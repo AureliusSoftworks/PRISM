@@ -35595,59 +35595,6 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   background: rgba(0, 0, 0, 0.24);
 }
 
-.botAvatarPreviewHeaderControls {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.botAvatarMaskBlendProbe {
-  min-width: 0;
-  height: 36px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 8px;
-  border: 1px dashed color-mix(in srgb, var(--editor-bot-color, var(--accent)) 30%, #303846);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 8%, rgba(0, 0, 0, 0.26));
-}
-
-.botAvatarMaskBlendProbe span {
-  color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 62%, var(--fg-muted));
-  font-size: 10px;
-  font-weight: 780;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.botAvatarMaskBlendProbe select {
-  -webkit-appearance: none;
-  appearance: none;
-  height: 28px;
-  min-width: 112px;
-  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 24%, #303846);
-  border-radius: 999px;
-  padding: 0 24px 0 10px;
-  background:
-    linear-gradient(45deg, transparent 50%, var(--fg-muted) 50%) calc(100% - 13px) 11px / 5px 5px no-repeat,
-    linear-gradient(135deg, var(--fg-muted) 50%, transparent 50%) calc(100% - 8px) 11px / 5px 5px no-repeat,
-    rgba(255, 255, 255, 0.045);
-  color: var(--fg);
-  font: inherit;
-  font-size: 11px;
-  font-weight: 720;
-}
-
-.botAvatarMaskBlendProbe select:focus-visible {
-  outline: none;
-  border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 56%, #ffffff);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 24%, transparent);
-}
-
 .botAvatarPreviewThemeToggle button,
 .form .botAvatarPreviewThemeToggle button {
   -webkit-appearance: none;
@@ -36174,6 +36121,403 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .botAvatarWeightEnds {
+  display: flex;
+  justify-content: space-between;
+  color: var(--fg-muted);
+  font-size: 10px;
+}
+
+.botAvatarCustomizerBody {
+  padding: 16px;
+  grid-template-columns: minmax(560px, 1fr) minmax(360px, 400px);
+  gap: 16px;
+}
+
+.botAvatarMannequinPanel,
+.botAvatarControlPanel {
+  gap: 14px;
+  border-radius: 8px;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--editor-bot-color, var(--accent)) 5%, transparent),
+      transparent 180px
+    ),
+    rgba(9, 12, 18, 0.68);
+}
+
+.botAvatarMannequinPanel {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.botAvatarControlPanel {
+  padding-right: 8px;
+  scrollbar-width: thin;
+  scrollbar-gutter: stable;
+  scrollbar-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 30%, transparent)
+    transparent;
+}
+
+.botAvatarControlStack {
+  gap: 12px;
+}
+
+.botAvatarControlGroup {
+  gap: 14px;
+  border-radius: 8px;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--editor-bot-color, var(--accent)) 4%, transparent),
+      rgba(255, 255, 255, 0.02)
+    );
+}
+
+.botAvatarControlGroupHeader {
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+}
+
+.botAvatarControlGroupIcon {
+  border-radius: 8px;
+}
+
+.botAvatarSectionResetButton,
+.form .botAvatarSectionResetButton,
+.botAvatarInlineResetButton,
+.form .botAvatarInlineResetButton {
+  -webkit-appearance: none;
+  appearance: none;
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 18%, #303846);
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 760;
+  cursor: pointer;
+}
+
+.botAvatarSectionResetButton,
+.form .botAvatarSectionResetButton {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 9px;
+  border-radius: 999px;
+}
+
+.botAvatarInlineResetButton,
+.form .botAvatarInlineResetButton {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+}
+
+.botAvatarSectionResetButton:hover:not(:disabled),
+.botAvatarSectionResetButton:focus-visible,
+.botAvatarInlineResetButton:hover:not(:disabled),
+.botAvatarInlineResetButton:focus-visible {
+  outline: none;
+  color: var(--fg);
+  border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 38%, #ffffff);
+  background: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 8%, rgba(255, 255, 255, 0.04));
+}
+
+.botAvatarSectionResetButton:disabled,
+.botAvatarInlineResetButton:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.botAvatarMannequinStage {
+  min-height: clamp(500px, calc(100dvh - 318px), 620px);
+  padding: 18px;
+  border-radius: 8px;
+}
+
+.botAvatarPreviewToolbar {
+  min-width: 0;
+  display: grid;
+  gap: 9px;
+  align-content: start;
+}
+
+.botAvatarPreviewModeToggle {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.botAvatarPreviewModeToggle button,
+.form .botAvatarPreviewModeToggle button {
+  -webkit-appearance: none;
+  appearance: none;
+  min-width: 0;
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 9px;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 14%, #303846);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 760;
+  cursor: pointer;
+}
+
+.botAvatarPreviewModeToggle button[data-active="true"],
+.form .botAvatarPreviewModeToggle button[data-active="true"] {
+  border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 52%, var(--line));
+  background: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 14%, rgba(255, 255, 255, 0.04));
+  color: var(--fg);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 22%, transparent);
+}
+
+.botAvatarPreviewModeToggle button:hover,
+.botAvatarPreviewModeToggle button:focus-visible {
+  outline: none;
+  color: var(--fg);
+  border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 34%, #ffffff);
+}
+
+.botAvatarPreviewMeta {
+  margin: 0;
+  padding: 0 2px;
+  display: block;
+  color: var(--fg-muted);
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.botAvatarMannequinStage .zenLiveBotPresencePlate[data-avatar-customizer-preview="true"] {
+  transform: translateY(-8px) scale(1.16);
+}
+
+.botAvatarMannequinStage
+  .zenLiveBotPresencePlate[data-avatar-customizer-preview="true"][data-avatar-preview-mode="blink"]
+  .zenLiveBotPresenceFaceGlyph
+  [data-coffee-plate-emoji-part="eyes"] {
+  --eye-blink-scale-x: 0.56;
+  --eye-blink-scale-y: 0.13;
+}
+
+.botAvatarFaceControls {
+  min-width: 0;
+  display: grid;
+  gap: 14px;
+}
+
+.botAvatarPresetControl,
+.botAvatarExpressionRow {
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.botAvatarPresetControl legend,
+.botAvatarExpressionRow legend,
+.botAvatarOverrideControl > span > strong,
+.botAvatarRangeControl > span {
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.botAvatarPresetStrip {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.botAvatarPresetButton,
+.form .botAvatarPresetButton {
+  -webkit-appearance: none;
+  appearance: none;
+  min-width: 0;
+  min-height: 70px;
+  padding: 8px 6px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 5px;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 13%, #303846);
+  border-radius: 8px;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--editor-bot-color, var(--accent)) 5%, transparent),
+      rgba(255, 255, 255, 0.02)
+    );
+  color: var(--fg-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.botAvatarPresetButton > span {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 3px;
+  align-items: center;
+  justify-items: center;
+}
+
+.botAvatarPresetButton strong {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: currentColor;
+  font-size: 10.5px;
+  font-weight: 780;
+  line-height: 1.1;
+}
+
+.botAvatarPresetButton:hover,
+.botAvatarPresetButton:focus-visible,
+.botAvatarPresetButton[data-selected="true"] {
+  outline: none;
+  color: var(--fg);
+  border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 44%, #ffffff);
+  background: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 11%, rgba(255, 255, 255, 0.04));
+}
+
+.botAvatarPresetButton[data-selected="true"] {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 30%, transparent),
+    0 8px 18px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 10%, transparent);
+}
+
+.botAvatarExpressionMatrix {
+  min-width: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.botAvatarFontOptions {
+  min-width: 0;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.form button.botAvatarFontOption,
+.botAvatarFontOption {
+  min-height: 58px;
+  padding: 7px 6px;
+  border-radius: 8px;
+  font-weight: 720;
+  gap: 4px;
+}
+
+.botAvatarFontOptionSample {
+  min-width: 28px;
+}
+
+.botAvatarOverrideGrid {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.botAvatarOverrideControl {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 13%, #303846);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.botAvatarOverrideControl > span:first-child {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.botAvatarOverrideControl small {
+  color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 56%, var(--fg));
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.botAvatarOverrideInputRow {
+  display: inline-grid;
+  grid-template-columns: 44px 34px;
+  gap: 6px;
+  align-items: center;
+}
+
+.botAvatarOverrideControl input {
+  width: 44px;
+  min-width: 44px;
+  height: 34px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 18%, #303846);
+  background: rgba(0, 0, 0, 0.24);
+  color: var(--fg);
+  font: inherit;
+  font-size: 17px;
+  font-weight: 780;
+  text-align: center;
+  outline: none;
+}
+
+.botAvatarOverrideControl input:focus-visible {
+  border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 58%, var(--line));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 20%, transparent);
+}
+
+.botAvatarSliderStack {
+  min-width: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.botAvatarRangeControl {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 13%, #303846);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.botAvatarRangeControl > span {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.botAvatarRangeControl strong {
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.botAvatarRangeControl input[type="range"] {
+  width: 100%;
+  accent-color: var(--editor-bot-color, var(--accent));
+}
+
+.botAvatarRangeEnds {
   display: flex;
   justify-content: space-between;
   color: var(--fg-muted);
