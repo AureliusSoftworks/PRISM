@@ -5091,6 +5091,84 @@
   margin-inline: auto;
 }
 
+.appLayout[data-chat-sidebar-hidden="true"][data-accent-active="true"]:not(
+    [data-private-active="true"]
+  )
+  .messagesFrame {
+  background:
+    radial-gradient(
+      ellipse 118% 58% at 50% -10%,
+      color-mix(in srgb, var(--accent) 42%, transparent) 0%,
+      color-mix(in srgb, var(--accent) 22%, transparent) 34%,
+      transparent 74%
+    ),
+    radial-gradient(
+      ellipse 82% 42% at 50% 6%,
+      color-mix(in srgb, #ffffff 10%, transparent) 0%,
+      transparent 68%
+    ),
+    linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--accent) 22%, var(--bg-deep) 78%) 0%,
+      color-mix(in srgb, var(--accent) 11%, var(--bg) 89%) 28%,
+      color-mix(in srgb, var(--bg-deep) 84%, #000000 16%) 64%,
+      #000000 100%
+    );
+}
+
+.themeLight.appLayout[data-chat-sidebar-hidden="true"][data-accent-active="true"]:not(
+    [data-private-active="true"]
+  )
+  .messagesFrame {
+  background:
+    radial-gradient(
+      ellipse 116% 56% at 50% 108%,
+      color-mix(in srgb, var(--accent) 26%, #ffffff 74%) 0%,
+      color-mix(in srgb, var(--accent) 12%, transparent) 42%,
+      transparent 76%
+    ),
+    radial-gradient(
+      ellipse 78% 38% at 50% 94%,
+      color-mix(in srgb, #ffffff 64%, transparent) 0%,
+      transparent 70%
+    ),
+    linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--fg) 24%, var(--bg-deep) 76%) 0%,
+      color-mix(in srgb, var(--fg) 9%, var(--bg) 91%) 30%,
+      color-mix(in srgb, var(--accent) 7%, var(--bg-surface) 93%) 66%,
+      color-mix(in srgb, var(--accent) 16%, #ffffff 84%) 100%
+    );
+}
+
+.appLayout[data-chat-sidebar-hidden="true"][data-accent-active="true"]:not(
+    [data-private-active="true"]
+  )
+  .messages[data-chat-ephemeral="true"]:not([data-zen-empty-hero="true"]):not(
+    [data-replying-live="true"]
+  ) {
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(0, 0, 0, 0.26) clamp(20px, 4dvh, 46px),
+    #000000 clamp(92px, 13dvh, 168px),
+    #000000 calc(100% - clamp(126px, 18dvh, 220px)),
+    rgba(0, 0, 0, 0.48) calc(100% - clamp(78px, 11dvh, 132px)),
+    transparent calc(100% - clamp(34px, 5dvh, 64px)),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(0, 0, 0, 0.26) clamp(20px, 4dvh, 46px),
+    #000000 clamp(92px, 13dvh, 168px),
+    #000000 calc(100% - clamp(126px, 18dvh, 220px)),
+    rgba(0, 0, 0, 0.48) calc(100% - clamp(78px, 11dvh, 132px)),
+    transparent calc(100% - clamp(34px, 5dvh, 64px)),
+    transparent 100%
+  );
+}
+
 .appLayout[data-chat-sidebar-hidden="true"] .message {
   max-width: 100%;
 }
@@ -19865,11 +19943,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --coffee-bot-color: var(--bot-color, var(--accent));
   --zen-live-bot-face-ink: var(--coffee-bot-color);
   --zen-live-bot-glyph-ink: var(--coffee-bot-color);
-  --coffee-plate-emoji-nudge-y: clamp(0px, 1.4%, 5px);
+  --zen-live-bot-eye-local-x: -0.2;
+  --coffee-plate-emoji-nudge-y: clamp(-5px, -2.6%, -2px);
   --coffee-plate-emoji-face-scale-y: 1;
   --zen-presence-face-bg:
-    radial-gradient(circle at 50% 42%, rgba(255, 255, 255, 0.07), transparent 48%),
-    #080808;
+    radial-gradient(circle at 50% 42%, rgba(255, 255, 255, 0.028), transparent 48%),
+    #020203;
   --zen-presence-face-border: color-mix(in srgb, var(--coffee-bot-color) 70%, rgba(255, 255, 255, 0.22));
   --zen-presence-face-ring: rgba(255, 255, 255, 0.035);
   --zen-presence-face-shadow:
@@ -19889,6 +19968,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     0 0 68px color-mix(in srgb, var(--coffee-bot-color) 32%, transparent),
     0 14px 30px rgba(0, 0, 0, 0.5);
   --zen-presence-pill-ink: color-mix(in srgb, var(--coffee-bot-color) 88%, #ffffff 12%);
+  --bot-face-crt-screen-texture-blend-mode: luminosity;
   position: relative;
   width: var(--zen-live-bot-avatar-size, clamp(156px, 14.8vw, 196px));
   min-height: clamp(92px, 9.8vw, 128px);
@@ -19930,6 +20010,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     --zen-live-bot-avatar-body-size,
     var(--zen-live-bot-avatar-face-size, clamp(72px, 8.8vw, 108px))
   );
+  --zen-live-bot-body-glyph-min-size: 18px;
+  --zen-live-bot-body-glyph-ratio: 0.145;
+  --zen-live-bot-body-glyph-max-size: 48px;
   position: relative;
   z-index: 8;
   width: var(--zen-live-bot-avatar-size, clamp(156px, 14.8vw, 196px));
@@ -19956,36 +20039,37 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   overflow: hidden;
   pointer-events: none;
   isolation: isolate;
-  --bot-face-crt-texture-image: url("/bot-frame/bot-frame-screen-mask.png?v=1000");
-  --bot-face-crt-texture-size: 100% 100%;
-  --bot-face-crt-texture-repeat: repeat;
+  --bot-face-screen-mask-image: url("/bot-frame/bot-frame-screen-mask-glass.png?v=1000");
+  --bot-face-screen-mask-size: 100% 100%;
+  --bot-face-screen-mask-repeat: no-repeat;
+  --bot-face-crt-screen-texture-image: url("/bot-frame/bot-frame-screen-mask.png?v=1000");
+  --bot-face-crt-screen-texture-opacity: 0.22;
+  --bot-face-crt-screen-texture-tint-strength: 48%;
   --bot-face-crt-color: var(--coffee-seat-emotion-color, var(--coffee-bot-color, currentColor));
   --bot-face-crt-cell-width: clamp(2.2px, 1.62%, 4.4px);
   --bot-face-crt-cell-height: clamp(2.6px, 1.9%, 5.2px);
   --bot-face-crt-subpixel-width: calc(var(--bot-face-crt-cell-width) / 3);
-  --bot-face-crt-phosphor-opacity: 0.18;
-  --bot-face-crt-gap-opacity: 0.42;
-  --bot-face-crt-scanline-opacity: 0.14;
-  mix-blend-mode: plus-lighter;
-  filter:
-    drop-shadow(0 0 2px color-mix(in srgb, var(--bot-face-crt-color) 30%, transparent))
-    drop-shadow(0 0 10px color-mix(in srgb, var(--bot-face-crt-color) 12%, transparent));
-  -webkit-mask-image: var(--bot-face-crt-texture-image);
+  --bot-face-crt-gap-opacity: 0.26;
+  --bot-face-crt-scanline-opacity: 0.1;
+  --crt-noise-opacity: 0.009;
+  --crt-breath-speed: 11.8s;
+  --crt-breath-strength: 0.0025;
+  mix-blend-mode: normal;
+  filter: none;
+  -webkit-mask-image: var(--bot-face-screen-mask-image);
   -webkit-mask-position: center;
-  -webkit-mask-size: var(--bot-face-crt-texture-size);
-  -webkit-mask-repeat: var(--bot-face-crt-texture-repeat);
+  -webkit-mask-size: var(--bot-face-screen-mask-size);
+  -webkit-mask-repeat: var(--bot-face-screen-mask-repeat);
   -webkit-mask-mode: alpha;
-  mask-image: var(--bot-face-crt-texture-image);
+  mask-image: var(--bot-face-screen-mask-image);
   mask-position: center;
-  mask-size: var(--bot-face-crt-texture-size);
-  mask-repeat: var(--bot-face-crt-texture-repeat);
+  mask-size: var(--bot-face-screen-mask-size);
+  mask-repeat: var(--bot-face-screen-mask-repeat);
   mask-mode: alpha;
 }
 
 .zenLiveBotPresenceFaceEmissionMask::before,
-.zenLiveBotPresenceFaceEmissionMask::after,
-.coffeeSeatFaceEmissionMask::before,
-.coffeeSeatFaceEmissionMask::after {
+.zenLiveBotPresenceFaceEmissionMask::after {
   content: "";
   position: absolute;
   inset: 0;
@@ -19993,35 +20077,28 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   pointer-events: none;
 }
 
-.zenLiveBotPresenceFaceEmissionMask::before,
-.coffeeSeatFaceEmissionMask::before {
+.zenLiveBotPresenceFaceEmissionMask::before {
   z-index: 12;
+  /* Low-opacity phosphor plate: restores the CRT RGB texture while the glass
+     mask keeps unlit screen areas dark instead of washing them in bot color. */
   background:
-    repeating-linear-gradient(
-      90deg,
-      rgba(255, 28, 52, 0.9) 0 calc(var(--bot-face-crt-subpixel-width) * 0.92),
-      rgba(36, 255, 92, 0.86) calc(var(--bot-face-crt-subpixel-width) * 0.92)
-        calc(var(--bot-face-crt-subpixel-width) * 1.86),
-      rgba(54, 120, 255, 0.88) calc(var(--bot-face-crt-subpixel-width) * 1.86)
-        calc(var(--bot-face-crt-subpixel-width) * 2.78),
-      rgba(0, 0, 0, 0.72) calc(var(--bot-face-crt-subpixel-width) * 2.78)
-        var(--bot-face-crt-cell-width)
-    ),
-    var(--bot-face-crt-texture-image);
-  background-size:
-    var(--bot-face-crt-cell-width) 100%,
-    var(--bot-face-crt-texture-size);
-  background-repeat:
-    repeat,
-    var(--bot-face-crt-texture-repeat);
-  background-blend-mode: multiply;
-  opacity: var(--bot-face-crt-phosphor-opacity);
-  mix-blend-mode: color-dodge;
-  filter: brightness(1.18) contrast(1.08) saturate(1.35);
+    var(--bot-face-crt-screen-texture-image) center / 100% 100% no-repeat,
+    radial-gradient(
+      circle at 50% 50%,
+      color-mix(
+        in srgb,
+        var(--bot-face-crt-color) var(--bot-face-crt-screen-texture-tint-strength),
+        transparent
+      ) 0 68%,
+      transparent 100%
+    );
+  background-blend-mode: var(--bot-face-crt-screen-texture-blend-mode, screen);
+  opacity: var(--bot-face-crt-screen-texture-opacity);
+  mix-blend-mode: var(--bot-face-crt-screen-texture-blend-mode, screen);
+  filter: saturate(1.36) contrast(1.12) brightness(0.84);
 }
 
-.zenLiveBotPresenceFaceEmissionMask::after,
-.coffeeSeatFaceEmissionMask::after {
+.zenLiveBotPresenceFaceEmissionMask::after {
   z-index: 13;
   background:
     repeating-linear-gradient(
@@ -20044,6 +20121,148 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   background-blend-mode: multiply;
   opacity: var(--bot-face-crt-gap-opacity);
   mix-blend-mode: multiply;
+}
+
+/* Phosphor imperfection: fixed, broad luminance variation keeps the CRT glass
+   from reading as a perfectly flat digital mask. This is not grain or static. */
+.botFaceCrtNoiseLayer {
+  position: absolute;
+  inset: 0;
+  z-index: 11;
+  display: block;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      ellipse at 18% 27%,
+      rgba(255, 255, 255, 0.56),
+      transparent 34%
+    ),
+    radial-gradient(
+      ellipse at 76% 64%,
+      rgba(0, 0, 0, 0.5),
+      transparent 38%
+    ),
+    linear-gradient(
+      112deg,
+      transparent 0 21%,
+      rgba(255, 255, 255, 0.28) 36%,
+      transparent 51% 100%
+    );
+  background-size:
+    74px 58px,
+    96px 72px,
+    100% 100%;
+  background-position:
+    9px 6px,
+    -17px 14px,
+    center;
+  opacity: var(--crt-noise-opacity);
+  mix-blend-mode: soft-light;
+  filter: blur(0.42px) contrast(1.04);
+  transform: translate3d(0, 0, 0);
+  animation: crtPhosphorImperfectionDrift 18.7s steps(4, end) infinite;
+}
+
+/* Electronic breathing: late CRT drive voltage wandered by tiny amounts, so a
+   barely visible additive veil makes the tube feel powered without pulsing. */
+.botFaceCrtBreathingLayer,
+.botFaceCrtBreathingLayer::before {
+  position: absolute;
+  inset: 5%;
+  z-index: 9;
+  display: block;
+  border-radius: 50%;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      ellipse at 50% 48%,
+      color-mix(in srgb, var(--bot-face-crt-color) 38%, transparent),
+      transparent 64%
+    );
+  opacity: 0;
+  mix-blend-mode: plus-lighter;
+  filter: blur(18px);
+}
+
+.botFaceCrtBreathingLayer {
+  animation: crtElectronicBreath var(--crt-breath-speed) linear infinite;
+}
+
+.botFaceCrtBreathingLayer::before {
+  content: "";
+  inset: 14%;
+  background:
+    radial-gradient(
+      ellipse at 48% 52%,
+      rgba(255, 255, 255, 0.42),
+      transparent 58%
+    );
+  animation: crtElectronicBreathCounter 16.4s linear infinite;
+}
+
+@keyframes crtPhosphorImperfectionDrift {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+
+  31% {
+    transform: translate3d(0.42px, -0.28px, 0);
+  }
+
+  63% {
+    transform: translate3d(-0.36px, 0.31px, 0);
+  }
+
+  82% {
+    transform: translate3d(0.18px, 0.46px, 0);
+  }
+}
+
+@keyframes crtElectronicBreath {
+  0%,
+  100% {
+    opacity: 0;
+  }
+
+  11% {
+    opacity: var(--crt-breath-strength);
+  }
+
+  34% {
+    opacity: 0;
+  }
+
+  58% {
+    opacity: var(--crt-breath-strength);
+  }
+
+  77% {
+    opacity: 0;
+  }
+}
+
+@keyframes crtElectronicBreathCounter {
+  0%,
+  100% {
+    opacity: 0;
+  }
+
+  19% {
+    opacity: var(--crt-breath-strength);
+  }
+
+  43% {
+    opacity: 0;
+  }
+
+  71% {
+    opacity: var(--crt-breath-strength);
+  }
+
+  89% {
+    opacity: 0;
+  }
 }
 
 .zenLiveBotPresenceFaceRig {
@@ -20076,7 +20295,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --bot-face-screen-right: 0;
   --bot-face-screen-bottom: 0;
   --bot-face-screen-radius: 0;
-  --bot-face-screen-mask-image: url("/bot-frame/bot-frame-screen-mask.png?v=1000");
+  --bot-face-screen-mask-image: url("/bot-frame/bot-frame-screen-mask-glass.png?v=1000");
   --bot-face-screen-glass-background: transparent;
   --bot-face-screen-glass-z: 0;
   --bot-face-screen-glass-opacity: var(--zen-live-bot-screen-glass-overlay-opacity, 0.2);
@@ -20174,6 +20393,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .zenLiveBotPresencePlate[data-talking="true"]:not([data-private-mode="true"])
+  .botFaceFrameTint,
+.coffeeSeat[data-table-speaking="true"]
+  .coffeeSeatPlate[data-live-body-style="zen"]
   .botFaceFrameTint {
   --zen-live-bot-talking-light-opacity-high: var(
     --bot-face-frame-tint-talking-opacity-high,
@@ -20191,6 +20413,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .zenLiveBotPresencePlate[data-talking="true"]:not([data-private-mode="true"])
+  .botFaceFrameLed,
+.coffeeSeat[data-table-speaking="true"]
+  .coffeeSeatPlate[data-live-body-style="zen"]
   .botFaceFrameLed {
   --zen-live-bot-talking-light-opacity-high: var(
     --bot-face-frame-led-talking-opacity-high,
@@ -20208,6 +20433,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .zenLiveBotPresencePlate[data-talking="true"]:not([data-private-mode="true"]):not([data-prism-persona="true"])
+  .zenLiveBotPresenceFaceGlyph,
+.coffeeSeat[data-table-speaking="true"]
+  .coffeeSeatPlate[data-live-body-style="zen"]
   .zenLiveBotPresenceFaceGlyph {
   text-shadow: none;
   filter: none;
@@ -20215,27 +20443,44 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .zenLiveBotPresencePlate[data-talking="true"]:not([data-private-mode="true"])
   .zenLiveBotPresenceFaceGlyph
+  [data-coffee-plate-emoji-part],
+.coffeeSeat[data-table-speaking="true"]
+  .coffeeSeatPlate[data-live-body-style="zen"]
+  .coffeeSeatPlateEmoji
   [data-coffee-plate-emoji-part] {
+  --crt-bloom-opacity: 0.15;
+  --crt-bloom-radius: 2px;
+  --crt-chromatic-offset: 0.38px;
+  --crt-chromatic-opacity: 0.034;
   --zen-live-bot-talking-light-opacity-high: 1;
   --zen-live-bot-talking-light-opacity-mid: 1;
   --zen-live-bot-talking-light-opacity-low: 1;
   --zen-live-bot-talking-face-glow-filter-high:
-    drop-shadow(0 0 0.18em color-mix(in srgb, currentColor 76%, transparent))
-    drop-shadow(0 0 0.48em color-mix(in srgb, currentColor 48%, transparent))
-    drop-shadow(0 0 0.95em color-mix(in srgb, var(--coffee-bot-color) 32%, transparent));
+    drop-shadow(0 0 0.105em color-mix(in srgb, currentColor 62%, transparent))
+    drop-shadow(0 0 0.32em color-mix(in srgb, currentColor 40%, transparent))
+    drop-shadow(0 0 0.66em color-mix(in srgb, var(--coffee-bot-color) 24%, transparent));
   --zen-live-bot-talking-face-glow-filter-mid:
-    drop-shadow(0 0 0.14em color-mix(in srgb, currentColor 64%, transparent))
-    drop-shadow(0 0 0.36em color-mix(in srgb, currentColor 38%, transparent))
-    drop-shadow(0 0 0.72em color-mix(in srgb, var(--coffee-bot-color) 24%, transparent));
+    drop-shadow(0 0 0.095em color-mix(in srgb, currentColor 54%, transparent))
+    drop-shadow(0 0 0.27em color-mix(in srgb, currentColor 32%, transparent))
+    drop-shadow(0 0 0.55em color-mix(in srgb, var(--coffee-bot-color) 19%, transparent));
   --zen-live-bot-talking-face-glow-filter-low:
-    drop-shadow(0 0 0.1em color-mix(in srgb, currentColor 46%, transparent))
-    drop-shadow(0 0 0.26em color-mix(in srgb, currentColor 28%, transparent))
-    drop-shadow(0 0 0.52em color-mix(in srgb, var(--coffee-bot-color) 16%, transparent));
+    drop-shadow(0 0 0.085em color-mix(in srgb, currentColor 48%, transparent))
+    drop-shadow(0 0 0.23em color-mix(in srgb, currentColor 26%, transparent))
+    drop-shadow(0 0 0.46em color-mix(in srgb, var(--coffee-bot-color) 15%, transparent));
+  --crt-face-glow-filter: var(--zen-live-bot-talking-face-glow-filter-high);
   opacity: 1;
-  filter: var(--zen-live-bot-talking-face-glow-filter-high);
-  animation:
-    zenLiveBotTalkingFaceGlowFlicker 760ms ease-in-out infinite,
-    zenLiveBotTalkingLightFlicker 760ms ease-in-out infinite;
+  filter: var(--crt-face-glow-filter);
+  animation: zenLiveBotTalkingFacePartFlicker 760ms ease-in-out infinite;
+}
+
+.zenLiveBotPresencePlate[data-talking="true"]:not([data-private-mode="true"])
+  .zenLiveBotPresenceFaceGlyph
+  [data-coffee-plate-emoji-part]::before,
+.coffeeSeat[data-table-speaking="true"]
+  .coffeeSeatPlate[data-live-body-style="zen"]
+  .coffeeSeatPlateEmoji
+  [data-coffee-plate-emoji-part]::before {
+  animation: zenLiveBotTalkingFaceGlowFlicker 760ms ease-in-out infinite;
 }
 
 .zenLiveBotPresencePlate:not([data-talking="true"]):not([data-transitioning="true"])
@@ -20245,17 +20490,24 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .zenLiveBotPresencePlate[data-talking="true"][data-mouth-open="true"]
   .zenLiveBotPresenceFaceGlyph
+  [data-coffee-plate-emoji-part="mouth"],
+.coffeeSeat[data-table-speaking="true"]
+  .coffeeSeatPlate[data-live-body-style="zen"]
+  .zenLiveBotPresenceFaceGlyph[data-coffee-plate-mouth-open="true"]
   [data-coffee-plate-emoji-part="mouth"] {
   animation: zenLiveBotPresenceMouthPulse 130ms cubic-bezier(0.37, 0, 0.2, 1) infinite;
 }
 
 .zenLiveBotPresencePlate[data-talking="true"]:not([data-private-mode="true"])[data-mouth-open="true"]
   .zenLiveBotPresenceFaceGlyph
+  [data-coffee-plate-emoji-part="mouth"],
+.coffeeSeat[data-table-speaking="true"]
+  .coffeeSeatPlate[data-live-body-style="zen"]
+  .zenLiveBotPresenceFaceGlyph[data-coffee-plate-mouth-open="true"]
   [data-coffee-plate-emoji-part="mouth"] {
   animation:
     zenLiveBotPresenceMouthPulse 130ms cubic-bezier(0.37, 0, 0.2, 1) infinite,
-    zenLiveBotTalkingFaceGlowFlicker 760ms ease-in-out infinite,
-    zenLiveBotTalkingLightFlicker 760ms ease-in-out infinite;
+    zenLiveBotTalkingFacePartFlicker 760ms ease-in-out infinite;
 }
 
 @keyframes zenLiveBotPresenceIdle {
@@ -20304,13 +20556,14 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   }
 }
 
-@keyframes zenLiveBotTalkingFaceGlowFlicker {
+@keyframes zenLiveBotTalkingFacePartFlicker {
   0%,
   8%,
   24%,
   47%,
   71%,
   100% {
+    opacity: var(--zen-live-bot-talking-light-opacity-high, 1);
     filter: var(--zen-live-bot-talking-face-glow-filter-high);
   }
 
@@ -20318,13 +20571,45 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   37%,
   60%,
   82% {
+    opacity: var(--zen-live-bot-talking-light-opacity-mid, 1);
     filter: var(--zen-live-bot-talking-face-glow-filter-mid);
   }
 
   15%,
   55%,
   87% {
+    opacity: var(--zen-live-bot-talking-light-opacity-low, 1);
     filter: var(--zen-live-bot-talking-face-glow-filter-low);
+  }
+}
+
+@keyframes zenLiveBotTalkingFaceGlowFlicker {
+  0%,
+  8%,
+  24%,
+  47%,
+  71%,
+  100% {
+    filter:
+      blur(var(--crt-bloom-radius))
+      var(--zen-live-bot-talking-face-glow-filter-high);
+  }
+
+  12%,
+  37%,
+  60%,
+  82% {
+    filter:
+      blur(var(--crt-bloom-radius))
+      var(--zen-live-bot-talking-face-glow-filter-mid);
+  }
+
+  15%,
+  55%,
+  87% {
+    filter:
+      blur(var(--crt-bloom-radius))
+      var(--zen-live-bot-talking-face-glow-filter-low);
   }
 }
 
@@ -20360,6 +20645,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .zenLiveBotPresenceFace {
   --bot-face-frame-glow-filter: drop-shadow(0 0 0 transparent);
+  --bot-face-ambient-glow-color: var(--zen-live-bot-frame-tint-color, var(--coffee-bot-color));
+  --bot-face-ambient-glow-size: 86%;
+  --bot-face-ambient-glow-opacity: 0.36;
+  --bot-face-ambient-glow-blur: clamp(24px, 17%, 48px);
+  --bot-face-ambient-glow-spread: clamp(14px, 9%, 28px);
   --bot-face-frame-color: var(--zen-live-bot-frame-tint-color, var(--coffee-bot-color));
   --bot-face-frame-inset: 0;
   --bot-face-frame-opacity: 1;
@@ -20372,11 +20662,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --bot-face-screen-top: 11.5%;
   --bot-face-screen-right: 15.2%;
   --bot-face-screen-bottom: 20.3%;
-  --bot-face-screen-glass-opacity: 0.56;
-  --bot-face-screen-glare-opacity: 0.34;
-  --bot-face-screen-specular-opacity: 0.72;
-  --zen-live-bot-screen-glass-overlay-opacity: 0.26;
-  --zen-live-bot-screen-glare-overlay-opacity: 0.32;
+  --bot-face-screen-glass-opacity: 0.34;
+  --bot-face-screen-glare-opacity: 0.18;
+  --bot-face-screen-specular-opacity: 0.44;
+  --zen-live-bot-screen-glass-overlay-opacity: 0.09;
+  --zen-live-bot-screen-glare-overlay-opacity: 0.16;
   position: absolute;
   isolation: isolate;
   left: 50%;
@@ -20395,22 +20685,82 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   background: transparent;
   border: 1px solid transparent;
   color: var(--coffee-bot-color);
-  box-shadow: none;
+  box-shadow:
+    0 0 calc(var(--bot-face-ambient-glow-blur, 30px) * 0.72)
+      calc(var(--bot-face-ambient-glow-spread, 18px) * 0.42)
+      color-mix(in srgb, var(--bot-face-ambient-glow-color, currentColor) 34%, transparent),
+    0 0 calc(var(--bot-face-ambient-glow-blur, 30px) * 1.35)
+      calc(var(--bot-face-ambient-glow-spread, 18px) * 0.62)
+      color-mix(in srgb, var(--bot-face-ambient-glow-color, currentColor) 18%, transparent);
   overflow: visible;
   cursor: inherit;
   pointer-events: none;
   transition: box-shadow 140ms ease, border-color 140ms ease;
 }
 
+.zenLiveBotPresenceFace::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: var(--bot-face-ambient-glow-z, 0);
+  width: var(--bot-face-ambient-glow-size, 86%);
+  height: var(--bot-face-ambient-glow-size, 86%);
+  display: block;
+  border-radius: 50%;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      circle at 50% 50%,
+      color-mix(in srgb, var(--bot-face-ambient-glow-color, currentColor) 58%, transparent) 0 32%,
+      color-mix(in srgb, var(--bot-face-ambient-glow-color, currentColor) 30%, transparent) 52%,
+      transparent 74%
+    );
+  box-shadow:
+    0 0 calc(var(--bot-face-ambient-glow-blur, 30px) * 0.56)
+      calc(var(--bot-face-ambient-glow-spread, 18px) * 0.38)
+      color-mix(in srgb, var(--bot-face-ambient-glow-color, currentColor) 68%, transparent),
+    0 0 var(--bot-face-ambient-glow-blur, 30px)
+      var(--bot-face-ambient-glow-spread, 18px)
+      color-mix(in srgb, var(--bot-face-ambient-glow-color, currentColor) 56%, transparent),
+    0 0 calc(var(--bot-face-ambient-glow-blur, 30px) * 1.65)
+      calc(var(--bot-face-ambient-glow-spread, 18px) * 0.52)
+      color-mix(in srgb, var(--bot-face-ambient-glow-color, currentColor) 34%, transparent);
+  opacity: var(--bot-face-ambient-glow-opacity, 0);
+  mix-blend-mode: normal;
+  filter: blur(var(--bot-face-ambient-glow-softness, 2.5px))
+    saturate(var(--bot-face-ambient-glow-saturation, 1.26));
+  transform: translate(-50%, -50%);
+  transform-origin: center center;
+  transition: opacity 180ms ease, filter 180ms ease;
+}
+
 .zenLiveBotPresencePlate[data-dragging="true"] .zenLiveBotPresenceFace,
 .zenLiveBotPresencePlate[data-flinging="true"] .zenLiveBotPresenceFace {
   --bot-face-metal-light-opacity: 0.62;
-  --zen-live-bot-screen-glass-overlay-opacity: 0.32;
-  --zen-live-bot-screen-glare-overlay-opacity: 0.38;
+  --bot-face-ambient-glow-opacity: 0.5;
+  --zen-live-bot-screen-glass-overlay-opacity: 0.12;
+  --zen-live-bot-screen-glare-overlay-opacity: 0.2;
 }
 
-.zenLiveBotPresencePlate[data-theme="light"] .zenLiveBotPresenceFace {
+.zenLiveBotPresencePlate[data-talking="true"] .zenLiveBotPresenceFace {
+  --bot-face-ambient-glow-opacity: 0.52;
+}
+
+.coffeeSeat[data-table-speaking="true"]
+  .coffeeSeatPlate[data-live-body-style="zen"]
+  .zenLiveBotPresenceFace {
+  --bot-face-ambient-glow-opacity: 0.6;
+}
+
+.zenLiveBotPresencePlate[data-theme="light"] .zenLiveBotPresenceFace,
+.themeLight.coffeeShell
+  .coffeeSeatPlate[data-live-body-style="zen"]
+  .zenLiveBotPresenceFace {
   --bot-face-metal-light-base-color: var(--coffee-bot-color);
+  --bot-face-ambient-glow-opacity: 0.32;
+  --bot-face-ambient-glow-blur: clamp(20px, 13%, 40px);
+  --bot-face-ambient-glow-spread: clamp(12px, 8%, 24px);
   --bot-face-metal-light-background:
     radial-gradient(
       circle at 36% 22%,
@@ -20433,11 +20783,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --bot-face-metal-light-opacity: 0.34;
   --bot-face-metal-light-raster-blend-mode: luminosity;
   --bot-face-metal-light-raster-opacity: 0.86;
-  --bot-face-screen-glass-opacity: 0.46;
-  --bot-face-screen-glare-opacity: 0.22;
-  --bot-face-screen-specular-opacity: 0.58;
-  --zen-live-bot-screen-glass-overlay-opacity: 0.22;
-  --zen-live-bot-screen-glare-overlay-opacity: 0.26;
+  --bot-face-screen-glass-opacity: 0.3;
+  --bot-face-screen-glare-opacity: 0.14;
+  --bot-face-screen-specular-opacity: 0.38;
+  --zen-live-bot-screen-glass-overlay-opacity: 0.08;
+  --zen-live-bot-screen-glare-overlay-opacity: 0.14;
 }
 
 .zenLiveBotPresencePlate[data-theme="light"][data-dragging="true"]
@@ -20445,6 +20795,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .zenLiveBotPresencePlate[data-theme="light"][data-flinging="true"]
   .zenLiveBotPresenceFace {
   --bot-face-metal-light-opacity: 0.38;
+  --bot-face-ambient-glow-opacity: 0.4;
+}
+
+.zenLiveBotPresencePlate[data-theme="light"][data-talking="true"] .zenLiveBotPresenceFace {
+  --bot-face-ambient-glow-opacity: 0.46;
 }
 
 .zenLiveBotPresencePlate[data-prism-persona="true"] {
@@ -20475,8 +20830,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --zen-live-bot-face-talking-opacity-mid: 1;
   --zen-live-bot-face-talking-opacity-low: 1;
   --zen-presence-face-bg:
-    radial-gradient(circle at 46% 28%, rgba(255, 255, 255, 0.05), transparent 34%),
-    linear-gradient(180deg, #111113 0%, #030304 100%);
+    radial-gradient(circle at 46% 28%, rgba(255, 255, 255, 0.032), transparent 34%),
+    linear-gradient(180deg, #08080a 0%, #020203 100%);
   --zen-presence-face-border: color-mix(in srgb, #ff3f6f 12%, #ffb62e 8%);
   --zen-presence-face-ring: transparent;
   --zen-presence-face-shadow: none;
@@ -20487,6 +20842,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     0 0 0 1px rgba(0, 0, 0, 0.58) inset,
     0 14px 30px rgba(0, 0, 0, 0.5);
   --zen-presence-pill-ink: #f7f7f2;
+}
+
+.zenLiveBotPresencePlate[data-prism-persona="true"] .zenLiveBotPresenceFace {
+  --bot-face-ambient-glow-opacity: 0.74;
+  --bot-face-ambient-glow-blur: clamp(32px, 22%, 68px);
+  --bot-face-ambient-glow-spread: clamp(24px, 16%, 48px);
 }
 
 .themeLight .zenLiveBotPresencePlate[data-prism-persona="true"],
@@ -20530,6 +20891,13 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --zen-presence-pill-ink: #243041;
 }
 
+.themeLight .zenLiveBotPresencePlate[data-prism-persona="true"] .zenLiveBotPresenceFace,
+.zenLiveBotPresencePlate[data-theme="light"][data-prism-persona="true"] .zenLiveBotPresenceFace {
+  --bot-face-ambient-glow-opacity: 0.48;
+  --bot-face-ambient-glow-blur: clamp(24px, 16%, 48px);
+  --bot-face-ambient-glow-spread: clamp(18px, 12%, 36px);
+}
+
 .zenLiveBotPresencePlate[data-prism-persona="true"][data-private-mode="true"] {
   --bot-face-frame-tint-background: currentColor;
   --bot-face-frame-tint-filter:
@@ -20538,6 +20906,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     saturate(0.18)
     contrast(0.96);
   --bot-face-frame-tint-opacity: 0.52;
+}
+
+.zenLiveBotPresencePlate[data-prism-persona="true"][data-private-mode="true"] .zenLiveBotPresenceFace {
+  --bot-face-ambient-glow-color: rgba(220, 226, 222, 0.74);
+  --bot-face-ambient-glow-opacity: 0.36;
 }
 
 .zenLiveBotPresenceFaceGlyph {
@@ -20561,7 +20934,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .coffeeSeatPlateEmoji.zenLiveBotPresenceFaceGlyph {
   font-size: var(
     --zen-live-bot-avatar-face-glyph-size,
-    clamp(1.74rem, 5.15vw, 2.58rem)
+    clamp(1.74rem, calc(var(--zen-live-bot-body-frame-size, 190px) * 0.217), 4.08rem)
   );
 }
 
@@ -20578,21 +20951,27 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   .coffeeSeatPlate[data-live-body-style="zen"]
   .coffeeSeatPlateEmoji
   [data-coffee-plate-emoji-part] {
+  --crt-bloom-opacity: 0.115;
+  --crt-bloom-radius: 1.75px;
   --zen-live-bot-idle-face-glow-filter:
-    drop-shadow(0 0 0.07em color-mix(in srgb, currentColor 46%, transparent))
-    drop-shadow(0 0 0.22em color-mix(in srgb, currentColor 28%, transparent))
-    drop-shadow(0 0 0.42em color-mix(in srgb, var(--coffee-bot-color) 14%, transparent));
+    drop-shadow(0 0 0.09em color-mix(in srgb, currentColor 56%, transparent))
+    drop-shadow(0 0 0.28em color-mix(in srgb, currentColor 34%, transparent))
+    drop-shadow(0 0 0.54em color-mix(in srgb, var(--coffee-bot-color) 19%, transparent));
+  --crt-face-glow-filter: var(--zen-live-bot-idle-face-glow-filter);
   filter: var(--zen-live-bot-idle-face-glow-filter);
 }
 
 .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part="eyes"] {
   --eye-blink-scale-x: 1;
   --eye-blink-scale-y: 1;
+  --bot-face-eye-shift-x: calc(
+    (var(--zen-live-bot-eye-local-x, 0) * 10px) + var(--bot-face-eye-offset-x, 0em)
+  );
+  --bot-face-eye-shift-y: calc(
+    (var(--zen-live-bot-eye-local-y, 0) * 18px) + var(--bot-face-eye-offset-y, 0em)
+  );
   transform:
-    translate(
-      calc((var(--zen-live-bot-eye-local-x, 0) * 10px) + var(--bot-face-eye-offset-x, 0em)),
-      calc((var(--zen-live-bot-eye-local-y, 0) * 18px) + var(--bot-face-eye-offset-y, 0em))
-    )
+    translate(var(--bot-face-eye-shift-x), var(--bot-face-eye-shift-y))
     scale(var(--bot-face-eye-scale, 1))
     scaleX(var(--eye-blink-scale-x))
     scaleY(var(--eye-blink-scale-y));
@@ -20608,7 +20987,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .zenLiveBotPresenceFaceGlyph[data-coffee-plate-emoji-blink-phase="half"]
   [data-coffee-plate-emoji-part="eyes"] {
-  --eye-blink-scale-y: 0.42;
+  --bot-face-eye-shift-x: 0px;
+  --bot-face-eye-shift-y: 0px;
+  --eye-blink-scale-x: 0.72;
+  --eye-blink-scale-y: 1.08;
 }
 
 .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part="mouth"] {
@@ -20632,7 +21014,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .zenLiveBotPresenceThinkingGlyph[data-coffee-plate-thinking-spinner="true"] {
   color: var(--zen-live-bot-face-ink, var(--zen-presence-face-ink));
-  font-size: clamp(1.82rem, 4.5vw, 3.08rem);
+  font-size: var(
+    --zen-live-bot-avatar-thinking-glyph-size,
+    clamp(1.82rem, calc(var(--zen-live-bot-body-frame-size, 190px) * 0.245), 4.6rem)
+  );
   text-shadow:
     0 0 0.1em color-mix(in srgb, currentColor 84%, transparent),
     0 0 0.34em color-mix(in srgb, var(--coffee-bot-color) 56%, transparent),
@@ -20671,14 +21056,37 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]
   .zenLiveBotPresenceFaceGlyph
   [data-coffee-plate-emoji-part] {
-  filter:
-    drop-shadow(0 0 0.12em rgba(255, 63, 111, 0.72))
-    drop-shadow(0 0 0.28em rgba(255, 182, 46, 0.46))
-    drop-shadow(0 0 0.5em rgba(49, 215, 255, 0.52))
-    drop-shadow(0 0 0.76em rgba(139, 124, 255, 0.38));
+  --crt-bloom-opacity: 0.16;
+  --crt-bloom-radius: 2.05px;
+  --crt-chromatic-offset: 0.4px;
+  --crt-chromatic-opacity: 0.038;
+  --zen-live-bot-talking-face-glow-filter-high:
+    drop-shadow(0 0 0.1em rgba(255, 63, 111, 0.56))
+    drop-shadow(0 0 0.26em rgba(255, 182, 46, 0.34))
+    drop-shadow(0 0 0.5em rgba(49, 215, 255, 0.38))
+    drop-shadow(0 0 0.72em rgba(139, 124, 255, 0.28));
+  --zen-live-bot-talking-face-glow-filter-mid:
+    drop-shadow(0 0 0.09em rgba(255, 63, 111, 0.46))
+    drop-shadow(0 0 0.22em rgba(255, 182, 46, 0.28))
+    drop-shadow(0 0 0.42em rgba(49, 215, 255, 0.3))
+    drop-shadow(0 0 0.6em rgba(139, 124, 255, 0.22));
+  --zen-live-bot-talking-face-glow-filter-low:
+    drop-shadow(0 0 0.08em rgba(255, 63, 111, 0.36))
+    drop-shadow(0 0 0.18em rgba(255, 182, 46, 0.22))
+    drop-shadow(0 0 0.34em rgba(49, 215, 255, 0.24))
+    drop-shadow(0 0 0.48em rgba(139, 124, 255, 0.18));
+  --crt-face-glow-filter:
+    var(--zen-live-bot-talking-face-glow-filter-high);
+  filter: var(--crt-face-glow-filter);
+  animation: zenLiveBotTalkingFacePartFlicker 760ms ease-in-out infinite;
+}
+
+.zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]
+  .zenLiveBotPresenceFaceGlyph
+  [data-coffee-plate-emoji-part]::before {
   animation:
     zenLivePrismFaceGlowHueRotate 1.7s linear infinite,
-    zenLiveBotTalkingLightFlicker 760ms ease-in-out infinite;
+    zenLiveBotTalkingFaceGlowFlicker 760ms ease-in-out infinite;
 }
 
 .themeLight .zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]
@@ -20697,14 +21105,34 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .zenLiveBotPresencePlate[data-theme="light"][data-prism-persona="true"][data-talking="true"]
   .zenLiveBotPresenceFaceGlyph
   [data-coffee-plate-emoji-part] {
-  filter:
-    drop-shadow(0 0 0.1em rgba(190, 20, 66, 0.5))
-    drop-shadow(0 0 0.24em rgba(150, 93, 0, 0.32))
-    drop-shadow(0 0 0.42em rgba(0, 112, 148, 0.36))
-    drop-shadow(0 0 0.62em rgba(82, 62, 176, 0.28));
+  --zen-live-bot-talking-face-glow-filter-high:
+    drop-shadow(0 0 0.09em rgba(190, 20, 66, 0.4))
+    drop-shadow(0 0 0.22em rgba(150, 93, 0, 0.28))
+    drop-shadow(0 0 0.4em rgba(0, 112, 148, 0.3))
+    drop-shadow(0 0 0.58em rgba(82, 62, 176, 0.22));
+  --zen-live-bot-talking-face-glow-filter-mid:
+    drop-shadow(0 0 0.08em rgba(190, 20, 66, 0.32))
+    drop-shadow(0 0 0.18em rgba(150, 93, 0, 0.22))
+    drop-shadow(0 0 0.34em rgba(0, 112, 148, 0.24))
+    drop-shadow(0 0 0.48em rgba(82, 62, 176, 0.18));
+  --zen-live-bot-talking-face-glow-filter-low:
+    drop-shadow(0 0 0.07em rgba(190, 20, 66, 0.24))
+    drop-shadow(0 0 0.15em rgba(150, 93, 0, 0.16))
+    drop-shadow(0 0 0.26em rgba(0, 112, 148, 0.18))
+    drop-shadow(0 0 0.38em rgba(82, 62, 176, 0.14));
+  --crt-face-glow-filter:
+    var(--zen-live-bot-talking-face-glow-filter-high);
+}
+
+.themeLight .zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]
+  .zenLiveBotPresenceFaceGlyph
+  [data-coffee-plate-emoji-part]::before,
+.zenLiveBotPresencePlate[data-theme="light"][data-prism-persona="true"][data-talking="true"]
+  .zenLiveBotPresenceFaceGlyph
+  [data-coffee-plate-emoji-part]::before {
   animation:
     zenLivePrismFaceGlowHueRotateLight 1.7s linear infinite,
-    zenLiveBotTalkingLightFlicker 760ms ease-in-out infinite;
+    zenLiveBotTalkingFaceGlowFlicker 760ms ease-in-out infinite;
 }
 
 .zenLiveBotPresencePlate[data-prism-persona="true"][data-private-mode="true"][data-talking="true"]
@@ -20717,7 +21145,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .zenLiveBotPresencePlate[data-prism-persona="true"][data-private-mode="true"][data-talking="true"]
   .zenLiveBotPresenceFaceGlyph
   [data-coffee-plate-emoji-part] {
-  filter:
+  --crt-face-glow-filter:
     drop-shadow(0 0 0.12em rgba(255, 255, 255, 0.38))
     drop-shadow(0 0 0.32em rgba(255, 255, 255, 0.2));
   animation: none;
@@ -20736,6 +21164,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 @keyframes zenLivePrismFaceGlowHueRotate {
   from {
     filter:
+      blur(var(--crt-bloom-radius))
       drop-shadow(0 0 0.12em rgba(255, 63, 111, 0.72))
       drop-shadow(0 0 0.28em rgba(255, 182, 46, 0.46))
       drop-shadow(0 0 0.5em rgba(49, 215, 255, 0.52))
@@ -20745,6 +21174,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
   to {
     filter:
+      blur(var(--crt-bloom-radius))
       drop-shadow(0 0 0.12em rgba(255, 63, 111, 0.72))
       drop-shadow(0 0 0.28em rgba(255, 182, 46, 0.46))
       drop-shadow(0 0 0.5em rgba(49, 215, 255, 0.52))
@@ -20756,6 +21186,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 @keyframes zenLivePrismFaceGlowHueRotateLight {
   from {
     filter:
+      blur(var(--crt-bloom-radius))
       drop-shadow(0 0 0.1em rgba(190, 20, 66, 0.5))
       drop-shadow(0 0 0.24em rgba(150, 93, 0, 0.32))
       drop-shadow(0 0 0.42em rgba(0, 112, 148, 0.36))
@@ -20765,6 +21196,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
   to {
     filter:
+      blur(var(--crt-bloom-radius))
       drop-shadow(0 0 0.1em rgba(190, 20, 66, 0.5))
       drop-shadow(0 0 0.24em rgba(150, 93, 0, 0.32))
       drop-shadow(0 0 0.42em rgba(0, 112, 148, 0.36))
@@ -20892,11 +21324,22 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .zenLiveBotPresenceBotGlyph {
   position: absolute;
-  left: calc(50% + var(--zen-live-bot-glyph-x-anchor, 0px));
-  top: calc(50% + var(--zen-live-bot-glyph-y-anchor, 70px));
+  left: calc(50% + var(--zen-live-bot-glyph-x-anchor, 0px) + 1px);
+  top: calc(50% + var(--zen-live-bot-glyph-y-anchor, 70px) + 1px);
   z-index: 12;
   box-sizing: border-box;
-  width: clamp(23px, calc(var(--zen-live-bot-body-frame-size) * 0.16), 33px);
+  --zen-live-bot-body-glyph-render-size: calc(
+    var(
+      --zen-live-bot-body-glyph-size,
+      clamp(
+        var(--zen-live-bot-body-glyph-min-size),
+        calc(var(--zen-live-bot-body-frame-size) * var(--zen-live-bot-body-glyph-ratio)),
+        var(--zen-live-bot-body-glyph-max-size)
+      )
+    ) - 2px
+  );
+  width: var(--zen-live-bot-body-glyph-render-size);
+  height: var(--zen-live-bot-body-glyph-render-size);
   aspect-ratio: 1;
   transform: translate(-50%, -50%);
   display: block;
@@ -20963,6 +21406,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .themeLight .zenLiveBotPresencePlate,
 .zenLiveBotPresencePlate[data-theme="light"] {
+  --bot-face-crt-screen-texture-blend-mode: overlay;
   --zen-presence-face-bg:
     radial-gradient(circle at 42% 24%, rgba(255, 255, 255, 0.96), transparent 34%),
     radial-gradient(
@@ -20982,6 +21426,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     0 0 26px color-mix(in srgb, var(--coffee-bot-color) 22%, transparent),
     0 13px 24px rgba(89, 69, 48, 0.18);
   --zen-presence-pill-ink: color-mix(in srgb, var(--coffee-bot-color) 72%, #2f241b 28%);
+}
+
+.zenLiveBotPresencePlate[data-theme="dark"] {
+  --bot-face-crt-screen-texture-blend-mode: luminosity;
 }
 
 .themeLight.appLayout[data-zen-atmosphere-active="true"] .zenLiveBotPresencePlate,
@@ -21119,7 +21567,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     [data-coffee-plate-emoji-part="mouth"],
   .zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]
     .zenLiveBotPresenceFaceGlyph
-    [data-coffee-plate-emoji-part] {
+    [data-coffee-plate-emoji-part],
+  .zenLiveBotPresencePlate[data-talking="true"]:not([data-private-mode="true"])
+    .zenLiveBotPresenceFaceGlyph
+    [data-coffee-plate-emoji-part]::before {
     animation-duration: 1ms;
   }
 
@@ -21129,7 +21580,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     .botFaceFrameLed,
   .zenLiveBotPresencePlate[data-talking="true"]:not([data-private-mode="true"])
     .zenLiveBotPresenceFaceGlyph
-    [data-coffee-plate-emoji-part] {
+    [data-coffee-plate-emoji-part],
+  .zenLiveBotPresencePlate[data-talking="true"]:not([data-private-mode="true"])
+    .zenLiveBotPresenceFaceGlyph
+    [data-coffee-plate-emoji-part]::before {
     animation: none;
   }
 
@@ -34658,6 +35112,12 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     0 18px 36px color-mix(in srgb, var(--bot-color, var(--accent)) 22%, transparent);
 }
 
+.botAvatarIdentityPicker .colorPickerWrapper .colorSwatchButton > svg {
+  width: 46px;
+  height: 46px;
+  stroke-width: 1.75;
+}
+
 @media (max-width: 799px) {
   .botAvatarBuilderBody {
     grid-template-columns: 1fr;
@@ -35135,6 +35595,59 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   background: rgba(0, 0, 0, 0.24);
 }
 
+.botAvatarPreviewHeaderControls {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.botAvatarMaskBlendProbe {
+  min-width: 0;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px dashed color-mix(in srgb, var(--editor-bot-color, var(--accent)) 30%, #303846);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 8%, rgba(0, 0, 0, 0.26));
+}
+
+.botAvatarMaskBlendProbe span {
+  color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 62%, var(--fg-muted));
+  font-size: 10px;
+  font-weight: 780;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.botAvatarMaskBlendProbe select {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 28px;
+  min-width: 112px;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 24%, #303846);
+  border-radius: 999px;
+  padding: 0 24px 0 10px;
+  background:
+    linear-gradient(45deg, transparent 50%, var(--fg-muted) 50%) calc(100% - 13px) 11px / 5px 5px no-repeat,
+    linear-gradient(135deg, var(--fg-muted) 50%, transparent 50%) calc(100% - 8px) 11px / 5px 5px no-repeat,
+    rgba(255, 255, 255, 0.045);
+  color: var(--fg);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 720;
+}
+
+.botAvatarMaskBlendProbe select:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 56%, #ffffff);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 24%, transparent);
+}
+
 .botAvatarPreviewThemeToggle button,
 .form .botAvatarPreviewThemeToggle button {
   -webkit-appearance: none;
@@ -35412,7 +35925,14 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .botAvatarMannequinStage .zenLiveBotPresenceBody {
+  --zen-live-bot-avatar-buckle-glyph-size: clamp(18px, calc(var(--zen-live-bot-body-frame-size) * 0.145), 48px);
+  --zen-live-bot-body-glyph-size: var(--zen-live-bot-avatar-buckle-glyph-size);
   pointer-events: auto;
+}
+
+.botAvatarMannequinStage .zenLiveBotPresenceBotGlyph {
+  width: var(--zen-live-bot-body-glyph-render-size);
+  height: var(--zen-live-bot-body-glyph-render-size);
 }
 
 .botAvatarModalFacePanel {
@@ -35481,6 +36001,13 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   margin: 0;
   display: grid;
   gap: 7px;
+}
+
+.botAvatarEyeGlyphControls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(116px, 0.56fr);
+  gap: 8px;
+  min-width: 0;
 }
 
 .botAvatarEyeCharacterControl {
@@ -47461,6 +47988,62 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   max-height: clamp(230px, 35vh, 380px);
 }
 
+@media (min-width: 1160px) {
+  .coffeeShell[data-session-active="true"][data-transcript-open="true"]
+    .coffeeStage:not([data-experimental-table-angle="true"]):is(
+      [data-phase="arriving"],
+      [data-phase="live"],
+      [data-phase="finished"][data-replay-active="true"]
+    )
+    .coffeeTableGlow {
+    width: min(72%, 680px);
+    filter: blur(30px);
+  }
+
+  .coffeeShell[data-session-active="true"][data-transcript-open="true"]
+    .coffeeStage:not([data-experimental-table-angle="true"]):is(
+      [data-phase="arriving"],
+      [data-phase="live"],
+      [data-phase="finished"][data-replay-active="true"]
+    )
+    .coffeeTableDisk {
+    width: min(50vw, 500px);
+    max-width: calc(100% - 112px);
+  }
+
+  .coffeeShell[data-session-active="true"][data-transcript-open="true"]
+    .coffeeStage[data-experimental-table-angle="true"]:is(
+      [data-phase="arriving"],
+      [data-phase="live"],
+      [data-phase="finished"][data-replay-active="true"]
+    )
+    .coffeeTableScene {
+    --coffee-table-asset-width: min(82%, 940px);
+  }
+
+  .coffeeShell[data-session-active="true"][data-transcript-open="true"]
+    .coffeeStage[data-experimental-table-angle="true"]:is(
+      [data-phase="arriving"],
+      [data-phase="live"],
+      [data-phase="finished"][data-replay-active="true"]
+    )
+    .coffeeTableGlow {
+    width: min(76%, 840px);
+    filter: blur(40px) saturate(1.04);
+  }
+
+  .coffeeShell[data-session-active="true"][data-transcript-open="true"]
+    .coffeeStage[data-experimental-table-angle="true"]:is(
+      [data-phase="arriving"],
+      [data-phase="live"],
+      [data-phase="finished"][data-replay-active="true"]
+    )
+    .coffeeTableFocalColumn {
+    width: min(62vw, 760px);
+    max-width: calc(100% - 96px);
+  }
+}
+
 .coffeeCenterMessage {
   position: relative;
   z-index: 4;
@@ -48176,7 +48759,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   z-index: 1;
   box-sizing: border-box;
   /* Emoji sits high in the disk; nudge Y is applied in TSX via this token + rotate(). */
-  --coffee-plate-emoji-nudge-y: clamp(-8px, -5.5%, -2px);
+  --coffee-plate-emoji-nudge-y: clamp(-12px, -7%, -5px);
   display: grid;
   align-items: start;
   justify-items: center;
@@ -48202,8 +48785,9 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeSeatGlowPill {
-  --coffee-seat-name-plate-y: clamp(-58px, -5.2vw, -38px);
-  --coffee-seat-glyph-slot-width: 31px;
+  --coffee-seat-name-plate-y: clamp(-50px, -4.45vw, -32px);
+  --coffee-seat-glyph-slot-width: 35px;
+  --coffee-seat-name-glyph-size: clamp(24px, calc(var(--coffee-seat-glyph-slot-width) * 0.86), 32px);
   --coffee-seat-name-glyph-gap: 4px;
   position: absolute;
   left: 50%;
@@ -48256,6 +48840,11 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   min-height: calc(2 * 1.1 * 0.84rem);
   line-height: 0;
   color: var(--coffee-seat-emotion-color);
+}
+
+.coffeeSeatGlowGlyph svg {
+  width: var(--coffee-seat-name-glyph-size);
+  height: var(--coffee-seat-name-glyph-size);
 }
 
 .coffeeSeat[data-cup-side="left"] .coffeeSeatGlowGlyph {
@@ -48339,79 +48928,42 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeSeatPlate[data-live-body-style="zen"] {
-  --bot-face-frame-glow-filter:
-    drop-shadow(0 0 10px color-mix(in srgb, var(--coffee-seat-emotion-color) 34%, transparent))
-    drop-shadow(0 0 30px color-mix(in srgb, var(--coffee-seat-emotion-color) 18%, transparent))
-    drop-shadow(0 0 58px color-mix(in srgb, var(--coffee-seat-emotion-color) 8%, transparent));
-  --coffee-live-bot-face-scale: 1.68;
-  --bot-face-frame-inset: 0;
-  --bot-face-frame-opacity: 1;
-  --bot-face-frame-z: 0;
-  --bot-face-metal-light-inset: 0;
-  --bot-face-metal-light-blend-mode: overlay;
-  --bot-face-metal-light-opacity: 0.58;
-  --bot-face-metal-light-z: 5;
-  --bot-face-screen-left: 16.6%;
-  --bot-face-screen-top: 11.5%;
-  --bot-face-screen-right: 15.2%;
-  --bot-face-screen-bottom: 20.3%;
-  --bot-face-screen-glass-opacity: 0.46;
-  --bot-face-screen-glare-opacity: 0.18;
-  --bot-face-screen-specular-opacity: 0.54;
-  --bot-face-glyph-z: 6;
-  --coffee-plate-emoji-nudge-y: -5px;
+  --zen-live-bot-avatar-size: var(--coffee-seat-avatar-size, clamp(156px, 14.8vw, 196px));
+  --zen-live-bot-avatar-body-size: var(--zen-live-bot-avatar-size);
+  --zen-live-bot-body-x: 50%;
+  --zen-live-bot-body-y: 50%;
+  --zen-live-bot-face-x: 50%;
+  --zen-live-bot-face-y: 43.8%;
+  --zen-live-bot-face-scale: 1.68;
+  --zen-live-bot-glyph-x-anchor: 0px;
+  --zen-live-bot-glyph-y-anchor: calc(var(--zen-live-bot-avatar-body-size) * 0.37);
+  --zen-live-bot-frame-tint-color: var(--coffee-seat-emotion-color);
+  --zen-live-bot-face-ink: color-mix(in srgb, var(--coffee-seat-emotion-color) 88%, #ffffff 12%);
+  --zen-live-bot-glyph-ink: color-mix(in srgb, var(--coffee-seat-emotion-color) 88%, #ffffff 12%);
+  --coffee-seat-emotion-face-scale: 1;
+  --zen-live-bot-eye-local-x: -0.2;
+  --coffee-plate-emoji-nudge-y: clamp(-5px, -2.6%, -2px);
   place-items: center;
   padding-top: 0;
   box-shadow: none;
 }
 
-.coffeeSeatFaceEmissionMask {
-  position: absolute;
-  inset: 0;
-  z-index: var(--bot-face-glyph-z, 6);
-  display: grid;
-  place-items: center;
-  overflow: hidden;
-  pointer-events: none;
-  isolation: isolate;
-  --bot-face-crt-texture-image: url("/bot-frame/bot-frame-screen-mask.png?v=1000");
-  --bot-face-crt-texture-size: 100% 100%;
-  --bot-face-crt-texture-repeat: repeat;
-  --bot-face-crt-color: var(--coffee-seat-emotion-color, var(--coffee-bot-color, currentColor));
-  --bot-face-crt-cell-width: clamp(2.2px, 1.62%, 4.4px);
-  --bot-face-crt-cell-height: clamp(2.6px, 1.9%, 5.2px);
-  --bot-face-crt-subpixel-width: calc(var(--bot-face-crt-cell-width) / 3);
-  --bot-face-crt-phosphor-opacity: 0.18;
-  --bot-face-crt-gap-opacity: 0.42;
-  --bot-face-crt-scanline-opacity: 0.14;
-  mix-blend-mode: plus-lighter;
-  filter:
-    drop-shadow(0 0 2px color-mix(in srgb, var(--bot-face-crt-color) 30%, transparent))
-    drop-shadow(0 0 10px color-mix(in srgb, var(--bot-face-crt-color) 12%, transparent));
-  -webkit-mask-image: var(--bot-face-crt-texture-image);
-  -webkit-mask-position: center;
-  -webkit-mask-size: var(--bot-face-crt-texture-size);
-  -webkit-mask-repeat: var(--bot-face-crt-texture-repeat);
-  -webkit-mask-mode: alpha;
-  mask-image: var(--bot-face-crt-texture-image);
-  mask-position: center;
-  mask-size: var(--bot-face-crt-texture-size);
-  mask-repeat: var(--bot-face-crt-texture-repeat);
-  mask-mode: alpha;
+.coffeeSeatPlate[data-live-body-style="zen"] .zenLiveBotPresenceFace {
+  --bot-face-ambient-glow-color: var(--coffee-seat-emotion-color);
+  --bot-face-ambient-glow-size: 86%;
+  --bot-face-ambient-glow-opacity: 0.36;
+  --bot-face-ambient-glow-blur: clamp(24px, 17%, 48px);
+  --bot-face-ambient-glow-spread: clamp(14px, 9%, 28px);
+}
+
+.coffeeSeat[data-table-speaking="true"] .coffeeSeatPlate[data-live-body-style="zen"] .zenLiveBotPresenceFace {
+  --bot-face-ambient-glow-opacity: 0.6;
 }
 
 .coffeeStage[data-phase="arriving"] .coffeeSeatPlate[data-live-body-style="zen"],
 .coffeeStage[data-phase="live"] .coffeeSeatPlate[data-live-body-style="zen"],
 .coffeeStage[data-compact="true"] .coffeeSeatPlate[data-live-body-style="zen"] {
-  --coffee-plate-emoji-nudge-y: -5px;
-}
-
-.coffeeSeatPlate[data-live-body-style="zen"] .coffeeSeatPlateEmoji {
-  --coffee-plate-emoji-flip-anchor-x: 0px;
-  font-size: calc(
-    var(--zen-live-bot-avatar-face-glyph-size, clamp(1.74rem, 5.15vw, 2.58rem)) *
-    var(--coffee-live-bot-face-scale, 1)
-  );
+  --coffee-plate-emoji-nudge-y: clamp(-5px, -2.6%, -2px);
 }
 
 .coffeeSeatTeamBadge {
@@ -48507,7 +49059,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   top: var(--bot-face-screen-top, var(--bot-face-screen-inset, 17%));
   right: var(--bot-face-screen-right, var(--bot-face-screen-inset, 17%));
   bottom: var(--bot-face-screen-bottom, var(--bot-face-screen-inset, 17%));
-  z-index: 0;
+  z-index: var(--bot-face-screen-z, 1);
   display: block;
   border-radius: var(--bot-face-screen-radius, 50%);
   pointer-events: none;
@@ -48612,9 +49164,13 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .botFaceCrtNoiseLayer,
+  .botFaceCrtBreathingLayer,
+  .botFaceCrtBreathingLayer::before,
   .botFaceScreenGlass,
   .botFaceScreenGlass::before,
   .botFaceScreenGlass::after {
+    animation: none;
     transition: none;
   }
 }
@@ -48649,7 +49205,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   --bot-face-frame-tint-mask: url("/bot-frame/bot-frame-tint-mask.png?v=1000");
   position: absolute;
   inset: var(--bot-face-frame-inset, -7%);
-  z-index: var(--bot-face-frame-z, 0);
+  z-index: var(--bot-face-frame-z, 2);
   display: block;
   overflow: hidden;
   border-radius: 50%;
@@ -48820,6 +49376,14 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .coffeeSeatPlateEmoji,
 .messageMoodCoffeeFace,
 .zenLiveBotPresenceFaceGlyph {
+  --crt-bloom-opacity: 0.075;
+  --crt-bloom-radius: 1.4px;
+  --crt-chromatic-offset: 0.34px;
+  --crt-chromatic-opacity: 0.026;
+  --crt-face-glow-filter:
+    drop-shadow(0 0 0.08em color-mix(in srgb, currentColor 74%, transparent))
+    drop-shadow(0 0 0.24em color-mix(in srgb, currentColor 48%, transparent))
+    drop-shadow(0 0 0.48em color-mix(in srgb, currentColor 24%, transparent));
   display: inline-grid;
   grid-template-columns: var(--coffee-face-eye-track, 0.4em) var(--coffee-face-mouth-track, 0.4em);
   grid-template-rows: 1em;
@@ -48837,11 +49401,12 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   z-index: var(--bot-face-glyph-z, 4);
   opacity: 1;
   text-shadow: none;
-  filter:
-    drop-shadow(0 0 0.08em color-mix(in srgb, currentColor 74%, transparent))
-    drop-shadow(0 0 0.24em color-mix(in srgb, currentColor 48%, transparent))
-    drop-shadow(0 0 0.48em color-mix(in srgb, currentColor 24%, transparent));
   transition: none;
+}
+
+.coffeeSeat[data-mood-near-desaturated="true"] .coffeeSeatPlateEmoji,
+.zenLiveBotPresencePlate[data-transitioning="true"] .zenLiveBotPresenceFaceGlyph {
+  --crt-chromatic-opacity: 0;
 }
 
 .coffeeSeatPlateEmoji.zenLiveBotPresenceFaceGlyph {
@@ -48915,6 +49480,62 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   transition: none;
 }
 
+/* Emissive glyph bloom: a tiny blurred clone simulates phosphor spill around
+   bright strokes. It inherits color and parent opacity, so light flicker dims it
+   with the glyph instead of becoming a shadow. */
+.coffeeSeatPlateEmoji [data-crt-glyph-layer="true"],
+.zenLiveBotPresenceFaceGlyph [data-crt-glyph-layer="true"] {
+  position: relative;
+  isolation: isolate;
+}
+
+.coffeeSeatPlateEmoji [data-crt-glyph-layer="true"]::before,
+.coffeeSeatPlateEmoji [data-crt-glyph-layer="true"]::after,
+.zenLiveBotPresenceFaceGlyph [data-crt-glyph-layer="true"]::before,
+.zenLiveBotPresenceFaceGlyph [data-crt-glyph-layer="true"]::after {
+  content: attr(data-crt-glyph-content);
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: currentColor;
+  font: inherit;
+  font-variation-settings: inherit;
+  letter-spacing: inherit;
+  line-height: inherit;
+  -webkit-text-stroke: inherit;
+  paint-order: inherit;
+  pointer-events: none;
+}
+
+.coffeeSeatPlateEmoji [data-crt-glyph-layer="true"]::before,
+.zenLiveBotPresenceFaceGlyph [data-crt-glyph-layer="true"]::before {
+  font-weight: var(--bot-face-glow-font-weight, 560);
+  font-variation-settings: "wght" var(--bot-face-glow-font-weight, 560);
+  -webkit-text-stroke: var(--bot-face-glow-stroke, 0) currentColor;
+  paint-order: stroke fill;
+  opacity: var(--crt-bloom-opacity);
+  filter:
+    blur(var(--crt-bloom-radius))
+    var(--crt-face-glow-filter);
+  mix-blend-mode: plus-lighter;
+}
+
+/* Micro chromatic bleed: overdriven RGB phosphors separate by a fraction of a
+   pixel. The layer is disabled through --crt-chromatic-opacity on dim states. */
+.coffeeSeatPlateEmoji [data-crt-glyph-layer="true"]::after,
+.zenLiveBotPresenceFaceGlyph [data-crt-glyph-layer="true"]::after {
+  color: transparent;
+  text-shadow:
+    calc(0px - var(--crt-chromatic-offset)) 0 0
+      color-mix(in srgb, #ff3b54 72%, currentColor 28%),
+    var(--crt-chromatic-offset) 0 0
+      color-mix(in srgb, #46dfff 76%, currentColor 24%);
+  opacity: var(--crt-chromatic-opacity);
+  mix-blend-mode: screen;
+  filter: brightness(1.08) contrast(1.04);
+}
+
 .coffeeSeatPlateEmoji [data-coffee-plate-emoji-part="mouth"],
 .messageMoodCoffeeFace [data-coffee-plate-emoji-part="mouth"],
 .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part="mouth"] {
@@ -48942,11 +49563,14 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part="eyes"] {
   --eye-blink-scale-x: 1;
   --eye-blink-scale-y: 1;
+  --bot-face-eye-shift-x: calc(
+    (var(--zen-live-bot-eye-local-x, 0) * 10px) + var(--bot-face-eye-offset-x, 0em)
+  );
+  --bot-face-eye-shift-y: calc(
+    (var(--zen-live-bot-eye-local-y, 0) * 18px) + var(--bot-face-eye-offset-y, 0em)
+  );
   transform:
-    translate(
-      calc((var(--zen-live-bot-eye-local-x, 0) * 10px) + var(--bot-face-eye-offset-x, 0em)),
-      calc((var(--zen-live-bot-eye-local-y, 0) * 18px) + var(--bot-face-eye-offset-y, 0em))
-    )
+    translate(var(--bot-face-eye-shift-x), var(--bot-face-eye-shift-y))
     scale(var(--bot-face-eye-scale, 1))
     scaleX(var(--eye-blink-scale-x))
     scaleY(var(--eye-blink-scale-y));
@@ -48958,7 +49582,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   [data-coffee-plate-emoji-part="eyes"],
 .zenLiveBotPresenceFaceGlyph[data-coffee-plate-emoji-blink-phase="half"]
   [data-coffee-plate-emoji-part="eyes"] {
-  --eye-blink-scale-x: 0.42;
+  --bot-face-eye-shift-x: 0px;
+  --bot-face-eye-shift-y: 0px;
+  --eye-blink-scale-x: 0.72;
+  --eye-blink-scale-y: 1.08;
   transition: none;
 }
 
@@ -49068,7 +49695,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .coffeeSeatPlateEmoji[data-coffee-plate-question-glyph="true"],
 .messageMoodCoffeeFace[data-coffee-plate-question-glyph="true"],
 .zenLiveBotPresenceFaceGlyph[data-coffee-plate-question-glyph="true"] {
-  --coffee-plate-emoji-nudge-y: 0px;
+  --coffee-plate-emoji-nudge-y: -0.02em;
   --coffee-seat-emotion-face-scale: 1;
   --coffee-face-eye-track: 1em;
   --coffee-face-mouth-track: 0em;
@@ -49105,7 +49732,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     0 0 0.12em color-mix(in srgb, currentColor 78%, transparent),
     0 0 0.36em color-mix(in srgb, currentColor 44%, transparent),
     0 0 0.68em color-mix(in srgb, var(--coffee-bot-color) 32%, transparent);
-  transform: translateY(-0.01em);
+  transform: translateY(-0.015em);
 }
 
 .messageMoodCoffeeFace[data-coffee-plate-question-glyph="true"] {
@@ -49114,7 +49741,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .coffeeSeatPlateEmoji.zenLiveBotPresenceFaceGlyph[data-coffee-plate-question-glyph="true"] {
   color: var(--zen-live-bot-face-ink, var(--zen-presence-face-ink));
-  font-size: var(--zen-live-bot-avatar-question-glyph-size, clamp(2rem, 4.25vw, 2.58rem));
+  font-size: var(
+    --zen-live-bot-avatar-question-glyph-size,
+    clamp(2.35rem, calc(var(--zen-live-bot-body-frame-size, 190px) * 0.275), 5.25rem)
+  );
 }
 
 .coffeeSeat[data-prism-mood="joyful"] {
@@ -49142,27 +49772,27 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeSeat[data-prism-mood="guarded"] {
-  --coffee-seat-emotion-color: color-mix(in srgb, var(--coffee-bot-color) 62%, #9fa3aa 38%);
+  --coffee-seat-emotion-color: color-mix(in srgb, var(--coffee-bot-color) 88%, #9fa3aa 12%);
   --coffee-seat-emotion-face-scale: 1.06;
   --coffee-seat-emotion-glow-strength: 30%;
   --coffee-seat-emotion-ring-alpha: 0.038;
-  --coffee-seat-mood-saturation: 0.72;
-  --coffee-seat-mood-grayscale: 0.16;
-  --coffee-seat-mood-contrast: 0.97;
-  --coffee-seat-mood-brightness: 0.95;
-  --coffee-seat-mood-frame-raster-opacity: 0.72;
+  --coffee-seat-mood-saturation: 1;
+  --coffee-seat-mood-grayscale: 0;
+  --coffee-seat-mood-contrast: 1;
+  --coffee-seat-mood-brightness: 1;
+  --coffee-seat-mood-frame-raster-opacity: 1;
 }
 
 .coffeeSeat[data-prism-mood="strained"] {
-  --coffee-seat-emotion-color: color-mix(in srgb, var(--coffee-bot-color) 48%, #9ca1a8 52%);
+  --coffee-seat-emotion-color: color-mix(in srgb, var(--coffee-bot-color) 82%, #9ca1a8 18%);
   --coffee-seat-emotion-face-scale: 1.03;
   --coffee-seat-emotion-glow-strength: 20%;
   --coffee-seat-emotion-ring-alpha: 0.028;
-  --coffee-seat-mood-saturation: 0.56;
-  --coffee-seat-mood-grayscale: 0.24;
-  --coffee-seat-mood-contrast: 0.95;
-  --coffee-seat-mood-brightness: 0.9;
-  --coffee-seat-mood-frame-raster-opacity: 0.56;
+  --coffee-seat-mood-saturation: 1;
+  --coffee-seat-mood-grayscale: 0;
+  --coffee-seat-mood-contrast: 1;
+  --coffee-seat-mood-brightness: 1;
+  --coffee-seat-mood-frame-raster-opacity: 1;
 }
 
 .coffeeSeat[data-mood-near-desaturated="true"] {
@@ -49182,16 +49812,28 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   --coffee-seat-emotion-ring-alpha: 0.068;
 }
 
-.coffeeSeat[data-prism-mood="joyful"] .coffeeSeatPlateEmoji [data-coffee-plate-emoji-part="mouth"],
-.coffeeSeat[data-prism-mood="warm"] .coffeeSeatPlateEmoji [data-coffee-plate-emoji-part="mouth"] {
+.coffeeSeat[data-prism-mood="joyful"]
+  .coffeeSeatPlate:not([data-live-body-style="zen"])
+  .coffeeSeatPlateEmoji
+  [data-coffee-plate-emoji-part="mouth"],
+.coffeeSeat[data-prism-mood="warm"]
+  .coffeeSeatPlate:not([data-live-body-style="zen"])
+  .coffeeSeatPlateEmoji
+  [data-coffee-plate-emoji-part="mouth"] {
   transform: translateY(-0.015em) scale(1.06);
 }
 
-.coffeeSeat[data-prism-mood="guarded"] .coffeeSeatPlateEmoji [data-coffee-plate-emoji-part="eyes"] {
+.coffeeSeat[data-prism-mood="guarded"]
+  .coffeeSeatPlate:not([data-live-body-style="zen"])
+  .coffeeSeatPlateEmoji
+  [data-coffee-plate-emoji-part="eyes"] {
   transform: translateY(-0.015em) scaleX(1.16);
 }
 
-.coffeeSeat[data-prism-mood="strained"] .coffeeSeatPlateEmoji [data-coffee-plate-emoji-part="eyes"] {
+.coffeeSeat[data-prism-mood="strained"]
+  .coffeeSeatPlate:not([data-live-body-style="zen"])
+  .coffeeSeatPlateEmoji
+  [data-coffee-plate-emoji-part="eyes"] {
   transform: translateY(0.025em) scaleX(0.92);
 }
 
@@ -49209,7 +49851,9 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   );
 }
 
-.coffeeSeat[data-table-speaking="true"] .coffeeSeatPlateEmoji {
+.coffeeSeat[data-table-speaking="true"]
+  .coffeeSeatPlate:not([data-live-body-style="zen"])
+  .coffeeSeatPlateEmoji {
   filter: drop-shadow(0 0 10px color-mix(in srgb, var(--coffee-seat-emotion-color) 48%, transparent));
 }
 
@@ -54644,37 +55288,13 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .themeLight.coffeeShell .coffeeSeatPlate[data-live-body-style="zen"] {
-  --bot-face-frame-glow-filter:
-    drop-shadow(0 0 9px color-mix(in srgb, var(--coffee-seat-emotion-color) 22%, transparent))
-    drop-shadow(0 0 34px color-mix(in srgb, var(--coffee-seat-emotion-color) 11%, transparent))
-    drop-shadow(0 0 72px color-mix(in srgb, var(--coffee-seat-emotion-color) 5%, transparent));
-  --bot-face-metal-light-base-color: var(--coffee-bot-color);
-  --bot-face-metal-light-background:
-    radial-gradient(
-      circle at 36% 22%,
-      rgba(255, 255, 255, 0.88) 0 9%,
-      color-mix(in srgb, var(--bot-face-metal-light-base-color) 44%, transparent) 24%,
-      transparent 42%
-    ),
-    conic-gradient(
-      from 218deg at 50% 50%,
-      var(--bot-face-metal-light-base-color) 0deg,
-      color-mix(in srgb, var(--bot-face-metal-light-base-color) 62%, #ffffff 38%) 54deg,
-      color-mix(in srgb, var(--bot-face-metal-light-base-color) 92%, #000000 8%) 124deg,
-      color-mix(in srgb, var(--bot-face-metal-light-base-color) 46%, #ffffff 54%) 188deg,
-      color-mix(in srgb, var(--bot-face-metal-light-base-color) 86%, #000000 14%) 252deg,
-      var(--bot-face-metal-light-base-color) 360deg
-    ),
-    var(--bot-face-metal-light-base-color);
-  --bot-face-metal-light-blend-mode: luminosity;
-  --bot-face-metal-light-filter: grayscale(1) contrast(1.42) brightness(1.08);
-  --bot-face-metal-light-opacity: 0.34;
-  --bot-face-metal-light-raster-blend-mode: luminosity;
-  --bot-face-metal-light-raster-opacity: 0.86;
-  --bot-face-screen-glass-opacity: 0.34;
-  --bot-face-screen-glare-opacity: 0.12;
-  --bot-face-screen-specular-opacity: 0.44;
   box-shadow: none;
+}
+
+.themeLight.coffeeShell .coffeeSeatPlate[data-live-body-style="zen"] .zenLiveBotPresenceFace {
+  --bot-face-ambient-glow-opacity: 0.32;
+  --bot-face-ambient-glow-blur: clamp(20px, 13%, 40px);
+  --bot-face-ambient-glow-spread: clamp(12px, 8%, 24px);
 }
 
 .themeLight.coffeeShell .coffeeSeatPlateEmoji {

@@ -22,6 +22,7 @@ export interface BotCustomizerSavePristine {
   faceFontWeight: number;
   faceEyeScale: number;
   faceEyeOffsetY: number;
+  faceBlinkBar: string;
   profilePictureImageId: string | null;
 }
 
@@ -53,6 +54,7 @@ export interface BotCustomizerSaveCurrent {
   faceFontWeight: number;
   faceEyeScale: number;
   faceEyeOffsetY: number;
+  faceBlinkBar: string;
   profilePictureImageId: string | null;
 }
 
@@ -79,6 +81,7 @@ export interface BotCustomizerSavePatch {
   faceFontWeight?: number;
   faceEyeScale?: number;
   faceEyeOffsetY?: number;
+  faceBlinkBar?: string;
   profilePictureImageId?: string | null;
 }
 
@@ -113,6 +116,7 @@ export function buildBotCustomizerSavePatch(
       faceFontWeight: current.faceFontWeight,
       faceEyeScale: current.faceEyeScale,
       faceEyeOffsetY: current.faceEyeOffsetY,
+      faceBlinkBar: current.faceBlinkBar,
       profilePictureImageId: current.profilePictureImageId,
     };
   }
@@ -175,6 +179,9 @@ export function buildBotCustomizerSavePatch(
   }
   if (current.faceEyeOffsetY !== pristine.faceEyeOffsetY) {
     patch.faceEyeOffsetY = current.faceEyeOffsetY;
+  }
+  if (current.faceBlinkBar !== pristine.faceBlinkBar) {
+    patch.faceBlinkBar = current.faceBlinkBar;
   }
   if (current.profilePictureImageId !== pristine.profilePictureImageId) {
     patch.profilePictureImageId = current.profilePictureImageId;

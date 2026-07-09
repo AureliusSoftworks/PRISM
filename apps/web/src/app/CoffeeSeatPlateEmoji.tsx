@@ -2,9 +2,12 @@
 
 import { useEffect, useState, type CSSProperties, type JSX } from "react";
 import {
+  DEFAULT_BOT_FACE_BLINK_BAR,
+  normalizeBotFaceBlinkBar,
   normalizeBotFaceEyeCharacter,
   normalizeBotFaceEyeOffsetY,
   normalizeBotFaceEyeScale,
+  type BotFaceBlinkBar,
   type BotFaceFontId,
   type BotVoicePreset,
 } from "@localai/shared";
@@ -81,6 +84,7 @@ export type CoffeeSeatPlateEmojiProps = {
   faceFontWeight?: number | null;
   faceEyeScale?: number | null;
   faceEyeOffsetY?: number | null;
+  faceBlinkBar?: BotFaceBlinkBar | null;
   className: string;
 };
 
@@ -118,6 +122,7 @@ export function CoffeeSeatPlateEmoji({
   faceFontWeight,
   faceEyeScale,
   faceEyeOffsetY,
+  faceBlinkBar,
   className,
 }: CoffeeSeatPlateEmojiProps): JSX.Element {
   const thinkingSpinnerActive = enabled && showThinkingSpinner && !isTalking;
@@ -128,12 +133,15 @@ export function CoffeeSeatPlateEmoji({
       ? "question"
       : "face";
   const normalizedFaceEyeCharacter = normalizeBotFaceEyeCharacter(faceEyeCharacter);
+  const normalizedFaceBlinkBar =
+    normalizeBotFaceBlinkBar(faceBlinkBar) ?? DEFAULT_BOT_FACE_BLINK_BAR;
+  const faceBlinkDisabled = normalizedFaceBlinkBar === "none";
   const faceText = coffeeSeatFaceTextWithEyeCharacter(
     baseText,
     normalizedFaceEyeCharacter
   );
   const talkingPausesBlink = isTalking && !blinkWhileTalking;
-  const blinkKey = `${enabled ? "enabled" : "disabled"}:${talkingPausesBlink ? "talking" : "idle"}:${faceMode}:${faceText}:${scheduleKey}`;
+  const blinkKey = `${enabled ? "enabled" : "disabled"}:${talkingPausesBlink ? "talking" : "idle"}:${faceMode}:${normalizedFaceBlinkBar}:${faceText}:${scheduleKey}`;
   const [blinkState, setBlinkState] = useState<CoffeeSeatPlateBlinkState>({
     phase: "open",
     key: blinkKey,
@@ -144,7 +152,13 @@ export function CoffeeSeatPlateEmoji({
   useEffect(() => {
     setBlinkState({ phase: "open", key: blinkKey });
 
-    if (!enabled || talkingPausesBlink || thinkingSpinnerActive || questionGlyphActive) {
+    if (
+      !enabled ||
+      faceBlinkDisabled ||
+      talkingPausesBlink ||
+      thinkingSpinnerActive ||
+      questionGlyphActive
+    ) {
       return;
     }
 
@@ -196,6 +210,7 @@ export function CoffeeSeatPlateEmoji({
   }, [
     blinkKey,
     enabled,
+    faceBlinkDisabled,
     questionGlyphActive,
     scheduleKey,
     thinkingSpinnerActive,
@@ -219,11 +234,16 @@ export function CoffeeSeatPlateEmoji({
   }, [thinkingSpinnerActive]);
 
   const displayBlinkPhase: CoffeeSeatBlinkPhase =
-    !enabled || talkingPausesBlink || thinkingSpinnerActive || questionGlyphActive
+    !enabled ||
+    faceBlinkDisabled ||
+    talkingPausesBlink ||
+    thinkingSpinnerActive ||
+    questionGlyphActive
       ? "open"
       : blinkPhase;
   const displayText = applyCoffeeSeatBlink(faceText, displayBlinkPhase, {
     eyeCharacter: normalizedFaceEyeCharacter,
+    blinkBar: normalizedFaceBlinkBar,
   });
   const glyphParts = Array.from(displayText);
   const baseGlyphParts = Array.from(baseText);
@@ -274,11 +294,13 @@ export function CoffeeSeatPlateEmoji({
         faceMouthFont ||
         faceFontWeight ||
         normalizedFaceEyeScale ||
-        normalizedFaceEyeOffsetY
+        normalizedFaceEyeOffsetY ||
+        normalizedFaceBlinkBar !== DEFAULT_BOT_FACE_BLINK_BAR
           ? "true"
           : undefined
       }
       data-face-eye-character={normalizedFaceEyeCharacter ?? undefined}
+      data-face-blink-bar={normalizedFaceBlinkBar}
       data-coffee-plate-mouth-open={mouthOpen ? "true" : undefined}
       style={{
         ["--bot-face-font-weight" as string]: normalizedFaceWeight,
@@ -301,6 +323,8 @@ export function CoffeeSeatPlateEmoji({
           data-coffee-plate-thinking-frame="true"
           data-coffee-plate-thinking-frame-index={thinkingSpinnerFrameIndex}
           data-coffee-plate-thinking-glyph={thinkingSpinnerGlyph}
+          data-crt-glyph-layer="true"
+          data-crt-glyph-content={thinkingSpinnerGlyph}
           data-face-font={faceMouthFont ?? undefined}
         >
           {thinkingSpinnerGlyph}
@@ -309,6 +333,8 @@ export function CoffeeSeatPlateEmoji({
         <span
           data-coffee-plate-question-frame="true"
           data-coffee-plate-question-glyph="?"
+          data-crt-glyph-layer="true"
+          data-crt-glyph-content="?"
           data-face-font={faceMouthFont ?? faceEyesFont ?? undefined}
         >
           ?
@@ -325,6 +351,8 @@ export function CoffeeSeatPlateEmoji({
               key={`${part}-${index}`}
               data-coffee-plate-emoji-glyph={glyph}
               data-coffee-plate-emoji-part={part}
+              data-crt-glyph-layer="true"
+              data-crt-glyph-content={glyph}
               data-face-font={
                 part === "eyes" ? faceEyesFont ?? undefined : faceMouthFont ?? undefined
               }

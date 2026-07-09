@@ -1,5 +1,5 @@
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
-import { type BotFaceFontId, type BotProfileFields } from "@localai/shared";
+import { type BotFaceBlinkBar, type BotFaceFontId, type BotProfileFields } from "@localai/shared";
 
 export const PRISM_BOT_ARCHIVE_SCHEMA = "prism-bot-export-v2";
 export const BOT_ARCHIVE_MIME = "application/vnd.prism.bot+zip";
@@ -34,6 +34,7 @@ export interface PrismBotArchiveJson {
     faceFontWeight?: number | null;
     faceEyeScale?: number | null;
     faceEyeOffsetY?: number | null;
+    faceBlinkBar?: BotFaceBlinkBar | null;
     onlineEnabled?: boolean;
     flirtEnabled?: boolean;
     chatEnabled?: boolean;

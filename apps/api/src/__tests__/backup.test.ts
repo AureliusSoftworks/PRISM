@@ -133,9 +133,9 @@ describe("backup bot avatar face style", () => {
         `INSERT INTO bots (
           id, user_id, name, system_prompt,
           face_eyes_font, face_eye_character, face_mouth_font, face_font_weight,
-          face_eye_scale, face_eye_offset_y,
+          face_eye_scale, face_eye_offset_y, face_blink_bar,
           created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         "bot-1",
         "user-1",
@@ -147,6 +147,7 @@ describe("backup bot avatar face style", () => {
         725,
         1.15,
         -0.08,
+        "❘",
         "2026-01-01T00:00:00.000Z",
         "2026-01-01T00:00:00.000Z"
       );
@@ -178,6 +179,7 @@ describe("backup bot avatar face style", () => {
         faceFontWeight: 725,
         faceEyeScale: 1.15,
         faceEyeOffsetY: -0.08,
+        faceBlinkBar: "❘",
         chatEnabled: true,
         visibility: "private",
         createdAt: "2026-01-01T00:00:00.000Z",
@@ -185,14 +187,14 @@ describe("backup bot avatar face style", () => {
       });
 
       db.prepare(
-        "UPDATE bots SET face_eyes_font = NULL, face_eye_character = NULL, face_mouth_font = NULL, face_font_weight = NULL, face_eye_scale = NULL, face_eye_offset_y = NULL WHERE id = ?"
+        "UPDATE bots SET face_eyes_font = NULL, face_eye_character = NULL, face_mouth_font = NULL, face_font_weight = NULL, face_eye_scale = NULL, face_eye_offset_y = NULL, face_blink_bar = NULL WHERE id = ?"
       ).run("bot-1");
 
       importUserSnapshot(db, "user-1", snapshot, userKey);
 
       const restored = db
         .prepare(
-          "SELECT face_eyes_font, face_eye_character, face_mouth_font, face_font_weight, face_eye_scale, face_eye_offset_y, profile_picture_image_id FROM bots WHERE id = ?"
+          "SELECT face_eyes_font, face_eye_character, face_mouth_font, face_font_weight, face_eye_scale, face_eye_offset_y, face_blink_bar, profile_picture_image_id FROM bots WHERE id = ?"
         )
         .get("bot-1") as {
         face_eyes_font: string | null;
@@ -201,6 +203,7 @@ describe("backup bot avatar face style", () => {
         face_font_weight: number | null;
         face_eye_scale: number | null;
         face_eye_offset_y: number | null;
+        face_blink_bar: string | null;
         profile_picture_image_id: string | null;
       };
       assert.equal(restored.face_eyes_font, "warm");
@@ -209,6 +212,7 @@ describe("backup bot avatar face style", () => {
       assert.equal(restored.face_font_weight, 725);
       assert.equal(restored.face_eye_scale, 1.15);
       assert.equal(restored.face_eye_offset_y, -0.08);
+      assert.equal(restored.face_blink_bar, "❘");
       assert.equal(restored.profile_picture_image_id, null);
     });
   });

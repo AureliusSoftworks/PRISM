@@ -345,6 +345,7 @@ import {
   ageFromIsoBirthday,
   classifyMemoryCategoryFromText,
   defaultBotPurpose,
+  DEFAULT_BOT_FACE_BLINK_BAR,
   DEFAULT_BOT_FACE_EYE_CHARACTER,
   DEFAULT_BOT_FACE_EYE_OFFSET_Y,
   DEFAULT_BOT_FACE_EYE_SCALE,
@@ -377,6 +378,7 @@ import {
   parseComfyUiRemoteWorkflowPath,
   memoryQualifiesLongTerm,
   normalizeCoffeeSessionSettings,
+  normalizeBotFaceBlinkBar,
   normalizeBotFaceEyeCharacter,
   normalizeBotFaceEyeOffsetY,
   normalizeBotFaceEyeScale,
@@ -404,6 +406,7 @@ import {
   coffeeSocialSnapshotIsNearDesaturated,
   derivePrismMoodKey,
   type BotCustomFact,
+  type BotFaceBlinkBar,
   type BotFaceFontId,
   type BotFaceStyle,
   type BotBirthEra,
@@ -2479,11 +2482,10 @@ const BOT_AVATAR_CUSTOMIZER_BODY_PLACEMENT: ZenLiveBotBodyPlacement = {
 };
 const BOT_AVATAR_CUSTOMIZER_AVATAR_SIZE_PX = 330;
 const BOT_AVATAR_CUSTOMIZER_BODY_SIZE_PX = 300;
-const BOT_AVATAR_CUSTOMIZER_FACE_GLYPH_SIZE_REM = 3.8;
 const BOT_AVATAR_SAVE_TIMEOUT_MS = 15000;
 const ZEN_LIVE_BOT_LOCKED_FACE_PLACEMENT: ZenLiveBotFacePlacement = {
   xPct: 50.0,
-  yPct: 46.5,
+  yPct: 43.8,
   scale: 1.68,
 };
 
@@ -6946,36 +6948,69 @@ function coffeeSeatEmojiMoodFromPrism(mood: BotMoodKey): CoffeeSeatEmojiMood {
   }
 }
 
+function coffeeSeatZenMoodHintFromPrism(
+  mood: BotMoodKey
+): NonNullable<ZenLiveBotActionState["moodHint"]> {
+  switch (mood) {
+    case "joyful":
+      return "amused";
+    case "warm":
+      return "warm";
+    case "guarded":
+      return "stern";
+    case "strained":
+      return "confused";
+    case "neutral":
+    default:
+      return "neutral";
+  }
+}
 
-function coffeeSeatVoicePreset(bot: Pick<Bot, "system_prompt"> | null | undefined): BotVoicePreset {
-  return resolveBotVoicePreset(bot);
+type BotFaceStyleSource = {
+  system_prompt?: string | null;
+  systemPrompt?: string | null;
+  face_eyes_font?: unknown;
+  faceEyesFont?: unknown;
+  face_eye_character?: unknown;
+  faceEyeCharacter?: unknown;
+  face_mouth_font?: unknown;
+  faceMouthFont?: unknown;
+  face_font_weight?: unknown;
+  faceFontWeight?: unknown;
+  face_eye_scale?: unknown;
+  faceEyeScale?: unknown;
+  face_eye_offset_y?: unknown;
+  faceEyeOffsetY?: unknown;
+  face_blink_bar?: unknown;
+  faceBlinkBar?: unknown;
+};
+
+function botFaceStyleSourceSystemPrompt(
+  bot: BotFaceStyleSource | null | undefined
+): string | null | undefined {
+  return bot?.system_prompt ?? bot?.systemPrompt;
+}
+
+function coffeeSeatVoicePreset(bot: BotFaceStyleSource | null | undefined): BotVoicePreset {
+  return resolveBotVoicePreset({
+    system_prompt: botFaceStyleSourceSystemPrompt(bot) ?? "",
+  });
 }
 
 function resolveBotFaceStyleForBot(
-  bot:
-    | Pick<
-        Bot,
-        | "system_prompt"
-        | "face_eyes_font"
-        | "face_eye_character"
-        | "face_mouth_font"
-        | "face_font_weight"
-        | "face_eye_scale"
-        | "face_eye_offset_y"
-      >
-    | null
-    | undefined
+  bot: BotFaceStyleSource | null | undefined
 ): BotFaceStyle {
   return resolveBotFaceStyle(
     {
-      faceEyesFont: bot?.face_eyes_font,
-      faceEyeCharacter: bot?.face_eye_character,
-      faceMouthFont: bot?.face_mouth_font,
-      faceFontWeight: bot?.face_font_weight,
-      faceEyeScale: bot?.face_eye_scale,
-      faceEyeOffsetY: bot?.face_eye_offset_y,
+      faceEyesFont: bot?.face_eyes_font ?? bot?.faceEyesFont,
+      faceEyeCharacter: bot?.face_eye_character ?? bot?.faceEyeCharacter,
+      faceMouthFont: bot?.face_mouth_font ?? bot?.faceMouthFont,
+      faceFontWeight: bot?.face_font_weight ?? bot?.faceFontWeight,
+      faceEyeScale: bot?.face_eye_scale ?? bot?.faceEyeScale,
+      faceEyeOffsetY: bot?.face_eye_offset_y ?? bot?.faceEyeOffsetY,
+      faceBlinkBar: bot?.face_blink_bar ?? bot?.faceBlinkBar,
     },
-    resolveBotVoicePreset(bot)
+    coffeeSeatVoicePreset(bot)
   );
 }
 
@@ -7075,6 +7110,14 @@ function resolveAssistantAskQuestion(msg: Message): NonNullable<Message["askQues
   return undefined;
 }
 
+function assistantMessageEndsWithVisibleQuestion(msg: Message | undefined | null): boolean {
+  if (!msg || msg.role !== "assistant") return false;
+  if (resolveAssistantAskQuestion(msg)) return true;
+  const displayContent = resolveMessageDisplayContent(msg)
+    .replace(/\s+/g, " ")
+    .trim();
+  return /[?？][\s"'’”)\].!*_`~]*$/u.test(displayContent);
+}
 
 const ASKQUESTION_INTENT_PATTERN =
   /\b(ask\s+me\s+(?:a|another)\s+question|quiz(?:\s+me)?|multiple[-\s]?choice|askquestion|use\s+askquestion)\b/i;
@@ -8719,6 +8762,7 @@ interface UserSettings {
   prismDefaultBotFaceFontWeight: number;
   prismDefaultBotFaceEyeScale: number;
   prismDefaultBotFaceEyeOffsetY: number;
+  prismDefaultBotFaceBlinkBar: BotFaceBlinkBar;
   prismDefaultBotTemperature: number;
   prismDefaultBotMaxTokens: number;
   prismDefaultBotTopP: number;
@@ -9218,6 +9262,7 @@ interface Bot {
   face_font_weight?: number | null;
   face_eye_scale?: number | null;
   face_eye_offset_y?: number | null;
+  face_blink_bar?: string | null;
   profile_picture_image_id?: string | null;
   chat_enabled: number;
 }
@@ -9246,6 +9291,7 @@ type BotEditOriginalSnapshot = {
   faceFontWeight: number;
   faceEyeScale: number;
   faceEyeOffsetY: number;
+  faceBlinkBar: BotFaceBlinkBar;
   profilePictureImageId: string | null;
 };
 
@@ -9279,6 +9325,10 @@ function normalizeBotAvatarAutosavePatch(
   if (patch.faceEyeOffsetY !== undefined) {
     next.faceEyeOffsetY =
       normalizeBotFaceEyeOffsetY(patch.faceEyeOffsetY) ?? DEFAULT_BOT_FACE_STYLE.eyeOffsetY;
+  }
+  if (patch.faceBlinkBar !== undefined) {
+    next.faceBlinkBar =
+      normalizeBotFaceBlinkBar(patch.faceBlinkBar) ?? DEFAULT_BOT_FACE_STYLE.blinkBar;
   }
   return next;
 }
@@ -9329,6 +9379,10 @@ function applyBotAvatarAutosavePatchToSnapshot(
       patch.faceEyeOffsetY !== undefined
         ? normalizeBotFaceEyeOffsetY(patch.faceEyeOffsetY) ?? DEFAULT_BOT_FACE_STYLE.eyeOffsetY
         : snapshot.faceEyeOffsetY,
+    faceBlinkBar:
+      patch.faceBlinkBar !== undefined
+        ? normalizeBotFaceBlinkBar(patch.faceBlinkBar) ?? DEFAULT_BOT_FACE_STYLE.blinkBar
+        : snapshot.faceBlinkBar,
   };
 }
 
@@ -11222,6 +11276,7 @@ function createBotFormHasEnteredData(options: {
   faceFontWeight?: number;
   faceEyeScale?: number;
   faceEyeOffsetY?: number;
+  faceBlinkBar?: BotFaceBlinkBar;
 }): boolean {
   if (options.name.trim().length > 0) return true;
   if (options.advancedMode) return true;
@@ -11243,6 +11298,7 @@ function createBotFormHasEnteredData(options: {
   if ((options.faceFontWeight ?? DEFAULT_BOT_FACE_FONT_WEIGHT) !== DEFAULT_BOT_FACE_FONT_WEIGHT) return true;
   if ((options.faceEyeScale ?? DEFAULT_BOT_FACE_EYE_SCALE) !== DEFAULT_BOT_FACE_EYE_SCALE) return true;
   if ((options.faceEyeOffsetY ?? DEFAULT_BOT_FACE_EYE_OFFSET_Y) !== DEFAULT_BOT_FACE_EYE_OFFSET_Y) return true;
+  if ((options.faceBlinkBar ?? DEFAULT_BOT_FACE_BLINK_BAR) !== DEFAULT_BOT_FACE_BLINK_BAR) return true;
   return false;
 }
 
@@ -14027,6 +14083,7 @@ function MessageMoodFace(props: {
         faceFontWeight={props.faceStyle?.weight}
         faceEyeScale={props.faceStyle?.eyeScale}
         faceEyeOffsetY={props.faceStyle?.eyeOffsetY}
+        faceBlinkBar={props.faceStyle?.blinkBar}
         className={styles.messageMoodCoffeeFace}
       />
       {showRasterFrame ? <BotFaceFrame /> : null}
@@ -23760,6 +23817,10 @@ interface ZenLiveBotMannequinProps {
   blinkWhileTalking?: boolean;
   mouthShape: ZenLiveBotMouthShape;
   moodHint: NonNullable<ZenLiveBotActionState["moodHint"]>;
+  plateFace?: {
+    text: string;
+    rotateDeg: number;
+  };
   scheduleKey: string;
   thinkingScheduleKey?: string;
   showThinkingSpinner?: boolean;
@@ -23774,15 +23835,17 @@ function ZenLiveBotMannequin({
   blinkWhileTalking = false,
   mouthShape,
   moodHint,
+  plateFace,
   scheduleKey,
   thinkingScheduleKey,
   showThinkingSpinner = false,
   showQuestionMark = false,
 }: ZenLiveBotMannequinProps): React.JSX.Element {
-  const plateFace =
+  const displayPlateFace = plateFace ?? (
     isTalking && mouthShape === "closed"
       ? { text: ":|", rotateDeg: 90 }
-      : zenLiveActionPlateFace(moodHint, mouthShape);
+      : zenLiveActionPlateFace(moodHint, mouthShape)
+  );
 
   return (
     <span
@@ -23802,6 +23865,16 @@ function ZenLiveBotMannequin({
         <BotFaceFrame />
       </span>
       <span className={styles.zenLiveBotPresenceFaceEmissionMask} aria-hidden="true">
+        <span
+          className={styles.botFaceCrtNoiseLayer}
+          data-crt-material-layer="noise"
+          aria-hidden="true"
+        />
+        <span
+          className={styles.botFaceCrtBreathingLayer}
+          data-crt-material-layer="breathing"
+          aria-hidden="true"
+        />
         {showThinkingSpinner ? (
           <span
             className={styles.zenLiveBotPresenceThinkingGlyphAnchor}
@@ -23811,8 +23884,8 @@ function ZenLiveBotMannequin({
               isTalking={false}
               scheduleKey={thinkingScheduleKey ?? `${scheduleKey}-thinking`}
               showThinkingSpinner
-              baseText={plateFace.text}
-              rotateDeg={plateFace.rotateDeg}
+              baseText={displayPlateFace.text}
+              rotateDeg={displayPlateFace.rotateDeg}
               voicePreset={voicePreset}
               faceEyesFont={faceStyle.eyesFont}
               faceEyeCharacter={faceStyle.eyeCharacter}
@@ -23820,6 +23893,7 @@ function ZenLiveBotMannequin({
               faceFontWeight={faceStyle.weight}
               faceEyeScale={faceStyle.eyeScale}
               faceEyeOffsetY={faceStyle.eyeOffsetY}
+              faceBlinkBar={faceStyle.blinkBar}
               className={`${styles.coffeeSeatPlateEmoji} ${styles.zenLiveBotPresenceThinkingGlyph}`}
             />
           </span>
@@ -23833,8 +23907,8 @@ function ZenLiveBotMannequin({
               isTalking={isTalking}
               scheduleKey={scheduleKey}
               showQuestionMark={showQuestionMark}
-              baseText={plateFace.text}
-              rotateDeg={plateFace.rotateDeg}
+              baseText={displayPlateFace.text}
+              rotateDeg={displayPlateFace.rotateDeg}
               voicePreset={voicePreset}
               blinkWhileTalking={blinkWhileTalking}
               faceEyesFont={faceStyle.eyesFont}
@@ -23843,6 +23917,7 @@ function ZenLiveBotMannequin({
               faceFontWeight={faceStyle.weight}
               faceEyeScale={faceStyle.eyeScale}
               faceEyeOffsetY={faceStyle.eyeOffsetY}
+              faceBlinkBar={faceStyle.blinkBar}
               className={`${styles.coffeeSeatPlateEmoji} ${styles.zenLiveBotPresenceFaceGlyph}`}
             />
           </span>
@@ -28975,6 +29050,7 @@ interface BotAvatarCustomizerModalProps {
   faceFontWeight: number;
   faceEyeScale: number;
   faceEyeOffsetY: number;
+  faceBlinkBar: BotFaceBlinkBar;
   hasUnsavedChanges: boolean;
   saving: boolean;
   saveError: string | null;
@@ -28992,6 +29068,7 @@ interface BotAvatarCustomizerModalProps {
   onWeightChange: (weight: number) => void;
   onEyeScaleChange: (scale: number) => void;
   onEyeOffsetYChange: (offsetY: number) => void;
+  onBlinkBarChange: (blinkBar: BotFaceBlinkBar) => void;
 }
 
 function optionalScaleLabel(
@@ -29113,6 +29190,14 @@ function botAvatarEyeOffsetYLabel(offsetY: number): string {
   return `${Math.round(Math.abs(offsetY) * 100)}% ${offsetY < 0 ? "up" : "down"}`;
 }
 
+function botAvatarBlinkBarLabel(blinkBar: BotFaceBlinkBar): string {
+  return blinkBar === "none" ? "No blink" : blinkBar;
+}
+
+function botAvatarBlinkBarInputValue(blinkBar: BotFaceBlinkBar): string {
+  return blinkBar === DEFAULT_BOT_FACE_BLINK_BAR ? "" : blinkBar;
+}
+
 function botAvatarPreviewIdentityStyle(rawHex: string, prismPersona = false): CSSProperties {
   if (prismPersona) return {};
   const accentStyle = botAccentStyle(rawHex, "dark") ?? {};
@@ -29160,6 +29245,12 @@ const BOT_AVATAR_SCREEN_MASK_BLEND_MODES = [
   label: string;
 }[];
 
+function botAvatarScreenMaskBlendModeForTheme(
+  theme: "light" | "dark"
+): BotAvatarScreenMaskBlendMode {
+  return theme === "light" ? "overlay" : "luminosity";
+}
+
 function BotAvatarCustomizerModal({
   open,
   botName,
@@ -29176,6 +29267,7 @@ function BotAvatarCustomizerModal({
   faceFontWeight,
   faceEyeScale,
   faceEyeOffsetY,
+  faceBlinkBar,
   hasUnsavedChanges,
   saving,
   saveError,
@@ -29193,12 +29285,15 @@ function BotAvatarCustomizerModal({
   onWeightChange,
   onEyeScaleChange,
   onEyeOffsetYChange,
+  onBlinkBarChange,
 }: BotAvatarCustomizerModalProps): React.JSX.Element | null {
   const [mouthPhase, setMouthPhase] = useState(0);
   const [previewHovered, setPreviewHovered] = useState(false);
   const [previewTheme, setPreviewTheme] = useState<"light" | "dark">(resolvedTheme);
   const [screenMaskBlendMode, setScreenMaskBlendMode] =
-    useState<BotAvatarScreenMaskBlendMode>("screen");
+    useState<BotAvatarScreenMaskBlendMode>(() =>
+      botAvatarScreenMaskBlendModeForTheme(resolvedTheme)
+    );
   const previewTalking = previewHovered;
   const previewMouthShape =
     BOT_AVATAR_PREVIEW_MOUTH_SHAPES[
@@ -29219,7 +29314,6 @@ function BotAvatarCustomizerModal({
     "--zen-live-bot-body-y": `${bodyPlacement.yPct}%`,
     "--zen-live-bot-avatar-size": `${BOT_AVATAR_CUSTOMIZER_AVATAR_SIZE_PX}px`,
     "--zen-live-bot-avatar-body-size": `${bodySize}px`,
-    "--zen-live-bot-avatar-face-glyph-size": `${BOT_AVATAR_CUSTOMIZER_FACE_GLYPH_SIZE_REM}rem`,
     "--zen-live-bot-glyph-x-anchor": "0px",
     "--zen-live-bot-glyph-y-anchor": `${Math.round(bodySize * 0.37)}px`,
     "--bot-face-crt-screen-texture-blend-mode": screenMaskBlendMode,
@@ -29229,7 +29323,7 @@ function BotAvatarCustomizerModal({
     if (!open) return;
     setPreviewTheme(resolvedTheme);
     setPreviewHovered(false);
-    setScreenMaskBlendMode("screen");
+    setScreenMaskBlendMode(botAvatarScreenMaskBlendModeForTheme(resolvedTheme));
     setMouthPhase(0);
   }, [open, resolvedTheme]);
 
@@ -29260,6 +29354,7 @@ function BotAvatarCustomizerModal({
   const previewWeightSummary = `${botAvatarWeightLabel(faceFontWeight)} · ${faceFontWeight}`;
   const previewEyeTransformSummary =
     `${botAvatarEyeScaleLabel(faceEyeScale)} · ${botAvatarEyeOffsetYLabel(faceEyeOffsetY)}`;
+  const previewBlinkSummary = `Blink ${botAvatarBlinkBarLabel(faceBlinkBar)}`;
 
   const modal = (
     <div
@@ -29345,7 +29440,10 @@ function BotAvatarCustomizerModal({
                     type="button"
                     data-active={previewTheme === "dark" ? "true" : undefined}
                     aria-pressed={previewTheme === "dark"}
-                    onClick={() => setPreviewTheme("dark")}
+                    onClick={() => {
+                      setPreviewTheme("dark");
+                      setScreenMaskBlendMode(botAvatarScreenMaskBlendModeForTheme("dark"));
+                    }}
                   >
                     <Moon size={13} strokeWidth={2.2} aria-hidden="true" />
                     Dark
@@ -29354,7 +29452,10 @@ function BotAvatarCustomizerModal({
                     type="button"
                     data-active={previewTheme === "light" ? "true" : undefined}
                     aria-pressed={previewTheme === "light"}
-                    onClick={() => setPreviewTheme("light")}
+                    onClick={() => {
+                      setPreviewTheme("light");
+                      setScreenMaskBlendMode(botAvatarScreenMaskBlendModeForTheme("light"));
+                    }}
                   >
                     <Sun size={13} strokeWidth={2.2} aria-hidden="true" />
                     Light
@@ -29403,6 +29504,7 @@ function BotAvatarCustomizerModal({
                     weight: faceFontWeight,
                     eyeScale: faceEyeScale,
                     eyeOffsetY: faceEyeOffsetY,
+                    blinkBar: faceBlinkBar,
                   }}
                   voicePreset="warm"
                   isTalking={previewTalking}
@@ -29417,6 +29519,7 @@ function BotAvatarCustomizerModal({
               <span>{previewFaceSummary}</span>
               <span>{previewWeightSummary}</span>
               <span>{previewEyeTransformSummary}</span>
+              <span>{previewBlinkSummary}</span>
             </div>
           </section>
           <section className={styles.botAvatarControlPanel} aria-label="Avatar controls">
@@ -29472,27 +29575,51 @@ function BotAvatarCustomizerModal({
                       ))}
                     </div>
                   </fieldset>
-                  <label className={styles.botAvatarEyeCharacterControl}>
-                    <span>
-                      Eye character
-                      <strong>{faceEyeCharacter ?? ":"}</strong>
-                    </span>
-                    <input
-                      type="text"
-                      value={faceEyeCharacter ?? ""}
-                      placeholder=":"
-                      inputMode="text"
-                      autoCapitalize="off"
-                      autoCorrect="off"
-                      spellCheck={false}
-                      aria-label="Custom eye character"
-                      onChange={(event) =>
-                        onEyeCharacterChange(
-                          normalizeBotFaceEyeCharacter(event.currentTarget.value)
-                        )
-                      }
-                    />
-                  </label>
+                  <div className={styles.botAvatarEyeGlyphControls}>
+                    <label className={styles.botAvatarEyeCharacterControl}>
+                      <span>
+                        Eye character
+                        <strong>{faceEyeCharacter ?? ":"}</strong>
+                      </span>
+                      <input
+                        type="text"
+                        value={faceEyeCharacter ?? ""}
+                        placeholder=":"
+                        inputMode="text"
+                        autoCapitalize="off"
+                        autoCorrect="off"
+                        spellCheck={false}
+                        aria-label="Custom eye character"
+                        onChange={(event) =>
+                          onEyeCharacterChange(
+                            normalizeBotFaceEyeCharacter(event.currentTarget.value)
+                          )
+                        }
+                      />
+                    </label>
+                    <label className={styles.botAvatarEyeCharacterControl}>
+                      <span>
+                        Blink bar
+                        <strong>{botAvatarBlinkBarLabel(faceBlinkBar)}</strong>
+                      </span>
+                      <input
+                        type="text"
+                        value={botAvatarBlinkBarInputValue(faceBlinkBar)}
+                        placeholder={DEFAULT_BOT_FACE_BLINK_BAR}
+                        inputMode="text"
+                        autoCapitalize="off"
+                        autoCorrect="off"
+                        spellCheck={false}
+                        aria-label="Custom blink bar"
+                        onChange={(event) =>
+                          onBlinkBarChange(
+                            normalizeBotFaceBlinkBar(event.currentTarget.value) ??
+                              DEFAULT_BOT_FACE_BLINK_BAR
+                          )
+                        }
+                      />
+                    </label>
+                  </div>
                   <fieldset className={styles.botAvatarFontControl}>
                     <legend>Mouth style</legend>
                     <div className={styles.botAvatarFontOptions}>
@@ -32429,6 +32556,9 @@ function HomeContent(): React.JSX.Element {
   const [newBotFaceEyeOffsetY, setNewBotFaceEyeOffsetY] = useState<number>(
     DEFAULT_BOT_FACE_STYLE.eyeOffsetY
   );
+  const [newBotFaceBlinkBar, setNewBotFaceBlinkBar] = useState<BotFaceBlinkBar>(
+    DEFAULT_BOT_FACE_STYLE.blinkBar
+  );
   const [newBotProfilePictureImageId, setNewBotProfilePictureImageId] =
     useState<string | null>(null);
   const [newBotLensId, setNewBotLensId] = useState<string>("");
@@ -32527,6 +32657,7 @@ function HomeContent(): React.JSX.Element {
     faceFontWeight: DEFAULT_BOT_FACE_STYLE.weight,
     faceEyeScale: DEFAULT_BOT_FACE_STYLE.eyeScale,
     faceEyeOffsetY: DEFAULT_BOT_FACE_STYLE.eyeOffsetY,
+    faceBlinkBar: DEFAULT_BOT_FACE_STYLE.blinkBar,
   });
   latestCreateBotDraftRef.current = {
     name: newBotName,
@@ -32549,6 +32680,7 @@ function HomeContent(): React.JSX.Element {
     faceFontWeight: newBotFaceFontWeight,
     faceEyeScale: newBotFaceEyeScale,
     faceEyeOffsetY: newBotFaceEyeOffsetY,
+    faceBlinkBar: newBotFaceBlinkBar,
   };
 
   const handleNewBotColorChange = useCallback((next: string) => {
@@ -32590,6 +32722,13 @@ function HomeContent(): React.JSX.Element {
     createBotAppearanceTouchedRef.current = true;
     setNewBotFaceEyeOffsetY(
       normalizeBotFaceEyeOffsetY(next) ?? DEFAULT_BOT_FACE_STYLE.eyeOffsetY
+    );
+  }, []);
+
+  const handleNewBotFaceBlinkBarChange = useCallback((next: BotFaceBlinkBar) => {
+    createBotAppearanceTouchedRef.current = true;
+    setNewBotFaceBlinkBar(
+      normalizeBotFaceBlinkBar(next) ?? DEFAULT_BOT_FACE_STYLE.blinkBar
     );
   }, []);
 
@@ -32661,6 +32800,7 @@ function HomeContent(): React.JSX.Element {
     setNewBotFaceFontWeight(pristine.faceFontWeight);
     setNewBotFaceEyeScale(pristine.faceEyeScale);
     setNewBotFaceEyeOffsetY(pristine.faceEyeOffsetY);
+    setNewBotFaceBlinkBar(pristine.faceBlinkBar);
   }, []);
 
   const closeBotAvatarCustomizer = useCallback((): void => {
@@ -35133,7 +35273,10 @@ function HomeContent(): React.JSX.Element {
       settings?.prismDefaultBotFaceEyeScale ?? DEFAULT_BOT_FACE_STYLE.eyeScale,
     eyeOffsetY:
       settings?.prismDefaultBotFaceEyeOffsetY ?? DEFAULT_BOT_FACE_STYLE.eyeOffsetY,
+    blinkBar:
+      settings?.prismDefaultBotFaceBlinkBar ?? DEFAULT_BOT_FACE_STYLE.blinkBar,
   }), [
+    settings?.prismDefaultBotFaceBlinkBar,
     settings?.prismDefaultBotFaceEyeCharacter,
     settings?.prismDefaultBotFaceEyesFont,
     settings?.prismDefaultBotFaceEyeOffsetY,
@@ -45107,6 +45250,9 @@ function HomeContent(): React.JSX.Element {
       prismDefaultBotFaceEyeOffsetY:
         normalizeBotFaceEyeOffsetY(d.settings.prismDefaultBotFaceEyeOffsetY) ??
         DEFAULT_BOT_FACE_STYLE.eyeOffsetY,
+      prismDefaultBotFaceBlinkBar:
+        normalizeBotFaceBlinkBar(d.settings.prismDefaultBotFaceBlinkBar) ??
+        DEFAULT_BOT_FACE_STYLE.blinkBar,
       prismDefaultBotTemperature: normalizeBotTemperature(
         typeof d.settings.prismDefaultBotTemperature === "number"
           ? d.settings.prismDefaultBotTemperature
@@ -51161,7 +51307,14 @@ function HomeContent(): React.JSX.Element {
     pendingReplyVisible &&
     pendingReplyStartMessageCount === 0 &&
     detail?.hasAssistantReply !== true;
-  const zenLiveAskQuestionMarkerVisible = pendingAskQuestionInteractiveKey !== null;
+  const zenLiveNaturalQuestionMarkerVisible =
+    !chatAssistantRevealInProgress &&
+    latestAssistantMessage !== null &&
+    latestDetailMessageId === latestAssistantMessage.id &&
+    (latestAssistantMessage.botId ?? null) === zenPersonaPresence.visibleBotId &&
+    assistantMessageEndsWithVisibleQuestion(latestAssistantMessage);
+  const zenLiveAskQuestionMarkerVisible =
+    pendingAskQuestionInteractiveKey !== null || zenLiveNaturalQuestionMarkerVisible;
   const zenLivePresenceRailVisible =
     zenDefaultPrismPresenceVisible ||
     Boolean(
@@ -54877,6 +55030,7 @@ function HomeContent(): React.JSX.Element {
         faceFontWeight: faceStyle.weight,
         faceEyeScale: faceStyle.eyeScale,
         faceEyeOffsetY: faceStyle.eyeOffsetY,
+        faceBlinkBar: faceStyle.blinkBar,
         onlineEnabled: bot.online_enabled === 1,
         flirtEnabled: bot.flirt_enabled === 1,
         chatEnabled: bot.chat_enabled === 1,
@@ -55454,6 +55608,9 @@ function HomeContent(): React.JSX.Element {
         faceFontWeight: normalizeBotFaceFontWeight(parsedBot.faceFontWeight),
         faceEyeScale: normalizeBotFaceEyeScale(parsedBot.faceEyeScale),
         faceEyeOffsetY: normalizeBotFaceEyeOffsetY(parsedBot.faceEyeOffsetY),
+        faceBlinkBar:
+          normalizeBotFaceBlinkBar(parsedBot.faceBlinkBar) ??
+          DEFAULT_BOT_FACE_BLINK_BAR,
         exportHash: importedBotHash,
       }),
     });
@@ -55924,6 +56081,13 @@ function HomeContent(): React.JSX.Element {
       normalizeBotFaceEyeOffsetY(parsed.botJson.bot.faceEyeOffsetY) === null
     ) {
       throw new Error(`${prepared.entry.name} marketplace bundle has an invalid eye height.`);
+    }
+    if (
+      parsed.botJson.bot.faceBlinkBar !== undefined &&
+      parsed.botJson.bot.faceBlinkBar !== null &&
+      normalizeBotFaceBlinkBar(parsed.botJson.bot.faceBlinkBar) === null
+    ) {
+      throw new Error(`${prepared.entry.name} marketplace bundle has an invalid blink bar.`);
     }
   }
 
@@ -58995,6 +59159,7 @@ function HomeContent(): React.JSX.Element {
     setNewBotFaceFontWeight(draft.faceStyle.weight);
     setNewBotFaceEyeScale(draft.faceStyle.eyeScale);
     setNewBotFaceEyeOffsetY(draft.faceStyle.eyeOffsetY);
+    setNewBotFaceBlinkBar(draft.faceStyle.blinkBar);
     setNewBotProfilePictureImageId(null);
     setNewBotGeneratedMemorySeeds({
       lensId: draft.lensId,
@@ -59045,6 +59210,7 @@ function HomeContent(): React.JSX.Element {
     setNewBotFaceFontWeight(DEFAULT_BOT_FACE_STYLE.weight);
     setNewBotFaceEyeScale(DEFAULT_BOT_FACE_STYLE.eyeScale);
     setNewBotFaceEyeOffsetY(DEFAULT_BOT_FACE_STYLE.eyeOffsetY);
+    setNewBotFaceBlinkBar(DEFAULT_BOT_FACE_STYLE.blinkBar);
     setNewBotProfilePictureImageId(null);
     setColorWheelOpen(false);
     setBotProfileBuilderOpen(false);
@@ -59145,6 +59311,9 @@ function HomeContent(): React.JSX.Element {
     const seededFaceEyeOffsetY =
       normalizeBotFaceEyeOffsetY(settings.prismDefaultBotFaceEyeOffsetY) ??
       DEFAULT_BOT_FACE_STYLE.eyeOffsetY;
+    const seededFaceBlinkBar =
+      normalizeBotFaceBlinkBar(settings.prismDefaultBotFaceBlinkBar) ??
+      DEFAULT_BOT_FACE_STYLE.blinkBar;
     const seededTemperature = BOT_TEMPERATURE_DEFAULT;
     const seededMaxTokens = BOT_REPLY_LENGTH_DEFAULT_TOKENS;
     const seededTopP = BOT_TOP_P_DEFAULT;
@@ -59175,6 +59344,7 @@ function HomeContent(): React.JSX.Element {
     setNewBotFaceFontWeight(seededFaceFontWeight);
     setNewBotFaceEyeScale(seededFaceEyeScale);
     setNewBotFaceEyeOffsetY(seededFaceEyeOffsetY);
+    setNewBotFaceBlinkBar(seededFaceBlinkBar);
     setNewBotProfilePictureImageId(null);
     setBotProfileBuilderOpen(false);
     setBotAiParametersModalOpen(false);
@@ -59203,6 +59373,7 @@ function HomeContent(): React.JSX.Element {
       faceFontWeight: seededFaceFontWeight,
       faceEyeScale: seededFaceEyeScale,
       faceEyeOffsetY: seededFaceEyeOffsetY,
+      faceBlinkBar: seededFaceBlinkBar,
       profilePictureImageId: null,
     };
     setBotPanelView("defaultCustomize");
@@ -59309,6 +59480,7 @@ function HomeContent(): React.JSX.Element {
           faceFontWeight: newBotFaceFontWeight,
           faceEyeScale: newBotFaceEyeScale,
           faceEyeOffsetY: newBotFaceEyeOffsetY,
+          faceBlinkBar: newBotFaceBlinkBar,
         }),
       });
       createdBotId = created.bot?.id ?? null;
@@ -59489,6 +59661,7 @@ function HomeContent(): React.JSX.Element {
           faceFontWeight: faceStyle.weight,
           faceEyeScale: faceStyle.eyeScale,
           faceEyeOffsetY: faceStyle.eyeOffsetY,
+          faceBlinkBar: faceStyle.blinkBar,
         }),
       });
       await refreshBots();
@@ -59558,6 +59731,7 @@ function HomeContent(): React.JSX.Element {
           faceFontWeight: newBotFaceFontWeight,
           faceEyeScale: newBotFaceEyeScale,
           faceEyeOffsetY: newBotFaceEyeOffsetY,
+          faceBlinkBar: newBotFaceBlinkBar,
         }),
       });
       setNewBotName(copiedName);
@@ -59598,6 +59772,7 @@ function HomeContent(): React.JSX.Element {
         faceFontWeight: newBotFaceFontWeight,
         faceEyeScale: newBotFaceEyeScale,
         faceEyeOffsetY: newBotFaceEyeOffsetY,
+        faceBlinkBar: newBotFaceBlinkBar,
         profilePictureImageId: null,
       };
       if (result.bot?.id) {
@@ -60760,6 +60935,7 @@ function HomeContent(): React.JSX.Element {
     setNewBotFaceFontWeight(seededFaceStyle.weight);
     setNewBotFaceEyeScale(seededFaceStyle.eyeScale);
     setNewBotFaceEyeOffsetY(seededFaceStyle.eyeOffsetY);
+    setNewBotFaceBlinkBar(seededFaceStyle.blinkBar);
 	    setNewBotProfilePictureImageId(seededProfilePictureImageId);
 	    setBotProfileBuilderOpen(false);
 	    setBotAiParametersModalOpen(false);
@@ -60789,6 +60965,7 @@ function HomeContent(): React.JSX.Element {
       faceFontWeight: seededFaceStyle.weight,
       faceEyeScale: seededFaceStyle.eyeScale,
       faceEyeOffsetY: seededFaceStyle.eyeOffsetY,
+      faceBlinkBar: seededFaceStyle.blinkBar,
       profilePictureImageId: seededProfilePictureImageId,
     };
     setPanelError(null);
@@ -62385,6 +62562,7 @@ function HomeContent(): React.JSX.Element {
         || newBotFaceFontWeight !== editPristine.faceFontWeight
         || newBotFaceEyeScale !== editPristine.faceEyeScale
         || newBotFaceEyeOffsetY !== editPristine.faceEyeOffsetY
+        || newBotFaceBlinkBar !== editPristine.faceBlinkBar
       : true;
     if (!hasChanges) return true;
 
@@ -62402,6 +62580,7 @@ function HomeContent(): React.JSX.Element {
             faceFontWeight: newBotFaceFontWeight,
             faceEyeScale: newBotFaceEyeScale,
             faceEyeOffsetY: newBotFaceEyeOffsetY,
+            faceBlinkBar: newBotFaceBlinkBar,
           }),
           signal,
         })
@@ -62438,6 +62617,7 @@ function HomeContent(): React.JSX.Element {
         faceFontWeight: newBotFaceFontWeight,
         faceEyeScale: newBotFaceEyeScale,
         faceEyeOffsetY: newBotFaceEyeOffsetY,
+        faceBlinkBar: newBotFaceBlinkBar,
         profilePictureImageId: null,
       };
       setSettings((previous) =>
@@ -62454,6 +62634,7 @@ function HomeContent(): React.JSX.Element {
               prismDefaultBotFaceFontWeight: newBotFaceFontWeight,
               prismDefaultBotFaceEyeScale: newBotFaceEyeScale,
               prismDefaultBotFaceEyeOffsetY: newBotFaceEyeOffsetY,
+              prismDefaultBotFaceBlinkBar: newBotFaceBlinkBar,
               prismDefaultBotTemperature: BOT_TEMPERATURE_DEFAULT,
               prismDefaultBotMaxTokens: BOT_REPLY_LENGTH_DEFAULT_TOKENS,
               prismDefaultBotTopP: BOT_TOP_P_DEFAULT,
@@ -62604,6 +62785,7 @@ function HomeContent(): React.JSX.Element {
         faceFontWeight: newBotFaceFontWeight,
         faceEyeScale: newBotFaceEyeScale,
         faceEyeOffsetY: newBotFaceEyeOffsetY,
+        faceBlinkBar: newBotFaceBlinkBar,
         profilePictureImageId: newBotProfilePictureImageId,
       },
       editOriginalRef.current
@@ -62657,6 +62839,7 @@ function HomeContent(): React.JSX.Element {
         faceFontWeight: newBotFaceFontWeight,
         faceEyeScale: newBotFaceEyeScale,
         faceEyeOffsetY: newBotFaceEyeOffsetY,
+        faceBlinkBar: newBotFaceBlinkBar,
         profilePictureImageId: newBotProfilePictureImageId,
       };
       setEditingBotId(id);
@@ -74317,6 +74500,7 @@ function HomeContent(): React.JSX.Element {
             || newBotFaceFontWeight !== editPristine.faceFontWeight
             || newBotFaceEyeScale !== editPristine.faceEyeScale
             || newBotFaceEyeOffsetY !== editPristine.faceEyeOffsetY
+            || newBotFaceBlinkBar !== editPristine.faceBlinkBar
           : false;
         const hasEditChanges = editPristine
           ? editingDefaultBot
@@ -74343,6 +74527,7 @@ function HomeContent(): React.JSX.Element {
               || newBotFaceFontWeight !== editPristine.faceFontWeight
               || newBotFaceEyeScale !== editPristine.faceEyeScale
               || newBotFaceEyeOffsetY !== editPristine.faceEyeOffsetY
+              || newBotFaceBlinkBar !== editPristine.faceBlinkBar
               || newBotProfilePictureImageId !== editPristine.profilePictureImageId
           : false;
         const avatarCustomizerSaving =
@@ -75520,6 +75705,7 @@ function HomeContent(): React.JSX.Element {
                   faceFontWeight={newBotFaceFontWeight}
                   faceEyeScale={newBotFaceEyeScale}
                   faceEyeOffsetY={newBotFaceEyeOffsetY}
+                  faceBlinkBar={newBotFaceBlinkBar}
                   hasUnsavedChanges={Boolean((editingBotId || editingDefaultBot) && hasEditChanges)}
                   saving={avatarCustomizerSaving}
                   saveError={panelError}
@@ -75585,6 +75771,12 @@ function HomeContent(): React.JSX.Element {
                       normalizeBotFaceEyeOffsetY(next) ?? DEFAULT_BOT_FACE_STYLE.eyeOffsetY;
                     handleNewBotFaceEyeOffsetYChange(normalizedOffsetY);
                     queueBotAvatarAutosave(editingBotId, { faceEyeOffsetY: normalizedOffsetY });
+                  }}
+                  onBlinkBarChange={(next) => {
+                    const normalizedBlinkBar =
+                      normalizeBotFaceBlinkBar(next) ?? DEFAULT_BOT_FACE_STYLE.blinkBar;
+                    handleNewBotFaceBlinkBarChange(normalizedBlinkBar);
+                    queueBotAvatarAutosave(editingBotId, { faceBlinkBar: normalizedBlinkBar });
                   }}
                 />
               </section>
@@ -82740,6 +82932,9 @@ function HomeContent(): React.JSX.Element {
               : "closed";
             const seatVoicePreset = coffeeSeatVoicePreset(bot);
             const seatFaceStyle = resolveBotFaceStyleForBot(bot);
+            const seatGlyphName: BotGlyphName = isBotGlyphName(bot.glyph)
+              ? bot.glyph
+              : DEFAULT_BOT_GLYPH;
             const seatEmojiTier = coffeeSeatEmojiMoodFromPrism(prismSeatMood);
             const seatTypingActionState = typingSeatActionByBotId.get(bot.id) ?? null;
             const seatSipActionInProgress =
@@ -83072,7 +83267,7 @@ function HomeContent(): React.JSX.Element {
 	                    <div className={styles.coffeeSeatPlate} style={coffeeHeadPlateStyle}>
 		                      <BotFaceScreenFill />
 	                      <span className={styles.coffeeSeatPlateGlyph} aria-hidden="true">
-	                        <BotGlyph name={bot.glyph} size={32} strokeWidth={1.62} />
+	                        <BotGlyph name={seatGlyphName} size={32} strokeWidth={1.62} />
 	                      </span>
 	                    </div>
 	                  ) : (
@@ -83080,27 +83275,19 @@ function HomeContent(): React.JSX.Element {
 		                      className={styles.coffeeSeatPlate}
 		                      data-live-body-style="zen"
 		                      style={coffeeHeadPlateStyle}
-		                    >
-	                      <span className={styles.coffeeSeatFaceEmissionMask} aria-hidden="true">
-	                        <CoffeeSeatPlateEmoji
-	                          key={`${coffeeSessionJoinedDock || coffeeReplayActive ? "j" : "p"}-${bot.id}`}
-	                          enabled={coffeeSessionJoinedDock || coffeeReplayActive}
-	                          isTalking={isTableTypingThisSeat}
-	                          scheduleKey={bot.id}
-	                          showThinkingSpinner={seatIsThinkingThisSeat}
-	                          baseText={seatPlateGlyph.text}
-	                          rotateDeg={seatPlateGlyph.rotateDeg}
-	                          voicePreset={seatVoicePreset}
-	                          faceEyesFont={seatFaceStyle.eyesFont}
-	                          faceEyeCharacter={seatFaceStyle.eyeCharacter}
-	                          faceMouthFont={seatFaceStyle.mouthFont}
-	                          faceFontWeight={seatFaceStyle.weight}
-                          faceEyeScale={seatFaceStyle.eyeScale}
-                          faceEyeOffsetY={seatFaceStyle.eyeOffsetY}
-	                          className={styles.coffeeSeatPlateEmoji}
-	                        />
-	                      </span>
-	                      <BotFaceFrame />
+	                    >
+	                      <ZenLiveBotMannequin
+	                        glyph={seatGlyphName}
+	                        faceStyle={seatFaceStyle}
+	                        voicePreset={seatVoicePreset}
+	                        isTalking={isTableTypingThisSeat}
+	                        mouthShape={mouthShapeWhileTyping}
+	                        moodHint={coffeeSeatZenMoodHintFromPrism(prismSeatMood)}
+	                        plateFace={seatPlateGlyph}
+	                        scheduleKey={`coffee-live-${bot.id}`}
+	                        thinkingScheduleKey={`coffee-thinking-${bot.id}`}
+	                        showThinkingSpinner={seatIsThinkingThisSeat}
+	                      />
                       {seatTeamId && seatTeamLabel ? (
                         <span
                           className={styles.coffeeSeatTeamBadge}
@@ -83173,7 +83360,7 @@ function HomeContent(): React.JSX.Element {
                   <div className={styles.coffeeSeatGlowPill}>
                     {rosterPreviewSeat ? null : (
                       <span className={styles.coffeeSeatGlowGlyph} aria-hidden="true">
-                        <BotGlyph name={bot.glyph} size={26} strokeWidth={1.52} />
+                        <BotGlyph name={seatGlyphName} size={30} strokeWidth={1.58} />
                       </span>
                     )}
                     <div className={styles.coffeeSeatGlowText}>

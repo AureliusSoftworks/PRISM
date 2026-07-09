@@ -32,6 +32,9 @@ export const DEFAULT_BOT_FACE_EYE_OFFSET_Y = 0;
 export const BOT_FACE_EYE_OFFSET_Y_MIN = -0.18;
 export const BOT_FACE_EYE_OFFSET_Y_MAX = 0.18;
 export const BOT_FACE_EYE_OFFSET_Y_STEP = 0.02;
+export const BOT_FACE_BLINK_BAR_VALUES = ["none", "¦", "❘", "|"] as const;
+export type BotFaceBlinkBar = string;
+export const DEFAULT_BOT_FACE_BLINK_BAR: BotFaceBlinkBar = "|";
 
 export interface BotFaceStyle {
   eyesFont: BotFaceFontId;
@@ -40,6 +43,7 @@ export interface BotFaceStyle {
   weight: number;
   eyeScale: number;
   eyeOffsetY: number;
+  blinkBar: BotFaceBlinkBar;
 }
 
 export interface BotFaceStyleInput {
@@ -49,6 +53,7 @@ export interface BotFaceStyleInput {
   faceFontWeight?: unknown;
   faceEyeScale?: unknown;
   faceEyeOffsetY?: unknown;
+  faceBlinkBar?: unknown;
 }
 
 export function isBotFaceFontId(value: unknown): value is BotFaceFontId {
@@ -110,6 +115,14 @@ export function normalizeBotFaceEyeOffsetY(value: unknown): number | null {
   );
 }
 
+export function normalizeBotFaceBlinkBar(value: unknown): BotFaceBlinkBar | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (trimmed === "none") return trimmed;
+  const [character] = Array.from(trimmed);
+  return character ?? null;
+}
+
 export function botFaceFontFromVoicePreset(
   preset: BotVoicePreset | null | undefined
 ): BotFaceFontId {
@@ -136,6 +149,9 @@ export function resolveBotFaceStyle(
     eyeOffsetY:
       normalizeBotFaceEyeOffsetY(input.faceEyeOffsetY) ??
       DEFAULT_BOT_FACE_EYE_OFFSET_Y,
+    blinkBar:
+      normalizeBotFaceBlinkBar(input.faceBlinkBar) ??
+      DEFAULT_BOT_FACE_BLINK_BAR,
   };
 }
 
@@ -157,5 +173,6 @@ export function randomBotFaceStyle(random = Math.random): BotFaceStyle {
     weight,
     eyeScale: DEFAULT_BOT_FACE_EYE_SCALE,
     eyeOffsetY: DEFAULT_BOT_FACE_EYE_OFFSET_Y,
+    blinkBar: DEFAULT_BOT_FACE_BLINK_BAR,
   };
 }

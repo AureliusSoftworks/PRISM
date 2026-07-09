@@ -26,6 +26,7 @@ function baseBotJson(overrides: Partial<PrismBotArchiveJson> = {}): PrismBotArch
       faceFontWeight: 675,
       faceEyeScale: 1.15,
       faceEyeOffsetY: -0.08,
+      faceBlinkBar: "¦",
     },
     systemPrompt: "Ask good questions.",
     ...overrides,
@@ -46,6 +47,7 @@ describe("botArchive", () => {
     assert.equal(parsed.botJson.bot.faceEyeCharacter, "8");
     assert.equal(parsed.botJson.bot.faceEyeScale, 1.15);
     assert.equal(parsed.botJson.bot.faceEyeOffsetY, -0.08);
+    assert.equal(parsed.botJson.bot.faceBlinkBar, "¦");
     assert.deepEqual(parsed.memories, ["Loves dialogue.", "Founded the Academy."]);
   });
 
