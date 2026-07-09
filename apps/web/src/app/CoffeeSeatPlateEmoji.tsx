@@ -3,6 +3,8 @@
 import { useEffect, useState, type CSSProperties, type JSX } from "react";
 import {
   normalizeBotFaceEyeCharacter,
+  normalizeBotFaceEyeOffsetY,
+  normalizeBotFaceEyeScale,
   type BotFaceFontId,
   type BotVoicePreset,
 } from "@localai/shared";
@@ -77,6 +79,8 @@ export type CoffeeSeatPlateEmojiProps = {
   faceEyeCharacter?: string | null;
   faceMouthFont?: BotFaceFontId | null;
   faceFontWeight?: number | null;
+  faceEyeScale?: number | null;
+  faceEyeOffsetY?: number | null;
   className: string;
 };
 
@@ -112,6 +116,8 @@ export function CoffeeSeatPlateEmoji({
   faceEyeCharacter,
   faceMouthFont,
   faceFontWeight,
+  faceEyeScale,
+  faceEyeOffsetY,
   className,
 }: CoffeeSeatPlateEmojiProps): JSX.Element {
   const thinkingSpinnerActive = enabled && showThinkingSpinner && !isTalking;
@@ -224,6 +230,21 @@ export function CoffeeSeatPlateEmoji({
   const normalizedFaceWeight = thinkingSpinnerActive
     ? undefined
     : normalizeFaceFontWeight(faceFontWeight);
+  const normalizedFaceEyeScale = thinkingSpinnerActive || questionGlyphActive
+    ? undefined
+    : normalizeBotFaceEyeScale(faceEyeScale) ?? undefined;
+  const normalizedFaceEyeOffsetY = thinkingSpinnerActive || questionGlyphActive
+    ? undefined
+    : normalizeBotFaceEyeOffsetY(faceEyeOffsetY) ?? undefined;
+  const faceEyeOffsetRadians = (rotateDeg * Math.PI) / 180;
+  const faceEyeOffsetLocalX =
+    normalizedFaceEyeOffsetY === undefined
+      ? undefined
+      : Number((normalizedFaceEyeOffsetY * Math.sin(faceEyeOffsetRadians)).toFixed(3));
+  const faceEyeOffsetLocalY =
+    normalizedFaceEyeOffsetY === undefined
+      ? undefined
+      : Number((normalizedFaceEyeOffsetY * Math.cos(faceEyeOffsetRadians)).toFixed(3));
   const mouthOpen =
     !thinkingSpinnerActive &&
     !questionGlyphActive &&
@@ -248,7 +269,12 @@ export function CoffeeSeatPlateEmoji({
       data-coffee-plate-emoji-blink-phase={displayBlinkPhase}
       data-voice-preset={voicePreset}
       data-face-custom={
-        faceEyesFont || normalizedFaceEyeCharacter || faceMouthFont || faceFontWeight
+        faceEyesFont ||
+        normalizedFaceEyeCharacter ||
+        faceMouthFont ||
+        faceFontWeight ||
+        normalizedFaceEyeScale ||
+        normalizedFaceEyeOffsetY
           ? "true"
           : undefined
       }
@@ -257,6 +283,15 @@ export function CoffeeSeatPlateEmoji({
       style={{
         ["--bot-face-font-weight" as string]: normalizedFaceWeight,
         ["--bot-face-weight-stroke" as string]: faceWeightStrokeForWeight(normalizedFaceWeight),
+        ["--bot-face-eye-scale" as string]: normalizedFaceEyeScale,
+        ["--bot-face-eye-offset-x" as string]:
+          faceEyeOffsetLocalX === undefined
+            ? undefined
+            : `${faceEyeOffsetLocalX}em`,
+        ["--bot-face-eye-offset-y" as string]:
+          faceEyeOffsetLocalY === undefined
+            ? undefined
+            : `${faceEyeOffsetLocalY}em`,
         transform: `translateX(${thinkingSpinnerActive || questionGlyphActive ? "0px" : "var(--coffee-plate-emoji-flip-anchor-x, 0px)"}) translateY(var(--coffee-plate-emoji-nudge-y)) rotate(${thinkingSpinnerActive || questionGlyphActive ? 0 : rotateDeg}deg) scale(var(--coffee-seat-emotion-face-scale, 1)) scaleY(${thinkingSpinnerActive || questionGlyphActive ? 1 : "var(--coffee-plate-emoji-face-scale-y, 1)"})`,
       } as CSSProperties}
       aria-hidden="true"

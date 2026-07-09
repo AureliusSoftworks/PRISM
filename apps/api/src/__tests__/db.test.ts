@@ -134,6 +134,8 @@ describe("createDatabase bot export hash migration", () => {
       assert.ok(columns.some((column) => column.name === "face_eye_character"));
       assert.ok(columns.some((column) => column.name === "face_mouth_font"));
       assert.ok(columns.some((column) => column.name === "face_font_weight"));
+      assert.ok(columns.some((column) => column.name === "face_eye_scale"));
+      assert.ok(columns.some((column) => column.name === "face_eye_offset_y"));
       assert.ok(columns.some((column) => column.name === "profile_picture_image_id"));
       const opinionColumns = reopened
         .prepare("PRAGMA table_info(session_opinions)")
@@ -159,12 +161,12 @@ describe("createDatabase bot export hash migration", () => {
       assert.match(row!.export_hash!, /^[a-f0-9]{32}$/);
       reopened
         .prepare(
-          "UPDATE bots SET face_eyes_font = ?, face_eye_character = ?, face_mouth_font = ?, face_font_weight = ?, profile_picture_image_id = ? WHERE id = ?"
+          "UPDATE bots SET face_eyes_font = ?, face_eye_character = ?, face_mouth_font = ?, face_font_weight = ?, face_eye_scale = ?, face_eye_offset_y = ?, profile_picture_image_id = ? WHERE id = ?"
         )
-        .run("warm", "8", "formal", 725, "img-profile", "bot-1");
+        .run("warm", "8", "formal", 725, 1.15, -0.08, "img-profile", "bot-1");
       const avatarRow = reopened
         .prepare(
-          "SELECT face_eyes_font, face_eye_character, face_mouth_font, face_font_weight, profile_picture_image_id FROM bots WHERE id = ?"
+          "SELECT face_eyes_font, face_eye_character, face_mouth_font, face_font_weight, face_eye_scale, face_eye_offset_y, profile_picture_image_id FROM bots WHERE id = ?"
         )
         .get("bot-1") as
         | {
@@ -172,6 +174,8 @@ describe("createDatabase bot export hash migration", () => {
             face_eye_character: string | null;
             face_mouth_font: string | null;
             face_font_weight: number | null;
+            face_eye_scale: number | null;
+            face_eye_offset_y: number | null;
             profile_picture_image_id: string | null;
           }
         | undefined;
@@ -179,6 +183,8 @@ describe("createDatabase bot export hash migration", () => {
       assert.equal(avatarRow?.face_eye_character, "8");
       assert.equal(avatarRow?.face_mouth_font, "formal");
       assert.equal(avatarRow?.face_font_weight, 725);
+      assert.equal(avatarRow?.face_eye_scale, 1.15);
+      assert.equal(avatarRow?.face_eye_offset_y, -0.08);
       assert.equal(avatarRow?.profile_picture_image_id, "img-profile");
       const settingsRow = reopened
         .prepare(

@@ -24,12 +24,22 @@ export const DEFAULT_BOT_FACE_FONT_WEIGHT = 600;
 export const BOT_FACE_FONT_WEIGHT_MIN = 300;
 export const BOT_FACE_FONT_WEIGHT_MAX = 800;
 export const BOT_FACE_FONT_WEIGHT_STEP = 25;
+export const DEFAULT_BOT_FACE_EYE_SCALE = 1;
+export const BOT_FACE_EYE_SCALE_MIN = 0.7;
+export const BOT_FACE_EYE_SCALE_MAX = 1.3;
+export const BOT_FACE_EYE_SCALE_STEP = 0.05;
+export const DEFAULT_BOT_FACE_EYE_OFFSET_Y = 0;
+export const BOT_FACE_EYE_OFFSET_Y_MIN = -0.18;
+export const BOT_FACE_EYE_OFFSET_Y_MAX = 0.18;
+export const BOT_FACE_EYE_OFFSET_Y_STEP = 0.02;
 
 export interface BotFaceStyle {
   eyesFont: BotFaceFontId;
   eyeCharacter: string | null;
   mouthFont: BotFaceFontId;
   weight: number;
+  eyeScale: number;
+  eyeOffsetY: number;
 }
 
 export interface BotFaceStyleInput {
@@ -37,6 +47,8 @@ export interface BotFaceStyleInput {
   faceEyeCharacter?: unknown;
   faceMouthFont?: unknown;
   faceFontWeight?: unknown;
+  faceEyeScale?: unknown;
+  faceEyeOffsetY?: unknown;
 }
 
 export function isBotFaceFontId(value: unknown): value is BotFaceFontId {
@@ -68,6 +80,36 @@ export function normalizeBotFaceFontWeight(value: unknown): number | null {
   );
 }
 
+function normalizeSteppedBotFaceFloat(
+  value: unknown,
+  min: number,
+  max: number,
+  step: number
+): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  const stepped = Math.round(value / step) * step;
+  const clamped = Math.max(min, Math.min(max, stepped));
+  return Number(clamped.toFixed(3));
+}
+
+export function normalizeBotFaceEyeScale(value: unknown): number | null {
+  return normalizeSteppedBotFaceFloat(
+    value,
+    BOT_FACE_EYE_SCALE_MIN,
+    BOT_FACE_EYE_SCALE_MAX,
+    BOT_FACE_EYE_SCALE_STEP
+  );
+}
+
+export function normalizeBotFaceEyeOffsetY(value: unknown): number | null {
+  return normalizeSteppedBotFaceFloat(
+    value,
+    BOT_FACE_EYE_OFFSET_Y_MIN,
+    BOT_FACE_EYE_OFFSET_Y_MAX,
+    BOT_FACE_EYE_OFFSET_Y_STEP
+  );
+}
+
 export function botFaceFontFromVoicePreset(
   preset: BotVoicePreset | null | undefined
 ): BotFaceFontId {
@@ -88,6 +130,12 @@ export function resolveBotFaceStyle(
     weight:
       normalizeBotFaceFontWeight(input.faceFontWeight) ??
       DEFAULT_BOT_FACE_FONT_WEIGHT,
+    eyeScale:
+      normalizeBotFaceEyeScale(input.faceEyeScale) ??
+      DEFAULT_BOT_FACE_EYE_SCALE,
+    eyeOffsetY:
+      normalizeBotFaceEyeOffsetY(input.faceEyeOffsetY) ??
+      DEFAULT_BOT_FACE_EYE_OFFSET_Y,
   };
 }
 
@@ -107,5 +155,7 @@ export function randomBotFaceStyle(random = Math.random): BotFaceStyle {
     eyeCharacter: DEFAULT_BOT_FACE_EYE_CHARACTER,
     mouthFont: pickFont(),
     weight,
+    eyeScale: DEFAULT_BOT_FACE_EYE_SCALE,
+    eyeOffsetY: DEFAULT_BOT_FACE_EYE_OFFSET_Y,
   };
 }

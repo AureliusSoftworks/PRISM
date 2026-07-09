@@ -101,6 +101,8 @@ export function restoreFactoryDefaultsInDatabase(
           prism_default_bot_face_eye_character = NULL,
           prism_default_bot_face_mouth_font = NULL,
           prism_default_bot_face_font_weight = NULL,
+          prism_default_bot_face_eye_scale = NULL,
+          prism_default_bot_face_eye_offset_y = NULL,
           prism_default_bot_temperature = NULL,
           prism_default_bot_max_tokens = NULL,
           prism_default_bot_top_p = NULL,

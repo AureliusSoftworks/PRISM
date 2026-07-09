@@ -1,4 +1,6 @@
 import {
+  DEFAULT_BOT_FACE_EYE_OFFSET_Y,
+  DEFAULT_BOT_FACE_EYE_SCALE,
   DEFAULT_BOT_PROFILE_FIELDS,
   randomBotProfile,
   type BotFaceStyle,
@@ -378,6 +380,8 @@ function buildPirateDraft(
       eyeCharacter: null,
       mouthFont: "formal",
       weight: 650,
+      eyeScale: DEFAULT_BOT_FACE_EYE_SCALE,
+      eyeOffsetY: DEFAULT_BOT_FACE_EYE_OFFSET_Y,
     },
     temperature: 0.88,
     maxTokens: 2560,

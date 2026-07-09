@@ -29,6 +29,8 @@ const pristine: BotCustomizerSavePristine = {
   faceEyeCharacter: null,
   faceMouthFont: "warm",
   faceFontWeight: 500,
+  faceEyeScale: 1,
+  faceEyeOffsetY: 0,
   profilePictureImageId: null,
 };
 
@@ -60,6 +62,8 @@ const currentFromPristine = (
   faceEyeCharacter: pristine.faceEyeCharacter,
   faceMouthFont: pristine.faceMouthFont,
   faceFontWeight: pristine.faceFontWeight,
+  faceEyeScale: pristine.faceEyeScale,
+  faceEyeOffsetY: pristine.faceEyeOffsetY,
   profilePictureImageId: pristine.profilePictureImageId,
   ...overrides,
 });
@@ -120,6 +124,16 @@ describe("bot customizer save patch", () => {
         { ...pristine, faceEyeCharacter: "B" }
       ),
       { faceEyeCharacter: null }
+    );
+  });
+
+  it("patches eye scale and vertical placement edits", () => {
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(
+        currentFromPristine({ faceEyeScale: 1.15, faceEyeOffsetY: -0.08 }),
+        pristine
+      ),
+      { faceEyeScale: 1.15, faceEyeOffsetY: -0.08 }
     );
   });
 });

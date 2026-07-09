@@ -70,6 +70,19 @@ function ruleForSelectorNeedles(...needles: string[]): string {
   return match[2]!;
 }
 
+function ruleForSelectorNeedlesWithBody(selectorNeedles: string[], bodyNeedle: string): string {
+  const match = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].find(
+    (entry) =>
+      selectorNeedles.every((needle) => (entry[1] ?? "").includes(needle)) &&
+      (entry[2] ?? "").includes(bodyNeedle)
+  );
+  assert.ok(
+    match,
+    `Missing CSS rule containing ${selectorNeedles.join(", ")} and body ${bodyNeedle}`
+  );
+  return match[2]!;
+}
+
 function ruleForExactSelector(selector: string): string {
   const match = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].find((entry) =>
     (entry[1] ?? "")
@@ -412,6 +425,23 @@ describe("Coffee seat arrival CSS", () => {
     assert.match(livePlateRule, /--bot-face-screen-glass-opacity:\s*0\.46\s*;/);
     assert.match(livePlateRule, /--bot-face-screen-glare-opacity:\s*0\.18\s*;/);
     assert.match(livePlateRule, /--bot-face-screen-specular-opacity:\s*0\.54\s*;/);
+    const sharedEyeTransformRule = ruleForSelectorNeedlesWithBody(
+      ['[data-coffee-plate-emoji-part="eyes"]'],
+      "--bot-face-eye-offset-y"
+    );
+    assert.match(sharedEyeTransformRule, /--eye-blink-scale-x:\s*1\s*;/);
+    assert.match(sharedEyeTransformRule, /--eye-blink-scale-y:\s*1\s*;/);
+    assert.match(
+      sharedEyeTransformRule,
+      /calc\(\(var\(--zen-live-bot-eye-local-x,\s*0\) \* 10px\) \+ var\(--bot-face-eye-offset-x,\s*0em\)\)/
+    );
+    assert.match(
+      sharedEyeTransformRule,
+      /calc\(\(var\(--zen-live-bot-eye-local-y,\s*0\) \* 18px\) \+ var\(--bot-face-eye-offset-y,\s*0em\)\)/
+    );
+    assert.match(sharedEyeTransformRule, /scale\(var\(--bot-face-eye-scale,\s*1\)\)/);
+    assert.match(sharedEyeTransformRule, /scaleX\(var\(--eye-blink-scale-x\)\)/);
+    assert.match(sharedEyeTransformRule, /scaleY\(var\(--eye-blink-scale-y\)\)/);
     assert.match(
       pageSource,
       /className=\{styles\.coffeeSeatFaceEmissionMask\}[\s\S]*<CoffeeSeatPlateEmoji[\s\S]*<BotFaceFrame \/>/
