@@ -3,10 +3,12 @@ import assert from "node:assert/strict";
 import {
   BOT_FACE_FONT_WEIGHT_MAX,
   BOT_FACE_FONT_WEIGHT_MIN,
+  DEFAULT_BOT_FACE_BLINK_BAR,
   DEFAULT_BOT_FACE_EYE_OFFSET_Y,
   DEFAULT_BOT_FACE_EYE_SCALE,
   DEFAULT_BOT_FACE_FONT_ID,
   DEFAULT_BOT_FACE_FONT_WEIGHT,
+  normalizeBotFaceBlinkBar,
   normalizeBotFaceEyeCharacter,
   normalizeBotFaceEyeOffsetY,
   normalizeBotFaceEyeScale,
@@ -48,6 +50,7 @@ describe("bot avatar face style", () => {
       weight: DEFAULT_BOT_FACE_FONT_WEIGHT,
       eyeScale: DEFAULT_BOT_FACE_EYE_SCALE,
       eyeOffsetY: DEFAULT_BOT_FACE_EYE_OFFSET_Y,
+      blinkBar: DEFAULT_BOT_FACE_BLINK_BAR,
     });
     assert.deepEqual(resolveBotFaceStyle({}, null), {
       eyesFont: DEFAULT_BOT_FACE_FONT_ID,
@@ -56,10 +59,11 @@ describe("bot avatar face style", () => {
       weight: DEFAULT_BOT_FACE_FONT_WEIGHT,
       eyeScale: DEFAULT_BOT_FACE_EYE_SCALE,
       eyeOffsetY: DEFAULT_BOT_FACE_EYE_OFFSET_Y,
+      blinkBar: DEFAULT_BOT_FACE_BLINK_BAR,
     });
   });
 
-  it("keeps independently saved eyes, custom eye character, eye placement, and mouth fonts", () => {
+  it("keeps independently saved eyes, custom eye character, eye placement, blink, and mouth fonts", () => {
     assert.deepEqual(
       resolveBotFaceStyle(
         {
@@ -69,6 +73,7 @@ describe("bot avatar face style", () => {
           faceFontWeight: 725,
           faceEyeScale: 1.18,
           faceEyeOffsetY: -0.084,
+          faceBlinkBar: "¦",
         },
         "formal"
       ),
@@ -79,6 +84,7 @@ describe("bot avatar face style", () => {
         weight: 725,
         eyeScale: 1.2,
         eyeOffsetY: -0.08,
+        blinkBar: "¦",
       }
     );
   });
@@ -94,6 +100,17 @@ describe("bot avatar face style", () => {
     assert.equal(normalizeBotFaceEyeOffsetY("0"), null);
   });
 
+  it("normalizes blink bars to one visible custom character", () => {
+    assert.equal(normalizeBotFaceBlinkBar("|"), "|");
+    assert.equal(normalizeBotFaceBlinkBar("  ❘  "), "❘");
+    assert.equal(normalizeBotFaceBlinkBar("::"), ":");
+    assert.equal(normalizeBotFaceBlinkBar("none"), "none");
+    assert.equal(normalizeBotFaceBlinkBar(""), null);
+    assert.equal(normalizeBotFaceBlinkBar("   "), null);
+    assert.equal(normalizeBotFaceBlinkBar(null), null);
+    assert.equal(resolveBotFaceStyle({ faceBlinkBar: null }, null).blinkBar, "|");
+  });
+
   it("randomizes face style within allowed bounds", () => {
     const values = [0, 0, 0.99, 0.51];
     const style = randomBotFaceStyle(() => values.shift() ?? 0);
@@ -104,5 +121,6 @@ describe("bot avatar face style", () => {
     assert.equal(style.weight <= BOT_FACE_FONT_WEIGHT_MAX, true);
     assert.equal(style.eyeScale, DEFAULT_BOT_FACE_EYE_SCALE);
     assert.equal(style.eyeOffsetY, DEFAULT_BOT_FACE_EYE_OFFSET_Y);
+    assert.equal(style.blinkBar, DEFAULT_BOT_FACE_BLINK_BAR);
   });
 });

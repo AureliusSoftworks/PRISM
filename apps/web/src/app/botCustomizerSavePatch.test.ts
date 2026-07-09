@@ -31,6 +31,7 @@ const pristine: BotCustomizerSavePristine = {
   faceFontWeight: 500,
   faceEyeScale: 1,
   faceEyeOffsetY: 0,
+  faceBlinkBar: "|",
   profilePictureImageId: null,
 };
 
@@ -64,6 +65,7 @@ const currentFromPristine = (
   faceFontWeight: pristine.faceFontWeight,
   faceEyeScale: pristine.faceEyeScale,
   faceEyeOffsetY: pristine.faceEyeOffsetY,
+  faceBlinkBar: pristine.faceBlinkBar,
   profilePictureImageId: pristine.profilePictureImageId,
   ...overrides,
 });
@@ -134,6 +136,16 @@ describe("bot customizer save patch", () => {
         pristine
       ),
       { faceEyeScale: 1.15, faceEyeOffsetY: -0.08 }
+    );
+  });
+
+  it("patches blink bar edits", () => {
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(
+        currentFromPristine({ faceBlinkBar: "none" }),
+        pristine
+      ),
+      { faceBlinkBar: "none" }
     );
   });
 });

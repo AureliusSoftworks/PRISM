@@ -11,7 +11,7 @@ const cssPath = join(dirname(fileURLToPath(import.meta.url)), "page.module.css")
 const pagePath = join(dirname(fileURLToPath(import.meta.url)), "page.tsx");
 const botFramePublicDir = join(dirname(fileURLToPath(import.meta.url)), "../../public/bot-frame");
 const metalMaskPath = join(botFramePublicDir, "bot-frame-metal-mask.png");
-const screenMaskPath = join(botFramePublicDir, "bot-frame-screen-mask.png");
+const screenGlassMaskPath = join(botFramePublicDir, "bot-frame-screen-mask-glass.png");
 const css = readFileSync(cssPath, "utf8");
 const pageSource = readFileSync(pagePath, "utf8");
 
@@ -37,6 +37,26 @@ function rulesForExactSelector(selector: string): string[] {
     .map((entry) => entry[2] ?? "");
 }
 
+function ruleForSelectorNeedles(...needles: string[]): string {
+  const match = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)]
+    .find((entry) => needles.every((needle) => (entry[1] ?? "").includes(needle)));
+  assert.ok(match, `Missing CSS rule containing ${needles.join(", ")}`);
+  return match[2]!;
+}
+
+function ruleForSelectorNeedlesWithBody(selectorNeedles: string[], bodyNeedle: string): string {
+  const match = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].find(
+    (entry) =>
+      selectorNeedles.every((needle) => (entry[1] ?? "").includes(needle)) &&
+      (entry[2] ?? "").includes(bodyNeedle)
+  );
+  assert.ok(
+    match,
+    `Missing CSS rule containing ${selectorNeedles.join(", ")} and body ${bodyNeedle}`
+  );
+  return match[2]!;
+}
+
 function ruleForNormalizedSelector(selector: string): string {
   const normalize = (value: string): string => value.replace(/\s+/g, " ").trim();
   const expected = normalize(selector);
@@ -58,6 +78,7 @@ describe("Zen live presence CSS", () => {
       "bot-frame-light-base.png",
       "bot-frame-metal-mask.png",
       "bot-frame-metal.png",
+      "bot-frame-screen-mask-glass.png",
       "bot-frame-screen-mask.png",
       "bot-frame-tint-mask.png",
     ]) {
@@ -81,7 +102,7 @@ describe("Zen live presence CSS", () => {
   });
 
   it("keeps the screen glass mask alpha-transparent outside the glass", () => {
-    const mask = PNG.sync.read(readFileSync(screenMaskPath));
+    const mask = PNG.sync.read(readFileSync(screenGlassMaskPath));
     const alphaAt = (x: number, y: number): number => mask.data[(y * mask.width + x) * 4 + 3] ?? 0;
     const centerX = Math.round(mask.width / 2);
     const centerY = Math.round(mask.height / 2);
@@ -103,6 +124,8 @@ describe("Zen live presence CSS", () => {
     assert.match(plateRule, /cursor:\s*default\s*;/);
     assert.match(plateRule, /touch-action:\s*none\s*;/);
     assert.match(plateRule, /user-select:\s*none\s*;/);
+    assert.match(plateRule, /--zen-live-bot-eye-local-x:\s*-0\.2\s*;/);
+    assert.match(plateRule, /--coffee-plate-emoji-nudge-y:\s*clamp\(-5px,\s*-2\.6%,\s*-2px\)\s*;/);
 
     const childRule = ruleForExactSelector(".zenLiveBotPresencePlate *");
     assert.match(childRule, /pointer-events:\s*none\s*;/);
@@ -145,7 +168,7 @@ describe("Zen live presence CSS", () => {
     assert.match(pageSource, /xPct:\s*76\.81,/);
     assert.match(pageSource, /yPct:\s*-38\.51,/);
     assert.match(pageSource, /xPct:\s*50\.0,/);
-    assert.match(pageSource, /yPct:\s*46\.5,/);
+    assert.match(pageSource, /yPct:\s*43\.8,/);
     assert.match(pageSource, /scale:\s*1\.68,/);
     assert.match(
       pageSource,
@@ -179,7 +202,7 @@ describe("Zen live presence CSS", () => {
       pageSource,
       /"--zen-live-bot-face-scale":\s*facePlacement\.scale/
     );
-    assert.match(pageSource, /const ZEN_LIVE_BOT_LOCKED_FACE_PLACEMENT:[\s\S]*yPct:\s*46\.5/);
+    assert.match(pageSource, /const ZEN_LIVE_BOT_LOCKED_FACE_PLACEMENT:[\s\S]*yPct:\s*43\.8/);
     assert.doesNotMatch(pageSource, /readZenLiveBotBodySize/);
     assert.doesNotMatch(pageSource, /readZenLiveBotFacePlacement/);
     assert.doesNotMatch(pageSource, /facePlacementScope/);
@@ -203,54 +226,80 @@ describe("Zen live presence CSS", () => {
     assert.match(emissionMaskRule, /z-index:\s*5\s*;/);
     assert.match(emissionMaskRule, /width:\s*var\(--zen-live-bot-body-frame-size\)/);
     assert.match(emissionMaskRule, /height:\s*var\(--zen-live-bot-body-frame-size\)/);
-    assert.match(emissionMaskRule, /mix-blend-mode:\s*plus-lighter\s*;/);
+    assert.match(emissionMaskRule, /mix-blend-mode:\s*normal\s*;/);
     assert.match(
       emissionMaskRule,
-      /--bot-face-crt-texture-image:\s*url\("\/bot-frame\/bot-frame-screen-mask\.png\?v=1000"\)\s*;/
+      /--bot-face-screen-mask-image:\s*url\("\/bot-frame\/bot-frame-screen-mask-glass\.png\?v=1000"\)\s*;/
     );
-    assert.match(emissionMaskRule, /--bot-face-crt-texture-size:\s*100%\s*100%\s*;/);
-    assert.match(emissionMaskRule, /--bot-face-crt-texture-repeat:\s*repeat\s*;/);
-    assert.match(emissionMaskRule, /--bot-face-crt-phosphor-opacity:\s*0\.18\s*;/);
-    assert.match(emissionMaskRule, /--bot-face-crt-gap-opacity:\s*0\.42\s*;/);
+    assert.match(emissionMaskRule, /--bot-face-screen-mask-size:\s*100%\s*100%\s*;/);
+    assert.match(emissionMaskRule, /--bot-face-screen-mask-repeat:\s*no-repeat\s*;/);
     assert.match(
       emissionMaskRule,
-      /filter:\s*[\s\S]*drop-shadow\(0 0 2px color-mix\(in srgb,\s*var\(--bot-face-crt-color\)\s*30%,\s*transparent\)\)[\s\S]*drop-shadow\(0 0 10px color-mix\(in srgb,\s*var\(--bot-face-crt-color\)\s*12%,\s*transparent\)\)/
+      /--bot-face-crt-screen-texture-image:\s*url\("\/bot-frame\/bot-frame-screen-mask\.png\?v=1000"\)\s*;/
     );
+    assert.match(emissionMaskRule, /--bot-face-crt-screen-texture-opacity:\s*0\.22\s*;/);
     assert.match(
       emissionMaskRule,
-      /-webkit-mask-image:\s*var\(--bot-face-crt-texture-image\)\s*;/
+      /--bot-face-crt-screen-texture-tint-strength:\s*48%\s*;/
     );
+    assert.doesNotMatch(emissionMaskRule, /--bot-face-crt-phosphor-opacity/);
+    assert.match(emissionMaskRule, /--bot-face-crt-gap-opacity:\s*0\.26\s*;/);
+    assert.match(emissionMaskRule, /--bot-face-crt-scanline-opacity:\s*0\.1\s*;/);
+    assert.match(emissionMaskRule, /--crt-noise-opacity:\s*0\.009\s*;/);
+    assert.match(emissionMaskRule, /--crt-breath-speed:\s*11\.8s\s*;/);
+    assert.match(emissionMaskRule, /--crt-breath-strength:\s*0\.0025\s*;/);
+    assert.match(emissionMaskRule, /filter:\s*none\s*;/);
     assert.match(
       emissionMaskRule,
-      /-webkit-mask-size:\s*var\(--bot-face-crt-texture-size\)\s*;/
-    );
-    assert.match(
-      emissionMaskRule,
-      /-webkit-mask-repeat:\s*var\(--bot-face-crt-texture-repeat\)\s*;/
-    );
-    assert.match(
-      emissionMaskRule,
-      /mask-image:\s*var\(--bot-face-crt-texture-image\)\s*;/
+      /-webkit-mask-image:\s*var\(--bot-face-screen-mask-image\)\s*;/
     );
     assert.match(
       emissionMaskRule,
-      /mask-size:\s*var\(--bot-face-crt-texture-size\)\s*;/
+      /-webkit-mask-size:\s*var\(--bot-face-screen-mask-size\)\s*;/
     );
     assert.match(
       emissionMaskRule,
-      /mask-repeat:\s*var\(--bot-face-crt-texture-repeat\)\s*;/
+      /-webkit-mask-repeat:\s*var\(--bot-face-screen-mask-repeat\)\s*;/
+    );
+    assert.match(
+      emissionMaskRule,
+      /mask-image:\s*var\(--bot-face-screen-mask-image\)\s*;/
+    );
+    assert.match(
+      emissionMaskRule,
+      /mask-size:\s*var\(--bot-face-screen-mask-size\)\s*;/
+    );
+    assert.match(
+      emissionMaskRule,
+      /mask-repeat:\s*var\(--bot-face-screen-mask-repeat\)\s*;/
     );
     assert.match(emissionMaskRule, /pointer-events:\s*none\s*;/);
+    assert.match(
+      pageSource,
+      /className=\{styles\.zenLiveBotPresenceFaceEmissionMask\}[\s\S]*botFaceCrtNoiseLayer[\s\S]*botFaceCrtBreathingLayer[\s\S]*CoffeeSeatPlateEmoji/
+    );
 
     const phosphorRule = rulesForExactSelector(".zenLiveBotPresenceFaceEmissionMask::before").find(
-      (rule) => /mix-blend-mode:\s*color-dodge\s*;/.test(rule)
+      (rule) => /var\(--bot-face-crt-screen-texture-image\)/.test(rule)
     );
-    assert.ok(phosphorRule, "Missing CRT phosphor color-dodge layer");
-    assert.match(phosphorRule, /repeating-linear-gradient\(\s*90deg/);
-    assert.match(phosphorRule, /var\(--bot-face-crt-texture-image\)/);
-    assert.match(phosphorRule, /background-blend-mode:\s*multiply\s*;/);
-    assert.match(phosphorRule, /mix-blend-mode:\s*color-dodge\s*;/);
-    assert.match(phosphorRule, /filter:\s*brightness\(1\.18\)\s*contrast\(1\.08\)\s*saturate\(1\.35\)\s*;/);
+    assert.ok(phosphorRule, "Missing clipped CRT RGB screen texture layer");
+    assert.doesNotMatch(phosphorRule, /repeating-linear-gradient\(\s*90deg/);
+    assert.doesNotMatch(phosphorRule, /var\(--bot-face-crt-texture-image\)/);
+    assert.match(
+      phosphorRule,
+      /background:\s*[\s\S]*var\(--bot-face-crt-screen-texture-image\) center \/ 100% 100% no-repeat,[\s\S]*radial-gradient\(/
+    );
+    assert.match(
+      phosphorRule,
+      /var\(--bot-face-crt-color\) var\(--bot-face-crt-screen-texture-tint-strength\)/
+    );
+    assert.match(
+      phosphorRule,
+      /background-blend-mode:\s*var\(--bot-face-crt-screen-texture-blend-mode,\s*screen\)\s*;/
+    );
+    assert.match(phosphorRule, /opacity:\s*var\(--bot-face-crt-screen-texture-opacity\)\s*;/);
+    assert.match(phosphorRule, /mix-blend-mode:\s*var\(--bot-face-crt-screen-texture-blend-mode,\s*screen\)\s*;/);
+    assert.match(phosphorRule, /filter:\s*saturate\(1\.36\) contrast\(1\.12\) brightness\(0\.84\)\s*;/);
 
     const gapRule = rulesForExactSelector(".zenLiveBotPresenceFaceEmissionMask::after").find(
       (rule) => /opacity:\s*var\(--bot-face-crt-gap-opacity\)\s*;/.test(rule)
@@ -261,6 +310,23 @@ describe("Zen live presence CSS", () => {
     assert.match(gapRule, /background-blend-mode:\s*multiply\s*;/);
     assert.match(gapRule, /opacity:\s*var\(--bot-face-crt-gap-opacity\)\s*;/);
     assert.match(gapRule, /mix-blend-mode:\s*multiply\s*;/);
+
+    const noiseRule = ruleForSelectorNeedles(".botFaceCrtNoiseLayer");
+    assert.match(noiseRule, /opacity:\s*var\(--crt-noise-opacity\)\s*;/);
+    assert.match(noiseRule, /mix-blend-mode:\s*soft-light\s*;/);
+    assert.match(noiseRule, /animation:\s*crtPhosphorImperfectionDrift 18\.7s steps\(4,\s*end\) infinite\s*;/);
+
+    const breathingRule = ruleForSelectorNeedlesWithBody(
+      [".botFaceCrtBreathingLayer"],
+      "crtElectronicBreath"
+    );
+    assert.match(
+      breathingRule,
+      /animation:\s*crtElectronicBreath var\(--crt-breath-speed\) linear infinite\s*;/
+    );
+    assert.match(css, /@keyframes crtPhosphorImperfectionDrift/);
+    assert.match(css, /@keyframes crtElectronicBreath/);
+    assert.match(css, /@keyframes crtElectronicBreathCounter/);
 
     const faceRigRule = ruleForExactSelector(".zenLiveBotPresenceFaceRig");
     assert.match(faceRigRule, /left:\s*var\(--zen-live-bot-face-x,\s*50%\)/);
@@ -303,6 +369,9 @@ describe("Zen live presence CSS", () => {
       faceRule,
       /--bot-face-frame-glow-filter:\s*drop-shadow\(0 0 0 transparent\)\s*;/
     );
+    assert.match(faceRule, /--bot-face-ambient-glow-color:\s*var\(--zen-live-bot-frame-tint-color,\s*var\(--coffee-bot-color\)\)\s*;/);
+    assert.match(faceRule, /--bot-face-ambient-glow-size:\s*86%\s*;/);
+    assert.match(faceRule, /--bot-face-ambient-glow-opacity:\s*0\.36\s*;/);
     assert.match(faceRule, /--bot-face-screen-left:\s*16\.6%\s*;/);
     assert.match(faceRule, /--bot-face-screen-top:\s*11\.5%\s*;/);
     assert.match(faceRule, /--bot-face-screen-right:\s*15\.2%\s*;/);
@@ -313,10 +382,10 @@ describe("Zen live presence CSS", () => {
     );
     assert.match(faceRule, /--bot-face-frame-inset:\s*0\s*;/);
     assert.match(faceRule, /--bot-face-frame-opacity:\s*1\s*;/);
-    assert.match(faceRule, /--bot-face-screen-glare-opacity:\s*0\.34\s*;/);
-    assert.match(faceRule, /--zen-live-bot-screen-glass-overlay-opacity:\s*0\.26\s*;/);
-    assert.match(faceRule, /--zen-live-bot-screen-glare-overlay-opacity:\s*0\.32\s*;/);
-    assert.match(faceRule, /box-shadow:\s*none\s*;/);
+    assert.match(faceRule, /--bot-face-screen-glare-opacity:\s*0\.18\s*;/);
+    assert.match(faceRule, /--zen-live-bot-screen-glass-overlay-opacity:\s*0\.09\s*;/);
+    assert.match(faceRule, /--zen-live-bot-screen-glare-overlay-opacity:\s*0\.16\s*;/);
+    assert.match(faceRule, /box-shadow:\s*[\s\S]*--bot-face-ambient-glow-blur[\s\S]*--bot-face-ambient-glow-spread/);
     assert.match(faceRule, /width:\s*var\(--zen-live-bot-body-frame-size\)/);
     assert.match(faceRule, /height:\s*var\(--zen-live-bot-body-frame-size\)/);
     assert.match(faceRule, /transform:\s*translate\(-50%,\s*-50%\)\s*;/);
@@ -328,13 +397,17 @@ describe("Zen live presence CSS", () => {
     );
 
     const faceGlyphRule = ruleForExactSelector(".coffeeSeatPlateEmoji.zenLiveBotPresenceFaceGlyph");
-    assert.match(faceGlyphRule, /clamp\(1\.74rem,\s*5\.15vw,\s*2\.58rem\)/);
+    assert.match(
+      faceGlyphRule,
+      /clamp\(1\.74rem,\s*calc\(var\(--zen-live-bot-body-frame-size,\s*190px\) \* 0\.217\),\s*4\.08rem\)/
+    );
 
     const movingFaceRule = ruleForExactSelector(
       '.zenLiveBotPresencePlate[data-dragging="true"] .zenLiveBotPresenceFace'
     );
-    assert.match(movingFaceRule, /--zen-live-bot-screen-glass-overlay-opacity:\s*0\.32\s*;/);
-    assert.match(movingFaceRule, /--zen-live-bot-screen-glare-overlay-opacity:\s*0\.38\s*;/);
+    assert.match(movingFaceRule, /--bot-face-ambient-glow-opacity:\s*0\.5\s*;/);
+    assert.match(movingFaceRule, /--zen-live-bot-screen-glass-overlay-opacity:\s*0\.12\s*;/);
+    assert.match(movingFaceRule, /--zen-live-bot-screen-glare-overlay-opacity:\s*0\.2\s*;/);
 
     assert.doesNotMatch(pageSource, /BotFaceScreenTexture/);
     assert.doesNotMatch(css, /\.botFaceScreenTexture/);
@@ -364,10 +437,12 @@ describe("Zen live presence CSS", () => {
     assert.doesNotMatch(css, /\.botFaceFrameMetalGrain/);
     assert.doesNotMatch(css, /--bot-face-metal-grain/);
 
-    const lightFaceRule = ruleForExactSelector(
-      '.zenLiveBotPresencePlate[data-theme="light"] .zenLiveBotPresenceFace'
+    const lightFaceRule = ruleForSelectorNeedles(
+      '.zenLiveBotPresencePlate[data-theme="light"]',
+      ".zenLiveBotPresenceFace"
     );
     assert.doesNotMatch(lightFaceRule, /--bot-face-frame-glow-filter/);
+    assert.match(lightFaceRule, /--bot-face-ambient-glow-opacity:\s*0\.32\s*;/);
     assert.match(lightFaceRule, /--bot-face-metal-light-base-color:\s*var\(--coffee-bot-color\)\s*;/);
     assert.match(
       lightFaceRule,
@@ -390,8 +465,10 @@ describe("Zen live presence CSS", () => {
     );
     assert.doesNotMatch(lightFaceRule, /--bot-face-metal-grain/);
 
-    const coffeeLightZenRule = ruleForExactSelector(
-      '.themeLight.coffeeShell .coffeeSeatPlate[data-live-body-style="zen"]'
+    const coffeeLightZenRule = ruleForSelectorNeedles(
+      ".themeLight.coffeeShell",
+      '.coffeeSeatPlate[data-live-body-style="zen"]',
+      ".zenLiveBotPresenceFace"
     );
     assert.match(
       coffeeLightZenRule,
@@ -541,7 +618,7 @@ describe("Zen live presence CSS", () => {
     assert.doesNotMatch(css, /bot-face-screen-pixel|lcd-pixel|screen-pixel/i);
 
     const frameRule = ruleForExactSelector(".botFaceFrame");
-    assert.match(frameRule, /z-index:\s*var\(--bot-face-frame-z,\s*0\)/);
+    assert.match(frameRule, /z-index:\s*var\(--bot-face-frame-z,\s*2\)/);
     assert.match(frameRule, /var\(--bot-face-frame-glow-filter,\s*drop-shadow\(0 0 0 transparent\)\)/);
     assert.match(frameRule, /opacity:\s*var\(--bot-face-frame-opacity,\s*1\)\s*;/);
     assert.match(frameRule, /overflow:\s*hidden\s*;/);
@@ -553,9 +630,21 @@ describe("Zen live presence CSS", () => {
       pageSource,
       /function BotFaceFrame\(\)[\s\S]*<BotFaceScreenFill \/>[\s\S]*className=\{styles\.botFaceFrame\}[\s\S]*className=\{styles\.botFaceFrameMetalLight\}/
     );
+    assert.doesNotMatch(pageSource, /botFaceAmbientGlow/);
+
+    const ambientGlowRule = ruleForExactSelector(".zenLiveBotPresenceFace::before");
+    assert.match(ambientGlowRule, /content:\s*""\s*;/);
+    assert.match(ambientGlowRule, /z-index:\s*var\(--bot-face-ambient-glow-z,\s*0\)\s*;/);
+    assert.match(ambientGlowRule, /width:\s*var\(--bot-face-ambient-glow-size,\s*86%\)\s*;/);
+    assert.match(ambientGlowRule, /height:\s*var\(--bot-face-ambient-glow-size,\s*86%\)\s*;/);
+    assert.match(ambientGlowRule, /border-radius:\s*50%\s*;/);
+    assert.match(ambientGlowRule, /box-shadow:\s*[\s\S]*var\(--bot-face-ambient-glow-blur,\s*30px\)[\s\S]*var\(--bot-face-ambient-glow-spread,\s*18px\)/);
+    assert.match(ambientGlowRule, /opacity:\s*var\(--bot-face-ambient-glow-opacity,\s*0\)\s*;/);
+    assert.match(ambientGlowRule, /mix-blend-mode:\s*normal\s*;/);
 
     const screenFillRule = ruleForExactSelector(".botFaceScreenFill");
     assert.match(screenFillRule, /inset:\s*auto\s*;/);
+    assert.match(screenFillRule, /z-index:\s*var\(--bot-face-screen-z,\s*1\)\s*;/);
     assert.match(
       screenFillRule,
       /left:\s*var\(--bot-face-screen-left,\s*var\(--bot-face-screen-inset,\s*17%\)\)\s*;/
@@ -635,7 +724,7 @@ describe("Zen live presence CSS", () => {
     assert.match(zenScreenGlassRule, /--bot-face-screen-radius:\s*0\s*;/);
     assert.match(
       zenScreenGlassRule,
-      /--bot-face-screen-mask-image:\s*url\("\/bot-frame\/bot-frame-screen-mask\.png\?v=1000"\)\s*;/
+      /--bot-face-screen-mask-image:\s*url\("\/bot-frame\/bot-frame-screen-mask-glass\.png\?v=1000"\)\s*;/
     );
     assert.match(zenScreenGlassRule, /--bot-face-screen-glass-background:\s*transparent\s*;/);
     assert.doesNotMatch(zenScreenGlassRule, /--bot-face-screen-glass-blend-mode:\s*plus-lighter\s*;/);
@@ -680,6 +769,10 @@ describe("Zen live presence CSS", () => {
       '.zenLiveBotPresencePlate[data-talking="true"] .zenLiveBotPresenceFace'
     );
     assert.match(talkingFaceRule, /animation:\s*none\s*;/);
+    const talkingFaceGlowRule = rulesForExactSelector(
+      '.zenLiveBotPresencePlate[data-talking="true"] .zenLiveBotPresenceFace'
+    ).find((rule) => /--bot-face-ambient-glow-opacity:\s*0\.52\s*;/.test(rule));
+    assert.ok(talkingFaceGlowRule, "Missing talking ambient glow lift");
     assert.doesNotMatch(css, /@keyframes zenLiveBotPresenceTalk\b/);
 
     assert.match(css, /@keyframes zenLiveBotTalkingLightFlicker/);
@@ -718,15 +811,15 @@ describe("Zen live presence CSS", () => {
     assert.match(talkingFaceGlowKeyframes, /15%,[\s\S]*55%,[\s\S]*87%/);
     assert.match(
       talkingFaceGlowKeyframes,
-      /filter:\s*var\(--zen-live-bot-talking-face-glow-filter-high\)/
+      /blur\(var\(--crt-bloom-radius\)\)[\s\S]*var\(--zen-live-bot-talking-face-glow-filter-high\)/
     );
     assert.match(
       talkingFaceGlowKeyframes,
-      /filter:\s*var\(--zen-live-bot-talking-face-glow-filter-mid\)/
+      /blur\(var\(--crt-bloom-radius\)\)[\s\S]*var\(--zen-live-bot-talking-face-glow-filter-mid\)/
     );
     assert.match(
       talkingFaceGlowKeyframes,
-      /filter:\s*var\(--zen-live-bot-talking-face-glow-filter-low\)/
+      /blur\(var\(--crt-bloom-radius\)\)[\s\S]*var\(--zen-live-bot-talking-face-glow-filter-low\)/
     );
 
     const talkingFrameTintRule = ruleForNormalizedSelector(
@@ -755,10 +848,19 @@ describe("Zen live presence CSS", () => {
     assert.match(talkingGlyphPartRule, /--zen-live-bot-talking-face-glow-filter-mid:/);
     assert.match(talkingGlyphPartRule, /--zen-live-bot-talking-face-glow-filter-low:/);
     assert.match(talkingGlyphPartRule, /opacity:\s*1\s*;/);
-    assert.match(talkingGlyphPartRule, /filter:\s*var\(--zen-live-bot-talking-face-glow-filter-high\)\s*;/);
+    assert.match(talkingGlyphPartRule, /--crt-face-glow-filter:\s*var\(--zen-live-bot-talking-face-glow-filter-high\)\s*;/);
+    assert.match(talkingGlyphPartRule, /filter:\s*var\(--crt-face-glow-filter\)\s*;/);
     assert.match(
       talkingGlyphPartRule,
-      /animation:\s*zenLiveBotTalkingFaceGlowFlicker 760ms ease-in-out infinite,\s*zenLiveBotTalkingLightFlicker 760ms ease-in-out infinite\s*;/
+      /animation:\s*zenLiveBotTalkingFacePartFlicker 760ms ease-in-out infinite\s*;/
+    );
+
+    const talkingGlyphGlowRule = ruleForNormalizedSelector(
+      '.zenLiveBotPresencePlate[data-talking="true"]:not([data-private-mode="true"]) .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part]::before'
+    );
+    assert.match(
+      talkingGlyphGlowRule,
+      /animation:\s*zenLiveBotTalkingFaceGlowFlicker 760ms ease-in-out infinite\s*;/
     );
 
     const talkingMouthRule = ruleForNormalizedSelector(
@@ -766,7 +868,7 @@ describe("Zen live presence CSS", () => {
     );
     assert.match(
       talkingMouthRule,
-      /animation:\s*zenLiveBotPresenceMouthPulse 130ms cubic-bezier\(0\.37,\s*0,\s*0\.2,\s*1\) infinite,\s*zenLiveBotTalkingFaceGlowFlicker 760ms ease-in-out infinite,\s*zenLiveBotTalkingLightFlicker 760ms ease-in-out infinite\s*;/
+      /animation:\s*zenLiveBotPresenceMouthPulse 130ms cubic-bezier\(0\.37,\s*0,\s*0\.2,\s*1\) infinite,\s*zenLiveBotTalkingFacePartFlicker 760ms ease-in-out infinite\s*;/
     );
   });
 
@@ -780,7 +882,7 @@ describe("Zen live presence CSS", () => {
     assert.match(prismRule, /--bot-face-metal-light-opacity:\s*0\.3\s*;/);
     assert.doesNotMatch(prismRule, /--bot-face-frame-glow-filter/);
     assert.doesNotMatch(prismRule, /--zen-prism-ambient/);
-    assert.match(prismRule, /--zen-presence-face-bg:\s*[\s\S]*rgba\(255,\s*255,\s*255,\s*0\.05\)/);
+    assert.match(prismRule, /--zen-presence-face-bg:\s*[\s\S]*rgba\(255,\s*255,\s*255,\s*0\.032\)/);
     assert.match(prismRule, /--zen-presence-face-border:\s*color-mix\(in srgb,\s*#ff3f6f 12%,\s*#ffb62e 8%\)\s*;/);
     assert.match(prismRule, /--zen-presence-face-ring:\s*transparent\s*;/);
     assert.doesNotMatch(prismRule, /#ffffff 3%/);
@@ -793,9 +895,19 @@ describe("Zen live presence CSS", () => {
     assert.doesNotMatch(privatePrismRule, /--bot-face-frame-glow-filter/);
     assert.doesNotMatch(privatePrismRule, /--zen-prism-ambient/);
 
+    const prismFaceRule = ruleForExactSelector(
+      '.zenLiveBotPresencePlate[data-prism-persona="true"] .zenLiveBotPresenceFace'
+    );
+    assert.match(prismFaceRule, /--bot-face-ambient-glow-opacity:\s*0\.74\s*;/);
+
+    const privatePrismFaceRule = ruleForExactSelector(
+      '.zenLiveBotPresencePlate[data-prism-persona="true"][data-private-mode="true"] .zenLiveBotPresenceFace'
+    );
+    assert.match(privatePrismFaceRule, /--bot-face-ambient-glow-opacity:\s*0\.36\s*;/);
+
     assert.doesNotMatch(css, /--zen-prism-ambient/);
     assert.doesNotMatch(css, /zenLivePrismRainbowAura/);
-    assert.doesNotMatch(css, /zenLiveBotPresenceFace::before/);
+    assert.doesNotMatch(css, /zenLivePrismRainbowAura/);
 
     assert.match(
       pageSource,
@@ -816,7 +928,7 @@ describe("Zen live presence CSS", () => {
     assert.match(css, /@keyframes zenLivePrismFaceGlowHueRotateLight/);
     assert.doesNotMatch(css, /@keyframes zenLivePrismRainbowInk\b/);
     assert.doesNotMatch(css, /@keyframes zenLivePrismRainbowInkLight\b/);
-    assert.doesNotMatch(css, /zenLiveBotPresenceFace::before/);
+    assert.doesNotMatch(css, /zenLivePrismRainbowAura/);
 
     const talkingFrameTintRule = ruleForNormalizedSelector(
       '.zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]:not([data-private-mode="true"]) .botFaceFrameTint'
@@ -845,10 +957,20 @@ describe("Zen live presence CSS", () => {
     const talkingFacePartRule = ruleForNormalizedSelector(
       '.zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"] .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part]'
     );
-    assert.match(talkingFacePartRule, /filter:\s*[\s\S]*drop-shadow/);
+    assert.match(talkingFacePartRule, /--crt-bloom-opacity:\s*0\.16\s*;/);
+    assert.match(talkingFacePartRule, /--crt-bloom-radius:\s*2\.05px\s*;/);
+    assert.match(talkingFacePartRule, /--crt-face-glow-filter:\s*var\(--zen-live-bot-talking-face-glow-filter-high\)\s*;/);
+    assert.match(talkingFacePartRule, /filter:\s*var\(--crt-face-glow-filter\)\s*;/);
     assert.match(
       talkingFacePartRule,
-      /animation:\s*zenLivePrismFaceGlowHueRotate 1\.7s linear infinite,\s*zenLiveBotTalkingLightFlicker 760ms ease-in-out infinite\s*;/
+      /animation:\s*zenLiveBotTalkingFacePartFlicker 760ms ease-in-out infinite\s*;/
+    );
+    const talkingFaceGlowRule = ruleForNormalizedSelector(
+      '.zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"] .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part]::before'
+    );
+    assert.match(
+      talkingFaceGlowRule,
+      /animation:\s*zenLivePrismFaceGlowHueRotate 1\.7s linear infinite,\s*zenLiveBotTalkingFaceGlowFlicker 760ms ease-in-out infinite\s*;/
     );
     assert.doesNotMatch(talkingFacePartRule, /#ff3f6f/);
 
@@ -894,9 +1016,27 @@ describe("Zen live presence CSS", () => {
 
     const glyphRule = ruleForExactSelector(".zenLiveBotPresenceBotGlyph");
     assert.match(glyphRule, /position:\s*absolute\s*;/);
-    assert.match(glyphRule, /left:\s*calc\(50%\s*\+\s*var\(--zen-live-bot-glyph-x-anchor,\s*0px\)\)/);
-    assert.match(glyphRule, /top:\s*calc\(50%\s*\+\s*var\(--zen-live-bot-glyph-y-anchor,\s*70px\)\)/);
-    assert.match(glyphRule, /width:\s*clamp\(23px,\s*calc\(var\(--zen-live-bot-body-frame-size\)\s*\*\s*0\.16\),\s*33px\)/);
+    assert.match(
+      glyphRule,
+      /left:\s*calc\(50%\s*\+\s*var\(--zen-live-bot-glyph-x-anchor,\s*0px\)\s*\+\s*1px\)/
+    );
+    assert.match(
+      glyphRule,
+      /top:\s*calc\(50%\s*\+\s*var\(--zen-live-bot-glyph-y-anchor,\s*70px\)\s*\+\s*1px\)/
+    );
+    const bodyRule = ruleForExactSelector(".zenLiveBotPresenceBody");
+    assert.match(bodyRule, /--zen-live-bot-body-glyph-min-size:\s*18px\s*;/);
+    assert.match(bodyRule, /--zen-live-bot-body-glyph-ratio:\s*0\.145\s*;/);
+    assert.match(bodyRule, /--zen-live-bot-body-glyph-max-size:\s*48px\s*;/);
+    assert.match(
+      glyphRule,
+      /--zen-live-bot-body-glyph-render-size:\s*calc\(\s*var\(\s*--zen-live-bot-body-glyph-size,\s*clamp\(\s*var\(--zen-live-bot-body-glyph-min-size\),\s*calc\(var\(--zen-live-bot-body-frame-size\)\s*\*\s*var\(--zen-live-bot-body-glyph-ratio\)\),\s*var\(--zen-live-bot-body-glyph-max-size\)\s*\)\s*\)\s*-\s*2px\s*\)/
+    );
+    assert.match(glyphRule, /width:\s*var\(--zen-live-bot-body-glyph-render-size\)\s*;/);
+    assert.match(
+      glyphRule,
+      /height:\s*var\(--zen-live-bot-body-glyph-render-size\)\s*;/
+    );
     assert.match(glyphRule, /padding:\s*0\s*;/);
     assert.match(glyphRule, /border:\s*0\s*;/);
     assert.match(glyphRule, /border-radius:\s*0\s*;/);
@@ -1132,7 +1272,7 @@ describe("Zen live presence CSS", () => {
       /const faceSpinnerVisible = showThinkingSpinner \|\| transitioning;/
     );
     assert.match(mannequinSource, /className=\{styles\.zenLiveBotPresenceThinkingGlyphAnchor\}/);
-    assert.match(mannequinSource, /showThinkingSpinner\s+baseText=\{plateFace\.text\}/);
+    assert.match(mannequinSource, /showThinkingSpinner\s+baseText=\{displayPlateFace\.text\}/);
     assert.match(mannequinSource, /className=\{styles\.zenLiveBotPresenceFaceEmissionMask\}/);
     assert.match(mannequinSource, /\{showThinkingSpinner \? \(/);
     assert.match(
@@ -1165,7 +1305,10 @@ describe("Zen live presence CSS", () => {
       /color:\s*var\(--zen-live-bot-face-ink,\s*var\(--zen-presence-face-ink\)\)\s*;/
     );
     assert.match(zenSpinnerGlyphRule, /var\(--coffee-bot-color\)/);
-    assert.match(zenSpinnerGlyphRule, /font-size:\s*clamp\(1\.82rem,\s*4\.5vw,\s*3\.08rem\)/);
+    assert.match(
+      zenSpinnerGlyphRule,
+      /font-size:\s*var\(\s*--zen-live-bot-avatar-thinking-glyph-size,\s*clamp\(1\.82rem,\s*calc\(var\(--zen-live-bot-body-frame-size,\s*190px\) \* 0\.245\),\s*4\.6rem\)\s*\)/
+    );
     assert.doesNotMatch(zenSpinnerGlyphRule, /#55ffe0|#0aa996/);
     assert.match(
       css,
@@ -1201,9 +1344,15 @@ describe("Zen live presence CSS", () => {
     const presenceSource = pageSource.slice(presenceStart, presenceEnd);
 
     assert.match(pageSource, /showQuestionMark\?: boolean;/);
+    assert.match(pageSource, /function assistantMessageEndsWithVisibleQuestion/);
+    assert.match(pageSource, /const zenLiveNaturalQuestionMarkerVisible =/);
     assert.match(mannequinSource, /showQuestionMark = false/);
     assert.match(mannequinSource, /showQuestionMark=\{showQuestionMark\}/);
     assert.match(presenceSource, /showQuestionMark=\{askQuestionActive\}/);
+    assert.match(
+      pageSource,
+      /pendingAskQuestionInteractiveKey !== null \|\| zenLiveNaturalQuestionMarkerVisible/
+    );
     assert.match(
       presenceSource,
       /data-ask-question-active=\{askQuestionActive \? "true" : undefined\}/
@@ -1216,7 +1365,7 @@ describe("Zen live presence CSS", () => {
     );
     assert.match(
       liveQuestionRule,
-      /font-size:\s*var\(--zen-live-bot-avatar-question-glyph-size,\s*clamp\(2rem,\s*4\.25vw,\s*2\.58rem\)\)\s*;/
+      /font-size:\s*var\(\s*--zen-live-bot-avatar-question-glyph-size,\s*clamp\(2\.35rem,\s*calc\(var\(--zen-live-bot-body-frame-size,\s*190px\) \* 0\.275\),\s*5\.25rem\)\s*\)\s*;/
     );
   });
 

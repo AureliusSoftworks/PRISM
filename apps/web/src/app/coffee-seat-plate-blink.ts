@@ -4,12 +4,19 @@
  * Blinking swaps that character for a half-eye or non-collapsing whitespace so
  * the face reads as blinking without shifting the mouth.
  */
+import {
+  DEFAULT_BOT_FACE_BLINK_BAR,
+  normalizeBotFaceBlinkBar,
+  type BotFaceBlinkBar,
+} from "@localai/shared";
+
 export type CoffeeSeatBlinkPhase = "open" | "half" | "closed";
 
-export const COFFEE_SEAT_BLINK_HALF_EYE = "|";
+export const COFFEE_SEAT_BLINK_HALF_EYE = DEFAULT_BOT_FACE_BLINK_BAR;
 
 export interface CoffeeSeatBlinkOptions {
   eyeCharacter?: string | null;
+  blinkBar?: BotFaceBlinkBar | null;
 }
 
 function normalizeCoffeeSeatBlinkPhase(
@@ -26,6 +33,9 @@ export function applyCoffeeSeatBlink(
   options: CoffeeSeatBlinkOptions = {}
 ): string {
   const phase = normalizeCoffeeSeatBlinkPhase(phaseOrEyesOpen);
+  const blinkBar =
+    normalizeBotFaceBlinkBar(options.blinkBar) ?? DEFAULT_BOT_FACE_BLINK_BAR;
+  if (blinkBar === "none") return text;
   if (phase === "open" || text.length === 0) return text;
   const [eye] = Array.from(text);
   if (!eye) return text;
@@ -42,7 +52,7 @@ export function applyCoffeeSeatBlink(
   ) {
     const rest = text.slice(eye.length);
     if (phase === "half") {
-      return `${COFFEE_SEAT_BLINK_HALF_EYE}${rest}`;
+      return `${blinkBar}${rest}`;
     }
     return `\u00a0${rest}`;
   }

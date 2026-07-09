@@ -224,6 +224,7 @@ export interface CoffeeBotProfile {
   faceFontWeight?: number | null;
   faceEyeScale?: number | null;
   faceEyeOffsetY?: number | null;
+  faceBlinkBar?: string | null;
   profilePictureImageId?: string | null;
   localModel: string | null;
   onlineModel: string | null;
@@ -4740,6 +4741,7 @@ type CoffeeBotProfileRow = {
   face_font_weight: number | null;
   face_eye_scale: number | null;
   face_eye_offset_y: number | null;
+  face_blink_bar: string | null;
   profile_picture_image_id: string | null;
   model: string | null;
   local_model: string | null;
@@ -4770,6 +4772,7 @@ function mapCoffeeBotProfileRow(row: CoffeeBotProfileRow): CoffeeBotProfile {
     faceEyeScale: typeof row.face_eye_scale === "number" ? row.face_eye_scale : null,
     faceEyeOffsetY:
       typeof row.face_eye_offset_y === "number" ? row.face_eye_offset_y : null,
+    faceBlinkBar: row.face_blink_bar ?? null,
     profilePictureImageId: row.profile_picture_image_id ?? null,
     localModel: row.local_model ?? null,
     onlineModel: row.online_model ?? null,
@@ -4811,6 +4814,7 @@ function loadCoffeeGroupProfileRows(
               ${selectOptionalBotColumn("face_font_weight")},
               ${selectOptionalBotColumn("face_eye_scale")},
               ${selectOptionalBotColumn("face_eye_offset_y")},
+              ${selectOptionalBotColumn("face_blink_bar")},
               ${selectOptionalBotColumn("profile_picture_image_id")},
               model, local_model, online_model,
               online_enabled, flirt_enabled, temperature, max_tokens,

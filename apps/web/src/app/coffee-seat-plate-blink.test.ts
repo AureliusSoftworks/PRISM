@@ -6,7 +6,7 @@ import {
 } from "./coffee-seat-plate-blink.ts";
 
 describe("applyCoffeeSeatBlink", () => {
-  it("uses a vertical bar for visible half-eye frames", () => {
+  it("defaults visible half-eye frames to the legacy bar", () => {
     assert.equal(COFFEE_SEAT_BLINK_HALF_EYE, "|");
   });
 
@@ -45,6 +45,12 @@ describe("applyCoffeeSeatBlink", () => {
     );
   });
 
+  it("uses the selected blink bar for half-eye frames", () => {
+    assert.equal(applyCoffeeSeatBlink(":]", "half", { blinkBar: "¦" }), "¦]");
+    assert.equal(applyCoffeeSeatBlink(":]", "half", { blinkBar: "❘" }), "❘]");
+    assert.equal(applyCoffeeSeatBlink(":]", "half", { blinkBar: "|" }), "|]");
+  });
+
   it("keeps legacy semicolon faces blink-safe", () => {
     assert.equal(applyCoffeeSeatBlink(";(", false), "\u00a0(");
     assert.equal(applyCoffeeSeatBlink(";0", false), "\u00a00");
@@ -58,10 +64,19 @@ describe("applyCoffeeSeatBlink", () => {
   it("blinks custom leading eye characters when provided", () => {
     assert.equal(applyCoffeeSeatBlink("B)", false, { eyeCharacter: "B" }), "\u00a0)");
     assert.equal(
-      applyCoffeeSeatBlink("8D", "half", { eyeCharacter: "8" }),
-      `${COFFEE_SEAT_BLINK_HALF_EYE}D`
+      applyCoffeeSeatBlink("8D", "half", { eyeCharacter: "8", blinkBar: "¦" }),
+      "¦D"
     );
     assert.equal(applyCoffeeSeatBlink("B)", false), "B)");
+  });
+
+  it("keeps eyes open when blink is disabled", () => {
+    assert.equal(applyCoffeeSeatBlink(":]", "half", { blinkBar: "none" }), ":]");
+    assert.equal(applyCoffeeSeatBlink(":]", "closed", { blinkBar: "none" }), ":]");
+    assert.equal(
+      applyCoffeeSeatBlink("8D", "half", { eyeCharacter: "8", blinkBar: "none" }),
+      "8D"
+    );
   });
 
   it("no-ops on empty or unknown first character", () => {

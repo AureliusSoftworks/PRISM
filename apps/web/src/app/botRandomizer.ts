@@ -1,4 +1,5 @@
 import {
+  DEFAULT_BOT_FACE_BLINK_BAR,
   DEFAULT_BOT_FACE_EYE_OFFSET_Y,
   DEFAULT_BOT_FACE_EYE_SCALE,
   DEFAULT_BOT_PROFILE_FIELDS,
@@ -382,6 +383,7 @@ function buildPirateDraft(
       weight: 650,
       eyeScale: DEFAULT_BOT_FACE_EYE_SCALE,
       eyeOffsetY: DEFAULT_BOT_FACE_EYE_OFFSET_Y,
+      blinkBar: DEFAULT_BOT_FACE_BLINK_BAR,
     },
     temperature: 0.88,
     maxTokens: 2560,
