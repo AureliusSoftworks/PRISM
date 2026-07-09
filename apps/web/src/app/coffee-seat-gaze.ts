@@ -105,10 +105,10 @@ function dockedCoffeeSeatCanvasLeftPercent(args: CoffeeSeatCanvasLeftPercentArgs
     "4:2": 73,
     "4:3": 27,
     "5:0": 50,
-    "5:1": 25,
-    "5:2": 75,
-    "5:3": 29,
-    "5:4": 71,
+    "5:1": 22,
+    "5:2": 78,
+    "5:3": 26,
+    "5:4": 74,
   } as Record<string, number>)[`${args.seatCount}:${args.layoutIndex}`] ??
     defaultCoffeeSeatCanvasLeftPercent(args);
 }

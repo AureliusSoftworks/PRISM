@@ -32,6 +32,7 @@ const pristine: BotCustomizerSavePristine = {
   faceEyeScale: 1,
   faceEyeOffsetY: 0,
   faceBlinkBar: "|",
+  faceThinkingFrames: ["|", "/", "-", "\\"],
   profilePictureImageId: null,
 };
 
@@ -66,6 +67,7 @@ const currentFromPristine = (
   faceEyeScale: pristine.faceEyeScale,
   faceEyeOffsetY: pristine.faceEyeOffsetY,
   faceBlinkBar: pristine.faceBlinkBar,
+  faceThinkingFrames: pristine.faceThinkingFrames,
   profilePictureImageId: pristine.profilePictureImageId,
   ...overrides,
 });
@@ -129,10 +131,13 @@ describe("bot customizer save patch", () => {
     );
   });
 
-  it("patches eye scale and vertical placement edits", () => {
+  it("patches eye scale and vertical eye placement edits", () => {
     assert.deepEqual(
       buildBotCustomizerSavePatch(
-        currentFromPristine({ faceEyeScale: 1.15, faceEyeOffsetY: -0.08 }),
+        currentFromPristine({
+          faceEyeScale: 1.15,
+          faceEyeOffsetY: -0.08,
+        }),
         pristine
       ),
       { faceEyeScale: 1.15, faceEyeOffsetY: -0.08 }
@@ -146,6 +151,16 @@ describe("bot customizer save patch", () => {
         pristine
       ),
       { faceBlinkBar: "none" }
+    );
+  });
+
+  it("patches thinking frame edits", () => {
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(
+        currentFromPristine({ faceThinkingFrames: [".", "o", "O", "o"] }),
+        pristine
+      ),
+      { faceThinkingFrames: [".", "o", "O", "o"] }
     );
   });
 });

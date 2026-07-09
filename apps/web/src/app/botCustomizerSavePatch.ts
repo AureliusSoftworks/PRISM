@@ -23,6 +23,7 @@ export interface BotCustomizerSavePristine {
   faceEyeScale: number;
   faceEyeOffsetY: number;
   faceBlinkBar: string;
+  faceThinkingFrames: readonly string[];
   profilePictureImageId: string | null;
 }
 
@@ -55,6 +56,7 @@ export interface BotCustomizerSaveCurrent {
   faceEyeScale: number;
   faceEyeOffsetY: number;
   faceBlinkBar: string;
+  faceThinkingFrames: readonly string[];
   profilePictureImageId: string | null;
 }
 
@@ -82,11 +84,19 @@ export interface BotCustomizerSavePatch {
   faceEyeScale?: number;
   faceEyeOffsetY?: number;
   faceBlinkBar?: string;
+  faceThinkingFrames?: readonly string[];
   profilePictureImageId?: string | null;
 }
 
 const normalizeColorForCompare = (hex: string | null | undefined): string =>
   (hex ?? "").trim().toLowerCase();
+
+const thinkingFramesEqual = (
+  left: readonly string[],
+  right: readonly string[]
+): boolean =>
+  left.length === right.length &&
+  left.every((frame, index) => frame === right[index]);
 
 export function buildBotCustomizerSavePatch(
   current: BotCustomizerSaveCurrent,
@@ -117,6 +127,7 @@ export function buildBotCustomizerSavePatch(
       faceEyeScale: current.faceEyeScale,
       faceEyeOffsetY: current.faceEyeOffsetY,
       faceBlinkBar: current.faceBlinkBar,
+      faceThinkingFrames: current.faceThinkingFrames,
       profilePictureImageId: current.profilePictureImageId,
     };
   }
@@ -182,6 +193,9 @@ export function buildBotCustomizerSavePatch(
   }
   if (current.faceBlinkBar !== pristine.faceBlinkBar) {
     patch.faceBlinkBar = current.faceBlinkBar;
+  }
+  if (!thinkingFramesEqual(current.faceThinkingFrames, pristine.faceThinkingFrames)) {
+    patch.faceThinkingFrames = current.faceThinkingFrames;
   }
   if (current.profilePictureImageId !== pristine.profilePictureImageId) {
     patch.profilePictureImageId = current.profilePictureImageId;

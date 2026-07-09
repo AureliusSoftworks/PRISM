@@ -3,12 +3,16 @@
 import { useEffect, useState, type CSSProperties, type JSX } from "react";
 import {
   DEFAULT_BOT_FACE_BLINK_BAR,
+  DEFAULT_BOT_FACE_THINKING_FRAMES,
+  botFaceThinkingFramesEqual,
   normalizeBotFaceBlinkBar,
   normalizeBotFaceEyeCharacter,
   normalizeBotFaceEyeOffsetY,
   normalizeBotFaceEyeScale,
+  normalizeBotFaceThinkingFrames,
   type BotFaceBlinkBar,
   type BotFaceFontId,
+  type BotFaceThinkingFrames,
   type BotVoicePreset,
 } from "@localai/shared";
 import {
@@ -85,6 +89,7 @@ export type CoffeeSeatPlateEmojiProps = {
   faceEyeScale?: number | null;
   faceEyeOffsetY?: number | null;
   faceBlinkBar?: BotFaceBlinkBar | null;
+  faceThinkingFrames?: BotFaceThinkingFrames | string[] | null;
   className: string;
 };
 
@@ -93,13 +98,26 @@ type CoffeeSeatPlateBlinkState = {
   key: string;
 };
 
-const COFFEE_SEAT_BLINK_HALF_FRAME_MS = 46;
 const COFFEE_SEAT_THINKING_SPINNER_FRAME_MS = 142;
-const COFFEE_SEAT_THINKING_SPINNER_FRAMES = ["|", "/", "-", "\\"] as const;
 const COFFEE_SEAT_SIP_MOUTH_GLYPHS = new Set(["*", "⁎"]);
 
 function coffeeSeatClosedBlinkHoldMs(): number {
-  return randomBetween(58, 92);
+  return randomBetween(112, 178);
+}
+
+function coffeeSeatBlinkGapMs(): number {
+  return randomBetween(1500, 4000);
+}
+
+function coffeeSeatExtraBlinkGapMs(): number {
+  return randomBetween(118, 260);
+}
+
+function coffeeSeatExtraBlinkCount(): number {
+  const roll = Math.random();
+  if (roll < 0.05) return 2;
+  if (roll < 0.22) return 1;
+  return 0;
 }
 
 /**
@@ -123,6 +141,7 @@ export function CoffeeSeatPlateEmoji({
   faceEyeScale,
   faceEyeOffsetY,
   faceBlinkBar,
+  faceThinkingFrames,
   className,
 }: CoffeeSeatPlateEmojiProps): JSX.Element {
   const thinkingSpinnerActive = enabled && showThinkingSpinner && !isTalking;
@@ -135,11 +154,14 @@ export function CoffeeSeatPlateEmoji({
   const normalizedFaceEyeCharacter = normalizeBotFaceEyeCharacter(faceEyeCharacter);
   const normalizedFaceBlinkBar =
     normalizeBotFaceBlinkBar(faceBlinkBar) ?? DEFAULT_BOT_FACE_BLINK_BAR;
-  const faceBlinkDisabled = normalizedFaceBlinkBar === "none";
+  const normalizedThinkingFrames =
+    normalizeBotFaceThinkingFrames(faceThinkingFrames) ??
+    DEFAULT_BOT_FACE_THINKING_FRAMES;
   const faceText = coffeeSeatFaceTextWithEyeCharacter(
     baseText,
     normalizedFaceEyeCharacter
   );
+  const faceBlinkDisabled = normalizedFaceBlinkBar === "none";
   const talkingPausesBlink = isTalking && !blinkWhileTalking;
   const blinkKey = `${enabled ? "enabled" : "disabled"}:${talkingPausesBlink ? "talking" : "idle"}:${faceMode}:${normalizedFaceBlinkBar}:${faceText}:${scheduleKey}`;
   const [blinkState, setBlinkState] = useState<CoffeeSeatPlateBlinkState>({
@@ -181,24 +203,24 @@ export function CoffeeSeatPlateEmoji({
     const digest = scheduleKeyDigest(scheduleKey);
     const startJitter = digest % 1200;
 
-    const armNextBlink = () => {
+    const armBlink = (delayMs: number, remainingExtraBlinks: number) => {
       arm(() => {
         if (cancelled) return;
-        setBlinkState({ phase: "half", key: blinkKey });
+        setBlinkState({ phase: "closed", key: blinkKey });
         arm(() => {
           if (cancelled) return;
-          setBlinkState({ phase: "closed", key: blinkKey });
-          arm(() => {
-            if (cancelled) return;
-            setBlinkState({ phase: "half", key: blinkKey });
-            arm(() => {
-              if (cancelled) return;
-              setBlinkState({ phase: "open", key: blinkKey });
-              armNextBlink();
-            }, COFFEE_SEAT_BLINK_HALF_FRAME_MS);
-          }, coffeeSeatClosedBlinkHoldMs());
-        }, COFFEE_SEAT_BLINK_HALF_FRAME_MS);
-      }, randomBetween(1500, 4000));
+          setBlinkState({ phase: "open", key: blinkKey });
+          if (remainingExtraBlinks > 0) {
+            armBlink(coffeeSeatExtraBlinkGapMs(), remainingExtraBlinks - 1);
+            return;
+          }
+          armNextBlink();
+        }, coffeeSeatClosedBlinkHoldMs());
+      }, delayMs);
+    };
+
+    const armNextBlink = () => {
+      armBlink(coffeeSeatBlinkGapMs(), coffeeSeatExtraBlinkCount());
     };
 
     arm(armNextBlink, startJitter);
@@ -224,14 +246,14 @@ export function CoffeeSeatPlateEmoji({
 
     const id = setInterval(() => {
       setThinkingSpinnerFrameIndex(
-        (index) => (index + 1) % COFFEE_SEAT_THINKING_SPINNER_FRAMES.length
+        (index) => (index + 1) % normalizedThinkingFrames.length
       );
     }, COFFEE_SEAT_THINKING_SPINNER_FRAME_MS);
 
     return () => {
       clearInterval(id);
     };
-  }, [thinkingSpinnerActive]);
+  }, [normalizedThinkingFrames.length, thinkingSpinnerActive]);
 
   const displayBlinkPhase: CoffeeSeatBlinkPhase =
     !enabled ||
@@ -271,8 +293,8 @@ export function CoffeeSeatPlateEmoji({
     (/[0oO]/.test(baseText) ||
       Array.from(baseText).some((glyph) => COFFEE_SEAT_SIP_MOUTH_GLYPHS.has(glyph)));
   const thinkingSpinnerGlyph =
-    COFFEE_SEAT_THINKING_SPINNER_FRAMES[
-      thinkingSpinnerFrameIndex % COFFEE_SEAT_THINKING_SPINNER_FRAMES.length
+    normalizedThinkingFrames[
+      thinkingSpinnerFrameIndex % normalizedThinkingFrames.length
     ];
 
   return (
@@ -295,7 +317,11 @@ export function CoffeeSeatPlateEmoji({
         faceFontWeight ||
         normalizedFaceEyeScale ||
         normalizedFaceEyeOffsetY ||
-        normalizedFaceBlinkBar !== DEFAULT_BOT_FACE_BLINK_BAR
+        normalizedFaceBlinkBar !== DEFAULT_BOT_FACE_BLINK_BAR ||
+        !botFaceThinkingFramesEqual(
+          normalizedThinkingFrames,
+          DEFAULT_BOT_FACE_THINKING_FRAMES
+        )
           ? "true"
           : undefined
       }
@@ -351,6 +377,9 @@ export function CoffeeSeatPlateEmoji({
               key={`${part}-${index}`}
               data-coffee-plate-emoji-glyph={glyph}
               data-coffee-plate-emoji-part={part}
+              data-coffee-plate-emoji-blink-glyph={
+                displayBlinkPhase === "closed" && part === "eyes" ? "true" : undefined
+              }
               data-crt-glyph-layer="true"
               data-crt-glyph-content={glyph}
               data-face-font={

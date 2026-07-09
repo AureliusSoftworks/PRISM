@@ -4,14 +4,19 @@ import { normalizeMemoryTier } from "./memory.ts";
 import type { ProviderName } from "./providers.ts";
 import {
   DEFAULT_BOT_FACE_BLINK_BAR,
+  DEFAULT_BOT_FACE_THINKING_FRAMES,
   normalizeBotFaceBlinkBar,
   normalizeBotFaceEyeCharacter,
   normalizeBotFaceEyeOffsetY,
   normalizeBotFaceEyeScale,
   normalizeBotFaceFontId,
   normalizeBotFaceFontWeight,
+  normalizeBotFaceMouthOffsetY,
+  parseStoredBotFaceThinkingFrames,
+  serializeBotFaceThinkingFrames,
   type BotFaceBlinkBar,
   type BotFaceFontId,
+  type BotFaceThinkingFrames,
 } from "@localai/shared";
 import {
   normalizeZenAskQuestionPatienceEnabled,
@@ -60,6 +65,7 @@ export interface BackupUserSettings {
   zenAskQuestionPatienceEnabled: boolean;
   zenAskQuestionPatienceMs: number;
   zenAutonomyEnabled: boolean;
+  prismDefaultBotFaceThinkingFrames?: BotFaceThinkingFrames | null;
   prismDefaultLlmModel: string;
   prismImageToolLlmModel: string;
   devMemoriesEnabled: boolean;
@@ -95,7 +101,9 @@ export interface BackupBotSnapshot {
   faceFontWeight?: number | null;
   faceEyeScale?: number | null;
   faceEyeOffsetY?: number | null;
+  faceMouthOffsetY?: number | null;
   faceBlinkBar?: BotFaceBlinkBar | null;
+  faceThinkingFrames?: BotFaceThinkingFrames | null;
   chatEnabled: boolean;
   visibility: "private" | "public";
   createdAt: string;
@@ -204,6 +212,7 @@ export function exportUserSnapshot(
          zen_ask_question_patience_enabled,
          zen_ask_question_patience_ms,
          zen_autonomy_enabled,
+         prism_default_bot_face_thinking_frames,
          prism_default_llm_model,
          prism_image_tool_llm_model,
          dev_memories_enabled,
@@ -255,6 +264,7 @@ export function exportUserSnapshot(
         zen_ask_question_patience_enabled: number | null;
         zen_ask_question_patience_ms: number | null;
         zen_autonomy_enabled: number | null;
+        prism_default_bot_face_thinking_frames: string | null;
         prism_default_llm_model: string | null;
         prism_image_tool_llm_model: string | null;
         dev_memories_enabled: number;
@@ -331,6 +341,10 @@ export function exportUserSnapshot(
         zenAutonomyEnabled: normalizeZenAutonomyEnabled(
           user.zen_autonomy_enabled
         ),
+        prismDefaultBotFaceThinkingFrames:
+          parseStoredBotFaceThinkingFrames(
+            user.prism_default_bot_face_thinking_frames
+          ) ?? DEFAULT_BOT_FACE_THINKING_FRAMES,
         prismDefaultLlmModel: user.prism_default_llm_model ?? "",
         prismImageToolLlmModel: user.prism_image_tool_llm_model ?? "",
         devMemoriesEnabled: user.dev_memories_enabled === 1,
@@ -405,7 +419,9 @@ export function exportUserSnapshot(
          face_font_weight,
          face_eye_scale,
          face_eye_offset_y,
+         face_mouth_offset_y,
          face_blink_bar,
+         face_thinking_frames,
          chat_enabled,
          visibility,
          created_at,
@@ -440,7 +456,9 @@ export function exportUserSnapshot(
     face_font_weight: number | null;
     face_eye_scale: number | null;
     face_eye_offset_y: number | null;
+    face_mouth_offset_y: number | null;
     face_blink_bar: string | null;
+    face_thinking_frames: string | null;
     chat_enabled: number;
     visibility: string | null;
     created_at: string;
@@ -554,9 +572,13 @@ export function exportUserSnapshot(
         faceFontWeight: normalizeBotFaceFontWeight(bot.face_font_weight),
         faceEyeScale: normalizeBotFaceEyeScale(bot.face_eye_scale),
         faceEyeOffsetY: normalizeBotFaceEyeOffsetY(bot.face_eye_offset_y),
+        faceMouthOffsetY: normalizeBotFaceMouthOffsetY(bot.face_mouth_offset_y),
         faceBlinkBar:
           normalizeBotFaceBlinkBar(bot.face_blink_bar) ??
           DEFAULT_BOT_FACE_BLINK_BAR,
+        faceThinkingFrames:
+          parseStoredBotFaceThinkingFrames(bot.face_thinking_frames) ??
+          DEFAULT_BOT_FACE_THINKING_FRAMES,
         chatEnabled: bot.chat_enabled !== 0,
         visibility: bot.visibility === "public" ? "public" : "private",
         createdAt: bot.created_at,
@@ -655,6 +677,7 @@ export function importUserSnapshot(
         zen_ask_question_patience_enabled = ?,
         zen_ask_question_patience_ms = ?,
         zen_autonomy_enabled = ?,
+        prism_default_bot_face_thinking_frames = ?,
         prism_default_llm_model = ?,
         prism_image_tool_llm_model = ?,
         dev_memories_enabled = ?,
@@ -719,6 +742,7 @@ export function importUserSnapshot(
       normalizeZenAskQuestionPatienceEnabled(settings.zenAskQuestionPatienceEnabled) ? 1 : 0,
       normalizeZenAskQuestionPatienceMs(settings.zenAskQuestionPatienceMs),
       normalizeZenAutonomyEnabled(settings.zenAutonomyEnabled) ? 1 : 0,
+      serializeBotFaceThinkingFrames(settings.prismDefaultBotFaceThinkingFrames),
       settings.prismDefaultLlmModel?.trim() ?? "",
       settings.prismImageToolLlmModel?.trim() ?? "",
       settings.devMemoriesEnabled ? 1 : 0,
@@ -765,12 +789,14 @@ export function importUserSnapshot(
         face_font_weight,
         face_eye_scale,
         face_eye_offset_y,
+        face_mouth_offset_y,
         face_blink_bar,
+        face_thinking_frames,
         chat_enabled,
         visibility,
         created_at,
         updated_at
-	      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const bot of snapshot.bots) {
       if (!bot || typeof bot.id !== "string" || bot.id.trim().length === 0) continue;
@@ -814,7 +840,9 @@ export function importUserSnapshot(
         normalizeBotFaceFontWeight(bot.faceFontWeight),
         normalizeBotFaceEyeScale(bot.faceEyeScale),
         normalizeBotFaceEyeOffsetY(bot.faceEyeOffsetY),
+        normalizeBotFaceMouthOffsetY(bot.faceMouthOffsetY),
         normalizeBotFaceBlinkBar(bot.faceBlinkBar) ?? DEFAULT_BOT_FACE_BLINK_BAR,
+        serializeBotFaceThinkingFrames(bot.faceThinkingFrames),
         bot.chatEnabled === false ? 0 : 1,
         bot.visibility === "public" ? "public" : "private",
         typeof bot.createdAt === "string" && bot.createdAt.trim().length > 0 ? bot.createdAt : now,

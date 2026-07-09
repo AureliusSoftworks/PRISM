@@ -108,12 +108,19 @@ export {
   BOT_FACE_EYE_SCALE_MAX,
   BOT_FACE_EYE_SCALE_MIN,
   BOT_FACE_EYE_SCALE_STEP,
+  BOT_FACE_MOUTH_OFFSET_Y_MAX,
+  BOT_FACE_MOUTH_OFFSET_Y_MIN,
+  BOT_FACE_MOUTH_OFFSET_Y_STEP,
+  BOT_FACE_THINKING_FRAME_COUNT,
   DEFAULT_BOT_FACE_BLINK_BAR,
   DEFAULT_BOT_FACE_EYE_CHARACTER,
   DEFAULT_BOT_FACE_EYE_OFFSET_Y,
   DEFAULT_BOT_FACE_EYE_SCALE,
   DEFAULT_BOT_FACE_FONT_ID,
   DEFAULT_BOT_FACE_FONT_WEIGHT,
+  DEFAULT_BOT_FACE_MOUTH_OFFSET_Y,
+  DEFAULT_BOT_FACE_THINKING_FRAMES,
+  botFaceThinkingFramesEqual,
   botFaceFontFromVoicePreset,
   isBotFaceFontId,
   normalizeBotFaceBlinkBar,
@@ -122,12 +129,17 @@ export {
   normalizeBotFaceEyeScale,
   normalizeBotFaceFontId,
   normalizeBotFaceFontWeight,
+  normalizeBotFaceMouthOffsetY,
+  normalizeBotFaceThinkingFrames,
+  parseStoredBotFaceThinkingFrames,
   randomBotFaceStyle,
   resolveBotFaceStyle,
+  serializeBotFaceThinkingFrames,
   type BotFaceBlinkBar,
   type BotFaceFontId,
   type BotFaceStyle,
   type BotFaceStyleInput,
+  type BotFaceThinkingFrames,
 } from "./botAvatar.js";
 
 export {
@@ -744,6 +756,12 @@ const COFFEE_CUP_TOP_OFF_PROGRESS_BY_FRAME_INDEX = [
   0.78,
   0.96,
 ] as const;
+export type CoffeeCupTempoRole = "normal" | "faster" | "slower";
+
+const COFFEE_CUP_FASTER_TEMPO_MULTIPLIER = 1.08;
+const COFFEE_CUP_SLOWER_TEMPO_MULTIPLIER = 0.93;
+const COFFEE_CUP_FASTER_TEMPO_SUFFIX = ":cup-tempo=faster";
+const COFFEE_CUP_SLOWER_TEMPO_SUFFIX = ":cup-tempo=slower";
 
 function clampCoffeeCupProgress(value: number): number {
   if (!Number.isFinite(value)) return 0;
@@ -768,8 +786,78 @@ function coffeeCupStableUnitValue(seed: string): number {
   return (hash >>> 0) / 0xffffffff;
 }
 
+function coffeeCupSeedWithoutTempoRole(seed: string): string {
+  if (seed.endsWith(COFFEE_CUP_FASTER_TEMPO_SUFFIX)) {
+    return seed.slice(0, -COFFEE_CUP_FASTER_TEMPO_SUFFIX.length);
+  }
+  if (seed.endsWith(COFFEE_CUP_SLOWER_TEMPO_SUFFIX)) {
+    return seed.slice(0, -COFFEE_CUP_SLOWER_TEMPO_SUFFIX.length);
+  }
+  return seed;
+}
+
+function coffeeCupTempoMultiplierForSeed(seed: string): number {
+  if (seed.endsWith(COFFEE_CUP_FASTER_TEMPO_SUFFIX)) {
+    return COFFEE_CUP_FASTER_TEMPO_MULTIPLIER;
+  }
+  if (seed.endsWith(COFFEE_CUP_SLOWER_TEMPO_SUFFIX)) {
+    return COFFEE_CUP_SLOWER_TEMPO_MULTIPLIER;
+  }
+  return 1;
+}
+
+export function coffeeCupSeedWithTempoRole(
+  seed: string,
+  role: CoffeeCupTempoRole
+): string {
+  const baseSeed = coffeeCupSeedWithoutTempoRole(seed);
+  switch (role) {
+    case "faster":
+      return `${baseSeed}${COFFEE_CUP_FASTER_TEMPO_SUFFIX}`;
+    case "slower":
+      return `${baseSeed}${COFFEE_CUP_SLOWER_TEMPO_SUFFIX}`;
+    case "normal":
+      return baseSeed;
+  }
+}
+
+export function coffeeCupTempoRoleForBot(args: {
+  sessionSeed: string;
+  botId: string;
+  seatBotIds: readonly (string | null)[];
+}): CoffeeCupTempoRole {
+  const seenBotIds = new Set<string>();
+  const activeBotIds: string[] = [];
+  for (const rawBotId of args.seatBotIds) {
+    const botId = rawBotId?.trim();
+    if (!botId || seenBotIds.has(botId)) continue;
+    seenBotIds.add(botId);
+    activeBotIds.push(botId);
+  }
+  const botId = args.botId.trim();
+  if (activeBotIds.length < 2 || !activeBotIds.includes(botId)) return "normal";
+
+  const sessionSeed = args.sessionSeed.trim() || "coffee";
+  const fasterIndex = coffeeCupStableIndex(
+    `${sessionSeed}:cup-tempo:faster`,
+    activeBotIds.length
+  );
+  const slowerCandidateIndex = coffeeCupStableIndex(
+    `${sessionSeed}:cup-tempo:slower`,
+    activeBotIds.length - 1
+  );
+  const slowerIndex =
+    slowerCandidateIndex >= fasterIndex
+      ? slowerCandidateIndex + 1
+      : slowerCandidateIndex;
+
+  if (activeBotIds[fasterIndex] === botId) return "faster";
+  if (activeBotIds[slowerIndex] === botId) return "slower";
+  return "normal";
+}
+
 export function coffeeCupSipBias(seed: string): number {
-  return coffeeCupStableUnitValue(`${seed}:sip-bias`);
+  return coffeeCupStableUnitValue(`${coffeeCupSeedWithoutTempoRole(seed)}:sip-bias`);
 }
 
 export function coffeeCupSessionDurationPaceMultiplier(
@@ -804,7 +892,10 @@ export function coffeeCupSipCycleMs(
   durationMinutes?: CoffeeSessionDurationMinutes | null
 ): number {
   const baseCycleMs = 34_000 - Math.round(coffeeCupSipBias(seed) * 15_000);
-  return Math.round(baseCycleMs * coffeeCupSessionDurationPaceMultiplier(durationMinutes));
+  return Math.round(
+    (baseCycleMs * coffeeCupSessionDurationPaceMultiplier(durationMinutes)) /
+      coffeeCupTempoMultiplierForSeed(seed)
+  );
 }
 
 export function coffeeCupConsumptionRate(
@@ -812,7 +903,10 @@ export function coffeeCupConsumptionRate(
   durationMinutes?: CoffeeSessionDurationMinutes | null
 ): number {
   const baseRate = 1.12 + coffeeCupSipBias(seed) * 0.58;
-  return baseRate / coffeeCupSessionDurationPaceMultiplier(durationMinutes);
+  return (
+    (baseRate * coffeeCupTempoMultiplierForSeed(seed)) /
+    coffeeCupSessionDurationPaceMultiplier(durationMinutes)
+  );
 }
 
 export function coffeeCupPacedProgress(
@@ -1000,6 +1094,7 @@ export function coffeeCupProgressAfterTopOff(args: {
   topOff?: CoffeeCupTopOffSnapshot | null;
   nowMs: number;
   durationMinutes?: CoffeeSessionDurationMinutes | null;
+  seed?: string | null;
   lowerProgressMeansConsumption?: boolean | null;
 }): number {
   const progress = clampCoffeeCupProgress(args.progress);
@@ -1013,9 +1108,13 @@ export function coffeeCupProgressAfterTopOff(args: {
   if (progressBefore <= progressAfter || progress <= progressAfter) return progress;
   const elapsedMs = Math.max(0, args.nowMs - toppedOffAtMs);
   const consumptionDurationMs = coffeeCupTopOffConsumptionDurationMs(args.durationMinutes);
+  const tempoRate =
+    typeof args.seed === "string" && args.seed.trim().length > 0
+      ? coffeeCupConsumptionRate(args.seed, args.durationMinutes)
+      : 1;
   const timedConsumedProgress = Math.max(
     0,
-    Math.min(1, elapsedMs / consumptionDurationMs)
+    Math.min(1, (elapsedMs / consumptionDurationMs) * tempoRate)
   );
   const explicitConsumedProgress =
     args.lowerProgressMeansConsumption === true

@@ -1,8 +1,8 @@
 /**
  * Coffee seat plate glyphs use a leading colon-style eye. Keep legacy `;` and
  * `>` strings blink-safe for older face snapshots.
- * Blinking swaps that character for a half-eye or non-collapsing whitespace so
- * the face reads as blinking without shifting the mouth.
+ * Blinking swaps that character for the configured closed-eye glyph without
+ * shifting the mouth.
  */
 import {
   DEFAULT_BOT_FACE_BLINK_BAR,
@@ -10,9 +10,7 @@ import {
   type BotFaceBlinkBar,
 } from "@localai/shared";
 
-export type CoffeeSeatBlinkPhase = "open" | "half" | "closed";
-
-export const COFFEE_SEAT_BLINK_HALF_EYE = DEFAULT_BOT_FACE_BLINK_BAR;
+export type CoffeeSeatBlinkPhase = "open" | "closed";
 
 export interface CoffeeSeatBlinkOptions {
   eyeCharacter?: string | null;
@@ -51,10 +49,7 @@ export function applyCoffeeSeatBlink(
     (customEye !== undefined && eye === customEye)
   ) {
     const rest = text.slice(eye.length);
-    if (phase === "half") {
-      return `${blinkBar}${rest}`;
-    }
-    return `\u00a0${rest}`;
+    return `${blinkBar}${rest}`;
   }
   return text;
 }

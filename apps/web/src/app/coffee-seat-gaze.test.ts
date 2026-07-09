@@ -68,7 +68,7 @@ describe("coffeeSeatCanvasLeftPercent", () => {
         phase: "live",
         autoplayDock: true,
       }),
-      25
+      22
     );
     assert.equal(
       coffeeSeatCanvasLeftPercent({
@@ -79,7 +79,7 @@ describe("coffeeSeatCanvasLeftPercent", () => {
         phase: "live",
         autoplayDock: true,
       }),
-      71
+      74
     );
   });
 

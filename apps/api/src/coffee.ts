@@ -105,8 +105,10 @@ import {
   coffeeCupProgressFromSessionTiming,
   coffeeCupPacedProgress,
   coffeeCupPromptCueForStatus,
+  coffeeCupSeedWithTempoRole,
   coffeeCupSipLikelihoodForProgress,
   coffeeCupStatusForProgress,
+  coffeeCupTempoRoleForBot,
   coffeeCupTopOffSnapshotForProgress,
   coffeeDepartureChanceFromSocial,
   coffeeMoodSaturationFromSocial,
@@ -224,7 +226,9 @@ export interface CoffeeBotProfile {
   faceFontWeight?: number | null;
   faceEyeScale?: number | null;
   faceEyeOffsetY?: number | null;
+  faceMouthOffsetY?: number | null;
   faceBlinkBar?: string | null;
+  faceThinkingFrames?: string | null;
   profilePictureImageId?: string | null;
   localModel: string | null;
   onlineModel: string | null;
@@ -881,7 +885,15 @@ function coffeeCupSeedForBot(args: {
       .filter((id): id is string => typeof id === "string" && id.trim().length > 0)
       .length - 1
   );
-  return `${args.conversationId}:${args.botId}:${seatIndex}:${layoutIndex}`;
+  const baseSeed = `${args.conversationId}:${args.botId}:${seatIndex}:${layoutIndex}`;
+  return coffeeCupSeedWithTempoRole(
+    baseSeed,
+    coffeeCupTempoRoleForBot({
+      sessionSeed: args.conversationId,
+      botId: args.botId,
+      seatBotIds: args.seatBotIds,
+    })
+  );
 }
 
 function countCoffeeAssistantTurnsForBot(
@@ -937,18 +949,15 @@ export function buildCoffeeDepartureOpportunity(args: {
     sessionRemainingMs,
     durationMinutes: args.durationMinutes,
   });
+  const coffeeCupSeed = coffeeCupSeedForBot({
+    conversationId: args.conversationId,
+    botId: args.speaker.id,
+    seatBotIds: args.seatBotIds,
+  });
   const pacedProgress =
     baseProgress === null
       ? null
-      : coffeeCupPacedProgress(
-          baseProgress,
-          coffeeCupSeedForBot({
-            conversationId: args.conversationId,
-            botId: args.speaker.id,
-            seatBotIds: args.seatBotIds,
-          }),
-          args.durationMinutes
-        );
+      : coffeeCupPacedProgress(baseProgress, coffeeCupSeed, args.durationMinutes);
   const visibleProgress =
     pacedProgress === null
       ? null
@@ -960,6 +969,7 @@ export function buildCoffeeDepartureOpportunity(args: {
               ? args.nowMs
               : Date.now(),
           durationMinutes: args.durationMinutes,
+          seed: coffeeCupSeed,
         });
   const emptyCup =
     visibleProgress !== null && visibleProgress >= COFFEE_DEPARTURE_EMPTY_PROGRESS;
@@ -4741,7 +4751,9 @@ type CoffeeBotProfileRow = {
   face_font_weight: number | null;
   face_eye_scale: number | null;
   face_eye_offset_y: number | null;
+  face_mouth_offset_y: number | null;
   face_blink_bar: string | null;
+  face_thinking_frames: string | null;
   profile_picture_image_id: string | null;
   model: string | null;
   local_model: string | null;
@@ -4772,7 +4784,10 @@ function mapCoffeeBotProfileRow(row: CoffeeBotProfileRow): CoffeeBotProfile {
     faceEyeScale: typeof row.face_eye_scale === "number" ? row.face_eye_scale : null,
     faceEyeOffsetY:
       typeof row.face_eye_offset_y === "number" ? row.face_eye_offset_y : null,
+    faceMouthOffsetY:
+      typeof row.face_mouth_offset_y === "number" ? row.face_mouth_offset_y : null,
     faceBlinkBar: row.face_blink_bar ?? null,
+    faceThinkingFrames: row.face_thinking_frames ?? null,
     profilePictureImageId: row.profile_picture_image_id ?? null,
     localModel: row.local_model ?? null,
     onlineModel: row.online_model ?? null,
@@ -4814,7 +4829,9 @@ function loadCoffeeGroupProfileRows(
               ${selectOptionalBotColumn("face_font_weight")},
               ${selectOptionalBotColumn("face_eye_scale")},
               ${selectOptionalBotColumn("face_eye_offset_y")},
+              ${selectOptionalBotColumn("face_mouth_offset_y")},
               ${selectOptionalBotColumn("face_blink_bar")},
+              ${selectOptionalBotColumn("face_thinking_frames")},
               ${selectOptionalBotColumn("profile_picture_image_id")},
               model, local_model, online_model,
               online_enabled, flirt_enabled, temperature, max_tokens,
@@ -8363,6 +8380,7 @@ export function buildSpeakerPrompt(args: {
                 topOff: coffeeCupTopOff,
                 nowMs: Date.now(),
                 durationMinutes: coffeeSessionDurationMinutes,
+                seed: coffeeCupStatusSeed,
               }),
               coffeeCupStatusSeed
             )
