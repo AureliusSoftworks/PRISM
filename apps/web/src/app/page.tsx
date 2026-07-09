@@ -29161,6 +29161,7 @@ function BotAvatarFontOption({
       className={styles.botAvatarFontOption}
       data-selected={selected ? "true" : undefined}
       aria-pressed={selected}
+      aria-label={`${BOT_FACE_FONT_LABELS[fontId]} ${part}`}
       onClick={onClick}
     >
       <span
@@ -29176,8 +29177,8 @@ function BotAvatarFontOption({
 }
 
 function botAvatarWeightLabel(weight: number): string {
-  if (weight <= 450) return "Deflated";
-  if (weight >= 750) return "Inflated";
+  if (weight <= 450) return "Thin";
+  if (weight >= 750) return "Bold";
   return "Balanced";
 }
 
@@ -29187,7 +29188,7 @@ function botAvatarEyeScaleLabel(scale: number): string {
 
 function botAvatarEyeOffsetYLabel(offsetY: number): string {
   if (Math.abs(offsetY) < BOT_FACE_EYE_OFFSET_Y_STEP / 2) return "Centered";
-  return `${Math.round(Math.abs(offsetY) * 100)}% ${offsetY < 0 ? "up" : "down"}`;
+  return `${Math.round(Math.abs(offsetY) * 100)}% ${offsetY < 0 ? "higher" : "lower"}`;
 }
 
 function botAvatarBlinkBarLabel(blinkBar: BotFaceBlinkBar): string {
@@ -29217,38 +29218,685 @@ const BOT_AVATAR_PREVIEW_MOUTH_SHAPES = [
   "open-small",
 ] as const satisfies readonly ZenLiveBotMouthShape[];
 
-type BotAvatarScreenMaskBlendMode =
-  | "normal"
-  | "multiply"
-  | "screen"
-  | "overlay"
-  | "soft-light"
-  | "hard-light"
-  | "color-dodge"
-  | "plus-lighter"
-  | "color"
-  | "luminosity";
+type BotAvatarPreviewMode = "idle" | "blink" | "talking" | "thinking";
 
-const BOT_AVATAR_SCREEN_MASK_BLEND_MODES = [
-  { value: "screen", label: "Screen" },
-  { value: "normal", label: "Normal" },
-  { value: "multiply", label: "Multiply" },
-  { value: "overlay", label: "Overlay" },
-  { value: "soft-light", label: "Soft light" },
-  { value: "hard-light", label: "Hard light" },
-  { value: "color-dodge", label: "Color dodge" },
-  { value: "plus-lighter", label: "Plus lighter" },
-  { value: "color", label: "Color" },
-  { value: "luminosity", label: "Luminosity" },
+const BOT_AVATAR_PREVIEW_MODES = [
+  { value: "idle", label: "Idle" },
+  { value: "blink", label: "Blink" },
+  { value: "talking", label: "Talking" },
+  { value: "thinking", label: "Thinking" },
 ] as const satisfies readonly {
-  value: BotAvatarScreenMaskBlendMode;
+  value: BotAvatarPreviewMode;
   label: string;
 }[];
 
-function botAvatarScreenMaskBlendModeForTheme(
-  theme: "light" | "dark"
-): BotAvatarScreenMaskBlendMode {
-  return theme === "light" ? "overlay" : "luminosity";
+interface BotAvatarFacePreset {
+  id: string;
+  label: string;
+  eyesFont: BotFaceFontId;
+  mouthFont: BotFaceFontId;
+  weight: number;
+  eyeScale: number;
+  eyeOffsetY: number;
+  eyeCharacter: string | null;
+  blinkBar: BotFaceBlinkBar;
+}
+
+const BOT_AVATAR_FACE_PRESETS = [
+  {
+    id: "classic",
+    label: "Classic",
+    eyesFont: "neutral",
+    mouthFont: "neutral",
+    weight: DEFAULT_BOT_FACE_STYLE.weight,
+    eyeScale: DEFAULT_BOT_FACE_STYLE.eyeScale,
+    eyeOffsetY: DEFAULT_BOT_FACE_STYLE.eyeOffsetY,
+    eyeCharacter: DEFAULT_BOT_FACE_STYLE.eyeCharacter,
+    blinkBar: DEFAULT_BOT_FACE_STYLE.blinkBar,
+  },
+  {
+    id: "soft",
+    label: "Soft",
+    eyesFont: "warm",
+    mouthFont: "warm",
+    weight: 575,
+    eyeScale: 1.05,
+    eyeOffsetY: 0,
+    eyeCharacter: DEFAULT_BOT_FACE_STYLE.eyeCharacter,
+    blinkBar: DEFAULT_BOT_FACE_STYLE.blinkBar,
+  },
+  {
+    id: "mono",
+    label: "Mono",
+    eyesFont: "concise",
+    mouthFont: "concise",
+    weight: 600,
+    eyeScale: 1,
+    eyeOffsetY: 0,
+    eyeCharacter: DEFAULT_BOT_FACE_STYLE.eyeCharacter,
+    blinkBar: DEFAULT_BOT_FACE_STYLE.blinkBar,
+  },
+  {
+    id: "bouncy",
+    label: "Bouncy",
+    eyesFont: "playful",
+    mouthFont: "playful",
+    weight: 625,
+    eyeScale: 1.05,
+    eyeOffsetY: -0.02,
+    eyeCharacter: DEFAULT_BOT_FACE_STYLE.eyeCharacter,
+    blinkBar: DEFAULT_BOT_FACE_STYLE.blinkBar,
+  },
+  {
+    id: "serif",
+    label: "Serif",
+    eyesFont: "formal",
+    mouthFont: "formal",
+    weight: 575,
+    eyeScale: 0.95,
+    eyeOffsetY: 0,
+    eyeCharacter: DEFAULT_BOT_FACE_STYLE.eyeCharacter,
+    blinkBar: DEFAULT_BOT_FACE_STYLE.blinkBar,
+  },
+] as const satisfies readonly BotAvatarFacePreset[];
+
+function BotAvatarPreviewModeIcon({
+  mode,
+}: {
+  mode: BotAvatarPreviewMode;
+}): React.JSX.Element {
+  if (mode === "blink") return <ScanLine size={13} strokeWidth={2.3} aria-hidden="true" />;
+  if (mode === "talking") return <Play size={13} strokeWidth={2.3} aria-hidden="true" />;
+  if (mode === "thinking") return <Timer size={13} strokeWidth={2.3} aria-hidden="true" />;
+  return <Pause size={13} strokeWidth={2.3} aria-hidden="true" />;
+}
+
+function botAvatarFaceIsDefault(args: {
+  faceEyesFont: BotFaceFontId;
+  faceEyeCharacter: string | null;
+  faceMouthFont: BotFaceFontId;
+  faceFontWeight: number;
+  faceEyeScale: number;
+  faceEyeOffsetY: number;
+  faceBlinkBar: BotFaceBlinkBar;
+}): boolean {
+  return (
+    args.faceEyesFont === DEFAULT_BOT_FACE_STYLE.eyesFont &&
+    args.faceEyeCharacter === DEFAULT_BOT_FACE_STYLE.eyeCharacter &&
+    args.faceMouthFont === DEFAULT_BOT_FACE_STYLE.mouthFont &&
+    args.faceFontWeight === DEFAULT_BOT_FACE_STYLE.weight &&
+    args.faceEyeScale === DEFAULT_BOT_FACE_STYLE.eyeScale &&
+    args.faceEyeOffsetY === DEFAULT_BOT_FACE_STYLE.eyeOffsetY &&
+    args.faceBlinkBar === DEFAULT_BOT_FACE_STYLE.blinkBar
+  );
+}
+
+function botAvatarPresetSelected(
+  preset: BotAvatarFacePreset,
+  args: {
+    faceEyesFont: BotFaceFontId;
+    faceEyeCharacter: string | null;
+    faceMouthFont: BotFaceFontId;
+    faceFontWeight: number;
+    faceEyeScale: number;
+    faceEyeOffsetY: number;
+    faceBlinkBar: BotFaceBlinkBar;
+  }
+): boolean {
+  return (
+    preset.eyesFont === args.faceEyesFont &&
+    preset.eyeCharacter === args.faceEyeCharacter &&
+    preset.mouthFont === args.faceMouthFont &&
+    preset.weight === args.faceFontWeight &&
+    preset.eyeScale === args.faceEyeScale &&
+    preset.eyeOffsetY === args.faceEyeOffsetY &&
+    preset.blinkBar === args.faceBlinkBar
+  );
+}
+
+function BotAvatarPreviewPanel({
+  titleName,
+  glyph,
+  scheduleKey,
+  isDefaultPrismBot,
+  previewTheme,
+  previewMode,
+  previewHovered,
+  previewTalking,
+  displayedPreviewMouthShape,
+  avatarStyle,
+  faceStyle,
+  previewSummary,
+  onPreviewThemeChange,
+  onPreviewModeChange,
+  onPreviewHoveredChange,
+}: {
+  titleName: string;
+  glyph: BotGlyphName;
+  scheduleKey: string;
+  isDefaultPrismBot: boolean;
+  previewTheme: "light" | "dark";
+  previewMode: BotAvatarPreviewMode;
+  previewHovered: boolean;
+  previewTalking: boolean;
+  displayedPreviewMouthShape: ZenLiveBotMouthShape;
+  avatarStyle: CSSProperties;
+  faceStyle: BotFaceStyle;
+  previewSummary: string;
+  onPreviewThemeChange: (theme: "light" | "dark") => void;
+  onPreviewModeChange: (mode: BotAvatarPreviewMode) => void;
+  onPreviewHoveredChange: (hovered: boolean) => void;
+}): React.JSX.Element {
+  const previewThinking = previewMode === "thinking";
+
+  return (
+    <section className={styles.botAvatarMannequinPanel} aria-label="Avatar preview">
+      <header className={styles.botAvatarPanelHeader}>
+        <div>
+          <span>Preview</span>
+          <strong>Live avatar</strong>
+        </div>
+        <div
+          className={styles.botAvatarPreviewThemeToggle}
+          role="group"
+          aria-label="Preview theme"
+        >
+          <button
+            type="button"
+            data-active={previewTheme === "dark" ? "true" : undefined}
+            aria-pressed={previewTheme === "dark"}
+            onClick={() => onPreviewThemeChange("dark")}
+          >
+            <Moon size={13} strokeWidth={2.2} aria-hidden="true" />
+            Dark
+          </button>
+          <button
+            type="button"
+            data-active={previewTheme === "light" ? "true" : undefined}
+            aria-pressed={previewTheme === "light"}
+            onClick={() => onPreviewThemeChange("light")}
+          >
+            <Sun size={13} strokeWidth={2.2} aria-hidden="true" />
+            Light
+          </button>
+        </div>
+      </header>
+      <div
+        className={styles.botAvatarMannequinStage}
+        data-app-cursor-theme={previewTheme}
+        data-preview-theme={previewTheme}
+      >
+        <div
+          className={styles.zenLiveBotPresencePlate}
+          data-theme={previewTheme}
+          data-mood="warm"
+          data-prism-mood="warm"
+          data-source={isDefaultPrismBot ? "prism" : "persona"}
+          data-prism-persona={isDefaultPrismBot ? "true" : undefined}
+          data-talking={previewTalking ? "true" : undefined}
+          data-mouth-open={
+            previewTalking
+              ? displayedPreviewMouthShape !== "closed"
+                ? "true"
+                : "false"
+              : undefined
+          }
+          data-mouth-shape={previewTalking ? displayedPreviewMouthShape : undefined}
+          data-canvas-side="left"
+          data-body-sized="true"
+          data-zen-live-bot-presence-plate="true"
+          data-avatar-customizer-preview="true"
+          data-avatar-preview-theme={previewTheme}
+          data-avatar-preview-mode={previewMode}
+          data-avatar-preview-hovered={previewHovered ? "true" : undefined}
+          style={avatarStyle}
+          role="img"
+          aria-label={`${titleName} avatar preview`}
+          onPointerEnter={() => onPreviewHoveredChange(true)}
+          onPointerLeave={() => onPreviewHoveredChange(false)}
+        >
+          <ZenLiveBotMannequin
+            glyph={glyph}
+            faceStyle={faceStyle}
+            voicePreset="warm"
+            isTalking={previewTalking}
+            blinkWhileTalking
+            mouthShape={displayedPreviewMouthShape}
+            moodHint="warm"
+            scheduleKey={`${scheduleKey}-${previewMode}`}
+            showThinkingSpinner={previewThinking}
+          />
+        </div>
+      </div>
+      <div className={styles.botAvatarPreviewToolbar}>
+        <div
+          className={styles.botAvatarPreviewModeToggle}
+          role="group"
+          aria-label="Preview expression"
+        >
+          {BOT_AVATAR_PREVIEW_MODES.map((mode) => (
+            <button
+              key={mode.value}
+              type="button"
+              data-active={previewMode === mode.value ? "true" : undefined}
+              aria-pressed={previewMode === mode.value}
+              onClick={() => onPreviewModeChange(mode.value)}
+            >
+              <BotAvatarPreviewModeIcon mode={mode.value} />
+              {mode.label}
+            </button>
+          ))}
+        </div>
+        <p className={styles.botAvatarPreviewMeta}>{previewSummary}</p>
+      </div>
+    </section>
+  );
+}
+
+function BotAvatarIdentityControls({
+  color,
+  glyph,
+  colorPickerOpen,
+  resolvedTheme,
+  onColorChange,
+  onGlyphChange,
+  onColorPickerToggle,
+}: {
+  color: string;
+  glyph: BotGlyphName;
+  colorPickerOpen: boolean;
+  resolvedTheme: "light" | "dark";
+  onColorChange: (next: string) => void;
+  onGlyphChange: (next: BotGlyphName) => void;
+  onColorPickerToggle: () => void;
+}): React.JSX.Element {
+  return (
+    <section className={styles.botAvatarControlGroup} aria-label="Identity">
+      <header className={styles.botAvatarControlGroupHeader}>
+        <span className={styles.botAvatarControlGroupIcon} aria-hidden="true">
+          <Brush size={16} strokeWidth={2.4} />
+        </span>
+        <div>
+          <strong>Identity</strong>
+          <small>Color and glyph</small>
+        </div>
+      </header>
+      <div className={styles.botAvatarIdentityPicker}>
+        <ColorGlyphPicker
+          color={color}
+          glyph={glyph}
+          onColorChange={onColorChange}
+          onGlyphChange={onGlyphChange}
+          open={colorPickerOpen}
+          onToggle={onColorPickerToggle}
+          ariaLabel="Bot color and glyph"
+          resolvedTheme={resolvedTheme}
+        />
+      </div>
+    </section>
+  );
+}
+
+function BotAvatarRangeControl({
+  label,
+  valueLabel,
+  min,
+  max,
+  step,
+  value,
+  leftLabel,
+  rightLabel,
+  onChange,
+}: {
+  label: string;
+  valueLabel: string;
+  min: number;
+  max: number;
+  step: number;
+  value: number;
+  leftLabel: string;
+  rightLabel: string;
+  onChange: (value: number) => void;
+}): React.JSX.Element {
+  return (
+    <label className={styles.botAvatarRangeControl}>
+      <span>
+        {label}
+        <strong>{valueLabel}</strong>
+      </span>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        aria-label={label}
+        onChange={(event) => onChange(Number(event.currentTarget.value))}
+      />
+      <div className={styles.botAvatarRangeEnds} aria-hidden="true">
+        <span>{leftLabel}</span>
+        <span>{rightLabel}</span>
+      </div>
+    </label>
+  );
+}
+
+function BotAvatarFaceControls({
+  faceEyesFont,
+  faceEyeCharacter,
+  faceMouthFont,
+  faceFontWeight,
+  faceEyeScale,
+  faceEyeOffsetY,
+  faceBlinkBar,
+  previewFaceSummary,
+  previewWeightSummary,
+  faceIsDefault,
+  onEyesFontChange,
+  onEyeCharacterChange,
+  onMouthFontChange,
+  onWeightChange,
+  onEyeScaleChange,
+  onEyeOffsetYChange,
+  onBlinkBarChange,
+  onApplyPreset,
+  onResetFace,
+}: {
+  faceEyesFont: BotFaceFontId;
+  faceEyeCharacter: string | null;
+  faceMouthFont: BotFaceFontId;
+  faceFontWeight: number;
+  faceEyeScale: number;
+  faceEyeOffsetY: number;
+  faceBlinkBar: BotFaceBlinkBar;
+  previewFaceSummary: string;
+  previewWeightSummary: string;
+  faceIsDefault: boolean;
+  onEyesFontChange: (fontId: BotFaceFontId) => void;
+  onEyeCharacterChange: (character: string | null) => void;
+  onMouthFontChange: (fontId: BotFaceFontId) => void;
+  onWeightChange: (weight: number) => void;
+  onEyeScaleChange: (scale: number) => void;
+  onEyeOffsetYChange: (offsetY: number) => void;
+  onBlinkBarChange: (blinkBar: BotFaceBlinkBar) => void;
+  onApplyPreset: (preset: BotAvatarFacePreset) => void;
+  onResetFace: () => void;
+}): React.JSX.Element {
+  const normalizedEyeGlyph = faceEyeCharacter ?? ":";
+  const blinkGlyph = botAvatarBlinkBarLabel(faceBlinkBar);
+
+  return (
+    <section className={styles.botAvatarControlGroup} aria-label="Face">
+      <header className={styles.botAvatarControlGroupHeader}>
+        <span className={styles.botAvatarControlGroupIcon} aria-hidden="true">
+          <Sparkles size={16} strokeWidth={2.4} />
+        </span>
+        <div>
+          <strong>Expression Kit</strong>
+          <small>{previewFaceSummary}</small>
+        </div>
+        <button
+          type="button"
+          className={styles.botAvatarSectionResetButton}
+          onClick={onResetFace}
+          disabled={faceIsDefault}
+        >
+          <RotateCcw size={13} strokeWidth={2.3} aria-hidden="true" />
+          Reset face
+        </button>
+      </header>
+      <div className={styles.botAvatarFaceControls}>
+        <fieldset className={styles.botAvatarPresetControl}>
+          <legend>Presets</legend>
+          <div className={styles.botAvatarPresetStrip}>
+            {BOT_AVATAR_FACE_PRESETS.map((preset) => {
+              const selected = botAvatarPresetSelected(preset, {
+                faceEyesFont,
+                faceEyeCharacter,
+                faceMouthFont,
+                faceFontWeight,
+                faceEyeScale,
+                faceEyeOffsetY,
+                faceBlinkBar,
+              });
+
+              return (
+                <button
+                  key={preset.id}
+                  type="button"
+                  className={styles.botAvatarPresetButton}
+                  data-selected={selected ? "true" : undefined}
+                  aria-pressed={selected}
+                  onClick={() => onApplyPreset(preset)}
+                >
+                  <span aria-hidden="true">
+                    <span
+                      className={styles.botAvatarFontOptionSample}
+                      data-face-font={preset.eyesFont}
+                    >
+                      ••
+                    </span>
+                    <span
+                      className={styles.botAvatarFontOptionSample}
+                      data-face-font={preset.mouthFont}
+                    >
+                      ━
+                    </span>
+                  </span>
+                  <strong>{preset.label}</strong>
+                </button>
+              );
+            })}
+          </div>
+        </fieldset>
+
+        <div className={styles.botAvatarExpressionMatrix}>
+          <fieldset className={styles.botAvatarExpressionRow}>
+            <legend>Eyes</legend>
+            <div className={styles.botAvatarFontOptions}>
+              {BOT_FACE_FONT_IDS.map((fontId) => (
+                <BotAvatarFontOption
+                  key={`avatar-eyes-${fontId}`}
+                  fontId={fontId}
+                  part="eyes"
+                  selected={faceEyesFont === fontId}
+                  onClick={() => onEyesFontChange(fontId)}
+                />
+              ))}
+            </div>
+          </fieldset>
+          <fieldset className={styles.botAvatarExpressionRow}>
+            <legend>Mouth</legend>
+            <div className={styles.botAvatarFontOptions}>
+              {BOT_FACE_FONT_IDS.map((fontId) => (
+                <BotAvatarFontOption
+                  key={`avatar-mouth-${fontId}`}
+                  fontId={fontId}
+                  part="mouth"
+                  selected={faceMouthFont === fontId}
+                  onClick={() => onMouthFontChange(fontId)}
+                />
+              ))}
+            </div>
+          </fieldset>
+        </div>
+
+        <div className={styles.botAvatarOverrideGrid}>
+          <label className={styles.botAvatarOverrideControl}>
+            <span>
+              <strong>Eye override</strong>
+              <small>{normalizedEyeGlyph}</small>
+            </span>
+            <span className={styles.botAvatarOverrideInputRow}>
+              <input
+                type="text"
+                value={faceEyeCharacter ?? ""}
+                placeholder=":"
+                inputMode="text"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+                aria-label="Eye override"
+                onChange={(event) =>
+                  onEyeCharacterChange(
+                    normalizeBotFaceEyeCharacter(event.currentTarget.value)
+                  )
+                }
+              />
+              <button
+                type="button"
+                className={styles.botAvatarInlineResetButton}
+                onClick={() => onEyeCharacterChange(DEFAULT_BOT_FACE_STYLE.eyeCharacter)}
+                disabled={faceEyeCharacter === DEFAULT_BOT_FACE_STYLE.eyeCharacter}
+                aria-label="Reset eye override"
+                title="Reset eye override"
+              >
+                <RotateCcw size={13} strokeWidth={2.3} aria-hidden="true" />
+              </button>
+            </span>
+          </label>
+          <label className={styles.botAvatarOverrideControl}>
+            <span>
+              <strong>Blink override</strong>
+              <small>{blinkGlyph}</small>
+            </span>
+            <span className={styles.botAvatarOverrideInputRow}>
+              <input
+                type="text"
+                value={botAvatarBlinkBarInputValue(faceBlinkBar)}
+                placeholder={DEFAULT_BOT_FACE_BLINK_BAR}
+                inputMode="text"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+                aria-label="Blink override"
+                onChange={(event) =>
+                  onBlinkBarChange(
+                    normalizeBotFaceBlinkBar(event.currentTarget.value) ??
+                      DEFAULT_BOT_FACE_BLINK_BAR
+                  )
+                }
+              />
+              <button
+                type="button"
+                className={styles.botAvatarInlineResetButton}
+                onClick={() => onBlinkBarChange(DEFAULT_BOT_FACE_STYLE.blinkBar)}
+                disabled={faceBlinkBar === DEFAULT_BOT_FACE_STYLE.blinkBar}
+                aria-label="Reset blink override"
+                title="Reset blink override"
+              >
+                <RotateCcw size={13} strokeWidth={2.3} aria-hidden="true" />
+              </button>
+            </span>
+          </label>
+        </div>
+
+        <div className={styles.botAvatarSliderStack}>
+          <BotAvatarRangeControl
+            label="Stroke weight"
+            valueLabel={previewWeightSummary}
+            min={BOT_FACE_FONT_WEIGHT_MIN}
+            max={BOT_FACE_FONT_WEIGHT_MAX}
+            step={BOT_FACE_FONT_WEIGHT_STEP}
+            value={faceFontWeight}
+            leftLabel="Thin"
+            rightLabel="Bold"
+            onChange={onWeightChange}
+          />
+          <BotAvatarRangeControl
+            label="Eye size"
+            valueLabel={botAvatarEyeScaleLabel(faceEyeScale)}
+            min={BOT_FACE_EYE_SCALE_MIN}
+            max={BOT_FACE_EYE_SCALE_MAX}
+            step={BOT_FACE_EYE_SCALE_STEP}
+            value={faceEyeScale}
+            leftLabel="Smaller"
+            rightLabel="Larger"
+            onChange={onEyeScaleChange}
+          />
+          <BotAvatarRangeControl
+            label="Eye position"
+            valueLabel={botAvatarEyeOffsetYLabel(faceEyeOffsetY)}
+            min={BOT_FACE_EYE_OFFSET_Y_MIN}
+            max={BOT_FACE_EYE_OFFSET_Y_MAX}
+            step={BOT_FACE_EYE_OFFSET_Y_STEP}
+            value={faceEyeOffsetY}
+            leftLabel="Higher"
+            rightLabel="Lower"
+            onChange={onEyeOffsetYChange}
+          />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function BotAvatarSavePrompt({
+  open,
+  saveError,
+  saving,
+  onSave,
+  onDiscard,
+  onCancel,
+}: {
+  open: boolean;
+  saveError: string | null;
+  saving: boolean;
+  onSave: () => void | Promise<void>;
+  onDiscard: () => void;
+  onCancel: () => void;
+}): React.JSX.Element | null {
+  if (!open) return null;
+
+  return (
+    <div
+      className={styles.botAvatarSavePromptBackdrop}
+      role="presentation"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onCancel();
+      }}
+    >
+      <section
+        className={styles.botAvatarSavePromptPanel}
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="bot-avatar-save-prompt-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <h2 id="bot-avatar-save-prompt-title">Do you want to save your changes?</h2>
+        {saveError ? (
+          <p className={styles.botAvatarSavePromptError} role="alert">
+            {saveError}
+          </p>
+        ) : null}
+        <div className={styles.botAvatarSavePromptActions}>
+          <button
+            type="button"
+            className={styles.botAvatarSavePromptCancel}
+            onClick={onCancel}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className={styles.botAvatarSavePromptDiscard}
+            onClick={onDiscard}
+            disabled={saving}
+          >
+            Don&apos;t Save
+          </button>
+          <button
+            type="button"
+            className={styles.botAvatarSavePromptSave}
+            onClick={() => void onSave()}
+            disabled={saving}
+          >
+            {saving ? "Saving..." : "Save"}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
 }
 
 function BotAvatarCustomizerModal({
@@ -29290,11 +29938,8 @@ function BotAvatarCustomizerModal({
   const [mouthPhase, setMouthPhase] = useState(0);
   const [previewHovered, setPreviewHovered] = useState(false);
   const [previewTheme, setPreviewTheme] = useState<"light" | "dark">(resolvedTheme);
-  const [screenMaskBlendMode, setScreenMaskBlendMode] =
-    useState<BotAvatarScreenMaskBlendMode>(() =>
-      botAvatarScreenMaskBlendModeForTheme(resolvedTheme)
-    );
-  const previewTalking = previewHovered;
+  const [previewMode, setPreviewMode] = useState<BotAvatarPreviewMode>("idle");
+  const previewTalking = previewMode === "talking" || (previewMode === "idle" && previewHovered);
   const previewMouthShape =
     BOT_AVATAR_PREVIEW_MOUTH_SHAPES[
       mouthPhase % BOT_AVATAR_PREVIEW_MOUTH_SHAPES.length
@@ -29316,14 +29961,26 @@ function BotAvatarCustomizerModal({
     "--zen-live-bot-avatar-body-size": `${bodySize}px`,
     "--zen-live-bot-glyph-x-anchor": "0px",
     "--zen-live-bot-glyph-y-anchor": `${Math.round(bodySize * 0.37)}px`,
-    "--bot-face-crt-screen-texture-blend-mode": screenMaskBlendMode,
+    "--bot-face-crt-screen-texture-blend-mode": "screen",
   } as CSSProperties;
+  const faceStyle = resolveBotFaceStyle(
+    {
+      faceEyesFont,
+      faceEyeCharacter,
+      faceMouthFont,
+      faceFontWeight,
+      faceEyeScale,
+      faceEyeOffsetY,
+      faceBlinkBar,
+    },
+    null
+  );
 
   useEffect(() => {
     if (!open) return;
     setPreviewTheme(resolvedTheme);
     setPreviewHovered(false);
-    setScreenMaskBlendMode(botAvatarScreenMaskBlendModeForTheme(resolvedTheme));
+    setPreviewMode("idle");
     setMouthPhase(0);
   }, [open, resolvedTheme]);
 
@@ -29354,7 +30011,36 @@ function BotAvatarCustomizerModal({
   const previewWeightSummary = `${botAvatarWeightLabel(faceFontWeight)} · ${faceFontWeight}`;
   const previewEyeTransformSummary =
     `${botAvatarEyeScaleLabel(faceEyeScale)} · ${botAvatarEyeOffsetYLabel(faceEyeOffsetY)}`;
-  const previewBlinkSummary = `Blink ${botAvatarBlinkBarLabel(faceBlinkBar)}`;
+  const previewSummary =
+    `${previewFaceSummary} · Stroke ${faceFontWeight} · ${previewEyeTransformSummary} · Blink ${botAvatarBlinkBarLabel(faceBlinkBar)}`;
+  const faceIsDefault = botAvatarFaceIsDefault({
+    faceEyesFont,
+    faceEyeCharacter,
+    faceMouthFont,
+    faceFontWeight,
+    faceEyeScale,
+    faceEyeOffsetY,
+    faceBlinkBar,
+  });
+  const saveButtonVisible = saving || hasUnsavedChanges;
+  const applyFacePreset = (preset: BotAvatarFacePreset) => {
+    onEyesFontChange(preset.eyesFont);
+    onEyeCharacterChange(preset.eyeCharacter);
+    onMouthFontChange(preset.mouthFont);
+    onWeightChange(preset.weight);
+    onEyeScaleChange(preset.eyeScale);
+    onEyeOffsetYChange(preset.eyeOffsetY);
+    onBlinkBarChange(preset.blinkBar);
+  };
+  const resetFace = () => {
+    onEyesFontChange(DEFAULT_BOT_FACE_STYLE.eyesFont);
+    onEyeCharacterChange(DEFAULT_BOT_FACE_STYLE.eyeCharacter);
+    onMouthFontChange(DEFAULT_BOT_FACE_STYLE.mouthFont);
+    onWeightChange(DEFAULT_BOT_FACE_STYLE.weight);
+    onEyeScaleChange(DEFAULT_BOT_FACE_STYLE.eyeScale);
+    onEyeOffsetYChange(DEFAULT_BOT_FACE_STYLE.eyeOffsetY);
+    onBlinkBarChange(DEFAULT_BOT_FACE_STYLE.blinkBar);
+  };
 
   const modal = (
     <div
@@ -29376,7 +30062,11 @@ function BotAvatarCustomizerModal({
           <div>
             <span>Avatar Studio</span>
             <h4 id="bot-avatar-customizer-title">{titleName}</h4>
-            <p>{identityControlsVisible ? "Identity and face." : "Default Prism face only."}</p>
+            <p>
+              {identityControlsVisible
+                ? "Identity and face."
+                : "Default Prism identity is fixed; customize its face."}
+            </p>
           </div>
           <div className={styles.botAvatarCustomizerHeaderActions}>
             <span
@@ -29385,16 +30075,18 @@ function BotAvatarCustomizerModal({
             >
               {saveStatusLabel}
             </span>
-            <button
-              type="button"
-              className={styles.botAvatarCustomizerSaveButton}
-              onClick={() => void onSave()}
-              disabled={!hasUnsavedChanges || saving}
-              data-dirty={hasUnsavedChanges ? "true" : undefined}
-            >
-              <IconSave />
-              {saving ? "Saving..." : "Save"}
-            </button>
+            {saveButtonVisible ? (
+              <button
+                type="button"
+                className={styles.botAvatarCustomizerSaveButton}
+                onClick={() => void onSave()}
+                disabled={!hasUnsavedChanges || saving}
+                data-dirty={hasUnsavedChanges ? "true" : undefined}
+              >
+                <IconSave />
+                {saving ? "Saving..." : "Save"}
+              </button>
+            ) : null}
             <button
               type="button"
               className={styles.botAvatarCustomizerCloseButton}
@@ -29406,290 +30098,58 @@ function BotAvatarCustomizerModal({
           </div>
         </header>
         <div className={styles.botAvatarCustomizerBody}>
-          <section className={styles.botAvatarMannequinPanel} aria-label="Avatar preview">
-            <header className={styles.botAvatarPanelHeader}>
-              <div>
-                <span>Preview</span>
-                <strong>Live avatar</strong>
-              </div>
-              <div className={styles.botAvatarPreviewHeaderControls}>
-                <label className={styles.botAvatarMaskBlendProbe}>
-                  <span>Mask</span>
-                  <select
-                    value={screenMaskBlendMode}
-                    onChange={(event) =>
-                      setScreenMaskBlendMode(
-                        event.currentTarget.value as BotAvatarScreenMaskBlendMode
-                      )
-                    }
-                    aria-label="Screen mask blend mode"
-                  >
-                    {BOT_AVATAR_SCREEN_MASK_BLEND_MODES.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <div
-                  className={styles.botAvatarPreviewThemeToggle}
-                  role="group"
-                  aria-label="Preview theme"
-                >
-                  <button
-                    type="button"
-                    data-active={previewTheme === "dark" ? "true" : undefined}
-                    aria-pressed={previewTheme === "dark"}
-                    onClick={() => {
-                      setPreviewTheme("dark");
-                      setScreenMaskBlendMode(botAvatarScreenMaskBlendModeForTheme("dark"));
-                    }}
-                  >
-                    <Moon size={13} strokeWidth={2.2} aria-hidden="true" />
-                    Dark
-                  </button>
-                  <button
-                    type="button"
-                    data-active={previewTheme === "light" ? "true" : undefined}
-                    aria-pressed={previewTheme === "light"}
-                    onClick={() => {
-                      setPreviewTheme("light");
-                      setScreenMaskBlendMode(botAvatarScreenMaskBlendModeForTheme("light"));
-                    }}
-                  >
-                    <Sun size={13} strokeWidth={2.2} aria-hidden="true" />
-                    Light
-                  </button>
-                </div>
-              </div>
-            </header>
-            <div
-              className={styles.botAvatarMannequinStage}
-              data-app-cursor-theme={previewTheme}
-              data-preview-theme={previewTheme}
-            >
-              <div
-                className={styles.zenLiveBotPresencePlate}
-                data-theme={previewTheme}
-                data-mood="warm"
-                data-prism-mood="warm"
-                data-source={isDefaultPrismBot ? "prism" : "persona"}
-                data-prism-persona={isDefaultPrismBot ? "true" : undefined}
-                data-talking={previewTalking ? "true" : undefined}
-                data-mouth-open={
-                  previewTalking
-                    ? displayedPreviewMouthShape !== "closed"
-                      ? "true"
-                      : "false"
-                    : undefined
-                }
-                data-mouth-shape={previewTalking ? displayedPreviewMouthShape : undefined}
-                data-canvas-side="left"
-                data-body-sized="true"
-                data-zen-live-bot-presence-plate="true"
-                data-avatar-customizer-preview="true"
-                data-avatar-preview-theme={previewTheme}
-                style={avatarStyle}
-                role="img"
-                aria-label={`${titleName} avatar preview`}
-                onPointerEnter={() => setPreviewHovered(true)}
-                onPointerLeave={() => setPreviewHovered(false)}
-              >
-                <ZenLiveBotMannequin
-                  glyph={glyph}
-                  faceStyle={{
-                    eyesFont: faceEyesFont,
-                    eyeCharacter: faceEyeCharacter,
-                    mouthFont: faceMouthFont,
-                    weight: faceFontWeight,
-                    eyeScale: faceEyeScale,
-                    eyeOffsetY: faceEyeOffsetY,
-                    blinkBar: faceBlinkBar,
-                  }}
-                  voicePreset="warm"
-                  isTalking={previewTalking}
-                  blinkWhileTalking
-                  mouthShape={displayedPreviewMouthShape}
-                  moodHint="warm"
-                  scheduleKey={scheduleKey}
-                />
-              </div>
-            </div>
-            <div className={styles.botAvatarPreviewMeta}>
-              <span>{previewFaceSummary}</span>
-              <span>{previewWeightSummary}</span>
-              <span>{previewEyeTransformSummary}</span>
-              <span>{previewBlinkSummary}</span>
-            </div>
-          </section>
+          <BotAvatarPreviewPanel
+            titleName={titleName}
+            glyph={glyph}
+            scheduleKey={scheduleKey}
+            isDefaultPrismBot={isDefaultPrismBot}
+            previewTheme={previewTheme}
+            previewMode={previewMode}
+            previewHovered={previewHovered}
+            previewTalking={previewTalking}
+            displayedPreviewMouthShape={displayedPreviewMouthShape}
+            avatarStyle={avatarStyle}
+            faceStyle={faceStyle}
+            previewSummary={previewSummary}
+            onPreviewThemeChange={setPreviewTheme}
+            onPreviewModeChange={setPreviewMode}
+            onPreviewHoveredChange={setPreviewHovered}
+          />
           <section className={styles.botAvatarControlPanel} aria-label="Avatar controls">
             <div className={styles.botAvatarControlStack}>
               {identityControlsVisible ? (
-                <section className={styles.botAvatarControlGroup} aria-label="Identity">
-                  <header className={styles.botAvatarControlGroupHeader}>
-                    <span className={styles.botAvatarControlGroupIcon} aria-hidden="true">
-                      <Brush size={16} strokeWidth={2.4} />
-                    </span>
-                    <div>
-                      <strong>Identity</strong>
-                      <small>Color and glyph</small>
-                    </div>
-                  </header>
-                  <div className={styles.botAvatarIdentityPicker}>
-                    <ColorGlyphPicker
-                      color={color}
-                      glyph={glyph}
-                      onColorChange={onColorChange}
-                      onGlyphChange={onGlyphChange}
-                      open={colorPickerOpen}
-                      onToggle={onColorPickerToggle}
-                      ariaLabel="Bot color and glyph"
-                      resolvedTheme={resolvedTheme}
-                    />
-                  </div>
-                </section>
+                <BotAvatarIdentityControls
+                  color={color}
+                  glyph={glyph}
+                  colorPickerOpen={colorPickerOpen}
+                  resolvedTheme={resolvedTheme}
+                  onColorChange={onColorChange}
+                  onGlyphChange={onGlyphChange}
+                  onColorPickerToggle={onColorPickerToggle}
+                />
               ) : null}
 
-              <section className={styles.botAvatarControlGroup} aria-label="Face">
-                <header className={styles.botAvatarControlGroupHeader}>
-                  <span className={styles.botAvatarControlGroupIcon} aria-hidden="true">
-                    <Sparkles size={16} strokeWidth={2.4} />
-                  </span>
-                  <div>
-                    <strong>Face</strong>
-                    <small>{previewFaceSummary}</small>
-                  </div>
-                </header>
-                <div className={styles.botAvatarFontControls}>
-                  <fieldset className={styles.botAvatarFontControl}>
-                    <legend>Eye style</legend>
-                    <div className={styles.botAvatarFontOptions}>
-                      {BOT_FACE_FONT_IDS.map((fontId) => (
-                        <BotAvatarFontOption
-                          key={`avatar-eyes-${fontId}`}
-                          fontId={fontId}
-                          part="eyes"
-                          selected={faceEyesFont === fontId}
-                          onClick={() => onEyesFontChange(fontId)}
-                        />
-                      ))}
-                    </div>
-                  </fieldset>
-                  <div className={styles.botAvatarEyeGlyphControls}>
-                    <label className={styles.botAvatarEyeCharacterControl}>
-                      <span>
-                        Eye character
-                        <strong>{faceEyeCharacter ?? ":"}</strong>
-                      </span>
-                      <input
-                        type="text"
-                        value={faceEyeCharacter ?? ""}
-                        placeholder=":"
-                        inputMode="text"
-                        autoCapitalize="off"
-                        autoCorrect="off"
-                        spellCheck={false}
-                        aria-label="Custom eye character"
-                        onChange={(event) =>
-                          onEyeCharacterChange(
-                            normalizeBotFaceEyeCharacter(event.currentTarget.value)
-                          )
-                        }
-                      />
-                    </label>
-                    <label className={styles.botAvatarEyeCharacterControl}>
-                      <span>
-                        Blink bar
-                        <strong>{botAvatarBlinkBarLabel(faceBlinkBar)}</strong>
-                      </span>
-                      <input
-                        type="text"
-                        value={botAvatarBlinkBarInputValue(faceBlinkBar)}
-                        placeholder={DEFAULT_BOT_FACE_BLINK_BAR}
-                        inputMode="text"
-                        autoCapitalize="off"
-                        autoCorrect="off"
-                        spellCheck={false}
-                        aria-label="Custom blink bar"
-                        onChange={(event) =>
-                          onBlinkBarChange(
-                            normalizeBotFaceBlinkBar(event.currentTarget.value) ??
-                              DEFAULT_BOT_FACE_BLINK_BAR
-                          )
-                        }
-                      />
-                    </label>
-                  </div>
-                  <fieldset className={styles.botAvatarFontControl}>
-                    <legend>Mouth style</legend>
-                    <div className={styles.botAvatarFontOptions}>
-                      {BOT_FACE_FONT_IDS.map((fontId) => (
-                        <BotAvatarFontOption
-                          key={`avatar-mouth-${fontId}`}
-                          fontId={fontId}
-                          part="mouth"
-                          selected={faceMouthFont === fontId}
-                          onClick={() => onMouthFontChange(fontId)}
-                        />
-                      ))}
-                    </div>
-                  </fieldset>
-                  <label className={styles.botAvatarWeightControl}>
-                    <span>
-                      Inflation
-                      <strong>{previewWeightSummary}</strong>
-                    </span>
-                    <input
-                      type="range"
-                      min={BOT_FACE_FONT_WEIGHT_MIN}
-                      max={BOT_FACE_FONT_WEIGHT_MAX}
-                      step={BOT_FACE_FONT_WEIGHT_STEP}
-                      value={faceFontWeight}
-                      onChange={(event) => onWeightChange(Number(event.currentTarget.value))}
-                    />
-                    <div className={styles.botAvatarWeightEnds} aria-hidden="true">
-                      <span>Deflate</span>
-                      <span>Inflate</span>
-                    </div>
-                  </label>
-                  <label className={styles.botAvatarWeightControl}>
-                    <span>
-                      Eye size
-                      <strong>{botAvatarEyeScaleLabel(faceEyeScale)}</strong>
-                    </span>
-                    <input
-                      type="range"
-                      min={BOT_FACE_EYE_SCALE_MIN}
-                      max={BOT_FACE_EYE_SCALE_MAX}
-                      step={BOT_FACE_EYE_SCALE_STEP}
-                      value={faceEyeScale}
-                      onChange={(event) => onEyeScaleChange(Number(event.currentTarget.value))}
-                    />
-                    <div className={styles.botAvatarWeightEnds} aria-hidden="true">
-                      <span>Smaller</span>
-                      <span>Larger</span>
-                    </div>
-                  </label>
-                  <label className={styles.botAvatarWeightControl}>
-                    <span>
-                      Eye height
-                      <strong>{botAvatarEyeOffsetYLabel(faceEyeOffsetY)}</strong>
-                    </span>
-                    <input
-                      type="range"
-                      min={BOT_FACE_EYE_OFFSET_Y_MIN}
-                      max={BOT_FACE_EYE_OFFSET_Y_MAX}
-                      step={BOT_FACE_EYE_OFFSET_Y_STEP}
-                      value={faceEyeOffsetY}
-                      onChange={(event) => onEyeOffsetYChange(Number(event.currentTarget.value))}
-                    />
-                    <div className={styles.botAvatarWeightEnds} aria-hidden="true">
-                      <span>Up</span>
-                      <span>Down</span>
-                    </div>
-                  </label>
-                </div>
-              </section>
+              <BotAvatarFaceControls
+                faceEyesFont={faceEyesFont}
+                faceEyeCharacter={faceEyeCharacter}
+                faceMouthFont={faceMouthFont}
+                faceFontWeight={faceFontWeight}
+                faceEyeScale={faceEyeScale}
+                faceEyeOffsetY={faceEyeOffsetY}
+                faceBlinkBar={faceBlinkBar}
+                previewFaceSummary={previewFaceSummary}
+                previewWeightSummary={previewWeightSummary}
+                faceIsDefault={faceIsDefault}
+                onEyesFontChange={onEyesFontChange}
+                onEyeCharacterChange={onEyeCharacterChange}
+                onMouthFontChange={onMouthFontChange}
+                onWeightChange={onWeightChange}
+                onEyeScaleChange={onEyeScaleChange}
+                onEyeOffsetYChange={onEyeOffsetYChange}
+                onBlinkBarChange={onBlinkBarChange}
+                onApplyPreset={applyFacePreset}
+                onResetFace={resetFace}
+              />
             </div>
             {saveError ? (
               <p className={styles.botAvatarSaveError} role="alert">
@@ -29701,55 +30161,16 @@ function BotAvatarCustomizerModal({
       </section>
     </div>
   );
-  const savePrompt = savePromptOpen ? (
-    <div
-      className={styles.botAvatarSavePromptBackdrop}
-      role="presentation"
-      onClick={(event) => {
-        if (event.target === event.currentTarget) onCancelSavePrompt();
-      }}
-    >
-      <section
-        className={styles.botAvatarSavePromptPanel}
-        role="alertdialog"
-        aria-modal="true"
-        aria-labelledby="bot-avatar-save-prompt-title"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <h2 id="bot-avatar-save-prompt-title">Do you want to save your changes?</h2>
-        {saveError ? (
-          <p className={styles.botAvatarSavePromptError} role="alert">
-            {saveError}
-          </p>
-        ) : null}
-        <div className={styles.botAvatarSavePromptActions}>
-          <button
-            type="button"
-            className={styles.botAvatarSavePromptCancel}
-            onClick={onCancelSavePrompt}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            className={styles.botAvatarSavePromptDiscard}
-            onClick={onDiscard}
-            disabled={saving}
-          >
-            Don&apos;t Save
-          </button>
-          <button
-            type="button"
-            className={styles.botAvatarSavePromptSave}
-            onClick={() => void onSave()}
-            disabled={saving}
-          >
-            {saving ? "Saving..." : "Save"}
-          </button>
-        </div>
-      </section>
-    </div>
-  ) : null;
+  const savePrompt = (
+    <BotAvatarSavePrompt
+      open={savePromptOpen}
+      saveError={saveError}
+      saving={saving}
+      onSave={onSave}
+      onDiscard={onDiscard}
+      onCancel={onCancelSavePrompt}
+    />
+  );
 
   if (typeof document === "undefined") return (
     <>

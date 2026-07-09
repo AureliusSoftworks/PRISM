@@ -50,20 +50,24 @@ test("avatar customizer supports one-character eye overrides", () => {
   assert.match(pageSource, /handleNewBotFaceEyeScaleChange\(normalizedScale\);/);
   assert.match(pageSource, /handleNewBotFaceEyeOffsetYChange\(normalizedOffsetY\);/);
   assert.match(pageSource, /handleNewBotFaceBlinkBarChange\(normalizedBlinkBar\);/);
-  assert.match(pageSource, /eyeCharacter: faceEyeCharacter/);
-  assert.match(pageSource, /eyeScale: faceEyeScale/);
-  assert.match(pageSource, /eyeOffsetY: faceEyeOffsetY/);
-  assert.match(pageSource, /blinkBar: faceBlinkBar/);
+  assert.match(pageSource, /const faceStyle = resolveBotFaceStyle\(/);
+  assert.match(pageSource, /faceEyeCharacter,/);
+  assert.match(pageSource, /faceEyeScale,/);
+  assert.match(pageSource, /faceEyeOffsetY,/);
+  assert.match(pageSource, /faceBlinkBar,/);
   assert.match(pageSource, /botAvatarBlinkBarInputValue\(faceBlinkBar\)/);
-  assert.match(pageSource, /placeholder=\{DEFAULT_BOT_FACE_BLINK_BAR\}/);
-  assert.match(pageSource, /aria-label="Custom blink bar"/);
-  assert.match(cssSource, /\.botAvatarEyeCharacterControl/);
-  assert.match(cssSource, /\.botAvatarEyeGlyphControls/);
-  assert.doesNotMatch(cssSource, /\.botAvatarBlinkOptions/);
-  assert.match(pageSource, />\s*Eye size\s*</);
-  assert.match(pageSource, />\s*Eye height\s*</);
-  assert.match(pageSource, />\s*Blink bar\s*</);
-  assert.doesNotMatch(pageSource, /BOT_AVATAR_BLINK_BAR_OPTIONS/);
+  assert.match(cssSource, /\.botAvatarOverrideControl/);
+  assert.match(cssSource, /\.botAvatarInlineResetButton/);
+  assert.match(pageSource, />\s*Eye override\s*</);
+  assert.match(pageSource, />\s*Blink override\s*</);
+  assert.match(pageSource, /aria-label="Blink override"/);
+  assert.match(pageSource, /label="Eye size"/);
+  assert.match(pageSource, /label="Eye position"/);
+  assert.match(pageSource, /label="Stroke weight"/);
+  assert.doesNotMatch(pageSource, />\s*Inflation\s*</);
+  assert.doesNotMatch(pageSource, />\s*Eye height\s*</);
+  assert.doesNotMatch(pageSource, />\s*Blink bar\s*</);
+  assert.doesNotMatch(pageSource, /aria-label="Custom blink bar"/);
 });
 
 test("avatar face edits autosave immediately to saved bots", () => {
@@ -116,6 +120,8 @@ test("avatar customizer keeps explicit save and dirty prompts for broader edits"
   assert.match(pageSource, /async function saveBot\(id: string\): Promise<boolean>/);
   assert.doesNotMatch(pageSource, /flushBotAvatarLiveSave/);
   assert.doesNotMatch(pageSource, /BotAvatarLiveSavePatch/);
+  assert.match(pageSource, /const saveButtonVisible = saving \|\| hasUnsavedChanges;/);
+  assert.match(pageSource, /\{saveButtonVisible \? \(/);
 
   const saveButtonRule = cssRuleBody(".botProfileBuilderHeader .botAvatarCustomizerSaveButton");
   assert.match(saveButtonRule, /min-width:\s*92px;/);
@@ -127,7 +133,7 @@ test("avatar customizer keeps explicit save and dirty prompts for broader edits"
   assert.match(promptBackdropRule, /z-index:\s*3010;/);
   assert.match(promptBackdropRule, /place-items:\s*center;/);
   assert.match(cssRuleBody(".botAvatarPanelHeader"), /justify-content:\s*space-between;/);
-  assert.match(cssRuleBody(".botAvatarPreviewMeta"), /flex-wrap:\s*wrap;/);
+  assert.match(cssSource, /\.botAvatarPreviewToolbar\s*\{[\s\S]*display:\s*grid;/);
 });
 
 test("avatar summary card previews identity, eyes, and mouth", () => {
@@ -183,7 +189,7 @@ test("default Prism bot card opens an avatar-only customizer path", () => {
   assert.match(pageSource, /identityControlsVisible\?: boolean;/);
   assert.match(pageSource, /identityControlsVisible = true/);
   assert.match(pageSource, /identityControlsVisible=\{!editingDefaultBot\}/);
-  assert.match(pageSource, /Default Prism face only\./);
+  assert.match(pageSource, /Default Prism identity is fixed; customize its face\./);
   assert.match(pageSource, /\{identityControlsVisible \? \(/);
   assert.match(pageSource, /const defaultBotCardGlyph = DEFAULT_PRISM_BOT_GLYPH;/);
   assert.match(pageSource, /const defaultBotCardStyle = undefined;/);
@@ -262,22 +268,34 @@ test("avatar customization modal is a contained foreground sheet", () => {
 
 test("avatar customizer uses a studio preview and grouped editor controls", () => {
   assert.match(pageSource, /<span>Avatar Studio<\/span>/);
+  assert.match(pageSource, /function BotAvatarPreviewPanel\(/);
+  assert.match(pageSource, /function BotAvatarIdentityControls\(/);
+  assert.match(pageSource, /function BotAvatarFaceControls\(/);
+  assert.match(pageSource, /function BotAvatarSavePrompt\(/);
   assert.match(pageSource, /className=\{styles\.botAvatarPanelHeader\}/);
-  assert.match(pageSource, /className=\{styles\.botAvatarPreviewHeaderControls\}/);
+  assert.match(pageSource, /className=\{styles\.botAvatarPreviewToolbar\}/);
   assert.match(pageSource, /className=\{styles\.botAvatarPreviewMeta\}/);
   assert.match(pageSource, /className=\{styles\.botAvatarControlStack\}/);
+  assert.match(pageSource, /className=\{styles\.botAvatarPresetStrip\}/);
+  assert.match(pageSource, /className=\{styles\.botAvatarExpressionMatrix\}/);
+  assert.match(pageSource, /className=\{styles\.botAvatarSliderStack\}/);
   assert.match(pageSource, /aria-label="Identity"[\s\S]*<Brush size=\{16\}/);
   assert.match(pageSource, /aria-label="Face"[\s\S]*<Sparkles size=\{16\}/);
   assert.match(pageSource, /const previewFaceSummary =/);
   assert.match(pageSource, /const previewWeightSummary =/);
+  assert.match(pageSource, /const BOT_AVATAR_FACE_PRESETS = \[/);
+  assert.match(pageSource, /Classic/);
+  assert.match(pageSource, /Bouncy/);
+  assert.match(pageSource, /Reset face/);
+  assert.doesNotMatch(pageSource, /BOT_AVATAR_SCREEN_MASK_BLEND_MODES/);
+  assert.doesNotMatch(pageSource, /Screen mask blend mode/);
 
-  const controlGroupRule = cssRuleBody(".botAvatarControlGroup");
-  assert.match(controlGroupRule, /border-radius:\s*13px;/);
-  assert.match(controlGroupRule, /background:\s*[\s\S]*linear-gradient/);
-  assert.match(cssRuleBody(".botAvatarControlGroupHeader"), /grid-template-columns:\s*34px minmax\(0,\s*1fr\);/);
-  assert.match(cssRuleBody(".botAvatarControlGroupIcon"), /place-items:\s*center;/);
-  assert.match(cssRuleBody(".botAvatarPreviewHeaderControls"), /justify-content:\s*flex-end;/);
-  assert.match(cssRuleBody(".botAvatarMaskBlendProbe"), /border:\s*1px dashed/);
+  assert.match(cssSource, /\.botAvatarControlGroup\s*\{[\s\S]*border-radius:\s*8px;/);
+  assert.match(cssSource, /\.botAvatarControlGroupHeader\s*\{[\s\S]*grid-template-columns:\s*34px minmax\(0,\s*1fr\) auto;/);
+  assert.match(cssSource, /\.botAvatarPresetStrip\s*\{[\s\S]*grid-template-columns:\s*repeat\(5,\s*minmax\(0,\s*1fr\)\);/);
+  assert.match(cssSource, /\.botAvatarPreviewModeToggle\s*\{[\s\S]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\);/);
+  assert.match(cssSource, /\.botAvatarSectionResetButton/);
+  assert.match(cssSource, /\.botAvatarRangeControl/);
   assert.match(cssRuleBody(".botAvatarIdentityPicker .colorSwatchButton"), /width:\s*72px;/);
   const avatarSwatchGlyphRule = cssRuleBody(
     ".botAvatarIdentityPicker .colorPickerWrapper .colorSwatchButton > svg"
@@ -289,94 +307,6 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   const stageRule = cssRuleBody(".botAvatarMannequinStage");
   assert.match(stageRule, /background-size:\s*34px 34px,\s*34px 34px,\s*auto;/);
   assert.doesNotMatch(stageRule, /radial-gradient/);
-});
-
-test("avatar customizer exposes a temporary CRT screen mask blend tester", () => {
-  assert.match(pageSource, /type BotAvatarScreenMaskBlendMode =/);
-  assert.match(pageSource, /const BOT_AVATAR_SCREEN_MASK_BLEND_MODES =/);
-  assert.match(
-    pageSource,
-    /function botAvatarScreenMaskBlendModeForTheme\(\s*theme: "light" \| "dark"\s*\): BotAvatarScreenMaskBlendMode/
-  );
-  assert.match(pageSource, /return theme === "light" \? "overlay" : "luminosity";/);
-  assert.match(
-    pageSource,
-    /useState<BotAvatarScreenMaskBlendMode>\(\(\) =>\s*botAvatarScreenMaskBlendModeForTheme\(resolvedTheme\)\s*\)/
-  );
-  assert.match(
-    pageSource,
-    /setScreenMaskBlendMode\(botAvatarScreenMaskBlendModeForTheme\(resolvedTheme\)\)/
-  );
-  assert.match(
-    pageSource,
-    /setPreviewTheme\("dark"\);[\s\S]*?setScreenMaskBlendMode\(botAvatarScreenMaskBlendModeForTheme\("dark"\)\);/
-  );
-  assert.match(
-    pageSource,
-    /setPreviewTheme\("light"\);[\s\S]*?setScreenMaskBlendMode\(botAvatarScreenMaskBlendModeForTheme\("light"\)\);/
-  );
-  assert.match(
-    pageSource,
-    /"--bot-face-crt-screen-texture-blend-mode": screenMaskBlendMode/
-  );
-  assert.match(pageSource, /aria-label="Screen mask blend mode"/);
-  assert.match(pageSource, /setScreenMaskBlendMode\(\s*event\.currentTarget\.value as BotAvatarScreenMaskBlendMode\s*\)/);
-  for (const blendMode of [
-    "normal",
-    "multiply",
-    "screen",
-    "overlay",
-    "soft-light",
-    "hard-light",
-    "color-dodge",
-    "plus-lighter",
-    "color",
-    "luminosity",
-  ]) {
-    assert.match(pageSource, new RegExp(`value: "${blendMode}"`));
-  }
-  const textureRule = cssRuleBody(".zenLiveBotPresenceFaceEmissionMask::before");
-  assert.match(textureRule, /radial-gradient\(/);
-  assert.match(
-    textureRule,
-    /var\(--bot-face-crt-color\) var\(--bot-face-crt-screen-texture-tint-strength\)/
-  );
-  assert.match(
-    textureRule,
-    /background-blend-mode:\s*var\(--bot-face-crt-screen-texture-blend-mode,\s*screen\)\s*;/
-  );
-  assert.match(
-    textureRule,
-    /mix-blend-mode:\s*var\(--bot-face-crt-screen-texture-blend-mode,\s*screen\)\s*;/
-  );
-  const sharedTextureScopeRule = cssRuleBody(".zenLiveBotPresenceFaceEmissionMask");
-  assert.match(
-    sharedTextureScopeRule,
-    /--bot-face-crt-screen-texture-opacity:\s*0\.22\s*;/
-  );
-  assert.match(
-    sharedTextureScopeRule,
-    /--bot-face-crt-screen-texture-tint-strength:\s*48%\s*;/
-  );
-  const livePlateRule = cssRuleBody(".zenLiveBotPresencePlate");
-  assert.match(
-    livePlateRule,
-    /--bot-face-crt-screen-texture-blend-mode:\s*luminosity\s*;/
-  );
-  const darkThemeRule = cssRuleBody('.zenLiveBotPresencePlate[data-theme="dark"]');
-  assert.match(
-    darkThemeRule,
-    /--bot-face-crt-screen-texture-blend-mode:\s*luminosity\s*;/
-  );
-  const lightThemeRule = cssRuleBody('.zenLiveBotPresencePlate[data-theme="light"]');
-  assert.match(
-    lightThemeRule,
-    /--bot-face-crt-screen-texture-blend-mode:\s*overlay\s*;/
-  );
-  assert.doesNotMatch(
-    cssSource,
-    /\.botAvatarMannequinStage\s+\.zenLiveBotPresenceFaceEmissionMask(?:::before)?\s*\{/
-  );
 });
 
 test("avatar preview theme keeps persona ink on normalized color without Prism rainbow aura", () => {
@@ -402,8 +332,8 @@ test("avatar preview theme keeps persona ink on normalized color without Prism r
   assert.match(pageSource, /data-avatar-preview-theme=\{previewTheme\}/);
   assert.match(pageSource, /data-theme=\{previewTheme\}/);
   assert.match(pageSource, /resolvedTheme=\{resolvedTheme\}/);
-  assert.match(pageSource, /setPreviewTheme\("light"\)/);
-  assert.match(pageSource, /setPreviewTheme\("dark"\)/);
+  assert.match(pageSource, /onPreviewThemeChange\("light"\)/);
+  assert.match(pageSource, /onPreviewThemeChange\("dark"\)/);
   assert.match(cssSource, /\.botAvatarPreviewThemeToggle/);
   assert.match(cssSource, /\.botAvatarMannequinStage\[data-preview-theme="light"\]/);
   assert.match(pageSource, /"--zen-live-bot-avatar-size": `\$\{BOT_AVATAR_CUSTOMIZER_AVATAR_SIZE_PX\}px`/);
@@ -455,6 +385,10 @@ test("avatar preview theme keeps persona ink on normalized color without Prism r
     '.botAvatarMannequinStage .zenLiveBotPresencePlate[data-avatar-customizer-preview="true"]'
   );
   assert.match(previewPlateRule, /transform:\s*scale\(1\)\s*;/);
+  assert.match(
+    cssSource,
+    /\.botAvatarMannequinStage \.zenLiveBotPresencePlate\[data-avatar-customizer-preview="true"\]\s*\{[\s\S]*transform:\s*translateY\(-8px\) scale\(1\.16\);/
+  );
   assert.doesNotMatch(previewPlateRule, /scale\(1\.28\)/);
   const previewBodyRule = cssRuleBody(".botAvatarMannequinStage .zenLiveBotPresenceBody");
   assert.match(previewBodyRule, /pointer-events:\s*auto\s*;/);
@@ -486,25 +420,35 @@ test("avatar preview theme keeps persona ink on normalized color without Prism r
   );
 });
 
-test("avatar customizer preview uses ordinary avatar-only framing", () => {
+test("avatar customizer preview uses tightened studio framing", () => {
   const stageRule = cssRuleBody(".botAvatarMannequinStage");
   assert.match(stageRule, /min-height:\s*640px\s*;/);
   assert.match(stageRule, /padding:\s*24px\s*;/);
   assert.match(stageRule, /overflow:\s*visible\s*;/);
+  assert.match(cssSource, /\.botAvatarMannequinStage\s*\{[\s\S]*min-height:\s*clamp\(500px,\s*calc\(100dvh - 318px\),\s*620px\);/);
+  assert.match(cssSource, /\.botAvatarMannequinStage\s*\{[\s\S]*padding:\s*18px;/);
 });
 
-test("avatar customizer preview only talks while hovered", () => {
+test("avatar customizer preview has explicit expression states", () => {
   assert.match(pageSource, /const \[previewHovered, setPreviewHovered\] = useState\(false\)/);
-  assert.match(pageSource, /const previewTalking = previewHovered;/);
+  assert.match(pageSource, /const \[previewMode, setPreviewMode\] = useState<BotAvatarPreviewMode>\("idle"\)/);
+  assert.match(pageSource, /type BotAvatarPreviewMode = "idle" \| "blink" \| "talking" \| "thinking";/);
+  assert.match(pageSource, /const BOT_AVATAR_PREVIEW_MODES = \[/);
+  assert.match(pageSource, /const previewTalking = previewMode === "talking" \|\| \(previewMode === "idle" && previewHovered\);/);
+  assert.doesNotMatch(pageSource, /const previewTalking = previewHovered;/);
   assert.match(pageSource, /blinkWhileTalking/);
   assert.match(pageSource, /if \(!open \|\| !previewTalking\) \{\s*setMouthPhase\(0\);\s*return;\s*\}/);
   assert.match(pageSource, /\}, \[open, previewTalking\]\);/);
   assert.match(pageSource, /data-talking=\{previewTalking \? "true" : undefined\}/);
   assert.match(pageSource, /data-mouth-shape=\{previewTalking \? displayedPreviewMouthShape : undefined\}/);
-  assert.match(pageSource, /onPointerEnter=\{\(\) => setPreviewHovered\(true\)\}/);
-  assert.match(pageSource, /onPointerLeave=\{\(\) => setPreviewHovered\(false\)\}/);
+  assert.match(pageSource, /data-avatar-preview-mode=\{previewMode\}/);
+  assert.match(pageSource, /onPreviewModeChange=\{setPreviewMode\}/);
+  assert.match(pageSource, /onPointerEnter=\{\(\) => onPreviewHoveredChange\(true\)\}/);
+  assert.match(pageSource, /onPointerLeave=\{\(\) => onPreviewHoveredChange\(false\)\}/);
   assert.match(pageSource, /isTalking=\{previewTalking\}/);
   assert.match(pageSource, /blinkWhileTalking\s+mouthShape=\{displayedPreviewMouthShape\}/);
+  assert.match(pageSource, /showThinkingSpinner=\{previewThinking\}/);
+  assert.match(cssSource, /\[data-avatar-preview-mode="blink"\][\s\S]*--eye-blink-scale-y:\s*0\.13;/);
   assert.doesNotMatch(pageSource, /data-talking="true"/);
   assert.doesNotMatch(pageSource, /\s+isTalking\s+mouthShape=\{previewMouthShape\}/);
 });
