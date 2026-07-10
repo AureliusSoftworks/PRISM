@@ -33,6 +33,8 @@ Automation support:
 
 - `.github/workflows/release-main.yml` — top-level release entrypoint
 - `.github/workflows/release-desktop-all.yml` — builds and uploads desktop artifacts
+- `.github/workflows/release-desktop-steam.yml` — exports Steam depots and can
+  upload a smoke-tested desktop release to a Steam prerelease branch
 
 `release-main.yml` dispatches the desktop matrix workflow and should be treated
 as the canonical operator trigger.
@@ -64,9 +66,35 @@ Before publishing any draft:
 - install and launch each desktop artifact on a clean environment
 - verify local API/web startup and first-run dependency checks
 - verify release notes
-- verify free-download/support copy and installer readiness
+- verify Steam/GitHub channel copy and installer readiness
 
 Publish is an explicit human decision after these checks.
+
+## Steam Release Lane
+
+Steam is an additional desktop lane, not a replacement for the free GitHub
+release baseline. Start from an already-built `desktop/v<version>` release.
+
+Prerequisites:
+- Steamworks partner/app setup is complete, with a Prism Desktop App ID and
+  Windows, macOS, and Linux depot IDs.
+- Steam app type, package/free-product setup, and branch names are recorded.
+- Steam Content Survey answers are ready, especially the live-generated AI
+  disclosure and guardrails.
+- Store presence copy and screenshots describe only shipped functionality.
+
+Operator flow:
+
+1. Complete the normal desktop release draft and smoke-test all platform artifacts.
+2. Dispatch `.github/workflows/release-desktop-steam.yml` with
+   `publish_to_steam=false` to export and inspect `steam-build`.
+3. Run the same workflow with `publish_to_steam=true` only after Jared confirms
+   the Steam App ID, depot IDs, branch, and smoke-test gate.
+4. Upload to a private or prerelease branch first; do not set the default branch
+   live until Valve build review and Jared approval are complete.
+5. Submit store presence and build review through Steamworks, then release
+   manually from Steamworks when the page/build are approved and the Coming Soon
+   timing requirement is satisfied.
 
 ## Operator Checklist
 
@@ -77,6 +105,9 @@ Use this order on `main` after merging `dev`:
 3. Wait for matrix packaging and artifact uploads to finish
 4. Smoke-test each platform artifact
 5. Publish draft when validated
-6. Post release links to download channels and the optional Patreon support page
+6. Post release links to the active Steam and/or GitHub download channels
+
+For Steam, run the Steam release lane only after the draft desktop artifacts are
+validated and the Steam-specific policy/store/build gates are satisfied.
 
 Do not merge, tag, publish, or trigger store upload without explicit human confirmation in chat.
