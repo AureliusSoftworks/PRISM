@@ -60236,25 +60236,20 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  const relocateHueLensToBot = useCallback(
-    (botId: string, geom: PickerGeometry): boolean => {
-      if (emptyStateSearchActive || hueFilterCenter !== null) return false;
-      if (!pickerUsesHueNavigation(geom, viewportWidth)) return false;
-      const bot = pickerSourceBots.find((candidate) => candidate.id === botId);
-      if (!bot || !botHasFilterableColor(bot)) return false;
+  const focusHueLensOnBot = useCallback(
+    (bot: Bot) => {
+      if (emptyStateSearchActive || !botHasFilterableColor(bot)) return;
       const { h } = hexToHsl(bot.color!.trim());
       setHueFilterCenter(hueLensPositionForHue(h));
-      setSelectedBotId(null);
-      return true;
     },
-    [emptyStateSearchActive, hueFilterCenter, pickerSourceBots, viewportWidth]
+    [emptyStateSearchActive]
   );
 
   // Touch keyboard-balloon handlers. Shared by both the Chat-mode and
   // Sandbox-mode empty-state picker frames. Active only when the gesture
   // is genuine touch input AND the picker is in hue-navigation territory:
-  // Stage 3+ on mobile, Stage 4+ elsewhere. The first tap zooms/snaps the
-  // hue lens; once narrowed, taps select individual bots again.
+  // Stage 3+ on mobile, Stage 4+ elsewhere. Completed taps select the bot
+  // directly; capture keeps long-press/context handling stable as fingers move.
   const handleTouchPickerDown = useCallback(
     (event: React.PointerEvent<HTMLDivElement>, geom: PickerGeometry) => {
       if (event.pointerType !== "touch") return;
@@ -60277,7 +60272,7 @@ function HomeContent(): React.JSX.Element {
   );
 
   const handleTouchPickerUp = useCallback(
-    (event: React.PointerEvent<HTMLDivElement>, geom: PickerGeometry) => {
+    (event: React.PointerEvent<HTMLDivElement>, _geom: PickerGeometry) => {
       if (event.pointerId !== touchPreviewPointerIdRef.current) return;
       cancelBotContextLongPress(event.pointerId);
       if (botContextSuppressClickRef.current) {
@@ -60294,10 +60289,7 @@ function HomeContent(): React.JSX.Element {
       }
       const botId = findBotIdAtPoint(event.clientX, event.clientY);
       if (botId) {
-        const relocated = relocateHueLensToBot(botId, geom);
-        if (!relocated) {
-          commitEmptyStateBotSelection(botId);
-        }
+        commitEmptyStateBotSelection(botId);
       }
       setTouchPreview(null);
       touchPreviewPointerIdRef.current = null;
@@ -60305,7 +60297,7 @@ function HomeContent(): React.JSX.Element {
         event.currentTarget.releasePointerCapture(event.pointerId);
       }
     },
-    [cancelBotContextLongPress, commitEmptyStateBotSelection, relocateHueLensToBot]
+    [cancelBotContextLongPress, commitEmptyStateBotSelection]
   );
 
   const handleTouchPickerCancel = useCallback(
@@ -60929,21 +60921,8 @@ function HomeContent(): React.JSX.Element {
                     geom.compactPixelGrid &&
                     e.detail > 0 &&
                     lastBotPickerPointerTypeRef.current === "mouse";
-                  const shouldRelocateHue =
-                    !emptyStateSearchActive &&
-                    botHasFilterableColor(b) &&
-                    (isDesktopMousePixelClick ||
-                      (!hueFilterActive && pickerUsesHueNavigation(geom, viewportWidth)));
-                  if (shouldRelocateHue) {
-                    const { h } = hexToHsl(b.color!.trim());
-                    const lensPosition = hueLensPositionForHue(h);
-                    setHueFilterCenter(lensPosition);
-                    if (isDesktopMousePixelClick) {
-                      commitEmptyStateBotSelection(b.id);
-                      return;
-                    }
-                    setSelectedBotId(null);
-                    return;
+                  if (isDesktopMousePixelClick) {
+                    focusHueLensOnBot(b);
                   }
                   commitEmptyStateBotSelection(b.id);
                 }}
@@ -91750,10 +91729,8 @@ function HomeContent(): React.JSX.Element {
                               // compose dropdown auto-populate (both
                               // read from the same state).
                               // Dense color-map mode mirrors the Chat
-                              // picker. Mobile Stage 3+ / desktop Stage 4+
-                              // snaps to a hue region before individual
-                              // selection; Stage 5+ desktop mouse clicks
-                              // select the exact pixel and also move the
+                              // picker. Direct clicks select the exact bot;
+                              // Stage 5+ desktop mouse clicks also move the
                               // hue lens there.
                               // Grayscale bots fall through to direct
                               // selection because the lens cannot target
@@ -91762,24 +91739,8 @@ function HomeContent(): React.JSX.Element {
                                 geom.compactPixelGrid &&
                                 e.detail > 0 &&
                                 lastBotPickerPointerTypeRef.current === "mouse";
-                              const shouldRelocateHue =
-                                !emptyStateSearchActive &&
-                                botHasFilterableColor(b) &&
-                                (isDesktopMousePixelClick ||
-                                  (!hueFilterActive &&
-                                    pickerUsesHueNavigation(geom, viewportWidth)));
-                              if (
-                                shouldRelocateHue
-                              ) {
-                                const { h } = hexToHsl(b.color!.trim());
-                                const lensPosition = hueLensPositionForHue(h);
-                                setHueFilterCenter(lensPosition);
-                                if (isDesktopMousePixelClick) {
-                                  commitEmptyStateBotSelection(b.id);
-                                  return;
-                                }
-                                setSelectedBotId(null);
-                                return;
+                              if (isDesktopMousePixelClick) {
+                                focusHueLensOnBot(b);
                               }
                               commitEmptyStateBotSelection(b.id);
                             }}
