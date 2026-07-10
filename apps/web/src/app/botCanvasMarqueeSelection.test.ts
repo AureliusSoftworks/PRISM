@@ -108,4 +108,20 @@ describe("bot canvas marquee selection", () => {
     );
     assert.doesNotMatch(pageSource, /onPointerDown=\{handleCanvasBotMarqueePointerDown\}/);
   });
+
+  it("commits plain bot picker card activation instead of only relocating the hue lens", () => {
+    assert.equal(
+      pageSource.match(/focusHueLensOnBot\(b\);\s*}\s*commitEmptyStateBotSelection\(b\.id\);/g)
+        ?.length,
+      2
+    );
+    assert.match(
+      pageSource,
+      /if \(botId\) \{\s*commitEmptyStateBotSelection\(botId\);\s*}/
+    );
+    assert.doesNotMatch(
+      pageSource,
+      /setSelectedBotId\(null\);\s*return;\s*}\s*commitEmptyStateBotSelection\(b\.id\);/
+    );
+  });
 });
