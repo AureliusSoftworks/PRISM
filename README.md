@@ -170,9 +170,10 @@ Full process: [`docs/release-process.md`](docs/release-process.md)
 
 Prism distribution is direct (indie model):
 
+- Steam desktop release target
 - Free official desktop app for macOS/Windows/Linux
+- GitHub Releases as the direct-download path while Steam is being prepared
 - iPhone via PWA ("Add to Home Screen" in Safari)
-- Optional $5/month Patreon support, with no tiers or paid feature locks
 
 Details: [`docs/distribution-model.md`](docs/distribution-model.md)
 
