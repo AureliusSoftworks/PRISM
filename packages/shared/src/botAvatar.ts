@@ -315,15 +315,17 @@ export function resolveBotFaceStyle(
   fallbackVoicePreset?: BotVoicePreset | null
 ): BotFaceStyle {
   const fallbackFont = botFaceFontFromVoicePreset(fallbackVoicePreset);
+  const eyeCharacter =
+    normalizeBotFaceEyeCharacter(input.faceEyeCharacter) ??
+    DEFAULT_BOT_FACE_EYE_CHARACTER;
+  const mouthCharacter =
+    normalizeBotFaceMouthCharacter(input.faceMouthCharacter) ??
+    DEFAULT_BOT_FACE_MOUTH_CHARACTER;
   return {
     eyesFont: normalizeBotFaceFontId(input.faceEyesFont) ?? fallbackFont,
-    eyeCharacter:
-      normalizeBotFaceEyeCharacter(input.faceEyeCharacter) ??
-      DEFAULT_BOT_FACE_EYE_CHARACTER,
+    eyeCharacter,
     mouthFont: normalizeBotFaceFontId(input.faceMouthFont) ?? fallbackFont,
-    mouthCharacter:
-      normalizeBotFaceMouthCharacter(input.faceMouthCharacter) ??
-      DEFAULT_BOT_FACE_MOUTH_CHARACTER,
+    mouthCharacter,
     weight:
       normalizeBotFaceFontWeight(input.faceFontWeight) ??
       DEFAULT_BOT_FACE_FONT_WEIGHT,
@@ -331,8 +333,10 @@ export function resolveBotFaceStyle(
       normalizeBotFaceEyeScale(input.faceEyeScale) ??
       DEFAULT_BOT_FACE_EYE_SCALE,
     eyeOffsetX:
-      normalizeBotFaceEyeOffsetX(input.faceEyeOffsetX) ??
-      DEFAULT_BOT_FACE_EYE_OFFSET_X,
+      eyeCharacter !== null
+        ? normalizeBotFaceEyeOffsetX(input.faceEyeOffsetX) ??
+          DEFAULT_BOT_FACE_EYE_OFFSET_X
+        : DEFAULT_BOT_FACE_EYE_OFFSET_X,
     eyeOffsetY:
       normalizeBotFaceEyeOffsetY(input.faceEyeOffsetY) ??
       DEFAULT_BOT_FACE_EYE_OFFSET_Y,
@@ -340,8 +344,10 @@ export function resolveBotFaceStyle(
       normalizeBotFaceMouthScale(input.faceMouthScale) ??
       DEFAULT_BOT_FACE_MOUTH_SCALE,
     mouthOffsetX:
-      normalizeBotFaceMouthOffsetX(input.faceMouthOffsetX) ??
-      DEFAULT_BOT_FACE_MOUTH_OFFSET_X,
+      mouthCharacter !== null
+        ? normalizeBotFaceMouthOffsetX(input.faceMouthOffsetX) ??
+          DEFAULT_BOT_FACE_MOUTH_OFFSET_X
+        : DEFAULT_BOT_FACE_MOUTH_OFFSET_X,
     mouthOffsetY:
       normalizeBotFaceMouthOffsetY(input.faceMouthOffsetY) ??
       DEFAULT_BOT_FACE_MOUTH_OFFSET_Y,
@@ -355,6 +361,17 @@ export function resolveBotFaceStyle(
       normalizeBotFaceThinkingFrames(input.faceThinkingFrames) ??
       DEFAULT_BOT_FACE_THINKING_FRAMES,
   };
+}
+
+function randomSteppedBotFaceScale(
+  random: () => number,
+  min: number,
+  max: number,
+  step: number
+): number {
+  const steps = Math.round((max - min) / step);
+  const centeredRoll = (random() + random()) / 2;
+  return Number((min + Math.round(centeredRoll * steps) * step).toFixed(3));
 }
 
 export function randomBotFaceStyle(random = Math.random): BotFaceStyle {
@@ -374,10 +391,20 @@ export function randomBotFaceStyle(random = Math.random): BotFaceStyle {
     mouthFont: pickFont(),
     mouthCharacter: DEFAULT_BOT_FACE_MOUTH_CHARACTER,
     weight,
-    eyeScale: DEFAULT_BOT_FACE_EYE_SCALE,
+    eyeScale: randomSteppedBotFaceScale(
+      random,
+      BOT_FACE_EYE_SCALE_MIN,
+      BOT_FACE_EYE_SCALE_MAX,
+      BOT_FACE_EYE_SCALE_STEP
+    ),
     eyeOffsetX: DEFAULT_BOT_FACE_EYE_OFFSET_X,
     eyeOffsetY: DEFAULT_BOT_FACE_EYE_OFFSET_Y,
-    mouthScale: DEFAULT_BOT_FACE_MOUTH_SCALE,
+    mouthScale: randomSteppedBotFaceScale(
+      random,
+      BOT_FACE_MOUTH_SCALE_MIN,
+      BOT_FACE_MOUTH_SCALE_MAX,
+      BOT_FACE_MOUTH_SCALE_STEP
+    ),
     mouthOffsetX: DEFAULT_BOT_FACE_MOUTH_OFFSET_X,
     mouthOffsetY: DEFAULT_BOT_FACE_MOUTH_OFFSET_Y,
     mouthRotationDeg: DEFAULT_BOT_FACE_MOUTH_ROTATION_DEG,

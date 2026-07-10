@@ -49,6 +49,32 @@ function faceWeightStrokeForWeight(weight: number | undefined): string | undefin
   return `${(t * 0.032).toFixed(3)}em`;
 }
 
+function faceWeightGlowRadiusScaleForWeight(weight: number | undefined): string | undefined {
+  if (weight === undefined) return undefined;
+  if (weight <= 500) {
+    const t = Math.max(0, Math.min(1, (weight - 300) / 200));
+    return (0.56 + t * 0.44).toFixed(3);
+  }
+  const t = Math.max(0, Math.min(1, (weight - 500) / 300));
+  return (1 + t * 0.36).toFixed(3);
+}
+
+function faceWeightGlowStrengthScaleForWeight(weight: number | undefined): string | undefined {
+  if (weight === undefined) return undefined;
+  if (weight <= 500) {
+    const t = Math.max(0, Math.min(1, (weight - 300) / 200));
+    return (0.36 + t * 0.64).toFixed(3);
+  }
+  const t = Math.max(0, Math.min(1, (weight - 500) / 300));
+  return (1 + t * 0.34).toFixed(3);
+}
+
+function faceWeightGlowStrokeForWeight(weight: number | undefined): string | undefined {
+  if (weight === undefined) return undefined;
+  const t = Math.max(0, Math.min(1, (weight - 300) / 500));
+  return `${(0.004 + t * 0.026).toFixed(3)}em`;
+}
+
 function rotatedFaceOffset(
   x: number | undefined,
   y: number | undefined,
@@ -345,15 +371,15 @@ export function CoffeeSeatPlateEmoji({
     ? undefined
     : normalizeBotFaceEyeOffsetY(faceEyeOffsetY) ?? undefined;
   const normalizedFaceMouthScale =
-    thinkingSpinnerActive || questionGlyphActive || !normalizedFaceMouthCharacter
+    thinkingSpinnerActive || questionGlyphActive
       ? undefined
       : normalizeBotFaceMouthScale(faceMouthScale) ?? undefined;
   const normalizedFaceMouthOffsetX =
-    thinkingSpinnerActive || questionGlyphActive || !normalizedFaceMouthCharacter
+    thinkingSpinnerActive || questionGlyphActive
       ? undefined
       : normalizeBotFaceMouthOffsetX(faceMouthOffsetX) ?? undefined;
   const normalizedFaceMouthOffsetY =
-    thinkingSpinnerActive || questionGlyphActive || !normalizedFaceMouthCharacter
+    thinkingSpinnerActive || questionGlyphActive
       ? undefined
       : normalizeBotFaceMouthOffsetY(faceMouthOffsetY) ?? undefined;
   const normalizedFaceMouthRotationDeg =
@@ -423,6 +449,12 @@ export function CoffeeSeatPlateEmoji({
       style={{
         ["--bot-face-font-weight" as string]: normalizedFaceWeight,
         ["--bot-face-weight-stroke" as string]: faceWeightStrokeForWeight(normalizedFaceWeight),
+        ["--bot-face-weight-glow-radius-scale" as string]:
+          faceWeightGlowRadiusScaleForWeight(normalizedFaceWeight),
+        ["--bot-face-weight-glow-strength-scale" as string]:
+          faceWeightGlowStrengthScaleForWeight(normalizedFaceWeight),
+        ["--bot-face-weight-glow-stroke" as string]:
+          faceWeightGlowStrokeForWeight(normalizedFaceWeight),
         ["--bot-face-eye-scale" as string]: normalizedFaceEyeScale,
         ["--bot-face-eye-offset-x" as string]:
           faceEyeOffset === null
@@ -454,21 +486,21 @@ export function CoffeeSeatPlateEmoji({
           data-coffee-plate-thinking-frame="true"
           data-coffee-plate-thinking-frame-index={thinkingSpinnerFrameIndex}
           data-coffee-plate-thinking-glyph={thinkingSpinnerGlyph}
-          data-crt-glyph-layer="true"
-          data-crt-glyph-content={thinkingSpinnerGlyph}
           data-face-font={faceMouthFont ?? undefined}
         >
-          {thinkingSpinnerGlyph}
+          <span data-crt-glyph-layer="true" data-crt-glyph-content={thinkingSpinnerGlyph}>
+            {thinkingSpinnerGlyph}
+          </span>
         </span>
       ) : questionGlyphActive ? (
         <span
           data-coffee-plate-question-frame="true"
           data-coffee-plate-question-glyph="?"
-          data-crt-glyph-layer="true"
-          data-crt-glyph-content="?"
           data-face-font={faceMouthFont ?? faceEyesFont ?? undefined}
         >
-          ?
+          <span data-crt-glyph-layer="true" data-crt-glyph-content="?">
+            ?
+          </span>
         </span>
       ) : (
         (() => {
@@ -495,13 +527,13 @@ export function CoffeeSeatPlateEmoji({
                 data-coffee-plate-emoji-blink-glyph={
                   displayBlinkPhase === "closed" && part === "eyes" ? "true" : undefined
                 }
-                data-crt-glyph-layer="true"
-                data-crt-glyph-content={renderedGlyph}
                 data-face-font={
                   part === "eyes" ? faceEyesFont ?? undefined : faceMouthFont ?? undefined
                 }
               >
-                {renderedGlyph}
+                <span data-crt-glyph-layer="true" data-crt-glyph-content={renderedGlyph}>
+                  {renderedGlyph}
+                </span>
               </span>
             );
           });

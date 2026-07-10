@@ -301,6 +301,7 @@ import {
 	  Copy,
   Download,
   Droplets,
+  Eye,
   Image as ImageGlyph,
   Info,
   Lock,
@@ -316,9 +317,9 @@ import {
   Recycle,
   RotateCcw,
   ScanLine,
-  Shuffle,
   SkipBack,
   SkipForward,
+  Smile,
   Sparkles,
   Store,
   Sun,
@@ -923,6 +924,8 @@ const MESSAGE_CONTEXT_MENU_ESTIMATED_WIDTH_PX = 190;
 const MESSAGE_CONTEXT_MENU_ESTIMATED_HEIGHT_PX = 220;
 const BOT_CONTEXT_MENU_ESTIMATED_WIDTH_PX = 184;
 const BOT_CONTEXT_MENU_ESTIMATED_HEIGHT_PX = 244;
+const ZEN_LIVE_BOT_CONTEXT_MENU_ESTIMATED_WIDTH_PX = 184;
+const ZEN_LIVE_BOT_CONTEXT_MENU_ESTIMATED_HEIGHT_PX = 152;
 /** Single-row "delete group chats" menu — keep in sync with clamp padding. */
 const CONVERSATION_GROUP_CONTEXT_MENU_ESTIMATED_WIDTH_PX = 220;
 const CONVERSATION_GROUP_CONTEXT_MENU_ESTIMATED_HEIGHT_PX = 72;
@@ -1221,6 +1224,8 @@ const PRISM_DEV_ZEN_PAUSE_TESTER_SETTINGS_STORAGE_KEY = "prism_dev_zen_pause_tes
 const PRISM_DEV_ZEN_PERSONA_BACKDROP_STORAGE_KEY = "prism_dev_zen_persona_backdrop_v2";
 const PRISM_ZEN_LIVE_BOT_AVATAR_POSITION_STORAGE_KEY =
   "prism_zen_live_bot_avatar_position_v1";
+const PRISM_ZEN_LIVE_BOT_AVATAR_SIZE_STORAGE_KEY =
+  "prism_zen_live_bot_avatar_size_v1";
 const DEV_MOOD_VISUAL_DEFAULT_X = 22;
 const DEV_MOOD_VISUAL_DEFAULT_Y = 150;
 const DEV_ZEN_PAUSE_TESTER_CONTROLS = [
@@ -1296,6 +1301,7 @@ type DevMoodVisualDragState = {
   moved: boolean;
 };
 type ZenLiveBotAvatarPosition = { x: number; y: number };
+type ZenLiveBotAvatarResizeAction = "grow" | "shrink";
 type ZenLiveBotScreenGlareState = {
   xPct: number;
   yPct: number;
@@ -1321,7 +1327,7 @@ type ZenLiveBotAvatarRect = {
 };
 type ZenLiveBotProseHillRect = ZenLiveBotAvatarRect;
 type ZenLiveBotChromeAvoidanceRect = ZenLiveBotAvatarRect;
-type ZenLiveBotActionCopyPlacement = "top" | "right" | "bottom" | "left";
+type ZenLiveBotActionCopyPlacement = "top" | "bottom";
 type ZenLiveBotActionCopyAnchor = {
   key: string;
   placement: ZenLiveBotActionCopyPlacement;
@@ -2245,6 +2251,10 @@ function persistMemoryBubbleLayouts(layouts: MemoryBubbleLayoutByScope): void {
 const ZEN_LIVE_BOT_AVATAR_VIEWPORT_MARGIN_PX = 14;
 const ZEN_LIVE_BOT_AVATAR_MIN_SIZE_PX = 118;
 const ZEN_LIVE_BOT_AVATAR_MAX_SIZE_PX = 300;
+const ZEN_LIVE_BOT_AVATAR_SIZE_STEP_PX = 24;
+const ZEN_LIVE_BOT_PROSE_WIDTH_MIN_PX = 680;
+const ZEN_LIVE_BOT_PROSE_WIDTH_DEFAULT_PX = 860;
+const ZEN_LIVE_BOT_PROSE_WIDTH_MAX_PX = 980;
 const ZEN_LIVE_BOT_AVATAR_FLING_MIN_SPEED = 180;
 const ZEN_LIVE_BOT_AVATAR_FLING_MAX_SPEED = 2200;
 const ZEN_LIVE_BOT_AVATAR_WALL_RESTITUTION = 0.82;
@@ -2486,10 +2496,12 @@ const ZEN_LIVE_BOT_PROSE_HILL_SELECTOR = "[data-zen-live-prose-target='true']";
 const ZEN_LIVE_BOT_PROSE_HILL_CLEARANCE_PX = 34;
 const ZEN_LIVE_BOT_PROSE_HILL_VERTICAL_CLEARANCE_PX = 18;
 const ZEN_LIVE_BOT_CHROME_AVOIDANCE_CLEARANCE_PX = 14;
-const ZEN_LIVE_BOT_CHROME_AVOIDANCE_ACCELERATION_PX_PER_SEC = 1850;
-const ZEN_LIVE_BOT_CHROME_AVOIDANCE_MAX_SPEED = 1080;
-const ZEN_LIVE_BOT_CHROME_AVOIDANCE_INERTIA_DAMPING_PER_FRAME = 0.94;
-const ZEN_LIVE_BOT_CHROME_AVOIDANCE_PERPENDICULAR_DAMPING_PER_FRAME = 0.72;
+const ZEN_LIVE_BOT_CHROME_AVOIDANCE_ACCELERATION_PX_PER_SEC = 980;
+const ZEN_LIVE_BOT_CHROME_AVOIDANCE_MAX_SPEED = 620;
+const ZEN_LIVE_BOT_CHROME_AVOIDANCE_MIN_LARGE_AVATAR_SPEED = 280;
+const ZEN_LIVE_BOT_CHROME_AVOIDANCE_INERTIA_DAMPING_PER_FRAME = 0.9;
+const ZEN_LIVE_BOT_CHROME_AVOIDANCE_PERPENDICULAR_DAMPING_PER_FRAME = 0.62;
+const ZEN_LIVE_BOT_CHROME_AVOIDANCE_LARGE_AVATAR_SOFTENING = 0.48;
 const ZEN_LIVE_BOT_PROSE_HILL_ACCELERATION_PX_PER_SEC = 1600;
 const ZEN_LIVE_BOT_PROSE_HILL_MAX_SIDE_SPEED = 960;
 const ZEN_LIVE_BOT_PROSE_HILL_INERTIA_DAMPING_PER_FRAME = 0.955;
@@ -2588,6 +2600,76 @@ function persistZenLiveBotAvatarPosition(position: ZenLiveBotAvatarPosition): vo
   } catch {
     // localStorage can throw (privacy mode, quota); non-fatal.
   }
+}
+
+function normalizeZenLiveBotAvatarSizePx(value: unknown): number {
+  if (
+    value === null ||
+    value === undefined ||
+    (typeof value === "string" && value.trim() === "")
+  ) {
+    return ZEN_LIVE_BOT_LOCKED_BODY_SIZE_PX;
+  }
+  const numeric = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(numeric)) return ZEN_LIVE_BOT_LOCKED_BODY_SIZE_PX;
+  return Math.max(
+    ZEN_LIVE_BOT_AVATAR_MIN_SIZE_PX,
+    Math.min(ZEN_LIVE_BOT_AVATAR_MAX_SIZE_PX, Math.round(numeric))
+  );
+}
+
+function readZenLiveBotAvatarSizePx(): number {
+  if (typeof window === "undefined") return ZEN_LIVE_BOT_LOCKED_BODY_SIZE_PX;
+  try {
+    const raw = window.localStorage.getItem(
+      PRISM_ZEN_LIVE_BOT_AVATAR_SIZE_STORAGE_KEY
+    );
+    return normalizeZenLiveBotAvatarSizePx(raw);
+  } catch {
+    // localStorage can throw (privacy mode, quota); non-fatal.
+  }
+  return ZEN_LIVE_BOT_LOCKED_BODY_SIZE_PX;
+}
+
+function persistZenLiveBotAvatarSizePx(sizePx: number): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      PRISM_ZEN_LIVE_BOT_AVATAR_SIZE_STORAGE_KEY,
+      String(normalizeZenLiveBotAvatarSizePx(sizePx))
+    );
+  } catch {
+    // localStorage can throw (privacy mode, quota); non-fatal.
+  }
+}
+
+function resizeZenLiveBotAvatarSizePx(
+  currentSizePx: number,
+  action: ZenLiveBotAvatarResizeAction
+): number {
+  const direction = action === "grow" ? 1 : -1;
+  return normalizeZenLiveBotAvatarSizePx(
+    currentSizePx + direction * ZEN_LIVE_BOT_AVATAR_SIZE_STEP_PX
+  );
+}
+
+function resolveZenLiveBotProseWidthPx(avatarSizePx: number): number {
+  const normalizedSize = normalizeZenLiveBotAvatarSizePx(avatarSizePx);
+  if (normalizedSize === ZEN_LIVE_BOT_LOCKED_BODY_SIZE_PX) {
+    return ZEN_LIVE_BOT_PROSE_WIDTH_DEFAULT_PX;
+  }
+  const sizeProgress =
+    (normalizedSize - ZEN_LIVE_BOT_AVATAR_MIN_SIZE_PX) /
+    (ZEN_LIVE_BOT_AVATAR_MAX_SIZE_PX - ZEN_LIVE_BOT_AVATAR_MIN_SIZE_PX);
+  const width =
+    ZEN_LIVE_BOT_PROSE_WIDTH_MAX_PX -
+    sizeProgress * (ZEN_LIVE_BOT_PROSE_WIDTH_MAX_PX - ZEN_LIVE_BOT_PROSE_WIDTH_MIN_PX);
+  return Math.round(
+    Math.max(
+      ZEN_LIVE_BOT_PROSE_WIDTH_MIN_PX,
+      Math.min(ZEN_LIVE_BOT_PROSE_WIDTH_MAX_PX, width)
+    )
+  );
 }
 
 function measureZenLiveBotAvatarBounds(node: HTMLElement): ZenLiveBotAvatarBounds {
@@ -2978,7 +3060,7 @@ function PrismAppCursor(): React.JSX.Element | null {
 
 function resolveZenLiveBotActionCopyPlacement(
   node: HTMLElement,
-  viewportWidth: number,
+  _viewportWidth: number,
   viewportHeight: number,
   safeAreaInsets: DevPanelSafeAreaInsets = DEV_PANEL_SAFE_AREA_DEFAULT_INSETS
 ): ZenLiveBotActionCopyPlacement {
@@ -2991,23 +3073,17 @@ function resolveZenLiveBotActionCopyPlacement(
     node;
   const bodyRect = body.getBoundingClientRect();
   const copyRect = copy?.getBoundingClientRect();
-  const copyWidth = copyRect?.width || 156;
   const copyHeight = copyRect?.height || 56;
   const margin = ZEN_LIVE_BOT_AVATAR_VIEWPORT_MARGIN_PX;
-  const safeLeft = safeAreaInsets.left + margin;
   const safeTop = safeAreaInsets.top + margin;
-  const safeRight = viewportWidth - safeAreaInsets.right - margin;
   const safeBottom = viewportHeight - safeAreaInsets.bottom - margin;
   const spaceBelow = safeBottom - bodyRect.bottom;
   const spaceAbove = bodyRect.top - safeTop;
-  const spaceLeft = bodyRect.left - safeLeft;
-  const spaceRight = safeRight - bodyRect.right;
   const bodyGap = Math.max(
     8,
     Math.min(12, Math.min(bodyRect.width, bodyRect.height) * 0.07)
   );
   const verticalNeed = copyHeight + bodyGap;
-  const horizontalNeed = copyWidth + margin;
   const topFits = spaceAbove >= verticalNeed;
   const bottomFits = spaceBelow >= verticalNeed;
 
@@ -3020,42 +3096,6 @@ function resolveZenLiveBotActionCopyPlacement(
     return topFits ? "top" : "bottom";
   }
 
-  const proseHillRect = collectZenLiveBotProseHillRect(
-    viewportWidth,
-    viewportHeight,
-    safeAreaInsets
-  );
-
-  if (proseHillRect) {
-    const proseGap = Math.max(12, ZEN_LIVE_BOT_PROSE_HILL_CLEARANCE_PX * 0.5);
-    const rightCopyLeft = clampZenLiveBotActionCopyAnchor(
-      bodyRect.right,
-      safeLeft,
-      safeRight - copyWidth
-    );
-    if (
-      bodyRect.left >= proseHillRect.right &&
-      rightCopyLeft >= proseHillRect.right + proseGap
-    ) {
-      return "right";
-    }
-
-    const leftCopyRight = clampZenLiveBotActionCopyAnchor(
-      bodyRect.left,
-      safeLeft + copyWidth,
-      safeRight
-    );
-    if (
-      bodyRect.right <= proseHillRect.left &&
-      leftCopyRight <= proseHillRect.left - proseGap
-    ) {
-      return "left";
-    }
-  }
-
-  if (spaceRight >= horizontalNeed || spaceLeft >= horizontalNeed) {
-    return spaceRight >= spaceLeft ? "right" : "left";
-  }
   return spaceAbove > spaceBelow ? "top" : "bottom";
 }
 
@@ -3064,9 +3104,8 @@ function resolveZenLiveBotActionCopyOffsetX(
   position: ZenLiveBotAvatarPosition,
   viewportWidth: number,
   safeAreaInsets: DevPanelSafeAreaInsets = DEV_PANEL_SAFE_AREA_DEFAULT_INSETS,
-  placement: ZenLiveBotActionCopyPlacement = "bottom"
+  _placement: ZenLiveBotActionCopyPlacement = "bottom"
 ): number {
-  if (placement === "left" || placement === "right") return 0;
   const copy = node.querySelector<HTMLElement>(
     "[data-zen-live-bot-action-copy-measure='true']"
   );
@@ -3112,6 +3151,65 @@ function clampZenLiveBotActionCopyAnchor(
   return Math.max(min, Math.min(max, value));
 }
 
+function resolveZenLiveBotActionCopyCenterX(
+  defaultCenterX: number,
+  copyWidth: number,
+  bodyRect: DOMRect,
+  viewportWidth: number,
+  viewportHeight: number,
+  safeAreaInsets: DevPanelSafeAreaInsets = DEV_PANEL_SAFE_AREA_DEFAULT_INSETS
+): number {
+  const margin = ZEN_LIVE_BOT_AVATAR_VIEWPORT_MARGIN_PX;
+  const safeLeft = safeAreaInsets.left + margin;
+  const safeRight = viewportWidth - safeAreaInsets.right - margin;
+  const minCenter = safeLeft + copyWidth / 2;
+  const maxCenter = safeRight - copyWidth / 2;
+  const viewportClampedCenter = clampZenLiveBotActionCopyAnchor(
+    defaultCenterX,
+    minCenter,
+    maxCenter
+  );
+  const proseRect = collectZenLiveBotProseHillRect(
+    viewportWidth,
+    viewportHeight,
+    safeAreaInsets
+  );
+  if (!proseRect) return viewportClampedCenter;
+
+  const proseGap = Math.max(16, ZEN_LIVE_BOT_PROSE_HILL_CLEARANCE_PX * 0.65);
+  const proseLeft = proseRect.left - proseGap;
+  const proseRight = proseRect.right + proseGap;
+  const copyLeft = viewportClampedCenter - copyWidth / 2;
+  const copyRight = viewportClampedCenter + copyWidth / 2;
+  if (copyRight <= proseLeft || copyLeft >= proseRight) {
+    return viewportClampedCenter;
+  }
+
+  const bodyCenterX = bodyRect.left + bodyRect.width / 2;
+  const proseCenterX = proseRect.left + proseRect.width / 2;
+  const leftMaxCenter = Math.min(maxCenter, proseLeft - copyWidth / 2);
+  const rightMinCenter = Math.max(minCenter, proseRight + copyWidth / 2);
+  const leftAvailable = leftMaxCenter >= minCenter;
+  const rightAvailable = rightMinCenter <= maxCenter;
+  const preferRight = bodyCenterX >= proseCenterX;
+
+  if ((preferRight && rightAvailable) || (!leftAvailable && rightAvailable)) {
+    return clampZenLiveBotActionCopyAnchor(
+      viewportClampedCenter,
+      rightMinCenter,
+      maxCenter
+    );
+  }
+  if (leftAvailable) {
+    return clampZenLiveBotActionCopyAnchor(
+      viewportClampedCenter,
+      minCenter,
+      leftMaxCenter
+    );
+  }
+  return viewportClampedCenter;
+}
+
 function resolveZenLiveBotActionCopyAnchor(
   node: HTMLElement,
   placement: ZenLiveBotActionCopyPlacement,
@@ -3131,25 +3229,26 @@ function resolveZenLiveBotActionCopyAnchor(
   const copyWidth = copyRect?.width || 260;
   const copyHeight = copyRect?.height || 48;
   const margin = ZEN_LIVE_BOT_AVATAR_VIEWPORT_MARGIN_PX;
-  const safeLeft = safeAreaInsets.left + margin;
   const safeTop = safeAreaInsets.top + margin;
-  const safeRight = viewportWidth - safeAreaInsets.right - margin;
   const safeBottom = viewportHeight - safeAreaInsets.bottom - margin;
   const bodyGap = Math.max(
     8,
     Math.min(12, Math.min(bodyRect.width, bodyRect.height) * 0.07)
   );
   const centerX = bodyRect.left + bodyRect.width / 2;
-  const centerY = bodyRect.top + bodyRect.height / 2;
+  const anchoredCenterX = resolveZenLiveBotActionCopyCenterX(
+    centerX,
+    copyWidth,
+    bodyRect,
+    viewportWidth,
+    viewportHeight,
+    safeAreaInsets
+  );
 
   if (placement === "top") {
     return {
       placement,
-      x: clampZenLiveBotActionCopyAnchor(
-        centerX,
-        safeLeft + copyWidth / 2,
-        safeRight - copyWidth / 2
-      ),
+      x: anchoredCenterX,
       y: clampZenLiveBotActionCopyAnchor(
         bodyRect.top - bodyGap,
         safeTop + copyHeight,
@@ -3158,45 +3257,9 @@ function resolveZenLiveBotActionCopyAnchor(
     };
   }
 
-  if (placement === "right") {
-    return {
-      placement,
-      x: clampZenLiveBotActionCopyAnchor(
-        bodyRect.right + bodyGap,
-        safeLeft,
-        safeRight - copyWidth
-      ),
-      y: clampZenLiveBotActionCopyAnchor(
-        centerY,
-        safeTop + copyHeight / 2,
-        safeBottom - copyHeight / 2
-      ),
-    };
-  }
-
-  if (placement === "left") {
-    return {
-      placement,
-      x: clampZenLiveBotActionCopyAnchor(
-        bodyRect.left - bodyGap,
-        safeLeft + copyWidth,
-        safeRight
-      ),
-      y: clampZenLiveBotActionCopyAnchor(
-        centerY,
-        safeTop + copyHeight / 2,
-        safeBottom - copyHeight / 2
-      ),
-    };
-  }
-
   return {
     placement,
-    x: clampZenLiveBotActionCopyAnchor(
-      centerX,
-      safeLeft + copyWidth / 2,
-      safeRight - copyWidth / 2
-    ),
+    x: anchoredCenterX,
     y: clampZenLiveBotActionCopyAnchor(
       bodyRect.bottom + bodyGap,
       safeTop,
@@ -3575,10 +3638,26 @@ function resolveZenLiveBotAvatarChromeAvoidanceMotion(
 
   const directionX = deltaX / distance;
   const directionY = deltaY / distance;
-  const distanceRatio = Math.min(1, distance / Math.max(1, bounds.width * 0.82));
-  const avoidanceStrength = Math.max(0.28, distanceRatio);
+  const avatarSize = Math.max(bounds.width, bounds.height);
+  const largeAvatarProgress = Math.max(
+    0,
+    Math.min(
+      1,
+      (avatarSize - ZEN_LIVE_BOT_LOCKED_BODY_SIZE_PX) /
+        Math.max(1, ZEN_LIVE_BOT_AVATAR_MAX_SIZE_PX - ZEN_LIVE_BOT_LOCKED_BODY_SIZE_PX)
+    )
+  );
+  const largeAvatarSoftening =
+    1 -
+    largeAvatarProgress * ZEN_LIVE_BOT_CHROME_AVOIDANCE_LARGE_AVATAR_SOFTENING;
+  const distanceRatio = Math.min(1, distance / Math.max(1, bounds.width * 1.35));
+  const avoidanceStrength = Math.max(0.16, distanceRatio) * largeAvatarSoftening;
   const acceleration =
     ZEN_LIVE_BOT_CHROME_AVOIDANCE_ACCELERATION_PX_PER_SEC * avoidanceStrength;
+  const maxAvoidanceSpeed = Math.max(
+    ZEN_LIVE_BOT_CHROME_AVOIDANCE_MIN_LARGE_AVATAR_SPEED,
+    ZEN_LIVE_BOT_CHROME_AVOIDANCE_MAX_SPEED * largeAvatarSoftening
+  );
   const inertiaDamping = Math.pow(
     ZEN_LIVE_BOT_CHROME_AVOIDANCE_INERTIA_DAMPING_PER_FRAME,
     dtSeconds * 60
@@ -3590,9 +3669,9 @@ function resolveZenLiveBotAvatarChromeAvoidanceMotion(
   const speedTowardTarget =
     (velocity.x * directionX + velocity.y * directionY) * inertiaDamping;
   const nextSpeedTowardTarget = Math.min(
-    ZEN_LIVE_BOT_CHROME_AVOIDANCE_MAX_SPEED,
+    maxAvoidanceSpeed,
     Math.max(
-      -ZEN_LIVE_BOT_CHROME_AVOIDANCE_MAX_SPEED * 0.28,
+      -maxAvoidanceSpeed * 0.18,
       speedTowardTarget + acceleration * Math.max(0.001, dtSeconds)
     )
   );
@@ -7256,7 +7335,7 @@ function coffeeSeatZenMoodHintFromPrism(
     case "guarded":
       return "stern";
     case "strained":
-      return "confused";
+      return "strained";
     case "neutral":
     default:
       return "neutral";
@@ -7336,35 +7415,51 @@ function resolveBotFaceStyleForBot(
 }
 
 function botScreenMaterialSeedForBot(
+  _bot: Pick<Bot, "id" | "export_hash"> | null | undefined,
+  _fallbackSeed: string
+): string {
+  return "bot-screen-material:shared-curved-glass";
+}
+
+function botScreenMaterialStyle(_seed: string | null | undefined): CSSProperties {
+  return {
+    ["--bot-face-crt-grime-rotation" as string]: "0deg",
+    ["--bot-face-crt-grime-x" as string]: "0%",
+    ["--bot-face-crt-grime-y" as string]: "0%",
+    ["--bot-face-crt-grime-scale" as string]: "1",
+    ["--bot-face-crt-grime-opacity" as string]: "0.24",
+    ["--bot-face-crt-grime-blur" as string]: "0.16px",
+  } as CSSProperties;
+}
+
+function botFrameMaterialSeedForBot(
   bot: Pick<Bot, "id" | "export_hash"> | null | undefined,
   fallbackSeed: string
 ): string {
-  const stableBotSeed =
-    normalizeImportedBotHash(bot?.export_hash) ??
-    (typeof bot?.id === "string" && bot.id.trim().length > 0
-      ? bot.id.trim()
-      : null);
-  const seed = stableBotSeed ?? (fallbackSeed.trim() || "prism");
-  return `bot-screen-material:${seed}`;
+  const exportHash = normalizeImportedBotHash(bot?.export_hash);
+  if (exportHash) return `bot-frame-material:export:${exportHash}`;
+  const botId = bot?.id?.trim();
+  if (botId) return `bot-frame-material:id:${botId}`;
+  return `bot-frame-material:fallback:${fallbackSeed.trim() || "preview"}`;
 }
 
-function botScreenMaterialStyle(seed: string | null | undefined): CSSProperties | undefined {
+function botFrameMetalMaterialStyle(seed: string | null | undefined): CSSProperties | undefined {
   const normalizedSeed = seed?.trim();
   if (!normalizedSeed) return undefined;
-  const rotationDeg = Math.round(stableUnitValue(`${normalizedSeed}:grime:rotation`) * 360);
-  const offsetX = ((stableUnitValue(`${normalizedSeed}:grime:x`) - 0.5) * 8).toFixed(2);
-  const offsetY = ((stableUnitValue(`${normalizedSeed}:grime:y`) - 0.5) * 8).toFixed(2);
-  const scale = (1.16 + stableUnitValue(`${normalizedSeed}:grime:scale`) * 0.12).toFixed(3);
-  const opacity = (0.048 + stableUnitValue(`${normalizedSeed}:grime:opacity`) * 0.024).toFixed(3);
-  const blurPx = (0.34 + stableUnitValue(`${normalizedSeed}:grime:blur`) * 0.34).toFixed(2);
+  const rotationDeg = Math.round(stableUnitValue(`${normalizedSeed}:metal-scratch:rotation`) * 360);
+  const offsetX = ((stableUnitValue(`${normalizedSeed}:metal-scratch:x`) - 0.5) * 10).toFixed(2);
+  const offsetY = ((stableUnitValue(`${normalizedSeed}:metal-scratch:y`) - 0.5) * 10).toFixed(2);
+  const scale = (1.08 + stableUnitValue(`${normalizedSeed}:metal-scratch:scale`) * 0.14).toFixed(3);
+  const opacity = (0.16 + stableUnitValue(`${normalizedSeed}:metal-scratch:opacity`) * 0.1).toFixed(3);
+  const contrast = (1.08 + stableUnitValue(`${normalizedSeed}:metal-scratch:contrast`) * 0.18).toFixed(3);
 
   return {
-    ["--bot-face-crt-grime-rotation" as string]: `${rotationDeg}deg`,
-    ["--bot-face-crt-grime-x" as string]: `${offsetX}%`,
-    ["--bot-face-crt-grime-y" as string]: `${offsetY}%`,
-    ["--bot-face-crt-grime-scale" as string]: scale,
-    ["--bot-face-crt-grime-opacity" as string]: opacity,
-    ["--bot-face-crt-grime-blur" as string]: `${blurPx}px`,
+    ["--bot-face-metal-scratch-rotation" as string]: `${rotationDeg}deg`,
+    ["--bot-face-metal-scratch-x" as string]: `${offsetX}%`,
+    ["--bot-face-metal-scratch-y" as string]: `${offsetY}%`,
+    ["--bot-face-metal-scratch-scale" as string]: scale,
+    ["--bot-face-metal-scratch-opacity" as string]: opacity,
+    ["--bot-face-metal-scratch-contrast" as string]: contrast,
   } as CSSProperties;
 }
 
@@ -7462,15 +7557,6 @@ function resolveAssistantAskQuestion(msg: Message): NonNullable<Message["askQues
     return refineAskQuestionPayloadFromDisplayClient(msg.content, parsed.askQuestion);
   }
   return undefined;
-}
-
-function assistantMessageEndsWithVisibleQuestion(msg: Message | undefined | null): boolean {
-  if (!msg || msg.role !== "assistant") return false;
-  if (resolveAssistantAskQuestion(msg)) return true;
-  const displayContent = resolveMessageDisplayContent(msg)
-    .replace(/\s+/g, " ")
-    .trim();
-  return /[?？][\s"'’”)\].!*_`~]*$/u.test(displayContent);
 }
 
 const ASKQUESTION_INTENT_PATTERN =
@@ -14458,12 +14544,21 @@ function messageMoodLabel(moodKey: NonNullable<Message["moodKey"]>): string {
   }
 }
 
-function BotFaceFrame(): React.JSX.Element {
+function BotFaceFrame({
+  metalMaterialStyle,
+}: {
+  metalMaterialStyle?: CSSProperties;
+} = {}): React.JSX.Element {
   return (
     <>
       <BotFaceScreenFill />
-      <span className={styles.botFaceFrame} aria-hidden="true">
+      <span className={styles.botFaceFrame} style={metalMaterialStyle} aria-hidden="true">
         <span className={styles.botFaceFrameTint} />
+        <span
+          className={styles.botFaceFrameMetalScratchLayer}
+          data-frame-material-layer="scratches"
+          aria-hidden="true"
+        />
         <span className={styles.botFaceFrameLed} />
       </span>
       <span className={styles.botFaceFrameMetalLight} aria-hidden="true">
@@ -24293,6 +24388,7 @@ interface ZenLiveBotMannequinProps {
   showQuestionMark?: boolean;
   forceBlinkPhase?: "open" | "closed" | null;
   screenMaterialSeed?: string | null;
+  frameMaterialSeed?: string | null;
 }
 
 function ZenLiveBotMannequin({
@@ -24310,6 +24406,7 @@ function ZenLiveBotMannequin({
   showQuestionMark = false,
   forceBlinkPhase = null,
   screenMaterialSeed,
+  frameMaterialSeed,
 }: ZenLiveBotMannequinProps): React.JSX.Element {
   const displayPlateFace = plateFace ?? (
     isTalking && mouthShape === "closed"
@@ -24318,6 +24415,9 @@ function ZenLiveBotMannequin({
   );
   const screenMaterialStyle = botScreenMaterialStyle(
     screenMaterialSeed ?? `fallback:${scheduleKey}`
+  );
+  const frameMetalMaterialStyle = botFrameMetalMaterialStyle(
+    frameMaterialSeed ?? `fallback:${scheduleKey}`
   );
 
   return (
@@ -24335,9 +24435,14 @@ function ZenLiveBotMannequin({
           data-zen-live-bot-body-hit-target="true"
           aria-hidden="true"
         />
-        <BotFaceFrame />
+        <BotFaceFrame metalMaterialStyle={frameMetalMaterialStyle} />
       </span>
-      <span className={styles.zenLiveBotPresenceFaceEmissionMask} aria-hidden="true">
+      <span
+        className={styles.zenLiveBotPresenceFaceEmissionMask}
+        data-crt-profile="clean"
+        data-crt-phosphor="white"
+        aria-hidden="true"
+      >
         <span
           className={styles.botFaceCrtNoiseLayer}
           data-crt-material-layer="noise"
@@ -24448,6 +24553,8 @@ function ZenLiveBotPresencePlate({
   resolvedTheme,
   atmosphereActive,
   privateModeActive = false,
+  avatarSizePx,
+  onContextMenuRequest,
 }: {
   bot: Bot | null;
   actionState: ZenLiveBotActionState | null;
@@ -24466,11 +24573,13 @@ function ZenLiveBotPresencePlate({
   resolvedTheme: "light" | "dark";
   atmosphereActive: boolean;
   privateModeActive?: boolean;
+  avatarSizePx: number;
+  onContextMenuRequest?: (x: number, y: number) => void;
 }): React.JSX.Element | null {
   const botName = bot?.name?.trim() || "Prism";
   const liveBotGlyphName: BotGlyphName =
     bot && isBotGlyphName(bot.glyph) ? bot.glyph : defaultPrismGlyph;
-  const bodySize = ZEN_LIVE_BOT_LOCKED_BODY_SIZE_PX;
+  const bodySize = normalizeZenLiveBotAvatarSizePx(avatarSizePx);
   const bodyPlacement = ZEN_LIVE_BOT_LOCKED_BODY_PLACEMENT;
   const facePlacement = ZEN_LIVE_BOT_LOCKED_FACE_PLACEMENT;
   const avatarRef = useRef<HTMLDivElement | null>(null);
@@ -24523,6 +24632,7 @@ function ZenLiveBotPresencePlate({
   const actionCopyAnchorForRender =
     actionCopyKey && actionCopyAnchor?.key === actionCopyKey ? actionCopyAnchor : null;
   const screenMaterialSeed = botScreenMaterialSeedForBot(bot, "prism");
+  const frameMaterialSeed = botFrameMaterialSeedForBot(bot, "prism");
 
   useEffect(() => {
     avatarPositionRef.current = avatarPosition;
@@ -24582,7 +24692,7 @@ function ZenLiveBotPresencePlate({
           setAvatarScreenGlare(
             resolveZenLiveBotScreenGlareState(
               nextPosition,
-              ZEN_LIVE_BOT_LOCKED_BODY_SIZE_PX,
+              bodySize,
               window.innerWidth,
               window.innerHeight
             )
@@ -24658,7 +24768,7 @@ function ZenLiveBotPresencePlate({
       if (persist) persistAvatarPositionIfUserRelocated(settled);
       return settled;
     },
-    [advanceAvatarMetalRotation, persistAvatarPositionIfUserRelocated]
+    [advanceAvatarMetalRotation, bodySize, persistAvatarPositionIfUserRelocated]
   );
 
   const captureActionCopyAnchor = useCallback((key: string): void => {
@@ -25350,6 +25460,17 @@ function ZenLiveBotPresencePlate({
     [beginAvatarGrab, finishAvatarGrab, moveAvatarGrab]
   );
 
+  const handleAvatarContextMenu = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>): void => {
+      if (!onContextMenuRequest) return;
+      event.preventDefault();
+      event.stopPropagation();
+      stopAvatarMomentum(true);
+      onContextMenuRequest(event.clientX, event.clientY);
+    },
+    [onContextMenuRequest, stopAvatarMomentum]
+  );
+
   if (
     !bot &&
     !actionState &&
@@ -25379,6 +25500,7 @@ function ZenLiveBotPresencePlate({
     "--zen-live-bot-face-scale": facePlacement.scale,
     "--zen-live-bot-body-x": `${bodyPlacement.xPct}%`,
     "--zen-live-bot-body-y": `${bodyPlacement.yPct}%`,
+    "--zen-live-bot-avatar-size": `${bodySize}px`,
     "--zen-live-bot-avatar-body-size": `${bodySize}px`,
     "--zen-live-bot-copy-center-anchor": `${Math.round(bodySize * 0.5)}px`,
     "--zen-live-bot-copy-vertical-anchor": `${Math.round(bodySize * 0.72)}px`,
@@ -25441,6 +25563,7 @@ function ZenLiveBotPresencePlate({
       aria-label={actionText ? `${botName}: ${actionText}` : botName}
       title={`Drag or fling ${botName} from the orb.`}
       style={avatarStyle}
+      onContextMenu={handleAvatarContextMenu}
       onPointerDown={handleAvatarPointerDown}
       onPointerMove={handleAvatarPointerMove}
       onPointerUp={handleAvatarPointerUp}
@@ -25459,6 +25582,7 @@ function ZenLiveBotPresencePlate({
         showThinkingSpinner={faceSpinnerVisible}
         showQuestionMark={askQuestionActive}
         screenMaterialSeed={screenMaterialSeed}
+        frameMaterialSeed={frameMaterialSeed}
       />
       {actionText ? (
         <span
@@ -29575,8 +29699,11 @@ interface BotAiParameterCustomizerProps {
 interface BotAvatarCustomizerModalProps {
   open: boolean;
   botName: string;
+  botNameDraft: string;
+  onBotNameChange: (next: string) => void;
   scheduleKey: string;
   screenMaterialSeed: string;
+  frameMaterialSeed: string;
   color: string;
   glyph: BotGlyphName;
   isDefaultPrismBot?: boolean;
@@ -29808,8 +29935,9 @@ function botAvatarPreviewIdentityStyle(rawHex: string, prismPersona = false): CS
   const accentStyle = botAccentStyle(rawHex, "dark") ?? {};
   return {
     ...accentStyle,
+    ["--zen-live-bot-face-phosphor-ink" as string]: "#ffffff",
     ["--zen-live-bot-face-ink" as string]: "var(--coffee-bot-color)",
-    ["--zen-live-bot-glyph-ink" as string]: "var(--coffee-bot-color)",
+    ["--zen-live-bot-glyph-ink" as string]: "var(--zen-live-bot-face-phosphor-ink)",
   } as CSSProperties;
 }
 
@@ -29823,10 +29951,10 @@ const BOT_AVATAR_PREVIEW_MOUTH_SHAPES = [
 ] as const satisfies readonly ZenLiveBotMouthShape[];
 
 type BotAvatarPreviewMode = "idle" | "blink" | "talking" | "thinking";
-type BotAvatarCustomizerTab = "identity" | "face" | "advanced" | "motion";
+type BotAvatarCustomizerTab = "identity" | "face" | "eyes" | "mouth" | "motion";
 type BotAvatarFaceControlTab = Extract<
   BotAvatarCustomizerTab,
-  "face" | "advanced" | "motion"
+  "face" | "eyes" | "mouth" | "motion"
 >;
 
 const BOT_AVATAR_PREVIEW_MODES = [
@@ -29857,7 +29985,8 @@ const BOT_AVATAR_PREVIEW_MOOD_LABELS: Record<(typeof BOT_AVATAR_PREVIEW_MOODS)[n
 
 const BOT_AVATAR_CUSTOMIZER_TABS = [
   { value: "face", label: "Face" },
-  { value: "advanced", label: "Glyphs" },
+  { value: "eyes", label: "Eyes" },
+  { value: "mouth", label: "Mouth" },
   { value: "motion", label: "Motion" },
   { value: "identity", label: "Identity" },
 ] as const satisfies readonly {
@@ -29867,7 +29996,8 @@ const BOT_AVATAR_CUSTOMIZER_TABS = [
 
 const BOT_AVATAR_FACE_CONTROL_TABS = [
   "face",
-  "advanced",
+  "eyes",
+  "mouth",
   "motion",
 ] as const satisfies readonly BotAvatarFaceControlTab[];
 
@@ -29899,10 +30029,10 @@ interface BotAvatarThinkingPreset {
 const BOT_AVATAR_THINKING_PRESETS = [
   { id: "classic", label: "Classic", frames: ["|", "/", "-", "\\"] },
   { id: "dots", label: "Dots", frames: [".", "o", "O", "o"] },
-  { id: "spark", label: "Spark", frames: ["·", "*", "✦", "*"] },
+  { id: "spark", label: "Spark", frames: ["◰", "◳", "◲", "◱"] },
   { id: "scan", label: "Scan", frames: ["-", "=", "≡", "="] },
   { id: "orbit", label: "Orbit", frames: ["◐", "◓", "◑", "◒"] },
-  { id: "mood", label: "Mood", frames: ["?", "!", "?", "…"] },
+  { id: "mood", label: "Mood", frames: ["▖", "▘", "▝", "▗"] },
 ] as const satisfies readonly BotAvatarThinkingPreset[];
 
 const BOT_AVATAR_CUSTOM_EYE_START = ":";
@@ -30149,6 +30279,7 @@ function BotAvatarPreviewPanel({
   glyph,
   scheduleKey,
   screenMaterialSeed,
+  frameMaterialSeed,
   isDefaultPrismBot,
   previewTheme,
   previewMode,
@@ -30165,6 +30296,7 @@ function BotAvatarPreviewPanel({
   glyph: BotGlyphName;
   scheduleKey: string;
   screenMaterialSeed: string;
+  frameMaterialSeed: string;
   isDefaultPrismBot: boolean;
   previewTheme: "light" | "dark";
   previewMode: BotAvatarPreviewMode;
@@ -30257,6 +30389,7 @@ function BotAvatarPreviewPanel({
             forceBlinkPhase={previewBlink ? "closed" : undefined}
             showThinkingSpinner={previewThinking}
             screenMaterialSeed={screenMaterialSeed}
+            frameMaterialSeed={frameMaterialSeed}
           />
         </div>
       </div>
@@ -30294,22 +30427,35 @@ function BotAvatarPreviewPanel({
 }
 
 function BotAvatarIdentityControls({
+  name,
   color,
   glyph,
   colorPickerOpen,
   resolvedTheme,
+  onNameChange,
   onColorChange,
   onGlyphChange,
   onColorPickerToggle,
 }: {
+  name: string;
   color: string;
   glyph: BotGlyphName;
   colorPickerOpen: boolean;
   resolvedTheme: "light" | "dark";
+  onNameChange: (next: string) => void;
   onColorChange: (next: string) => void;
   onGlyphChange: (next: BotGlyphName) => void;
   onColorPickerToggle: () => void;
 }): React.JSX.Element {
+  // The picker defaults closed behind a swatch toggle everywhere else; in the
+  // studio the Identity tab IS the picker, so open it on arrival.
+  const autoOpenedRef = useRef(false);
+  useEffect(() => {
+    if (autoOpenedRef.current) return;
+    autoOpenedRef.current = true;
+    if (!colorPickerOpen) onColorPickerToggle();
+  }, [colorPickerOpen, onColorPickerToggle]);
+
   return (
     <section className={styles.botAvatarControlGroup} aria-label="Identity">
       <header className={styles.botAvatarControlGroupHeader}>
@@ -30318,9 +30464,22 @@ function BotAvatarIdentityControls({
         </span>
         <div>
           <strong>Identity</strong>
-          <small>Color and glyph</small>
+          <small>Name, color, and glyph</small>
         </div>
       </header>
+      <label className={styles.botAvatarIdentityNameField}>
+        <span>Name</span>
+        <input
+          type="text"
+          value={name}
+          placeholder="Name this bot"
+          autoCapitalize="words"
+          autoCorrect="off"
+          spellCheck={false}
+          aria-label="Bot name"
+          onChange={(event) => onNameChange(event.currentTarget.value)}
+        />
+      </label>
       <div className={styles.botAvatarIdentityPicker}>
         <ColorGlyphPicker
           color={color}
@@ -30406,6 +30565,8 @@ function BotAvatarCoordinateControl({
   minY,
   maxY,
   stepY,
+  lockX = false,
+  lockedX = DEFAULT_BOT_FACE_EYE_OFFSET_X,
   onChange,
   onReset,
 }: {
@@ -30418,11 +30579,14 @@ function BotAvatarCoordinateControl({
   minY: number;
   maxY: number;
   stepY: number;
+  lockX?: boolean;
+  lockedX?: number;
   onChange: (next: { x: number; y: number }) => void;
   onReset: () => void;
 }): React.JSX.Element {
   const padRef = useRef<HTMLDivElement | null>(null);
-  const xRatio = (x - minX) / (maxX - minX);
+  const displayX = lockX ? lockedX : x;
+  const xRatio = (displayX - minX) / (maxX - minX);
   const yRatio = (y - minY) / (maxY - minY);
   const updateFromPointer = (event: ReactPointerEvent<HTMLDivElement>) => {
     const rect = padRef.current?.getBoundingClientRect();
@@ -30430,7 +30594,9 @@ function BotAvatarCoordinateControl({
     const rawX = (event.clientX - rect.left) / rect.width;
     const rawY = (event.clientY - rect.top) / rect.height;
     onChange({
-      x: botAvatarSnapCoordinate(minX + Math.max(0, Math.min(1, rawX)) * (maxX - minX), minX, maxX, stepX),
+      x: lockX
+        ? lockedX
+        : botAvatarSnapCoordinate(minX + Math.max(0, Math.min(1, rawX)) * (maxX - minX), minX, maxX, stepX),
       y: botAvatarSnapCoordinate(minY + Math.max(0, Math.min(1, rawY)) * (maxY - minY), minY, maxY, stepY),
     });
   };
@@ -30440,7 +30606,7 @@ function BotAvatarCoordinateControl({
       <header>
         <span>
           <strong>{label}</strong>
-          <small>{botAvatarCoordinateLabel(x, y)}</small>
+          <small>{botAvatarCoordinateLabel(displayX, y)}</small>
         </span>
         <button type="button" onClick={onReset} aria-label={`Reset ${label}`}>
           <RotateCcw size={12} strokeWidth={2.4} aria-hidden="true" />
@@ -30449,10 +30615,11 @@ function BotAvatarCoordinateControl({
       <div
         ref={padRef}
         className={styles.botAvatarCoordinatePad}
+        data-x-locked={lockX ? "true" : undefined}
         role="slider"
         tabIndex={0}
         aria-label={label}
-        aria-valuetext={botAvatarCoordinateLabel(x, y)}
+        aria-valuetext={botAvatarCoordinateLabel(displayX, y)}
         onPointerDown={(event) => {
           event.currentTarget.setPointerCapture(event.pointerId);
           updateFromPointer(event);
@@ -30466,16 +30633,16 @@ function BotAvatarCoordinateControl({
           const yStep = event.shiftKey ? stepY * 3 : stepY;
           if (event.key === "ArrowLeft") {
             event.preventDefault();
-            onChange({ x: botAvatarSnapCoordinate(x - xStep, minX, maxX, stepX), y });
+            if (!lockX) onChange({ x: botAvatarSnapCoordinate(displayX - xStep, minX, maxX, stepX), y });
           } else if (event.key === "ArrowRight") {
             event.preventDefault();
-            onChange({ x: botAvatarSnapCoordinate(x + xStep, minX, maxX, stepX), y });
+            if (!lockX) onChange({ x: botAvatarSnapCoordinate(displayX + xStep, minX, maxX, stepX), y });
           } else if (event.key === "ArrowUp") {
             event.preventDefault();
-            onChange({ x, y: botAvatarSnapCoordinate(y - yStep, minY, maxY, stepY) });
+            onChange({ x: displayX, y: botAvatarSnapCoordinate(y - yStep, minY, maxY, stepY) });
           } else if (event.key === "ArrowDown") {
             event.preventDefault();
-            onChange({ x, y: botAvatarSnapCoordinate(y + yStep, minY, maxY, stepY) });
+            onChange({ x: displayX, y: botAvatarSnapCoordinate(y + yStep, minY, maxY, stepY) });
           } else if (event.key === "Home") {
             event.preventDefault();
             onReset();
@@ -30600,23 +30767,9 @@ function BotAvatarMouthRotationWheel({
             data-face-font={mouthFont}
             aria-hidden="true"
           >
-            {mouthGlyph}
+            <span className={styles.botAvatarMouthRotationGlyphText}>{mouthGlyph}</span>
           </span>
         </div>
-        <input
-          type="range"
-          min={BOT_FACE_MOUTH_ROTATION_DEG_MIN}
-          max={BOT_FACE_MOUTH_ROTATION_DEG_MAX}
-          step={BOT_FACE_MOUTH_ROTATION_DEG_STEP}
-          value={normalizedValue}
-          aria-label="Mouth rotation degrees"
-          onChange={(event) =>
-            onChange(
-              normalizeBotFaceMouthRotationDeg(Number(event.currentTarget.value)) ??
-                DEFAULT_BOT_FACE_STYLE.mouthRotationDeg
-            )
-          }
-        />
       </div>
     </section>
   );
@@ -30657,7 +30810,7 @@ function BotAvatarFaceControls({
   onApplyPreset,
   onResetFace,
 }: {
-  activeTab: Extract<BotAvatarCustomizerTab, "face" | "advanced" | "motion">;
+  activeTab: Extract<BotAvatarCustomizerTab, "face" | "eyes" | "mouth" | "motion">;
   faceEyesFont: BotFaceFontId;
   faceEyeCharacter: string | null;
   faceMouthFont: BotFaceFontId;
@@ -30720,14 +30873,6 @@ function BotAvatarFaceControls({
     }
   }, [customEyeActive, customMouthActive]);
 
-  const randomThinkingPreset = () => {
-    const available = BOT_AVATAR_THINKING_PRESETS.filter(
-      (preset) => !botFaceThinkingFramesEqual(preset.frames, faceThinkingFrames)
-    );
-    const pool = available.length > 0 ? available : BOT_AVATAR_THINKING_PRESETS;
-    const index = Math.floor(Math.random() * pool.length);
-    onThinkingFramesChange(pool[index]?.frames ?? DEFAULT_BOT_FACE_STYLE.thinkingFrames);
-  };
   const updateThinkingFrame = (index: number, value: string) => {
     const pastedFrames = botAvatarThinkingFramesFromPaste(value);
     if (pastedFrames) {
@@ -30754,6 +30899,19 @@ function BotAvatarFaceControls({
       normalizeBotFaceMouthCharacter(faceMouthCharacter) ?? BOT_AVATAR_CUSTOM_MOUTH_START
     );
   };
+  const selectEyeFont = (fontId: BotFaceFontId) => {
+    onEyesFontChange(fontId);
+    if (customEyeActive) return;
+    onEyeCharacterChange(DEFAULT_BOT_FACE_STYLE.eyeCharacter);
+    onEyeOffsetXChange(DEFAULT_BOT_FACE_STYLE.eyeOffsetX);
+  };
+  const selectMouthFont = (fontId: BotFaceFontId) => {
+    onMouthFontChange(fontId);
+    if (customMouthActive) return;
+    onMouthCharacterChange(DEFAULT_BOT_FACE_STYLE.mouthCharacter);
+    onMouthOffsetXChange(DEFAULT_BOT_FACE_STYLE.mouthOffsetX);
+    onMouthRotationDegChange(DEFAULT_BOT_FACE_STYLE.mouthRotationDeg);
+  };
   const enableCustomBlink = () => {
     onBlinkBarChange(
       normalizeBotFaceBlinkBar(faceBlinkBar) && !builtInBlinkActive
@@ -30771,21 +30929,31 @@ function BotAvatarFaceControls({
   const controlLabel =
     activeTab === "face"
       ? "Face avatar controls"
-      : activeTab === "advanced"
-        ? "Glyph avatar controls"
-        : "Motion avatar controls";
+      : activeTab === "eyes"
+        ? "Eye avatar controls"
+        : activeTab === "mouth"
+          ? "Mouth avatar controls"
+          : "Motion avatar controls";
   const controlTitle =
     activeTab === "face"
       ? "Face"
-      : activeTab === "advanced"
-        ? "Glyphs"
-        : "Motion";
+      : activeTab === "eyes"
+        ? "Eyes"
+        : activeTab === "mouth"
+          ? "Mouth"
+          : "Motion";
   const controlSubtitle =
     activeTab === "face"
-      ? "Presets and built-in styles"
-      : activeTab === "advanced"
-        ? "Glyphs, size, and position"
-        : "Blink and thinking animation";
+      ? "Presets and stroke weight"
+      : activeTab === "eyes"
+        ? customEyeActive
+          ? "Custom glyph"
+          : "Built-in style"
+        : activeTab === "mouth"
+          ? customMouthActive
+            ? "Custom glyph"
+            : "Built-in style"
+          : "Blink and thinking animation";
 
   return (
     <section
@@ -30797,8 +30965,10 @@ function BotAvatarFaceControls({
         <span className={styles.botAvatarControlGroupIcon} aria-hidden="true">
           {activeTab === "face" ? (
             <Sparkles size={16} strokeWidth={2.4} />
-          ) : activeTab === "advanced" ? (
-            <PencilLine size={16} strokeWidth={2.4} />
+          ) : activeTab === "eyes" ? (
+            <Eye size={16} strokeWidth={2.4} />
+          ) : activeTab === "mouth" ? (
+            <Smile size={16} strokeWidth={2.4} />
           ) : (
             <Timer size={16} strokeWidth={2.4} />
           )}
@@ -30870,43 +31040,6 @@ function BotAvatarFaceControls({
             </div>
           </fieldset>
 
-          <div className={styles.botAvatarExpressionMatrix}>
-            <fieldset className={styles.botAvatarExpressionRow}>
-              <legend>Eyes</legend>
-              <div className={styles.botAvatarFontOptions}>
-                {BOT_FACE_FONT_IDS.map((fontId) => (
-                  <BotAvatarFontOption
-                    key={`avatar-eyes-${fontId}`}
-                    fontId={fontId}
-                    part="eyes"
-                    selected={faceEyesFont === fontId && !customEyeActive}
-                    onClick={() => {
-                      onEyesFontChange(fontId);
-                      onEyeCharacterChange(DEFAULT_BOT_FACE_STYLE.eyeCharacter);
-                    }}
-                  />
-                ))}
-              </div>
-            </fieldset>
-            <fieldset className={styles.botAvatarExpressionRow}>
-              <legend>Mouth</legend>
-              <div className={styles.botAvatarFontOptions}>
-                {BOT_FACE_FONT_IDS.map((fontId) => (
-                  <BotAvatarFontOption
-                    key={`avatar-mouth-${fontId}`}
-                    fontId={fontId}
-                    part="mouth"
-                    selected={faceMouthFont === fontId && !customMouthActive}
-                    onClick={() => {
-                      onMouthFontChange(fontId);
-                      onMouthCharacterChange(DEFAULT_BOT_FACE_STYLE.mouthCharacter);
-                    }}
-                  />
-                ))}
-              </div>
-            </fieldset>
-          </div>
-
           <div className={styles.botAvatarSliderStack}>
             <BotAvatarRangeControl
               label="Stroke weight"
@@ -30921,20 +31054,28 @@ function BotAvatarFaceControls({
             />
           </div>
         </div>
-      ) : activeTab === "advanced" ? (
+      ) : activeTab === "eyes" ? (
         <div className={styles.botAvatarCustomControls}>
+          <fieldset className={styles.botAvatarExpressionRow}>
+            <legend>Style</legend>
+            <div className={styles.botAvatarFontOptions}>
+              {BOT_FACE_FONT_IDS.map((fontId) => (
+                <BotAvatarFontOption
+                  key={`avatar-eyes-${fontId}`}
+                  fontId={fontId}
+                  part="eyes"
+                  selected={faceEyesFont === fontId}
+                  onClick={() => selectEyeFont(fontId)}
+                />
+              ))}
+            </div>
+          </fieldset>
           <div className={styles.botAvatarOverrideGrid}>
             <section
               className={styles.botAvatarOverrideControl}
               data-custom-active={customEyeActive ? "true" : undefined}
               aria-label="Eyes"
             >
-              <header className={styles.botAvatarGlyphSectionHeader}>
-                <span>
-                  <strong>Eyes</strong>
-                  <small>{customEyeActive ? "Custom glyph" : "Built-in style"}</small>
-                </span>
-              </header>
               <div
                 className={styles.botAvatarGlyphModeControl}
                 role="group"
@@ -30944,7 +31085,10 @@ function BotAvatarFaceControls({
                   type="button"
                   data-active={!customEyeActive ? "true" : undefined}
                   aria-pressed={!customEyeActive}
-                  onClick={() => onEyeCharacterChange(DEFAULT_BOT_FACE_STYLE.eyeCharacter)}
+                  onClick={() => {
+                    onEyeCharacterChange(DEFAULT_BOT_FACE_STYLE.eyeCharacter);
+                    onEyeOffsetXChange(DEFAULT_BOT_FACE_STYLE.eyeOffsetX);
+                  }}
                 >
                   Built-in
                 </button>
@@ -30980,9 +31124,10 @@ function BotAvatarFaceControls({
                     <button
                       type="button"
                       className={styles.botAvatarInlineResetButton}
-                      onClick={() =>
-                        onEyeCharacterChange(DEFAULT_BOT_FACE_STYLE.eyeCharacter)
-                      }
+                      onClick={() => {
+                        onEyeCharacterChange(DEFAULT_BOT_FACE_STYLE.eyeCharacter);
+                        onEyeOffsetXChange(DEFAULT_BOT_FACE_STYLE.eyeOffsetX);
+                      }}
                       aria-label="Use built-in eyes"
                       title="Use built-in eyes"
                     >
@@ -31005,7 +31150,7 @@ function BotAvatarFaceControls({
                 />
                 <BotAvatarCoordinateControl
                   label="Eye position"
-                  x={faceEyeOffsetX}
+                  x={customEyeActive ? faceEyeOffsetX : DEFAULT_BOT_FACE_STYLE.eyeOffsetX}
                   y={faceEyeOffsetY}
                   minX={BOT_FACE_EYE_OFFSET_X_MIN}
                   maxX={BOT_FACE_EYE_OFFSET_X_MAX}
@@ -31013,6 +31158,8 @@ function BotAvatarFaceControls({
                   minY={BOT_FACE_EYE_OFFSET_Y_MIN}
                   maxY={BOT_FACE_EYE_OFFSET_Y_MAX}
                   stepY={BOT_FACE_EYE_OFFSET_Y_STEP}
+                  lockX={!customEyeActive}
+                  lockedX={DEFAULT_BOT_FACE_STYLE.eyeOffsetX}
                   onChange={(next) => {
                     onEyeOffsetXChange(next.x);
                     onEyeOffsetYChange(next.y);
@@ -31024,75 +31171,92 @@ function BotAvatarFaceControls({
                 />
               </div>
             </section>
-
+          </div>
+        </div>
+      ) : activeTab === "mouth" ? (
+        <div className={styles.botAvatarCustomControls}>
+          <fieldset className={styles.botAvatarExpressionRow}>
+            <legend>Style</legend>
+            <div className={styles.botAvatarFontOptions}>
+              {BOT_FACE_FONT_IDS.map((fontId) => (
+                <BotAvatarFontOption
+                  key={`avatar-mouth-${fontId}`}
+                  fontId={fontId}
+                  part="mouth"
+                  selected={faceMouthFont === fontId}
+                  onClick={() => selectMouthFont(fontId)}
+                />
+              ))}
+              <button
+                type="button"
+                className={`${styles.botAvatarFontOption} ${styles.botAvatarCustomOption}`}
+                data-selected={customMouthActive ? "true" : undefined}
+                aria-pressed={customMouthActive}
+                aria-label="Custom mouth"
+                onClick={enableCustomMouth}
+              >
+                <span
+                  className={styles.botAvatarFontOptionSample}
+                  data-face-font={faceMouthFont}
+                  aria-hidden="true"
+                >
+                  {customMouthActive ? normalizedMouthGlyph : BOT_AVATAR_CUSTOM_MOUTH_START}
+                </span>
+                <span>Custom</span>
+              </button>
+            </div>
+          </fieldset>
+          <div className={styles.botAvatarOverrideGrid}>
             <section
               className={styles.botAvatarOverrideControl}
               data-custom-active={customMouthActive ? "true" : undefined}
               aria-label="Mouth"
             >
-              <header className={styles.botAvatarGlyphSectionHeader}>
-                <span>
-                  <strong>Mouth</strong>
-                  <small>{customMouthActive ? "Custom glyph" : "Built-in style"}</small>
-                </span>
-              </header>
-              <div
-                className={styles.botAvatarGlyphModeControl}
-                role="group"
-                aria-label="Mouth glyph mode"
-              >
-                <button
-                  type="button"
-                  data-active={!customMouthActive ? "true" : undefined}
-                  aria-pressed={!customMouthActive}
-                  onClick={() =>
-                    onMouthCharacterChange(DEFAULT_BOT_FACE_STYLE.mouthCharacter)
-                  }
-                >
-                  Built-in
-                </button>
-                <button
-                  type="button"
-                  data-active={customMouthActive ? "true" : undefined}
-                  aria-pressed={customMouthActive}
-                  onClick={enableCustomMouth}
-                >
-                  Custom
-                </button>
-              </div>
               {customMouthActive ? (
-                <label className={styles.botAvatarGlyphInputField}>
-                  <span>Mouth glyph</span>
-                  <span className={styles.botAvatarOverrideInputRow}>
-                    <input
-                      ref={mouthGlyphInputRef}
-                      type="text"
-                      value={faceMouthCharacter ?? ""}
-                      placeholder={BOT_AVATAR_CUSTOM_MOUTH_START}
-                      inputMode="text"
-                      autoCapitalize="off"
-                      autoCorrect="off"
-                      spellCheck={false}
-                      aria-label="Mouth glyph"
-                      onChange={(event) =>
-                        onMouthCharacterChange(
-                          normalizeBotFaceMouthCharacter(event.currentTarget.value)
-                        )
-                      }
-                    />
-                    <button
-                      type="button"
-                      className={styles.botAvatarInlineResetButton}
-                      onClick={() =>
-                        onMouthCharacterChange(DEFAULT_BOT_FACE_STYLE.mouthCharacter)
-                      }
-                      aria-label="Use built-in mouth"
-                      title="Use built-in mouth"
-                    >
-                      <RotateCcw size={13} strokeWidth={2.3} aria-hidden="true" />
-                    </button>
-                  </span>
-                </label>
+                <div className={styles.botAvatarMouthCustomRow}>
+                  <label className={styles.botAvatarGlyphInputField}>
+                    <span>Mouth glyph</span>
+                    <span className={styles.botAvatarOverrideInputRow}>
+                      <input
+                        ref={mouthGlyphInputRef}
+                        type="text"
+                        value={faceMouthCharacter ?? ""}
+                        placeholder={BOT_AVATAR_CUSTOM_MOUTH_START}
+                        inputMode="text"
+                        autoCapitalize="off"
+                        autoCorrect="off"
+                        spellCheck={false}
+                        aria-label="Mouth glyph"
+                        onChange={(event) =>
+                          onMouthCharacterChange(
+                            normalizeBotFaceMouthCharacter(event.currentTarget.value)
+                          )
+                        }
+                      />
+                      <button
+                        type="button"
+                        className={styles.botAvatarInlineResetButton}
+                        onClick={() => {
+                          onMouthCharacterChange(DEFAULT_BOT_FACE_STYLE.mouthCharacter);
+                          onMouthOffsetXChange(DEFAULT_BOT_FACE_STYLE.mouthOffsetX);
+                        }}
+                        aria-label="Use built-in mouth"
+                        title="Use built-in mouth"
+                      >
+                        <RotateCcw size={13} strokeWidth={2.3} aria-hidden="true" />
+                      </button>
+                    </span>
+                  </label>
+                  <BotAvatarMouthRotationWheel
+                    value={faceMouthRotationDeg}
+                    mouthGlyph={mouthRotationGlyph}
+                    mouthFont={faceMouthFont}
+                    onChange={onMouthRotationDegChange}
+                    onReset={() =>
+                      onMouthRotationDegChange(DEFAULT_BOT_FACE_STYLE.mouthRotationDeg)
+                    }
+                  />
+                </div>
               ) : null}
               <div className={styles.botAvatarCustomGeometry}>
                 <BotAvatarRangeControl
@@ -31106,18 +31270,9 @@ function BotAvatarFaceControls({
                   rightLabel="Larger"
                   onChange={onMouthScaleChange}
                 />
-                <BotAvatarMouthRotationWheel
-                  value={faceMouthRotationDeg}
-                  mouthGlyph={mouthRotationGlyph}
-                  mouthFont={faceMouthFont}
-                  onChange={onMouthRotationDegChange}
-                  onReset={() =>
-                    onMouthRotationDegChange(DEFAULT_BOT_FACE_STYLE.mouthRotationDeg)
-                  }
-                />
                 <BotAvatarCoordinateControl
                   label="Mouth position"
-                  x={faceMouthOffsetX}
+                  x={customMouthActive ? faceMouthOffsetX : DEFAULT_BOT_FACE_STYLE.mouthOffsetX}
                   y={faceMouthOffsetY}
                   minX={BOT_FACE_MOUTH_OFFSET_X_MIN}
                   maxX={BOT_FACE_MOUTH_OFFSET_X_MAX}
@@ -31125,6 +31280,8 @@ function BotAvatarFaceControls({
                   minY={BOT_FACE_MOUTH_OFFSET_Y_MIN}
                   maxY={BOT_FACE_MOUTH_OFFSET_Y_MAX}
                   stepY={BOT_FACE_MOUTH_OFFSET_Y_STEP}
+                  lockX={!customMouthActive}
+                  lockedX={DEFAULT_BOT_FACE_STYLE.mouthOffsetX}
                   onChange={(next) => {
                     onMouthOffsetXChange(next.x);
                     onMouthOffsetYChange(next.y);
@@ -31224,15 +31381,6 @@ function BotAvatarFaceControls({
                   )}
                 </span>
                 <strong>Custom</strong>
-              </button>
-              <button
-                type="button"
-                className={styles.botAvatarThinkingIconButton}
-                onClick={randomThinkingPreset}
-                aria-label="Random thinking preset"
-                title="Random thinking preset"
-              >
-                <Shuffle size={13} strokeWidth={2.3} aria-hidden="true" />
               </button>
               <button
                 type="button"
@@ -31361,8 +31509,11 @@ function BotAvatarSavePrompt({
 function BotAvatarCustomizerModal({
   open,
   botName,
+  botNameDraft,
+  onBotNameChange,
   scheduleKey,
   screenMaterialSeed,
+  frameMaterialSeed,
   color,
   glyph,
   isDefaultPrismBot = false,
@@ -31488,6 +31639,25 @@ function BotAvatarCustomizerModal({
   }, [open, previewTalking]);
 
   if (!open) return null;
+
+  // The studio portals to document.body, outside the app shell that carries
+  // the .themeDark/.themeLight variable scope. Without re-declaring that scope
+  // here, every var(--accent)/var(--line) declaration in the studio CSS is
+  // invalid at computed-value time and silently collapses to initial values.
+  const themeScopeClass =
+    resolvedTheme === "light" ? styles.themeLight : styles.themeDark;
+  const chromeAccentStyle = ((): CSSProperties => {
+    if (isDefaultPrismBot) return {};
+    const accentNormalized = normalizeAccentForTheme(color, resolvedTheme);
+    const base = deriveAccentStyle(accentNormalized, resolvedTheme);
+    return {
+      ["--editor-bot-color" as string]: accentNormalized,
+      ["--editor-bot-text" as string]: base["--accent-text" as keyof typeof base],
+      ["--editor-bot-ink" as string]: base["--accent-ink" as keyof typeof base],
+      ["--editor-bot-soft" as string]: base["--accent-soft" as keyof typeof base],
+      ["--editor-bot-glow" as string]: base["--accent-glow" as keyof typeof base],
+    } as CSSProperties;
+  })();
 
   const saveStatusState = saving ? "saving" : hasUnsavedChanges ? "dirty" : "saved";
   const saveStatusLabel =
@@ -31616,6 +31786,7 @@ function BotAvatarCustomizerModal({
             glyph={glyph}
             scheduleKey={scheduleKey}
             screenMaterialSeed={screenMaterialSeed}
+            frameMaterialSeed={frameMaterialSeed}
             isDefaultPrismBot={isDefaultPrismBot}
             previewTheme={previewTheme}
             previewMode={previewMode}
@@ -31650,8 +31821,10 @@ function BotAvatarCustomizerModal({
                       <Brush size={13} strokeWidth={2.3} aria-hidden="true" />
                     ) : tab.value === "face" ? (
                       <Sparkles size={13} strokeWidth={2.3} aria-hidden="true" />
-                    ) : tab.value === "advanced" ? (
-                      <PencilLine size={13} strokeWidth={2.3} aria-hidden="true" />
+                    ) : tab.value === "eyes" ? (
+                      <Eye size={13} strokeWidth={2.3} aria-hidden="true" />
+                    ) : tab.value === "mouth" ? (
+                      <Smile size={13} strokeWidth={2.3} aria-hidden="true" />
                     ) : (
                       <Timer size={13} strokeWidth={2.3} aria-hidden="true" />
                     )}
@@ -31663,10 +31836,12 @@ function BotAvatarCustomizerModal({
             <div className={styles.botAvatarControlStack}>
               {activeControlTab === "identity" && identityControlsVisible ? (
                 <BotAvatarIdentityControls
+                  name={botNameDraft}
                   color={color}
                   glyph={glyph}
                   colorPickerOpen={colorPickerOpen}
                   resolvedTheme={resolvedTheme}
+                  onNameChange={onBotNameChange}
                   onColorChange={onColorChange}
                   onGlyphChange={onGlyphChange}
                   onColorPickerToggle={onColorPickerToggle}
@@ -31733,19 +31908,18 @@ function BotAvatarCustomizerModal({
     />
   );
 
-  if (typeof document === "undefined") return (
-    <>
+  const themedStudio = (
+    <div
+      className={`${styles.botAvatarStudioThemeScope} ${themeScopeClass}`}
+      style={chromeAccentStyle}
+    >
       {modal}
       {savePrompt}
-    </>
+    </div>
   );
-  return createPortal(
-    <>
-      {modal}
-      {savePrompt}
-    </>,
-    document.body
-  );
+
+  if (typeof document === "undefined") return themedStudio;
+  return createPortal(themedStudio, document.body);
 }
 
 function BotAiParameterCustomizer({
@@ -32981,6 +33155,9 @@ function HomeContent(): React.JSX.Element {
     useState<ZenActionCue | null>(null);
   const [zenLiveBotAction, setZenLiveBotAction] =
     useState<ZenLiveBotActionState | null>(null);
+  const [zenLiveBotAvatarSizePx, setZenLiveBotAvatarSizePx] = useState<number>(
+    () => readZenLiveBotAvatarSizePx()
+  );
   const zenLiveUserActionPreviewRef = useRef<ZenActionCue | null>(null);
   const zenLiveUserActionPreviewSourceRef = useRef<"composer" | "debug">("composer");
   const zenLiveBotActionRef = useRef<ZenLiveBotActionState | null>(null);
@@ -33425,6 +33602,11 @@ function HomeContent(): React.JSX.Element {
     y: number;
     maxHeight?: number;
   } | null>(null);
+  const [zenLiveBotContextMenu, setZenLiveBotContextMenu] = useState<{
+    x: number;
+    y: number;
+    maxHeight?: number;
+  } | null>(null);
   const [conversationGroupContextMenu, setConversationGroupContextMenu] = useState<{
     groupKey: string;
     x: number;
@@ -33454,6 +33636,7 @@ function HomeContent(): React.JSX.Element {
   /** Message-actions popover (`role="menu"`) root for tap-outside + touch dismiss. */
   const messageActionsMenuRef = useRef<HTMLDivElement | null>(null);
   const botContextMenuRef = useRef<HTMLDivElement | null>(null);
+  const zenLiveBotContextMenuRef = useRef<HTMLDivElement | null>(null);
   const conversationGroupContextMenuRef = useRef<HTMLDivElement | null>(null);
   const canvasToolsContextMenuRef = useRef<HTMLDivElement | null>(null);
   const coffeeShellContextMenuRef = useRef<HTMLDivElement | null>(null);
@@ -33782,6 +33965,10 @@ function HomeContent(): React.JSX.Element {
     setBotContextMenu(null);
   }, []);
 
+  const closeZenLiveBotContextMenu = useCallback(() => {
+    setZenLiveBotContextMenu(null);
+  }, []);
+
   const closeConversationGroupContextMenu = useCallback(() => {
     setConversationGroupContextMenu(null);
   }, []);
@@ -33801,6 +33988,19 @@ function HomeContent(): React.JSX.Element {
   const closeStoryShellContextMenu = useCallback(() => {
     setStoryShellContextMenu(null);
   }, []);
+
+  const resizeZenLiveBotAvatar = useCallback(
+    (action: ZenLiveBotAvatarResizeAction): void => {
+      setZenLiveBotAvatarSizePx((current) => {
+        const next = resizeZenLiveBotAvatarSizePx(current, action);
+        if (next !== current) {
+          persistZenLiveBotAvatarSizePx(next);
+        }
+        return next;
+      });
+    },
+    []
+  );
 
   const cancelBotContextLongPress = useCallback((pointerId?: number) => {
     const pending = botContextLongPressRef.current;
@@ -45136,6 +45336,9 @@ function HomeContent(): React.JSX.Element {
             "--zen-tone-gap-extra": `${Math.round(zenToneSpace * 64)}px`,
             "--zen-tone-runway-extra": `${Math.round(zenToneSpace * 112)}px`,
             "--zen-tone-scroll-margin-extra": `${Math.round(zenToneSpace * 112)}px`,
+            "--zen-live-bot-prose-width": `${resolveZenLiveBotProseWidthPx(
+              zenLiveBotAvatarSizePx
+            )}px`,
           }
         : {};
       const merged = { ...lensThumb, ...homeVars, ...zenToneVars };
@@ -45148,6 +45351,7 @@ function HomeContent(): React.JSX.Element {
       emptyStateLensVisible,
       homeRainbowVars,
       lensThumbXPct,
+      zenLiveBotAvatarSizePx,
       zenToneSpace,
     ]
   );
@@ -53427,14 +53631,7 @@ function HomeContent(): React.JSX.Element {
     pendingReplyVisible &&
     pendingReplyStartMessageCount === 0 &&
     detail?.hasAssistantReply !== true;
-  const zenLiveNaturalQuestionMarkerVisible =
-    !chatAssistantRevealInProgress &&
-    latestAssistantMessage !== null &&
-    latestDetailMessageId === latestAssistantMessage.id &&
-    (latestAssistantMessage.botId ?? null) === zenPersonaPresence.visibleBotId &&
-    assistantMessageEndsWithVisibleQuestion(latestAssistantMessage);
-  const zenLiveAskQuestionMarkerVisible =
-    pendingAskQuestionInteractiveKey !== null || zenLiveNaturalQuestionMarkerVisible;
+  const zenLiveAskQuestionMarkerVisible = pendingAskQuestionInteractiveKey !== null;
   const zenLivePresenceRailVisible =
     zenDefaultPrismPresenceVisible ||
     Boolean(
@@ -55163,6 +55360,8 @@ function HomeContent(): React.JSX.Element {
                     resolvedTheme={resolvedTheme}
                     atmosphereActive={zenPresenceAtmosphereActive}
                     privateModeActive={privateChatActive}
+                    avatarSizePx={zenLiveBotAvatarSizePx}
+                    onContextMenuRequest={openZenLiveBotContextMenu}
                   />
                   {zenComposerActionPreview ? (
                     <ZenActionComposerPreview cue={zenComposerActionPreview} />
@@ -56617,6 +56816,7 @@ function HomeContent(): React.JSX.Element {
       maxHeight: contextMenuMaxHeightForBoundary(bottomBoundaryY),
     });
     closeMessageContextOverlay();
+    setZenLiveBotContextMenu(null);
     setConversationGroupContextMenu(null);
     setCanvasToolsContextMenu(null);
     setChatOverflowMenuOpen(false);
@@ -56645,8 +56845,33 @@ function HomeContent(): React.JSX.Element {
       maxHeight: contextMenuMaxHeightForBoundary(bottomBoundaryY),
     });
     closeMessageContextOverlay();
+    setZenLiveBotContextMenu(null);
     setConversationGroupContextMenu(null);
     setCanvasToolsContextMenu(null);
+    setChatOverflowMenuOpen(false);
+  }, [closeMessageContextOverlay]);
+
+  const openZenLiveBotContextMenu = useCallback((x: number, y: number) => {
+    const bottomBoundaryY = contextMenuComposerBoundaryY();
+    const clamped = clampContextMenuPosition(
+      x,
+      y,
+      ZEN_LIVE_BOT_CONTEXT_MENU_ESTIMATED_WIDTH_PX,
+      ZEN_LIVE_BOT_CONTEXT_MENU_ESTIMATED_HEIGHT_PX,
+      bottomBoundaryY
+    );
+    setZenLiveBotContextMenu({
+      x: clamped.x,
+      y: clamped.y,
+      maxHeight: contextMenuMaxHeightForBoundary(bottomBoundaryY),
+    });
+    closeMessageContextOverlay();
+    setBotContextMenu(null);
+    setConversationGroupContextMenu(null);
+    setCanvasToolsContextMenu(null);
+    setCoffeeShellContextMenu(null);
+    setCoffeeBotContextMenu(null);
+    setStoryShellContextMenu(null);
     setChatOverflowMenuOpen(false);
   }, [closeMessageContextOverlay]);
 
@@ -56665,6 +56890,7 @@ function HomeContent(): React.JSX.Element {
       });
       closeMessageContextOverlay();
       setBotContextMenu(null);
+      setZenLiveBotContextMenu(null);
       setCanvasToolsContextMenu(null);
       setChatOverflowMenuOpen(false);
     },
@@ -56788,6 +57014,33 @@ function HomeContent(): React.JSX.Element {
       document.removeEventListener("keydown", handleKey);
     };
   }, [botContextMenu, closeBotContextMenu]);
+
+  useEffect(() => {
+    if (!zenLiveBotContextMenu) return;
+
+    function handlePointerDown(event: PointerEvent) {
+      if (!isPrimaryPointerDismissal(event)) return;
+      const target = event.target;
+      if (target instanceof Node && zenLiveBotContextMenuRef.current?.contains(target)) {
+        return;
+      }
+      closeZenLiveBotContextMenu();
+    }
+
+    function handleKey(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        closeZenLiveBotContextMenu();
+      }
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [zenLiveBotContextMenu, closeZenLiveBotContextMenu]);
 
   useEffect(() => {
     if (!conversationGroupContextMenu) return;
@@ -56993,6 +57246,7 @@ function HomeContent(): React.JSX.Element {
         anchor,
       });
       setBotContextMenu(null);
+      setZenLiveBotContextMenu(null);
       setConversationGroupContextMenu(null);
       setCanvasToolsContextMenu(null);
       setContextFocusedMessageId(msg.id);
@@ -60636,6 +60890,7 @@ function HomeContent(): React.JSX.Element {
   const handleAppContextMenu = useCallback((event: React.MouseEvent<HTMLElement>) => {
     if (shouldAllowNativeContextMenu(event.target)) return;
     event.preventDefault();
+    setZenLiveBotContextMenu(null);
   }, [shouldAllowNativeContextMenu]);
 
   /**
@@ -60661,6 +60916,7 @@ function HomeContent(): React.JSX.Element {
       setCoffeeBotContextMenu(null);
       setCanvasToolsContextMenu(null);
       setBotContextMenu(null);
+      setZenLiveBotContextMenu(null);
       setConversationGroupContextMenu(null);
     },
     [shouldAllowNativeContextMenu]
@@ -60680,6 +60936,7 @@ function HomeContent(): React.JSX.Element {
       setCoffeeBotContextMenu({ botId, x: clamped.x, y: clamped.y });
       setCoffeeShellContextMenu(null);
       setBotContextMenu(null);
+      setZenLiveBotContextMenu(null);
       setCanvasToolsContextMenu(null);
       setConversationGroupContextMenu(null);
     },
@@ -60700,6 +60957,7 @@ function HomeContent(): React.JSX.Element {
       setCoffeeBotContextMenu(null);
       setCanvasToolsContextMenu(null);
       setBotContextMenu(null);
+      setZenLiveBotContextMenu(null);
       setConversationGroupContextMenu(null);
     },
     []
@@ -60713,6 +60971,7 @@ function HomeContent(): React.JSX.Element {
       if (botLibraryGroupDashboardActive) {
         closeMessageContextOverlay();
         setBotContextMenu(null);
+        setZenLiveBotContextMenu(null);
         setConversationGroupContextMenu(null);
         setCanvasToolsContextMenu(null);
         setChatOverflowMenuOpen(false);
@@ -60729,6 +60988,7 @@ function HomeContent(): React.JSX.Element {
       setCanvasToolsContextMenu({ x: clamped.x, y: clamped.y });
       closeMessageContextOverlay();
       setBotContextMenu(null);
+      setZenLiveBotContextMenu(null);
       setConversationGroupContextMenu(null);
       setChatOverflowMenuOpen(false);
     },
@@ -69181,6 +69441,82 @@ function HomeContent(): React.JSX.Element {
       </div>
     );
   };
+
+  function renderZenLiveBotContextMenu(): React.JSX.Element | null {
+    if (!zenLiveBotContextMenu) return null;
+    const bot = zenLivePresenceBot;
+    const botName = bot?.name?.trim() || "Prism";
+    const canGrow = zenLiveBotAvatarSizePx < ZEN_LIVE_BOT_AVATAR_MAX_SIZE_PX;
+    const canShrink = zenLiveBotAvatarSizePx > ZEN_LIVE_BOT_AVATAR_MIN_SIZE_PX;
+    const canEdit = Boolean(bot) || Boolean(settings);
+    const menuStyle = {
+      left: `${zenLiveBotContextMenu.x}px`,
+      top: `${zenLiveBotContextMenu.y}px`,
+      maxHeight:
+        typeof zenLiveBotContextMenu.maxHeight === "number"
+          ? `${zenLiveBotContextMenu.maxHeight}px`
+          : undefined,
+      "--bot-color": normalizeAccentForTheme(
+        bot?.color ?? PRISM_DEFAULT_ACCENT,
+        resolvedTheme
+      ),
+    } as React.CSSProperties;
+    const runAndClose = (fn: () => void) => {
+      closeZenLiveBotContextMenu();
+      fn();
+    };
+    const openZenAvatarCustomizer = (): void => {
+      if (bot) {
+        openBotCustomizer(bot);
+        setBotAvatarCustomizerOpen(true);
+        return;
+      }
+      openDefaultBotCustomizer();
+    };
+    return (
+      <div
+        ref={zenLiveBotContextMenuRef}
+        className={`${styles.messageContextMenu} ${styles.botContextMenu}`}
+        style={menuStyle}
+        role="menu"
+        aria-label={`${botName} avatar actions`}
+      >
+        <button
+          type="button"
+          role="menuitem"
+          disabled={!canGrow}
+          onClick={() => runAndClose(() => resizeZenLiveBotAvatar("grow"))}
+        >
+          <span className={styles.contextMenuItemLabel}>
+            <span className={styles.contextMenuGlyph} aria-hidden="true">+</span>
+            <span>Grow</span>
+          </span>
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          disabled={!canShrink}
+          onClick={() => runAndClose(() => resizeZenLiveBotAvatar("shrink"))}
+        >
+          <span className={styles.contextMenuItemLabel}>
+            <span className={styles.contextMenuGlyph} aria-hidden="true">−</span>
+            <span>Shrink</span>
+          </span>
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          disabled={!canEdit}
+          onClick={() => runAndClose(openZenAvatarCustomizer)}
+        >
+          <span className={styles.contextMenuItemLabel}>
+            <span className={styles.contextMenuGlyph} aria-hidden="true">✎</span>
+            <span>Edit avatar</span>
+          </span>
+        </button>
+      </div>
+    );
+  }
 
   /** Right-click on `messagesFrame`: Sandbox mirrors the full header tool stack;
    *  Zen keeps a compact canvas menu so the calm surface stays light. */
@@ -78062,6 +78398,8 @@ function HomeContent(): React.JSX.Element {
               <BotAvatarCustomizerModal
                   open={botAvatarCustomizerOpen}
                   botName={profileReferenceName}
+                  botNameDraft={newBotName}
+                  onBotNameChange={setNewBotName}
 	                  scheduleKey={`bot-avatar-customizer-${
 	                    editingDefaultBot ? "default" : editingBotId ?? "draft"
 	                  }`}
@@ -78073,7 +78411,15 @@ function HomeContent(): React.JSX.Element {
                         editingDefaultBot ? "default" : editingBotId ?? "draft"
                       }`
                     )}
-	                  color={newBotColor}
+                    frameMaterialSeed={botFrameMaterialSeedForBot(
+                      editingBotId
+                        ? bots.find((candidate) => candidate.id === editingBotId)
+                        : null,
+                      `bot-avatar-customizer-${
+                        editingDefaultBot ? "default" : editingBotId ?? "draft"
+                      }`
+                    )}
+		                  color={newBotColor}
                   glyph={newBotGlyph}
                   isDefaultPrismBot={editingDefaultBot}
                   identityControlsVisible={!editingDefaultBot}
@@ -85734,7 +86080,8 @@ function HomeContent(): React.JSX.Element {
 		                        thinkingScheduleKey={`coffee-thinking-${bot.id}`}
 		                        showThinkingSpinner={seatIsThinkingThisSeat}
                             screenMaterialSeed={botScreenMaterialSeedForBot(bot, bot.id)}
-		                      />
+                            frameMaterialSeed={botFrameMaterialSeedForBot(bot, bot.id)}
+			                      />
                       {seatTeamId && seatTeamLabel ? (
                         <span
                           className={styles.coffeeSeatTeamBadge}
@@ -89892,6 +90239,8 @@ function HomeContent(): React.JSX.Element {
                       resolvedTheme={resolvedTheme}
                       atmosphereActive={zenAtmosphereWallpaperVisible}
                       privateModeActive={privateChatActive}
+                      avatarSizePx={zenLiveBotAvatarSizePx}
+                      onContextMenuRequest={openZenLiveBotContextMenu}
                     />
                     {zenComposerActionPreview ? (
                       <ZenActionComposerPreview cue={zenComposerActionPreview} />
@@ -89973,6 +90322,7 @@ function HomeContent(): React.JSX.Element {
         {renderBotContextMenu()}
         {renderConversationGroupContextMenu()}
         {renderCanvasToolsContextMenu()}
+        {renderZenLiveBotContextMenu()}
       </section>
 
       {renderSharedPanels()}
@@ -91572,6 +91922,7 @@ function HomeContent(): React.JSX.Element {
         {renderBotContextMenu()}
         {renderConversationGroupContextMenu()}
         {renderCanvasToolsContextMenu()}
+        {renderZenLiveBotContextMenu()}
       </section>
 
       {renderSharedPanels()}

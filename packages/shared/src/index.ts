@@ -1616,6 +1616,7 @@ export type ZenLiveActionMoodHint =
   | "amused"
   | "confused"
   | "stern"
+  | "strained"
   | "waiting"
   | "warm";
 
