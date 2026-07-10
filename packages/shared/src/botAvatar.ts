@@ -20,6 +20,7 @@ export const BOT_FACE_FONT_LABELS: Record<BotFaceFontId, string> = {
 
 export const DEFAULT_BOT_FACE_FONT_ID: BotFaceFontId = "neutral";
 export const DEFAULT_BOT_FACE_EYE_CHARACTER: string | null = null;
+export const DEFAULT_BOT_FACE_MOUTH_CHARACTER: string | null = null;
 export const DEFAULT_BOT_FACE_FONT_WEIGHT = 600;
 export const BOT_FACE_FONT_WEIGHT_MIN = 300;
 export const BOT_FACE_FONT_WEIGHT_MAX = 800;
@@ -28,14 +29,30 @@ export const DEFAULT_BOT_FACE_EYE_SCALE = 1;
 export const BOT_FACE_EYE_SCALE_MIN = 0.7;
 export const BOT_FACE_EYE_SCALE_MAX = 1.3;
 export const BOT_FACE_EYE_SCALE_STEP = 0.05;
+export const DEFAULT_BOT_FACE_EYE_OFFSET_X = 0;
+export const BOT_FACE_EYE_OFFSET_X_MIN = -0.18;
+export const BOT_FACE_EYE_OFFSET_X_MAX = 0.18;
+export const BOT_FACE_EYE_OFFSET_X_STEP = 0.02;
 export const DEFAULT_BOT_FACE_EYE_OFFSET_Y = 0;
 export const BOT_FACE_EYE_OFFSET_Y_MIN = -0.18;
 export const BOT_FACE_EYE_OFFSET_Y_MAX = 0.18;
 export const BOT_FACE_EYE_OFFSET_Y_STEP = 0.02;
+export const DEFAULT_BOT_FACE_MOUTH_SCALE = 1;
+export const BOT_FACE_MOUTH_SCALE_MIN = 0.7;
+export const BOT_FACE_MOUTH_SCALE_MAX = 1.5;
+export const BOT_FACE_MOUTH_SCALE_STEP = 0.05;
+export const DEFAULT_BOT_FACE_MOUTH_OFFSET_X = 0;
+export const BOT_FACE_MOUTH_OFFSET_X_MIN = -0.18;
+export const BOT_FACE_MOUTH_OFFSET_X_MAX = 0.18;
+export const BOT_FACE_MOUTH_OFFSET_X_STEP = 0.02;
 export const DEFAULT_BOT_FACE_MOUTH_OFFSET_Y = 0;
 export const BOT_FACE_MOUTH_OFFSET_Y_MIN = -0.18;
 export const BOT_FACE_MOUTH_OFFSET_Y_MAX = 0.18;
 export const BOT_FACE_MOUTH_OFFSET_Y_STEP = 0.02;
+export const DEFAULT_BOT_FACE_MOUTH_ROTATION_DEG = 0;
+export const BOT_FACE_MOUTH_ROTATION_DEG_MIN = -180;
+export const BOT_FACE_MOUTH_ROTATION_DEG_MAX = 180;
+export const BOT_FACE_MOUTH_ROTATION_DEG_STEP = 5;
 export const BOT_FACE_BLINK_BAR_VALUES = ["none", "¦", "❘", "|"] as const;
 export type BotFaceBlinkBar = string;
 export const DEFAULT_BOT_FACE_BLINK_BAR: BotFaceBlinkBar = "¦";
@@ -52,10 +69,15 @@ export interface BotFaceStyle {
   eyesFont: BotFaceFontId;
   eyeCharacter: string | null;
   mouthFont: BotFaceFontId;
+  mouthCharacter: string | null;
   weight: number;
   eyeScale: number;
+  eyeOffsetX: number;
   eyeOffsetY: number;
+  mouthScale: number;
+  mouthOffsetX: number;
   mouthOffsetY: number;
+  mouthRotationDeg: number;
   blinkBar: BotFaceBlinkBar;
   thinkingFrames: BotFaceThinkingFrames;
 }
@@ -64,10 +86,15 @@ export interface BotFaceStyleInput {
   faceEyesFont?: unknown;
   faceEyeCharacter?: unknown;
   faceMouthFont?: unknown;
+  faceMouthCharacter?: unknown;
   faceFontWeight?: unknown;
   faceEyeScale?: unknown;
+  faceEyeOffsetX?: unknown;
   faceEyeOffsetY?: unknown;
+  faceMouthScale?: unknown;
+  faceMouthOffsetX?: unknown;
   faceMouthOffsetY?: unknown;
+  faceMouthRotationDeg?: unknown;
   faceBlinkBar?: unknown;
   faceThinkingFrames?: unknown;
 }
@@ -85,10 +112,22 @@ export function normalizeBotFaceFontId(
   return isBotFaceFontId(value) ? value : null;
 }
 
+const BOT_FACE_EMOJI_GLYPH_PATTERN =
+  /[\ufe0f]|\p{Emoji_Presentation}|\p{Extended_Pictographic}|\p{Emoji_Modifier}/u;
+
+function botFaceGraphemeHasEmoji(value: string): boolean {
+  return BOT_FACE_EMOJI_GLYPH_PATTERN.test(value);
+}
+
 export function normalizeBotFaceEyeCharacter(value: unknown): string | null {
   if (typeof value !== "string") return null;
-  const [character] = Array.from(value.trim());
-  return character ?? null;
+  const [character] = splitBotFaceVisibleGraphemes(value);
+  if (!character || botFaceGraphemeHasEmoji(character)) return null;
+  return character;
+}
+
+export function normalizeBotFaceMouthCharacter(value: unknown): string | null {
+  return normalizeBotFaceEyeCharacter(value);
 }
 
 export function normalizeBotFaceFontWeight(value: unknown): number | null {
@@ -122,12 +161,39 @@ export function normalizeBotFaceEyeScale(value: unknown): number | null {
   );
 }
 
+export function normalizeBotFaceEyeOffsetX(value: unknown): number | null {
+  return normalizeSteppedBotFaceFloat(
+    value,
+    BOT_FACE_EYE_OFFSET_X_MIN,
+    BOT_FACE_EYE_OFFSET_X_MAX,
+    BOT_FACE_EYE_OFFSET_X_STEP
+  );
+}
+
 export function normalizeBotFaceEyeOffsetY(value: unknown): number | null {
   return normalizeSteppedBotFaceFloat(
     value,
     BOT_FACE_EYE_OFFSET_Y_MIN,
     BOT_FACE_EYE_OFFSET_Y_MAX,
     BOT_FACE_EYE_OFFSET_Y_STEP
+  );
+}
+
+export function normalizeBotFaceMouthScale(value: unknown): number | null {
+  return normalizeSteppedBotFaceFloat(
+    value,
+    BOT_FACE_MOUTH_SCALE_MIN,
+    BOT_FACE_MOUTH_SCALE_MAX,
+    BOT_FACE_MOUTH_SCALE_STEP
+  );
+}
+
+export function normalizeBotFaceMouthOffsetX(value: unknown): number | null {
+  return normalizeSteppedBotFaceFloat(
+    value,
+    BOT_FACE_MOUTH_OFFSET_X_MIN,
+    BOT_FACE_MOUTH_OFFSET_X_MAX,
+    BOT_FACE_MOUTH_OFFSET_X_STEP
   );
 }
 
@@ -140,12 +206,22 @@ export function normalizeBotFaceMouthOffsetY(value: unknown): number | null {
   );
 }
 
+export function normalizeBotFaceMouthRotationDeg(value: unknown): number | null {
+  return normalizeSteppedBotFaceFloat(
+    value,
+    BOT_FACE_MOUTH_ROTATION_DEG_MIN,
+    BOT_FACE_MOUTH_ROTATION_DEG_MAX,
+    BOT_FACE_MOUTH_ROTATION_DEG_STEP
+  );
+}
+
 export function normalizeBotFaceBlinkBar(value: unknown): BotFaceBlinkBar | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   if (trimmed === "none") return trimmed;
-  const [character] = Array.from(trimmed);
-  return character ?? null;
+  const [character] = splitBotFaceVisibleGraphemes(trimmed);
+  if (!character || botFaceGraphemeHasEmoji(character)) return null;
+  return character;
 }
 
 type BotFaceGraphemeSegment = {
@@ -186,6 +262,7 @@ function botFaceThinkingFramesFromList(
   if (frames.length !== BOT_FACE_THINKING_FRAME_COUNT) return null;
   const [first, second, third, fourth] = frames;
   if (!first || !second || !third || !fourth) return null;
+  if (frames.some((frame) => botFaceGraphemeHasEmoji(frame))) return null;
   return [first, second, third, fourth];
 }
 
@@ -243,18 +320,33 @@ export function resolveBotFaceStyle(
       normalizeBotFaceEyeCharacter(input.faceEyeCharacter) ??
       DEFAULT_BOT_FACE_EYE_CHARACTER,
     mouthFont: normalizeBotFaceFontId(input.faceMouthFont) ?? fallbackFont,
+    mouthCharacter:
+      normalizeBotFaceMouthCharacter(input.faceMouthCharacter) ??
+      DEFAULT_BOT_FACE_MOUTH_CHARACTER,
     weight:
       normalizeBotFaceFontWeight(input.faceFontWeight) ??
       DEFAULT_BOT_FACE_FONT_WEIGHT,
     eyeScale:
       normalizeBotFaceEyeScale(input.faceEyeScale) ??
       DEFAULT_BOT_FACE_EYE_SCALE,
+    eyeOffsetX:
+      normalizeBotFaceEyeOffsetX(input.faceEyeOffsetX) ??
+      DEFAULT_BOT_FACE_EYE_OFFSET_X,
     eyeOffsetY:
       normalizeBotFaceEyeOffsetY(input.faceEyeOffsetY) ??
       DEFAULT_BOT_FACE_EYE_OFFSET_Y,
+    mouthScale:
+      normalizeBotFaceMouthScale(input.faceMouthScale) ??
+      DEFAULT_BOT_FACE_MOUTH_SCALE,
+    mouthOffsetX:
+      normalizeBotFaceMouthOffsetX(input.faceMouthOffsetX) ??
+      DEFAULT_BOT_FACE_MOUTH_OFFSET_X,
     mouthOffsetY:
       normalizeBotFaceMouthOffsetY(input.faceMouthOffsetY) ??
       DEFAULT_BOT_FACE_MOUTH_OFFSET_Y,
+    mouthRotationDeg:
+      normalizeBotFaceMouthRotationDeg(input.faceMouthRotationDeg) ??
+      DEFAULT_BOT_FACE_MOUTH_ROTATION_DEG,
     blinkBar:
       normalizeBotFaceBlinkBar(input.faceBlinkBar) ??
       DEFAULT_BOT_FACE_BLINK_BAR,
@@ -279,10 +371,15 @@ export function randomBotFaceStyle(random = Math.random): BotFaceStyle {
     eyesFont: pickFont(),
     eyeCharacter: DEFAULT_BOT_FACE_EYE_CHARACTER,
     mouthFont: pickFont(),
+    mouthCharacter: DEFAULT_BOT_FACE_MOUTH_CHARACTER,
     weight,
     eyeScale: DEFAULT_BOT_FACE_EYE_SCALE,
+    eyeOffsetX: DEFAULT_BOT_FACE_EYE_OFFSET_X,
     eyeOffsetY: DEFAULT_BOT_FACE_EYE_OFFSET_Y,
+    mouthScale: DEFAULT_BOT_FACE_MOUTH_SCALE,
+    mouthOffsetX: DEFAULT_BOT_FACE_MOUTH_OFFSET_X,
     mouthOffsetY: DEFAULT_BOT_FACE_MOUTH_OFFSET_Y,
+    mouthRotationDeg: DEFAULT_BOT_FACE_MOUTH_ROTATION_DEG,
     blinkBar: DEFAULT_BOT_FACE_BLINK_BAR,
     thinkingFrames: DEFAULT_BOT_FACE_THINKING_FRAMES,
   };

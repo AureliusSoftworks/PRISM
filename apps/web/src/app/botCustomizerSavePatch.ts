@@ -19,9 +19,15 @@ export interface BotCustomizerSavePristine {
   faceEyesFont: string;
   faceEyeCharacter: string | null;
   faceMouthFont: string;
+  faceMouthCharacter: string | null;
   faceFontWeight: number;
   faceEyeScale: number;
+  faceEyeOffsetX: number;
   faceEyeOffsetY: number;
+  faceMouthScale: number;
+  faceMouthOffsetX: number;
+  faceMouthOffsetY: number;
+  faceMouthRotationDeg: number;
   faceBlinkBar: string;
   faceThinkingFrames: readonly string[];
   profilePictureImageId: string | null;
@@ -52,9 +58,15 @@ export interface BotCustomizerSaveCurrent {
   faceEyesFont: string;
   faceEyeCharacter: string | null;
   faceMouthFont: string;
+  faceMouthCharacter: string | null;
   faceFontWeight: number;
   faceEyeScale: number;
+  faceEyeOffsetX: number;
   faceEyeOffsetY: number;
+  faceMouthScale: number;
+  faceMouthOffsetX: number;
+  faceMouthOffsetY: number;
+  faceMouthRotationDeg: number;
   faceBlinkBar: string;
   faceThinkingFrames: readonly string[];
   profilePictureImageId: string | null;
@@ -80,9 +92,15 @@ export interface BotCustomizerSavePatch {
   faceEyesFont?: string;
   faceEyeCharacter?: string | null;
   faceMouthFont?: string;
+  faceMouthCharacter?: string | null;
   faceFontWeight?: number;
   faceEyeScale?: number;
+  faceEyeOffsetX?: number;
   faceEyeOffsetY?: number;
+  faceMouthScale?: number;
+  faceMouthOffsetX?: number;
+  faceMouthOffsetY?: number;
+  faceMouthRotationDeg?: number;
   faceBlinkBar?: string;
   faceThinkingFrames?: readonly string[];
   profilePictureImageId?: string | null;
@@ -123,9 +141,15 @@ export function buildBotCustomizerSavePatch(
       faceEyesFont: current.faceEyesFont,
       faceEyeCharacter: current.faceEyeCharacter,
       faceMouthFont: current.faceMouthFont,
+      faceMouthCharacter: current.faceMouthCharacter,
       faceFontWeight: current.faceFontWeight,
       faceEyeScale: current.faceEyeScale,
+      faceEyeOffsetX: current.faceEyeOffsetX,
       faceEyeOffsetY: current.faceEyeOffsetY,
+      faceMouthScale: current.faceMouthScale,
+      faceMouthOffsetX: current.faceMouthOffsetX,
+      faceMouthOffsetY: current.faceMouthOffsetY,
+      faceMouthRotationDeg: current.faceMouthRotationDeg,
       faceBlinkBar: current.faceBlinkBar,
       faceThinkingFrames: current.faceThinkingFrames,
       profilePictureImageId: current.profilePictureImageId,
@@ -182,14 +206,32 @@ export function buildBotCustomizerSavePatch(
   if (current.faceMouthFont !== pristine.faceMouthFont) {
     patch.faceMouthFont = current.faceMouthFont;
   }
+  if (current.faceMouthCharacter !== pristine.faceMouthCharacter) {
+    patch.faceMouthCharacter = current.faceMouthCharacter;
+  }
   if (current.faceFontWeight !== pristine.faceFontWeight) {
     patch.faceFontWeight = current.faceFontWeight;
   }
   if (current.faceEyeScale !== pristine.faceEyeScale) {
     patch.faceEyeScale = current.faceEyeScale;
   }
+  if (current.faceEyeOffsetX !== pristine.faceEyeOffsetX) {
+    patch.faceEyeOffsetX = current.faceEyeOffsetX;
+  }
   if (current.faceEyeOffsetY !== pristine.faceEyeOffsetY) {
     patch.faceEyeOffsetY = current.faceEyeOffsetY;
+  }
+  if (current.faceMouthScale !== pristine.faceMouthScale) {
+    patch.faceMouthScale = current.faceMouthScale;
+  }
+  if (current.faceMouthOffsetX !== pristine.faceMouthOffsetX) {
+    patch.faceMouthOffsetX = current.faceMouthOffsetX;
+  }
+  if (current.faceMouthOffsetY !== pristine.faceMouthOffsetY) {
+    patch.faceMouthOffsetY = current.faceMouthOffsetY;
+  }
+  if (current.faceMouthRotationDeg !== pristine.faceMouthRotationDeg) {
+    patch.faceMouthRotationDeg = current.faceMouthRotationDeg;
   }
   if (current.faceBlinkBar !== pristine.faceBlinkBar) {
     patch.faceBlinkBar = current.faceBlinkBar;

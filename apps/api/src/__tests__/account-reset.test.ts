@@ -71,9 +71,13 @@ describe("restoreFactoryDefaultsInDatabase", () => {
             prism_default_bot_name, prism_default_bot_system_prompt,
             prism_default_bot_color, prism_default_bot_glyph,
             prism_default_bot_face_eyes_font, prism_default_bot_face_eye_character,
-            prism_default_bot_face_mouth_font, prism_default_bot_face_font_weight,
-            prism_default_bot_face_eye_scale, prism_default_bot_face_eye_offset_y,
-            prism_default_bot_face_mouth_offset_y,
+            prism_default_bot_face_mouth_font, prism_default_bot_face_mouth_character,
+            prism_default_bot_face_font_weight,
+            prism_default_bot_face_eye_scale,
+            prism_default_bot_face_eye_offset_x, prism_default_bot_face_eye_offset_y,
+            prism_default_bot_face_mouth_scale,
+            prism_default_bot_face_mouth_offset_x, prism_default_bot_face_mouth_offset_y,
+            prism_default_bot_face_mouth_rotation_deg,
             prism_default_bot_face_blink_bar,
             prism_default_bot_face_thinking_frames,
             prism_default_bot_temperature, prism_default_bot_max_tokens,
@@ -147,10 +151,15 @@ describe("restoreFactoryDefaultsInDatabase", () => {
       assert.equal(user.prism_default_bot_face_eyes_font, null);
       assert.equal(user.prism_default_bot_face_eye_character, null);
       assert.equal(user.prism_default_bot_face_mouth_font, null);
+      assert.equal(user.prism_default_bot_face_mouth_character, null);
       assert.equal(user.prism_default_bot_face_font_weight, null);
       assert.equal(user.prism_default_bot_face_eye_scale, null);
+      assert.equal(user.prism_default_bot_face_eye_offset_x, null);
       assert.equal(user.prism_default_bot_face_eye_offset_y, null);
+      assert.equal(user.prism_default_bot_face_mouth_scale, null);
+      assert.equal(user.prism_default_bot_face_mouth_offset_x, null);
       assert.equal(user.prism_default_bot_face_mouth_offset_y, null);
+      assert.equal(user.prism_default_bot_face_mouth_rotation_deg, null);
       assert.equal(user.prism_default_bot_face_blink_bar, null);
       assert.equal(user.prism_default_bot_face_thinking_frames, null);
       assert.equal(user.prism_default_bot_temperature, null);
@@ -243,10 +252,15 @@ function seedResetFixture(db: DatabaseSync): void {
       prism_default_bot_face_eyes_font = 'warm',
       prism_default_bot_face_eye_character = '8',
       prism_default_bot_face_mouth_font = 'playful',
+      prism_default_bot_face_mouth_character = '△',
       prism_default_bot_face_font_weight = 700,
       prism_default_bot_face_eye_scale = 1.15,
+      prism_default_bot_face_eye_offset_x = 0.06,
       prism_default_bot_face_eye_offset_y = -0.08,
+      prism_default_bot_face_mouth_scale = 1.25,
+      prism_default_bot_face_mouth_offset_x = -0.04,
       prism_default_bot_face_mouth_offset_y = 0.06,
+      prism_default_bot_face_mouth_rotation_deg = 35,
       prism_default_bot_face_blink_bar = '¦',
       prism_default_bot_face_thinking_frames = '["?","!","?","…"]',
       prism_default_bot_temperature = 0.9,

@@ -36,10 +36,15 @@ export interface PrismBotArchiveJson {
     faceEyesFont?: BotFaceFontId | null;
     faceEyeCharacter?: string | null;
     faceMouthFont?: BotFaceFontId | null;
+    faceMouthCharacter?: string | null;
     faceFontWeight?: number | null;
     faceEyeScale?: number | null;
+    faceEyeOffsetX?: number | null;
     faceEyeOffsetY?: number | null;
+    faceMouthScale?: number | null;
+    faceMouthOffsetX?: number | null;
     faceMouthOffsetY?: number | null;
+    faceMouthRotationDeg?: number | null;
     faceBlinkBar?: BotFaceBlinkBar | null;
     faceThinkingFrames?: BotFaceThinkingFrames | null;
     onlineEnabled?: boolean;
