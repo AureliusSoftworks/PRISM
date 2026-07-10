@@ -175,9 +175,11 @@ import {
   deleteBots,
   deleteSelectedBots,
   normalizeBotExportHash,
+  patchSelectedBots,
   readBotPreferredModelForCreate,
   resolveBotExportHashForCreate,
   setSelectedBotsDeleteProtection,
+  type SelectedBotPatch,
 } from "./bots.ts";
 import { queueBotSemanticFacetsRefresh } from "./bot-facets.ts";
 import {
@@ -7498,6 +7500,36 @@ function buildRoutes(): RouteDefinition[] {
         body.deleteProtected
       );
       json(ctx.res, 200, { ok: true, ...result });
+    }),
+    route("PATCH", "/api/bots/selected", async (ctx) => {
+      const userId = requireAuth(ctx);
+      if (!ctx.body || typeof ctx.body !== "object" || Array.isArray(ctx.body)) {
+        throw new Error("Selected bot patch body is required.");
+      }
+      const body = ctx.body as Record<string, unknown>;
+      const idsRaw = body.ids;
+      if (!Array.isArray(idsRaw)) {
+        throw new Error("Selected bot ids are required.");
+      }
+      const patchRaw = body.patch;
+      if (!patchRaw || typeof patchRaw !== "object" || Array.isArray(patchRaw)) {
+        throw new Error("Selected bot patch is required.");
+      }
+      const ids = idsRaw.filter((id): id is string => typeof id === "string");
+      const result = patchSelectedBots(
+        db,
+        userId,
+        ids,
+        patchRaw as SelectedBotPatch
+      );
+      const updatedBots = result.ids.length > 0
+        ? db
+            .prepare(
+              `SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, face_eyes_font, face_eye_character, face_mouth_font, face_mouth_character, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? AND id IN (${result.ids.map(() => "?").join(", ")})`
+            )
+            .all(userId, ...result.ids)
+        : [];
+      json(ctx.res, 200, { ok: true, updated: result.updated, bots: updatedBots });
     }),
     route("PATCH", "/api/bots/:id", async (ctx) => {
       const userId = requireAuth(ctx);

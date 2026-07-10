@@ -1,10 +1,18 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   resolveCanvasBotMarqueeSelection,
   resolveInactiveCanvasBotMarqueeSelection,
 } from "./botCanvasMarqueeSelection.ts";
+
+const pageSource = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), "page.tsx"),
+  "utf8"
+);
 
 function ids(set: ReadonlySet<string>): string[] {
   return Array.from(set).sort();
@@ -78,5 +86,26 @@ describe("bot canvas marquee selection", () => {
     );
 
     assert.deepEqual(ids(selected), ["bot-a"]);
+  });
+
+  it("starts marquee gestures from the canvas capture phase before child clicks", () => {
+    assert.match(
+      pageSource,
+      /const handleMessagesSurfacePointerDownCapture = useCallback/
+    );
+    assert.match(
+      pageSource,
+      /const marqueeStarted = handleCanvasBotMarqueePointerDown\(event\);/
+    );
+    assert.match(
+      pageSource,
+      /if \(!marqueeStarted\) \{\s*handleZenCanvasSpeedNudgePointerDown\(event\);/
+    );
+    assert.equal(
+      pageSource.match(/onPointerDownCapture=\{handleMessagesSurfacePointerDownCapture\}/g)
+        ?.length,
+      2
+    );
+    assert.doesNotMatch(pageSource, /onPointerDown=\{handleCanvasBotMarqueePointerDown\}/);
   });
 });

@@ -1810,6 +1810,42 @@ describe("Zen live presence CSS", () => {
     assert.doesNotMatch(staticMoodBadgeRule, /url\(/);
   });
 
+  it("renders named bot picker cards with the original compact icon styling", () => {
+    assert.doesNotMatch(pageSource, /chatBotTileCrtSurface/);
+    assert.doesNotMatch(pageSource, /chatBotTileCrtGlass/);
+    assert.doesNotMatch(css, /--bot-card-crt-core/);
+
+    const namedTileRule = ruleForSelectorNeedlesWithBody(
+      [".chatBotTileWithName"],
+      "grid-template-rows"
+    );
+    assert.match(namedTileRule, /grid-template-rows:\s*minmax\(0,\s*1fr\) auto\s*;/);
+    assert.match(namedTileRule, /row-gap:\s*clamp\(4px,/);
+    assert.match(namedTileRule, /radial-gradient\(\s*circle at 50% 36%/);
+    assert.match(namedTileRule, /linear-gradient\(\s*180deg/);
+
+    const darkGlyphRule = ruleForSelectorNeedlesWithBody(
+      [".themeDark .chatBotTileWithName .chatBotTileBotGlyph"],
+      "color-mix"
+    );
+    assert.match(darkGlyphRule, /color:\s*color-mix\(in srgb,\s*var\(--bot-color/);
+    assert.match(darkGlyphRule, /opacity:\s*0\.92\s*;/);
+
+    const lightGlyphRule = ruleForSelectorNeedlesWithBody(
+      [".themeLight .chatBotTileWithName .chatBotTileBotGlyph"],
+      "var(--tile-rest-contrast-color)"
+    );
+    assert.match(lightGlyphRule, /color:\s*var\(--tile-rest-contrast-color\)\s*;/);
+    assert.match(lightGlyphRule, /opacity:\s*0\.94\s*;/);
+
+    const glyphRule = ruleForSelectorNeedlesWithBody(
+      [".chatBotTileBotGlyph"],
+      "place-items: center"
+    );
+    assert.match(glyphRule, /display:\s*grid\s*;/);
+    assert.match(glyphRule, /place-items:\s*center\s*;/);
+  });
+
   it("drags from the Zen surface while preserving body geometry and relocation persistence", () => {
     assert.match(
       pageSource,

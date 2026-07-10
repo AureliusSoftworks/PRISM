@@ -8,6 +8,41 @@ const BOT_FLIRT_DISABLED_POLICY =
 const BOT_FLIRT_ENABLED_POLICY =
   "Interaction policy: You may engage in consensual flirt or romantic roleplay when invited, as long as it stays respectful and in character. Build chemistry through warmth, playful tension, reciprocal curiosity, and pacing instead of jumping straight to explicit detail. Keep boundaries clear, speak from the bot's own comfort when declining, and do not claim real-world intimacy beyond this conversation. Avoid policy-style refusal wording; if a line is needed, make it sound like the bot's choice.";
 
+export interface SelectedBotPatch {
+  color?: string;
+  glyph?: string;
+  localModel?: string;
+  onlineModel?: string;
+  localImageModel?: string;
+  openaiImageModel?: string;
+}
+
+function readSelectedBotPatchString(value: unknown, label: string): string {
+  if (typeof value !== "string") {
+    throw new Error(`${label} must be a string.`);
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    throw new Error(`${label} must not be blank.`);
+  }
+  return trimmed;
+}
+
+function readSelectedBotPatchOptionalString(value: unknown, label: string): string | null {
+  if (typeof value !== "string") {
+    throw new Error(`${label} must be a string.`);
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function hasPatchField<K extends keyof SelectedBotPatch>(
+  patch: SelectedBotPatch,
+  field: K
+): boolean {
+  return Object.prototype.hasOwnProperty.call(patch, field);
+}
+
 /**
  * Build the system-prompt string sent to the model for a selected bot.
  *
@@ -332,6 +367,82 @@ export function setSelectedBotsDeleteProtection(
     ).run(deleteProtected ? 1 : 0, new Date().toISOString(), userId, ...uniqueIds);
     db.exec("COMMIT");
     return { updated: Number(result.changes ?? 0) };
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+export function patchSelectedBots(
+  db: DatabaseSync,
+  userId: string,
+  selectedBotIds: string[],
+  patch: SelectedBotPatch
+): { updated: number; ids: string[] } {
+  const uniqueIds = Array.from(
+    new Set(
+      selectedBotIds
+        .filter((id): id is string => typeof id === "string")
+        .map((id) => id.trim())
+        .filter((id) => id.length > 0)
+    )
+  );
+  if (!uniqueIds.length) {
+    return { updated: 0, ids: [] };
+  }
+
+  const fields: string[] = [];
+  const values: Array<string | null> = [];
+  if (hasPatchField(patch, "color")) {
+    fields.push("color = ?");
+    values.push(readSelectedBotPatchString(patch.color, "Color"));
+  }
+  if (hasPatchField(patch, "glyph")) {
+    fields.push("glyph = ?");
+    values.push(readSelectedBotPatchString(patch.glyph, "Glyph"));
+  }
+  if (hasPatchField(patch, "localModel")) {
+    fields.push("local_model = ?");
+    values.push(readSelectedBotPatchOptionalString(patch.localModel, "Offline model"));
+  }
+  if (hasPatchField(patch, "onlineModel")) {
+    fields.push("online_model = ?");
+    values.push(readSelectedBotPatchOptionalString(patch.onlineModel, "Online model"));
+  }
+  if (hasPatchField(patch, "localImageModel")) {
+    fields.push("local_image_model = ?");
+    values.push(readSelectedBotPatchOptionalString(patch.localImageModel, "Offline image model"));
+  }
+  if (hasPatchField(patch, "openaiImageModel")) {
+    fields.push("openai_image_model = ?");
+    values.push(readSelectedBotPatchOptionalString(patch.openaiImageModel, "Online image model"));
+  }
+  if (!fields.length) {
+    return { updated: 0, ids: [] };
+  }
+
+  db.exec("BEGIN IMMEDIATE TRANSACTION");
+  try {
+    const placeholders = uniqueIds.map(() => "?").join(", ");
+    const ownedRows = db
+      .prepare(`SELECT id FROM bots WHERE user_id = ? AND id IN (${placeholders})`)
+      .all(userId, ...uniqueIds) as Array<{ id: string }>;
+    const ownedIds = ownedRows.map((row) => row.id);
+    if (!ownedIds.length) {
+      db.exec("COMMIT");
+      return { updated: 0, ids: [] };
+    }
+
+    const ownedPlaceholders = ownedIds.map(() => "?").join(", ");
+    fields.push("updated_at = ?");
+    values.push(new Date().toISOString());
+    db.prepare(
+      `UPDATE bots
+       SET ${fields.join(", ")}
+       WHERE user_id = ? AND id IN (${ownedPlaceholders})`
+    ).run(...values, userId, ...ownedIds);
+    db.exec("COMMIT");
+    return { updated: ownedIds.length, ids: ownedIds };
   } catch (error) {
     db.exec("ROLLBACK");
     throw error;

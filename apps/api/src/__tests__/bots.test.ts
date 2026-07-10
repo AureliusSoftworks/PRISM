@@ -13,6 +13,7 @@ import {
   deleteBots,
   deleteSelectedBots,
   normalizeBotExportHash,
+  patchSelectedBots,
   readBotPreferredModelForCreate,
   resolveBotExportHashForCreate,
   setSelectedBotsDeleteProtection,
@@ -174,6 +175,13 @@ function createTestDb(): DatabaseSync {
       user_id TEXT NOT NULL,
       name TEXT NOT NULL,
       system_prompt TEXT NOT NULL DEFAULT '',
+      model TEXT,
+      local_model TEXT,
+      online_model TEXT,
+      local_image_model TEXT,
+      openai_image_model TEXT,
+      color TEXT,
+      glyph TEXT,
       delete_protected INTEGER NOT NULL DEFAULT 0,
       visibility TEXT NOT NULL DEFAULT 'private',
       created_at TEXT NOT NULL,
@@ -829,6 +837,139 @@ describe("setSelectedBotsDeleteProtection", () => {
         ["protected-b", 0],
         ["still-protected", 1],
       ]
+    );
+  });
+});
+
+describe("patchSelectedBots", () => {
+  it("updates only selected owned bots and dedupes ids", () => {
+    const db = createTestDb();
+    seedBot(db, "user-1", "a");
+    seedBot(db, "user-1", "b");
+    seedBot(db, "user-2", "theirs");
+
+    const result = patchSelectedBots(
+      db,
+      "user-1",
+      ["a", "b", "a", "theirs", "missing"],
+      { color: "#112233" }
+    );
+
+    assert.equal(result.updated, 2);
+    assert.deepEqual(new Set(result.ids), new Set(["a", "b"]));
+    assert.deepEqual(
+      (db.prepare("SELECT id, user_id, color FROM bots ORDER BY id").all() as Array<{
+        id: string;
+        user_id: string;
+        color: string | null;
+      }>).map((row) => [row.id, row.user_id, row.color]),
+      [
+        ["a", "user-1", "#112233"],
+        ["b", "user-1", "#112233"],
+        ["theirs", "user-2", null],
+      ]
+    );
+  });
+
+  it("updates every batch-edit routing and identity field", () => {
+    const db = createTestDb();
+    seedBot(db, "user-1", "a");
+    seedBot(db, "user-1", "b");
+
+    const result = patchSelectedBots(db, "user-1", ["a", "b"], {
+      color: "#abcdef",
+      glyph: "triangle",
+      localModel: "llama3.2",
+      onlineModel: "gpt-4.1-mini",
+      localImageModel: "sdxl",
+      openaiImageModel: "gpt-image-2",
+    });
+
+    assert.equal(result.updated, 2);
+    const rows = db
+      .prepare(
+        `SELECT color, glyph, local_model, online_model, local_image_model, openai_image_model
+         FROM bots
+         WHERE user_id = ?
+         ORDER BY id`
+      )
+      .all("user-1") as Array<{
+        color: string | null;
+        glyph: string | null;
+        local_model: string | null;
+        online_model: string | null;
+        local_image_model: string | null;
+        openai_image_model: string | null;
+      }>;
+    assert.deepEqual(
+      rows.map((row) => [
+        row.color,
+        row.glyph,
+        row.local_model,
+        row.online_model,
+        row.local_image_model,
+        row.openai_image_model,
+      ]),
+      [
+        ["#abcdef", "triangle", "llama3.2", "gpt-4.1-mini", "sdxl", "gpt-image-2"],
+        ["#abcdef", "triangle", "llama3.2", "gpt-4.1-mini", "sdxl", "gpt-image-2"],
+      ]
+    );
+  });
+
+  it("stores blank model fields as fallback nulls", () => {
+    const db = createTestDb();
+    seedBot(db, "user-1", "a");
+    db.prepare(
+      `UPDATE bots
+       SET local_model = 'old-local',
+           online_model = 'old-online',
+           local_image_model = 'old-local-image',
+           openai_image_model = 'old-openai-image'
+       WHERE id = ?`
+    ).run("a");
+
+    const result = patchSelectedBots(db, "user-1", ["a"], {
+      localModel: " ",
+      onlineModel: "",
+      localImageModel: "\t",
+      openaiImageModel: "   ",
+    });
+
+    assert.equal(result.updated, 1);
+    const row = db
+      .prepare(
+        "SELECT local_model, online_model, local_image_model, openai_image_model FROM bots WHERE id = ?"
+      )
+      .get("a") as {
+        local_model: string | null;
+        online_model: string | null;
+        local_image_model: string | null;
+        openai_image_model: string | null;
+      };
+    assert.deepEqual(
+      [row.local_model, row.online_model, row.local_image_model, row.openai_image_model],
+      [null, null, null, null]
+    );
+  });
+
+  it("no-ops cleanly for empty ids or an empty patch", () => {
+    const db = createTestDb();
+    seedBot(db, "user-1", "a");
+
+    assert.deepEqual(patchSelectedBots(db, "user-1", [], { color: "#123456" }), {
+      updated: 0,
+      ids: [],
+    });
+    assert.deepEqual(patchSelectedBots(db, "user-1", ["a"], {}), {
+      updated: 0,
+      ids: [],
+    });
+    assert.equal(
+      (db.prepare("SELECT color FROM bots WHERE id = ?").get("a") as {
+        color: string | null;
+      }).color,
+      null
     );
   });
 });
