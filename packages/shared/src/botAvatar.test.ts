@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  BOT_FACE_BLINK_BAR_VALUES,
   BOT_FACE_FONT_LABELS,
   BOT_FACE_FONT_WEIGHT_MAX,
   BOT_FACE_FONT_WEIGHT_MIN,
@@ -36,6 +37,16 @@ import {
 } from "./botAvatar.ts";
 
 describe("bot avatar face style", () => {
+  it("offers an empty-space default blink and keeps the broken bar as a built-in", () => {
+    assert.equal(DEFAULT_BOT_FACE_BLINK_BAR, " ");
+    assert.deepEqual(Array.from(BOT_FACE_BLINK_BAR_VALUES), [
+      "none",
+      DEFAULT_BOT_FACE_BLINK_BAR,
+      "❘",
+      "¦",
+    ]);
+  });
+
   it("labels the concise face font as a distinct sharp style", () => {
     assert.equal(BOT_FACE_FONT_LABELS.concise, "Sharp");
   });
@@ -181,6 +192,7 @@ describe("bot avatar face style", () => {
 
   it("normalizes blink bars to one visible custom character", () => {
     assert.equal(normalizeBotFaceBlinkBar("|"), "|");
+    assert.equal(normalizeBotFaceBlinkBar(" "), DEFAULT_BOT_FACE_BLINK_BAR);
     assert.equal(normalizeBotFaceBlinkBar("  ❘  "), "❘");
     assert.equal(normalizeBotFaceBlinkBar("::"), ":");
     assert.equal(normalizeBotFaceBlinkBar("😂"), null);

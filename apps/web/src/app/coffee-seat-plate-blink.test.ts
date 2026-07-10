@@ -10,13 +10,13 @@ describe("applyCoffeeSeatBlink", () => {
     assert.equal(applyCoffeeSeatBlink(";(", true), ";(");
   });
 
-  it("replaces leading colon-style eyes with the default broken bar when eyes closed", () => {
-    assert.equal(applyCoffeeSeatBlink(":|", false), "¦|");
-    assert.equal(applyCoffeeSeatBlink(":D", false), "¦D");
-    assert.equal(applyCoffeeSeatBlink(":[", false), "¦[");
-    assert.equal(applyCoffeeSeatBlink("\u02d0[", false), "¦[");
-    assert.equal(applyCoffeeSeatBlink("\u02d0(", false), "¦(");
-    assert.equal(applyCoffeeSeatBlink(":V", false), "¦V");
+  it("replaces leading colon-style eyes with the default empty space when eyes closed", () => {
+    assert.equal(applyCoffeeSeatBlink(":|", false), " |");
+    assert.equal(applyCoffeeSeatBlink(":D", false), " D");
+    assert.equal(applyCoffeeSeatBlink(":[", false), " [");
+    assert.equal(applyCoffeeSeatBlink("\u02d0[", false), " [");
+    assert.equal(applyCoffeeSeatBlink("\u02d0(", false), " (");
+    assert.equal(applyCoffeeSeatBlink(":V", false), " V");
   });
 
   it("uses the configured closed-eye glyph without an intermediate frame", () => {
@@ -30,17 +30,17 @@ describe("applyCoffeeSeatBlink", () => {
   });
 
   it("keeps legacy semicolon faces blink-safe", () => {
-    assert.equal(applyCoffeeSeatBlink(";(", false), "¦(");
-    assert.equal(applyCoffeeSeatBlink(";0", false), "¦0");
+    assert.equal(applyCoffeeSeatBlink(";(", false), " (");
+    assert.equal(applyCoffeeSeatBlink(";0", false), " 0");
   });
 
   it("replaces leading greater-than (guarded eyes) with the closed-eye glyph", () => {
-    assert.equal(applyCoffeeSeatBlink(">[", false), "¦[");
-    assert.equal(applyCoffeeSeatBlink(">O", false), "¦O");
+    assert.equal(applyCoffeeSeatBlink(">[", false), " [");
+    assert.equal(applyCoffeeSeatBlink(">O", false), " O");
   });
 
   it("blinks custom leading eye characters when provided", () => {
-    assert.equal(applyCoffeeSeatBlink("B)", false, { eyeCharacter: "B" }), "¦)");
+    assert.equal(applyCoffeeSeatBlink("B)", false, { eyeCharacter: "B" }), " )");
     assert.equal(
       applyCoffeeSeatBlink("8D", "closed", { eyeCharacter: "8", blinkBar: "¦" }),
       "¦D"
