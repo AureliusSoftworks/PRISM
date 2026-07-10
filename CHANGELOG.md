@@ -12,6 +12,44 @@ Active development happens on the `dev` branch; every release is a merge into
 
 _Staging area - nothing queued for release yet._
 
+## [0.7.0] - 2026-07-10
+
+### Added
+
+- **Batch bot editing.** Multi-selected bots can now be edited together for
+  shared identity, chat model, and image model preferences, with mixed-state
+  controls that make bulk changes clear before applying them.
+- **Steam-first release lane documentation.** Prism now documents the desktop
+  Steam launch path alongside the current GitHub Releases fallback, making the
+  next distribution steps easier to audit.
+
+### Changed
+
+- **Bot customization is more legible and resilient.** Avatar Studio and the
+  bot profile builder now use clearer grouped sections, stronger visual chrome,
+  improved face placement controls, safer autosave recovery, and unclipped
+  color/glyph popovers.
+- **Chat and Zen startup surfaces feel calmer.** Bot hubs, picker activation,
+  Zen new-session presence, selected-bot hero panels, and in-hero model/private
+  controls now behave more predictably during fresh starts and persona changes.
+- **Coffee and live bot presence have richer polish.** Coffee table color,
+  avatar rendering, live presence placement, and Zen face/glyph presentation
+  have been tuned for stronger desktop readability and personality.
+
+### Fixed
+
+- **Bot grid cards click reliably.** Mouse and keyboard activation on visible
+  bot cards now selects the card directly instead of feeling like text
+  selection or only moving the hue lens.
+- **Bot edit targets recover when stale.** Bot saves and avatar autosaves now
+  refresh the library and clear stale edit targets when a bot no longer exists.
+
+### Desktop
+
+- **Desktop polish and Steam readiness improved.** Prism client icons, desktop
+  veil behavior, text-field context menus, and release-process guidance now
+  better match the desktop-first launch lane.
+
 ## [0.6.5] - 2026-07-04
 
 ### Added
