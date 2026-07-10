@@ -1266,6 +1266,55 @@ test("avatar customizer preview has explicit expression states", () => {
   );
 });
 
+test("identity color/glyph popover is never trapped by studio panel chrome", () => {
+  // The ColorGlyphPicker popover positions itself with viewport-space
+  // `position: fixed` coordinates (see popoverAnchor in page.tsx). Per the
+  // CSS Filter Effects spec, ANY ancestor with `filter`/`backdrop-filter`
+  // (and per css-transforms, `transform`/`perspective`/`will-change`)
+  // becomes the containing block for fixed descendants — which re-anchors
+  // those viewport coordinates to the ancestor and lets the control
+  // panel's `overflow: hidden` swallow the popover entirely. This is the
+  // bug where the Identity tab's glyph/color options were invisible.
+  // Every class below is in the popover's ancestor chain inside the
+  // studio; none of their rules may declare a containing-block trap.
+  const popoverAncestorChain = [
+    ".botAvatarControlPanel",
+    ".botAvatarMannequinPanel", // shares panel chrome rules with the control panel
+    ".botAvatarControlStack",
+    ".botAvatarControlGroup",
+    ".botAvatarIdentityPicker",
+    ".colorPickerWrapper",
+  ];
+  const containingBlockTrap =
+    /backdrop-filter|(?<![-\w])filter\s*:|(?<![-\w])transform\s*:|will-change|perspective\s*:/;
+  for (const selector of popoverAncestorChain) {
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+    // Match any rule whose selector list mentions the class exactly
+    // (not as a prefix of a longer class name, e.g. ControlGroupHeader).
+    const rulePattern = new RegExp(
+      `[^{}]*${escaped}(?![\\w-])[^{}]*\\{[^}]*\\}`,
+      "g",
+    );
+    let seen = 0;
+    for (const match of cssSource.matchAll(rulePattern)) {
+      seen += 1;
+      // Comments may (and do) mention the banned properties by name to
+      // document this very constraint — only declarations count.
+      const withoutComments = match[0].replace(/\/\*[\s\S]*?\*\//g, "");
+      assert.doesNotMatch(
+        withoutComments,
+        containingBlockTrap,
+        `${selector} rule creates a containing block that traps the fixed-position color/glyph popover`,
+      );
+    }
+    assert.ok(seen > 0, `Expected at least one CSS rule mentioning ${selector}`);
+  }
+  // The popover itself must stay viewport-fixed so the JS anchor math holds.
+  const popoverRule =
+    cssSource.match(/^\.colorGlyphPopover\s*\{([\s\S]*?)\n\}/m)?.[1] ?? "";
+  assert.match(popoverRule, /position:\s*fixed;/);
+});
+
 test("desktop kiosk shell uses a fixed 1280x900 clipping floor and fullscreen launch", () => {
   assert.match(cssSource, /min-width:\s*1280px/);
   assert.match(cssSource, /min-height:\s*900px/);

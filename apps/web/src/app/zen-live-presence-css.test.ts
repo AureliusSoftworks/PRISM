@@ -1964,17 +1964,85 @@ describe("Zen live presence CSS", () => {
     assert.match(sidebarOpenRule, /display:\s*none\s*;/);
   });
 
-  it("keeps default PRISM presence visible on collapsed empty Zen", () => {
+  it("defers live presence on new Zen sessions until the opener overlay settles", () => {
     assert.match(
       pageSource,
-      /const zenDefaultPrismPresenceVisible =\s*chatLikeSurface &&\s*zenPersonaBotId === null &&\s*zenPersonaPresence\.visibleBotId === null &&\s*\(!zenEmptyHeroVisible \|\| !sidebarOpen\);/
+      /const zenNewSessionPresenceDeferred =\s*chatLikeSurface &&\s*\(activeConversationIsEmpty \|\|\s*showConversationSurfaceLoading \|\|\s*zenInitialThinkingActive \|\|\s*zenInitialReplyRevealActive\);/
+    );
+    assert.match(
+      pageSource,
+      /const zenDefaultPrismPresenceVisible =\s*chatLikeSurface &&\s*!zenNewSessionPresenceDeferred &&\s*zenPersonaBotId === null &&\s*zenPersonaPresence\.visibleBotId === null;/
+    );
+    assert.match(
+      pageSource,
+      /const zenLivePresenceRailVisible =\s*!zenNewSessionPresenceDeferred &&\s*\(zenDefaultPrismPresenceVisible \|\|/
     );
   });
 
-  it("keeps selected persona hero headings as Zen with name", () => {
+  it("keeps fresh Zen hero model and privacy controls inside the hero", () => {
     assert.match(
       pageSource,
+      /const renderZenSplashControls = \(\) =>\s*zenCanvasModelPickerActive \? \(\s*<div\s*className=\{styles\.zenSplashControls\}/
+    );
+    assert.match(
+      pageSource,
+      /renderHeaderModelPicker\(\{\s*modelMenuClassName: styles\.zenSplashModelMenu,\s*modelMenuWidthPx: 220,\s*showBotPicker: false,\s*\}\)/
+    );
+    assert.match(
+      pageSource,
+      /className=\{`\$\{styles\.privateChatButton\} \$\{styles\.zenSplashPrivateButton\}`\}/
+    );
+    assert.match(pageSource, /aria-pressed=\{appWidePrivateMode\}/);
+    assert.equal(pageSource.match(/\{renderZenSplashControls\(\)\}/g)?.length, 2);
+    assert.match(css, /\.zenSplashControls\b/);
+    assert.match(css, /\.zenSplashPrivateButton\b/);
+  });
+
+  it("keeps selected persona hero headings structured for unusual names", () => {
+    assert.match(
+      pageSource,
+      /const titleSubjectLongestWordLength = titleSubject\s*\.split\(\/\\s\+\/u\)\s*\.reduce/
+    );
+    assert.match(
+      pageSource,
+      /const renderZenHeroTitle = \(options: \{ inlineHero\?: boolean \} = \{\}\) =>/
+    );
+    assert.match(
+      pageSource,
+      /const titleSubjectVisualCapRem = heroBot\s*\?\s*Math\.min\(titleSubjectFontCapRem, 3\.2\)/
+    );
+    assert.match(pageSource, /data-zen-title-long=\{/);
+    assert.match(pageSource, /data-selected-bot-hero="true"/);
+    assert.match(
+      pageSource,
+      /className=\{styles\.emptyStateSelectedHeroIdentity\}/
+    );
+    assert.match(
+      pageSource,
+      /className=\{styles\.emptyStateSelectedHeroCopy\}/
+    );
+    assert.match(pageSource, /className=\{styles\.emptyStateTitlePhrase\}/);
+    assert.match(pageSource, /className=\{styles\.emptyStateTitleSubject\}/);
+    assert.doesNotMatch(
+      pageSource,
       /<div className=\{styles\.emptyStateTitle\}>\s*\{`Zen with \$\{titleSubject\}`\}\s*<\/div>/
+    );
+    assert.match(css, /text-wrap:\s*balance\s*;/);
+    assert.match(css, /overflow-wrap:\s*anywhere\s*;/);
+    assert.match(css, /\.emptyStateTitle\[data-zen-title-long="true"\]/);
+    assert.match(css, /\.emptyStateSelectedHeroIdentity\b/);
+    assert.match(css, /\.emptyStateSelectedHeroCopy\b/);
+    assert.match(
+      css,
+      /\.emptyStateInfoBand\[data-selected-bot-hero="true"\][\s\S]*\.emptyStateInfoBandRow/
+    );
+    assert.match(
+      css,
+      /\.emptyStateInfoBand\[data-selected-bot-hero="true"\][\s\S]*\.emptyStateTitleSubject[\s\S]*hyphens:\s*manual\s*;/
+    );
+    assert.match(
+      css,
+      /\.emptyStateInfoBand[\s\S]*\.emptyStateTitle\[data-zen-title-with-hero="true"\]/
     );
   });
 

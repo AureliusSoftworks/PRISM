@@ -109,19 +109,34 @@ describe("bot canvas marquee selection", () => {
     assert.doesNotMatch(pageSource, /onPointerDown=\{handleCanvasBotMarqueePointerDown\}/);
   });
 
-  it("commits plain bot picker card activation instead of only relocating the hue lens", () => {
-    assert.equal(
-      pageSource.match(/focusHueLensOnBot\(b\);\s*}\s*commitEmptyStateBotSelection\(b\.id\);/g)
-        ?.length,
-      2
+  it("lets plain bot-card presses fall through to the card click handler", () => {
+    assert.match(
+      pageSource,
+      /const botTileMarqueeGesture =\s*startsOnBotTile && event\.shiftKey && !event\.ctrlKey && !event\.metaKey;/
     );
     assert.match(
       pageSource,
-      /if \(botId\) \{\s*commitEmptyStateBotSelection\(botId\);\s*}/
+      /if \(startsOnBotTile && !botTileMarqueeGesture\) \{\s*return false;\s*\}/
     );
-    assert.doesNotMatch(
+    assert.match(
       pageSource,
-      /setSelectedBotId\(null\);\s*return;\s*}\s*commitEmptyStateBotSelection\(b\.id\);/
+      /if \(blockedInteractiveTarget && !botTileMarqueeGesture && !allowPickerFrameDrag\)/
     );
+  });
+
+  it("keeps mouse and keyboard dense bot-card activation as direct selection", () => {
+    assert.equal(
+      pageSource.match(
+        /const clickShouldSelectDirectly =\s*e\.detail === 0 \|\| lastBotPickerPointerTypeRef\.current !== "touch";/g
+      )?.length,
+      2
+    );
+    assert.equal(
+      pageSource.match(
+        /const shouldRelocateHue =\s*!clickShouldSelectDirectly &&\s*!emptyStateSearchActive &&\s*botHasFilterableColor\(b\) &&\s*!hueFilterActive &&\s*pickerUsesHueNavigation\(geom, viewportWidth\);/g
+      )?.length,
+      2
+    );
+    assert.doesNotMatch(pageSource, /const isDesktopMousePixelClick/);
   });
 });

@@ -11680,6 +11680,20 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   min-width: 0;
 }
 
+.emptyStateSelectedHeroIdentity {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.emptyStateSelectedHeroCopy {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
 .emptyStateInfoBandRow .emptyStateTitle {
   margin-top: 0;
 }
@@ -11722,6 +11736,16 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     justify-items: center;
     text-align: center;
     width: 100%;
+  }
+
+  .emptyStateSelectedHeroIdentity {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    text-align: center;
+  }
+
+  .emptyStateInfoBand[data-selected-bot-hero="true"] .emptyStateTitleBlock {
+    justify-items: center;
   }
 
   .emptyStateHeroCue {
@@ -11917,6 +11941,45 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
       0 22px 52px color-mix(in srgb, #000000 16%, transparent),
       0 0 30px color-mix(in srgb, var(--accent-glow, var(--accent)) 18%, transparent),
       inset 0 1px 0 color-mix(in srgb, #ffffff 18%, transparent);
+  }
+
+  .emptyStateInfoBand[data-selected-bot-hero="true"] {
+    min-height: 164px;
+    padding: 18px 24px 16px;
+    border-radius: 22px;
+  }
+
+  .emptyStateInfoBand[data-selected-bot-hero="true"] .emptyStateInfoBandRow {
+    grid-template-columns: minmax(300px, 0.92fr) minmax(320px, 1.08fr);
+    align-items: center;
+    column-gap: clamp(28px, 4vw, 64px);
+    row-gap: 14px;
+  }
+
+  .emptyStateInfoBand[data-selected-bot-hero="true"] .emptyStateSelectedHeroIdentity {
+    gap: 16px;
+  }
+
+  .emptyStateInfoBand[data-selected-bot-hero="true"] .emptyStateTitleBlock {
+    width: auto;
+    margin-top: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    justify-items: start;
+  }
+
+  .emptyStateInfoBand[data-selected-bot-hero="true"] .emptyStateHint {
+    align-self: center;
+    max-width: 50ch;
+    padding-left: clamp(18px, 2.2vw, 32px);
+    border-left: 1px solid color-mix(in srgb, var(--line) 52%, transparent);
+    font-size: clamp(1rem, 1.24vw, 1.18rem);
+    line-height: 1.56;
   }
 
   .emptyStateInfoBandRow .emptyStateHeader {
@@ -19354,6 +19417,21 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
   .messagesEmptyState
+  .emptyStateInfoBand[data-selected-bot-hero="true"]
+  .emptyStateTitleBlock {
+  width: auto;
+  margin-top: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .messagesEmptyState
   .emptyStateHubPicker
   .emptyStateTitleBlock {
   margin-top: 0;
@@ -19408,9 +19486,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   width: 100%;
   max-width: 100%;
   justify-items: center;
-  gap: clamp(5px, 0.9dvh, 10px);
-  line-height: 0.95;
-  letter-spacing: 0.04em;
+  gap: clamp(6px, 1dvh, 12px);
+  line-height: 1;
+  letter-spacing: 0;
   white-space: normal;
 }
 
@@ -19421,6 +19499,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   align-items: center;
   justify-content: center;
   gap: clamp(7px, 0.9vw, 12px);
+  font-size: clamp(1.18rem, 2vw, 2.05rem);
+  font-weight: 360;
+  letter-spacing: 0.12em;
+  line-height: 1.05;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--fg) 76%, var(--accent-ink) 24%);
   white-space: nowrap;
 }
 
@@ -19435,11 +19519,96 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   .messagesEmptyState
   .emptyStateTitleSubject {
   display: block;
-  max-width: min(100%, 9.2em);
-  overflow: hidden;
-  font-size: min(1em, var(--zen-title-subject-font-cap, 1em));
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  max-width: min(100%, 12em);
+  overflow: visible;
+  font-size: clamp(2.15rem, 5.2vw, var(--zen-title-subject-font-cap, 4.8rem));
+  font-weight: 300;
+  letter-spacing: clamp(0.02em, 0.35vw, 0.08em);
+  line-height: 0.96;
+  text-align: center;
+  text-wrap: balance;
+  overflow-wrap: anywhere;
+  hyphens: auto;
+  white-space: normal;
+}
+
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .messagesEmptyState
+  .emptyStateTitle[data-zen-title-long="true"]
+  .emptyStateTitleSubject {
+  max-width: min(100%, 14em);
+  line-height: 1.02;
+  letter-spacing: 0.03em;
+}
+
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .messagesEmptyState
+  .emptyStateInfoBand
+  .emptyStateTitle[data-zen-title-with-hero="true"] {
+  justify-items: start;
+  text-align: left;
+}
+
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .messagesEmptyState
+  .emptyStateInfoBand
+  .emptyStateTitle[data-zen-title-with-hero="true"]
+  .emptyStateTitlePhrase {
+  justify-content: flex-start;
+  font-size: clamp(0.86rem, 1.45vw, 1.22rem);
+  letter-spacing: 0.18em;
+}
+
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .messagesEmptyState
+  .emptyStateInfoBand
+  .emptyStateTitle[data-zen-title-with-hero="true"]
+  .emptyStateTitleSubject {
+  max-width: min(100%, 10.5em);
+  font-size: clamp(2rem, 4.2vw, var(--zen-title-subject-font-cap, 4.2rem));
+  text-align: left;
+}
+
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .messagesEmptyState
+  .emptyStateInfoBand[data-selected-bot-hero="true"]
+  .emptyStateTitle[data-zen-title-with-hero="true"] {
+  gap: clamp(5px, 0.7vw, 9px);
+}
+
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .messagesEmptyState
+  .emptyStateInfoBand[data-selected-bot-hero="true"]
+  .emptyStateTitle[data-zen-title-with-hero="true"]
+  .emptyStateTitlePhrase {
+  font-size: clamp(0.76rem, 0.92vw, 0.94rem);
+  font-weight: 520;
+  letter-spacing: 0.22em;
+  color: color-mix(in srgb, var(--fg-muted) 74%, var(--accent-ink) 26%);
+}
+
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .messagesEmptyState
+  .emptyStateInfoBand[data-selected-bot-hero="true"]
+  .emptyStateTitle[data-zen-title-with-hero="true"]
+  .emptyStateTitleSubject {
+  max-width: min(100%, 13em);
+  font-size: clamp(2.05rem, 3.1vw, var(--zen-title-subject-font-cap, 3.2rem));
+  letter-spacing: 0.03em;
+  line-height: 1.02;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: manual;
+}
+
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .messagesEmptyState
+  .emptyStateInfoBand[data-selected-bot-hero="true"]
+  .emptyStateTitle[data-zen-title-long="true"]
+  .emptyStateTitleSubject {
+  max-width: min(100%, 14em);
+  font-size: clamp(1.82rem, 2.7vw, var(--zen-title-subject-font-cap, 3rem));
+  overflow-wrap: break-word;
 }
 
 .appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
@@ -19466,14 +19635,43 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   color: color-mix(in srgb, var(--fg) 74%, var(--fg-muted));
 }
 
-.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"] .zenSplashModelPicker {
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"] .zenSplashControls {
   width: min(440px, 100%);
   margin-top: clamp(2px, 1.4vh, 10px);
   padding-top: clamp(12px, 2.4vh, 18px);
   border-top: 1px solid color-mix(in srgb, var(--line) 54%, transparent);
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   justify-content: center;
+  gap: 8px;
   pointer-events: auto;
+}
+
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"] .zenSplashModelPicker {
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+}
+
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .emptyStateInfoBandRow
+  .zenSplashControls {
+  grid-column: 1 / -1;
+  justify-self: start;
+  width: min(560px, 100%);
+  margin-top: 0;
+  padding-top: 10px;
+}
+
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .emptyStateInfoBand[data-selected-bot-hero="true"]
+  .zenSplashControls {
+  justify-self: stretch;
+  width: 100%;
+  margin-top: 2px;
+  padding-top: 12px;
+  justify-content: center;
 }
 
 .appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
@@ -19580,6 +19778,39 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   .composeModelTriggerName {
   max-width: min(16ch, 38vw);
   font-size: 12px;
+}
+
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .zenSplashPrivateButton {
+  width: auto;
+  min-width: 0;
+  height: 32px;
+  min-height: 32px;
+  padding: 0 13px;
+  border-radius: 999px;
+  justify-content: center;
+  white-space: nowrap;
+  font-size: 11px;
+  line-height: 1;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-surface) 74%, var(--private-chat-color, var(--accent)) 7%),
+      color-mix(in srgb, var(--bg-deep) 88%, var(--private-chat-color, var(--accent)) 5%)
+    );
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 8%, transparent),
+    0 10px 28px rgba(0, 0, 0, 0.12);
+}
+
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .zenSplashPrivateButton[aria-pressed="true"] {
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--private-chat-color, var(--fg)) 18%, var(--bg-surface)),
+      color-mix(in srgb, var(--private-chat-color, var(--fg)) 10%, var(--bg-deep))
+    );
 }
 
 .composeBotMenu.zenSplashModelMenu {
@@ -33929,25 +34160,86 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   inset: 0;
   z-index: 130;
   pointer-events: auto;
+  /* Same scrim family as .botAvatarCustomizerBackdrop, dialed down — the
+     builder is a side sheet, not a takeover. Full-viewport, so the fixed
+     descendants it becomes the containing block for (via backdrop-filter)
+     keep viewport-equivalent coordinates. */
+  background:
+    linear-gradient(
+      120deg,
+      color-mix(in srgb, #020308 32%, transparent),
+      color-mix(in srgb, #020308 14%, transparent)
+    );
+  backdrop-filter: blur(10px) saturate(110%);
+  -webkit-backdrop-filter: blur(10px) saturate(110%);
 }
 
 .botProfileBuilder {
+  /* Per-page accent hue, mixed from the edited bot's color exactly like the
+     Avatar Studio's per-tab section accents (eyes/mouth/motion recipes). */
+  --bot-profile-page-accent: var(--editor-bot-color, var(--accent));
   position: fixed;
   top: max(20px, env(safe-area-inset-top));
   right: calc(var(--panel-width, 479px) + 28px);
   width: min(560px, calc(max(100vw, 1280px) - var(--panel-width, 479px) - 56px));
   max-height: calc(max(100dvh, 900px) - 40px);
-  border: 1px solid var(--line);
+  border: 1px solid color-mix(in srgb, var(--bot-profile-page-accent) 26%, var(--line));
   border-radius: 18px;
   background: color-mix(in srgb, var(--bg-surface) 96%, transparent);
   color: var(--fg);
-  box-shadow: var(--shadow-lg);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--bot-profile-page-accent) 16%, transparent),
+    var(--shadow-lg);
   pointer-events: auto;
   display: grid;
   grid-template-columns: 156px minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr);
+  isolation: isolate;
   overflow: hidden;
   animation: popIn 0.16s ease-out;
+}
+
+.botProfileBuilder[data-profile-page="personality"],
+.botProfileBuilderNav button[data-profile-page="personality"] {
+  --bot-profile-page-accent: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 68%, #8bdcff);
+}
+
+.botProfileBuilder[data-profile-page="character"],
+.botProfileBuilderNav button[data-profile-page="character"] {
+  --bot-profile-page-accent: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 68%, #ff9db8);
+}
+
+.botProfileBuilder[data-profile-page="facts"],
+.botProfileBuilderNav button[data-profile-page="facts"] {
+  --bot-profile-page-accent: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 62%, #ffd38a);
+}
+
+/* Accent rail on the left edge — the Avatar Studio's signature stripe.
+   The studio's own later `.botAvatarCustomizer::after` rule overrides
+   every property here, so the studio keeps its multi-hue rail. */
+.botProfileBuilder::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  z-index: 0;
+  width: 3px;
+  border-radius: 18px 0 0 18px;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bot-profile-page-accent) 78%, #ffffff),
+    color-mix(in srgb, var(--bot-profile-page-accent) 22%, transparent)
+  );
+  box-shadow: 0 0 18px color-mix(in srgb, var(--bot-profile-page-accent) 26%, transparent);
+}
+
+.botProfileBuilder.botAiParameterBuilder::after {
+  border-radius: 12px 0 0 12px;
+}
+
+.botProfileBuilder > * {
+  position: relative;
+  z-index: 1;
 }
 
 .botProfileBuilder.botAiParameterBuilder {
@@ -33970,18 +34262,44 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .botProfileBuilderHeader {
   grid-column: 1 / -1;
   padding: 16px 16px 14px;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid color-mix(in srgb, var(--bot-profile-page-accent, var(--editor-bot-color, var(--accent))) 22%, var(--line));
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--bot-profile-page-accent, var(--editor-bot-color, var(--accent))) 9%, transparent),
+    transparent 52%
+  );
+}
+
+.botProfileBuilderHeader > div:first-of-type {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .botProfileBuilderHeader span {
-  color: var(--fg-muted);
+  color: color-mix(in srgb, var(--bot-profile-page-accent, var(--editor-bot-color, var(--accent))) 48%, var(--fg-muted));
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+.botProfileBuilderHeader .botProfileBuilderHeaderIcon {
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  color: color-mix(in srgb, var(--bot-profile-page-accent, var(--editor-bot-color, var(--accent))) 72%, var(--fg));
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #ffffff 7%, transparent), transparent),
+    color-mix(in srgb, var(--bot-profile-page-accent, var(--editor-bot-color, var(--accent))) 13%, var(--bg));
+  border: 1px solid color-mix(in srgb, var(--bot-profile-page-accent, var(--editor-bot-color, var(--accent))) 26%, var(--line));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 6%, transparent);
 }
 
 .botProfileBuilderHeader h4 {
@@ -34009,6 +34327,15 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   flex-shrink: 0;
 }
 
+/* Direct-child scope keeps this off the Avatar Studio's header buttons
+   (those live inside .botAvatarCustomizerHeaderActions). */
+.botProfileBuilderHeader > button:hover,
+.botProfileBuilderHeader > button:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--bot-profile-page-accent, var(--editor-bot-color, var(--accent))) 46%, var(--line));
+  background: color-mix(in srgb, var(--bot-profile-page-accent, var(--editor-bot-color, var(--accent))) 12%, var(--bg));
+}
+
 .botProfileBuilderNav {
   min-height: 0;
   padding: 12px;
@@ -34027,8 +34354,29 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   background: transparent;
   color: var(--fg);
   display: grid;
-  gap: 1px;
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: center;
+  column-gap: 9px;
+  row-gap: 1px;
   text-align: left;
+}
+
+.botProfileBuilderNavIcon {
+  grid-row: 1 / span 2;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  color: color-mix(in srgb, var(--bot-profile-page-accent, var(--editor-bot-color, var(--accent))) 58%, var(--fg-muted));
+  background: color-mix(in srgb, var(--bot-profile-page-accent, var(--editor-bot-color, var(--accent))) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--bot-profile-page-accent, var(--editor-bot-color, var(--accent))) 15%, transparent);
+}
+
+.botProfileBuilderNav button[data-active="true"] .botProfileBuilderNavIcon {
+  color: color-mix(in srgb, var(--bot-profile-page-accent, var(--editor-bot-color, var(--accent))) 74%, var(--fg));
+  background: color-mix(in srgb, var(--bot-profile-page-accent, var(--editor-bot-color, var(--accent))) 16%, transparent);
+  border-color: color-mix(in srgb, var(--bot-profile-page-accent, var(--editor-bot-color, var(--accent))) 30%, transparent);
 }
 
 .botProfileBuilderNav button:not([data-active="true"]):hover,
@@ -34044,15 +34392,20 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .botProfileBuilderNav button[data-active="true"] {
-  border-color: color-mix(in srgb, var(--editor-bot-color, var(--fg)) 46%, var(--line));
-  background: color-mix(in srgb, var(--editor-bot-color, var(--fg)) 18%, var(--bg));
+  border-color: color-mix(in srgb, var(--bot-profile-page-accent, var(--editor-bot-color, var(--fg))) 52%, var(--line));
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #ffffff 8%, transparent), transparent),
+    color-mix(in srgb, var(--bot-profile-page-accent, var(--editor-bot-color, var(--fg))) 15%, var(--bg));
   color: var(--fg);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bot-profile-page-accent, var(--editor-bot-color, var(--fg))) 20%, transparent);
 }
 
 .botProfileBuilderNav button[data-active="true"]:hover,
 .botProfileBuilderNav button[data-active="true"]:focus-visible {
-  border-color: color-mix(in srgb, var(--editor-bot-color, var(--fg)) 62%, var(--fg));
-  background: color-mix(in srgb, var(--editor-bot-color, var(--fg)) 22%, var(--bg));
+  border-color: color-mix(in srgb, var(--bot-profile-page-accent, var(--editor-bot-color, var(--fg))) 68%, var(--fg));
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #ffffff 9%, transparent), transparent),
+    color-mix(in srgb, var(--bot-profile-page-accent, var(--editor-bot-color, var(--fg))) 19%, var(--bg));
   color: var(--fg);
 }
 
@@ -34084,6 +34437,11 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .botProfileBuilderNav small {
   color: var(--fg-muted);
   font-size: 10px;
+}
+
+.botProfileBuilderNav small[data-filled="true"] {
+  color: color-mix(in srgb, var(--bot-profile-page-accent, var(--editor-bot-color, var(--accent))) 58%, var(--fg-muted));
+  font-weight: 720;
 }
 
 .botProfileBuilderBody {
@@ -34201,29 +34559,91 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   line-height: 1.35;
 }
 
-.botProfileSubsection {
+/* Studio-language section cards — the theme-aware sibling of
+   .botAvatarControlGroup (same geometry, accent strip, and icon-tile
+   header, but built on theme variables so light mode stays correct). */
+.botProfileGroup {
+  --bot-profile-section-accent: var(--bot-profile-page-accent, var(--editor-bot-color, var(--accent)));
+  position: relative;
+  isolation: isolate;
+  min-width: 0;
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--bot-profile-section-accent) 18%, var(--line));
+  border-radius: 8px;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bot-profile-section-accent) 5%, transparent),
+      color-mix(in srgb, var(--fg) 2%, transparent)
+    );
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 5%, transparent);
+  /* No overflow: hidden — that turns the card into a scroll container and
+     clips below-the-fold controls (the Avatar Studio unreachable-controls
+     bug). The accent strip clips its own corners instead. */
+}
+
+.botProfileGroup::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  border-radius: 8px 0 0 8px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bot-profile-section-accent) 72%, #ffffff),
+    color-mix(in srgb, var(--bot-profile-section-accent) 18%, transparent)
+  );
+  opacity: 0.72;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.botProfileGroup > * {
+  position: relative;
+  z-index: 1;
+}
+
+.botProfileGroupHeader {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.botProfileGroupHeader > div {
+  min-width: 0;
   display: grid;
   gap: 2px;
-  margin-top: 6px;
-  padding-top: 10px;
-  border-top: 1px solid var(--line);
 }
 
-.botProfileSubsection:first-child {
-  margin-top: 0;
-  padding-top: 0;
-  border-top: 0;
-}
-
-.botProfileSubsection span {
-  font-size: 13px;
-  font-weight: 760;
+.botProfileGroupHeader strong {
   color: var(--fg);
+  font-size: 14px;
+  line-height: 1.1;
 }
 
-.botProfileSubsection small {
-  color: var(--fg-muted);
+.botProfileGroupHeader small {
+  min-width: 0;
+  color: color-mix(in srgb, var(--bot-profile-section-accent) 45%, var(--fg-muted));
   font-size: 11px;
+  line-height: 1.25;
+}
+
+.botProfileGroupIcon {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  color: color-mix(in srgb, var(--bot-profile-section-accent) 72%, var(--fg));
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #ffffff 7%, transparent), transparent),
+    color-mix(in srgb, var(--bot-profile-section-accent) 12%, var(--bg));
+  border: 1px solid color-mix(in srgb, var(--bot-profile-section-accent) 18%, var(--line));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 6%, transparent);
 }
 
 .botProfileField textarea {
@@ -34335,8 +34755,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .botProfileDetails {
-  border: 1px solid var(--line);
-  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--bot-profile-section-accent, var(--bot-profile-page-accent, var(--editor-bot-color, var(--accent)))) 14%, var(--line));
+  border-radius: 10px;
   background: var(--bg);
   overflow: hidden;
 }
@@ -34345,9 +34765,32 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   cursor: pointer;
   padding: 10px 12px;
   list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: color-mix(in srgb, var(--bot-profile-section-accent, var(--bot-profile-page-accent, var(--editor-bot-color, var(--accent)))) 45%, var(--fg-muted));
+  font-size: 11px;
+  font-weight: 760;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.botProfileDetails summary::after {
+  content: "▾";
+  flex-shrink: 0;
+  font-size: 11px;
+  transition: transform 0.14s ease;
+}
+
+.botProfileDetails[open] summary::after {
+  transform: rotate(180deg);
+}
+
+.botProfileDetails summary:hover,
+.botProfileDetails summary:focus-visible {
   color: var(--fg);
-  font-size: 13px;
-  font-weight: 700;
+  outline: none;
 }
 
 .botProfileDetails summary::-webkit-details-marker {
@@ -34463,8 +34906,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .botProfileScaleControl {
   display: grid;
   gap: 6px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--bot-profile-section-accent, var(--editor-bot-color, var(--accent))) 12%, var(--line));
+  border-radius: 10px;
   padding: 10px;
   background: var(--bg);
 }
@@ -34484,7 +34927,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .botProfileScaleControl input[type="range"] {
   width: 100%;
-  accent-color: var(--editor-bot-color, var(--accent));
+  accent-color: var(--bot-profile-section-accent, var(--editor-bot-color, var(--accent)));
   opacity: 0.98;
 }
 
@@ -36806,7 +37249,12 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.05),
     inset 0 -1px 0 rgba(0, 0, 0, 0.3);
-  backdrop-filter: blur(14px) saturate(120%);
+  /* No backdrop-filter here — it would make these panels the containing
+     block for position: fixed descendants (per spec, like `filter`), so
+     the Identity tab's color/glyph popover would resolve its viewport
+     coordinates against the control panel and be swallowed by the
+     panel's overflow: hidden. The panels sit on the customizer's opaque
+     background, so the blur had no visible effect anyway. */
 }
 
 .botAvatarMannequinPanel {
@@ -46584,6 +47032,11 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     min-width: 76px;
     scroll-snap-align: start;
     text-align: center;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .botProfileBuilderNavIcon {
+    display: none;
   }
 
 	  .botProfileBuilderBody {

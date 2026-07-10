@@ -305,15 +305,19 @@ import { LensTile } from "./LensTile";
 import {
   CircleHelp,
   BarChart3,
+  BookMarked,
   Brush,
   Building2,
 	  Check,
 	  ChevronDown,
 	  ChevronLeft,
+	  Compass,
 	  Copy,
   Download,
+  Drama,
   Droplets,
   Eye,
+  Globe,
   Image as ImageGlyph,
   Info,
   Lock,
@@ -11670,6 +11674,19 @@ const BOT_PROFILE_PAGE_COPY: Record<
     label: "Facts",
     description: "Permanent canon this bot keeps true.",
   },
+};
+
+// Page glyphs mirror the Avatar Studio's icon-tile group headers — the
+// builder speaks the same visual language as the studio (glyphs carry
+// meaning; labels stay short).
+const BOT_PROFILE_PAGE_ICONS: Record<
+  BotProfileBuilderPageId,
+  React.ComponentType<{ size?: number | string; strokeWidth?: number | string }>
+> = {
+  purpose: Compass,
+  personality: Sparkles,
+  character: Drama,
+  facts: BookMarked,
 };
 
 const BOT_VOICE_PRESET_DESCRIPTIONS: Record<BotVoicePreset, string> = {
@@ -32194,6 +32211,7 @@ function BotProfileBuilder({
   if (!open) return null;
 
   const pageCopy = BOT_PROFILE_PAGE_COPY[activePage];
+  const PageIcon = BOT_PROFILE_PAGE_ICONS[activePage];
   const seededPurpose = defaultBotPurpose(botName);
   const updatePurpose = (field: keyof BotProfileFields["purpose"], value: string) => {
     const nextValue =
@@ -32338,7 +32356,7 @@ function BotProfileBuilder({
     switch (activePage) {
       case "purpose":
         return (
-          <>
+          <section className={styles.botProfileGroup} aria-label="Purpose statement">
             <div className={styles.botPurposeEditorBlock}>
               <div className={styles.botPurposeFieldHeading} id="bot-profile-purpose-q">
                 What is my purpose?
@@ -32377,15 +32395,22 @@ function BotProfileBuilder({
                 />
               </label>
             )}
-          </>
+          </section>
         );
       case "personality":
         return (
           <>
-            <div className={styles.botProfileSubsection}>
-              <span>Communication style</span>
-            </div>
-            <div className={styles.botVoicePresetGrid}>
+            <section className={styles.botProfileGroup} aria-label="Communication style">
+              <header className={styles.botProfileGroupHeader}>
+                <span className={styles.botProfileGroupIcon} aria-hidden="true">
+                  <Smile size={16} strokeWidth={2.4} />
+                </span>
+                <div>
+                  <strong>Communication style</strong>
+                  <small>How this bot sounds.</small>
+                </div>
+              </header>
+              <div className={styles.botVoicePresetGrid}>
               {(Object.keys(BOT_VOICE_PRESET_LABELS) as BotVoicePreset[]).map((preset) => (
                 <button
                   key={preset}
@@ -32399,11 +32424,18 @@ function BotProfileBuilder({
                   <small>{BOT_VOICE_PRESET_DESCRIPTIONS[preset]}</small>
                 </button>
               ))}
-            </div>
-            <div className={styles.botProfileSubsection}>
-              <span>OCEAN balance</span>
-              <small>Set a vibe without locking the bot into one rigid persona.</small>
-            </div>
+              </div>
+            </section>
+            <section className={styles.botProfileGroup} aria-label="OCEAN balance">
+              <header className={styles.botProfileGroupHeader}>
+                <span className={styles.botProfileGroupIcon} aria-hidden="true">
+                  <BarChart3 size={16} strokeWidth={2.4} />
+                </span>
+                <div>
+                  <strong>OCEAN balance</strong>
+                  <small>Set a vibe without locking the bot into one rigid persona.</small>
+                </div>
+              </header>
             <BotProfileScaleControl
               label="Openness"
               infoId="bot-profile-scale-info-openness"
@@ -32454,6 +32486,17 @@ function BotProfileBuilder({
               rightLabel="Steady"
               onChange={(value) => updateCore("emotionalStability", value)}
             />
+            </section>
+            <section className={styles.botProfileGroup} aria-label="Flavor">
+              <header className={styles.botProfileGroupHeader}>
+                <span className={styles.botProfileGroupIcon} aria-hidden="true">
+                  <Sparkles size={16} strokeWidth={2.4} />
+                </span>
+                <div>
+                  <strong>Flavor</strong>
+                  <small>Notes, leanings, and signature quirks.</small>
+                </div>
+              </header>
             <label className={styles.botProfileField}>
               <span>Flavor notes (optional)</span>
               <textarea
@@ -32491,39 +32534,60 @@ function BotProfileBuilder({
                 </label>
               </div>
             </details>
+            </section>
           </>
         );
       case "character":
         return (
           <>
-            <div className={styles.botProfileSubsection}>
-              <span>Identity</span>
-              <small>A quick snapshot of who this bot is.</small>
-            </div>
-            <label className={styles.botProfileField}>
-              <span>Identity snapshot</span>
-              <textarea
-                value={profile.identity.role}
-                onChange={(event) => updateTextSection("identity", "role", event.currentTarget.value)}
-                placeholder="ageless raven oracle, they/them, former royal cartographer..."
-              />
-            </label>
-            <div className={styles.botProfileSubsection}>
-              <span>Appearance</span>
-              <small>Useful for avatars and generated images.</small>
-            </div>
-            <label className={styles.botProfileField}>
-              <span>Visual description</span>
-              <textarea
-                value={profile.appearance.description}
-                onChange={(event) => updateTextSection("appearance", "description", event.currentTarget.value)}
-                placeholder="what they look like, how they dress, the feeling they give off..."
-              />
-            </label>
-            <div className={styles.botProfileSubsection}>
-              <span>Worldview</span>
-              <small>Optional sliders for how this bot sees the world.</small>
-            </div>
+            <section className={styles.botProfileGroup} aria-label="Identity">
+              <header className={styles.botProfileGroupHeader}>
+                <span className={styles.botProfileGroupIcon} aria-hidden="true">
+                  <Drama size={16} strokeWidth={2.4} />
+                </span>
+                <div>
+                  <strong>Identity</strong>
+                  <small>A quick snapshot of who this bot is.</small>
+                </div>
+              </header>
+              <label className={styles.botProfileField}>
+                <span>Identity snapshot</span>
+                <textarea
+                  value={profile.identity.role}
+                  onChange={(event) => updateTextSection("identity", "role", event.currentTarget.value)}
+                  placeholder="ageless raven oracle, they/them, former royal cartographer..."
+                />
+              </label>
+            </section>
+            <section className={styles.botProfileGroup} aria-label="Appearance">
+              <header className={styles.botProfileGroupHeader}>
+                <span className={styles.botProfileGroupIcon} aria-hidden="true">
+                  <Eye size={16} strokeWidth={2.4} />
+                </span>
+                <div>
+                  <strong>Appearance</strong>
+                  <small>Useful for avatars and generated images.</small>
+                </div>
+              </header>
+              <label className={styles.botProfileField}>
+                <span>Visual description</span>
+                <textarea
+                  value={profile.appearance.description}
+                  onChange={(event) => updateTextSection("appearance", "description", event.currentTarget.value)}
+                  placeholder="what they look like, how they dress, the feeling they give off..."
+                />
+              </label>
+            </section>
+            <section className={styles.botProfileGroup} aria-label="Worldview">
+              <header className={styles.botProfileGroupHeader}>
+                <span className={styles.botProfileGroupIcon} aria-hidden="true">
+                  <Globe size={16} strokeWidth={2.4} />
+                </span>
+                <div>
+                  <strong>Worldview</strong>
+                  <small>Optional sliders for how this bot sees the world.</small>
+                </div>
+              </header>
             <BotProfileScaleControl
               label="Political perspective"
               infoId="bot-profile-scale-info-political-perspective"
@@ -32575,18 +32639,25 @@ function BotProfileBuilder({
                 </label>
               </div>
             </details>
+            </section>
           </>
         );
       case "facts":
         return (
           <>
             <div className={styles.botProfileFactsTopSticky}>
-              <div className={styles.botProfileSubsection}>
-                <span>Permanent facts</span>
-                <small>
-                  Treated as canon. Leave blank anything you do not want to define.
-                </small>
-              </div>
+              <section className={styles.botProfileGroup} aria-label="Permanent facts">
+              <header className={styles.botProfileGroupHeader}>
+                <span className={styles.botProfileGroupIcon} aria-hidden="true">
+                  <BookMarked size={16} strokeWidth={2.4} />
+                </span>
+                <div>
+                  <strong>Permanent facts</strong>
+                  <small>
+                    Treated as canon. Leave blank anything you do not want to define.
+                  </small>
+                </div>
+              </header>
               <label className={`${styles.botProfileField} ${styles.botProfileKnownEntityToggle}`}>
                 <span>Based on a real person or character?</span>
                 <button
@@ -32734,6 +32805,7 @@ function BotProfileBuilder({
                   </div>
                 );
               })()}
+              </section>
             </div>
             {profile.facts.customFacts.length === 0 ? (
               <button
@@ -32820,11 +32892,15 @@ function BotProfileBuilder({
     >
       <section
         className={styles.botProfileBuilder}
+        data-profile-page={activePage}
         role="dialog"
         aria-modal="true"
         aria-labelledby="bot-profile-builder-title"
       >
         <header className={styles.botProfileBuilderHeader}>
+          <span className={styles.botProfileBuilderHeaderIcon} aria-hidden="true">
+            <PageIcon size={18} strokeWidth={2.2} />
+          </span>
           <div>
             <span>Bot Profile Builder</span>
             <h4 id="bot-profile-builder-title">{pageCopy.label}</h4>
@@ -32835,19 +32911,27 @@ function BotProfileBuilder({
           </button>
         </header>
         <nav className={styles.botProfileBuilderNav} aria-label="Bot profile categories">
-          {BOT_PROFILE_BUILDER_PAGE_ORDER.map((category) => (
-            <button
-              key={category}
-              type="button"
-              data-active={activePage === category ? "true" : undefined}
-              onClick={() => onActivePageChange(category)}
-            >
-              <span>{BOT_PROFILE_BUILDER_PAGE_LABELS[category]}</span>
-              <small>
-                {botProfileCategoryCount(profile, category) > 0 ? "Set" : "Optional"}
-              </small>
-            </button>
-          ))}
+          {BOT_PROFILE_BUILDER_PAGE_ORDER.map((category) => {
+            const CategoryIcon = BOT_PROFILE_PAGE_ICONS[category];
+            const categoryFilled = botProfileCategoryCount(profile, category) > 0;
+            return (
+              <button
+                key={category}
+                type="button"
+                data-active={activePage === category ? "true" : undefined}
+                data-profile-page={category}
+                onClick={() => onActivePageChange(category)}
+              >
+                <span className={styles.botProfileBuilderNavIcon} aria-hidden="true">
+                  <CategoryIcon size={15} strokeWidth={2.4} />
+                </span>
+                <span>{BOT_PROFILE_BUILDER_PAGE_LABELS[category]}</span>
+                <small data-filled={categoryFilled ? "true" : undefined}>
+                  {categoryFilled ? "Set" : "Optional"}
+                </small>
+              </button>
+            );
+          })}
         </nav>
         <div
           className={
@@ -45414,6 +45498,12 @@ function HomeContent(): React.JSX.Element {
   const showConversationSurfaceLoading =
     conversationSurfaceLoading &&
     (view === "chat" || view === "sandbox");
+  const zenNewSessionPresenceDeferred =
+    chatLikeSurface &&
+    (activeConversationIsEmpty ||
+      showConversationSurfaceLoading ||
+      zenInitialThinkingActive ||
+      zenInitialReplyRevealActive);
   // Bot-profile switching keeps running in the background, but we no longer
   // block the messages frame with the dedicated "Switching bot profile..."
   // overlay. Keep only the conversation-load gate visible.
@@ -53721,9 +53811,9 @@ function HomeContent(): React.JSX.Element {
   }, [zenLiveBotAction, zenPersonaPresence.visibleBotId]);
   const zenDefaultPrismPresenceVisible =
     chatLikeSurface &&
+    !zenNewSessionPresenceDeferred &&
     zenPersonaBotId === null &&
-    zenPersonaPresence.visibleBotId === null &&
-    (!zenEmptyHeroVisible || !sidebarOpen);
+    zenPersonaPresence.visibleBotId === null;
   const zenDefaultPrismPresenceForming =
     zenDefaultPrismPresenceVisible &&
     view === "chat" &&
@@ -53732,14 +53822,16 @@ function HomeContent(): React.JSX.Element {
     detail?.hasAssistantReply !== true;
   const zenLiveAskQuestionMarkerVisible = pendingAskQuestionInteractiveKey !== null;
   const zenLivePresenceRailVisible =
-    zenDefaultPrismPresenceVisible ||
-    Boolean(
-      zenLiveVisibleBotAction ||
-        zenComposerActionPreview ||
-        zenLivePresenceBot ||
-        zenLiveBotTalking ||
-        zenLiveAskQuestionMarkerVisible
-    ) || zenPersonaPresence.phase !== "stable";
+    !zenNewSessionPresenceDeferred &&
+    (zenDefaultPrismPresenceVisible ||
+      Boolean(
+        zenLiveVisibleBotAction ||
+          zenComposerActionPreview ||
+          zenLivePresenceBot ||
+          zenLiveBotTalking ||
+          zenLiveAskQuestionMarkerVisible
+      ) ||
+      zenPersonaPresence.phase !== "stable");
   useEffect(() => {
     setZenLiveUserActionPreview(null);
     setZenLiveBotAction(null);
@@ -59495,12 +59587,16 @@ function HomeContent(): React.JSX.Element {
       const botTileTarget = target.closest<HTMLElement>("[data-bot-id]");
       const startsOnBotTile = botTileTarget !== null;
       pressedBotId = botTileTarget?.dataset.botId ?? null;
-      const allowBotTileDrag = startsOnBotTile;
+      const botTileMarqueeGesture =
+        startsOnBotTile && event.shiftKey && !event.ctrlKey && !event.metaKey;
+      if (startsOnBotTile && !botTileMarqueeGesture) {
+        return false;
+      }
       const blockedInteractiveTarget = target.closest(BOT_CANVAS_BACKGROUND_INTERACTIVE_SELECTOR);
       const allowPickerFrameDrag =
         blockedInteractiveTarget instanceof HTMLElement &&
         blockedInteractiveTarget.dataset.botPickerFrame === "true";
-      if (blockedInteractiveTarget && !allowBotTileDrag && !allowPickerFrameDrag) {
+      if (blockedInteractiveTarget && !botTileMarqueeGesture && !allowPickerFrameDrag) {
         return false;
       }
     }
@@ -60917,12 +61013,20 @@ function HomeContent(): React.JSX.Element {
                     toggleCanvasBotSelection(b.id);
                     return;
                   }
-                  const isDesktopMousePixelClick =
-                    geom.compactPixelGrid &&
-                    e.detail > 0 &&
-                    lastBotPickerPointerTypeRef.current === "mouse";
-                  if (isDesktopMousePixelClick) {
-                    focusHueLensOnBot(b);
+                  const clickShouldSelectDirectly =
+                    e.detail === 0 || lastBotPickerPointerTypeRef.current !== "touch";
+                  const shouldRelocateHue =
+                    !clickShouldSelectDirectly &&
+                    !emptyStateSearchActive &&
+                    botHasFilterableColor(b) &&
+                    !hueFilterActive &&
+                    pickerUsesHueNavigation(geom, viewportWidth);
+                  if (shouldRelocateHue) {
+                    const { h } = hexToHsl(b.color!.trim());
+                    const lensPosition = hueLensPositionForHue(h);
+                    setHueFilterCenter(lensPosition);
+                    setSelectedBotId(null);
+                    return;
                   }
                   commitEmptyStateBotSelection(b.id);
                 }}
@@ -89902,12 +90006,24 @@ function HomeContent(): React.JSX.Element {
             });
             if (groupDashboard) return groupDashboard;
             const titleSubject = heroBotName || "PRISM";
+            const titleSubjectLength = Array.from(titleSubject).length;
+            const titleSubjectLongestWordLength = titleSubject
+              .split(/\s+/u)
+              .reduce((longest, word) => Math.max(longest, Array.from(word).length), 0);
             const titleSubjectFontCapRem = Math.max(
-              2.4,
-              Math.min(4.8, 4.8 - Math.max(0, Array.from(titleSubject).length - 12) * 0.15)
+              2.15,
+              Math.min(
+                4.8,
+                4.8 -
+                  Math.max(0, titleSubjectLength - 14) * 0.11 -
+                  Math.max(0, titleSubjectLongestWordLength - 11) * 0.16
+              )
             );
+            const titleSubjectVisualCapRem = heroBot
+              ? Math.min(titleSubjectFontCapRem, 3.2)
+              : titleSubjectFontCapRem;
             const titleSubjectStyle = {
-              "--zen-title-subject-font-cap": `${titleSubjectFontCapRem.toFixed(2)}rem`,
+              "--zen-title-subject-font-cap": `${titleSubjectVisualCapRem.toFixed(2)}rem`,
             } as React.CSSProperties;
             const emptyStatePickerGeometry =
               pickerSourceBots.length > 0
@@ -89960,6 +90076,86 @@ function HomeContent(): React.JSX.Element {
               !emptyStateSearchActive &&
               !suppressHeroCopy &&
               !pendingReply;
+            const renderZenHeroTitle = (options: { inlineHero?: boolean } = {}) => (
+              <div
+                className={styles.emptyStateTitle}
+                data-zen-title-with-hero="true"
+                data-zen-title-selected-bot={heroBot ? "true" : undefined}
+                data-zen-title-long={
+                  titleSubjectLength > 18 || titleSubjectLongestWordLength > 12
+                    ? "true"
+                    : undefined
+                }
+              >
+                <span className={styles.emptyStateTitlePhrase}>
+                  <span className={styles.emptyStateTitleLead}>Zen</span>
+                  {options.inlineHero && !suppressHeroCopy ? (
+                    <button
+                      type="button"
+                      className={[
+                        styles.emptyStateIconButton,
+                        styles.zenInlineHeroGlyph,
+                      ].filter(Boolean).join(" ")}
+                      data-bot-talk-hero="true"
+                      onClick={handleHeroStartConversation}
+                      disabled={heroStartDisabled}
+                      title={heroStartTitle}
+                      aria-label={heroStartAriaLabel}
+                    >
+                      {renderHero()}
+                    </button>
+                  ) : null}
+                  <span className={styles.emptyStateTitleLead}>with</span>
+                </span>
+                <span
+                  className={styles.emptyStateTitleSubject}
+                  style={titleSubjectStyle}
+                  data-title={titleSubject}
+                >
+                  {titleSubject}
+                </span>
+              </div>
+            );
+            const renderZenSplashControls = () =>
+              zenCanvasModelPickerActive ? (
+                <div
+                  className={styles.zenSplashControls}
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <div className={styles.zenSplashModelPicker}>
+                    {renderHeaderModelPicker({
+                      modelMenuClassName: styles.zenSplashModelMenu,
+                      modelMenuWidthPx: 220,
+                      showBotPicker: false,
+                    })}
+                  </div>
+                  <button
+                    type="button"
+                    className={`${styles.privateChatButton} ${styles.zenSplashPrivateButton}`}
+                    style={privateChatButtonStyle}
+                    onClick={toggleAppWidePrivateMode}
+                    aria-pressed={appWidePrivateMode}
+                    title="Private mode - no saved history or memory"
+                  >
+                    <span className={styles.privateChatButtonIcon} aria-hidden="true">
+                      <svg
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <rect x="4" y="11" width="16" height="9" rx="2" />
+                        <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+                      </svg>
+                    </span>
+                    <span>Private</span>
+                  </button>
+                </div>
+              ) : null;
             return (
               <div
                 className={emptyStateClassName}
@@ -89991,71 +90187,42 @@ function HomeContent(): React.JSX.Element {
                   <div
                     className={styles.emptyStateInfoBand}
                     data-empty-state-band-emphasis="bot"
+                    data-selected-bot-hero="true"
                   >
                     <div className={styles.emptyStateInfoBandRow}>
-                      <button
-                        type="button"
-                        className={[
-                          styles.emptyStateIconButton,
-                          shouldShowHeroNudge ? styles.emptyStateIconButtonNudge : "",
-                        ].filter(Boolean).join(" ")}
-                        data-bot-talk-hero="true"
-                        onClick={handleHeroStartConversation}
-                        disabled={heroStartDisabled}
-                        title={heroStartTitle}
-                        aria-label={heroStartAriaLabel}
-                      >
-                        {renderHero()}
-                      </button>
-                      <div className={styles.emptyStateHeader}>
-                        <div className={styles.emptyStateTitleBlock}>
-                          <div className={styles.emptyStateTitle}>
-                            {`Zen with ${titleSubject}`}
+                      <div className={styles.emptyStateSelectedHeroIdentity}>
+                        <button
+                          type="button"
+                          className={[
+                            styles.emptyStateIconButton,
+                            shouldShowHeroNudge ? styles.emptyStateIconButtonNudge : "",
+                          ].filter(Boolean).join(" ")}
+                          data-bot-talk-hero="true"
+                          onClick={handleHeroStartConversation}
+                          disabled={heroStartDisabled}
+                          title={heroStartTitle}
+                          aria-label={heroStartAriaLabel}
+                        >
+                          {renderHero()}
+                        </button>
+                        <div className={styles.emptyStateSelectedHeroCopy}>
+                          <div className={styles.emptyStateTitleBlock}>
+                            {renderZenHeroTitle()}
+                            {heroStartCue ? (
+                              <p className={styles.emptyStateHeroCue}>{heroStartCue}</p>
+                            ) : null}
                           </div>
-                          {heroStartCue ? (
-                            <p className={styles.emptyStateHeroCue}>{heroStartCue}</p>
-                          ) : null}
                         </div>
-                        <p className={styles.emptyStateHint}>{hint}</p>
                       </div>
+                      <p className={styles.emptyStateHint}>{hint}</p>
+                      {renderZenSplashControls()}
                     </div>
                   </div>
                 ) : null}
                 {!emptyStateSearchActive && !heroBot ? (
                   <div className={styles.emptyStateTitleBlock}>
                     {immersiveEmptyState ? (
-                      <div
-                        className={styles.emptyStateTitle}
-                        data-zen-title-with-hero="true"
-                      >
-                        <span className={styles.emptyStateTitlePhrase}>
-                          <span className={styles.emptyStateTitleLead}>Zen</span>
-                          {!suppressHeroCopy ? (
-                            <button
-                              type="button"
-                              className={[
-                                styles.emptyStateIconButton,
-                                styles.zenInlineHeroGlyph,
-                              ].filter(Boolean).join(" ")}
-                              data-bot-talk-hero="true"
-                              onClick={handleHeroStartConversation}
-                              disabled={heroStartDisabled}
-                              title={heroStartTitle}
-                              aria-label={heroStartAriaLabel}
-                            >
-                              {renderHero()}
-                            </button>
-                          ) : null}
-                          <span className={styles.emptyStateTitleLead}>with</span>
-                        </span>
-                        <span
-                          className={styles.emptyStateTitleSubject}
-                          style={titleSubjectStyle}
-                          data-title={titleSubject}
-                        >
-                          {titleSubject}
-                        </span>
-                      </div>
+                      renderZenHeroTitle({ inlineHero: true })
                     ) : (
                       <>
                         {!suppressHeroCopy ? (
@@ -90080,15 +90247,7 @@ function HomeContent(): React.JSX.Element {
                       </>
                     )}
                     <p className={styles.emptyStateHint}>{hint}</p>
-                    {zenCanvasModelPickerActive ? (
-                      <div className={styles.zenSplashModelPicker}>
-                        {renderHeaderModelPicker({
-                          modelMenuClassName: styles.zenSplashModelMenu,
-                          modelMenuWidthPx: 220,
-                          showBotPicker: false,
-                        })}
-                      </div>
-                    ) : null}
+                    {renderZenSplashControls()}
                   </div>
                 ) : null}
                 {pickerSourceBots.length > 0 &&
@@ -91729,18 +91888,30 @@ function HomeContent(): React.JSX.Element {
                               // compose dropdown auto-populate (both
                               // read from the same state).
                               // Dense color-map mode mirrors the Chat
-                              // picker. Direct clicks select the exact bot;
-                              // Stage 5+ desktop mouse clicks also move the
-                              // hue lens there.
+                              // picker. Touch Stage 3+ snaps to a hue region
+                              // before individual selection; mouse and
+                              // keyboard activation select the bot card
+                              // directly so visible cards always feel
+                              // clickable.
                               // Grayscale bots fall through to direct
                               // selection because the lens cannot target
                               // them.
-                              const isDesktopMousePixelClick =
-                                geom.compactPixelGrid &&
-                                e.detail > 0 &&
-                                lastBotPickerPointerTypeRef.current === "mouse";
-                              if (isDesktopMousePixelClick) {
-                                focusHueLensOnBot(b);
+                              const clickShouldSelectDirectly =
+                                e.detail === 0 || lastBotPickerPointerTypeRef.current !== "touch";
+                              const shouldRelocateHue =
+                                !clickShouldSelectDirectly &&
+                                !emptyStateSearchActive &&
+                                botHasFilterableColor(b) &&
+                                !hueFilterActive &&
+                                pickerUsesHueNavigation(geom, viewportWidth);
+                              if (
+                                shouldRelocateHue
+                              ) {
+                                const { h } = hexToHsl(b.color!.trim());
+                                const lensPosition = hueLensPositionForHue(h);
+                                setHueFilterCenter(lensPosition);
+                                setSelectedBotId(null);
+                                return;
                               }
                               commitEmptyStateBotSelection(b.id);
                             }}
