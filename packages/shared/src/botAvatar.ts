@@ -53,9 +53,9 @@ export const DEFAULT_BOT_FACE_MOUTH_ROTATION_DEG = 0;
 export const BOT_FACE_MOUTH_ROTATION_DEG_MIN = -180;
 export const BOT_FACE_MOUTH_ROTATION_DEG_MAX = 180;
 export const BOT_FACE_MOUTH_ROTATION_DEG_STEP = 5;
-export const BOT_FACE_BLINK_BAR_VALUES = ["none", "¦", "❘", "|"] as const;
+export const BOT_FACE_BLINK_BAR_VALUES = ["none", " ", "❘", "¦"] as const;
 export type BotFaceBlinkBar = string;
-export const DEFAULT_BOT_FACE_BLINK_BAR: BotFaceBlinkBar = "¦";
+export const DEFAULT_BOT_FACE_BLINK_BAR: BotFaceBlinkBar = " ";
 export const BOT_FACE_THINKING_FRAME_COUNT = 4;
 export type BotFaceThinkingFrames = readonly [string, string, string, string];
 export const DEFAULT_BOT_FACE_THINKING_FRAMES: BotFaceThinkingFrames = [
@@ -217,6 +217,7 @@ export function normalizeBotFaceMouthRotationDeg(value: unknown): number | null 
 
 export function normalizeBotFaceBlinkBar(value: unknown): BotFaceBlinkBar | null {
   if (typeof value !== "string") return null;
+  if (value === DEFAULT_BOT_FACE_BLINK_BAR) return DEFAULT_BOT_FACE_BLINK_BAR;
   const trimmed = value.trim();
   if (trimmed === "none") return trimmed;
   const [character] = splitBotFaceVisibleGraphemes(trimmed);
