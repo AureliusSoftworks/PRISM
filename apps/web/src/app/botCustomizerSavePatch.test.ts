@@ -28,9 +28,15 @@ const pristine: BotCustomizerSavePristine = {
   faceEyesFont: "warm",
   faceEyeCharacter: null,
   faceMouthFont: "warm",
+  faceMouthCharacter: null,
   faceFontWeight: 500,
   faceEyeScale: 1,
+  faceEyeOffsetX: 0,
   faceEyeOffsetY: 0,
+  faceMouthScale: 1,
+  faceMouthOffsetX: 0,
+  faceMouthOffsetY: 0,
+  faceMouthRotationDeg: 0,
   faceBlinkBar: "|",
   faceThinkingFrames: ["|", "/", "-", "\\"],
   profilePictureImageId: null,
@@ -63,9 +69,15 @@ const currentFromPristine = (
   faceEyesFont: pristine.faceEyesFont,
   faceEyeCharacter: pristine.faceEyeCharacter,
   faceMouthFont: pristine.faceMouthFont,
+  faceMouthCharacter: pristine.faceMouthCharacter,
   faceFontWeight: pristine.faceFontWeight,
   faceEyeScale: pristine.faceEyeScale,
+  faceEyeOffsetX: pristine.faceEyeOffsetX,
   faceEyeOffsetY: pristine.faceEyeOffsetY,
+  faceMouthScale: pristine.faceMouthScale,
+  faceMouthOffsetX: pristine.faceMouthOffsetX,
+  faceMouthOffsetY: pristine.faceMouthOffsetY,
+  faceMouthRotationDeg: pristine.faceMouthRotationDeg,
   faceBlinkBar: pristine.faceBlinkBar,
   faceThinkingFrames: pristine.faceThinkingFrames,
   profilePictureImageId: pristine.profilePictureImageId,
@@ -131,16 +143,55 @@ describe("bot customizer save patch", () => {
     );
   });
 
-  it("patches eye scale and vertical eye placement edits", () => {
+  it("patches custom mouth character edits including clears", () => {
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(
+        currentFromPristine({ faceMouthCharacter: "△" }),
+        pristine
+      ),
+      { faceMouthCharacter: "△" }
+    );
+
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(
+        currentFromPristine({ faceMouthCharacter: null }),
+        { ...pristine, faceMouthCharacter: "V" }
+      ),
+      { faceMouthCharacter: null }
+    );
+  });
+
+  it("patches eye scale and coordinate placement edits", () => {
     assert.deepEqual(
       buildBotCustomizerSavePatch(
         currentFromPristine({
           faceEyeScale: 1.15,
+          faceEyeOffsetX: 0.06,
           faceEyeOffsetY: -0.08,
         }),
         pristine
       ),
-      { faceEyeScale: 1.15, faceEyeOffsetY: -0.08 }
+      { faceEyeScale: 1.15, faceEyeOffsetX: 0.06, faceEyeOffsetY: -0.08 }
+    );
+  });
+
+  it("patches custom mouth scale, coordinate placement, and rotation edits", () => {
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(
+        currentFromPristine({
+          faceMouthScale: 1.25,
+          faceMouthOffsetX: -0.06,
+          faceMouthOffsetY: 0.08,
+          faceMouthRotationDeg: 35,
+        }),
+        pristine
+      ),
+      {
+        faceMouthScale: 1.25,
+        faceMouthOffsetX: -0.06,
+        faceMouthOffsetY: 0.08,
+        faceMouthRotationDeg: 35,
+      }
     );
   });
 

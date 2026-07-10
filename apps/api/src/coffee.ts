@@ -223,10 +223,15 @@ export interface CoffeeBotProfile {
   faceEyesFont?: string | null;
   faceEyeCharacter?: string | null;
   faceMouthFont?: string | null;
+  faceMouthCharacter?: string | null;
   faceFontWeight?: number | null;
   faceEyeScale?: number | null;
+  faceEyeOffsetX?: number | null;
   faceEyeOffsetY?: number | null;
+  faceMouthScale?: number | null;
+  faceMouthOffsetX?: number | null;
   faceMouthOffsetY?: number | null;
+  faceMouthRotationDeg?: number | null;
   faceBlinkBar?: string | null;
   faceThinkingFrames?: string | null;
   profilePictureImageId?: string | null;
@@ -4748,10 +4753,15 @@ type CoffeeBotProfileRow = {
   face_eyes_font: string | null;
   face_eye_character: string | null;
   face_mouth_font: string | null;
+  face_mouth_character: string | null;
   face_font_weight: number | null;
   face_eye_scale: number | null;
+  face_eye_offset_x: number | null;
   face_eye_offset_y: number | null;
+  face_mouth_scale: number | null;
+  face_mouth_offset_x: number | null;
   face_mouth_offset_y: number | null;
+  face_mouth_rotation_deg: number | null;
   face_blink_bar: string | null;
   face_thinking_frames: string | null;
   profile_picture_image_id: string | null;
@@ -4780,12 +4790,23 @@ function mapCoffeeBotProfileRow(row: CoffeeBotProfileRow): CoffeeBotProfile {
     faceEyesFont: row.face_eyes_font ?? null,
     faceEyeCharacter: row.face_eye_character ?? null,
     faceMouthFont: row.face_mouth_font ?? null,
+    faceMouthCharacter: row.face_mouth_character ?? null,
     faceFontWeight: typeof row.face_font_weight === "number" ? row.face_font_weight : null,
     faceEyeScale: typeof row.face_eye_scale === "number" ? row.face_eye_scale : null,
+    faceEyeOffsetX:
+      typeof row.face_eye_offset_x === "number" ? row.face_eye_offset_x : null,
     faceEyeOffsetY:
       typeof row.face_eye_offset_y === "number" ? row.face_eye_offset_y : null,
+    faceMouthScale:
+      typeof row.face_mouth_scale === "number" ? row.face_mouth_scale : null,
+    faceMouthOffsetX:
+      typeof row.face_mouth_offset_x === "number" ? row.face_mouth_offset_x : null,
     faceMouthOffsetY:
       typeof row.face_mouth_offset_y === "number" ? row.face_mouth_offset_y : null,
+    faceMouthRotationDeg:
+      typeof row.face_mouth_rotation_deg === "number"
+        ? row.face_mouth_rotation_deg
+        : null,
     faceBlinkBar: row.face_blink_bar ?? null,
     faceThinkingFrames: row.face_thinking_frames ?? null,
     profilePictureImageId: row.profile_picture_image_id ?? null,
@@ -4826,10 +4847,15 @@ function loadCoffeeGroupProfileRows(
               ${selectOptionalBotColumn("face_eyes_font")},
               ${selectOptionalBotColumn("face_eye_character")},
               ${selectOptionalBotColumn("face_mouth_font")},
+              ${selectOptionalBotColumn("face_mouth_character")},
               ${selectOptionalBotColumn("face_font_weight")},
               ${selectOptionalBotColumn("face_eye_scale")},
+              ${selectOptionalBotColumn("face_eye_offset_x")},
               ${selectOptionalBotColumn("face_eye_offset_y")},
+              ${selectOptionalBotColumn("face_mouth_scale")},
+              ${selectOptionalBotColumn("face_mouth_offset_x")},
               ${selectOptionalBotColumn("face_mouth_offset_y")},
+              ${selectOptionalBotColumn("face_mouth_rotation_deg")},
               ${selectOptionalBotColumn("face_blink_bar")},
               ${selectOptionalBotColumn("face_thinking_frames")},
               ${selectOptionalBotColumn("profile_picture_image_id")},

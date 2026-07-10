@@ -205,10 +205,15 @@ export function createDatabase(): DatabaseSync {
       prism_default_bot_face_eyes_font TEXT,
       prism_default_bot_face_eye_character TEXT,
       prism_default_bot_face_mouth_font TEXT,
+      prism_default_bot_face_mouth_character TEXT,
       prism_default_bot_face_font_weight INTEGER,
       prism_default_bot_face_eye_scale REAL,
+      prism_default_bot_face_eye_offset_x REAL,
       prism_default_bot_face_eye_offset_y REAL,
+      prism_default_bot_face_mouth_scale REAL,
+      prism_default_bot_face_mouth_offset_x REAL,
       prism_default_bot_face_mouth_offset_y REAL,
+      prism_default_bot_face_mouth_rotation_deg REAL,
       prism_default_bot_face_blink_bar TEXT,
       prism_default_bot_face_thinking_frames TEXT,
       prism_default_bot_temperature REAL,
@@ -421,10 +426,15 @@ export function createDatabase(): DatabaseSync {
       face_eyes_font TEXT,
       face_eye_character TEXT,
       face_mouth_font TEXT,
+      face_mouth_character TEXT,
       face_font_weight INTEGER,
       face_eye_scale REAL,
+      face_eye_offset_x REAL,
       face_eye_offset_y REAL,
+      face_mouth_scale REAL,
+      face_mouth_offset_x REAL,
       face_mouth_offset_y REAL,
+      face_mouth_rotation_deg REAL,
       face_blink_bar TEXT,
       face_thinking_frames TEXT,
       profile_picture_image_id TEXT,
@@ -910,10 +920,15 @@ export function createDatabase(): DatabaseSync {
     ["prism_default_bot_face_eyes_font", "TEXT"],
     ["prism_default_bot_face_eye_character", "TEXT"],
     ["prism_default_bot_face_mouth_font", "TEXT"],
+    ["prism_default_bot_face_mouth_character", "TEXT"],
     ["prism_default_bot_face_font_weight", "INTEGER"],
     ["prism_default_bot_face_eye_scale", "REAL"],
+    ["prism_default_bot_face_eye_offset_x", "REAL"],
     ["prism_default_bot_face_eye_offset_y", "REAL"],
+    ["prism_default_bot_face_mouth_scale", "REAL"],
+    ["prism_default_bot_face_mouth_offset_x", "REAL"],
     ["prism_default_bot_face_mouth_offset_y", "REAL"],
+    ["prism_default_bot_face_mouth_rotation_deg", "REAL"],
     ["prism_default_bot_face_blink_bar", "TEXT"],
     ["prism_default_bot_face_thinking_frames", "TEXT"],
     ["prism_default_bot_temperature", "REAL"],
@@ -1421,6 +1436,12 @@ export function createDatabase(): DatabaseSync {
   if (!hasBotFaceMouthFontColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN face_mouth_font TEXT;");
   }
+  const hasBotFaceMouthCharacterColumn = botColumns.some(
+    (column) => column.name === "face_mouth_character"
+  );
+  if (!hasBotFaceMouthCharacterColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN face_mouth_character TEXT;");
+  }
   const hasBotFaceFontWeightColumn = botColumns.some(
     (column) => column.name === "face_font_weight"
   );
@@ -1433,17 +1454,41 @@ export function createDatabase(): DatabaseSync {
   if (!hasBotFaceEyeScaleColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN face_eye_scale REAL;");
   }
+  const hasBotFaceEyeOffsetXColumn = botColumns.some(
+    (column) => column.name === "face_eye_offset_x"
+  );
+  if (!hasBotFaceEyeOffsetXColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN face_eye_offset_x REAL;");
+  }
   const hasBotFaceEyeOffsetYColumn = botColumns.some(
     (column) => column.name === "face_eye_offset_y"
   );
   if (!hasBotFaceEyeOffsetYColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN face_eye_offset_y REAL;");
   }
+  const hasBotFaceMouthScaleColumn = botColumns.some(
+    (column) => column.name === "face_mouth_scale"
+  );
+  if (!hasBotFaceMouthScaleColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN face_mouth_scale REAL;");
+  }
+  const hasBotFaceMouthOffsetXColumn = botColumns.some(
+    (column) => column.name === "face_mouth_offset_x"
+  );
+  if (!hasBotFaceMouthOffsetXColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN face_mouth_offset_x REAL;");
+  }
   const hasBotFaceMouthOffsetYColumn = botColumns.some(
     (column) => column.name === "face_mouth_offset_y"
   );
   if (!hasBotFaceMouthOffsetYColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN face_mouth_offset_y REAL;");
+  }
+  const hasBotFaceMouthRotationDegColumn = botColumns.some(
+    (column) => column.name === "face_mouth_rotation_deg"
+  );
+  if (!hasBotFaceMouthRotationDegColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN face_mouth_rotation_deg REAL;");
   }
   const hasBotFaceBlinkBarColumn = botColumns.some(
     (column) => column.name === "face_blink_bar"

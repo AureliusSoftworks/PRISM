@@ -138,10 +138,15 @@ describe("createDatabase bot export hash migration", () => {
       assert.ok(columns.some((column) => column.name === "face_eyes_font"));
       assert.ok(columns.some((column) => column.name === "face_eye_character"));
       assert.ok(columns.some((column) => column.name === "face_mouth_font"));
+      assert.ok(columns.some((column) => column.name === "face_mouth_character"));
       assert.ok(columns.some((column) => column.name === "face_font_weight"));
       assert.ok(columns.some((column) => column.name === "face_eye_scale"));
+      assert.ok(columns.some((column) => column.name === "face_eye_offset_x"));
       assert.ok(columns.some((column) => column.name === "face_eye_offset_y"));
+      assert.ok(columns.some((column) => column.name === "face_mouth_scale"));
+      assert.ok(columns.some((column) => column.name === "face_mouth_offset_x"));
       assert.ok(columns.some((column) => column.name === "face_mouth_offset_y"));
+      assert.ok(columns.some((column) => column.name === "face_mouth_rotation_deg"));
       assert.ok(columns.some((column) => column.name === "face_blink_bar"));
       assert.ok(columns.some((column) => column.name === "face_thinking_frames"));
       assert.ok(columns.some((column) => column.name === "profile_picture_image_id"));
@@ -169,16 +174,21 @@ describe("createDatabase bot export hash migration", () => {
       assert.match(row!.export_hash!, /^[a-f0-9]{32}$/);
       reopened
         .prepare(
-          "UPDATE bots SET face_eyes_font = ?, face_eye_character = ?, face_mouth_font = ?, face_font_weight = ?, face_eye_scale = ?, face_eye_offset_y = ?, face_mouth_offset_y = ?, face_blink_bar = ?, face_thinking_frames = ?, profile_picture_image_id = ? WHERE id = ?"
+          "UPDATE bots SET face_eyes_font = ?, face_eye_character = ?, face_mouth_font = ?, face_mouth_character = ?, face_font_weight = ?, face_eye_scale = ?, face_eye_offset_x = ?, face_eye_offset_y = ?, face_mouth_scale = ?, face_mouth_offset_x = ?, face_mouth_offset_y = ?, face_mouth_rotation_deg = ?, face_blink_bar = ?, face_thinking_frames = ?, profile_picture_image_id = ? WHERE id = ?"
         )
         .run(
           "warm",
           "8",
           "formal",
+          "△",
           725,
           1.15,
-          -0.08,
           0.06,
+          -0.08,
+          1.25,
+          -0.04,
+          0.06,
+          35,
           "¦",
           '[".","o","O","o"]',
           "img-profile",
@@ -186,17 +196,22 @@ describe("createDatabase bot export hash migration", () => {
         );
       const avatarRow = reopened
         .prepare(
-          "SELECT face_eyes_font, face_eye_character, face_mouth_font, face_font_weight, face_eye_scale, face_eye_offset_y, face_mouth_offset_y, face_blink_bar, face_thinking_frames, profile_picture_image_id FROM bots WHERE id = ?"
+          "SELECT face_eyes_font, face_eye_character, face_mouth_font, face_mouth_character, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_thinking_frames, profile_picture_image_id FROM bots WHERE id = ?"
         )
         .get("bot-1") as
         | {
             face_eyes_font: string | null;
             face_eye_character: string | null;
             face_mouth_font: string | null;
+            face_mouth_character: string | null;
             face_font_weight: number | null;
             face_eye_scale: number | null;
+            face_eye_offset_x: number | null;
             face_eye_offset_y: number | null;
+            face_mouth_scale: number | null;
+            face_mouth_offset_x: number | null;
             face_mouth_offset_y: number | null;
+            face_mouth_rotation_deg: number | null;
             face_blink_bar: string | null;
             face_thinking_frames: string | null;
             profile_picture_image_id: string | null;
@@ -205,10 +220,15 @@ describe("createDatabase bot export hash migration", () => {
       assert.equal(avatarRow?.face_eyes_font, "warm");
       assert.equal(avatarRow?.face_eye_character, "8");
       assert.equal(avatarRow?.face_mouth_font, "formal");
+      assert.equal(avatarRow?.face_mouth_character, "△");
       assert.equal(avatarRow?.face_font_weight, 725);
       assert.equal(avatarRow?.face_eye_scale, 1.15);
+      assert.equal(avatarRow?.face_eye_offset_x, 0.06);
       assert.equal(avatarRow?.face_eye_offset_y, -0.08);
+      assert.equal(avatarRow?.face_mouth_scale, 1.25);
+      assert.equal(avatarRow?.face_mouth_offset_x, -0.04);
       assert.equal(avatarRow?.face_mouth_offset_y, 0.06);
+      assert.equal(avatarRow?.face_mouth_rotation_deg, 35);
       assert.equal(avatarRow?.face_blink_bar, "¦");
       assert.equal(avatarRow?.face_thinking_frames, '[".","o","O","o"]');
       assert.equal(avatarRow?.profile_picture_image_id, "img-profile");
