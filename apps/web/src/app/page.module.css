@@ -41815,6 +41815,19 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   box-shadow: 0 0 18px color-mix(in srgb, #ffd95a 10%, transparent);
 }
 
+.botCardBatchSelected {
+  border-color: color-mix(in srgb, var(--bot-color, var(--accent)) 64%, var(--line-strong));
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--bot-color, var(--accent)) 12%, transparent),
+      color-mix(in srgb, var(--bg) 96%, var(--bot-color, var(--accent)) 4%)
+    );
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--bot-color, var(--accent)) 26%, transparent),
+    0 12px 24px color-mix(in srgb, var(--bot-color, var(--accent)) 10%, transparent);
+}
+
 .botCard::before {
   content: "";
   position: absolute;
@@ -43265,6 +43278,42 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   border-radius: 8px;
 }
 
+.botCardSelectButton {
+  width: 32px;
+  min-width: 32px;
+  padding: 0;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg-muted);
+  opacity: 0.58;
+  border-radius: 8px;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  align-self: stretch;
+  transition:
+    opacity 130ms ease-out,
+    color 130ms ease-out,
+    border-color 130ms ease-out,
+    background 130ms ease-out,
+    transform 130ms ease-out;
+}
+
+.botCardSelectButton:hover,
+.botCardSelectButton:focus-visible,
+.botCard:hover .botCardSelectButton,
+.botCardSelectButton[aria-pressed="true"] {
+  opacity: 1;
+  color: var(--bot-color, var(--accent));
+  border-color: color-mix(in srgb, var(--bot-color, var(--accent)) 34%, var(--line));
+  background: color-mix(in srgb, var(--bot-color, var(--accent)) 10%, transparent);
+  outline: none;
+}
+
+.botCardSelectButton:active {
+  transform: translateY(1px);
+}
+
 /* ── Bot card × delete ──
    Visual + interaction twin of .conversationDelete. The 0.45 rest
    opacity makes the × discoverable on the card without shouting,
@@ -43603,6 +43652,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   overflow: hidden;
 }
 
+.botLibraryListArea:has(.botBatchEditPanel) {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
 .botLibraryListHeader {
   display: flex;
   align-items: center;
@@ -43679,6 +43732,178 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   border-color: var(--line-strong);
   color: var(--fg);
   outline: none;
+}
+
+.botBatchEditPanel {
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line));
+  border-radius: 10px;
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--accent) 8%, var(--bg-elevated) 92%),
+      color-mix(in srgb, var(--bg) 94%, var(--accent) 6%)
+    );
+  padding: 10px;
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  box-shadow: 0 10px 22px color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.botBatchEditHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.botBatchEditHeader > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.botBatchEditHeader span {
+  color: var(--fg-muted);
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.botBatchEditHeader h4 {
+  margin: 0;
+  color: var(--fg);
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+.botBatchEditHeader p {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 11.5px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.botBatchEditClear,
+.botBatchEditSecondary,
+.botBatchEditApply {
+  -webkit-appearance: none;
+  appearance: none;
+  border-radius: 8px;
+  min-height: 30px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 760;
+  cursor: pointer;
+  transition:
+    background 0.14s ease,
+    border-color 0.14s ease,
+    color 0.14s ease,
+    opacity 0.14s ease,
+    transform 0.08s ease;
+}
+
+.botBatchEditClear,
+.botBatchEditSecondary {
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg) 80%, transparent);
+  color: var(--fg-muted);
+}
+
+.botBatchEditClear:hover,
+.botBatchEditClear:focus-visible,
+.botBatchEditSecondary:hover:not(:disabled),
+.botBatchEditSecondary:focus-visible:not(:disabled) {
+  border-color: var(--line-strong);
+  background: var(--bg-hover);
+  color: var(--fg);
+  outline: none;
+}
+
+.botBatchEditGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+
+.botBatchEditField {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  align-content: start;
+}
+
+.botBatchEditField > span {
+  color: var(--fg-muted);
+  font-size: 10.5px;
+  font-weight: 780;
+}
+
+.botBatchEditField .composeModelControl {
+  width: 100%;
+}
+
+.botBatchEditField .composeModelTrigger {
+  width: 100%;
+  min-width: 0;
+}
+
+.botBatchEditIdentityControl {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.botBatchEditIdentityControl small {
+  color: var(--fg-muted);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.botBatchEditActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.botBatchEditApply {
+  border: 1px solid color-mix(in srgb, var(--accent) 72%, var(--line-strong));
+  background: var(--accent);
+  color: var(--accent-text);
+  box-shadow: 0 8px 18px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.botBatchEditApply:hover:not(:disabled),
+.botBatchEditApply:focus-visible:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 76%, var(--fg));
+  background: var(--accent-hover, var(--accent));
+  outline: none;
+}
+
+.botBatchEditApply:disabled,
+.botBatchEditSecondary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.botBatchEditApply:active:not(:disabled),
+.botBatchEditSecondary:active:not(:disabled),
+.botBatchEditClear:active {
+  transform: translateY(1px);
 }
 
 .botLibraryEmptyFilter {
@@ -46741,6 +46966,11 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     padding: 0 6px;
   }
 
+  .botCardSelectButton {
+    width: 28px;
+    min-width: 28px;
+  }
+
   .botsScrollArea,
   .botList {
     gap: 8px;
@@ -46785,6 +47015,33 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   .botLibraryFilterRename {
     width: 32px;
     height: 32px;
+  }
+
+  .botBatchEditPanel {
+    padding: 9px;
+  }
+
+  .botBatchEditHeader {
+    display: grid;
+    gap: 8px;
+  }
+
+  .botBatchEditClear {
+    width: 100%;
+  }
+
+  .botBatchEditGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .botBatchEditActions {
+    justify-content: stretch;
+  }
+
+  .botBatchEditSecondary,
+  .botBatchEditApply {
+    flex: 1 1 0;
+    min-height: 34px;
   }
 
   .botGroupBack {

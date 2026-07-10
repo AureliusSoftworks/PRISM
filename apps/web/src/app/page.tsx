@@ -289,6 +289,18 @@ import {
   buildBotCustomizerSavePatch,
   type BotCustomizerSavePatch,
 } from "./botCustomizerSavePatch";
+import {
+  BOT_BATCH_MIXED_LABEL,
+  BOT_BATCH_MIXED_VALUE,
+  batchFieldDisplayValue,
+  botBatchEditPatchHasFields,
+  buildBotBatchEditPatch,
+  resolveBotBatchEditState,
+  type BotBatchEditDraft,
+  type BotBatchEditField,
+  type BotBatchEditPatch,
+  type BotBatchEditValues,
+} from "./botBatchEdit";
 import { LensTile } from "./LensTile";
 import {
   CircleHelp,
@@ -942,6 +954,7 @@ const ZEN_CANVAS_TOOLS_CONTEXT_MENU_ESTIMATED_HEIGHT_PX = 232;
 // apply uniformly.
 const DELETE_ALL_BOTS_KEY = "__delete_all_bots__";
 const BOT_MARQUEE_DRAG_THRESHOLD_PX = 5;
+const BOT_MARQUEE_SUPPRESS_CLICK_MS = 180;
 
 /** Prefix for long-term memory row actions (demote / remove) in `pendingDeleteKey`. */
 const LONG_TERM_MEMORY_ACTION_PREFIX = "ltm:";
@@ -15242,6 +15255,10 @@ function prismApiTransportHint(path: string, rawMsg: string): Error {
   });
 }
 
+function isBotNotFoundError(err: unknown): boolean {
+  return err instanceof Error && err.message.toLowerCase().includes("bot not found");
+}
+
 async function api<T>(path: string, options?: RequestInit): Promise<T> {
   const headers: HeadersInit = {
     "content-type": "application/json",
@@ -18743,6 +18760,10 @@ interface ComposerModelPickerProps {
   disabledOptionLabel?: string;
   /** Replaces the default Disabled subtitle when a surface needs context-specific copy. */
   disabledOptionMetaOverride?: string;
+  /** Synthetic value used by batch edit when selected bots disagree. */
+  mixedOptionValue?: string;
+  /** Visible label for the synthetic mixed state. */
+  mixedOptionLabel?: string;
   /**
    * When set, the "Default" badge follows this id (user’s saved Settings choice).
    * `null` = never badge a concrete row. Omit to fall back to catalog `isDefault`.
@@ -18774,6 +18795,8 @@ function ComposerModelPicker({
   disabledOptionValue = DISABLED_MODEL_CHOICE,
   disabledOptionLabel = "Disabled",
   disabledOptionMetaOverride,
+  mixedOptionValue,
+  mixedOptionLabel = BOT_BATCH_MIXED_LABEL,
   settingsDefaultModelId,
   effortControl,
   statusMessage,
@@ -18787,15 +18810,19 @@ function ComposerModelPicker({
   const disabledMetaShown =
     disabledOptionMetaOverride ?? DISABLED_MODEL_SETTINGS_SUBTEXT;
   const disabledSelected = value === disabledOptionValue;
+  const mixedSelected =
+    mixedOptionValue !== undefined && value === mixedOptionValue;
   const selectedModel =
-    (value === autoOptionValue || disabledSelected
+    (value === autoOptionValue || disabledSelected || mixedSelected
       ? null
       : options.find((model) => model.id === value)) ??
     options.find((model) => model.isDefault) ??
     options[0] ??
     null;
   const selectedLabel =
-    value === autoOptionValue
+    mixedSelected
+      ? mixedOptionLabel
+      : value === autoOptionValue
       ? autoOptionLabel
       : disabledSelected
         ? disabledOptionLabel
@@ -18953,6 +18980,26 @@ function ComposerModelPicker({
             role="listbox"
             aria-label={ariaLabel}
           >
+            {mixedSelected && mixedOptionValue ? (
+              <button
+                key={mixedOptionValue}
+                type="button"
+                className={`${styles.composeBotOption} ${styles.composeModelOption} ${styles.composeModelOptionDisabled}`}
+                role="option"
+                aria-selected="true"
+                aria-disabled="true"
+                disabled
+              >
+                <span className={styles.composeModelOptionMain}>
+                  <span className={styles.composeModelOptionName}>
+                    {mixedOptionLabel}
+                  </span>
+                  <span className={styles.composeModelOptionMeta}>
+                    Choose a value to update every selected bot
+                  </span>
+                </span>
+              </button>
+            ) : null}
             {showAutoOption && (
               <button
                 key={autoOptionValue}
@@ -34121,6 +34168,9 @@ function HomeContent(): React.JSX.Element {
   const [canvasSelectedBotIds, setCanvasSelectedBotIds] = useState<Set<string>>(
     () => new Set()
   );
+  const [botBatchEditDraft, setBotBatchEditDraft] = useState<BotBatchEditDraft>({});
+  const [botBatchEditColorPickerOpen, setBotBatchEditColorPickerOpen] = useState(false);
+  const [botBatchEditBusy, setBotBatchEditBusy] = useState(false);
   const [canvasBotMarqueeRect, setCanvasBotMarqueeRect] =
     useState<CanvasBotMarqueeRect | null>(null);
   const canvasBotMarqueeDragRef = useRef<CanvasBotMarqueeDragState | null>(null);
@@ -45528,6 +45578,55 @@ function HomeContent(): React.JSX.Element {
     if (botPanelGroup === BOT_LIBRARY_FILTER_ALL) return baseFilteredPanelBots;
     return botGroupBuckets[botPanelGroup];
   }, [baseFilteredPanelBots, botPanelDashboardActive, botPanelGroup, botGroupBuckets]);
+
+  const botBatchEditSelectedBots = useMemo(
+    () => sortedPanelBots.filter((bot) => canvasSelectedBotIds.has(bot.id)),
+    [canvasSelectedBotIds, sortedPanelBots]
+  );
+  const botBatchEditActive = botBatchEditSelectedBots.length > 1;
+  const botBatchEditSelectionKey = useMemo(
+    () => botBatchEditSelectedBots.map((bot) => bot.id).sort().join("|"),
+    [botBatchEditSelectedBots]
+  );
+  const botBatchEditValues = useMemo<BotBatchEditValues[]>(
+    () =>
+      botBatchEditSelectedBots.map((bot) => {
+        const localImageModel = bot.local_image_model?.trim() || AUTO_MODEL_CHOICE;
+        const openaiImageModel = bot.openai_image_model?.trim() || AUTO_MODEL_CHOICE;
+        return {
+          color: bot.color?.trim() || PRISM_DEFAULT_ACCENT,
+          glyph: isBotGlyphName(bot.glyph) ? bot.glyph : DEFAULT_BOT_GLYPH,
+          localModel: visibleConcreteModelChoiceForProvider(
+            modelCatalog,
+            settings,
+            "local",
+            bot.local_model ?? bot.model ?? DEFAULT_BOT_CHAT_MODEL_CHOICE
+          ),
+          onlineModel: visibleConcreteOnlineModelChoice(
+            modelCatalog,
+            settings,
+            bot.online_model ?? DEFAULT_BOT_CHAT_MODEL_CHOICE
+          ),
+          localImageModel,
+          openaiImageModel,
+        };
+      }),
+    [botBatchEditSelectedBots, modelCatalog, settings]
+  );
+  const botBatchEditState = useMemo(
+    () => resolveBotBatchEditState(botBatchEditValues),
+    [botBatchEditValues]
+  );
+  const botBatchEditPatch = useMemo(
+    () => buildBotBatchEditPatch(botBatchEditState, botBatchEditDraft),
+    [botBatchEditDraft, botBatchEditState]
+  );
+  const botBatchEditCanApply = botBatchEditActive && botBatchEditPatchHasFields(botBatchEditPatch);
+
+  useEffect(() => {
+    setBotBatchEditDraft({});
+    setBotBatchEditColorPickerOpen(false);
+  }, [botBatchEditSelectionKey]);
 
   const activeBotPanelGroup = botPanelGroup !== BOT_LIBRARY_FILTER_ALL
     ? PRISM_GROUPS.find(g => g.id === botPanelGroup) ?? null
@@ -59396,12 +59495,12 @@ function HomeContent(): React.JSX.Element {
       const botTileTarget = target.closest<HTMLElement>("[data-bot-id]");
       const startsOnBotTile = botTileTarget !== null;
       pressedBotId = botTileTarget?.dataset.botId ?? null;
-      const allowBotTileShiftDrag = event.shiftKey && startsOnBotTile;
+      const allowBotTileDrag = startsOnBotTile;
       const blockedInteractiveTarget = target.closest(BOT_CANVAS_BACKGROUND_INTERACTIVE_SELECTOR);
-      if (blockedInteractiveTarget && !allowBotTileShiftDrag) {
-        return false;
-      }
-      if (startsOnBotTile && !allowBotTileShiftDrag) {
+      const allowPickerFrameDrag =
+        blockedInteractiveTarget instanceof HTMLElement &&
+        blockedInteractiveTarget.dataset.botPickerFrame === "true";
+      if (blockedInteractiveTarget && !allowBotTileDrag && !allowPickerFrameDrag) {
         return false;
       }
     }
@@ -59464,7 +59563,7 @@ function HomeContent(): React.JSX.Element {
       canvasBotMarqueeSuppressClickRef.current = true;
       window.setTimeout(() => {
         canvasBotMarqueeSuppressClickRef.current = false;
-      }, 0);
+      }, BOT_MARQUEE_SUPPRESS_CLICK_MS);
       event.preventDefault();
       event.stopPropagation();
     } else {
@@ -59480,7 +59579,7 @@ function HomeContent(): React.JSX.Element {
         canvasBotMarqueeSuppressClickRef.current = true;
         window.setTimeout(() => {
           canvasBotMarqueeSuppressClickRef.current = false;
-        }, 0);
+        }, BOT_MARQUEE_SUPPRESS_CLICK_MS);
         event.preventDefault();
         event.stopPropagation();
       }
@@ -59496,6 +59595,15 @@ function HomeContent(): React.JSX.Element {
     }
     return true;
   }, [updateCanvasBotMarqueeSelection]);
+
+  const handleMessagesSurfacePointerDownCapture = useCallback((
+    event: React.PointerEvent<HTMLDivElement>
+  ): void => {
+    const marqueeStarted = handleCanvasBotMarqueePointerDown(event);
+    if (!marqueeStarted) {
+      handleZenCanvasSpeedNudgePointerDown(event);
+    }
+  }, [handleCanvasBotMarqueePointerDown, handleZenCanvasSpeedNudgePointerDown]);
 
   const resetEmptyStateBotSelection = useCallback(() => {
     cancelPendingEmptyStateSearchOpen();
@@ -59991,6 +60099,142 @@ function HomeContent(): React.JSX.Element {
       return next;
     });
   }, []);
+
+  function stageBotBatchEditField(field: BotBatchEditField, value: string): void {
+    setBotBatchEditDraft((current) => ({
+      ...current,
+      [field]: value,
+    }));
+  }
+
+  function resetBotBatchEditDraft(): void {
+    setBotBatchEditDraft({});
+    setBotBatchEditColorPickerOpen(false);
+  }
+
+  function clearBotBatchEditSelection(): void {
+    resetBotBatchEditDraft();
+    setCanvasSelectedBotIds((current) => (current.size === 0 ? current : new Set()));
+  }
+
+  function openBotBatchEditorForSelected(selectedIds: readonly string[]): void {
+    const uniqueIds = Array.from(new Set(selectedIds.filter((id) => existingBotIds.has(id))));
+    if (uniqueIds.length < 2) return;
+    resetBotPanelDraftNavigation();
+    setCanvasSelectedBotIds(new Set(uniqueIds));
+    setSelectedBotPanelBotId(null);
+    setBotPanelView("library");
+    setBotLibraryGroupFilterId(BOT_LIBRARY_GROUP_FILTER_ALL);
+    setBotPanelGroup(BOT_LIBRARY_FILTER_ALL);
+    setBotLibraryExpanded(true);
+    setBotLibraryClosing(false);
+    openRightPanel("bots");
+  }
+
+  function apiPatchForBotBatchEdit(patch: BotBatchEditPatch): Record<string, string> {
+    const apiPatch: Record<string, string> = {};
+    if (patch.color !== undefined) apiPatch.color = patch.color;
+    if (patch.glyph !== undefined) apiPatch.glyph = patch.glyph;
+    if (patch.localModel !== undefined) {
+      apiPatch.localModel = patch.localModel === AUTO_MODEL_CHOICE ? "" : patch.localModel;
+    }
+    if (patch.onlineModel !== undefined) {
+      apiPatch.onlineModel = patch.onlineModel === AUTO_MODEL_CHOICE ? "" : patch.onlineModel;
+    }
+    if (patch.localImageModel !== undefined) {
+      apiPatch.localImageModel =
+        patch.localImageModel === AUTO_MODEL_CHOICE ? "" : patch.localImageModel.trim();
+    }
+    if (patch.openaiImageModel !== undefined) {
+      apiPatch.openaiImageModel =
+        patch.openaiImageModel === AUTO_MODEL_CHOICE
+          ? ""
+          : normalizeOnlineImageModelPreference(patch.openaiImageModel);
+    }
+    return apiPatch;
+  }
+
+  async function patchSelectedBotsIndividuallyForBatchEdit(
+    ids: readonly string[],
+    patch: Record<string, string>
+  ): Promise<{ updated?: number; bots?: Bot[] }> {
+    const updatedBots: Bot[] = [];
+    const missingIds: string[] = [];
+    let updatedWithoutReturnedRow = 0;
+    for (const id of ids) {
+      try {
+        const result = await api<{ bot?: Bot }>(`/api/bots/${encodeURIComponent(id)}`, {
+          method: "PATCH",
+          body: JSON.stringify(patch),
+        });
+        if (result.bot?.id) {
+          updatedBots.push(result.bot);
+        } else {
+          updatedWithoutReturnedRow += 1;
+        }
+      } catch (err) {
+        if (isBotNotFoundError(err)) {
+          missingIds.push(id);
+          continue;
+        }
+        throw err;
+      }
+    }
+    if (missingIds.length > 0) {
+      const missingIdSet = new Set(missingIds);
+      setCanvasSelectedBotIds((current) => {
+        const next = new Set(Array.from(current).filter((id) => !missingIdSet.has(id)));
+        return stringSetsEqual(current, next) ? current : next;
+      });
+      await refreshBots().catch(() => undefined);
+    }
+    return {
+      updated: updatedBots.length + updatedWithoutReturnedRow,
+      bots: updatedBots,
+    };
+  }
+
+  async function applyBotBatchEdit(): Promise<void> {
+    if (!botBatchEditActive || !botBatchEditCanApply || botBatchEditBusy) return;
+    const ids = botBatchEditSelectedBots.map((bot) => bot.id);
+    const patch = apiPatchForBotBatchEdit(botBatchEditPatch);
+    setBotBatchEditBusy(true);
+    setPanelError(null);
+    setPanelNotice(null);
+    try {
+      let result: { updated?: number; bots?: Bot[] };
+      try {
+        result = await api<{ updated?: number; bots?: Bot[] }>("/api/bots/selected", {
+          method: "PATCH",
+          body: JSON.stringify({ ids, patch }),
+        });
+      } catch (err) {
+        if (!isBotNotFoundError(err)) throw err;
+        result = await patchSelectedBotsIndividuallyForBatchEdit(ids, patch);
+      }
+      const updatedBots = Array.isArray(result.bots) ? result.bots : [];
+      const updatedCount = result.updated ?? updatedBots.length;
+      if (updatedBots.length > 0) {
+        setBots((list) => {
+          let next = list;
+          for (const updatedBot of updatedBots) {
+            next = replaceBotRowById(next, updatedBot);
+          }
+          return next;
+        });
+      } else if (updatedCount > 0) {
+        await refreshBots();
+      }
+      resetBotBatchEditDraft();
+      setPanelNotice(
+        updatedCount === 1 ? "Updated 1 bot." : `Updated ${updatedCount} bots.`
+      );
+    } catch (err) {
+      setPanelError(err instanceof Error ? err.message : "Batch edit failed.");
+    } finally {
+      setBotBatchEditBusy(false);
+    }
+  }
 
   const relocateHueLensToBot = useCallback(
     (botId: string, geom: PickerGeometry): boolean => {
@@ -65228,6 +65472,25 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
+  async function recoverMissingBotEditTarget(id: string): Promise<void> {
+    await refreshBots().catch(() => undefined);
+    setCanvasSelectedBotIds((current) => {
+      if (!current.has(id)) return current;
+      const next = new Set(current);
+      next.delete(id);
+      return next;
+    });
+    if (editingBotId === id) {
+      setEditingBotId(null);
+      resetBotForm();
+    }
+    if (selectedBotPanelBotId === id) {
+      setSelectedBotPanelBotId(null);
+      setBotPanelView("library");
+    }
+    setPanelError("That bot is no longer available. I refreshed the bot library.");
+  }
+
   async function flushBotAvatarAutosaveQueue(id: string): Promise<boolean> {
     if (!botAvatarAutosavePatchHasFields(botAvatarAutoSaveQueuedPatchRef.current)) {
       return botAvatarAutoSaveFlushPromiseRef.current ?? true;
@@ -65269,7 +65532,12 @@ function HomeContent(): React.JSX.Element {
         }
       } catch (err) {
         saved = false;
-        setPanelError(err instanceof Error ? err.message : "Avatar save failed.");
+        if (isBotNotFoundError(err)) {
+          botAvatarAutoSaveQueuedPatchRef.current = {};
+          await recoverMissingBotEditTarget(id);
+        } else {
+          setPanelError(err instanceof Error ? err.message : "Avatar save failed.");
+        }
       } finally {
         botAvatarAutoSaveInFlightRef.current = false;
       }
@@ -65308,6 +65576,10 @@ function HomeContent(): React.JSX.Element {
   async function saveBot(id: string): Promise<boolean> {
     const trimmedName = newBotName.trim();
     if (!trimmedName) return false;
+    if (!bots.some((bot) => bot.id === id)) {
+      await recoverMissingBotEditTarget(id);
+      return false;
+    }
     const avatarSaved = await flushBotAvatarAutosaveQueue(id);
     if (!avatarSaved) return false;
     const storedSystemPrompt = botEditorAdvancedMode
@@ -65440,7 +65712,11 @@ function HomeContent(): React.JSX.Element {
       }
       return true;
     } catch (err) {
-      setPanelError(err instanceof Error ? err.message : "Save failed.");
+      if (isBotNotFoundError(err)) {
+        await recoverMissingBotEditTarget(id);
+      } else {
+        setPanelError(err instanceof Error ? err.message : "Save failed.");
+      }
       return false;
     } finally {
       setBusy(false);
@@ -66819,6 +67095,19 @@ function HomeContent(): React.JSX.Element {
       >
         {isMultiSelectionMenu ? (
           <>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                closeBotContextMenu();
+                openBotBatchEditorForSelected(multiSelectedBotIds);
+              }}
+            >
+              <span className={styles.contextMenuItemLabel}>
+                <span className={styles.contextMenuGlyph} aria-hidden="true">✎</span>
+                <span>Batch edit selected</span>
+              </span>
+            </button>
             <button
               type="button"
               role="menuitem"
@@ -79425,6 +79714,200 @@ function HomeContent(): React.JSX.Element {
                       </div>
                     </div>
                   </div>
+                    {botBatchEditActive ? (() => {
+                      const selectedCount = botBatchEditSelectedBots.length;
+                      const selectedNames = botBatchEditSelectedBots
+                        .slice(0, 3)
+                        .map((bot) => bot.name)
+                        .join(", ");
+                      const remainingCount = Math.max(0, selectedCount - 3);
+                      const selectedSummary = remainingCount > 0
+                        ? `${selectedNames}, +${remainingCount} more`
+                        : selectedNames;
+                      const batchColorValue = batchFieldDisplayValue(
+                        botBatchEditState.color,
+                        botBatchEditDraft.color
+                      );
+                      const batchGlyphValue = batchFieldDisplayValue(
+                        botBatchEditState.glyph,
+                        botBatchEditDraft.glyph
+                      );
+                      const batchColorPreview =
+                        batchColorValue === BOT_BATCH_MIXED_VALUE
+                          ? PRISM_DEFAULT_ACCENT
+                          : batchColorValue;
+                      const batchGlyphPreview =
+                        batchGlyphValue !== BOT_BATCH_MIXED_VALUE &&
+                        isBotGlyphName(batchGlyphValue)
+                          ? batchGlyphValue
+                          : DEFAULT_BOT_GLYPH;
+                      const colorMixed =
+                        botBatchEditDraft.color === undefined &&
+                        botBatchEditState.color.kind === "mixed";
+                      const glyphMixed =
+                        botBatchEditDraft.glyph === undefined &&
+                        botBatchEditState.glyph.kind === "mixed";
+                      return (
+                        <section
+                          className={styles.botBatchEditPanel}
+                          aria-label="Batch edit selected bots"
+                        >
+                          <header className={styles.botBatchEditHeader}>
+                            <div>
+                              <span>{selectedCount} selected</span>
+                              <h4>Batch edit</h4>
+                              <p>{selectedSummary}</p>
+                            </div>
+                            <button
+                              type="button"
+                              className={styles.botBatchEditClear}
+                              onClick={clearBotBatchEditSelection}
+                            >
+                              <X size={14} strokeWidth={2.3} aria-hidden="true" />
+                              <span>Clear selection</span>
+                            </button>
+                          </header>
+                          <div className={styles.botBatchEditGrid}>
+                            <div className={styles.botBatchEditField}>
+                              <span>Color & glyph</span>
+                              <div className={styles.botBatchEditIdentityControl}>
+                                <ColorGlyphPicker
+                                  color={batchColorPreview}
+                                  glyph={batchGlyphPreview}
+                                  onColorChange={(next) => stageBotBatchEditField("color", next)}
+                                  onGlyphChange={(next) => stageBotBatchEditField("glyph", next)}
+                                  open={botBatchEditColorPickerOpen}
+                                  onToggle={() =>
+                                    setBotBatchEditColorPickerOpen((open) => !open)
+                                  }
+                                  ariaLabel="Batch bot color and glyph"
+                                  resolvedTheme={resolvedTheme}
+                                />
+                                <small>
+                                  {colorMixed || glyphMixed
+                                    ? BOT_BATCH_MIXED_LABEL
+                                    : "Shared identity"}
+                                </small>
+                              </div>
+                            </div>
+                            <div className={styles.botBatchEditField}>
+                              <span>Offline chat model</span>
+                              <ComposerModelPicker
+                                value={batchFieldDisplayValue(
+                                  botBatchEditState.localModel,
+                                  botBatchEditDraft.localModel
+                                )}
+                                onChange={(next) => stageBotBatchEditField("localModel", next)}
+                                options={localModelOptions}
+                                provider="local"
+                                ariaLabel="Preferred offline model for selected bots"
+                                placement="down"
+                                minMenuWidthPx={260}
+                                showAutoOption={false}
+                                showDisabledOption
+                                mixedOptionValue={BOT_BATCH_MIXED_VALUE}
+                                dismissPopoversSignal={composerPopoverDismissSignal}
+                              />
+                            </div>
+                            <div className={styles.botBatchEditField}>
+                              <span>Online chat model</span>
+                              <ComposerModelPicker
+                                value={batchFieldDisplayValue(
+                                  botBatchEditState.onlineModel,
+                                  botBatchEditDraft.onlineModel
+                                )}
+                                onChange={(next) => stageBotBatchEditField("onlineModel", next)}
+                                options={onlineModelPickerOptions}
+                                provider="online"
+                                ariaLabel="Preferred online model for selected bots"
+                                placement="down"
+                                minMenuWidthPx={260}
+                                showAutoOption={false}
+                                showDisabledOption
+                                mixedOptionValue={BOT_BATCH_MIXED_VALUE}
+                                dismissPopoversSignal={composerPopoverDismissSignal}
+                              />
+                            </div>
+                            <div className={styles.botBatchEditField}>
+                              <span>Offline image model</span>
+                              <ComposerModelPicker
+                                value={batchFieldDisplayValue(
+                                  botBatchEditState.localImageModel,
+                                  botBatchEditDraft.localImageModel
+                                )}
+                                onChange={(next) => stageBotBatchEditField("localImageModel", next)}
+                                options={localImageModelOptionsForBot}
+                                provider="local"
+                                ariaLabel="Preferred offline image model for selected bots"
+                                disabled={localImageModelCatalogEntries.length === 0}
+                                placement="down"
+                                minMenuWidthPx={260}
+                                autoOptionLabel="Account default"
+                                autoOptionMetaOverride="Settings"
+                                settingsDefaultModelId={imageSettingsSavedDefaultModelId(
+                                  settings,
+                                  "local"
+                                )}
+                                mixedOptionValue={BOT_BATCH_MIXED_VALUE}
+                                dismissPopoversSignal={composerPopoverDismissSignal}
+                              />
+                            </div>
+                            <div className={styles.botBatchEditField}>
+                              <span>Online image model</span>
+                              <ComposerModelPicker
+                                value={batchFieldDisplayValue(
+                                  botBatchEditState.openaiImageModel,
+                                  botBatchEditDraft.openaiImageModel
+                                )}
+                                onChange={(next) =>
+                                  stageBotBatchEditField("openaiImageModel", next)
+                                }
+                                options={openAiImageModelOptionsForBot}
+                                provider="openai"
+                                ariaLabel="Preferred online image model for selected bots"
+                                disabled={!hasVisibleOnlineImageModels}
+                                placement="down"
+                                minMenuWidthPx={260}
+                                autoOptionLabel="Account default"
+                                autoOptionMetaOverride={
+                                  hasRunnableOnlineImageModels
+                                    ? "Settings"
+                                    : hasVisibleOnlineImageModels
+                                      ? "no runnable online image model"
+                                      : "add online image key to enable"
+                                }
+                                settingsDefaultModelId={imageSettingsSavedDefaultModelId(
+                                  settings,
+                                  "openai"
+                                )}
+                                mixedOptionValue={BOT_BATCH_MIXED_VALUE}
+                                dismissPopoversSignal={composerPopoverDismissSignal}
+                              />
+                            </div>
+                          </div>
+                          <footer className={styles.botBatchEditActions}>
+                            <button
+                              type="button"
+                              className={styles.botBatchEditSecondary}
+                              onClick={resetBotBatchEditDraft}
+                              disabled={botBatchEditBusy}
+                            >
+                              <RotateCcw size={14} strokeWidth={2.2} aria-hidden="true" />
+                              <span>Cancel</span>
+                            </button>
+                            <button
+                              type="button"
+                              className={styles.botBatchEditApply}
+                              onClick={() => void applyBotBatchEdit()}
+                              disabled={!botBatchEditCanApply || botBatchEditBusy}
+                            >
+                              <Check size={14} strokeWidth={2.4} aria-hidden="true" />
+                              <span>{botBatchEditBusy ? "Applying" : "Apply"}</span>
+                            </button>
+                          </footer>
+                        </section>
+                      );
+                    })() : null}
                   {/* List-level data attrs mirror the sidebar conversation list:
                       `data-delete-holding` during a press-and-hold on any card ×,
                       `data-delete-armed-all` once the threshold crosses. The CSS
@@ -79455,6 +79938,7 @@ function HomeContent(): React.JSX.Element {
                         </p>
                       ) : visibleBotPanelBots.map((b) => {
                         const isEditing = editingBotId === b.id;
+                        const isBatchSelected = canvasSelectedBotIds.has(b.id);
                         // Live preview during editing — the card mirrors the
                         // values currently in the top form so color/glyph
                         // changes are visible on the card itself before
@@ -79482,7 +79966,9 @@ function HomeContent(): React.JSX.Element {
                           : undefined;
                         const cardClassName = isEditing
                           ? `${styles.botCard} ${styles.botCardEditing}`
-                          : styles.botCard;
+                          : isBatchSelected
+                            ? `${styles.botCard} ${styles.botCardBatchSelected}`
+                            : styles.botCard;
 
                       return (
                         // Two siblings inside a plain wrapper: the tile area
@@ -79491,19 +79977,35 @@ function HomeContent(): React.JSX.Element {
                         // <button> inside <button> is invalid HTML, which is
                         // why the card itself is a div — matches the sidebar
                         // conversation row's "title-button + delete-button"
-                        // pattern exactly. `draggable` lifts the wrapper for
-                        // reorder; nested <button> children are drag-inert
-                        // by default so the × and the edit-tap still work.
+                        // pattern exactly.
                         <div
                           key={b.id}
                           className={cardClassName}
                           style={cardStyle}
                           data-favorite={isFavorite ? "true" : undefined}
+                          data-batch-selected={isBatchSelected ? "true" : undefined}
                         >
                           <button
                             type="button"
                             className={styles.botCardTile}
-                            onClick={() => openBotPanelHub(b)}
+                            onClick={(event) => {
+                              if (event.shiftKey || event.ctrlKey || event.metaKey) {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                toggleCanvasBotSelection(b.id);
+                                return;
+                              }
+                              openBotPanelHub(b);
+                            }}
+                            onContextMenu={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              const multiSelectionIds =
+                                canvasSelectedBotIds.size > 1 && canvasSelectedBotIds.has(b.id)
+                                  ? Array.from(canvasSelectedBotIds)
+                                  : [];
+                              openBotContextMenu(b, event.clientX, event.clientY, multiSelectionIds);
+                            }}
                             aria-label={`Open options for ${b.name}${isFavorite ? ", favorite" : ""}`}
                             aria-pressed={isEditing}
                           >
@@ -79525,6 +80027,26 @@ function HomeContent(): React.JSX.Element {
                                 })()}
                               </small>
                             </div>
+                          </button>
+                          <button
+                            type="button"
+                            className={styles.botCardSelectButton}
+                            aria-label={`${isBatchSelected ? "Deselect" : "Select"} ${b.name} for batch edit`}
+                            aria-pressed={isBatchSelected}
+                            data-glyph-tooltip={
+                              isBatchSelected ? "Deselect for batch edit" : "Select for batch edit"
+                            }
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              toggleCanvasBotSelection(b.id);
+                            }}
+                          >
+                            {isBatchSelected ? (
+                              <Check size={14} strokeWidth={2.4} aria-hidden="true" />
+                            ) : (
+                              <Plus size={14} strokeWidth={2.4} aria-hidden="true" />
+                            )}
                           </button>
                           {renderBotDeleteButton(b)}
                         </div>
@@ -89305,11 +89827,10 @@ function HomeContent(): React.JSX.Element {
               canvasBotMarqueeRect !== null ? "true" : undefined
             }
             onScroll={handleMessagesPaneScroll}
-            onPointerDownCapture={handleZenCanvasSpeedNudgePointerDown}
+            onPointerDownCapture={handleMessagesSurfacePointerDownCapture}
             onPointerUpCapture={handleZenCanvasSpeedNudgePointerEnd}
             onPointerCancelCapture={handleZenCanvasSpeedNudgePointerEnd}
             onLostPointerCapture={handleZenCanvasSpeedNudgePointerEnd}
-            onPointerDown={handleCanvasBotMarqueePointerDown}
             onPointerMove={handleCanvasBotMarqueePointerMove}
             onPointerUp={handleCanvasBotMarqueePointerEnd}
             onPointerCancel={handleCanvasBotMarqueePointerEnd}
@@ -90644,11 +91165,10 @@ function HomeContent(): React.JSX.Element {
               canvasBotMarqueeRect !== null ? "true" : undefined
             }
             onScroll={handleMessagesPaneScroll}
-            onPointerDownCapture={handleZenCanvasSpeedNudgePointerDown}
+            onPointerDownCapture={handleMessagesSurfacePointerDownCapture}
             onPointerUpCapture={handleZenCanvasSpeedNudgePointerEnd}
             onPointerCancelCapture={handleZenCanvasSpeedNudgePointerEnd}
             onLostPointerCapture={handleZenCanvasSpeedNudgePointerEnd}
-            onPointerDown={handleCanvasBotMarqueePointerDown}
             onPointerMove={handleCanvasBotMarqueePointerMove}
             onPointerUp={handleCanvasBotMarqueePointerEnd}
             onPointerCancel={handleCanvasBotMarqueePointerEnd}

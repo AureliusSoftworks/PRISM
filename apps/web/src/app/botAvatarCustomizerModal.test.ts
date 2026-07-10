@@ -461,6 +461,24 @@ test("avatar save state is scoped and bounded so prompts cannot stay stuck", () 
   assert.doesNotMatch(pageSource, /saving=\{busy \|\| botAvatarAutoSaving\}/);
 });
 
+test("avatar and bot saves recover cleanly when the edit target no longer exists", () => {
+  assert.match(pageSource, /function isBotNotFoundError\(err: unknown\): boolean/);
+  assert.match(pageSource, /async function recoverMissingBotEditTarget\(id: string\)/);
+  assert.match(pageSource, /setPanelError\("That bot is no longer available\. I refreshed the bot library\."\);/);
+  assert.match(
+    pageSource,
+    /botAvatarAutoSaveQueuedPatchRef\.current = \{\};[\s\S]*await recoverMissingBotEditTarget\(id\);/
+  );
+  assert.match(
+    pageSource,
+    /if \(!bots\.some\(\(bot\) => bot\.id === id\)\) \{[\s\S]*await recoverMissingBotEditTarget\(id\);[\s\S]*return false;/
+  );
+  assert.match(
+    pageSource,
+    /if \(isBotNotFoundError\(err\)\) \{[\s\S]*await recoverMissingBotEditTarget\(id\);/
+  );
+});
+
 test("avatar customizer keeps explicit save and dirty prompts for broader edits", () => {
   assert.match(pageSource, /hasUnsavedChanges: boolean;/);
   assert.match(pageSource, /draftMode\?: boolean;/);
