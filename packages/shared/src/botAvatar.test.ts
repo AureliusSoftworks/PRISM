@@ -2,9 +2,13 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   BOT_FACE_BLINK_BAR_VALUES,
+  BOT_FACE_EYE_SCALE_MAX,
+  BOT_FACE_EYE_SCALE_MIN,
   BOT_FACE_FONT_LABELS,
   BOT_FACE_FONT_WEIGHT_MAX,
   BOT_FACE_FONT_WEIGHT_MIN,
+  BOT_FACE_MOUTH_SCALE_MAX,
+  BOT_FACE_MOUTH_SCALE_MIN,
   DEFAULT_BOT_FACE_BLINK_BAR,
   DEFAULT_BOT_FACE_EYE_OFFSET_X,
   DEFAULT_BOT_FACE_EYE_OFFSET_Y,
@@ -159,6 +163,25 @@ describe("bot avatar face style", () => {
     );
   });
 
+  it("locks built-in eyes and mouths to default horizontal placement", () => {
+    const style = resolveBotFaceStyle(
+      {
+        faceEyeOffsetX: 0.12,
+        faceEyeOffsetY: -0.08,
+        faceMouthOffsetX: -0.12,
+        faceMouthOffsetY: 0.08,
+      },
+      null
+    );
+
+    assert.equal(style.eyeCharacter, null);
+    assert.equal(style.eyeOffsetX, DEFAULT_BOT_FACE_EYE_OFFSET_X);
+    assert.equal(style.eyeOffsetY, -0.08);
+    assert.equal(style.mouthCharacter, DEFAULT_BOT_FACE_MOUTH_CHARACTER);
+    assert.equal(style.mouthOffsetX, DEFAULT_BOT_FACE_MOUTH_OFFSET_X);
+    assert.equal(style.mouthOffsetY, 0.08);
+  });
+
   it("clamps and steps eye scale, mouth scale, face placement, and mouth rotation", () => {
     assert.equal(normalizeBotFaceEyeScale(1.17), 1.15);
     assert.equal(normalizeBotFaceEyeScale(0.2), 0.7);
@@ -269,7 +292,7 @@ describe("bot avatar face style", () => {
   });
 
   it("randomizes face style within allowed bounds", () => {
-    const values = [0, 0, 0.99, 0.51];
+    const values = [0, 0, 0.99, 0.2, 0.8, 0.25, 0.75];
     const style = randomBotFaceStyle(() => values.shift() ?? 0);
     assert.equal(style.eyesFont, "neutral");
     assert.equal(style.eyeCharacter, null);
@@ -277,14 +300,38 @@ describe("bot avatar face style", () => {
     assert.equal(style.mouthCharacter, DEFAULT_BOT_FACE_MOUTH_CHARACTER);
     assert.equal(style.weight >= BOT_FACE_FONT_WEIGHT_MIN, true);
     assert.equal(style.weight <= BOT_FACE_FONT_WEIGHT_MAX, true);
-    assert.equal(style.eyeScale, DEFAULT_BOT_FACE_EYE_SCALE);
+    assert.equal(style.eyeScale >= BOT_FACE_EYE_SCALE_MIN, true);
+    assert.equal(style.eyeScale <= BOT_FACE_EYE_SCALE_MAX, true);
     assert.equal(style.eyeOffsetX, DEFAULT_BOT_FACE_EYE_OFFSET_X);
     assert.equal(style.eyeOffsetY, DEFAULT_BOT_FACE_EYE_OFFSET_Y);
-    assert.equal(style.mouthScale, DEFAULT_BOT_FACE_MOUTH_SCALE);
+    assert.equal(style.mouthScale >= BOT_FACE_MOUTH_SCALE_MIN, true);
+    assert.equal(style.mouthScale <= BOT_FACE_MOUTH_SCALE_MAX, true);
     assert.equal(style.mouthOffsetX, DEFAULT_BOT_FACE_MOUTH_OFFSET_X);
     assert.equal(style.mouthOffsetY, DEFAULT_BOT_FACE_MOUTH_OFFSET_Y);
     assert.equal(style.mouthRotationDeg, DEFAULT_BOT_FACE_MOUTH_ROTATION_DEG);
     assert.equal(style.blinkBar, DEFAULT_BOT_FACE_BLINK_BAR);
     assert.deepEqual(style.thinkingFrames, DEFAULT_BOT_FACE_THINKING_FRAMES);
+  });
+
+  it("can randomize eye and mouth sizes to slider extremes without custom glyphs or placement", () => {
+    const smallStyle = randomBotFaceStyle(() => 0);
+    assert.equal(smallStyle.eyeCharacter, null);
+    assert.equal(smallStyle.mouthCharacter, DEFAULT_BOT_FACE_MOUTH_CHARACTER);
+    assert.equal(smallStyle.eyeScale, BOT_FACE_EYE_SCALE_MIN);
+    assert.equal(smallStyle.mouthScale, BOT_FACE_MOUTH_SCALE_MIN);
+    assert.equal(smallStyle.eyeOffsetX, DEFAULT_BOT_FACE_EYE_OFFSET_X);
+    assert.equal(smallStyle.eyeOffsetY, DEFAULT_BOT_FACE_EYE_OFFSET_Y);
+    assert.equal(smallStyle.mouthOffsetX, DEFAULT_BOT_FACE_MOUTH_OFFSET_X);
+    assert.equal(smallStyle.mouthOffsetY, DEFAULT_BOT_FACE_MOUTH_OFFSET_Y);
+
+    const largeStyle = randomBotFaceStyle(() => 1);
+    assert.equal(largeStyle.eyeCharacter, null);
+    assert.equal(largeStyle.mouthCharacter, DEFAULT_BOT_FACE_MOUTH_CHARACTER);
+    assert.equal(largeStyle.eyeScale, BOT_FACE_EYE_SCALE_MAX);
+    assert.equal(largeStyle.mouthScale, BOT_FACE_MOUTH_SCALE_MAX);
+    assert.equal(largeStyle.eyeOffsetX, DEFAULT_BOT_FACE_EYE_OFFSET_X);
+    assert.equal(largeStyle.eyeOffsetY, DEFAULT_BOT_FACE_EYE_OFFSET_Y);
+    assert.equal(largeStyle.mouthOffsetX, DEFAULT_BOT_FACE_MOUTH_OFFSET_X);
+    assert.equal(largeStyle.mouthOffsetY, DEFAULT_BOT_FACE_MOUTH_OFFSET_Y);
   });
 });

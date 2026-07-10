@@ -31,6 +31,8 @@ export function zenLiveActionMoodToBotMood(
       return "warm";
     case "stern":
       return "guarded";
+    case "strained":
+      return "strained";
     case "confused":
     case "waiting":
       return "neutral";
@@ -98,6 +100,8 @@ export function zenLiveActionPlateFace(
       return { text: openMouth ?? ":]", rotateDeg: 90 };
     case "confused":
       return { text: openMouth ?? ":?", rotateDeg: 90 };
+    case "strained":
+      return { text: openMouth ?? ":(", rotateDeg: 90 };
     case "stern":
       return { text: openMouth ?? ZEN_LIVE_ACTION_ANGRY_BRACKET_GLYPH, rotateDeg: 90 };
     case "attentive":

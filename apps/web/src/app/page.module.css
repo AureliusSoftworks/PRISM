@@ -15355,6 +15355,18 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .messageMoodCoffeeFace {
+  --crt-core-opacity: 0.9;
+  --crt-beam-softness: 0.32px;
+  --crt-bloom-narrow-radius: 0.75px;
+  --crt-bloom-narrow-strength: 0.18;
+  --crt-bloom-wide-strength: 0.03;
+  --crt-phosphor-opacity: 0.07;
+  --crt-phosphor-midtone-strength: 0.22;
+  --crt-phosphor-bright-strength: 0.08;
+  --crt-phosphor-scale: 1.9px;
+  --crt-scanline-opacity: 0.018;
+  --crt-convergence-offset: 0.12px;
+  --crt-convergence-opacity: 0.028;
   display: block;
   font-family: var(--prism-face-font);
   font-size: 11.5px;
@@ -19127,6 +19139,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] {
+  --chat-reading-width: min(var(--zen-live-bot-prose-width, 860px), 94%);
   --zen-tone-gap-extra: 0px;
   --zen-tone-runway-extra: 0px;
   --zen-tone-scroll-margin-extra: 0px;
@@ -19947,8 +19960,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .zenLiveBotPresencePlate {
   --coffee-bot-color: var(--bot-color, var(--accent));
+  --zen-live-bot-face-phosphor-ink: #ffffff;
   --zen-live-bot-face-ink: var(--coffee-bot-color);
-  --zen-live-bot-glyph-ink: var(--coffee-bot-color);
+  --zen-live-bot-glyph-ink: var(--zen-live-bot-face-phosphor-ink);
   --zen-live-bot-eye-local-x: -0.2;
   --coffee-plate-emoji-nudge-y: clamp(-5px, -2.6%, -2px);
   --coffee-plate-emoji-face-scale-y: 1;
@@ -20045,30 +20059,68 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   overflow: hidden;
   pointer-events: none;
   isolation: isolate;
+  contain: paint;
   --bot-face-screen-mask-image: url("/bot-frame/bot-frame-screen-mask-glass.png?v=1000");
   --bot-face-screen-mask-size: 100% 100%;
   --bot-face-screen-mask-repeat: no-repeat;
-  --bot-face-crt-screen-texture-image: url("/bot-frame/bot-frame-screen-mask.png?v=1000");
-  --bot-face-crt-screen-texture-opacity: 0.22;
-  --bot-face-crt-screen-texture-tint-strength: 48%;
   --bot-face-crt-color: var(--coffee-seat-emotion-color, var(--coffee-bot-color, currentColor));
-  --bot-face-crt-cell-width: clamp(3px, 2.2%, 5.8px);
-  --bot-face-crt-cell-height: clamp(3.4px, 2.55%, 6.8px);
-  --bot-face-crt-subpixel-width: calc(var(--bot-face-crt-cell-width) / 3);
-  --bot-face-crt-gap-opacity: 0.26;
-  --bot-face-crt-scanline-opacity: 0.1;
-  --bot-face-crt-grime-mask-image: url("/bot-frame/bot-frame-screen-grime-mask.png?v=1000");
-  --bot-face-crt-grime-opacity: 0.058;
-  --bot-face-crt-grime-blur: 0.48px;
+  --crt-strength: 1;
+  --crt-core-opacity: 0.82;
+  --crt-beam-softness: 0.45px;
+  --crt-bloom-narrow-radius: 1.25px;
+  --crt-bloom-narrow-strength: 0.28;
+  --crt-bloom-wide-radius: 6px;
+  --crt-bloom-wide-strength: 0.08;
+  --crt-phosphor-opacity: 0.16;
+  --crt-phosphor-midtone-strength: 0.38;
+  --crt-phosphor-bright-strength: 0.14;
+  --crt-unlit-phosphor-opacity: 0.018;
+  --crt-phosphor-scale: clamp(1.85px, 1.16%, 3.8px);
+  --crt-scanline-opacity: 0.045;
+  --crt-scanline-pitch: clamp(3px, 1.82%, 5px);
+  --crt-static-opacity: 0.03;
+  --crt-static-speed: 860ms;
+  --crt-convergence-offset: 0.26px;
+  --crt-convergence-opacity: 0.068;
+  --crt-vignette-strength: 0.2;
+  --crt-fresnel-strength: 0.2;
+  --crt-glare-strength: 0.24;
+  --crt-accent-rgb: 255 255 255;
+  --crt-phosphor-red-rgb: 255 75 90;
+  --crt-phosphor-green-rgb: 164 255 178;
+  --crt-phosphor-blue-rgb: 92 215 255;
+  --bot-face-crt-cell-width: var(--crt-phosphor-scale);
+  --bot-face-crt-cell-height: var(--crt-scanline-pitch);
+  --bot-face-crt-subpixel-width: calc(var(--crt-phosphor-scale) / 3);
+  --bot-face-crt-grime-opacity: var(--crt-fresnel-strength);
+  --bot-face-crt-grime-blur: 0.16px;
   --bot-face-crt-grime-rotation: 0deg;
   --bot-face-crt-grime-x: 0%;
   --bot-face-crt-grime-y: 0%;
-  --bot-face-crt-grime-scale: 1.2;
-  --crt-noise-opacity: 0.009;
+  --bot-face-crt-grime-scale: 1;
+  --crt-noise-opacity: var(--crt-static-opacity);
   --crt-breath-speed: 11.8s;
-  --crt-breath-strength: 0.0025;
+  --crt-breath-strength: 0.0018;
   mix-blend-mode: normal;
   filter: none;
+  background:
+    radial-gradient(
+      ellipse 74% 62% at 49% 45%,
+      rgba(255, 255, 255, 0.018),
+      transparent 62%
+    ),
+    radial-gradient(
+      ellipse 108% 104% at 50% 52%,
+      transparent 56%,
+      rgba(0, 0, 0, calc(var(--crt-vignette-strength) * 0.58)) 86%,
+      rgba(0, 0, 0, var(--crt-vignette-strength)) 100%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #010404 92%, var(--bot-face-crt-color) 8%),
+      #000203 64%,
+      #000101
+    );
   -webkit-mask-image: var(--bot-face-screen-mask-image);
   -webkit-mask-position: center;
   -webkit-mask-size: var(--bot-face-screen-mask-size);
@@ -20081,6 +20133,364 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   mask-mode: alpha;
 }
 
+.zenLiveBotPresenceFaceEmissionMask[data-crt-profile="clean"] {
+  --crt-core-opacity: 0.84;
+  --crt-bloom-narrow-strength: 0.28;
+  --crt-bloom-wide-strength: 0.075;
+  --crt-phosphor-midtone-strength: 0.34;
+  --crt-phosphor-bright-strength: 0.12;
+  --crt-static-opacity: 0.026;
+}
+
+.zenLiveBotPresenceFaceEmissionMask[data-crt-profile="arcade"] {
+  --crt-bloom-narrow-strength: 0.32;
+  --crt-bloom-wide-strength: 0.1;
+  --crt-phosphor-midtone-strength: 0.46;
+  --crt-phosphor-bright-strength: 0.2;
+  --crt-scanline-opacity: 0.058;
+  --crt-static-opacity: 0.032;
+}
+
+.zenLiveBotPresenceFaceEmissionMask[data-crt-profile="broadcast"] {
+  --crt-core-opacity: 0.88;
+  --crt-bloom-narrow-strength: 0.24;
+  --crt-bloom-wide-strength: 0.055;
+  --crt-phosphor-scale: clamp(1.65px, 1%, 3.35px);
+  --crt-phosphor-midtone-strength: 0.3;
+  --crt-phosphor-bright-strength: 0.1;
+  --crt-static-opacity: 0.018;
+  --crt-convergence-opacity: 0.048;
+}
+
+.zenLiveBotPresenceFaceEmissionMask[data-crt-profile="worn"] {
+  --crt-beam-softness: 0.62px;
+  --crt-bloom-narrow-radius: 1.55px;
+  --crt-bloom-wide-radius: 7px;
+  --crt-phosphor-midtone-strength: 0.42;
+  --crt-static-opacity: 0.035;
+  --crt-breath-strength: 0.004;
+}
+
+.zenLiveBotPresenceFaceEmissionMask[data-crt-phosphor="white"] {
+  --crt-phosphor-red-rgb: 255 246 238;
+  --crt-phosphor-green-rgb: 235 255 246;
+  --crt-phosphor-blue-rgb: 218 238 255;
+}
+
+.zenLiveBotPresenceFaceEmissionMask[data-crt-phosphor="green"] {
+  --crt-phosphor-red-rgb: 108 214 126;
+  --crt-phosphor-green-rgb: 178 255 190;
+  --crt-phosphor-blue-rgb: 90 220 150;
+}
+
+.zenLiveBotPresenceFaceEmissionMask[data-crt-phosphor="amber"] {
+  --crt-phosphor-red-rgb: 255 182 72;
+  --crt-phosphor-green-rgb: 255 224 112;
+  --crt-phosphor-blue-rgb: 255 150 58;
+}
+
+.zenLiveBotPresenceFaceEmissionMask[data-crt-phosphor="bot"] {
+  --crt-phosphor-red-rgb: var(--crt-accent-rgb);
+  --crt-phosphor-green-rgb: var(--crt-accent-rgb);
+  --crt-phosphor-blue-rgb: var(--crt-accent-rgb);
+}
+
+.zenLiveBotPresencePlate[data-theme="light"] .zenLiveBotPresenceFaceEmissionMask,
+.themeLight .zenLiveBotPresencePlate .zenLiveBotPresenceFaceEmissionMask {
+  --crt-core-opacity: 0.88;
+  --crt-bloom-narrow-strength: 0.22;
+  --crt-bloom-wide-strength: 0.045;
+  --crt-phosphor-opacity: 0.18;
+  --crt-phosphor-midtone-strength: 0.42;
+  --crt-phosphor-bright-strength: 0.16;
+  --crt-unlit-phosphor-opacity: 0.022;
+  --crt-scanline-opacity: 0.052;
+  --crt-static-opacity: 0.018;
+  --crt-vignette-strength: 0.16;
+  --crt-fresnel-strength: 0.23;
+}
+
+.zenLiveBotPresencePlate[data-theme="dark"] .zenLiveBotPresenceFaceEmissionMask {
+  --crt-bloom-narrow-strength: 0.31;
+  --crt-bloom-wide-strength: 0.09;
+  --crt-unlit-phosphor-opacity: 0.014;
+  --crt-vignette-strength: 0.22;
+}
+
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer]:not([data-crt-debug-layer="final"])::before,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer]:not([data-crt-debug-layer="final"])::after,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer]:not([data-crt-debug-layer="final"])
+  > * {
+  opacity: 0 !important;
+}
+
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer="base"] {
+  background:
+    radial-gradient(ellipse 74% 62% at 49% 45%, rgba(255, 255, 255, 0.018), transparent 62%),
+    radial-gradient(
+      ellipse 108% 104% at 50% 52%,
+      transparent 56%,
+      rgba(0, 0, 0, calc(var(--crt-vignette-strength) * 0.58)) 86%,
+      rgba(0, 0, 0, var(--crt-vignette-strength)) 100%
+    ),
+    linear-gradient(180deg, #010404, #000203 64%, #000101);
+}
+
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer="unlit-phosphor"]::before,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer="scanlines"]::after,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer="static"]
+  .botFaceCrtNoiseLayer,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer="curvature"]
+  .botFaceCrtGrimeLayer,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer="fresnel"]
+  .botFaceCrtGrimeLayer,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer="wide-halo"]
+  .zenLiveBotPresenceFaceRig,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer="narrow-bloom"]
+  .zenLiveBotPresenceFaceRig,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer="lit-phosphor-emission"]
+  .zenLiveBotPresenceFaceRig,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer="sharp-core"]
+  .zenLiveBotPresenceFaceRig,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer="red-convergence"]
+  .zenLiveBotPresenceFaceRig,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer="blue-convergence"]
+  .zenLiveBotPresenceFaceRig,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer="source-glyph"]
+  .zenLiveBotPresenceFaceRig,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer="wide-halo"]
+  .zenLiveBotPresenceThinkingGlyphAnchor,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer="narrow-bloom"]
+  .zenLiveBotPresenceThinkingGlyphAnchor,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer="lit-phosphor-emission"]
+  .zenLiveBotPresenceThinkingGlyphAnchor,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer="sharp-core"]
+  .zenLiveBotPresenceThinkingGlyphAnchor,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer="red-convergence"]
+  .zenLiveBotPresenceThinkingGlyphAnchor,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer="blue-convergence"]
+  .zenLiveBotPresenceThinkingGlyphAnchor,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer="source-glyph"]
+  .zenLiveBotPresenceThinkingGlyphAnchor {
+  opacity: 1 !important;
+}
+
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer="source-glyph"]
+  [data-crt-glyph-layer="true"] {
+  background: none;
+  filter: none;
+  text-shadow: none;
+  -webkit-text-fill-color: currentColor;
+}
+
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer="source-glyph"]
+  [data-crt-glyph-layer="true"]::before,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer="source-glyph"]
+  [data-crt-glyph-layer="true"]::after {
+  display: none;
+}
+
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer="sharp-core"]
+  [data-crt-glyph-layer="true"] {
+  background: linear-gradient(180deg, #ffffff, color-mix(in srgb, #ffffff 84%, currentColor 16%));
+  filter: none;
+  text-shadow: none;
+}
+
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer="wide-halo"]
+  [data-crt-glyph-layer="true"],
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer="narrow-bloom"]
+  [data-crt-glyph-layer="true"],
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer="red-convergence"]
+  [data-crt-glyph-layer="true"],
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer="blue-convergence"]
+  [data-crt-glyph-layer="true"] {
+  -webkit-text-fill-color: transparent;
+  text-shadow: none;
+}
+
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer="wide-halo"]
+  [data-crt-glyph-layer="true"]::after,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer="narrow-bloom"]
+  [data-crt-glyph-layer="true"]::after {
+  display: none;
+}
+
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer="red-convergence"]
+  [data-crt-glyph-layer="true"]::before,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer="blue-convergence"]
+  [data-crt-glyph-layer="true"]::before {
+  display: none;
+}
+
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer="red-convergence"]
+  [data-crt-glyph-layer="true"]::after {
+  text-shadow:
+    calc(0px - var(--crt-glyph-convergence-offset)) 0 0.2px
+      rgb(255 54 78 / var(--crt-glyph-convergence-opacity));
+}
+
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer="blue-convergence"]
+  [data-crt-glyph-layer="true"]::after {
+  text-shadow:
+    var(--crt-glyph-convergence-offset) 0 0.2px
+      rgb(70 218 255 / var(--crt-glyph-convergence-opacity));
+}
+
+.zenLiveBotPresencePlate[data-crt-debug-layer="glass-and-glare"] .zenLiveBotPresenceFaceEmissionMask {
+  opacity: 0 !important;
+}
+
+.zenLiveBotPresencePlate[data-crt-debug-layer="glass-and-glare"]
+  .zenLiveBotPresenceScreenGlassOverlay {
+  opacity: 1 !important;
+}
+
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug="feature-geometry"] {
+  --crt-glyph-beam-softness: 0px;
+  --crt-bloom-narrow-radius: 0px;
+  --crt-bloom-wide-radius: 0px;
+  --crt-convergence-offset: 0px;
+  background: #001014;
+}
+
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug="feature-geometry"]::before,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug="feature-geometry"]::after,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug="feature-geometry"]
+  .botFaceCrtNoiseLayer,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug="feature-geometry"]
+  .botFaceCrtGrimeLayer,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug="feature-geometry"]
+  .botFaceCrtBreathingLayer {
+  opacity: 0 !important;
+  animation: none !important;
+}
+
+.zenLiveBotPresencePlate[data-crt-debug="feature-geometry"] .zenLiveBotPresenceScreenGlassOverlay,
+.zenLiveBotPresencePlate:has(.zenLiveBotPresenceFaceEmissionMask[data-crt-debug="feature-geometry"])
+  .zenLiveBotPresenceScreenGlassOverlay {
+  opacity: 0 !important;
+}
+
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug="feature-geometry"]
+  [data-coffee-plate-thinking-frame],
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug="feature-geometry"]
+  [data-coffee-plate-question-frame],
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug="feature-geometry"]
+  [data-coffee-plate-emoji-part] {
+  outline: 1px solid rgb(44 141 255 / 0.9);
+  outline-offset: 0;
+  overflow: visible !important;
+}
+
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug="feature-geometry"]
+  [data-crt-glyph-layer="true"] {
+  color: #ffffff !important;
+  background: none !important;
+  background-clip: border-box;
+  -webkit-background-clip: border-box;
+  -webkit-text-fill-color: currentColor !important;
+  filter: none !important;
+  mix-blend-mode: normal !important;
+  opacity: 1 !important;
+  text-shadow: none !important;
+  -webkit-text-stroke: 0 !important;
+  outline: 1px dashed rgb(255 255 255 / 0.96);
+  outline-offset: 1px;
+  overflow: visible !important;
+}
+
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug="feature-geometry"]
+  [data-crt-glyph-layer="true"]::before,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug="feature-geometry"]
+  [data-crt-glyph-layer="true"]::after {
+  filter: none !important;
+  mix-blend-mode: normal !important;
+  opacity: 1 !important;
+  text-shadow: none !important;
+  -webkit-text-stroke: 0 !important;
+  animation: none !important;
+}
+
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug="feature-geometry"]
+  [data-crt-glyph-layer="true"]::before {
+  color: #ff43f7 !important;
+}
+
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug="feature-geometry"]
+  [data-crt-glyph-layer="true"]::after {
+  color: transparent !important;
+  text-shadow:
+    -0.08em 0 0 #ff2b42,
+    0.08em 0 0 #00e6ff !important;
+}
+
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug="feature-geometry"][data-crt-debug-pass="source"]
+  [data-crt-glyph-layer="true"],
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug="feature-geometry"][data-crt-debug-pass="sharp-core"]
+  [data-crt-glyph-layer="true"],
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug="feature-geometry"][data-crt-debug-pass="lit-phosphor-emission"]
+  [data-crt-glyph-layer="true"] {
+  color: #ffffff !important;
+}
+
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug="feature-geometry"][data-crt-debug-pass="source"]
+  [data-crt-glyph-layer="true"] {
+  color: #2a8dff !important;
+}
+
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug="feature-geometry"][data-crt-debug-pass="lit-phosphor-emission"]
+  [data-crt-glyph-layer="true"] {
+  color: #ffe94a !important;
+}
+
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug="feature-geometry"][data-crt-debug-pass="source"]
+  [data-crt-glyph-layer="true"]::before,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug="feature-geometry"][data-crt-debug-pass="source"]
+  [data-crt-glyph-layer="true"]::after,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug="feature-geometry"][data-crt-debug-pass="sharp-core"]
+  [data-crt-glyph-layer="true"]::before,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug="feature-geometry"][data-crt-debug-pass="sharp-core"]
+  [data-crt-glyph-layer="true"]::after,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug="feature-geometry"][data-crt-debug-pass="lit-phosphor-emission"]
+  [data-crt-glyph-layer="true"]::before,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug="feature-geometry"][data-crt-debug-pass="lit-phosphor-emission"]
+  [data-crt-glyph-layer="true"]::after {
+  display: none !important;
+}
+
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug="feature-geometry"][data-crt-debug-pass="wide-halo"]
+  [data-crt-glyph-layer="true"],
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug="feature-geometry"][data-crt-debug-pass="narrow-bloom"]
+  [data-crt-glyph-layer="true"],
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug="feature-geometry"][data-crt-debug-pass="red-convergence"]
+  [data-crt-glyph-layer="true"],
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug="feature-geometry"][data-crt-debug-pass="blue-convergence"]
+  [data-crt-glyph-layer="true"] {
+  color: transparent !important;
+}
+
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug="feature-geometry"][data-crt-debug-pass="wide-halo"]
+  [data-crt-glyph-layer="true"]::after,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug="feature-geometry"][data-crt-debug-pass="narrow-bloom"]
+  [data-crt-glyph-layer="true"]::after,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug="feature-geometry"][data-crt-debug-pass="red-convergence"]
+  [data-crt-glyph-layer="true"]::before,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug="feature-geometry"][data-crt-debug-pass="blue-convergence"]
+  [data-crt-glyph-layer="true"]::before {
+  display: none !important;
+}
+
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug="feature-geometry"][data-crt-debug-pass="red-convergence"]
+  [data-crt-glyph-layer="true"]::after {
+  text-shadow: -0.08em 0 0 #ff2b42 !important;
+}
+
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug="feature-geometry"][data-crt-debug-pass="blue-convergence"]
+  [data-crt-glyph-layer="true"]::after {
+  text-shadow: 0.08em 0 0 #00e6ff !important;
+}
+
 .zenLiveBotPresenceFaceEmissionMask::before,
 .zenLiveBotPresenceFaceEmissionMask::after {
   content: "";
@@ -20091,126 +20501,139 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .zenLiveBotPresenceFaceEmissionMask::before {
-  z-index: 12;
-  /* Low-opacity phosphor plate: restores the CRT RGB texture while the glass
-     mask keeps unlit screen areas dark instead of washing them in bot color. */
-  background:
-    var(--bot-face-crt-screen-texture-image) center / 100% 100% no-repeat,
-    radial-gradient(
-      circle at 50% 50%,
-      color-mix(
-        in srgb,
-        var(--bot-face-crt-color) var(--bot-face-crt-screen-texture-tint-strength),
-        transparent
-      ) 0 68%,
-      transparent 100%
-    );
-  background-blend-mode: var(--bot-face-crt-screen-texture-blend-mode, screen);
-  opacity: var(--bot-face-crt-screen-texture-opacity);
-  mix-blend-mode: var(--bot-face-crt-screen-texture-blend-mode, screen);
-  filter: saturate(1.36) contrast(1.12) brightness(0.84);
-}
-
-.zenLiveBotPresenceFaceEmissionMask::after {
-  z-index: 13;
+  z-index: 1;
+  /* Unlit aperture grille: one fixed phosphor lattice, not a full screen image. */
   background:
     repeating-linear-gradient(
       90deg,
-      rgba(0, 0, 0, 0.48) 0 calc(var(--bot-face-crt-subpixel-width) * 0.13),
-      transparent calc(var(--bot-face-crt-subpixel-width) * 0.13)
-        calc(var(--bot-face-crt-subpixel-width) * 0.92),
-      rgba(0, 0, 0, 0.34) calc(var(--bot-face-crt-subpixel-width) * 0.92)
-        var(--bot-face-crt-subpixel-width)
+      rgb(var(--crt-phosphor-red-rgb) / var(--crt-unlit-phosphor-opacity)) 0
+        calc(var(--crt-phosphor-scale) * 0.22),
+      transparent calc(var(--crt-phosphor-scale) * 0.22)
+        calc(var(--crt-phosphor-scale) * 0.34),
+      rgb(var(--crt-phosphor-green-rgb) / var(--crt-unlit-phosphor-opacity))
+        calc(var(--crt-phosphor-scale) * 0.34)
+        calc(var(--crt-phosphor-scale) * 0.56),
+      transparent calc(var(--crt-phosphor-scale) * 0.56)
+        calc(var(--crt-phosphor-scale) * 0.68),
+      rgb(var(--crt-phosphor-blue-rgb) / var(--crt-unlit-phosphor-opacity))
+        calc(var(--crt-phosphor-scale) * 0.68)
+        calc(var(--crt-phosphor-scale) * 0.9),
+      transparent calc(var(--crt-phosphor-scale) * 0.9) var(--crt-phosphor-scale)
     ),
-    repeating-linear-gradient(
-      0deg,
-      rgba(0, 0, 0, var(--bot-face-crt-scanline-opacity)) 0 1px,
-      transparent 1px var(--bot-face-crt-cell-height)
+    radial-gradient(
+      ellipse 86% 76% at 50% 48%,
+      rgba(255, 255, 255, 0.022),
+      transparent 68%
     );
   background-size:
-    var(--bot-face-crt-cell-width) 100%,
-    100% var(--bot-face-crt-cell-height);
+    var(--crt-phosphor-scale) 100%,
+    100% 100%;
+  background-repeat: repeat, no-repeat;
+  background-blend-mode: screen;
+  opacity: var(--crt-strength);
+  mix-blend-mode: screen;
+  filter: saturate(0.92) contrast(0.96);
+}
+
+.zenLiveBotPresenceFaceEmissionMask::after {
+  z-index: 7;
+  /* Scanlines are screen-fixed and intentionally weaker than the lattice. */
+  background:
+    repeating-linear-gradient(
+      0deg,
+      rgba(0, 0, 0, var(--crt-scanline-opacity)) 0 1px,
+      transparent 1px var(--crt-scanline-pitch)
+    );
+  background-size: 100% var(--crt-scanline-pitch);
   background-repeat: repeat;
-  background-blend-mode: multiply;
-  opacity: var(--bot-face-crt-gap-opacity);
+  opacity: var(--crt-strength);
   mix-blend-mode: multiply;
 }
 
-/* Phosphor imperfection: fixed, broad luminance variation keeps the CRT glass
-   from reading as a perfectly flat digital mask. This is not grain or static. */
+/* Dark-area static: restrained hard-light turbulence lives below emission. */
 .botFaceCrtNoiseLayer {
   position: absolute;
   inset: 0;
-  z-index: 11;
+  z-index: 2;
   display: block;
   pointer-events: none;
   background:
-    radial-gradient(
-      ellipse at 18% 27%,
-      rgba(255, 255, 255, 0.56),
-      transparent 34%
-    ),
-    radial-gradient(
-      ellipse at 76% 64%,
-      rgba(0, 0, 0, 0.5),
-      transparent 38%
-    ),
-    linear-gradient(
-      112deg,
-      transparent 0 21%,
-      rgba(255, 255, 255, 0.28) 36%,
-      transparent 51% 100%
-    );
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='3' seed='29' stitchTiles='stitch'/%3E%3CfeComponentTransfer%3E%3CfeFuncR type='table' tableValues='0.18 0.34'/%3E%3CfeFuncG type='table' tableValues='0.18 0.34'/%3E%3CfeFuncB type='table' tableValues='0.18 0.34'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)' opacity='0.86'/%3E%3C/svg%3E");
   background-size:
-    118px 92px,
-    148px 112px,
-    100% 100%;
-  background-position:
-    9px 6px,
-    -17px 14px,
-    center;
+    180px 180px;
+  background-position: 0 0;
   opacity: var(--crt-noise-opacity);
-  mix-blend-mode: soft-light;
-  filter: blur(0.52px) contrast(1.04);
+  mix-blend-mode: hard-light;
+  filter: contrast(1.12) saturate(0) brightness(0.62);
   transform: translate3d(0, 0, 0);
-  animation: crtPhosphorImperfectionDrift 18.7s steps(4, end) infinite;
+  will-change: transform, background-position;
+  animation: crtStaticSnowJitter var(--crt-static-speed) steps(9, end) infinite;
 }
 
-/* Seeded glass grime: a static material map, not motion or particle noise.
-   It creates tiny blur/density variation while staying under the glass glare. */
+/* Curvature and Fresnel: broad fields make the tube feel convex, not patterned. */
 .botFaceCrtGrimeLayer {
   position: absolute;
-  inset: -30%;
-  z-index: 14;
+  inset: 0;
+  z-index: 8;
   display: block;
   pointer-events: none;
   background:
     radial-gradient(
-      ellipse at 46% 44%,
-      rgba(255, 255, 255, 0.18),
-      transparent 58%
+      ellipse 118% 108% at 50% 52%,
+      transparent 56%,
+      rgba(0, 0, 0, calc(var(--crt-vignette-strength) * 0.32)) 82%,
+      rgba(0, 0, 0, calc(var(--crt-vignette-strength) * 0.72)) 100%
     ),
-    rgba(18, 16, 13, 0.44);
-  opacity: var(--bot-face-crt-grime-opacity);
-  mix-blend-mode: multiply;
+    radial-gradient(
+      ellipse 104% 88% at 50% 50%,
+      transparent 68%,
+      rgba(255, 255, 255, calc(var(--crt-fresnel-strength) * 0.34)) 84%,
+      transparent 96%
+    ),
+    radial-gradient(
+      ellipse 74% 32% at var(--bot-face-screen-glare-x, 38%) var(--bot-face-screen-glare-y, 44%),
+      rgba(255, 255, 255, calc(var(--crt-glare-strength) * 0.2)),
+      transparent 68%
+    ),
+    linear-gradient(
+      118deg,
+      transparent 18%,
+      rgba(255, 255, 255, calc(var(--crt-glare-strength) * 0.12)) 43%,
+      transparent 62%
+    ),
+    radial-gradient(
+      ellipse 52% 80% at 16% 50%,
+      rgba(255, 255, 255, calc(var(--crt-fresnel-strength) * 0.14)),
+      transparent 64%
+    );
+  background-size:
+    100% 100%,
+    100% 100%,
+    100% 100%,
+    100% 100%,
+    100% 100%;
+  background-position:
+    center,
+    center,
+    center,
+    center,
+    center;
+  background-repeat:
+    no-repeat,
+    no-repeat,
+    no-repeat,
+    no-repeat,
+    no-repeat;
+  opacity: 1;
+  mix-blend-mode: normal;
   -webkit-backdrop-filter:
     blur(var(--bot-face-crt-grime-blur))
-    saturate(0.88)
-    contrast(1.04);
+    saturate(1.02)
+    contrast(1.03);
   backdrop-filter:
     blur(var(--bot-face-crt-grime-blur))
-    saturate(0.88)
-    contrast(1.04);
-  -webkit-mask-image: var(--bot-face-crt-grime-mask-image);
-  -webkit-mask-position: center;
-  -webkit-mask-size: cover;
-  -webkit-mask-repeat: no-repeat;
-  -webkit-mask-mode: alpha;
-  mask-image: var(--bot-face-crt-grime-mask-image);
-  mask-position: center;
-  mask-size: cover;
-  mask-repeat: no-repeat;
-  mask-mode: alpha;
+    saturate(1.02)
+    contrast(1.03);
   transform:
     translate3d(var(--bot-face-crt-grime-x), var(--bot-face-crt-grime-y), 0)
     rotate(var(--bot-face-crt-grime-rotation))
@@ -20218,20 +20641,19 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   transform-origin: 50% 50%;
 }
 
-/* Electronic breathing: late CRT drive voltage wandered by tiny amounts, so a
-   barely visible additive veil makes the tube feel powered without pulsing. */
+/* Substrate drive drift: dark-only warmth, kept far below glyph emission. */
 .botFaceCrtBreathingLayer,
 .botFaceCrtBreathingLayer::before {
   position: absolute;
   inset: 5%;
-  z-index: 9;
+  z-index: 3;
   display: block;
   border-radius: 50%;
   pointer-events: none;
   background:
     radial-gradient(
       ellipse at 50% 48%,
-      color-mix(in srgb, var(--bot-face-crt-color) 38%, transparent),
+      color-mix(in srgb, var(--bot-face-crt-color) 28%, transparent),
       transparent 64%
     );
   opacity: 0;
@@ -20249,28 +20671,46 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   background:
     radial-gradient(
       ellipse at 48% 52%,
-      rgba(255, 255, 255, 0.42),
+      rgba(255, 255, 255, 0.24),
       transparent 58%
     );
   animation: crtElectronicBreathCounter 16.4s linear infinite;
 }
 
-@keyframes crtPhosphorImperfectionDrift {
+@keyframes crtStaticSnowJitter {
   0%,
   100% {
     transform: translate3d(0, 0, 0);
   }
 
-  31% {
+  14% {
     transform: translate3d(0.42px, -0.28px, 0);
+    background-position: 13px -9px;
   }
 
-  63% {
-    transform: translate3d(-0.36px, 0.31px, 0);
+  29% {
+    transform: translate3d(-0.32px, 0.3px, 0);
+    background-position: -17px 11px;
   }
 
-  82% {
-    transform: translate3d(0.18px, 0.46px, 0);
+  43% {
+    transform: translate3d(0.18px, 0.38px, 0);
+    background-position: 7px 19px;
+  }
+
+  57% {
+    transform: translate3d(-0.44px, -0.18px, 0);
+    background-position: -23px -5px;
+  }
+
+  71% {
+    transform: translate3d(0.3px, 0.14px, 0);
+    background-position: 19px 5px;
+  }
+
+  86% {
+    transform: translate3d(-0.16px, -0.36px, 0);
+    background-position: -9px -21px;
   }
 }
 
@@ -20324,7 +20764,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   position: absolute;
   left: var(--zen-live-bot-face-x, 50%);
   top: var(--zen-live-bot-face-y, 50%);
-  z-index: 5;
+  z-index: 6;
   transform: translate(-50%, -50%) scale(var(--zen-live-bot-face-scale, 1));
   transform-origin: 50% 50%;
   display: grid;
@@ -20503,39 +20943,53 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   .coffeeSeatPlate[data-live-body-style="zen"]
   .coffeeSeatPlateEmoji
   [data-coffee-plate-emoji-part] {
-  --crt-bloom-opacity: 0.11;
-  --crt-bloom-radius: 1.48px;
-  --crt-chromatic-offset: 0.3px;
-  --crt-chromatic-opacity: 0.028;
+  --crt-face-edge-color: var(
+    --zen-live-bot-face-crt-border-color,
+    var(--coffee-bot-color, var(--coffee-seat-emotion-color, currentColor))
+  );
+  --crt-bloom-opacity: 0.16;
+  --crt-bloom-radius: 2px;
+  --crt-chromatic-offset: 0.42px;
+  --crt-chromatic-opacity: 0.042;
+  --crt-bloom-narrow-strength: 0.42;
+  --crt-bloom-narrow-radius: 1.8px;
+  --crt-bloom-wide-strength: 0.22;
+  --crt-bloom-wide-radius: 12px;
+  --crt-convergence-offset: 0.26px;
+  --crt-convergence-opacity: 0.05;
   --zen-live-bot-talking-light-opacity-high: 1;
   --zen-live-bot-talking-light-opacity-mid: 1;
   --zen-live-bot-talking-light-opacity-low: 1;
   --zen-live-bot-talking-face-glow-filter-high:
-    drop-shadow(0 0 0.075em color-mix(in srgb, currentColor 50%, transparent))
-    drop-shadow(0 0 0.22em color-mix(in srgb, currentColor 28%, transparent))
-    drop-shadow(0 0 0.44em color-mix(in srgb, var(--coffee-bot-color) 14%, transparent));
+    drop-shadow(0 0 calc(0.052em * var(--crt-face-glow-radius-scale, 1)) color-mix(in srgb, var(--crt-face-edge-color) 78%, transparent))
+    drop-shadow(0 0 calc(0.12em * var(--crt-face-glow-radius-scale, 1)) color-mix(in srgb, var(--crt-face-edge-color) 58%, transparent))
+    drop-shadow(0 0 calc(0.27em * var(--crt-face-glow-radius-scale, 1)) color-mix(in srgb, var(--crt-face-edge-color) 34%, transparent))
+    drop-shadow(0 0 calc(0.52em * var(--crt-face-glow-radius-scale, 1)) color-mix(in srgb, var(--crt-face-edge-color) 18%, transparent));
   --zen-live-bot-talking-face-glow-filter-mid:
-    drop-shadow(0 0 0.068em color-mix(in srgb, currentColor 42%, transparent))
-    drop-shadow(0 0 0.19em color-mix(in srgb, currentColor 22%, transparent))
-    drop-shadow(0 0 0.36em color-mix(in srgb, var(--coffee-bot-color) 10%, transparent));
+    drop-shadow(0 0 calc(0.046em * var(--crt-face-glow-radius-scale, 1)) color-mix(in srgb, var(--crt-face-edge-color) 68%, transparent))
+    drop-shadow(0 0 calc(0.1em * var(--crt-face-glow-radius-scale, 1)) color-mix(in srgb, var(--crt-face-edge-color) 48%, transparent))
+    drop-shadow(0 0 calc(0.22em * var(--crt-face-glow-radius-scale, 1)) color-mix(in srgb, var(--crt-face-edge-color) 26%, transparent))
+    drop-shadow(0 0 calc(0.42em * var(--crt-face-glow-radius-scale, 1)) color-mix(in srgb, var(--crt-face-edge-color) 14%, transparent));
   --zen-live-bot-talking-face-glow-filter-low:
-    drop-shadow(0 0 0.06em color-mix(in srgb, currentColor 36%, transparent))
-    drop-shadow(0 0 0.16em color-mix(in srgb, currentColor 18%, transparent))
-    drop-shadow(0 0 0.3em color-mix(in srgb, var(--coffee-bot-color) 8%, transparent));
+    drop-shadow(0 0 calc(0.04em * var(--crt-face-glow-radius-scale, 1)) color-mix(in srgb, var(--crt-face-edge-color) 58%, transparent))
+    drop-shadow(0 0 calc(0.085em * var(--crt-face-glow-radius-scale, 1)) color-mix(in srgb, var(--crt-face-edge-color) 40%, transparent))
+    drop-shadow(0 0 calc(0.18em * var(--crt-face-glow-radius-scale, 1)) color-mix(in srgb, var(--crt-face-edge-color) 22%, transparent))
+    drop-shadow(0 0 calc(0.34em * var(--crt-face-glow-radius-scale, 1)) color-mix(in srgb, var(--crt-face-edge-color) 12%, transparent));
   --crt-face-glow-filter: var(--zen-live-bot-talking-face-glow-filter-high);
   opacity: 1;
   filter: var(--crt-face-glow-filter);
-  animation: zenLiveBotTalkingFacePartFlicker 760ms ease-in-out infinite;
 }
 
 .zenLiveBotPresencePlate[data-talking="true"]:not([data-private-mode="true"])
   .zenLiveBotPresenceFaceGlyph
-  [data-coffee-plate-emoji-part]::before,
+  [data-coffee-plate-emoji-part]
+  [data-crt-glyph-layer="true"]::before,
 .coffeeSeat[data-table-speaking="true"]
   .coffeeSeatPlate[data-live-body-style="zen"]
   .coffeeSeatPlateEmoji
-  [data-coffee-plate-emoji-part]::before {
-  animation: zenLiveBotTalkingFaceGlowFlicker 760ms ease-in-out infinite;
+  [data-coffee-plate-emoji-part]
+  [data-crt-glyph-layer="true"]::before {
+  animation: none;
 }
 
 .zenLiveBotPresencePlate:not([data-talking="true"]):not([data-transitioning="true"])
@@ -20606,9 +21060,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   .coffeeSeatPlate[data-live-body-style="zen"]
   .zenLiveBotPresenceFaceGlyph[data-coffee-plate-mouth-open="true"]
   [data-coffee-plate-emoji-part="mouth"] {
-  animation:
-    zenLiveBotPresenceMouthPulse 130ms cubic-bezier(0.37, 0, 0.2, 1) infinite,
-    zenLiveBotTalkingFacePartFlicker 760ms ease-in-out infinite;
+  animation: zenLiveBotPresenceMouthPulse 130ms cubic-bezier(0.37, 0, 0.2, 1) infinite;
 }
 
 @keyframes zenLiveBotIdleLightBreath {
@@ -20624,14 +21076,59 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   }
 }
 
+@keyframes zenLiveBotCrtFaceFlicker {
+  0%,
+  47.8%,
+  49.1%,
+  74.4%,
+  75.8%,
+  91.2%,
+  92%,
+  100% {
+    opacity: 1;
+    filter: brightness(1.07) contrast(1.02);
+  }
+
+  48.2% {
+    opacity: 0.86;
+    filter: brightness(0.92) contrast(1.06);
+  }
+
+  48.55% {
+    opacity: 0.96;
+    filter: brightness(1.02) contrast(1.03);
+  }
+
+  74.9% {
+    opacity: 0.78;
+    filter: brightness(0.84) contrast(1.08);
+  }
+
+  75.22% {
+    opacity: 0.93;
+    filter: brightness(0.98) contrast(1.04);
+  }
+
+  91.55% {
+    opacity: 0.9;
+    filter: brightness(0.95) contrast(1.05);
+  }
+}
+
 @keyframes zenLiveBotPresenceMouthPulse {
   0%,
   100% {
-    transform: scale(1);
+    transform:
+      translate(var(--bot-face-mouth-offset-x, 0em), var(--bot-face-mouth-offset-y, 0em))
+      scale(var(--bot-face-mouth-scale, 1))
+      scale(1);
   }
 
   50% {
-    transform: scale(1.14);
+    transform:
+      translate(var(--bot-face-mouth-offset-x, 0em), var(--bot-face-mouth-offset-y, 0em))
+      scale(var(--bot-face-mouth-scale, 1))
+      scale(1.14);
   }
 }
 
@@ -20656,63 +21153,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   55%,
   87% {
     opacity: var(--zen-live-bot-talking-light-opacity-low, 0.64);
-  }
-}
-
-@keyframes zenLiveBotTalkingFacePartFlicker {
-  0%,
-  8%,
-  24%,
-  47%,
-  71%,
-  100% {
-    opacity: var(--zen-live-bot-talking-light-opacity-high, 1);
-    filter: var(--zen-live-bot-talking-face-glow-filter-high);
-  }
-
-  12%,
-  37%,
-  60%,
-  82% {
-    opacity: var(--zen-live-bot-talking-light-opacity-mid, 1);
-    filter: var(--zen-live-bot-talking-face-glow-filter-mid);
-  }
-
-  15%,
-  55%,
-  87% {
-    opacity: var(--zen-live-bot-talking-light-opacity-low, 1);
-    filter: var(--zen-live-bot-talking-face-glow-filter-low);
-  }
-}
-
-@keyframes zenLiveBotTalkingFaceGlowFlicker {
-  0%,
-  8%,
-  24%,
-  47%,
-  71%,
-  100% {
-    filter:
-      blur(var(--crt-bloom-radius))
-      var(--zen-live-bot-talking-face-glow-filter-high);
-  }
-
-  12%,
-  37%,
-  60%,
-  82% {
-    filter:
-      blur(var(--crt-bloom-radius))
-      var(--zen-live-bot-talking-face-glow-filter-mid);
-  }
-
-  15%,
-  55%,
-  87% {
-    filter:
-      blur(var(--crt-bloom-radius))
-      var(--zen-live-bot-talking-face-glow-filter-low);
   }
 }
 
@@ -20907,6 +21347,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .zenLiveBotPresencePlate[data-prism-persona="true"] {
   --coffee-bot-color: #f7f7f2;
+  --zen-live-bot-face-crt-border-color: #ffffff;
+  --zen-live-bot-face-phosphor-ink: #ffffff;
   --zen-live-bot-face-ink: #ffffff;
   --zen-live-bot-glyph-ink: #ffffff;
   --zen-live-bot-frame-tint-color: #f7f7f2;
@@ -21002,6 +21444,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .zenLiveBotPresencePlate[data-prism-persona="true"][data-private-mode="true"] {
+  --zen-live-bot-face-crt-border-color: #e8eee8;
   --bot-face-frame-tint-background: currentColor;
   --bot-face-frame-tint-filter:
     drop-shadow(0 0 6px color-mix(in srgb, currentColor 22%, transparent))
@@ -21017,24 +21460,38 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .zenLiveBotPresenceFaceGlyph {
+  --crt-face-edge-color: var(
+    --zen-live-bot-face-crt-border-color,
+    var(--coffee-bot-color, var(--zen-live-bot-face-ink, currentColor))
+  );
   color: var(--zen-live-bot-face-ink, var(--zen-presence-face-ink));
   position: relative;
   z-index: 1;
   text-shadow:
-    0 0 0.12em color-mix(in srgb, currentColor 62%, transparent),
-    0 0 0.28em color-mix(in srgb, currentColor 32%, transparent),
-    0 0 0.48em color-mix(in srgb, var(--coffee-bot-color) 16%, transparent);
+    0 0 calc(0.08em * var(--crt-face-glow-radius-scale, 1))
+      color-mix(in srgb, var(--crt-face-edge-color) 68%, transparent),
+    0 0 calc(0.18em * var(--crt-face-glow-radius-scale, 1))
+      color-mix(in srgb, var(--crt-face-edge-color) 44%, transparent),
+    0 0 calc(0.36em * var(--crt-face-glow-radius-scale, 1))
+      color-mix(in srgb, var(--crt-face-edge-color) 26%, transparent),
+    0 0 calc(0.62em * var(--crt-face-glow-radius-scale, 1))
+      color-mix(in srgb, var(--crt-face-edge-color) 16%, transparent);
   pointer-events: none;
   transition: none;
 }
 
 .zenLiveBotPresencePlate[data-avatar-customizer-preview="true"] .zenLiveBotPresenceFaceGlyph {
   text-shadow:
-    0 0 0.08em color-mix(in srgb, currentColor 54%, transparent),
-    0 0 0.22em color-mix(in srgb, currentColor 24%, transparent);
+    0 0 calc(0.06em * var(--crt-face-glow-radius-scale, 1))
+      color-mix(in srgb, var(--crt-face-edge-color) 58%, transparent),
+    0 0 calc(0.16em * var(--crt-face-glow-radius-scale, 1))
+      color-mix(in srgb, var(--crt-face-edge-color) 36%, transparent),
+    0 0 calc(0.32em * var(--crt-face-glow-radius-scale, 1))
+      color-mix(in srgb, var(--crt-face-edge-color) 18%, transparent);
 }
 
 .coffeeSeatPlateEmoji.zenLiveBotPresenceFaceGlyph {
+  --crt-glyph-core-paint-bleed: 0.14em;
   font-size: var(
     --zen-live-bot-avatar-face-glyph-size,
     clamp(1.74rem, calc(var(--zen-live-bot-body-frame-size, 190px) * 0.217), 4.08rem)
@@ -21047,52 +21504,41 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   transform-origin: center center;
 }
 
-.zenLiveBotPresencePlate:not([data-talking="true"]):not([data-transitioning="true"])
-  .zenLiveBotPresenceFaceGlyph
+.zenLiveBotPresenceFaceGlyph
   [data-coffee-plate-emoji-part],
-.coffeeSeat:not([data-table-speaking="true"])
-  .coffeeSeatPlate[data-live-body-style="zen"]
+.coffeeSeatPlate[data-live-body-style="zen"]
   .coffeeSeatPlateEmoji
   [data-coffee-plate-emoji-part] {
-  --crt-bloom-opacity: 0.09;
-  --crt-bloom-radius: 1.35px;
-  --zen-live-bot-idle-face-glow-filter:
-    drop-shadow(0 0 0.065em color-mix(in srgb, currentColor 44%, transparent))
-    drop-shadow(0 0 0.19em color-mix(in srgb, currentColor 22%, transparent))
-    drop-shadow(0 0 0.36em color-mix(in srgb, var(--coffee-bot-color) 10%, transparent));
+  --crt-face-edge-color: var(
+    --zen-live-bot-face-crt-border-color,
+    var(--coffee-bot-color, var(--coffee-seat-emotion-color, currentColor))
+  );
+  --crt-bloom-opacity: 0.16;
+  --crt-bloom-radius: 2px;
+  --crt-bloom-narrow-strength: 0.42;
+  --crt-bloom-narrow-radius: 1.8px;
+  --crt-bloom-wide-strength: 0.22;
+  --crt-bloom-wide-radius: 12px;
   --zen-live-bot-idle-face-glow-filter-high:
-    drop-shadow(0 0 0.075em color-mix(in srgb, currentColor 50%, transparent))
-    drop-shadow(0 0 0.22em color-mix(in srgb, currentColor 26%, transparent))
-    drop-shadow(0 0 0.42em color-mix(in srgb, var(--coffee-bot-color) 12%, transparent));
-  --crt-face-glow-filter: var(--zen-live-bot-idle-face-glow-filter);
-  --zen-live-bot-idle-light-opacity-low: 0.94;
-  --zen-live-bot-idle-light-opacity-high: 1;
-  --zen-live-bot-idle-light-filter-low:
-    var(--zen-live-bot-idle-face-glow-filter)
-    brightness(0.96);
-  --zen-live-bot-idle-light-filter-high:
-    var(--zen-live-bot-idle-face-glow-filter-high)
-    brightness(1.04);
+    drop-shadow(0 0 calc(0.72px * var(--crt-face-glow-radius-scale, 1)) var(--crt-face-edge-color))
+    drop-shadow(0 0 calc(1.5px * var(--crt-face-glow-radius-scale, 1)) var(--crt-face-edge-color))
+    drop-shadow(0 0 calc(3px * var(--crt-face-glow-radius-scale, 1)) color-mix(in srgb, var(--crt-face-edge-color) 82%, transparent))
+    drop-shadow(0 0 calc(6px * var(--crt-face-glow-radius-scale, 1)) color-mix(in srgb, var(--crt-face-edge-color) 58%, transparent))
+    drop-shadow(0 0 calc(12px * var(--crt-face-glow-radius-scale, 1)) color-mix(in srgb, var(--crt-face-edge-color) 36%, transparent))
+    drop-shadow(0 0 calc(21px * var(--crt-face-glow-radius-scale, 1)) color-mix(in srgb, var(--crt-face-edge-color) 22%, transparent));
+  --zen-live-bot-idle-face-glow-filter: var(--zen-live-bot-idle-face-glow-filter-high);
+  --crt-face-glow-filter: var(--zen-live-bot-idle-face-glow-filter-high);
   filter: var(--zen-live-bot-idle-face-glow-filter);
-  animation: zenLiveBotIdleLightBreath 4.8s ease-in-out infinite;
 }
 
-.zenLiveBotPresencePlate:not([data-talking="true"]):not([data-transitioning="true"])
-  .zenLiveBotPresenceFaceGlyph
-  [data-coffee-plate-emoji-part]::before,
-.coffeeSeat:not([data-table-speaking="true"])
-  .coffeeSeatPlate[data-live-body-style="zen"]
+.zenLiveBotPresenceFaceGlyph
+  [data-coffee-plate-emoji-part]
+  [data-crt-glyph-layer="true"],
+.coffeeSeatPlate[data-live-body-style="zen"]
   .coffeeSeatPlateEmoji
-  [data-coffee-plate-emoji-part]::before {
-  --zen-live-bot-idle-light-opacity-low: 0.07;
-  --zen-live-bot-idle-light-opacity-high: 0.095;
-  --zen-live-bot-idle-light-filter-low:
-    blur(var(--crt-bloom-radius))
-    var(--zen-live-bot-idle-face-glow-filter);
-  --zen-live-bot-idle-light-filter-high:
-    blur(var(--crt-bloom-radius))
-    var(--zen-live-bot-idle-face-glow-filter-high);
-  animation: zenLiveBotIdleLightBreath 4.8s ease-in-out infinite;
+  [data-coffee-plate-emoji-part]
+  [data-crt-glyph-layer="true"] {
+  animation: zenLiveBotCrtFaceFlicker 11.7s linear infinite;
 }
 
 .zenLiveBotPresenceFaceGlyph[data-coffee-plate-emoji-eyes-open="false"]
@@ -21108,11 +21554,52 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   text-shadow: none;
 }
 
+.zenLiveBotPresencePlate[data-prism-persona="true"]
+  .zenLiveBotPresenceFaceGlyph
+  [data-coffee-plate-emoji-part] {
+  --crt-prism-face-glow-strength-scale: var(--bot-face-weight-glow-strength-scale, 1);
+  --crt-prism-face-rim-strength-scale: calc(
+    var(--crt-prism-face-glow-strength-scale, 1) * 0.52
+  );
+  --crt-prism-face-halo-strength-scale: calc(
+    var(--crt-prism-face-glow-strength-scale, 1) * 0.34
+  );
+  --crt-face-edge-color: #ffffff;
+  --crt-face-glow-blend-mode: screen;
+  --bot-face-glow-font-weight: var(--bot-face-font-weight, 560);
+  --bot-face-glow-stroke: calc(var(--bot-face-weight-glow-stroke, 0.006em) * 0.72);
+  --bot-face-glow-strength-scale: var(--crt-prism-face-glow-strength-scale);
+  --zen-live-bot-idle-face-glow-filter-high:
+    drop-shadow(0 -0.012em calc(0.045em * var(--crt-face-glow-radius-scale, 1)) color-mix(in srgb, #ff3f6f calc(30% * var(--crt-prism-face-rim-strength-scale, 1)), transparent))
+    drop-shadow(0.012em 0 calc(0.052em * var(--crt-face-glow-radius-scale, 1)) color-mix(in srgb, #ffb62e calc(22% * var(--crt-prism-face-rim-strength-scale, 1)), transparent))
+    drop-shadow(0 0.012em calc(0.06em * var(--crt-face-glow-radius-scale, 1)) color-mix(in srgb, #31d7ff calc(28% * var(--crt-prism-face-rim-strength-scale, 1)), transparent))
+    drop-shadow(-0.012em 0 calc(0.056em * var(--crt-face-glow-radius-scale, 1)) color-mix(in srgb, #8b7cff calc(24% * var(--crt-prism-face-rim-strength-scale, 1)), transparent))
+    drop-shadow(0 0 calc(0.18em * var(--crt-face-glow-radius-scale, 1)) color-mix(in srgb, #ffffff calc(20% * var(--crt-prism-face-glow-strength-scale, 1)), transparent))
+    drop-shadow(0 0 calc(0.34em * var(--crt-face-glow-radius-scale, 1)) color-mix(in srgb, #31d7ff calc(12% * var(--crt-prism-face-halo-strength-scale, 1)), transparent))
+    drop-shadow(0 0 calc(0.58em * var(--crt-face-glow-radius-scale, 1)) color-mix(in srgb, #8b7cff calc(9% * var(--crt-prism-face-halo-strength-scale, 1)), transparent));
+  --zen-live-bot-idle-face-glow-filter: var(--zen-live-bot-idle-face-glow-filter-high);
+  --crt-face-glow-filter: var(--zen-live-bot-idle-face-glow-filter-high);
+  --crt-bloom-narrow-radius: 1.35px;
+  --crt-bloom-wide-radius: 8px;
+  --crt-chromatic-offset: 0.78px;
+  --crt-chromatic-opacity: 0.105;
+  --crt-core-opacity: 0.88;
+  --crt-convergence-offset: 0.28px;
+  --crt-convergence-opacity: 0.062;
+}
+
+.zenLiveBotPresencePlate[data-prism-persona="true"]:not([data-talking="true"]):not([data-transitioning="true"])
+  .zenLiveBotPresenceFaceGlyph
+  [data-coffee-plate-emoji-part]
+  [data-crt-glyph-layer="true"]::before {
+  animation: none;
+}
+
 .zenLiveBotPresenceThinkingGlyphAnchor {
   position: absolute;
   left: 50%;
   top: 46%;
-  z-index: 8;
+  z-index: 6;
   display: grid;
   place-items: center;
   transform: translate(-50%, -50%);
@@ -21165,35 +21652,38 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   [data-coffee-plate-emoji-part] {
   --crt-bloom-opacity: 0.16;
   --crt-bloom-radius: 2.05px;
-  --crt-chromatic-offset: 0.4px;
-  --crt-chromatic-opacity: 0.038;
+  --crt-chromatic-offset: 0.9px;
+  --crt-chromatic-opacity: 0.13;
+  --crt-bloom-narrow-strength: 0.35;
+  --crt-bloom-narrow-radius: 1.7px;
+  --crt-bloom-wide-strength: 0.11;
+  --crt-convergence-offset: 0.34px;
+  --crt-convergence-opacity: 0.076;
   --zen-live-bot-talking-face-glow-filter-high:
-    drop-shadow(0 0 0.1em rgba(255, 63, 111, 0.56))
-    drop-shadow(0 0 0.26em rgba(255, 182, 46, 0.34))
-    drop-shadow(0 0 0.5em rgba(49, 215, 255, 0.38))
-    drop-shadow(0 0 0.72em rgba(139, 124, 255, 0.28));
+    drop-shadow(0 0 calc(0.08em * var(--crt-face-glow-radius-scale, 1)) rgba(255, 63, 111, calc(0.34 * var(--crt-prism-face-rim-strength-scale, 1))))
+    drop-shadow(0 0 calc(0.18em * var(--crt-face-glow-radius-scale, 1)) rgba(255, 182, 46, calc(0.2 * var(--crt-prism-face-rim-strength-scale, 1))))
+    drop-shadow(0 0 calc(0.34em * var(--crt-face-glow-radius-scale, 1)) rgba(49, 215, 255, calc(0.22 * var(--crt-prism-face-halo-strength-scale, 1))))
+    drop-shadow(0 0 calc(0.48em * var(--crt-face-glow-radius-scale, 1)) rgba(139, 124, 255, calc(0.16 * var(--crt-prism-face-halo-strength-scale, 1))));
   --zen-live-bot-talking-face-glow-filter-mid:
-    drop-shadow(0 0 0.09em rgba(255, 63, 111, 0.46))
-    drop-shadow(0 0 0.22em rgba(255, 182, 46, 0.28))
-    drop-shadow(0 0 0.42em rgba(49, 215, 255, 0.3))
-    drop-shadow(0 0 0.6em rgba(139, 124, 255, 0.22));
+    drop-shadow(0 0 calc(0.07em * var(--crt-face-glow-radius-scale, 1)) rgba(255, 63, 111, calc(0.28 * var(--crt-prism-face-rim-strength-scale, 1))))
+    drop-shadow(0 0 calc(0.16em * var(--crt-face-glow-radius-scale, 1)) rgba(255, 182, 46, calc(0.16 * var(--crt-prism-face-rim-strength-scale, 1))))
+    drop-shadow(0 0 calc(0.3em * var(--crt-face-glow-radius-scale, 1)) rgba(49, 215, 255, calc(0.18 * var(--crt-prism-face-halo-strength-scale, 1))))
+    drop-shadow(0 0 calc(0.42em * var(--crt-face-glow-radius-scale, 1)) rgba(139, 124, 255, calc(0.13 * var(--crt-prism-face-halo-strength-scale, 1))));
   --zen-live-bot-talking-face-glow-filter-low:
-    drop-shadow(0 0 0.08em rgba(255, 63, 111, 0.36))
-    drop-shadow(0 0 0.18em rgba(255, 182, 46, 0.22))
-    drop-shadow(0 0 0.34em rgba(49, 215, 255, 0.24))
-    drop-shadow(0 0 0.48em rgba(139, 124, 255, 0.18));
+    drop-shadow(0 0 calc(0.06em * var(--crt-face-glow-radius-scale, 1)) rgba(255, 63, 111, calc(0.22 * var(--crt-prism-face-rim-strength-scale, 1))))
+    drop-shadow(0 0 calc(0.13em * var(--crt-face-glow-radius-scale, 1)) rgba(255, 182, 46, calc(0.13 * var(--crt-prism-face-rim-strength-scale, 1))))
+    drop-shadow(0 0 calc(0.24em * var(--crt-face-glow-radius-scale, 1)) rgba(49, 215, 255, calc(0.14 * var(--crt-prism-face-halo-strength-scale, 1))))
+    drop-shadow(0 0 calc(0.34em * var(--crt-face-glow-radius-scale, 1)) rgba(139, 124, 255, calc(0.1 * var(--crt-prism-face-halo-strength-scale, 1))));
   --crt-face-glow-filter:
     var(--zen-live-bot-talking-face-glow-filter-high);
   filter: var(--crt-face-glow-filter);
-  animation: zenLiveBotTalkingFacePartFlicker 760ms ease-in-out infinite;
 }
 
 .zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]
   .zenLiveBotPresenceFaceGlyph
-  [data-coffee-plate-emoji-part]::before {
-  animation:
-    zenLivePrismFaceGlowHueRotate 1.7s linear infinite,
-    zenLiveBotTalkingFaceGlowFlicker 760ms ease-in-out infinite;
+  [data-coffee-plate-emoji-part]
+  [data-crt-glyph-layer="true"]::before {
+  animation: zenLivePrismFaceGlowHueRotate 1.7s linear infinite;
 }
 
 .themeLight .zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]
@@ -21213,33 +21703,33 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   .zenLiveBotPresenceFaceGlyph
   [data-coffee-plate-emoji-part] {
   --zen-live-bot-talking-face-glow-filter-high:
-    drop-shadow(0 0 0.09em rgba(190, 20, 66, 0.4))
-    drop-shadow(0 0 0.22em rgba(150, 93, 0, 0.28))
-    drop-shadow(0 0 0.4em rgba(0, 112, 148, 0.3))
-    drop-shadow(0 0 0.58em rgba(82, 62, 176, 0.22));
+    drop-shadow(0 0 calc(0.08em * var(--crt-face-glow-radius-scale, 1)) rgba(190, 20, 66, calc(0.24 * var(--crt-prism-face-rim-strength-scale, 1))))
+    drop-shadow(0 0 calc(0.18em * var(--crt-face-glow-radius-scale, 1)) rgba(150, 93, 0, calc(0.16 * var(--crt-prism-face-rim-strength-scale, 1))))
+    drop-shadow(0 0 calc(0.34em * var(--crt-face-glow-radius-scale, 1)) rgba(0, 112, 148, calc(0.18 * var(--crt-prism-face-halo-strength-scale, 1))))
+    drop-shadow(0 0 calc(0.48em * var(--crt-face-glow-radius-scale, 1)) rgba(82, 62, 176, calc(0.13 * var(--crt-prism-face-halo-strength-scale, 1))));
   --zen-live-bot-talking-face-glow-filter-mid:
-    drop-shadow(0 0 0.08em rgba(190, 20, 66, 0.32))
-    drop-shadow(0 0 0.18em rgba(150, 93, 0, 0.22))
-    drop-shadow(0 0 0.34em rgba(0, 112, 148, 0.24))
-    drop-shadow(0 0 0.48em rgba(82, 62, 176, 0.18));
+    drop-shadow(0 0 calc(0.07em * var(--crt-face-glow-radius-scale, 1)) rgba(190, 20, 66, calc(0.19 * var(--crt-prism-face-rim-strength-scale, 1))))
+    drop-shadow(0 0 calc(0.15em * var(--crt-face-glow-radius-scale, 1)) rgba(150, 93, 0, calc(0.13 * var(--crt-prism-face-rim-strength-scale, 1))))
+    drop-shadow(0 0 calc(0.3em * var(--crt-face-glow-radius-scale, 1)) rgba(0, 112, 148, calc(0.15 * var(--crt-prism-face-halo-strength-scale, 1))))
+    drop-shadow(0 0 calc(0.42em * var(--crt-face-glow-radius-scale, 1)) rgba(82, 62, 176, calc(0.1 * var(--crt-prism-face-halo-strength-scale, 1))));
   --zen-live-bot-talking-face-glow-filter-low:
-    drop-shadow(0 0 0.07em rgba(190, 20, 66, 0.24))
-    drop-shadow(0 0 0.15em rgba(150, 93, 0, 0.16))
-    drop-shadow(0 0 0.26em rgba(0, 112, 148, 0.18))
-    drop-shadow(0 0 0.38em rgba(82, 62, 176, 0.14));
+    drop-shadow(0 0 calc(0.06em * var(--crt-face-glow-radius-scale, 1)) rgba(190, 20, 66, calc(0.15 * var(--crt-prism-face-rim-strength-scale, 1))))
+    drop-shadow(0 0 calc(0.13em * var(--crt-face-glow-radius-scale, 1)) rgba(150, 93, 0, calc(0.1 * var(--crt-prism-face-rim-strength-scale, 1))))
+    drop-shadow(0 0 calc(0.24em * var(--crt-face-glow-radius-scale, 1)) rgba(0, 112, 148, calc(0.12 * var(--crt-prism-face-halo-strength-scale, 1))))
+    drop-shadow(0 0 calc(0.34em * var(--crt-face-glow-radius-scale, 1)) rgba(82, 62, 176, calc(0.08 * var(--crt-prism-face-halo-strength-scale, 1))));
   --crt-face-glow-filter:
     var(--zen-live-bot-talking-face-glow-filter-high);
 }
 
 .themeLight .zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]
   .zenLiveBotPresenceFaceGlyph
-  [data-coffee-plate-emoji-part]::before,
+  [data-coffee-plate-emoji-part]
+  [data-crt-glyph-layer="true"]::before,
 .zenLiveBotPresencePlate[data-theme="light"][data-prism-persona="true"][data-talking="true"]
   .zenLiveBotPresenceFaceGlyph
-  [data-coffee-plate-emoji-part]::before {
-  animation:
-    zenLivePrismFaceGlowHueRotateLight 1.7s linear infinite,
-    zenLiveBotTalkingFaceGlowFlicker 760ms ease-in-out infinite;
+  [data-coffee-plate-emoji-part]
+  [data-crt-glyph-layer="true"]::before {
+  animation: zenLivePrismFaceGlowHueRotateLight 1.7s linear infinite;
 }
 
 .zenLiveBotPresencePlate[data-prism-persona="true"][data-private-mode="true"][data-talking="true"]
@@ -21253,8 +21743,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   .zenLiveBotPresenceFaceGlyph
   [data-coffee-plate-emoji-part] {
   --crt-face-glow-filter:
-    drop-shadow(0 0 0.12em rgba(255, 255, 255, 0.38))
-    drop-shadow(0 0 0.32em rgba(255, 255, 255, 0.2));
+    drop-shadow(0 0 calc(0.12em * var(--crt-face-glow-radius-scale, 1)) rgba(255, 255, 255, 0.38))
+    drop-shadow(0 0 calc(0.32em * var(--crt-face-glow-radius-scale, 1)) rgba(255, 255, 255, 0.2));
   animation: none;
 }
 
@@ -21271,21 +21761,21 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 @keyframes zenLivePrismFaceGlowHueRotate {
   from {
     filter:
-      blur(var(--crt-bloom-radius))
-      drop-shadow(0 0 0.12em rgba(255, 63, 111, 0.72))
-      drop-shadow(0 0 0.28em rgba(255, 182, 46, 0.46))
-      drop-shadow(0 0 0.5em rgba(49, 215, 255, 0.52))
-      drop-shadow(0 0 0.76em rgba(139, 124, 255, 0.38))
+      blur(var(--crt-weighted-bloom-radius, var(--crt-bloom-radius)))
+      drop-shadow(0 0 calc(0.08em * var(--crt-face-glow-radius-scale, 1)) rgba(255, 63, 111, calc(0.36 * var(--crt-prism-face-rim-strength-scale, 1))))
+      drop-shadow(0 0 calc(0.18em * var(--crt-face-glow-radius-scale, 1)) rgba(255, 182, 46, calc(0.22 * var(--crt-prism-face-rim-strength-scale, 1))))
+      drop-shadow(0 0 calc(0.34em * var(--crt-face-glow-radius-scale, 1)) rgba(49, 215, 255, calc(0.24 * var(--crt-prism-face-halo-strength-scale, 1))))
+      drop-shadow(0 0 calc(0.5em * var(--crt-face-glow-radius-scale, 1)) rgba(139, 124, 255, calc(0.16 * var(--crt-prism-face-halo-strength-scale, 1))))
       hue-rotate(0deg);
   }
 
   to {
     filter:
-      blur(var(--crt-bloom-radius))
-      drop-shadow(0 0 0.12em rgba(255, 63, 111, 0.72))
-      drop-shadow(0 0 0.28em rgba(255, 182, 46, 0.46))
-      drop-shadow(0 0 0.5em rgba(49, 215, 255, 0.52))
-      drop-shadow(0 0 0.76em rgba(139, 124, 255, 0.38))
+      blur(var(--crt-weighted-bloom-radius, var(--crt-bloom-radius)))
+      drop-shadow(0 0 calc(0.08em * var(--crt-face-glow-radius-scale, 1)) rgba(255, 63, 111, calc(0.36 * var(--crt-prism-face-rim-strength-scale, 1))))
+      drop-shadow(0 0 calc(0.18em * var(--crt-face-glow-radius-scale, 1)) rgba(255, 182, 46, calc(0.22 * var(--crt-prism-face-rim-strength-scale, 1))))
+      drop-shadow(0 0 calc(0.34em * var(--crt-face-glow-radius-scale, 1)) rgba(49, 215, 255, calc(0.24 * var(--crt-prism-face-halo-strength-scale, 1))))
+      drop-shadow(0 0 calc(0.5em * var(--crt-face-glow-radius-scale, 1)) rgba(139, 124, 255, calc(0.16 * var(--crt-prism-face-halo-strength-scale, 1))))
       hue-rotate(360deg);
   }
 }
@@ -21293,21 +21783,21 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 @keyframes zenLivePrismFaceGlowHueRotateLight {
   from {
     filter:
-      blur(var(--crt-bloom-radius))
-      drop-shadow(0 0 0.1em rgba(190, 20, 66, 0.5))
-      drop-shadow(0 0 0.24em rgba(150, 93, 0, 0.32))
-      drop-shadow(0 0 0.42em rgba(0, 112, 148, 0.36))
-      drop-shadow(0 0 0.62em rgba(82, 62, 176, 0.28))
+      blur(var(--crt-weighted-bloom-radius, var(--crt-bloom-radius)))
+      drop-shadow(0 0 calc(0.07em * var(--crt-face-glow-radius-scale, 1)) rgba(190, 20, 66, calc(0.24 * var(--crt-prism-face-rim-strength-scale, 1))))
+      drop-shadow(0 0 calc(0.16em * var(--crt-face-glow-radius-scale, 1)) rgba(150, 93, 0, calc(0.16 * var(--crt-prism-face-rim-strength-scale, 1))))
+      drop-shadow(0 0 calc(0.3em * var(--crt-face-glow-radius-scale, 1)) rgba(0, 112, 148, calc(0.18 * var(--crt-prism-face-halo-strength-scale, 1))))
+      drop-shadow(0 0 calc(0.42em * var(--crt-face-glow-radius-scale, 1)) rgba(82, 62, 176, calc(0.13 * var(--crt-prism-face-halo-strength-scale, 1))))
       hue-rotate(0deg);
   }
 
   to {
     filter:
-      blur(var(--crt-bloom-radius))
-      drop-shadow(0 0 0.1em rgba(190, 20, 66, 0.5))
-      drop-shadow(0 0 0.24em rgba(150, 93, 0, 0.32))
-      drop-shadow(0 0 0.42em rgba(0, 112, 148, 0.36))
-      drop-shadow(0 0 0.62em rgba(82, 62, 176, 0.28))
+      blur(var(--crt-weighted-bloom-radius, var(--crt-bloom-radius)))
+      drop-shadow(0 0 calc(0.07em * var(--crt-face-glow-radius-scale, 1)) rgba(190, 20, 66, calc(0.24 * var(--crt-prism-face-rim-strength-scale, 1))))
+      drop-shadow(0 0 calc(0.16em * var(--crt-face-glow-radius-scale, 1)) rgba(150, 93, 0, calc(0.16 * var(--crt-prism-face-rim-strength-scale, 1))))
+      drop-shadow(0 0 calc(0.3em * var(--crt-face-glow-radius-scale, 1)) rgba(0, 112, 148, calc(0.18 * var(--crt-prism-face-halo-strength-scale, 1))))
+      drop-shadow(0 0 calc(0.42em * var(--crt-face-glow-radius-scale, 1)) rgba(82, 62, 176, calc(0.13 * var(--crt-prism-face-halo-strength-scale, 1))))
       hue-rotate(360deg);
   }
 }
@@ -21387,34 +21877,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   transform: translateX(-50%) translateY(-100%);
 }
 
-.zenLiveBotPresencePlate[data-copy-placement="right"] .zenLiveBotPresenceCopy,
-.zenLiveBotPresenceCopy[data-copy-placement="right"] {
-  --zen-live-bot-action-copy-start-transform: translateX(-8px) translateY(-50%) scale(0.982);
-  --zen-live-bot-action-copy-mid-transform: translateX(4px) translateY(-50%) scale(1);
-  --zen-live-bot-action-copy-end-transform: translateX(24px) translateY(-50%) scale(0.992);
-  left: calc(
-    var(--zen-live-bot-body-x, 50%) +
-    var(--zen-live-bot-copy-center-anchor, 95px) +
-    var(--zen-live-bot-copy-side-anchor, 82px)
-  );
-  top: calc(var(--zen-live-bot-body-y, 50%) + var(--zen-live-bot-copy-center-anchor, 95px));
-  transform: translateY(-50%);
-}
-
-.zenLiveBotPresencePlate[data-copy-placement="left"] .zenLiveBotPresenceCopy,
-.zenLiveBotPresenceCopy[data-copy-placement="left"] {
-  --zen-live-bot-action-copy-start-transform: translateX(calc(-100% + 8px)) translateY(-50%) scale(0.982);
-  --zen-live-bot-action-copy-mid-transform: translateX(calc(-100% - 4px)) translateY(-50%) scale(1);
-  --zen-live-bot-action-copy-end-transform: translateX(calc(-100% - 24px)) translateY(-50%) scale(0.992);
-  left: calc(
-    var(--zen-live-bot-body-x, 50%) +
-    var(--zen-live-bot-copy-center-anchor, 95px) -
-    var(--zen-live-bot-copy-side-anchor, 82px)
-  );
-  top: calc(var(--zen-live-bot-body-y, 50%) + var(--zen-live-bot-copy-center-anchor, 95px));
-  transform: translateX(-100%) translateY(-50%);
-}
-
 .zenLiveBotPresenceCopy[data-copy-anchored="true"] {
   position: fixed;
   left: var(--zen-live-bot-action-copy-anchor-x, 50vw);
@@ -21455,28 +21917,29 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   border-radius: 0;
   background: transparent;
   --zen-live-bot-glyph-glow-color: var(--coffee-bot-color);
-  --zen-live-bot-glyph-edge-shadow: color-mix(
-    in srgb,
-    #020706 74%,
-    var(--coffee-bot-color) 26%
-  );
+  --zen-live-bot-glyph-crt-border-color: var(--zen-live-bot-glyph-glow-color);
   color: var(
     --zen-live-bot-glyph-ink,
-    color-mix(in srgb, var(--coffee-bot-color) 86%, #ffffff 14%)
+    var(--zen-live-bot-face-phosphor-ink, var(--zen-live-bot-face-ink, #ffffff))
   );
   filter:
-    drop-shadow(0 0 1px var(--zen-live-bot-glyph-edge-shadow))
+    drop-shadow(0 0 0.72px var(--zen-live-bot-glyph-crt-border-color))
+    drop-shadow(0 0 1.5px var(--zen-live-bot-glyph-crt-border-color))
     drop-shadow(
-      0 0 4px
-      color-mix(in srgb, var(--zen-live-bot-glyph-glow-color) 82%, transparent)
+      0 0 3px
+      color-mix(in srgb, var(--zen-live-bot-glyph-crt-border-color) 82%, transparent)
     )
     drop-shadow(
-      0 0 11px
-      color-mix(in srgb, var(--zen-live-bot-glyph-glow-color) 52%, transparent)
+      0 0 6px
+      color-mix(in srgb, var(--zen-live-bot-glyph-crt-border-color) 58%, transparent)
     )
     drop-shadow(
-      0 0 19px
-      color-mix(in srgb, var(--zen-live-bot-glyph-glow-color) 28%, transparent)
+      0 0 12px
+      color-mix(in srgb, var(--zen-live-bot-glyph-crt-border-color) 36%, transparent)
+    )
+    drop-shadow(
+      0 0 21px
+      color-mix(in srgb, var(--zen-live-bot-glyph-crt-border-color) 22%, transparent)
     );
   line-height: 0;
   pointer-events: none;
@@ -21675,7 +22138,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     [data-coffee-plate-emoji-part],
   .zenLiveBotPresencePlate[data-talking="true"]:not([data-private-mode="true"])
     .zenLiveBotPresenceFaceGlyph
-    [data-coffee-plate-emoji-part]::before {
+    [data-coffee-plate-emoji-part]
+    [data-crt-glyph-layer="true"]::before {
     animation-duration: 1ms;
   }
 
@@ -21683,26 +22147,26 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     .botFaceFrameTint,
   .zenLiveBotPresencePlate:not([data-talking="true"]):not([data-transitioning="true"])
     .botFaceFrameLed,
-  .zenLiveBotPresencePlate:not([data-talking="true"]):not([data-transitioning="true"])
-    .zenLiveBotPresenceFaceGlyph
-    [data-coffee-plate-emoji-part],
-  .zenLiveBotPresencePlate:not([data-talking="true"]):not([data-transitioning="true"])
-    .zenLiveBotPresenceFaceGlyph
-    [data-coffee-plate-emoji-part]::before,
+  .zenLiveBotPresenceFaceGlyph
+    [data-coffee-plate-emoji-part]
+    [data-crt-glyph-layer="true"],
+  .zenLiveBotPresenceFaceGlyph
+    [data-coffee-plate-emoji-part]
+    [data-crt-glyph-layer="true"]::before,
   .coffeeSeat:not([data-table-speaking="true"])
     .coffeeSeatPlate[data-live-body-style="zen"]
     .botFaceFrameTint,
   .coffeeSeat:not([data-table-speaking="true"])
     .coffeeSeatPlate[data-live-body-style="zen"]
     .botFaceFrameLed,
-  .coffeeSeat:not([data-table-speaking="true"])
-    .coffeeSeatPlate[data-live-body-style="zen"]
+  .coffeeSeatPlate[data-live-body-style="zen"]
     .coffeeSeatPlateEmoji
-    [data-coffee-plate-emoji-part],
-  .coffeeSeat:not([data-table-speaking="true"])
-    .coffeeSeatPlate[data-live-body-style="zen"]
+    [data-coffee-plate-emoji-part]
+    [data-crt-glyph-layer="true"],
+  .coffeeSeatPlate[data-live-body-style="zen"]
     .coffeeSeatPlateEmoji
-    [data-coffee-plate-emoji-part]::before {
+    [data-coffee-plate-emoji-part]
+    [data-crt-glyph-layer="true"]::before {
     animation: none;
   }
 
@@ -21715,7 +22179,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     [data-coffee-plate-emoji-part],
   .zenLiveBotPresencePlate[data-talking="true"]:not([data-private-mode="true"])
     .zenLiveBotPresenceFaceGlyph
-    [data-coffee-plate-emoji-part]::before {
+    [data-coffee-plate-emoji-part]
+    [data-crt-glyph-layer="true"]::before {
     animation: none;
   }
 
@@ -35226,6 +35691,46 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   --coffee-plate-emoji-nudge-y: -5px;
 }
 
+.botAvatarIdentityNameField {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.botAvatarIdentityNameField > span {
+  color: color-mix(
+    in srgb,
+    var(--bot-avatar-section-accent, var(--editor-bot-color, var(--accent))) 52%,
+    var(--fg-muted)
+  );
+  font-size: 10.5px;
+  font-weight: 760;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.botAvatarIdentityNameField input {
+  min-width: 0;
+  width: 100%;
+  height: 36px;
+  padding: 4px 12px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 18%, #303846);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.012)),
+    rgba(0, 0, 0, 0.26);
+  color: var(--fg);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 680;
+  outline: none;
+}
+
+.botAvatarIdentityNameField input:focus-visible {
+  border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 58%, var(--line));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 20%, transparent);
+}
+
 .botAvatarIdentityPicker {
   min-width: 0;
   display: grid;
@@ -35445,6 +35950,12 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   text-shadow:
     0 0 5px color-mix(in srgb, currentColor 72%, transparent),
     0 0 12px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 52%, transparent);
+}
+
+/* Carries the .themeDark/.themeLight variable scope into the portaled studio
+   (rendered on document.body, outside the app shell). Layout-neutral. */
+.botAvatarStudioThemeScope {
+  display: contents;
 }
 
 .botAvatarCustomizerBackdrop {
@@ -35921,13 +36432,17 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .botAvatarControlGroupHeader strong {
   color: var(--fg);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.1;
 }
 
 .botAvatarControlGroupHeader small {
   min-width: 0;
-  color: var(--fg-muted);
+  color: color-mix(
+    in srgb,
+    var(--bot-avatar-section-accent, var(--editor-bot-color, var(--accent))) 45%,
+    var(--fg-muted)
+  );
   font-size: 11px;
   line-height: 1.25;
   white-space: nowrap;
@@ -36376,7 +36891,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   isolation: isolate;
   gap: 14px;
   border-radius: 8px;
-  overflow: hidden;
+  /* No overflow:hidden here — it turns the group into a scroll container,
+     which zeroes its content contribution during the stack's grid track
+     sizing and clips everything below the fold unreachably. The accent
+     strip clips its own corners instead. */
   border-color: color-mix(in srgb, var(--bot-avatar-section-accent) 18%, #303846);
   background:
     linear-gradient(
@@ -36393,6 +36911,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   position: absolute;
   inset: 0 auto 0 0;
   width: 3px;
+  border-radius: 8px 0 0 8px;
   background:
     linear-gradient(
       180deg,
@@ -36409,8 +36928,12 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   z-index: 1;
 }
 
-.botAvatarControlGroup[data-avatar-control-tab="advanced"] {
+.botAvatarControlGroup[data-avatar-control-tab="eyes"] {
   --bot-avatar-section-accent: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 68%, #8bdcff);
+}
+
+.botAvatarControlGroup[data-avatar-control-tab="mouth"] {
+  --bot-avatar-section-accent: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 68%, #ff9db8);
 }
 
 .botAvatarControlGroup[data-avatar-control-tab="motion"] {
@@ -36587,9 +37110,22 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   gap: 8px;
 }
 
+/* Section legends follow the Settings panel's eyebrow idiom: small caps
+   tinted toward the active section accent, so groups read at a glance. */
 .botAvatarPresetControl legend,
 .botAvatarExpressionRow legend,
-.botAvatarEyeScalePresetControl legend,
+.botAvatarEyeScalePresetControl legend {
+  color: color-mix(
+    in srgb,
+    var(--bot-avatar-section-accent, var(--editor-bot-color, var(--accent))) 52%,
+    var(--fg-muted)
+  );
+  font-size: 10.5px;
+  font-weight: 760;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
 .botAvatarOverrideControl > span > strong,
 .botAvatarRangeControl > span {
   color: var(--fg);
@@ -36664,15 +37200,9 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     0 8px 18px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 10%, transparent);
 }
 
-.botAvatarExpressionMatrix {
-  min-width: 0;
-  display: grid;
-  gap: 12px;
-}
-
 .botAvatarFontOptions {
   min-width: 0;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(56px, 1fr));
 }
 
 .form button.botAvatarFontOption,
@@ -36802,23 +37332,6 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.045);
 }
 
-.botAvatarGlyphSectionHeader {
-  min-width: 0;
-}
-
-.botAvatarGlyphSectionHeader > span {
-  min-width: 0;
-  display: grid;
-  gap: 2px;
-}
-
-.botAvatarGlyphSectionHeader strong {
-  color: var(--fg);
-  font-size: 12px;
-  font-weight: 780;
-}
-
-.botAvatarGlyphSectionHeader small,
 .botAvatarGlyphInputField > span {
   color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 38%, var(--fg-muted));
   font-size: 11px;
@@ -36870,6 +37383,25 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+}
+
+.botAvatarMouthCustomRow {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(132px, 148px);
+  gap: 10px;
+  align-items: stretch;
+}
+
+.botAvatarMouthCustomRow .botAvatarGlyphInputField {
+  align-self: stretch;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 13%, #303846);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.012)),
+    rgba(255, 255, 255, 0.018);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
 }
 
 .botAvatarOverrideInputRow {
@@ -36948,7 +37480,18 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
 }
 
-.botAvatarCustomChoiceGroup legend,
+.botAvatarCustomChoiceGroup legend {
+  color: color-mix(
+    in srgb,
+    var(--bot-avatar-section-accent, var(--editor-bot-color, var(--accent))) 52%,
+    var(--fg-muted)
+  );
+  font-size: 10.5px;
+  font-weight: 760;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
 .botAvatarSingleGlyphInput span {
   color: var(--fg);
   font-size: 12px;
@@ -37010,9 +37553,15 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .botAvatarThinkingControl legend {
   padding: 0;
-  color: var(--fg);
-  font-size: 12px;
+  color: color-mix(
+    in srgb,
+    var(--bot-avatar-section-accent, var(--editor-bot-color, var(--accent))) 52%,
+    var(--fg-muted)
+  );
+  font-size: 10.5px;
   font-weight: 760;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
 }
 
 .botAvatarThinkingTiles {
@@ -37370,17 +37919,15 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .botAvatarMouthRotationBody {
   min-width: 0;
   display: grid;
-  grid-template-columns: minmax(92px, 108px) minmax(0, 1fr);
-  align-items: center;
-  gap: 12px;
+  place-items: center;
 }
 
 .botAvatarMouthRotationWheel {
   position: relative;
   width: 100%;
   aspect-ratio: 1;
-  min-width: 92px;
-  max-width: 108px;
+  min-width: 78px;
+  max-width: 88px;
   overflow: hidden;
   display: grid;
   place-items: center;
@@ -37452,14 +37999,21 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 76%, var(--fg));
   font-size: 18px;
   line-height: 1;
-  transform: rotate(var(--bot-avatar-mouth-rotation, 0deg));
-  transform-origin: center;
+  transform: none;
   pointer-events: none;
 }
 
-.botAvatarMouthRotationBody input {
-  min-width: 0;
-  width: 100%;
+.botAvatarMouthRotationGlyphText {
+  display: inline-grid;
+  place-items: center;
+  inline-size: max-content;
+  min-inline-size: 1em;
+  block-size: 1em;
+  line-height: 1;
+  text-align: center;
+  transform: rotate(var(--bot-avatar-mouth-rotation, 0deg));
+  transform-box: border-box;
+  transform-origin: center center;
 }
 
 .botAvatarRangeControl {
@@ -50277,8 +50831,9 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   --zen-live-bot-glyph-x-anchor: 0px;
   --zen-live-bot-glyph-y-anchor: calc(var(--zen-live-bot-avatar-body-size) * 0.37);
   --zen-live-bot-frame-tint-color: var(--coffee-seat-emotion-color);
+  --zen-live-bot-face-phosphor-ink: #ffffff;
   --zen-live-bot-face-ink: color-mix(in srgb, var(--coffee-seat-emotion-color) 88%, #ffffff 12%);
-  --zen-live-bot-glyph-ink: color-mix(in srgb, var(--coffee-seat-emotion-color) 88%, #ffffff 12%);
+  --zen-live-bot-glyph-ink: var(--zen-live-bot-face-phosphor-ink);
   --bot-face-crt-screen-texture-blend-mode: luminosity;
   --coffee-seat-emotion-face-scale: 1;
   --zen-live-bot-eye-local-x: -0.2;
@@ -50544,6 +51099,13 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .botFaceFrame {
   --bot-face-frame-base-image: url("/bot-frame/bot-frame-base.png?v=1000");
   --bot-face-frame-tint-mask: url("/bot-frame/bot-frame-tint-mask.png?v=1000");
+  --bot-face-metal-scratch-mask-image: url("/bot-frame/bot-frame-metal-mask.png?v=1000");
+  --bot-face-metal-scratch-opacity: 0;
+  --bot-face-metal-scratch-rotation: 0deg;
+  --bot-face-metal-scratch-x: 0%;
+  --bot-face-metal-scratch-y: 0%;
+  --bot-face-metal-scratch-scale: 1.14;
+  --bot-face-metal-scratch-contrast: 1.12;
   position: absolute;
   inset: var(--bot-face-frame-inset, -7%);
   z-index: var(--bot-face-frame-z, 2);
@@ -50587,6 +51149,49 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   );
   opacity: var(--bot-face-frame-tint-opacity, var(--coffee-seat-mood-frame-raster-opacity, 1));
   transition: opacity 280ms ease;
+}
+
+.botFaceFrameMetalScratchLayer {
+  /* Physical scratch map: paired dark grooves and pale catch-light edges stay
+     masked to the metal while the rotating metal-light raster sweeps above them. */
+  position: absolute;
+  inset: -9%;
+  display: block;
+  pointer-events: none;
+  background:
+    linear-gradient(104deg, transparent 0 46%, rgba(255, 255, 255, 0.58) 46.25% 46.65%, transparent 47.1%),
+    linear-gradient(104deg, transparent 0 61%, rgba(0, 0, 0, 0.34) 61.2% 61.5%, rgba(255, 255, 255, 0.38) 61.65% 61.95%, transparent 62.35%),
+    linear-gradient(28deg, transparent 0 52%, rgba(255, 255, 255, 0.34) 52.15% 52.45%, transparent 52.9%),
+    linear-gradient(149deg, transparent 0 38%, rgba(0, 0, 0, 0.24) 38.1% 38.35%, rgba(255, 255, 255, 0.28) 38.45% 38.7%, transparent 39.1%);
+  background-size:
+    142px 76px,
+    188px 110px,
+    96px 64px,
+    164px 94px;
+  background-position:
+    8px 17px,
+    -44px 36px,
+    28px -16px,
+    54px 7px;
+  background-repeat: repeat;
+  opacity: var(--bot-face-metal-scratch-opacity);
+  mix-blend-mode: soft-light;
+  filter: contrast(var(--bot-face-metal-scratch-contrast)) brightness(1.08);
+  -webkit-mask-image: var(--bot-face-metal-scratch-mask-image);
+  -webkit-mask-position: center;
+  -webkit-mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-mode: luminance;
+  mask-image: var(--bot-face-metal-scratch-mask-image);
+  mask-position: center;
+  mask-size: contain;
+  mask-repeat: no-repeat;
+  mask-mode: luminance;
+  transform:
+    translate3d(var(--bot-face-metal-scratch-x), var(--bot-face-metal-scratch-y), 0)
+    rotate(var(--bot-face-metal-scratch-rotation))
+    scale(var(--bot-face-metal-scratch-scale));
+  transform-origin: 50% 50%;
 }
 
 .botFaceFrameLed {
@@ -50693,6 +51298,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   --coffee-face-mouth-track: 0.4em;
   --coffee-face-gap: 0em;
   --coffee-face-mouth-font-size: 0.82em;
+  --coffee-face-single-glyph-paint-pad-block: 0.18em;
+  --coffee-face-single-glyph-paint-pad-inline: 0.28em;
   --coffee-plate-emoji-flip-anchor-x: 0px;
   display: block;
   font-family: var(--prism-face-font);
@@ -50717,14 +51324,22 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .coffeeSeatPlateEmoji,
 .messageMoodCoffeeFace,
 .zenLiveBotPresenceFaceGlyph {
+  --crt-face-edge-color: var(
+    --zen-live-bot-face-crt-border-color,
+    var(--coffee-bot-color, var(--coffee-seat-emotion-color, currentColor))
+  );
   --crt-bloom-opacity: 0.075;
   --crt-bloom-radius: 1.4px;
-  --crt-chromatic-offset: 0.34px;
-  --crt-chromatic-opacity: 0.026;
+  --crt-chromatic-offset: 0.46px;
+  --crt-chromatic-opacity: 0.04;
+  --crt-face-glow-radius-scale: var(--bot-face-weight-glow-radius-scale, 1);
+  --crt-face-glow-strength-scale: 1;
+  --coffee-face-feature-paint-pad-inline: 0.18em;
   --crt-face-glow-filter:
-    drop-shadow(0 0 0.06em color-mix(in srgb, currentColor 58%, transparent))
-    drop-shadow(0 0 0.18em color-mix(in srgb, currentColor 30%, transparent))
-    drop-shadow(0 0 0.34em color-mix(in srgb, currentColor 14%, transparent));
+    drop-shadow(0 0 calc(0.045em * var(--crt-face-glow-radius-scale)) color-mix(in srgb, var(--crt-face-edge-color) 72%, transparent))
+    drop-shadow(0 0 calc(0.1em * var(--crt-face-glow-radius-scale)) color-mix(in srgb, var(--crt-face-edge-color) 54%, transparent))
+    drop-shadow(0 0 calc(0.23em * var(--crt-face-glow-radius-scale)) color-mix(in srgb, var(--crt-face-edge-color) 32%, transparent))
+    drop-shadow(0 0 calc(0.44em * var(--crt-face-glow-radius-scale)) color-mix(in srgb, var(--crt-face-edge-color) 18%, transparent));
   display: inline-grid;
   grid-template-areas: "eyes mouth";
   grid-template-columns: var(--coffee-face-eye-track, 0.4em) var(--coffee-face-mouth-track, 0.4em);
@@ -50746,7 +51361,11 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   transition: none;
 }
 
-.coffeeSeat[data-mood-near-desaturated="true"] .coffeeSeatPlateEmoji,
+.coffeeSeat[data-mood-near-desaturated="true"] .coffeeSeatPlateEmoji {
+  --crt-chromatic-offset: 0.72px;
+  --crt-chromatic-opacity: 0.085;
+}
+
 .zenLiveBotPresencePlate[data-transitioning="true"] .zenLiveBotPresenceFaceGlyph {
   --crt-chromatic-opacity: 0;
 }
@@ -50786,12 +51405,35 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   display: grid;
   place-items: center;
   position: relative;
-  inline-size: 1em;
-  block-size: 1em;
+  inline-size: calc(
+    1em +
+    var(--coffee-face-single-glyph-paint-pad-inline, 0em) +
+    var(--coffee-face-single-glyph-paint-pad-inline, 0em)
+  );
+  min-inline-size: calc(
+    1em +
+    var(--coffee-face-single-glyph-paint-pad-inline, 0em) +
+    var(--coffee-face-single-glyph-paint-pad-inline, 0em)
+  );
+  max-inline-size: none;
+  block-size: calc(
+    1em +
+    var(--coffee-face-single-glyph-paint-pad-block, 0em) +
+    var(--coffee-face-single-glyph-paint-pad-block, 0em)
+  );
+  min-block-size: calc(
+    1em +
+    var(--coffee-face-single-glyph-paint-pad-block, 0em) +
+    var(--coffee-face-single-glyph-paint-pad-block, 0em)
+  );
+  margin-inline: calc(var(--coffee-face-single-glyph-paint-pad-inline, 0em) * -1);
+  margin-block: calc(var(--coffee-face-single-glyph-paint-pad-block, 0em) * -1);
   font-size: 1em;
   font-weight: 780;
   line-height: 1;
   color: inherit;
+  --crt-glyph-core-paint-bleed: 0.16em;
+  overflow: visible;
   text-align: center;
   text-shadow:
     0 0 0.12em color-mix(in srgb, currentColor 76%, transparent),
@@ -50805,29 +51447,167 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   box-sizing: border-box;
   display: grid;
   place-items: center;
-  inline-size: 100%;
-  min-inline-size: 0;
+  inline-size: calc(
+    100% +
+    var(--coffee-face-feature-paint-pad-inline, 0em) +
+    var(--coffee-face-feature-paint-pad-inline, 0em)
+  );
+  min-inline-size: calc(
+    100% +
+    var(--coffee-face-feature-paint-pad-inline, 0em) +
+    var(--coffee-face-feature-paint-pad-inline, 0em)
+  );
+  max-inline-size: none;
   block-size: 1em;
+  margin-inline: calc(var(--coffee-face-feature-paint-pad-inline, 0em) * -1);
   line-height: 1;
   position: relative;
   color: inherit;
-  -webkit-text-stroke: var(--bot-face-weight-stroke, 0) currentColor;
+  justify-self: center;
+  --crt-face-glow-radius-scale: var(--bot-face-weight-glow-radius-scale, 1);
+  --crt-weighted-bloom-radius: calc(
+    var(--crt-bloom-radius, 1.4px) * var(--crt-face-glow-radius-scale)
+  );
+  overflow: visible;
+  text-align: center;
+  -webkit-text-stroke: var(--bot-face-weight-stroke, 0)
+    var(--crt-face-edge-color, currentColor);
   paint-order: stroke fill;
   transform-origin: center center;
   transition: none;
 }
 
-/* Emissive glyph bloom: a tiny blurred clone simulates phosphor spill around
-   bright strokes. It inherits color and parent opacity, so light flicker dims it
-   with the glyph instead of becoming a shadow. */
+/* Glyph alpha is the emission field: core, lit phosphors, bloom, and convergence
+   all derive from the actual face silhouette instead of a circular glow. */
 .coffeeSeatPlateEmoji [data-crt-glyph-layer="true"],
+.messageMoodCoffeeFace [data-crt-glyph-layer="true"],
 .zenLiveBotPresenceFaceGlyph [data-crt-glyph-layer="true"] {
+  --crt-glyph-paint-bleed: var(--crt-glyph-core-paint-bleed, 0.08em);
+  --crt-glyph-core-opacity: var(--crt-core-opacity, 0.82);
+  --crt-face-glow-radius-scale: var(--bot-face-weight-glow-radius-scale, 1);
+  --crt-weighted-bloom-radius: calc(
+    var(--crt-bloom-radius, 1.4px) * var(--crt-face-glow-radius-scale)
+  );
+  --crt-glyph-beam-softness: calc(
+    var(--crt-beam-softness, 0.45px) * var(--crt-face-glow-radius-scale)
+  );
+  --crt-glyph-bloom-strength-scale: var(--bot-face-glow-strength-scale, 1);
+  --crt-glyph-bloom-narrow-radius: calc(
+    var(--crt-bloom-narrow-radius, var(--crt-bloom-radius, 1.4px)) *
+      var(--crt-face-glow-radius-scale)
+  );
+  --crt-glyph-bloom-narrow-strength: var(
+    --crt-bloom-narrow-strength,
+    var(--crt-bloom-opacity, 0.075)
+  );
+  --crt-glyph-bloom-wide-radius: calc(
+    var(--crt-bloom-wide-radius, 6px) * var(--crt-face-glow-radius-scale)
+  );
+  --crt-glyph-bloom-wide-strength: var(--crt-bloom-wide-strength, 0.08);
+  --crt-glyph-phosphor-opacity: var(--crt-phosphor-opacity, 0.16);
+  --crt-glyph-phosphor-midtone-strength: var(--crt-phosphor-midtone-strength, 0.38);
+  --crt-glyph-phosphor-bright-strength: var(--crt-phosphor-bright-strength, 0.14);
+  --crt-glyph-phosphor-scale: var(--crt-phosphor-scale, 2.4px);
+  --crt-glyph-core-red-rgb: var(--crt-phosphor-red-rgb, 255 246 238);
+  --crt-glyph-core-green-rgb: var(--crt-phosphor-green-rgb, 235 255 246);
+  --crt-glyph-core-blue-rgb: var(--crt-phosphor-blue-rgb, 218 238 255);
+  --crt-glyph-convergence-offset: var(
+    --crt-convergence-offset,
+    var(--crt-chromatic-offset, 0.46px)
+  );
+  --crt-glyph-convergence-opacity: var(
+    --crt-convergence-opacity,
+    var(--crt-chromatic-opacity, 0.04)
+  );
+  display: inline-grid;
+  place-items: center;
+  inline-size: max-content;
+  min-inline-size: 100%;
+  block-size: 1em;
+  max-inline-size: none;
+  padding-inline: var(--crt-glyph-paint-bleed);
+  margin-inline: calc(var(--crt-glyph-paint-bleed) * -1);
+  justify-self: center;
+  align-self: center;
   position: relative;
   isolation: isolate;
+  overflow: visible;
+  box-sizing: border-box;
+  color: currentColor;
+  line-height: inherit;
+  text-align: center;
+  white-space: pre;
+  transform-box: border-box;
+  transform-origin: center center;
+  -webkit-text-stroke: inherit;
+  paint-order: inherit;
+  background:
+    linear-gradient(
+      180deg,
+      rgb(255 255 255 / var(--crt-glyph-core-opacity)),
+      color-mix(in srgb, #ffffff 84%, currentColor 16%)
+    ),
+    repeating-linear-gradient(
+      90deg,
+      rgb(var(--crt-glyph-core-red-rgb) / var(--crt-glyph-phosphor-midtone-strength))
+        0 calc(var(--crt-glyph-phosphor-scale) * 0.22),
+      rgb(255 255 255 / var(--crt-glyph-phosphor-bright-strength))
+        calc(var(--crt-glyph-phosphor-scale) * 0.22)
+        calc(var(--crt-glyph-phosphor-scale) * 0.34),
+      rgb(var(--crt-glyph-core-green-rgb) / var(--crt-glyph-phosphor-midtone-strength))
+        calc(var(--crt-glyph-phosphor-scale) * 0.34)
+        calc(var(--crt-glyph-phosphor-scale) * 0.56),
+      rgb(255 255 255 / var(--crt-glyph-phosphor-bright-strength))
+        calc(var(--crt-glyph-phosphor-scale) * 0.56)
+        calc(var(--crt-glyph-phosphor-scale) * 0.68),
+      rgb(var(--crt-glyph-core-blue-rgb) / var(--crt-glyph-phosphor-midtone-strength))
+        calc(var(--crt-glyph-phosphor-scale) * 0.68)
+        calc(var(--crt-glyph-phosphor-scale) * 0.9),
+      rgb(255 255 255 / var(--crt-glyph-phosphor-bright-strength))
+        calc(var(--crt-glyph-phosphor-scale) * 0.9) var(--crt-glyph-phosphor-scale)
+    );
+  background-size:
+    100% 100%,
+    var(--crt-glyph-phosphor-scale) 100%;
+  background-blend-mode: screen;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow:
+    0 0 var(--crt-glyph-beam-softness)
+      color-mix(in srgb, var(--crt-face-edge-color) 46%, transparent);
+  filter: brightness(1.07) contrast(1.02);
+}
+
+.coffeeSeatPlateEmoji:not([data-face-eye-character])
+  [data-coffee-plate-emoji-part="eyes"]
+  > [data-crt-glyph-layer="true"],
+.messageMoodCoffeeFace:not([data-face-eye-character])
+  [data-coffee-plate-emoji-part="eyes"]
+  > [data-crt-glyph-layer="true"],
+.zenLiveBotPresenceFaceGlyph:not([data-face-eye-character])
+  [data-coffee-plate-emoji-part="eyes"]
+  > [data-crt-glyph-layer="true"],
+.coffeeSeatPlateEmoji:not([data-face-mouth-character])
+  [data-coffee-plate-emoji-part="mouth"]
+  > [data-crt-glyph-layer="true"],
+.messageMoodCoffeeFace:not([data-face-mouth-character])
+  [data-coffee-plate-emoji-part="mouth"]
+  > [data-crt-glyph-layer="true"],
+.zenLiveBotPresenceFaceGlyph:not([data-face-mouth-character])
+  [data-coffee-plate-emoji-part="mouth"]
+  > [data-crt-glyph-layer="true"] {
+  --crt-glyph-core-red-rgb: 255 255 255;
+  --crt-glyph-core-green-rgb: 255 255 255;
+  --crt-glyph-core-blue-rgb: 255 255 255;
+  --crt-glyph-phosphor-midtone-strength: 0.14;
+  --crt-glyph-phosphor-bright-strength: 0.04;
 }
 
 .coffeeSeatPlateEmoji [data-crt-glyph-layer="true"]::before,
 .coffeeSeatPlateEmoji [data-crt-glyph-layer="true"]::after,
+.messageMoodCoffeeFace [data-crt-glyph-layer="true"]::before,
+.messageMoodCoffeeFace [data-crt-glyph-layer="true"]::after,
 .zenLiveBotPresenceFaceGlyph [data-crt-glyph-layer="true"]::before,
 .zenLiveBotPresenceFaceGlyph [data-crt-glyph-layer="true"]::after {
   content: attr(data-crt-glyph-content);
@@ -50841,36 +51621,68 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   letter-spacing: inherit;
   line-height: inherit;
   -webkit-text-stroke: 0;
+  -webkit-background-clip: border-box;
+  background-clip: border-box;
+  -webkit-text-fill-color: currentColor;
+  background: none;
   paint-order: fill;
   pointer-events: none;
 }
 
 .coffeeSeatPlateEmoji [data-crt-glyph-layer="true"]::before,
+.messageMoodCoffeeFace [data-crt-glyph-layer="true"]::before,
 .zenLiveBotPresenceFaceGlyph [data-crt-glyph-layer="true"]::before {
   font-weight: var(--bot-face-glow-font-weight, 560);
   font-variation-settings: "wght" var(--bot-face-glow-font-weight, 560);
-  -webkit-text-stroke: var(--bot-face-glow-stroke, 0) currentColor;
+  -webkit-text-stroke: var(--bot-face-glow-stroke, 0)
+    var(--crt-face-edge-color, currentColor);
   paint-order: stroke fill;
-  opacity: var(--crt-bloom-opacity);
+  color: var(--crt-face-edge-color, currentColor);
+  opacity: 1;
+  text-shadow:
+    0 0 var(--crt-glyph-bloom-narrow-radius)
+      color-mix(
+        in srgb,
+        var(--crt-face-edge-color) calc(76% * var(--crt-glyph-bloom-strength-scale, 1)),
+        transparent
+      ),
+    0 0 calc(var(--crt-glyph-bloom-narrow-radius) * 2.2)
+      color-mix(
+        in srgb,
+        var(--crt-face-edge-color) calc(42% * var(--crt-glyph-bloom-strength-scale, 1)),
+        transparent
+      ),
+    0 0 var(--crt-glyph-bloom-wide-radius)
+      color-mix(
+        in srgb,
+        var(--crt-face-edge-color) calc(30% * var(--crt-glyph-bloom-strength-scale, 1)),
+        transparent
+      ),
+    0 0 calc(var(--crt-glyph-bloom-wide-radius) * 1.45)
+      color-mix(
+        in srgb,
+        var(--crt-face-edge-color) calc(18% * var(--crt-glyph-bloom-strength-scale, 1)),
+        transparent
+      );
   filter:
-    blur(var(--crt-bloom-radius))
+    blur(var(--crt-glyph-beam-softness))
     var(--crt-face-glow-filter);
-  mix-blend-mode: plus-lighter;
+  mix-blend-mode: var(--crt-face-glow-blend-mode, screen);
 }
 
-/* Micro chromatic bleed: overdriven RGB phosphors separate by a fraction of a
-   pixel. The layer is disabled through --crt-chromatic-opacity on dim states. */
+/* Micro convergence: tiny beam offsets live behind the neutral core, not as an RGB glitch. */
 .coffeeSeatPlateEmoji [data-crt-glyph-layer="true"]::after,
+.messageMoodCoffeeFace [data-crt-glyph-layer="true"]::after,
 .zenLiveBotPresenceFaceGlyph [data-crt-glyph-layer="true"]::after {
   color: transparent;
   text-shadow:
-    calc(0px - var(--crt-chromatic-offset)) 0 0
-      color-mix(in srgb, #ff3b54 72%, currentColor 28%),
-    var(--crt-chromatic-offset) 0 0
-      color-mix(in srgb, #46dfff 76%, currentColor 24%);
-  opacity: var(--crt-chromatic-opacity);
+    calc(0px - var(--crt-glyph-convergence-offset)) 0 0.2px
+      rgb(255 54 78 / var(--crt-glyph-convergence-opacity)),
+    var(--crt-glyph-convergence-offset) 0 0.2px
+      rgb(70 218 255 / var(--crt-glyph-convergence-opacity));
+  opacity: 1;
   mix-blend-mode: screen;
-  filter: brightness(1.08) contrast(1.04);
+  filter: brightness(1.04) contrast(1.02);
 }
 
 .coffeeSeatPlateEmoji [data-coffee-plate-emoji-part="mouth"],
@@ -50878,10 +51690,21 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part="mouth"] {
   grid-area: mouth;
   font-size: var(--coffee-face-mouth-font-size, 0.82em);
+  transform-origin: center center;
   transform:
     translate(var(--bot-face-mouth-offset-x, 0em), var(--bot-face-mouth-offset-y, 0em))
-    rotate(var(--bot-face-mouth-rotation, 0deg))
     scale(var(--bot-face-mouth-scale, 1));
+}
+
+.coffeeSeatPlateEmoji [data-coffee-plate-emoji-part="mouth"] > [data-crt-glyph-layer="true"],
+.messageMoodCoffeeFace [data-coffee-plate-emoji-part="mouth"] > [data-crt-glyph-layer="true"],
+.zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part="mouth"] > [data-crt-glyph-layer="true"] {
+  inline-size: max-content;
+  min-inline-size: 100%;
+  block-size: 1em;
+  transform: rotate(var(--bot-face-mouth-rotation, 0deg));
+  transform-box: border-box;
+  transform-origin: center center;
 }
 
 .coffeeSeatPlateEmoji [data-coffee-plate-emoji-part="mouth"][data-coffee-plate-emoji-glyph="0"],
@@ -50893,11 +51716,33 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part="mouth"][data-coffee-plate-emoji-glyph="0"],
 .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part="mouth"][data-coffee-plate-emoji-glyph="o"],
 .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part="mouth"][data-coffee-plate-emoji-glyph="O"] {
-  inline-size: 1.04em;
+  inline-size: 1.12em;
   block-size: 1.12em;
-  margin: -0.06em -0.02em;
-  line-height: 1.08;
+  margin: 0;
+  justify-self: center;
+  align-self: center;
+  place-items: center;
+  line-height: 1;
   overflow: visible;
+  transform-origin: center center;
+}
+
+.coffeeSeatPlateEmoji [data-coffee-plate-emoji-part="mouth"][data-coffee-plate-emoji-glyph="0"] > [data-crt-glyph-layer="true"],
+.coffeeSeatPlateEmoji [data-coffee-plate-emoji-part="mouth"][data-coffee-plate-emoji-glyph="o"] > [data-crt-glyph-layer="true"],
+.coffeeSeatPlateEmoji [data-coffee-plate-emoji-part="mouth"][data-coffee-plate-emoji-glyph="O"] > [data-crt-glyph-layer="true"],
+.messageMoodCoffeeFace [data-coffee-plate-emoji-part="mouth"][data-coffee-plate-emoji-glyph="0"] > [data-crt-glyph-layer="true"],
+.messageMoodCoffeeFace [data-coffee-plate-emoji-part="mouth"][data-coffee-plate-emoji-glyph="o"] > [data-crt-glyph-layer="true"],
+.messageMoodCoffeeFace [data-coffee-plate-emoji-part="mouth"][data-coffee-plate-emoji-glyph="O"] > [data-crt-glyph-layer="true"],
+.zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part="mouth"][data-coffee-plate-emoji-glyph="0"] > [data-crt-glyph-layer="true"],
+.zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part="mouth"][data-coffee-plate-emoji-glyph="o"] > [data-crt-glyph-layer="true"],
+.zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part="mouth"][data-coffee-plate-emoji-glyph="O"] > [data-crt-glyph-layer="true"] {
+  inline-size: 100%;
+  min-inline-size: 100%;
+  block-size: 100%;
+  place-items: center;
+  justify-self: center;
+  align-self: center;
+  line-height: 1;
 }
 
 .coffeeSeatPlateEmoji [data-coffee-plate-emoji-part="eyes"],
@@ -51065,9 +51910,31 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   box-sizing: border-box;
   display: grid;
   place-items: center;
-  inline-size: 1em;
-  block-size: 1em;
+  inline-size: calc(
+    1em +
+    var(--coffee-face-single-glyph-paint-pad-inline, 0em) +
+    var(--coffee-face-single-glyph-paint-pad-inline, 0em)
+  );
+  min-inline-size: calc(
+    1em +
+    var(--coffee-face-single-glyph-paint-pad-inline, 0em) +
+    var(--coffee-face-single-glyph-paint-pad-inline, 0em)
+  );
+  max-inline-size: none;
+  block-size: calc(
+    1em +
+    var(--coffee-face-single-glyph-paint-pad-block, 0em) +
+    var(--coffee-face-single-glyph-paint-pad-block, 0em)
+  );
+  min-block-size: calc(
+    1em +
+    var(--coffee-face-single-glyph-paint-pad-block, 0em) +
+    var(--coffee-face-single-glyph-paint-pad-block, 0em)
+  );
+  margin-inline: calc(var(--coffee-face-single-glyph-paint-pad-inline, 0em) * -1);
+  margin-block: calc(var(--coffee-face-single-glyph-paint-pad-block, 0em) * -1);
   color: inherit;
+  --crt-glyph-core-paint-bleed: 0.16em;
   font-family: var(--font-ui-sans), system-ui, sans-serif;
   font-size: 1em;
   font-weight: 840;
@@ -51079,6 +51946,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     0 0 0.12em color-mix(in srgb, currentColor 78%, transparent),
     0 0 0.36em color-mix(in srgb, currentColor 44%, transparent),
     0 0 0.68em color-mix(in srgb, var(--coffee-bot-color) 32%, transparent);
+  overflow: visible;
   transform: translateY(-0.015em);
 }
 
@@ -51172,7 +52040,6 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
       var(--bot-face-mouth-offset-x, 0em),
       calc(var(--bot-face-mouth-offset-y, 0em) - 0.015em)
     )
-    rotate(var(--bot-face-mouth-rotation, 0deg))
     scale(var(--bot-face-mouth-scale, 1))
     scale(1.06);
 }
