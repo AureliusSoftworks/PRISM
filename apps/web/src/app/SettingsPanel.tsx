@@ -11,6 +11,7 @@ import {
   SlidersHorizontal,
   Sparkles,
   UserRound,
+  Volume2,
 } from "lucide-react";
 import styles from "./page.module.css";
 
@@ -22,6 +23,7 @@ export type SettingsScope =
   | "experimental"
   | "models"
   | "behavior"
+  | "voice"
   | "about"
   | "account";
 
@@ -53,6 +55,7 @@ const SETTINGS_NAV_GROUPS: readonly {
       { scope: "network", title: "Network", icon: <Network size={16} strokeWidth={2} /> },
       { scope: "experimental", title: "Experimental", icon: <FlaskConical size={16} strokeWidth={2} /> },
       { scope: "behavior", title: "Behavior", icon: <Brain size={16} strokeWidth={2} /> },
+      { scope: "voice", title: "Voice", icon: <Volume2 size={16} strokeWidth={2} /> },
     ],
   },
   {

@@ -1,4 +1,4 @@
-import type { ComfyUiWorkflowRegistration } from "@localai/shared";
+import type { ComfyUiWorkflowRegistration, EnglishVoiceEngine, VoiceMode } from "@localai/shared";
 import {
   DEFAULT_PRISM_MOOD_SENSITIVITY,
   isComfyUiRemoteWorkflowModelId,
@@ -7,6 +7,10 @@ import {
   MIN_PRISM_MOOD_SENSITIVITY,
   normalizePrismMoodSensitivity,
   validateComfyUiWorkflowsPayload,
+  normalizeEnglishVoiceEngine,
+  normalizeVoiceMode,
+  BOT_AUDIO_VOICE_IDS,
+  type BotAudioVoiceId,
 } from "@localai/shared";
 import { sanitizeHiddenModelIds } from "./model-routing.ts";
 
@@ -28,6 +32,34 @@ import { sanitizeHiddenModelIds } from "./model-routing.ts";
  */
 export type Theme = "light" | "dark" | "system";
 export type Provider = "local" | "openai" | "anthropic";
+
+export interface ElevenLabsVoiceBank {
+  [voiceId: string]: string | null;
+}
+
+export function normalizeElevenLabsVoiceBank(value: unknown): ElevenLabsVoiceBank {
+  const record = value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  return Object.fromEntries(BOT_AUDIO_VOICE_IDS.map((slot) => {
+    const raw = record[slot];
+    const voiceId = typeof raw === "string" ? raw.trim().slice(0, 160) : "";
+    return [slot, voiceId || null];
+  })) as Record<BotAudioVoiceId, string | null>;
+}
+
+export function parseStoredElevenLabsVoiceBank(value: string | null | undefined): ElevenLabsVoiceBank {
+  if (!value) return normalizeElevenLabsVoiceBank({});
+  try { return normalizeElevenLabsVoiceBank(JSON.parse(value)); } catch { return normalizeElevenLabsVoiceBank({}); }
+}
+
+function normalizeElevenLabsVoiceModel(value: unknown, fallback: string | null): string | null {
+  if (value === undefined) return fallback;
+  if (value === null) return null;
+  if (typeof value !== "string") return fallback;
+  const normalized = value.trim().slice(0, 160);
+  return normalized || null;
+}
 
 export const DEFAULT_ZEN_WALLPAPER_OPACITY = 0.28;
 export const MIN_ZEN_WALLPAPER_OPACITY = 0.05;
@@ -130,6 +162,10 @@ export interface CurrentSettings {
   /** Null/empty → use normal hub chat model for turns that emit `sendGeneratedImage`. */
   prismImageToolLlmModel: string | null;
   primaryOllamaHost: string;
+  voiceMode: VoiceMode | string | null;
+  englishVoiceEngine: EnglishVoiceEngine | string | null;
+  elevenLabsVoiceBank: string | null;
+  elevenLabsVoiceModel: string | null;
 }
 
 /** Shape of the next-settings result, with OpenAI key intent captured separately. */
@@ -177,6 +213,10 @@ export interface NextSettings {
   comfyUiWorkflows: ComfyUiWorkflowRegistration[];
   prismDefaultLlmModel: string | null;
   prismImageToolLlmModel: string | null;
+  voiceMode: VoiceMode;
+  englishVoiceEngine: EnglishVoiceEngine;
+  elevenLabsVoiceBank: ElevenLabsVoiceBank;
+  elevenLabsVoiceModel: string | null;
   /**
    * Intent for the OpenAI API key:
    *   - "replace": caller sent a non-empty string; encrypt it
@@ -1016,6 +1056,18 @@ export function resolveNextSettings(
     body.prismImageToolLlmModel,
     current.prismImageToolLlmModel
   );
+  const voiceMode = normalizeVoiceMode(body.voiceMode, normalizeVoiceMode(current.voiceMode));
+  const englishVoiceEngine = normalizeEnglishVoiceEngine(
+    body.englishVoiceEngine,
+    normalizeEnglishVoiceEngine(current.englishVoiceEngine)
+  );
+  const elevenLabsVoiceBank = body.elevenLabsVoiceBank === undefined
+    ? parseStoredElevenLabsVoiceBank(current.elevenLabsVoiceBank)
+    : normalizeElevenLabsVoiceBank(body.elevenLabsVoiceBank);
+  const elevenLabsVoiceModel = normalizeElevenLabsVoiceModel(
+    body.elevenLabsVoiceModel,
+    current.elevenLabsVoiceModel
+  );
 
   const comfyUiWorkflows =
     body.comfyUiWorkflows === undefined
@@ -1103,6 +1155,10 @@ export function resolveNextSettings(
     comfyUiWorkflows,
     prismDefaultLlmModel,
     prismImageToolLlmModel,
+    voiceMode,
+    englishVoiceEngine,
+    elevenLabsVoiceBank,
+    elevenLabsVoiceModel,
     openAiKeyIntent,
     anthropicKeyIntent,
     elevenLabsKeyIntent,
