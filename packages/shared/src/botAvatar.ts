@@ -13,12 +13,21 @@ export type BotFaceFontId = (typeof BOT_FACE_FONT_IDS)[number];
 export const BOT_FACE_FONT_LABELS: Record<BotFaceFontId, string> = {
   neutral: "Core",
   warm: "Soft",
-  concise: "Sharp",
+  concise: "Doto",
   playful: "Bounce",
   formal: "Serif",
 };
 
 export const DEFAULT_BOT_FACE_FONT_ID: BotFaceFontId = "neutral";
+export const BOT_FACE_GLYPH_ANIMATIONS = [
+  "none",
+  "pulsate",
+  "spin",
+  "flicker",
+  "wobble",
+] as const;
+export type BotFaceGlyphAnimation = (typeof BOT_FACE_GLYPH_ANIMATIONS)[number];
+export const DEFAULT_BOT_FACE_GLYPH_ANIMATION: BotFaceGlyphAnimation = "none";
 export const DEFAULT_BOT_FACE_EYE_CHARACTER: string | null = null;
 export const DEFAULT_BOT_FACE_MOUTH_CHARACTER: string | null = null;
 export const DEFAULT_BOT_FACE_FONT_WEIGHT = 600;
@@ -37,6 +46,11 @@ export const DEFAULT_BOT_FACE_EYE_OFFSET_Y = 0;
 export const BOT_FACE_EYE_OFFSET_Y_MIN = -0.18;
 export const BOT_FACE_EYE_OFFSET_Y_MAX = 0.18;
 export const BOT_FACE_EYE_OFFSET_Y_STEP = 0.02;
+/** Plate-relative default — custom eyes inherit the same sideways orientation as built-ins. */
+export const DEFAULT_BOT_FACE_EYE_ROTATION_DEG = 0;
+export const BOT_FACE_EYE_ROTATION_DEG_MIN = -180;
+export const BOT_FACE_EYE_ROTATION_DEG_MAX = 180;
+export const BOT_FACE_EYE_ROTATION_DEG_STEP = 5;
 export const DEFAULT_BOT_FACE_MOUTH_SCALE = 1;
 export const BOT_FACE_MOUTH_SCALE_MIN = 0.7;
 export const BOT_FACE_MOUTH_SCALE_MAX = 1.5;
@@ -68,12 +82,16 @@ export const DEFAULT_BOT_FACE_THINKING_FRAMES: BotFaceThinkingFrames = [
 export interface BotFaceStyle {
   eyesFont: BotFaceFontId;
   eyeCharacter: string | null;
+  /** Legacy compatibility field. Custom eye glyphs do not animate. */
+  eyeAnimation: BotFaceGlyphAnimation;
   mouthFont: BotFaceFontId;
   mouthCharacter: string | null;
+  mouthAnimation: BotFaceGlyphAnimation;
   weight: number;
   eyeScale: number;
   eyeOffsetX: number;
   eyeOffsetY: number;
+  eyeRotationDeg: number;
   mouthScale: number;
   mouthOffsetX: number;
   mouthOffsetY: number;
@@ -85,12 +103,15 @@ export interface BotFaceStyle {
 export interface BotFaceStyleInput {
   faceEyesFont?: unknown;
   faceEyeCharacter?: unknown;
+  faceEyeAnimation?: unknown;
   faceMouthFont?: unknown;
   faceMouthCharacter?: unknown;
+  faceMouthAnimation?: unknown;
   faceFontWeight?: unknown;
   faceEyeScale?: unknown;
   faceEyeOffsetX?: unknown;
   faceEyeOffsetY?: unknown;
+  faceEyeRotationDeg?: unknown;
   faceMouthScale?: unknown;
   faceMouthOffsetX?: unknown;
   faceMouthOffsetY?: unknown;
@@ -112,8 +133,17 @@ export function normalizeBotFaceFontId(
   return isBotFaceFontId(value) ? value : null;
 }
 
+export function normalizeBotFaceGlyphAnimation(
+  value: unknown
+): BotFaceGlyphAnimation | null {
+  return typeof value === "string" &&
+    BOT_FACE_GLYPH_ANIMATIONS.includes(value as BotFaceGlyphAnimation)
+    ? (value as BotFaceGlyphAnimation)
+    : null;
+}
+
 const BOT_FACE_EMOJI_GLYPH_PATTERN =
-  /[\ufe0f]|\p{Emoji_Presentation}|\p{Extended_Pictographic}|\p{Emoji_Modifier}/u;
+  /[\u200d\u20e3\ufe0f]|\p{Emoji_Presentation}|\p{Emoji_Modifier}/u;
 
 function botFaceGraphemeHasEmoji(value: string): boolean {
   return BOT_FACE_EMOJI_GLYPH_PATTERN.test(value);
@@ -121,9 +151,9 @@ function botFaceGraphemeHasEmoji(value: string): boolean {
 
 export function normalizeBotFaceEyeCharacter(value: unknown): string | null {
   if (typeof value !== "string") return null;
-  const [character] = splitBotFaceVisibleGraphemes(value);
-  if (!character || botFaceGraphemeHasEmoji(character)) return null;
-  return character;
+  const [glyph] = splitBotFaceVisibleGraphemes(value);
+  if (!glyph || botFaceGraphemeHasEmoji(glyph)) return null;
+  return glyph;
 }
 
 export function normalizeBotFaceMouthCharacter(value: unknown): string | null {
@@ -176,6 +206,15 @@ export function normalizeBotFaceEyeOffsetY(value: unknown): number | null {
     BOT_FACE_EYE_OFFSET_Y_MIN,
     BOT_FACE_EYE_OFFSET_Y_MAX,
     BOT_FACE_EYE_OFFSET_Y_STEP
+  );
+}
+
+export function normalizeBotFaceEyeRotationDeg(value: unknown): number | null {
+  return normalizeSteppedBotFaceFloat(
+    value,
+    BOT_FACE_EYE_ROTATION_DEG_MIN,
+    BOT_FACE_EYE_ROTATION_DEG_MAX,
+    BOT_FACE_EYE_ROTATION_DEG_STEP
   );
 }
 
@@ -324,8 +363,12 @@ export function resolveBotFaceStyle(
   return {
     eyesFont: normalizeBotFaceFontId(input.faceEyesFont) ?? fallbackFont,
     eyeCharacter,
+    eyeAnimation: DEFAULT_BOT_FACE_GLYPH_ANIMATION,
     mouthFont: normalizeBotFaceFontId(input.faceMouthFont) ?? fallbackFont,
     mouthCharacter,
+    mouthAnimation:
+      normalizeBotFaceGlyphAnimation(input.faceMouthAnimation) ??
+      DEFAULT_BOT_FACE_GLYPH_ANIMATION,
     weight:
       normalizeBotFaceFontWeight(input.faceFontWeight) ??
       DEFAULT_BOT_FACE_FONT_WEIGHT,
@@ -340,6 +383,9 @@ export function resolveBotFaceStyle(
     eyeOffsetY:
       normalizeBotFaceEyeOffsetY(input.faceEyeOffsetY) ??
       DEFAULT_BOT_FACE_EYE_OFFSET_Y,
+    eyeRotationDeg:
+      normalizeBotFaceEyeRotationDeg(input.faceEyeRotationDeg) ??
+      DEFAULT_BOT_FACE_EYE_ROTATION_DEG,
     mouthScale:
       normalizeBotFaceMouthScale(input.faceMouthScale) ??
       DEFAULT_BOT_FACE_MOUTH_SCALE,
@@ -388,8 +434,10 @@ export function randomBotFaceStyle(random = Math.random): BotFaceStyle {
   return {
     eyesFont: pickFont(),
     eyeCharacter: DEFAULT_BOT_FACE_EYE_CHARACTER,
+    eyeAnimation: DEFAULT_BOT_FACE_GLYPH_ANIMATION,
     mouthFont: pickFont(),
     mouthCharacter: DEFAULT_BOT_FACE_MOUTH_CHARACTER,
+    mouthAnimation: DEFAULT_BOT_FACE_GLYPH_ANIMATION,
     weight,
     eyeScale: randomSteppedBotFaceScale(
       random,
@@ -399,6 +447,7 @@ export function randomBotFaceStyle(random = Math.random): BotFaceStyle {
     ),
     eyeOffsetX: DEFAULT_BOT_FACE_EYE_OFFSET_X,
     eyeOffsetY: DEFAULT_BOT_FACE_EYE_OFFSET_Y,
+    eyeRotationDeg: DEFAULT_BOT_FACE_EYE_ROTATION_DEG,
     mouthScale: randomSteppedBotFaceScale(
       random,
       BOT_FACE_MOUTH_SCALE_MIN,

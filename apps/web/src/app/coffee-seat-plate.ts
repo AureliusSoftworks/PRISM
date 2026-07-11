@@ -2,11 +2,11 @@ import type { ZenLiveBotMouthShape } from "./zenLiveMouth";
 
 export type CoffeeSeatEmojiMood = "happy" | "warm" | "neutral" | "sad" | "angry";
 
-export const COFFEE_SEAT_ANGRY_BRACKET_GLYPH = "\u02d0[" as const;
+export const COFFEE_SEAT_ANGRY_BRACKET_GLYPH = ":[" as const;
 export const COFFEE_SEAT_SIP_PLATE_GLYPH = { text: ":⁎", rotateDeg: 90 } as const;
-// Let the expression relax while the cup is already on its way back down so
-// the pucker does not linger after the visible drinking beat has finished.
-export const COFFEE_SEAT_SIP_FACE_ACTIVE_PROGRESS = 0.7;
+// Keep the pucker as a quick early beat: it lands while the mug is up, then
+// relaxes well before the cup begins its return at 76%.
+export const COFFEE_SEAT_SIP_FACE_ACTIVE_PROGRESS = 0.45;
 const COFFEE_SEAT_SIP_MOUTH_OFFSET_EM = 0.48;
 const COFFEE_SEAT_CENTER_SIP_MOUTH_OFFSET_EM = 0.36;
 const COFFEE_SEAT_SIP_MOUTH_DROP_EM = 0.17;
@@ -52,13 +52,15 @@ function coffeeSeatSipPresentationReason(args: {
   isSpeaking?: boolean | null;
 }): CoffeeSeatSipPresentationReason {
   if (args.seatIsFirmlySeated === false || args.isSpeaking === true) return "none";
-  if (args.sipInProgress) return "explicit-sip";
   const timedSipFaceActive = coffeeSeatTimedSipFaceActive({
     ageMs: args.completedSipAnimationAgeMs,
     durationMs: args.completedSipAnimationDurationMs,
   });
-  if (timedSipFaceActive === true) return "completed-sip-hold";
+  // The live action can outlast its cup animation. Once we have animation
+  // timing, let that clock release the pucker even if the action is still live.
   if (timedSipFaceActive === false) return "none";
+  if (args.sipInProgress) return "explicit-sip";
+  if (timedSipFaceActive === true) return "completed-sip-hold";
   if (args.cupSipping === true) return "cup-visual-sip";
   return "none";
 }
@@ -134,6 +136,10 @@ export function resolveCoffeeSeatSipFacePresentation(args: {
 }
 
 function coffeeSeatOpenMouthGlyph(mouthShape: ZenLiveBotMouthShape): string | null {
+  if (mouthShape === "speech-closed") return ":|";
+  if (mouthShape === "dot") return ":∙";
+  if (mouthShape === "at") return ":@";
+  if (mouthShape === "narrow") return ":o";
   if (mouthShape === "open-wide") return ":0";
   if (mouthShape === "open-small") return ":o";
   if (mouthShape === "open-round") return ":O";

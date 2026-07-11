@@ -224,10 +224,12 @@ export interface CoffeeBotProfile {
   faceEyeCharacter?: string | null;
   faceMouthFont?: string | null;
   faceMouthCharacter?: string | null;
+  faceMouthAnimation?: string | null;
   faceFontWeight?: number | null;
   faceEyeScale?: number | null;
   faceEyeOffsetX?: number | null;
   faceEyeOffsetY?: number | null;
+  faceEyeRotationDeg?: number | null;
   faceMouthScale?: number | null;
   faceMouthOffsetX?: number | null;
   faceMouthOffsetY?: number | null;
@@ -4876,12 +4878,15 @@ type CoffeeBotProfileRow = {
   glyph: string | null;
   face_eyes_font: string | null;
   face_eye_character: string | null;
+  face_eye_animation: string | null;
   face_mouth_font: string | null;
   face_mouth_character: string | null;
+  face_mouth_animation: string | null;
   face_font_weight: number | null;
   face_eye_scale: number | null;
   face_eye_offset_x: number | null;
   face_eye_offset_y: number | null;
+  face_eye_rotation_deg: number | null;
   face_mouth_scale: number | null;
   face_mouth_offset_x: number | null;
   face_mouth_offset_y: number | null;
@@ -4915,12 +4920,15 @@ function mapCoffeeBotProfileRow(row: CoffeeBotProfileRow): CoffeeBotProfile {
     faceEyeCharacter: row.face_eye_character ?? null,
     faceMouthFont: row.face_mouth_font ?? null,
     faceMouthCharacter: row.face_mouth_character ?? null,
+    faceMouthAnimation: row.face_mouth_animation ?? null,
     faceFontWeight: typeof row.face_font_weight === "number" ? row.face_font_weight : null,
     faceEyeScale: typeof row.face_eye_scale === "number" ? row.face_eye_scale : null,
     faceEyeOffsetX:
       typeof row.face_eye_offset_x === "number" ? row.face_eye_offset_x : null,
     faceEyeOffsetY:
       typeof row.face_eye_offset_y === "number" ? row.face_eye_offset_y : null,
+    faceEyeRotationDeg:
+      typeof row.face_eye_rotation_deg === "number" ? row.face_eye_rotation_deg : null,
     faceMouthScale:
       typeof row.face_mouth_scale === "number" ? row.face_mouth_scale : null,
     faceMouthOffsetX:
@@ -4970,12 +4978,15 @@ function loadCoffeeGroupProfileRows(
       `SELECT id, name, system_prompt, color, glyph,
               ${selectOptionalBotColumn("face_eyes_font")},
               ${selectOptionalBotColumn("face_eye_character")},
+              ${selectOptionalBotColumn("face_eye_animation")},
               ${selectOptionalBotColumn("face_mouth_font")},
               ${selectOptionalBotColumn("face_mouth_character")},
+              ${selectOptionalBotColumn("face_mouth_animation")},
               ${selectOptionalBotColumn("face_font_weight")},
               ${selectOptionalBotColumn("face_eye_scale")},
               ${selectOptionalBotColumn("face_eye_offset_x")},
               ${selectOptionalBotColumn("face_eye_offset_y")},
+              ${selectOptionalBotColumn("face_eye_rotation_deg")},
               ${selectOptionalBotColumn("face_mouth_scale")},
               ${selectOptionalBotColumn("face_mouth_offset_x")},
               ${selectOptionalBotColumn("face_mouth_offset_y")},

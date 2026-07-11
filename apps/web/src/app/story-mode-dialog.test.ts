@@ -110,7 +110,7 @@ describe("Story Mode dialog helpers", () => {
     assert.equal(storyNpcFaceTextForExpression("warm", true), ":0");
     assert.equal(storyNpcFaceTextForExpression("neutral", false), ":|");
     assert.equal(storyNpcFaceTextForExpression("neutral", true), ":o");
-    assert.equal(storyNpcFaceTextForExpression("guarded", false), "\u02d0[");
+    assert.equal(storyNpcFaceTextForExpression("guarded", false), ":[");
     assert.equal(storyNpcFaceTextForExpression("guarded", true), ":V");
     assert.equal(storyNpcFaceTextForExpression("strained", false), ";(");
     assert.equal(storyNpcFaceTextForExpression("strained", true), ";0");

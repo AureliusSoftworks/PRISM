@@ -22,11 +22,15 @@ function baseBotJson(overrides: Partial<PrismBotArchiveJson> = {}): PrismBotArch
       glyph: "lucideDrama",
       faceEyesFont: "formal",
       faceEyeCharacter: "8",
+      faceEyeAnimation: "wobble",
       faceMouthFont: "formal",
       faceFontWeight: 675,
       faceEyeScale: 1.15,
       faceEyeOffsetX: 0.06,
       faceEyeOffsetY: -0.08,
+      faceEyeRotationDeg: -35,
+      faceMouthCharacter: "△",
+      faceMouthAnimation: "flicker",
       faceMouthScale: 1.25,
       faceMouthOffsetX: -0.04,
       faceMouthOffsetY: 0.06,
@@ -51,9 +55,12 @@ describe("botArchive", () => {
     assert.equal(parsed.botJson.schema, PRISM_BOT_ARCHIVE_SCHEMA);
     assert.equal(parsed.botJson.bot.name, "Plato");
     assert.equal(parsed.botJson.bot.faceEyeCharacter, "8");
+    assert.equal(parsed.botJson.bot.faceEyeAnimation, "wobble");
     assert.equal(parsed.botJson.bot.faceEyeScale, 1.15);
     assert.equal(parsed.botJson.bot.faceEyeOffsetX, 0.06);
     assert.equal(parsed.botJson.bot.faceEyeOffsetY, -0.08);
+    assert.equal(parsed.botJson.bot.faceEyeRotationDeg, -35);
+    assert.equal(parsed.botJson.bot.faceMouthAnimation, "flicker");
     assert.equal(parsed.botJson.bot.faceMouthScale, 1.25);
     assert.equal(parsed.botJson.bot.faceMouthOffsetX, -0.04);
     assert.equal(parsed.botJson.bot.faceMouthOffsetY, 0.06);

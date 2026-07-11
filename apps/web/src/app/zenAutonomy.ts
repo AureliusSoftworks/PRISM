@@ -39,6 +39,17 @@ export interface ZenAutonomyEligibilityResult {
   idleMs: number;
 }
 
+/**
+ * Returns whether Zen's autonomy scheduler may enqueue another state tick.
+ */
+export function zenAutonomySchedulerIsActive(input: {
+  view: ZenAutonomyEligibilityInput["view"];
+  enabled: boolean;
+  hasUser: boolean;
+}): boolean {
+  return input.view === "chat" && input.enabled && input.hasUser;
+}
+
 export function resolveZenAutonomyEligibility(
   input: ZenAutonomyEligibilityInput
 ): ZenAutonomyEligibilityResult {

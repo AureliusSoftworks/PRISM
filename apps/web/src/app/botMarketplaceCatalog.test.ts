@@ -406,7 +406,7 @@ describe("bot marketplace static catalog", () => {
       ],
       [
         "iris",
-        { preset: "Sharp", eyesFont: "concise", mouthFont: "concise", weight: 600, eyeScale: 1, eyeOffsetY: 0 },
+        { preset: "Doto", eyesFont: "concise", mouthFont: "concise", weight: 600, eyeScale: 1, eyeOffsetY: 0 },
       ],
       [
         "sol",

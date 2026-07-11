@@ -150,7 +150,7 @@ describe("API request integration", () => {
     assert.deepEqual(fetchRecorder.calls, []);
   });
 
-  it("accepts the canonical blank-space blink on bot updates", async () => {
+  it("persists mouth animation and eye rotation while ignoring legacy eye animation", async () => {
     const client = createClient();
     const register = await client.request(
       "/api/auth/register",
@@ -160,19 +160,55 @@ describe("API request integration", () => {
 
     const created = await client.request(
       "/api/bots",
-      jsonInit({ name: "Marketplace update target" })
+      jsonInit({
+        name: "Marketplace update target",
+        faceEyeCharacter: "8",
+        faceEyeAnimation: "spin",
+        faceEyeRotationDeg: -25,
+        faceMouthCharacter: "△",
+        faceMouthAnimation: "wobble",
+      })
     );
     assert.equal(created.status, 201);
     const createdPayload = await json(created);
     const botId = String(createdPayload.bot.id);
+    assert.equal(createdPayload.bot.face_eye_animation, undefined);
+    assert.equal(createdPayload.bot.face_eye_rotation_deg, -25);
+    assert.equal(createdPayload.bot.face_mouth_animation, "wobble");
 
     const updated = await client.request(`/api/bots/${encodeURIComponent(botId)}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ faceBlinkBar: " " }),
+      body: JSON.stringify({
+        faceBlinkBar: " ",
+        faceEyeAnimation: "flicker",
+        faceEyeRotationDeg: 35,
+        faceMouthAnimation: "pulsate",
+      }),
     });
     assert.equal(updated.status, 200);
-    assert.equal((await json(updated)).bot.face_blink_bar, " ");
+    const updatedPayload = await json(updated);
+    assert.equal(updatedPayload.bot.face_blink_bar, " ");
+    assert.equal(updatedPayload.bot.face_eye_animation, "none");
+    assert.equal(updatedPayload.bot.face_eye_rotation_deg, 35);
+    assert.equal(updatedPayload.bot.face_mouth_animation, "pulsate");
+
+    const updatedDefault = await client.request("/api/default-bot", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        faceEyeCharacter: "8",
+        faceEyeAnimation: "spin",
+        faceEyeRotationDeg: -45,
+        faceMouthCharacter: "△",
+        faceMouthAnimation: "wobble",
+      }),
+    });
+    assert.equal(updatedDefault.status, 200);
+    const defaultPayload = await json(updatedDefault);
+    assert.equal(defaultPayload.defaultBot.prismDefaultBotFaceEyeAnimation, undefined);
+    assert.equal(defaultPayload.defaultBot.prismDefaultBotFaceEyeRotationDeg, -45);
+    assert.equal(defaultPayload.defaultBot.prismDefaultBotFaceMouthAnimation, "wobble");
   });
 
   it("runs a Zen chat through a deterministic provider without external egress", async () => {

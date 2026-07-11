@@ -209,12 +209,15 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       prism_default_bot_glyph TEXT,
       prism_default_bot_face_eyes_font TEXT,
       prism_default_bot_face_eye_character TEXT,
+      prism_default_bot_face_eye_animation TEXT,
       prism_default_bot_face_mouth_font TEXT,
       prism_default_bot_face_mouth_character TEXT,
+      prism_default_bot_face_mouth_animation TEXT,
       prism_default_bot_face_font_weight INTEGER,
       prism_default_bot_face_eye_scale REAL,
       prism_default_bot_face_eye_offset_x REAL,
       prism_default_bot_face_eye_offset_y REAL,
+      prism_default_bot_face_eye_rotation_deg REAL,
       prism_default_bot_face_mouth_scale REAL,
       prism_default_bot_face_mouth_offset_x REAL,
       prism_default_bot_face_mouth_offset_y REAL,
@@ -430,12 +433,15 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       glyph TEXT,
       face_eyes_font TEXT,
       face_eye_character TEXT,
+      face_eye_animation TEXT,
       face_mouth_font TEXT,
       face_mouth_character TEXT,
+      face_mouth_animation TEXT,
       face_font_weight INTEGER,
       face_eye_scale REAL,
       face_eye_offset_x REAL,
       face_eye_offset_y REAL,
+      face_eye_rotation_deg REAL,
       face_mouth_scale REAL,
       face_mouth_offset_x REAL,
       face_mouth_offset_y REAL,
@@ -924,12 +930,15 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     ["prism_default_bot_glyph", "TEXT"],
     ["prism_default_bot_face_eyes_font", "TEXT"],
     ["prism_default_bot_face_eye_character", "TEXT"],
+    ["prism_default_bot_face_eye_animation", "TEXT"],
     ["prism_default_bot_face_mouth_font", "TEXT"],
     ["prism_default_bot_face_mouth_character", "TEXT"],
+    ["prism_default_bot_face_mouth_animation", "TEXT"],
     ["prism_default_bot_face_font_weight", "INTEGER"],
     ["prism_default_bot_face_eye_scale", "REAL"],
     ["prism_default_bot_face_eye_offset_x", "REAL"],
     ["prism_default_bot_face_eye_offset_y", "REAL"],
+    ["prism_default_bot_face_eye_rotation_deg", "REAL"],
     ["prism_default_bot_face_mouth_scale", "REAL"],
     ["prism_default_bot_face_mouth_offset_x", "REAL"],
     ["prism_default_bot_face_mouth_offset_y", "REAL"],
@@ -1435,6 +1444,12 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   if (!hasBotFaceEyeCharacterColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN face_eye_character TEXT;");
   }
+  const hasBotFaceEyeAnimationColumn = botColumns.some(
+    (column) => column.name === "face_eye_animation"
+  );
+  if (!hasBotFaceEyeAnimationColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN face_eye_animation TEXT;");
+  }
   const hasBotFaceMouthFontColumn = botColumns.some(
     (column) => column.name === "face_mouth_font"
   );
@@ -1446,6 +1461,12 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   );
   if (!hasBotFaceMouthCharacterColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN face_mouth_character TEXT;");
+  }
+  const hasBotFaceMouthAnimationColumn = botColumns.some(
+    (column) => column.name === "face_mouth_animation"
+  );
+  if (!hasBotFaceMouthAnimationColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN face_mouth_animation TEXT;");
   }
   const hasBotFaceFontWeightColumn = botColumns.some(
     (column) => column.name === "face_font_weight"
@@ -1470,6 +1491,12 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   );
   if (!hasBotFaceEyeOffsetYColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN face_eye_offset_y REAL;");
+  }
+  const hasBotFaceEyeRotationDegColumn = botColumns.some(
+    (column) => column.name === "face_eye_rotation_deg"
+  );
+  if (!hasBotFaceEyeRotationDegColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN face_eye_rotation_deg REAL;");
   }
   const hasBotFaceMouthScaleColumn = botColumns.some(
     (column) => column.name === "face_mouth_scale"
