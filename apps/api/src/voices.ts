@@ -11,7 +11,7 @@ export interface VoiceCapabilities {
   modes: VoiceMode[];
   englishEngines: EnglishVoiceEngine[];
   builtinBottish: { available: true; synthesis: "metadata-only" };
-  builtinEnglish: { available: boolean; model: "kitten-nano-en-v0_2-fp16" };
+  builtinEnglish: { available: boolean; model: "system-native" };
   elevenLabs: { available: true; requiresApiKey: true; defaultModel: "eleven_flash_v2_5" };
 }
 
@@ -19,7 +19,7 @@ export const VOICE_CAPABILITIES: VoiceCapabilities = {
   modes: ["mute", "bottish", "english"],
   englishEngines: ["builtin", "elevenlabs"],
   builtinBottish: { available: true, synthesis: "metadata-only" },
-  builtinEnglish: { available: true, model: "kitten-nano-en-v0_2-fp16" },
+  builtinEnglish: { available: true, model: "system-native" },
   elevenLabs: {
     available: true,
     requiresApiKey: true,
@@ -52,12 +52,17 @@ export function elevenLabsVoiceSettings(profile: BotAudioVoiceProfileV1): {
   speed: number;
 } {
   const normalized = normalizeBotAudioVoiceProfileV1(profile);
+  const pitchPlaybackRatio = 2 ** ((normalized.pitch * 650) / 1200);
   return {
     stability: Number(clamp(0.52 - normalized.lilt * 0.24, 0.18, 0.86).toFixed(3)),
     similarity_boost: 0.75,
     style: Number(clamp(0.18 + normalized.lilt * 0.18, 0, 0.45).toFixed(3)),
     use_speaker_boost: true,
-    speed: Number(clamp(1 + normalized.pace * 0.24, 0.76, 1.24).toFixed(3)),
+    speed: Number(clamp(
+      (1 + normalized.pace * 0.24) / pitchPlaybackRatio,
+      0.7,
+      1.2
+    ).toFixed(3)),
   };
 }
 

@@ -13,7 +13,19 @@ describe("English voice post processing", () => {
         pace: 0,
         lilt: 0,
       }),
-      { detuneCents: 325, lowpassHz: 4650, gain: 0.94 }
+      { detuneCents: 325, lowpassHz: 13000, gain: 0.94 }
     );
+  });
+
+  it("keeps neutral speech spectrally transparent", () => {
+    const processing = resolveEnglishVoicePostProcessing({
+      v: 1,
+      baseVoiceId: "voice-1",
+      pitch: 0,
+      warmth: 0,
+      pace: 0,
+      lilt: 0,
+    });
+    assert.equal(processing.lowpassHz, 16000);
   });
 });

@@ -92,6 +92,7 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     prismDefaultLlmModel: null,
     prismImageToolLlmModel: null,
     voiceMode: "mute",
+    voiceEffectsEnabled: 1,
     englishVoiceEngine: "builtin",
     elevenLabsVoiceBank: "{}",
     elevenLabsVoiceModel: null,
@@ -105,6 +106,7 @@ describe("resolveNextSettings — voice foundation", () => {
     const next = resolveNextSettings(
       {
         voiceMode: "english",
+        voiceEffectsEnabled: false,
         englishVoiceEngine: "elevenlabs",
         elevenLabsVoiceBank: { "voice-1": "  voice_alpha  ", "voice-3": 17, extra: "ignore" },
         elevenLabsVoiceModel: " eleven_multilingual_v2 ",
@@ -112,6 +114,7 @@ describe("resolveNextSettings — voice foundation", () => {
       baseline()
     );
     assert.equal(next.voiceMode, "english");
+    assert.equal(next.voiceEffectsEnabled, false);
     assert.equal(next.englishVoiceEngine, "elevenlabs");
     assert.deepEqual(next.elevenLabsVoiceBank, {
       "voice-1": "voice_alpha", "voice-2": null, "voice-3": null, "voice-4": null, "voice-5": null,

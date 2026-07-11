@@ -124,7 +124,7 @@ export interface BotCustomizerSavePatch {
   faceThinkingFrames?: readonly string[];
   avatarDetails?: BotAvatarDetailsV1 | null;
   profilePictureImageId?: string | null;
-  audioVoiceProfileOverride?: BotAudioVoiceProfileV1;
+  audioVoiceProfileOverride?: BotAudioVoiceProfileV1 | null;
 }
 
 const normalizeColorForCompare = (hex: string | null | undefined): string =>

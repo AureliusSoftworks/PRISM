@@ -867,8 +867,11 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   );
   assert.match(
     pageSource,
-    /const BOT_AVATAR_CUSTOMIZER_TABS = \[\s*\{ value: "face", label: "Identity" \},\s*\{ value: "eyes", label: "Eyes" \},\s*\{ value: "mouth", label: "Mouth" \},\s*\{ value: "details", label: "Details" \},\s*\{ value: "motion", label: "Motion" \}/,
+    /const BOT_AVATAR_CUSTOMIZER_TABS = \[\s*\{ value: "face", label: "Identity" \},\s*\{ value: "eyes", label: "Eyes" \},\s*\{ value: "mouth", label: "Mouth" \},\s*\{ value: "voice", label: "Voice" \},\s*\{ value: "details", label: "Details" \},\s*\{ value: "motion", label: "Motion" \}/,
   );
+  assert.match(pageSource, /activeControlTab === "voice"/);
+  assert.match(pageSource, /resetLabel=\{isDefaultPrismBot \? "Reset voice" : "Restore original voice"\}/);
+  assert.match(pageSource, /setPreviewMode\("talking"\)/);
   assert.match(pageSource, /const avatarControlTabsVisible = true;/);
   assert.match(pageSource, /visibleAvatarTabs\.map\(\(tab\) =>/);
   assert.match(pageSource, /BOT_AVATAR_FACE_CONTROL_TABS\.includes\(/);

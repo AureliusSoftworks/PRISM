@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  BOT_VOICE_TEXTURE_RECIPES,
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+  botVoiceTextureIsModified,
   normalizeBotAudioVoiceProfileV1,
+  normalizeBotVoiceTexture,
   normalizeEnglishVoiceEngine,
   normalizeOptionalBotAudioVoiceProfileV1,
   normalizeVoiceMode,
@@ -17,8 +20,17 @@ describe("audio voice normalization", () => {
   });
   it("uses a deterministic portable profile and clamps controls", () => {
     assert.deepEqual(normalizeBotAudioVoiceProfileV1(undefined), DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1);
-    assert.deepEqual(normalizeBotAudioVoiceProfileV1({ v: 1, baseVoiceId: "voice-4", pitch: 4, warmth: -4, pace: ".125", lilt: 0.2 }), {
-      v: 1, baseVoiceId: "voice-4", pitch: 1, warmth: -1, pace: 0.125, lilt: 0.2,
+    assert.deepEqual(normalizeBotAudioVoiceProfileV1({ v: 1, baseVoiceId: "voice-4", pitch: 4, warmth: -4, pace: ".125", lilt: 0.2, signal: 4 }), {
+      v: 2,
+      enabled: true,
+      baseVoiceId: "voice-4",
+      pitch: 1,
+      warmth: -1,
+      pace: 0.125,
+      lilt: 0.2,
+      bottishTone: 1,
+      volume: 1,
+      texture: BOT_VOICE_TEXTURE_RECIPES.clean,
     });
   });
   it("does not turn malformed user overrides into an override", () => {
@@ -29,5 +41,37 @@ describe("audio voice normalization", () => {
       normalizeOptionalBotAudioVoiceProfileV1({ v: 1, baseVoiceId: "voice-2" }),
       { ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1, baseVoiceId: "voice-2" }
     );
+  });
+
+  it("normalizes v2 volume and texture controls", () => {
+    const profile = normalizeBotAudioVoiceProfileV1({
+      ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+      volume: 4,
+      texture: {
+        preset: "tape",
+        amount: 2,
+        bandwidth: -1,
+        noise: 0.2,
+        instability: 0.3,
+        distortion: 0.4,
+        damage: 0.5,
+      },
+    });
+    assert.equal(profile.volume, 1.25);
+    assert.deepEqual(profile.texture, {
+      preset: "tape",
+      amount: 1,
+      bandwidth: 0,
+      noise: 0.2,
+      instability: 0.3,
+      distortion: 0.4,
+      damage: 0.5,
+    });
+  });
+
+  it("detects modified texture recipes and restores canonical defaults", () => {
+    assert.equal(botVoiceTextureIsModified({ ...BOT_VOICE_TEXTURE_RECIPES.lofi }), false);
+    assert.equal(botVoiceTextureIsModified({ ...BOT_VOICE_TEXTURE_RECIPES.lofi, noise: 0.4 }), true);
+    assert.deepEqual(normalizeBotVoiceTexture({ preset: "crt-speaker" }), BOT_VOICE_TEXTURE_RECIPES["crt-speaker"]);
   });
 });

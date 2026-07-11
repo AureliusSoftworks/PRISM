@@ -2,6 +2,11 @@ import {
   normalizeBotAudioVoiceProfileV1,
   type BotAudioVoiceProfileV1,
 } from "@localai/shared";
+import {
+  playRealtimeVoiceBytes,
+  prepareRealtimeVoiceAudio,
+  stopRealtimeVoiceAudio,
+} from "./voiceEffects.ts";
 
 export interface BottishNote {
   startMs: number;
@@ -17,6 +22,9 @@ export interface BottishPlan {
   notes: BottishNote[];
   durationMs: number;
 }
+
+const MEDIA_PLAY_START_TIMEOUT_MS = 1500;
+const BOTTISH_SAMPLE_RATE = 24_000;
 
 const VOICE_BASES = {
   "voice-1": { frequency: 310, waveform: "sine" as OscillatorType },
@@ -49,8 +57,15 @@ export function buildBottishPlan(
   const pitchMultiplier = 2 ** (profile.pitch * 0.7);
   const noteMs = Math.round(55 * (1 - profile.pace * 0.38));
   const gapMs = Math.round(18 * (1 - profile.pace * 0.42));
-  const warmthLowpass = Math.round(2400 - profile.warmth * 900);
-  const waveform = profile.warmth > 0.55 ? "sine" : voice.waveform;
+  // Keep neutral Bottish bright enough to read through laptop speakers. The
+  // original 2.4 kHz cutoff and ~-26 dB peak made the chirps feel muted even
+  // with the system volume up; warmth should color the voice, not bury it.
+  const warmthLowpass = Math.round(7200 - profile.warmth * 2200 + profile.bottishTone * 700);
+  const waveform = profile.bottishTone > 0.65
+    ? "square"
+    : profile.bottishTone < -0.35 || profile.warmth > 0.55
+      ? "sine"
+      : voice.waveform;
   const notes: BottishNote[] = [];
   let cursorMs = 0;
   let spokenIndex = 0;
@@ -77,9 +92,9 @@ export function buildBottishPlan(
       durationMs: noteMs,
       frequencyHz: Math.round(frequencyHz * 10) / 10,
       endFrequencyHz: Math.round(frequencyHz * (1 + glide) * 10) / 10,
-      gain: Math.max(0.025, Math.min(0.085, 0.052 - profile.warmth * 0.012)),
+      gain: Math.max(0.22, Math.min(0.38, 0.3 - profile.warmth * 0.04)),
       waveform,
-      lowpassHz: Math.max(900, Math.min(4800, warmthLowpass)),
+      lowpassHz: Math.max(4800, Math.min(10_000, warmthLowpass)),
     });
     cursorMs += noteMs + gapMs;
     spokenIndex += 1;
@@ -91,35 +106,109 @@ export function buildBottishPlan(
   };
 }
 
-let audioContext: AudioContext | null = null;
-let activeNodes: AudioScheduledSourceNode[] = [];
+function writeWaveText(view: DataView, offset: number, value: string): void {
+  for (let index = 0; index < value.length; index += 1) {
+    view.setUint8(offset + index, value.charCodeAt(index));
+  }
+}
+
+function bottishWaveSample(waveform: OscillatorType, phase: number): number {
+  const sine = Math.sin(phase);
+  if (waveform === "square") return sine >= 0 ? 1 : -1;
+  if (waveform === "triangle") return (2 / Math.PI) * Math.asin(sine);
+  if (waveform === "sawtooth") {
+    return 2 * ((phase / (2 * Math.PI)) - Math.floor(phase / (2 * Math.PI) + 0.5));
+  }
+  return sine;
+}
+
+/** Render Bottish without a live AudioContext so browsers with a suspended
+ * Web Audio engine can fall back to ordinary media playback. */
+export function encodeBottishPlanWave(
+  plan: BottishPlan,
+  sampleRate = BOTTISH_SAMPLE_RATE
+): ArrayBuffer {
+  const sampleCount = Math.max(1, Math.ceil((plan.durationMs / 1000) * sampleRate));
+  const samples = new Float32Array(sampleCount);
+
+  for (const note of plan.notes) {
+    const startSample = Math.max(0, Math.floor((note.startMs / 1000) * sampleRate));
+    const noteSampleCount = Math.max(1, Math.floor((note.durationMs / 1000) * sampleRate));
+    const attackSamples = Math.max(1, Math.floor(0.008 * sampleRate));
+    const releaseSamples = Math.max(1, Math.floor(0.012 * sampleRate));
+    const filterAlpha = 1 - Math.exp((-2 * Math.PI * note.lowpassHz) / sampleRate);
+    const frequencyRatio = Math.max(0.001, note.endFrequencyHz / note.frequencyHz);
+    let phase = 0;
+    let filtered = 0;
+
+    for (let offset = 0; offset < noteSampleCount; offset += 1) {
+      const target = startSample + offset;
+      if (target >= samples.length) break;
+      const progress = noteSampleCount <= 1 ? 0 : offset / (noteSampleCount - 1);
+      const frequency = note.frequencyHz * frequencyRatio ** progress;
+      phase += (2 * Math.PI * frequency) / sampleRate;
+      const raw = bottishWaveSample(note.waveform, phase);
+      filtered += filterAlpha * (raw - filtered);
+      const envelope = Math.min(
+        1,
+        offset / attackSamples,
+        (noteSampleCount - offset) / releaseSamples
+      );
+      samples[target] += filtered * note.gain * Math.max(0, envelope);
+    }
+  }
+
+  const output = new ArrayBuffer(44 + samples.length * 2);
+  const view = new DataView(output);
+  writeWaveText(view, 0, "RIFF");
+  view.setUint32(4, 36 + samples.length * 2, true);
+  writeWaveText(view, 8, "WAVE");
+  writeWaveText(view, 12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeWaveText(view, 36, "data");
+  view.setUint32(40, samples.length * 2, true);
+  for (let index = 0; index < samples.length; index += 1) {
+    const sample = Math.max(-1, Math.min(1, samples[index] ?? 0));
+    view.setInt16(44 + index * 2, Math.round(sample * 0x7fff), true);
+  }
+  return output;
+}
+
+let activeMedia: HTMLAudioElement | null = null;
+let activeMediaUrl: string | null = null;
 let activeTimer: number | null = null;
 let activeResolve: (() => void) | null = null;
 let generation = 0;
 let queue: Promise<void> = Promise.resolve();
 
-function contextForPlayback(): AudioContext | null {
-  if (typeof window === "undefined") return null;
-  const AudioContextConstructor = window.AudioContext;
-  if (!AudioContextConstructor) return null;
-  audioContext ??= new AudioContextConstructor();
-  return audioContext;
+export async function prepareBottishVoice(): Promise<void> {
+  if (await prepareRealtimeVoiceAudio()) return;
+  if (typeof Audio === "undefined" || typeof URL.createObjectURL !== "function") {
+    throw new Error("Audio playback is unavailable in this browser.");
+  }
 }
 
-export async function prepareBottishVoice(): Promise<void> {
-  const context = contextForPlayback();
-  if (context?.state === "suspended") await context.resume();
+function releaseActiveMedia(): void {
+  if (activeMedia) {
+    activeMedia.pause();
+    activeMedia.removeAttribute("src");
+    activeMedia.load();
+    activeMedia = null;
+  }
+  if (activeMediaUrl) {
+    URL.revokeObjectURL(activeMediaUrl);
+    activeMediaUrl = null;
+  }
 }
 
 function stopScheduledNodes(): void {
-  for (const node of activeNodes) {
-    try {
-      node.stop();
-    } catch {
-      // A node may already have completed naturally.
-    }
-  }
-  activeNodes = [];
+  releaseActiveMedia();
   if (activeTimer !== null && typeof window !== "undefined") {
     window.clearTimeout(activeTimer);
     activeTimer = null;
@@ -130,61 +219,88 @@ function stopScheduledNodes(): void {
 
 export function stopBottishVoice(): void {
   generation += 1;
+  stopRealtimeVoiceAudio();
   stopScheduledNodes();
   queue = Promise.resolve();
 }
 
-async function playPlan(plan: BottishPlan, expectedGeneration: number): Promise<void> {
-  if (plan.durationMs <= 0 || expectedGeneration !== generation) return;
-  const context = contextForPlayback();
-  if (!context) return;
-  if (context.state === "suspended") await context.resume();
+async function playPlanWithMedia(
+  plan: BottishPlan,
+  profile: BotAudioVoiceProfileV1,
+  expectedGeneration: number
+): Promise<void> {
   if (expectedGeneration !== generation) return;
+  const url = URL.createObjectURL(
+    new Blob([encodeBottishPlanWave(plan)], { type: "audio/wav" })
+  );
+  const audio = new Audio(url);
+  audio.preload = "auto";
+  audio.volume = Math.min(1, normalizeBotAudioVoiceProfileV1(profile).volume);
+  activeMedia = audio;
+  activeMediaUrl = url;
 
-  const startAt = context.currentTime + 0.025;
-  for (const note of plan.notes) {
-    const oscillator = context.createOscillator();
-    const gain = context.createGain();
-    const filter = context.createBiquadFilter();
-    const noteStart = startAt + note.startMs / 1000;
-    const noteEnd = noteStart + note.durationMs / 1000;
-    oscillator.type = note.waveform;
-    oscillator.frequency.setValueAtTime(note.frequencyHz, noteStart);
-    oscillator.frequency.exponentialRampToValueAtTime(
-      Math.max(40, note.endFrequencyHz),
-      noteEnd
-    );
-    filter.type = "lowpass";
-    filter.frequency.setValueAtTime(note.lowpassHz, noteStart);
-    gain.gain.setValueAtTime(0.0001, noteStart);
-    gain.gain.exponentialRampToValueAtTime(note.gain, noteStart + 0.008);
-    gain.gain.exponentialRampToValueAtTime(0.0001, noteEnd);
-    oscillator.connect(filter).connect(gain).connect(context.destination);
-    oscillator.start(noteStart);
-    oscillator.stop(noteEnd + 0.01);
-    activeNodes.push(oscillator);
-  }
-
-  await new Promise<void>((resolve) => {
-    activeResolve = resolve;
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    let started = false;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      if (activeTimer !== null) {
+        window.clearTimeout(activeTimer);
+        activeTimer = null;
+      }
+      if (activeResolve === cancel) activeResolve = null;
+      releaseActiveMedia();
+      if (error) reject(error);
+      else resolve();
+    };
+    const cancel = () => finish();
+    activeResolve = cancel;
+    audio.addEventListener("ended", () => finish(), { once: true });
+    audio.addEventListener("error", () => finish(new Error("Bottish audio could not play.")), {
+      once: true,
+    });
     activeTimer = window.setTimeout(() => {
-      activeNodes = [];
-      activeTimer = null;
-      activeResolve = null;
-      resolve();
-    }, plan.durationMs + 80);
+      if (!started) finish(new Error("Audio playback did not start. Check the browser tab's sound setting."));
+    }, MEDIA_PLAY_START_TIMEOUT_MS);
+    void audio.play().then(
+      () => {
+        started = true;
+        if (activeTimer !== null) {
+          window.clearTimeout(activeTimer);
+          activeTimer = null;
+        }
+      },
+      (error: unknown) => finish(
+        error instanceof Error ? error : new Error("Bottish audio could not play.")
+      )
+    );
   });
+}
+
+async function playPlan(
+  plan: BottishPlan,
+  profile: BotAudioVoiceProfileV1,
+  expectedGeneration: number,
+  seed: string,
+  effectsEnabled: boolean
+): Promise<void> {
+  if (plan.durationMs <= 0 || expectedGeneration !== generation) return;
+  const bytes = encodeBottishPlanWave(plan);
+  const played = await playRealtimeVoiceBytes({ bytes, profile, seed, effectsEnabled });
+  if (!played) await playPlanWithMedia(plan, profile, expectedGeneration);
 }
 
 export function enqueueBottishVoice(
   text: string,
   profile: BotAudioVoiceProfileV1,
-  seed: string
+  seed: string,
+  effectsEnabled = true
 ): Promise<void> {
   const expectedGeneration = generation;
   const plan = buildBottishPlan(text, profile, seed);
   queue = queue
     .catch(() => undefined)
-    .then(() => playPlan(plan, expectedGeneration));
+    .then(() => playPlan(plan, profile, expectedGeneration, seed, effectsEnabled));
   return queue;
 }

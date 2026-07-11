@@ -385,6 +385,7 @@ import {
 } from "./voices.ts";
 import {
   builtinEnglishAvailable,
+  getSystemVoiceCapabilities,
   generateBuiltinEnglishWave,
 } from "./builtin-tts.ts";
 import { deleteVector, deleteVectorsForUser } from "./qdrant.ts";
@@ -675,9 +676,11 @@ interface UserDbRow {
   elevenlabs_key_iv: string | null;
   elevenlabs_key_tag: string | null;
   voice_mode: string | null;
+  voice_effects_enabled: number;
   english_voice_engine: string | null;
   elevenlabs_voice_bank: string | null;
   elevenlabs_voice_model: string | null;
+  prism_default_bot_audio_voice_profile: string | null;
   created_at: string;
   last_active_at: string;
 }
@@ -824,7 +827,7 @@ function getOrCreateLocalOwnerUser(): string {
 function getUserRow(userId: string): UserDbRow {
   const row = db
     .prepare(
-      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, auto_switch_model, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, fallback_model_message_stripe, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, zen_persona_transition_choice, prism_default_bot_name, prism_default_bot_system_prompt, prism_default_bot_color, prism_default_bot_glyph, prism_default_bot_face_eyes_font, prism_default_bot_face_eye_character, prism_default_bot_face_eye_animation, prism_default_bot_face_mouth_font, prism_default_bot_face_mouth_character, prism_default_bot_face_mouth_animation, prism_default_bot_face_font_weight, prism_default_bot_face_eye_scale, prism_default_bot_face_eye_offset_x, prism_default_bot_face_eye_offset_y, prism_default_bot_face_eye_rotation_deg, prism_default_bot_face_mouth_scale, prism_default_bot_face_mouth_offset_x, prism_default_bot_face_mouth_offset_y, prism_default_bot_face_mouth_rotation_deg, prism_default_bot_face_blink_bar, prism_default_bot_face_thinking_frames, prism_default_bot_temperature, prism_default_bot_max_tokens, prism_default_bot_top_p, prism_default_bot_top_k, prism_default_bot_repetition_penalty, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, voice_mode, english_voice_engine, elevenlabs_voice_bank, elevenlabs_voice_model, created_at, last_active_at FROM users WHERE id = ?"
+      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, auto_switch_model, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, fallback_model_message_stripe, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, zen_persona_transition_choice, prism_default_bot_name, prism_default_bot_system_prompt, prism_default_bot_color, prism_default_bot_glyph, prism_default_bot_face_eyes_font, prism_default_bot_face_eye_character, prism_default_bot_face_eye_animation, prism_default_bot_face_mouth_font, prism_default_bot_face_mouth_character, prism_default_bot_face_mouth_animation, prism_default_bot_face_font_weight, prism_default_bot_face_eye_scale, prism_default_bot_face_eye_offset_x, prism_default_bot_face_eye_offset_y, prism_default_bot_face_eye_rotation_deg, prism_default_bot_face_mouth_scale, prism_default_bot_face_mouth_offset_x, prism_default_bot_face_mouth_offset_y, prism_default_bot_face_mouth_rotation_deg, prism_default_bot_face_blink_bar, prism_default_bot_face_thinking_frames, prism_default_bot_audio_voice_profile, prism_default_bot_temperature, prism_default_bot_max_tokens, prism_default_bot_top_p, prism_default_bot_top_k, prism_default_bot_repetition_penalty, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, voice_mode, voice_effects_enabled, english_voice_engine, elevenlabs_voice_bank, elevenlabs_voice_model, created_at, last_active_at FROM users WHERE id = ?"
     )
     .get(userId) as UserDbRow | undefined;
   if (!row) {
@@ -1753,6 +1756,9 @@ function normalizeDefaultBotSettingsForResponse(user: UserDbRow) {
     prismDefaultBotFaceThinkingFrames: readBotFaceThinkingFramesForResponse(
       user.prism_default_bot_face_thinking_frames
     ),
+    prismDefaultBotAudioVoiceProfile:
+      parseStoredBotAudioVoiceProfileV1(user.prism_default_bot_audio_voice_profile) ??
+      normalizeBotAudioVoiceProfileV1(undefined),
     prismDefaultBotTemperature: BOT_TEMPERATURE_DEFAULT,
     prismDefaultBotMaxTokens: BOT_REPLY_LENGTH_DEFAULT_TOKENS,
     prismDefaultBotTopP: BOT_TOP_P_DEFAULT,
@@ -6114,6 +6120,7 @@ function buildRoutes(): RouteDefinition[] {
     route("GET", "/api/voices/capabilities", async (ctx) => {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
+      const systemVoices = await getSystemVoiceCapabilities();
       json(ctx.res, 200, {
         ok: true,
         capabilities: {
@@ -6121,6 +6128,7 @@ function buildRoutes(): RouteDefinition[] {
           builtinEnglish: {
             ...VOICE_CAPABILITIES.builtinEnglish,
             available: builtinEnglishAvailable(),
+            ...systemVoices,
           },
           elevenLabs: {
             ...VOICE_CAPABILITIES.elevenLabs,
@@ -6341,6 +6349,7 @@ function buildRoutes(): RouteDefinition[] {
           hasAnthropicApiKey: Boolean(user.anthropic_key_ciphertext),
           hasElevenLabsApiKey: Boolean(user.elevenlabs_key_ciphertext),
           voiceMode: user.voice_mode === "bottish" || user.voice_mode === "english" ? user.voice_mode : "mute",
+          voiceEffectsEnabled: user.voice_effects_enabled !== 0,
           englishVoiceEngine: user.english_voice_engine === "elevenlabs" ? "elevenlabs" : "builtin",
           elevenLabsVoiceBank: parseStoredElevenLabsVoiceBank(user.elevenlabs_voice_bank),
           elevenLabsVoiceModel: user.elevenlabs_voice_model ?? "",
@@ -6654,7 +6663,8 @@ function buildRoutes(): RouteDefinition[] {
             prism_default_bot_max_tokens = NULL,
             prism_default_bot_top_p = NULL,
             prism_default_bot_top_k = NULL,
-            prism_default_bot_repetition_penalty = NULL
+            prism_default_bot_repetition_penalty = NULL,
+            prism_default_bot_audio_voice_profile = ?
         WHERE id = ?
       `).run(
         faceEyesFont,
@@ -6673,6 +6683,7 @@ function buildRoutes(): RouteDefinition[] {
         faceMouthRotationDeg,
         faceBlinkBar,
         faceThinkingFrames,
+        serializeBotAudioVoiceProfileV1(body.audioVoiceProfile),
         userId
       );
 
@@ -6749,6 +6760,7 @@ function buildRoutes(): RouteDefinition[] {
         prismDefaultLlmModel: user.prism_default_llm_model,
         prismImageToolLlmModel: user.prism_image_tool_llm_model,
         voiceMode: user.voice_mode,
+        voiceEffectsEnabled: user.voice_effects_enabled,
         englishVoiceEngine: user.english_voice_engine,
         elevenLabsVoiceBank: user.elevenlabs_voice_bank,
         elevenLabsVoiceModel: user.elevenlabs_voice_model,
@@ -6810,7 +6822,7 @@ function buildRoutes(): RouteDefinition[] {
             preferred_local_image_model = ?, preferred_openai_image_model = ?, preferred_zen_wallpaper_local_image_model = ?, preferred_zen_wallpaper_openai_image_model = ?, zen_wallpaper_opacity = ?, zen_wallpaper_text_mask_enabled = ?, zen_wallpaper_grayscale_enabled = ?, zen_wallpaper_blurred_edges_enabled = ?, zen_wallpaper_style_notes = ?,
             zen_session_idle_gap_ms = ?, zen_fresh_start_gap_ms = ?, zen_recent_context_messages = ?, zen_wallpaper_regen_message_interval = ?, zen_mood_sensitivity = ?, zen_canvas_typing_speed = ?, zen_message_font_min_px = ?, zen_message_font_max_px = ?, zen_ask_question_patience_enabled = ?, zen_ask_question_patience_ms = ?, zen_autonomy_enabled = ?, zen_persona_transition_choice = ?,
             comfyui_workflows = ?, prism_default_llm_model = ?, prism_image_tool_llm_model = ?,
-            voice_mode = ?, english_voice_engine = ?, elevenlabs_voice_bank = ?, elevenlabs_voice_model = ?,
+            voice_mode = ?, voice_effects_enabled = ?, english_voice_engine = ?, elevenlabs_voice_bank = ?, elevenlabs_voice_model = ?,
             dev_memories_enabled = ?, dev_memories_text = ?,
             openai_key_ciphertext = ?, openai_key_iv = ?, openai_key_tag = ?,
             anthropic_key_ciphertext = ?, anthropic_key_iv = ?, anthropic_key_tag = ?,
@@ -6862,6 +6874,7 @@ function buildRoutes(): RouteDefinition[] {
         next.prismDefaultLlmModel,
         next.prismImageToolLlmModel,
         next.voiceMode,
+        next.voiceEffectsEnabled ? 1 : 0,
         next.englishVoiceEngine,
         JSON.stringify(next.elevenLabsVoiceBank),
         next.elevenLabsVoiceModel,
@@ -6889,6 +6902,7 @@ function buildRoutes(): RouteDefinition[] {
           psychicModeEnabled: next.psychicModeEnabled === 1,
           zenPersonaTransitionChoice: next.zenPersonaTransitionChoice,
           voiceMode: next.voiceMode,
+          voiceEffectsEnabled: next.voiceEffectsEnabled,
           englishVoiceEngine: next.englishVoiceEngine,
           elevenLabsVoiceBank: next.elevenLabsVoiceBank,
           elevenLabsVoiceModel: next.elevenLabsVoiceModel ?? "",

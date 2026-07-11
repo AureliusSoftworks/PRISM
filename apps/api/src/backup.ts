@@ -97,6 +97,8 @@ export interface BackupUserSettings {
   anthropicApiKey?: string;
   elevenLabsApiKey?: string;
   voiceMode?: VoiceMode;
+  voiceEffectsEnabled?: boolean;
+  prismDefaultBotAudioVoiceProfile?: BotAudioVoiceProfileV1;
   englishVoiceEngine?: EnglishVoiceEngine;
   elevenLabsVoiceBank?: Record<string, string | null>;
   elevenLabsVoiceModel?: string;
@@ -263,7 +265,8 @@ export function exportUserSnapshot(
          elevenlabs_key_ciphertext,
          elevenlabs_key_iv,
          elevenlabs_key_tag
-         ,voice_mode, english_voice_engine, elevenlabs_voice_bank, elevenlabs_voice_model
+         ,voice_mode, voice_effects_enabled, english_voice_engine, elevenlabs_voice_bank,
+         elevenlabs_voice_model, prism_default_bot_audio_voice_profile
        FROM users
        WHERE id = ?`
     )
@@ -317,9 +320,11 @@ export function exportUserSnapshot(
         elevenlabs_key_iv: string | null;
          elevenlabs_key_tag: string | null;
         voice_mode: string | null;
+        voice_effects_enabled: number | null;
         english_voice_engine: string | null;
         elevenlabs_voice_bank: string | null;
         elevenlabs_voice_model: string | null;
+        prism_default_bot_audio_voice_profile: string | null;
       }
     | undefined;
   const settings: BackupUserSettings | undefined = user
@@ -390,6 +395,10 @@ export function exportUserSnapshot(
         prismDefaultLlmModel: user.prism_default_llm_model ?? "",
         prismImageToolLlmModel: user.prism_image_tool_llm_model ?? "",
         voiceMode: normalizeVoiceMode(user.voice_mode),
+        voiceEffectsEnabled: user.voice_effects_enabled !== 0,
+        prismDefaultBotAudioVoiceProfile:
+          parseStoredBotAudioVoiceProfileV1(user.prism_default_bot_audio_voice_profile) ??
+          normalizeBotAudioVoiceProfileV1(undefined),
         englishVoiceEngine: normalizeEnglishVoiceEngine(user.english_voice_engine),
         elevenLabsVoiceBank: parseStoredElevenLabsVoiceBank(user.elevenlabs_voice_bank),
         elevenLabsVoiceModel: user.elevenlabs_voice_model ?? "",
@@ -870,9 +879,11 @@ function importUserSnapshotWithinTransaction(
         elevenlabs_key_iv = ?,
         elevenlabs_key_tag = ?,
         voice_mode = ?,
+        voice_effects_enabled = ?,
         english_voice_engine = ?,
         elevenlabs_voice_bank = ?,
-        elevenlabs_voice_model = ?
+        elevenlabs_voice_model = ?,
+        prism_default_bot_audio_voice_profile = ?
       WHERE id = ?
     `).run(
       settings.theme === "light" || settings.theme === "dark" ? settings.theme : "system",
@@ -939,11 +950,13 @@ function importUserSnapshotWithinTransaction(
       encryptedElevenLabsKey?.iv ?? null,
       encryptedElevenLabsKey?.tag ?? null,
       normalizeVoiceMode(settings.voiceMode),
+      settings.voiceEffectsEnabled === false ? 0 : 1,
       normalizeEnglishVoiceEngine(settings.englishVoiceEngine),
       JSON.stringify(normalizeElevenLabsVoiceBank(settings.elevenLabsVoiceBank)),
       typeof settings.elevenLabsVoiceModel === "string"
         ? settings.elevenLabsVoiceModel.trim().slice(0, 160) || null
         : null,
+      serializeBotAudioVoiceProfileV1(settings.prismDefaultBotAudioVoiceProfile),
       userId
     );
   }
