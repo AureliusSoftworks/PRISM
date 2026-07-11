@@ -772,6 +772,7 @@ const COFFEE_CUP_TOP_OFF_TARGET_PROGRESS = 0.04;
 const COFFEE_CUP_TOP_OFF_MIN_ELIGIBLE_PROGRESS = 0.18;
 const COFFEE_CUP_TOP_OFF_PROGRESS_BY_FRAME_INDEX = [
   COFFEE_CUP_TOP_OFF_TARGET_PROGRESS,
+  0.09,
   COFFEE_CUP_TOP_OFF_MIN_ELIGIBLE_PROGRESS,
   0.38,
   0.58,
@@ -994,16 +995,17 @@ export function coffeeCupShouldFinishAfterSip(args: {
 
 export function coffeeCupFrameIndexForProgress(progress: number): number {
   const clamped = clampCoffeeCupProgress(progress);
-  if (clamped >= 0.96) return 5;
-  if (clamped >= 0.78) return 4;
-  if (clamped >= 0.58) return 3;
-  if (clamped >= 0.38) return 2;
-  if (clamped >= 0.18) return 1;
+  if (clamped >= 0.96) return 6;
+  if (clamped >= 0.78) return 5;
+  if (clamped >= 0.58) return 4;
+  if (clamped >= 0.38) return 3;
+  if (clamped >= 0.18) return 2;
+  if (clamped >= 0.09) return 1;
   return 0;
 }
 
 export function coffeeCupTopOffProgressForFrameIndex(frameIndex: number): number {
-  const frame = Math.max(0, Math.min(5, Math.round(frameIndex)));
+  const frame = Math.max(0, Math.min(6, Math.round(frameIndex)));
   return COFFEE_CUP_TOP_OFF_PROGRESS_BY_FRAME_INDEX[frame]!;
 }
 
@@ -1018,13 +1020,13 @@ export function coffeeCupStatusForProgress(
   const amount: CoffeeCupAmountStage =
     frameIndex === 0
       ? "full"
-      : frameIndex === 1
+      : frameIndex <= 2
         ? "mostly-full"
-        : frameIndex === 2
+        : frameIndex === 3
           ? "half"
-          : frameIndex === 3
+          : frameIndex === 4
             ? "low"
-            : frameIndex === 4
+            : frameIndex === 5
               ? "dregs"
               : "empty";
   const temperatureLabel =

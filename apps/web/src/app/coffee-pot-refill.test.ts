@@ -85,8 +85,8 @@ describe("Coffee pot refill timing", () => {
   });
 
   it("maps interrupted pour frames to the last visible filled cup level", () => {
-    assert.equal(coffeeCupTopOffProgressAfterForPour(4, 1), 0.58);
-    assert.equal(coffeeCupTopOffProgressAfterForPour(4, 2), 0.38);
+    assert.equal(coffeeCupTopOffProgressAfterForPour(4, 1), 0.38);
+    assert.equal(coffeeCupTopOffProgressAfterForPour(4, 2), 0.18);
     assert.equal(coffeeCupTopOffProgressAfterForPour(4, 4), 0.04);
     assert.equal(coffeeCupTopOffProgressAfterForPour(0, 2), null);
   });
