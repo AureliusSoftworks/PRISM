@@ -36289,14 +36289,6 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   font-size: 11px;
 }
 
-.botAvatarMouthAnimationRow {
-  min-width: 0;
-}
-
-.botAvatarMouthAnimationRow .botAvatarGlyphAnimationControl {
-  width: 100%;
-}
-
 @media (max-width: 799px) {
   .botAvatarBuilderBody {
     grid-template-columns: 1fr;
@@ -38029,8 +38021,47 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   justify-content: start;
 }
 
+.botAvatarCustomMotionRowCombined {
+  width: 100%;
+  max-width: 100%;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 1.35fr);
+}
+
+.botAvatarGlyphRotationField {
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(118px, 0.82fr);
+  gap: 10px;
+  align-items: stretch;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 13%, #303846);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.012)),
+    rgba(255, 255, 255, 0.018);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+}
+
+.botAvatarGlyphRotationField .botAvatarCustomGlyphCapture {
+  min-height: 146px;
+}
+
+.botAvatarGlyphRotationField .botAvatarMouthRotationControl {
+  padding: 0 0 0 10px;
+  border: 0;
+  border-left: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 13%, #303846);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
 .botAvatarGlyphAnimationControl {
   min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
   margin: 0;
   padding: 10px;
   border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 13%, #303846);
@@ -38042,16 +38073,25 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .botAvatarGlyphAnimationControl legend {
-  padding: 0 3px;
+  float: left;
+  width: 100%;
+  margin: 0 0 9px;
+  padding: 0;
   color: var(--fg-muted);
-  font-size: 11px;
-  font-weight: 750;
+  font-size: 11.5px;
+  font-weight: 780;
+  line-height: 1.2;
 }
 
 .botAvatarGlyphAnimationControl > div {
+  clear: both;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 5px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.botAvatarGlyphAnimationControl > div > button:first-child {
+  grid-column: 1 / -1;
 }
 
 .botAvatarGlyphAnimationControl button,
@@ -38059,16 +38099,32 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   -webkit-appearance: none;
   appearance: none;
   min-width: 0;
-  min-height: 29px;
-  padding: 4px 6px;
+  min-height: 32px;
+  padding: 5px 9px;
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr);
+  gap: 7px;
+  align-items: center;
   border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 13%, #303846);
   border-radius: 6px;
   background: rgba(0, 0, 0, 0.16);
   color: var(--fg-muted);
   font: inherit;
-  font-size: 9.5px;
-  font-weight: 760;
+  font-size: 10.5px;
+  font-weight: 780;
+  line-height: 1.1;
+  text-align: left;
+  white-space: normal;
   cursor: pointer;
+}
+
+.botAvatarGlyphAnimationControl button::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 36%, var(--fg-muted));
+  border-radius: 999px;
+  background: transparent;
 }
 
 .botAvatarGlyphAnimationControl button:hover,
@@ -38078,6 +38134,12 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   color: var(--fg);
   border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 48%, #ffffff);
   background: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 13%, rgba(255, 255, 255, 0.04));
+}
+
+.botAvatarGlyphAnimationControl button[data-selected="true"]::before {
+  border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 72%, #ffffff);
+  background: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 78%, #ffffff);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 44%, transparent);
 }
 
 .botAvatarGlyphAnimationControl:disabled,
