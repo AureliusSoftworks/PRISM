@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  VOICE_CAPABILITIES,
   cleanSpeakableAssistantProse,
   elevenLabsVoiceSettings,
   requestElevenLabsSpeech,
@@ -10,6 +11,9 @@ import {
 } from "../voices.ts";
 
 describe("voice Phase 1 boundary", () => {
+  it("advertises native system speech instead of the retired neural model", () => {
+    assert.equal(VOICE_CAPABILITIES.builtinEnglish.model, "system-native");
+  });
   it("cleans markdown, tools, URLs, code, and stage directions", () => {
     assert.equal(cleanSpeakableAssistantProse("# Hi\n*waves*\n```js\nsecret()\n```\n[link](https://example.com) https://raw.example"), "Hi link");
   });
@@ -22,12 +26,24 @@ describe("voice Phase 1 boundary", () => {
       engineUsed: "builtin-local-fallback",
       text: "hello",
       profile: {
-        v: 1,
+        v: 2,
+        enabled: true,
         baseVoiceId: "voice-1",
         pitch: 0,
         warmth: 0,
         pace: 0,
         lilt: 0,
+        bottishTone: 0.45,
+        volume: 1,
+        texture: {
+          preset: "clean",
+          amount: 0,
+          bandwidth: 1,
+          noise: 0,
+          instability: 0,
+          distortion: 0,
+          damage: 0,
+        },
       },
     });
   });
@@ -61,7 +77,7 @@ describe("voice Phase 1 boundary", () => {
         similarity_boost: 0.75,
         style: 0.36,
         use_speaker_boost: true,
-        speed: 1.24,
+        speed: 0.852,
       }
     );
   });

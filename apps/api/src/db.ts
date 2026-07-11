@@ -242,9 +242,11 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       elevenlabs_key_iv TEXT,
       elevenlabs_key_tag TEXT,
       voice_mode TEXT NOT NULL DEFAULT 'mute',
+      voice_effects_enabled INTEGER NOT NULL DEFAULT 1,
       english_voice_engine TEXT NOT NULL DEFAULT 'builtin',
       elevenlabs_voice_bank TEXT NOT NULL DEFAULT '{}',
       elevenlabs_voice_model TEXT,
+      prism_default_bot_audio_voice_profile TEXT,
       created_at TEXT NOT NULL,
       last_active_at TEXT NOT NULL
     );
@@ -710,12 +712,20 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   }
   const hasVoiceMode = userColumns.some((column) => column.name === "voice_mode");
   if (!hasVoiceMode) db.exec("ALTER TABLE users ADD COLUMN voice_mode TEXT NOT NULL DEFAULT 'mute';");
+  const hasVoiceEffectsEnabled = userColumns.some((column) => column.name === "voice_effects_enabled");
+  if (!hasVoiceEffectsEnabled) db.exec("ALTER TABLE users ADD COLUMN voice_effects_enabled INTEGER NOT NULL DEFAULT 1;");
   const hasEnglishVoiceEngine = userColumns.some((column) => column.name === "english_voice_engine");
   if (!hasEnglishVoiceEngine) db.exec("ALTER TABLE users ADD COLUMN english_voice_engine TEXT NOT NULL DEFAULT 'builtin';");
   const hasElevenLabsVoiceBank = userColumns.some((column) => column.name === "elevenlabs_voice_bank");
   if (!hasElevenLabsVoiceBank) db.exec("ALTER TABLE users ADD COLUMN elevenlabs_voice_bank TEXT NOT NULL DEFAULT '{}';");
   const hasElevenLabsVoiceModel = userColumns.some((column) => column.name === "elevenlabs_voice_model");
   if (!hasElevenLabsVoiceModel) db.exec("ALTER TABLE users ADD COLUMN elevenlabs_voice_model TEXT;");
+  const hasPrismDefaultBotAudioVoiceProfile = userColumns.some(
+    (column) => column.name === "prism_default_bot_audio_voice_profile"
+  );
+  if (!hasPrismDefaultBotAudioVoiceProfile) {
+    db.exec("ALTER TABLE users ADD COLUMN prism_default_bot_audio_voice_profile TEXT;");
+  }
   const hasProviderLocked = userColumns.some((column) => column.name === "provider_locked");
   if (!hasProviderLocked) {
     db.exec("ALTER TABLE users ADD COLUMN provider_locked INTEGER NOT NULL DEFAULT 0;");

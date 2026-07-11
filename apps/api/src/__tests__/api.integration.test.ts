@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { getAppConfig } from "@localai/config";
+import { normalizeBotAudioVoiceProfileV1 } from "@localai/shared";
 import {
   createDeterministicProvider,
   createFetchRecorder,
@@ -312,7 +313,10 @@ describe("API request integration", () => {
     );
     assert.equal(created.status, 201);
     const createdPayload = await json(created);
-    assert.deepEqual(createdPayload.bot.authored_audio_voice_profile, authored);
+    assert.deepEqual(
+      createdPayload.bot.authored_audio_voice_profile,
+      normalizeBotAudioVoiceProfileV1(authored)
+    );
     assert.equal(createdPayload.bot.audio_voice_profile_override, null);
 
     const override = { ...authored, baseVoiceId: "voice-2", pitch: -0.25 };
@@ -323,7 +327,13 @@ describe("API request integration", () => {
     });
     assert.equal(updated.status, 200);
     const updatedPayload = await json(updated);
-    assert.deepEqual(updatedPayload.bot.authored_audio_voice_profile, authored);
-    assert.deepEqual(updatedPayload.bot.audio_voice_profile_override, override);
+    assert.deepEqual(
+      updatedPayload.bot.authored_audio_voice_profile,
+      normalizeBotAudioVoiceProfileV1(authored)
+    );
+    assert.deepEqual(
+      updatedPayload.bot.audio_voice_profile_override,
+      normalizeBotAudioVoiceProfileV1(override)
+    );
   });
 });

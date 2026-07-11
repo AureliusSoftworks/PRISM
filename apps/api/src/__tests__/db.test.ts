@@ -88,6 +88,11 @@ describe("createDatabase bot export hash migration", () => {
           (column) => column.name === "prism_default_bot_face_thinking_frames"
         )
       );
+      assert.ok(userColumns.some((column) => column.name === "prism_default_bot_audio_voice_profile"));
+      assert.equal(
+        userColumns.find((column) => column.name === "voice_effects_enabled")?.dflt_value,
+        "1"
+      );
       assert.ok(userColumns.some((column) => column.name === "hidden_comfyui_workflow_ids"));
       assert.ok(userColumns.some((column) => column.name === "zen_wallpaper_text_mask_enabled"));
       assert.ok(

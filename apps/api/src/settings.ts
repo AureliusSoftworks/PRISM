@@ -163,6 +163,7 @@ export interface CurrentSettings {
   prismImageToolLlmModel: string | null;
   primaryOllamaHost: string;
   voiceMode: VoiceMode | string | null;
+  voiceEffectsEnabled: number;
   englishVoiceEngine: EnglishVoiceEngine | string | null;
   elevenLabsVoiceBank: string | null;
   elevenLabsVoiceModel: string | null;
@@ -214,6 +215,7 @@ export interface NextSettings {
   prismDefaultLlmModel: string | null;
   prismImageToolLlmModel: string | null;
   voiceMode: VoiceMode;
+  voiceEffectsEnabled: boolean;
   englishVoiceEngine: EnglishVoiceEngine;
   elevenLabsVoiceBank: ElevenLabsVoiceBank;
   elevenLabsVoiceModel: string | null;
@@ -1057,6 +1059,9 @@ export function resolveNextSettings(
     current.prismImageToolLlmModel
   );
   const voiceMode = normalizeVoiceMode(body.voiceMode, normalizeVoiceMode(current.voiceMode));
+  const voiceEffectsEnabled = typeof body.voiceEffectsEnabled === "boolean"
+    ? body.voiceEffectsEnabled
+    : current.voiceEffectsEnabled !== 0;
   const englishVoiceEngine = normalizeEnglishVoiceEngine(
     body.englishVoiceEngine,
     normalizeEnglishVoiceEngine(current.englishVoiceEngine)
@@ -1156,6 +1161,7 @@ export function resolveNextSettings(
     prismDefaultLlmModel,
     prismImageToolLlmModel,
     voiceMode,
+    voiceEffectsEnabled,
     englishVoiceEngine,
     elevenLabsVoiceBank,
     elevenLabsVoiceModel,

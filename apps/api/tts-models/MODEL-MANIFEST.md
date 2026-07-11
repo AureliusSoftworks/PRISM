@@ -1,4 +1,4 @@
-# Bundled speech model
+# Retired speech model source
 
 - Model: `kitten-nano-en-v0_2-fp16`
 - Source: https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kitten-nano-en-v0_2-fp16.tar.bz2
@@ -8,8 +8,9 @@
 - Phonemizer data: eSpeak NG, GPL-3.0-or-later. Its complete license is retained as `ESPEAK-NG-COPYING`.
 - Runtime: `sherpa-onnx-node` 1.13.4
 
-The model is included in packaged Prism runtimes. Prism never downloads speech
-models while the app is running.
+This model was replaced by native macOS and Windows system speech and is no
+longer staged into packaged Prism runtimes. Its source files remain in the
+repository temporarily as a non-shipping migration artifact.
 
 The eSpeak NG license interaction must be reviewed before release packaging is
 approved; keeping this manifest and the full licenses is necessary but does not

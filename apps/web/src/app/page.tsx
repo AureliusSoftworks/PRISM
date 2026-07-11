@@ -362,6 +362,8 @@ import {
   Sun,
   Timer,
   Trash2,
+  Volume2,
+  VolumeX,
   Waves,
   X,
 } from "lucide-react";
@@ -550,6 +552,10 @@ import {
   normalizeOptionalBotAudioVoiceProfileV1,
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
   BOT_AUDIO_VOICE_IDS,
+  BOT_VOICE_TEXTURE_PRESETS,
+  BOT_VOICE_TEXTURE_PRESET_LABELS,
+  botVoiceTextureForPreset,
+  botVoiceTextureIsModified,
   normalizeEnglishVoiceEngine,
   normalizeVoiceMode,
   type BotAudioVoiceProfileV1,
@@ -568,6 +574,12 @@ import {
   prepareEnglishVoice,
   stopEnglishVoice,
 } from "./englishVoice";
+import {
+  normalizeAudibleVoiceMode,
+  voiceModeAfterQuickToggle,
+  voiceModeDisplayName,
+  type AudibleVoiceMode,
+} from "./voiceQuickToggle";
 import {
   PRISM_APPLETS,
   prismAppletVersionLabel,
@@ -9294,6 +9306,7 @@ interface UserSettings {
   anthropicApiKeySource: ApiKeySource;
   elevenLabsApiKeySource: ApiKeySource;
   voiceMode: VoiceMode;
+  voiceEffectsEnabled: boolean;
   englishVoiceEngine: EnglishVoiceEngine;
   elevenLabsVoiceBank: Record<BotAudioVoiceId, string | null>;
   elevenLabsVoiceModel: string;
@@ -9328,6 +9341,7 @@ interface UserSettings {
   prismDefaultBotFaceMouthRotationDeg: number;
   prismDefaultBotFaceBlinkBar: BotFaceBlinkBar;
   prismDefaultBotFaceThinkingFrames: BotFaceThinkingFrames;
+  prismDefaultBotAudioVoiceProfile: BotAudioVoiceProfileV1;
   prismDefaultBotTemperature: number;
   prismDefaultBotMaxTokens: number;
   prismDefaultBotTopP: number;
@@ -9376,6 +9390,16 @@ interface ElevenLabsVoiceCatalogEntry {
   description: string | null;
   previewUrl: string | null;
   labels: Record<string, string>;
+}
+
+interface VoiceCapabilitiesResponse {
+  capabilities?: {
+    builtinEnglish?: {
+      platform?: string;
+      hasFiveDistinctVoices?: boolean;
+      slots?: Array<{ voiceId: BotAudioVoiceId; name: string | null }>;
+    };
+  };
 }
 
 type ZenModeSettingsFields = Pick<
@@ -9858,58 +9882,98 @@ interface Bot {
 function BotVoiceEditor({
   profile,
   onChange,
+  previewMode,
+  effectsEnabled,
+  voiceLabels,
+  resetLabel,
+  onReset,
+  onPreview,
 }: {
   profile: BotAudioVoiceProfileV1;
   onChange: (profile: BotAudioVoiceProfileV1) => void;
+  previewMode: VoiceMode;
+  effectsEnabled: boolean;
+  voiceLabels?: readonly string[];
+  resetLabel: string;
+  onReset: () => void;
+  onPreview: (profile: BotAudioVoiceProfileV1) => Promise<void>;
 }): React.JSX.Element {
+  const normalizedProfile = normalizeBotAudioVoiceProfileV1(profile);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
+  const [previewNote, setPreviewNote] = useState<string | null>(null);
   const updateControl = (
-    key: "pitch" | "warmth" | "pace" | "lilt",
+    key: "pitch" | "warmth" | "pace" | "lilt" | "bottishTone",
     value: number
   ): void => {
     onChange(normalizeBotAudioVoiceProfileV1({
-      ...profile,
+      ...normalizedProfile,
       [key]: value,
     }));
+  };
+  const updateTextureControl = (
+    key: "amount" | "bandwidth" | "noise" | "instability" | "distortion" | "damage",
+    value: number
+  ): void => {
+    onChange(normalizeBotAudioVoiceProfileV1({
+      ...normalizedProfile,
+      texture: { ...normalizedProfile.texture, [key]: value },
+    }));
+  };
+  const preview = async (): Promise<void> => {
+    if (previewMode === "mute") {
+      setPreviewNote("Global voices are muted. Choose Bottish or English in Settings to preview.");
+      return;
+    }
+    if (!normalizedProfile.enabled) {
+      setPreviewNote("This bot is Silent. Turn Voice enabled on to preview it.");
+      return;
+    }
+    setPreviewNote(!effectsEnabled && normalizedProfile.texture.preset !== "clean"
+      ? "Voice textures are bypassed globally, so this preview will be clean."
+      : null);
+    setPreviewing(true);
+    try { await onPreview(normalizedProfile); } finally { setPreviewing(false); }
   };
   return (
     <div className={styles.botVoiceEditor}>
       <div className={styles.botVoiceEditorHeader}>
         <div>
-          <strong>Voice</strong>
-          <small>The same character is used for Bottish and English.</small>
+          <strong>Voice enabled</strong>
+          <small>The same identity speaks Bottish and English.</small>
         </div>
         <button
           type="button"
-          onClick={() => {
-            stopBottishVoice();
-            void prepareBottishVoice().then(() =>
-              enqueueBottishVoice("Hello! This is how I sound in Prism.", profile, "bot-voice-preview")
-            );
-          }}
+          role="switch"
+          aria-checked={normalizedProfile.enabled}
+          data-active={normalizedProfile.enabled ? "true" : undefined}
+          onClick={() => onChange({ ...normalizedProfile, enabled: !normalizedProfile.enabled })}
         >
-          Preview
+          {normalizedProfile.enabled ? "On" : "Silent"}
         </button>
       </div>
+      <div className={styles.botVoiceSectionLabel}>Voice identity</div>
       <div className={styles.botVoiceSlots} role="radiogroup" aria-label="Base voice">
         {BOT_AUDIO_VOICE_IDS.map((voiceId, index) => (
           <button
             key={voiceId}
             type="button"
             role="radio"
-            aria-checked={profile.baseVoiceId === voiceId}
-            data-active={profile.baseVoiceId === voiceId ? "true" : undefined}
-            onClick={() => onChange({ ...profile, baseVoiceId: voiceId })}
+            aria-checked={normalizedProfile.baseVoiceId === voiceId}
+            data-active={normalizedProfile.baseVoiceId === voiceId ? "true" : undefined}
+            onClick={() => onChange({ ...normalizedProfile, baseVoiceId: voiceId })}
           >
             <span>{index + 1}</span>
-            <small>Voice {index + 1}</small>
+            <small>{voiceLabels?.[index] || `Voice ${index + 1}`}</small>
           </button>
         ))}
       </div>
+      <div className={styles.botVoiceSectionLabel}>Performance</div>
       <div className={styles.botVoiceControls}>
         {([
           ["pitch", "Pitch"],
-          ["warmth", "Warmth"],
           ["pace", "Pace"],
+          ["warmth", "Warmth"],
           ["lilt", "Lilt"],
         ] as const).map(([key, label]) => (
           <label key={key}>
@@ -9919,12 +9983,111 @@ function BotVoiceEditor({
               min={-1}
               max={1}
               step={0.05}
-              value={profile[key]}
+              value={normalizedProfile[key]}
+              aria-label={label}
               onChange={(event) => updateControl(key, Number(event.currentTarget.value))}
             />
-            <output>{profile[key].toFixed(2)}</output>
+            <output>{normalizedProfile[key].toFixed(2)}</output>
           </label>
         ))}
+        <label>
+          <span>Volume</span>
+          <input
+            type="range"
+            min={0}
+            max={1.25}
+            step={0.05}
+            value={normalizedProfile.volume}
+            aria-label="Volume"
+            onChange={(event) => onChange({
+              ...normalizedProfile,
+              volume: Number(event.currentTarget.value),
+            })}
+          />
+          <output>{Math.round(normalizedProfile.volume * 100)}%</output>
+        </label>
+      </div>
+      <div className={styles.botVoiceSectionLabel}>Bottish tone</div>
+      <div className={styles.botVoiceControls}>
+        <label>
+          <span>Tone</span>
+          <input
+            type="range"
+            min={-1}
+            max={1}
+            step={0.05}
+            value={normalizedProfile.bottishTone}
+            aria-label="Bottish tone from organic to synthetic"
+            onChange={(event) => updateControl("bottishTone", Number(event.currentTarget.value))}
+          />
+          <output>{normalizedProfile.bottishTone.toFixed(2)}</output>
+        </label>
+      </div>
+      <div className={styles.botVoiceSectionLabel}>Texture</div>
+      <div className={styles.botVoiceTexturePresets} role="radiogroup" aria-label="Voice texture">
+        {BOT_VOICE_TEXTURE_PRESETS.map((preset) => (
+          <button
+            key={preset}
+            type="button"
+            role="radio"
+            aria-checked={normalizedProfile.texture.preset === preset}
+            data-active={normalizedProfile.texture.preset === preset ? "true" : undefined}
+            onClick={() => onChange({
+              ...normalizedProfile,
+              texture: botVoiceTextureForPreset(preset),
+            })}
+          >
+            {BOT_VOICE_TEXTURE_PRESET_LABELS[preset]}
+            {normalizedProfile.texture.preset === preset &&
+            botVoiceTextureIsModified(normalizedProfile.texture) ? <small>Modified</small> : null}
+          </button>
+        ))}
+      </div>
+      <div className={styles.botVoiceControls}>
+        <label>
+          <span>Amount</span>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={normalizedProfile.texture.amount}
+            aria-label="Texture amount"
+            disabled={normalizedProfile.texture.preset === "clean"}
+            onChange={(event) => updateTextureControl("amount", Number(event.currentTarget.value))}
+          />
+          <output>{Math.round(normalizedProfile.texture.amount * 100)}%</output>
+        </label>
+      </div>
+      <details className={styles.botVoiceAdvanced} open={advancedOpen} onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}>
+        <summary>Advanced</summary>
+        <div className={styles.botVoiceControls}>
+          {([
+            ["bandwidth", "Bandwidth"],
+            ["noise", "Noise"],
+            ["instability", "Instability"],
+            ["distortion", "Distortion"],
+            ["damage", "Damage"],
+          ] as const).map(([key, label]) => (
+            <label key={key}>
+              <span>{label}</span>
+              <input type="range" min={0} max={1} step={0.05}
+                value={normalizedProfile.texture[key]}
+                aria-label={label}
+                onChange={(event) => updateTextureControl(key, Number(event.currentTarget.value))}
+              />
+              <output>{normalizedProfile.texture[key].toFixed(2)}</output>
+            </label>
+          ))}
+        </div>
+      </details>
+      {previewNote ? <p className={styles.botVoiceNotice}>{previewNote}</p> : null}
+      <div className={styles.botVoiceActions}>
+        <button type="button" onClick={onReset}>{resetLabel}</button>
+        <button type="button" onClick={() => void preview()} disabled={previewing}>
+          <Play size={13} strokeWidth={2.3} aria-hidden="true" />
+          {previewing ? "Playing…" : "Preview"}
+        </button>
       </div>
     </div>
   );
@@ -9994,6 +10157,7 @@ type BotAvatarDraftSnapshot = Pick<
   | "faceBlinkBar"
   | "faceThinkingFrames"
   | "avatarDetails"
+  | "audioVoiceProfile"
 >;
 
 const BOT_AVATAR_UNDO_HISTORY_LIMIT = 100;
@@ -11892,6 +12056,9 @@ const BOT_VOICE_PRESET_DESCRIPTIONS: Record<BotVoicePreset, string> = {
   playful: "Light humor when useful.",
   formal: "Structured and precise.",
 };
+
+const VOICE_PREVIEW_TEXT = "Hello there. This is a voice preview.";
+const LAST_AUDIBLE_VOICE_MODE_STORAGE_PREFIX = "prism_last_audible_voice_mode";
 
 function blankBotProfile(): BotProfileFields {
   return parseStoredBotPrompt("").fields;
@@ -30118,6 +30285,10 @@ interface BotAvatarCustomizerModalProps {
   faceThinkingFrames: BotFaceThinkingFrames;
   avatarDetails: BotAvatarDetailsV1 | null;
   detailsEditorVisible?: boolean;
+  audioVoiceProfile: BotAudioVoiceProfileV1;
+  voiceMode: VoiceMode;
+  voiceEffectsEnabled: boolean;
+  voiceLabels?: readonly string[];
   hasUnsavedChanges: boolean;
   canUndo: boolean;
   saving: boolean;
@@ -30151,6 +30322,9 @@ interface BotAvatarCustomizerModalProps {
   onAvatarDetailsApply: (
     details: BotAvatarDetailsV1 | null
   ) => void | Promise<void>;
+  onAudioVoiceProfileChange: (profile: BotAudioVoiceProfileV1) => void;
+  onVoicePreview: (profile: BotAudioVoiceProfileV1) => Promise<void>;
+  onVoiceRestore: () => void;
 }
 
 function optionalScaleLabel(
@@ -30440,6 +30614,7 @@ type BotAvatarCustomizerTab =
   | "face"
   | "eyes"
   | "mouth"
+  | "voice"
   | "motion"
   | "details";
 type BotAvatarFaceControlTab = Extract<
@@ -30477,6 +30652,7 @@ const BOT_AVATAR_CUSTOMIZER_TABS = [
   { value: "face", label: "Identity" },
   { value: "eyes", label: "Eyes" },
   { value: "mouth", label: "Mouth" },
+  { value: "voice", label: "Voice" },
   { value: "details", label: "Details" },
   { value: "motion", label: "Motion" },
 ] as const satisfies readonly {
@@ -31699,6 +31875,13 @@ function BotAvatarFaceControls({
                   }}
                 />
               </div>
+              <div className={styles.botAvatarMouthAnimationRow}>
+                <BotAvatarGlyphAnimationControl
+                  value={faceMouthAnimation}
+                  disabled={!customMouthActive}
+                  onChange={onMouthAnimationChange}
+                />
+              </div>
             </section>
           </div>
         </div>
@@ -31777,13 +31960,6 @@ function BotAvatarFaceControls({
                     onMouthOffsetXChange(DEFAULT_BOT_FACE_STYLE.mouthOffsetX);
                     onMouthOffsetYChange(DEFAULT_BOT_FACE_STYLE.mouthOffsetY);
                   }}
-                />
-              </div>
-              <div className={styles.botAvatarMouthAnimationRow}>
-                <BotAvatarGlyphAnimationControl
-                  value={faceMouthAnimation}
-                  disabled={!customMouthActive}
-                  onChange={onMouthAnimationChange}
                 />
               </div>
             </section>
@@ -32034,6 +32210,10 @@ function BotAvatarCustomizerModal({
   faceThinkingFrames,
   avatarDetails,
   detailsEditorVisible = false,
+  audioVoiceProfile,
+  voiceMode,
+  voiceEffectsEnabled,
+  voiceLabels,
   hasUnsavedChanges,
   canUndo,
   saving,
@@ -32065,6 +32245,9 @@ function BotAvatarCustomizerModal({
   onBlinkBarChange,
   onThinkingFramesChange,
   onAvatarDetailsApply,
+  onAudioVoiceProfileChange,
+  onVoicePreview,
+  onVoiceRestore,
 }: BotAvatarCustomizerModalProps): React.JSX.Element | null {
   const [mouthPhase, setMouthPhase] = useState(0);
   const [previewTheme, setPreviewTheme] = useState<"light" | "dark">(resolvedTheme);
@@ -32542,6 +32725,8 @@ function BotAvatarCustomizerModal({
                       <Eye size={13} strokeWidth={2.3} aria-hidden="true" />
                     ) : tab.value === "mouth" ? (
                       <Smile size={13} strokeWidth={2.3} aria-hidden="true" />
+                    ) : tab.value === "voice" ? (
+                      <Volume2 size={13} strokeWidth={2.3} aria-hidden="true" />
                     ) : tab.value === "details" ? (
                       <PencilLine size={13} strokeWidth={2.3} aria-hidden="true" />
                     ) : (
@@ -32568,6 +32753,26 @@ function BotAvatarCustomizerModal({
                   }}
                   onDirtyChange={setDetailsEditorDirty}
                   onPreviewChange={setAvatarDetailsPreview}
+                />
+              ) : null}
+              {activeControlTab === "voice" ? (
+                <BotVoiceEditor
+                  profile={audioVoiceProfile}
+                  onChange={onAudioVoiceProfileChange}
+                  previewMode={voiceMode}
+                  effectsEnabled={voiceEffectsEnabled}
+                  voiceLabels={voiceLabels}
+                  resetLabel={isDefaultPrismBot ? "Reset voice" : "Restore original voice"}
+                  onReset={onVoiceRestore}
+                  onPreview={async (profile) => {
+                    const previousMode = previewMode;
+                    setPreviewMode("talking");
+                    try {
+                      await onVoicePreview(profile);
+                    } finally {
+                      setPreviewMode(previousMode);
+                    }
+                  }}
                 />
               ) : null}
               {activeFaceControlTabs.map((faceControlTab) => (
@@ -34119,11 +34324,55 @@ function HomeContent(): React.JSX.Element {
     new Map()
   );
   const [settings, setSettings] = useState<UserSettings | null>(null);
+  const lastAudibleVoiceModeRef = useRef<AudibleVoiceMode>("bottish");
+  const voiceQuickToggleBusyRef = useRef(false);
   const [voicePlaybackNotice, setVoicePlaybackNotice] = useState<string | null>(null);
   const [elevenLabsVoiceCatalog, setElevenLabsVoiceCatalog] = useState<
     ElevenLabsVoiceCatalogEntry[]
   >([]);
   const [elevenLabsVoiceCatalogLoading, setElevenLabsVoiceCatalogLoading] = useState(false);
+  const [systemVoiceSlotLabels, setSystemVoiceSlotLabels] = useState<string[]>([]);
+  const [systemVoiceSlotsLimited, setSystemVoiceSlotsLimited] = useState(false);
+  useEffect(() => {
+    if (!user) return;
+    void api<VoiceCapabilitiesResponse>("/api/voices/capabilities")
+      .then((response) => {
+        const slots = response.capabilities?.builtinEnglish?.slots;
+        if (!Array.isArray(slots)) return;
+        setSystemVoiceSlotsLimited(
+          response.capabilities?.builtinEnglish?.platform === "win32" &&
+          response.capabilities?.builtinEnglish?.hasFiveDistinctVoices === false
+        );
+        setSystemVoiceSlotLabels(BOT_AUDIO_VOICE_IDS.map((voiceId, index) =>
+          slots.find((slot) => slot.voiceId === voiceId)?.name || `Voice ${index + 1}`
+        ));
+      })
+      .catch(() => {
+        setSystemVoiceSlotLabels([]);
+        setSystemVoiceSlotsLimited(false);
+      });
+  }, [user]);
+  useEffect(() => {
+    if (!settings || !user) return;
+    const storageKey = `${LAST_AUDIBLE_VOICE_MODE_STORAGE_PREFIX}:${user.id}`;
+    if (settings.voiceMode === "bottish" || settings.voiceMode === "english") {
+      lastAudibleVoiceModeRef.current = settings.voiceMode;
+      try {
+        window.localStorage.setItem(storageKey, settings.voiceMode);
+      } catch {
+        // The in-memory fallback is sufficient when browser storage is unavailable.
+      }
+      return;
+    }
+    try {
+      lastAudibleVoiceModeRef.current = normalizeAudibleVoiceMode(
+        window.localStorage.getItem(storageKey),
+        lastAudibleVoiceModeRef.current
+      );
+    } catch {
+      // Keep the current in-memory fallback.
+    }
+  }, [settings?.voiceMode, user?.id]);
   const [zenAutonomyScheduleTick, setZenAutonomyScheduleTick] = useState(0);
   const zenAutonomyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const zenAutonomyScheduleFrameRef = useRef<number | null>(null);
@@ -34972,13 +35221,16 @@ function HomeContent(): React.JSX.Element {
             detail.lastBotId ?? detail.botId
           );
           const profile =
-            normalizeOptionalBotAudioVoiceProfileV1(
-              messageBot?.audio_voice_profile_override
-            ) ??
-            normalizeBotAudioVoiceProfileV1(
-              messageBot?.authored_audio_voice_profile ??
-                DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1
-            );
+            messageBot
+              ? normalizeOptionalBotAudioVoiceProfileV1(
+                  messageBot.audio_voice_profile_override
+                ) ?? normalizeBotAudioVoiceProfileV1(
+                  messageBot.authored_audio_voice_profile
+                )
+              : normalizeBotAudioVoiceProfileV1(
+                  settings.prismDefaultBotAudioVoiceProfile
+                );
+          if (!profile.enabled || profile.volume <= 0) continue;
           if (settings.voiceMode === "bottish") {
             const response = await api<{
               synthesis: {
@@ -34999,7 +35251,8 @@ function HomeContent(): React.JSX.Element {
             await enqueueBottishVoice(
               response.synthesis.text,
               response.synthesis.profile,
-              message.id
+              message.id,
+              settings.voiceEffectsEnabled !== false
             );
           } else {
             const response = await fetch(
@@ -35028,7 +35281,7 @@ function HomeContent(): React.JSX.Element {
                 engineUsed?: string;
               } | null;
               if (payload?.engineUsed === "builtin-local-fallback") {
-                setVoicePlaybackNotice("Built-in voice used for LOCAL mode.");
+                setVoicePlaybackNotice("System voice used for LOCAL mode.");
               }
               throw new Error(payload?.error ?? payload?.code ?? `Voice playback failed (${response.status}).`);
             }
@@ -35036,13 +35289,18 @@ function HomeContent(): React.JSX.Element {
             if (controller.signal.aborted) return;
             const engineUsed = response.headers.get("x-prism-voice-engine");
             if (engineUsed === "builtin-local-fallback") {
-              setVoicePlaybackNotice("Built-in voice used for LOCAL mode.");
+              setVoicePlaybackNotice("System voice used for LOCAL mode.");
             } else if (engineUsed === "builtin-provider-fallback") {
-              setVoicePlaybackNotice("ElevenLabs was unavailable, so Prism used its built-in voice.");
+              setVoicePlaybackNotice("ElevenLabs was unavailable, so Prism used its system voice.");
             } else {
               setVoicePlaybackNotice(null);
             }
-            await enqueueEnglishVoice(bytes, profile);
+            await enqueueEnglishVoice(
+              bytes,
+              profile,
+              message.id,
+              settings.voiceEffectsEnabled !== false
+            );
           }
         }
       } catch (err) {
@@ -35059,7 +35317,7 @@ function HomeContent(): React.JSX.Element {
     })();
 
     return () => controller.abort();
-  }, [bots, detail, settings?.englishVoiceEngine, settings?.voiceMode]);
+  }, [bots, detail, settings?.englishVoiceEngine, settings?.prismDefaultBotAudioVoiceProfile, settings?.voiceEffectsEnabled, settings?.voiceMode]);
 
   useEffect(() => {
     if (settings?.voiceMode !== "mute") return;
@@ -35081,9 +35339,11 @@ function HomeContent(): React.JSX.Element {
       bots,
       detail.lastBotId ?? detail.botId
     );
-    const profile =
-      normalizeOptionalBotAudioVoiceProfileV1(messageBot?.audio_voice_profile_override) ??
-      normalizeBotAudioVoiceProfileV1(messageBot?.authored_audio_voice_profile);
+    const profile = messageBot
+      ? normalizeOptionalBotAudioVoiceProfileV1(messageBot.audio_voice_profile_override) ??
+        normalizeBotAudioVoiceProfileV1(messageBot.authored_audio_voice_profile)
+      : normalizeBotAudioVoiceProfileV1(settings.prismDefaultBotAudioVoiceProfile);
+    if (!profile.enabled || profile.volume <= 0) return;
     const controller = new AbortController();
     voiceSynthesisAbortRef.current?.abort();
     voiceSynthesisAbortRef.current = controller;
@@ -35104,7 +35364,12 @@ function HomeContent(): React.JSX.Element {
             profile,
           }),
         });
-        await enqueueBottishVoice(response.synthesis.text, response.synthesis.profile, message.id);
+        await enqueueBottishVoice(
+          response.synthesis.text,
+          response.synthesis.profile,
+          message.id,
+          settings.voiceEffectsEnabled !== false
+        );
         return;
       }
       await prepareEnglishVoice();
@@ -35125,12 +35390,17 @@ function HomeContent(): React.JSX.Element {
       const engineUsed = response.headers.get("x-prism-voice-engine");
       setVoicePlaybackNotice(
         engineUsed === "builtin-local-fallback"
-          ? "Built-in voice used for LOCAL mode."
+          ? "System voice used for LOCAL mode."
           : engineUsed === "builtin-provider-fallback"
-            ? "ElevenLabs was unavailable, so Prism used its built-in voice."
+            ? "ElevenLabs was unavailable, so Prism used its system voice."
             : null
       );
-      await enqueueEnglishVoice(await response.arrayBuffer(), profile);
+      await enqueueEnglishVoice(
+        await response.arrayBuffer(),
+        profile,
+        message.id,
+        settings.voiceEffectsEnabled !== false
+      );
     } catch (err) {
       if (!isAbortLikeError(err)) {
         setVoicePlaybackNotice(err instanceof Error ? err.message : "Voice playback failed.");
@@ -36228,6 +36498,8 @@ function HomeContent(): React.JSX.Element {
   // stored color (where we seed the picker with a random hex) don't
   // immediately appear as "dirty". Cleared when edit mode exits.
   const editOriginalRef = useRef<BotEditOriginalSnapshot | null>(null);
+  const voiceRestoreRequestedRef = useRef(false);
+  const voiceAutosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const botAvatarUndoHistoryRef = useRef<BotAvatarDraftSnapshot[]>([]);
   const botAvatarUndoInteractionRef = useRef<{
     key: string;
@@ -36259,6 +36531,7 @@ function HomeContent(): React.JSX.Element {
       faceBlinkBar: newBotFaceBlinkBar,
       faceThinkingFrames: newBotFaceThinkingFrames,
       avatarDetails: newBotAvatarDetails,
+      audioVoiceProfile: newBotAudioVoiceProfile,
     }),
     [
       newBotColor,
@@ -36280,6 +36553,7 @@ function HomeContent(): React.JSX.Element {
       newBotFaceMouthScale,
       newBotFaceThinkingFrames,
       newBotAvatarDetails,
+      newBotAudioVoiceProfile,
       newBotGlyph,
       newBotName,
     ]
@@ -36307,6 +36581,7 @@ function HomeContent(): React.JSX.Element {
     setNewBotFaceBlinkBar(snapshot.faceBlinkBar);
     setNewBotFaceThinkingFrames(snapshot.faceThinkingFrames);
     setNewBotAvatarDetails(snapshot.avatarDetails);
+    setNewBotAudioVoiceProfile(snapshot.audioVoiceProfile);
   }, []);
 
   const clearBotAvatarUndoHistory = useCallback((): void => {
@@ -36369,6 +36644,7 @@ function HomeContent(): React.JSX.Element {
     setNewBotFaceMouthOffsetX(pristine.faceMouthOffsetX);
     setNewBotFaceMouthOffsetY(pristine.faceMouthOffsetY);
     setNewBotFaceMouthRotationDeg(pristine.faceMouthRotationDeg);
+    setNewBotAudioVoiceProfile(pristine.audioVoiceProfile);
     setNewBotFaceBlinkBar(pristine.faceBlinkBar);
     setNewBotFaceThinkingFrames(pristine.faceThinkingFrames);
     setNewBotAvatarDetails(pristine.avatarDetails);
@@ -43997,6 +44273,7 @@ function HomeContent(): React.JSX.Element {
           const profile =
             normalizeOptionalBotAudioVoiceProfileV1(bot?.audio_voice_profile_override) ??
             normalizeBotAudioVoiceProfileV1(bot?.authored_audio_voice_profile);
+          if (!profile.enabled || profile.volume <= 0) continue;
           if (settings.voiceMode === "bottish") {
             const response = await api<{
               synthesis: { text: string; profile: BotAudioVoiceProfileV1 };
@@ -44010,7 +44287,12 @@ function HomeContent(): React.JSX.Element {
                 profile,
               }),
             });
-            await enqueueBottishVoice(response.synthesis.text, response.synthesis.profile, message.id);
+            await enqueueBottishVoice(
+              response.synthesis.text,
+              response.synthesis.profile,
+              message.id,
+              settings.voiceEffectsEnabled !== false
+            );
           } else {
             const response = await fetch(new URL("/api/voices/synthesize", window.location.origin), {
               method: "POST",
@@ -44028,11 +44310,16 @@ function HomeContent(): React.JSX.Element {
             if (!response.ok) throw new Error(`Voice playback failed (${response.status}).`);
             const engineUsed = response.headers.get("x-prism-voice-engine");
             if (engineUsed === "builtin-local-fallback") {
-              setVoicePlaybackNotice("Built-in voice used for LOCAL mode.");
+              setVoicePlaybackNotice("System voice used for LOCAL mode.");
             } else if (engineUsed === "builtin-provider-fallback") {
-              setVoicePlaybackNotice("ElevenLabs was unavailable, so Prism used its built-in voice.");
+              setVoicePlaybackNotice("ElevenLabs was unavailable, so Prism used its system voice.");
             }
-            await enqueueEnglishVoice(await response.arrayBuffer(), profile);
+            await enqueueEnglishVoice(
+              await response.arrayBuffer(),
+              profile,
+              message.id,
+              settings.voiceEffectsEnabled !== false
+            );
           }
         }
       } catch (err) {
@@ -44048,7 +44335,7 @@ function HomeContent(): React.JSX.Element {
       controller.abort();
       coffeeVoicePlaybackBusyRef.current = false;
     };
-  }, [bots, coffeeConversation, coffeeSessionPhase, settings?.englishVoiceEngine, settings?.voiceMode]);
+  }, [bots, coffeeConversation, coffeeSessionPhase, settings?.englishVoiceEngine, settings?.voiceEffectsEnabled, settings?.voiceMode]);
   /** Scenario for arrival animation — held while the user picks a starter topic. */
   const [coffeePendingArrivalScenario, setCoffeePendingArrivalScenario] =
     useState<CoffeeArrivalScenario>("user-first");
@@ -45651,6 +45938,103 @@ function HomeContent(): React.JSX.Element {
     if (!storySession?.episode || !storyCurrentScene) return null;
     return getStoryLocation(storySession.episode, storyCurrentScene.locationId) ?? null;
   }, [storySession?.episode, storyCurrentScene]);
+  const storyVoiceBeatKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (
+      view !== "story" ||
+      !settings ||
+      settings.voiceMode === "mute" ||
+      !storySession ||
+      !storyCurrentScene
+    ) {
+      storyVoiceBeatKeyRef.current = null;
+      return;
+    }
+    const beatIndex =
+      storyDialogCursor.sessionId === storySession.id &&
+      storyDialogCursor.sceneId === storyCurrentScene.id
+        ? storyDialogCursor.beatIndex
+        : 0;
+    const dialogState = createStoryDialogState(storyCurrentScene, beatIndex);
+    const beat = dialogState.activeBeat;
+    if (beat.actorRole !== "npc" || !beat.speakerBotId || !beat.text.trim()) return;
+    const bot = storyBotsById.get(beat.speakerBotId);
+    if (!bot) return;
+    const profile =
+      normalizeOptionalBotAudioVoiceProfileV1(bot.audio_voice_profile_override) ??
+      normalizeBotAudioVoiceProfileV1(bot.authored_audio_voice_profile);
+    if (!profile.enabled || profile.volume <= 0) return;
+    const seed = `${storySession.id}:${storyCurrentScene.id}:${dialogState.activeBeatIndex}:${beat.speakerBotId}`;
+    if (storyVoiceBeatKeyRef.current === seed) return;
+    storyVoiceBeatKeyRef.current = seed;
+    const controller = new AbortController();
+    stopBottishVoice();
+    stopEnglishVoice();
+    void (async () => {
+      try {
+        if (settings.voiceMode === "bottish") {
+          await prepareBottishVoice();
+          const response = await api<{
+            synthesis: { text: string; profile: BotAudioVoiceProfileV1 };
+          }>("/api/voices/synthesize", {
+            method: "POST",
+            signal: controller.signal,
+            body: JSON.stringify({
+              text: beat.text,
+              mode: "bottish",
+              engine: "builtin",
+              profile,
+            }),
+          });
+          await enqueueBottishVoice(
+            response.synthesis.text,
+            response.synthesis.profile,
+            seed,
+            settings.voiceEffectsEnabled !== false
+          );
+          return;
+        }
+        await prepareEnglishVoice();
+        const engine = storySession.provider === "local"
+          ? "builtin"
+          : settings.englishVoiceEngine;
+        const response = await fetch(new URL("/api/voices/synthesize", window.location.origin), {
+          method: "POST",
+          credentials: "include",
+          signal: controller.signal,
+          headers: { "content-type": "application/json", ...authHeadersForFetch() },
+          body: JSON.stringify({
+            text: beat.text,
+            mode: "english",
+            engine,
+            explicitOnlineContext: storySession.provider !== "local",
+            profile,
+          }),
+        });
+        if (!response.ok) throw new Error(`Story voice playback failed (${response.status}).`);
+        await enqueueEnglishVoice(
+          await response.arrayBuffer(),
+          profile,
+          seed,
+          settings.voiceEffectsEnabled !== false
+        );
+      } catch (error) {
+        if (!isAbortLikeError(error)) {
+          setVoicePlaybackNotice(
+            error instanceof Error ? error.message : "Story voice playback failed."
+          );
+        }
+      }
+    })();
+    return () => controller.abort();
+  }, [
+    settings,
+    storyBotsById,
+    storyCurrentScene,
+    storyDialogCursor,
+    storySession,
+    view,
+  ]);
   const storyDiscoveredLocationIds = useMemo(
     () => new Set(storySession?.progress?.discoveredLocationIds ?? []),
     [storySession?.progress?.discoveredLocationIds]
@@ -49186,6 +49570,7 @@ function HomeContent(): React.JSX.Element {
         : [],
       ...keySettings,
       voiceMode: normalizeVoiceMode(d.settings.voiceMode),
+      voiceEffectsEnabled: d.settings.voiceEffectsEnabled !== false,
       englishVoiceEngine: normalizeEnglishVoiceEngine(d.settings.englishVoiceEngine),
       elevenLabsVoiceBank: Object.fromEntries(
         BOT_AUDIO_VOICE_IDS.map((voiceId) => [
@@ -49313,6 +49698,9 @@ function HomeContent(): React.JSX.Element {
       prismDefaultBotFaceThinkingFrames:
         normalizeBotFaceThinkingFrames(d.settings.prismDefaultBotFaceThinkingFrames) ??
         DEFAULT_BOT_FACE_STYLE.thinkingFrames,
+      prismDefaultBotAudioVoiceProfile: normalizeBotAudioVoiceProfileV1(
+        d.settings.prismDefaultBotAudioVoiceProfile
+      ),
       prismDefaultBotTemperature: normalizeBotTemperature(
         typeof d.settings.prismDefaultBotTemperature === "number"
           ? d.settings.prismDefaultBotTemperature
@@ -50451,6 +50839,7 @@ function HomeContent(): React.JSX.Element {
     setNewBotTopK(BOT_TOP_K_DEFAULT);
     setNewBotRepetitionPenalty(BOT_REPETITION_PENALTY_DEFAULT);
     setNewBotAudioVoiceProfile(DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1);
+    voiceRestoreRequestedRef.current = false;
     setNewBotColor(randomHex());
     setNewBotGlyph(randomBotGlyph());
     setColorWheelOpen(false);
@@ -57706,11 +58095,57 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
+  async function toggleGlobalVoicePlayback(): Promise<void> {
+    if (!settings || voiceQuickToggleBusyRef.current) return;
+    const previousMode = normalizeVoiceMode(settings.voiceMode);
+    if (previousMode === "bottish" || previousMode === "english") {
+      lastAudibleVoiceModeRef.current = previousMode;
+    }
+    const nextMode = voiceModeAfterQuickToggle(
+      previousMode,
+      lastAudibleVoiceModeRef.current
+    );
+    voiceQuickToggleBusyRef.current = true;
+    setSettings((previous) => previous ? { ...previous, voiceMode: nextMode } : previous);
+    if (nextMode === "mute") {
+      stopBottishVoice();
+      stopEnglishVoice();
+      showLocalCommandToast(
+        "Voices muted",
+        `${voiceModeDisplayName(lastAudibleVoiceModeRef.current)} is ready when you turn voices back on.`
+      );
+    } else {
+      showLocalCommandToast(
+        `Voices on · ${voiceModeDisplayName(nextMode)}`,
+        "Enabled across Prism. Click the speaker again to mute."
+      );
+    }
+    try {
+      await api("/api/settings", {
+        method: "PATCH",
+        body: JSON.stringify({ voiceMode: nextMode }),
+      });
+    } catch (err) {
+      setSettings((previous) => previous ? { ...previous, voiceMode: previousMode } : previous);
+      if (previousMode === "mute") {
+        stopBottishVoice();
+        stopEnglishVoice();
+      }
+      showLocalCommandToast(
+        "Voice switch failed",
+        err instanceof Error ? err.message : "Prism kept the previous voice setting."
+      );
+    } finally {
+      voiceQuickToggleBusyRef.current = false;
+    }
+  }
+
   async function saveVoiceSettings(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!settings) return;
     const payload = {
       voiceMode: normalizeVoiceMode(settings.voiceMode),
+      voiceEffectsEnabled: settings.voiceEffectsEnabled !== false,
       englishVoiceEngine: normalizeEnglishVoiceEngine(settings.englishVoiceEngine),
       elevenLabsVoiceBank: settings.elevenLabsVoiceBank,
       elevenLabsVoiceModel: settings.elevenLabsVoiceModel,
@@ -57734,18 +58169,78 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  async function previewBottishVoice(): Promise<void> {
+  async function previewSelectedVoice(
+    rawProfile: BotAudioVoiceProfileV1 = DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1
+  ): Promise<void> {
+    if (!settings) return;
+    const previewProfile = normalizeBotAudioVoiceProfileV1(rawProfile);
     setPanelError(null);
+    setVoicePlaybackNotice(null);
+    stopBottishVoice();
+    stopEnglishVoice();
+    if (settings.voiceMode === "mute") {
+      setVoicePlaybackNotice("Mute is silent. Choose Bottish or English to hear a preview.");
+      return;
+    }
+    setBusy(true);
     try {
-      await prepareBottishVoice();
-      stopBottishVoice();
-      await enqueueBottishVoice(
-        "Hello! This is how a Prism bot sounds in Bottish.",
-        DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
-        "settings-bottish-preview"
+      if (settings.voiceMode === "bottish") {
+        await prepareBottishVoice();
+        setVoicePlaybackNotice("Playing Bottish preview…");
+        await enqueueBottishVoice(
+          VOICE_PREVIEW_TEXT,
+          previewProfile,
+          "settings-voice-preview",
+          settings.voiceEffectsEnabled !== false
+        );
+        setVoicePlaybackNotice("Played Bottish preview.");
+        return;
+      }
+
+      await prepareEnglishVoice();
+      setVoicePlaybackNotice("Preparing English preview…");
+      const previewEngine = settings.preferredProvider === "local"
+        ? "builtin"
+        : settings.englishVoiceEngine;
+      const response = await fetch(new URL("/api/voices/synthesize", window.location.origin), {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json", ...authHeadersForFetch() },
+        body: JSON.stringify({
+          text: VOICE_PREVIEW_TEXT,
+          mode: "english",
+          engine: previewEngine,
+          explicitOnlineContext: true,
+          profile: previewProfile,
+        }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null) as {
+          error?: string;
+          code?: string;
+        } | null;
+        throw new Error(payload?.error ?? payload?.code ?? `Voice preview failed (${response.status}).`);
+      }
+      const engineUsed = response.headers.get("x-prism-voice-engine");
+      setVoicePlaybackNotice(
+        settings.preferredProvider === "local" && settings.englishVoiceEngine === "elevenlabs"
+          ? "Playing a system English preview to keep LOCAL mode offline."
+          : engineUsed === "builtin-provider-fallback"
+            ? "ElevenLabs was unavailable, so Prism is previewing its system voice."
+            : "Playing English preview…"
       );
+      await enqueueEnglishVoice(
+        await response.arrayBuffer(),
+        previewProfile,
+        "settings-voice-preview",
+        settings.voiceEffectsEnabled !== false
+      );
+      setVoicePlaybackNotice("Played English preview.");
     } catch (err) {
-      setPanelError(err instanceof Error ? err.message : "Could not preview Bottish.");
+      setPanelError(err instanceof Error ? err.message : "Could not preview the selected voice.");
+      setVoicePlaybackNotice(null);
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -63781,6 +64276,10 @@ function HomeContent(): React.JSX.Element {
   // like an empty compose. Called after a successful create and when the
   // user cancels or deletes an in-progress edit.
   const resetBotForm = useCallback(() => {
+    if (voiceAutosaveTimerRef.current) {
+      clearTimeout(voiceAutosaveTimerRef.current);
+      voiceAutosaveTimerRef.current = null;
+    }
     setNewBotName("");
     setBotProfile(blankBotProfile());
     setNewBotSystemPrompt("");
@@ -63961,6 +64460,9 @@ function HomeContent(): React.JSX.Element {
     const seededTopP = BOT_TOP_P_DEFAULT;
     const seededTopK = BOT_TOP_K_DEFAULT;
     const seededRepetitionPenalty = BOT_REPETITION_PENALTY_DEFAULT;
+    const seededAudioVoiceProfile = normalizeBotAudioVoiceProfileV1(
+      settings.prismDefaultBotAudioVoiceProfile
+    );
 
     setEditingBotId(null);
     setNewBotName(seededName);
@@ -63978,6 +64480,8 @@ function HomeContent(): React.JSX.Element {
     setNewBotTopP(seededTopP);
     setNewBotTopK(seededTopK);
     setNewBotRepetitionPenalty(seededRepetitionPenalty);
+    setNewBotAudioVoiceProfile(seededAudioVoiceProfile);
+    voiceRestoreRequestedRef.current = false;
     setNewBotColor(seededColor);
     setNewBotGlyph(seededGlyph);
     setNewBotFaceEyesFont(seededFaceEyesFont);
@@ -64040,7 +64544,7 @@ function HomeContent(): React.JSX.Element {
       faceThinkingFrames: seededFaceThinkingFrames,
       avatarDetails: null,
       profilePictureImageId: null,
-      audioVoiceProfile: DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+      audioVoiceProfile: seededAudioVoiceProfile,
     };
     setBotPanelView("defaultCustomize");
     setBotAvatarCustomizerOpen(true);
@@ -65634,6 +66138,7 @@ function HomeContent(): React.JSX.Element {
     const seededAudioVoiceProfile =
       normalizeOptionalBotAudioVoiceProfileV1(bot.audio_voice_profile_override) ??
       normalizeBotAudioVoiceProfileV1(bot.authored_audio_voice_profile);
+    voiceRestoreRequestedRef.current = false;
     setNewBotName(seededName);
     setBotProfile(seededProfile);
     setNewBotSystemPrompt(rawStoredPrompt);
@@ -67366,6 +67871,8 @@ function HomeContent(): React.JSX.Element {
           newBotFaceThinkingFrames,
           editPristine.faceThinkingFrames
         )
+        || JSON.stringify(normalizeBotAudioVoiceProfileV1(newBotAudioVoiceProfile)) !==
+          JSON.stringify(normalizeBotAudioVoiceProfileV1(editPristine.audioVoiceProfile))
       : true;
     if (!hasChanges) return true;
 
@@ -67394,6 +67901,7 @@ function HomeContent(): React.JSX.Element {
           faceMouthRotationDeg: newBotFaceMouthRotationDeg,
             faceBlinkBar: newBotFaceBlinkBar,
             faceThinkingFrames: newBotFaceThinkingFrames,
+            audioVoiceProfile: newBotAudioVoiceProfile,
           }),
           signal,
         })
@@ -67444,7 +67952,7 @@ function HomeContent(): React.JSX.Element {
         faceThinkingFrames: newBotFaceThinkingFrames,
         avatarDetails: null,
         profilePictureImageId: null,
-        audioVoiceProfile: DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+        audioVoiceProfile: normalizeBotAudioVoiceProfileV1(newBotAudioVoiceProfile),
       };
       setSettings((previous) =>
         previous
@@ -67471,6 +67979,9 @@ function HomeContent(): React.JSX.Element {
               prismDefaultBotFaceMouthRotationDeg: newBotFaceMouthRotationDeg,
               prismDefaultBotFaceBlinkBar: newBotFaceBlinkBar,
               prismDefaultBotFaceThinkingFrames: newBotFaceThinkingFrames,
+              prismDefaultBotAudioVoiceProfile: normalizeBotAudioVoiceProfileV1(
+                newBotAudioVoiceProfile
+              ),
               prismDefaultBotTemperature: BOT_TEMPERATURE_DEFAULT,
               prismDefaultBotMaxTokens: BOT_REPLY_LENGTH_DEFAULT_TOKENS,
               prismDefaultBotTopP: BOT_TOP_P_DEFAULT,
@@ -67582,6 +68093,9 @@ function HomeContent(): React.JSX.Element {
       },
       editOriginalRef.current
     );
+    if (voiceRestoreRequestedRef.current) {
+      patch.audioVoiceProfileOverride = null;
+    }
     if (Object.keys(patch).length === 0) return true;
     setBusy(true);
     setPanelError(null);
@@ -67647,6 +68161,7 @@ function HomeContent(): React.JSX.Element {
         profilePictureImageId: newBotProfilePictureImageId,
         audioVoiceProfile: newBotAudioVoiceProfile,
       };
+      voiceRestoreRequestedRef.current = false;
       setEditingBotId(id);
       setColorWheelOpen(false);
       const updatedBot = result.bot;
@@ -67666,6 +68181,39 @@ function HomeContent(): React.JSX.Element {
     } finally {
       setBusy(false);
     }
+  }
+
+  function queueBotVoiceAutosave(
+    rawProfile: BotAudioVoiceProfileV1,
+    restoreOriginal = false
+  ): void {
+    if (!editingBotId) return;
+    if (voiceAutosaveTimerRef.current) clearTimeout(voiceAutosaveTimerRef.current);
+    const targetId = editingBotId;
+    const profile = normalizeBotAudioVoiceProfileV1(rawProfile);
+    voiceAutosaveTimerRef.current = setTimeout(() => {
+      voiceAutosaveTimerRef.current = null;
+      void api<{ bot?: Bot }>(`/api/bots/${targetId}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          audioVoiceProfileOverride: restoreOriginal ? null : profile,
+        }),
+      }).then((result) => {
+        if (editingBotId !== targetId) return;
+        if (editOriginalRef.current?.botId === targetId) {
+          editOriginalRef.current = {
+            ...editOriginalRef.current,
+            audioVoiceProfile: profile,
+          };
+        }
+        voiceRestoreRequestedRef.current = false;
+        if (result.bot?.id) setBots((list) => replaceBotRowById(list, result.bot!));
+        setPanelNotice("Voice saved.");
+      }).catch((error: unknown) => {
+        if (editingBotId !== targetId) return;
+        setPanelError(error instanceof Error ? error.message : "Voice autosave failed.");
+      });
+    }, 650);
   }
 
   // Single submit handler for the top form: routes to createBot or
@@ -70893,6 +71441,7 @@ function HomeContent(): React.JSX.Element {
     toolStyles?: {
 	      memories?: React.CSSProperties;
 	      refresh?: React.CSSProperties;
+	      voice?: React.CSSProperties;
 	      atmosphere?: React.CSSProperties;
 	      images?: React.CSSProperties;
 	      bots?: React.CSSProperties;
@@ -70994,6 +71543,11 @@ function HomeContent(): React.JSX.Element {
     const botsAriaLabel = navbarCustomizerBot
       ? `Edit ${navbarCustomizerBot.name}`
       : "Open bot customizer";
+    const currentVoiceMode = normalizeVoiceMode(settings?.voiceMode);
+    const voiceMuted = currentVoiceMode === "mute";
+    const voiceTooltip = voiceMuted
+      ? `Voices muted · restore ${voiceModeDisplayName(lastAudibleVoiceModeRef.current)}`
+      : `Voices: ${voiceModeDisplayName(currentVoiceMode)} · click to mute`;
     const imagesButton = (
       <button
         type="button"
@@ -71040,6 +71594,23 @@ function HomeContent(): React.JSX.Element {
           disabled={disabled}
         >
           <WrenchGlyph />
+        </button>
+        <button
+          type="button"
+          className={`${styles.headerIconButton} ${styles.voiceHeaderButton}`}
+          onClick={() => runAsyncAction(toggleGlobalVoicePlayback)}
+          aria-label={voiceTooltip}
+          aria-pressed={!voiceMuted}
+          data-glyph-tooltip={voiceTooltip}
+          data-voice-mode={currentVoiceMode}
+          disabled={disabled || !settings}
+          style={toolStyles.voice}
+        >
+          {voiceMuted ? (
+            <VolumeX className={styles.headerIconGlyph} size={18} strokeWidth={2.15} aria-hidden="true" />
+          ) : (
+            <Volume2 className={styles.headerIconGlyph} size={18} strokeWidth={2.15} aria-hidden="true" />
+          )}
         </button>
         <button
           type="button"
@@ -71490,6 +72061,21 @@ function HomeContent(): React.JSX.Element {
               }}
             >
               Settings
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className={styles.chatOverflowMenuItem}
+              disabled={headerActionsDisabled || !settings}
+              onClick={(event) => {
+                swallowMenuEvent(event);
+                setChatOverflowMenuOpen(false);
+                void toggleGlobalVoicePlayback();
+              }}
+            >
+              {settings?.voiceMode === "mute"
+                ? `Turn on ${voiceModeDisplayName(lastAudibleVoiceModeRef.current)} voices`
+                : "Mute voices"}
             </button>
             {!isZenSurface ? (
               <button
@@ -77523,6 +78109,22 @@ function HomeContent(): React.JSX.Element {
                       </label>
                     ))}
                   </div>
+                  <label className={`${styles.checkbox} ${styles.settingsInlineToggle} ${styles.settingsFieldFull}`}>
+                    <input
+                      type="checkbox"
+                      checked={settings.voiceEffectsEnabled !== false}
+                      onChange={(event) => {
+                        const voiceEffectsEnabled = event.currentTarget.checked;
+                        setSettings((previous) => previous
+                          ? { ...previous, voiceEffectsEnabled }
+                          : previous);
+                      }}
+                    />
+                    <span>
+                      <strong>Voice textures</strong>
+                      <small>Apply each bot&apos;s CRT, Lo-Fi, Tape, or damaged-speaker texture.</small>
+                    </span>
+                  </label>
                 </section>
 
                 <section
@@ -77550,7 +78152,7 @@ function HomeContent(): React.JSX.Element {
                           );
                         }}
                       >
-                        <option value="builtin">Built-in (Offline)</option>
+                        <option value="builtin">System Classic (Offline)</option>
                         <option value="elevenlabs">ElevenLabs (Online)</option>
                       </select>
                     </label>
@@ -77635,7 +78237,12 @@ function HomeContent(): React.JSX.Element {
                       </>
                     ) : (
                       <p className={`${styles.settingsFieldFull} ${styles.settingsSectionHint}`}>
-                        Built-in English is packaged with Prism and never sends speech text online.
+                        System Classic uses voices installed by macOS or Windows and never sends
+                        speech text online. On macOS, the five slots prefer Fred, Zarvox, Trinoids,
+                        Junior, and Ralph; installed voices may vary by computer.
+                        {systemVoiceSlotsLimited
+                          ? " Windows currently exposes fewer than five distinct SAPI voices, so repeated slot names are expected. Install additional Windows voices to expand the set."
+                          : ""}
                       </p>
                     )}
                   </div>
@@ -77648,8 +78255,8 @@ function HomeContent(): React.JSX.Element {
                   <p className={styles.panelNotice} role="status">{voicePlaybackNotice}</p>
                 )}
                 {panelError && <p className={styles.error} role="alert">{panelError}</p>}
-                <button type="button" onClick={() => void previewBottishVoice()} disabled={busy}>
-                  Preview Bottish
+                <button type="button" onClick={() => void previewSelectedVoice()} disabled={busy}>
+                  Preview
                 </button>
                 <button type="submit" disabled={busy}>
                   Save voice settings
@@ -79612,6 +80219,8 @@ function HomeContent(): React.JSX.Element {
               newBotFaceThinkingFrames,
               editPristine.faceThinkingFrames
             )
+            || JSON.stringify(normalizeBotAudioVoiceProfileV1(newBotAudioVoiceProfile)) !==
+              JSON.stringify(normalizeBotAudioVoiceProfileV1(editPristine.audioVoiceProfile))
           : false;
         const hasEditChanges = editPristine
           ? editingDefaultBot
@@ -80952,6 +81561,19 @@ function HomeContent(): React.JSX.Element {
                   faceThinkingFrames={newBotFaceThinkingFrames}
                   avatarDetails={newBotAvatarDetails}
                   detailsEditorVisible={!editingDefaultBot}
+                  audioVoiceProfile={newBotAudioVoiceProfile}
+                  voiceMode={normalizeVoiceMode(settings?.voiceMode)}
+                  voiceEffectsEnabled={settings?.voiceEffectsEnabled !== false}
+                  voiceLabels={BOT_AUDIO_VOICE_IDS.map((voiceId, index) => {
+                    if (settings?.englishVoiceEngine !== "elevenlabs") {
+                      return systemVoiceSlotLabels[index] ||
+                        ["Fred", "Zarvox", "Trinoids", "Junior", "Ralph"][index] ||
+                        `Voice ${index + 1}`;
+                    }
+                    const voiceIdValue = settings.elevenLabsVoiceBank[voiceId];
+                    return elevenLabsVoiceCatalog.find((voice) => voice.voiceId === voiceIdValue)?.name ||
+                      voiceIdValue || `Voice ${index + 1}`;
+                  })}
                   hasUnsavedChanges={Boolean((editingBotId || editingDefaultBot) && hasEditChanges)}
                   canUndo={botAvatarUndoDepth > 0}
                   saving={avatarCustomizerSaving}
@@ -81100,6 +81722,28 @@ function HomeContent(): React.JSX.Element {
 	                    createBotAppearanceTouchedRef.current = true;
 	                    setNewBotAvatarDetails(normalized);
 	                  }}
+                  onAudioVoiceProfileChange={(next) => {
+                    pushBotAvatarUndoSnapshot("voice");
+                    voiceRestoreRequestedRef.current = false;
+                    const normalized = normalizeBotAudioVoiceProfileV1(next);
+                    setNewBotAudioVoiceProfile(normalized);
+                    if (!editingDefaultBot) queueBotVoiceAutosave(normalized);
+                  }}
+                  onVoicePreview={previewSelectedVoice}
+                  onVoiceRestore={() => {
+                    pushBotAvatarUndoSnapshot();
+                    if (editingDefaultBot) {
+                      voiceRestoreRequestedRef.current = false;
+                      setNewBotAudioVoiceProfile(DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1);
+                      return;
+                    }
+                    voiceRestoreRequestedRef.current = true;
+                    const authored = normalizeBotAudioVoiceProfileV1(
+                      editingBot?.authored_audio_voice_profile
+                    );
+                    setNewBotAudioVoiceProfile(authored);
+                    queueBotVoiceAutosave(authored, true);
+                  }}
                 />
               {!editingDefaultBot ? (
                 <>
@@ -81301,10 +81945,6 @@ function HomeContent(): React.JSX.Element {
 	                <div className={styles.botParameterHeader}>
 	                  <small>Plain-language choices for permissions and model routing.</small>
 	                </div>
-	                <BotVoiceEditor
-	                  profile={newBotAudioVoiceProfile}
-	                  onChange={setNewBotAudioVoiceProfile}
-	                />
 	                <div className={styles.botResponseSettingsGrid}>
 	                  <div className={styles.botResponseSettingsColumn}>
 	                    <div className={styles.botParameterToggleRow}>
