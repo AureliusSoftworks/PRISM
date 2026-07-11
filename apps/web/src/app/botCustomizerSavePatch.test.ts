@@ -39,6 +39,7 @@ const pristine: BotCustomizerSavePristine = {
   faceMouthRotationDeg: 0,
   faceBlinkBar: "|",
   faceThinkingFrames: ["|", "/", "-", "\\"],
+  avatarDetails: null,
   profilePictureImageId: null,
 };
 
@@ -80,6 +81,7 @@ const currentFromPristine = (
   faceMouthRotationDeg: pristine.faceMouthRotationDeg,
   faceBlinkBar: pristine.faceBlinkBar,
   faceThinkingFrames: pristine.faceThinkingFrames,
+  avatarDetails: pristine.avatarDetails,
   profilePictureImageId: pristine.profilePictureImageId,
   ...overrides,
 });
@@ -212,6 +214,37 @@ describe("bot customizer save patch", () => {
         pristine
       ),
       { faceThinkingFrames: [".", "o", "O", "o"] }
+    );
+  });
+
+  it("patches avatar detail recipe edits and clears", () => {
+    const avatarDetails = {
+      version: 1 as const,
+      screen: {
+        stamps: [
+          {
+            id: "round-glasses" as const,
+            offsetX: 0,
+            offsetY: 0,
+            scalePct: 100,
+          },
+        ],
+        paintMaskBase64: null,
+      },
+    };
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(
+        currentFromPristine({ avatarDetails }),
+        pristine
+      ),
+      { avatarDetails }
+    );
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(
+        currentFromPristine({ avatarDetails: null }),
+        { ...pristine, avatarDetails }
+      ),
+      { avatarDetails: null }
     );
   });
 });

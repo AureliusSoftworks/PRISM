@@ -28,6 +28,23 @@ const testBots = ["a", "b", "c"].map((id, index) => ({
   repetition_penalty: 1,
   color: ["#8b5cf6", "#06b6d4", "#f59e0b"][index],
   glyph: "circle",
+  avatarDetails:
+    index === 0
+      ? {
+          version: 1,
+          screen: {
+            stamps: [
+              {
+                id: "round-glasses",
+                offsetX: 0,
+                offsetY: 0,
+                scalePct: 100,
+              },
+            ],
+            paintMaskBase64: null,
+          },
+        }
+      : null,
   chat_enabled: 1,
 }));
 
@@ -183,6 +200,57 @@ test.describe("PRISM desktop smoke", () => {
     await expect(page.getByRole("button", { name: /Coffee/ }).first()).toBeVisible();
     await expect(page.locator('[data-mode="picker"]')).toBeVisible();
     await expect(page.getByText("Select bots to begin")).toBeVisible();
+  });
+
+  test("custom bot draft edits Avatar Details as a guarded local recipe", async ({ page }) => {
+    await installAuthenticatedApi(page);
+    await page.goto("/");
+
+    await page.getByRole("button", { name: "Open bot customizer" }).click();
+    await page.getByRole("button", { name: /Create new bot/ }).click();
+    await page.getByPlaceholder("Name this bot").fill("Draft Detail Bot");
+    await page
+      .getByRole("button", { name: "Open Avatar Studio to edit bot avatar" })
+      .click();
+
+    const studio = page.getByRole("dialog", { name: "Draft Detail Bot" });
+    await expect(studio).toBeVisible();
+    await studio.getByRole("tab", { name: "Details" }).click();
+    const detailsEditor = studio.getByRole("region", {
+      name: "Avatar details editor",
+    });
+    await expect(detailsEditor).toBeVisible();
+    await detailsEditor.getByRole("button", { name: "Round glasses" }).click();
+    await expect(studio.locator('[data-avatar-details-mask="true"]')).toBeVisible();
+    await expect(detailsEditor.getByText("Working copy · not applied")).toBeVisible();
+
+    await studio.getByRole("tab", { name: "Face" }).click();
+    const leavePrompt = page.getByRole("alertdialog", {
+      name: "Apply avatar details?",
+    });
+    await expect(leavePrompt).toBeVisible();
+    await leavePrompt.getByRole("button", { name: "Keep editing" }).click();
+    await detailsEditor.getByRole("button", { name: "Apply", exact: true }).click();
+    await expect(detailsEditor.getByText("Applied recipe")).toBeVisible();
+  });
+
+  test("existing custom bot Studio renders its saved Avatar Details", async ({ page }) => {
+    await installAuthenticatedApi(page);
+    await page.goto("/");
+
+    await page.getByRole("button", { name: "Open bot customizer" }).click();
+    await page.getByRole("button", { name: /Browse bots/ }).click();
+    await page
+      .getByRole("button", { name: "Open options for Test Bot 1" })
+      .click();
+    await page.getByRole("button", { name: /Customize/ }).click();
+    await page
+      .getByRole("button", { name: "Open Avatar Studio to edit bot avatar" })
+      .click();
+
+    const studio = page.getByRole("dialog", { name: "Test Bot 1" });
+    await expect(studio.getByRole("tab", { name: "Details" })).toBeVisible();
+    await expect(studio.locator('[data-avatar-details-mask="true"]')).toBeVisible();
   });
 
 });

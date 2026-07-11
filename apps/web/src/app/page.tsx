@@ -56,6 +56,17 @@ import {
   isAbortLikeError,
 } from "./authBootstrap";
 import { CoffeeSeatPlateEmoji } from "./CoffeeSeatPlateEmoji";
+import {
+  AvatarDetailsEditor,
+  type AvatarDetailsEditorHandle,
+} from "./AvatarDetailsEditor";
+import { AvatarDetailsMask } from "./AvatarDetailsMask";
+import {
+  avatarDetailsEqual,
+  avatarDetailsHasVisuals,
+  avatarDetailsKey,
+  normalizeAvatarDetails,
+} from "./avatar-details";
 import { coffeeCenterScrollIsAtBottom } from "./coffee-center-scroll";
 import {
   buildCoffeeCupVisualState,
@@ -299,6 +310,15 @@ import {
   type BotCustomizerSavePatch,
 } from "./botCustomizerSavePatch";
 import {
+  botAvatarAutosavePatchHasFields,
+  clearBotAvatarAutosaveQueue,
+  hasQueuedBotAvatarAutosavePatch,
+  queueBotAvatarAutosavePatch,
+  takeBotAvatarAutosaveRequest,
+  updateOwnedBotAvatarSnapshot,
+  type BotAvatarAutosaveQueue,
+} from "./botAvatarAutosaveQueue";
+import {
   BOT_BATCH_MIXED_LABEL,
   BOT_BATCH_MIXED_VALUE,
   batchFieldDisplayValue,
@@ -443,6 +463,7 @@ import {
   normalizeBotFaceMouthScale,
   normalizeBotFaceThinkingFrames,
   parseStoredBotFaceThinkingFrames,
+  parseBotAvatarDetailsV1,
   randomBotFaceStyle,
   resolveBotFaceStyle,
   PRISM_DEFAULT_STORY_THEME,
@@ -470,6 +491,7 @@ import {
   type BotFaceFontId,
   type BotFaceStyle,
   type BotFaceThinkingFrames,
+  type BotAvatarDetailsV1,
   type BotBirthEra,
   type CoffeeBotSocialSnapshot,
   type CoffeeCupTopOffSnapshot,
@@ -7447,6 +7469,25 @@ function resolveBotFaceStyleForBot(
   );
 }
 
+type BotAvatarDetailsSource = {
+  avatarDetails?: BotAvatarDetailsV1 | null;
+  avatar_details_json?: unknown;
+};
+
+function resolveBotAvatarDetails(
+  bot: BotAvatarDetailsSource | null | undefined
+): BotAvatarDetailsV1 | null {
+  const raw = bot?.avatarDetails ?? bot?.avatar_details_json;
+  if (raw == null || raw === "") return null;
+  try {
+    return parseBotAvatarDetailsV1(
+      typeof raw === "string" ? JSON.parse(raw) : raw
+    );
+  } catch {
+    return null;
+  }
+}
+
 function botScreenMaterialSeedForBot(
   _bot: Pick<Bot, "id" | "export_hash"> | null | undefined,
   _fallbackSeed: string
@@ -9750,11 +9791,14 @@ interface Bot {
   face_mouth_rotation_deg?: number | null;
   face_blink_bar?: string | null;
   face_thinking_frames?: string | null;
+  avatarDetails?: BotAvatarDetailsV1 | null;
+  avatar_details_json?: unknown;
   profile_picture_image_id?: string | null;
   chat_enabled: number;
 }
 
 type BotEditOriginalSnapshot = {
+  botId: string | null;
   name: string;
   prompt: string;
   rawPrompt?: string;
@@ -9786,6 +9830,7 @@ type BotEditOriginalSnapshot = {
   faceMouthRotationDeg: number;
   faceBlinkBar: BotFaceBlinkBar;
   faceThinkingFrames: BotFaceThinkingFrames;
+  avatarDetails: BotAvatarDetailsV1 | null;
   profilePictureImageId: string | null;
 };
 
@@ -9857,21 +9902,13 @@ function normalizeBotAvatarAutosavePatch(
       normalizeBotFaceThinkingFrames(patch.faceThinkingFrames) ??
       DEFAULT_BOT_FACE_STYLE.thinkingFrames;
   }
+  if (patch.avatarDetails !== undefined) {
+    next.avatarDetails =
+      patch.avatarDetails === null
+        ? null
+        : parseBotAvatarDetailsV1(patch.avatarDetails);
+  }
   return next;
-}
-
-function mergeBotAvatarAutosavePatch(
-  current: BotCustomizerSavePatch,
-  patch: BotCustomizerSavePatch
-): BotCustomizerSavePatch {
-  return {
-    ...current,
-    ...normalizeBotAvatarAutosavePatch(patch),
-  };
-}
-
-function botAvatarAutosavePatchHasFields(patch: BotCustomizerSavePatch): boolean {
-  return Object.keys(patch).length > 0;
 }
 
 function applyBotAvatarAutosavePatchToSnapshot(
@@ -9944,6 +9981,12 @@ function applyBotAvatarAutosavePatchToSnapshot(
         ? normalizeBotFaceThinkingFrames(patch.faceThinkingFrames) ??
           DEFAULT_BOT_FACE_STYLE.thinkingFrames
         : snapshot.faceThinkingFrames,
+    avatarDetails:
+      patch.avatarDetails !== undefined
+        ? patch.avatarDetails === null
+          ? null
+          : parseBotAvatarDetailsV1(patch.avatarDetails)
+        : snapshot.avatarDetails,
   };
 }
 
@@ -10218,6 +10261,7 @@ function prepareBotArchivePayload(
         typeof parsedBot.glyph === "string" && parsedBot.glyph.trim().length > 0
           ? parsedBot.glyph.trim()
           : null,
+      avatarDetails: parsedBot.avatarDetails ?? null,
       faceEyesFont: normalizeBotFaceFontId(parsedBot.faceEyesFont),
       faceEyeCharacter: normalizeBotFaceEyeCharacter(parsedBot.faceEyeCharacter),
       faceMouthFont: normalizeBotFaceFontId(parsedBot.faceMouthFont),
@@ -11962,6 +12006,7 @@ function createBotFormHasEnteredData(options: {
   faceMouthRotationDeg?: number;
   faceBlinkBar?: BotFaceBlinkBar;
   faceThinkingFrames?: BotFaceThinkingFrames;
+  avatarDetails?: BotAvatarDetailsV1 | null;
 }): boolean {
   if (options.name.trim().length > 0) return true;
   if (options.advancedMode) return true;
@@ -11995,6 +12040,7 @@ function createBotFormHasEnteredData(options: {
       DEFAULT_BOT_FACE_THINKING_FRAMES
     )
   ) return true;
+  if (options.avatarDetails && avatarDetailsHasVisuals(options.avatarDetails)) return true;
   return false;
 }
 
@@ -24617,6 +24663,8 @@ interface ZenLiveBotMannequinProps {
   forceBlinkPhase?: "open" | "closed" | null;
   screenMaterialSeed?: string | null;
   frameMaterialSeed?: string | null;
+  avatarDetails?: BotAvatarDetailsV1 | null;
+  avatarDetailsColor?: string | null;
 }
 
 function ZenLiveBotMannequin({
@@ -24635,6 +24683,8 @@ function ZenLiveBotMannequin({
   forceBlinkPhase = null,
   screenMaterialSeed,
   frameMaterialSeed,
+  avatarDetails = null,
+  avatarDetailsColor = null,
 }: ZenLiveBotMannequinProps): React.JSX.Element {
   const displayPlateFace = plateFace ?? (
     isTalking && mouthShape === "closed"
@@ -24686,6 +24736,11 @@ function ZenLiveBotMannequin({
           data-crt-material-layer="grime"
           style={screenMaterialStyle}
           aria-hidden="true"
+        />
+        <AvatarDetailsMask
+          details={avatarDetails}
+          color={avatarDetailsColor}
+          faceGeometry={faceStyle}
         />
         {showThinkingSpinner ? (
           <span
@@ -25811,6 +25866,15 @@ function ZenLiveBotPresencePlate({
         showQuestionMark={askQuestionActive}
         screenMaterialSeed={screenMaterialSeed}
         frameMaterialSeed={frameMaterialSeed}
+        avatarDetails={bot ? resolveBotAvatarDetails(bot) : null}
+        avatarDetailsColor={
+          bot
+            ? normalizeAccentForTheme(
+                bot.color ?? PRISM_DEFAULT_ACCENT,
+                resolvedTheme
+              )
+            : null
+        }
       />
       {actionText ? (
         <span
@@ -29953,6 +30017,8 @@ interface BotAvatarCustomizerModalProps {
   faceMouthRotationDeg: number;
   faceBlinkBar: BotFaceBlinkBar;
   faceThinkingFrames: BotFaceThinkingFrames;
+  avatarDetails: BotAvatarDetailsV1 | null;
+  detailsEditorVisible?: boolean;
   hasUnsavedChanges: boolean;
   saving: boolean;
   saveError: string | null;
@@ -29978,6 +30044,9 @@ interface BotAvatarCustomizerModalProps {
   onMouthRotationDegChange: (rotationDeg: number) => void;
   onBlinkBarChange: (blinkBar: BotFaceBlinkBar) => void;
   onThinkingFramesChange: (frames: BotFaceThinkingFrames) => void;
+  onAvatarDetailsApply: (
+    details: BotAvatarDetailsV1 | null
+  ) => void | Promise<void>;
 }
 
 function optionalScaleLabel(
@@ -30180,7 +30249,13 @@ const BOT_AVATAR_PREVIEW_MOUTH_SHAPES = [
 ] as const satisfies readonly ZenLiveBotMouthShape[];
 
 type BotAvatarPreviewMode = "idle" | "blink" | "talking" | "thinking";
-type BotAvatarCustomizerTab = "identity" | "face" | "eyes" | "mouth" | "motion";
+type BotAvatarCustomizerTab =
+  | "identity"
+  | "face"
+  | "eyes"
+  | "mouth"
+  | "motion"
+  | "details";
 type BotAvatarFaceControlTab = Extract<
   BotAvatarCustomizerTab,
   "face" | "eyes" | "mouth" | "motion"
@@ -30216,6 +30291,7 @@ const BOT_AVATAR_CUSTOMIZER_TABS = [
   { value: "face", label: "Face" },
   { value: "eyes", label: "Eyes" },
   { value: "mouth", label: "Mouth" },
+  { value: "details", label: "Details" },
   { value: "motion", label: "Motion" },
   { value: "identity", label: "Identity" },
 ] as const satisfies readonly {
@@ -30517,6 +30593,8 @@ function BotAvatarPreviewPanel({
   displayedPreviewMouthShape,
   avatarStyle,
   faceStyle,
+  avatarDetails,
+  avatarDetailsColor,
   onPreviewThemeChange,
   onPreviewModeChange,
   onPreviewMoodCycle,
@@ -30534,6 +30612,8 @@ function BotAvatarPreviewPanel({
   displayedPreviewMouthShape: ZenLiveBotMouthShape;
   avatarStyle: CSSProperties;
   faceStyle: BotFaceStyle;
+  avatarDetails: BotAvatarDetailsV1 | null;
+  avatarDetailsColor: string;
   onPreviewThemeChange: (theme: "light" | "dark") => void;
   onPreviewModeChange: (mode: BotAvatarPreviewMode) => void;
   onPreviewMoodCycle: () => void;
@@ -30619,6 +30699,12 @@ function BotAvatarPreviewPanel({
             showThinkingSpinner={previewThinking}
             screenMaterialSeed={screenMaterialSeed}
             frameMaterialSeed={frameMaterialSeed}
+            avatarDetails={isDefaultPrismBot ? null : avatarDetails}
+            avatarDetailsColor={
+              isDefaultPrismBot
+                ? null
+                : normalizeAccentForTheme(avatarDetailsColor, previewTheme)
+            }
           />
         </div>
       </div>
@@ -31764,6 +31850,8 @@ function BotAvatarCustomizerModal({
   faceMouthRotationDeg,
   faceBlinkBar,
   faceThinkingFrames,
+  avatarDetails,
+  detailsEditorVisible = false,
   hasUnsavedChanges,
   saving,
   saveError,
@@ -31789,12 +31877,29 @@ function BotAvatarCustomizerModal({
   onMouthRotationDegChange,
   onBlinkBarChange,
   onThinkingFramesChange,
+  onAvatarDetailsApply,
 }: BotAvatarCustomizerModalProps): React.JSX.Element | null {
   const [mouthPhase, setMouthPhase] = useState(0);
   const [previewTheme, setPreviewTheme] = useState<"light" | "dark">(resolvedTheme);
   const [previewMode, setPreviewMode] = useState<BotAvatarPreviewMode>("idle");
   const [previewMoodIndex, setPreviewMoodIndex] = useState(0);
   const [activeControlTab, setActiveControlTab] = useState<BotAvatarCustomizerTab>("face");
+  const detailsEditorRef = useRef<AvatarDetailsEditorHandle | null>(null);
+  const [detailsEditorDirty, setDetailsEditorDirty] = useState(false);
+  const [avatarDetailsPreview, setAvatarDetailsPreview] =
+    useState<BotAvatarDetailsV1>(() => normalizeAvatarDetails(avatarDetails));
+  const [detailsLeaveRequest, setDetailsLeaveRequest] = useState<
+    | { kind: "tab"; tab: BotAvatarCustomizerTab }
+    | { kind: "close" }
+    | { kind: "save" }
+    | null
+  >(null);
+  const [detailsLeaveApplying, setDetailsLeaveApplying] = useState(false);
+  const [pendingDetailsSaveKey, setPendingDetailsSaveKey] =
+    useState<string | null>(null);
+  const detailsLeavePanelRef = useRef<HTMLElement | null>(null);
+  const detailsLeaveKeepEditingRef = useRef<HTMLButtonElement | null>(null);
+  const detailsLeaveInvokerRef = useRef<HTMLElement | null>(null);
   const previewMood =
     BOT_AVATAR_PREVIEW_MOODS[
       previewMoodIndex % BOT_AVATAR_PREVIEW_MOODS.length
@@ -31851,7 +31956,69 @@ function BotAvatarCustomizerModal({
     setPreviewMoodIndex(0);
     setActiveControlTab("face");
     setMouthPhase(0);
+    setDetailsEditorDirty(false);
+    setDetailsLeaveRequest(null);
+    setDetailsLeaveApplying(false);
+    setPendingDetailsSaveKey(null);
   }, [identityControlsVisible, open, resolvedTheme]);
+
+  useEffect(() => {
+    if (!open || detailsEditorDirty) return;
+    setAvatarDetailsPreview(normalizeAvatarDetails(avatarDetails));
+  }, [avatarDetails, detailsEditorDirty, open]);
+
+  useEffect(() => {
+    if (!detailsLeaveRequest) return;
+    const invoker = detailsLeaveInvokerRef.current;
+    queueMicrotask(() => detailsLeaveKeepEditingRef.current?.focus());
+    return () => {
+      queueMicrotask(() => invoker?.focus());
+    };
+  }, [detailsLeaveRequest]);
+
+  useEffect(() => {
+    if (
+      !open ||
+      pendingDetailsSaveKey === null ||
+      avatarDetailsKey(avatarDetails) !== pendingDetailsSaveKey
+    ) {
+      return;
+    }
+    setPendingDetailsSaveKey(null);
+    void onSave();
+  }, [avatarDetails, onSave, open, pendingDetailsSaveKey]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleEscape = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      if (detailsLeaveRequest) {
+        if (!detailsLeaveApplying) setDetailsLeaveRequest(null);
+        return;
+      }
+      if (
+        activeControlTab === "details" &&
+        detailsEditorRef.current?.hasDirtyChanges()
+      ) {
+        detailsLeaveInvokerRef.current =
+          document.activeElement instanceof HTMLElement
+            ? document.activeElement
+            : null;
+        setDetailsLeaveRequest({ kind: "close" });
+        return;
+      }
+      onRequestClose();
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [
+    activeControlTab,
+    detailsLeaveApplying,
+    detailsLeaveRequest,
+    onRequestClose,
+    open,
+  ]);
 
   useEffect(() => {
     if (!open || !previewTalking) {
@@ -31868,6 +32035,94 @@ function BotAvatarCustomizerModal({
   }, [open, previewTalking]);
 
   if (!open) return null;
+
+  const continueDetailsNavigation = (
+    request:
+      | { kind: "tab"; tab: BotAvatarCustomizerTab }
+      | { kind: "close" }
+      | { kind: "save" }
+  ): void => {
+    setDetailsLeaveRequest(null);
+    if (request.kind === "tab") {
+      setActiveControlTab(request.tab);
+      return;
+    }
+    if (request.kind === "save") {
+      void onSave();
+      return;
+    }
+    onRequestClose();
+  };
+  const openDetailsLeavePrompt = (
+    request:
+      | { kind: "tab"; tab: BotAvatarCustomizerTab }
+      | { kind: "close" }
+      | { kind: "save" }
+  ): void => {
+    detailsLeaveInvokerRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    setDetailsLeaveRequest(request);
+  };
+  const requestControlTab = (tab: BotAvatarCustomizerTab): void => {
+    if (
+      activeControlTab === "details" &&
+      tab !== "details" &&
+      detailsEditorRef.current?.hasDirtyChanges()
+    ) {
+      openDetailsLeavePrompt({ kind: "tab", tab });
+      return;
+    }
+    setActiveControlTab(tab);
+  };
+  const requestStudioClose = (): void => {
+    if (
+      activeControlTab === "details" &&
+      detailsEditorRef.current?.hasDirtyChanges()
+    ) {
+      openDetailsLeavePrompt({ kind: "close" });
+      return;
+    }
+    onRequestClose();
+  };
+  const requestStudioSave = (dismissOuterSavePrompt = false): void => {
+    if (
+      activeControlTab === "details" &&
+      detailsEditorRef.current?.hasDirtyChanges()
+    ) {
+      if (dismissOuterSavePrompt) onCancelSavePrompt();
+      openDetailsLeavePrompt({ kind: "save" });
+      return;
+    }
+    void onSave();
+  };
+  const discardDetailsAndContinue = (): void => {
+    const request = detailsLeaveRequest;
+    if (!request) return;
+    detailsEditorRef.current?.cancel();
+    setDetailsEditorDirty(false);
+    setAvatarDetailsPreview(normalizeAvatarDetails(avatarDetails));
+    continueDetailsNavigation(request);
+  };
+  const applyDetailsAndContinue = async (): Promise<void> => {
+    const request = detailsLeaveRequest;
+    if (!request || detailsLeaveApplying) return;
+    setDetailsLeaveApplying(true);
+    const applied = (await detailsEditorRef.current?.apply()) ?? true;
+    setDetailsLeaveApplying(false);
+    if (!applied) {
+      setDetailsLeaveRequest(null);
+      return;
+    }
+    setDetailsEditorDirty(false);
+    if (request.kind === "save") {
+      setPendingDetailsSaveKey(avatarDetailsKey(avatarDetailsPreview));
+      setDetailsLeaveRequest(null);
+      return;
+    }
+    continueDetailsNavigation(request);
+  };
 
   // The studio portals to document.body, outside the app shell that carries
   // the .themeDark/.themeLight variable scope. Without re-declaring that scope
@@ -31888,7 +32143,11 @@ function BotAvatarCustomizerModal({
     } as CSSProperties;
   })();
 
-  const saveStatusState = saving ? "saving" : hasUnsavedChanges ? "dirty" : "saved";
+  const saveStatusState = saving
+    ? "saving"
+    : hasUnsavedChanges || detailsEditorDirty
+      ? "dirty"
+      : "saved";
   const saveStatusLabel =
     saveStatusState === "saving"
       ? "Saving"
@@ -31917,10 +32176,16 @@ function BotAvatarCustomizerModal({
   const saveButtonVisible = saving || hasUnsavedChanges;
   const avatarControlTabsVisible = true;
   const visibleAvatarTabs = BOT_AVATAR_CUSTOMIZER_TABS.filter(
-    (tab) => identityControlsVisible || tab.value !== "identity"
+    (tab) =>
+      (identityControlsVisible || tab.value !== "identity") &&
+      (detailsEditorVisible || tab.value !== "details")
   );
   const activeFaceControlTabs: readonly BotAvatarFaceControlTab[] =
-    activeControlTab === "identity" ? [] : [activeControlTab];
+    BOT_AVATAR_FACE_CONTROL_TABS.includes(
+      activeControlTab as BotAvatarFaceControlTab
+    )
+      ? [activeControlTab as BotAvatarFaceControlTab]
+      : [];
   const applyFacePreset = (preset: BotAvatarFacePreset) => {
     onEyesFontChange(preset.eyesFont);
     onEyeCharacterChange(preset.eyeCharacter);
@@ -31961,7 +32226,7 @@ function BotAvatarCustomizerModal({
       onPointerDown={(event) => {
         if (event.target !== event.currentTarget) return;
         if (!isPrimaryPointerDismissal(event.nativeEvent)) return;
-        onRequestClose();
+        requestStudioClose();
       }}
     >
       <section
@@ -31975,7 +32240,9 @@ function BotAvatarCustomizerModal({
             <span>Avatar Studio</span>
             <h4 id="bot-avatar-customizer-title">{titleName}</h4>
             <p>
-              {identityControlsVisible
+              {detailsEditorVisible
+                ? "Identity, face, and details."
+                : identityControlsVisible
                 ? "Identity and face."
                 : "Default Prism identity is fixed; customize its face."}
             </p>
@@ -31991,7 +32258,7 @@ function BotAvatarCustomizerModal({
               <button
                 type="button"
                 className={styles.botAvatarCustomizerSaveButton}
-                onClick={() => void onSave()}
+                onClick={() => requestStudioSave()}
                 disabled={!hasUnsavedChanges || saving}
                 data-dirty={hasUnsavedChanges ? "true" : undefined}
               >
@@ -32002,7 +32269,7 @@ function BotAvatarCustomizerModal({
             <button
               type="button"
               className={styles.botAvatarCustomizerCloseButton}
-              onClick={onRequestClose}
+              onClick={requestStudioClose}
               aria-label="Close avatar customizer"
             >
               <X size={16} strokeWidth={2.6} aria-hidden="true" />
@@ -32024,6 +32291,8 @@ function BotAvatarCustomizerModal({
             displayedPreviewMouthShape={displayedPreviewMouthShape}
             avatarStyle={avatarStyle}
             faceStyle={faceStyle}
+            avatarDetails={avatarDetailsPreview}
+            avatarDetailsColor={color}
             onPreviewThemeChange={setPreviewTheme}
             onPreviewModeChange={setPreviewMode}
             onPreviewMoodCycle={() =>
@@ -32044,7 +32313,7 @@ function BotAvatarCustomizerModal({
                     role="tab"
                     aria-selected={activeControlTab === tab.value}
                     data-active={activeControlTab === tab.value ? "true" : undefined}
-                    onClick={() => setActiveControlTab(tab.value)}
+                    onClick={() => requestControlTab(tab.value)}
                   >
                     {tab.value === "identity" ? (
                       <Brush size={13} strokeWidth={2.3} aria-hidden="true" />
@@ -32054,6 +32323,8 @@ function BotAvatarCustomizerModal({
                       <Eye size={13} strokeWidth={2.3} aria-hidden="true" />
                     ) : tab.value === "mouth" ? (
                       <Smile size={13} strokeWidth={2.3} aria-hidden="true" />
+                    ) : tab.value === "details" ? (
+                      <PencilLine size={13} strokeWidth={2.3} aria-hidden="true" />
                     ) : (
                       <Timer size={13} strokeWidth={2.3} aria-hidden="true" />
                     )}
@@ -32074,6 +32345,24 @@ function BotAvatarCustomizerModal({
                   onColorChange={onColorChange}
                   onGlyphChange={onGlyphChange}
                   onColorPickerToggle={onColorPickerToggle}
+                />
+              ) : null}
+
+              {activeControlTab === "details" && detailsEditorVisible ? (
+                <AvatarDetailsEditor
+                  ref={detailsEditorRef}
+                  value={avatarDetails}
+                  accentColor={normalizeAccentForTheme(color, resolvedTheme)}
+                  faceGeometry={faceStyle}
+                  onApply={async (nextDetails) => {
+                    const normalized = normalizeAvatarDetails(nextDetails);
+                    await onAvatarDetailsApply(
+                      avatarDetailsHasVisuals(normalized) ? normalized : null
+                    );
+                    setAvatarDetailsPreview(normalized);
+                  }}
+                  onDirtyChange={setDetailsEditorDirty}
+                  onPreviewChange={setAvatarDetailsPreview}
                 />
               ) : null}
 
@@ -32124,6 +32413,79 @@ function BotAvatarCustomizerModal({
           </section>
         </div>
       </section>
+      {detailsLeaveRequest ? (
+        <div
+          className={styles.botAvatarSavePromptBackdrop}
+          role="presentation"
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <section
+            ref={detailsLeavePanelRef}
+            className={styles.botAvatarSavePromptPanel}
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="bot-avatar-details-leave-title"
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                event.stopPropagation();
+                if (!detailsLeaveApplying) setDetailsLeaveRequest(null);
+                return;
+              }
+              if (event.key !== "Tab") return;
+              const focusable = Array.from(
+                detailsLeavePanelRef.current?.querySelectorAll<HTMLButtonElement>(
+                  "button:not(:disabled)"
+                ) ?? []
+              );
+              if (focusable.length === 0) return;
+              const first = focusable[0]!;
+              const last = focusable[focusable.length - 1]!;
+              if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault();
+                last.focus();
+              } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault();
+                first.focus();
+              }
+            }}
+          >
+            <h2 id="bot-avatar-details-leave-title">
+              {detailsLeaveRequest.kind === "save"
+                ? "Apply avatar details before saving?"
+                : "Apply avatar details?"}
+            </h2>
+            <p>Your detail recipe is still a local working copy.</p>
+            <div className={styles.botAvatarSavePromptActions}>
+              <button
+                ref={detailsLeaveKeepEditingRef}
+                type="button"
+                className={styles.botAvatarSavePromptCancel}
+                onClick={() => setDetailsLeaveRequest(null)}
+                disabled={detailsLeaveApplying}
+              >
+                Keep editing
+              </button>
+              <button
+                type="button"
+                className={styles.botAvatarSavePromptDiscard}
+                onClick={discardDetailsAndContinue}
+                disabled={detailsLeaveApplying}
+              >
+                Discard
+              </button>
+              <button
+                type="button"
+                className={styles.botAvatarSavePromptSave}
+                onClick={() => void applyDetailsAndContinue()}
+                disabled={detailsLeaveApplying}
+              >
+                {detailsLeaveApplying ? "Applying…" : "Apply"}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
   const savePrompt = (
@@ -32131,7 +32493,7 @@ function BotAvatarCustomizerModal({
       open={savePromptOpen}
       saveError={saveError}
       saving={saving}
-      onSave={onSave}
+      onSave={() => requestStudioSave(true)}
       onDiscard={onDiscard}
       onCancel={onCancelSavePrompt}
     />
@@ -35066,6 +35428,8 @@ function HomeContent(): React.JSX.Element {
   );
   const [newBotFaceThinkingFrames, setNewBotFaceThinkingFrames] =
     useState<BotFaceThinkingFrames>(DEFAULT_BOT_FACE_STYLE.thinkingFrames);
+  const [newBotAvatarDetails, setNewBotAvatarDetails] =
+    useState<BotAvatarDetailsV1 | null>(null);
   const [newBotProfilePictureImageId, setNewBotProfilePictureImageId] =
     useState<string | null>(null);
   const [newBotLensId, setNewBotLensId] = useState<string>("");
@@ -35172,6 +35536,7 @@ function HomeContent(): React.JSX.Element {
     faceMouthRotationDeg: DEFAULT_BOT_FACE_STYLE.mouthRotationDeg,
     faceBlinkBar: DEFAULT_BOT_FACE_STYLE.blinkBar,
     faceThinkingFrames: DEFAULT_BOT_FACE_STYLE.thinkingFrames,
+    avatarDetails: null as BotAvatarDetailsV1 | null,
   });
   latestCreateBotDraftRef.current = {
     name: newBotName,
@@ -35202,6 +35567,7 @@ function HomeContent(): React.JSX.Element {
     faceMouthRotationDeg: newBotFaceMouthRotationDeg,
     faceBlinkBar: newBotFaceBlinkBar,
     faceThinkingFrames: newBotFaceThinkingFrames,
+    avatarDetails: newBotAvatarDetails,
   };
 
   const handleNewBotColorChange = useCallback((next: string) => {
@@ -35357,9 +35723,10 @@ function HomeContent(): React.JSX.Element {
   // stored color (where we seed the picker with a random hex) don't
   // immediately appear as "dirty". Cleared when edit mode exits.
   const editOriginalRef = useRef<BotEditOriginalSnapshot | null>(null);
-  const botAvatarAutoSaveQueuedPatchRef = useRef<BotCustomizerSavePatch>({});
-  const botAvatarAutoSaveInFlightRef = useRef(false);
-  const botAvatarAutoSaveFlushPromiseRef = useRef<Promise<boolean> | null>(null);
+  const botAvatarAutoSaveQueueRef = useRef<BotAvatarAutosaveQueue>(new Map());
+  const botAvatarAutoSaveFlushPromisesRef = useRef<
+    Map<string, Promise<boolean>>
+  >(new Map());
   const botDeleteProtectionProjectionRunRef = useRef(0);
   const botNameInputRef = useRef<HTMLInputElement | null>(null);
   const restoreBotAvatarDraftFromPristine = useCallback((): void => {
@@ -35381,6 +35748,7 @@ function HomeContent(): React.JSX.Element {
     setNewBotFaceMouthRotationDeg(pristine.faceMouthRotationDeg);
     setNewBotFaceBlinkBar(pristine.faceBlinkBar);
     setNewBotFaceThinkingFrames(pristine.faceThinkingFrames);
+    setNewBotAvatarDetails(pristine.avatarDetails);
   }, []);
 
   const closeBotAvatarCustomizer = useCallback((): void => {
@@ -40902,7 +41270,7 @@ function HomeContent(): React.JSX.Element {
   const summaryDebugMatchesActiveZen =
     activeZenConversationId !== null &&
     summaryDebug?.conversationId === activeZenConversationId &&
-    summaryDebug.mode === "zen";
+    summaryDebug?.mode === "zen";
   const currentZenInternalSummary =
     summaryDebugMatchesActiveZen ? summaryDebug.latestSummary?.trim() || null : null;
   const currentZenDisplaySummary =
@@ -57952,6 +58320,7 @@ function HomeContent(): React.JSX.Element {
         name: trimmedName,
         color: bot.color ?? null,
         glyph: bot.glyph ?? null,
+        avatarDetails: resolveBotAvatarDetails(bot),
         temperature: bot.temperature,
         maxTokens: bot.max_tokens,
         topP: normalizeBotTopP(bot.top_p),
@@ -58278,6 +58647,12 @@ function HomeContent(): React.JSX.Element {
     } catch {
       throw new Error("Could not read .prism archive.");
     }
+    const unsupportedEntries = Object.keys(entries).filter(
+      (name) => !name.trim().toLowerCase().endsWith(".json")
+    );
+    if (unsupportedEntries.length > 0) {
+      throw new Error(".prism account backups cannot contain PNG, SVG, accessory, or other asset files.");
+    }
     const preferredEntry = Object.entries(entries).find(
       ([name]) => name.trim().toLowerCase() === "backup.json"
     );
@@ -58592,6 +58967,13 @@ function HomeContent(): React.JSX.Element {
       throw new Error("Could not read bot collection file.");
     }
     const allEntries = Object.entries(entries);
+    const unsupportedEntries = allEntries.filter(([name]) => {
+      const normalized = name.trim().toLowerCase();
+      return !normalized.endsWith(".bot") && normalized !== "manifest.json";
+    });
+    if (unsupportedEntries.length > 0) {
+      throw new Error("Bot collection contains unsupported files.");
+    }
     const botEntries = allEntries.filter(([name]) => name.trim().toLowerCase().endsWith(".bot"));
     if (botEntries.length === 0) {
       throw new Error("Bot collection contains no .bot files.");
@@ -58608,6 +58990,9 @@ function HomeContent(): React.JSX.Element {
     for (const [entryName, bytes] of botEntries) {
       try {
         const parsed = parsePrismBotArchive(bytes);
+        // Validate the complete create payload before any duplicate can be
+        // deleted during the later overwrite phase.
+        prepareBotArchivePayload(parsed);
         const importedName = parsed.botJson.bot.name.trim() || entryName;
         const memoryCount = parsed.memories.length;
         totalMemoryEntries += memoryCount;
@@ -58618,7 +59003,13 @@ function HomeContent(): React.JSX.Element {
           importedName,
           memoryCount,
         });
-      } catch {
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Invalid bot archive.";
+        if (/(?:avatarDetails|avatar|accessory|unsupported files)/iu.test(message)) {
+          throw new Error(
+            `Bot collection entry ${entryName} was rejected before import: ${message}`
+          );
+        }
         failedCount += 1;
       }
     }
@@ -62434,6 +62825,7 @@ function HomeContent(): React.JSX.Element {
     setNewBotFaceMouthRotationDeg(draft.faceStyle.mouthRotationDeg);
     setNewBotFaceBlinkBar(draft.faceStyle.blinkBar);
     setNewBotFaceThinkingFrames(draft.faceStyle.thinkingFrames);
+    setNewBotAvatarDetails(null);
     setNewBotProfilePictureImageId(null);
     setNewBotGeneratedMemorySeeds({
       lensId: draft.lensId,
@@ -62492,6 +62884,7 @@ function HomeContent(): React.JSX.Element {
     setNewBotFaceMouthRotationDeg(DEFAULT_BOT_FACE_STYLE.mouthRotationDeg);
     setNewBotFaceBlinkBar(DEFAULT_BOT_FACE_STYLE.blinkBar);
     setNewBotFaceThinkingFrames(DEFAULT_BOT_FACE_STYLE.thinkingFrames);
+    setNewBotAvatarDetails(null);
     setNewBotProfilePictureImageId(null);
     setColorWheelOpen(false);
     setBotProfileBuilderOpen(false);
@@ -62654,11 +63047,13 @@ function HomeContent(): React.JSX.Element {
     setNewBotFaceMouthRotationDeg(seededFaceMouthRotationDeg);
     setNewBotFaceBlinkBar(seededFaceBlinkBar);
     setNewBotFaceThinkingFrames(seededFaceThinkingFrames);
+    setNewBotAvatarDetails(null);
     setNewBotProfilePictureImageId(null);
     setBotProfileBuilderOpen(false);
     setBotAiParametersModalOpen(false);
     setBotProfileActivePage("purpose");
     editOriginalRef.current = {
+      botId: null,
       name: seededName,
       prompt: normalizedStoredPrompt,
       rawPrompt: rawStoredPrompt,
@@ -62690,6 +63085,7 @@ function HomeContent(): React.JSX.Element {
       faceMouthRotationDeg: seededFaceMouthRotationDeg,
       faceBlinkBar: seededFaceBlinkBar,
       faceThinkingFrames: seededFaceThinkingFrames,
+      avatarDetails: null,
       profilePictureImageId: null,
     };
     setBotPanelView("defaultCustomize");
@@ -62805,6 +63201,7 @@ function HomeContent(): React.JSX.Element {
           faceMouthRotationDeg: newBotFaceMouthRotationDeg,
           faceBlinkBar: newBotFaceBlinkBar,
           faceThinkingFrames: newBotFaceThinkingFrames,
+          avatarDetails: newBotAvatarDetails,
         }),
       });
       createdBotId = created.bot?.id ?? null;
@@ -62993,6 +63390,7 @@ function HomeContent(): React.JSX.Element {
           faceMouthRotationDeg: faceStyle.mouthRotationDeg,
           faceBlinkBar: faceStyle.blinkBar,
           faceThinkingFrames: faceStyle.thinkingFrames,
+          avatarDetails: resolveBotAvatarDetails(bot),
         }),
       });
       await refreshBots();
@@ -63070,6 +63468,7 @@ function HomeContent(): React.JSX.Element {
           faceMouthRotationDeg: newBotFaceMouthRotationDeg,
           faceBlinkBar: newBotFaceBlinkBar,
           faceThinkingFrames: newBotFaceThinkingFrames,
+          avatarDetails: newBotAvatarDetails,
         }),
       });
       setNewBotName(copiedName);
@@ -63084,6 +63483,7 @@ function HomeContent(): React.JSX.Element {
       );
       setNewBotDeleteProtected(false);
       editOriginalRef.current = {
+        botId: result.bot?.id ?? null,
         name: copiedName,
         prompt: serializeStoredBotPrompt(
           parseStoredBotPrompt(copiedPrompt).fields,
@@ -63118,6 +63518,7 @@ function HomeContent(): React.JSX.Element {
         faceMouthRotationDeg: newBotFaceMouthRotationDeg,
         faceBlinkBar: newBotFaceBlinkBar,
         faceThinkingFrames: newBotFaceThinkingFrames,
+        avatarDetails: newBotAvatarDetails,
         profilePictureImageId: null,
       };
       if (result.bot?.id) {
@@ -64256,6 +64657,7 @@ function HomeContent(): React.JSX.Element {
       ? bot.openai_image_model.trim()
       : AUTO_MODEL_CHOICE;
     const seededFaceStyle = resolveBotFaceStyleForBot(bot);
+    const seededAvatarDetails = resolveBotAvatarDetails(bot);
     const seededProfilePictureImageId = bot.profile_picture_image_id?.trim() || null;
     setNewBotName(seededName);
     setBotProfile(seededProfile);
@@ -64288,12 +64690,14 @@ function HomeContent(): React.JSX.Element {
     setNewBotFaceMouthRotationDeg(seededFaceStyle.mouthRotationDeg);
     setNewBotFaceBlinkBar(seededFaceStyle.blinkBar);
     setNewBotFaceThinkingFrames(seededFaceStyle.thinkingFrames);
+    setNewBotAvatarDetails(seededAvatarDetails);
 	    setNewBotProfilePictureImageId(seededProfilePictureImageId);
 	    setBotProfileBuilderOpen(false);
 	    setBotAiParametersModalOpen(false);
     setBotProfileActivePage("purpose");
     setEditingBotId(bot.id);
     editOriginalRef.current = {
+      botId: bot.id,
       name: seededName,
       prompt: normalizedStoredPrompt,
       rawPrompt: rawStoredPrompt,
@@ -64325,6 +64729,7 @@ function HomeContent(): React.JSX.Element {
       faceMouthRotationDeg: seededFaceStyle.mouthRotationDeg,
       faceBlinkBar: seededFaceStyle.blinkBar,
       faceThinkingFrames: seededFaceStyle.thinkingFrames,
+      avatarDetails: seededAvatarDetails,
       profilePictureImageId: seededProfilePictureImageId,
     };
     setPanelError(null);
@@ -66013,6 +66418,7 @@ function HomeContent(): React.JSX.Element {
       setNewBotTopK(BOT_TOP_K_DEFAULT);
       setNewBotRepetitionPenalty(BOT_REPETITION_PENALTY_DEFAULT);
       editOriginalRef.current = {
+        botId: null,
         name: defaultBotName,
         prompt: defaultBotPrompt,
         rawPrompt: "",
@@ -66044,6 +66450,7 @@ function HomeContent(): React.JSX.Element {
           faceMouthRotationDeg: newBotFaceMouthRotationDeg,
         faceBlinkBar: newBotFaceBlinkBar,
         faceThinkingFrames: newBotFaceThinkingFrames,
+        avatarDetails: null,
         profilePictureImageId: null,
       };
       setSettings((previous) =>
@@ -66107,73 +66514,68 @@ function HomeContent(): React.JSX.Element {
   }
 
   async function flushBotAvatarAutosaveQueue(id: string): Promise<boolean> {
-    if (!botAvatarAutosavePatchHasFields(botAvatarAutoSaveQueuedPatchRef.current)) {
-      return botAvatarAutoSaveFlushPromiseRef.current ?? true;
-    }
-    if (botAvatarAutoSaveInFlightRef.current) {
-      return botAvatarAutoSaveFlushPromiseRef.current ?? true;
+    const existingFlush = botAvatarAutoSaveFlushPromisesRef.current.get(id);
+    if (existingFlush) return existingFlush;
+    if (!hasQueuedBotAvatarAutosavePatch(botAvatarAutoSaveQueueRef.current, id)) {
+      return true;
     }
 
     const flushPromise = (async (): Promise<boolean> => {
-      botAvatarAutoSaveInFlightRef.current = true;
       setBotAvatarAutoSaving(true);
       setBotAvatarAutoSavingBotId(id);
       setPanelError(null);
       setPanelNotice(null);
 
       let saved = true;
-      try {
-        while (botAvatarAutosavePatchHasFields(botAvatarAutoSaveQueuedPatchRef.current)) {
-          const patch = botAvatarAutoSaveQueuedPatchRef.current;
-          botAvatarAutoSaveQueuedPatchRef.current = {};
+      while (true) {
+        const request = takeBotAvatarAutosaveRequest(
+          botAvatarAutoSaveQueueRef.current,
+          id
+        );
+        if (!request) break;
+        try {
           const result = await withBotAvatarSaveTimeout((signal) =>
-            api<{ bot?: Bot }>(`/api/bots/${encodeURIComponent(id)}`, {
+            api<{ bot?: Bot }>(request.endpoint, {
               method: "PATCH",
-              body: JSON.stringify(patch),
+              body: request.body,
               signal,
             })
           );
-          if (editOriginalRef.current) {
-            editOriginalRef.current = applyBotAvatarAutosavePatchToSnapshot(
-              editOriginalRef.current,
-              patch
-            );
-          }
+          editOriginalRef.current = updateOwnedBotAvatarSnapshot(
+            editOriginalRef.current,
+            id,
+            (snapshot) =>
+              applyBotAvatarAutosavePatchToSnapshot(snapshot, request.patch)
+          );
           if (result.bot?.id) {
             setBots((list) => replaceBotRowById(list, result.bot as Bot));
           } else {
             await refreshBots();
           }
-        }
-      } catch (err) {
-        saved = false;
-        if (isBotNotFoundError(err)) {
-          botAvatarAutoSaveQueuedPatchRef.current = {};
-          await recoverMissingBotEditTarget(id);
-        } else {
+        } catch (err) {
+          saved = false;
+          if (isBotNotFoundError(err)) {
+            clearBotAvatarAutosaveQueue(botAvatarAutoSaveQueueRef.current, id);
+            await recoverMissingBotEditTarget(id);
+            break;
+          }
           setPanelError(err instanceof Error ? err.message : "Avatar save failed.");
         }
-      } finally {
-        botAvatarAutoSaveInFlightRef.current = false;
       }
-
-      if (botAvatarAutosavePatchHasFields(botAvatarAutoSaveQueuedPatchRef.current)) {
-        const nextSaved = await flushBotAvatarAutosaveQueue(id);
-        return saved && nextSaved;
-      }
-
-      setBotAvatarAutoSaving(false);
-      setBotAvatarAutoSavingBotId(null);
       return saved;
     })();
 
-    botAvatarAutoSaveFlushPromiseRef.current = flushPromise;
+    botAvatarAutoSaveFlushPromisesRef.current.set(id, flushPromise);
     try {
       return await flushPromise;
     } finally {
-      if (botAvatarAutoSaveFlushPromiseRef.current === flushPromise) {
-        botAvatarAutoSaveFlushPromiseRef.current = null;
+      if (botAvatarAutoSaveFlushPromisesRef.current.get(id) === flushPromise) {
+        botAvatarAutoSaveFlushPromisesRef.current.delete(id);
       }
+      const nextSavingBotId =
+        botAvatarAutoSaveFlushPromisesRef.current.keys().next().value ?? null;
+      setBotAvatarAutoSaving(nextSavingBotId !== null);
+      setBotAvatarAutoSavingBotId(nextSavingBotId);
     }
   }
 
@@ -66181,8 +66583,9 @@ function HomeContent(): React.JSX.Element {
     if (!id) return;
     const normalizedPatch = normalizeBotAvatarAutosavePatch(patch);
     if (!botAvatarAutosavePatchHasFields(normalizedPatch)) return;
-    botAvatarAutoSaveQueuedPatchRef.current = mergeBotAvatarAutosavePatch(
-      botAvatarAutoSaveQueuedPatchRef.current,
+    queueBotAvatarAutosavePatch(
+      botAvatarAutoSaveQueueRef.current,
+      id,
       normalizedPatch
     );
     void flushBotAvatarAutosaveQueue(id);
@@ -66254,6 +66657,7 @@ function HomeContent(): React.JSX.Element {
           faceMouthRotationDeg: newBotFaceMouthRotationDeg,
         faceBlinkBar: newBotFaceBlinkBar,
         faceThinkingFrames: newBotFaceThinkingFrames,
+        avatarDetails: newBotAvatarDetails,
         profilePictureImageId: newBotProfilePictureImageId,
       },
       editOriginalRef.current
@@ -66281,6 +66685,7 @@ function HomeContent(): React.JSX.Element {
         openaiImageStored ? openaiImageStored : AUTO_MODEL_CHOICE
       );
       editOriginalRef.current = {
+        botId: id,
         name: trimmedName,
         prompt: serializeStoredBotPrompt(
           parseStoredBotPrompt(storedSystemPrompt).fields,
@@ -66315,6 +66720,7 @@ function HomeContent(): React.JSX.Element {
           faceMouthRotationDeg: newBotFaceMouthRotationDeg,
         faceBlinkBar: newBotFaceBlinkBar,
         faceThinkingFrames: newBotFaceThinkingFrames,
+        avatarDetails: newBotAvatarDetails,
         profilePictureImageId: newBotProfilePictureImageId,
       };
       setEditingBotId(id);
@@ -78116,6 +78522,10 @@ function HomeContent(): React.JSX.Element {
                 newBotFaceThinkingFrames,
                 editPristine.faceThinkingFrames
               )
+              || !avatarDetailsEqual(
+                newBotAvatarDetails,
+                editPristine.avatarDetails
+              )
               || newBotProfilePictureImageId !== editPristine.profilePictureImageId
           : false;
         const avatarCustomizerSaving =
@@ -79408,6 +79818,8 @@ function HomeContent(): React.JSX.Element {
 	                  faceMouthRotationDeg={newBotFaceMouthRotationDeg}
 	                  faceBlinkBar={newBotFaceBlinkBar}
                   faceThinkingFrames={newBotFaceThinkingFrames}
+                  avatarDetails={newBotAvatarDetails}
+                  detailsEditorVisible={!editingDefaultBot}
                   hasUnsavedChanges={Boolean((editingBotId || editingDefaultBot) && hasEditChanges)}
                   saving={avatarCustomizerSaving}
                   saveError={panelError}
@@ -79531,6 +79943,20 @@ function HomeContent(): React.JSX.Element {
                       faceThinkingFrames: normalizedFrames,
                     });
                   }}
+	                  onAvatarDetailsApply={async (next) => {
+	                    const normalized = next ? parseBotAvatarDetailsV1(next) : null;
+	                    if (editingBotId) {
+	                      queueBotAvatarAutosave(editingBotId, {
+	                        avatarDetails: normalized,
+	                      });
+	                      const saved = await flushBotAvatarAutosaveQueue(editingBotId);
+	                      if (!saved) {
+	                        throw new Error("Avatar details could not be saved. Your working copy is still here.");
+	                      }
+	                    }
+	                    createBotAppearanceTouchedRef.current = true;
+	                    setNewBotAvatarDetails(normalized);
+	                  }}
                 />
               {!editingDefaultBot ? (
                 <>
@@ -87439,6 +87865,11 @@ function HomeContent(): React.JSX.Element {
 		                        showThinkingSpinner={seatIsThinkingThisSeat}
                             screenMaterialSeed={botScreenMaterialSeedForBot(bot, bot.id)}
                             frameMaterialSeed={botFrameMaterialSeedForBot(bot, bot.id)}
+                            avatarDetails={resolveBotAvatarDetails(bot)}
+                            avatarDetailsColor={normalizeAccentForTheme(
+                              bot.color ?? PRISM_DEFAULT_ACCENT,
+                              resolvedTheme
+                            )}
 			                      />
                       {seatTeamId && seatTeamLabel ? (
                         <span

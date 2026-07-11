@@ -428,6 +428,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       repetition_penalty REAL DEFAULT 1.1,
       color TEXT,
       glyph TEXT,
+      avatar_details_json TEXT,
       face_eyes_font TEXT,
       face_eye_character TEXT,
       face_mouth_font TEXT,
@@ -1422,6 +1423,12 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   );
   if (!hasBotGlyphColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN glyph TEXT;");
+  }
+  const hasBotAvatarDetailsJsonColumn = botColumns.some(
+    (column) => column.name === "avatar_details_json"
+  );
+  if (!hasBotAvatarDetailsJsonColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN avatar_details_json TEXT;");
   }
   const hasBotFaceEyesFontColumn = botColumns.some(
     (column) => column.name === "face_eyes_font"
