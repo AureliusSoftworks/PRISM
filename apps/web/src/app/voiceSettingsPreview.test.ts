@@ -46,6 +46,32 @@ describe("voice settings preview", () => {
     assert.doesNotMatch(pageSource, /Built-in English is packaged with Prism/);
   });
 
+  it("selects real provider voices from a dropdown instead of five fixed slots", () => {
+    assert.match(pageSource, /<select[\s\S]*aria-label="Voice identity"/);
+    assert.match(pageSource, /Voices on this computer/);
+    assert.match(pageSource, /ElevenLabs voices/);
+    assert.match(pageSource, /systemVoiceName: value/);
+    assert.match(pageSource, /elevenLabsVoiceId: value/);
+    assert.doesNotMatch(pageSource, /\["Fred", "Zarvox", "Trinoids", "Junior", "Ralph"\]/);
+    assert.doesNotMatch(pageSource, /className=\{styles\.botVoiceSlots\}/);
+  });
+
+  it("keeps only the useful Bottish controls and moves volume to global settings", () => {
+    const editorSource = pageSource.slice(
+      pageSource.indexOf("function BotVoiceEditor("),
+      pageSource.indexOf("type BotEditOriginalSnapshot")
+    );
+    assert.match(editorSource, /\["pitch", "Pitch"\]/);
+    assert.match(editorSource, /\["lilt", "Lilt"\]/);
+    assert.match(editorSource, /Bottish tone/);
+    assert.doesNotMatch(editorSource, /\["pace", "Pace"\]/);
+    assert.doesNotMatch(editorSource, /\["warmth", "Warmth"\]/);
+    assert.doesNotMatch(editorSource, /<span>Volume<\/span>/);
+    assert.match(editorSource, /preset === "clean" \|\| preset === "crt-speaker" \|\| preset === "damaged-speaker"/);
+    assert.match(pageSource, /<strong>Voice volume<\/strong>/);
+    assert.match(pageSource, /voiceVolume: normalizeBotVoiceVolume\(settings\.voiceVolume\)/);
+  });
+
   it("does not wait forever for Web Audio before falling back to media playback", () => {
     const bottishSource = readFileSync(new URL("./bottishVoice.ts", import.meta.url), "utf8");
     const englishSource = readFileSync(new URL("./englishVoice.ts", import.meta.url), "utf8");
@@ -55,5 +81,38 @@ describe("voice settings preview", () => {
     assert.match(effectsSource, /Promise\.race\(/);
     assert.match(englishSource, /beginMediaUnlock\(\);/);
     assert.match(englishSource, /playBytesWithMedia/);
+  });
+
+  it("ties live Bottish to visible speech and hard-stops interruptions", () => {
+    assert.match(pageSource, /liveBottishRevealKeyRef/);
+    assert.match(pageSource, /zenLiveBotMouthOpen/);
+    assert.match(pageSource, /\{ targetDurationMs \}/);
+    assert.match(
+      pageSource,
+      /view === "chat" && settings\.voiceMode === "bottish"\) return;/
+    );
+    assert.match(pageSource, /function stopVoicePlaybackForAssistantInterruption\(\)/);
+    assert.match(
+      pageSource,
+      /function applyActiveAssistantRevealInterruption\([\s\S]*?stopVoicePlaybackForAssistantInterruption\(\);/
+    );
+    assert.match(
+      pageSource,
+      /function discardActiveAssistantRevealForGrace\([\s\S]*?stopVoicePlaybackForAssistantInterruption\(\);/
+    );
+  });
+
+  it("starts Coffee Bottish locally with its reveal instead of a synthesis round trip", () => {
+    const coffeeVoiceStart = pageSource.slice(
+      pageSource.indexOf("const startCoffeeVoiceForReveal = async"),
+      pageSource.indexOf("const queueCoffeeReveal =")
+    );
+    assert.match(coffeeVoiceStart, /enqueueBottishVoice\(\s*displayText,\s*profile,/);
+    assert.match(coffeeVoiceStart, /targetDurationMs: fallbackDuration/);
+    const bottishBranch = coffeeVoiceStart.slice(
+      coffeeVoiceStart.indexOf('if (settings.voiceMode === "bottish")'),
+      coffeeVoiceStart.indexOf("} else {")
+    );
+    assert.doesNotMatch(bottishBranch, /\/api\/voices\/synthesize/);
   });
 });

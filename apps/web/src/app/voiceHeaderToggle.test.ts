@@ -16,8 +16,8 @@ describe("universal voice switch", () => {
   it("persists the switch immediately and exposes it in the mobile menu", () => {
     assert.match(pageSource, /async function toggleGlobalVoicePlayback\(\)/);
     assert.match(pageSource, /body: JSON\.stringify\(\{ voiceMode: nextMode \}\)/);
-    assert.match(pageSource, /Turn on \$\{voiceModeDisplayName\(lastAudibleVoiceModeRef\.current\)\} voices/);
-    assert.match(pageSource, /"Mute voices"/);
+    assert.match(pageSource, /voiceModeAfterQuickToggle\(normalizeVoiceMode\(settings\.voiceMode\)\)/);
+    assert.match(pageSource, /Switch to/);
   });
 
   it("visually distinguishes muted and audible states", () => {
