@@ -52,6 +52,7 @@ web UI registry lives in `apps/web/src/app/appletVersions.ts`.
 - **Vector Store:** Qdrant (semantic memory retrieval)
 - **Local LLM:** Ollama (running on host, accessed via `host.docker.internal`)
 - **Image Gen:** OpenAI DALL-E 3 API
+- **Speech:** Web Audio Bottish + bundled sherpa-onnx English; optional ElevenLabs BYOK
 - **Deployment:** Docker Compose with nginx reverse proxy
 
 ## Data Model
@@ -144,6 +145,7 @@ user's network.
 | `apps/api/src/providers.ts` (`OpenAiProvider`) | `api.openai.com` | Only when the effective mode is ONLINE for the user's actual chat reply. |
 | `apps/api/src/qdrant.ts` | `QDRANT_URL` | Memory summary vector read/write. Local by config. |
 | `apps/api/src/image-provider.ts` | `api.openai.com` | Only when the effective mode is ONLINE (gated in `/api/images/generate`). |
+| `apps/api/src/voices.ts` | `api.elevenlabs.io` | Only for the optional ElevenLabs English engine. Persisted LOCAL replies always synthesize with the bundled engine; previews and voice catalog reads require ONLINE mode. |
 
 The web app only issues relative `/api/*` fetches; those are rewritten to
 the backend on the same origin by `apps/web/next.config.ts`.
@@ -165,6 +167,8 @@ the backend on the same origin by `apps/web/next.config.ts`.
   "Online mode required" explainer instead.
 - Next.js anonymous telemetry is disabled via `NEXT_TELEMETRY_DISABLED=1`
   in the web Dockerfile and `.env.example`.
+- Voice modes, profile portability, playback rules, and the offline model
+  release gate are documented in [`docs/voices.md`](docs/voices.md).
 
 ### Reviewer checklist for new outbound calls
 

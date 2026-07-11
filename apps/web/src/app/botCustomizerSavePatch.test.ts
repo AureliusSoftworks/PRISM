@@ -6,6 +6,7 @@ import {
   type BotCustomizerSaveCurrent,
   type BotCustomizerSavePristine,
 } from "./botCustomizerSavePatch.ts";
+import { DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1 } from "@localai/shared";
 
 const pristine: BotCustomizerSavePristine = {
   name: "Iris",
@@ -43,6 +44,7 @@ const pristine: BotCustomizerSavePristine = {
   faceBlinkBar: "|",
   faceThinkingFrames: ["|", "/", "-", "\\"],
   profilePictureImageId: null,
+  audioVoiceProfile: DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
 };
 
 const currentFromPristine = (
@@ -87,6 +89,7 @@ const currentFromPristine = (
   faceBlinkBar: pristine.faceBlinkBar,
   faceThinkingFrames: pristine.faceThinkingFrames,
   profilePictureImageId: pristine.profilePictureImageId,
+  audioVoiceProfile: pristine.audioVoiceProfile,
   ...overrides,
 });
 
@@ -236,6 +239,18 @@ describe("bot customizer save patch", () => {
         pristine
       ),
       { faceThinkingFrames: [".", "o", "O", "o"] }
+    );
+  });
+
+  it("patches a portable voice profile as the user override", () => {
+    const audioVoiceProfile = {
+      ...pristine.audioVoiceProfile,
+      baseVoiceId: "voice-4" as const,
+      pitch: 0.35,
+    };
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(currentFromPristine({ audioVoiceProfile }), pristine),
+      { audioVoiceProfileOverride: audioVoiceProfile }
     );
   });
 });

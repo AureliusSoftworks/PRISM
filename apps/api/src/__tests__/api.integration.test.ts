@@ -244,4 +244,86 @@ describe("API request integration", () => {
       )
     );
   });
+
+  it("synthesizes persisted LOCAL replies offline even when ElevenLabs is requested", async () => {
+    const client = createClient();
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({ username: "voice-local@example.com", password: "voice-password" })
+    );
+    assert.equal(register.status, 201);
+    const userId = String((await json(register)).user.id);
+    const now = "2026-07-11T18:00:00.000Z";
+    db.prepare(
+      "INSERT INTO conversations (id, user_id, title, conversation_mode, created_at, updated_at) VALUES (?, ?, ?, 'chat', ?, ?)"
+    ).run("voice-local-conversation", userId, "Voice privacy", now, now);
+    db.prepare(
+      "INSERT INTO messages (id, conversation_id, user_id, role, content, provider, created_at) VALUES (?, ?, ?, 'assistant', ?, 'local', ?)"
+    ).run(
+      "voice-local-message",
+      "voice-local-conversation",
+      userId,
+      "This local reply must stay on the device.",
+      now
+    );
+
+    const beforeCalls = fetchRecorder.calls.length;
+    const response = await client.request(
+      "/api/voices/synthesize",
+      jsonInit({
+        messageId: "voice-local-message",
+        mode: "english",
+        engine: "elevenlabs",
+        explicitOnlineContext: true,
+        profile: {
+          v: 1,
+          baseVoiceId: "voice-3",
+          pitch: 0.1,
+          warmth: 0.2,
+          pace: 0,
+          lilt: 0,
+        },
+      })
+    );
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("x-prism-voice-engine"), "builtin-local-fallback");
+    assert.equal(Buffer.from(await response.arrayBuffer()).subarray(0, 4).toString(), "RIFF");
+    assert.deepEqual(fetchRecorder.calls.slice(beforeCalls), []);
+  });
+
+  it("persists authored bot voices separately from user overrides", async () => {
+    const client = createClient();
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({ username: "voice-profile@example.com", password: "voice-password" })
+    );
+    assert.equal(register.status, 201);
+    const authored = {
+      v: 1,
+      baseVoiceId: "voice-4",
+      pitch: 0.2,
+      warmth: -0.1,
+      pace: 0.15,
+      lilt: 0.35,
+    };
+    const created = await client.request(
+      "/api/bots",
+      jsonInit({ name: "Voiced bot", authoredAudioVoiceProfile: authored })
+    );
+    assert.equal(created.status, 201);
+    const createdPayload = await json(created);
+    assert.deepEqual(createdPayload.bot.authored_audio_voice_profile, authored);
+    assert.equal(createdPayload.bot.audio_voice_profile_override, null);
+
+    const override = { ...authored, baseVoiceId: "voice-2", pitch: -0.25 };
+    const updated = await client.request(`/api/bots/${createdPayload.bot.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ audioVoiceProfileOverride: override }),
+    });
+    assert.equal(updated.status, 200);
+    const updatedPayload = await json(updated);
+    assert.deepEqual(updatedPayload.bot.authored_audio_voice_profile, authored);
+    assert.deepEqual(updatedPayload.bot.audio_voice_profile_override, override);
+  });
 });

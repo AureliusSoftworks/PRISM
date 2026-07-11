@@ -215,6 +215,15 @@ describe("backup bot avatar face style", () => {
         faceMouthRotationDeg: 35,
         faceBlinkBar: "❘",
         faceThinkingFrames: ["·", "*", "✦", "*"],
+        authoredAudioVoiceProfile: {
+          v: 1,
+          baseVoiceId: "voice-1",
+          pitch: 0,
+          warmth: 0,
+          pace: 0,
+          lilt: 0,
+        },
+        audioVoiceProfileOverride: null,
         chatEnabled: true,
         visibility: "private",
         createdAt: "2026-01-01T00:00:00.000Z",
@@ -269,6 +278,63 @@ describe("backup bot avatar face style", () => {
       assert.equal(restored.face_blink_bar, "❘");
       assert.equal(restored.face_thinking_frames, '["·","*","✦","*"]');
       assert.equal(restored.profile_picture_image_id, null);
+    });
+  });
+});
+
+describe("backup audio voice settings", () => {
+  it("round-trips account settings, authored profiles, and user overrides", () => {
+    withBackupDatabase((db, userKey) => {
+      db.prepare(
+        "UPDATE users SET voice_mode = ?, english_voice_engine = ?, elevenlabs_voice_bank = ?, elevenlabs_voice_model = ? WHERE id = ?"
+      ).run(
+        "english",
+        "elevenlabs",
+        JSON.stringify({ "voice-1": "eleven-a" }),
+        "eleven_flash_v2_5",
+        "user-1"
+      );
+      db.prepare(
+        `INSERT INTO bots (
+          id, user_id, name, system_prompt,
+          authored_audio_voice_profile, audio_voice_profile_override,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        "voice-bot",
+        "user-1",
+        "Voice Bot",
+        "You are Voice Bot.",
+        JSON.stringify({ v: 1, baseVoiceId: "voice-4", pitch: 0.2, warmth: -0.1, pace: 0.3, lilt: 0.4 }),
+        JSON.stringify({ v: 1, baseVoiceId: "voice-2", pitch: -0.4, warmth: 0.6, pace: 0, lilt: -0.2 }),
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-01T00:00:00.000Z"
+      );
+
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.equal(snapshot.settings?.voiceMode, "english");
+      assert.equal(snapshot.settings?.englishVoiceEngine, "elevenlabs");
+      assert.equal(snapshot.settings?.elevenLabsVoiceModel, "eleven_flash_v2_5");
+      assert.equal(snapshot.settings?.elevenLabsVoiceBank?.["voice-1"], "eleven-a");
+
+      db.prepare(
+        "UPDATE users SET voice_mode = 'mute', english_voice_engine = 'builtin', elevenlabs_voice_bank = '{}', elevenlabs_voice_model = NULL WHERE id = ?"
+      ).run("user-1");
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+
+      const restoredUser = db.prepare(
+        "SELECT voice_mode, english_voice_engine, elevenlabs_voice_bank, elevenlabs_voice_model FROM users WHERE id = ?"
+      ).get("user-1") as Record<string, string | null>;
+      assert.equal(restoredUser.voice_mode, "english");
+      assert.equal(restoredUser.english_voice_engine, "elevenlabs");
+      assert.equal(restoredUser.elevenlabs_voice_model, "eleven_flash_v2_5");
+      assert.equal(JSON.parse(restoredUser.elevenlabs_voice_bank ?? "{}")["voice-1"], "eleven-a");
+
+      const restoredBot = db.prepare(
+        "SELECT authored_audio_voice_profile, audio_voice_profile_override FROM bots WHERE id = ?"
+      ).get("voice-bot") as Record<string, string>;
+      assert.equal(JSON.parse(restoredBot.authored_audio_voice_profile).baseVoiceId, "voice-4");
+      assert.equal(JSON.parse(restoredBot.audio_voice_profile_override).baseVoiceId, "voice-2");
     });
   });
 });
