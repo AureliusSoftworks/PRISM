@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import {
   autoBackfillSendGeneratedImagePrompt,
+  buildMentionedBotPromptContexts,
   buildAssistantToolCallEvents,
   buildAskQuestionFallback,
   compactPreImageLeadMessage,
@@ -20,7 +21,7 @@ import {
   userMessageSuggestsInChatImageRequest,
 } from "../chat.ts";
 import { rewindConversation } from "../conversations.ts";
-import { persistMemoryCandidates } from "../memory.ts";
+import { persistMemoryCandidates, restoreMemory } from "../memory.ts";
 import { RECENT_WINDOW_SIZE, summarizeThreadCompact } from "../memory-summarizer.ts";
 import { fallbackEmbedding, LocalOllamaProvider, type LlmProvider } from "../providers.ts";
 import {
@@ -6463,6 +6464,50 @@ describe("processChatMessage Zen action prompt guidance", () => {
 });
 
 describe("processChatMessage bot mentions", () => {
+  it("hydrates the first five external bots and keeps later references name-only", async () => {
+    const db = createChatTestDb();
+    db.prepare(
+      "INSERT INTO bots (id, name, system_prompt, color, glyph) VALUES (?, ?, ?, ?, ?)"
+    ).run("receiver", "Receiver", "The receiving persona.", "#ffffff", "spark");
+    for (let index = 1; index <= 7; index += 1) {
+      db.prepare(
+        "INSERT INTO bots (id, name, system_prompt, color, glyph) VALUES (?, ?, ?, ?, ?)"
+      ).run(
+        `bot-${index}`,
+        `Bot ${index}`,
+        `Personality profile ${index}.`,
+        "#4f8cff",
+        "spark"
+      );
+    }
+    globalThis.fetch = (async () => {
+      throw new Error("use fallback embedding");
+    }) as typeof fetch;
+    await restoreMemory(db, "user-1", CHAT_TEST_USER_KEY, {
+      botId: "bot-1",
+      text: "Bot 1 recently met Receiver at the observatory.",
+      tier: "short_term",
+    });
+
+    const message = ["receiver", ...Array.from({ length: 7 }, (_, index) => `bot-${index + 1}`)]
+      .map((id) => `[${id}](prism-bot://${id})`)
+      .join(" ");
+    const result = await buildMentionedBotPromptContexts({
+      db,
+      userId: "user-1",
+      userKey: CHAT_TEST_USER_KEY,
+      message,
+      receiverBotId: "receiver",
+      includeMemories: true,
+    });
+
+    assert.equal(result.contexts.length, 5);
+    assert.match(result.contexts[0] ?? "", /Personality profile 1/u);
+    assert.match(result.contexts[0] ?? "", /observatory/u);
+    assert.doesNotMatch(result.contexts.join("\n"), /The receiving persona/u);
+    assert.deepEqual(result.overflowNames, ["Bot 6", "Bot 7"]);
+  });
+
   it("adds mentioned library bot profile context to the model prompt", async () => {
     const db = createChatTestDb();
     db.prepare(

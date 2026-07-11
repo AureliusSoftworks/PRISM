@@ -12530,12 +12530,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   user-select: none;
 }
 
-.messages[data-drag-selecting="true"] .chatBotTile,
-.messages[data-drag-selecting="true"] .chatBotPicker:hover .chatBotTile:not(:hover) {
-  transform: none;
-  opacity: 1;
-}
-
 .chatBotSelectionMarquee {
   position: absolute;
   pointer-events: none;
@@ -13758,6 +13752,19 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   .chatBotTileBotGlyph {
     transition: none;
   }
+}
+
+[data-canvas-bot-marquee-surface="true"][data-canvas-bot-marquee-active="true"]
+  .chatBotTile,
+[data-canvas-bot-marquee-surface="true"][data-canvas-bot-marquee-active="true"]
+  .chatBotTile:hover,
+[data-canvas-bot-marquee-surface="true"][data-canvas-bot-marquee-active="true"]
+  .chatBotTile:not(:hover) {
+  pointer-events: none;
+  transform: none !important;
+  opacity: 1 !important;
+  z-index: 1 !important;
+  transition: none !important;
 }
 
 .message {
@@ -37364,7 +37371,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .botAvatarControlTabs {
   min-width: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
   padding: 4px;
   border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 20%, #303846);

@@ -20,6 +20,20 @@ function baseBotJson(overrides: Partial<PrismBotArchiveJson> = {}): PrismBotArch
       name: "Plato",
       color: "#4F46A5",
       glyph: "lucideDrama",
+      avatarDetails: {
+        version: 1,
+        screen: {
+          stamps: [
+            {
+              id: "round-glasses",
+              offsetX: 2,
+              offsetY: -1,
+              scalePct: 105,
+            },
+          ],
+          paintMaskBase64: null,
+        },
+      },
       faceEyesFont: "formal",
       faceEyeCharacter: "8",
       faceEyeAnimation: "wobble",
@@ -54,6 +68,20 @@ describe("botArchive", () => {
 
     assert.equal(parsed.botJson.schema, PRISM_BOT_ARCHIVE_SCHEMA);
     assert.equal(parsed.botJson.bot.name, "Plato");
+    assert.deepEqual(parsed.botJson.bot.avatarDetails, {
+      version: 1,
+      screen: {
+        stamps: [
+          {
+            id: "round-glasses",
+            offsetX: 2,
+            offsetY: -1,
+            scalePct: 105,
+          },
+        ],
+        paintMaskBase64: null,
+      },
+    });
     assert.equal(parsed.botJson.bot.faceEyeCharacter, "8");
     assert.equal(parsed.botJson.bot.faceEyeAnimation, "wobble");
     assert.equal(parsed.botJson.bot.faceEyeScale, 1.15);
@@ -121,6 +149,135 @@ describe("botArchive", () => {
     assert.throws(() => parsePrismBotArchive(archive), /unsupported files/);
   });
 
+  it("explicitly rejects legacy accessory.png archives", () => {
+    const archive = zipSync({
+      [BOT_ARCHIVE_BOT_ENTRY_NAME]: strToU8(`${JSON.stringify(baseBotJson())}\n`),
+      "accessory.png": strToU8("raw png"),
+    });
+
+    assert.throws(() => parsePrismBotArchive(archive), /accessory\.png.*not supported/i);
+  });
+
+  it("accepts only a root-level null legacy accessory marker and strips it", () => {
+    const compatible = zipSync({
+      [BOT_ARCHIVE_BOT_ENTRY_NAME]: strToU8(
+        JSON.stringify({ ...baseBotJson(), accessory: null })
+      ),
+    });
+    const parsed = parsePrismBotArchive(compatible);
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(parsed.botJson, "accessory"),
+      false
+    );
+
+    const nonNull = zipSync({
+      [BOT_ARCHIVE_BOT_ENTRY_NAME]: strToU8(
+        JSON.stringify({ ...baseBotJson(), accessory: { url: "avatar.png" } })
+      ),
+    });
+    assert.throws(
+      () => parsePrismBotArchive(nonNull),
+      /unsupported non-null legacy accessory metadata/
+    );
+  });
+
+  it("rejects raw avatar URLs and legacy accessory metadata", () => {
+    const rawUrl = zipSync({
+      [BOT_ARCHIVE_BOT_ENTRY_NAME]: strToU8(
+        JSON.stringify({
+          ...baseBotJson(),
+          bot: { ...baseBotJson().bot, avatarDetails: "https://example.com/avatar.svg" },
+        })
+      ),
+    });
+    assert.throws(() => parsePrismBotArchive(rawUrl), /structured recipe.*PNG, SVG, data, or URL/i);
+
+    const legacyField = zipSync({
+      [BOT_ARCHIVE_BOT_ENTRY_NAME]: strToU8(
+        JSON.stringify({
+          ...baseBotJson(),
+          bot: { ...baseBotJson().bot, accessoryImageUrl: "data:image/png;base64,AAAA" },
+        })
+      ),
+    });
+    assert.throws(() => parsePrismBotArchive(legacyField), /unsupported legacy avatar field/i);
+
+    const portraitField = zipSync({
+      [BOT_ARCHIVE_BOT_ENTRY_NAME]: strToU8(
+        JSON.stringify({
+          ...baseBotJson(),
+          bot: {
+            ...baseBotJson().bot,
+            portraitImageUrl: "https://example.com/avatar.png",
+          },
+        })
+      ),
+    });
+    assert.throws(
+      () => parsePrismBotArchive(portraitField),
+      /unsupported legacy avatar field: portraitImageUrl/i
+    );
+  });
+
+  it("rejects raw profile image fields at bot and root level", () => {
+    const botLevel = zipSync({
+      [BOT_ARCHIVE_BOT_ENTRY_NAME]: strToU8(
+        JSON.stringify({
+          ...baseBotJson(),
+          bot: {
+            ...baseBotJson().bot,
+            profileImageUrl: "https://example.com/profile.png",
+          },
+        })
+      ),
+    });
+    assert.throws(
+      () => parsePrismBotArchive(botLevel),
+      /unsupported legacy avatar field: profileImageUrl/
+    );
+
+    const rootLevel = zipSync({
+      [BOT_ARCHIVE_BOT_ENTRY_NAME]: strToU8(
+        JSON.stringify({
+          ...baseBotJson(),
+          profile_image_data: "data:image/svg+xml;base64,AAAA",
+        })
+      ),
+    });
+    assert.throws(
+      () => parsePrismBotArchive(rootLevel),
+      /unsupported legacy avatar field: profile_image_data/
+    );
+  });
+
+  it("rejects raw legacy image fields nested directly inside profile", () => {
+    const archive = zipSync({
+      [BOT_ARCHIVE_BOT_ENTRY_NAME]: strToU8(
+        JSON.stringify({
+          ...baseBotJson(),
+          profile: {
+            purpose: "Offer thoughtful dialogue.",
+            profile_picture_data: "data:image/png;base64,AAAA",
+          },
+        })
+      ),
+    });
+
+    assert.throws(
+      () => parsePrismBotArchive(archive),
+      /unsupported legacy avatar field: profile_picture_data/
+    );
+  });
+
+  it("rejects zipped raw SVG detail files", () => {
+    const archive = zipSync({
+      [BOT_ARCHIVE_BOT_ENTRY_NAME]: strToU8(`${JSON.stringify(baseBotJson())}\n`),
+      "avatar-details.svg": strToU8("<svg></svg>"),
+    });
+
+    assert.throws(() => parsePrismBotArchive(archive), /unsupported files/);
+  });
+
   it("rejects archives missing bot.json", () => {
     const archive = zipSync({
       [BOT_ARCHIVE_MEMORIES_ENTRY_NAME]: strToU8("[]"),
@@ -147,5 +304,16 @@ describe("botArchive", () => {
     );
 
     assert.throws(() => parsePrismBotArchive(legacy), /zipped \.bot archive/);
+  });
+
+  it("rejects raw PNG and SVG content instead of treating it as avatar details", () => {
+    assert.throws(
+      () => parsePrismBotArchive(strToU8("\u0089PNG\r\n\u001a\nraw")),
+      /zipped \.bot archive/
+    );
+    assert.throws(
+      () => parsePrismBotArchive(strToU8("<svg><path /></svg>")),
+      /zipped \.bot archive/
+    );
   });
 });

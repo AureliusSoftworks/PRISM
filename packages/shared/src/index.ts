@@ -174,6 +174,37 @@ export {
 } from "./botAvatar.js";
 
 export {
+  BOT_AVATAR_DETAILS_CANVAS_SIZE,
+  BOT_AVATAR_DETAILS_MAX_JSON_BYTES,
+  BOT_AVATAR_DETAILS_MAX_PAINTED_PIXELS,
+  BOT_AVATAR_DETAILS_PAINT_MASK_BASE64_LENGTH,
+  BOT_AVATAR_DETAILS_PAINT_MASK_BYTE_LENGTH,
+  BOT_AVATAR_DETAILS_VERSION,
+  BOT_AVATAR_DETAILS_WRITABLE_PIXEL_COUNT,
+  BOT_AVATAR_DETAIL_OFFSET_MAX,
+  BOT_AVATAR_DETAIL_OFFSET_MIN,
+  BOT_AVATAR_DETAIL_SCALE_MAX,
+  BOT_AVATAR_DETAIL_SCALE_MIN,
+  BOT_AVATAR_DETAIL_STAMP_CATALOG,
+  BOT_AVATAR_DETAIL_STAMP_CATEGORIES,
+  BOT_AVATAR_DETAIL_STAMP_IDS,
+  countBotAvatarDetailsPaintedPixels,
+  decodeBotAvatarDetailsPaintMask,
+  encodeBotAvatarDetailsPaintMask,
+  isBotAvatarDetailStampTransformInsideCanvas,
+  isBotAvatarDetailsWritablePixel,
+  parseBotAvatarDetailsV1,
+  parseStoredBotAvatarDetailsV1,
+  serializeBotAvatarDetailsV1,
+  type BotAvatarDetailStampCategory,
+  type BotAvatarDetailStampDefinition,
+  type BotAvatarDetailStampId,
+  type BotAvatarDetailStampTransform,
+  type BotAvatarDetailStampV1,
+  type BotAvatarDetailsV1,
+} from "./botAvatarDetails.js";
+
+export {
   PRISM_TOOL_END,
   PRISM_TOOL_START,
   assistantContentHasPrismToolFraming,

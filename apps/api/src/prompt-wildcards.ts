@@ -144,6 +144,87 @@ export interface PromptWildcardResolution {
   replacements: PromptShortcutWildcardReplacement[];
 }
 
+export interface PromptBotWildcardCandidate {
+  id: string;
+  name: string;
+}
+
+function formatPromptBotMention(candidate: PromptBotWildcardCandidate): string {
+  const label = candidate.name.replace(/\\/g, "\\\\").replace(/\]/g, "\\]");
+  return `[${label}](prism-bot://${encodeURIComponent(candidate.id)})`;
+}
+
+/**
+ * Resolves only `{BOT}` occurrences from the authenticated library roster.
+ * Other wildcard kinds remain untouched for the normal wildcard pipeline.
+ */
+export function resolvePromptBotWildcards(args: {
+  prompt: string;
+  candidates: readonly PromptBotWildcardCandidate[];
+  receiverBotId?: string | null;
+  existingReplacements?: readonly PromptShortcutWildcardReplacement[];
+  randomIndex?: (length: number) => number;
+}): PromptWildcardResolution {
+  const occurrences = promptWildcardOccurrences(args.prompt).filter(
+    (occurrence) => occurrence.key === "BOT"
+  );
+  if (occurrences.length === 0) {
+    return applyPromptWildcardValues(args.prompt, new Map(), args.existingReplacements);
+  }
+
+  const seenIds = new Set<string>();
+  const candidates = args.candidates
+    .map((candidate) => ({ id: candidate.id.trim(), name: candidate.name.trim() }))
+    .filter((candidate) => {
+      if (!candidate.id || !candidate.name || seenIds.has(candidate.id)) return false;
+      seenIds.add(candidate.id);
+      return true;
+    });
+  if (candidates.length === 0) {
+    return applyPromptWildcardValues(args.prompt, new Map(), args.existingReplacements);
+  }
+
+  const receiverBotId = args.receiverBotId?.trim() || null;
+  const nonReceiver = receiverBotId
+    ? candidates.filter((candidate) => candidate.id !== receiverBotId)
+    : candidates;
+  const pool = nonReceiver.length > 0 ? nonReceiver : candidates;
+  const available = [...pool];
+  const values = new Map<string, string>();
+  const botIdByValue = new Map<string, string>();
+  const randomIndex = args.randomIndex ?? ((length: number) => randomInt(length));
+
+  for (const occurrence of occurrences) {
+    if (values.has(occurrence.requestKey)) continue;
+    const source = available.length > 0 ? available : pool;
+    const rawIndex = randomIndex(source.length);
+    const index = Number.isFinite(rawIndex)
+      ? ((Math.floor(rawIndex) % source.length) + source.length) % source.length
+      : 0;
+    const [candidate] = available.length > 0
+      ? available.splice(index, 1)
+      : [source[index]];
+    if (!candidate) continue;
+    const value = formatPromptBotMention(candidate);
+    values.set(occurrence.requestKey, value);
+    botIdByValue.set(value, candidate.id);
+  }
+
+  const resolved = applyPromptWildcardValues(
+    args.prompt,
+    values,
+    args.existingReplacements
+  );
+  return {
+    ...resolved,
+    replacements: resolved.replacements.map((replacement) =>
+      replacement.key === "BOT" && botIdByValue.has(replacement.value)
+        ? { ...replacement, botId: botIdByValue.get(replacement.value) }
+        : replacement
+    ),
+  };
+}
+
 export function normalizePromptWildcardKey(value: unknown): string {
   return typeof value === "string"
     ? value.trim().replace(/\s+/g, "_").toUpperCase()

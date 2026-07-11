@@ -465,7 +465,7 @@ test("avatar customizer keeps explicit save and dirty prompts for broader edits"
   assert.doesNotMatch(pageSource, /BotAvatarLiveSavePatch/);
   assert.match(
     pageSource,
-    /const saveButtonVisible = saving \|\| hasUnsavedChanges;/,
+    /const saveButtonVisible = saving \|\| hasUnsavedChanges \|\| detailsEditorDirty;/,
   );
   assert.match(pageSource, /\{saveButtonVisible \? \(/);
   assert.match(pageSource, /draftMode\s*\?\s*"Draft"\s*:\s*"Saved"/);
@@ -867,12 +867,12 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   );
   assert.match(
     pageSource,
-    /const BOT_AVATAR_CUSTOMIZER_TABS = \[\s*\{ value: "face", label: "Identity" \},\s*\{ value: "eyes", label: "Eyes" \},\s*\{ value: "mouth", label: "Mouth" \},\s*\{ value: "motion", label: "Motion" \}/,
+    /const BOT_AVATAR_CUSTOMIZER_TABS = \[\s*\{ value: "face", label: "Identity" \},\s*\{ value: "eyes", label: "Eyes" \},\s*\{ value: "mouth", label: "Mouth" \},\s*\{ value: "details", label: "Details" \},\s*\{ value: "motion", label: "Motion" \}/,
   );
   assert.match(pageSource, /const avatarControlTabsVisible = true;/);
-  assert.match(pageSource, /BOT_AVATAR_CUSTOMIZER_TABS\.map\(\(tab\) =>/);
-  assert.match(pageSource, /const activeFaceControlTabs: readonly BotAvatarFaceControlTab\[\] = \[activeControlTab\]/);
-  assert.doesNotMatch(pageSource, /: BOT_AVATAR_FACE_CONTROL_TABS;/);
+  assert.match(pageSource, /visibleAvatarTabs\.map\(\(tab\) =>/);
+  assert.match(pageSource, /BOT_AVATAR_FACE_CONTROL_TABS\.includes\(/);
+  assert.match(pageSource, /const BOT_AVATAR_FACE_CONTROL_TABS = \[/);
   assert.match(
     pageSource,
     /\? "Face"\s*: activeTab === "eyes"\s*\? "Eyes"\s*: activeTab === "mouth"\s*\? "Mouth"\s*: "Motion"/,
@@ -882,10 +882,8 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   assert.match(pageSource, /Built-in style/);
   assert.match(pageSource, /Custom glyph/);
   assert.match(pageSource, /Blink and thinking animation/);
-  assert.match(
-    pageSource,
-    /type BotAvatarCustomizerTab = "face" \| "eyes" \| "mouth" \| "motion"/,
-  );
+  assert.match(pageSource, /type BotAvatarCustomizerTab =/);
+  assert.match(pageSource, /\| "details";/);
   assert.match(pageSource, /useState<BotAvatarCustomizerTab>\("face"\)/);
   assert.match(pageSource, /setActiveControlTab\("face"\)/);
   assert.match(pageSource, /aria-label=\{controlLabel\}/);

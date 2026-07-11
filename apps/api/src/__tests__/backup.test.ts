@@ -144,19 +144,20 @@ describe("backup bot avatar face style", () => {
     withBackupDatabase((db, userKey) => {
       db.prepare(
         `INSERT INTO bots (
-          id, user_id, name, system_prompt,
+          id, user_id, name, system_prompt, avatar_details_json,
           face_eyes_font, face_eye_character, face_eye_animation,
           face_mouth_font, face_mouth_character, face_mouth_animation, face_font_weight,
           face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg,
           face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg,
           face_blink_bar, face_thinking_frames,
           created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         "bot-1",
         "user-1",
         "Avatar Bot",
         "You are Avatar Bot.",
+        '{"version":1,"screen":{"stamps":[{"id":"round-glasses","offsetX":2,"offsetY":-1,"scalePct":105}],"paintMaskBase64":null}}',
         "warm",
         "8",
         "wobble",
@@ -199,6 +200,20 @@ describe("backup bot avatar face style", () => {
 	        repetitionPenalty: 1.1,
 	        color: null,
         glyph: null,
+        avatarDetails: {
+          version: 1,
+          screen: {
+            stamps: [
+              {
+                id: "round-glasses",
+                offsetX: 2,
+                offsetY: -1,
+                scalePct: 105,
+              },
+            ],
+            paintMaskBase64: null,
+          },
+        },
         faceEyesFont: "warm",
         faceEyeCharacter: "8",
         faceMouthFont: "formal",
@@ -222,16 +237,17 @@ describe("backup bot avatar face style", () => {
       });
 
       db.prepare(
-        "UPDATE bots SET face_eyes_font = NULL, face_eye_character = NULL, face_eye_animation = NULL, face_mouth_font = NULL, face_mouth_character = NULL, face_mouth_animation = NULL, face_font_weight = NULL, face_eye_scale = NULL, face_eye_offset_x = NULL, face_eye_offset_y = NULL, face_eye_rotation_deg = NULL, face_mouth_scale = NULL, face_mouth_offset_x = NULL, face_mouth_offset_y = NULL, face_mouth_rotation_deg = NULL, face_blink_bar = NULL, face_thinking_frames = NULL WHERE id = ?"
+        "UPDATE bots SET avatar_details_json = NULL, face_eyes_font = NULL, face_eye_character = NULL, face_eye_animation = NULL, face_mouth_font = NULL, face_mouth_character = NULL, face_mouth_animation = NULL, face_font_weight = NULL, face_eye_scale = NULL, face_eye_offset_x = NULL, face_eye_offset_y = NULL, face_eye_rotation_deg = NULL, face_mouth_scale = NULL, face_mouth_offset_x = NULL, face_mouth_offset_y = NULL, face_mouth_rotation_deg = NULL, face_blink_bar = NULL, face_thinking_frames = NULL WHERE id = ?"
       ).run("bot-1");
 
       importUserSnapshot(db, "user-1", snapshot, userKey);
 
       const restored = db
         .prepare(
-          "SELECT face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_thinking_frames, profile_picture_image_id FROM bots WHERE id = ?"
+          "SELECT avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_thinking_frames, profile_picture_image_id FROM bots WHERE id = ?"
         )
         .get("bot-1") as {
+        avatar_details_json: string | null;
         face_eyes_font: string | null;
         face_eye_character: string | null;
         face_eye_animation: string | null;
@@ -251,6 +267,10 @@ describe("backup bot avatar face style", () => {
         face_thinking_frames: string | null;
         profile_picture_image_id: string | null;
       };
+      assert.equal(
+        restored.avatar_details_json,
+        '{"version":1,"screen":{"stamps":[{"id":"round-glasses","offsetX":2,"offsetY":-1,"scalePct":105}],"paintMaskBase64":null}}'
+      );
       assert.equal(restored.face_eyes_font, "warm");
       assert.equal(restored.face_eye_character, "8");
       assert.equal(restored.face_eye_animation, "none");
@@ -269,6 +289,161 @@ describe("backup bot avatar face style", () => {
       assert.equal(restored.face_blink_bar, "❘");
       assert.equal(restored.face_thinking_frames, '["·","*","✦","*"]');
       assert.equal(restored.profile_picture_image_id, null);
+    });
+  });
+
+  it("rejects raw avatar URLs and legacy accessory fields from account backups", () => {
+    withBackupDatabase((db, userKey) => {
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      snapshot.bots = [
+        {
+          id: "raw-avatar",
+          name: "Raw Avatar",
+          systemPrompt: "",
+          onlineEnabled: true,
+          deleteProtected: false,
+          flirtEnabled: false,
+          temperature: 0.7,
+          maxTokens: 2048,
+          chatEnabled: true,
+          visibility: "private",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          avatarDetails: "https://example.com/avatar.png" as never,
+        },
+      ];
+
+      assert.throws(
+        () => importUserSnapshot(db, "user-1", snapshot, userKey),
+        /Invalid avatar details/
+      );
+      assert.equal(
+        db.prepare("SELECT id FROM bots WHERE id = ?").get("raw-avatar"),
+        undefined
+      );
+
+      snapshot.bots = [
+        {
+          ...snapshot.bots[0]!,
+          id: "legacy-accessory",
+          avatarDetails: null,
+          accessoryImageUrl: "data:image/png;base64,AAAA",
+        } as never,
+      ];
+      assert.throws(
+        () => importUserSnapshot(db, "user-1", snapshot, userKey),
+        /unsupported legacy avatar field: accessoryImageUrl/
+      );
+      assert.equal(
+        db.prepare("SELECT id FROM bots WHERE id = ?").get("legacy-accessory"),
+        undefined
+      );
+
+      const rawFieldBase = { ...snapshot.bots[0] } as Record<string, unknown>;
+      delete rawFieldBase.accessoryImageUrl;
+      for (const [field, value] of [
+        ["profilePictureDataUrl", "data:image/png;base64,AAAA"],
+        ["profile_picture_svg", "<svg><path /></svg>"],
+        ["avatarImageUrl", "https://example.com/avatar.png"],
+        ["portraitImageUrl", "https://example.com/avatar.png"],
+      ] as const) {
+        snapshot.bots = [
+          {
+            ...rawFieldBase,
+            id: `raw-${field}`,
+            [field]: value,
+          } as never,
+        ];
+        assert.throws(
+          () => importUserSnapshot(db, "user-1", snapshot, userKey),
+          new RegExp(`unsupported legacy avatar field: ${field}`)
+        );
+        assert.equal(
+          db.prepare("SELECT id FROM bots WHERE id = ?").get(`raw-${field}`),
+          undefined
+        );
+      }
+
+      const rootRasterSnapshot = {
+        ...snapshot,
+        bots: [],
+        imageAssets: [{ dataUrl: "data:image/png;base64,AAAA" }],
+      } as never;
+      assert.throws(
+        () => importUserSnapshot(db, "user-1", rootRasterSnapshot, userKey),
+        /unsupported raster data field: imageAssets/i
+      );
+    });
+  });
+
+  it("rejects cross-tenant id collisions without mutating either tenant", () => {
+    withBackupDatabase((db, userKey) => {
+      db.prepare(
+        `INSERT INTO users (
+          id, email, display_name, password_hash, password_salt,
+          wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag,
+          created_at, last_active_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        "user-2",
+        "user-2@example.com",
+        "User Two",
+        "hash",
+        "salt",
+        "cipher",
+        "iv",
+        "tag",
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-02T00:00:00.000Z"
+      );
+      db.prepare(
+        `INSERT INTO bots (
+          id, user_id, name, system_prompt, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?)`
+      ).run(
+        "shared-id",
+        "user-2",
+        "Tenant Two Bot",
+        "Do not replace me.",
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-01T00:00:00.000Z"
+      );
+
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      snapshot.settings = { ...snapshot.settings!, theme: "dark" };
+      snapshot.bots = [
+        {
+          id: "shared-id",
+          name: "Collision",
+          systemPrompt: "",
+          onlineEnabled: true,
+          deleteProtected: false,
+          flirtEnabled: false,
+          temperature: 0.7,
+          maxTokens: 2048,
+          chatEnabled: true,
+          visibility: "private",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          avatarDetails: null,
+        },
+      ];
+
+      assert.throws(
+        () => importUserSnapshot(db, "user-1", snapshot, userKey),
+        /belongs to another user/i
+      );
+      const retained = db
+        .prepare("SELECT user_id, name FROM bots WHERE id = ?")
+        .get("shared-id") as { user_id: string; name: string };
+      assert.equal(retained.user_id, "user-2");
+      assert.equal(retained.name, "Tenant Two Bot");
+      assert.equal(
+        (db.prepare("SELECT theme FROM users WHERE id = ?").get("user-1") as {
+          theme: string;
+        }).theme,
+        "system"
+      );
     });
   });
 });

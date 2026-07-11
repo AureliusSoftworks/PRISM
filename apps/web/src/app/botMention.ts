@@ -15,6 +15,8 @@ export const PRISM_BOT_MARKDOWN_LINK_RE =
 export interface BotMentionPick {
   id: string;
   name: string;
+  /** Optional picker-only label. The committed mention still uses `name`. */
+  pickerLabel?: string;
   color: string | null;
   glyph: string | null;
 }
@@ -618,12 +620,18 @@ export function findAtMentionTokenPlain(text: string, caret: number): AtMentionT
 
 export function filterBotsForMentionQuery(
   bots: readonly BotMentionPick[],
-  query: string
+  query: string,
+  limit = 5
 ): BotMentionPick[] {
   const q = query.trim().toLocaleLowerCase();
   const pool = bots.filter((b) => b.name.trim().length > 0);
-  if (q.length === 0) return [...pool];
-  return pool.filter((b) => b.name.toLocaleLowerCase().includes(q));
+  const matches = q.length === 0
+    ? pool
+    : pool.filter((b) =>
+        b.name.toLocaleLowerCase().includes(q) ||
+        b.pickerLabel?.toLocaleLowerCase().includes(q)
+      );
+  return matches.slice(0, Math.max(1, limit));
 }
 
 export function uniqueBotMatchingName(

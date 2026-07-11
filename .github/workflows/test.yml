@@ -43,8 +43,8 @@ jobs:
       - name: Lint workspace
         run: npm run lint
 
-      - name: Install Chromium
-        run: npx playwright install --with-deps chromium
+      - name: Install browser test engines
+        run: npx playwright install --with-deps chromium webkit
 
       - name: Run browser smoke tests
         run: npm run test:e2e

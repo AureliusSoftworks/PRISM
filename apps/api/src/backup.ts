@@ -6,6 +6,7 @@ import {
   DEFAULT_BOT_FACE_BLINK_BAR,
   DEFAULT_BOT_FACE_GLYPH_ANIMATION,
   DEFAULT_BOT_FACE_THINKING_FRAMES,
+  parseStoredBotAvatarDetailsV1,
   normalizeBotFaceBlinkBar,
   normalizeBotFaceEyeCharacter,
   normalizeBotFaceEyeOffsetX,
@@ -22,6 +23,8 @@ import {
   normalizeBotFaceMouthScale,
   parseStoredBotFaceThinkingFrames,
   serializeBotFaceThinkingFrames,
+  serializeBotAvatarDetailsV1,
+  type BotAvatarDetailsV1,
   type BotFaceBlinkBar,
   type BotFaceFontId,
   type BotFaceGlyphAnimation,
@@ -104,6 +107,7 @@ export interface BackupBotSnapshot {
   repetitionPenalty?: number;
   color?: string | null;
   glyph?: string | null;
+  avatarDetails?: BotAvatarDetailsV1 | null;
   faceEyesFont?: BotFaceFontId | null;
   faceEyeCharacter?: string | null;
   faceMouthFont?: BotFaceFontId | null;
@@ -429,6 +433,7 @@ export function exportUserSnapshot(
 	         repetition_penalty,
          color,
          glyph,
+         avatar_details_json,
          face_eyes_font,
          face_eye_character,
          face_eye_animation,
@@ -474,6 +479,7 @@ export function exportUserSnapshot(
 	    repetition_penalty: number | null;
 	    color: string | null;
     glyph: string | null;
+    avatar_details_json: string | null;
     face_eyes_font: string | null;
     face_eye_character: string | null;
     face_eye_animation: string | null;
@@ -598,6 +604,7 @@ export function exportUserSnapshot(
           typeof bot.repetition_penalty === "number" ? bot.repetition_penalty : 1.1,
         color: bot.color,
         glyph: bot.glyph,
+        avatarDetails: parseStoredBotAvatarDetailsV1(bot.avatar_details_json),
         faceEyesFont: normalizeBotFaceFontId(bot.face_eyes_font),
         faceEyeCharacter: normalizeBotFaceEyeCharacter(bot.face_eye_character),
         faceMouthFont: normalizeBotFaceFontId(bot.face_mouth_font),
@@ -647,7 +654,101 @@ export function exportUserSnapshot(
   };
 }
 
+function assertSnapshotIdsStayWithinTenant(
+  db: DatabaseSync,
+  userId: string,
+  snapshot: BackupSnapshot
+): void {
+  const assertIds = (
+    table: "bots" | "conversations" | "messages" | "memories",
+    ids: readonly string[]
+  ): void => {
+    const seen = new Set<string>();
+    const findOwner = db.prepare(`SELECT user_id FROM ${table} WHERE id = ?`);
+    for (const rawId of ids) {
+      const id = rawId.trim();
+      if (!id) continue;
+      if (seen.has(id)) {
+        throw new Error(`Account backup contains a duplicate ${table} id.`);
+      }
+      seen.add(id);
+      const row = findOwner.get(id) as { user_id?: string } | undefined;
+      if (row?.user_id && row.user_id !== userId) {
+        throw new Error(`Account backup ${table} id belongs to another user.`);
+      }
+    }
+  };
+
+  const conversations = Array.isArray(snapshot.conversations)
+    ? snapshot.conversations
+    : [];
+  assertIds(
+    "bots",
+    Array.isArray(snapshot.bots)
+      ? snapshot.bots.flatMap((bot) =>
+          bot && typeof bot.id === "string" ? [bot.id] : []
+        )
+      : []
+  );
+  assertIds(
+    "conversations",
+    conversations.flatMap((conversation) =>
+      conversation && typeof conversation.id === "string"
+        ? [conversation.id]
+        : []
+    )
+  );
+  assertIds(
+    "messages",
+    conversations.flatMap((conversation) =>
+      Array.isArray(conversation?.messages)
+        ? conversation.messages.flatMap((message) =>
+            message && typeof message.id === "string" ? [message.id] : []
+          )
+        : []
+    )
+  );
+  assertIds(
+    "memories",
+    Array.isArray(snapshot.memories)
+      ? snapshot.memories.flatMap((memory) =>
+          memory && typeof memory.id === "string" ? [memory.id] : []
+        )
+      : []
+  );
+}
+
 export function importUserSnapshot(
+  db: DatabaseSync,
+  userId: string,
+  snapshot: BackupSnapshot,
+  userKey: Buffer
+): void {
+  const snapshotRecord = snapshot as unknown as Record<string, unknown>;
+  const unsupportedSnapshotField = Object.keys(snapshotRecord).find((key) => {
+    const normalized = key.toLowerCase().replace(/[^a-z]/gu, "");
+    return /(?:accessor|avatar|portrait|png|svg|imageasset|imagepayload|raster)/u.test(
+      normalized
+    );
+  });
+  if (unsupportedSnapshotField) {
+    throw new Error(
+      `Account backup contains unsupported raster data field: ${unsupportedSnapshotField}.`
+    );
+  }
+  validateBackupBotAvatarDetails(snapshot.bots);
+  db.exec("BEGIN IMMEDIATE;");
+  try {
+    assertSnapshotIdsStayWithinTenant(db, userId, snapshot);
+    importUserSnapshotWithinTransaction(db, userId, snapshot, userKey);
+    db.exec("COMMIT;");
+  } catch (error) {
+    db.exec("ROLLBACK;");
+    throw error;
+  }
+}
+
+function importUserSnapshotWithinTransaction(
   db: DatabaseSync,
   userId: string,
   snapshot: BackupSnapshot,
@@ -824,6 +925,7 @@ export function importUserSnapshot(
 	        repetition_penalty,
         color,
         glyph,
+        avatar_details_json,
         face_eyes_font,
         face_eye_character,
         face_eye_animation,
@@ -845,7 +947,7 @@ export function importUserSnapshot(
         visibility,
         created_at,
         updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const bot of snapshot.bots) {
       if (!bot || typeof bot.id !== "string" || bot.id.trim().length === 0) continue;
@@ -883,6 +985,9 @@ export function importUserSnapshot(
 	          : 1.1,
 	        typeof bot.color === "string" && bot.color.trim().length > 0 ? bot.color.trim() : null,
         typeof bot.glyph === "string" && bot.glyph.trim().length > 0 ? bot.glyph.trim() : null,
+        bot.avatarDetails === undefined || bot.avatarDetails === null
+          ? null
+          : serializeBotAvatarDetailsV1(bot.avatarDetails),
         normalizeBotFaceFontId(bot.faceEyesFont),
         normalizeBotFaceEyeCharacter(bot.faceEyeCharacter),
         DEFAULT_BOT_FACE_GLYPH_ANIMATION,
@@ -979,6 +1084,40 @@ export function importUserSnapshot(
       memory.durability ?? 0.5,
       memory.createdAt
     );
+  }
+}
+
+function validateBackupBotAvatarDetails(bots: BackupBotSnapshot[] | undefined): void {
+  if (!Array.isArray(bots)) return;
+  for (const bot of bots) {
+    if (!bot || typeof bot !== "object") continue;
+    const record = bot as unknown as Record<string, unknown>;
+    const unsupported = Object.keys(record).find((key) => {
+      if (key === "avatarDetails") return false;
+      const normalized = key.toLowerCase().replace(/[^a-z]/gu, "");
+      if (normalized === "localimagemodel" || normalized === "openaiimagemodel") {
+        return false;
+      }
+      const profileIndex = normalized.indexOf("profile");
+      const profileSuffix =
+        profileIndex >= 0 ? normalized.slice(profileIndex + "profile".length) : "";
+      return (
+        normalized.includes("accessory") ||
+        normalized.startsWith("avatar") ||
+        normalized.includes("portrait") ||
+        /(?:png|svg|imageurl|dataurl|imagebase64|imagepayload|raster)/u.test(
+          normalized
+        ) ||
+        (profileIndex >= 0 &&
+          /(?:picture|image|png|svg|url|data|file)/u.test(profileSuffix))
+      );
+    });
+    if (unsupported) {
+      throw new Error(`Account backup contains unsupported legacy avatar field: ${unsupported}.`);
+    }
+    if (record.avatarDetails !== undefined && record.avatarDetails !== null) {
+      serializeBotAvatarDetailsV1(record.avatarDetails);
+    }
   }
 }
 
