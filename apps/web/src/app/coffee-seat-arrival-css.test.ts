@@ -1432,16 +1432,17 @@ describe("Coffee seat arrival CSS", () => {
     assert.match(leftMugRule, /--coffee-cup-sip-x:\s*clamp\(24px,\s*2\.7vw,\s*36px\)\s*;/);
   });
 
-  it("keeps the Coffee pot in the table canvas at its original resting size", () => {
+  it("docks the Coffee pot directly above the composer", () => {
     assert.match(
       pageSource,
-      /const coffeePotVisible =[\s\S]*conversationActive[\s\S]*coffeeSessionPhase === "live"[\s\S]*!previewingSession[\s\S]*!coffeeReplayActive;/
+      /const coffeePotVisible =[\s\S]*conversationActive[\s\S]*coffeeSessionPhase === "arriving"[\s\S]*coffeeSessionPhase === "live"[\s\S]*!previewingSession[\s\S]*!coffeeReplayActive;/
     );
-    assert.ok(
-      pageSource.indexOf("className={styles.coffeePotLayer}") <
-        pageSource.indexOf('data-coffee-table-scene="true"'),
-      "expected the Coffee pot layer to render inside the table canvas before the table scene"
+    assert.match(
+      pageSource,
+      /const coffeePotComposerDockVisible =[\s\S]*coffeeSessionPhase === "arriving"[\s\S]*coffeeSessionPhase === "live"[\s\S]*!coffeeReplayActive;/
     );
+    assert.match(pageSource, /topContent:\s*coffeePotComposerDockVisible\s*\?\s*\(/);
+    assert.match(pageSource, /className=\{styles\.coffeePotComposerDock\}/);
     assert.match(pageSource, /const coffeePotAssetTheme: CoffeePotAssetTheme = resolvedTheme;/);
     assert.match(pageSource, /data-coffee-pot-theme=\{coffeePotAssetTheme\}/);
     assert.match(pageSource, /coffeePotRestImageUrl\(coffeePotAssetTheme\)/);
@@ -1453,18 +1454,30 @@ describe("Coffee seat arrival CSS", () => {
     );
 
     const potLayerRule = ruleForExactSelector(".coffeePotLayer");
+    assert.match(potLayerRule, /position:\s*absolute\s*;/);
+    assert.match(potLayerRule, /z-index:\s*3\s*;/);
     assert.match(potLayerRule, /--coffee-pot-pour-stream-blend-mode:\s*normal\s*;/);
-    assert.match(potLayerRule, /brightness\(0\.92\)/);
+    assert.match(potLayerRule, /--coffee-pot-pour-highlight:\s*rgba\(255,\s*154,\s*52,\s*0\.88\)\s*;/);
+    assert.match(potLayerRule, /brightness\(1\.04\)/);
 
     const lightPotLayerRule = ruleForExactSelector(
       '.coffeePotLayer[data-coffee-pot-theme="light"]'
     );
-    assert.match(lightPotLayerRule, /--coffee-pot-pour-stream-blend-mode:\s*screen\s*;/);
-    assert.match(lightPotLayerRule, /saturate\(1\.18\)/);
+    assert.match(lightPotLayerRule, /--coffee-pot-pour-stream-blend-mode:\s*normal\s*;/);
+    assert.match(lightPotLayerRule, /saturate\(1\.08\)/);
+
+    const potDockRule = ruleForExactSelector(".coffeePotComposerDock");
+    assert.match(potDockRule, /left:\s*clamp\(18px,\s*2\.2vw,\s*30px\)\s*;/);
+    assert.match(
+      potDockRule,
+      /bottom:\s*calc\(100%\s*\+\s*clamp\(6px,\s*0\.7vw,\s*10px\)\)\s*;/
+    );
+
+    const globalComposerRule = ruleForExactSelector(".coffeeGlobalComposer");
+    assert.match(globalComposerRule, /position:\s*relative\s*;/);
 
     const potTrayRule = ruleForExactSelector(".coffeePotTray");
-    assert.match(potTrayRule, /left:\s*clamp\(18px,\s*2\.2vw,\s*30px\)\s*;/);
-    assert.match(potTrayRule, /bottom:\s*clamp\(18px,\s*2\.4vw,\s*34px\)\s*;/);
+    assert.match(potTrayRule, /position:\s*relative\s*;/);
     assert.match(potTrayRule, /width:\s*clamp\(54px,\s*6\.6vw,\s*84px\)\s*;/);
     assert.match(potTrayRule, /height:\s*clamp\(46px,\s*5\.4vw,\s*70px\)\s*;/);
 
@@ -1473,8 +1486,37 @@ describe("Coffee seat arrival CSS", () => {
     assert.match(potImageRule, /height:\s*116%\s*;/);
 
     const potDragRule = ruleForExactSelector(".coffeePotDrag");
+    assert.match(potDragRule, /position:\s*absolute\s*;/);
     assert.match(potDragRule, /--coffee-pot-drag-size:\s*clamp\(63px,\s*7\.65vw,\s*97px\)\s*;/);
     assert.doesNotMatch(css, /coffee-pot-composer-reserve/);
+    assert.doesNotMatch(pageSource, /stageRect:\s*DOMRect/);
+    assert.match(
+      pageSource,
+      /const dragPoint = coffeePotScenePointFromClient\(event\.clientX, event\.clientY\);[\s\S]*x:\s*dragPoint\.x,[\s\S]*y:\s*dragPoint\.y,/
+    );
+    assert.match(pageSource, /ref=\{coffeeTableSceneRef\}/);
+    assert.match(pageSource, /ref=\{coffeeCenterMessageRef\}/);
+    assert.match(pageSource, /coffeePotPointOutsideExclusion\(\{/);
+    assert.match(pageSource, /data-coffee-pot-drag-exclusion="center-text"/);
+    assert.match(pageSource, /data-coffee-pot-drag-exclusion="nameplate"/);
+    assert.match(
+      pageSource,
+      /querySelectorAll<HTMLElement>\('\[data-coffee-pot-drag-exclusion="nameplate"\]'\)/
+    );
+    assert.match(pageSource, /paddingPx:\s*28/);
+    assert.match(
+      pageSource,
+      /const coffeePotScenePointFromClient =[\s\S]*coffeeTableSceneRef\.current\?\.getBoundingClientRect\(\)[\s\S]*clientX - \(sceneRect\?\.left \?\? 0\)[\s\S]*clientY - \(sceneRect\?\.top \?\? 0\)/
+    );
+
+    const tableSceneIndex = pageSource.indexOf("ref={coffeeTableSceneRef}");
+    const potLayerIndex = pageSource.indexOf("className={styles.coffeePotLayer}");
+    const canvasPickerIndex = pageSource.indexOf("className={styles.coffeeCanvasPicker}");
+    assert.ok(tableSceneIndex >= 0 && potLayerIndex > tableSceneIndex);
+    assert.ok(canvasPickerIndex > potLayerIndex, "expected the dragged pot inside the table scene");
+
+    const coffeeSeatRule = ruleForExactSelector(".coffeeSeat");
+    assert.match(coffeeSeatRule, /z-index:\s*5\s*;/);
 
     const potPourFrameRule = ruleForExactSelector(".coffeePotPourStreamFrame");
     assert.match(
@@ -1485,6 +1527,19 @@ describe("Coffee seat arrival CSS", () => {
       potPourFrameRule,
       /filter:\s*var\(--coffee-pot-pour-stream-filter\)\s*;/
     );
+
+    const pourStreamRule = ruleForExactSelector(".coffeePotPourStream");
+    assert.match(pourStreamRule, /right:\s*6%\s*;/);
+
+    const pouringPotRule = ruleForExactSelector('.coffeePotDrag[data-pouring="true"]');
+    assert.match(pouringPotRule, /--coffee-pot-drag-rotate:\s*0deg\s*;/);
+
+    const pourCoreRule = ruleForExactSelector(".coffeePotPourStream::before");
+    assert.match(pourCoreRule, /--coffee-pot-pour-highlight/);
+    assert.match(pourCoreRule, /animation:\s*coffeePotPourCorePulse 520ms ease-in-out infinite alternate\s*;/);
+
+    const pourLandingRule = ruleForExactSelector(".coffeePotPourStream::after");
+    assert.match(pourLandingRule, /animation:\s*coffeePotPourLandingPulse 560ms ease-out infinite\s*;/);
 
     assert.match(pageSource, /COFFEE_POT_RETURN_MS/);
     assert.match(pageSource, /returning\?: boolean;/);

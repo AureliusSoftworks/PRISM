@@ -86,6 +86,7 @@ import {
   coffeeCupTopOffFrameIndexForPour,
   coffeeCupTopOffProgressAfterForPour,
   coffeePotPointerIsInsideTarget,
+  coffeePotPointOutsideExclusion,
   coffeePotFillFrameDelayMs,
   coffeePotPourFrameDelayMs,
   coffeePotPourFrameImageUrl,
@@ -6317,7 +6318,7 @@ function coffeePotPourStreamFrameStyle(
   activeFrameIndex: number
 ): React.CSSProperties {
   return {
-    "--coffee-pot-pour-frame-opacity": frameIndex === activeFrameIndex ? "1" : "0",
+    "--coffee-pot-pour-frame-opacity": frameIndex === activeFrameIndex ? "0.72" : "0",
   } as React.CSSProperties;
 }
 
@@ -6550,7 +6551,6 @@ interface CoffeeArrivalSeatTimers {
 
 interface CoffeePotDragRuntimeState {
   pointerId: number;
-  stageRect: DOMRect;
   completedBotIds: Set<string>;
 }
 
@@ -42636,6 +42636,8 @@ function HomeContent(): React.JSX.Element {
   const coffeeDevBotPanelRef = useRef<HTMLElement | null>(null);
   const coffeeDevPanelDragRef = useRef<CoffeeDevPanelDragState | null>(null);
   const coffeeStageRef = useRef<HTMLElement | null>(null);
+  const coffeeTableSceneRef = useRef<HTMLDivElement | null>(null);
+  const coffeeCenterMessageRef = useRef<HTMLDivElement | null>(null);
   const coffeeCupElementByBotIdRef = useRef<Map<string, HTMLDivElement>>(new Map());
   const coffeePotDragRuntimeRef = useRef<CoffeePotDragRuntimeState | null>(null);
   const coffeePotDragRef = useRef<CoffeePotDragState | null>(null);
@@ -81497,32 +81499,61 @@ function HomeContent(): React.JSX.Element {
       coffeeCupElementByBotIdRef.current.delete(botId);
     }
   };
+  const coffeePotScenePointFromClient = (
+    clientX: number,
+    clientY: number,
+    previousPoint?: { x: number; y: number } | null,
+    avoidCenterMessage = true
+  ): { x: number; y: number } => {
+    const sceneRect = coffeeTableSceneRef.current?.getBoundingClientRect();
+    const scenePoint = {
+      x: clientX - (sceneRect?.left ?? 0),
+      y: clientY - (sceneRect?.top ?? 0),
+    };
+    const centerMessageRect = coffeeCenterMessageRef.current?.getBoundingClientRect();
+    if (!avoidCenterMessage || !sceneRect) return scenePoint;
+    const exclusions: Array<{ rect: DOMRect; paddingPx?: number }> = [];
+    if (centerMessageRect) exclusions.push({ rect: centerMessageRect });
+    coffeeTableSceneRef.current
+      ?.querySelectorAll<HTMLElement>('[data-coffee-pot-drag-exclusion="nameplate"]')
+      .forEach((node) => exclusions.push({ rect: node.getBoundingClientRect(), paddingPx: 28 }));
+    return exclusions.reduce(
+      (point, exclusion) => coffeePotPointOutsideExclusion({
+        ...point,
+        previousX: previousPoint?.x,
+        previousY: previousPoint?.y,
+        paddingPx: exclusion.paddingPx,
+        rect: {
+          left: exclusion.rect.left - sceneRect.left,
+          right: exclusion.rect.right - sceneRect.left,
+          top: exclusion.rect.top - sceneRect.top,
+          bottom: exclusion.rect.bottom - sceneRect.top,
+        },
+      }),
+      scenePoint
+    );
+  };
   const startCoffeePotDrag = (event: React.PointerEvent<HTMLButtonElement>): void => {
     if (event.button !== 0 || coffeePotTopOffBusyBotIdRef.current) return;
-    const stage = coffeeStageRef.current;
-    if (!stage) return;
     event.preventDefault();
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
-    const stageRect = stage.getBoundingClientRect();
     const runtime: CoffeePotDragRuntimeState = {
       pointerId: event.pointerId,
-      stageRect,
       completedBotIds: new Set(),
     };
     coffeePotDragRuntimeRef.current = runtime;
-    const x = Math.max(0, Math.min(stageRect.width, event.clientX - stageRect.left));
-    const y = Math.max(0, Math.min(stageRect.height, event.clientY - stageRect.top));
     const target = coffeeCupTopOffTargetAtPoint(
       event.clientX,
       event.clientY,
       runtime.completedBotIds
     );
     clearCoffeeCupTopOffFillAnimation();
+    const dragPoint = coffeePotScenePointFromClient(event.clientX, event.clientY);
     const nextDrag = {
       pointerId: event.pointerId,
-      x,
-      y,
+      x: dragPoint.x,
+      y: dragPoint.y,
       pouringBotId: target?.botId ?? null,
       pourProgress: target?.progress ?? null,
       pourReady: false,
@@ -81534,9 +81565,6 @@ function HomeContent(): React.JSX.Element {
     const runtime = coffeePotDragRuntimeRef.current;
     if (!runtime || runtime.pointerId !== event.pointerId) return;
     event.preventDefault();
-    const { stageRect } = runtime;
-    const x = Math.max(0, Math.min(stageRect.width, event.clientX - stageRect.left));
-    const y = Math.max(0, Math.min(stageRect.height, event.clientY - stageRect.top));
     const target =
       coffeePotTopOffBusyBotIdRef.current == null
         ? coffeeCupTopOffTargetAtPoint(event.clientX, event.clientY, runtime.completedBotIds)
@@ -81555,10 +81583,11 @@ function HomeContent(): React.JSX.Element {
     ) {
       clearCoffeeCupTopOffFillAnimation();
     }
+    const dragPoint = coffeePotScenePointFromClient(event.clientX, event.clientY, current);
     const nextDrag = {
       pointerId: event.pointerId,
-      x,
-      y,
+      x: dragPoint.x,
+      y: dragPoint.y,
       ...targetState,
     };
     coffeePotDragRef.current = nextDrag;
@@ -81612,14 +81641,14 @@ function HomeContent(): React.JSX.Element {
       coffeePotTopOffBusyBotIdRef.current !== null ||
       (activeTopOffBotId !== null && runtime.completedBotIds.has(activeTopOffBotId));
     const trayRect = event.currentTarget.getBoundingClientRect();
-    const returnX = Math.max(
-      0,
-      Math.min(runtime.stageRect.width, trayRect.left - runtime.stageRect.left + trayRect.width / 2)
+    const returnPoint = coffeePotScenePointFromClient(
+      trayRect.left + trayRect.width / 2,
+      trayRect.top + trayRect.height / 2,
+      null,
+      false
     );
-    const returnY = Math.max(
-      0,
-      Math.min(runtime.stageRect.height, trayRect.top - runtime.stageRect.top + trayRect.height / 2)
-    );
+    const returnX = returnPoint.x;
+    const returnY = returnPoint.y;
     const prefersReducedMotion =
       typeof window !== "undefined" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -85646,7 +85675,7 @@ function HomeContent(): React.JSX.Element {
     };
     const coffeePotVisible =
       conversationActive &&
-      coffeeSessionPhase === "live" &&
+      (coffeeSessionPhase === "arriving" || coffeeSessionPhase === "live") &&
       !previewingSession &&
       !coffeeReplayActive;
     const coffeeCanvasPickerVisible =
@@ -85679,77 +85708,11 @@ function HomeContent(): React.JSX.Element {
                 : `${coffeeSelectedBotIds.length || coffeeActiveBotIds.length} / ${COFFEE_GROUP_MAX_SIZE_CLIENT} seats filled`}
             </div>
           </div>
-          {coffeePotVisible ? (
-            <div className={styles.coffeePotLayer} data-coffee-pot-theme={coffeePotAssetTheme}>
-              <button
-                type="button"
-                className={styles.coffeePotTray}
-                data-dragging={coffeePotDrag ? "true" : undefined}
-                disabled={coffeePotTopOffBusyBotId !== null && coffeePotDrag == null}
-                aria-label="Drag coffee pot or press Enter to refill the lowest mug"
-                title="Drag coffee pot"
-                onPointerDown={startCoffeePotDrag}
-                onPointerMove={moveCoffeePotDrag}
-                onPointerUp={finishCoffeePotDrag}
-                onPointerCancel={finishCoffeePotDrag}
-                onKeyDown={handleCoffeePotKeyDown}
-              >
-                <img src={coffeePotRestImageUrl(coffeePotAssetTheme)} alt="" draggable={false} />
-              </button>
-              {coffeePotDrag ? (
-                <div
-                  className={styles.coffeePotDrag}
-                  data-pour-target={coffeePotDrag.pouringBotId ? "true" : undefined}
-                  data-pouring={coffeePotDrag.pourReady ? "true" : undefined}
-                  data-returning={coffeePotDrag.returning ? "true" : undefined}
-                  aria-hidden="true"
-                  style={
-                    {
-                      "--coffee-pot-drag-x": `${coffeePotDrag.x}px`,
-                      "--coffee-pot-drag-y": `${coffeePotDrag.y}px`,
-                      "--coffee-pot-return-x": `${
-                        coffeePotDrag.returnX ?? coffeePotDrag.x
-                      }px`,
-                      "--coffee-pot-return-y": `${
-                        coffeePotDrag.returnY ?? coffeePotDrag.y
-                      }px`,
-                    } as React.CSSProperties
-                  }
-                >
-                  <img
-                    className={`${styles.coffeePotDragImage} ${styles.coffeePotDragImageRest}`}
-                    src={coffeePotRestImageUrl(coffeePotAssetTheme)}
-                    alt=""
-                    draggable={false}
-                  />
-                  <img
-                    className={`${styles.coffeePotDragImage} ${styles.coffeePotDragImagePour}`}
-                    src={coffeePotPourImageUrl(coffeePotAssetTheme)}
-                    alt=""
-                    draggable={false}
-                  />
-                  {coffeePotDrag.pourReady ? (
-                    <span className={styles.coffeePotPourStream} aria-hidden="true">
-                      {COFFEE_POT_POUR_FRAME_INDICES.map((frameIndex) => (
-                        <img
-                          key={frameIndex}
-                          className={styles.coffeePotPourStreamFrame}
-                          src={coffeePotPourFrameImageUrl(coffeePotAssetTheme, frameIndex)}
-                          alt=""
-                          draggable={false}
-                          style={coffeePotPourStreamFrameStyle(
-                            frameIndex,
-                            coffeePotPourFrameIndex
-                          )}
-                        />
-                      ))}
-                    </span>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-          <div className={styles.coffeeTableScene} data-coffee-table-scene="true">
+          <div
+            ref={coffeeTableSceneRef}
+            className={styles.coffeeTableScene}
+            data-coffee-table-scene="true"
+          >
           <div className={styles.coffeeTableGlow} aria-hidden="true" />
           <div className={styles.coffeeTableAsset} aria-hidden="true" />
           <div className={styles.coffeeTableDisk} aria-hidden="true" />
@@ -85932,7 +85895,9 @@ function HomeContent(): React.JSX.Element {
           <div className={styles.coffeeTableFocalColumn}>
             <div className={styles.coffeeTableFocalStack}>
               <div
+                ref={coffeeCenterMessageRef}
                 className={styles.coffeeCenterMessage}
+                data-coffee-pot-drag-exclusion="center-text"
                 data-empty={
                   !centerMessage && !visibleTableTypingBot && !userLineTyping
                     ? "true"
@@ -86756,7 +86721,10 @@ function HomeContent(): React.JSX.Element {
                         <BotGlyph name={seatGlyphName} size={30} strokeWidth={1.58} />
                       </span>
                     )}
-                    <div className={styles.coffeeSeatGlowText}>
+                    <div
+                      className={styles.coffeeSeatGlowText}
+                      data-coffee-pot-drag-exclusion="nameplate"
+                    >
                       <span>{bot.name}</span>
                     </div>
                   </div>
@@ -87087,6 +87055,59 @@ function HomeContent(): React.JSX.Element {
                 <code>{coffeeDevCopiedCoordinates.text.split("\n")[0]}</code>
               )}
             </aside>
+          ) : null}
+          {coffeePotVisible && coffeePotDrag ? (
+            <div className={styles.coffeePotLayer} data-coffee-pot-theme={coffeePotAssetTheme}>
+              <div
+                className={styles.coffeePotDrag}
+                data-pour-target={coffeePotDrag.pouringBotId ? "true" : undefined}
+                data-pouring={coffeePotDrag.pourReady ? "true" : undefined}
+                data-returning={coffeePotDrag.returning ? "true" : undefined}
+                aria-hidden="true"
+                style={
+                  {
+                    "--coffee-pot-drag-x": `${coffeePotDrag.x}px`,
+                    "--coffee-pot-drag-y": `${coffeePotDrag.y}px`,
+                    "--coffee-pot-return-x": `${
+                      coffeePotDrag.returnX ?? coffeePotDrag.x
+                    }px`,
+                    "--coffee-pot-return-y": `${
+                      coffeePotDrag.returnY ?? coffeePotDrag.y
+                    }px`,
+                  } as React.CSSProperties
+                }
+              >
+                <img
+                  className={`${styles.coffeePotDragImage} ${styles.coffeePotDragImageRest}`}
+                  src={coffeePotRestImageUrl(coffeePotAssetTheme)}
+                  alt=""
+                  draggable={false}
+                />
+                <img
+                  className={`${styles.coffeePotDragImage} ${styles.coffeePotDragImagePour}`}
+                  src={coffeePotPourImageUrl(coffeePotAssetTheme)}
+                  alt=""
+                  draggable={false}
+                />
+                {coffeePotDrag.pourReady ? (
+                  <span className={styles.coffeePotPourStream} aria-hidden="true">
+                    {COFFEE_POT_POUR_FRAME_INDICES.map((frameIndex) => (
+                      <img
+                        key={frameIndex}
+                        className={styles.coffeePotPourStreamFrame}
+                        src={coffeePotPourFrameImageUrl(coffeePotAssetTheme, frameIndex)}
+                        alt=""
+                        draggable={false}
+                        style={coffeePotPourStreamFrameStyle(
+                          frameIndex,
+                          coffeePotPourFrameIndex
+                        )}
+                      />
+                    ))}
+                  </span>
+                ) : null}
+              </div>
+            </div>
           ) : null}
           </div>
         </div>
@@ -87987,6 +88008,10 @@ function HomeContent(): React.JSX.Element {
       (coffeeSessionPhase === "live" ||
         coffeeSessionPhase === "topic" ||
         coffeeSessionPhase === "arriving");
+    const coffeePotComposerDockVisible =
+      conversationActive &&
+      (coffeeSessionPhase === "arriving" || coffeeSessionPhase === "live") &&
+      !coffeeReplayActive;
     const coffeeComposerWaitingForSeat =
       coffeeSessionPhase === "arriving" && !coffeeArrivalHasSeatedBot;
     const coffeeComposerInputDisabled =
@@ -88362,6 +88387,32 @@ function HomeContent(): React.JSX.Element {
                 onValueChange: updateCoffeeDraftFromComposer,
                 onFocus: () => {},
                 mentionBots: coffeeMentionBotPicks,
+                topContent: coffeePotComposerDockVisible ? (
+                  <div
+                    className={styles.coffeePotComposerDock}
+                    data-coffee-pot-theme={coffeePotAssetTheme}
+                  >
+                    <button
+                      type="button"
+                      className={styles.coffeePotTray}
+                      data-dragging={coffeePotDrag ? "true" : undefined}
+                      disabled={coffeePotTopOffBusyBotId !== null && coffeePotDrag == null}
+                      aria-label="Drag coffee pot or press Enter to refill the lowest mug"
+                      title="Drag coffee pot"
+                      onPointerDown={startCoffeePotDrag}
+                      onPointerMove={moveCoffeePotDrag}
+                      onPointerUp={finishCoffeePotDrag}
+                      onPointerCancel={finishCoffeePotDrag}
+                      onKeyDown={handleCoffeePotKeyDown}
+                    >
+                      <img
+                        src={coffeePotRestImageUrl(coffeePotAssetTheme)}
+                        alt=""
+                        draggable={false}
+                      />
+                    </button>
+                  </div>
+                ) : null,
                 status: coffeeComposerStatus ? (
                   <p className={styles.coffeeComposerStatus} role="status" aria-live="polite">
                     {coffeeComposerStatus}

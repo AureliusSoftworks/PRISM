@@ -7,10 +7,90 @@ export const COFFEE_POT_FILL_FRAME_MS = 180;
 export const COFFEE_POT_FILL_CLEAR_MS = 360;
 export const COFFEE_POT_RETURN_MS = 280;
 export const COFFEE_POT_TARGET_HIT_SLOP_PX = 18;
+export const COFFEE_POT_TEXT_FORCEFIELD_PADDING_PX = 64;
 export const COFFEE_POT_POUR_FRAME_INDICES = [0, 1, 2, 3, 4] as const;
 export const COFFEE_POT_ASSET_VERSION = "dark-refill-2026-07-02";
 export type CoffeePotAssetTheme = "light" | "dark";
 export type CoffeePotTargetRect = Pick<DOMRect, "left" | "right" | "top" | "bottom">;
+
+export function coffeePotPointOutsideExclusion(args: {
+  x: number;
+  y: number;
+  previousX?: number | null;
+  previousY?: number | null;
+  rect: CoffeePotTargetRect;
+  paddingPx?: number;
+}): { x: number; y: number; blocked: boolean } {
+  const padding = Math.max(0, args.paddingPx ?? COFFEE_POT_TEXT_FORCEFIELD_PADDING_PX);
+  const left = args.rect.left - padding;
+  const right = args.rect.right + padding;
+  const top = args.rect.top - padding;
+  const bottom = args.rect.bottom + padding;
+  const previousX = args.previousX;
+  const previousY = args.previousY;
+  const currentInsideVerticalSpan = args.y > top && args.y < bottom;
+  const currentInsideHorizontalSpan = args.x > left && args.x < right;
+  const previousInsideVerticalSpan =
+    typeof previousY === "number" && previousY > top && previousY < bottom;
+  const previousInsideHorizontalSpan =
+    typeof previousX === "number" && previousX > left && previousX < right;
+  if (
+    typeof previousX === "number" &&
+    previousX <= left &&
+    previousInsideVerticalSpan &&
+    args.x >= right &&
+    currentInsideVerticalSpan
+  ) {
+    return { x: left, y: args.y, blocked: true };
+  }
+  if (
+    typeof previousX === "number" &&
+    previousX >= right &&
+    previousInsideVerticalSpan &&
+    args.x <= left &&
+    currentInsideVerticalSpan
+  ) {
+    return { x: right, y: args.y, blocked: true };
+  }
+  if (
+    typeof previousY === "number" &&
+    previousY <= top &&
+    previousInsideHorizontalSpan &&
+    args.y >= bottom &&
+    currentInsideHorizontalSpan
+  ) {
+    return { x: args.x, y: top, blocked: true };
+  }
+  if (
+    typeof previousY === "number" &&
+    previousY >= bottom &&
+    previousInsideHorizontalSpan &&
+    args.y <= top &&
+    currentInsideHorizontalSpan
+  ) {
+    return { x: args.x, y: bottom, blocked: true };
+  }
+
+  const inside = currentInsideHorizontalSpan && currentInsideVerticalSpan;
+  if (!inside) return { x: args.x, y: args.y, blocked: false };
+
+  if (typeof previousX === "number" && Number.isFinite(previousX)) {
+    if (previousX <= left) return { x: left, y: args.y, blocked: true };
+    if (previousX >= right) return { x: right, y: args.y, blocked: true };
+  }
+  if (typeof previousY === "number" && Number.isFinite(previousY)) {
+    if (previousY <= top) return { x: args.x, y: top, blocked: true };
+    if (previousY >= bottom) return { x: args.x, y: bottom, blocked: true };
+  }
+
+  const nearest = [
+    { distance: args.x - left, x: left, y: args.y },
+    { distance: right - args.x, x: right, y: args.y },
+    { distance: args.y - top, x: args.x, y: top },
+    { distance: bottom - args.y, x: args.x, y: bottom },
+  ].reduce((best, candidate) => candidate.distance < best.distance ? candidate : best);
+  return { x: nearest.x, y: nearest.y, blocked: true };
+}
 
 function coffeePotAssetPrefix(theme: CoffeePotAssetTheme): "coffee_light" | "coffee" {
   return theme === "light" ? "coffee_light" : "coffee";
