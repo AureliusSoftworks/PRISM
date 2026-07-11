@@ -50,6 +50,15 @@ export function coffeePendingSubmittedUserLineVisible(args: {
   );
 }
 
+export function coffeeCenterFeedMessagesDuringPendingReveal<T extends { id: string }>(args: {
+  messages: readonly T[];
+  pendingMessageId?: string | null;
+  revealInProgress: boolean;
+}): T[] {
+  if (!args.revealInProgress || !args.pendingMessageId) return [...args.messages];
+  return args.messages.filter((message) => message.id !== args.pendingMessageId);
+}
+
 export function coffeeShouldIgnoreStaleTurnResponse(response: {
   stale?: boolean;
   speakerBotId?: string | null;

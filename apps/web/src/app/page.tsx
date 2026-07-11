@@ -113,6 +113,7 @@ import {
 import {
   coffeeArrivalAutoplayCanScheduleNow,
   coffeeArrivalAutoplayRetryDelayMs,
+  coffeeCenterFeedMessagesDuringPendingReveal,
   coffeeDraftChangeCountsAsTyping,
   coffeeDirectedMentionBotIds,
   coffeeGeneratedReplyRevealDeferralMs,
@@ -85059,12 +85060,17 @@ function HomeContent(): React.JSX.Element {
               coffeeSystemSynopsisIsDisplayable(message.content)
           )
         : [];
-    const centerFeedSourceMessages =
+    const unfilteredCenterFeedSourceMessages =
       coffeeSessionPhase === "finished" && !coffeeReplayActive
         ? synopsisMessages
         : coffeeReplayActive && messages.length > 0
           ? replayCompletedThreadMessages
           : messages;
+    const centerFeedSourceMessages = coffeeCenterFeedMessagesDuringPendingReveal({
+      messages: unfilteredCenterFeedSourceMessages,
+      pendingMessageId: pendingLatestMessage?.id,
+      revealInProgress: liveTableTypingBot !== null,
+    });
     const baseCenterFeedLines: CoffeeCenterFeedLine[] = centerFeedSourceMessages
       .filter((message): message is CoffeeConversationMessage => coffeeMessageHasTableText(message))
       .slice(-COFFEE_CENTER_FEED_MAX_LINES)
