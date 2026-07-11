@@ -3918,6 +3918,23 @@
   margin: -2px 0 0;
 }
 
+[data-settings-section="voice"] .settingsInlineToggle > span {
+  display: grid;
+  gap: 2px;
+}
+
+[data-settings-section="voice"] .settingsInlineToggle small,
+.settingsSectionHint {
+  color: var(--settings-section-quiet);
+  font-size: 12px;
+  font-weight: 520;
+  line-height: 1.45;
+}
+
+.settingsSectionHint {
+  margin: 0;
+}
+
 .settingsToggleStack {
   display: grid;
   gap: 8px;
@@ -60027,4 +60044,91 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     overflow: hidden;
     padding: 14px;
   }
+}
+.botVoiceEditor {
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--panel) 86%, var(--editor-bot-color) 14%);
+}
+
+.botVoiceEditorHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.botVoiceEditorHeader > div {
+  display: grid;
+  gap: 3px;
+}
+
+.botVoiceEditorHeader small,
+.botVoiceSlots small {
+  color: var(--muted);
+}
+
+.botVoiceEditorHeader button {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 7px 12px;
+  background: var(--bg);
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.botVoiceSlots {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.botVoiceSlots button {
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  min-width: 0;
+  padding: 9px 4px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg);
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.botVoiceSlots button[data-active="true"] {
+  border-color: var(--editor-bot-color);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--editor-bot-color) 22%, transparent);
+}
+
+.botVoiceSlots button > span {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--editor-bot-color) 18%, var(--panel));
+  font-weight: 700;
+}
+
+.botVoiceControls {
+  display: grid;
+  gap: 9px;
+}
+
+.botVoiceControls label {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) 42px;
+  align-items: center;
+  gap: 9px;
+  font-size: 12px;
+}
+
+.botVoiceControls output {
+  text-align: right;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }

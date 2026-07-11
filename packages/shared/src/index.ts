@@ -96,6 +96,25 @@ export {
 } from "./botProfile.js";
 
 export {
+  BOT_AUDIO_VOICE_IDS,
+  DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+  DEFAULT_ENGLISH_VOICE_ENGINE,
+  DEFAULT_VOICE_MODE,
+  isBotAudioVoiceId,
+  normalizeBotAudioVoiceControl,
+  normalizeBotAudioVoiceProfileV1,
+  normalizeEnglishVoiceEngine,
+  normalizeOptionalBotAudioVoiceProfileV1,
+  normalizeVoiceMode,
+  parseStoredBotAudioVoiceProfileV1,
+  serializeBotAudioVoiceProfileV1,
+  type BotAudioVoiceId,
+  type BotAudioVoiceProfileV1,
+  type EnglishVoiceEngine,
+  type VoiceMode,
+} from "./audioVoice.js";
+
+export {
   BOT_FACE_FONT_IDS,
   BOT_FACE_FONT_LABELS,
   BOT_FACE_GLYPH_ANIMATIONS,

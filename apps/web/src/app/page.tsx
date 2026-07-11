@@ -546,8 +546,28 @@ import {
   type UsageRecentEvent,
   type UsageResponse,
   coffeeCupStatusForProgress,
+  normalizeBotAudioVoiceProfileV1,
+  normalizeOptionalBotAudioVoiceProfileV1,
+  DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+  BOT_AUDIO_VOICE_IDS,
+  normalizeEnglishVoiceEngine,
+  normalizeVoiceMode,
+  type BotAudioVoiceProfileV1,
+  type BotAudioVoiceId,
+  type EnglishVoiceEngine,
+  type VoiceMode,
 } from "@localai/shared";
 import { PRISM_APP_VERSION } from "../prismAppVersion";
+import {
+  enqueueBottishVoice,
+  prepareBottishVoice,
+  stopBottishVoice,
+} from "./bottishVoice";
+import {
+  enqueueEnglishVoice,
+  prepareEnglishVoice,
+  stopEnglishVoice,
+} from "./englishVoice";
 import {
   PRISM_APPLETS,
   prismAppletVersionLabel,
@@ -9273,6 +9293,10 @@ interface UserSettings {
   openAiApiKeySource: ApiKeySource;
   anthropicApiKeySource: ApiKeySource;
   elevenLabsApiKeySource: ApiKeySource;
+  voiceMode: VoiceMode;
+  englishVoiceEngine: EnglishVoiceEngine;
+  elevenLabsVoiceBank: Record<BotAudioVoiceId, string | null>;
+  elevenLabsVoiceModel: string;
   ollamaModel: string;
   /** Server OLLAMA_AUXILIARY_MODEL — Prism internal LLM when not overridden below. */
   ollamaAuxiliaryModel: string;
@@ -9343,6 +9367,15 @@ interface UserSettings {
   comfyUiWorkflows: ComfyUiWorkflowRegistration[];
   devMemoriesEnabled: boolean;
   devMemoriesText: string;
+}
+
+interface ElevenLabsVoiceCatalogEntry {
+  voiceId: string;
+  name: string;
+  category: string | null;
+  description: string | null;
+  previewUrl: string | null;
+  labels: Record<string, string>;
 }
 
 type ZenModeSettingsFields = Pick<
@@ -9816,8 +9849,85 @@ interface Bot {
   face_thinking_frames?: string | null;
   avatarDetails?: BotAvatarDetailsV1 | null;
   avatar_details_json?: unknown;
+  authored_audio_voice_profile?: BotAudioVoiceProfileV1 | string | null;
+  audio_voice_profile_override?: BotAudioVoiceProfileV1 | string | null;
   profile_picture_image_id?: string | null;
   chat_enabled: number;
+}
+
+function BotVoiceEditor({
+  profile,
+  onChange,
+}: {
+  profile: BotAudioVoiceProfileV1;
+  onChange: (profile: BotAudioVoiceProfileV1) => void;
+}): React.JSX.Element {
+  const updateControl = (
+    key: "pitch" | "warmth" | "pace" | "lilt",
+    value: number
+  ): void => {
+    onChange(normalizeBotAudioVoiceProfileV1({
+      ...profile,
+      [key]: value,
+    }));
+  };
+  return (
+    <div className={styles.botVoiceEditor}>
+      <div className={styles.botVoiceEditorHeader}>
+        <div>
+          <strong>Voice</strong>
+          <small>The same character is used for Bottish and English.</small>
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            stopBottishVoice();
+            void prepareBottishVoice().then(() =>
+              enqueueBottishVoice("Hello! This is how I sound in Prism.", profile, "bot-voice-preview")
+            );
+          }}
+        >
+          Preview
+        </button>
+      </div>
+      <div className={styles.botVoiceSlots} role="radiogroup" aria-label="Base voice">
+        {BOT_AUDIO_VOICE_IDS.map((voiceId, index) => (
+          <button
+            key={voiceId}
+            type="button"
+            role="radio"
+            aria-checked={profile.baseVoiceId === voiceId}
+            data-active={profile.baseVoiceId === voiceId ? "true" : undefined}
+            onClick={() => onChange({ ...profile, baseVoiceId: voiceId })}
+          >
+            <span>{index + 1}</span>
+            <small>Voice {index + 1}</small>
+          </button>
+        ))}
+      </div>
+      <div className={styles.botVoiceControls}>
+        {([
+          ["pitch", "Pitch"],
+          ["warmth", "Warmth"],
+          ["pace", "Pace"],
+          ["lilt", "Lilt"],
+        ] as const).map(([key, label]) => (
+          <label key={key}>
+            <span>{label}</span>
+            <input
+              type="range"
+              min={-1}
+              max={1}
+              step={0.05}
+              value={profile[key]}
+              onChange={(event) => updateControl(key, Number(event.currentTarget.value))}
+            />
+            <output>{profile[key].toFixed(2)}</output>
+          </label>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 type BotEditOriginalSnapshot = {
@@ -9858,6 +9968,7 @@ type BotEditOriginalSnapshot = {
   faceThinkingFrames: BotFaceThinkingFrames;
   avatarDetails: BotAvatarDetailsV1 | null;
   profilePictureImageId: string | null;
+  audioVoiceProfile: BotAudioVoiceProfileV1;
 };
 
 type BotAvatarDraftSnapshot = Pick<
@@ -10195,6 +10306,10 @@ function prepareBotArchivePayload(
       faceBlinkBar:
         normalizeBotFaceBlinkBar(parsedBot.faceBlinkBar) ?? DEFAULT_BOT_FACE_BLINK_BAR,
       faceThinkingFrames: normalizeBotFaceThinkingFrames(parsedBot.faceThinkingFrames),
+      authoredAudioVoiceProfile: normalizeBotAudioVoiceProfileV1(parsedBot.authoredAudioVoiceProfile),
+      audioVoiceProfileOverride: normalizeOptionalBotAudioVoiceProfileV1(
+        parsedBot.audioVoiceProfileOverride
+      ),
       exportHash: importedBotHash,
     },
     memories: parsed.memories,
@@ -34004,6 +34119,11 @@ function HomeContent(): React.JSX.Element {
     new Map()
   );
   const [settings, setSettings] = useState<UserSettings | null>(null);
+  const [voicePlaybackNotice, setVoicePlaybackNotice] = useState<string | null>(null);
+  const [elevenLabsVoiceCatalog, setElevenLabsVoiceCatalog] = useState<
+    ElevenLabsVoiceCatalogEntry[]
+  >([]);
+  const [elevenLabsVoiceCatalogLoading, setElevenLabsVoiceCatalogLoading] = useState(false);
   const [zenAutonomyScheduleTick, setZenAutonomyScheduleTick] = useState(0);
   const zenAutonomyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const zenAutonomyScheduleFrameRef = useRef<number | null>(null);
@@ -34786,6 +34906,239 @@ function HomeContent(): React.JSX.Element {
     botContextLongPressRef.current = null;
   }, []);
   const [bots, setBots] = useState<Bot[]>([]);
+  const voiceConversationIdRef = useRef<string | null>(null);
+  const voiceSeenAssistantMessageIdsRef = useRef<Set<string>>(new Set());
+  const voiceAwaitingReplyRef = useRef(false);
+  const voiceSynthesisAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (!detail) {
+      voiceConversationIdRef.current = null;
+      voiceSeenAssistantMessageIdsRef.current = new Set();
+      voiceSynthesisAbortRef.current?.abort();
+      voiceSynthesisAbortRef.current = null;
+      stopBottishVoice();
+      stopEnglishVoice();
+      return;
+    }
+
+    const assistantMessages = detail.messages.filter(
+      (message): message is Message => message.role === "assistant" && Boolean(message.id)
+    );
+    const conversationChanged = voiceConversationIdRef.current !== detail.id;
+    if (conversationChanged) {
+      voiceConversationIdRef.current = detail.id;
+      voiceSynthesisAbortRef.current?.abort();
+      stopBottishVoice();
+      stopEnglishVoice();
+      if (!voiceAwaitingReplyRef.current) {
+        voiceSeenAssistantMessageIdsRef.current = new Set(
+          assistantMessages.map((message) => message.id)
+        );
+        return;
+      }
+      voiceSeenAssistantMessageIdsRef.current = new Set(
+        assistantMessages.slice(0, -1).map((message) => message.id)
+      );
+    }
+
+    const unseen = assistantMessages.filter(
+      (message) => !voiceSeenAssistantMessageIdsRef.current.has(message.id)
+    );
+    for (const message of unseen) {
+      voiceSeenAssistantMessageIdsRef.current.add(message.id);
+    }
+    if (unseen.length === 0) return;
+
+    voiceAwaitingReplyRef.current = false;
+    if (!settings || settings.voiceMode === "mute") {
+      stopBottishVoice();
+      stopEnglishVoice();
+      return;
+    }
+
+    const controller = new AbortController();
+    voiceSynthesisAbortRef.current?.abort();
+    voiceSynthesisAbortRef.current = controller;
+    void (async () => {
+      try {
+        if (settings.voiceMode === "bottish") await prepareBottishVoice();
+        else await prepareEnglishVoice();
+        for (const message of unseen) {
+          if (controller.signal.aborted) return;
+          const messageBot = resolveMessageBotIdentity(
+            message,
+            bots,
+            detail.lastBotId ?? detail.botId
+          );
+          const profile =
+            normalizeOptionalBotAudioVoiceProfileV1(
+              messageBot?.audio_voice_profile_override
+            ) ??
+            normalizeBotAudioVoiceProfileV1(
+              messageBot?.authored_audio_voice_profile ??
+                DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1
+            );
+          if (settings.voiceMode === "bottish") {
+            const response = await api<{
+              synthesis: {
+                text: string;
+                profile: BotAudioVoiceProfileV1;
+              };
+            }>("/api/voices/synthesize", {
+              method: "POST",
+              signal: controller.signal,
+              body: JSON.stringify({
+                messageId: message.id,
+                mode: "bottish",
+                engine: "builtin",
+                profile,
+              }),
+            });
+            if (controller.signal.aborted) return;
+            await enqueueBottishVoice(
+              response.synthesis.text,
+              response.synthesis.profile,
+              message.id
+            );
+          } else {
+            const response = await fetch(
+              new URL("/api/voices/synthesize", window.location.origin),
+              {
+                method: "POST",
+                credentials: "include",
+                signal: controller.signal,
+                headers: {
+                  "content-type": "application/json",
+                  ...authHeadersForFetch(),
+                },
+                body: JSON.stringify({
+                  messageId: message.id,
+                  mode: "english",
+                  engine: settings.englishVoiceEngine,
+                  explicitOnlineContext: true,
+                  profile,
+                }),
+              }
+            );
+            if (!response.ok) {
+              const payload = await response.json().catch(() => null) as {
+                error?: string;
+                code?: string;
+                engineUsed?: string;
+              } | null;
+              if (payload?.engineUsed === "builtin-local-fallback") {
+                setVoicePlaybackNotice("Built-in voice used for LOCAL mode.");
+              }
+              throw new Error(payload?.error ?? payload?.code ?? `Voice playback failed (${response.status}).`);
+            }
+            const bytes = await response.arrayBuffer();
+            if (controller.signal.aborted) return;
+            const engineUsed = response.headers.get("x-prism-voice-engine");
+            if (engineUsed === "builtin-local-fallback") {
+              setVoicePlaybackNotice("Built-in voice used for LOCAL mode.");
+            } else if (engineUsed === "builtin-provider-fallback") {
+              setVoicePlaybackNotice("ElevenLabs was unavailable, so Prism used its built-in voice.");
+            } else {
+              setVoicePlaybackNotice(null);
+            }
+            await enqueueEnglishVoice(bytes, profile);
+          }
+        }
+      } catch (err) {
+        if (!isAbortLikeError(err)) {
+          const message = err instanceof Error ? err.message : "Voice playback failed.";
+          setVoicePlaybackNotice(message);
+          console.warn("[voices] playback failed", err);
+        }
+      } finally {
+        if (voiceSynthesisAbortRef.current === controller) {
+          voiceSynthesisAbortRef.current = null;
+        }
+      }
+    })();
+
+    return () => controller.abort();
+  }, [bots, detail, settings?.englishVoiceEngine, settings?.voiceMode]);
+
+  useEffect(() => {
+    if (settings?.voiceMode !== "mute") return;
+    voiceSynthesisAbortRef.current?.abort();
+    stopBottishVoice();
+    stopEnglishVoice();
+  }, [settings?.voiceMode]);
+
+  useEffect(() => () => {
+    voiceSynthesisAbortRef.current?.abort();
+    stopBottishVoice();
+    stopEnglishVoice();
+  }, []);
+
+  async function replayAssistantMessageVoice(message: Message): Promise<void> {
+    if (!settings || settings.voiceMode === "mute" || !detail) return;
+    const messageBot = resolveMessageBotIdentity(
+      message,
+      bots,
+      detail.lastBotId ?? detail.botId
+    );
+    const profile =
+      normalizeOptionalBotAudioVoiceProfileV1(messageBot?.audio_voice_profile_override) ??
+      normalizeBotAudioVoiceProfileV1(messageBot?.authored_audio_voice_profile);
+    const controller = new AbortController();
+    voiceSynthesisAbortRef.current?.abort();
+    voiceSynthesisAbortRef.current = controller;
+    stopBottishVoice();
+    stopEnglishVoice();
+    try {
+      if (settings.voiceMode === "bottish") {
+        await prepareBottishVoice();
+        const response = await api<{
+          synthesis: { text: string; profile: BotAudioVoiceProfileV1 };
+        }>("/api/voices/synthesize", {
+          method: "POST",
+          signal: controller.signal,
+          body: JSON.stringify({
+            messageId: message.id,
+            mode: "bottish",
+            engine: "builtin",
+            profile,
+          }),
+        });
+        await enqueueBottishVoice(response.synthesis.text, response.synthesis.profile, message.id);
+        return;
+      }
+      await prepareEnglishVoice();
+      const response = await fetch(new URL("/api/voices/synthesize", window.location.origin), {
+        method: "POST",
+        credentials: "include",
+        signal: controller.signal,
+        headers: { "content-type": "application/json", ...authHeadersForFetch() },
+        body: JSON.stringify({
+          messageId: message.id,
+          mode: "english",
+          engine: settings.englishVoiceEngine,
+          explicitOnlineContext: true,
+          profile,
+        }),
+      });
+      if (!response.ok) throw new Error(`Voice playback failed (${response.status}).`);
+      const engineUsed = response.headers.get("x-prism-voice-engine");
+      setVoicePlaybackNotice(
+        engineUsed === "builtin-local-fallback"
+          ? "Built-in voice used for LOCAL mode."
+          : engineUsed === "builtin-provider-fallback"
+            ? "ElevenLabs was unavailable, so Prism used its built-in voice."
+            : null
+      );
+      await enqueueEnglishVoice(await response.arrayBuffer(), profile);
+    } catch (err) {
+      if (!isAbortLikeError(err)) {
+        setVoicePlaybackNotice(err instanceof Error ? err.message : "Voice playback failed.");
+      }
+    } finally {
+      if (voiceSynthesisAbortRef.current === controller) voiceSynthesisAbortRef.current = null;
+    }
+  }
   const botLibraryGroupsCanPruneRef = useRef(false);
   const marketplaceGlyphRepairAttemptedRef = useRef<Set<string>>(new Set());
   const [botLibraryGroups, setBotLibraryGroups] = useState<BotLibraryGroup[]>(() => [
@@ -35495,6 +35848,8 @@ function HomeContent(): React.JSX.Element {
   const [newBotRepetitionPenalty, setNewBotRepetitionPenalty] = useState(
     BOT_REPETITION_PENALTY_DEFAULT
   );
+  const [newBotAudioVoiceProfile, setNewBotAudioVoiceProfile] =
+    useState<BotAudioVoiceProfileV1>(DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1);
   // Lazy initializers so the very first render already picks a random seed
   // without re-randomizing on every re-render.
   const [newBotColor, setNewBotColor] = useState<string>(() => randomHex());
@@ -43295,6 +43650,9 @@ function HomeContent(): React.JSX.Element {
     useState<Array<string | null>>(() => emptyCoffeeSeatBotIds());
   const [coffeeConversation, setCoffeeConversation] =
     useState<CoffeeConversationState | null>(null);
+  const coffeeVoiceConversationIdRef = useRef<string | null>(null);
+  const coffeeVoiceSeenMessageIdsRef = useRef<Set<string>>(new Set());
+  const coffeeVoicePlaybackBusyRef = useRef(false);
   const [coffeeSelectedSessionId, setCoffeeSelectedSessionId] = useState<string | null>(null);
   const [coffeeGroups, setCoffeeGroups] = useState<CoffeeGroupState[]>([]);
   const [coffeeSelectedGroupId, setCoffeeSelectedGroupId] = useState<string | null>(null);
@@ -43598,6 +43956,99 @@ function HomeContent(): React.JSX.Element {
     coffeeSessionPhaseRef.current = phase;
     setCoffeeSessionPhase(phase);
   };
+  useEffect(() => {
+    if (!coffeeConversation) {
+      coffeeVoiceConversationIdRef.current = null;
+      coffeeVoiceSeenMessageIdsRef.current = new Set();
+      coffeeVoicePlaybackBusyRef.current = false;
+      return;
+    }
+    const assistantMessages = coffeeConversation.messages.filter(
+      (message) => message.role === "assistant"
+    );
+    if (coffeeVoiceConversationIdRef.current !== coffeeConversation.id) {
+      coffeeVoiceConversationIdRef.current = coffeeConversation.id;
+      const shouldSpeakLatest =
+        (coffeeSessionPhase === "live" || coffeeSessionPhase === "arriving") &&
+        assistantMessages.length > 0;
+      coffeeVoiceSeenMessageIdsRef.current = new Set(
+        (shouldSpeakLatest ? assistantMessages.slice(0, -1) : assistantMessages).map(
+          (message) => message.id
+        )
+      );
+    }
+    const unseen = assistantMessages.filter(
+      (message) => !coffeeVoiceSeenMessageIdsRef.current.has(message.id)
+    );
+    unseen.forEach((message) => coffeeVoiceSeenMessageIdsRef.current.add(message.id));
+    if (unseen.length === 0 || !settings || settings.voiceMode === "mute") return;
+
+    const controller = new AbortController();
+    voiceSynthesisAbortRef.current?.abort();
+    voiceSynthesisAbortRef.current = controller;
+    coffeeVoicePlaybackBusyRef.current = true;
+    void (async () => {
+      try {
+        if (settings.voiceMode === "bottish") await prepareBottishVoice();
+        else await prepareEnglishVoice();
+        for (const message of unseen) {
+          if (controller.signal.aborted) return;
+          const bot = message.botId ? bots.find((candidate) => candidate.id === message.botId) : null;
+          const profile =
+            normalizeOptionalBotAudioVoiceProfileV1(bot?.audio_voice_profile_override) ??
+            normalizeBotAudioVoiceProfileV1(bot?.authored_audio_voice_profile);
+          if (settings.voiceMode === "bottish") {
+            const response = await api<{
+              synthesis: { text: string; profile: BotAudioVoiceProfileV1 };
+            }>("/api/voices/synthesize", {
+              method: "POST",
+              signal: controller.signal,
+              body: JSON.stringify({
+                messageId: message.id,
+                mode: "bottish",
+                engine: "builtin",
+                profile,
+              }),
+            });
+            await enqueueBottishVoice(response.synthesis.text, response.synthesis.profile, message.id);
+          } else {
+            const response = await fetch(new URL("/api/voices/synthesize", window.location.origin), {
+              method: "POST",
+              credentials: "include",
+              signal: controller.signal,
+              headers: { "content-type": "application/json", ...authHeadersForFetch() },
+              body: JSON.stringify({
+                messageId: message.id,
+                mode: "english",
+                engine: settings.englishVoiceEngine,
+                explicitOnlineContext: true,
+                profile,
+              }),
+            });
+            if (!response.ok) throw new Error(`Voice playback failed (${response.status}).`);
+            const engineUsed = response.headers.get("x-prism-voice-engine");
+            if (engineUsed === "builtin-local-fallback") {
+              setVoicePlaybackNotice("Built-in voice used for LOCAL mode.");
+            } else if (engineUsed === "builtin-provider-fallback") {
+              setVoicePlaybackNotice("ElevenLabs was unavailable, so Prism used its built-in voice.");
+            }
+            await enqueueEnglishVoice(await response.arrayBuffer(), profile);
+          }
+        }
+      } catch (err) {
+        if (!isAbortLikeError(err)) {
+          setVoicePlaybackNotice(err instanceof Error ? err.message : "Coffee voice playback failed.");
+        }
+      } finally {
+        coffeeVoicePlaybackBusyRef.current = false;
+        if (voiceSynthesisAbortRef.current === controller) voiceSynthesisAbortRef.current = null;
+      }
+    })();
+    return () => {
+      controller.abort();
+      coffeeVoicePlaybackBusyRef.current = false;
+    };
+  }, [bots, coffeeConversation, coffeeSessionPhase, settings?.englishVoiceEngine, settings?.voiceMode]);
   /** Scenario for arrival animation — held while the user picks a starter topic. */
   const [coffeePendingArrivalScenario, setCoffeePendingArrivalScenario] =
     useState<CoffeeArrivalScenario>("user-first");
@@ -48734,6 +49185,20 @@ function HomeContent(): React.JSX.Element {
         ? d.settings.hiddenComfyUiWorkflowIds
         : [],
       ...keySettings,
+      voiceMode: normalizeVoiceMode(d.settings.voiceMode),
+      englishVoiceEngine: normalizeEnglishVoiceEngine(d.settings.englishVoiceEngine),
+      elevenLabsVoiceBank: Object.fromEntries(
+        BOT_AUDIO_VOICE_IDS.map((voiceId) => [
+          voiceId,
+          typeof d.settings.elevenLabsVoiceBank?.[voiceId] === "string"
+            ? d.settings.elevenLabsVoiceBank[voiceId]
+            : null,
+        ])
+      ) as Record<BotAudioVoiceId, string | null>,
+      elevenLabsVoiceModel:
+        typeof d.settings.elevenLabsVoiceModel === "string"
+          ? d.settings.elevenLabsVoiceModel
+          : "",
       secondaryOllamaHost: secondaryHost,
       comfyUiHost,
       preferredLocalModel:
@@ -49985,6 +50450,7 @@ function HomeContent(): React.JSX.Element {
     setNewBotTopP(BOT_TOP_P_DEFAULT);
     setNewBotTopK(BOT_TOP_K_DEFAULT);
     setNewBotRepetitionPenalty(BOT_REPETITION_PENALTY_DEFAULT);
+    setNewBotAudioVoiceProfile(DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1);
     setNewBotColor(randomHex());
     setNewBotGlyph(randomBotGlyph());
     setColorWheelOpen(false);
@@ -52915,6 +53381,16 @@ function HomeContent(): React.JSX.Element {
       // Every new send starts from the compact active-turn view again.
       hardResetChatArchiveStateForConversation(archiveConversationId);
     }
+    voiceAwaitingReplyRef.current = !isZenAutonomy && !isZenLiveActionInterrupt;
+    voiceSynthesisAbortRef.current?.abort();
+    stopBottishVoice();
+    stopEnglishVoice();
+    if (settings?.voiceMode !== "mute") {
+      void (settings?.voiceMode === "bottish"
+        ? prepareBottishVoice()
+        : prepareEnglishVoice()
+      ).catch(() => undefined);
+    }
     const chatRequestController = new AbortController();
     if (!isZenAutonomy) {
       pendingReplyAbortControllerRef.current = chatRequestController;
@@ -53560,6 +54036,7 @@ function HomeContent(): React.JSX.Element {
         }
       }
     } catch (err) {
+      voiceAwaitingReplyRef.current = false;
       const stillViewingRequest = requestConversationId
         ? selectedIdRef.current === requestConversationId ||
           detailIdRef.current === requestConversationId
@@ -57229,6 +57706,71 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
+  async function saveVoiceSettings(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!settings) return;
+    const payload = {
+      voiceMode: normalizeVoiceMode(settings.voiceMode),
+      englishVoiceEngine: normalizeEnglishVoiceEngine(settings.englishVoiceEngine),
+      elevenLabsVoiceBank: settings.elevenLabsVoiceBank,
+      elevenLabsVoiceModel: settings.elevenLabsVoiceModel,
+    };
+    setBusy(true);
+    setPanelError(null);
+    setPanelNotice(null);
+    try {
+      await api("/api/settings", {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      });
+      await refreshSettings();
+      if (payload.voiceMode === "mute") stopBottishVoice();
+      setPanelNotice("Voice settings saved.");
+    } catch (err) {
+      setPanelError(err instanceof Error ? err.message : "Voice settings failed to save.");
+      await refreshSettings();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function previewBottishVoice(): Promise<void> {
+    setPanelError(null);
+    try {
+      await prepareBottishVoice();
+      stopBottishVoice();
+      await enqueueBottishVoice(
+        "Hello! This is how a Prism bot sounds in Bottish.",
+        DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+        "settings-bottish-preview"
+      );
+    } catch (err) {
+      setPanelError(err instanceof Error ? err.message : "Could not preview Bottish.");
+    }
+  }
+
+  async function loadElevenLabsVoiceCatalog(): Promise<void> {
+    setElevenLabsVoiceCatalogLoading(true);
+    setPanelError(null);
+    try {
+      const response = await api<{ voices: ElevenLabsVoiceCatalogEntry[] }>(
+        "/api/voices/elevenlabs"
+      );
+      setElevenLabsVoiceCatalog(response.voices);
+      setPanelNotice(
+        response.voices.length > 0
+          ? `Loaded ${response.voices.length} ElevenLabs voices.`
+          : "No ElevenLabs voices were available for this account."
+      );
+    } catch (err) {
+      setPanelError(
+        err instanceof Error ? err.message : "Could not load ElevenLabs voices."
+      );
+    } finally {
+      setElevenLabsVoiceCatalogLoading(false);
+    }
+  }
+
   async function saveSettings(
     e: React.FormEvent<HTMLFormElement>,
     options: { closeHostsModalOnSuccess?: boolean } = {}
@@ -58689,6 +59231,10 @@ function HomeContent(): React.JSX.Element {
         onlineEnabled: bot.online_enabled === 1,
         flirtEnabled: bot.flirt_enabled === 1,
         chatEnabled: bot.chat_enabled === 1,
+        authoredAudioVoiceProfile: normalizeBotAudioVoiceProfileV1(bot.authored_audio_voice_profile),
+        audioVoiceProfileOverride: normalizeOptionalBotAudioVoiceProfileV1(
+          bot.audio_voice_profile_override
+        ),
       },
       profile,
       systemPrompt: visiblePrompt,
@@ -59770,13 +60316,17 @@ function HomeContent(): React.JSX.Element {
     if (archive.importedBotHash !== prepared.entry.botHash) {
       throw new Error(`${prepared.entry.name} marketplace update has the wrong bot hash.`);
     }
+    // Marketplace bundles may author a new portable voice profile, but the
+    // installed bot's account-local override is a user's choice and must win.
+    const { audioVoiceProfileOverride: _preservedUserOverride, ...marketplacePatch } =
+      archive.body;
     const updated = await api<{ bot?: { id?: string } }>(
       `/api/bots/${encodeURIComponent(botId)}`,
       {
         method: "PATCH",
         // Marketplace profile/config is authoritative. Keep the existing bot
         // row so conversations, library groups, and user memories survive.
-        body: JSON.stringify(archive.body),
+        body: JSON.stringify(marketplacePatch),
       }
     );
     if (!updated.bot?.id) {
@@ -63249,6 +63799,7 @@ function HomeContent(): React.JSX.Element {
     setNewBotTopP(BOT_TOP_P_DEFAULT);
     setNewBotTopK(BOT_TOP_K_DEFAULT);
     setNewBotRepetitionPenalty(BOT_REPETITION_PENALTY_DEFAULT);
+    setNewBotAudioVoiceProfile(DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1);
     createBotAppearanceTouchedRef.current = false;
     setNewBotColor(randomHex(
       bots.map((bot) => bot.color?.trim() ?? "").filter((hex) => hex.length > 0)
@@ -63489,6 +64040,7 @@ function HomeContent(): React.JSX.Element {
       faceThinkingFrames: seededFaceThinkingFrames,
       avatarDetails: null,
       profilePictureImageId: null,
+      audioVoiceProfile: DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
     };
     setBotPanelView("defaultCustomize");
     setBotAvatarCustomizerOpen(true);
@@ -63607,6 +64159,7 @@ function HomeContent(): React.JSX.Element {
           faceBlinkBar: newBotFaceBlinkBar,
           faceThinkingFrames: newBotFaceThinkingFrames,
           avatarDetails: newBotAvatarDetails,
+          authoredAudioVoiceProfile: newBotAudioVoiceProfile,
         }),
       });
       createdBotId = created.bot?.id ?? null;
@@ -63799,6 +64352,9 @@ function HomeContent(): React.JSX.Element {
           faceBlinkBar: faceStyle.blinkBar,
           faceThinkingFrames: faceStyle.thinkingFrames,
           avatarDetails: resolveBotAvatarDetails(bot),
+          authoredAudioVoiceProfile:
+            normalizeOptionalBotAudioVoiceProfileV1(bot.audio_voice_profile_override) ??
+            normalizeBotAudioVoiceProfileV1(bot.authored_audio_voice_profile),
         }),
       });
       await refreshBots();
@@ -63880,6 +64436,7 @@ function HomeContent(): React.JSX.Element {
           faceBlinkBar: newBotFaceBlinkBar,
           faceThinkingFrames: newBotFaceThinkingFrames,
           avatarDetails: newBotAvatarDetails,
+          authoredAudioVoiceProfile: newBotAudioVoiceProfile,
         }),
       });
       setNewBotName(copiedName);
@@ -63934,6 +64491,7 @@ function HomeContent(): React.JSX.Element {
         faceThinkingFrames: newBotFaceThinkingFrames,
         avatarDetails: newBotAvatarDetails,
         profilePictureImageId: null,
+        audioVoiceProfile: newBotAudioVoiceProfile,
       };
       if (result.bot?.id) {
         setEditingBotId(result.bot.id);
@@ -65073,6 +65631,9 @@ function HomeContent(): React.JSX.Element {
     const seededFaceStyle = resolveBotFaceStyleForBot(bot);
     const seededAvatarDetails = resolveBotAvatarDetails(bot);
     const seededProfilePictureImageId = bot.profile_picture_image_id?.trim() || null;
+    const seededAudioVoiceProfile =
+      normalizeOptionalBotAudioVoiceProfileV1(bot.audio_voice_profile_override) ??
+      normalizeBotAudioVoiceProfileV1(bot.authored_audio_voice_profile);
     setNewBotName(seededName);
     setBotProfile(seededProfile);
     setNewBotSystemPrompt(rawStoredPrompt);
@@ -65088,6 +65649,7 @@ function HomeContent(): React.JSX.Element {
     setNewBotTopP(seededTopP);
     setNewBotTopK(seededTopK);
     setNewBotRepetitionPenalty(seededRepetitionPenalty);
+    setNewBotAudioVoiceProfile(seededAudioVoiceProfile);
     setNewBotColor(seededColor);
     setNewBotGlyph(seededGlyph);
     setNewBotFaceEyesFont(seededFaceStyle.eyesFont);
@@ -65151,6 +65713,7 @@ function HomeContent(): React.JSX.Element {
       faceThinkingFrames: seededFaceStyle.thinkingFrames,
       avatarDetails: seededAvatarDetails,
       profilePictureImageId: seededProfilePictureImageId,
+      audioVoiceProfile: seededAudioVoiceProfile,
     };
     setPanelError(null);
   }
@@ -66881,6 +67444,7 @@ function HomeContent(): React.JSX.Element {
         faceThinkingFrames: newBotFaceThinkingFrames,
         avatarDetails: null,
         profilePictureImageId: null,
+        audioVoiceProfile: DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
       };
       setSettings((previous) =>
         previous
@@ -67014,6 +67578,7 @@ function HomeContent(): React.JSX.Element {
         faceThinkingFrames: newBotFaceThinkingFrames,
         avatarDetails: newBotAvatarDetails,
         profilePictureImageId: newBotProfilePictureImageId,
+        audioVoiceProfile: newBotAudioVoiceProfile,
       },
       editOriginalRef.current
     );
@@ -67080,6 +67645,7 @@ function HomeContent(): React.JSX.Element {
         faceThinkingFrames: newBotFaceThinkingFrames,
         avatarDetails: newBotAvatarDetails,
         profilePictureImageId: newBotProfilePictureImageId,
+        audioVoiceProfile: newBotAudioVoiceProfile,
       };
       setEditingBotId(id);
       setColorWheelOpen(false);
@@ -68315,6 +68881,21 @@ function HomeContent(): React.JSX.Element {
               </button>
             </>
           )}
+          {!isUser && settings?.voiceMode !== "mute" ? (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                closeMessageContextOverlay();
+                void replayAssistantMessageVoice(msg);
+              }}
+            >
+              <span className={styles.contextMenuItemLabel}>
+                <span className={styles.contextMenuGlyph} aria-hidden="true">♪</span>
+                <span>Speak</span>
+              </span>
+            </button>
+          ) : null}
           {showFork && !isUser && (
             <button
               type="button"
@@ -76891,6 +77472,191 @@ function HomeContent(): React.JSX.Element {
             onClose={closePanel}
             renderScopeContent={(activeSettingsScope: SettingsLeafScope) => (
               <>
+          {settings && activeSettingsScope === "voice" && (
+            <form className={`${styles.form} ${styles.settingsWorkspace}`} onSubmit={saveVoiceSettings}>
+              <div className={styles.settingsSectionGrid}>
+                <section
+                  className={`${styles.settingsSection} ${styles.settingsSectionWide}`}
+                  data-settings-section="voice"
+                  aria-labelledby="voice-playback-settings-title"
+                >
+                  <header className={styles.settingsSectionHeader}>
+                    <div>
+                      <span className={styles.settingsEyebrow}>Playback</span>
+                      <h4 id="voice-playback-settings-title">Bot voices</h4>
+                    </div>
+                    <div className={styles.settingsSectionHeaderAside}>
+                      <small>One setting across Prism.</small>
+                      <PanelSectionInfo
+                        id="settings-section-info-voice-playback"
+                        label="About bot voices"
+                      >
+                        Mute stays silent. Bottish uses offline procedural chirps. English uses the selected speech engine.
+                      </PanelSectionInfo>
+                    </div>
+                  </header>
+                  <div className={styles.settingsFieldGrid} role="radiogroup" aria-label="Voice mode">
+                    {([
+                      ["mute", "Mute", "No bot speech."],
+                      ["bottish", "Bottish", "Offline beeps, boops, and chirps."],
+                      ["english", "English", "Spoken English through the selected engine."],
+                    ] as const).map(([value, label, description]) => (
+                      <label
+                        key={value}
+                        className={`${styles.checkbox} ${styles.settingsInlineToggle}`}
+                      >
+                        <input
+                          type="radio"
+                          name="voiceMode"
+                          value={value}
+                          checked={settings.voiceMode === value}
+                          onChange={() =>
+                            setSettings((previous) =>
+                              previous ? { ...previous, voiceMode: value } : previous
+                            )
+                          }
+                        />
+                        <span>
+                          <strong>{label}</strong>
+                          <small>{description}</small>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </section>
+
+                <section
+                  className={`${styles.settingsSection} ${styles.settingsSectionWide}`}
+                  aria-labelledby="voice-engine-settings-title"
+                >
+                  <header className={styles.settingsSectionHeader}>
+                    <div>
+                      <span className={styles.settingsEyebrow}>English</span>
+                      <h4 id="voice-engine-settings-title">Speech engine</h4>
+                    </div>
+                    <div className={styles.settingsSectionHeaderAside}>
+                      <small>LOCAL messages always stay offline.</small>
+                    </div>
+                  </header>
+                  <div className={styles.settingsFieldGrid}>
+                    <label className={styles.settingsFieldFull}>
+                      <span>Engine</span>
+                      <select
+                        value={settings.englishVoiceEngine}
+                        onChange={(event) => {
+                          const engine = normalizeEnglishVoiceEngine(event.currentTarget.value);
+                          setSettings((previous) =>
+                            previous ? { ...previous, englishVoiceEngine: engine } : previous
+                          );
+                        }}
+                      >
+                        <option value="builtin">Built-in (Offline)</option>
+                        <option value="elevenlabs">ElevenLabs (Online)</option>
+                      </select>
+                    </label>
+                    {settings.englishVoiceEngine === "elevenlabs" ? (
+                      <>
+                        <label className={styles.settingsFieldFull}>
+                          <span>ElevenLabs model</span>
+                          <select
+                            value={settings.elevenLabsVoiceModel || "eleven_flash_v2_5"}
+                            onChange={(event) =>
+                              setSettings((previous) =>
+                                previous
+                                  ? { ...previous, elevenLabsVoiceModel: event.currentTarget.value }
+                                  : previous
+                              )
+                            }
+                          >
+                            <option value="eleven_flash_v2_5">Flash v2.5</option>
+                            <option value="eleven_multilingual_v2">Multilingual v2</option>
+                            <option value="eleven_v3">Eleven v3</option>
+                          </select>
+                        </label>
+                        <div className={`${styles.settingsFieldFull} ${styles.settingsDockRow}`}>
+                          <span>
+                            Map the five portable Prism slots to voices from your account.
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => void loadElevenLabsVoiceCatalog()}
+                            disabled={elevenLabsVoiceCatalogLoading}
+                          >
+                            {elevenLabsVoiceCatalogLoading ? "Loading…" : "Load voices"}
+                          </button>
+                        </div>
+                        {elevenLabsVoiceCatalog.length > 0
+                          ? BOT_AUDIO_VOICE_IDS.map((voiceId, index) => {
+                              const selectedVoiceId = settings.elevenLabsVoiceBank[voiceId] ?? "";
+                              const selectedIsMissing = Boolean(
+                                selectedVoiceId &&
+                                !elevenLabsVoiceCatalog.some(
+                                  (entry) => entry.voiceId === selectedVoiceId
+                                )
+                              );
+                              return (
+                                <label key={voiceId}>
+                                  <span>{`Voice ${index + 1}`}</span>
+                                  <select
+                                    value={selectedVoiceId}
+                                    onChange={(event) => {
+                                      const providerVoiceId = event.currentTarget.value || null;
+                                      setSettings((previous) =>
+                                        previous
+                                          ? {
+                                              ...previous,
+                                              elevenLabsVoiceBank: {
+                                                ...previous.elevenLabsVoiceBank,
+                                                [voiceId]: providerVoiceId,
+                                              },
+                                            }
+                                          : previous
+                                      );
+                                    }}
+                                  >
+                                    <option value="">Choose a voice…</option>
+                                    {selectedIsMissing ? (
+                                      <option value={selectedVoiceId}>Saved voice (unavailable)</option>
+                                    ) : null}
+                                    {elevenLabsVoiceCatalog.map((entry) => (
+                                      <option key={entry.voiceId} value={entry.voiceId}>
+                                        {entry.name}
+                                        {entry.labels.accent ? ` · ${entry.labels.accent}` : ""}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                              );
+                            })
+                          : null}
+                        <p className={`${styles.settingsFieldFull} ${styles.settingsSectionHint}`}>
+                          Uses your ElevenLabs API key and credits. Spoken text leaves this device and may be retained by ElevenLabs. LOCAL turns never use this engine.
+                        </p>
+                      </>
+                    ) : (
+                      <p className={`${styles.settingsFieldFull} ${styles.settingsSectionHint}`}>
+                        Built-in English is packaged with Prism and never sends speech text online.
+                      </p>
+                    )}
+                  </div>
+                </section>
+              </div>
+
+              <div className={styles.settingsSaveDock}>
+                {panelNotice && <p className={styles.panelNotice} role="status">{panelNotice}</p>}
+                {voicePlaybackNotice && (
+                  <p className={styles.panelNotice} role="status">{voicePlaybackNotice}</p>
+                )}
+                {panelError && <p className={styles.error} role="alert">{panelError}</p>}
+                <button type="button" onClick={() => void previewBottishVoice()} disabled={busy}>
+                  Preview Bottish
+                </button>
+                <button type="submit" disabled={busy}>
+                  Save voice settings
+                </button>
+              </div>
+            </form>
+          )}
           {settings && activeSettingsScope === "coffee" && (
             <form
               className={`${styles.form} ${styles.settingsWorkspace}`}
@@ -78891,6 +79657,8 @@ function HomeContent(): React.JSX.Element {
                 editPristine.avatarDetails
               )
               || newBotProfilePictureImageId !== editPristine.profilePictureImageId
+              || JSON.stringify(newBotAudioVoiceProfile) !==
+                JSON.stringify(editPristine.audioVoiceProfile)
           : false;
         const avatarCustomizerSaving = busy;
 
@@ -80533,6 +81301,10 @@ function HomeContent(): React.JSX.Element {
 	                <div className={styles.botParameterHeader}>
 	                  <small>Plain-language choices for permissions and model routing.</small>
 	                </div>
+	                <BotVoiceEditor
+	                  profile={newBotAudioVoiceProfile}
+	                  onChange={setNewBotAudioVoiceProfile}
+	                />
 	                <div className={styles.botResponseSettingsGrid}>
 	                  <div className={styles.botResponseSettingsColumn}>
 	                    <div className={styles.botParameterToggleRow}>
@@ -83796,6 +84568,10 @@ function HomeContent(): React.JSX.Element {
       coffeeLoopTimerRef.current = null;
       coffeeLoopDeadlineMsRef.current = null;
       if (coffeeAutoplayPausedRef.current || coffeeDevModeEnabledRef.current) return;
+      if (coffeeVoicePlaybackBusyRef.current) {
+        scheduleCoffeeLoopTimer(startAutonomousTurn, 240);
+        return;
+      }
       const liveRhythm = coffeeTurnRhythmStateRef.current;
       if (coffeeDraftRef.current.trim().length > 0) {
         setCoffeeTurnRhythmState("playerComposing");
@@ -85209,6 +85985,8 @@ function HomeContent(): React.JSX.Element {
     const liveDraft = coffeeComposerRichRef.current?.getValue() ?? coffeeDraft;
     const trimmed = liveDraft.trim();
     if (!trimmed) return;
+    if (settings?.voiceMode === "bottish") void prepareBottishVoice();
+    if (settings?.voiceMode === "english") void prepareEnglishVoice();
     if (consumeDeprecatedRefreshCommand(trimmed, "coffee")) return;
     if (consumeGlobalClearCommand(trimmed, "coffee")) return;
     if (await consumeCoffeeNvmCommand(trimmed)) return;

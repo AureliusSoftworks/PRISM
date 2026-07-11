@@ -91,10 +91,34 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     comfyUiWorkflows: [],
     prismDefaultLlmModel: null,
     prismImageToolLlmModel: null,
+    voiceMode: "mute",
+    englishVoiceEngine: "builtin",
+    elevenLabsVoiceBank: "{}",
+    elevenLabsVoiceModel: null,
     primaryOllamaHost: "http://localhost:11434",
     ...overrides,
   };
 }
+
+describe("resolveNextSettings — voice foundation", () => {
+  it("keeps an account-wide mode, engine, and exactly five normalized ElevenLabs slots", () => {
+    const next = resolveNextSettings(
+      {
+        voiceMode: "english",
+        englishVoiceEngine: "elevenlabs",
+        elevenLabsVoiceBank: { "voice-1": "  voice_alpha  ", "voice-3": 17, extra: "ignore" },
+        elevenLabsVoiceModel: " eleven_multilingual_v2 ",
+      },
+      baseline()
+    );
+    assert.equal(next.voiceMode, "english");
+    assert.equal(next.englishVoiceEngine, "elevenlabs");
+    assert.deepEqual(next.elevenLabsVoiceBank, {
+      "voice-1": "voice_alpha", "voice-2": null, "voice-3": null, "voice-4": null, "voice-5": null,
+    });
+    assert.equal(next.elevenLabsVoiceModel, "eleven_multilingual_v2");
+  });
+});
 
 describe("resolveNextSettings — theme", () => {
   it("accepts 'light'", () => {

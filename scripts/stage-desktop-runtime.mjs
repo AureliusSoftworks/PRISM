@@ -207,6 +207,10 @@ async function main() {
 
   console.log("Staging API runtime...");
   await copyDir(apiDistSource, path.join(resolvedOutputDir, "apps", "api", "dist"));
+  await copyDir(
+    path.join(repoRoot, "apps", "api", "tts-models"),
+    path.join(resolvedOutputDir, "apps", "api", "tts-models")
+  );
   const stagedApiEntry = path.join(resolvedOutputDir, "apps", "api", "dist", "server.js");
   const apiEntryExists = await fileExists(stagedApiEntry);
   if (!apiEntryExists) {

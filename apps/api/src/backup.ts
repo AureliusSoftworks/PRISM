@@ -29,6 +29,15 @@ import {
   type BotFaceFontId,
   type BotFaceGlyphAnimation,
   type BotFaceThinkingFrames,
+  normalizeBotAudioVoiceProfileV1,
+  normalizeEnglishVoiceEngine,
+  normalizeOptionalBotAudioVoiceProfileV1,
+  normalizeVoiceMode,
+  parseStoredBotAudioVoiceProfileV1,
+  serializeBotAudioVoiceProfileV1,
+  type BotAudioVoiceProfileV1,
+  type EnglishVoiceEngine,
+  type VoiceMode,
 } from "@localai/shared";
 import {
   normalizeZenAskQuestionPatienceEnabled,
@@ -41,6 +50,8 @@ import {
   normalizeZenWallpaperOpacity,
   normalizeZenWallpaperStyleNotes,
   normalizeZenWallpaperTextMaskEnabled,
+  normalizeElevenLabsVoiceBank,
+  parseStoredElevenLabsVoiceBank,
 } from "./settings.ts";
 
 export interface BackupUserSettings {
@@ -85,6 +96,10 @@ export interface BackupUserSettings {
   openAiApiKey?: string;
   anthropicApiKey?: string;
   elevenLabsApiKey?: string;
+  voiceMode?: VoiceMode;
+  englishVoiceEngine?: EnglishVoiceEngine;
+  elevenLabsVoiceBank?: Record<string, string | null>;
+  elevenLabsVoiceModel?: string;
 }
 
 export interface BackupBotSnapshot {
@@ -128,6 +143,8 @@ export interface BackupBotSnapshot {
   visibility: "private" | "public";
   createdAt: string;
   updatedAt: string;
+  authoredAudioVoiceProfile?: BotAudioVoiceProfileV1;
+  audioVoiceProfileOverride?: BotAudioVoiceProfileV1 | null;
 }
 
 export interface BackupSnapshot {
@@ -246,6 +263,7 @@ export function exportUserSnapshot(
          elevenlabs_key_ciphertext,
          elevenlabs_key_iv,
          elevenlabs_key_tag
+         ,voice_mode, english_voice_engine, elevenlabs_voice_bank, elevenlabs_voice_model
        FROM users
        WHERE id = ?`
     )
@@ -297,7 +315,11 @@ export function exportUserSnapshot(
         anthropic_key_tag: string | null;
         elevenlabs_key_ciphertext: string | null;
         elevenlabs_key_iv: string | null;
-        elevenlabs_key_tag: string | null;
+         elevenlabs_key_tag: string | null;
+        voice_mode: string | null;
+        english_voice_engine: string | null;
+        elevenlabs_voice_bank: string | null;
+        elevenlabs_voice_model: string | null;
       }
     | undefined;
   const settings: BackupUserSettings | undefined = user
@@ -367,6 +389,10 @@ export function exportUserSnapshot(
           ) ?? DEFAULT_BOT_FACE_THINKING_FRAMES,
         prismDefaultLlmModel: user.prism_default_llm_model ?? "",
         prismImageToolLlmModel: user.prism_image_tool_llm_model ?? "",
+        voiceMode: normalizeVoiceMode(user.voice_mode),
+        englishVoiceEngine: normalizeEnglishVoiceEngine(user.english_voice_engine),
+        elevenLabsVoiceBank: parseStoredElevenLabsVoiceBank(user.elevenlabs_voice_bank),
+        elevenLabsVoiceModel: user.elevenlabs_voice_model ?? "",
         devMemoriesEnabled: user.dev_memories_enabled === 1,
         devMemoriesText: user.dev_memories_text ?? "",
         ...(user.openai_key_ciphertext && user.openai_key_iv && user.openai_key_tag
@@ -451,6 +477,8 @@ export function exportUserSnapshot(
          face_mouth_rotation_deg,
          face_blink_bar,
          face_thinking_frames,
+         authored_audio_voice_profile,
+         audio_voice_profile_override,
          chat_enabled,
          visibility,
          created_at,
@@ -497,6 +525,8 @@ export function exportUserSnapshot(
     face_mouth_rotation_deg: number | null;
     face_blink_bar: string | null;
     face_thinking_frames: string | null;
+    authored_audio_voice_profile: string | null;
+    audio_voice_profile_override: string | null;
     chat_enabled: number;
     visibility: string | null;
     created_at: string;
@@ -627,6 +657,12 @@ export function exportUserSnapshot(
         faceThinkingFrames:
           parseStoredBotFaceThinkingFrames(bot.face_thinking_frames) ??
           DEFAULT_BOT_FACE_THINKING_FRAMES,
+        authoredAudioVoiceProfile:
+          parseStoredBotAudioVoiceProfileV1(bot.authored_audio_voice_profile) ??
+          normalizeBotAudioVoiceProfileV1(undefined),
+        audioVoiceProfileOverride: parseStoredBotAudioVoiceProfileV1(
+          bot.audio_voice_profile_override
+        ),
         chatEnabled: bot.chat_enabled !== 0,
         visibility: bot.visibility === "public" ? "public" : "private",
         createdAt: bot.created_at,
@@ -832,7 +868,11 @@ function importUserSnapshotWithinTransaction(
         anthropic_key_tag = ?,
         elevenlabs_key_ciphertext = ?,
         elevenlabs_key_iv = ?,
-        elevenlabs_key_tag = ?
+        elevenlabs_key_tag = ?,
+        voice_mode = ?,
+        english_voice_engine = ?,
+        elevenlabs_voice_bank = ?,
+        elevenlabs_voice_model = ?
       WHERE id = ?
     `).run(
       settings.theme === "light" || settings.theme === "dark" ? settings.theme : "system",
@@ -898,6 +938,12 @@ function importUserSnapshotWithinTransaction(
       encryptedElevenLabsKey?.ciphertext ?? null,
       encryptedElevenLabsKey?.iv ?? null,
       encryptedElevenLabsKey?.tag ?? null,
+      normalizeVoiceMode(settings.voiceMode),
+      normalizeEnglishVoiceEngine(settings.englishVoiceEngine),
+      JSON.stringify(normalizeElevenLabsVoiceBank(settings.elevenLabsVoiceBank)),
+      typeof settings.elevenLabsVoiceModel === "string"
+        ? settings.elevenLabsVoiceModel.trim().slice(0, 160) || null
+        : null,
       userId
     );
   }
@@ -943,11 +989,13 @@ function importUserSnapshotWithinTransaction(
         face_mouth_rotation_deg,
         face_blink_bar,
         face_thinking_frames,
+        authored_audio_voice_profile,
+        audio_voice_profile_override,
         chat_enabled,
         visibility,
         created_at,
         updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const bot of snapshot.bots) {
       if (!bot || typeof bot.id !== "string" || bot.id.trim().length === 0) continue;
@@ -1005,6 +1053,10 @@ function importUserSnapshotWithinTransaction(
         normalizeBotFaceMouthRotationDeg(bot.faceMouthRotationDeg),
         normalizeBotFaceBlinkBar(bot.faceBlinkBar) ?? DEFAULT_BOT_FACE_BLINK_BAR,
         serializeBotFaceThinkingFrames(bot.faceThinkingFrames),
+        serializeBotAudioVoiceProfileV1(bot.authoredAudioVoiceProfile),
+        bot.audioVoiceProfileOverride === null || bot.audioVoiceProfileOverride === undefined
+          ? null
+          : serializeBotAudioVoiceProfileV1(bot.audioVoiceProfileOverride),
         bot.chatEnabled === false ? 0 : 1,
         bot.visibility === "public" ? "public" : "private",
         typeof bot.createdAt === "string" && bot.createdAt.trim().length > 0 ? bot.createdAt : now,
