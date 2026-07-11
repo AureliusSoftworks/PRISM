@@ -60,12 +60,24 @@ describe("bot marketplace static catalog", () => {
       if (originals.includes(entry.id)) {
         const index = originals.indexOf(entry.id);
         assert.deepEqual(profile, {
-          v: 1,
+          v: 2,
+          enabled: true,
           baseVoiceId: BOT_AUDIO_VOICE_IDS[index],
           pitch: 0,
           warmth: 0,
           pace: 0,
           lilt: 0,
+          bottishTone: 0.45,
+          volume: 1,
+          texture: {
+            preset: "clean",
+            amount: 0,
+            bandwidth: 1,
+            noise: 0,
+            instability: 0,
+            distortion: 0,
+            damage: 0,
+          },
         });
       }
     }
