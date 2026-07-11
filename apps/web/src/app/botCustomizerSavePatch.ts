@@ -1,5 +1,6 @@
 import {
   serializeBotAvatarDetailsV1,
+  type BotAudioVoiceProfileV1,
   type BotAvatarDetailsV1,
 } from "@localai/shared";
 
@@ -40,6 +41,7 @@ export interface BotCustomizerSavePristine {
   faceThinkingFrames: readonly string[];
   avatarDetails: BotAvatarDetailsV1 | null;
   profilePictureImageId: string | null;
+  audioVoiceProfile: BotAudioVoiceProfileV1;
 }
 
 export interface BotCustomizerSaveCurrent {
@@ -83,6 +85,7 @@ export interface BotCustomizerSaveCurrent {
   faceThinkingFrames: readonly string[];
   avatarDetails: BotAvatarDetailsV1 | null;
   profilePictureImageId: string | null;
+  audioVoiceProfile: BotAudioVoiceProfileV1;
 }
 
 export interface BotCustomizerSavePatch {
@@ -121,6 +124,7 @@ export interface BotCustomizerSavePatch {
   faceThinkingFrames?: readonly string[];
   avatarDetails?: BotAvatarDetailsV1 | null;
   profilePictureImageId?: string | null;
+  audioVoiceProfileOverride?: BotAudioVoiceProfileV1;
 }
 
 const normalizeColorForCompare = (hex: string | null | undefined): string =>
@@ -177,6 +181,7 @@ export function buildBotCustomizerSavePatch(
       faceThinkingFrames: current.faceThinkingFrames,
       avatarDetails: current.avatarDetails,
       profilePictureImageId: current.profilePictureImageId,
+      audioVoiceProfileOverride: current.audioVoiceProfile,
     };
   }
 
@@ -277,6 +282,9 @@ export function buildBotCustomizerSavePatch(
   }
   if (current.profilePictureImageId !== pristine.profilePictureImageId) {
     patch.profilePictureImageId = current.profilePictureImageId;
+  }
+  if (JSON.stringify(current.audioVoiceProfile) !== JSON.stringify(pristine.audioVoiceProfile)) {
+    patch.audioVoiceProfileOverride = current.audioVoiceProfile;
   }
 
   return patch;

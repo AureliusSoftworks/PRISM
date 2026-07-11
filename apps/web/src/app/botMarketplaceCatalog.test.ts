@@ -15,6 +15,8 @@ import {
   normalizeBotFaceMouthOffsetY,
   normalizeBotFaceMouthScale,
   normalizeBotFaceThinkingFrames,
+  normalizeOptionalBotAudioVoiceProfileV1,
+  BOT_AUDIO_VOICE_IDS,
   type BotFaceThinkingFrames,
 } from "@localai/shared";
 import {
@@ -44,6 +46,31 @@ function readBotBundle(filePath: string) {
 }
 
 describe("bot marketplace static catalog", () => {
+  it("ships a portable authored voice for every bot and neutral defaults for the originals", () => {
+    const manifest = normalizeBotMarketplaceManifest(
+      readJsonFile(path.join(publicRoot, "bot-marketplace/manifest.json"))
+    );
+    const originals = ["pia", "rowan", "iris", "sol", "mira"];
+    for (const entry of manifest.bots) {
+      const bundle = readBotBundle(path.join(publicRoot, entry.bundlePath));
+      const profile = normalizeOptionalBotAudioVoiceProfileV1(
+        bundle.botJson.bot.authoredAudioVoiceProfile
+      );
+      assert.notEqual(profile, null, `${entry.name} must include an authored voice`);
+      if (originals.includes(entry.id)) {
+        const index = originals.indexOf(entry.id);
+        assert.deepEqual(profile, {
+          v: 1,
+          baseVoiceId: BOT_AUDIO_VOICE_IDS[index],
+          pitch: 0,
+          warmth: 0,
+          pace: 0,
+          lilt: 0,
+        });
+      }
+    }
+  });
+
   it("ships valid avatar face settings in every bundle", () => {
     const manifest = normalizeBotMarketplaceManifest(
       readJsonFile(path.join(publicRoot, "bot-marketplace/manifest.json"))

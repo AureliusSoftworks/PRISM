@@ -132,6 +132,10 @@ export function restoreFactoryDefaultsInDatabase(
           elevenlabs_key_ciphertext = NULL,
           elevenlabs_key_iv = NULL,
           elevenlabs_key_tag = NULL,
+          voice_mode = 'mute',
+          english_voice_engine = 'builtin',
+          elevenlabs_voice_bank = '{}',
+          elevenlabs_voice_model = NULL,
           last_active_at = ?
         WHERE id = ?
       `

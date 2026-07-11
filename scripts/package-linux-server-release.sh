@@ -37,12 +37,15 @@ if [ ! -f "${RUNTIME}/apps/api/dist/server.js" ]; then
   exit 1
 fi
 cp -a "apps/api/package.json" "${RUNTIME}/apps/api/package.json"
+cp -a "apps/api/tts-models" "${RUNTIME}/apps/api/tts-models"
 cp -a "package.json" "${RUNTIME}/package.json"
 cp -a "package-lock.json" "${RUNTIME}/package-lock.json"
 
 cp -a "packages/config" "${RUNTIME}/node_modules/@localai/config"
 cp -a "packages/shared" "${RUNTIME}/node_modules/@localai/shared"
 cp -a "node_modules/dnssd-advertise" "${RUNTIME}/node_modules/dnssd-advertise"
+cp -a "node_modules/sherpa-onnx-node" "${RUNTIME}/node_modules/sherpa-onnx-node"
+cp -a "node_modules/sherpa-onnx-linux-x64" "${RUNTIME}/node_modules/sherpa-onnx-linux-x64"
 
 mkdir -p "${RUNTIME}/apps/web/.next/standalone"
 cp -a "apps/web/.next/standalone/." "${RUNTIME}/apps/web/.next/standalone/"

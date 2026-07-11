@@ -241,6 +241,10 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       elevenlabs_key_ciphertext TEXT,
       elevenlabs_key_iv TEXT,
       elevenlabs_key_tag TEXT,
+      voice_mode TEXT NOT NULL DEFAULT 'mute',
+      english_voice_engine TEXT NOT NULL DEFAULT 'builtin',
+      elevenlabs_voice_bank TEXT NOT NULL DEFAULT '{}',
+      elevenlabs_voice_model TEXT,
       created_at TEXT NOT NULL,
       last_active_at TEXT NOT NULL
     );
@@ -449,6 +453,8 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       face_mouth_rotation_deg REAL,
       face_blink_bar TEXT,
       face_thinking_frames TEXT,
+      authored_audio_voice_profile TEXT,
+      audio_voice_profile_override TEXT,
       profile_picture_image_id TEXT,
       chat_enabled INTEGER NOT NULL DEFAULT 1,
       online_enabled INTEGER NOT NULL DEFAULT 1,
@@ -702,6 +708,14 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   if (!hasLastActiveAt) {
     db.exec("ALTER TABLE users ADD COLUMN last_active_at TEXT;");
   }
+  const hasVoiceMode = userColumns.some((column) => column.name === "voice_mode");
+  if (!hasVoiceMode) db.exec("ALTER TABLE users ADD COLUMN voice_mode TEXT NOT NULL DEFAULT 'mute';");
+  const hasEnglishVoiceEngine = userColumns.some((column) => column.name === "english_voice_engine");
+  if (!hasEnglishVoiceEngine) db.exec("ALTER TABLE users ADD COLUMN english_voice_engine TEXT NOT NULL DEFAULT 'builtin';");
+  const hasElevenLabsVoiceBank = userColumns.some((column) => column.name === "elevenlabs_voice_bank");
+  if (!hasElevenLabsVoiceBank) db.exec("ALTER TABLE users ADD COLUMN elevenlabs_voice_bank TEXT NOT NULL DEFAULT '{}';");
+  const hasElevenLabsVoiceModel = userColumns.some((column) => column.name === "elevenlabs_voice_model");
+  if (!hasElevenLabsVoiceModel) db.exec("ALTER TABLE users ADD COLUMN elevenlabs_voice_model TEXT;");
   const hasProviderLocked = userColumns.some((column) => column.name === "provider_locked");
   if (!hasProviderLocked) {
     db.exec("ALTER TABLE users ADD COLUMN provider_locked INTEGER NOT NULL DEFAULT 0;");
@@ -1571,6 +1585,18 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   );
   if (!hasBotFlirtEnabledColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN flirt_enabled INTEGER NOT NULL DEFAULT 0;");
+  }
+  const hasAuthoredAudioVoiceProfileColumn = botColumns.some(
+    (column) => column.name === "authored_audio_voice_profile"
+  );
+  if (!hasAuthoredAudioVoiceProfileColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN authored_audio_voice_profile TEXT;");
+  }
+  const hasAudioVoiceProfileOverrideColumn = botColumns.some(
+    (column) => column.name === "audio_voice_profile_override"
+  );
+  if (!hasAudioVoiceProfileOverrideColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN audio_voice_profile_override TEXT;");
   }
   const hasBotLocalModelColumn = botColumns.some(
     (column) => column.name === "local_model"

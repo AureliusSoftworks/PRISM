@@ -7,6 +7,7 @@ import {
   type BotFaceGlyphAnimation,
   type BotFaceThinkingFrames,
   type BotProfileFields,
+  type BotAudioVoiceProfileV1,
 } from "@localai/shared";
 
 export const PRISM_BOT_ARCHIVE_SCHEMA = "prism-bot-export-v2";
@@ -57,6 +58,9 @@ export interface PrismBotArchiveJson {
     onlineEnabled?: boolean;
     flirtEnabled?: boolean;
     chatEnabled?: boolean;
+    /** Portable profile values only; account voice-bank mappings are never exported. */
+    authoredAudioVoiceProfile?: BotAudioVoiceProfileV1;
+    audioVoiceProfileOverride?: BotAudioVoiceProfileV1 | null;
   };
   profile?: BotProfileFields;
   systemPrompt?: string;
