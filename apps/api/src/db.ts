@@ -143,10 +143,15 @@ export function resolveDbPath(): string {
   return join(srcDir, "..", "data", "localai.db");
 }
 
-export function createDatabase(): DatabaseSync {
-  const dbPath = resolveDbPath();
-  mkdirSync(dirname(dbPath), { recursive: true });
-  const db = new DatabaseSync(dbPath);
+/**
+ * Apply the current production schema and migrations to an existing database.
+ *
+ * Keeping this separate from the file-opening wrapper lets tests use an
+ * in-memory SQLite database with the exact same schema and migration path as
+ * production. This prevents handwritten fixtures from drifting as columns are
+ * added to the application database.
+ */
+export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   db.exec(`
     PRAGMA foreign_keys = ON;
     PRAGMA journal_mode = WAL;
@@ -1700,8 +1705,23 @@ export function createDatabase(): DatabaseSync {
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_coffee_poll_votes_poll ON coffee_poll_votes (user_id, poll_id, updated_at DESC);"
   );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_conversations_user_updated ON conversations (user_id, updated_at DESC);"
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_messages_user_created ON messages (user_id, created_at DESC);"
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_memories_user_created ON memories (user_id, created_at DESC);"
+  );
 
   return db;
+}
+
+export function createDatabase(): DatabaseSync {
+  const dbPath = resolveDbPath();
+  mkdirSync(dirname(dbPath), { recursive: true });
+  return initializeDatabase(new DatabaseSync(dbPath));
 }
 
 export function mapUserProfile(row: DbUserRecord): UserProfile {

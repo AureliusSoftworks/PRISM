@@ -1,5 +1,6 @@
 import { utimesSync } from "node:fs";
-import { createServer } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import type { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -360,9 +361,11 @@ import {
 } from "./account-retention.ts";
 import { restoreFactoryDefaultsInDatabase } from "./account-reset.ts";
 import { deleteVector, deleteVectorsForUser } from "./qdrant.ts";
-const config = getAppConfig();
-const db = createDatabase();
-const masterKey = deriveMasterKey(config.encryptionMasterKey);
+let config: AppConfig = getAppConfig();
+let db: DatabaseSync = createDatabase();
+let masterKey = deriveMasterKey(config.encryptionMasterKey);
+let providerFactoryOverride: typeof selectProvider = selectProvider;
+let auxiliaryProviderFactoryOverride: typeof getAuxiliaryProvider = getAuxiliaryProvider;
 /**
  * Runtime view of local-network access. `boundLanActive` reflects what the
  * process actually bound at startup (immutable for the process lifetime);
@@ -1559,6 +1562,11 @@ function readBotFaceMouthRotationDegForStorage(value: unknown): number | null {
 }
 
 function readBotFaceBlinkBarForStorage(value: unknown): BotFaceBlinkBar | null {
+  // Keep the canonical blank-space default valid even if the API process is
+  // running against an older compiled shared package during dev watch reload.
+  if (typeof value === "string" && value.trim().length === 0) {
+    return DEFAULT_BOT_FACE_BLINK_BAR;
+  }
   return normalizeBotFaceBlinkBar(value);
 }
 
@@ -4550,6 +4558,8 @@ function buildRoutes(): RouteDefinition[] {
           userKey,
           {
             preferredProvider: effectiveProvider,
+            providerFactory: providerFactoryOverride,
+            auxiliaryProviderFactory: auxiliaryProviderFactoryOverride,
             autoMemory: !commandCenterPrompt && !incognito && Boolean(user.auto_memory),
             openAiApiKey,
             anthropicApiKey,
@@ -8252,12 +8262,24 @@ function buildRoutes(): RouteDefinition[] {
 
 const routes = buildRoutes();
 
-void purgeInactiveAccounts();
-setInterval(() => {
-  void purgeInactiveAccounts();
-}, INACTIVE_ACCOUNT_CLEANUP_INTERVAL_MS);
+export interface PrismRequestHandlerOptions {
+  /** Isolated database used by integration tests. */
+  db?: DatabaseSync;
+  /** Test config, typically with loopback ports and no provider credentials. */
+  config?: AppConfig;
+  /** Optional network stub for integration tests that reach provider boundaries. */
+  fetchImpl?: typeof fetch;
+  /** Optional deterministic primary-provider factory for integration/performance tests. */
+  providerFactory?: typeof selectProvider;
+  /** Optional deterministic auxiliary-provider factory for integration/performance tests. */
+  auxiliaryProviderFactory?: typeof getAuxiliaryProvider;
+}
 
-const server = createServer(async (req, res) => {
+async function dispatchRequest(
+  req: IncomingMessage,
+  res: ServerResponse<IncomingMessage>,
+  routeTable: RouteDefinition[]
+): Promise<void> {
   try {
     setCorsHeaders(res, req.headers.origin as string | undefined);
     if (req.method === "OPTIONS") {
@@ -8273,7 +8295,7 @@ const server = createServer(async (req, res) => {
       method === "POST" || method === "PATCH" || method === "DELETE"
         ? await readJsonBody(req)
         : {};
-    const matchingRoute = routes.find(
+    const matchingRoute = routeTable.find(
       (candidate) => candidate.method === method && candidate.pattern.test(pathname)
     );
     if (!matchingRoute) {
@@ -8300,10 +8322,51 @@ const server = createServer(async (req, res) => {
       error: message
     });
   }
-});
+}
+
+/**
+ * Build a request handler without starting a listener or background jobs.
+ * Production still uses the same route table below; tests can inject an
+ * in-memory database and provider-safe config while exercising real HTTP
+ * routing, auth, cookies, and persistence behavior.
+ */
+export function createPrismRequestHandler(
+  options: PrismRequestHandlerOptions = {}
+): (req: IncomingMessage, res: ServerResponse<IncomingMessage>) => Promise<void> {
+  return async (req, res) => {
+    const previousDb = db;
+    const previousConfig = config;
+    const previousMasterKey = masterKey;
+    const previousFetch = globalThis.fetch;
+    const previousProviderFactory = providerFactoryOverride;
+    const previousAuxiliaryProviderFactory = auxiliaryProviderFactoryOverride;
+    if (options.db) db = options.db;
+    if (options.config) {
+      config = options.config;
+      masterKey = deriveMasterKey(config.encryptionMasterKey);
+    }
+    if (options.fetchImpl) globalThis.fetch = options.fetchImpl;
+    if (options.providerFactory) providerFactoryOverride = options.providerFactory;
+    if (options.auxiliaryProviderFactory) {
+      auxiliaryProviderFactoryOverride = options.auxiliaryProviderFactory;
+    }
+    try {
+      await dispatchRequest(req, res, routes);
+    } finally {
+      db = previousDb;
+      config = previousConfig;
+      masterKey = previousMasterKey;
+      globalThis.fetch = previousFetch;
+      providerFactoryOverride = previousProviderFactory;
+      auxiliaryProviderFactoryOverride = previousAuxiliaryProviderFactory;
+    }
+  };
+}
 
 let stopDiscovery: StopDiscovery | null = null;
 let shuttingDown = false;
+
+let server: ReturnType<typeof createServer> | null = null;
 
 async function shutdown(signal: NodeJS.Signals): Promise<void> {
   if (shuttingDown) {
@@ -8318,28 +8381,40 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
   }
 
   await new Promise<void>((resolve) => {
+    if (!server) {
+      resolve();
+      return;
+    }
     server.close(() => resolve());
   });
 }
 
-process.on("SIGINT", () => {
-  void shutdown("SIGINT").then(() => process.exit(0));
-});
-process.on("SIGTERM", () => {
-  void shutdown("SIGTERM").then(() => process.exit(0));
-});
+if (process.env.PRISM_API_DISABLE_AUTOSTART !== "1") {
+  void purgeInactiveAccounts();
+  setInterval(() => {
+    void purgeInactiveAccounts();
+  }, INACTIVE_ACCOUNT_CLEANUP_INTERVAL_MS);
 
-const lanAccessEnabled = resolveLanAccessEnabled(config);
-const apiHost = resolveApiBindHost(lanAccessEnabled);
-networkState.desiredLanAccess = lanAccessEnabled;
-networkState.boundLanActive = apiHost === "0.0.0.0";
-const effectiveConfig: AppConfig = { ...config, lanAccessEnabled };
-server.listen(config.apiPort, apiHost, () => {
-  const reachability = networkState.boundLanActive
-    ? "reachable on your local network"
-    : "private to this machine";
-  console.log(
-    `API ready at http://${apiHost}:${config.apiPort} (${reachability})`
-  );
-  stopDiscovery = startPrismDiscovery(effectiveConfig);
-});
+  process.on("SIGINT", () => {
+    void shutdown("SIGINT").then(() => process.exit(0));
+  });
+  process.on("SIGTERM", () => {
+    void shutdown("SIGTERM").then(() => process.exit(0));
+  });
+
+  const lanAccessEnabled = resolveLanAccessEnabled(config);
+  const apiHost = resolveApiBindHost(lanAccessEnabled);
+  networkState.desiredLanAccess = lanAccessEnabled;
+  networkState.boundLanActive = apiHost === "0.0.0.0";
+  const effectiveConfig: AppConfig = { ...config, lanAccessEnabled };
+  server = createServer(createPrismRequestHandler());
+  server.listen(config.apiPort, apiHost, () => {
+    const reachability = networkState.boundLanActive
+      ? "reachable on your local network"
+      : "private to this machine";
+    console.log(
+      `API ready at http://${apiHost}:${config.apiPort} (${reachability})`
+    );
+    stopDiscovery = startPrismDiscovery(effectiveConfig);
+  });
+}

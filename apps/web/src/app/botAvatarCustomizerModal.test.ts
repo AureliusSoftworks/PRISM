@@ -159,6 +159,10 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.match(pageSource, /faceMouthRotationDeg,/);
   assert.match(pageSource, /faceBlinkBar,/);
   assert.match(pageSource, /faceThinkingFrames,/);
+  assert.match(
+    pageSource,
+    /if \(blinkBar === DEFAULT_BOT_FACE_BLINK_BAR\) return "Default";/,
+  );
   assert.match(pageSource, /botAvatarBlinkBarInputValue\(faceBlinkBar\)/);
   assert.match(pageSource, /botAvatarThinkingFramesFromPaste/);
   assert.match(cssSource, /\.botAvatarOverrideControl/);

@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   coffeeStarterTopicPoolFromByBotId,
+  formatCoffeeStarterTopicsClipboardText,
   normalizeCoffeeStarterTopicPool,
   pickCoffeeStarterTopicOptions,
 } from "./coffee-topic-suggestions.ts";
@@ -61,5 +62,49 @@ describe("coffee topic suggestions", () => {
       "Alpha",
       "Beta test",
     ]);
+  });
+
+  it("formats stored starter topics grouped by bot for clipboard diagnostics", () => {
+    const text = formatCoffeeStarterTopicsClipboardText({
+      groupName: "Coffee with SpongeBob and Patrick",
+      groupId: "group-1",
+      orderedBotIds: ["patrick", "spongebob"],
+      botNamesById: {
+        patrick: "Patrick",
+        spongebob: "SpongeBob",
+      },
+      topicsByBotId: {
+        spongebob: ["Relentless optimism on shift", "A spatula worth defending"],
+        patrick: ["Simple wisdom under pressure", "Being wrong with confidence"],
+      },
+    });
+
+    assert.equal(
+      text,
+      [
+        "PRISM Coffee Group starter topics",
+        "Group: Coffee with SpongeBob and Patrick",
+        "Group ID: group-1",
+        "",
+        "Patrick (patrick):",
+        "1. Simple wisdom under pressure",
+        "2. Being wrong with confidence",
+        "",
+        "SpongeBob (spongebob):",
+        "1. Relentless optimism on shift",
+        "2. A spatula worth defending",
+      ].join("\n")
+    );
+  });
+
+  it("returns no clipboard text when stored starter topics are empty", () => {
+    assert.equal(
+      formatCoffeeStarterTopicsClipboardText({
+        topicsByBotId: {
+          ada: [" ", ""],
+        },
+      }),
+      null
+    );
   });
 });

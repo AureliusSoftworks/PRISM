@@ -2586,6 +2586,10 @@ export async function refreshConversationTitle(
 
 export interface UserChatSettings {
   preferredProvider: ProviderName;
+  /** Test seam for deterministic HTTP integration and performance runs. */
+  providerFactory?: typeof selectProvider;
+  /** Test seam for Prism-owned auxiliary work such as summaries and cleanup. */
+  auxiliaryProviderFactory?: typeof getAuxiliaryProvider;
   autoMemory: boolean;
   openAiApiKey?: string;
   anthropicApiKey?: string;
@@ -6442,13 +6446,13 @@ export async function processChatMessage(
       skipPersonalFacts || commandCenterPromptTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn ? "skipped" : "enabled"
     }; summaries=${skipSummarization ? "skipped" : "enabled"}`
   );
-  const provider = selectProvider(
+  const provider = (settings.providerFactory ?? selectProvider)(
     effectiveProvider,
     settings.openAiApiKey,
     settings.secondaryOllamaHost,
     settings.anthropicApiKey
   );
-  const auxiliaryProvider = getAuxiliaryProvider(settings.prismDefaultLlmModel, {
+  const auxiliaryProvider = (settings.auxiliaryProviderFactory ?? getAuxiliaryProvider)(settings.prismDefaultLlmModel, {
     secondaryOllamaHost: settings.secondaryOllamaHost,
     experimentalDualOllama: settings.experimentalDualOllamaEnabled === true,
   });

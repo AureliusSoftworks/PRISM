@@ -43,6 +43,7 @@ import {
 describe("bot avatar face style", () => {
   it("offers an empty-space default blink and keeps the broken bar as a built-in", () => {
     assert.equal(DEFAULT_BOT_FACE_BLINK_BAR, " ");
+    assert.equal(resolveBotFaceStyle({}, null).blinkBar, " ");
     assert.deepEqual(Array.from(BOT_FACE_BLINK_BAR_VALUES), [
       "none",
       DEFAULT_BOT_FACE_BLINK_BAR,
@@ -220,8 +221,8 @@ describe("bot avatar face style", () => {
     assert.equal(normalizeBotFaceBlinkBar("::"), ":");
     assert.equal(normalizeBotFaceBlinkBar("😂"), null);
     assert.equal(normalizeBotFaceBlinkBar("none"), "none");
-    assert.equal(normalizeBotFaceBlinkBar(""), null);
-    assert.equal(normalizeBotFaceBlinkBar("   "), null);
+    assert.equal(normalizeBotFaceBlinkBar(""), DEFAULT_BOT_FACE_BLINK_BAR);
+    assert.equal(normalizeBotFaceBlinkBar("   "), DEFAULT_BOT_FACE_BLINK_BAR);
     assert.equal(normalizeBotFaceBlinkBar(null), null);
     assert.equal(
       resolveBotFaceStyle({ faceBlinkBar: null }, null).blinkBar,

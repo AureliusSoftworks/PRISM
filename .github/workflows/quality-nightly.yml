@@ -1,0 +1,44 @@
+name: PRISM extended quality
+
+on:
+  schedule:
+    - cron: "30 8 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  extended:
+    name: Performance and extended browser quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run deterministic performance probes
+        run: npm run test:perf
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run extended browser lane
+        run: npm run test:e2e
+
+      - name: Upload browser diagnostics
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: prism-extended-playwright-results
+          path: test-results
+          if-no-files-found: ignore

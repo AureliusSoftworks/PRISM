@@ -1,4 +1,29 @@
+import { normalizeBotFaceEyeCharacter } from "@localai/shared";
+
 export const BOT_MARKETPLACE_MANIFEST_PATH = "/bot-marketplace/manifest.json";
+
+/**
+ * Marketplace faces use one glyph for the eye row. Keep that glyph visibly
+ * pair-like after the plate face is rotated sideways; letters and single
+ * marks read as one eye and are not suitable for the marketplace roster.
+ */
+export const MARKETPLACE_SIDEWAYS_EYE_CHARACTERS = [
+  "=",
+  ":",
+  "≈",
+] as const;
+
+const marketplaceSidewaysEyeCharacterSet = new Set<string>(
+  MARKETPLACE_SIDEWAYS_EYE_CHARACTERS
+);
+
+export function marketplaceBotEyeCharacterIsSideways(value: unknown): boolean {
+  if (value === null || value === undefined) return true;
+  if (typeof value !== "string") return false;
+  if (!value.trim()) return true;
+  const normalized = normalizeBotFaceEyeCharacter(value);
+  return normalized !== null && marketplaceSidewaysEyeCharacterSet.has(normalized);
+}
 
 export type MarketplaceContentType = "bot" | "lens";
 export type BotMarketplaceEntryInstallState = "available" | "installed";
@@ -77,6 +102,24 @@ export interface BotMarketplaceManifest {
   bots: BotMarketplaceEntry[];
   lensCategories: MarketplaceLensCategory[];
   lenses: MarketplaceLensEntry[];
+}
+
+export type BotMarketplaceUpdateRevisions = Readonly<Record<string, string>>;
+
+export function marketplaceCatalogRevision(manifest: BotMarketplaceManifest): string {
+  return manifest.updatedAt?.trim() || `version:${manifest.version}`;
+}
+
+export function marketplaceEntryNeedsUpdate(
+  entry: BotMarketplaceEntry,
+  installedHashes: ReadonlySet<string>,
+  updatedRevisions: BotMarketplaceUpdateRevisions,
+  catalogRevision: string
+): boolean {
+  return (
+    installedHashes.has(entry.botHash) &&
+    updatedRevisions[entry.id] !== catalogRevision
+  );
 }
 
 export interface BotMarketplacePreparedBundle {
