@@ -33,6 +33,7 @@
     "eval-experimental-effort": "node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/experimental-effort.ts",
     "eval:effort-ladder": "node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/effort-ladder.ts",
     "eval-effort-ladder": "node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/effort-ladder.ts",
+    "cleanup:legacy-avatar-details": "node --experimental-strip-types scripts/cleanup-legacy-avatar-details.ts",
     "build": "npm run build -w packages/shared && npm run build -w packages/config && npm run build -w apps/api && npm run build -w apps/web",
     "lint": "npm run lint -w apps/api && npm run lint -w apps/web",
     "typecheck": "npm run typecheck -w packages/shared && npm run typecheck -w packages/config && npm run typecheck -w apps/api && npm run typecheck -w apps/web",

@@ -135,6 +135,12 @@ describe("createDatabase bot export hash migration", () => {
       assert.ok(columns.some((column) => column.name === "semantic_facets"));
       assert.ok(columns.some((column) => column.name === "semantic_facets_source_hash"));
       assert.ok(columns.some((column) => column.name === "semantic_facets_updated_at"));
+      assert.ok(columns.some((column) => column.name === "avatar_details_json"));
+      assert.equal(
+        userColumns.some((column) => column.name.includes("avatar_details")),
+        false,
+        "Avatar Details belongs to custom bots, not Default Prism settings"
+      );
       assert.ok(columns.some((column) => column.name === "face_eyes_font"));
       assert.ok(columns.some((column) => column.name === "face_eye_character"));
       assert.ok(columns.some((column) => column.name === "face_mouth_font"));

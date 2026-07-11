@@ -1,3 +1,8 @@
+import {
+  serializeBotAvatarDetailsV1,
+  type BotAvatarDetailsV1,
+} from "@localai/shared";
+
 export interface BotCustomizerSavePristine {
   name: string;
   prompt: string;
@@ -30,6 +35,7 @@ export interface BotCustomizerSavePristine {
   faceMouthRotationDeg: number;
   faceBlinkBar: string;
   faceThinkingFrames: readonly string[];
+  avatarDetails: BotAvatarDetailsV1 | null;
   profilePictureImageId: string | null;
 }
 
@@ -69,6 +75,7 @@ export interface BotCustomizerSaveCurrent {
   faceMouthRotationDeg: number;
   faceBlinkBar: string;
   faceThinkingFrames: readonly string[];
+  avatarDetails: BotAvatarDetailsV1 | null;
   profilePictureImageId: string | null;
 }
 
@@ -103,6 +110,7 @@ export interface BotCustomizerSavePatch {
   faceMouthRotationDeg?: number;
   faceBlinkBar?: string;
   faceThinkingFrames?: readonly string[];
+  avatarDetails?: BotAvatarDetailsV1 | null;
   profilePictureImageId?: string | null;
 }
 
@@ -115,6 +123,9 @@ const thinkingFramesEqual = (
 ): boolean =>
   left.length === right.length &&
   left.every((frame, index) => frame === right[index]);
+
+const avatarDetailsKey = (details: BotAvatarDetailsV1 | null): string =>
+  details === null ? "" : serializeBotAvatarDetailsV1(details);
 
 export function buildBotCustomizerSavePatch(
   current: BotCustomizerSaveCurrent,
@@ -152,6 +163,7 @@ export function buildBotCustomizerSavePatch(
       faceMouthRotationDeg: current.faceMouthRotationDeg,
       faceBlinkBar: current.faceBlinkBar,
       faceThinkingFrames: current.faceThinkingFrames,
+      avatarDetails: current.avatarDetails,
       profilePictureImageId: current.profilePictureImageId,
     };
   }
@@ -238,6 +250,9 @@ export function buildBotCustomizerSavePatch(
   }
   if (!thinkingFramesEqual(current.faceThinkingFrames, pristine.faceThinkingFrames)) {
     patch.faceThinkingFrames = current.faceThinkingFrames;
+  }
+  if (avatarDetailsKey(current.avatarDetails) !== avatarDetailsKey(pristine.avatarDetails)) {
+    patch.avatarDetails = current.avatarDetails;
   }
   if (current.profilePictureImageId !== pristine.profilePictureImageId) {
     patch.profilePictureImageId = current.profilePictureImageId;

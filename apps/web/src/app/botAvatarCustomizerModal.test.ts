@@ -359,7 +359,11 @@ test("avatar face edits autosave immediately to saved bots", () => {
   );
   assert.match(
     pageSource,
-    /const botAvatarAutoSaveFlushPromiseRef = useRef<Promise<boolean> \| null>\(null\);/,
+    /const botAvatarAutoSaveQueueRef = useRef<BotAvatarAutosaveQueue>\(new Map\(\)\);/,
+  );
+  assert.match(
+    pageSource,
+    /const botAvatarAutoSaveFlushPromisesRef = useRef<[\s\S]*Map<string, Promise<boolean>>[\s\S]*>\(new Map\(\)\);/,
   );
   assert.match(
     pageSource,
@@ -371,13 +375,14 @@ test("avatar face edits autosave immediately to saved bots", () => {
   );
   assert.match(
     pageSource,
-    /botAvatarAutoSaveQueuedPatchRef\.current = mergeBotAvatarAutosavePatch/,
+    /queueBotAvatarAutosavePatch\([\s\S]*botAvatarAutoSaveQueueRef\.current,[\s\S]*id,[\s\S]*normalizedPatch/,
   );
   assert.match(pageSource, /applyBotAvatarAutosavePatchToSnapshot/);
+  assert.match(pageSource, /updateOwnedBotAvatarSnapshot/);
   assert.match(pageSource, /setBotAvatarAutoSavingBotId\(id\);/);
   assert.match(
     pageSource,
-    /return botAvatarAutoSaveFlushPromiseRef\.current \?\? true;/,
+    /const existingFlush = botAvatarAutoSaveFlushPromisesRef\.current\.get\(id\);[\s\S]*if \(existingFlush\) return existingFlush;/,
   );
   assert.match(
     pageSource,
@@ -471,7 +476,7 @@ test("avatar and bot saves recover cleanly when the edit target no longer exists
   assert.match(pageSource, /setPanelError\("That bot is no longer available\. I refreshed the bot library\."\);/);
   assert.match(
     pageSource,
-    /botAvatarAutoSaveQueuedPatchRef\.current = \{\};[\s\S]*await recoverMissingBotEditTarget\(id\);/
+    /clearBotAvatarAutosaveQueue\(botAvatarAutoSaveQueueRef\.current, id\);[\s\S]*await recoverMissingBotEditTarget\(id\);/
   );
   assert.match(
     pageSource,
@@ -891,18 +896,18 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   );
   assert.match(
     pageSource,
-    /const BOT_AVATAR_CUSTOMIZER_TABS = \[\s*\{ value: "face", label: "Face" \},\s*\{ value: "eyes", label: "Eyes" \},\s*\{ value: "mouth", label: "Mouth" \},\s*\{ value: "motion", label: "Motion" \},\s*\{ value: "identity", label: "Identity" \}/,
+    /const BOT_AVATAR_CUSTOMIZER_TABS = \[\s*\{ value: "face", label: "Face" \},\s*\{ value: "eyes", label: "Eyes" \},\s*\{ value: "mouth", label: "Mouth" \},\s*\{ value: "details", label: "Details" \},\s*\{ value: "motion", label: "Motion" \},\s*\{ value: "identity", label: "Identity" \}/,
   );
   assert.match(pageSource, /const avatarControlTabsVisible = true;/);
   assert.match(
     pageSource,
-    /\(tab\) => identityControlsVisible \|\| tab\.value !== "identity"/,
+    /\(identityControlsVisible \|\| tab\.value !== "identity"\)/,
   );
   assert.match(
     pageSource,
-    /activeControlTab === "identity" \? \[\] : \[activeControlTab\]/,
+    /BOT_AVATAR_FACE_CONTROL_TABS\.includes\(/,
   );
-  assert.doesNotMatch(pageSource, /: BOT_AVATAR_FACE_CONTROL_TABS;/);
+  assert.match(pageSource, /const BOT_AVATAR_FACE_CONTROL_TABS = \[/);
   assert.match(
     pageSource,
     /\? "Face"\s*: activeTab === "eyes"\s*\? "Eyes"\s*: activeTab === "mouth"\s*\? "Mouth"\s*: "Motion"/,
@@ -911,10 +916,8 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   assert.match(pageSource, /Built-in style/);
   assert.match(pageSource, /Custom glyph/);
   assert.match(pageSource, /Blink and thinking animation/);
-  assert.match(
-    pageSource,
-    /type BotAvatarCustomizerTab = "identity" \| "face" \| "eyes" \| "mouth" \| "motion"/,
-  );
+  assert.match(pageSource, /type BotAvatarCustomizerTab =/);
+  assert.match(pageSource, /\| "details";/);
   assert.match(pageSource, /useState<BotAvatarCustomizerTab>\("face"\)/);
   assert.match(pageSource, /setActiveControlTab\("face"\)/);
   assert.match(pageSource, /aria-label=\{controlLabel\}/);
