@@ -1551,7 +1551,10 @@ describe("Coffee seat arrival CSS", () => {
       pageSource,
       /const coffeePotComposerDockVisible =[\s\S]*coffeeSessionPhase === "arriving"[\s\S]*coffeeSessionPhase === "live"[\s\S]*!coffeeReplayActive;/
     );
-    assert.match(pageSource, /topContent:\s*coffeePotComposerDockVisible\s*\?\s*\(/);
+    assert.match(
+      pageSource,
+      /topContent:\s*coffeePotComposerDockVisible\s*\|\|\s*coffeeShhVisible\s*\?\s*\(/
+    );
     assert.match(pageSource, /className=\{styles\.coffeePotComposerDock\}/);
     assert.match(pageSource, /const coffeePotAssetTheme: CoffeePotAssetTheme = resolvedTheme;/);
     assert.match(pageSource, /data-coffee-pot-theme=\{coffeePotAssetTheme\}/);

@@ -9773,9 +9773,10 @@
     grayscale(var(--zen-atmosphere-grayscale-amount));
   transform: translate3d(0, var(--zen-atmosphere-parallax-y, 0px), 0) scale(1.02);
   transition:
-    opacity 180ms linear,
+    opacity 220ms linear,
+    transform 420ms cubic-bezier(0.18, 0.72, 0.22, 1),
     filter var(--zen-atmosphere-color-transition-duration) cubic-bezier(0.18, 0.72, 0.22, 1);
-  will-change: opacity, filter;
+  will-change: opacity, transform;
 }
 
 .zenAtmosphereBackdrop img[data-zen-fallback-wallpaper="true"] {
@@ -10038,7 +10039,7 @@
     transparent 100%
   );
   transition: opacity 180ms linear;
-  will-change: opacity, backdrop-filter;
+  will-change: opacity;
 }
 
 .zenAtmosphereReadabilityOverlay[data-edge-mode="hard"] {
@@ -10436,15 +10437,18 @@
   --chat-elastic-offset-y: 0px;
   overflow-y: auto;
   overscroll-behavior-y: contain;
+  overflow-anchor: none;
   touch-action: pan-y;
-  scroll-behavior: smooth;
-  transform: translate3d(0, var(--chat-elastic-offset-y), 0);
+  /* One motion owner: Zen's follow controller animates programmatic movement,
+     while wheel/trackpad gestures stay fully native. */
+  scroll-behavior: auto;
   transition: transform 0.42s cubic-bezier(0.18, 0.98, 0.22, 1);
-  will-change: scroll-position, transform;
   padding-bottom: max(140px, calc(env(safe-area-inset-bottom) + 112px));
 }
 
 .messages[data-chat-ephemeral="true"][data-chat-elastic-pulling="true"] {
+  transform: translate3d(0, var(--chat-elastic-offset-y), 0);
+  will-change: transform;
   transition-duration: 80ms;
   transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -49923,6 +49927,90 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   pointer-events: none;
 }
 
+.coffeeComposerTools {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.coffeeShhControl {
+  position: absolute;
+  right: clamp(18px, 2.2vw, 30px);
+  bottom: calc(100% + clamp(8px, 0.8vw, 12px));
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  pointer-events: auto;
+}
+
+.coffeeShhButton,
+.coffeeShhMenuButton {
+  min-height: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(8, 8, 8, 0.82);
+  color: rgba(255, 255, 255, 0.88);
+  cursor: pointer;
+  backdrop-filter: blur(12px);
+}
+
+.coffeeShhButton {
+  min-width: 52px;
+  padding: 0 13px;
+  border-radius: 999px 0 0 999px;
+  font-weight: 720;
+}
+
+.coffeeShhMenuButton {
+  width: 30px;
+  padding: 0;
+  border-left: 0;
+  border-radius: 0 999px 999px 0;
+}
+
+.coffeeShhButton:hover,
+.coffeeShhMenuButton:hover {
+  background: rgba(36, 25, 25, 0.94);
+  border-color: rgba(255, 255, 255, 0.32);
+}
+
+.coffeeShhMenu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  width: 196px;
+  display: grid;
+  gap: 3px;
+  padding: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 10px;
+  background: rgba(7, 7, 7, 0.95);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(16px);
+}
+
+.coffeeShhMenu button {
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.84);
+  text-align: left;
+  cursor: pointer;
+}
+
+.coffeeShhMenu button:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.coffeeShhMenuGroup {
+  padding: 6px 9px 2px;
+  color: rgba(255, 255, 255, 0.44);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
 .coffeePotTray {
   position: relative;
   z-index: 1;
@@ -51309,6 +51397,14 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   word-break: break-word;
 }
 
+.coffeeTableTypingLine[data-coffee-emphasis="true"] .coffeeTypewriter {
+  display: inline-block;
+  transform: scale(1.045);
+  transform-origin: center bottom;
+  font-weight: 650;
+  transition: transform 220ms ease-out, font-weight 220ms ease-out;
+}
+
 .coffeeTypewriterCaret {
   display: inline-block;
   margin-left: 1px;
@@ -51316,6 +51412,12 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   color: rgba(255, 255, 255, 0.55);
   animation: coffeeTypewriterCaretBlink 0.95s step-end infinite;
   transform: translateY(-0.05em);
+}
+
+.coffeeTypewriterCaret:has([data-coffee-caret-holding="true"]) {
+  opacity: 0.62;
+  animation-duration: 1.45s;
+  animation-timing-function: ease-in-out;
 }
 
 @keyframes coffeeTypewriterCaretBlink {
@@ -60157,7 +60259,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .botVoiceEditorHeader small,
-.botVoiceSlots small {
+.botVoiceIdentityField small {
   color: var(--muted);
 }
 
@@ -60183,38 +60285,27 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   text-transform: uppercase;
 }
 
-.botVoiceSlots {
+.botVoiceIdentityField {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 7px;
 }
 
-.botVoiceSlots button {
-  display: grid;
-  justify-items: center;
-  gap: 3px;
+.botVoiceIdentityField label {
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 720;
+}
+
+.botVoiceIdentityField select {
+  width: 100%;
   min-width: 0;
-  padding: 9px 4px;
+  padding: 10px 34px 10px 11px;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 10px;
   background: var(--bg);
   color: var(--fg);
-  cursor: pointer;
-}
-
-.botVoiceSlots button[data-active="true"] {
-  border-color: var(--editor-bot-color);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--editor-bot-color) 22%, transparent);
-}
-
-.botVoiceSlots button > span {
-  display: grid;
-  place-items: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--editor-bot-color) 18%, var(--panel));
-  font-weight: 700;
+  font: inherit;
+  font-size: 12px;
 }
 
 .botVoiceControls {
