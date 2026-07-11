@@ -1,0 +1,24 @@
+.mask {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  transform: scaleX(var(--coffee-plate-emoji-face-scale-y, 1));
+  transform-origin: center;
+  opacity: 0.9;
+  mix-blend-mode: screen;
+  -webkit-mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-size: 100% 100%;
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: 100% 100%;
+  filter:
+    drop-shadow(0 0 1px currentColor)
+    drop-shadow(0 0 3px color-mix(in srgb, currentColor 54%, transparent));
+}

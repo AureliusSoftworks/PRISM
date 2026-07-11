@@ -1,0 +1,349 @@
+.editor {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  color: var(--fg);
+}
+
+.applyError {
+  margin: -8px 0 0;
+  color: #ff8f8f;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.header,
+.paintHeader,
+.footer,
+.coverage > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.header > div,
+.paintHeader > div {
+  display: grid;
+  gap: 2px;
+}
+
+.header strong,
+.paintHeader strong {
+  font-size: 13px;
+}
+
+.header small,
+.paintHeader small,
+.keyboardHelp,
+.coverage small,
+.footer > span {
+  color: var(--fg-muted);
+  font-size: 10px;
+}
+
+.clearAllButton,
+.historyActions button,
+.segmentedControl button,
+.brushSizes button,
+.stampOptions button,
+.cancelButton,
+.applyButton {
+  border: 1px solid color-mix(in srgb, var(--line) 84%, transparent);
+  background: color-mix(in srgb, var(--bg-surface) 86%, transparent);
+  color: var(--fg-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.clearAllButton {
+  min-height: 28px;
+  padding: 0 9px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.editor button:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+
+.editor button:focus-visible,
+.canvas:focus-visible,
+.editor input:focus-visible {
+  outline: 2px solid var(--editor-bot-color, var(--accent));
+  outline-offset: 2px;
+}
+
+.stampStack {
+  display: grid;
+  gap: 10px;
+}
+
+.stampGroup {
+  min-width: 0;
+  margin: 0;
+  padding: 9px;
+  border: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-deep) 52%, transparent);
+}
+
+.stampGroup legend {
+  padding: 0 5px;
+  color: var(--fg-muted);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.stampOptions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.stampOptions button {
+  min-height: 30px;
+  padding: 5px 6px;
+  border-radius: 7px;
+  font-size: 9px;
+  line-height: 1.15;
+}
+
+.stampOptions button[data-selected="true"],
+.segmentedControl button[data-selected="true"],
+.brushSizes button[data-selected="true"] {
+  border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 70%, var(--line));
+  background: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 16%, var(--bg-surface));
+  color: var(--fg);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 18%, transparent);
+}
+
+.stampAdjustments {
+  margin-top: 9px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.stampAdjustmentSet {
+  margin-top: 9px;
+  display: grid;
+  gap: 3px;
+}
+
+.stampAdjustmentSet > strong {
+  color: var(--fg-muted);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.stampAdjustmentSet .stampAdjustments {
+  margin-top: 0;
+}
+
+.stampAdjustments label {
+  display: grid;
+  gap: 5px;
+  color: var(--fg-muted);
+  font-size: 9px;
+}
+
+.stampAdjustments label > span {
+  display: flex;
+  justify-content: space-between;
+  gap: 4px;
+}
+
+.stampAdjustments strong {
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+
+.stampAdjustments input {
+  width: 100%;
+  accent-color: var(--editor-bot-color, var(--accent));
+}
+
+.paintSection {
+  display: grid;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-deep) 64%, transparent);
+}
+
+.historyActions,
+.paintTools,
+.segmentedControl,
+.brushSizes,
+.footer > div {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.historyActions button,
+.brushSizes button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+}
+
+.paintTools {
+  justify-content: space-between;
+}
+
+.segmentedControl button {
+  min-height: 28px;
+  padding: 0 8px;
+  border-radius: 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.brushSizes button {
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.canvasFrame {
+  --avatar-details-cell-size: calc(100% / 128);
+  position: relative;
+  width: min(100%, 320px);
+  aspect-ratio: 1;
+  margin: 0 auto;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 36%, var(--line));
+  border-radius: 9px;
+  background-color: #050608;
+  background-image:
+    linear-gradient(45deg, rgba(255, 255, 255, 0.035) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(255, 255, 255, 0.035) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(255, 255, 255, 0.035) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(255, 255, 255, 0.035) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+  box-shadow:
+    inset 0 0 28px rgba(0, 0, 0, 0.62),
+    0 0 18px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 8%, transparent);
+}
+
+.canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.keyboardCursor {
+  position: absolute;
+  left: calc(var(--avatar-details-cursor-x) * var(--avatar-details-cell-size));
+  top: calc(var(--avatar-details-cursor-y) * var(--avatar-details-cell-size));
+  width: calc(var(--avatar-details-cursor-size) * var(--avatar-details-cell-size));
+  height: calc(var(--avatar-details-cursor-size) * var(--avatar-details-cell-size));
+  transform: translate(-50%, -50%);
+  border: 1px solid #ffffff;
+  box-shadow: 0 0 0 1px #000000, 0 0 5px #ffffff;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.keyboardCursor[data-visible="true"] {
+  opacity: 1;
+}
+
+.keyboardHelp {
+  margin: 0;
+  line-height: 1.35;
+}
+
+.coverage {
+  display: grid;
+  gap: 4px;
+}
+
+.coverage span,
+.coverage strong {
+  font-size: 10px;
+}
+
+.coverage strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.coverage meter {
+  width: 100%;
+  height: 7px;
+  accent-color: var(--editor-bot-color, var(--accent));
+}
+
+.limitMessage {
+  color: #ffb27d;
+}
+
+.footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  padding: 9px 0 2px;
+  background: linear-gradient(180deg, transparent, var(--bg-surface) 30%);
+}
+
+.footer > span[data-dirty="true"] {
+  color: var(--editor-bot-color, var(--accent));
+}
+
+.cancelButton,
+.applyButton {
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.applyButton {
+  border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 72%, var(--line));
+  background: var(--editor-bot-color, var(--accent));
+  color: var(--editor-bot-ink, #071011);
+}
+
+@media (max-width: 760px) {
+  .stampOptions,
+  .stampAdjustments {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .paintTools {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .editor *,
+  .editor *::before,
+  .editor *::after {
+    scroll-behavior: auto !important;
+    transition: none !important;
+  }
+}

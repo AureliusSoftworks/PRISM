@@ -56,6 +56,17 @@ import {
   isAbortLikeError,
 } from "./authBootstrap";
 import { CoffeeSeatPlateEmoji } from "./CoffeeSeatPlateEmoji";
+import {
+  AvatarDetailsEditor,
+  type AvatarDetailsEditorHandle,
+} from "./AvatarDetailsEditor";
+import { AvatarDetailsMask } from "./AvatarDetailsMask";
+import {
+  avatarDetailsEqual,
+  avatarDetailsHasVisuals,
+  avatarDetailsKey,
+  normalizeAvatarDetails,
+} from "./avatar-details";
 import { coffeeCenterScrollIsAtBottom } from "./coffee-center-scroll";
 import {
   buildCoffeeCupVisualState,
@@ -288,8 +299,8 @@ import {
   upsertBotLibraryGroup,
 } from "./botLibraryGroupFilter";
 import {
+  canvasBotDirectoryIsInteractive,
   resolveCanvasBotMarqueeSelection,
-  resolveInactiveCanvasBotMarqueeSelection,
   type CanvasBotMarqueeSelectionMode,
 } from "./botCanvasMarqueeSelection";
 import {
@@ -450,6 +461,7 @@ import {
   normalizeBotFaceMouthScale,
   normalizeBotFaceThinkingFrames,
   parseStoredBotFaceThinkingFrames,
+  parseBotAvatarDetailsV1,
   randomBotFaceStyle,
   resolveBotFaceStyle,
   PRISM_DEFAULT_STORY_THEME,
@@ -478,6 +490,7 @@ import {
   type BotFaceGlyphAnimation,
   type BotFaceStyle,
   type BotFaceThinkingFrames,
+  type BotAvatarDetailsV1,
   type BotBirthEra,
   type CoffeeBotSocialSnapshot,
   type CoffeeCupTopOffSnapshot,
@@ -638,7 +651,6 @@ import {
   extractStageDirections,
   filterBotsForMentionQuery,
   findAtMentionTokenPlain,
-  findFirstBotMentionId,
   getBotMentionDisplayLength,
   getBotMentionDisplayText,
   type BotMentionPick,
@@ -1509,10 +1521,10 @@ type CanvasBotMarqueeRect = { left: number; top: number; width: number; height: 
 type CanvasBotMarqueeDragState = {
   pointerId: number;
   frame: HTMLElement;
+  surface: HTMLElement;
   frameRect: DOMRect;
   startClientX: number;
   startClientY: number;
-  pressedBotId: string | null;
   active: boolean;
   mode: CanvasBotMarqueeSelectionMode;
   baseSelectedBotIds: Set<string>;
@@ -7474,6 +7486,25 @@ function resolveBotFaceStyleForBot(
   );
 }
 
+type BotAvatarDetailsSource = {
+  avatarDetails?: BotAvatarDetailsV1 | null;
+  avatar_details_json?: unknown;
+};
+
+function resolveBotAvatarDetails(
+  bot: BotAvatarDetailsSource | null | undefined
+): BotAvatarDetailsV1 | null {
+  const raw = bot?.avatarDetails ?? bot?.avatar_details_json;
+  if (raw == null || raw === "") return null;
+  try {
+    return parseBotAvatarDetailsV1(
+      typeof raw === "string" ? JSON.parse(raw) : raw
+    );
+  } catch {
+    return null;
+  }
+}
+
 function botScreenMaterialSeedForBot(
   _bot: Pick<Bot, "id" | "export_hash"> | null | undefined,
   _fallbackSeed: string
@@ -9783,11 +9814,14 @@ interface Bot {
   face_mouth_rotation_deg?: number | null;
   face_blink_bar?: string | null;
   face_thinking_frames?: string | null;
+  avatarDetails?: BotAvatarDetailsV1 | null;
+  avatar_details_json?: unknown;
   profile_picture_image_id?: string | null;
   chat_enabled: number;
 }
 
 type BotEditOriginalSnapshot = {
+  botId: string | null;
   name: string;
   prompt: string;
   rawPrompt?: string;
@@ -9822,6 +9856,7 @@ type BotEditOriginalSnapshot = {
   faceMouthRotationDeg: number;
   faceBlinkBar: BotFaceBlinkBar;
   faceThinkingFrames: BotFaceThinkingFrames;
+  avatarDetails: BotAvatarDetailsV1 | null;
   profilePictureImageId: string | null;
 };
 
@@ -9847,6 +9882,7 @@ type BotAvatarDraftSnapshot = Pick<
   | "faceMouthRotationDeg"
   | "faceBlinkBar"
   | "faceThinkingFrames"
+  | "avatarDetails"
 >;
 
 const BOT_AVATAR_UNDO_HISTORY_LIMIT = 100;
@@ -10138,6 +10174,7 @@ function prepareBotArchivePayload(
         typeof parsedBot.glyph === "string" && parsedBot.glyph.trim().length > 0
           ? parsedBot.glyph.trim()
           : null,
+      avatarDetails: parsedBot.avatarDetails ?? null,
       faceEyesFont: normalizeBotFaceFontId(parsedBot.faceEyesFont),
       faceEyeCharacter: normalizeBotFaceEyeCharacter(parsedBot.faceEyeCharacter),
       faceEyeAnimation: normalizeBotFaceGlyphAnimation(parsedBot.faceEyeAnimation),
@@ -11889,6 +11926,7 @@ function createBotFormHasEnteredData(options: {
   faceMouthRotationDeg?: number;
   faceBlinkBar?: BotFaceBlinkBar;
   faceThinkingFrames?: BotFaceThinkingFrames;
+  avatarDetails?: BotAvatarDetailsV1 | null;
 }): boolean {
   if (options.name.trim().length > 0) return true;
   if (options.advancedMode) return true;
@@ -11926,6 +11964,7 @@ function createBotFormHasEnteredData(options: {
       DEFAULT_BOT_FACE_THINKING_FRAMES
     )
   ) return true;
+  if (options.avatarDetails && avatarDetailsHasVisuals(options.avatarDetails)) return true;
   return false;
 }
 
@@ -17267,6 +17306,7 @@ const BOT_GLYPHS: Record<string, BotGlyphDefinition> = {
 
 const DEFAULT_BOT_GLYPH: BotGlyphName = "bot";
 const DEFAULT_PRISM_BOT_GLYPH: BotGlyphName = "triangle";
+const DEFAULT_PRISM_BOT_MENTION_ID = "__prism_default__";
 const DEFAULT_PRISM_BOT_CUSTOMIZER_COLOR = "#f3f3f3";
 
 function isBotGlyphName(value: string | null | undefined): value is BotGlyphName {
@@ -22716,9 +22756,16 @@ function filterWildcardSlotPicksForShortcutQuery(
   query: string
 ): CommandCenterCommand[] {
   const normalizedQuery = normalizeComposerShortcutQuery(query);
+  const selectableCommands = commands.filter((command) => {
+    const key = composerTrueWildcardSlotKey(command);
+    const slot = key
+      ? BUILT_IN_PROMPT_WILDCARD_SLOTS.find((candidate) => candidate.key === key)
+      : null;
+    return slot?.pickerVisibility !== "hidden";
+  });
   const visibleCommands = normalizedQuery
-    ? commands
-    : commands.filter((command) => {
+    ? selectableCommands
+    : selectableCommands.filter((command) => {
         const key = composerTrueWildcardSlotKey(command);
         const slot = key
           ? BUILT_IN_PROMPT_WILDCARD_SLOTS.find((candidate) => candidate.key === key)
@@ -24568,6 +24615,8 @@ interface ZenLiveBotMannequinProps {
   forceBlinkPhase?: "open" | "closed" | null;
   screenMaterialSeed?: string | null;
   frameMaterialSeed?: string | null;
+  avatarDetails?: BotAvatarDetailsV1 | null;
+  avatarDetailsColor?: string | null;
 }
 
 function ZenLiveBotMannequin({
@@ -24588,6 +24637,8 @@ function ZenLiveBotMannequin({
   forceBlinkPhase = null,
   screenMaterialSeed,
   frameMaterialSeed,
+  avatarDetails = null,
+  avatarDetailsColor = null,
 }: ZenLiveBotMannequinProps): React.JSX.Element {
   const normalizedPlateFaceRestAfterMs =
     typeof plateFaceRestAfterMs === "number" &&
@@ -24663,6 +24714,11 @@ function ZenLiveBotMannequin({
           data-crt-material-layer="grime"
           style={screenMaterialStyle}
           aria-hidden="true"
+        />
+        <AvatarDetailsMask
+          details={avatarDetails}
+          color={avatarDetailsColor}
+          faceGeometry={faceStyle}
         />
         {showThinkingSpinner ? (
           <span
@@ -25793,6 +25849,15 @@ function ZenLiveBotPresencePlate({
         showQuestionMark={askQuestionActive}
         screenMaterialSeed={screenMaterialSeed}
         frameMaterialSeed={frameMaterialSeed}
+        avatarDetails={bot ? resolveBotAvatarDetails(bot) : null}
+        avatarDetailsColor={
+          bot
+            ? normalizeAccentForTheme(
+                bot.color ?? PRISM_DEFAULT_ACCENT,
+                resolvedTheme
+              )
+            : null
+        }
       />
       {actionText ? (
         <span
@@ -27164,10 +27229,9 @@ const DesktopMarkdownComposer = forwardRef<DesktopMarkdownComposerHandle, Deskto
         const sameIds =
           sameLength &&
           prev.filtered.every((b, i) => b.id === filtered[i]?.id);
-        const lastIndex = Math.max(0, filtered.length - 1);
         const highlight = sameIds
-          ? Math.min(prev.highlight, lastIndex)
-          : lastIndex;
+          ? Math.min(prev.highlight, Math.max(0, filtered.length - 1))
+          : 0;
         return {
           open: true,
           caretRect,
@@ -28917,10 +28981,9 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(functi
       const sameIds =
         sameLength &&
         prev.filtered.every((b, i) => b.id === filtered[i]?.id);
-      const lastIndex = Math.max(0, filtered.length - 1);
       const highlight = sameIds
-        ? Math.min(prev.highlight, lastIndex)
-        : lastIndex;
+        ? Math.min(prev.highlight, Math.max(0, filtered.length - 1))
+        : 0;
       return {
         open: true,
         caretRect: caretRect ?? el.getBoundingClientRect(),
@@ -29938,6 +30001,8 @@ interface BotAvatarCustomizerModalProps {
   faceMouthRotationDeg: number;
   faceBlinkBar: BotFaceBlinkBar;
   faceThinkingFrames: BotFaceThinkingFrames;
+  avatarDetails: BotAvatarDetailsV1 | null;
+  detailsEditorVisible?: boolean;
   hasUnsavedChanges: boolean;
   canUndo: boolean;
   saving: boolean;
@@ -29968,6 +30033,9 @@ interface BotAvatarCustomizerModalProps {
   onMouthRotationDegChange: (rotationDeg: number) => void;
   onBlinkBarChange: (blinkBar: BotFaceBlinkBar) => void;
   onThinkingFramesChange: (frames: BotFaceThinkingFrames) => void;
+  onAvatarDetailsApply: (
+    details: BotAvatarDetailsV1 | null
+  ) => void | Promise<void>;
 }
 
 function optionalScaleLabel(
@@ -30253,7 +30321,12 @@ const BOT_AVATAR_PREVIEW_MOUTH_SHAPES = [
 ] as const satisfies readonly ZenLiveBotMouthShape[];
 
 type BotAvatarPreviewMode = "idle" | "blink" | "talking" | "thinking";
-type BotAvatarCustomizerTab = "face" | "eyes" | "mouth" | "motion";
+type BotAvatarCustomizerTab =
+  | "face"
+  | "eyes"
+  | "mouth"
+  | "motion"
+  | "details";
 type BotAvatarFaceControlTab = Extract<
   BotAvatarCustomizerTab,
   "face" | "eyes" | "mouth" | "motion"
@@ -30289,6 +30362,7 @@ const BOT_AVATAR_CUSTOMIZER_TABS = [
   { value: "face", label: "Identity" },
   { value: "eyes", label: "Eyes" },
   { value: "mouth", label: "Mouth" },
+  { value: "details", label: "Details" },
   { value: "motion", label: "Motion" },
 ] as const satisfies readonly {
   value: BotAvatarCustomizerTab;
@@ -30601,6 +30675,8 @@ function BotAvatarPreviewPanel({
   displayedPreviewMouthShape,
   avatarStyle,
   faceStyle,
+  avatarDetails,
+  avatarDetailsColor,
   onPreviewThemeChange,
   onPreviewModeChange,
   onPreviewMoodCycle,
@@ -30618,6 +30694,8 @@ function BotAvatarPreviewPanel({
   displayedPreviewMouthShape: ZenLiveBotMouthShape;
   avatarStyle: CSSProperties;
   faceStyle: BotFaceStyle;
+  avatarDetails: BotAvatarDetailsV1 | null;
+  avatarDetailsColor: string;
   onPreviewThemeChange: (theme: "light" | "dark") => void;
   onPreviewModeChange: (mode: BotAvatarPreviewMode) => void;
   onPreviewMoodCycle: () => void;
@@ -30703,6 +30781,12 @@ function BotAvatarPreviewPanel({
             showThinkingSpinner={previewThinking}
             screenMaterialSeed={screenMaterialSeed}
             frameMaterialSeed={frameMaterialSeed}
+            avatarDetails={isDefaultPrismBot ? null : avatarDetails}
+            avatarDetailsColor={
+              isDefaultPrismBot
+                ? null
+                : normalizeAccentForTheme(avatarDetailsColor, previewTheme)
+            }
           />
         </div>
       </div>
@@ -31833,6 +31917,8 @@ function BotAvatarCustomizerModal({
   faceMouthRotationDeg,
   faceBlinkBar,
   faceThinkingFrames,
+  avatarDetails,
+  detailsEditorVisible = false,
   hasUnsavedChanges,
   canUndo,
   saving,
@@ -31863,12 +31949,29 @@ function BotAvatarCustomizerModal({
   onMouthRotationDegChange,
   onBlinkBarChange,
   onThinkingFramesChange,
+  onAvatarDetailsApply,
 }: BotAvatarCustomizerModalProps): React.JSX.Element | null {
   const [mouthPhase, setMouthPhase] = useState(0);
   const [previewTheme, setPreviewTheme] = useState<"light" | "dark">(resolvedTheme);
   const [previewMode, setPreviewMode] = useState<BotAvatarPreviewMode>("idle");
   const [previewMoodIndex, setPreviewMoodIndex] = useState(0);
   const [activeControlTab, setActiveControlTab] = useState<BotAvatarCustomizerTab>("face");
+  const detailsEditorRef = useRef<AvatarDetailsEditorHandle | null>(null);
+  const [detailsEditorDirty, setDetailsEditorDirty] = useState(false);
+  const [avatarDetailsPreview, setAvatarDetailsPreview] =
+    useState<BotAvatarDetailsV1>(() => normalizeAvatarDetails(avatarDetails));
+  const [detailsLeaveRequest, setDetailsLeaveRequest] = useState<
+    | { kind: "tab"; tab: BotAvatarCustomizerTab }
+    | { kind: "close" }
+    | { kind: "save" }
+    | null
+  >(null);
+  const [detailsLeaveApplying, setDetailsLeaveApplying] = useState(false);
+  const [pendingDetailsSaveKey, setPendingDetailsSaveKey] =
+    useState<string | null>(null);
+  const detailsLeavePanelRef = useRef<HTMLElement | null>(null);
+  const detailsLeaveKeepEditingRef = useRef<HTMLButtonElement | null>(null);
+  const detailsLeaveInvokerRef = useRef<HTMLElement | null>(null);
   const previewMood =
     BOT_AVATAR_PREVIEW_MOODS[
       previewMoodIndex % BOT_AVATAR_PREVIEW_MOODS.length
@@ -31928,6 +32031,10 @@ function BotAvatarCustomizerModal({
     setPreviewMoodIndex(0);
     setActiveControlTab("face");
     setMouthPhase(0);
+    setDetailsEditorDirty(false);
+    setDetailsLeaveRequest(null);
+    setDetailsLeaveApplying(false);
+    setPendingDetailsSaveKey(null);
   }, [identityControlsVisible, open, resolvedTheme]);
 
   useEffect(() => {
@@ -31941,6 +32048,64 @@ function BotAvatarCustomizerModal({
     window.addEventListener("keydown", handleUndoKeyDown);
     return () => window.removeEventListener("keydown", handleUndoKeyDown);
   }, [canUndo, onUndo, open, savePromptOpen, saving]);
+
+  useEffect(() => {
+    if (!open || detailsEditorDirty) return;
+    setAvatarDetailsPreview(normalizeAvatarDetails(avatarDetails));
+  }, [avatarDetails, detailsEditorDirty, open]);
+
+  useEffect(() => {
+    if (!detailsLeaveRequest) return;
+    const invoker = detailsLeaveInvokerRef.current;
+    queueMicrotask(() => detailsLeaveKeepEditingRef.current?.focus());
+    return () => {
+      queueMicrotask(() => invoker?.focus());
+    };
+  }, [detailsLeaveRequest]);
+
+  useEffect(() => {
+    if (
+      !open ||
+      pendingDetailsSaveKey === null ||
+      avatarDetailsKey(avatarDetails) !== pendingDetailsSaveKey
+    ) {
+      return;
+    }
+    setPendingDetailsSaveKey(null);
+    void onSave();
+  }, [avatarDetails, onSave, open, pendingDetailsSaveKey]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleEscape = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      if (detailsLeaveRequest) {
+        if (!detailsLeaveApplying) setDetailsLeaveRequest(null);
+        return;
+      }
+      if (
+        activeControlTab === "details" &&
+        detailsEditorRef.current?.hasDirtyChanges()
+      ) {
+        detailsLeaveInvokerRef.current =
+          document.activeElement instanceof HTMLElement
+            ? document.activeElement
+            : null;
+        setDetailsLeaveRequest({ kind: "close" });
+        return;
+      }
+      onRequestClose();
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [
+    activeControlTab,
+    detailsLeaveApplying,
+    detailsLeaveRequest,
+    onRequestClose,
+    open,
+  ]);
 
   useEffect(() => {
     if (!open || !previewTalking) {
@@ -31957,6 +32122,94 @@ function BotAvatarCustomizerModal({
   }, [open, previewTalking]);
 
   if (!open) return null;
+
+  const continueDetailsNavigation = (
+    request:
+      | { kind: "tab"; tab: BotAvatarCustomizerTab }
+      | { kind: "close" }
+      | { kind: "save" }
+  ): void => {
+    setDetailsLeaveRequest(null);
+    if (request.kind === "tab") {
+      setActiveControlTab(request.tab);
+      return;
+    }
+    if (request.kind === "save") {
+      void onSave();
+      return;
+    }
+    onRequestClose();
+  };
+  const openDetailsLeavePrompt = (
+    request:
+      | { kind: "tab"; tab: BotAvatarCustomizerTab }
+      | { kind: "close" }
+      | { kind: "save" }
+  ): void => {
+    detailsLeaveInvokerRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    setDetailsLeaveRequest(request);
+  };
+  const requestControlTab = (tab: BotAvatarCustomizerTab): void => {
+    if (
+      activeControlTab === "details" &&
+      tab !== "details" &&
+      detailsEditorRef.current?.hasDirtyChanges()
+    ) {
+      openDetailsLeavePrompt({ kind: "tab", tab });
+      return;
+    }
+    setActiveControlTab(tab);
+  };
+  const requestStudioClose = (): void => {
+    if (
+      activeControlTab === "details" &&
+      detailsEditorRef.current?.hasDirtyChanges()
+    ) {
+      openDetailsLeavePrompt({ kind: "close" });
+      return;
+    }
+    onRequestClose();
+  };
+  const requestStudioSave = (dismissOuterSavePrompt = false): void => {
+    if (
+      activeControlTab === "details" &&
+      detailsEditorRef.current?.hasDirtyChanges()
+    ) {
+      if (dismissOuterSavePrompt) onCancelSavePrompt();
+      openDetailsLeavePrompt({ kind: "save" });
+      return;
+    }
+    void onSave();
+  };
+  const discardDetailsAndContinue = (): void => {
+    const request = detailsLeaveRequest;
+    if (!request) return;
+    detailsEditorRef.current?.cancel();
+    setDetailsEditorDirty(false);
+    setAvatarDetailsPreview(normalizeAvatarDetails(avatarDetails));
+    continueDetailsNavigation(request);
+  };
+  const applyDetailsAndContinue = async (): Promise<void> => {
+    const request = detailsLeaveRequest;
+    if (!request || detailsLeaveApplying) return;
+    setDetailsLeaveApplying(true);
+    const applied = (await detailsEditorRef.current?.apply()) ?? true;
+    setDetailsLeaveApplying(false);
+    if (!applied) {
+      setDetailsLeaveRequest(null);
+      return;
+    }
+    setDetailsEditorDirty(false);
+    if (request.kind === "save") {
+      setPendingDetailsSaveKey(avatarDetailsKey(avatarDetailsPreview));
+      setDetailsLeaveRequest(null);
+      return;
+    }
+    continueDetailsNavigation(request);
+  };
 
   // The studio portals to document.body, outside the app shell that carries
   // the .themeDark/.themeLight variable scope. Without re-declaring that scope
@@ -31978,7 +32231,11 @@ function BotAvatarCustomizerModal({
     } as CSSProperties;
   })();
 
-  const saveStatusState = saving ? "saving" : hasUnsavedChanges ? "dirty" : "saved";
+  const saveStatusState = saving
+    ? "saving"
+    : hasUnsavedChanges || detailsEditorDirty
+      ? "dirty"
+      : "saved";
   const saveStatusLabel =
     saveStatusState === "saving"
       ? "Saving"
@@ -32007,9 +32264,17 @@ function BotAvatarCustomizerModal({
     faceBlinkBar,
     faceThinkingFrames,
   });
-  const saveButtonVisible = saving || hasUnsavedChanges;
+  const saveButtonVisible = saving || hasUnsavedChanges || detailsEditorDirty;
   const avatarControlTabsVisible = true;
-  const activeFaceControlTabs: readonly BotAvatarFaceControlTab[] = [activeControlTab];
+  const visibleAvatarTabs = BOT_AVATAR_CUSTOMIZER_TABS.filter(
+    (tab) => detailsEditorVisible || tab.value !== "details"
+  );
+  const activeFaceControlTabs: readonly BotAvatarFaceControlTab[] =
+    BOT_AVATAR_FACE_CONTROL_TABS.includes(
+      activeControlTab as BotAvatarFaceControlTab
+    )
+      ? [activeControlTab as BotAvatarFaceControlTab]
+      : [];
   const applyFacePreset = (preset: BotAvatarFacePreset) => {
     onEyesFontChange(preset.eyesFont);
     onEyeCharacterChange(preset.eyeCharacter);
@@ -32056,7 +32321,7 @@ function BotAvatarCustomizerModal({
       onPointerDown={(event) => {
         if (event.target !== event.currentTarget) return;
         if (!isPrimaryPointerDismissal(event.nativeEvent)) return;
-        onRequestClose();
+        requestStudioClose();
       }}
     >
       <section
@@ -32070,7 +32335,9 @@ function BotAvatarCustomizerModal({
             <span>Avatar Studio</span>
             <h4 id="bot-avatar-customizer-title">{titleName}</h4>
             <p>
-              {identityControlsVisible
+              {detailsEditorVisible
+                ? "Identity, face, and details."
+                : identityControlsVisible
                 ? "Identity and face."
                 : "Default Prism identity is fixed; customize its face."}
             </p>
@@ -32097,7 +32364,7 @@ function BotAvatarCustomizerModal({
               <button
                 type="button"
                 className={styles.botAvatarCustomizerSaveButton}
-                onClick={() => void onSave()}
+                onClick={() => requestStudioSave()}
                 disabled={!hasUnsavedChanges || saving}
                 data-dirty={hasUnsavedChanges ? "true" : undefined}
               >
@@ -32108,7 +32375,7 @@ function BotAvatarCustomizerModal({
             <button
               type="button"
               className={styles.botAvatarCustomizerCloseButton}
-              onClick={onRequestClose}
+              onClick={requestStudioClose}
               aria-label="Close avatar customizer"
             >
               <X size={16} strokeWidth={2.6} aria-hidden="true" />
@@ -32130,6 +32397,8 @@ function BotAvatarCustomizerModal({
             displayedPreviewMouthShape={displayedPreviewMouthShape}
             avatarStyle={avatarStyle}
             faceStyle={faceStyle}
+            avatarDetails={avatarDetailsPreview}
+            avatarDetailsColor={color}
             onPreviewThemeChange={setPreviewTheme}
             onPreviewModeChange={setPreviewMode}
             onPreviewMoodCycle={() =>
@@ -32143,14 +32412,14 @@ function BotAvatarCustomizerModal({
                 role="tablist"
                 aria-label="Avatar control sections"
               >
-                {BOT_AVATAR_CUSTOMIZER_TABS.map((tab) => (
+                {visibleAvatarTabs.map((tab) => (
                   <button
                     key={tab.value}
                     type="button"
                     role="tab"
                     aria-selected={activeControlTab === tab.value}
                     data-active={activeControlTab === tab.value ? "true" : undefined}
-                    onClick={() => setActiveControlTab(tab.value)}
+                    onClick={() => requestControlTab(tab.value)}
                   >
                     {tab.value === "face" ? (
                       <Sparkles size={13} strokeWidth={2.3} aria-hidden="true" />
@@ -32158,6 +32427,8 @@ function BotAvatarCustomizerModal({
                       <Eye size={13} strokeWidth={2.3} aria-hidden="true" />
                     ) : tab.value === "mouth" ? (
                       <Smile size={13} strokeWidth={2.3} aria-hidden="true" />
+                    ) : tab.value === "details" ? (
+                      <PencilLine size={13} strokeWidth={2.3} aria-hidden="true" />
                     ) : (
                       <Timer size={13} strokeWidth={2.3} aria-hidden="true" />
                     )}
@@ -32167,6 +32438,23 @@ function BotAvatarCustomizerModal({
               </div>
             ) : null}
             <div className={styles.botAvatarControlStack}>
+              {activeControlTab === "details" && detailsEditorVisible ? (
+                <AvatarDetailsEditor
+                  ref={detailsEditorRef}
+                  value={avatarDetails}
+                  accentColor={normalizeAccentForTheme(color, resolvedTheme)}
+                  faceGeometry={faceStyle}
+                  onApply={async (nextDetails) => {
+                    const normalized = normalizeAvatarDetails(nextDetails);
+                    await onAvatarDetailsApply(
+                      avatarDetailsHasVisuals(normalized) ? normalized : null
+                    );
+                    setAvatarDetailsPreview(normalized);
+                  }}
+                  onDirtyChange={setDetailsEditorDirty}
+                  onPreviewChange={setAvatarDetailsPreview}
+                />
+              ) : null}
               {activeFaceControlTabs.map((faceControlTab) => (
                 <BotAvatarFaceControls
                   key={faceControlTab}
@@ -32235,6 +32523,79 @@ function BotAvatarCustomizerModal({
           </section>
         </div>
       </section>
+      {detailsLeaveRequest ? (
+        <div
+          className={styles.botAvatarSavePromptBackdrop}
+          role="presentation"
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <section
+            ref={detailsLeavePanelRef}
+            className={styles.botAvatarSavePromptPanel}
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="bot-avatar-details-leave-title"
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                event.stopPropagation();
+                if (!detailsLeaveApplying) setDetailsLeaveRequest(null);
+                return;
+              }
+              if (event.key !== "Tab") return;
+              const focusable = Array.from(
+                detailsLeavePanelRef.current?.querySelectorAll<HTMLButtonElement>(
+                  "button:not(:disabled)"
+                ) ?? []
+              );
+              if (focusable.length === 0) return;
+              const first = focusable[0]!;
+              const last = focusable[focusable.length - 1]!;
+              if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault();
+                last.focus();
+              } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault();
+                first.focus();
+              }
+            }}
+          >
+            <h2 id="bot-avatar-details-leave-title">
+              {detailsLeaveRequest.kind === "save"
+                ? "Apply avatar details before saving?"
+                : "Apply avatar details?"}
+            </h2>
+            <p>Your detail recipe is still a local working copy.</p>
+            <div className={styles.botAvatarSavePromptActions}>
+              <button
+                ref={detailsLeaveKeepEditingRef}
+                type="button"
+                className={styles.botAvatarSavePromptCancel}
+                onClick={() => setDetailsLeaveRequest(null)}
+                disabled={detailsLeaveApplying}
+              >
+                Keep editing
+              </button>
+              <button
+                type="button"
+                className={styles.botAvatarSavePromptDiscard}
+                onClick={discardDetailsAndContinue}
+                disabled={detailsLeaveApplying}
+              >
+                Discard
+              </button>
+              <button
+                type="button"
+                className={styles.botAvatarSavePromptSave}
+                onClick={() => void applyDetailsAndContinue()}
+                disabled={detailsLeaveApplying}
+              >
+                {detailsLeaveApplying ? "Applying…" : "Apply"}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
   const savePrompt = (
@@ -32242,7 +32603,7 @@ function BotAvatarCustomizerModal({
       open={savePromptOpen}
       saveError={saveError}
       saving={saving}
-      onSave={onSave}
+      onSave={() => requestStudioSave(true)}
       onDiscard={onDiscard}
       onCancel={onCancelSavePrompt}
     />
@@ -35185,6 +35546,8 @@ function HomeContent(): React.JSX.Element {
   );
   const [newBotFaceThinkingFrames, setNewBotFaceThinkingFrames] =
     useState<BotFaceThinkingFrames>(DEFAULT_BOT_FACE_STYLE.thinkingFrames);
+  const [newBotAvatarDetails, setNewBotAvatarDetails] =
+    useState<BotAvatarDetailsV1 | null>(null);
   const [newBotProfilePictureImageId, setNewBotProfilePictureImageId] =
     useState<string | null>(null);
   const [newBotLensId, setNewBotLensId] = useState<string>("");
@@ -35293,6 +35656,7 @@ function HomeContent(): React.JSX.Element {
     faceMouthRotationDeg: DEFAULT_BOT_FACE_STYLE.mouthRotationDeg,
     faceBlinkBar: DEFAULT_BOT_FACE_STYLE.blinkBar,
     faceThinkingFrames: DEFAULT_BOT_FACE_STYLE.thinkingFrames,
+    avatarDetails: null as BotAvatarDetailsV1 | null,
   });
   latestCreateBotDraftRef.current = {
     name: newBotName,
@@ -35326,6 +35690,7 @@ function HomeContent(): React.JSX.Element {
     faceMouthRotationDeg: newBotFaceMouthRotationDeg,
     faceBlinkBar: newBotFaceBlinkBar,
     faceThinkingFrames: newBotFaceThinkingFrames,
+    avatarDetails: newBotAvatarDetails,
   };
 
   const handleNewBotColorChange = useCallback((next: string) => {
@@ -35538,6 +35903,7 @@ function HomeContent(): React.JSX.Element {
       faceMouthRotationDeg: newBotFaceMouthRotationDeg,
       faceBlinkBar: newBotFaceBlinkBar,
       faceThinkingFrames: newBotFaceThinkingFrames,
+      avatarDetails: newBotAvatarDetails,
     }),
     [
       newBotColor,
@@ -35558,6 +35924,7 @@ function HomeContent(): React.JSX.Element {
       newBotFaceMouthRotationDeg,
       newBotFaceMouthScale,
       newBotFaceThinkingFrames,
+      newBotAvatarDetails,
       newBotGlyph,
       newBotName,
     ]
@@ -35584,6 +35951,7 @@ function HomeContent(): React.JSX.Element {
     setNewBotFaceMouthRotationDeg(snapshot.faceMouthRotationDeg);
     setNewBotFaceBlinkBar(snapshot.faceBlinkBar);
     setNewBotFaceThinkingFrames(snapshot.faceThinkingFrames);
+    setNewBotAvatarDetails(snapshot.avatarDetails);
   }, []);
 
   const clearBotAvatarUndoHistory = useCallback((): void => {
@@ -35648,6 +36016,7 @@ function HomeContent(): React.JSX.Element {
     setNewBotFaceMouthRotationDeg(pristine.faceMouthRotationDeg);
     setNewBotFaceBlinkBar(pristine.faceBlinkBar);
     setNewBotFaceThinkingFrames(pristine.faceThinkingFrames);
+    setNewBotAvatarDetails(pristine.avatarDetails);
   }, []);
 
   const closeBotAvatarCustomizer = useCallback((): void => {
@@ -41183,7 +41552,7 @@ function HomeContent(): React.JSX.Element {
   const summaryDebugMatchesActiveZen =
     activeZenConversationId !== null &&
     summaryDebug?.conversationId === activeZenConversationId &&
-    summaryDebug.mode === "zen";
+    summaryDebug?.mode === "zen";
   const currentZenInternalSummary =
     summaryDebugMatchesActiveZen ? summaryDebug.latestSummary?.trim() || null : null;
   const currentZenDisplaySummary =
@@ -45496,8 +45865,8 @@ function HomeContent(): React.JSX.Element {
           : "No chat-enabled bots live in this group yet."
       : "No bots match that search.";
   const composeMentionBotPicks = useMemo(
-    () =>
-      [...bots]
+    () => {
+      const sorted = [...bots]
         .filter((bot) => bot.chat_enabled === 1)
         .sort((a, b) =>
           compareBotsByColor(a, b, resolvedTheme, panelColorHarmonyActive)
@@ -45507,8 +45876,39 @@ function HomeContent(): React.JSX.Element {
           name: b.name,
           color: b.color,
           glyph: b.glyph,
-        })),
-    [bots, resolvedTheme, panelColorHarmonyActive]
+        }));
+      const receiverId = composeBotAccentId ?? (view === "sandbox" ? selectedBotId : null);
+      if (receiverId) {
+        const receiver = sorted.find((bot) => bot.id === receiverId);
+        if (receiver) {
+          return [
+            { ...receiver, pickerLabel: "You" },
+            ...sorted.filter((bot) => bot.id !== receiverId),
+          ];
+        }
+      }
+      if (view === "chat") {
+        return [
+          {
+            id: DEFAULT_PRISM_BOT_MENTION_ID,
+            name: "Prism",
+            pickerLabel: "You",
+            color: PRISM_DEFAULT_ACCENT,
+            glyph: DEFAULT_PRISM_BOT_GLYPH,
+          },
+          ...sorted,
+        ];
+      }
+      return sorted;
+    },
+    [
+      bots,
+      composeBotAccentId,
+      panelColorHarmonyActive,
+      resolvedTheme,
+      selectedBotId,
+      view,
+    ]
   );
   const zenPersonaPickerBots = useMemo(
     () =>
@@ -46045,6 +46445,11 @@ function HomeContent(): React.JSX.Element {
   //     thread chat. Lens-driven hue (the existing `var(--accent)` orb
   //     behavior).
   const activeConversationIsEmpty = !detail || detail.messages.length === 0;
+  const canvasBotDirectoryInteractive = canvasBotDirectoryIsInteractive({
+    view: view === "chat" || view === "sandbox" || view === "coffee" ? view : "other",
+    conversationMessageCount: detail ? detail.messages.length : null,
+    pendingReplyVisible,
+  });
   /** The native composer keeps browser typing stable; chips are rendered by a visual overlay. */
   const composerMarkdownEditorEnabled = false;
   const messagesFrameMode = useMemo<"private" | "home" | "engaged">(() => {
@@ -46253,11 +46658,16 @@ function HomeContent(): React.JSX.Element {
   }, [pickerBots]);
 
   useEffect(() => {
-    if ((view === "chat" || view === "sandbox") && !detail && !pendingReplyVisible) return;
+    if (canvasBotDirectoryInteractive) return;
+    const drag = canvasBotMarqueeDragRef.current;
+    if (drag) {
+      delete drag.surface.dataset.canvasBotMarqueeActive;
+      if (drag.surface instanceof HTMLDivElement) resetPickerParallax(drag.surface);
+    }
     canvasBotMarqueeDragRef.current = null;
     setCanvasBotMarqueeRect(null);
     setCanvasSelectedBotIds((current) => (current.size === 0 ? current : new Set()));
-  }, [detail, pendingReplyVisible, view]);
+  }, [canvasBotDirectoryInteractive]);
 
   // Bucket the active library filter into the five Prism letters
   // (plus an `other` bucket for grayscale/colorless bots). Rendered
@@ -52537,10 +52947,6 @@ function HomeContent(): React.JSX.Element {
     }
     setError(null);
 
-    const mentionedZenPersonaBotId =
-      view === "chat" && !activeSideChatSend && !isStarterPrompt && !isAssistantOnlyTurn
-        ? findFirstBotMentionId(displayTrimmed, composeMentionBotPicks)
-        : null;
     const zenPersonaBotIdForSend =
       view === "chat"
         ? activeSideChatSend
@@ -52551,16 +52957,12 @@ function HomeContent(): React.JSX.Element {
             ? options.zenAutonomy!.activeBotId
           : isAskQuestionPatienceTurn
             ? options.zenAskQuestionPatience!.activeBotId
-          : mentionedZenPersonaBotId ?? zenPersonaBotId
+          : zenPersonaBotId
         : undefined;
     const optimisticZenPersonaBot =
       view === "chat" && zenPersonaBotIdForSend
         ? bots.find((bot) => bot.id === zenPersonaBotIdForSend) ?? null
         : null;
-    if (mentionedZenPersonaBotId) {
-      setZenPersonaBotId(mentionedZenPersonaBotId);
-    }
-
     const previousDetail = detailForSend;
     const previousPendingIncognito = pendingIncognito;
     const previousZenPersonaBotId = zenPersonaBotIdRef.current;
@@ -58257,6 +58659,7 @@ function HomeContent(): React.JSX.Element {
         name: trimmedName,
         color: bot.color ?? null,
         glyph: bot.glyph ?? null,
+        avatarDetails: resolveBotAvatarDetails(bot),
         temperature: bot.temperature,
         maxTokens: bot.max_tokens,
         topP: normalizeBotTopP(bot.top_p),
@@ -58586,6 +58989,12 @@ function HomeContent(): React.JSX.Element {
     } catch {
       throw new Error("Could not read .prism archive.");
     }
+    const unsupportedEntries = Object.keys(entries).filter(
+      (name) => !name.trim().toLowerCase().endsWith(".json")
+    );
+    if (unsupportedEntries.length > 0) {
+      throw new Error(".prism account backups cannot contain PNG, SVG, accessory, or other asset files.");
+    }
     const preferredEntry = Object.entries(entries).find(
       ([name]) => name.trim().toLowerCase() === "backup.json"
     );
@@ -58900,6 +59309,13 @@ function HomeContent(): React.JSX.Element {
       throw new Error("Could not read bot collection file.");
     }
     const allEntries = Object.entries(entries);
+    const unsupportedEntries = allEntries.filter(([name]) => {
+      const normalized = name.trim().toLowerCase();
+      return !normalized.endsWith(".bot") && normalized !== "manifest.json";
+    });
+    if (unsupportedEntries.length > 0) {
+      throw new Error("Bot collection contains unsupported files.");
+    }
     const botEntries = allEntries.filter(([name]) => name.trim().toLowerCase().endsWith(".bot"));
     if (botEntries.length === 0) {
       throw new Error("Bot collection contains no .bot files.");
@@ -58916,6 +59332,9 @@ function HomeContent(): React.JSX.Element {
     for (const [entryName, bytes] of botEntries) {
       try {
         const parsed = parsePrismBotArchive(bytes);
+        // Validate the complete create payload before any duplicate can be
+        // deleted during the later overwrite phase.
+        prepareBotArchivePayload(parsed);
         const importedName = parsed.botJson.bot.name.trim() || entryName;
         const memoryCount = parsed.memories.length;
         totalMemoryEntries += memoryCount;
@@ -58926,7 +59345,13 @@ function HomeContent(): React.JSX.Element {
           importedName,
           memoryCount,
         });
-      } catch {
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Invalid bot archive.";
+        if (/(?:avatarDetails|avatar|accessory|unsupported files)/iu.test(message)) {
+          throw new Error(
+            `Bot collection entry ${entryName} was rejected before import: ${message}`
+          );
+        }
         failedCount += 1;
       }
     }
@@ -60403,28 +60828,20 @@ function HomeContent(): React.JSX.Element {
   const handleCanvasBotMarqueePointerDown = useCallback((
     event: React.PointerEvent<HTMLDivElement>
   ): boolean => {
-    if (detail || pendingReplyVisible) return false;
+    if (!canvasBotDirectoryInteractive) return false;
     if (event.pointerType === "touch") return false;
     if (event.button !== 0) return false;
     const target = event.target;
-    let pressedBotId: string | null = null;
-    if (target instanceof Element) {
-      const botTileTarget = target.closest<HTMLElement>("[data-bot-id]");
-      const startsOnBotTile = botTileTarget !== null;
-      pressedBotId = botTileTarget?.dataset.botId ?? null;
-      const botTileMarqueeGesture = startsOnBotTile;
-      const blockedInteractiveTarget = target.closest(BOT_CANVAS_BACKGROUND_INTERACTIVE_SELECTOR);
-      const allowPickerFrameDrag =
-        blockedInteractiveTarget instanceof HTMLElement &&
-        blockedInteractiveTarget.dataset.botPickerFrame === "true";
-      if (blockedInteractiveTarget && !botTileMarqueeGesture && !allowPickerFrameDrag) {
-        return false;
-      }
-    }
+    if (!(target instanceof Element)) return false;
+    const surface = target.closest<HTMLElement>('[data-canvas-bot-marquee-surface="true"]');
+    if (!surface || !event.currentTarget.contains(surface)) return false;
+    if (target.closest('[data-canvas-bot-marquee-ignore="true"]')) return false;
     const frame = event.currentTarget;
     const frameRect = frame.getBoundingClientRect();
     if (frameRect.width <= 0 || frameRect.height <= 0) return false;
-    const tileRects = Array.from(frame.querySelectorAll<HTMLElement>("[data-bot-id]"))
+    const tileRects = Array.from(
+      surface.querySelectorAll<HTMLElement>('[data-canvas-bot-marquee-item="true"]')
+    )
       .map((node) => {
         const botId = node.dataset.botId;
         if (!botId) return null;
@@ -60435,10 +60852,10 @@ function HomeContent(): React.JSX.Element {
     canvasBotMarqueeDragRef.current = {
       pointerId: event.pointerId,
       frame,
+      surface,
       frameRect,
       startClientX: event.clientX,
       startClientY: event.clientY,
-      pressedBotId,
       active: false,
       mode: event.shiftKey ? "toggle" : "replace",
       baseSelectedBotIds: new Set(canvasSelectedBotIds),
@@ -60446,7 +60863,24 @@ function HomeContent(): React.JSX.Element {
     };
     setCanvasBotMarqueeRect(null);
     return true;
-  }, [canvasSelectedBotIds, detail, pendingReplyVisible]);
+  }, [canvasBotDirectoryInteractive, canvasSelectedBotIds]);
+
+  const clearCanvasBotMarqueeGesture = useCallback((
+    drag: CanvasBotMarqueeDragState,
+    restoreSelection: boolean
+  ): void => {
+    delete drag.surface.dataset.canvasBotMarqueeActive;
+    if (drag.surface instanceof HTMLDivElement) resetPickerParallax(drag.surface);
+    if (restoreSelection) {
+      setCanvasSelectedBotIds((current) =>
+        stringSetsEqual(current, drag.baseSelectedBotIds)
+          ? current
+          : new Set(drag.baseSelectedBotIds)
+      );
+    }
+    setCanvasBotMarqueeRect(null);
+    canvasBotMarqueeDragRef.current = null;
+  }, []);
 
   const handleCanvasBotMarqueePointerMove = useCallback((event: PointerEvent): boolean => {
     const drag = canvasBotMarqueeDragRef.current;
@@ -60456,8 +60890,14 @@ function HomeContent(): React.JSX.Element {
     if (!drag.active) {
       if (Math.hypot(dx, dy) < BOT_MARQUEE_DRAG_THRESHOLD_PX) return true;
       drag.active = true;
-      drag.frame.style.setProperty("--picker-parallax-x", "0px");
-      drag.frame.style.setProperty("--picker-parallax-y", "0px");
+      drag.surface.dataset.canvasBotMarqueeActive = "true";
+      if (drag.surface instanceof HTMLDivElement) resetPickerParallax(drag.surface);
+      drag.tileRects = Array.from(
+        drag.surface.querySelectorAll<HTMLElement>('[data-canvas-bot-marquee-item="true"]')
+      ).flatMap((node) => {
+        const botId = node.dataset.botId;
+        return botId ? [{ botId, rect: node.getBoundingClientRect() }] : [];
+      });
     }
     event.preventDefault();
     updateCanvasBotMarqueeSelection(drag, event.clientX, event.clientY);
@@ -60467,37 +60907,24 @@ function HomeContent(): React.JSX.Element {
   const handleCanvasBotMarqueePointerEnd = useCallback((event: PointerEvent): boolean => {
     const drag = canvasBotMarqueeDragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return false;
-    const wasActive = drag.active;
-    if (wasActive) {
+    const cancelled = event.type !== "pointerup";
+    if (drag.active && !cancelled) {
       updateCanvasBotMarqueeSelection(drag, event.clientX, event.clientY);
       canvasBotMarqueeSuppressClickRef.current = true;
       window.setTimeout(() => {
         canvasBotMarqueeSuppressClickRef.current = false;
       }, BOT_MARQUEE_SUPPRESS_CLICK_MS);
       event.preventDefault();
-      event.stopPropagation();
-    } else {
-      const nextSelectedIds = resolveInactiveCanvasBotMarqueeSelection(
-        drag.mode,
-        drag.baseSelectedBotIds,
-        drag.pressedBotId
-      );
-      setCanvasSelectedBotIds((current) =>
-        stringSetsEqual(current, nextSelectedIds) ? current : nextSelectedIds
-      );
-      if (drag.mode === "toggle" && drag.pressedBotId) {
-        canvasBotMarqueeSuppressClickRef.current = true;
-        window.setTimeout(() => {
-          canvasBotMarqueeSuppressClickRef.current = false;
-        }, BOT_MARQUEE_SUPPRESS_CLICK_MS);
-        event.preventDefault();
-        event.stopPropagation();
-      }
     }
-    setCanvasBotMarqueeRect(null);
-    canvasBotMarqueeDragRef.current = null;
+    clearCanvasBotMarqueeGesture(drag, cancelled && drag.active);
     return true;
-  }, [updateCanvasBotMarqueeSelection]);
+  }, [clearCanvasBotMarqueeGesture, updateCanvasBotMarqueeSelection]);
+
+  const cancelCanvasBotMarqueeGesture = useCallback((): void => {
+    const drag = canvasBotMarqueeDragRef.current;
+    if (!drag) return;
+    clearCanvasBotMarqueeGesture(drag, drag.active);
+  }, [clearCanvasBotMarqueeGesture]);
 
   const handleMessagesSurfacePointerDownCapture = useCallback((
     event: React.PointerEvent<HTMLDivElement>
@@ -60515,33 +60942,43 @@ function HomeContent(): React.JSX.Element {
     const handleWindowCanvasBotMarqueePointerEnd = (event: PointerEvent): void => {
       handleCanvasBotMarqueePointerEnd(event);
     };
+    const handleWindowCanvasBotMarqueeVisibility = (): void => {
+      if (document.visibilityState !== "visible") cancelCanvasBotMarqueeGesture();
+    };
     window.addEventListener("pointermove", handleWindowCanvasBotMarqueePointerMove, true);
     window.addEventListener("pointerup", handleWindowCanvasBotMarqueePointerEnd, true);
     window.addEventListener("pointercancel", handleWindowCanvasBotMarqueePointerEnd, true);
+    window.addEventListener("blur", cancelCanvasBotMarqueeGesture);
+    window.addEventListener("resize", cancelCanvasBotMarqueeGesture);
+    document.addEventListener("visibilitychange", handleWindowCanvasBotMarqueeVisibility);
     return () => {
       window.removeEventListener("pointermove", handleWindowCanvasBotMarqueePointerMove, true);
       window.removeEventListener("pointerup", handleWindowCanvasBotMarqueePointerEnd, true);
       window.removeEventListener("pointercancel", handleWindowCanvasBotMarqueePointerEnd, true);
+      window.removeEventListener("blur", cancelCanvasBotMarqueeGesture);
+      window.removeEventListener("resize", cancelCanvasBotMarqueeGesture);
+      document.removeEventListener("visibilitychange", handleWindowCanvasBotMarqueeVisibility);
     };
-  }, [handleCanvasBotMarqueePointerEnd, handleCanvasBotMarqueePointerMove]);
+  }, [
+    cancelCanvasBotMarqueeGesture,
+    handleCanvasBotMarqueePointerEnd,
+    handleCanvasBotMarqueePointerMove,
+  ]);
 
   const resetEmptyStateBotSelection = useCallback(() => {
     cancelPendingEmptyStateSearchOpen();
     setSelectedBotId(null);
     setSandboxGridSelectedBotId(null);
-    setCanvasBotMarqueeRect(null);
-    canvasBotMarqueeDragRef.current = null;
+    cancelCanvasBotMarqueeGesture();
     setCanvasSelectedBotIds((current) => (current.size === 0 ? current : new Set()));
-  }, [cancelPendingEmptyStateSearchOpen]);
+  }, [cancelCanvasBotMarqueeGesture, cancelPendingEmptyStateSearchOpen]);
 
   function applyBotLibraryGroupFilter(nextFilterId: string): void {
     setBotLibraryGroupFilterId(nextFilterId);
     setBotPanelGroup(BOT_LIBRARY_FILTER_ALL);
     if (
       nextFilterId !== BOT_LIBRARY_GROUP_FILTER_ALL &&
-      (view === "chat" || view === "sandbox") &&
-      !detail &&
-      !pendingReplyVisible
+      canvasBotDirectoryInteractive
     ) {
       resetEmptyStateBotSelection();
       setHueFilterCenter(null);
@@ -61478,6 +61915,7 @@ function HomeContent(): React.JSX.Element {
           {groupDashboardBots.length > 0 ? (
             <div
               className={styles.botGroupDashboardBotGrid}
+              data-canvas-bot-marquee-surface="true"
               role="list"
               aria-label={`Bots in ${focusedBotLibraryGroup.name}`}
             >
@@ -61510,6 +61948,8 @@ function HomeContent(): React.JSX.Element {
                     className={tileClassName}
                     style={tileStyle}
                     data-bot-id={b.id}
+                    data-canvas-bot-marquee-item="true"
+                    data-marquee-selected={isMarqueeSelected ? "true" : undefined}
                     data-zen-live-bot-chrome-avoid="true"
                     onContextMenu={(event) => {
                       event.preventDefault();
@@ -61680,6 +62120,7 @@ function HomeContent(): React.JSX.Element {
         className={styles.chatBotPickerFrame}
         data-starter-bot-affordance="true"
         data-bot-picker-frame="true"
+        data-canvas-bot-marquee-surface="true"
         data-single-bot={geom.singleBot ? "true" : undefined}
         data-returning-all={botPickerReturnAnimating ? "true" : undefined}
         data-search-active={emptyStateSearchActive ? "true" : undefined}
@@ -61786,6 +62227,8 @@ function HomeContent(): React.JSX.Element {
                 aria-label={tileTraits.length > 0 ? `${b.name}, ${tileTraits.join(", ")}` : b.name}
                 className={tileClassName}
                 data-bot-id={b.id}
+                data-canvas-bot-marquee-item="true"
+                data-marquee-selected={isMarqueeSelected ? "true" : undefined}
                 data-zen-live-bot-chrome-avoid="true"
                 data-glyph-tooltip={botTileTooltip}
                 data-favorite={isFavorite ? "true" : undefined}
@@ -61797,11 +62240,13 @@ function HomeContent(): React.JSX.Element {
                 onPointerUp={handleBotContextPointerEnd}
                 onPointerCancel={handleBotContextPointerEnd}
                 onPointerEnter={e => {
+                  if (canvasBotMarqueeDragRef.current?.active) return;
                   if (e.pointerType !== "mouse" || geom.compactPixelGrid) return;
                   updatePickerParallax(e);
                 }}
                 onPointerMove={e => {
                   handleBotContextPointerMove(e);
+                  if (canvasBotMarqueeDragRef.current?.active) return;
                   if (geom.compactPixelGrid) return;
                   updatePickerParallax(e);
                 }}
@@ -62764,6 +63209,7 @@ function HomeContent(): React.JSX.Element {
     setNewBotFaceMouthRotationDeg(draft.faceStyle.mouthRotationDeg);
     setNewBotFaceBlinkBar(draft.faceStyle.blinkBar);
     setNewBotFaceThinkingFrames(draft.faceStyle.thinkingFrames);
+    setNewBotAvatarDetails(null);
     setNewBotProfilePictureImageId(null);
     setNewBotGeneratedMemorySeeds({
       lensId: draft.lensId,
@@ -62825,6 +63271,7 @@ function HomeContent(): React.JSX.Element {
     setNewBotFaceMouthRotationDeg(DEFAULT_BOT_FACE_STYLE.mouthRotationDeg);
     setNewBotFaceBlinkBar(DEFAULT_BOT_FACE_STYLE.blinkBar);
     setNewBotFaceThinkingFrames(DEFAULT_BOT_FACE_STYLE.thinkingFrames);
+    setNewBotAvatarDetails(null);
     setNewBotProfilePictureImageId(null);
     setColorWheelOpen(false);
     setBotProfileBuilderOpen(false);
@@ -62999,11 +63446,13 @@ function HomeContent(): React.JSX.Element {
     setNewBotFaceMouthRotationDeg(seededFaceMouthRotationDeg);
     setNewBotFaceBlinkBar(seededFaceBlinkBar);
     setNewBotFaceThinkingFrames(seededFaceThinkingFrames);
+    setNewBotAvatarDetails(null);
     setNewBotProfilePictureImageId(null);
     setBotProfileBuilderOpen(false);
     setBotAiParametersModalOpen(false);
     setBotProfileActivePage("purpose");
     editOriginalRef.current = {
+      botId: null,
       name: seededName,
       prompt: normalizedStoredPrompt,
       rawPrompt: rawStoredPrompt,
@@ -63038,6 +63487,7 @@ function HomeContent(): React.JSX.Element {
       faceMouthRotationDeg: seededFaceMouthRotationDeg,
       faceBlinkBar: seededFaceBlinkBar,
       faceThinkingFrames: seededFaceThinkingFrames,
+      avatarDetails: null,
       profilePictureImageId: null,
     };
     setBotPanelView("defaultCustomize");
@@ -63156,6 +63606,7 @@ function HomeContent(): React.JSX.Element {
           faceMouthRotationDeg: newBotFaceMouthRotationDeg,
           faceBlinkBar: newBotFaceBlinkBar,
           faceThinkingFrames: newBotFaceThinkingFrames,
+          avatarDetails: newBotAvatarDetails,
         }),
       });
       createdBotId = created.bot?.id ?? null;
@@ -63347,6 +63798,7 @@ function HomeContent(): React.JSX.Element {
           faceMouthRotationDeg: faceStyle.mouthRotationDeg,
           faceBlinkBar: faceStyle.blinkBar,
           faceThinkingFrames: faceStyle.thinkingFrames,
+          avatarDetails: resolveBotAvatarDetails(bot),
         }),
       });
       await refreshBots();
@@ -63427,6 +63879,7 @@ function HomeContent(): React.JSX.Element {
           faceMouthRotationDeg: newBotFaceMouthRotationDeg,
           faceBlinkBar: newBotFaceBlinkBar,
           faceThinkingFrames: newBotFaceThinkingFrames,
+          avatarDetails: newBotAvatarDetails,
         }),
       });
       setNewBotName(copiedName);
@@ -63441,6 +63894,7 @@ function HomeContent(): React.JSX.Element {
       );
       setNewBotDeleteProtected(false);
       editOriginalRef.current = {
+        botId: result.bot?.id ?? null,
         name: copiedName,
         prompt: serializeStoredBotPrompt(
           parseStoredBotPrompt(copiedPrompt).fields,
@@ -63478,6 +63932,7 @@ function HomeContent(): React.JSX.Element {
         faceMouthRotationDeg: newBotFaceMouthRotationDeg,
         faceBlinkBar: newBotFaceBlinkBar,
         faceThinkingFrames: newBotFaceThinkingFrames,
+        avatarDetails: newBotAvatarDetails,
         profilePictureImageId: null,
       };
       if (result.bot?.id) {
@@ -64616,6 +65071,7 @@ function HomeContent(): React.JSX.Element {
       ? bot.openai_image_model.trim()
       : AUTO_MODEL_CHOICE;
     const seededFaceStyle = resolveBotFaceStyleForBot(bot);
+    const seededAvatarDetails = resolveBotAvatarDetails(bot);
     const seededProfilePictureImageId = bot.profile_picture_image_id?.trim() || null;
     setNewBotName(seededName);
     setBotProfile(seededProfile);
@@ -64651,12 +65107,14 @@ function HomeContent(): React.JSX.Element {
     setNewBotFaceMouthRotationDeg(seededFaceStyle.mouthRotationDeg);
     setNewBotFaceBlinkBar(seededFaceStyle.blinkBar);
     setNewBotFaceThinkingFrames(seededFaceStyle.thinkingFrames);
+    setNewBotAvatarDetails(seededAvatarDetails);
 	    setNewBotProfilePictureImageId(seededProfilePictureImageId);
 	    setBotProfileBuilderOpen(false);
 	    setBotAiParametersModalOpen(false);
     setBotProfileActivePage("purpose");
     setEditingBotId(bot.id);
     editOriginalRef.current = {
+      botId: bot.id,
       name: seededName,
       prompt: normalizedStoredPrompt,
       rawPrompt: rawStoredPrompt,
@@ -64691,6 +65149,7 @@ function HomeContent(): React.JSX.Element {
       faceMouthRotationDeg: seededFaceStyle.mouthRotationDeg,
       faceBlinkBar: seededFaceStyle.blinkBar,
       faceThinkingFrames: seededFaceStyle.thinkingFrames,
+      avatarDetails: seededAvatarDetails,
       profilePictureImageId: seededProfilePictureImageId,
     };
     setPanelError(null);
@@ -66385,6 +66844,7 @@ function HomeContent(): React.JSX.Element {
       setNewBotTopK(BOT_TOP_K_DEFAULT);
       setNewBotRepetitionPenalty(BOT_REPETITION_PENALTY_DEFAULT);
       editOriginalRef.current = {
+        botId: null,
         name: defaultBotName,
         prompt: defaultBotPrompt,
         rawPrompt: "",
@@ -66419,6 +66879,7 @@ function HomeContent(): React.JSX.Element {
           faceMouthRotationDeg: newBotFaceMouthRotationDeg,
         faceBlinkBar: newBotFaceBlinkBar,
         faceThinkingFrames: newBotFaceThinkingFrames,
+        avatarDetails: null,
         profilePictureImageId: null,
       };
       setSettings((previous) =>
@@ -66551,6 +67012,7 @@ function HomeContent(): React.JSX.Element {
           faceMouthRotationDeg: newBotFaceMouthRotationDeg,
         faceBlinkBar: newBotFaceBlinkBar,
         faceThinkingFrames: newBotFaceThinkingFrames,
+        avatarDetails: newBotAvatarDetails,
         profilePictureImageId: newBotProfilePictureImageId,
       },
       editOriginalRef.current
@@ -66578,6 +67040,7 @@ function HomeContent(): React.JSX.Element {
         openaiImageStored ? openaiImageStored : AUTO_MODEL_CHOICE
       );
       editOriginalRef.current = {
+        botId: id,
         name: trimmedName,
         prompt: serializeStoredBotPrompt(
           parseStoredBotPrompt(storedSystemPrompt).fields,
@@ -66615,6 +67078,7 @@ function HomeContent(): React.JSX.Element {
           faceMouthRotationDeg: newBotFaceMouthRotationDeg,
         faceBlinkBar: newBotFaceBlinkBar,
         faceThinkingFrames: newBotFaceThinkingFrames,
+        avatarDetails: newBotAvatarDetails,
         profilePictureImageId: newBotProfilePictureImageId,
       };
       setEditingBotId(id);
@@ -78422,6 +78886,10 @@ function HomeContent(): React.JSX.Element {
                 newBotFaceThinkingFrames,
                 editPristine.faceThinkingFrames
               )
+              || !avatarDetailsEqual(
+                newBotAvatarDetails,
+                editPristine.avatarDetails
+              )
               || newBotProfilePictureImageId !== editPristine.profilePictureImageId
           : false;
         const avatarCustomizerSaving = busy;
@@ -79714,6 +80182,8 @@ function HomeContent(): React.JSX.Element {
 	                  faceMouthRotationDeg={newBotFaceMouthRotationDeg}
 	                  faceBlinkBar={newBotFaceBlinkBar}
                   faceThinkingFrames={newBotFaceThinkingFrames}
+                  avatarDetails={newBotAvatarDetails}
+                  detailsEditorVisible={!editingDefaultBot}
                   hasUnsavedChanges={Boolean((editingBotId || editingDefaultBot) && hasEditChanges)}
                   canUndo={botAvatarUndoDepth > 0}
                   saving={avatarCustomizerSaving}
@@ -79856,6 +80326,12 @@ function HomeContent(): React.JSX.Element {
                     pushBotAvatarUndoSnapshot("thinking-frames");
                     handleNewBotFaceThinkingFramesChange(normalizedFrames);
                   }}
+	                  onAvatarDetailsApply={async (next) => {
+	                    const normalized = next ? parseBotAvatarDetailsV1(next) : null;
+	                    pushBotAvatarUndoSnapshot("avatar-details");
+	                    createBotAppearanceTouchedRef.current = true;
+	                    setNewBotAvatarDetails(normalized);
+	                  }}
                 />
               {!editingDefaultBot ? (
                 <>
@@ -87831,6 +88307,11 @@ function HomeContent(): React.JSX.Element {
                             showThinkingSpinner={seatIsThinkingThisSeat}
                             screenMaterialSeed={botScreenMaterialSeedForBot(bot, bot.id)}
                             frameMaterialSeed={botFrameMaterialSeedForBot(bot, bot.id)}
+                            avatarDetails={resolveBotAvatarDetails(bot)}
+                            avatarDetailsColor={normalizeAccentForTheme(
+                              bot.color ?? PRISM_DEFAULT_ACCENT,
+                              resolvedTheme
+                            )}
                           />
                         </span>
                       {seatTeamId && seatTeamLabel ? (
@@ -89804,9 +90285,6 @@ function HomeContent(): React.JSX.Element {
                 onInputActivity: markComposerTypingActivity,
                 onFocus: handleComposerFocus,
                 mentionBots: chatMentionsEnabled ? composeMentionBotPicks : [],
-                mentionCommitMode: "select-persona",
-                onMentionPersonaSelect: handleZenMentionPersonaSelection,
-                mentionPopoverFooter: renderZenPersonaTransitionChoiceControl(true),
                 commandPicks: composerCommandPicks,
                 toolPicks: COMPOSER_TOOL_PICKS,
                 promptPicks: commandCenterPromptPicks,
@@ -92324,15 +92802,6 @@ function HomeContent(): React.JSX.Element {
                         ? composeMentionBotPicks
                         : []
                     }
-                    mentionCommitMode={activeSideChatSurface ? undefined : "select-persona"}
-                    onMentionPersonaSelect={
-                      activeSideChatSurface ? undefined : handleZenMentionPersonaSelection
-                    }
-                    mentionPopoverFooter={
-                      activeSideChatSurface
-                        ? undefined
-                        : renderZenPersonaTransitionChoiceControl(true)
-                    }
                     commandPicks={composerCommandPicks}
                     toolPicks={COMPOSER_TOOL_PICKS}
                     promptPicks={commandCenterPromptPicks}
@@ -93098,6 +93567,7 @@ function HomeContent(): React.JSX.Element {
                         className={styles.chatBotPickerFrame}
                         data-starter-bot-affordance="true"
                         data-bot-picker-frame="true"
+                        data-canvas-bot-marquee-surface="true"
                         data-single-bot={geom.singleBot ? "true" : undefined}
                         data-returning-all={botPickerReturnAnimating ? "true" : undefined}
                         data-search-active={emptyStateSearchActive ? "true" : undefined}
@@ -93222,6 +93692,8 @@ function HomeContent(): React.JSX.Element {
                             aria-label={tileTraits.length > 0 ? `${b.name}, ${tileTraits.join(", ")}` : b.name}
                             className={tileClassName}
                             data-bot-id={b.id}
+                            data-canvas-bot-marquee-item="true"
+                            data-marquee-selected={isMarqueeSelected ? "true" : undefined}
                             data-zen-live-bot-chrome-avoid="true"
                             data-glyph-tooltip={botTileTooltip}
                             data-favorite={isFavorite ? "true" : undefined}
@@ -93233,11 +93705,13 @@ function HomeContent(): React.JSX.Element {
                             onPointerUp={handleBotContextPointerEnd}
                             onPointerCancel={handleBotContextPointerEnd}
                             onPointerEnter={e => {
+                              if (canvasBotMarqueeDragRef.current?.active) return;
                               if (e.pointerType !== "mouse" || geom.compactPixelGrid) return;
                               updatePickerParallax(e);
                             }}
                             onPointerMove={e => {
                               handleBotContextPointerMove(e);
+                              if (canvasBotMarqueeDragRef.current?.active) return;
                               if (geom.compactPixelGrid) return;
                               updatePickerParallax(e);
                             }}
@@ -93917,11 +94391,6 @@ function HomeContent(): React.JSX.Element {
           onInputActivity: markComposerTypingActivity,
           onFocus: handleComposerFocus,
           mentionBots: chatMentionsEnabled ? composeMentionBotPicks : [],
-          mentionCommitMode: chatLikeSurface ? "select-persona" : undefined,
-          onMentionPersonaSelect: chatLikeSurface ? handleZenMentionPersonaSelection : undefined,
-          mentionPopoverFooter: chatLikeSurface
-            ? renderZenPersonaTransitionChoiceControl(true)
-            : undefined,
           commandPicks: composerCommandPicks,
           toolPicks: COMPOSER_TOOL_PICKS,
           promptPicks: commandCenterPromptPicks,

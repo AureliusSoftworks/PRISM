@@ -16,6 +16,11 @@ export default defineConfig({
       name: "desktop-chromium",
       use: { ...devices["Desktop Chrome"] },
     },
+    {
+      name: "marquee-webkit",
+      grep: /@marquee/,
+      use: { ...devices["Desktop Safari"] },
+    },
   ],
   webServer: process.env.PRISM_E2E_BASE_URL
     ? undefined

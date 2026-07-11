@@ -24,17 +24,26 @@ export function zenLiveBotMouthShapeForTalkingState({
 type ZenLiveTalkingMouthShape = Exclude<ZenLiveBotMouthShape, "closed">;
 
 const ZEN_LIVE_TALKING_MOUTH_TRANSITIONS = {
-  "speech-closed": ["open-wide", "narrow", "open-small", "dot"],
-  narrow: ["open-small", "dot", "speech-closed"],
-  dot: ["speech-closed", "open-small"],
-  "open-small": ["speech-closed", "open-wide", "open-round"],
-  "open-wide": ["narrow", "open-small", "open-round"],
-  "open-round": ["open-small", "open-wide", "at"],
+  "speech-closed": ["open-wide", "open-wide", "open-small", "dot"],
+  narrow: ["open-small", "open-small", "open-wide", "dot"],
+  dot: ["speech-closed", "speech-closed", "open-small"],
+  "open-small": ["speech-closed", "speech-closed", "open-wide", "open-round"],
+  "open-wide": ["narrow", "narrow", "open-small", "open-round"],
+  "open-round": ["open-small", "open-small", "open-wide", "at"],
   at: ["open-round"],
 } as const satisfies Record<
   ZenLiveTalkingMouthShape,
   readonly ZenLiveTalkingMouthShape[]
 >;
+
+function zenLiveMouthShapeIsOpen(mouthShape: ZenLiveTalkingMouthShape): boolean {
+  return (
+    mouthShape === "open-small" ||
+    mouthShape === "open-wide" ||
+    mouthShape === "open-round" ||
+    mouthShape === "at"
+  );
+}
 
 function zenLiveTalkingMouthShapeAtPhase(
   phaseIndex: number,
@@ -42,13 +51,22 @@ function zenLiveTalkingMouthShapeAtPhase(
 ): ZenLiveTalkingMouthShape {
   const safePhaseIndex = Math.max(0, Math.floor(phaseIndex));
   let mouthShape: ZenLiveTalkingMouthShape = "speech-closed";
+  let consecutiveOpenShapes = 0;
   for (let index = 0; index < safePhaseIndex; index += 1) {
-    const choices: readonly ZenLiveTalkingMouthShape[] =
+    let choices: readonly ZenLiveTalkingMouthShape[] =
       ZEN_LIVE_TALKING_MOUTH_TRANSITIONS[mouthShape];
+    if (consecutiveOpenShapes >= 3) {
+      if (mouthShape === "open-round") choices = ["open-small"];
+      if (mouthShape === "open-wide") choices = ["narrow"];
+      if (mouthShape === "open-small") choices = ["speech-closed"];
+    }
     const roll = zenLiveMouthHashText(
       `${speechSeedText}:transition:${index}:${mouthShape}`,
     );
     mouthShape = choices[roll % choices.length]!;
+    consecutiveOpenShapes = zenLiveMouthShapeIsOpen(mouthShape)
+      ? consecutiveOpenShapes + 1
+      : 0;
   }
   return mouthShape;
 }

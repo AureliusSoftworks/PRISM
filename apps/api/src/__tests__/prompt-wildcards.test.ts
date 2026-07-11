@@ -5,11 +5,43 @@ import {
   applyPromptWildcardValues,
   generateScriptedPromptWildcardValue,
   promptWildcardNames,
+  resolvePromptBotWildcards,
   resolvePromptWildcardsWithModel,
 } from "../prompt-wildcards.ts";
 import { SCRIPTED_PROMPT_NOUN_PAIRS } from "../prompt-wildcard-seeds.ts";
 
 describe("prompt wildcard resolution", () => {
+  it("resolves BOT from the library after send and preserves stable bot ids", () => {
+    const result = resolvePromptBotWildcards({
+      prompt: "Ask {BOT}, then {BOT}, then {BOT}.",
+      receiverBotId: "receiver",
+      candidates: [
+        { id: "receiver", name: "Mira" },
+        { id: "a", name: "Alpha" },
+        { id: "b", name: "Beta" },
+      ],
+      randomIndex: () => 0,
+    });
+
+    assert.doesNotMatch(result.prompt, /\{BOT\}/u);
+    assert.deepEqual(
+      result.replacements.map((replacement) => replacement.botId),
+      ["a", "b", "a"]
+    );
+    assert.doesNotMatch(result.prompt, /prism-bot:\/\/receiver/u);
+  });
+
+  it("falls back to the receiver when it is the only eligible library bot", () => {
+    const result = resolvePromptBotWildcards({
+      prompt: "Ask {BOT}.",
+      receiverBotId: "receiver",
+      candidates: [{ id: "receiver", name: "Mira" }],
+      randomIndex: () => 0,
+    });
+    assert.match(result.prompt, /\[Mira\]\(prism-bot:\/\/receiver\)/u);
+    assert.equal(result.replacements[0]?.botId, "receiver");
+  });
+
   it("scripted built-in wildcard generation avoids used values when possible", () => {
     const usedValues = new Set<string>();
     const first = generateScriptedPromptWildcardValue("PERSON", usedValues);

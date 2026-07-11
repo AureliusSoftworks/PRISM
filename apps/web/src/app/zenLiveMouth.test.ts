@@ -218,8 +218,8 @@ test("Zen live mouth follows the shape-aware transition graph", () => {
     })
   );
   const allowedTransitions = {
-    "speech-closed": ["open-wide", "narrow", "open-small", "dot"],
-    narrow: ["open-small", "dot", "speech-closed"],
+    "speech-closed": ["open-wide", "open-small", "dot"],
+    narrow: ["open-small", "open-wide", "dot"],
     dot: ["speech-closed", "open-small"],
     "open-small": ["speech-closed", "open-wide", "open-round"],
     "open-wide": ["narrow", "open-small", "open-round"],
@@ -228,6 +228,7 @@ test("Zen live mouth follows the shape-aware transition graph", () => {
   } as const;
 
   assert.equal(shapes[0], "speech-closed");
+  let consecutiveOpenShapes = 0;
   for (let index = 1; index < shapes.length; index += 1) {
     const previous = shapes[index - 1]!;
     const current = shapes[index]!;
@@ -248,6 +249,13 @@ test("Zen live mouth follows the shape-aware transition graph", () => {
     if (current === "at" || previous === "at") {
       assert.ok(current === "open-round" || previous === "open-round");
     }
+    const currentIsOpen =
+      current === "open-small" ||
+      current === "open-wide" ||
+      current === "open-round" ||
+      current === "at";
+    consecutiveOpenShapes = currentIsOpen ? consecutiveOpenShapes + 1 : 0;
+    assert.ok(consecutiveOpenShapes <= 5);
   }
   for (const expectedShape of Object.keys(allowedTransitions)) {
     assert.ok(shapes.includes(expectedShape as (typeof shapes)[number]));

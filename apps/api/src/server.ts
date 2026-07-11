@@ -234,6 +234,7 @@ import { cleanupResolvedPromptWithModel } from "./composer-cleanup.ts";
 import {
   generateScriptedPromptWildcardValue,
   promptWildcardNames,
+  resolvePromptBotWildcards,
   resolvePromptWildcardsWithModel,
 } from "./prompt-wildcards.ts";
 import {
@@ -279,7 +280,9 @@ import {
   normalizeBotFaceMouthOffsetY,
   normalizeBotFaceMouthRotationDeg,
   normalizeBotFaceMouthScale,
+  parseStoredBotAvatarDetailsV1,
   parseStoredBotFaceThinkingFrames,
+  serializeBotAvatarDetailsV1,
   serializeBotFaceThinkingFrames,
   encodeComfyUiRemoteWorkflowModelId,
   formatComfyUiRemoteWorkflowLabel,
@@ -1599,6 +1602,50 @@ function readBotFaceThinkingFramesForResponse(
     normalizeBotFaceThinkingFrames(value) ??
     DEFAULT_BOT_FACE_THINKING_FRAMES
   );
+}
+
+function readBotAvatarDetailsForStorage(value: unknown): string {
+  return serializeBotAvatarDetailsV1(value);
+}
+
+function rejectUnsupportedBotAvatarPayload(body: Record<string, unknown>): void {
+  const allowedImageAdjacentFields = new Set([
+    "avatarDetails",
+    "localImageModel",
+    "openaiImageModel",
+    "profilePictureImageId",
+  ]);
+  for (const key of Object.keys(body)) {
+    if (allowedImageAdjacentFields.has(key)) continue;
+    const normalized = key.toLowerCase().replace(/[^a-z0-9]/gu, "");
+    const suspiciousKey =
+      normalized.includes("accessory") ||
+      /(?:avatar|portrait|profilepicture|profileimage).*(?:png|svg|image|url|data|file|base64|payload|raster)/u.test(
+        normalized
+      ) ||
+      /(?:png|svg|imageurl|dataurl|imagebase64|imagepayload|rasterpayload|rawimage|rawavatar)/u.test(
+        normalized
+      );
+    if (suspiciousKey) {
+      throw new Error(`Unsupported raw avatar field: ${key}.`);
+    }
+  }
+}
+
+function botRowForResponse(
+  row: Record<string, unknown>
+): Record<string, unknown> & { avatarDetails: ReturnType<typeof parseStoredBotAvatarDetailsV1> } {
+  const { avatar_details_json: avatarDetailsJson, ...bot } = row;
+  return {
+    ...bot,
+    avatarDetails: parseStoredBotAvatarDetailsV1(avatarDetailsJson),
+  };
+}
+
+function botRowsForResponse(
+  rows: Record<string, unknown>[]
+): Array<Record<string, unknown> & { avatarDetails: ReturnType<typeof parseStoredBotAvatarDetailsV1> }> {
+  return rows.map(botRowForResponse);
 }
 
 function normalizeDefaultBotSettingsForResponse(user: UserDbRow) {
@@ -4497,6 +4544,30 @@ function buildRoutes(): RouteDefinition[] {
       let promptWildcardsForChat = promptWildcards;
       let resolvedWildcardReplacements =
         promptShortcut?.wildcardReplacements ?? promptWildcards?.wildcardReplacements ?? [];
+      const initialWildcardNames = promptWildcardNames(messageForChat);
+      if (
+        !starterPrompt &&
+        (commandCenterPrompt || promptWildcards) &&
+        initialWildcardNames.includes("BOT")
+      ) {
+        const botCandidates = db
+          .prepare(
+            `SELECT id, name
+               FROM bots
+              WHERE (user_id = ? OR visibility = 'public')
+                AND chat_enabled = 1
+              ORDER BY created_at ASC, id ASC`
+          )
+          .all(userId) as Array<{ id: string; name: string }>;
+        const botWildcardResolution = resolvePromptBotWildcards({
+          prompt: messageForChat,
+          candidates: botCandidates,
+          receiverBotId: runtimeBotId ?? null,
+          existingReplacements: resolvedWildcardReplacements,
+        });
+        messageForChat = botWildcardResolution.prompt;
+        resolvedWildcardReplacements = botWildcardResolution.replacements;
+      }
       const hasTrueWildcardSlots = promptWildcardNames(messageForChat).length > 0;
       if (
         !starterPrompt &&
@@ -6258,6 +6329,9 @@ function buildRoutes(): RouteDefinition[] {
     route("PATCH", "/api/default-bot", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
+      if (Object.prototype.hasOwnProperty.call(body, "avatarDetails")) {
+        throw new Error("Avatar Details are only available for custom bots.");
+      }
       const faceEyesFont =
         readBotFaceFontForStorage(body.faceEyesFont) ?? DEFAULT_BOT_FACE_FONT_ID;
       const faceEyeCharacter = readBotFaceEyeCharacterForStorage(body.faceEyeCharacter);
@@ -7344,12 +7418,12 @@ function buildRoutes(): RouteDefinition[] {
 
       const updatedBot = db
         .prepare(
-          "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?"
+          "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?"
         )
-        .get(botId, userId);
+        .get(botId, userId) as Record<string, unknown>;
       json(ctx.res, 200, {
         ok: true,
-        bot: updatedBot,
+        bot: botRowForResponse(updatedBot),
         image: {
           id: imageId,
           url: displayUrl,
@@ -7364,6 +7438,7 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
       const body = ctx.body as Record<string, unknown>;
+      rejectUnsupportedBotAvatarPayload(body);
       const name = readString(body.name, "name");
       const systemPrompt = typeof body.systemPrompt === "string" ? body.systemPrompt : "";
       const model = readOptionalString(body.model);
@@ -7433,11 +7508,15 @@ function buildRoutes(): RouteDefinition[] {
         typeof body.glyph === "string" && body.glyph.trim().length > 0
           ? body.glyph.trim()
           : null;
+      const avatarDetailsJson =
+        body.avatarDetails === undefined || body.avatarDetails === null
+          ? null
+          : readBotAvatarDetailsForStorage(body.avatarDetails);
       const chatEnabled = body.chatEnabled === false ? 0 : 1;
       const botId = randomId(12);
       const now = new Date().toISOString();
       db.prepare(
-        "INSERT INTO bots (id, user_id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 'private', ?, ?)"
+        "INSERT INTO bots (id, user_id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 'private', ?, ?)"
       ).run(
         botId,
         userId,
@@ -7459,6 +7538,7 @@ function buildRoutes(): RouteDefinition[] {
         repetitionPenalty,
         color,
         glyph,
+        avatarDetailsJson,
         faceEyesFont,
         faceEyeCharacter,
         DEFAULT_BOT_FACE_GLYPH_ANIMATION,
@@ -7508,6 +7588,7 @@ function buildRoutes(): RouteDefinition[] {
           repetition_penalty: repetitionPenalty,
           color,
           glyph,
+          avatarDetails: parseStoredBotAvatarDetailsV1(avatarDetailsJson),
           face_eyes_font: faceEyesFont,
           face_eye_character: faceEyeCharacter,
           face_mouth_font: faceMouthFont,
@@ -7532,9 +7613,9 @@ function buildRoutes(): RouteDefinition[] {
     route("GET", "/api/bots", async (ctx) => {
       const userId = requireAuth(ctx);
       const rows = db.prepare(
-        "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC"
-      ).all(userId);
-      json(ctx.res, 200, { ok: true, bots: rows });
+        "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC"
+      ).all(userId) as Record<string, unknown>[];
+      json(ctx.res, 200, { ok: true, bots: botRowsForResponse(rows) });
     }),
     route("PATCH", "/api/bots/selected/delete-protection", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -7579,11 +7660,15 @@ function buildRoutes(): RouteDefinition[] {
       const updatedBots = result.ids.length > 0
         ? db
             .prepare(
-              `SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? AND id IN (${result.ids.map(() => "?").join(", ")})`
+              `SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? AND id IN (${result.ids.map(() => "?").join(", ")})`
             )
-            .all(userId, ...result.ids)
+            .all(userId, ...result.ids) as Record<string, unknown>[]
         : [];
-      json(ctx.res, 200, { ok: true, updated: result.updated, bots: updatedBots });
+      json(ctx.res, 200, {
+        ok: true,
+        updated: result.updated,
+        bots: botRowsForResponse(updatedBots),
+      });
     }),
     route("PATCH", "/api/bots/:id", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -7598,6 +7683,7 @@ function buildRoutes(): RouteDefinition[] {
         throw new Error("Bot not found.");
       }
       const body = ctx.body as Record<string, unknown>;
+      rejectUnsupportedBotAvatarPayload(body);
       const fields: string[] = [];
       const values: Array<string | number | null> = [];
       let shouldRefreshFacets = false;
@@ -7862,6 +7948,14 @@ function buildRoutes(): RouteDefinition[] {
           values.push(normalizedFaceThinkingFrames);
         }
       }
+      if (body.avatarDetails !== undefined) {
+        fields.push("avatar_details_json = ?");
+        values.push(
+          body.avatarDetails === null
+            ? null
+            : readBotAvatarDetailsForStorage(body.avatarDetails)
+        );
+      }
       if (body.profilePictureImageId !== undefined) {
         const profilePictureImageId = readProfilePictureImageIdForBot(
           db,
@@ -7940,10 +8034,10 @@ function buildRoutes(): RouteDefinition[] {
       }
       const updatedBot = db
         .prepare(
-          "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?"
+          "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?"
         )
-        .get(botId, userId);
-      json(ctx.res, 200, { ok: true, bot: updatedBot });
+        .get(botId, userId) as Record<string, unknown>;
+      json(ctx.res, 200, { ok: true, bot: botRowForResponse(updatedBot) });
     }),
     route("DELETE", "/api/bots/selected", async (ctx) => {
       const userId = requireAuth(ctx);

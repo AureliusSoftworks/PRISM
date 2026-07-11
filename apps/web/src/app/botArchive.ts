@@ -1,5 +1,7 @@
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import {
+  parseBotAvatarDetailsV1,
+  type BotAvatarDetailsV1,
   type BotFaceBlinkBar,
   type BotFaceFontId,
   type BotFaceGlyphAnimation,
@@ -25,6 +27,7 @@ export interface PrismBotArchiveJson {
     name: string;
     color?: string | null;
     glyph?: string | null;
+    avatarDetails?: BotAvatarDetailsV1 | null;
     temperature?: number;
     maxTokens?: number;
     topP?: number;
@@ -68,8 +71,9 @@ export function createPrismBotArchive(args: {
   botJson: PrismBotArchiveJson;
   memories: readonly string[];
 }): Uint8Array {
+  const botJson = validateBotJson(args.botJson);
   const files: Record<string, Uint8Array> = {
-    [BOT_ARCHIVE_BOT_ENTRY_NAME]: strToU8(`${JSON.stringify(args.botJson, null, 2)}\n`),
+    [BOT_ARCHIVE_BOT_ENTRY_NAME]: strToU8(`${JSON.stringify(botJson, null, 2)}\n`),
   };
   const memories = args.memories
     .map((memory) => memory.trim())
@@ -89,6 +93,9 @@ export function parsePrismBotArchive(bytes: Uint8Array): ParsedPrismBotArchive {
   }
 
   const entryNames = Object.keys(entries);
+  if (entryNames.some((name) => name.trim().toLowerCase() === "accessory.png")) {
+    throw new Error("Legacy accessory.png bot archives are not supported.");
+  }
   const unsupported = entryNames.filter((name) => !ALLOWED_BOT_ARCHIVE_ENTRIES.has(name));
   if (unsupported.length > 0) {
     throw new Error("Bot archive contains unsupported files.");
@@ -117,14 +124,101 @@ function parseBotJson(bytes: Uint8Array): PrismBotArchiveJson {
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new Error("bot.json must be a JSON object.");
   }
-  const botJson = parsed as Partial<PrismBotArchiveJson>;
+  return validateBotJson(parsed);
+}
+
+function validateBotJson(parsed: unknown): PrismBotArchiveJson {
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("bot.json must be a JSON object.");
+  }
+  const rootRecord = parsed as Record<string, unknown>;
+  if (Object.prototype.hasOwnProperty.call(rootRecord, "accessory")) {
+    if (rootRecord.accessory !== null) {
+      throw new Error("bot.json contains unsupported non-null legacy accessory metadata.");
+    }
+  }
+  const canonicalRoot = { ...rootRecord };
+  delete canonicalRoot.accessory;
+  const botJson = canonicalRoot as Partial<PrismBotArchiveJson>;
   if (botJson.schema !== PRISM_BOT_ARCHIVE_SCHEMA) {
     throw new Error("Unsupported bot archive schema.");
   }
   if (!botJson.bot || typeof botJson.bot.name !== "string" || !botJson.bot.name.trim()) {
     throw new Error("bot.json is missing a valid bot name.");
   }
-  return botJson as PrismBotArchiveJson;
+  rejectLegacyAvatarMetadata(canonicalRoot, false);
+  if (botJson.profile && typeof botJson.profile === "object" && !Array.isArray(botJson.profile)) {
+    rejectLegacyAvatarMetadata(
+      botJson.profile as unknown as Record<string, unknown>,
+      false
+    );
+  }
+  const bot = botJson.bot as PrismBotArchiveJson["bot"] & Record<string, unknown>;
+  rejectLegacyAvatarMetadata(bot, true);
+  let avatarDetails: BotAvatarDetailsV1 | null | undefined;
+  if (bot.avatarDetails !== undefined) {
+    if (bot.avatarDetails === null) {
+      avatarDetails = null;
+    } else {
+      rejectRawAvatarDetailsValue(bot.avatarDetails);
+      try {
+        avatarDetails = parseBotAvatarDetailsV1(bot.avatarDetails);
+      } catch (error) {
+        throw new Error(
+          `bot.json has invalid avatarDetails: ${
+            error instanceof Error ? error.message : "invalid structured recipe"
+          }`
+        );
+      }
+    }
+  }
+  return {
+    ...(botJson as PrismBotArchiveJson),
+    bot: {
+      ...botJson.bot,
+      ...(avatarDetails !== undefined ? { avatarDetails } : {}),
+    },
+  };
+}
+
+function rejectLegacyAvatarMetadata(
+  record: Record<string, unknown>,
+  allowStructuredAvatarDetails: boolean
+): void {
+  const unsupported = Object.keys(record).find((key) => {
+    if (allowStructuredAvatarDetails && key === "avatarDetails") return false;
+    const normalized = key.toLowerCase().replace(/[^a-z]/gu, "");
+    if (normalized === "localimagemodel" || normalized === "openaiimagemodel") {
+      return false;
+    }
+    const profileIndex = normalized.indexOf("profile");
+    const profileSuffix =
+      profileIndex >= 0 ? normalized.slice(profileIndex + "profile".length) : "";
+    return (
+      normalized.includes("accessory") ||
+      normalized.startsWith("avatar") ||
+      normalized.includes("portrait") ||
+      /(?:png|svg|imageurl|dataurl|imagebase64|imagepayload|raster)/u.test(
+        normalized
+      ) ||
+      (profileIndex >= 0 &&
+        /(?:picture|image|png|svg|url|data|file)/u.test(profileSuffix))
+    );
+  });
+  if (unsupported) {
+    throw new Error(`bot.json contains unsupported legacy avatar field: ${unsupported}.`);
+  }
+}
+
+function rejectRawAvatarDetailsValue(value: unknown): void {
+  if (typeof value !== "string") return;
+  const trimmed = value.trim();
+  if (
+    /^(?:data:image\/|https?:\/\/|<\?xml\b|<svg\b)/iu.test(trimmed) ||
+    /\.(?:png|svg)(?:[?#].*)?$/iu.test(trimmed)
+  ) {
+    throw new Error("bot.json avatarDetails must be a structured recipe, not PNG, SVG, data, or URL content.");
+  }
 }
 
 function parseMemoriesJson(bytes: Uint8Array | undefined): string[] {

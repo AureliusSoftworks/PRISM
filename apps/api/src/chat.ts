@@ -10,6 +10,7 @@ import {
   findMemoryByCue,
   memoryQualifiesLongTerm,
   persistMemoryCandidates,
+  retrieveRecentBotMemoriesForStarter,
   retrieveRecentMemoriesForStarter,
   retrieveRelevantMemories,
 } from "./memory.ts";
@@ -132,6 +133,7 @@ import {
   buildZenPersonaContinuityPromptContext,
   createZenPersonaSessionMemoryCheckpoint,
   createZenSessionMemoryCheckpoint,
+  listZenSessionMemories,
   loadZenSessionMemoryOverview,
   pruneExpiredZenSessionMemories,
   userMessageRequestsZenSessionMemory,
@@ -3613,9 +3615,11 @@ export function extractPrismBotMentionIdsFromMessage(raw: string): string[] {
 }
 
 const MENTIONED_BOT_CONTEXT_MAX_BOTS = 5;
-const MENTIONED_BOT_PROFILE_MAX_CHARS = 900;
-const MENTIONED_BOT_MEMORY_MAX_CHARS = 220;
-const MENTIONED_BOT_MEMORY_LIMIT = 4;
+const MENTIONED_BOT_REFERENCE_MAX_BOTS = 40;
+const MENTIONED_BOT_PROFILE_MAX_CHARS = 650;
+const MENTIONED_BOT_SESSION_MAX_CHARS = 420;
+const MENTIONED_BOT_MEMORY_MAX_CHARS = 180;
+const MENTIONED_BOT_SHORT_TERM_MEMORY_LIMIT = 2;
 
 interface MentionedBotContextRow {
   id: string;
@@ -3644,23 +3648,68 @@ function compactMentionedBotContextText(text: string, maxChars: number): string 
   return clampBoundaryContext(normalized, maxChars);
 }
 
-async function buildMentionedBotPromptContexts(args: {
+export interface MentionedBotPromptContextResult {
+  contexts: string[];
+  overflowNames: string[];
+}
+
+function latestMentionedBotSessionRecap(args: {
+  db: DatabaseSync;
+  userId: string;
+  userKey: Buffer;
+  botId: string;
+}): string | null {
+  const candidates: Array<{ text: string; createdAt: string }> = [];
+  try {
+    const zen = listZenSessionMemories(args.db, args.userId, args.userKey, new Date(), {
+      botId: args.botId,
+      limit: 1,
+    })[0];
+    if (zen?.text) {
+      candidates.push({ text: zen.text, createdAt: zen.createdAt });
+    }
+  } catch {
+    /* best-effort session continuity */
+  }
+  try {
+    const coffee = loadRecentCoffeeContinuityContexts({
+      db: args.db,
+      userId: args.userId,
+      botId: args.botId,
+      limit: 1,
+    })[0];
+    if (coffee?.summary) {
+      candidates.push({ text: coffee.summary, createdAt: coffee.updatedAt });
+    }
+  } catch {
+    /* best-effort session continuity */
+  }
+  const latest = candidates.sort(
+    (a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)
+  )[0];
+  return latest
+    ? compactMentionedBotContextText(latest.text, MENTIONED_BOT_SESSION_MAX_CHARS)
+    : null;
+}
+
+export async function buildMentionedBotPromptContexts(args: {
   db: DatabaseSync;
   userId: string;
   userKey: Buffer;
   message: string;
+  receiverBotId?: string | null;
   userDisplayName?: string;
   includeMemories: boolean;
-}): Promise<string[]> {
+}): Promise<MentionedBotPromptContextResult> {
   const mentionIds = extractPrismBotMentionIdsFromMessage(args.message).slice(
     0,
-    MENTIONED_BOT_CONTEXT_MAX_BOTS
+    MENTIONED_BOT_REFERENCE_MAX_BOTS
   );
-  if (mentionIds.length === 0) return [];
+  if (mentionIds.length === 0) return { contexts: [], overflowNames: [] };
 
   const botColumns = getTableColumnNames(args.db, "bots");
   if (!botColumns.has("id") || !botColumns.has("name") || !botColumns.has("user_id")) {
-    return [];
+    return { contexts: [], overflowNames: [] };
   }
 
   const placeholders = mentionIds.map(() => "?").join(", ");
@@ -3684,14 +3733,20 @@ async function buildMentionedBotPromptContexts(args: {
       )
       .all(...mentionIds, args.userId) as unknown as MentionedBotContextRow[];
   } catch {
-    return [];
+    return { contexts: [], overflowNames: [] };
   }
 
   const rowsById = new Map(rows.map((row) => [row.id, row]));
+  const externalRows = mentionIds
+    .filter((mentionId) => !sameChatBotId(mentionId, args.receiverBotId ?? null))
+    .map((mentionId) => rowsById.get(mentionId))
+    .filter((row): row is MentionedBotContextRow => Boolean(row));
+  const hydratedRows = externalRows.slice(0, MENTIONED_BOT_CONTEXT_MAX_BOTS);
+  const overflowNames = externalRows
+    .slice(MENTIONED_BOT_CONTEXT_MAX_BOTS)
+    .map((row) => row.name?.trim() || "Unnamed bot");
   const contexts: string[] = [];
-  for (const mentionId of mentionIds) {
-    const row = rowsById.get(mentionId);
-    if (!row) continue;
+  for (const row of hydratedRows) {
     const displayName = row.name?.trim() || "Unnamed bot";
     const profileExcerpt = compactMentionedBotContextText(
       stripBotProfileMetaSuffix(row.system_prompt ?? ""),
@@ -3703,17 +3758,28 @@ async function buildMentionedBotPromptContexts(args: {
     }
 
     if (args.includeMemories) {
+      const sessionRecap = latestMentionedBotSessionRecap({
+        db: args.db,
+        userId: args.userId,
+        userKey: args.userKey,
+        botId: row.id,
+      });
+      if (sessionRecap) {
+        lines.push(`  Most recent session recap: ${sessionRecap}`);
+      }
       try {
-        const scopedMemories = await retrieveRelevantMemories(
+        const recentMemories = retrieveRecentBotMemoriesForStarter(
           args.db,
           args.userId,
-          args.message,
           args.userKey,
           row.id,
-          MENTIONED_BOT_MEMORY_LIMIT
+          20
         );
-        const memoryLines = scopedMemories
-          .filter((memory) => memory.botId === row.id)
+        const shortTerm = recentMemories.filter((memory) => memory.tier !== "long_term");
+        const selectedMemories = shortTerm.length > 0
+          ? shortTerm.slice(0, MENTIONED_BOT_SHORT_TERM_MEMORY_LIMIT)
+          : recentMemories.filter((memory) => memory.tier === "long_term").slice(0, 1);
+        const memoryLines = selectedMemories
           .map((memory) =>
             compactMentionedBotContextText(
               formatMemoryHintForPrompt(memory.text, args.userDisplayName),
@@ -3722,7 +3788,11 @@ async function buildMentionedBotPromptContexts(args: {
           )
           .filter((line) => line.length > 0);
         if (memoryLines.length > 0) {
-          lines.push("  Relevant memories in this bot's scope:");
+          lines.push(
+            shortTerm.length > 0
+              ? "  Recent short-term memories in this bot's scope:"
+              : "  Long-term memory fallback in this bot's scope:"
+          );
           lines.push(...memoryLines.map((line) => `  - ${line}`));
         }
       } catch {
@@ -3733,7 +3803,7 @@ async function buildMentionedBotPromptContexts(args: {
     contexts.push(lines.join("\n"));
   }
 
-  return contexts;
+  return { contexts, overflowNames };
 }
 
 const ASKQUESTION_REQUEST_PATTERN =
@@ -5772,6 +5842,7 @@ function buildPromptMessages(args: {
   coffeeContinuityContexts?: CoffeeContinuityContext[];
   memoryLines: string[];
   mentionedBotContexts?: string[];
+  mentionedBotOverflowNames?: string[];
   memoryClarification?: string | null;
   sessionResumeContext?: SessionResumeContext | null;
   topicReset?: boolean;
@@ -5878,6 +5949,16 @@ function buildPromptMessages(args: {
         "Prism bot mentions in the latest user message:",
         "Use this as reference context for mentioned library bots. Stay in the current Prism/persona voice unless the user explicitly asks one of these bots to speak or roleplay.",
         ...args.mentionedBotContexts,
+      ].join("\n"),
+    });
+  }
+  if (args.mentionedBotOverflowNames && args.mentionedBotOverflowNames.length > 0) {
+    promptMessages.push({
+      role: "system",
+      content: [
+        "Additional bot names referenced in the latest user message:",
+        "These names did not open those bots' profiles or memory stores. Use only memories already present in your own context; do not invent familiarity.",
+        ...args.mentionedBotOverflowNames.map((name) => `- ${name}`),
       ].join("\n"),
     });
   }
@@ -6067,7 +6148,12 @@ async function handleCompanionChatTurn(args: {
   isStarterPrompt: boolean;
   retrievalMode: ModeRuntimePlan["retrievalMode"];
   userDisplayName?: string;
-}): Promise<{ threadSummary: string | null; memoryLines: string[]; mentionedBotContexts: string[] }> {
+}): Promise<{
+  threadSummary: string | null;
+  memoryLines: string[];
+  mentionedBotContexts: string[];
+  mentionedBotOverflowNames: string[];
+}> {
   const {
     mode,
     db,
@@ -6082,6 +6168,7 @@ async function handleCompanionChatTurn(args: {
   } = args;
   let memoryLines: string[] = [];
   let mentionedBotContexts: string[] = [];
+  let mentionedBotOverflowNames: string[] = [];
   const botScopedOnly = mode === "chat";
   if (isStarterPrompt && retrievalMode === "cross_thread") {
     memoryLines = retrieveRecentMemoriesForStarter(
@@ -6093,30 +6180,36 @@ async function handleCompanionChatTurn(args: {
       .filter((memory) => !botScopedOnly || sameChatBotId(memory.botId, activeMemoryBotId))
       .map((memory) => memory.text);
   } else if (!isStarterPrompt) {
+    const mentioned = await buildMentionedBotPromptContexts({
+      db,
+      userId,
+      userKey,
+      message,
+      receiverBotId: activeMemoryBotId,
+      userDisplayName: args.userDisplayName,
+      includeMemories: retrievalMode === "cross_thread",
+    });
+    mentionedBotContexts = mentioned.contexts;
+    mentionedBotOverflowNames = mentioned.overflowNames;
+    const memoryQuery = mentionedBotOverflowNames.length > 0
+      ? `${message}\nMentioned bot name cues: ${mentionedBotOverflowNames.join(", ")}`
+      : message;
     memoryLines = await retrieveMemoriesWithFallback(
       db,
       provider,
       userId,
-      message,
+      memoryQuery,
       userKey,
       activeMemoryBotId,
       mode === "zen",
       botScopedOnly
     );
-    mentionedBotContexts = await buildMentionedBotPromptContexts({
-      db,
-      userId,
-      userKey,
-      message,
-      userDisplayName: args.userDisplayName,
-      includeMemories: retrievalMode === "cross_thread" && mode === "zen",
-    });
   }
   const threadSummary =
     retrievalMode === "cross_thread"
       ? getLatestThreadSummary(db, userId, activeConversationId, mode)
       : null;
-  return { threadSummary, memoryLines, mentionedBotContexts };
+  return { threadSummary, memoryLines, mentionedBotContexts, mentionedBotOverflowNames };
 }
 
 async function handleSandboxTurn(args: {
@@ -6127,27 +6220,44 @@ async function handleSandboxTurn(args: {
   retrievalMode: ModeRuntimePlan["retrievalMode"];
   message: string;
   userKey: Buffer;
+  receiverBotId?: string | null;
   userDisplayName?: string;
-}): Promise<{ threadSummary: string | null; memoryLines: string[]; mentionedBotContexts: string[] }> {
+}): Promise<{
+  threadSummary: string | null;
+  memoryLines: string[];
+  mentionedBotContexts: string[];
+  mentionedBotOverflowNames: string[];
+}> {
   const { db, userId, activeConversationId, isStarterPrompt, retrievalMode } = args;
   const threadSummary =
     retrievalMode === "thread_only"
       ? getLatestThreadSummary(db, userId, activeConversationId, "sandbox")
       : null;
-  const mentionedBotContexts = !isStarterPrompt
+  const mentioned = !isStarterPrompt
     ? await buildMentionedBotPromptContexts({
         db,
         userId,
         userKey: args.userKey,
         message: args.message,
+        receiverBotId: args.receiverBotId ?? null,
         userDisplayName: args.userDisplayName,
         includeMemories: false,
       })
-    : [];
+    : { contexts: [], overflowNames: [] };
   if (isStarterPrompt) {
-    return { threadSummary, memoryLines: [], mentionedBotContexts };
+    return {
+      threadSummary,
+      memoryLines: [],
+      mentionedBotContexts: mentioned.contexts,
+      mentionedBotOverflowNames: mentioned.overflowNames,
+    };
   }
-  return { threadSummary, memoryLines: [], mentionedBotContexts };
+  return {
+    threadSummary,
+    memoryLines: [],
+    mentionedBotContexts: mentioned.contexts,
+    mentionedBotOverflowNames: mentioned.overflowNames,
+  };
 }
 
 export function loadPersistedConversationForChatResponse(args: {
@@ -7330,6 +7440,7 @@ export async function processChatMessage(
   let threadSummary: string | null = null;
   let memoryLines: string[] = [];
   let mentionedBotContexts: string[] = [];
+  let mentionedBotOverflowNames: string[] = [];
   let coffeeContinuityContexts: CoffeeContinuityContext[] = [];
   if (
     !incognitoForTurn &&
@@ -7349,7 +7460,7 @@ export async function processChatMessage(
             provider,
             userId,
             activeConversationId,
-            message,
+            message: modelUserMessage,
             userKey,
             activeMemoryBotId,
             isStarterPrompt,
@@ -7362,13 +7473,15 @@ export async function processChatMessage(
             activeConversationId,
             isStarterPrompt,
             retrievalMode,
-            message,
+            message: modelUserMessage,
             userKey,
+            receiverBotId: activeMemoryBotId,
             userDisplayName: settings.userDisplayName,
           });
     threadSummary = pipelineResult.threadSummary;
     memoryLines = pipelineResult.memoryLines;
     mentionedBotContexts = pipelineResult.mentionedBotContexts;
+    mentionedBotOverflowNames = pipelineResult.mentionedBotOverflowNames;
   }
   if (
     isCompanionMode(mode) &&
@@ -7392,7 +7505,7 @@ export async function processChatMessage(
   pushBackendEvent(
     "context",
     "Loaded model context",
-    `history=${history.length}; historyCutoff=${historyCutoff ?? "none"}; threadSummary=${threadSummary ? `${threadSummary.length} chars` : "none"}; memoryLines=${memoryLines.length}; mentionedBots=${mentionedBotContexts.length}; coffeeContinuity=${coffeeContinuityContexts.length}; askQuestion=${askQuestionMode}; activeBot=${activeMemoryBotId ?? "default"}; moodCooldownMemory=${skipMemoryForMoodCooldownTurn ? "skipped" : "normal"}`
+    `history=${history.length}; historyCutoff=${historyCutoff ?? "none"}; threadSummary=${threadSummary ? `${threadSummary.length} chars` : "none"}; memoryLines=${memoryLines.length}; mentionedBots=${mentionedBotContexts.length}; mentionedBotNames=${mentionedBotOverflowNames.length}; coffeeContinuity=${coffeeContinuityContexts.length}; askQuestion=${askQuestionMode}; activeBot=${activeMemoryBotId ?? "default"}; moodCooldownMemory=${skipMemoryForMoodCooldownTurn ? "skipped" : "normal"}`
   );
 
   let userMessageId: string | null = null;
@@ -7562,6 +7675,7 @@ export async function processChatMessage(
     coffeeContinuityContexts,
     memoryLines,
     mentionedBotContexts,
+    mentionedBotOverflowNames,
     memoryClarification,
     sessionResumeContext: settings.sessionResumeContext,
     topicReset: settings.topicReset === true,

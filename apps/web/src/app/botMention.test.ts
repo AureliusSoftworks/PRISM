@@ -112,6 +112,23 @@ describe("filterBotsForMentionQuery", () => {
     assert.equal(r.length, 1);
     assert.equal(r[0]!.id, "1");
   });
+
+  it("uses picker-only labels and caps the compact menu at five rows", () => {
+    const many = [
+      { id: "self", name: "Mira", pickerLabel: "You", color: null, glyph: null },
+      ...Array.from({ length: 7 }, (_, index) => ({
+        id: `bot-${index}`,
+        name: `Bot ${index}`,
+        color: null,
+        glyph: null,
+      })),
+    ];
+    assert.equal(filterBotsForMentionQuery(many, "you")[0]?.id, "self");
+    assert.deepEqual(
+      filterBotsForMentionQuery(many, "").map((bot) => bot.id),
+      ["self", "bot-0", "bot-1", "bot-2", "bot-3"]
+    );
+  });
 });
 
 describe("mentionTabPlainTextAction", () => {

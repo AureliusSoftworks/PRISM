@@ -6,6 +6,8 @@ export interface PromptShortcutFlag {
 export interface PromptShortcutWildcardReplacement {
   key: string;
   value: string;
+  /** Stable library bot id when this replacement resolved a bot reference. */
+  botId?: string;
   start?: number;
   end?: number;
   source?: "deck" | "option" | "wildcard";
@@ -42,10 +44,18 @@ export interface BuiltInPromptWildcardSlot {
   aliases: readonly string[];
   title: string;
   generationHint: string;
-  pickerVisibility: "primary" | "searchable";
+  pickerVisibility: "primary" | "searchable" | "hidden";
 }
 
 export const BUILT_IN_PROMPT_WILDCARD_SLOTS = [
+  {
+    key: "BOT",
+    label: "BOT",
+    aliases: ["bot"],
+    title: "Choose a random bot from your library after sending.",
+    generationHint: "Resolve this from the user's bot library; never generate a fictional bot.",
+    pickerVisibility: "hidden",
+  },
   {
     key: "NUM",
     label: "#",
@@ -708,9 +718,11 @@ function normalizePromptWildcardReplacements(
             replacementRow.source === "wildcard"
               ? replacementRow.source
               : undefined;
+          const botId = readPromptShortcutString(replacementRow.botId, 200);
           return {
             key,
             value: replacementValue,
+            ...(botId ? { botId } : {}),
             ...(hasValidRange ? { start, end } : {}),
             ...(source ? { source } : {}),
           };

@@ -28,6 +28,23 @@ const testBots = ["a", "b", "c"].map((id, index) => ({
   repetition_penalty: 1,
   color: ["#8b5cf6", "#06b6d4", "#f59e0b"][index],
   glyph: "circle",
+  avatarDetails:
+    index === 0
+      ? {
+          version: 1,
+          screen: {
+            stamps: [
+              {
+                id: "round-glasses",
+                offsetX: 0,
+                offsetY: 0,
+                scalePct: 100,
+              },
+            ],
+            paintMaskBase64: null,
+          },
+        }
+      : null,
   chat_enabled: 1,
 }));
 
@@ -129,6 +146,29 @@ async function installAuthenticatedApi(page: Page): Promise<void> {
         ],
       });
     }
+    if (pathname === "/api/conversations/zen/open") {
+      return json({ conversationId: testConversation.id });
+    }
+    if (pathname === `/api/conversations/${testConversation.id}/summary`) {
+      return json({ summary: null });
+    }
+    if (pathname === `/api/conversations/${testConversation.id}/summarization-debug`) {
+      return json({
+        debug: {
+          conversationId: testConversation.id,
+          mode: "zen",
+          inProgress: false,
+          latestSummary: null,
+          latestDisplaySummary: null,
+          latestSummaryAt: null,
+          messagesSinceLastCompaction: 0,
+          summaryCount: 0,
+        },
+      });
+    }
+    if (pathname === `/api/conversations/${testConversation.id}/title`) {
+      return json({ conversation: testConversation });
+    }
     if (/^\/api\/conversations\/[^/]+$/.test(pathname)) {
       return json({ conversation: testConversation });
     }
@@ -183,6 +223,101 @@ test.describe("PRISM desktop smoke", () => {
     await expect(page.getByRole("button", { name: /Coffee/ }).first()).toBeVisible();
     await expect(page.locator('[data-mode="picker"]')).toBeVisible();
     await expect(page.getByText("Select bots to begin")).toBeVisible();
+  });
+
+  test("marquee selects bots in a hydrated empty Chat without leaving zoom behind @marquee", async ({ page }) => {
+    await installAuthenticatedApi(page);
+    await page.goto("/?view=chat");
+
+    const surface = page.locator('[data-canvas-bot-marquee-surface="true"]');
+    const cards = surface.locator('[data-canvas-bot-marquee-item="true"]');
+    await expect(surface).toBeVisible();
+    await expect(cards).toHaveCount(3);
+
+    const firstBox = await cards.nth(0).boundingBox();
+    const secondBox = await cards.nth(1).boundingBox();
+    expect(firstBox).not.toBeNull();
+    expect(secondBox).not.toBeNull();
+    if (!firstBox || !secondBox) return;
+
+    await page.mouse.move(firstBox.x + firstBox.width / 2, firstBox.y + firstBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(
+      secondBox.x + secondBox.width / 2,
+      secondBox.y + secondBox.height / 2,
+      { steps: 8 }
+    );
+    await page.mouse.up();
+
+    await expect(surface.locator('[data-marquee-selected="true"]')).toHaveCount(2);
+    await expect(surface).not.toHaveAttribute("data-canvas-bot-marquee-active", "true");
+
+    await page.mouse.move(8, 120);
+    await expect.poll(async () => surface.evaluate((node) => ({
+      x: (node as HTMLElement).style.getPropertyValue("--picker-parallax-x"),
+      y: (node as HTMLElement).style.getPropertyValue("--picker-parallax-y"),
+    }))).toEqual({ x: "0px", y: "0px" });
+    await expect.poll(async () => cards.evaluateAll((nodes) =>
+      nodes.map((node) => ({
+        transform: getComputedStyle(node).transform,
+        opacity: getComputedStyle(node).opacity,
+      }))
+    )).toEqual([
+      { transform: "none", opacity: "1" },
+      { transform: "none", opacity: "1" },
+      { transform: "none", opacity: "1" },
+    ]);
+  });
+
+  test("custom bot draft edits Avatar Details as a guarded local recipe", async ({ page }) => {
+    await installAuthenticatedApi(page);
+    await page.goto("/");
+
+    await page.getByRole("button", { name: "Open bot customizer" }).click();
+    await page.getByRole("button", { name: /Create new bot/ }).click();
+    await page.getByPlaceholder("Name this bot").fill("Draft Detail Bot");
+    await page
+      .getByRole("button", { name: "Open Avatar Studio to edit bot avatar" })
+      .click();
+
+    const studio = page.getByRole("dialog", { name: "Draft Detail Bot" });
+    await expect(studio).toBeVisible();
+    await studio.getByRole("tab", { name: "Details" }).click();
+    const detailsEditor = studio.getByRole("region", {
+      name: "Avatar details editor",
+    });
+    await expect(detailsEditor).toBeVisible();
+    await detailsEditor.getByRole("button", { name: "Round glasses" }).click();
+    await expect(studio.locator('[data-avatar-details-mask="true"]')).toBeVisible();
+    await expect(detailsEditor.getByText("Working copy · not applied")).toBeVisible();
+
+    await studio.getByRole("tab", { name: "Face" }).click();
+    const leavePrompt = page.getByRole("alertdialog", {
+      name: "Apply avatar details?",
+    });
+    await expect(leavePrompt).toBeVisible();
+    await leavePrompt.getByRole("button", { name: "Keep editing" }).click();
+    await detailsEditor.getByRole("button", { name: "Apply", exact: true }).click();
+    await expect(detailsEditor.getByText("Applied recipe")).toBeVisible();
+  });
+
+  test("existing custom bot Studio renders its saved Avatar Details", async ({ page }) => {
+    await installAuthenticatedApi(page);
+    await page.goto("/");
+
+    await page.getByRole("button", { name: "Open bot customizer" }).click();
+    await page.getByRole("button", { name: /Browse bots/ }).click();
+    await page
+      .getByRole("button", { name: "Open options for Test Bot 1" })
+      .click();
+    await page.getByRole("button", { name: /Customize/ }).click();
+    await page
+      .getByRole("button", { name: "Open Avatar Studio to edit bot avatar" })
+      .click();
+
+    const studio = page.getByRole("dialog", { name: "Test Bot 1" });
+    await expect(studio.getByRole("tab", { name: "Details" })).toBeVisible();
+    await expect(studio.locator('[data-avatar-details-mask="true"]')).toBeVisible();
   });
 
 });
