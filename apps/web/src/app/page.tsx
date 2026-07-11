@@ -59587,11 +59587,7 @@ function HomeContent(): React.JSX.Element {
       const botTileTarget = target.closest<HTMLElement>("[data-bot-id]");
       const startsOnBotTile = botTileTarget !== null;
       pressedBotId = botTileTarget?.dataset.botId ?? null;
-      const botTileMarqueeGesture =
-        startsOnBotTile && event.shiftKey && !event.ctrlKey && !event.metaKey;
-      if (startsOnBotTile && !botTileMarqueeGesture) {
-        return false;
-      }
+      const botTileMarqueeGesture = startsOnBotTile;
       const blockedInteractiveTarget = target.closest(BOT_CANVAS_BACKGROUND_INTERACTIVE_SELECTOR);
       const allowPickerFrameDrag =
         blockedInteractiveTarget instanceof HTMLElement &&
@@ -59624,11 +59620,6 @@ function HomeContent(): React.JSX.Element {
       tileRects,
     };
     setCanvasBotMarqueeRect(null);
-    try {
-      frame.setPointerCapture(event.pointerId);
-    } catch {
-      // Some browser/test environments do not expose pointer capture.
-    }
     return true;
   }, [canvasSelectedBotIds, detail, pendingReplyVisible]);
 
@@ -59642,6 +59633,11 @@ function HomeContent(): React.JSX.Element {
     if (!drag.active) {
       if (Math.hypot(dx, dy) < BOT_MARQUEE_DRAG_THRESHOLD_PX) return true;
       drag.active = true;
+      try {
+        drag.frame.setPointerCapture(event.pointerId);
+      } catch {
+        // Some browser/test environments do not expose pointer capture.
+      }
     }
     event.preventDefault();
     updateCanvasBotMarqueeSelection(drag, event.clientX, event.clientY);
@@ -61013,20 +61009,12 @@ function HomeContent(): React.JSX.Element {
                     toggleCanvasBotSelection(b.id);
                     return;
                   }
-                  const clickShouldSelectDirectly =
-                    e.detail === 0 || lastBotPickerPointerTypeRef.current !== "touch";
-                  const shouldRelocateHue =
-                    !clickShouldSelectDirectly &&
-                    !emptyStateSearchActive &&
-                    botHasFilterableColor(b) &&
-                    !hueFilterActive &&
-                    pickerUsesHueNavigation(geom, viewportWidth);
-                  if (shouldRelocateHue) {
-                    const { h } = hexToHsl(b.color!.trim());
-                    const lensPosition = hueLensPositionForHue(h);
-                    setHueFilterCenter(lensPosition);
-                    setSelectedBotId(null);
-                    return;
+                  const isDesktopMousePixelClick =
+                    geom.compactPixelGrid &&
+                    e.detail > 0 &&
+                    lastBotPickerPointerTypeRef.current === "mouse";
+                  if (isDesktopMousePixelClick) {
+                    focusHueLensOnBot(b);
                   }
                   commitEmptyStateBotSelection(b.id);
                 }}
@@ -91896,22 +91884,12 @@ function HomeContent(): React.JSX.Element {
                               // Grayscale bots fall through to direct
                               // selection because the lens cannot target
                               // them.
-                              const clickShouldSelectDirectly =
-                                e.detail === 0 || lastBotPickerPointerTypeRef.current !== "touch";
-                              const shouldRelocateHue =
-                                !clickShouldSelectDirectly &&
-                                !emptyStateSearchActive &&
-                                botHasFilterableColor(b) &&
-                                !hueFilterActive &&
-                                pickerUsesHueNavigation(geom, viewportWidth);
-                              if (
-                                shouldRelocateHue
-                              ) {
-                                const { h } = hexToHsl(b.color!.trim());
-                                const lensPosition = hueLensPositionForHue(h);
-                                setHueFilterCenter(lensPosition);
-                                setSelectedBotId(null);
-                                return;
+                              const isDesktopMousePixelClick =
+                                geom.compactPixelGrid &&
+                                e.detail > 0 &&
+                                lastBotPickerPointerTypeRef.current === "mouse";
+                              if (isDesktopMousePixelClick) {
+                                focusHueLensOnBot(b);
                               }
                               commitEmptyStateBotSelection(b.id);
                             }}
