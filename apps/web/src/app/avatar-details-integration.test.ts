@@ -17,9 +17,13 @@ const maskCss = readFileSync(
 );
 
 describe("Avatar Details Studio integration", () => {
-  it("shows Details for custom drafts and edits, but excludes Default Prism", () => {
+  it("shows Details only for custom bots on development branches", () => {
     assert.match(pageSource, /\{ value: "details", label: "Details" \}/);
-    assert.match(pageSource, /detailsEditorVisible=\{!editingDefaultBot\}/);
+    assert.match(
+      pageSource,
+      /detailsEditorVisible=\{AVATAR_DETAILS_PANE_ENABLED && !editingDefaultBot\}/
+    );
+    assert.match(pageSource, /const AVATAR_DETAILS_PANE_ENABLED = prismAvatarDetailsPaneEnabled/);
     assert.match(
       pageSource,
       /detailsEditorVisible \|\| tab\.value !== "details"/

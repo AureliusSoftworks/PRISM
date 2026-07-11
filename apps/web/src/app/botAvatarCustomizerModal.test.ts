@@ -167,9 +167,32 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.match(cssSource, /\.botAvatarOverrideControl/);
   assert.match(cssSource, /\.botAvatarCustomOptionInput/);
   assert.match(cssSource, /\.botAvatarGlyphAnimationControl/);
+  assert.match(
+    cssSource,
+    /\.botAvatarGlyphAnimationControl > div\s*\{[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\)/
+  );
+  assert.match(pageSource, /pulsate:\s*"Pulse"/);
   assert.match(cssSource, /\.botAvatarIdentitySection/);
   assert.match(cssSource, /\.botAvatarCustomMotionRow/);
-  assert.match(cssSource, /\.botAvatarMouthAnimationRow/);
+  assert.match(cssSource, /\.botAvatarCustomMotionRowCombined/);
+  assert.match(cssSource, /\.botAvatarGlyphRotationField/);
+  assert.match(
+    cssSource,
+    /\.botAvatarCustomMotionRowCombined\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 3fr\) minmax\(0, 1\.35fr\)/
+  );
+  assert.match(
+    cssSource,
+    /\.botAvatarGlyphRotationField\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\) minmax\(118px, 0\.82fr\)/
+  );
+  assert.match(
+    cssSource,
+    /\.botAvatarGlyphRotationField \.botAvatarMouthRotationControl\s*\{[\s\S]*?border-left:/
+  );
+  assert.match(
+    cssSource,
+    /\.botAvatarGlyphAnimationControl > div\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/
+  );
+  assert.doesNotMatch(cssSource, /\.botAvatarMouthAnimationRow/);
   assert.match(cssSource, /\.botAvatarThinkingControl/);
   assert.match(cssSource, /\.botAvatarInlineResetButton/);
   assert.match(pageSource, /ariaLabel="Custom eye glyph"/);
@@ -305,23 +328,25 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.match(mouthTabSource, /label="Mouth position"/);
   assert.match(mouthTabSource, /lockX=\{!customMouthActive\}/);
   assert.match(mouthTabSource, /lockedX=\{DEFAULT_BOT_FACE_STYLE\.mouthOffsetX\}/);
-  assert.match(mouthTabSource, /botAvatarCustomMotionRowSingle/);
-  assert.match(mouthTabSource, /botAvatarMouthAnimationRow/);
+  assert.doesNotMatch(mouthTabSource, /botAvatarCustomMotionRowSingle/);
+  assert.doesNotMatch(mouthTabSource, /botAvatarMouthAnimationRow/);
+  assert.match(mouthTabSource, /botAvatarCustomMotionRowCombined/);
+  assert.match(mouthTabSource, /botAvatarGlyphRotationField/);
   assert.match(mouthTabSource, /<BotAvatarGlyphAnimationControl/);
   assert.ok(
     mouthTabSource.indexOf("<BotAvatarCustomGlyphCapture") <
       mouthTabSource.indexOf("<BotAvatarMouthRotationWheel"),
-    "Custom glyph capture should sit left of the mouth rotation wheel"
+    "Custom glyph capture should sit left of mouth rotation in their shared field"
+  );
+  assert.ok(
+    mouthTabSource.indexOf("<BotAvatarMouthRotationWheel") <
+      mouthTabSource.indexOf("<BotAvatarGlyphAnimationControl"),
+    "The shared glyph and rotation field should sit before mouth animation"
   );
   assert.ok(
     mouthTabSource.indexOf("<BotAvatarMouthRotationWheel") <
       mouthTabSource.indexOf('label="Mouth size"'),
     "Mouth rotation should sit with the custom glyph controls above mouth size"
-  );
-  assert.ok(
-    mouthTabSource.indexOf('label="Mouth position"') <
-      mouthTabSource.indexOf("<BotAvatarGlyphAnimationControl"),
-    "Mouth animation should sit below the mouth position pad"
   );
   const eyeFontHandlerStart = pageSource.indexOf("const selectEyeFont");
   const mouthFontHandlerStart = pageSource.indexOf("const selectMouthFont");
@@ -917,6 +942,10 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
     /\.botAvatarControlGroup\[data-avatar-control-tab="mouth"\]/,
   );
   assert.match(cssSource, /\.botAvatarControlTabs\s*\{/);
+  assert.match(
+    cssRuleBody(".botAvatarControlTabs"),
+    /grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\);/,
+  );
   assert.match(
     cssSource,
     /\.botAvatarControlGroupHeader\s*\{[\s\S]*grid-template-columns:\s*34px minmax\(0,\s*1fr\) auto;/,

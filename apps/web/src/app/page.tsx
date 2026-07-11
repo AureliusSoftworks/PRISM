@@ -598,7 +598,10 @@ import {
   PRISM_WEB_DEV_CHAT_COMMANDS_ENABLED,
   resolvePrismDevPanelToggleAction,
 } from "./prismDevChatCommands";
-import { prismWebDevToolsEnabled } from "./prismDevGating";
+import {
+  prismAvatarDetailsPaneEnabled,
+  prismWebDevToolsEnabled,
+} from "./prismDevGating";
 import {
   ZEN_TOOL_LAB_TOOLS,
   buildZenToolLabMessageSample,
@@ -1077,6 +1080,10 @@ const DEV_TOOLS_ENABLED = prismWebDevToolsEnabled({
   NODE_ENV: process.env.NODE_ENV,
   NEXT_PUBLIC_DEV_TOOLS: process.env.NEXT_PUBLIC_DEV_TOOLS,
   NEXT_PUBLIC_PRISM_BRANCH: process.env.NEXT_PUBLIC_PRISM_BRANCH,
+});
+const AVATAR_DETAILS_PANE_ENABLED = prismAvatarDetailsPaneEnabled({
+  NEXT_PUBLIC_PRISM_BRANCH: process.env.NEXT_PUBLIC_PRISM_BRANCH,
+  NEXT_PUBLIC_AVATAR_DETAILS: process.env.NEXT_PUBLIC_AVATAR_DETAILS,
 });
 // Floating shell applets (phone hamburger/handle/gear) are dev-only by default.
 // Release builds keep shell controls anchored in-header unless explicitly re-enabled.
@@ -31456,7 +31463,7 @@ function BotAvatarMouthRotationWheel({
 
 const BOT_AVATAR_GLYPH_ANIMATION_LABELS: Record<BotFaceGlyphAnimation, string> = {
   none: "Default",
-  pulsate: "Pulsate",
+  pulsate: "Pulse",
   spin: "Spin",
   flicker: "Flicker",
   wobble: "Wobble",
@@ -31875,13 +31882,6 @@ function BotAvatarFaceControls({
                   }}
                 />
               </div>
-              <div className={styles.botAvatarMouthAnimationRow}>
-                <BotAvatarGlyphAnimationControl
-                  value={faceMouthAnimation}
-                  disabled={!customMouthActive}
-                  onChange={onMouthAnimationChange}
-                />
-              </div>
             </section>
           </div>
         </div>
@@ -31908,24 +31908,31 @@ function BotAvatarFaceControls({
               aria-label="Mouth"
             >
               <div
-                className={`${styles.botAvatarCustomMotionRow} ${styles.botAvatarCustomMotionRowSingle}`}
+                className={`${styles.botAvatarCustomMotionRow} ${styles.botAvatarCustomMotionRowCombined}`}
               >
-                <BotAvatarCustomGlyphCapture
-                  ariaLabel="Custom mouth glyph"
-                  placeholderGlyph={BOT_AVATAR_CUSTOM_MOUTH_START}
-                  value={faceMouthCharacter}
-                  normalize={(raw) => normalizeBotFaceMouthCharacter(raw)}
-                  onChange={handleMouthCharacterChange}
-                />
-                <BotAvatarMouthRotationWheel
+                <div className={styles.botAvatarGlyphRotationField}>
+                  <BotAvatarCustomGlyphCapture
+                    ariaLabel="Custom mouth glyph"
+                    placeholderGlyph={BOT_AVATAR_CUSTOM_MOUTH_START}
+                    value={faceMouthCharacter}
+                    normalize={(raw) => normalizeBotFaceMouthCharacter(raw)}
+                    onChange={handleMouthCharacterChange}
+                  />
+                  <BotAvatarMouthRotationWheel
+                    disabled={!customMouthActive}
+                    value={faceMouthRotationDeg}
+                    mouthGlyph={mouthRotationGlyph}
+                    mouthFont={faceMouthFont}
+                    onChange={onMouthRotationDegChange}
+                    onReset={() =>
+                      onMouthRotationDegChange(DEFAULT_BOT_FACE_STYLE.mouthRotationDeg)
+                    }
+                  />
+                </div>
+                <BotAvatarGlyphAnimationControl
+                  value={faceMouthAnimation}
                   disabled={!customMouthActive}
-                  value={faceMouthRotationDeg}
-                  mouthGlyph={mouthRotationGlyph}
-                  mouthFont={faceMouthFont}
-                  onChange={onMouthRotationDegChange}
-                  onReset={() =>
-                    onMouthRotationDegChange(DEFAULT_BOT_FACE_STYLE.mouthRotationDeg)
-                  }
+                  onChange={onMouthAnimationChange}
                 />
               </div>
               <div className={styles.botAvatarCustomGeometry}>
@@ -81560,7 +81567,7 @@ function HomeContent(): React.JSX.Element {
 	                  faceBlinkBar={newBotFaceBlinkBar}
                   faceThinkingFrames={newBotFaceThinkingFrames}
                   avatarDetails={newBotAvatarDetails}
-                  detailsEditorVisible={!editingDefaultBot}
+                  detailsEditorVisible={AVATAR_DETAILS_PANE_ENABLED && !editingDefaultBot}
                   audioVoiceProfile={newBotAudioVoiceProfile}
                   voiceMode={normalizeVoiceMode(settings?.voiceMode)}
                   voiceEffectsEnabled={settings?.voiceEffectsEnabled !== false}
