@@ -1,19 +1,11 @@
 import type { VoiceMode } from "@localai/shared";
 
-export type AudibleVoiceMode = Exclude<VoiceMode, "mute">;
-
-export function normalizeAudibleVoiceMode(
-  value: unknown,
-  fallback: AudibleVoiceMode = "bottish"
-): AudibleVoiceMode {
-  return value === "bottish" || value === "english" ? value : fallback;
-}
-
 export function voiceModeAfterQuickToggle(
-  current: VoiceMode,
-  lastAudible: AudibleVoiceMode
+  current: VoiceMode
 ): VoiceMode {
-  return current === "mute" ? normalizeAudibleVoiceMode(lastAudible) : "mute";
+  if (current === "english") return "bottish";
+  if (current === "bottish") return "mute";
+  return "english";
 }
 
 export function voiceModeDisplayName(mode: VoiceMode): string {

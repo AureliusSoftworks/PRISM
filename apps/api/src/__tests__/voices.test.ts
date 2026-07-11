@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   VOICE_CAPABILITIES,
+  applyPlayerNamePronunciation,
   cleanSpeakableAssistantProse,
   elevenLabsVoiceSettings,
   requestElevenLabsSpeech,
   requestElevenLabsVoiceCatalog,
+  resolveElevenLabsVoiceId,
   resolveVoiceSynthesisBoundary,
   validateVoiceSynthesisRequest,
 } from "../voices.ts";
@@ -16,6 +18,16 @@ describe("voice Phase 1 boundary", () => {
   });
   it("cleans markdown, tools, URLs, code, and stage directions", () => {
     assert.equal(cleanSpeakableAssistantProse("# Hi\n*waves*\n```js\nsecret()\n```\n[link](https://example.com) https://raw.example"), "Hi link");
+  });
+  it("uses a phonetic player name only in synthesized text", () => {
+    assert.equal(
+      applyPlayerNamePronunciation("Jared, what do you think?", "Jared", "Jair-id"),
+      "Jair-id, what do you think?"
+    );
+    assert.equal(
+      applyPlayerNamePronunciation("Jaredson is different.", "Jared", "Jair-id"),
+      "Jaredson is different."
+    );
   });
   it("forces ElevenLabs history from LOCAL through builtin fallback without egress", () => {
     const request = validateVoiceSynthesisRequest({ text: "hello", mode: "english", engine: "elevenlabs", explicitOnlineContext: true });
@@ -60,6 +72,39 @@ describe("voice Phase 1 boundary", () => {
       explicitOnlineContext: true,
     });
     assert.equal(resolveVoiceSynthesisBoundary(request).ok, true);
+  });
+
+  it("prefers a bot-specific ElevenLabs selection over the account fallback", () => {
+    const bank = { "voice-1": "account-voice" };
+    assert.equal(resolveElevenLabsVoiceId({
+      v: 2,
+      enabled: true,
+      baseVoiceId: "voice-1",
+      elevenLabsVoiceId: "bot-voice",
+      pitch: 0,
+      warmth: 0,
+      pace: 0,
+      lilt: 0,
+      bottishTone: 0.45,
+      volume: 1,
+      texture: {
+        preset: "clean",
+        amount: 0,
+        bandwidth: 1,
+        noise: 0,
+        instability: 0,
+        distortion: 0,
+        damage: 0,
+      },
+    }, bank), "bot-voice");
+    assert.equal(resolveElevenLabsVoiceId({
+      v: 1,
+      baseVoiceId: "voice-1",
+      pitch: 0,
+      warmth: 0,
+      pace: 0,
+      lilt: 0,
+    }, bank), "account-voice");
   });
 
   it("maps portable pace and lilt controls into bounded ElevenLabs settings", () => {

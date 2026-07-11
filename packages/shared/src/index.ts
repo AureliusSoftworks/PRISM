@@ -116,6 +116,8 @@ export {
   normalizeEnglishVoiceEngine,
   normalizeOptionalBotAudioVoiceProfileV1,
   normalizeVoiceMode,
+  NEUTRAL_COFFEE_VOICE_DELIVERY_ENVELOPE,
+  applyPlayerNamePronunciation,
   parseStoredBotAudioVoiceProfileV1,
   serializeBotAudioVoiceProfileV1,
   type BotAudioVoiceId,
@@ -124,6 +126,7 @@ export {
   type BotAudioVoiceProfileV2,
   type BotVoiceTexturePreset,
   type BotVoiceTextureV1,
+  type CoffeeVoiceDeliveryEnvelope,
   type LegacyBotAudioVoiceProfileV1,
   type NormalizedBotAudioVoiceProfileV1,
   type EnglishVoiceEngine,
@@ -660,12 +663,19 @@ export interface CoffeePlayerInterruptionInput {
 }
 
 export interface CoffeeInterruptionEvent {
-  kind: "playerInterruptsBot" | "botInterruptsPlayer";
+  kind: "playerInterruptsBot" | "botInterruptsPlayer" | "botInterruptsBot";
   interruptedBotId: string;
   interrupterBotId?: string;
+  activeTurnId?: string;
+  targetPhase?: "thinking" | "speaking";
   interruptedMessageId?: string;
   visibleTokenCount?: number;
+  visibleProgress?: number;
   interruptedSnippet?: string;
+  pauseBeat?: boolean;
+  reactionOutcome?: "silence" | "react" | "yield" | "resume";
+  resumeOutcome?: "none" | "yielded" | "continued" | "invited";
+  reactionText?: string;
   socialConsequences: CoffeeInterruptionSocialDelta[];
 }
 
@@ -1324,6 +1334,14 @@ export {
   type CoffeeSessionSettings,
   type CoffeeTableEnergy,
 } from "./coffeeSettings.js";
+
+export {
+  coffeeInterruptionReactionCandidates,
+  pickCoffeeInterruptionReaction,
+  type CoffeeReactionOutcome,
+  type CoffeeReactionStyle,
+  type CoffeeReactionTone,
+} from "./coffeeInterruptionReactions.js";
 
 export interface Conversation {
   id: string;
@@ -1985,6 +2003,29 @@ export interface CoffeeTurnResponse {
     jobId: string;
     conversationId: string | null;
   };
+}
+
+export type CoffeeTurnJobPhase =
+  | "routing"
+  | "thinking"
+  | "voicing"
+  | "speaking"
+  | "reaction"
+  | "completed"
+  | "interrupted"
+  | "stale"
+  | "failed";
+
+export interface CoffeeTurnJobStatus {
+  id: string;
+  conversationId: string | null;
+  phase: CoffeeTurnJobPhase;
+  speakerBotId: string | null;
+  startedAt: string;
+  updatedAt: string;
+  interruptEligibleAt: string | null;
+  response?: CoffeeTurnResponse;
+  error?: string;
 }
 
 /** Request body for `POST /api/coffee/sessions/:id/polls`. */

@@ -93,9 +93,12 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     prismImageToolLlmModel: null,
     voiceMode: "mute",
     voiceEffectsEnabled: 1,
+    voiceVolume: 1,
     englishVoiceEngine: "builtin",
     elevenLabsVoiceBank: "{}",
     elevenLabsVoiceModel: null,
+    playerAudioVoiceProfile: null,
+    playerNamePronunciation: "",
     primaryOllamaHost: "http://localhost:11434",
     ...overrides,
   };
@@ -107,14 +110,35 @@ describe("resolveNextSettings — voice foundation", () => {
       {
         voiceMode: "english",
         voiceEffectsEnabled: false,
+        voiceVolume: 0.65,
         englishVoiceEngine: "elevenlabs",
         elevenLabsVoiceBank: { "voice-1": "  voice_alpha  ", "voice-3": 17, extra: "ignore" },
         elevenLabsVoiceModel: " eleven_multilingual_v2 ",
+        playerAudioVoiceProfile: {
+          v: 2,
+          enabled: true,
+          baseVoiceId: "voice-4",
+          systemVoiceName: "Zarvox",
+          elevenLabsVoiceId: "player-eleven",
+          pitch: 0,
+          warmth: 0,
+          pace: 0,
+          lilt: 0,
+          bottishTone: 0.45,
+          volume: 1,
+          texture: { preset: "clean", amount: 0, bandwidth: 1, noise: 0, instability: 0, distortion: 0, damage: 0 },
+        },
+        playerNamePronunciation: "  Jair id  ",
       },
       baseline()
     );
     assert.equal(next.voiceMode, "english");
     assert.equal(next.voiceEffectsEnabled, false);
+    assert.equal(next.voiceVolume, 0.65);
+    assert.equal(next.playerAudioVoiceProfile.baseVoiceId, "voice-4");
+    assert.equal(next.playerAudioVoiceProfile.systemVoiceName, "Zarvox");
+    assert.equal(next.playerAudioVoiceProfile.elevenLabsVoiceId, "player-eleven");
+    assert.equal(next.playerNamePronunciation, "Jair id");
     assert.equal(next.englishVoiceEngine, "elevenlabs");
     assert.deepEqual(next.elevenLabsVoiceBank, {
       "voice-1": "voice_alpha", "voice-2": null, "voice-3": null, "voice-4": null, "voice-5": null,

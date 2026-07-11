@@ -9,7 +9,6 @@ import {
   advanceCoffeeTeamStateAfterReply,
   autoTagPeerMentionsInCoffeeReply,
   applyCoffeeMoodSessionNoShows,
-  applyCoffeeOrganicSeedToReply,
   applyCoffeeSessionStartMoodBias,
   buildCoffeeConversationQualityState,
   buildCoffeeDepartureOpportunity,
@@ -28,6 +27,7 @@ import {
   coffeeFallbackFocusPhrase,
   coffeeHistoryVisibleToSpeakerAfterFirmSeat,
   coffeeDepartureOpportunityRequiresExit,
+  coffeeEffectiveReasoningEffort,
   coffeeLateOpeningMissingBotIds,
   coffeePresentBotIdsForTurn,
   coffeePromptAbsentBotIdsForTurn,
@@ -43,7 +43,6 @@ import {
   coffeeReplyRepeatsStockFallbackShape,
   coffeeSpeakerMaxTokensForTurn,
   coffeeUserMessageIsActionOnly,
-  coffeeSpeakerUsesOrganicSeeds,
   collectCoffeePollVotes,
   computePlayerInterruptionConsequences,
   computeNextCoffeeSocialState,
@@ -79,6 +78,7 @@ import {
   normalizeCoffeeSeatBotIds,
   normalizeCoffeeSessionSynopsis,
   normalizeCoffeeUserActionText,
+  recordCoffeeInterruptionPause,
   parseCoffeePollStructuredBallot,
   parseStoredBotGroupIds,
   parseStoredCoffeeSeatBotIds,
@@ -3695,6 +3695,54 @@ describe("Coffee group foundation", () => {
     assert.match(promptText, /interrupted Boris's visible line/);
     assert.match(promptText, /The sauce analogy works because it—/);
     assert.match(promptText, /Do not pretend to know the hidden rest/);
+  });
+
+  it("persists bot-to-bot cutoff fragments and a structured pause beat", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-cutoff";
+    const conversationId = "conv-cutoff";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+    await createCoffeeConversationWithId(db, userId, conversationId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+      durationMinutes: 10,
+    });
+    db.prepare(
+      `INSERT INTO messages
+         (id, conversation_id, user_id, role, content, bot_id, created_at)
+       VALUES ('alice-cutoff', ?, ?, 'assistant', ?, ?, '2026-01-01T00:00:00.000Z')`
+    ).run(
+      conversationId,
+      userId,
+      "I think it would be interesting if the premise held together.",
+      ALICE.id
+    );
+
+    recordCoffeeInterruptionPause({
+      db,
+      userId,
+      conversationId,
+      interruptedBotId: ALICE.id,
+      interruptedMessageId: "alice-cutoff",
+      visibleTokenCount: 8,
+      interrupterBotId: BORIS.id,
+      activeTurnId: "turn-1",
+      targetPhase: "speaking",
+    });
+
+    const cutoff = db.prepare("SELECT content FROM messages WHERE id = 'alice-cutoff'").get() as {
+      content: string;
+    };
+    assert.match(cutoff.content, /—$/u);
+    const pause = db.prepare(
+      "SELECT content, tool_payload FROM messages WHERE conversation_id = ? AND content = '...' ORDER BY created_at DESC LIMIT 1"
+    ).get(conversationId) as { content: string; tool_payload: string };
+    const payload = JSON.parse(pause.tool_payload) as {
+      coffeeInterruption?: { kind?: string; activeTurnId?: string; targetPhase?: string };
+    };
+    assert.equal(payload.coffeeInterruption?.kind, "botInterruptsBot");
+    assert.equal(payload.coffeeInterruption?.activeTurnId, "turn-1");
+    assert.equal(payload.coffeeInterruption?.targetPhase, "speaking");
   });
 
   it("rejects excluded bots that are not in the Coffee group", async () => {
@@ -7589,6 +7637,11 @@ describe("Coffee stale autonomous guard helpers", () => {
       }),
       false
     );
+    assert.equal(
+      coffeeMessageBelongsInBotPromptHistory({ role: "assistant", content: "..." }),
+      false,
+      "structured interruption pause beats must not become model dialogue"
+    );
   });
 
   it("detects when a newer message lands after an autonomous turn starts", () => {
@@ -8530,6 +8583,7 @@ describe("normalizeCoffeeSessionSettings", () => {
     assert.equal(defaults.tableEnergy, "theatre");
     assert.equal(defaults.crossTalk, "chatty");
     assert.equal(defaults.responseDelayBias, 76);
+    assert.equal(defaults.humanPacing, 50);
     assert.equal(defaults.givePlayerLastWord, false);
     assert.deepEqual(
       normalizeCoffeeSessionSettings({ responseLength: "huge", crossTalk: "loud" }),
@@ -8542,6 +8596,7 @@ describe("normalizeCoffeeSessionSettings", () => {
       responseLength: "detailed",
       responseDelayBias: -20,
       breathingRoom: 200,
+      humanPacing: 140,
       tableEnergy: "afterparty",
       crossTalk: "pileup",
       stayOnThread: false,
@@ -8549,9 +8604,69 @@ describe("normalizeCoffeeSessionSettings", () => {
     assert.equal(s.responseLength, "detailed");
     assert.equal(s.responseDelayBias, 0);
     assert.equal(s.breathingRoom, 100);
+    assert.equal(s.humanPacing, 100);
     assert.equal(s.tableEnergy, "afterparty");
     assert.equal(s.crossTalk, "pileup");
     assert.equal(s.stayOnThread, false);
+  });
+});
+
+describe("coffeeEffectiveReasoningEffort", () => {
+  const social = {
+    disposition: 0.5,
+    valuesFriction: 0.25,
+    restraint: 0.5,
+    engagement: 0.6,
+    leavePressure: 0.1,
+  };
+
+  it("adapts local and native reasoning turns without simulating online non-reasoning calls", () => {
+    const base = { activePoll: null, coffeeTeams: null, social };
+    assert.equal(
+      coffeeEffectiveReasoningEffort({
+        ...base,
+        experimentEnabled: true,
+        effectiveProvider: "local",
+        tableFocus: "Tell me what happened?",
+      }),
+      "medium"
+    );
+    assert.equal(
+      coffeeEffectiveReasoningEffort({
+        ...base,
+        experimentEnabled: true,
+        effectiveProvider: "openai",
+        modelId: "gpt-5.2",
+        tableFocus: "Add a thought.",
+      }),
+      "low"
+    );
+    assert.equal(
+      coffeeEffectiveReasoningEffort({
+        ...base,
+        experimentEnabled: true,
+        effectiveProvider: "openai",
+        modelId: "gpt-4o",
+        tableFocus: "Add a thought.",
+      }),
+      undefined
+    );
+  });
+
+  it("keeps high effort explicit", () => {
+    assert.equal(
+      coffeeEffectiveReasoningEffort({
+        requested: "high",
+        experimentEnabled: true,
+        effectiveProvider: "openai",
+        modelId: "gpt-4o",
+        tableFocus: "Anything.",
+        activePoll: null,
+        coffeeTeams: null,
+        social,
+      }),
+      "high"
+    );
   });
 });
 
@@ -8727,59 +8842,7 @@ function coffeeTestPromptWithProfile(
   return serializeStoredBotPrompt(fields);
 }
 
-describe("coffee organic seed persona gating", () => {
-  it("skips transitional beats for formal historical personas", () => {
-    const speaker = {
-      id: "marcus",
-      name: "Marcus Aurelius",
-      systemPrompt: coffeeTestPromptWithProfile({
-        communicationStyle: "formal",
-        birthEra: "bc",
-        deceased: true,
-        basedOnRealPersonOrCharacter: true,
-      }),
-    };
-    assert.equal(coffeeSpeakerUsesOrganicSeeds(speaker), false);
-    const out = applyCoffeeOrganicSeedToReply({
-      replyText: "Duty binds us all.",
-      conversationId: "conv-1",
-      speaker,
-      historyLength: 3,
-      turnKind: "autonomous",
-      avoidTexts: [],
-    });
-    assert.equal(out, "Duty binds us all.");
-  });
-
-  it("allows playful beats for modern playful personas", () => {
-    const speaker = {
-      id: "sponge",
-      name: "SpongeBob",
-      systemPrompt: coffeeTestPromptWithProfile({ communicationStyle: "playful" }),
-    };
-    assert.equal(coffeeSpeakerUsesOrganicSeeds(speaker), true);
-    let seeded: string | null = null;
-    for (let index = 0; index < 200; index += 1) {
-      const out = applyCoffeeOrganicSeedToReply({
-        replyText: "Jellyfishing sounds fun.",
-        conversationId: `conv-playful-${index}`,
-        speaker,
-        historyLength: 0,
-        turnKind: "autonomous",
-        avoidTexts: [],
-      });
-      if (out !== "Jellyfishing sounds fun.") {
-        seeded = out;
-        break;
-      }
-    }
-    assert.ok(seeded, "expected at least one deterministic playful seed to apply");
-    assert.match(
-      seeded!,
-      /Jellyfishing sounds fun\.|I know, right\?|kind of wild|that tracks|over my head|this is boring|Didn't see that coming/
-    );
-  });
-
+describe("coffee character-authored imperfection guidance", () => {
   it("threads persona-aware transitional guidance into the speaker prompt", () => {
     const formalSpeaker: CoffeeBotProfile = {
       ...ALICE,
@@ -8797,7 +8860,7 @@ describe("coffee organic seed persona gating", () => {
       userMessage: "What is virtue?",
       socialByBotId: {},
     });
-    assert.match(formalMessages[1]!.content, /Do not slip into modern internet slang/);
+    assert.match(formalMessages[1]!.content, /Never add modern filler that breaks character/);
     assert.doesNotMatch(formalMessages[1]!.content, /kind of wild/);
 
     const playfulSpeaker: CoffeeBotProfile = {
@@ -8811,6 +8874,6 @@ describe("coffee organic seed persona gating", () => {
       userMessage: "Who wants snacks?",
       socialByBotId: {},
     });
-    assert.match(playfulMessages[1]!.content, /playful beat/);
+    assert.match(playfulMessages[1]!.content, /suits your playful voice/);
   });
 });

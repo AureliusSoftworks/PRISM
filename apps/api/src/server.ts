@@ -102,6 +102,7 @@ import {
   processCoffeeTurn,
   recordCoffeeUserAction,
   recordCoffeeReplayEvents,
+  recordCoffeeInterruptionPause,
   restartCoffeeConversationFromSession,
   resolveCoffeeTeamTiebreaker,
   setCoffeeConversationTopic,
@@ -114,6 +115,12 @@ import {
   updateCoffeeBotSocialDebug,
   updateCoffeeConversationSettings,
 } from "./coffee.ts";
+import {
+  getCoffeeTurnJob,
+  interruptCoffeeTurnJob,
+  setCoffeeTurnJobPhase,
+  startCoffeeTurnJob,
+} from "./coffee-turn-jobs.ts";
 import {
   createDevSeedMemories,
   demoteMemoryToShortTerm,
@@ -216,6 +223,8 @@ import {
   parseHiddenBotModelIds,
   parseHiddenComfyUiWorkflowIds,
   parseStoredElevenLabsVoiceBank,
+  parseStoredPlayerAudioVoiceProfile,
+  normalizePlayerNamePronunciation,
   resolveNextSettings,
   sanitizeAnthropicKeyInput,
   sanitizeElevenLabsKeyInput,
@@ -286,6 +295,7 @@ import {
   serializeBotAvatarDetailsV1,
   serializeBotFaceThinkingFrames,
   normalizeBotAudioVoiceProfileV1,
+  normalizeBotVoiceVolume,
   normalizeOptionalBotAudioVoiceProfileV1,
   parseStoredBotAudioVoiceProfileV1,
   serializeBotAudioVoiceProfileV1,
@@ -379,6 +389,8 @@ import {
   VOICE_CAPABILITIES,
   normalizeElevenLabsTtsModel,
   requestElevenLabsSpeech,
+  resolveElevenLabsVoiceId,
+  applyPlayerNamePronunciation,
   requestElevenLabsVoiceCatalog,
   resolveVoiceSynthesisBoundary,
   validateVoiceSynthesisRequest,
@@ -677,9 +689,12 @@ interface UserDbRow {
   elevenlabs_key_tag: string | null;
   voice_mode: string | null;
   voice_effects_enabled: number;
+  voice_volume: number;
   english_voice_engine: string | null;
   elevenlabs_voice_bank: string | null;
   elevenlabs_voice_model: string | null;
+  player_audio_voice_profile: string | null;
+  player_name_pronunciation: string | null;
   prism_default_bot_audio_voice_profile: string | null;
   created_at: string;
   last_active_at: string;
@@ -827,7 +842,7 @@ function getOrCreateLocalOwnerUser(): string {
 function getUserRow(userId: string): UserDbRow {
   const row = db
     .prepare(
-      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, auto_switch_model, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, fallback_model_message_stripe, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, zen_persona_transition_choice, prism_default_bot_name, prism_default_bot_system_prompt, prism_default_bot_color, prism_default_bot_glyph, prism_default_bot_face_eyes_font, prism_default_bot_face_eye_character, prism_default_bot_face_eye_animation, prism_default_bot_face_mouth_font, prism_default_bot_face_mouth_character, prism_default_bot_face_mouth_animation, prism_default_bot_face_font_weight, prism_default_bot_face_eye_scale, prism_default_bot_face_eye_offset_x, prism_default_bot_face_eye_offset_y, prism_default_bot_face_eye_rotation_deg, prism_default_bot_face_mouth_scale, prism_default_bot_face_mouth_offset_x, prism_default_bot_face_mouth_offset_y, prism_default_bot_face_mouth_rotation_deg, prism_default_bot_face_blink_bar, prism_default_bot_face_thinking_frames, prism_default_bot_audio_voice_profile, prism_default_bot_temperature, prism_default_bot_max_tokens, prism_default_bot_top_p, prism_default_bot_top_k, prism_default_bot_repetition_penalty, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, voice_mode, voice_effects_enabled, english_voice_engine, elevenlabs_voice_bank, elevenlabs_voice_model, created_at, last_active_at FROM users WHERE id = ?"
+      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, auto_switch_model, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, fallback_model_message_stripe, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, zen_persona_transition_choice, prism_default_bot_name, prism_default_bot_system_prompt, prism_default_bot_color, prism_default_bot_glyph, prism_default_bot_face_eyes_font, prism_default_bot_face_eye_character, prism_default_bot_face_eye_animation, prism_default_bot_face_mouth_font, prism_default_bot_face_mouth_character, prism_default_bot_face_mouth_animation, prism_default_bot_face_font_weight, prism_default_bot_face_eye_scale, prism_default_bot_face_eye_offset_x, prism_default_bot_face_eye_offset_y, prism_default_bot_face_eye_rotation_deg, prism_default_bot_face_mouth_scale, prism_default_bot_face_mouth_offset_x, prism_default_bot_face_mouth_offset_y, prism_default_bot_face_mouth_rotation_deg, prism_default_bot_face_blink_bar, prism_default_bot_face_thinking_frames, prism_default_bot_audio_voice_profile, prism_default_bot_temperature, prism_default_bot_max_tokens, prism_default_bot_top_p, prism_default_bot_top_k, prism_default_bot_repetition_penalty, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, voice_mode, voice_effects_enabled, voice_volume, english_voice_engine, elevenlabs_voice_bank, elevenlabs_voice_model, player_audio_voice_profile, player_name_pronunciation, created_at, last_active_at FROM users WHERE id = ?"
     )
     .get(userId) as UserDbRow | undefined;
   if (!row) {
@@ -5331,6 +5346,8 @@ function buildRoutes(): RouteDefinition[] {
               anthropicApiKey,
               secondaryOllamaHost: user.secondary_ollama_host,
               experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
+              experimentalAllModelEffortEnabled:
+                user.experimental_all_model_effort_enabled === 1,
               userDisplayName: user.display_name,
               userKey,
               prismDefaultLlmModel: user.prism_default_llm_model,
@@ -5389,6 +5406,8 @@ function buildRoutes(): RouteDefinition[] {
               anthropicApiKey,
               secondaryOllamaHost: user.secondary_ollama_host,
               experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
+              experimentalAllModelEffortEnabled:
+                user.experimental_all_model_effort_enabled === 1,
               userDisplayName: user.display_name,
               userKey,
               prismDefaultLlmModel: user.prism_default_llm_model,
@@ -5483,6 +5502,8 @@ function buildRoutes(): RouteDefinition[] {
               anthropicApiKey,
               secondaryOllamaHost: user.secondary_ollama_host,
               experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
+              experimentalAllModelEffortEnabled:
+                user.experimental_all_model_effort_enabled === 1,
               userDisplayName: user.display_name,
               userKey,
               prismDefaultLlmModel: user.prism_default_llm_model,
@@ -5504,6 +5525,187 @@ function buildRoutes(): RouteDefinition[] {
         ok: true,
         ...result,
       });
+    }),
+    route("POST", "/api/coffee/turn-jobs", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const kind = body.kind === "autonomous" ? "autonomous" : "user";
+      const conversationId =
+        typeof body.conversationId === "string" ? body.conversationId.trim() : "";
+      if (!conversationId) throw new Error("Coffee conversation id is required.");
+      const message = kind === "user" ? readString(body.message, "message") : "";
+      const directedSpeakerBotId =
+        typeof body.directedSpeakerBotId === "string" ? body.directedSpeakerBotId : undefined;
+      const directedUserMessage =
+        typeof body.directedUserMessage === "string" ? body.directedUserMessage : undefined;
+      const presentBotIds = Array.isArray(body.presentBotIds)
+        ? body.presentBotIds.filter(
+            (value): value is string => typeof value === "string" && value.trim().length > 0
+          )
+        : undefined;
+      const requestedProvider = readProvider(body.preferredProvider);
+      const user = getUserRow(userId);
+      const userKey = decryptUserKey(userId);
+      const effectiveProvider = requestedProvider ?? user.preferred_provider;
+      const requestedReasoningEffort = reasoningEffortForRequest(body.reasoningEffort);
+      const jobEffort =
+        requestedReasoningEffort ??
+        (effectiveProvider === "local" && user.experimental_all_model_effort_enabled === 1
+          ? /\?/u.test(message) || body.playerInterruption != null
+            ? "medium"
+            : "low"
+          : undefined);
+      const sessionSpeakerModel = readCoffeeSessionSpeakerModel(body.modelOverride);
+      const sessionRemainingMs =
+        typeof body.sessionRemainingMs === "number" && Number.isFinite(body.sessionRemainingMs)
+          ? Math.max(0, body.sessionRemainingMs)
+          : null;
+      const interruptionInput =
+        body.playerInterruption && typeof body.playerInterruption === "object"
+          ? (body.playerInterruption as Record<string, unknown>)
+          : undefined;
+      const playerInterruption =
+        interruptionInput &&
+        typeof interruptionInput.interruptedMessageId === "string" &&
+        typeof interruptionInput.interruptedBotId === "string"
+          ? {
+              interruptedMessageId: interruptionInput.interruptedMessageId,
+              interruptedBotId: interruptionInput.interruptedBotId,
+              visibleTokenCount:
+                typeof interruptionInput.visibleTokenCount === "number"
+                  ? interruptionInput.visibleTokenCount
+                  : 1,
+            }
+          : undefined;
+      const openAiApiKey = getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
+      const anthropicApiKey = getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey;
+      const jobDb = db;
+      const status = startCoffeeTurnJob({
+        userId,
+        conversationId,
+        effort: jobEffort,
+        run: async ({ signal, setPhase }) =>
+          await runWithUsageSession(
+            {
+              db: jobDb,
+              userId,
+              privacyScope: "normal",
+              mode: "coffee",
+              surface: "coffee",
+              conversationId,
+              botId: directedSpeakerBotId ?? null,
+            },
+            () => {
+              const settings = {
+                preferredProvider: effectiveProvider,
+                openAiApiKey,
+                anthropicApiKey,
+                secondaryOllamaHost: user.secondary_ollama_host,
+                experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
+                experimentalAllModelEffortEnabled:
+                  user.experimental_all_model_effort_enabled === 1,
+                userDisplayName: user.display_name,
+                userKey,
+                prismDefaultLlmModel: user.prism_default_llm_model,
+                assistantImageUserPrefs: {
+                  preferredLocalImageModel: user.preferred_local_image_model,
+                  preferredOpenAiImageModel: user.preferred_openai_image_model,
+                  lenientLocalImageFallbackModel: user.lenient_local_image_fallback_model,
+                  comfyuiHost: user.comfyui_host,
+                  comfyUiWorkflows: parseStoredComfyUiWorkflows(user.comfyui_workflows),
+                  secondaryOllamaHost: user.secondary_ollama_host,
+                },
+                sessionRemainingMs,
+                signal,
+                onPhase: setPhase,
+                ...(sessionSpeakerModel ? { sessionSpeakerModel } : {}),
+                ...(requestedReasoningEffort
+                  ? { reasoningEffort: requestedReasoningEffort }
+                  : {}),
+              };
+              return kind === "autonomous"
+                ? processCoffeeAutonomousTurn(
+                    jobDb,
+                    userId,
+                    conversationId,
+                    settings,
+                    body.userIsComposing === true,
+                    directedSpeakerBotId,
+                    directedUserMessage,
+                    presentBotIds
+                  )
+                : processCoffeeTurn(
+                    jobDb,
+                    userId,
+                    {
+                      conversationId,
+                      message,
+                      playerInterruption,
+                      directedSpeakerBotId,
+                      presentBotIds,
+                    },
+                    settings
+                  );
+            }
+          ),
+      });
+      json(ctx.res, 202, { ok: true, job: status });
+    }),
+    route("GET", "/api/coffee/turn-jobs/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const job = getCoffeeTurnJob(userId, ctx.params.id);
+      if (!job) throw new HttpError(404, "Coffee turn job not found.");
+      json(ctx.res, 200, { ok: true, job });
+    }),
+    route("POST", "/api/coffee/turn-jobs/:id/phase", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const phase = body.phase;
+      if (phase !== "speaking" && phase !== "reaction" && phase !== "completed") {
+        throw new Error("Invalid Coffee turn phase.");
+      }
+      const job = setCoffeeTurnJobPhase(userId, ctx.params.id, phase);
+      if (!job) throw new HttpError(404, "Coffee turn job not found.");
+      json(ctx.res, 200, { ok: true, job });
+    }),
+    route("POST", "/api/coffee/turn-jobs/:id/interrupt", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const job = interruptCoffeeTurnJob(userId, ctx.params.id);
+      if (!job) throw new HttpError(404, "Coffee turn job not found.");
+      json(ctx.res, 200, { ok: true, job });
+    }),
+    route("POST", "/api/coffee/sessions/:id/interruption-pause", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      if (typeof body.interruptedBotId !== "string" || !body.interruptedBotId.trim()) {
+        throw new Error("Interrupted bot id is required.");
+      }
+      const conversation = recordCoffeeInterruptionPause({
+        db,
+        userId,
+        conversationId: ctx.params.id,
+        interruptedBotId: body.interruptedBotId,
+        ...(typeof body.interruptedMessageId === "string"
+          ? { interruptedMessageId: body.interruptedMessageId }
+          : {}),
+        ...(typeof body.visibleTokenCount === "number"
+          ? { visibleTokenCount: body.visibleTokenCount }
+          : {}),
+        ...(typeof body.interrupterBotId === "string"
+          ? { interrupterBotId: body.interrupterBotId }
+          : {}),
+        ...(typeof body.activeTurnId === "string" ? { activeTurnId: body.activeTurnId } : {}),
+        ...(body.targetPhase === "thinking" || body.targetPhase === "speaking"
+          ? { targetPhase: body.targetPhase }
+          : {}),
+      });
+      json(ctx.res, 200, { ok: true, conversation });
+    }),
+    route("DELETE", "/api/coffee/turn-jobs/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const job = interruptCoffeeTurnJob(userId, ctx.params.id);
+      if (!job) throw new HttpError(404, "Coffee turn job not found.");
+      json(ctx.res, 200, { ok: true, job });
     }),
     route("GET", "/api/memories", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -6189,6 +6391,11 @@ function buildRoutes(): RouteDefinition[] {
         sourceText = message.content ?? "";
         persistedMessageProvider = message.provider ?? null;
       }
+      sourceText = applyPlayerNamePronunciation(
+        sourceText,
+        user.display_name,
+        user.player_name_pronunciation
+      );
       const explicitOnlineContext = persistedMessageProvider
         ? persistedMessageProvider !== "local"
         : raw.explicitOnlineContext === true && user.preferred_provider !== "local";
@@ -6238,7 +6445,8 @@ function buildRoutes(): RouteDefinition[] {
       }
 
       const voiceBank = parseStoredElevenLabsVoiceBank(user.elevenlabs_voice_bank);
-      const voiceId = voiceBank[boundary.profile.baseVoiceId];
+      const normalizedProfile = normalizeBotAudioVoiceProfileV1(boundary.profile);
+      const voiceId = resolveElevenLabsVoiceId(normalizedProfile, voiceBank);
       if (!voiceId) {
         throw new HttpError(
           409,
@@ -6350,9 +6558,16 @@ function buildRoutes(): RouteDefinition[] {
           hasElevenLabsApiKey: Boolean(user.elevenlabs_key_ciphertext),
           voiceMode: user.voice_mode === "bottish" || user.voice_mode === "english" ? user.voice_mode : "mute",
           voiceEffectsEnabled: user.voice_effects_enabled !== 0,
+          voiceVolume: normalizeBotVoiceVolume(user.voice_volume),
           englishVoiceEngine: user.english_voice_engine === "elevenlabs" ? "elevenlabs" : "builtin",
           elevenLabsVoiceBank: parseStoredElevenLabsVoiceBank(user.elevenlabs_voice_bank),
           elevenLabsVoiceModel: user.elevenlabs_voice_model ?? "",
+          playerAudioVoiceProfile: parseStoredPlayerAudioVoiceProfile(
+            user.player_audio_voice_profile
+          ),
+          playerNamePronunciation: normalizePlayerNamePronunciation(
+            user.player_name_pronunciation
+          ),
           openAiApiKeySource: apiKeySource(
             user.openai_key_ciphertext,
             config.openAiApiKey
@@ -6761,9 +6976,12 @@ function buildRoutes(): RouteDefinition[] {
         prismImageToolLlmModel: user.prism_image_tool_llm_model,
         voiceMode: user.voice_mode,
         voiceEffectsEnabled: user.voice_effects_enabled,
+        voiceVolume: user.voice_volume,
         englishVoiceEngine: user.english_voice_engine,
         elevenLabsVoiceBank: user.elevenlabs_voice_bank,
         elevenLabsVoiceModel: user.elevenlabs_voice_model,
+        playerAudioVoiceProfile: user.player_audio_voice_profile,
+        playerNamePronunciation: user.player_name_pronunciation,
         primaryOllamaHost: config.ollamaHost,
       });
 
@@ -6822,7 +7040,7 @@ function buildRoutes(): RouteDefinition[] {
             preferred_local_image_model = ?, preferred_openai_image_model = ?, preferred_zen_wallpaper_local_image_model = ?, preferred_zen_wallpaper_openai_image_model = ?, zen_wallpaper_opacity = ?, zen_wallpaper_text_mask_enabled = ?, zen_wallpaper_grayscale_enabled = ?, zen_wallpaper_blurred_edges_enabled = ?, zen_wallpaper_style_notes = ?,
             zen_session_idle_gap_ms = ?, zen_fresh_start_gap_ms = ?, zen_recent_context_messages = ?, zen_wallpaper_regen_message_interval = ?, zen_mood_sensitivity = ?, zen_canvas_typing_speed = ?, zen_message_font_min_px = ?, zen_message_font_max_px = ?, zen_ask_question_patience_enabled = ?, zen_ask_question_patience_ms = ?, zen_autonomy_enabled = ?, zen_persona_transition_choice = ?,
             comfyui_workflows = ?, prism_default_llm_model = ?, prism_image_tool_llm_model = ?,
-            voice_mode = ?, voice_effects_enabled = ?, english_voice_engine = ?, elevenlabs_voice_bank = ?, elevenlabs_voice_model = ?,
+            voice_mode = ?, voice_effects_enabled = ?, voice_volume = ?, english_voice_engine = ?, elevenlabs_voice_bank = ?, elevenlabs_voice_model = ?, player_audio_voice_profile = ?, player_name_pronunciation = ?,
             dev_memories_enabled = ?, dev_memories_text = ?,
             openai_key_ciphertext = ?, openai_key_iv = ?, openai_key_tag = ?,
             anthropic_key_ciphertext = ?, anthropic_key_iv = ?, anthropic_key_tag = ?,
@@ -6875,9 +7093,12 @@ function buildRoutes(): RouteDefinition[] {
         next.prismImageToolLlmModel,
         next.voiceMode,
         next.voiceEffectsEnabled ? 1 : 0,
+        next.voiceVolume,
         next.englishVoiceEngine,
         JSON.stringify(next.elevenLabsVoiceBank),
         next.elevenLabsVoiceModel,
+        JSON.stringify(next.playerAudioVoiceProfile),
+        next.playerNamePronunciation,
         devMemoriesEnabled,
         devMemoriesText,
         openAiCipher,
@@ -6903,9 +7124,12 @@ function buildRoutes(): RouteDefinition[] {
           zenPersonaTransitionChoice: next.zenPersonaTransitionChoice,
           voiceMode: next.voiceMode,
           voiceEffectsEnabled: next.voiceEffectsEnabled,
+          voiceVolume: next.voiceVolume,
           englishVoiceEngine: next.englishVoiceEngine,
           elevenLabsVoiceBank: next.elevenLabsVoiceBank,
           elevenLabsVoiceModel: next.elevenLabsVoiceModel ?? "",
+          playerAudioVoiceProfile: next.playerAudioVoiceProfile,
+          playerNamePronunciation: next.playerNamePronunciation,
           hasOpenAiApiKey: Boolean(openAiCipher),
           hasAnthropicApiKey: Boolean(anthropicCipher),
           hasElevenLabsApiKey: Boolean(elevenLabsCipher),

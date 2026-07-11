@@ -243,9 +243,12 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       elevenlabs_key_tag TEXT,
       voice_mode TEXT NOT NULL DEFAULT 'mute',
       voice_effects_enabled INTEGER NOT NULL DEFAULT 1,
+      voice_volume REAL NOT NULL DEFAULT 1,
       english_voice_engine TEXT NOT NULL DEFAULT 'builtin',
       elevenlabs_voice_bank TEXT NOT NULL DEFAULT '{}',
       elevenlabs_voice_model TEXT,
+      player_audio_voice_profile TEXT,
+      player_name_pronunciation TEXT NOT NULL DEFAULT '',
       prism_default_bot_audio_voice_profile TEXT,
       created_at TEXT NOT NULL,
       last_active_at TEXT NOT NULL
@@ -714,12 +717,26 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   if (!hasVoiceMode) db.exec("ALTER TABLE users ADD COLUMN voice_mode TEXT NOT NULL DEFAULT 'mute';");
   const hasVoiceEffectsEnabled = userColumns.some((column) => column.name === "voice_effects_enabled");
   if (!hasVoiceEffectsEnabled) db.exec("ALTER TABLE users ADD COLUMN voice_effects_enabled INTEGER NOT NULL DEFAULT 1;");
+  const hasVoiceVolume = userColumns.some((column) => column.name === "voice_volume");
+  if (!hasVoiceVolume) db.exec("ALTER TABLE users ADD COLUMN voice_volume REAL NOT NULL DEFAULT 1;");
   const hasEnglishVoiceEngine = userColumns.some((column) => column.name === "english_voice_engine");
   if (!hasEnglishVoiceEngine) db.exec("ALTER TABLE users ADD COLUMN english_voice_engine TEXT NOT NULL DEFAULT 'builtin';");
   const hasElevenLabsVoiceBank = userColumns.some((column) => column.name === "elevenlabs_voice_bank");
   if (!hasElevenLabsVoiceBank) db.exec("ALTER TABLE users ADD COLUMN elevenlabs_voice_bank TEXT NOT NULL DEFAULT '{}';");
   const hasElevenLabsVoiceModel = userColumns.some((column) => column.name === "elevenlabs_voice_model");
   if (!hasElevenLabsVoiceModel) db.exec("ALTER TABLE users ADD COLUMN elevenlabs_voice_model TEXT;");
+  const hasPlayerAudioVoiceProfile = userColumns.some(
+    (column) => column.name === "player_audio_voice_profile"
+  );
+  if (!hasPlayerAudioVoiceProfile) {
+    db.exec("ALTER TABLE users ADD COLUMN player_audio_voice_profile TEXT;");
+  }
+  const hasPlayerNamePronunciation = userColumns.some(
+    (column) => column.name === "player_name_pronunciation"
+  );
+  if (!hasPlayerNamePronunciation) {
+    db.exec("ALTER TABLE users ADD COLUMN player_name_pronunciation TEXT NOT NULL DEFAULT '';");
+  }
   const hasPrismDefaultBotAudioVoiceProfile = userColumns.some(
     (column) => column.name === "prism_default_bot_audio_voice_profile"
   );

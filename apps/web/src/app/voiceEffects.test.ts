@@ -8,18 +8,29 @@ describe("voice textures", () => {
     const profile = {
       ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
       volume: 1.2,
-      texture: { ...botVoiceTextureForPreset("lofi"), amount: 0.5 },
+      texture: { ...botVoiceTextureForPreset("crt-speaker"), amount: 0.5 },
     };
     assert.deepEqual(resolveVoiceTexture(profile), {
-      bandwidth: 0.725,
-      noise: 0.075,
-      instability: 0.04,
-      distortion: 0.125,
-      damage: 0.05,
+      bandwidth: 0.675,
+      noise: 0.025,
+      instability: 0.01,
+      distortion: 0.06,
+      damage: 0.025,
     });
     assert.deepEqual(resolveVoiceTexture(profile, false), {
       bandwidth: 1, noise: 0, instability: 0, distortion: 0, damage: 0,
     });
+  });
+
+  it("treats retired Lo-Fi and Tape profiles as clean", () => {
+    for (const preset of ["lofi", "tape"] as const) {
+      assert.deepEqual(resolveVoiceTexture({
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+        texture: botVoiceTextureForPreset(preset),
+      }), {
+        bandwidth: 1, noise: 0, instability: 0, distortion: 0, damage: 0,
+      });
+    }
   });
 
   it("builds deterministic seeded damage schedules", () => {

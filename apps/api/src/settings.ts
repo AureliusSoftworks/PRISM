@@ -1,4 +1,9 @@
-import type { ComfyUiWorkflowRegistration, EnglishVoiceEngine, VoiceMode } from "@localai/shared";
+import type {
+  BotAudioVoiceProfileV1,
+  ComfyUiWorkflowRegistration,
+  EnglishVoiceEngine,
+  VoiceMode,
+} from "@localai/shared";
 import {
   DEFAULT_PRISM_MOOD_SENSITIVITY,
   isComfyUiRemoteWorkflowModelId,
@@ -8,6 +13,8 @@ import {
   normalizePrismMoodSensitivity,
   validateComfyUiWorkflowsPayload,
   normalizeEnglishVoiceEngine,
+  normalizeBotAudioVoiceProfileV1,
+  normalizeBotVoiceVolume,
   normalizeVoiceMode,
   BOT_AUDIO_VOICE_IDS,
   type BotAudioVoiceId,
@@ -51,6 +58,23 @@ export function normalizeElevenLabsVoiceBank(value: unknown): ElevenLabsVoiceBan
 export function parseStoredElevenLabsVoiceBank(value: string | null | undefined): ElevenLabsVoiceBank {
   if (!value) return normalizeElevenLabsVoiceBank({});
   try { return normalizeElevenLabsVoiceBank(JSON.parse(value)); } catch { return normalizeElevenLabsVoiceBank({}); }
+}
+
+export function parseStoredPlayerAudioVoiceProfile(
+  value: string | null | undefined
+): BotAudioVoiceProfileV1 {
+  if (!value) return normalizeBotAudioVoiceProfileV1(undefined);
+  try {
+    return normalizeBotAudioVoiceProfileV1(JSON.parse(value));
+  } catch {
+    return normalizeBotAudioVoiceProfileV1(undefined);
+  }
+}
+
+export function normalizePlayerNamePronunciation(value: unknown, fallback = ""): string {
+  if (value === undefined) return fallback;
+  if (typeof value !== "string") return fallback;
+  return value.replace(/\s+/gu, " ").trim().slice(0, 120);
 }
 
 function normalizeElevenLabsVoiceModel(value: unknown, fallback: string | null): string | null {
@@ -164,9 +188,12 @@ export interface CurrentSettings {
   primaryOllamaHost: string;
   voiceMode: VoiceMode | string | null;
   voiceEffectsEnabled: number;
+  voiceVolume: number | null;
   englishVoiceEngine: EnglishVoiceEngine | string | null;
   elevenLabsVoiceBank: string | null;
   elevenLabsVoiceModel: string | null;
+  playerAudioVoiceProfile: string | null;
+  playerNamePronunciation: string | null;
 }
 
 /** Shape of the next-settings result, with OpenAI key intent captured separately. */
@@ -216,9 +243,12 @@ export interface NextSettings {
   prismImageToolLlmModel: string | null;
   voiceMode: VoiceMode;
   voiceEffectsEnabled: boolean;
+  voiceVolume: number;
   englishVoiceEngine: EnglishVoiceEngine;
   elevenLabsVoiceBank: ElevenLabsVoiceBank;
   elevenLabsVoiceModel: string | null;
+  playerAudioVoiceProfile: BotAudioVoiceProfileV1;
+  playerNamePronunciation: string;
   /**
    * Intent for the OpenAI API key:
    *   - "replace": caller sent a non-empty string; encrypt it
@@ -1062,6 +1092,9 @@ export function resolveNextSettings(
   const voiceEffectsEnabled = typeof body.voiceEffectsEnabled === "boolean"
     ? body.voiceEffectsEnabled
     : current.voiceEffectsEnabled !== 0;
+  const voiceVolume = body.voiceVolume === undefined
+    ? normalizeBotVoiceVolume(current.voiceVolume)
+    : normalizeBotVoiceVolume(body.voiceVolume, normalizeBotVoiceVolume(current.voiceVolume));
   const englishVoiceEngine = normalizeEnglishVoiceEngine(
     body.englishVoiceEngine,
     normalizeEnglishVoiceEngine(current.englishVoiceEngine)
@@ -1072,6 +1105,13 @@ export function resolveNextSettings(
   const elevenLabsVoiceModel = normalizeElevenLabsVoiceModel(
     body.elevenLabsVoiceModel,
     current.elevenLabsVoiceModel
+  );
+  const playerAudioVoiceProfile = body.playerAudioVoiceProfile === undefined
+    ? parseStoredPlayerAudioVoiceProfile(current.playerAudioVoiceProfile)
+    : normalizeBotAudioVoiceProfileV1(body.playerAudioVoiceProfile);
+  const playerNamePronunciation = normalizePlayerNamePronunciation(
+    body.playerNamePronunciation,
+    normalizePlayerNamePronunciation(current.playerNamePronunciation)
   );
 
   const comfyUiWorkflows =
@@ -1162,9 +1202,12 @@ export function resolveNextSettings(
     prismImageToolLlmModel,
     voiceMode,
     voiceEffectsEnabled,
+    voiceVolume,
     englishVoiceEngine,
     elevenLabsVoiceBank,
     elevenLabsVoiceModel,
+    playerAudioVoiceProfile,
+    playerNamePronunciation,
     openAiKeyIntent,
     anthropicKeyIntent,
     elevenLabsKeyIntent,

@@ -93,6 +93,10 @@ describe("createDatabase bot export hash migration", () => {
         userColumns.find((column) => column.name === "voice_effects_enabled")?.dflt_value,
         "1"
       );
+      assert.equal(
+        userColumns.find((column) => column.name === "voice_volume")?.dflt_value,
+        "1"
+      );
       assert.ok(userColumns.some((column) => column.name === "hidden_comfyui_workflow_ids"));
       assert.ok(userColumns.some((column) => column.name === "zen_wallpaper_text_mask_enabled"));
       assert.ok(

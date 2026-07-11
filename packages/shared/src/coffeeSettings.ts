@@ -20,6 +20,8 @@ export interface CoffeeSessionSettings {
   crossTalk: CoffeeCrossTalkLevel;
   /** 0 = tight spacing, 50 = medium, 100 = loose (matches UI slider). */
   breathingRoom: number;
+  /** 0 = steady delivery, 50 = natural, 100 = expressive. */
+  humanPacing: number;
   stayOnThread: boolean;
   givePlayerLastWord: boolean;
   memoryCallbacks: CoffeeMemoryCallbacks;
@@ -32,6 +34,7 @@ export const DEFAULT_COFFEE_SESSION_SETTINGS: CoffeeSessionSettings = {
   tableEnergy: "theatre",
   crossTalk: "chatty",
   breathingRoom: 24,
+  humanPacing: 50,
   stayOnThread: true,
   givePlayerLastWord: false,
   memoryCallbacks: "this-session",
@@ -104,6 +107,11 @@ export function normalizeCoffeeSessionSettings(raw: unknown): CoffeeSessionSetti
     breathingRoom = clampInt(o.breathingRoom, 0, 100);
   }
 
+  let humanPacing = base.humanPacing;
+  if (typeof o.humanPacing === "number") {
+    humanPacing = clampInt(o.humanPacing, 0, 100);
+  }
+
   const stayOnThread = typeof o.stayOnThread === "boolean" ? o.stayOnThread : base.stayOnThread;
   const givePlayerLastWord =
     typeof o.givePlayerLastWord === "boolean" ? o.givePlayerLastWord : base.givePlayerLastWord;
@@ -119,6 +127,7 @@ export function normalizeCoffeeSessionSettings(raw: unknown): CoffeeSessionSetti
     tableEnergy,
     crossTalk,
     breathingRoom,
+    humanPacing,
     stayOnThread,
     givePlayerLastWord,
     memoryCallbacks,
