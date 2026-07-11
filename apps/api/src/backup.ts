@@ -4,14 +4,17 @@ import { normalizeMemoryTier } from "./memory.ts";
 import type { ProviderName } from "./providers.ts";
 import {
   DEFAULT_BOT_FACE_BLINK_BAR,
+  DEFAULT_BOT_FACE_GLYPH_ANIMATION,
   DEFAULT_BOT_FACE_THINKING_FRAMES,
   normalizeBotFaceBlinkBar,
   normalizeBotFaceEyeCharacter,
   normalizeBotFaceEyeOffsetX,
   normalizeBotFaceEyeOffsetY,
+  normalizeBotFaceEyeRotationDeg,
   normalizeBotFaceEyeScale,
   normalizeBotFaceFontId,
   normalizeBotFaceFontWeight,
+  normalizeBotFaceGlyphAnimation,
   normalizeBotFaceMouthCharacter,
   normalizeBotFaceMouthOffsetX,
   normalizeBotFaceMouthOffsetY,
@@ -21,6 +24,7 @@ import {
   serializeBotFaceThinkingFrames,
   type BotFaceBlinkBar,
   type BotFaceFontId,
+  type BotFaceGlyphAnimation,
   type BotFaceThinkingFrames,
 } from "@localai/shared";
 import {
@@ -104,10 +108,12 @@ export interface BackupBotSnapshot {
   faceEyeCharacter?: string | null;
   faceMouthFont?: BotFaceFontId | null;
   faceMouthCharacter?: string | null;
+  faceMouthAnimation?: BotFaceGlyphAnimation | null;
   faceFontWeight?: number | null;
   faceEyeScale?: number | null;
   faceEyeOffsetX?: number | null;
   faceEyeOffsetY?: number | null;
+  faceEyeRotationDeg?: number | null;
   faceMouthScale?: number | null;
   faceMouthOffsetX?: number | null;
   faceMouthOffsetY?: number | null;
@@ -425,12 +431,15 @@ export function exportUserSnapshot(
          glyph,
          face_eyes_font,
          face_eye_character,
+         face_eye_animation,
          face_mouth_font,
          face_mouth_character,
+         face_mouth_animation,
          face_font_weight,
          face_eye_scale,
          face_eye_offset_x,
          face_eye_offset_y,
+         face_eye_rotation_deg,
          face_mouth_scale,
          face_mouth_offset_x,
          face_mouth_offset_y,
@@ -467,12 +476,15 @@ export function exportUserSnapshot(
     glyph: string | null;
     face_eyes_font: string | null;
     face_eye_character: string | null;
+    face_eye_animation: string | null;
     face_mouth_font: string | null;
     face_mouth_character: string | null;
+    face_mouth_animation: string | null;
     face_font_weight: number | null;
     face_eye_scale: number | null;
     face_eye_offset_x: number | null;
     face_eye_offset_y: number | null;
+    face_eye_rotation_deg: number | null;
     face_mouth_scale: number | null;
     face_mouth_offset_x: number | null;
     face_mouth_offset_y: number | null;
@@ -590,10 +602,12 @@ export function exportUserSnapshot(
         faceEyeCharacter: normalizeBotFaceEyeCharacter(bot.face_eye_character),
         faceMouthFont: normalizeBotFaceFontId(bot.face_mouth_font),
         faceMouthCharacter: normalizeBotFaceMouthCharacter(bot.face_mouth_character),
+        faceMouthAnimation: normalizeBotFaceGlyphAnimation(bot.face_mouth_animation),
         faceFontWeight: normalizeBotFaceFontWeight(bot.face_font_weight),
         faceEyeScale: normalizeBotFaceEyeScale(bot.face_eye_scale),
         faceEyeOffsetX: normalizeBotFaceEyeOffsetX(bot.face_eye_offset_x),
         faceEyeOffsetY: normalizeBotFaceEyeOffsetY(bot.face_eye_offset_y),
+        faceEyeRotationDeg: normalizeBotFaceEyeRotationDeg(bot.face_eye_rotation_deg),
         faceMouthScale: normalizeBotFaceMouthScale(bot.face_mouth_scale),
         faceMouthOffsetX: normalizeBotFaceMouthOffsetX(bot.face_mouth_offset_x),
         faceMouthOffsetY: normalizeBotFaceMouthOffsetY(bot.face_mouth_offset_y),
@@ -812,12 +826,15 @@ export function importUserSnapshot(
         glyph,
         face_eyes_font,
         face_eye_character,
+        face_eye_animation,
         face_mouth_font,
         face_mouth_character,
+        face_mouth_animation,
         face_font_weight,
         face_eye_scale,
         face_eye_offset_x,
         face_eye_offset_y,
+        face_eye_rotation_deg,
         face_mouth_scale,
         face_mouth_offset_x,
         face_mouth_offset_y,
@@ -828,7 +845,7 @@ export function importUserSnapshot(
         visibility,
         created_at,
         updated_at
-			      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const bot of snapshot.bots) {
       if (!bot || typeof bot.id !== "string" || bot.id.trim().length === 0) continue;
@@ -868,12 +885,15 @@ export function importUserSnapshot(
         typeof bot.glyph === "string" && bot.glyph.trim().length > 0 ? bot.glyph.trim() : null,
         normalizeBotFaceFontId(bot.faceEyesFont),
         normalizeBotFaceEyeCharacter(bot.faceEyeCharacter),
+        DEFAULT_BOT_FACE_GLYPH_ANIMATION,
         normalizeBotFaceFontId(bot.faceMouthFont),
         normalizeBotFaceMouthCharacter(bot.faceMouthCharacter),
+        normalizeBotFaceGlyphAnimation(bot.faceMouthAnimation),
         normalizeBotFaceFontWeight(bot.faceFontWeight),
         normalizeBotFaceEyeScale(bot.faceEyeScale),
         normalizeBotFaceEyeOffsetX(bot.faceEyeOffsetX),
         normalizeBotFaceEyeOffsetY(bot.faceEyeOffsetY),
+        normalizeBotFaceEyeRotationDeg(bot.faceEyeRotationDeg),
         normalizeBotFaceMouthScale(bot.faceMouthScale),
         normalizeBotFaceMouthOffsetX(bot.faceMouthOffsetX),
         normalizeBotFaceMouthOffsetY(bot.faceMouthOffsetY),

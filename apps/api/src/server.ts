@@ -252,9 +252,11 @@ import {
   DEFAULT_BOT_FACE_EYE_CHARACTER,
   DEFAULT_BOT_FACE_EYE_OFFSET_X,
   DEFAULT_BOT_FACE_EYE_OFFSET_Y,
+  DEFAULT_BOT_FACE_EYE_ROTATION_DEG,
   DEFAULT_BOT_FACE_EYE_SCALE,
   DEFAULT_BOT_FACE_FONT_ID,
   DEFAULT_BOT_FACE_FONT_WEIGHT,
+  DEFAULT_BOT_FACE_GLYPH_ANIMATION,
   DEFAULT_BOT_FACE_MOUTH_CHARACTER,
   DEFAULT_BOT_FACE_MOUTH_OFFSET_X,
   DEFAULT_BOT_FACE_MOUTH_OFFSET_Y,
@@ -267,9 +269,11 @@ import {
   normalizeBotFaceEyeCharacter,
   normalizeBotFaceEyeOffsetX,
   normalizeBotFaceEyeOffsetY,
+  normalizeBotFaceEyeRotationDeg,
   normalizeBotFaceEyeScale,
   normalizeBotFaceFontId,
   normalizeBotFaceFontWeight,
+  normalizeBotFaceGlyphAnimation,
   normalizeBotFaceMouthCharacter,
   normalizeBotFaceMouthOffsetX,
   normalizeBotFaceMouthOffsetY,
@@ -308,6 +312,7 @@ import {
   type ChatMessage,
   type BotFaceBlinkBar,
   type BotFaceFontId,
+  type BotFaceGlyphAnimation,
   type BotFaceThinkingFrames,
   type OpinionBand,
   type OpinionTrend,
@@ -590,10 +595,12 @@ interface UserDbRow {
   prism_default_bot_face_eye_character: string | null;
   prism_default_bot_face_mouth_font: string | null;
   prism_default_bot_face_mouth_character: string | null;
+  prism_default_bot_face_mouth_animation: string | null;
   prism_default_bot_face_font_weight: number | null;
   prism_default_bot_face_eye_scale: number | null;
   prism_default_bot_face_eye_offset_x: number | null;
   prism_default_bot_face_eye_offset_y: number | null;
+  prism_default_bot_face_eye_rotation_deg: number | null;
   prism_default_bot_face_mouth_scale: number | null;
   prism_default_bot_face_mouth_offset_x: number | null;
   prism_default_bot_face_mouth_offset_y: number | null;
@@ -764,7 +771,7 @@ function getOrCreateLocalOwnerUser(): string {
 function getUserRow(userId: string): UserDbRow {
   const row = db
     .prepare(
-      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, auto_switch_model, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, fallback_model_message_stripe, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, zen_persona_transition_choice, prism_default_bot_name, prism_default_bot_system_prompt, prism_default_bot_color, prism_default_bot_glyph, prism_default_bot_face_eyes_font, prism_default_bot_face_eye_character, prism_default_bot_face_mouth_font, prism_default_bot_face_mouth_character, prism_default_bot_face_font_weight, prism_default_bot_face_eye_scale, prism_default_bot_face_eye_offset_x, prism_default_bot_face_eye_offset_y, prism_default_bot_face_mouth_scale, prism_default_bot_face_mouth_offset_x, prism_default_bot_face_mouth_offset_y, prism_default_bot_face_mouth_rotation_deg, prism_default_bot_face_blink_bar, prism_default_bot_face_thinking_frames, prism_default_bot_temperature, prism_default_bot_max_tokens, prism_default_bot_top_p, prism_default_bot_top_k, prism_default_bot_repetition_penalty, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, created_at, last_active_at FROM users WHERE id = ?"
+      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, auto_switch_model, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, fallback_model_message_stripe, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, zen_persona_transition_choice, prism_default_bot_name, prism_default_bot_system_prompt, prism_default_bot_color, prism_default_bot_glyph, prism_default_bot_face_eyes_font, prism_default_bot_face_eye_character, prism_default_bot_face_eye_animation, prism_default_bot_face_mouth_font, prism_default_bot_face_mouth_character, prism_default_bot_face_mouth_animation, prism_default_bot_face_font_weight, prism_default_bot_face_eye_scale, prism_default_bot_face_eye_offset_x, prism_default_bot_face_eye_offset_y, prism_default_bot_face_eye_rotation_deg, prism_default_bot_face_mouth_scale, prism_default_bot_face_mouth_offset_x, prism_default_bot_face_mouth_offset_y, prism_default_bot_face_mouth_rotation_deg, prism_default_bot_face_blink_bar, prism_default_bot_face_thinking_frames, prism_default_bot_temperature, prism_default_bot_max_tokens, prism_default_bot_top_p, prism_default_bot_top_k, prism_default_bot_repetition_penalty, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, created_at, last_active_at FROM users WHERE id = ?"
     )
     .get(userId) as UserDbRow | undefined;
   if (!row) {
@@ -1529,6 +1536,12 @@ function readBotFaceMouthCharacterForStorage(value: unknown): string | null {
   return normalizeBotFaceMouthCharacter(value);
 }
 
+function readBotFaceGlyphAnimationForStorage(
+  value: unknown
+): BotFaceGlyphAnimation | null {
+  return normalizeBotFaceGlyphAnimation(value);
+}
+
 function readBotFaceWeightForStorage(value: unknown): number | null {
   return normalizeBotFaceFontWeight(value);
 }
@@ -1543,6 +1556,10 @@ function readBotFaceEyeOffsetXForStorage(value: unknown): number | null {
 
 function readBotFaceEyeOffsetYForStorage(value: unknown): number | null {
   return normalizeBotFaceEyeOffsetY(value);
+}
+
+function readBotFaceEyeRotationDegForStorage(value: unknown): number | null {
+  return normalizeBotFaceEyeRotationDeg(value);
 }
 
 function readBotFaceMouthScaleForStorage(value: unknown): number | null {
@@ -1602,6 +1619,9 @@ function normalizeDefaultBotSettingsForResponse(user: UserDbRow) {
     prismDefaultBotFaceMouthCharacter:
       normalizeBotFaceMouthCharacter(user.prism_default_bot_face_mouth_character) ??
       DEFAULT_BOT_FACE_MOUTH_CHARACTER,
+    prismDefaultBotFaceMouthAnimation:
+      normalizeBotFaceGlyphAnimation(user.prism_default_bot_face_mouth_animation) ??
+      DEFAULT_BOT_FACE_GLYPH_ANIMATION,
     prismDefaultBotFaceFontWeight:
       normalizeBotFaceFontWeight(user.prism_default_bot_face_font_weight) ??
       DEFAULT_BOT_FACE_FONT_WEIGHT,
@@ -1614,6 +1634,9 @@ function normalizeDefaultBotSettingsForResponse(user: UserDbRow) {
     prismDefaultBotFaceEyeOffsetY:
       normalizeBotFaceEyeOffsetY(user.prism_default_bot_face_eye_offset_y) ??
       DEFAULT_BOT_FACE_EYE_OFFSET_Y,
+    prismDefaultBotFaceEyeRotationDeg:
+      normalizeBotFaceEyeRotationDeg(user.prism_default_bot_face_eye_rotation_deg) ??
+      DEFAULT_BOT_FACE_EYE_ROTATION_DEG,
     prismDefaultBotFaceMouthScale:
       normalizeBotFaceMouthScale(user.prism_default_bot_face_mouth_scale) ??
       DEFAULT_BOT_FACE_MOUTH_SCALE,
@@ -6243,6 +6266,9 @@ function buildRoutes(): RouteDefinition[] {
       const faceMouthCharacter = readBotFaceMouthCharacterForStorage(
         body.faceMouthCharacter
       );
+      const faceMouthAnimation =
+        readBotFaceGlyphAnimationForStorage(body.faceMouthAnimation) ??
+        DEFAULT_BOT_FACE_GLYPH_ANIMATION;
       const faceFontWeight =
         readBotFaceWeightForStorage(body.faceFontWeight) ?? DEFAULT_BOT_FACE_FONT_WEIGHT;
       const faceEyeScale =
@@ -6253,6 +6279,9 @@ function buildRoutes(): RouteDefinition[] {
       const faceEyeOffsetY =
         readBotFaceEyeOffsetYForStorage(body.faceEyeOffsetY) ??
         DEFAULT_BOT_FACE_EYE_OFFSET_Y;
+      const faceEyeRotationDeg =
+        readBotFaceEyeRotationDegForStorage(body.faceEyeRotationDeg) ??
+        DEFAULT_BOT_FACE_EYE_ROTATION_DEG;
       const faceMouthScale =
         readBotFaceMouthScaleForStorage(body.faceMouthScale) ??
         DEFAULT_BOT_FACE_MOUTH_SCALE;
@@ -6288,10 +6317,12 @@ function buildRoutes(): RouteDefinition[] {
             prism_default_bot_face_eye_character = ?,
             prism_default_bot_face_mouth_font = ?,
             prism_default_bot_face_mouth_character = ?,
+            prism_default_bot_face_mouth_animation = ?,
             prism_default_bot_face_font_weight = ?,
             prism_default_bot_face_eye_scale = ?,
             prism_default_bot_face_eye_offset_x = ?,
             prism_default_bot_face_eye_offset_y = ?,
+            prism_default_bot_face_eye_rotation_deg = ?,
             prism_default_bot_face_mouth_scale = ?,
             prism_default_bot_face_mouth_offset_x = ?,
             prism_default_bot_face_mouth_offset_y = ?,
@@ -6309,10 +6340,12 @@ function buildRoutes(): RouteDefinition[] {
         faceEyeCharacter,
         faceMouthFont,
         faceMouthCharacter,
+        faceMouthAnimation,
         faceFontWeight,
         faceEyeScale,
         faceEyeOffsetX,
         faceEyeOffsetY,
+        faceEyeRotationDeg,
         faceMouthScale,
         faceMouthOffsetX,
         faceMouthOffsetY,
@@ -7311,7 +7344,7 @@ function buildRoutes(): RouteDefinition[] {
 
       const updatedBot = db
         .prepare(
-          "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, face_eyes_font, face_eye_character, face_mouth_font, face_mouth_character, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?"
+          "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?"
         )
         .get(botId, userId);
       json(ctx.res, 200, {
@@ -7352,10 +7385,16 @@ function buildRoutes(): RouteDefinition[] {
       const faceMouthCharacter = readBotFaceMouthCharacterForStorage(
         body.faceMouthCharacter
       );
+      const faceMouthAnimation =
+        readBotFaceGlyphAnimationForStorage(body.faceMouthAnimation) ??
+        DEFAULT_BOT_FACE_GLYPH_ANIMATION;
       const faceFontWeight = readBotFaceWeightForStorage(body.faceFontWeight);
       const faceEyeScale = readBotFaceEyeScaleForStorage(body.faceEyeScale);
       const faceEyeOffsetX = readBotFaceEyeOffsetXForStorage(body.faceEyeOffsetX);
       const faceEyeOffsetY = readBotFaceEyeOffsetYForStorage(body.faceEyeOffsetY);
+      const faceEyeRotationDeg = readBotFaceEyeRotationDegForStorage(
+        body.faceEyeRotationDeg
+      );
       const faceMouthScale = readBotFaceMouthScaleForStorage(body.faceMouthScale);
       const faceMouthOffsetX = readBotFaceMouthOffsetXForStorage(body.faceMouthOffsetX);
       const faceMouthOffsetY = readBotFaceMouthOffsetYForStorage(body.faceMouthOffsetY);
@@ -7398,7 +7437,7 @@ function buildRoutes(): RouteDefinition[] {
       const botId = randomId(12);
       const now = new Date().toISOString();
       db.prepare(
-        "INSERT INTO bots (id, user_id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, face_eyes_font, face_eye_character, face_mouth_font, face_mouth_character, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 'private', ?, ?)"
+        "INSERT INTO bots (id, user_id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 'private', ?, ?)"
       ).run(
         botId,
         userId,
@@ -7422,12 +7461,15 @@ function buildRoutes(): RouteDefinition[] {
         glyph,
         faceEyesFont,
         faceEyeCharacter,
+        DEFAULT_BOT_FACE_GLYPH_ANIMATION,
         faceMouthFont,
         faceMouthCharacter,
+        faceMouthAnimation,
         faceFontWeight,
         faceEyeScale,
         faceEyeOffsetX,
         faceEyeOffsetY,
+        faceEyeRotationDeg,
         faceMouthScale,
         faceMouthOffsetX,
         faceMouthOffsetY,
@@ -7470,10 +7512,12 @@ function buildRoutes(): RouteDefinition[] {
           face_eye_character: faceEyeCharacter,
           face_mouth_font: faceMouthFont,
           face_mouth_character: faceMouthCharacter,
+          face_mouth_animation: faceMouthAnimation,
           face_font_weight: faceFontWeight,
           face_eye_scale: faceEyeScale,
           face_eye_offset_x: faceEyeOffsetX,
           face_eye_offset_y: faceEyeOffsetY,
+          face_eye_rotation_deg: faceEyeRotationDeg,
           face_mouth_scale: faceMouthScale,
           face_mouth_offset_x: faceMouthOffsetX,
           face_mouth_offset_y: faceMouthOffsetY,
@@ -7488,7 +7532,7 @@ function buildRoutes(): RouteDefinition[] {
     route("GET", "/api/bots", async (ctx) => {
       const userId = requireAuth(ctx);
       const rows = db.prepare(
-        "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, face_eyes_font, face_eye_character, face_mouth_font, face_mouth_character, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC"
+        "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC"
       ).all(userId);
       json(ctx.res, 200, { ok: true, bots: rows });
     }),
@@ -7535,7 +7579,7 @@ function buildRoutes(): RouteDefinition[] {
       const updatedBots = result.ids.length > 0
         ? db
             .prepare(
-              `SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, face_eyes_font, face_eye_character, face_mouth_font, face_mouth_character, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? AND id IN (${result.ids.map(() => "?").join(", ")})`
+              `SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? AND id IN (${result.ids.map(() => "?").join(", ")})`
             )
             .all(userId, ...result.ids)
         : [];
@@ -7657,6 +7701,14 @@ function buildRoutes(): RouteDefinition[] {
           values.push(faceMouthCharacter);
         }
       }
+      if (body.faceMouthAnimation !== undefined) {
+        const faceMouthAnimation = readBotFaceGlyphAnimationForStorage(
+          body.faceMouthAnimation
+        );
+        if (faceMouthAnimation === null) throw new Error("Invalid face mouth animation.");
+        fields.push("face_mouth_animation = ?");
+        values.push(faceMouthAnimation);
+      }
       if (body.faceFontWeight !== undefined) {
         if (body.faceFontWeight === null) {
           fields.push("face_font_weight = ?");
@@ -7707,6 +7759,20 @@ function buildRoutes(): RouteDefinition[] {
           }
           fields.push("face_eye_offset_y = ?");
           values.push(normalizedFaceEyeOffsetY);
+        }
+      }
+      if (body.faceEyeRotationDeg !== undefined) {
+        if (body.faceEyeRotationDeg === null) {
+          fields.push("face_eye_rotation_deg = ?");
+          values.push(null);
+        } else {
+          const normalizedFaceEyeRotationDeg =
+            readBotFaceEyeRotationDegForStorage(body.faceEyeRotationDeg);
+          if (normalizedFaceEyeRotationDeg === null) {
+            throw new Error("Invalid face eye rotation.");
+          }
+          fields.push("face_eye_rotation_deg = ?");
+          values.push(normalizedFaceEyeRotationDeg);
         }
       }
       if (body.faceMouthScale !== undefined) {
@@ -7874,7 +7940,7 @@ function buildRoutes(): RouteDefinition[] {
       }
       const updatedBot = db
         .prepare(
-          "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, face_eyes_font, face_eye_character, face_mouth_font, face_mouth_character, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?"
+          "SELECT id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?"
         )
         .get(botId, userId);
       json(ctx.res, 200, { ok: true, bot: updatedBot });

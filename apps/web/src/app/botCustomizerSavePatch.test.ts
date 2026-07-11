@@ -27,12 +27,15 @@ const pristine: BotCustomizerSavePristine = {
   glyph: "bot",
   faceEyesFont: "warm",
   faceEyeCharacter: null,
+  faceEyeAnimation: "none",
   faceMouthFont: "warm",
   faceMouthCharacter: null,
+  faceMouthAnimation: "none",
   faceFontWeight: 500,
   faceEyeScale: 1,
   faceEyeOffsetX: 0,
   faceEyeOffsetY: 0,
+  faceEyeRotationDeg: 0,
   faceMouthScale: 1,
   faceMouthOffsetX: 0,
   faceMouthOffsetY: 0,
@@ -68,12 +71,15 @@ const currentFromPristine = (
   glyph: pristine.glyph,
   faceEyesFont: pristine.faceEyesFont,
   faceEyeCharacter: pristine.faceEyeCharacter,
+  faceEyeAnimation: pristine.faceEyeAnimation,
   faceMouthFont: pristine.faceMouthFont,
   faceMouthCharacter: pristine.faceMouthCharacter,
+  faceMouthAnimation: pristine.faceMouthAnimation,
   faceFontWeight: pristine.faceFontWeight,
   faceEyeScale: pristine.faceEyeScale,
   faceEyeOffsetX: pristine.faceEyeOffsetX,
   faceEyeOffsetY: pristine.faceEyeOffsetY,
+  faceEyeRotationDeg: pristine.faceEyeRotationDeg,
   faceMouthScale: pristine.faceMouthScale,
   faceMouthOffsetX: pristine.faceMouthOffsetX,
   faceMouthOffsetY: pristine.faceMouthOffsetY,
@@ -158,6 +164,24 @@ describe("bot customizer save patch", () => {
         { ...pristine, faceMouthCharacter: "V" }
       ),
       { faceMouthCharacter: null }
+    );
+  });
+
+  it("patches custom glyph animation and eye rotation edits", () => {
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(
+        currentFromPristine({
+          faceEyeAnimation: "wobble",
+          faceMouthAnimation: "flicker",
+          faceEyeRotationDeg: 35,
+        }),
+        pristine
+      ),
+      {
+        faceEyeAnimation: "wobble",
+        faceMouthAnimation: "flicker",
+        faceEyeRotationDeg: 35,
+      }
     );
   });
 

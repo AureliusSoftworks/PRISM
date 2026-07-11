@@ -33,12 +33,29 @@ describe("coffeeSeatPlateGlyph", () => {
       rotateDeg: 90,
     });
     assert.deepEqual(coffeeSeatPlateGlyph("angry", "closed"), {
-      text: COFFEE_SEAT_ANGRY_BRACKET_GLYPH,
+      text: ":[",
       rotateDeg: 90,
     });
+    assert.equal(COFFEE_SEAT_ANGRY_BRACKET_GLYPH, ":[");
   });
 
   it("uses shared open-mouth shapes while speaking", () => {
+    assert.deepEqual(coffeeSeatPlateGlyph("warm", "speech-closed"), {
+      text: ":|",
+      rotateDeg: 90,
+    });
+    assert.deepEqual(coffeeSeatPlateGlyph("warm", "dot"), {
+      text: ":∙",
+      rotateDeg: 90,
+    });
+    assert.deepEqual(coffeeSeatPlateGlyph("warm", "at"), {
+      text: ":@",
+      rotateDeg: 90,
+    });
+    assert.deepEqual(coffeeSeatPlateGlyph("warm", "narrow"), {
+      text: ":o",
+      rotateDeg: 90,
+    });
     assert.deepEqual(coffeeSeatPlateGlyph("warm", "open-wide"), {
       text: ":0",
       rotateDeg: 90,
@@ -144,10 +161,10 @@ describe("coffeeSeatPlateGlyph", () => {
     );
   });
 
-  it("returns the sip face before the cup returns to rest", () => {
+  it("returns the sip face before the cup returns even while the action remains live", () => {
     const durationMs = 1000;
     const releaseAtMs = durationMs * COFFEE_SEAT_SIP_FACE_ACTIVE_PROGRESS;
-    assert.equal(COFFEE_SEAT_SIP_FACE_ACTIVE_PROGRESS, 0.7);
+    assert.equal(COFFEE_SEAT_SIP_FACE_ACTIVE_PROGRESS, 0.45);
     assert.equal(
       coffeeSeatSipFaceActive({
         sipInProgress: false,
@@ -167,10 +184,18 @@ describe("coffeeSeatPlateGlyph", () => {
     assert.equal(
       coffeeSeatSipFaceActive({
         sipInProgress: true,
+        completedSipAnimationAgeMs: releaseAtMs,
+        completedSipAnimationDurationMs: durationMs,
+      }),
+      true
+    );
+    assert.equal(
+      coffeeSeatSipFaceActive({
+        sipInProgress: true,
         completedSipAnimationAgeMs: 1000,
         completedSipAnimationDurationMs: 1000,
       }),
-      true
+      false
     );
   });
 

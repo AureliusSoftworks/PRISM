@@ -3,6 +3,7 @@ import type {
   ZenLiveActionMoodHint,
   ZenLiveActionReactionResponse,
 } from "@localai/shared";
+import type { ZenLiveBotMouthShape } from "./zenLiveMouth";
 
 export type ZenLiveBotActionState = {
   action: string;
@@ -18,7 +19,7 @@ export type ZenLiveBotActionState = {
 
 const TRAILING_SPEECH_BRIDGE_RE =
   /(?:[,:;]?\s*(?:and\s+)?(?:says?|saying|asks?|asking|replies?|replying|responds?|responding|tells?|telling|whispers?|whispering|murmurs?|murmuring|adds?|adding|speaks?|speaking|sings?|singing|croons?|crooning)\b\s*(?:softly|warmly|quietly|gently|candidly|brightly|kindly|slowly|under\s+.*)?[.!?\u2026;:,]*)+$/iu;
-const ZEN_LIVE_ACTION_ANGRY_BRACKET_GLYPH = "\u02d0[";
+const ZEN_LIVE_ACTION_ANGRY_BRACKET_GLYPH = ":[";
 
 export function zenLiveActionMoodToBotMood(
   moodHint: ZenLiveActionMoodHint | undefined
@@ -42,11 +43,7 @@ export function zenLiveActionMoodToBotMood(
   }
 }
 
-export type ZenLiveActionMouthShape =
-  | "open-wide"
-  | "closed"
-  | "open-small"
-  | "open-round";
+export type ZenLiveActionMouthShape = ZenLiveBotMouthShape;
 
 export type ZenLiveBotCanvasSide = "left" | "right";
 
@@ -78,6 +75,10 @@ function zenLiveActionOpenMouthGlyph(
   eyes: ":" | ";",
   mouthShape: ZenLiveActionMouthShape
 ): string | null {
+  if (mouthShape === "speech-closed") return `${eyes}|`;
+  if (mouthShape === "dot") return `${eyes}∙`;
+  if (mouthShape === "at") return `${eyes}@`;
+  if (mouthShape === "narrow") return `${eyes}o`;
   if (mouthShape === "open-wide") return `${eyes}0`;
   if (mouthShape === "open-small") return `${eyes}o`;
   if (mouthShape === "open-round") return `${eyes}O`;

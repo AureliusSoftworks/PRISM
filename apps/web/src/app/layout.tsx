@@ -6,9 +6,9 @@ import {
   Geist_Mono,
   Instrument_Sans,
   Lora,
-  Oxanium,
   Raleway,
 } from "next/font/google";
+import localFont from "next/font/local";
 import { BlockBrowserInspection } from "./BlockBrowserInspection";
 import { ClientInstallCoach } from "./ClientInstallCoach";
 import { DisableNativeTooltips } from "./DisableNativeTooltips";
@@ -50,10 +50,11 @@ const conciseRounded = Fredoka({
   weight: ["600", "700"],
 });
 
-const sharpDisplay = Oxanium({
-  variable: "--font-sharp-display",
-  subsets: ["latin"],
-  weight: ["600", "700", "800"],
+const dotoDisplay = localFont({
+  src: "./fonts/Doto-Variable.ttf",
+  variable: "--font-doto-display",
+  weight: "100 900",
+  display: "swap",
 });
 
 const geistMono = Geist_Mono({
@@ -94,7 +95,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${uiSans.variable} ${titleSans.variable} ${chatSerif.variable} ${formalSerif.variable} ${playfulDisplay.variable} ${conciseRounded.variable} ${sharpDisplay.variable} ${geistMono.variable}`}
+      className={`${uiSans.variable} ${titleSans.variable} ${chatSerif.variable} ${formalSerif.variable} ${playfulDisplay.variable} ${conciseRounded.variable} ${dotoDisplay.variable} ${geistMono.variable}`}
       suppressHydrationWarning
     >
       <body>

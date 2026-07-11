@@ -2,6 +2,7 @@ import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import {
   type BotFaceBlinkBar,
   type BotFaceFontId,
+  type BotFaceGlyphAnimation,
   type BotFaceThinkingFrames,
   type BotProfileFields,
 } from "@localai/shared";
@@ -35,12 +36,15 @@ export interface PrismBotArchiveJson {
     openaiImageModel?: string | null;
     faceEyesFont?: BotFaceFontId | null;
     faceEyeCharacter?: string | null;
+    faceEyeAnimation?: BotFaceGlyphAnimation | null;
     faceMouthFont?: BotFaceFontId | null;
     faceMouthCharacter?: string | null;
+    faceMouthAnimation?: BotFaceGlyphAnimation | null;
     faceFontWeight?: number | null;
     faceEyeScale?: number | null;
     faceEyeOffsetX?: number | null;
     faceEyeOffsetY?: number | null;
+    faceEyeRotationDeg?: number | null;
     faceMouthScale?: number | null;
     faceMouthOffsetX?: number | null;
     faceMouthOffsetY?: number | null;

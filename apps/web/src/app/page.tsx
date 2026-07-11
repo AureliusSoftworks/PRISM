@@ -86,6 +86,7 @@ import {
   coffeeCupTopOffFrameIndexForPour,
   coffeeCupTopOffProgressAfterForPour,
   coffeePotPointerIsInsideTarget,
+  coffeePotPointerDistanceFromTarget,
   coffeePotPointOutsideExclusion,
   coffeePotFillFrameDelayMs,
   coffeePotPourFrameDelayMs,
@@ -107,6 +108,7 @@ import {
   coffeeSeatIsTopHead,
 } from "./coffee-seat-gaze";
 import {
+  COFFEE_SEAT_SIP_FACE_ACTIVE_PROGRESS,
   coffeeSeatPlateGlyph,
   resolveCoffeeSeatSipFacePresentation,
   type CoffeeSeatEmojiMood,
@@ -296,7 +298,6 @@ import {
 } from "./botProfileEditorGate";
 import {
   buildBotCustomizerSavePatch,
-  type BotCustomizerSavePatch,
 } from "./botCustomizerSavePatch";
 import {
   BOT_BATCH_MIXED_LABEL,
@@ -398,6 +399,10 @@ import {
   DEFAULT_BOT_FACE_EYE_SCALE,
   DEFAULT_BOT_FACE_FONT_ID,
   DEFAULT_BOT_FACE_FONT_WEIGHT,
+  BOT_FACE_GLYPH_ANIMATIONS,
+  BOT_FACE_EYE_ROTATION_DEG_MAX,
+  BOT_FACE_EYE_ROTATION_DEG_MIN,
+  BOT_FACE_EYE_ROTATION_DEG_STEP,
   DEFAULT_BOT_FACE_MOUTH_OFFSET_X,
   DEFAULT_BOT_FACE_MOUTH_OFFSET_Y,
   DEFAULT_BOT_FACE_MOUTH_SCALE,
@@ -433,9 +438,11 @@ import {
   normalizeBotFaceEyeCharacter,
   normalizeBotFaceEyeOffsetX,
   normalizeBotFaceEyeOffsetY,
+  normalizeBotFaceEyeRotationDeg,
   normalizeBotFaceEyeScale,
   normalizeBotFaceFontId,
   normalizeBotFaceFontWeight,
+  normalizeBotFaceGlyphAnimation,
   normalizeBotFaceMouthCharacter,
   normalizeBotFaceMouthOffsetX,
   normalizeBotFaceMouthOffsetY,
@@ -468,6 +475,7 @@ import {
   botFaceThinkingFramesEqual,
   type BotFaceBlinkBar,
   type BotFaceFontId,
+  type BotFaceGlyphAnimation,
   type BotFaceStyle,
   type BotFaceThinkingFrames,
   type BotBirthEra,
@@ -632,6 +640,7 @@ import {
   findAtMentionTokenPlain,
   findFirstBotMentionId,
   getBotMentionDisplayLength,
+  getBotMentionDisplayText,
   type BotMentionPick,
 } from "./botMention";
 import {
@@ -656,8 +665,10 @@ import {
 } from "./zenLiveActions";
 import {
   ZEN_LIVE_MOUTH_PHASE_MS,
-  zenLiveBotMouthShapeFromSpeechPhase,
+  normalizeCrtSpeechText,
+  zenLiveBotMouthShapeForTalkingState,
   zenLiveBotMouthShapeFromRevealProgress,
+  zenLiveBotMouthShapeFromVisibleTextProgress,
   type ZenLiveBotMouthShape,
 } from "./zenLiveMouth";
 import {
@@ -770,7 +781,12 @@ import {
 import {
   nextZenAutonomyCooldownUntilMs,
   resolveZenAutonomyEligibility,
+  zenAutonomySchedulerIsActive,
 } from "./zenAutonomy";
+import {
+  zenReadableAnchorMessageIds,
+  zenReadableMaxScrollTop,
+} from "./zenReadableScroll";
 import {
   DEFAULT_CHAT_REVEAL_TIMING,
   formatChatRevealTokenDisplay,
@@ -6561,6 +6577,10 @@ interface CoffeeArrivalSeatTimers {
 interface CoffeePotDragRuntimeState {
   pointerId: number;
   completedBotIds: Set<string>;
+  startClientX: number;
+  startClientY: number;
+  moved: boolean;
+  equipped: boolean;
 }
 
 interface CoffeePotDragState {
@@ -7198,8 +7218,8 @@ function collectGeneratedImageIds(messages: readonly Message[]): string[] {
   return ids;
 }
 
-/** How many typewriter characters advance before moving to the next Zen mouth phase. */
-const COFFEE_SEAT_MOUTH_CHARS_PER_PHASE = 3;
+/** Advance the Coffee mouth state with every newly revealed character. */
+const COFFEE_SEAT_MOUTH_CHARS_PER_PHASE = 1;
 const COFFEE_SEAT_MOOD_PULSE_MS = 8_000;
 
 function coffeeSeatStableHash(text: string): number {
@@ -7215,12 +7235,10 @@ function coffeeSeatMouthShapeFromVisibleLength(
   visibleLength: number,
   speechSeedText: string
 ): ZenLiveBotMouthShape {
-  if (visibleLength <= 0) return "closed";
-  return zenLiveBotMouthShapeFromSpeechPhase({
-    speechSeedText,
-    phaseIndex: Math.floor(
-      Math.max(0, visibleLength) / COFFEE_SEAT_MOUTH_CHARS_PER_PHASE
-    ),
+  return zenLiveBotMouthShapeFromVisibleTextProgress({
+    text: speechSeedText,
+    visibleLength,
+    charactersPerPhase: COFFEE_SEAT_MOUTH_CHARS_PER_PHASE,
   });
 }
 
@@ -7382,10 +7400,14 @@ type BotFaceStyleSource = {
   faceEyesFont?: unknown;
   face_eye_character?: unknown;
   faceEyeCharacter?: unknown;
+  face_eye_animation?: unknown;
+  faceEyeAnimation?: unknown;
   face_mouth_font?: unknown;
   faceMouthFont?: unknown;
   face_mouth_character?: unknown;
   faceMouthCharacter?: unknown;
+  face_mouth_animation?: unknown;
+  faceMouthAnimation?: unknown;
   face_font_weight?: unknown;
   faceFontWeight?: unknown;
   face_eye_scale?: unknown;
@@ -7394,6 +7416,8 @@ type BotFaceStyleSource = {
   faceEyeOffsetX?: unknown;
   face_eye_offset_y?: unknown;
   faceEyeOffsetY?: unknown;
+  face_eye_rotation_deg?: unknown;
+  faceEyeRotationDeg?: unknown;
   face_mouth_scale?: unknown;
   faceMouthScale?: unknown;
   face_mouth_offset_x?: unknown;
@@ -7427,12 +7451,15 @@ function resolveBotFaceStyleForBot(
     {
       faceEyesFont: bot?.face_eyes_font ?? bot?.faceEyesFont,
       faceEyeCharacter: bot?.face_eye_character ?? bot?.faceEyeCharacter,
+      faceEyeAnimation: bot?.face_eye_animation ?? bot?.faceEyeAnimation,
       faceMouthFont: bot?.face_mouth_font ?? bot?.faceMouthFont,
       faceMouthCharacter: bot?.face_mouth_character ?? bot?.faceMouthCharacter,
+      faceMouthAnimation: bot?.face_mouth_animation ?? bot?.faceMouthAnimation,
       faceFontWeight: bot?.face_font_weight ?? bot?.faceFontWeight,
       faceEyeScale: bot?.face_eye_scale ?? bot?.faceEyeScale,
       faceEyeOffsetX: bot?.face_eye_offset_x ?? bot?.faceEyeOffsetX,
       faceEyeOffsetY: bot?.face_eye_offset_y ?? bot?.faceEyeOffsetY,
+      faceEyeRotationDeg: bot?.face_eye_rotation_deg ?? bot?.faceEyeRotationDeg,
       faceMouthScale: bot?.face_mouth_scale ?? bot?.faceMouthScale,
       faceMouthOffsetX: bot?.face_mouth_offset_x ?? bot?.faceMouthOffsetX,
       faceMouthOffsetY: bot?.face_mouth_offset_y ?? bot?.faceMouthOffsetY,
@@ -9231,12 +9258,15 @@ interface UserSettings {
   prismDefaultBotGlyph: string;
   prismDefaultBotFaceEyesFont: BotFaceFontId;
   prismDefaultBotFaceEyeCharacter: string | null;
+  prismDefaultBotFaceEyeAnimation: BotFaceGlyphAnimation;
   prismDefaultBotFaceMouthFont: BotFaceFontId;
   prismDefaultBotFaceMouthCharacter: string | null;
+  prismDefaultBotFaceMouthAnimation: BotFaceGlyphAnimation;
   prismDefaultBotFaceFontWeight: number;
   prismDefaultBotFaceEyeScale: number;
   prismDefaultBotFaceEyeOffsetX: number;
   prismDefaultBotFaceEyeOffsetY: number;
+  prismDefaultBotFaceEyeRotationDeg: number;
   prismDefaultBotFaceMouthScale: number;
   prismDefaultBotFaceMouthOffsetX: number;
   prismDefaultBotFaceMouthOffsetY: number;
@@ -9738,12 +9768,15 @@ interface Bot {
   glyph: string | null;
   face_eyes_font?: string | null;
   face_eye_character?: string | null;
+  face_eye_animation?: string | null;
   face_mouth_font?: string | null;
   face_mouth_character?: string | null;
+  face_mouth_animation?: string | null;
   face_font_weight?: number | null;
   face_eye_scale?: number | null;
   face_eye_offset_x?: number | null;
   face_eye_offset_y?: number | null;
+  face_eye_rotation_deg?: number | null;
   face_mouth_scale?: number | null;
   face_mouth_offset_x?: number | null;
   face_mouth_offset_y?: number | null;
@@ -9774,12 +9807,15 @@ type BotEditOriginalSnapshot = {
   glyph: BotGlyphName;
   faceEyesFont: BotFaceFontId;
   faceEyeCharacter: string | null;
+  faceEyeAnimation: BotFaceGlyphAnimation;
   faceMouthFont: BotFaceFontId;
   faceMouthCharacter: string | null;
+  faceMouthAnimation: BotFaceGlyphAnimation;
   faceFontWeight: number;
   faceEyeScale: number;
   faceEyeOffsetX: number;
   faceEyeOffsetY: number;
+  faceEyeRotationDeg: number;
   faceMouthScale: number;
   faceMouthOffsetX: number;
   faceMouthOffsetY: number;
@@ -9789,162 +9825,46 @@ type BotEditOriginalSnapshot = {
   profilePictureImageId: string | null;
 };
 
+type BotAvatarDraftSnapshot = Pick<
+  BotEditOriginalSnapshot,
+  | "name"
+  | "color"
+  | "glyph"
+  | "faceEyesFont"
+  | "faceEyeCharacter"
+  | "faceEyeAnimation"
+  | "faceMouthFont"
+  | "faceMouthCharacter"
+  | "faceMouthAnimation"
+  | "faceFontWeight"
+  | "faceEyeScale"
+  | "faceEyeOffsetX"
+  | "faceEyeOffsetY"
+  | "faceEyeRotationDeg"
+  | "faceMouthScale"
+  | "faceMouthOffsetX"
+  | "faceMouthOffsetY"
+  | "faceMouthRotationDeg"
+  | "faceBlinkBar"
+  | "faceThinkingFrames"
+>;
+
+const BOT_AVATAR_UNDO_HISTORY_LIMIT = 100;
+const BOT_AVATAR_UNDO_STATIONARY_MS = 450;
+
+function botAvatarDraftSnapshotsEqual(
+  left: BotAvatarDraftSnapshot,
+  right: BotAvatarDraftSnapshot
+): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
 function replaceBotRowById(rows: Bot[], updatedBot: Bot): Bot[] {
   const index = rows.findIndex((bot) => bot.id === updatedBot.id);
   if (index === -1) return [updatedBot, ...rows];
   const next = rows.slice();
   next[index] = updatedBot;
   return next;
-}
-
-function normalizeBotAvatarAutosavePatch(
-  patch: BotCustomizerSavePatch
-): BotCustomizerSavePatch {
-  const next: BotCustomizerSavePatch = {};
-  if (patch.color !== undefined) next.color = patch.color;
-  if (patch.glyph !== undefined) next.glyph = patch.glyph;
-  if (patch.faceEyesFont !== undefined) next.faceEyesFont = patch.faceEyesFont;
-  if (patch.faceEyeCharacter !== undefined) {
-    next.faceEyeCharacter = normalizeBotFaceEyeCharacter(patch.faceEyeCharacter);
-  }
-  if (patch.faceMouthFont !== undefined) next.faceMouthFont = patch.faceMouthFont;
-  if (patch.faceMouthCharacter !== undefined) {
-    next.faceMouthCharacter = normalizeBotFaceMouthCharacter(patch.faceMouthCharacter);
-  }
-  if (patch.faceFontWeight !== undefined) {
-    next.faceFontWeight =
-      normalizeBotFaceFontWeight(patch.faceFontWeight) ?? DEFAULT_BOT_FACE_STYLE.weight;
-  }
-  if (patch.faceEyeScale !== undefined) {
-    next.faceEyeScale =
-      normalizeBotFaceEyeScale(patch.faceEyeScale) ?? DEFAULT_BOT_FACE_STYLE.eyeScale;
-  }
-  if (patch.faceEyeOffsetX !== undefined) {
-    next.faceEyeOffsetX =
-      normalizeBotFaceEyeOffsetX(patch.faceEyeOffsetX) ??
-      DEFAULT_BOT_FACE_STYLE.eyeOffsetX;
-  }
-  if (patch.faceEyeOffsetY !== undefined) {
-    next.faceEyeOffsetY =
-      normalizeBotFaceEyeOffsetY(patch.faceEyeOffsetY) ?? DEFAULT_BOT_FACE_STYLE.eyeOffsetY;
-  }
-  if (patch.faceMouthScale !== undefined) {
-    next.faceMouthScale =
-      normalizeBotFaceMouthScale(patch.faceMouthScale) ??
-      DEFAULT_BOT_FACE_STYLE.mouthScale;
-  }
-  if (patch.faceMouthOffsetX !== undefined) {
-    next.faceMouthOffsetX =
-      normalizeBotFaceMouthOffsetX(patch.faceMouthOffsetX) ??
-      DEFAULT_BOT_FACE_STYLE.mouthOffsetX;
-  }
-  if (patch.faceMouthOffsetY !== undefined) {
-    next.faceMouthOffsetY =
-      normalizeBotFaceMouthOffsetY(patch.faceMouthOffsetY) ??
-      DEFAULT_BOT_FACE_STYLE.mouthOffsetY;
-  }
-  if (patch.faceMouthRotationDeg !== undefined) {
-    next.faceMouthRotationDeg =
-      normalizeBotFaceMouthRotationDeg(patch.faceMouthRotationDeg) ??
-      DEFAULT_BOT_FACE_STYLE.mouthRotationDeg;
-  }
-  if (patch.faceBlinkBar !== undefined) {
-    next.faceBlinkBar =
-      normalizeBotFaceBlinkBar(patch.faceBlinkBar) ?? DEFAULT_BOT_FACE_STYLE.blinkBar;
-  }
-  if (patch.faceThinkingFrames !== undefined) {
-    next.faceThinkingFrames =
-      normalizeBotFaceThinkingFrames(patch.faceThinkingFrames) ??
-      DEFAULT_BOT_FACE_STYLE.thinkingFrames;
-  }
-  return next;
-}
-
-function mergeBotAvatarAutosavePatch(
-  current: BotCustomizerSavePatch,
-  patch: BotCustomizerSavePatch
-): BotCustomizerSavePatch {
-  return {
-    ...current,
-    ...normalizeBotAvatarAutosavePatch(patch),
-  };
-}
-
-function botAvatarAutosavePatchHasFields(patch: BotCustomizerSavePatch): boolean {
-  return Object.keys(patch).length > 0;
-}
-
-function applyBotAvatarAutosavePatchToSnapshot(
-  snapshot: BotEditOriginalSnapshot,
-  patch: BotCustomizerSavePatch
-): BotEditOriginalSnapshot {
-  return {
-    ...snapshot,
-    color: patch.color !== undefined ? patch.color : snapshot.color,
-    glyph: patch.glyph !== undefined ? (patch.glyph as BotGlyphName) : snapshot.glyph,
-    faceEyesFont:
-      patch.faceEyesFont !== undefined
-        ? (patch.faceEyesFont as BotFaceFontId)
-        : snapshot.faceEyesFont,
-    faceEyeCharacter:
-      patch.faceEyeCharacter !== undefined
-        ? normalizeBotFaceEyeCharacter(patch.faceEyeCharacter)
-        : snapshot.faceEyeCharacter,
-    faceMouthFont:
-      patch.faceMouthFont !== undefined
-        ? (patch.faceMouthFont as BotFaceFontId)
-        : snapshot.faceMouthFont,
-    faceMouthCharacter:
-      patch.faceMouthCharacter !== undefined
-        ? normalizeBotFaceMouthCharacter(patch.faceMouthCharacter)
-        : snapshot.faceMouthCharacter,
-    faceFontWeight:
-      patch.faceFontWeight !== undefined
-        ? normalizeBotFaceFontWeight(patch.faceFontWeight) ?? DEFAULT_BOT_FACE_STYLE.weight
-        : snapshot.faceFontWeight,
-    faceEyeScale:
-      patch.faceEyeScale !== undefined
-        ? normalizeBotFaceEyeScale(patch.faceEyeScale) ?? DEFAULT_BOT_FACE_STYLE.eyeScale
-        : snapshot.faceEyeScale,
-    faceEyeOffsetX:
-      patch.faceEyeOffsetX !== undefined
-        ? normalizeBotFaceEyeOffsetX(patch.faceEyeOffsetX) ??
-          DEFAULT_BOT_FACE_STYLE.eyeOffsetX
-        : snapshot.faceEyeOffsetX,
-    faceEyeOffsetY:
-      patch.faceEyeOffsetY !== undefined
-        ? normalizeBotFaceEyeOffsetY(patch.faceEyeOffsetY) ?? DEFAULT_BOT_FACE_STYLE.eyeOffsetY
-        : snapshot.faceEyeOffsetY,
-    faceMouthScale:
-      patch.faceMouthScale !== undefined
-        ? normalizeBotFaceMouthScale(patch.faceMouthScale) ??
-          DEFAULT_BOT_FACE_STYLE.mouthScale
-        : snapshot.faceMouthScale,
-    faceMouthOffsetX:
-      patch.faceMouthOffsetX !== undefined
-        ? normalizeBotFaceMouthOffsetX(patch.faceMouthOffsetX) ??
-          DEFAULT_BOT_FACE_STYLE.mouthOffsetX
-        : snapshot.faceMouthOffsetX,
-    faceMouthOffsetY:
-      patch.faceMouthOffsetY !== undefined
-        ? normalizeBotFaceMouthOffsetY(patch.faceMouthOffsetY) ??
-          DEFAULT_BOT_FACE_STYLE.mouthOffsetY
-        : snapshot.faceMouthOffsetY,
-    faceMouthRotationDeg:
-      patch.faceMouthRotationDeg !== undefined
-        ? normalizeBotFaceMouthRotationDeg(patch.faceMouthRotationDeg) ??
-          DEFAULT_BOT_FACE_STYLE.mouthRotationDeg
-        : snapshot.faceMouthRotationDeg,
-    faceBlinkBar:
-      patch.faceBlinkBar !== undefined
-        ? normalizeBotFaceBlinkBar(patch.faceBlinkBar) ?? DEFAULT_BOT_FACE_STYLE.blinkBar
-        : snapshot.faceBlinkBar,
-    faceThinkingFrames:
-      patch.faceThinkingFrames !== undefined
-        ? normalizeBotFaceThinkingFrames(patch.faceThinkingFrames) ??
-          DEFAULT_BOT_FACE_STYLE.thinkingFrames
-        : snapshot.faceThinkingFrames,
-  };
 }
 
 interface AccountExportBundleV1 {
@@ -10220,12 +10140,15 @@ function prepareBotArchivePayload(
           : null,
       faceEyesFont: normalizeBotFaceFontId(parsedBot.faceEyesFont),
       faceEyeCharacter: normalizeBotFaceEyeCharacter(parsedBot.faceEyeCharacter),
+      faceEyeAnimation: normalizeBotFaceGlyphAnimation(parsedBot.faceEyeAnimation),
       faceMouthFont: normalizeBotFaceFontId(parsedBot.faceMouthFont),
       faceMouthCharacter: normalizeBotFaceMouthCharacter(parsedBot.faceMouthCharacter),
+      faceMouthAnimation: normalizeBotFaceGlyphAnimation(parsedBot.faceMouthAnimation),
       faceFontWeight: normalizeBotFaceFontWeight(parsedBot.faceFontWeight),
       faceEyeScale: normalizeBotFaceEyeScale(parsedBot.faceEyeScale),
       faceEyeOffsetX: normalizeBotFaceEyeOffsetX(parsedBot.faceEyeOffsetX),
       faceEyeOffsetY: normalizeBotFaceEyeOffsetY(parsedBot.faceEyeOffsetY),
+      faceEyeRotationDeg: normalizeBotFaceEyeRotationDeg(parsedBot.faceEyeRotationDeg),
       faceMouthScale: normalizeBotFaceMouthScale(parsedBot.faceMouthScale),
       faceMouthOffsetX: normalizeBotFaceMouthOffsetX(parsedBot.faceMouthOffsetX),
       faceMouthOffsetY: normalizeBotFaceMouthOffsetY(parsedBot.faceMouthOffsetY),
@@ -11951,11 +11874,15 @@ function createBotFormHasEnteredData(options: {
 	  repetitionPenalty: number;
 	  faceEyesFont?: BotFaceFontId;
   faceEyeCharacter?: string | null;
+  faceEyeAnimation?: BotFaceGlyphAnimation;
   faceMouthFont?: BotFaceFontId;
+  faceMouthCharacter?: string | null;
+  faceMouthAnimation?: BotFaceGlyphAnimation;
 		  faceFontWeight?: number;
   faceEyeScale?: number;
   faceEyeOffsetX?: number;
   faceEyeOffsetY?: number;
+  faceEyeRotationDeg?: number;
   faceMouthScale?: number;
   faceMouthOffsetX?: number;
   faceMouthOffsetY?: number;
@@ -11979,11 +11906,15 @@ function createBotFormHasEnteredData(options: {
 	  if (options.repetitionPenalty !== BOT_REPETITION_PENALTY_DEFAULT) return true;
 	  if ((options.faceEyesFont ?? DEFAULT_BOT_FACE_FONT_ID) !== DEFAULT_BOT_FACE_FONT_ID) return true;
   if ((options.faceEyeCharacter ?? DEFAULT_BOT_FACE_EYE_CHARACTER) !== DEFAULT_BOT_FACE_EYE_CHARACTER) return true;
+  if ((options.faceEyeAnimation ?? DEFAULT_BOT_FACE_STYLE.eyeAnimation) !== DEFAULT_BOT_FACE_STYLE.eyeAnimation) return true;
   if ((options.faceMouthFont ?? DEFAULT_BOT_FACE_FONT_ID) !== DEFAULT_BOT_FACE_FONT_ID) return true;
+  if ((options.faceMouthCharacter ?? DEFAULT_BOT_FACE_STYLE.mouthCharacter) !== DEFAULT_BOT_FACE_STYLE.mouthCharacter) return true;
+  if ((options.faceMouthAnimation ?? DEFAULT_BOT_FACE_STYLE.mouthAnimation) !== DEFAULT_BOT_FACE_STYLE.mouthAnimation) return true;
   if ((options.faceFontWeight ?? DEFAULT_BOT_FACE_FONT_WEIGHT) !== DEFAULT_BOT_FACE_FONT_WEIGHT) return true;
   if ((options.faceEyeScale ?? DEFAULT_BOT_FACE_EYE_SCALE) !== DEFAULT_BOT_FACE_EYE_SCALE) return true;
   if ((options.faceEyeOffsetX ?? DEFAULT_BOT_FACE_EYE_OFFSET_X) !== DEFAULT_BOT_FACE_EYE_OFFSET_X) return true;
   if ((options.faceEyeOffsetY ?? DEFAULT_BOT_FACE_EYE_OFFSET_Y) !== DEFAULT_BOT_FACE_EYE_OFFSET_Y) return true;
+  if ((options.faceEyeRotationDeg ?? DEFAULT_BOT_FACE_STYLE.eyeRotationDeg) !== DEFAULT_BOT_FACE_STYLE.eyeRotationDeg) return true;
   if ((options.faceMouthScale ?? DEFAULT_BOT_FACE_MOUTH_SCALE) !== DEFAULT_BOT_FACE_MOUTH_SCALE) return true;
   if ((options.faceMouthOffsetX ?? DEFAULT_BOT_FACE_MOUTH_OFFSET_X) !== DEFAULT_BOT_FACE_MOUTH_OFFSET_X) return true;
   if ((options.faceMouthOffsetY ?? DEFAULT_BOT_FACE_MOUTH_OFFSET_Y) !== DEFAULT_BOT_FACE_MOUTH_OFFSET_Y) return true;
@@ -14757,8 +14688,11 @@ function MessageMoodFace(props: {
   const placement = props.placement ?? "trailing";
   const moodKey = props.moodKey;
   const seatEmojiTier = coffeeSeatEmojiMoodFromPrism(moodKey);
-  const seatMouthShape =
-    props.mouthShape ?? (props.mouthOpen === true ? "open-wide" : "closed");
+  const seatMouthShape = zenLiveBotMouthShapeForTalkingState({
+    mouthShape:
+      props.mouthShape ?? (props.mouthOpen === true ? "open-wide" : "closed"),
+    isTalking: props.isTalking === true,
+  });
   const seatPlateGlyph = coffeeSeatPlateGlyph(seatEmojiTier, seatMouthShape);
   const questionMarkActive = props.questionMarkActive === true;
   const color = props.color?.trim();
@@ -14779,6 +14713,7 @@ function MessageMoodFace(props: {
       <CoffeeSeatPlateEmoji
         enabled={variant === "prism"}
         isTalking={props.isTalking === true}
+        mouthShape={seatMouthShape}
         scheduleKey={`message-mood-${variant}-${moodKey}`}
         showQuestionMark={questionMarkActive}
         baseText={seatPlateGlyph.text}
@@ -14788,10 +14723,12 @@ function MessageMoodFace(props: {
         faceEyeCharacter={props.faceStyle?.eyeCharacter}
         faceMouthFont={props.faceStyle?.mouthFont}
         faceMouthCharacter={props.faceStyle?.mouthCharacter}
+        faceMouthAnimation={props.faceStyle?.mouthAnimation}
         faceFontWeight={props.faceStyle?.weight}
         faceEyeScale={props.faceStyle?.eyeScale}
         faceEyeOffsetX={props.faceStyle?.eyeOffsetX}
         faceEyeOffsetY={props.faceStyle?.eyeOffsetY}
+        faceEyeRotationDeg={props.faceStyle?.eyeRotationDeg}
         faceMouthScale={props.faceStyle?.mouthScale}
         faceMouthOffsetX={props.faceStyle?.mouthOffsetX}
         faceMouthOffsetY={props.faceStyle?.mouthOffsetY}
@@ -19652,6 +19589,8 @@ interface ColorGlyphPickerProps {
   onGlyphChange: (next: BotGlyphName) => void;
   open: boolean;
   onToggle: () => void;
+  /** Render the color and glyph surfaces inline instead of behind a swatch popover. */
+  inline?: boolean;
   /** Optional label override for accessibility (defaults are fine for both forms). */
   ariaLabel?: string;
   /**
@@ -19702,14 +19641,16 @@ function ColorGlyphPicker({
   onGlyphChange,
   open,
   onToggle,
+  inline = false,
   ariaLabel = "Bot color and glyph. Click to open the picker, right-click for random.",
   resolvedTheme,
 }: ColorGlyphPickerProps): React.JSX.Element {
   const [mobilePickerActive, setMobilePickerActive] = useState(false);
   const [draftColor, setDraftColor] = useState(color);
   const [draftGlyph, setDraftGlyph] = useState<BotGlyphName>(glyph);
-  const pickerColor = mobilePickerActive && open ? draftColor : color;
-  const pickerGlyph = mobilePickerActive && open ? draftGlyph : glyph;
+  const mobileDraftActive = mobilePickerActive && open && !inline;
+  const pickerColor = mobileDraftActive ? draftColor : color;
+  const pickerGlyph = mobileDraftActive ? draftGlyph : glyph;
   // Everything the swatch paints keys off the band-clamped color, not the
   // raw hex. The editor preview intentionally uses a solid selected-tile
   // treatment; the empty-state hero gets its own softer ambient styling.
@@ -19751,24 +19692,24 @@ function ColorGlyphPicker({
 
   const commitColorPick = useCallback(
     (next: string) => {
-      if (mobilePickerActive) {
+      if (mobilePickerActive && !inline) {
         setDraftColor(next);
         return;
       }
       onColorChange(next);
     },
-    [mobilePickerActive, onColorChange]
+    [inline, mobilePickerActive, onColorChange]
   );
 
   const commitGlyphPick = useCallback(
     (next: BotGlyphName) => {
-      if (mobilePickerActive) {
+      if (mobilePickerActive && !inline) {
         setDraftGlyph(next);
         return;
       }
       onGlyphChange(next);
     },
-    [mobilePickerActive, onGlyphChange]
+    [inline, mobilePickerActive, onGlyphChange]
   );
 
   const applyMobileDraft = useCallback(() => {
@@ -19968,7 +19909,7 @@ function ColorGlyphPicker({
   // call onColorChange with a stale rect, and quietly overwrite the
   // user's picked color.
   useEffect(() => {
-    if (open) return;
+    if (open || inline) return;
     draggingRef.current = false;
     pendingPointRef.current = null;
     dragRectRef.current = null;
@@ -19976,7 +19917,7 @@ function ColorGlyphPicker({
       cancelAnimationFrame(dragFrameRef.current);
       dragFrameRef.current = null;
     }
-  }, [open]);
+  }, [inline, open]);
 
   // Position driver — the baseline camera. Maps the shell's viewport
   // position to the camera coords so the vignette + rim light pool on
@@ -20018,6 +19959,9 @@ function ColorGlyphPicker({
   // `@media (max-width: 799px)` centered-modal fallback in
   // page.module.css can take over.
   useLayoutEffect(() => {
+    if (inline) {
+      return;
+    }
     if (!open) {
       // Resetting the anchor when the popover closes is the intended
       // synchronization between component-state and the projected
@@ -20056,14 +20000,14 @@ function ColorGlyphPicker({
     measure();
     window.addEventListener("resize", measure);
     return () => window.removeEventListener("resize", measure);
-  }, [open]);
+  }, [inline, open]);
 
   // Wire the position driver only while the popover is open (the DOM
   // doesn't exist until then, and leaving listeners attached to window
   // after unmount leaks). Window scroll + resize both move the shell
   // within the viewport, so both trigger a re-compute.
   useEffect(() => {
-    if (!open) return;
+    if (!open && !inline) return;
     const shell = shellRef.current;
     if (!shell) return;
     window.addEventListener("scroll", positionCamera, { passive: true });
@@ -20075,7 +20019,7 @@ function ColorGlyphPicker({
       window.removeEventListener("scroll", positionCamera);
       window.removeEventListener("resize", positionCamera);
     };
-  }, [open, positionCamera]);
+  }, [inline, open, positionCamera]);
 
   // Cursor driver — hover-capable override. While the cursor is over
   // the shell, its position becomes the vignette/rim camera directly.
@@ -20100,22 +20044,24 @@ function ColorGlyphPicker({
 
   return (
     <div ref={wrapperRef} className={styles.colorPickerWrapper} data-color-affordance="true">
-      <button
-        type="button"
-        className={styles.colorSwatchButton}
-        style={{
-          ["--bot-color" as string]: displayColor,
-          ["--bot-tile-ink" as string]: readable,
-        } as React.CSSProperties}
-        onClick={togglePicker}
-        aria-label={ariaLabel}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        data-glyph-tooltip="Pick color and glyph"
-      >
-        <BotGlyph name={pickerGlyph} />
-      </button>
-      {open && (
+      {!inline ? (
+        <button
+          type="button"
+          className={styles.colorSwatchButton}
+          style={{
+            ["--bot-color" as string]: displayColor,
+            ["--bot-tile-ink" as string]: readable,
+          } as React.CSSProperties}
+          onClick={togglePicker}
+          aria-label={ariaLabel}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          data-glyph-tooltip="Pick color and glyph"
+        >
+          <BotGlyph name={pickerGlyph} />
+        </button>
+      ) : null}
+      {(inline || open) && (
         // Popover is a pure picking surface — no reroll affordance lives
         // here. Randomization is exclusively the swatch's right-click,
         // keeping the popover's two jobs (pick color, pick glyph)
@@ -20132,14 +20078,14 @@ function ColorGlyphPicker({
         // `@media (max-width: 799px)` rule in page.module.css wins
         // and the popover recenters as a modal.
         <div
-          className={styles.colorGlyphPopover}
-          style={popoverAnchor ? {
+          className={inline ? styles.colorGlyphInline : styles.colorGlyphPopover}
+          style={!inline && popoverAnchor ? {
             position: "fixed",
             top: `${popoverAnchor.top}px`,
             left: `${popoverAnchor.left}px`,
             transform: "none",
           } : undefined}
-          role="dialog"
+          role={inline ? "group" : "dialog"}
           aria-label="Bot color and glyph picker"
         >
           <div
@@ -20157,7 +20103,7 @@ function ColorGlyphPicker({
               aria-hidden="true"
             />
           </div>
-          <div className={styles.popoverDivider} aria-hidden="true" />
+          {!inline ? <div className={styles.popoverDivider} aria-hidden="true" /> : null}
           {/* glyph picker lives in a three-layer stack:
               · shell (shellRef): clips, hosts the dynamic vignette +
                 rim light (both read --vignette-x/y; rim is a masked
@@ -20193,7 +20139,7 @@ function ColorGlyphPicker({
               </div>
             </div>
           </div>
-          <div className={styles.colorGlyphApplyBar}>
+          {!inline ? <div className={styles.colorGlyphApplyBar}>
             <div
               className={styles.colorGlyphApplyPreview}
               style={{
@@ -20211,7 +20157,7 @@ function ColorGlyphPicker({
             >
               Apply
             </button>
-          </div>
+          </div> : null}
         </div>
       )}
     </div>
@@ -24610,6 +24556,11 @@ interface ZenLiveBotMannequinProps {
     text: string;
     rotateDeg: number;
   };
+  plateFaceRest?: {
+    text: string;
+    rotateDeg: number;
+  };
+  plateFaceRestAfterMs?: number | null;
   scheduleKey: string;
   thinkingScheduleKey?: string;
   showThinkingSpinner?: boolean;
@@ -24628,6 +24579,8 @@ function ZenLiveBotMannequin({
   mouthShape,
   moodHint,
   plateFace,
+  plateFaceRest,
+  plateFaceRestAfterMs = null,
   scheduleKey,
   thinkingScheduleKey,
   showThinkingSpinner = false,
@@ -24636,11 +24589,35 @@ function ZenLiveBotMannequin({
   screenMaterialSeed,
   frameMaterialSeed,
 }: ZenLiveBotMannequinProps): React.JSX.Element {
-  const displayPlateFace = plateFace ?? (
-    isTalking && mouthShape === "closed"
-      ? { text: ":|", rotateDeg: 90 }
-      : zenLiveActionPlateFace(moodHint, mouthShape)
-  );
+  const normalizedPlateFaceRestAfterMs =
+    typeof plateFaceRestAfterMs === "number" &&
+    Number.isFinite(plateFaceRestAfterMs) &&
+    plateFaceRestAfterMs >= 0
+      ? Math.round(plateFaceRestAfterMs)
+      : null;
+  const plateFaceRestKey =
+    plateFace && plateFaceRest && normalizedPlateFaceRestAfterMs !== null
+      ? `${plateFace.text}:${plateFace.rotateDeg}:${plateFaceRest.text}:${plateFaceRest.rotateDeg}:${normalizedPlateFaceRestAfterMs}`
+      : null;
+  const [releasedPlateFaceKey, setReleasedPlateFaceKey] = useState<string | null>(null);
+  useEffect(() => {
+    if (plateFaceRestKey === null || normalizedPlateFaceRestAfterMs === null) {
+      const resetTimeoutId = window.setTimeout(() => setReleasedPlateFaceKey(null), 0);
+      return () => window.clearTimeout(resetTimeoutId);
+    }
+    const timeoutId = window.setTimeout(() => {
+      setReleasedPlateFaceKey(plateFaceRestKey);
+    }, normalizedPlateFaceRestAfterMs);
+    return () => window.clearTimeout(timeoutId);
+  }, [normalizedPlateFaceRestAfterMs, plateFaceRestKey]);
+  const displayedMouthShape = zenLiveBotMouthShapeForTalkingState({
+    mouthShape,
+    isTalking,
+  });
+  const displayPlateFace =
+    plateFaceRestKey !== null && releasedPlateFaceKey === plateFaceRestKey
+      ? plateFaceRest!
+      : plateFace ?? zenLiveActionPlateFace(moodHint, displayedMouthShape);
   const screenMaterialStyle = botScreenMaterialStyle(
     screenMaterialSeed ?? `fallback:${scheduleKey}`
   );
@@ -24703,10 +24680,12 @@ function ZenLiveBotMannequin({
               faceEyeCharacter={faceStyle.eyeCharacter}
               faceMouthFont={faceStyle.mouthFont}
               faceMouthCharacter={faceStyle.mouthCharacter}
+              faceMouthAnimation={faceStyle.mouthAnimation}
               faceFontWeight={faceStyle.weight}
               faceEyeScale={faceStyle.eyeScale}
               faceEyeOffsetX={faceStyle.eyeOffsetX}
               faceEyeOffsetY={faceStyle.eyeOffsetY}
+              faceEyeRotationDeg={faceStyle.eyeRotationDeg}
               faceMouthScale={faceStyle.mouthScale}
               faceMouthOffsetX={faceStyle.mouthOffsetX}
               faceMouthOffsetY={faceStyle.mouthOffsetY}
@@ -24724,6 +24703,7 @@ function ZenLiveBotMannequin({
             <CoffeeSeatPlateEmoji
               enabled
               isTalking={isTalking}
+              mouthShape={displayedMouthShape}
               scheduleKey={scheduleKey}
               showQuestionMark={showQuestionMark}
               baseText={displayPlateFace.text}
@@ -24734,10 +24714,12 @@ function ZenLiveBotMannequin({
               faceEyeCharacter={faceStyle.eyeCharacter}
               faceMouthFont={faceStyle.mouthFont}
               faceMouthCharacter={faceStyle.mouthCharacter}
+              faceMouthAnimation={faceStyle.mouthAnimation}
               faceFontWeight={faceStyle.weight}
               faceEyeScale={faceStyle.eyeScale}
               faceEyeOffsetX={faceStyle.eyeOffsetX}
               faceEyeOffsetY={faceStyle.eyeOffsetY}
+              faceEyeRotationDeg={faceStyle.eyeRotationDeg}
               faceMouthScale={faceStyle.mouthScale}
               faceMouthOffsetX={faceStyle.mouthOffsetX}
               faceMouthOffsetY={faceStyle.mouthOffsetY}
@@ -29941,12 +29923,15 @@ interface BotAvatarCustomizerModalProps {
   resolvedTheme: "light" | "dark";
   faceEyesFont: BotFaceFontId;
   faceEyeCharacter: string | null;
+  faceEyeAnimation: BotFaceGlyphAnimation;
   faceMouthFont: BotFaceFontId;
   faceMouthCharacter: string | null;
+  faceMouthAnimation: BotFaceGlyphAnimation;
   faceFontWeight: number;
   faceEyeScale: number;
   faceEyeOffsetX: number;
   faceEyeOffsetY: number;
+  faceEyeRotationDeg: number;
   faceMouthScale: number;
   faceMouthOffsetX: number;
   faceMouthOffsetY: number;
@@ -29954,11 +29939,13 @@ interface BotAvatarCustomizerModalProps {
   faceBlinkBar: BotFaceBlinkBar;
   faceThinkingFrames: BotFaceThinkingFrames;
   hasUnsavedChanges: boolean;
+  canUndo: boolean;
   saving: boolean;
   saveError: string | null;
   savePromptOpen: boolean;
   onRequestClose: () => void;
   onSave: () => void | Promise<void>;
+  onUndo: () => void;
   onDiscard: () => void;
   onCancelSavePrompt: () => void;
   onColorChange: (next: string) => void;
@@ -29966,12 +29953,15 @@ interface BotAvatarCustomizerModalProps {
   onColorPickerToggle: () => void;
   onEyesFontChange: (fontId: BotFaceFontId) => void;
   onEyeCharacterChange: (character: string | null) => void;
+  onEyeAnimationChange: (animation: BotFaceGlyphAnimation) => void;
   onMouthFontChange: (fontId: BotFaceFontId) => void;
   onMouthCharacterChange: (character: string | null) => void;
+  onMouthAnimationChange: (animation: BotFaceGlyphAnimation) => void;
   onWeightChange: (weight: number) => void;
   onEyeScaleChange: (scale: number) => void;
   onEyeOffsetXChange: (offsetY: number) => void;
   onEyeOffsetYChange: (offsetY: number) => void;
+  onEyeRotationDegChange: (rotationDeg: number) => void;
   onMouthScaleChange: (scale: number) => void;
   onMouthOffsetXChange: (offsetY: number) => void;
   onMouthOffsetYChange: (offsetY: number) => void;
@@ -30085,6 +30075,87 @@ function BotAvatarFontOption({
   );
 }
 
+function BotAvatarCustomGlyphCapture({
+  ariaLabel,
+  placeholderGlyph,
+  value,
+  normalize,
+  onChange,
+}: {
+  ariaLabel: string;
+  placeholderGlyph: string;
+  value: string | null;
+  normalize: (raw: string) => string | null;
+  onChange: (character: string | null) => void;
+}): React.JSX.Element {
+  const [capturing, setCapturing] = useState(false);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (!capturing) return;
+    const frame = window.requestAnimationFrame(() => inputRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [capturing]);
+
+  const commitCapture = (raw: string) => {
+    onChange(normalize(raw));
+    setCapturing(false);
+  };
+
+  return (
+    <div
+      className={styles.botAvatarCustomGlyphCapture}
+      data-capturing={capturing ? "true" : undefined}
+    >
+      {capturing ? (
+        <input
+          ref={inputRef}
+          className={styles.botAvatarCustomGlyphCaptureInput}
+          type="text"
+          aria-label={ariaLabel}
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
+          onBlur={() => setCapturing(false)}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              setCapturing(false);
+            }
+          }}
+          onChange={(event) => {
+            const next = event.currentTarget.value;
+            if (!next) return;
+            commitCapture(next);
+            event.currentTarget.value = "";
+          }}
+        />
+      ) : null}
+      <button
+        type="button"
+        className={styles.botAvatarCustomGlyphCaptureButton}
+        data-filled={value ? "true" : undefined}
+        aria-label={ariaLabel}
+        aria-pressed={capturing}
+        onClick={() => setCapturing(true)}
+      >
+        <span aria-hidden="true">{value ?? placeholderGlyph}</span>
+        <strong>{capturing ? "Type glyph…" : value ? "Custom" : "Set glyph"}</strong>
+      </button>
+      {value ? (
+        <button
+          type="button"
+          className={styles.botAvatarCustomGlyphClearButton}
+          aria-label={`Clear ${ariaLabel.toLowerCase()}`}
+          onClick={() => onChange(null)}
+        >
+          <X size={12} strokeWidth={2.4} aria-hidden="true" />
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 function botAvatarWeightLabel(weight: number): string {
   if (weight <= 450) return "Thin";
   if (weight >= 750) return "Bold";
@@ -30172,6 +30243,8 @@ function botAvatarPreviewIdentityStyle(rawHex: string, prismPersona = false): CS
 
 const BOT_AVATAR_PREVIEW_MOUTH_SHAPES = [
   "closed",
+  "speech-closed",
+  "narrow",
   "open-small",
   "open-wide",
   "closed",
@@ -30180,7 +30253,7 @@ const BOT_AVATAR_PREVIEW_MOUTH_SHAPES = [
 ] as const satisfies readonly ZenLiveBotMouthShape[];
 
 type BotAvatarPreviewMode = "idle" | "blink" | "talking" | "thinking";
-type BotAvatarCustomizerTab = "identity" | "face" | "eyes" | "mouth" | "motion";
+type BotAvatarCustomizerTab = "face" | "eyes" | "mouth" | "motion";
 type BotAvatarFaceControlTab = Extract<
   BotAvatarCustomizerTab,
   "face" | "eyes" | "mouth" | "motion"
@@ -30213,11 +30286,10 @@ const BOT_AVATAR_PREVIEW_MOOD_LABELS: Record<(typeof BOT_AVATAR_PREVIEW_MOODS)[n
 };
 
 const BOT_AVATAR_CUSTOMIZER_TABS = [
-  { value: "face", label: "Face" },
+  { value: "face", label: "Identity" },
   { value: "eyes", label: "Eyes" },
   { value: "mouth", label: "Mouth" },
   { value: "motion", label: "Motion" },
-  { value: "identity", label: "Identity" },
 ] as const satisfies readonly {
   value: BotAvatarCustomizerTab;
   label: string;
@@ -30324,8 +30396,8 @@ const BOT_AVATAR_FACE_PRESETS = [
     thinkingFrames: DEFAULT_BOT_FACE_STYLE.thinkingFrames,
   },
   {
-    id: "sharp",
-    label: "Sharp",
+    id: "doto",
+    label: "Doto",
     eyesFont: "concise",
     mouthFont: "concise",
     weight: 600,
@@ -30393,12 +30465,15 @@ function BotAvatarPreviewModeIcon({
 function botAvatarFaceIsDefault(args: {
   faceEyesFont: BotFaceFontId;
   faceEyeCharacter: string | null;
+  faceEyeAnimation: BotFaceGlyphAnimation;
   faceMouthFont: BotFaceFontId;
   faceMouthCharacter: string | null;
+  faceMouthAnimation: BotFaceGlyphAnimation;
   faceFontWeight: number;
   faceEyeScale: number;
   faceEyeOffsetX: number;
   faceEyeOffsetY: number;
+  faceEyeRotationDeg: number;
   faceMouthScale: number;
   faceMouthOffsetX: number;
   faceMouthOffsetY: number;
@@ -30409,12 +30484,15 @@ function botAvatarFaceIsDefault(args: {
   return (
     args.faceEyesFont === DEFAULT_BOT_FACE_STYLE.eyesFont &&
     args.faceEyeCharacter === DEFAULT_BOT_FACE_STYLE.eyeCharacter &&
+    args.faceEyeAnimation === DEFAULT_BOT_FACE_STYLE.eyeAnimation &&
     args.faceMouthFont === DEFAULT_BOT_FACE_STYLE.mouthFont &&
     args.faceMouthCharacter === DEFAULT_BOT_FACE_STYLE.mouthCharacter &&
+    args.faceMouthAnimation === DEFAULT_BOT_FACE_STYLE.mouthAnimation &&
     args.faceFontWeight === DEFAULT_BOT_FACE_STYLE.weight &&
     args.faceEyeScale === DEFAULT_BOT_FACE_STYLE.eyeScale &&
     args.faceEyeOffsetX === DEFAULT_BOT_FACE_STYLE.eyeOffsetX &&
     args.faceEyeOffsetY === DEFAULT_BOT_FACE_STYLE.eyeOffsetY &&
+    args.faceEyeRotationDeg === DEFAULT_BOT_FACE_STYLE.eyeRotationDeg &&
     args.faceMouthScale === DEFAULT_BOT_FACE_STYLE.mouthScale &&
     args.faceMouthOffsetX === DEFAULT_BOT_FACE_STYLE.mouthOffsetX &&
     args.faceMouthOffsetY === DEFAULT_BOT_FACE_STYLE.mouthOffsetY &&
@@ -30432,12 +30510,15 @@ function botAvatarPresetSelected(
   args: {
     faceEyesFont: BotFaceFontId;
     faceEyeCharacter: string | null;
+    faceEyeAnimation: BotFaceGlyphAnimation;
     faceMouthFont: BotFaceFontId;
     faceMouthCharacter: string | null;
+    faceMouthAnimation: BotFaceGlyphAnimation;
     faceFontWeight: number;
     faceEyeScale: number;
     faceEyeOffsetX: number;
     faceEyeOffsetY: number;
+    faceEyeRotationDeg: number;
     faceMouthScale: number;
     faceMouthOffsetX: number;
     faceMouthOffsetY: number;
@@ -30449,12 +30530,15 @@ function botAvatarPresetSelected(
   return (
     preset.eyesFont === args.faceEyesFont &&
     preset.eyeCharacter === args.faceEyeCharacter &&
+    args.faceEyeAnimation === DEFAULT_BOT_FACE_STYLE.eyeAnimation &&
     preset.mouthFont === args.faceMouthFont &&
     preset.mouthCharacter === args.faceMouthCharacter &&
+    args.faceMouthAnimation === DEFAULT_BOT_FACE_STYLE.mouthAnimation &&
     preset.weight === args.faceFontWeight &&
     preset.eyeScale === args.faceEyeScale &&
     preset.eyeOffsetX === args.faceEyeOffsetX &&
     preset.eyeOffsetY === args.faceEyeOffsetY &&
+    args.faceEyeRotationDeg === DEFAULT_BOT_FACE_STYLE.eyeRotationDeg &&
     preset.mouthScale === args.faceMouthScale &&
     preset.mouthOffsetX === args.faceMouthOffsetX &&
     preset.mouthOffsetY === args.faceMouthOffsetY &&
@@ -30657,43 +30741,20 @@ function BotAvatarPreviewPanel({
 
 function BotAvatarIdentityControls({
   name,
-  color,
-  glyph,
-  colorPickerOpen,
-  resolvedTheme,
   onNameChange,
-  onColorChange,
-  onGlyphChange,
-  onColorPickerToggle,
 }: {
   name: string;
-  color: string;
-  glyph: BotGlyphName;
-  colorPickerOpen: boolean;
-  resolvedTheme: "light" | "dark";
   onNameChange: (next: string) => void;
-  onColorChange: (next: string) => void;
-  onGlyphChange: (next: BotGlyphName) => void;
-  onColorPickerToggle: () => void;
 }): React.JSX.Element {
-  // The picker defaults closed behind a swatch toggle everywhere else; in the
-  // studio the Identity tab IS the picker, so open it on arrival.
-  const autoOpenedRef = useRef(false);
-  useEffect(() => {
-    if (autoOpenedRef.current) return;
-    autoOpenedRef.current = true;
-    if (!colorPickerOpen) onColorPickerToggle();
-  }, [colorPickerOpen, onColorPickerToggle]);
-
   return (
-    <section className={styles.botAvatarControlGroup} aria-label="Identity">
-      <header className={styles.botAvatarControlGroupHeader}>
+    <div className={styles.botAvatarIdentitySection} aria-label="Bot identity">
+      <header className={styles.botAvatarIdentitySectionHeader}>
         <span className={styles.botAvatarControlGroupIcon} aria-hidden="true">
           <Brush size={16} strokeWidth={2.4} />
         </span>
         <div>
-          <strong>Identity</strong>
-          <small>Name, color, and glyph</small>
+          <strong>Name & badge</strong>
+          <small>Color and glyph</small>
         </div>
       </header>
       <label className={styles.botAvatarIdentityNameField}>
@@ -30709,19 +30770,7 @@ function BotAvatarIdentityControls({
           onChange={(event) => onNameChange(event.currentTarget.value)}
         />
       </label>
-      <div className={styles.botAvatarIdentityPicker}>
-        <ColorGlyphPicker
-          color={color}
-          glyph={glyph}
-          onColorChange={onColorChange}
-          onGlyphChange={onGlyphChange}
-          open={colorPickerOpen}
-          onToggle={onColorPickerToggle}
-          ariaLabel="Bot color and glyph"
-          resolvedTheme={resolvedTheme}
-        />
-      </div>
-    </section>
+    </div>
   );
 }
 
@@ -30894,12 +30943,16 @@ function BotAvatarCoordinateControl({
 }
 
 function BotAvatarMouthRotationWheel({
+  part = "mouth",
+  disabled = false,
   value,
   mouthGlyph,
   mouthFont,
   onChange,
   onReset,
 }: {
+  part?: "eyes" | "mouth";
+  disabled?: boolean;
   value: number;
   mouthGlyph: string;
   mouthFont: BotFaceFontId;
@@ -30907,10 +30960,30 @@ function BotAvatarMouthRotationWheel({
   onReset: () => void;
 }): React.JSX.Element {
   const wheelRef = useRef<HTMLDivElement | null>(null);
-  const normalizedValue =
-    normalizeBotFaceMouthRotationDeg(value) ??
-    DEFAULT_BOT_FACE_STYLE.mouthRotationDeg;
+  const isEye = part === "eyes";
+  const normalizeRotation = isEye
+    ? normalizeBotFaceEyeRotationDeg
+    : normalizeBotFaceMouthRotationDeg;
+  const defaultRotation = isEye
+    ? DEFAULT_BOT_FACE_STYLE.eyeRotationDeg
+    : DEFAULT_BOT_FACE_STYLE.mouthRotationDeg;
+  const minRotation = isEye
+    ? BOT_FACE_EYE_ROTATION_DEG_MIN
+    : BOT_FACE_MOUTH_ROTATION_DEG_MIN;
+  const maxRotation = isEye
+    ? BOT_FACE_EYE_ROTATION_DEG_MAX
+    : BOT_FACE_MOUTH_ROTATION_DEG_MAX;
+  const rotationStep = isEye
+    ? BOT_FACE_EYE_ROTATION_DEG_STEP
+    : BOT_FACE_MOUTH_ROTATION_DEG_STEP;
+  const partLabel = isEye ? "Eye" : "Mouth";
+  const normalizedValue = normalizeRotation(value) ?? defaultRotation;
   const valueLabel = botAvatarMouthRotationLabel(normalizedValue);
+  const commitRotation = (nextValue: number) => {
+    const snapped = normalizeRotation(nextValue) ?? defaultRotation;
+    if (snapped === normalizedValue) return;
+    onChange(snapped);
+  };
   const updateFromPointer = (event: ReactPointerEvent<HTMLDivElement>) => {
     const rect = wheelRef.current?.getBoundingClientRect();
     if (!rect) return;
@@ -30919,32 +30992,30 @@ function BotAvatarMouthRotationWheel({
     const rawDegrees =
       (Math.atan2(event.clientX - centerX, centerY - event.clientY) * 180) /
       Math.PI;
-    onChange(
-      normalizeBotFaceMouthRotationDeg(rawDegrees) ??
-        DEFAULT_BOT_FACE_STYLE.mouthRotationDeg
-    );
+    commitRotation(rawDegrees);
   };
   const nudge = (direction: -1 | 1, large: boolean) => {
-    const step = BOT_FACE_MOUTH_ROTATION_DEG_STEP * (large ? 3 : 1);
-    onChange(
-      normalizeBotFaceMouthRotationDeg(normalizedValue + direction * step) ??
-        DEFAULT_BOT_FACE_STYLE.mouthRotationDeg
-    );
+    const step = rotationStep * (large ? 3 : 1);
+    commitRotation(normalizedValue + direction * step);
   };
 
   return (
-    <section className={styles.botAvatarMouthRotationControl} aria-label="Mouth rotation">
+    <section
+      className={styles.botAvatarMouthRotationControl}
+      aria-label={`${partLabel} rotation`}
+      data-disabled={disabled ? "true" : undefined}
+    >
       <header>
         <span>
-          <strong>Mouth rotation</strong>
+          <strong>{partLabel} rotation</strong>
           <small>{valueLabel}</small>
         </span>
         <button
           type="button"
           onClick={onReset}
-          disabled={normalizedValue === DEFAULT_BOT_FACE_STYLE.mouthRotationDeg}
-          aria-label="Reset mouth rotation"
-          title="Reset mouth rotation"
+          disabled={disabled || normalizedValue === defaultRotation}
+          aria-label={`Reset ${partLabel.toLowerCase()} rotation`}
+          title={`Reset ${partLabel.toLowerCase()} rotation`}
         >
           <RotateCcw size={12} strokeWidth={2.4} aria-hidden="true" />
         </button>
@@ -30954,10 +31025,11 @@ function BotAvatarMouthRotationWheel({
           ref={wheelRef}
           className={styles.botAvatarMouthRotationWheel}
           role="slider"
-          tabIndex={0}
-          aria-label="Mouth rotation"
-          aria-valuemin={BOT_FACE_MOUTH_ROTATION_DEG_MIN}
-          aria-valuemax={BOT_FACE_MOUTH_ROTATION_DEG_MAX}
+          tabIndex={disabled ? -1 : 0}
+          aria-label={`${partLabel} rotation`}
+          aria-disabled={disabled}
+          aria-valuemin={minRotation}
+          aria-valuemax={maxRotation}
           aria-valuenow={normalizedValue}
           aria-valuetext={valueLabel}
           style={
@@ -30966,14 +31038,17 @@ function BotAvatarMouthRotationWheel({
             } as CSSProperties
           }
           onPointerDown={(event) => {
+            if (disabled) return;
             event.currentTarget.setPointerCapture(event.pointerId);
             updateFromPointer(event);
           }}
           onPointerMove={(event) => {
+            if (disabled) return;
             if ((event.buttons & 1) === 0) return;
             updateFromPointer(event);
           }}
           onKeyDown={(event) => {
+            if (disabled) return;
             if (event.key === "ArrowLeft" || event.key === "ArrowDown") {
               event.preventDefault();
               nudge(-1, event.shiftKey);
@@ -30985,7 +31060,7 @@ function BotAvatarMouthRotationWheel({
               onReset();
             } else if (event.key === "End") {
               event.preventDefault();
-              onChange(BOT_FACE_MOUTH_ROTATION_DEG_MAX);
+              onChange(maxRotation);
             }
           }}
         >
@@ -31004,16 +31079,57 @@ function BotAvatarMouthRotationWheel({
   );
 }
 
+const BOT_AVATAR_GLYPH_ANIMATION_LABELS: Record<BotFaceGlyphAnimation, string> = {
+  none: "Default",
+  pulsate: "Pulsate",
+  spin: "Spin",
+  flicker: "Flicker",
+  wobble: "Wobble",
+};
+
+function BotAvatarGlyphAnimationControl({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: BotFaceGlyphAnimation;
+  disabled: boolean;
+  onChange: (value: BotFaceGlyphAnimation) => void;
+}): React.JSX.Element {
+  const label = "Mouth animation";
+  return (
+    <fieldset className={styles.botAvatarGlyphAnimationControl} disabled={disabled}>
+      <legend>{label}</legend>
+      <div role="group" aria-label={label}>
+        {BOT_FACE_GLYPH_ANIMATIONS.map((animation) => (
+          <button
+            key={`mouth-${animation}`}
+            type="button"
+            data-selected={value === animation ? "true" : undefined}
+            aria-pressed={value === animation}
+            onClick={() => onChange(animation)}
+          >
+            {BOT_AVATAR_GLYPH_ANIMATION_LABELS[animation]}
+          </button>
+        ))}
+      </div>
+    </fieldset>
+  );
+}
+
 function BotAvatarFaceControls({
   activeTab,
   faceEyesFont,
   faceEyeCharacter,
+  faceEyeAnimation,
   faceMouthFont,
   faceMouthCharacter,
+  faceMouthAnimation,
   faceFontWeight,
   faceEyeScale,
   faceEyeOffsetX,
   faceEyeOffsetY,
+  faceEyeRotationDeg,
   faceMouthScale,
   faceMouthOffsetX,
   faceMouthOffsetY,
@@ -31024,12 +31140,15 @@ function BotAvatarFaceControls({
   faceIsDefault,
   onEyesFontChange,
   onEyeCharacterChange,
+  onEyeAnimationChange,
   onMouthFontChange,
   onMouthCharacterChange,
+  onMouthAnimationChange,
   onWeightChange,
   onEyeScaleChange,
   onEyeOffsetXChange,
   onEyeOffsetYChange,
+  onEyeRotationDegChange,
   onMouthScaleChange,
   onMouthOffsetXChange,
   onMouthOffsetYChange,
@@ -31038,16 +31157,20 @@ function BotAvatarFaceControls({
   onThinkingFramesChange,
   onApplyPreset,
   onResetFace,
+  identitySection,
 }: {
   activeTab: Extract<BotAvatarCustomizerTab, "face" | "eyes" | "mouth" | "motion">;
   faceEyesFont: BotFaceFontId;
   faceEyeCharacter: string | null;
+  faceEyeAnimation: BotFaceGlyphAnimation;
   faceMouthFont: BotFaceFontId;
   faceMouthCharacter: string | null;
+  faceMouthAnimation: BotFaceGlyphAnimation;
   faceFontWeight: number;
   faceEyeScale: number;
   faceEyeOffsetX: number;
   faceEyeOffsetY: number;
+  faceEyeRotationDeg: number;
   faceMouthScale: number;
   faceMouthOffsetX: number;
   faceMouthOffsetY: number;
@@ -31058,12 +31181,15 @@ function BotAvatarFaceControls({
   faceIsDefault: boolean;
   onEyesFontChange: (fontId: BotFaceFontId) => void;
   onEyeCharacterChange: (character: string | null) => void;
+  onEyeAnimationChange: (animation: BotFaceGlyphAnimation) => void;
   onMouthFontChange: (fontId: BotFaceFontId) => void;
   onMouthCharacterChange: (character: string | null) => void;
+  onMouthAnimationChange: (animation: BotFaceGlyphAnimation) => void;
   onWeightChange: (weight: number) => void;
   onEyeScaleChange: (scale: number) => void;
   onEyeOffsetXChange: (offsetX: number) => void;
   onEyeOffsetYChange: (offsetY: number) => void;
+  onEyeRotationDegChange: (rotationDeg: number) => void;
   onMouthScaleChange: (scale: number) => void;
   onMouthOffsetXChange: (offsetX: number) => void;
   onMouthOffsetYChange: (offsetY: number) => void;
@@ -31072,6 +31198,17 @@ function BotAvatarFaceControls({
   onThinkingFramesChange: (frames: BotFaceThinkingFrames) => void;
   onApplyPreset: (preset: BotAvatarFacePreset) => void;
   onResetFace: () => void;
+  identitySection?: {
+    name: string;
+    color: string;
+    glyph: BotGlyphName;
+    colorPickerOpen: boolean;
+    resolvedTheme: "light" | "dark";
+    onNameChange: (next: string) => void;
+    onColorChange: (next: string) => void;
+    onGlyphChange: (next: BotGlyphName) => void;
+    onColorPickerToggle: () => void;
+  };
 }): React.JSX.Element {
   const normalizedEyeGlyph = faceEyeCharacter ?? BOT_AVATAR_CUSTOM_EYE_START;
   const normalizedMouthGlyph = faceMouthCharacter ?? BOT_AVATAR_CUSTOM_MOUTH_START;
@@ -31086,21 +31223,6 @@ function BotAvatarFaceControls({
       botFaceThinkingFramesEqual(preset.frames, faceThinkingFrames)
     ) ?? null;
   const customThinkingActive = currentThinkingPreset === null;
-  const eyeGlyphInputRef = useRef<HTMLInputElement | null>(null);
-  const mouthGlyphInputRef = useRef<HTMLInputElement | null>(null);
-  const pendingGlyphFocusRef = useRef<"eye" | "mouth" | null>(null);
-
-  useEffect(() => {
-    if (pendingGlyphFocusRef.current === "eye" && customEyeActive) {
-      pendingGlyphFocusRef.current = null;
-      eyeGlyphInputRef.current?.focus();
-      eyeGlyphInputRef.current?.select();
-    } else if (pendingGlyphFocusRef.current === "mouth" && customMouthActive) {
-      pendingGlyphFocusRef.current = null;
-      mouthGlyphInputRef.current?.focus();
-      mouthGlyphInputRef.current?.select();
-    }
-  }, [customEyeActive, customMouthActive]);
 
   const updateThinkingFrame = (index: number, value: string) => {
     const pastedFrames = botAvatarThinkingFramesFromPaste(value);
@@ -31116,30 +31238,21 @@ function BotAvatarFaceControls({
     const normalizedFrames = normalizeBotFaceThinkingFrames(nextFrames);
     if (normalizedFrames) onThinkingFramesChange(normalizedFrames);
   };
-  const enableCustomEye = () => {
-    pendingGlyphFocusRef.current = "eye";
-    onEyeCharacterChange(
-      normalizeBotFaceEyeCharacter(faceEyeCharacter) ?? BOT_AVATAR_CUSTOM_EYE_START
-    );
-  };
-  const enableCustomMouth = () => {
-    pendingGlyphFocusRef.current = "mouth";
-    onMouthCharacterChange(
-      normalizeBotFaceMouthCharacter(faceMouthCharacter) ?? BOT_AVATAR_CUSTOM_MOUTH_START
-    );
-  };
   const selectEyeFont = (fontId: BotFaceFontId) => {
     onEyesFontChange(fontId);
-    if (customEyeActive) return;
-    onEyeCharacterChange(DEFAULT_BOT_FACE_STYLE.eyeCharacter);
-    onEyeOffsetXChange(DEFAULT_BOT_FACE_STYLE.eyeOffsetX);
   };
   const selectMouthFont = (fontId: BotFaceFontId) => {
     onMouthFontChange(fontId);
-    if (customMouthActive) return;
-    onMouthCharacterChange(DEFAULT_BOT_FACE_STYLE.mouthCharacter);
-    onMouthOffsetXChange(DEFAULT_BOT_FACE_STYLE.mouthOffsetX);
-    onMouthRotationDegChange(DEFAULT_BOT_FACE_STYLE.mouthRotationDeg);
+  };
+  const handleEyeCharacterChange = (character: string | null) => {
+    const enablingCustom = faceEyeCharacter === null && character !== null;
+    onEyeCharacterChange(character);
+    if (enablingCustom) {
+      onEyeRotationDegChange(DEFAULT_BOT_FACE_STYLE.eyeRotationDeg);
+    }
+  };
+  const handleMouthCharacterChange = (character: string | null) => {
+    onMouthCharacterChange(character);
   };
   const enableCustomBlink = () => {
     onBlinkBarChange(
@@ -31173,7 +31286,9 @@ function BotAvatarFaceControls({
           : "Motion";
   const controlSubtitle =
     activeTab === "face"
-      ? "Presets and stroke weight"
+      ? identitySection
+        ? "Name, badge, presets, and stroke"
+        : "Presets and stroke weight"
       : activeTab === "eyes"
         ? customEyeActive
           ? "Custom glyph"
@@ -31218,6 +31333,12 @@ function BotAvatarFaceControls({
       </header>
       {activeTab === "face" ? (
         <div className={styles.botAvatarFaceControls}>
+          {identitySection ? (
+            <BotAvatarIdentityControls
+              name={identitySection.name}
+              onNameChange={identitySection.onNameChange}
+            />
+          ) : null}
           <fieldset className={styles.botAvatarPresetControl}>
             <legend>Presets</legend>
             <div className={styles.botAvatarPresetStrip}>
@@ -31225,12 +31346,15 @@ function BotAvatarFaceControls({
                 const selected = botAvatarPresetSelected(preset, {
                   faceEyesFont,
                   faceEyeCharacter,
+                  faceEyeAnimation,
                   faceMouthFont,
                   faceMouthCharacter,
+                  faceMouthAnimation,
                   faceFontWeight,
                   faceEyeScale,
                   faceEyeOffsetX,
                   faceEyeOffsetY,
+                  faceEyeRotationDeg,
                   faceMouthScale,
                   faceMouthOffsetX,
                   faceMouthOffsetY,
@@ -31282,6 +31406,21 @@ function BotAvatarFaceControls({
               onChange={onWeightChange}
             />
           </div>
+          {identitySection ? (
+            <div className={styles.botAvatarIdentityPicker}>
+              <ColorGlyphPicker
+                color={identitySection.color}
+                glyph={identitySection.glyph}
+                onColorChange={identitySection.onColorChange}
+                onGlyphChange={identitySection.onGlyphChange}
+                open={identitySection.colorPickerOpen}
+                onToggle={identitySection.onColorPickerToggle}
+                inline
+                ariaLabel="Bot color and glyph"
+                resolvedTheme={identitySection.resolvedTheme}
+              />
+            </div>
+          ) : null}
         </div>
       ) : activeTab === "eyes" ? (
         <div className={styles.botAvatarCustomControls}>
@@ -31306,65 +31445,27 @@ function BotAvatarFaceControls({
               aria-label="Eyes"
             >
               <div
-                className={styles.botAvatarGlyphModeControl}
-                role="group"
-                aria-label="Eye glyph mode"
+                className={`${styles.botAvatarCustomMotionRow} ${styles.botAvatarCustomMotionRowSingle}`}
               >
-                <button
-                  type="button"
-                  data-active={!customEyeActive ? "true" : undefined}
-                  aria-pressed={!customEyeActive}
-                  onClick={() => {
-                    onEyeCharacterChange(DEFAULT_BOT_FACE_STYLE.eyeCharacter);
-                    onEyeOffsetXChange(DEFAULT_BOT_FACE_STYLE.eyeOffsetX);
-                  }}
-                >
-                  Built-in
-                </button>
-                <button
-                  type="button"
-                  data-active={customEyeActive ? "true" : undefined}
-                  aria-pressed={customEyeActive}
-                  onClick={enableCustomEye}
-                >
-                  Custom
-                </button>
+                <BotAvatarCustomGlyphCapture
+                  ariaLabel="Custom eye glyph"
+                  placeholderGlyph={BOT_AVATAR_CUSTOM_EYE_START}
+                  value={faceEyeCharacter}
+                  normalize={(raw) => normalizeBotFaceEyeCharacter(raw)}
+                  onChange={handleEyeCharacterChange}
+                />
+                <BotAvatarMouthRotationWheel
+                  part="eyes"
+                  disabled={!customEyeActive}
+                  value={faceEyeRotationDeg}
+                  mouthGlyph={normalizedEyeGlyph}
+                  mouthFont={faceEyesFont}
+                  onChange={onEyeRotationDegChange}
+                  onReset={() =>
+                    onEyeRotationDegChange(DEFAULT_BOT_FACE_STYLE.eyeRotationDeg)
+                  }
+                />
               </div>
-              {customEyeActive ? (
-                <label className={styles.botAvatarGlyphInputField}>
-                  <span>Eye glyph</span>
-                  <span className={styles.botAvatarOverrideInputRow}>
-                    <input
-                      ref={eyeGlyphInputRef}
-                      type="text"
-                      value={faceEyeCharacter ?? ""}
-                      placeholder={BOT_AVATAR_CUSTOM_EYE_START}
-                      inputMode="text"
-                      autoCapitalize="off"
-                      autoCorrect="off"
-                      spellCheck={false}
-                      aria-label="Eye glyph"
-                      onChange={(event) =>
-                        onEyeCharacterChange(
-                          normalizeBotFaceEyeCharacter(event.currentTarget.value)
-                        )
-                      }
-                    />
-                    <button
-                      type="button"
-                      className={styles.botAvatarInlineResetButton}
-                      onClick={() => {
-                        onEyeCharacterChange(DEFAULT_BOT_FACE_STYLE.eyeCharacter);
-                        onEyeOffsetXChange(DEFAULT_BOT_FACE_STYLE.eyeOffsetX);
-                      }}
-                      aria-label="Use built-in eyes"
-                      title="Use built-in eyes"
-                    >
-                      <RotateCcw size={13} strokeWidth={2.3} aria-hidden="true" />
-                    </button>
-                  </span>
-                </label>
-              ) : null}
               <div className={styles.botAvatarCustomGeometry}>
                 <BotAvatarRangeControl
                   label="Eye size"
@@ -31416,23 +31517,6 @@ function BotAvatarFaceControls({
                   onClick={() => selectMouthFont(fontId)}
                 />
               ))}
-              <button
-                type="button"
-                className={`${styles.botAvatarFontOption} ${styles.botAvatarCustomOption}`}
-                data-selected={customMouthActive ? "true" : undefined}
-                aria-pressed={customMouthActive}
-                aria-label="Custom mouth"
-                onClick={enableCustomMouth}
-              >
-                <span
-                  className={styles.botAvatarFontOptionSample}
-                  data-face-font={faceMouthFont}
-                  aria-hidden="true"
-                >
-                  {customMouthActive ? normalizedMouthGlyph : BOT_AVATAR_CUSTOM_MOUTH_START}
-                </span>
-                <span>Custom</span>
-              </button>
             </div>
           </fieldset>
           <div className={styles.botAvatarOverrideGrid}>
@@ -31441,52 +31525,27 @@ function BotAvatarFaceControls({
               data-custom-active={customMouthActive ? "true" : undefined}
               aria-label="Mouth"
             >
-              {customMouthActive ? (
-                <div className={styles.botAvatarMouthCustomRow}>
-                  <label className={styles.botAvatarGlyphInputField}>
-                    <span>Mouth glyph</span>
-                    <span className={styles.botAvatarOverrideInputRow}>
-                      <input
-                        ref={mouthGlyphInputRef}
-                        type="text"
-                        value={faceMouthCharacter ?? ""}
-                        placeholder={BOT_AVATAR_CUSTOM_MOUTH_START}
-                        inputMode="text"
-                        autoCapitalize="off"
-                        autoCorrect="off"
-                        spellCheck={false}
-                        aria-label="Mouth glyph"
-                        onChange={(event) =>
-                          onMouthCharacterChange(
-                            normalizeBotFaceMouthCharacter(event.currentTarget.value)
-                          )
-                        }
-                      />
-                      <button
-                        type="button"
-                        className={styles.botAvatarInlineResetButton}
-                        onClick={() => {
-                          onMouthCharacterChange(DEFAULT_BOT_FACE_STYLE.mouthCharacter);
-                          onMouthOffsetXChange(DEFAULT_BOT_FACE_STYLE.mouthOffsetX);
-                        }}
-                        aria-label="Use built-in mouth"
-                        title="Use built-in mouth"
-                      >
-                        <RotateCcw size={13} strokeWidth={2.3} aria-hidden="true" />
-                      </button>
-                    </span>
-                  </label>
-                  <BotAvatarMouthRotationWheel
-                    value={faceMouthRotationDeg}
-                    mouthGlyph={mouthRotationGlyph}
-                    mouthFont={faceMouthFont}
-                    onChange={onMouthRotationDegChange}
-                    onReset={() =>
-                      onMouthRotationDegChange(DEFAULT_BOT_FACE_STYLE.mouthRotationDeg)
-                    }
-                  />
-                </div>
-              ) : null}
+              <div
+                className={`${styles.botAvatarCustomMotionRow} ${styles.botAvatarCustomMotionRowSingle}`}
+              >
+                <BotAvatarCustomGlyphCapture
+                  ariaLabel="Custom mouth glyph"
+                  placeholderGlyph={BOT_AVATAR_CUSTOM_MOUTH_START}
+                  value={faceMouthCharacter}
+                  normalize={(raw) => normalizeBotFaceMouthCharacter(raw)}
+                  onChange={handleMouthCharacterChange}
+                />
+                <BotAvatarMouthRotationWheel
+                  disabled={!customMouthActive}
+                  value={faceMouthRotationDeg}
+                  mouthGlyph={mouthRotationGlyph}
+                  mouthFont={faceMouthFont}
+                  onChange={onMouthRotationDegChange}
+                  onReset={() =>
+                    onMouthRotationDegChange(DEFAULT_BOT_FACE_STYLE.mouthRotationDeg)
+                  }
+                />
+              </div>
               <div className={styles.botAvatarCustomGeometry}>
                 <BotAvatarRangeControl
                   label="Mouth size"
@@ -31519,6 +31578,13 @@ function BotAvatarFaceControls({
                     onMouthOffsetXChange(DEFAULT_BOT_FACE_STYLE.mouthOffsetX);
                     onMouthOffsetYChange(DEFAULT_BOT_FACE_STYLE.mouthOffsetY);
                   }}
+                />
+              </div>
+              <div className={styles.botAvatarMouthAnimationRow}>
+                <BotAvatarGlyphAnimationControl
+                  value={faceMouthAnimation}
+                  disabled={!customMouthActive}
+                  onChange={onMouthAnimationChange}
                 />
               </div>
             </section>
@@ -31752,12 +31818,15 @@ function BotAvatarCustomizerModal({
   resolvedTheme,
   faceEyesFont,
   faceEyeCharacter,
+  faceEyeAnimation,
   faceMouthFont,
   faceMouthCharacter,
+  faceMouthAnimation,
   faceFontWeight,
   faceEyeScale,
   faceEyeOffsetX,
   faceEyeOffsetY,
+  faceEyeRotationDeg,
   faceMouthScale,
   faceMouthOffsetX,
   faceMouthOffsetY,
@@ -31765,11 +31834,13 @@ function BotAvatarCustomizerModal({
   faceBlinkBar,
   faceThinkingFrames,
   hasUnsavedChanges,
+  canUndo,
   saving,
   saveError,
   savePromptOpen,
   onRequestClose,
   onSave,
+  onUndo,
   onDiscard,
   onCancelSavePrompt,
   onColorChange,
@@ -31777,12 +31848,15 @@ function BotAvatarCustomizerModal({
   onColorPickerToggle,
   onEyesFontChange,
   onEyeCharacterChange,
+  onEyeAnimationChange,
   onMouthFontChange,
   onMouthCharacterChange,
+  onMouthAnimationChange,
   onWeightChange,
   onEyeScaleChange,
   onEyeOffsetXChange,
   onEyeOffsetYChange,
+  onEyeRotationDegChange,
   onMouthScaleChange,
   onMouthOffsetXChange,
   onMouthOffsetYChange,
@@ -31828,12 +31902,15 @@ function BotAvatarCustomizerModal({
     {
       faceEyesFont,
       faceEyeCharacter,
+      faceEyeAnimation,
       faceMouthFont,
       faceMouthCharacter,
+      faceMouthAnimation,
       faceFontWeight,
       faceEyeScale,
       faceEyeOffsetX,
       faceEyeOffsetY,
+      faceEyeRotationDeg,
       faceMouthScale,
       faceMouthOffsetX,
       faceMouthOffsetY,
@@ -31852,6 +31929,18 @@ function BotAvatarCustomizerModal({
     setActiveControlTab("face");
     setMouthPhase(0);
   }, [identityControlsVisible, open, resolvedTheme]);
+
+  useEffect(() => {
+    if (!open || savePromptOpen) return;
+    const handleUndoKeyDown = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() !== "z") return;
+      if ((!event.metaKey && !event.ctrlKey) || event.altKey || event.shiftKey) return;
+      event.preventDefault();
+      if (canUndo && !saving) onUndo();
+    };
+    window.addEventListener("keydown", handleUndoKeyDown);
+    return () => window.removeEventListener("keydown", handleUndoKeyDown);
+  }, [canUndo, onUndo, open, savePromptOpen, saving]);
 
   useEffect(() => {
     if (!open || !previewTalking) {
@@ -31881,6 +31970,7 @@ function BotAvatarCustomizerModal({
     const base = deriveAccentStyle(accentNormalized, resolvedTheme);
     return {
       ["--editor-bot-color" as string]: accentNormalized,
+      ["--editor-bot-contrast" as string]: pickReadableText(accentNormalized),
       ["--editor-bot-text" as string]: base["--accent-text" as keyof typeof base],
       ["--editor-bot-ink" as string]: base["--accent-ink" as keyof typeof base],
       ["--editor-bot-soft" as string]: base["--accent-soft" as keyof typeof base],
@@ -31895,18 +31985,21 @@ function BotAvatarCustomizerModal({
       : saveStatusState === "dirty"
         ? "Unsaved"
         : draftMode
-          ? "Draft synced"
+          ? "Draft"
           : "Saved";
   const previewWeightSummary = `${botAvatarWeightLabel(faceFontWeight)} · ${faceFontWeight}`;
   const faceIsDefault = botAvatarFaceIsDefault({
     faceEyesFont,
     faceEyeCharacter,
+    faceEyeAnimation,
     faceMouthFont,
     faceMouthCharacter,
+    faceMouthAnimation,
     faceFontWeight,
     faceEyeScale,
     faceEyeOffsetX,
     faceEyeOffsetY,
+    faceEyeRotationDeg,
     faceMouthScale,
     faceMouthOffsetX,
     faceMouthOffsetY,
@@ -31916,20 +32009,19 @@ function BotAvatarCustomizerModal({
   });
   const saveButtonVisible = saving || hasUnsavedChanges;
   const avatarControlTabsVisible = true;
-  const visibleAvatarTabs = BOT_AVATAR_CUSTOMIZER_TABS.filter(
-    (tab) => identityControlsVisible || tab.value !== "identity"
-  );
-  const activeFaceControlTabs: readonly BotAvatarFaceControlTab[] =
-    activeControlTab === "identity" ? [] : [activeControlTab];
+  const activeFaceControlTabs: readonly BotAvatarFaceControlTab[] = [activeControlTab];
   const applyFacePreset = (preset: BotAvatarFacePreset) => {
     onEyesFontChange(preset.eyesFont);
     onEyeCharacterChange(preset.eyeCharacter);
+    onEyeAnimationChange(DEFAULT_BOT_FACE_STYLE.eyeAnimation);
     onMouthFontChange(preset.mouthFont);
     onMouthCharacterChange(preset.mouthCharacter);
+    onMouthAnimationChange(DEFAULT_BOT_FACE_STYLE.mouthAnimation);
     onWeightChange(preset.weight);
     onEyeScaleChange(preset.eyeScale);
     onEyeOffsetXChange(preset.eyeOffsetX);
     onEyeOffsetYChange(preset.eyeOffsetY);
+    onEyeRotationDegChange(DEFAULT_BOT_FACE_STYLE.eyeRotationDeg);
     onMouthScaleChange(preset.mouthScale);
     onMouthOffsetXChange(preset.mouthOffsetX);
     onMouthOffsetYChange(preset.mouthOffsetY);
@@ -31940,12 +32032,15 @@ function BotAvatarCustomizerModal({
   const resetFace = () => {
     onEyesFontChange(DEFAULT_BOT_FACE_STYLE.eyesFont);
     onEyeCharacterChange(DEFAULT_BOT_FACE_STYLE.eyeCharacter);
+    onEyeAnimationChange(DEFAULT_BOT_FACE_STYLE.eyeAnimation);
     onMouthFontChange(DEFAULT_BOT_FACE_STYLE.mouthFont);
     onMouthCharacterChange(DEFAULT_BOT_FACE_STYLE.mouthCharacter);
+    onMouthAnimationChange(DEFAULT_BOT_FACE_STYLE.mouthAnimation);
     onWeightChange(DEFAULT_BOT_FACE_STYLE.weight);
     onEyeScaleChange(DEFAULT_BOT_FACE_STYLE.eyeScale);
     onEyeOffsetXChange(DEFAULT_BOT_FACE_STYLE.eyeOffsetX);
     onEyeOffsetYChange(DEFAULT_BOT_FACE_STYLE.eyeOffsetY);
+    onEyeRotationDegChange(DEFAULT_BOT_FACE_STYLE.eyeRotationDeg);
     onMouthScaleChange(DEFAULT_BOT_FACE_STYLE.mouthScale);
     onMouthOffsetXChange(DEFAULT_BOT_FACE_STYLE.mouthOffsetX);
     onMouthOffsetYChange(DEFAULT_BOT_FACE_STYLE.mouthOffsetY);
@@ -31981,6 +32076,17 @@ function BotAvatarCustomizerModal({
             </p>
           </div>
           <div className={styles.botAvatarCustomizerHeaderActions}>
+            <button
+              type="button"
+              className={styles.botAvatarCustomizerUndoButton}
+              onClick={onUndo}
+              disabled={!canUndo || saving}
+              aria-label="Undo last Avatar Studio edit"
+              title="Undo last edit (Ctrl/Cmd+Z)"
+            >
+              <RotateCcw size={14} strokeWidth={2.3} aria-hidden="true" />
+              Undo
+            </button>
             <span
               className={styles.botAvatarSaveStatus}
               data-state={saveStatusState}
@@ -32037,7 +32143,7 @@ function BotAvatarCustomizerModal({
                 role="tablist"
                 aria-label="Avatar control sections"
               >
-                {visibleAvatarTabs.map((tab) => (
+                {BOT_AVATAR_CUSTOMIZER_TABS.map((tab) => (
                   <button
                     key={tab.value}
                     type="button"
@@ -32046,9 +32152,7 @@ function BotAvatarCustomizerModal({
                     data-active={activeControlTab === tab.value ? "true" : undefined}
                     onClick={() => setActiveControlTab(tab.value)}
                   >
-                    {tab.value === "identity" ? (
-                      <Brush size={13} strokeWidth={2.3} aria-hidden="true" />
-                    ) : tab.value === "face" ? (
+                    {tab.value === "face" ? (
                       <Sparkles size={13} strokeWidth={2.3} aria-hidden="true" />
                     ) : tab.value === "eyes" ? (
                       <Eye size={13} strokeWidth={2.3} aria-hidden="true" />
@@ -32063,32 +32167,36 @@ function BotAvatarCustomizerModal({
               </div>
             ) : null}
             <div className={styles.botAvatarControlStack}>
-              {activeControlTab === "identity" && identityControlsVisible ? (
-                <BotAvatarIdentityControls
-                  name={botNameDraft}
-                  color={color}
-                  glyph={glyph}
-                  colorPickerOpen={colorPickerOpen}
-                  resolvedTheme={resolvedTheme}
-                  onNameChange={onBotNameChange}
-                  onColorChange={onColorChange}
-                  onGlyphChange={onGlyphChange}
-                  onColorPickerToggle={onColorPickerToggle}
-                />
-              ) : null}
-
               {activeFaceControlTabs.map((faceControlTab) => (
                 <BotAvatarFaceControls
                   key={faceControlTab}
                   activeTab={faceControlTab}
+                  identitySection={
+                    faceControlTab === "face" && identityControlsVisible
+                      ? {
+                          name: botNameDraft,
+                          color,
+                          glyph,
+                          colorPickerOpen,
+                          resolvedTheme,
+                          onNameChange: onBotNameChange,
+                          onColorChange,
+                          onGlyphChange,
+                          onColorPickerToggle,
+                        }
+                      : undefined
+                  }
                   faceEyesFont={faceEyesFont}
                   faceEyeCharacter={faceEyeCharacter}
+                  faceEyeAnimation={faceEyeAnimation}
                   faceMouthFont={faceMouthFont}
                   faceMouthCharacter={faceMouthCharacter}
+                  faceMouthAnimation={faceMouthAnimation}
                   faceFontWeight={faceFontWeight}
                   faceEyeScale={faceEyeScale}
                   faceEyeOffsetX={faceEyeOffsetX}
                   faceEyeOffsetY={faceEyeOffsetY}
+                  faceEyeRotationDeg={faceEyeRotationDeg}
                   faceMouthScale={faceMouthScale}
                   faceMouthOffsetX={faceMouthOffsetX}
                   faceMouthOffsetY={faceMouthOffsetY}
@@ -32099,12 +32207,15 @@ function BotAvatarCustomizerModal({
                   faceIsDefault={faceIsDefault}
                   onEyesFontChange={onEyesFontChange}
                   onEyeCharacterChange={onEyeCharacterChange}
+                  onEyeAnimationChange={onEyeAnimationChange}
                   onMouthFontChange={onMouthFontChange}
                   onMouthCharacterChange={onMouthCharacterChange}
+                  onMouthAnimationChange={onMouthAnimationChange}
                   onWeightChange={onWeightChange}
                   onEyeScaleChange={onEyeScaleChange}
                   onEyeOffsetXChange={onEyeOffsetXChange}
                   onEyeOffsetYChange={onEyeOffsetYChange}
+                  onEyeRotationDegChange={onEyeRotationDegChange}
                   onMouthScaleChange={onMouthScaleChange}
                   onMouthOffsetXChange={onMouthOffsetXChange}
                   onMouthOffsetYChange={onMouthOffsetYChange}
@@ -33535,6 +33646,7 @@ function HomeContent(): React.JSX.Element {
   const [zenAutonomyScheduleTick, setZenAutonomyScheduleTick] = useState(0);
   const zenAutonomyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const zenAutonomyScheduleFrameRef = useRef<number | null>(null);
+  const zenAutonomySchedulingActiveRef = useRef(false);
   const zenAutonomyLastActivityAtMsRef = useRef(Date.now());
   const zenAutonomyCooldownUntilMsRef = useRef(0);
   const zenAutonomySpokenCountRef = useRef(0);
@@ -35032,12 +35144,16 @@ function HomeContent(): React.JSX.Element {
   const [newBotFaceEyeCharacter, setNewBotFaceEyeCharacter] = useState<string | null>(
     DEFAULT_BOT_FACE_STYLE.eyeCharacter
   );
+  const [newBotFaceEyeAnimation, setNewBotFaceEyeAnimation] =
+    useState<BotFaceGlyphAnimation>(DEFAULT_BOT_FACE_STYLE.eyeAnimation);
   const [newBotFaceMouthFont, setNewBotFaceMouthFont] = useState<BotFaceFontId>(
     DEFAULT_BOT_FACE_STYLE.mouthFont
   );
   const [newBotFaceMouthCharacter, setNewBotFaceMouthCharacter] = useState<string | null>(
     DEFAULT_BOT_FACE_STYLE.mouthCharacter
   );
+  const [newBotFaceMouthAnimation, setNewBotFaceMouthAnimation] =
+    useState<BotFaceGlyphAnimation>(DEFAULT_BOT_FACE_STYLE.mouthAnimation);
   const [newBotFaceFontWeight, setNewBotFaceFontWeight] = useState<number>(
     DEFAULT_BOT_FACE_STYLE.weight
   );
@@ -35049,6 +35165,9 @@ function HomeContent(): React.JSX.Element {
   );
   const [newBotFaceEyeOffsetY, setNewBotFaceEyeOffsetY] = useState<number>(
     DEFAULT_BOT_FACE_STYLE.eyeOffsetY
+  );
+  const [newBotFaceEyeRotationDeg, setNewBotFaceEyeRotationDeg] = useState<number>(
+    DEFAULT_BOT_FACE_STYLE.eyeRotationDeg
   );
   const [newBotFaceMouthScale, setNewBotFaceMouthScale] = useState<number>(
     DEFAULT_BOT_FACE_STYLE.mouthScale
@@ -35078,11 +35197,10 @@ function HomeContent(): React.JSX.Element {
     x: number;
     y: number;
   } | null>(null);
-  const [botAvatarAutoSaving, setBotAvatarAutoSaving] = useState(false);
-  const [botAvatarAutoSavingBotId, setBotAvatarAutoSavingBotId] = useState<string | null>(null);
   const [colorWheelOpen, setColorWheelOpen] = useState(false);
   const [botAvatarCustomizerOpen, setBotAvatarCustomizerOpen] = useState(false);
   const [botAvatarSavePromptOpen, setBotAvatarSavePromptOpen] = useState(false);
+  const [botAvatarUndoDepth, setBotAvatarUndoDepth] = useState(0);
   const [botProfileBuilderOpen, setBotProfileBuilderOpen] = useState(false);
   const [botAiParametersModalOpen, setBotAiParametersModalOpen] = useState(false);
   const [botPreferredModelsModalOpen, setBotPreferredModelsModalOpen] = useState(false);
@@ -35160,12 +35278,15 @@ function HomeContent(): React.JSX.Element {
     repetitionPenalty: BOT_REPETITION_PENALTY_DEFAULT,
     faceEyesFont: DEFAULT_BOT_FACE_STYLE.eyesFont,
     faceEyeCharacter: DEFAULT_BOT_FACE_STYLE.eyeCharacter,
+    faceEyeAnimation: DEFAULT_BOT_FACE_STYLE.eyeAnimation,
     faceMouthFont: DEFAULT_BOT_FACE_STYLE.mouthFont,
     faceMouthCharacter: DEFAULT_BOT_FACE_STYLE.mouthCharacter,
+    faceMouthAnimation: DEFAULT_BOT_FACE_STYLE.mouthAnimation,
     faceFontWeight: DEFAULT_BOT_FACE_STYLE.weight,
     faceEyeScale: DEFAULT_BOT_FACE_STYLE.eyeScale,
     faceEyeOffsetX: DEFAULT_BOT_FACE_STYLE.eyeOffsetX,
     faceEyeOffsetY: DEFAULT_BOT_FACE_STYLE.eyeOffsetY,
+    faceEyeRotationDeg: DEFAULT_BOT_FACE_STYLE.eyeRotationDeg,
     faceMouthScale: DEFAULT_BOT_FACE_STYLE.mouthScale,
     faceMouthOffsetX: DEFAULT_BOT_FACE_STYLE.mouthOffsetX,
     faceMouthOffsetY: DEFAULT_BOT_FACE_STYLE.mouthOffsetY,
@@ -35190,12 +35311,15 @@ function HomeContent(): React.JSX.Element {
     repetitionPenalty: newBotRepetitionPenalty,
     faceEyesFont: newBotFaceEyesFont,
     faceEyeCharacter: newBotFaceEyeCharacter,
+    faceEyeAnimation: newBotFaceEyeAnimation,
     faceMouthFont: newBotFaceMouthFont,
     faceMouthCharacter: newBotFaceMouthCharacter,
+    faceMouthAnimation: newBotFaceMouthAnimation,
     faceFontWeight: newBotFaceFontWeight,
     faceEyeScale: newBotFaceEyeScale,
     faceEyeOffsetX: newBotFaceEyeOffsetX,
     faceEyeOffsetY: newBotFaceEyeOffsetY,
+    faceEyeRotationDeg: newBotFaceEyeRotationDeg,
     faceMouthScale: newBotFaceMouthScale,
     faceMouthOffsetX: newBotFaceMouthOffsetX,
     faceMouthOffsetY: newBotFaceMouthOffsetY,
@@ -35224,6 +35348,16 @@ function HomeContent(): React.JSX.Element {
     setNewBotFaceEyeCharacter(normalizeBotFaceEyeCharacter(next));
   }, []);
 
+  const handleNewBotFaceEyeAnimationChange = useCallback(
+    (next: BotFaceGlyphAnimation) => {
+      createBotAppearanceTouchedRef.current = true;
+      setNewBotFaceEyeAnimation(
+        normalizeBotFaceGlyphAnimation(next) ?? DEFAULT_BOT_FACE_STYLE.eyeAnimation
+      );
+    },
+    []
+  );
+
   const handleNewBotFaceMouthFontChange = useCallback((next: BotFaceFontId) => {
     createBotAppearanceTouchedRef.current = true;
     setNewBotFaceMouthFont(next);
@@ -35233,6 +35367,16 @@ function HomeContent(): React.JSX.Element {
     createBotAppearanceTouchedRef.current = true;
     setNewBotFaceMouthCharacter(normalizeBotFaceMouthCharacter(next));
   }, []);
+
+  const handleNewBotFaceMouthAnimationChange = useCallback(
+    (next: BotFaceGlyphAnimation) => {
+      createBotAppearanceTouchedRef.current = true;
+      setNewBotFaceMouthAnimation(
+        normalizeBotFaceGlyphAnimation(next) ?? DEFAULT_BOT_FACE_STYLE.mouthAnimation
+      );
+    },
+    []
+  );
 
   const handleNewBotFaceFontWeightChange = useCallback((next: number) => {
     createBotAppearanceTouchedRef.current = true;
@@ -35255,6 +35399,13 @@ function HomeContent(): React.JSX.Element {
     createBotAppearanceTouchedRef.current = true;
     setNewBotFaceEyeOffsetY(
       normalizeBotFaceEyeOffsetY(next) ?? DEFAULT_BOT_FACE_STYLE.eyeOffsetY
+    );
+  }, []);
+
+  const handleNewBotFaceEyeRotationDegChange = useCallback((next: number) => {
+    createBotAppearanceTouchedRef.current = true;
+    setNewBotFaceEyeRotationDeg(
+      normalizeBotFaceEyeRotationDeg(next) ?? DEFAULT_BOT_FACE_STYLE.eyeRotationDeg
     );
   }, []);
 
@@ -35357,11 +35508,124 @@ function HomeContent(): React.JSX.Element {
   // stored color (where we seed the picker with a random hex) don't
   // immediately appear as "dirty". Cleared when edit mode exits.
   const editOriginalRef = useRef<BotEditOriginalSnapshot | null>(null);
-  const botAvatarAutoSaveQueuedPatchRef = useRef<BotCustomizerSavePatch>({});
-  const botAvatarAutoSaveInFlightRef = useRef(false);
-  const botAvatarAutoSaveFlushPromiseRef = useRef<Promise<boolean> | null>(null);
+  const botAvatarUndoHistoryRef = useRef<BotAvatarDraftSnapshot[]>([]);
+  const botAvatarUndoInteractionRef = useRef<{
+    key: string;
+    lastChangedAt: number;
+  } | null>(null);
   const botDeleteProtectionProjectionRunRef = useRef(0);
   const botNameInputRef = useRef<HTMLInputElement | null>(null);
+
+  const currentBotAvatarDraftSnapshot = useCallback(
+    (): BotAvatarDraftSnapshot => ({
+      name: newBotName,
+      color: newBotColor,
+      glyph: newBotGlyph,
+      faceEyesFont: newBotFaceEyesFont,
+      faceEyeCharacter: newBotFaceEyeCharacter,
+      faceEyeAnimation: newBotFaceEyeAnimation,
+      faceMouthFont: newBotFaceMouthFont,
+      faceMouthCharacter: newBotFaceMouthCharacter,
+      faceMouthAnimation: newBotFaceMouthAnimation,
+      faceFontWeight: newBotFaceFontWeight,
+      faceEyeScale: newBotFaceEyeScale,
+      faceEyeOffsetX: newBotFaceEyeOffsetX,
+      faceEyeOffsetY: newBotFaceEyeOffsetY,
+      faceEyeRotationDeg: newBotFaceEyeRotationDeg,
+      faceMouthScale: newBotFaceMouthScale,
+      faceMouthOffsetX: newBotFaceMouthOffsetX,
+      faceMouthOffsetY: newBotFaceMouthOffsetY,
+      faceMouthRotationDeg: newBotFaceMouthRotationDeg,
+      faceBlinkBar: newBotFaceBlinkBar,
+      faceThinkingFrames: newBotFaceThinkingFrames,
+    }),
+    [
+      newBotColor,
+      newBotFaceBlinkBar,
+      newBotFaceEyeAnimation,
+      newBotFaceEyeCharacter,
+      newBotFaceEyeOffsetX,
+      newBotFaceEyeOffsetY,
+      newBotFaceEyeRotationDeg,
+      newBotFaceEyeScale,
+      newBotFaceEyesFont,
+      newBotFaceFontWeight,
+      newBotFaceMouthAnimation,
+      newBotFaceMouthCharacter,
+      newBotFaceMouthFont,
+      newBotFaceMouthOffsetX,
+      newBotFaceMouthOffsetY,
+      newBotFaceMouthRotationDeg,
+      newBotFaceMouthScale,
+      newBotFaceThinkingFrames,
+      newBotGlyph,
+      newBotName,
+    ]
+  );
+
+  const applyBotAvatarDraftSnapshot = useCallback((snapshot: BotAvatarDraftSnapshot): void => {
+    setNewBotName(snapshot.name);
+    setNewBotColor(snapshot.color);
+    setNewBotGlyph(snapshot.glyph);
+    setNewBotFaceEyesFont(snapshot.faceEyesFont);
+    setNewBotFaceEyeCharacter(snapshot.faceEyeCharacter);
+    setNewBotFaceEyeAnimation(snapshot.faceEyeAnimation);
+    setNewBotFaceMouthFont(snapshot.faceMouthFont);
+    setNewBotFaceMouthCharacter(snapshot.faceMouthCharacter);
+    setNewBotFaceMouthAnimation(snapshot.faceMouthAnimation);
+    setNewBotFaceFontWeight(snapshot.faceFontWeight);
+    setNewBotFaceEyeScale(snapshot.faceEyeScale);
+    setNewBotFaceEyeOffsetX(snapshot.faceEyeOffsetX);
+    setNewBotFaceEyeOffsetY(snapshot.faceEyeOffsetY);
+    setNewBotFaceEyeRotationDeg(snapshot.faceEyeRotationDeg);
+    setNewBotFaceMouthScale(snapshot.faceMouthScale);
+    setNewBotFaceMouthOffsetX(snapshot.faceMouthOffsetX);
+    setNewBotFaceMouthOffsetY(snapshot.faceMouthOffsetY);
+    setNewBotFaceMouthRotationDeg(snapshot.faceMouthRotationDeg);
+    setNewBotFaceBlinkBar(snapshot.faceBlinkBar);
+    setNewBotFaceThinkingFrames(snapshot.faceThinkingFrames);
+  }, []);
+
+  const clearBotAvatarUndoHistory = useCallback((): void => {
+    botAvatarUndoHistoryRef.current = [];
+    botAvatarUndoInteractionRef.current = null;
+    setBotAvatarUndoDepth(0);
+  }, []);
+
+  const pushBotAvatarUndoSnapshot = useCallback((interactionKey?: string): void => {
+    const now = performance.now();
+    const activeInteraction = botAvatarUndoInteractionRef.current;
+    if (
+      interactionKey &&
+      activeInteraction?.key === interactionKey &&
+      now - activeInteraction.lastChangedAt < BOT_AVATAR_UNDO_STATIONARY_MS
+    ) {
+      activeInteraction.lastChangedAt = now;
+      return;
+    }
+    botAvatarUndoInteractionRef.current = interactionKey
+      ? { key: interactionKey, lastChangedAt: now }
+      : null;
+    const snapshot = currentBotAvatarDraftSnapshot();
+    const history = botAvatarUndoHistoryRef.current;
+    const previous = history.at(-1);
+    if (previous && botAvatarDraftSnapshotsEqual(previous, snapshot)) return;
+    const next = [...history, snapshot].slice(-BOT_AVATAR_UNDO_HISTORY_LIMIT);
+    botAvatarUndoHistoryRef.current = next;
+    setBotAvatarUndoDepth(next.length);
+  }, [currentBotAvatarDraftSnapshot]);
+
+  const undoBotAvatarDraft = useCallback((): void => {
+    const history = botAvatarUndoHistoryRef.current;
+    const snapshot = history.at(-1);
+    if (!snapshot) return;
+    const next = history.slice(0, -1);
+    botAvatarUndoHistoryRef.current = next;
+    botAvatarUndoInteractionRef.current = null;
+    setBotAvatarUndoDepth(next.length);
+    applyBotAvatarDraftSnapshot(snapshot);
+  }, [applyBotAvatarDraftSnapshot]);
+
   const restoreBotAvatarDraftFromPristine = useCallback((): void => {
     const pristine = editOriginalRef.current;
     if (!pristine) return;
@@ -35369,12 +35633,15 @@ function HomeContent(): React.JSX.Element {
     setNewBotGlyph(pristine.glyph);
     setNewBotFaceEyesFont(pristine.faceEyesFont);
     setNewBotFaceEyeCharacter(pristine.faceEyeCharacter);
+    setNewBotFaceEyeAnimation(pristine.faceEyeAnimation);
     setNewBotFaceMouthFont(pristine.faceMouthFont);
     setNewBotFaceMouthCharacter(pristine.faceMouthCharacter);
+    setNewBotFaceMouthAnimation(pristine.faceMouthAnimation);
     setNewBotFaceFontWeight(pristine.faceFontWeight);
     setNewBotFaceEyeScale(pristine.faceEyeScale);
     setNewBotFaceEyeOffsetX(pristine.faceEyeOffsetX);
     setNewBotFaceEyeOffsetY(pristine.faceEyeOffsetY);
+    setNewBotFaceEyeRotationDeg(pristine.faceEyeRotationDeg);
     setNewBotFaceMouthScale(pristine.faceMouthScale);
     setNewBotFaceMouthOffsetX(pristine.faceMouthOffsetX);
     setNewBotFaceMouthOffsetY(pristine.faceMouthOffsetY);
@@ -35387,7 +35654,8 @@ function HomeContent(): React.JSX.Element {
     setBotAvatarCustomizerOpen(false);
     setBotAvatarSavePromptOpen(false);
     setColorWheelOpen(false);
-  }, []);
+    clearBotAvatarUndoHistory();
+  }, [clearBotAvatarUndoHistory]);
 
   const discardBotAvatarCustomizerChanges = useCallback((): void => {
     restoreBotAvatarDraftFromPristine();
@@ -37847,10 +38115,14 @@ function HomeContent(): React.JSX.Element {
     eyesFont: settings?.prismDefaultBotFaceEyesFont ?? DEFAULT_BOT_FACE_STYLE.eyesFont,
     eyeCharacter:
       settings?.prismDefaultBotFaceEyeCharacter ?? DEFAULT_BOT_FACE_STYLE.eyeCharacter,
+    eyeAnimation:
+      settings?.prismDefaultBotFaceEyeAnimation ?? DEFAULT_BOT_FACE_STYLE.eyeAnimation,
     mouthFont: settings?.prismDefaultBotFaceMouthFont ?? DEFAULT_BOT_FACE_STYLE.mouthFont,
     mouthCharacter:
       settings?.prismDefaultBotFaceMouthCharacter ??
       DEFAULT_BOT_FACE_STYLE.mouthCharacter,
+    mouthAnimation:
+      settings?.prismDefaultBotFaceMouthAnimation ?? DEFAULT_BOT_FACE_STYLE.mouthAnimation,
     weight: settings?.prismDefaultBotFaceFontWeight ?? DEFAULT_BOT_FACE_STYLE.weight,
     eyeScale:
       settings?.prismDefaultBotFaceEyeScale ?? DEFAULT_BOT_FACE_STYLE.eyeScale,
@@ -37858,6 +38130,8 @@ function HomeContent(): React.JSX.Element {
       settings?.prismDefaultBotFaceEyeOffsetX ?? DEFAULT_BOT_FACE_STYLE.eyeOffsetX,
     eyeOffsetY:
       settings?.prismDefaultBotFaceEyeOffsetY ?? DEFAULT_BOT_FACE_STYLE.eyeOffsetY,
+    eyeRotationDeg:
+      settings?.prismDefaultBotFaceEyeRotationDeg ?? DEFAULT_BOT_FACE_STYLE.eyeRotationDeg,
     mouthScale:
       settings?.prismDefaultBotFaceMouthScale ?? DEFAULT_BOT_FACE_STYLE.mouthScale,
     mouthOffsetX:
@@ -37875,11 +38149,14 @@ function HomeContent(): React.JSX.Element {
   }), [
     settings?.prismDefaultBotFaceBlinkBar,
     settings?.prismDefaultBotFaceEyeCharacter,
+    settings?.prismDefaultBotFaceEyeAnimation,
     settings?.prismDefaultBotFaceEyesFont,
     settings?.prismDefaultBotFaceEyeOffsetX,
     settings?.prismDefaultBotFaceEyeOffsetY,
+    settings?.prismDefaultBotFaceEyeRotationDeg,
     settings?.prismDefaultBotFaceEyeScale,
     settings?.prismDefaultBotFaceMouthCharacter,
+    settings?.prismDefaultBotFaceMouthAnimation,
     settings?.prismDefaultBotFaceMouthOffsetX,
     settings?.prismDefaultBotFaceMouthOffsetY,
     settings?.prismDefaultBotFaceMouthRotationDeg,
@@ -40291,19 +40568,18 @@ function HomeContent(): React.JSX.Element {
   const pendingReplyVisualVisible =
     pendingReplyVisible && !pendingMessageCleanupVisible;
   const requestZenAutonomyScheduleTick = useCallback((): void => {
-    if (typeof window === "undefined") {
-      setZenAutonomyScheduleTick((tick) => tick + 1);
-      return;
-    }
+    if (!zenAutonomySchedulingActiveRef.current || typeof window === "undefined") return;
     if (zenAutonomyScheduleFrameRef.current !== null) return;
     zenAutonomyScheduleFrameRef.current = window.requestAnimationFrame(() => {
       zenAutonomyScheduleFrameRef.current = null;
+      if (!zenAutonomySchedulingActiveRef.current) return;
       setZenAutonomyScheduleTick((tick) => tick + 1);
     });
   }, []);
 
   useEffect(() => {
     return () => {
+      zenAutonomySchedulingActiveRef.current = false;
       if (zenAutonomyScheduleFrameRef.current === null) return;
       window.cancelAnimationFrame(zenAutonomyScheduleFrameRef.current);
       zenAutonomyScheduleFrameRef.current = null;
@@ -40311,7 +40587,13 @@ function HomeContent(): React.JSX.Element {
   }, []);
 
   useEffect(() => {
-    if (view === "chat" && zenAutonomyEnabled && user) return;
+    const schedulerActive = zenAutonomySchedulerIsActive({
+      view,
+      enabled: zenAutonomyEnabled,
+      hasUser: Boolean(user),
+    });
+    zenAutonomySchedulingActiveRef.current = schedulerActive;
+    if (schedulerActive) return;
     if (zenAutonomyTimerRef.current) {
       clearTimeout(zenAutonomyTimerRef.current);
       zenAutonomyTimerRef.current = null;
@@ -40320,8 +40602,7 @@ function HomeContent(): React.JSX.Element {
     zenAutonomySpokenCountRef.current = 0;
     zenAutonomyCooldownUntilMsRef.current = 0;
     zenAutonomyLastActivityAtMsRef.current = Date.now();
-    requestZenAutonomyScheduleTick();
-  }, [user?.id, view, zenAutonomyEnabled, requestZenAutonomyScheduleTick]);
+  }, [user?.id, view, zenAutonomyEnabled]);
 
   useEffect(() => {
     if (typeof window === "undefined" || typeof document === "undefined") return;
@@ -41331,7 +41612,8 @@ function HomeContent(): React.JSX.Element {
     if (!chatAssistantRevealEligibleKeysRef.current.has(revealKey)) return null;
     if (!latestAssistantMessage) return null;
     const displayContent = resolveVisibleMessageContent(latestAssistantMessage);
-    const revealTokens = tokenizeMessageReveal(displayContent);
+    const speechContent = normalizeCrtSpeechText(getBotMentionDisplayText(displayContent));
+    const revealTokens = tokenizeMessageReveal(speechContent);
     const delayMultiplier = resolveZenAssistantRevealDelayMultiplier(revealKey);
     const moodKey = latestAssistantMessage.moodKey ?? DEFAULT_MESSAGE_MOOD;
     const visibleTokenCount = resolveAssistantRevealVisibleTokenCount({
@@ -42861,8 +43143,11 @@ function HomeContent(): React.JSX.Element {
   const coffeeTableSceneRef = useRef<HTMLDivElement | null>(null);
   const coffeeCenterMessageRef = useRef<HTMLDivElement | null>(null);
   const coffeeCupElementByBotIdRef = useRef<Map<string, HTMLDivElement>>(new Map());
+  const coffeePotTrayRef = useRef<HTMLButtonElement | null>(null);
   const coffeePotDragRuntimeRef = useRef<CoffeePotDragRuntimeState | null>(null);
   const coffeePotDragRef = useRef<CoffeePotDragState | null>(null);
+  const moveEquippedCoffeePotRef = useRef<(clientX: number, clientY: number) => void>(() => {});
+  const returnEquippedCoffeePotRef = useRef<(pointerId: number) => void>(() => {});
   const coffeePotPourFrameIndexRef = useRef(0);
   const coffeePotFillFrameIndexRef = useRef(0);
   const coffeePotPourReadyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -42925,6 +43210,9 @@ function HomeContent(): React.JSX.Element {
   );
   const coffeeSeatDebugDragRef = useRef<CoffeeSeatDebugDragState | null>(null);
   const coffeeSeatDebugSuppressClickRef = useRef<string | null>(null);
+  const [coffeeSeatDebugDraggingBotId, setCoffeeSeatDebugDraggingBotId] = useState<
+    string | null
+  >(null);
   const [coffeeSeatDebugOverrides, setCoffeeSeatDebugOverrides] = useState<
     Record<string, { leftPct: number; topPct: number }>
   >({});
@@ -43411,6 +43699,26 @@ function HomeContent(): React.JSX.Element {
     },
     []
   );
+  useEffect(() => {
+    const moveEquippedPot = (event: PointerEvent) => {
+      const runtime = coffeePotDragRuntimeRef.current;
+      if (!runtime?.equipped) return;
+      moveEquippedCoffeePotRef.current(event.clientX, event.clientY);
+    };
+    const dropEquippedPot = (event: PointerEvent) => {
+      const runtime = coffeePotDragRuntimeRef.current;
+      if (!runtime?.equipped || event.button !== 0) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      returnEquippedCoffeePotRef.current(runtime.pointerId);
+    };
+    window.addEventListener("pointermove", moveEquippedPot);
+    window.addEventListener("pointerdown", dropEquippedPot, true);
+    return () => {
+      window.removeEventListener("pointermove", moveEquippedPot);
+      window.removeEventListener("pointerdown", dropEquippedPot, true);
+    };
+  }, []);
   const [coffeeSessionSettings, setCoffeeSessionSettings] = useState<CoffeeSessionSettings>(() =>
     loadCoffeeSettingsFromBrowser()
   );
@@ -46378,11 +46686,11 @@ function HomeContent(): React.JSX.Element {
 
   function resolveZenReadableAnchorRow(scrollRoot: HTMLDivElement): HTMLElement | null {
     const lastMessageId = detail?.messages[detail.messages.length - 1]?.id ?? null;
-    const candidateIds = [
+    const candidateIds = zenReadableAnchorMessageIds({
+      lastMessageId,
       latestAssistantMessageId,
       latestUserMessageId,
-      lastMessageId,
-    ].filter((id): id is string => Boolean(id));
+    });
     return (
       candidateIds
         .map((id) => findMessageRowById(scrollRoot, id))
@@ -46446,21 +46754,9 @@ function HomeContent(): React.JSX.Element {
 
   function resolveZenReadableMaxScrollTop(scrollRoot: HTMLDivElement): number {
     syncZenReadableTailSpace(scrollRoot);
-    const nativeMaxScrollTop = Math.max(
-      0,
-      scrollRoot.scrollHeight - scrollRoot.clientHeight
-    );
-    if (view !== "chat" || !chatEphemeralMode || zenEmptyHeroVisible) {
-      return nativeMaxScrollTop;
-    }
-    const anchorRow = resolveZenReadableAnchorRow(scrollRoot);
-    if (!anchorRow) return nativeMaxScrollTop;
-
-    const anchorY = resolveChatModeMessageFollowY(anchorRow, scrollRoot);
-    const anchorViewportY = resolveZenReadableAnchorViewportY(scrollRoot);
-    return Math.max(
-      0,
-      Math.min(nativeMaxScrollTop, anchorY - anchorViewportY)
+    return zenReadableMaxScrollTop(
+      scrollRoot.scrollHeight,
+      scrollRoot.clientHeight
     );
   }
 
@@ -48096,12 +48392,18 @@ function HomeContent(): React.JSX.Element {
       prismDefaultBotFaceEyeCharacter:
         normalizeBotFaceEyeCharacter(d.settings.prismDefaultBotFaceEyeCharacter) ??
         DEFAULT_BOT_FACE_STYLE.eyeCharacter,
+      prismDefaultBotFaceEyeAnimation:
+        normalizeBotFaceGlyphAnimation(d.settings.prismDefaultBotFaceEyeAnimation) ??
+        DEFAULT_BOT_FACE_STYLE.eyeAnimation,
       prismDefaultBotFaceMouthFont:
         normalizeBotFaceFontId(d.settings.prismDefaultBotFaceMouthFont) ??
         DEFAULT_BOT_FACE_STYLE.mouthFont,
       prismDefaultBotFaceMouthCharacter:
         normalizeBotFaceMouthCharacter(d.settings.prismDefaultBotFaceMouthCharacter) ??
         DEFAULT_BOT_FACE_STYLE.mouthCharacter,
+      prismDefaultBotFaceMouthAnimation:
+        normalizeBotFaceGlyphAnimation(d.settings.prismDefaultBotFaceMouthAnimation) ??
+        DEFAULT_BOT_FACE_STYLE.mouthAnimation,
       prismDefaultBotFaceFontWeight:
         normalizeBotFaceFontWeight(d.settings.prismDefaultBotFaceFontWeight) ??
         DEFAULT_BOT_FACE_STYLE.weight,
@@ -48114,6 +48416,9 @@ function HomeContent(): React.JSX.Element {
       prismDefaultBotFaceEyeOffsetY:
         normalizeBotFaceEyeOffsetY(d.settings.prismDefaultBotFaceEyeOffsetY) ??
         DEFAULT_BOT_FACE_STYLE.eyeOffsetY,
+      prismDefaultBotFaceEyeRotationDeg:
+        normalizeBotFaceEyeRotationDeg(d.settings.prismDefaultBotFaceEyeRotationDeg) ??
+        DEFAULT_BOT_FACE_STYLE.eyeRotationDeg,
       prismDefaultBotFaceMouthScale:
         normalizeBotFaceMouthScale(d.settings.prismDefaultBotFaceMouthScale) ??
         DEFAULT_BOT_FACE_STYLE.mouthScale,
@@ -57963,12 +58268,15 @@ function HomeContent(): React.JSX.Element {
         openaiImageModel: bot.openai_image_model ?? null,
         faceEyesFont: faceStyle.eyesFont,
         faceEyeCharacter: faceStyle.eyeCharacter,
+        faceEyeAnimation: faceStyle.eyeAnimation,
           faceMouthFont: faceStyle.mouthFont,
         faceMouthCharacter: faceStyle.mouthCharacter,
+        faceMouthAnimation: faceStyle.mouthAnimation,
         faceFontWeight: faceStyle.weight,
         faceEyeScale: faceStyle.eyeScale,
         faceEyeOffsetX: faceStyle.eyeOffsetX,
         faceEyeOffsetY: faceStyle.eyeOffsetY,
+        faceEyeRotationDeg: faceStyle.eyeRotationDeg,
         faceMouthScale: faceStyle.mouthScale,
         faceMouthOffsetX: faceStyle.mouthOffsetX,
         faceMouthOffsetY: faceStyle.mouthOffsetY,
@@ -58934,6 +59242,18 @@ function HomeContent(): React.JSX.Element {
     if (!normalizeBotFaceFontId(parsed.botJson.bot.faceMouthFont)) {
       throw new Error(`${prepared.entry.name} marketplace bundle is missing a valid mouth face font.`);
     }
+    for (const [label, animation] of [
+      ["eye", parsed.botJson.bot.faceEyeAnimation],
+      ["mouth", parsed.botJson.bot.faceMouthAnimation],
+    ] as const) {
+      if (
+        animation !== undefined &&
+        animation !== null &&
+        normalizeBotFaceGlyphAnimation(animation) === null
+      ) {
+        throw new Error(`${prepared.entry.name} marketplace bundle has an invalid ${label} animation.`);
+      }
+    }
     if (
       parsed.botJson.bot.faceMouthCharacter !== undefined &&
       parsed.botJson.bot.faceMouthCharacter !== null &&
@@ -58964,6 +59284,13 @@ function HomeContent(): React.JSX.Element {
       normalizeBotFaceEyeOffsetY(parsed.botJson.bot.faceEyeOffsetY) === null
     ) {
       throw new Error(`${prepared.entry.name} marketplace bundle has an invalid eye height.`);
+    }
+    if (
+      parsed.botJson.bot.faceEyeRotationDeg !== undefined &&
+      parsed.botJson.bot.faceEyeRotationDeg !== null &&
+      normalizeBotFaceEyeRotationDeg(parsed.botJson.bot.faceEyeRotationDeg) === null
+    ) {
+      throw new Error(`${prepared.entry.name} marketplace bundle has an invalid eye rotation.`);
     }
     if (
       parsed.botJson.bot.faceMouthScale !== undefined &&
@@ -62422,12 +62749,15 @@ function HomeContent(): React.JSX.Element {
     setNewBotGlyph(draft.glyph);
     setNewBotFaceEyesFont(draft.faceStyle.eyesFont);
     setNewBotFaceEyeCharacter(draft.faceStyle.eyeCharacter);
+    setNewBotFaceEyeAnimation(draft.faceStyle.eyeAnimation);
     setNewBotFaceMouthFont(draft.faceStyle.mouthFont);
     setNewBotFaceMouthCharacter(draft.faceStyle.mouthCharacter);
+    setNewBotFaceMouthAnimation(draft.faceStyle.mouthAnimation);
     setNewBotFaceFontWeight(draft.faceStyle.weight);
     setNewBotFaceEyeScale(draft.faceStyle.eyeScale);
     setNewBotFaceEyeOffsetX(draft.faceStyle.eyeOffsetX);
     setNewBotFaceEyeOffsetY(draft.faceStyle.eyeOffsetY);
+    setNewBotFaceEyeRotationDeg(draft.faceStyle.eyeRotationDeg);
     setNewBotFaceMouthScale(draft.faceStyle.mouthScale);
     setNewBotFaceMouthOffsetX(draft.faceStyle.mouthOffsetX);
     setNewBotFaceMouthOffsetY(draft.faceStyle.mouthOffsetY);
@@ -62480,12 +62810,15 @@ function HomeContent(): React.JSX.Element {
     setNewBotGlyph(randomBotGlyph());
     setNewBotFaceEyesFont(DEFAULT_BOT_FACE_STYLE.eyesFont);
     setNewBotFaceEyeCharacter(DEFAULT_BOT_FACE_STYLE.eyeCharacter);
+    setNewBotFaceEyeAnimation(DEFAULT_BOT_FACE_STYLE.eyeAnimation);
     setNewBotFaceMouthFont(DEFAULT_BOT_FACE_STYLE.mouthFont);
     setNewBotFaceMouthCharacter(DEFAULT_BOT_FACE_STYLE.mouthCharacter);
+    setNewBotFaceMouthAnimation(DEFAULT_BOT_FACE_STYLE.mouthAnimation);
     setNewBotFaceFontWeight(DEFAULT_BOT_FACE_STYLE.weight);
     setNewBotFaceEyeScale(DEFAULT_BOT_FACE_STYLE.eyeScale);
     setNewBotFaceEyeOffsetX(DEFAULT_BOT_FACE_STYLE.eyeOffsetX);
     setNewBotFaceEyeOffsetY(DEFAULT_BOT_FACE_STYLE.eyeOffsetY);
+    setNewBotFaceEyeRotationDeg(DEFAULT_BOT_FACE_STYLE.eyeRotationDeg);
     setNewBotFaceMouthScale(DEFAULT_BOT_FACE_STYLE.mouthScale);
     setNewBotFaceMouthOffsetX(DEFAULT_BOT_FACE_STYLE.mouthOffsetX);
     setNewBotFaceMouthOffsetY(DEFAULT_BOT_FACE_STYLE.mouthOffsetY);
@@ -62580,12 +62913,18 @@ function HomeContent(): React.JSX.Element {
     const seededFaceEyeCharacter =
       normalizeBotFaceEyeCharacter(settings.prismDefaultBotFaceEyeCharacter) ??
       DEFAULT_BOT_FACE_STYLE.eyeCharacter;
+    const seededFaceEyeAnimation =
+      normalizeBotFaceGlyphAnimation(settings.prismDefaultBotFaceEyeAnimation) ??
+      DEFAULT_BOT_FACE_STYLE.eyeAnimation;
     const seededFaceMouthFont =
       normalizeBotFaceFontId(settings.prismDefaultBotFaceMouthFont) ??
       DEFAULT_BOT_FACE_STYLE.mouthFont;
     const seededFaceMouthCharacter =
       normalizeBotFaceMouthCharacter(settings.prismDefaultBotFaceMouthCharacter) ??
       DEFAULT_BOT_FACE_STYLE.mouthCharacter;
+    const seededFaceMouthAnimation =
+      normalizeBotFaceGlyphAnimation(settings.prismDefaultBotFaceMouthAnimation) ??
+      DEFAULT_BOT_FACE_STYLE.mouthAnimation;
     const seededFaceFontWeight =
       normalizeBotFaceFontWeight(settings.prismDefaultBotFaceFontWeight) ??
       DEFAULT_BOT_FACE_STYLE.weight;
@@ -62598,6 +62937,9 @@ function HomeContent(): React.JSX.Element {
     const seededFaceEyeOffsetY =
       normalizeBotFaceEyeOffsetY(settings.prismDefaultBotFaceEyeOffsetY) ??
       DEFAULT_BOT_FACE_STYLE.eyeOffsetY;
+    const seededFaceEyeRotationDeg =
+      normalizeBotFaceEyeRotationDeg(settings.prismDefaultBotFaceEyeRotationDeg) ??
+      DEFAULT_BOT_FACE_STYLE.eyeRotationDeg;
     const seededFaceMouthScale =
       normalizeBotFaceMouthScale(settings.prismDefaultBotFaceMouthScale) ??
       DEFAULT_BOT_FACE_STYLE.mouthScale;
@@ -62642,12 +62984,15 @@ function HomeContent(): React.JSX.Element {
     setNewBotGlyph(seededGlyph);
     setNewBotFaceEyesFont(seededFaceEyesFont);
     setNewBotFaceEyeCharacter(seededFaceEyeCharacter);
+    setNewBotFaceEyeAnimation(seededFaceEyeAnimation);
     setNewBotFaceMouthFont(seededFaceMouthFont);
     setNewBotFaceMouthCharacter(seededFaceMouthCharacter);
+    setNewBotFaceMouthAnimation(seededFaceMouthAnimation);
     setNewBotFaceFontWeight(seededFaceFontWeight);
     setNewBotFaceEyeScale(seededFaceEyeScale);
     setNewBotFaceEyeOffsetX(seededFaceEyeOffsetX);
     setNewBotFaceEyeOffsetY(seededFaceEyeOffsetY);
+    setNewBotFaceEyeRotationDeg(seededFaceEyeRotationDeg);
     setNewBotFaceMouthScale(seededFaceMouthScale);
     setNewBotFaceMouthOffsetX(seededFaceMouthOffsetX);
     setNewBotFaceMouthOffsetY(seededFaceMouthOffsetY);
@@ -62678,12 +63023,15 @@ function HomeContent(): React.JSX.Element {
       glyph: seededGlyph,
       faceEyesFont: seededFaceEyesFont,
       faceEyeCharacter: seededFaceEyeCharacter,
+      faceEyeAnimation: seededFaceEyeAnimation,
       faceMouthFont: seededFaceMouthFont,
       faceMouthCharacter: seededFaceMouthCharacter,
+      faceMouthAnimation: seededFaceMouthAnimation,
       faceFontWeight: seededFaceFontWeight,
       faceEyeScale: seededFaceEyeScale,
       faceEyeOffsetX: seededFaceEyeOffsetX,
       faceEyeOffsetY: seededFaceEyeOffsetY,
+      faceEyeRotationDeg: seededFaceEyeRotationDeg,
       faceMouthScale: seededFaceMouthScale,
       faceMouthOffsetX: seededFaceMouthOffsetX,
       faceMouthOffsetY: seededFaceMouthOffsetY,
@@ -62793,12 +63141,15 @@ function HomeContent(): React.JSX.Element {
           glyph: newBotGlyph,
           faceEyesFont: newBotFaceEyesFont,
           faceEyeCharacter: newBotFaceEyeCharacter,
+          faceEyeAnimation: newBotFaceEyeAnimation,
           faceMouthFont: newBotFaceMouthFont,
           faceMouthCharacter: newBotFaceMouthCharacter,
+          faceMouthAnimation: newBotFaceMouthAnimation,
           faceFontWeight: newBotFaceFontWeight,
           faceEyeScale: newBotFaceEyeScale,
           faceEyeOffsetX: newBotFaceEyeOffsetX,
           faceEyeOffsetY: newBotFaceEyeOffsetY,
+          faceEyeRotationDeg: newBotFaceEyeRotationDeg,
           faceMouthScale: newBotFaceMouthScale,
           faceMouthOffsetX: newBotFaceMouthOffsetX,
           faceMouthOffsetY: newBotFaceMouthOffsetY,
@@ -62981,12 +63332,15 @@ function HomeContent(): React.JSX.Element {
           glyph: bot.glyph,
           faceEyesFont: faceStyle.eyesFont,
           faceEyeCharacter: faceStyle.eyeCharacter,
+          faceEyeAnimation: faceStyle.eyeAnimation,
           faceMouthFont: faceStyle.mouthFont,
           faceMouthCharacter: faceStyle.mouthCharacter,
+          faceMouthAnimation: faceStyle.mouthAnimation,
           faceFontWeight: faceStyle.weight,
           faceEyeScale: faceStyle.eyeScale,
           faceEyeOffsetX: faceStyle.eyeOffsetX,
           faceEyeOffsetY: faceStyle.eyeOffsetY,
+          faceEyeRotationDeg: faceStyle.eyeRotationDeg,
           faceMouthScale: faceStyle.mouthScale,
           faceMouthOffsetX: faceStyle.mouthOffsetX,
           faceMouthOffsetY: faceStyle.mouthOffsetY,
@@ -63058,12 +63412,15 @@ function HomeContent(): React.JSX.Element {
           glyph: newBotGlyph,
           faceEyesFont: newBotFaceEyesFont,
           faceEyeCharacter: newBotFaceEyeCharacter,
+          faceEyeAnimation: newBotFaceEyeAnimation,
           faceMouthFont: newBotFaceMouthFont,
           faceMouthCharacter: newBotFaceMouthCharacter,
+          faceMouthAnimation: newBotFaceMouthAnimation,
           faceFontWeight: newBotFaceFontWeight,
           faceEyeScale: newBotFaceEyeScale,
           faceEyeOffsetX: newBotFaceEyeOffsetX,
           faceEyeOffsetY: newBotFaceEyeOffsetY,
+          faceEyeRotationDeg: newBotFaceEyeRotationDeg,
           faceMouthScale: newBotFaceMouthScale,
           faceMouthOffsetX: newBotFaceMouthOffsetX,
           faceMouthOffsetY: newBotFaceMouthOffsetY,
@@ -63106,12 +63463,15 @@ function HomeContent(): React.JSX.Element {
         glyph: newBotGlyph,
         faceEyesFont: newBotFaceEyesFont,
         faceEyeCharacter: newBotFaceEyeCharacter,
+        faceEyeAnimation: newBotFaceEyeAnimation,
         faceMouthFont: newBotFaceMouthFont,
         faceMouthCharacter: newBotFaceMouthCharacter,
+        faceMouthAnimation: newBotFaceMouthAnimation,
         faceFontWeight: newBotFaceFontWeight,
         faceEyeScale: newBotFaceEyeScale,
         faceEyeOffsetX: newBotFaceEyeOffsetX,
         faceEyeOffsetY: newBotFaceEyeOffsetY,
+        faceEyeRotationDeg: newBotFaceEyeRotationDeg,
         faceMouthScale: newBotFaceMouthScale,
         faceMouthOffsetX: newBotFaceMouthOffsetX,
         faceMouthOffsetY: newBotFaceMouthOffsetY,
@@ -64276,12 +64636,15 @@ function HomeContent(): React.JSX.Element {
     setNewBotGlyph(seededGlyph);
     setNewBotFaceEyesFont(seededFaceStyle.eyesFont);
     setNewBotFaceEyeCharacter(seededFaceStyle.eyeCharacter);
+    setNewBotFaceEyeAnimation(seededFaceStyle.eyeAnimation);
     setNewBotFaceMouthFont(seededFaceStyle.mouthFont);
     setNewBotFaceMouthCharacter(seededFaceStyle.mouthCharacter);
+    setNewBotFaceMouthAnimation(seededFaceStyle.mouthAnimation);
     setNewBotFaceFontWeight(seededFaceStyle.weight);
     setNewBotFaceEyeScale(seededFaceStyle.eyeScale);
     setNewBotFaceEyeOffsetX(seededFaceStyle.eyeOffsetX);
     setNewBotFaceEyeOffsetY(seededFaceStyle.eyeOffsetY);
+    setNewBotFaceEyeRotationDeg(seededFaceStyle.eyeRotationDeg);
     setNewBotFaceMouthScale(seededFaceStyle.mouthScale);
     setNewBotFaceMouthOffsetX(seededFaceStyle.mouthOffsetX);
     setNewBotFaceMouthOffsetY(seededFaceStyle.mouthOffsetY);
@@ -64313,12 +64676,15 @@ function HomeContent(): React.JSX.Element {
       glyph: seededGlyph,
       faceEyesFont: seededFaceStyle.eyesFont,
       faceEyeCharacter: seededFaceStyle.eyeCharacter,
+      faceEyeAnimation: seededFaceStyle.eyeAnimation,
       faceMouthFont: seededFaceStyle.mouthFont,
       faceMouthCharacter: seededFaceStyle.mouthCharacter,
+      faceMouthAnimation: seededFaceStyle.mouthAnimation,
       faceFontWeight: seededFaceStyle.weight,
       faceEyeScale: seededFaceStyle.eyeScale,
       faceEyeOffsetX: seededFaceStyle.eyeOffsetX,
       faceEyeOffsetY: seededFaceStyle.eyeOffsetY,
+      faceEyeRotationDeg: seededFaceStyle.eyeRotationDeg,
       faceMouthScale: seededFaceStyle.mouthScale,
       faceMouthOffsetX: seededFaceStyle.mouthOffsetX,
       faceMouthOffsetY: seededFaceStyle.mouthOffsetY,
@@ -65960,12 +66326,15 @@ function HomeContent(): React.JSX.Element {
     const hasChanges = editPristine
       ? newBotFaceEyesFont !== editPristine.faceEyesFont
         || newBotFaceEyeCharacter !== editPristine.faceEyeCharacter
+        || newBotFaceEyeAnimation !== editPristine.faceEyeAnimation
         || newBotFaceMouthFont !== editPristine.faceMouthFont
         || newBotFaceMouthCharacter !== editPristine.faceMouthCharacter
+        || newBotFaceMouthAnimation !== editPristine.faceMouthAnimation
         || newBotFaceFontWeight !== editPristine.faceFontWeight
         || newBotFaceEyeScale !== editPristine.faceEyeScale
         || newBotFaceEyeOffsetX !== editPristine.faceEyeOffsetX
         || newBotFaceEyeOffsetY !== editPristine.faceEyeOffsetY
+        || newBotFaceEyeRotationDeg !== editPristine.faceEyeRotationDeg
         || newBotFaceMouthScale !== editPristine.faceMouthScale
         || newBotFaceMouthOffsetX !== editPristine.faceMouthOffsetX
         || newBotFaceMouthOffsetY !== editPristine.faceMouthOffsetY
@@ -65988,12 +66357,15 @@ function HomeContent(): React.JSX.Element {
           body: JSON.stringify({
             faceEyesFont: newBotFaceEyesFont,
             faceEyeCharacter: newBotFaceEyeCharacter,
+            faceEyeAnimation: newBotFaceEyeAnimation,
             faceMouthFont: newBotFaceMouthFont,
             faceMouthCharacter: newBotFaceMouthCharacter,
+            faceMouthAnimation: newBotFaceMouthAnimation,
             faceFontWeight: newBotFaceFontWeight,
             faceEyeScale: newBotFaceEyeScale,
           faceEyeOffsetX: newBotFaceEyeOffsetX,
           faceEyeOffsetY: newBotFaceEyeOffsetY,
+          faceEyeRotationDeg: newBotFaceEyeRotationDeg,
           faceMouthScale: newBotFaceMouthScale,
           faceMouthOffsetX: newBotFaceMouthOffsetX,
           faceMouthOffsetY: newBotFaceMouthOffsetY,
@@ -66032,12 +66404,15 @@ function HomeContent(): React.JSX.Element {
         glyph: DEFAULT_PRISM_BOT_GLYPH,
         faceEyesFont: newBotFaceEyesFont,
         faceEyeCharacter: newBotFaceEyeCharacter,
+        faceEyeAnimation: newBotFaceEyeAnimation,
         faceMouthFont: newBotFaceMouthFont,
         faceMouthCharacter: newBotFaceMouthCharacter,
+        faceMouthAnimation: newBotFaceMouthAnimation,
         faceFontWeight: newBotFaceFontWeight,
         faceEyeScale: newBotFaceEyeScale,
           faceEyeOffsetX: newBotFaceEyeOffsetX,
           faceEyeOffsetY: newBotFaceEyeOffsetY,
+          faceEyeRotationDeg: newBotFaceEyeRotationDeg,
           faceMouthScale: newBotFaceMouthScale,
           faceMouthOffsetX: newBotFaceMouthOffsetX,
           faceMouthOffsetY: newBotFaceMouthOffsetY,
@@ -66056,12 +66431,15 @@ function HomeContent(): React.JSX.Element {
               prismDefaultBotGlyph: "",
               prismDefaultBotFaceEyesFont: newBotFaceEyesFont,
               prismDefaultBotFaceEyeCharacter: newBotFaceEyeCharacter,
+              prismDefaultBotFaceEyeAnimation: newBotFaceEyeAnimation,
               prismDefaultBotFaceMouthFont: newBotFaceMouthFont,
               prismDefaultBotFaceMouthCharacter: newBotFaceMouthCharacter,
+              prismDefaultBotFaceMouthAnimation: newBotFaceMouthAnimation,
               prismDefaultBotFaceFontWeight: newBotFaceFontWeight,
               prismDefaultBotFaceEyeScale: newBotFaceEyeScale,
               prismDefaultBotFaceEyeOffsetX: newBotFaceEyeOffsetX,
               prismDefaultBotFaceEyeOffsetY: newBotFaceEyeOffsetY,
+              prismDefaultBotFaceEyeRotationDeg: newBotFaceEyeRotationDeg,
               prismDefaultBotFaceMouthScale: newBotFaceMouthScale,
               prismDefaultBotFaceMouthOffsetX: newBotFaceMouthOffsetX,
               prismDefaultBotFaceMouthOffsetY: newBotFaceMouthOffsetY,
@@ -66106,88 +66484,6 @@ function HomeContent(): React.JSX.Element {
     setPanelError("That bot is no longer available. I refreshed the bot library.");
   }
 
-  async function flushBotAvatarAutosaveQueue(id: string): Promise<boolean> {
-    if (!botAvatarAutosavePatchHasFields(botAvatarAutoSaveQueuedPatchRef.current)) {
-      return botAvatarAutoSaveFlushPromiseRef.current ?? true;
-    }
-    if (botAvatarAutoSaveInFlightRef.current) {
-      return botAvatarAutoSaveFlushPromiseRef.current ?? true;
-    }
-
-    const flushPromise = (async (): Promise<boolean> => {
-      botAvatarAutoSaveInFlightRef.current = true;
-      setBotAvatarAutoSaving(true);
-      setBotAvatarAutoSavingBotId(id);
-      setPanelError(null);
-      setPanelNotice(null);
-
-      let saved = true;
-      try {
-        while (botAvatarAutosavePatchHasFields(botAvatarAutoSaveQueuedPatchRef.current)) {
-          const patch = botAvatarAutoSaveQueuedPatchRef.current;
-          botAvatarAutoSaveQueuedPatchRef.current = {};
-          const result = await withBotAvatarSaveTimeout((signal) =>
-            api<{ bot?: Bot }>(`/api/bots/${encodeURIComponent(id)}`, {
-              method: "PATCH",
-              body: JSON.stringify(patch),
-              signal,
-            })
-          );
-          if (editOriginalRef.current) {
-            editOriginalRef.current = applyBotAvatarAutosavePatchToSnapshot(
-              editOriginalRef.current,
-              patch
-            );
-          }
-          if (result.bot?.id) {
-            setBots((list) => replaceBotRowById(list, result.bot as Bot));
-          } else {
-            await refreshBots();
-          }
-        }
-      } catch (err) {
-        saved = false;
-        if (isBotNotFoundError(err)) {
-          botAvatarAutoSaveQueuedPatchRef.current = {};
-          await recoverMissingBotEditTarget(id);
-        } else {
-          setPanelError(err instanceof Error ? err.message : "Avatar save failed.");
-        }
-      } finally {
-        botAvatarAutoSaveInFlightRef.current = false;
-      }
-
-      if (botAvatarAutosavePatchHasFields(botAvatarAutoSaveQueuedPatchRef.current)) {
-        const nextSaved = await flushBotAvatarAutosaveQueue(id);
-        return saved && nextSaved;
-      }
-
-      setBotAvatarAutoSaving(false);
-      setBotAvatarAutoSavingBotId(null);
-      return saved;
-    })();
-
-    botAvatarAutoSaveFlushPromiseRef.current = flushPromise;
-    try {
-      return await flushPromise;
-    } finally {
-      if (botAvatarAutoSaveFlushPromiseRef.current === flushPromise) {
-        botAvatarAutoSaveFlushPromiseRef.current = null;
-      }
-    }
-  }
-
-  function queueBotAvatarAutosave(id: string | null, patch: BotCustomizerSavePatch): void {
-    if (!id) return;
-    const normalizedPatch = normalizeBotAvatarAutosavePatch(patch);
-    if (!botAvatarAutosavePatchHasFields(normalizedPatch)) return;
-    botAvatarAutoSaveQueuedPatchRef.current = mergeBotAvatarAutosavePatch(
-      botAvatarAutoSaveQueuedPatchRef.current,
-      normalizedPatch
-    );
-    void flushBotAvatarAutosaveQueue(id);
-  }
-
   async function saveBot(id: string): Promise<boolean> {
     const trimmedName = newBotName.trim();
     if (!trimmedName) return false;
@@ -66195,8 +66491,6 @@ function HomeContent(): React.JSX.Element {
       await recoverMissingBotEditTarget(id);
       return false;
     }
-    const avatarSaved = await flushBotAvatarAutosaveQueue(id);
-    if (!avatarSaved) return false;
     const storedSystemPrompt = botEditorAdvancedMode
       ? newBotSystemPrompt
       : serializeStoredBotPrompt(botProfile, trimmedName);
@@ -66242,12 +66536,15 @@ function HomeContent(): React.JSX.Element {
         glyph: newBotGlyph,
         faceEyesFont: newBotFaceEyesFont,
         faceEyeCharacter: newBotFaceEyeCharacter,
+        faceEyeAnimation: newBotFaceEyeAnimation,
         faceMouthFont: newBotFaceMouthFont,
         faceMouthCharacter: newBotFaceMouthCharacter,
+        faceMouthAnimation: newBotFaceMouthAnimation,
         faceFontWeight: newBotFaceFontWeight,
         faceEyeScale: newBotFaceEyeScale,
           faceEyeOffsetX: newBotFaceEyeOffsetX,
           faceEyeOffsetY: newBotFaceEyeOffsetY,
+          faceEyeRotationDeg: newBotFaceEyeRotationDeg,
           faceMouthScale: newBotFaceMouthScale,
           faceMouthOffsetX: newBotFaceMouthOffsetX,
           faceMouthOffsetY: newBotFaceMouthOffsetY,
@@ -66303,12 +66600,15 @@ function HomeContent(): React.JSX.Element {
         glyph: newBotGlyph,
         faceEyesFont: newBotFaceEyesFont,
         faceEyeCharacter: newBotFaceEyeCharacter,
+        faceEyeAnimation: newBotFaceEyeAnimation,
         faceMouthFont: newBotFaceMouthFont,
         faceMouthCharacter: newBotFaceMouthCharacter,
+        faceMouthAnimation: newBotFaceMouthAnimation,
         faceFontWeight: newBotFaceFontWeight,
         faceEyeScale: newBotFaceEyeScale,
           faceEyeOffsetX: newBotFaceEyeOffsetX,
           faceEyeOffsetY: newBotFaceEyeOffsetY,
+          faceEyeRotationDeg: newBotFaceEyeRotationDeg,
           faceMouthScale: newBotFaceMouthScale,
           faceMouthOffsetX: newBotFaceMouthOffsetX,
           faceMouthOffsetY: newBotFaceMouthOffsetY,
@@ -78064,12 +78364,15 @@ function HomeContent(): React.JSX.Element {
         const hasDefaultBotAvatarChanges = editPristine
           ? newBotFaceEyesFont !== editPristine.faceEyesFont
             || newBotFaceEyeCharacter !== editPristine.faceEyeCharacter
+            || newBotFaceEyeAnimation !== editPristine.faceEyeAnimation
             || newBotFaceMouthFont !== editPristine.faceMouthFont
             || newBotFaceMouthCharacter !== editPristine.faceMouthCharacter
+            || newBotFaceMouthAnimation !== editPristine.faceMouthAnimation
             || newBotFaceFontWeight !== editPristine.faceFontWeight
             || newBotFaceEyeScale !== editPristine.faceEyeScale
         || newBotFaceEyeOffsetX !== editPristine.faceEyeOffsetX
             || newBotFaceEyeOffsetY !== editPristine.faceEyeOffsetY
+            || newBotFaceEyeRotationDeg !== editPristine.faceEyeRotationDeg
         || newBotFaceMouthScale !== editPristine.faceMouthScale
         || newBotFaceMouthOffsetX !== editPristine.faceMouthOffsetX
         || newBotFaceMouthOffsetY !== editPristine.faceMouthOffsetY
@@ -78101,12 +78404,15 @@ function HomeContent(): React.JSX.Element {
               || newBotGlyph !== editPristine.glyph
               || newBotFaceEyesFont !== editPristine.faceEyesFont
               || newBotFaceEyeCharacter !== editPristine.faceEyeCharacter
+              || newBotFaceEyeAnimation !== editPristine.faceEyeAnimation
               || newBotFaceMouthFont !== editPristine.faceMouthFont
               || newBotFaceMouthCharacter !== editPristine.faceMouthCharacter
+              || newBotFaceMouthAnimation !== editPristine.faceMouthAnimation
               || newBotFaceFontWeight !== editPristine.faceFontWeight
               || newBotFaceEyeScale !== editPristine.faceEyeScale
         || newBotFaceEyeOffsetX !== editPristine.faceEyeOffsetX
               || newBotFaceEyeOffsetY !== editPristine.faceEyeOffsetY
+              || newBotFaceEyeRotationDeg !== editPristine.faceEyeRotationDeg
         || newBotFaceMouthScale !== editPristine.faceMouthScale
         || newBotFaceMouthOffsetX !== editPristine.faceMouthOffsetX
         || newBotFaceMouthOffsetY !== editPristine.faceMouthOffsetY
@@ -78118,13 +78424,7 @@ function HomeContent(): React.JSX.Element {
               )
               || newBotProfilePictureImageId !== editPristine.profilePictureImageId
           : false;
-        const avatarCustomizerSaving =
-          busy ||
-          Boolean(
-            editingBotId &&
-              botAvatarAutoSaving &&
-              botAvatarAutoSavingBotId === editingBotId
-          );
+        const avatarCustomizerSaving = busy;
 
         // "Active" = pressing the button commits something useful.
         // Drives BOTH the enabled/disabled flag AND whether the bot
@@ -79367,7 +79667,10 @@ function HomeContent(): React.JSX.Element {
                   open={botAvatarCustomizerOpen}
                   botName={profileReferenceName}
                   botNameDraft={newBotName}
-                  onBotNameChange={setNewBotName}
+                  onBotNameChange={(next) => {
+                    pushBotAvatarUndoSnapshot("name");
+                    setNewBotName(next);
+                  }}
 	                  scheduleKey={`bot-avatar-customizer-${
 	                    editingDefaultBot ? "default" : editingBotId ?? "draft"
 	                  }`}
@@ -79396,12 +79699,15 @@ function HomeContent(): React.JSX.Element {
                   resolvedTheme={resolvedTheme}
                   faceEyesFont={newBotFaceEyesFont}
                   faceEyeCharacter={newBotFaceEyeCharacter}
+                  faceEyeAnimation={newBotFaceEyeAnimation}
                   faceMouthFont={newBotFaceMouthFont}
                   faceMouthCharacter={newBotFaceMouthCharacter}
+                  faceMouthAnimation={newBotFaceMouthAnimation}
 	                  faceFontWeight={newBotFaceFontWeight}
 	                  faceEyeScale={newBotFaceEyeScale}
 	                  faceEyeOffsetX={newBotFaceEyeOffsetX}
 	                  faceEyeOffsetY={newBotFaceEyeOffsetY}
+	                  faceEyeRotationDeg={newBotFaceEyeRotationDeg}
 	                  faceMouthScale={newBotFaceMouthScale}
 	                  faceMouthOffsetX={newBotFaceMouthOffsetX}
 	                  faceMouthOffsetY={newBotFaceMouthOffsetY}
@@ -79409,6 +79715,7 @@ function HomeContent(): React.JSX.Element {
 	                  faceBlinkBar={newBotFaceBlinkBar}
                   faceThinkingFrames={newBotFaceThinkingFrames}
                   hasUnsavedChanges={Boolean((editingBotId || editingDefaultBot) && hasEditChanges)}
+                  canUndo={botAvatarUndoDepth > 0}
                   saving={avatarCustomizerSaving}
                   saveError={panelError}
                   savePromptOpen={botAvatarSavePromptOpen}
@@ -79434,102 +79741,120 @@ function HomeContent(): React.JSX.Element {
                     const saved = await saveBot(editingBotId);
                     if (saved) closeBotAvatarCustomizer();
                   }}
+                  onUndo={undoBotAvatarDraft}
                   onDiscard={() => {
                     discardBotAvatarCustomizerChanges();
                   }}
                   onCancelSavePrompt={() => setBotAvatarSavePromptOpen(false)}
                   onColorChange={(next) => {
+                    pushBotAvatarUndoSnapshot("color");
                     handleNewBotColorChange(next);
-                    queueBotAvatarAutosave(editingBotId, { color: next });
                   }}
                   onGlyphChange={(next) => {
+                    pushBotAvatarUndoSnapshot();
                     handleNewBotGlyphChange(next);
-                    queueBotAvatarAutosave(editingBotId, { glyph: next });
                   }}
                   onColorPickerToggle={() => setColorWheelOpen((open) => !open)}
                   onEyesFontChange={(next) => {
+                    pushBotAvatarUndoSnapshot();
                     handleNewBotFaceEyesFontChange(next);
-                    queueBotAvatarAutosave(editingBotId, { faceEyesFont: next });
                   }}
                   onEyeCharacterChange={(next) => {
                     const normalized = normalizeBotFaceEyeCharacter(next);
+                    pushBotAvatarUndoSnapshot();
                     handleNewBotFaceEyeCharacterChange(normalized);
-                    queueBotAvatarAutosave(editingBotId, { faceEyeCharacter: normalized });
+                  }}
+                  onEyeAnimationChange={(next) => {
+                    const normalized =
+                      normalizeBotFaceGlyphAnimation(next) ??
+                      DEFAULT_BOT_FACE_STYLE.eyeAnimation;
+                    pushBotAvatarUndoSnapshot();
+                    handleNewBotFaceEyeAnimationChange(normalized);
                   }}
                   onMouthFontChange={(next) => {
+                    pushBotAvatarUndoSnapshot();
                     handleNewBotFaceMouthFontChange(next);
-                    queueBotAvatarAutosave(editingBotId, { faceMouthFont: next });
                   }}
                   onMouthCharacterChange={(next) => {
                     const normalized = normalizeBotFaceMouthCharacter(next);
+                    pushBotAvatarUndoSnapshot();
                     handleNewBotFaceMouthCharacterChange(normalized);
-                    queueBotAvatarAutosave(editingBotId, { faceMouthCharacter: normalized });
+                  }}
+                  onMouthAnimationChange={(next) => {
+                    const normalized =
+                      normalizeBotFaceGlyphAnimation(next) ??
+                      DEFAULT_BOT_FACE_STYLE.mouthAnimation;
+                    pushBotAvatarUndoSnapshot();
+                    handleNewBotFaceMouthAnimationChange(normalized);
                   }}
                   onWeightChange={(next) => {
                     const normalizedWeight =
                       normalizeBotFaceFontWeight(next) ?? DEFAULT_BOT_FACE_STYLE.weight;
+                    pushBotAvatarUndoSnapshot("face-weight");
                     handleNewBotFaceFontWeightChange(normalizedWeight);
-                    queueBotAvatarAutosave(editingBotId, { faceFontWeight: normalizedWeight });
                   }}
                   onEyeScaleChange={(next) => {
                     const normalizedScale =
                       normalizeBotFaceEyeScale(next) ?? DEFAULT_BOT_FACE_STYLE.eyeScale;
+                    pushBotAvatarUndoSnapshot("eye-scale");
                     handleNewBotFaceEyeScaleChange(normalizedScale);
-                    queueBotAvatarAutosave(editingBotId, { faceEyeScale: normalizedScale });
                   }}
 	                  onEyeOffsetXChange={(next) => {
 	                    const normalizedOffsetX =
 	                      normalizeBotFaceEyeOffsetX(next) ?? DEFAULT_BOT_FACE_STYLE.eyeOffsetX;
+		                    pushBotAvatarUndoSnapshot("eye-position");
 		                    handleNewBotFaceEyeOffsetXChange(normalizedOffsetX);
-		                    queueBotAvatarAutosave(editingBotId, { faceEyeOffsetX: normalizedOffsetX });
 		                  }}
 	                  onEyeOffsetYChange={(next) => {
 	                    const normalizedOffsetY =
 	                      normalizeBotFaceEyeOffsetY(next) ?? DEFAULT_BOT_FACE_STYLE.eyeOffsetY;
+		                    pushBotAvatarUndoSnapshot("eye-position");
 		                    handleNewBotFaceEyeOffsetYChange(normalizedOffsetY);
-		                    queueBotAvatarAutosave(editingBotId, { faceEyeOffsetY: normalizedOffsetY });
-		                  }}
+	                  }}
+	                  onEyeRotationDegChange={(next) => {
+	                    const normalizedRotation =
+	                      normalizeBotFaceEyeRotationDeg(next) ??
+	                      DEFAULT_BOT_FACE_STYLE.eyeRotationDeg;
+	                    pushBotAvatarUndoSnapshot("eye-rotation");
+	                    handleNewBotFaceEyeRotationDegChange(normalizedRotation);
+	                  }}
                   onMouthScaleChange={(next) => {
                     const normalizedScale =
                       normalizeBotFaceMouthScale(next) ?? DEFAULT_BOT_FACE_STYLE.mouthScale;
+                    pushBotAvatarUndoSnapshot("mouth-scale");
                     handleNewBotFaceMouthScaleChange(normalizedScale);
-                    queueBotAvatarAutosave(editingBotId, { faceMouthScale: normalizedScale });
                   }}
                   onMouthOffsetXChange={(next) => {
                     const normalizedOffsetX =
                       normalizeBotFaceMouthOffsetX(next) ?? DEFAULT_BOT_FACE_STYLE.mouthOffsetX;
+                    pushBotAvatarUndoSnapshot("mouth-position");
                     handleNewBotFaceMouthOffsetXChange(normalizedOffsetX);
-                    queueBotAvatarAutosave(editingBotId, { faceMouthOffsetX: normalizedOffsetX });
                   }}
                   onMouthOffsetYChange={(next) => {
                     const normalizedOffsetY =
                       normalizeBotFaceMouthOffsetY(next) ?? DEFAULT_BOT_FACE_STYLE.mouthOffsetY;
+                    pushBotAvatarUndoSnapshot("mouth-position");
                     handleNewBotFaceMouthOffsetYChange(normalizedOffsetY);
-                    queueBotAvatarAutosave(editingBotId, { faceMouthOffsetY: normalizedOffsetY });
                   }}
                   onMouthRotationDegChange={(next) => {
                     const normalizedRotationDeg =
                       normalizeBotFaceMouthRotationDeg(next) ??
                       DEFAULT_BOT_FACE_STYLE.mouthRotationDeg;
+                    pushBotAvatarUndoSnapshot("mouth-rotation");
                     handleNewBotFaceMouthRotationDegChange(normalizedRotationDeg);
-                    queueBotAvatarAutosave(editingBotId, {
-                      faceMouthRotationDeg: normalizedRotationDeg,
-                    });
                   }}
 			                  onBlinkBarChange={(next) => {
                     const normalizedBlinkBar =
                       normalizeBotFaceBlinkBar(next) ?? DEFAULT_BOT_FACE_STYLE.blinkBar;
+                    pushBotAvatarUndoSnapshot();
                     handleNewBotFaceBlinkBarChange(normalizedBlinkBar);
-                    queueBotAvatarAutosave(editingBotId, { faceBlinkBar: normalizedBlinkBar });
                   }}
                   onThinkingFramesChange={(next) => {
                     const normalizedFrames =
                       normalizeBotFaceThinkingFrames(next) ??
                       DEFAULT_BOT_FACE_STYLE.thinkingFrames;
+                    pushBotAvatarUndoSnapshot("thinking-frames");
                     handleNewBotFaceThinkingFramesChange(normalizedFrames);
-                    queueBotAvatarAutosave(editingBotId, {
-                      faceThinkingFrames: normalizedFrames,
-                    });
                   }}
                 />
               {!editingDefaultBot ? (
@@ -82098,6 +82423,7 @@ function HomeContent(): React.JSX.Element {
     clientY: number,
     excludedBotIds?: ReadonlySet<string>
   ): { botId: string; progress: number } | null => {
+    let nearest: { botId: string; progress: number; distance: number } | null = null;
     for (const [botId, node] of coffeeCupElementByBotIdRef.current.entries()) {
       if (!node.isConnected) {
         coffeeCupElementByBotIdRef.current.delete(botId);
@@ -82109,9 +82435,12 @@ function HomeContent(): React.JSX.Element {
       if (!coffeePotPointerIsInsideTarget(clientX, clientY, rect)) continue;
       const progress = Number(node.dataset.cupProgress);
       if (!Number.isFinite(progress)) continue;
-      return { botId, progress };
+      const distance = coffeePotPointerDistanceFromTarget(clientX, clientY, rect);
+      if (!nearest || distance < nearest.distance) {
+        nearest = { botId, progress, distance };
+      }
     }
-    return null;
+    return nearest ? { botId: nearest.botId, progress: nearest.progress } : null;
   };
   const coffeeCupFallbackTopOffTarget = (
     excludedBotIds?: ReadonlySet<string>
@@ -82181,6 +82510,10 @@ function HomeContent(): React.JSX.Element {
     const runtime: CoffeePotDragRuntimeState = {
       pointerId: event.pointerId,
       completedBotIds: new Set(),
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      moved: false,
+      equipped: false,
     };
     coffeePotDragRuntimeRef.current = runtime;
     const target = coffeeCupTopOffTargetAtPoint(
@@ -82201,16 +82534,18 @@ function HomeContent(): React.JSX.Element {
     coffeePotDragRef.current = nextDrag;
     setCoffeePotDrag(nextDrag);
   };
-  const moveCoffeePotDrag = (event: React.PointerEvent<HTMLButtonElement>): void => {
+  const moveCoffeePotToClientPoint = (clientX: number, clientY: number): void => {
     const runtime = coffeePotDragRuntimeRef.current;
-    if (!runtime || runtime.pointerId !== event.pointerId) return;
-    event.preventDefault();
+    if (!runtime) return;
+    if (Math.hypot(clientX - runtime.startClientX, clientY - runtime.startClientY) >= 6) {
+      runtime.moved = true;
+    }
     const target =
       coffeePotTopOffBusyBotIdRef.current == null
-        ? coffeeCupTopOffTargetAtPoint(event.clientX, event.clientY, runtime.completedBotIds)
+        ? coffeeCupTopOffTargetAtPoint(clientX, clientY, runtime.completedBotIds)
         : null;
     const current = coffeePotDragRef.current;
-    if (!current || current.pointerId !== event.pointerId) return;
+    if (!current || current.pointerId !== runtime.pointerId) return;
     const targetState = coffeePotRefillTargetState({
       currentBotId: current.pouringBotId,
       currentPourReady: current.pourReady,
@@ -82223,15 +82558,21 @@ function HomeContent(): React.JSX.Element {
     ) {
       clearCoffeeCupTopOffFillAnimation();
     }
-    const dragPoint = coffeePotScenePointFromClient(event.clientX, event.clientY, current);
+    const dragPoint = coffeePotScenePointFromClient(clientX, clientY, current);
     const nextDrag = {
-      pointerId: event.pointerId,
+      pointerId: runtime.pointerId,
       x: dragPoint.x,
       y: dragPoint.y,
       ...targetState,
     };
     coffeePotDragRef.current = nextDrag;
     setCoffeePotDrag(nextDrag);
+  };
+  const moveCoffeePotDrag = (event: React.PointerEvent<HTMLButtonElement>): void => {
+    const runtime = coffeePotDragRuntimeRef.current;
+    if (!runtime || runtime.pointerId !== event.pointerId || runtime.equipped) return;
+    event.preventDefault();
+    moveCoffeePotToClientPoint(event.clientX, event.clientY);
   };
   const commitPartialCoffeePotRefill = (pointerId: number): boolean => {
     const runtime = coffeePotDragRuntimeRef.current;
@@ -82271,16 +82612,17 @@ function HomeContent(): React.JSX.Element {
     );
     return true;
   };
-  const finishCoffeePotDrag = (event: React.PointerEvent<HTMLButtonElement>): void => {
+  const returnCoffeePot = (pointerId: number): void => {
     const runtime = coffeePotDragRuntimeRef.current;
-    if (!runtime || runtime.pointerId !== event.pointerId) return;
-    commitPartialCoffeePotRefill(event.pointerId);
+    if (!runtime || runtime.pointerId !== pointerId) return;
+    commitPartialCoffeePotRefill(pointerId);
     const latest = coffeePotDragRef.current;
     const activeTopOffBotId = coffeeCupTopOffAnimationActiveBotIdRef.current;
     const keepFillAnimation =
       coffeePotTopOffBusyBotIdRef.current !== null ||
       (activeTopOffBotId !== null && runtime.completedBotIds.has(activeTopOffBotId));
-    const trayRect = event.currentTarget.getBoundingClientRect();
+    const trayRect = coffeePotTrayRef.current?.getBoundingClientRect();
+    if (!trayRect) return;
     const returnPoint = coffeePotScenePointFromClient(
       trayRect.left + trayRect.width / 2,
       trayRect.top + trayRect.height / 2,
@@ -82292,9 +82634,6 @@ function HomeContent(): React.JSX.Element {
     const prefersReducedMotion =
       typeof window !== "undefined" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
     coffeePotDragRuntimeRef.current = null;
     coffeePotDragRef.current = null;
     if (coffeePotPourReadyTimerRef.current) {
@@ -82329,6 +82668,25 @@ function HomeContent(): React.JSX.Element {
       clearCoffeeCupTopOffFillAnimation();
     }
   };
+  const finishCoffeePotDrag = (event: React.PointerEvent<HTMLButtonElement>): void => {
+    const runtime = coffeePotDragRuntimeRef.current;
+    if (!runtime || runtime.pointerId !== event.pointerId) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    if (!runtime.moved) {
+      runtime.equipped = true;
+      return;
+    }
+    returnCoffeePot(event.pointerId);
+  };
+  const cancelCoffeePotDrag = (event: React.PointerEvent<HTMLButtonElement>): void => {
+    const runtime = coffeePotDragRuntimeRef.current;
+    if (!runtime || runtime.pointerId !== event.pointerId) return;
+    returnCoffeePot(event.pointerId);
+  };
+  moveEquippedCoffeePotRef.current = moveCoffeePotToClientPoint;
+  returnEquippedCoffeePotRef.current = returnCoffeePot;
   const refillFallbackCoffeeCupFromPot = (): void => {
     if (coffeePotTopOffBusyBotIdRef.current) return;
     const target = coffeeCupFallbackTopOffTarget();
@@ -82500,6 +82858,7 @@ function HomeContent(): React.JSX.Element {
       startTopPct: ((seatRect.top + seatRect.height / 2 - sceneRect.top) / sceneRect.height) * 100,
       moved: false,
     };
+    setCoffeeSeatDebugDraggingBotId(args.bot.id);
   };
   const moveCoffeeSeatDebugDrag = (event: React.PointerEvent<HTMLButtonElement>) => {
     const dragState = coffeeSeatDebugDragRef.current;
@@ -82517,6 +82876,7 @@ function HomeContent(): React.JSX.Element {
     const dragState = coffeeSeatDebugDragRef.current;
     if (!dragState || dragState.pointerId !== event.pointerId) return;
     coffeeSeatDebugDragRef.current = null;
+    setCoffeeSeatDebugDraggingBotId(null);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
@@ -84985,6 +85345,7 @@ function HomeContent(): React.JSX.Element {
                     data-current={session.id === coffeeSelectedSessionId ? "true" : undefined}
                   >
                     <button
+                      ref={coffeePotTrayRef}
                       type="button"
                       className={styles.coffeeGroupSessionButton}
                       data-current={session.id === coffeeSelectedSessionId ? "true" : undefined}
@@ -85846,6 +86207,9 @@ function HomeContent(): React.JSX.Element {
           ? clampCoffeeTableText(replayMessage.content)
         : "";
     const tableTypingAssistantDisplayText = coffeeTableDisplayText(tableTypingAssistantRawText);
+    const tableTypingAssistantSpeechText = getBotMentionDisplayText(
+      extractStageDirections(tableTypingAssistantDisplayText).mainText
+    );
     const visibleTableTypingBot =
       tableTypingBot && getBotMentionDisplayLength(tableTypingAssistantDisplayText) > 0
         ? tableTypingBot
@@ -87061,12 +87425,15 @@ function HomeContent(): React.JSX.Element {
                 : basePrismSeatMood;
             const seatNearDesaturated =
               socialSnapshot != null && coffeeSocialSnapshotIsNearDesaturated(socialSnapshot);
-            const mouthShapeWhileTyping = isTableTypingThisSeat
-              ? coffeeSeatMouthShapeFromVisibleLength(
-                  activeTypewriterLength,
-                  tableTypingAssistantDisplayText || bot.name
-                )
-              : "closed";
+            const mouthShapeWhileTyping = zenLiveBotMouthShapeForTalkingState({
+              mouthShape: isTableTypingThisSeat
+                ? coffeeSeatMouthShapeFromVisibleLength(
+                    activeTypewriterLength,
+                    tableTypingAssistantSpeechText || bot.name
+                  )
+                : "closed",
+              isTalking: isTableTypingThisSeat,
+            });
             const seatVoicePreset = coffeeSeatVoicePreset(bot);
             const seatFaceStyle = resolveBotFaceStyleForBot(bot);
             const seatGlyphName: BotGlyphName = isBotGlyphName(bot.glyph)
@@ -87251,8 +87618,16 @@ function HomeContent(): React.JSX.Element {
               faceScaleY: coffeePlateFaceScaleY,
               seatHorizontalSide: resolvedSeatHorizontalSide,
             });
-            const seatPlateGlyph =
-              seatSipPresentation.glyph ?? coffeeSeatPlateGlyph(seatEmojiTier, mouthShapeWhileTyping);
+            const restingSeatPlateGlyph = coffeeSeatPlateGlyph(
+              seatEmojiTier,
+              mouthShapeWhileTyping
+            );
+            const seatPlateGlyph = seatSipPresentation.glyph ?? restingSeatPlateGlyph;
+            const seatPlateFaceRestAfterMs = seatSipPresentation.active
+              ? Math.round(
+                  coffeeCupVisual.sipAnimationMs * COFFEE_SEAT_SIP_FACE_ACTIVE_PROGRESS
+                )
+              : null;
             const coffeeSeatLighting = coffeeSeatCanvasLightingFromLeftPercent(
               seatCanvasLeftPercent,
               {
@@ -87289,6 +87664,16 @@ function HomeContent(): React.JSX.Element {
                   )
                 : null;
             const coffeeCupTopOffEligible = coffeeCupCanTopOff(coffeeCupVisual.progress);
+            const coffeeSeatHoverActive =
+              !rosterPreviewSeat &&
+              seatIsFirmlySeated &&
+              !isTableTypingThisSeat &&
+              !seatIsThinkingThisSeat &&
+              !coffeeCupVisual.sipping &&
+              activeCoffeeCupTopOffAnimation == null &&
+              coffeePotDrag?.pouringBotId !== bot.id &&
+              !coffeeReplayActive &&
+              coffeeSeatDebugDraggingBotId !== bot.id;
             const seatInteractive =
               coffeeDevModeEnabled ||
               replayActionReviewEnabled ||
@@ -87348,6 +87733,7 @@ function HomeContent(): React.JSX.Element {
                 data-replay-review-enabled={replayActionReviewEnabled ? "true" : undefined}
                 data-roster-preview={rosterPreviewSeat ? "true" : undefined}
                 data-table-speaking={activeTableSpeakerBotId === bot.id ? "true" : undefined}
+                data-hover-active={coffeeSeatHoverActive ? "true" : undefined}
                 data-top-head-seat={isTopHeadSeat ? "true" : undefined}
                 data-sip-face-reason={
                   seatSipPresentation.active ? seatSipPresentation.reason : undefined
@@ -87423,23 +87809,30 @@ function HomeContent(): React.JSX.Element {
 	                  ) : (
 		                    <div
 		                      className={styles.coffeeSeatPlate}
-		                      data-live-body-style="zen"
-		                      style={coffeeHeadPlateStyle}
-	                    >
-	                      <ZenLiveBotMannequin
-	                        glyph={seatGlyphName}
-	                        faceStyle={seatFaceStyle}
-	                        voicePreset={seatVoicePreset}
-	                        isTalking={isTableTypingThisSeat}
-	                        mouthShape={mouthShapeWhileTyping}
-	                        moodHint={coffeeSeatZenMoodHintFromPrism(prismSeatMood)}
-	                        plateFace={seatPlateGlyph}
-		                        scheduleKey={`coffee-live-${bot.id}`}
-		                        thinkingScheduleKey={`coffee-thinking-${bot.id}`}
-		                        showThinkingSpinner={seatIsThinkingThisSeat}
+	                      data-live-body-style="zen"
+	                      style={coffeeHeadPlateStyle}
+                      >
+                        <span className={styles.coffeeSeatUnderglow} aria-hidden="true" />
+                        <span className={styles.coffeeSeatHoverBody}>
+                          <ZenLiveBotMannequin
+                            glyph={seatGlyphName}
+                            faceStyle={seatFaceStyle}
+                            voicePreset={seatVoicePreset}
+                            isTalking={isTableTypingThisSeat}
+                            mouthShape={mouthShapeWhileTyping}
+                            moodHint={coffeeSeatZenMoodHintFromPrism(prismSeatMood)}
+                            plateFace={seatPlateGlyph}
+                            plateFaceRest={
+                              seatSipPresentation.active ? restingSeatPlateGlyph : undefined
+                            }
+                            plateFaceRestAfterMs={seatPlateFaceRestAfterMs}
+                            scheduleKey={`coffee-live-${bot.id}`}
+                            thinkingScheduleKey={`coffee-thinking-${bot.id}`}
+                            showThinkingSpinner={seatIsThinkingThisSeat}
                             screenMaterialSeed={botScreenMaterialSeedForBot(bot, bot.id)}
                             frameMaterialSeed={botFrameMaterialSeedForBot(bot, bot.id)}
-			                      />
+                          />
+                        </span>
                       {seatTeamId && seatTeamLabel ? (
                         <span
                           className={styles.coffeeSeatTeamBadge}
@@ -89362,12 +89755,12 @@ function HomeContent(): React.JSX.Element {
                       className={styles.coffeePotTray}
                       data-dragging={coffeePotDrag ? "true" : undefined}
                       disabled={coffeePotTopOffBusyBotId !== null && coffeePotDrag == null}
-                      aria-label="Drag coffee pot or press Enter to refill the lowest mug"
-                      title="Drag coffee pot"
+                      aria-label="Click to equip coffee pot, drag it, or press Enter to refill the lowest mug"
+                      title="Click to equip or drag coffee pot"
                       onPointerDown={startCoffeePotDrag}
                       onPointerMove={moveCoffeePotDrag}
                       onPointerUp={finishCoffeePotDrag}
-                      onPointerCancel={finishCoffeePotDrag}
+                      onPointerCancel={cancelCoffeePotDrag}
                       onKeyDown={handleCoffeePotKeyDown}
                     >
                       <img

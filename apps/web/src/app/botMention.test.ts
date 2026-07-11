@@ -13,6 +13,7 @@ import {
   formatBotMentionMarkdown,
   normalizePeerMentionChipLabel,
   getBotMentionDisplayLength,
+  getBotMentionDisplayText,
   mentionTabPlainTextAction,
   parsePrismBotMentionHref,
   prismBotMentionHref,
@@ -358,6 +359,15 @@ describe("getBotMentionDisplayLength", () => {
     const text = "[Pat](prism-bot://1) and [Sam](prism-bot://2) chat.";
     // "Pat and Sam chat." → 17 chars.
     assert.equal(getBotMentionDisplayLength(text), 17);
+  });
+});
+
+describe("getBotMentionDisplayText", () => {
+  it("keeps the speech cursor on visible mention labels instead of hidden ids", () => {
+    assert.equal(
+      getBotMentionDisplayText("Hello [Mira](prism-bot://bot-secret-id), friend."),
+      "Hello Mira, friend."
+    );
   });
 });
 

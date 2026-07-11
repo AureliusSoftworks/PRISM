@@ -9,12 +9,17 @@ const require = createRequire(import.meta.url);
 const { PNG } = require("pngjs");
 const cssPath = join(dirname(fileURLToPath(import.meta.url)), "page.module.css");
 const pagePath = join(dirname(fileURLToPath(import.meta.url)), "page.tsx");
+const coffeeSeatPlateEmojiPath = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "CoffeeSeatPlateEmoji.tsx"
+);
 const botFramePublicDir = join(dirname(fileURLToPath(import.meta.url)), "../../public/bot-frame");
 const metalMaskPath = join(botFramePublicDir, "bot-frame-metal-mask.png");
 const screenGlassMaskPath = join(botFramePublicDir, "bot-frame-screen-mask-glass.png");
 const screenGrimeMaskPath = join(botFramePublicDir, "bot-frame-screen-grime-mask.png");
 const css = readFileSync(cssPath, "utf8");
 const pageSource = readFileSync(pagePath, "utf8");
+const coffeeSeatPlateEmojiSource = readFileSync(coffeeSeatPlateEmojiPath, "utf8");
 
 function ruleForExactSelector(selector: string): string {
   const match = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].find((entry) =>
@@ -1217,6 +1222,144 @@ describe("Zen live presence CSS", () => {
       css,
       /data-mouth-open="true"[^{}]*[\s\S]*?animation:/
     );
+    assert.match(
+      pageSource,
+      /normalizeCrtSpeechText\(getBotMentionDisplayText\(displayContent\)\)/
+    );
+    assert.match(pageSource, /zenLiveBotMouthShapeFromVisibleTextProgress\(/);
+    assert.match(
+      pageSource,
+      /plateFace \?\? zenLiveActionPlateFace\(moodHint, displayedMouthShape\)/
+    );
+  });
+
+  it("routes Default custom mouths through standard visemes and keeps alternate motion explicit", () => {
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /isTalking && normalizedFaceMouthAnimation === "none"\s*\?\s*null\s*:\s*normalizedFaceMouthCharacter/
+    );
+    assert.doesNotMatch(coffeeSeatPlateEmojiSource, /data-face-eye-animation=/);
+    assert.match(coffeeSeatPlateEmojiSource, /data-face-mouth-animation=/);
+    assert.match(coffeeSeatPlateEmojiSource, /data-talking=\{isTalking \? "true" : undefined\}/);
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /data-coffee-plate-mouth-open=\{mouthOpen \? "true" : undefined\}/
+    );
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /data-coffee-plate-mouth-shape=\{isTalking \? streamedMouthShape : undefined\}/
+    );
+    assert.match(pageSource, /mouthShape=\{seatMouthShape\}/);
+    assert.match(pageSource, /mouthShape=\{displayedMouthShape\}/);
+    assert.match(pageSource, /zenLiveBotMouthShapeForTalkingState\(\{/);
+    assert.doesNotMatch(css, /data-face-eye-animation=/);
+    assert.doesNotMatch(css, /botFaceCustomGlyphPulsate/);
+    assert.doesNotMatch(css, /botFaceCustomGlyphSpin/);
+    assert.match(
+      css,
+      /\[data-talking="true"\][\s\S]*transition:\s*transform 70ms ease-out/
+    );
+    for (const mouthShape of [
+      "closed",
+      "speech-closed",
+      "dot",
+      "narrow",
+      "open-small",
+      "open-wide",
+      "open-round",
+      "at",
+    ]) {
+      assert.match(
+        css,
+        new RegExp(
+          `data-coffee-plate-mouth-shape="${mouthShape}"`
+        )
+      );
+    }
+    const closedShapeRule = ruleForSelectorNeedles(
+      'data-coffee-plate-mouth-shape="closed"',
+    );
+    const openWideShapeRule = ruleForSelectorNeedles(
+      'data-coffee-plate-mouth-shape="open-wide"',
+    );
+    assert.match(closedShapeRule, /--bot-face-mouth-pulse-scale-x:\s*0\.97\s*;/);
+    assert.match(openWideShapeRule, /--bot-face-mouth-pulse-scale-x:\s*1\.1\s*;/);
+    assert.match(openWideShapeRule, /--bot-face-mouth-pulse-scale-y:\s*1\.12\s*;/);
+    assert.doesNotMatch(css, /data-face-mouth-animation="none"/);
+    for (const animation of ["pulsate", "spin", "flicker", "wobble"]) {
+      assert.match(css, new RegExp(`data-face-mouth-animation="${animation}"`));
+    }
+    const pulsateRule = ruleForSelectorNeedles('data-face-mouth-animation="pulsate"');
+    const flickerRule = ruleForSelectorNeedles('data-face-mouth-animation="flicker"');
+    const wobbleRule = ruleForSelectorNeedles('data-face-mouth-animation="wobble"');
+    const spinGeometryRule = ruleForSelectorNeedlesWithBody(
+      ['data-face-mouth-animation="spin"'],
+      "inline-size: max-content",
+    );
+    const spinTalkingRule = ruleForSelectorNeedlesWithBody(
+      ['data-talking="true"', 'data-face-mouth-animation="spin"'],
+      "botFaceCustomMouthSpin",
+    );
+    assert.match(pulsateRule, /--bot-face-mouth-pulse-scale-x/);
+    assert.match(flickerRule, /--bot-face-mouth-speech-opacity/);
+    assert.doesNotMatch(flickerRule, /scale[XY]\(/);
+    assert.match(wobbleRule, /--bot-face-mouth-speech-wobble/);
+    assert.doesNotMatch(wobbleRule, /scale[XY]\(/);
+    assert.match(spinTalkingRule, /botFaceCustomMouthSpin/);
+    assert.match(spinTalkingRule, /--bot-face-mouth-spin-turn-duration,\s*480ms/);
+    assert.doesNotMatch(spinTalkingRule, /scale[XY]\(/);
+    assert.match(spinGeometryRule, /display:\s*inline-block\s*;/);
+    assert.match(spinGeometryRule, /inline-size:\s*max-content\s*;/);
+    assert.match(spinGeometryRule, /min-inline-size:\s*0\s*;/);
+    assert.match(spinGeometryRule, /block-size:\s*1em\s*;/);
+    assert.match(spinGeometryRule, /padding-inline:\s*0\s*;/);
+    assert.match(spinGeometryRule, /margin-inline:\s*0\s*;/);
+    assert.match(
+      spinGeometryRule,
+      /transform-origin:\s*var\(--bot-face-mouth-spin-origin-x,\s*50%\)\s*var\(--bot-face-mouth-spin-origin-y,\s*50%\)\s*;/,
+    );
+    assert.match(coffeeSeatPlateEmojiSource, /function updateCustomMouthSpinOrigin/);
+    assert.match(coffeeSeatPlateEmojiSource, /context\.measureText\(glyph\)/);
+    assert.match(coffeeSeatPlateEmojiSource, /metrics\.actualBoundingBoxLeft/);
+    assert.match(coffeeSeatPlateEmojiSource, /metrics\.actualBoundingBoxAscent/);
+    assert.match(coffeeSeatPlateEmojiSource, /document\.fonts\?\.ready\.then\(measure\)/);
+    assert.match(coffeeSeatPlateEmojiSource, /customMouthGlyphRef/);
+    assert.match(css, /--bot-face-mouth-speech-scale-x/);
+    assert.match(css, /--bot-face-mouth-speech-wobble/);
+    assert.match(css, /@keyframes botFaceCustomMouthSpin/);
+    assert.match(css, /1turn/);
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /ZEN_LIVE_MOUTH_PHASE_MS \* CUSTOM_MOUTH_SPIN_PHASES_PER_TURN/,
+    );
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /\["--bot-face-mouth-spin-turn-duration" as string\]: `\$\{CUSTOM_MOUTH_SPIN_TURN_MS\}ms`/,
+    );
+    assert.match(
+      css,
+      /\[data-talking="true"\]\s*\{\s*--bot-face-mouth-speech-scale-x:\s*1\s*;/,
+    );
+    assert.doesNotMatch(
+      css,
+      /\[data-talking="true"\][^{]*\[data-coffee-plate-emoji-part="mouth"\][^{]*\{[^}]*--bot-face-mouth-speech-scale-x:/,
+    );
+    assert.doesNotMatch(
+      css,
+      /data-face-mouth-animation="(?:pulsate|flicker|wobble)"[^{}]*\{[^}]*animation\s*:/,
+    );
+
+    const blinkRule = ruleForSelectorNeedlesWithBody(
+      [
+        ":is(.coffeeSeatPlateEmoji",
+        'data-coffee-plate-emoji-blink-glyph="true"',
+        'data-crt-glyph-layer="true"',
+      ],
+      "animation: none"
+    );
+    assert.match(blinkRule, /--bot-face-custom-glyph-base-rotation:\s*0deg\s*;/);
+    assert.match(blinkRule, /animation:\s*none\s*;/);
+    assert.match(blinkRule, /transform:\s*rotate\(0deg\)\s*;/);
   });
 
   it("removes the Prism ambient aura from Zen mode", () => {
@@ -1717,6 +1860,18 @@ describe("Zen live presence CSS", () => {
       /color:\s*var\(--zen-live-bot-face-ink,\s*var\(--zen-presence-face-ink\)\)\s*;/
     );
     assert.match(zenSpinnerGlyphRule, /var\(--coffee-bot-color\)/);
+    assert.match(
+      zenSpinnerGlyphRule,
+      /--crt-face-edge-color:\s*var\(--zen-live-bot-spinner-glow-color\)\s*;/
+    );
+    assert.match(
+      zenSpinnerGlyphRule,
+      /--crt-face-glow-filter:[\s\S]*drop-shadow\(0 0 0\.72px var\(--zen-live-bot-spinner-glow-color\)\)[\s\S]*drop-shadow\(0 0 1\.5px var\(--zen-live-bot-spinner-glow-color\)\)[\s\S]*0 0 3px[\s\S]*0 0 6px[\s\S]*0 0 9px/
+    );
+    assert.doesNotMatch(
+      css,
+      /\.zenLiveBotPresenceThinkingGlyph\s+\[data-coffee-plate-thinking-frame\]\s*\{[^}]*filter:/
+    );
     assert.match(
       zenSpinnerGlyphRule,
       /font-size:\s*var\(\s*--zen-live-bot-avatar-thinking-glyph-size,\s*clamp\(1\.82rem,\s*calc\(var\(--zen-live-bot-body-frame-size,\s*190px\) \* 0\.245\),\s*4\.6rem\)\s*\)/

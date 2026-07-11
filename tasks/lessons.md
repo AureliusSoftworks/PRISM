@@ -4,6 +4,31 @@ LocalAI-specific patterns and corrections. Updated when project-specific behavio
 
 ---
 
+### 2026-07-11 · [UX]
+**Trigger**: Zen's first-session transcript became downward-scroll locked again after an earlier flex-margin fix, while the console also reported a maximum React update depth from the autonomy scheduler.
+**Lesson**: Zen's artificial readable-bottom boundary must anchor to the conversation's chronologically final message before role-specific assistant/user fallbacks; otherwise a new user prompt can be trapped behind the previous assistant reply. Any request-animation-frame scheduler that advances React state must also reject queued ticks once its feature is inactive, and inactive reset effects should reset refs/timers without scheduling another state update.
+**Applies to**: `apps/web/src/app/page.tsx`, `apps/web/src/app/zenReadableScroll.ts`, and Zen autonomy scheduling.
+
+### 2026-07-11 · [UX]
+**Trigger**: Custom mouth animation collapsed six streamed-text viseme states into one open/closed boolean, making most speech read as a slow steady pulse.
+**Lesson**: Custom mouth effects must derive from streamed speech rather than a free-running idle timer. A custom glyph is the resting mouth. With `Default`, a deterministic shape-aware transition graph drives `|`, `I`, `∙`, `o`, `0`, `O`, and `@` at one state per revealed character / shared 120ms speech phase. The graph follows visual similarity instead of a fixed loop: `O` never jumps directly to `∙`; `@` enters and exits through `O`; `∙` enters only from `I` or `|` and exits through `|` or `o`; no state repeats immediately. This avoids bullseye after-images and apparent multi-frame holds while preserving varied speech. Never leak mood-specific idle mouths such as warm `]` into speech. Pulsate/Flicker/Wobble keep the custom glyph visible and respectively change scale, opacity, or angle from the streamed state. Keep Pulsate gentle: roughly 3–6% compression on closed sounds and 6–12% expansion on open sounds. Spin is the exception: it rotates continuously only while speech is active, with one turn per four shared 120ms mouth phases, so its speed remains derived from the speech cadence. For arbitrary asymmetric glyphs, neither the mouth track nor a fixed em square represents the visible center. Measure the glyph's actual ink bounds once with Canvas `TextMetrics` when glyph/font/weight changes, then feed that center to CSS `transform-origin`; never use per-character hardcoded offsets. Keep Spin's measured geometry active at rest and gate only the animation on talking, otherwise the glyph visibly offsets as speech begins. Preserve user rotation. Put shared speech defaults on the face root; defining fallback custom properties directly on the glyph blocks the streamed values inherited from the root and freezes every effect.
+**Applies to**: `apps/web/src/app/CoffeeSeatPlateEmoji.tsx`, Avatar/Zen/Coffee mouth-shape plumbing in `apps/web/src/app/page.tsx`, and custom mouth rules in `apps/web/src/app/page.module.css`.
+
+### 2026-07-11 · [design]
+**Trigger**: A request to replace the Sharp face font was initially interpreted as changing the preset's glyph structure and geometry.
+**Lesson**: Avatar Studio's Core/Soft/Sharp/Bounce/Serif choices are font personalities first. When one lacks distinction, choose a replacement typeface based on how its punctuation and symbols render at face scale, then name the style after the resulting visual character; do not change facial glyph structure unless explicitly requested. Doto was preferred over DotGothic16 and Bungee because its dotted matrix reads distinctly while preserving variable weight; self-host the licensed font so it works offline.
+**Applies to**: `packages/shared/src/botAvatar.ts`, `apps/web/src/app/layout.tsx`, and face-font rules in `apps/web/src/app/page.module.css`.
+
+### 2026-07-11 · [UX]
+**Trigger**: Avatar Studio face controls autosaved each adjustment, but the desired editing model is deliberate Save with reversible experimentation.
+**Lesson**: Avatar Studio edits should remain local until the user presses Save. Maintain a bounded multi-step draft history across all studio fields, expose Undo in the header, and support `Cmd+Z`/`Ctrl+Z` while the studio is open so experimentation feels safe. Coalesce rapid updates from sliders, pads, wheels, color drags, and typing into one gesture; after a short stationary pause, the next movement starts a new undo point. Primary action text and icons over bot-colored fills must use computed black-or-white contrast rather than a related accent tone, or enabled actions can appear disabled.
+**Applies to**: `apps/web/src/app/page.tsx` Avatar Studio save flow and undo controls.
+
+### 2026-07-11 · [UX]
+**Trigger**: Moving the combined color/glyph popover into Avatar Studio's Face tab still let the floating picker clip above the viewport.
+**Lesson**: Dense controls that already belong to a bounded studio panel should render as inline, independently bounded sections instead of reusing a viewport-positioned popover. Let the final control row stretch into the panel's remaining height, keep growing glyph catalogs inside their own scroll region, and place identity controls after the primary face-size/weight control when vertical space is constrained.
+**Applies to**: `apps/web/src/app/page.tsx` Avatar Studio Face controls and `apps/web/src/app/page.module.css` inline color/glyph layout.
+
 ### 2026-05-22 · [UX]
 **Trigger**: Coffee poll ideation expanded to include in-session poll creation, then was tightened to "poll only at session start."
 **Lesson**: In Coffee mode, polls are an opening ritual, not a mid-session interruption. Treat poll creation as pre-session setup; once live conversation begins, remove new-poll affordances and only show/collect the existing opening poll.

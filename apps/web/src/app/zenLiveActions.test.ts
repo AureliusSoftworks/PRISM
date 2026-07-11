@@ -109,7 +109,7 @@ describe("zenLiveActionPlateFace", () => {
       ["warm", ":]"],
       ["attentive", ":]"],
       ["confused", ":?"],
-      ["stern", "\u02d0["],
+      ["stern", ":["],
       ["strained", ":("],
       ["waiting", ":|"],
       ["neutral", ":|"],
@@ -124,6 +124,22 @@ describe("zenLiveActionPlateFace", () => {
   });
 
   it("supports open-mouth shapes for Zen speech", () => {
+    assert.deepEqual(zenLiveActionPlateFace("warm", "speech-closed"), {
+      text: ":|",
+      rotateDeg: 90,
+    });
+    assert.deepEqual(zenLiveActionPlateFace("warm", "dot"), {
+      text: ":∙",
+      rotateDeg: 90,
+    });
+    assert.deepEqual(zenLiveActionPlateFace("warm", "at"), {
+      text: ":@",
+      rotateDeg: 90,
+    });
+    assert.deepEqual(zenLiveActionPlateFace("warm", "narrow"), {
+      text: ":o",
+      rotateDeg: 90,
+    });
     assert.deepEqual(zenLiveActionPlateFace("warm", "open-wide"), {
       text: ":0",
       rotateDeg: 90,

@@ -518,6 +518,13 @@ export function getBotMentionDisplayLength(text: string): number {
   return total;
 }
 
+/** Plain visible text after prism-bot mention markdown is reduced to its label. */
+export function getBotMentionDisplayText(text: string): string {
+  return tokenizeBotMentionSource(text)
+    .map((segment) => segment.kind === "mention" ? segment.displayName : segment.text)
+    .join("");
+}
+
 /**
  * Splits a markdown string into ordered text + mention segments. Used by the
  * renderer to chip-up `[Name](prism-bot://id)` tokens while leaving plain

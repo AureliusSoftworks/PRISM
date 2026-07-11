@@ -212,26 +212,27 @@ describe("Coffee seat arrival CSS", () => {
     );
   });
 
-  it("uses the sharp display font for the concise face slot", () => {
-    assert.match(css, /--prism-sharp-face-font:\s*var\(--font-sharp-display\)/);
+  it("uses the Doto matrix font for the concise face slot", () => {
+    assert.match(css, /--prism-doto-face-font:\s*var\(--font-doto-display\)/);
 
     const conciseVoiceRule = ruleForSelectorNeedles(
       ".coffeeSeatPlateEmoji",
       'data-voice-preset="concise"'
     );
-    assert.match(conciseVoiceRule, /font-family:\s*var\(--prism-sharp-face-font\)\s*;/);
+    assert.match(conciseVoiceRule, /font-family:\s*var\(--prism-doto-face-font\)\s*;/);
+    assert.match(conciseVoiceRule, /"ROND"\s*55/);
 
     const concisePartRule = ruleForSelectorNeedlesWithBody(
       ['data-face-font="concise"'],
-      "font-family: var(--prism-sharp-face-font)"
+      "font-family: var(--prism-doto-face-font)"
     );
-    assert.match(concisePartRule, /letter-spacing:\s*0\s*;/);
+    assert.match(concisePartRule, /"ROND"\s*55/);
 
     const customizerSampleRule = ruleForSelectorNeedles(
       ".botAvatarFontOptionSample",
       'data-face-font="concise"'
     );
-    assert.match(customizerSampleRule, /font-family:\s*var\(--prism-sharp-face-font\)\s*;/);
+    assert.match(customizerSampleRule, /font-family:\s*var\(--prism-doto-face-font\)\s*;/);
   });
 
   it("keeps the rest cup hidden until the sip cup returns to the table", () => {
@@ -301,7 +302,11 @@ describe("Coffee seat arrival CSS", () => {
     );
     assert.match(
       coffeeSeatPlateEmojiSource,
-      /const normalizedFaceMouthRotationDeg =\s+thinkingSpinnerActive \|\| questionGlyphActive \|\| !normalizedFaceMouthCharacter/
+      /const normalizedFaceMouthRotationDeg =\s+thinkingSpinnerActive \|\| questionGlyphActive \|\| !renderedFaceMouthCharacter/
+    );
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /const faceEyeRotationCssDeg =\s+normalizedFaceEyeRotationDeg === undefined\s+\? undefined\s+: normalizedFaceEyeRotationDeg;/
     );
     assert.match(
       coffeeSeatPlateEmojiSource,
@@ -344,7 +349,19 @@ describe("Coffee seat arrival CSS", () => {
     );
   });
 
-  it("keeps shared face parts in fixed slots while mouths change for speech", () => {
+  it("keeps shared face parts fixed while Default uses visemes and alternates keep custom mouths", () => {
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /isTalking && normalizedFaceMouthAnimation === "none"\s*\?\s*null\s*:\s*normalizedFaceMouthCharacter/
+    );
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /\(\/\[0oOI\]\/\.test\(baseText\)/
+    );
+    assert.match(
+      css,
+      /data-coffee-plate-emoji-glyph="I"/
+    );
     const sharedFaceRule = ruleForSelectorNeedles(
       ".coffeeSeatPlateEmoji",
       ".messageMoodCoffeeFace",

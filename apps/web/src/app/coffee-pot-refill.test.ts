@@ -13,6 +13,7 @@ import {
   coffeeCupTopOffFrameIndexForPour,
   coffeeCupTopOffProgressAfterForPour,
   coffeePotFillFrameDelayMs,
+  coffeePotPointerDistanceFromTarget,
   coffeePotPointerIsInsideTarget,
   coffeePotPointOutsideExclusion,
   coffeePotPourFrameImageUrl,
@@ -63,8 +64,9 @@ describe("Coffee pot refill timing", () => {
     );
   });
 
-  it("accepts near-misses around mug targets without swallowing distant points", () => {
+  it("gives the pot a generous reach around mug targets", () => {
     const rect = { left: 100, right: 150, top: 200, bottom: 250 };
+    assert.ok(COFFEE_POT_TARGET_HIT_SLOP_PX >= 96);
     assert.equal(coffeePotPointerIsInsideTarget(125, 225, rect), true);
     assert.equal(
       coffeePotPointerIsInsideTarget(100 - COFFEE_POT_TARGET_HIT_SLOP_PX, 225, rect),
@@ -75,6 +77,8 @@ describe("Coffee pot refill timing", () => {
       false
     );
     assert.equal(coffeePotPointerIsInsideTarget(99, 225, rect, 0), false);
+    assert.equal(coffeePotPointerDistanceFromTarget(125, 225, rect), 0);
+    assert.equal(coffeePotPointerDistanceFromTarget(80, 190, rect), Math.hypot(20, 10));
   });
 
   it("keeps the dragged pot outside the padded center-text forcefield", () => {

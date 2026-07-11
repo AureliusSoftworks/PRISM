@@ -90,6 +90,15 @@ describe("createDatabase bot export hash migration", () => {
       );
       assert.ok(userColumns.some((column) => column.name === "hidden_comfyui_workflow_ids"));
       assert.ok(userColumns.some((column) => column.name === "zen_wallpaper_text_mask_enabled"));
+      assert.ok(
+        userColumns.some((column) => column.name === "prism_default_bot_face_eye_animation")
+      );
+      assert.ok(
+        userColumns.some((column) => column.name === "prism_default_bot_face_mouth_animation")
+      );
+      assert.ok(
+        userColumns.some((column) => column.name === "prism_default_bot_face_eye_rotation_deg")
+      );
       const allModelEffortColumn = userColumns.find(
         (column) => column.name === "experimental_all_model_effort_enabled"
       );
@@ -137,12 +146,15 @@ describe("createDatabase bot export hash migration", () => {
       assert.ok(columns.some((column) => column.name === "semantic_facets_updated_at"));
       assert.ok(columns.some((column) => column.name === "face_eyes_font"));
       assert.ok(columns.some((column) => column.name === "face_eye_character"));
+      assert.ok(columns.some((column) => column.name === "face_eye_animation"));
       assert.ok(columns.some((column) => column.name === "face_mouth_font"));
       assert.ok(columns.some((column) => column.name === "face_mouth_character"));
+      assert.ok(columns.some((column) => column.name === "face_mouth_animation"));
       assert.ok(columns.some((column) => column.name === "face_font_weight"));
       assert.ok(columns.some((column) => column.name === "face_eye_scale"));
       assert.ok(columns.some((column) => column.name === "face_eye_offset_x"));
       assert.ok(columns.some((column) => column.name === "face_eye_offset_y"));
+      assert.ok(columns.some((column) => column.name === "face_eye_rotation_deg"));
       assert.ok(columns.some((column) => column.name === "face_mouth_scale"));
       assert.ok(columns.some((column) => column.name === "face_mouth_offset_x"));
       assert.ok(columns.some((column) => column.name === "face_mouth_offset_y"));
