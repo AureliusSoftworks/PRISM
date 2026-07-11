@@ -2,10 +2,19 @@ import {
   normalizeBotAudioVoiceProfileV1,
   normalizeEnglishVoiceEngine,
   normalizeVoiceMode,
+  applyPlayerNamePronunciation as applySharedPlayerNamePronunciation,
   type BotAudioVoiceProfileV1,
   type EnglishVoiceEngine,
   type VoiceMode,
 } from "@localai/shared";
+
+export function resolveElevenLabsVoiceId(
+  profile: BotAudioVoiceProfileV1,
+  voiceBank: Partial<Record<string, string | null>>
+): string | null {
+  const normalized = normalizeBotAudioVoiceProfileV1(profile);
+  return normalized.elevenLabsVoiceId || voiceBank[normalized.baseVoiceId] || null;
+}
 
 export interface VoiceCapabilities {
   modes: VoiceMode[];
@@ -189,6 +198,14 @@ export function cleanSpeakableAssistantProse(value: unknown): string {
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 4000);
+}
+
+export function applyPlayerNamePronunciation(
+  text: unknown,
+  displayName: string | null | undefined,
+  pronunciation: string | null | undefined
+): unknown {
+  return applySharedPlayerNamePronunciation(text, displayName, pronunciation);
 }
 
 export function validateVoiceSynthesisRequest(body: Record<string, unknown>): VoiceSynthesisRequest {

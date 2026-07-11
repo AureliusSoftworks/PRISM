@@ -1,6 +1,7 @@
 import {
   normalizeBotAudioVoiceProfileV1,
   type BotAudioVoiceProfileV1,
+  type CoffeeVoiceDeliveryEnvelope,
 } from "@localai/shared";
 
 export interface ResolvedVoiceTexture {
@@ -17,6 +18,13 @@ export interface VoiceDamageEvent {
   depth: number;
 }
 
+export interface VoicePlaybackLifecycle {
+  /** Temporary per-utterance delivery changes. V1 accepts the neutral envelope only. */
+  deliveryEnvelope?: CoffeeVoiceDeliveryEnvelope;
+  onStart?: (durationMs: number | null) => void;
+  onEnd?: () => void;
+}
+
 const AUDIO_CONTEXT_RESUME_TIMEOUT_MS = 500;
 
 export function resolveVoiceTexture(
@@ -24,7 +32,12 @@ export function resolveVoiceTexture(
   effectsEnabled = true
 ): ResolvedVoiceTexture {
   const profile = normalizeBotAudioVoiceProfileV1(rawProfile);
-  if (!effectsEnabled || profile.texture.preset === "clean") {
+  if (
+    !effectsEnabled ||
+    profile.texture.preset === "clean" ||
+    profile.texture.preset === "lofi" ||
+    profile.texture.preset === "tape"
+  ) {
     return { bandwidth: 1, noise: 0, instability: 0, distortion: 0, damage: 0 };
   }
   const amount = profile.texture.amount;
@@ -135,6 +148,7 @@ export async function playRealtimeVoiceBytes(args: {
   effectsEnabled: boolean;
   detuneCents?: number;
   baseLowpassHz?: number;
+  lifecycle?: VoicePlaybackLifecycle;
 }): Promise<boolean> {
   const context = contextForPlayback();
   if (!context || !await prepareRealtimeVoiceAudio()) return false;
@@ -223,8 +237,10 @@ export async function playRealtimeVoiceBytes(args: {
         try { node.disconnect(); } catch { /* no-op */ }
       }
       if (activeNodes === scheduled) activeNodes = [];
+      args.lifecycle?.onEnd?.();
       resolve();
     }, { once: true });
+    args.lifecycle?.onStart?.(Math.round(decoded.duration * 1000));
     source.start(now);
   });
   return true;

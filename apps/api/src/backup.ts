@@ -30,6 +30,7 @@ import {
   type BotFaceGlyphAnimation,
   type BotFaceThinkingFrames,
   normalizeBotAudioVoiceProfileV1,
+  normalizeBotVoiceVolume,
   normalizeEnglishVoiceEngine,
   normalizeOptionalBotAudioVoiceProfileV1,
   normalizeVoiceMode,
@@ -51,7 +52,9 @@ import {
   normalizeZenWallpaperStyleNotes,
   normalizeZenWallpaperTextMaskEnabled,
   normalizeElevenLabsVoiceBank,
+  normalizePlayerNamePronunciation,
   parseStoredElevenLabsVoiceBank,
+  parseStoredPlayerAudioVoiceProfile,
 } from "./settings.ts";
 
 export interface BackupUserSettings {
@@ -98,10 +101,13 @@ export interface BackupUserSettings {
   elevenLabsApiKey?: string;
   voiceMode?: VoiceMode;
   voiceEffectsEnabled?: boolean;
+  voiceVolume?: number;
   prismDefaultBotAudioVoiceProfile?: BotAudioVoiceProfileV1;
   englishVoiceEngine?: EnglishVoiceEngine;
   elevenLabsVoiceBank?: Record<string, string | null>;
   elevenLabsVoiceModel?: string;
+  playerAudioVoiceProfile?: BotAudioVoiceProfileV1;
+  playerNamePronunciation?: string;
 }
 
 export interface BackupBotSnapshot {
@@ -265,8 +271,9 @@ export function exportUserSnapshot(
          elevenlabs_key_ciphertext,
          elevenlabs_key_iv,
          elevenlabs_key_tag
-         ,voice_mode, voice_effects_enabled, english_voice_engine, elevenlabs_voice_bank,
-         elevenlabs_voice_model, prism_default_bot_audio_voice_profile
+         ,voice_mode, voice_effects_enabled, voice_volume, english_voice_engine, elevenlabs_voice_bank,
+         elevenlabs_voice_model, player_audio_voice_profile, player_name_pronunciation,
+         prism_default_bot_audio_voice_profile
        FROM users
        WHERE id = ?`
     )
@@ -321,9 +328,12 @@ export function exportUserSnapshot(
          elevenlabs_key_tag: string | null;
         voice_mode: string | null;
         voice_effects_enabled: number | null;
+        voice_volume: number | null;
         english_voice_engine: string | null;
         elevenlabs_voice_bank: string | null;
         elevenlabs_voice_model: string | null;
+        player_audio_voice_profile: string | null;
+        player_name_pronunciation: string | null;
         prism_default_bot_audio_voice_profile: string | null;
       }
     | undefined;
@@ -396,12 +406,19 @@ export function exportUserSnapshot(
         prismImageToolLlmModel: user.prism_image_tool_llm_model ?? "",
         voiceMode: normalizeVoiceMode(user.voice_mode),
         voiceEffectsEnabled: user.voice_effects_enabled !== 0,
+        voiceVolume: normalizeBotVoiceVolume(user.voice_volume),
         prismDefaultBotAudioVoiceProfile:
           parseStoredBotAudioVoiceProfileV1(user.prism_default_bot_audio_voice_profile) ??
           normalizeBotAudioVoiceProfileV1(undefined),
         englishVoiceEngine: normalizeEnglishVoiceEngine(user.english_voice_engine),
         elevenLabsVoiceBank: parseStoredElevenLabsVoiceBank(user.elevenlabs_voice_bank),
         elevenLabsVoiceModel: user.elevenlabs_voice_model ?? "",
+        playerAudioVoiceProfile: parseStoredPlayerAudioVoiceProfile(
+          user.player_audio_voice_profile
+        ),
+        playerNamePronunciation: normalizePlayerNamePronunciation(
+          user.player_name_pronunciation
+        ),
         devMemoriesEnabled: user.dev_memories_enabled === 1,
         devMemoriesText: user.dev_memories_text ?? "",
         ...(user.openai_key_ciphertext && user.openai_key_iv && user.openai_key_tag
@@ -880,9 +897,12 @@ function importUserSnapshotWithinTransaction(
         elevenlabs_key_tag = ?,
         voice_mode = ?,
         voice_effects_enabled = ?,
+        voice_volume = ?,
         english_voice_engine = ?,
         elevenlabs_voice_bank = ?,
         elevenlabs_voice_model = ?,
+        player_audio_voice_profile = ?,
+        player_name_pronunciation = ?,
         prism_default_bot_audio_voice_profile = ?
       WHERE id = ?
     `).run(
@@ -951,11 +971,14 @@ function importUserSnapshotWithinTransaction(
       encryptedElevenLabsKey?.tag ?? null,
       normalizeVoiceMode(settings.voiceMode),
       settings.voiceEffectsEnabled === false ? 0 : 1,
+      normalizeBotVoiceVolume(settings.voiceVolume),
       normalizeEnglishVoiceEngine(settings.englishVoiceEngine),
       JSON.stringify(normalizeElevenLabsVoiceBank(settings.elevenLabsVoiceBank)),
       typeof settings.elevenLabsVoiceModel === "string"
         ? settings.elevenLabsVoiceModel.trim().slice(0, 160) || null
         : null,
+      serializeBotAudioVoiceProfileV1(settings.playerAudioVoiceProfile),
+      normalizePlayerNamePronunciation(settings.playerNamePronunciation),
       serializeBotAudioVoiceProfileV1(settings.prismDefaultBotAudioVoiceProfile),
       userId
     );

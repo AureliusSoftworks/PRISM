@@ -1,20 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
-  normalizeAudibleVoiceMode,
   voiceModeAfterQuickToggle,
   voiceModeDisplayName,
 } from "./voiceQuickToggle.ts";
 
 describe("global voice quick toggle", () => {
-  it("mutes an audible mode and restores the remembered mode", () => {
-    assert.equal(voiceModeAfterQuickToggle("english", "english"), "mute");
-    assert.equal(voiceModeAfterQuickToggle("mute", "english"), "english");
-    assert.equal(voiceModeAfterQuickToggle("mute", "bottish"), "bottish");
-  });
-
-  it("falls back to Bottish for malformed remembered state", () => {
-    assert.equal(normalizeAudibleVoiceMode("robot"), "bottish");
+  it("cycles English to Bottish to Mute", () => {
+    assert.equal(voiceModeAfterQuickToggle("english"), "bottish");
+    assert.equal(voiceModeAfterQuickToggle("bottish"), "mute");
+    assert.equal(voiceModeAfterQuickToggle("mute"), "english");
   });
 
   it("formats concise header labels", () => {

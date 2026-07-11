@@ -87,6 +87,37 @@ after(() => {
 });
 
 describe("API request integration", () => {
+  it("persists the player's Coffee voice identity and name pronunciation", async () => {
+    const client = createClient();
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({ username: "player-voice@example.com", password: "player-voice-password", displayName: "Jared" })
+    );
+    assert.equal(register.status, 201);
+    const profile = {
+      ...normalizeBotAudioVoiceProfileV1(undefined),
+      baseVoiceId: "voice-3" as const,
+      systemVoiceName: "Zarvox",
+      elevenLabsVoiceId: "eleven-player",
+    };
+    const saved = await client.request("/api/settings", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        playerAudioVoiceProfile: profile,
+        playerNamePronunciation: "Jair-id",
+      }),
+    });
+    assert.equal(saved.status, 200);
+    const loaded = await client.request("/api/settings");
+    assert.equal(loaded.status, 200);
+    const settings = (await json(loaded)).settings;
+    assert.equal(settings.playerAudioVoiceProfile.baseVoiceId, "voice-3");
+    assert.equal(settings.playerAudioVoiceProfile.systemVoiceName, "Zarvox");
+    assert.equal(settings.playerAudioVoiceProfile.elevenLabsVoiceId, "eleven-player");
+    assert.equal(settings.playerNamePronunciation, "Jair-id");
+  });
+
   it("routes CORS preflight, root landing, and unknown paths without external services", async () => {
     const preflight = await createClient().request("/api/health", { method: "OPTIONS" });
     assert.equal(preflight.status, 204);
@@ -319,7 +350,28 @@ describe("API request integration", () => {
     );
     assert.equal(createdPayload.bot.audio_voice_profile_override, null);
 
-    const override = { ...authored, baseVoiceId: "voice-2", pitch: -0.25 };
+    const capabilitiesResponse = await client.request("/api/voices/capabilities");
+    assert.equal(capabilitiesResponse.status, 200);
+    const capabilitiesPayload = await json(capabilitiesResponse);
+    const systemVoices = capabilitiesPayload.capabilities?.builtinEnglish?.voices;
+    assert.equal(Array.isArray(systemVoices), true);
+    assert.equal(
+      systemVoices.every((voice: unknown) => {
+        const record = voice as { name?: unknown; locale?: unknown };
+        return typeof record.name === "string" && typeof record.locale === "string";
+      }),
+      true
+    );
+
+    const override = {
+      baseVoiceId: "voice-2",
+      pitch: -0.25,
+      warmth: authored.warmth,
+      pace: authored.pace,
+      lilt: authored.lilt,
+      systemVoiceName: "Alex",
+      elevenLabsVoiceId: "eleven-voice-id",
+    };
     const updated = await client.request(`/api/bots/${createdPayload.bot.id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },

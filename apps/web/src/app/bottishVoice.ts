@@ -1,11 +1,13 @@
 import {
   normalizeBotAudioVoiceProfileV1,
+  normalizeBotVoiceVolume,
   type BotAudioVoiceProfileV1,
 } from "@localai/shared";
 import {
   playRealtimeVoiceBytes,
   prepareRealtimeVoiceAudio,
   stopRealtimeVoiceAudio,
+  type VoicePlaybackLifecycle,
 } from "./voiceEffects.ts";
 
 export interface BottishNote {
@@ -21,6 +23,10 @@ export interface BottishNote {
 export interface BottishPlan {
   notes: BottishNote[];
   durationMs: number;
+}
+
+export interface BottishPlaybackTiming {
+  targetDurationMs?: number;
 }
 
 const MEDIA_PLAY_START_TIMEOUT_MS = 1500;
@@ -55,15 +61,12 @@ export function buildBottishPlan(
   const profile = normalizeBotAudioVoiceProfileV1(rawProfile);
   const voice = VOICE_BASES[profile.baseVoiceId];
   const pitchMultiplier = 2 ** (profile.pitch * 0.7);
-  const noteMs = Math.round(55 * (1 - profile.pace * 0.38));
-  const gapMs = Math.round(18 * (1 - profile.pace * 0.42));
-  // Keep neutral Bottish bright enough to read through laptop speakers. The
-  // original 2.4 kHz cutoff and ~-26 dB peak made the chirps feel muted even
-  // with the system volume up; warmth should color the voice, not bury it.
-  const warmthLowpass = Math.round(7200 - profile.warmth * 2200 + profile.bottishTone * 700);
+  const noteMs = 55;
+  const gapMs = 18;
+  const toneLowpass = Math.round(7200 + profile.bottishTone * 700);
   const waveform = profile.bottishTone > 0.65
     ? "square"
-    : profile.bottishTone < -0.35 || profile.warmth > 0.55
+    : profile.bottishTone < -0.35
       ? "sine"
       : voice.waveform;
   const notes: BottishNote[] = [];
@@ -92,9 +95,9 @@ export function buildBottishPlan(
       durationMs: noteMs,
       frequencyHz: Math.round(frequencyHz * 10) / 10,
       endFrequencyHz: Math.round(frequencyHz * (1 + glide) * 10) / 10,
-      gain: Math.max(0.22, Math.min(0.38, 0.3 - profile.warmth * 0.04)),
+      gain: 0.3,
       waveform,
-      lowpassHz: Math.max(4800, Math.min(10_000, warmthLowpass)),
+      lowpassHz: Math.max(4800, Math.min(10_000, toneLowpass)),
     });
     cursorMs += noteMs + gapMs;
     spokenIndex += 1;
@@ -104,6 +107,38 @@ export function buildBottishPlan(
     notes,
     durationMs: notes.length > 0 ? Math.round(cursorMs + 50) : 0,
   };
+}
+
+/** Fits procedural Bottish to the visible delivery window. This makes its
+ * cadence follow the UI reveal speed instead of becoming a second, trailing
+ * speech clock. */
+export function fitBottishPlanToDuration(
+  plan: BottishPlan,
+  targetDurationMs: number | undefined
+): BottishPlan {
+  if (
+    plan.durationMs <= 0 ||
+    typeof targetDurationMs !== "number" ||
+    !Number.isFinite(targetDurationMs) ||
+    targetDurationMs <= 0
+  ) {
+    return plan;
+  }
+  const durationMs = Math.max(80, Math.round(targetDurationMs));
+  const scale = durationMs / plan.durationMs;
+  const notes = plan.notes.flatMap((note) => {
+    const startMs = Math.max(0, Math.round(note.startMs * scale));
+    if (startMs >= durationMs) return [];
+    return [{
+      ...note,
+      startMs,
+      durationMs: Math.max(
+        8,
+        Math.min(durationMs - startMs, Math.round(note.durationMs * scale))
+      ),
+    }];
+  });
+  return { notes, durationMs };
 }
 
 function writeWaveText(view: DataView, offset: number, value: string): void {
@@ -227,7 +262,8 @@ export function stopBottishVoice(): void {
 async function playPlanWithMedia(
   plan: BottishPlan,
   profile: BotAudioVoiceProfileV1,
-  expectedGeneration: number
+  expectedGeneration: number,
+  lifecycle?: VoicePlaybackLifecycle
 ): Promise<void> {
   if (expectedGeneration !== generation) return;
   const url = URL.createObjectURL(
@@ -251,6 +287,7 @@ async function playPlanWithMedia(
       }
       if (activeResolve === cancel) activeResolve = null;
       releaseActiveMedia();
+      lifecycle?.onEnd?.();
       if (error) reject(error);
       else resolve();
     };
@@ -266,6 +303,7 @@ async function playPlanWithMedia(
     void audio.play().then(
       () => {
         started = true;
+        lifecycle?.onStart?.(plan.durationMs);
         if (activeTimer !== null) {
           window.clearTimeout(activeTimer);
           activeTimer = null;
@@ -283,24 +321,35 @@ async function playPlan(
   profile: BotAudioVoiceProfileV1,
   expectedGeneration: number,
   seed: string,
-  effectsEnabled: boolean
+  effectsEnabled: boolean,
+  lifecycle?: VoicePlaybackLifecycle
 ): Promise<void> {
   if (plan.durationMs <= 0 || expectedGeneration !== generation) return;
   const bytes = encodeBottishPlanWave(plan);
-  const played = await playRealtimeVoiceBytes({ bytes, profile, seed, effectsEnabled });
-  if (!played) await playPlanWithMedia(plan, profile, expectedGeneration);
+  const played = await playRealtimeVoiceBytes({ bytes, profile, seed, effectsEnabled, lifecycle });
+  if (!played) await playPlanWithMedia(plan, profile, expectedGeneration, lifecycle);
 }
 
 export function enqueueBottishVoice(
   text: string,
   profile: BotAudioVoiceProfileV1,
   seed: string,
-  effectsEnabled = true
+  effectsEnabled = true,
+  globalVolume = 1,
+  lifecycle?: VoicePlaybackLifecycle,
+  timing?: BottishPlaybackTiming
 ): Promise<void> {
   const expectedGeneration = generation;
-  const plan = buildBottishPlan(text, profile, seed);
+  const playbackProfile = {
+    ...normalizeBotAudioVoiceProfileV1(profile),
+    volume: normalizeBotVoiceVolume(globalVolume),
+  };
+  const plan = fitBottishPlanToDuration(
+    buildBottishPlan(text, playbackProfile, seed),
+    timing?.targetDurationMs
+  );
   queue = queue
     .catch(() => undefined)
-    .then(() => playPlan(plan, profile, expectedGeneration, seed, effectsEnabled));
+    .then(() => playPlan(plan, playbackProfile, expectedGeneration, seed, effectsEnabled, lifecycle));
   return queue;
 }

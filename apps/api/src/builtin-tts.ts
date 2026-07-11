@@ -12,24 +12,10 @@ import {
 
 type SupportedSystemTtsPlatform = "darwin" | "win32";
 
-export const MACOS_CLASSIC_VOICE_BY_ID: Record<BotAudioVoiceId, string> = {
-  "voice-1": "Fred",
-  "voice-2": "Zarvox",
-  "voice-3": "Trinoids",
-  "voice-4": "Junior",
-  "voice-5": "Ralph",
-};
-
-export const WINDOWS_CLASSIC_VOICE_CANDIDATES_BY_ID: Record<
-  BotAudioVoiceId,
-  readonly string[]
-> = {
-  "voice-1": ["Microsoft Sam", "Microsoft David Desktop", "Microsoft Mark"],
-  "voice-2": ["Microsoft Mike", "Microsoft Zira Desktop", "Microsoft Hazel Desktop"],
-  "voice-3": ["Microsoft Mary", "Microsoft George", "Microsoft Susan"],
-  "voice-4": ["Microsoft Anna", "Microsoft Linda", "Microsoft Catherine"],
-  "voice-5": ["Microsoft Lili", "Microsoft James", "Microsoft Richard"],
-};
+export interface SystemVoiceOption {
+  name: string;
+  locale: string;
+}
 
 const WINDOWS_LIST_VOICES_SCRIPT = `
 Add-Type -AssemblyName System.Speech
@@ -37,7 +23,7 @@ $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer
 try {
   $synth.GetInstalledVoices() |
     Where-Object { $_.Enabled } |
-    ForEach-Object { $_.VoiceInfo.Name }
+    ForEach-Object { "{0}{1}{2}" -f $_.VoiceInfo.Name, [char]9, $_.VoiceInfo.Culture.Name }
 } finally {
   $synth.Dispose()
 }
@@ -50,12 +36,12 @@ try {
   $voices = @($synth.GetInstalledVoices() | Where-Object { $_.Enabled })
   if ($voices.Count -eq 0) { throw "No Windows speech voices are installed." }
   $preferred = $env:PRISM_TTS_VOICE
-  $selected = $voices | Where-Object { $_.VoiceInfo.Name -eq $preferred } | Select-Object -First 1
-  if ($null -eq $selected) {
-    $fallbackIndex = [Math]::Abs([int]$env:PRISM_TTS_SLOT) % $voices.Count
-    $selected = $voices[$fallbackIndex]
+  if (-not [string]::IsNullOrWhiteSpace($preferred)) {
+    $selected = $voices | Where-Object { $_.VoiceInfo.Name -eq $preferred } | Select-Object -First 1
+    if ($null -ne $selected) {
+      $synth.SelectVoice($selected.VoiceInfo.Name)
+    }
   }
-  $synth.SelectVoice($selected.VoiceInfo.Name)
   $synth.Rate = [Math]::Max(-10, [Math]::Min(10, [int]$env:PRISM_TTS_RATE))
   $synth.SetOutputToWaveFile($env:PRISM_TTS_OUTPUT)
   $synth.Speak([IO.File]::ReadAllText($env:PRISM_TTS_INPUT))
@@ -131,35 +117,41 @@ async function runCommand(args: {
   });
 }
 
-export function parseMacSystemVoiceList(output: string): string[] {
+export function parseMacSystemVoiceOptions(output: string): SystemVoiceOption[] {
   return output
     .split(/\r?\n/)
-    .map((line) => line.match(/^(.+?)\s{2,}[a-z]{2}_[A-Z]{2}\s+#/)?.[1]?.trim() ?? "")
-    .filter(Boolean);
+    .flatMap((line) => {
+      const match = line.match(/^(.+?)\s{2,}([a-z]{2}_[A-Z]{2})\s+#/);
+      return match ? [{ name: match[1]!.trim(), locale: match[2]! }] : [];
+    });
 }
 
-function parseWindowsSystemVoiceList(output: string): string[] {
-  return output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+export function parseMacSystemVoiceList(output: string): string[] {
+  return parseMacSystemVoiceOptions(output)
+    .filter((voice) => voice.locale.toLowerCase().startsWith("en_"))
+    .map((voice) => voice.name);
+}
+
+function parseWindowsSystemVoiceOptions(output: string): SystemVoiceOption[] {
+  return output.split(/\r?\n/).flatMap((line) => {
+    const [name, locale = ""] = line.split("\t");
+    const normalizedName = name?.trim() ?? "";
+    return normalizedName ? [{ name: normalizedName, locale: locale.trim() }] : [];
+  });
 }
 
 export function selectSystemVoice(args: {
   platform: SupportedSystemTtsPlatform;
   voiceId: BotAudioVoiceId;
+  voiceName?: string | null;
   installedVoices: readonly string[];
 }): string | null {
-  if (args.installedVoices.length === 0) return null;
-  const preferred = args.platform === "darwin"
-    ? [MACOS_CLASSIC_VOICE_BY_ID[args.voiceId]]
-    : WINDOWS_CLASSIC_VOICE_CANDIDATES_BY_ID[args.voiceId];
+  const requestedName = args.voiceName?.trim();
+  if (!requestedName || args.installedVoices.length === 0) return null;
   const installedByLowercase = new Map(
     args.installedVoices.map((voice) => [voice.toLocaleLowerCase(), voice])
   );
-  for (const candidate of preferred) {
-    const installed = installedByLowercase.get(candidate.toLocaleLowerCase());
-    if (installed) return installed;
-  }
-  const slotIndex = Number(args.voiceId.slice(-1)) - 1;
-  return args.installedVoices[slotIndex % args.installedVoices.length] ?? null;
+  return installedByLowercase.get(requestedName.toLocaleLowerCase()) ?? null;
 }
 
 export function systemEnglishGenerationSettings(args: {
@@ -173,6 +165,7 @@ export function systemEnglishGenerationSettings(args: {
     voiceName: selectSystemVoice({
       platform: args.platform,
       voiceId: profile.baseVoiceId,
+      voiceName: profile.systemVoiceName,
       installedVoices: args.installedVoices,
     }),
     rate: args.platform === "darwin"
@@ -182,19 +175,19 @@ export function systemEnglishGenerationSettings(args: {
   };
 }
 
-let macVoiceListPromise: Promise<string[]> | null = null;
-let windowsVoiceListPromise: Promise<string[]> | null = null;
+let macVoiceListPromise: Promise<SystemVoiceOption[]> | null = null;
+let windowsVoiceListPromise: Promise<SystemVoiceOption[]> | null = null;
 
-async function listInstalledSystemVoices(
+async function listInstalledSystemVoiceOptions(
   platform: SupportedSystemTtsPlatform,
   signal?: AbortSignal
-): Promise<string[]> {
+): Promise<SystemVoiceOption[]> {
   if (platform === "darwin") {
     macVoiceListPromise ??= runCommand({
       command: "/usr/bin/say",
       parameters: ["-v", "?"],
       signal,
-    }).then(parseMacSystemVoiceList).catch((error) => {
+    }).then(parseMacSystemVoiceOptions).catch((error) => {
       macVoiceListPromise = null;
       throw error;
     });
@@ -212,11 +205,20 @@ async function listInstalledSystemVoices(
       encodedPowerShell(WINDOWS_LIST_VOICES_SCRIPT),
     ],
     signal,
-  }).then(parseWindowsSystemVoiceList).catch((error) => {
+  }).then(parseWindowsSystemVoiceOptions).catch((error) => {
     windowsVoiceListPromise = null;
     throw error;
   });
   return windowsVoiceListPromise;
+}
+
+async function listInstalledSystemVoices(
+  platform: SupportedSystemTtsPlatform,
+  signal?: AbortSignal
+): Promise<string[]> {
+  const options = await listInstalledSystemVoiceOptions(platform, signal);
+  const english = options.filter((voice) => voice.locale.toLowerCase().startsWith("en"));
+  return (english.length > 0 ? english : options).map((voice) => voice.name);
 }
 
 export function builtinEnglishAvailable(platform = process.platform): boolean {
@@ -230,6 +232,7 @@ export function builtinEnglishAvailable(platform = process.platform): boolean {
 export async function getSystemVoiceCapabilities(signal?: AbortSignal): Promise<{
   platform: string;
   installedVoices: string[];
+  voices: SystemVoiceOption[];
   slots: Array<{ voiceId: BotAudioVoiceId; name: string | null }>;
   hasFiveDistinctVoices: boolean;
 }> {
@@ -237,19 +240,24 @@ export async function getSystemVoiceCapabilities(signal?: AbortSignal): Promise<
     return {
       platform: process.platform,
       installedVoices: [],
+      voices: [],
       slots: BOT_AUDIO_VOICE_IDS.map((voiceId) => ({ voiceId, name: null })),
       hasFiveDistinctVoices: false,
     };
   }
   const platform = process.platform as SupportedSystemTtsPlatform;
-  const installedVoices = await listInstalledSystemVoices(platform, signal).catch(() => []);
+  const allVoices = await listInstalledSystemVoiceOptions(platform, signal).catch(() => []);
+  const englishVoices = allVoices.filter((voice) => voice.locale.toLowerCase().startsWith("en"));
+  const voices = englishVoices.length > 0 ? englishVoices : allVoices;
+  const installedVoices = voices.map((voice) => voice.name);
   const slots = BOT_AUDIO_VOICE_IDS.map((voiceId) => ({
     voiceId,
-    name: selectSystemVoice({ platform, voiceId, installedVoices }),
+    name: null,
   }));
   return {
     platform,
     installedVoices,
+    voices,
     slots,
     hasFiveDistinctVoices: new Set(slots.map((slot) => slot.name).filter(Boolean)).size >= 5,
   };
@@ -281,7 +289,7 @@ export async function generateBuiltinEnglishWave(args: {
     platform,
     installedVoices,
   });
-  if (!settings.voiceName) {
+  if (installedVoices.length === 0) {
     throw new Error("No compatible system English voices are installed.");
   }
 
@@ -292,11 +300,11 @@ export async function generateBuiltinEnglishWave(args: {
     await writeFile(inputPath, args.text, "utf8");
     if (platform === "darwin") {
       const intermediatePath = join(directory, "speech.caf");
+      const voiceParameters = settings.voiceName ? ["-v", settings.voiceName] : [];
       await runCommand({
         command: "/usr/bin/say",
         parameters: [
-          "-v",
-          settings.voiceName,
+          ...voiceParameters,
           "-r",
           String(settings.rate),
           "--data-format=LEI16@24000",
@@ -329,7 +337,7 @@ export async function generateBuiltinEnglishWave(args: {
           ...process.env,
           PRISM_TTS_INPUT: inputPath,
           PRISM_TTS_OUTPUT: outputPath,
-          PRISM_TTS_VOICE: settings.voiceName,
+          PRISM_TTS_VOICE: settings.voiceName ?? "",
           PRISM_TTS_RATE: String(settings.rate),
           PRISM_TTS_SLOT: String(settings.slotIndex),
         },

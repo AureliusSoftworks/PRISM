@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildBottishPlan, encodeBottishPlanWave } from "./bottishVoice.ts";
+import {
+  buildBottishPlan,
+  encodeBottishPlanWave,
+  fitBottishPlanToDuration,
+} from "./bottishVoice.ts";
 
 const neutral = {
   v: 1 as const,
@@ -19,17 +23,34 @@ describe("Bottish speech plan", () => {
     );
   });
 
-  it("maps pitch, pace, warmth, lilt, and base voice into audible plan changes", () => {
+  it("maps pitch, lilt, tone, and base voice into audible plan changes", () => {
     const base = buildBottishPlan("Testing voice controls.", neutral, "same");
     const changed = buildBottishPlan(
       "Testing voice controls.",
-      { v: 1, baseVoiceId: "voice-4", pitch: 0.8, warmth: 0.7, pace: 0.6, lilt: 0.9 },
+      {
+        v: 1,
+        baseVoiceId: "voice-4",
+        pitch: 0.8,
+        warmth: 0,
+        pace: 0,
+        lilt: 0.9,
+        signal: 1,
+      },
       "same"
     );
     assert.notEqual(changed.notes[0]?.frequencyHz, base.notes[0]?.frequencyHz);
-    assert.notEqual(changed.notes[0]?.lowpassHz, base.notes[0]?.lowpassHz);
     assert.notEqual(changed.notes[1]?.frequencyHz, base.notes[1]?.frequencyHz);
-    assert.ok(changed.durationMs < base.durationMs);
+    assert.notEqual(changed.notes[0]?.waveform, base.notes[0]?.waveform);
+  });
+
+  it("ignores legacy Pace and Warmth values", () => {
+    const base = buildBottishPlan("Testing removed controls.", neutral, "same");
+    const legacyValues = buildBottishPlan(
+      "Testing removed controls.",
+      { ...neutral, pace: 1, warmth: -1 },
+      "same"
+    );
+    assert.deepEqual(legacyValues, base);
   });
 
   it("keeps the neutral mix bright and clearly audible", () => {
@@ -58,5 +79,19 @@ describe("Bottish speech plan", () => {
   it("caps extremely long replies", () => {
     const plan = buildBottishPlan("a".repeat(5000), neutral, "long");
     assert.equal(plan.notes.length, 420);
+  });
+
+  it("fits Bottish to the visible streaming window", () => {
+    const original = buildBottishPlan("A streamed reply with several words.", neutral, "stream");
+    const fitted = fitBottishPlanToDuration(original, 640);
+    assert.equal(fitted.durationMs, 640);
+    assert.equal(fitted.notes.length, original.notes.length);
+    assert.equal(fitted.notes[0]?.frequencyHz, original.notes[0]?.frequencyHz);
+    assert.ok((fitted.notes.at(-1)?.startMs ?? 0) < fitted.durationMs);
+  });
+
+  it("keeps the natural duration when no streaming window is supplied", () => {
+    const original = buildBottishPlan("Natural preview timing.", neutral, "preview");
+    assert.equal(fitBottishPlanToDuration(original, undefined), original);
   });
 });

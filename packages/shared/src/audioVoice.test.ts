@@ -9,6 +9,8 @@ import {
   normalizeEnglishVoiceEngine,
   normalizeOptionalBotAudioVoiceProfileV1,
   normalizeVoiceMode,
+  parseStoredBotAudioVoiceProfileV1,
+  serializeBotAudioVoiceProfileV1,
 } from "./audioVoice.ts";
 
 describe("audio voice normalization", () => {
@@ -41,6 +43,17 @@ describe("audio voice normalization", () => {
       normalizeOptionalBotAudioVoiceProfileV1({ v: 1, baseVoiceId: "voice-2" }),
       { ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1, baseVoiceId: "voice-2" }
     );
+    assert.deepEqual(
+      normalizeOptionalBotAudioVoiceProfileV1(JSON.stringify({
+        baseVoiceId: "voice-3",
+        systemVoiceName: "Samantha",
+      })),
+      {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+        baseVoiceId: "voice-3",
+        systemVoiceName: "Samantha",
+      }
+    );
   });
 
   it("normalizes v2 volume and texture controls", () => {
@@ -67,6 +80,20 @@ describe("audio voice normalization", () => {
       distortion: 0.4,
       damage: 0.5,
     });
+  });
+
+  it("keeps provider-specific voice selections independent", () => {
+    const profile = normalizeBotAudioVoiceProfileV1({
+      ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+      systemVoiceName: "  Alex  ",
+      elevenLabsVoiceId: " eleven-voice-id ",
+    });
+    assert.equal(profile.systemVoiceName, "Alex");
+    assert.equal(profile.elevenLabsVoiceId, "eleven-voice-id");
+    assert.deepEqual(
+      parseStoredBotAudioVoiceProfileV1(serializeBotAudioVoiceProfileV1(profile)),
+      profile
+    );
   });
 
   it("detects modified texture recipes and restores canonical defaults", () => {

@@ -45,6 +45,8 @@ export interface BotAudioVoiceProfileV2 {
   v: 2;
   enabled: boolean;
   baseVoiceId: BotAudioVoiceId;
+  systemVoiceName?: string | null;
+  elevenLabsVoiceId?: string | null;
   pitch: number;
   warmth: number;
   pace: number;
@@ -60,6 +62,38 @@ export type BotAudioVoiceProfile = LegacyBotAudioVoiceProfileV1 | BotAudioVoiceP
  * persistence always writes v2 through serializeBotAudioVoiceProfileV1. */
 export type BotAudioVoiceProfileV1 = BotAudioVoiceProfile;
 export type NormalizedBotAudioVoiceProfileV1 = BotAudioVoiceProfileV2;
+
+/** Ephemeral modulation around a bot's persisted voice identity. */
+export interface CoffeeVoiceDeliveryEnvelope {
+  paceMultiplier: number;
+  pitchDeltaCents: number;
+  liltDelta: number;
+  warmthDelta: number;
+  emphasisStrength: number;
+}
+
+export const NEUTRAL_COFFEE_VOICE_DELIVERY_ENVELOPE: CoffeeVoiceDeliveryEnvelope = {
+  paceMultiplier: 1,
+  pitchDeltaCents: 0,
+  liltDelta: 0,
+  warmthDelta: 0,
+  emphasisStrength: 0,
+};
+
+export function applyPlayerNamePronunciation(
+  text: unknown,
+  displayName: string | null | undefined,
+  pronunciation: string | null | undefined
+): unknown {
+  if (typeof text !== "string") return text;
+  const written = displayName?.replace(/\s+/gu, " ").trim() ?? "";
+  const spoken = pronunciation?.replace(/\s+/gu, " ").trim() ?? "";
+  if (!written || !spoken || written.toLocaleLowerCase() === spoken.toLocaleLowerCase()) {
+    return text;
+  }
+  const escaped = written.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return text.replace(new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, "giu"), spoken);
+}
 
 export const BOT_VOICE_TEXTURE_PRESET_LABELS: Record<BotVoiceTexturePreset, string> = {
   clean: "Clean",
@@ -209,12 +243,22 @@ export function normalizeBotAudioVoiceProfileV1(
     ? value as Record<string, unknown>
     : {};
   const legacy = record.v !== 2;
+  const systemVoiceName = normalizeOptionalVoiceSelection(
+    record.systemVoiceName,
+    fallbackProfile.systemVoiceName ?? null
+  );
+  const elevenLabsVoiceId = normalizeOptionalVoiceSelection(
+    record.elevenLabsVoiceId,
+    fallbackProfile.elevenLabsVoiceId ?? null
+  );
   return {
     v: 2,
     enabled: legacy ? true : record.enabled !== false,
     baseVoiceId: isBotAudioVoiceId(record.baseVoiceId)
       ? record.baseVoiceId
       : fallbackProfile.baseVoiceId,
+    ...(systemVoiceName ? { systemVoiceName } : {}),
+    ...(elevenLabsVoiceId ? { elevenLabsVoiceId } : {}),
     pitch: normalizeBotAudioVoiceControl(record.pitch, fallbackProfile.pitch),
     warmth: normalizeBotAudioVoiceControl(record.warmth, fallbackProfile.warmth),
     pace: normalizeBotAudioVoiceControl(record.pace, fallbackProfile.pace),
@@ -258,13 +302,33 @@ export function normalizeBotVoiceVolume(value: unknown, fallback = 1): number {
   return Number(Math.min(1.25, Math.max(0, safe)).toFixed(3));
 }
 
+function normalizeOptionalVoiceSelection(
+  value: unknown,
+  fallback: string | null = null
+): string | null {
+  if (value === null) return null;
+  if (typeof value !== "string") return fallback;
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized.slice(0, 240) : null;
+}
+
 /** Null is a deliberate absence for per-user overrides; malformed values are ignored. */
 export function normalizeOptionalBotAudioVoiceProfileV1(value: unknown): BotAudioVoiceProfileV2 | null {
   if (value === null || value === undefined) return null;
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const version = (value as Record<string, unknown>).v;
-  if (version !== 1 && version !== 2) return null;
-  return normalizeBotAudioVoiceProfileV1(value);
+  let candidate = value;
+  if (typeof candidate === "string") {
+    try { candidate = JSON.parse(candidate); } catch { return null; }
+  }
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return null;
+  const record = candidate as Record<string, unknown>;
+  const version = record.v;
+  const recognizableUnversionedProfile = version === undefined && (
+    isBotAudioVoiceId(record.baseVoiceId) ||
+    typeof record.systemVoiceName === "string" ||
+    typeof record.elevenLabsVoiceId === "string"
+  );
+  if (version !== 1 && version !== 2 && !recognizableUnversionedProfile) return null;
+  return normalizeBotAudioVoiceProfileV1(candidate);
 }
 
 export function parseStoredBotAudioVoiceProfileV1(value: unknown): BotAudioVoiceProfileV2 | null {

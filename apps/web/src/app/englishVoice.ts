@@ -1,11 +1,13 @@
 import {
   normalizeBotAudioVoiceProfileV1,
+  normalizeBotVoiceVolume,
   type BotAudioVoiceProfileV1,
 } from "@localai/shared";
 import {
   playRealtimeVoiceBytes,
   prepareRealtimeVoiceAudio,
   stopRealtimeVoiceAudio,
+  type VoicePlaybackLifecycle,
 } from "./voiceEffects.ts";
 
 export interface EnglishVoicePostProcessing {
@@ -134,7 +136,8 @@ export function stopEnglishVoice(): void {
 async function playBytesWithMedia(
   bytes: ArrayBuffer,
   profile: BotAudioVoiceProfileV1,
-  expectedGeneration: number
+  expectedGeneration: number,
+  lifecycle?: VoicePlaybackLifecycle
 ): Promise<void> {
   if (expectedGeneration !== generation) return;
   const header = new Uint8Array(bytes, 0, Math.min(4, bytes.byteLength));
@@ -162,6 +165,7 @@ async function playBytesWithMedia(
       settled = true;
       if (activeMediaResolve === cancel) activeMediaResolve = null;
       releaseActiveMedia(!error);
+      lifecycle?.onEnd?.();
       if (error) reject(error);
       else resolve();
     };
@@ -177,6 +181,11 @@ async function playBytesWithMedia(
     void audio.play().then(
       () => {
         started = true;
+        lifecycle?.onStart?.(
+          Number.isFinite(audio.duration) && audio.duration > 0
+            ? Math.round(audio.duration * 1000)
+            : null
+        );
         if (activeMediaStartTimer !== null) {
           window.clearTimeout(activeMediaStartTimer);
           activeMediaStartTimer = null;
@@ -194,7 +203,8 @@ async function playAudio(
   profile: BotAudioVoiceProfileV1,
   expectedGeneration: number,
   seed: string,
-  effectsEnabled: boolean
+  effectsEnabled: boolean,
+  lifecycle?: VoicePlaybackLifecycle
 ): Promise<void> {
   if (expectedGeneration !== generation) return;
   const processing = resolveEnglishVoicePostProcessing(profile);
@@ -205,9 +215,10 @@ async function playAudio(
     effectsEnabled,
     detuneCents: processing.detuneCents,
     baseLowpassHz: processing.lowpassHz,
+    lifecycle,
   });
   if (!played) {
-    await playBytesWithMedia(bytes, profile, expectedGeneration);
+    await playBytesWithMedia(bytes, profile, expectedGeneration, lifecycle);
     return;
   }
 }
@@ -216,11 +227,17 @@ export function enqueueEnglishVoice(
   bytes: ArrayBuffer,
   profile: BotAudioVoiceProfileV1,
   seed = "english-preview",
-  effectsEnabled = true
+  effectsEnabled = true,
+  globalVolume = 1,
+  lifecycle?: VoicePlaybackLifecycle
 ): Promise<void> {
   const expectedGeneration = generation;
+  const playbackProfile = {
+    ...normalizeBotAudioVoiceProfileV1(profile),
+    volume: normalizeBotVoiceVolume(globalVolume),
+  };
   queue = queue
     .catch(() => undefined)
-    .then(() => playAudio(bytes, profile, expectedGeneration, seed, effectsEnabled));
+    .then(() => playAudio(bytes, playbackProfile, expectedGeneration, seed, effectsEnabled, lifecycle));
   return queue;
 }

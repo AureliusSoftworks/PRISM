@@ -135,9 +135,12 @@ export function restoreFactoryDefaultsInDatabase(
           elevenlabs_key_tag = NULL,
           voice_mode = 'mute',
           voice_effects_enabled = 1,
+          voice_volume = 1,
           english_voice_engine = 'builtin',
           elevenlabs_voice_bank = '{}',
           elevenlabs_voice_model = NULL,
+          player_audio_voice_profile = NULL,
+          player_name_pronunciation = '',
           last_active_at = ?
         WHERE id = ?
       `
