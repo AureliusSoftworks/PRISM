@@ -82,7 +82,7 @@ export function coffeeCupTopOffFrameIndexForPour(
   fromFrameIndex: number,
   pourFrameIndex: number
 ): number | null {
-  const startFrame = Math.max(0, Math.min(5, Math.round(fromFrameIndex)));
+  const startFrame = Math.max(0, Math.min(6, Math.round(fromFrameIndex)));
   if (startFrame <= 0) return null;
   const pourFrame = Math.max(
     0,
@@ -96,7 +96,7 @@ export function coffeeCupTopOffFrameIndexForPour(
 }
 
 export function coffeeCupTopOffFillFrameIndices(fromFrameIndex: number): number[] {
-  const startFrame = Math.max(0, Math.min(5, Math.round(fromFrameIndex)));
+  const startFrame = Math.max(0, Math.min(6, Math.round(fromFrameIndex)));
   if (startFrame <= 0) return [];
   return Array.from({ length: startFrame + 1 }, (_, index) => startFrame - index);
 }

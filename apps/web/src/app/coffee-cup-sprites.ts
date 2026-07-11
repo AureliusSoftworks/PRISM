@@ -55,7 +55,7 @@ export interface CoffeeCupVisualState extends CoffeeCupStatus {
   restImageUrl: string;
   sipImageUrl: string;
   frameX: "0%" | "50%" | "100%";
-  frameY: "0%" | "100%";
+  frameY: "0%" | "50%" | "100%";
   sipping: boolean;
   sipAnimationMs: number;
   sipHoldMs: number;
@@ -70,6 +70,10 @@ const COFFEE_STEAM_BASE_RATE_MS = 3450;
 const COFFEE_STEAM_COOLED_RATE_MS = 6800;
 const COFFEE_CUP_SIP_WINDOW_BASE_MS = 1_300;
 const COFFEE_CUP_MIN_SIP_WINDOW_MS = 650;
+// Coffee's visual clock samples once per second. A sip can be noticed almost
+// one sample late, so keep the state alive for one extra tick and let the CSS
+// return-to-table keyframes finish before data-cup-sipping is removed.
+const COFFEE_CUP_SIP_RENDER_SAMPLE_GRACE_MS = 1_000;
 
 function clampUnit(value: number): number {
   if (!Number.isFinite(value)) return 0;
@@ -128,12 +132,12 @@ export function coffeeCupColorForBotColor(
 }
 
 export function coffeeCupFramePosition(frameIndex: number): Pick<CoffeeCupVisualState, "frameX" | "frameY"> {
-  const clamped = Math.max(0, Math.min(5, Math.round(frameIndex)));
+  const clamped = Math.max(0, Math.min(6, Math.round(frameIndex)));
   const col = clamped % 3;
   const row = Math.floor(clamped / 3);
   return {
     frameX: col === 0 ? "0%" : col === 1 ? "50%" : "100%",
-    frameY: row === 0 ? "0%" : "100%",
+    frameY: row === 0 ? "0%" : row === 1 ? "50%" : "100%",
   };
 }
 
@@ -154,7 +158,7 @@ export function coffeeCupSippingActive(args: {
   const sipWindowMs = Math.max(
     COFFEE_CUP_MIN_SIP_WINDOW_MS,
     Math.round(COFFEE_CUP_SIP_WINDOW_BASE_MS * sipLikelihood),
-    sipAnimationMs
+    sipAnimationMs + COFFEE_CUP_SIP_RENDER_SAMPLE_GRACE_MS
   );
   const offsetMs = Math.round(stableUnitValue(`${args.seed}:offset`) * cycleMs);
   return positiveModulo(args.nowMs + offsetMs, cycleMs) < sipWindowMs;
@@ -257,10 +261,10 @@ export function coffeeCupSipBelongsToCurrentFill(args: {
 }
 
 function coffeeCupSteamBaseAlphaForFrame(frameIndex: number): number {
-  if (frameIndex >= 5) return 0;
-  if (frameIndex >= 4) return 0.16;
-  if (frameIndex >= 3) return 0.28;
-  if (frameIndex >= 2) return 0.4;
+  if (frameIndex >= 6) return 0;
+  if (frameIndex >= 5) return 0.16;
+  if (frameIndex >= 4) return 0.28;
+  if (frameIndex >= 3) return 0.4;
   return 0.52;
 }
 
@@ -663,9 +667,9 @@ export function buildCoffeeCupVisualState(args: {
       ? coffeeCupStatusForProgress(previousSipGateProgress, args.seed).frameIndex
       : null;
   const finalFrameReachedByThisSip =
-    status.frameIndex >= 5 &&
+    status.frameIndex >= 6 &&
     previousSipGateFrameIndex !== null &&
-    previousSipGateFrameIndex < 5;
+    previousSipGateFrameIndex < 6;
   const position = coffeeCupFramePosition(status.frameIndex);
   const topOffHeatStartedAtMs =
     args.topOff && Number.isFinite(Date.parse(args.topOff.toppedOffAt))

@@ -52850,8 +52850,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   --coffee-cup-frame-y: 0%;
   --coffee-cup-side-offset: clamp(-16px, -1.35vw, -8px);
   --coffee-cup-facing-scale-x: 1;
-  --coffee-cup-sip-x: clamp(-64px, -4.8vw, -44px);
-  --coffee-cup-sip-y: clamp(-22px, -1.75vw, -12px);
+  --coffee-cup-sip-x: clamp(-36px, -2.7vw, -24px);
+  --coffee-cup-sip-y: clamp(-10px, -0.75vw, -6px);
   --coffee-cup-sip-duration-ms: 1400ms;
   --coffee-cup-sip-hold-ms: 500ms;
   --coffee-cup-sip-rest-scale: 0.84;
@@ -52896,7 +52896,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeCup[data-cup-side="left"] {
-  --coffee-cup-sip-x: clamp(44px, 4.8vw, 64px);
+  --coffee-cup-sip-x: clamp(24px, 2.7vw, 36px);
   right: auto;
   left: var(--coffee-cup-side-offset);
 }
@@ -52961,7 +52961,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   background-image: var(--coffee-cup-sprite);
   background-repeat: no-repeat;
   background-position: var(--coffee-cup-frame-x) var(--coffee-cup-frame-y);
-  background-size: 300% 200%;
+  background-size: 300% 300%;
   transform: scaleX(var(--coffee-cup-facing-scale-x)) scale(1);
   transform-origin: center;
   transition:
@@ -52986,8 +52986,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   opacity: 0;
   background-image: var(--coffee-cup-sip-sprite);
   background-repeat: no-repeat;
-  background-position: center;
-  background-size: contain;
+  background-position: var(--coffee-cup-frame-x) var(--coffee-cup-frame-y);
+  background-size: 300% 300%;
   transform: translate(0, 5px) scaleX(var(--coffee-cup-facing-scale-x)) scale(var(--coffee-cup-sip-rest-scale));
   transform-origin: 58% 52%;
   filter: drop-shadow(0 8px 8px rgba(0, 0, 0, 0.4));
@@ -53008,7 +53008,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   background-image: var(--coffee-cup-fill-sprite);
   background-repeat: no-repeat;
   background-position: var(--coffee-cup-fill-frame-x) var(--coffee-cup-fill-frame-y);
-  background-size: 300% 200%;
+  background-size: 300% 300%;
   transform: scaleX(var(--coffee-cup-facing-scale-x)) scale(1);
   transform-origin: center;
   transition: opacity 165ms ease;
@@ -53196,13 +53196,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   }
 
   22%,
-  88% {
+  99% {
     opacity: var(--coffee-cup-rest-sip-opacity);
-    transform: scaleX(var(--coffee-cup-facing-scale-x)) scale(1);
-  }
-
-  96% {
-    opacity: 0.62;
     transform: scaleX(var(--coffee-cup-facing-scale-x)) scale(1);
   }
 
@@ -53229,7 +53224,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     transform: translate(var(--coffee-cup-sip-x), var(--coffee-cup-sip-y)) scaleX(var(--coffee-cup-facing-scale-x)) scale(var(--coffee-cup-sip-active-scale));
   }
 
-  96% {
+  96%,
+  99% {
     opacity: 1;
     transform: translate(0, 3px) scaleX(var(--coffee-cup-facing-scale-x)) scale(var(--coffee-cup-sip-rest-scale));
   }

@@ -234,14 +234,14 @@ describe("Coffee seat arrival CSS", () => {
     assert.match(customizerSampleRule, /font-family:\s*var\(--prism-sharp-face-font\)\s*;/);
   });
 
-  it("keeps the Coffee cup visible while reversing the sip animation", () => {
+  it("keeps the rest cup hidden until the sip cup returns to the table", () => {
     assert.match(
       css,
-      /@keyframes coffeeCupRestDuringSip \{[\s\S]*22%,\s*88% \{[\s\S]*opacity:\s*var\(--coffee-cup-rest-sip-opacity\);[\s\S]*96% \{[\s\S]*opacity:\s*0\.62;[\s\S]*100% \{[\s\S]*opacity:\s*1;/
+      /@keyframes coffeeCupRestDuringSip \{[\s\S]*22%,\s*99% \{[\s\S]*opacity:\s*var\(--coffee-cup-rest-sip-opacity\);[\s\S]*100% \{[\s\S]*opacity:\s*1;/
     );
     assert.match(
       css,
-      /@keyframes coffeeCupSip \{[\s\S]*18%,\s*76% \{[\s\S]*opacity:\s*1;[\s\S]*translate\(var\(--coffee-cup-sip-x\), var\(--coffee-cup-sip-y\)\)[\s\S]*96% \{[\s\S]*opacity:\s*1;[\s\S]*translate\(0, 3px\)[\s\S]*100% \{[\s\S]*opacity:\s*0;[\s\S]*translate\(0, 3px\)/
+      /@keyframes coffeeCupSip \{[\s\S]*18%,\s*76% \{[\s\S]*opacity:\s*1;[\s\S]*translate\(var\(--coffee-cup-sip-x\), var\(--coffee-cup-sip-y\)\)[\s\S]*96%,\s*99% \{[\s\S]*opacity:\s*1;[\s\S]*translate\(0, 3px\)[\s\S]*100% \{[\s\S]*opacity:\s*0;[\s\S]*translate\(0, 3px\)/
     );
   });
 
@@ -1423,13 +1423,13 @@ describe("Coffee seat arrival CSS", () => {
 
     const mugRule = ruleForExactSelector(".coffeeCup");
     assert.match(mugRule, /--coffee-cup-side-offset:\s*clamp\(-16px,\s*-1\.35vw,\s*-8px\)\s*;/);
-    assert.match(mugRule, /--coffee-cup-sip-x:\s*clamp\(-64px,\s*-4\.8vw,\s*-44px\)\s*;/);
-    assert.match(mugRule, /--coffee-cup-sip-y:\s*clamp\(-22px,\s*-1\.75vw,\s*-12px\)\s*;/);
+    assert.match(mugRule, /--coffee-cup-sip-x:\s*clamp\(-36px,\s*-2\.7vw,\s*-24px\)\s*;/);
+    assert.match(mugRule, /--coffee-cup-sip-y:\s*clamp\(-10px,\s*-0\.75vw,\s*-6px\)\s*;/);
     assert.match(mugRule, /width:\s*clamp\(52px,\s*6vw,\s*70px\)\s*;/);
     assert.match(mugRule, /height:\s*clamp\(60px,\s*6\.9vw,\s*82px\)\s*;/);
 
     const leftMugRule = ruleForExactSelector('.coffeeCup[data-cup-side="left"]');
-    assert.match(leftMugRule, /--coffee-cup-sip-x:\s*clamp\(44px,\s*4\.8vw,\s*64px\)\s*;/);
+    assert.match(leftMugRule, /--coffee-cup-sip-x:\s*clamp\(24px,\s*2\.7vw,\s*36px\)\s*;/);
   });
 
   it("keeps the Coffee pot in the table canvas at its original resting size", () => {
