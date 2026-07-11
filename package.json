@@ -1,12 +1,18 @@
 {
   "name": "localai-chatgov",
   "private": true,
+  "type": "module",
   "version": "0.7.0",
   "workspaces": [
     "apps/*",
     "packages/*"
   ],
   "scripts": {
+    "test": "node scripts/run-tests.mjs",
+    "test:coverage": "node scripts/run-tests.mjs --coverage",
+    "test:e2e": "playwright test --grep-invert @visual",
+    "test:visual": "playwright test --grep @visual",
+    "test:perf": "npm --prefix packages/config run build && npm --prefix packages/shared run build && node --experimental-strip-types scripts/perf/test-performance.ts",
     "dev": "node --env-file-if-exists=.env scripts/dev.mjs",
     "version:set": "node scripts/set-version.mjs",
     "dev:web": "npm run dev -w apps/web",
@@ -39,6 +45,7 @@
     "wiki:closeout": "wk closeout --profile mixed --audience all"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@thjodann/wk": "^1.0.4"
   }
 }

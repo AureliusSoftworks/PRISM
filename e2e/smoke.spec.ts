@@ -1,0 +1,188 @@
+import { test, expect, type Page, type Route } from "@playwright/test";
+
+const testUser = {
+  id: "e2e-user",
+  username: "e2e@example.com",
+  email: "e2e@example.com",
+  displayName: "E2E User",
+  theme: "dark",
+  preferredProvider: "local",
+};
+
+const testBots = ["a", "b", "c"].map((id, index) => ({
+  id: `e2e-bot-${id}`,
+  name: `Test Bot ${index + 1}`,
+  system_prompt: "A deterministic test persona.",
+  model: null,
+  local_model: "llama3.2",
+  online_model: null,
+  local_image_model: null,
+  openai_image_model: null,
+  online_enabled: 0,
+  delete_protected: 0,
+  flirt_enabled: 0,
+  temperature: 0.7,
+  max_tokens: 512,
+  top_p: 1,
+  top_k: 40,
+  repetition_penalty: 1,
+  color: ["#8b5cf6", "#06b6d4", "#f59e0b"][index],
+  glyph: "circle",
+  chat_enabled: 1,
+}));
+
+const testConversation = {
+  id: "e2e-conversation",
+  title: "E2E companion thread",
+  mode: "zen",
+  conversationMode: "zen",
+  botId: null,
+  incognito: false,
+  messages: [],
+  createdAt: "2026-01-01T00:00:00.000Z",
+  updatedAt: "2026-01-01T00:00:00.000Z",
+};
+
+async function installAuthenticatedApi(page: Page): Promise<void> {
+  await page.route("**/api/**", async (route: Route) => {
+    const pathname = new URL(route.request().url()).pathname;
+    const json = (payload: unknown, status = 200) =>
+      route.fulfill({
+        status,
+        contentType: "application/json",
+        body: JSON.stringify(payload),
+      });
+
+    if (pathname === "/api/auth/me") {
+      return json({ user: testUser, hasAnyAccounts: true });
+    }
+    if (pathname === "/api/settings") {
+      return json({
+        settings: {
+          ...testUser,
+          providerLocked: false,
+          autoMemory: true,
+          composerWritingAssist: true,
+          experimentalDualOllamaEnabled: false,
+          experimentalAllModelEffortEnabled: false,
+          coffeeExperimentalTableAngleEnabled: false,
+          psychicModeEnabled: false,
+          fallbackModelMessageStripe: true,
+          hiddenBotModelIds: [],
+          hiddenComfyUiWorkflowIds: [],
+          hasOpenAiApiKey: false,
+          hasAnthropicApiKey: false,
+          hasElevenLabsApiKey: false,
+          openAiApiKeySource: "none",
+          anthropicApiKeySource: "none",
+          elevenLabsApiKeySource: "none",
+          ollamaModel: "llama3.2",
+          ollamaAuxiliaryModel: "llama3.2",
+          secondaryOllamaHost: "",
+          comfyUiHost: "",
+          preferredLocalModel: "",
+          preferredOnlineModel: "",
+          preferredLocalImageModel: "",
+          preferredOpenAiImageModel: "",
+          preferredZenWallpaperLocalImageModel: "",
+          preferredZenWallpaperOpenAiImageModel: "",
+          zenWallpaperOpacity: 0.28,
+          zenWallpaperTextMaskEnabled: true,
+          zenWallpaperGrayscaleEnabled: true,
+          zenWallpaperBlurredEdgesEnabled: true,
+          zenWallpaperStyleNotes: "",
+          zenSessionIdleGapMs: 43_200_000,
+          zenFreshStartGapMs: 604_800_000,
+          zenRecentContextMessages: 30,
+          zenWallpaperRegenMessageInterval: 30,
+          zenMoodSensitivity: 0.5,
+          zenCanvasTypingSpeed: 1,
+          zenMessageFontMinPx: 15.8,
+          zenMessageFontMaxPx: 32.8,
+          zenAskQuestionPatienceEnabled: false,
+          zenAskQuestionPatienceMs: 60_000,
+          zenAutonomyEnabled: false,
+          zenPersonaTransitionChoice: "random",
+          prismDefaultBotName: "",
+          prismDefaultBotSystemPrompt: "",
+          prismDefaultBotColor: "",
+          prismDefaultBotGlyph: "",
+          prismDefaultLlmModel: "",
+          prismImageToolLlmModel: "",
+          devMemoriesEnabled: false,
+          devMemoriesText: "",
+          comfyUiWorkflows: [],
+          lenientLocalFallbackModel: "",
+          lenientLocalImageFallbackModel: "",
+        },
+      });
+    }
+    if (pathname === "/api/conversations") {
+      return json({
+        conversations: [
+          {
+            ...testConversation,
+            lastBotId: null,
+            lastBotColor: null,
+            hasAssistantReply: false,
+          },
+        ],
+      });
+    }
+    if (/^\/api\/conversations\/[^/]+$/.test(pathname)) {
+      return json({ conversation: testConversation });
+    }
+    if (pathname === "/api/memories") return json({ memories: [] });
+    if (pathname === "/api/bots") return json({ bots: testBots });
+    if (pathname === "/api/images") return json({ images: [] });
+    if (pathname === "/api/models") {
+      return json({
+        catalog: { local: [], online: [], defaults: { local: "llama3.2", online: "" } },
+        comfyUi: { configured: false, reachable: false, checkpoints: [], allCheckpoints: [] },
+      });
+    }
+    if (pathname === "/api/coffee/groups") return json({ ok: true, groups: [] });
+    if (pathname === "/api/coffee/presets") return json({ ok: true, presets: [] });
+    return json({});
+  });
+}
+
+test.describe("PRISM desktop smoke", () => {
+  test("loads the app shell", async ({ page }) => {
+    await page.goto("/");
+    await expect(page).toHaveTitle(/Prism/i);
+    await expect(page.locator("body")).toBeVisible();
+  });
+
+  test("keeps the unauthenticated shell visually stable @visual", async ({ page }) => {
+    await page.goto("/");
+    await expect(page).toHaveScreenshot("prism-auth-shell.png", {
+      animations: "disabled",
+      caret: "hide",
+      scale: "css",
+    });
+  });
+
+  test("auth screen exposes the login path without backend services", async ({ page }) => {
+    await page.route("**/api/auth/me", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ user: null, hasAnyAccounts: true }),
+      });
+    });
+    await page.goto("/?mode=login");
+    await expect(page.getByRole("heading", { name: "Welcome back" })).toBeVisible();
+    await expect(page.getByPlaceholder("Username")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Log in" })).toBeVisible();
+  });
+
+  test("authenticated Coffee shell opens its picker without external services", async ({ page }) => {
+    await installAuthenticatedApi(page);
+    await page.goto("/?view=coffee");
+    await expect(page.getByRole("button", { name: /Coffee/ }).first()).toBeVisible();
+    await expect(page.locator('[data-mode="picker"]')).toBeVisible();
+    await expect(page.getByText("Select bots to begin")).toBeVisible();
+  });
+
+});

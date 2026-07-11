@@ -59,3 +59,51 @@ export function pickCoffeeStarterTopicOptions(
     .slice(0, count)
     .map(({ label }) => label);
 }
+
+export function formatCoffeeStarterTopicsClipboardText(args: {
+  groupName?: string | null;
+  groupId?: string | null;
+  topicsByBotId?: CoffeeStarterTopicsByBotId | null;
+  orderedBotIds?: readonly (string | null | undefined)[];
+  botNamesById?: Readonly<Record<string, string | undefined>>;
+}): string | null {
+  const topicsByBotId = args.topicsByBotId;
+  if (!topicsByBotId) return null;
+
+  const orderedBotIds: string[] = [];
+  const seenBotIds = new Set<string>();
+  for (const botId of args.orderedBotIds ?? []) {
+    const trimmed = typeof botId === "string" ? botId.trim() : "";
+    if (!trimmed || seenBotIds.has(trimmed)) continue;
+    seenBotIds.add(trimmed);
+    orderedBotIds.push(trimmed);
+  }
+  const remainingBotIds = Object.keys(topicsByBotId)
+    .filter((botId) => !seenBotIds.has(botId))
+    .sort((a, b) => {
+      const aName = args.botNamesById?.[a]?.trim() || a;
+      const bName = args.botNamesById?.[b]?.trim() || b;
+      return aName.localeCompare(bName);
+    });
+  const botIds = [...orderedBotIds, ...remainingBotIds];
+  const sections: string[] = [];
+
+  for (const botId of botIds) {
+    const topics = normalizeCoffeeStarterTopicPool(topicsByBotId[botId] ?? []);
+    if (topics.length === 0) continue;
+    const name = args.botNamesById?.[botId]?.replace(/\s+/g, " ").trim();
+    const label = name && name !== botId ? `${name} (${botId})` : botId;
+    sections.push(
+      [`${label}:`, ...topics.map((topic, index) => `${index + 1}. ${topic}`)].join("\n")
+    );
+  }
+
+  if (sections.length === 0) return null;
+  const lines = ["PRISM Coffee Group starter topics"];
+  const groupName = args.groupName?.replace(/\s+/g, " ").trim();
+  const groupId = args.groupId?.replace(/\s+/g, " ").trim();
+  if (groupName) lines.push(`Group: ${groupName}`);
+  if (groupId) lines.push(`Group ID: ${groupId}`);
+  lines.push("", ...sections.map((section) => `${section}\n`));
+  return lines.join("\n").trimEnd();
+}

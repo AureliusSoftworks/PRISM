@@ -3,6 +3,7 @@ node_modules/
 dist/
 dist-desktop/
 coverage/
+test-results/
 *.profraw
 .env
 .env.local

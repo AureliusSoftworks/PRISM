@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import type { LlmProvider, ProviderMessage } from "../providers.ts";
+import { initializeDatabase } from "../db.ts";
 import {
   buildZenSessionMemoryPromptContext,
   createZenPersonaSessionMemoryCheckpoint,
@@ -18,52 +19,35 @@ import {
 const USER_KEY = Buffer.alloc(32, 11);
 
 function createTestDb(): DatabaseSync {
-  const db = new DatabaseSync(":memory:");
-  db.exec(`
-    CREATE TABLE conversations (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      title TEXT NOT NULL,
-      conversation_mode TEXT NOT NULL DEFAULT 'zen',
-      incognito INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-    CREATE TABLE memory_summaries (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      conversation_id TEXT,
-      summary TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    );
-    CREATE TABLE bots (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL DEFAULT 'user-1',
-      name TEXT NOT NULL,
-      visibility TEXT NOT NULL DEFAULT 'private'
-    );
-    CREATE TABLE messages (
-      id TEXT PRIMARY KEY,
-      conversation_id TEXT NOT NULL,
-      user_id TEXT NOT NULL,
-      role TEXT NOT NULL,
-      content TEXT NOT NULL,
-      bot_id TEXT,
-      tool_payload TEXT,
-      created_at TEXT NOT NULL
-    );
-    CREATE TABLE zen_session_memories (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      conversation_id TEXT,
-      bot_id TEXT,
-      ciphertext TEXT NOT NULL,
-      iv TEXT NOT NULL,
-      tag TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      expires_at TEXT NOT NULL
-    );
-  `);
+  const db = initializeDatabase(new DatabaseSync(":memory:"));
+  db.prepare(
+    "INSERT INTO users (id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, created_at, last_active_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ).run(
+    "user-1",
+    "user-1@example.com",
+    "User 1",
+    "hash",
+    "salt",
+    "cipher",
+    "iv",
+    "tag",
+    "2026-01-01T00:00:00.000Z",
+    "2026-01-01T00:00:00.000Z"
+  );
+  db.prepare(
+    "INSERT INTO users (id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, created_at, last_active_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ).run(
+    "user-2",
+    "user-2@example.com",
+    "User 2",
+    "hash",
+    "salt",
+    "cipher",
+    "iv",
+    "tag",
+    "2026-01-01T00:00:00.000Z",
+    "2026-01-01T00:00:00.000Z"
+  );
   return db;
 }
 
@@ -86,7 +70,7 @@ function insertConversation(
   options?: { userId?: string; title?: string; incognito?: boolean }
 ): void {
   db.prepare(
-    "INSERT INTO conversations (id, user_id, title, conversation_mode, incognito, created_at, updated_at) VALUES (?, ?, ?, 'zen', ?, ?, ?)"
+    "INSERT INTO conversations (id, user_id, title, conversation_mode, bot_id, incognito, created_at, updated_at) VALUES (?, ?, ?, 'zen', NULL, ?, ?, ?)"
   ).run(
     id,
     options?.userId ?? "user-1",
@@ -243,7 +227,12 @@ describe("Zen session memory checkpoints", () => {
     assert.equal(deleteZenSessionMemoryById(db, "user-1", userTwo.id), false);
     assert.equal(deleteZenSessionMemoryById(db, "user-2", userTwo.id), true);
     assert.deepEqual(
-      listZenSessionMemories(db, "user-1", USER_KEY).map((memory) => memory.id),
+      listZenSessionMemories(
+        db,
+        "user-1",
+        USER_KEY,
+        new Date("2026-06-20T12:05:00.000Z")
+      ).map((memory) => memory.id),
       [userOne.id]
     );
   });
@@ -282,10 +271,14 @@ describe("Zen session memory checkpoints", () => {
   it("creates automatic Persona checkpoints only for substantial player-facing spans", async () => {
     const db = createTestDb();
     insertConversation(db, "conversation-1", "2026-06-20T12:00:00.000Z");
-    db.prepare("INSERT INTO bots (id, user_id, name) VALUES (?, ?, ?)").run(
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)"
+    ).run(
       "mario",
       "user-1",
-      "Mario"
+      "Mario",
+      "2026-06-20T12:00:00.000Z",
+      "2026-06-20T12:00:00.000Z"
     );
     db.prepare(
       "INSERT INTO messages (id, conversation_id, user_id, role, content, bot_id, tool_payload, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
@@ -353,15 +346,23 @@ describe("Zen session memory checkpoints", () => {
   it("excludes previous-persona handoff and bridge user replies from Persona checkpoints", async () => {
     const db = createTestDb();
     insertConversation(db, "conversation-1", "2026-06-20T12:00:00.000Z");
-    db.prepare("INSERT INTO bots (id, user_id, name) VALUES (?, ?, ?)").run(
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)"
+    ).run(
       "spongebob",
       "user-1",
-      "Spongebob"
+      "Spongebob",
+      "2026-06-20T12:00:00.000Z",
+      "2026-06-20T12:00:00.000Z"
     );
-    db.prepare("INSERT INTO bots (id, user_id, name) VALUES (?, ?, ?)").run(
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)"
+    ).run(
       "mario",
       "user-1",
-      "Mario"
+      "Mario",
+      "2026-06-20T12:00:00.000Z",
+      "2026-06-20T12:00:00.000Z"
     );
     const insertMessage = db.prepare(
       "INSERT INTO messages (id, conversation_id, user_id, role, content, bot_id, tool_payload, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"

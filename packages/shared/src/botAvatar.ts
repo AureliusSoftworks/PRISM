@@ -217,8 +217,8 @@ export function normalizeBotFaceMouthRotationDeg(value: unknown): number | null 
 
 export function normalizeBotFaceBlinkBar(value: unknown): BotFaceBlinkBar | null {
   if (typeof value !== "string") return null;
-  if (value === DEFAULT_BOT_FACE_BLINK_BAR) return DEFAULT_BOT_FACE_BLINK_BAR;
   const trimmed = value.trim();
+  if (!trimmed) return DEFAULT_BOT_FACE_BLINK_BAR;
   if (trimmed === "none") return trimmed;
   const [character] = splitBotFaceVisibleGraphemes(trimmed);
   if (!character || botFaceGraphemeHasEmoji(character)) return null;

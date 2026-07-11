@@ -1212,16 +1212,10 @@ describe("Zen live presence CSS", () => {
       /animation:\s*none\s*;/
     );
 
-    const talkingMouthRule = ruleForNormalizedSelector(
-      '.zenLiveBotPresencePlate[data-talking="true"]:not([data-private-mode="true"])[data-mouth-open="true"] .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part="mouth"]'
-    );
-    assert.match(
-      talkingMouthRule,
-      /animation:\s*zenLiveBotPresenceMouthPulse 130ms cubic-bezier\(0\.37,\s*0,\s*0\.2,\s*1\) infinite\s*;/
-    );
-    assert.match(
+    assert.doesNotMatch(css, /zenLiveBotPresenceMouthPulse/);
+    assert.doesNotMatch(
       css,
-      /@keyframes zenLiveBotPresenceMouthPulse\s*\{[\s\S]*transform:\s*[\s\S]*translate\(var\(--bot-face-mouth-offset-x,\s*0em\),\s*var\(--bot-face-mouth-offset-y,\s*0em\)\)[\s\S]*scale\(var\(--bot-face-mouth-scale,\s*1\)\)[\s\S]*scale\(1\.14\)/
+      /data-mouth-open="true"[^{}]*[\s\S]*?animation:/
     );
   });
 
@@ -1979,6 +1973,52 @@ describe("Zen live presence CSS", () => {
     );
   });
 
+  it("uses the wordmark as the reversible Zen zoom toggle", () => {
+    assert.match(
+      pageSource,
+      /const \[zenZoomedOutConversationId, setZenZoomedOutConversationId\] =\s*useState<string \| null>\(null\);/
+    );
+    assert.match(
+      pageSource,
+      /if \(view === "chat" && conversationForDisplay\.mode === "zen"\) \{\s*setZenZoomedOutConversationId\(null\);/
+    );
+
+    const zoomOutStart = pageSource.indexOf("function zoomOutFromActiveZenConversation()");
+    const zoomInStart = pageSource.indexOf("async function zoomIntoActiveZenConversation()");
+    assert.notEqual(zoomOutStart, -1);
+    assert.notEqual(zoomInStart, -1);
+    const zoomOutSource = pageSource.slice(zoomOutStart, zoomInStart);
+    const zoomInSource = pageSource.slice(
+      zoomInStart,
+      pageSource.indexOf("function handleChatHeaderWordmarkClick", zoomInStart)
+    );
+    assert.match(zoomOutSource, /setZenZoomedOutConversationId\(activeZenConversationId\);/);
+    assert.match(zoomOutSource, /performShowAllBotsView\(null, \{ suppressChatAutoRestore: true \}\);/);
+    assert.match(zoomInSource, /setForceNewConversationOnNextSend\(false\);/);
+    assert.match(zoomInSource, /await refreshConversation\(returnConversationId\);/);
+    assert.match(zoomInSource, /setChatAutoRestoreSuppressed\(true\);/);
+
+    const wordmarkStart = pageSource.indexOf("function handleChatHeaderWordmarkClick");
+    const wordmarkSource = pageSource.slice(
+      wordmarkStart,
+      pageSource.indexOf("function handleSandboxHeaderWordmarkClick", wordmarkStart)
+    );
+    assert.match(
+      wordmarkSource,
+      /if \(zenCanZoomIntoActiveConversation\) \{\s*void zoomIntoActiveZenConversation\(\);\s*return;\s*\}/
+    );
+    assert.match(
+      wordmarkSource,
+      /if \(zenCanZoomOutToAllBots\) \{\s*zoomOutFromActiveZenConversation\(\);\s*return;\s*\}/
+    );
+    assert.match(pageSource, /const zenWordmarkActionLabel = zenCanZoomOutToAllBots/);
+    assert.match(pageSource, /aria-label=\{zenWordmarkActionLabel\}/);
+    assert.doesNotMatch(pageSource, /function renderZenZoomNavigationButton\(\)/);
+    assert.doesNotMatch(pageSource, /function renderZenZoomReturnButton\(\)/);
+    assert.doesNotMatch(css, /\.zenZoomNavigationButton\b/);
+    assert.doesNotMatch(css, /\.zenZoomReturnButton\b/);
+  });
+
   it("keeps fresh Zen hero model and privacy controls inside the hero", () => {
     assert.match(
       pageSource,
@@ -1996,6 +2036,22 @@ describe("Zen live presence CSS", () => {
     assert.equal(pageSource.match(/\{renderZenSplashControls\(\)\}/g)?.length, 2);
     assert.match(css, /\.zenSplashControls\b/);
     assert.match(css, /\.zenSplashPrivateButton\b/);
+  });
+
+  it("keeps sparse Zen transcripts natively scrollable", () => {
+    const sparseTranscriptRule = ruleForSelectorNeedles(
+      '.messages[data-chat-ephemeral="true"] > article.message:first-of-type',
+      '.messages[data-chat-ephemeral="true"] > article.message:last-of-type'
+    );
+    assert.match(sparseTranscriptRule, /margin-block:\s*0\s*;/);
+    assert.doesNotMatch(
+      css,
+      />\s*article\.message:first-of-type\s*\{[\s\S]*?margin-block-start:\s*auto/
+    );
+    assert.doesNotMatch(
+      css,
+      />\s*article\.message:last-of-type\s*\{[\s\S]*?margin-block-end:\s*auto/
+    );
   });
 
   it("keeps selected persona hero headings structured for unusual names", () => {
@@ -2023,6 +2079,14 @@ describe("Zen live presence CSS", () => {
     );
     assert.match(pageSource, /className=\{styles\.emptyStateTitlePhrase\}/);
     assert.match(pageSource, /className=\{styles\.emptyStateTitleSubject\}/);
+    assert.match(
+      pageSource,
+      /<span className=\{styles\.emptyStateTitleLead\}>Chat<\/span>[\s\S]*?<span className=\{styles\.emptyStateTitleLead\}>with<\/span>/
+    );
+    assert.doesNotMatch(
+      pageSource,
+      /<span className=\{styles\.emptyStateTitleLead\}>Zen<\/span>[\s\S]*?<span className=\{styles\.emptyStateTitleLead\}>with<\/span>/
+    );
     assert.doesNotMatch(
       pageSource,
       /<div className=\{styles\.emptyStateTitle\}>\s*\{`Zen with \$\{titleSubject\}`\}\s*<\/div>/

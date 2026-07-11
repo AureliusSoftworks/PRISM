@@ -1982,9 +1982,11 @@ const COFFEE_CHARACTER_IMMERSION_BREAK_PATTERNS = [
 ] as const;
 
 const COFFEE_STAGE_ACTION_VERB_RE =
-  /^(?:(?:dryly|slowly|quietly|thoughtfully|carefully|softly|theatrically|excitedly|gently|nervously)\s+)?(?:adjusts?|arches?|arranges?|blinks?|breathes?|chuckles?|crosses?|drums?|eyes?|eyeing|folds?|frowns?|gazes?|gestures?|glances?|grins?|grimaces?|heads?|laughs?|leans?|looks?|mutters?|nods?|nudges?|pauses?|picks?|places?|plucks?|points?|ponders?|pours?|pulls?|pulling|pushes?|pushing|raises?|rests?|rolls?|rubs?|scoffs?|scratches?|sets?|shakes?|shifts?|shrugs?|sighs?|sips?|slides?|sliding|smiles?|smirks?|snorts?|squints?|stands?|stares?|stirs?|straightens?|stretches?|strokes?|takes?|taking|taps?|tilts?|touches?|turns?|waves?|winces?|winks?)\b/i;
+  /^(?:(?:dryly|slowly|quietly|thoughtfully|carefully|softly|theatrically|excitedly|gently|nervously)\s+)?(?:adjusts?|arches?|arranges?|arrives?|blinks?|breathes?|chuckles?|crosses?|drums?|eyes?|eyeing|folds?|frowns?|gazes?|gestures?|glances?|grins?|grimaces?|heads?|laughs?|leans?|looks?|mutters?|nods?|nudges?|pauses?|picks?|places?|plucks?|points?|ponders?|pours?|pulls?|pulling|pushes?|pushing|raises?|rests?|rolls?|rubs?|scoffs?|scratches?|sets?|settles?|shakes?|shifts?|shrugs?|sighs?|sips?|sits?|slides?|sliding|smiles?|smirks?|snorts?|squints?|stands?|stares?|stirs?|straightens?|stretches?|strokes?|takes?|taking|taps?|tilts?|touches?|turns?|waves?|winces?|winks?)\b/i;
 const COFFEE_STAGE_ACTION_BODY_PART_RE =
-  /^(?:(?:his|her|their|my)\s+)?(?:brows?|claws?|eyes?|fingers?|fists?|hands?|head|jaw|mouth|shoulders?|tentacles?|voice)\s+(?:clench(?:es)?|drum(?:s)?|fold(?:s)?|glance(?:s)?|grip(?:s)?|hover(?:s)?|lift(?:s)?|pause(?:s)?|raise(?:s)?|rest(?:s)?|slam(?:s)?|slap(?:s)?|snap(?:s)?|tap(?:s)?|tighten(?:s)?|twitch(?:es)?|wave(?:s)?)\b/i;
+  /^(?:(?:his|her|their|my)\s+)?(?:brows?|claws?|eyes?|expression|fingers?|fists?|hands?|head|jaw|mouth|shoulders?|tentacles?|voice)\s+(?:clench(?:es)?|drum(?:s)?|fold(?:s)?|glance(?:s)?|grip(?:s)?|hover(?:s)?|lift(?:s)?|pause(?:s)?|raise(?:s)?|rest(?:s)?|sharpen(?:s)?|shift(?:s)?|slam(?:s)?|slap(?:s)?|snap(?:s)?|stead(?:y|ies)|tap(?:s)?|tighten(?:s)?|twitch(?:es)?|wave(?:s)?)\b/i;
+const COFFEE_THUMB_TWIDDLE_ACTION_RE =
+  /^(?:(?:dryly|slowly|quietly|thoughtfully|carefully|softly|theatrically|excitedly|gently|nervously)\s+)?twiddles?\b/i;
 const COFFEE_STAGE_ACTION_BLOCK_RE = /\*+([^*\n]+?)\*+/g;
 const COFFEE_CUP_DRINKING_STAGE_ACTION_RE =
   /\b(?:sips?|sipping|drinks?|drinking|takes?\s+(?:a\s+)?(?:(?:quick|small|slow|quiet|deliberate|long)\s+)?sip|raises?\s+(?:(?:his|her|their|the)\s+)?(?:cup|mug)\s+(?:for\s+a\s+sip|to|toward)\s+(?:(?:his|her|their|the)\s+)?(?:mouth|lips)?|lifts?\s+(?:(?:his|her|their|the)\s+)?(?:cup|mug)\s+(?:to|toward)\s+(?:(?:his|her|their|the)\s+)?(?:mouth|lips))\b/i;
@@ -1994,14 +1996,18 @@ const COFFEE_FIRST_PERSON_STAGE_ACTION_COMMA_RE =
   /^((?:\[[^\]\n]+\]\(prism-bot:\/\/[^)\s]+?\),?\s+)?)I\s+(adjust|arch|arrange|blink|breathe|chuckle|cross|drum|eye|fold|frown|gaze|gesture|glance|grin|grimace|head|laugh|lean|look|mutter|nod|nudge|pause|pick|place|pluck|point|ponder|pour|pull|push|raise|roll|rub|scoff|scratch|set|shake|shift|shrug|sigh|sip|slide|smile|smirk|snort|squint|stand|stare|stir|straighten|stretch|stroke|take|tap|tilt|touch|turn|wave|wince)\s*,\s+((?:[A-Z"“'‘(\[]).*)$/u;
 const COFFEE_FIRST_PERSON_STAGE_ACTION_ONLY_RE =
   /^I\s+(adjust|arch|arrange|blink|breathe|chuckle|cross|drum|eye|fold|frown|gaze|gesture|glance|grin|grimace|head|laugh|lean|look|mutter|nod|nudge|pause|pick|place|pluck|point|ponder|pour|pull|push|raise|roll|rub|scoff|scratch|set|shake|shift|shrug|sigh|sip|slide|smile|smirk|snort|squint|stand|stare|stir|straighten|stretch|stroke|take|tap|tilt|touch|turn|wave|wince)\b(.{2,180})$/u;
+const COFFEE_NARRATED_FIRST_PERSON_STAGE_PRELUDE_RE =
+  /^(?:The|A)\s+[^.!?\n]{3,160}?\bas I\s+(adjust|arrive|cross|fold|glance|lean|pause|settle|shift|sit|stand|straighten|take|turn)\b([^.!?\n]{0,100})[.!?]\s+(.+)$/iu;
+const COFFEE_INLINE_FIRST_PERSON_STAGE_ACTION_RE =
+  /([.!?]\s+)I\s+(adjust|blink|breathe|chuckle|cross|drum|fold|frown|gesture|glance|grin|grimace|laugh|lean|nod|pause|place|raise|roll|rub|settle|shake|shift|shrug|sigh|sit|smile|smirk|stare|straighten|stretch|tap|tilt|turn|wave|wince)\b([^.!?:\n]{1,100})[.!?](?=\s+(?:[A-Z"“'‘(\[]|\*)|$)/gu;
 const COFFEE_TRAILING_STAGE_ACTION_RE =
   /^(.+\S)\s+(blinks?|chuckles?|frowns?|glances?|grins?|grimaces?|laughs?|nods?|pauses?|scoffs?|shrugs?|sighs?|smiles?|smirks?|snorts?|squints?|stares?|winks?)\.?$/iu;
 const COFFEE_MENTION_STAGE_ACTION_OPENER_RE =
   /^((?:\[[^\]\n]+\]\(prism-bot:\/\/[^)\s]+?\),?\s+))(.{3,120}?)\s+((?:[A-Z"“'‘(\[]).*)$/u;
 const COFFEE_INLINE_STAGE_ACTION_RE =
-  /^(.+[.!?])\s+((?:(?:dryly|slowly|quietly|thoughtfully|carefully|softly|theatrically|excitedly|gently|nervously)\s+)?(?:glances?|grins?|heads?|leans?|looks?|nods?|pauses?|rests?|sighs?|smiles?|stands?|stirs?|stretches?|strokes?|taps?|turns?)\b.{0,100}?)\s+((?:[A-Z"“'‘(\[]).*)$/u;
+  /^(.+[.!?])\s+((?:(?:dryly|slowly|quietly|thoughtfully|carefully|softly|theatrically|excitedly|gently|nervously)\s+)?(?:glances?|grins?|heads?|leans?|looks?|nods?|pauses?|rests?|sets?|sighs?|smiles?|stands?|stirs?|stretches?|strokes?|taps?|turns?)\b.{0,100}?)\s+((?:[A-Z"“'‘(\[]).*)$/u;
 const COFFEE_TRAILING_STAGE_ACTION_PHRASE_RE =
-  /^(.+[.!?])\s+((?:(?:dryly|slowly|quietly|thoughtfully|carefully|softly|theatrically|excitedly|gently|nervously)\s+)?(?:glances?|grins?|heads?|leans?|looks?|nods?|pauses?|rests?|sighs?|smiles?|stands?|stirs?|stretches?|strokes?|taps?|turns?)\b.{0,100})$/iu;
+  /^(.+[.!?])\s+((?:(?:dryly|slowly|quietly|thoughtfully|carefully|softly|theatrically|excitedly|gently|nervously)\s+)?(?:glances?|grins?|heads?|leans?|looks?|nods?|pauses?|rests?|sets?|sighs?|smiles?|stands?|stirs?|stretches?|strokes?|taps?|turns?)\b.{0,100})$/iu;
 const COFFEE_SLASH_STAGE_ACTION_SUFFIX_RE =
   /^(.+?)\s*\/\s*((?:(?:dryly|slowly|quietly|thoughtfully|carefully|softly|theatrically|excitedly|gently|nervously)\s+)?(?:glances?|grins?|heads?|leans?|looks?|nods?|pauses?|rests?|sighs?|smiles?|stands?|stirs?|stretches?|strokes?|taps?|turns?)\b.{0,120})$/iu;
 
@@ -2012,6 +2018,7 @@ function isValidCoffeeStageAction(action: string): boolean {
   if (tokenCount > 24) return false;
   const lower = normalized.toLowerCase();
   if (COFFEE_STAGE_ACTION_VERB_RE.test(lower)) return true;
+  if (COFFEE_THUMB_TWIDDLE_ACTION_RE.test(lower)) return true;
   if (COFFEE_STAGE_ACTION_BODY_PART_RE.test(lower)) return true;
   // Allow common verb-like morphology so we don't over-prune natural actions.
   return /\b\p{L}+(?:ing|ed)\b/iu.test(lower);
@@ -2054,12 +2061,97 @@ function thirdPersonCoffeeActionVerb(raw: string): string {
 
 function normalizeCoffeeStageActionText(raw: string): string {
   const trimmed = raw
+    .replace(/\bbefore me\b/giu, "nearby")
     .replace(/\bmy\b/giu, "the")
+    .replace(/\bme\b/giu, "the speaker")
     .replace(/\s+/g, " ")
     .replace(/[,.!?;:\s]+$/u, "")
     .trim();
   if (!trimmed) return "";
   return `${trimmed.charAt(0).toLowerCase()}${trimmed.slice(1)}`;
+}
+
+function normalizeCoffeeNarratedFirstPersonStagePrelude(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return raw;
+  const match = trimmed.match(COFFEE_NARRATED_FIRST_PERSON_STAGE_PRELUDE_RE);
+  if (!match?.[1] || !match[3]) return raw;
+  const action = normalizeCoffeeStageActionText(
+    `${thirdPersonCoffeeActionVerb(match[1])}${match[2] ?? ""}`
+  );
+  const spoken = match[3].trim();
+  if (!action || !spoken || !isValidCoffeeStageAction(action)) return raw;
+  return `*${action}* ${spoken}`;
+}
+
+function normalizeCoffeeInlineFirstPersonStageActions(raw: string): string {
+  if (!raw) return raw;
+  return raw.replace(
+    COFFEE_INLINE_FIRST_PERSON_STAGE_ACTION_RE,
+    (full, prefix, verb, tail) => {
+      const action = normalizeCoffeeStageActionText(
+        `${thirdPersonCoffeeActionVerb(String(verb))}${String(tail ?? "")}`
+      );
+      if (!action || !isValidCoffeeStageAction(action)) return full;
+      return `${String(prefix ?? "")}*${action}*`;
+    }
+  );
+}
+
+function coffeeSpeakerActionAliases(speakerName: string | null | undefined): string[] {
+  const full = typeof speakerName === "string" ? speakerName.trim() : "";
+  if (!full) return [];
+  const last = full.split(/\s+/).filter(Boolean).at(-1) ?? "";
+  return [...new Set([full, last].filter(Boolean))].sort((a, b) => b.length - a.length);
+}
+
+function normalizeCoffeeNamedThirdPersonStageActionOpener(
+  raw: string,
+  speakerName: string | null | undefined
+): string {
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed.includes("*")) return raw;
+  const aliases = coffeeSpeakerActionAliases(speakerName);
+  if (aliases.length === 0) return raw;
+  const mentionMatch = trimmed.match(/^(\[[^\]\n]+\]\(prism-bot:\/\/[^)\s]+?\),?\s+)?(.*)$/u);
+  const prefix = mentionMatch?.[1] ?? "";
+  const body = mentionMatch?.[2] ?? trimmed;
+  const aliasPattern = aliases.map(escapeRegExp).join("|");
+  const namedMatch = body.match(new RegExp(`^(?:${aliasPattern})(?:['’]s)?\\s+(.+)$`, "iu"));
+  if (!namedMatch?.[1]) return raw;
+  const actionAndSpeech = namedMatch[1].match(
+    /^(.{3,180}?)(?:[.!?]\s+|\s+)((?:Ah|Aye|But|Hey|Now|Oh|Okay|Ok|So|That|The|Then|This|Those|These|Well|You|We|What|Why|Yes|No)\b.*)$/u
+  );
+  if (!actionAndSpeech?.[1] || !actionAndSpeech[2]) return raw;
+  const action = normalizeCoffeeStageActionText(actionAndSpeech[1]);
+  const spoken = actionAndSpeech[2].trim();
+  if (!action || !spoken || !isValidCoffeeStageAction(action)) return raw;
+  return `${prefix}*${action}* ${spoken}`;
+}
+
+function normalizeCoffeeInlineThirdPersonStageAction(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed.includes("*")) return raw;
+  const match = trimmed.match(/^(.+[.!?])\s+(?:He|She|They)\s+(.{3,160}?)[.!?]\s+(.+)$/u);
+  if (!match?.[1] || !match[2] || !match[3]) return raw;
+  const before = match[1].trim();
+  const action = normalizeCoffeeStageActionText(match[2]);
+  const after = match[3].trim();
+  if (!before || !action || !after || !isValidCoffeeStageAction(action)) return raw;
+  return `${before} *${action}* ${after}`;
+}
+
+function stripCoffeeSelfNameFromStageActions(
+  raw: string,
+  speakerName: string | null | undefined
+): string {
+  const aliases = coffeeSpeakerActionAliases(speakerName);
+  if (aliases.length === 0) return raw;
+  const aliasPattern = aliases.map(escapeRegExp).join("|");
+  return raw.replace(
+    new RegExp(`\\*(?:${aliasPattern})(?:['’]s)?\\s+`, "giu"),
+    "*"
+  );
 }
 
 function normalizeCoffeeFirstPersonStageActionOpener(raw: string): string {
@@ -2274,6 +2366,16 @@ const COFFEE_META_TABLE_MANAGEMENT_PATTERNS = [
   /^interesting dynamics at play\b/i,
   /^the new object is\b/i,
   /^the useful part is (?:where|what)\b.{0,120}\b(?:break|cost|costing|risk|protect)/i,
+  /^put one visible choice beside that and it starts to make sense[.!?]?$/i,
+  /^one table-sized example would make this easier to answer[.!?]?$/i,
+  /^give the idea one visible choice before it turns into fog[.!?]?$/i,
+  /^anchor it to one scene we can actually argue over[.!?]?$/i,
+  /^if\b.{1,80}\bis the lever, i need to see what breaks first[.!?]?$/i,
+  /^make\b.{1,80}\bvisible in one choice and i can take a side[.!?]?$/i,
+  /^that only lands if\b.{1,80}\bchanges what someone actually does[.!?]?$/i,
+  /^give\b.{1,80}\bone table-sized example before it turns into fog[.!?]?$/i,
+  /^i need\b.{1,80}\bin a scene where someone has to choose[.!?]?$/i,
+  /^anchor\b.{1,80}\bto one scene we can actually argue over[.!?]?$/i,
 ] as const;
 
 const COFFEE_INCOHERENT_TABLE_LINE_PATTERNS = [
@@ -2449,18 +2551,28 @@ export function sanitizeCoffeeTableReply(
   const withoutSelfAddressNoise = stripCoffeeLeadingOrphanPunctuation(
     stripCoffeeSelfAddressNoise(stripped, speakerName)
   );
-  const withStageActionsSanitized = normalizeCoffeeUnmarkedTrailingStageAction(
-    normalizeCoffeeInlineUnmarkedStageAction(
-      normalizeCoffeeUnmarkedStageActionOpener(
-        normalizeCoffeeMentionPrefixedStageActionOpener(
-          normalizeCoffeeFirstPersonStageActionOpener(
-            normalizeCoffeeFirstPersonStageActionOnly(
-              sanitizeCoffeeStageActions(withoutSelfAddressNoise)
+  const withThirdPersonActions = normalizeCoffeeInlineThirdPersonStageAction(
+    normalizeCoffeeNamedThirdPersonStageActionOpener(withoutSelfAddressNoise, speakerName)
+  );
+  const withStageActionsSanitized = stripCoffeeSelfNameFromStageActions(
+    normalizeCoffeeUnmarkedTrailingStageAction(
+      normalizeCoffeeInlineUnmarkedStageAction(
+        normalizeCoffeeUnmarkedStageActionOpener(
+          normalizeCoffeeMentionPrefixedStageActionOpener(
+            normalizeCoffeeFirstPersonStageActionOpener(
+              normalizeCoffeeFirstPersonStageActionOnly(
+                normalizeCoffeeInlineFirstPersonStageActions(
+                  normalizeCoffeeNarratedFirstPersonStagePrelude(
+                    sanitizeCoffeeStageActions(withThirdPersonActions)
+                  )
+                )
+              )
             )
           )
         )
       )
-    )
+    ),
+    speakerName
   );
   const withoutCupDrinkingActions = stripCoffeeCupDrinkingStageActions(withStageActionsSanitized);
   if (!withoutCupDrinkingActions) return "";
@@ -2876,22 +2988,22 @@ export function buildCoffeeEmergencyFallbackReply(args: {
       })
     : /\?\s*$/.test(args.tableFocus.trim())
     ? [
-        "Give me one concrete example and I can answer that more cleanly.",
-        "Name the exact case and I can take a side.",
-        "I can follow that if we anchor it to one real choice.",
-        "The answer changes depending on what someone is trying to protect.",
-        "Ask what would prove the opposite and the question gets sharper.",
-        "Put one visible cost beside it and the room has something to test.",
+        "My answer turns on one detail: who bears the cost when this goes wrong?",
+        "I would test that at the weakest handoff, where responsibility changes hands.",
+        "The deciding case is the person who pays for exposing the mistake.",
+        "I take the side that can admit error without punishing the dissenter.",
+        "The first break usually appears when nobody owns the consequence.",
+        "My choice depends on whether the rule can correct itself without protecting its pride.",
       ]
     : [
-        "I am not sold yet; one concrete detail would make this easier to answer.",
-        "That needs one real example before I can move with it.",
-        "Put one visible choice beside that and it starts to make sense.",
-        "A concrete detail would show whether this actually holds up.",
-        "Give that idea a receipt, not just a mood.",
-        "Which detail would change what someone does next?",
-        "Make the cost plain enough for someone at the table to feel it.",
-        "One real scene would keep the answer from floating.",
+        "The first break usually appears at the handoff, when responsibility changes hands.",
+        "I distrust any rule that punishes the person who exposes its mistake.",
+        "The cost tells me more than the intention; watch who pays when this fails.",
+        "A process that cannot admit error will eventually protect itself over its purpose.",
+        "The real test is whether anyone can correct the mistake without being punished.",
+        "Once nobody owns the consequence, the system teaches everyone to hide the failure.",
+        "I would watch the exception; that is where a rule reveals whom it actually serves.",
+        "The choice becomes real when one side must absorb the failure.",
       ];
   const seed = `${args.conversationId}:${args.speaker.id}:${args.historyLength}:${args.seedExtra ?? ""}:${args.tableFocus}`;
   const startIndex = Math.floor(stableUnitValue(seed) * options.length) % options.length;
@@ -2946,24 +3058,14 @@ export function buildCoffeeFreshFallbackBeat(args: {
   avoidTexts?: readonly string[];
   maxChars: number;
 }): string {
-  const focus = coffeeFallbackFocusPhrase(args.tableFocus ?? "");
-  const options = focus
-    ? [
-        `If ${focus} is the lever, I need to see what breaks first.`,
-        `Make ${focus} visible in one choice and I can take a side.`,
-        `That only lands if ${focus} changes what someone actually does.`,
-        `Give ${focus} one table-sized example before it turns into fog.`,
-        `I need ${focus} in a scene where someone has to choose.`,
-        `Anchor ${focus} to one scene we can actually argue over.`,
-      ]
-    : [
-        "One table-sized example would make this easier to answer.",
-        "Give the idea one visible choice before it turns into fog.",
-        "A scene where the help starts costing someone would make this clearer.",
-        "A concrete detail would show whether this actually holds up.",
-        "The answer depends on what we are protecting.",
-        "Anchor it to one scene we can actually argue over.",
-      ];
+  const options = [
+    "Trust breaks before the machinery does; people work around rules they believe are rigged.",
+    "The weakest handoff matters most, because that is where responsibility disappears.",
+    "I would follow the consequence, not the promise; the person paying usually sees the truth first.",
+    "A system can survive a mistake, but not a habit of punishing whoever names it.",
+    "The part I cannot ignore is who gets to call this a success after someone else pays.",
+    "Then I take the skeptical side: the rule is serving itself, not its purpose.",
+  ];
   const seed = `${args.conversationId}:${args.speaker.id}:${args.historyLength}:${args.seedExtra ?? ""}:fresh-fallback`;
   const startIndex = Math.floor(stableUnitValue(seed) * options.length) % options.length;
   const avoidKeys = new Set((args.avoidTexts ?? []).map(coffeeReplyRepeatKey).filter(Boolean));
@@ -2977,6 +3079,9 @@ export function buildCoffeeFreshFallbackBeat(args: {
   }
   return clampCoffeeTableReplyText(fallback, args.maxChars);
 }
+
+const COFFEE_LAST_RESORT_VISIBLE_REPLY =
+  "I distrust any rule that punishes the person who exposes its mistake.";
 
 export function coffeeFallbackFocusPhrase(raw: string): string | null {
   const visible = visibleCoffeeSpeechForValueScan(raw)
@@ -3402,7 +3507,10 @@ function formatCoffeeTranscriptLine(message: ChatMessage): string {
   return `System: ${message.content.trim()}`;
 }
 
-function coffeeMessageIsPrivatePlayerTeamChoiceMarker(message: ChatMessage): boolean {
+function coffeeMessageIsPrivatePlayerTeamChoiceMarker(message: {
+  role: string;
+  content: string;
+}): boolean {
   if (message.role !== "user") return false;
   const text = message.content.replace(/\s+/g, " ").trim();
   return /^\*(?:joins .+|switches from .+ to .+|steps back to Undecided after leaving .+)\*$/iu.test(
@@ -3420,12 +3528,27 @@ function latestCoffeeUserActionPayload(
   return null;
 }
 
+export function coffeeMessageBelongsInBotPromptHistory(message: {
+  role: string;
+  content: string;
+  coffeeReplayEvents?: readonly unknown[] | null;
+  coffeeUserAction?: unknown;
+}): boolean {
+  if (
+    message.coffeeReplayEvents &&
+    message.coffeeReplayEvents.length > 0 &&
+    message.content.trim().length === 0
+  ) {
+    return false;
+  }
+  if (message.coffeeUserAction) return false;
+  if (message.role === "system" && message.content.trim().length === 0) return false;
+  return !coffeeMessageIsPrivatePlayerTeamChoiceMarker(message);
+}
+
 function coffeeBotPromptHistory(messages: readonly ChatMessage[]): ChatMessage[] {
   return messages.filter((message) => {
-    if (message.coffeeReplayEvents && message.coffeeReplayEvents.length > 0) return false;
-    if (message.coffeeUserAction) return false;
-    if (message.role === "system" && message.content.trim().length === 0) return false;
-    return !coffeeMessageIsPrivatePlayerTeamChoiceMarker(message);
+    return coffeeMessageBelongsInBotPromptHistory(message);
   });
 }
 
@@ -3693,7 +3816,7 @@ function buildCoffeeSessionSynopsisMessages(args: {
     {
       role: "system",
       content:
-        "Write a concise end-of-session Coffee table synopsis for the user. Be concrete, observant, and natural. Do not mention prompts, hidden rules, account metadata, display names, or system-noted facts.",
+        "Write a concise end-of-session Coffee table synopsis for the user. Be concrete, observant, and natural. Attribute every introduced object, action, and claim to the speaker who actually supplied it in the transcript. Do not invent broad engagement judgments or praise; describe only behavior the transcript directly shows. Do not mention prompts, hidden rules, account metadata, display names, or system-noted facts.",
     },
     {
       role: "user",
@@ -3708,6 +3831,7 @@ function buildCoffeeSessionSynopsisMessages(args: {
         ...memorySection,
         "",
         "Write 2-4 short sentences. Cover how the conversation went, highlights or lows, and mention attendance only if the transcript made it socially meaningful. If the table drifted away from the topic, say so plainly instead of praising or disguising the sidestep. If poll results, team dynamics, or memory changes are provided above, include them naturally; do not mention categories that were not provided.",
+        "Keep attribution literal: if Franklin introduces an object and Washington later handles it, do not credit Washington with introducing it. Never claim everyone stayed engaged unless every participant's visible lines support that exact conclusion.",
       ].join("\n"),
     },
   ];
@@ -5830,6 +5954,80 @@ const COFFEE_STARTER_TOPIC_STOPWORDS = new Set([
   "with",
 ]);
 
+const COFFEE_STARTER_TOPIC_NAME_TITLES = new Set([
+  "dr",
+  "miss",
+  "mr",
+  "mrs",
+  "ms",
+  "prof",
+  "professor",
+  "the",
+]);
+
+const COFFEE_STARTER_TOPIC_PROFILE_CARD_WORDS = new Set([
+  "adventure",
+  "adventures",
+  "blue",
+  "blues",
+  "dream",
+  "dreams",
+  "outlook",
+  "reflection",
+  "reflections",
+  "struggle",
+  "struggles",
+]);
+
+const COFFEE_STARTER_TOPIC_PASSIVE_ENDINGS = new Set([
+  "ignit",
+  "ignited",
+  "unveil",
+  "unveiled",
+]);
+
+const COFFEE_STARTER_TOPIC_SIMILARITY_WEAK_WORDS = new Set([
+  ...COFFEE_STARTER_TOPIC_PROFILE_CARD_WORDS,
+  "challenge",
+  "challenges",
+  "dilemma",
+  "dilemmas",
+  "issue",
+  "issues",
+  "problem",
+  "problems",
+  "topic",
+  "topics",
+]);
+
+const COFFEE_DISTINCT_FILL_TOPICS = [
+  "The first practical test",
+  "A necessary compromise",
+  "The favorite exception",
+  "Useful discomfort at work",
+  "A promise under pressure",
+  "The cost of staying quiet",
+  "When good rules bend",
+  "A shortcut with consequences",
+  "The honest version",
+  "A duty nobody wanted",
+  "The small thing worth defending",
+  "When loyalty gets expensive",
+  "A plan that got weird",
+  "The quiet part of ambition",
+  "A kindness with limits",
+  "The rule nobody follows",
+  "A secret with witnesses",
+  "When certainty annoys everyone",
+  "The useful mistake",
+  "A victory that feels awkward",
+  "When the easy answer fails",
+  "A habit worth questioning",
+  "The problem with being helpful",
+  "A risk worth taking",
+  "The hard part of fairness",
+] as const;
+
 function coffeeStarterTopicFromPayloadItem(item: unknown): CoffeeStarterTopicCandidate | null {
   if (typeof item === "string") return { label: item };
   if (!item || typeof item !== "object" || Array.isArray(item)) return null;
@@ -5856,6 +6054,97 @@ function coffeeStarterTopicFromPayloadItem(item: unknown): CoffeeStarterTopicCan
   };
 }
 
+function coffeeStarterTopicTokens(raw: string): string[] {
+  return raw.toLowerCase().match(/[\p{L}\p{N}'-]+/gu) ?? [];
+}
+
+function coffeeStarterTopicStemToken(raw: string): string {
+  const token = raw.toLowerCase().replace(/^['-]+|['-]+$/g, "");
+  if (token.startsWith("profit")) return "profit";
+  if (token.endsWith("ies") && token.length > 5) return `${token.slice(0, -3)}y`;
+  if (token.endsWith("ing") && token.length > 6) return token.slice(0, -3);
+  if (token.endsWith("ed") && token.length > 5) return token.slice(0, -2);
+  if (token.endsWith("s") && token.length > 4) return token.slice(0, -1);
+  return token;
+}
+
+function coffeeStarterTopicContentRoots(raw: string): string[] {
+  return coffeeStarterTopicTokens(raw)
+    .filter((token) => token.length > 2 && !COFFEE_STARTER_TOPIC_STOPWORDS.has(token))
+    .map((token) => coffeeStarterTopicStemToken(token))
+    .filter((token) => token.length > 2);
+}
+
+function coffeeStarterTopicParticipantTokens(bot: Pick<CoffeeBotProfile, "name">): string[] {
+  return coffeeStarterTopicTokens(bot.name)
+    .filter((token) => token.length > 1)
+    .filter((token) => !COFFEE_STARTER_TOPIC_NAME_TITLES.has(token));
+}
+
+function coffeeStarterTopicContainsTokenSequence(
+  haystack: readonly string[],
+  needle: readonly string[]
+): boolean {
+  if (needle.length === 0 || needle.length > haystack.length) return false;
+  for (let index = 0; index <= haystack.length - needle.length; index += 1) {
+    let matches = true;
+    for (let offset = 0; offset < needle.length; offset += 1) {
+      if (haystack[index + offset] !== needle[offset]) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches) return true;
+  }
+  return false;
+}
+
+function coffeeStarterTopicMentionsParticipantName(
+  label: string,
+  group: readonly Pick<CoffeeBotProfile, "name">[]
+): boolean {
+  const labelTokens = coffeeStarterTopicTokens(label);
+  if (labelTokens.length === 0) return false;
+  const normalized = label.toLowerCase();
+  for (const bot of group) {
+    const nameTokens = coffeeStarterTopicParticipantTokens(bot);
+    if (nameTokens.length === 0) continue;
+    if (coffeeStarterTopicContainsTokenSequence(labelTokens, nameTokens)) return true;
+    if (nameTokens.length === 1 && labelTokens.includes(nameTokens[0]!)) return true;
+    for (const token of nameTokens) {
+      if (token.length <= 2) continue;
+      const possessivePattern = new RegExp(
+        `\\b${token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:[’']s|[’'])`,
+        "u"
+      );
+      if (possessivePattern.test(normalized)) return true;
+    }
+  }
+  return false;
+}
+
+function coffeeStarterTopicHasAwkwardRepeatedRoot(label: string): boolean {
+  const roots = coffeeStarterTopicContentRoots(label);
+  if (roots.length < 2 || roots.length > 5) return false;
+  const counts = new Map<string, number>();
+  for (const root of roots) {
+    counts.set(root, (counts.get(root) ?? 0) + 1);
+  }
+  return [...counts.values()].some((count) => count > 1);
+}
+
+function coffeeStarterTopicLooksLikeProfileCardLabel(
+  label: string,
+  group: readonly Pick<CoffeeBotProfile, "name">[]
+): boolean {
+  if (coffeeStarterTopicMentionsParticipantName(label, group)) return true;
+  if (coffeeStarterTopicHasAwkwardRepeatedRoot(label)) return true;
+  const roots = coffeeStarterTopicContentRoots(label);
+  if (roots.some((root) => COFFEE_STARTER_TOPIC_PROFILE_CARD_WORDS.has(root))) return true;
+  const lastRoot = roots.at(-1);
+  return Boolean(lastRoot && COFFEE_STARTER_TOPIC_PASSIVE_ENDINGS.has(lastRoot));
+}
+
 function normalizeCoffeeStarterTopicLabel(raw: string): string | null {
   const normalized = raw
     .replace(/\s+/g, " ")
@@ -5878,15 +6167,15 @@ function normalizeCoffeeStarterTopicLabel(raw: string): string | null {
   return normalized;
 }
 
-function coffeeStarterTopicSimilarityKey(label: string): string {
-  return (
-    label
-      .toLowerCase()
-      .match(/[\p{L}\p{N}'-]+/gu)
-      ?.filter((token) => token.length > 2 && !COFFEE_STARTER_TOPIC_STOPWORDS.has(token))
-      .slice(0, 6)
-      .join(" ") ?? ""
-  );
+function coffeeStarterTopicSimilarityKeys(label: string): string[] {
+  const roots = coffeeStarterTopicContentRoots(label)
+    .filter((root) => !COFFEE_STARTER_TOPIC_SIMILARITY_WEAK_WORDS.has(root));
+  const uniqueRoots = roots.filter((root, index, all) => all.indexOf(root) === index);
+  if (uniqueRoots.length === 0) return [];
+  const keys = [uniqueRoots.slice(0, 6).join(" ")];
+  if (uniqueRoots.length >= 3) keys.push(uniqueRoots.slice(0, 3).join(" "));
+  if (uniqueRoots.length >= 4) keys.push(uniqueRoots.slice(0, 4).join(" "));
+  return keys.filter((key, index, all) => key.length > 0 && all.indexOf(key) === index);
 }
 
 function coffeeStarterTopicMentionsMultipleBots(
@@ -5914,11 +6203,15 @@ function selectCoffeeStarterTopicLabels(
   for (const candidate of candidates) {
     const label = normalizeCoffeeStarterTopicLabel(candidate.label);
     if (!label) continue;
+    if (coffeeStarterTopicLooksLikeProfileCardLabel(label, group)) continue;
     if (coffeeStarterTopicMentionsMultipleBots(label, group)) continue;
-    const key = coffeeStarterTopicSimilarityKey(label);
-    if (!key || seenKeys.has(key) || options.selectedKeys?.has(key)) continue;
-    seenKeys.add(key);
-    options.selectedKeys?.add(key);
+    const keys = coffeeStarterTopicSimilarityKeys(label);
+    if (keys.length === 0) continue;
+    if (keys.some((key) => seenKeys.has(key) || options.selectedKeys?.has(key))) continue;
+    for (const key of keys) {
+      seenKeys.add(key);
+      options.selectedKeys?.add(key);
+    }
     selected.push(label);
     if (selected.length >= maxLabels) break;
   }
@@ -6976,8 +7269,16 @@ function buildKnownPersonaCoffeeStarterTopics(bot: CoffeeBotProfile): string[] {
   if (/\baristotle\b/u.test(name)) {
     return ["Virtue as practiced habit", "Friendship and the good life", "When moderation fails"];
   }
-  if (/\bspongebob|squarepants\b/u.test(name) || /\bfry cook|krusty krab|optimism\b/u.test(hints)) {
-    return ["Relentless optimism on shift", "A spatula worth defending", "Kindness before competence"];
+  if (/\bplankton\b/u.test(name) || /\bchum bucket|schem|envy|formula heist\b/u.test(hints)) {
+    return ["A plan too clever", "Envy at tiny scale", "Stealing what cannot satisfy"];
+  }
+  if (/\bspongebob|squarepants\b/u.test(name) || /\bfry cook|optimism\b/u.test(hints)) {
+    return [
+      "Relentless optimism on shift",
+      "When optimism runs the shift",
+      "A spatula worth defending",
+      "Kindness before competence",
+    ];
   }
   if (/\bpatrick\b/u.test(name) || /\bunder a rock|simple wisdom\b/u.test(hints)) {
     return ["Simple wisdom under pressure", "Being wrong with confidence", "Friendship without strategy"];
@@ -7025,19 +7326,18 @@ const COFFEE_BOT_TOPIC_PHRASE_STOPWORDS = new Set([
   "who",
 ]);
 
-function coffeeBotTopicDisplayName(bot: Pick<CoffeeBotProfile, "name">): string {
-  const words = bot.name.match(/[\p{L}\p{N}'-]+/gu) ?? [];
-  const compact = words.slice(0, 2).join(" ").trim();
-  return compact || "This guest";
-}
-
-function coffeeBotTopicPossessiveName(bot: Pick<CoffeeBotProfile, "name">): string {
-  const name = coffeeBotTopicDisplayName(bot);
-  return /s$/iu.test(name) ? `${name}'` : `${name}'s`;
-}
-
 function sentenceCaseCoffeeTopicPhrase(phrase: string): string {
   return phrase.length > 0 ? `${phrase.slice(0, 1).toUpperCase()}${phrase.slice(1)}` : phrase;
+}
+
+function rotatedCoffeeDistinctFillTopics(seed: string): string[] {
+  const offset = Math.floor(
+    stableUnitValue(`coffee-topic-fill:${seed}`) * COFFEE_DISTINCT_FILL_TOPICS.length
+  );
+  return [
+    ...COFFEE_DISTINCT_FILL_TOPICS.slice(offset),
+    ...COFFEE_DISTINCT_FILL_TOPICS.slice(0, offset),
+  ];
 }
 
 function collectCoffeeBotTopicKeywordPhrases(bot: CoffeeBotProfile): string[] {
@@ -7084,16 +7384,10 @@ function buildDistinctCoffeeStarterTopicFillCandidatesForBot(
       `${titled} worth defending`,
     ];
   });
-  const possessive = coffeeBotTopicPossessiveName(bot);
   return [
     ...buildDeterministicCoffeeStarterTopicsForBot(bot, sessionSettings),
     ...phraseCandidates,
-    `${possessive} hardest question`,
-    `${possessive} necessary compromise`,
-    `${possessive} private doubt`,
-    `${possessive} practical test`,
-    `${possessive} useful discomfort`,
-    `${possessive} favorite exception`,
+    ...rotatedCoffeeDistinctFillTopics(`${bot.id}:${bot.name}`),
   ];
 }
 
@@ -7144,9 +7438,13 @@ export async function inferCoffeeGroupStarterTopics(args: {
         `Include exactly ${COFFEE_GROUP_STARTER_TOPICS_PER_BOT} topic objects per botId.`,
         "Each label is a TOPIC THE TABLE CAN EXPLORE together, but it should be especially grounded in that bot's persona, role, values, interests, canon details, or productive tensions.",
         "Each label must be 2-8 words, concrete, safe, single-line UTF-8; no numbering or prefixes inside strings.",
+        "Write table topics, not bot profile labels: avoid labels shaped like \"Name's trait\", \"Name's outlook\", hobby dreams, quiet reflections, or generic struggles.",
+        "If a label would name a participant, rewrite it as the shared situation, tension, or choice the whole table can argue about.",
+        "Avoid near-duplicate concepts across bots; change the actual angle, not just a suffix like dilemma, struggle, or chaos.",
         "Avoid making every topic generic philosophy. Different bots should produce visibly different angles.",
         "Do not usually name participants in labels; capture the underlying idea instead.",
         "Avoid generic filler like 'check-in', 'worth unpacking', or bland universal agreement phrasing.",
+        "Bad -> better examples: \"SpongeBob's Optimistic Outlook\" -> \"When optimism runs the shift\"; \"Patrick's Simple Wisdom\" -> \"Doing nothing as a plan\"; \"Krusty Krab Closing Shift Dilemma\" -> \"Who cleans up the mess\".",
       ].join("\n"),
     },
   ];
@@ -7238,6 +7536,9 @@ export async function inferCoffeeStarterTopics(args: {
         "Each label is a TOPIC THE GROUP EXPLORES together (not a user quick-reply, not a question directed only at the player).",
         "Each label must be 2–8 words, concrete, safe, single-line UTF-8; no numbering or prefixes inside strings.",
         "Ground every topic in the seated bots' stated interests, values, purpose, roles, memories, or productive contrasts between them.",
+        "Write table topics, not bot profile labels: avoid labels shaped like \"Name's trait\", \"Name's outlook\", hobby dreams, quiet reflections, or generic struggles.",
+        "If a label would name a participant, rewrite it as the shared situation, tension, or choice the whole table can argue about.",
+        "Avoid near-duplicate concepts; change the actual angle, not just a suffix like dilemma, struggle, or chaos.",
         "Attendance can tint topic choice only when it creates a natural group dynamic; do not make all topics about who is away.",
         "When memory hints exist, treat them as first-class signal; prefer fresh labels inspired by recent memories, recurring interests, unresolved tensions, or contrasts between attendees.",
         "Do not quote memory text verbatim or make labels about memories.",
@@ -7893,7 +8194,9 @@ export function buildRouterPrompt(args: {
   });
 
   const recencyHint =
-    settings.crossTalk === "rare"
+    turnKind === "autonomous" && lastSpeakerBotId && group.length > 1
+      ? `The last bot to speak was id="${lastSpeakerBotId}". Pass the mic to a different seated bot so the next turn becomes a real bot-to-bot handoff; the next speaker should answer one concrete part of the previous line.`
+      : settings.crossTalk === "rare"
       ? lastSpeakerBotId
         ? `The last bot to speak was id="${lastSpeakerBotId}". Prefer letting that line land before handing the mic elsewhere unless another bot is clearly a better fit.`
         : `No bot has spoken yet in this thread.`
@@ -8123,6 +8426,25 @@ export function pickFallbackSpeaker(
   return group[(index + 1) % group.length]!;
 }
 
+export function resolveCoffeeAutonomousSpeakerHandoff(args: {
+  group: CoffeeBotProfile[];
+  pickedBotId: string;
+  lastSpeakerBotId: string | null;
+  turnKind: CoffeeTurnKind;
+}): CoffeeBotProfile {
+  const picked = args.group.find((bot) => bot.id === args.pickedBotId);
+  if (!picked) return pickFallbackSpeaker(args.group, args.lastSpeakerBotId);
+  if (
+    args.turnKind !== "autonomous" ||
+    args.group.length < 2 ||
+    !args.lastSpeakerBotId ||
+    picked.id !== args.lastSpeakerBotId
+  ) {
+    return picked;
+  }
+  return pickFallbackSpeaker(args.group, args.lastSpeakerBotId);
+}
+
 /**
  * Resolve an optional director-mode speaker request.
  *
@@ -8264,6 +8586,35 @@ export function buildSpeakerPrompt(args: {
   const peers = group.filter((bot) => bot.id !== speaker.id);
   const peerLines = peers.map((bot) => `- ${bot.name}`);
   const speakerSocial = socialByBotId[speaker.id] ?? DEFAULT_COFFEE_SOCIAL;
+  const latestTableMessage = promptHistory.at(-1) ?? null;
+  const latestTableMessageIsSpeaker =
+    latestTableMessage?.role === "assistant" &&
+    (latestTableMessage.botId
+      ? latestTableMessage.botId === speaker.id
+      : latestTableMessage.botName?.trim().toLowerCase() === speaker.name.trim().toLowerCase());
+  const latestPeerMessage =
+    turnKind === "autonomous" &&
+    latestTableMessage?.role === "assistant" &&
+    !latestTableMessageIsSpeaker
+      ? latestTableMessage
+      : null;
+  const latestPeerName = latestPeerMessage?.botName?.trim() || "The previous bot";
+  const latestPeerSpeech = latestPeerMessage
+    ? normalizeCoffeePromptSnippet(
+        visibleCoffeeSpeechForValueScan(
+          stripCoffeeSpeakerPrefix(latestPeerMessage.content, latestPeerMessage.botName)
+        ) || latestPeerMessage.content,
+        420
+      )
+    : "";
+  const latestPeerHandoffLines = latestPeerMessage
+    ? [
+        "",
+        `Immediate bot-to-bot handoff from ${latestPeerName}: ${latestPeerSpeech}`,
+        "Respond to one specific claim, image, disagreement, or question from that line before adding your own angle. Do not restart with a standalone topic monologue as if nobody just spoke.",
+        "A bare agreement is not enough; make the connection visible through your own worldview.",
+      ]
+    : [];
 
   const prismBotMentionHint = coffeeTranscriptContainsPrismBotMention(userMessage, promptHistory);
   const speakerMentionRosterAppendix = buildCoffeeSpeakerMentionRosterAppendix(
@@ -8483,6 +8834,7 @@ export function buildSpeakerPrompt(args: {
     "PRISM chat can generate and share images. Never say that photos/images are impossible to send in this chat.",
     "You may react directly to what another bot just said, agree, disagree, add one concrete thought, pause into a softer observation, or gently shift the topic when that fits your personality.",
     "When another bot states a strong value or purpose, answer from your own worldview. Avoid empty acknowledgements like 'I get that' with no character-specific substance.",
+    ...latestPeerHandoffLines,
     "The user is present, but Coffee should feel like a group conversation. Do not turn every reply back toward the user.",
     ...autonomousFocusLines,
     ...userDisplayNameGuidanceLines,
@@ -8564,10 +8916,17 @@ export function buildSpeakerPrompt(args: {
     turnKind === "autonomous"
       ? {
           role: "user",
-          content: [
-            `Latest table moment: ${userMessage}`,
-            `${speaker.name}, say your next short table line now.`,
-          ].join("\n"),
+          content: latestPeerMessage
+            ? [
+                `Latest table moment: ${userMessage}`,
+                `${latestPeerName} just spoke at the table: ${latestPeerSpeech}`,
+                "Continue that exchange by answering one concrete part of the line.",
+                `${speaker.name}, say your next short table line now.`,
+              ].join("\n")
+            : [
+                `Latest table moment: ${userMessage}`,
+                `${speaker.name}, say your next short table line now.`,
+              ].join("\n"),
         }
       : userActionOnly
         ? {
@@ -11733,6 +12092,21 @@ async function generateCoffeeBotReply(args: {
     }
   }
 
+  if (!explicitDirectedSpeaker && !currentUserAddressedSpeaker && !addressedBotId) {
+    const handoffSpeaker = resolveCoffeeAutonomousSpeakerHandoff({
+      group: turnGroup,
+      pickedBotId,
+      lastSpeakerBotId,
+      turnKind,
+    });
+    if (handoffSpeaker.id !== pickedBotId) {
+      pickedBotId = handoffSpeaker.id;
+      routerReason = `Autonomous peer handoff passed the table from the previous speaker to ${handoffSpeaker.name}.`;
+      routerDirective =
+        "Respond to one concrete claim or image from the previous bot, then add your own in-character angle.";
+    }
+  }
+
   const speaker = turnGroup.find((bot) => bot.id === pickedBotId) ?? turnGroup[0]!;
   const activeSeatBotIds = coffeeActiveSeatBotIdsFromStored(row.bot_group_ids);
   const coffeeCupSeed = coffeeCupSeedForBot({
@@ -11971,6 +12345,17 @@ async function generateCoffeeBotReply(args: {
       avoidTexts: recentCoffeeAssistantTexts(history),
       maxChars: replyCaps.tableReplyMaxChars,
     });
+  }
+  if (
+    !replyText ||
+    coffeeReplyLooksLikePromptLeak(replyText) ||
+    coffeeReplyIsLowValueTableLine(replyText) ||
+    coffeeReplyLooksUnfinished(replyText)
+  ) {
+    replyText = clampCoffeeTableReplyText(
+      COFFEE_LAST_RESORT_VISIBLE_REPLY,
+      replyCaps.tableReplyMaxChars
+    );
   }
   if (!replyText) {
     throw new Error("Speaker bot returned an empty reply.");
@@ -12998,7 +13383,7 @@ export async function processCoffeeAutonomousTurn(
   const history = loadMessages(db, userId, row.id, historyLimit);
   const promptHistory = coffeeBotPromptHistory(history);
   const latest = promptHistory[promptHistory.length - 1];
-  const expectedLatestMessageId = latest?.id ?? null;
+  const expectedLatestMessageId = loadLatestCoffeeMessageId(db, userId, row.id);
   const directedUserFocus =
     directedSpeakerBotId && typeof directedUserMessage === "string"
       ? directedUserMessage.replace(/\s+/g, " ").trim().slice(0, 700)

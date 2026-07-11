@@ -13,6 +13,10 @@ const pageSource = readFileSync(
   join(dirname(fileURLToPath(import.meta.url)), "page.tsx"),
   "utf8"
 );
+const cssSource = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), "page.module.css"),
+  "utf8"
+);
 
 function ids(set: ReadonlySet<string>): string[] {
   return Array.from(set).sort();
@@ -88,7 +92,7 @@ describe("bot canvas marquee selection", () => {
     assert.deepEqual(ids(selected), ["bot-a"]);
   });
 
-  it("starts marquee gestures from the canvas capture phase before child clicks", () => {
+  it("starts marquee gestures before child clicks and tracks them outside the canvas", () => {
     assert.match(
       pageSource,
       /const handleMessagesSurfacePointerDownCapture = useCallback/
@@ -107,6 +111,20 @@ describe("bot canvas marquee selection", () => {
       2
     );
     assert.doesNotMatch(pageSource, /onPointerDown=\{handleCanvasBotMarqueePointerDown\}/);
+    assert.doesNotMatch(pageSource, /onPointerMove=\{handleCanvasBotMarqueePointerMove\}/);
+    assert.doesNotMatch(pageSource, /onPointerUp=\{handleCanvasBotMarqueePointerEnd\}/);
+    assert.match(
+      pageSource,
+      /window\.addEventListener\("pointermove", handleWindowCanvasBotMarqueePointerMove, true\);/
+    );
+    assert.match(
+      pageSource,
+      /window\.addEventListener\("pointerup", handleWindowCanvasBotMarqueePointerEnd, true\);/
+    );
+    assert.match(
+      pageSource,
+      /window\.addEventListener\("pointercancel", handleWindowCanvasBotMarqueePointerEnd, true\);/
+    );
   });
 
   it("arms bot-card presses for drag without capturing ordinary clicks", () => {
@@ -130,9 +148,11 @@ describe("bot canvas marquee selection", () => {
     const pointerDownSource = pageSource.slice(pointerDownStart, pointerMoveStart);
     const pointerMoveSource = pageSource.slice(pointerMoveStart, pointerEndStart);
     assert.doesNotMatch(pointerDownSource, /setPointerCapture/);
+    assert.doesNotMatch(pointerMoveSource, /setPointerCapture/);
+    assert.match(pointerMoveSource, /drag\.frame\.style\.setProperty\("--picker-parallax-x", "0px"\);/);
     assert.match(
-      pointerMoveSource,
-      /if \(Math\.hypot\(dx, dy\) < BOT_MARQUEE_DRAG_THRESHOLD_PX\) return true;\s*drag\.active = true;\s*try \{\s*drag\.frame\.setPointerCapture\(event\.pointerId\);/
+      cssSource,
+      /\.messages\[data-drag-selecting="true"\] \.chatBotTile,[\s\S]*transform:\s*none;[\s\S]*opacity:\s*1;/
     );
   });
 

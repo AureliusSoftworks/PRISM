@@ -1320,9 +1320,48 @@ describe("Coffee seat arrival CSS", () => {
     );
   });
 
-  it("uses a larger live table with docked seats, overlapping nameplates, and bigger mugs", () => {
+  it("turns the Coffee picker composer into the group creation CTA", () => {
+    assert.match(
+      pageSource,
+      /const coffeeSetupComposerVisible =\s*coffeeSessionPhase === "selecting" && !conversationActive && coffeeSelectedGroup === null;/
+    );
+    assert.match(pageSource, /const coffeeSetupComposerReady = coffeeSetupComposerVisible && coffeeSelectionValid;/);
+    assert.match(
+      pageSource,
+      /const coffeeSetupComposerStyle:[\s\S]*coffeeGroupVisualStyle\(\{[\s\S]*id: `draft:\$\{coffeeSelectedBotIds\.join\(":"\)\}`,[\s\S]*botGroupIds: coffeeSelectedBotIds,/
+    );
+    assert.match(
+      pageSource,
+      /const renderCoffeeSetupComposer = \(\): React\.JSX\.Element => \([\s\S]*data-coffee-setup-composer="true"[\s\S]*void createCoffeeGroupFromSelection\(\);/
+    );
+    assert.match(
+      pageSource,
+      /className=\{styles\.coffeeSetupComposerButton\}[\s\S]*disabled=\{!coffeeSetupComposerReady \|\| coffeeBusy\}/
+    );
+    assert.match(
+      pageSource,
+      /: coffeeSetupComposerVisible\s*\?\s*renderCoffeeSetupComposer\(\)\s*:\s*coffeeGroupStartComposerVisible\s*\?\s*renderCoffeeGroupStartComposer\(\)\s*: renderShellComposer\(\{/
+    );
+
+    const setupButtonRule = ruleForExactSelector(".coffeeSetupComposerButton");
+    assert.match(setupButtonRule, /grid-template-areas:\s*"eyebrow arrow"\s*"title arrow"\s*"meta arrow"\s*;/);
+    assert.match(setupButtonRule, /cursor:\s*not-allowed\s*;/);
+
+    const readyButtonRule = ruleForExactSelector(
+      '.coffeeSetupComposer[data-coffee-setup-ready="true"] .coffeeSetupComposerButton'
+    );
+    assert.match(readyButtonRule, /var\(--coffee-group-gradient\)/);
+    assert.match(readyButtonRule, /cursor:\s*pointer\s*;/);
+
+    const lightReadyButtonRule = ruleForExactSelector(
+      '.themeLight.coffeeShell .coffeeSetupComposer[data-coffee-setup-ready="true"] .coffeeSetupComposerButton'
+    );
+    assert.match(lightReadyButtonRule, /var\(--coffee-group-gradient\)/);
+  });
+
+  it("uses a larger live table with clear action anchors, spatial nameplates, and bigger mugs", () => {
     const liveStageRule = ruleForExactSelector('.coffeeStage[data-phase="arriving"]');
-    assert.match(liveStageRule, /--coffee-canvas-y:\s*clamp\(40px,\s*5vh,\s*56px\)\s*;/);
+    assert.match(liveStageRule, /--coffee-canvas-y:\s*clamp\(64px,\s*7vh,\s*80px\)\s*;/);
 
     const tableGlowRule = ruleForExactSelector(".coffeeTableGlow");
     assert.match(tableGlowRule, /width:\s*min\(84%,\s*760px\)\s*;/);
@@ -1332,8 +1371,8 @@ describe("Coffee seat arrival CSS", () => {
     assert.match(tableDiskRule, /max-width:\s*calc\(100% - 56px\)\s*;/);
     assert.match(
       css,
-      /@media\s*\(min-width:\s*1160px\)\s*\{[\s\S]*\.coffeeShell\[data-session-active="true"\]\[data-transcript-open="true"\][\s\S]*\.coffeeStage:not\(\[data-experimental-table-angle="true"\]\):is\([\s\S]*\.coffeeTableGlow\s*\{[\s\S]*width:\s*min\(72%,\s*680px\)\s*;[\s\S]*\.coffeeTableDisk\s*\{[\s\S]*width:\s*min\(50vw,\s*500px\)\s*;[\s\S]*max-width:\s*calc\(100% - 112px\)\s*;/,
-      "expected docked Table Talk to scale down the round table disk on narrower live layouts"
+      /@media\s*\(min-width:\s*1160px\)\s*\{[\s\S]*\.coffeeShell\[data-session-active="true"\]\[data-transcript-open="true"\][\s\S]*\.coffeeStage:not\(\[data-experimental-table-angle="true"\]\):is\([\s\S]*\.coffeeTableGlow\s*\{[\s\S]*width:\s*min\(72%,\s*680px\)\s*;[\s\S]*\.coffeeTableDisk\s*\{[\s\S]*width:\s*min\(54vw,\s*540px\)\s*;[\s\S]*max-width:\s*calc\(100% - 96px\)\s*;/,
+      "expected docked Table Talk to scale the round table disk up while preserving edge clearance"
     );
     assert.match(
       css,
@@ -1344,7 +1383,7 @@ describe("Coffee seat arrival CSS", () => {
     const liveTableOffsetRule = ruleForExactSelector(
       '.coffeeStage[data-phase="arriving"][data-autoplay-dock="true"]'
     );
-    assert.match(liveTableOffsetRule, /--coffee-live-table-y:\s*clamp\(18px,\s*3vh,\s*32px\)\s*;/);
+    assert.match(liveTableOffsetRule, /--coffee-live-table-y:\s*clamp\(28px,\s*4vh,\s*44px\)\s*;/);
 
     const liveTopSeatRule = ruleForSelectorNeedles(
       '.coffeeStage[data-phase="arriving"][data-autoplay-dock="true"]',
@@ -1362,22 +1401,55 @@ describe("Coffee seat arrival CSS", () => {
       '.coffeeStage[data-phase="arriving"][data-autoplay-dock="true"]',
       '.coffeeSeat[data-seat-count="5"][data-seat="1"][data-layout-seat="1"]'
     );
-    assert.match(liveLeftSeatRule, /left:\s*22%\s*;/);
+    assert.match(liveLeftSeatRule, /left:\s*24%\s*;/);
     assert.match(liveLeftSeatRule, /top:\s*43%\s*;/);
 
     const liveRightSeatRule = ruleForSelectorNeedles(
       '.coffeeStage[data-phase="arriving"][data-autoplay-dock="true"]',
       '.coffeeSeat[data-seat-count="5"][data-seat="2"][data-layout-seat="2"]'
     );
-    assert.match(liveRightSeatRule, /left:\s*78%\s*;/);
+    assert.match(liveRightSeatRule, /left:\s*76%\s*;/);
     assert.match(liveRightSeatRule, /top:\s*43%\s*;/);
 
     const liveLowerSeatRule = ruleForSelectorNeedles(
       '.coffeeStage[data-phase="arriving"][data-autoplay-dock="true"]',
       '.coffeeSeat[data-seat-count="5"][data-seat="3"][data-layout-seat="3"]'
     );
-    assert.match(liveLowerSeatRule, /left:\s*26%\s*;/);
+    assert.match(liveLowerSeatRule, /left:\s*29%\s*;/);
     assert.match(liveLowerSeatRule, /top:\s*79%\s*;/);
+
+    const liveLowerRightSeatRule = ruleForSelectorNeedles(
+      '.coffeeStage[data-phase="arriving"][data-autoplay-dock="true"]',
+      '.coffeeSeat[data-seat-count="5"][data-seat="4"][data-layout-seat="4"]'
+    );
+    assert.match(liveLowerRightSeatRule, /left:\s*71%\s*;/);
+    assert.match(liveLowerRightSeatRule, /top:\s*79%\s*;/);
+
+    assert.match(
+      css,
+      /\.coffeeStage\[data-autoplay-dock="true"\]:not\(\[data-compact="true"\]\):not\(\[data-experimental-table-angle="true"\]\):is\([\s\S]*\.coffeeSeatActionAnchor\[data-seat-count="5"\]\[data-layout-seat="0"\][\s\S]*bottom:\s*calc\(100%\s*\+\s*clamp\(10px,\s*1\.4vw,\s*18px\)\)\s*;[\s\S]*width:\s*min\(270px,\s*34cqw,\s*calc\(100cqw\s*-\s*24px\)\)\s*;/,
+      "expected the top action label to stay centered above the top bot"
+    );
+    assert.match(
+      css,
+      /\.coffeeSeatActionAnchor:is\([\s\S]*\[data-seat-count="5"\]\[data-layout-seat="1"\][\s\S]*\[data-seat-count="5"\]\[data-layout-seat="3"\][\s\S]*right:\s*calc\(100%\s*\+\s*clamp\(10px,\s*1\.5vw,\s*18px\)\)\s*;[\s\S]*width:\s*min\([\s\S]*210px,[\s\S]*calc\(24cqw\s*-\s*var\(--coffee-action-avatar-half\)\s*-\s*18px\),[\s\S]*calc\(100vw\s*-\s*24px\)[\s\S]*\)\s*;[\s\S]*min-width:\s*0\s*;/,
+      "expected left-side action labels to be bounded by the stage edge"
+    );
+    assert.match(
+      css,
+      /\.coffeeStage\[data-autoplay-dock="true"\]:not\(\[data-compact="true"\]\):not\(\[data-experimental-table-angle="true"\]\):is\([\s\S]*\.coffeeSeatActionAnchor\[data-seat-count="5"\] \.coffeeSeatActionBadgeText\s*\{[\s\S]*-webkit-line-clamp:\s*3\s*;[\s\S]*font-size:\s*clamp\(0\.86rem,\s*0\.98vw,\s*1\.08rem\)\s*;/,
+      "expected five-seat action text to wrap before it can be clipped"
+    );
+
+    const actionAnchorRule = ruleForExactSelector(".coffeeSeatActionAnchor");
+    assert.match(
+      actionAnchorRule,
+      /width:\s*var\(--coffee-seat-avatar-size,[\s\S]*--coffee-seat-responsive-avatar-size/
+    );
+    assert.match(
+      actionAnchorRule,
+      /height:\s*var\(--coffee-seat-avatar-size,[\s\S]*--coffee-seat-responsive-avatar-size/
+    );
 
     const nameplateRules = rulesForExactSelector(".coffeeSeatGlowPill");
     assert.ok(
@@ -1389,6 +1461,19 @@ describe("Coffee seat arrival CSS", () => {
     assert.ok(
       nameplateRules.some((rule) => /--coffee-seat-glyph-slot-width:\s*35px\s*;/.test(rule)),
       "expected nameplate glyph slot to fit the larger body glyph"
+    );
+    assert.ok(
+      nameplateRules.some((rule) =>
+        /--coffee-seat-cup-slot-width:\s*clamp\(68px,\s*6vw,\s*80px\)\s*;/.test(rule)
+      ),
+      "expected the table-facing mug to have its own nameplate slot"
+    );
+    assert.ok(
+      nameplateRules.some((rule) =>
+        /width:\s*clamp\(284px,\s*23vw,\s*304px\)\s*;/.test(rule) &&
+        /grid-template-columns:\s*var\(--coffee-seat-glyph-slot-width\)\s*minmax\(0,\s*1fr\)\s*var\(--coffee-seat-cup-slot-width\)\s*;/.test(rule)
+      ),
+      "expected full names between the outer glyph and table-facing mug"
     );
     assert.ok(
       nameplateRules.some((rule) =>
@@ -1420,6 +1505,14 @@ describe("Coffee seat arrival CSS", () => {
     );
     assert.match(flippedNameTextRule, /justify-items:\s*end\s*;/);
     assert.match(flippedNameTextRule, /text-align:\s*right\s*;/);
+
+    const flippedNameplateRule = ruleForExactSelector(
+      '.coffeeSeat[data-cup-side="left"] .coffeeSeatGlowPill'
+    );
+    assert.match(
+      flippedNameplateRule,
+      /grid-template-columns:\s*var\(--coffee-seat-cup-slot-width\)\s*minmax\(0,\s*1fr\)\s*var\(--coffee-seat-glyph-slot-width\)\s*;/
+    );
 
     const mugRule = ruleForExactSelector(".coffeeCup");
     assert.match(mugRule, /--coffee-cup-side-offset:\s*clamp\(-16px,\s*-1\.35vw,\s*-8px\)\s*;/);
@@ -1559,6 +1652,39 @@ describe("Coffee seat arrival CSS", () => {
       css,
       /@keyframes coffeePotReturnToTray \{[\s\S]*left:\s*var\(--coffee-pot-return-x,\s*var\(--coffee-pot-drag-x\)\);[\s\S]*top:\s*var\(--coffee-pot-return-y,\s*var\(--coffee-pot-drag-y\)\);/
     );
+  });
+
+  it("keeps early Coffee turns, director clicks, and Enter submission connected", () => {
+    assert.match(
+      pageSource,
+      /const directorTapEnabled =[\s\S]*coffeeAutoplayPaused[\s\S]*coffeeSessionPhase === "live"[\s\S]*coffeeSessionPhase === "arriving"/
+    );
+    assert.match(
+      pageSource,
+      /const startAutonomousTurn = \(\) => \{[\s\S]*coffeeLoopTimerRef\.current = null;[\s\S]*coffeeTurnAbortRef\.current !== null[\s\S]*coffeeContinueAbortRef\.current !== null[\s\S]*coffeeArrivalAutoplayRetryDelayMs/
+    );
+    assert.match(pageSource, /coffeeAutoplayWatchdogShouldWake\(\{/);
+    assert.match(pageSource, /coffeeAutoplayForceTurnShouldRun\(\{/);
+    assert.match(pageSource, /coffeeLoopTimerOwnsAutoplayTurn\(\{/);
+    assert.match(pageSource, /coffeeLoopDeadlineMsRef\.current = Date\.now\(\) \+ boundedDelayMs;/);
+    assert.match(pageSource, /void continueCoffeeSessionRef\.current\(activeConversation\.id, endsAt\);/);
+    assert.match(
+      pageSource,
+      /coffeeEmptyTurnAutoplayRetryDelayMs\(\{[\s\S]*stale:\s*response\.stale,[\s\S]*scheduleCoffeeAutonomousTurnWhenRhythmReady/
+    );
+    assert.doesNotMatch(
+      pageSource,
+      /if \(!conversationId \|\| coffeeBusy \|\| coffeeAutoBusy\) return;/
+    );
+    assert.match(pageSource, /const coffeeDirectedTurnQueueRef = useRef<string\[\]>\(\[\]\);/);
+    assert.match(pageSource, /const nextDirectedTurn = nextDirectedCoffeeTurnAfterReveal\(directedFollowupBotIds\);/);
+    assert.match(pageSource, /queueDirectedCoffeeTurn\(botId\);/);
+    assert.match(
+      pageSource,
+      /event\.key !== "ArrowUp" && event\.key !== "Enter"[\s\S]*void sendCoffeeTurn\(\);/
+    );
+    assert.match(pageSource, /coffeeDraftRef\.current = "";\s+setCoffeeDraft\(""\);/);
+    assert.match(pageSource, /coffeeConversationRef\.current = args\.conversation;\s+setCoffeeConversation\(args\.conversation\);/);
   });
 
   it("blocks sip visuals while the Coffee pot is filling a bot", () => {

@@ -147,6 +147,7 @@ describe("coffeeSeatPlateGlyph", () => {
   it("returns the sip face before the cup returns to rest", () => {
     const durationMs = 1000;
     const releaseAtMs = durationMs * COFFEE_SEAT_SIP_FACE_ACTIVE_PROGRESS;
+    assert.equal(COFFEE_SEAT_SIP_FACE_ACTIVE_PROGRESS, 0.7);
     assert.equal(
       coffeeSeatSipFaceActive({
         sipInProgress: false,

@@ -24,6 +24,7 @@ import {
   clampCoffeeSocialValue,
   clampCoffeeTableReplyText,
   coffeeLatestMessageIdChanged,
+  coffeeMessageBelongsInBotPromptHistory,
   coffeeFallbackFocusPhrase,
   coffeeHistoryVisibleToSpeakerAfterFirmSeat,
   coffeeDepartureOpportunityRequiresExit,
@@ -94,6 +95,7 @@ import {
   recordCoffeeReplayEvents,
   repairBotMentionBrackets,
   restartCoffeeConversationFromSession,
+  resolveCoffeeAutonomousSpeakerHandoff,
   resolveCoffeeTeamTiebreaker,
   seedCoffeeSocialStateFromRelationships,
   setCoffeePlayerTeam,
@@ -2685,6 +2687,115 @@ describe("Coffee group foundation", () => {
     assert.equal(new Set(sessionTopics.map((topic) => topic.toLowerCase())).size, 20);
   });
 
+  it("filters profile-card generated group topics into table-worthy suggestions", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    const sponge: CoffeeBotProfile = {
+      ...ALICE,
+      id: "bot-spongebob",
+      name: "SpongeBob",
+      systemPrompt: "Optimistic fry cook at the Krusty Krab in Bikini Bottom.",
+    };
+    const squidward: CoffeeBotProfile = {
+      ...DANTE,
+      id: "bot-squidward",
+      name: "Squidward",
+      systemPrompt: "Clarinet player and Krusty Krab cashier who wants quiet and art.",
+    };
+    const patrick: CoffeeBotProfile = {
+      ...BORIS,
+      id: "bot-patrick",
+      name: "Patrick Star",
+      systemPrompt: "SpongeBob's best friend who loves doing nothing and jellyfishing.",
+    };
+    const bots = [sponge, squidward, PLANKTON, MR_KRABS, patrick];
+    for (const bot of bots) {
+      seedCoffeeBot(db, userId, bot);
+    }
+    const generatedTopics = JSON.stringify({
+      bots: [
+        {
+          botId: sponge.id,
+          topics: [
+            { label: "Krabby Patty Perfection" },
+            { label: "SpongeBob's Optimistic Outlook" },
+            { label: "Bikini Bottom Blues" },
+            { label: "Shift Changeover Chaos" },
+          ],
+        },
+        {
+          botId: squidward.id,
+          topics: [
+            { label: "Clarinet Concerto Dreams" },
+            { label: "Artistic Expression Struggles" },
+            { label: "Krusty Krab Customer Service" },
+            { label: "Squidward's Quiet Reflections" },
+          ],
+        },
+        {
+          botId: PLANKTON.id,
+          topics: [
+            { label: "Plankton's Envy Formula" },
+            { label: "Chum Bucket Schemes Unveiled" },
+            { label: "Krabby Patty Formula Heist" },
+            { label: "Tiny Rivalry Ignited" },
+          ],
+        },
+        {
+          botId: MR_KRABS.id,
+          topics: [
+            { label: "Profit Over Profitability" },
+            { label: "Secret Formula Secret Keeping" },
+            { label: "Mr. Krabs' Penny Pinching" },
+            { label: "Krusty Krab Closing Shift" },
+          ],
+        },
+        {
+          botId: patrick.id,
+          topics: [
+            { label: "Patrick's Simple Wisdom" },
+            { label: "Jellyfishing Adventures with SpongeBob" },
+            { label: "Doing Nothing as a Plan" },
+            { label: "Krusty Krab Closing Shift Dilemma" },
+          ],
+        },
+      ],
+    });
+
+    const group = await withMockedCoffeeFetch(
+      generatedTopics,
+      () =>
+        createCoffeeGroupWithGeneratedName(db, userId, {
+          name: "Krabby Patty Schemes",
+          groupBotIds: bots.map((bot) => bot.id),
+        })
+    );
+    const savedTopics = bots.flatMap((bot) => group.starterTopicsByBotId?.[bot.id] ?? []);
+
+    for (const bot of bots) {
+      assert.equal(group.starterTopicsByBotId?.[bot.id]?.length, 4);
+    }
+    assert.equal(savedTopics.length, 20);
+    assert.equal(new Set(savedTopics.map((topic) => topic.toLowerCase())).size, 20);
+    assert.ok(
+      !savedTopics.some((topic) =>
+        /SpongeBob's|Squidward's|Patrick's|Plankton's|Krabs'/i.test(topic)
+      )
+    );
+    assert.ok(!savedTopics.includes("Bikini Bottom Blues"));
+    assert.ok(!savedTopics.includes("Artistic Expression Struggles"));
+    assert.ok(!savedTopics.includes("Chum Bucket Schemes Unveiled"));
+    assert.ok(!savedTopics.includes("Profit Over Profitability"));
+    assert.ok(!savedTopics.includes("Krusty Krab Closing Shift Dilemma"));
+    assert.equal(
+      savedTopics.filter((topic) => /Krusty Krab Closing Shift/i.test(topic)).length,
+      1
+    );
+    assert.ok(group.starterTopicsByBotId?.[sponge.id]?.includes("Shift Changeover Chaos"));
+    assert.ok(group.starterTopicsByBotId?.[PLANKTON.id]?.includes("Krabby Patty Formula Heist"));
+    assert.ok(group.starterTopicsByBotId?.[patrick.id]?.includes("Doing Nothing as a Plan"));
+  });
+
   it("backfills legacy three-topic Coffee groups without another LLM call", async () => {
     const db = createCoffeeTestDb();
     const userId = "user-1";
@@ -3855,6 +3966,19 @@ describe("buildRouterPrompt", () => {
     assert.match(system!.content, /name="Alice"/);
     assert.match(system!.content, /Curious philosopher/);
     assert.match(system!.content, /"directive": "<one short next-move cue>"/);
+  });
+
+  it("requires autonomous turns to hand the table to a different bot", () => {
+    const messages = buildRouterPrompt({
+      group: [ALICE, BORIS, CARA],
+      history: [],
+      userMessage: "Boris just made a claim about duty.",
+      lastSpeakerBotId: BORIS.id,
+      turnKind: "autonomous",
+    });
+
+    assert.match(messages[0]!.content, /Pass the mic to a different seated bot/);
+    assert.match(messages[0]!.content, /answer one concrete part of the previous line/);
   });
 
   it("threads attendance context without making absent bots selectable", () => {
@@ -5224,6 +5348,36 @@ describe("buildSpeakerPrompt", () => {
     assert.match(userTurnInstruction!.content, /Alice, answer with your next short table line now/);
   });
 
+  it("turns an autonomous reply into a concrete bot-to-bot continuation", () => {
+    const messages = buildSpeakerPrompt({
+      speaker: ALICE,
+      group: [ALICE, BORIS, CARA],
+      history: [
+        {
+          id: "peer-turn",
+          role: "assistant",
+          content: "Duty without limits becomes a shield for the powerful.",
+          createdAt: "2026-07-10T00:00:00.000Z",
+          botId: BORIS.id,
+          botName: BORIS.name,
+        },
+      ],
+      userMessage: "Boris just spoke about duty.",
+      turnKind: "autonomous",
+      socialByBotId: {
+        [ALICE.id]: TEST_SOCIAL,
+        [BORIS.id]: TEST_SOCIAL,
+        [CARA.id]: TEST_SOCIAL,
+      },
+    });
+    const joined = messages.map((message) => message.content).join("\n");
+
+    assert.match(joined, /Immediate bot-to-bot handoff from Boris/);
+    assert.match(joined, /Duty without limits becomes a shield for the powerful/);
+    assert.match(joined, /Respond to one specific claim, image, disagreement, or question/);
+    assert.match(messages.at(-1)!.content, /Continue that exchange/);
+  });
+
   it("threads the session topic into the speaker group context when provided", () => {
     const messages = buildSpeakerPrompt({
       speaker: ALICE,
@@ -6249,6 +6403,16 @@ describe("coffee prompt leak cleanup", () => {
       coffeeReplyIsLowValueTableLine("Give me the receipt version, not the brochure version."),
       true
     );
+    for (const leakedFallback of [
+      "Make general and speak visible in one choice and I can take a side.",
+      "That only lands if lawyer and speak changes what someone actually does.",
+      "Give general and worth one table-sized example before it turns into fog.",
+      "Anchor finger and against to one scene we can actually argue over.",
+      "If appear and ordinary is the lever, I need to see what breaks first.",
+    ]) {
+      assert.equal(coffeeReplyIsLowValueTableLine(leakedFallback), true);
+      assert.equal(sanitizeCoffeeTableReply(leakedFallback, "James Madison"), "");
+    }
     assert.equal(
       coffeeReplyIsLowValueTableLine("Interesting dynamics at play... strokes chin Perhaps Mr. Krabs' coin is not the only change agent?"),
       true
@@ -6349,6 +6513,37 @@ describe("coffee prompt leak cleanup", () => {
         "SpongeBob"
       ),
       "Fair point, but the receipt is who pays afterward."
+    );
+  });
+
+  it("lifts exported third-person narration into Coffee action sections", () => {
+    assert.equal(
+      sanitizeCoffeeTableReply(
+        "Gentlemen, perhaps we approach this matter too abstractly. He reaches into his coat pocket and produces a small glass vial filled with clear liquid. I recently tested this in my workshop.",
+        "Benjamin Franklin"
+      ),
+      "Gentlemen, perhaps we approach this matter too abstractly. *reaches into his coat pocket and produces a small glass vial filled with clear liquid* I recently tested this in my workshop."
+    );
+    assert.equal(
+      sanitizeCoffeeTableReply(
+        "Jefferson tilts his head slightly, curious So you're suggesting the manner of presentation alters the substance discussed, General?",
+        "Thomas Jefferson"
+      ),
+      "*tilts his head slightly, curious* So you're suggesting the manner of presentation alters the substance discussed, General?"
+    );
+    assert.equal(
+      sanitizeCoffeeTableReply(
+        "Madison's expression shifts from contemplative to sharp. Then perhaps appearance is the substance in your argument, Mr. Adams.",
+        "James Madison"
+      ),
+      "*expression shifts from contemplative to sharp* Then perhaps appearance is the substance in your argument, Mr. Adams."
+    );
+    assert.equal(
+      sanitizeCoffeeTableReply(
+        "This appears to be ordinary water, though I could not say for certain without tasting. sets it down deliberately on the table surface",
+        "George Washington"
+      ),
+      "This appears to be ordinary water, though I could not say for certain without tasting. *sets it down deliberately on the table surface*"
     );
   });
 
@@ -6533,6 +6728,13 @@ describe("coffee prompt leak cleanup", () => {
     );
     assert.equal(
       sanitizeCoffeeTableReply(
+        "The coffee shop hums with quiet conversation as I settle into my seat, notebook open before me. Liberty isn't freedom from constraint—it's freedom within structure. I fold my hands around my cup. The question isn't whether to accept limits, but which ones preserve what matters.",
+        "James Madison"
+      ),
+      "*settles into the seat, notebook open nearby* Liberty isn't freedom from constraint—it's freedom within structure. *folds the hands around the cup* The question isn't whether to accept limits, but which ones preserve what matters."
+    );
+    assert.equal(
+      sanitizeCoffeeTableReply(
         "I stare intensely at the empty chair Squidward would occupy, a hint of disappointment on my face",
         "Plankton"
       ),
@@ -6624,6 +6826,9 @@ describe("coffee prompt leak cleanup", () => {
   it("recognizes user action-only messages", () => {
     assert.equal(coffeeUserMessageIsActionOnly("*takes a quiet sip*"), true);
     assert.equal(coffeeUserMessageIsActionOnly("takes a quiet sip"), true);
+    assert.equal(coffeeUserMessageIsActionOnly("*twiddles thumbs*"), true);
+    assert.equal(normalizeCoffeeUserActionText("*twiddles thumbs*"), "twiddles thumbs");
+    assert.equal(coffeeUserMessageIsActionOnly("*twiddles thumbs* Okay, continue."), false);
     assert.equal(coffeeUserMessageIsActionOnly("*takes a quiet sip* Okay, continue."), false);
     assert.equal(coffeeUserMessageIsActionOnly("Okay, continue."), false);
     assert.equal(normalizeCoffeeUserActionText("*leans back and smiles faintly*"), "leans back and smiles faintly");
@@ -6763,12 +6968,15 @@ describe("coffee prompt leak cleanup", () => {
     assert.doesNotMatch(line, /sharper object|stronger point|easy one|name the cost, not just the mood/i);
     assert.doesNotMatch(line, /real case before I buy|money, time, or pride actually moves/i);
     assert.doesNotMatch(line, /\b(tradeoff|claim|stakes)\b/i);
-    assert.match(line, /\b(cost|test|case|detail|receipt|concrete|break|choice|scene|example)\b/i);
+    assert.match(
+      line,
+      /\b(cost|test|case|detail|break|choice|rule|mistake|responsibility|purpose|failure|consequence)\b/i
+    );
   });
 
   it("avoids reported stock fallback lines in emergency and fresh fallback replies", () => {
     const reportedPattern =
-      /sharper object on the table|stronger point is still hiding under the easy one|name the cost, not just the mood|bring it back to the thing we can actually test|put actually under a consequence we can see|show me .+ receipt attached|put a real case on the table first|the useful part is where this could actually break|name the tradeoff|point stays decorative|someone (?:at this table |here )?would dispute|stakes plain enough to disagree|only matters if it changes what someone would do|claim has teeth|real case before I buy|money, time, or pride actually moves/i;
+      /sharper object on the table|stronger point is still hiding under the easy one|name the cost, not just the mood|bring it back to the thing we can actually test|put actually under a consequence we can see|show me .+ receipt attached|put a real case on the table first|the useful part is where this could actually break|name the tradeoff|point stays decorative|someone (?:at this table |here )?would dispute|stakes plain enough to disagree|only matters if it changes what someone would do|claim has teeth|real case before I buy|money, time, or pride actually moves|table-sized example|turns into fog|visible in one choice|that only lands if|is the lever|anchor .+ to one scene/i;
 
     for (let index = 0; index < 24; index += 1) {
       const emergencyLine = buildCoffeeEmergencyFallbackReply({
@@ -6797,6 +7005,8 @@ describe("coffee prompt leak cleanup", () => {
       assert.doesNotMatch(freshLine, reportedPattern);
       assert.doesNotMatch(emergencyLine, /\b(tradeoff|claim|stakes)\b/i);
       assert.doesNotMatch(freshLine, /\b(tradeoff|claim|stakes)\b/i);
+      assert.equal(coffeeReplyIsLowValueTableLine(emergencyLine), false);
+      assert.equal(coffeeReplyIsLowValueTableLine(freshLine), false);
     }
   });
 
@@ -7035,6 +7245,9 @@ describe("coffee meeting summary helpers", () => {
     assert.doesNotMatch(prompt, /Memory changes recorded during this session/i);
     assert.doesNotMatch(prompt, /No Coffee polls?|No Coffee Teams|No explicit saved\/changed memories/i);
     assert.match(prompt, /If the table drifted away from the topic, say so plainly/);
+    assert.match(prompt, /Attribute every introduced object, action, and claim to the speaker/);
+    assert.match(prompt, /if Franklin introduces an object and Washington later handles it/i);
+    assert.match(prompt, /Never claim everyone stayed engaged/i);
     assert.match(prompt, /Transcript:/);
     assert.match(prompt, /Alice notices/);
   });
@@ -7255,6 +7468,27 @@ describe("pickFallbackSpeaker", () => {
   it("throws if the group is empty (programmer error guard)", () => {
     assert.throws(() => pickFallbackSpeaker([], null), /Coffee group is empty/);
   });
+
+  it("overrides a repeated autonomous router pick with the next peer", () => {
+    assert.equal(
+      resolveCoffeeAutonomousSpeakerHandoff({
+        group: [ALICE, BORIS, CARA],
+        pickedBotId: ALICE.id,
+        lastSpeakerBotId: ALICE.id,
+        turnKind: "autonomous",
+      }).id,
+      BORIS.id
+    );
+    assert.equal(
+      resolveCoffeeAutonomousSpeakerHandoff({
+        group: [ALICE, BORIS],
+        pickedBotId: ALICE.id,
+        lastSpeakerBotId: ALICE.id,
+        turnKind: "user",
+      }).id,
+      ALICE.id
+    );
+  });
 });
 
 describe("pickDirectedSpeaker", () => {
@@ -7338,6 +7572,25 @@ describe("Coffee direct mention routing helpers", () => {
 });
 
 describe("Coffee stale autonomous guard helpers", () => {
+  it("keeps spoken assistant turns with mood replay metadata in bot prompt history", () => {
+    assert.equal(
+      coffeeMessageBelongsInBotPromptHistory({
+        role: "assistant",
+        content: "A real table line.",
+        coffeeReplayEvents: [{ kind: "mood" }],
+      }),
+      true
+    );
+    assert.equal(
+      coffeeMessageBelongsInBotPromptHistory({
+        role: "system",
+        content: "",
+        coffeeReplayEvents: [{ kind: "mood" }],
+      }),
+      false
+    );
+  });
+
   it("detects when a newer message lands after an autonomous turn starts", () => {
     const db = createCoffeeTestDb();
     const userId = "stale-user";
@@ -7349,9 +7602,27 @@ describe("Coffee stale autonomous guard helpers", () => {
           coffee_meeting_summary_message_count, coffee_meeting_summary_updated_at, incognito, created_at, updated_at)
        VALUES (?, ?, 'Coffee Session', 'coffee', NULL, ?, NULL, NULL, 5, NULL, 'Power', NULL, NULL, NULL, 0, ?, ?)`
     ).run("conv-stale", userId, JSON.stringify([ALICE.id, BORIS.id]), now, now);
+    const assistantPayload = serializeAssistantToolPayload({
+      coffeeReplayEvents: [
+        {
+          v: 1,
+          name: "coffeeReplayEvent",
+          kind: "mood",
+          botId: ALICE.id,
+          occurredAt: now,
+          social: {
+            disposition: 0.5,
+            valuesFriction: 0.2,
+            restraint: 0.6,
+            engagement: 0.7,
+            leavePressure: 0.1,
+          },
+        },
+      ],
+    });
     db.prepare(
-      "INSERT INTO messages (id, conversation_id, user_id, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?)"
-    ).run("m1", "conv-stale", userId, "assistant", "First line.", now);
+      "INSERT INTO messages (id, conversation_id, user_id, role, content, tool_payload, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    ).run("m1", "conv-stale", userId, "assistant", "First line.", assistantPayload, now);
 
     assert.equal(coffeeLatestMessageIdChanged(db, userId, "conv-stale", "m1"), false);
 

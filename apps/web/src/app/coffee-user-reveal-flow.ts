@@ -66,6 +66,87 @@ export function coffeeShouldIgnoreStaleTurnResponse(response: {
   return response.stale === true || !response.speakerBotId;
 }
 
+export function coffeeEmptyTurnAutoplayRetryDelayMs(args: {
+  speakerBotId?: string | null;
+  stale?: boolean;
+  autoplayPaused: boolean;
+  sessionPhase: string;
+  sessionRemainingMs: number | null;
+}): number | null {
+  if (args.speakerBotId) return null;
+  if (args.autoplayPaused) return null;
+  if (args.sessionPhase !== "arriving" && args.sessionPhase !== "live") return null;
+  if (args.sessionRemainingMs !== null && args.sessionRemainingMs <= 0) return null;
+  return args.stale === true ? 360 : 850;
+}
+
+export function coffeeLoopTimerOwnsAutoplayTurn(args: {
+  timerPresent: boolean;
+  scheduledForMs: number | null;
+  nowMs: number;
+}): boolean {
+  if (!args.timerPresent) return false;
+  return args.scheduledForMs === null || args.scheduledForMs > args.nowMs;
+}
+
+export function coffeeAutoplayForceTurnShouldRun(args: {
+  hasConversation: boolean;
+  hasPresentBot: boolean;
+  sessionPhase: string;
+  autoplayPaused: boolean;
+  devModeEnabled: boolean;
+  draft: string;
+  requestInFlight: boolean;
+  pendingReveal: boolean;
+  timerPresent: boolean;
+  timerScheduledForMs: number | null;
+  sessionEndsAtMs: number | null;
+  lastAssistantAtMs: number | null;
+  sessionStartedAtMs: number | null;
+  lastForcedAtMs: number;
+  nowMs: number;
+  deadlineGraceMs?: number;
+  silenceRecoveryMs?: number;
+}): boolean {
+  if (!args.hasConversation || !args.hasPresentBot) return false;
+  if (args.sessionPhase !== "arriving" && args.sessionPhase !== "live") return false;
+  if (args.autoplayPaused || args.devModeEnabled || args.draft.trim().length > 0) return false;
+  if (args.requestInFlight || args.pendingReveal) return false;
+  if (args.sessionEndsAtMs === null || args.nowMs >= args.sessionEndsAtMs) return false;
+  const deadlineGraceMs = Math.max(0, args.deadlineGraceMs ?? 1_500);
+  const silenceRecoveryMs = Math.max(1_000, args.silenceRecoveryMs ?? 35_000);
+  if (args.lastForcedAtMs > 0 && args.nowMs - args.lastForcedAtMs < deadlineGraceMs) {
+    return false;
+  }
+  if (args.timerPresent && args.timerScheduledForMs !== null) {
+    return args.nowMs >= args.timerScheduledForMs + deadlineGraceMs;
+  }
+  if (args.timerPresent) return false;
+  const progressAtMs = args.lastAssistantAtMs ?? args.sessionStartedAtMs;
+  return progressAtMs !== null && args.nowMs - progressAtMs >= silenceRecoveryMs;
+}
+
+export function coffeeAutoplayWatchdogShouldWake(args: {
+  hasConversation: boolean;
+  sessionPhase: string;
+  autoplayPaused: boolean;
+  devModeEnabled: boolean;
+  draft: string;
+  rhythmState: CoffeeUserRevealFlowState;
+  loopScheduled: boolean;
+  requestInFlight: boolean;
+  sessionEndsAtMs: number | null;
+  nowMs: number;
+}): boolean {
+  if (!args.hasConversation) return false;
+  if (args.sessionPhase !== "arriving" && args.sessionPhase !== "live") return false;
+  if (args.autoplayPaused || args.devModeEnabled) return false;
+  if (args.draft.trim().length > 0) return false;
+  if (!coffeeArrivalAutoplayCanScheduleNow(args.rhythmState)) return false;
+  if (args.loopScheduled || args.requestInFlight) return false;
+  return args.sessionEndsAtMs !== null && args.nowMs < args.sessionEndsAtMs;
+}
+
 export function coffeeTableTalkAutoplayDeferralMs(args: {
   conversationId: string;
   draft: string;
