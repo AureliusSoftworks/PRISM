@@ -109,34 +109,46 @@ describe("bot canvas marquee selection", () => {
     assert.doesNotMatch(pageSource, /onPointerDown=\{handleCanvasBotMarqueePointerDown\}/);
   });
 
-  it("lets plain bot-card presses fall through to the card click handler", () => {
+  it("arms bot-card presses for drag without capturing ordinary clicks", () => {
     assert.match(
       pageSource,
-      /const botTileMarqueeGesture =\s*startsOnBotTile && event\.shiftKey && !event\.ctrlKey && !event\.metaKey;/
-    );
-    assert.match(
-      pageSource,
-      /if \(startsOnBotTile && !botTileMarqueeGesture\) \{\s*return false;\s*\}/
+      /const botTileMarqueeGesture = startsOnBotTile;/
     );
     assert.match(
       pageSource,
       /if \(blockedInteractiveTarget && !botTileMarqueeGesture && !allowPickerFrameDrag\)/
     );
+    const pointerDownStart = pageSource.indexOf(
+      "const handleCanvasBotMarqueePointerDown = useCallback"
+    );
+    const pointerMoveStart = pageSource.indexOf(
+      "const handleCanvasBotMarqueePointerMove = useCallback"
+    );
+    const pointerEndStart = pageSource.indexOf(
+      "const handleCanvasBotMarqueePointerEnd = useCallback"
+    );
+    const pointerDownSource = pageSource.slice(pointerDownStart, pointerMoveStart);
+    const pointerMoveSource = pageSource.slice(pointerMoveStart, pointerEndStart);
+    assert.doesNotMatch(pointerDownSource, /setPointerCapture/);
+    assert.match(
+      pointerMoveSource,
+      /if \(Math\.hypot\(dx, dy\) < BOT_MARQUEE_DRAG_THRESHOLD_PX\) return true;\s*drag\.active = true;\s*try \{\s*drag\.frame\.setPointerCapture\(event\.pointerId\);/
+    );
   });
 
-  it("keeps mouse and keyboard dense bot-card activation as direct selection", () => {
+  it("keeps every completed bot-card activation as direct selection", () => {
     assert.equal(
       pageSource.match(
-        /const clickShouldSelectDirectly =\s*e\.detail === 0 \|\| lastBotPickerPointerTypeRef\.current !== "touch";/g
+        /if \(isDesktopMousePixelClick\) \{\s*focusHueLensOnBot\(b\);\s*\}\s*commitEmptyStateBotSelection\(b\.id\);/g
       )?.length,
       2
     );
     assert.equal(
       pageSource.match(
-        /const shouldRelocateHue =\s*!clickShouldSelectDirectly &&\s*!emptyStateSearchActive &&\s*botHasFilterableColor\(b\) &&\s*!hueFilterActive &&\s*pickerUsesHueNavigation\(geom, viewportWidth\);/g
+        /const isDesktopMousePixelClick =\s*geom\.compactPixelGrid &&\s*e\.detail > 0 &&\s*lastBotPickerPointerTypeRef\.current === "mouse";/g
       )?.length,
       2
     );
-    assert.doesNotMatch(pageSource, /const isDesktopMousePixelClick/);
+    assert.doesNotMatch(pageSource, /const shouldRelocateHue/);
   });
 });
