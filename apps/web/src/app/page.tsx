@@ -31478,7 +31478,7 @@ function BotAvatarGlyphAnimationControl({
   disabled: boolean;
   onChange: (value: BotFaceGlyphAnimation) => void;
 }): React.JSX.Element {
-  const label = "Mouth animation";
+  const label = "Animation";
   return (
     <fieldset className={styles.botAvatarGlyphAnimationControl} disabled={disabled}>
       <legend>{label}</legend>

@@ -190,8 +190,13 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   );
   assert.match(
     cssSource,
-    /\.botAvatarGlyphAnimationControl > div\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/
+    /\.botAvatarGlyphAnimationControl > div\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\)/
   );
+  assert.doesNotMatch(
+    cssSource,
+    /\.botAvatarGlyphAnimationControl > div > button:first-child/,
+  );
+  assert.match(pageSource, /const label = "Animation";/);
   assert.doesNotMatch(cssSource, /\.botAvatarMouthAnimationRow/);
   assert.match(cssSource, /\.botAvatarThinkingControl/);
   assert.match(cssSource, /\.botAvatarInlineResetButton/);
