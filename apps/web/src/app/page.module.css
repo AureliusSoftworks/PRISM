@@ -49482,26 +49482,43 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .coffeePotLayer {
   position: absolute;
   inset: 0;
-  z-index: 14;
+  z-index: 3;
   pointer-events: none;
   --coffee-pot-pour-stream-blend-mode: normal;
+  --coffee-pot-pour-deep: rgba(54, 14, 5, 0.96);
+  --coffee-pot-pour-mid: rgba(154, 48, 13, 0.94);
+  --coffee-pot-pour-highlight: rgba(255, 154, 52, 0.88);
+  --coffee-pot-pour-splash: rgba(238, 103, 30, 0.68);
   --coffee-pot-pour-stream-filter:
-    saturate(0.98)
-    brightness(0.92)
-    drop-shadow(0 0 7px rgba(255, 106, 32, 0.24));
+    saturate(1.12)
+    contrast(1.08)
+    brightness(1.04)
+    drop-shadow(0 0 7px rgba(255, 106, 32, 0.32));
 }
 
 .coffeePotLayer[data-coffee-pot-theme="light"] {
-  --coffee-pot-pour-stream-blend-mode: screen;
+  --coffee-pot-pour-stream-blend-mode: normal;
+  --coffee-pot-pour-deep: rgba(63, 18, 6, 0.94);
+  --coffee-pot-pour-mid: rgba(166, 53, 14, 0.94);
+  --coffee-pot-pour-highlight: rgba(255, 163, 55, 0.84);
+  --coffee-pot-pour-splash: rgba(214, 77, 20, 0.62);
   --coffee-pot-pour-stream-filter:
-    saturate(1.18)
-    drop-shadow(0 0 8px rgba(255, 116, 36, 0.42));
+    saturate(1.08)
+    contrast(1.08)
+    brightness(0.88)
+    drop-shadow(0 0 8px rgba(203, 69, 17, 0.34));
+}
+
+.coffeePotComposerDock {
+  position: absolute;
+  left: clamp(18px, 2.2vw, 30px);
+  bottom: calc(100% + clamp(6px, 0.7vw, 10px));
+  z-index: 18;
+  pointer-events: none;
 }
 
 .coffeePotTray {
-  position: absolute;
-  left: clamp(18px, 2.2vw, 30px);
-  bottom: clamp(18px, 2.4vw, 34px);
+  position: relative;
   z-index: 1;
   width: clamp(54px, 6.6vw, 84px);
   height: clamp(46px, 5.4vw, 70px);
@@ -49584,10 +49601,13 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .coffeePotDrag[data-pour-target="true"] {
   transform: translate(var(--coffee-pot-pour-cursor-x), var(--coffee-pot-pour-cursor-y)) rotate(var(--coffee-pot-drag-rotate));
+  filter:
+    drop-shadow(0 12px 14px rgba(0, 0, 0, 0.42))
+    drop-shadow(0 0 16px rgba(255, 164, 66, 0.2));
 }
 
 .coffeePotDrag[data-pouring="true"] {
-  --coffee-pot-drag-rotate: 4deg;
+  --coffee-pot-drag-rotate: 0deg;
 }
 
 .coffeePotDrag[data-returning="true"] {
@@ -49628,17 +49648,80 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .coffeePotPourStream {
   position: absolute;
   z-index: 1;
-  right: -6%;
+  right: 6%;
   top: var(--coffee-pot-pour-stream-top);
   width: var(--coffee-pot-drag-size);
   height: var(--coffee-pot-pour-stream-height);
+  isolation: isolate;
   pointer-events: none;
-  animation: coffeePotPourStreamAppear 80ms ease-out both;
+  transform-origin: 88.5% 0;
+  animation: coffeePotPourStreamAppear 170ms cubic-bezier(0.2, 0.82, 0.22, 1) both;
+}
+
+.coffeePotPourStream::before {
+  content: "";
+  position: absolute;
+  right: 8%;
+  top: 0;
+  bottom: 1%;
+  z-index: 2;
+  width: 7.4%;
+  min-width: 3px;
+  border-radius: 999px;
+  background:
+    linear-gradient(
+      90deg,
+      var(--coffee-pot-pour-deep) 0%,
+      var(--coffee-pot-pour-mid) 26%,
+      var(--coffee-pot-pour-highlight) 48%,
+      var(--coffee-pot-pour-mid) 68%,
+      var(--coffee-pot-pour-deep) 100%
+    );
+  box-shadow:
+    inset 1px 0 0 rgba(255, 218, 153, 0.22),
+    0 0 5px color-mix(in srgb, var(--coffee-pot-pour-splash) 44%, transparent);
+  clip-path: polygon(
+    4% 0,
+    100% 0,
+    84% 18%,
+    98% 36%,
+    78% 54%,
+    92% 72%,
+    72% 100%,
+    20% 100%,
+    28% 72%,
+    8% 54%,
+    22% 36%,
+    0 18%
+  );
+  transform-origin: 50% 0;
+  animation: coffeePotPourCorePulse 520ms ease-in-out infinite alternate;
+}
+
+.coffeePotPourStream::after {
+  content: "";
+  position: absolute;
+  right: -1%;
+  bottom: -2.5%;
+  z-index: 3;
+  width: 22%;
+  height: 72%;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 20% 28%, var(--coffee-pot-pour-highlight) 0 2.8%, transparent 4.2%),
+    radial-gradient(circle at 76% 51%, var(--coffee-pot-pour-mid) 0 3.2%, transparent 4.8%),
+    radial-gradient(circle at 30% 72%, var(--coffee-pot-pour-splash) 0 2.4%, transparent 4%),
+    radial-gradient(circle at 69% 84%, var(--coffee-pot-pour-highlight) 0 2.2%, transparent 3.8%),
+    radial-gradient(ellipse at 50% 97%, transparent 4%, var(--coffee-pot-pour-splash) 8% 13%, transparent 20%);
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--coffee-pot-pour-splash) 46%, transparent));
+  transform-origin: center;
+  animation: coffeePotPourLandingPulse 560ms ease-out infinite;
 }
 
 .coffeePotPourStreamFrame {
   position: absolute;
   inset: 0;
+  z-index: 1;
   width: 100%;
   height: 100%;
   object-fit: contain;
@@ -49647,18 +49730,59 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   opacity: var(--coffee-pot-pour-frame-opacity, 0);
   mix-blend-mode: var(--coffee-pot-pour-stream-blend-mode, normal);
   filter: var(--coffee-pot-pour-stream-filter);
-  transition: opacity 55ms ease;
+  transform-origin: 88.5% 0;
+  animation: coffeePotPourFrameWaver 440ms ease-in-out infinite alternate;
+  transition: opacity 70ms ease;
 }
 
 @keyframes coffeePotPourStreamAppear {
   from {
     opacity: 0;
-    transform: translateY(-4px) scaleY(0.94);
+    transform: translateY(-5px) scaleY(0.22);
   }
 
   to {
     opacity: 1;
     transform: translateY(0) scaleY(1);
+  }
+}
+
+@keyframes coffeePotPourCorePulse {
+  from {
+    opacity: 0.7;
+    transform: translateX(-0.45px) scaleX(0.88);
+  }
+
+  to {
+    opacity: 0.96;
+    transform: translateX(0.45px) scaleX(1.12);
+  }
+}
+
+@keyframes coffeePotPourFrameWaver {
+  from {
+    transform: translateX(-0.35px) scaleX(1.04);
+  }
+
+  to {
+    transform: translateX(0.35px) scaleX(1.14);
+  }
+}
+
+@keyframes coffeePotPourLandingPulse {
+  0% {
+    opacity: 0.28;
+    transform: translateY(-2px) scale(0.68) rotate(-3deg);
+  }
+
+  55% {
+    opacity: 0.86;
+    transform: translateY(1px) scale(1.06) rotate(2deg);
+  }
+
+  100% {
+    opacity: 0.2;
+    transform: translateY(3px) scale(0.82) rotate(4deg);
   }
 }
 
@@ -57309,6 +57433,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeGlobalComposer {
+  position: relative;
   justify-self: center;
   align-self: end;
   width: calc(100% + var(--coffee-shell-inline-padding) + var(--coffee-shell-inline-padding));

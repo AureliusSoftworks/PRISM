@@ -8,11 +8,13 @@ import {
   COFFEE_POT_POUR_FRAME_MS,
   COFFEE_POT_RETURN_MS,
   COFFEE_POT_TARGET_HIT_SLOP_PX,
+  COFFEE_POT_TEXT_FORCEFIELD_PADDING_PX,
   coffeeCupTopOffFillFrameIndices,
   coffeeCupTopOffFrameIndexForPour,
   coffeeCupTopOffProgressAfterForPour,
   coffeePotFillFrameDelayMs,
   coffeePotPointerIsInsideTarget,
+  coffeePotPointOutsideExclusion,
   coffeePotPourFrameImageUrl,
   coffeePotPourFrameDelayMs,
   coffeePotPourImageUrl,
@@ -73,6 +75,63 @@ describe("Coffee pot refill timing", () => {
       false
     );
     assert.equal(coffeePotPointerIsInsideTarget(99, 225, rect, 0), false);
+  });
+
+  it("keeps the dragged pot outside the padded center-text forcefield", () => {
+    const rect = { left: 200, right: 400, top: 160, bottom: 340 };
+    assert.deepEqual(
+      coffeePotPointOutsideExclusion({ x: 120, y: 240, rect }),
+      { x: 120, y: 240, blocked: false }
+    );
+    assert.deepEqual(
+      coffeePotPointOutsideExclusion({ x: 190, y: 240, rect }),
+      { x: 136, y: 240, blocked: true }
+    );
+    assert.equal(COFFEE_POT_TEXT_FORCEFIELD_PADDING_PX, 64);
+  });
+
+  it("slides along the forcefield edge instead of jumping across the table text", () => {
+    const rect = { left: 200, right: 400, top: 160, bottom: 340 };
+    assert.deepEqual(
+      coffeePotPointOutsideExclusion({
+        x: 280,
+        y: 220,
+        previousX: 120,
+        previousY: 220,
+        rect,
+      }),
+      { x: 136, y: 220, blocked: true }
+    );
+    assert.deepEqual(
+      coffeePotPointOutsideExclusion({
+        x: 320,
+        y: 260,
+        previousX: 320,
+        previousY: 90,
+        rect,
+      }),
+      { x: 320, y: 96, blocked: true }
+    );
+    assert.deepEqual(
+      coffeePotPointOutsideExclusion({
+        x: 480,
+        y: 240,
+        previousX: 136,
+        previousY: 240,
+        rect,
+      }),
+      { x: 136, y: 240, blocked: true }
+    );
+    assert.deepEqual(
+      coffeePotPointOutsideExclusion({
+        x: 480,
+        y: 70,
+        previousX: 136,
+        previousY: 240,
+        rect,
+      }),
+      { x: 480, y: 70, blocked: false }
+    );
   });
 
   it("maps pour frames from the current cup state back to full", () => {
