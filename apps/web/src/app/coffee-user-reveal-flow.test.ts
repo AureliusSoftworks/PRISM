@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   coffeeArrivalAutoplayCanScheduleNow,
   coffeeArrivalAutoplayRetryDelayMs,
+  coffeeCenterFeedMessagesDuringPendingReveal,
   coffeeDraftChangeCountsAsTyping,
   coffeeDirectedMentionBotIds,
   coffeeGeneratedReplyRevealDeferralMs,
@@ -66,6 +67,30 @@ describe("coffee user reveal flow", () => {
         sessionFinished: true,
       }),
       false
+    );
+  });
+
+  it("gives a pending assistant message one center-table owner while it streams", () => {
+    const messages = [
+      { id: "earlier", content: "Earlier line." },
+      { id: "first-bot-reply", content: "Streaming line." },
+    ];
+
+    assert.deepEqual(
+      coffeeCenterFeedMessagesDuringPendingReveal({
+        messages,
+        pendingMessageId: "first-bot-reply",
+        revealInProgress: true,
+      }),
+      [{ id: "earlier", content: "Earlier line." }]
+    );
+    assert.deepEqual(
+      coffeeCenterFeedMessagesDuringPendingReveal({
+        messages,
+        pendingMessageId: "first-bot-reply",
+        revealInProgress: false,
+      }),
+      messages
     );
   });
 
