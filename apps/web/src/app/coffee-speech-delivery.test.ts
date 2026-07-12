@@ -41,4 +41,22 @@ describe("Coffee speech delivery", () => {
     assert.equal(coffeeDeliveryIsHoldingAtMs(plan, duringHold), true);
     assert.ok(coffeeDeliveryVisibleLengthAtMs(plan, duringHold) > 0);
   });
+
+  it("uses provider character timestamps when speech supplies them", () => {
+    const text = "Hi!";
+    const plan = buildCoffeeDeliveryPlan({
+      text,
+      seed: "aligned",
+      humanPacing: 0,
+      audioDurationMs: 1000,
+      audioAlignment: {
+        characters: Array.from(text),
+        characterStartTimesSeconds: [0, 0.1, 0.8],
+        characterEndTimesSeconds: [0.1, 0.2, 1],
+      },
+    });
+    assert.deepEqual(plan.revealAtMs, [0, 100, 800]);
+    assert.equal(coffeeDeliveryVisibleLengthAtMs(plan, 750), 2);
+    assert.equal(coffeeDeliveryVisibleLengthAtMs(plan, 850), 3);
+  });
 });

@@ -8,6 +8,12 @@ export interface CoffeeDeliveryPlan {
   emphasis: { start: number; end: number } | null;
 }
 
+export interface CoffeeDeliveryCharacterAlignment {
+  characters: string[];
+  characterStartTimesSeconds: number[];
+  characterEndTimesSeconds: number[];
+}
+
 const MOOD_CHARACTERS_PER_SECOND: Record<CoffeeDeliveryMood, number> = {
   joyful: 20,
   warm: 16,
@@ -68,12 +74,14 @@ export function buildCoffeeDeliveryPlan({
   mood,
   humanPacing,
   audioDurationMs,
+  audioAlignment,
 }: {
   text: string;
   seed: string;
   mood?: CoffeeDeliveryMood | null;
   humanPacing: number;
   audioDurationMs?: number | null;
+  audioAlignment?: CoffeeDeliveryCharacterAlignment | null;
 }): CoffeeDeliveryPlan {
   const characters = Array.from(text);
   if (characters.length === 0) {
@@ -101,6 +109,45 @@ export function buildCoffeeDeliveryPlan({
       ? audioDurationMs
       : null;
   const targetDuration = requestedAudioDuration ?? clamp(elapsedMs, 280, 12_000);
+  const alignmentLength = audioAlignment?.characters.length ?? 0;
+  const alignmentValid = Boolean(
+    audioAlignment &&
+    alignmentLength > 0 &&
+    alignmentLength === audioAlignment.characterStartTimesSeconds.length &&
+    alignmentLength === audioAlignment.characterEndTimesSeconds.length
+  );
+  if (alignmentValid && audioAlignment) {
+    const alignedText = audioAlignment.characters.join("");
+    const exactText = alignedText === text;
+    const alignedDurationMs = Math.max(
+      1,
+      (audioAlignment.characterEndTimesSeconds[alignmentLength - 1] ?? 0) * 1000
+    );
+    const alignmentScale = targetDuration / alignedDurationMs;
+    const alignedRevealAtMs = characters.map((_, index) => {
+      const alignedIndex = exactText
+        ? Math.min(alignmentLength - 1, index)
+        : Math.min(
+            alignmentLength - 1,
+            Math.round((index / Math.max(1, characters.length - 1)) * (alignmentLength - 1))
+          );
+      return Math.max(0, Math.min(
+        targetDuration,
+        Math.round(
+          (audioAlignment.characterStartTimesSeconds[alignedIndex] ?? 0) *
+          1000 *
+          alignmentScale
+        )
+      ));
+    });
+    return {
+      text,
+      revealAtMs: alignedRevealAtMs,
+      durationMs: Math.round(targetDuration),
+      baseCharacterMs: targetDuration / Math.max(1, characters.length),
+      emphasis: resolveEmphasis(text),
+    };
+  }
   const scale = targetDuration / elapsedMs;
   return {
     text,

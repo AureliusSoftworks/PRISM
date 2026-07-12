@@ -95,6 +95,8 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     voiceEffectsEnabled: 1,
     voiceVolume: 1,
     englishVoiceEngine: "builtin",
+    defaultSystemVoiceName: null,
+    defaultElevenLabsVoiceId: null,
     elevenLabsVoiceBank: "{}",
     elevenLabsVoiceModel: null,
     playerAudioVoiceProfile: null,
@@ -112,6 +114,8 @@ describe("resolveNextSettings — voice foundation", () => {
         voiceEffectsEnabled: false,
         voiceVolume: 0.65,
         englishVoiceEngine: "elevenlabs",
+        defaultSystemVoiceName: "  Alex  ",
+        defaultElevenLabsVoiceId: " eleven-default ",
         elevenLabsVoiceBank: { "voice-1": "  voice_alpha  ", "voice-3": 17, extra: "ignore" },
         elevenLabsVoiceModel: " eleven_multilingual_v2 ",
         playerAudioVoiceProfile: {
@@ -140,6 +144,8 @@ describe("resolveNextSettings — voice foundation", () => {
     assert.equal(next.playerAudioVoiceProfile.elevenLabsVoiceId, "player-eleven");
     assert.equal(next.playerNamePronunciation, "Jair id");
     assert.equal(next.englishVoiceEngine, "elevenlabs");
+    assert.equal(next.defaultSystemVoiceName, "Alex");
+    assert.equal(next.defaultElevenLabsVoiceId, "eleven-default");
     assert.deepEqual(next.elevenLabsVoiceBank, {
       "voice-1": "voice_alpha", "voice-2": null, "voice-3": null, "voice-4": null, "voice-5": null,
     });

@@ -512,6 +512,7 @@ export type UsagePurpose =
   | "prompt_wildcard"
   | "psychic_planning"
   | "story_generation"
+  | "voice_preview"
   | "zen_live_action"
   | "system_unlabeled";
 

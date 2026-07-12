@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   cancelCoffeeTurnJobsForConversation,
   coffeeThinkingCutInDelayMs,
+  getActiveCoffeeTurnJobForConversation,
   getCoffeeTurnJob,
   interruptCoffeeTurnJob,
   setCoffeeTurnJobPhase,
@@ -85,6 +86,68 @@ describe("Coffee turn jobs", () => {
     });
     assert.equal(cancelCoffeeTurnJobsForConversation("u4", "c4"), 1);
     assert.equal(getCoffeeTurnJob("u4", started.id)?.phase, "interrupted");
+  });
+
+  it("only supersedes overlapping work for an explicit user turn", async () => {
+    const first = startCoffeeTurnJob({
+      userId: "u-overlap",
+      conversationId: "c-overlap",
+      run: async ({ signal, setPhase }) => {
+        setPhase("thinking", "patrick");
+        return await new Promise((_resolve, reject) => {
+          signal.addEventListener("abort", () => reject(new Error("superseded")), { once: true });
+        });
+      },
+    });
+    await Promise.resolve();
+
+    const second = startCoffeeTurnJob({
+      userId: "u-overlap",
+      conversationId: "c-overlap",
+      supersedeExisting: true,
+      run: async ({ setPhase }) => {
+        setPhase("thinking", "plankton");
+        return await new Promise(() => {});
+      },
+    });
+    await Promise.resolve();
+
+    assert.equal(getCoffeeTurnJob("u-overlap", first.id)?.phase, "interrupted");
+    assert.equal(getCoffeeTurnJob("u-overlap", second.id)?.phase, "thinking");
+    assert.equal(getCoffeeTurnJob("u-overlap", second.id)?.speakerBotId, "plankton");
+    interruptCoffeeTurnJob("u-overlap", second.id);
+  });
+
+  it("does not let an autonomous timer cancel an active player turn", async () => {
+    const playerTurn = startCoffeeTurnJob({
+      userId: "u-autoplay",
+      conversationId: "c-autoplay",
+      supersedeExisting: true,
+      run: async ({ setPhase }) => {
+        setPhase("thinking", "plankton");
+        return await new Promise(() => {});
+      },
+    });
+    await Promise.resolve();
+
+    const autonomousTurn = startCoffeeTurnJob({
+      userId: "u-autoplay",
+      conversationId: "c-autoplay",
+      run: async ({ setPhase }) => {
+        setPhase("thinking", "patrick");
+        return await new Promise(() => {});
+      },
+    });
+    await Promise.resolve();
+
+    assert.equal(getCoffeeTurnJob("u-autoplay", playerTurn.id)?.phase, "thinking");
+    assert.equal(
+      getActiveCoffeeTurnJobForConversation("u-autoplay", "c-autoplay")?.id,
+      playerTurn.id
+    );
+    assert.equal(getCoffeeTurnJob("u-autoplay", autonomousTurn.id)?.phase, "thinking");
+    interruptCoffeeTurnJob("u-autoplay", playerTurn.id);
+    interruptCoffeeTurnJob("u-autoplay", autonomousTurn.id);
   });
 
   it("expires abandoned in-memory jobs and aborts their work", async () => {

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
   buildBottishPlan,
@@ -65,6 +66,9 @@ describe("Bottish speech plan", () => {
     assert.equal(organic.notes[0]?.waveform, "sine");
     assert.equal(synthetic.notes[0]?.waveform, "square");
     assert.ok((synthetic.notes[0]?.lowpassHz ?? 0) > (organic.notes[0]?.lowpassHz ?? 0));
+    assert.ok(
+      (synthetic.notes[0]?.lowpassHz ?? 0) - (organic.notes[0]?.lowpassHz ?? 0) >= 4000
+    );
   });
 
   it("renders a playable PCM wave for the media fallback", () => {
@@ -74,6 +78,13 @@ describe("Bottish speech plan", () => {
     assert.equal(String.fromCharCode(...new Uint8Array(wave, 0, 4)), "RIFF");
     assert.equal(view.getUint32(24, true), 24_000);
     assert.ok(new Int16Array(wave, 44).some((sample) => sample !== 0));
+  });
+
+  it("pre-authorizes and reuses media fallback playback", () => {
+    const source = readFileSync(new URL("./bottishVoice.ts", import.meta.url), "utf8");
+    assert.match(source, /export async function prepareBottishVoice\(\)[\s\S]*?beginMediaUnlock\(\);/);
+    assert.match(source, /const audio = preparedMedia \?\? new Audio\(\)/);
+    assert.match(source, /releaseActiveMedia\(!error\)/);
   });
 
   it("caps extremely long replies", () => {
@@ -93,5 +104,17 @@ describe("Bottish speech plan", () => {
   it("keeps the natural duration when no streaming window is supplied", () => {
     const original = buildBottishPlan("Natural preview timing.", neutral, "preview");
     assert.equal(fitBottishPlanToDuration(original, undefined), original);
+  });
+
+  it("carries character timing for audio-driven text reveal", () => {
+    const plan = buildBottishPlan("Hi, bot!", neutral, "aligned");
+    assert.equal(plan.alignment.characters.join(""), "Hi, bot!");
+    assert.equal(plan.alignment.characterStartTimesSeconds.length, 8);
+    assert.equal(
+      plan.alignment.characterEndTimesSeconds.every((end, index) =>
+        end >= (plan.alignment.characterStartTimesSeconds[index] ?? 0)
+      ),
+      true
+    );
   });
 });

@@ -5,11 +5,14 @@ import { describe, it } from "node:test";
 const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
 
 describe("voice settings preview", () => {
-  it("uses one generic Preview action for the selected voice mode", () => {
+  it("keeps the global voice settings preview tied to the selected mode", () => {
     assert.match(pageSource, /async function previewSelectedVoice\(/);
     assert.match(pageSource, /onClick=\{\(\) => void previewSelectedVoice\(\)\}/);
     assert.match(pageSource, />\s*Preview\s*<\/button>/);
-    assert.doesNotMatch(pageSource, /Preview Bottish/);
+    assert.match(
+      pageSource,
+      /rawProfile \?\? \{[\s\S]*?DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,[\s\S]*?systemVoiceName: settings\.defaultSystemVoiceName,[\s\S]*?elevenLabsVoiceId: settings\.defaultElevenLabsVoiceId/
+    );
   });
 
   it("previews a customized bot with the currently selected global mode", () => {
@@ -18,10 +21,34 @@ describe("voice settings preview", () => {
     assert.match(pageSource, /Bottish tone from organic to synthetic/);
   });
 
-  it("previews Bottish and English with the same generic phrase", () => {
-    assert.match(pageSource, /enqueueBottishVoice\(\s*VOICE_PREVIEW_TEXT/);
-    assert.match(pageSource, /text: VOICE_PREVIEW_TEXT,\s*mode: "english"/);
+  it("previews Bottish and English with the same resolved phrase", () => {
+    assert.match(pageSource, /enqueueBottishVoice\(\s*previewText/);
+    assert.match(pageSource, /text: previewText,\s*mode: "english"/);
     assert.match(pageSource, /await enqueueEnglishVoice\(/);
+  });
+
+  it("previews the unsaved Avatar Studio voice directly in either mode", () => {
+    assert.match(pageSource, /Preview Bottish/);
+    assert.match(pageSource, /Preview English/);
+    assert.match(pageSource, /onClick=\{\(\) => void previewVoice\("bottish"\)\}/);
+    assert.match(pageSource, /onClick=\{\(\) => void previewVoice\("english"\)\}/);
+    assert.match(pageSource, /await onPreview\(normalizedProfile, mode, previewText\)/);
+    assert.match(pageSource, /voicePreviewPlaybackRunRef/);
+    assert.match(pageSource, /stopBottishVoice\(\);\s*stopEnglishVoice\(\);/);
+    assert.match(pageSource, /const previewVoiceMode = forcedMode \?\? settings\.voiceMode/);
+    assert.match(pageSource, /await onVoicePreview\(profile, forcedMode, previewText\)/);
+    assert.doesNotMatch(pageSource, /disabled=\{previewing !== null\}/);
+    assert.doesNotMatch(pageSource, /previewMode !== "bottish"/);
+  });
+
+  it("supports global defaults, randomization, and session-cached persona previews", () => {
+    assert.match(pageSource, /<span>Global default voice<\/span>/);
+    assert.match(pageSource, /defaultSystemVoiceName/);
+    assert.match(pageSource, /defaultElevenLabsVoiceId/);
+    assert.match(pageSource, />\s*Randomize\s*<\/button>/);
+    assert.match(pageSource, /voicePreviewLineCacheRef/);
+    assert.match(pageSource, /\/api\/voices\/preview-line/);
+    assert.match(pageSource, /DEFAULT_PRISM_VOICE_PREVIEW_LINES/);
   });
 
   it("keeps Mute silent and LOCAL English previews offline", () => {
@@ -56,7 +83,7 @@ describe("voice settings preview", () => {
     assert.doesNotMatch(pageSource, /className=\{styles\.botVoiceSlots\}/);
   });
 
-  it("keeps only the useful Bottish controls and moves volume to global settings", () => {
+  it("keeps only audible performance controls and removes custom textures", () => {
     const editorSource = pageSource.slice(
       pageSource.indexOf("function BotVoiceEditor("),
       pageSource.indexOf("type BotEditOriginalSnapshot")
@@ -67,7 +94,11 @@ describe("voice settings preview", () => {
     assert.doesNotMatch(editorSource, /\["pace", "Pace"\]/);
     assert.doesNotMatch(editorSource, /\["warmth", "Warmth"\]/);
     assert.doesNotMatch(editorSource, /<span>Volume<\/span>/);
-    assert.match(editorSource, /preset === "clean" \|\| preset === "crt-speaker" \|\| preset === "damaged-speaker"/);
+    assert.doesNotMatch(editorSource, />Texture</);
+    assert.doesNotMatch(editorSource, /Voice texture/);
+    assert.doesNotMatch(editorSource, /Texture amount/);
+    assert.doesNotMatch(editorSource, />Advanced</);
+    assert.match(editorSource, /texture: DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1\.texture/);
     assert.match(pageSource, /<strong>Voice volume<\/strong>/);
     assert.match(pageSource, /voiceVolume: normalizeBotVoiceVolume\(settings\.voiceVolume\)/);
   });
@@ -81,11 +112,15 @@ describe("voice settings preview", () => {
     assert.match(effectsSource, /Promise\.race\(/);
     assert.match(englishSource, /beginMediaUnlock\(\);/);
     assert.match(englishSource, /playBytesWithMedia/);
+    assert.match(englishSource, /audio\.preservesPitch = false/);
+    assert.match(englishSource, /activeMediaLiltTimer = window\.setInterval\(updatePlaybackRate, 100\)/);
   });
 
   it("ties live Bottish to visible speech and hard-stops interruptions", () => {
     assert.match(pageSource, /liveBottishRevealKeyRef/);
-    assert.match(pageSource, /zenLiveBotMouthOpen/);
+    assert.match(pageSource, /prepareChatSpeechReveal/);
+    assert.match(pageSource, /startChatSpeechReveal/);
+    assert.match(pageSource, /progressChatSpeechReveal/);
     assert.match(pageSource, /\{ targetDurationMs \}/);
     assert.match(
       pageSource,
@@ -102,6 +137,22 @@ describe("voice settings preview", () => {
     );
   });
 
+  it("uses actual audio progress as the Chat and Zen reveal clock", () => {
+    const effectsSource = readFileSync(new URL("./voiceEffects.ts", import.meta.url), "utf8");
+    assert.match(effectsSource, /onProgress\?: \(elapsedMs: number, durationMs: number\)/);
+    assert.match(effectsSource, /beginVoicePlaybackProgress/);
+    assert.match(pageSource, /speechRevealVisibleTokenCount\(speechTimeline\)/);
+    assert.match(pageSource, /onProgress: \(elapsedMs\) =>/);
+    assert.match(pageSource, /releaseChatSpeechReveal\(interruption\.revealKey\)/);
+  });
+
+  it("buffers native speech and requests exact provider timing", () => {
+    assert.match(pageSource, /buildSpeechRevealPhrases\(speechRevealTokens\)/);
+    assert.match(pageSource, /startChatSpeechRevealPhrase\(/);
+    assert.match(pageSource, /includeAlignment: true/);
+    assert.match(pageSource, /readEnglishVoiceSynthesisClip\(response\)/);
+  });
+
   it("starts Coffee Bottish locally with its reveal instead of a synthesis round trip", () => {
     const coffeeVoiceStart = pageSource.slice(
       pageSource.indexOf("const startCoffeeVoiceForReveal = async"),
@@ -114,5 +165,17 @@ describe("voice settings preview", () => {
       coffeeVoiceStart.indexOf("} else {")
     );
     assert.doesNotMatch(bottishBranch, /\/api\/voices\/synthesize/);
+  });
+
+  it("does not let inactive Chat or Coffee Replay tear down another surface's voice", () => {
+    assert.match(
+      pageSource,
+      /const chatOwnedPlayback = voiceConversationIdRef\.current !== null;[\s\S]*?if \(chatOwnedPlayback\) \{[\s\S]*?stopBottishVoice\(\);[\s\S]*?stopEnglishVoice\(\);/
+    );
+    assert.match(pageSource, /const coffeeReplayOwnsVoicePlaybackRef = useRef\(false\);/);
+    assert.match(
+      pageSource,
+      /if \(coffeeReplayOwnsVoicePlaybackRef\.current\) \{[\s\S]*?coffeeReplayOwnsVoicePlaybackRef\.current = false;[\s\S]*?stopBottishVoice\(\);[\s\S]*?stopEnglishVoice\(\);/
+    );
   });
 });

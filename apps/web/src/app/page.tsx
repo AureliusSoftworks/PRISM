@@ -329,6 +329,10 @@ import {
 } from "./botBatchEdit";
 import { LensTile } from "./LensTile";
 import {
+  fillMissingBotAudioVoiceIdentities,
+  randomizeBotAudioVoiceProfile,
+} from "./botVoiceRandomizer";
+import {
   CircleHelp,
   BarChart3,
   BookMarked,
@@ -364,6 +368,7 @@ import {
   Smile,
   Sparkles,
   Store,
+  Shuffle,
   Sun,
   Timer,
   Trash2,
@@ -561,10 +566,6 @@ import {
   applyPlayerNamePronunciation,
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
   BOT_AUDIO_VOICE_IDS,
-  BOT_VOICE_TEXTURE_PRESETS,
-  BOT_VOICE_TEXTURE_PRESET_LABELS,
-  botVoiceTextureForPreset,
-  botVoiceTextureIsModified,
   normalizeEnglishVoiceEngine,
   normalizeVoiceMode,
   type BotAudioVoiceProfileV1,
@@ -581,6 +582,7 @@ import {
 import {
   enqueueEnglishVoice,
   prepareEnglishVoice,
+  readEnglishVoiceSynthesisClip,
   stopEnglishVoice,
 } from "./englishVoice";
 import {
@@ -598,7 +600,10 @@ import {
   prismSurfaceViewForRouteParam,
   type PrismSurfaceView,
 } from "./viewRouting";
-import { coffeePlayerEnglishEngine } from "./coffee-player-voice";
+import {
+  coffeePlayerEnglishEngine,
+  coffeePlayerPlaybackProfile,
+} from "./coffee-player-voice";
 import { shouldShowEmptyStateHueLens } from "./hue-lens-visibility";
 import {
   normalizeComposerSlashCommandLine,
@@ -784,6 +789,20 @@ import {
   resolvePacedChatRevealVisibleTokenCount,
   type ChatRevealPaceState,
 } from "./chatRevealPacing";
+import {
+  buildSpeechRevealPhrases,
+  finishSpeechRevealTimeline,
+  prepareSpeechRevealTimeline,
+  speechRevealTimelineComplete,
+  speechRevealVisibleTokenCount,
+  startAlignedSpeechRevealTimeline,
+  startSpeechRevealPhraseTimeline,
+  startSpeechRevealTimeline,
+  updateSpeechRevealTimeline,
+  type SpeechCharacterAlignment,
+  type SpeechRevealPhrase,
+  type SpeechRevealTimeline,
+} from "./speechRevealTimeline";
 import {
   buildCoffeeDeliveryPlan,
   coffeeDeliveryIsHoldingAtMs,
@@ -9375,6 +9394,8 @@ interface UserSettings {
   voiceEffectsEnabled: boolean;
   voiceVolume: number;
   englishVoiceEngine: EnglishVoiceEngine;
+  defaultSystemVoiceName: string | null;
+  defaultElevenLabsVoiceId: string | null;
   elevenLabsVoiceBank: Record<BotAudioVoiceId, string | null>;
   elevenLabsVoiceModel: string;
   playerAudioVoiceProfile: BotAudioVoiceProfileV1;
@@ -9957,30 +9978,30 @@ interface Bot {
 function BotVoiceEditor({
   profile,
   onChange,
-  previewMode,
-  effectsEnabled,
   identityCatalog,
   resetLabel,
   onReset,
+  resolvePreviewText,
   onPreview,
 }: {
   profile: BotAudioVoiceProfileV1;
   onChange: (profile: BotAudioVoiceProfileV1) => void;
-  previewMode: VoiceMode;
-  effectsEnabled: boolean;
   identityCatalog: BotVoiceIdentityCatalog;
   resetLabel: string;
   onReset: () => void;
-  onPreview: (profile: BotAudioVoiceProfileV1) => Promise<void>;
+  resolvePreviewText: () => Promise<string>;
+  onPreview: (
+    profile: BotAudioVoiceProfileV1,
+    forcedMode?: Exclude<VoiceMode, "mute">,
+    previewText?: string
+  ) => Promise<void>;
 }): React.JSX.Element {
-  const rawNormalizedProfile = normalizeBotAudioVoiceProfileV1(profile);
-  const normalizedProfile = rawNormalizedProfile.texture.preset === "lofi" ||
-    rawNormalizedProfile.texture.preset === "tape"
-    ? { ...rawNormalizedProfile, texture: botVoiceTextureForPreset("clean") }
-    : rawNormalizedProfile;
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [previewing, setPreviewing] = useState(false);
-  const [previewNote, setPreviewNote] = useState<string | null>(null);
+  const normalizedProfile = {
+    ...normalizeBotAudioVoiceProfileV1(profile),
+    texture: DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1.texture,
+  };
+  const [previewing, setPreviewing] = useState<"bottish" | "english" | null>(null);
+  const previewRunRef = useRef(0);
   const selectedVoiceValue = identityCatalog.engine === "builtin"
     ? normalizedProfile.systemVoiceName ?? ""
     : normalizedProfile.elevenLabsVoiceId ?? "";
@@ -9995,29 +10016,26 @@ function BotVoiceEditor({
       [key]: value,
     }));
   };
-  const updateTextureControl = (
-    key: "amount" | "bandwidth" | "noise" | "instability" | "distortion" | "damage",
-    value: number
-  ): void => {
-    onChange(normalizeBotAudioVoiceProfileV1({
-      ...normalizedProfile,
-      texture: { ...normalizedProfile.texture, [key]: value },
-    }));
+  const previewVoice = async (
+    mode: Exclude<VoiceMode, "mute">
+  ): Promise<void> => {
+    const runId = previewRunRef.current + 1;
+    previewRunRef.current = runId;
+    setPreviewing(mode);
+    try {
+      const previewText = await resolvePreviewText();
+      if (previewRunRef.current !== runId) return;
+      await onPreview(normalizedProfile, mode, previewText);
+    } finally {
+      if (previewRunRef.current === runId) setPreviewing(null);
+    }
   };
-  const preview = async (): Promise<void> => {
-    if (previewMode === "mute") {
-      setPreviewNote("Global voices are muted. Choose Bottish or English in Settings to preview.");
-      return;
-    }
-    if (!normalizedProfile.enabled) {
-      setPreviewNote("This bot is Silent. Turn Voice enabled on to preview it.");
-      return;
-    }
-    setPreviewNote(!effectsEnabled && normalizedProfile.texture.preset !== "clean"
-      ? "Voice textures are bypassed globally, so this preview will be clean."
-      : null);
-    setPreviewing(true);
-    try { await onPreview(normalizedProfile); } finally { setPreviewing(false); }
+  const randomizeVoice = (): void => {
+    onChange(randomizeBotAudioVoiceProfile(
+      normalizedProfile,
+      identityCatalog.engine,
+      identityCatalog.options.map((option) => option.value)
+    ));
   };
   return (
     <div className={styles.botVoiceEditor}>
@@ -10054,7 +10072,7 @@ function BotVoiceEditor({
           }}
         >
           <option value="">
-            {identityCatalog.engine === "builtin" ? "System Default" : "Account default"}
+          Global default
           </option>
           {!selectedVoiceAvailable ? (
             <option value={selectedVoiceValue}>{selectedVoiceValue} (unavailable)</option>
@@ -10112,72 +10130,22 @@ function BotVoiceEditor({
           <output>{normalizedProfile.bottishTone.toFixed(2)}</output>
         </label>
       </div>
-      <div className={styles.botVoiceSectionLabel}>Texture</div>
-      <div className={styles.botVoiceTexturePresets} role="radiogroup" aria-label="Voice texture">
-        {BOT_VOICE_TEXTURE_PRESETS.filter(
-          (preset) => preset === "clean" || preset === "crt-speaker" || preset === "damaged-speaker"
-        ).map((preset) => (
-          <button
-            key={preset}
-            type="button"
-            role="radio"
-            aria-checked={normalizedProfile.texture.preset === preset}
-            data-active={normalizedProfile.texture.preset === preset ? "true" : undefined}
-            onClick={() => onChange({
-              ...normalizedProfile,
-              texture: botVoiceTextureForPreset(preset),
-            })}
-          >
-            {BOT_VOICE_TEXTURE_PRESET_LABELS[preset]}
-            {normalizedProfile.texture.preset === preset &&
-            botVoiceTextureIsModified(normalizedProfile.texture) ? <small>Modified</small> : null}
-          </button>
-        ))}
-      </div>
-      <div className={styles.botVoiceControls}>
-        <label>
-          <span>Amount</span>
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.05}
-            value={normalizedProfile.texture.amount}
-            aria-label="Texture amount"
-            disabled={normalizedProfile.texture.preset === "clean"}
-            onChange={(event) => updateTextureControl("amount", Number(event.currentTarget.value))}
-          />
-          <output>{Math.round(normalizedProfile.texture.amount * 100)}%</output>
-        </label>
-      </div>
-      <details className={styles.botVoiceAdvanced} open={advancedOpen} onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}>
-        <summary>Advanced</summary>
-        <div className={styles.botVoiceControls}>
-          {([
-            ["bandwidth", "Bandwidth"],
-            ["noise", "Noise"],
-            ["instability", "Instability"],
-            ["distortion", "Distortion"],
-            ["damage", "Damage"],
-          ] as const).map(([key, label]) => (
-            <label key={key}>
-              <span>{label}</span>
-              <input type="range" min={0} max={1} step={0.05}
-                value={normalizedProfile.texture[key]}
-                aria-label={label}
-                onChange={(event) => updateTextureControl(key, Number(event.currentTarget.value))}
-              />
-              <output>{normalizedProfile.texture[key].toFixed(2)}</output>
-            </label>
-          ))}
-        </div>
-      </details>
-      {previewNote ? <p className={styles.botVoiceNotice}>{previewNote}</p> : null}
+      <small className={styles.botVoiceControlHint}>
+        Bottish only — use Preview Bottish to hear this control.
+      </small>
       <div className={styles.botVoiceActions}>
         <button type="button" onClick={onReset}>{resetLabel}</button>
-        <button type="button" onClick={() => void preview()} disabled={previewing}>
+        <button type="button" onClick={randomizeVoice}>
+          <Shuffle size={13} strokeWidth={2.3} aria-hidden="true" />
+          Randomize
+        </button>
+        <button type="button" onClick={() => void previewVoice("bottish")}>
           <Play size={13} strokeWidth={2.3} aria-hidden="true" />
-          {previewing ? "Playing…" : "Preview"}
+          {previewing === "bottish" ? "Restart Bottish" : "Preview Bottish"}
+        </button>
+        <button type="button" onClick={() => void previewVoice("english")}>
+          <Play size={13} strokeWidth={2.3} aria-hidden="true" />
+          {previewing === "english" ? "Restart English" : "Preview English"}
         </button>
       </div>
     </div>
@@ -12148,7 +12116,15 @@ const BOT_VOICE_PRESET_DESCRIPTIONS: Record<BotVoicePreset, string> = {
   formal: "Structured and precise.",
 };
 
-const VOICE_PREVIEW_TEXT = "Hello there. This is a voice preview.";
+const VOICE_PREVIEW_TEXT =
+  "Hello there; this preview lets you hear the voice's tone and rhythm.";
+const DEFAULT_PRISM_VOICE_PREVIEW_LINES: Record<BotAudioVoiceId, string> = {
+  "voice-1": "Mic check complete; Prism is listening closely to this voice's natural rhythm.",
+  "voice-2": "Signal test complete; every bright note and quiet pause sounds operational.",
+  "voice-3": "One, two, three; this voice is steady, synchronized, and conversation-ready.",
+  "voice-4": "Hello from Prism; hear how this voice carries one complete sentence.",
+  "voice-5": "Audio check passed; this sample reveals the voice's pace, tone, and character.",
+};
 
 function blankBotProfile(): BotProfileFields {
   return parseStoredBotPrompt("").fields;
@@ -32361,6 +32337,7 @@ function BotAvatarCustomizerModal({
   const [previewMoodIndex, setPreviewMoodIndex] = useState(0);
   const [activeControlTab, setActiveControlTab] = useState<BotAvatarCustomizerTab>("face");
   const detailsEditorRef = useRef<AvatarDetailsEditorHandle | null>(null);
+  const avatarVoicePreviewRunRef = useRef(0);
   const [detailsEditorDirty, setDetailsEditorDirty] = useState(false);
   const [avatarDetailsPreview, setAvatarDetailsPreview] =
     useState<BotAvatarDetailsV1>(() => normalizeAvatarDetails(avatarDetails));
@@ -32430,6 +32407,7 @@ function BotAvatarCustomizerModal({
 
   useEffect(() => {
     if (!open) return;
+    avatarVoicePreviewRunRef.current += 1;
     setPreviewTheme(resolvedTheme);
     setPreviewMode("idle");
     setPreviewMoodIndex(0);
@@ -32865,18 +32843,21 @@ function BotAvatarCustomizerModal({
                 <BotVoiceEditor
                   profile={audioVoiceProfile}
                   onChange={onAudioVoiceProfileChange}
-                  previewMode={voiceMode}
-                  effectsEnabled={voiceEffectsEnabled}
                   identityCatalog={voiceIdentityCatalog}
                   resetLabel={isDefaultPrismBot ? "Reset voice" : "Restore original voice"}
                   onReset={onVoiceRestore}
-                  onPreview={async (profile) => {
+                  resolvePreviewText={resolveVoicePreviewText}
+                  onPreview={async (profile, forcedMode, previewText) => {
+                    const runId = avatarVoicePreviewRunRef.current + 1;
+                    avatarVoicePreviewRunRef.current = runId;
                     const previousMode = previewMode;
                     setPreviewMode("talking");
                     try {
-                      await onVoicePreview(profile);
+                      await onVoicePreview(profile, forcedMode, previewText);
                     } finally {
-                      setPreviewMode(previousMode);
+                      if (avatarVoicePreviewRunRef.current === runId) {
+                        setPreviewMode(previousMode);
+                      }
                     }
                   }}
                 />
@@ -35256,17 +35237,99 @@ function HomeContent(): React.JSX.Element {
   const voiceSeenAssistantMessageIdsRef = useRef<Set<string>>(new Set());
   const voiceAwaitingReplyRef = useRef(false);
   const voiceSynthesisAbortRef = useRef<AbortController | null>(null);
+  const voicePreviewLineCacheRef = useRef<Map<string, string>>(new Map());
+  const voicePreviewPlaybackRunRef = useRef(0);
   const liveBottishRevealKeyRef = useRef<string | null>(null);
+  const resolveVisibleMessageContentForVoiceRef = useRef<(message: Message) => string>(
+    resolveMessageDisplayContent
+  );
+  const resolveVoiceRevealDelayMultiplierRef = useRef<(revealKey: string) => number>(
+    () => 1
+  );
+  const chatSpeechRevealByKeyRef = useRef<Map<string, SpeechRevealTimeline>>(new Map());
+  const [chatSpeechRevealVersion, setChatSpeechRevealVersion] = useState(0);
+  const prepareChatSpeechReveal = useCallback((revealKey: string, tokenSignature: string) => {
+    chatSpeechRevealByKeyRef.current.set(
+      revealKey,
+      prepareSpeechRevealTimeline(tokenSignature)
+    );
+    setChatSpeechRevealVersion((version) => version + 1);
+  }, []);
+  const startChatSpeechReveal = useCallback((
+    revealKey: string,
+    tokens: readonly string[],
+    tokenSignature: string,
+    durationMs: number,
+    alignment?: SpeechCharacterAlignment | null
+  ) => {
+    const current = chatSpeechRevealByKeyRef.current.get(revealKey);
+    if (current && current.tokenSignature !== tokenSignature) return;
+    chatSpeechRevealByKeyRef.current.set(
+      revealKey,
+      alignment
+        ? startAlignedSpeechRevealTimeline(tokens, tokenSignature, durationMs, alignment)
+        : startSpeechRevealTimeline(tokens, tokenSignature, durationMs)
+    );
+    setChatSpeechRevealVersion((version) => version + 1);
+  }, []);
+  const startChatSpeechRevealPhrase = useCallback((args: {
+    revealKey: string;
+    tokens: readonly string[];
+    tokenSignature: string;
+    phrase: SpeechRevealPhrase;
+    durationMs: number;
+    alignment?: SpeechCharacterAlignment | null;
+  }) => {
+    const current = chatSpeechRevealByKeyRef.current.get(args.revealKey);
+    if (current && current.tokenSignature !== args.tokenSignature) return;
+    chatSpeechRevealByKeyRef.current.set(
+      args.revealKey,
+      startSpeechRevealPhraseTimeline({
+        tokens: args.tokens,
+        tokenSignature: args.tokenSignature,
+        phrase: args.phrase,
+        durationMs: args.durationMs,
+        alignment: args.alignment,
+      })
+    );
+    setChatSpeechRevealVersion((version) => version + 1);
+  }, []);
+  const progressChatSpeechReveal = useCallback((revealKey: string, elapsedMs: number) => {
+    const current = chatSpeechRevealByKeyRef.current.get(revealKey);
+    if (!current || current.phase !== "playing") return;
+    chatSpeechRevealByKeyRef.current.set(
+      revealKey,
+      updateSpeechRevealTimeline(current, elapsedMs)
+    );
+    setChatSpeechRevealVersion((version) => version + 1);
+  }, []);
+  const finishChatSpeechReveal = useCallback((revealKey: string) => {
+    const current = chatSpeechRevealByKeyRef.current.get(revealKey);
+    if (!current || current.phase === "preparing") return;
+    chatSpeechRevealByKeyRef.current.set(revealKey, finishSpeechRevealTimeline(current));
+    setChatSpeechRevealVersion((version) => version + 1);
+  }, []);
+  const releaseChatSpeechReveal = useCallback((revealKey: string) => {
+    if (!chatSpeechRevealByKeyRef.current.delete(revealKey)) return;
+    setChatSpeechRevealVersion((version) => version + 1);
+  }, []);
 
   useEffect(() => {
     if (!detail) {
+      const chatOwnedPlayback = voiceConversationIdRef.current !== null;
       voiceConversationIdRef.current = null;
       voiceSeenAssistantMessageIdsRef.current = new Set();
-      voiceSynthesisAbortRef.current?.abort();
-      voiceSynthesisAbortRef.current = null;
       liveBottishRevealKeyRef.current = null;
-      stopBottishVoice();
-      stopEnglishVoice();
+      if (chatSpeechRevealByKeyRef.current.size > 0) {
+        chatSpeechRevealByKeyRef.current.clear();
+        setChatSpeechRevealVersion((version) => version + 1);
+      }
+      if (chatOwnedPlayback) {
+        voiceSynthesisAbortRef.current?.abort();
+        voiceSynthesisAbortRef.current = null;
+        stopBottishVoice();
+        stopEnglishVoice();
+      }
       return;
     }
 
@@ -35313,11 +35376,28 @@ function HomeContent(): React.JSX.Element {
     voiceSynthesisAbortRef.current?.abort();
     voiceSynthesisAbortRef.current = controller;
     void (async () => {
+      let activeSpeechRevealKey: string | null = null;
       try {
         if (settings.voiceMode === "bottish") await prepareBottishVoice();
         else await prepareEnglishVoice();
         for (const message of unseen) {
           if (controller.signal.aborted) return;
+          const speechRevealKey = view === "chat" && detail.id
+            ? `${detail.id}:${message.id}`
+            : null;
+          activeSpeechRevealKey = speechRevealKey;
+          const speechDisplayContent = speechRevealKey
+            ? resolveVisibleMessageContentForVoiceRef.current(message)
+            : "";
+          const speechRevealTokens = speechRevealKey
+            ? tokenizeMessageReveal(speechDisplayContent)
+            : [];
+          if (
+            speechRevealKey &&
+            !chatSpeechRevealByKeyRef.current.has(speechRevealKey)
+          ) {
+            prepareChatSpeechReveal(speechRevealKey, speechDisplayContent);
+          }
           const messageBot = resolveMessageBotIdentity(
             message,
             bots,
@@ -35333,7 +35413,13 @@ function HomeContent(): React.JSX.Element {
               : normalizeBotAudioVoiceProfileV1(
                   settings.prismDefaultBotAudioVoiceProfile
                 );
-          if (!profile.enabled || settings.voiceVolume <= 0) continue;
+          if (!profile.enabled || settings.voiceVolume <= 0) {
+            if (speechRevealKey) {
+              releaseChatSpeechReveal(speechRevealKey);
+              chatMessageFirstSeenAtRef.current.set(speechRevealKey, Date.now());
+            }
+            continue;
+          }
           if (settings.voiceMode === "bottish") {
             const response = await api<{
               synthesis: {
@@ -35359,56 +35445,168 @@ function HomeContent(): React.JSX.Element {
               settings.voiceVolume
             );
           } else {
-            const response = await fetch(
-              new URL("/api/voices/synthesize", window.location.origin),
-              {
-                method: "POST",
-                credentials: "include",
-                signal: controller.signal,
-                headers: {
-                  "content-type": "application/json",
-                  ...authHeadersForFetch(),
-                },
-                body: JSON.stringify({
-                  messageId: message.id,
-                  mode: "english",
-                  engine: settings.englishVoiceEngine,
-                  explicitOnlineContext: true,
-                  profile,
-                }),
+            const effectiveEnglishEngine =
+              message.provider === "local" || settings.preferredProvider === "local"
+                ? "builtin"
+                : settings.englishVoiceEngine;
+            const requestEnglishClip = async (input: {
+              messageId?: string;
+              text?: string;
+              engine: EnglishVoiceEngine;
+            }) => {
+              const response = await fetch(
+                new URL("/api/voices/synthesize", window.location.origin),
+                {
+                  method: "POST",
+                  credentials: "include",
+                  signal: controller.signal,
+                  headers: {
+                    "content-type": "application/json",
+                    ...authHeadersForFetch(),
+                  },
+                  body: JSON.stringify({
+                    ...(input.messageId ? { messageId: input.messageId } : { text: input.text }),
+                    mode: "english",
+                    engine: input.engine,
+                    explicitOnlineContext: input.engine === "elevenlabs",
+                    includeAlignment: true,
+                    profile,
+                  }),
+                }
+              );
+              if (!response.ok) {
+                const payload = await response.json().catch(() => null) as {
+                  error?: string;
+                  code?: string;
+                  engineUsed?: string;
+                } | null;
+                if (payload?.engineUsed === "builtin-local-fallback") {
+                  setVoicePlaybackNotice("System voice used for LOCAL mode.");
+                }
+                throw new Error(
+                  payload?.error ?? payload?.code ?? `Voice playback failed (${response.status}).`
+                );
               }
-            );
-            if (!response.ok) {
-              const payload = await response.json().catch(() => null) as {
-                error?: string;
-                code?: string;
-                engineUsed?: string;
-              } | null;
-              if (payload?.engineUsed === "builtin-local-fallback") {
+              const engineUsed = response.headers.get("x-prism-voice-engine");
+              if (engineUsed === "builtin-local-fallback") {
                 setVoicePlaybackNotice("System voice used for LOCAL mode.");
+              } else if (engineUsed === "builtin-provider-fallback") {
+                setVoicePlaybackNotice("ElevenLabs was unavailable, so Prism used its system voice.");
+              } else if (
+                input.engine === "builtin" &&
+                settings.englishVoiceEngine === "elevenlabs" &&
+                (message.provider === "local" || settings.preferredProvider === "local")
+              ) {
+                setVoicePlaybackNotice("System voice used for LOCAL mode.");
+              } else {
+                setVoicePlaybackNotice(null);
               }
-              throw new Error(payload?.error ?? payload?.code ?? `Voice playback failed (${response.status}).`);
-            }
-            const bytes = await response.arrayBuffer();
-            if (controller.signal.aborted) return;
-            const engineUsed = response.headers.get("x-prism-voice-engine");
-            if (engineUsed === "builtin-local-fallback") {
-              setVoicePlaybackNotice("System voice used for LOCAL mode.");
-            } else if (engineUsed === "builtin-provider-fallback") {
-              setVoicePlaybackNotice("ElevenLabs was unavailable, so Prism used its system voice.");
+              return readEnglishVoiceSynthesisClip(response);
+            };
+
+            if (speechRevealKey && effectiveEnglishEngine === "builtin") {
+              const phrases = buildSpeechRevealPhrases(speechRevealTokens);
+              let pendingClip = phrases[0]
+                ? requestEnglishClip({ text: phrases[0].text, engine: "builtin" })
+                : null;
+              for (let phraseIndex = 0; phraseIndex < phrases.length; phraseIndex += 1) {
+                const phrase = phrases[phraseIndex]!;
+                const clip = await pendingClip!;
+                const nextPhrase = phrases[phraseIndex + 1];
+                pendingClip = nextPhrase
+                  ? requestEnglishClip({ text: nextPhrase.text, engine: "builtin" })
+                  : null;
+                if (controller.signal.aborted) return;
+                const phraseTokens = speechRevealTokens.slice(
+                  phrase.startTokenIndex,
+                  phrase.endTokenIndex
+                );
+                const fallbackDurationMs = resolveRevealDurationMsForTokens(
+                  phraseTokens,
+                  message.moodKey ?? DEFAULT_MESSAGE_MOOD,
+                  effectiveChatRevealTiming,
+                  resolveVoiceRevealDelayMultiplierRef.current(speechRevealKey)
+                );
+                await enqueueEnglishVoice(
+                  clip.bytes,
+                  profile,
+                  `${message.id}:phrase:${phraseIndex}`,
+                  settings.voiceEffectsEnabled !== false,
+                  settings.voiceVolume,
+                  {
+                    onStart: (durationMs) => {
+                      if (controller.signal.aborted) return;
+                      if (phraseIndex === 0) {
+                        chatMessageFirstSeenAtRef.current.set(speechRevealKey, Date.now());
+                      }
+                      startChatSpeechRevealPhrase({
+                        revealKey: speechRevealKey,
+                        tokens: speechRevealTokens,
+                        tokenSignature: speechDisplayContent,
+                        phrase,
+                        durationMs: durationMs ?? fallbackDurationMs,
+                        alignment: clip.alignment,
+                      });
+                    },
+                    onProgress: (elapsedMs) => {
+                      if (!controller.signal.aborted) {
+                        progressChatSpeechReveal(speechRevealKey, elapsedMs);
+                      }
+                    },
+                    onEnd: () => finishChatSpeechReveal(speechRevealKey),
+                  }
+                );
+              }
             } else {
-              setVoicePlaybackNotice(null);
+              const clip = await requestEnglishClip({
+                messageId: message.id,
+                engine: effectiveEnglishEngine,
+              });
+              if (controller.signal.aborted) return;
+              await enqueueEnglishVoice(
+                clip.bytes,
+                profile,
+                message.id,
+                settings.voiceEffectsEnabled !== false,
+                settings.voiceVolume,
+                speechRevealKey
+                  ? {
+                      onStart: (durationMs) => {
+                        if (controller.signal.aborted) return;
+                        const fallbackDurationMs = resolveRevealDurationMsForTokens(
+                          speechRevealTokens,
+                          message.moodKey ?? DEFAULT_MESSAGE_MOOD,
+                          effectiveChatRevealTiming,
+                          resolveVoiceRevealDelayMultiplierRef.current(speechRevealKey)
+                        );
+                        chatMessageFirstSeenAtRef.current.set(speechRevealKey, Date.now());
+                        startChatSpeechReveal(
+                          speechRevealKey,
+                          speechRevealTokens,
+                          speechDisplayContent,
+                          durationMs ?? fallbackDurationMs,
+                          clip.alignment
+                        );
+                      },
+                      onProgress: (elapsedMs) => {
+                        if (!controller.signal.aborted) {
+                          progressChatSpeechReveal(speechRevealKey, elapsedMs);
+                        }
+                      },
+                      onEnd: () => finishChatSpeechReveal(speechRevealKey),
+                    }
+                  : undefined
+              );
             }
-            await enqueueEnglishVoice(
-              bytes,
-              profile,
-              message.id,
-              settings.voiceEffectsEnabled !== false,
-              settings.voiceVolume
-            );
+            activeSpeechRevealKey = null;
           }
         }
       } catch (err) {
+        if (activeSpeechRevealKey) {
+          releaseChatSpeechReveal(activeSpeechRevealKey);
+          chatMessageFirstSeenAtRef.current.set(activeSpeechRevealKey, Date.now());
+          chatRevealPaceByKeyRef.current.delete(activeSpeechRevealKey);
+        }
         if (!isAbortLikeError(err)) {
           const message = err instanceof Error ? err.message : "Voice playback failed.";
           setVoicePlaybackNotice(message);
@@ -35422,17 +35620,39 @@ function HomeContent(): React.JSX.Element {
     })();
 
     return () => controller.abort();
-  }, [bots, detail, settings?.englishVoiceEngine, settings?.prismDefaultBotAudioVoiceProfile, settings?.voiceEffectsEnabled, settings?.voiceMode, settings?.voiceVolume, view]);
+  }, [
+    bots,
+    detail,
+    effectiveChatRevealTiming,
+    finishChatSpeechReveal,
+    prepareChatSpeechReveal,
+    progressChatSpeechReveal,
+    releaseChatSpeechReveal,
+    settings?.englishVoiceEngine,
+    settings?.prismDefaultBotAudioVoiceProfile,
+    settings?.voiceEffectsEnabled,
+    settings?.voiceMode,
+    settings?.voiceVolume,
+    settings,
+    startChatSpeechReveal,
+    startChatSpeechRevealPhrase,
+    view,
+  ]);
 
   useEffect(() => {
     if (settings?.voiceMode !== "mute") return;
     voiceSynthesisAbortRef.current?.abort();
+    if (chatSpeechRevealByKeyRef.current.size > 0) {
+      chatSpeechRevealByKeyRef.current.clear();
+      setChatSpeechRevealVersion((version) => version + 1);
+    }
     stopBottishVoice();
     stopEnglishVoice();
   }, [settings?.voiceMode]);
 
   useEffect(() => () => {
     voiceSynthesisAbortRef.current?.abort();
+    chatSpeechRevealByKeyRef.current.clear();
     stopBottishVoice();
     stopEnglishVoice();
   }, []);
@@ -36226,7 +36446,11 @@ function HomeContent(): React.JSX.Element {
     BOT_REPETITION_PENALTY_DEFAULT
   );
   const [newBotAudioVoiceProfile, setNewBotAudioVoiceProfile] =
-    useState<BotAudioVoiceProfileV1>(DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1);
+    useState<BotAudioVoiceProfileV1>(() => randomizeBotAudioVoiceProfile(
+      DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+      "builtin",
+      []
+    ));
   // Lazy initializers so the very first render already picks a random seed
   // without re-randomizing on every re-render.
   const [newBotColor, setNewBotColor] = useState<string>(() => randomHex());
@@ -41466,6 +41690,8 @@ function HomeContent(): React.JSX.Element {
       }),
     [chatEphemeralNowMs, chatRevealDelayMultiplier, zenCanvasSpeedNudgeState]
   );
+  resolveVisibleMessageContentForVoiceRef.current = resolveVisibleMessageContent;
+  resolveVoiceRevealDelayMultiplierRef.current = resolveZenAssistantRevealDelayMultiplier;
   const zenFollowupActive = view === "chat" && zenFollowupBuffer !== null;
   const zenFollowupModelPrompt = (messages: readonly string[]): string =>
     messages
@@ -41991,11 +42217,20 @@ function HomeContent(): React.JSX.Element {
     const tokenTotal = Math.max(1, revealTokens.length);
     if (completed) {
       chatRevealPaceByKeyRef.current.delete(revealKey);
+      chatSpeechRevealByKeyRef.current.delete(revealKey);
       return tokenTotal;
     }
     if (typeof cancelledTokenCount === "number") {
       chatRevealPaceByKeyRef.current.delete(revealKey);
+      chatSpeechRevealByKeyRef.current.delete(revealKey);
       return Math.min(tokenTotal, Math.max(0, cancelledTokenCount));
+    }
+    const speechTimeline = chatSpeechRevealByKeyRef.current.get(revealKey);
+    if (speechTimeline) {
+      if (speechTimeline.tokenSignature === displayContent) {
+        return Math.min(tokenTotal, speechRevealVisibleTokenCount(speechTimeline));
+      }
+      chatSpeechRevealByKeyRef.current.delete(revealKey);
     }
     return resolvePacedChatRevealVisibleTokenCount({
       revealKey,
@@ -42444,13 +42679,31 @@ function HomeContent(): React.JSX.Element {
       chatCompletedRevealKeysRef.current.delete(revealKey);
       chatCancelledRevealTokenCountByKeyRef.current.delete(revealKey);
       chatRevealPaceByKeyRef.current.delete(revealKey);
+      const displayContent = resolveVisibleMessageContent(latestAssistant);
+      if (
+        view === "chat" &&
+        settings?.voiceMode !== "mute" &&
+        (settings?.voiceVolume ?? 0) > 0
+      ) {
+        prepareChatSpeechReveal(revealKey, displayContent);
+      } else {
+        releaseChatSpeechReveal(revealKey);
+      }
       chatMessageFirstSeenAtRef.current.set(
         revealKey,
         options.firstSeenAtMs ?? Date.now()
       );
       return revealKey;
     },
-    [chatAssistantTypingMechanicsActive]
+    [
+      chatAssistantTypingMechanicsActive,
+      prepareChatSpeechReveal,
+      releaseChatSpeechReveal,
+      resolveVisibleMessageContent,
+      settings?.voiceMode,
+      settings?.voiceVolume,
+      view,
+    ]
   );
   const latestUserMessageId = useMemo<string | null>(() => {
     const source = detail?.messages ?? [];
@@ -42652,6 +42905,7 @@ function HomeContent(): React.JSX.Element {
       ? detail.messages[detail.messages.length - 1]?.id ?? null
       : null;
   const chatAssistantRevealInProgress = useMemo(() => {
+    void chatSpeechRevealVersion;
     if (!chatAssistantTypingMechanicsActive || !detail?.id || !latestAssistantMessageId) return false;
     const revealKey = `${detail.id}:${latestAssistantMessageId}`;
     if (!chatAssistantRevealEligibleKeysRef.current.has(revealKey)) return false;
@@ -42667,6 +42921,10 @@ function HomeContent(): React.JSX.Element {
     if (!latestAssistantMessage) return false;
     const revealTokens = tokenizeMessageReveal(resolveVisibleMessageContent(latestAssistantMessage));
     const tokenTotal = Math.max(1, revealTokens.length);
+    const speechTimeline = chatSpeechRevealByKeyRef.current.get(revealKey);
+    if (speechTimeline) {
+      return !speechRevealTimelineComplete(speechTimeline);
+    }
     const pacedVisibleTokenCount =
       chatRevealPaceByKeyRef.current.get(revealKey)?.visibleTokenCount;
     if (
@@ -42686,6 +42944,7 @@ function HomeContent(): React.JSX.Element {
     return chatEphemeralNowMs - firstSeenAt < revealDurationMs;
   }, [
     chatAssistantTypingMechanicsActive,
+    chatSpeechRevealVersion,
     detail?.id,
     detail?.messages,
     effectiveChatRevealTiming,
@@ -42780,7 +43039,6 @@ function HomeContent(): React.JSX.Element {
       view === "chat" &&
       settings?.voiceMode === "bottish" &&
       settings.voiceVolume > 0 &&
-      zenLiveBotTalking &&
       revealKey !== null &&
       latestAssistantMessage !== null;
     if (!shouldRun) {
@@ -42790,7 +43048,6 @@ function HomeContent(): React.JSX.Element {
       }
       return;
     }
-    if (!zenLiveBotMouthOpen && liveBottishRevealKeyRef.current !== revealKey) return;
     if (liveBottishRevealKeyRef.current === revealKey) return;
 
     const messageBot = resolveMessageBotIdentity(
@@ -42802,22 +43059,29 @@ function HomeContent(): React.JSX.Element {
       ? normalizeOptionalBotAudioVoiceProfileV1(messageBot.audio_voice_profile_override) ??
         normalizeBotAudioVoiceProfileV1(messageBot.authored_audio_voice_profile)
       : normalizeBotAudioVoiceProfileV1(settings.prismDefaultBotAudioVoiceProfile);
-    if (!profile.enabled) return;
+    if (!profile.enabled) {
+      releaseChatSpeechReveal(revealKey);
+      chatMessageFirstSeenAtRef.current.set(revealKey, Date.now());
+      return;
+    }
 
     const displayContent = resolveVisibleMessageContent(latestAssistantMessage);
     const speechText = normalizeCrtSpeechText(getBotMentionDisplayText(displayContent));
     if (!speechText) return;
+    if (!chatSpeechRevealByKeyRef.current.has(revealKey)) {
+      prepareChatSpeechReveal(revealKey, displayContent);
+    }
     const revealTokens = tokenizeMessageReveal(displayContent);
-    const revealEndsAtMs =
-      (chatMessageFirstSeenAtRef.current.get(revealKey) ?? Date.now()) +
+    const targetDurationMs = Math.max(
+      80,
       resolveMessageActionTextLagMs(latestAssistantMessage) +
       resolveRevealDurationMsForTokens(
         revealTokens,
         DEFAULT_MESSAGE_MOOD,
         effectiveChatRevealTiming,
         resolveZenAssistantRevealDelayMultiplier(revealKey)
-      );
-    const targetDurationMs = Math.max(80, revealEndsAtMs - Date.now());
+      )
+    );
 
     liveBottishRevealKeyRef.current = revealKey;
     stopBottishVoice();
@@ -42831,7 +43095,20 @@ function HomeContent(): React.JSX.Element {
           `live:${revealKey}`,
           settings.voiceEffectsEnabled !== false,
           settings.voiceVolume,
-          undefined,
+          {
+            onStart: (durationMs, alignment) => {
+              chatMessageFirstSeenAtRef.current.set(revealKey, Date.now());
+              startChatSpeechReveal(
+                revealKey,
+                revealTokens,
+                displayContent,
+                durationMs ?? targetDurationMs,
+                alignment
+              );
+            },
+            onProgress: (elapsedMs) => progressChatSpeechReveal(revealKey, elapsedMs),
+            onEnd: () => finishChatSpeechReveal(revealKey),
+          },
           { targetDurationMs }
         );
       })
@@ -42839,6 +43116,9 @@ function HomeContent(): React.JSX.Element {
         if (liveBottishRevealKeyRef.current === revealKey) {
           liveBottishRevealKeyRef.current = null;
         }
+        releaseChatSpeechReveal(revealKey);
+        chatMessageFirstSeenAtRef.current.set(revealKey, Date.now());
+        chatRevealPaceByKeyRef.current.delete(revealKey);
         if (!isAbortLikeError(error)) {
           setVoicePlaybackNotice("Bottish playback could not start.");
         }
@@ -42849,7 +43129,11 @@ function HomeContent(): React.JSX.Element {
     detail?.botId,
     detail?.lastBotId,
     effectiveChatRevealTiming,
+    finishChatSpeechReveal,
     latestAssistantMessage,
+    progressChatSpeechReveal,
+    prepareChatSpeechReveal,
+    releaseChatSpeechReveal,
     resolveMessageActionTextLagMs,
     resolveVisibleMessageContent,
     resolveZenAssistantRevealDelayMultiplier,
@@ -42857,9 +43141,8 @@ function HomeContent(): React.JSX.Element {
     settings?.voiceEffectsEnabled,
     settings?.voiceMode,
     settings?.voiceVolume,
+    startChatSpeechReveal,
     view,
-    zenLiveBotMouthOpen,
-    zenLiveBotTalking,
   ]);
   const zenLiveReplyActionText = useMemo(() => {
     if (!zenLiveBotTalking || !detail?.id || !latestAssistantMessageId) return null;
@@ -42988,13 +43271,16 @@ function HomeContent(): React.JSX.Element {
     const revealTokens = tokenizeMessageReveal(interruptedText);
     const firstSeenAt = chatMessageFirstSeenAtRef.current.get(revealKey) ?? Date.now();
     const tokenTotal = Math.max(1, revealTokens.length);
+    const speechTimeline = chatSpeechRevealByKeyRef.current.get(revealKey);
     const pacedVisibleTokenCount =
       chatRevealPaceByKeyRef.current.get(revealKey)?.visibleTokenCount;
     const startDelayMs = resolveMessageActionTextLagMs(latestAssistant);
     const elapsedMs = Math.max(0, Date.now() - firstSeenAt);
     const visibleTokenCount = Math.min(
       tokenTotal,
-      typeof pacedVisibleTokenCount === "number"
+      speechTimeline
+        ? speechRevealVisibleTokenCount(speechTimeline)
+        : typeof pacedVisibleTokenCount === "number"
         ? Math.max(0, pacedVisibleTokenCount)
         : elapsedMs < startDelayMs
           ? 0
@@ -43077,6 +43363,7 @@ function HomeContent(): React.JSX.Element {
     chatCompletedRevealKeysRef.current.add(interruption.revealKey);
     chatAssistantRevealEligibleKeysRef.current.delete(interruption.revealKey);
     chatRevealPaceByKeyRef.current.delete(interruption.revealKey);
+    releaseChatSpeechReveal(interruption.revealKey);
     pulseChatInterruptionSettle(interruption.revealKey);
     setStarterComposerRevealed(false);
     setConversationStarterPrompts(null);
@@ -43143,6 +43430,7 @@ function HomeContent(): React.JSX.Element {
     chatCompletedRevealKeysRef.current.add(interruption.revealKey);
     chatAssistantRevealEligibleKeysRef.current.delete(interruption.revealKey);
     chatRevealPaceByKeyRef.current.delete(interruption.revealKey);
+    releaseChatSpeechReveal(interruption.revealKey);
     setDetail((current) => {
       if (current?.id !== interruption.conversationId) return current;
       const nextMessages = current.messages.filter(
@@ -43242,6 +43530,7 @@ function HomeContent(): React.JSX.Element {
     chatCompletedRevealKeysRef.current.add(revealKey);
     chatAssistantRevealEligibleKeysRef.current.delete(revealKey);
     chatRevealPaceByKeyRef.current.delete(revealKey);
+    releaseChatSpeechReveal(revealKey);
     completeZenPersonaPresenceIntroReveal(revealKey);
     setChatEphemeralNowMs(Date.now());
   }
@@ -43263,6 +43552,7 @@ function HomeContent(): React.JSX.Element {
     const displayContent = resolveVisibleMessageContent(latestAssistant);
     const revealTokens = tokenizeMessageReveal(displayContent);
     const tokenTotal = Math.max(1, revealTokens.length);
+    const speechTimeline = chatSpeechRevealByKeyRef.current.get(revealKey);
     const pacedVisibleTokenCount =
       chatRevealPaceByKeyRef.current.get(revealKey)?.visibleTokenCount;
     const firstSeenAt = chatMessageFirstSeenAtRef.current.get(revealKey) ?? Date.now();
@@ -43270,8 +43560,10 @@ function HomeContent(): React.JSX.Element {
     const elapsedMs = Math.max(0, Date.now() - firstSeenAt);
     const visibleTokenCount = Math.min(
       tokenTotal,
-      typeof pacedVisibleTokenCount === "number"
-        ? Math.max(0, pacedVisibleTokenCount)
+      speechTimeline
+        ? speechRevealVisibleTokenCount(speechTimeline)
+        : typeof pacedVisibleTokenCount === "number"
+          ? Math.max(0, pacedVisibleTokenCount)
         : elapsedMs < startDelayMs
           ? 0
           : resolveVisibleTokenCountAtElapsedMs(
@@ -43294,6 +43586,7 @@ function HomeContent(): React.JSX.Element {
     );
     chatCancelledRevealTokenCountByKeyRef.current.set(revealKey, visibleTokenCount);
     chatRevealPaceByKeyRef.current.delete(revealKey);
+    releaseChatSpeechReveal(revealKey);
     setChatEphemeralNowMs(Date.now());
   }
 
@@ -44833,7 +45126,19 @@ function HomeContent(): React.JSX.Element {
   /** Matches `randomCoffeeRevealDelayMs` for the current pending assistant line so typewriter finishes with reveal. */
   const coffeeRevealTypingDurationMsRef = useRef(0);
   const coffeeTypewriterRafRef = useRef<number | null>(null);
-  const coffeeVoiceRevealClockRef = useRef<{ messageId: string; durationMs: number } | null>(null);
+  const coffeeVoiceRevealClockRef = useRef<{
+    messageId: string;
+    durationMs: number;
+    alignment: SpeechCharacterAlignment | null;
+  } | null>(null);
+  const coffeeVoiceAlignmentByMessageIdRef = useRef<Map<string, SpeechCharacterAlignment | null>>(
+    new Map()
+  );
+  const coffeePlayerVoiceClockRef = useRef<{
+    text: string;
+    durationMs: number;
+    alignment: SpeechCharacterAlignment | null;
+  } | null>(null);
   const coffeeActiveVoiceMessageIdRef = useRef<string | null>(null);
   const coffeeActivePlayerVoiceTextRef = useRef<string | null>(null);
   const coffeeCenterMessageScrollRef = useRef<HTMLDivElement | null>(null);
@@ -44854,6 +45159,7 @@ function HomeContent(): React.JSX.Element {
   const coffeeReplayTypewriterMessageKeyRef = useRef<string | null>(null);
   const coffeeReplayVoiceClockRef = useRef<{ messageKey: string; durationMs: number } | null>(null);
   const coffeeReplayVoicePreparingKeyRef = useRef<string | null>(null);
+  const coffeeReplayOwnsVoicePlaybackRef = useRef(false);
   const coffeeSynopsisRequestIdsRef = useRef<Set<string>>(new Set());
   const coffeeCenterAutoFollowRef = useRef(true);
   const coffeeCenterAutoFollowKeyRef = useRef<string | null>(null);
@@ -45639,8 +45945,11 @@ function HomeContent(): React.JSX.Element {
   useEffect(() => {
     if (!coffeeReplayActive || !coffeeReplayPlaying || !coffeeConversation || !settings) {
       coffeeReplayVoicePreparingKeyRef.current = null;
-      if (!coffeeReplayPlaying) {
+      coffeeReplayVoiceClockRef.current = null;
+      if (coffeeReplayOwnsVoicePlaybackRef.current) {
+        coffeeReplayOwnsVoicePlaybackRef.current = false;
         voiceSynthesisAbortRef.current?.abort();
+        voiceSynthesisAbortRef.current = null;
         stopBottishVoice();
         stopEnglishVoice();
       }
@@ -45661,6 +45970,7 @@ function HomeContent(): React.JSX.Element {
     }
     coffeeReplayVoiceClockRef.current = null;
     coffeeReplayVoicePreparingKeyRef.current = messageKey;
+    coffeeReplayOwnsVoicePlaybackRef.current = true;
     voiceSynthesisAbortRef.current?.abort();
     stopBottishVoice();
     stopEnglishVoice();
@@ -46146,22 +46456,37 @@ function HomeContent(): React.JSX.Element {
       // name only, keeping mouth animation + caret in sync with the text the
       // user actually sees. `*action*` stage-direction blocks are stripped
       // first since they don't appear on the table line.
-      const charCount = getBotMentionDisplayLength(extractStageDirections(full).mainText);
-      const durationMs = Math.max(
-        120,
-        coffeeRevealTypingDurationMsRef.current || randomCoffeeRevealDelayMs(full, undefined)
-      );
+      const displayText = getBotMentionDisplayText(extractStageDirections(full).mainText);
+      const charCount = Array.from(displayText).length;
+      const playerVoiceClock = coffeePlayerVoiceClockRef.current?.text === displayText
+        ? coffeePlayerVoiceClockRef.current
+        : null;
+      const deliveryPlan = buildCoffeeDeliveryPlan({
+        text: displayText,
+        seed: `coffee-player:${coffeeConversationRef.current?.id ?? "coffee"}:${displayText}`,
+        mood: "neutral",
+        humanPacing: 0,
+        audioDurationMs: playerVoiceClock?.durationMs ?? (
+          coffeeRevealTypingDurationMsRef.current ||
+          randomCoffeeRevealDelayMs(full, undefined)
+        ),
+        audioAlignment: playerVoiceClock?.alignment,
+      });
+      const durationMs = Math.max(120, deliveryPlan.durationMs);
       setCoffeeTypewriterLength(0);
       const startMs = performance.now();
       const step = (now: number) => {
         const elapsed = now - startMs;
-        const t = Math.min(1, elapsed / durationMs);
-        const nextLen = Math.min(charCount, Math.ceil(t * charCount));
+        const nextLen = Math.min(
+          charCount,
+          coffeeDeliveryVisibleLengthAtMs(deliveryPlan, elapsed)
+        );
         setCoffeeTypewriterLength(nextLen);
-        if (t < 1) {
+        if (elapsed < durationMs) {
           coffeeTypewriterRafRef.current = requestAnimationFrame(step);
         } else {
           coffeeTypewriterRafRef.current = null;
+          coffeePlayerVoiceClockRef.current = null;
           const queued = coffeePendingRevealAfterUserRef.current;
           coffeePendingRevealAfterUserRef.current = null;
           if (queued) {
@@ -46207,7 +46532,10 @@ function HomeContent(): React.JSX.Element {
       mood: revealMood,
       humanPacing: coffeeSessionSettingsRef.current.humanPacing,
       ...(coffeeVoiceRevealClockRef.current?.messageId === last.id
-        ? { audioDurationMs: coffeeVoiceRevealClockRef.current.durationMs }
+        ? {
+            audioDurationMs: coffeeVoiceRevealClockRef.current.durationMs,
+            audioAlignment: coffeeVoiceRevealClockRef.current.alignment,
+          }
         : {}),
       ...(reducedMotion ? { audioDurationMs: 180 } : {}),
     });
@@ -49118,6 +49446,7 @@ function HomeContent(): React.JSX.Element {
       chatCancelledRevealTokenCountByKeyRef.current.clear();
       chatCommittedFontLineCountByKeyRef.current.clear();
       chatRevealPaceByKeyRef.current.clear();
+      chatSpeechRevealByKeyRef.current.clear();
       chatAssistantRevealEligibleKeysRef.current.clear();
       chatCompletedRevealKeysRef.current.clear();
       chatInterruptCountByConversationRef.current.clear();
@@ -49167,6 +49496,11 @@ function HomeContent(): React.JSX.Element {
         chatRevealPaceByKeyRef.current.delete(temporalKey);
       }
     }
+    for (const temporalKey of chatSpeechRevealByKeyRef.current.keys()) {
+      if (!temporalKey.startsWith(activeConversationPrefix)) {
+        chatSpeechRevealByKeyRef.current.delete(temporalKey);
+      }
+    }
     for (const temporalKey of chatAssistantRevealEligibleKeysRef.current.keys()) {
       if (!temporalKey.startsWith(activeConversationPrefix)) {
         chatAssistantRevealEligibleKeysRef.current.delete(temporalKey);
@@ -49204,6 +49538,14 @@ function HomeContent(): React.JSX.Element {
         !activeMessageKeys.has(temporalKey)
       ) {
         chatRevealPaceByKeyRef.current.delete(temporalKey);
+      }
+    }
+    for (const temporalKey of chatSpeechRevealByKeyRef.current.keys()) {
+      if (
+        !temporalKey.startsWith(activeConversationPrefix) ||
+        !activeMessageKeys.has(temporalKey)
+      ) {
+        chatSpeechRevealByKeyRef.current.delete(temporalKey);
       }
     }
   }, [chatEphemeralMode, detail?.id, detail?.messages]);
@@ -49282,6 +49624,7 @@ function HomeContent(): React.JSX.Element {
     chatMessageFirstSeenAtRef.current.set(temporalKey, Date.now());
   }, [chatAssistantTypingMechanicsActive, detail?.id, latestAssistantMessageId]);
   useEffect(() => {
+    void chatSpeechRevealVersion;
     if (!chatAssistantTypingMechanicsActive || !detail?.id) return;
     if (pendingReplyVisible) return;
     const source = detail.messages;
@@ -49301,6 +49644,7 @@ function HomeContent(): React.JSX.Element {
     if (firstSeenAt === undefined) return;
     const revealTokens = tokenizeMessageReveal(resolveVisibleMessageContent(latestAssistant));
     const tokenTotal = Math.max(1, revealTokens.length);
+    const speechTimeline = chatSpeechRevealByKeyRef.current.get(temporalKey);
     const pacedVisibleTokenCount =
       chatRevealPaceByKeyRef.current.get(temporalKey)?.visibleTokenCount;
     const revealDurationMs =
@@ -49311,19 +49655,22 @@ function HomeContent(): React.JSX.Element {
         effectiveChatRevealTiming,
         resolveZenAssistantRevealDelayMultiplier(temporalKey)
       );
-    const visuallyComplete =
-      typeof pacedVisibleTokenCount === "number"
+    const visuallyComplete = speechTimeline
+      ? speechRevealTimelineComplete(speechTimeline)
+      : typeof pacedVisibleTokenCount === "number"
         ? pacedVisibleTokenCount >= tokenTotal
         : chatEphemeralNowMs - firstSeenAt >= revealDurationMs;
     if (visuallyComplete) {
       chatCompletedRevealKeysRef.current.add(temporalKey);
       chatAssistantRevealEligibleKeysRef.current.delete(temporalKey);
       chatRevealPaceByKeyRef.current.delete(temporalKey);
+      chatSpeechRevealByKeyRef.current.delete(temporalKey);
       completeZenPersonaPresenceIntroReveal(temporalKey);
     }
   }, [
     chatAssistantTypingMechanicsActive,
     chatEphemeralNowMs,
+    chatSpeechRevealVersion,
     completeZenPersonaPresenceIntroReveal,
     detail?.id,
     detail?.messages,
@@ -50257,6 +50604,14 @@ function HomeContent(): React.JSX.Element {
       voiceEffectsEnabled: d.settings.voiceEffectsEnabled !== false,
       voiceVolume: normalizeBotVoiceVolume(d.settings.voiceVolume),
       englishVoiceEngine: normalizeEnglishVoiceEngine(d.settings.englishVoiceEngine),
+      defaultSystemVoiceName:
+        typeof d.settings.defaultSystemVoiceName === "string"
+          ? d.settings.defaultSystemVoiceName
+          : null,
+      defaultElevenLabsVoiceId:
+        typeof d.settings.defaultElevenLabsVoiceId === "string"
+          ? d.settings.defaultElevenLabsVoiceId
+          : null,
       elevenLabsVoiceBank: Object.fromEntries(
         BOT_AUDIO_VOICE_IDS.map((voiceId) => [
           voiceId,
@@ -51590,6 +51945,9 @@ function HomeContent(): React.JSX.Element {
     coffeeMessageFirstVisibleAtMsRef.current.clear();
     coffeePendingRevealAfterUserRef.current = null;
     setCoffeeUserRevealText("");
+    coffeeVoiceRevealClockRef.current = null;
+    coffeeVoiceAlignmentByMessageIdRef.current.clear();
+    coffeePlayerVoiceClockRef.current = null;
     setCoffeeInterruptedSnippet(null);
     setCoffeeLiveInterruptionCue(null);
     setCoffeePendingArrivalScenario("user-first");
@@ -52754,6 +53112,7 @@ function HomeContent(): React.JSX.Element {
       chatCompletedRevealKeysRef.current.add(revealKey);
       chatAssistantRevealEligibleKeysRef.current.delete(revealKey);
       chatRevealPaceByKeyRef.current.delete(revealKey);
+      chatSpeechRevealByKeyRef.current.delete(revealKey);
       chatMessageFirstSeenAtRef.current.delete(revealKey);
     }
     if (cleanupRevealKeys.length > 0) {
@@ -58700,6 +59059,10 @@ function HomeContent(): React.JSX.Element {
     const payload = {
       coffeeExperimentalTableAngleEnabled:
         settings.coffeeExperimentalTableAngleEnabled === true,
+      playerAudioVoiceProfile: normalizeBotAudioVoiceProfileV1(
+        settings.playerAudioVoiceProfile
+      ),
+      playerNamePronunciation: settings.playerNamePronunciation.trim(),
     };
     setBusy(true);
     setPanelError(null);
@@ -58771,12 +59134,10 @@ function HomeContent(): React.JSX.Element {
       voiceEffectsEnabled: settings.voiceEffectsEnabled !== false,
       voiceVolume: normalizeBotVoiceVolume(settings.voiceVolume),
       englishVoiceEngine: normalizeEnglishVoiceEngine(settings.englishVoiceEngine),
+      defaultSystemVoiceName: settings.defaultSystemVoiceName,
+      defaultElevenLabsVoiceId: settings.defaultElevenLabsVoiceId,
       elevenLabsVoiceBank: settings.elevenLabsVoiceBank,
       elevenLabsVoiceModel: settings.elevenLabsVoiceModel,
-      playerAudioVoiceProfile: normalizeBotAudioVoiceProfileV1(
-        settings.playerAudioVoiceProfile
-      ),
-      playerNamePronunciation: settings.playerNamePronunciation.trim(),
     };
     setBusy(true);
     setPanelError(null);
@@ -58797,34 +59158,74 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
+  async function resolveAvatarVoicePreviewText(): Promise<string> {
+    if (botPanelView === "defaultCustomize") {
+      return DEFAULT_PRISM_VOICE_PREVIEW_LINES[
+        normalizeBotAudioVoiceProfileV1(newBotAudioVoiceProfile).baseVoiceId
+      ];
+    }
+    const cacheKey = editingBotId ? `bot:${editingBotId}` : `draft:${newBotName.trim() || "new"}`;
+    const cached = voicePreviewLineCacheRef.current.get(cacheKey);
+    if (cached) return cached;
+    try {
+      const result = await api<{ line?: string }>("/api/voices/preview-line", {
+        method: "POST",
+        body: JSON.stringify({
+          botId: editingBotId,
+          botName: newBotName.trim() || "New bot",
+          systemPrompt: newBotSystemPrompt,
+        }),
+      });
+      const line = typeof result.line === "string" && result.line.trim()
+        ? result.line.trim()
+        : VOICE_PREVIEW_TEXT;
+      voicePreviewLineCacheRef.current.set(cacheKey, line);
+      return line;
+    } catch {
+      voicePreviewLineCacheRef.current.set(cacheKey, VOICE_PREVIEW_TEXT);
+      return VOICE_PREVIEW_TEXT;
+    }
+  }
+
   async function previewSelectedVoice(
-    rawProfile?: BotAudioVoiceProfileV1
+    rawProfile?: BotAudioVoiceProfileV1,
+    forcedMode?: Exclude<VoiceMode, "mute">,
+    previewText = VOICE_PREVIEW_TEXT
   ): Promise<void> {
     if (!settings) return;
+    const previewRunId = voicePreviewPlaybackRunRef.current + 1;
+    voicePreviewPlaybackRunRef.current = previewRunId;
+    const previewVoiceMode = forcedMode ?? settings.voiceMode;
     const previewProfile = normalizeBotAudioVoiceProfileV1(
-      rawProfile ?? settings.playerAudioVoiceProfile
+      rawProfile ?? {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+        systemVoiceName: settings.defaultSystemVoiceName,
+        elevenLabsVoiceId: settings.defaultElevenLabsVoiceId,
+      }
     );
     setPanelError(null);
     setVoicePlaybackNotice(null);
     stopBottishVoice();
     stopEnglishVoice();
-    if (settings.voiceMode === "mute") {
+    if (previewVoiceMode === "mute") {
       setVoicePlaybackNotice("Mute is silent. Choose Bottish or English to hear a preview.");
       return;
     }
     setBusy(true);
     try {
-      if (settings.voiceMode === "bottish") {
+      if (previewVoiceMode === "bottish") {
         await prepareBottishVoice();
         setVoicePlaybackNotice("Playing Bottish preview…");
         await enqueueBottishVoice(
-          VOICE_PREVIEW_TEXT,
+          previewText,
           previewProfile,
           "settings-voice-preview",
           settings.voiceEffectsEnabled !== false,
           settings.voiceVolume
         );
-        setVoicePlaybackNotice("Played Bottish preview.");
+        if (voicePreviewPlaybackRunRef.current === previewRunId) {
+          setVoicePlaybackNotice("Played Bottish preview.");
+        }
         return;
       }
 
@@ -58838,7 +59239,7 @@ function HomeContent(): React.JSX.Element {
         credentials: "include",
         headers: { "content-type": "application/json", ...authHeadersForFetch() },
         body: JSON.stringify({
-          text: VOICE_PREVIEW_TEXT,
+          text: previewText,
           mode: "english",
           engine: previewEngine,
           explicitOnlineContext: true,
@@ -58867,12 +59268,16 @@ function HomeContent(): React.JSX.Element {
         settings.voiceEffectsEnabled !== false,
         settings.voiceVolume
       );
-      setVoicePlaybackNotice("Played English preview.");
+      if (voicePreviewPlaybackRunRef.current === previewRunId) {
+        setVoicePlaybackNotice("Played English preview.");
+      }
     } catch (err) {
-      setPanelError(err instanceof Error ? err.message : "Could not preview the selected voice.");
-      setVoicePlaybackNotice(null);
+      if (voicePreviewPlaybackRunRef.current === previewRunId) {
+        setPanelError(err instanceof Error ? err.message : "Could not preview the selected voice.");
+        setVoicePlaybackNotice(null);
+      }
     } finally {
-      setBusy(false);
+      if (voicePreviewPlaybackRunRef.current === previewRunId) setBusy(false);
     }
   }
 
@@ -64862,6 +65267,19 @@ function HomeContent(): React.JSX.Element {
     };
   }
 
+  const randomBotVoiceProfileForCreation = useCallback((): BotAudioVoiceProfileV1 => {
+    const withSystemVoice = randomizeBotAudioVoiceProfile(
+      DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+      "builtin",
+      systemVoiceOptions.map((voice) => voice.name)
+    );
+    return randomizeBotAudioVoiceProfile(
+      withSystemVoice,
+      "elevenlabs",
+      elevenLabsVoiceCatalog.map((voice) => voice.voiceId)
+    );
+  }, [elevenLabsVoiceCatalog, systemVoiceOptions]);
+
   function applyRandomBotDraft() {
     const draft = buildRandomBotDraft();
     setPanelNotice(null);
@@ -64873,6 +65291,7 @@ function HomeContent(): React.JSX.Element {
     setNewBotTopP(draft.topP);
     setNewBotTopK(draft.topK);
     setNewBotRepetitionPenalty(draft.repetitionPenalty);
+    setNewBotAudioVoiceProfile(randomBotVoiceProfileForCreation());
     createBotAppearanceTouchedRef.current = true;
     setNewBotColor(draft.color);
     setNewBotGlyph(draft.glyph);
@@ -64937,7 +65356,7 @@ function HomeContent(): React.JSX.Element {
     setNewBotTopP(BOT_TOP_P_DEFAULT);
     setNewBotTopK(BOT_TOP_K_DEFAULT);
     setNewBotRepetitionPenalty(BOT_REPETITION_PENALTY_DEFAULT);
-    setNewBotAudioVoiceProfile(DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1);
+    setNewBotAudioVoiceProfile(randomBotVoiceProfileForCreation());
     createBotAppearanceTouchedRef.current = false;
     setNewBotColor(randomHex(
       bots.map((bot) => bot.color?.trim() ?? "").filter((hex) => hex.length > 0)
@@ -64973,7 +65392,7 @@ function HomeContent(): React.JSX.Element {
     // the only places that hold a snapshot are paths that also call
     // resetBotForm on exit.
     editOriginalRef.current = null;
-  }, []);
+  }, [bots, randomBotVoiceProfileForCreation]);
 
   function resetBotPanelDraftNavigation(): void {
     disarmDelete();
@@ -65238,6 +65657,11 @@ function HomeContent(): React.JSX.Element {
     const storedSystemPrompt = botEditorAdvancedMode
       ? newBotSystemPrompt
       : serializeStoredBotPrompt(botProfile, createdBotName);
+    const createdAudioVoiceProfile = fillMissingBotAudioVoiceIdentities(
+      newBotAudioVoiceProfile,
+      systemVoiceOptions.map((voice) => voice.name),
+      elevenLabsVoiceCatalog.map((voice) => voice.voiceId)
+    );
     const transferTotalSteps = generatedMemorySeeds.length > 0
       ? generatedMemorySeeds.length + 1
       : 0;
@@ -78796,15 +79220,260 @@ function HomeContent(): React.JSX.Element {
 
                 <section
                   className={`${styles.settingsSection} ${styles.settingsSectionWide}`}
-                  aria-labelledby="player-voice-settings-title"
+                  aria-labelledby="voice-engine-settings-title"
+                >
+                  <header className={styles.settingsSectionHeader}>
+                    <div>
+                      <span className={styles.settingsEyebrow}>English</span>
+                      <h4 id="voice-engine-settings-title">Speech engine</h4>
+                    </div>
+                    <div className={styles.settingsSectionHeaderAside}>
+                      <small>LOCAL messages always stay offline.</small>
+                    </div>
+                  </header>
+                  <div className={styles.settingsFieldGrid}>
+                    <label className={styles.settingsFieldFull}>
+                      <span>Engine</span>
+                      <select
+                        value={settings.englishVoiceEngine}
+                        onChange={(event) => {
+                          const engine = normalizeEnglishVoiceEngine(event.currentTarget.value);
+                          setSettings((previous) =>
+                            previous ? { ...previous, englishVoiceEngine: engine } : previous
+                          );
+                        }}
+                      >
+                        <option value="builtin">System Classic (Offline)</option>
+                        <option value="elevenlabs">ElevenLabs (Online)</option>
+                      </select>
+                    </label>
+                    {settings.englishVoiceEngine === "elevenlabs" ? (
+                      <>
+                        <label className={styles.settingsFieldFull}>
+                          <span>Global default voice</span>
+                          <select
+                            value={settings.defaultElevenLabsVoiceId ?? ""}
+                            onChange={(event) => {
+                              const defaultElevenLabsVoiceId = event.currentTarget.value || null;
+                              setSettings((previous) => previous
+                                ? { ...previous, defaultElevenLabsVoiceId }
+                                : previous);
+                            }}
+                          >
+                            <option value="">ElevenLabs account default</option>
+                            {elevenLabsVoiceCatalog.map((entry) => (
+                              <option key={entry.voiceId} value={entry.voiceId}>
+                                {entry.name}{entry.labels.accent ? ` · ${entry.labels.accent}` : ""}
+                              </option>
+                            ))}
+                          </select>
+                          <small>Used whenever a bot has not chosen its own ElevenLabs voice.</small>
+                        </label>
+                        <label className={styles.settingsFieldFull}>
+                          <span>ElevenLabs model</span>
+                          <select
+                            value={settings.elevenLabsVoiceModel || "eleven_flash_v2_5"}
+                            onChange={(event) =>
+                              setSettings((previous) =>
+                                previous
+                                  ? { ...previous, elevenLabsVoiceModel: event.currentTarget.value }
+                                  : previous
+                              )
+                            }
+                          >
+                            <option value="eleven_flash_v2_5">Flash v2.5</option>
+                            <option value="eleven_multilingual_v2">Multilingual v2</option>
+                            <option value="eleven_v3">Eleven v3</option>
+                          </select>
+                        </label>
+                        <div className={`${styles.settingsFieldFull} ${styles.settingsDockRow}`}>
+                          <span>
+                            Map the five portable Prism slots to voices from your account.
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => void loadElevenLabsVoiceCatalog()}
+                            disabled={elevenLabsVoiceCatalogLoading}
+                          >
+                            {elevenLabsVoiceCatalogLoading ? "Loading…" : "Load voices"}
+                          </button>
+                        </div>
+                        {elevenLabsVoiceCatalog.length > 0
+                          ? BOT_AUDIO_VOICE_IDS.map((voiceId, index) => {
+                              const selectedVoiceId = settings.elevenLabsVoiceBank[voiceId] ?? "";
+                              const selectedIsMissing = Boolean(
+                                selectedVoiceId &&
+                                !elevenLabsVoiceCatalog.some(
+                                  (entry) => entry.voiceId === selectedVoiceId
+                                )
+                              );
+                              return (
+                                <label key={voiceId}>
+                                  <span>{`Voice ${index + 1}`}</span>
+                                  <select
+                                    value={selectedVoiceId}
+                                    onChange={(event) => {
+                                      const providerVoiceId = event.currentTarget.value || null;
+                                      setSettings((previous) =>
+                                        previous
+                                          ? {
+                                              ...previous,
+                                              elevenLabsVoiceBank: {
+                                                ...previous.elevenLabsVoiceBank,
+                                                [voiceId]: providerVoiceId,
+                                              },
+                                            }
+                                          : previous
+                                      );
+                                    }}
+                                  >
+                                    <option value="">Choose a voice…</option>
+                                    {selectedIsMissing ? (
+                                      <option value={selectedVoiceId}>Saved voice (unavailable)</option>
+                                    ) : null}
+                                    {elevenLabsVoiceCatalog.map((entry) => (
+                                      <option key={entry.voiceId} value={entry.voiceId}>
+                                        {entry.name}
+                                        {entry.labels.accent ? ` · ${entry.labels.accent}` : ""}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                              );
+                            })
+                          : null}
+                        <p className={`${styles.settingsFieldFull} ${styles.settingsSectionHint}`}>
+                          Uses your ElevenLabs API key and credits. Spoken text leaves this device and may be retained by ElevenLabs. LOCAL turns never use this engine.
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <label className={styles.settingsFieldFull}>
+                          <span>Global default voice</span>
+                          <select
+                            value={settings.defaultSystemVoiceName ?? ""}
+                            onChange={(event) => {
+                              const defaultSystemVoiceName = event.currentTarget.value || null;
+                              setSettings((previous) => previous
+                                ? { ...previous, defaultSystemVoiceName }
+                                : previous);
+                            }}
+                          >
+                            <option value="">Operating system default</option>
+                            {systemVoiceOptions.map((voice) => (
+                              <option key={`${voice.name}:${voice.locale}`} value={voice.name}>
+                                {voice.name}{voice.locale ? ` · ${voice.locale.replace("_", "-")}` : ""}
+                              </option>
+                            ))}
+                          </select>
+                          <small>Used whenever a bot is set to Global default.</small>
+                        </label>
+                        <p className={`${styles.settingsFieldFull} ${styles.settingsSectionHint}`}>
+                          System Classic uses voices installed by macOS or Windows and never sends
+                          speech text online.
+                          {systemVoiceOptions.length > 0
+                            ? ` ${systemVoiceOptions.length} English voice${systemVoiceOptions.length === 1 ? "" : "s"} detected on this computer.`
+                            : " No English system voices were detected yet."}
+                        </p>
+                      </>
+                    )}
+                  </div>
+                </section>
+              </div>
+
+              <div className={styles.settingsSaveDock}>
+                {panelNotice && <p className={styles.panelNotice} role="status">{panelNotice}</p>}
+                {voicePlaybackNotice && (
+                  <p className={styles.panelNotice} role="status">{voicePlaybackNotice}</p>
+                )}
+                {panelError && <p className={styles.error} role="alert">{panelError}</p>}
+                <button type="button" onClick={() => void previewSelectedVoice()} disabled={busy}>
+                  Preview
+                </button>
+                <button type="submit" disabled={busy}>
+                  Save voice settings
+                </button>
+              </div>
+            </form>
+          )}
+          {settings && activeSettingsScope === "coffee" && (
+            <form
+              className={`${styles.form} ${styles.settingsWorkspace}`}
+              onSubmit={saveCoffeeModeSettings}
+            >
+              <div className={styles.settingsSectionGrid}>
+                <section
+                  className={`${styles.settingsSection} ${styles.settingsSectionWide}`}
+                  data-settings-section="coffee"
+                  aria-labelledby="coffee-table-settings-title"
+                >
+                  <header className={styles.settingsSectionHeader}>
+                    <div>
+                      <span className={styles.settingsEyebrow}>Display</span>
+                      <h4 id="coffee-table-settings-title">Table View</h4>
+                    </div>
+                    <div className={styles.settingsSectionHeaderAside}>
+                      <small>Saved with Coffee Mode settings.</small>
+                      <PanelSectionInfo
+                        id="settings-section-info-coffee-table"
+                        label="About Coffee table settings"
+                      >
+                        Controls experimental table presentation for active Coffee sessions and replays.
+                      </PanelSectionInfo>
+                    </div>
+                  </header>
+                  <div className={styles.settingsFieldGrid}>
+                    <label
+                      className={`${styles.checkbox} ${styles.settingsInlineToggle} ${styles.settingsFieldFull}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={settings.coffeeExperimentalTableAngleEnabled === true}
+                        onChange={(event) => {
+                          const next = event.target.checked;
+                          setSettings((previous) =>
+                            previous
+                              ? {
+                                  ...previous,
+                                  coffeeExperimentalTableAngleEnabled: next,
+                                }
+                              : previous
+                          );
+                        }}
+                      />
+                      <span className={styles.controlLabelWithInfo}>
+                        <span>Experimental table angle</span>
+                        <PanelSectionInfo
+                          id="settings-control-info-coffee-experimental-table-angle"
+                          label="About experimental table angle"
+                          variant="control"
+                        >
+                          Uses the wider angled table art during active Coffee sessions and replays.
+                        </PanelSectionInfo>
+                      </span>
+                    </label>
+                  </div>
+                </section>
+
+                <section
+                  className={`${styles.settingsSection} ${styles.settingsSectionWide}`}
+                  aria-labelledby="coffee-player-voice-settings-title"
                 >
                   <header className={styles.settingsSectionHeader}>
                     <div>
                       <span className={styles.settingsEyebrow}>You</span>
-                      <h4 id="player-voice-settings-title">Your table voice</h4>
+                      <h4 id="coffee-player-voice-settings-title">Your table voice</h4>
                     </div>
                     <div className={styles.settingsSectionHeaderAside}>
-                      <small>Used when you speak in Coffee.</small>
+                      <small>
+                        Global voice · {voiceModeDisplayName(settings.voiceMode)}
+                      </small>
+                      <PanelSectionInfo
+                        id="settings-section-info-coffee-player-voice"
+                        label="About your Coffee voice"
+                      >
+                        Your Coffee voice follows Prism&apos;s global Mute, Bottish, or English switch. These controls only choose your identity and name pronunciation.
+                      </PanelSectionInfo>
                     </div>
                   </header>
                   <div className={styles.settingsFieldGrid}>
@@ -78826,7 +79495,11 @@ function HomeContent(): React.JSX.Element {
                         Optional phonetic spelling used only for speech, such as “Jair-id.”
                       </small>
                     </label>
-                    {settings.voiceMode === "bottish" ? (
+                    {settings.voiceMode === "mute" ? (
+                      <p className={`${styles.settingsFieldFull} ${styles.settingsSectionHint}`}>
+                        Your table voice is muted by the global voice switch. Your saved voice will return when Bottish or English is selected.
+                      </p>
+                    ) : settings.voiceMode === "bottish" ? (
                       <label className={styles.settingsFieldFull}>
                         <span>Your Bottish voice</span>
                         <select
@@ -78925,127 +79598,6 @@ function HomeContent(): React.JSX.Element {
                     )}
                   </div>
                 </section>
-
-                <section
-                  className={`${styles.settingsSection} ${styles.settingsSectionWide}`}
-                  aria-labelledby="voice-engine-settings-title"
-                >
-                  <header className={styles.settingsSectionHeader}>
-                    <div>
-                      <span className={styles.settingsEyebrow}>English</span>
-                      <h4 id="voice-engine-settings-title">Speech engine</h4>
-                    </div>
-                    <div className={styles.settingsSectionHeaderAside}>
-                      <small>LOCAL messages always stay offline.</small>
-                    </div>
-                  </header>
-                  <div className={styles.settingsFieldGrid}>
-                    <label className={styles.settingsFieldFull}>
-                      <span>Engine</span>
-                      <select
-                        value={settings.englishVoiceEngine}
-                        onChange={(event) => {
-                          const engine = normalizeEnglishVoiceEngine(event.currentTarget.value);
-                          setSettings((previous) =>
-                            previous ? { ...previous, englishVoiceEngine: engine } : previous
-                          );
-                        }}
-                      >
-                        <option value="builtin">System Classic (Offline)</option>
-                        <option value="elevenlabs">ElevenLabs (Online)</option>
-                      </select>
-                    </label>
-                    {settings.englishVoiceEngine === "elevenlabs" ? (
-                      <>
-                        <label className={styles.settingsFieldFull}>
-                          <span>ElevenLabs model</span>
-                          <select
-                            value={settings.elevenLabsVoiceModel || "eleven_flash_v2_5"}
-                            onChange={(event) =>
-                              setSettings((previous) =>
-                                previous
-                                  ? { ...previous, elevenLabsVoiceModel: event.currentTarget.value }
-                                  : previous
-                              )
-                            }
-                          >
-                            <option value="eleven_flash_v2_5">Flash v2.5</option>
-                            <option value="eleven_multilingual_v2">Multilingual v2</option>
-                            <option value="eleven_v3">Eleven v3</option>
-                          </select>
-                        </label>
-                        <div className={`${styles.settingsFieldFull} ${styles.settingsDockRow}`}>
-                          <span>
-                            Map the five portable Prism slots to voices from your account.
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => void loadElevenLabsVoiceCatalog()}
-                            disabled={elevenLabsVoiceCatalogLoading}
-                          >
-                            {elevenLabsVoiceCatalogLoading ? "Loading…" : "Load voices"}
-                          </button>
-                        </div>
-                        {elevenLabsVoiceCatalog.length > 0
-                          ? BOT_AUDIO_VOICE_IDS.map((voiceId, index) => {
-                              const selectedVoiceId = settings.elevenLabsVoiceBank[voiceId] ?? "";
-                              const selectedIsMissing = Boolean(
-                                selectedVoiceId &&
-                                !elevenLabsVoiceCatalog.some(
-                                  (entry) => entry.voiceId === selectedVoiceId
-                                )
-                              );
-                              return (
-                                <label key={voiceId}>
-                                  <span>{`Voice ${index + 1}`}</span>
-                                  <select
-                                    value={selectedVoiceId}
-                                    onChange={(event) => {
-                                      const providerVoiceId = event.currentTarget.value || null;
-                                      setSettings((previous) =>
-                                        previous
-                                          ? {
-                                              ...previous,
-                                              elevenLabsVoiceBank: {
-                                                ...previous.elevenLabsVoiceBank,
-                                                [voiceId]: providerVoiceId,
-                                              },
-                                            }
-                                          : previous
-                                      );
-                                    }}
-                                  >
-                                    <option value="">Choose a voice…</option>
-                                    {selectedIsMissing ? (
-                                      <option value={selectedVoiceId}>Saved voice (unavailable)</option>
-                                    ) : null}
-                                    {elevenLabsVoiceCatalog.map((entry) => (
-                                      <option key={entry.voiceId} value={entry.voiceId}>
-                                        {entry.name}
-                                        {entry.labels.accent ? ` · ${entry.labels.accent}` : ""}
-                                      </option>
-                                    ))}
-                                  </select>
-                                </label>
-                              );
-                            })
-                          : null}
-                        <p className={`${styles.settingsFieldFull} ${styles.settingsSectionHint}`}>
-                          Uses your ElevenLabs API key and credits. Spoken text leaves this device and may be retained by ElevenLabs. LOCAL turns never use this engine.
-                        </p>
-                      </>
-                    ) : (
-                      <p className={`${styles.settingsFieldFull} ${styles.settingsSectionHint}`}>
-                        System Classic uses voices installed by macOS or Windows and never sends
-                        speech text online. Each bot can use the system default or any English
-                        voice currently installed on this computer.
-                        {systemVoiceOptions.length > 0
-                          ? ` ${systemVoiceOptions.length} English voice${systemVoiceOptions.length === 1 ? "" : "s"} detected on this computer.`
-                          : " No English system voices were detected yet."}
-                      </p>
-                    )}
-                  </div>
-                </section>
               </div>
 
               <div className={styles.settingsSaveDock}>
@@ -79054,78 +79606,15 @@ function HomeContent(): React.JSX.Element {
                   <p className={styles.panelNotice} role="status">{voicePlaybackNotice}</p>
                 )}
                 {panelError && <p className={styles.error} role="alert">{panelError}</p>}
-                <button type="button" onClick={() => void previewSelectedVoice()} disabled={busy}>
-                  Preview
-                </button>
-                <button type="submit" disabled={busy}>
-                  Save voice settings
-                </button>
-              </div>
-            </form>
-          )}
-          {settings && activeSettingsScope === "coffee" && (
-            <form
-              className={`${styles.form} ${styles.settingsWorkspace}`}
-              onSubmit={saveCoffeeModeSettings}
-            >
-              <div className={styles.settingsSectionGrid}>
-                <section
-                  className={`${styles.settingsSection} ${styles.settingsSectionWide}`}
-                  data-settings-section="coffee"
-                  aria-labelledby="coffee-table-settings-title"
+                <button
+                  type="button"
+                  onClick={() => void previewSelectedVoice(
+                    coffeePlayerPlaybackProfile(settings.playerAudioVoiceProfile)
+                  )}
+                  disabled={busy || settings.voiceMode === "mute"}
                 >
-                  <header className={styles.settingsSectionHeader}>
-                    <div>
-                      <span className={styles.settingsEyebrow}>Display</span>
-                      <h4 id="coffee-table-settings-title">Table View</h4>
-                    </div>
-                    <div className={styles.settingsSectionHeaderAside}>
-                      <small>Saved with Coffee Mode settings.</small>
-                      <PanelSectionInfo
-                        id="settings-section-info-coffee-table"
-                        label="About Coffee table settings"
-                      >
-                        Controls experimental table presentation for active Coffee sessions and replays.
-                      </PanelSectionInfo>
-                    </div>
-                  </header>
-                  <div className={styles.settingsFieldGrid}>
-                    <label
-                      className={`${styles.checkbox} ${styles.settingsInlineToggle} ${styles.settingsFieldFull}`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={settings.coffeeExperimentalTableAngleEnabled === true}
-                        onChange={(event) => {
-                          const next = event.target.checked;
-                          setSettings((previous) =>
-                            previous
-                              ? {
-                                  ...previous,
-                                  coffeeExperimentalTableAngleEnabled: next,
-                                }
-                              : previous
-                          );
-                        }}
-                      />
-                      <span className={styles.controlLabelWithInfo}>
-                        <span>Experimental table angle</span>
-                        <PanelSectionInfo
-                          id="settings-control-info-coffee-experimental-table-angle"
-                          label="About experimental table angle"
-                          variant="control"
-                        >
-                          Uses the wider angled table art during active Coffee sessions and replays.
-                        </PanelSectionInfo>
-                      </span>
-                    </label>
-                  </div>
-                </section>
-              </div>
-
-              <div className={styles.settingsSaveDock}>
-                {panelNotice && <p className={styles.panelNotice} role="status">{panelNotice}</p>}
-                {panelError && <p className={styles.error} role="alert">{panelError}</p>}
+                  Preview your voice
+                </button>
                 <button type="submit" disabled={busy}>
                   Save Coffee settings
                 </button>
@@ -82541,6 +83030,7 @@ function HomeContent(): React.JSX.Element {
                     if (!editingDefaultBot) queueBotVoiceAutosave(normalized);
                   }}
                   onVoicePreview={previewSelectedVoice}
+                  resolveVoicePreviewText={resolveAvatarVoicePreviewText}
                   onVoiceRestore={() => {
                     pushBotAvatarUndoSnapshot();
                     if (editingDefaultBot) {
@@ -84861,6 +85351,9 @@ function HomeContent(): React.JSX.Element {
       coffeeMessageFirstVisibleAtMsRef.current.clear();
       coffeePendingRevealAfterUserRef.current = null;
     setCoffeeUserRevealText("");
+    coffeeVoiceRevealClockRef.current = null;
+    coffeeVoiceAlignmentByMessageIdRef.current.clear();
+    coffeePlayerVoiceClockRef.current = null;
     setCoffeeInterruptedSnippet(null);
     if (coffeeInterruptionCueTimerRef.current) {
       clearTimeout(coffeeInterruptionCueTimerRef.current);
@@ -84921,7 +85414,16 @@ function HomeContent(): React.JSX.Element {
       };
       const lifecycle = {
         deliveryEnvelope: NEUTRAL_COFFEE_VOICE_DELIVERY_ENVELOPE,
-        onStart: settle,
+        onStart: (
+          durationMs: number | null,
+          alignment?: SpeechCharacterAlignment | null
+        ) => {
+          coffeeVoiceAlignmentByMessageIdRef.current.set(
+            message.id,
+            alignment ?? coffeeVoiceAlignmentByMessageIdRef.current.get(message.id) ?? null
+          );
+          settle(durationMs);
+        },
         onEnd: () => {
           if (coffeeActiveVoiceMessageIdRef.current === message.id) {
             setCoffeeTypewriterLength(getBotMentionDisplayLength(displayText));
@@ -84959,12 +85461,15 @@ function HomeContent(): React.JSX.Element {
                 mode: "english",
                 engine: settings.englishVoiceEngine,
                 explicitOnlineContext: true,
+                includeAlignment: true,
                 profile,
               }),
             });
             if (!response.ok) throw new Error(`Voice playback failed (${response.status}).`);
+            const clip = await readEnglishVoiceSynthesisClip(response);
+            coffeeVoiceAlignmentByMessageIdRef.current.set(message.id, clip.alignment);
             void enqueueEnglishVoice(
-              await response.arrayBuffer(),
+              clip.bytes,
               profile,
               message.id,
               settings.voiceEffectsEnabled !== false,
@@ -84989,9 +85494,10 @@ function HomeContent(): React.JSX.Element {
   };
   const startCoffeePlayerVoiceForReveal = async (text: string): Promise<number | null> => {
     if (!settings || settings.voiceMode === "mute" || settings.voiceVolume <= 0) return null;
-    const profile = normalizeBotAudioVoiceProfileV1(settings.playerAudioVoiceProfile);
+    const profile = coffeePlayerPlaybackProfile(settings.playerAudioVoiceProfile);
     const spokenText = extractStageDirections(text).mainText.trim();
-    if (!profile.enabled || !spokenText) return null;
+    if (!spokenText) return null;
+    const displaySpokenText = getBotMentionDisplayText(spokenText);
     const synthesizedText = applyPlayerNamePronunciation(
       spokenText,
       settings.displayName,
@@ -85011,14 +85517,27 @@ function HomeContent(): React.JSX.Element {
     voiceSynthesisAbortRef.current = controller;
     return await new Promise<number | null>((resolve) => {
       let settled = false;
+      let playerAlignment: SpeechCharacterAlignment | null = null;
       const settle = (durationMs: number | null) => {
         if (settled) return;
         settled = true;
-        resolve(durationMs && durationMs > 0 ? durationMs : fallbackDuration);
+        const resolvedDurationMs = durationMs && durationMs > 0 ? durationMs : fallbackDuration;
+        coffeePlayerVoiceClockRef.current = {
+          text: displaySpokenText,
+          durationMs: resolvedDurationMs,
+          alignment: playerAlignment,
+        };
+        resolve(resolvedDurationMs);
       };
       const lifecycle = {
         deliveryEnvelope: NEUTRAL_COFFEE_VOICE_DELIVERY_ENVELOPE,
-        onStart: settle,
+        onStart: (
+          durationMs: number | null,
+          alignment?: SpeechCharacterAlignment | null
+        ) => {
+          playerAlignment = alignment ?? playerAlignment;
+          settle(durationMs);
+        },
         onEnd: () => {
           if (coffeeActivePlayerVoiceTextRef.current === spokenText) {
             setCoffeeTypewriterLength(getBotMentionDisplayLength(spokenText));
@@ -85056,12 +85575,15 @@ function HomeContent(): React.JSX.Element {
                 mode: "english",
                 engine: englishEngine,
                 explicitOnlineContext: englishEngine === "elevenlabs",
+                includeAlignment: true,
                 profile,
               }),
             });
             if (!response.ok) throw new Error(`Player voice failed (${response.status}).`);
+            const clip = await readEnglishVoiceSynthesisClip(response);
+            playerAlignment = clip.alignment;
             void enqueueEnglishVoice(
-              await response.arrayBuffer(),
+              clip.bytes,
               profile,
               `coffee-player:${spokenText}`,
               settings.voiceEffectsEnabled !== false,
@@ -85118,6 +85640,8 @@ function HomeContent(): React.JSX.Element {
           coffeeVoiceRevealClockRef.current = {
             messageId: pendingMessage.id,
             durationMs: voiceDurationMs,
+            alignment:
+              coffeeVoiceAlignmentByMessageIdRef.current.get(pendingMessage.id) ?? null,
           };
         }
       }
@@ -85150,6 +85674,9 @@ function HomeContent(): React.JSX.Element {
       setCoffeePendingRevealConversation(null);
       if (coffeeVoiceRevealClockRef.current?.messageId === pendingMessage?.id) {
         coffeeVoiceRevealClockRef.current = null;
+      }
+      if (pendingMessage?.id) {
+        coffeeVoiceAlignmentByMessageIdRef.current.delete(pendingMessage.id);
       }
       if (coffeeActiveVoiceMessageIdRef.current === pendingMessage?.id) {
         stopBottishVoice();
@@ -87206,6 +87733,9 @@ function HomeContent(): React.JSX.Element {
     try {
       let job = started.job;
       for (;;) {
+        if (coffeeActiveTurnJobIdRef.current !== jobId) {
+          throw new DOMException("Coffee turn superseded.", "AbortError");
+        }
         if (job.phase === "thinking") {
           if (job.speakerBotId) setCoffeePendingSpeakerBotId(job.speakerBotId);
           setCoffeeTurnRhythmState(
@@ -87228,6 +87758,9 @@ function HomeContent(): React.JSX.Element {
           { signal }
         );
         job = polled.job;
+        if (coffeeActiveTurnJobIdRef.current !== jobId) {
+          throw new DOMException("Coffee turn superseded.", "AbortError");
+        }
         setCoffeeActiveTurnJob(job);
       }
     } catch (error) {

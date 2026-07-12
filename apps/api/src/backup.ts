@@ -104,6 +104,8 @@ export interface BackupUserSettings {
   voiceVolume?: number;
   prismDefaultBotAudioVoiceProfile?: BotAudioVoiceProfileV1;
   englishVoiceEngine?: EnglishVoiceEngine;
+  defaultSystemVoiceName?: string | null;
+  defaultElevenLabsVoiceId?: string | null;
   elevenLabsVoiceBank?: Record<string, string | null>;
   elevenLabsVoiceModel?: string;
   playerAudioVoiceProfile?: BotAudioVoiceProfileV1;
@@ -271,7 +273,8 @@ export function exportUserSnapshot(
          elevenlabs_key_ciphertext,
          elevenlabs_key_iv,
          elevenlabs_key_tag
-         ,voice_mode, voice_effects_enabled, voice_volume, english_voice_engine, elevenlabs_voice_bank,
+         ,voice_mode, voice_effects_enabled, voice_volume, english_voice_engine,
+         default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank,
          elevenlabs_voice_model, player_audio_voice_profile, player_name_pronunciation,
          prism_default_bot_audio_voice_profile
        FROM users
@@ -330,6 +333,8 @@ export function exportUserSnapshot(
         voice_effects_enabled: number | null;
         voice_volume: number | null;
         english_voice_engine: string | null;
+        default_system_voice_name: string | null;
+        default_elevenlabs_voice_id: string | null;
         elevenlabs_voice_bank: string | null;
         elevenlabs_voice_model: string | null;
         player_audio_voice_profile: string | null;
@@ -411,6 +416,8 @@ export function exportUserSnapshot(
           parseStoredBotAudioVoiceProfileV1(user.prism_default_bot_audio_voice_profile) ??
           normalizeBotAudioVoiceProfileV1(undefined),
         englishVoiceEngine: normalizeEnglishVoiceEngine(user.english_voice_engine),
+        defaultSystemVoiceName: user.default_system_voice_name,
+        defaultElevenLabsVoiceId: user.default_elevenlabs_voice_id,
         elevenLabsVoiceBank: parseStoredElevenLabsVoiceBank(user.elevenlabs_voice_bank),
         elevenLabsVoiceModel: user.elevenlabs_voice_model ?? "",
         playerAudioVoiceProfile: parseStoredPlayerAudioVoiceProfile(
@@ -899,6 +906,8 @@ function importUserSnapshotWithinTransaction(
         voice_effects_enabled = ?,
         voice_volume = ?,
         english_voice_engine = ?,
+        default_system_voice_name = ?,
+        default_elevenlabs_voice_id = ?,
         elevenlabs_voice_bank = ?,
         elevenlabs_voice_model = ?,
         player_audio_voice_profile = ?,
@@ -973,6 +982,12 @@ function importUserSnapshotWithinTransaction(
       settings.voiceEffectsEnabled === false ? 0 : 1,
       normalizeBotVoiceVolume(settings.voiceVolume),
       normalizeEnglishVoiceEngine(settings.englishVoiceEngine),
+      typeof settings.defaultSystemVoiceName === "string"
+        ? settings.defaultSystemVoiceName.trim().slice(0, 200) || null
+        : null,
+      typeof settings.defaultElevenLabsVoiceId === "string"
+        ? settings.defaultElevenLabsVoiceId.trim().slice(0, 200) || null
+        : null,
       JSON.stringify(normalizeElevenLabsVoiceBank(settings.elevenLabsVoiceBank)),
       typeof settings.elevenLabsVoiceModel === "string"
         ? settings.elevenLabsVoiceModel.trim().slice(0, 160) || null
