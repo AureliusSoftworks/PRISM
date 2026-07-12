@@ -52601,6 +52601,20 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   --bot-face-metal-scratch-y: 0%;
   --bot-face-metal-scratch-scale: 1.14;
   --bot-face-metal-scratch-contrast: 1.12;
+  --bot-face-frame-paint-mask-image: none;
+  --bot-face-frame-paint-strength: 0;
+  --bot-face-frame-paint-theme-gain: 1;
+  --bot-face-frame-paint-blend-mode: screen;
+  --bot-face-frame-finish-scale-x: 1;
+  --bot-face-frame-wear-mask-image: none;
+  --bot-face-frame-wear-strength: 0;
+  --bot-face-frame-wear-theme-gain: 1;
+  --bot-face-frame-wear-background: linear-gradient(
+    145deg,
+    rgba(178, 184, 190, 0.74),
+    rgba(108, 115, 122, 0.58)
+  );
+  --bot-face-frame-wear-blend-mode: soft-light;
   position: absolute;
   inset: var(--bot-face-frame-inset, -7%);
   z-index: var(--bot-face-frame-z, 2);
@@ -52646,6 +52660,49 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   transition: opacity 280ms ease;
 }
 
+.botFaceFramePaintLayer,
+.botFaceFrameWearLayer {
+  position: absolute;
+  inset: 0;
+  display: block;
+  pointer-events: none;
+  -webkit-mask-position: center;
+  -webkit-mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-mode: alpha;
+  mask-position: center;
+  mask-size: contain;
+  mask-repeat: no-repeat;
+  mask-mode: alpha;
+  transform: scaleX(var(--bot-face-frame-finish-scale-x));
+  transform-origin: 50% 50%;
+}
+
+.botFaceFramePaintLayer {
+  color: var(
+    --bot-face-frame-finish-color,
+    var(--coffee-bot-color, var(--editor-bot-color, var(--accent)))
+  );
+  background: currentColor;
+  opacity: calc(
+    var(--bot-face-frame-paint-strength) * var(--bot-face-frame-paint-theme-gain)
+  );
+  mix-blend-mode: var(--bot-face-frame-paint-blend-mode);
+  filter: saturate(1.12) contrast(1.06);
+  -webkit-mask-image: var(--bot-face-frame-paint-mask-image);
+  mask-image: var(--bot-face-frame-paint-mask-image);
+}
+
+.botFaceFrameWearLayer {
+  background: var(--bot-face-frame-wear-background);
+  opacity: calc(
+    var(--bot-face-frame-wear-strength) * var(--bot-face-frame-wear-theme-gain)
+  );
+  mix-blend-mode: var(--bot-face-frame-wear-blend-mode);
+  -webkit-mask-image: var(--bot-face-frame-wear-mask-image);
+  mask-image: var(--bot-face-frame-wear-mask-image);
+}
+
 .botFaceFrameMetalScratchLayer {
   /* Physical scratch map: paired dark grooves and pale catch-light edges stay
      masked to the metal while the rotating metal-light raster sweeps above them. */
@@ -52654,10 +52711,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   display: block;
   pointer-events: none;
   background:
-    linear-gradient(104deg, transparent 0 46%, rgba(255, 255, 255, 0.58) 46.25% 46.65%, transparent 47.1%),
-    linear-gradient(104deg, transparent 0 61%, rgba(0, 0, 0, 0.34) 61.2% 61.5%, rgba(255, 255, 255, 0.38) 61.65% 61.95%, transparent 62.35%),
-    linear-gradient(28deg, transparent 0 52%, rgba(255, 255, 255, 0.34) 52.15% 52.45%, transparent 52.9%),
-    linear-gradient(149deg, transparent 0 38%, rgba(0, 0, 0, 0.24) 38.1% 38.35%, rgba(255, 255, 255, 0.28) 38.45% 38.7%, transparent 39.1%);
+    linear-gradient(104deg, transparent 0 46%, rgba(196, 201, 206, 0.42) 46.25% 46.65%, transparent 47.1%),
+    linear-gradient(104deg, transparent 0 61%, rgba(0, 0, 0, 0.3) 61.2% 61.5%, rgba(188, 194, 200, 0.3) 61.65% 61.95%, transparent 62.35%),
+    linear-gradient(28deg, transparent 0 52%, rgba(190, 196, 202, 0.26) 52.15% 52.45%, transparent 52.9%),
+    linear-gradient(149deg, transparent 0 38%, rgba(0, 0, 0, 0.22) 38.1% 38.35%, rgba(180, 186, 192, 0.22) 38.45% 38.7%, transparent 39.1%);
   background-size:
     142px 76px,
     188px 110px,
@@ -52780,6 +52837,15 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .themeLight.coffeeShell .botFaceFrame,
 .zenLiveBotPresencePlate[data-theme="light"] .botFaceFrame {
   --bot-face-frame-base-image: url("/bot-frame/bot-frame-light-base.png?v=1000");
+  --bot-face-frame-paint-theme-gain: 0.58;
+  --bot-face-frame-paint-blend-mode: multiply;
+  --bot-face-frame-wear-theme-gain: 0.9;
+  --bot-face-frame-wear-background: linear-gradient(
+    145deg,
+    rgba(72, 78, 85, 0.76),
+    rgba(132, 138, 145, 0.56)
+  );
+  --bot-face-frame-wear-blend-mode: multiply;
 }
 
 .messageMoodBadge .botFaceScreenGlass {

@@ -34,6 +34,11 @@ import { LUCIDE_BOT_GLYPHS, LUCIDE_BOT_GLYPH_ORDER } from "./glyphCatalog";
 import GlyphTooltipLayer from "./GlyphTooltipLayer";
 import { BackendUnavailableNotice } from "./BackendUnavailableNotice";
 import {
+  PRISM_FACTORY_CLEAN_FRAME_SEED,
+  botFrameFinishForSeed,
+  botFrameFinishMirroredForSeed,
+} from "./botFrameFinish";
+import {
   BACKEND_AVAILABLE_EVENT,
   BACKEND_UNAVAILABLE_CODE,
   BACKEND_UNAVAILABLE_EVENT,
@@ -7604,19 +7609,46 @@ function botFrameMaterialSeedForBot(
 function botFrameMetalMaterialStyle(seed: string | null | undefined): CSSProperties | undefined {
   const normalizedSeed = seed?.trim();
   if (!normalizedSeed) return undefined;
+  const finish = botFrameFinishForSeed(normalizedSeed);
+  const finishMirrored = botFrameFinishMirroredForSeed(normalizedSeed);
   const rotationDeg = Math.round(stableUnitValue(`${normalizedSeed}:metal-scratch:rotation`) * 360);
   const offsetX = ((stableUnitValue(`${normalizedSeed}:metal-scratch:x`) - 0.5) * 10).toFixed(2);
   const offsetY = ((stableUnitValue(`${normalizedSeed}:metal-scratch:y`) - 0.5) * 10).toFixed(2);
   const scale = (1.08 + stableUnitValue(`${normalizedSeed}:metal-scratch:scale`) * 0.14).toFixed(3);
-  const opacity = (0.16 + stableUnitValue(`${normalizedSeed}:metal-scratch:opacity`) * 0.1).toFixed(3);
+  const scuffOpacity = (0.12 + stableUnitValue(`${normalizedSeed}:metal-scratch:opacity`) * 0.08).toFixed(3);
   const contrast = (1.08 + stableUnitValue(`${normalizedSeed}:metal-scratch:contrast`) * 0.18).toFixed(3);
+  const paintMaskImage =
+    finish === "band"
+      ? 'url("/bot-frame/bot-frame-broken-band-mask.png?v=1000")'
+      : finish === "stripe"
+        ? 'url("/bot-frame/bot-frame-offset-stripe-mask.png?v=1000")'
+        : "none";
+  const wearMaskImage =
+    finish === "chipped"
+      ? 'url("/bot-frame/bot-frame-chipped-paint-mask.png?v=1000")'
+      : "none";
+  const scratchOpacity =
+    finish === "scuffed"
+      ? scuffOpacity
+      : finish === "chipped"
+        ? "0.05"
+        : finish === "band" || finish === "stripe"
+          ? "0.035"
+          : "0";
 
   return {
+    ["--bot-face-frame-finish" as string]: finish,
+    ["--bot-face-frame-finish-scale-x" as string]: finishMirrored ? "-1" : "1",
+    ["--bot-face-frame-paint-mask-image" as string]: paintMaskImage,
+    ["--bot-face-frame-paint-strength" as string]:
+      finish === "band" ? "0.58" : finish === "stripe" ? "0.64" : "0",
+    ["--bot-face-frame-wear-mask-image" as string]: wearMaskImage,
+    ["--bot-face-frame-wear-strength" as string]: finish === "chipped" ? "0.52" : "0",
     ["--bot-face-metal-scratch-rotation" as string]: `${rotationDeg}deg`,
     ["--bot-face-metal-scratch-x" as string]: `${offsetX}%`,
     ["--bot-face-metal-scratch-y" as string]: `${offsetY}%`,
     ["--bot-face-metal-scratch-scale" as string]: scale,
-    ["--bot-face-metal-scratch-opacity" as string]: opacity,
+    ["--bot-face-metal-scratch-opacity" as string]: scratchOpacity,
     ["--bot-face-metal-scratch-contrast" as string]: contrast,
   } as CSSProperties;
 }
@@ -15017,6 +15049,16 @@ function BotFaceFrame({
       <BotFaceScreenFill />
       <span className={styles.botFaceFrame} style={metalMaterialStyle} aria-hidden="true">
         <span className={styles.botFaceFrameTint} />
+        <span
+          className={styles.botFaceFramePaintLayer}
+          data-frame-material-layer="paint"
+          aria-hidden="true"
+        />
+        <span
+          className={styles.botFaceFrameWearLayer}
+          data-frame-material-layer="wear"
+          aria-hidden="true"
+        />
         <span
           className={styles.botFaceFrameMetalScratchLayer}
           data-frame-material-layer="scratches"
@@ -25238,7 +25280,9 @@ function ZenLiveBotPresencePlate({
   const actionCopyAnchorForRender =
     actionCopyKey && actionCopyAnchor?.key === actionCopyKey ? actionCopyAnchor : null;
   const screenMaterialSeed = botScreenMaterialSeedForBot(bot, "prism");
-  const frameMaterialSeed = botFrameMaterialSeedForBot(bot, "prism");
+  const frameMaterialSeed = defaultPrismPresence
+    ? PRISM_FACTORY_CLEAN_FRAME_SEED
+    : botFrameMaterialSeedForBot(bot, "prism");
 
   useEffect(() => {
     avatarPositionRef.current = avatarPosition;
@@ -31129,7 +31173,11 @@ function BotAvatarPreviewPanel({
             forceBlinkPhase={previewBlink ? "closed" : undefined}
             showThinkingSpinner={previewThinking}
             screenMaterialSeed={screenMaterialSeed}
-            frameMaterialSeed={frameMaterialSeed}
+            frameMaterialSeed={
+              isDefaultPrismBot
+                ? PRISM_FACTORY_CLEAN_FRAME_SEED
+                : frameMaterialSeed
+            }
             avatarDetails={isDefaultPrismBot ? null : avatarDetails}
             avatarDetailsColor={
               isDefaultPrismBot

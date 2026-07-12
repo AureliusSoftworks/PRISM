@@ -80,10 +80,13 @@ describe("Zen live presence CSS", () => {
   it("keeps bot frame assets normalized to the 1000px canvas", () => {
     for (const assetName of [
       "bot-frame-base.png",
+      "bot-frame-broken-band-mask.png",
+      "bot-frame-chipped-paint-mask.png",
       "bot-frame-led.png",
       "bot-frame-light-base.png",
       "bot-frame-metal-mask.png",
       "bot-frame-metal.png",
+      "bot-frame-offset-stripe-mask.png",
       "bot-frame-screen-mask-glass.png",
       "bot-frame-screen-grime-mask.png",
       "bot-frame-screen-mask.png",
@@ -417,11 +420,23 @@ describe("Zen live presence CSS", () => {
     assert.match(pageSource, /function botFrameMaterialSeedForBot/);
     assert.match(pageSource, /normalizeImportedBotHash\(bot\?\.export_hash\)/);
     assert.match(pageSource, /function botFrameMetalMaterialStyle/);
+    assert.match(pageSource, /botFrameFinishForSeed\(normalizedSeed\)/);
+    assert.match(pageSource, /botFrameFinishMirroredForSeed\(normalizedSeed\)/);
+    assert.match(pageSource, /--bot-face-frame-finish-scale-x/);
+    assert.match(pageSource, /--bot-face-frame-paint-mask-image/);
+    assert.match(pageSource, /--bot-face-frame-wear-mask-image/);
     assert.match(pageSource, /\$\{normalizedSeed\}:metal-scratch:rotation/);
     assert.match(pageSource, /"--bot-face-metal-scratch-opacity"/);
-    assert.match(pageSource, /const frameMaterialSeed = botFrameMaterialSeedForBot\(bot,\s*"prism"\);/);
+    assert.match(
+      pageSource,
+      /const frameMaterialSeed = defaultPrismPresence\s*\? PRISM_FACTORY_CLEAN_FRAME_SEED\s*:\s*botFrameMaterialSeedForBot\(bot,\s*"prism"\);/
+    );
     assert.match(pageSource, /frameMaterialSeed=\{frameMaterialSeed\}/);
     assert.match(pageSource, /frameMaterialSeed=\{botFrameMaterialSeedForBot\(bot,\s*bot\.id\)\}/);
+    assert.match(
+      pageSource,
+      /frameMaterialSeed=\{\s*isDefaultPrismBot\s*\? PRISM_FACTORY_CLEAN_FRAME_SEED\s*:\s*frameMaterialSeed\s*\}/
+    );
 
     const phosphorRule = rulesForExactSelector(".zenLiveBotPresenceFaceEmissionMask::before").find(
       (rule) => /Unlit aperture grille/.test(rule)
@@ -988,7 +1003,7 @@ describe("Zen live presence CSS", () => {
     assert.match(pageSource, /className=\{styles\.botFaceFrameLed\}/);
     assert.match(
       pageSource,
-      /function BotFaceFrame\(\{[\s\S]*metalMaterialStyle[\s\S]*<BotFaceScreenFill \/>[\s\S]*className=\{styles\.botFaceFrame\} style=\{metalMaterialStyle\}[\s\S]*botFaceFrameTint[\s\S]*botFaceFrameMetalScratchLayer[\s\S]*data-frame-material-layer="scratches"[\s\S]*botFaceFrameLed[\s\S]*className=\{styles\.botFaceFrameMetalLight\}/
+      /function BotFaceFrame\(\{[\s\S]*metalMaterialStyle[\s\S]*<BotFaceScreenFill \/>[\s\S]*className=\{styles\.botFaceFrame\} style=\{metalMaterialStyle\}[\s\S]*botFaceFrameTint[\s\S]*botFaceFramePaintLayer[\s\S]*data-frame-material-layer="paint"[\s\S]*botFaceFrameWearLayer[\s\S]*data-frame-material-layer="wear"[\s\S]*botFaceFrameMetalScratchLayer[\s\S]*data-frame-material-layer="scratches"[\s\S]*botFaceFrameLed[\s\S]*className=\{styles\.botFaceFrameMetalLight\}/
     );
     assert.match(
       pageSource,
@@ -1009,8 +1024,18 @@ describe("Zen live presence CSS", () => {
     assert.match(scratchRule, /translate3d\(var\(--bot-face-metal-scratch-x\),\s*var\(--bot-face-metal-scratch-y\),\s*0\)/);
     assert.match(scratchRule, /rotate\(var\(--bot-face-metal-scratch-rotation\)\)/);
     assert.match(scratchRule, /scale\(var\(--bot-face-metal-scratch-scale\)\)/);
+    assert.doesNotMatch(scratchRule, /rgba\(255,\s*255,\s*255/);
     assert.doesNotMatch(scratchRule, /animation:/);
     assert.doesNotMatch(pageSource, /botFaceAmbientGlow/);
+
+    const finishMaskRule = ruleForSelectorNeedles(
+      ".botFaceFramePaintLayer",
+      ".botFaceFrameWearLayer"
+    );
+    assert.match(
+      finishMaskRule,
+      /transform:\s*scaleX\(var\(--bot-face-frame-finish-scale-x\)\)\s*;/
+    );
 
     const ambientGlowRule = ruleForExactSelector(".zenLiveBotPresenceFace::before");
     assert.match(ambientGlowRule, /content:\s*""\s*;/);
