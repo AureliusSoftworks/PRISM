@@ -190,6 +190,8 @@ export interface CurrentSettings {
   voiceEffectsEnabled: number;
   voiceVolume: number | null;
   englishVoiceEngine: EnglishVoiceEngine | string | null;
+  defaultSystemVoiceName: string | null;
+  defaultElevenLabsVoiceId: string | null;
   elevenLabsVoiceBank: string | null;
   elevenLabsVoiceModel: string | null;
   playerAudioVoiceProfile: string | null;
@@ -245,6 +247,8 @@ export interface NextSettings {
   voiceEffectsEnabled: boolean;
   voiceVolume: number;
   englishVoiceEngine: EnglishVoiceEngine;
+  defaultSystemVoiceName: string | null;
+  defaultElevenLabsVoiceId: string | null;
   elevenLabsVoiceBank: ElevenLabsVoiceBank;
   elevenLabsVoiceModel: string | null;
   playerAudioVoiceProfile: BotAudioVoiceProfileV1;
@@ -1099,6 +1103,20 @@ export function resolveNextSettings(
     body.englishVoiceEngine,
     normalizeEnglishVoiceEngine(current.englishVoiceEngine)
   );
+  const normalizeDefaultVoiceSelection = (value: unknown, fallback: string | null): string | null => {
+    if (value === undefined) return fallback;
+    if (value === null) return null;
+    if (typeof value !== "string") return fallback;
+    return value.trim().slice(0, 200) || null;
+  };
+  const defaultSystemVoiceName = normalizeDefaultVoiceSelection(
+    body.defaultSystemVoiceName,
+    current.defaultSystemVoiceName
+  );
+  const defaultElevenLabsVoiceId = normalizeDefaultVoiceSelection(
+    body.defaultElevenLabsVoiceId,
+    current.defaultElevenLabsVoiceId
+  );
   const elevenLabsVoiceBank = body.elevenLabsVoiceBank === undefined
     ? parseStoredElevenLabsVoiceBank(current.elevenLabsVoiceBank)
     : normalizeElevenLabsVoiceBank(body.elevenLabsVoiceBank);
@@ -1204,6 +1222,8 @@ export function resolveNextSettings(
     voiceEffectsEnabled,
     voiceVolume,
     englishVoiceEngine,
+    defaultSystemVoiceName,
+    defaultElevenLabsVoiceId,
     elevenLabsVoiceBank,
     elevenLabsVoiceModel,
     playerAudioVoiceProfile,

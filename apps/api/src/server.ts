@@ -116,6 +116,7 @@ import {
   updateCoffeeConversationSettings,
 } from "./coffee.ts";
 import {
+  getActiveCoffeeTurnJobForConversation,
   getCoffeeTurnJob,
   interruptCoffeeTurnJob,
   setCoffeeTurnJobPhase,
@@ -241,6 +242,7 @@ import {
 } from "./providers.ts";
 import type { GenerateOptions, ProviderMessage, ProviderName } from "./providers.ts";
 import { cleanupResolvedPromptWithModel } from "./composer-cleanup.ts";
+import { inferVoicePreviewLine } from "./voice-preview-line.ts";
 import {
   generateScriptedPromptWildcardValue,
   promptWildcardNames,
@@ -387,8 +389,10 @@ import { restoreFactoryDefaultsInDatabase } from "./account-reset.ts";
 import {
   ElevenLabsVoiceError,
   VOICE_CAPABILITIES,
+  applyGlobalEnglishVoiceDefault,
   normalizeElevenLabsTtsModel,
   requestElevenLabsSpeech,
+  requestElevenLabsSpeechWithTimestamps,
   resolveElevenLabsVoiceId,
   applyPlayerNamePronunciation,
   requestElevenLabsVoiceCatalog,
@@ -434,14 +438,27 @@ function sendVoiceWave(
   response: ServerResponse,
   wave: Buffer,
   engineUsed: "builtin" | "builtin-local-fallback" | "builtin-provider-fallback",
-  characterCount: number
+  characterCount: number,
+  includeAlignment = false
 ): void {
-  response.statusCode = 200;
-  response.setHeader("content-type", "audio/wav");
-  response.setHeader("content-length", String(wave.byteLength));
   response.setHeader("cache-control", "no-store");
   response.setHeader("x-prism-voice-engine", engineUsed);
   response.setHeader("x-prism-voice-characters", String(characterCount));
+  if (includeAlignment) {
+    response.setHeader("x-prism-audio-content-type", "audio/wav");
+    response.setHeader("x-prism-voice-alignment", "none");
+    json(response, 200, {
+      ok: true,
+      audioBase64: wave.toString("base64"),
+      audioContentType: "audio/wav",
+      alignment: null,
+      normalizedAlignment: null,
+    });
+    return;
+  }
+  response.statusCode = 200;
+  response.setHeader("content-type", "audio/wav");
+  response.setHeader("content-length", String(wave.byteLength));
   response.end(wave);
 }
 const LOCAL_OWNER_USERNAME = "prism-owner";
@@ -691,6 +708,8 @@ interface UserDbRow {
   voice_effects_enabled: number;
   voice_volume: number;
   english_voice_engine: string | null;
+  default_system_voice_name: string | null;
+  default_elevenlabs_voice_id: string | null;
   elevenlabs_voice_bank: string | null;
   elevenlabs_voice_model: string | null;
   player_audio_voice_profile: string | null;
@@ -5579,10 +5598,18 @@ function buildRoutes(): RouteDefinition[] {
           : undefined;
       const openAiApiKey = getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
       const anthropicApiKey = getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey;
+      if (kind === "autonomous") {
+        const activeJob = getActiveCoffeeTurnJobForConversation(userId, conversationId);
+        if (activeJob) {
+          json(ctx.res, 202, { ok: true, job: activeJob });
+          return;
+        }
+      }
       const jobDb = db;
       const status = startCoffeeTurnJob({
         userId,
         conversationId,
+        supersedeExisting: kind === "user",
         effort: jobEffort,
         run: async ({ signal, setPhase }) =>
           await runWithUsageSession(
@@ -6371,6 +6398,34 @@ function buildRoutes(): RouteDefinition[] {
         ctx.req.off("close", onClose);
       }
     }),
+    route("POST", "/api/voices/preview-line", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const botName = typeof body.botName === "string" ? body.botName.trim().slice(0, 120) : "";
+      const systemPrompt = typeof body.systemPrompt === "string"
+        ? body.systemPrompt.trim().slice(0, 16_000)
+        : "";
+      if (!botName) throw new HttpError(400, "Bot name is required for a voice preview.");
+      const user = getUserRow(userId);
+      const line = await runWithUsageSession(
+        {
+          db,
+          userId,
+          privacyScope: "normal",
+          mode: "system",
+          surface: "voice_preview",
+          botId: typeof body.botId === "string" ? body.botId.trim() || null : null,
+        },
+        () => inferVoicePreviewLine(
+          auxiliaryProviderFactoryOverride(
+            user.prism_default_llm_model,
+            dualOllamaWorkloadOptions(user)
+          ),
+          { botName, systemPrompt }
+        )
+      );
+      json(ctx.res, 200, { ok: true, line });
+    }),
     route("POST", "/api/voices/synthesize", async (ctx) => {
       const userId = requireAuth(ctx);
       const raw = ctx.body as Record<string, unknown>;
@@ -6399,10 +6454,20 @@ function buildRoutes(): RouteDefinition[] {
       const explicitOnlineContext = persistedMessageProvider
         ? persistedMessageProvider !== "local"
         : raw.explicitOnlineContext === true && user.preferred_provider !== "local";
+      const requestedEngine = raw.engine === "elevenlabs" ? "elevenlabs" : "builtin";
+      const profileWithGlobalDefault = applyGlobalEnglishVoiceDefault(
+        raw.profile,
+        requestedEngine,
+        {
+          systemVoiceName: user.default_system_voice_name,
+          elevenLabsVoiceId: user.default_elevenlabs_voice_id,
+        }
+      );
       const request = validateVoiceSynthesisRequest({
         ...raw,
         text: sourceText,
         explicitOnlineContext,
+        profile: profileWithGlobalDefault,
       });
       const boundary = resolveVoiceSynthesisBoundary({ ...request, persistedMessageProvider });
       if (!boundary.ok) {
@@ -6461,6 +6526,36 @@ function buildRoutes(): RouteDefinition[] {
       const onClose = () => controller.abort();
       ctx.req.once("close", onClose);
       try {
+        if (request.includeAlignment) {
+          const timestamped = await requestElevenLabsSpeechWithTimestamps({
+            apiKey,
+            voiceId,
+            model: normalizeElevenLabsTtsModel(user.elevenlabs_voice_model),
+            text: boundary.text,
+            profile: boundary.profile,
+            signal: controller.signal,
+          });
+          const alignment = timestamped.alignment ?? timestamped.normalizedAlignment;
+          ctx.res.setHeader("cache-control", "no-store");
+          ctx.res.setHeader("x-prism-voice-engine", "elevenlabs");
+          ctx.res.setHeader("x-prism-voice-characters", String(boundary.text.length));
+          ctx.res.setHeader("x-prism-audio-content-type", timestamped.audioContentType);
+          ctx.res.setHeader(
+            "x-prism-voice-alignment",
+            timestamped.alignment ? "original" : timestamped.normalizedAlignment ? "normalized" : "none"
+          );
+          if (timestamped.providerRequestId) {
+            ctx.res.setHeader("x-prism-provider-request-id", timestamped.providerRequestId);
+          }
+          json(ctx.res, 200, {
+            ok: true,
+            audioBase64: timestamped.audioBase64,
+            audioContentType: timestamped.audioContentType,
+            alignment,
+            normalizedAlignment: timestamped.normalizedAlignment,
+          });
+          return;
+        }
         const providerResponse = await requestElevenLabsSpeech({
           apiKey,
           voiceId,
@@ -6560,6 +6655,8 @@ function buildRoutes(): RouteDefinition[] {
           voiceEffectsEnabled: user.voice_effects_enabled !== 0,
           voiceVolume: normalizeBotVoiceVolume(user.voice_volume),
           englishVoiceEngine: user.english_voice_engine === "elevenlabs" ? "elevenlabs" : "builtin",
+          defaultSystemVoiceName: user.default_system_voice_name,
+          defaultElevenLabsVoiceId: user.default_elevenlabs_voice_id,
           elevenLabsVoiceBank: parseStoredElevenLabsVoiceBank(user.elevenlabs_voice_bank),
           elevenLabsVoiceModel: user.elevenlabs_voice_model ?? "",
           playerAudioVoiceProfile: parseStoredPlayerAudioVoiceProfile(
@@ -6978,6 +7075,8 @@ function buildRoutes(): RouteDefinition[] {
         voiceEffectsEnabled: user.voice_effects_enabled,
         voiceVolume: user.voice_volume,
         englishVoiceEngine: user.english_voice_engine,
+        defaultSystemVoiceName: user.default_system_voice_name,
+        defaultElevenLabsVoiceId: user.default_elevenlabs_voice_id,
         elevenLabsVoiceBank: user.elevenlabs_voice_bank,
         elevenLabsVoiceModel: user.elevenlabs_voice_model,
         playerAudioVoiceProfile: user.player_audio_voice_profile,
@@ -7040,7 +7139,7 @@ function buildRoutes(): RouteDefinition[] {
             preferred_local_image_model = ?, preferred_openai_image_model = ?, preferred_zen_wallpaper_local_image_model = ?, preferred_zen_wallpaper_openai_image_model = ?, zen_wallpaper_opacity = ?, zen_wallpaper_text_mask_enabled = ?, zen_wallpaper_grayscale_enabled = ?, zen_wallpaper_blurred_edges_enabled = ?, zen_wallpaper_style_notes = ?,
             zen_session_idle_gap_ms = ?, zen_fresh_start_gap_ms = ?, zen_recent_context_messages = ?, zen_wallpaper_regen_message_interval = ?, zen_mood_sensitivity = ?, zen_canvas_typing_speed = ?, zen_message_font_min_px = ?, zen_message_font_max_px = ?, zen_ask_question_patience_enabled = ?, zen_ask_question_patience_ms = ?, zen_autonomy_enabled = ?, zen_persona_transition_choice = ?,
             comfyui_workflows = ?, prism_default_llm_model = ?, prism_image_tool_llm_model = ?,
-            voice_mode = ?, voice_effects_enabled = ?, voice_volume = ?, english_voice_engine = ?, elevenlabs_voice_bank = ?, elevenlabs_voice_model = ?, player_audio_voice_profile = ?, player_name_pronunciation = ?,
+            voice_mode = ?, voice_effects_enabled = ?, voice_volume = ?, english_voice_engine = ?, default_system_voice_name = ?, default_elevenlabs_voice_id = ?, elevenlabs_voice_bank = ?, elevenlabs_voice_model = ?, player_audio_voice_profile = ?, player_name_pronunciation = ?,
             dev_memories_enabled = ?, dev_memories_text = ?,
             openai_key_ciphertext = ?, openai_key_iv = ?, openai_key_tag = ?,
             anthropic_key_ciphertext = ?, anthropic_key_iv = ?, anthropic_key_tag = ?,
@@ -7095,6 +7194,8 @@ function buildRoutes(): RouteDefinition[] {
         next.voiceEffectsEnabled ? 1 : 0,
         next.voiceVolume,
         next.englishVoiceEngine,
+        next.defaultSystemVoiceName,
+        next.defaultElevenLabsVoiceId,
         JSON.stringify(next.elevenLabsVoiceBank),
         next.elevenLabsVoiceModel,
         JSON.stringify(next.playerAudioVoiceProfile),
@@ -7126,6 +7227,8 @@ function buildRoutes(): RouteDefinition[] {
           voiceEffectsEnabled: next.voiceEffectsEnabled,
           voiceVolume: next.voiceVolume,
           englishVoiceEngine: next.englishVoiceEngine,
+          defaultSystemVoiceName: next.defaultSystemVoiceName,
+          defaultElevenLabsVoiceId: next.defaultElevenLabsVoiceId,
           elevenLabsVoiceBank: next.elevenLabsVoiceBank,
           elevenLabsVoiceModel: next.elevenLabsVoiceModel ?? "",
           playerAudioVoiceProfile: next.playerAudioVoiceProfile,

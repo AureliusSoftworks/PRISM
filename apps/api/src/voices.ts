@@ -5,6 +5,7 @@ import {
   applyPlayerNamePronunciation as applySharedPlayerNamePronunciation,
   type BotAudioVoiceProfileV1,
   type EnglishVoiceEngine,
+  type NormalizedBotAudioVoiceProfileV1,
   type VoiceMode,
 } from "@localai/shared";
 
@@ -14,6 +15,23 @@ export function resolveElevenLabsVoiceId(
 ): string | null {
   const normalized = normalizeBotAudioVoiceProfileV1(profile);
   return normalized.elevenLabsVoiceId || voiceBank[normalized.baseVoiceId] || null;
+}
+
+export function applyGlobalEnglishVoiceDefault(
+  profile: unknown,
+  _engine: EnglishVoiceEngine,
+  defaults: { systemVoiceName?: string | null; elevenLabsVoiceId?: string | null }
+): NormalizedBotAudioVoiceProfileV1 {
+  const normalized = normalizeBotAudioVoiceProfileV1(profile);
+  return {
+    ...normalized,
+    ...(!normalized.systemVoiceName && defaults.systemVoiceName
+      ? { systemVoiceName: defaults.systemVoiceName }
+      : {}),
+    ...(!normalized.elevenLabsVoiceId && defaults.elevenLabsVoiceId
+      ? { elevenLabsVoiceId: defaults.elevenLabsVoiceId }
+      : {}),
+  };
 }
 
 export interface VoiceCapabilities {
@@ -85,6 +103,72 @@ export class ElevenLabsVoiceError extends Error {
   }
 }
 
+export interface VoiceCharacterAlignment {
+  characters: string[];
+  characterStartTimesSeconds: number[];
+  characterEndTimesSeconds: number[];
+}
+
+export interface ElevenLabsTimestampedSpeech {
+  audioBase64: string;
+  audioContentType: "audio/mpeg";
+  alignment: VoiceCharacterAlignment | null;
+  normalizedAlignment: VoiceCharacterAlignment | null;
+  providerRequestId: string | null;
+}
+
+type ElevenLabsSpeechArgs = {
+  apiKey: string;
+  voiceId: string;
+  model: unknown;
+  text: string;
+  profile: BotAudioVoiceProfileV1;
+  signal?: AbortSignal;
+  fetchImpl?: typeof fetch;
+};
+
+function elevenLabsSpeechRequestBody(args: ElevenLabsSpeechArgs): string {
+  return JSON.stringify({
+    text: args.text,
+    model_id: normalizeElevenLabsTtsModel(args.model),
+    voice_settings: elevenLabsVoiceSettings(args.profile),
+  });
+}
+
+async function throwElevenLabsSpeechError(response: Response): Promise<never> {
+  const detail = (await response.text()).trim();
+  throw new ElevenLabsVoiceError(
+    response.status,
+    detail || `ElevenLabs speech failed (${response.status}).`
+  );
+}
+
+function normalizeVoiceCharacterAlignment(value: unknown): VoiceCharacterAlignment | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const characters = record.characters;
+  const starts = record.character_start_times_seconds;
+  const ends = record.character_end_times_seconds;
+  if (!Array.isArray(characters) || !Array.isArray(starts) || !Array.isArray(ends)) return null;
+  if (characters.length === 0 || characters.length !== starts.length || starts.length !== ends.length) {
+    return null;
+  }
+  if (!characters.every((character) => typeof character === "string")) return null;
+  if (!starts.every((start) => typeof start === "number" && Number.isFinite(start) && start >= 0)) {
+    return null;
+  }
+  if (!ends.every((end, index) => (
+    typeof end === "number"
+    && Number.isFinite(end)
+    && end >= (starts[index] as number)
+  ))) return null;
+  return {
+    characters: [...characters] as string[],
+    characterStartTimesSeconds: [...starts] as number[],
+    characterEndTimesSeconds: [...ends] as number[],
+  };
+}
+
 export async function requestElevenLabsSpeech(args: {
   apiKey: string;
   voiceId: string;
@@ -104,24 +188,52 @@ export async function requestElevenLabsSpeech(args: {
         "content-type": "application/json",
         "xi-api-key": args.apiKey,
       },
-      body: JSON.stringify({
-        text: args.text,
-        model_id: normalizeElevenLabsTtsModel(args.model),
-        voice_settings: elevenLabsVoiceSettings(args.profile),
-      }),
+      body: elevenLabsSpeechRequestBody(args),
     }
   );
-  if (!response.ok) {
-    const detail = (await response.text()).trim();
-    throw new ElevenLabsVoiceError(
-      response.status,
-      detail || `ElevenLabs speech failed (${response.status}).`
-    );
-  }
+  if (!response.ok) await throwElevenLabsSpeechError(response);
   if (!response.body) {
     throw new ElevenLabsVoiceError(502, "ElevenLabs returned an empty audio stream.");
   }
   return response;
+}
+
+export async function requestElevenLabsSpeechWithTimestamps(
+  args: ElevenLabsSpeechArgs
+): Promise<ElevenLabsTimestampedSpeech> {
+  const fetchImpl = args.fetchImpl ?? fetch;
+  const response = await fetchImpl(
+    `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(args.voiceId)}/with-timestamps?output_format=mp3_44100_128`,
+    {
+      method: "POST",
+      signal: args.signal,
+      headers: {
+        "content-type": "application/json",
+        "xi-api-key": args.apiKey,
+      },
+      body: elevenLabsSpeechRequestBody(args),
+    }
+  );
+  if (!response.ok) await throwElevenLabsSpeechError(response);
+  let payload: Record<string, unknown>;
+  try {
+    payload = await response.json() as Record<string, unknown>;
+  } catch {
+    throw new ElevenLabsVoiceError(502, "ElevenLabs returned invalid timestamped speech.");
+  }
+  const audioBase64 = typeof payload.audio_base64 === "string"
+    ? payload.audio_base64.trim()
+    : "";
+  if (!audioBase64) {
+    throw new ElevenLabsVoiceError(502, "ElevenLabs returned empty timestamped audio.");
+  }
+  return {
+    audioBase64,
+    audioContentType: "audio/mpeg",
+    alignment: normalizeVoiceCharacterAlignment(payload.alignment),
+    normalizedAlignment: normalizeVoiceCharacterAlignment(payload.normalized_alignment),
+    providerRequestId: response.headers.get("request-id"),
+  };
 }
 
 export interface ElevenLabsVoiceCatalogEntry {
@@ -181,6 +293,7 @@ export type VoiceSynthesisRequest = {
   profile: BotAudioVoiceProfileV1;
   messageId: string | null;
   explicitOnlineContext: boolean;
+  includeAlignment: boolean;
 };
 
 export function cleanSpeakableAssistantProse(value: unknown): string {
@@ -221,6 +334,7 @@ export function validateVoiceSynthesisRequest(body: Record<string, unknown>): Vo
     profile: normalizeBotAudioVoiceProfileV1(body.profile),
     messageId,
     explicitOnlineContext: body.explicitOnlineContext === true,
+    includeAlignment: body.includeAlignment === true,
   };
 }
 

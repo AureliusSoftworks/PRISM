@@ -245,6 +245,8 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       voice_effects_enabled INTEGER NOT NULL DEFAULT 1,
       voice_volume REAL NOT NULL DEFAULT 1,
       english_voice_engine TEXT NOT NULL DEFAULT 'builtin',
+      default_system_voice_name TEXT,
+      default_elevenlabs_voice_id TEXT,
       elevenlabs_voice_bank TEXT NOT NULL DEFAULT '{}',
       elevenlabs_voice_model TEXT,
       player_audio_voice_profile TEXT,
@@ -721,6 +723,10 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   if (!hasVoiceVolume) db.exec("ALTER TABLE users ADD COLUMN voice_volume REAL NOT NULL DEFAULT 1;");
   const hasEnglishVoiceEngine = userColumns.some((column) => column.name === "english_voice_engine");
   if (!hasEnglishVoiceEngine) db.exec("ALTER TABLE users ADD COLUMN english_voice_engine TEXT NOT NULL DEFAULT 'builtin';");
+  const hasDefaultSystemVoiceName = userColumns.some((column) => column.name === "default_system_voice_name");
+  if (!hasDefaultSystemVoiceName) db.exec("ALTER TABLE users ADD COLUMN default_system_voice_name TEXT;");
+  const hasDefaultElevenLabsVoiceId = userColumns.some((column) => column.name === "default_elevenlabs_voice_id");
+  if (!hasDefaultElevenLabsVoiceId) db.exec("ALTER TABLE users ADD COLUMN default_elevenlabs_voice_id TEXT;");
   const hasElevenLabsVoiceBank = userColumns.some((column) => column.name === "elevenlabs_voice_bank");
   if (!hasElevenLabsVoiceBank) db.exec("ALTER TABLE users ADD COLUMN elevenlabs_voice_bank TEXT NOT NULL DEFAULT '{}';");
   const hasElevenLabsVoiceModel = userColumns.some((column) => column.name === "elevenlabs_voice_model");

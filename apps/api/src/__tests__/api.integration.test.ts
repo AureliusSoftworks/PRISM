@@ -106,6 +106,8 @@ describe("API request integration", () => {
       body: JSON.stringify({
         playerAudioVoiceProfile: profile,
         playerNamePronunciation: "Jair-id",
+        defaultSystemVoiceName: "Alex",
+        defaultElevenLabsVoiceId: "eleven-global",
       }),
     });
     assert.equal(saved.status, 200);
@@ -116,6 +118,15 @@ describe("API request integration", () => {
     assert.equal(settings.playerAudioVoiceProfile.systemVoiceName, "Zarvox");
     assert.equal(settings.playerAudioVoiceProfile.elevenLabsVoiceId, "eleven-player");
     assert.equal(settings.playerNamePronunciation, "Jair-id");
+    assert.equal(settings.defaultSystemVoiceName, "Alex");
+    assert.equal(settings.defaultElevenLabsVoiceId, "eleven-global");
+
+    const preview = await client.request(
+      "/api/voices/preview-line",
+      jsonInit({ botName: "Plankton", systemPrompt: "A theatrical tiny villain." })
+    );
+    assert.equal(preview.status, 200);
+    assert.equal((await json(preview)).line, "Deterministic API reply.");
   });
 
   it("routes CORS preflight, root landing, and unknown paths without external services", async () => {
@@ -320,6 +331,33 @@ describe("API request integration", () => {
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("x-prism-voice-engine"), "builtin-local-fallback");
     assert.equal(Buffer.from(await response.arrayBuffer()).subarray(0, 4).toString(), "RIFF");
+
+    const alignedResponse = await client.request(
+      "/api/voices/synthesize",
+      jsonInit({
+        messageId: "voice-local-message",
+        mode: "english",
+        engine: "elevenlabs",
+        explicitOnlineContext: true,
+        includeAlignment: true,
+        profile: {
+          v: 1,
+          baseVoiceId: "voice-3",
+          pitch: 0.1,
+          warmth: 0.2,
+          pace: 0,
+          lilt: 0,
+        },
+      })
+    );
+    assert.equal(alignedResponse.status, 200);
+    assert.equal(alignedResponse.headers.get("content-type"), "application/json; charset=utf-8");
+    assert.equal(alignedResponse.headers.get("x-prism-voice-engine"), "builtin-local-fallback");
+    assert.equal(alignedResponse.headers.get("x-prism-voice-alignment"), "none");
+    const alignedPayload = await json(alignedResponse);
+    assert.equal(alignedPayload.audioContentType, "audio/wav");
+    assert.equal(alignedPayload.alignment, null);
+    assert.equal(Buffer.from(alignedPayload.audioBase64, "base64").subarray(0, 4).toString(), "RIFF");
     assert.deepEqual(fetchRecorder.calls.slice(beforeCalls), []);
   });
 

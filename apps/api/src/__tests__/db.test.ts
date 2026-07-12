@@ -89,6 +89,8 @@ describe("createDatabase bot export hash migration", () => {
         )
       );
       assert.ok(userColumns.some((column) => column.name === "prism_default_bot_audio_voice_profile"));
+      assert.ok(userColumns.some((column) => column.name === "default_system_voice_name"));
+      assert.ok(userColumns.some((column) => column.name === "default_elevenlabs_voice_id"));
       assert.equal(
         userColumns.find((column) => column.name === "voice_effects_enabled")?.dflt_value,
         "1"

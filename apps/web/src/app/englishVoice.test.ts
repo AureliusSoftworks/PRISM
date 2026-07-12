@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { resolveEnglishVoicePostProcessing } from "./englishVoice.ts";
+import {
+  readEnglishVoiceSynthesisClip,
+  resolveEnglishVoicePostProcessing,
+} from "./englishVoice.ts";
 
 describe("English voice post processing", () => {
   it("maps pitch and warmth without changing portable profile semantics", () => {
@@ -27,5 +30,34 @@ describe("English voice post processing", () => {
       lilt: 0,
     });
     assert.equal(processing.lowpassHz, 16000);
+  });
+});
+
+describe("English voice synthesis responses", () => {
+  it("keeps legacy binary audio compatible", async () => {
+    const response = new Response(new Uint8Array([1, 2, 3]), {
+      headers: { "content-type": "audio/wav" },
+    });
+    const clip = await readEnglishVoiceSynthesisClip(response);
+    assert.deepEqual([...new Uint8Array(clip.bytes)], [1, 2, 3]);
+    assert.equal(clip.audioContentType, "audio/wav");
+    assert.equal(clip.alignment, null);
+  });
+
+  it("decodes timed JSON audio and character alignment", async () => {
+    const response = Response.json({
+      ok: true,
+      audioBase64: Buffer.from([4, 5, 6]).toString("base64"),
+      audioContentType: "audio/mpeg",
+      alignment: {
+        characters: ["H", "i"],
+        characterStartTimesSeconds: [0, 0.12],
+        characterEndTimesSeconds: [0.12, 0.3],
+      },
+    });
+    const clip = await readEnglishVoiceSynthesisClip(response);
+    assert.deepEqual([...new Uint8Array(clip.bytes)], [4, 5, 6]);
+    assert.deepEqual(clip.alignment?.characters, ["H", "i"]);
+    assert.equal(clip.alignment?.characterEndTimesSeconds[1], 0.3);
   });
 });

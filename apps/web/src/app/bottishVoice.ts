@@ -4,9 +4,11 @@ import {
   type BotAudioVoiceProfileV1,
 } from "@localai/shared";
 import {
+  beginVoicePlaybackProgress,
   playRealtimeVoiceBytes,
   prepareRealtimeVoiceAudio,
   stopRealtimeVoiceAudio,
+  type VoicePlaybackCharacterAlignment,
   type VoicePlaybackLifecycle,
 } from "./voiceEffects.ts";
 
@@ -23,6 +25,7 @@ export interface BottishNote {
 export interface BottishPlan {
   notes: BottishNote[];
   durationMs: number;
+  alignment: VoicePlaybackCharacterAlignment;
 }
 
 export interface BottishPlaybackTiming {
@@ -63,21 +66,30 @@ export function buildBottishPlan(
   const pitchMultiplier = 2 ** (profile.pitch * 0.7);
   const noteMs = 55;
   const gapMs = 18;
-  const toneLowpass = Math.round(7200 + profile.bottishTone * 700);
+  const toneLowpass = Math.round(6200 + profile.bottishTone * 2600);
   const waveform = profile.bottishTone > 0.65
     ? "square"
     : profile.bottishTone < -0.35
       ? "sine"
       : voice.waveform;
   const notes: BottishNote[] = [];
+  const alignment: VoicePlaybackCharacterAlignment = {
+    characters: [],
+    characterStartTimesSeconds: [],
+    characterEndTimesSeconds: [],
+  };
   let cursorMs = 0;
   let spokenIndex = 0;
 
   for (const character of Array.from(text).slice(0, 1200)) {
+    const characterStartMs = cursorMs;
     if (!isSpeakableCharacter(character)) {
       if (/[.!?]/.test(character)) cursorMs += noteMs * 2.2;
       else if (/[,;:]/.test(character)) cursorMs += noteMs * 1.15;
       else if (/\s/.test(character)) cursorMs += gapMs * 1.4;
+      alignment.characters.push(character);
+      alignment.characterStartTimesSeconds.push(characterStartMs / 1000);
+      alignment.characterEndTimesSeconds.push(cursorMs / 1000);
       continue;
     }
     if (notes.length >= 420) break;
@@ -99,6 +111,9 @@ export function buildBottishPlan(
       waveform,
       lowpassHz: Math.max(4800, Math.min(10_000, toneLowpass)),
     });
+    alignment.characters.push(character);
+    alignment.characterStartTimesSeconds.push(characterStartMs / 1000);
+    alignment.characterEndTimesSeconds.push((characterStartMs + noteMs) / 1000);
     cursorMs += noteMs + gapMs;
     spokenIndex += 1;
   }
@@ -106,6 +121,7 @@ export function buildBottishPlan(
   return {
     notes,
     durationMs: notes.length > 0 ? Math.round(cursorMs + 50) : 0,
+    alignment,
   };
 }
 
@@ -138,7 +154,19 @@ export function fitBottishPlanToDuration(
       ),
     }];
   });
-  return { notes, durationMs };
+  return {
+    notes,
+    durationMs,
+    alignment: {
+      characters: [...plan.alignment.characters],
+      characterStartTimesSeconds: plan.alignment.characterStartTimesSeconds.map(
+        (seconds) => seconds * scale
+      ),
+      characterEndTimesSeconds: plan.alignment.characterEndTimesSeconds.map(
+        (seconds) => seconds * scale
+      ),
+    },
+  };
 }
 
 function writeWaveText(view: DataView, offset: number, value: string): void {
@@ -217,29 +245,75 @@ export function encodeBottishPlanWave(
 
 let activeMedia: HTMLAudioElement | null = null;
 let activeMediaUrl: string | null = null;
+let preparedMedia: HTMLAudioElement | null = null;
+let preparedMediaUrl: string | null = null;
 let activeTimer: number | null = null;
 let activeResolve: (() => void) | null = null;
 let generation = 0;
 let queue: Promise<void> = Promise.resolve();
 
 export async function prepareBottishVoice(): Promise<void> {
-  if (await prepareRealtimeVoiceAudio()) return;
+  beginMediaUnlock();
+  if (await prepareRealtimeVoiceAudio()) {
+    releasePreparedMedia();
+    return;
+  }
   if (typeof Audio === "undefined" || typeof URL.createObjectURL !== "function") {
     throw new Error("Audio playback is unavailable in this browser.");
   }
 }
 
-function releaseActiveMedia(): void {
-  if (activeMedia) {
-    activeMedia.pause();
-    activeMedia.removeAttribute("src");
-    activeMedia.load();
+function releasePreparedMedia(): void {
+  if (preparedMedia) {
+    preparedMedia.pause();
+    preparedMedia.removeAttribute("src");
+    preparedMedia.load();
+    preparedMedia = null;
+  }
+  if (preparedMediaUrl) {
+    URL.revokeObjectURL(preparedMediaUrl);
+    preparedMediaUrl = null;
+  }
+}
+
+function beginMediaUnlock(): void {
+  if (typeof Audio === "undefined" || typeof URL.createObjectURL !== "function") return;
+  releasePreparedMedia();
+  const silentPlan: BottishPlan = {
+    notes: [],
+    durationMs: 0,
+    alignment: {
+      characters: [],
+      characterStartTimesSeconds: [],
+      characterEndTimesSeconds: [],
+    },
+  };
+  const url = URL.createObjectURL(
+    new Blob([encodeBottishPlanWave(silentPlan)], { type: "audio/wav" })
+  );
+  const audio = new Audio(url);
+  audio.preload = "auto";
+  audio.volume = 0;
+  preparedMedia = audio;
+  preparedMediaUrl = url;
+  // Start inside the original pointer/keyboard gesture. If Web Audio cannot
+  // run, this same authorized element is reused for the audible preview.
+  void audio.play().catch(() => undefined);
+}
+
+function releaseActiveMedia(keepElement = false): void {
+  const media = activeMedia;
+  if (media) {
+    media.pause();
+    media.removeAttribute("src");
+    media.load();
     activeMedia = null;
   }
   if (activeMediaUrl) {
     URL.revokeObjectURL(activeMediaUrl);
     activeMediaUrl = null;
   }
+  if (keepElement && media) preparedMedia = media;
 }
 
 function stopScheduledNodes(): void {
@@ -256,6 +330,7 @@ export function stopBottishVoice(): void {
   generation += 1;
   stopRealtimeVoiceAudio();
   stopScheduledNodes();
+  releasePreparedMedia();
   queue = Promise.resolve();
 }
 
@@ -269,7 +344,13 @@ async function playPlanWithMedia(
   const url = URL.createObjectURL(
     new Blob([encodeBottishPlanWave(plan)], { type: "audio/wav" })
   );
-  const audio = new Audio(url);
+  const audio = preparedMedia ?? new Audio();
+  if (preparedMediaUrl) URL.revokeObjectURL(preparedMediaUrl);
+  preparedMedia = null;
+  preparedMediaUrl = null;
+  audio.pause();
+  audio.src = url;
+  audio.load();
   audio.preload = "auto";
   audio.volume = Math.min(1, normalizeBotAudioVoiceProfileV1(profile).volume);
   activeMedia = audio;
@@ -278,6 +359,7 @@ async function playPlanWithMedia(
   await new Promise<void>((resolve, reject) => {
     let settled = false;
     let started = false;
+    let progress: ReturnType<typeof beginVoicePlaybackProgress> | null = null;
     const finish = (error?: Error) => {
       if (settled) return;
       settled = true;
@@ -286,7 +368,10 @@ async function playPlanWithMedia(
         activeTimer = null;
       }
       if (activeResolve === cancel) activeResolve = null;
-      releaseActiveMedia();
+      if (error) progress?.cancel();
+      else progress?.finish();
+      progress = null;
+      releaseActiveMedia(!error);
       lifecycle?.onEnd?.();
       if (error) reject(error);
       else resolve();
@@ -303,7 +388,12 @@ async function playPlanWithMedia(
     void audio.play().then(
       () => {
         started = true;
-        lifecycle?.onStart?.(plan.durationMs);
+        progress = beginVoicePlaybackProgress(
+          lifecycle,
+          plan.durationMs,
+          () => audio.currentTime * 1000,
+          plan.alignment
+        );
         if (activeTimer !== null) {
           window.clearTimeout(activeTimer);
           activeTimer = null;
@@ -326,7 +416,14 @@ async function playPlan(
 ): Promise<void> {
   if (plan.durationMs <= 0 || expectedGeneration !== generation) return;
   const bytes = encodeBottishPlanWave(plan);
-  const played = await playRealtimeVoiceBytes({ bytes, profile, seed, effectsEnabled, lifecycle });
+  const played = await playRealtimeVoiceBytes({
+    bytes,
+    profile,
+    seed,
+    effectsEnabled,
+    lifecycle,
+    alignment: plan.alignment,
+  });
   if (!played) await playPlanWithMedia(plan, profile, expectedGeneration, lifecycle);
 }
 

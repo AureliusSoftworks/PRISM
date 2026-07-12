@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   VOICE_CAPABILITIES,
+  applyGlobalEnglishVoiceDefault,
   applyPlayerNamePronunciation,
   cleanSpeakableAssistantProse,
   elevenLabsVoiceSettings,
   requestElevenLabsSpeech,
+  requestElevenLabsSpeechWithTimestamps,
   requestElevenLabsVoiceCatalog,
   resolveElevenLabsVoiceId,
   resolveVoiceSynthesisBoundary,
@@ -107,6 +109,21 @@ describe("voice Phase 1 boundary", () => {
     }, bank), "account-voice");
   });
 
+  it("applies the global voice only when the bot has no explicit selection", () => {
+    assert.equal(
+      applyGlobalEnglishVoiceDefault({}, "builtin", { systemVoiceName: "Alex" }).systemVoiceName,
+      "Alex"
+    );
+    assert.equal(
+      applyGlobalEnglishVoiceDefault({ systemVoiceName: "Fred" }, "builtin", { systemVoiceName: "Alex" }).systemVoiceName,
+      "Fred"
+    );
+    assert.equal(
+      applyGlobalEnglishVoiceDefault({}, "elevenlabs", { elevenLabsVoiceId: "global-eleven" }).elevenLabsVoiceId,
+      "global-eleven"
+    );
+  });
+
   it("maps portable pace and lilt controls into bounded ElevenLabs settings", () => {
     assert.deepEqual(
       elevenLabsVoiceSettings({
@@ -149,6 +166,60 @@ describe("voice Phase 1 boundary", () => {
     const body = JSON.parse(String(request?.init?.body));
     assert.equal(body.model_id, "eleven_flash_v2_5");
     assert.equal(body.text, "hello");
+  });
+
+  it("normalizes timestamped ElevenLabs audio and character alignment", async () => {
+    let requestUrl = "";
+    const speech = await requestElevenLabsSpeechWithTimestamps({
+      apiKey: "secret-key",
+      voiceId: "voice/provider id",
+      model: "eleven_flash_v2_5",
+      text: "Hi",
+      profile: { v: 1, baseVoiceId: "voice-1", pitch: 0, warmth: 0, pace: 0, lilt: 0 },
+      fetchImpl: (async (url) => {
+        requestUrl = String(url);
+        return new Response(JSON.stringify({
+          audio_base64: "AQID",
+          alignment: {
+            characters: ["H", "i"],
+            character_start_times_seconds: [0, 0.12],
+            character_end_times_seconds: [0.12, 0.24],
+          },
+          normalized_alignment: {
+            characters: ["H", "i"],
+            character_start_times_seconds: [0.01, 0.13],
+            character_end_times_seconds: [0.13, 0.25],
+          },
+        }), {
+          status: 200,
+          headers: { "request-id": "provider-request" },
+        });
+      }) as typeof fetch,
+    });
+    assert.match(requestUrl, /voice%2Fprovider%20id\/with-timestamps/);
+    assert.deepEqual(speech, {
+      audioBase64: "AQID",
+      audioContentType: "audio/mpeg",
+      alignment: {
+        characters: ["H", "i"],
+        characterStartTimesSeconds: [0, 0.12],
+        characterEndTimesSeconds: [0.12, 0.24],
+      },
+      normalizedAlignment: {
+        characters: ["H", "i"],
+        characterStartTimesSeconds: [0.01, 0.13],
+        characterEndTimesSeconds: [0.13, 0.25],
+      },
+      providerRequestId: "provider-request",
+    });
+  });
+
+  it("opts into alignment transport without changing legacy requests", () => {
+    assert.equal(validateVoiceSynthesisRequest({ text: "hello" }).includeAlignment, false);
+    assert.equal(
+      validateVoiceSynthesisRequest({ text: "hello", includeAlignment: true }).includeAlignment,
+      true
+    );
   });
 
   it("normalizes the ElevenLabs voice catalog", async () => {

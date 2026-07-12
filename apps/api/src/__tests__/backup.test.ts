@@ -473,11 +473,13 @@ describe("backup audio voice settings", () => {
   it("round-trips account settings, authored profiles, and user overrides", () => {
     withBackupDatabase((db, userKey) => {
       db.prepare(
-        "UPDATE users SET voice_mode = ?, voice_effects_enabled = 0, voice_volume = ?, english_voice_engine = ?, elevenlabs_voice_bank = ?, elevenlabs_voice_model = ?, player_audio_voice_profile = ?, player_name_pronunciation = ?, prism_default_bot_audio_voice_profile = ? WHERE id = ?"
+        "UPDATE users SET voice_mode = ?, voice_effects_enabled = 0, voice_volume = ?, english_voice_engine = ?, default_system_voice_name = ?, default_elevenlabs_voice_id = ?, elevenlabs_voice_bank = ?, elevenlabs_voice_model = ?, player_audio_voice_profile = ?, player_name_pronunciation = ?, prism_default_bot_audio_voice_profile = ? WHERE id = ?"
       ).run(
         "english",
         0.65,
         "elevenlabs",
+        "Alex",
+        "eleven-global",
         JSON.stringify({ "voice-1": "eleven-a" }),
         "eleven_flash_v2_5",
         JSON.stringify({ v: 1, baseVoiceId: "voice-3", pitch: 0, warmth: 0, pace: 0, lilt: 0 }),
@@ -508,24 +510,28 @@ describe("backup audio voice settings", () => {
       assert.equal(snapshot.settings?.voiceVolume, 0.65);
       assert.equal(snapshot.settings?.prismDefaultBotAudioVoiceProfile?.baseVoiceId, "voice-5");
       assert.equal(snapshot.settings?.englishVoiceEngine, "elevenlabs");
+      assert.equal(snapshot.settings?.defaultSystemVoiceName, "Alex");
+      assert.equal(snapshot.settings?.defaultElevenLabsVoiceId, "eleven-global");
       assert.equal(snapshot.settings?.elevenLabsVoiceModel, "eleven_flash_v2_5");
       assert.equal(snapshot.settings?.elevenLabsVoiceBank?.["voice-1"], "eleven-a");
       assert.equal(snapshot.settings?.playerAudioVoiceProfile?.baseVoiceId, "voice-3");
       assert.equal(snapshot.settings?.playerNamePronunciation, "Jair-id");
 
       db.prepare(
-        "UPDATE users SET voice_mode = 'mute', voice_effects_enabled = 1, voice_volume = 1, english_voice_engine = 'builtin', elevenlabs_voice_bank = '{}', elevenlabs_voice_model = NULL, player_audio_voice_profile = NULL, player_name_pronunciation = '', prism_default_bot_audio_voice_profile = NULL WHERE id = ?"
+        "UPDATE users SET voice_mode = 'mute', voice_effects_enabled = 1, voice_volume = 1, english_voice_engine = 'builtin', default_system_voice_name = NULL, default_elevenlabs_voice_id = NULL, elevenlabs_voice_bank = '{}', elevenlabs_voice_model = NULL, player_audio_voice_profile = NULL, player_name_pronunciation = '', prism_default_bot_audio_voice_profile = NULL WHERE id = ?"
       ).run("user-1");
       importUserSnapshot(db, "user-1", snapshot, userKey);
 
       const restoredUser = db.prepare(
-        "SELECT voice_mode, voice_effects_enabled, voice_volume, english_voice_engine, elevenlabs_voice_bank, elevenlabs_voice_model, player_audio_voice_profile, player_name_pronunciation, prism_default_bot_audio_voice_profile FROM users WHERE id = ?"
+        "SELECT voice_mode, voice_effects_enabled, voice_volume, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, player_audio_voice_profile, player_name_pronunciation, prism_default_bot_audio_voice_profile FROM users WHERE id = ?"
       ).get("user-1") as Record<string, string | null>;
       assert.equal(restoredUser.voice_mode, "english");
       assert.equal(restoredUser.voice_effects_enabled, 0);
       assert.equal(restoredUser.voice_volume, 0.65);
       assert.equal(JSON.parse(restoredUser.prism_default_bot_audio_voice_profile ?? "{}").baseVoiceId, "voice-5");
       assert.equal(restoredUser.english_voice_engine, "elevenlabs");
+      assert.equal(restoredUser.default_system_voice_name, "Alex");
+      assert.equal(restoredUser.default_elevenlabs_voice_id, "eleven-global");
       assert.equal(restoredUser.elevenlabs_voice_model, "eleven_flash_v2_5");
       assert.equal(JSON.parse(restoredUser.elevenlabs_voice_bank ?? "{}")["voice-1"], "eleven-a");
       assert.equal(JSON.parse(restoredUser.player_audio_voice_profile ?? "{}").baseVoiceId, "voice-3");

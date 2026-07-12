@@ -18,14 +18,76 @@ export interface VoiceDamageEvent {
   depth: number;
 }
 
+export interface VoicePlaybackCharacterAlignment {
+  characters: string[];
+  characterStartTimesSeconds: number[];
+  characterEndTimesSeconds: number[];
+}
+
 export interface VoicePlaybackLifecycle {
   /** Temporary per-utterance delivery changes. V1 accepts the neutral envelope only. */
   deliveryEnvelope?: CoffeeVoiceDeliveryEnvelope;
-  onStart?: (durationMs: number | null) => void;
+  onStart?: (
+    durationMs: number | null,
+    alignment?: VoicePlaybackCharacterAlignment | null
+  ) => void;
+  /** Audio-clock progress used to keep visible speech and mouth motion aligned. */
+  onProgress?: (elapsedMs: number, durationMs: number) => void;
   onEnd?: () => void;
 }
 
+export interface VoicePlaybackProgressController {
+  finish: () => void;
+  cancel: () => void;
+}
+
+export function beginVoicePlaybackProgress(
+  lifecycle: VoicePlaybackLifecycle | undefined,
+  durationMs: number,
+  currentElapsedMs: () => number,
+  alignment?: VoicePlaybackCharacterAlignment | null
+): VoicePlaybackProgressController {
+  const normalizedDurationMs = Math.max(1, Math.round(durationMs));
+  let frame: number | null = null;
+  let active = true;
+  const report = (elapsedMs: number) => {
+    lifecycle?.onProgress?.(
+      Math.min(normalizedDurationMs, Math.max(0, elapsedMs)),
+      normalizedDurationMs
+    );
+  };
+  const tick = () => {
+    if (!active) return;
+    report(currentElapsedMs());
+    frame = window.requestAnimationFrame(tick);
+  };
+  lifecycle?.onStart?.(normalizedDurationMs, alignment);
+  report(0);
+  if (lifecycle?.onProgress) frame = window.requestAnimationFrame(tick);
+  const cancel = () => {
+    if (!active) return;
+    active = false;
+    if (frame !== null) window.cancelAnimationFrame(frame);
+    frame = null;
+  };
+  return {
+    cancel,
+    finish: () => {
+      if (!active) return;
+      report(normalizedDurationMs);
+      cancel();
+    },
+  };
+}
+
 const AUDIO_CONTEXT_RESUME_TIMEOUT_MS = 500;
+export const VOICE_LILT_DEPTH_CENTS = 120;
+
+export function voiceLiltDetuneCents(lilt: number, elapsedSeconds: number): number {
+  const normalizedLilt = Math.max(-1, Math.min(1, Number.isFinite(lilt) ? lilt : 0));
+  const elapsed = Math.max(0, Number.isFinite(elapsedSeconds) ? elapsedSeconds : 0);
+  return Math.sin(elapsed * 5.4) * normalizedLilt * VOICE_LILT_DEPTH_CENTS;
+}
 
 export function resolveVoiceTexture(
   rawProfile: BotAudioVoiceProfileV1,
@@ -104,6 +166,7 @@ function createNoiseBuffer(context: AudioContext, durationSeconds: number, seed:
 let audioContext: AudioContext | null = null;
 let activeNodes: AudioScheduledSourceNode[] = [];
 let activeResolve: (() => void) | null = null;
+let activeProgress: VoicePlaybackProgressController | null = null;
 
 function contextForPlayback(): AudioContext | null {
   if (typeof window === "undefined" || typeof window.AudioContext !== "function") return null;
@@ -132,6 +195,8 @@ export async function prepareRealtimeVoiceAudio(): Promise<boolean> {
 }
 
 export function stopRealtimeVoiceAudio(): void {
+  activeProgress?.cancel();
+  activeProgress = null;
   for (const node of activeNodes) {
     try { node.stop(); } catch { /* already stopped */ }
     try { node.disconnect(); } catch { /* already disconnected */ }
@@ -149,6 +214,7 @@ export async function playRealtimeVoiceBytes(args: {
   detuneCents?: number;
   baseLowpassHz?: number;
   lifecycle?: VoicePlaybackLifecycle;
+  alignment?: VoicePlaybackCharacterAlignment | null;
 }): Promise<boolean> {
   const context = contextForPlayback();
   if (!context || !await prepareRealtimeVoiceAudio()) return false;
@@ -158,13 +224,16 @@ export async function playRealtimeVoiceBytes(args: {
   stopRealtimeVoiceAudio();
   const texture = resolveVoiceTexture(profile, args.effectsEnabled);
   const now = context.currentTime;
+  const playbackRateRatio = 2 ** ((args.detuneCents ?? 0) / 1200);
+  const playbackDurationSeconds = decoded.duration / playbackRateRatio;
+  const playbackDurationMs = Math.max(1, Math.round(playbackDurationSeconds * 1000));
   const source = context.createBufferSource();
   source.buffer = decoded;
   source.detune.setValueAtTime(args.detuneCents ?? 0, now);
   if (profile.lilt !== 0) {
     const contourStep = 0.32;
     for (let at = contourStep; at < decoded.duration; at += contourStep) {
-      const cents = (args.detuneCents ?? 0) + Math.sin(at * 5.4) * profile.lilt * 45;
+      const cents = (args.detuneCents ?? 0) + voiceLiltDetuneCents(profile.lilt, at);
       source.detune.linearRampToValueAtTime(cents, now + at);
     }
   }
@@ -193,7 +262,7 @@ export async function playRealtimeVoiceBytes(args: {
   limiter.release.value = 0.12;
   source.connect(highpass).connect(lowpass).connect(shaper).connect(speechGain).connect(outputGain).connect(limiter).connect(context.destination);
 
-  for (const event of buildVoiceDamageSchedule(args.seed, decoded.duration * 1000, texture.damage)) {
+  for (const event of buildVoiceDamageSchedule(args.seed, playbackDurationMs, texture.damage)) {
     const at = now + event.atMs / 1000;
     const end = at + event.durationMs / 1000;
     speechGain.gain.setValueAtTime(1, at);
@@ -207,14 +276,14 @@ export async function playRealtimeVoiceBytes(args: {
     const noise = context.createBufferSource();
     const noiseFilter = context.createBiquadFilter();
     const noiseGain = context.createGain();
-    noise.buffer = createNoiseBuffer(context, Math.max(0.25, decoded.duration), `${args.seed}:noise`);
+    noise.buffer = createNoiseBuffer(context, Math.max(0.25, playbackDurationSeconds), `${args.seed}:noise`);
     noiseFilter.type = "bandpass";
     noiseFilter.frequency.value = 1800;
     noiseFilter.Q.value = 0.55;
     noiseGain.gain.value = texture.noise * 0.075;
     noise.connect(noiseFilter).connect(noiseGain).connect(outputGain);
     noise.start(now);
-    noise.stop(now + decoded.duration);
+    noise.stop(now + playbackDurationSeconds);
     scheduled.push(noise);
   }
   if (texture.instability > 0) {
@@ -225,13 +294,17 @@ export async function playRealtimeVoiceBytes(args: {
     modulation.gain.value = texture.instability * 0.12;
     oscillator.connect(modulation).connect(speechGain.gain);
     oscillator.start(now);
-    oscillator.stop(now + decoded.duration);
+    oscillator.stop(now + playbackDurationSeconds);
     scheduled.push(oscillator);
   }
   activeNodes = scheduled;
   await new Promise<void>((resolve) => {
+    let progress: VoicePlaybackProgressController | null = null;
     activeResolve = resolve;
     source.addEventListener("ended", () => {
+      progress?.finish();
+      if (activeProgress === progress) activeProgress = null;
+      progress = null;
       if (activeResolve === resolve) activeResolve = null;
       for (const node of scheduled) {
         try { node.disconnect(); } catch { /* no-op */ }
@@ -240,8 +313,14 @@ export async function playRealtimeVoiceBytes(args: {
       args.lifecycle?.onEnd?.();
       resolve();
     }, { once: true });
-    args.lifecycle?.onStart?.(Math.round(decoded.duration * 1000));
     source.start(now);
+    progress = beginVoicePlaybackProgress(
+      args.lifecycle,
+      playbackDurationMs,
+      () => (context.currentTime - now) * 1000,
+      args.alignment
+    );
+    activeProgress = progress;
   });
   return true;
 }

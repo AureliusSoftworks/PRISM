@@ -4,9 +4,11 @@ import {
   type BotAudioVoiceProfileV1,
 } from "@localai/shared";
 import {
+  beginVoicePlaybackProgress,
   playRealtimeVoiceBytes,
   prepareRealtimeVoiceAudio,
   stopRealtimeVoiceAudio,
+  voiceLiltDetuneCents,
   type VoicePlaybackLifecycle,
 } from "./voiceEffects.ts";
 
@@ -16,7 +18,80 @@ export interface EnglishVoicePostProcessing {
   gain: number;
 }
 
+export interface EnglishVoiceCharacterAlignment {
+  characters: string[];
+  characterStartTimesSeconds: number[];
+  characterEndTimesSeconds: number[];
+}
+
+export interface EnglishVoiceSynthesisClip {
+  bytes: ArrayBuffer;
+  alignment: EnglishVoiceCharacterAlignment | null;
+  audioContentType: string;
+}
+
 const MEDIA_PLAY_START_TIMEOUT_MS = 1500;
+
+function decodedBase64Bytes(value: string): ArrayBuffer {
+  if (typeof atob === "function") {
+    const binary = atob(value);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+    return bytes.buffer;
+  }
+  const bufferConstructor = (globalThis as typeof globalThis & {
+    Buffer?: { from: (input: string, encoding: string) => Uint8Array };
+  }).Buffer;
+  if (!bufferConstructor) throw new Error("Voice audio could not be decoded.");
+  const bytes = bufferConstructor.from(value, "base64");
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+}
+
+function normalizedAlignment(value: unknown): EnglishVoiceCharacterAlignment | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const characters = record.characters;
+  const starts = record.characterStartTimesSeconds;
+  const ends = record.characterEndTimesSeconds;
+  if (!Array.isArray(characters) || !Array.isArray(starts) || !Array.isArray(ends)) return null;
+  if (characters.length === 0 || characters.length !== starts.length || starts.length !== ends.length) {
+    return null;
+  }
+  if (!characters.every((character) => typeof character === "string")) return null;
+  if (!starts.every((start) => typeof start === "number" && Number.isFinite(start))) return null;
+  if (!ends.every((end) => typeof end === "number" && Number.isFinite(end))) return null;
+  return {
+    characters: [...characters] as string[],
+    characterStartTimesSeconds: [...starts] as number[],
+    characterEndTimesSeconds: [...ends] as number[],
+  };
+}
+
+/** Read either the legacy binary voice response or Prism's timed JSON envelope. */
+export async function readEnglishVoiceSynthesisClip(
+  response: Response
+): Promise<EnglishVoiceSynthesisClip> {
+  const contentType = response.headers.get("content-type") ?? "application/octet-stream";
+  if (!contentType.toLowerCase().includes("application/json")) {
+    return {
+      bytes: await response.arrayBuffer(),
+      alignment: null,
+      audioContentType: contentType,
+    };
+  }
+  const payload = await response.json() as Record<string, unknown>;
+  const audioBase64 = typeof payload.audioBase64 === "string" ? payload.audioBase64.trim() : "";
+  if (!audioBase64) throw new Error("Voice synthesis returned no audio.");
+  return {
+    bytes: decodedBase64Bytes(audioBase64),
+    alignment: normalizedAlignment(payload.alignment),
+    audioContentType: typeof payload.audioContentType === "string"
+      ? payload.audioContentType
+      : response.headers.get("x-prism-audio-content-type") ?? "application/octet-stream",
+  };
+}
 
 export function resolveEnglishVoicePostProcessing(
   rawProfile: BotAudioVoiceProfileV1
@@ -35,6 +110,7 @@ export function resolveEnglishVoicePostProcessing(
 let activeMedia: HTMLAudioElement | null = null;
 let activeMediaUrl: string | null = null;
 let activeMediaStartTimer: number | null = null;
+let activeMediaLiltTimer: number | null = null;
 let activeMediaResolve: (() => void) | null = null;
 let preparedMedia: HTMLAudioElement | null = null;
 let preparedMediaUrl: string | null = null;
@@ -120,6 +196,10 @@ function releaseActiveMedia(keepElement = false): void {
     window.clearTimeout(activeMediaStartTimer);
     activeMediaStartTimer = null;
   }
+  if (activeMediaLiltTimer !== null) {
+    window.clearInterval(activeMediaLiltTimer);
+    activeMediaLiltTimer = null;
+  }
   if (keepElement && media) preparedMedia = media;
 }
 
@@ -154,16 +234,21 @@ async function playBytesWithMedia(
   audio.load();
   audio.preload = "auto";
   audio.volume = Math.min(1, normalizeBotAudioVoiceProfileV1(profile).volume);
+  audio.preservesPitch = false;
   activeMedia = audio;
   activeMediaUrl = url;
 
   await new Promise<void>((resolve, reject) => {
     let settled = false;
     let started = false;
+    let progress: ReturnType<typeof beginVoicePlaybackProgress> | null = null;
     const finish = (error?: Error) => {
       if (settled) return;
       settled = true;
       if (activeMediaResolve === cancel) activeMediaResolve = null;
+      if (error) progress?.cancel();
+      else progress?.finish();
+      progress = null;
       releaseActiveMedia(!error);
       lifecycle?.onEnd?.();
       if (error) reject(error);
@@ -181,11 +266,29 @@ async function playBytesWithMedia(
     void audio.play().then(
       () => {
         started = true;
-        lifecycle?.onStart?.(
-          Number.isFinite(audio.duration) && audio.duration > 0
-            ? Math.round(audio.duration * 1000)
-            : null
-        );
+        const normalizedProfile = normalizeBotAudioVoiceProfileV1(profile);
+        const updatePlaybackRate = () => {
+          const detuneCents =
+            normalizedProfile.pitch * 650 +
+            voiceLiltDetuneCents(normalizedProfile.lilt, audio.currentTime);
+          audio.playbackRate = Math.max(0.7, Math.min(1.4, 2 ** (detuneCents / 1200)));
+        };
+        updatePlaybackRate();
+        if (normalizedProfile.lilt !== 0) {
+          activeMediaLiltTimer = window.setInterval(updatePlaybackRate, 100);
+        }
+        const durationMs = Number.isFinite(audio.duration) && audio.duration > 0
+          ? Math.round(audio.duration * 1000)
+          : null;
+        if (durationMs) {
+          progress = beginVoicePlaybackProgress(
+            lifecycle,
+            durationMs,
+            () => audio.currentTime * 1000
+          );
+        } else {
+          lifecycle?.onStart?.(null);
+        }
         if (activeMediaStartTimer !== null) {
           window.clearTimeout(activeMediaStartTimer);
           activeMediaStartTimer = null;

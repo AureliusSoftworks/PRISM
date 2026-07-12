@@ -60393,13 +60393,12 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   font-variant-numeric: tabular-nums;
 }
 
-.botVoiceTexturePresets {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
-  gap: 7px;
+.botVoiceControlHint {
+  margin-top: -4px;
+  color: var(--muted);
+  font-size: 10.5px;
 }
 
-.botVoiceTexturePresets button,
 .botVoiceActions button {
   min-width: 0;
   border: 1px solid var(--border);
@@ -60410,48 +60409,15 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   cursor: pointer;
 }
 
-.botVoiceTexturePresets button {
-  display: grid;
-  gap: 2px;
-  justify-items: center;
-  font-size: 11px;
-}
-
-.botVoiceTexturePresets button[data-active="true"] {
-  border-color: var(--editor-bot-color);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--editor-bot-color) 22%, transparent);
-}
-
-.botVoiceTexturePresets small,
-.botVoiceNotice {
-  color: var(--muted);
-  font-size: 10px;
-}
-
-.botVoiceAdvanced {
-  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
-  padding-top: 10px;
-}
-
-.botVoiceAdvanced summary {
-  color: var(--muted);
-  cursor: pointer;
-  font-size: 11px;
-  font-weight: 750;
-}
-
-.botVoiceAdvanced .botVoiceControls {
-  margin-top: 10px;
-}
-
-.botVoiceNotice {
-  margin: 0;
-}
-
 .botVoiceActions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 8px;
+}
+
+.botVoiceActions button:first-child {
+  margin-right: auto;
 }
 
 .botVoiceActions button {

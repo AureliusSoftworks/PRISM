@@ -58,6 +58,9 @@ export function coffeeThinkingCutInDelayMs(effort: ReasoningEffort | null | unde
 export function startCoffeeTurnJob(args: {
   userId: string;
   conversationId: string | null;
+  /** Explicit user turns may replace abandoned work. Autonomous timers must
+   * never cancel a response already being prepared for the player. */
+  supersedeExisting?: boolean;
   effort?: ReasoningEffort | null;
   /** Test and embedding override; production jobs use the five-minute default. */
   ttlMs?: number;
@@ -67,6 +70,12 @@ export function startCoffeeTurnJob(args: {
   }) => Promise<CoffeeTurnResponse>;
 }): CoffeeTurnJobStatus {
   cleanupExpiredJobs();
+  if (args.conversationId && args.supersedeExisting === true) {
+    // A Coffee table can only have one bot choosing or holding the floor at a
+    // time. Supersede abandoned/overlapping work before publishing the next
+    // job so two pollers cannot alternate the visible thinking seat.
+    cancelCoffeeTurnJobsForConversation(args.userId, args.conversationId);
+  }
   const startedAt = nowIso();
   const controller = new AbortController();
   const job: InternalCoffeeTurnJob = {
@@ -114,6 +123,23 @@ export function getCoffeeTurnJob(userId: string, jobId: string): CoffeeTurnJobSt
   cleanupExpiredJobs();
   const job = jobs.get(jobId);
   return job?.userId === userId ? publicStatus(job) : null;
+}
+
+export function getActiveCoffeeTurnJobForConversation(
+  userId: string,
+  conversationId: string
+): CoffeeTurnJobStatus | null {
+  cleanupExpiredJobs();
+  for (const job of jobs.values()) {
+    if (
+      job.userId === userId &&
+      job.conversationId === conversationId &&
+      !isTerminalCoffeeTurnPhase(job.phase)
+    ) {
+      return publicStatus(job);
+    }
+  }
+  return null;
 }
 
 export function setCoffeeTurnJobPhase(

@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1, botVoiceTextureForPreset } from "@localai/shared";
-import { buildVoiceDamageSchedule, resolveVoiceTexture } from "./voiceEffects.ts";
+import {
+  VOICE_LILT_DEPTH_CENTS,
+  buildVoiceDamageSchedule,
+  resolveVoiceTexture,
+  voiceLiltDetuneCents,
+} from "./voiceEffects.ts";
 
 describe("voice textures", () => {
   it("scales texture controls by Amount and bypasses texture only", () => {
@@ -38,5 +43,14 @@ describe("voice textures", () => {
     assert.deepEqual(first, buildVoiceDamageSchedule("message-1:bot-2", 4200, 0.7));
     assert.notDeepEqual(first, buildVoiceDamageSchedule("message-2:bot-2", 4200, 0.7));
     assert.ok(first.every((event) => event.atMs >= 0 && event.atMs < 4200));
+  });
+});
+
+describe("voice performance", () => {
+  it("gives Lilt an audible pitch contour while keeping neutral speech still", () => {
+    assert.equal(voiceLiltDetuneCents(0, 0.3), 0);
+    assert.ok(Math.abs(voiceLiltDetuneCents(1, 0.3)) > 100);
+    assert.ok(Math.abs(voiceLiltDetuneCents(-1, 0.3)) > 100);
+    assert.equal(VOICE_LILT_DEPTH_CENTS, 120);
   });
 });
