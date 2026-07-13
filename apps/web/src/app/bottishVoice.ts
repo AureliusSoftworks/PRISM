@@ -143,9 +143,10 @@ export function buildBottishPlan(
   };
 }
 
-/** Fits procedural Bottish to the visible delivery window. This makes its
- * cadence follow the UI reveal speed instead of becoming a second, trailing
- * speech clock. */
+/** Fits procedural Bottish to a longer visible delivery window. Speech must
+ * never be compressed to catch up with the UI: doing that turns a normal
+ * Bottish cadence into an unintelligible burst. The reveal follows audio via
+ * lifecycle timing, so a short UI window is simply ignored here. */
 export function fitBottishPlanToDuration(
   plan: BottishPlan,
   targetDurationMs: number | undefined
@@ -154,11 +155,11 @@ export function fitBottishPlanToDuration(
     plan.durationMs <= 0 ||
     typeof targetDurationMs !== "number" ||
     !Number.isFinite(targetDurationMs) ||
-    targetDurationMs <= 0
+    targetDurationMs <= plan.durationMs
   ) {
     return plan;
   }
-  const durationMs = Math.max(80, Math.round(targetDurationMs));
+  const durationMs = Math.max(plan.durationMs, 80, Math.round(targetDurationMs));
   const scale = durationMs / plan.durationMs;
   const notes = plan.notes.flatMap((note) => {
     const startMs = Math.max(0, Math.round(note.startMs * scale));
