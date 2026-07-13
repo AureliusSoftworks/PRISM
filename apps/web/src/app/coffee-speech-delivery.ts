@@ -14,12 +14,15 @@ export interface CoffeeDeliveryCharacterAlignment {
   characterEndTimesSeconds: number[];
 }
 
-const MOOD_CHARACTERS_PER_SECOND: Record<CoffeeDeliveryMood, number> = {
-  joyful: 20,
-  warm: 16,
-  neutral: 12,
-  guarded: 9,
-  strained: 7,
+export const COFFEE_DELIVERY_MIN_DURATION_MS = 280;
+export const COFFEE_DELIVERY_MAX_DURATION_MS = 18_000;
+
+export const COFFEE_DELIVERY_MOOD_CHARACTERS_PER_SECOND: Record<CoffeeDeliveryMood, number> = {
+  joyful: 14,
+  warm: 12,
+  neutral: 10,
+  guarded: 8,
+  strained: 6,
 };
 
 function clamp(value: number, min: number, max: number): number {
@@ -88,7 +91,8 @@ export function buildCoffeeDeliveryPlan({
     return { text, revealAtMs: [], durationMs: 0, baseCharacterMs: 0, emphasis: null };
   }
   const intensity = clamp(humanPacing, 0, 100) / 50;
-  const baseCharacterMs = 1000 / MOOD_CHARACTERS_PER_SECOND[normalizeMood(mood)];
+  const baseCharacterMs =
+    1000 / COFFEE_DELIVERY_MOOD_CHARACTERS_PER_SECOND[normalizeMood(mood)];
   const variationAmplitude = 0.12 * clamp(intensity, 0, 2);
   const revealAtMs: number[] = [];
   let elapsedMs = 0;
@@ -108,7 +112,11 @@ export function buildCoffeeDeliveryPlan({
     typeof audioDurationMs === "number" && Number.isFinite(audioDurationMs) && audioDurationMs > 0
       ? audioDurationMs
       : null;
-  const targetDuration = requestedAudioDuration ?? clamp(elapsedMs, 280, 12_000);
+  const targetDuration = requestedAudioDuration ?? clamp(
+    elapsedMs,
+    COFFEE_DELIVERY_MIN_DURATION_MS,
+    COFFEE_DELIVERY_MAX_DURATION_MS
+  );
   const alignmentLength = audioAlignment?.characters.length ?? 0;
   const alignmentValid = Boolean(
     audioAlignment &&

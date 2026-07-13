@@ -1,12 +1,17 @@
-import type { ZenLiveBotMouthShape } from "./zenLiveMouth";
+import {
+  zenLiveBotMouthShapeFromVisibleTextProgress,
+  type ZenLiveBotMouthShape,
+} from "./zenLiveMouth.ts";
 
 export type CoffeeSeatEmojiMood = "happy" | "warm" | "neutral" | "sad" | "angry";
 
 export const COFFEE_SEAT_ANGRY_BRACKET_GLYPH = ":[" as const;
 export const COFFEE_SEAT_SIP_PLATE_GLYPH = { text: ":⁎", rotateDeg: 90 } as const;
-// Keep the pucker as a quick early beat: it lands while the mug is up, then
-// relaxes well before the cup begins its return at 76%.
-export const COFFEE_SEAT_SIP_FACE_ACTIVE_PROGRESS = 0.45;
+// Hold the pucker through most of the mug-up beat, then relax shortly before
+// the cup begins its return at 76%.
+export const COFFEE_SEAT_SIP_FACE_ACTIVE_PROGRESS = 0.68;
+/** Hold each Coffee speaking mouth pose across a few revealed characters. */
+export const COFFEE_SEAT_MOUTH_CHARACTERS_PER_PHASE = 3;
 const COFFEE_SEAT_SIP_MOUTH_OFFSET_EM = 0.48;
 const COFFEE_SEAT_CENTER_SIP_MOUTH_OFFSET_EM = 0.36;
 const COFFEE_SEAT_SIP_MOUTH_DROP_EM = 0.17;
@@ -24,6 +29,17 @@ export interface CoffeeSeatSipPresentation {
   glyph: typeof COFFEE_SEAT_SIP_PLATE_GLYPH | null;
   mouthOffsetX: string;
   mouthOffsetY: string;
+}
+
+export function coffeeSeatMouthShapeFromVisibleLength(
+  visibleLength: number,
+  speechSeedText: string
+): ZenLiveBotMouthShape {
+  return zenLiveBotMouthShapeFromVisibleTextProgress({
+    text: speechSeedText,
+    visibleLength,
+    charactersPerPhase: COFFEE_SEAT_MOUTH_CHARACTERS_PER_PHASE,
+  });
 }
 
 function coffeeSeatTimedSipFaceActive(args: {

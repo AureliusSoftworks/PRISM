@@ -2,11 +2,31 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildCoffeeDeliveryPlan,
+  COFFEE_DELIVERY_MAX_DURATION_MS,
   coffeeDeliveryIsHoldingAtMs,
   coffeeDeliveryVisibleLengthAtMs,
 } from "./coffee-speech-delivery.ts";
 
 describe("Coffee speech delivery", () => {
+  it("uses a calmer table reveal pace and gives long replies more room", () => {
+    const neutral = buildCoffeeDeliveryPlan({
+      text: "A steady conversational line.",
+      seed: "neutral-pace",
+      mood: "neutral",
+      humanPacing: 0,
+    });
+    const longReply = buildCoffeeDeliveryPlan({
+      text: "x".repeat(500),
+      seed: "long-reply",
+      mood: "neutral",
+      humanPacing: 0,
+    });
+
+    assert.equal(neutral.baseCharacterMs, 100);
+    assert.equal(longReply.durationMs, COFFEE_DELIVERY_MAX_DURATION_MS);
+    assert.equal(COFFEE_DELIVERY_MAX_DURATION_MS, 18_000);
+  });
+
   it("builds deterministic phrase timing", () => {
     const input = { text: "Well, this is interesting.", seed: "m1:b1", humanPacing: 50 };
     assert.deepEqual(buildCoffeeDeliveryPlan(input), buildCoffeeDeliveryPlan(input));
