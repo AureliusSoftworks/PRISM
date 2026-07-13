@@ -49676,6 +49676,13 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   --coffee-stage-max-width: 1500px;
 }
 
+/* Coffee deliberately keeps its global toolbar above the backdrop while a
+   shared drawer is open. Keep the drawer itself one layer higher so its own
+   back / close header is never hidden behind that toolbar. */
+.coffeeShell .panel {
+  z-index: 181;
+}
+
 .coffeeSidebar {
   box-sizing: border-box;
   backdrop-filter: blur(18px);

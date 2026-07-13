@@ -56,6 +56,17 @@ describe("selected bot library showcase", () => {
     );
   });
 
+  it("keeps shared panel navigation above the Coffee toolbar", () => {
+    assert.match(
+      cssSource,
+      /\.chatHeader\s*\{[\s\S]*?z-index:\s*180;/
+    );
+    assert.match(
+      cssSource,
+      /\.coffeeShell \.panel\s*\{[\s\S]*?z-index:\s*181;/
+    );
+  });
+
   it("keeps the large preview silent and plays only from its voice buttons", () => {
     const previewSource = pageSource.slice(
       pageSource.indexOf("className={styles.botPanelHubAvatarPreview}"),
