@@ -16271,21 +16271,19 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .markdownBody pre.markdownCodeBlockComposing {
-  min-height: calc(var(--code-total-lines, 1) * 1.5em + 3.2rem);
-  overflow: hidden;
-  max-height: 0;
-  animation: markdownCodeBlockExpandIn 220ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  overflow-y: hidden;
 }
 
-@keyframes markdownCodeBlockExpandIn {
-  from {
-    max-height: 0;
-    opacity: 0.9;
-  }
-  to {
-    max-height: calc(var(--code-total-lines, 1) * 1.5em + 3.2rem);
-    opacity: 1;
-  }
+.markdownBody pre.markdownCodeBlockMini {
+  min-height: calc(3 * 1.5em + 3.2rem);
+  max-height: calc(3 * 1.5em + 3.2rem);
+  overflow-y: hidden;
+  padding-top: 42px;
+}
+
+.markdownBody pre.markdownCodeBlockMini[data-expanded="true"] {
+  min-height: 0;
+  max-height: none;
 }
 
 .markdownBody pre.markdownCodeBlock {
@@ -16344,6 +16342,35 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   user-select: none;
 }
 
+.markdownCodeCopyStatus {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  z-index: 3;
+  transform: translateX(-50%);
+  border: 1px solid color-mix(in srgb, #78e6a3 58%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, #102719 92%, transparent);
+  color: #a9f5c4;
+  padding: 7px 11px;
+  font-family: var(--font-ui-sans), system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.035em;
+  line-height: 1;
+  text-transform: uppercase;
+  pointer-events: none;
+  -webkit-user-select: none;
+  user-select: none;
+  box-shadow: 0 5px 18px color-mix(in srgb, #000000 32%, transparent);
+}
+
+.markdownCodeCopyStatus[data-copy-state="failed"] {
+  border-color: color-mix(in srgb, #ff7b7b 58%, transparent);
+  background: color-mix(in srgb, #321313 92%, transparent);
+  color: #ffc0c0;
+}
+
 .markdownCodeCopyButton {
   position: absolute;
   top: 10px;
@@ -16368,8 +16395,33 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   transition: none;
 }
 
+.markdownCodeExpandButton {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 2;
+  border: 1px solid color-mix(in srgb, var(--fg) 18%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-surface) 88%, transparent);
+  color: color-mix(in srgb, var(--fg) 82%, transparent);
+  font-family: var(--font-ui-sans), system-ui, sans-serif;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  line-height: 1;
+  padding: 7px 9px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.markdownBody pre.markdownCodeBlockMini .markdownCodeCopyButton {
+  right: 82px;
+}
+
 .markdownCodeCopyButton:hover,
-.markdownCodeCopyButton:focus-visible {
+.markdownCodeCopyButton:focus-visible,
+.markdownCodeExpandButton:hover,
+.markdownCodeExpandButton:focus-visible {
   border-color: color-mix(in srgb, var(--fg) 30%, transparent);
   background: color-mix(in srgb, var(--bg-surface) 72%, transparent);
   color: var(--fg);
@@ -17144,6 +17196,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   font-size: 14px;
   font-weight: 650;
   text-align: left;
+  cursor: pointer;
 }
 
 .contextMenuItemLabel {
@@ -17178,6 +17231,87 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .messageContextMenu button:disabled {
   cursor: default;
   opacity: 0.45;
+}
+
+.contextMenuSelectionFeedback {
+  position: fixed;
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  box-sizing: border-box;
+  border: 1px solid color-mix(in srgb, var(--accent-ink) 62%, #ffffff 18%);
+  border-radius: 10px;
+  padding: 10px 14px;
+  background:
+    linear-gradient(
+      100deg,
+      color-mix(in srgb, var(--accent-ink) 28%, var(--bg-surface)),
+      color-mix(in srgb, var(--accent-ink) 10%, var(--bg-surface))
+    );
+  color: var(--fg);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, #ffffff 12%, transparent),
+    0 10px 30px color-mix(in srgb, #000000 34%, transparent),
+    0 0 22px color-mix(in srgb, var(--accent-ink) 22%, transparent);
+  font-family: var(--font-ui-sans), system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.2;
+  pointer-events: none;
+  -webkit-user-select: none;
+  user-select: none;
+  animation: contextMenuSelectionConfirm 640ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.contextMenuSelectionFeedback > span {
+  display: grid;
+  place-items: center;
+  flex: 0 0 20px;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-ink) 30%, transparent);
+  color: color-mix(in srgb, var(--accent-ink) 76%, #ffffff 24%);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.contextMenuSelectionFeedback strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 750;
+}
+
+@keyframes contextMenuSelectionConfirm {
+  0% {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  18% {
+    opacity: 1;
+    transform: scale(1.035);
+  }
+  62% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.985) translateY(-4px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .contextMenuSelectionFeedback {
+    animation-name: contextMenuSelectionConfirmReduced;
+  }
+}
+
+@keyframes contextMenuSelectionConfirmReduced {
+  0%, 72% { opacity: 1; }
+  100% { opacity: 0; }
 }
 
 .modeTutorialOverlay {
@@ -19252,7 +19386,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --zen-persona-ink-overlap: clamp(112px, calc(12dvh + var(--zen-tone-gap-extra)), 228px);
   --zen-prose-runway-top: clamp(240px, calc(38dvh + var(--zen-tone-runway-extra)), 672px);
   --zen-prose-runway-bottom: clamp(260px, calc(34dvh + var(--zen-tone-runway-extra)), 420px);
-  --zen-readable-tail-padding: var(--zen-prose-runway-bottom);
+  --zen-readable-tail-padding-floor: var(--zen-prose-runway-bottom);
+  --zen-readable-tail-padding: var(--zen-readable-tail-padding-floor);
   --zen-text-top-fade-start: clamp(28px, 5dvh, 68px);
   --zen-text-top-fade-mid: clamp(108px, 16dvh, 192px);
   --zen-text-top-fade-end: clamp(188px, 26dvh, 320px);
@@ -19266,9 +19401,15 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --zen-user-prism-color: var(--zen-user-prism-color-bright);
   z-index: 5;
   padding-top: max(76px, var(--zen-prose-runway-top));
-  padding-bottom: max(0px, var(--zen-readable-tail-padding));
+  padding-bottom: max(
+    var(--zen-readable-tail-padding-floor),
+    var(--zen-readable-tail-padding)
+  );
   scroll-padding-top: var(--zen-prose-runway-top);
-  scroll-padding-bottom: max(0px, var(--zen-readable-tail-padding));
+  scroll-padding-bottom: max(
+    var(--zen-readable-tail-padding-floor),
+    var(--zen-readable-tail-padding)
+  );
   gap: clamp(34px, calc(7dvh + var(--zen-tone-gap-extra)), 156px);
   -webkit-mask-image: linear-gradient(
     to bottom,
@@ -20057,8 +20198,14 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"][data-reply-runway-active="true"] {
-  padding-bottom: max(0px, var(--zen-readable-tail-padding));
-  scroll-padding-bottom: max(0px, var(--zen-readable-tail-padding));
+  padding-bottom: max(
+    var(--zen-readable-tail-padding-floor),
+    var(--zen-readable-tail-padding)
+  );
+  scroll-padding-bottom: max(
+    var(--zen-readable-tail-padding-floor),
+    var(--zen-readable-tail-padding)
+  );
 }
 
 .appLayout[data-zen-surface="true"]
@@ -21866,7 +22013,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   color: var(--zen-live-bot-face-ink, var(--zen-presence-face-ink));
   font-size: var(
     --zen-live-bot-avatar-thinking-glyph-size,
-    clamp(1.82rem, calc(var(--zen-live-bot-body-frame-size, 190px) * 0.245), 4.6rem)
+    clamp(2.35rem, calc(var(--zen-live-bot-body-frame-size, 190px) * 0.275), 5.25rem)
   );
   text-shadow: none;
 }
@@ -31382,28 +31529,23 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   overflow: visible;
 }
 
-.botPanelHubAvatarButton {
-  -webkit-appearance: none;
-  appearance: none;
-  border: 0;
+.botPanelHubAvatarPreview {
   border-radius: 50%;
-  padding: 0;
   display: grid;
   place-items: center;
   color: inherit;
   background: transparent;
-  cursor: pointer;
-}
-
-.botPanelHubAvatarButton:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--editor-bot-color) 58%, #ffffff 42%);
-  outline-offset: 10px;
+  cursor: default;
 }
 
 .botPanelHubAvatarPlate {
   margin: 0;
   transform-origin: center center;
   animation: botPanelHubAvatarIdle 4.8s ease-in-out infinite;
+}
+
+.botPanelHubAvatarPlate .zenLiveBotPresenceHitTarget {
+  cursor: default;
 }
 
 .botPanelHubAvatarPlate .zenLiveBotPresenceBody {
@@ -37843,7 +37985,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .botAvatarControlTabs {
   min-width: 0;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
   padding: 4px;
   border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 20%, #303846);
@@ -37904,6 +38046,278 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   padding-right: 6px;
   padding-bottom: 2px;
   scrollbar-width: thin;
+}
+
+.botPowersPanel {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.botAvatarStudioTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.botPowerSurfaceBadgeWrap {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  outline: none;
+}
+
+.botPowerSurfaceBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 24px;
+  height: 20px;
+  padding: 0 6px;
+  border: 1px solid color-mix(in srgb, var(--bot-color, var(--editor-bot-color, var(--accent))) 55%, var(--line));
+  border-radius: 999px;
+  color: var(--fg);
+  background: color-mix(in srgb, var(--bot-color, var(--editor-bot-color, var(--accent))) 16%, rgba(0, 0, 0, 0.24));
+  font-size: 9px;
+  font-weight: 850;
+  line-height: 1;
+}
+
+.botPowerSurfaceBadgeWrap:focus-visible .botPowerSurfaceBadge,
+.botPowerSurfaceBadgeWrap[data-open="true"] .botPowerSurfaceBadge {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.botPowerSurfacePopover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 120;
+  width: min(280px, 70vw);
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--line));
+  border-radius: 9px;
+  color: var(--fg);
+  background: color-mix(in srgb, var(--panel-strong) 96%, #000);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.42);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: left;
+  white-space: normal;
+}
+
+.botPowerSurfacePopover strong {
+  color: var(--fg);
+  font-size: 11px;
+}
+
+.botPowerSurfacePopover em {
+  color: #ffd08a;
+  font-style: normal;
+}
+
+.coffeePowerWarning {
+  position: absolute;
+  left: 50%;
+  bottom: 88px;
+  z-index: 18;
+  max-width: min(640px, calc(100% - 40px));
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  padding: 8px 11px;
+  border: 1px solid rgba(255, 193, 92, 0.4);
+  border-radius: 9px;
+  color: #ffe0a6;
+  background: rgba(36, 24, 8, 0.92);
+  font-size: 11px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+}
+
+.botPowersHeader,
+.botPowerCardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.botPowersHeader > div {
+  min-width: 0;
+}
+
+.botPowersHeader span,
+.botPowerCardHeader strong {
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.botPowersHeader p {
+  margin: 3px 0 0;
+  color: var(--fg-muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.botPowersBadge {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--fg-muted);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.botPowersBadge[data-active="true"] {
+  border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 55%, var(--line));
+  color: var(--fg);
+  background: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 15%, transparent);
+}
+
+.botPowersList {
+  display: grid;
+  gap: 10px;
+}
+
+.botPowerCard {
+  display: grid;
+  gap: 9px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 22%, var(--line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 6%, rgba(0, 0, 0, 0.18));
+}
+
+.botPowerCard[data-status="error"] {
+  border-color: color-mix(in srgb, #ff6b7a 55%, var(--line));
+}
+
+.botPowerEnabledToggle {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--fg-muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.botPowerEnabledToggle input {
+  accent-color: var(--editor-bot-color, var(--accent));
+}
+
+.botPowerRemoveButton,
+.botPowerCompileStatus button,
+.botPowerAddButton {
+  border: 1px solid var(--line);
+  color: var(--fg);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.botPowerRemoveButton {
+  width: 26px;
+  height: 26px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 7px;
+}
+
+.botPowerField {
+  position: relative;
+  display: grid;
+  gap: 5px;
+}
+
+.botPowerField > span {
+  color: var(--fg-muted);
+  font-size: 10px;
+  font-weight: 760;
+}
+
+.botPowerField input,
+.botPowerField textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 9px;
+  color: var(--fg);
+  background: rgba(0, 0, 0, 0.24);
+  font: inherit;
+  font-size: 12px;
+  resize: vertical;
+}
+
+.botPowerField small {
+  justify-self: end;
+  color: var(--fg-muted);
+  font-size: 9px;
+}
+
+.botPowerCompileStatus {
+  display: grid;
+  gap: 7px;
+  color: var(--fg-muted);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.botPowerCompileStatus[data-status="error"] {
+  color: #ff9aa4;
+}
+
+.botPowerCompileStatus button {
+  justify-self: start;
+  padding: 5px 9px;
+  border-radius: 7px;
+  font-size: 10px;
+}
+
+.botPowerCompileStatus p {
+  margin: 0;
+  color: var(--fg-muted);
+}
+
+.botPowerRuleChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.botPowerRuleChips span {
+  padding: 4px 7px;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 38%, var(--line));
+  border-radius: 999px;
+  color: var(--fg);
+  background: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 11%, transparent);
+  font-size: 9px;
+  font-weight: 740;
+}
+
+.botPowerAddButton {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 780;
+}
+
+.botPowerAddButton:disabled {
+  opacity: 0.45;
 }
 
 .botAvatarProfilePanel {
@@ -48636,11 +49050,18 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     --zen-persona-ink-overlap: clamp(88px, calc(10dvh + var(--zen-tone-gap-extra)), 184px);
     --zen-prose-runway-top: clamp(148px, calc(34dvh + var(--zen-tone-runway-extra)), 412px);
     --zen-prose-runway-bottom: clamp(220px, calc(46dvh + var(--zen-tone-runway-extra)), 492px);
-    --zen-readable-tail-padding: var(--zen-prose-runway-bottom);
+    --zen-readable-tail-padding-floor: var(--zen-prose-runway-bottom);
+    --zen-readable-tail-padding: var(--zen-readable-tail-padding-floor);
     padding-top: var(--zen-prose-runway-top);
-    padding-bottom: max(0px, var(--zen-readable-tail-padding));
+    padding-bottom: max(
+      var(--zen-readable-tail-padding-floor),
+      var(--zen-readable-tail-padding)
+    );
     scroll-padding-top: var(--zen-prose-runway-top);
-    scroll-padding-bottom: max(0px, var(--zen-readable-tail-padding));
+    scroll-padding-bottom: max(
+      var(--zen-readable-tail-padding-floor),
+      var(--zen-readable-tail-padding)
+    );
     gap: clamp(26px, calc(6dvh + var(--zen-tone-gap-extra)), 128px);
   }
 
@@ -48666,8 +49087,14 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   }
 
   .appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"][data-reply-runway-active="true"] {
-    padding-bottom: max(0px, var(--zen-readable-tail-padding));
-    scroll-padding-bottom: max(0px, var(--zen-readable-tail-padding));
+    padding-bottom: max(
+      var(--zen-readable-tail-padding-floor),
+      var(--zen-readable-tail-padding)
+    );
+    scroll-padding-bottom: max(
+      var(--zen-readable-tail-padding-floor),
+      var(--zen-readable-tail-padding)
+    );
   }
 
   .chatEphemeralMarkdownBody[data-zen-placement-active="true"] {
@@ -51646,22 +52073,22 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     0 26px 72px rgba(0, 0, 0, 0.62);
 }
 
-.coffeeStage[data-experimental-table-angle="true"][data-phase="live"] .coffeeTableScene,
-.coffeeStage[data-experimental-table-angle="true"][data-phase="finished"][data-replay-active="true"] .coffeeTableScene {
+.coffeeStage[data-coffee-perspective="first-person"][data-phase="live"] .coffeeTableScene,
+.coffeeStage[data-coffee-perspective="first-person"][data-phase="arriving"] .coffeeTableScene {
   --coffee-experimental-table-lift: clamp(-150px, -15vh, -92px);
   --coffee-experimental-seat-lift: 18%;
   --coffee-experimental-seat-extra-lift: 4%;
   min-height: clamp(560px, min(76vh, 82dvh), 820px);
 }
 
-.coffeeStage[data-experimental-table-angle="true"][data-phase="live"],
-.coffeeStage[data-experimental-table-angle="true"][data-phase="finished"][data-replay-active="true"] {
+.coffeeStage[data-coffee-perspective="first-person"][data-phase="live"],
+.coffeeStage[data-coffee-perspective="first-person"][data-phase="arriving"] {
   --coffee-stage-max-width: 1640px;
   --coffee-stage-max-height: 880px;
 }
 
-.coffeeStage[data-experimental-table-angle="true"][data-phase="live"] .coffeeTableGlow,
-.coffeeStage[data-experimental-table-angle="true"][data-phase="finished"][data-replay-active="true"] .coffeeTableGlow {
+.coffeeStage[data-coffee-perspective="first-person"][data-phase="live"] .coffeeTableGlow,
+.coffeeStage[data-coffee-perspective="first-person"][data-phase="arriving"] .coffeeTableGlow {
   width: min(89%, 980px);
   aspect-ratio: 1490 / 1056;
   border-radius: 42%;
@@ -51673,8 +52100,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   opacity: 0.7;
 }
 
-.coffeeStage[data-experimental-table-angle="true"][data-phase="live"] .coffeeTableAsset,
-.coffeeStage[data-experimental-table-angle="true"][data-phase="finished"][data-replay-active="true"] .coffeeTableAsset {
+.coffeeStage[data-coffee-perspective="first-person"][data-phase="live"] .coffeeTableAsset,
+.coffeeStage[data-coffee-perspective="first-person"][data-phase="arriving"] .coffeeTableAsset {
   display: block;
   transform: translate(
     -50%,
@@ -51682,25 +52109,25 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   );
 }
 
-.coffeeStage[data-experimental-table-angle="true"][data-phase="live"] .coffeeTableDisk,
-.coffeeStage[data-experimental-table-angle="true"][data-phase="finished"][data-replay-active="true"] .coffeeTableDisk {
+.coffeeStage[data-coffee-perspective="first-person"][data-phase="live"] .coffeeTableDisk,
+.coffeeStage[data-coffee-perspective="first-person"][data-phase="arriving"] .coffeeTableDisk {
   opacity: 0;
   pointer-events: none;
 }
 
-.coffeeStage[data-experimental-table-angle="true"][data-phase="live"] .coffeeTableFocalColumn,
-.coffeeStage[data-experimental-table-angle="true"][data-phase="finished"][data-replay-active="true"] .coffeeTableFocalColumn {
+.coffeeStage[data-coffee-perspective="first-person"][data-phase="live"] .coffeeTableFocalColumn,
+.coffeeStage[data-coffee-perspective="first-person"][data-phase="arriving"] .coffeeTableFocalColumn {
   width: min(72vw, 860px);
   max-width: calc(100% - 72px);
   transform: translateY(clamp(42px, 6vh, 74px));
 }
 
-.coffeeStage[data-experimental-table-angle="true"][data-phase="finished"][data-replay-active="true"] .coffeeTableFocalColumn {
+.coffeeStage[data-coffee-perspective="first-person"][data-phase="arriving"] .coffeeTableFocalColumn {
   transform: translateY(clamp(86px, 11vh, 124px));
 }
 
-.coffeeStage[data-experimental-table-angle="true"][data-phase="live"] .coffeeCenterMessage,
-.coffeeStage[data-experimental-table-angle="true"][data-phase="finished"][data-replay-active="true"] .coffeeCenterMessage {
+.coffeeStage[data-coffee-perspective="first-person"][data-phase="live"] .coffeeCenterMessage,
+.coffeeStage[data-coffee-perspective="first-person"][data-phase="arriving"] .coffeeCenterMessage {
   width: min(780px, 64vw);
   min-height: clamp(200px, 28vh, 320px);
   max-width: calc(100% - 24px);
@@ -51708,18 +52135,18 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   padding-inline: clamp(14px, 2vw, 28px);
 }
 
-.coffeeStage[data-experimental-table-angle="true"][data-phase="live"] .coffeeCenterMessage {
+.coffeeStage[data-coffee-perspective="first-person"][data-phase="live"] .coffeeCenterMessage {
   margin-top: clamp(34px, 5.2vh, 52px);
 }
 
-.coffeeStage[data-experimental-table-angle="true"][data-phase="live"] .coffeeCenterMessageScroll,
-.coffeeStage[data-experimental-table-angle="true"][data-phase="finished"][data-replay-active="true"] .coffeeCenterMessageScroll {
+.coffeeStage[data-coffee-perspective="first-person"][data-phase="live"] .coffeeCenterMessageScroll,
+.coffeeStage[data-coffee-perspective="first-person"][data-phase="arriving"] .coffeeCenterMessageScroll {
   max-height: clamp(230px, 35vh, 380px);
 }
 
 @media (min-width: 1160px) {
   .coffeeShell[data-session-active="true"][data-transcript-open="true"]
-    .coffeeStage:not([data-experimental-table-angle="true"]):is(
+    .coffeeStage:not([data-coffee-perspective="first-person"]):is(
       [data-phase="arriving"],
       [data-phase="live"],
       [data-phase="finished"][data-replay-active="true"]
@@ -51730,7 +52157,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   }
 
   .coffeeShell[data-session-active="true"][data-transcript-open="true"]
-    .coffeeStage:not([data-experimental-table-angle="true"]):is(
+    .coffeeStage:not([data-coffee-perspective="first-person"]):is(
       [data-phase="arriving"],
       [data-phase="live"],
       [data-phase="finished"][data-replay-active="true"]
@@ -51741,7 +52168,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   }
 
   .coffeeShell[data-session-active="true"][data-transcript-open="true"]
-    .coffeeStage[data-experimental-table-angle="true"]:is(
+    .coffeeStage[data-coffee-perspective="first-person"]:is(
       [data-phase="arriving"],
       [data-phase="live"],
       [data-phase="finished"][data-replay-active="true"]
@@ -51751,7 +52178,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   }
 
   .coffeeShell[data-session-active="true"][data-transcript-open="true"]
-    .coffeeStage[data-experimental-table-angle="true"]:is(
+    .coffeeStage[data-coffee-perspective="first-person"]:is(
       [data-phase="arriving"],
       [data-phase="live"],
       [data-phase="finished"][data-replay-active="true"]
@@ -51762,7 +52189,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   }
 
   .coffeeShell[data-session-active="true"][data-transcript-open="true"]
-    .coffeeStage[data-experimental-table-angle="true"]:is(
+    .coffeeStage[data-coffee-perspective="first-person"]:is(
       [data-phase="arriving"],
       [data-phase="live"],
       [data-phase="finished"][data-replay-active="true"]
@@ -52358,85 +52785,85 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   transform-origin: left center;
 }
 
-.coffeeStage[data-experimental-table-angle="true"]:is([data-phase="live"], [data-phase="finished"][data-replay-active="true"]):not([data-compact="true"])
+.coffeeStage[data-coffee-perspective="first-person"]:is([data-phase="arriving"], [data-phase="live"]):not([data-compact="true"])
   :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="2"][data-layout-seat="0"] {
   left: 18%;
   top: calc(58% - var(--coffee-experimental-seat-lift) - var(--coffee-experimental-seat-extra-lift));
 }
 
-.coffeeStage[data-experimental-table-angle="true"]:is([data-phase="live"], [data-phase="finished"][data-replay-active="true"]):not([data-compact="true"])
+.coffeeStage[data-coffee-perspective="first-person"]:is([data-phase="arriving"], [data-phase="live"]):not([data-compact="true"])
   :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="2"][data-layout-seat="1"] {
   left: 82%;
   top: calc(58% - var(--coffee-experimental-seat-lift) - var(--coffee-experimental-seat-extra-lift));
 }
 
-.coffeeStage[data-experimental-table-angle="true"]:is([data-phase="live"], [data-phase="finished"][data-replay-active="true"]):not([data-compact="true"])
+.coffeeStage[data-coffee-perspective="first-person"]:is([data-phase="arriving"], [data-phase="live"]):not([data-compact="true"])
   :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="3"][data-layout-seat="0"] {
   left: 50%;
   top: calc(26% - var(--coffee-experimental-seat-lift));
 }
 
-.coffeeStage[data-experimental-table-angle="true"]:is([data-phase="live"], [data-phase="finished"][data-replay-active="true"]):not([data-compact="true"])
+.coffeeStage[data-coffee-perspective="first-person"]:is([data-phase="arriving"], [data-phase="live"]):not([data-compact="true"])
   :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="3"][data-layout-seat="1"] {
   left: 22%;
   top: calc(72% - var(--coffee-experimental-seat-lift) - var(--coffee-experimental-seat-extra-lift));
 }
 
-.coffeeStage[data-experimental-table-angle="true"]:is([data-phase="live"], [data-phase="finished"][data-replay-active="true"]):not([data-compact="true"])
+.coffeeStage[data-coffee-perspective="first-person"]:is([data-phase="arriving"], [data-phase="live"]):not([data-compact="true"])
   :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="3"][data-layout-seat="2"] {
   left: 78%;
   top: calc(72% - var(--coffee-experimental-seat-lift) - var(--coffee-experimental-seat-extra-lift));
 }
 
-.coffeeStage[data-experimental-table-angle="true"]:is([data-phase="live"], [data-phase="finished"][data-replay-active="true"]):not([data-compact="true"])
+.coffeeStage[data-coffee-perspective="first-person"]:is([data-phase="arriving"], [data-phase="live"]):not([data-compact="true"])
   :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="4"][data-layout-seat="0"] {
   left: 18%;
   top: calc(40% - var(--coffee-experimental-seat-lift) - var(--coffee-experimental-seat-extra-lift));
 }
 
-.coffeeStage[data-experimental-table-angle="true"]:is([data-phase="live"], [data-phase="finished"][data-replay-active="true"]):not([data-compact="true"])
+.coffeeStage[data-coffee-perspective="first-person"]:is([data-phase="arriving"], [data-phase="live"]):not([data-compact="true"])
   :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="4"][data-layout-seat="1"] {
   left: 82%;
   top: calc(40% - var(--coffee-experimental-seat-lift) - var(--coffee-experimental-seat-extra-lift));
 }
 
-.coffeeStage[data-experimental-table-angle="true"]:is([data-phase="live"], [data-phase="finished"][data-replay-active="true"]):not([data-compact="true"])
+.coffeeStage[data-coffee-perspective="first-person"]:is([data-phase="arriving"], [data-phase="live"]):not([data-compact="true"])
   :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="4"][data-layout-seat="2"] {
   left: 78%;
   top: calc(73% - var(--coffee-experimental-seat-lift) - var(--coffee-experimental-seat-extra-lift));
 }
 
-.coffeeStage[data-experimental-table-angle="true"]:is([data-phase="live"], [data-phase="finished"][data-replay-active="true"]):not([data-compact="true"])
+.coffeeStage[data-coffee-perspective="first-person"]:is([data-phase="arriving"], [data-phase="live"]):not([data-compact="true"])
   :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="4"][data-layout-seat="3"] {
   left: 22%;
   top: calc(73% - var(--coffee-experimental-seat-lift) - var(--coffee-experimental-seat-extra-lift));
 }
 
-.coffeeStage[data-experimental-table-angle="true"]:is([data-phase="live"], [data-phase="finished"][data-replay-active="true"]):not([data-compact="true"])
+.coffeeStage[data-coffee-perspective="first-person"]:is([data-phase="arriving"], [data-phase="live"]):not([data-compact="true"])
   :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="5"][data-layout-seat="0"] {
   left: 50%;
   top: calc(45% - var(--coffee-experimental-seat-lift));
 }
 
-.coffeeStage[data-experimental-table-angle="true"]:is([data-phase="live"], [data-phase="finished"][data-replay-active="true"]):not([data-compact="true"])
+.coffeeStage[data-coffee-perspective="first-person"]:is([data-phase="arriving"], [data-phase="live"]):not([data-compact="true"])
   :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="5"][data-layout-seat="1"] {
   left: 14%;
   top: calc(58% - var(--coffee-experimental-seat-lift) - var(--coffee-experimental-seat-extra-lift));
 }
 
-.coffeeStage[data-experimental-table-angle="true"]:is([data-phase="live"], [data-phase="finished"][data-replay-active="true"]):not([data-compact="true"])
+.coffeeStage[data-coffee-perspective="first-person"]:is([data-phase="arriving"], [data-phase="live"]):not([data-compact="true"])
   :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="5"][data-layout-seat="2"] {
   left: 86%;
   top: calc(58% - var(--coffee-experimental-seat-lift) - var(--coffee-experimental-seat-extra-lift));
 }
 
-.coffeeStage[data-experimental-table-angle="true"]:is([data-phase="live"], [data-phase="finished"][data-replay-active="true"]):not([data-compact="true"])
+.coffeeStage[data-coffee-perspective="first-person"]:is([data-phase="arriving"], [data-phase="live"]):not([data-compact="true"])
   :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="5"][data-layout-seat="3"] {
   left: 16%;
   top: calc(88% - var(--coffee-experimental-seat-lift) - var(--coffee-experimental-seat-extra-lift));
 }
 
-.coffeeStage[data-experimental-table-angle="true"]:is([data-phase="live"], [data-phase="finished"][data-replay-active="true"]):not([data-compact="true"])
+.coffeeStage[data-coffee-perspective="first-person"]:is([data-phase="arriving"], [data-phase="live"]):not([data-compact="true"])
   :is(.coffeeSeat, .coffeeSeatActionAnchor)[data-seat-count="5"][data-layout-seat="4"] {
   left: 84%;
   top: calc(88% - var(--coffee-experimental-seat-lift) - var(--coffee-experimental-seat-extra-lift));
@@ -54624,78 +55051,96 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   transition: opacity 165ms ease;
 }
 
-.coffeeReplayRefillCourier {
-  --coffee-replay-refill-start-x: 38px;
-  position: absolute;
-  right: clamp(-44px, -4.6vw, -31px);
-  top: clamp(12px, 1.8vw, 22px);
-  z-index: 7;
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  width: clamp(56px, 6.6vw, 76px);
-  height: clamp(34px, 4vw, 46px);
-  pointer-events: none;
-  opacity: 0;
-  filter:
-    drop-shadow(0 9px 11px rgba(0, 0, 0, 0.58))
-    drop-shadow(0 0 14px rgba(255, 255, 255, 0.16));
-  animation: coffeeReplayRefillCourier 1460ms cubic-bezier(0.2, 0.82, 0.22, 1) both;
+.botVoiceCoffeePersonaNote {
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line));
+  border-radius: 12px;
+  color: var(--fg-muted);
+  background: color-mix(in srgb, var(--accent-soft) 34%, transparent);
+  font-size: 0.88rem;
+  line-height: 1.45;
 }
 
-.coffeeReplayRefillCourier[data-cup-side="left"] {
-  --coffee-replay-refill-start-x: -38px;
-  left: clamp(-44px, -4.6vw, -31px);
-  right: auto;
-  flex-direction: row-reverse;
-}
-
-.coffeeReplayRefillCourier img {
+.coffeeReplayPlayerPotMotion {
+  position: fixed;
+  z-index: 80;
   display: block;
-  width: clamp(35px, 4.3vw, 50px);
+  width: clamp(58px, 6.5vw, 76px);
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  transition:
+    left 360ms cubic-bezier(0.2, 0.82, 0.22, 1),
+    top 360ms cubic-bezier(0.2, 0.82, 0.22, 1),
+    opacity 160ms ease,
+    filter 180ms ease;
+  filter:
+    drop-shadow(0 10px 12px rgba(0, 0, 0, 0.62))
+    drop-shadow(0 0 14px rgba(255, 255, 255, 0.14));
+}
+
+.coffeeReplayPlayerPotMotion[data-chained="true"] {
+  transition-duration: 280ms;
+}
+
+.coffeeReplayPlayerPotMotion[data-phase="returning"] {
+  opacity: 0.82;
+}
+
+.coffeeReplayPlayerPotMotion img {
+  display: block;
+  width: 100%;
   height: auto;
-  transform: rotate(-9deg);
 }
 
-.coffeeReplayRefillCourier[data-cup-side="left"] img {
-  transform: scaleX(-1) rotate(-9deg);
+.coffeeReplayPlayerPotMotion[data-phase="pouring"] img {
+  animation: coffeeReplayPotPourPulse 520ms ease-in-out infinite alternate;
 }
 
-.coffeeReplayRefillBot {
-  display: grid;
-  place-items: center;
-  width: clamp(22px, 2.5vw, 28px);
-  height: clamp(22px, 2.5vw, 28px);
+.coffeeReplayPlayerPotStream {
+  position: absolute;
+  right: 5%;
+  top: 66%;
+  width: 3px;
+  height: clamp(24px, 3.2vw, 42px);
   border-radius: 999px;
-  color: #060606;
+  background: linear-gradient(to bottom, #f3d49b, #7c421d 58%, transparent);
+  box-shadow: 0 0 8px rgba(239, 190, 116, 0.4);
+  transform-origin: top center;
+  animation: coffeeReplayPotStreamPulse 360ms ease-in-out infinite alternate;
+}
+
+@keyframes coffeeReplayPotPourPulse {
+  from { transform: translateY(0) rotate(-1deg); }
+  to { transform: translateY(1px) rotate(1deg); }
+}
+
+@keyframes coffeeReplayPotStreamPulse {
+  from { opacity: 0.62; transform: scaleY(0.92); }
+  to { opacity: 1; transform: scaleY(1.05); }
+}
+
+.coffeeStage[data-coffee-perspective="first-person"] .coffeeCenterMessage {
+  border-color: color-mix(in srgb, var(--accent) 22%, rgba(255, 255, 255, 0.1));
   background:
-    linear-gradient(135deg, #f4f4f0 0 48%, #050505 52% 100%);
-  border: 1px solid rgba(255, 255, 255, 0.44);
+    linear-gradient(180deg, rgba(8, 8, 10, 0.72), rgba(3, 3, 4, 0.82)),
+    radial-gradient(circle at 50% 0%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 62%);
   box-shadow:
-    0 0 0 1px rgba(0, 0, 0, 0.62) inset,
-    0 0 16px rgba(255, 255, 255, 0.18);
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 20px 58px rgba(0, 0, 0, 0.34),
+    0 0 44px color-mix(in srgb, var(--accent) 8%, transparent);
+  backdrop-filter: blur(9px) saturate(1.06);
 }
 
-.coffeeReplayRefillBot svg {
-  filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.34));
-}
-
-@keyframes coffeeReplayRefillCourier {
-  0% {
-    opacity: 0;
-    transform: translateX(var(--coffee-replay-refill-start-x)) translateY(4px) scale(0.88);
+@media (prefers-reduced-motion: reduce) {
+  .coffeeReplayPlayerPotMotion,
+  .coffeeReplayPlayerPotMotion[data-chained="true"] {
+    transition-duration: 1ms;
   }
 
-  24%,
-  76% {
-    opacity: 1;
-    transform: translateX(0) translateY(0) scale(1);
-  }
-
-  100% {
-    opacity: 0;
-    transform: translateX(calc(var(--coffee-replay-refill-start-x) * -0.36)) translateY(-4px)
-      scale(0.94);
+  .coffeeReplayPlayerPotMotion[data-phase="pouring"] img,
+  .coffeeReplayPlayerPotStream {
+    animation: none;
   }
 }
 
@@ -55073,7 +55518,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   transform-origin: left center;
 }
 
-.coffeeStage[data-experimental-table-angle="true"]:is([data-phase="live"], [data-phase="finished"][data-replay-active="true"]):not([data-compact="true"])
+.coffeeStage[data-coffee-perspective="first-person"]:is([data-phase="arriving"], [data-phase="live"]):not([data-compact="true"])
   .coffeeSeatActionAnchor:is(
     [data-seat-count="2"][data-layout-seat="0"],
     [data-seat-count="2"][data-layout-seat="1"],
@@ -55097,7 +55542,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   text-align: center;
 }
 
-.coffeeStage[data-experimental-table-angle="true"]:is([data-phase="live"], [data-phase="finished"][data-replay-active="true"]):not([data-compact="true"])
+.coffeeStage[data-coffee-perspective="first-person"]:is([data-phase="arriving"], [data-phase="live"]):not([data-compact="true"])
   .coffeeSeatActionAnchor:is(
     [data-seat-count="3"][data-layout-seat="1"],
     [data-seat-count="3"][data-layout-seat="2"],
@@ -55119,7 +55564,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   text-align: center;
 }
 
-.coffeeStage[data-experimental-table-angle="true"]:is([data-phase="live"], [data-phase="finished"][data-replay-active="true"]):not([data-compact="true"])
+.coffeeStage[data-coffee-perspective="first-person"]:is([data-phase="arriving"], [data-phase="live"]):not([data-compact="true"])
   .coffeeSeatActionAnchor:is(
     [data-seat-count="2"],
     [data-seat-count="3"],
@@ -55174,7 +55619,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
  * panel or disappear past the left/right edge.
  */
 @media (min-width: 1160px) {
-  .coffeeStage[data-autoplay-dock="true"]:not([data-compact="true"]):not([data-experimental-table-angle="true"]):is(
+  .coffeeStage[data-autoplay-dock="true"]:not([data-compact="true"]):not([data-coffee-perspective="first-person"]):is(
     [data-phase="arriving"],
     [data-phase="live"]
   ) .coffeeSeatActionAnchor[data-seat-count="5"][data-layout-seat="0"] .coffeeSeatActionBadgeStack {
@@ -55191,7 +55636,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     text-align: center;
   }
 
-  .coffeeStage[data-autoplay-dock="true"]:not([data-compact="true"]):not([data-experimental-table-angle="true"]):is(
+  .coffeeStage[data-autoplay-dock="true"]:not([data-compact="true"]):not([data-coffee-perspective="first-person"]):is(
     [data-phase="arriving"],
     [data-phase="live"]
   ) .coffeeSeatActionAnchor:is(
@@ -55213,7 +55658,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     transform-origin: right center;
   }
 
-  .coffeeStage[data-autoplay-dock="true"]:not([data-compact="true"]):not([data-experimental-table-angle="true"]):is(
+  .coffeeStage[data-autoplay-dock="true"]:not([data-compact="true"]):not([data-coffee-perspective="first-person"]):is(
     [data-phase="arriving"],
     [data-phase="live"]
   ) .coffeeSeatActionAnchor[data-seat-count="5"][data-layout-seat="3"] .coffeeSeatActionBadgeStack {
@@ -55224,7 +55669,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     );
   }
 
-  .coffeeStage[data-autoplay-dock="true"]:not([data-compact="true"]):not([data-experimental-table-angle="true"]):is(
+  .coffeeStage[data-autoplay-dock="true"]:not([data-compact="true"]):not([data-coffee-perspective="first-person"]):is(
     [data-phase="arriving"],
     [data-phase="live"]
   ) .coffeeSeatActionAnchor:is(
@@ -55246,7 +55691,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     transform-origin: left center;
   }
 
-  .coffeeStage[data-autoplay-dock="true"]:not([data-compact="true"]):not([data-experimental-table-angle="true"]):is(
+  .coffeeStage[data-autoplay-dock="true"]:not([data-compact="true"]):not([data-coffee-perspective="first-person"]):is(
     [data-phase="arriving"],
     [data-phase="live"]
   ) .coffeeSeatActionAnchor[data-seat-count="5"][data-layout-seat="4"] .coffeeSeatActionBadgeStack {
@@ -55257,7 +55702,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     );
   }
 
-  .coffeeStage[data-autoplay-dock="true"]:not([data-compact="true"]):not([data-experimental-table-angle="true"]):is(
+  .coffeeStage[data-autoplay-dock="true"]:not([data-compact="true"]):not([data-coffee-perspective="first-person"]):is(
     [data-phase="arriving"],
     [data-phase="live"]
   ) .coffeeSeatActionAnchor[data-seat-count="5"] .coffeeSeatActionBadgeText {
@@ -58121,10 +58566,86 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .coffeeReplayControlRail {
   display: grid;
-  grid-template-columns: minmax(118px, 1fr) auto minmax(118px, 1fr);
+  grid-template-columns: minmax(210px, 1fr) auto minmax(118px, 1fr);
   gap: clamp(10px, 2.2vw, 18px);
   align-items: center;
   width: 100%;
+}
+
+.coffeeReplayPersona {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) 34px;
+  align-items: center;
+  width: min(240px, 100%);
+  min-height: 58px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 12% 50%, rgba(255, 255, 255, 0.09), transparent 42%),
+    rgba(255, 255, 255, 0.055);
+  color: rgba(255, 255, 255, 0.88);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 10px 24px rgba(0, 0, 0, 0.2);
+}
+
+.coffeeReplayPersona[data-player-thinking="true"],
+.coffeeReplayPersona[data-table-speaking="true"] {
+  border-color: rgba(255, 255, 255, 0.32);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 0 24px rgba(255, 255, 255, 0.1),
+    0 10px 24px rgba(0, 0, 0, 0.24);
+}
+
+.coffeeReplayComposerPot {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 58px;
+  margin-left: 2px;
+}
+
+.coffeeReplayComposerPot img {
+  display: block;
+  width: 68px;
+  max-width: none;
+  height: auto;
+  filter:
+    drop-shadow(0 8px 9px rgba(0, 0, 0, 0.56))
+    drop-shadow(0 0 9px rgba(255, 255, 255, 0.1));
+  transition: opacity 140ms ease, transform 180ms ease;
+}
+
+.coffeeReplayComposerPot[data-pot-away="true"] img {
+  opacity: 0;
+  transform: translateY(-4px) scale(0.9);
+}
+
+.coffeeReplayPersonaName {
+  min-width: 0;
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 0.78rem;
+  font-weight: 760;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.coffeeReplayPersonaGlyph {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 50%;
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(0, 0, 0, 0.2);
+  box-shadow: 0 0 14px rgba(255, 255, 255, 0.1);
 }
 
 .coffeeReplayUtilityControls,
@@ -58955,6 +59476,9 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeMessageBotLabel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 0.75rem;
   font-weight: 600;
   text-transform: uppercase;

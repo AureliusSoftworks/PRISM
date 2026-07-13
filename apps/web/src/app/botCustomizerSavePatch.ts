@@ -1,7 +1,9 @@
 import {
   serializeBotAvatarDetailsV1,
+  serializeBotPowersV1,
   type BotAudioVoiceProfileV1,
   type BotAvatarDetailsV1,
+  type BotPowerV1,
 } from "@localai/shared";
 
 export interface BotCustomizerSavePristine {
@@ -45,6 +47,7 @@ export interface BotCustomizerSavePristine {
   avatarDetails: BotAvatarDetailsV1 | null;
   profilePictureImageId: string | null;
   audioVoiceProfile: BotAudioVoiceProfileV1;
+  powers?: BotPowerV1[];
 }
 
 export interface BotCustomizerSaveCurrent {
@@ -92,6 +95,7 @@ export interface BotCustomizerSaveCurrent {
   avatarDetails: BotAvatarDetailsV1 | null;
   profilePictureImageId: string | null;
   audioVoiceProfile: BotAudioVoiceProfileV1;
+  powers?: BotPowerV1[];
 }
 
 export interface BotCustomizerSavePatch {
@@ -134,6 +138,7 @@ export interface BotCustomizerSavePatch {
   avatarDetails?: BotAvatarDetailsV1 | null;
   profilePictureImageId?: string | null;
   audioVoiceProfileOverride?: BotAudioVoiceProfileV1 | null;
+  powers?: BotPowerV1[];
 }
 
 const normalizeColorForCompare = (hex: string | null | undefined): string =>
@@ -194,6 +199,7 @@ export function buildBotCustomizerSavePatch(
       avatarDetails: current.avatarDetails,
       profilePictureImageId: current.profilePictureImageId,
       audioVoiceProfileOverride: current.audioVoiceProfile,
+      powers: current.powers ?? [],
     };
   }
 
@@ -238,6 +244,9 @@ export function buildBotCustomizerSavePatch(
     patch.color = current.color;
   }
   if (current.glyph !== pristine.glyph) patch.glyph = current.glyph;
+  if (serializeBotPowersV1(current.powers ?? []) !== serializeBotPowersV1(pristine.powers ?? [])) {
+    patch.powers = current.powers ?? [];
+  }
   if (current.faceEyesFont !== pristine.faceEyesFont) {
     patch.faceEyesFont = current.faceEyesFont;
   }

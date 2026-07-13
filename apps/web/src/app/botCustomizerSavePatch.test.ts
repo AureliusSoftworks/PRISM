@@ -6,7 +6,7 @@ import {
   type BotCustomizerSaveCurrent,
   type BotCustomizerSavePristine,
 } from "./botCustomizerSavePatch.ts";
-import { DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1 } from "@localai/shared";
+import { DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1, botPowerSourceHashV1 } from "@localai/shared";
 
 const pristine: BotCustomizerSavePristine = {
   name: "Iris",
@@ -49,6 +49,7 @@ const pristine: BotCustomizerSavePristine = {
   avatarDetails: null,
   profilePictureImageId: null,
   audioVoiceProfile: DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+  powers: [],
 };
 
 const currentFromPristine = (
@@ -98,6 +99,7 @@ const currentFromPristine = (
   avatarDetails: pristine.avatarDetails,
   profilePictureImageId: pristine.profilePictureImageId,
   audioVoiceProfile: pristine.audioVoiceProfile,
+  powers: pristine.powers,
   ...overrides,
 });
 
@@ -106,6 +108,31 @@ describe("bot customizer save patch", () => {
     assert.deepEqual(
       buildBotCustomizerSavePatch(currentFromPristine({ name: "Iriss" }), pristine),
       { name: "Iriss" }
+    );
+  });
+
+  it("patches Coffee powers without changing unrelated bot fields", () => {
+    const name = "Stoic";
+    const intent = "Mood hardly changes.";
+    const powers = [{
+      version: 1 as const,
+      id: "stoic",
+      name,
+      intent,
+      enabled: true,
+      compileStatus: "ready" as const,
+      compiled: {
+        version: 1 as const,
+        sourceHash: botPowerSourceHashV1(name, intent),
+        selfCue: "Remain steady.",
+        observerCue: "",
+        effects: [{ type: "mood_resistance" as const, polarity: "both" as const, strength: "large" as const }],
+        ruleLabels: ["Mood resistance"],
+      },
+    }];
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(currentFromPristine({ powers }), pristine),
+      { powers }
     );
   });
 

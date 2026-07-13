@@ -147,6 +147,16 @@ import {
 } from "./bot-facets.ts";
 import { undoLatestConversationMessages } from "./conversations.ts";
 import { attachUsageEventsToMessage, patchUsageSession } from "./usage.ts";
+import {
+  applyCoffeePowerAfterSpeech,
+  coffeePowerActionBias,
+  coffeePowerBotCanSpeak,
+  coffeePowerBotVisibleTo,
+  coffeePowerCupRateMultiplier,
+  coffeePowerMessageAudience,
+  coffeePowersPromptForSpeaker,
+  resolveCoffeePowersForSession,
+} from "./coffee-powers.ts";
 
 /** Coffee groups must have at least 2 and at most 5 bots. */
 export const COFFEE_GROUP_MIN_SIZE = 2;
@@ -932,6 +942,7 @@ export function buildCoffeeDepartureOpportunity(args: {
   sessionRemainingMs?: number | null;
   durationMinutes?: CoffeeSessionDurationMinutes | null;
   coffeeCupTopOff?: CoffeeCupTopOffSnapshot | null;
+  coffeeCupRateMultiplier?: number;
   nowMs?: number | null;
 }): string | null {
   const activeBotCount = args.seatBotIds.filter(
@@ -971,7 +982,12 @@ export function buildCoffeeDepartureOpportunity(args: {
   const pacedProgress =
     baseProgress === null
       ? null
-      : coffeeCupPacedProgress(baseProgress, coffeeCupSeed, args.durationMinutes);
+      : coffeeCupPacedProgress(
+          baseProgress,
+          coffeeCupSeed,
+          args.durationMinutes,
+          args.coffeeCupRateMultiplier
+        );
   const visibleProgress =
     pacedProgress === null
       ? null
@@ -2687,12 +2703,29 @@ function buildScriptedCoffeeAmbientAction(args: {
   activePoll: CoffeePoll | null;
   interruptionEvent?: CoffeeInterruptionEvent;
   departurePersisted: boolean;
+  coffeeCupRateMultiplier?: number;
+  actionBias?: { cue: string; frequency: "occasional" | "frequent" } | null;
 }): CoffeeAmbientActionPayload | null {
   if (args.activePoll) return null;
   if (args.interruptionEvent) return null;
   if (args.departurePersisted) return null;
   if (!coffeeReplySpokenText(args.replyText)) return null;
   if (coffeeReplyContainsStageAction(args.replyText)) return null;
+  if (args.actionBias) {
+    const actionRoll = stableUnitValue(
+      `${args.conversationId}:${args.speaker.id}:${args.historyLength}:coffee-power-action`
+    );
+    const chance = args.actionBias.frequency === "frequent" ? 0.45 : 0.18;
+    if (actionRoll <= chance) {
+      return {
+        v: 1,
+        name: "coffeeAmbientAction",
+        source: "scripted",
+        category: "power",
+        action: args.actionBias.cue.replace(/\s+/g, " ").trim().slice(0, 80),
+      };
+    }
+  }
   const baseProgress = coffeeCupProgressFromSessionTiming({
     sessionRemainingMs: args.sessionRemainingMs,
     durationMinutes: args.durationMinutes,
@@ -2701,7 +2734,8 @@ function buildScriptedCoffeeAmbientAction(args: {
   const pacedProgress = coffeeCupPacedProgress(
     baseProgress,
     args.coffeeCupSeed,
-    args.durationMinutes
+    args.durationMinutes,
+    args.coffeeCupRateMultiplier
   );
   if (pacedProgress >= COFFEE_AMBIENT_EMPTY_PROGRESS) return null;
   const chance = coffeeAmbientActionChance(args.sessionSettings);
@@ -2792,10 +2826,142 @@ function appendCoffeeReplayEventMessage(args: {
     randomId(12),
     args.conversationId,
     args.userId,
-    args.event.botId,
+    "botId" in args.event ? args.event.botId : null,
     toolPayload,
     args.event.occurredAt
   );
+}
+
+interface CoffeePlayerDepartureEventRow {
+  rowid: number;
+  role: string;
+  content: string;
+  tool_payload: string | null;
+  created_at: string;
+}
+
+function coffeePlayerDepartureRows(args: {
+  db: DatabaseSync;
+  userId: string;
+  conversationId: string;
+}): CoffeePlayerDepartureEventRow[] {
+  return args.db.prepare(
+    `SELECT rowid, role, content, tool_payload, created_at
+       FROM messages
+      WHERE user_id = ? AND conversation_id = ?
+      ORDER BY rowid ASC`
+  ).all(args.userId, args.conversationId) as unknown as CoffeePlayerDepartureEventRow[];
+}
+
+function coffeePlayerDepartureEventRow(
+  rows: readonly CoffeePlayerDepartureEventRow[]
+): { row: CoffeePlayerDepartureEventRow; occurredAt: string } | null {
+  for (const row of rows) {
+    const departure = (parseStoredAssistantToolPayload(row.tool_payload).coffeeReplayEvents ?? [])
+      .find((event) => event.kind === "playerDeparture");
+    if (departure?.kind === "playerDeparture") {
+      return { row, occurredAt: departure.occurredAt };
+    }
+  }
+  return null;
+}
+
+function coffeeConversationHasPlayerDeparture(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string
+): boolean {
+  return Boolean(
+    coffeePlayerDepartureEventRow(
+      coffeePlayerDepartureRows({ db, userId, conversationId })
+    )
+  );
+}
+
+export function coffeePlayerDepartureEpilogueTurnCount(conversationId: string): number {
+  return 2 + Math.floor(stableUnitValue(`${conversationId}:player-departure-epilogue`) * 3);
+}
+
+export function coffeePlayerDepartureEpilogueFocus(
+  turnIndex: number,
+  totalTurns: number,
+  playerDisplayName?: string | null
+): string {
+  const boundedTotal = Math.max(2, Math.min(4, Math.round(totalTurns)));
+  const boundedIndex = Math.max(0, Math.min(boundedTotal - 1, Math.round(turnIndex)));
+  const playerName = playerDisplayName?.replace(/\s+/g, " ").trim().slice(0, 80);
+  const playerReference = playerName ? `the human player, ${playerName},` : "the human player";
+  if (boundedIndex === 0) {
+    return `${playerReference} has just stood up and physically left the Coffee table early. Every seated bot is still present; do not claim that any bot left or is absent. React in character with one brief, natural acknowledgment of the player's departure, then give the remaining bots something concrete to respond to. Do not speak for the player.`;
+  }
+  if (boundedIndex === boundedTotal - 1) {
+    return `${playerReference} has left the Coffee table, while every seated bot remains. Give the bots' after-hours exchange a natural final beat that closes the table without addressing the absent player, claiming a bot left, or repeating the departure.`;
+  }
+  return `${playerReference} has left the Coffee table, while every seated bot remains. Continue the topic naturally among the bots. Do not address the absent player, claim a bot left, or keep dwelling on the departure.`;
+}
+
+export interface CoffeePlayerDepartureRecordResult {
+  conversation: Conversation;
+  recorded: boolean;
+  occurredAt: string;
+  targetTurns: number;
+  completedTurns: number;
+}
+
+export function recordCoffeePlayerDeparture(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string
+): CoffeePlayerDepartureRecordResult {
+  const { row } = loadCoffeeConversationGroup(db, userId, conversationId);
+  let rows = coffeePlayerDepartureRows({ db, userId, conversationId: row.id });
+  let departure = coffeePlayerDepartureEventRow(rows);
+  let recorded = false;
+  if (!departure) {
+    const hasMeaningfulDialogue = rows.some(
+      (message) =>
+        (message.role === "user" || message.role === "assistant") &&
+        message.content.trim().length > 0 &&
+        !coffeeUserMessageIsActionOnly(message.content)
+    );
+    if (!hasMeaningfulDialogue) {
+      throw new Error("Coffee session has no table dialogue to preserve.");
+    }
+    const occurredAt = new Date().toISOString();
+    appendCoffeeReplayEventMessage({
+      db,
+      userId,
+      conversationId: row.id,
+      event: {
+        v: 1,
+        name: "coffeeReplayEvent",
+        kind: "playerDeparture",
+        occurredAt,
+      },
+    });
+    db.prepare("UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?")
+      .run(occurredAt, row.id, userId);
+    rows = coffeePlayerDepartureRows({ db, userId, conversationId: row.id });
+    departure = coffeePlayerDepartureEventRow(rows);
+    recorded = true;
+  }
+  if (!departure) {
+    throw new Error("Could not record Coffee player departure.");
+  }
+  const completedTurns = rows.filter(
+    (message) =>
+      message.rowid > departure.row.rowid &&
+      message.role === "assistant" &&
+      message.content.trim().length > 0 &&
+      !coffeeUserMessageIsActionOnly(message.content)
+  ).length;
+  return {
+    conversation: buildCurrentCoffeeConversationResponse(db, userId, row.id),
+    recorded,
+    occurredAt: departure.occurredAt,
+    targetTurns: coffeePlayerDepartureEpilogueTurnCount(row.id),
+    completedTurns,
+  };
 }
 
 function coffeeReplayArrivalEventAlreadyRecorded(args: {
@@ -4048,19 +4214,26 @@ export interface CoffeeTurnSettings {
   onPhase?: (phase: "routing" | "thinking", speakerBotId?: string | null) => void;
   /** Optional per-user image model/workflow prefs (same shape as chat mode). */
   assistantImageUserPrefs?: AssistantSentImageUserPrefs;
+  /** Request-scoped provider overrides used by the isolated server test harness. */
+  providerFactory?: typeof selectProvider;
+  auxiliaryProviderFactory?: typeof getAuxiliaryProvider;
 }
 
 interface CoffeeAuxiliaryOptions {
   prismDefaultLlmModel?: string | null;
   secondaryOllamaHost?: string | null;
   experimentalDualOllamaEnabled?: boolean;
+  auxiliaryProviderFactory?: typeof getAuxiliaryProvider;
 }
 
 function coffeeAuxiliaryProvider(options?: CoffeeAuxiliaryOptions | null): LlmProvider {
-  return getAuxiliaryProvider(options?.prismDefaultLlmModel ?? undefined, {
-    secondaryOllamaHost: options?.secondaryOllamaHost,
-    experimentalDualOllama: options?.experimentalDualOllamaEnabled === true,
-  });
+  return (options?.auxiliaryProviderFactory ?? getAuxiliaryProvider)(
+    options?.prismDefaultLlmModel ?? undefined,
+    {
+      secondaryOllamaHost: options?.secondaryOllamaHost,
+      experimentalDualOllama: options?.experimentalDualOllamaEnabled === true,
+    }
+  );
 }
 
 export interface CoffeeTurnInput {
@@ -8727,6 +8900,10 @@ export function buildSpeakerPrompt(args: {
   interruptionEvent?: CoffeeInterruptionEvent | null;
   /** Speaker-scoped preferred display labels for peers, keyed by peer bot id. */
   peerAddressByBotId?: ReadonlyMap<string, string>;
+  /** Compact, already-resolved Coffee-only power context for this speaker. */
+  coffeePowersPrompt?: string | null;
+  /** Resolved cup consumption multiplier from this session's immutable power plan. */
+  coffeeCupRateMultiplier?: number;
 }): ProviderMessage[] {
   const {
     speaker,
@@ -8757,6 +8934,8 @@ export function buildSpeakerPrompt(args: {
     departureOpportunity,
     interruptionEvent,
     peerAddressByBotId,
+    coffeePowersPrompt,
+    coffeeCupRateMultiplier = 1,
   } = args;
   const settings = sessionSettings ?? normalizeCoffeeSessionSettings(undefined);
   const promptHistory = coffeeBotPromptHistory(history);
@@ -8935,7 +9114,8 @@ export function buildSpeakerPrompt(args: {
                 progress: coffeeCupPacedProgress(
                   coffeeCupProgress,
                   coffeeCupStatusSeed,
-                  coffeeSessionDurationMinutes
+                  coffeeSessionDurationMinutes,
+                  coffeeCupRateMultiplier
                 ),
                 topOff: coffeeCupTopOff,
                 nowMs: Date.now(),
@@ -9050,6 +9230,9 @@ export function buildSpeakerPrompt(args: {
     messages.push({ role: "system", content: speakerSystemPrompt });
   }
   messages.push({ role: "system", content: groupContextLines.join("\n") });
+  if (coffeePowersPrompt?.trim()) {
+    messages.push({ role: "system", content: coffeePowersPrompt.trim() });
+  }
   messages.push({
     role: "system",
     content: buildCoffeeSpeakerStyleAppendix(settings, tableReplyMaxChars),
@@ -10633,7 +10816,8 @@ async function generateCoffeePollStructuredBallots(args: {
             args.settings.preferredProvider,
             args.settings.openAiApiKey,
             args.settings.secondaryOllamaHost,
-            args.settings.anthropicApiKey
+            args.settings.anthropicApiKey,
+            args.settings.providerFactory
           );
       const model = pickSpeakerModel(
         bot,
@@ -11624,10 +11808,11 @@ function pickSpeakerProvider(
   preferred: ProviderName,
   openAiApiKey: string | undefined,
   secondaryOllamaHost: string | null | undefined,
-  anthropicApiKey: string | undefined
+  anthropicApiKey: string | undefined,
+  providerFactory: typeof selectProvider = selectProvider
 ): { provider: LlmProvider; effectiveProvider: ProviderName } {
   const effective = effectiveCoffeeSpeakerProvider(speaker.onlineEnabled, preferred);
-  const provider = selectProvider(
+  const provider = providerFactory(
     effective,
     openAiApiKey,
     secondaryOllamaHost,
@@ -12034,6 +12219,13 @@ async function generateCoffeeBotReply(args: {
   throwIfCoffeeTurnCancelled(settings.signal);
   const sessionSettings = parseStoredCoffeeSessionSettings(row.coffee_settings);
   const turnGroup = coffeePresentGroupForTurn(group, presentBotIds, directedSpeakerBotId);
+  const coffeePowerPlan = resolveCoffeePowersForSession(db, userId, row.id);
+  const routableTurnGroup = turnGroup.filter((bot) =>
+    coffeePowerBotCanSpeak(coffeePowerPlan, bot.id)
+  );
+  if (routableTurnGroup.length === 0) {
+    throw new Error("No bot at this Coffee table is currently allowed to speak.");
+  }
   const historyLimit = coffeeEffectiveHistoryLimit(sessionSettings);
   const replyCaps = coffeeReplyLengthCaps(sessionSettings);
   const coffeeTeams = parseCoffeeTeamState(row.coffee_team_mode_json);
@@ -12163,12 +12355,12 @@ async function generateCoffeeBotReply(args: {
   const latestAssistantBeforeTurn = [...history]
     .reverse()
     .find((message): message is ChatMessage => message.role === "assistant") ?? null;
-  const seatedBotIds = new Set(turnGroup.map((bot) => bot.id));
+  const seatedBotIds = new Set(routableTurnGroup.map((bot) => bot.id));
   const effectiveDirectedSpeakerBotId =
     typeof directedSpeakerBotId === "string" && seatedBotIds.has(directedSpeakerBotId.trim())
       ? directedSpeakerBotId
       : null;
-  const explicitDirectedSpeaker = pickDirectedSpeaker(turnGroup, effectiveDirectedSpeakerBotId);
+  const explicitDirectedSpeaker = pickDirectedSpeaker(routableTurnGroup, effectiveDirectedSpeakerBotId);
   const userActionOnly = turnKind === "user" && coffeeUserMessageIsActionOnly(tableFocus);
   const currentUserAddressedBotId =
     !explicitDirectedSpeaker && turnKind === "user"
@@ -12179,7 +12371,7 @@ async function generateCoffeeBotReply(args: {
         })
       : null;
   const currentUserAddressedSpeaker = currentUserAddressedBotId
-    ? turnGroup.find((bot) => bot.id === currentUserAddressedBotId) ?? null
+    ? routableTurnGroup.find((bot) => bot.id === currentUserAddressedBotId) ?? null
     : null;
   const priorAssistantSpeakerBotId = latestAssistantBeforeTurn
     ? resolveAssistantSpeakerBotId(latestAssistantBeforeTurn, group)
@@ -12204,20 +12396,20 @@ async function generateCoffeeBotReply(args: {
     routerDirective = "Answer the direct call-out first, then add one concrete new angle.";
   } else {
     if (addressedBotId) {
-      const addressedSpeaker = turnGroup.find((bot) => bot.id === addressedBotId);
+      const addressedSpeaker = routableTurnGroup.find((bot) => bot.id === addressedBotId);
       if (addressedSpeaker) {
         pickedBotId = addressedSpeaker.id;
         routerReason = `Followed direct bot address to ${addressedSpeaker.name}.`;
         routerDirective = "Answer the direct call-out first, then add one concrete new angle.";
       } else {
-        const fallbackSpeaker = pickFallbackSpeaker(turnGroup, lastSpeakerBotId);
+        const fallbackSpeaker = pickFallbackSpeaker(routableTurnGroup, lastSpeakerBotId);
         pickedBotId = fallbackSpeaker.id;
         routerReason = ROUTER_FALLBACK_REASON;
       }
     } else {
       const routerProvider = coffeeAuxiliaryProvider(settings);
       const routerMessages = buildRouterPrompt({
-        group: turnGroup,
+        group: routableTurnGroup,
         history,
         userMessage: tableFocus,
         userActionOnly,
@@ -12243,18 +12435,18 @@ async function generateCoffeeBotReply(args: {
           usagePurpose: "coffee_router",
           ...(settings.signal ? { signal: settings.signal } : {}),
         });
-        const parsed = parseRouterResponse(routerRaw, turnGroup);
+        const parsed = parseRouterResponse(routerRaw, routableTurnGroup);
         if (parsed) {
           pickedBotId = parsed.botId;
           routerReason = parsed.reason;
           routerDirective = parsed.directive;
         } else {
-          const fallbackSpeaker = pickFallbackSpeaker(turnGroup, lastSpeakerBotId);
+          const fallbackSpeaker = pickFallbackSpeaker(routableTurnGroup, lastSpeakerBotId);
           pickedBotId = fallbackSpeaker.id;
           routerReason = ROUTER_FALLBACK_REASON;
         }
       } catch {
-        const fallbackSpeaker = pickFallbackSpeaker(turnGroup, lastSpeakerBotId);
+        const fallbackSpeaker = pickFallbackSpeaker(routableTurnGroup, lastSpeakerBotId);
         pickedBotId = fallbackSpeaker.id;
         routerReason = ROUTER_FALLBACK_REASON;
       }
@@ -12263,7 +12455,7 @@ async function generateCoffeeBotReply(args: {
 
   if (!explicitDirectedSpeaker && !currentUserAddressedSpeaker && !addressedBotId) {
     const balanceOverride = pickCoffeeSpeakerBalanceOverride({
-      group: turnGroup,
+      group: routableTurnGroup,
       history,
       pickedBotId,
       sessionSettings,
@@ -12280,7 +12472,7 @@ async function generateCoffeeBotReply(args: {
 
   if (!explicitDirectedSpeaker && !currentUserAddressedSpeaker && !addressedBotId) {
     const handoffSpeaker = resolveCoffeeAutonomousSpeakerHandoff({
-      group: turnGroup,
+      group: routableTurnGroup,
       pickedBotId,
       lastSpeakerBotId,
       turnKind,
@@ -12293,7 +12485,7 @@ async function generateCoffeeBotReply(args: {
     }
   }
 
-  const speaker = turnGroup.find((bot) => bot.id === pickedBotId) ?? turnGroup[0]!;
+  const speaker = routableTurnGroup.find((bot) => bot.id === pickedBotId) ?? routableTurnGroup[0]!;
   settings.onPhase?.("thinking", speaker.id);
   throwIfCoffeeTurnCancelled(settings.signal);
   const activeSeatBotIds = coffeeActiveSeatBotIdsFromStored(row.bot_group_ids);
@@ -12311,14 +12503,19 @@ async function generateCoffeeBotReply(args: {
     sessionRemainingMs: settings.sessionRemainingMs,
     durationMinutes: row.coffee_duration_minutes,
     coffeeCupTopOff: cupTopOffsByBotId[speaker.id] ?? null,
+    coffeeCupRateMultiplier: coffeePowerCupRateMultiplier(coffeePowerPlan, speaker.id),
     nowMs: Date.now(),
   });
+  const speakerPromptGroup = turnGroup.filter((bot) =>
+    coffeePowerBotVisibleTo(coffeePowerPlan, bot.id, speaker.id)
+  );
+  const speakerHasHiddenPeers = speakerPromptGroup.length !== turnGroup.length;
   const peerAddressByBotId = await loadCoffeePeerAddressPreferences({
     db,
     userId,
     userKey: settings.userKey,
     speakerBotId: speaker.id,
-    peers: turnGroup.filter((bot) => bot.id !== speaker.id),
+    peers: speakerPromptGroup.filter((bot) => bot.id !== speaker.id),
   });
   if (!interruptionEvent) {
     const botInterruptionEvent = maybeBuildBotInterruptionEvent({
@@ -12326,7 +12523,7 @@ async function generateCoffeeBotReply(args: {
       userIsComposing,
       speaker,
       socialByBotId: preTurnSocialByBotId,
-      group: turnGroup,
+      group: speakerPromptGroup,
       conversationId: row.id,
       historyLength: history.length,
       sessionSettings,
@@ -12373,7 +12570,8 @@ async function generateCoffeeBotReply(args: {
     settings.preferredProvider,
     settings.openAiApiKey,
     settings.secondaryOllamaHost,
-    settings.anthropicApiKey
+    settings.anthropicApiKey,
+    settings.providerFactory
   );
   const speakerOptions: GenerateOptions = {};
   const speakerModel = pickSpeakerModel(
@@ -12415,8 +12613,13 @@ async function generateCoffeeBotReply(args: {
       reasoningEffort: effectiveReasoningEffort,
     }
   );
-  const speakerVisibleHistory = coffeeHistoryVisibleToSpeakerAfterFirmSeat(history, speaker.id);
-  const latestVisibleTableMessage = coffeeBotPromptHistory(history).at(-1) ?? null;
+  const arrivalVisibleHistory = coffeeHistoryVisibleToSpeakerAfterFirmSeat(history, speaker.id);
+  const speakerVisibleHistory = arrivalVisibleHistory.filter((message) =>
+    message.role !== "assistant" ||
+    !message.botId ||
+    coffeePowerBotVisibleTo(coffeePowerPlan, message.botId, speaker.id)
+  );
+  const latestVisibleTableMessage = coffeeBotPromptHistory(speakerVisibleHistory).at(-1) ?? null;
   const speakerVisibleMessageIds = new Set(speakerVisibleHistory.map((message) => message.id));
   const speakerHistoryWasArrivalScoped = speakerVisibleHistory.length !== history.length;
   const speakerMissedLatestTableMoment =
@@ -12426,7 +12629,7 @@ async function generateCoffeeBotReply(args: {
     : tableFocus;
   let speakerMessages = buildSpeakerPrompt({
     speaker,
-    group: turnGroup,
+    group: speakerPromptGroup,
     history: speakerVisibleHistory,
     userMessage: speakerTableFocus,
     userActionOnly,
@@ -12438,14 +12641,14 @@ async function generateCoffeeBotReply(args: {
     firstContactIntro: turnKind === "user" && !speakerHasSpokenInSession,
     sessionSettings,
     coffeeTopic: row.coffee_topic,
-    pollSummary: latestPollSummary,
+    pollSummary: speakerHasHiddenPeers ? null : latestPollSummary,
     activePollContext,
     activePoll,
-    coffeeTeams,
-    meetingSummary: speakerHistoryWasArrivalScoped ? null : meetingSummary,
-    attendanceContext,
+    coffeeTeams: speakerHasHiddenPeers ? null : coffeeTeams,
+    meetingSummary: speakerHistoryWasArrivalScoped || speakerHasHiddenPeers ? null : meetingSummary,
+    attendanceContext: speakerHasHiddenPeers ? null : attendanceContext,
     latestUserAction: latestUserAction?.action ?? null,
-    directorCue: speakerHistoryWasArrivalScoped ? null : routerDirective,
+    directorCue: speakerHistoryWasArrivalScoped || speakerHasHiddenPeers ? null : routerDirective,
     sessionRemainingMs: settings.sessionRemainingMs,
     coffeeSessionDurationMinutes: row.coffee_duration_minutes,
     coffeeCupSeed,
@@ -12453,6 +12656,12 @@ async function generateCoffeeBotReply(args: {
     departureOpportunity,
     interruptionEvent,
     peerAddressByBotId,
+    coffeePowersPrompt: coffeePowersPromptForSpeaker(
+      coffeePowerPlan,
+      speaker.id,
+      speakerPromptGroup.filter((bot) => bot.id !== speaker.id).map((bot) => bot.id)
+    ),
+    coffeeCupRateMultiplier: coffeePowerCupRateMultiplier(coffeePowerPlan, speaker.id),
   });
   if (
     !cannedInterruptionReaction &&
@@ -12520,8 +12729,8 @@ async function generateCoffeeBotReply(args: {
   // href before sanitizing — otherwise they leak as visible artifacts on the
   // table (and the visible-length clamp still works correctly because the
   // repaired markdown adds source bytes only).
-  const peersForRepair = turnGroup.filter((bot) => bot.id !== speaker.id);
-  const knownCoffeeSpeakerNames = turnGroup.map((bot) => bot.name);
+  const peersForRepair = speakerPromptGroup.filter((bot) => bot.id !== speaker.id);
+  const knownCoffeeSpeakerNames = speakerPromptGroup.map((bot) => bot.name);
   const speakerReplyRepaired =
     typeof speakerReply === "string"
       ? repairBotMentionBrackets(speakerReply, peersForRepair)
@@ -12654,7 +12863,7 @@ async function generateCoffeeBotReply(args: {
     turnKind,
     speaker,
     latestAssistantBeforeTurn,
-    group: turnGroup,
+    group: speakerPromptGroup,
     peerAddressByBotId,
   });
   if (cannedInterruptionReaction) {
@@ -12671,12 +12880,12 @@ async function generateCoffeeBotReply(args: {
   replyText = autoTagPeerMentionsInCoffeeReply(
     replyText,
     speaker,
-    turnGroup,
+    speakerPromptGroup,
     peerAddressByBotId
   );
   const relationshipSignals = extractCoffeeRelationshipSignals({
     speaker,
-    group: turnGroup,
+    group: speakerPromptGroup,
     replyText,
   });
   let nextSocialByBotId = computeNextCoffeeSocialState({
@@ -12691,6 +12900,20 @@ async function generateCoffeeBotReply(args: {
     speakerBotId: speaker.id,
     signals: relationshipSignals,
   });
+  nextSocialByBotId = applyCoffeePowerAfterSpeech({
+    plan: coffeePowerPlan,
+    speakerBotId: speaker.id,
+    socialByBotId: nextSocialByBotId,
+  });
+  for (const bot of group) {
+    if (
+      bot.id !== speaker.id &&
+      !coffeePowerBotVisibleTo(coffeePowerPlan, speaker.id, bot.id) &&
+      preTurnSocialByBotId[bot.id]
+    ) {
+      nextSocialByBotId[bot.id] = preTurnSocialByBotId[bot.id]!;
+    }
+  }
 
   const assistantNow = new Date().toISOString();
   const nextCoffeeTeams = advanceCoffeeTeamStateAfterReply({
@@ -12723,6 +12946,8 @@ async function generateCoffeeBotReply(args: {
     activePoll,
     interruptionEvent,
     departurePersisted: departurePersistence !== null,
+    coffeeCupRateMultiplier: coffeePowerCupRateMultiplier(coffeePowerPlan, speaker.id),
+    actionBias: coffeePowerActionBias(coffeePowerPlan, speaker.id),
   });
   const coffeeDebugTurnSnapshot: CoffeeDebugTurnSnapshotPayload = {
     v: 1,
@@ -12754,10 +12979,11 @@ async function generateCoffeeBotReply(args: {
     coffeeReplayEvents: coffeeReplayMoodEvents,
   });
   const assistantMessageId = randomId(12);
+  const coffeeAudienceBotIds = coffeePowerMessageAudience(coffeePowerPlan, speaker.id);
   db.prepare(
     `INSERT INTO messages
-       (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at)
-     VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?, ?, ?)`
+       (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, coffee_audience_bot_ids, created_at)
+     VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     assistantMessageId,
     row.id,
@@ -12767,6 +12993,7 @@ async function generateCoffeeBotReply(args: {
     speakerModel ?? null,
     speaker.id,
     assistantToolPayload,
+    coffeeAudienceBotIds === null ? null : JSON.stringify(coffeeAudienceBotIds),
     assistantNow
   );
   attachUsageEventsToMessage({
@@ -13181,6 +13408,9 @@ export async function processCoffeeTurn(
     conversationRow = loaded.row;
     groupIds = loaded.groupIds;
     group = loaded.group;
+    if (coffeeConversationHasPlayerDeparture(db, userId, conversationRow.id)) {
+      throw new Error("This Coffee session ended when the player left the table.");
+    }
   } else {
     groupIds = normalizeCoffeeGroupBotIds(input.groupBotIds);
     group = loadCoffeeGroupProfiles(db, userId, groupIds);
@@ -13416,8 +13646,16 @@ export function recordCoffeeReplayEvents(
     throw new Error("No valid Coffee replay events provided.");
   }
   for (const event of events) {
-    if (!groupIds.includes(event.botId)) {
+    if (event.kind !== "playerDeparture" && !groupIds.includes(event.botId)) {
       throw new Error("Replay event bot is not seated in this Coffee session.");
+    }
+    if (
+      event.kind === "playerDeparture" &&
+      coffeePlayerDepartureEventRow(
+        coffeePlayerDepartureRows({ db, userId, conversationId: row.id })
+      )
+    ) {
+      continue;
     }
     if (
       event.kind === "arrival" &&
@@ -13630,9 +13868,16 @@ export async function processCoffeeAutonomousTurn(
   userIsComposing = false,
   directedSpeakerBotId?: string,
   directedUserMessage?: string,
-  presentBotIds?: string[]
+  presentBotIds?: string[],
+  playerDepartureEpilogue?: { turnIndex: number; totalTurns: number }
 ): Promise<CoffeeTurnResponse> {
   const { row, group } = loadCoffeeConversationGroup(db, userId, conversationId);
+  if (
+    !playerDepartureEpilogue &&
+    coffeeConversationHasPlayerDeparture(db, userId, conversationId)
+  ) {
+    throw new Error("This Coffee session ended when the player left the table.");
+  }
   const topicTrim = row.coffee_topic?.trim() ?? "";
   if (!topicTrim) {
     throw new Error("Pick a Coffee topic for this session before bots can autoplay.");
@@ -13647,7 +13892,13 @@ export async function processCoffeeAutonomousTurn(
     directedSpeakerBotId && typeof directedUserMessage === "string"
       ? directedUserMessage.replace(/\s+/g, " ").trim().slice(0, 700)
       : "";
-  const tableFocus = latest
+  const tableFocus = playerDepartureEpilogue
+    ? coffeePlayerDepartureEpilogueFocus(
+        playerDepartureEpilogue.turnIndex,
+        playerDepartureEpilogue.totalTurns,
+        settings.userDisplayName
+      )
+    : latest
     ? directedUserFocus
       ? `The user directly addressed multiple bots with: ${directedUserFocus}. You are one of the addressed bots answering that same user prompt now. Keep it to your own answer; acknowledge the latest bot only if it helps.`
       : latest.role === "assistant" && latest.botName

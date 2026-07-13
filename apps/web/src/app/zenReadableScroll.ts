@@ -35,3 +35,24 @@ export function zenReadableMaxScrollTop(
 ): number {
   return Math.max(0, scrollHeight - clientHeight);
 }
+
+/**
+ * Returns whether a user's scroll gesture can move through Zen's native
+ * scroll range and should therefore take ownership from live auto-follow.
+ *
+ * Positive deltas move toward newer content; negative deltas move toward
+ * older content. Edge-only gestures stay available for Zen's elastic pull.
+ */
+export function zenReadableGestureShouldDisarmFollow(
+  scrollTop: number,
+  maxScrollTop: number,
+  scrollDeltaY: number,
+  activationThresholdPx = 1
+): boolean {
+  const normalizedMax = Math.max(0, maxScrollTop);
+  const normalizedTop = Math.max(0, Math.min(normalizedMax, scrollTop));
+  const threshold = Math.max(0, activationThresholdPx);
+  if (normalizedMax <= 0 || Math.abs(scrollDeltaY) <= threshold) return false;
+  if (scrollDeltaY > 0) return normalizedTop < normalizedMax - 0.5;
+  return normalizedTop > 0.5;
+}

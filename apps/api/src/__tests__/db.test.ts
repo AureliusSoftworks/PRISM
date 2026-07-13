@@ -150,12 +150,18 @@ describe("createDatabase bot export hash migration", () => {
         .prepare("PRAGMA table_info(conversations)")
         .all() as Array<{ name: string }>;
       assert.ok(conversationColumns.some((column) => column.name === "zen_wallpaper_history"));
+      assert.ok(conversationColumns.some((column) => column.name === "coffee_power_plan_json"));
+      const messageColumns = reopened
+        .prepare("PRAGMA table_info(messages)")
+        .all() as Array<{ name: string }>;
+      assert.ok(messageColumns.some((column) => column.name === "coffee_audience_bot_ids"));
       assert.ok(columns.some((column) => column.name === "export_hash"));
       assert.ok(columns.some((column) => column.name === "flirt_enabled"));
       assert.ok(columns.some((column) => column.name === "semantic_facets"));
       assert.ok(columns.some((column) => column.name === "semantic_facets_source_hash"));
       assert.ok(columns.some((column) => column.name === "semantic_facets_updated_at"));
       assert.ok(columns.some((column) => column.name === "avatar_details_json"));
+      assert.ok(columns.some((column) => column.name === "powers_json"));
       assert.equal(
         userColumns.some((column) => column.name.includes("avatar_details")),
         false,

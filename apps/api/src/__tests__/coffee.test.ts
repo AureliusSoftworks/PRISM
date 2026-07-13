@@ -91,6 +91,9 @@ import {
   pickFallbackSpeaker,
   processCoffeeTurn,
   randomizeCoffeeSeatBotIdsForSession,
+  coffeePlayerDepartureEpilogueFocus,
+  coffeePlayerDepartureEpilogueTurnCount,
+  recordCoffeePlayerDeparture,
   recordCoffeeUserAction,
   recordCoffeeReplayEvents,
   repairBotMentionBrackets,
@@ -531,6 +534,7 @@ function createCoffeeTestDb(): DatabaseSync {
       coffee_meeting_summary TEXT,
       coffee_meeting_summary_message_count INTEGER,
       coffee_meeting_summary_updated_at TEXT,
+      coffee_power_plan_json TEXT,
       incognito INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -545,6 +549,7 @@ function createCoffeeTestDb(): DatabaseSync {
       model TEXT,
       bot_id TEXT,
       tool_payload TEXT,
+      coffee_audience_bot_ids TEXT,
       created_at TEXT NOT NULL
     );
     CREATE TABLE memories (
@@ -618,6 +623,7 @@ function createCoffeeTestDb(): DatabaseSync {
       semantic_facets TEXT,
       semantic_facets_source_hash TEXT,
       semantic_facets_updated_at TEXT,
+      powers_json TEXT NOT NULL DEFAULT '[]',
       color TEXT,
       glyph TEXT,
       model TEXT,
@@ -7875,6 +7881,88 @@ describe("coffee social state helpers", () => {
       ).length,
       1
     );
+  });
+
+  it("records player departure once and counts bounded epilogue turns after it", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+    const created = await createCoffeeConversation(db, userId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+    });
+
+    assert.throws(
+      () => recordCoffeePlayerDeparture(db, userId, created.conversation.id),
+      /no table dialogue/i
+    );
+
+    db.prepare(
+      `INSERT INTO messages (id, conversation_id, user_id, role, content, created_at)
+       VALUES ('player-action-only', ?, ?, 'user', '*adjusts chair*', '2026-07-02T14:59:59.000Z')`
+    ).run(created.conversation.id, userId);
+    assert.throws(
+      () => recordCoffeePlayerDeparture(db, userId, created.conversation.id),
+      /no table dialogue/i
+    );
+
+    db.prepare(
+      `INSERT INTO messages (id, conversation_id, user_id, role, content, created_at)
+       VALUES ('player-line', ?, ?, 'user', 'I have to run.', '2026-07-02T15:00:00.000Z')`
+    ).run(created.conversation.id, userId);
+
+    const first = recordCoffeePlayerDeparture(db, userId, created.conversation.id);
+    assert.equal(first.recorded, true);
+    assert.equal(first.completedTurns, 0);
+    assert.ok(first.targetTurns >= 2 && first.targetTurns <= 4);
+    assert.equal(
+      first.targetTurns,
+      coffeePlayerDepartureEpilogueTurnCount(created.conversation.id)
+    );
+    const departureMessages = first.conversation.messages.filter((message) =>
+      message.coffeeReplayEvents?.some((event) => event.kind === "playerDeparture")
+    );
+    assert.equal(departureMessages.length, 1);
+    assert.equal(departureMessages[0]?.role, "system");
+    assert.equal(departureMessages[0]?.botId ?? null, null);
+
+    const duplicate = recordCoffeePlayerDeparture(db, userId, created.conversation.id);
+    assert.equal(duplicate.recorded, false);
+    assert.equal(
+      duplicate.conversation.messages.filter((message) =>
+        message.coffeeReplayEvents?.some((event) => event.kind === "playerDeparture")
+      ).length,
+      1
+    );
+
+    db.prepare(
+      `INSERT INTO messages (id, conversation_id, user_id, role, content, bot_id, created_at)
+       VALUES ('epilogue-1', ?, ?, 'assistant', 'Safe travels.', ?, '2026-07-02T15:02:00.000Z')`
+    ).run(created.conversation.id, userId, ALICE.id);
+    assert.equal(
+      recordCoffeePlayerDeparture(db, userId, created.conversation.id).completedTurns,
+      1
+    );
+
+    assert.throws(
+      () => recordCoffeePlayerDeparture(db, "user-2", created.conversation.id),
+      /not found/i
+    );
+  });
+
+  it("acknowledges departure once, resumes the topic, and closes the epilogue", () => {
+    const first = coffeePlayerDepartureEpilogueFocus(0, 4, "Jared");
+    const middle = coffeePlayerDepartureEpilogueFocus(1, 4);
+    const final = coffeePlayerDepartureEpilogueFocus(3, 4);
+    assert.match(first, /human player, Jared/i);
+    assert.match(first, /every seated bot is still present/i);
+    assert.match(first, /acknowledgment of the player's departure/i);
+    assert.match(middle, /continue the topic naturally/i);
+    assert.match(middle, /while every seated bot remains/i);
+    assert.match(middle, /keep dwelling on the departure/i);
+    assert.doesNotMatch(middle, /acknowledgment of the player's departure/i);
+    assert.match(final, /natural final beat/i);
+    assert.match(final, /without addressing the absent player/i);
   });
 
   it("tops off a seated bot cup and nudges social mood", async () => {

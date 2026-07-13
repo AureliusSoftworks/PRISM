@@ -96,7 +96,7 @@ function countVisibleContrastPixels(base64: string): { dark: number; light: numb
 }
 
 describe("Prism app cursor", () => {
-  it("keeps the custom cursor controller disabled for now", () => {
+  it("keeps the custom cursor controller available but disabled", () => {
     const cursorSource = sourceBetween(
       "function PrismAppCursor(): React.JSX.Element | null",
       "function resolveZenLiveBotActionCopyPlacement"
@@ -121,11 +121,12 @@ describe("Prism app cursor", () => {
       pageSource,
       /const PRISM_APP_CURSOR_GRABBING_BODY_CLASS = "prismAppCursorGrabbing";/
     );
-    assert.match(cursorSource, /createPortal\(<style>\{PRISM_APP_CURSOR_GLOBAL_STYLE\}<\/style>, document\.body\)/);
+    assert.match(cursorSource, /<style>\{PRISM_APP_CURSOR_GLOBAL_STYLE\}<\/style>/);
+    assert.match(cursorSource, /ref=\{cursorNodeRef\}/);
+    assert.match(cursorSource, /data-prism-app-cursor="true"/);
+    assert.match(cursorSource, /pointerEvents: "none"/);
     assert.match(cursorSource, /document\.body\.classList\.add\(PRISM_APP_CURSOR_BODY_CLASS\)/);
     assert.match(cursorSource, /document\.body\.classList\.remove\(PRISM_APP_CURSOR_BODY_CLASS\)/);
-    assert.doesNotMatch(cursorSource, /className=\{styles\.prismAppCursor\}/);
-    assert.doesNotMatch(cursorSource, /<img/);
     assert.doesNotMatch(css, /\.prismAppCursor\b/);
   });
 
@@ -156,9 +157,13 @@ describe("Prism app cursor", () => {
     }
   });
 
-  it("uses native cursor URLs with compact hotspots", () => {
-    assert.match(pageSource, /function prismNativeCursorRule/);
-    assert.match(pageSource, /cursor: url\("\$\{asset\.path\}"\) \$\{asset\.hotspotX\} \$\{asset\.hotspotY\}, \$\{asset\.fallback\} !important;/);
+  it("uses compact hotspots to align the rendered follower", () => {
+    assert.doesNotMatch(pageSource, /function prismNativeCursorRule/);
+    assert.match(
+      pageSource,
+      /\$\{PRISM_APP_CURSOR_ACTIVE_SCOPE\}, \$\{PRISM_APP_CURSOR_ACTIVE_SCOPE\} \* \{ cursor: none !important; \}/
+    );
+    assert.match(pageSource, /renderedX - hotspotX[\s\S]*renderedY - hotspotY/);
     assert.match(pageSource, /PRISM_APP_CURSOR_PNG_DATA\.pointerDark\)[\s\S]*hotspotX:\s*7,[\s\S]*hotspotY:\s*6/);
     assert.match(pageSource, /PRISM_APP_CURSOR_PNG_DATA\.fingerDark\)[\s\S]*hotspotX:\s*10,[\s\S]*hotspotY:\s*6/);
     assert.match(pageSource, /PRISM_APP_CURSOR_PNG_DATA\.textDark\)[\s\S]*hotspotX:\s*11,[\s\S]*hotspotY:\s*17/);
@@ -181,67 +186,84 @@ describe("Prism app cursor", () => {
     assert.match(pageSource, /"\[data-zen-live-bot-presence-plate='true'\]"/);
     assert.match(pageSource, /const PRISM_APP_CURSOR_DISABLED_SELECTOR = \[/);
     assert.match(pageSource, /const PRISM_APP_CURSOR_EXCLUDED_SELECTOR = \[/);
+    assert.match(pageSource, /const PRISM_APP_CURSOR_POINTER_SELECTOR = "\[data-app-cursor='pointer'\]";/);
     assert.match(pageSource, /"\[class\*='chatBotPickerPixelGrid'\]"/);
-    assert.match(pageSource, /\$\{scopeSelector\} :is\(\$\{PRISM_APP_CURSOR_FINGER_SELECTOR\}\)/);
-    assert.match(pageSource, /\$\{scopeSelector\} :is\(\$\{PRISM_APP_CURSOR_DISABLED_SELECTOR\}\)/);
-    assert.match(pageSource, /\$\{scopeSelector\} :is\(\$\{PRISM_APP_CURSOR_TEXT_SELECTOR\}\)/);
-    assert.match(pageSource, /\$\{scopeSelector\} :is\(\$\{PRISM_APP_CURSOR_GRAB_SELECTOR\}\)/);
+    assert.match(pageSource, /function prismAppCursorKindForTarget/);
+    assert.match(pageSource, /if \(target\.closest\(PRISM_APP_CURSOR_EXCLUDED_SELECTOR\)\) return null;/);
+    assert.match(pageSource, /if \(target\.closest\(PRISM_APP_CURSOR_POINTER_SELECTOR\)\) return "pointer";/);
+    assert.match(pageSource, /if \(grabbing\) return "grabbing";/);
+    assert.match(pageSource, /if \(target\.closest\(PRISM_APP_CURSOR_DISABLED_SELECTOR\)\) return "pointer";/);
+    assert.match(pageSource, /if \(target\.closest\(PRISM_APP_CURSOR_TEXT_SELECTOR\)\) return "text";/);
+    assert.match(pageSource, /if \(target\.closest\(PRISM_APP_CURSOR_GRAB_SELECTOR\)\) return "grab";/);
+    assert.match(pageSource, /if \(target\.closest\(PRISM_APP_CURSOR_FINGER_SELECTOR\)\) return "finger";/);
     assert.match(pageSource, /PRISM_APP_CURSOR_EXCLUDED_SELECTOR[\s\S]*cursor: auto !important/);
+    assert.match(
+      pageSource,
+      /className=\{styles\.botPanelHubAvatarPreview\}[\s\S]*data-app-cursor="pointer"/
+    );
   });
 
-  it("switches native cursor color by resolved theme classes and cursor-themed surfaces", () => {
+  it("uses the dark cursor art for contrast in Light mode", () => {
     assert.match(pageSource, /document\.body\.dataset\.prismTheme = resolvedTheme;/);
     assert.match(pageSource, /delete document\.body\.dataset\.prismTheme;/);
     assert.match(pageSource, /data-app-cursor-theme=\{previewTheme\}/);
-    assert.match(pageSource, /const applyCursorTheme = \(\): void => \{/);
-    assert.match(pageSource, /document\.body\.dataset\.prismTheme === "light" \? "light" : "dark"/);
+    assert.match(pageSource, /function prismAppCursorThemeForTarget/);
+    assert.match(pageSource, /target\.closest<HTMLElement>\("\[data-app-cursor-theme\]"\)/);
+    assert.match(pageSource, /surfaceTheme === "light" \|\| surfaceTheme === "dark"/);
+    assert.match(pageSource, /function prismAppCursorAsset/);
+    const lightSurfaceStart = pageSource.indexOf(
+      "const PRISM_APP_CURSOR_NATIVE_LIGHT_SURFACE"
+    );
+    const lightSurfaceEnd = pageSource.indexOf(
+      "const PRISM_APP_CURSOR_ACTIVE_SCOPE",
+      lightSurfaceStart
+    );
+    const lightSurfaceSource = pageSource.slice(lightSurfaceStart, lightSurfaceEnd);
+    assert.match(lightSurfaceSource, /PRISM_APP_CURSOR_PNG_DATA\.pointerDark/);
+    assert.match(lightSurfaceSource, /PRISM_APP_CURSOR_PNG_DATA\.fingerDark/);
+    assert.match(lightSurfaceSource, /PRISM_APP_CURSOR_PNG_DATA\.textDark/);
+    assert.match(lightSurfaceSource, /PRISM_APP_CURSOR_PNG_DATA\.grabDark/);
+    assert.match(lightSurfaceSource, /PRISM_APP_CURSOR_PNG_DATA\.grabbingDark/);
+    assert.doesNotMatch(lightSurfaceSource, /PRISM_APP_CURSOR_PNG_DATA\.[a-z]+Light/);
     assert.match(
       pageSource,
-      /document\.body\.classList\.toggle\(PRISM_APP_CURSOR_DARK_BODY_CLASS, theme === "dark"\);/
+      /theme === "light"[\s\S]*\? PRISM_APP_CURSOR_NATIVE_LIGHT_SURFACE[\s\S]*: PRISM_APP_CURSOR_NATIVE_DARK_SURFACE/
     );
     assert.match(
       pageSource,
-      /document\.body\.classList\.toggle\(PRISM_APP_CURSOR_LIGHT_BODY_CLASS, theme === "light"\);/
+      /document\.body\.classList\.toggle\([\s\S]*?PRISM_APP_CURSOR_DARK_BODY_CLASS,[\s\S]*?theme === "dark"[\s\S]*?\);/
     );
-    assert.match(pageSource, /const observer = new MutationObserver\(applyCursorTheme\);/);
+    assert.match(
+      pageSource,
+      /document\.body\.classList\.toggle\([\s\S]*?PRISM_APP_CURSOR_LIGHT_BODY_CLASS,[\s\S]*?theme === "light"[\s\S]*?\);/
+    );
+    assert.match(pageSource, /const observer = new MutationObserver\(refreshCursorTheme\);/);
     assert.match(pageSource, /attributeFilter: \["data-prism-theme"\]/);
     assert.match(pageSource, /observer\.disconnect\(\);/);
-    assert.match(pageSource, /PRISM_APP_CURSOR_NATIVE_DARK_SURFACE/);
-    assert.match(pageSource, /PRISM_APP_CURSOR_NATIVE_LIGHT_SURFACE/);
-    assert.match(pageSource, /PRISM_APP_CURSOR_DARK_THEME_SCOPE/);
-    assert.match(pageSource, /PRISM_APP_CURSOR_LIGHT_THEME_SCOPE/);
-    assert.match(
-      pageSource,
-      /PRISM_APP_CURSOR_LIGHT_THEME_SCOPE,\s*PRISM_APP_CURSOR_NATIVE_LIGHT_SURFACE/
-    );
-    assert.doesNotMatch(pageSource, /PRISM_APP_CURSOR_ACTIVE_SCOPE\}\[data-prism-theme/);
-    assert.match(
-      pageSource,
-      /\$\{PRISM_APP_CURSOR_ACTIVE_SCOPE\} \[data-app-cursor-theme="dark"\]/
-    );
-    assert.match(
-      pageSource,
-      /\$\{PRISM_APP_CURSOR_ACTIVE_SCOPE\} \[data-app-cursor-theme="light"\]/
-    );
   });
 
-  it("tracks only grab press state and never follows pointer position in JS", () => {
+  it("follows pointer position with deliberate frame-lag easing", () => {
     const cursorSource = sourceBetween(
       "function PrismAppCursor(): React.JSX.Element | null",
       "function resolveZenLiveBotActionCopyPlacement"
     );
 
-    assert.match(cursorSource, /const activeGrabPointerIdRef = useRef<number \| null>\(null\);/);
+    assert.match(pageSource, /const PRISM_APP_CURSOR_FOLLOW_EASING = 0\.34;/);
+    assert.match(cursorSource, /let activeGrabPointerId: number \| null = null;/);
     assert.match(cursorSource, /event\.target\.closest\(PRISM_APP_CURSOR_GRAB_SELECTOR\)/);
     assert.match(cursorSource, /document\.body\.classList\.add\(PRISM_APP_CURSOR_GRABBING_BODY_CLASS\)/);
     assert.match(cursorSource, /document\.body\.classList\.remove\(PRISM_APP_CURSOR_GRABBING_BODY_CLASS\)/);
+    assert.match(cursorSource, /window\.addEventListener\("pointermove", handlePointerMove, true\);/);
     assert.match(cursorSource, /window\.addEventListener\("pointerdown", startGrabCursor, true\);/);
     assert.match(cursorSource, /window\.addEventListener\("pointerup", finishGrabCursor, true\);/);
-    assert.match(cursorSource, /window\.addEventListener\("pointercancel", finishGrabCursor, true\);/);
-    assert.doesNotMatch(cursorSource, /pointermove/);
-    assert.doesNotMatch(cursorSource, /requestAnimationFrame/);
-    assert.doesNotMatch(cursorSource, /style\.setProperty\("--prism-app-cursor-x"/);
-    assert.doesNotMatch(cursorSource, /clientX/);
-    assert.doesNotMatch(cursorSource, /clientY/);
+    assert.match(cursorSource, /window\.addEventListener\("pointercancel", handlePointerCancel, true\);/);
+    assert.match(cursorSource, /renderedX \+ deltaX \* PRISM_APP_CURSOR_FOLLOW_EASING/);
+    assert.match(cursorSource, /renderedY \+ deltaY \* PRISM_APP_CURSOR_FOLLOW_EASING/);
+    assert.match(cursorSource, /window\.requestAnimationFrame\(animateCursor\)/);
+    assert.match(cursorSource, /window\.cancelAnimationFrame\(animationFrameId\)/);
+    assert.match(cursorSource, /targetX = event\.clientX;/);
+    assert.match(cursorSource, /targetY = event\.clientY;/);
+    assert.match(cursorSource, /if \(!hasPosition\)[\s\S]*renderedX = targetX;[\s\S]*renderedY = targetY;/);
+    assert.match(cursorSource, /cursorNode\.style\.opacity = "0";/);
   });
 });

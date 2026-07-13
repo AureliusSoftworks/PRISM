@@ -14,7 +14,7 @@ describe("selected bot library showcase", () => {
     );
     assert.match(pageSource, /node\.dataset\.prismPanelLayer !== "true"/);
     assert.match(pageSource, /className=\{`\$\{styles\.zenLiveBotPresencePlate\} \$\{styles\.botPanelHubAvatarPlate\}`\}/);
-    assert.match(pageSource, /void playBotHubVoicePreview\(bot, "english"\)/);
+    assert.match(pageSource, /void regenerateBotHubAudioSample\(bot\)/);
     assert.match(pageSource, /void playBotHubVoicePreview\(bot, "bottish"\)/);
     assert.match(pageSource, /"--zen-live-bot-avatar-size": "min\(520px, 72vmin\)"/);
     assert.match(pageSource, /\{renderBotHubShowcase\(\)\}[\s\S]*?\{renderUsagePanel\(\)\}/);
@@ -24,6 +24,60 @@ describe("selected bot library showcase", () => {
       cssSource,
       /\.botPanelHubAvatarPlate \.zenLiveBotPresenceBody\s*\{[\s\S]*?--zen-live-bot-avatar-face-glyph-size:\s*calc\(var\(--zen-live-bot-body-frame-size\) \* 0\.217\)/
     );
+  });
+
+  it("opens the selected bot actions from the showcase context menu", () => {
+    assert.match(
+      pageSource,
+      /onContextMenuCapture=\{\(event\) => \{[\s\S]*?openBotShowcaseContextMenu\(bot, event\.clientX, event\.clientY\)/
+    );
+    assert.match(pageSource, /source: "showcase"/);
+    assert.match(pageSource, /aria-label=\{`\$\{bot\.name\} preview actions`\}/);
+    for (const label of [
+      "Avatar Studio",
+      "Memories",
+      "Images",
+      "Settings",
+    ]) {
+      assert.match(pageSource, new RegExp(`<span>${label}<\\/span>`));
+    }
+    const showcaseMenuSource = pageSource.slice(
+      pageSource.indexOf('if (botContextMenu.source === "showcase")'),
+      pageSource.indexOf("if (botContextMenu.groupId && !botLibraryGroupContext)")
+    );
+    assert.doesNotMatch(showcaseMenuSource, /Regenerate audio sample/);
+  });
+
+  it("keeps the showcase context menu authoritative in Coffee Mode", () => {
+    assert.match(pageSource, /data-bot-showcase-context="true"/);
+    assert.match(
+      pageSource,
+      /handleCoffeeShellContextMenu[\s\S]*?event\.target\.closest\('\[data-bot-showcase-context="true"\]'\)[\s\S]*?return;/
+    );
+  });
+
+  it("keeps the large preview silent and plays only from its voice buttons", () => {
+    const previewSource = pageSource.slice(
+      pageSource.indexOf("className={styles.botPanelHubAvatarPreview}"),
+      pageSource.indexOf("className={styles.botPanelHubShowcasePrompt}")
+    );
+    assert.doesNotMatch(previewSource, /onClick=/);
+    assert.doesNotMatch(previewSource, /playBotHubVoicePreview/);
+    assert.match(
+      pageSource,
+      /aria-label="Voice preview language"[\s\S]*?onClick=\{\(\) => void regenerateBotHubAudioSample\(bot\)\}[\s\S]*?onClick=\{\(\) => void playBotHubVoicePreview\(bot, "bottish"\)\}/
+    );
+  });
+
+  it("regenerates and automatically plays every English sample in one click", () => {
+    const regenerationSource = pageSource.slice(
+      pageSource.indexOf("async function regenerateBotHubAudioSample"),
+      pageSource.indexOf("async function loadElevenLabsVoiceCatalog")
+    );
+    assert.match(regenerationSource, /voicePreviewAudioCacheRef\.current\.clear\(\)/);
+    assert.match(regenerationSource, /JSON\.stringify\(\{ voicePreviewLine: null \}\)/);
+    assert.match(regenerationSource, /await playBotHubVoicePreview\(regeneratedBot, "english"\)/);
+    assert.match(pageSource, /previewStatus === "generating" \|\| previewStatus === "playing"/);
   });
 
   it("keeps the Bots panel open when the surrounding backdrop is clicked", () => {
@@ -43,14 +97,14 @@ describe("selected bot library showcase", () => {
     );
   });
 
-  it("uses thinking while silently generating and announces when playback is ready", () => {
+  it("uses thinking while generating and then plays on the same click", () => {
     assert.match(pageSource, /showThinkingSpinner=\{previewStatus === "generating"\}/);
     assert.match(pageSource, /Generating audio sample…/);
-    assert.match(pageSource, /…ready! Click again to play\./);
+    assert.match(pageSource, /English"\} preview played\./);
     assert.match(pageSource, /data-talking=\{previewStatus === "playing"/);
   });
 
-  it("awaits persona copy and generates the first English sample without playback", () => {
+  it("awaits persona copy and plays the first English sample", () => {
     const previewHandlerSource = pageSource.slice(
       pageSource.indexOf("async function playBotHubVoicePreview"),
       pageSource.indexOf("async function loadElevenLabsVoiceCatalog")
@@ -69,7 +123,8 @@ describe("selected bot library showcase", () => {
       /const previewText = `My name is \$\{showcaseName\}\./
     );
     assert.equal(previewHandlerSource.match(/await previewSelectedVoice\(/g)?.length, 1);
-    assert.match(previewHandlerSource, /generateOnly,/);
+    assert.doesNotMatch(previewHandlerSource, /generateOnly/);
+    assert.match(previewHandlerSource, /onPlaybackStart:/);
   });
 
   it("guarantees visible click feedback even when playback settles immediately", () => {
@@ -81,7 +136,7 @@ describe("selected bot library showcase", () => {
     );
     assert.match(pageSource, /data-feedback=\{previewMode === "english" \? previewStatus : undefined\}/);
     assert.match(pageSource, /aria-busy=\{previewMode === "bottish" && previewStatus === "generating"\}/);
-    assert.match(pageSource, /Click again to play\./);
+    assert.match(pageSource, /preview played\./);
     assert.match(cssSource, /button\[data-feedback="generating"\]::before/);
     assert.match(cssSource, /button\[data-feedback="complete"\]::before[\s\S]*?content: "✓"/);
     assert.match(cssSource, /@keyframes botPanelHubVoiceFeedbackSpin/);
@@ -175,8 +230,7 @@ describe("selected bot library showcase", () => {
     assert.match(pageSource, /voicePreviewAudioCacheRef\.current\.set\(options\.cacheKey, previewBytes\.slice\(0\)\)/);
     assert.match(pageSource, /normalizeOptionalBotAudioVoiceProfileV1\(bot\.audio_voice_profile_override\)/);
     assert.match(pageSource, /resolveBotHubVoicePreviewText\(bot\)/);
-    assert.match(pageSource, /!voicePreviewAudioCacheRef\.current\.has\(audioCacheKey\)/);
-    assert.match(pageSource, /if \(options\.generateOnly\) \{[\s\S]*?return;/);
+    assert.doesNotMatch(pageSource, /generateOnly/);
     assert.match(pageSource, /voice_preview_line: line/);
     assert.match(pageSource, /onPlaybackStart:/);
   });

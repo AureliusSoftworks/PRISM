@@ -907,7 +907,7 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   );
   assert.match(
     pageSource,
-    /const BOT_AVATAR_CUSTOMIZER_TABS = \[\s*\{ value: "face", label: "Identity" \},\s*\{ value: "profile", label: "Profile" \},\s*\{ value: "eyes", label: "Eyes" \},\s*\{ value: "mouth", label: "Mouth" \},\s*\{ value: "voice", label: "Voice" \},\s*\{ value: "settings", label: "Settings" \},\s*\{ value: "details", label: "Details" \},\s*\{ value: "motion", label: "Motion" \}/,
+    /const BOT_AVATAR_CUSTOMIZER_TABS = \[\s*\{ value: "face", label: "Identity" \},\s*\{ value: "profile", label: "Profile" \},\s*\{ value: "powers", label: "Powers" \},\s*\{ value: "eyes", label: "Eyes" \},\s*\{ value: "mouth", label: "Mouth" \},\s*\{ value: "voice", label: "Voice" \},\s*\{ value: "settings", label: "Settings" \},\s*\{ value: "details", label: "Details" \},\s*\{ value: "motion", label: "Motion" \}/,
   );
   assert.match(pageSource, /activeControlTab === "profile" && identityControlsVisible/);
   assert.match(pageSource, /aria-label="Bot profile editor mode"/);
@@ -918,6 +918,11 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   assert.match(cssSource, /\.botProfileBuilderBackdrop\[data-avatar-studio-layer="true"\]/);
   assert.match(pageSource, /activeControlTab === "voice"/);
   assert.match(pageSource, /activeControlTab === "settings" && identityControlsVisible/);
+  assert.match(pageSource, /activeControlTab === "powers" && identityControlsVisible/);
+  assert.match(pageSource, /<BotPowersEditor powers=\{newBotPowers\} onChange=\{setNewBotPowers\}/);
+  assert.match(pageSource, /\/api\/bot-powers\/compile/);
+  assert.match(cssSource, /\.botPowersPanel/);
+  assert.match(cssSource, /grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/);
   assert.match(pageSource, /aria-label="Generation Lens and bot randomizer"/);
   assert.match(pageSource, /resetLabel=\{isDefaultPrismBot \? "Reset voice" : "Restore original voice"\}/);
   assert.match(pageSource, /setPreviewMode\("talking"\)/);
@@ -936,6 +941,7 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   assert.match(pageSource, /Blink and thinking animation/);
   assert.match(pageSource, /type BotAvatarCustomizerTab =/);
   assert.match(pageSource, /\| "profile"/);
+  assert.match(pageSource, /\| "powers"/);
   assert.match(pageSource, /\| "settings"/);
   assert.match(pageSource, /\| "details"/);
   assert.match(pageSource, /useState<BotAvatarCustomizerTab>\(initialTab\)/);
@@ -970,7 +976,7 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   assert.match(cssSource, /\.botAvatarControlTabs\s*\{/);
   assert.match(
     cssRuleBody(".botAvatarControlTabs"),
-    /grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\);/,
+    /grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\);/,
   );
   assert.match(
     cssSource,

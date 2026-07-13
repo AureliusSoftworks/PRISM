@@ -522,6 +522,7 @@ export function buildCoffeeCupVisualState(args: {
   sessionStartedAtMs?: number | null;
   sessionEndsAtMs?: number | null;
   durationMinutes?: number | null;
+  powerRateMultiplier?: number;
   progressOverride?: number | null;
   topOff?: CoffeeCupTopOffSnapshot | null;
   sipCount?: number | null;
@@ -583,7 +584,12 @@ export function buildCoffeeCupVisualState(args: {
       ? 1
       : sipProgress != null
         ? sipProgress
-        : coffeeCupPacedProgress(timedProgress ?? 0, args.seed, args.durationMinutes);
+        : coffeeCupPacedProgress(
+            timedProgress ?? 0,
+            args.seed,
+            args.durationMinutes,
+            args.powerRateMultiplier
+          );
   const gatedTimedProgress =
     sipProgress == null && explicitProgress == null && timedProgress != null
       ? coffeeCupSipGatedTimedProgress({
@@ -615,7 +621,7 @@ export function buildCoffeeCupVisualState(args: {
                 sessionStartedAtMs: args.sessionStartedAtMs,
                 sessionEndsAtMs: args.sessionEndsAtMs,
                 durationMinutes: args.durationMinutes,
-              })
+            })
             : null;
         })()
       : null;
@@ -624,7 +630,12 @@ export function buildCoffeeCupVisualState(args: {
       ? 1
       : sipProgress != null
         ? sipProgress
-        : coffeeCupPacedProgress(gatedTimedProgress ?? 0, args.seed, args.durationMinutes);
+        : coffeeCupPacedProgress(
+            gatedTimedProgress ?? 0,
+            args.seed,
+            args.durationMinutes,
+            args.powerRateMultiplier
+          );
   const topOffForVisibleProgress = sipProgress != null ? null : args.topOff;
   const topOffBaseProgress =
     args.topOff && explicitProgress != null ? explicitProgress : pacedProgress;
@@ -653,7 +664,8 @@ export function buildCoffeeCupVisualState(args: {
           progress: coffeeCupPacedProgress(
             previousTimedSipGateProgress,
             args.seed,
-            args.durationMinutes
+            args.durationMinutes,
+            args.powerRateMultiplier
           ),
         topOff: args.topOff,
         nowMs: args.nowMs,

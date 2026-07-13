@@ -1,6 +1,7 @@
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import {
   parseBotAvatarDetailsV1,
+  normalizeBotPowersV1,
   type BotAvatarDetailsV1,
   type BotFaceBlinkBar,
   type BotFaceFontId,
@@ -8,6 +9,7 @@ import {
   type BotFaceThinkingFrames,
   type BotProfileFields,
   type BotAudioVoiceProfileV1,
+  type BotPowerV1,
 } from "@localai/shared";
 
 export const PRISM_BOT_ARCHIVE_SCHEMA = "prism-bot-export-v2";
@@ -66,6 +68,7 @@ export interface PrismBotArchiveJson {
     /** Portable profile values only; account voice-bank mappings are never exported. */
     authoredAudioVoiceProfile?: BotAudioVoiceProfileV1;
     audioVoiceProfileOverride?: BotAudioVoiceProfileV1 | null;
+    powers?: BotPowerV1[];
   };
   profile?: BotProfileFields;
   systemPrompt?: string;
@@ -186,6 +189,7 @@ function validateBotJson(parsed: unknown): PrismBotArchiveJson {
     bot: {
       ...botJson.bot,
       ...(avatarDetails !== undefined ? { avatarDetails } : {}),
+      ...(bot.powers !== undefined ? { powers: normalizeBotPowersV1(bot.powers) } : {}),
     },
   };
 }

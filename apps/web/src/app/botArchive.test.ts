@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { strToU8, unzipSync, zipSync } from "fflate";
+import { botPowerSourceHashV1 } from "@localai/shared";
 
 import {
   BOT_ARCHIVE_BOT_ENTRY_NAME,
@@ -107,6 +108,54 @@ describe("botArchive", () => {
     });
 
     assert.deepEqual(parsePrismBotArchive(archive).memories, []);
+  });
+
+  it("round-trips powers and queues mismatched compiled rules for recompilation", () => {
+    const name = "Stoic";
+    const intent = "Mood hardly changes from praise or criticism.";
+    const archive = createPrismBotArchive({
+      botJson: baseBotJson({
+        bot: {
+          ...baseBotJson().bot,
+          powers: [{
+            version: 1,
+            id: "stoic",
+            name,
+            intent,
+            enabled: true,
+            compileStatus: "ready",
+            compiled: {
+              version: 1,
+              sourceHash: botPowerSourceHashV1(name, intent),
+              selfCue: "Remain emotionally steady.",
+              observerCue: "Praise and criticism have little effect.",
+              effects: [{ type: "mood_resistance", polarity: "both", strength: "large" }],
+              ruleLabels: ["Strong mood resistance"],
+            },
+          }],
+        },
+      }),
+      memories: [],
+    });
+    const parsed = parsePrismBotArchive(archive);
+    assert.equal(parsed.botJson.bot.powers?.[0]?.compileStatus, "ready");
+
+    const stale = createPrismBotArchive({
+      botJson: baseBotJson({
+        bot: {
+          ...baseBotJson().bot,
+          powers: [{
+            ...parsed.botJson.bot.powers![0]!,
+            intent: "A revised intent that invalidates compiled rules.",
+          }],
+        },
+      }),
+      memories: [],
+    });
+    const stalePower = parsePrismBotArchive(stale).botJson.bot.powers?.[0];
+    assert.equal(stalePower?.compileStatus, "draft");
+    assert.equal(stalePower?.compiled, null);
+    assert.equal(stalePower?.intent, "A revised intent that invalidates compiled rules.");
   });
 
   it("can be embedded as zipped .bot entries inside a .bots collection", () => {

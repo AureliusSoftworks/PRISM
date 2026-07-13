@@ -1,5 +1,4 @@
 import type {
-  BotAudioVoiceProfileV1,
   ComfyUiWorkflowRegistration,
   EnglishVoiceEngine,
   VoiceMode,
@@ -13,7 +12,6 @@ import {
   normalizePrismMoodSensitivity,
   validateComfyUiWorkflowsPayload,
   normalizeEnglishVoiceEngine,
-  normalizeBotAudioVoiceProfileV1,
   normalizeBotVoiceVolume,
   normalizeVoiceMode,
   BOT_AUDIO_VOICE_IDS,
@@ -58,23 +56,6 @@ export function normalizeElevenLabsVoiceBank(value: unknown): ElevenLabsVoiceBan
 export function parseStoredElevenLabsVoiceBank(value: string | null | undefined): ElevenLabsVoiceBank {
   if (!value) return normalizeElevenLabsVoiceBank({});
   try { return normalizeElevenLabsVoiceBank(JSON.parse(value)); } catch { return normalizeElevenLabsVoiceBank({}); }
-}
-
-export function parseStoredPlayerAudioVoiceProfile(
-  value: string | null | undefined
-): BotAudioVoiceProfileV1 {
-  if (!value) return normalizeBotAudioVoiceProfileV1(undefined);
-  try {
-    return normalizeBotAudioVoiceProfileV1(JSON.parse(value));
-  } catch {
-    return normalizeBotAudioVoiceProfileV1(undefined);
-  }
-}
-
-export function normalizePlayerNamePronunciation(value: unknown, fallback = ""): string {
-  if (value === undefined) return fallback;
-  if (typeof value !== "string") return fallback;
-  return value.replace(/\s+/gu, " ").trim().slice(0, 120);
 }
 
 function normalizeElevenLabsVoiceModel(value: unknown, fallback: string | null): string | null {
@@ -194,8 +175,6 @@ export interface CurrentSettings {
   defaultElevenLabsVoiceId: string | null;
   elevenLabsVoiceBank: string | null;
   elevenLabsVoiceModel: string | null;
-  playerAudioVoiceProfile: string | null;
-  playerNamePronunciation: string | null;
 }
 
 /** Shape of the next-settings result, with OpenAI key intent captured separately. */
@@ -251,8 +230,6 @@ export interface NextSettings {
   defaultElevenLabsVoiceId: string | null;
   elevenLabsVoiceBank: ElevenLabsVoiceBank;
   elevenLabsVoiceModel: string | null;
-  playerAudioVoiceProfile: BotAudioVoiceProfileV1;
-  playerNamePronunciation: string;
   /**
    * Intent for the OpenAI API key:
    *   - "replace": caller sent a non-empty string; encrypt it
@@ -1124,14 +1101,6 @@ export function resolveNextSettings(
     body.elevenLabsVoiceModel,
     current.elevenLabsVoiceModel
   );
-  const playerAudioVoiceProfile = body.playerAudioVoiceProfile === undefined
-    ? parseStoredPlayerAudioVoiceProfile(current.playerAudioVoiceProfile)
-    : normalizeBotAudioVoiceProfileV1(body.playerAudioVoiceProfile);
-  const playerNamePronunciation = normalizePlayerNamePronunciation(
-    body.playerNamePronunciation,
-    normalizePlayerNamePronunciation(current.playerNamePronunciation)
-  );
-
   const comfyUiWorkflows =
     body.comfyUiWorkflows === undefined
       ? current.comfyUiWorkflows
@@ -1226,8 +1195,6 @@ export function resolveNextSettings(
     defaultElevenLabsVoiceId,
     elevenLabsVoiceBank,
     elevenLabsVoiceModel,
-    playerAudioVoiceProfile,
-    playerNamePronunciation,
     openAiKeyIntent,
     anthropicKeyIntent,
     elevenLabsKeyIntent,

@@ -32,9 +32,8 @@ describe("voice settings preview", () => {
     assert.match(pageSource, /Preview English/);
     assert.match(pageSource, /onClick=\{\(\) => void previewVoice\("bottish"\)\}/);
     assert.match(pageSource, /onClick=\{\(\) => void previewVoice\("english"\)\}/);
-    assert.match(pageSource, /englishReadyCacheKeyRef\.current !== cacheKey/);
-    assert.match(pageSource, /generateOnly,/);
-    assert.match(pageSource, /englishPreviewState === "ready"[\s\S]*?"Play English"/);
+    assert.match(pageSource, /onPlaybackStart: \(\) => setEnglishPreviewState\("playing"\)/);
+    assert.doesNotMatch(pageSource, /generateOnly/);
     assert.match(pageSource, /voicePreviewPlaybackRunRef/);
     assert.match(pageSource, /stopBottishVoice\(\);\s*stopEnglishVoice\(\);/);
     assert.match(pageSource, /const previewVoiceMode = forcedMode \?\? settings\.voiceMode/);

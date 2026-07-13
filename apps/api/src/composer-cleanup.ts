@@ -2,6 +2,7 @@ import type { PromptShortcutWildcardReplacement } from "@localai/shared";
 import type { LlmProvider } from "./providers.ts";
 
 export const COMPOSER_CLEANUP_MAX_INPUT_CHARS = 8000;
+export const COMPOSER_SEND_CLEANUP_TIMEOUT_MS = 4_500;
 
 export const COMPOSER_CLEANUP_SYSTEM_PROMPT =
   "You are Prism's composer proofreader. Correct spelling, grammar, punctuation, and obvious autocorrect mistakes only. Preserve the user's meaning, tone, markdown, line breaks, emoji, code blocks, names, and URLs. Do not add explanations, labels, quotes, or commentary. Return only the corrected text. If nothing needs correction, return the original text exactly.";
@@ -328,6 +329,7 @@ export async function cleanupResolvedPromptWithModel(args: {
   provider: LlmProvider;
   model?: string;
   signal?: AbortSignal;
+  timeoutMs?: number;
 }): Promise<{
   prompt: string;
   replacements: PromptShortcutWildcardReplacement[];
@@ -343,6 +345,12 @@ export async function cleanupResolvedPromptWithModel(args: {
     };
   }
   const maxTokens = Math.min(1800, Math.max(180, Math.ceil(prompt.length / 2)));
+  const timeoutSignal = AbortSignal.timeout(
+    Math.max(1, args.timeoutMs ?? COMPOSER_SEND_CLEANUP_TIMEOUT_MS)
+  );
+  const signal = args.signal
+    ? AbortSignal.any([args.signal, timeoutSignal])
+    : timeoutSignal;
   const raw = await args.provider.generateResponse(
     [
       { role: "system", content: COMPOSER_SEND_CLEANUP_SYSTEM_PROMPT },
@@ -371,7 +379,7 @@ export async function cleanupResolvedPromptWithModel(args: {
       maxTokens,
       jsonMode: true,
       usagePurpose: "composer_cleanup",
-      signal: args.signal,
+      signal,
     }
   );
   const cleanup = normalizeSendCleanupResponse(raw, prompt, replacements);

@@ -87,24 +87,21 @@ after(() => {
 });
 
 describe("API request integration", () => {
-  it("persists the player's Coffee voice identity and name pronunciation", async () => {
+  it("uses account-wide voice defaults and ignores retired Coffee player voice fields", async () => {
     const client = createClient();
     const register = await client.request(
       "/api/auth/register",
       jsonInit({ username: "player-voice@example.com", password: "player-voice-password", displayName: "Jared" })
     );
     assert.equal(register.status, 201);
-    const profile = {
-      ...normalizeBotAudioVoiceProfileV1(undefined),
-      baseVoiceId: "voice-3" as const,
-      systemVoiceName: "Zarvox",
-      elevenLabsVoiceId: "eleven-player",
-    };
     const saved = await client.request("/api/settings", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        playerAudioVoiceProfile: profile,
+        playerAudioVoiceProfile: {
+          ...normalizeBotAudioVoiceProfileV1(undefined),
+          baseVoiceId: "voice-3",
+        },
         playerNamePronunciation: "Jair-id",
         defaultSystemVoiceName: "Alex",
         defaultElevenLabsVoiceId: "eleven-global",
@@ -114,10 +111,8 @@ describe("API request integration", () => {
     const loaded = await client.request("/api/settings");
     assert.equal(loaded.status, 200);
     const settings = (await json(loaded)).settings;
-    assert.equal(settings.playerAudioVoiceProfile.baseVoiceId, "voice-3");
-    assert.equal(settings.playerAudioVoiceProfile.systemVoiceName, "Zarvox");
-    assert.equal(settings.playerAudioVoiceProfile.elevenLabsVoiceId, "eleven-player");
-    assert.equal(settings.playerNamePronunciation, "Jair-id");
+    assert.equal("playerAudioVoiceProfile" in settings, false);
+    assert.equal("playerNamePronunciation" in settings, false);
     assert.equal(settings.defaultSystemVoiceName, "Alex");
     assert.equal(settings.defaultElevenLabsVoiceId, "eleven-global");
 
@@ -127,6 +122,93 @@ describe("API request integration", () => {
     );
     assert.equal(preview.status, 200);
     assert.equal((await json(preview)).line, "Deterministic API reply.");
+  });
+
+  it("records Coffee departure idempotently and completes one bounded local epilogue", async () => {
+    const client = createClient();
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "coffee-departure@example.com",
+        password: "coffee-departure-password",
+        displayName: "Player",
+      })
+    );
+    assert.equal(register.status, 201);
+    const userId = String((await json(register)).user.id);
+    const botIds = ["departure-bot-1", "departure-bot-2"];
+    const now = new Date().toISOString();
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, system_prompt, online_enabled, created_at, updated_at) VALUES (?, ?, ?, ?, 0, ?, ?)"
+    ).run(botIds[0], userId, "First Bot", "You are First Bot.", now, now);
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, system_prompt, online_enabled, created_at, updated_at) VALUES (?, ?, ?, ?, 0, ?, ?)"
+    ).run(botIds[1], userId, "Second Bot", "You are Second Bot.", now, now);
+    const sessionId = "departure-session";
+    db.prepare(
+      "INSERT INTO conversations (id, user_id, title, conversation_mode, bot_group_ids, coffee_topic, created_at, updated_at) VALUES (?, ?, ?, 'coffee', ?, ?, ?, ?)"
+    ).run(
+      sessionId,
+      userId,
+      "Coffee departure",
+      JSON.stringify(botIds),
+      "What makes a good goodbye?",
+      now,
+      now
+    );
+    db.prepare(
+      "INSERT INTO messages (id, conversation_id, user_id, role, content, bot_id, created_at) VALUES (?, ?, ?, 'user', ?, NULL, ?)"
+    ).run("departure-user-line", sessionId, userId, "I have to head out early.", now);
+
+    const first = await client.request(
+      `/api/coffee/sessions/${encodeURIComponent(sessionId)}/depart`,
+      jsonInit({ preferredProvider: "local" })
+    );
+    assert.equal(first.status, 202);
+    const firstPayload = await json(first);
+    assert.equal(firstPayload.departureRecorded, true);
+    assert.equal(firstPayload.epilogueStarted, true);
+    assert.ok(firstPayload.epilogueTurnTarget >= 2 && firstPayload.epilogueTurnTarget <= 4);
+
+    const duplicate = await client.request(
+      `/api/coffee/sessions/${encodeURIComponent(sessionId)}/depart`,
+      jsonInit({ preferredProvider: "openai" })
+    );
+    assert.equal(duplicate.status, 202);
+    const duplicatePayload = await json(duplicate);
+    assert.equal(duplicatePayload.departureRecorded, false);
+    assert.equal(duplicatePayload.epilogueStarted, false);
+    assert.equal(duplicatePayload.epilogueTurnTarget, firstPayload.epilogueTurnTarget);
+
+    const resumeAttempt = await client.request(
+      `/api/coffee/sessions/${encodeURIComponent(sessionId)}/continue`,
+      jsonInit({ preferredProvider: "local" })
+    );
+    assert.equal(resumeAttempt.status, 400);
+    assert.match(String((await json(resumeAttempt)).error), /ended when the player left/i);
+
+    const deadline = Date.now() + 5_000;
+    let assistantCount = 0;
+    while (Date.now() < deadline) {
+      assistantCount = Number(
+        (db.prepare(
+          "SELECT COUNT(*) AS count FROM messages WHERE conversation_id = ? AND user_id = ? AND role = 'assistant' AND content <> ''"
+        ).get(sessionId, userId) as { count: number }).count
+      );
+      if (assistantCount >= firstPayload.epilogueTurnTarget) break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.equal(assistantCount, firstPayload.epilogueTurnTarget);
+    const markerCount = Number(
+      (db.prepare(
+        "SELECT COUNT(*) AS count FROM messages WHERE conversation_id = ? AND user_id = ? AND role = 'system' AND tool_payload LIKE '%playerDeparture%'"
+      ).get(sessionId, userId) as { count: number }).count
+    );
+    assert.equal(markerCount, 1);
+    const epilogueProviders = db.prepare(
+      "SELECT DISTINCT provider FROM messages WHERE conversation_id = ? AND user_id = ? AND role = 'assistant'"
+    ).all(sessionId, userId) as Array<{ provider: string | null }>;
+    assert.deepEqual(epilogueProviders.map((row) => row.provider), ["local"]);
   });
 
   it("routes CORS preflight, root landing, and unknown paths without external services", async () => {
@@ -324,15 +406,17 @@ describe("API request integration", () => {
       "voice-local-message",
       "voice-local-conversation",
       userId,
-      "This local reply must stay on the device.",
+      "*straightens the napkin edge* This local reply must stay on the device.",
       now
     );
+    const spokenText = "This local reply must stay on the device.";
 
     const beforeCalls = fetchRecorder.calls.length;
     const response = await client.request(
       "/api/voices/synthesize",
       jsonInit({
         messageId: "voice-local-message",
+        spokenText,
         mode: "english",
         engine: "elevenlabs",
         explicitOnlineContext: true,
@@ -348,12 +432,14 @@ describe("API request integration", () => {
     );
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("x-prism-voice-engine"), "builtin-local-fallback");
+    assert.equal(response.headers.get("x-prism-voice-characters"), String(spokenText.length));
     assert.equal(Buffer.from(await response.arrayBuffer()).subarray(0, 4).toString(), "RIFF");
 
     const alignedResponse = await client.request(
       "/api/voices/synthesize",
       jsonInit({
         messageId: "voice-local-message",
+        spokenText,
         mode: "english",
         engine: "elevenlabs",
         explicitOnlineContext: true,

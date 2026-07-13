@@ -41,7 +41,7 @@ describe("Bottish speech plan", () => {
     );
     assert.notEqual(changed.notes[0]?.frequencyHz, base.notes[0]?.frequencyHz);
     assert.notEqual(changed.notes[1]?.frequencyHz, base.notes[1]?.frequencyHz);
-    assert.notEqual(changed.notes[0]?.waveform, base.notes[0]?.waveform);
+    assert.notEqual(changed.notes[1]?.startMs, base.notes[1]?.startMs);
   });
 
   it("ignores legacy Pace and Warmth values", () => {
@@ -60,15 +60,23 @@ describe("Bottish speech plan", () => {
     assert.ok((plan.notes[0]?.lowpassHz ?? 0) >= 6000);
   });
 
-  it("uses Signal to move Bottish from organic tones to synthetic edges", () => {
-    const organic = buildBottishPlan("Signal check", { ...neutral, signal: -1 }, "signal");
-    const synthetic = buildBottishPlan("Signal check", { ...neutral, signal: 1 }, "signal");
-    assert.equal(organic.notes[0]?.waveform, "sine");
-    assert.equal(synthetic.notes[0]?.waveform, "square");
-    assert.ok((synthetic.notes[0]?.lowpassHz ?? 0) > (organic.notes[0]?.lowpassHz ?? 0));
-    assert.ok(
-      (synthetic.notes[0]?.lowpassHz ?? 0) - (organic.notes[0]?.lowpassHz ?? 0) >= 4000
+  it("uses tone to change voice character without adding loudness or distortion", () => {
+    const organic = buildBottishPlan(
+      "Signal check",
+      { ...neutral, signal: -1 },
+      "signal"
     );
+    const synthetic = buildBottishPlan(
+      "Signal check",
+      { ...neutral, signal: 1 },
+      "signal"
+    );
+    assert.notEqual(organic.notes[0]?.frequencyHz, synthetic.notes[0]?.frequencyHz);
+    assert.notEqual(organic.notes[1]?.startMs, synthetic.notes[1]?.startMs);
+    assert.ok(organic.durationMs > synthetic.durationMs);
+    assert.equal(organic.notes[0]?.waveform, synthetic.notes[0]?.waveform);
+    assert.equal(organic.notes[0]?.lowpassHz, synthetic.notes[0]?.lowpassHz);
+    assert.equal(organic.notes[0]?.gain, synthetic.notes[0]?.gain);
   });
 
   it("renders a playable PCM wave for the media fallback", () => {

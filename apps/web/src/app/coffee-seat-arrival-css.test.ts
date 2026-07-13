@@ -10,9 +10,11 @@ const coffeeSeatPlateEmojiPath = join(
   "CoffeeSeatPlateEmoji.tsx"
 );
 const pagePath = join(dirname(fileURLToPath(import.meta.url)), "page.tsx");
+const settingsPanelPath = join(dirname(fileURLToPath(import.meta.url)), "SettingsPanel.tsx");
 const css = readFileSync(cssPath, "utf8");
 const coffeeSeatPlateEmojiSource = readFileSync(coffeeSeatPlateEmojiPath, "utf8");
 const pageSource = readFileSync(pagePath, "utf8");
+const settingsPanelSource = readFileSync(settingsPanelPath, "utf8");
 
 function ruleForSeatVector(
   kind: "arrival" | "finished",
@@ -1388,12 +1390,12 @@ describe("Coffee seat arrival CSS", () => {
     assert.match(tableDiskRule, /max-width:\s*calc\(100% - 56px\)\s*;/);
     assert.match(
       css,
-      /@media\s*\(min-width:\s*1160px\)\s*\{[\s\S]*\.coffeeShell\[data-session-active="true"\]\[data-transcript-open="true"\][\s\S]*\.coffeeStage:not\(\[data-experimental-table-angle="true"\]\):is\([\s\S]*\.coffeeTableGlow\s*\{[\s\S]*width:\s*min\(72%,\s*680px\)\s*;[\s\S]*\.coffeeTableDisk\s*\{[\s\S]*width:\s*min\(54vw,\s*540px\)\s*;[\s\S]*max-width:\s*calc\(100% - 96px\)\s*;/,
+      /@media\s*\(min-width:\s*1160px\)\s*\{[\s\S]*\.coffeeShell\[data-session-active="true"\]\[data-transcript-open="true"\][\s\S]*\.coffeeStage:not\(\[data-coffee-perspective="first-person"\]\):is\([\s\S]*\.coffeeTableGlow\s*\{[\s\S]*width:\s*min\(72%,\s*680px\)\s*;[\s\S]*\.coffeeTableDisk\s*\{[\s\S]*width:\s*min\(54vw,\s*540px\)\s*;[\s\S]*max-width:\s*calc\(100% - 96px\)\s*;/,
       "expected docked Table Talk to scale the round table disk up while preserving edge clearance"
     );
     assert.match(
       css,
-      /@media\s*\(min-width:\s*1160px\)\s*\{[\s\S]*\.coffeeShell\[data-session-active="true"\]\[data-transcript-open="true"\][\s\S]*\.coffeeStage\[data-experimental-table-angle="true"\]:is\([\s\S]*\.coffeeTableScene\s*\{[\s\S]*--coffee-table-asset-width:\s*min\(82%,\s*940px\)\s*;/,
+      /@media\s*\(min-width:\s*1160px\)\s*\{[\s\S]*\.coffeeShell\[data-session-active="true"\]\[data-transcript-open="true"\][\s\S]*\.coffeeStage\[data-coffee-perspective="first-person"\]:is\([\s\S]*\.coffeeTableScene\s*\{[\s\S]*--coffee-table-asset-width:\s*min\(82%,\s*940px\)\s*;/,
       "expected docked Table Talk to scale down the raster table asset on narrower live layouts"
     );
 
@@ -1444,7 +1446,7 @@ describe("Coffee seat arrival CSS", () => {
 
     assert.match(
       css,
-      /\.coffeeStage\[data-autoplay-dock="true"\]:not\(\[data-compact="true"\]\):not\(\[data-experimental-table-angle="true"\]\):is\([\s\S]*\.coffeeSeatActionAnchor\[data-seat-count="5"\]\[data-layout-seat="0"\][\s\S]*bottom:\s*calc\(100%\s*\+\s*clamp\(10px,\s*1\.4vw,\s*18px\)\)\s*;[\s\S]*width:\s*min\(270px,\s*34cqw,\s*calc\(100cqw\s*-\s*24px\)\)\s*;/,
+      /\.coffeeStage\[data-autoplay-dock="true"\]:not\(\[data-compact="true"\]\):not\(\[data-coffee-perspective="first-person"\]\):is\([\s\S]*\.coffeeSeatActionAnchor\[data-seat-count="5"\]\[data-layout-seat="0"\][\s\S]*bottom:\s*calc\(100%\s*\+\s*clamp\(10px,\s*1\.4vw,\s*18px\)\)\s*;[\s\S]*width:\s*min\(270px,\s*34cqw,\s*calc\(100cqw\s*-\s*24px\)\)\s*;/,
       "expected the top action label to stay centered above the top bot"
     );
     assert.match(
@@ -1454,7 +1456,7 @@ describe("Coffee seat arrival CSS", () => {
     );
     assert.match(
       css,
-      /\.coffeeStage\[data-autoplay-dock="true"\]:not\(\[data-compact="true"\]\):not\(\[data-experimental-table-angle="true"\]\):is\([\s\S]*\.coffeeSeatActionAnchor\[data-seat-count="5"\] \.coffeeSeatActionBadgeText\s*\{[\s\S]*-webkit-line-clamp:\s*3\s*;[\s\S]*font-size:\s*clamp\(0\.86rem,\s*0\.98vw,\s*1\.08rem\)\s*;/,
+      /\.coffeeStage\[data-autoplay-dock="true"\]:not\(\[data-compact="true"\]\):not\(\[data-coffee-perspective="first-person"\]\):is\([\s\S]*\.coffeeSeatActionAnchor\[data-seat-count="5"\] \.coffeeSeatActionBadgeText\s*\{[\s\S]*-webkit-line-clamp:\s*3\s*;[\s\S]*font-size:\s*clamp\(0\.86rem,\s*0\.98vw,\s*1\.08rem\)\s*;/,
       "expected five-seat action text to wrap before it can be clipped"
     );
 
@@ -1540,6 +1542,21 @@ describe("Coffee seat arrival CSS", () => {
 
     const leftMugRule = ruleForExactSelector('.coffeeCup[data-cup-side="left"]');
     assert.match(leftMugRule, /--coffee-cup-sip-x:\s*clamp\(24px,\s*2\.7vw,\s*36px\)\s*;/);
+  });
+
+  it("selects first-person Coffee automatically while keeping current Coffee settings discoverable", () => {
+    assert.match(
+      pageSource,
+      /const coffeeFirstPersonPerspective =[\s\S]*?!coffeeReplayActive[\s\S]*?coffeeSessionPhase === "arriving"[\s\S]*?coffeeSessionPhase === "live"/
+    );
+    assert.match(
+      pageSource,
+      /data-coffee-perspective=\{[\s\S]*?coffeeFirstPersonPerspective \? "first-person" : "third-person"/
+    );
+    assert.doesNotMatch(pageSource, /data-experimental-table-angle/);
+    assert.doesNotMatch(pageSource, /coffeeExperimentalTableAngleEnabled/);
+    assert.match(settingsPanelSource, /scope:\s*"coffee"/u);
+    assert.match(pageSource, /data-settings-section="coffee"[\s\S]*Open Coffee Groups/u);
   });
 
   it("docks the Coffee pot directly above the composer", () => {

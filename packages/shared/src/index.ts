@@ -2,6 +2,35 @@ import type { TellFictionalStoryPayload, WebSearchPayload } from "./prismTool.js
 import type { PrismMoodIgnoredQuestionPenaltyLevel } from "./mood.js";
 
 export {
+  BOT_POWER_INTENT_MAX_LENGTH,
+  BOT_POWER_MAX_COUNT,
+  BOT_POWER_NAME_MAX_LENGTH,
+  BOT_POWER_VERSION,
+  COFFEE_POWER_PROMPT_MAX_CHARS,
+  COFFEE_POWER_PROMPT_MAX_TOKENS,
+  activeBotPowersV1,
+  botPowerSourceHashV1,
+  buildCoffeePowersPromptBlock,
+  coffeePowerCupRateMultiplierV1,
+  estimateCoffeePowerTokensV1,
+  normalizeBotPowerEffectV1,
+  normalizeBotPowerV1,
+  normalizeBotPowersV1,
+  normalizeCompiledBotPowerV1,
+  parseStoredBotPowersV1,
+  serializeBotPowersV1,
+  type BotPowerCompileStatus,
+  type BotPowerEffectV1,
+  type BotPowerFrequency,
+  type BotPowerStrength,
+  type BotPowerTargetV1,
+  type BotPowerV1,
+  type CoffeePowerPlanV1,
+  type CompiledBotPowerV1,
+  type ResolvedCoffeePowerBotV1,
+} from "./botPower.js";
+
+export {
   applyPrismMoodExpiredIgnoreCooldown,
   applyPrismMoodForgivenessSuccess,
   applyPrismMoodIgnoredQuestion,
@@ -276,6 +305,7 @@ export {
   type CoffeeReplayArrivalEventPayload,
   type CoffeeReplayEventPayload,
   type CoffeeReplayMoodEventPayload,
+  type CoffeeReplayPlayerDepartureEventPayload,
   type CoffeeReplaySocialSnapshotPayload,
   type CoffeeReplayTopOffEventPayload,
   type CoffeeUserActionPayload,
@@ -1036,10 +1066,15 @@ export function coffeeCupConsumptionRate(
 export function coffeeCupPacedProgress(
   progress: number,
   seed: string,
-  durationMinutes?: CoffeeSessionDurationMinutes | null
+  durationMinutes?: CoffeeSessionDurationMinutes | null,
+  powerRateMultiplier = 1
 ): number {
+  const multiplier =
+    Number.isFinite(powerRateMultiplier) && powerRateMultiplier > 0
+      ? Math.max(0.25, Math.min(3, powerRateMultiplier))
+      : 1;
   return clampCoffeeCupProgress(
-    progress * coffeeCupConsumptionRate(seed, durationMinutes)
+    progress * coffeeCupConsumptionRate(seed, durationMinutes) * multiplier
   );
 }
 
