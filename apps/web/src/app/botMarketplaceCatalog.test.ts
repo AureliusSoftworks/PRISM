@@ -17,7 +17,6 @@ import {
   normalizeBotFaceThinkingFrames,
   normalizeOptionalBotAudioVoiceProfileV1,
   BOT_AUDIO_VOICE_IDS,
-  type BotFaceThinkingFrames,
 } from "@localai/shared";
 import {
   marketplaceBotEyeCharacterIsSideways,
@@ -88,7 +87,6 @@ describe("bot marketplace static catalog", () => {
       readJsonFile(path.join(publicRoot, "bot-marketplace/manifest.json"))
     );
     const seenFaceSignatures = new Set<string>();
-    const seenThinkingSpinners = new Set<string>();
 
     assert.equal(manifest.bots.length > 0, true);
     for (const entry of manifest.bots) {
@@ -123,9 +121,6 @@ describe("bot marketplace static catalog", () => {
       assert.equal(normalizeBotFaceBlinkBar(bot.faceBlinkBar), DEFAULT_BOT_FACE_BLINK_BAR, entry.name);
       const thinkingFrames = normalizeBotFaceThinkingFrames(bot.faceThinkingFrames);
       assert.notEqual(thinkingFrames, null, entry.name);
-      const thinkingSpinner = (thinkingFrames as BotFaceThinkingFrames).join("");
-      assert.equal(seenThinkingSpinners.has(thinkingSpinner), false, entry.name);
-      seenThinkingSpinners.add(thinkingSpinner);
       const faceSignature = JSON.stringify({
         eyesFont: bot.faceEyesFont,
         eyeCharacter: bot.faceEyeCharacter,
@@ -421,7 +416,7 @@ describe("bot marketplace static catalog", () => {
     assert.equal(byId.get("mira")?.color, "#7b5cff");
   });
 
-  it("pairs each Prism Original with a distinct basic face preset", () => {
+  it("pairs each Prism Original with its requested basic face preset", () => {
     const manifest = normalizeBotMarketplaceManifest(
       readJsonFile(path.join(publicRoot, "bot-marketplace/manifest.json"))
     );
@@ -430,7 +425,7 @@ describe("bot marketplace static catalog", () => {
     const expectedPresets = new Map([
       [
         "pia",
-        { preset: "Soft", eyesFont: "warm", mouthFont: "warm", weight: 575, eyeScale: 1.05, eyeOffsetY: 0 },
+        { preset: "Default", eyesFont: "neutral", mouthFont: "neutral", weight: 600, eyeScale: 1, eyeOffsetY: 0 },
       ],
       [
         "rowan",
@@ -445,7 +440,7 @@ describe("bot marketplace static catalog", () => {
       ],
       [
         "iris",
-        { preset: "Doto", eyesFont: "concise", mouthFont: "concise", weight: 600, eyeScale: 1, eyeOffsetY: 0 },
+        { preset: "Soft", eyesFont: "warm", mouthFont: "warm", weight: 575, eyeScale: 1.05, eyeOffsetY: 0 },
       ],
       [
         "sol",
@@ -476,6 +471,13 @@ describe("bot marketplace static catalog", () => {
       assert.equal(bot.faceMouthOffsetY, 0, `${botId} ${preset.preset} mouth y`);
       assert.equal(bot.faceMouthRotationDeg, 0, `${botId} ${preset.preset} mouth rotation`);
       assert.equal(bot.faceBlinkBar, " ", `${botId} ${preset.preset} blink bar`);
+      if (botId === "pia" || botId === "iris") {
+        assert.deepEqual(
+          bot.faceThinkingFrames,
+          ["|", "/", "-", "\\"],
+          `${botId} ${preset.preset} thinking frames`
+        );
+      }
     }
   });
 });
