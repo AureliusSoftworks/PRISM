@@ -42,6 +42,9 @@ const pristine: BotCustomizerSavePristine = {
   faceMouthOffsetY: 0,
   faceMouthRotationDeg: 0,
   faceBlinkBar: "|",
+  faceBlinkScale: 1,
+  faceBlinkOffsetX: 0,
+  faceBlinkOffsetY: 0,
   faceThinkingFrames: ["|", "/", "-", "\\"],
   avatarDetails: null,
   profilePictureImageId: null,
@@ -88,6 +91,9 @@ const currentFromPristine = (
   faceMouthOffsetY: pristine.faceMouthOffsetY,
   faceMouthRotationDeg: pristine.faceMouthRotationDeg,
   faceBlinkBar: pristine.faceBlinkBar,
+  faceBlinkScale: pristine.faceBlinkScale,
+  faceBlinkOffsetX: pristine.faceBlinkOffsetX,
+  faceBlinkOffsetY: pristine.faceBlinkOffsetY,
   faceThinkingFrames: pristine.faceThinkingFrames,
   avatarDetails: pristine.avatarDetails,
   profilePictureImageId: pristine.profilePictureImageId,
@@ -231,6 +237,24 @@ describe("bot customizer save patch", () => {
         pristine
       ),
       { faceBlinkBar: "none" }
+    );
+  });
+
+  it("patches custom blink scale and placement edits", () => {
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(
+        currentFromPristine({
+          faceBlinkScale: 1.2,
+          faceBlinkOffsetX: -0.08,
+          faceBlinkOffsetY: 0.06,
+        }),
+        pristine
+      ),
+      {
+        faceBlinkScale: 1.2,
+        faceBlinkOffsetX: -0.08,
+        faceBlinkOffsetY: 0.06,
+      }
     );
   });
 

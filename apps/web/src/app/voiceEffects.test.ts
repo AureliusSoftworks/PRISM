@@ -9,18 +9,14 @@ import {
 } from "./voiceEffects.ts";
 
 describe("voice textures", () => {
-  it("scales texture controls by Amount and bypasses texture only", () => {
+  it("treats retired CRT texture profiles as clean", () => {
     const profile = {
       ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
       volume: 1.2,
       texture: { ...botVoiceTextureForPreset("crt-speaker"), amount: 0.5 },
     };
     assert.deepEqual(resolveVoiceTexture(profile), {
-      bandwidth: 0.675,
-      noise: 0.025,
-      instability: 0.01,
-      distortion: 0.06,
-      damage: 0.025,
+      bandwidth: 1, noise: 0, instability: 0, distortion: 0, damage: 0,
     });
     assert.deepEqual(resolveVoiceTexture(profile, false), {
       bandwidth: 1, noise: 0, instability: 0, distortion: 0, damage: 0,

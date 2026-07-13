@@ -223,6 +223,9 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       prism_default_bot_face_mouth_offset_y REAL,
       prism_default_bot_face_mouth_rotation_deg REAL,
       prism_default_bot_face_blink_bar TEXT,
+      prism_default_bot_face_blink_scale REAL,
+      prism_default_bot_face_blink_offset_x REAL,
+      prism_default_bot_face_blink_offset_y REAL,
       prism_default_bot_face_thinking_frames TEXT,
       prism_default_bot_temperature REAL,
       prism_default_bot_max_tokens INTEGER,
@@ -426,6 +429,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       user_id TEXT NOT NULL,
       name TEXT NOT NULL,
       system_prompt TEXT NOT NULL DEFAULT '',
+      voice_preview_line TEXT,
       export_hash TEXT,
       semantic_facets TEXT,
       semantic_facets_source_hash TEXT,
@@ -459,6 +463,9 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       face_mouth_offset_y REAL,
       face_mouth_rotation_deg REAL,
       face_blink_bar TEXT,
+      face_blink_scale REAL,
+      face_blink_offset_x REAL,
+      face_blink_offset_y REAL,
       face_thinking_frames TEXT,
       authored_audio_voice_profile TEXT,
       audio_voice_profile_override TEXT,
@@ -992,6 +999,9 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     ["prism_default_bot_face_mouth_offset_y", "REAL"],
     ["prism_default_bot_face_mouth_rotation_deg", "REAL"],
     ["prism_default_bot_face_blink_bar", "TEXT"],
+    ["prism_default_bot_face_blink_scale", "REAL"],
+    ["prism_default_bot_face_blink_offset_x", "REAL"],
+    ["prism_default_bot_face_blink_offset_y", "REAL"],
     ["prism_default_bot_face_thinking_frames", "TEXT"],
     ["prism_default_bot_temperature", "REAL"],
     ["prism_default_bot_max_tokens", "INTEGER"],
@@ -1582,6 +1592,24 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   if (!hasBotFaceBlinkBarColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN face_blink_bar TEXT;");
   }
+  const hasBotFaceBlinkScaleColumn = botColumns.some(
+    (column) => column.name === "face_blink_scale"
+  );
+  if (!hasBotFaceBlinkScaleColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN face_blink_scale REAL;");
+  }
+  const hasBotFaceBlinkOffsetXColumn = botColumns.some(
+    (column) => column.name === "face_blink_offset_x"
+  );
+  if (!hasBotFaceBlinkOffsetXColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN face_blink_offset_x REAL;");
+  }
+  const hasBotFaceBlinkOffsetYColumn = botColumns.some(
+    (column) => column.name === "face_blink_offset_y"
+  );
+  if (!hasBotFaceBlinkOffsetYColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN face_blink_offset_y REAL;");
+  }
   const hasBotFaceThinkingFramesColumn = botColumns.some(
     (column) => column.name === "face_thinking_frames"
   );
@@ -1618,6 +1646,12 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   );
   if (!hasBotFlirtEnabledColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN flirt_enabled INTEGER NOT NULL DEFAULT 0;");
+  }
+  const hasBotVoicePreviewLineColumn = botColumns.some(
+    (column) => column.name === "voice_preview_line"
+  );
+  if (!hasBotVoicePreviewLineColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN voice_preview_line TEXT;");
   }
   const hasAuthoredAudioVoiceProfileColumn = botColumns.some(
     (column) => column.name === "authored_audio_voice_profile"

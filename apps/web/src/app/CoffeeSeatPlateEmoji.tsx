@@ -9,10 +9,14 @@ import {
   type JSX,
 } from "react";
 import {
+  BOT_FACE_BLINK_BAR_VALUES,
   DEFAULT_BOT_FACE_BLINK_BAR,
   DEFAULT_BOT_FACE_THINKING_FRAMES,
   botFaceThinkingFramesEqual,
   normalizeBotFaceBlinkBar,
+  normalizeBotFaceBlinkOffsetX,
+  normalizeBotFaceBlinkOffsetY,
+  normalizeBotFaceBlinkScale,
   normalizeBotFaceEyeCharacter,
   normalizeBotFaceEyeOffsetX,
   normalizeBotFaceEyeOffsetY,
@@ -192,6 +196,9 @@ export type CoffeeSeatPlateEmojiProps = {
   faceMouthOffsetY?: number | null;
   faceMouthRotationDeg?: number | null;
   faceBlinkBar?: BotFaceBlinkBar | null;
+  faceBlinkScale?: number | null;
+  faceBlinkOffsetX?: number | null;
+  faceBlinkOffsetY?: number | null;
   faceThinkingFrames?: BotFaceThinkingFrames | string[] | null;
   forceBlinkPhase?: CoffeeSeatBlinkPhase | null;
   className: string;
@@ -257,6 +264,9 @@ export function CoffeeSeatPlateEmoji({
   faceMouthOffsetY,
   faceMouthRotationDeg,
   faceBlinkBar,
+  faceBlinkScale,
+  faceBlinkOffsetX,
+  faceBlinkOffsetY,
   faceThinkingFrames,
   forceBlinkPhase,
   className,
@@ -281,6 +291,9 @@ export function CoffeeSeatPlateEmoji({
       : normalizedFaceMouthCharacter;
   const normalizedFaceBlinkBar =
     normalizeBotFaceBlinkBar(faceBlinkBar) ?? DEFAULT_BOT_FACE_BLINK_BAR;
+  const customBlinkBarActive = !BOT_FACE_BLINK_BAR_VALUES.some(
+    (blinkBar) => blinkBar === normalizedFaceBlinkBar
+  );
   const forcedBlinkPhase =
     forceBlinkPhase === "open" || forceBlinkPhase === "closed"
       ? forceBlinkPhase
@@ -462,6 +475,18 @@ export function CoffeeSeatPlateEmoji({
     thinkingSpinnerActive || questionGlyphActive || !normalizedFaceEyeCharacter
       ? undefined
       : normalizeBotFaceEyeRotationDeg(faceEyeRotationDeg) ?? undefined;
+  const normalizedFaceBlinkScale =
+    thinkingSpinnerActive || questionGlyphActive || !customBlinkBarActive
+    ? undefined
+    : normalizeBotFaceBlinkScale(faceBlinkScale) ?? undefined;
+  const normalizedFaceBlinkOffsetX =
+    thinkingSpinnerActive || questionGlyphActive || !customBlinkBarActive
+    ? undefined
+    : normalizeBotFaceBlinkOffsetX(faceBlinkOffsetX) ?? undefined;
+  const normalizedFaceBlinkOffsetY =
+    thinkingSpinnerActive || questionGlyphActive || !customBlinkBarActive
+    ? undefined
+    : normalizeBotFaceBlinkOffsetY(faceBlinkOffsetY) ?? undefined;
   const normalizedFaceMouthScale =
     thinkingSpinnerActive || questionGlyphActive
       ? undefined
@@ -489,6 +514,11 @@ export function CoffeeSeatPlateEmoji({
   const faceEyeOffset = rotatedFaceOffset(
     normalizedFaceEyeOffsetX,
     normalizedFaceEyeOffsetY,
+    rotateDeg
+  );
+  const faceBlinkOffset = rotatedFaceOffset(
+    normalizedFaceBlinkOffsetX,
+    normalizedFaceBlinkOffsetY,
     rotateDeg
   );
   const faceMouthOffset = rotatedFaceOffset(
@@ -534,6 +564,9 @@ export function CoffeeSeatPlateEmoji({
         normalizedFaceEyeOffsetX ||
         normalizedFaceEyeOffsetY ||
         normalizedFaceEyeRotationDeg ||
+        normalizedFaceBlinkScale ||
+        normalizedFaceBlinkOffsetX ||
+        normalizedFaceBlinkOffsetY ||
         normalizedFaceMouthScale ||
         normalizedFaceMouthOffsetX ||
         normalizedFaceMouthOffsetY ||
@@ -577,6 +610,11 @@ export function CoffeeSeatPlateEmoji({
           faceEyeRotationCssDeg === undefined
             ? undefined
             : `${faceEyeRotationCssDeg}deg`,
+        ["--bot-face-blink-scale" as string]: normalizedFaceBlinkScale,
+        ["--bot-face-blink-offset-x" as string]:
+          faceBlinkOffset === null ? undefined : `${faceBlinkOffset.x}em`,
+        ["--bot-face-blink-offset-y" as string]:
+          faceBlinkOffset === null ? undefined : `${faceBlinkOffset.y}em`,
         ["--bot-face-mouth-scale" as string]: normalizedFaceMouthScale,
         ["--bot-face-mouth-offset-x" as string]:
           faceMouthOffset === null

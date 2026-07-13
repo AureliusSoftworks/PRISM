@@ -177,6 +177,9 @@ describe("createDatabase bot export hash migration", () => {
       assert.ok(columns.some((column) => column.name === "face_mouth_offset_y"));
       assert.ok(columns.some((column) => column.name === "face_mouth_rotation_deg"));
       assert.ok(columns.some((column) => column.name === "face_blink_bar"));
+      assert.ok(columns.some((column) => column.name === "face_blink_scale"));
+      assert.ok(columns.some((column) => column.name === "face_blink_offset_x"));
+      assert.ok(columns.some((column) => column.name === "face_blink_offset_y"));
       assert.ok(columns.some((column) => column.name === "face_thinking_frames"));
       assert.ok(columns.some((column) => column.name === "profile_picture_image_id"));
       const opinionColumns = reopened

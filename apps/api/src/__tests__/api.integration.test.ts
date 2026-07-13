@@ -193,7 +193,7 @@ describe("API request integration", () => {
     assert.deepEqual(fetchRecorder.calls, []);
   });
 
-  it("persists mouth animation and eye rotation while ignoring legacy eye animation", async () => {
+  it("persists face motion, rotation, and custom blink geometry", async () => {
     const client = createClient();
     const register = await client.request(
       "/api/auth/register",
@@ -210,6 +210,9 @@ describe("API request integration", () => {
         faceEyeRotationDeg: -25,
         faceMouthCharacter: "△",
         faceMouthAnimation: "wobble",
+        faceBlinkScale: 1.2,
+        faceBlinkOffsetX: -0.08,
+        faceBlinkOffsetY: 0.06,
       })
     );
     assert.equal(created.status, 201);
@@ -218,6 +221,9 @@ describe("API request integration", () => {
     assert.equal(createdPayload.bot.face_eye_animation, undefined);
     assert.equal(createdPayload.bot.face_eye_rotation_deg, -25);
     assert.equal(createdPayload.bot.face_mouth_animation, "wobble");
+    assert.equal(createdPayload.bot.face_blink_scale, 1.2);
+    assert.equal(createdPayload.bot.face_blink_offset_x, -0.08);
+    assert.equal(createdPayload.bot.face_blink_offset_y, 0.06);
 
     const updated = await client.request(`/api/bots/${encodeURIComponent(botId)}`, {
       method: "PATCH",
@@ -227,6 +233,9 @@ describe("API request integration", () => {
         faceEyeAnimation: "flicker",
         faceEyeRotationDeg: 35,
         faceMouthAnimation: "pulsate",
+        faceBlinkScale: 0.85,
+        faceBlinkOffsetX: 0.1,
+        faceBlinkOffsetY: -0.12,
       }),
     });
     assert.equal(updated.status, 200);
@@ -235,6 +244,9 @@ describe("API request integration", () => {
     assert.equal(updatedPayload.bot.face_eye_animation, "none");
     assert.equal(updatedPayload.bot.face_eye_rotation_deg, 35);
     assert.equal(updatedPayload.bot.face_mouth_animation, "pulsate");
+    assert.equal(updatedPayload.bot.face_blink_scale, 0.85);
+    assert.equal(updatedPayload.bot.face_blink_offset_x, 0.1);
+    assert.equal(updatedPayload.bot.face_blink_offset_y, -0.12);
 
     const updatedDefault = await client.request("/api/default-bot", {
       method: "PATCH",
@@ -245,6 +257,9 @@ describe("API request integration", () => {
         faceEyeRotationDeg: -45,
         faceMouthCharacter: "△",
         faceMouthAnimation: "wobble",
+        faceBlinkScale: 1.25,
+        faceBlinkOffsetX: -0.06,
+        faceBlinkOffsetY: 0.08,
       }),
     });
     assert.equal(updatedDefault.status, 200);
@@ -252,6 +267,9 @@ describe("API request integration", () => {
     assert.equal(defaultPayload.defaultBot.prismDefaultBotFaceEyeAnimation, undefined);
     assert.equal(defaultPayload.defaultBot.prismDefaultBotFaceEyeRotationDeg, -45);
     assert.equal(defaultPayload.defaultBot.prismDefaultBotFaceMouthAnimation, "wobble");
+    assert.equal(defaultPayload.defaultBot.prismDefaultBotFaceBlinkScale, 1.25);
+    assert.equal(defaultPayload.defaultBot.prismDefaultBotFaceBlinkOffsetX, -0.06);
+    assert.equal(defaultPayload.defaultBot.prismDefaultBotFaceBlinkOffsetY, 0.08);
   });
 
   it("runs a Zen chat through a deterministic provider without external egress", async () => {
@@ -387,6 +405,29 @@ describe("API request integration", () => {
       normalizeBotAudioVoiceProfileV1(authored)
     );
     assert.equal(createdPayload.bot.audio_voice_profile_override, null);
+
+    const generatedPreview = await client.request(
+      "/api/voices/preview-line",
+      jsonInit({
+        botId: createdPayload.bot.id,
+        botName: "Voiced bot",
+        systemPrompt: "A careful voice tester.",
+      })
+    );
+    assert.equal(generatedPreview.status, 200);
+    const generatedPreviewLine = (await json(generatedPreview)).line;
+    assert.equal(typeof generatedPreviewLine, "string");
+    assert.equal(
+      (db.prepare("SELECT voice_preview_line FROM bots WHERE id = ?")
+        .get(createdPayload.bot.id) as { voice_preview_line?: string }).voice_preview_line,
+      generatedPreviewLine
+    );
+
+    const cachedPreview = await client.request(
+      "/api/voices/preview-line",
+      jsonInit({ botId: createdPayload.bot.id, botName: "Voiced bot" })
+    );
+    assert.equal((await json(cachedPreview)).line, generatedPreviewLine);
 
     const capabilitiesResponse = await client.request("/api/voices/capabilities");
     assert.equal(capabilitiesResponse.status, 200);
