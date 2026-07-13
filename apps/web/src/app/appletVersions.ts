@@ -34,7 +34,7 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   zen: {
     id: "zen",
     name: "Zen",
-    version: "0.6",
+    version: "0.7",
     status: "active",
   },
   arena: {
