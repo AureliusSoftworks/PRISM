@@ -237,6 +237,11 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.match(pageSource, /: randomBotAvatarCustomThinkingFrames\(\)/);
   assert.match(pageSource, /label="Eye size"/);
   assert.match(pageSource, /label="Eye position"/);
+  assert.match(pageSource, /label="Blink size"/);
+  assert.match(pageSource, /label="Blink position"/);
+  assert.match(pageSource, /onBlinkScaleChange/);
+  assert.match(pageSource, /onBlinkOffsetXChange/);
+  assert.match(pageSource, /onBlinkOffsetYChange/);
   assert.match(pageSource, /label="Mouth size"/);
   assert.match(pageSource, /label="Mouth position"/);
   assert.match(pageSource, /function BotAvatarCoordinateControl\(/);
@@ -252,6 +257,9 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.match(cssRuleBody(".botAvatarCoordinatePad"), /cursor:\s*grab;/);
   assert.match(cssSource, /\.botAvatarCoordinatePad::before/);
   assert.match(cssRuleBody(".botAvatarCoordinateThumb"), /width:\s*20px;/);
+  assert.match(cssSource, /--bot-face-eye-scale:\s*var\(--bot-face-blink-scale, 1\)/);
+  assert.match(cssSource, /--bot-face-eye-offset-x:\s*var\(--bot-face-blink-offset-x, 0em\)/);
+  assert.match(cssSource, /--bot-face-eye-offset-y:\s*var\(--bot-face-blink-offset-y, 0em\)/);
   const faceBranchStart = pageSource.indexOf(
     '{activeTab === "face" ? (\n        <div className={styles.botAvatarFaceControls}>',
   );
@@ -476,6 +484,7 @@ test("avatar and bot saves recover cleanly when the edit target no longer exists
 test("avatar customizer keeps explicit save and dirty prompts for broader edits", () => {
   assert.match(pageSource, /hasUnsavedChanges: boolean;/);
   assert.match(pageSource, /draftMode\?: boolean;/);
+  assert.match(pageSource, /canSave\?: boolean;/);
   assert.match(pageSource, /draftMode = false/);
   assert.match(pageSource, /savePromptOpen: boolean;/);
   assert.match(
@@ -495,7 +504,7 @@ test("avatar customizer keeps explicit save and dirty prompts for broader edits"
   assert.doesNotMatch(pageSource, /BotAvatarLiveSavePatch/);
   assert.match(
     pageSource,
-    /const saveButtonVisible = saving \|\| hasUnsavedChanges \|\| detailsEditorDirty;/,
+    /const saveButtonVisible = draftMode \|\| saving \|\| hasUnsavedChanges \|\| detailsEditorDirty;/,
   );
   assert.match(pageSource, /\{saveButtonVisible \? \(/);
   assert.match(pageSource, /draftMode\s*\?\s*"Draft"\s*:\s*"Saved"/);
@@ -503,6 +512,8 @@ test("avatar customizer keeps explicit save and dirty prompts for broader edits"
     pageSource,
     /draftMode=\{botPanelCreateMode && !editingBotId && !editingDefaultBot\}/,
   );
+  assert.match(pageSource, /draftMode \? "Create bot" : "Save"/);
+  assert.match(pageSource, /const created = await createBot\(\);/);
 
   const saveButtonRule = cssRuleBody(
     ".botProfileBuilderHeader .botAvatarCustomizerSaveButton",
@@ -672,13 +683,12 @@ test("default Prism bot card opens an avatar-only customizer path", () => {
     /botPanelAdvancedEditorAvailable =\s*botPanelView === "create" \|\| botPanelView === "customize";/,
   );
   assert.match(pageSource, /!editingDefaultBot \? \(/);
+  assert.match(pageSource, /onDoubleClick=\{openDefaultBotCustomizer\}/);
+  assert.match(pageSource, /aria-label="Preview Prism; double-click to customize"/);
   assert.match(
     pageSource,
-    /className=\{styles\.botCardDefaultCustomizeButton\}/,
+    /<button type="button" onClick=\{openDefaultBotCustomizer\}>\s*Customize Prism\s*<\/button>/,
   );
-  assert.match(pageSource, /aria-label="Customize Default Prism bot"/);
-  assert.match(pageSource, /onClick=\{openDefaultBotCustomizer\}/);
-  assert.match(cssSource, /\.botCardDefaultCustomizeButton/);
 
   const openDefaultStart = pageSource.indexOf(
     "function openDefaultBotCustomizer(): void",
@@ -897,9 +907,18 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   );
   assert.match(
     pageSource,
-    /const BOT_AVATAR_CUSTOMIZER_TABS = \[\s*\{ value: "face", label: "Identity" \},\s*\{ value: "eyes", label: "Eyes" \},\s*\{ value: "mouth", label: "Mouth" \},\s*\{ value: "voice", label: "Voice" \},\s*\{ value: "details", label: "Details" \},\s*\{ value: "motion", label: "Motion" \}/,
+    /const BOT_AVATAR_CUSTOMIZER_TABS = \[\s*\{ value: "face", label: "Identity" \},\s*\{ value: "profile", label: "Profile" \},\s*\{ value: "eyes", label: "Eyes" \},\s*\{ value: "mouth", label: "Mouth" \},\s*\{ value: "voice", label: "Voice" \},\s*\{ value: "settings", label: "Settings" \},\s*\{ value: "details", label: "Details" \},\s*\{ value: "motion", label: "Motion" \}/,
   );
+  assert.match(pageSource, /activeControlTab === "profile" && identityControlsVisible/);
+  assert.match(pageSource, /aria-label="Bot profile editor mode"/);
+  assert.match(pageSource, /onProfilePageOpen\(category\)/);
+  assert.match(pageSource, /profileEditorLayer=\{!editingDefaultBot \? \(/);
+  assert.match(pageSource, /data-avatar-studio-layer=\{studioLayer \? "true" : undefined\}/);
+  assert.match(cssSource, /\.botAvatarProfilePanel/);
+  assert.match(cssSource, /\.botProfileBuilderBackdrop\[data-avatar-studio-layer="true"\]/);
   assert.match(pageSource, /activeControlTab === "voice"/);
+  assert.match(pageSource, /activeControlTab === "settings" && identityControlsVisible/);
+  assert.match(pageSource, /aria-label="Generation Lens and bot randomizer"/);
   assert.match(pageSource, /resetLabel=\{isDefaultPrismBot \? "Reset voice" : "Restore original voice"\}/);
   assert.match(pageSource, /setPreviewMode\("talking"\)/);
   assert.match(pageSource, /const avatarControlTabsVisible = true;/);
@@ -916,9 +935,11 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   assert.match(pageSource, /Custom glyph/);
   assert.match(pageSource, /Blink and thinking animation/);
   assert.match(pageSource, /type BotAvatarCustomizerTab =/);
-  assert.match(pageSource, /\| "details";/);
-  assert.match(pageSource, /useState<BotAvatarCustomizerTab>\("face"\)/);
-  assert.match(pageSource, /setActiveControlTab\("face"\)/);
+  assert.match(pageSource, /\| "profile"/);
+  assert.match(pageSource, /\| "settings"/);
+  assert.match(pageSource, /\| "details"/);
+  assert.match(pageSource, /useState<BotAvatarCustomizerTab>\(initialTab\)/);
+  assert.match(pageSource, /setActiveControlTab\(initialTab\)/);
   assert.match(pageSource, /aria-label=\{controlLabel\}/);
   assert.match(pageSource, /<Sparkles size=\{16\}/);
   assert.match(pageSource, /<Timer size=\{16\}/);
@@ -949,7 +970,7 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   assert.match(cssSource, /\.botAvatarControlTabs\s*\{/);
   assert.match(
     cssRuleBody(".botAvatarControlTabs"),
-    /grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\);/,
+    /grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\);/,
   );
   assert.match(
     cssSource,
@@ -1005,6 +1026,71 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   const stageRule = cssRuleBody(".botAvatarMannequinStage");
   assert.match(stageRule, /background-size:\s*34px 34px,\s*34px 34px,\s*auto;/);
   assert.doesNotMatch(stageRule, /radial-gradient/);
+});
+
+test("bot creation, customization, and settings open directly in Avatar Studio", () => {
+  const createStart = pageSource.indexOf("function openNewBotCreator(): void");
+  const createEnd = pageSource.indexOf("function openFreshBotCustomizer", createStart);
+  assert.notEqual(createStart, -1);
+  assert.notEqual(createEnd, -1);
+  const createSource = pageSource.slice(createStart, createEnd);
+  assert.match(createSource, /resetBotForm\(\);/);
+  assert.match(createSource, /setBotAvatarCustomizerOpen\(true\);/);
+  assert.match(
+    pageSource,
+    /botProfileCompletionCount\(botProfile\) === 0\s*\? ""\s*:\s*serializeStoredBotPrompt\(botProfile, createdBotName\)/,
+  );
+
+  const openStart = pageSource.indexOf("function openBotCustomizer(bot: Bot)");
+  const openEnd = pageSource.indexOf("function openBotSettings(bot: Bot)", openStart);
+  assert.notEqual(openStart, -1);
+  assert.notEqual(openEnd, -1);
+  const openSource = pageSource.slice(openStart, openEnd);
+  assert.match(openSource, /startEditBot\(bot\);/);
+  assert.match(openSource, /setBotAvatarCustomizerOpen\(true\);/);
+
+  const settingsStart = pageSource.indexOf("function openBotSettings(bot: Bot)");
+  const settingsEnd = pageSource.indexOf("function exitBotEditorToLibrary", settingsStart);
+  assert.notEqual(settingsStart, -1);
+  assert.notEqual(settingsEnd, -1);
+  const settingsSource = pageSource.slice(settingsStart, settingsEnd);
+  assert.match(settingsSource, /setBotPanelView\("settings"\);/);
+  assert.match(settingsSource, /setBotAvatarCustomizerOpen\(true\);/);
+
+  const closeStart = pageSource.indexOf("function closeBotAvatarStudioFlow(): void");
+  const closeEnd = pageSource.indexOf("function openBotCustomizerFacts", closeStart);
+  assert.notEqual(closeStart, -1);
+  assert.notEqual(closeEnd, -1);
+  const closeSource = pageSource.slice(closeStart, closeEnd);
+  assert.match(closeSource, /closeBotAvatarCustomizer\(\);/);
+  assert.match(closeSource, /if \(editingBotId\) \{[\s\S]*?exitBotEditorToLibrary\(\);/);
+  assert.match(
+    closeSource,
+    /if \(botPanelView === "defaultCustomize"\) \{[\s\S]*?setBotPanelView\("home"\);/,
+  );
+  assert.match(
+    closeSource,
+    /if \(botPanelView === "create"\) \{[\s\S]*?resetBotForm\(\);[\s\S]*?setBotPanelView\("home"\);/,
+  );
+
+  assert.match(pageSource, /<strong>Avatar Studio<\/strong>/);
+  assert.match(pageSource, /\{botPanelCreateMode && !botAvatarCustomizerOpen \? \(/);
+});
+
+test("personality randomization is scoped away from identity and settings", () => {
+  const start = pageSource.indexOf("function applyRandomBotPersonalityDraft()");
+  const end = pageSource.indexOf("const resetBotForm", start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const helperSource = pageSource.slice(start, end);
+  assert.match(helperSource, /setBotProfile\(\(current\) => \(\{/);
+  assert.match(helperSource, /\.\.\.current,\s*core: draft\.profile\.core,/);
+  assert.doesNotMatch(helperSource, /setNewBotName/);
+  assert.doesNotMatch(helperSource, /setNewBotColor/);
+  assert.doesNotMatch(helperSource, /setNewBotAudioVoiceProfile/);
+  assert.doesNotMatch(helperSource, /setNewBotOnlineEnabled/);
+  assert.doesNotMatch(helperSource, /setNewBotLocalModel/);
+  assert.match(pageSource, /aria-label="Randomize personality"/);
 });
 
 test("avatar preview theme keeps persona ink on normalized color without Prism rainbow aura", () => {

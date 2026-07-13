@@ -11,7 +11,7 @@ describe("voice settings preview", () => {
     assert.match(pageSource, />\s*Preview\s*<\/button>/);
     assert.match(
       pageSource,
-      /rawProfile \?\? \{[\s\S]*?DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,[\s\S]*?systemVoiceName: settings\.defaultSystemVoiceName,[\s\S]*?elevenLabsVoiceId: settings\.defaultElevenLabsVoiceId/
+      /resolveVoicePreviewProfileWithGlobalDefaults\([\s\S]*?rawProfile \?\? \{[\s\S]*?DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,[\s\S]*?systemVoiceName: settings\.defaultSystemVoiceName,[\s\S]*?elevenLabsVoiceId: settings\.defaultElevenLabsVoiceId,[\s\S]*?settings\s*\)/
     );
   });
 
@@ -32,11 +32,14 @@ describe("voice settings preview", () => {
     assert.match(pageSource, /Preview English/);
     assert.match(pageSource, /onClick=\{\(\) => void previewVoice\("bottish"\)\}/);
     assert.match(pageSource, /onClick=\{\(\) => void previewVoice\("english"\)\}/);
-    assert.match(pageSource, /await onPreview\(normalizedProfile, mode, previewText\)/);
+    assert.match(pageSource, /englishReadyCacheKeyRef\.current !== cacheKey/);
+    assert.match(pageSource, /generateOnly,/);
+    assert.match(pageSource, /englishPreviewState === "ready"[\s\S]*?"Play English"/);
     assert.match(pageSource, /voicePreviewPlaybackRunRef/);
     assert.match(pageSource, /stopBottishVoice\(\);\s*stopEnglishVoice\(\);/);
     assert.match(pageSource, /const previewVoiceMode = forcedMode \?\? settings\.voiceMode/);
-    assert.match(pageSource, /await onVoicePreview\(profile, forcedMode, previewText\)/);
+    assert.match(pageSource, /await onVoicePreview\(profile, forcedMode, previewText, \{/);
+    assert.match(pageSource, /onPlaybackStart: \(\) => \{/);
     assert.doesNotMatch(pageSource, /disabled=\{previewing !== null\}/);
     assert.doesNotMatch(pageSource, /previewMode !== "bottish"/);
   });
@@ -91,6 +94,7 @@ describe("voice settings preview", () => {
     assert.match(editorSource, /\["pitch", "Pitch"\]/);
     assert.match(editorSource, /\["lilt", "Lilt"\]/);
     assert.match(editorSource, /Bottish tone/);
+    assert.match(editorSource, /Bottish only — use Preview Bottish to hear this control\./);
     assert.doesNotMatch(editorSource, /\["pace", "Pace"\]/);
     assert.doesNotMatch(editorSource, /\["warmth", "Warmth"\]/);
     assert.doesNotMatch(editorSource, /<span>Volume<\/span>/);
