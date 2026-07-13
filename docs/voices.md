@@ -41,10 +41,3 @@ Marketplace bundles carry an authored profile. A user's later customization is
 stored separately as an override, so catalog updates can improve the authored
 voice without overwriting the user's choice. The five Prism Originals use
 Voices 1–5 respectively at neutral controls.
-
-## Legacy bundled-model release gate
-
-The runtime no longer depends on the legacy KittenTTS/sherpa-onnx bundle, but
-those model files remain in the repository. Any distributable that still packages
-them requires explicit licensing review or removal before release approval. The
-retained notices are in `THIRD_PARTY_NOTICES.md` and `apps/api/tts-models/`.

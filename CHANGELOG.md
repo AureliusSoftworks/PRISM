@@ -32,6 +32,9 @@ _Staging area - nothing queued for release yet._
 - **Avatar rendering shares canonical geometry.** Authored screen details now
   keep their intended position and scale when bots move between editor,
   library, and conversation surfaces.
+- **Release sources no longer carry the retired offline speech bundle.** The
+  unused KittenTTS, sherpa-onnx, and eSpeak data has been removed now that
+  English and Bottish use native system voices.
 
 ### Fixed
 
