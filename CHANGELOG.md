@@ -12,6 +12,33 @@ Active development happens on the `dev` branch; every release is a merge into
 
 _Staging area - nothing queued for release yet._
 
+## [0.8.0] - 2026-07-13
+
+### Added
+
+- **Bottish is now a voiced robot language.** Deterministic pseudo-syllables
+  preserve the original cadence through the selected system voice, while
+  bounded clicks, chirps, gating, and buzz add robotic character without
+  provider traffic; voiced-only and procedural fallbacks keep playback usable.
+- **Avatar Details Studio.** Custom bots can author persistent phosphor-screen
+  paint and anchored face details with guarded local drafts and deterministic
+  rendering across Studio, Chat, Zen, and Coffee.
+
+### Changed
+
+- **Speech remains audio-master across live surfaces.** Chat, Zen, Coffee,
+  Story, previews, and replay use the synthesized carrier for reveal and mouth
+  timing, and interruptions stop both the carrier and Bottish accents.
+- **Avatar rendering shares canonical geometry.** Authored screen details now
+  keep their intended position and scale when bots move between editor,
+  library, and conversation surfaces.
+
+### Fixed
+
+- **Coffee bot panels retain their escape navigation.** Opening a bot-owned
+  panel over the Coffee table no longer lets the Coffee toolbar cover the
+  shared top navigation.
+
 ## [0.7.0] - 2026-07-12
 
 ### Added

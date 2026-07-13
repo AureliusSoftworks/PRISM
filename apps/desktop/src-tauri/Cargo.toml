@@ -1,6 +1,6 @@
 [package]
 name = "prism_desktop"
-version = "0.7.0"
+version = "0.8.0"
 description = "Prism unified desktop shell"
 authors = ["Prism"]
 license = ""
