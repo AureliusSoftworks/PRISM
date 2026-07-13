@@ -5,7 +5,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 const appDir = dirname(fileURLToPath(import.meta.url));
-const pageSource = readFileSync(join(appDir, "page.tsx"), "utf8");
+const pageSource = readFileSync(join(appDir, "page.tsx"), "utf8").replace(/\s+/gu, " ");
 const css = readFileSync(join(appDir, "page.module.css"), "utf8");
 
 function sourceBlockAfter(needle: string, terminator: string): string {
@@ -36,11 +36,11 @@ test("left sidebar is treated as right-panel background", () => {
   );
   assert.match(
     pageSource,
-    /aria-hidden=\{panel !== null \|\| \(sidebarDrawerMode && !sidebarOpen\) \? true : undefined\}/
+    /aria-hidden=\{\s*panel !== null\s*\|\|\s*\(sidebarDrawerMode && !sidebarOpen\)\s*\?\s*true\s*:\s*undefined\s*\}/
   );
   assert.match(
     pageSource,
-    /inert=\{panel !== null \|\| \(sidebarDrawerMode && !sidebarOpen\) \? true : undefined\}/
+    /inert=\{\s*panel !== null\s*\|\|\s*\(sidebarDrawerMode && !sidebarOpen\)\s*\?\s*true\s*:\s*undefined\s*\}/
   );
 
   assert.match(

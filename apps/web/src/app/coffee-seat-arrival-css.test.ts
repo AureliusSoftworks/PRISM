@@ -13,7 +13,7 @@ const pagePath = join(dirname(fileURLToPath(import.meta.url)), "page.tsx");
 const settingsPanelPath = join(dirname(fileURLToPath(import.meta.url)), "SettingsPanel.tsx");
 const css = readFileSync(cssPath, "utf8");
 const coffeeSeatPlateEmojiSource = readFileSync(coffeeSeatPlateEmojiPath, "utf8");
-const pageSource = readFileSync(pagePath, "utf8");
+const pageSource = readFileSync(pagePath, "utf8").replace(/\s+/gu, " ");
 const settingsPanelSource = readFileSync(settingsPanelPath, "utf8");
 
 function ruleForSeatVector(
@@ -913,7 +913,7 @@ describe("Coffee seat arrival CSS", () => {
     assert.doesNotMatch(livePlateRule, /--bot-face-screen-glass-opacity/);
     assert.match(
       pageSource,
-      /data-live-body-style="zen"[\s\S]*<ZenLiveBotMannequin[\s\S]*glyph=\{seatGlyphName\}[\s\S]*faceStyle=\{seatFaceStyle\}[\s\S]*plateFace=\{seatPlateGlyph\}[\s\S]*frameMaterialSeed=\{botFrameMaterialSeedForBot\(bot,\s*bot\.id\)\}/
+      /data-live-body-style="zen"[\s\S]*<ZenLiveBotMannequin[\s\S]*glyph=\{seatGlyphName\}[\s\S]*faceStyle=\{seatFaceStyle\}[\s\S]*plateFace=\{seatPlateGlyph\}[\s\S]*frameMaterialSeed=\{\s*botFrameMaterialSeedForBot\(\s*bot\s*,\s*bot\.id\s*,?\s*\)\s*\}/
     );
     assert.match(
       pageSource,
@@ -1022,8 +1022,14 @@ describe("Coffee seat arrival CSS", () => {
     assert.match(pageSource, /function botFrameMetalMaterialStyle/);
     assert.match(pageSource, /\$\{normalizedSeed\}:metal-scratch:rotation/);
     assert.match(pageSource, /"--bot-face-metal-scratch-opacity"/);
-    assert.match(pageSource, /screenMaterialSeed=\{botScreenMaterialSeedForBot\(bot,\s*bot\.id\)\}/);
-    assert.match(pageSource, /frameMaterialSeed=\{botFrameMaterialSeedForBot\(bot,\s*bot\.id\)\}/);
+    assert.match(
+      pageSource,
+      /screenMaterialSeed=\{\s*botScreenMaterialSeedForBot\(\s*bot\s*,\s*bot\.id\s*,?\s*\)\s*\}/
+    );
+    assert.match(
+      pageSource,
+      /frameMaterialSeed=\{\s*botFrameMaterialSeedForBot\(\s*bot\s*,\s*bot\.id\s*,?\s*\)\s*\}/
+    );
 
     const phosphorRule = rulesForExactSelector(".zenLiveBotPresenceFaceEmissionMask::before").find((rule) =>
       /Unlit aperture grille/.test(rule)
@@ -1577,7 +1583,10 @@ describe("Coffee seat arrival CSS", () => {
     assert.match(pageSource, /data-coffee-pot-theme=\{coffeePotAssetTheme\}/);
     assert.match(pageSource, /coffeePotRestImageUrl\(coffeePotAssetTheme\)/);
     assert.match(pageSource, /coffeePotPourImageUrl\(coffeePotAssetTheme\)/);
-    assert.match(pageSource, /coffeePotPourFrameImageUrl\(coffeePotAssetTheme, frameIndex\)/);
+    assert.match(
+      pageSource,
+      /coffeePotPourFrameImageUrl\(\s*coffeePotAssetTheme\s*,\s*frameIndex\s*,?\s*\)/
+    );
     assert.doesNotMatch(
       pageSource,
       /coffeePot(?:Rest|Pour|PourFrame)ImageUrl\(resolvedTheme/
@@ -1622,7 +1631,7 @@ describe("Coffee seat arrival CSS", () => {
     assert.doesNotMatch(pageSource, /stageRect:\s*DOMRect/);
     assert.match(
       pageSource,
-      /const dragPoint = coffeePotScenePointFromClient\(event\.clientX, event\.clientY\);[\s\S]*x:\s*dragPoint\.x,[\s\S]*y:\s*dragPoint\.y,/
+      /const dragPoint = coffeePotScenePointFromClient\(\s*event\.clientX\s*,\s*event\.clientY\s*,?\s*\);[\s\S]*x:\s*dragPoint\.x,[\s\S]*y:\s*dragPoint\.y,/
     );
     assert.match(pageSource, /ref=\{coffeeTableSceneRef\}/);
     assert.match(pageSource, /ref=\{coffeeCenterMessageRef\}/);
@@ -1631,7 +1640,7 @@ describe("Coffee seat arrival CSS", () => {
     assert.match(pageSource, /data-coffee-pot-drag-exclusion="nameplate"/);
     assert.match(
       pageSource,
-      /querySelectorAll<HTMLElement>\('\[data-coffee-pot-drag-exclusion="nameplate"\]'\)/
+      /querySelectorAll<HTMLElement>\(\s*'\[data-coffee-pot-drag-exclusion="nameplate"\]'\s*,?\s*\)/
     );
     assert.match(pageSource, /paddingPx:\s*28/);
     assert.match(
@@ -1714,7 +1723,10 @@ describe("Coffee seat arrival CSS", () => {
       /if \(!conversationId \|\| coffeeBusy \|\| coffeeAutoBusy\) return;/
     );
     assert.match(pageSource, /const coffeeDirectedTurnQueueRef = useRef<string\[\]>\(\[\]\);/);
-    assert.match(pageSource, /const nextDirectedTurn = nextDirectedCoffeeTurnAfterReveal\(directedFollowupBotIds\);/);
+    assert.match(
+      pageSource,
+      /const nextDirectedTurn = nextDirectedCoffeeTurnAfterReveal\(\s*directedFollowupBotIds\s*,?\s*\);/
+    );
     assert.match(pageSource, /queueDirectedCoffeeTurn\(botId\);/);
     assert.match(
       pageSource,

@@ -6,7 +6,7 @@ import { describe, it } from "node:test";
 
 const appDir = dirname(fileURLToPath(import.meta.url));
 const css = readFileSync(join(appDir, "page.module.css"), "utf8");
-const pageSource = readFileSync(join(appDir, "page.tsx"), "utf8");
+const pageSource = readFileSync(join(appDir, "page.tsx"), "utf8").replace(/\s+/gu, " ");
 
 function ruleForExactSelector(selector: string): string {
   const match = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].find((entry) =>
@@ -48,7 +48,7 @@ describe("Zen live presence body hit target", () => {
     );
     assert.match(
       pageSource,
-      /function measureZenLiveBotGrabGeometries\(node: HTMLElement\): ZenLiveBotGrabGeometry\[\] \{/
+      /function measureZenLiveBotGrabGeometries\(\s*node: HTMLElement\s*,?\s*\): ZenLiveBotGrabGeometry\[\] \{/
     );
     assert.match(
       pageSource,
@@ -64,7 +64,7 @@ describe("Zen live presence body hit target", () => {
     );
     assert.match(
       pageSource,
-      /function measureZenLiveBotGrabGeometry\(node: HTMLElement\): ZenLiveBotGrabGeometry \| null \{\s+return measureZenLiveBotGrabGeometries\(node\)\[0\] \?\? null;/
+      /function measureZenLiveBotGrabGeometry\(\s*node: HTMLElement\s*,?\s*\): ZenLiveBotGrabGeometry \| null \{\s*return measureZenLiveBotGrabGeometries\(node\)\[0\] \?\? null;/
     );
     assert.match(
       pageSource,
@@ -107,11 +107,11 @@ describe("Zen live presence body hit target", () => {
     );
     assert.match(
       pageSource,
-      /zenLiveBotAvatarPointMatchesSelector\(\s*clientX,\s*clientY,\s*ZEN_LIVE_BOT_AVATAR_DRAG_BLOCKED_SELECTOR\s*\)/
+      /zenLiveBotAvatarPointMatchesSelector\(\s*clientX\s*,\s*clientY\s*,\s*ZEN_LIVE_BOT_AVATAR_DRAG_BLOCKED_SELECTOR\s*,?\s*\)/
     );
     assert.match(
       pageSource,
-      /zenLiveBotAvatarSurfaceCanStartGrab\(\s*options\.eventTarget,\s*clientX,\s*clientY\s*\)/
+      /zenLiveBotAvatarSurfaceCanStartGrab\(\s*options\.eventTarget\s*,\s*clientX\s*,\s*clientY\s*,?\s*\)/
     );
     assert.match(pageSource, /data-zen-live-bot-drag-exclusion="top-bar"/);
     assert.match(pageSource, /data-zen-live-bot-composer-boundary="true"/);

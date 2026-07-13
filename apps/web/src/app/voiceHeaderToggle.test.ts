@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
-const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8").replace(
+  /\s+/gu,
+  " "
+);
 const styleSource = readFileSync(new URL("./page.module.css", import.meta.url), "utf8");
 
 describe("universal voice switch", () => {
@@ -16,7 +19,10 @@ describe("universal voice switch", () => {
   it("persists the switch immediately and exposes it in the mobile menu", () => {
     assert.match(pageSource, /async function toggleGlobalVoicePlayback\(\)/);
     assert.match(pageSource, /body: JSON\.stringify\(\{ voiceMode: nextMode \}\)/);
-    assert.match(pageSource, /voiceModeAfterQuickToggle\(normalizeVoiceMode\(settings\.voiceMode\)\)/);
+    assert.match(
+      pageSource,
+      /voiceModeAfterQuickToggle\(\s*normalizeVoiceMode\(settings\.voiceMode\)\s*,?\s*\)/
+    );
     assert.match(pageSource, /Switch to/);
   });
 

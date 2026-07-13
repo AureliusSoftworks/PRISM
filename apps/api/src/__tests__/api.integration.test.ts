@@ -21,6 +21,26 @@ const { createPrismRequestHandler } = await import("../server.ts");
 const db = createTestDatabase();
 const fetchRecorder = createFetchRecorder();
 const deterministicProvider = createDeterministicProvider(["Deterministic API reply."]);
+function deterministicVoiceWave(): Buffer {
+  const sampleRate = 24_000;
+  const sampleCount = 240;
+  const dataLength = sampleCount * 2;
+  const wave = Buffer.alloc(44 + dataLength);
+  wave.write("RIFF", 0, "ascii");
+  wave.writeUInt32LE(36 + dataLength, 4);
+  wave.write("WAVE", 8, "ascii");
+  wave.write("fmt ", 12, "ascii");
+  wave.writeUInt32LE(16, 16);
+  wave.writeUInt16LE(1, 20);
+  wave.writeUInt16LE(1, 22);
+  wave.writeUInt32LE(sampleRate, 24);
+  wave.writeUInt32LE(sampleRate * 2, 28);
+  wave.writeUInt16LE(2, 32);
+  wave.writeUInt16LE(16, 34);
+  wave.write("data", 36, "ascii");
+  wave.writeUInt32LE(dataLength, 40);
+  return wave;
+}
 const config = {
   ...getAppConfig(),
   apiPort: 0,
@@ -38,6 +58,7 @@ const server = createServer(
     fetchImpl: fetchRecorder,
     providerFactory: () => deterministicProvider,
     auxiliaryProviderFactory: () => deterministicProvider,
+    builtinVoiceWaveGenerator: async () => deterministicVoiceWave(),
   })
 );
 await new Promise<void>((resolve, reject) => {

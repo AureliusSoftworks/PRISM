@@ -345,43 +345,52 @@ export async function cleanupResolvedPromptWithModel(args: {
     };
   }
   const maxTokens = Math.min(1800, Math.max(180, Math.ceil(prompt.length / 2)));
-  const timeoutSignal = AbortSignal.timeout(
-    Math.max(1, args.timeoutMs ?? COMPOSER_SEND_CLEANUP_TIMEOUT_MS)
-  );
+  const timeoutMs = Math.max(1, args.timeoutMs ?? COMPOSER_SEND_CLEANUP_TIMEOUT_MS);
+  const timeoutController = new AbortController();
+  const timeout = setTimeout(() => {
+    timeoutController.abort(
+      new DOMException(`Composer cleanup timed out after ${timeoutMs}ms.`, "TimeoutError")
+    );
+  }, timeoutMs);
   const signal = args.signal
-    ? AbortSignal.any([args.signal, timeoutSignal])
-    : timeoutSignal;
-  const raw = await args.provider.generateResponse(
-    [
-      { role: "system", content: COMPOSER_SEND_CLEANUP_SYSTEM_PROMPT },
+    ? AbortSignal.any([args.signal, timeoutController.signal])
+    : timeoutController.signal;
+  let raw: string;
+  try {
+    raw = await args.provider.generateResponse(
+      [
+        { role: "system", content: COMPOSER_SEND_CLEANUP_SYSTEM_PROMPT },
+        {
+          role: "user",
+          content: [
+            "<resolved_prompt>",
+            prompt,
+            "</resolved_prompt>",
+            "",
+            "<wildcard_replacements_json>",
+            JSON.stringify(
+              replacements.map((replacement, index) => ({
+                index,
+                key: replacement.key,
+                value: replacement.value,
+              }))
+            ),
+            "</wildcard_replacements_json>",
+          ].join("\n"),
+        },
+      ],
       {
-        role: "user",
-        content: [
-          "<resolved_prompt>",
-          prompt,
-          "</resolved_prompt>",
-          "",
-          "<wildcard_replacements_json>",
-          JSON.stringify(
-            replacements.map((replacement, index) => ({
-              index,
-              key: replacement.key,
-              value: replacement.value,
-            }))
-          ),
-          "</wildcard_replacements_json>",
-        ].join("\n"),
-      },
-    ],
-    {
-      model: args.model,
-      temperature: 0.05,
-      maxTokens,
-      jsonMode: true,
-      usagePurpose: "composer_cleanup",
-      signal,
-    }
-  );
+        model: args.model,
+        temperature: 0.05,
+        maxTokens,
+        jsonMode: true,
+        usagePurpose: "composer_cleanup",
+        signal,
+      }
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
   const cleanup = normalizeSendCleanupResponse(raw, prompt, replacements);
   const protectedCleanup = restoreJoinedWildcardTokens({
     prompt: cleanup.prompt,

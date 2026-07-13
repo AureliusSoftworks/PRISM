@@ -7,7 +7,7 @@ import { inflateSync } from "node:zlib";
 
 const appDir = dirname(fileURLToPath(import.meta.url));
 const css = readFileSync(join(appDir, "page.module.css"), "utf8");
-const pageSource = readFileSync(join(appDir, "page.tsx"), "utf8");
+const pageSource = readFileSync(join(appDir, "page.tsx"), "utf8").replace(/\s+/gu, " ");
 
 function sourceBetween(startNeedle: string, endNeedle: string): string {
   const start = pageSource.indexOf(startNeedle);
@@ -146,7 +146,7 @@ describe("Prism app cursor", () => {
       "const PRISM_APP_CURSOR_PNG_DATA = {",
       "} as const;"
     );
-    const entries = [...pngDataBlock.matchAll(/  ([a-zA-Z]+): "([A-Za-z0-9+/=]+)",/g)];
+    const entries = [...pngDataBlock.matchAll(/\s+([a-zA-Z]+): "([A-Za-z0-9+/=]+)",/g)];
     assert.equal(entries.length, 10);
 
     for (const [, key, base64] of entries) {

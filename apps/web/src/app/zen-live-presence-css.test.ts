@@ -35,7 +35,7 @@ const opaquePaintMaskNames = [
   "bot-frame-weathered-gap-mask.png",
 ] as const;
 const css = readFileSync(cssPath, "utf8");
-const pageSource = readFileSync(pagePath, "utf8");
+const pageSource = readFileSync(pagePath, "utf8").replace(/\s+/gu, " ");
 const coffeeSeatPlateEmojiSource = readFileSync(coffeeSeatPlateEmojiPath, "utf8");
 
 function ruleForExactSelector(selector: string): string {
@@ -268,9 +268,10 @@ describe("Zen live presence CSS", () => {
     assert.match(pageSource, /const ZEN_LIVE_BOT_LOCKED_BODY_SIZE_PX = 190;/);
     assert.match(pageSource, /xPct:\s*76\.81,/);
     assert.match(pageSource, /yPct:\s*-38\.51,/);
-    assert.match(pageSource, /xPct:\s*50\.0,/);
-    assert.match(pageSource, /yPct:\s*43\.8,/);
-    assert.match(pageSource, /scale:\s*1\.68,/);
+    assert.match(
+      pageSource,
+      /const ZEN_LIVE_BOT_LOCKED_FACE_PLACEMENT:[\s\S]*=\s*BOT_AVATAR_CANONICAL_FACE_PLACEMENT;/
+    );
     assert.match(
       pageSource,
       /"--zen-live-bot-avatar-body-size":\s*`\$\{bodySize\}px`/
@@ -307,7 +308,6 @@ describe("Zen live presence CSS", () => {
       pageSource,
       /"--zen-live-bot-face-scale":\s*facePlacement\.scale/
     );
-    assert.match(pageSource, /const ZEN_LIVE_BOT_LOCKED_FACE_PLACEMENT:[\s\S]*yPct:\s*43\.8/);
     assert.doesNotMatch(pageSource, /readZenLiveBotBodySize/);
     assert.doesNotMatch(pageSource, /readZenLiveBotFacePlacement/);
     assert.doesNotMatch(pageSource, /facePlacementScope/);
@@ -345,7 +345,7 @@ describe("Zen live presence CSS", () => {
     assert.match(pageSource, /openDefaultBotCustomizer\(\);/);
     assert.match(
       pageSource,
-      /"--zen-live-bot-prose-width":\s*`\$\{resolveZenLiveBotProseWidthPx\(\s*zenLiveBotAvatarSizePx\s*\)\}px`/
+      /"--zen-live-bot-prose-width":\s*`\$\{resolveZenLiveBotProseWidthPx\(\s*zenLiveBotAvatarSizePx\s*,?\s*\)\}px`/
     );
 
     const zenMessagesRule = ruleForNormalizedSelector(
@@ -490,7 +490,10 @@ describe("Zen live presence CSS", () => {
     assert.doesNotMatch(pageSource, /stableUnitValue\(`\$\{normalizedSeed\}:grime:/);
     assert.match(pageSource, /const screenMaterialSeed = botScreenMaterialSeedForBot\(bot,\s*"prism"\);/);
     assert.match(pageSource, /screenMaterialSeed=\{screenMaterialSeed\}/);
-    assert.match(pageSource, /screenMaterialSeed=\{botScreenMaterialSeedForBot\(bot,\s*bot\.id\)\}/);
+    assert.match(
+      pageSource,
+      /screenMaterialSeed=\{\s*botScreenMaterialSeedForBot\(\s*bot\s*,\s*bot\.id\s*,?\s*\)\s*\}/
+    );
     assert.match(pageSource, /function botFrameMaterialSeedForBot/);
     assert.match(pageSource, /normalizeImportedBotHash\(bot\?\.export_hash\)/);
     assert.match(pageSource, /function botFrameMetalMaterialStyle/);
@@ -506,7 +509,10 @@ describe("Zen live presence CSS", () => {
       /const frameMaterialSeed = defaultPrismPresence\s*\? PRISM_FACTORY_CLEAN_FRAME_SEED\s*:\s*botFrameMaterialSeedForBot\(bot,\s*"prism"\);/
     );
     assert.match(pageSource, /frameMaterialSeed=\{frameMaterialSeed\}/);
-    assert.match(pageSource, /frameMaterialSeed=\{botFrameMaterialSeedForBot\(bot,\s*bot\.id\)\}/);
+    assert.match(
+      pageSource,
+      /frameMaterialSeed=\{\s*botFrameMaterialSeedForBot\(\s*bot\s*,\s*bot\.id\s*,?\s*\)\s*\}/
+    );
     assert.match(
       pageSource,
       /frameMaterialSeed=\{\s*isDefaultPrismBot\s*\? PRISM_FACTORY_CLEAN_FRAME_SEED\s*:\s*frameMaterialSeed\s*\}/
@@ -1397,7 +1403,7 @@ describe("Zen live presence CSS", () => {
     );
     assert.match(
       pageSource,
-      /normalizeCrtSpeechText\(getBotMentionDisplayText\(displayContent\)\)/
+      /normalizeCrtSpeechText\(\s*getBotMentionDisplayText\(displayContent\)\s*,?\s*\)/
     );
     assert.match(pageSource, /zenLiveBotMouthShapeFromRevealProgress\(/);
     assert.match(
@@ -1793,7 +1799,10 @@ describe("Zen live presence CSS", () => {
     assert.match(pageSource, /getPropertyValue\("--zen-live-bot-body-x"\)/);
     assert.match(pageSource, /getPropertyValue\("--zen-live-bot-copy-center-anchor"\)/);
     assert.match(pageSource, /setActionCopyAnchor\(\{ key, \.\.\.anchor \}\);/);
-    assert.match(pageSource, /data-copy-placement=\{actionCopyAnchorForRender\?\.placement \?\? avatarCopyPlacement\}/);
+    assert.match(
+      pageSource,
+      /data-copy-placement=\{\s*actionCopyAnchorForRender\?\.placement\s*\?\?\s*avatarCopyPlacement\s*\}/
+    );
     assert.match(
       pageSource,
       /const actionCopyKey = actionText\s+\?\s+`\$\{actionState\?\.createdAtMs \?\? "static"\}:\$\{actionText\}`\s+:\s+null;/
@@ -1937,7 +1946,7 @@ describe("Zen live presence CSS", () => {
     );
     assert.match(
       pageSource,
-      /const hillMotion = resolveZenLiveBotAvatarProseHillMotion\(\s*current,\s*avatarVelocityRef\.current,[\s\S]*dt\s*\);/
+      /const hillMotion = resolveZenLiveBotAvatarProseHillMotion\(\s*current\s*,\s*avatarVelocityRef\.current\s*,[\s\S]*dt\s*,?\s*\);/
     );
     assert.match(
       pageSource,
@@ -1970,7 +1979,7 @@ describe("Zen live presence CSS", () => {
     );
     assert.match(
       pageSource,
-      /data-zen-live-prose-target=\{chatLikeSurface \? "true" : undefined\}/
+      /data-zen-live-prose-target=\{\s*chatLikeSurface\s*\?\s*"true"\s*:\s*undefined\s*\}/
     );
   });
 
@@ -2179,7 +2188,7 @@ describe("Zen live presence CSS", () => {
     );
     assert.match(
       pageSource,
-      /if \(!node \|\| !zenLiveBotAvatarPointerCanStartGrab\(node, clientX, clientY, options\)\) \{\s+return false;\s+\}/
+      /if \(\s*!node\s*\|\|\s*!zenLiveBotAvatarPointerCanStartGrab\(node, clientX, clientY, options\)\s*\) \{\s*return false;\s*\}/
     );
     assert.match(pageSource, /allowSurfaceDrag:\s*true/);
     assert.match(pageSource, /data-zen-live-bot-composer-boundary="true"/);
@@ -2210,7 +2219,7 @@ describe("Zen live presence CSS", () => {
   it("lets the live bot overlap side panels while keeping top and bottom safe areas", () => {
     assert.match(
       pageSource,
-      /const panelInsets = collectDevPanelSafeAreaInsets\(viewportWidth, viewportHeight\);/
+      /const panelInsets = collectDevPanelSafeAreaInsets\(\s*viewportWidth\s*,\s*viewportHeight\s*,?\s*\);/
     );
     assert.match(
       pageSource,
@@ -2268,7 +2277,7 @@ describe("Zen live presence CSS", () => {
     );
     assert.match(
       pageSource,
-      /setAvatarPositionClamped\(current, persist, avatarDragRef\.current === null\);/
+      /setAvatarPositionClamped\(\s*current\s*,\s*persist\s*,\s*avatarDragRef\.current === null\s*,?\s*\);/
     );
     assert.match(pageSource, /const chromeMotion = resolveZenLiveBotAvatarChromeAvoidanceMotion\(/);
   });
@@ -2311,7 +2320,7 @@ describe("Zen live presence CSS", () => {
   it("uses the wordmark as the reversible Zen zoom toggle", () => {
     assert.match(
       pageSource,
-      /const \[zenZoomedOutConversationId, setZenZoomedOutConversationId\] =\s*useState<string \| null>\(null\);/
+      /const \[zenZoomedOutConversationId, setZenZoomedOutConversationId\]\s*=\s*useState<\s*string \| null\s*>\(null\);/
     );
     assert.match(
       pageSource,
@@ -2396,7 +2405,7 @@ describe("Zen live presence CSS", () => {
     );
     assert.match(
       pageSource,
-      /const renderZenHeroTitle = \(options: \{ inlineHero\?: boolean \} = \{\}\) =>/
+      /const renderZenHeroTitle = \(\s*options: \{ inlineHero\?: boolean \} = \{\}\s*,?\s*\) =>/
     );
     assert.match(
       pageSource,
@@ -2456,7 +2465,7 @@ describe("Zen live presence CSS", () => {
     assert.doesNotMatch(pageSource, /navbarRefreshSplashVisible/);
     assert.match(
       pageSource,
-      /showLocalCommandToast\("Refresh moved", "Use the recycle icon in the navbar\."\)/
+      /showLocalCommandToast\(\s*"Refresh moved"\s*,\s*"Use the recycle icon in the navbar\."\s*,?\s*\)/
     );
   });
 
