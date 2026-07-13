@@ -44,8 +44,11 @@ _Staging area - nothing queued for release yet._
   confirmation.
 - **Speech and reveal timing stay synchronized.** English and Bottish playback
   now follow the visible reveal timeline more reliably, persona previews use
-  fresh in-character lines, and Coffee table speech and mouth cadence feel
-  closer to Zen pacing.
+  fresh in-character lines, Bottish never compresses into an unintelligible
+  burst, and Coffee table speech and mouth cadence feel closer to Zen pacing.
+- **Model discovery stays warm after startup.** Prism caches provider model
+  catalogs for the API process lifetime, avoiding repeated Ollama and cloud
+  catalog scans when the browser refreshes or opens a fresh conversation.
 - **Coffee and Zen navigation remain responsive during long sessions.** Coffee
   arrivals, cups, replay state, and table speed nudges are more stable, while
   Zen hands scrolling to the reader sooner and releases visual text if audio
@@ -63,6 +66,10 @@ _Staging area - nothing queued for release yet._
 
 ### Fixed
 
+- **Zen speech and scrolling recover reliably.** Bottish and English playback
+  now preserve Safari's gesture-authorized audio element through fresh-session
+  conversation handoffs, reveal rerenders no longer restart speech, and Zen
+  leaves transcript wheel and touch scrolling under native reader control.
 - **Wildcard prompts cannot wedge Chat.** Composer cleanup now has a bounded
   timeout and falls back to the resolved prompt instead of leaving the Shh
   control active forever.

@@ -25,7 +25,7 @@ ship as `0.5.2` while Coffee is `v0.7` and Story is `v0.1`.
 | Applet | Version | Status | Notes |
 | --- | --- | --- | --- |
 | Chat | v0.8 | Active | Full playground for bots, providers, models, images, exports, and memory-aware conversations. |
-| Zen | v0.6 | Active | Calm one-to-one continuity surface; the standalone Zen lane is deprecating as this becomes Prism's default state. |
+| Zen | v0.7 | Active | Calm one-to-one continuity surface; the standalone Zen lane is deprecating as this becomes Prism's default state. |
 | Coffee | v0.9 | Active | Multi-bot group table with Coffee Groups, session pacing, cups, transcripts, replay, and table controls. |
 | Story | v0.1 | Preview | Generated visual-novel episodes with bots, choices, maps, inventory, and transcripts. |
 | Arena | v0.0 | Planned | Moderated bot debate surface. |
@@ -44,8 +44,9 @@ ship as `0.5.2` while Coffee is `v0.7` and Story is `v0.1`.
 - Bumped `Chat` to `v0.8` for dedicated Chat settings, bounded wildcard cleanup,
   code-block copy/collapse interaction, Bot Library actions, and per-bot voice
   identity.
-- Bumped `Zen` to `v0.6` for voice-reveal fallback, native scroll ownership,
-  shared live-avatar behavior, and conversation-surface polish.
+- Bumped `Zen` to `v0.7` for reliable Safari voice handoff, stable reveal
+  timing, fully native transcript scrolling, shared live-avatar behavior, and
+  conversation-surface polish.
 - Bumped `Coffee` to `v0.9` for Coffee Powers, richer replay and player
   presence, departure epilogues, cup/arrival persistence, and table pacing.
 
