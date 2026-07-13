@@ -42,8 +42,8 @@
 <p class="nav-heading">Agent records</p>
 <a class="nav-link" href="../concepts.html">Concepts<span>7</span></a>
 <a class="nav-link" href="../decisions.html">Decisions<span>4</span></a>
-<a class="nav-link" href="../devlog.html">Devlog<span>6</span></a>
-<a class="nav-link" href="../notes.html">Notes<span>2</span></a>
+<a class="nav-link" href="../devlog.html">Devlog<span>7</span></a>
+<a class="nav-link" href="../notes.html">Notes<span>3</span></a>
 <a class="nav-link" href="../symbols.html">Symbols<span>4</span></a>
 </nav>
       </div>
@@ -51,7 +51,7 @@
     <main id="content" class="content">
       <header class="page-header">
         <h1>Developer guide</h1>
-        <p>Repo structure, common commands, local privacy invariants, and the Wikiwiki documentation workflow for Prism maintainers.</p>
+        <p>Repo structure, common commands, automatic local test login, privacy invariants, and Wikiwiki maintenance.</p>
       </header>
       <article class="record-page">
   <nav class="breadcrumbs" aria-label="Breadcrumb">
@@ -65,14 +65,21 @@
   </div>
   <section class="prose">
     <h2>Summary</h2>
-    <p>Repo structure, common commands, local privacy invariants, and the Wikiwiki documentation workflow for Prism maintainers.</p>
+    <p>Repo structure, common commands, automatic local test login, privacy invariants, and Wikiwiki maintenance.</p>
     <h2>Article</h2>
     <h2>Repo Shape</h2>
 <p>Prism is organized as apps plus shared packages. <code>apps/api</code> owns local data, auth, providers, memory, and orchestration. <code>apps/web</code> owns the product UI. <code>apps/desktop</code> wraps and stages the local runtime. <code>packages/shared</code> and <code>packages/config</code> hold cross-surface contracts and configuration.</p>
 <h2>Common Commands</h2>
 <p>Use <code>npm run dev</code> for the full local stack, <code>npm run dev:api</code> or <code>npm run dev:web</code> for one side, <code>npm run typecheck</code> for workspace type checks, <code>npm run lint</code> for linting, and <code>npm run build</code> for production build coverage. API tests run with <code>npm run test --prefix apps/api</code>.</p>
+<h2>Automatic Local UI Test Login</h2>
+<p>When browser or agent-driven testing reaches Prism&#39;s login screen, log in automatically with:</p>
+<ul><li>Username: <code>admin</code></li>
+<li>Password: <code>password</code></li></ul>
+<p>This is the default local development account. Treat it as a testing convenience, not a production-safe credential.</p>
 <h2>Privacy Invariant</h2>
 <p>LOCAL mode is a hard boundary. New outbound network work must either target configured local services or have an explicit LOCAL guard with matching UI behavior and tests. Do not weaken the provider tests that pin this behavior.</p>
+<h2>Testing Current Interaction Work</h2>
+<p>Prefer focused tests for the touched behavior before broad workspace checks. Current regression coverage pins Chat settings navigation, bounded composer cleanup, code-block copy/collapse interaction, Bot Library showcase actions and audio, context-menu feedback, persona preview-line filtering, Coffee Powers, Coffee replay behavior, and the temporarily disabled custom cursor switch.</p>
 <h2>Wikiwiki Workflow</h2>
 <p>Treat <code>.wikiwiki/records/*.jsonl</code> as the source of truth. Add or revise records first, then regenerate Markdown and the static site with <code>wk validate</code>, <code>wk render</code>, and <code>wk site --audience all</code>. Do not hand-edit generated <code>wiki/</code> or <code>wiki-site/</code> output.</p>
 <h2>Distribution And Launch</h2>
@@ -86,14 +93,21 @@
 <li><a href="../records/concept/concept_d8ee0648-129b-427a-b6a7-dea62bb82e3e.html">LOCAL mode privacy boundary</a> <code>concept_d8ee0648-129b-427a-b6a7-dea62bb82e3e</code></li>
 <li><a href="../records/decision/decision_74d88333-8a92-47f5-897a-2f0458817e74.html">Adopt Wikiwiki for repo-local project knowledge</a> <code>decision_74d88333-8a92-47f5-897a-2f0458817e74</code></li>
 <li><a href="../records/note/note_5850980f-5230-4d48-ae29-08c98e6ed3a3.html">Note from 2026-07-05</a> <code>note_5850980f-5230-4d48-ae29-08c98e6ed3a3</code></li>
-<li><a href="../records/decision/decision_791a7b3c-d069-4543-907d-3c0cda50f452.html">Keep support non-gating</a> <code>decision_791a7b3c-d069-4543-907d-3c0cda50f452</code></li></ul>
+<li><a href="../records/decision/decision_791a7b3c-d069-4543-907d-3c0cda50f452.html">Keep support non-gating</a> <code>decision_791a7b3c-d069-4543-907d-3c0cda50f452</code></li>
+<li><a href="../records/note/note_fb321679-5908-4454-b01f-3dc5e09fd0da.html">Automatic local UI testing login</a> <code>note_fb321679-5908-4454-b01f-3dc5e09fd0da</code></li>
+<li><a href="../records/event/event_9049a96d-ec0f-4c0e-9444-d9c9997799ec.html">Chat, Bot Library, voice previews, Coffee, and interaction polish advanced</a> <code>event_9049a96d-ec0f-4c0e-9444-d9c9997799ec</code></li></ul>
 </aside>
   <aside class="sources-panel">
   <h2>Related files</h2>
   <ul><li><a class="source-link" href="../../AGENTS.md"><code>AGENTS.md</code></a></li>
 <li><a class="source-link" href="../../README.md"><code>README.md</code></a></li>
 <li><a class="source-link" href="../../package.json"><code>package.json</code></a></li>
-<li><a class="source-link" href="../../.wikiwiki/config.json"><code>.wikiwiki/config.json</code></a></li></ul>
+<li><a class="source-link" href="../../.wikiwiki/config.json"><code>.wikiwiki/config.json</code></a></li>
+<li><a class="source-link" href="../../apps/web/src/app/chat-settings-navigation.test.ts"><code>apps/web/src/app/chat-settings-navigation.test.ts</code></a></li>
+<li><a class="source-link" href="../../apps/web/src/app/botLibraryShowcase.test.ts"><code>apps/web/src/app/botLibraryShowcase.test.ts</code></a></li>
+<li><a class="source-link" href="../../apps/web/src/app/prism-app-cursor.test.ts"><code>apps/web/src/app/prism-app-cursor.test.ts</code></a></li>
+<li><a class="source-link" href="../../apps/api/src/__tests__/voice-preview-line.test.ts"><code>apps/api/src/__tests__/voice-preview-line.test.ts</code></a></li>
+<li><a class="source-link" href="../../apps/api/src/__tests__/bot-powers.test.ts"><code>apps/api/src/__tests__/bot-powers.test.ts</code></a></li></ul>
 </aside>
   <details class="record-meta">
   <summary>Agent details</summary>
@@ -103,12 +117,17 @@
     <div><dt>Authority</dt><dd>agent</dd></div>
     <div><dt>Confidence</dt><dd>high</dd></div>
     <div><dt>Created</dt><dd><time datetime="2026-07-05T04:14:41.666Z">2026-07-05</time></dd></div>
-    <div><dt>Updated</dt><dd><time datetime="2026-07-05T04:14:41.666Z">2026-07-05</time></dd></div>
+    <div><dt>Updated</dt><dd><time datetime="2026-07-13T04:09:15.115Z">2026-07-13</time></dd></div>
     <div><dt>Tags</dt><dd><code>audience:developer</code> <code>dx</code> <code>architecture</code> <code>docs</code></dd></div>
     <div><dt>Files</dt><dd><ul><li><a class="source-link" href="../../AGENTS.md"><code>AGENTS.md</code></a></li>
 <li><a class="source-link" href="../../README.md"><code>README.md</code></a></li>
 <li><a class="source-link" href="../../package.json"><code>package.json</code></a></li>
-<li><a class="source-link" href="../../.wikiwiki/config.json"><code>.wikiwiki/config.json</code></a></li></ul></dd></div>
+<li><a class="source-link" href="../../.wikiwiki/config.json"><code>.wikiwiki/config.json</code></a></li>
+<li><a class="source-link" href="../../apps/web/src/app/chat-settings-navigation.test.ts"><code>apps/web/src/app/chat-settings-navigation.test.ts</code></a></li>
+<li><a class="source-link" href="../../apps/web/src/app/botLibraryShowcase.test.ts"><code>apps/web/src/app/botLibraryShowcase.test.ts</code></a></li>
+<li><a class="source-link" href="../../apps/web/src/app/prism-app-cursor.test.ts"><code>apps/web/src/app/prism-app-cursor.test.ts</code></a></li>
+<li><a class="source-link" href="../../apps/api/src/__tests__/voice-preview-line.test.ts"><code>apps/api/src/__tests__/voice-preview-line.test.ts</code></a></li>
+<li><a class="source-link" href="../../apps/api/src/__tests__/bot-powers.test.ts"><code>apps/api/src/__tests__/bot-powers.test.ts</code></a></li></ul></dd></div>
   </dl>
 </details>
 </article>

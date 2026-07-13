@@ -42,8 +42,8 @@
 <p class="nav-heading">Agent records</p>
 <a class="nav-link" href="../concepts.html">Concepts<span>7</span></a>
 <a class="nav-link" href="../decisions.html">Decisions<span>4</span></a>
-<a class="nav-link" href="../devlog.html">Devlog<span>6</span></a>
-<a class="nav-link" href="../notes.html">Notes<span>2</span></a>
+<a class="nav-link" href="../devlog.html">Devlog<span>7</span></a>
+<a class="nav-link" href="../notes.html">Notes<span>3</span></a>
 <a class="nav-link" href="../symbols.html">Symbols<span>4</span></a>
 </nav>
       </div>
@@ -51,7 +51,7 @@
     <main id="content" class="content">
       <header class="page-header">
         <h1>Bot library and marketplace</h1>
-        <p>How Prism organizes bots into library groups and installs marketplace bots, packs, starter bots, and Lenses.</p>
+        <p>How Prism organizes bots, previews personas and voices, exposes bot actions, and installs marketplace collections.</p>
       </header>
       <article class="record-page">
   <nav class="breadcrumbs" aria-label="Breadcrumb">
@@ -65,18 +65,24 @@
   </div>
   <section class="prose">
     <h2>Summary</h2>
-    <p>How Prism organizes bots into library groups and installs marketplace bots, packs, starter bots, and Lenses.</p>
+    <p>How Prism organizes bots, previews personas and voices, exposes bot actions, and installs marketplace collections.</p>
     <h2>Article</h2>
     <h2>Bot Library Groups</h2>
 <p>The Chat and Sandbox canvas can show all bots, ungrouped bots, favorites, marketplace theme groups, or custom saved groups. Custom groups act like focused dashboard cards with optional descriptions, delete protection, edit/delete controls, and a capacity cap.</p>
 <h2>Canvas Behavior</h2>
 <p>A focused group card is a drill-in view, not a dead end. Clicking open canvas outside the group card returns to the overview where all bots are visible. Interacting with the card, bot tiles, menus, dialogs, or composer controls does not trigger that return.</p>
+<h2>Selected Bot Preview</h2>
+<p>Selecting a bot opens a large persona preview on the left while the library remains available. The preview itself is intentionally silent. Use the English or Bottish buttons below it to hear the bot, so opening menus or interacting with the surrounding library never triggers surprise speech.</p>
+<p>An English click clears the previous generated sample, creates a fresh persona-specific line, waits for synthesis, and then plays it automatically. The button shows generation, playback, completion, and error feedback. Preview prompts reject microphone checks, audio checks, and generic testing language.</p>
 <h2>Context Menus</h2>
-<p>Multiple selected bots can create or update a group when the selection is eligible. A single bot can be added to an existing custom group from the context menu through a dropdown that lists only groups where the bot is not already present and capacity remains.</p>
+<p>Right-clicking the selected preview opens Avatar Studio, Memories, Images, and Settings. The menu remains authoritative even while Coffee Mode is active. Context-menu items use a pointer cursor and show a brief visual confirmation after selection before the requested action takes over.</p>
+<p>Multiple selected bots can create or update a group when the selection is eligible. A single bot can be added to an existing custom group from the context menu through a chooser that lists only groups where the bot is not already present and capacity remains.</p>
+<h2>Coffee Powers</h2>
+<p>A bot can define short Powers that apply only at the Coffee table. Active powers are surfaced in the library and Coffee UI, while the structured rules travel with bot archive/import flows.</p>
 <h2>Group Details Dialogs</h2>
 <p>Create and edit dialogs for bot groups are higher-level modals. They close through explicit controls such as the close button, Cancel, or Save, so dragging across text fields while naming or renaming a group does not accidentally dismiss the dialog.</p>
 <h2>Marketplace Installs</h2>
-<p>Marketplace bot, theme pack, starter-pack, and Lens installs now show the shared bot transfer overlay. The overlay communicates download, preparation, profile creation, memory restore, refresh, and completion states instead of leaving the marketplace feeling idle.</p>
+<p>Marketplace bot, theme pack, starter-pack, and Lens installs show the shared bot transfer overlay. The overlay communicates download, preparation, profile creation, memory restore, refresh, and completion states instead of leaving the marketplace feeling idle.</p>
     <h2>Categories</h2><p><code>Product</code> <code>Guides</code></p>
     <h2>Aliases</h2><p><code>Bot groups</code> <code>Marketplace installs</code> <code>Bot library groups</code></p>
   </section>
@@ -84,14 +90,18 @@
   <h2>Source records</h2>
   <ul><li><a href="../records/concept/concept_38af8f30-6915-43a6-814b-76ca3e5b63cf.html">Bot library groups and marketplace installs</a> <code>concept_38af8f30-6915-43a6-814b-76ca3e5b63cf</code></li>
 <li><a href="../records/event/event_f3ec88b8-87fb-4521-ae5e-1cf42592c6b6.html">Bot library and marketplace UX refined</a> <code>event_f3ec88b8-87fb-4521-ae5e-1cf42592c6b6</code></li>
-<li><a href="../records/symbol/symbol_0e66cb6b-f542-4c77-8c02-d387c38adc17.html">addBotToLibraryGroup</a> <code>symbol_0e66cb6b-f542-4c77-8c02-d387c38adc17</code></li></ul>
+<li><a href="../records/symbol/symbol_0e66cb6b-f542-4c77-8c02-d387c38adc17.html">addBotToLibraryGroup</a> <code>symbol_0e66cb6b-f542-4c77-8c02-d387c38adc17</code></li>
+<li><a href="../records/event/event_9049a96d-ec0f-4c0e-9444-d9c9997799ec.html">Chat, Bot Library, voice previews, Coffee, and interaction polish advanced</a> <code>event_9049a96d-ec0f-4c0e-9444-d9c9997799ec</code></li></ul>
 </aside>
   <aside class="sources-panel">
   <h2>Related files</h2>
   <ul><li><a class="source-link" href="../../apps/web/src/app/page.tsx"><code>apps/web/src/app/page.tsx</code></a></li>
+<li><a class="source-link" href="../../apps/web/src/app/page.module.css"><code>apps/web/src/app/page.module.css</code></a></li>
 <li><a class="source-link" href="../../apps/web/src/app/botLibraryGroupFilter.ts"><code>apps/web/src/app/botLibraryGroupFilter.ts</code></a></li>
-<li><a class="source-link" href="../../apps/web/src/app/botLibraryGroupFilter.test.ts"><code>apps/web/src/app/botLibraryGroupFilter.test.ts</code></a></li>
-<li><a class="source-link" href="../../apps/web/src/app/page.module.css"><code>apps/web/src/app/page.module.css</code></a></li></ul>
+<li><a class="source-link" href="../../apps/web/src/app/botLibraryShowcase.test.ts"><code>apps/web/src/app/botLibraryShowcase.test.ts</code></a></li>
+<li><a class="source-link" href="../../apps/web/src/app/context-menu-selection-feedback.test.ts"><code>apps/web/src/app/context-menu-selection-feedback.test.ts</code></a></li>
+<li><a class="source-link" href="../../apps/api/src/voice-preview-line.ts"><code>apps/api/src/voice-preview-line.ts</code></a></li>
+<li><a class="source-link" href="../../packages/shared/src/botPower.ts"><code>packages/shared/src/botPower.ts</code></a></li></ul>
 </aside>
   <details class="record-meta">
   <summary>Agent details</summary>
@@ -101,12 +111,15 @@
     <div><dt>Authority</dt><dd>agent</dd></div>
     <div><dt>Confidence</dt><dd>high</dd></div>
     <div><dt>Created</dt><dd><time datetime="2026-07-05T04:14:25.411Z">2026-07-05</time></dd></div>
-    <div><dt>Updated</dt><dd><time datetime="2026-07-05T04:14:25.411Z">2026-07-05</time></dd></div>
+    <div><dt>Updated</dt><dd><time datetime="2026-07-13T04:09:14.952Z">2026-07-13</time></dd></div>
     <div><dt>Tags</dt><dd><code>audience:all</code> <code>bots</code> <code>groups</code> <code>marketplace</code> <code>ux</code></dd></div>
     <div><dt>Files</dt><dd><ul><li><a class="source-link" href="../../apps/web/src/app/page.tsx"><code>apps/web/src/app/page.tsx</code></a></li>
+<li><a class="source-link" href="../../apps/web/src/app/page.module.css"><code>apps/web/src/app/page.module.css</code></a></li>
 <li><a class="source-link" href="../../apps/web/src/app/botLibraryGroupFilter.ts"><code>apps/web/src/app/botLibraryGroupFilter.ts</code></a></li>
-<li><a class="source-link" href="../../apps/web/src/app/botLibraryGroupFilter.test.ts"><code>apps/web/src/app/botLibraryGroupFilter.test.ts</code></a></li>
-<li><a class="source-link" href="../../apps/web/src/app/page.module.css"><code>apps/web/src/app/page.module.css</code></a></li></ul></dd></div>
+<li><a class="source-link" href="../../apps/web/src/app/botLibraryShowcase.test.ts"><code>apps/web/src/app/botLibraryShowcase.test.ts</code></a></li>
+<li><a class="source-link" href="../../apps/web/src/app/context-menu-selection-feedback.test.ts"><code>apps/web/src/app/context-menu-selection-feedback.test.ts</code></a></li>
+<li><a class="source-link" href="../../apps/api/src/voice-preview-line.ts"><code>apps/api/src/voice-preview-line.ts</code></a></li>
+<li><a class="source-link" href="../../packages/shared/src/botPower.ts"><code>packages/shared/src/botPower.ts</code></a></li></ul></dd></div>
   </dl>
 </details>
 </article>

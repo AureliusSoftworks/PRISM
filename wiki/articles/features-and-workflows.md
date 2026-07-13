@@ -2,30 +2,46 @@
 
 # Features and workflows
 
-The main Prism lanes and how they divide controls, continuity, memory, and creative exploration.
+The main Prism lanes and the latest settings, conversation, audio, Coffee, and interaction workflows.
 
 
 Categories: `Product`
 
 Aliases: `Workflows`, `Applets`, `Feature map`
 
-Files: `README.md`, `docs/applets.md`, `AGENTS.md`, `apps/web/src/app/page.tsx`
+Files: `README.md`, `docs/applets.md`, `AGENTS.md`, `apps/web/src/app/SettingsPanel.tsx`, `apps/web/src/app/page.tsx`, `apps/api/src/composer-cleanup.ts`, `apps/api/src/voice-preview-line.ts`, `apps/api/src/bot-powers.ts`, `apps/web/src/app/coffee-replay.ts`
 
 ## Experience Lanes
 
 Prism keeps its major workflows in separate lanes instead of one overloaded chat surface. Chat is the full playground, Zen is calmer one-to-one continuity, Coffee is multi-bot group conversation, Story is a preview narrative lane, and Sandbox carries the most explicit runtime controls.
 
-## Shared Workspace
+## Settings That Follow The Experience
 
-The lanes share the same account, bot library, provider choices, and memory infrastructure, but each lane keeps its own expectations. Advanced knobs belong in Sandbox; companion-like continuity stays focused in Chat and Zen; group orchestration belongs in Coffee.
+Settings now has a first-class Chat category alongside Coffee and Zen. Chat owns conversation behavior such as memory and writing controls, while Coffee and Zen keep their mode-specific options and tutorial resets. This makes the panel easier to scan without blurring the boundaries between experiences.
 
-## Bots And Memory
+## Conversation Interaction
 
-Persona bots can carry behavior, visual identity, exports, and memories. Normal conversations can use scoped continuity, while incognito/private paths avoid memory reads and writes.
+Wildcard prompts use bounded cleanup so a resolved prompt cannot leave the conversation stuck indefinitely with the Shh control active. Multi-line code blocks can collapse without widening the normal Chat reading column; users can expand them, use Copy, or triple-click the block, with visible confirmation after copying. Custom context menus also show a brief confirmation when an item is selected.
+
+## Bots, Voice, And Memory
+
+Persona bots can carry behavior, visual identity, exports, memories, voices, and Coffee-only Powers. The selected Bot Library preview is display-only until the user chooses English or Bottish below it. English generates a fresh persona-specific line and plays it automatically in the same click; legacy mic-check and audio-check lines are rejected and regenerated.
+
+Normal conversations can use scoped continuity, while incognito/private paths avoid memory reads and writes.
+
+## Coffee Powers And Replay
+
+Coffee Powers are short rules or quirks attached to a bot and applied only during Coffee sessions. Prism compiles supported intents into structured session behavior, surfaces active-power badges, and keeps incomplete powers inactive instead of pretending they worked.
+
+Coffee replay reconstructs more of the saved table state, including arrivals, mood, top-offs, player presence and speech timing, so replay reads more like the session that actually happened.
 
 ## Creative Tools
 
-The current app includes image generation paths when online mode allows them, bot export/import flows, applet versions, group conversations, and early Story episodes. Planned applets are tracked separately from release versions so experience changes can be discussed at the surface people actually touch.
+The current app includes online-gated image generation, bot export/import flows, applet versions, group conversations, and early Story episodes. Planned applets are tracked separately from release versions so experience changes can be discussed at the surface people actually touch.
+
+## Current Cursor State
+
+Prism currently uses native system cursors. The custom cursor controller remains in the codebase behind a disabled switch so it can be revisited without rebuilding the system.
 
 ## Source Records
 
@@ -33,5 +49,6 @@ The current app includes image generation paths when online mode allows them, bo
 - `concept_c2d00b3b-6b79-4faf-ac21-b3b4e7e022e6` (concept)
 - `decision_d8f8761e-d67c-4d96-8217-3af3b67ec403` (decision)
 - `concept_38af8f30-6915-43a6-814b-76ca3e5b63cf` (concept)
+- `event_9049a96d-ec0f-4c0e-9444-d9c9997799ec` (event)
 
 Record: `article_9547e9e8-fe98-41fa-87ab-64ddd8b390f8` | Slug: `features-and-workflows` | Authority: agent | Confidence: high
