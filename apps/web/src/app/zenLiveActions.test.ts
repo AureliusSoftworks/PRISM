@@ -79,6 +79,27 @@ describe("resolveZenLiveBotPresenceActionText", () => {
       "replying"
     );
   });
+
+  it("does not emit idle placeholder text", () => {
+    assert.equal(
+      resolveZenLiveBotPresenceActionText({
+        action: null,
+        isTalking: false,
+        userActionVisible: false,
+        hasBot: false,
+      }),
+      null
+    );
+    assert.equal(
+      resolveZenLiveBotPresenceActionText({
+        action: null,
+        isTalking: false,
+        userActionVisible: false,
+        hasBot: true,
+      }),
+      null
+    );
+  });
 });
 
 describe("zenLiveActionPlateFace", () => {
@@ -89,6 +110,7 @@ describe("zenLiveActionPlateFace", () => {
       ["attentive", ":]"],
       ["confused", ":?"],
       ["stern", ":["],
+      ["strained", ":("],
       ["waiting", ":|"],
       ["neutral", ":|"],
     ] as const;
@@ -102,6 +124,22 @@ describe("zenLiveActionPlateFace", () => {
   });
 
   it("supports open-mouth shapes for Zen speech", () => {
+    assert.deepEqual(zenLiveActionPlateFace("warm", "speech-closed"), {
+      text: ":|",
+      rotateDeg: 90,
+    });
+    assert.deepEqual(zenLiveActionPlateFace("warm", "dot"), {
+      text: ":∙",
+      rotateDeg: 90,
+    });
+    assert.deepEqual(zenLiveActionPlateFace("warm", "at"), {
+      text: ":@",
+      rotateDeg: 90,
+    });
+    assert.deepEqual(zenLiveActionPlateFace("warm", "narrow"), {
+      text: ":o",
+      rotateDeg: 90,
+    });
     assert.deepEqual(zenLiveActionPlateFace("warm", "open-wide"), {
       text: ":0",
       rotateDeg: 90,

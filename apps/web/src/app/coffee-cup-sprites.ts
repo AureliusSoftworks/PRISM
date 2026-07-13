@@ -16,11 +16,13 @@ import {
 export {
   coffeeCupConsumptionRate,
   coffeeCupSessionDurationPaceMultiplier,
+  coffeeCupSeedWithTempoRole,
   coffeeCupSipMessageGapForDuration,
   coffeeCupSipBias,
   coffeeCupSipCycleMs,
   coffeeCupShouldFinishAfterSip,
   coffeeCupSipLikelihoodForProgress,
+  coffeeCupTempoRoleForBot,
   coffeeCupCanTopOff,
   coffeeCupProgressAfterTopOff,
   coffeeCupTopOffSnapshotForProgress,
@@ -53,7 +55,7 @@ export interface CoffeeCupVisualState extends CoffeeCupStatus {
   restImageUrl: string;
   sipImageUrl: string;
   frameX: "0%" | "50%" | "100%";
-  frameY: "0%" | "100%";
+  frameY: "0%" | "50%" | "100%";
   sipping: boolean;
   sipAnimationMs: number;
   sipHoldMs: number;
@@ -68,6 +70,10 @@ const COFFEE_STEAM_BASE_RATE_MS = 3450;
 const COFFEE_STEAM_COOLED_RATE_MS = 6800;
 const COFFEE_CUP_SIP_WINDOW_BASE_MS = 1_300;
 const COFFEE_CUP_MIN_SIP_WINDOW_MS = 650;
+// Coffee's visual clock samples once per second. A sip can be noticed almost
+// one sample late, so keep the state alive for one extra tick and let the CSS
+// return-to-table keyframes finish before data-cup-sipping is removed.
+const COFFEE_CUP_SIP_RENDER_SAMPLE_GRACE_MS = 1_000;
 
 function clampUnit(value: number): number {
   if (!Number.isFinite(value)) return 0;
@@ -126,12 +132,12 @@ export function coffeeCupColorForBotColor(
 }
 
 export function coffeeCupFramePosition(frameIndex: number): Pick<CoffeeCupVisualState, "frameX" | "frameY"> {
-  const clamped = Math.max(0, Math.min(5, Math.round(frameIndex)));
+  const clamped = Math.max(0, Math.min(6, Math.round(frameIndex)));
   const col = clamped % 3;
   const row = Math.floor(clamped / 3);
   return {
     frameX: col === 0 ? "0%" : col === 1 ? "50%" : "100%",
-    frameY: row === 0 ? "0%" : "100%",
+    frameY: row === 0 ? "0%" : row === 1 ? "50%" : "100%",
   };
 }
 
@@ -148,9 +154,11 @@ export function coffeeCupSippingActive(args: {
   const sipLikelihood = coffeeCupSipLikelihoodForProgress(args.progress);
   if (sipLikelihood <= 0) return false;
   const cycleMs = coffeeCupSipCycleMs(args.seed, args.durationMinutes);
+  const sipAnimationMs = coffeeCupSipAnimationTiming({ seed: args.seed }).durationMs;
   const sipWindowMs = Math.max(
     COFFEE_CUP_MIN_SIP_WINDOW_MS,
-    Math.round(COFFEE_CUP_SIP_WINDOW_BASE_MS * sipLikelihood)
+    Math.round(COFFEE_CUP_SIP_WINDOW_BASE_MS * sipLikelihood),
+    sipAnimationMs + COFFEE_CUP_SIP_RENDER_SAMPLE_GRACE_MS
   );
   const offsetMs = Math.round(stableUnitValue(`${args.seed}:offset`) * cycleMs);
   return positiveModulo(args.nowMs + offsetMs, cycleMs) < sipWindowMs;
@@ -253,10 +261,10 @@ export function coffeeCupSipBelongsToCurrentFill(args: {
 }
 
 function coffeeCupSteamBaseAlphaForFrame(frameIndex: number): number {
-  if (frameIndex >= 5) return 0;
-  if (frameIndex >= 4) return 0.16;
-  if (frameIndex >= 3) return 0.28;
-  if (frameIndex >= 2) return 0.4;
+  if (frameIndex >= 6) return 0;
+  if (frameIndex >= 5) return 0.16;
+  if (frameIndex >= 4) return 0.28;
+  if (frameIndex >= 3) return 0.4;
   return 0.52;
 }
 
@@ -514,10 +522,12 @@ export function buildCoffeeCupVisualState(args: {
   sessionStartedAtMs?: number | null;
   sessionEndsAtMs?: number | null;
   durationMinutes?: number | null;
+  powerRateMultiplier?: number;
   progressOverride?: number | null;
   topOff?: CoffeeCupTopOffSnapshot | null;
   sipCount?: number | null;
   sippingOverride?: boolean | null;
+  sipLockedUntilMs?: number | null;
   speaking?: boolean;
   forceEmpty?: boolean;
   finished?: boolean;
@@ -525,6 +535,12 @@ export function buildCoffeeCupVisualState(args: {
 }): CoffeeCupVisualState {
   const color = coffeeCupColorForBotColor(args.botColor);
   const finishSeed = args.finishSeed?.trim() || args.seed;
+  const sipLocked =
+    typeof args.sipLockedUntilMs === "number" &&
+    Number.isFinite(args.sipLockedUntilMs) &&
+    Number.isFinite(args.nowMs) &&
+    args.nowMs < args.sipLockedUntilMs;
+  const sippingOverride = sipLocked ? false : args.sippingOverride;
   const sipBaseProgress =
     args.topOff && Number.isFinite(args.topOff.progressAfter)
       ? clampUnit(args.topOff.progressAfter)
@@ -538,7 +554,7 @@ export function buildCoffeeCupVisualState(args: {
     });
   const finished = args.finished === true || finishedBySip;
   const finishingSipActive =
-    finishedBySip && args.sippingOverride === true && args.finished !== true && args.forceEmpty !== true;
+    finishedBySip && sippingOverride === true && args.finished !== true && args.forceEmpty !== true;
   const sipProgress =
     args.forceEmpty === true || (finished && !finishingSipActive)
       ? 1
@@ -568,7 +584,12 @@ export function buildCoffeeCupVisualState(args: {
       ? 1
       : sipProgress != null
         ? sipProgress
-        : coffeeCupPacedProgress(timedProgress ?? 0, args.seed, args.durationMinutes);
+        : coffeeCupPacedProgress(
+            timedProgress ?? 0,
+            args.seed,
+            args.durationMinutes,
+            args.powerRateMultiplier
+          );
   const gatedTimedProgress =
     sipProgress == null && explicitProgress == null && timedProgress != null
       ? coffeeCupSipGatedTimedProgress({
@@ -600,7 +621,7 @@ export function buildCoffeeCupVisualState(args: {
                 sessionStartedAtMs: args.sessionStartedAtMs,
                 sessionEndsAtMs: args.sessionEndsAtMs,
                 durationMinutes: args.durationMinutes,
-              })
+            })
             : null;
         })()
       : null;
@@ -609,7 +630,12 @@ export function buildCoffeeCupVisualState(args: {
       ? 1
       : sipProgress != null
         ? sipProgress
-        : coffeeCupPacedProgress(gatedTimedProgress ?? 0, args.seed, args.durationMinutes);
+        : coffeeCupPacedProgress(
+            gatedTimedProgress ?? 0,
+            args.seed,
+            args.durationMinutes,
+            args.powerRateMultiplier
+          );
   const topOffForVisibleProgress = sipProgress != null ? null : args.topOff;
   const topOffBaseProgress =
     args.topOff && explicitProgress != null ? explicitProgress : pacedProgress;
@@ -618,6 +644,7 @@ export function buildCoffeeCupVisualState(args: {
     topOff: topOffForVisibleProgress,
     nowMs: args.nowMs,
     durationMinutes: args.durationMinutes,
+    seed: args.seed,
     lowerProgressMeansConsumption: sipProgress != null,
   });
   const rawTopOffBaseProgress =
@@ -627,6 +654,7 @@ export function buildCoffeeCupVisualState(args: {
     topOff: topOffForVisibleProgress,
     nowMs: args.nowMs,
     durationMinutes: args.durationMinutes,
+    seed: args.seed,
     lowerProgressMeansConsumption: sipProgress != null,
   });
   const status = coffeeCupStatusForProgress(visibleProgress, args.seed);
@@ -636,22 +664,24 @@ export function buildCoffeeCupVisualState(args: {
           progress: coffeeCupPacedProgress(
             previousTimedSipGateProgress,
             args.seed,
-            args.durationMinutes
+            args.durationMinutes,
+            args.powerRateMultiplier
           ),
-          topOff: args.topOff,
-          nowMs: args.nowMs,
-          durationMinutes: args.durationMinutes,
-          lowerProgressMeansConsumption: false,
-        })
+        topOff: args.topOff,
+        nowMs: args.nowMs,
+        durationMinutes: args.durationMinutes,
+        seed: args.seed,
+        lowerProgressMeansConsumption: false,
+      })
       : null;
   const previousSipGateFrameIndex =
     previousSipGateProgress != null
       ? coffeeCupStatusForProgress(previousSipGateProgress, args.seed).frameIndex
       : null;
   const finalFrameReachedByThisSip =
-    status.frameIndex >= 5 &&
+    status.frameIndex >= 6 &&
     previousSipGateFrameIndex !== null &&
-    previousSipGateFrameIndex < 5;
+    previousSipGateFrameIndex < 6;
   const position = coffeeCupFramePosition(status.frameIndex);
   const topOffHeatStartedAtMs =
     args.topOff && Number.isFinite(Date.parse(args.topOff.toppedOffAt))
@@ -664,8 +694,8 @@ export function buildCoffeeCupVisualState(args: {
   const sipping =
     args.forceEmpty === true || args.finished === true
       ? false
-      : typeof args.sippingOverride === "boolean"
-      ? args.sippingOverride && (status.progress < 0.96 || finishingSipActive)
+      : typeof sippingOverride === "boolean"
+      ? sippingOverride && (status.progress < 0.96 || finishingSipActive)
       : coffeeCupSippingActive({
           seed: args.seed,
           nowMs: args.nowMs,

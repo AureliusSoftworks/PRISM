@@ -147,35 +147,45 @@ export function coffeeMoodSaturationFromSocial(
   const valuesFriction = clampPrismMoodValue(social.valuesFriction);
   const leavePressure = clampPrismMoodValue(social.leavePressure);
   const restraint = clampPrismMoodValue(social.restraint);
-  const socialHealth =
-    disposition * 0.34 +
-    engagement * 0.24 +
-    (1 - valuesFriction) * 0.24 +
-    (1 - leavePressure) * 0.08 +
-    restraint * 0.1;
-  const strain = Math.max(
-    valuesFriction * 0.42 + leavePressure * 0.32,
-    (1 - disposition) * 0.56 + (1 - engagement) * 0.44
+  const colorLift = Math.min(
+    0.28,
+    Math.max(0, disposition - 0.68) * 0.28 +
+      Math.max(0, engagement - 0.68) * 0.2 +
+      Math.max(0, 0.25 - valuesFriction) * 0.2 +
+      Math.max(0, 0.18 - leavePressure) * 0.06 +
+      Math.max(0, restraint - 0.62) * 0.05
   );
   const departureChance = coffeeDepartureChanceFromSocial(social);
-  const departureFadeBase = Math.max(0, (departureChance - 0.62) / 0.38);
-  const departureFade = Math.pow(departureFadeBase, 1.35) * 0.52;
-  const saturation =
-    0.12 +
-    socialHealth * 1.22 -
-    Math.max(0, strain - 0.72) * 0.7 -
-    departureFade;
+  const lowDisposition = Math.max(0, (0.52 - disposition) / 0.52);
+  const lowEngagement = Math.max(0, (0.52 - engagement) / 0.52);
+  const highFriction = Math.max(0, (valuesFriction - 0.5) / 0.5);
+  const depressedPressure =
+    ((lowDisposition + lowEngagement) / 2) * 0.72 + highFriction * 0.28;
+  const exitPressure = Math.max(
+    Math.max(0, (leavePressure - 0.62) / 0.38),
+    Math.max(0, (departureChance - 0.72) / 0.28)
+  );
+  const desaturationBase = Math.max(
+    0,
+    (Math.min(1, depressedPressure, exitPressure) - 0.3) / 0.7
+  );
+  const desaturation = Math.pow(desaturationBase, 0.64) * 1.32;
+  const saturation = 1 + colorLift - desaturation;
   return Math.round(Math.max(0.06, Math.min(1.38, saturation)) * 1000) / 1000;
 }
 
 export function coffeeSocialSnapshotIsNearDesaturated(
   social: CoffeeSocialLikeSnapshot
 ): boolean {
+  const disposition = clampPrismMoodValue(social.disposition);
+  const engagement = clampPrismMoodValue(social.engagement);
+  const leavePressure = clampPrismMoodValue(social.leavePressure);
+  const deeplyWithdrawn = disposition <= 0.22 && engagement <= 0.28;
+  const activelyLeaving =
+    leavePressure >= 0.86 || coffeeDepartureChanceFromSocial(social) >= 0.82;
   return (
     coffeeMoodSaturationFromSocial(social) <= COFFEE_NEAR_DESATURATED_SATURATION ||
-    coffeeDepartureChanceFromSocial(social) >= 0.82 ||
-    (clampPrismMoodValue(social.disposition) <= 0.16 &&
-      clampPrismMoodValue(social.engagement) <= 0.22)
+    (deeplyWithdrawn && activelyLeaving)
   );
 }
 

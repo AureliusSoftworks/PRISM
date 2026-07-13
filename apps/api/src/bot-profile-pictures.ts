@@ -65,7 +65,9 @@ export function parseBotProfilePictureDataUrl(dataUrl: unknown): Buffer {
   return bytes;
 }
 
-export async function normalizeBotProfilePicturePngBytes(inputBytes: Buffer): Promise<Buffer> {
+export async function normalizeBotProfilePicturePngBytes(
+  inputBytes: Buffer
+): Promise<Buffer> {
   return sharp(inputBytes, { limitInputPixels: 24_000_000 })
     .rotate()
     .resize(1024, 1024, {

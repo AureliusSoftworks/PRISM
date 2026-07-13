@@ -32,11 +32,8 @@ export interface BotLibraryGroupSelectionGroup {
   builtIn?: boolean;
 }
 
-export interface BotLibraryMultiSelectionActions<
-  TGroup extends BotLibraryGroupSelectionGroup,
-> {
+export interface BotLibraryMultiSelectionActions {
   canCreateGroup: boolean;
-  removableGroup: TGroup | null;
 }
 
 export interface UpsertBotLibraryGroupOptions {
@@ -153,29 +150,12 @@ export function pruneBotLibraryGroupsForExistingBots<
   );
 }
 
-export function resolveCommonBotLibraryGroupForSelection<
-  TGroup extends BotLibraryGroupSelectionGroup,
->(groups: readonly TGroup[], selectedBotIds: readonly string[]): TGroup | null {
-  const selectedSet = new Set(selectedBotIds);
-  if (selectedSet.size < BOT_LIBRARY_CUSTOM_GROUP_MIN_BOTS) return null;
-  const selectedIds = Array.from(selectedSet);
-  const matching = groups.filter((group) =>
-    selectedIds.every((botId) => group.botIds.includes(botId))
-  );
-  if (matching.length === 0) return null;
-  return matching.find((group) => group.builtIn !== true) ?? matching[0] ?? null;
-}
-
-export function resolveBotLibraryMultiSelectionActions<
-  TGroup extends BotLibraryGroupSelectionGroup,
->(
-  groups: readonly TGroup[],
+export function resolveBotLibraryMultiSelectionActions(
   selectedBotIds: readonly string[]
-): BotLibraryMultiSelectionActions<TGroup> {
+): BotLibraryMultiSelectionActions {
   const selectedSet = new Set(selectedBotIds);
   return {
     canCreateGroup: selectedSet.size >= BOT_LIBRARY_CUSTOM_GROUP_MIN_BOTS,
-    removableGroup: resolveCommonBotLibraryGroupForSelection(groups, selectedBotIds),
   };
 }
 

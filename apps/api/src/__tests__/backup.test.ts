@@ -19,8 +19,12 @@ describe("backup Zen Atmosphere style notes", () => {
   it("exports and restores normalized style notes", () => {
     withBackupDatabase((db, userKey) => {
       db.prepare(
-        "UPDATE users SET zen_wallpaper_style_notes = ?, zen_wallpaper_blurred_edges_enabled = 0, zen_message_font_min_px = 18.4, zen_message_font_max_px = 36.7, experimental_all_model_effort_enabled = 1, coffee_experimental_table_angle_enabled = 1, psychic_mode_enabled = 1 WHERE id = ?"
-      ).run("  misty\n glass,   paper grain  ", "user-1");
+        "UPDATE users SET zen_wallpaper_style_notes = ?, zen_wallpaper_blurred_edges_enabled = 0, zen_message_font_min_px = 18.4, zen_message_font_max_px = 36.7, experimental_all_model_effort_enabled = 1, coffee_experimental_table_angle_enabled = 1, psychic_mode_enabled = 1, prism_default_bot_face_thinking_frames = ? WHERE id = ?"
+      ).run(
+        "  misty\n glass,   paper grain  ",
+        '["?","!","?","…"]',
+        "user-1"
+      );
 
       const snapshot = exportUserSnapshot(db, "user-1", userKey);
 
@@ -34,6 +38,12 @@ describe("backup Zen Atmosphere style notes", () => {
       assert.equal(snapshot.settings?.experimentalAllModelEffortEnabled, true);
       assert.equal(snapshot.settings?.coffeeExperimentalTableAngleEnabled, true);
       assert.equal(snapshot.settings?.psychicModeEnabled, true);
+      assert.deepEqual(snapshot.settings?.prismDefaultBotFaceThinkingFrames, [
+        "?",
+        "!",
+        "?",
+        "…",
+      ]);
 
       const longNotes = "x".repeat(MAX_ZEN_WALLPAPER_STYLE_NOTES_LENGTH + 10);
       importUserSnapshot(
@@ -50,6 +60,7 @@ describe("backup Zen Atmosphere style notes", () => {
             experimentalAllModelEffortEnabled: false,
             coffeeExperimentalTableAngleEnabled: false,
             psychicModeEnabled: false,
+            prismDefaultBotFaceThinkingFrames: [".", "o", "O", "o"],
           },
         },
         userKey
@@ -57,7 +68,7 @@ describe("backup Zen Atmosphere style notes", () => {
 
       const restored = db
         .prepare(
-          "SELECT zen_wallpaper_style_notes, zen_wallpaper_blurred_edges_enabled, zen_message_font_min_px, zen_message_font_max_px, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled FROM users WHERE id = ?"
+          "SELECT zen_wallpaper_style_notes, zen_wallpaper_blurred_edges_enabled, zen_message_font_min_px, zen_message_font_max_px, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, prism_default_bot_face_thinking_frames FROM users WHERE id = ?"
         )
         .get("user-1") as {
         zen_wallpaper_style_notes: string;
@@ -67,6 +78,7 @@ describe("backup Zen Atmosphere style notes", () => {
         experimental_all_model_effort_enabled: number;
         coffee_experimental_table_angle_enabled: number;
         psychic_mode_enabled: number;
+        prism_default_bot_face_thinking_frames: string | null;
       };
 
       assert.equal(
@@ -79,6 +91,7 @@ describe("backup Zen Atmosphere style notes", () => {
       assert.equal(restored.experimental_all_model_effort_enabled, 0);
       assert.equal(restored.coffee_experimental_table_angle_enabled, 0);
       assert.equal(restored.psychic_mode_enabled, 0);
+      assert.equal(restored.prism_default_bot_face_thinking_frames, '[".","o","O","o"]');
     });
   });
 
@@ -131,18 +144,42 @@ describe("backup bot avatar face style", () => {
     withBackupDatabase((db, userKey) => {
       db.prepare(
         `INSERT INTO bots (
-          id, user_id, name, system_prompt,
-          face_eyes_font, face_mouth_font, face_font_weight,
+          id, user_id, name, system_prompt, voice_preview_line, avatar_details_json,
+          face_eyes_font, face_eye_character, face_eye_animation,
+          face_mouth_font, face_mouth_character, face_mouth_animation, face_font_weight,
+          face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg,
+          face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg,
+          face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y,
+          face_thinking_frames,
           created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         "bot-1",
         "user-1",
         "Avatar Bot",
         "You are Avatar Bot.",
+        "Testing this carefully calibrated voice.",
+        '{"version":1,"screen":{"stamps":[{"id":"round-glasses","offsetX":2,"offsetY":-1,"scalePct":105}],"paintMaskBase64":null}}',
         "warm",
+        "8",
+        "wobble",
         "formal",
+        "△",
+        "flicker",
         725,
+        1.15,
+        0.06,
+        -0.08,
+        -25,
+        1.25,
+        -0.04,
+        0.06,
+        35,
+        "❘",
+        1.2,
+        -0.08,
+        0.06,
+        '["·","*","✦","*"]',
         "2026-01-01T00:00:00.000Z",
         "2026-01-01T00:00:00.000Z"
       );
@@ -152,6 +189,7 @@ describe("backup bot avatar face style", () => {
         id: "bot-1",
         name: "Avatar Bot",
         systemPrompt: "You are Avatar Bot.",
+        voicePreviewLine: "Testing this carefully calibrated voice.",
         exportHash: null,
         model: null,
         localModel: null,
@@ -168,9 +206,60 @@ describe("backup bot avatar face style", () => {
 	        repetitionPenalty: 1.1,
 	        color: null,
         glyph: null,
+        avatarDetails: {
+          version: 1,
+          screen: {
+            stamps: [
+              {
+                id: "round-glasses",
+                offsetX: 2,
+                offsetY: -1,
+                scalePct: 105,
+              },
+            ],
+            paintMaskBase64: null,
+          },
+        },
         faceEyesFont: "warm",
+        faceEyeCharacter: "8",
         faceMouthFont: "formal",
+        faceMouthCharacter: "△",
+        faceMouthAnimation: "flicker",
         faceFontWeight: 725,
+        faceEyeScale: 1.15,
+        faceEyeOffsetX: 0.06,
+        faceEyeOffsetY: -0.08,
+        faceEyeRotationDeg: -25,
+        faceMouthScale: 1.25,
+        faceMouthOffsetX: -0.04,
+        faceMouthOffsetY: 0.06,
+        faceMouthRotationDeg: 35,
+        faceBlinkBar: "❘",
+        faceBlinkScale: 1.2,
+        faceBlinkOffsetX: -0.08,
+        faceBlinkOffsetY: 0.06,
+        faceThinkingFrames: ["·", "*", "✦", "*"],
+        authoredAudioVoiceProfile: {
+          v: 2,
+          enabled: true,
+          baseVoiceId: "voice-1",
+          pitch: 0,
+          warmth: 0,
+          pace: 0,
+          lilt: 0,
+          bottishTone: 0.45,
+          volume: 1,
+          texture: {
+            preset: "clean",
+            amount: 0,
+            bandwidth: 1,
+            noise: 0,
+            instability: 0,
+            distortion: 0,
+            damage: 0,
+          },
+        },
+        audioVoiceProfileOverride: null,
         chatEnabled: true,
         visibility: "private",
         createdAt: "2026-01-01T00:00:00.000Z",
@@ -178,25 +267,302 @@ describe("backup bot avatar face style", () => {
       });
 
       db.prepare(
-        "UPDATE bots SET face_eyes_font = NULL, face_mouth_font = NULL, face_font_weight = NULL WHERE id = ?"
+        "UPDATE bots SET voice_preview_line = NULL, avatar_details_json = NULL, face_eyes_font = NULL, face_eye_character = NULL, face_eye_animation = NULL, face_mouth_font = NULL, face_mouth_character = NULL, face_mouth_animation = NULL, face_font_weight = NULL, face_eye_scale = NULL, face_eye_offset_x = NULL, face_eye_offset_y = NULL, face_eye_rotation_deg = NULL, face_mouth_scale = NULL, face_mouth_offset_x = NULL, face_mouth_offset_y = NULL, face_mouth_rotation_deg = NULL, face_blink_bar = NULL, face_blink_scale = NULL, face_blink_offset_x = NULL, face_blink_offset_y = NULL, face_thinking_frames = NULL WHERE id = ?"
       ).run("bot-1");
 
       importUserSnapshot(db, "user-1", snapshot, userKey);
 
       const restored = db
         .prepare(
-          "SELECT face_eyes_font, face_mouth_font, face_font_weight, profile_picture_image_id FROM bots WHERE id = ?"
+          "SELECT voice_preview_line, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, profile_picture_image_id FROM bots WHERE id = ?"
         )
         .get("bot-1") as {
+        voice_preview_line: string | null;
+        avatar_details_json: string | null;
         face_eyes_font: string | null;
+        face_eye_character: string | null;
+        face_eye_animation: string | null;
         face_mouth_font: string | null;
+        face_mouth_character: string | null;
+        face_mouth_animation: string | null;
         face_font_weight: number | null;
+        face_eye_scale: number | null;
+        face_eye_offset_x: number | null;
+        face_eye_offset_y: number | null;
+        face_eye_rotation_deg: number | null;
+        face_mouth_scale: number | null;
+        face_mouth_offset_x: number | null;
+        face_mouth_offset_y: number | null;
+        face_mouth_rotation_deg: number | null;
+        face_blink_bar: string | null;
+        face_blink_scale: number | null;
+        face_blink_offset_x: number | null;
+        face_blink_offset_y: number | null;
+        face_thinking_frames: string | null;
         profile_picture_image_id: string | null;
       };
+      assert.equal(restored.voice_preview_line, "Testing this carefully calibrated voice.");
+      assert.equal(
+        restored.avatar_details_json,
+        '{"version":1,"screen":{"stamps":[{"id":"round-glasses","offsetX":2,"offsetY":-1,"scalePct":105}],"paintMaskBase64":null}}'
+      );
       assert.equal(restored.face_eyes_font, "warm");
+      assert.equal(restored.face_eye_character, "8");
+      assert.equal(restored.face_eye_animation, "none");
       assert.equal(restored.face_mouth_font, "formal");
+      assert.equal(restored.face_mouth_character, "△");
+      assert.equal(restored.face_mouth_animation, "flicker");
       assert.equal(restored.face_font_weight, 725);
+      assert.equal(restored.face_eye_scale, 1.15);
+      assert.equal(restored.face_eye_offset_x, 0.06);
+      assert.equal(restored.face_eye_offset_y, -0.08);
+      assert.equal(restored.face_eye_rotation_deg, -25);
+      assert.equal(restored.face_mouth_scale, 1.25);
+      assert.equal(restored.face_mouth_offset_x, -0.04);
+      assert.equal(restored.face_mouth_offset_y, 0.06);
+      assert.equal(restored.face_mouth_rotation_deg, 35);
+      assert.equal(restored.face_blink_bar, "❘");
+      assert.equal(restored.face_blink_scale, 1.2);
+      assert.equal(restored.face_blink_offset_x, -0.08);
+      assert.equal(restored.face_blink_offset_y, 0.06);
+      assert.equal(restored.face_thinking_frames, '["·","*","✦","*"]');
       assert.equal(restored.profile_picture_image_id, null);
+    });
+  });
+
+  it("rejects raw avatar URLs and legacy accessory fields from account backups", () => {
+    withBackupDatabase((db, userKey) => {
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      snapshot.bots = [
+        {
+          id: "raw-avatar",
+          name: "Raw Avatar",
+          systemPrompt: "",
+          onlineEnabled: true,
+          deleteProtected: false,
+          flirtEnabled: false,
+          temperature: 0.7,
+          maxTokens: 2048,
+          chatEnabled: true,
+          visibility: "private",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          avatarDetails: "https://example.com/avatar.png" as never,
+        },
+      ];
+
+      assert.throws(
+        () => importUserSnapshot(db, "user-1", snapshot, userKey),
+        /Invalid avatar details/
+      );
+      assert.equal(
+        db.prepare("SELECT id FROM bots WHERE id = ?").get("raw-avatar"),
+        undefined
+      );
+
+      snapshot.bots = [
+        {
+          ...snapshot.bots[0]!,
+          id: "legacy-accessory",
+          avatarDetails: null,
+          accessoryImageUrl: "data:image/png;base64,AAAA",
+        } as never,
+      ];
+      assert.throws(
+        () => importUserSnapshot(db, "user-1", snapshot, userKey),
+        /unsupported legacy avatar field: accessoryImageUrl/
+      );
+      assert.equal(
+        db.prepare("SELECT id FROM bots WHERE id = ?").get("legacy-accessory"),
+        undefined
+      );
+
+      const rawFieldBase = { ...snapshot.bots[0] } as Record<string, unknown>;
+      delete rawFieldBase.accessoryImageUrl;
+      for (const [field, value] of [
+        ["profilePictureDataUrl", "data:image/png;base64,AAAA"],
+        ["profile_picture_svg", "<svg><path /></svg>"],
+        ["avatarImageUrl", "https://example.com/avatar.png"],
+        ["portraitImageUrl", "https://example.com/avatar.png"],
+      ] as const) {
+        snapshot.bots = [
+          {
+            ...rawFieldBase,
+            id: `raw-${field}`,
+            [field]: value,
+          } as never,
+        ];
+        assert.throws(
+          () => importUserSnapshot(db, "user-1", snapshot, userKey),
+          new RegExp(`unsupported legacy avatar field: ${field}`)
+        );
+        assert.equal(
+          db.prepare("SELECT id FROM bots WHERE id = ?").get(`raw-${field}`),
+          undefined
+        );
+      }
+
+      const rootRasterSnapshot = {
+        ...snapshot,
+        bots: [],
+        imageAssets: [{ dataUrl: "data:image/png;base64,AAAA" }],
+      } as never;
+      assert.throws(
+        () => importUserSnapshot(db, "user-1", rootRasterSnapshot, userKey),
+        /unsupported raster data field: imageAssets/i
+      );
+    });
+  });
+
+  it("rejects cross-tenant id collisions without mutating either tenant", () => {
+    withBackupDatabase((db, userKey) => {
+      db.prepare(
+        `INSERT INTO users (
+          id, email, display_name, password_hash, password_salt,
+          wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag,
+          created_at, last_active_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        "user-2",
+        "user-2@example.com",
+        "User Two",
+        "hash",
+        "salt",
+        "cipher",
+        "iv",
+        "tag",
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-02T00:00:00.000Z"
+      );
+      db.prepare(
+        `INSERT INTO bots (
+          id, user_id, name, system_prompt, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?)`
+      ).run(
+        "shared-id",
+        "user-2",
+        "Tenant Two Bot",
+        "Do not replace me.",
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-01T00:00:00.000Z"
+      );
+
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      snapshot.settings = { ...snapshot.settings!, theme: "dark" };
+      snapshot.bots = [
+        {
+          id: "shared-id",
+          name: "Collision",
+          systemPrompt: "",
+          onlineEnabled: true,
+          deleteProtected: false,
+          flirtEnabled: false,
+          temperature: 0.7,
+          maxTokens: 2048,
+          chatEnabled: true,
+          visibility: "private",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          avatarDetails: null,
+        },
+      ];
+
+      assert.throws(
+        () => importUserSnapshot(db, "user-1", snapshot, userKey),
+        /belongs to another user/i
+      );
+      const retained = db
+        .prepare("SELECT user_id, name FROM bots WHERE id = ?")
+        .get("shared-id") as { user_id: string; name: string };
+      assert.equal(retained.user_id, "user-2");
+      assert.equal(retained.name, "Tenant Two Bot");
+      assert.equal(
+        (db.prepare("SELECT theme FROM users WHERE id = ?").get("user-1") as {
+          theme: string;
+        }).theme,
+        "system"
+      );
+    });
+  });
+});
+
+describe("backup audio voice settings", () => {
+  it("round-trips account and bot profiles without touching retired Coffee player columns", () => {
+    withBackupDatabase((db, userKey) => {
+      db.prepare(
+        "UPDATE users SET voice_mode = ?, voice_effects_enabled = 0, voice_volume = ?, english_voice_engine = ?, default_system_voice_name = ?, default_elevenlabs_voice_id = ?, elevenlabs_voice_bank = ?, elevenlabs_voice_model = ?, player_audio_voice_profile = ?, player_name_pronunciation = ?, prism_default_bot_audio_voice_profile = ? WHERE id = ?"
+      ).run(
+        "english",
+        0.65,
+        "elevenlabs",
+        "Alex",
+        "eleven-global",
+        JSON.stringify({ "voice-1": "eleven-a" }),
+        "eleven_flash_v2_5",
+        JSON.stringify({ v: 1, baseVoiceId: "voice-3", pitch: 0, warmth: 0, pace: 0, lilt: 0 }),
+        "Jair-id",
+        JSON.stringify({ v: 1, baseVoiceId: "voice-5", pitch: 0.4, warmth: 0, pace: 0, lilt: 0 }),
+        "user-1"
+      );
+      db.prepare(
+        `INSERT INTO bots (
+          id, user_id, name, system_prompt,
+          authored_audio_voice_profile, audio_voice_profile_override,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        "voice-bot",
+        "user-1",
+        "Voice Bot",
+        "You are Voice Bot.",
+        JSON.stringify({ v: 1, baseVoiceId: "voice-4", pitch: 0.2, warmth: -0.1, pace: 0.3, lilt: 0.4 }),
+        JSON.stringify({ v: 1, baseVoiceId: "voice-2", pitch: -0.4, warmth: 0.6, pace: 0, lilt: -0.2 }),
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-01T00:00:00.000Z"
+      );
+
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.equal(snapshot.settings?.voiceMode, "english");
+      assert.equal(snapshot.settings?.voiceEffectsEnabled, false);
+      assert.equal(snapshot.settings?.voiceVolume, 0.65);
+      assert.equal(snapshot.settings?.prismDefaultBotAudioVoiceProfile?.baseVoiceId, "voice-5");
+      assert.equal(snapshot.settings?.englishVoiceEngine, "elevenlabs");
+      assert.equal(snapshot.settings?.defaultSystemVoiceName, "Alex");
+      assert.equal(snapshot.settings?.defaultElevenLabsVoiceId, "eleven-global");
+      assert.equal(snapshot.settings?.elevenLabsVoiceModel, "eleven_flash_v2_5");
+      assert.equal(snapshot.settings?.elevenLabsVoiceBank?.["voice-1"], "eleven-a");
+      assert.equal("playerAudioVoiceProfile" in (snapshot.settings ?? {}), false);
+      assert.equal("playerNamePronunciation" in (snapshot.settings ?? {}), false);
+
+      db.prepare(
+        "UPDATE users SET voice_mode = 'mute', voice_effects_enabled = 1, voice_volume = 1, english_voice_engine = 'builtin', default_system_voice_name = NULL, default_elevenlabs_voice_id = NULL, elevenlabs_voice_bank = '{}', elevenlabs_voice_model = NULL, player_audio_voice_profile = ?, player_name_pronunciation = ?, prism_default_bot_audio_voice_profile = NULL WHERE id = ?"
+      ).run(
+        JSON.stringify({ v: 1, baseVoiceId: "voice-2", pitch: 0, warmth: 0, pace: 0, lilt: 0 }),
+        "Keep me",
+        "user-1"
+      );
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+
+      const restoredUser = db.prepare(
+        "SELECT voice_mode, voice_effects_enabled, voice_volume, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, player_audio_voice_profile, player_name_pronunciation, prism_default_bot_audio_voice_profile FROM users WHERE id = ?"
+      ).get("user-1") as Record<string, string | null>;
+      assert.equal(restoredUser.voice_mode, "english");
+      assert.equal(restoredUser.voice_effects_enabled, 0);
+      assert.equal(restoredUser.voice_volume, 0.65);
+      assert.equal(JSON.parse(restoredUser.prism_default_bot_audio_voice_profile ?? "{}").baseVoiceId, "voice-5");
+      assert.equal(restoredUser.english_voice_engine, "elevenlabs");
+      assert.equal(restoredUser.default_system_voice_name, "Alex");
+      assert.equal(restoredUser.default_elevenlabs_voice_id, "eleven-global");
+      assert.equal(restoredUser.elevenlabs_voice_model, "eleven_flash_v2_5");
+      assert.equal(JSON.parse(restoredUser.elevenlabs_voice_bank ?? "{}")["voice-1"], "eleven-a");
+      assert.equal(JSON.parse(restoredUser.player_audio_voice_profile ?? "{}").baseVoiceId, "voice-2");
+      assert.equal(restoredUser.player_name_pronunciation, "Keep me");
+
+      const restoredBot = db.prepare(
+        "SELECT authored_audio_voice_profile, audio_voice_profile_override FROM bots WHERE id = ?"
+      ).get("voice-bot") as Record<string, string>;
+      assert.equal(JSON.parse(restoredBot.authored_audio_voice_profile).baseVoiceId, "voice-4");
+      assert.equal(JSON.parse(restoredBot.audio_voice_profile_override).baseVoiceId, "voice-2");
     });
   });
 });

@@ -1,29 +1,40 @@
 export interface ZenAtmosphereTimelineEntry {
   imageId: string;
   generationMessageCount: number;
-  revealStartMessageCount?: number;
-  revealFullMessageCount?: number;
+  startsVisible?: boolean;
   createdAt?: string;
 }
 
 interface ZenAtmosphereAnchorEntry extends ZenAtmosphereTimelineEntry {
   startY: number;
   fullY: number;
-  revealStartMessageCount: number;
-  revealFullMessageCount: number;
 }
 
 export interface ZenAtmosphereLayerOpacityArgs {
   timeline: readonly ZenAtmosphereTimelineEntry[];
   readerY: number;
-  revealDelayMessageCount: number;
-  revealSpanMessageCount: number;
+  revealScrollDistancePx: number;
   messageCountToY: (messageCount: number) => number;
+}
+
+export interface ZenAtmosphereLayerState {
+  opacity: number;
+  parallaxY: number;
+}
+
+export interface ZenAtmosphereLayerStateArgs extends ZenAtmosphereLayerOpacityArgs {
+  parallaxRate?: number;
+  parallaxMaxPx?: number;
 }
 
 function clampUnit(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(1, value));
+}
+
+function clampFinite(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.max(min, Math.min(max, value));
 }
 
 export function maxZenAtmosphereLayerOpacity(
@@ -35,47 +46,52 @@ export function maxZenAtmosphereLayerOpacity(
   );
 }
 
-export function calculateZenAtmosphereLayerOpacitiesForReader({
+export function calculateZenAtmosphereLayerStatesForReader({
   timeline,
   readerY,
-  revealDelayMessageCount,
-  revealSpanMessageCount,
+  revealScrollDistancePx,
   messageCountToY,
-}: ZenAtmosphereLayerOpacityArgs): Record<string, number> {
+  parallaxRate = 0.08,
+  parallaxMaxPx = 42,
+}: ZenAtmosphereLayerStateArgs): Record<string, ZenAtmosphereLayerState> {
   if (timeline.length === 0) return {};
 
+  const revealDistancePx = Math.max(1, revealScrollDistancePx);
+  const maxParallaxY = Math.max(0, parallaxMaxPx);
   const anchors: ZenAtmosphereAnchorEntry[] = timeline
     .map((entry) => {
-      const revealStartMessageCount =
-        entry.revealStartMessageCount ??
-        entry.generationMessageCount + revealDelayMessageCount;
-      const revealFullMessageCount = Math.max(
-        revealStartMessageCount,
-        entry.revealFullMessageCount ??
-          revealStartMessageCount + revealSpanMessageCount
-      );
-      const startY = messageCountToY(revealStartMessageCount);
-      const fullY = Math.max(startY + 1, messageCountToY(revealFullMessageCount));
+      const startY = messageCountToY(entry.generationMessageCount);
+      const fullY = startY + revealDistancePx;
       return {
         ...entry,
         startY,
         fullY,
-        revealStartMessageCount,
-        revealFullMessageCount,
       };
     })
     .sort((a, b) => {
       const yDelta = a.startY - b.startY;
       if (Math.abs(yDelta) > 0.5) return yDelta;
-      return a.revealStartMessageCount - b.revealStartMessageCount;
+      return a.generationMessageCount - b.generationMessageCount;
     });
 
-  const next: Record<string, number> = {};
+  const next: Record<string, ZenAtmosphereLayerState> = {};
   for (const entry of timeline) {
-    next[entry.imageId] = 0;
+    const anchor =
+      anchors.find((candidate) => candidate.imageId === entry.imageId) ?? null;
+    const rawParallaxY =
+      anchor && readerY > anchor.startY
+        ? -(readerY - anchor.startY) * Math.max(0, parallaxRate)
+        : 0;
+    next[entry.imageId] = {
+      opacity: 0,
+      parallaxY: clampFinite(rawParallaxY, -maxParallaxY, 0),
+    };
   }
 
   if (readerY < anchors[0]!.startY) {
+    if (anchors[0]!.startsVisible) {
+      next[anchors[0]!.imageId]!.opacity = 1;
+    }
     return next;
   }
 
@@ -87,16 +103,34 @@ export function calculateZenAtmosphereLayerOpacitiesForReader({
       const progress = clampUnit(
         (readerY - current.startY) / Math.max(1, current.fullY - current.startY)
       );
-      if (previous) next[previous.imageId] = 1 - progress;
-      next[current.imageId] = progress;
+      if (previous) {
+        next[previous.imageId]!.opacity = 1 - progress;
+        next[current.imageId]!.opacity = progress;
+      } else if (current.startsVisible) {
+        next[current.imageId]!.opacity = 1;
+      } else {
+        next[current.imageId]!.opacity = progress;
+      }
       return next;
     }
     if (readerY > current.fullY && (!upcoming || readerY < upcoming.startY)) {
-      next[current.imageId] = 1;
+      next[current.imageId]!.opacity = 1;
       return next;
     }
   }
 
-  next[anchors[anchors.length - 1]!.imageId] = 1;
+  next[anchors[anchors.length - 1]!.imageId]!.opacity = 1;
   return next;
+}
+
+export function calculateZenAtmosphereLayerOpacitiesForReader(
+  args: ZenAtmosphereLayerOpacityArgs
+): Record<string, number> {
+  const states = calculateZenAtmosphereLayerStatesForReader(args);
+  return Object.fromEntries(
+    Object.entries(states).map(([imageId, state]) => [
+      imageId,
+      state.opacity,
+    ])
+  );
 }

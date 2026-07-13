@@ -1,6 +1,6 @@
 {
   "name": "@localai/api",
-  "version": "0.6.5",
+  "version": "0.8.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,6 +8,9 @@
     "build": "tsc -p tsconfig.json",
     "start": "node --env-file-if-exists=../../.env dist/server.js",
     "test": "node --test --experimental-strip-types src/__tests__/*.test.ts",
+    "test:coverage": "node --test --experimental-strip-types --experimental-test-coverage --test-coverage-lines=85 --test-coverage-branches=65 --test-coverage-functions=85 --test-coverage-exclude='**/packages/**' --test-coverage-exclude='src/server.ts' src/__tests__/*.test.ts",
+    "pretest": "npm --prefix ../../packages/config run build && npm --prefix ../../packages/shared run build",
+    "pretest:coverage": "npm --prefix ../../packages/config run build && npm --prefix ../../packages/shared run build",
     "lint": "tsc -p tsconfig.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

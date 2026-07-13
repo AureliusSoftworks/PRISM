@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { getAppConfig } from "@localai/config";
 import {
   openAiModelSupportsReasoningEffort,
@@ -123,6 +124,33 @@ interface DualOllamaWorkloadOptions {
 }
 
 const config = getAppConfig();
+
+// Model lists change only when a provider configuration or the API process
+// changes. Keep discovery out of the browser-refresh path: it probes local
+// Ollama plus any configured cloud catalogs and can otherwise make every page
+// load feel like the models themselves are restarting.
+const modelCatalogCache = new Map<string, Promise<ModelCatalog>>();
+
+function modelCatalogCacheKey(
+  openAiApiKey?: string,
+  secondaryOllamaHost?: string | null,
+  anthropicApiKey?: string
+): string {
+  return createHash("sha256")
+    .update(JSON.stringify({
+      primaryOllamaHost: config.ollamaHost,
+      primaryOllamaModel: config.ollamaModel,
+      secondaryOllamaHost: secondaryOllamaHost?.trim() ?? "",
+      openAiApiKey: openAiApiKey?.trim() ?? "",
+      anthropicApiKey: anthropicApiKey?.trim() ?? "",
+    }))
+    .digest("hex");
+}
+
+/** Test-only reset; production cache lifetime is the API process lifetime. */
+export function resetModelCatalogCacheForTests(): void {
+  modelCatalogCache.clear();
+}
 export const SECONDARY_OLLAMA_MODEL_PREFIX = "ollama-secondary:";
 const DUAL_OLLAMA_WORKLOAD_STATUS_CACHE_MS = 30_000;
 
@@ -979,6 +1007,32 @@ export async function checkAnthropicApiKeyStatus(
 }
 
 export async function buildModelCatalog(
+  openAiApiKey?: string,
+  secondaryOllamaHost?: string | null,
+  anthropicApiKey?: string
+): Promise<ModelCatalog> {
+  const cacheKey = modelCatalogCacheKey(
+    openAiApiKey,
+    secondaryOllamaHost,
+    anthropicApiKey
+  );
+  const cached = modelCatalogCache.get(cacheKey);
+  if (cached) return cached;
+  const catalog = buildUncachedModelCatalog(
+    openAiApiKey,
+    secondaryOllamaHost,
+    anthropicApiKey
+  );
+  modelCatalogCache.set(cacheKey, catalog);
+  try {
+    return await catalog;
+  } catch (error) {
+    modelCatalogCache.delete(cacheKey);
+    throw error;
+  }
+}
+
+async function buildUncachedModelCatalog(
   openAiApiKey?: string,
   secondaryOllamaHost?: string | null,
   anthropicApiKey?: string

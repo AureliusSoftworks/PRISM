@@ -177,6 +177,7 @@ describe("bot profile picture gallery filtering", () => {
     seedImage(db, "avatar", "user-1", "bot-1", BOT_PROFILE_PICTURE_IMAGE_PURPOSE);
     seedImage(db, "gallery", "user-1", null, "gallery");
     seedImage(db, "legacy", "user-1", null, null);
+    seedImage(db, "other-upload", "user-1", "bot-1", "bot_upload");
     seedImage(db, "wallpaper", "user-1", null, "wallpaper");
 
     const listed = db
@@ -184,7 +185,7 @@ describe("bot profile picture gallery filtering", () => {
       .all("user-1") as Array<{ id: string }>;
     assert.deepEqual(
       listed.map((row) => row.id),
-      ["gallery", "legacy"]
+      ["gallery", "legacy", "other-upload"]
     );
 
     db.prepare(`DELETE FROM images WHERE user_id = ? AND ${GALLERY_EXCLUDED_PURPOSE_SQL}`).run("user-1");

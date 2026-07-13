@@ -30,6 +30,7 @@ describe("built-in prompt wildcard slots", () => {
     assert.equal(normalizeBuiltInPromptWildcardSlotKey("{NUM}"), "NUM");
     assert.equal(normalizeBuiltInPromptWildcardSlotKey("{number}"), "NUM");
     assert.equal(normalizeBuiltInPromptWildcardSlotKey("number"), "NUM");
+    assert.equal(normalizeBuiltInPromptWildcardSlotKey("{BOT}"), "BOT");
   });
 
   it("rejects unsupported built-in wildcard keys", () => {
@@ -98,6 +99,7 @@ describe("built-in prompt wildcard slots", () => {
     assert.equal(getBuiltInPromptWildcardSlot("CONTAINER")?.pickerVisibility, "searchable");
     assert.equal(getBuiltInPromptWildcardSlot("TREASURE")?.pickerVisibility, "searchable");
     assert.equal(getBuiltInPromptWildcardSlot("SUFFIX")?.pickerVisibility, "searchable");
+    assert.equal(getBuiltInPromptWildcardSlot("BOT")?.pickerVisibility, "hidden");
   });
 
   it("keeps noun generation rules free of sticky concrete examples", () => {
@@ -257,6 +259,7 @@ describe("prompt shortcut payloads", () => {
         wildcardReplacements: [
           { key: "randomShit", value: "lemon", start: 14, end: 19, source: "deck" },
           { key: "ADJECTIVE", value: "luminous", start: 25, end: 33, source: "wildcard" },
+          { key: "BOT", value: "[Mira](prism-bot://mira)", botId: "mira", source: "wildcard" },
         ],
       },
       psychicThought: {
@@ -294,6 +297,7 @@ describe("prompt shortcut payloads", () => {
       wildcardReplacements: [
         { key: "RANDOMSHIT", value: "lemon", start: 14, end: 19, source: "deck" },
         { key: "ADJECTIVE", value: "luminous", start: 25, end: 33, source: "wildcard" },
+        { key: "BOT", value: "[Mira](prism-bot://mira)", botId: "mira", source: "wildcard" },
       ],
     });
     assert.deepEqual(parseStoredPsychicThoughtPayload(serialized), {

@@ -1,5 +1,22 @@
 export type CanvasBotMarqueeSelectionMode = "replace" | "toggle";
 
+export type CanvasBotDirectoryView = "chat" | "sandbox" | "coffee" | "other";
+
+export function canvasBotDirectoryIsInteractive(args: {
+  view: CanvasBotDirectoryView;
+  conversationMessageCount: number | null;
+  pendingReplyVisible: boolean;
+}): boolean {
+  if (args.pendingReplyVisible) return false;
+  if (args.view === "chat") {
+    return args.conversationMessageCount === null || args.conversationMessageCount === 0;
+  }
+  if (args.view === "sandbox") {
+    return args.conversationMessageCount === null;
+  }
+  return false;
+}
+
 export interface CanvasBotMarqueeSelectionInput {
   mode: CanvasBotMarqueeSelectionMode;
   baseSelectedBotIds: ReadonlySet<string>;

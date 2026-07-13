@@ -10,6 +10,11 @@ import {
   isPrismBackendUnavailableError,
   type BackendUnavailableEventDetail,
 } from "./backendUnavailable.ts";
+import {
+  backendUnavailableDetailFromError,
+  decideAuthBootstrapFailure,
+  isAbortLikeError,
+} from "./authBootstrap.ts";
 
 const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
 
@@ -83,5 +88,51 @@ describe("backend unavailable helpers", () => {
         detail: "ECONNREFUSED",
       },
     ]);
+  });
+
+  it("preserves the current user when auth bootstrap hits a backend outage", () => {
+    const currentUser = { id: "user-1", displayName: "Jared" };
+    const decision = decideAuthBootstrapFailure(
+      new PrismBackendUnavailableError("Prism is waiting for its local API.", {
+        path: "/api/auth/me",
+        status: 503,
+        detail: "ECONNREFUSED",
+      }),
+      currentUser
+    );
+
+    assert.equal(decision.kind, "reconnecting");
+    if (decision.kind !== "reconnecting") return;
+    assert.equal(decision.user, currentUser);
+    assert.deepEqual(decision.detail, {
+      code: BACKEND_UNAVAILABLE_CODE,
+      message: "Prism is waiting for its local API.",
+      path: "/api/auth/me",
+      status: 503,
+      detail: "ECONNREFUSED",
+    });
+  });
+
+  it("treats auth bootstrap timeouts as reconnecting instead of signed out", () => {
+    const timeout = new Error("operation timed out");
+    timeout.name = "AbortError";
+
+    assert.equal(isAbortLikeError(timeout), true);
+    assert.deepEqual(backendUnavailableDetailFromError(timeout, { path: "/api/auth/me" }), {
+      code: BACKEND_UNAVAILABLE_CODE,
+      message: "Trying to reconnect to Prism...",
+      path: "/api/auth/me",
+      status: undefined,
+      detail: "Request timed out while Prism was starting.",
+    });
+  });
+
+  it("still clears auth state for ordinary bootstrap failures", () => {
+    const decision = decideAuthBootstrapFailure(
+      new Error("Invalid session."),
+      { id: "user-1" }
+    );
+
+    assert.deepEqual(decision, { kind: "signed-out" });
   });
 });

@@ -1,0 +1,370 @@
+.editor {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  color: var(--fg);
+}
+
+.applyError {
+  margin: -8px 0 0;
+  color: #ff8f8f;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.paintHeader,
+.footer,
+.coverage > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.paintHeader > div {
+  display: grid;
+  gap: 2px;
+}
+
+.paintHeader strong {
+  font-size: 13px;
+}
+
+.paintHeader small,
+.keyboardHelp,
+.coverage small,
+.footer > span {
+  color: var(--fg-muted);
+  font-size: 10px;
+}
+
+.historyActions button,
+.guideToggleButton,
+.segmentedControl button,
+.brushSizes button,
+.cancelButton,
+.applyButton {
+  border: 1px solid color-mix(in srgb, var(--line) 84%, transparent);
+  background: color-mix(in srgb, var(--bg-surface) 86%, transparent);
+  color: var(--fg-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.editor button:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+
+.editor button:focus-visible,
+.canvas:focus-visible,
+.editor input:focus-visible {
+  outline: 2px solid var(--editor-bot-color, var(--accent));
+  outline-offset: 2px;
+}
+
+.segmentedControl button[data-selected="true"],
+.brushSizes button[data-selected="true"] {
+  border-color: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 70%,
+    var(--line)
+  );
+  background: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 16%,
+    var(--bg-surface)
+  );
+  color: var(--fg);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--editor-bot-color, var(--accent)) 18%, transparent);
+}
+
+.paintSection {
+  display: grid;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-deep) 64%, transparent);
+}
+
+.historyActions,
+.paintHeaderActions,
+.paintTools,
+.segmentedControl,
+.brushSizes,
+.footer > div {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.paintHeaderActions {
+  justify-content: flex-end;
+}
+
+.historyActions button,
+.brushSizes button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+}
+
+.guideToggleButton {
+  min-height: 28px;
+  padding: 0 8px;
+  border-radius: 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 9px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.guideToggleButton[aria-pressed="true"] {
+  border-color: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 48%,
+    var(--line)
+  );
+  color: var(--fg);
+}
+
+.paintTools {
+  justify-content: space-between;
+}
+
+.segmentedControl button {
+  min-height: 28px;
+  padding: 0 8px;
+  border-radius: 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.brushSizes button {
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.canvasFrame {
+  --avatar-details-cell-size: calc(100% / 128);
+  container-type: inline-size;
+  position: relative;
+  width: min(100%, 320px);
+  aspect-ratio: 1;
+  margin: 0 auto;
+  overflow: hidden;
+  border: 1px solid
+    color-mix(in srgb, var(--editor-bot-color, var(--accent)) 36%, var(--line));
+  border-radius: 9px;
+  background-color: #050608;
+  background-image:
+    linear-gradient(45deg, rgba(255, 255, 255, 0.035) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(255, 255, 255, 0.035) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(255, 255, 255, 0.035) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(255, 255, 255, 0.035) 75%);
+  background-size: 16px 16px;
+  background-position:
+    0 0,
+    0 8px,
+    8px -8px,
+    -8px 0;
+  box-shadow:
+    inset 0 0 28px rgba(0, 0, 0, 0.62),
+    0 0 18px
+      color-mix(in srgb, var(--editor-bot-color, var(--accent)) 8%, transparent);
+}
+
+.screenBoundary {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: block;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  pointer-events: none;
+}
+
+.faceGuide {
+  --zen-live-bot-face-ink: var(--editor-bot-color, var(--accent));
+  --zen-live-bot-face-crt-border-color: var(--editor-bot-color, var(--accent));
+  --coffee-bot-color: var(--editor-bot-color, var(--accent));
+  --coffee-seat-emotion-color: var(--editor-bot-color, var(--accent));
+  --coffee-plate-emoji-nudge-y: clamp(-5px, -2.6%, -2px);
+  opacity: 0;
+  filter: saturate(0.72) brightness(0.82);
+  transition: opacity 120ms ease;
+}
+
+.faceGuide[data-visible="true"] {
+  opacity: 0.34;
+}
+
+.faceGuideGlyph {
+  pointer-events: none;
+}
+
+.canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  z-index: 3;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.paintEmission {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+.paintHalo {
+  opacity: 0.16;
+  mix-blend-mode: plus-lighter;
+  filter: blur(1.4px) saturate(1.35)
+    drop-shadow(0 0 3px color-mix(in srgb, currentColor 54%, transparent))
+    drop-shadow(0 0 5px color-mix(in srgb, currentColor 26%, transparent));
+}
+
+.paintBloom {
+  opacity: 0.58;
+  mix-blend-mode: screen;
+  filter: blur(0.22px) saturate(1.18) drop-shadow(0 0 1px currentColor)
+    drop-shadow(0 0 2px color-mix(in srgb, currentColor 56%, transparent));
+}
+
+.paintCore {
+  mix-blend-mode: screen;
+  filter: drop-shadow(0 0 0.35px rgba(255, 255, 255, 0.68));
+}
+
+.keyboardCursor {
+  position: absolute;
+  z-index: 4;
+  left: calc(var(--avatar-details-cursor-x) * var(--avatar-details-cell-size));
+  top: calc(var(--avatar-details-cursor-y) * var(--avatar-details-cell-size));
+  width: calc(
+    var(--avatar-details-cursor-size) * var(--avatar-details-cell-size)
+  );
+  height: calc(
+    var(--avatar-details-cursor-size) * var(--avatar-details-cell-size)
+  );
+  transform: translate(-50%, -50%);
+  border: 1px solid #ffffff;
+  box-shadow:
+    0 0 0 1px #000000,
+    0 0 5px #ffffff;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.keyboardCursor[data-visible="true"] {
+  opacity: 1;
+}
+
+.keyboardHelp {
+  margin: 0;
+  line-height: 1.35;
+}
+
+.coverage {
+  display: grid;
+  gap: 4px;
+}
+
+.coverage span,
+.coverage strong {
+  font-size: 10px;
+}
+
+.coverage strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.coverage meter {
+  width: 100%;
+  height: 7px;
+  accent-color: var(--editor-bot-color, var(--accent));
+}
+
+.limitMessage {
+  color: #ffb27d;
+}
+
+.footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  padding: 9px 0 2px;
+  background: linear-gradient(180deg, transparent, var(--bg-surface) 30%);
+}
+
+.footer > span[data-dirty="true"] {
+  color: var(--editor-bot-color, var(--accent));
+}
+
+.cancelButton,
+.applyButton {
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.applyButton {
+  border-color: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 72%,
+    var(--line)
+  );
+  background: var(--editor-bot-color, var(--accent));
+  color: var(--editor-bot-ink, #071011);
+}
+
+@media (max-width: 760px) {
+  .paintTools {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .paintHeader {
+    align-items: flex-start;
+  }
+
+  .paintHeaderActions {
+    align-items: flex-end;
+    flex-direction: column;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .editor *,
+  .editor *::before,
+  .editor *::after {
+    scroll-behavior: auto !important;
+    transition: none !important;
+  }
+}

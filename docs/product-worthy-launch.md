@@ -10,7 +10,6 @@ Status: not ready for broad outreach until every Go/No-Go item is marked
 
 Related launch assets:
 
-- [`launch/support-copy-pack.md`](launch/support-copy-pack.md)
 - [`launch/outreach-workflow.md`](launch/outreach-workflow.md)
 
 ## Evidence Tracker
@@ -25,9 +24,13 @@ Related launch assets:
 | Factory reset | Reset/reinstall behavior is documented and works | Command/path used, data retained/deleted notes | pending |
 | LOCAL privacy | LOCAL mode stays local for chat, auxiliary work, embeddings, and image-generation blocking | Test command/log evidence; no unexpected outbound host | pending |
 | ONLINE clarity | README/release notes explain when online providers may be called | Doc links and reviewed copy | pending |
-| Support boundary | Support copy stays optional and non-gating | Link to reviewed support copy pack | pending |
-| Launch copy | Release notes include downloads, limitations, privacy summary, and optional support | Draft link or release notes path | pending |
+| Distribution copy | Steam and GitHub are the active public channels | Reviewed README/store/release wording | pending |
+| Launch copy | Release notes include downloads, limitations, and privacy summary | Draft link or release notes path | pending |
 | Outreach packet | First public draft includes rule audit and manual-posting note | Link to outreach packet | pending |
+| Steamworks setup | Steam app, package/free-product setup, OS depots, and prerelease branch exist | App ID/depot ID storage location, branch name, non-secret config notes | pending |
+| Steam policy review | Content Survey, live AI disclosure, and store copy are Steam-safe | Reviewed disclosure copy and reviewer notes | pending |
+| Steam store presence | Store page assets represent shipped Prism Desktop only | Store preview, screenshot list, capsule/library asset checklist | pending |
+| Steam depot upload | Smoke-tested desktop artifacts export and upload to a private/prerelease Steam branch | Workflow run, steam-build artifact, Steam branch/build ID | pending |
 
 ## Go/No-Go
 
@@ -36,7 +39,7 @@ Related launch assets:
 | Downloads | Mac, Windows, and Linux artifacts install and launch cleanly enough for a first public audience | pending |
 | Trust | Privacy/local-mode claims are verified against the release candidate | pending |
 | Clarity | First-run setup and known limitations are written plainly | pending |
-| Support | Patreon copy uses `[PATREON_URL]` only in drafts or the real URL in public copy | pending |
+| Steam | Store page and Steam prerelease build pass Steamworks review before public release | pending |
 | Outreach | Every community draft has a live rule audit and Jared approval before posting | pending |
 
 ## Known Gaps Log
@@ -53,6 +56,6 @@ minute.
 Launch only when:
 
 - All required platform smoke tests pass.
-- The free-download/support model is consistent in canonical docs.
+- The Steam/GitHub distribution model is consistent in canonical docs.
+- Steam-specific AI disclosures are accepted for the Steam build.
 - Any known product gaps are listed plainly in release notes.
-- The support ask feels like patronage, not permission.

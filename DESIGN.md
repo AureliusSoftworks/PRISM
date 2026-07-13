@@ -52,6 +52,7 @@ web UI registry lives in `apps/web/src/app/appletVersions.ts`.
 - **Vector Store:** Qdrant (semantic memory retrieval)
 - **Local LLM:** Ollama (running on host, accessed via `host.docker.internal`)
 - **Image Gen:** OpenAI DALL-E 3 API
+- **Speech:** system-native English and voiced Bottish with deterministic Web Audio accents; optional ElevenLabs BYOK
 - **Deployment:** Docker Compose with nginx reverse proxy
 
 ## Data Model
@@ -144,6 +145,7 @@ user's network.
 | `apps/api/src/providers.ts` (`OpenAiProvider`) | `api.openai.com` | Only when the effective mode is ONLINE for the user's actual chat reply. |
 | `apps/api/src/qdrant.ts` | `QDRANT_URL` | Memory summary vector read/write. Local by config. |
 | `apps/api/src/image-provider.ts` | `api.openai.com` | Only when the effective mode is ONLINE (gated in `/api/images/generate`). |
+| `apps/api/src/voices.ts` | `api.elevenlabs.io` | Only for the optional ElevenLabs English engine. Bottish always uses local system speech with procedural fallback. Persisted LOCAL English replies always synthesize with the built-in engine; previews and voice catalog reads require ONLINE mode. |
 
 The web app only issues relative `/api/*` fetches; those are rewritten to
 the backend on the same origin by `apps/web/next.config.ts`.
@@ -165,6 +167,8 @@ the backend on the same origin by `apps/web/next.config.ts`.
   "Online mode required" explainer instead.
 - Next.js anonymous telemetry is disabled via `NEXT_TELEMETRY_DISABLED=1`
   in the web Dockerfile and `.env.example`.
+- Voice modes, profile portability, playback rules, and local fallbacks are
+  documented in [`docs/voices.md`](docs/voices.md).
 
 ### Reviewer checklist for new outbound calls
 
@@ -207,12 +211,11 @@ API binds to `0.0.0.0` and enables mDNS discovery. Qdrant always stays loopback.
 
 ## Clients and distribution (current)
 
-Shipping posture today is **direct downloads** (GitHub Releases) plus **Prism on
-iPhone as a PWA** served by the server - not an App Store-first model.
-Official desktop builds are free to download and use. Optional $5/month
-Patreon support funds development but does not unlock core features, affect
-LOCAL/ONLINE behavior, or create runtime access checks. The server remains the
-source of truth for accounts, memory, provider rules, and tenancy.
+Shipping posture today is **Steam for desktop** plus **GitHub Releases as the
+direct-download path while Steam is being prepared**, with **Prism on iPhone as
+a PWA** served by the server. It is not an App Store-first model. Official
+desktop builds are free to download and use. The server remains the source of
+truth for accounts, memory, provider rules, and tenancy.
 
 The native client must not reimplement chat, memory, provider routing, or
 tenancy rules on-device. Those invariants stay in `apps/api`.

@@ -13,6 +13,7 @@ import {
   formatBotMentionMarkdown,
   normalizePeerMentionChipLabel,
   getBotMentionDisplayLength,
+  getBotMentionDisplayText,
   mentionTabPlainTextAction,
   parsePrismBotMentionHref,
   prismBotMentionHref,
@@ -110,6 +111,23 @@ describe("filterBotsForMentionQuery", () => {
     const r = filterBotsForMentionQuery(bots, "alp");
     assert.equal(r.length, 1);
     assert.equal(r[0]!.id, "1");
+  });
+
+  it("uses picker-only labels and caps the compact menu at five rows", () => {
+    const many = [
+      { id: "self", name: "Mira", pickerLabel: "You", color: null, glyph: null },
+      ...Array.from({ length: 7 }, (_, index) => ({
+        id: `bot-${index}`,
+        name: `Bot ${index}`,
+        color: null,
+        glyph: null,
+      })),
+    ];
+    assert.equal(filterBotsForMentionQuery(many, "you")[0]?.id, "self");
+    assert.deepEqual(
+      filterBotsForMentionQuery(many, "").map((bot) => bot.id),
+      ["self", "bot-0", "bot-1", "bot-2", "bot-3"]
+    );
   });
 });
 
@@ -358,6 +376,15 @@ describe("getBotMentionDisplayLength", () => {
     const text = "[Pat](prism-bot://1) and [Sam](prism-bot://2) chat.";
     // "Pat and Sam chat." → 17 chars.
     assert.equal(getBotMentionDisplayLength(text), 17);
+  });
+});
+
+describe("getBotMentionDisplayText", () => {
+  it("keeps the speech cursor on visible mention labels instead of hidden ids", () => {
+    assert.equal(
+      getBotMentionDisplayText("Hello [Mira](prism-bot://bot-secret-id), friend."),
+      "Hello Mira, friend."
+    );
   });
 });
 

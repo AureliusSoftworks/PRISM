@@ -2,6 +2,35 @@ import type { TellFictionalStoryPayload, WebSearchPayload } from "./prismTool.js
 import type { PrismMoodIgnoredQuestionPenaltyLevel } from "./mood.js";
 
 export {
+  BOT_POWER_INTENT_MAX_LENGTH,
+  BOT_POWER_MAX_COUNT,
+  BOT_POWER_NAME_MAX_LENGTH,
+  BOT_POWER_VERSION,
+  COFFEE_POWER_PROMPT_MAX_CHARS,
+  COFFEE_POWER_PROMPT_MAX_TOKENS,
+  activeBotPowersV1,
+  botPowerSourceHashV1,
+  buildCoffeePowersPromptBlock,
+  coffeePowerCupRateMultiplierV1,
+  estimateCoffeePowerTokensV1,
+  normalizeBotPowerEffectV1,
+  normalizeBotPowerV1,
+  normalizeBotPowersV1,
+  normalizeCompiledBotPowerV1,
+  parseStoredBotPowersV1,
+  serializeBotPowersV1,
+  type BotPowerCompileStatus,
+  type BotPowerEffectV1,
+  type BotPowerFrequency,
+  type BotPowerStrength,
+  type BotPowerTargetV1,
+  type BotPowerV1,
+  type CoffeePowerPlanV1,
+  type CompiledBotPowerV1,
+  type ResolvedCoffeePowerBotV1,
+} from "./botPower.js";
+
+export {
   applyPrismMoodExpiredIgnoreCooldown,
   applyPrismMoodForgivenessSuccess,
   applyPrismMoodIgnoredQuestion,
@@ -96,23 +125,166 @@ export {
 } from "./botProfile.js";
 
 export {
+  BOT_AUDIO_VOICE_IDS,
+  BOT_VOICE_TEXTURE_PRESETS,
+  BOT_VOICE_TEXTURE_PRESET_LABELS,
+  BOT_VOICE_TEXTURE_RECIPES,
+  DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+  DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+  DEFAULT_ENGLISH_VOICE_ENGINE,
+  DEFAULT_VOICE_MODE,
+  botVoiceTextureForPreset,
+  botVoiceTextureIsModified,
+  isBotAudioVoiceId,
+  isBotVoiceTexturePreset,
+  normalizeBotAudioVoiceControl,
+  normalizeBotAudioVoiceProfileV1,
+  normalizeBotVoiceTexture,
+  normalizeBotVoiceTextureUnit,
+  normalizeBotVoiceVolume,
+  normalizeEnglishVoiceEngine,
+  normalizeOptionalBotAudioVoiceProfileV1,
+  normalizeVoiceMode,
+  NEUTRAL_COFFEE_VOICE_DELIVERY_ENVELOPE,
+  applyPlayerNamePronunciation,
+  parseStoredBotAudioVoiceProfileV1,
+  serializeBotAudioVoiceProfileV1,
+  type BotAudioVoiceId,
+  type BotAudioVoiceProfile,
+  type BotAudioVoiceProfileV1,
+  type BotAudioVoiceProfileV2,
+  type BotVoiceTexturePreset,
+  type BotVoiceTextureV1,
+  type CoffeeVoiceDeliveryEnvelope,
+  type LegacyBotAudioVoiceProfileV1,
+  type NormalizedBotAudioVoiceProfileV1,
+  type EnglishVoiceEngine,
+  type VoiceMode,
+} from "./audioVoice.js";
+
+export {
   BOT_FACE_FONT_IDS,
   BOT_FACE_FONT_LABELS,
+  BOT_FACE_GLYPH_ANIMATIONS,
   BOT_FACE_FONT_WEIGHT_MAX,
   BOT_FACE_FONT_WEIGHT_MIN,
   BOT_FACE_FONT_WEIGHT_STEP,
+  BOT_FACE_BLINK_BAR_VALUES,
+  BOT_FACE_BLINK_OFFSET_X_MAX,
+  BOT_FACE_BLINK_OFFSET_X_MIN,
+  BOT_FACE_BLINK_OFFSET_X_STEP,
+  BOT_FACE_BLINK_OFFSET_Y_MAX,
+  BOT_FACE_BLINK_OFFSET_Y_MIN,
+  BOT_FACE_BLINK_OFFSET_Y_STEP,
+  BOT_FACE_BLINK_SCALE_MAX,
+  BOT_FACE_BLINK_SCALE_MIN,
+  BOT_FACE_BLINK_SCALE_STEP,
+  BOT_FACE_EYE_OFFSET_X_MAX,
+  BOT_FACE_EYE_OFFSET_X_MIN,
+  BOT_FACE_EYE_OFFSET_X_STEP,
+  BOT_FACE_EYE_OFFSET_Y_MAX,
+  BOT_FACE_EYE_OFFSET_Y_MIN,
+  BOT_FACE_EYE_OFFSET_Y_STEP,
+  BOT_FACE_EYE_ROTATION_DEG_MAX,
+  BOT_FACE_EYE_ROTATION_DEG_MIN,
+  BOT_FACE_EYE_ROTATION_DEG_STEP,
+  BOT_FACE_EYE_SCALE_MAX,
+  BOT_FACE_EYE_SCALE_MIN,
+  BOT_FACE_EYE_SCALE_STEP,
+  BOT_FACE_MOUTH_OFFSET_X_MAX,
+  BOT_FACE_MOUTH_OFFSET_X_MIN,
+  BOT_FACE_MOUTH_OFFSET_X_STEP,
+  BOT_FACE_MOUTH_OFFSET_Y_MAX,
+  BOT_FACE_MOUTH_OFFSET_Y_MIN,
+  BOT_FACE_MOUTH_OFFSET_Y_STEP,
+  BOT_FACE_MOUTH_ROTATION_DEG_MAX,
+  BOT_FACE_MOUTH_ROTATION_DEG_MIN,
+  BOT_FACE_MOUTH_ROTATION_DEG_STEP,
+  BOT_FACE_MOUTH_SCALE_MAX,
+  BOT_FACE_MOUTH_SCALE_MIN,
+  BOT_FACE_MOUTH_SCALE_STEP,
+  BOT_FACE_THINKING_FRAME_COUNT,
+  DEFAULT_BOT_FACE_BLINK_BAR,
+  DEFAULT_BOT_FACE_BLINK_OFFSET_X,
+  DEFAULT_BOT_FACE_BLINK_OFFSET_Y,
+  DEFAULT_BOT_FACE_BLINK_SCALE,
+  DEFAULT_BOT_FACE_EYE_CHARACTER,
+  DEFAULT_BOT_FACE_EYE_OFFSET_X,
+  DEFAULT_BOT_FACE_EYE_OFFSET_Y,
+  DEFAULT_BOT_FACE_EYE_SCALE,
+  DEFAULT_BOT_FACE_EYE_ROTATION_DEG,
   DEFAULT_BOT_FACE_FONT_ID,
+  DEFAULT_BOT_FACE_GLYPH_ANIMATION,
   DEFAULT_BOT_FACE_FONT_WEIGHT,
+  DEFAULT_BOT_FACE_MOUTH_CHARACTER,
+  DEFAULT_BOT_FACE_MOUTH_OFFSET_X,
+  DEFAULT_BOT_FACE_MOUTH_OFFSET_Y,
+  DEFAULT_BOT_FACE_MOUTH_ROTATION_DEG,
+  DEFAULT_BOT_FACE_MOUTH_SCALE,
+  DEFAULT_BOT_FACE_THINKING_FRAMES,
+  botFaceThinkingFramesEqual,
   botFaceFontFromVoicePreset,
   isBotFaceFontId,
+  normalizeBotFaceBlinkBar,
+  normalizeBotFaceBlinkOffsetX,
+  normalizeBotFaceBlinkOffsetY,
+  normalizeBotFaceBlinkScale,
+  normalizeBotFaceEyeCharacter,
+  normalizeBotFaceEyeOffsetX,
+  normalizeBotFaceEyeOffsetY,
+  normalizeBotFaceEyeScale,
+  normalizeBotFaceEyeRotationDeg,
   normalizeBotFaceFontId,
   normalizeBotFaceFontWeight,
+  normalizeBotFaceGlyphAnimation,
+  normalizeBotFaceMouthCharacter,
+  normalizeBotFaceMouthOffsetX,
+  normalizeBotFaceMouthOffsetY,
+  normalizeBotFaceMouthRotationDeg,
+  normalizeBotFaceMouthScale,
+  normalizeBotFaceThinkingFrames,
+  parseStoredBotFaceThinkingFrames,
   randomBotFaceStyle,
   resolveBotFaceStyle,
+  serializeBotFaceThinkingFrames,
+  type BotFaceBlinkBar,
   type BotFaceFontId,
+  type BotFaceGlyphAnimation,
   type BotFaceStyle,
   type BotFaceStyleInput,
+  type BotFaceThinkingFrames,
 } from "./botAvatar.js";
+
+export {
+  BOT_AVATAR_DETAILS_CANVAS_SIZE,
+  BOT_AVATAR_DETAILS_MAX_JSON_BYTES,
+  BOT_AVATAR_DETAILS_MAX_PAINTED_PIXELS,
+  BOT_AVATAR_DETAILS_PAINT_MASK_BASE64_LENGTH,
+  BOT_AVATAR_DETAILS_PAINT_MASK_BYTE_LENGTH,
+  BOT_AVATAR_DETAILS_VERSION,
+  BOT_AVATAR_DETAILS_WRITABLE_PIXEL_COUNT,
+  BOT_AVATAR_DETAIL_OFFSET_MAX,
+  BOT_AVATAR_DETAIL_OFFSET_MIN,
+  BOT_AVATAR_DETAIL_SCALE_MAX,
+  BOT_AVATAR_DETAIL_SCALE_MIN,
+  BOT_AVATAR_DETAIL_STAMP_CATALOG,
+  BOT_AVATAR_DETAIL_STAMP_CATEGORIES,
+  BOT_AVATAR_DETAIL_STAMP_IDS,
+  countBotAvatarDetailsPaintedPixels,
+  decodeBotAvatarDetailsPaintMask,
+  encodeBotAvatarDetailsPaintMask,
+  isBotAvatarDetailStampTransformInsideCanvas,
+  isBotAvatarDetailsWritablePixel,
+  parseBotAvatarDetailsV1,
+  parseStoredBotAvatarDetailsV1,
+  serializeBotAvatarDetailsV1,
+  type BotAvatarDetailStampCategory,
+  type BotAvatarDetailStampDefinition,
+  type BotAvatarDetailStampId,
+  type BotAvatarDetailStampTransform,
+  type BotAvatarDetailStampV1,
+  type BotAvatarDetailsV1,
+} from "./botAvatarDetails.js";
 
 export {
   PRISM_TOOL_END,
@@ -133,6 +305,7 @@ export {
   type CoffeeReplayArrivalEventPayload,
   type CoffeeReplayEventPayload,
   type CoffeeReplayMoodEventPayload,
+  type CoffeeReplayPlayerDepartureEventPayload,
   type CoffeeReplaySocialSnapshotPayload,
   type CoffeeReplayTopOffEventPayload,
   type CoffeeUserActionPayload,
@@ -384,6 +557,7 @@ export type UsagePurpose =
   | "prompt_wildcard"
   | "psychic_planning"
   | "story_generation"
+  | "voice_preview"
   | "zen_live_action"
   | "system_unlabeled";
 
@@ -535,12 +709,19 @@ export interface CoffeePlayerInterruptionInput {
 }
 
 export interface CoffeeInterruptionEvent {
-  kind: "playerInterruptsBot" | "botInterruptsPlayer";
+  kind: "playerInterruptsBot" | "botInterruptsPlayer" | "botInterruptsBot";
   interruptedBotId: string;
   interrupterBotId?: string;
+  activeTurnId?: string;
+  targetPhase?: "thinking" | "speaking";
   interruptedMessageId?: string;
   visibleTokenCount?: number;
+  visibleProgress?: number;
   interruptedSnippet?: string;
+  pauseBeat?: boolean;
+  reactionOutcome?: "silence" | "react" | "yield" | "resume";
+  resumeOutcome?: "none" | "yielded" | "continued" | "invited";
+  reactionText?: string;
   socialConsequences: CoffeeInterruptionSocialDelta[];
 }
 
@@ -722,12 +903,19 @@ const COFFEE_CUP_TOP_OFF_TARGET_PROGRESS = 0.04;
 const COFFEE_CUP_TOP_OFF_MIN_ELIGIBLE_PROGRESS = 0.18;
 const COFFEE_CUP_TOP_OFF_PROGRESS_BY_FRAME_INDEX = [
   COFFEE_CUP_TOP_OFF_TARGET_PROGRESS,
+  0.09,
   COFFEE_CUP_TOP_OFF_MIN_ELIGIBLE_PROGRESS,
   0.38,
   0.58,
   0.78,
   0.96,
 ] as const;
+export type CoffeeCupTempoRole = "normal" | "faster" | "slower";
+
+const COFFEE_CUP_FASTER_TEMPO_MULTIPLIER = 1.08;
+const COFFEE_CUP_SLOWER_TEMPO_MULTIPLIER = 0.93;
+const COFFEE_CUP_FASTER_TEMPO_SUFFIX = ":cup-tempo=faster";
+const COFFEE_CUP_SLOWER_TEMPO_SUFFIX = ":cup-tempo=slower";
 
 function clampCoffeeCupProgress(value: number): number {
   if (!Number.isFinite(value)) return 0;
@@ -752,8 +940,78 @@ function coffeeCupStableUnitValue(seed: string): number {
   return (hash >>> 0) / 0xffffffff;
 }
 
+function coffeeCupSeedWithoutTempoRole(seed: string): string {
+  if (seed.endsWith(COFFEE_CUP_FASTER_TEMPO_SUFFIX)) {
+    return seed.slice(0, -COFFEE_CUP_FASTER_TEMPO_SUFFIX.length);
+  }
+  if (seed.endsWith(COFFEE_CUP_SLOWER_TEMPO_SUFFIX)) {
+    return seed.slice(0, -COFFEE_CUP_SLOWER_TEMPO_SUFFIX.length);
+  }
+  return seed;
+}
+
+function coffeeCupTempoMultiplierForSeed(seed: string): number {
+  if (seed.endsWith(COFFEE_CUP_FASTER_TEMPO_SUFFIX)) {
+    return COFFEE_CUP_FASTER_TEMPO_MULTIPLIER;
+  }
+  if (seed.endsWith(COFFEE_CUP_SLOWER_TEMPO_SUFFIX)) {
+    return COFFEE_CUP_SLOWER_TEMPO_MULTIPLIER;
+  }
+  return 1;
+}
+
+export function coffeeCupSeedWithTempoRole(
+  seed: string,
+  role: CoffeeCupTempoRole
+): string {
+  const baseSeed = coffeeCupSeedWithoutTempoRole(seed);
+  switch (role) {
+    case "faster":
+      return `${baseSeed}${COFFEE_CUP_FASTER_TEMPO_SUFFIX}`;
+    case "slower":
+      return `${baseSeed}${COFFEE_CUP_SLOWER_TEMPO_SUFFIX}`;
+    case "normal":
+      return baseSeed;
+  }
+}
+
+export function coffeeCupTempoRoleForBot(args: {
+  sessionSeed: string;
+  botId: string;
+  seatBotIds: readonly (string | null)[];
+}): CoffeeCupTempoRole {
+  const seenBotIds = new Set<string>();
+  const activeBotIds: string[] = [];
+  for (const rawBotId of args.seatBotIds) {
+    const botId = rawBotId?.trim();
+    if (!botId || seenBotIds.has(botId)) continue;
+    seenBotIds.add(botId);
+    activeBotIds.push(botId);
+  }
+  const botId = args.botId.trim();
+  if (activeBotIds.length < 2 || !activeBotIds.includes(botId)) return "normal";
+
+  const sessionSeed = args.sessionSeed.trim() || "coffee";
+  const fasterIndex = coffeeCupStableIndex(
+    `${sessionSeed}:cup-tempo:faster`,
+    activeBotIds.length
+  );
+  const slowerCandidateIndex = coffeeCupStableIndex(
+    `${sessionSeed}:cup-tempo:slower`,
+    activeBotIds.length - 1
+  );
+  const slowerIndex =
+    slowerCandidateIndex >= fasterIndex
+      ? slowerCandidateIndex + 1
+      : slowerCandidateIndex;
+
+  if (activeBotIds[fasterIndex] === botId) return "faster";
+  if (activeBotIds[slowerIndex] === botId) return "slower";
+  return "normal";
+}
+
 export function coffeeCupSipBias(seed: string): number {
-  return coffeeCupStableUnitValue(`${seed}:sip-bias`);
+  return coffeeCupStableUnitValue(`${coffeeCupSeedWithoutTempoRole(seed)}:sip-bias`);
 }
 
 export function coffeeCupSessionDurationPaceMultiplier(
@@ -788,7 +1046,10 @@ export function coffeeCupSipCycleMs(
   durationMinutes?: CoffeeSessionDurationMinutes | null
 ): number {
   const baseCycleMs = 34_000 - Math.round(coffeeCupSipBias(seed) * 15_000);
-  return Math.round(baseCycleMs * coffeeCupSessionDurationPaceMultiplier(durationMinutes));
+  return Math.round(
+    (baseCycleMs * coffeeCupSessionDurationPaceMultiplier(durationMinutes)) /
+      coffeeCupTempoMultiplierForSeed(seed)
+  );
 }
 
 export function coffeeCupConsumptionRate(
@@ -796,16 +1057,24 @@ export function coffeeCupConsumptionRate(
   durationMinutes?: CoffeeSessionDurationMinutes | null
 ): number {
   const baseRate = 1.12 + coffeeCupSipBias(seed) * 0.58;
-  return baseRate / coffeeCupSessionDurationPaceMultiplier(durationMinutes);
+  return (
+    (baseRate * coffeeCupTempoMultiplierForSeed(seed)) /
+    coffeeCupSessionDurationPaceMultiplier(durationMinutes)
+  );
 }
 
 export function coffeeCupPacedProgress(
   progress: number,
   seed: string,
-  durationMinutes?: CoffeeSessionDurationMinutes | null
+  durationMinutes?: CoffeeSessionDurationMinutes | null,
+  powerRateMultiplier = 1
 ): number {
+  const multiplier =
+    Number.isFinite(powerRateMultiplier) && powerRateMultiplier > 0
+      ? Math.max(0.25, Math.min(3, powerRateMultiplier))
+      : 1;
   return clampCoffeeCupProgress(
-    progress * coffeeCupConsumptionRate(seed, durationMinutes)
+    progress * coffeeCupConsumptionRate(seed, durationMinutes) * multiplier
   );
 }
 
@@ -862,16 +1131,17 @@ export function coffeeCupShouldFinishAfterSip(args: {
 
 export function coffeeCupFrameIndexForProgress(progress: number): number {
   const clamped = clampCoffeeCupProgress(progress);
-  if (clamped >= 0.96) return 5;
-  if (clamped >= 0.78) return 4;
-  if (clamped >= 0.58) return 3;
-  if (clamped >= 0.38) return 2;
-  if (clamped >= 0.18) return 1;
+  if (clamped >= 0.96) return 6;
+  if (clamped >= 0.78) return 5;
+  if (clamped >= 0.58) return 4;
+  if (clamped >= 0.38) return 3;
+  if (clamped >= 0.18) return 2;
+  if (clamped >= 0.09) return 1;
   return 0;
 }
 
 export function coffeeCupTopOffProgressForFrameIndex(frameIndex: number): number {
-  const frame = Math.max(0, Math.min(5, Math.round(frameIndex)));
+  const frame = Math.max(0, Math.min(6, Math.round(frameIndex)));
   return COFFEE_CUP_TOP_OFF_PROGRESS_BY_FRAME_INDEX[frame]!;
 }
 
@@ -886,13 +1156,13 @@ export function coffeeCupStatusForProgress(
   const amount: CoffeeCupAmountStage =
     frameIndex === 0
       ? "full"
-      : frameIndex === 1
+      : frameIndex <= 2
         ? "mostly-full"
-        : frameIndex === 2
+        : frameIndex === 3
           ? "half"
-          : frameIndex === 3
+          : frameIndex === 4
             ? "low"
-            : frameIndex === 4
+            : frameIndex === 5
               ? "dregs"
               : "empty";
   const temperatureLabel =
@@ -984,6 +1254,7 @@ export function coffeeCupProgressAfterTopOff(args: {
   topOff?: CoffeeCupTopOffSnapshot | null;
   nowMs: number;
   durationMinutes?: CoffeeSessionDurationMinutes | null;
+  seed?: string | null;
   lowerProgressMeansConsumption?: boolean | null;
 }): number {
   const progress = clampCoffeeCupProgress(args.progress);
@@ -997,9 +1268,13 @@ export function coffeeCupProgressAfterTopOff(args: {
   if (progressBefore <= progressAfter || progress <= progressAfter) return progress;
   const elapsedMs = Math.max(0, args.nowMs - toppedOffAtMs);
   const consumptionDurationMs = coffeeCupTopOffConsumptionDurationMs(args.durationMinutes);
+  const tempoRate =
+    typeof args.seed === "string" && args.seed.trim().length > 0
+      ? coffeeCupConsumptionRate(args.seed, args.durationMinutes)
+      : 1;
   const timedConsumedProgress = Math.max(
     0,
-    Math.min(1, elapsedMs / consumptionDurationMs)
+    Math.min(1, (elapsedMs / consumptionDurationMs) * tempoRate)
   );
   const explicitConsumedProgress =
     args.lowerProgressMeansConsumption === true
@@ -1111,6 +1386,14 @@ export {
   type CoffeeTableEnergy,
 } from "./coffeeSettings.js";
 
+export {
+  coffeeInterruptionReactionCandidates,
+  pickCoffeeInterruptionReaction,
+  type CoffeeReactionOutcome,
+  type CoffeeReactionStyle,
+  type CoffeeReactionTone,
+} from "./coffeeInterruptionReactions.js";
+
 export interface Conversation {
   id: string;
   userId: string;
@@ -1127,6 +1410,12 @@ export interface Conversation {
    * Coffee mode leaves this null and uses {@link botGroupIds} instead.
    */
   botId: string | null;
+  /** Hub metadata for unified Chat. Hub rows are canonical timelines; side rows fork from a Hub. */
+  hubRole?: "hub" | "side";
+  /** Bot that owns this Hub group. Null means the PRISM Hub. */
+  hubBotId?: string | null;
+  /** Parent Hub conversation for side chats. Null/omitted for Hub roots. */
+  parentHubId?: string | null;
   /**
    * Coffee-only — ordered list of 2-5 bot ids that participate in this
    * live session. Captured once when the Coffee thread is created and
@@ -1339,9 +1628,10 @@ export interface MemoryValidationEvent {
 /**
  * Post-auth surface the user is chatting from.
  *
- * - `"chat"`: the calm, stripped-down personal Prism. Honors auto-memory and
- *   per-send `incognito` (where incognito keeps the conversation entirely
- *   ephemeral without changing the selected provider).
+ * - `"zen"`: PRISM's own lane. It may use an optional Facet bot for a turn,
+ *   but the conversation remains PRISM-owned rather than bot-locked.
+ * - `"chat"`: bot-locked persona conversation. Requires a concrete `botId`
+ *   and keeps memory scoped to that bot.
  * - `"sandbox"`: the full command-center. Cross-session memory is disabled
  *   entirely here — the rolling message window IS the thread's memory. The
  *   `incognito` flag is ignored for Sandbox requests.
@@ -1397,10 +1687,18 @@ export interface ChatRequestPayload {
   preferredProvider?: LlmProviderName;
   modelOverride?: string;
   reasoningEffort?: ReasoningEffort;
+  /**
+   * Chat/Sandbox bot selector. In Zen this is a backwards-compatible fallback
+   * for `facetBotId`.
+   */
   botId?: string | null;
-  /** When true in Zen, keep this turn client-held and skip memory/persistence. */
+  /** Preferred Zen Facet selector. Keeps the conversation row bot_id NULL. */
+  facetBotId?: string | null;
+  /** When true in Zen/Chat, keep this turn client-held and skip memory/persistence. */
   incognito?: boolean;
-  /** Zen-only automatic Persona handoff turn. */
+  /** Zen-only automatic Facet handoff turn. */
+  facetTransition?: ZenPersonaTransitionInput;
+  /** Backwards-compatible name for Zen Facet handoff. */
   personaTransition?: ZenPersonaTransitionInput;
   /** Zen-only idle autonomy check/turn. */
   zenAutonomy?: ZenAutonomyInput;
@@ -1464,6 +1762,7 @@ export type ZenLiveActionMoodHint =
   | "amused"
   | "confused"
   | "stern"
+  | "strained"
   | "waiting"
   | "warm";
 
@@ -1755,6 +2054,29 @@ export interface CoffeeTurnResponse {
     jobId: string;
     conversationId: string | null;
   };
+}
+
+export type CoffeeTurnJobPhase =
+  | "routing"
+  | "thinking"
+  | "voicing"
+  | "speaking"
+  | "reaction"
+  | "completed"
+  | "interrupted"
+  | "stale"
+  | "failed";
+
+export interface CoffeeTurnJobStatus {
+  id: string;
+  conversationId: string | null;
+  phase: CoffeeTurnJobPhase;
+  speakerBotId: string | null;
+  startedAt: string;
+  updatedAt: string;
+  interruptEligibleAt: string | null;
+  response?: CoffeeTurnResponse;
+  error?: string;
 }
 
 /** Request body for `POST /api/coffee/sessions/:id/polls`. */

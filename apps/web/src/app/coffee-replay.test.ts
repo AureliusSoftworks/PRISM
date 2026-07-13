@@ -9,8 +9,11 @@ import {
   coffeeActionIsSip,
   coffeeActionPassesSipCadence,
   coffeeActionSipMessageGapForDuration,
+  coffeeConversationHasMeaningfulTableDialogue,
   coffeeReplayMessageHasStateEvent,
+  coffeeReplayPlayerThinkingDurationMs,
   coffeeReplayStateAt,
+  coffeeReplayTopOffsChain,
   coffeeReplayVisibleMessages,
   coffeeStageActionTimelineMessages,
   coffeeSystemSynopsisIsDisplayable,
@@ -142,6 +145,59 @@ describe("coffee replay helpers", () => {
       progressAfter: 0.18,
       toppedOffAt: "2026-07-02T15:01:00.000Z",
     });
+  });
+
+  it("reconstructs the player's departure without requiring a bot id", () => {
+    const messages = [
+      { id: "u1", role: "user", content: "I should get going." },
+      {
+        id: "d1",
+        role: "system",
+        content: "",
+        coffeeReplayEvents: [{
+          v: 1 as const,
+          name: "coffeeReplayEvent" as const,
+          kind: "playerDeparture" as const,
+          occurredAt: "2026-07-02T15:02:00.000Z",
+        }],
+      },
+      { id: "a1", role: "assistant", content: "There they go." },
+    ];
+
+    const departing = coffeeReplayStateAt(messages, 1);
+    assert.equal(departing.playerPresent, true);
+    assert.equal(departing.playerDeparting, true);
+    assert.equal(departing.playerDepartureEvent?.kind, "playerDeparture");
+
+    const departed = coffeeReplayStateAt(messages, 2);
+    assert.equal(departed.playerPresent, false);
+    assert.equal(departed.playerDeparting, false);
+  });
+
+  it("scales simulated player thinking with message length and caps it", () => {
+    assert.equal(coffeeReplayPlayerThinkingDurationMs("Hi"), 800);
+    assert.ok(
+      coffeeReplayPlayerThinkingDurationMs("This is a meaningfully longer thought.") >
+        coffeeReplayPlayerThinkingDurationMs("Hi")
+    );
+    assert.equal(coffeeReplayPlayerThinkingDurationMs("x".repeat(1_000)), 3_500);
+  });
+
+  it("chains top-offs within the inclusive three-second cooldown", () => {
+    const event = (occurredAt: string) => ({ occurredAt });
+    assert.equal(coffeeReplayTopOffsChain(event("2026-07-02T15:00:00.000Z"), event("2026-07-02T15:00:02.999Z")), true);
+    assert.equal(coffeeReplayTopOffsChain(event("2026-07-02T15:00:00.000Z"), event("2026-07-02T15:00:03.000Z")), true);
+    assert.equal(coffeeReplayTopOffsChain(event("2026-07-02T15:00:00.000Z"), event("2026-07-02T15:00:03.001Z")), false);
+  });
+
+  it("distinguishes meaningful dialogue from replay-only system markers", () => {
+    assert.equal(coffeeConversationHasMeaningfulTableDialogue([
+      { role: "system", content: "" },
+      { role: "assistant", content: "*waves*" },
+    ]), false);
+    assert.equal(coffeeConversationHasMeaningfulTableDialogue([
+      { role: "user", content: "One actual line." },
+    ]), true);
   });
 
   it("hides action-only assistant turns from Table talk transcript rows", () => {

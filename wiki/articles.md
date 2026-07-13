@@ -4,7 +4,7 @@
 
 ## [Bot library and marketplace](./articles/bot-library-and-marketplace.md)
 
-How Prism organizes bots into library groups and installs marketplace bots, packs, starter bots, and Lenses.
+How Prism organizes bots, previews personas and voices, exposes bot actions, and installs marketplace collections.
 
 Categories: `Product`, `Guides`
 
@@ -14,7 +14,7 @@ Record: `article_a85cd666-f08f-43b5-911b-d03d411293a2`
 
 ## [Developer guide](./articles/developer-guide.md)
 
-Repo structure, common commands, local privacy invariants, and the Wikiwiki documentation workflow for Prism maintainers.
+Repo structure, common commands, automatic local test login, privacy invariants, and Wikiwiki maintenance.
 
 Categories: `Developer`
 
@@ -24,7 +24,7 @@ Record: `article_e250c780-976e-443d-9cc5-5199c0d38422`
 
 ## [Features and workflows](./articles/features-and-workflows.md)
 
-The main Prism lanes and how they divide controls, continuity, memory, and creative exploration.
+The main Prism lanes and the latest settings, conversation, voiced Bottish, Coffee, and interaction workflows.
 
 Categories: `Product`
 

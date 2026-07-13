@@ -33,7 +33,7 @@ export function discardLatestZenAssistantMessage(
   if (message.role !== "assistant") {
     throw new Error("Only assistant messages can be discarded.");
   }
-  if (message.conversation_mode !== "zen" && message.conversation_mode !== "chat") {
+  if (message.conversation_mode !== "zen") {
     throw new Error("Only Zen assistant messages can be discarded.");
   }
 

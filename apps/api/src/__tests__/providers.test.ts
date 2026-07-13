@@ -15,6 +15,7 @@ import {
   openAiModelUsesMaxCompletionTokens,
   openAiModelUsesFixedDefaultTemperature,
   readOpenAiErrorMessage,
+  resetModelCatalogCacheForTests,
   SECONDARY_OLLAMA_MODEL_PREFIX,
   selectProvider,
 } from "../providers.ts";
@@ -241,6 +242,10 @@ describe("provider API key authentication status", () => {
 describe("buildModelCatalog", () => {
   const originalFetch = globalThis.fetch;
 
+  beforeEach(() => {
+    resetModelCatalogCacheForTests();
+  });
+
   afterEach(() => {
     globalThis.fetch = originalFetch;
   });
@@ -255,6 +260,23 @@ describe("buildModelCatalog", () => {
     assert.equal(catalog.defaults.online, "gpt-4o-mini");
     assert.equal(catalog.local[0]?.id, catalog.defaults.local);
     assert.deepEqual(catalog.online, []);
+  });
+
+  it("caches discovery for the API process lifetime", async () => {
+    let fetchCount = 0;
+    globalThis.fetch = (async () => {
+      fetchCount += 1;
+      return new Response(JSON.stringify({ models: [{ name: "llama3.2" }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    const first = await buildModelCatalog(undefined);
+    const second = await buildModelCatalog(undefined);
+
+    assert.equal(fetchCount, 1);
+    assert.equal(second, first);
   });
 
   it("keeps fallback defaults available when keyed discovery is unavailable", async () => {

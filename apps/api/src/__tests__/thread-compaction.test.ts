@@ -374,7 +374,7 @@ describe("summarizeThreadCompact", () => {
       "chat-mode compaction should preserve transcript rows for persisted chat history"
     );
     const displaySummary = getLatestThreadDisplaySummary(db, "user-1", "conv-1", "chat");
-    assert.equal(displaySummary, "chat-mode-summary.");
+    assert.equal(displaySummary, "chat-mode-summary");
   });
 });
 

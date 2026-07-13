@@ -4,6 +4,7 @@ import {
   type CoffeeAmbientActionPayload,
   type CoffeeCupTopOffSnapshot,
   type CoffeeReplayEventPayload,
+  type CoffeeReplayPlayerDepartureEventPayload,
   type CoffeeReplaySocialSnapshotPayload,
   type CoffeeReplayTopOffEventPayload,
   type CoffeeSessionSettings,
@@ -80,6 +81,47 @@ export interface CoffeeReplayState {
   topOffsByBotId: Record<string, CoffeeCupTopOffSnapshot>;
   currentEvents: CoffeeReplayEventPayload[];
   activeTopOffEvent: CoffeeReplayTopOffEventPayload | null;
+  playerPresent: boolean;
+  playerDeparting: boolean;
+  playerDepartureEvent: CoffeeReplayPlayerDepartureEventPayload | null;
+}
+
+export const COFFEE_REPLAY_PLAYER_THINKING_MIN_MS = 800;
+export const COFFEE_REPLAY_PLAYER_THINKING_MAX_MS = 3_500;
+export const COFFEE_REPLAY_TOP_OFF_CHAIN_MS = 3_000;
+
+function coffeeReplayGraphemeCount(text: string): number {
+  if (typeof Intl.Segmenter === "function") {
+    const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+    return Array.from(segmenter.segment(text)).length;
+  }
+  return Array.from(text).length;
+}
+
+export function coffeeReplayPlayerThinkingDurationMs(text: string): number {
+  const correlatedMs = 650 + coffeeReplayGraphemeCount(text.trim()) * 18;
+  return Math.max(
+    COFFEE_REPLAY_PLAYER_THINKING_MIN_MS,
+    Math.min(COFFEE_REPLAY_PLAYER_THINKING_MAX_MS, Math.round(correlatedMs))
+  );
+}
+
+export function coffeeReplayTopOffsChain(
+  previous: Pick<CoffeeReplayTopOffEventPayload, "occurredAt"> | null | undefined,
+  next: Pick<CoffeeReplayTopOffEventPayload, "occurredAt"> | null | undefined
+): boolean {
+  if (!previous || !next) return false;
+  const gapMs = Date.parse(next.occurredAt) - Date.parse(previous.occurredAt);
+  return Number.isFinite(gapMs) && gapMs >= 0 && gapMs <= COFFEE_REPLAY_TOP_OFF_CHAIN_MS;
+}
+
+export function coffeeConversationHasMeaningfulTableDialogue(
+  messages: readonly Pick<CoffeeReplayMessageLike, "role" | "content">[]
+): boolean {
+  return messages.some((message) => {
+    if (message.role !== "user" && message.role !== "assistant") return false;
+    return extractStageDirections(message.content).mainText.trim().length > 0;
+  });
 }
 
 const COFFEE_ACTION_FACIAL_HAIR_RE = /\b(?:beard|mustache|moustache|goatee)\b/i;
@@ -243,6 +285,9 @@ export function coffeeReplayStateAt(
   const currentEvents: CoffeeReplayEventPayload[] = [];
   let hasReplayEvents = false;
   let activeTopOffEvent: CoffeeReplayTopOffEventPayload | null = null;
+  let playerPresent = true;
+  let playerDeparting = false;
+  let playerDepartureEvent: CoffeeReplayPlayerDepartureEventPayload | null = null;
 
   for (let index = 0; index < messages.length && index <= clampedIndex; index += 1) {
     const isCurrentMessage = index === clampedIndex;
@@ -266,6 +311,13 @@ export function coffeeReplayStateAt(
         if (isCurrentMessage) {
           activeTopOffEvent = event;
         }
+      } else if (event.kind === "playerDeparture") {
+        playerDepartureEvent = event;
+        if (isCurrentMessage) {
+          playerDeparting = true;
+        } else {
+          playerPresent = false;
+        }
       }
     }
   }
@@ -279,6 +331,9 @@ export function coffeeReplayStateAt(
     topOffsByBotId,
     currentEvents,
     activeTopOffEvent,
+    playerPresent,
+    playerDeparting,
+    playerDepartureEvent,
   };
 }
 
@@ -385,6 +440,9 @@ function coffeeReviewReplayEventLine(
   event: CoffeeReplayEventPayload,
   botNameById: ReadonlyMap<string, string>
 ): string {
+  if (event.kind === "playerDeparture") {
+    return `- ${event.occurredAt} playerDeparture: player left the table early`;
+  }
   const bot = coffeeReviewBotLabel(event.botId, botNameById);
   if (event.kind === "arrival") {
     const timing = [

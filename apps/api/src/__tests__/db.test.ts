@@ -83,8 +83,33 @@ describe("createDatabase bot export hash migration", () => {
           (column) => column.name === "model_visibility_defaults_version"
         )
       );
+      assert.ok(
+        userColumns.some(
+          (column) => column.name === "prism_default_bot_face_thinking_frames"
+        )
+      );
+      assert.ok(userColumns.some((column) => column.name === "prism_default_bot_audio_voice_profile"));
+      assert.ok(userColumns.some((column) => column.name === "default_system_voice_name"));
+      assert.ok(userColumns.some((column) => column.name === "default_elevenlabs_voice_id"));
+      assert.equal(
+        userColumns.find((column) => column.name === "voice_effects_enabled")?.dflt_value,
+        "1"
+      );
+      assert.equal(
+        userColumns.find((column) => column.name === "voice_volume")?.dflt_value,
+        "1"
+      );
       assert.ok(userColumns.some((column) => column.name === "hidden_comfyui_workflow_ids"));
       assert.ok(userColumns.some((column) => column.name === "zen_wallpaper_text_mask_enabled"));
+      assert.ok(
+        userColumns.some((column) => column.name === "prism_default_bot_face_eye_animation")
+      );
+      assert.ok(
+        userColumns.some((column) => column.name === "prism_default_bot_face_mouth_animation")
+      );
+      assert.ok(
+        userColumns.some((column) => column.name === "prism_default_bot_face_eye_rotation_deg")
+      );
       const allModelEffortColumn = userColumns.find(
         (column) => column.name === "experimental_all_model_effort_enabled"
       );
@@ -117,18 +142,51 @@ describe("createDatabase bot export hash migration", () => {
         (column) => column.name === "zen_message_font_max_px"
       );
       assert.equal(zenMessageFontMaxColumn?.dflt_value, "32.8");
+      const zenPersonaTransitionChoiceColumn = userColumns.find(
+        (column) => column.name === "zen_persona_transition_choice"
+      );
+      assert.equal(zenPersonaTransitionChoiceColumn?.dflt_value, "'random'");
       const conversationColumns = reopened
         .prepare("PRAGMA table_info(conversations)")
         .all() as Array<{ name: string }>;
       assert.ok(conversationColumns.some((column) => column.name === "zen_wallpaper_history"));
+      assert.ok(conversationColumns.some((column) => column.name === "coffee_power_plan_json"));
+      const messageColumns = reopened
+        .prepare("PRAGMA table_info(messages)")
+        .all() as Array<{ name: string }>;
+      assert.ok(messageColumns.some((column) => column.name === "coffee_audience_bot_ids"));
       assert.ok(columns.some((column) => column.name === "export_hash"));
       assert.ok(columns.some((column) => column.name === "flirt_enabled"));
       assert.ok(columns.some((column) => column.name === "semantic_facets"));
       assert.ok(columns.some((column) => column.name === "semantic_facets_source_hash"));
       assert.ok(columns.some((column) => column.name === "semantic_facets_updated_at"));
+      assert.ok(columns.some((column) => column.name === "avatar_details_json"));
+      assert.ok(columns.some((column) => column.name === "powers_json"));
+      assert.equal(
+        userColumns.some((column) => column.name.includes("avatar_details")),
+        false,
+        "Avatar Details belongs to custom bots, not Default Prism settings"
+      );
       assert.ok(columns.some((column) => column.name === "face_eyes_font"));
+      assert.ok(columns.some((column) => column.name === "face_eye_character"));
+      assert.ok(columns.some((column) => column.name === "face_eye_animation"));
       assert.ok(columns.some((column) => column.name === "face_mouth_font"));
+      assert.ok(columns.some((column) => column.name === "face_mouth_character"));
+      assert.ok(columns.some((column) => column.name === "face_mouth_animation"));
       assert.ok(columns.some((column) => column.name === "face_font_weight"));
+      assert.ok(columns.some((column) => column.name === "face_eye_scale"));
+      assert.ok(columns.some((column) => column.name === "face_eye_offset_x"));
+      assert.ok(columns.some((column) => column.name === "face_eye_offset_y"));
+      assert.ok(columns.some((column) => column.name === "face_eye_rotation_deg"));
+      assert.ok(columns.some((column) => column.name === "face_mouth_scale"));
+      assert.ok(columns.some((column) => column.name === "face_mouth_offset_x"));
+      assert.ok(columns.some((column) => column.name === "face_mouth_offset_y"));
+      assert.ok(columns.some((column) => column.name === "face_mouth_rotation_deg"));
+      assert.ok(columns.some((column) => column.name === "face_blink_bar"));
+      assert.ok(columns.some((column) => column.name === "face_blink_scale"));
+      assert.ok(columns.some((column) => column.name === "face_blink_offset_x"));
+      assert.ok(columns.some((column) => column.name === "face_blink_offset_y"));
+      assert.ok(columns.some((column) => column.name === "face_thinking_frames"));
       assert.ok(columns.some((column) => column.name === "profile_picture_image_id"));
       const opinionColumns = reopened
         .prepare("PRAGMA table_info(session_opinions)")
@@ -154,28 +212,67 @@ describe("createDatabase bot export hash migration", () => {
       assert.match(row!.export_hash!, /^[a-f0-9]{32}$/);
       reopened
         .prepare(
-          "UPDATE bots SET face_eyes_font = ?, face_mouth_font = ?, face_font_weight = ?, profile_picture_image_id = ? WHERE id = ?"
+          "UPDATE bots SET face_eyes_font = ?, face_eye_character = ?, face_mouth_font = ?, face_mouth_character = ?, face_font_weight = ?, face_eye_scale = ?, face_eye_offset_x = ?, face_eye_offset_y = ?, face_mouth_scale = ?, face_mouth_offset_x = ?, face_mouth_offset_y = ?, face_mouth_rotation_deg = ?, face_blink_bar = ?, face_thinking_frames = ?, profile_picture_image_id = ? WHERE id = ?"
         )
-        .run("warm", "formal", 725, "img-profile", "bot-1");
+        .run(
+          "warm",
+          "8",
+          "formal",
+          "△",
+          725,
+          1.15,
+          0.06,
+          -0.08,
+          1.25,
+          -0.04,
+          0.06,
+          35,
+          "¦",
+          '[".","o","O","o"]',
+          "img-profile",
+          "bot-1"
+        );
       const avatarRow = reopened
         .prepare(
-          "SELECT face_eyes_font, face_mouth_font, face_font_weight, profile_picture_image_id FROM bots WHERE id = ?"
+          "SELECT face_eyes_font, face_eye_character, face_mouth_font, face_mouth_character, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_thinking_frames, profile_picture_image_id FROM bots WHERE id = ?"
         )
         .get("bot-1") as
         | {
             face_eyes_font: string | null;
+            face_eye_character: string | null;
             face_mouth_font: string | null;
+            face_mouth_character: string | null;
             face_font_weight: number | null;
+            face_eye_scale: number | null;
+            face_eye_offset_x: number | null;
+            face_eye_offset_y: number | null;
+            face_mouth_scale: number | null;
+            face_mouth_offset_x: number | null;
+            face_mouth_offset_y: number | null;
+            face_mouth_rotation_deg: number | null;
+            face_blink_bar: string | null;
+            face_thinking_frames: string | null;
             profile_picture_image_id: string | null;
           }
         | undefined;
       assert.equal(avatarRow?.face_eyes_font, "warm");
+      assert.equal(avatarRow?.face_eye_character, "8");
       assert.equal(avatarRow?.face_mouth_font, "formal");
+      assert.equal(avatarRow?.face_mouth_character, "△");
       assert.equal(avatarRow?.face_font_weight, 725);
+      assert.equal(avatarRow?.face_eye_scale, 1.15);
+      assert.equal(avatarRow?.face_eye_offset_x, 0.06);
+      assert.equal(avatarRow?.face_eye_offset_y, -0.08);
+      assert.equal(avatarRow?.face_mouth_scale, 1.25);
+      assert.equal(avatarRow?.face_mouth_offset_x, -0.04);
+      assert.equal(avatarRow?.face_mouth_offset_y, 0.06);
+      assert.equal(avatarRow?.face_mouth_rotation_deg, 35);
+      assert.equal(avatarRow?.face_blink_bar, "¦");
+      assert.equal(avatarRow?.face_thinking_frames, '[".","o","O","o"]');
       assert.equal(avatarRow?.profile_picture_image_id, "img-profile");
       const settingsRow = reopened
         .prepare(
-          "SELECT experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, zen_message_font_min_px, zen_message_font_max_px FROM users WHERE id = ?"
+          "SELECT experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, zen_message_font_min_px, zen_message_font_max_px, zen_persona_transition_choice FROM users WHERE id = ?"
         )
         .get("user-1") as
         | {
@@ -184,6 +281,7 @@ describe("createDatabase bot export hash migration", () => {
             psychic_mode_enabled: number;
             zen_message_font_min_px: number;
             zen_message_font_max_px: number;
+            zen_persona_transition_choice: string;
           }
         | undefined;
       assert.equal(settingsRow?.experimental_all_model_effort_enabled, 0);
@@ -191,6 +289,7 @@ describe("createDatabase bot export hash migration", () => {
       assert.equal(settingsRow?.psychic_mode_enabled, 0);
       assert.equal(settingsRow?.zen_message_font_min_px, 15.8);
       assert.equal(settingsRow?.zen_message_font_max_px, 32.8);
+      assert.equal(settingsRow?.zen_persona_transition_choice, "random");
       reopened.close();
     } finally {
       restoreEnv("DB_PATH", previousDbPath);

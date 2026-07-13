@@ -1,12 +1,13 @@
 {
   "name": "@localai/shared",
-  "version": "0.6.5",
+  "version": "0.8.0",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "node --test --experimental-strip-types src/*.test.ts",
+    "test:coverage": "node --test --experimental-strip-types --experimental-test-coverage --test-coverage-lines=85 --test-coverage-branches=65 --test-coverage-functions=85 src/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {

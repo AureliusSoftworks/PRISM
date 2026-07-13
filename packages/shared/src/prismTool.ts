@@ -79,7 +79,7 @@ export interface CoffeeAmbientActionPayload {
   v: 1;
   name: "coffeeAmbientAction";
   source: "scripted";
-  category: "sip" | "cup";
+  category: "sip" | "cup" | "power";
   action: string;
 }
 
@@ -129,10 +129,18 @@ export interface CoffeeReplayTopOffEventPayload {
   toppedOffAt: string;
 }
 
+export interface CoffeeReplayPlayerDepartureEventPayload {
+  v: 1;
+  name: "coffeeReplayEvent";
+  kind: "playerDeparture";
+  occurredAt: string;
+}
+
 export type CoffeeReplayEventPayload =
   | CoffeeReplayArrivalEventPayload
   | CoffeeReplayMoodEventPayload
-  | CoffeeReplayTopOffEventPayload;
+  | CoffeeReplayTopOffEventPayload
+  | CoffeeReplayPlayerDepartureEventPayload;
 
 export type ZenDisplayAlign = "start" | "center" | "end";
 
@@ -502,7 +510,10 @@ function normalizeCoffeeAmbientActionPayload(
   if (row.v !== 1 || row.name !== "coffeeAmbientAction" || row.source !== "scripted") {
     return undefined;
   }
-  const category = row.category === "sip" || row.category === "cup" ? row.category : undefined;
+  const category =
+    row.category === "sip" || row.category === "cup" || row.category === "power"
+      ? row.category
+      : undefined;
   const action = typeof row.action === "string" ? row.action.replace(/\s+/g, " ").trim() : "";
   if (!category || !action || action.length > 80) return undefined;
   return {
@@ -590,9 +601,18 @@ export function normalizeCoffeeReplayEventPayload(
   if (!value || typeof value !== "object") return undefined;
   const row = value as Record<string, unknown>;
   if (row.v !== 1 || row.name !== "coffeeReplayEvent") return undefined;
-  const botId = normalizeCoffeeReplayBotId(row.botId);
   const occurredAt = normalizeCoffeeReplayIso(row.occurredAt);
-  if (!botId || !occurredAt) return undefined;
+  if (!occurredAt) return undefined;
+  if (row.kind === "playerDeparture") {
+    return {
+      v: 1,
+      name: "coffeeReplayEvent",
+      kind: "playerDeparture",
+      occurredAt,
+    };
+  }
+  const botId = normalizeCoffeeReplayBotId(row.botId);
+  if (!botId) return undefined;
   if (row.kind === "arrival") {
     const walkDurationMs = normalizeCoffeeReplayDurationMs(row.walkDurationMs);
     const nameplateDelayMs = normalizeCoffeeReplayDurationMs(row.nameplateDelayMs);

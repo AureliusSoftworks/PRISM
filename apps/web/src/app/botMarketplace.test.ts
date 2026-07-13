@@ -2,10 +2,13 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  marketplaceBotEyeCharacterIsSideways,
+  marketplaceCatalogRevision,
   marketplaceLensEntriesForCategory,
   marketplaceLensInstallState,
   marketplaceEntriesForTheme,
   marketplaceEntryInstallState,
+  marketplaceEntryNeedsUpdate,
   marketplaceInstalledHashSet,
   marketplaceMissingEntries,
   marketplaceThemeInstallState,
@@ -127,6 +130,19 @@ const baseManifest = {
 };
 
 describe("bot marketplace helpers", () => {
+  it("accepts pair-like sideways eye glyphs and rejects one-mark eyes", () => {
+    assert.equal(marketplaceBotEyeCharacterIsSideways(null), true);
+    assert.equal(marketplaceBotEyeCharacterIsSideways("="), true);
+    assert.equal(marketplaceBotEyeCharacterIsSideways(":"), true);
+    assert.equal(marketplaceBotEyeCharacterIsSideways("≈"), true);
+    assert.equal(marketplaceBotEyeCharacterIsSideways("≡"), false);
+    assert.equal(marketplaceBotEyeCharacterIsSideways("‥"), false);
+    assert.equal(marketplaceBotEyeCharacterIsSideways("_"), false);
+    assert.equal(marketplaceBotEyeCharacterIsSideways("@"), false);
+    assert.equal(marketplaceBotEyeCharacterIsSideways("J"), false);
+    assert.equal(marketplaceBotEyeCharacterIsSideways("👁️"), false);
+  });
+
   it("normalizes valid manifest entries and drops missing theme references", () => {
     const manifest = normalizeBotMarketplaceManifest(baseManifest);
 
@@ -146,8 +162,8 @@ describe("bot marketplace helpers", () => {
   it("rejects missing bundle coverage before a theme install writes anything", () => {
     const manifest = normalizeBotMarketplaceManifest(baseManifest);
     const entries = marketplaceEntriesForTheme(manifest, "famous-philosophers");
-    const bundles = new Map<string, string>([
-      ["/bot-marketplace/bots/bot-plato.bot", "{}"],
+    const bundles = new Map<string, Uint8Array>([
+      ["/bot-marketplace/bots/bot-plato.bot", new Uint8Array([1])],
     ]);
 
     assert.throws(
@@ -183,6 +199,46 @@ describe("bot marketplace helpers", () => {
       marketplaceEntryInstallState(manifest.bots[1]!, installedHashes),
       "available"
     );
+  });
+
+  it("tracks marketplace updates by catalog revision without changing bot identity", () => {
+    const manifest = normalizeBotMarketplaceManifest(baseManifest);
+    const entry = manifest.bots[0]!;
+    const installedHashes = marketplaceInstalledHashSet([entry.botHash]);
+    const revision = marketplaceCatalogRevision(manifest);
+
+    assert.equal(revision, "2026-07-02T00:00:00.000Z");
+    assert.equal(
+      marketplaceEntryNeedsUpdate(entry, installedHashes, {}, revision),
+      true
+    );
+    assert.equal(
+      marketplaceEntryNeedsUpdate(entry, installedHashes, { [entry.id]: revision }, revision),
+      false
+    );
+    assert.equal(
+      marketplaceEntryNeedsUpdate(
+        entry,
+        installedHashes,
+        { [entry.id]: "2026-07-01T00:00:00.000Z" },
+        revision
+      ),
+      true
+    );
+    assert.equal(
+      marketplaceEntryNeedsUpdate(entry, new Set(), { [entry.id]: revision }, revision),
+      false
+    );
+  });
+
+  it("falls back to the manifest version when updatedAt is absent", () => {
+    const manifest = normalizeBotMarketplaceManifest({
+      ...baseManifest,
+      updatedAt: null,
+      version: 7,
+    });
+
+    assert.equal(marketplaceCatalogRevision(manifest), "version:7");
   });
 
   it("groups entries by theme and resolves partial theme install state", () => {

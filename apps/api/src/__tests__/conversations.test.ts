@@ -35,6 +35,8 @@ function createTestDb(): DatabaseSync {
       conversation_mode TEXT NOT NULL DEFAULT 'sandbox',
       bot_id TEXT,
       bot_group_ids TEXT,
+      parent_id TEXT,
+      fork_message_id TEXT,
       coffee_group_id TEXT,
       coffee_duration_minutes INTEGER,
       coffee_preset_id TEXT,
@@ -307,7 +309,7 @@ describe("getLatestRememberedZenWallpaperForBot", () => {
 });
 
 describe("rebaseZenWallpaperMetadataForVisibleWindow", () => {
-  it("rebases absolute wallpaper reveal counts to the restored message window", () => {
+  it("rebases absolute wallpaper generation counts to the restored message window", () => {
     const metadata = rebaseZenWallpaperMetadataForVisibleWindow(
       {
         enabled: true,
@@ -341,21 +343,15 @@ describe("rebaseZenWallpaperMetadataForVisibleWindow", () => {
       metadata.history.map((entry) => ({
         imageId: entry.imageId,
         generationMessageCount: entry.generationMessageCount,
-        revealStartMessageCount: entry.revealStartMessageCount,
-        revealFullMessageCount: entry.revealFullMessageCount,
       })),
       [
         {
           imageId: "wallpaper-old",
           generationMessageCount: 10,
-          revealStartMessageCount: 14,
-          revealFullMessageCount: 26,
         },
         {
           imageId: "wallpaper-new",
           generationMessageCount: 75,
-          revealStartMessageCount: 79,
-          revealFullMessageCount: 91,
         },
       ]
     );
@@ -381,15 +377,13 @@ describe("rebaseZenWallpaperMetadataForVisibleWindow", () => {
         imageId: "wallpaper-stale",
         promptSeed: "stale prompt",
         generationMessageCount: 5,
-        revealStartMessageCount: 5,
-        revealFullMessageCount: 5,
       },
     ]);
   });
 });
 
 describe("buildZenWallpaperHistoryForGeneratedImage", () => {
-  it("replaces the scroll timeline with an immediately visible wallpaper", () => {
+  it("keeps forced wallpaper generations on the scroll reveal timeline", () => {
     const history = buildZenWallpaperHistoryForGeneratedImage(
       JSON.stringify([
         {
@@ -404,8 +398,6 @@ describe("buildZenWallpaperHistoryForGeneratedImage", () => {
         imageId: "wallpaper-new",
         promptSeed: "new prompt",
         generationMessageCount: 120,
-        revealStartMessageCount: 124,
-        revealFullMessageCount: 136,
         createdAt: "2026-06-19T12:00:00.000Z",
       },
       {
@@ -415,16 +407,22 @@ describe("buildZenWallpaperHistoryForGeneratedImage", () => {
       }
     );
 
-    assert.deepEqual(history, [
-      {
-        imageId: "wallpaper-new",
-        promptSeed: "new prompt",
-        generationMessageCount: 120,
-        revealStartMessageCount: 0,
-        revealFullMessageCount: 0,
-        createdAt: "2026-06-19T12:00:00.000Z",
-      },
-    ]);
+    assert.deepEqual(
+      history.map((entry) => ({
+        imageId: entry.imageId,
+        generationMessageCount: entry.generationMessageCount,
+      })),
+      [
+        {
+          imageId: "wallpaper-old",
+          generationMessageCount: 30,
+        },
+        {
+          imageId: "wallpaper-new",
+          generationMessageCount: 120,
+        },
+      ]
+    );
   });
 
   it("keeps automatic wallpaper generations on the scroll reveal timeline", () => {
@@ -442,8 +440,6 @@ describe("buildZenWallpaperHistoryForGeneratedImage", () => {
         imageId: "wallpaper-new",
         promptSeed: "new prompt",
         generationMessageCount: 70,
-        revealStartMessageCount: 74,
-        revealFullMessageCount: 86,
       },
       {
         latestMessageCount: 70,
@@ -454,19 +450,16 @@ describe("buildZenWallpaperHistoryForGeneratedImage", () => {
     assert.deepEqual(
       history.map((entry) => ({
         imageId: entry.imageId,
-        revealStartMessageCount: entry.revealStartMessageCount,
-        revealFullMessageCount: entry.revealFullMessageCount,
+        generationMessageCount: entry.generationMessageCount,
       })),
       [
         {
           imageId: "wallpaper-old",
-          revealStartMessageCount: 34,
-          revealFullMessageCount: 46,
+          generationMessageCount: 30,
         },
         {
           imageId: "wallpaper-new",
-          revealStartMessageCount: 74,
-          revealFullMessageCount: 86,
+          generationMessageCount: 70,
         },
       ]
     );
@@ -481,8 +474,6 @@ describe("buildZenWallpaperHistoryForGeneratedImage", () => {
           imageId: `wallpaper-${index + 1}`,
           promptSeed: `theme ${index + 1}`,
           generationMessageCount: 12,
-          revealStartMessageCount: index === 0 ? 12 : 16,
-          revealFullMessageCount: index === 0 ? 24 : 28,
           createdAt: `2026-06-24T12:00:0${index}.000Z`,
         },
         {
@@ -1042,6 +1033,55 @@ describe("deleteConversation", () => {
     assert.equal(
       (db.prepare("SELECT COUNT(*) AS n FROM coffee_poll_votes").get() as { n: number }).n,
       0
+    );
+  });
+
+  it("deletes a session root and its child bot projections", () => {
+    const db = createTestDb();
+    seedChat(db, "user-1", "session-1");
+    seedChat(db, "user-1", "fork-1");
+    db.prepare(
+      "UPDATE conversations SET conversation_mode = 'zen' WHERE id = ? AND user_id = ?"
+    ).run("session-1", "user-1");
+    db.prepare(
+      "UPDATE conversations SET conversation_mode = 'chat', bot_id = ?, parent_id = ? WHERE id = ? AND user_id = ?"
+    ).run("bot-1", "session-1", "fork-1", "user-1");
+
+    deleteConversation(db, "user-1", "session-1");
+
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM conversations").get() as { n: number }).n,
+      0
+    );
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM messages").get() as { n: number }).n,
+      0
+    );
+  });
+
+  it("deletes a child bot projection without deleting the session canvas", () => {
+    const db = createTestDb();
+    seedChat(db, "user-1", "session-1");
+    seedChat(db, "user-1", "fork-1");
+    db.prepare(
+      "UPDATE conversations SET conversation_mode = 'zen' WHERE id = ? AND user_id = ?"
+    ).run("session-1", "user-1");
+    db.prepare(
+      "UPDATE conversations SET conversation_mode = 'chat', bot_id = ?, parent_id = ? WHERE id = ? AND user_id = ?"
+    ).run("bot-1", "session-1", "fork-1", "user-1");
+
+    deleteConversation(db, "user-1", "fork-1");
+
+    const remaining = db
+      .prepare("SELECT id, parent_id FROM conversations ORDER BY id")
+      .all() as Array<{ id: string; parent_id: string | null }>;
+    assert.deepEqual(
+      remaining.map((row) => ({ id: row.id, parent_id: row.parent_id })),
+      [{ id: "session-1", parent_id: null }]
+    );
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ?").get("session-1") as { n: number }).n,
+      1
     );
   });
 
@@ -2159,6 +2199,77 @@ describe("deleteConversationMessage", () => {
       .get("memory-1") as { id: string; conversation_id: string | null } | undefined;
     assert.equal(memory?.id, "memory-1");
     assert.equal(memory?.conversation_id, "chat-1");
+  });
+
+  it("deletes Zen messages and clears derived Zen context", () => {
+    const db = createTestDb();
+    seedConversationAt(db, "user-1", "zen-1", [
+      { id: "m1", role: "user", content: "first", seconds: 1 },
+      { id: "m2", role: "assistant", content: "reply", seconds: 2 },
+      { id: "m3", role: "user", content: "third", seconds: 3 },
+    ]);
+    db.prepare(
+      "UPDATE conversations SET conversation_mode = 'zen' WHERE id = ? AND user_id = ?"
+    ).run("zen-1", "user-1");
+    insertSummary(db, "user-1", "zen-1", "sum-1", "summary 1", 2);
+    insertSummary(db, "user-1", "zen-1", "sum-2", "summary 2", 3);
+    insertLinkedMemory(db, "user-1", "zen-1", "memory-1", ["m1", "m2"]);
+    db.prepare(`
+      INSERT INTO zen_session_memories (
+        id, user_id, conversation_id, ciphertext, iv, tag, created_at, expires_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      "zen-old",
+      "user-1",
+      "zen-1",
+      "cipher",
+      "iv",
+      "tag",
+      "1970-01-01T00:00:01.000Z",
+      "1970-01-02T00:00:01.000Z"
+    );
+    db.prepare(`
+      INSERT INTO zen_session_memories (
+        id, user_id, conversation_id, ciphertext, iv, tag, created_at, expires_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      "zen-new",
+      "user-1",
+      "zen-1",
+      "cipher",
+      "iv",
+      "tag",
+      "1970-01-01T00:00:02.000Z",
+      "1970-01-02T00:00:02.000Z"
+    );
+    db.prepare(
+      "INSERT INTO prism_mood_events (user_id, conversation_id, message_id, event_type, created_at, payload_json) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run("user-1", "zen-1", "m2", "ignored_question", "1970-01-01T00:00:02.000Z", "{}");
+
+    const result = deleteConversationMessage(db, "user-1", "m2");
+
+    assert.equal(result.conversationId, "zen-1");
+    assert.equal(result.deletedSummaries, 2);
+    assert.equal(result.deletedZenSessionMemories, 1);
+    assert.equal(result.deletedMoodEvents, 1);
+    const remainingMessages = db
+      .prepare("SELECT id FROM messages WHERE conversation_id = ? ORDER BY created_at ASC")
+      .all("zen-1") as Array<{ id: string }>;
+    assert.deepEqual(
+      remainingMessages.map((row) => row.id),
+      ["m1", "m3"]
+    );
+    const remainingZenMemories = db
+      .prepare("SELECT id FROM zen_session_memories ORDER BY id")
+      .all() as Array<{ id: string }>;
+    assert.deepEqual(
+      remainingZenMemories.map((row) => row.id),
+      ["zen-old"]
+    );
+    const memory = db
+      .prepare("SELECT id, conversation_id FROM memories WHERE id = ?")
+      .get("memory-1") as { id: string; conversation_id: string | null } | undefined;
+    assert.equal(memory?.conversation_id, "zen-1");
   });
 
   it("rejects deletion when the message belongs to another user", () => {

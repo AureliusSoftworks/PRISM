@@ -1,4 +1,8 @@
-import type { ComfyUiWorkflowRegistration } from "@localai/shared";
+import type {
+  ComfyUiWorkflowRegistration,
+  EnglishVoiceEngine,
+  VoiceMode,
+} from "@localai/shared";
 import {
   DEFAULT_PRISM_MOOD_SENSITIVITY,
   isComfyUiRemoteWorkflowModelId,
@@ -7,6 +11,11 @@ import {
   MIN_PRISM_MOOD_SENSITIVITY,
   normalizePrismMoodSensitivity,
   validateComfyUiWorkflowsPayload,
+  normalizeEnglishVoiceEngine,
+  normalizeBotVoiceVolume,
+  normalizeVoiceMode,
+  BOT_AUDIO_VOICE_IDS,
+  type BotAudioVoiceId,
 } from "@localai/shared";
 import { sanitizeHiddenModelIds } from "./model-routing.ts";
 
@@ -29,6 +38,34 @@ import { sanitizeHiddenModelIds } from "./model-routing.ts";
 export type Theme = "light" | "dark" | "system";
 export type Provider = "local" | "openai" | "anthropic";
 
+export interface ElevenLabsVoiceBank {
+  [voiceId: string]: string | null;
+}
+
+export function normalizeElevenLabsVoiceBank(value: unknown): ElevenLabsVoiceBank {
+  const record = value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  return Object.fromEntries(BOT_AUDIO_VOICE_IDS.map((slot) => {
+    const raw = record[slot];
+    const voiceId = typeof raw === "string" ? raw.trim().slice(0, 160) : "";
+    return [slot, voiceId || null];
+  })) as Record<BotAudioVoiceId, string | null>;
+}
+
+export function parseStoredElevenLabsVoiceBank(value: string | null | undefined): ElevenLabsVoiceBank {
+  if (!value) return normalizeElevenLabsVoiceBank({});
+  try { return normalizeElevenLabsVoiceBank(JSON.parse(value)); } catch { return normalizeElevenLabsVoiceBank({}); }
+}
+
+function normalizeElevenLabsVoiceModel(value: unknown, fallback: string | null): string | null {
+  if (value === undefined) return fallback;
+  if (value === null) return null;
+  if (typeof value !== "string") return fallback;
+  const normalized = value.trim().slice(0, 160);
+  return normalized || null;
+}
+
 export const DEFAULT_ZEN_WALLPAPER_OPACITY = 0.28;
 export const MIN_ZEN_WALLPAPER_OPACITY = 0.05;
 export const MAX_ZEN_WALLPAPER_OPACITY = 1;
@@ -49,12 +86,6 @@ export const MAX_ZEN_RECENT_CONTEXT_MESSAGES = 80;
 export const DEFAULT_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL = 30;
 export const MIN_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL = 3;
 export const MAX_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL = 100;
-export const DEFAULT_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT = 4;
-export const MIN_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT = 0;
-export const MAX_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT = 20;
-export const DEFAULT_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT = 12;
-export const MIN_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT = 1;
-export const MAX_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT = 50;
 export const DEFAULT_ZEN_MOOD_SENSITIVITY = DEFAULT_PRISM_MOOD_SENSITIVITY;
 export const MIN_ZEN_MOOD_SENSITIVITY = MIN_PRISM_MOOD_SENSITIVITY;
 export const MAX_ZEN_MOOD_SENSITIVITY = MAX_PRISM_MOOD_SENSITIVITY;
@@ -70,6 +101,12 @@ export const DEFAULT_ZEN_ASK_QUESTION_PATIENCE_MS = 60_000;
 export const MIN_ZEN_ASK_QUESTION_PATIENCE_MS = 10_000;
 export const MAX_ZEN_ASK_QUESTION_PATIENCE_MS = 60_000;
 export const STEP_ZEN_ASK_QUESTION_PATIENCE_MS = 10_000;
+export type ZenPersonaTransitionChoice =
+  | "random"
+  | "new-speaks"
+  | "previous-introduces"
+  | "off";
+export const DEFAULT_ZEN_PERSONA_TRANSITION_CHOICE: ZenPersonaTransitionChoice = "random";
 
 const LOOPBACK_OLLAMA_HOSTNAMES = new Set([
   "localhost",
@@ -115,8 +152,6 @@ export interface CurrentSettings {
   zenFreshStartGapMs: number | null;
   zenRecentContextMessages: number | null;
   zenWallpaperRegenMessageInterval: number | null;
-  zenWallpaperRevealDelayMessageCount: number | null;
-  zenWallpaperRevealSpanMessageCount: number | null;
   zenMoodSensitivity: number | null;
   zenCanvasTypingSpeed: number | null;
   zenMessageFontMinPx: number | null;
@@ -124,6 +159,7 @@ export interface CurrentSettings {
   zenAskQuestionPatienceEnabled: number | null;
   zenAskQuestionPatienceMs: number | null;
   zenAutonomyEnabled: number | null;
+  zenPersonaTransitionChoice: string | null;
   /** Parsed `users.comfyui_workflows` JSON; empty when unset or invalid. */
   comfyUiWorkflows: ComfyUiWorkflowRegistration[];
   /** Null/empty → server `OLLAMA_AUXILIARY_MODEL` (default llama3.2). */
@@ -131,6 +167,14 @@ export interface CurrentSettings {
   /** Null/empty → use normal hub chat model for turns that emit `sendGeneratedImage`. */
   prismImageToolLlmModel: string | null;
   primaryOllamaHost: string;
+  voiceMode: VoiceMode | string | null;
+  voiceEffectsEnabled: number;
+  voiceVolume: number | null;
+  englishVoiceEngine: EnglishVoiceEngine | string | null;
+  defaultSystemVoiceName: string | null;
+  defaultElevenLabsVoiceId: string | null;
+  elevenLabsVoiceBank: string | null;
+  elevenLabsVoiceModel: string | null;
 }
 
 /** Shape of the next-settings result, with OpenAI key intent captured separately. */
@@ -167,8 +211,6 @@ export interface NextSettings {
   zenFreshStartGapMs: number;
   zenRecentContextMessages: number;
   zenWallpaperRegenMessageInterval: number;
-  zenWallpaperRevealDelayMessageCount: number;
-  zenWallpaperRevealSpanMessageCount: number;
   zenMoodSensitivity: number;
   zenCanvasTypingSpeed: number;
   zenMessageFontMinPx: number;
@@ -176,9 +218,18 @@ export interface NextSettings {
   zenAskQuestionPatienceEnabled: boolean;
   zenAskQuestionPatienceMs: number;
   zenAutonomyEnabled: boolean;
+  zenPersonaTransitionChoice: ZenPersonaTransitionChoice;
   comfyUiWorkflows: ComfyUiWorkflowRegistration[];
   prismDefaultLlmModel: string | null;
   prismImageToolLlmModel: string | null;
+  voiceMode: VoiceMode;
+  voiceEffectsEnabled: boolean;
+  voiceVolume: number;
+  englishVoiceEngine: EnglishVoiceEngine;
+  defaultSystemVoiceName: string | null;
+  defaultElevenLabsVoiceId: string | null;
+  elevenLabsVoiceBank: ElevenLabsVoiceBank;
+  elevenLabsVoiceModel: string | null;
   /**
    * Intent for the OpenAI API key:
    *   - "replace": caller sent a non-empty string; encrypt it
@@ -197,6 +248,24 @@ function isTheme(value: unknown): value is Theme {
 
 function isProvider(value: unknown): value is Provider {
   return value === "local" || value === "openai" || value === "anthropic";
+}
+
+function isZenPersonaTransitionChoice(
+  value: unknown
+): value is ZenPersonaTransitionChoice {
+  return (
+    value === "random" ||
+    value === "new-speaks" ||
+    value === "previous-introduces" ||
+    value === "off"
+  );
+}
+
+export function normalizeZenPersonaTransitionChoice(
+  value: unknown,
+  fallback: ZenPersonaTransitionChoice = DEFAULT_ZEN_PERSONA_TRANSITION_CHOICE
+): ZenPersonaTransitionChoice {
+  return isZenPersonaTransitionChoice(value) ? value : fallback;
 }
 
 function normalizeOllamaHostValue(input: string): string {
@@ -545,30 +614,6 @@ export function normalizeZenWallpaperRegenMessageInterval(
     fallback,
     MIN_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL,
     MAX_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL
-  );
-}
-
-export function normalizeZenWallpaperRevealDelayMessageCount(
-  value: unknown,
-  fallback = DEFAULT_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT
-): number {
-  return normalizeNumberSetting(
-    value,
-    fallback,
-    MIN_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT,
-    MAX_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT
-  );
-}
-
-export function normalizeZenWallpaperRevealSpanMessageCount(
-  value: unknown,
-  fallback = DEFAULT_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT
-): number {
-  return normalizeNumberSetting(
-    value,
-    fallback,
-    MIN_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT,
-    MAX_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT
   );
 }
 
@@ -933,28 +978,6 @@ export function resolveNextSettings(
           body.zenWallpaperRegenMessageInterval,
           currentZenWallpaperRegenMessageInterval
         );
-  const currentZenWallpaperRevealDelayMessageCount =
-    normalizeZenWallpaperRevealDelayMessageCount(
-      current.zenWallpaperRevealDelayMessageCount
-    );
-  const zenWallpaperRevealDelayMessageCount =
-    body.zenWallpaperRevealDelayMessageCount === undefined
-      ? currentZenWallpaperRevealDelayMessageCount
-      : normalizeZenWallpaperRevealDelayMessageCount(
-          body.zenWallpaperRevealDelayMessageCount,
-          currentZenWallpaperRevealDelayMessageCount
-        );
-  const currentZenWallpaperRevealSpanMessageCount =
-    normalizeZenWallpaperRevealSpanMessageCount(
-      current.zenWallpaperRevealSpanMessageCount
-    );
-  const zenWallpaperRevealSpanMessageCount =
-    body.zenWallpaperRevealSpanMessageCount === undefined
-      ? currentZenWallpaperRevealSpanMessageCount
-      : normalizeZenWallpaperRevealSpanMessageCount(
-          body.zenWallpaperRevealSpanMessageCount,
-          currentZenWallpaperRevealSpanMessageCount
-        );
   const currentZenMoodSensitivity = normalizeZenMoodSensitivity(
     current.zenMoodSensitivity
   );
@@ -1028,6 +1051,16 @@ export function resolveNextSettings(
           body.zenAutonomyEnabled,
           currentZenAutonomyEnabled
         );
+  const currentZenPersonaTransitionChoice = normalizeZenPersonaTransitionChoice(
+    current.zenPersonaTransitionChoice
+  );
+  const zenPersonaTransitionChoice =
+    body.zenPersonaTransitionChoice === undefined
+      ? currentZenPersonaTransitionChoice
+      : normalizeZenPersonaTransitionChoice(
+          body.zenPersonaTransitionChoice,
+          currentZenPersonaTransitionChoice
+        );
   const prismDefaultLlmModel = readPreferredModel(
     body.prismDefaultLlmModel,
     current.prismDefaultLlmModel
@@ -1036,7 +1069,38 @@ export function resolveNextSettings(
     body.prismImageToolLlmModel,
     current.prismImageToolLlmModel
   );
-
+  const voiceMode = normalizeVoiceMode(body.voiceMode, normalizeVoiceMode(current.voiceMode));
+  const voiceEffectsEnabled = typeof body.voiceEffectsEnabled === "boolean"
+    ? body.voiceEffectsEnabled
+    : current.voiceEffectsEnabled !== 0;
+  const voiceVolume = body.voiceVolume === undefined
+    ? normalizeBotVoiceVolume(current.voiceVolume)
+    : normalizeBotVoiceVolume(body.voiceVolume, normalizeBotVoiceVolume(current.voiceVolume));
+  const englishVoiceEngine = normalizeEnglishVoiceEngine(
+    body.englishVoiceEngine,
+    normalizeEnglishVoiceEngine(current.englishVoiceEngine)
+  );
+  const normalizeDefaultVoiceSelection = (value: unknown, fallback: string | null): string | null => {
+    if (value === undefined) return fallback;
+    if (value === null) return null;
+    if (typeof value !== "string") return fallback;
+    return value.trim().slice(0, 200) || null;
+  };
+  const defaultSystemVoiceName = normalizeDefaultVoiceSelection(
+    body.defaultSystemVoiceName,
+    current.defaultSystemVoiceName
+  );
+  const defaultElevenLabsVoiceId = normalizeDefaultVoiceSelection(
+    body.defaultElevenLabsVoiceId,
+    current.defaultElevenLabsVoiceId
+  );
+  const elevenLabsVoiceBank = body.elevenLabsVoiceBank === undefined
+    ? parseStoredElevenLabsVoiceBank(current.elevenLabsVoiceBank)
+    : normalizeElevenLabsVoiceBank(body.elevenLabsVoiceBank);
+  const elevenLabsVoiceModel = normalizeElevenLabsVoiceModel(
+    body.elevenLabsVoiceModel,
+    current.elevenLabsVoiceModel
+  );
   const comfyUiWorkflows =
     body.comfyUiWorkflows === undefined
       ? current.comfyUiWorkflows
@@ -1112,8 +1176,6 @@ export function resolveNextSettings(
     zenFreshStartGapMs,
     zenRecentContextMessages,
     zenWallpaperRegenMessageInterval,
-    zenWallpaperRevealDelayMessageCount,
-    zenWallpaperRevealSpanMessageCount,
     zenMoodSensitivity,
     zenCanvasTypingSpeed,
     zenMessageFontMinPx,
@@ -1121,9 +1183,18 @@ export function resolveNextSettings(
     zenAskQuestionPatienceEnabled,
     zenAskQuestionPatienceMs,
     zenAutonomyEnabled,
+    zenPersonaTransitionChoice,
     comfyUiWorkflows,
     prismDefaultLlmModel,
     prismImageToolLlmModel,
+    voiceMode,
+    voiceEffectsEnabled,
+    voiceVolume,
+    englishVoiceEngine,
+    defaultSystemVoiceName,
+    defaultElevenLabsVoiceId,
+    elevenLabsVoiceBank,
+    elevenLabsVoiceModel,
     openAiKeyIntent,
     anthropicKeyIntent,
     elevenLabsKeyIntent,

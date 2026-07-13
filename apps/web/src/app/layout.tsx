@@ -8,9 +8,11 @@ import {
   Lora,
   Raleway,
 } from "next/font/google";
+import localFont from "next/font/local";
 import { BlockBrowserInspection } from "./BlockBrowserInspection";
 import { ClientInstallCoach } from "./ClientInstallCoach";
 import { DisableNativeTooltips } from "./DisableNativeTooltips";
+import { TextFieldContextMenu } from "./TextFieldContextMenu";
 import "./globals.css";
 
 const uiSans = Instrument_Sans({
@@ -46,6 +48,13 @@ const conciseRounded = Fredoka({
   variable: "--font-concise-rounded",
   subsets: ["latin"],
   weight: ["600", "700"],
+});
+
+const dotoDisplay = localFont({
+  src: "./fonts/Doto-Variable.ttf",
+  variable: "--font-doto-display",
+  weight: "100 900",
+  display: "swap",
 });
 
 const geistMono = Geist_Mono({
@@ -86,10 +95,11 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${uiSans.variable} ${titleSans.variable} ${chatSerif.variable} ${formalSerif.variable} ${playfulDisplay.variable} ${conciseRounded.variable} ${geistMono.variable}`}
+      className={`${uiSans.variable} ${titleSans.variable} ${chatSerif.variable} ${formalSerif.variable} ${playfulDisplay.variable} ${conciseRounded.variable} ${dotoDisplay.variable} ${geistMono.variable}`}
       suppressHydrationWarning
     >
       <body>
+        <TextFieldContextMenu />
         <BlockBrowserInspection />
         <DisableNativeTooltips />
         {children}

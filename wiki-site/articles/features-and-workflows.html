@@ -42,8 +42,8 @@
 <p class="nav-heading">Agent records</p>
 <a class="nav-link" href="../concepts.html">Concepts<span>7</span></a>
 <a class="nav-link" href="../decisions.html">Decisions<span>4</span></a>
-<a class="nav-link" href="../devlog.html">Devlog<span>6</span></a>
-<a class="nav-link" href="../notes.html">Notes<span>2</span></a>
+<a class="nav-link" href="../devlog.html">Devlog<span>7</span></a>
+<a class="nav-link" href="../notes.html">Notes<span>3</span></a>
 <a class="nav-link" href="../symbols.html">Symbols<span>4</span></a>
 </nav>
       </div>
@@ -51,7 +51,7 @@
     <main id="content" class="content">
       <header class="page-header">
         <h1>Features and workflows</h1>
-        <p>The main Prism lanes and how they divide controls, continuity, memory, and creative exploration.</p>
+        <p>The main Prism lanes and the latest settings, conversation, voiced Bottish, Coffee, and interaction workflows.</p>
       </header>
       <article class="record-page">
   <nav class="breadcrumbs" aria-label="Breadcrumb">
@@ -65,16 +65,26 @@
   </div>
   <section class="prose">
     <h2>Summary</h2>
-    <p>The main Prism lanes and how they divide controls, continuity, memory, and creative exploration.</p>
+    <p>The main Prism lanes and the latest settings, conversation, voiced Bottish, Coffee, and interaction workflows.</p>
     <h2>Article</h2>
     <h2>Experience Lanes</h2>
 <p>Prism keeps its major workflows in separate lanes instead of one overloaded chat surface. Chat is the full playground, Zen is calmer one-to-one continuity, Coffee is multi-bot group conversation, Story is a preview narrative lane, and Sandbox carries the most explicit runtime controls.</p>
-<h2>Shared Workspace</h2>
-<p>The lanes share the same account, bot library, provider choices, and memory infrastructure, but each lane keeps its own expectations. Advanced knobs belong in Sandbox; companion-like continuity stays focused in Chat and Zen; group orchestration belongs in Coffee.</p>
-<h2>Bots And Memory</h2>
-<p>Persona bots can carry behavior, visual identity, exports, and memories. Normal conversations can use scoped continuity, while incognito/private paths avoid memory reads and writes.</p>
+<h2>Settings That Follow The Experience</h2>
+<p>Settings now has a first-class Chat category alongside Coffee and Zen. Chat owns conversation behavior such as memory and writing controls, while Coffee and Zen keep their mode-specific options and tutorial resets. This makes the panel easier to scan without blurring the boundaries between experiences.</p>
+<h2>Conversation Interaction</h2>
+<p>Wildcard prompts use bounded cleanup so a resolved prompt cannot leave the conversation stuck indefinitely with the Shh control active. Multi-line code blocks can collapse without widening the normal Chat reading column; users can expand them, use Copy, or triple-click the block, with visible confirmation after copying. Custom context menus also show a brief confirmation when an item is selected.</p>
+<h2>Bots, Voice, And Memory</h2>
+<p>Persona bots can carry behavior, visual identity, exports, memories, voices, and Coffee-only Powers. The selected Bot Library preview is display-only until the user chooses English or Bottish below it. English generates a fresh persona-specific line and plays it automatically in the same click; legacy mic-check and audio-check lines are rejected and regenerated.</p>
+<p>Bottish is a voiced robot language built from deterministic pronounceable pseudo-syllables spoken by the selected system voice. Sparse clicks, chirps, gating, and buzz shape the robotic character, while Bottish tone moves from fuller vocal body to a brighter and denser treatment. If Web Audio is unavailable, Prism keeps the voiced gibberish without accents; if system speech is unavailable, the original procedural Bottish engine is the complete fallback. Bottish is local in both LOCAL and ONLINE modes and never uses provider TTS.</p>
+<p>Voice playback remains audio-master across Chat, Zen, Coffee, Story, previews, and replay, so the synthesized carrier drives text reveal and mouth motion. Interruptions stop both carrier and accents.</p>
+<p>Normal conversations can use scoped continuity, while incognito/private paths avoid memory reads and writes.</p>
+<h2>Coffee Powers And Replay</h2>
+<p>Coffee Powers are short rules or quirks attached to a bot and applied only during Coffee sessions. Prism compiles supported intents into structured session behavior, surfaces active-power badges, and keeps incomplete powers inactive instead of pretending they worked.</p>
+<p>Coffee replay reconstructs more of the saved table state, including arrivals, mood, top-offs, player presence and speech timing, so replay reads more like the session that actually happened.</p>
 <h2>Creative Tools</h2>
-<p>The current app includes image generation paths when online mode allows them, bot export/import flows, applet versions, group conversations, and early Story episodes. Planned applets are tracked separately from release versions so experience changes can be discussed at the surface people actually touch.</p>
+<p>The current app includes online-gated image generation, bot export/import flows, applet versions, group conversations, and early Story episodes. Planned applets are tracked separately from release versions so experience changes can be discussed at the surface people actually touch.</p>
+<h2>Current Cursor State</h2>
+<p>Prism currently uses native system cursors. The custom cursor controller remains in the codebase behind a disabled switch so it can be revisited without rebuilding the system.</p>
     <h2>Categories</h2><p><code>Product</code></p>
     <h2>Aliases</h2><p><code>Workflows</code> <code>Applets</code> <code>Feature map</code></p>
   </section>
@@ -83,14 +93,25 @@
   <ul><li><a href="../records/concept/concept_bbdc911a-c8a6-417e-8a32-a5650c8be316.html">Experience lanes</a> <code>concept_bbdc911a-c8a6-417e-8a32-a5650c8be316</code></li>
 <li><a href="../records/concept/concept_c2d00b3b-6b79-4faf-ac21-b3b4e7e022e6.html">Memory and continuity pipeline</a> <code>concept_c2d00b3b-6b79-4faf-ac21-b3b4e7e022e6</code></li>
 <li><a href="../records/decision/decision_d8f8761e-d67c-4d96-8217-3af3b67ec403.html">Keep experience lanes separated</a> <code>decision_d8f8761e-d67c-4d96-8217-3af3b67ec403</code></li>
-<li><a href="../records/concept/concept_38af8f30-6915-43a6-814b-76ca3e5b63cf.html">Bot library groups and marketplace installs</a> <code>concept_38af8f30-6915-43a6-814b-76ca3e5b63cf</code></li></ul>
+<li><a href="../records/concept/concept_38af8f30-6915-43a6-814b-76ca3e5b63cf.html">Bot library groups and marketplace installs</a> <code>concept_38af8f30-6915-43a6-814b-76ca3e5b63cf</code></li>
+<li><a href="../records/event/event_9049a96d-ec0f-4c0e-9444-d9c9997799ec.html">Chat, Bot Library, voice previews, Coffee, and interaction polish advanced</a> <code>event_9049a96d-ec0f-4c0e-9444-d9c9997799ec</code></li></ul>
 </aside>
   <aside class="sources-panel">
   <h2>Related files</h2>
   <ul><li><a class="source-link" href="../../README.md"><code>README.md</code></a></li>
 <li><a class="source-link" href="../../docs/applets.md"><code>docs/applets.md</code></a></li>
+<li><a class="source-link" href="../../docs/voices.md"><code>docs/voices.md</code></a></li>
 <li><a class="source-link" href="../../AGENTS.md"><code>AGENTS.md</code></a></li>
-<li><a class="source-link" href="../../apps/web/src/app/page.tsx"><code>apps/web/src/app/page.tsx</code></a></li></ul>
+<li><a class="source-link" href="../../apps/web/src/app/SettingsPanel.tsx"><code>apps/web/src/app/SettingsPanel.tsx</code></a></li>
+<li><a class="source-link" href="../../apps/web/src/app/page.tsx"><code>apps/web/src/app/page.tsx</code></a></li>
+<li><a class="source-link" href="../../apps/web/src/app/bottishVoice.ts"><code>apps/web/src/app/bottishVoice.ts</code></a></li>
+<li><a class="source-link" href="../../apps/web/src/app/voiceEffects.ts"><code>apps/web/src/app/voiceEffects.ts</code></a></li>
+<li><a class="source-link" href="../../apps/api/src/bottish-text.ts"><code>apps/api/src/bottish-text.ts</code></a></li>
+<li><a class="source-link" href="../../apps/api/src/voices.ts"><code>apps/api/src/voices.ts</code></a></li>
+<li><a class="source-link" href="../../apps/api/src/composer-cleanup.ts"><code>apps/api/src/composer-cleanup.ts</code></a></li>
+<li><a class="source-link" href="../../apps/api/src/voice-preview-line.ts"><code>apps/api/src/voice-preview-line.ts</code></a></li>
+<li><a class="source-link" href="../../apps/api/src/bot-powers.ts"><code>apps/api/src/bot-powers.ts</code></a></li>
+<li><a class="source-link" href="../../apps/web/src/app/coffee-replay.ts"><code>apps/web/src/app/coffee-replay.ts</code></a></li></ul>
 </aside>
   <details class="record-meta">
   <summary>Agent details</summary>
@@ -100,12 +121,22 @@
     <div><dt>Authority</dt><dd>agent</dd></div>
     <div><dt>Confidence</dt><dd>high</dd></div>
     <div><dt>Created</dt><dd><time datetime="2026-07-05T04:14:08.766Z">2026-07-05</time></dd></div>
-    <div><dt>Updated</dt><dd><time datetime="2026-07-05T04:14:08.766Z">2026-07-05</time></dd></div>
+    <div><dt>Updated</dt><dd><time datetime="2026-07-13T06:45:13.572Z">2026-07-13</time></dd></div>
     <div><dt>Tags</dt><dd><code>audience:all</code> <code>features</code> <code>ux</code> <code>applets</code></dd></div>
     <div><dt>Files</dt><dd><ul><li><a class="source-link" href="../../README.md"><code>README.md</code></a></li>
 <li><a class="source-link" href="../../docs/applets.md"><code>docs/applets.md</code></a></li>
+<li><a class="source-link" href="../../docs/voices.md"><code>docs/voices.md</code></a></li>
 <li><a class="source-link" href="../../AGENTS.md"><code>AGENTS.md</code></a></li>
-<li><a class="source-link" href="../../apps/web/src/app/page.tsx"><code>apps/web/src/app/page.tsx</code></a></li></ul></dd></div>
+<li><a class="source-link" href="../../apps/web/src/app/SettingsPanel.tsx"><code>apps/web/src/app/SettingsPanel.tsx</code></a></li>
+<li><a class="source-link" href="../../apps/web/src/app/page.tsx"><code>apps/web/src/app/page.tsx</code></a></li>
+<li><a class="source-link" href="../../apps/web/src/app/bottishVoice.ts"><code>apps/web/src/app/bottishVoice.ts</code></a></li>
+<li><a class="source-link" href="../../apps/web/src/app/voiceEffects.ts"><code>apps/web/src/app/voiceEffects.ts</code></a></li>
+<li><a class="source-link" href="../../apps/api/src/bottish-text.ts"><code>apps/api/src/bottish-text.ts</code></a></li>
+<li><a class="source-link" href="../../apps/api/src/voices.ts"><code>apps/api/src/voices.ts</code></a></li>
+<li><a class="source-link" href="../../apps/api/src/composer-cleanup.ts"><code>apps/api/src/composer-cleanup.ts</code></a></li>
+<li><a class="source-link" href="../../apps/api/src/voice-preview-line.ts"><code>apps/api/src/voice-preview-line.ts</code></a></li>
+<li><a class="source-link" href="../../apps/api/src/bot-powers.ts"><code>apps/api/src/bot-powers.ts</code></a></li>
+<li><a class="source-link" href="../../apps/web/src/app/coffee-replay.ts"><code>apps/web/src/app/coffee-replay.ts</code></a></li></ul></dd></div>
   </dl>
 </details>
 </article>

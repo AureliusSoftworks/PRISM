@@ -12,6 +12,115 @@ Active development happens on the `dev` branch; every release is a merge into
 
 _Staging area - nothing queued for release yet._
 
+## [0.8.0] - 2026-07-13
+
+### Added
+
+- **Bottish is now a voiced robot language.** Deterministic pseudo-syllables
+  preserve the original cadence through the selected system voice, while
+  bounded clicks, chirps, gating, and buzz add robotic character without
+  provider traffic; voiced-only and procedural fallbacks keep playback usable.
+- **Avatar Details Studio.** Custom bots can author persistent phosphor-screen
+  paint and anchored face details with guarded local drafts and deterministic
+  rendering across Studio, Chat, Zen, and Coffee.
+
+### Changed
+
+- **Speech remains audio-master across live surfaces.** Chat, Zen, Coffee,
+  Story, previews, and replay use the synthesized carrier for reveal and mouth
+  timing, and interruptions stop both the carrier and Bottish accents.
+- **Avatar rendering shares canonical geometry.** Authored screen details now
+  keep their intended position and scale when bots move between editor,
+  library, and conversation surfaces.
+- **Release sources no longer carry the retired offline speech bundle.** The
+  unused KittenTTS, sherpa-onnx, and eSpeak data has been removed now that
+  English and Bottish use native system voices.
+
+### Fixed
+
+- **Coffee bot panels retain their escape navigation.** Opening a bot-owned
+  panel over the Coffee table no longer lets the Coffee toolbar cover the
+  shared top navigation.
+
+## [0.7.0] - 2026-07-12
+
+### Added
+
+- **Per-bot voices and Coffee Powers.** Bots can now keep independent System
+  Classic or ElevenLabs voice identities and up to three Coffee-only Powers,
+  with compiled table rules that persist through archive and account backups.
+- **Coffee replay preserves the player's presence.** Replays now represent the
+  player with the Prism bot, retain voice and cup-top-off timing, and record an
+  early departure so the remaining bots can finish a short in-character
+  epilogue.
+- **Deterministic bot frame finishes.** Persona bots can render stable painted,
+  worn, and material-aware frame treatments while the default Prism frame
+  remains factory clean.
+- **Batch bot editing.** Multi-selected bots can now be edited together for
+  shared identity, chat model, and image model preferences, with mixed-state
+  controls that make bulk changes clear before applying them.
+- **Steam-first release lane documentation.** Prism now documents the desktop
+  Steam launch path alongside the current GitHub Releases fallback, making the
+  next distribution steps easier to audit.
+
+### Changed
+
+- **Conversation surfaces share richer bot behavior.** Avatar Studio, Chat,
+  Zen, Coffee, and Bot Library previews now share more consistent face, glyph,
+  voice, accessory, context-menu, and autosave behavior.
+- **Chat interaction is easier to scan and control.** Settings has a dedicated
+  Chat category, collapsible code blocks keep the normal reading width and
+  support triple-click copy, and context-menu selections provide visible
+  confirmation.
+- **Speech and reveal timing stay synchronized.** English and Bottish playback
+  now follow the visible reveal timeline more reliably, persona previews use
+  fresh in-character lines, Bottish never compresses into an unintelligible
+  burst, and Coffee table speech and mouth cadence feel closer to Zen pacing.
+- **Model discovery stays warm after startup.** Prism caches provider model
+  catalogs for the API process lifetime, avoiding repeated Ollama and cloud
+  catalog scans when the browser refreshes or opens a fresh conversation.
+- **Coffee and Zen navigation remain responsive during long sessions.** Coffee
+  arrivals, cups, replay state, and table speed nudges are more stable, while
+  Zen hands scrolling to the reader sooner and releases visual text if audio
+  preparation stalls.
+- **Bot customization is more legible and resilient.** Avatar Studio and the
+  bot profile builder now use clearer grouped sections, stronger visual chrome,
+  improved face placement controls, safer autosave recovery, and unclipped
+  color/glyph popovers.
+- **Chat and Zen startup surfaces feel calmer.** Bot hubs, picker activation,
+  Zen new-session presence, selected-bot hero panels, and in-hero model/private
+  controls now behave more predictably during fresh starts and persona changes.
+- **Coffee and live bot presence have richer polish.** Coffee table color,
+  avatar rendering, live presence placement, and Zen face/glyph presentation
+  have been tuned for stronger desktop readability and personality.
+
+### Fixed
+
+- **Zen speech and scrolling recover reliably.** Bottish and English playback
+  now preserve Safari's gesture-authorized audio element through fresh-session
+  conversation handoffs, reveal rerenders no longer restart speech, and Zen
+  leaves transcript wheel and touch scrolling under native reader control.
+- **Wildcard prompts cannot wedge Chat.** Composer cleanup now has a bounded
+  timeout and falls back to the resolved prompt instead of leaving the Shh
+  control active forever.
+- **Bot Library preview actions click reliably.** The selected preview is
+  display-only, custom menus render above draggable bot layers, and English
+  voice samples regenerate and play from one button press.
+- **Coffee replay and persistence recover cleanly.** Player departures,
+  per-message audiences, active Powers, cup state, and reconstructed table
+  labels now survive save, restore, and replay without stale-scope failures.
+- **Bot grid cards click reliably.** Mouse and keyboard activation on visible
+  bot cards now selects the card directly instead of feeling like text
+  selection or only moving the hue lens.
+- **Bot edit targets recover when stale.** Bot saves and avatar autosaves now
+  refresh the library and clear stale edit targets when a bot no longer exists.
+
+### Desktop
+
+- **Desktop polish and Steam readiness improved.** Prism client icons, desktop
+  veil behavior, text-field context menus, and release-process guidance now
+  better match the desktop-first launch lane.
+
 ## [0.6.5] - 2026-07-04
 
 ### Added

@@ -655,6 +655,12 @@ describe("hydrateAssistantMessageParts", () => {
         progressAfter: 0.2,
         toppedOffAt: "2026-07-02T15:01:00.000Z",
       },
+      {
+        v: 1,
+        name: "coffeeReplayEvent",
+        kind: "playerDeparture",
+        occurredAt: "2026-07-02T15:02:00.000Z",
+      },
     ];
     const stored = serializeAssistantToolPayload({ coffeeReplayEvents });
 

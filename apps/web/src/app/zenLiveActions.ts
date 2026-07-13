@@ -3,6 +3,7 @@ import type {
   ZenLiveActionMoodHint,
   ZenLiveActionReactionResponse,
 } from "@localai/shared";
+import type { ZenLiveBotMouthShape } from "./zenLiveMouth";
 
 export type ZenLiveBotActionState = {
   action: string;
@@ -18,6 +19,7 @@ export type ZenLiveBotActionState = {
 
 const TRAILING_SPEECH_BRIDGE_RE =
   /(?:[,:;]?\s*(?:and\s+)?(?:says?|saying|asks?|asking|replies?|replying|responds?|responding|tells?|telling|whispers?|whispering|murmurs?|murmuring|adds?|adding|speaks?|speaking|sings?|singing|croons?|crooning)\b\s*(?:softly|warmly|quietly|gently|candidly|brightly|kindly|slowly|under\s+.*)?[.!?\u2026;:,]*)+$/iu;
+const ZEN_LIVE_ACTION_ANGRY_BRACKET_GLYPH = ":[";
 
 export function zenLiveActionMoodToBotMood(
   moodHint: ZenLiveActionMoodHint | undefined
@@ -30,6 +32,8 @@ export function zenLiveActionMoodToBotMood(
       return "warm";
     case "stern":
       return "guarded";
+    case "strained":
+      return "strained";
     case "confused":
     case "waiting":
       return "neutral";
@@ -39,11 +43,7 @@ export function zenLiveActionMoodToBotMood(
   }
 }
 
-export type ZenLiveActionMouthShape =
-  | "open-wide"
-  | "closed"
-  | "open-small"
-  | "open-round";
+export type ZenLiveActionMouthShape = ZenLiveBotMouthShape;
 
 export type ZenLiveBotCanvasSide = "left" | "right";
 
@@ -75,6 +75,10 @@ function zenLiveActionOpenMouthGlyph(
   eyes: ":" | ";",
   mouthShape: ZenLiveActionMouthShape
 ): string | null {
+  if (mouthShape === "speech-closed") return `${eyes}|`;
+  if (mouthShape === "dot") return `${eyes}∙`;
+  if (mouthShape === "at") return `${eyes}@`;
+  if (mouthShape === "narrow") return `${eyes}o`;
   if (mouthShape === "open-wide") return `${eyes}0`;
   if (mouthShape === "open-small") return `${eyes}o`;
   if (mouthShape === "open-round") return `${eyes}O`;
@@ -97,8 +101,10 @@ export function zenLiveActionPlateFace(
       return { text: openMouth ?? ":]", rotateDeg: 90 };
     case "confused":
       return { text: openMouth ?? ":?", rotateDeg: 90 };
+    case "strained":
+      return { text: openMouth ?? ":(", rotateDeg: 90 };
     case "stern":
-      return { text: openMouth ?? ":[", rotateDeg: 90 };
+      return { text: openMouth ?? ZEN_LIVE_ACTION_ANGRY_BRACKET_GLYPH, rotateDeg: 90 };
     case "attentive":
       return { text: openMouth ?? ":]", rotateDeg: 90 };
     case "waiting":
@@ -145,15 +151,15 @@ export function resolveZenLiveBotPresenceActionText({
   isTalking: boolean;
   userActionVisible: boolean;
   hasBot: boolean;
-}): string {
+}): string | null {
+  void hasBot;
   const replyActionText = isTalking ? sanitizeZenLiveBotActionText(replyAction) : null;
   if (replyActionText) return replyActionText;
   const actionText = sanitizeZenLiveBotActionText(action);
   if (actionText) return actionText;
   if (isTalking) return "replying";
   if (userActionVisible) return "notices";
-  if (hasBot) return "listens";
-  return "waits";
+  return null;
 }
 
 export function isZenLiveBotPresenceActionVerbose(value: unknown): boolean {

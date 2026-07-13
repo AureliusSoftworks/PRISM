@@ -1,0 +1,62 @@
+name: PRISM deterministic tests
+
+on:
+  pull_request:
+    branches: [dev, main]
+  push:
+    branches: [dev, main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prism-tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deterministic:
+    name: Unit, integration, coverage, and browser smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # Pull-request checkouts are detached; preserve the source branch for
+      # branch-gated development surfaces such as Avatar Details Studio.
+      PRISM_BRANCH: ${{ github.head_ref || github.ref_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run deterministic test suites
+        run: npm test
+
+      - name: Enforce coverage thresholds
+        run: npm run test:coverage
+
+      - name: Typecheck workspace
+        run: npm run typecheck
+
+      - name: Lint workspace
+        run: npm run lint
+
+      - name: Install browser test engines
+        run: npx playwright install --with-deps chromium webkit
+
+      - name: Run browser smoke tests
+        run: npm run test:e2e
+
+      - name: Upload browser diagnostics
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: prism-playwright-results
+          path: test-results
+          if-no-files-found: ignore

@@ -28,13 +28,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   chat: {
     id: "chat",
     name: "Chat",
-    version: "0.5",
+    version: "0.9",
     status: "active",
   },
   zen: {
     id: "zen",
     name: "Zen",
-    version: "0.3",
+    version: "0.8",
     status: "active",
   },
   arena: {
@@ -52,7 +52,7 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   coffee: {
     id: "coffee",
     name: "Coffee",
-    version: "0.6",
+    version: "1.0",
     status: "active",
   },
   feed: {
@@ -99,15 +99,15 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   },
 };
 
-export const PRISM_PLAYABLE_HUB_APPLET_IDS = [
+export const PRISM_TOP_LEVEL_SWITCHER_APPLET_IDS = [
   "chat",
-  "zen",
   "coffee",
-  "story",
 ] as const satisfies readonly PrismAppletId[];
 
-export function prismPlayableHubApplets(): PrismAppletVersion[] {
-  return PRISM_PLAYABLE_HUB_APPLET_IDS.map((appletId) => PRISM_APPLETS[appletId]);
+export function prismTopLevelSwitcherApplets(): PrismAppletVersion[] {
+  return PRISM_TOP_LEVEL_SWITCHER_APPLET_IDS.map((appletId) => PRISM_APPLETS[appletId]).filter(
+    (applet) => applet.status === "active"
+  );
 }
 
 export function prismPlannedRoadmapApplets(): PrismAppletVersion[] {

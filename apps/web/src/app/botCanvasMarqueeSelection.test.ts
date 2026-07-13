@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  canvasBotDirectoryIsInteractive,
   resolveCanvasBotMarqueeSelection,
   resolveInactiveCanvasBotMarqueeSelection,
 } from "./botCanvasMarqueeSelection.ts";
@@ -78,5 +79,44 @@ describe("bot canvas marquee selection", () => {
     );
 
     assert.deepEqual(ids(selected), ["bot-a"]);
+  });
+
+  it("keeps Chat marquee interactive for both fresh and hydrated empty conversations", () => {
+    assert.equal(canvasBotDirectoryIsInteractive({
+      view: "chat",
+      conversationMessageCount: null,
+      pendingReplyVisible: false,
+    }), true);
+    assert.equal(canvasBotDirectoryIsInteractive({
+      view: "chat",
+      conversationMessageCount: 0,
+      pendingReplyVisible: false,
+    }), true);
+  });
+
+  it("disables marquee for active replies and nonempty conversations", () => {
+    assert.equal(canvasBotDirectoryIsInteractive({
+      view: "chat",
+      conversationMessageCount: 1,
+      pendingReplyVisible: false,
+    }), false);
+    assert.equal(canvasBotDirectoryIsInteractive({
+      view: "chat",
+      conversationMessageCount: 0,
+      pendingReplyVisible: true,
+    }), false);
+  });
+
+  it("keeps Sandbox marquee scoped to its true empty state", () => {
+    assert.equal(canvasBotDirectoryIsInteractive({
+      view: "sandbox",
+      conversationMessageCount: null,
+      pendingReplyVisible: false,
+    }), true);
+    assert.equal(canvasBotDirectoryIsInteractive({
+      view: "sandbox",
+      conversationMessageCount: 0,
+      pendingReplyVisible: false,
+    }), false);
   });
 });

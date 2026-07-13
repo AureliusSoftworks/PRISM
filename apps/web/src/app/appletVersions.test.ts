@@ -2,24 +2,27 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  PRISM_APPLETS,
+  prismAppletVersionLabel,
   prismPlannedRoadmapApplets,
-  prismPlayableHubApplets,
+  prismTopLevelSwitcherApplets,
 } from "./appletVersions.ts";
 
 describe("applet version helpers", () => {
-  it("keeps the hub focused on playable applets", () => {
+  it("keeps the app switcher focused on active top-level applets", () => {
     assert.deepEqual(
-      prismPlayableHubApplets().map((applet) => applet.id),
-      ["chat", "zen", "coffee", "story"]
+      prismTopLevelSwitcherApplets().map((applet) => applet.id),
+      ["chat", "coffee"]
     );
     assert.deepEqual(
-      new Set(prismPlayableHubApplets().map((applet) => applet.status)),
-      new Set(["active", "preview"])
+      new Set(prismTopLevelSwitcherApplets().map((applet) => applet.status)),
+      new Set(["active"])
     );
   });
 
-  it("keeps planned applets out of the primary hub grid", () => {
+  it("keeps planned and preview applets out of release navigation", () => {
     const plannedIds = prismPlannedRoadmapApplets().map((applet) => applet.id);
+    const switcherIds = prismTopLevelSwitcherApplets().map((applet) => applet.id);
 
     assert.deepEqual(plannedIds, [
       "arena",
@@ -31,8 +34,17 @@ describe("applet version helpers", () => {
       "pseudo",
       "surf",
     ]);
-    for (const playable of prismPlayableHubApplets()) {
-      assert.equal(plannedIds.includes(playable.id), false);
-    }
+    assert.equal(switcherIds.includes("zen"), false);
+    assert.equal(switcherIds.includes("story"), false);
+    assert.equal(switcherIds.some((id) => plannedIds.includes(id)), false);
+  });
+
+  it("tracks the current visual applet versions for release provenance", () => {
+    assert.equal(PRISM_APPLETS.chat.version, "0.9");
+    assert.equal(PRISM_APPLETS.zen.version, "0.8");
+    assert.equal(PRISM_APPLETS.coffee.version, "1.0");
+    assert.equal(prismAppletVersionLabel("chat"), "v0.9");
+    assert.equal(prismAppletVersionLabel("zen"), "v0.8");
+    assert.equal(prismAppletVersionLabel("coffee"), "v1.0");
   });
 });

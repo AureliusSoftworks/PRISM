@@ -143,10 +143,15 @@ export function resolveDbPath(): string {
   return join(srcDir, "..", "data", "localai.db");
 }
 
-export function createDatabase(): DatabaseSync {
-  const dbPath = resolveDbPath();
-  mkdirSync(dirname(dbPath), { recursive: true });
-  const db = new DatabaseSync(dbPath);
+/**
+ * Apply the current production schema and migrations to an existing database.
+ *
+ * Keeping this separate from the file-opening wrapper lets tests use an
+ * in-memory SQLite database with the exact same schema and migration path as
+ * production. This prevents handwritten fixtures from drifting as columns are
+ * added to the application database.
+ */
+export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   db.exec(`
     PRAGMA foreign_keys = ON;
     PRAGMA journal_mode = WAL;
@@ -190,8 +195,6 @@ export function createDatabase(): DatabaseSync {
       zen_fresh_start_gap_ms INTEGER NOT NULL DEFAULT 604800000,
       zen_recent_context_messages INTEGER NOT NULL DEFAULT 30,
       zen_wallpaper_regen_message_interval INTEGER NOT NULL DEFAULT 30,
-      zen_wallpaper_reveal_delay_message_count INTEGER NOT NULL DEFAULT 4,
-      zen_wallpaper_reveal_span_message_count INTEGER NOT NULL DEFAULT 12,
       zen_mood_sensitivity REAL NOT NULL DEFAULT 0.5,
       zen_canvas_typing_speed REAL NOT NULL DEFAULT 1,
       zen_message_font_min_px REAL NOT NULL DEFAULT 15.8,
@@ -199,6 +202,36 @@ export function createDatabase(): DatabaseSync {
       zen_ask_question_patience_enabled INTEGER NOT NULL DEFAULT 0,
       zen_ask_question_patience_ms INTEGER NOT NULL DEFAULT 60000,
       zen_autonomy_enabled INTEGER NOT NULL DEFAULT 0,
+      zen_persona_transition_choice TEXT NOT NULL DEFAULT 'random',
+      prism_default_bot_name TEXT,
+      prism_default_bot_system_prompt TEXT,
+      prism_default_bot_color TEXT,
+      prism_default_bot_glyph TEXT,
+      prism_default_bot_face_eyes_font TEXT,
+      prism_default_bot_face_eye_character TEXT,
+      prism_default_bot_face_eye_animation TEXT,
+      prism_default_bot_face_mouth_font TEXT,
+      prism_default_bot_face_mouth_character TEXT,
+      prism_default_bot_face_mouth_animation TEXT,
+      prism_default_bot_face_font_weight INTEGER,
+      prism_default_bot_face_eye_scale REAL,
+      prism_default_bot_face_eye_offset_x REAL,
+      prism_default_bot_face_eye_offset_y REAL,
+      prism_default_bot_face_eye_rotation_deg REAL,
+      prism_default_bot_face_mouth_scale REAL,
+      prism_default_bot_face_mouth_offset_x REAL,
+      prism_default_bot_face_mouth_offset_y REAL,
+      prism_default_bot_face_mouth_rotation_deg REAL,
+      prism_default_bot_face_blink_bar TEXT,
+      prism_default_bot_face_blink_scale REAL,
+      prism_default_bot_face_blink_offset_x REAL,
+      prism_default_bot_face_blink_offset_y REAL,
+      prism_default_bot_face_thinking_frames TEXT,
+      prism_default_bot_temperature REAL,
+      prism_default_bot_max_tokens INTEGER,
+      prism_default_bot_top_p REAL,
+      prism_default_bot_top_k INTEGER,
+      prism_default_bot_repetition_penalty REAL,
       composer_writing_assist INTEGER NOT NULL DEFAULT 1,
       dev_memories_enabled INTEGER NOT NULL DEFAULT 0,
       dev_memories_text TEXT NOT NULL DEFAULT '',
@@ -211,6 +244,17 @@ export function createDatabase(): DatabaseSync {
       elevenlabs_key_ciphertext TEXT,
       elevenlabs_key_iv TEXT,
       elevenlabs_key_tag TEXT,
+      voice_mode TEXT NOT NULL DEFAULT 'mute',
+      voice_effects_enabled INTEGER NOT NULL DEFAULT 1,
+      voice_volume REAL NOT NULL DEFAULT 1,
+      english_voice_engine TEXT NOT NULL DEFAULT 'builtin',
+      default_system_voice_name TEXT,
+      default_elevenlabs_voice_id TEXT,
+      elevenlabs_voice_bank TEXT NOT NULL DEFAULT '{}',
+      elevenlabs_voice_model TEXT,
+      player_audio_voice_profile TEXT,
+      player_name_pronunciation TEXT NOT NULL DEFAULT '',
+      prism_default_bot_audio_voice_profile TEXT,
       created_at TEXT NOT NULL,
       last_active_at TEXT NOT NULL
     );
@@ -258,6 +302,7 @@ export function createDatabase(): DatabaseSync {
       coffee_meeting_summary TEXT,
       coffee_meeting_summary_message_count INTEGER,
       coffee_meeting_summary_updated_at TEXT,
+      coffee_power_plan_json TEXT,
       zen_wallpaper_enabled INTEGER NOT NULL DEFAULT 0,
       zen_wallpaper_image_id TEXT,
       zen_wallpaper_prompt_seed TEXT,
@@ -268,6 +313,17 @@ export function createDatabase(): DatabaseSync {
       updated_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS conversation_hubs (
+      user_id TEXT NOT NULL,
+      bot_key TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY(user_id, bot_key),
+      FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_conversation_hubs_conversation
+      ON conversation_hubs(conversation_id);
     CREATE TABLE IF NOT EXISTS messages (
       id TEXT PRIMARY KEY,
       conversation_id TEXT NOT NULL,
@@ -278,6 +334,7 @@ export function createDatabase(): DatabaseSync {
       model TEXT,
       bot_id TEXT,
       tool_payload TEXT,
+      coffee_audience_bot_ids TEXT,
       created_at TEXT NOT NULL,
       FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -374,10 +431,12 @@ export function createDatabase(): DatabaseSync {
       user_id TEXT NOT NULL,
       name TEXT NOT NULL,
       system_prompt TEXT NOT NULL DEFAULT '',
+      voice_preview_line TEXT,
       export_hash TEXT,
       semantic_facets TEXT,
       semantic_facets_source_hash TEXT,
       semantic_facets_updated_at TEXT,
+      powers_json TEXT NOT NULL DEFAULT '[]',
       model TEXT,
       local_model TEXT,
       online_model TEXT,
@@ -390,9 +449,29 @@ export function createDatabase(): DatabaseSync {
       repetition_penalty REAL DEFAULT 1.1,
       color TEXT,
       glyph TEXT,
+      avatar_details_json TEXT,
       face_eyes_font TEXT,
+      face_eye_character TEXT,
+      face_eye_animation TEXT,
       face_mouth_font TEXT,
+      face_mouth_character TEXT,
+      face_mouth_animation TEXT,
       face_font_weight INTEGER,
+      face_eye_scale REAL,
+      face_eye_offset_x REAL,
+      face_eye_offset_y REAL,
+      face_eye_rotation_deg REAL,
+      face_mouth_scale REAL,
+      face_mouth_offset_x REAL,
+      face_mouth_offset_y REAL,
+      face_mouth_rotation_deg REAL,
+      face_blink_bar TEXT,
+      face_blink_scale REAL,
+      face_blink_offset_x REAL,
+      face_blink_offset_y REAL,
+      face_thinking_frames TEXT,
+      authored_audio_voice_profile TEXT,
+      audio_voice_profile_override TEXT,
       profile_picture_image_id TEXT,
       chat_enabled INTEGER NOT NULL DEFAULT 1,
       online_enabled INTEGER NOT NULL DEFAULT 1,
@@ -646,6 +725,40 @@ export function createDatabase(): DatabaseSync {
   if (!hasLastActiveAt) {
     db.exec("ALTER TABLE users ADD COLUMN last_active_at TEXT;");
   }
+  const hasVoiceMode = userColumns.some((column) => column.name === "voice_mode");
+  if (!hasVoiceMode) db.exec("ALTER TABLE users ADD COLUMN voice_mode TEXT NOT NULL DEFAULT 'mute';");
+  const hasVoiceEffectsEnabled = userColumns.some((column) => column.name === "voice_effects_enabled");
+  if (!hasVoiceEffectsEnabled) db.exec("ALTER TABLE users ADD COLUMN voice_effects_enabled INTEGER NOT NULL DEFAULT 1;");
+  const hasVoiceVolume = userColumns.some((column) => column.name === "voice_volume");
+  if (!hasVoiceVolume) db.exec("ALTER TABLE users ADD COLUMN voice_volume REAL NOT NULL DEFAULT 1;");
+  const hasEnglishVoiceEngine = userColumns.some((column) => column.name === "english_voice_engine");
+  if (!hasEnglishVoiceEngine) db.exec("ALTER TABLE users ADD COLUMN english_voice_engine TEXT NOT NULL DEFAULT 'builtin';");
+  const hasDefaultSystemVoiceName = userColumns.some((column) => column.name === "default_system_voice_name");
+  if (!hasDefaultSystemVoiceName) db.exec("ALTER TABLE users ADD COLUMN default_system_voice_name TEXT;");
+  const hasDefaultElevenLabsVoiceId = userColumns.some((column) => column.name === "default_elevenlabs_voice_id");
+  if (!hasDefaultElevenLabsVoiceId) db.exec("ALTER TABLE users ADD COLUMN default_elevenlabs_voice_id TEXT;");
+  const hasElevenLabsVoiceBank = userColumns.some((column) => column.name === "elevenlabs_voice_bank");
+  if (!hasElevenLabsVoiceBank) db.exec("ALTER TABLE users ADD COLUMN elevenlabs_voice_bank TEXT NOT NULL DEFAULT '{}';");
+  const hasElevenLabsVoiceModel = userColumns.some((column) => column.name === "elevenlabs_voice_model");
+  if (!hasElevenLabsVoiceModel) db.exec("ALTER TABLE users ADD COLUMN elevenlabs_voice_model TEXT;");
+  const hasPlayerAudioVoiceProfile = userColumns.some(
+    (column) => column.name === "player_audio_voice_profile"
+  );
+  if (!hasPlayerAudioVoiceProfile) {
+    db.exec("ALTER TABLE users ADD COLUMN player_audio_voice_profile TEXT;");
+  }
+  const hasPlayerNamePronunciation = userColumns.some(
+    (column) => column.name === "player_name_pronunciation"
+  );
+  if (!hasPlayerNamePronunciation) {
+    db.exec("ALTER TABLE users ADD COLUMN player_name_pronunciation TEXT NOT NULL DEFAULT '';");
+  }
+  const hasPrismDefaultBotAudioVoiceProfile = userColumns.some(
+    (column) => column.name === "prism_default_bot_audio_voice_profile"
+  );
+  if (!hasPrismDefaultBotAudioVoiceProfile) {
+    db.exec("ALTER TABLE users ADD COLUMN prism_default_bot_audio_voice_profile TEXT;");
+  }
   const hasProviderLocked = userColumns.some((column) => column.name === "provider_locked");
   if (!hasProviderLocked) {
     db.exec("ALTER TABLE users ADD COLUMN provider_locked INTEGER NOT NULL DEFAULT 0;");
@@ -820,18 +933,6 @@ export function createDatabase(): DatabaseSync {
   if (!hasZenWallpaperRegenMessageInterval) {
     db.exec("ALTER TABLE users ADD COLUMN zen_wallpaper_regen_message_interval INTEGER NOT NULL DEFAULT 30;");
   }
-  const hasZenWallpaperRevealDelayMessageCount = userColumns.some(
-    (column) => column.name === "zen_wallpaper_reveal_delay_message_count"
-  );
-  if (!hasZenWallpaperRevealDelayMessageCount) {
-    db.exec("ALTER TABLE users ADD COLUMN zen_wallpaper_reveal_delay_message_count INTEGER NOT NULL DEFAULT 4;");
-  }
-  const hasZenWallpaperRevealSpanMessageCount = userColumns.some(
-    (column) => column.name === "zen_wallpaper_reveal_span_message_count"
-  );
-  if (!hasZenWallpaperRevealSpanMessageCount) {
-    db.exec("ALTER TABLE users ADD COLUMN zen_wallpaper_reveal_span_message_count INTEGER NOT NULL DEFAULT 12;");
-  }
   const hasZenMoodSensitivity = userColumns.some(
     (column) => column.name === "zen_mood_sensitivity"
   );
@@ -873,6 +974,49 @@ export function createDatabase(): DatabaseSync {
   );
   if (!hasZenAutonomyEnabled) {
     db.exec("ALTER TABLE users ADD COLUMN zen_autonomy_enabled INTEGER NOT NULL DEFAULT 0;");
+  }
+  const hasZenPersonaTransitionChoice = userColumns.some(
+    (column) => column.name === "zen_persona_transition_choice"
+  );
+  if (!hasZenPersonaTransitionChoice) {
+    db.exec("ALTER TABLE users ADD COLUMN zen_persona_transition_choice TEXT NOT NULL DEFAULT 'random';");
+  }
+  const defaultBotColumns: Array<[string, string]> = [
+    ["prism_default_bot_name", "TEXT"],
+    ["prism_default_bot_system_prompt", "TEXT"],
+    ["prism_default_bot_color", "TEXT"],
+    ["prism_default_bot_glyph", "TEXT"],
+    ["prism_default_bot_face_eyes_font", "TEXT"],
+    ["prism_default_bot_face_eye_character", "TEXT"],
+    ["prism_default_bot_face_eye_animation", "TEXT"],
+    ["prism_default_bot_face_mouth_font", "TEXT"],
+    ["prism_default_bot_face_mouth_character", "TEXT"],
+    ["prism_default_bot_face_mouth_animation", "TEXT"],
+    ["prism_default_bot_face_font_weight", "INTEGER"],
+    ["prism_default_bot_face_eye_scale", "REAL"],
+    ["prism_default_bot_face_eye_offset_x", "REAL"],
+    ["prism_default_bot_face_eye_offset_y", "REAL"],
+    ["prism_default_bot_face_eye_rotation_deg", "REAL"],
+    ["prism_default_bot_face_mouth_scale", "REAL"],
+    ["prism_default_bot_face_mouth_offset_x", "REAL"],
+    ["prism_default_bot_face_mouth_offset_y", "REAL"],
+    ["prism_default_bot_face_mouth_rotation_deg", "REAL"],
+    ["prism_default_bot_face_blink_bar", "TEXT"],
+    ["prism_default_bot_face_blink_scale", "REAL"],
+    ["prism_default_bot_face_blink_offset_x", "REAL"],
+    ["prism_default_bot_face_blink_offset_y", "REAL"],
+    ["prism_default_bot_face_thinking_frames", "TEXT"],
+    ["prism_default_bot_temperature", "REAL"],
+    ["prism_default_bot_max_tokens", "INTEGER"],
+    ["prism_default_bot_top_p", "REAL"],
+    ["prism_default_bot_top_k", "INTEGER"],
+    ["prism_default_bot_repetition_penalty", "REAL"],
+  ];
+  for (const [name, type] of defaultBotColumns) {
+    const hasColumn = userColumns.some((column) => column.name === name);
+    if (!hasColumn) {
+      db.exec(`ALTER TABLE users ADD COLUMN ${name} ${type};`);
+    }
   }
   const hasLenientLocalImageFallbackModel = userColumns.some(
     (column) => column.name === "lenient_local_image_fallback_model"
@@ -975,9 +1119,28 @@ export function createDatabase(): DatabaseSync {
   if (!hasToolPayloadColumn) {
     db.exec("ALTER TABLE messages ADD COLUMN tool_payload TEXT;");
   }
+  const hasCoffeeAudienceBotIdsColumn = messageColumns.some(
+    (column) => column.name === "coffee_audience_bot_ids"
+  );
+  if (!hasCoffeeAudienceBotIdsColumn) {
+    db.exec("ALTER TABLE messages ADD COLUMN coffee_audience_bot_ids TEXT;");
+  }
   const conversationColumns = db
     .prepare("PRAGMA table_info(conversations)")
     .all() as Array<{ name: string }>;
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS conversation_hubs (
+      user_id TEXT NOT NULL,
+      bot_key TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY(user_id, bot_key),
+      FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_conversation_hubs_conversation
+      ON conversation_hubs(conversation_id);
+  `);
   const hasConversationModeColumn = conversationColumns.some(
     (column) => column.name === "conversation_mode"
   );
@@ -1001,6 +1164,18 @@ export function createDatabase(): DatabaseSync {
   );
   if (!hasConversationBotGroupIdsColumn) {
     db.exec("ALTER TABLE conversations ADD COLUMN bot_group_ids TEXT;");
+  }
+  const hasConversationParentIdColumn = conversationColumns.some(
+    (column) => column.name === "parent_id"
+  );
+  if (!hasConversationParentIdColumn) {
+    db.exec("ALTER TABLE conversations ADD COLUMN parent_id TEXT;");
+  }
+  const hasConversationForkMessageIdColumn = conversationColumns.some(
+    (column) => column.name === "fork_message_id"
+  );
+  if (!hasConversationForkMessageIdColumn) {
+    db.exec("ALTER TABLE conversations ADD COLUMN fork_message_id TEXT;");
   }
   const hasConversationCoffeeSettingsColumn = conversationColumns.some(
     (column) => column.name === "coffee_settings"
@@ -1061,6 +1236,12 @@ export function createDatabase(): DatabaseSync {
   );
   if (!hasConversationCoffeeMeetingSummaryUpdatedAtColumn) {
     db.exec("ALTER TABLE conversations ADD COLUMN coffee_meeting_summary_updated_at TEXT;");
+  }
+  const hasConversationCoffeePowerPlanColumn = conversationColumns.some(
+    (column) => column.name === "coffee_power_plan_json"
+  );
+  if (!hasConversationCoffeePowerPlanColumn) {
+    db.exec("ALTER TABLE conversations ADD COLUMN coffee_power_plan_json TEXT;");
   }
   const hasZenWallpaperEnabledColumn = conversationColumns.some(
     (column) => column.name === "zen_wallpaper_enabled"
@@ -1147,7 +1328,8 @@ export function createDatabase(): DatabaseSync {
   db.exec(`
     UPDATE conversations
     SET conversation_mode = 'zen'
-    WHERE conversation_mode = 'chat';
+    WHERE conversation_mode = 'chat'
+      AND bot_id IS NULL;
   `);
 
   const memoryColumns = db
@@ -1323,11 +1505,29 @@ export function createDatabase(): DatabaseSync {
   if (!hasBotGlyphColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN glyph TEXT;");
   }
+  const hasBotAvatarDetailsJsonColumn = botColumns.some(
+    (column) => column.name === "avatar_details_json"
+  );
+  if (!hasBotAvatarDetailsJsonColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN avatar_details_json TEXT;");
+  }
   const hasBotFaceEyesFontColumn = botColumns.some(
     (column) => column.name === "face_eyes_font"
   );
   if (!hasBotFaceEyesFontColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN face_eyes_font TEXT;");
+  }
+  const hasBotFaceEyeCharacterColumn = botColumns.some(
+    (column) => column.name === "face_eye_character"
+  );
+  if (!hasBotFaceEyeCharacterColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN face_eye_character TEXT;");
+  }
+  const hasBotFaceEyeAnimationColumn = botColumns.some(
+    (column) => column.name === "face_eye_animation"
+  );
+  if (!hasBotFaceEyeAnimationColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN face_eye_animation TEXT;");
   }
   const hasBotFaceMouthFontColumn = botColumns.some(
     (column) => column.name === "face_mouth_font"
@@ -1335,11 +1535,101 @@ export function createDatabase(): DatabaseSync {
   if (!hasBotFaceMouthFontColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN face_mouth_font TEXT;");
   }
+  const hasBotFaceMouthCharacterColumn = botColumns.some(
+    (column) => column.name === "face_mouth_character"
+  );
+  if (!hasBotFaceMouthCharacterColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN face_mouth_character TEXT;");
+  }
+  const hasBotFaceMouthAnimationColumn = botColumns.some(
+    (column) => column.name === "face_mouth_animation"
+  );
+  if (!hasBotFaceMouthAnimationColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN face_mouth_animation TEXT;");
+  }
   const hasBotFaceFontWeightColumn = botColumns.some(
     (column) => column.name === "face_font_weight"
   );
   if (!hasBotFaceFontWeightColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN face_font_weight INTEGER;");
+  }
+  const hasBotFaceEyeScaleColumn = botColumns.some(
+    (column) => column.name === "face_eye_scale"
+  );
+  if (!hasBotFaceEyeScaleColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN face_eye_scale REAL;");
+  }
+  const hasBotFaceEyeOffsetXColumn = botColumns.some(
+    (column) => column.name === "face_eye_offset_x"
+  );
+  if (!hasBotFaceEyeOffsetXColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN face_eye_offset_x REAL;");
+  }
+  const hasBotFaceEyeOffsetYColumn = botColumns.some(
+    (column) => column.name === "face_eye_offset_y"
+  );
+  if (!hasBotFaceEyeOffsetYColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN face_eye_offset_y REAL;");
+  }
+  const hasBotFaceEyeRotationDegColumn = botColumns.some(
+    (column) => column.name === "face_eye_rotation_deg"
+  );
+  if (!hasBotFaceEyeRotationDegColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN face_eye_rotation_deg REAL;");
+  }
+  const hasBotFaceMouthScaleColumn = botColumns.some(
+    (column) => column.name === "face_mouth_scale"
+  );
+  if (!hasBotFaceMouthScaleColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN face_mouth_scale REAL;");
+  }
+  const hasBotFaceMouthOffsetXColumn = botColumns.some(
+    (column) => column.name === "face_mouth_offset_x"
+  );
+  if (!hasBotFaceMouthOffsetXColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN face_mouth_offset_x REAL;");
+  }
+  const hasBotFaceMouthOffsetYColumn = botColumns.some(
+    (column) => column.name === "face_mouth_offset_y"
+  );
+  if (!hasBotFaceMouthOffsetYColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN face_mouth_offset_y REAL;");
+  }
+  const hasBotFaceMouthRotationDegColumn = botColumns.some(
+    (column) => column.name === "face_mouth_rotation_deg"
+  );
+  if (!hasBotFaceMouthRotationDegColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN face_mouth_rotation_deg REAL;");
+  }
+  const hasBotFaceBlinkBarColumn = botColumns.some(
+    (column) => column.name === "face_blink_bar"
+  );
+  if (!hasBotFaceBlinkBarColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN face_blink_bar TEXT;");
+  }
+  const hasBotFaceBlinkScaleColumn = botColumns.some(
+    (column) => column.name === "face_blink_scale"
+  );
+  if (!hasBotFaceBlinkScaleColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN face_blink_scale REAL;");
+  }
+  const hasBotFaceBlinkOffsetXColumn = botColumns.some(
+    (column) => column.name === "face_blink_offset_x"
+  );
+  if (!hasBotFaceBlinkOffsetXColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN face_blink_offset_x REAL;");
+  }
+  const hasBotFaceBlinkOffsetYColumn = botColumns.some(
+    (column) => column.name === "face_blink_offset_y"
+  );
+  if (!hasBotFaceBlinkOffsetYColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN face_blink_offset_y REAL;");
+  }
+  const hasBotFaceThinkingFramesColumn = botColumns.some(
+    (column) => column.name === "face_thinking_frames"
+  );
+  if (!hasBotFaceThinkingFramesColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN face_thinking_frames TEXT;");
   }
   const hasBotProfilePictureImageIdColumn = botColumns.some(
     (column) => column.name === "profile_picture_image_id"
@@ -1371,6 +1661,24 @@ export function createDatabase(): DatabaseSync {
   );
   if (!hasBotFlirtEnabledColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN flirt_enabled INTEGER NOT NULL DEFAULT 0;");
+  }
+  const hasBotVoicePreviewLineColumn = botColumns.some(
+    (column) => column.name === "voice_preview_line"
+  );
+  if (!hasBotVoicePreviewLineColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN voice_preview_line TEXT;");
+  }
+  const hasAuthoredAudioVoiceProfileColumn = botColumns.some(
+    (column) => column.name === "authored_audio_voice_profile"
+  );
+  if (!hasAuthoredAudioVoiceProfileColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN authored_audio_voice_profile TEXT;");
+  }
+  const hasAudioVoiceProfileOverrideColumn = botColumns.some(
+    (column) => column.name === "audio_voice_profile_override"
+  );
+  if (!hasAudioVoiceProfileOverrideColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN audio_voice_profile_override TEXT;");
   }
   const hasBotLocalModelColumn = botColumns.some(
     (column) => column.name === "local_model"
@@ -1437,6 +1745,12 @@ export function createDatabase(): DatabaseSync {
   );
   if (!hasBotSemanticFacetsUpdatedAtColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN semantic_facets_updated_at TEXT;");
+  }
+  const hasBotPowersJsonColumn = botColumns.some(
+    (column) => column.name === "powers_json"
+  );
+  if (!hasBotPowersJsonColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN powers_json TEXT NOT NULL DEFAULT '[]';");
   }
   const prismMoodColumns = db
     .prepare("PRAGMA table_info(prism_mood_state)")
@@ -1539,8 +1853,23 @@ export function createDatabase(): DatabaseSync {
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_coffee_poll_votes_poll ON coffee_poll_votes (user_id, poll_id, updated_at DESC);"
   );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_conversations_user_updated ON conversations (user_id, updated_at DESC);"
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_messages_user_created ON messages (user_id, created_at DESC);"
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_memories_user_created ON memories (user_id, created_at DESC);"
+  );
 
   return db;
+}
+
+export function createDatabase(): DatabaseSync {
+  const dbPath = resolveDbPath();
+  mkdirSync(dirname(dbPath), { recursive: true });
+  return initializeDatabase(new DatabaseSync(dbPath));
 }
 
 export function mapUserProfile(row: DbUserRecord): UserProfile {
@@ -1576,9 +1905,11 @@ export function mapConversation(
   messages: ChatMessage[]
 ): Conversation {
   const conversationMode =
-    row.conversation_mode === "zen" || row.conversation_mode === "chat"
+    row.conversation_mode === "zen"
       ? "zen"
-      : row.conversation_mode === "coffee"
+      : row.conversation_mode === "chat"
+        ? "chat"
+        : row.conversation_mode === "coffee"
         ? "coffee"
         : "sandbox";
   const botGroupIds = parseBotGroupIds(row.bot_group_ids);

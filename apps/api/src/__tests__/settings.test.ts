@@ -15,8 +15,6 @@ import {
   DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED,
   DEFAULT_ZEN_WALLPAPER_OPACITY,
   DEFAULT_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL,
-  DEFAULT_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT,
-  DEFAULT_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT,
   DEFAULT_ZEN_WALLPAPER_STYLE_NOTES,
   DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED,
   MAX_ZEN_ASK_QUESTION_PATIENCE_MS,
@@ -82,8 +80,6 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     zenFreshStartGapMs: DEFAULT_ZEN_FRESH_START_GAP_MS,
     zenRecentContextMessages: DEFAULT_ZEN_RECENT_CONTEXT_MESSAGES,
     zenWallpaperRegenMessageInterval: DEFAULT_ZEN_WALLPAPER_REGEN_MESSAGE_INTERVAL,
-    zenWallpaperRevealDelayMessageCount: DEFAULT_ZEN_WALLPAPER_REVEAL_DELAY_MESSAGE_COUNT,
-    zenWallpaperRevealSpanMessageCount: DEFAULT_ZEN_WALLPAPER_REVEAL_SPAN_MESSAGE_COUNT,
     zenMoodSensitivity: DEFAULT_ZEN_MOOD_SENSITIVITY,
     zenCanvasTypingSpeed: DEFAULT_ZEN_CANVAS_TYPING_SPEED,
     zenMessageFontMinPx: DEFAULT_ZEN_MESSAGE_FONT_MIN_PX,
@@ -91,13 +87,50 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     zenAskQuestionPatienceEnabled: DEFAULT_ZEN_ASK_QUESTION_PATIENCE_ENABLED ? 1 : 0,
     zenAskQuestionPatienceMs: DEFAULT_ZEN_ASK_QUESTION_PATIENCE_MS,
     zenAutonomyEnabled: 0,
+    zenPersonaTransitionChoice: "random",
     comfyUiWorkflows: [],
     prismDefaultLlmModel: null,
     prismImageToolLlmModel: null,
+    voiceMode: "mute",
+    voiceEffectsEnabled: 1,
+    voiceVolume: 1,
+    englishVoiceEngine: "builtin",
+    defaultSystemVoiceName: null,
+    defaultElevenLabsVoiceId: null,
+    elevenLabsVoiceBank: "{}",
+    elevenLabsVoiceModel: null,
     primaryOllamaHost: "http://localhost:11434",
     ...overrides,
   };
 }
+
+describe("resolveNextSettings — voice foundation", () => {
+  it("keeps an account-wide mode, engine, and exactly five normalized ElevenLabs slots", () => {
+    const next = resolveNextSettings(
+      {
+        voiceMode: "english",
+        voiceEffectsEnabled: false,
+        voiceVolume: 0.65,
+        englishVoiceEngine: "elevenlabs",
+        defaultSystemVoiceName: "  Alex  ",
+        defaultElevenLabsVoiceId: " eleven-default ",
+        elevenLabsVoiceBank: { "voice-1": "  voice_alpha  ", "voice-3": 17, extra: "ignore" },
+        elevenLabsVoiceModel: " eleven_multilingual_v2 ",
+      },
+      baseline()
+    );
+    assert.equal(next.voiceMode, "english");
+    assert.equal(next.voiceEffectsEnabled, false);
+    assert.equal(next.voiceVolume, 0.65);
+    assert.equal(next.englishVoiceEngine, "elevenlabs");
+    assert.equal(next.defaultSystemVoiceName, "Alex");
+    assert.equal(next.defaultElevenLabsVoiceId, "eleven-default");
+    assert.deepEqual(next.elevenLabsVoiceBank, {
+      "voice-1": "voice_alpha", "voice-2": null, "voice-3": null, "voice-4": null, "voice-5": null,
+    });
+    assert.equal(next.elevenLabsVoiceModel, "eleven_multilingual_v2");
+  });
+});
 
 describe("resolveNextSettings — theme", () => {
   it("accepts 'light'", () => {
@@ -999,6 +1032,29 @@ describe("resolveNextSettings — Zen Atmosphere style notes", () => {
 });
 
 describe("resolveNextSettings — Zen Mode settings", () => {
+  it("stores the Zen persona transition switch choice", () => {
+    const next = resolveNextSettings(
+      { zenPersonaTransitionChoice: "previous-introduces" },
+      baseline()
+    );
+
+    assert.equal(next.zenPersonaTransitionChoice, "previous-introduces");
+  });
+
+  it("keeps the stored Zen persona transition choice when omitted or invalid", () => {
+    const current = baseline({ zenPersonaTransitionChoice: "new-speaks" });
+
+    assert.equal(
+      resolveNextSettings({}, current).zenPersonaTransitionChoice,
+      "new-speaks"
+    );
+    assert.equal(
+      resolveNextSettings({ zenPersonaTransitionChoice: "fade-wipe" }, current)
+        .zenPersonaTransitionChoice,
+      "new-speaks"
+    );
+  });
+
   it("stores Zen session and context settings", () => {
     const next = resolveNextSettings(
       {
@@ -1006,8 +1062,6 @@ describe("resolveNextSettings — Zen Mode settings", () => {
         zenFreshStartGapMs: 3 * 24 * 60 * 60 * 1000,
         zenRecentContextMessages: 42,
         zenWallpaperRegenMessageInterval: 24,
-        zenWallpaperRevealDelayMessageCount: 3,
-        zenWallpaperRevealSpanMessageCount: 10,
       },
       baseline()
     );
@@ -1016,8 +1070,6 @@ describe("resolveNextSettings — Zen Mode settings", () => {
     assert.equal(next.zenFreshStartGapMs, 3 * 24 * 60 * 60 * 1000);
     assert.equal(next.zenRecentContextMessages, 42);
     assert.equal(next.zenWallpaperRegenMessageInterval, 24);
-    assert.equal(next.zenWallpaperRevealDelayMessageCount, 3);
-    assert.equal(next.zenWallpaperRevealSpanMessageCount, 10);
   });
 
   it("keeps stored values when omitted or invalid", () => {
@@ -1026,8 +1078,6 @@ describe("resolveNextSettings — Zen Mode settings", () => {
       zenFreshStartGapMs: 4 * 24 * 60 * 60 * 1000,
       zenRecentContextMessages: 44,
       zenWallpaperRegenMessageInterval: 40,
-      zenWallpaperRevealDelayMessageCount: 6,
-      zenWallpaperRevealSpanMessageCount: 16,
     });
 
     const next = resolveNextSettings(
@@ -1036,8 +1086,6 @@ describe("resolveNextSettings — Zen Mode settings", () => {
         zenFreshStartGapMs: false,
         zenRecentContextMessages: null,
         zenWallpaperRegenMessageInterval: undefined,
-        zenWallpaperRevealDelayMessageCount: "still nope",
-        zenWallpaperRevealSpanMessageCount: Number.NaN,
       },
       current
     );
@@ -1046,14 +1094,6 @@ describe("resolveNextSettings — Zen Mode settings", () => {
     assert.equal(next.zenFreshStartGapMs, current.zenFreshStartGapMs);
     assert.equal(next.zenRecentContextMessages, current.zenRecentContextMessages);
     assert.equal(next.zenWallpaperRegenMessageInterval, current.zenWallpaperRegenMessageInterval);
-    assert.equal(
-      next.zenWallpaperRevealDelayMessageCount,
-      current.zenWallpaperRevealDelayMessageCount
-    );
-    assert.equal(
-      next.zenWallpaperRevealSpanMessageCount,
-      current.zenWallpaperRevealSpanMessageCount
-    );
   });
 
   it("clamps fresh starts to happen no earlier than the idle session break", () => {
@@ -1074,8 +1114,6 @@ describe("resolveNextSettings — Zen Mode settings", () => {
       {
         zenRecentContextMessages: 1,
         zenWallpaperRegenMessageInterval: 1,
-        zenWallpaperRevealDelayMessageCount: -2,
-        zenWallpaperRevealSpanMessageCount: 0,
       },
       baseline()
     );
@@ -1083,20 +1121,14 @@ describe("resolveNextSettings — Zen Mode settings", () => {
       {
         zenRecentContextMessages: 999,
         zenWallpaperRegenMessageInterval: 999,
-        zenWallpaperRevealDelayMessageCount: 999,
-        zenWallpaperRevealSpanMessageCount: 999,
       },
       baseline()
     );
 
     assert.equal(low.zenRecentContextMessages, 10);
     assert.equal(low.zenWallpaperRegenMessageInterval, 3);
-    assert.equal(low.zenWallpaperRevealDelayMessageCount, 0);
-    assert.equal(low.zenWallpaperRevealSpanMessageCount, 1);
     assert.equal(high.zenRecentContextMessages, 80);
     assert.equal(high.zenWallpaperRegenMessageInterval, 100);
-    assert.equal(high.zenWallpaperRevealDelayMessageCount, 20);
-    assert.equal(high.zenWallpaperRevealSpanMessageCount, 50);
   });
 
   it("clamps Zen mood sensitivity while preserving current value for invalid input", () => {

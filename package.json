@@ -1,12 +1,18 @@
 {
   "name": "localai-chatgov",
   "private": true,
-  "version": "0.6.5",
+  "type": "module",
+  "version": "0.8.0",
   "workspaces": [
     "apps/*",
     "packages/*"
   ],
   "scripts": {
+    "test": "node scripts/run-tests.mjs",
+    "test:coverage": "node scripts/run-tests.mjs --coverage",
+    "test:e2e": "playwright test --grep-invert @visual",
+    "test:visual": "playwright test --grep @visual",
+    "test:perf": "npm --prefix packages/config run build && npm --prefix packages/shared run build && node --experimental-strip-types scripts/perf/test-performance.ts",
     "dev": "node --env-file-if-exists=.env scripts/dev.mjs",
     "version:set": "node scripts/set-version.mjs",
     "dev:web": "npm run dev -w apps/web",
@@ -27,6 +33,7 @@
     "eval-experimental-effort": "node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/experimental-effort.ts",
     "eval:effort-ladder": "node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/effort-ladder.ts",
     "eval-effort-ladder": "node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/effort-ladder.ts",
+    "cleanup:legacy-avatar-details": "node --experimental-strip-types scripts/cleanup-legacy-avatar-details.ts",
     "build": "npm run build -w packages/shared && npm run build -w packages/config && npm run build -w apps/api && npm run build -w apps/web",
     "lint": "npm run lint -w apps/api && npm run lint -w apps/web",
     "typecheck": "npm run typecheck -w packages/shared && npm run typecheck -w packages/config && npm run typecheck -w apps/api && npm run typecheck -w apps/web",
@@ -39,6 +46,7 @@
     "wiki:closeout": "wk closeout --profile mixed --audience all"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@thjodann/wk": "^1.0.4"
   }
 }

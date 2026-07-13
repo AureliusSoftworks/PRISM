@@ -2,26 +2,28 @@
 
 import type { ReactNode } from "react";
 import {
-  Brain,
   Coffee,
   FlaskConical,
   Info,
   KeyRound,
+  MessageCircle,
   Network,
   SlidersHorizontal,
   Sparkles,
   UserRound,
+  Volume2,
 } from "lucide-react";
 import styles from "./page.module.css";
 
 export type SettingsScope =
+  | "chat"
   | "zen"
   | "coffee"
   | "connections"
   | "network"
   | "experimental"
   | "models"
-  | "behavior"
+  | "voice"
   | "about"
   | "account";
 
@@ -31,7 +33,7 @@ interface SettingsPanelProps {
   scope: SettingsScope;
   settingsLoaded: boolean;
   panelClosing?: boolean;
-  headerAccessory?: ReactNode;
+  headerAction?: ReactNode;
   onScopeChange: (scope: SettingsScope) => void;
   onClose: () => void;
   renderScopeContent: (scope: SettingsLeafScope) => ReactNode;
@@ -52,12 +54,13 @@ const SETTINGS_NAV_GROUPS: readonly {
       { scope: "models", title: "Models", icon: <SlidersHorizontal size={16} strokeWidth={2} /> },
       { scope: "network", title: "Network", icon: <Network size={16} strokeWidth={2} /> },
       { scope: "experimental", title: "Experimental", icon: <FlaskConical size={16} strokeWidth={2} /> },
-      { scope: "behavior", title: "Behavior", icon: <Brain size={16} strokeWidth={2} /> },
+      { scope: "voice", title: "Voice", icon: <Volume2 size={16} strokeWidth={2} /> },
     ],
   },
   {
     label: "Modes",
     items: [
+      { scope: "chat", title: "Chat", icon: <MessageCircle size={16} strokeWidth={2} /> },
       { scope: "zen", title: "Zen", icon: <Sparkles size={16} strokeWidth={2} /> },
       { scope: "coffee", title: "Coffee", icon: <Coffee size={16} strokeWidth={2} /> },
     ],
@@ -75,7 +78,7 @@ export function SettingsPanel({
   scope,
   settingsLoaded,
   panelClosing,
-  headerAccessory,
+  headerAction,
   onScopeChange,
   onClose,
   renderScopeContent,
@@ -98,7 +101,7 @@ export function SettingsPanel({
           <h3 id="settings-panel-title">Settings</h3>
         </div>
         <div className={styles.panelHeaderActions}>
-          {headerAccessory}
+          {headerAction}
           <button
             type="button"
             className={styles.panelClose}

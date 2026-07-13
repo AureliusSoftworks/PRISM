@@ -16,10 +16,12 @@ import {
   coffeeCupProgressForSipCount,
   coffeeCupPrismFamilyForBotColor,
   coffeeCupSessionDurationPaceMultiplier,
+  coffeeCupSeedWithTempoRole,
   coffeeCupSipBelongsToCurrentFill,
   coffeeCupSipCycleMs,
   coffeeCupSipGatedTimedProgress,
   coffeeCupSipAnimationTiming,
+  coffeeCupTempoRoleForBot,
   coffeeCupShouldMirrorForSeat,
   coffeeCupShouldFinishAfterSip,
   coffeeCupSideForSeat,
@@ -45,8 +47,23 @@ describe("coffee cup sprites", () => {
   it("maps drink levels to authored sheet positions", () => {
     assert.deepEqual(coffeeCupFramePosition(0), { frameX: "0%", frameY: "0%" });
     assert.deepEqual(coffeeCupFramePosition(2), { frameX: "100%", frameY: "0%" });
-    assert.deepEqual(coffeeCupFramePosition(3), { frameX: "0%", frameY: "100%" });
-    assert.deepEqual(coffeeCupFramePosition(5), { frameX: "100%", frameY: "100%" });
+    assert.deepEqual(coffeeCupFramePosition(3), { frameX: "0%", frameY: "50%" });
+    assert.deepEqual(coffeeCupFramePosition(5), { frameX: "100%", frameY: "50%" });
+    assert.deepEqual(coffeeCupFramePosition(6), { frameX: "0%", frameY: "100%" });
+  });
+
+  it("maps progress through the full seven-frame cup sequence", () => {
+    for (const [progress, frameIndex] of [
+      [0, 0],
+      [0.1, 1],
+      [0.2, 2],
+      [0.4, 3],
+      [0.6, 4],
+      [0.8, 5],
+      [0.96, 6],
+    ] as const) {
+      assert.equal(coffeeCupStatusForProgress(progress).frameIndex, frameIndex);
+    }
   });
 
   it("advances cup state over session time and force-empties finished cups", () => {
@@ -80,7 +97,7 @@ describe("coffee cup sprites", () => {
     assert.match(full.sipImageUrl, /coffee_blue_sip\.png$/);
     assert.ok(empty.progress > full.progress);
     assert.ok(empty.frameIndex >= full.frameIndex);
-    assert.equal(finished.frameIndex, 5);
+    assert.equal(finished.frameIndex, 6);
     assert.equal(finished.amount, "empty");
   });
 
@@ -143,12 +160,16 @@ describe("coffee cup sprites", () => {
     assert.match(light.sipImageUrl, /coffee_light_red_sip\.png$/);
   });
 
-  it("keeps light-mode sip sprites on the same canvas as dark-mode sip sprites", () => {
+  it("ships every rest and sip sprite as a 500x576 seven-frame sheet", () => {
+    const expectedSize = { width: 500, height: 576 };
+
     for (const color of COFFEE_CUP_SPRITE_COLORS) {
-      assert.deepEqual(
-        coffeeCupAssetPngSize(`coffee_light_${color}_sip.png`),
-        coffeeCupAssetPngSize(`coffee_${color}_sip.png`)
-      );
+      for (const themePrefix of ["", "light_"]) {
+        for (const stateSuffix of ["", "_sip"]) {
+          const assetName = `coffee_${themePrefix}${color}${stateSuffix}.png`;
+          assert.deepEqual(coffeeCupAssetPngSize(assetName), expectedSize, assetName);
+        }
+      }
     }
   });
 
@@ -182,7 +203,7 @@ describe("coffee cup sprites", () => {
     assert.equal(untouched.frameIndex, 0);
     assert.equal(untouched.progress, 0);
     assert.ok(afterTwoSips.progress > untouched.progress);
-    assert.equal(afterTwoSips.frameIndex, 1);
+    assert.equal(afterTwoSips.frameIndex, 2);
   });
 
   it("counts explicit sips from the latest top-off baseline", () => {
@@ -207,8 +228,8 @@ describe("coffee cup sprites", () => {
     });
 
     assert.equal(afterOneSip.progress, 0.48);
-    assert.equal(afterOneSip.frameIndex, 2);
-    assert.equal(afterSixSips.frameIndex, 5);
+    assert.equal(afterOneSip.frameIndex, 3);
+    assert.equal(afterSixSips.frameIndex, 6);
   });
 
   it("keeps sip history before a top-off out of the current fill state", () => {
@@ -268,6 +289,26 @@ describe("coffee cup sprites", () => {
     assert.ok(sipping.sipAnimationMs > sipping.sipHoldMs);
     assert.ok(sipping.sipHoldMs >= 500);
     assert.ok(sipping.sipHoldMs <= 2_200);
+  });
+
+  it("blocks cup sipping while a refill lock is active", () => {
+    const locked = buildCoffeeCupVisualState({
+      seed: "session:bot-alice",
+      nowMs: 1_000,
+      sipCount: 1,
+      sippingOverride: true,
+      sipLockedUntilMs: 4_000,
+    });
+    const unlocked = buildCoffeeCupVisualState({
+      seed: "session:bot-alice",
+      nowMs: 4_001,
+      sipCount: 1,
+      sippingOverride: true,
+      sipLockedUntilMs: 4_000,
+    });
+
+    assert.equal(locked.sipping, false);
+    assert.equal(unlocked.sipping, true);
   });
 
   it("cools steam over session age and removes it near minute 25", () => {
@@ -400,7 +441,7 @@ describe("coffee cup sprites", () => {
       sippingOverride: false,
     });
 
-    assert.equal(lastFrame.frameIndex, 5);
+    assert.equal(lastFrame.frameIndex, 6);
     assert.equal(lastFrame.finished, false);
     assert.equal(finalSip.finished, true);
     assert.equal(finalSip.sipping, true);
@@ -438,6 +479,34 @@ describe("coffee cup sprites", () => {
     assert.ok(fast.frameIndex >= slow.frameIndex);
   });
 
+  it("assigns one subtle faster and one subtle slower cup tempo per session", () => {
+    const sessionSeed = "coffee-session-tempo-demo";
+    const seatBotIds = ["alice", "boris", "cleo", "daria"];
+    const roles = seatBotIds.map((botId) =>
+      coffeeCupTempoRoleForBot({ sessionSeed, botId, seatBotIds })
+    );
+
+    assert.equal(roles.filter((role) => role === "faster").length, 1);
+    assert.equal(roles.filter((role) => role === "slower").length, 1);
+
+    const baseSeed = `${sessionSeed}:alice:0:0`;
+    const normalSeed = coffeeCupSeedWithTempoRole(baseSeed, "normal");
+    const fasterSeed = coffeeCupSeedWithTempoRole(baseSeed, "faster");
+    const slowerSeed = coffeeCupSeedWithTempoRole(baseSeed, "slower");
+    const normalRate = coffeeCupConsumptionRate(normalSeed);
+    const fasterRate = coffeeCupConsumptionRate(fasterSeed);
+    const slowerRate = coffeeCupConsumptionRate(slowerSeed);
+
+    assert.equal(normalSeed, baseSeed);
+    assert.equal(coffeeCupSeedWithTempoRole(fasterSeed, "slower"), slowerSeed);
+    assert.ok(fasterRate > normalRate);
+    assert.ok(slowerRate < normalRate);
+    assert.ok(fasterRate < normalRate * 1.1);
+    assert.ok(slowerRate > normalRate * 0.9);
+    assert.ok(coffeeCupSipCycleMs(fasterSeed) < coffeeCupSipCycleMs(normalSeed));
+    assert.ok(coffeeCupSipCycleMs(slowerSeed) > coffeeCupSipCycleMs(normalSeed));
+  });
+
   it("tops off non-full cups toward hot/full", () => {
     const toppedOffAt = "2026-07-01T12:00:00.000Z";
     const topOff = coffeeCupTopOffSnapshotForProgress(0.62, toppedOffAt);
@@ -473,7 +542,7 @@ describe("coffee cup sprites", () => {
 
     assert.equal(topOff?.progressBefore, 0.82);
     assert.equal(topOff?.progressAfter, 0.38);
-    assert.equal(toppedOff.frameIndex, 2);
+    assert.equal(toppedOff.frameIndex, 3);
     assert.equal(toppedOff.amount, "half");
   });
 
@@ -513,6 +582,39 @@ describe("coffee cup sprites", () => {
     assert.ok(later > immediate);
     assert.ok(later < 0.3);
     assert.equal(naturalProgress, 0.72);
+  });
+
+  it("keeps fast and slow cup tempo after a top-off", () => {
+    const toppedOffAt = "2026-07-01T12:00:00.000Z";
+    const topOff = coffeeCupTopOffSnapshotForProgress(0.72, toppedOffAt);
+    assert.notEqual(topOff, null);
+    const nowMs = Date.parse(toppedOffAt) + 3 * 60 * 1000;
+    const baseSeed = "session:bot-alice";
+    const normalProgress = coffeeCupProgressAfterTopOff({
+      progress: 0.72,
+      topOff,
+      nowMs,
+      durationMinutes: 10,
+      seed: coffeeCupSeedWithTempoRole(baseSeed, "normal"),
+    });
+    const fasterProgress = coffeeCupProgressAfterTopOff({
+      progress: 0.72,
+      topOff,
+      nowMs,
+      durationMinutes: 10,
+      seed: coffeeCupSeedWithTempoRole(baseSeed, "faster"),
+    });
+    const slowerProgress = coffeeCupProgressAfterTopOff({
+      progress: 0.72,
+      topOff,
+      nowMs,
+      durationMinutes: 10,
+      seed: coffeeCupSeedWithTempoRole(baseSeed, "slower"),
+    });
+
+    assert.ok(fasterProgress > normalProgress);
+    assert.ok(slowerProgress < normalProgress);
+    assert.ok(fasterProgress - slowerProgress < 0.08);
   });
 
   it("keeps a fresh top-off full when timed progress is already ahead", () => {
@@ -598,7 +700,7 @@ describe("coffee cup sprites", () => {
 
     assert.ok(afterRefillIdle.progress < 0.3);
     assert.ok(afterFirstSip.progress < 0.3);
-    assert.notEqual(afterFirstSip.frameIndex, 5);
+    assert.notEqual(afterFirstSip.frameIndex, 6);
   });
 
   it("lets the first sip drain a timed top-off even before sip progress catches up", () => {
@@ -674,6 +776,23 @@ describe("coffee cup sprites", () => {
     assert.ok(short.progress >= long.progress);
   });
 
+  it("renders the same faster Coffee power pace used by server decisions", () => {
+    const normal = buildCoffeeCupVisualState({
+      seed: "session:voltaire",
+      nowMs: 120_000,
+      durationMinutes: 10,
+      progressOverride: 0.3,
+    });
+    const powered = buildCoffeeCupVisualState({
+      seed: "session:voltaire",
+      nowMs: 120_000,
+      durationMinutes: 10,
+      progressOverride: 0.3,
+      powerRateMultiplier: 2.5,
+    });
+    assert.ok(powered.progress > normal.progress);
+  });
+
   it("varies sip hold timing by sip count", () => {
     const first = coffeeCupSipAnimationTiming({
       seed: "session:bot-alice",
@@ -732,12 +851,90 @@ describe("coffee cup sprites", () => {
     );
   });
 
+  it("keeps ambient sip art active until the sprite return animation finishes", () => {
+    const seed = "session:bot-alice";
+    const sipAnimationMs = coffeeCupSipAnimationTiming({ seed }).durationMs;
+    const cycleMs = coffeeCupSipCycleMs(seed);
+    let windowStartMs: number | null = null;
+    let previousActive = coffeeCupSippingActive({
+      seed,
+      nowMs: 0,
+      progress: 0.5,
+    });
+
+    for (let nowMs = 10; nowMs <= cycleMs * 2; nowMs += 10) {
+      const active = coffeeCupSippingActive({
+        seed,
+        nowMs,
+        progress: 0.5,
+      });
+      if (!previousActive && active) {
+        windowStartMs = nowMs;
+        break;
+      }
+      previousActive = active;
+    }
+
+    if (windowStartMs === null) {
+      assert.fail("expected to find a deterministic ambient sip window");
+    }
+
+    assert.equal(
+      coffeeCupSippingActive({
+        seed,
+        nowMs: windowStartMs + sipAnimationMs - 30,
+        progress: 0.5,
+      }),
+      true
+    );
+  });
+
+  it("keeps sampled ambient sips active for the full up-and-down animation", () => {
+    const renderSampleMs = 1_000;
+
+    for (const seed of ["a", "b", "session:bot-alice"]) {
+      const sipAnimationMs = coffeeCupSipAnimationTiming({ seed }).durationMs;
+      const cycleMs = coffeeCupSipCycleMs(seed);
+      let previousActive = coffeeCupSippingActive({
+        seed,
+        nowMs: 0,
+        progress: 0.5,
+      });
+      let sampledRunStartedAtMs: number | null = null;
+      let sampledRunDurationMs: number | null = null;
+
+      for (let nowMs = renderSampleMs; nowMs <= cycleMs * 3; nowMs += renderSampleMs) {
+        const active = coffeeCupSippingActive({
+          seed,
+          nowMs,
+          progress: 0.5,
+        });
+        if (!previousActive && active) {
+          sampledRunStartedAtMs = nowMs;
+        } else if (previousActive && !active && sampledRunStartedAtMs !== null) {
+          sampledRunDurationMs = nowMs - sampledRunStartedAtMs;
+          break;
+        }
+        previousActive = active;
+      }
+
+      assert.notEqual(sampledRunDurationMs, null, `expected a sampled sip run for ${seed}`);
+      assert.ok(
+        sampledRunDurationMs! >= sipAnimationMs,
+        `${seed} sampled for ${sampledRunDurationMs}ms but needs ${sipAnimationMs}ms`
+      );
+    }
+  });
+
   it("shows sip art only in short ambient windows", () => {
+    const seed = "session:bot-alice";
+    const sipAnimationMs = coffeeCupSipAnimationTiming({ seed }).durationMs;
+    const cycleMs = coffeeCupSipCycleMs(seed);
     let sippingSeconds = 0;
     for (let nowMs = 0; nowMs <= 180_000; nowMs += 1_000) {
       if (
         coffeeCupSippingActive({
-          seed: "session:bot-alice",
+          seed,
           nowMs,
           progress: 0.5,
         })
@@ -747,10 +944,13 @@ describe("coffee cup sprites", () => {
     }
 
     assert.ok(sippingSeconds >= 1);
-    assert.ok(sippingSeconds <= 8);
+    assert.ok(
+      sippingSeconds <=
+        (Math.ceil(180_000 / cycleMs) + 1) * Math.ceil((sipAnimationMs + 1_000) / 1_000)
+    );
     assert.equal(
       coffeeCupSippingActive({
-        seed: "session:bot-alice",
+        seed,
         nowMs: 1_000,
         progress: 1,
       }),

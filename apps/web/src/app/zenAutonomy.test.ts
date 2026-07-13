@@ -7,6 +7,7 @@ import {
   ZEN_AUTONOMY_SPOKEN_COOLDOWN_MS,
   nextZenAutonomyCooldownUntilMs,
   resolveZenAutonomyEligibility,
+  zenAutonomySchedulerIsActive,
 } from "./zenAutonomy.ts";
 
 const base = {
@@ -84,5 +85,26 @@ describe("nextZenAutonomyCooldownUntilMs", () => {
       nextZenAutonomyCooldownUntilMs(5_000, { action: "speak", botId: null }),
       5_000 + ZEN_AUTONOMY_SPOKEN_COOLDOWN_MS
     );
+  });
+});
+
+describe("zenAutonomySchedulerIsActive", () => {
+  it("only permits ticks for a signed-in Zen surface with autonomy enabled", () => {
+    assert.equal(
+      zenAutonomySchedulerIsActive({
+        view: "chat",
+        enabled: true,
+        hasUser: true,
+      }),
+      true
+    );
+
+    for (const input of [
+      { view: "sandbox" as const, enabled: true, hasUser: true },
+      { view: "chat" as const, enabled: false, hasUser: true },
+      { view: "chat" as const, enabled: true, hasUser: false },
+    ]) {
+      assert.equal(zenAutonomySchedulerIsActive(input), false);
+    }
   });
 });

@@ -228,7 +228,7 @@ export function ComposerBotMentionPopover({
                 {renderBotGlyph(b.glyph)}
               </span>
               <span className={styles.composeCommandText}>
-                <span className={styles.composeBotOptionName}>{b.name}</span>
+                <span className={styles.composeBotOptionName}>{b.pickerLabel ?? b.name}</span>
               </span>
             </button>
           );

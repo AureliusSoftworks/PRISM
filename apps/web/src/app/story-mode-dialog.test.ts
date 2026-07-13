@@ -103,7 +103,7 @@ describe("Story Mode dialog helpers", () => {
     assert.equal(storyNpcFaceExpressionForPose(undefined), "neutral");
   });
 
-  it("uses Coffee Mode ASCII face text for NPC expressions", () => {
+  it("uses Coffee Mode face text for NPC expressions", () => {
     assert.equal(storyNpcFaceTextForExpression("joyful", false), ":)");
     assert.equal(storyNpcFaceTextForExpression("joyful", true), ":D");
     assert.equal(storyNpcFaceTextForExpression("warm", false), ":]");

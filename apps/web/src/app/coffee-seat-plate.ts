@@ -1,9 +1,17 @@
-import type { ZenLiveBotMouthShape } from "./zenLiveMouth";
+import {
+  zenLiveBotMouthShapeFromVisibleTextProgress,
+  type ZenLiveBotMouthShape,
+} from "./zenLiveMouth.ts";
 
 export type CoffeeSeatEmojiMood = "happy" | "warm" | "neutral" | "sad" | "angry";
 
-export const COFFEE_SEAT_SIP_PLATE_GLYPH = { text: ":*", rotateDeg: 90 } as const;
-export const COFFEE_SEAT_SIP_FACE_ACTIVE_PROGRESS = 0.78;
+export const COFFEE_SEAT_ANGRY_BRACKET_GLYPH = ":[" as const;
+export const COFFEE_SEAT_SIP_PLATE_GLYPH = { text: ":⁎", rotateDeg: 90 } as const;
+// Hold the pucker through most of the mug-up beat, then relax shortly before
+// the cup begins its return at 76%.
+export const COFFEE_SEAT_SIP_FACE_ACTIVE_PROGRESS = 0.68;
+/** Hold each Coffee speaking mouth pose across a few revealed characters. */
+export const COFFEE_SEAT_MOUTH_CHARACTERS_PER_PHASE = 3;
 const COFFEE_SEAT_SIP_MOUTH_OFFSET_EM = 0.48;
 const COFFEE_SEAT_CENTER_SIP_MOUTH_OFFSET_EM = 0.36;
 const COFFEE_SEAT_SIP_MOUTH_DROP_EM = 0.17;
@@ -21,6 +29,17 @@ export interface CoffeeSeatSipPresentation {
   glyph: typeof COFFEE_SEAT_SIP_PLATE_GLYPH | null;
   mouthOffsetX: string;
   mouthOffsetY: string;
+}
+
+export function coffeeSeatMouthShapeFromVisibleLength(
+  visibleLength: number,
+  speechSeedText: string
+): ZenLiveBotMouthShape {
+  return zenLiveBotMouthShapeFromVisibleTextProgress({
+    text: speechSeedText,
+    visibleLength,
+    charactersPerPhase: COFFEE_SEAT_MOUTH_CHARACTERS_PER_PHASE,
+  });
 }
 
 function coffeeSeatTimedSipFaceActive(args: {
@@ -49,13 +68,15 @@ function coffeeSeatSipPresentationReason(args: {
   isSpeaking?: boolean | null;
 }): CoffeeSeatSipPresentationReason {
   if (args.seatIsFirmlySeated === false || args.isSpeaking === true) return "none";
-  if (args.sipInProgress) return "explicit-sip";
   const timedSipFaceActive = coffeeSeatTimedSipFaceActive({
     ageMs: args.completedSipAnimationAgeMs,
     durationMs: args.completedSipAnimationDurationMs,
   });
-  if (timedSipFaceActive === true) return "completed-sip-hold";
+  // The live action can outlast its cup animation. Once we have animation
+  // timing, let that clock release the pucker even if the action is still live.
   if (timedSipFaceActive === false) return "none";
+  if (args.sipInProgress) return "explicit-sip";
+  if (timedSipFaceActive === true) return "completed-sip-hold";
   if (args.cupSipping === true) return "cup-visual-sip";
   return "none";
 }
@@ -81,9 +102,10 @@ export function coffeeSeatSipMouthOffsetY(args: {
     typeof args.faceScaleY === "number"
       ? args.faceScaleY < 0
       : String(args.faceScaleY).trim().startsWith("-");
-  // The sip star is translated along the emoji's local Y axis; after the
+  // The sip pucker is translated along the emoji's local Y axis; after the
   // parent face rotates 90deg, positive local Y moves toward screen-left.
-  const rimDirection = -sideSign * (faceFlip ? -1 : 1);
+  const faceFlipMultiplier = args.seatHorizontalSide === 0 ? 1 : faceFlip ? -1 : 1;
+  const rimDirection = -sideSign * faceFlipMultiplier;
   const offsetEm = args.seatHorizontalSide === 0
     ? COFFEE_SEAT_CENTER_SIP_MOUTH_OFFSET_EM
     : COFFEE_SEAT_SIP_MOUTH_OFFSET_EM;
@@ -130,6 +152,10 @@ export function resolveCoffeeSeatSipFacePresentation(args: {
 }
 
 function coffeeSeatOpenMouthGlyph(mouthShape: ZenLiveBotMouthShape): string | null {
+  if (mouthShape === "speech-closed") return ":|";
+  if (mouthShape === "dot") return ":∙";
+  if (mouthShape === "at") return ":@";
+  if (mouthShape === "narrow") return ":o";
   if (mouthShape === "open-wide") return ":0";
   if (mouthShape === "open-small") return ":o";
   if (mouthShape === "open-round") return ":O";
@@ -153,7 +179,10 @@ export function coffeeSeatPlateGlyph(
     case "sad":
       return { text: coffeeSeatOpenMouthGlyph(mouthShape) ?? ":(", rotateDeg: 90 };
     case "angry":
-      return { text: coffeeSeatOpenMouthGlyph(mouthShape) ?? ":[", rotateDeg: 90 };
+      return {
+        text: coffeeSeatOpenMouthGlyph(mouthShape) ?? COFFEE_SEAT_ANGRY_BRACKET_GLYPH,
+        rotateDeg: 90,
+      };
     default:
       return { text: coffeeSeatOpenMouthGlyph(mouthShape) ?? ":|", rotateDeg: 90 };
   }

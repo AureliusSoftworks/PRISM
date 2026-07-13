@@ -2,6 +2,10 @@ import type { DatabaseSync } from "node:sqlite";
 import { randomId } from "./security.ts";
 import { upsertPrismMoodState } from "./db.ts";
 import {
+  getConversationHubMetadataMap,
+  type ConversationHubMetadata,
+} from "./conversation-hubs.ts";
+import {
   applyPrismMoodIgnoredQuestion,
   applyPrismMoodIgnoreCooldown,
   applyPrismMoodInterruption,
@@ -50,6 +54,9 @@ export interface ConversationSummary {
   title: string;
   mode: "zen" | "chat" | "sandbox" | "coffee";
   botId: string | null;
+  hubRole?: ConversationHubMetadata["hubRole"];
+  hubBotId?: string | null;
+  parentHubId?: string | null;
   /** Coffee-only — the 2-5 bot ids participating in this group thread. */
   botGroupIds?: string[];
   /** Coffee-only — invited bot ids that did not attend this session. */
@@ -528,8 +535,6 @@ export function buildRememberedZenWallpaperHistory(
       imageId: wallpaper.imageId,
       promptSeed: wallpaper.promptSeed,
       generationMessageCount: 0,
-      revealStartMessageCount: 0,
-      revealFullMessageCount: 0,
       createdAt: wallpaper.createdAt,
     },
   ]);
@@ -544,19 +549,8 @@ export function buildZenWallpaperHistoryForGeneratedImage(
     replaceImmediately?: boolean;
   }
 ): ZenWallpaperHistoryEntry[] {
-  const normalizedEntry = normalizeZenWallpaperHistoryEntry(
-    options.replaceImmediately
-      ? {
-          ...entry,
-          revealStartMessageCount: 0,
-          revealFullMessageCount: 0,
-        }
-      : entry
-  );
+  const normalizedEntry = normalizeZenWallpaperHistoryEntry(entry);
   if (!normalizedEntry) return parseZenWallpaperHistory(rawHistory);
-  if (options.replaceImmediately) {
-    return normalizeZenWallpaperHistory([normalizedEntry]);
-  }
   const prunedHistory = pruneZenWallpaperHistoryForRestoreWindow(
     serializeZenWallpaperHistory(
       appendZenWallpaperHistoryEntry(rawHistory, normalizedEntry)
@@ -589,12 +583,19 @@ export function pruneZenWallpaperHistoryForRestoreWindow(
 ): ZenWallpaperHistoryEntry[] {
   const latest = Math.max(0, Math.floor(latestMessageCount));
   const windowStart = Math.max(0, latest - Math.max(0, Math.floor(restoreMessageLimit)));
-  return parseZenWallpaperHistory(rawHistory).filter((entry) => {
-    const generatedAt = entry.generationMessageCount;
-    const revealStart = entry.revealStartMessageCount ?? entry.generationMessageCount;
-    const revealFull = entry.revealFullMessageCount ?? entry.generationMessageCount;
-    return revealFull >= windowStart && generatedAt <= latest;
-  });
+  const history = parseZenWallpaperHistory(rawHistory).filter(
+    (entry) => entry.generationMessageCount <= latest
+  );
+  const visibleEntries = history.filter(
+    (entry) => entry.generationMessageCount >= windowStart
+  );
+  const baselineEntry =
+    history
+      .filter((entry) => entry.generationMessageCount < windowStart)
+      .at(-1) ?? null;
+  return normalizeZenWallpaperHistory(
+    baselineEntry ? [baselineEntry, ...visibleEntries] : visibleEntries
+  );
 }
 
 export function mapZenWallpaperMetadata(row: {
@@ -631,75 +632,10 @@ export function mapZenWallpaperMetadata(row: {
   };
 }
 
-const ZEN_WALLPAPER_DEFAULT_REVEAL_DELAY_MESSAGE_COUNT = 4;
-const ZEN_WALLPAPER_DEFAULT_REVEAL_SPAN_MESSAGE_COUNT = 12;
-
 function normalizeMessageCount(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value)
     ? Math.max(0, Math.floor(value))
     : 0;
-}
-
-type ZenWallpaperWindowEntry = ZenWallpaperHistoryEntry & {
-  revealStartMessageCount: number;
-  revealFullMessageCount: number;
-};
-
-function prepareZenWallpaperWindowEntry(
-  entry: ZenWallpaperHistoryEntry,
-  args: {
-    totalMessageCount: number;
-    currentImageId: string | null;
-  }
-): ZenWallpaperWindowEntry {
-  const generationMessageCount = Math.min(
-    normalizeMessageCount(entry.generationMessageCount),
-    args.totalMessageCount
-  );
-  const hasExplicitReveal =
-    entry.revealStartMessageCount !== undefined ||
-    entry.revealFullMessageCount !== undefined;
-  const isLegacyCurrentImage =
-    entry.imageId === args.currentImageId && !hasExplicitReveal;
-  const wasGeneratedBeyondCurrentThread =
-    normalizeMessageCount(entry.generationMessageCount) >
-    args.totalMessageCount;
-  const defaultRevealStart =
-    isLegacyCurrentImage || wasGeneratedBeyondCurrentThread
-      ? generationMessageCount
-      : generationMessageCount + ZEN_WALLPAPER_DEFAULT_REVEAL_DELAY_MESSAGE_COUNT;
-  const revealStartMessageCount =
-    entry.revealStartMessageCount !== undefined
-      ? normalizeMessageCount(entry.revealStartMessageCount)
-      : defaultRevealStart;
-  const defaultRevealFull =
-    isLegacyCurrentImage || wasGeneratedBeyondCurrentThread
-      ? revealStartMessageCount
-      : revealStartMessageCount + ZEN_WALLPAPER_DEFAULT_REVEAL_SPAN_MESSAGE_COUNT;
-  const revealFullMessageCount =
-    entry.revealFullMessageCount !== undefined
-      ? Math.max(
-          revealStartMessageCount,
-          normalizeMessageCount(entry.revealFullMessageCount)
-        )
-      : defaultRevealFull;
-  return {
-    ...entry,
-    generationMessageCount,
-    revealStartMessageCount,
-    revealFullMessageCount,
-  };
-}
-
-function compareZenWallpaperWindowEntries(
-  a: ZenWallpaperWindowEntry,
-  b: ZenWallpaperWindowEntry
-): number {
-  const fullDelta = a.revealFullMessageCount - b.revealFullMessageCount;
-  if (fullDelta !== 0) return fullDelta;
-  const generationDelta = a.generationMessageCount - b.generationMessageCount;
-  if (generationDelta !== 0) return generationDelta;
-  return (a.createdAt ?? "").localeCompare(b.createdAt ?? "");
 }
 
 /**
@@ -740,36 +676,28 @@ export function rebaseZenWallpaperMetadataForVisibleWindow(
           imageId: currentImageId,
           promptSeed: metadata.promptSeed,
           generationMessageCount: currentGenerationMessageCount,
-          revealStartMessageCount: currentGenerationMessageCount,
-          revealFullMessageCount: currentGenerationMessageCount,
         },
       ]);
     }
   }
 
-  const preparedEntries = history.map((entry) =>
-    prepareZenWallpaperWindowEntry(entry, {
-      totalMessageCount,
-      currentImageId,
-    })
-  );
-  const selectedByImageId = new Map<string, ZenWallpaperWindowEntry>();
-  let baselineEntry: ZenWallpaperWindowEntry | null = null;
+  const preparedEntries = history
+    .map((entry) => ({
+      ...entry,
+      generationMessageCount: Math.min(
+        normalizeMessageCount(entry.generationMessageCount),
+        totalMessageCount
+      ),
+    }))
+    .filter((entry) => entry.generationMessageCount <= totalMessageCount);
+  const selectedByImageId = new Map<string, ZenWallpaperHistoryEntry>();
+  const baselineEntry =
+    preparedEntries
+      .filter((entry) => entry.generationMessageCount < windowStartMessageCount)
+      .at(-1) ?? null;
 
   for (const entry of preparedEntries) {
-    if (entry.revealFullMessageCount < windowStartMessageCount) {
-      if (
-        !baselineEntry ||
-        compareZenWallpaperWindowEntries(baselineEntry, entry) < 0
-      ) {
-        baselineEntry = entry;
-      }
-      continue;
-    }
-    if (
-      entry.revealStartMessageCount <= totalMessageCount &&
-      entry.revealFullMessageCount >= windowStartMessageCount
-    ) {
+    if (entry.generationMessageCount >= windowStartMessageCount) {
       selectedByImageId.set(entry.imageId, entry);
     }
   }
@@ -786,8 +714,6 @@ export function rebaseZenWallpaperMetadataForVisibleWindow(
       imageId: currentImageId,
       promptSeed: metadata.promptSeed,
       generationMessageCount: currentGenerationMessageCount,
-      revealStartMessageCount: currentGenerationMessageCount,
-      revealFullMessageCount: currentGenerationMessageCount,
     });
   }
 
@@ -796,11 +722,6 @@ export function rebaseZenWallpaperMetadataForVisibleWindow(
       imageId: entry.imageId,
       promptSeed: entry.promptSeed,
       generationMessageCount: rebaseCount(entry.generationMessageCount),
-      revealStartMessageCount: rebaseCount(entry.revealStartMessageCount),
-      revealFullMessageCount: Math.max(
-        rebaseCount(entry.revealStartMessageCount),
-        rebaseCount(entry.revealFullMessageCount)
-      ),
       ...(entry.createdAt ? { createdAt: entry.createdAt } : {}),
     }))
   );
@@ -1102,7 +1023,6 @@ export function listConversationSummaries(
          FROM conversations c
         WHERE c.user_id = ?
           AND COALESCE(c.incognito, 0) = 0
-          AND c.conversation_mode NOT IN ('zen', 'chat')
           AND c.archived_at IS NULL
      ORDER BY c.updated_at DESC`
     )
@@ -1129,6 +1049,12 @@ export function listConversationSummaries(
     has_assistant_reply: number;
   }>;
 
+  const hubMetadataByConversationId = getConversationHubMetadataMap(
+    db,
+    userId,
+    rows.map((row) => row.id)
+  );
+
   return rows.map((row) => {
     const mode: "zen" | "chat" | "sandbox" | "coffee" =
       row.conversation_mode === "zen"
@@ -1140,11 +1066,19 @@ export function listConversationSummaries(
             : "sandbox";
     const botGroupIds = parseBotGroupIdsForSummary(row.bot_group_ids);
     const coffeeAbsentBotIds = parseBotGroupIdsForSummary(row.coffee_absent_bot_ids);
+    const hubMetadata = hubMetadataByConversationId.get(row.id);
     return {
       id: row.id,
       title: row.title,
       mode,
       botId: row.bot_id ?? null,
+      ...(hubMetadata
+        ? {
+            hubRole: hubMetadata.hubRole,
+            hubBotId: hubMetadata.hubBotId,
+            parentHubId: hubMetadata.parentHubId,
+          }
+        : {}),
       ...(botGroupIds.length > 0 ? { botGroupIds } : {}),
       ...(mode === "coffee" && coffeeAbsentBotIds.length > 0
         ? { coffeeAbsentBotIds }
@@ -1213,15 +1147,6 @@ export function sweepConversations(
   userId: string,
   mode: "chat" | "sandbox"
 ): ConversationSweepResult {
-  if (mode === "chat") {
-    return {
-      batchId: null,
-      sweptGroups: 0,
-      archivedConversationCount: 0,
-      summaryConversationCount: 0,
-      undoExpiresAt: null,
-    };
-  }
   const rows = db
     .prepare(
       `SELECT id, title, bot_id, updated_at
@@ -1462,42 +1387,37 @@ export function deleteConversation(
   userId: string,
   conversationId: string
 ): void {
+  const conversationColumns = db
+    .prepare("PRAGMA table_info(conversations)")
+    .all() as Array<{ name: string }>;
+  const hasParentIdColumn = conversationColumns.some((column) => column.name === "parent_id");
   const existing = db
-    .prepare("SELECT id, conversation_mode FROM conversations WHERE id = ? AND user_id = ?")
+    .prepare(
+      `SELECT id, conversation_mode${hasParentIdColumn ? ", parent_id" : ""}
+         FROM conversations
+        WHERE id = ? AND user_id = ?`
+    )
     .get(conversationId, userId) as
-    | { id?: string; conversation_mode?: string | null }
+    | { id?: string; conversation_mode?: string | null; parent_id?: string | null }
     | undefined;
   if (!existing?.id) {
     throw new Error("Conversation not found.");
   }
-  if (existing.conversation_mode === "zen" || existing.conversation_mode === "chat") {
-    throw new Error("Zen conversations cannot be deleted from the chat surface.");
+  const conversationIdsToDelete = [conversationId];
+  if (hasParentIdColumn && !existing.parent_id) {
+    const childRows = db
+      .prepare("SELECT id FROM conversations WHERE user_id = ? AND parent_id = ?")
+      .all(userId, conversationId) as Array<{ id: string }>;
+    for (const child of childRows) {
+      if (!conversationIdsToDelete.includes(child.id)) {
+        conversationIdsToDelete.push(child.id);
+      }
+    }
   }
 
   db.exec("BEGIN IMMEDIATE TRANSACTION");
   try {
-    deleteCoffeePollsForConversations(db, userId, [conversationId]);
-    db.prepare(
-      "UPDATE images SET conversation_id = NULL WHERE user_id = ? AND conversation_id = ?"
-    ).run(userId, conversationId);
-    db.prepare(
-      "UPDATE memory_summaries SET conversation_id = NULL WHERE user_id = ? AND conversation_id = ?"
-    ).run(userId, conversationId);
-    db.prepare(
-      "UPDATE zen_session_memories SET conversation_id = NULL WHERE user_id = ? AND conversation_id = ?"
-    ).run(userId, conversationId);
-    db.prepare(
-      "UPDATE memories SET conversation_id = NULL WHERE user_id = ? AND conversation_id = ?"
-    ).run(userId, conversationId);
-    db.prepare(
-      "DELETE FROM conversation_exports WHERE conversation_id = ? AND user_id = ?"
-    ).run(conversationId, userId);
-    db.prepare(
-      "DELETE FROM messages WHERE conversation_id = ? AND user_id = ?"
-    ).run(conversationId, userId);
-    db.prepare(
-      "DELETE FROM conversations WHERE id = ? AND user_id = ?"
-    ).run(conversationId, userId);
+    deleteConversationsByIds(db, userId, conversationIdsToDelete);
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
@@ -1641,14 +1561,14 @@ export function deleteConversationsByBot(
   botId: string | null
 ): number {
   const botPredicate = botId === null ? "bot_id IS NULL" : "bot_id = ?";
-  const groupSubquery = `SELECT id FROM conversations WHERE user_id = ? AND COALESCE(incognito, 0) = 0 AND archived_at IS NULL AND conversation_mode NOT IN ('zen', 'chat') AND ${botPredicate}`;
+  const groupSubquery = `SELECT id FROM conversations WHERE user_id = ? AND COALESCE(incognito, 0) = 0 AND archived_at IS NULL AND conversation_mode != 'zen' AND ${botPredicate}`;
   const groupParams: Array<string | null> = botId === null ? [userId] : [userId, botId];
 
   db.exec("BEGIN IMMEDIATE TRANSACTION");
   try {
     const countRow = db
       .prepare(
-        `SELECT COUNT(*) AS n FROM conversations WHERE user_id = ? AND COALESCE(incognito, 0) = 0 AND archived_at IS NULL AND conversation_mode NOT IN ('zen', 'chat') AND ${botPredicate}`
+        `SELECT COUNT(*) AS n FROM conversations WHERE user_id = ? AND COALESCE(incognito, 0) = 0 AND archived_at IS NULL AND conversation_mode != 'zen' AND ${botPredicate}`
       )
       .get(...groupParams) as { n: number };
     const conversationCount = Number(countRow.n ?? 0);
@@ -1672,7 +1592,7 @@ export function deleteConversationsByBot(
       `DELETE FROM messages WHERE user_id = ? AND conversation_id IN (${groupSubquery})`
     ).run(userId, ...groupParams);
     db.prepare(
-      `DELETE FROM conversations WHERE user_id = ? AND COALESCE(incognito, 0) = 0 AND archived_at IS NULL AND conversation_mode NOT IN ('zen', 'chat') AND ${botPredicate}`
+      `DELETE FROM conversations WHERE user_id = ? AND COALESCE(incognito, 0) = 0 AND archived_at IS NULL AND conversation_mode != 'zen' AND ${botPredicate}`
     ).run(...groupParams);
     db.exec("COMMIT");
     return conversationCount;
@@ -1722,7 +1642,7 @@ export function rewindConversation(
   if (!conversation?.id) {
     throw new Error("Conversation not found.");
   }
-  if (conversation.conversation_mode === "zen" || conversation.conversation_mode === "chat") {
+  if (conversation.conversation_mode === "zen") {
     throw new Error("Zen messages cannot be rewound.");
   }
 
@@ -1926,12 +1846,19 @@ export function deleteConversationMessage(
   db: DatabaseSync,
   userId: string,
   messageId: string
-): { conversationId: string; deletedSummaries: number } {
+): {
+  conversationId: string;
+  deletedSummaries: number;
+  deletedZenSessionMemories: number;
+  deletedMoodEvents: number;
+} {
   const target = db
     .prepare(
-      "SELECT id, conversation_id FROM messages WHERE id = ? AND user_id = ?"
+      "SELECT id, conversation_id, created_at FROM messages WHERE id = ? AND user_id = ?"
     )
-    .get(messageId, userId) as { id: string; conversation_id: string } | undefined;
+    .get(messageId, userId) as
+    | { id: string; conversation_id: string; created_at: string }
+    | undefined;
   if (!target) {
     throw new Error("Message not found.");
   }
@@ -1944,9 +1871,6 @@ export function deleteConversationMessage(
   if (!conversation?.id) {
     throw new Error("Conversation not found.");
   }
-  if (conversation.conversation_mode === "zen" || conversation.conversation_mode === "chat") {
-    throw new Error("Zen messages cannot be deleted.");
-  }
 
   db.exec("BEGIN IMMEDIATE TRANSACTION");
   try {
@@ -1956,6 +1880,19 @@ export function deleteConversationMessage(
         "DELETE FROM memory_summaries WHERE user_id = ? AND conversation_id = ?"
       )
       .run(userId, target.conversation_id);
+    const zenSessionDelete =
+      conversation.conversation_mode === "zen"
+        ? db
+            .prepare(
+              "DELETE FROM zen_session_memories WHERE user_id = ? AND conversation_id = ? AND created_at >= ?"
+            )
+            .run(userId, target.conversation_id, target.created_at)
+        : { changes: 0 };
+    const moodEventDelete = db
+      .prepare(
+        "DELETE FROM prism_mood_events WHERE user_id = ? AND conversation_id = ? AND message_id = ?"
+      )
+      .run(userId, target.conversation_id, messageId);
     db.prepare(
       "UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?"
     ).run(new Date().toISOString(), target.conversation_id, userId);
@@ -1963,6 +1900,8 @@ export function deleteConversationMessage(
     return {
       conversationId: target.conversation_id,
       deletedSummaries: Number(summaryDelete.changes ?? 0),
+      deletedZenSessionMemories: Number(zenSessionDelete.changes ?? 0),
+      deletedMoodEvents: Number(moodEventDelete.changes ?? 0),
     };
   } catch (error) {
     db.exec("ROLLBACK");
@@ -1990,29 +1929,37 @@ export function deleteAllConversations(
   db.exec("BEGIN IMMEDIATE TRANSACTION");
   try {
     const { n: conversationCount } = db
-      .prepare("SELECT COUNT(*) AS n FROM conversations WHERE user_id = ? AND conversation_mode NOT IN ('zen', 'chat')")
+      .prepare(
+        `SELECT COUNT(*) AS n
+           FROM conversations
+          WHERE user_id = ?
+            AND NOT (
+              conversation_mode = 'zen'
+              OR (conversation_mode = 'chat' AND bot_id IS NULL)
+            )`
+      )
       .get(userId) as { n: number };
 
     db.prepare(
-      "UPDATE images SET conversation_id = NULL WHERE user_id = ? AND conversation_id IN (SELECT id FROM conversations WHERE user_id = ? AND conversation_mode NOT IN ('zen', 'chat'))"
+      "UPDATE images SET conversation_id = NULL WHERE user_id = ? AND conversation_id IN (SELECT id FROM conversations WHERE user_id = ? AND NOT (conversation_mode = 'zen' OR (conversation_mode = 'chat' AND bot_id IS NULL)))"
     ).run(userId, userId);
     db.prepare(
-      "UPDATE memory_summaries SET conversation_id = NULL WHERE user_id = ? AND conversation_id IN (SELECT id FROM conversations WHERE user_id = ? AND conversation_mode NOT IN ('zen', 'chat'))"
+      "UPDATE memory_summaries SET conversation_id = NULL WHERE user_id = ? AND conversation_id IN (SELECT id FROM conversations WHERE user_id = ? AND NOT (conversation_mode = 'zen' OR (conversation_mode = 'chat' AND bot_id IS NULL)))"
     ).run(userId, userId);
     db.prepare(
-      "UPDATE zen_session_memories SET conversation_id = NULL WHERE user_id = ? AND conversation_id IN (SELECT id FROM conversations WHERE user_id = ? AND conversation_mode NOT IN ('zen', 'chat'))"
+      "UPDATE zen_session_memories SET conversation_id = NULL WHERE user_id = ? AND conversation_id IN (SELECT id FROM conversations WHERE user_id = ? AND NOT (conversation_mode = 'zen' OR (conversation_mode = 'chat' AND bot_id IS NULL)))"
     ).run(userId, userId);
     db.prepare(
-      "UPDATE memories SET conversation_id = NULL WHERE user_id = ? AND conversation_id IN (SELECT id FROM conversations WHERE user_id = ? AND conversation_mode NOT IN ('zen', 'chat'))"
+      "UPDATE memories SET conversation_id = NULL WHERE user_id = ? AND conversation_id IN (SELECT id FROM conversations WHERE user_id = ? AND NOT (conversation_mode = 'zen' OR (conversation_mode = 'chat' AND bot_id IS NULL)))"
     ).run(userId, userId);
     db.prepare(
-      "DELETE FROM conversation_exports WHERE user_id = ? AND conversation_id IN (SELECT id FROM conversations WHERE user_id = ? AND conversation_mode NOT IN ('zen', 'chat'))"
+      "DELETE FROM conversation_exports WHERE user_id = ? AND conversation_id IN (SELECT id FROM conversations WHERE user_id = ? AND NOT (conversation_mode = 'zen' OR (conversation_mode = 'chat' AND bot_id IS NULL)))"
     ).run(userId, userId);
     db.prepare(
-      "DELETE FROM messages WHERE user_id = ? AND conversation_id IN (SELECT id FROM conversations WHERE user_id = ? AND conversation_mode NOT IN ('zen', 'chat'))"
+      "DELETE FROM messages WHERE user_id = ? AND conversation_id IN (SELECT id FROM conversations WHERE user_id = ? AND NOT (conversation_mode = 'zen' OR (conversation_mode = 'chat' AND bot_id IS NULL)))"
     ).run(userId, userId);
     db.prepare(
-      "DELETE FROM conversations WHERE user_id = ? AND conversation_mode NOT IN ('zen', 'chat')"
+      "DELETE FROM conversations WHERE user_id = ? AND NOT (conversation_mode = 'zen' OR (conversation_mode = 'chat' AND bot_id IS NULL))"
     ).run(userId);
     db.exec("COMMIT");
     return conversationCount;

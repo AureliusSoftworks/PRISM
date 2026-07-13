@@ -6,6 +6,7 @@ import {
   type BotCustomizerSaveCurrent,
   type BotCustomizerSavePristine,
 } from "./botCustomizerSavePatch.ts";
+import { DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1, botPowerSourceHashV1 } from "@localai/shared";
 
 const pristine: BotCustomizerSavePristine = {
   name: "Iris",
@@ -26,9 +27,29 @@ const pristine: BotCustomizerSavePristine = {
   color: "#66cc33",
   glyph: "bot",
   faceEyesFont: "warm",
+  faceEyeCharacter: null,
+  faceEyeAnimation: "none",
   faceMouthFont: "warm",
+  faceMouthCharacter: null,
+  faceMouthAnimation: "none",
   faceFontWeight: 500,
+  faceEyeScale: 1,
+  faceEyeOffsetX: 0,
+  faceEyeOffsetY: 0,
+  faceEyeRotationDeg: 0,
+  faceMouthScale: 1,
+  faceMouthOffsetX: 0,
+  faceMouthOffsetY: 0,
+  faceMouthRotationDeg: 0,
+  faceBlinkBar: "|",
+  faceBlinkScale: 1,
+  faceBlinkOffsetX: 0,
+  faceBlinkOffsetY: 0,
+  faceThinkingFrames: ["|", "/", "-", "\\"],
+  avatarDetails: null,
   profilePictureImageId: null,
+  audioVoiceProfile: DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+  powers: [],
 };
 
 const currentFromPristine = (
@@ -56,9 +77,29 @@ const currentFromPristine = (
   color: pristine.color,
   glyph: pristine.glyph,
   faceEyesFont: pristine.faceEyesFont,
+  faceEyeCharacter: pristine.faceEyeCharacter,
+  faceEyeAnimation: pristine.faceEyeAnimation,
   faceMouthFont: pristine.faceMouthFont,
+  faceMouthCharacter: pristine.faceMouthCharacter,
+  faceMouthAnimation: pristine.faceMouthAnimation,
   faceFontWeight: pristine.faceFontWeight,
+  faceEyeScale: pristine.faceEyeScale,
+  faceEyeOffsetX: pristine.faceEyeOffsetX,
+  faceEyeOffsetY: pristine.faceEyeOffsetY,
+  faceEyeRotationDeg: pristine.faceEyeRotationDeg,
+  faceMouthScale: pristine.faceMouthScale,
+  faceMouthOffsetX: pristine.faceMouthOffsetX,
+  faceMouthOffsetY: pristine.faceMouthOffsetY,
+  faceMouthRotationDeg: pristine.faceMouthRotationDeg,
+  faceBlinkBar: pristine.faceBlinkBar,
+  faceBlinkScale: pristine.faceBlinkScale,
+  faceBlinkOffsetX: pristine.faceBlinkOffsetX,
+  faceBlinkOffsetY: pristine.faceBlinkOffsetY,
+  faceThinkingFrames: pristine.faceThinkingFrames,
+  avatarDetails: pristine.avatarDetails,
   profilePictureImageId: pristine.profilePictureImageId,
+  audioVoiceProfile: pristine.audioVoiceProfile,
+  powers: pristine.powers,
   ...overrides,
 });
 
@@ -67,6 +108,31 @@ describe("bot customizer save patch", () => {
     assert.deepEqual(
       buildBotCustomizerSavePatch(currentFromPristine({ name: "Iriss" }), pristine),
       { name: "Iriss" }
+    );
+  });
+
+  it("patches Coffee powers without changing unrelated bot fields", () => {
+    const name = "Stoic";
+    const intent = "Mood hardly changes.";
+    const powers = [{
+      version: 1 as const,
+      id: "stoic",
+      name,
+      intent,
+      enabled: true,
+      compileStatus: "ready" as const,
+      compiled: {
+        version: 1 as const,
+        sourceHash: botPowerSourceHashV1(name, intent),
+        selfCue: "Remain steady.",
+        observerCue: "",
+        effects: [{ type: "mood_resistance" as const, polarity: "both" as const, strength: "large" as const }],
+        ruleLabels: ["Mood resistance"],
+      },
+    }];
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(currentFromPristine({ powers }), pristine),
+      { powers }
     );
   });
 
@@ -100,6 +166,175 @@ describe("bot customizer save patch", () => {
         pristine
       ),
       {}
+    );
+  });
+
+  it("patches custom eye character edits including clears", () => {
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(
+        currentFromPristine({ faceEyeCharacter: "8" }),
+        pristine
+      ),
+      { faceEyeCharacter: "8" }
+    );
+
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(
+        currentFromPristine({ faceEyeCharacter: null }),
+        { ...pristine, faceEyeCharacter: "B" }
+      ),
+      { faceEyeCharacter: null }
+    );
+  });
+
+  it("patches custom mouth character edits including clears", () => {
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(
+        currentFromPristine({ faceMouthCharacter: "△" }),
+        pristine
+      ),
+      { faceMouthCharacter: "△" }
+    );
+
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(
+        currentFromPristine({ faceMouthCharacter: null }),
+        { ...pristine, faceMouthCharacter: "V" }
+      ),
+      { faceMouthCharacter: null }
+    );
+  });
+
+  it("patches custom glyph animation and eye rotation edits", () => {
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(
+        currentFromPristine({
+          faceEyeAnimation: "wobble",
+          faceMouthAnimation: "flicker",
+          faceEyeRotationDeg: 35,
+        }),
+        pristine
+      ),
+      {
+        faceEyeAnimation: "wobble",
+        faceMouthAnimation: "flicker",
+        faceEyeRotationDeg: 35,
+      }
+    );
+  });
+
+  it("patches eye scale and coordinate placement edits", () => {
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(
+        currentFromPristine({
+          faceEyeScale: 1.15,
+          faceEyeOffsetX: 0.06,
+          faceEyeOffsetY: -0.08,
+        }),
+        pristine
+      ),
+      { faceEyeScale: 1.15, faceEyeOffsetX: 0.06, faceEyeOffsetY: -0.08 }
+    );
+  });
+
+  it("patches custom mouth scale, coordinate placement, and rotation edits", () => {
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(
+        currentFromPristine({
+          faceMouthScale: 1.25,
+          faceMouthOffsetX: -0.06,
+          faceMouthOffsetY: 0.08,
+          faceMouthRotationDeg: 35,
+        }),
+        pristine
+      ),
+      {
+        faceMouthScale: 1.25,
+        faceMouthOffsetX: -0.06,
+        faceMouthOffsetY: 0.08,
+        faceMouthRotationDeg: 35,
+      }
+    );
+  });
+
+  it("patches blink bar edits", () => {
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(
+        currentFromPristine({ faceBlinkBar: "none" }),
+        pristine
+      ),
+      { faceBlinkBar: "none" }
+    );
+  });
+
+  it("patches custom blink scale and placement edits", () => {
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(
+        currentFromPristine({
+          faceBlinkScale: 1.2,
+          faceBlinkOffsetX: -0.08,
+          faceBlinkOffsetY: 0.06,
+        }),
+        pristine
+      ),
+      {
+        faceBlinkScale: 1.2,
+        faceBlinkOffsetX: -0.08,
+        faceBlinkOffsetY: 0.06,
+      }
+    );
+  });
+
+  it("patches thinking frame edits", () => {
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(
+        currentFromPristine({ faceThinkingFrames: [".", "o", "O", "o"] }),
+        pristine
+      ),
+      { faceThinkingFrames: [".", "o", "O", "o"] }
+    );
+  });
+
+  it("patches avatar detail recipe edits and clears", () => {
+    const avatarDetails = {
+      version: 1 as const,
+      screen: {
+        stamps: [
+          {
+            id: "round-glasses" as const,
+            offsetX: 0,
+            offsetY: 0,
+            scalePct: 100,
+          },
+        ],
+        paintMaskBase64: null,
+      },
+    };
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(
+        currentFromPristine({ avatarDetails }),
+        pristine
+      ),
+      { avatarDetails }
+    );
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(
+        currentFromPristine({ avatarDetails: null }),
+        { ...pristine, avatarDetails }
+      ),
+      { avatarDetails: null }
+    );
+  });
+
+  it("patches a portable voice profile as the user override", () => {
+    const audioVoiceProfile = {
+      ...pristine.audioVoiceProfile,
+      baseVoiceId: "voice-4" as const,
+      pitch: 0.35,
+    };
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(currentFromPristine({ audioVoiceProfile }), pristine),
+      { audioVoiceProfileOverride: audioVoiceProfile }
     );
   });
 });

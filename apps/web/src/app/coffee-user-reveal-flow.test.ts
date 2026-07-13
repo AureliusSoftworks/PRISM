@@ -3,7 +3,14 @@ import assert from "node:assert/strict";
 import {
   coffeeArrivalAutoplayCanScheduleNow,
   coffeeArrivalAutoplayRetryDelayMs,
+  coffeeAutoplayForceTurnShouldRun,
+  coffeeAutoplayWatchdogShouldWake,
+  coffeeCenterFeedMessagesDuringPendingReveal,
+  coffeeDraftChangeCountsAsTyping,
   coffeeDirectedMentionBotIds,
+  coffeeEmptyTurnAutoplayRetryDelayMs,
+  coffeeGeneratedReplyRevealDeferralMs,
+  coffeeLoopTimerOwnsAutoplayTurn,
   coffeePendingSubmittedUserLineVisible,
   coffeeShouldQueueAssistantRevealAfterUserTyping,
   coffeeShouldIgnoreStaleTurnResponse,
@@ -67,10 +74,185 @@ describe("coffee user reveal flow", () => {
     );
   });
 
+  it("gives a pending assistant message one center-table owner while it streams", () => {
+    const messages = [
+      { id: "earlier", content: "Earlier line." },
+      { id: "first-bot-reply", content: "Streaming line." },
+    ];
+
+    assert.deepEqual(
+      coffeeCenterFeedMessagesDuringPendingReveal({
+        messages,
+        pendingMessageId: "first-bot-reply",
+        revealInProgress: true,
+      }),
+      [{ id: "earlier", content: "Earlier line." }]
+    );
+    assert.deepEqual(
+      coffeeCenterFeedMessagesDuringPendingReveal({
+        messages,
+        pendingMessageId: "first-bot-reply",
+        revealInProgress: false,
+      }),
+      messages
+    );
+  });
+
   it("ignores stale Coffee turn responses without a visible speaker", () => {
     assert.equal(coffeeShouldIgnoreStaleTurnResponse({ stale: true, speakerBotId: null }), true);
     assert.equal(coffeeShouldIgnoreStaleTurnResponse({ speakerBotId: null }), true);
     assert.equal(coffeeShouldIgnoreStaleTurnResponse({ speakerBotId: "bot-vader" }), false);
+  });
+
+  it("rearms autoplay after a stale or empty Coffee turn", () => {
+    const activeTurn = {
+      speakerBotId: null,
+      autoplayPaused: false,
+      sessionPhase: "live",
+      sessionRemainingMs: 60_000,
+    };
+    assert.equal(
+      coffeeEmptyTurnAutoplayRetryDelayMs({ ...activeTurn, stale: true }),
+      360
+    );
+    assert.equal(
+      coffeeEmptyTurnAutoplayRetryDelayMs({ ...activeTurn, stale: false }),
+      850
+    );
+    assert.equal(
+      coffeeEmptyTurnAutoplayRetryDelayMs({
+        ...activeTurn,
+        speakerBotId: "bot-jefferson",
+        stale: false,
+      }),
+      null
+    );
+    assert.equal(
+      coffeeEmptyTurnAutoplayRetryDelayMs({ ...activeTurn, autoplayPaused: true }),
+      null
+    );
+    assert.equal(
+      coffeeEmptyTurnAutoplayRetryDelayMs({ ...activeTurn, sessionPhase: "finished" }),
+      null
+    );
+    assert.equal(
+      coffeeEmptyTurnAutoplayRetryDelayMs({ ...activeTurn, sessionRemainingMs: 0 }),
+      null
+    );
+  });
+
+  it("wakes an active Coffee room when no timer or request owns the next turn", () => {
+    const strandedRoom = {
+      hasConversation: true,
+      sessionPhase: "live",
+      autoplayPaused: false,
+      devModeEnabled: false,
+      draft: "",
+      rhythmState: "idle" as const,
+      loopScheduled: false,
+      requestInFlight: false,
+      sessionEndsAtMs: 70_000,
+      nowMs: 10_000,
+    };
+    assert.equal(coffeeAutoplayWatchdogShouldWake(strandedRoom), true);
+    assert.equal(
+      coffeeAutoplayWatchdogShouldWake({ ...strandedRoom, sessionPhase: "arriving" }),
+      true
+    );
+    assert.equal(
+      coffeeAutoplayWatchdogShouldWake({ ...strandedRoom, loopScheduled: true }),
+      false
+    );
+    assert.equal(
+      coffeeAutoplayWatchdogShouldWake({ ...strandedRoom, requestInFlight: true }),
+      false
+    );
+    assert.equal(
+      coffeeAutoplayWatchdogShouldWake({ ...strandedRoom, draft: "still typing" }),
+      false
+    );
+    assert.equal(
+      coffeeAutoplayWatchdogShouldWake({ ...strandedRoom, rhythmState: "tableTyping" }),
+      false
+    );
+    assert.equal(
+      coffeeAutoplayWatchdogShouldWake({ ...strandedRoom, nowMs: 70_000 }),
+      false
+    );
+  });
+
+  it("does not let an overdue Coffee loop timer mask a stranded table", () => {
+    assert.equal(
+      coffeeLoopTimerOwnsAutoplayTurn({
+        timerPresent: true,
+        scheduledForMs: 20_000,
+        nowMs: 19_999,
+      }),
+      true
+    );
+    assert.equal(
+      coffeeLoopTimerOwnsAutoplayTurn({
+        timerPresent: true,
+        scheduledForMs: 20_000,
+        nowMs: 20_000,
+      }),
+      false
+    );
+    assert.equal(
+      coffeeLoopTimerOwnsAutoplayTurn({
+        timerPresent: false,
+        scheduledForMs: null,
+        nowMs: 20_000,
+      }),
+      false
+    );
+  });
+
+  it("forces a turn when an owned deadline or the whole room has gone silent", () => {
+    const activeRoom = {
+      hasConversation: true,
+      hasPresentBot: true,
+      sessionPhase: "arriving",
+      autoplayPaused: false,
+      devModeEnabled: false,
+      draft: "",
+      requestInFlight: false,
+      pendingReveal: false,
+      timerPresent: true,
+      timerScheduledForMs: 10_000,
+      sessionEndsAtMs: 100_000,
+      lastAssistantAtMs: 5_000,
+      sessionStartedAtMs: 0,
+      lastForcedAtMs: 0,
+      nowMs: 11_500,
+    };
+    assert.equal(coffeeAutoplayForceTurnShouldRun(activeRoom), true);
+    assert.equal(
+      coffeeAutoplayForceTurnShouldRun({ ...activeRoom, nowMs: 11_499 }),
+      false
+    );
+    assert.equal(
+      coffeeAutoplayForceTurnShouldRun({
+        ...activeRoom,
+        timerPresent: false,
+        timerScheduledForMs: null,
+        lastAssistantAtMs: 20_000,
+        nowMs: 55_000,
+      }),
+      true
+    );
+    assert.equal(
+      coffeeAutoplayForceTurnShouldRun({ ...activeRoom, requestInFlight: true }),
+      false
+    );
+    assert.equal(
+      coffeeAutoplayForceTurnShouldRun({ ...activeRoom, pendingReveal: true }),
+      false
+    );
+    assert.equal(
+      coffeeAutoplayForceTurnShouldRun({ ...activeRoom, hasPresentBot: false }),
+      false
+    );
   });
 
   it("defers Coffee autoplay while Table talk is active or freshly edited", () => {
@@ -107,6 +289,53 @@ describe("coffee user reveal flow", () => {
       }),
       0
     );
+  });
+
+  it("does not hide generated bot replies behind an empty Table Talk grace window", () => {
+    assert.equal(
+      coffeeGeneratedReplyRevealDeferralMs({
+        conversationId: "coffee-1",
+        draft: "",
+        includeCooldown: false,
+        lastTypedAtMs: 10_000,
+        lastTypedConversationId: "coffee-1",
+        nowMs: 12_000,
+        graceMs: 5200,
+      }),
+      0
+    );
+    assert.equal(
+      coffeeGeneratedReplyRevealDeferralMs({
+        conversationId: "coffee-1",
+        draft: "wait",
+        includeCooldown: false,
+        lastTypedAtMs: 10_000,
+        lastTypedConversationId: "coffee-1",
+        nowMs: 12_000,
+        graceMs: 5200,
+      }),
+      5200
+    );
+    assert.equal(
+      coffeeGeneratedReplyRevealDeferralMs({
+        conversationId: "coffee-1",
+        draft: "wait",
+        includeCooldown: true,
+        lastTypedAtMs: 10_000,
+        lastTypedConversationId: "coffee-1",
+        nowMs: 12_000,
+        graceMs: 5200,
+      }),
+      0
+    );
+  });
+
+  it("does not treat no-op empty Table Talk syncs as typing activity", () => {
+    assert.equal(coffeeDraftChangeCountsAsTyping("", ""), false);
+    assert.equal(coffeeDraftChangeCountsAsTyping("  ", ""), false);
+    assert.equal(coffeeDraftChangeCountsAsTyping("", "hi"), true);
+    assert.equal(coffeeDraftChangeCountsAsTyping("hi", ""), true);
+    assert.equal(coffeeDraftChangeCountsAsTyping("hi", "hi there"), true);
   });
 
   it("returns ordered unique seated bot mentions for directed Coffee rounds", () => {

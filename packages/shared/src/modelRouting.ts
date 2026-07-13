@@ -198,7 +198,10 @@ function providerForCandidateModel(
     return inferredProvider === null || inferredProvider === "local" ? "local" : null;
   }
 
-  if (inferredProvider === "local") return null;
+  if (inferredProvider === "local" ||
+      (requestedProvider === "anthropic" && inferredProvider === "openai")) {
+    return null;
+  }
   return inferredProvider ?? requestedProvider;
 }
 

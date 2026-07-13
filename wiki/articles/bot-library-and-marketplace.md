@@ -2,14 +2,14 @@
 
 # Bot library and marketplace
 
-How Prism organizes bots into library groups and installs marketplace bots, packs, starter bots, and Lenses.
+How Prism organizes bots, previews personas and voices, exposes bot actions, and installs marketplace collections.
 
 
 Categories: `Product`, `Guides`
 
 Aliases: `Bot groups`, `Marketplace installs`, `Bot library groups`
 
-Files: `apps/web/src/app/page.tsx`, `apps/web/src/app/botLibraryGroupFilter.ts`, `apps/web/src/app/botLibraryGroupFilter.test.ts`, `apps/web/src/app/page.module.css`
+Files: `apps/web/src/app/page.tsx`, `apps/web/src/app/page.module.css`, `apps/web/src/app/botLibraryGroupFilter.ts`, `apps/web/src/app/botLibraryShowcase.test.ts`, `apps/web/src/app/context-menu-selection-feedback.test.ts`, `apps/api/src/voice-preview-line.ts`, `packages/shared/src/botPower.ts`
 
 ## Bot Library Groups
 
@@ -19,9 +19,21 @@ The Chat and Sandbox canvas can show all bots, ungrouped bots, favorites, market
 
 A focused group card is a drill-in view, not a dead end. Clicking open canvas outside the group card returns to the overview where all bots are visible. Interacting with the card, bot tiles, menus, dialogs, or composer controls does not trigger that return.
 
+## Selected Bot Preview
+
+Selecting a bot opens a large persona preview on the left while the library remains available. The preview itself is intentionally silent. Use the English or Bottish buttons below it to hear the bot, so opening menus or interacting with the surrounding library never triggers surprise speech.
+
+An English click clears the previous generated sample, creates a fresh persona-specific line, waits for synthesis, and then plays it automatically. The button shows generation, playback, completion, and error feedback. Preview prompts reject microphone checks, audio checks, and generic testing language.
+
 ## Context Menus
 
-Multiple selected bots can create or update a group when the selection is eligible. A single bot can be added to an existing custom group from the context menu through a dropdown that lists only groups where the bot is not already present and capacity remains.
+Right-clicking the selected preview opens Avatar Studio, Memories, Images, and Settings. The menu remains authoritative even while Coffee Mode is active. Context-menu items use a pointer cursor and show a brief visual confirmation after selection before the requested action takes over.
+
+Multiple selected bots can create or update a group when the selection is eligible. A single bot can be added to an existing custom group from the context menu through a chooser that lists only groups where the bot is not already present and capacity remains.
+
+## Coffee Powers
+
+A bot can define short Powers that apply only at the Coffee table. Active powers are surfaced in the library and Coffee UI, while the structured rules travel with bot archive/import flows.
 
 ## Group Details Dialogs
 
@@ -29,12 +41,13 @@ Create and edit dialogs for bot groups are higher-level modals. They close throu
 
 ## Marketplace Installs
 
-Marketplace bot, theme pack, starter-pack, and Lens installs now show the shared bot transfer overlay. The overlay communicates download, preparation, profile creation, memory restore, refresh, and completion states instead of leaving the marketplace feeling idle.
+Marketplace bot, theme pack, starter-pack, and Lens installs show the shared bot transfer overlay. The overlay communicates download, preparation, profile creation, memory restore, refresh, and completion states instead of leaving the marketplace feeling idle.
 
 ## Source Records
 
 - `concept_38af8f30-6915-43a6-814b-76ca3e5b63cf` (concept)
 - `event_f3ec88b8-87fb-4521-ae5e-1cf42592c6b6` (event)
 - `symbol_0e66cb6b-f542-4c77-8c02-d387c38adc17` (symbol)
+- `event_9049a96d-ec0f-4c0e-9444-d9c9997799ec` (event)
 
 Record: `article_a85cd666-f08f-43b5-911b-d03d411293a2` | Slug: `bot-library-and-marketplace` | Authority: agent | Confidence: high

@@ -10,10 +10,12 @@ or release doc disagrees with this file, this file wins.
 
 ```mermaid
 flowchart LR
+  Steam["Steam"] --> macDesktop["Prism Desktop macOS"]
+  Steam --> winDesktop["Prism Desktop Windows"]
+  Steam --> linuxDesktop["Prism Desktop Linux"]
   GitHub["GitHub Releases"] --> macDesktop["Prism Desktop macOS"]
   GitHub --> winDesktop["Prism Desktop Windows"]
   GitHub --> linuxDesktop["Prism Desktop Linux"]
-  Patreon["Optional $5/month Patreon support"] -. funds development .-> GitHub
   macDesktop --> bundledRuntime["Bundled local runtime"]
   winDesktop --> bundledRuntime
   linuxDesktop --> bundledRuntime
@@ -21,12 +23,9 @@ flowchart LR
 ```
 
 - Desktop distribution is direct: no App Store, no Mac App Store, no TestFlight.
-- GitHub Releases is the primary delivery channel.
+- Steam is the desktop release target.
+- GitHub Releases is the direct-download path while Steam is being prepared.
 - Official desktop builds are free to download and use.
-- Optional support is a single $5/month Patreon lane.
-- Support is not a product tier and does not unlock core features.
-- Steam and similar stores may become additional lanes for the same official
-  desktop artifacts, but the GitHub release remains the baseline free download.
 - iPhone remains a separate PWA path served by Prism.
 
 ## What Users Get
@@ -47,26 +46,22 @@ experience.
 
 | Platform | Format | Release Tag | Signing |
 |---|---|---|---|
-| macOS | `Prism-Desktop-v<version>.dmg` | `desktop/v<version>` | Developer ID + notarized |
-| Windows | `Prism-Desktop-Setup-v<version>-win-x64.exe` (+ optional MSI) | `desktop/v<version>` | Standard code-signing certificate when available |
-| Linux | `Prism-Desktop-v<version>-linux-x64.AppImage` | `desktop/v<version>` | Unsigned initially |
+| macOS | Steam depot + `Prism-Desktop-v<version>.dmg` | Steam branch + `desktop/v<version>` | Developer ID + notarized |
+| Windows | Steam depot + `Prism-Desktop-Setup-v<version>-win-x64.exe` (+ optional MSI) | Steam branch + `desktop/v<version>` | Standard code-signing certificate when available |
+| Linux | Steam depot + `Prism-Desktop-v<version>-linux-x64.AppImage` | Steam branch + `desktop/v<version>` | Unsigned initially |
 | iPhone | PWA via Safari -> Add to Home Screen | N/A | Not applicable |
 
-## Support Model
+## Channel Model
 
-Prism's first commercial model is optional support, not access control.
+Prism's active public channels are Steam and GitHub Releases.
 
-- One Patreon support option: `$5/month`.
-- No tiers, paid feature locks, purchase screens, or supporter-only core
-  functionality.
-- No Patreon account linking in the product for this phase.
-- No telemetry or outbound support checks from the local runtime.
-- A future in-app entry point should be quiet: a Settings/About link labeled
-  `Support Prism` that opens Patreon externally.
-
-The product should remain usable, private, and clear for people who never
-support financially. The support ask should feel like helping the project
-continue, not like buying permission to use Prism.
+- Steam is the launch target for desktop discovery and installs.
+- GitHub Releases remains the direct-download path for now and a practical
+  fallback channel.
+- No paid feature locks, activation checks, purchase screens, or runtime
+  entitlement checks are part of this phase.
+- Store-specific copy should describe Prism as the same free local-first
+  desktop app, with channel differences limited to installer/update mechanics.
 
 ## Launch Readiness
 
@@ -74,9 +69,10 @@ Do not broadly promote Prism until the product-worthy checklist is satisfied:
 
 - Mac, Windows, and Linux installers are smoke-tested.
 - First-run setup is understandable for non-developers.
-- GitHub Releases and the README explain the free download path clearly.
+- Steam and GitHub Releases explain the download path clearly.
 - LOCAL mode and privacy guarantees are verified.
-- Support copy is ready, restrained, and non-intrusive.
+- Steam store presence and build review are completed before public Steam
+  release.
 
 The detailed launch checklist lives in
 [`product-worthy-launch.md`](product-worthy-launch.md).

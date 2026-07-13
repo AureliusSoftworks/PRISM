@@ -136,16 +136,9 @@ describe("bot library group filtering", () => {
   });
 
   it("keeps create-group available when selected bots already share a group", () => {
-    const actions = resolveBotLibraryMultiSelectionActions(
-      [
-        { id: "builtin:favorites", botIds: ["vader", "palpatine"], builtIn: true },
-        { id: "group:villains", botIds: ["vader", "palpatine"], builtIn: false },
-      ],
-      ["vader", "palpatine"]
-    );
+    const actions = resolveBotLibraryMultiSelectionActions(["vader", "palpatine"]);
 
     assert.equal(actions.canCreateGroup, true);
-    assert.equal(actions.removableGroup?.id, "group:villains");
   });
 
   it("adds one bot to a mutable existing group and drops stale ids", () => {

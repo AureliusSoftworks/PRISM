@@ -1,4 +1,31 @@
+import { normalizeBotFaceEyeCharacter } from "@localai/shared";
+
+import { normalizeBotPowersV1, type BotPowerV1 } from "@localai/shared";
+
 export const BOT_MARKETPLACE_MANIFEST_PATH = "/bot-marketplace/manifest.json";
+
+/**
+ * Marketplace faces use one glyph for the eye row. Keep that glyph visibly
+ * pair-like after the plate face is rotated sideways; letters and single
+ * marks read as one eye and are not suitable for the marketplace roster.
+ */
+export const MARKETPLACE_SIDEWAYS_EYE_CHARACTERS = [
+  "=",
+  ":",
+  "≈",
+] as const;
+
+const marketplaceSidewaysEyeCharacterSet = new Set<string>(
+  MARKETPLACE_SIDEWAYS_EYE_CHARACTERS
+);
+
+export function marketplaceBotEyeCharacterIsSideways(value: unknown): boolean {
+  if (value === null || value === undefined) return true;
+  if (typeof value !== "string") return false;
+  if (!value.trim()) return true;
+  const normalized = normalizeBotFaceEyeCharacter(value);
+  return normalized !== null && marketplaceSidewaysEyeCharacterSet.has(normalized);
+}
 
 export type MarketplaceContentType = "bot" | "lens";
 export type BotMarketplaceEntryInstallState = "available" | "installed";
@@ -37,6 +64,7 @@ export interface BotMarketplaceEntry {
   deprecated: boolean;
   replacementType: MarketplaceContentType | null;
   replacementIds: string[];
+  powers?: BotPowerV1[];
 }
 
 export interface MarketplaceLensCategory {
@@ -79,9 +107,27 @@ export interface BotMarketplaceManifest {
   lenses: MarketplaceLensEntry[];
 }
 
+export type BotMarketplaceUpdateRevisions = Readonly<Record<string, string>>;
+
+export function marketplaceCatalogRevision(manifest: BotMarketplaceManifest): string {
+  return manifest.updatedAt?.trim() || `version:${manifest.version}`;
+}
+
+export function marketplaceEntryNeedsUpdate(
+  entry: BotMarketplaceEntry,
+  installedHashes: ReadonlySet<string>,
+  updatedRevisions: BotMarketplaceUpdateRevisions,
+  catalogRevision: string
+): boolean {
+  return (
+    installedHashes.has(entry.botHash) &&
+    updatedRevisions[entry.id] !== catalogRevision
+  );
+}
+
 export interface BotMarketplacePreparedBundle {
   entry: BotMarketplaceEntry;
-  raw: string;
+  bytes: Uint8Array;
 }
 
 const MARKETPLACE_SCHEMA = "prism-bot-marketplace-v1";
@@ -172,6 +218,7 @@ export function normalizeBotMarketplaceManifest(raw: unknown): BotMarketplaceMan
     if (seenBotIds.has(id) || seenHashes.has(botHash)) continue;
     seenBotIds.add(id);
     seenHashes.add(botHash);
+    const powers = normalizeBotPowersV1(botRecord.powers);
     bots.push({
       id,
       name,
@@ -190,6 +237,7 @@ export function normalizeBotMarketplaceManifest(raw: unknown): BotMarketplaceMan
       replacementIds: stringList(botRecord.replacementIds).map((replacementId) =>
         replacementId.toLowerCase()
       ),
+      ...(powers.length > 0 ? { powers } : {}),
     });
   }
 
@@ -377,9 +425,9 @@ export function marketplaceLensInstallState(
 
 export function validateMarketplaceSelectionBundles(
   entries: readonly BotMarketplaceEntry[],
-  bundleRawByPath: ReadonlyMap<string, string>
+  bundleBytesByPath: ReadonlyMap<string, Uint8Array>
 ): BotMarketplacePreparedBundle[] {
-  const missing = entries.filter((entry) => !bundleRawByPath.has(entry.bundlePath));
+  const missing = entries.filter((entry) => !bundleBytesByPath.has(entry.bundlePath));
   if (missing.length > 0) {
     throw new Error(
       `Marketplace bundle missing for ${missing.map((entry) => entry.name).join(", ")}.`
@@ -387,6 +435,6 @@ export function validateMarketplaceSelectionBundles(
   }
   return entries.map((entry) => ({
     entry,
-    raw: bundleRawByPath.get(entry.bundlePath) ?? "",
+    bytes: bundleBytesByPath.get(entry.bundlePath) ?? new Uint8Array(),
   }));
 }

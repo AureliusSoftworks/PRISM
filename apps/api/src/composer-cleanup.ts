@@ -2,6 +2,7 @@ import type { PromptShortcutWildcardReplacement } from "@localai/shared";
 import type { LlmProvider } from "./providers.ts";
 
 export const COMPOSER_CLEANUP_MAX_INPUT_CHARS = 8000;
+export const COMPOSER_SEND_CLEANUP_TIMEOUT_MS = 4_500;
 
 export const COMPOSER_CLEANUP_SYSTEM_PROMPT =
   "You are Prism's composer proofreader. Correct spelling, grammar, punctuation, and obvious autocorrect mistakes only. Preserve the user's meaning, tone, markdown, line breaks, emoji, code blocks, names, and URLs. Do not add explanations, labels, quotes, or commentary. Return only the corrected text. If nothing needs correction, return the original text exactly.";
@@ -328,6 +329,7 @@ export async function cleanupResolvedPromptWithModel(args: {
   provider: LlmProvider;
   model?: string;
   signal?: AbortSignal;
+  timeoutMs?: number;
 }): Promise<{
   prompt: string;
   replacements: PromptShortcutWildcardReplacement[];
@@ -343,37 +345,52 @@ export async function cleanupResolvedPromptWithModel(args: {
     };
   }
   const maxTokens = Math.min(1800, Math.max(180, Math.ceil(prompt.length / 2)));
-  const raw = await args.provider.generateResponse(
-    [
-      { role: "system", content: COMPOSER_SEND_CLEANUP_SYSTEM_PROMPT },
+  const timeoutMs = Math.max(1, args.timeoutMs ?? COMPOSER_SEND_CLEANUP_TIMEOUT_MS);
+  const timeoutController = new AbortController();
+  const timeout = setTimeout(() => {
+    timeoutController.abort(
+      new DOMException(`Composer cleanup timed out after ${timeoutMs}ms.`, "TimeoutError")
+    );
+  }, timeoutMs);
+  const signal = args.signal
+    ? AbortSignal.any([args.signal, timeoutController.signal])
+    : timeoutController.signal;
+  let raw: string;
+  try {
+    raw = await args.provider.generateResponse(
+      [
+        { role: "system", content: COMPOSER_SEND_CLEANUP_SYSTEM_PROMPT },
+        {
+          role: "user",
+          content: [
+            "<resolved_prompt>",
+            prompt,
+            "</resolved_prompt>",
+            "",
+            "<wildcard_replacements_json>",
+            JSON.stringify(
+              replacements.map((replacement, index) => ({
+                index,
+                key: replacement.key,
+                value: replacement.value,
+              }))
+            ),
+            "</wildcard_replacements_json>",
+          ].join("\n"),
+        },
+      ],
       {
-        role: "user",
-        content: [
-          "<resolved_prompt>",
-          prompt,
-          "</resolved_prompt>",
-          "",
-          "<wildcard_replacements_json>",
-          JSON.stringify(
-            replacements.map((replacement, index) => ({
-              index,
-              key: replacement.key,
-              value: replacement.value,
-            }))
-          ),
-          "</wildcard_replacements_json>",
-        ].join("\n"),
-      },
-    ],
-    {
-      model: args.model,
-      temperature: 0.05,
-      maxTokens,
-      jsonMode: true,
-      usagePurpose: "composer_cleanup",
-      signal: args.signal,
-    }
-  );
+        model: args.model,
+        temperature: 0.05,
+        maxTokens,
+        jsonMode: true,
+        usagePurpose: "composer_cleanup",
+        signal,
+      }
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
   const cleanup = normalizeSendCleanupResponse(raw, prompt, replacements);
   const protectedCleanup = restoreJoinedWildcardTokens({
     prompt: cleanup.prompt,

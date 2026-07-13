@@ -5,6 +5,21 @@ import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+  DEFAULT_BOT_FACE_BLINK_BAR,
+  normalizeBotFaceBlinkBar,
+  normalizeBotFaceEyeCharacter,
+  normalizeBotFaceEyeOffsetX,
+  normalizeBotFaceEyeOffsetY,
+  normalizeBotFaceEyeScale,
+  normalizeBotFaceMouthCharacter,
+  normalizeBotFaceMouthOffsetY,
+  normalizeBotFaceMouthScale,
+  normalizeBotFaceThinkingFrames,
+  normalizeOptionalBotAudioVoiceProfileV1,
+  BOT_AUDIO_VOICE_IDS,
+} from "@localai/shared";
+import {
+  marketplaceBotEyeCharacterIsSideways,
   marketplaceEntriesForTheme,
   marketplaceLensEntriesForCategory,
   marketplaceVisibleBotEntries,
@@ -15,6 +30,7 @@ import {
   botMarketplaceThemeGradientColors,
   buildBotMarketplaceThemeVisualStyle,
 } from "./botMarketplaceThemeGradient.ts";
+import { parsePrismBotArchive } from "./botArchive.ts";
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const publicRoot = path.join(appRoot, "public");
@@ -24,36 +40,103 @@ function readJsonFile<T>(filePath: string): T {
   return JSON.parse(readFileSync(filePath, "utf8")) as T;
 }
 
+function readBotBundle(filePath: string) {
+  return parsePrismBotArchive(readFileSync(filePath));
+}
+
 describe("bot marketplace static catalog", () => {
+  it("ships a portable authored voice for every bot and neutral defaults for the originals", () => {
+    const manifest = normalizeBotMarketplaceManifest(
+      readJsonFile(path.join(publicRoot, "bot-marketplace/manifest.json"))
+    );
+    const originals = ["pia", "rowan", "iris", "sol", "mira"];
+    for (const entry of manifest.bots) {
+      const bundle = readBotBundle(path.join(publicRoot, entry.bundlePath));
+      const profile = normalizeOptionalBotAudioVoiceProfileV1(
+        bundle.botJson.bot.authoredAudioVoiceProfile
+      );
+      assert.notEqual(profile, null, `${entry.name} must include an authored voice`);
+      if (originals.includes(entry.id)) {
+        const index = originals.indexOf(entry.id);
+        assert.deepEqual(profile, {
+          v: 2,
+          enabled: true,
+          baseVoiceId: BOT_AUDIO_VOICE_IDS[index],
+          pitch: 0,
+          warmth: 0,
+          pace: 0,
+          lilt: 0,
+          bottishTone: 0.45,
+          volume: 1,
+          texture: {
+            preset: "clean",
+            amount: 0,
+            bandwidth: 1,
+            noise: 0,
+            instability: 0,
+            distortion: 0,
+            damage: 0,
+          },
+        });
+      }
+    }
+  });
+
   it("ships valid avatar face settings in every bundle", () => {
     const manifest = normalizeBotMarketplaceManifest(
       readJsonFile(path.join(publicRoot, "bot-marketplace/manifest.json"))
     );
+    const seenFaceSignatures = new Set<string>();
 
     assert.equal(manifest.bots.length > 0, true);
     for (const entry of manifest.bots) {
-      const bundle = readJsonFile<{
-        schema?: unknown;
-        botHash?: unknown;
-        bot?: {
-          name?: unknown;
-          faceEyesFont?: unknown;
-          faceMouthFont?: unknown;
-          faceFontWeight?: unknown;
-        };
-        memories?: unknown;
-      }>(path.join(publicRoot, entry.bundlePath));
+      const bundle = readBotBundle(path.join(publicRoot, entry.bundlePath));
+      const bot = bundle.botJson.bot;
 
-      assert.equal(bundle.schema, "prism-bot-export-v1", entry.name);
-      assert.equal(bundle.botHash, entry.botHash, entry.name);
-      assert.equal(bundle.bot?.name, entry.name, entry.name);
-      assert.equal(faceFontIds.has(bundle.bot?.faceEyesFont as string), true, entry.name);
-      assert.equal(faceFontIds.has(bundle.bot?.faceMouthFont as string), true, entry.name);
-      assert.equal(typeof bundle.bot?.faceFontWeight, "number", entry.name);
-      const weight = bundle.bot?.faceFontWeight as number;
+      assert.equal(bundle.botJson.schema, "prism-bot-export-v2", entry.name);
+      assert.equal(bundle.botJson.botHash, entry.botHash, entry.name);
+      assert.equal(bot.name, entry.name, entry.name);
+      assert.equal(bot.color, entry.color, entry.name);
+      assert.equal(bot.glyph, entry.glyph, entry.name);
+      assert.equal(
+        marketplaceBotEyeCharacterIsSideways(bot.faceEyeCharacter),
+        true,
+        `${entry.name} must use a sideways pair-like eye glyph`
+      );
+      assert.equal(faceFontIds.has(bot.faceEyesFont as string), true, entry.name);
+      assert.equal(faceFontIds.has(bot.faceMouthFont as string), true, entry.name);
+      assert.equal(typeof bot.faceFontWeight, "number", entry.name);
+      const weight = bot.faceFontWeight as number;
       assert.equal(weight >= 300 && weight <= 800, true, entry.name);
       assert.equal(weight % 25, 0, entry.name);
-      assert.equal(Array.isArray(bundle.memories) ? bundle.memories.length : 0, entry.memoryCount);
+      assert.equal(normalizeBotFaceEyeCharacter(bot.faceEyeCharacter), bot.faceEyeCharacter, entry.name);
+      assert.equal(normalizeBotFaceMouthCharacter(bot.faceMouthCharacter), null, entry.name);
+      assert.equal(bot.faceMouthCharacter, null, entry.name);
+      assert.equal(normalizeBotFaceEyeScale(bot.faceEyeScale), bot.faceEyeScale, entry.name);
+      assert.equal(normalizeBotFaceEyeOffsetX(bot.faceEyeOffsetX), bot.faceEyeOffsetX, entry.name);
+      assert.equal(normalizeBotFaceEyeOffsetY(bot.faceEyeOffsetY), bot.faceEyeOffsetY, entry.name);
+      assert.equal(normalizeBotFaceMouthScale(bot.faceMouthScale), bot.faceMouthScale, entry.name);
+      assert.equal(normalizeBotFaceMouthOffsetY(bot.faceMouthOffsetY), bot.faceMouthOffsetY, entry.name);
+      assert.equal(bot.faceBlinkBar, DEFAULT_BOT_FACE_BLINK_BAR, entry.name);
+      assert.equal(normalizeBotFaceBlinkBar(bot.faceBlinkBar), DEFAULT_BOT_FACE_BLINK_BAR, entry.name);
+      const thinkingFrames = normalizeBotFaceThinkingFrames(bot.faceThinkingFrames);
+      assert.notEqual(thinkingFrames, null, entry.name);
+      const faceSignature = JSON.stringify({
+        eyesFont: bot.faceEyesFont,
+        eyeCharacter: bot.faceEyeCharacter,
+        mouthFont: bot.faceMouthFont,
+        weight: bot.faceFontWeight,
+        eyeScale: bot.faceEyeScale,
+        eyeOffsetX: bot.faceEyeOffsetX,
+        eyeOffsetY: bot.faceEyeOffsetY,
+        mouthScale: bot.faceMouthScale,
+        mouthOffsetY: bot.faceMouthOffsetY,
+        blinkBar: bot.faceBlinkBar,
+        thinkingFrames,
+      });
+      assert.equal(seenFaceSignatures.has(faceSignature), false, entry.name);
+      seenFaceSignatures.add(faceSignature);
+      assert.equal(bundle.memories.length, entry.memoryCount);
     }
   });
 
@@ -293,18 +376,18 @@ describe("bot marketplace static catalog", () => {
       readJsonFile(path.join(publicRoot, "bot-marketplace/manifest.json"))
     );
     const byId = new Map(manifest.bots.map((entry) => [entry.id, entry]));
-    const jesusBundle = readJsonFile<{ bot?: { glyph?: unknown } }>(
+    const jesusBundle = readBotBundle(
       path.join(publicRoot, "bot-marketplace/bots/bot-jesus-christ.bot")
     );
-    const alanWattsBundle = readJsonFile<{ bot?: { glyph?: unknown } }>(
+    const alanWattsBundle = readBotBundle(
       path.join(publicRoot, "bot-marketplace/bots/bot-alan-watts.bot")
     );
 
     assert.equal(byId.get("jesus-christ")?.color, "#2563A8");
     assert.equal(byId.get("jesus-christ")?.glyph, "lucideFishSymbol");
-    assert.equal(jesusBundle.bot?.glyph, "lucideFishSymbol");
+    assert.equal(jesusBundle.botJson.bot.glyph, "lucideFishSymbol");
     assert.equal(byId.get("alan-watts")?.glyph, "yinYang");
-    assert.equal(alanWattsBundle.bot?.glyph, "yinYang");
+    assert.equal(alanWattsBundle.botJson.bot.glyph, "yinYang");
   });
 
   it("maps Prism Originals to the PRISM letter palette", () => {
@@ -333,32 +416,68 @@ describe("bot marketplace static catalog", () => {
     assert.equal(byId.get("mira")?.color, "#7b5cff");
   });
 
-  it("pairs each Prism Original with a distinct starter face", () => {
+  it("pairs each Prism Original with its requested basic face preset", () => {
     const manifest = normalizeBotMarketplaceManifest(
       readJsonFile(path.join(publicRoot, "bot-marketplace/manifest.json"))
     );
     const originals = manifest.themes.find((theme) => theme.id === "originals");
     const byId = new Map(manifest.bots.map((entry) => [entry.id, entry]));
-    const expectedFaces = new Map([
-      ["pia", "neutral"],
-      ["rowan", "warm"],
-      ["iris", "concise"],
-      ["sol", "playful"],
-      ["mira", "formal"],
+    const expectedPresets = new Map([
+      [
+        "pia",
+        { preset: "Default", eyesFont: "neutral", mouthFont: "neutral", weight: 600, eyeScale: 1, eyeOffsetY: 0 },
+      ],
+      [
+        "rowan",
+        {
+          preset: "Bouncy",
+          eyesFont: "playful",
+          mouthFont: "playful",
+          weight: 625,
+          eyeScale: 1.05,
+          eyeOffsetY: -0.02,
+        },
+      ],
+      [
+        "iris",
+        { preset: "Soft", eyesFont: "warm", mouthFont: "warm", weight: 575, eyeScale: 1.05, eyeOffsetY: 0 },
+      ],
+      [
+        "sol",
+        { preset: "Classic", eyesFont: "neutral", mouthFont: "neutral", weight: 600, eyeScale: 1, eyeOffsetY: 0 },
+      ],
+      [
+        "mira",
+        { preset: "Serif", eyesFont: "formal", mouthFont: "formal", weight: 575, eyeScale: 0.95, eyeOffsetY: 0 },
+      ],
     ]);
 
-    assert.deepEqual(originals?.botIds, Array.from(expectedFaces.keys()));
-    for (const [botId, faceFont] of expectedFaces) {
+    assert.deepEqual(originals?.botIds, Array.from(expectedPresets.keys()));
+    for (const [botId, preset] of expectedPresets) {
       const entry = byId.get(botId);
       assert.ok(entry, botId);
-      const bundle = readJsonFile<{
-        bot?: {
-          faceEyesFont?: unknown;
-          faceMouthFont?: unknown;
-        };
-      }>(path.join(publicRoot, entry.bundlePath));
-      assert.equal(bundle.bot?.faceEyesFont, faceFont, botId);
-      assert.equal(bundle.bot?.faceMouthFont, faceFont, botId);
+      const bundle = readBotBundle(path.join(publicRoot, entry.bundlePath));
+      const bot = bundle.botJson.bot;
+
+      assert.equal(bot.faceEyeCharacter, null, `${botId} ${preset.preset} custom eye`);
+      assert.equal(bot.faceMouthCharacter, null, `${botId} ${preset.preset} custom mouth`);
+      assert.equal(bot.faceEyesFont, preset.eyesFont, `${botId} ${preset.preset} eyes font`);
+      assert.equal(bot.faceMouthFont, preset.mouthFont, `${botId} ${preset.preset} mouth font`);
+      assert.equal(bot.faceFontWeight, preset.weight, `${botId} ${preset.preset} weight`);
+      assert.equal(bot.faceEyeScale, preset.eyeScale, `${botId} ${preset.preset} eye scale`);
+      assert.equal(bot.faceEyeOffsetX, 0, `${botId} ${preset.preset} eye x`);
+      assert.equal(bot.faceEyeOffsetY, preset.eyeOffsetY, `${botId} ${preset.preset} eye y`);
+      assert.equal(bot.faceMouthScale, 1, `${botId} ${preset.preset} mouth scale`);
+      assert.equal(bot.faceMouthOffsetY, 0, `${botId} ${preset.preset} mouth y`);
+      assert.equal(bot.faceMouthRotationDeg, 0, `${botId} ${preset.preset} mouth rotation`);
+      assert.equal(bot.faceBlinkBar, " ", `${botId} ${preset.preset} blink bar`);
+      if (botId === "pia" || botId === "iris") {
+        assert.deepEqual(
+          bot.faceThinkingFrames,
+          ["|", "/", "-", "\\"],
+          `${botId} ${preset.preset} thinking frames`
+        );
+      }
     }
   });
 });

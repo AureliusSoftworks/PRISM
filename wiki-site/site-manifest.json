@@ -40,11 +40,13 @@
     "records/decision/decision_a19295be-77fe-4e95-9a6a-57206331a0a5.html",
     "records/decision/decision_791a7b3c-d069-4543-907d-3c0cda50f452.html",
     "records/event/event_f3ec88b8-87fb-4521-ae5e-1cf42592c6b6.html",
+    "records/event/event_9049a96d-ec0f-4c0e-9444-d9c9997799ec.html",
     "records/event/event_752b90fc-e23c-4000-afe3-fbb07affebba.html",
     "records/event/event_836e6d6c-33bb-48c5-9074-3deba3b54f2e.html",
     "records/event/event_fd2fe77b-bba7-4ed3-af0d-afc361ccab12.html",
     "records/event/event_6e6f9de8-6e3a-4198-8d37-6501b0a8c392.html",
     "records/event/event_23e31d58-3ea5-4a39-8e56-5cc51b4a136a.html",
+    "records/note/note_fb321679-5908-4454-b01f-3dc5e09fd0da.html",
     "records/note/note_5850980f-5230-4d48-ae29-08c98e6ed3a3.html",
     "records/note/note_65e62737-730b-45ab-b59e-309f9888db4f.html",
     "records/symbol/symbol_0e66cb6b-f542-4c77-8c02-d387c38adc17.html",
@@ -180,6 +182,12 @@
     },
     {
       "type": "event",
+      "id": "event_9049a96d-ec0f-4c0e-9444-d9c9997799ec",
+      "title": "Chat, Bot Library, voice previews, Coffee, and interaction polish advanced",
+      "url": "records/event/event_9049a96d-ec0f-4c0e-9444-d9c9997799ec.html"
+    },
+    {
+      "type": "event",
       "id": "event_752b90fc-e23c-4000-afe3-fbb07affebba",
       "title": "Wiki site restyled with PRISM visual language",
       "url": "records/event/event_752b90fc-e23c-4000-afe3-fbb07affebba.html"
@@ -207,6 +215,12 @@
       "id": "event_23e31d58-3ea5-4a39-8e56-5cc51b4a136a",
       "title": "Wikiwiki updated and first-run theming retested",
       "url": "records/event/event_23e31d58-3ea5-4a39-8e56-5cc51b4a136a.html"
+    },
+    {
+      "type": "note",
+      "id": "note_fb321679-5908-4454-b01f-3dc5e09fd0da",
+      "title": "Automatic local UI testing login",
+      "url": "records/note/note_fb321679-5908-4454-b01f-3dc5e09fd0da.html"
     },
     {
       "type": "note",
