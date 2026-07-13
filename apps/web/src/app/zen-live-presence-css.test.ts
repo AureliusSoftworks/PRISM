@@ -17,6 +17,23 @@ const botFramePublicDir = join(dirname(fileURLToPath(import.meta.url)), "../../p
 const metalMaskPath = join(botFramePublicDir, "bot-frame-metal-mask.png");
 const screenGlassMaskPath = join(botFramePublicDir, "bot-frame-screen-mask-glass.png");
 const screenGrimeMaskPath = join(botFramePublicDir, "bot-frame-screen-grime-mask.png");
+const nativeGeometryPaintMaskNames = [
+  "bot-frame-top-crown-mask.png",
+  "bot-frame-side-pods-mask.png",
+  "bot-frame-lower-jaw-mask.png",
+  "bot-frame-staggered-dashes-mask.png",
+  "bot-frame-diagonal-sweep-mask.png",
+  "bot-frame-quartered-panels-mask.png",
+] as const;
+const opaquePaintMaskNames = [
+  "bot-frame-broken-band-mask.png",
+  "bot-frame-offset-stripe-mask.png",
+  ...nativeGeometryPaintMaskNames,
+  "bot-frame-weathered-asymmetric-mask.png",
+  "bot-frame-weathered-segments-mask.png",
+  "bot-frame-weathered-ring-mask.png",
+  "bot-frame-weathered-gap-mask.png",
+] as const;
 const css = readFileSync(cssPath, "utf8");
 const pageSource = readFileSync(pagePath, "utf8");
 const coffeeSeatPlateEmojiSource = readFileSync(coffeeSeatPlateEmojiPath, "utf8");
@@ -87,6 +104,7 @@ describe("Zen live presence CSS", () => {
       "bot-frame-metal-mask.png",
       "bot-frame-metal.png",
       "bot-frame-offset-stripe-mask.png",
+      ...opaquePaintMaskNames,
       "bot-frame-screen-mask-glass.png",
       "bot-frame-screen-grime-mask.png",
       "bot-frame-screen-mask.png",
@@ -96,6 +114,62 @@ describe("Zen live presence CSS", () => {
       assert.equal(asset.width, 1000, `${assetName} width`);
       assert.equal(asset.height, 1000, `${assetName} height`);
     }
+  });
+
+  it("keeps paint masks at exactly transparent or opaque coverage", () => {
+    for (const assetName of opaquePaintMaskNames) {
+      const mask = PNG.sync.read(readFileSync(join(botFramePublicDir, assetName)));
+      const pixelValues = new Set<string>();
+      let paintedPixelCount = 0;
+      for (let offset = 0; offset < mask.data.length; offset += 4) {
+        const red = mask.data[offset] ?? 0;
+        const green = mask.data[offset + 1] ?? 0;
+        const blue = mask.data[offset + 2] ?? 0;
+        const alpha = mask.data[offset + 3] ?? 0;
+        pixelValues.add(`${red},${green},${blue},${alpha}`);
+        if (alpha > 0) paintedPixelCount += 1;
+      }
+
+      const alphaAt = (x: number, y: number): number =>
+        mask.data[(y * mask.width + x) * 4 + 3] ?? 0;
+      assert.deepEqual(
+        [...pixelValues].sort(),
+        ["0,0,0,0", "255,255,255,255"],
+        `${assetName} binary coverage pixels`
+      );
+      assert.ok(paintedPixelCount > 0, `${assetName} painted coverage`);
+      assert.equal(alphaAt(0, 0), 0, `${assetName} top-left corner`);
+      assert.equal(alphaAt(mask.width - 1, 0), 0, `${assetName} top-right corner`);
+      assert.equal(alphaAt(0, mask.height - 1), 0, `${assetName} bottom-left corner`);
+      assert.equal(
+        alphaAt(Math.round(mask.width / 2), Math.round(mask.height / 2)),
+        0,
+        `${assetName} screen center`
+      );
+    }
+  });
+
+  it("keeps every paint mask within exact native frame geometry", () => {
+    const geometry = PNG.sync.read(readFileSync(metalMaskPath));
+    for (const assetName of opaquePaintMaskNames) {
+      const mask = PNG.sync.read(readFileSync(join(botFramePublicDir, assetName)));
+      assert.equal(mask.width, geometry.width, `${assetName} native width`);
+      assert.equal(mask.height, geometry.height, `${assetName} native height`);
+      for (let offset = 0; offset < mask.data.length; offset += 4) {
+        const maskAlpha = mask.data[offset + 3] ?? 0;
+        const geometryAlpha = geometry.data[offset + 3] ?? 0;
+        if (maskAlpha > 0) {
+          assert.ok(
+            geometryAlpha >= 128,
+            `${assetName} paints outside native geometry at pixel ${offset / 4}`
+          );
+        }
+      }
+    }
+    assert.match(
+      pageSource,
+      /finishRecipe\.paintMaskAsset\}\?v=1003/
+    );
   });
 
   it("keeps the metal frame mask alpha-transparent outside the ring", () => {
@@ -1000,10 +1074,14 @@ describe("Zen live presence CSS", () => {
     assert.match(frameRule, /border-radius:\s*50%\s*;/);
     assert.match(frameRule, /clip-path:\s*circle\(50% at 50% 50%\)\s*;/);
     assert.doesNotMatch(frameRule, /coffee-plate-emoji-face-scale-y/);
-    assert.match(pageSource, /className=\{styles\.botFaceFrameLed\}/);
+    assert.equal(
+      pageSource.match(/className=\{styles\.botFaceFrameLed\}/g)?.length,
+      1,
+      "one top-level LED layer"
+    );
     assert.match(
       pageSource,
-      /function BotFaceFrame\(\{[\s\S]*metalMaterialStyle[\s\S]*<BotFaceScreenFill \/>[\s\S]*className=\{styles\.botFaceFrame\} style=\{metalMaterialStyle\}[\s\S]*botFaceFrameTint[\s\S]*botFaceFramePaintLayer[\s\S]*data-frame-material-layer="paint"[\s\S]*botFaceFrameWearLayer[\s\S]*data-frame-material-layer="wear"[\s\S]*botFaceFrameMetalScratchLayer[\s\S]*data-frame-material-layer="scratches"[\s\S]*botFaceFrameLed[\s\S]*className=\{styles\.botFaceFrameMetalLight\}/
+      /function BotFaceFrame\(\{[\s\S]*metalMaterialStyle[\s\S]*<BotFaceScreenFill \/>[\s\S]*className=\{styles\.botFaceFrame\} style=\{metalMaterialStyle\}[\s\S]*botFaceFrameTint[\s\S]*botFaceFrameWearLayer[\s\S]*data-frame-material-layer="wear"[\s\S]*botFaceFrameMetalScratchLayer[\s\S]*data-frame-material-layer="scratches"[\s\S]*className=\{styles\.botFaceFrameMetalLight\}[\s\S]*botFaceFramePaintLayer[\s\S]*style=\{metalMaterialStyle\}[\s\S]*data-frame-material-layer="paint"[\s\S]*botFaceFrameLed/
     );
     assert.match(
       pageSource,
@@ -1014,7 +1092,7 @@ describe("Zen live presence CSS", () => {
     assert.match(scratchRule, /inset:\s*-9%\s*;/);
     assert.match(scratchRule, /linear-gradient\(104deg/);
     assert.match(scratchRule, /opacity:\s*var\(--bot-face-metal-scratch-opacity\)\s*;/);
-    assert.match(scratchRule, /mix-blend-mode:\s*soft-light\s*;/);
+    assert.match(scratchRule, /mix-blend-mode:\s*exclusion\s*;/);
     assert.doesNotMatch(scratchRule, /z-index:/);
     assert.match(scratchRule, /filter:\s*contrast\(var\(--bot-face-metal-scratch-contrast\)\) brightness\(1\.08\)\s*;/);
     assert.match(scratchRule, /-webkit-mask-image:\s*var\(--bot-face-metal-scratch-mask-image\)\s*;/);
@@ -1035,6 +1113,68 @@ describe("Zen live presence CSS", () => {
     assert.match(
       finishMaskRule,
       /transform:\s*scaleX\(var\(--bot-face-frame-finish-scale-x\)\)\s*;/
+    );
+
+    const paintRule = ruleForSelectorNeedlesWithBody(
+      [".botFaceFramePaintLayer"],
+      "--bot-face-frame-paint-z"
+    );
+    assert.match(paintRule, /z-index:\s*var\(--bot-face-frame-paint-z,\s*7\)\s*;/);
+    assert.match(
+      paintRule,
+      /--bot-face-frame-paint-substrate-image,[\s\S]*?url\("\/bot-frame\/bot-frame-base\.png\?v=1000"\)[\s\S]*?center \/ contain no-repeat,[\s\S]*?#a3a3a3\s*;/
+    );
+    assert.match(paintRule, /background-blend-mode:\s*soft-light\s*;/);
+    assert.match(paintRule, /isolation:\s*isolate\s*;/);
+    assert.match(paintRule, /mix-blend-mode:\s*normal\s*;/);
+    assert.match(
+      paintRule,
+      /var\(--bot-face-frame-paint-strength,\s*0\)[\s\S]*?var\(--bot-face-frame-paint-theme-gain,\s*1\)/
+    );
+    assert.match(
+      paintRule,
+      /mask-image:\s*var\(--bot-face-frame-paint-mask-image,\s*none\)\s*;/
+    );
+    assert.match(
+      css,
+      /--bot-face-frame-paint-theme-gain:\s*1;/
+    );
+
+    const paintColorRule = ruleForExactSelector(".botFaceFramePaintLayer::before");
+    assert.match(paintColorRule, /content:\s*""\s*;/);
+    assert.match(paintColorRule, /background:\s*currentColor\s*;/);
+    assert.match(paintColorRule, /opacity:\s*1\s*;/);
+    assert.match(
+      paintColorRule,
+      /mix-blend-mode:\s*var\(--bot-face-frame-paint-color-blend-mode,\s*multiply\)\s*;/
+    );
+    assert.doesNotMatch(paintColorRule, /bot-frame-metal\.png/);
+    assert.doesNotMatch(paintColorRule, /blur\(/);
+    assert.doesNotMatch(paintColorRule, /bot-face-metal-light-rotation/);
+
+    const paintPlasticLightRule = ruleForExactSelector(".botFaceFramePaintLayer::after");
+    assert.match(paintPlasticLightRule, /content:\s*""\s*;/);
+    assert.match(paintPlasticLightRule, /linear-gradient\(\s*110deg/);
+    assert.match(
+      paintPlasticLightRule,
+      /opacity:\s*var\(--bot-face-frame-paint-plastic-light-opacity,\s*0\.28\)\s*;/
+    );
+    assert.match(
+      paintPlasticLightRule,
+      /mix-blend-mode:\s*var\(--bot-face-frame-paint-plastic-light-blend-mode,\s*screen\)\s*;/
+    );
+    assert.match(
+      paintPlasticLightRule,
+      /blur\(var\(--bot-face-frame-paint-plastic-light-blur,\s*14px\)\)/
+    );
+    assert.match(
+      paintPlasticLightRule,
+      /rotate\(var\(--bot-face-metal-light-rotation,\s*0deg\)\)[\s\S]*?scale\(1\.12\)/
+    );
+    assert.doesNotMatch(paintPlasticLightRule, /bot-frame-metal\.png/);
+    assert.match(
+      css,
+      /\.themeLight \.botFaceFramePaintLayer,[\s\S]*?--bot-face-frame-paint-substrate-image:\s*url\("\/bot-frame\/bot-frame-light-base\.png\?v=1000"\)\s*;/
     );
 
     const ambientGlowRule = ruleForExactSelector(".zenLiveBotPresenceFace::before");
@@ -1154,6 +1294,14 @@ describe("Zen live presence CSS", () => {
 
     const ledRule = ruleForExactSelector(".botFaceFrameLed");
     assert.match(ledRule, /background:\s*url\("\/bot-frame\/bot-frame-led\.png\?v=1000"\)\s*center\s*\/\s*contain\s*no-repeat/);
+    assert.match(ledRule, /inset:\s*var\(--bot-face-frame-inset,\s*-7%\)\s*;/);
+    assert.match(ledRule, /z-index:\s*var\(--bot-face-frame-led-z,\s*8\)\s*;/);
+    assert.match(ledRule, /overflow:\s*hidden\s*;/);
+    assert.match(ledRule, /clip-path:\s*circle\(50% at 50% 50%\)\s*;/);
+    assert.match(
+      ledRule,
+      /mix-blend-mode:\s*var\(--bot-face-frame-led-blend-mode,\s*plus-lighter\)\s*;/
+    );
     assert.doesNotMatch(ledRule, /mask-image/);
   });
 
@@ -1251,7 +1399,7 @@ describe("Zen live presence CSS", () => {
       pageSource,
       /normalizeCrtSpeechText\(getBotMentionDisplayText\(displayContent\)\)/
     );
-    assert.match(pageSource, /zenLiveBotMouthShapeFromVisibleTextProgress\(/);
+    assert.match(pageSource, /zenLiveBotMouthShapeFromRevealProgress\(/);
     assert.match(
       pageSource,
       /plateFace \?\? zenLiveActionPlateFace\(moodHint, displayedMouthShape\)/

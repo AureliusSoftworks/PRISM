@@ -34,6 +34,7 @@ import { LUCIDE_BOT_GLYPHS, LUCIDE_BOT_GLYPH_ORDER } from "./glyphCatalog";
 import GlyphTooltipLayer from "./GlyphTooltipLayer";
 import { BackendUnavailableNotice } from "./BackendUnavailableNotice";
 import {
+  BOT_FRAME_FINISH_RECIPES,
   PRISM_FACTORY_CLEAN_FRAME_SEED,
   botFrameFinishForSeed,
   botFrameFinishMirroredForSeed,
@@ -125,6 +126,7 @@ import {
 } from "./coffee-seat-gaze";
 import {
   COFFEE_SEAT_SIP_FACE_ACTIVE_PROGRESS,
+  coffeeSeatMouthShapeFromVisibleLength,
   coffeeSeatPlateGlyph,
   resolveCoffeeSeatSipFacePresentation,
   type CoffeeSeatEmojiMood,
@@ -328,10 +330,7 @@ import {
   type BotBatchEditValues,
 } from "./botBatchEdit";
 import { LensTile } from "./LensTile";
-import {
-  fillMissingBotAudioVoiceIdentities,
-  randomizeBotAudioVoiceProfile,
-} from "./botVoiceRandomizer";
+import { randomizeBotAudioVoiceProfile } from "./botVoiceRandomizer";
 import {
   CircleHelp,
   BarChart3,
@@ -363,6 +362,7 @@ import {
   Recycle,
   RotateCcw,
   ScanLine,
+  Settings,
   SkipBack,
   SkipForward,
   Smile,
@@ -383,6 +383,15 @@ import { SettingsPanel, type SettingsLeafScope, type SettingsScope } from "./Set
 import {
   BOT_FACT_KEY_LABELS,
   BOT_FACE_BLINK_BAR_VALUES,
+  BOT_FACE_BLINK_OFFSET_X_MAX,
+  BOT_FACE_BLINK_OFFSET_X_MIN,
+  BOT_FACE_BLINK_OFFSET_X_STEP,
+  BOT_FACE_BLINK_OFFSET_Y_MAX,
+  BOT_FACE_BLINK_OFFSET_Y_MIN,
+  BOT_FACE_BLINK_OFFSET_Y_STEP,
+  BOT_FACE_BLINK_SCALE_MAX,
+  BOT_FACE_BLINK_SCALE_MIN,
+  BOT_FACE_BLINK_SCALE_STEP,
   BOT_FACE_EYE_OFFSET_X_MAX,
   BOT_FACE_EYE_OFFSET_X_MIN,
   BOT_FACE_EYE_OFFSET_X_STEP,
@@ -416,6 +425,9 @@ import {
   classifyMemoryCategoryFromText,
   defaultBotPurpose,
   DEFAULT_BOT_FACE_BLINK_BAR,
+  DEFAULT_BOT_FACE_BLINK_OFFSET_X,
+  DEFAULT_BOT_FACE_BLINK_OFFSET_Y,
+  DEFAULT_BOT_FACE_BLINK_SCALE,
   DEFAULT_BOT_FACE_EYE_CHARACTER,
   DEFAULT_BOT_FACE_EYE_OFFSET_X,
   DEFAULT_BOT_FACE_EYE_OFFSET_Y,
@@ -458,6 +470,9 @@ import {
   memoryQualifiesLongTerm,
   normalizeCoffeeSessionSettings,
   normalizeBotFaceBlinkBar,
+  normalizeBotFaceBlinkOffsetX,
+  normalizeBotFaceBlinkOffsetY,
+  normalizeBotFaceBlinkScale,
   normalizeBotFaceEyeCharacter,
   normalizeBotFaceEyeOffsetX,
   normalizeBotFaceEyeOffsetY,
@@ -728,7 +743,6 @@ import {
   normalizeCrtSpeechText,
   zenLiveBotMouthShapeForTalkingState,
   zenLiveBotMouthShapeFromRevealProgress,
-  zenLiveBotMouthShapeFromVisibleTextProgress,
   type ZenLiveBotMouthShape,
 } from "./zenLiveMouth";
 import {
@@ -805,6 +819,9 @@ import {
 } from "./speechRevealTimeline";
 import {
   buildCoffeeDeliveryPlan,
+  COFFEE_DELIVERY_MAX_DURATION_MS,
+  COFFEE_DELIVERY_MIN_DURATION_MS,
+  COFFEE_DELIVERY_MOOD_CHARACTERS_PER_SECOND,
   coffeeDeliveryIsHoldingAtMs,
   coffeeDeliveryVisibleLengthAtMs,
 } from "./coffee-speech-delivery";
@@ -6018,14 +6035,10 @@ const COFFEE_TRANSCRIPT_CLOSE_MS = 180;
 const COFFEE_SEND_COOLDOWN_MS = 2200;
 const COFFEE_CUP_REFILL_SIP_LOCK_MS = 3_200;
 const ZEN_SUCCESSIVE_MESSAGE_CONTEXT_LIMIT = 6;
-const COFFEE_BOT_REVEAL_DELAY_MIN_MS = 280;
-const COFFEE_BOT_REVEAL_DELAY_MAX_MS = 12000;
+const COFFEE_BOT_REVEAL_DELAY_MIN_MS = COFFEE_DELIVERY_MIN_DURATION_MS;
+const COFFEE_BOT_REVEAL_DELAY_MAX_MS = COFFEE_DELIVERY_MAX_DURATION_MS;
 const COFFEE_MOOD_TYPEWRITER_CHARS_PER_SECOND: Record<BotMoodKey, number> = {
-  joyful: 20,
-  warm: 16,
-  neutral: 12,
-  guarded: 9,
-  strained: 7,
+  ...COFFEE_DELIVERY_MOOD_CHARACTERS_PER_SECOND,
 };
 const COFFEE_INTERRUPTION_CUE_HIDE_MS = 3200;
 const COFFEE_INTERRUPTED_SNIPPET_HIDE_MS = 9000;
@@ -7321,8 +7334,6 @@ function collectGeneratedImageIds(messages: readonly Message[]): string[] {
   return ids;
 }
 
-/** Advance the Coffee mouth state with every newly revealed character. */
-const COFFEE_SEAT_MOUTH_CHARS_PER_PHASE = 1;
 const COFFEE_SEAT_MOOD_PULSE_MS = 8_000;
 
 function coffeeSeatStableHash(text: string): number {
@@ -7332,17 +7343,6 @@ function coffeeSeatStableHash(text: string): number {
     hash = Math.imul(hash, 16_777_619);
   }
   return hash >>> 0;
-}
-
-function coffeeSeatMouthShapeFromVisibleLength(
-  visibleLength: number,
-  speechSeedText: string
-): ZenLiveBotMouthShape {
-  return zenLiveBotMouthShapeFromVisibleTextProgress({
-    text: speechSeedText,
-    visibleLength,
-    charactersPerPhase: COFFEE_SEAT_MOUTH_CHARS_PER_PHASE,
-  });
 }
 
 function lastCoffeeAssistantMoodKeyForBotName(
@@ -7531,6 +7531,12 @@ type BotFaceStyleSource = {
   faceMouthRotationDeg?: unknown;
   face_blink_bar?: unknown;
   faceBlinkBar?: unknown;
+  face_blink_scale?: unknown;
+  faceBlinkScale?: unknown;
+  face_blink_offset_x?: unknown;
+  faceBlinkOffsetX?: unknown;
+  face_blink_offset_y?: unknown;
+  faceBlinkOffsetY?: unknown;
   face_thinking_frames?: unknown;
   faceThinkingFrames?: unknown;
 };
@@ -7569,6 +7575,9 @@ function resolveBotFaceStyleForBot(
       faceMouthRotationDeg:
         bot?.face_mouth_rotation_deg ?? bot?.faceMouthRotationDeg,
       faceBlinkBar: bot?.face_blink_bar ?? bot?.faceBlinkBar,
+      faceBlinkScale: bot?.face_blink_scale ?? bot?.faceBlinkScale,
+      faceBlinkOffsetX: bot?.face_blink_offset_x ?? bot?.faceBlinkOffsetX,
+      faceBlinkOffsetY: bot?.face_blink_offset_y ?? bot?.faceBlinkOffsetY,
       faceThinkingFrames: parseStoredBotFaceThinkingFrames(
         bot?.face_thinking_frames ?? bot?.faceThinkingFrames
       ),
@@ -7629,6 +7638,7 @@ function botFrameMetalMaterialStyle(seed: string | null | undefined): CSSPropert
   const normalizedSeed = seed?.trim();
   if (!normalizedSeed) return undefined;
   const finish = botFrameFinishForSeed(normalizedSeed);
+  const finishRecipe = BOT_FRAME_FINISH_RECIPES[finish];
   const finishMirrored = botFrameFinishMirroredForSeed(normalizedSeed);
   const rotationDeg = Math.round(stableUnitValue(`${normalizedSeed}:metal-scratch:rotation`) * 360);
   const offsetX = ((stableUnitValue(`${normalizedSeed}:metal-scratch:x`) - 0.5) * 10).toFixed(2);
@@ -7636,33 +7646,24 @@ function botFrameMetalMaterialStyle(seed: string | null | undefined): CSSPropert
   const scale = (1.08 + stableUnitValue(`${normalizedSeed}:metal-scratch:scale`) * 0.14).toFixed(3);
   const scuffOpacity = (0.12 + stableUnitValue(`${normalizedSeed}:metal-scratch:opacity`) * 0.08).toFixed(3);
   const contrast = (1.08 + stableUnitValue(`${normalizedSeed}:metal-scratch:contrast`) * 0.18).toFixed(3);
-  const paintMaskImage =
-    finish === "band"
-      ? 'url("/bot-frame/bot-frame-broken-band-mask.png?v=1000")'
-      : finish === "stripe"
-        ? 'url("/bot-frame/bot-frame-offset-stripe-mask.png?v=1000")'
-        : "none";
-  const wearMaskImage =
-    finish === "chipped"
-      ? 'url("/bot-frame/bot-frame-chipped-paint-mask.png?v=1000")'
-      : "none";
+  const paintMaskImage = finishRecipe.paintMaskAsset
+    ? `url("/bot-frame/${finishRecipe.paintMaskAsset}?v=1003")`
+    : "none";
+  const wearMaskImage = finishRecipe.wearMaskAsset
+    ? `url("/bot-frame/${finishRecipe.wearMaskAsset}?v=1000")`
+    : "none";
   const scratchOpacity =
-    finish === "scuffed"
+    finishRecipe.scratchOpacity === "seeded"
       ? scuffOpacity
-      : finish === "chipped"
-        ? "0.05"
-        : finish === "band" || finish === "stripe"
-          ? "0.035"
-          : "0";
+      : String(finishRecipe.scratchOpacity);
 
   return {
     ["--bot-face-frame-finish" as string]: finish,
     ["--bot-face-frame-finish-scale-x" as string]: finishMirrored ? "-1" : "1",
     ["--bot-face-frame-paint-mask-image" as string]: paintMaskImage,
-    ["--bot-face-frame-paint-strength" as string]:
-      finish === "band" ? "0.58" : finish === "stripe" ? "0.64" : "0",
+    ["--bot-face-frame-paint-strength" as string]: String(finishRecipe.paintStrength),
     ["--bot-face-frame-wear-mask-image" as string]: wearMaskImage,
-    ["--bot-face-frame-wear-strength" as string]: finish === "chipped" ? "0.52" : "0",
+    ["--bot-face-frame-wear-strength" as string]: String(finishRecipe.wearStrength),
     ["--bot-face-metal-scratch-rotation" as string]: `${rotationDeg}deg`,
     ["--bot-face-metal-scratch-x" as string]: `${offsetX}%`,
     ["--bot-face-metal-scratch-y" as string]: `${offsetY}%`,
@@ -7820,6 +7821,20 @@ const ZEN_CANVAS_SPEED_NUDGE_EXCLUDED_TARGET_SELECTOR = [
   "[data-bot-id]",
   "[data-dev-panel-safe-area]",
   "[data-zen-pending-reply-placeholder]",
+].join(", ");
+const COFFEE_TABLE_SPEED_NUDGE_EXCLUDED_TARGET_SELECTOR = [
+  "button",
+  "a",
+  "input",
+  "textarea",
+  "select",
+  "[contenteditable='true']",
+  "summary",
+  "[role='button']",
+  "[role='menu']",
+  "[role='menuitem']",
+  "[role='option']",
+  "[data-dev-panel-safe-area]",
 ].join(", ");
 const CHAT_MODE_USER_QUESTION_PATTERN =
   /\?\s*$|^(?:who|what|when|where|why|how|can|could|would|should|is|are|do|does|did)\b/i;
@@ -9430,6 +9445,9 @@ interface UserSettings {
   prismDefaultBotFaceMouthOffsetY: number;
   prismDefaultBotFaceMouthRotationDeg: number;
   prismDefaultBotFaceBlinkBar: BotFaceBlinkBar;
+  prismDefaultBotFaceBlinkScale: number;
+  prismDefaultBotFaceBlinkOffsetX: number;
+  prismDefaultBotFaceBlinkOffsetY: number;
   prismDefaultBotFaceThinkingFrames: BotFaceThinkingFrames;
   prismDefaultBotAudioVoiceProfile: BotAudioVoiceProfileV1;
   prismDefaultBotTemperature: number;
@@ -9471,6 +9489,23 @@ interface UserSettings {
   comfyUiWorkflows: ComfyUiWorkflowRegistration[];
   devMemoriesEnabled: boolean;
   devMemoriesText: string;
+}
+
+function resolveVoicePreviewProfileWithGlobalDefaults(
+  profile: unknown,
+  settings: Pick<
+    UserSettings,
+    "defaultSystemVoiceName" | "defaultElevenLabsVoiceId"
+  >
+): BotAudioVoiceProfileV1 {
+  const normalized = normalizeBotAudioVoiceProfileV1(profile);
+  return normalizeBotAudioVoiceProfileV1({
+    ...normalized,
+    systemVoiceName:
+      normalized.systemVoiceName ?? settings.defaultSystemVoiceName,
+    elevenLabsVoiceId:
+      normalized.elevenLabsVoiceId ?? settings.defaultElevenLabsVoiceId,
+  });
 }
 
 interface ElevenLabsVoiceCatalogEntry {
@@ -9934,6 +9969,7 @@ interface Bot {
   id: string;
   name: string;
   system_prompt: string;
+  voice_preview_line?: string | null;
   export_hash?: string | null;
   model: string | null;
   local_model: string | null;
@@ -9966,6 +10002,9 @@ interface Bot {
   face_mouth_offset_y?: number | null;
   face_mouth_rotation_deg?: number | null;
   face_blink_bar?: string | null;
+  face_blink_scale?: number | null;
+  face_blink_offset_x?: number | null;
+  face_blink_offset_y?: number | null;
   face_thinking_frames?: string | null;
   avatarDetails?: BotAvatarDetailsV1 | null;
   avatar_details_json?: unknown;
@@ -9993,7 +10032,8 @@ function BotVoiceEditor({
   onPreview: (
     profile: BotAudioVoiceProfileV1,
     forcedMode?: Exclude<VoiceMode, "mute">,
-    previewText?: string
+    previewText?: string,
+    options?: VoicePreviewPlaybackOptions
   ) => Promise<void>;
 }): React.JSX.Element {
   const normalizedProfile = {
@@ -10001,6 +10041,10 @@ function BotVoiceEditor({
     texture: DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1.texture,
   };
   const [previewing, setPreviewing] = useState<"bottish" | "english" | null>(null);
+  const [englishPreviewState, setEnglishPreviewState] = useState<
+    "idle" | "generating" | "ready" | "playing"
+  >("idle");
+  const englishReadyCacheKeyRef = useRef<string | null>(null);
   const previewRunRef = useRef(0);
   const selectedVoiceValue = identityCatalog.engine === "builtin"
     ? normalizedProfile.systemVoiceName ?? ""
@@ -10022,12 +10066,43 @@ function BotVoiceEditor({
     const runId = previewRunRef.current + 1;
     previewRunRef.current = runId;
     setPreviewing(mode);
+    let failed = false;
     try {
       const previewText = await resolvePreviewText();
       if (previewRunRef.current !== runId) return;
-      await onPreview(normalizedProfile, mode, previewText);
+      const cacheKey = [
+        "bot-editor",
+        identityCatalog.engine,
+        previewText,
+        JSON.stringify(normalizedProfile),
+      ].join(":");
+      const generateOnly = mode === "english" && englishReadyCacheKeyRef.current !== cacheKey;
+      if (mode === "english") {
+        setEnglishPreviewState(generateOnly ? "generating" : "playing");
+      }
+      await onPreview(
+        normalizedProfile,
+        mode,
+        previewText,
+        mode === "english"
+          ? {
+              cacheKey,
+              generateOnly,
+              onError: () => {
+                failed = true;
+              },
+            }
+          : undefined
+      );
+      if (mode === "english" && !failed && previewRunRef.current === runId) {
+        englishReadyCacheKeyRef.current = cacheKey;
+        setEnglishPreviewState("ready");
+      }
     } finally {
-      if (previewRunRef.current === runId) setPreviewing(null);
+      if (previewRunRef.current === runId) {
+        setPreviewing(null);
+        if (mode === "english" && failed) setEnglishPreviewState("idle");
+      }
     }
   };
   const randomizeVoice = (): void => {
@@ -10145,7 +10220,13 @@ function BotVoiceEditor({
         </button>
         <button type="button" onClick={() => void previewVoice("english")}>
           <Play size={13} strokeWidth={2.3} aria-hidden="true" />
-          {previewing === "english" ? "Restart English" : "Preview English"}
+          {englishPreviewState === "generating"
+            ? "Generating audio sample…"
+            : englishPreviewState === "playing"
+              ? "Playing English…"
+              : englishPreviewState === "ready"
+                ? "Play English"
+                : "Preview English"}
         </button>
       </div>
     </div>
@@ -10187,6 +10268,9 @@ type BotEditOriginalSnapshot = {
   faceMouthOffsetY: number;
   faceMouthRotationDeg: number;
   faceBlinkBar: BotFaceBlinkBar;
+  faceBlinkScale: number;
+  faceBlinkOffsetX: number;
+  faceBlinkOffsetY: number;
   faceThinkingFrames: BotFaceThinkingFrames;
   avatarDetails: BotAvatarDetailsV1 | null;
   profilePictureImageId: string | null;
@@ -10214,6 +10298,9 @@ type BotAvatarDraftSnapshot = Pick<
   | "faceMouthOffsetY"
   | "faceMouthRotationDeg"
   | "faceBlinkBar"
+  | "faceBlinkScale"
+  | "faceBlinkOffsetX"
+  | "faceBlinkOffsetY"
   | "faceThinkingFrames"
   | "avatarDetails"
   | "audioVoiceProfile"
@@ -10528,7 +10615,19 @@ function prepareBotArchivePayload(
       ),
       faceBlinkBar:
         normalizeBotFaceBlinkBar(parsedBot.faceBlinkBar) ?? DEFAULT_BOT_FACE_BLINK_BAR,
+      faceBlinkScale:
+        normalizeBotFaceBlinkScale(parsedBot.faceBlinkScale) ?? DEFAULT_BOT_FACE_BLINK_SCALE,
+      faceBlinkOffsetX:
+        normalizeBotFaceBlinkOffsetX(parsedBot.faceBlinkOffsetX) ??
+        DEFAULT_BOT_FACE_BLINK_OFFSET_X,
+      faceBlinkOffsetY:
+        normalizeBotFaceBlinkOffsetY(parsedBot.faceBlinkOffsetY) ??
+        DEFAULT_BOT_FACE_BLINK_OFFSET_Y,
       faceThinkingFrames: normalizeBotFaceThinkingFrames(parsedBot.faceThinkingFrames),
+      voicePreviewLine:
+        typeof parsedBot.voicePreviewLine === "string" && parsedBot.voicePreviewLine.trim()
+          ? parsedBot.voicePreviewLine.trim()
+          : null,
       authoredAudioVoiceProfile: normalizeBotAudioVoiceProfileV1(parsedBot.authoredAudioVoiceProfile),
       audioVoiceProfileOverride: normalizeOptionalBotAudioVoiceProfileV1(
         parsedBot.audioVoiceProfileOverride
@@ -12125,6 +12224,17 @@ const DEFAULT_PRISM_VOICE_PREVIEW_LINES: Record<BotAudioVoiceId, string> = {
   "voice-4": "Hello from Prism; hear how this voice carries one complete sentence.",
   "voice-5": "Audio check passed; this sample reveals the voice's pace, tone, and character.",
 };
+
+type BotHubVoicePreviewStatus = "idle" | "generating" | "playing" | "complete" | "error";
+const DEFAULT_PRISM_SHOWCASE_VOICE_ID = "default-prism";
+const BOT_HUB_VOICE_CLICK_FEEDBACK_MS = 1400;
+
+interface VoicePreviewPlaybackOptions {
+  cacheKey?: string;
+  generateOnly?: boolean;
+  onPlaybackStart?: () => void;
+  onError?: (message: string) => void;
+}
 
 function blankBotProfile(): BotProfileFields {
   return parseStoredBotPrompt("").fields;
@@ -15026,11 +15136,6 @@ function BotFaceFrame({
       <span className={styles.botFaceFrame} style={metalMaterialStyle} aria-hidden="true">
         <span className={styles.botFaceFrameTint} />
         <span
-          className={styles.botFaceFramePaintLayer}
-          data-frame-material-layer="paint"
-          aria-hidden="true"
-        />
-        <span
           className={styles.botFaceFrameWearLayer}
           data-frame-material-layer="wear"
           aria-hidden="true"
@@ -15040,11 +15145,17 @@ function BotFaceFrame({
           data-frame-material-layer="scratches"
           aria-hidden="true"
         />
-        <span className={styles.botFaceFrameLed} />
       </span>
       <span className={styles.botFaceFrameMetalLight} aria-hidden="true">
         <span className={styles.botFaceFrameMetalLightRaster} />
       </span>
+      <span
+        className={styles.botFaceFramePaintLayer}
+        style={metalMaterialStyle}
+        data-frame-material-layer="paint"
+        aria-hidden="true"
+      />
+      <span className={styles.botFaceFrameLed} aria-hidden="true" />
     </>
   );
 }
@@ -15131,6 +15242,9 @@ function MessageMoodFace(props: {
         faceMouthOffsetY={props.faceStyle?.mouthOffsetY}
         faceMouthRotationDeg={props.faceStyle?.mouthRotationDeg}
         faceBlinkBar={props.faceStyle?.blinkBar}
+        faceBlinkScale={props.faceStyle?.blinkScale}
+        faceBlinkOffsetX={props.faceStyle?.blinkOffsetX}
+        faceBlinkOffsetY={props.faceStyle?.blinkOffsetY}
         faceThinkingFrames={props.faceStyle?.thinkingFrames}
         className={styles.messageMoodCoffeeFace}
       />
@@ -19254,6 +19368,7 @@ interface ComposerModelPickerProps {
   options: ModelCatalogEntry[];
   provider: ComposerModelPickerProvider;
   disabled?: boolean;
+  loading?: boolean;
   title?: string;
   ariaLabel: string;
   formName?: string;
@@ -19297,6 +19412,7 @@ function ComposerModelPicker({
   options,
   provider,
   disabled,
+  loading = false,
   title,
   ariaLabel,
   formName,
@@ -19335,15 +19451,17 @@ function ComposerModelPicker({
     options.find((model) => model.isDefault) ??
     options[0] ??
     null;
-  const selectedLabel =
-    mixedSelected
+  const selectedLabel = loading
+    ? "Loading models…"
+    : mixedSelected
       ? mixedOptionLabel
       : value === autoOptionValue
       ? autoOptionLabel
       : disabledSelected
         ? disabledOptionLabel
       : selectedModel?.label ?? value;
-  const menuOpen = open && !disabled;
+  const interactionDisabled = disabled || loading;
+  const menuOpen = open && !interactionDisabled;
   const menuPortalStyle = useComposeMenuPortalStyle(
     menuOpen,
     triggerRef,
@@ -19389,10 +19507,10 @@ function ComposerModelPicker({
   }, [menuOpen]);
 
   useEffect(() => {
-    if (!disabled || !open) return;
+    if (!interactionDisabled || !open) return;
     const timeout = window.setTimeout(() => setOpen(false), 0);
     return () => window.clearTimeout(timeout);
-  }, [disabled, open]);
+  }, [interactionDisabled, open]);
 
   useEffect(() => {
     if (dismissPopoversSignal === undefined) return;
@@ -19429,7 +19547,8 @@ function ComposerModelPicker({
   return (
     <div
       className={styles.composeModelControl}
-      data-disabled={disabled ? "true" : undefined}
+      data-disabled={interactionDisabled ? "true" : undefined}
+      data-loading={loading ? "true" : undefined}
       data-open={menuOpen ? "true" : undefined}
       data-provider={provider}
     >
@@ -19446,11 +19565,12 @@ function ComposerModelPicker({
         type="button"
         className={styles.composeModelTrigger}
         onClick={() => setOpen((current) => !current)}
-        disabled={disabled}
-        data-glyph-tooltip={title}
+        disabled={interactionDisabled}
+        data-glyph-tooltip={loading ? "Models are still loading." : title}
         aria-haspopup="listbox"
         aria-expanded={menuOpen}
-        aria-label={ariaLabel}
+        aria-label={loading ? `${ariaLabel}. Models are still loading.` : ariaLabel}
+        aria-busy={loading ? "true" : undefined}
       >
         <span className={styles.composeControlLabel}>Model</span>
         <span className={styles.composeModelTriggerName}>
@@ -19474,6 +19594,11 @@ function ComposerModelPicker({
           </svg>
         </span>
       </button>
+      {loading ? (
+        <span className={styles.srOnly} role="status" aria-live="polite">
+          Models are still loading.
+        </span>
+      ) : null}
       {menuOpen &&
         menuPortalStyle &&
         typeof document !== "undefined" &&
@@ -25105,6 +25230,9 @@ function ZenLiveBotMannequin({
               faceMouthOffsetY={faceStyle.mouthOffsetY}
               faceMouthRotationDeg={faceStyle.mouthRotationDeg}
               faceBlinkBar={faceStyle.blinkBar}
+              faceBlinkScale={faceStyle.blinkScale}
+              faceBlinkOffsetX={faceStyle.blinkOffsetX}
+              faceBlinkOffsetY={faceStyle.blinkOffsetY}
               faceThinkingFrames={faceStyle.thinkingFrames}
               className={`${styles.coffeeSeatPlateEmoji} ${styles.zenLiveBotPresenceThinkingGlyph}`}
             />
@@ -25139,6 +25267,9 @@ function ZenLiveBotMannequin({
               faceMouthOffsetY={faceStyle.mouthOffsetY}
               faceMouthRotationDeg={faceStyle.mouthRotationDeg}
               faceBlinkBar={faceStyle.blinkBar}
+              faceBlinkScale={faceStyle.blinkScale}
+              faceBlinkOffsetX={faceStyle.blinkOffsetX}
+              faceBlinkOffsetY={faceStyle.blinkOffsetY}
               faceThinkingFrames={faceStyle.thinkingFrames}
               forceBlinkPhase={forceBlinkPhase}
               className={`${styles.coffeeSeatPlateEmoji} ${styles.zenLiveBotPresenceFaceGlyph}`}
@@ -25201,6 +25332,7 @@ function ZenLiveBotPresencePlate({
   onContextMenuRequest?: (x: number, y: number) => void;
 }): React.JSX.Element | null {
   const botName = bot?.name?.trim() || "Prism";
+  const defaultPrismPresence = bot === null;
   const liveBotGlyphName: BotGlyphName =
     bot && isBotGlyphName(bot.glyph) ? bot.glyph : defaultPrismGlyph;
   const bodySize = normalizeZenLiveBotAvatarSizePx(avatarSizePx);
@@ -26108,7 +26240,6 @@ function ZenLiveBotPresencePlate({
   ) {
     return null;
   }
-  const defaultPrismPresence = bot === null;
   const moodHint =
     actionState?.moodHint ?? (bot ? "warm" : userActionVisible ? "attentive" : "warm");
   const voicePreset = coffeeSeatVoicePreset(bot);
@@ -30306,6 +30437,8 @@ interface BotProfileBuilderProps {
   activePage: BotProfileBuilderPageId;
   profile: BotProfileFields;
   botName: string;
+  studioLayer?: boolean;
+  onRandomizePersonality?: () => void;
   onActivePageChange: (page: BotProfileBuilderPageId) => void;
   onProfileChange: (updater: (profile: BotProfileFields) => BotProfileFields) => void;
   onClose: () => void;
@@ -30314,6 +30447,7 @@ interface BotProfileBuilderProps {
 interface BotAiParameterCustomizerProps {
   open: boolean;
   botName: string;
+  studioLayer?: boolean;
   systemPrompt: string;
   temperature: number;
   maxTokens: number;
@@ -30331,6 +30465,8 @@ interface BotAiParameterCustomizerProps {
 
 interface BotAvatarCustomizerModalProps {
   open: boolean;
+  profileEditorLayer?: React.ReactNode;
+  profileEditorLayerOpen?: boolean;
   botName: string;
   botNameDraft: string;
   onBotNameChange: (next: string) => void;
@@ -30342,6 +30478,10 @@ interface BotAvatarCustomizerModalProps {
   isDefaultPrismBot?: boolean;
   identityControlsVisible?: boolean;
   draftMode?: boolean;
+  initialTab?: BotAvatarCustomizerTab;
+  canSave?: boolean;
+  identityTools?: React.ReactNode;
+  settingsPanel?: React.ReactNode;
   colorPickerOpen: boolean;
   resolvedTheme: "light" | "dark";
   faceEyesFont: BotFaceFontId;
@@ -30360,13 +30500,24 @@ interface BotAvatarCustomizerModalProps {
   faceMouthOffsetY: number;
   faceMouthRotationDeg: number;
   faceBlinkBar: BotFaceBlinkBar;
+  faceBlinkScale: number;
+  faceBlinkOffsetX: number;
+  faceBlinkOffsetY: number;
   faceThinkingFrames: BotFaceThinkingFrames;
   avatarDetails: BotAvatarDetailsV1 | null;
   detailsEditorVisible?: boolean;
   audioVoiceProfile: BotAudioVoiceProfileV1;
   voiceMode: VoiceMode;
-  voiceEffectsEnabled: boolean;
   voiceIdentityCatalog: BotVoiceIdentityCatalog;
+  profile: BotProfileFields;
+  profileDetailsUnlocked: boolean;
+  profileAdvancedMode: boolean;
+  profileSystemPrompt: string;
+  profileTemperature: number;
+  profileMaxTokens: number;
+  profileTopP: number;
+  profileTopK: number;
+  profileRepetitionPenalty: number;
   hasUnsavedChanges: boolean;
   canUndo: boolean;
   saving: boolean;
@@ -30396,13 +30547,25 @@ interface BotAvatarCustomizerModalProps {
   onMouthOffsetYChange: (offsetY: number) => void;
   onMouthRotationDegChange: (rotationDeg: number) => void;
   onBlinkBarChange: (blinkBar: BotFaceBlinkBar) => void;
+  onBlinkScaleChange: (scale: number) => void;
+  onBlinkOffsetXChange: (offsetX: number) => void;
+  onBlinkOffsetYChange: (offsetY: number) => void;
   onThinkingFramesChange: (frames: BotFaceThinkingFrames) => void;
   onAvatarDetailsApply: (
     details: BotAvatarDetailsV1 | null
   ) => void | Promise<void>;
   onAudioVoiceProfileChange: (profile: BotAudioVoiceProfileV1) => void;
-  onVoicePreview: (profile: BotAudioVoiceProfileV1) => Promise<void>;
+  onVoicePreview: (
+    profile: BotAudioVoiceProfileV1,
+    forcedMode?: Exclude<VoiceMode, "mute">,
+    previewText?: string,
+    options?: VoicePreviewPlaybackOptions
+  ) => Promise<void>;
+  resolveVoicePreviewText: () => Promise<string>;
   onVoiceRestore: () => void;
+  onProfileModeChange: (advanced: boolean) => void;
+  onProfilePageOpen: (page: BotProfileBuilderPageId) => void;
+  onAiParametersOpen: () => void;
 }
 
 function optionalScaleLabel(
@@ -30690,9 +30853,11 @@ const BOT_AVATAR_PREVIEW_MOUTH_SHAPES = [
 type BotAvatarPreviewMode = "idle" | "blink" | "talking" | "thinking";
 type BotAvatarCustomizerTab =
   | "face"
+  | "profile"
   | "eyes"
   | "mouth"
   | "voice"
+  | "settings"
   | "motion"
   | "details";
 type BotAvatarFaceControlTab = Extract<
@@ -30728,9 +30893,11 @@ const BOT_AVATAR_PREVIEW_MOOD_LABELS: Record<(typeof BOT_AVATAR_PREVIEW_MOODS)[n
 
 const BOT_AVATAR_CUSTOMIZER_TABS = [
   { value: "face", label: "Identity" },
+  { value: "profile", label: "Profile" },
   { value: "eyes", label: "Eyes" },
   { value: "mouth", label: "Mouth" },
   { value: "voice", label: "Voice" },
+  { value: "settings", label: "Settings" },
   { value: "details", label: "Details" },
   { value: "motion", label: "Motion" },
 ] as const satisfies readonly {
@@ -30922,6 +31089,9 @@ function botAvatarFaceIsDefault(args: {
   faceMouthOffsetY: number;
   faceMouthRotationDeg: number;
   faceBlinkBar: BotFaceBlinkBar;
+  faceBlinkScale: number;
+  faceBlinkOffsetX: number;
+  faceBlinkOffsetY: number;
   faceThinkingFrames: BotFaceThinkingFrames;
 }): boolean {
   return (
@@ -30941,6 +31111,9 @@ function botAvatarFaceIsDefault(args: {
     args.faceMouthOffsetY === DEFAULT_BOT_FACE_STYLE.mouthOffsetY &&
     args.faceMouthRotationDeg === DEFAULT_BOT_FACE_STYLE.mouthRotationDeg &&
     args.faceBlinkBar === DEFAULT_BOT_FACE_STYLE.blinkBar &&
+    args.faceBlinkScale === DEFAULT_BOT_FACE_STYLE.blinkScale &&
+    args.faceBlinkOffsetX === DEFAULT_BOT_FACE_STYLE.blinkOffsetX &&
+    args.faceBlinkOffsetY === DEFAULT_BOT_FACE_STYLE.blinkOffsetY &&
     botFaceThinkingFramesEqual(
       args.faceThinkingFrames,
       DEFAULT_BOT_FACE_STYLE.thinkingFrames
@@ -30967,6 +31140,9 @@ function botAvatarPresetSelected(
     faceMouthOffsetY: number;
     faceMouthRotationDeg: number;
     faceBlinkBar: BotFaceBlinkBar;
+    faceBlinkScale: number;
+    faceBlinkOffsetX: number;
+    faceBlinkOffsetY: number;
     faceThinkingFrames: BotFaceThinkingFrames;
   }
 ): boolean {
@@ -30987,6 +31163,9 @@ function botAvatarPresetSelected(
     preset.mouthOffsetY === args.faceMouthOffsetY &&
     preset.mouthRotationDeg === args.faceMouthRotationDeg &&
     preset.blinkBar === args.faceBlinkBar &&
+    args.faceBlinkScale === DEFAULT_BOT_FACE_STYLE.blinkScale &&
+    args.faceBlinkOffsetX === DEFAULT_BOT_FACE_STYLE.blinkOffsetX &&
+    args.faceBlinkOffsetY === DEFAULT_BOT_FACE_STYLE.blinkOffsetY &&
     botFaceThinkingFramesEqual(preset.thinkingFrames, args.faceThinkingFrames)
   );
 }
@@ -31198,9 +31377,11 @@ function BotAvatarPreviewPanel({
 
 function BotAvatarIdentityControls({
   name,
+  tools,
   onNameChange,
 }: {
   name: string;
+  tools?: React.ReactNode;
   onNameChange: (next: string) => void;
 }): React.JSX.Element {
   return (
@@ -31227,6 +31408,7 @@ function BotAvatarIdentityControls({
           onChange={(event) => onNameChange(event.currentTarget.value)}
         />
       </label>
+      {tools}
     </div>
   );
 }
@@ -31592,6 +31774,9 @@ function BotAvatarFaceControls({
   faceMouthOffsetY,
   faceMouthRotationDeg,
   faceBlinkBar,
+  faceBlinkScale,
+  faceBlinkOffsetX,
+  faceBlinkOffsetY,
   faceThinkingFrames,
   previewWeightSummary,
   faceIsDefault,
@@ -31611,6 +31796,9 @@ function BotAvatarFaceControls({
   onMouthOffsetYChange,
   onMouthRotationDegChange,
   onBlinkBarChange,
+  onBlinkScaleChange,
+  onBlinkOffsetXChange,
+  onBlinkOffsetYChange,
   onThinkingFramesChange,
   onApplyPreset,
   onResetFace,
@@ -31633,6 +31821,9 @@ function BotAvatarFaceControls({
   faceMouthOffsetY: number;
   faceMouthRotationDeg: number;
   faceBlinkBar: BotFaceBlinkBar;
+  faceBlinkScale: number;
+  faceBlinkOffsetX: number;
+  faceBlinkOffsetY: number;
   faceThinkingFrames: BotFaceThinkingFrames;
   previewWeightSummary: string;
   faceIsDefault: boolean;
@@ -31652,11 +31843,15 @@ function BotAvatarFaceControls({
   onMouthOffsetYChange: (offsetY: number) => void;
   onMouthRotationDegChange: (rotationDeg: number) => void;
   onBlinkBarChange: (blinkBar: BotFaceBlinkBar) => void;
+  onBlinkScaleChange: (scale: number) => void;
+  onBlinkOffsetXChange: (offsetX: number) => void;
+  onBlinkOffsetYChange: (offsetY: number) => void;
   onThinkingFramesChange: (frames: BotFaceThinkingFrames) => void;
   onApplyPreset: (preset: BotAvatarFacePreset) => void;
   onResetFace: () => void;
   identitySection?: {
     name: string;
+    tools?: React.ReactNode;
     color: string;
     glyph: BotGlyphName;
     colorPickerOpen: boolean;
@@ -31793,6 +31988,7 @@ function BotAvatarFaceControls({
           {identitySection ? (
             <BotAvatarIdentityControls
               name={identitySection.name}
+              tools={identitySection.tools}
               onNameChange={identitySection.onNameChange}
             />
           ) : null}
@@ -31817,6 +32013,9 @@ function BotAvatarFaceControls({
                   faceMouthOffsetY,
                   faceMouthRotationDeg,
                   faceBlinkBar,
+                  faceBlinkScale,
+                  faceBlinkOffsetX,
+                  faceBlinkOffsetY,
                   faceThinkingFrames,
                 });
 
@@ -32077,25 +32276,59 @@ function BotAvatarFaceControls({
               </button>
             </div>
             {customBlinkActive ? (
-              <label className={styles.botAvatarSingleGlyphInput}>
-                <span>Custom blink bar</span>
-                <input
-                  type="text"
-                  value={botAvatarBlinkBarInputValue(faceBlinkBar)}
-                  placeholder={BOT_AVATAR_CUSTOM_BLINK_START}
-                  inputMode="text"
-                  autoCapitalize="off"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  aria-label="Custom blink bar"
-                  onChange={(event) =>
-                    onBlinkBarChange(
-                      normalizeBotFaceBlinkBar(event.currentTarget.value) ??
-                        DEFAULT_BOT_FACE_BLINK_BAR
-                    )
-                  }
-                />
-              </label>
+              <div className={styles.botAvatarCustomBlinkControls}>
+                <label className={styles.botAvatarSingleGlyphInput}>
+                  <span>Custom blink bar</span>
+                  <input
+                    type="text"
+                    value={botAvatarBlinkBarInputValue(faceBlinkBar)}
+                    placeholder={BOT_AVATAR_CUSTOM_BLINK_START}
+                    inputMode="text"
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    aria-label="Custom blink bar"
+                    onChange={(event) =>
+                      onBlinkBarChange(
+                        normalizeBotFaceBlinkBar(event.currentTarget.value) ??
+                          DEFAULT_BOT_FACE_BLINK_BAR
+                      )
+                    }
+                  />
+                </label>
+                <div className={styles.botAvatarCustomGeometry}>
+                  <BotAvatarRangeControl
+                    label="Blink size"
+                    valueLabel={`${Math.round(faceBlinkScale * 100)}%`}
+                    min={BOT_FACE_BLINK_SCALE_MIN}
+                    max={BOT_FACE_BLINK_SCALE_MAX}
+                    step={BOT_FACE_BLINK_SCALE_STEP}
+                    value={faceBlinkScale}
+                    leftLabel="Smaller"
+                    rightLabel="Larger"
+                    onChange={onBlinkScaleChange}
+                  />
+                  <BotAvatarCoordinateControl
+                    label="Blink position"
+                    x={faceBlinkOffsetX}
+                    y={faceBlinkOffsetY}
+                    minX={BOT_FACE_BLINK_OFFSET_X_MIN}
+                    maxX={BOT_FACE_BLINK_OFFSET_X_MAX}
+                    stepX={BOT_FACE_BLINK_OFFSET_X_STEP}
+                    minY={BOT_FACE_BLINK_OFFSET_Y_MIN}
+                    maxY={BOT_FACE_BLINK_OFFSET_Y_MAX}
+                    stepY={BOT_FACE_BLINK_OFFSET_Y_STEP}
+                    onChange={(next) => {
+                      onBlinkOffsetXChange(next.x);
+                      onBlinkOffsetYChange(next.y);
+                    }}
+                    onReset={() => {
+                      onBlinkOffsetXChange(DEFAULT_BOT_FACE_BLINK_OFFSET_X);
+                      onBlinkOffsetYChange(DEFAULT_BOT_FACE_BLINK_OFFSET_Y);
+                    }}
+                  />
+                </div>
+              </div>
             ) : null}
           </fieldset>
 
@@ -32260,6 +32493,8 @@ function BotAvatarSavePrompt({
 
 function BotAvatarCustomizerModal({
   open,
+  profileEditorLayer,
+  profileEditorLayerOpen = false,
   botName,
   botNameDraft,
   onBotNameChange,
@@ -32271,6 +32506,10 @@ function BotAvatarCustomizerModal({
   isDefaultPrismBot = false,
   identityControlsVisible = true,
   draftMode = false,
+  initialTab = "face",
+  canSave = true,
+  identityTools,
+  settingsPanel,
   colorPickerOpen,
   resolvedTheme,
   faceEyesFont,
@@ -32289,13 +32528,24 @@ function BotAvatarCustomizerModal({
   faceMouthOffsetY,
   faceMouthRotationDeg,
   faceBlinkBar,
+  faceBlinkScale,
+  faceBlinkOffsetX,
+  faceBlinkOffsetY,
   faceThinkingFrames,
   avatarDetails,
   detailsEditorVisible = false,
   audioVoiceProfile,
   voiceMode,
-  voiceEffectsEnabled,
   voiceIdentityCatalog,
+  profile,
+  profileDetailsUnlocked,
+  profileAdvancedMode,
+  profileSystemPrompt,
+  profileTemperature,
+  profileMaxTokens,
+  profileTopP,
+  profileTopK,
+  profileRepetitionPenalty,
   hasUnsavedChanges,
   canUndo,
   saving,
@@ -32325,17 +32575,24 @@ function BotAvatarCustomizerModal({
   onMouthOffsetYChange,
   onMouthRotationDegChange,
   onBlinkBarChange,
+  onBlinkScaleChange,
+  onBlinkOffsetXChange,
+  onBlinkOffsetYChange,
   onThinkingFramesChange,
   onAvatarDetailsApply,
   onAudioVoiceProfileChange,
   onVoicePreview,
+  resolveVoicePreviewText,
   onVoiceRestore,
+  onProfileModeChange,
+  onProfilePageOpen,
+  onAiParametersOpen,
 }: BotAvatarCustomizerModalProps): React.JSX.Element | null {
   const [mouthPhase, setMouthPhase] = useState(0);
   const [previewTheme, setPreviewTheme] = useState<"light" | "dark">(resolvedTheme);
   const [previewMode, setPreviewMode] = useState<BotAvatarPreviewMode>("idle");
   const [previewMoodIndex, setPreviewMoodIndex] = useState(0);
-  const [activeControlTab, setActiveControlTab] = useState<BotAvatarCustomizerTab>("face");
+  const [activeControlTab, setActiveControlTab] = useState<BotAvatarCustomizerTab>(initialTab);
   const detailsEditorRef = useRef<AvatarDetailsEditorHandle | null>(null);
   const avatarVoicePreviewRunRef = useRef(0);
   const [detailsEditorDirty, setDetailsEditorDirty] = useState(false);
@@ -32400,6 +32657,9 @@ function BotAvatarCustomizerModal({
       faceMouthOffsetY,
       faceMouthRotationDeg,
       faceBlinkBar,
+      faceBlinkScale,
+      faceBlinkOffsetX,
+      faceBlinkOffsetY,
       faceThinkingFrames,
     },
     null
@@ -32411,13 +32671,13 @@ function BotAvatarCustomizerModal({
     setPreviewTheme(resolvedTheme);
     setPreviewMode("idle");
     setPreviewMoodIndex(0);
-    setActiveControlTab("face");
+    setActiveControlTab(initialTab);
     setMouthPhase(0);
     setDetailsEditorDirty(false);
     setDetailsLeaveRequest(null);
     setDetailsLeaveApplying(false);
     setPendingDetailsSaveKey(null);
-  }, [identityControlsVisible, open, resolvedTheme]);
+  }, [identityControlsVisible, initialTab, open, resolvedTheme]);
 
   useEffect(() => {
     if (!open || savePromptOpen) return;
@@ -32458,7 +32718,7 @@ function BotAvatarCustomizerModal({
   }, [avatarDetails, onSave, open, pendingDetailsSaveKey]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || profileEditorLayerOpen) return;
     const handleEscape = (event: KeyboardEvent): void => {
       if (event.key !== "Escape") return;
       event.preventDefault();
@@ -32487,6 +32747,7 @@ function BotAvatarCustomizerModal({
     detailsLeaveRequest,
     onRequestClose,
     open,
+    profileEditorLayerOpen,
   ]);
 
   useEffect(() => {
@@ -32644,12 +32905,17 @@ function BotAvatarCustomizerModal({
     faceMouthOffsetY,
     faceMouthRotationDeg,
     faceBlinkBar,
+    faceBlinkScale,
+    faceBlinkOffsetX,
+    faceBlinkOffsetY,
     faceThinkingFrames,
   });
-  const saveButtonVisible = saving || hasUnsavedChanges || detailsEditorDirty;
+  const saveButtonVisible = draftMode || saving || hasUnsavedChanges || detailsEditorDirty;
   const avatarControlTabsVisible = true;
   const visibleAvatarTabs = BOT_AVATAR_CUSTOMIZER_TABS.filter(
-    (tab) => detailsEditorVisible || tab.value !== "details"
+    (tab) =>
+      (detailsEditorVisible || tab.value !== "details") &&
+      (identityControlsVisible || (tab.value !== "profile" && tab.value !== "settings"))
   );
   const activeFaceControlTabs: readonly BotAvatarFaceControlTab[] =
     BOT_AVATAR_FACE_CONTROL_TABS.includes(
@@ -32657,6 +32923,29 @@ function BotAvatarCustomizerModal({
     )
       ? [activeControlTab as BotAvatarFaceControlTab]
       : [];
+  const completedProfileCategories = botProfileCompletionCount(profile);
+  const profileProgressPercent = profileDetailsUnlocked
+    ? Math.round(
+        (completedProfileCategories / BOT_PROFILE_BUILDER_PAGE_ORDER.length) * 100
+      )
+    : 0;
+  const profileSummary = !profileDetailsUnlocked
+    ? "Name this bot to unlock profile details"
+    : completedProfileCategories === 0
+      ? "Purpose only"
+      : `${completedProfileCategories} profile section${completedProfileCategories === 1 ? "" : "s"} filled`;
+  const systemPromptSummary = profileSystemPrompt.trim();
+  const clippedSystemPromptSummary = systemPromptSummary
+    ? systemPromptSummary.length > 92
+      ? `${systemPromptSummary.slice(0, 92)}...`
+      : systemPromptSummary
+    : "No system prompt set";
+  const advancedSamplerChanged =
+    profileTemperature !== BOT_TEMPERATURE_DEFAULT ||
+    profileMaxTokens !== BOT_REPLY_LENGTH_DEFAULT_TOKENS ||
+    profileTopP !== BOT_TOP_P_DEFAULT ||
+    profileTopK !== BOT_TOP_K_DEFAULT ||
+    profileRepetitionPenalty !== BOT_REPETITION_PENALTY_DEFAULT;
   const applyFacePreset = (preset: BotAvatarFacePreset) => {
     onEyesFontChange(preset.eyesFont);
     onEyeCharacterChange(preset.eyeCharacter);
@@ -32674,6 +32963,9 @@ function BotAvatarCustomizerModal({
     onMouthOffsetYChange(preset.mouthOffsetY);
     onMouthRotationDegChange(preset.mouthRotationDeg);
     onBlinkBarChange(preset.blinkBar);
+    onBlinkScaleChange(DEFAULT_BOT_FACE_STYLE.blinkScale);
+    onBlinkOffsetXChange(DEFAULT_BOT_FACE_STYLE.blinkOffsetX);
+    onBlinkOffsetYChange(DEFAULT_BOT_FACE_STYLE.blinkOffsetY);
     onThinkingFramesChange(preset.thinkingFrames);
   };
   const resetFace = () => {
@@ -32693,6 +32985,9 @@ function BotAvatarCustomizerModal({
     onMouthOffsetYChange(DEFAULT_BOT_FACE_STYLE.mouthOffsetY);
     onMouthRotationDegChange(DEFAULT_BOT_FACE_STYLE.mouthRotationDeg);
     onBlinkBarChange(DEFAULT_BOT_FACE_STYLE.blinkBar);
+    onBlinkScaleChange(DEFAULT_BOT_FACE_STYLE.blinkScale);
+    onBlinkOffsetXChange(DEFAULT_BOT_FACE_STYLE.blinkOffsetX);
+    onBlinkOffsetYChange(DEFAULT_BOT_FACE_STYLE.blinkOffsetY);
     onThinkingFramesChange(DEFAULT_BOT_FACE_STYLE.thinkingFrames);
   };
 
@@ -32718,9 +33013,9 @@ function BotAvatarCustomizerModal({
             <h4 id="bot-avatar-customizer-title">{titleName}</h4>
             <p>
               {detailsEditorVisible
-                ? "Identity, face, and details."
+                ? "Identity, personality, voice, and settings."
                 : identityControlsVisible
-                ? "Identity and face."
+                ? "Identity, personality, voice, and settings."
                 : "Default Prism identity is fixed; customize its face."}
             </p>
           </div>
@@ -32747,11 +33042,11 @@ function BotAvatarCustomizerModal({
                 type="button"
                 className={styles.botAvatarCustomizerSaveButton}
                 onClick={() => requestStudioSave()}
-                disabled={!hasUnsavedChanges || saving}
+                disabled={!canSave || saving || (!draftMode && !hasUnsavedChanges)}
                 data-dirty={hasUnsavedChanges ? "true" : undefined}
               >
                 <IconSave />
-                {saving ? "Saving..." : "Save"}
+                {saving ? "Saving..." : draftMode ? "Create bot" : "Save"}
               </button>
             ) : null}
             <button
@@ -32805,12 +33100,16 @@ function BotAvatarCustomizerModal({
                   >
                     {tab.value === "face" ? (
                       <Sparkles size={13} strokeWidth={2.3} aria-hidden="true" />
+                    ) : tab.value === "profile" ? (
+                      <BookMarked size={13} strokeWidth={2.3} aria-hidden="true" />
                     ) : tab.value === "eyes" ? (
                       <Eye size={13} strokeWidth={2.3} aria-hidden="true" />
                     ) : tab.value === "mouth" ? (
                       <Smile size={13} strokeWidth={2.3} aria-hidden="true" />
                     ) : tab.value === "voice" ? (
                       <Volume2 size={13} strokeWidth={2.3} aria-hidden="true" />
+                    ) : tab.value === "settings" ? (
+                      <Settings size={13} strokeWidth={2.3} aria-hidden="true" />
                     ) : tab.value === "details" ? (
                       <PencilLine size={13} strokeWidth={2.3} aria-hidden="true" />
                     ) : (
@@ -32822,6 +33121,128 @@ function BotAvatarCustomizerModal({
               </div>
             ) : null}
             <div className={styles.botAvatarControlStack}>
+              {activeControlTab === "profile" && identityControlsVisible ? (
+                <section
+                  className={styles.botAvatarProfilePanel}
+                  aria-label={profileAdvancedMode ? "Advanced bot profile" : "Bot profile"}
+                >
+                  <div className={`${styles.botParameterHeader} ${styles.botProfileModeHeader}`}>
+                    <div className={styles.botProfileModeHeaderTop}>
+                      <div className={styles.botProfileProgressHeader}>
+                        <span>{profileAdvancedMode ? "AI Parameters" : "Profile"}</span>
+                        <strong>{profileAdvancedMode ? "ADV" : `${profileProgressPercent}%`}</strong>
+                      </div>
+                      <div
+                        className={styles.botEditorModeStrip}
+                        role="radiogroup"
+                        aria-label="Bot profile editor mode"
+                      >
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={!profileAdvancedMode}
+                          data-active={!profileAdvancedMode ? "true" : undefined}
+                          onClick={() => onProfileModeChange(false)}
+                        >
+                          Builder
+                        </button>
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={profileAdvancedMode}
+                          data-active={profileAdvancedMode ? "true" : undefined}
+                          onClick={() => onProfileModeChange(true)}
+                        >
+                          Advanced
+                        </button>
+                      </div>
+                    </div>
+                    <div
+                      className={styles.botProfileProgressTrack}
+                      aria-hidden="true"
+                      style={{
+                        ["--bot-profile-progress" as string]: profileAdvancedMode
+                          ? "100%"
+                          : `${profileProgressPercent}%`,
+                      }}
+                    />
+                    <small>
+                      {profileAdvancedMode
+                        ? "System prompt and sampler controls."
+                        : `${profileSummary}. These details shape how the bot behaves.`}
+                    </small>
+                  </div>
+                  {profileAdvancedMode ? (
+                    <div className={styles.botProfileSummaryGrid}>
+                      <button
+                        type="button"
+                        className={`${styles.botProfileSummaryButton} ${styles.botAiPromptSummaryButton}`}
+                        data-complete={systemPromptSummary ? "true" : undefined}
+                        onClick={onAiParametersOpen}
+                      >
+                        <span>System Prompt</span>
+                        <small>{clippedSystemPromptSummary}</small>
+                        <strong>{systemPromptSummary ? "Set" : "Blank"}</strong>
+                      </button>
+                      <div className={styles.botAiParameterSummaryGrid}>
+                        <button type="button" className={styles.botAiParameterSummaryButton} onClick={onAiParametersOpen}>
+                          <span>Temperature</span>
+                          <strong>{formatBotParameterValue(profileTemperature)}</strong>
+                        </button>
+                        <button type="button" className={styles.botAiParameterSummaryButton} onClick={onAiParametersOpen}>
+                          <span>Top P</span>
+                          <strong>{formatBotParameterValue(profileTopP)}</strong>
+                        </button>
+                        <button type="button" className={styles.botAiParameterSummaryButton} onClick={onAiParametersOpen}>
+                          <span>Top K</span>
+                          <strong>{profileTopK}</strong>
+                        </button>
+                        <button type="button" className={styles.botAiParameterSummaryButton} onClick={onAiParametersOpen}>
+                          <span>Repeat Penalty</span>
+                          <strong>{formatBotParameterValue(profileRepetitionPenalty)}</strong>
+                        </button>
+                      </div>
+                      <button
+                        type="button"
+                        className={`${styles.botProfileSummaryButton} ${styles.botAiPromptSummaryButton}`}
+                        data-complete={advancedSamplerChanged ? "true" : undefined}
+                        onClick={onAiParametersOpen}
+                      >
+                        <span>Max Tokens</span>
+                        <small>{profileMaxTokens.toLocaleString()} token reply cap</small>
+                        <strong>{advancedSamplerChanged ? "Tuned" : "Default"}</strong>
+                      </button>
+                    </div>
+                  ) : (
+                    <div className={styles.botProfileSummaryGrid}>
+                      {BOT_PROFILE_BUILDER_PAGE_ORDER.map((category) => {
+                        const complete = botProfileCategoryComplete(profile, category, titleName);
+                        return (
+                          <button
+                            key={category}
+                            type="button"
+                            className={styles.botProfileSummaryButton}
+                            data-complete={complete ? "true" : undefined}
+                            data-locked={!profileDetailsUnlocked ? "true" : undefined}
+                            disabled={!profileDetailsUnlocked}
+                            onClick={() => onProfilePageOpen(category)}
+                          >
+                            <span>{BOT_PROFILE_BUILDER_PAGE_LABELS[category]}</span>
+                            <small>
+                              {profileDetailsUnlocked
+                                ? botProfileCategorySummary(profile, category, titleName)
+                                : "Enter a name first"}
+                            </small>
+                            <strong>
+                              {!profileDetailsUnlocked ? "Locked" : complete ? "Complete" : "Optional"}
+                            </strong>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </section>
+              ) : null}
               {activeControlTab === "details" && detailsEditorVisible ? (
                 <AvatarDetailsEditor
                   ref={detailsEditorRef}
@@ -32839,6 +33260,7 @@ function BotAvatarCustomizerModal({
                   onPreviewChange={setAvatarDetailsPreview}
                 />
               ) : null}
+              {activeControlTab === "settings" && identityControlsVisible ? settingsPanel : null}
               {activeControlTab === "voice" ? (
                 <BotVoiceEditor
                   profile={audioVoiceProfile}
@@ -32847,15 +33269,22 @@ function BotAvatarCustomizerModal({
                   resetLabel={isDefaultPrismBot ? "Reset voice" : "Restore original voice"}
                   onReset={onVoiceRestore}
                   resolvePreviewText={resolveVoicePreviewText}
-                  onPreview={async (profile, forcedMode, previewText) => {
+                  onPreview={async (profile, forcedMode, previewText, options) => {
                     const runId = avatarVoicePreviewRunRef.current + 1;
                     avatarVoicePreviewRunRef.current = runId;
                     const previousMode = previewMode;
-                    setPreviewMode("talking");
+                    let playbackStarted = false;
                     try {
-                      await onVoicePreview(profile, forcedMode, previewText);
+                      await onVoicePreview(profile, forcedMode, previewText, {
+                        ...options,
+                        onPlaybackStart: () => {
+                          playbackStarted = true;
+                          setPreviewMode("talking");
+                          options?.onPlaybackStart?.();
+                        },
+                      });
                     } finally {
-                      if (avatarVoicePreviewRunRef.current === runId) {
+                      if (playbackStarted && avatarVoicePreviewRunRef.current === runId) {
                         setPreviewMode(previousMode);
                       }
                     }
@@ -32870,6 +33299,7 @@ function BotAvatarCustomizerModal({
                     faceControlTab === "face" && identityControlsVisible
                       ? {
                           name: botNameDraft,
+                          tools: identityTools,
                           color,
                           glyph,
                           colorPickerOpen,
@@ -32897,6 +33327,9 @@ function BotAvatarCustomizerModal({
                   faceMouthOffsetY={faceMouthOffsetY}
                   faceMouthRotationDeg={faceMouthRotationDeg}
                   faceBlinkBar={faceBlinkBar}
+                  faceBlinkScale={faceBlinkScale}
+                  faceBlinkOffsetX={faceBlinkOffsetX}
+                  faceBlinkOffsetY={faceBlinkOffsetY}
                   faceThinkingFrames={faceThinkingFrames}
                   previewWeightSummary={previewWeightSummary}
                   faceIsDefault={faceIsDefault}
@@ -32916,6 +33349,9 @@ function BotAvatarCustomizerModal({
                   onMouthOffsetYChange={onMouthOffsetYChange}
                   onMouthRotationDegChange={onMouthRotationDegChange}
                   onBlinkBarChange={onBlinkBarChange}
+                  onBlinkScaleChange={onBlinkScaleChange}
+                  onBlinkOffsetXChange={onBlinkOffsetXChange}
+                  onBlinkOffsetYChange={onBlinkOffsetYChange}
                   onThinkingFramesChange={onThinkingFramesChange}
                   onApplyPreset={applyFacePreset}
                   onResetFace={resetFace}
@@ -33023,6 +33459,7 @@ function BotAvatarCustomizerModal({
     >
       {modal}
       {savePrompt}
+      {profileEditorLayer}
     </div>
   );
 
@@ -33033,6 +33470,7 @@ function BotAvatarCustomizerModal({
 function BotAiParameterCustomizer({
   open,
   botName,
+  studioLayer = false,
   systemPrompt,
   temperature,
   maxTokens,
@@ -33047,12 +33485,24 @@ function BotAiParameterCustomizer({
   onRepetitionPenaltyChange,
   onClose,
 }: BotAiParameterCustomizerProps): React.JSX.Element | null {
+  useEffect(() => {
+    if (!open) return;
+    const handleEscape = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      onClose();
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [onClose, open]);
+
   if (!open) return null;
   const titleName = botName.trim() || "Bot";
 
   return (
     <div
       className={styles.botProfileBuilderBackdrop}
+      data-avatar-studio-layer={studioLayer ? "true" : undefined}
       role="presentation"
       onPointerDown={(event) => {
         if (event.target !== event.currentTarget) return;
@@ -33231,6 +33681,8 @@ function BotProfileBuilder({
   activePage,
   profile,
   botName,
+  studioLayer = false,
+  onRandomizePersonality,
   onActivePageChange,
   onProfileChange,
   onClose,
@@ -33251,6 +33703,17 @@ function BotProfileBuilder({
       };
     });
   }, [open, botName, profile.purpose.statement, onProfileChange]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleEscape = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      onClose();
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [onClose, open]);
 
   if (!open) return null;
 
@@ -33927,6 +34390,7 @@ function BotProfileBuilder({
   return (
     <div
       className={styles.botProfileBuilderBackdrop}
+      data-avatar-studio-layer={studioLayer ? "true" : undefined}
       role="presentation"
       onPointerDown={(event) => {
         if (event.target !== event.currentTarget) return;
@@ -33950,6 +34414,16 @@ function BotProfileBuilder({
             <h4 id="bot-profile-builder-title">{pageCopy.label}</h4>
             <p>{pageCopy.description}</p>
           </div>
+          {activePage === "personality" && onRandomizePersonality ? (
+            <button
+              type="button"
+              onClick={onRandomizePersonality}
+              aria-label="Randomize personality"
+              title="Randomize personality"
+            >
+              <BotGlyph name="dice" size={17} strokeWidth={1.9} />
+            </button>
+          ) : null}
           <button type="button" onClick={onClose} aria-label="Close profile builder">
             ×
           </button>
@@ -34490,6 +34964,9 @@ function HomeContent(): React.JSX.Element {
   const [modelCatalog, setModelCatalog] = useState<ModelCatalog | null>(null);
   const [modelCatalogStatus, setModelCatalogStatus] =
     useState<ModelCatalogRefreshStatus>("idle");
+  const modelCatalogLoading =
+    modelCatalogStatus === "checking" ||
+    (modelCatalogStatus === "idle" && modelCatalog === null);
   const modelCatalogRefreshTokenRef = useRef(0);
   const [comfyUiModelsPayload, setComfyUiModelsPayload] = useState<{
     configured: boolean;
@@ -35238,7 +35715,63 @@ function HomeContent(): React.JSX.Element {
   const voiceAwaitingReplyRef = useRef(false);
   const voiceSynthesisAbortRef = useRef<AbortController | null>(null);
   const voicePreviewLineCacheRef = useRef<Map<string, string>>(new Map());
+  const voicePreviewAudioCacheRef = useRef<Map<string, ArrayBuffer>>(new Map());
   const voicePreviewPlaybackRunRef = useRef(0);
+  const botHubVoicePreviewRunRef = useRef(0);
+  const botHubVoiceFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [botHubVoicePreview, setBotHubVoicePreview] = useState<{
+    botId: string | null;
+    mode: Exclude<VoiceMode, "mute"> | null;
+    status: BotHubVoicePreviewStatus;
+    error: string | null;
+  }>({ botId: null, mode: null, status: "idle", error: null });
+  useEffect(() => {
+    voicePreviewPlaybackRunRef.current += 1;
+    botHubVoicePreviewRunRef.current += 1;
+    voicePreviewAudioCacheRef.current.clear();
+    stopEnglishVoice();
+    if (botHubVoiceFeedbackTimerRef.current) {
+      clearTimeout(botHubVoiceFeedbackTimerRef.current);
+      botHubVoiceFeedbackTimerRef.current = null;
+    }
+    setBotHubVoicePreview({ botId: null, mode: null, status: "idle", error: null });
+  }, [
+    settings?.defaultSystemVoiceName,
+    settings?.defaultElevenLabsVoiceId,
+    settings?.englishVoiceEngine,
+    settings?.preferredProvider,
+  ]);
+  const [botHubPreviewMouthShape, setBotHubPreviewMouthShape] =
+    useState<ZenLiveBotMouthShape>("speech-closed");
+  useEffect(() => {
+    return () => {
+      if (botHubVoiceFeedbackTimerRef.current) {
+        clearTimeout(botHubVoiceFeedbackTimerRef.current);
+      }
+    };
+  }, []);
+  useEffect(() => {
+    if (botHubVoicePreview.status !== "playing") return;
+    let mouthShapeIndex = 0;
+    const advanceMouthShape = () => {
+      setBotHubPreviewMouthShape(
+        BOT_AVATAR_PREVIEW_MOUTH_SHAPES[
+          mouthShapeIndex % BOT_AVATAR_PREVIEW_MOUTH_SHAPES.length
+        ] ?? "speech-closed"
+      );
+      mouthShapeIndex += 1;
+    };
+    const startTimer = window.setTimeout(advanceMouthShape, 0);
+    const interval = window.setInterval(advanceMouthShape, 118);
+    return () => {
+      window.clearTimeout(startTimer);
+      window.clearInterval(interval);
+    };
+  }, [
+    botHubVoicePreview.botId,
+    botHubVoicePreview.mode,
+    botHubVoicePreview.status,
+  ]);
   const liveBottishRevealKeyRef = useRef<string | null>(null);
   const resolveVisibleMessageContentForVoiceRef = useRef<(message: Message) => string>(
     resolveMessageDisplayContent
@@ -36446,15 +36979,11 @@ function HomeContent(): React.JSX.Element {
     BOT_REPETITION_PENALTY_DEFAULT
   );
   const [newBotAudioVoiceProfile, setNewBotAudioVoiceProfile] =
-    useState<BotAudioVoiceProfileV1>(() => randomizeBotAudioVoiceProfile(
-      DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
-      "builtin",
-      []
-    ));
-  // Lazy initializers so the very first render already picks a random seed
-  // without re-randomizing on every re-render.
-  const [newBotColor, setNewBotColor] = useState<string>(() => randomHex());
-  const [newBotGlyph, setNewBotGlyph] = useState<BotGlyphName>(() => randomBotGlyph());
+    useState<BotAudioVoiceProfileV1>(DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1);
+  const [newBotColor, setNewBotColor] = useState<string>(
+    DEFAULT_PRISM_BOT_CUSTOMIZER_COLOR
+  );
+  const [newBotGlyph, setNewBotGlyph] = useState<BotGlyphName>(DEFAULT_BOT_GLYPH);
   const [newBotFaceEyesFont, setNewBotFaceEyesFont] = useState<BotFaceFontId>(
     DEFAULT_BOT_FACE_STYLE.eyesFont
   );
@@ -36499,6 +37028,15 @@ function HomeContent(): React.JSX.Element {
     useState<number>(DEFAULT_BOT_FACE_STYLE.mouthRotationDeg);
   const [newBotFaceBlinkBar, setNewBotFaceBlinkBar] = useState<BotFaceBlinkBar>(
     DEFAULT_BOT_FACE_STYLE.blinkBar
+  );
+  const [newBotFaceBlinkScale, setNewBotFaceBlinkScale] = useState<number>(
+    DEFAULT_BOT_FACE_STYLE.blinkScale
+  );
+  const [newBotFaceBlinkOffsetX, setNewBotFaceBlinkOffsetX] = useState<number>(
+    DEFAULT_BOT_FACE_STYLE.blinkOffsetX
+  );
+  const [newBotFaceBlinkOffsetY, setNewBotFaceBlinkOffsetY] = useState<number>(
+    DEFAULT_BOT_FACE_STYLE.blinkOffsetY
   );
   const [newBotFaceThinkingFrames, setNewBotFaceThinkingFrames] =
     useState<BotFaceThinkingFrames>(DEFAULT_BOT_FACE_STYLE.thinkingFrames);
@@ -36611,6 +37149,9 @@ function HomeContent(): React.JSX.Element {
     faceMouthOffsetY: DEFAULT_BOT_FACE_STYLE.mouthOffsetY,
     faceMouthRotationDeg: DEFAULT_BOT_FACE_STYLE.mouthRotationDeg,
     faceBlinkBar: DEFAULT_BOT_FACE_STYLE.blinkBar,
+    faceBlinkScale: DEFAULT_BOT_FACE_STYLE.blinkScale,
+    faceBlinkOffsetX: DEFAULT_BOT_FACE_STYLE.blinkOffsetX,
+    faceBlinkOffsetY: DEFAULT_BOT_FACE_STYLE.blinkOffsetY,
     faceThinkingFrames: DEFAULT_BOT_FACE_STYLE.thinkingFrames,
     avatarDetails: null as BotAvatarDetailsV1 | null,
   });
@@ -36645,6 +37186,9 @@ function HomeContent(): React.JSX.Element {
     faceMouthOffsetY: newBotFaceMouthOffsetY,
     faceMouthRotationDeg: newBotFaceMouthRotationDeg,
     faceBlinkBar: newBotFaceBlinkBar,
+    faceBlinkScale: newBotFaceBlinkScale,
+    faceBlinkOffsetX: newBotFaceBlinkOffsetX,
+    faceBlinkOffsetY: newBotFaceBlinkOffsetY,
     faceThinkingFrames: newBotFaceThinkingFrames,
     avatarDetails: newBotAvatarDetails,
   };
@@ -36766,6 +37310,27 @@ function HomeContent(): React.JSX.Element {
     );
   }, []);
 
+  const handleNewBotFaceBlinkScaleChange = useCallback((next: number) => {
+    createBotAppearanceTouchedRef.current = true;
+    setNewBotFaceBlinkScale(
+      normalizeBotFaceBlinkScale(next) ?? DEFAULT_BOT_FACE_STYLE.blinkScale
+    );
+  }, []);
+
+  const handleNewBotFaceBlinkOffsetXChange = useCallback((next: number) => {
+    createBotAppearanceTouchedRef.current = true;
+    setNewBotFaceBlinkOffsetX(
+      normalizeBotFaceBlinkOffsetX(next) ?? DEFAULT_BOT_FACE_STYLE.blinkOffsetX
+    );
+  }, []);
+
+  const handleNewBotFaceBlinkOffsetYChange = useCallback((next: number) => {
+    createBotAppearanceTouchedRef.current = true;
+    setNewBotFaceBlinkOffsetY(
+      normalizeBotFaceBlinkOffsetY(next) ?? DEFAULT_BOT_FACE_STYLE.blinkOffsetY
+    );
+  }, []);
+
   const handleNewBotFaceThinkingFramesChange = useCallback(
     (next: BotFaceThinkingFrames) => {
       createBotAppearanceTouchedRef.current = true;
@@ -36860,6 +37425,9 @@ function HomeContent(): React.JSX.Element {
       faceMouthOffsetY: newBotFaceMouthOffsetY,
       faceMouthRotationDeg: newBotFaceMouthRotationDeg,
       faceBlinkBar: newBotFaceBlinkBar,
+      faceBlinkScale: newBotFaceBlinkScale,
+      faceBlinkOffsetX: newBotFaceBlinkOffsetX,
+      faceBlinkOffsetY: newBotFaceBlinkOffsetY,
       faceThinkingFrames: newBotFaceThinkingFrames,
       avatarDetails: newBotAvatarDetails,
       audioVoiceProfile: newBotAudioVoiceProfile,
@@ -36867,6 +37435,9 @@ function HomeContent(): React.JSX.Element {
     [
       newBotColor,
       newBotFaceBlinkBar,
+      newBotFaceBlinkScale,
+      newBotFaceBlinkOffsetX,
+      newBotFaceBlinkOffsetY,
       newBotFaceEyeAnimation,
       newBotFaceEyeCharacter,
       newBotFaceEyeOffsetX,
@@ -36910,6 +37481,9 @@ function HomeContent(): React.JSX.Element {
     setNewBotFaceMouthOffsetY(snapshot.faceMouthOffsetY);
     setNewBotFaceMouthRotationDeg(snapshot.faceMouthRotationDeg);
     setNewBotFaceBlinkBar(snapshot.faceBlinkBar);
+    setNewBotFaceBlinkScale(snapshot.faceBlinkScale);
+    setNewBotFaceBlinkOffsetX(snapshot.faceBlinkOffsetX);
+    setNewBotFaceBlinkOffsetY(snapshot.faceBlinkOffsetY);
     setNewBotFaceThinkingFrames(snapshot.faceThinkingFrames);
     setNewBotAvatarDetails(snapshot.avatarDetails);
     setNewBotAudioVoiceProfile(snapshot.audioVoiceProfile);
@@ -36977,6 +37551,9 @@ function HomeContent(): React.JSX.Element {
     setNewBotFaceMouthRotationDeg(pristine.faceMouthRotationDeg);
     setNewBotAudioVoiceProfile(pristine.audioVoiceProfile);
     setNewBotFaceBlinkBar(pristine.faceBlinkBar);
+    setNewBotFaceBlinkScale(pristine.faceBlinkScale);
+    setNewBotFaceBlinkOffsetX(pristine.faceBlinkOffsetX);
+    setNewBotFaceBlinkOffsetY(pristine.faceBlinkOffsetY);
     setNewBotFaceThinkingFrames(pristine.faceThinkingFrames);
     setNewBotAvatarDetails(pristine.avatarDetails);
   }, []);
@@ -39442,6 +40019,45 @@ function HomeContent(): React.JSX.Element {
       ? bots.find((bot) => bot.id === zenPersonaPresence.visibleBotId) ?? null
       : null;
   }, [bots, zenPersonaPresence.visibleBotId]);
+  const botPanelShowcaseBotId = useMemo<string | null>(() => {
+    if (panel === "bots") {
+      if (botPanelView === "library") return selectedBotPanelBotId;
+      if (botPanelView === "botHub") return selectedBotPanelBotId;
+      return botPanelView === "customize" || botPanelView === "settings"
+        ? editingBotId ?? selectedBotPanelBotId
+        : null;
+    }
+    if (panel === "memories" && memoryPanelScope === "bot") {
+      return memoryPanelBotId;
+    }
+    if (panel === "images" && imagePanelScope === "bot") {
+      return imagePanelBotId;
+    }
+    return null;
+  }, [
+    botPanelView,
+    editingBotId,
+    imagePanelBotId,
+    imagePanelScope,
+    memoryPanelBotId,
+    memoryPanelScope,
+    panel,
+    selectedBotPanelBotId,
+  ]);
+  const botPanelShowcaseBot = useMemo<Bot | null>(() => {
+    return botPanelShowcaseBotId
+      ? bots.find((bot) => bot.id === botPanelShowcaseBotId) ?? null
+      : null;
+  }, [botPanelShowcaseBotId, bots]);
+  const botPanelShowcaseIsDefaultPrism =
+    panel === "bots" &&
+    botPanelShowcaseBotId === null &&
+    (botPanelView === "home" ||
+      botPanelView === "library" ||
+      botPanelView === "defaultCustomize");
+  const zenCanvasBotSuppressedForPanel =
+    botPanelShowcaseIsDefaultPrism ||
+    (botPanelShowcaseBotId !== null && zenLivePresenceBot?.id === botPanelShowcaseBotId);
   const zenDefaultPrismGlyph = DEFAULT_PRISM_BOT_GLYPH;
   const zenDefaultPrismFaceStyle = useMemo<BotFaceStyle>(() => ({
     eyesFont: settings?.prismDefaultBotFaceEyesFont ?? DEFAULT_BOT_FACE_STYLE.eyesFont,
@@ -39475,11 +40091,20 @@ function HomeContent(): React.JSX.Element {
       DEFAULT_BOT_FACE_STYLE.mouthRotationDeg,
     blinkBar:
       settings?.prismDefaultBotFaceBlinkBar ?? DEFAULT_BOT_FACE_STYLE.blinkBar,
+    blinkScale:
+      settings?.prismDefaultBotFaceBlinkScale ?? DEFAULT_BOT_FACE_STYLE.blinkScale,
+    blinkOffsetX:
+      settings?.prismDefaultBotFaceBlinkOffsetX ?? DEFAULT_BOT_FACE_STYLE.blinkOffsetX,
+    blinkOffsetY:
+      settings?.prismDefaultBotFaceBlinkOffsetY ?? DEFAULT_BOT_FACE_STYLE.blinkOffsetY,
     thinkingFrames:
       settings?.prismDefaultBotFaceThinkingFrames ??
       DEFAULT_BOT_FACE_STYLE.thinkingFrames,
   }), [
     settings?.prismDefaultBotFaceBlinkBar,
+    settings?.prismDefaultBotFaceBlinkScale,
+    settings?.prismDefaultBotFaceBlinkOffsetX,
+    settings?.prismDefaultBotFaceBlinkOffsetY,
     settings?.prismDefaultBotFaceEyeCharacter,
     settings?.prismDefaultBotFaceEyeAnimation,
     settings?.prismDefaultBotFaceEyesFont,
@@ -40213,6 +40838,7 @@ function HomeContent(): React.JSX.Element {
                 : localImageModelCatalogEntries
             }
             provider="local"
+            loading={modelCatalogLoading}
             ariaLabel="Atmosphere wallpaper offline image model"
             formName={SETTINGS_PREFERRED_ZEN_WALLPAPER_LOCAL_IMAGE_MODEL_FIELD}
             placement="down"
@@ -40264,6 +40890,7 @@ function HomeContent(): React.JSX.Element {
                 : onlineImageModelCatalogEntries
             }
             provider="online"
+            loading={modelCatalogLoading}
             title={
               hasRunnableOnlineImageModels
                 ? "Online image model."
@@ -40323,6 +40950,7 @@ function HomeContent(): React.JSX.Element {
               }}
               options={prismInternalLlmCallOptions}
               provider="local"
+              loading={modelCatalogLoading}
               ariaLabel="Prism internal LLM"
               formName={SETTINGS_PRISM_DEFAULT_LLM_MODEL_FIELD}
               placement="down"
@@ -40356,6 +40984,7 @@ function HomeContent(): React.JSX.Element {
               }}
               options={prismImageToolLlmCallOptions}
               provider="local"
+              loading={modelCatalogLoading}
               ariaLabel="Image-request LLM"
               formName={SETTINGS_PRISM_IMAGE_TOOL_LLM_MODEL_FIELD}
               placement="down"
@@ -40408,6 +41037,7 @@ function HomeContent(): React.JSX.Element {
                 }}
                 options={hubPreferredLocalOptions}
                 provider="local"
+                loading={modelCatalogLoading}
                 ariaLabel="Default offline chat model"
                 formName={SETTINGS_PREFERRED_LOCAL_MODEL_FIELD}
                 placement="down"
@@ -40448,6 +41078,7 @@ function HomeContent(): React.JSX.Element {
                 }}
                 options={hubPreferredOnlineOptions}
                 provider="online"
+                loading={modelCatalogLoading}
                 ariaLabel="Default online chat model"
                 formName={SETTINGS_PREFERRED_ONLINE_MODEL_FIELD}
                 placement="down"
@@ -40495,6 +41126,7 @@ function HomeContent(): React.JSX.Element {
                     : localImageModelCatalogEntries
                 }
                 provider="local"
+                loading={modelCatalogLoading}
                 ariaLabel="Default offline image model"
                 formName={SETTINGS_PREFERRED_LOCAL_IMAGE_MODEL_FIELD}
                 placement="down"
@@ -40538,6 +41170,7 @@ function HomeContent(): React.JSX.Element {
                     : onlineImageModelCatalogEntries
                 }
                 provider="online"
+                loading={modelCatalogLoading}
                 title={
                   hasRunnableOnlineImageModels
                     ? "Online image model."
@@ -40599,6 +41232,7 @@ function HomeContent(): React.JSX.Element {
                   "local"
                 )}
                 provider="local"
+                loading={modelCatalogLoading}
                 ariaLabel="Copyright fallback text chat offline model"
                 formName={SETTINGS_LENIENT_LOCAL_FALLBACK_MODEL_FIELD}
                 placement="down"
@@ -40637,6 +41271,7 @@ function HomeContent(): React.JSX.Element {
                   settings.lenientLocalImageFallbackModel
                 )}
                 provider="local"
+                loading={modelCatalogLoading}
                 ariaLabel="Copyright fallback images offline model"
                 formName={SETTINGS_LENIENT_LOCAL_IMAGE_FALLBACK_MODEL_FIELD}
                 placement="down"
@@ -40944,6 +41579,7 @@ function HomeContent(): React.JSX.Element {
         }}
         options={modelOptions}
         provider={isLocal ? "local" : "online"}
+        loading={modelCatalogLoading}
         disabled={coffeeBusy || coffeeAutoBusy}
         title={`Coffee model (${responseModeShortLabel(responseMode)} — concrete choices override seated bots)`}
         ariaLabel={`Coffee session model for ${
@@ -41068,6 +41704,7 @@ function HomeContent(): React.JSX.Element {
               }}
               options={modelOptions}
               provider={isLocal ? "local" : "online"}
+              loading={modelCatalogLoading}
               disabled={!settings || pendingReplyVisible}
               title={`Model for ${responseModeShortLabel(responseMode)} replies`}
               ariaLabel={`Model for ${isLocal ? "local" : "online"} replies`}
@@ -41156,6 +41793,7 @@ function HomeContent(): React.JSX.Element {
               },
             ]}
             provider="local"
+            loading={modelCatalogLoading}
             disabled
             title="Install an image model via Ollama (for example: ollama pull flux2-klein), or add your ComfyUI server URL in Settings."
             ariaLabel="No local image models — configure Ollama or ComfyUI in Settings"
@@ -41221,6 +41859,7 @@ function HomeContent(): React.JSX.Element {
           }}
           options={modelOptions}
           provider={isLocal ? "local" : "online"}
+          loading={modelCatalogLoading}
           disabled={
             !settings ||
             (!isLocal && !hasVisibleOnlineImageModels)
@@ -45125,7 +45764,15 @@ function HomeContent(): React.JSX.Element {
   const coffeeRevealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Matches `randomCoffeeRevealDelayMs` for the current pending assistant line so typewriter finishes with reveal. */
   const coffeeRevealTypingDurationMsRef = useRef(0);
+  const coffeeRevealCompleteFnRef = useRef<(() => void) | null>(null);
   const coffeeTypewriterRafRef = useRef<number | null>(null);
+  const coffeeTableSpeedNudgeStateRef = useRef<ZenCanvasSpeedNudgeState>(
+    createZenCanvasSpeedNudgeState()
+  );
+  const coffeeTableSpeedNudgePointerRef = useRef<{
+    pointerId: number;
+    revealKey: string;
+  } | null>(null);
   const coffeeVoiceRevealClockRef = useRef<{
     messageId: string;
     durationMs: number;
@@ -46526,15 +47173,17 @@ function HomeContent(): React.JSX.Element {
       last.moodKey
     );
     const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+    const revealKey = `${coffeePendingRevealConversation?.id ?? "coffee"}:${last.id}`;
+    const voiceRevealActive = coffeeVoiceRevealClockRef.current?.messageId === last.id;
     const deliveryPlan = buildCoffeeDeliveryPlan({
       text: displayText,
       seed: `${coffeePendingRevealConversation?.id ?? "coffee"}:${last.id}:${coffeePendingSpeakerBotId ?? "bot"}`,
       mood: revealMood,
       humanPacing: coffeeSessionSettingsRef.current.humanPacing,
-      ...(coffeeVoiceRevealClockRef.current?.messageId === last.id
+      ...(voiceRevealActive
         ? {
-            audioDurationMs: coffeeVoiceRevealClockRef.current.durationMs,
-            audioAlignment: coffeeVoiceRevealClockRef.current.alignment,
+            audioDurationMs: coffeeVoiceRevealClockRef.current!.durationMs,
+            audioAlignment: coffeeVoiceRevealClockRef.current!.alignment,
           }
         : {}),
       ...(reducedMotion ? { audioDurationMs: 180 } : {}),
@@ -46544,9 +47193,18 @@ function HomeContent(): React.JSX.Element {
     setCoffeeTypewriterLength(0);
     setCoffeeTypewriterHolding(false);
     setCoffeeTypewriterEmphasisActive(false);
-    const startMs = performance.now();
+    let elapsed = 0;
+    let previousFrameMs = performance.now();
     const step = (now: number) => {
-      const elapsed = now - startMs;
+      const frameDeltaMs = Math.max(0, now - previousFrameMs);
+      previousFrameMs = now;
+      const delayMultiplier = voiceRevealActive || reducedMotion
+        ? 1
+        : resolveZenCanvasSpeedNudgeDelayMultiplier(
+            coffeeTableSpeedNudgeStateRef.current,
+            { revealKey, nowMs: Date.now() }
+          );
+      elapsed += frameDeltaMs / delayMultiplier;
       const nextLen = Math.min(charCount, coffeeDeliveryVisibleLengthAtMs(deliveryPlan, elapsed));
       setCoffeeTypewriterLength(nextLen);
       setCoffeeTypewriterHolding(coffeeDeliveryIsHoldingAtMs(deliveryPlan, elapsed));
@@ -46562,6 +47220,7 @@ function HomeContent(): React.JSX.Element {
         setCoffeeTypewriterHolding(false);
         setCoffeeTypewriterEmphasisActive(false);
         coffeeTypewriterRafRef.current = null;
+        coffeeRevealCompleteFnRef.current?.();
       }
     };
     coffeeTypewriterRafRef.current = requestAnimationFrame(step);
@@ -50742,6 +51401,15 @@ function HomeContent(): React.JSX.Element {
       prismDefaultBotFaceBlinkBar:
         normalizeBotFaceBlinkBar(d.settings.prismDefaultBotFaceBlinkBar) ??
         DEFAULT_BOT_FACE_STYLE.blinkBar,
+      prismDefaultBotFaceBlinkScale:
+        normalizeBotFaceBlinkScale(d.settings.prismDefaultBotFaceBlinkScale) ??
+        DEFAULT_BOT_FACE_STYLE.blinkScale,
+      prismDefaultBotFaceBlinkOffsetX:
+        normalizeBotFaceBlinkOffsetX(d.settings.prismDefaultBotFaceBlinkOffsetX) ??
+        DEFAULT_BOT_FACE_STYLE.blinkOffsetX,
+      prismDefaultBotFaceBlinkOffsetY:
+        normalizeBotFaceBlinkOffsetY(d.settings.prismDefaultBotFaceBlinkOffsetY) ??
+        DEFAULT_BOT_FACE_STYLE.blinkOffsetY,
       prismDefaultBotFaceThinkingFrames:
         normalizeBotFaceThinkingFrames(d.settings.prismDefaultBotFaceThinkingFrames) ??
         DEFAULT_BOT_FACE_STYLE.thinkingFrames,
@@ -58462,7 +59130,9 @@ function HomeContent(): React.JSX.Element {
           stacked ? (
             <div className={styles.chatComposerStack}>
               {showDebugComposer ? renderDebugComposer() : null}
-              {showZenLivePresence && zenLivePresenceRailVisible ? (
+              {showZenLivePresence &&
+              zenLivePresenceRailVisible &&
+              !zenCanvasBotSuppressedForPanel ? (
                 <div className={styles.zenLiveActionStatusRail}>
                   <ZenLiveBotPresencePlate
                     bot={zenLivePresenceBot}
@@ -59187,21 +59857,57 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
+  async function resolveBotHubVoicePreviewText(bot: Bot): Promise<string> {
+    const cacheKey = `bot:${bot.id}`;
+    const cached = voicePreviewLineCacheRef.current.get(cacheKey);
+    if (cached) return cached;
+    const persisted = bot.voice_preview_line?.trim();
+    if (persisted) {
+      voicePreviewLineCacheRef.current.set(cacheKey, persisted);
+      return persisted;
+    }
+    try {
+      const result = await api<{ line?: string }>("/api/voices/preview-line", {
+        method: "POST",
+        body: JSON.stringify({
+          botId: bot.id,
+          botName: bot.name,
+          systemPrompt: bot.system_prompt,
+        }),
+      });
+      const line = typeof result.line === "string" && result.line.trim()
+        ? result.line.trim()
+        : VOICE_PREVIEW_TEXT;
+      voicePreviewLineCacheRef.current.set(cacheKey, line);
+      setBots((list) =>
+        list.map((candidate) =>
+          candidate.id === bot.id ? { ...candidate, voice_preview_line: line } : candidate
+        )
+      );
+      return line;
+    } catch {
+      voicePreviewLineCacheRef.current.set(cacheKey, VOICE_PREVIEW_TEXT);
+      return VOICE_PREVIEW_TEXT;
+    }
+  }
+
   async function previewSelectedVoice(
     rawProfile?: BotAudioVoiceProfileV1,
     forcedMode?: Exclude<VoiceMode, "mute">,
-    previewText = VOICE_PREVIEW_TEXT
+    previewText = VOICE_PREVIEW_TEXT,
+    options: VoicePreviewPlaybackOptions = {}
   ): Promise<void> {
     if (!settings) return;
     const previewRunId = voicePreviewPlaybackRunRef.current + 1;
     voicePreviewPlaybackRunRef.current = previewRunId;
     const previewVoiceMode = forcedMode ?? settings.voiceMode;
-    const previewProfile = normalizeBotAudioVoiceProfileV1(
+    const previewProfile = resolveVoicePreviewProfileWithGlobalDefaults(
       rawProfile ?? {
         ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
         systemVoiceName: settings.defaultSystemVoiceName,
         elevenLabsVoiceId: settings.defaultElevenLabsVoiceId,
-      }
+      },
+      settings
     );
     setPanelError(null);
     setVoicePlaybackNotice(null);
@@ -59216,6 +59922,7 @@ function HomeContent(): React.JSX.Element {
       if (previewVoiceMode === "bottish") {
         await prepareBottishVoice();
         setVoicePlaybackNotice("Playing Bottish preview…");
+        options.onPlaybackStart?.();
         await enqueueBottishVoice(
           previewText,
           previewProfile,
@@ -59229,31 +59936,45 @@ function HomeContent(): React.JSX.Element {
         return;
       }
 
-      await prepareEnglishVoice();
       setVoicePlaybackNotice("Preparing English preview…");
       const previewEngine = settings.preferredProvider === "local"
         ? "builtin"
         : settings.englishVoiceEngine;
-      const response = await fetch(new URL("/api/voices/synthesize", window.location.origin), {
-        method: "POST",
-        credentials: "include",
-        headers: { "content-type": "application/json", ...authHeadersForFetch() },
-        body: JSON.stringify({
-          text: previewText,
-          mode: "english",
-          engine: previewEngine,
-          explicitOnlineContext: true,
-          profile: previewProfile,
-        }),
-      });
-      if (!response.ok) {
-        const payload = await response.json().catch(() => null) as {
-          error?: string;
-          code?: string;
-        } | null;
-        throw new Error(payload?.error ?? payload?.code ?? `Voice preview failed (${response.status}).`);
+      let previewBytes = options.cacheKey
+        ? voicePreviewAudioCacheRef.current.get(options.cacheKey) ?? null
+        : null;
+      let engineUsed: string | null = null;
+      if (!previewBytes) {
+        const response = await fetch(new URL("/api/voices/synthesize", window.location.origin), {
+          method: "POST",
+          credentials: "include",
+          headers: { "content-type": "application/json", ...authHeadersForFetch() },
+          body: JSON.stringify({
+            text: previewText,
+            mode: "english",
+            engine: previewEngine,
+            explicitOnlineContext: true,
+            profile: previewProfile,
+          }),
+        });
+        if (!response.ok) {
+          const payload = await response.json().catch(() => null) as {
+            error?: string;
+            code?: string;
+          } | null;
+          throw new Error(payload?.error ?? payload?.code ?? `Voice preview failed (${response.status}).`);
+        }
+        engineUsed = response.headers.get("x-prism-voice-engine");
+        previewBytes = await response.arrayBuffer();
+        if (options.cacheKey) {
+          voicePreviewAudioCacheRef.current.set(options.cacheKey, previewBytes.slice(0));
+        }
       }
-      const engineUsed = response.headers.get("x-prism-voice-engine");
+      if (options.generateOnly) {
+        setVoicePlaybackNotice("Audio sample ready!");
+        return;
+      }
+      await prepareEnglishVoice();
       setVoicePlaybackNotice(
         settings.preferredProvider === "local" && settings.englishVoiceEngine === "elevenlabs"
           ? "Playing a system English preview to keep LOCAL mode offline."
@@ -59261,8 +59982,9 @@ function HomeContent(): React.JSX.Element {
             ? "ElevenLabs was unavailable, so Prism is previewing its system voice."
             : "Playing English preview…"
       );
+      options.onPlaybackStart?.();
       await enqueueEnglishVoice(
-        await response.arrayBuffer(),
+        previewBytes,
         previewProfile,
         "settings-voice-preview",
         settings.voiceEffectsEnabled !== false,
@@ -59272,12 +59994,106 @@ function HomeContent(): React.JSX.Element {
         setVoicePlaybackNotice("Played English preview.");
       }
     } catch (err) {
+      const message = err instanceof Error ? err.message : "Could not preview the selected voice.";
+      options.onError?.(message);
       if (voicePreviewPlaybackRunRef.current === previewRunId) {
-        setPanelError(err instanceof Error ? err.message : "Could not preview the selected voice.");
+        setPanelError(message);
         setVoicePlaybackNotice(null);
       }
     } finally {
       if (voicePreviewPlaybackRunRef.current === previewRunId) setBusy(false);
+    }
+  }
+
+  async function playBotHubVoicePreview(
+    bot: Bot | null,
+    mode: Exclude<VoiceMode, "mute">
+  ): Promise<void> {
+    const showcaseVoiceId = bot?.id ?? DEFAULT_PRISM_SHOWCASE_VOICE_ID;
+    const runId = botHubVoicePreviewRunRef.current + 1;
+    botHubVoicePreviewRunRef.current = runId;
+    if (botHubVoiceFeedbackTimerRef.current) {
+      clearTimeout(botHubVoiceFeedbackTimerRef.current);
+      botHubVoiceFeedbackTimerRef.current = null;
+    }
+    setBotHubVoicePreview({ botId: showcaseVoiceId, mode, status: "generating", error: null });
+    if (!settings) {
+      setBotHubVoicePreview({
+        botId: showcaseVoiceId,
+        mode,
+        status: "error",
+        error: "Voice settings are still loading. Try again in a moment.",
+      });
+      return;
+    }
+    const authoredProfile = bot
+      ? normalizeOptionalBotAudioVoiceProfileV1(bot.audio_voice_profile_override) ??
+        normalizeBotAudioVoiceProfileV1(bot.authored_audio_voice_profile)
+      : normalizeBotAudioVoiceProfileV1(settings.prismDefaultBotAudioVoiceProfile);
+    const profile = resolveVoicePreviewProfileWithGlobalDefaults(
+      authoredProfile,
+      settings
+    );
+    let failed = false;
+    try {
+      const previewEngine = settings.preferredProvider === "local"
+        ? "builtin"
+        : settings.englishVoiceEngine;
+      const showcaseName = bot?.name ?? "Prism";
+      const cachedPreviewLine = bot
+        ? await resolveBotHubVoicePreviewText(bot)
+        : DEFAULT_PRISM_VOICE_PREVIEW_LINES[profile.baseVoiceId] ?? VOICE_PREVIEW_TEXT;
+      if (botHubVoicePreviewRunRef.current !== runId) return;
+      const previewText = `My name is ${showcaseName}. ${
+        cachedPreviewLine
+      }`;
+      const audioCacheKey = mode === "english"
+        ? [
+            "bot-hub",
+            showcaseVoiceId,
+            previewEngine,
+            previewText,
+            JSON.stringify(profile),
+          ].join(":")
+        : undefined;
+      const generateOnly = mode === "english" && Boolean(
+        audioCacheKey && !voicePreviewAudioCacheRef.current.has(audioCacheKey)
+      );
+      await previewSelectedVoice(profile, mode, previewText, {
+        cacheKey: audioCacheKey,
+        generateOnly,
+        onPlaybackStart: () => {
+          if (botHubVoicePreviewRunRef.current === runId) {
+            setBotHubVoicePreview({ botId: showcaseVoiceId, mode, status: "playing", error: null });
+          }
+        },
+        onError: (message) => {
+          failed = true;
+          if (botHubVoicePreviewRunRef.current === runId) {
+            setBotHubVoicePreview({ botId: showcaseVoiceId, mode, status: "error", error: message });
+          }
+        },
+      });
+      if (!failed && botHubVoicePreviewRunRef.current === runId) {
+        setBotHubVoicePreview({ botId: showcaseVoiceId, mode, status: "complete", error: null });
+        if (mode === "bottish") {
+          botHubVoiceFeedbackTimerRef.current = setTimeout(() => {
+            if (botHubVoicePreviewRunRef.current === runId) {
+              setBotHubVoicePreview({ botId: showcaseVoiceId, mode, status: "idle", error: null });
+            }
+            botHubVoiceFeedbackTimerRef.current = null;
+          }, BOT_HUB_VOICE_CLICK_FEEDBACK_MS);
+        }
+      }
+    } catch (error) {
+      if (botHubVoicePreviewRunRef.current === runId) {
+        setBotHubVoicePreview({
+          botId: showcaseVoiceId,
+          mode,
+          status: "error",
+          error: error instanceof Error ? error.message : "Could not generate the voice sample.",
+        });
+      }
     }
   }
 
@@ -60762,10 +61578,14 @@ function HomeContent(): React.JSX.Element {
         faceMouthOffsetY: faceStyle.mouthOffsetY,
         faceMouthRotationDeg: faceStyle.mouthRotationDeg,
         faceBlinkBar: faceStyle.blinkBar,
+        faceBlinkScale: faceStyle.blinkScale,
+        faceBlinkOffsetX: faceStyle.blinkOffsetX,
+        faceBlinkOffsetY: faceStyle.blinkOffsetY,
         faceThinkingFrames: faceStyle.thinkingFrames,
         onlineEnabled: bot.online_enabled === 1,
         flirtEnabled: bot.flirt_enabled === 1,
         chatEnabled: bot.chat_enabled === 1,
+        voicePreviewLine: bot.voice_preview_line ?? null,
         authoredAudioVoiceProfile: normalizeBotAudioVoiceProfileV1(bot.authored_audio_voice_profile),
         audioVoiceProfileOverride: normalizeOptionalBotAudioVoiceProfileV1(
           bot.audio_voice_profile_override
@@ -61477,6 +62297,7 @@ function HomeContent(): React.JSX.Element {
     let restoredTotal = 0;
 
     for (const entry of preparedEntries) {
+      const identityHint = parseImportBotLoadingHint(entry.archiveBytes);
       const entryTotalSteps = 1 + entry.memoryCount;
       let entryCompletedSteps = 0;
       let entryRestoredMemories = 0;
@@ -61494,6 +62315,8 @@ function HomeContent(): React.JSX.Element {
             ? `Restoring ${entry.memoryCount} memories for ${entry.importedName}.`
             : `Importing ${entry.importedName}.`,
           currentStepLabel: `Importing ${entry.importedName}`,
+          accentColor: identityHint.color,
+          glyph: identityHint.glyph,
           stats: {
             ...current.stats,
             imported: importedCount,
@@ -61832,6 +62655,27 @@ function HomeContent(): React.JSX.Element {
       normalizeBotFaceBlinkBar(parsed.botJson.bot.faceBlinkBar) === null
     ) {
       throw new Error(`${prepared.entry.name} marketplace bundle has an invalid blink bar.`);
+    }
+    if (
+      parsed.botJson.bot.faceBlinkScale !== undefined &&
+      parsed.botJson.bot.faceBlinkScale !== null &&
+      normalizeBotFaceBlinkScale(parsed.botJson.bot.faceBlinkScale) === null
+    ) {
+      throw new Error(`${prepared.entry.name} marketplace bundle has an invalid blink size.`);
+    }
+    if (
+      parsed.botJson.bot.faceBlinkOffsetX !== undefined &&
+      parsed.botJson.bot.faceBlinkOffsetX !== null &&
+      normalizeBotFaceBlinkOffsetX(parsed.botJson.bot.faceBlinkOffsetX) === null
+    ) {
+      throw new Error(`${prepared.entry.name} marketplace bundle has an invalid blink horizontal position.`);
+    }
+    if (
+      parsed.botJson.bot.faceBlinkOffsetY !== undefined &&
+      parsed.botJson.bot.faceBlinkOffsetY !== null &&
+      normalizeBotFaceBlinkOffsetY(parsed.botJson.bot.faceBlinkOffsetY) === null
+    ) {
+      throw new Error(`${prepared.entry.name} marketplace bundle has an invalid blink height.`);
     }
     if (
       parsed.botJson.bot.faceThinkingFrames !== undefined &&
@@ -62666,6 +63510,7 @@ function HomeContent(): React.JSX.Element {
 	    applyMarketplaceLensToRandomizer(lens);
 	    setBotMarketplaceSection("lens");
 	    setBotPanelView("create");
+	    setBotAvatarCustomizerOpen(true);
 	  }
 
 	  function browseMarketplaceLenses(): void {
@@ -64908,26 +65753,6 @@ function HomeContent(): React.JSX.Element {
     disarmDelete();
   }, [panel, pendingDeleteKey, disarmDelete]);
 
-  // Create mode: seed random color/glyph when the Bots panel opens only if
-  // the compose form is still empty and the user hasn't picked a swatch/glyph
-  // yet — so closing the panel mid-draft (or after a mis-tap) preserves work.
-  useEffect(() => {
-    if (panel !== "bots" || editingBotId) return;
-
-    const draft = latestCreateBotDraftRef.current;
-    if (
-      createBotFormHasEnteredData(draft) ||
-      createBotAppearanceTouchedRef.current
-    ) {
-      return;
-    }
-
-    setNewBotColor(randomHex(
-      bots.map((bot) => bot.color?.trim() ?? "").filter((hex) => hex.length > 0)
-    ));
-    setNewBotGlyph(randomBotGlyph());
-  }, [panel, editingBotId]);
-
   useEffect(() => {
     if (botProfileBuilderOpen && !editingBotId && !newBotName.trim()) {
       setBotProfileBuilderOpen(false);
@@ -65311,6 +66136,9 @@ function HomeContent(): React.JSX.Element {
     setNewBotFaceMouthOffsetY(draft.faceStyle.mouthOffsetY);
     setNewBotFaceMouthRotationDeg(draft.faceStyle.mouthRotationDeg);
     setNewBotFaceBlinkBar(draft.faceStyle.blinkBar);
+    setNewBotFaceBlinkScale(draft.faceStyle.blinkScale);
+    setNewBotFaceBlinkOffsetX(draft.faceStyle.blinkOffsetX);
+    setNewBotFaceBlinkOffsetY(draft.faceStyle.blinkOffsetY);
     setNewBotFaceThinkingFrames(draft.faceStyle.thinkingFrames);
     setNewBotAvatarDetails(null);
     setNewBotProfilePictureImageId(null);
@@ -65329,10 +66157,17 @@ function HomeContent(): React.JSX.Element {
     );
   }
 
-  // Reset the top form back to "create" mode with a fresh random
-  // color/glyph seed. Clears draft/touch guards so the next open behaves
-  // like an empty compose. Called after a successful create and when the
-  // user cancels or deletes an in-progress edit.
+  function applyRandomBotPersonalityDraft() {
+    const draft = buildRandomBotDraft(newBotName.trim() || randomBotName());
+    setBotProfile((current) => ({
+      ...current,
+      core: draft.profile.core,
+    }));
+    setPanelNotice("Personality randomized. Identity, face, voice, facts, and settings were preserved.");
+  }
+
+  // Reset to a deterministic blank draft. Randomization is opt-in inside
+  // Avatar Studio so merely opening the creator never invents a persona.
   const resetBotForm = useCallback(() => {
     if (voiceAutosaveTimerRef.current) {
       clearTimeout(voiceAutosaveTimerRef.current);
@@ -65356,12 +66191,10 @@ function HomeContent(): React.JSX.Element {
     setNewBotTopP(BOT_TOP_P_DEFAULT);
     setNewBotTopK(BOT_TOP_K_DEFAULT);
     setNewBotRepetitionPenalty(BOT_REPETITION_PENALTY_DEFAULT);
-    setNewBotAudioVoiceProfile(randomBotVoiceProfileForCreation());
+    setNewBotAudioVoiceProfile(DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1);
     createBotAppearanceTouchedRef.current = false;
-    setNewBotColor(randomHex(
-      bots.map((bot) => bot.color?.trim() ?? "").filter((hex) => hex.length > 0)
-    ));
-    setNewBotGlyph(randomBotGlyph());
+    setNewBotColor(DEFAULT_PRISM_BOT_CUSTOMIZER_COLOR);
+    setNewBotGlyph(DEFAULT_BOT_GLYPH);
     setNewBotFaceEyesFont(DEFAULT_BOT_FACE_STYLE.eyesFont);
     setNewBotFaceEyeCharacter(DEFAULT_BOT_FACE_STYLE.eyeCharacter);
     setNewBotFaceEyeAnimation(DEFAULT_BOT_FACE_STYLE.eyeAnimation);
@@ -65378,6 +66211,9 @@ function HomeContent(): React.JSX.Element {
     setNewBotFaceMouthOffsetY(DEFAULT_BOT_FACE_STYLE.mouthOffsetY);
     setNewBotFaceMouthRotationDeg(DEFAULT_BOT_FACE_STYLE.mouthRotationDeg);
     setNewBotFaceBlinkBar(DEFAULT_BOT_FACE_STYLE.blinkBar);
+    setNewBotFaceBlinkScale(DEFAULT_BOT_FACE_STYLE.blinkScale);
+    setNewBotFaceBlinkOffsetX(DEFAULT_BOT_FACE_STYLE.blinkOffsetX);
+    setNewBotFaceBlinkOffsetY(DEFAULT_BOT_FACE_STYLE.blinkOffsetY);
     setNewBotFaceThinkingFrames(DEFAULT_BOT_FACE_STYLE.thinkingFrames);
     setNewBotAvatarDetails(null);
     setNewBotProfilePictureImageId(null);
@@ -65392,7 +66228,7 @@ function HomeContent(): React.JSX.Element {
     // the only places that hold a snapshot are paths that also call
     // resetBotForm on exit.
     editOriginalRef.current = null;
-  }, [bots, randomBotVoiceProfileForCreation]);
+  }, []);
 
   function resetBotPanelDraftNavigation(): void {
     disarmDelete();
@@ -65424,6 +66260,7 @@ function HomeContent(): React.JSX.Element {
     setBotPanelView("create");
     resetBotForm();
     openRightPanel("bots");
+    setBotAvatarCustomizerOpen(true);
   }
 
   function openFreshBotCustomizer(): void {
@@ -65435,6 +66272,24 @@ function HomeContent(): React.JSX.Element {
     setBotPanelView("library");
     setBotLibraryExpanded(true);
     openRightPanel("bots");
+  }
+
+  function selectBotPanelShowcase(bot: Bot | null): void {
+    botHubVoicePreviewRunRef.current += 1;
+    voicePreviewPlaybackRunRef.current += 1;
+    if (botHubVoiceFeedbackTimerRef.current) {
+      clearTimeout(botHubVoiceFeedbackTimerRef.current);
+      botHubVoiceFeedbackTimerRef.current = null;
+    }
+    stopBottishVoice();
+    stopEnglishVoice();
+    setSelectedBotPanelBotId(bot?.id ?? null);
+    setBotHubVoicePreview({
+      botId: bot?.id ?? DEFAULT_PRISM_SHOWCASE_VOICE_ID,
+      mode: null,
+      status: "idle",
+      error: null,
+    });
   }
 
   function openDefaultBotCustomizer(): void {
@@ -65510,6 +66365,15 @@ function HomeContent(): React.JSX.Element {
     const seededFaceBlinkBar =
       normalizeBotFaceBlinkBar(settings.prismDefaultBotFaceBlinkBar) ??
       DEFAULT_BOT_FACE_STYLE.blinkBar;
+    const seededFaceBlinkScale =
+      normalizeBotFaceBlinkScale(settings.prismDefaultBotFaceBlinkScale) ??
+      DEFAULT_BOT_FACE_STYLE.blinkScale;
+    const seededFaceBlinkOffsetX =
+      normalizeBotFaceBlinkOffsetX(settings.prismDefaultBotFaceBlinkOffsetX) ??
+      DEFAULT_BOT_FACE_STYLE.blinkOffsetX;
+    const seededFaceBlinkOffsetY =
+      normalizeBotFaceBlinkOffsetY(settings.prismDefaultBotFaceBlinkOffsetY) ??
+      DEFAULT_BOT_FACE_STYLE.blinkOffsetY;
     const seededFaceThinkingFrames =
       normalizeBotFaceThinkingFrames(settings.prismDefaultBotFaceThinkingFrames) ??
       DEFAULT_BOT_FACE_STYLE.thinkingFrames;
@@ -65558,6 +66422,9 @@ function HomeContent(): React.JSX.Element {
     setNewBotFaceMouthOffsetY(seededFaceMouthOffsetY);
     setNewBotFaceMouthRotationDeg(seededFaceMouthRotationDeg);
     setNewBotFaceBlinkBar(seededFaceBlinkBar);
+    setNewBotFaceBlinkScale(seededFaceBlinkScale);
+    setNewBotFaceBlinkOffsetX(seededFaceBlinkOffsetX);
+    setNewBotFaceBlinkOffsetY(seededFaceBlinkOffsetY);
     setNewBotFaceThinkingFrames(seededFaceThinkingFrames);
     setNewBotAvatarDetails(null);
     setNewBotProfilePictureImageId(null);
@@ -65599,6 +66466,9 @@ function HomeContent(): React.JSX.Element {
       faceMouthOffsetY: seededFaceMouthOffsetY,
       faceMouthRotationDeg: seededFaceMouthRotationDeg,
       faceBlinkBar: seededFaceBlinkBar,
+      faceBlinkScale: seededFaceBlinkScale,
+      faceBlinkOffsetX: seededFaceBlinkOffsetX,
+      faceBlinkOffsetY: seededFaceBlinkOffsetY,
       faceThinkingFrames: seededFaceThinkingFrames,
       avatarDetails: null,
       profilePictureImageId: null,
@@ -65627,7 +66497,9 @@ function HomeContent(): React.JSX.Element {
     openRightPanel("bots");
   }
 
-  async function createBot() {
+  async function createBot(): Promise<boolean> {
+    if (!newBotName.trim()) return false;
+    setBusy(true);
     setPanelError(null);
     setPanelNotice(null);
     const createdBotName = newBotName.trim();
@@ -65656,11 +66528,11 @@ function HomeContent(): React.JSX.Element {
         : normalizeOnlineImageModelPreference(newBotOpenAiImageModel);
     const storedSystemPrompt = botEditorAdvancedMode
       ? newBotSystemPrompt
-      : serializeStoredBotPrompt(botProfile, createdBotName);
-    const createdAudioVoiceProfile = fillMissingBotAudioVoiceIdentities(
-      newBotAudioVoiceProfile,
-      systemVoiceOptions.map((voice) => voice.name),
-      elevenLabsVoiceCatalog.map((voice) => voice.voiceId)
+      : botProfileCompletionCount(botProfile) === 0
+        ? ""
+        : serializeStoredBotPrompt(botProfile, createdBotName);
+    const createdAudioVoiceProfile = normalizeBotAudioVoiceProfileV1(
+      newBotAudioVoiceProfile
     );
     const transferTotalSteps = generatedMemorySeeds.length > 0
       ? generatedMemorySeeds.length + 1
@@ -65724,9 +66596,12 @@ function HomeContent(): React.JSX.Element {
           faceMouthOffsetY: newBotFaceMouthOffsetY,
           faceMouthRotationDeg: newBotFaceMouthRotationDeg,
           faceBlinkBar: newBotFaceBlinkBar,
+          faceBlinkScale: newBotFaceBlinkScale,
+          faceBlinkOffsetX: newBotFaceBlinkOffsetX,
+          faceBlinkOffsetY: newBotFaceBlinkOffsetY,
           faceThinkingFrames: newBotFaceThinkingFrames,
           avatarDetails: newBotAvatarDetails,
-          authoredAudioVoiceProfile: newBotAudioVoiceProfile,
+          authoredAudioVoiceProfile: createdAudioVoiceProfile,
         }),
       });
       createdBotId = created.bot?.id ?? null;
@@ -65805,6 +66680,7 @@ function HomeContent(): React.JSX.Element {
         await refreshMemories();
         await refreshBotMemories(createdBotId);
       }
+      return true;
     } catch (err) {
       if (createdBotId) {
         resetBotForm();
@@ -65818,10 +66694,12 @@ function HomeContent(): React.JSX.Element {
       } else {
         setPanelError(err instanceof Error ? err.message : "Create bot failed.");
       }
+      return createdBotId !== null;
     } finally {
       if (generatedMemorySeeds.length > 0) {
         setBotTransferOverlay(null);
       }
+      setBusy(false);
     }
   }
 
@@ -65917,8 +66795,12 @@ function HomeContent(): React.JSX.Element {
           faceMouthOffsetY: faceStyle.mouthOffsetY,
           faceMouthRotationDeg: faceStyle.mouthRotationDeg,
           faceBlinkBar: faceStyle.blinkBar,
+          faceBlinkScale: faceStyle.blinkScale,
+          faceBlinkOffsetX: faceStyle.blinkOffsetX,
+          faceBlinkOffsetY: faceStyle.blinkOffsetY,
           faceThinkingFrames: faceStyle.thinkingFrames,
           avatarDetails: resolveBotAvatarDetails(bot),
+          voicePreviewLine: bot.voice_preview_line ?? null,
           authoredAudioVoiceProfile:
             normalizeOptionalBotAudioVoiceProfileV1(bot.audio_voice_profile_override) ??
             normalizeBotAudioVoiceProfileV1(bot.authored_audio_voice_profile),
@@ -66001,6 +66883,9 @@ function HomeContent(): React.JSX.Element {
           faceMouthOffsetY: newBotFaceMouthOffsetY,
           faceMouthRotationDeg: newBotFaceMouthRotationDeg,
           faceBlinkBar: newBotFaceBlinkBar,
+          faceBlinkScale: newBotFaceBlinkScale,
+          faceBlinkOffsetX: newBotFaceBlinkOffsetX,
+          faceBlinkOffsetY: newBotFaceBlinkOffsetY,
           faceThinkingFrames: newBotFaceThinkingFrames,
           avatarDetails: newBotAvatarDetails,
           authoredAudioVoiceProfile: newBotAudioVoiceProfile,
@@ -66055,6 +66940,9 @@ function HomeContent(): React.JSX.Element {
         faceMouthOffsetY: newBotFaceMouthOffsetY,
         faceMouthRotationDeg: newBotFaceMouthRotationDeg,
         faceBlinkBar: newBotFaceBlinkBar,
+        faceBlinkScale: newBotFaceBlinkScale,
+        faceBlinkOffsetX: newBotFaceBlinkOffsetX,
+        faceBlinkOffsetY: newBotFaceBlinkOffsetY,
         faceThinkingFrames: newBotFaceThinkingFrames,
         avatarDetails: newBotAvatarDetails,
         profilePictureImageId: null,
@@ -67236,6 +68124,9 @@ function HomeContent(): React.JSX.Element {
     setNewBotFaceMouthOffsetY(seededFaceStyle.mouthOffsetY);
     setNewBotFaceMouthRotationDeg(seededFaceStyle.mouthRotationDeg);
     setNewBotFaceBlinkBar(seededFaceStyle.blinkBar);
+    setNewBotFaceBlinkScale(seededFaceStyle.blinkScale);
+    setNewBotFaceBlinkOffsetX(seededFaceStyle.blinkOffsetX);
+    setNewBotFaceBlinkOffsetY(seededFaceStyle.blinkOffsetY);
     setNewBotFaceThinkingFrames(seededFaceStyle.thinkingFrames);
     setNewBotAvatarDetails(seededAvatarDetails);
 	    setNewBotProfilePictureImageId(seededProfilePictureImageId);
@@ -67278,6 +68169,9 @@ function HomeContent(): React.JSX.Element {
       faceMouthOffsetY: seededFaceStyle.mouthOffsetY,
       faceMouthRotationDeg: seededFaceStyle.mouthRotationDeg,
       faceBlinkBar: seededFaceStyle.blinkBar,
+      faceBlinkScale: seededFaceStyle.blinkScale,
+      faceBlinkOffsetX: seededFaceStyle.blinkOffsetX,
+      faceBlinkOffsetY: seededFaceStyle.blinkOffsetY,
       faceThinkingFrames: seededFaceStyle.thinkingFrames,
       avatarDetails: seededAvatarDetails,
       profilePictureImageId: seededProfilePictureImageId,
@@ -67297,6 +68191,7 @@ function HomeContent(): React.JSX.Element {
     setBotPanelView("customize");
     startEditBot(bot);
     openRightPanel("bots");
+    setBotAvatarCustomizerOpen(true);
     setBotLibraryExpanded(false);
     setBotLibraryClosing(false);
   }
@@ -67307,6 +68202,7 @@ function HomeContent(): React.JSX.Element {
     setBotPanelView("settings");
     startEditBot(bot);
     openRightPanel("bots");
+    setBotAvatarCustomizerOpen(true);
     setBotLibraryExpanded(false);
     setBotLibraryClosing(false);
   }
@@ -67328,6 +68224,23 @@ function HomeContent(): React.JSX.Element {
     }
     setSelectedBotPanelBotId(null);
     setBotPanelView("library");
+  }
+
+  function closeBotAvatarStudioFlow(): void {
+    closeBotAvatarCustomizer();
+    if (editingBotId) {
+      exitBotEditorToLibrary();
+      return;
+    }
+    if (botPanelView === "defaultCustomize") {
+      resetBotForm();
+      setBotPanelView("home");
+      return;
+    }
+    if (botPanelView === "create") {
+      resetBotForm();
+      setBotPanelView("home");
+    }
   }
 
   /** Opens the customizer focused on the Facts page so the Memories panel
@@ -68930,6 +69843,9 @@ function HomeContent(): React.JSX.Element {
         || newBotFaceMouthOffsetY !== editPristine.faceMouthOffsetY
         || newBotFaceMouthRotationDeg !== editPristine.faceMouthRotationDeg
         || newBotFaceBlinkBar !== editPristine.faceBlinkBar
+        || newBotFaceBlinkScale !== editPristine.faceBlinkScale
+        || newBotFaceBlinkOffsetX !== editPristine.faceBlinkOffsetX
+        || newBotFaceBlinkOffsetY !== editPristine.faceBlinkOffsetY
         || !botFaceThinkingFramesEqual(
           newBotFaceThinkingFrames,
           editPristine.faceThinkingFrames
@@ -68963,6 +69879,9 @@ function HomeContent(): React.JSX.Element {
           faceMouthOffsetY: newBotFaceMouthOffsetY,
           faceMouthRotationDeg: newBotFaceMouthRotationDeg,
             faceBlinkBar: newBotFaceBlinkBar,
+            faceBlinkScale: newBotFaceBlinkScale,
+            faceBlinkOffsetX: newBotFaceBlinkOffsetX,
+            faceBlinkOffsetY: newBotFaceBlinkOffsetY,
             faceThinkingFrames: newBotFaceThinkingFrames,
             audioVoiceProfile: newBotAudioVoiceProfile,
           }),
@@ -69012,6 +69931,9 @@ function HomeContent(): React.JSX.Element {
           faceMouthOffsetY: newBotFaceMouthOffsetY,
           faceMouthRotationDeg: newBotFaceMouthRotationDeg,
         faceBlinkBar: newBotFaceBlinkBar,
+        faceBlinkScale: newBotFaceBlinkScale,
+        faceBlinkOffsetX: newBotFaceBlinkOffsetX,
+        faceBlinkOffsetY: newBotFaceBlinkOffsetY,
         faceThinkingFrames: newBotFaceThinkingFrames,
         avatarDetails: null,
         profilePictureImageId: null,
@@ -69041,6 +69963,9 @@ function HomeContent(): React.JSX.Element {
               prismDefaultBotFaceMouthOffsetY: newBotFaceMouthOffsetY,
               prismDefaultBotFaceMouthRotationDeg: newBotFaceMouthRotationDeg,
               prismDefaultBotFaceBlinkBar: newBotFaceBlinkBar,
+              prismDefaultBotFaceBlinkScale: newBotFaceBlinkScale,
+              prismDefaultBotFaceBlinkOffsetX: newBotFaceBlinkOffsetX,
+              prismDefaultBotFaceBlinkOffsetY: newBotFaceBlinkOffsetY,
               prismDefaultBotFaceThinkingFrames: newBotFaceThinkingFrames,
               prismDefaultBotAudioVoiceProfile: normalizeBotAudioVoiceProfileV1(
                 newBotAudioVoiceProfile
@@ -69149,6 +70074,9 @@ function HomeContent(): React.JSX.Element {
           faceMouthOffsetY: newBotFaceMouthOffsetY,
           faceMouthRotationDeg: newBotFaceMouthRotationDeg,
         faceBlinkBar: newBotFaceBlinkBar,
+        faceBlinkScale: newBotFaceBlinkScale,
+        faceBlinkOffsetX: newBotFaceBlinkOffsetX,
+        faceBlinkOffsetY: newBotFaceBlinkOffsetY,
         faceThinkingFrames: newBotFaceThinkingFrames,
         avatarDetails: newBotAvatarDetails,
         profilePictureImageId: newBotProfilePictureImageId,
@@ -69219,6 +70147,9 @@ function HomeContent(): React.JSX.Element {
           faceMouthOffsetY: newBotFaceMouthOffsetY,
           faceMouthRotationDeg: newBotFaceMouthRotationDeg,
         faceBlinkBar: newBotFaceBlinkBar,
+        faceBlinkScale: newBotFaceBlinkScale,
+        faceBlinkOffsetX: newBotFaceBlinkOffsetX,
+        faceBlinkOffsetY: newBotFaceBlinkOffsetY,
         faceThinkingFrames: newBotFaceThinkingFrames,
         avatarDetails: newBotAvatarDetails,
         profilePictureImageId: newBotProfilePictureImageId,
@@ -76108,6 +77039,30 @@ function HomeContent(): React.JSX.Element {
     </section>
   );
 
+  const renderPanelThemeToggle = (): React.JSX.Element => {
+    const themeAriaLabel =
+      effectiveThemeMode === "system"
+        ? `Theme: Auto, currently ${THEME_LABEL[resolvedTheme]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
+        : `Theme: ${THEME_LABEL[effectiveThemeMode]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`;
+    const themeTooltip =
+      effectiveThemeMode === "system"
+        ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
+        : `Theme: ${THEME_LABEL[effectiveThemeMode]}`;
+
+    return (
+      <button
+        type="button"
+        className={`${styles.panelHeaderIconButton} ${styles.panelHeaderThemeButton}`}
+        onClick={() => void cycleThemeMode()}
+        aria-label={themeAriaLabel}
+        data-glyph-tooltip={themeTooltip}
+        data-prism-panel-theme-toggle="true"
+      >
+        <ThemeGlyph mode={effectiveThemeMode} />
+      </button>
+    );
+  };
+
   const renderUsagePanel = (): React.JSX.Element | null => {
     if (panel !== "usage") return null;
     const totals = usageReport?.totals;
@@ -76158,6 +77113,7 @@ function HomeContent(): React.JSX.Element {
             >
               <RotateCcw size={14} aria-hidden="true" />
             </button>
+            {renderPanelThemeToggle()}
             <button
               className={styles.panelClose}
               onClick={closePanel}
@@ -76323,6 +77279,175 @@ function HomeContent(): React.JSX.Element {
   // Returned JSX is a fragment so the helper plugs straight into the
   // existing render tree without introducing a wrapper element that
   // would perturb CSS grid/flex layout in the parent <main>.
+  const renderBotHubShowcase = (): React.JSX.Element | null => {
+    const bot = botPanelShowcaseBot;
+    const isDefaultPrism = botPanelShowcaseIsDefaultPrism;
+    if (!bot && !isDefaultPrism) return null;
+    const showcaseVoiceId = bot?.id ?? DEFAULT_PRISM_SHOWCASE_VOICE_ID;
+    const showcaseName = bot?.name ?? "Prism";
+    const previewStatus = botHubVoicePreview.botId === showcaseVoiceId
+      ? botHubVoicePreview.status
+      : "idle";
+    const previewMode = botHubVoicePreview.botId === showcaseVoiceId
+      ? botHubVoicePreview.mode
+      : null;
+    const previewError = botHubVoicePreview.botId === showcaseVoiceId
+      ? botHubVoicePreview.error
+      : null;
+    const previewMouthShape = previewStatus === "playing"
+      ? botHubPreviewMouthShape
+      : "closed";
+    const faceStyle = bot ? resolveBotFaceStyleForBot(bot) : zenDefaultPrismFaceStyle;
+    const avatarStyle = {
+      ...botAvatarPreviewIdentityStyle(
+        bot?.color ?? DEFAULT_PRISM_BOT_CUSTOMIZER_COLOR,
+        isDefaultPrism
+      ),
+      "--coffee-plate-emoji-face-scale-y": zenLiveBotFaceScaleYForCanvasSide("left"),
+      "--zen-live-bot-face-x": `${ZEN_LIVE_BOT_LOCKED_FACE_PLACEMENT.xPct}%`,
+      "--zen-live-bot-face-y": `${ZEN_LIVE_BOT_LOCKED_FACE_PLACEMENT.yPct}%`,
+      "--zen-live-bot-face-scale": ZEN_LIVE_BOT_LOCKED_FACE_PLACEMENT.scale,
+      "--zen-live-bot-body-x": `${BOT_AVATAR_CUSTOMIZER_BODY_PLACEMENT.xPct}%`,
+      "--zen-live-bot-body-y": `${BOT_AVATAR_CUSTOMIZER_BODY_PLACEMENT.yPct}%`,
+      "--zen-live-bot-avatar-size": "min(520px, 72vmin)",
+      "--zen-live-bot-avatar-body-size": "min(468px, 65vmin)",
+      "--zen-live-bot-glyph-x-anchor": "0px",
+      "--zen-live-bot-glyph-y-anchor":
+        "calc(var(--zen-live-bot-avatar-body-size) * 0.37)",
+    } as CSSProperties;
+    return (
+      <section
+        className={styles.botPanelHubShowcase}
+        data-prism-panel-layer="true"
+        data-panel={panel ?? undefined}
+        data-bot-view={panel === "bots" ? botPanelView : undefined}
+        data-prism-persona={isDefaultPrism ? "true" : undefined}
+        data-status={previewStatus}
+        aria-busy={previewStatus === "generating"}
+      >
+        <button
+          type="button"
+          className={styles.botPanelHubAvatarButton}
+          aria-label={
+            previewMode === "english" && previewStatus === "complete"
+              ? `Play ${showcaseName}'s English audio sample`
+              : `Generate ${showcaseName}'s English audio sample`
+          }
+          onClick={() => void playBotHubVoicePreview(bot, "english")}
+        >
+          <span
+            className={`${styles.zenLiveBotPresencePlate} ${styles.botPanelHubAvatarPlate}`}
+            data-mood="warm"
+            data-prism-mood="warm"
+            data-source={isDefaultPrism ? "prism" : "persona"}
+            data-prism-persona={isDefaultPrism ? "true" : undefined}
+            data-talking={previewStatus === "playing" ? "true" : undefined}
+            data-mouth-shape={previewStatus === "playing" ? previewMouthShape : undefined}
+            data-canvas-side="left"
+            data-body-sized="true"
+            style={avatarStyle}
+            aria-hidden="true"
+          >
+            <ZenLiveBotMannequin
+              glyph={
+                bot && isBotGlyphName(bot.glyph)
+                  ? bot.glyph
+                  : DEFAULT_PRISM_BOT_GLYPH
+              }
+              faceStyle={faceStyle}
+              voicePreset={bot ? coffeeSeatVoicePreset(bot) : "warm"}
+              isTalking={previewStatus === "playing"}
+              blinkWhileTalking
+              mouthShape={previewMouthShape}
+              moodHint="warm"
+              scheduleKey={`bot-hub-${showcaseVoiceId}`}
+              thinkingScheduleKey={`bot-hub-thinking-${showcaseVoiceId}`}
+              showThinkingSpinner={previewStatus === "generating"}
+              screenMaterialSeed={
+                bot ? botScreenMaterialSeedForBot(bot, bot.id) : "prism-default"
+              }
+              frameMaterialSeed={
+                bot ? botFrameMaterialSeedForBot(bot, bot.id) : PRISM_FACTORY_CLEAN_FRAME_SEED
+              }
+              avatarDetails={bot ? resolveBotAvatarDetails(bot) : null}
+              avatarDetailsColor={
+                bot
+                  ? normalizeAccentForTheme(
+                      bot.color ?? PRISM_DEFAULT_ACCENT,
+                      resolvedTheme
+                    )
+                  : null
+              }
+            />
+          </span>
+        </button>
+        <span className={styles.botPanelHubShowcasePrompt}>
+          <strong>{showcaseName}</strong>
+          <small
+            role="status"
+            aria-live="polite"
+            data-error={previewStatus === "error" ? "true" : undefined}
+          >
+            {previewStatus === "generating"
+              ? previewMode === "english"
+                ? "Generating audio sample…"
+                : "Preparing Bottish—please wait…"
+              : previewStatus === "playing"
+                ? `Playing ${previewMode === "bottish" ? "Bottish" : "English"}…`
+                : previewStatus === "complete"
+                  ? previewMode === "english"
+                    ? "…ready! Click again to play."
+                    : "Bottish preview selected."
+                : previewStatus === "error"
+                  ? previewError ?? "Voice sample unavailable. Try again."
+                  : "Choose how to hear this bot"}
+          </small>
+        </span>
+        <div
+          className={styles.botPanelHubVoiceChoices}
+          role="group"
+          aria-label="Voice preview language"
+        >
+          <button
+            type="button"
+            data-active={previewMode === "english" ? "true" : undefined}
+            data-feedback={previewMode === "english" ? previewStatus : undefined}
+            aria-pressed={previewMode === "english"}
+            aria-busy={previewMode === "english" && previewStatus === "generating"}
+            onClick={() => void playBotHubVoicePreview(bot, "english")}
+          >
+            {previewMode === "english" && previewStatus === "generating"
+              ? "Generating audio sample…"
+              : previewMode === "english" && previewStatus === "playing"
+                ? "Playing English…"
+                : previewMode === "english" && previewStatus === "complete"
+                  ? "Play English"
+                : "English"}
+          </button>
+          <button
+            type="button"
+            data-active={previewMode === "bottish" ? "true" : undefined}
+            data-feedback={previewMode === "bottish" ? previewStatus : undefined}
+            aria-pressed={previewMode === "bottish"}
+            aria-busy={previewMode === "bottish" && previewStatus === "generating"}
+            onClick={() => void playBotHubVoicePreview(bot, "bottish")}
+          >
+            {previewMode === "bottish" && previewStatus === "generating"
+              ? "Preparing Bottish…"
+              : previewMode === "bottish" && previewStatus === "playing"
+                ? "Playing Bottish…"
+                : "Bottish"}
+          </button>
+          {isDefaultPrism ? (
+            <button type="button" onClick={openDefaultBotCustomizer}>
+              Customize Prism
+            </button>
+          ) : null}
+        </div>
+      </section>
+    );
+  };
+
   const renderSharedPanels = (): React.JSX.Element => (
     <>
       {renderBotLibraryGroupDetailsDialog()}
@@ -76461,12 +77586,15 @@ function HomeContent(): React.JSX.Element {
           data-prism-panel-layer="true"
           data-closing={panelClosing ? "true" : undefined}
           onClick={(event) => {
+            if (panel === "bots") return;
             if (event.button !== 0 || event.ctrlKey) return;
             closePanel();
           }}
           aria-hidden="true"
         />
       )}
+
+      {renderBotHubShowcase()}
 
       {renderUsagePanel()}
 
@@ -76551,15 +77679,18 @@ function HomeContent(): React.JSX.Element {
                       : "Bot memories"}
               </h3>
             </div>
-            <button
-              type="button"
-              className={styles.panelClose}
-              onClick={closePanel}
-              aria-label="Close panel"
-              data-glyph-tooltip="Close panel"
-            >
-              ×
-            </button>
+            <div className={styles.panelHeaderActions}>
+              {renderPanelThemeToggle()}
+              <button
+                type="button"
+                className={styles.panelClose}
+                onClick={closePanel}
+                aria-label="Close panel"
+                data-glyph-tooltip="Close panel"
+              >
+                ×
+              </button>
+            </div>
           </div>
           {/* Transition layer: receives the directional zoom + fade so
               the navigation reads as "drilling into" or "pulling out of"
@@ -77259,6 +78390,7 @@ function HomeContent(): React.JSX.Element {
                     <IconUpload />
                   </span>
                 </button>
+                {renderPanelThemeToggle()}
                 <button
                   type="button"
                   className={styles.panelClose}
@@ -78266,6 +79398,7 @@ function HomeContent(): React.JSX.Element {
                         }
                         options={commandCenterModelOptions}
                         provider="local"
+                        loading={modelCatalogLoading}
                         ariaLabel="Prompt run model"
                         placement="down"
                         minMenuWidthPx={260}
@@ -79101,25 +80234,7 @@ function HomeContent(): React.JSX.Element {
             scope={settingsScope}
             settingsLoaded={Boolean(settings)}
             panelClosing={panelClosing}
-            headerAction={
-              <button
-                type="button"
-                className={`${styles.panelHeaderIconButton} ${styles.settingsHeaderThemeButton}`}
-                onClick={() => void cycleThemeMode()}
-                aria-label={
-                  effectiveThemeMode === "system"
-                    ? `Theme: Auto, currently ${THEME_LABEL[resolvedTheme]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
-                    : `Theme: ${THEME_LABEL[effectiveThemeMode]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
-                }
-                data-glyph-tooltip={
-                  effectiveThemeMode === "system"
-                    ? `Theme: Auto (${THEME_LABEL[resolvedTheme]})`
-                    : `Theme: ${THEME_LABEL[effectiveThemeMode]}`
-                }
-              >
-                <ThemeGlyph mode={effectiveThemeMode} />
-              </button>
-            }
+            headerAction={renderPanelThemeToggle()}
             onScopeChange={setSettingsScope}
             onClose={closePanel}
             renderScopeContent={(activeSettingsScope: SettingsLeafScope) => (
@@ -79199,22 +80314,6 @@ function HomeContent(): React.JSX.Element {
                           : previous);
                       }}
                     />
-                  </label>
-                  <label className={`${styles.checkbox} ${styles.settingsInlineToggle} ${styles.settingsFieldFull}`}>
-                    <input
-                      type="checkbox"
-                      checked={settings.voiceEffectsEnabled !== false}
-                      onChange={(event) => {
-                        const voiceEffectsEnabled = event.currentTarget.checked;
-                        setSettings((previous) => previous
-                          ? { ...previous, voiceEffectsEnabled }
-                          : previous);
-                      }}
-                    />
-                    <span>
-                      <strong>Voice textures</strong>
-                      <small>Apply each bot&apos;s CRT or damaged-speaker texture.</small>
-                    </span>
                   </label>
                 </section>
 
@@ -81440,12 +82539,22 @@ function HomeContent(): React.JSX.Element {
         const botPanelAdvancedEditorActive =
           botPanelAdvancedEditorAvailable && botEditorAdvancedMode;
         const botPanelShowPersonaFields =
-          botPanelView === "create" || botPanelView === "customize" || editingDefaultBot;
+          botPanelView === "create" ||
+          botPanelView === "customize" ||
+          botPanelView === "settings" ||
+          editingDefaultBot;
         const botPanelShowResponseSettings =
           botPanelView === "create" || botPanelView === "settings";
         const botPanelCanSave = botPanelFormActive;
         const trimmedName = newBotName.trim();
         const nameIsPresent = trimmedName.length > 0;
+        const createDraftHasChanges =
+          createBotFormHasEnteredData(latestCreateBotDraftRef.current) ||
+          createBotAppearanceTouchedRef.current ||
+          newBotLocalImageModel !== AUTO_MODEL_CHOICE ||
+          newBotOpenAiImageModel !== AUTO_MODEL_CHOICE ||
+          JSON.stringify(newBotAudioVoiceProfile) !==
+            JSON.stringify(DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1);
         const profileReferenceName = botProfileReferenceName({
           draftName: newBotName,
           editingBotId,
@@ -81503,6 +82612,9 @@ function HomeContent(): React.JSX.Element {
         || newBotFaceMouthOffsetY !== editPristine.faceMouthOffsetY
         || newBotFaceMouthRotationDeg !== editPristine.faceMouthRotationDeg
             || newBotFaceBlinkBar !== editPristine.faceBlinkBar
+            || newBotFaceBlinkScale !== editPristine.faceBlinkScale
+            || newBotFaceBlinkOffsetX !== editPristine.faceBlinkOffsetX
+            || newBotFaceBlinkOffsetY !== editPristine.faceBlinkOffsetY
             || !botFaceThinkingFramesEqual(
               newBotFaceThinkingFrames,
               editPristine.faceThinkingFrames
@@ -81545,6 +82657,9 @@ function HomeContent(): React.JSX.Element {
         || newBotFaceMouthOffsetY !== editPristine.faceMouthOffsetY
         || newBotFaceMouthRotationDeg !== editPristine.faceMouthRotationDeg
               || newBotFaceBlinkBar !== editPristine.faceBlinkBar
+              || newBotFaceBlinkScale !== editPristine.faceBlinkScale
+              || newBotFaceBlinkOffsetX !== editPristine.faceBlinkOffsetX
+              || newBotFaceBlinkOffsetY !== editPristine.faceBlinkOffsetY
               || !botFaceThinkingFramesEqual(
                 newBotFaceThinkingFrames,
                 editPristine.faceThinkingFrames
@@ -81654,6 +82769,19 @@ function HomeContent(): React.JSX.Element {
         const defaultBotCardName = "Default";
         const defaultBotCardGlyph = DEFAULT_PRISM_BOT_GLYPH;
         const defaultBotCardStyle = undefined;
+        const botPanelHomePrismAvatarStyle = {
+          "--coffee-plate-emoji-face-scale-y": zenLiveBotFaceScaleYForCanvasSide("left"),
+          "--zen-live-bot-face-x": `${ZEN_LIVE_BOT_LOCKED_FACE_PLACEMENT.xPct}%`,
+          "--zen-live-bot-face-y": `${ZEN_LIVE_BOT_LOCKED_FACE_PLACEMENT.yPct}%`,
+          "--zen-live-bot-face-scale": ZEN_LIVE_BOT_LOCKED_FACE_PLACEMENT.scale,
+          "--zen-live-bot-body-x": `${BOT_AVATAR_CUSTOMIZER_BODY_PLACEMENT.xPct}%`,
+          "--zen-live-bot-body-y": `${BOT_AVATAR_CUSTOMIZER_BODY_PLACEMENT.yPct}%`,
+          "--zen-live-bot-avatar-size": "126px",
+          "--zen-live-bot-avatar-body-size": "114px",
+          "--zen-live-bot-glyph-x-anchor": "0px",
+          "--zen-live-bot-glyph-y-anchor":
+            "calc(var(--zen-live-bot-avatar-body-size) * 0.37)",
+        } as CSSProperties;
         const editorPanelStyle = (() => {
           const panelAccentColor =
             botPanelView === "botHub" && selectedBotPanelBot?.color
@@ -81990,6 +83118,7 @@ function HomeContent(): React.JSX.Element {
                     </span>
                   </button>
                 ) : null}
+                {renderPanelThemeToggle()}
                 <button
                   type="button"
                   className={styles.panelClose}
@@ -82055,6 +83184,52 @@ function HomeContent(): React.JSX.Element {
 	                    <small>Install premade bots and reusable Lenses.</small>
 	                  </span>
                 </button>
+                <article
+                  className={styles.botPanelHomePrismCard}
+                  data-prism-persona="true"
+                  aria-label="Default Prism bot"
+                >
+                  <span className={styles.botPanelHomePrismAvatar} aria-hidden="true">
+                    <span
+                      className={`${styles.zenLiveBotPresencePlate} ${styles.botPanelHomePrismAvatarPlate}`}
+                      data-mood="warm"
+                      data-prism-mood="warm"
+                      data-source="prism"
+                      data-prism-persona="true"
+                      data-canvas-side="left"
+                      data-body-sized="true"
+                      style={botPanelHomePrismAvatarStyle}
+                    >
+                      <ZenLiveBotMannequin
+                        glyph={DEFAULT_PRISM_BOT_GLYPH}
+                        faceStyle={zenDefaultPrismFaceStyle}
+                        voicePreset="warm"
+                        isTalking={false}
+                        mouthShape="closed"
+                        moodHint="warm"
+                        scheduleKey="bots-home-default-prism"
+                        screenMaterialSeed="prism-default"
+                        frameMaterialSeed={PRISM_FACTORY_CLEAN_FRAME_SEED}
+                      />
+                    </span>
+                  </span>
+                  <span className={styles.botPanelHomePrismCopy}>
+                    <span>Built-in companion</span>
+                    <strong>Prism</strong>
+                    <small>
+                      Your always-available default bot. Personalize its face and voice without changing its role.
+                    </small>
+                  </span>
+                  <button
+                    type="button"
+                    className={styles.botPanelHomePrismCustomize}
+                    onClick={openDefaultBotCustomizer}
+                    disabled={!settings}
+                  >
+                    <Brush size={16} strokeWidth={2.1} aria-hidden="true" />
+                    Customize Prism
+                  </button>
+                </article>
               </section>
             ) : null}
             {botPanelView === "marketplace" ? (
@@ -82479,73 +83654,75 @@ function HomeContent(): React.JSX.Element {
             ) : null}
             {botPanelView === "botHub" && selectedBotPanelBot ? (
               <section className={styles.botPanelHub} aria-label={`${selectedBotPanelBot.name} options`}>
-                <div className={styles.botPanelHubHero}>
-                  <span className={styles.botPanelHubGlyph} aria-hidden="true">
-                    <BotGlyph
-                      name={
-                        isBotGlyphName(selectedBotPanelBot.glyph)
-                          ? selectedBotPanelBot.glyph
-                          : DEFAULT_BOT_GLYPH
-                      }
-                      size={28}
-                      strokeWidth={1.9}
-                    />
-                  </span>
-                  <div className={styles.botPanelHubCopy}>
-                    <span>Selected bot</span>
-                    <strong>{selectedBotPanelBot.name}</strong>
-                    <small>
-                      {stripBotProfileMetaSuffix(selectedBotPanelBot.system_prompt).trim()
-                        ? stripBotProfileMetaSuffix(selectedBotPanelBot.system_prompt).trim().slice(0, 96)
-                        : "No personality copy yet"}
-                    </small>
+                <div className={styles.botPanelHubManagement}>
+                  <div className={styles.botPanelHubHero}>
+                    <span className={styles.botPanelHubGlyph} aria-hidden="true">
+                      <BotGlyph
+                        name={
+                          isBotGlyphName(selectedBotPanelBot.glyph)
+                            ? selectedBotPanelBot.glyph
+                            : DEFAULT_BOT_GLYPH
+                        }
+                        size={28}
+                        strokeWidth={1.9}
+                      />
+                    </span>
+                    <div className={styles.botPanelHubCopy}>
+                      <span>Selected bot</span>
+                      <strong>{selectedBotPanelBot.name}</strong>
+                      <small>
+                        {stripBotProfileMetaSuffix(selectedBotPanelBot.system_prompt).trim()
+                          ? stripBotProfileMetaSuffix(selectedBotPanelBot.system_prompt).trim().slice(0, 96)
+                          : "No personality copy yet"}
+                      </small>
+                    </div>
                   </div>
-                </div>
-                <div className={styles.botPanelHubActions}>
-                  <button
-                    type="button"
-                    className={styles.botPanelHubAction}
-                    onClick={() => openBotCustomizer(selectedBotPanelBot)}
-                  >
-                    <Brush size={18} strokeWidth={1.9} aria-hidden="true" />
-                    <span>
-                      <strong>Customize</strong>
-                      <small>Identity, appearance, and persona profile.</small>
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.botPanelHubAction}
-                    onClick={() => void openMemoriesPanelForBot(selectedBotPanelBot)}
-                  >
-                    <BookmarkGlyph />
-                    <span>
-                      <strong>Memories</strong>
-                      <small>Review what this bot remembers.</small>
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.botPanelHubAction}
-                    onClick={() => void openImagesPanelForBot(selectedBotPanelBot)}
-                  >
-                    <ImagesGlyph />
-                    <span>
-                      <strong>Images</strong>
-                      <small>Open this bot&apos;s image gallery.</small>
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.botPanelHubAction}
-                    onClick={() => openBotSettings(selectedBotPanelBot)}
-                  >
-                    <WrenchGlyph />
-                    <span>
-                      <strong>Settings</strong>
-                      <small>Models, reply style, and protection.</small>
-                    </span>
-                  </button>
+                  <div className={styles.botPanelHubActions}>
+                    <button
+                      type="button"
+                      className={styles.botPanelHubAction}
+                      onClick={() => openBotCustomizer(selectedBotPanelBot)}
+                    >
+                      <Brush size={18} strokeWidth={1.9} aria-hidden="true" />
+                      <span>
+                        <strong>Avatar Studio</strong>
+                        <small>Identity, personality, voice, and settings.</small>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.botPanelHubAction}
+                      onClick={() => void openMemoriesPanelForBot(selectedBotPanelBot)}
+                    >
+                      <BookmarkGlyph />
+                      <span>
+                        <strong>Memories</strong>
+                        <small>Review what this bot remembers.</small>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.botPanelHubAction}
+                      onClick={() => void openImagesPanelForBot(selectedBotPanelBot)}
+                    >
+                      <ImagesGlyph />
+                      <span>
+                        <strong>Images</strong>
+                        <small>Open this bot&apos;s image gallery.</small>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.botPanelHubAction}
+                      onClick={() => openBotSettings(selectedBotPanelBot)}
+                    >
+                      <WrenchGlyph />
+                      <span>
+                        <strong>Settings</strong>
+                        <small>Permissions and model routing.</small>
+                      </span>
+                    </button>
+                  </div>
                 </div>
               </section>
             ) : null}
@@ -82578,7 +83755,7 @@ function HomeContent(): React.JSX.Element {
                         onChange={e => setNewBotName(e.target.value)}
                       />
                     </label>
-                    {botPanelCreateMode ? (
+                    {botPanelCreateMode && !botAvatarCustomizerOpen ? (
 	                    <span
 	                      className={styles.botRandomizerSocket}
 	                      data-lens-applied={newBotAppliedLens ? "true" : undefined}
@@ -82615,7 +83792,7 @@ function HomeContent(): React.JSX.Element {
 	                  </div>
 	                </section>
               ) : null}
-	              {botPanelCreateMode ? (
+	              {botPanelCreateMode && !botAvatarCustomizerOpen ? (
 	              <section
 	                className={`${styles.botParameterCard} ${styles.botLensPickerCard}`}
 	                aria-label="Generation Lens"
@@ -82798,6 +83975,44 @@ function HomeContent(): React.JSX.Element {
               ) : null}
               <BotAvatarCustomizerModal
                   open={botAvatarCustomizerOpen}
+                  profileEditorLayerOpen={
+                    botProfileBuilderOpen ||
+                    botAiParametersModalOpen ||
+                    botPreferredModelsModalOpen
+                  }
+                  profileEditorLayer={!editingDefaultBot ? (
+                    <>
+                      <BotProfileBuilder
+                        open={botProfileBuilderOpen}
+                        activePage={botProfileActivePage}
+                        profile={botProfile}
+                        botName={profileReferenceName}
+                        studioLayer
+                        onRandomizePersonality={applyRandomBotPersonalityDraft}
+                        onActivePageChange={setBotProfileActivePage}
+                        onProfileChange={setBotProfile}
+                        onClose={() => setBotProfileBuilderOpen(false)}
+                      />
+                      <BotAiParameterCustomizer
+                        open={botAiParametersModalOpen}
+                        botName={trimmedName}
+                        studioLayer
+                        systemPrompt={newBotSystemPrompt}
+                        temperature={newBotTemperature}
+                        maxTokens={newBotMaxTokens}
+                        topP={newBotTopP}
+                        topK={newBotTopK}
+                        repetitionPenalty={newBotRepetitionPenalty}
+                        onSystemPromptChange={setNewBotSystemPrompt}
+                        onTemperatureChange={setNewBotTemperature}
+                        onMaxTokensChange={setNewBotMaxTokens}
+                        onTopPChange={setNewBotTopP}
+                        onTopKChange={setNewBotTopK}
+                        onRepetitionPenaltyChange={setNewBotRepetitionPenalty}
+                        onClose={() => setBotAiParametersModalOpen(false)}
+                      />
+                    </>
+                  ) : null}
                   botName={profileReferenceName}
                   botNameDraft={newBotName}
                   onBotNameChange={(next) => {
@@ -82828,6 +84043,167 @@ function HomeContent(): React.JSX.Element {
                   isDefaultPrismBot={editingDefaultBot}
                   identityControlsVisible={!editingDefaultBot}
                   draftMode={botPanelCreateMode && !editingBotId && !editingDefaultBot}
+                  initialTab={botPanelView === "settings" ? "settings" : "face"}
+                  canSave={!botPanelCreateMode || nameIsPresent}
+                  identityTools={botPanelCreateMode ? (
+                    <section
+                      className={`${styles.botParameterCard} ${styles.botLensPickerCard} ${styles.botAvatarStudioLensCard}`}
+                      aria-label="Generation Lens and bot randomizer"
+                    >
+                      <div className={styles.botAvatarStudioGenerationHeader}>
+                        <span>
+                          <strong>Generation Lens</strong>
+                          <small>Shape the next randomized bot.</small>
+                        </span>
+                        <span className={styles.botAvatarStudioGenerationActions}>
+                          <button
+                            type="button"
+                            className={styles.botRandomizeButton}
+                            data-lens-applied={newBotAppliedLens ? "true" : undefined}
+                            onClick={applyRandomBotDraft}
+                            disabled={botTransferBusy}
+                            aria-label={newBotAppliedLens
+                              ? `Randomize whole bot through ${newBotAppliedLens.displayName}`
+                              : "Randomize whole bot"}
+                            title="Randomize whole bot"
+                          >
+                            <BotGlyph name="dice" size={19} strokeWidth={1.8} />
+                          </button>
+                          <button
+                            type="button"
+                            className={styles.botLensBrowseButton}
+                            disabled={botTransferBusy}
+                            aria-label="Browse Lenses"
+                            title="Browse Lenses"
+                            onClick={browseMarketplaceLenses}
+                          >
+                            <Plus size={14} strokeWidth={2} aria-hidden="true" />
+                          </button>
+                        </span>
+                      </div>
+                      <div className={styles.botLensAppliedPanel} data-applied={newBotAppliedLens ? "true" : undefined}>
+                        {newBotAppliedLens ? (
+                          <>
+                            <LensTile lens={newBotAppliedLens} size="lg" className={styles.botLensAppliedTile} />
+                            <span className={styles.botLensAppliedCopy}>
+                              <strong>{newBotAppliedLens.displayName}</strong>
+                              <small>{marketplaceLensPreviewLine(newBotAppliedLens)}</small>
+                            </span>
+                            <button
+                              type="button"
+                              className={styles.botLensRemoveButton}
+                              disabled={botTransferBusy}
+                              aria-label="Clear Generation Lens"
+                              onClick={() => {
+                                setNewBotLensId("");
+                                setNewBotGeneratedMemorySeeds(null);
+                              }}
+                            >
+                              <X size={14} strokeWidth={2} aria-hidden="true" />
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <span className={styles.botLensEmptySocket} aria-hidden="true">
+                              <BotGlyph name="dice" size={18} strokeWidth={1.9} />
+                            </span>
+                            <span className={styles.botLensAppliedCopy}>
+                              <strong>Plain randomizer</strong>
+                              <small>No Lens is loaded.</small>
+                            </span>
+                          </>
+                        )}
+                      </div>
+                      {installedMarketplaceLensTray.length > 0 ? (
+                        <div className={styles.botLensTray} aria-label="Installed Lenses">
+                          <div className={styles.botLensTileRow}>
+                            {installedMarketplaceLensTray.map((lens) => (
+                              <button
+                                key={lens.id}
+                                type="button"
+                                className={styles.botLensTileButton}
+                                disabled={botTransferBusy}
+                                aria-label={`Use ${lens.displayName} for the next random bot`}
+                                title={lens.displayName}
+                                onClick={() => applyMarketplaceLensToRandomizer(lens)}
+                              >
+                                <LensTile lens={lens} size="sm" />
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className={styles.botLensTrayEmpty}>
+                          <span>Installed Lenses will appear here.</span>
+                        </div>
+                      )}
+                    </section>
+                  ) : null}
+                  settingsPanel={!editingDefaultBot ? (
+                    <section
+                      className={`${styles.botParameterCard} ${styles.botResponseSettingsCard} ${styles.botAvatarStudioSettingsPanel}`}
+                      aria-label="Bot settings"
+                    >
+                      <div className={styles.botParameterHeader}>
+                        <span>Bot settings</span>
+                        <small>Permissions and model routing stay with this bot.</small>
+                      </div>
+                      <div className={styles.botResponseSettingsGrid}>
+                        <div className={styles.botResponseSettingsColumn}>
+                          <div className={styles.botParameterToggleRow}>
+                            <label className={`${styles.botParameterField} ${styles.botOnlineCapabilityToggle}`}>
+                              <span>Online capability</span>
+                              <button
+                                type="button"
+                                role="switch"
+                                aria-checked={newBotOnlineEnabled}
+                                data-enabled={newBotOnlineEnabled ? "true" : undefined}
+                                data-locked={!newBotOnlineEnabled ? "true" : undefined}
+                                onClick={() => setNewBotOnlineEnabled((enabled) => !enabled)}
+                              >
+                                <strong>{newBotOnlineEnabled ? "Allowed" : "🔒 Offline only — Protected"}</strong>
+                                <small>{newBotOnlineEnabled
+                                  ? "This bot may use its preferred online model."
+                                  : "This bot will refuse online routing."}</small>
+                              </button>
+                            </label>
+                            <label className={`${styles.botParameterField} ${styles.botOnlineCapabilityToggle}`}>
+                              <span>Flirt &amp; roleplay</span>
+                              <button
+                                type="button"
+                                role="switch"
+                                aria-checked={newBotFlirtEnabled}
+                                data-enabled={newBotFlirtEnabled ? "true" : undefined}
+                                onClick={() => setNewBotFlirtEnabled((enabled) => !enabled)}
+                              >
+                                <strong>{newBotFlirtEnabled ? "Enabled" : "Disabled"}</strong>
+                                <small>{newBotFlirtEnabled
+                                  ? "This bot may flirt or roleplay in-character when invited."
+                                  : "This bot will politely reject romantic or sexual advances."}</small>
+                              </button>
+                            </label>
+                          </div>
+                          <div className={styles.botParameterField}>
+                            <span>Models &amp; routing</span>
+                            <button
+                              type="button"
+                              className={styles.botPreferredModelsButton}
+                              aria-haspopup="dialog"
+                              aria-expanded={botPreferredModelsModalOpen ? "true" : undefined}
+                              onClick={() => {
+                                setActiveFieldHelp(null);
+                                setBotModelRoutingPage("chat");
+                                setBotPreferredModelsModalOpen(true);
+                              }}
+                            >
+                              <strong>Open model &amp; image routing</strong>
+                              <span>Offline / online chat models and image-generation defaults</span>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </section>
+                  ) : null}
                   colorPickerOpen={colorWheelOpen}
                   resolvedTheme={resolvedTheme}
                   faceEyesFont={newBotFaceEyesFont}
@@ -82846,12 +84222,14 @@ function HomeContent(): React.JSX.Element {
 	                  faceMouthOffsetY={newBotFaceMouthOffsetY}
 	                  faceMouthRotationDeg={newBotFaceMouthRotationDeg}
 	                  faceBlinkBar={newBotFaceBlinkBar}
+                  faceBlinkScale={newBotFaceBlinkScale}
+                  faceBlinkOffsetX={newBotFaceBlinkOffsetX}
+                  faceBlinkOffsetY={newBotFaceBlinkOffsetY}
                   faceThinkingFrames={newBotFaceThinkingFrames}
                   avatarDetails={newBotAvatarDetails}
                   detailsEditorVisible={AVATAR_DETAILS_PANE_ENABLED && !editingDefaultBot}
                   audioVoiceProfile={newBotAudioVoiceProfile}
                   voiceMode={normalizeVoiceMode(settings?.voiceMode)}
-                  voiceEffectsEnabled={settings?.voiceEffectsEnabled !== false}
                   voiceIdentityCatalog={settings?.englishVoiceEngine === "elevenlabs"
                     ? {
                         engine: "elevenlabs",
@@ -82874,36 +84252,64 @@ function HomeContent(): React.JSX.Element {
                           ? null
                           : "No English system voices were reported by this computer.",
                       }}
-                  hasUnsavedChanges={Boolean((editingBotId || editingDefaultBot) && hasEditChanges)}
+                  profile={botProfile}
+                  profileDetailsUnlocked={profileDetailsAreUnlocked}
+                  profileAdvancedMode={botEditorAdvancedMode}
+                  profileSystemPrompt={newBotSystemPrompt}
+                  profileTemperature={newBotTemperature}
+                  profileMaxTokens={newBotMaxTokens}
+                  profileTopP={newBotTopP}
+                  profileTopK={newBotTopK}
+                  profileRepetitionPenalty={newBotRepetitionPenalty}
+                  hasUnsavedChanges={botPanelCreateMode
+                    ? createDraftHasChanges
+                    : Boolean((editingBotId || editingDefaultBot) && hasEditChanges)}
                   canUndo={botAvatarUndoDepth > 0}
                   saving={avatarCustomizerSaving}
                   saveError={panelError}
                   savePromptOpen={botAvatarSavePromptOpen}
                   onRequestClose={() => {
-                    if ((editingBotId || editingDefaultBot) && hasEditChanges) {
+                    if (
+                      ((editingBotId || editingDefaultBot) && hasEditChanges) ||
+                      (botPanelCreateMode && createDraftHasChanges)
+                    ) {
                       setBotAvatarSavePromptOpen(true);
                       return;
                     }
-                    closeBotAvatarCustomizer();
+                    closeBotAvatarStudioFlow();
                   }}
                   onSave={async () => {
                     if (editingDefaultBot) {
                       const saved = await saveDefaultBot();
                       if (saved) {
-                        closeBotAvatarCustomizer();
+                        closeBotAvatarStudioFlow();
                       }
                       return;
                     }
                     if (!editingBotId) {
-                      closeBotAvatarCustomizer();
+                      const created = await createBot();
+                      if (created) {
+                        closeBotAvatarCustomizer();
+                        setBotPanelView("home");
+                      }
                       return;
                     }
                     const saved = await saveBot(editingBotId);
-                    if (saved) closeBotAvatarCustomizer();
+                    if (saved) closeBotAvatarStudioFlow();
                   }}
                   onUndo={undoBotAvatarDraft}
                   onDiscard={() => {
                     discardBotAvatarCustomizerChanges();
+                    if (editingBotId) {
+                      exitBotEditorToLibrary();
+                    } else if (editingDefaultBot) {
+                      resetBotForm();
+                      setBotPanelView("home");
+                    } else if (botPanelCreateMode) {
+                      resetBotForm();
+                      closeBotAvatarCustomizer();
+                      setBotPanelView("home");
+                    }
                   }}
                   onCancelSavePrompt={() => setBotAvatarSavePromptOpen(false)}
                   onColorChange={(next) => {
@@ -83009,6 +84415,26 @@ function HomeContent(): React.JSX.Element {
                     pushBotAvatarUndoSnapshot();
                     handleNewBotFaceBlinkBarChange(normalizedBlinkBar);
                   }}
+                  onBlinkScaleChange={(next) => {
+                    const normalizedScale =
+                      normalizeBotFaceBlinkScale(next) ?? DEFAULT_BOT_FACE_STYLE.blinkScale;
+                    pushBotAvatarUndoSnapshot("blink-scale");
+                    handleNewBotFaceBlinkScaleChange(normalizedScale);
+                  }}
+                  onBlinkOffsetXChange={(next) => {
+                    const normalizedOffsetX =
+                      normalizeBotFaceBlinkOffsetX(next) ??
+                      DEFAULT_BOT_FACE_STYLE.blinkOffsetX;
+                    pushBotAvatarUndoSnapshot("blink-position");
+                    handleNewBotFaceBlinkOffsetXChange(normalizedOffsetX);
+                  }}
+                  onBlinkOffsetYChange={(next) => {
+                    const normalizedOffsetY =
+                      normalizeBotFaceBlinkOffsetY(next) ??
+                      DEFAULT_BOT_FACE_STYLE.blinkOffsetY;
+                    pushBotAvatarUndoSnapshot("blink-position");
+                    handleNewBotFaceBlinkOffsetYChange(normalizedOffsetY);
+                  }}
                   onThinkingFramesChange={(next) => {
                     const normalizedFrames =
                       normalizeBotFaceThinkingFrames(next) ??
@@ -83045,9 +84471,23 @@ function HomeContent(): React.JSX.Element {
                     setNewBotAudioVoiceProfile(authored);
                     queueBotVoiceAutosave(authored, true);
                   }}
+                  onProfileModeChange={setBotEditorModeAdvanced}
+                  onProfilePageOpen={(category) => {
+                    if (!profileDetailsAreUnlocked) return;
+                    setColorWheelOpen(false);
+                    setBotAiParametersModalOpen(false);
+                    setBotProfileActivePage(category);
+                    setBotProfileBuilderOpen(true);
+                  }}
+                  onAiParametersOpen={() => {
+                    setColorWheelOpen(false);
+                    setBotProfileBuilderOpen(false);
+                    setBotAiParametersModalOpen(true);
+                  }}
                 />
               {!editingDefaultBot ? (
                 <>
+	              {botPanelCreateMode && !botAvatarCustomizerOpen ? (
 	              <section
 	                className={`${styles.botParameterCard} ${styles.botProfileSummaryCard}`}
 	                aria-label={botEditorAdvancedMode ? "AI Parameters" : "Profile Builder"}
@@ -83208,18 +84648,22 @@ function HomeContent(): React.JSX.Element {
 	                  </div>
 	                )}
 	              </section>
+	              ) : null}
 	              <BotProfileBuilder
-	                open={botProfileBuilderOpen}
+	                open={!botAvatarCustomizerOpen && botProfileBuilderOpen}
                 activePage={botProfileActivePage}
                 profile={botProfile}
                 botName={profileReferenceName}
+                studioLayer={botAvatarCustomizerOpen}
+                onRandomizePersonality={applyRandomBotPersonalityDraft}
                 onActivePageChange={setBotProfileActivePage}
 	                onProfileChange={setBotProfile}
 	                onClose={() => setBotProfileBuilderOpen(false)}
 	              />
 	              <BotAiParameterCustomizer
-	                open={botAiParametersModalOpen}
+	                open={!botAvatarCustomizerOpen && botAiParametersModalOpen}
 	                botName={trimmedName}
+	                studioLayer={botAvatarCustomizerOpen}
 	                systemPrompt={newBotSystemPrompt}
 	                temperature={newBotTemperature}
 	                maxTokens={newBotMaxTokens}
@@ -83238,7 +84682,7 @@ function HomeContent(): React.JSX.Element {
               ) : null}
                 </>
               ) : null}
-              {botPanelShowResponseSettings ? (
+              {botPanelShowResponseSettings && !botAvatarCustomizerOpen ? (
 	              <section
 	                className={`${styles.botParameterCard} ${styles.botResponseSettingsCard}`}
 	                aria-label="Response settings"
@@ -83318,6 +84762,7 @@ function HomeContent(): React.JSX.Element {
                 mobileBotsPanel ? (
                 <div
                   className={styles.botPreferredModelsModalBackdrop}
+                  data-avatar-studio-layer={botAvatarCustomizerOpen ? "true" : undefined}
                   role="presentation"
                   onClick={() => setBotPreferredModelsModalOpen(false)}
                 >
@@ -83376,6 +84821,7 @@ function HomeContent(): React.JSX.Element {
                                 onChange={setNewBotLocalModel}
                                 options={localModelOptions}
                                 provider="local"
+                                loading={modelCatalogLoading}
                                 ariaLabel="Preferred offline model for this bot"
                                 placement="down"
                                 minMenuWidthPx={260}
@@ -83394,6 +84840,7 @@ function HomeContent(): React.JSX.Element {
                                 onChange={setNewBotOnlineModel}
                                 options={onlineModelPickerOptions}
                                 provider="online"
+                                loading={modelCatalogLoading}
                                 ariaLabel="Preferred online model for this bot"
                                 disabled={!newBotOnlineEnabled}
                                 placement="down"
@@ -83421,6 +84868,7 @@ function HomeContent(): React.JSX.Element {
                                 onChange={setNewBotLocalImageModel}
                                 options={localImageModelOptionsForBot}
                                 provider="local"
+                                loading={modelCatalogLoading}
                                 ariaLabel="Preferred offline image model for this bot"
                                 disabled={localImageModelCatalogEntries.length === 0}
                                 placement="down"
@@ -83447,6 +84895,7 @@ function HomeContent(): React.JSX.Element {
                                 onChange={setNewBotOpenAiImageModel}
                                 options={openAiImageModelOptionsForBot}
                                 provider="openai"
+                                loading={modelCatalogLoading}
                                 ariaLabel="Preferred online image model for this bot"
                                 disabled={!newBotOnlineEnabled || !hasVisibleOnlineImageModels}
                                 title={
@@ -83491,6 +84940,7 @@ function HomeContent(): React.JSX.Element {
                 ) : (
                 <div
                   className={styles.botModelRoutingBackdrop}
+                  data-avatar-studio-layer={botAvatarCustomizerOpen ? "true" : undefined}
                   role="presentation"
                   onClick={() => setBotPreferredModelsModalOpen(false)}
                 >
@@ -83555,6 +85005,7 @@ function HomeContent(): React.JSX.Element {
                               onChange={setNewBotLocalModel}
                               options={localModelOptions}
                               provider="local"
+                              loading={modelCatalogLoading}
                               ariaLabel="Preferred offline model for this bot"
                               placement="down"
                               minMenuWidthPx={260}
@@ -83583,6 +85034,7 @@ function HomeContent(): React.JSX.Element {
                               onChange={setNewBotOnlineModel}
                               options={onlineModelPickerOptions}
                               provider="online"
+                              loading={modelCatalogLoading}
                               ariaLabel="Preferred online model for this bot"
                               disabled={!newBotOnlineEnabled}
                               placement="down"
@@ -83620,6 +85072,7 @@ function HomeContent(): React.JSX.Element {
                               onChange={setNewBotLocalImageModel}
                               options={localImageModelOptionsForBot}
                               provider="local"
+                              loading={modelCatalogLoading}
                               ariaLabel="Preferred offline image model for this bot"
                               disabled={localImageModelCatalogEntries.length === 0}
                               placement="down"
@@ -83655,6 +85108,7 @@ function HomeContent(): React.JSX.Element {
                               onChange={setNewBotOpenAiImageModel}
                               options={openAiImageModelOptionsForBot}
                               provider="openai"
+                              loading={modelCatalogLoading}
                               ariaLabel="Preferred online image model for this bot"
                               disabled={!newBotOnlineEnabled || !hasVisibleOnlineImageModels}
                               title={
@@ -83770,28 +85224,29 @@ function HomeContent(): React.JSX.Element {
               <div
                 className={`${styles.botCard} ${styles.botCardDefault}`}
                 style={defaultBotCardStyle}
+                data-preview-selected={selectedBotPanelBotId === null ? "true" : undefined}
                 aria-label="Default bot: always available, cannot be deleted"
               >
-                <span className={styles.botCardGlyph} aria-hidden="true">
-                  <BotGlyph name={defaultBotCardGlyph} />
-                </span>
-                <div className={styles.botCardBody}>
-                  <div className={styles.botCardDefaultHeader}>
-                    <strong>{defaultBotCardName}</strong>
-                    <span className={styles.botCardBadge}>Always on</span>
-                  </div>
-                  <small>
-                    Plain chat with no custom system prompt. Kept as a permanent fallback so you can always talk to your model, even if every other bot is deleted.
-                  </small>
-                </div>
                 <button
                   type="button"
-                  className={styles.botCardDefaultCustomizeButton}
-                  onClick={openDefaultBotCustomizer}
-                  disabled={!settings}
-                  aria-label="Customize Default Prism bot"
+                  className={styles.botCardTile}
+                  onClick={() => selectBotPanelShowcase(null)}
+                  onDoubleClick={openDefaultBotCustomizer}
+                  aria-label="Preview Prism; double-click to customize"
+                  aria-pressed={selectedBotPanelBotId === null}
                 >
-                  Customize
+                  <span className={styles.botCardGlyph} aria-hidden="true">
+                    <BotGlyph name={defaultBotCardGlyph} />
+                  </span>
+                  <div className={styles.botCardBody}>
+                    <div className={styles.botCardDefaultHeader}>
+                      <strong>{defaultBotCardName}</strong>
+                      <span className={styles.botCardBadge}>Always on</span>
+                    </div>
+                    <small>
+                      Plain chat with no custom system prompt. Kept as a permanent fallback so you can always talk to your model, even if every other bot is deleted.
+                    </small>
+                  </div>
                 </button>
               </div>
 
@@ -83993,6 +85448,7 @@ function HomeContent(): React.JSX.Element {
                                 onChange={(next) => stageBotBatchEditField("localModel", next)}
                                 options={localModelOptions}
                                 provider="local"
+                                loading={modelCatalogLoading}
                                 ariaLabel="Preferred offline model for selected bots"
                                 placement="down"
                                 minMenuWidthPx={260}
@@ -84012,6 +85468,7 @@ function HomeContent(): React.JSX.Element {
                                 onChange={(next) => stageBotBatchEditField("onlineModel", next)}
                                 options={onlineModelPickerOptions}
                                 provider="online"
+                                loading={modelCatalogLoading}
                                 ariaLabel="Preferred online model for selected bots"
                                 placement="down"
                                 minMenuWidthPx={260}
@@ -84031,6 +85488,7 @@ function HomeContent(): React.JSX.Element {
                                 onChange={(next) => stageBotBatchEditField("localImageModel", next)}
                                 options={localImageModelOptionsForBot}
                                 provider="local"
+                                loading={modelCatalogLoading}
                                 ariaLabel="Preferred offline image model for selected bots"
                                 disabled={localImageModelCatalogEntries.length === 0}
                                 placement="down"
@@ -84057,6 +85515,7 @@ function HomeContent(): React.JSX.Element {
                                 }
                                 options={openAiImageModelOptionsForBot}
                                 provider="openai"
+                                loading={modelCatalogLoading}
                                 ariaLabel="Preferred online image model for selected bots"
                                 disabled={!hasVisibleOnlineImageModels}
                                 placement="down"
@@ -84131,6 +85590,7 @@ function HomeContent(): React.JSX.Element {
                         </p>
                       ) : visibleBotPanelBots.map((b) => {
                         const isEditing = editingBotId === b.id;
+                        const isPreviewSelected = selectedBotPanelBotId === b.id;
                         const isBatchSelected = canvasSelectedBotIds.has(b.id);
                         // Live preview during editing — the card mirrors the
                         // values currently in the top form so color/glyph
@@ -84176,6 +85636,7 @@ function HomeContent(): React.JSX.Element {
                           className={cardClassName}
                           style={cardStyle}
                           data-favorite={isFavorite ? "true" : undefined}
+                          data-preview-selected={isPreviewSelected ? "true" : undefined}
                           data-batch-selected={isBatchSelected ? "true" : undefined}
                         >
                           <button
@@ -84188,6 +85649,11 @@ function HomeContent(): React.JSX.Element {
                                 toggleCanvasBotSelection(b.id);
                                 return;
                               }
+                              selectBotPanelShowcase(b);
+                            }}
+                            onDoubleClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
                               openBotPanelHub(b);
                             }}
                             onContextMenu={(event) => {
@@ -84199,8 +85665,8 @@ function HomeContent(): React.JSX.Element {
                                   : [];
                               openBotContextMenu(b, event.clientX, event.clientY, multiSelectionIds);
                             }}
-                            aria-label={`Open options for ${b.name}${isFavorite ? ", favorite" : ""}`}
-                            aria-pressed={isEditing}
+                            aria-label={`Preview ${b.name}${isFavorite ? ", favorite" : ""}; double-click to manage`}
+                            aria-pressed={isPreviewSelected}
                           >
                             <span className={styles.botCardGlyph} aria-hidden="true">
                               <BotGlyph name={liveGlyph} />
@@ -84708,6 +86174,7 @@ function HomeContent(): React.JSX.Element {
                     <IconTrash />
                   </span>
                 </button>
+                {renderPanelThemeToggle()}
                 <button
                   type="button"
                   className={styles.panelClose}
@@ -85324,6 +86791,7 @@ function HomeContent(): React.JSX.Element {
       cancelAnimationFrame(coffeeTypewriterRafRef.current);
       coffeeTypewriterRafRef.current = null;
     }
+    coffeeRevealCompleteFnRef.current = null;
   };
   const resolveCoffeeRevealSettledWaiters = () => {
     const waiters = coffeeRevealSettledWaitersRef.current;
@@ -85352,6 +86820,8 @@ function HomeContent(): React.JSX.Element {
       coffeePendingRevealAfterUserRef.current = null;
     setCoffeeUserRevealText("");
     coffeeVoiceRevealClockRef.current = null;
+    coffeeTableSpeedNudgeStateRef.current = createZenCanvasSpeedNudgeState();
+    coffeeTableSpeedNudgePointerRef.current = null;
     coffeeVoiceAlignmentByMessageIdRef.current.clear();
     coffeePlayerVoiceClockRef.current = null;
     setCoffeeInterruptedSnippet(null);
@@ -85659,7 +87129,19 @@ function HomeContent(): React.JSX.Element {
         coffeeRevealTimerRef.current = setTimeout(applyReveal, durationMs);
       });
     };
+    let revealApplied = false;
     const applyReveal = () => {
+      if (revealApplied) return;
+      revealApplied = true;
+      if (coffeeRevealTimerRef.current) {
+        clearTimeout(coffeeRevealTimerRef.current);
+        coffeeRevealTimerRef.current = null;
+      }
+      if (coffeeRevealCompleteFnRef.current === applyReveal) {
+        coffeeRevealCompleteFnRef.current = null;
+      }
+      coffeeTableSpeedNudgeStateRef.current = createZenCanvasSpeedNudgeState();
+      coffeeTableSpeedNudgePointerRef.current = null;
       const visibleAtMs = Date.now();
       if (pendingMessage?.role === "assistant" && pendingMessage.id) {
         const firstVisibleAt = coffeeMessageFirstVisibleAtMsRef.current;
@@ -85703,6 +87185,7 @@ function HomeContent(): React.JSX.Element {
       args.onReveal?.();
     };
     clearCoffeeRhythmTimers();
+    coffeeRevealCompleteFnRef.current = applyReveal;
     setCoffeePendingRevealConversation(args.conversation);
     setCoffeePendingSpeakerBotId(args.speakerBotId);
     const typingDeferralMs = coffeeGeneratedReplyRevealDeferralMs({
@@ -85750,6 +87233,57 @@ function HomeContent(): React.JSX.Element {
     beginSpeakingAndScheduleReveal();
   };
   queueCoffeeRevealFnRef.current = queueCoffeeReveal;
+  const handleCoffeeTableSpeedNudgePointerDown = (
+    event: React.PointerEvent<HTMLDivElement>
+  ): void => {
+    if (event.defaultPrevented || event.pointerType === "touch" || event.button !== 0) return;
+    if (coffeeTurnRhythmStateRef.current !== "tableTyping") return;
+    const conversation = coffeePendingRevealConversation;
+    const pendingMessage = conversation?.messages.at(-1);
+    if (!conversation || pendingMessage?.role !== "assistant") return;
+    // Spoken Coffee stays audio-master so the text never races ahead of the voice.
+    if (coffeeVoiceRevealClockRef.current?.messageId === pendingMessage.id) return;
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    if (target.closest(COFFEE_TABLE_SPEED_NUDGE_EXCLUDED_TARGET_SELECTOR)) return;
+
+    const revealKey = `${conversation.id}:${pendingMessage.id}`;
+    event.preventDefault();
+    event.stopPropagation();
+    coffeeTableSpeedNudgePointerRef.current = {
+      pointerId: event.pointerId,
+      revealKey,
+    };
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Pointer capture is optional in tests and older embedded webviews.
+    }
+    coffeeTableSpeedNudgeStateRef.current = beginZenCanvasSpeedNudgeHold(
+      coffeeTableSpeedNudgeStateRef.current,
+      { revealKey, nowMs: Date.now() }
+    ).state;
+  };
+  const handleCoffeeTableSpeedNudgePointerEnd = (
+    event: React.PointerEvent<HTMLDivElement>
+  ): void => {
+    const activePointer = coffeeTableSpeedNudgePointerRef.current;
+    if (!activePointer || activePointer.pointerId !== event.pointerId) return;
+    coffeeTableSpeedNudgePointerRef.current = null;
+    event.preventDefault();
+    event.stopPropagation();
+    try {
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+    } catch {
+      // Capture may already be released by the browser.
+    }
+    coffeeTableSpeedNudgeStateRef.current = endZenCanvasSpeedNudgeHold(
+      coffeeTableSpeedNudgeStateRef.current,
+      { revealKey: activePointer.revealKey, nowMs: Date.now() }
+    );
+  };
   const showCoffeeInterruptionCue = (event: CoffeeInterruptionEvent | undefined) => {
     if (!event) return;
     if (coffeeInterruptionCueTimerRef.current) {
@@ -90535,6 +92069,10 @@ function HomeContent(): React.JSX.Element {
             ref={coffeeTableSceneRef}
             className={styles.coffeeTableScene}
             data-coffee-table-scene="true"
+            onPointerDownCapture={handleCoffeeTableSpeedNudgePointerDown}
+            onPointerUpCapture={handleCoffeeTableSpeedNudgePointerEnd}
+            onPointerCancelCapture={handleCoffeeTableSpeedNudgePointerEnd}
+            onLostPointerCapture={handleCoffeeTableSpeedNudgePointerEnd}
           >
           <div className={styles.coffeeTableGlow} aria-hidden="true" />
           <div className={styles.coffeeTableAsset} aria-hidden="true" />
@@ -92894,23 +94432,6 @@ function HomeContent(): React.JSX.Element {
       coffeeSessionPhase !== "finished" &&
       (coffeeTurnRhythmState === "botThinking" || coffeeTurnRhythmState === "tableTyping") &&
       Boolean(coffeeActiveTurnJob?.speakerBotId ?? coffeePendingSpeakerBotId);
-    const coffeeComposerStatus = (() => {
-      if (coffeeComposerWaitingForSeat) return "Waiting for the first bot to sit down...";
-      if (coffeeTurnRhythmState === "userTableTyping") return "Sharing your note with the table...";
-      if (coffeeTurnRhythmState === "cooldown") return "Letting the table breathe...";
-      if (coffeeActiveTurnJob?.phase === "voicing") {
-        return `${coffeeActiveThinkerName} is about to speak…`;
-      }
-      if (coffeeActiveTurnJob?.phase === "thinking") {
-        const eligibleAtMs = coffeeActiveTurnJob.interruptEligibleAt
-          ? Date.parse(coffeeActiveTurnJob.interruptEligibleAt)
-          : Number.POSITIVE_INFINITY;
-        return coffeeSessionClockMs >= eligibleAtMs
-          ? `${coffeeActiveThinkerName} is still thinking…`
-          : `${coffeeActiveThinkerName} is thinking…`;
-      }
-      return null;
-    })();
     const coffeeTableComposerSubmitDisabled =
       coffeeComposerInputDisabled ||
       coffeeDraft.trim().length === 0 ||
@@ -93514,11 +95035,6 @@ function HomeContent(): React.JSX.Element {
                     ) : null}
                   </div>
                 ) : null,
-                status: coffeeComposerStatus ? (
-                  <p className={styles.coffeeComposerStatus} role="status" aria-live="polite">
-                    {coffeeComposerStatus}
-                  </p>
-                ) : null,
                 showQueuedPromptRail: false,
                 stacked: true,
                 composeBotSelected: false,
@@ -93687,6 +95203,7 @@ function HomeContent(): React.JSX.Element {
         }}
         options={storyModelOptions}
         provider={storyResponseMode === "local" ? "local" : "online"}
+        loading={modelCatalogLoading}
         disabled={!settings || storyBusy || storySession?.status === "generating"}
         title={`Story model (${responseModeShortLabel(storyResponseMode)})`}
         ariaLabel={`Story generation model for ${
@@ -94873,6 +96390,7 @@ function HomeContent(): React.JSX.Element {
                         }}
                         options={modelOptions}
                         provider={isLocal ? "local" : "online"}
+                        loading={modelCatalogLoading}
                         disabled={!settings || pendingReply}
                         title={`Model for ${responseModeShortLabel(responseMode)} replies`}
                         ariaLabel={`Model for ${
@@ -96027,7 +97545,7 @@ function HomeContent(): React.JSX.Element {
             chatLikeSurface ? (
               <div className={styles.chatComposerStack}>
                 {renderDebugComposer()}
-                {zenLivePresenceRailVisible ? (
+                {zenLivePresenceRailVisible && !zenCanvasBotSuppressedForPanel ? (
                   <div className={styles.zenLiveActionStatusRail}>
                     <ZenLiveBotPresencePlate
                       bot={zenLivePresenceBot}

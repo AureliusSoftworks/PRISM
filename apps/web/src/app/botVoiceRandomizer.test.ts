@@ -44,11 +44,30 @@ describe("bot voice randomizer", () => {
     assert.equal(filled.texture.preset, customized.texture.preset);
   });
 
-  it("seeds fresh bot drafts and preserves that draft at creation", () => {
+  it("keeps fresh bot drafts deterministic until the explicit randomizer is used", () => {
     const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
     assert.match(pageSource, /const randomBotVoiceProfileForCreation = useCallback/);
     assert.match(pageSource, /setNewBotAudioVoiceProfile\(randomBotVoiceProfileForCreation\(\)\)/);
-    assert.match(pageSource, /const createdAudioVoiceProfile = fillMissingBotAudioVoiceIdentities\(/);
+    assert.match(
+      pageSource,
+      /useState<BotAudioVoiceProfileV1>\(DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1\)/,
+    );
+    assert.match(
+      pageSource,
+      /setNewBotAudioVoiceProfile\(DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1\)/,
+    );
+    assert.match(
+      pageSource,
+      /useState<string>\(\s*DEFAULT_PRISM_BOT_CUSTOMIZER_COLOR\s*\)/,
+    );
+    assert.match(
+      pageSource,
+      /useState<BotGlyphName>\(DEFAULT_BOT_GLYPH\)/,
+    );
+    assert.match(pageSource, /setNewBotColor\(DEFAULT_PRISM_BOT_CUSTOMIZER_COLOR\)/);
+    assert.match(pageSource, /setNewBotGlyph\(DEFAULT_BOT_GLYPH\)/);
+    assert.match(pageSource, /const createdAudioVoiceProfile = normalizeBotAudioVoiceProfileV1\(/);
+    assert.doesNotMatch(pageSource, /const createdAudioVoiceProfile = fillMissingBotAudioVoiceIdentities\(/);
     assert.match(pageSource, /authoredAudioVoiceProfile: createdAudioVoiceProfile/);
   });
 });

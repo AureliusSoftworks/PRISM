@@ -1222,7 +1222,7 @@ describe("Coffee seat arrival CSS", () => {
 
     const metalScratchRule = ruleForExactSelector(".botFaceFrameMetalScratchLayer");
     assert.match(metalScratchRule, /opacity:\s*var\(--bot-face-metal-scratch-opacity\)\s*;/);
-    assert.match(metalScratchRule, /mix-blend-mode:\s*soft-light\s*;/);
+    assert.match(metalScratchRule, /mix-blend-mode:\s*exclusion\s*;/);
     assert.match(
       metalScratchRule,
       /-webkit-mask-image:\s*var\(--bot-face-metal-scratch-mask-image\)\s*;/
