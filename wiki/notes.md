@@ -17,3 +17,13 @@ Prism should not be broadly promoted from wiki copy until the product-worthy lau
 Tags: `audience:all`, `launch`, `caveats`
 
 Record: `note_65e62737-730b-45ab-b59e-309f9888db4f` | Authority: agent | Confidence: high
+
+## Automatic local UI testing login
+
+When automated or agent-driven testing reaches the Prism login screen, use the default local development account automatically: username `admin`, password `password`. These credentials are for local development and testing only; do not present them as production-safe defaults.
+
+Files: `README.md`
+
+Tags: `audience:developer`, `tests`, `auth`, `local-development`
+
+Record: `note_fb321679-5908-4454-b01f-3dc5e09fd0da` | Authority: user | Confidence: high

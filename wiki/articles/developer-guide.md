@@ -2,14 +2,14 @@
 
 # Developer guide
 
-Repo structure, common commands, local privacy invariants, and the Wikiwiki documentation workflow for Prism maintainers.
+Repo structure, common commands, automatic local test login, privacy invariants, and Wikiwiki maintenance.
 
 
 Categories: `Developer`
 
 Aliases: `Maintainer guide`, `Repo guide`, `Wikiwiki workflow`
 
-Files: `AGENTS.md`, `README.md`, `package.json`, `.wikiwiki/config.json`
+Files: `AGENTS.md`, `README.md`, `package.json`, `.wikiwiki/config.json`, `apps/web/src/app/chat-settings-navigation.test.ts`, `apps/web/src/app/botLibraryShowcase.test.ts`, `apps/web/src/app/prism-app-cursor.test.ts`, `apps/api/src/__tests__/voice-preview-line.test.ts`, `apps/api/src/__tests__/bot-powers.test.ts`
 
 ## Repo Shape
 
@@ -19,9 +19,22 @@ Prism is organized as apps plus shared packages. `apps/api` owns local data, aut
 
 Use `npm run dev` for the full local stack, `npm run dev:api` or `npm run dev:web` for one side, `npm run typecheck` for workspace type checks, `npm run lint` for linting, and `npm run build` for production build coverage. API tests run with `npm run test --prefix apps/api`.
 
+## Automatic Local UI Test Login
+
+When browser or agent-driven testing reaches Prism's login screen, log in automatically with:
+
+- Username: `admin`
+- Password: `password`
+
+This is the default local development account. Treat it as a testing convenience, not a production-safe credential.
+
 ## Privacy Invariant
 
 LOCAL mode is a hard boundary. New outbound network work must either target configured local services or have an explicit LOCAL guard with matching UI behavior and tests. Do not weaken the provider tests that pin this behavior.
+
+## Testing Current Interaction Work
+
+Prefer focused tests for the touched behavior before broad workspace checks. Current regression coverage pins Chat settings navigation, bounded composer cleanup, code-block copy/collapse interaction, Bot Library showcase actions and audio, context-menu feedback, persona preview-line filtering, Coffee Powers, Coffee replay behavior, and the temporarily disabled custom cursor switch.
 
 ## Wikiwiki Workflow
 
@@ -38,5 +51,7 @@ Official desktop builds are free, with optional non-gating support. Launch copy 
 - `decision_74d88333-8a92-47f5-897a-2f0458817e74` (decision)
 - `note_5850980f-5230-4d48-ae29-08c98e6ed3a3` (note)
 - `decision_791a7b3c-d069-4543-907d-3c0cda50f452` (decision)
+- `note_fb321679-5908-4454-b01f-3dc5e09fd0da` (note)
+- `event_9049a96d-ec0f-4c0e-9444-d9c9997799ec` (event)
 
 Record: `article_e250c780-976e-443d-9cc5-5199c0d38422` | Slug: `developer-guide` | Authority: agent | Confidence: high

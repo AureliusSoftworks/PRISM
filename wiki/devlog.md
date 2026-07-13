@@ -49,3 +49,11 @@ Added PRISM logo, wordmark, and favicon asset paths to the Wikiwiki site theme s
 Files: `.wikiwiki/site-theme.json`, `apps/web/public/icon-triangle.svg`, `apps/web/public/wordmark.svg`
 
 Recorded: 2026-07-05T05:58:46.535Z | Record: `event_836e6d6c-33bb-48c5-9074-3deba3b54f2e` | Confidence: high
+
+## Chat, Bot Library, voice previews, Coffee, and interaction polish advanced
+
+The current July 2026 polish pass makes Settings easier to scan with a first-class Chat category; prevents wildcard composer cleanup from hanging indefinitely; restores the standard reading width for collapsible code blocks while adding triple-click copy and visible confirmation; gives every custom context-menu selection visible feedback; expands the selected Bot Library preview with reliable right-click actions in every mode; regenerates and automatically plays a fresh persona-specific English sample from one click while keeping the large preview silent; adds Coffee-only bot Powers with compiled rules; improves Coffee replay state reconstruction and player voice playback; and temporarily returns the app to native system cursors while retaining the custom cursor system behind a disabled switch.
+
+Files: `apps/web/src/app/SettingsPanel.tsx`, `apps/web/src/app/page.tsx`, `apps/web/src/app/page.module.css`, `apps/api/src/composer-cleanup.ts`, `apps/api/src/voice-preview-line.ts`, `apps/api/src/bot-powers.ts`, `apps/api/src/coffee-powers.ts`, `apps/web/src/app/coffee-replay.ts`, `packages/shared/src/botPower.ts`
+
+Recorded: 2026-07-13T04:08:19.899Z | Record: `event_9049a96d-ec0f-4c0e-9444-d9c9997799ec` | Confidence: high
