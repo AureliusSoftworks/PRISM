@@ -18,6 +18,10 @@ jobs:
     name: Unit, integration, coverage, and browser smoke
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      # Pull-request checkouts are detached; preserve the source branch for
+      # branch-gated development surfaces such as Avatar Details Studio.
+      PRISM_BRANCH: ${{ github.head_ref || github.ref_name }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
