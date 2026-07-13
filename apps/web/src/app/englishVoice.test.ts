@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
   readEnglishVoiceSynthesisClip,
@@ -6,6 +7,18 @@ import {
 } from "./englishVoice.ts";
 
 describe("English voice post processing", () => {
+  it("preserves gesture-authorized fallback media across passive preparation", () => {
+    const source = readFileSync(new URL("./englishVoice.ts", import.meta.url), "utf8");
+    assert.match(
+      source,
+      /export async function prepareEnglishVoice\(\)[\s\S]*?if \(preparedMedia\)[\s\S]*?return;[\s\S]*?beginMediaUnlock\(\);/
+    );
+    assert.match(
+      source,
+      /export function stopEnglishVoice\([\s\S]*?preservePreparedMedia[\s\S]*?if \(!options\.preservePreparedMedia\) releasePreparedMedia\(\)/
+    );
+  });
+
   it("maps pitch and warmth without changing portable profile semantics", () => {
     assert.deepEqual(
       resolveEnglishVoicePostProcessing({

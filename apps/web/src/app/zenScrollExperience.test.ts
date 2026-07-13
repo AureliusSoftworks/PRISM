@@ -47,6 +47,13 @@ describe("Zen scroll experience", () => {
     assert.doesNotMatch(rule, /will-change:\s*scroll-position/);
     assert.match(pageSource, /zenReadableGestureShouldDisarmFollow\([\s\S]*event\.deltaY/);
     assert.match(pageSource, /zenReadableGestureShouldDisarmFollow\([\s\S]*-touchDeltaY/);
+    assert.match(pageSource, /zenReadableWheelShouldApplyElasticPull\(el\.scrollTop, event\.deltaY\)/);
+    assert.doesNotMatch(pageSource, /zenReadableBottomMomentumHold|holdZenReadableBottom/);
+    const wheelHandler = pageSource.slice(
+      pageSource.indexOf("function handleChatModeThreadWheel"),
+      pageSource.indexOf("function handleChatModeThreadTouchStart")
+    );
+    assert.doesNotMatch(wheelHandler, /preventDefault\(\)/);
   });
 
   it("keeps a native Zen runway when opening measurements request zero tail space", () => {
