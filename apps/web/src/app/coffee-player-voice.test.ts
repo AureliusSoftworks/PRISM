@@ -49,7 +49,9 @@ describe("Coffee player voice", () => {
     const source = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
     assert.match(source, /startCoffeePlayerVoiceForReveal\(trimmed\)/);
     assert.match(source, /settings\.voiceMode === "mute"/);
-    assert.match(source, /enqueueBottishVoice\([\s\S]*?coffee-player:/);
+    assert.match(source, /const seed = `coffee-player:\$\{spokenText\}`/);
+    assert.match(source, /requestBottishSynthesisClip\(\{[\s\S]*?source: \{ text: spokenText \}/);
+    assert.match(source, /enqueueBottishClipOrFallback\(\{[\s\S]*?sourceText: spokenText/);
     assert.match(
       source,
       /await startCoffeePlayerVoiceForReveal\(trimmed\)[\s\S]*?setCoffeeUserRevealText\(trimmed\)/
@@ -61,7 +63,10 @@ describe("Coffee player voice", () => {
   it("explains the Coffee persona in Default Prism's voice customizer", () => {
     const source = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
     assert.match(source, /Prism represents you at the Coffee table/);
-    assert.match(source, /live messages and session[\s\S]*?replays use this voice/);
+    assert.match(
+      source,
+      /live\s+messages and session[\s\S]*?replays use this voice/
+    );
     assert.doesNotMatch(source, /Your table voice|Name pronunciation/);
     assert.doesNotMatch(source, /playerAudioVoiceProfile|playerNamePronunciation/);
   });
@@ -76,8 +81,11 @@ describe("Coffee player voice", () => {
     assert.match(source, /coffeeGlobalComposer[^\n]*coffeeReplayComposerControls/);
     assert.match(source, /className=\{styles\.coffeeReplayPersona\}/);
     assert.match(source, /zenDefaultPrismGlyph/);
-    assert.match(source, /data-player-thinking=\{coffeeReplayPlayerThinking/);
-    assert.match(source, /data-table-speaking=\{replayPlayerTalking/);
+    assert.match(
+      source,
+      /data-player-thinking=\{\s*coffeeReplayPlayerThinking/
+    );
+    assert.match(source, /data-table-speaking=\{\s*replayPlayerTalking/);
     assert.match(source, /className=\{styles\.coffeeReplayComposerPot\}/);
     assert.match(source, /className=\{styles\.coffeeReplayPersonaGlyph\}/);
     assert.doesNotMatch(source, /coffeeReplayPlayerSeat/);
@@ -92,7 +100,7 @@ describe("Coffee player voice", () => {
     );
     assert.match(
       source,
-      /message\.role === "user"[\s\S]*?\? coffeeReplayActive \? coffeePlayerLabel : "You"/
+      /message\.role === "user"[\s\S]*?\?\s*coffeeReplayActive\s*\?\s*coffeePlayerLabel\s*:\s*"You"/
     );
   });
 });

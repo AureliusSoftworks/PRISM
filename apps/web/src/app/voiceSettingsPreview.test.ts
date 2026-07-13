@@ -18,11 +18,14 @@ describe("voice settings preview", () => {
   it("previews a customized bot with the currently selected global mode", () => {
     assert.match(pageSource, /voiceMode=\{normalizeVoiceMode\(settings\?\.voiceMode\)\}/);
     assert.match(pageSource, /onVoicePreview=\{previewSelectedVoice\}/);
-    assert.match(pageSource, /Bottish tone from organic to synthetic/);
+    assert.match(pageSource, /Bottish tone from full and soft to bright and robotic/);
   });
 
   it("previews Bottish and English with the same resolved phrase", () => {
-    assert.match(pageSource, /enqueueBottishVoice\(\s*previewText/);
+    assert.match(pageSource, /requestBottishSynthesisClip\(\{[\s\S]*?text: previewText/);
+    assert.match(pageSource, /if \(!clip\) \{[\s\S]*?Voiced Bottish is still loading/);
+    assert.match(pageSource, /Playing new voiced Bottish preview/);
+    assert.match(pageSource, /enqueueBottishClipOrFallback\(\{[\s\S]*?sourceText: previewText/);
     assert.match(pageSource, /text: previewText,\s*mode: "english"/);
     assert.match(pageSource, /await enqueueEnglishVoice\(/);
   });
@@ -65,13 +68,13 @@ describe("voice settings preview", () => {
     assert.match(pageSource, /beat\.actorRole !== "npc"/);
     assert.match(pageSource, /storyVoiceBeatKeyRef/);
     assert.match(pageSource, /storySession\.provider === "local"\s*\? "builtin"/);
-    assert.match(pageSource, /enqueueBottishVoice\([\s\S]*settings\.voiceEffectsEnabled !== false/);
+    assert.match(pageSource, /enqueueBottishClipOrFallback\([\s\S]*settings\.voiceEffectsEnabled !== false/);
     assert.match(pageSource, /enqueueEnglishVoice\([\s\S]*settings\.voiceEffectsEnabled !== false/);
   });
 
   it("presents offline English as native system speech rather than a bundled neural voice", () => {
     assert.match(pageSource, /System Classic \(Offline\)/);
-    assert.match(pageSource, /voices installed by macOS or Windows/);
+    assert.match(pageSource, /voices installed by your operating system/);
     assert.doesNotMatch(pageSource, /Built-in English is packaged with Prism/);
   });
 
@@ -93,7 +96,7 @@ describe("voice settings preview", () => {
     assert.match(editorSource, /\["pitch", "Pitch"\]/);
     assert.match(editorSource, /\["lilt", "Lilt"\]/);
     assert.match(editorSource, /Bottish tone/);
-    assert.match(editorSource, /Bottish only — use Preview Bottish to hear this control\./);
+    assert.match(editorSource, /lower keeps more vocal body; higher adds brighter clicks,[\s\S]*?gating, and buzz\./);
     assert.doesNotMatch(editorSource, /\["pace", "Pace"\]/);
     assert.doesNotMatch(editorSource, /\["warmth", "Warmth"\]/);
     assert.doesNotMatch(editorSource, /<span>Volume<\/span>/);
@@ -112,6 +115,8 @@ describe("voice settings preview", () => {
     const effectsSource = readFileSync(new URL("./voiceEffects.ts", import.meta.url), "utf8");
     assert.match(bottishSource, /encodeBottishPlanWave/);
     assert.match(bottishSource, /playPlanWithMedia/);
+    assert.match(bottishSource, /playHybridBytesWithMedia/);
+    assert.match(bottishSource, /if \(!played\) \{[\s\S]*?playHybridBytesWithMedia/);
     assert.match(effectsSource, /Promise\.race\(/);
     assert.match(englishSource, /beginMediaUnlock\(\);/);
     assert.match(englishSource, /playBytesWithMedia/);
@@ -156,18 +161,19 @@ describe("voice settings preview", () => {
     assert.match(pageSource, /readEnglishVoiceSynthesisClip\(response\)/);
   });
 
-  it("starts Coffee Bottish locally with its reveal instead of a synthesis round trip", () => {
+  it("starts Coffee Bottish from system synthesis with procedural fallback", () => {
     const coffeeVoiceStart = pageSource.slice(
       pageSource.indexOf("const startCoffeeVoiceForReveal = async"),
       pageSource.indexOf("const queueCoffeeReveal =")
     );
-    assert.match(coffeeVoiceStart, /enqueueBottishVoice\(\s*displayText,\s*profile,/);
+    assert.match(coffeeVoiceStart, /requestBottishSynthesisClip\(\{/);
+    assert.match(coffeeVoiceStart, /enqueueBottishClipOrFallback\(\{/);
     assert.match(coffeeVoiceStart, /targetDurationMs: fallbackDuration/);
     const bottishBranch = coffeeVoiceStart.slice(
       coffeeVoiceStart.indexOf('if (settings.voiceMode === "bottish")'),
       coffeeVoiceStart.indexOf("} else {")
     );
-    assert.doesNotMatch(bottishBranch, /\/api\/voices\/synthesize/);
+    assert.match(bottishBranch, /requestBottishSynthesisClip/);
   });
 
   it("does not let inactive Chat or Coffee Replay tear down another surface's voice", () => {

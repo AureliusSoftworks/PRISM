@@ -17,6 +17,28 @@ import {
 describe("voice Phase 1 boundary", () => {
   it("advertises native system speech instead of the retired neural model", () => {
     assert.equal(VOICE_CAPABILITIES.builtinEnglish.model, "system-native");
+    assert.deepEqual(VOICE_CAPABILITIES.builtinBottish, {
+      available: true,
+      synthesis: "system-hybrid",
+      proceduralFallback: true,
+    });
+  });
+  it("routes Bottish only to builtin system synthesis", () => {
+    const request = validateVoiceSynthesisRequest({
+      text: "hello",
+      mode: "bottish",
+      engine: "elevenlabs",
+      explicitOnlineContext: true,
+      seed: " message-1 ",
+    });
+    assert.equal(request.seed, "message-1");
+    assert.deepEqual(resolveVoiceSynthesisBoundary(request), {
+      ok: true,
+      kind: "builtin-bottish",
+      engineUsed: "builtin-bottish",
+      text: "hello",
+      profile: request.profile,
+    });
   });
   it("cleans markdown, tools, URLs, code, and stage directions", () => {
     assert.equal(cleanSpeakableAssistantProse("# Hi\n*waves*\n```js\nsecret()\n```\n[link](https://example.com) https://raw.example"), "Hi link");

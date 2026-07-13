@@ -43,7 +43,8 @@ export const AVATAR_DETAIL_STAMP_IDS = BOT_AVATAR_DETAIL_STAMP_IDS;
 
 export type AvatarDetailStampId = BotAvatarDetailStampId;
 export type AvatarDetailStampCategory = BotAvatarDetailStampCategory;
-export type AvatarDetailsBrushSize = (typeof AVATAR_DETAILS_BRUSH_SIZES)[number];
+export type AvatarDetailsBrushSize =
+  (typeof AVATAR_DETAILS_BRUSH_SIZES)[number];
 export type AvatarDetailsPaintMode = "brush" | "eraser";
 
 export type AvatarDetailStampV1 = BotAvatarDetailStampV1;
@@ -86,7 +87,10 @@ export const AVATAR_DETAIL_STAMP_DEFINITIONS: readonly AvatarDetailStampDefiniti
   }));
 
 const AVATAR_DETAIL_STAMP_DEFINITION_BY_ID = new Map(
-  AVATAR_DETAIL_STAMP_DEFINITIONS.map((definition) => [definition.id, definition])
+  AVATAR_DETAIL_STAMP_DEFINITIONS.map((definition) => [
+    definition.id,
+    definition,
+  ]),
 );
 export const EMPTY_AVATAR_DETAILS: AvatarDetailsV1 = {
   version: AVATAR_DETAILS_VERSION,
@@ -125,20 +129,22 @@ export function cloneAvatarDetails(details: AvatarDetailsV1): AvatarDetailsV1 {
   };
 }
 
-export function avatarDetailsKey(details: AvatarDetailsV1 | null | undefined): string {
+export function avatarDetailsKey(
+  details: AvatarDetailsV1 | null | undefined,
+): string {
   const normalized = normalizeAvatarDetails(details);
   return JSON.stringify(normalized);
 }
 
 export function avatarDetailsEqual(
   left: AvatarDetailsV1 | null | undefined,
-  right: AvatarDetailsV1 | null | undefined
+  right: AvatarDetailsV1 | null | undefined,
 ): boolean {
   return avatarDetailsKey(left) === avatarDetailsKey(right);
 }
 
 export function avatarDetailsHasVisuals(
-  details: AvatarDetailsV1 | null | undefined
+  details: AvatarDetailsV1 | null | undefined,
 ): boolean {
   const normalized = normalizeAvatarDetails(details);
   return (
@@ -150,7 +156,7 @@ export function avatarDetailsHasVisuals(
 export function encodeAvatarDetailsPaintMask(mask: Uint8Array): string | null {
   if (mask.length !== AVATAR_DETAILS_MASK_BYTE_LENGTH) {
     throw new RangeError(
-      `Avatar detail mask must contain ${AVATAR_DETAILS_MASK_BYTE_LENGTH} bytes.`
+      `Avatar detail mask must contain ${AVATAR_DETAILS_MASK_BYTE_LENGTH} bytes.`,
     );
   }
   return avatarDetailsPaintPixelCount(mask) === 0
@@ -159,7 +165,7 @@ export function encodeAvatarDetailsPaintMask(mask: Uint8Array): string | null {
 }
 
 export function decodeAvatarDetailsPaintMask(
-  encoded: string | null | undefined
+  encoded: string | null | undefined,
 ): Uint8Array | null {
   if (encoded == null || encoded === "") {
     return new Uint8Array(AVATAR_DETAILS_MASK_BYTE_LENGTH);
@@ -177,8 +183,7 @@ export function avatarDetailsPaintPixelCount(mask: Uint8Array): number {
 
 export function avatarDetailsPaintCoveragePercent(mask: Uint8Array): number {
   return (
-    (avatarDetailsPaintPixelCount(mask) / AVATAR_DETAILS_WRITABLE_PIXELS) *
-    100
+    (avatarDetailsPaintPixelCount(mask) / AVATAR_DETAILS_WRITABLE_PIXELS) * 100
   );
 }
 
@@ -189,7 +194,7 @@ export function avatarDetailsWritablePixel(x: number, y: number): boolean {
 export function avatarDetailsMaskPixel(
   mask: Uint8Array,
   x: number,
-  y: number
+  y: number,
 ): boolean {
   if (
     x < 0 ||
@@ -209,7 +214,7 @@ function setAvatarDetailsMaskPixel(
   mask: Uint8Array,
   x: number,
   y: number,
-  enabled: boolean
+  enabled: boolean,
 ): boolean {
   if (
     x < 0 ||
@@ -237,10 +242,37 @@ export interface AvatarDetailsGridPoint {
   y: number;
 }
 
+export interface AvatarDetailsClientBounds {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/** Maps a pointer into the canonical, front-facing 128px editor grid. */
+export function avatarDetailsGridPointFromClient(
+  clientX: number,
+  clientY: number,
+  bounds: AvatarDetailsClientBounds,
+): AvatarDetailsGridPoint {
+  const x = Math.floor(
+    ((clientX - bounds.left) / Math.max(1, bounds.width)) *
+      AVATAR_DETAILS_CANVAS_SIZE,
+  );
+  const y = Math.floor(
+    ((clientY - bounds.top) / Math.max(1, bounds.height)) *
+      AVATAR_DETAILS_CANVAS_SIZE,
+  );
+  return {
+    x: Math.max(0, Math.min(AVATAR_DETAILS_CANVAS_SIZE - 1, x)),
+    y: Math.max(0, Math.min(AVATAR_DETAILS_CANVAS_SIZE - 1, y)),
+  };
+}
+
 /** Integer Bresenham traversal prevents holes between sparse pointer events. */
 export function interpolateAvatarDetailsGridLine(
   start: AvatarDetailsGridPoint,
-  end: AvatarDetailsGridPoint
+  end: AvatarDetailsGridPoint,
 ): AvatarDetailsGridPoint[] {
   let x = Math.round(start.x);
   let y = Math.round(start.y);
@@ -279,7 +311,7 @@ export function paintAvatarDetailsMask(
   source: Uint8Array,
   points: readonly AvatarDetailsGridPoint[],
   brushSize: AvatarDetailsBrushSize,
-  mode: AvatarDetailsPaintMode
+  mode: AvatarDetailsPaintMode,
 ): PaintAvatarDetailsMaskResult {
   const mask = source.slice();
   let pixelCount = avatarDetailsPaintPixelCount(mask);
@@ -316,38 +348,39 @@ export function paintAvatarDetailsMask(
 }
 
 export function avatarDetailStampDefinition(
-  id: AvatarDetailStampId
+  id: AvatarDetailStampId,
 ): AvatarDetailStampDefinition {
   return AVATAR_DETAIL_STAMP_DEFINITION_BY_ID.get(id)!;
 }
 
 export function avatarDetailStampForCategory(
   details: AvatarDetailsV1,
-  category: AvatarDetailStampCategory
+  category: AvatarDetailStampCategory,
 ): AvatarDetailStampV1 | null {
   return (
     details.screen.stamps.find(
-      (stamp) => avatarDetailStampDefinition(stamp.id).category === category
+      (stamp) => avatarDetailStampDefinition(stamp.id).category === category,
     ) ?? null
   );
 }
 
 export function avatarDetailStampsForCategory(
   details: AvatarDetailsV1,
-  category: AvatarDetailStampCategory
+  category: AvatarDetailStampCategory,
 ): AvatarDetailStampV1[] {
   return details.screen.stamps.filter(
-    (stamp) => avatarDetailStampDefinition(stamp.id).category === category
+    (stamp) => avatarDetailStampDefinition(stamp.id).category === category,
   );
 }
 
 export function replaceAvatarDetailStampForCategory(
   details: AvatarDetailsV1,
   category: AvatarDetailStampCategory,
-  stamp: AvatarDetailStampV1 | null
+  stamp: AvatarDetailStampV1 | null,
 ): AvatarDetailsV1 {
   const stamps = details.screen.stamps.filter(
-    (candidate) => avatarDetailStampDefinition(candidate.id).category !== category
+    (candidate) =>
+      avatarDetailStampDefinition(candidate.id).category !== category,
   );
   if (stamp) stamps.push({ ...stamp });
   return normalizeAvatarDetails({
@@ -358,7 +391,7 @@ export function replaceAvatarDetailStampForCategory(
 
 export function toggleAvatarDetailStamp(
   details: AvatarDetailsV1,
-  id: AvatarDetailStampId
+  id: AvatarDetailStampId,
 ): AvatarDetailsV1 {
   const definition = avatarDetailStampDefinition(id);
   const existing = details.screen.stamps.find((stamp) => stamp.id === id);
@@ -371,7 +404,10 @@ export function toggleAvatarDetailStamp(
       },
     });
   }
-  const categoryStamps = avatarDetailStampsForCategory(details, definition.category);
+  const categoryStamps = avatarDetailStampsForCategory(
+    details,
+    definition.category,
+  );
   if (definition.category !== "marking") {
     return replaceAvatarDetailStampForCategory(details, definition.category, {
       id,
@@ -395,14 +431,14 @@ export function toggleAvatarDetailStamp(
 
 export function updateAvatarDetailStamp(
   details: AvatarDetailsV1,
-  nextStamp: AvatarDetailStampV1
+  nextStamp: AvatarDetailStampV1,
 ): AvatarDetailsV1 {
   return normalizeAvatarDetails({
     ...details,
     screen: {
       ...details.screen,
       stamps: details.screen.stamps.map((stamp) =>
-        stamp.id === nextStamp.id ? { ...nextStamp } : stamp
+        stamp.id === nextStamp.id ? { ...nextStamp } : stamp,
       ),
     },
   });
@@ -420,7 +456,7 @@ export interface AvatarDetailStampBounds {
 }
 
 export function avatarDetailStampBounds(
-  stamp: AvatarDetailStampV1
+  stamp: AvatarDetailStampV1,
 ): AvatarDetailStampBounds {
   const definition = avatarDetailStampDefinition(stamp.id);
   const scale = stamp.scalePct / 100;
@@ -444,7 +480,12 @@ function alphaIndex(x: number, y: number): number {
   return y * AVATAR_DETAILS_CANVAS_SIZE + x;
 }
 
-function setAlphaPixel(alpha: Uint8Array, x: number, y: number, value = 255): void {
+function setAlphaPixel(
+  alpha: Uint8Array,
+  x: number,
+  y: number,
+  value = 255,
+): void {
   const roundedX = Math.round(x);
   const roundedY = Math.round(y);
   if (
@@ -463,7 +504,7 @@ function drawAlphaDisk(
   alpha: Uint8Array,
   centerX: number,
   centerY: number,
-  radius: number
+  radius: number,
 ): void {
   const integerRadius = Math.max(0, Math.round(radius));
   for (let y = -integerRadius; y <= integerRadius; y += 1) {
@@ -481,11 +522,11 @@ function drawAlphaLine(
   startY: number,
   endX: number,
   endY: number,
-  thickness = 1
+  thickness = 1,
 ): void {
   const points = interpolateAvatarDetailsGridLine(
     { x: startX, y: startY },
-    { x: endX, y: endY }
+    { x: endX, y: endY },
   );
   const radius = Math.max(0, (thickness - 1) / 2);
   for (const point of points) drawAlphaDisk(alpha, point.x, point.y, radius);
@@ -497,16 +538,19 @@ function drawAlphaEllipseOutline(
   centerY: number,
   radiusX: number,
   radiusY: number,
-  thickness: number
+  thickness: number,
 ): void {
-  const steps = Math.max(24, Math.ceil(Math.max(radiusX, radiusY) * Math.PI * 3));
+  const steps = Math.max(
+    24,
+    Math.ceil(Math.max(radiusX, radiusY) * Math.PI * 3),
+  );
   for (let step = 0; step < steps; step += 1) {
     const angle = (step / steps) * Math.PI * 2;
     drawAlphaDisk(
       alpha,
       centerX + Math.cos(angle) * radiusX,
       centerY + Math.sin(angle) * radiusY,
-      Math.max(0, (thickness - 1) / 2)
+      Math.max(0, (thickness - 1) / 2),
     );
   }
 }
@@ -517,7 +561,7 @@ function drawAlphaRectangleOutline(
   top: number,
   right: number,
   bottom: number,
-  thickness: number
+  thickness: number,
 ): void {
   drawAlphaLine(alpha, left, top, right, top, thickness);
   drawAlphaLine(alpha, right, top, right, bottom, thickness);
@@ -525,7 +569,10 @@ function drawAlphaRectangleOutline(
   drawAlphaLine(alpha, left, bottom, left, top, thickness);
 }
 
-function drawAvatarDetailStamp(alpha: Uint8Array, stamp: AvatarDetailStampV1): void {
+function drawAvatarDetailStamp(
+  alpha: Uint8Array,
+  stamp: AvatarDetailStampV1,
+): void {
   const bounds = avatarDetailStampBounds(stamp);
   const { centerX: cx, centerY: cy, width: w, height: h } = bounds;
   const line = Math.max(1, Math.round(stamp.scalePct / 55));
@@ -534,11 +581,39 @@ function drawAvatarDetailStamp(alpha: Uint8Array, stamp: AvatarDetailStampV1): v
     case "round-glasses": {
       const lensRadiusX = w * 0.2;
       const lensRadiusY = h * 0.4;
-      drawAlphaEllipseOutline(alpha, cx - w * 0.26, cy, lensRadiusX, lensRadiusY, line);
-      drawAlphaEllipseOutline(alpha, cx + w * 0.26, cy, lensRadiusX, lensRadiusY, line);
+      drawAlphaEllipseOutline(
+        alpha,
+        cx - w * 0.26,
+        cy,
+        lensRadiusX,
+        lensRadiusY,
+        line,
+      );
+      drawAlphaEllipseOutline(
+        alpha,
+        cx + w * 0.26,
+        cy,
+        lensRadiusX,
+        lensRadiusY,
+        line,
+      );
       drawAlphaLine(alpha, cx - w * 0.06, cy, cx + w * 0.06, cy, line);
-      drawAlphaLine(alpha, bounds.left, cy - h * 0.06, bounds.left - w * 0.08, cy - h * 0.15, line);
-      drawAlphaLine(alpha, bounds.right, cy - h * 0.06, bounds.right + w * 0.08, cy - h * 0.15, line);
+      drawAlphaLine(
+        alpha,
+        bounds.left,
+        cy - h * 0.06,
+        bounds.left - w * 0.08,
+        cy - h * 0.15,
+        line,
+      );
+      drawAlphaLine(
+        alpha,
+        bounds.right,
+        cy - h * 0.06,
+        bounds.right + w * 0.08,
+        cy - h * 0.15,
+        line,
+      );
       break;
     }
     case "square-glasses": {
@@ -548,7 +623,7 @@ function drawAvatarDetailStamp(alpha: Uint8Array, stamp: AvatarDetailStampV1): v
         bounds.top + h * 0.1,
         cx - w * 0.05,
         bounds.bottom - h * 0.1,
-        line
+        line,
       );
       drawAlphaRectangleOutline(
         alpha,
@@ -556,7 +631,7 @@ function drawAvatarDetailStamp(alpha: Uint8Array, stamp: AvatarDetailStampV1): v
         bounds.top + h * 0.1,
         bounds.right - w * 0.04,
         bounds.bottom - h * 0.1,
-        line
+        line,
       );
       drawAlphaLine(alpha, cx - w * 0.05, cy, cx + w * 0.05, cy, line);
       break;
@@ -568,21 +643,56 @@ function drawAvatarDetailStamp(alpha: Uint8Array, stamp: AvatarDetailStampV1): v
         bounds.top + h * 0.08,
         bounds.right,
         bounds.bottom - h * 0.08,
-        line + 1
+        line + 1,
       );
-      drawAlphaLine(alpha, bounds.left + w * 0.08, cy, bounds.right - w * 0.08, cy, line);
+      drawAlphaLine(
+        alpha,
+        bounds.left + w * 0.08,
+        cy,
+        bounds.right - w * 0.08,
+        cy,
+        line,
+      );
       break;
     }
     case "monocle": {
-      drawAlphaEllipseOutline(alpha, cx, cy - h * 0.08, w * 0.38, h * 0.36, line);
-      drawAlphaLine(alpha, cx + w * 0.3, cy + h * 0.17, cx + w * 0.46, bounds.bottom, line);
+      drawAlphaEllipseOutline(
+        alpha,
+        cx,
+        cy - h * 0.08,
+        w * 0.38,
+        h * 0.36,
+        line,
+      );
+      drawAlphaLine(
+        alpha,
+        cx + w * 0.3,
+        cy + h * 0.17,
+        cx + w * 0.46,
+        bounds.bottom,
+        line,
+      );
       break;
     }
     case "handlebar-mustache": {
       drawAlphaLine(alpha, cx, cy, cx - w * 0.22, cy + h * 0.1, line + 2);
-      drawAlphaLine(alpha, cx - w * 0.22, cy + h * 0.1, bounds.left, cy - h * 0.24, line + 1);
+      drawAlphaLine(
+        alpha,
+        cx - w * 0.22,
+        cy + h * 0.1,
+        bounds.left,
+        cy - h * 0.24,
+        line + 1,
+      );
       drawAlphaLine(alpha, cx, cy, cx + w * 0.22, cy + h * 0.1, line + 2);
-      drawAlphaLine(alpha, cx + w * 0.22, cy + h * 0.1, bounds.right, cy - h * 0.24, line + 1);
+      drawAlphaLine(
+        alpha,
+        cx + w * 0.22,
+        cy + h * 0.1,
+        bounds.right,
+        cy - h * 0.24,
+        line + 1,
+      );
       drawAlphaDisk(alpha, cx, cy, line + 1);
       break;
     }
@@ -592,19 +702,75 @@ function drawAvatarDetailStamp(alpha: Uint8Array, stamp: AvatarDetailStampV1): v
       break;
     }
     case "short-beard": {
-      drawAlphaLine(alpha, bounds.left, bounds.top, bounds.left + w * 0.12, cy + h * 0.28, line + 1);
-      drawAlphaLine(alpha, bounds.left + w * 0.12, cy + h * 0.28, cx, bounds.bottom, line + 1);
-      drawAlphaLine(alpha, cx, bounds.bottom, bounds.right - w * 0.12, cy + h * 0.28, line + 1);
-      drawAlphaLine(alpha, bounds.right - w * 0.12, cy + h * 0.28, bounds.right, bounds.top, line + 1);
+      drawAlphaLine(
+        alpha,
+        bounds.left,
+        bounds.top,
+        bounds.left + w * 0.12,
+        cy + h * 0.28,
+        line + 1,
+      );
+      drawAlphaLine(
+        alpha,
+        bounds.left + w * 0.12,
+        cy + h * 0.28,
+        cx,
+        bounds.bottom,
+        line + 1,
+      );
+      drawAlphaLine(
+        alpha,
+        cx,
+        bounds.bottom,
+        bounds.right - w * 0.12,
+        cy + h * 0.28,
+        line + 1,
+      );
+      drawAlphaLine(
+        alpha,
+        bounds.right - w * 0.12,
+        cy + h * 0.28,
+        bounds.right,
+        bounds.top,
+        line + 1,
+      );
       for (let offset = -0.28; offset <= 0.28; offset += 0.14) {
-        drawAlphaLine(alpha, cx + w * offset, cy + h * 0.16, cx + w * offset, bounds.bottom - h * 0.08, line);
+        drawAlphaLine(
+          alpha,
+          cx + w * offset,
+          cy + h * 0.16,
+          cx + w * offset,
+          bounds.bottom - h * 0.08,
+          line,
+        );
       }
       break;
     }
     case "goatee": {
-      drawAlphaLine(alpha, cx - w * 0.28, bounds.top, cx - w * 0.14, bounds.bottom, line + 1);
-      drawAlphaLine(alpha, cx + w * 0.28, bounds.top, cx + w * 0.14, bounds.bottom, line + 1);
-      drawAlphaLine(alpha, cx - w * 0.14, bounds.bottom, cx + w * 0.14, bounds.bottom, line + 1);
+      drawAlphaLine(
+        alpha,
+        cx - w * 0.28,
+        bounds.top,
+        cx - w * 0.14,
+        bounds.bottom,
+        line + 1,
+      );
+      drawAlphaLine(
+        alpha,
+        cx + w * 0.28,
+        bounds.top,
+        cx + w * 0.14,
+        bounds.bottom,
+        line + 1,
+      );
+      drawAlphaLine(
+        alpha,
+        cx - w * 0.14,
+        bounds.bottom,
+        cx + w * 0.14,
+        bounds.bottom,
+        line + 1,
+      );
       break;
     }
     case "freckles": {
@@ -622,11 +788,25 @@ function drawAvatarDetailStamp(alpha: Uint8Array, stamp: AvatarDetailStampV1): v
       break;
     }
     case "diagonal-scar": {
-      drawAlphaLine(alpha, bounds.left, bounds.bottom, bounds.right, bounds.top, line);
+      drawAlphaLine(
+        alpha,
+        bounds.left,
+        bounds.bottom,
+        bounds.right,
+        bounds.top,
+        line,
+      );
       for (const offset of [0.25, 0.5, 0.75]) {
         const x = bounds.left + w * offset;
         const y = bounds.bottom - h * offset;
-        drawAlphaLine(alpha, x - w * 0.12, y - h * 0.05, x + w * 0.12, y + h * 0.05, line);
+        drawAlphaLine(
+          alpha,
+          x - w * 0.12,
+          y - h * 0.05,
+          x + w * 0.12,
+          y + h * 0.05,
+          line,
+        );
       }
       break;
     }
@@ -638,7 +818,7 @@ function drawAvatarDetailStamp(alpha: Uint8Array, stamp: AvatarDetailStampV1): v
           cy + h * offset + h * 0.14,
           bounds.right,
           cy + h * offset - h * 0.14,
-          line
+          line,
         );
       }
       break;
@@ -675,28 +855,40 @@ function finiteOr(value: number | undefined, fallback: number): number {
 }
 
 export function normalizeAvatarDetailsFaceGeometry(
-  geometry: Partial<AvatarDetailsFaceGeometry> | null | undefined
+  geometry: Partial<AvatarDetailsFaceGeometry> | null | undefined,
 ): AvatarDetailsFaceGeometry {
   return {
     eyeScale: Math.min(1.3, Math.max(0.7, finiteOr(geometry?.eyeScale, 1))),
-    eyeOffsetX: Math.min(0.18, Math.max(-0.18, finiteOr(geometry?.eyeOffsetX, 0))),
-    eyeOffsetY: Math.min(0.18, Math.max(-0.18, finiteOr(geometry?.eyeOffsetY, 0))),
+    eyeOffsetX: Math.min(
+      0.18,
+      Math.max(-0.18, finiteOr(geometry?.eyeOffsetX, 0)),
+    ),
+    eyeOffsetY: Math.min(
+      0.18,
+      Math.max(-0.18, finiteOr(geometry?.eyeOffsetY, 0)),
+    ),
     mouthScale: Math.min(1.5, Math.max(0.7, finiteOr(geometry?.mouthScale, 1))),
-    mouthOffsetX: Math.min(0.18, Math.max(-0.18, finiteOr(geometry?.mouthOffsetX, 0))),
-    mouthOffsetY: Math.min(0.18, Math.max(-0.18, finiteOr(geometry?.mouthOffsetY, 0))),
+    mouthOffsetX: Math.min(
+      0.18,
+      Math.max(-0.18, finiteOr(geometry?.mouthOffsetX, 0)),
+    ),
+    mouthOffsetY: Math.min(
+      0.18,
+      Math.max(-0.18, finiteOr(geometry?.mouthOffsetY, 0)),
+    ),
     mouthRotationDeg: Math.min(
       180,
-      Math.max(-180, finiteOr(geometry?.mouthRotationDeg, 0))
+      Math.max(-180, finiteOr(geometry?.mouthRotationDeg, 0)),
     ),
   };
 }
 
 export function avatarDetailsMaskCacheKey(
   details: AvatarDetailsV1 | null | undefined,
-  faceGeometry?: Partial<AvatarDetailsFaceGeometry> | null
+  faceGeometry?: Partial<AvatarDetailsFaceGeometry> | null,
 ): string {
   return `${AVATAR_DETAILS_CATALOG_VERSION}:${avatarDetailsKey(details)}:${JSON.stringify(
-    normalizeAvatarDetailsFaceGeometry(faceGeometry)
+    normalizeAvatarDetailsFaceGeometry(faceGeometry),
   )}`;
 }
 
@@ -709,7 +901,7 @@ export interface AvatarDetailsResolvedStampAnchor {
 
 export function resolveAvatarDetailStampAnchor(
   stamp: AvatarDetailStampV1,
-  geometryInput?: Partial<AvatarDetailsFaceGeometry> | null
+  geometryInput?: Partial<AvatarDetailsFaceGeometry> | null,
 ): AvatarDetailsResolvedStampAnchor {
   const definition = avatarDetailStampDefinition(stamp.id);
   const geometry = normalizeAvatarDetailsFaceGeometry(geometryInput);
@@ -742,10 +934,10 @@ export function resolveAvatarDetailStampAnchor(
 function compositeResolvedAvatarDetailStamp(
   destination: Uint8Array,
   stamp: AvatarDetailStampV1,
-  geometry: AvatarDetailsFaceGeometry
+  geometry: AvatarDetailsFaceGeometry,
 ): void {
   const source = new Uint8Array(
-    AVATAR_DETAILS_CANVAS_SIZE * AVATAR_DETAILS_CANVAS_SIZE
+    AVATAR_DETAILS_CANVAS_SIZE * AVATAR_DETAILS_CANVAS_SIZE,
   );
   drawAvatarDetailStamp(source, stamp);
   const definition = avatarDetailStampDefinition(stamp.id);
@@ -783,7 +975,7 @@ function compositeResolvedAvatarDetailStamp(
 
 export function rasterizeAvatarDetailsAlpha(
   details: AvatarDetailsV1 | null | undefined,
-  faceGeometry?: Partial<AvatarDetailsFaceGeometry> | null
+  faceGeometry?: Partial<AvatarDetailsFaceGeometry> | null,
 ): Uint8Array {
   const normalized = normalizeAvatarDetails(details);
   const geometry = normalizeAvatarDetailsFaceGeometry(faceGeometry);
@@ -792,15 +984,16 @@ export function rasterizeAvatarDetailsAlpha(
   if (cached) return cached;
 
   const alpha = new Uint8Array(
-    AVATAR_DETAILS_CANVAS_SIZE * AVATAR_DETAILS_CANVAS_SIZE
+    AVATAR_DETAILS_CANVAS_SIZE * AVATAR_DETAILS_CANVAS_SIZE,
   );
   const paintMask = decodeAvatarDetailsPaintMask(
-    normalized.screen.paintMaskBase64
+    normalized.screen.paintMaskBase64,
   );
   if (paintMask) {
     for (let y = 0; y < AVATAR_DETAILS_CANVAS_SIZE; y += 1) {
       for (let x = 0; x < AVATAR_DETAILS_CANVAS_SIZE; x += 1) {
-        if (avatarDetailsMaskPixel(paintMask, x, y)) alpha[alphaIndex(x, y)] = 255;
+        if (avatarDetailsMaskPixel(paintMask, x, y))
+          alpha[alphaIndex(x, y)] = 255;
       }
     }
   }
@@ -821,7 +1014,9 @@ export function rasterizeAvatarDetailsAlpha(
   return alpha;
 }
 
-export function normalizeAvatarDetailsColor(color: string | null | undefined): string {
+export function normalizeAvatarDetailsColor(
+  color: string | null | undefined,
+): string {
   const raw = color?.trim() ?? "";
   const shortHex = /^#([0-9a-f]{3})$/i.exec(raw)?.[1];
   if (shortHex) {
@@ -834,7 +1029,7 @@ export function normalizeAvatarDetailsColor(color: string | null | undefined): s
 export function rasterizeAvatarDetailsRgba(
   details: AvatarDetailsV1 | null | undefined,
   color: string | null | undefined,
-  faceGeometry?: Partial<AvatarDetailsFaceGeometry> | null
+  faceGeometry?: Partial<AvatarDetailsFaceGeometry> | null,
 ): Uint8ClampedArray {
   const normalizedColor = normalizeAvatarDetailsColor(color);
   const colorValue = Number.parseInt(normalizedColor.slice(1), 16);
@@ -851,4 +1046,17 @@ export function rasterizeAvatarDetailsRgba(
     rgba[rgbaIndex + 3] = alpha[index] ?? 0;
   }
   return rgba;
+}
+
+export function avatarDetailsPhosphorCoreRgba(
+  glowRgba: Uint8ClampedArray,
+): Uint8ClampedArray {
+  const coreRgba = new Uint8ClampedArray(glowRgba);
+  for (let index = 0; index < coreRgba.length; index += 4) {
+    if ((coreRgba[index + 3] ?? 0) === 0) continue;
+    coreRgba[index] = 255;
+    coreRgba[index + 1] = 255;
+    coreRgba[index + 2] = 255;
+  }
+  return coreRgba;
 }

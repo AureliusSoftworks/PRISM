@@ -51,7 +51,7 @@
     <main id="content" class="content">
       <header class="page-header">
         <h1>Features and workflows</h1>
-        <p>The main Prism lanes and the latest settings, conversation, audio, Coffee, and interaction workflows.</p>
+        <p>The main Prism lanes and the latest settings, conversation, voiced Bottish, Coffee, and interaction workflows.</p>
       </header>
       <article class="record-page">
   <nav class="breadcrumbs" aria-label="Breadcrumb">
@@ -65,7 +65,7 @@
   </div>
   <section class="prose">
     <h2>Summary</h2>
-    <p>The main Prism lanes and the latest settings, conversation, audio, Coffee, and interaction workflows.</p>
+    <p>The main Prism lanes and the latest settings, conversation, voiced Bottish, Coffee, and interaction workflows.</p>
     <h2>Article</h2>
     <h2>Experience Lanes</h2>
 <p>Prism keeps its major workflows in separate lanes instead of one overloaded chat surface. Chat is the full playground, Zen is calmer one-to-one continuity, Coffee is multi-bot group conversation, Story is a preview narrative lane, and Sandbox carries the most explicit runtime controls.</p>
@@ -75,6 +75,8 @@
 <p>Wildcard prompts use bounded cleanup so a resolved prompt cannot leave the conversation stuck indefinitely with the Shh control active. Multi-line code blocks can collapse without widening the normal Chat reading column; users can expand them, use Copy, or triple-click the block, with visible confirmation after copying. Custom context menus also show a brief confirmation when an item is selected.</p>
 <h2>Bots, Voice, And Memory</h2>
 <p>Persona bots can carry behavior, visual identity, exports, memories, voices, and Coffee-only Powers. The selected Bot Library preview is display-only until the user chooses English or Bottish below it. English generates a fresh persona-specific line and plays it automatically in the same click; legacy mic-check and audio-check lines are rejected and regenerated.</p>
+<p>Bottish is a voiced robot language built from deterministic pronounceable pseudo-syllables spoken by the selected system voice. Sparse clicks, chirps, gating, and buzz shape the robotic character, while Bottish tone moves from fuller vocal body to a brighter and denser treatment. If Web Audio is unavailable, Prism keeps the voiced gibberish without accents; if system speech is unavailable, the original procedural Bottish engine is the complete fallback. Bottish is local in both LOCAL and ONLINE modes and never uses provider TTS.</p>
+<p>Voice playback remains audio-master across Chat, Zen, Coffee, Story, previews, and replay, so the synthesized carrier drives text reveal and mouth motion. Interruptions stop both carrier and accents.</p>
 <p>Normal conversations can use scoped continuity, while incognito/private paths avoid memory reads and writes.</p>
 <h2>Coffee Powers And Replay</h2>
 <p>Coffee Powers are short rules or quirks attached to a bot and applied only during Coffee sessions. Prism compiles supported intents into structured session behavior, surfaces active-power badges, and keeps incomplete powers inactive instead of pretending they worked.</p>
@@ -98,9 +100,14 @@
   <h2>Related files</h2>
   <ul><li><a class="source-link" href="../../README.md"><code>README.md</code></a></li>
 <li><a class="source-link" href="../../docs/applets.md"><code>docs/applets.md</code></a></li>
+<li><a class="source-link" href="../../docs/voices.md"><code>docs/voices.md</code></a></li>
 <li><a class="source-link" href="../../AGENTS.md"><code>AGENTS.md</code></a></li>
 <li><a class="source-link" href="../../apps/web/src/app/SettingsPanel.tsx"><code>apps/web/src/app/SettingsPanel.tsx</code></a></li>
 <li><a class="source-link" href="../../apps/web/src/app/page.tsx"><code>apps/web/src/app/page.tsx</code></a></li>
+<li><a class="source-link" href="../../apps/web/src/app/bottishVoice.ts"><code>apps/web/src/app/bottishVoice.ts</code></a></li>
+<li><a class="source-link" href="../../apps/web/src/app/voiceEffects.ts"><code>apps/web/src/app/voiceEffects.ts</code></a></li>
+<li><a class="source-link" href="../../apps/api/src/bottish-text.ts"><code>apps/api/src/bottish-text.ts</code></a></li>
+<li><a class="source-link" href="../../apps/api/src/voices.ts"><code>apps/api/src/voices.ts</code></a></li>
 <li><a class="source-link" href="../../apps/api/src/composer-cleanup.ts"><code>apps/api/src/composer-cleanup.ts</code></a></li>
 <li><a class="source-link" href="../../apps/api/src/voice-preview-line.ts"><code>apps/api/src/voice-preview-line.ts</code></a></li>
 <li><a class="source-link" href="../../apps/api/src/bot-powers.ts"><code>apps/api/src/bot-powers.ts</code></a></li>
@@ -114,13 +121,18 @@
     <div><dt>Authority</dt><dd>agent</dd></div>
     <div><dt>Confidence</dt><dd>high</dd></div>
     <div><dt>Created</dt><dd><time datetime="2026-07-05T04:14:08.766Z">2026-07-05</time></dd></div>
-    <div><dt>Updated</dt><dd><time datetime="2026-07-13T04:09:14.807Z">2026-07-13</time></dd></div>
+    <div><dt>Updated</dt><dd><time datetime="2026-07-13T06:45:13.572Z">2026-07-13</time></dd></div>
     <div><dt>Tags</dt><dd><code>audience:all</code> <code>features</code> <code>ux</code> <code>applets</code></dd></div>
     <div><dt>Files</dt><dd><ul><li><a class="source-link" href="../../README.md"><code>README.md</code></a></li>
 <li><a class="source-link" href="../../docs/applets.md"><code>docs/applets.md</code></a></li>
+<li><a class="source-link" href="../../docs/voices.md"><code>docs/voices.md</code></a></li>
 <li><a class="source-link" href="../../AGENTS.md"><code>AGENTS.md</code></a></li>
 <li><a class="source-link" href="../../apps/web/src/app/SettingsPanel.tsx"><code>apps/web/src/app/SettingsPanel.tsx</code></a></li>
 <li><a class="source-link" href="../../apps/web/src/app/page.tsx"><code>apps/web/src/app/page.tsx</code></a></li>
+<li><a class="source-link" href="../../apps/web/src/app/bottishVoice.ts"><code>apps/web/src/app/bottishVoice.ts</code></a></li>
+<li><a class="source-link" href="../../apps/web/src/app/voiceEffects.ts"><code>apps/web/src/app/voiceEffects.ts</code></a></li>
+<li><a class="source-link" href="../../apps/api/src/bottish-text.ts"><code>apps/api/src/bottish-text.ts</code></a></li>
+<li><a class="source-link" href="../../apps/api/src/voices.ts"><code>apps/api/src/voices.ts</code></a></li>
 <li><a class="source-link" href="../../apps/api/src/composer-cleanup.ts"><code>apps/api/src/composer-cleanup.ts</code></a></li>
 <li><a class="source-link" href="../../apps/api/src/voice-preview-line.ts"><code>apps/api/src/voice-preview-line.ts</code></a></li>
 <li><a class="source-link" href="../../apps/api/src/bot-powers.ts"><code>apps/api/src/bot-powers.ts</code></a></li>

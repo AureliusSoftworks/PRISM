@@ -37,7 +37,11 @@ export function applyGlobalEnglishVoiceDefault(
 export interface VoiceCapabilities {
   modes: VoiceMode[];
   englishEngines: EnglishVoiceEngine[];
-  builtinBottish: { available: true; synthesis: "metadata-only" };
+  builtinBottish: {
+    available: true;
+    synthesis: "system-hybrid";
+    proceduralFallback: true;
+  };
   builtinEnglish: { available: boolean; model: "system-native" };
   elevenLabs: { available: true; requiresApiKey: true; defaultModel: "eleven_flash_v2_5" };
 }
@@ -45,7 +49,11 @@ export interface VoiceCapabilities {
 export const VOICE_CAPABILITIES: VoiceCapabilities = {
   modes: ["mute", "bottish", "english"],
   englishEngines: ["builtin", "elevenlabs"],
-  builtinBottish: { available: true, synthesis: "metadata-only" },
+  builtinBottish: {
+    available: true,
+    synthesis: "system-hybrid",
+    proceduralFallback: true,
+  },
   builtinEnglish: { available: true, model: "system-native" },
   elevenLabs: {
     available: true,
@@ -294,6 +302,7 @@ export type VoiceSynthesisRequest = {
   messageId: string | null;
   explicitOnlineContext: boolean;
   includeAlignment: boolean;
+  seed: string | null;
 };
 
 export function cleanSpeakableAssistantProse(value: unknown): string {
@@ -335,13 +344,16 @@ export function validateVoiceSynthesisRequest(body: Record<string, unknown>): Vo
     messageId,
     explicitOnlineContext: body.explicitOnlineContext === true,
     includeAlignment: body.includeAlignment === true,
+    seed: typeof body.seed === "string" && body.seed.trim()
+      ? body.seed.trim().slice(0, 160)
+      : null,
   };
 }
 
 export function resolveVoiceSynthesisBoundary(args: VoiceSynthesisRequest & {
   persistedMessageProvider?: string | null;
 }):
-  | { ok: true; kind: "bottish-metadata"; engineUsed: "builtin" | "builtin-local-fallback"; text: string; profile: BotAudioVoiceProfileV1 }
+  | { ok: true; kind: "builtin-bottish"; engineUsed: "builtin-bottish"; text: string; profile: BotAudioVoiceProfileV1 }
   | { ok: true; kind: "builtin-english"; engineUsed: "builtin" | "builtin-local-fallback"; text: string; profile: BotAudioVoiceProfileV1 }
   | { ok: true; kind: "elevenlabs-stream"; engineUsed: "elevenlabs"; text: string; profile: BotAudioVoiceProfileV1 }
   | { ok: false; status: 409 | 503; code: "muted" | "online-context-required" | "english-worker-unavailable" | "elevenlabs-unavailable"; engineUsed?: "builtin-local-fallback" } {
@@ -351,7 +363,13 @@ export function resolveVoiceSynthesisBoundary(args: VoiceSynthesisRequest & {
     return { ok: false, status: 409, code: "muted" };
   }
   if (args.mode === "bottish") {
-    return { ok: true, kind: "bottish-metadata", engineUsed: localFallback ? "builtin-local-fallback" : "builtin", text: args.text, profile: args.profile };
+    return {
+      ok: true,
+      kind: "builtin-bottish",
+      engineUsed: "builtin-bottish",
+      text: args.text,
+      profile: args.profile,
+    };
   }
   if (localFallback) {
     return {

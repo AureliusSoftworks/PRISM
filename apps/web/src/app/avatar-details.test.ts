@@ -8,6 +8,8 @@ import {
   AVATAR_DETAILS_MAX_PAINT_PIXELS,
   AVATAR_DETAIL_STAMP_DEFINITIONS,
   avatarDetailStampBounds,
+  avatarDetailsPhosphorCoreRgba,
+  avatarDetailsGridPointFromClient,
   avatarDetailsMaskPixel,
   avatarDetailsPaintPixelCount,
   decodeAvatarDetailsPaintMask,
@@ -50,8 +52,10 @@ describe("avatar details packed paint mask", () => {
 
   it("uses null as the canonical empty mask and rejects malformed input", () => {
     assert.equal(
-      encodeAvatarDetailsPaintMask(new Uint8Array(AVATAR_DETAILS_MASK_BYTE_LENGTH)),
-      null
+      encodeAvatarDetailsPaintMask(
+        new Uint8Array(AVATAR_DETAILS_MASK_BYTE_LENGTH),
+      ),
+      null,
     );
     assert.equal(decodeAvatarDetailsPaintMask("not-a-mask"), null);
   });
@@ -60,30 +64,58 @@ describe("avatar details packed paint mask", () => {
     let mask: Uint8Array = new Uint8Array(AVATAR_DETAILS_MASK_BYTE_LENGTH);
     let limitReached = false;
     for (let y = 0; y < AVATAR_DETAILS_CANVAS_SIZE; y += 1) {
-      const points = Array.from({ length: AVATAR_DETAILS_CANVAS_SIZE }, (_, x) => ({
-        x,
-        y,
-      }));
+      const points = Array.from(
+        { length: AVATAR_DETAILS_CANVAS_SIZE },
+        (_, x) => ({
+          x,
+          y,
+        }),
+      );
       const result = paintAvatarDetailsMask(mask, points, 1, "brush");
       mask = result.mask;
       limitReached ||= result.limitReached;
     }
-    assert.equal(avatarDetailsPaintPixelCount(mask), AVATAR_DETAILS_MAX_PAINT_PIXELS);
+    assert.equal(
+      avatarDetailsPaintPixelCount(mask),
+      AVATAR_DETAILS_MAX_PAINT_PIXELS,
+    );
     assert.equal(limitReached, true);
   });
 });
 
 describe("avatar details input geometry", () => {
+  it("maps pointer movement into the canonical front-facing grid", () => {
+    const bounds = { left: 100, top: 50, width: 256, height: 256 };
+    assert.deepEqual(avatarDetailsGridPointFromClient(164, 178, bounds), {
+      x: 32,
+      y: 64,
+    });
+    assert.deepEqual(avatarDetailsGridPointFromClient(292, 178, bounds), {
+      x: 96,
+      y: 64,
+    });
+    assert.ok(
+      avatarDetailsGridPointFromClient(164, 178, bounds).x <
+        avatarDetailsGridPointFromClient(292, 178, bounds).x,
+    );
+  });
+
   it("interpolates every pixel between sparse pointer samples", () => {
-    assert.deepEqual(interpolateAvatarDetailsGridLine({ x: 2, y: 3 }, { x: 7, y: 3 }), [
-      { x: 2, y: 3 },
-      { x: 3, y: 3 },
-      { x: 4, y: 3 },
-      { x: 5, y: 3 },
-      { x: 6, y: 3 },
-      { x: 7, y: 3 },
-    ]);
-    const diagonal = interpolateAvatarDetailsGridLine({ x: 2, y: 2 }, { x: 5, y: 5 });
+    assert.deepEqual(
+      interpolateAvatarDetailsGridLine({ x: 2, y: 3 }, { x: 7, y: 3 }),
+      [
+        { x: 2, y: 3 },
+        { x: 3, y: 3 },
+        { x: 4, y: 3 },
+        { x: 5, y: 3 },
+        { x: 6, y: 3 },
+        { x: 7, y: 3 },
+      ],
+    );
+    const diagonal = interpolateAvatarDetailsGridLine(
+      { x: 2, y: 2 },
+      { x: 5, y: 5 },
+    );
     assert.deepEqual(diagonal, [
       { x: 2, y: 2 },
       { x: 3, y: 3 },
@@ -133,9 +165,13 @@ describe("avatar details input geometry", () => {
     const withTwo = replaceAvatarDetailStampForCategory(
       replaceAvatarDetailStampForCategory(emptyDetails(), "eyewear", glasses),
       "facial-hair",
-      beard
+      beard,
     );
-    const replaced = replaceAvatarDetailStampForCategory(withTwo, "eyewear", square);
+    const replaced = replaceAvatarDetailStampForCategory(
+      withTwo,
+      "eyewear",
+      square,
+    );
     assert.deepEqual(replaced.screen.stamps, [square, beard]);
   });
 
@@ -145,13 +181,28 @@ describe("avatar details input geometry", () => {
     const capped = toggleAvatarDetailStamp(second, "circuit-mark");
     assert.deepEqual(
       second.screen.stamps.map((stamp) => stamp.id),
-      ["freckles", "diagonal-scar"]
+      ["freckles", "diagonal-scar"],
     );
     assert.deepEqual(capped, second);
   });
 });
 
 describe("avatar details deterministic raster", () => {
+  it("keeps alpha intact while making the phosphor core white", () => {
+    const glow = new Uint8ClampedArray([
+      80, 120, 240, 0, 80, 120, 240, 96, 80, 120, 240, 255,
+    ]);
+    const core = avatarDetailsPhosphorCoreRgba(glow);
+    assert.deepEqual(
+      Array.from(core),
+      [80, 120, 240, 0, 255, 255, 255, 96, 255, 255, 255, 255],
+    );
+    assert.deepEqual(
+      Array.from(glow),
+      [80, 120, 240, 0, 80, 120, 240, 96, 80, 120, 240, 255],
+    );
+  });
+
   it("caches identical nearest-neighbor alpha masks", () => {
     const details: AvatarDetailsV1 = {
       version: 1,
