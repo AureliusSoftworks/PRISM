@@ -1,11 +1,11 @@
 ---
 name: release
-description: Cut a PRISM release from dev to main. Use when the user invokes $release or /release, asks to prepare or cut a PRISM release, wants a changelog/version bump, merge dev to main, create a semver tag, push release branches/tags, or trigger the GitHub Actions release-main.yml binary build workflow.
+description: Prepare or cut a PRISM release from dev to main. A bare $release or /release commits and pushes the intended dev work, prepares version notes, and opens a draft dev-to-main release PR for Jared to review on GitHub. Final merge, tag, and build steps remain separately guarded.
 ---
 
 # Release
 
-Use this skill only in the PRISM repository. Treat it as a guarded release runbook: do reversible preparation first, then ask for explicit approval before merge, tag, push, or workflow-trigger steps.
+Use this skill only in the PRISM repository. Treat it as a draft-first release runbook: prepare and push `dev`, open a draft release PR, then stop for Jared's GitHub handoff. Merge, tag, publication, and workflow-trigger steps require a separate explicit approval.
 
 ## Safety Rules
 
@@ -14,11 +14,12 @@ Use this skill only in the PRISM repository. Treat it as a guarded release runbo
 - Release from `dev`. Do not cut a release from a feature branch.
 - Never use `git add -A`, destructive resets, force pushes, or tag deletion unless Jared explicitly asks.
 - Load credentials only through the normal local environment. If a command needs secrets, run it through `/Users/jared/.codex/bin/with-secrets <command>`.
-- Ask for explicit approval before:
+- A bare `$release` or `/release` is explicit authorization to commit the intended current work, push `dev`, prepare release metadata, and open or update a draft `dev` to `main` release PR.
+- Ask for separate explicit approval before:
   - checking out or modifying `main`
   - merging `dev` into `main`
   - creating a release tag
-  - pushing branches or tags
+  - pushing `main` or release tags
   - triggering GitHub Actions
 
 ## Workflow
@@ -121,9 +122,28 @@ One-line summary of what the release covers.
 
 Do not commit unrelated files.
 
-### 7. Approval Gate: Merge, Tag, Push, Build
+### 7. Push dev And Open The Draft Release PR
 
-Before irreversible release operations, summarize:
+Push the prepared `dev` branch:
+
+```bash
+git push origin dev
+```
+
+Check whether an open `dev` to `main` PR already exists. Reuse and update it when appropriate; otherwise create a new draft PR:
+
+```bash
+gh pr list --base main --head dev --state open
+gh pr create --draft --base main --head dev --title "Release vX.Y.Z" --body "..."
+```
+
+The PR body should summarize the version, release notes, verification, and the human handoff. Confirm with `gh pr view` that `isDraft` is true. Do not merge, tag, publish a GitHub Release, or trigger the build workflow in this default path.
+
+Tell Jared when the PR is in draft status so he can mark it ready and complete his GitHub step.
+
+### 8. Approval Gate: Merge, Tag, Push, Build
+
+Only after Jared separately authorizes finalization, summarize:
 
 - version
 - current branch and commit
@@ -133,7 +153,7 @@ Before irreversible release operations, summarize:
 
 Ask Jared for explicit approval to proceed.
 
-After approval:
+After that approval:
 
 ```bash
 git checkout main
@@ -148,7 +168,7 @@ gh workflow run release-main.yml --ref main --field version=X.Y.Z --field deskto
 
 If GitHub CLI needs credentials, wrap only that command with `/Users/jared/.codex/bin/with-secrets`.
 
-### 8. Watch And Report
+### 9. Watch And Report
 
 After triggering the workflow, find the run id with `gh run list` if needed, then watch it:
 

@@ -12,10 +12,20 @@ Active development happens on the `dev` branch; every release is a merge into
 
 _Staging area - nothing queued for release yet._
 
-## [0.7.0] - 2026-07-10
+## [0.7.0] - 2026-07-12
 
 ### Added
 
+- **Per-bot voices and Coffee Powers.** Bots can now keep independent System
+  Classic or ElevenLabs voice identities and up to three Coffee-only Powers,
+  with compiled table rules that persist through archive and account backups.
+- **Coffee replay preserves the player's presence.** Replays now represent the
+  player with the Prism bot, retain voice and cup-top-off timing, and record an
+  early departure so the remaining bots can finish a short in-character
+  epilogue.
+- **Deterministic bot frame finishes.** Persona bots can render stable painted,
+  worn, and material-aware frame treatments while the default Prism frame
+  remains factory clean.
 - **Batch bot editing.** Multi-selected bots can now be edited together for
   shared identity, chat model, and image model preferences, with mixed-state
   controls that make bulk changes clear before applying them.
@@ -25,6 +35,21 @@ _Staging area - nothing queued for release yet._
 
 ### Changed
 
+- **Conversation surfaces share richer bot behavior.** Avatar Studio, Chat,
+  Zen, Coffee, and Bot Library previews now share more consistent face, glyph,
+  voice, accessory, context-menu, and autosave behavior.
+- **Chat interaction is easier to scan and control.** Settings has a dedicated
+  Chat category, collapsible code blocks keep the normal reading width and
+  support triple-click copy, and context-menu selections provide visible
+  confirmation.
+- **Speech and reveal timing stay synchronized.** English and Bottish playback
+  now follow the visible reveal timeline more reliably, persona previews use
+  fresh in-character lines, and Coffee table speech and mouth cadence feel
+  closer to Zen pacing.
+- **Coffee and Zen navigation remain responsive during long sessions.** Coffee
+  arrivals, cups, replay state, and table speed nudges are more stable, while
+  Zen hands scrolling to the reader sooner and releases visual text if audio
+  preparation stalls.
 - **Bot customization is more legible and resilient.** Avatar Studio and the
   bot profile builder now use clearer grouped sections, stronger visual chrome,
   improved face placement controls, safer autosave recovery, and unclipped
@@ -38,6 +63,15 @@ _Staging area - nothing queued for release yet._
 
 ### Fixed
 
+- **Wildcard prompts cannot wedge Chat.** Composer cleanup now has a bounded
+  timeout and falls back to the resolved prompt instead of leaving the Shh
+  control active forever.
+- **Bot Library preview actions click reliably.** The selected preview is
+  display-only, custom menus render above draggable bot layers, and English
+  voice samples regenerate and play from one button press.
+- **Coffee replay and persistence recover cleanly.** Player departures,
+  per-message audiences, active Powers, cup state, and reconstructed table
+  labels now survive save, restore, and replay without stale-scope failures.
 - **Bot grid cards click reliably.** Mouse and keyboard activation on visible
   bot cards now selects the card directly instead of feeling like text
   selection or only moving the hue lens.
