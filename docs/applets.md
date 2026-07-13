@@ -24,9 +24,9 @@ ship as `0.5.2` while Coffee is `v0.7` and Story is `v0.1`.
 
 | Applet | Version | Status | Notes |
 | --- | --- | --- | --- |
-| Chat | v0.8 | Active | Full playground for bots, providers, models, images, exports, and memory-aware conversations. |
-| Zen | v0.7 | Active | Calm one-to-one continuity surface; the standalone Zen lane is deprecating as this becomes Prism's default state. |
-| Coffee | v0.9 | Active | Multi-bot group table with Coffee Groups, session pacing, cups, transcripts, replay, and table controls. |
+| Chat | v0.9 | Active | Full playground for bots, providers, models, images, exports, and memory-aware conversations. |
+| Zen | v0.8 | Active | Calm one-to-one continuity surface; the standalone Zen lane is deprecating as this becomes Prism's default state. |
+| Coffee | v1.0 | Active | Multi-bot group table with Coffee Groups, session pacing, cups, transcripts, replay, and table controls. |
 | Story | v0.1 | Preview | Generated visual-novel episodes with bots, choices, maps, inventory, and transcripts. |
 | Arena | v0.0 | Planned | Moderated bot debate surface. |
 | Polling | v0.0 | Planned | AI-powered polling across bot groups. |
@@ -38,6 +38,15 @@ ship as `0.5.2` while Coffee is `v0.7` and Story is `v0.1`.
 | Surf | v0.0 | Planned | Simple browsing plus optional bot screen viewing. |
 
 ## Changelog
+
+### 2026-07-13
+
+- Bumped `Chat` to `v0.9` for Avatar Details Studio, canonical live-avatar
+  rendering, and voiced Bottish previews and playback.
+- Bumped `Zen` to `v0.8` for shared authored screen details and audio-master
+  voiced Bottish reveal timing.
+- Bumped `Coffee` to `v1.0` for shared authored avatar details, voiced Bottish
+  table speech, and reliable navigation above bot-owned panels.
 
 ### 2026-07-12
 
