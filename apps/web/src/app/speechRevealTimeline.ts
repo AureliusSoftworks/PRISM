@@ -48,6 +48,13 @@ export function prepareSpeechRevealTimeline(tokenSignature: string): SpeechRevea
   };
 }
 
+/** True while text is waiting for synthesized audio to begin or resume. */
+export function speechRevealTimelineWaitingForAudio(
+  timeline: SpeechRevealTimeline | null | undefined
+): boolean {
+  return timeline?.phase === "preparing";
+}
+
 function revealAtMsFromAlignment(
   tokens: readonly string[],
   tokenSignature: string,

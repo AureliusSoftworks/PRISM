@@ -43,7 +43,11 @@ import {
   normalizeVoiceMode,
   parseStoredBotAudioVoiceProfileV1,
   serializeBotAudioVoiceProfileV1,
+  parseStoredBotPowersV1,
+  serializeBotPowersV1,
   type BotAudioVoiceProfileV1,
+  type BotPowerV1,
+  type CoffeePowerPlanV1,
   type EnglishVoiceEngine,
   type VoiceMode,
 } from "@localai/shared";
@@ -59,9 +63,7 @@ import {
   normalizeZenWallpaperStyleNotes,
   normalizeZenWallpaperTextMaskEnabled,
   normalizeElevenLabsVoiceBank,
-  normalizePlayerNamePronunciation,
   parseStoredElevenLabsVoiceBank,
-  parseStoredPlayerAudioVoiceProfile,
 } from "./settings.ts";
 
 export interface BackupUserSettings {
@@ -115,8 +117,6 @@ export interface BackupUserSettings {
   defaultElevenLabsVoiceId?: string | null;
   elevenLabsVoiceBank?: Record<string, string | null>;
   elevenLabsVoiceModel?: string;
-  playerAudioVoiceProfile?: BotAudioVoiceProfileV1;
-  playerNamePronunciation?: string;
 }
 
 export interface BackupBotSnapshot {
@@ -166,6 +166,7 @@ export interface BackupBotSnapshot {
   updatedAt: string;
   authoredAudioVoiceProfile?: BotAudioVoiceProfileV1;
   audioVoiceProfileOverride?: BotAudioVoiceProfileV1 | null;
+  powers?: BotPowerV1[];
 }
 
 export interface BackupSnapshot {
@@ -178,6 +179,7 @@ export interface BackupSnapshot {
     title: string;
     createdAt: string;
     updatedAt: string;
+    coffeePowerPlan?: CoffeePowerPlanV1;
     messages: Array<{
       id: string;
       role: string;
@@ -191,6 +193,7 @@ export interface BackupSnapshot {
       botId?: string;
       /** Serialized AskQuestion envelope; optional snapshots omit this. */
       toolPayload?: string;
+      coffeeAudienceBotIds?: string[];
     }>;
   }>;
   memories: Array<{
@@ -286,8 +289,7 @@ export function exportUserSnapshot(
          elevenlabs_key_tag
          ,voice_mode, voice_effects_enabled, voice_volume, english_voice_engine,
          default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank,
-         elevenlabs_voice_model, player_audio_voice_profile, player_name_pronunciation,
-         prism_default_bot_audio_voice_profile
+         elevenlabs_voice_model, prism_default_bot_audio_voice_profile
        FROM users
        WHERE id = ?`
     )
@@ -348,8 +350,6 @@ export function exportUserSnapshot(
         default_elevenlabs_voice_id: string | null;
         elevenlabs_voice_bank: string | null;
         elevenlabs_voice_model: string | null;
-        player_audio_voice_profile: string | null;
-        player_name_pronunciation: string | null;
         prism_default_bot_audio_voice_profile: string | null;
       }
     | undefined;
@@ -431,12 +431,6 @@ export function exportUserSnapshot(
         defaultElevenLabsVoiceId: user.default_elevenlabs_voice_id,
         elevenLabsVoiceBank: parseStoredElevenLabsVoiceBank(user.elevenlabs_voice_bank),
         elevenLabsVoiceModel: user.elevenlabs_voice_model ?? "",
-        playerAudioVoiceProfile: parseStoredPlayerAudioVoiceProfile(
-          user.player_audio_voice_profile
-        ),
-        playerNamePronunciation: normalizePlayerNamePronunciation(
-          user.player_name_pronunciation
-        ),
         devMemoriesEnabled: user.dev_memories_enabled === 1,
         devMemoriesText: user.dev_memories_text ?? "",
         ...(user.openai_key_ciphertext && user.openai_key_iv && user.openai_key_tag
@@ -504,6 +498,7 @@ export function exportUserSnapshot(
 	         repetition_penalty,
          color,
          glyph,
+         powers_json,
          avatar_details_json,
          face_eyes_font,
          face_eye_character,
@@ -556,6 +551,7 @@ export function exportUserSnapshot(
 	    repetition_penalty: number | null;
 	    color: string | null;
     glyph: string | null;
+    powers_json: string | null;
     avatar_details_json: string | null;
     face_eyes_font: string | null;
     face_eye_character: string | null;
@@ -587,11 +583,12 @@ export function exportUserSnapshot(
 
   const conversations = db
     .prepare(
-      "SELECT id, title, created_at, updated_at FROM conversations WHERE user_id = ? ORDER BY updated_at DESC"
+      "SELECT id, title, coffee_power_plan_json, created_at, updated_at FROM conversations WHERE user_id = ? ORDER BY updated_at DESC"
     )
     .all(userId) as Array<{
     id: string;
     title: string;
+    coffee_power_plan_json: string | null;
     created_at: string;
     updated_at: string;
   }>;
@@ -599,7 +596,7 @@ export function exportUserSnapshot(
   const conversationPayload = conversations.map((conversation) => {
     const messages = db
       .prepare(
-        "SELECT id, role, content, provider, model, bot_id, tool_payload, created_at FROM messages WHERE conversation_id = ? AND user_id = ? ORDER BY created_at ASC"
+        "SELECT id, role, content, provider, model, bot_id, tool_payload, coffee_audience_bot_ids, created_at FROM messages WHERE conversation_id = ? AND user_id = ? ORDER BY created_at ASC"
       )
       .all(conversation.id, userId) as Array<{
       id: string;
@@ -609,13 +606,26 @@ export function exportUserSnapshot(
       model: string | null;
       bot_id: string | null;
       tool_payload: string | null;
+      coffee_audience_bot_ids: string | null;
       created_at: string;
     }>;
+    const coffeePowerPlan = (() => {
+      if (!conversation.coffee_power_plan_json) return undefined;
+      try {
+        const parsed = JSON.parse(conversation.coffee_power_plan_json) as CoffeePowerPlanV1;
+        return parsed?.version === 1 && parsed.bots && typeof parsed.bots === "object"
+          ? parsed
+          : undefined;
+      } catch {
+        return undefined;
+      }
+    })();
     return {
       id: conversation.id,
       title: conversation.title,
       createdAt: conversation.created_at,
       updatedAt: conversation.updated_at,
+      ...(coffeePowerPlan ? { coffeePowerPlan } : {}),
       messages: messages.map((message) => {
         const provider: ProviderName | undefined =
           message.provider === "local" ||
@@ -629,6 +639,17 @@ export function exportUserSnapshot(
           typeof message.tool_payload === "string" && message.tool_payload.trim().length > 0
             ? message.tool_payload
             : undefined;
+        const coffeeAudienceBotIds = (() => {
+          if (!message.coffee_audience_bot_ids) return undefined;
+          try {
+            const parsed = JSON.parse(message.coffee_audience_bot_ids) as unknown;
+            return Array.isArray(parsed)
+              ? parsed.filter((id): id is string => typeof id === "string")
+              : undefined;
+          } catch {
+            return undefined;
+          }
+        })();
         return {
           id: message.id,
           role: message.role,
@@ -638,6 +659,7 @@ export function exportUserSnapshot(
           model,
           botId,
           ...(toolPayload ? { toolPayload } : {}),
+          ...(coffeeAudienceBotIds ? { coffeeAudienceBotIds } : {}),
         };
       }),
     };
@@ -689,6 +711,9 @@ export function exportUserSnapshot(
           typeof bot.repetition_penalty === "number" ? bot.repetition_penalty : 1.1,
         color: bot.color,
         glyph: bot.glyph,
+        ...(parseStoredBotPowersV1(bot.powers_json).length > 0
+          ? { powers: parseStoredBotPowersV1(bot.powers_json) }
+          : {}),
         avatarDetails: parseStoredBotAvatarDetailsV1(bot.avatar_details_json),
         faceEyesFont: normalizeBotFaceFontId(bot.face_eyes_font),
         faceEyeCharacter: normalizeBotFaceEyeCharacter(bot.face_eye_character),
@@ -941,8 +966,6 @@ function importUserSnapshotWithinTransaction(
         default_elevenlabs_voice_id = ?,
         elevenlabs_voice_bank = ?,
         elevenlabs_voice_model = ?,
-        player_audio_voice_profile = ?,
-        player_name_pronunciation = ?,
         prism_default_bot_audio_voice_profile = ?
       WHERE id = ?
     `).run(
@@ -1023,8 +1046,6 @@ function importUserSnapshotWithinTransaction(
       typeof settings.elevenLabsVoiceModel === "string"
         ? settings.elevenLabsVoiceModel.trim().slice(0, 160) || null
         : null,
-      serializeBotAudioVoiceProfileV1(settings.playerAudioVoiceProfile),
-      normalizePlayerNamePronunciation(settings.playerNamePronunciation),
       serializeBotAudioVoiceProfileV1(settings.prismDefaultBotAudioVoiceProfile),
       userId
     );
@@ -1154,6 +1175,8 @@ function importUserSnapshotWithinTransaction(
         typeof bot.createdAt === "string" && bot.createdAt.trim().length > 0 ? bot.createdAt : now,
         typeof bot.updatedAt === "string" && bot.updatedAt.trim().length > 0 ? bot.updatedAt : now
       );
+      db.prepare("UPDATE bots SET powers_json = ? WHERE id = ? AND user_id = ?")
+        .run(serializeBotPowersV1(bot.powers ?? []), bot.id.trim(), userId);
     }
   }
 
@@ -1178,6 +1201,11 @@ function importUserSnapshotWithinTransaction(
       conversation.createdAt,
       conversation.updatedAt
     );
+    if (conversation.coffeePowerPlan?.version === 1) {
+      db.prepare(
+        "UPDATE conversations SET coffee_power_plan_json = ? WHERE id = ? AND user_id = ?"
+      ).run(JSON.stringify(conversation.coffeePowerPlan), conversation.id, userId);
+    }
     for (const message of conversation.messages) {
       const providerValue =
         message.provider === "local" ||
@@ -1209,6 +1237,10 @@ function importUserSnapshotWithinTransaction(
         toolPayloadValue,
         message.createdAt
       );
+      if (Array.isArray(message.coffeeAudienceBotIds)) {
+        db.prepare("UPDATE messages SET coffee_audience_bot_ids = ? WHERE id = ? AND user_id = ?")
+          .run(JSON.stringify(message.coffeeAudienceBotIds), message.id, userId);
+      }
     }
   }
 

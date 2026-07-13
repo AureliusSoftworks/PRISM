@@ -1,5 +1,7 @@
 import { normalizeBotFaceEyeCharacter } from "@localai/shared";
 
+import { normalizeBotPowersV1, type BotPowerV1 } from "@localai/shared";
+
 export const BOT_MARKETPLACE_MANIFEST_PATH = "/bot-marketplace/manifest.json";
 
 /**
@@ -62,6 +64,7 @@ export interface BotMarketplaceEntry {
   deprecated: boolean;
   replacementType: MarketplaceContentType | null;
   replacementIds: string[];
+  powers?: BotPowerV1[];
 }
 
 export interface MarketplaceLensCategory {
@@ -215,6 +218,7 @@ export function normalizeBotMarketplaceManifest(raw: unknown): BotMarketplaceMan
     if (seenBotIds.has(id) || seenHashes.has(botHash)) continue;
     seenBotIds.add(id);
     seenHashes.add(botHash);
+    const powers = normalizeBotPowersV1(botRecord.powers);
     bots.push({
       id,
       name,
@@ -233,6 +237,7 @@ export function normalizeBotMarketplaceManifest(raw: unknown): BotMarketplaceMan
       replacementIds: stringList(botRecord.replacementIds).map((replacementId) =>
         replacementId.toLowerCase()
       ),
+      ...(powers.length > 0 ? { powers } : {}),
     });
   }
 

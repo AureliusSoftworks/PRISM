@@ -2047,7 +2047,7 @@ describe("Zen live presence CSS", () => {
     );
     assert.match(
       zenSpinnerGlyphRule,
-      /font-size:\s*var\(\s*--zen-live-bot-avatar-thinking-glyph-size,\s*clamp\(1\.82rem,\s*calc\(var\(--zen-live-bot-body-frame-size,\s*190px\) \* 0\.245\),\s*4\.6rem\)\s*\)/
+      /font-size:\s*var\(\s*--zen-live-bot-avatar-thinking-glyph-size,\s*clamp\(2\.35rem,\s*calc\(var\(--zen-live-bot-body-frame-size,\s*190px\) \* 0\.275\),\s*5\.25rem\)\s*\)/
     );
     assert.doesNotMatch(zenSpinnerGlyphRule, /#55ffe0|#0aa996/);
     assert.match(
@@ -2286,10 +2286,17 @@ describe("Zen live presence CSS", () => {
     assert.match(sidebarOpenRule, /display:\s*none\s*;/);
   });
 
-  it("defers live presence on new Zen sessions until the opener overlay settles", () => {
+  it("shows live presence once a new Zen opener begins revealing", () => {
     assert.match(
       pageSource,
-      /const zenNewSessionPresenceDeferred =\s*chatLikeSurface &&\s*\(activeConversationIsEmpty \|\|\s*showConversationSurfaceLoading \|\|\s*zenInitialThinkingActive \|\|\s*zenInitialReplyRevealActive\);/
+      /const zenNewSessionPresenceDeferred =\s*chatLikeSurface &&\s*\(activeConversationIsEmpty \|\|\s*showConversationSurfaceLoading \|\|\s*zenInitialThinkingActive\);/
+    );
+    assert.doesNotMatch(
+      pageSource.slice(
+        pageSource.indexOf("const zenNewSessionPresenceDeferred"),
+        pageSource.indexOf("const showMessagesFrameStateLoadingOverlay")
+      ),
+      /zenInitialReplyRevealActive/
     );
     assert.match(
       pageSource,

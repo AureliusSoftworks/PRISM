@@ -2,11 +2,11 @@
 
 import type { ReactNode } from "react";
 import {
-  Brain,
   Coffee,
   FlaskConical,
   Info,
   KeyRound,
+  MessageCircle,
   Network,
   SlidersHorizontal,
   Sparkles,
@@ -16,13 +16,13 @@ import {
 import styles from "./page.module.css";
 
 export type SettingsScope =
+  | "chat"
   | "zen"
   | "coffee"
   | "connections"
   | "network"
   | "experimental"
   | "models"
-  | "behavior"
   | "voice"
   | "about"
   | "account";
@@ -54,13 +54,13 @@ const SETTINGS_NAV_GROUPS: readonly {
       { scope: "models", title: "Models", icon: <SlidersHorizontal size={16} strokeWidth={2} /> },
       { scope: "network", title: "Network", icon: <Network size={16} strokeWidth={2} /> },
       { scope: "experimental", title: "Experimental", icon: <FlaskConical size={16} strokeWidth={2} /> },
-      { scope: "behavior", title: "Behavior", icon: <Brain size={16} strokeWidth={2} /> },
       { scope: "voice", title: "Voice", icon: <Volume2 size={16} strokeWidth={2} /> },
     ],
   },
   {
     label: "Modes",
     items: [
+      { scope: "chat", title: "Chat", icon: <MessageCircle size={16} strokeWidth={2} /> },
       { scope: "zen", title: "Zen", icon: <Sparkles size={16} strokeWidth={2} /> },
       { scope: "coffee", title: "Coffee", icon: <Coffee size={16} strokeWidth={2} /> },
     ],

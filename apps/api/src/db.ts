@@ -302,6 +302,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       coffee_meeting_summary TEXT,
       coffee_meeting_summary_message_count INTEGER,
       coffee_meeting_summary_updated_at TEXT,
+      coffee_power_plan_json TEXT,
       zen_wallpaper_enabled INTEGER NOT NULL DEFAULT 0,
       zen_wallpaper_image_id TEXT,
       zen_wallpaper_prompt_seed TEXT,
@@ -333,6 +334,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       model TEXT,
       bot_id TEXT,
       tool_payload TEXT,
+      coffee_audience_bot_ids TEXT,
       created_at TEXT NOT NULL,
       FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -434,6 +436,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       semantic_facets TEXT,
       semantic_facets_source_hash TEXT,
       semantic_facets_updated_at TEXT,
+      powers_json TEXT NOT NULL DEFAULT '[]',
       model TEXT,
       local_model TEXT,
       online_model TEXT,
@@ -1116,6 +1119,12 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   if (!hasToolPayloadColumn) {
     db.exec("ALTER TABLE messages ADD COLUMN tool_payload TEXT;");
   }
+  const hasCoffeeAudienceBotIdsColumn = messageColumns.some(
+    (column) => column.name === "coffee_audience_bot_ids"
+  );
+  if (!hasCoffeeAudienceBotIdsColumn) {
+    db.exec("ALTER TABLE messages ADD COLUMN coffee_audience_bot_ids TEXT;");
+  }
   const conversationColumns = db
     .prepare("PRAGMA table_info(conversations)")
     .all() as Array<{ name: string }>;
@@ -1227,6 +1236,12 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   );
   if (!hasConversationCoffeeMeetingSummaryUpdatedAtColumn) {
     db.exec("ALTER TABLE conversations ADD COLUMN coffee_meeting_summary_updated_at TEXT;");
+  }
+  const hasConversationCoffeePowerPlanColumn = conversationColumns.some(
+    (column) => column.name === "coffee_power_plan_json"
+  );
+  if (!hasConversationCoffeePowerPlanColumn) {
+    db.exec("ALTER TABLE conversations ADD COLUMN coffee_power_plan_json TEXT;");
   }
   const hasZenWallpaperEnabledColumn = conversationColumns.some(
     (column) => column.name === "zen_wallpaper_enabled"
@@ -1730,6 +1745,12 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   );
   if (!hasBotSemanticFacetsUpdatedAtColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN semantic_facets_updated_at TEXT;");
+  }
+  const hasBotPowersJsonColumn = botColumns.some(
+    (column) => column.name === "powers_json"
+  );
+  if (!hasBotPowersJsonColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN powers_json TEXT NOT NULL DEFAULT '[]';");
   }
   const prismMoodColumns = db
     .prepare("PRAGMA table_info(prism_mood_state)")

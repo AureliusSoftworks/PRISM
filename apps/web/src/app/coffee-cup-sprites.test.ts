@@ -776,6 +776,23 @@ describe("coffee cup sprites", () => {
     assert.ok(short.progress >= long.progress);
   });
 
+  it("renders the same faster Coffee power pace used by server decisions", () => {
+    const normal = buildCoffeeCupVisualState({
+      seed: "session:voltaire",
+      nowMs: 120_000,
+      durationMinutes: 10,
+      progressOverride: 0.3,
+    });
+    const powered = buildCoffeeCupVisualState({
+      seed: "session:voltaire",
+      nowMs: 120_000,
+      durationMinutes: 10,
+      progressOverride: 0.3,
+      powerRateMultiplier: 2.5,
+    });
+    assert.ok(powered.progress > normal.progress);
+  });
+
   it("varies sip hold timing by sip count", () => {
     const first = coffeeCupSipAnimationTiming({
       seed: "session:bot-alice",

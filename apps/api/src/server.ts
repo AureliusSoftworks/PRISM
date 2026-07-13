@@ -100,6 +100,7 @@ import {
   parseStoredCoffeeSessionSettings,
   processCoffeeAutonomousTurn,
   processCoffeeTurn,
+  recordCoffeePlayerDeparture,
   recordCoffeeUserAction,
   recordCoffeeReplayEvents,
   recordCoffeeInterruptionPause,
@@ -116,6 +117,7 @@ import {
   updateCoffeeConversationSettings,
 } from "./coffee.ts";
 import {
+  cancelCoffeeTurnJobsForConversation,
   getActiveCoffeeTurnJobForConversation,
   getCoffeeTurnJob,
   interruptCoffeeTurnJob,
@@ -191,6 +193,8 @@ import {
   type SelectedBotPatch,
 } from "./bots.ts";
 import { queueBotSemanticFacetsRefresh } from "./bot-facets.ts";
+import { compileBotPowers } from "./bot-powers.ts";
+import { resolveCoffeePowersForSession } from "./coffee-powers.ts";
 import {
   BOT_PROFILE_PICTURE_IMAGE_PURPOSE,
   BOT_PROFILE_PICTURE_SIZE,
@@ -224,8 +228,6 @@ import {
   parseHiddenBotModelIds,
   parseHiddenComfyUiWorkflowIds,
   parseStoredElevenLabsVoiceBank,
-  parseStoredPlayerAudioVoiceProfile,
-  normalizePlayerNamePronunciation,
   resolveNextSettings,
   sanitizeAnthropicKeyInput,
   sanitizeElevenLabsKeyInput,
@@ -242,7 +244,11 @@ import {
 } from "./providers.ts";
 import type { GenerateOptions, ProviderMessage, ProviderName } from "./providers.ts";
 import { cleanupResolvedPromptWithModel } from "./composer-cleanup.ts";
-import { inferVoicePreviewLine, normalizeVoicePreviewLine } from "./voice-preview-line.ts";
+import {
+  inferVoicePreviewLine,
+  normalizeVoicePreviewLine,
+  voicePreviewLineSoundsLikeAudioCheck,
+} from "./voice-preview-line.ts";
 import {
   generateScriptedPromptWildcardValue,
   promptWildcardNames,
@@ -306,7 +312,9 @@ import {
   normalizeBotVoiceVolume,
   normalizeOptionalBotAudioVoiceProfileV1,
   parseStoredBotAudioVoiceProfileV1,
+  parseStoredBotPowersV1,
   serializeBotAudioVoiceProfileV1,
+  serializeBotPowersV1,
   encodeComfyUiRemoteWorkflowModelId,
   formatComfyUiRemoteWorkflowLabel,
   hydrateAssistantMessageParts,
@@ -400,7 +408,6 @@ import {
   requestElevenLabsSpeech,
   requestElevenLabsSpeechWithTimestamps,
   resolveElevenLabsVoiceId,
-  applyPlayerNamePronunciation,
   requestElevenLabsVoiceCatalog,
   resolveVoiceSynthesisBoundary,
   validateVoiceSynthesisRequest,
@@ -416,6 +423,7 @@ let db: DatabaseSync = createDatabase();
 let masterKey = deriveMasterKey(config.encryptionMasterKey);
 let providerFactoryOverride: typeof selectProvider = selectProvider;
 let auxiliaryProviderFactoryOverride: typeof getAuxiliaryProvider = getAuxiliaryProvider;
+const activeCoffeeDepartureEpilogues = new Set<string>();
 /**
  * Runtime view of local-network access. `boundLanActive` reflects what the
  * process actually bound at startup (immutable for the process lifetime);
@@ -1747,17 +1755,23 @@ function rejectUnsupportedBotAvatarPayload(body: Record<string, unknown>): void 
 
 function botRowForResponse(
   row: Record<string, unknown>
-): Record<string, unknown> & { avatarDetails: ReturnType<typeof parseStoredBotAvatarDetailsV1> } {
-  const { avatar_details_json: avatarDetailsJson, ...bot } = row;
+): Record<string, unknown> & {
+  avatarDetails: ReturnType<typeof parseStoredBotAvatarDetailsV1>;
+  powers: ReturnType<typeof parseStoredBotPowersV1>;
+} {
+  const {
+    avatar_details_json: avatarDetailsJson,
+    powers_json: powersJson,
+    ...bot
+  } = row;
   return {
     ...normalizeBotAudioVoiceProfilesForResponse(bot),
     avatarDetails: parseStoredBotAvatarDetailsV1(avatarDetailsJson),
+    powers: parseStoredBotPowersV1(powersJson),
   };
 }
 
-function botRowsForResponse(
-  rows: Record<string, unknown>[]
-): Array<Record<string, unknown> & { avatarDetails: ReturnType<typeof parseStoredBotAvatarDetailsV1> }> {
+function botRowsForResponse(rows: Record<string, unknown>[]) {
   return rows.map(botRowForResponse);
 }
 
@@ -5096,6 +5110,11 @@ function buildRoutes(): RouteDefinition[] {
         ...result,
       });
     }),
+    route("POST", "/api/coffee/sessions/:id/powers/resolve", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const plan = resolveCoffeePowersForSession(db, userId, ctx.params.id);
+      json(ctx.res, 200, { ok: true, plan, warnings: plan.warnings });
+    }),
     route("GET", "/api/coffee/sessions/:id/transcript", async (ctx) => {
       const userId = requireAuth(ctx);
       const messages = getCoffeeConversationTranscript(db, userId, ctx.params.id);
@@ -5116,6 +5135,121 @@ function buildRoutes(): RouteDefinition[] {
       json(ctx.res, 201, {
         ok: true,
         conversation,
+      });
+    }),
+    route("POST", "/api/coffee/sessions/:id/depart", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const conversationId = ctx.params.id;
+      cancelCoffeeTurnJobsForConversation(userId, conversationId);
+      const departure = recordCoffeePlayerDeparture(db, userId, conversationId);
+      const requestedProvider = readProvider(body.preferredProvider);
+      const user = getUserRow(userId);
+      const userKey = decryptUserKey(userId);
+      const generatedSessionMessages = departure.conversation.messages.filter(
+        (message) => message.role === "assistant" && message.provider
+      );
+      const sessionWasLocal =
+        generatedSessionMessages.length > 0 &&
+        generatedSessionMessages.every((message) => message.provider === "local");
+      const effectiveProvider = sessionWasLocal
+        ? "local"
+        : requestedProvider ?? user.preferred_provider;
+      const sessionSpeakerModel = readCoffeeSessionSpeakerModel(body.modelOverride);
+      const requestedReasoningEffort = reasoningEffortForRequest(body.reasoningEffort);
+      const sessionRemainingMs =
+        typeof body.sessionRemainingMs === "number" && Number.isFinite(body.sessionRemainingMs)
+          ? Math.max(0, body.sessionRemainingMs)
+          : null;
+      const openAiApiKey = getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
+      const anthropicApiKey =
+        getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey;
+      const departureDb = db;
+      const departureProviderFactory = providerFactoryOverride;
+      const departureAuxiliaryProviderFactory = auxiliaryProviderFactoryOverride;
+      const jobKey = `${userId}:${conversationId}`;
+      const shouldStart =
+        departure.recorded &&
+        departure.completedTurns < departure.targetTurns &&
+        !activeCoffeeDepartureEpilogues.has(jobKey);
+      if (shouldStart) {
+        activeCoffeeDepartureEpilogues.add(jobKey);
+        void (async () => {
+          for (
+            let turnIndex = departure.completedTurns;
+            turnIndex < departure.targetTurns;
+            turnIndex += 1
+          ) {
+            await runWithUsageSession(
+              {
+                db: departureDb,
+                userId,
+                privacyScope: "normal",
+                mode: "coffee",
+                surface: "coffee",
+                conversationId,
+                botId: null,
+              },
+              () =>
+                processCoffeeAutonomousTurn(
+                  departureDb,
+                  userId,
+                  conversationId,
+                  {
+                    preferredProvider: effectiveProvider,
+                    openAiApiKey,
+                    anthropicApiKey,
+                    secondaryOllamaHost: user.secondary_ollama_host,
+                    experimentalDualOllamaEnabled:
+                      user.experimental_dual_ollama_enabled === 1,
+                    experimentalAllModelEffortEnabled:
+                      user.experimental_all_model_effort_enabled === 1,
+                    userDisplayName: user.display_name,
+                    userKey,
+                    prismDefaultLlmModel: user.prism_default_llm_model,
+                    providerFactory: departureProviderFactory,
+                    auxiliaryProviderFactory: departureAuxiliaryProviderFactory,
+                    assistantImageUserPrefs: {
+                      preferredLocalImageModel: user.preferred_local_image_model,
+                      preferredOpenAiImageModel: user.preferred_openai_image_model,
+                      lenientLocalImageFallbackModel:
+                        user.lenient_local_image_fallback_model,
+                      comfyuiHost: user.comfyui_host,
+                      comfyUiWorkflows: parseStoredComfyUiWorkflows(user.comfyui_workflows),
+                      secondaryOllamaHost: user.secondary_ollama_host,
+                    },
+                    sessionRemainingMs,
+                    ...(sessionSpeakerModel ? { sessionSpeakerModel } : {}),
+                    ...(requestedReasoningEffort
+                      ? { reasoningEffort: requestedReasoningEffort }
+                      : {}),
+                  },
+                  false,
+                  undefined,
+                  undefined,
+                  undefined,
+                  { turnIndex, totalTurns: departure.targetTurns }
+                )
+            );
+          }
+        })()
+          .catch((error) => {
+            console.warn(
+              `[coffee] player departure epilogue stopped conversation=${conversationId}`,
+              error
+            );
+          })
+          .finally(() => {
+            activeCoffeeDepartureEpilogues.delete(jobKey);
+          });
+      }
+      json(ctx.res, 202, {
+        ok: true,
+        departureRecorded: departure.recorded,
+        epilogueStarted: shouldStart,
+        epilogueTurnTarget: departure.targetTurns,
+        epilogueTurnsCompleted: departure.completedTurns,
+        conversation: departure.conversation,
       });
     }),
     route("POST", "/api/coffee/sessions/:id/topic", async (ctx) => {
@@ -6448,7 +6582,7 @@ function buildRoutes(): RouteDefinition[] {
           ).get(botId, userId) as { voice_preview_line?: string | null } | undefined
         : undefined;
       const storedLine = normalizeVoicePreviewLine(storedBot?.voice_preview_line);
-      if (storedLine) {
+      if (storedLine && !voicePreviewLineSoundsLikeAudioCheck(storedLine)) {
         json(ctx.res, 200, { ok: true, line: storedLine });
         return;
       }
@@ -6494,14 +6628,13 @@ function buildRoutes(): RouteDefinition[] {
         if (!message || message.role !== "assistant") {
           throw new HttpError(404, "Assistant message not found.");
         }
-        sourceText = message.content ?? "";
+        // Keep messageId as the provider/privacy authority, but allow clients
+        // to supply a derived spoken-only view that omits visual action cues.
+        sourceText = Object.prototype.hasOwnProperty.call(raw, "spokenText")
+          ? raw.spokenText
+          : message.content ?? "";
         persistedMessageProvider = message.provider ?? null;
       }
-      sourceText = applyPlayerNamePronunciation(
-        sourceText,
-        user.display_name,
-        user.player_name_pronunciation
-      );
       const explicitOnlineContext = persistedMessageProvider
         ? persistedMessageProvider !== "local"
         : raw.explicitOnlineContext === true && user.preferred_provider !== "local";
@@ -6712,12 +6845,6 @@ function buildRoutes(): RouteDefinition[] {
           defaultElevenLabsVoiceId: user.default_elevenlabs_voice_id,
           elevenLabsVoiceBank: parseStoredElevenLabsVoiceBank(user.elevenlabs_voice_bank),
           elevenLabsVoiceModel: user.elevenlabs_voice_model ?? "",
-          playerAudioVoiceProfile: parseStoredPlayerAudioVoiceProfile(
-            user.player_audio_voice_profile
-          ),
-          playerNamePronunciation: normalizePlayerNamePronunciation(
-            user.player_name_pronunciation
-          ),
           openAiApiKeySource: apiKeySource(
             user.openai_key_ciphertext,
             config.openAiApiKey
@@ -7147,8 +7274,6 @@ function buildRoutes(): RouteDefinition[] {
         defaultElevenLabsVoiceId: user.default_elevenlabs_voice_id,
         elevenLabsVoiceBank: user.elevenlabs_voice_bank,
         elevenLabsVoiceModel: user.elevenlabs_voice_model,
-        playerAudioVoiceProfile: user.player_audio_voice_profile,
-        playerNamePronunciation: user.player_name_pronunciation,
         primaryOllamaHost: config.ollamaHost,
       });
 
@@ -7207,7 +7332,7 @@ function buildRoutes(): RouteDefinition[] {
             preferred_local_image_model = ?, preferred_openai_image_model = ?, preferred_zen_wallpaper_local_image_model = ?, preferred_zen_wallpaper_openai_image_model = ?, zen_wallpaper_opacity = ?, zen_wallpaper_text_mask_enabled = ?, zen_wallpaper_grayscale_enabled = ?, zen_wallpaper_blurred_edges_enabled = ?, zen_wallpaper_style_notes = ?,
             zen_session_idle_gap_ms = ?, zen_fresh_start_gap_ms = ?, zen_recent_context_messages = ?, zen_wallpaper_regen_message_interval = ?, zen_mood_sensitivity = ?, zen_canvas_typing_speed = ?, zen_message_font_min_px = ?, zen_message_font_max_px = ?, zen_ask_question_patience_enabled = ?, zen_ask_question_patience_ms = ?, zen_autonomy_enabled = ?, zen_persona_transition_choice = ?,
             comfyui_workflows = ?, prism_default_llm_model = ?, prism_image_tool_llm_model = ?,
-            voice_mode = ?, voice_effects_enabled = ?, voice_volume = ?, english_voice_engine = ?, default_system_voice_name = ?, default_elevenlabs_voice_id = ?, elevenlabs_voice_bank = ?, elevenlabs_voice_model = ?, player_audio_voice_profile = ?, player_name_pronunciation = ?,
+            voice_mode = ?, voice_effects_enabled = ?, voice_volume = ?, english_voice_engine = ?, default_system_voice_name = ?, default_elevenlabs_voice_id = ?, elevenlabs_voice_bank = ?, elevenlabs_voice_model = ?,
             dev_memories_enabled = ?, dev_memories_text = ?,
             openai_key_ciphertext = ?, openai_key_iv = ?, openai_key_tag = ?,
             anthropic_key_ciphertext = ?, anthropic_key_iv = ?, anthropic_key_tag = ?,
@@ -7266,8 +7391,6 @@ function buildRoutes(): RouteDefinition[] {
         next.defaultElevenLabsVoiceId,
         JSON.stringify(next.elevenLabsVoiceBank),
         next.elevenLabsVoiceModel,
-        JSON.stringify(next.playerAudioVoiceProfile),
-        next.playerNamePronunciation,
         devMemoriesEnabled,
         devMemoriesText,
         openAiCipher,
@@ -7299,8 +7422,6 @@ function buildRoutes(): RouteDefinition[] {
           defaultElevenLabsVoiceId: next.defaultElevenLabsVoiceId,
           elevenLabsVoiceBank: next.elevenLabsVoiceBank,
           elevenLabsVoiceModel: next.elevenLabsVoiceModel ?? "",
-          playerAudioVoiceProfile: next.playerAudioVoiceProfile,
-          playerNamePronunciation: next.playerNamePronunciation,
           hasOpenAiApiKey: Boolean(openAiCipher),
           hasAnthropicApiKey: Boolean(anthropicCipher),
           hasElevenLabsApiKey: Boolean(elevenLabsCipher),
@@ -8087,7 +8208,7 @@ function buildRoutes(): RouteDefinition[] {
 
       const updatedBot = db
         .prepare(
-          "SELECT id, name, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?"
+          "SELECT id, name, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?"
         )
         .get(botId, userId) as Record<string, unknown>;
       json(ctx.res, 200, {
@@ -8102,6 +8223,27 @@ function buildRoutes(): RouteDefinition[] {
           model: "upload",
         },
       });
+    }),
+    route("POST", "/api/bot-powers/compile", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const body = ctx.body as Record<string, unknown>;
+      const result = await runWithUsageSession(
+        {
+          db,
+          userId,
+          privacyScope: "normal",
+          mode: "system",
+          surface: "bots",
+        },
+        () => compileBotPowers({
+          provider: getAuxiliaryProvider(user.prism_default_llm_model ?? undefined),
+          botName: typeof body.botName === "string" ? body.botName : "",
+          systemPrompt: typeof body.systemPrompt === "string" ? body.systemPrompt : "",
+          powers: body.powers,
+        })
+      );
+      json(ctx.res, 200, { ok: true, ...result });
     }),
     route("POST", "/api/bots", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -8192,6 +8334,7 @@ function buildRoutes(): RouteDefinition[] {
       const audioVoiceProfileOverride = normalizeOptionalBotAudioVoiceProfileV1(
         body.audioVoiceProfileOverride
       );
+      const powers = parseStoredBotPowersV1(body.powers);
       const botId = randomId(12);
       const now = new Date().toISOString();
       db.prepare(
@@ -8247,6 +8390,10 @@ function buildRoutes(): RouteDefinition[] {
         now,
         now
       );
+      if (powers.length > 0) {
+        db.prepare("UPDATE bots SET powers_json = ? WHERE id = ? AND user_id = ?")
+          .run(serializeBotPowersV1(powers), botId, userId);
+      }
       queueBotSemanticFacetsRefresh({
         db,
         userId,
@@ -8300,13 +8447,14 @@ function buildRoutes(): RouteDefinition[] {
           profile_picture_image_id: null,
           chat_enabled: chatEnabled,
           voice_preview_line: voicePreviewLine,
+          powers,
         },
       });
     }),
     route("GET", "/api/bots", async (ctx) => {
       const userId = requireAuth(ctx);
       const rows = db.prepare(
-        "SELECT id, name, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC"
+        "SELECT id, name, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC"
       ).all(userId) as Record<string, unknown>[];
       json(ctx.res, 200, { ok: true, bots: botRowsForResponse(rows) });
     }),
@@ -8353,7 +8501,7 @@ function buildRoutes(): RouteDefinition[] {
       const updatedBots = result.ids.length > 0
         ? db
             .prepare(
-              `SELECT id, name, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? AND id IN (${result.ids.map(() => "?").join(", ")})`
+              `SELECT id, name, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? AND id IN (${result.ids.map(() => "?").join(", ")})`
             )
             .all(userId, ...result.ids) as Record<string, unknown>[]
         : [];
@@ -8423,6 +8571,10 @@ function buildRoutes(): RouteDefinition[] {
       if (typeof body.chatEnabled === "boolean") {
         fields.push("chat_enabled = ?");
         values.push(body.chatEnabled ? 1 : 0);
+      }
+      if (body.powers !== undefined) {
+        fields.push("powers_json = ?");
+        values.push(serializeBotPowersV1(body.powers));
       }
       if (typeof body.temperature === "number") { fields.push("temperature = ?"); values.push(body.temperature); }
       if (typeof body.maxTokens === "number") { fields.push("max_tokens = ?"); values.push(body.maxTokens); }
@@ -8786,7 +8938,7 @@ function buildRoutes(): RouteDefinition[] {
       }
       const updatedBot = db
         .prepare(
-          "SELECT id, name, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?"
+          "SELECT id, name, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?"
         )
         .get(botId, userId) as Record<string, unknown>;
       json(ctx.res, 200, { ok: true, bot: botRowForResponse(updatedBot) });

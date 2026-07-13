@@ -487,7 +487,7 @@ describe("backup bot avatar face style", () => {
 });
 
 describe("backup audio voice settings", () => {
-  it("round-trips account settings, authored profiles, and user overrides", () => {
+  it("round-trips account and bot profiles without touching retired Coffee player columns", () => {
     withBackupDatabase((db, userKey) => {
       db.prepare(
         "UPDATE users SET voice_mode = ?, voice_effects_enabled = 0, voice_volume = ?, english_voice_engine = ?, default_system_voice_name = ?, default_elevenlabs_voice_id = ?, elevenlabs_voice_bank = ?, elevenlabs_voice_model = ?, player_audio_voice_profile = ?, player_name_pronunciation = ?, prism_default_bot_audio_voice_profile = ? WHERE id = ?"
@@ -531,12 +531,16 @@ describe("backup audio voice settings", () => {
       assert.equal(snapshot.settings?.defaultElevenLabsVoiceId, "eleven-global");
       assert.equal(snapshot.settings?.elevenLabsVoiceModel, "eleven_flash_v2_5");
       assert.equal(snapshot.settings?.elevenLabsVoiceBank?.["voice-1"], "eleven-a");
-      assert.equal(snapshot.settings?.playerAudioVoiceProfile?.baseVoiceId, "voice-3");
-      assert.equal(snapshot.settings?.playerNamePronunciation, "Jair-id");
+      assert.equal("playerAudioVoiceProfile" in (snapshot.settings ?? {}), false);
+      assert.equal("playerNamePronunciation" in (snapshot.settings ?? {}), false);
 
       db.prepare(
-        "UPDATE users SET voice_mode = 'mute', voice_effects_enabled = 1, voice_volume = 1, english_voice_engine = 'builtin', default_system_voice_name = NULL, default_elevenlabs_voice_id = NULL, elevenlabs_voice_bank = '{}', elevenlabs_voice_model = NULL, player_audio_voice_profile = NULL, player_name_pronunciation = '', prism_default_bot_audio_voice_profile = NULL WHERE id = ?"
-      ).run("user-1");
+        "UPDATE users SET voice_mode = 'mute', voice_effects_enabled = 1, voice_volume = 1, english_voice_engine = 'builtin', default_system_voice_name = NULL, default_elevenlabs_voice_id = NULL, elevenlabs_voice_bank = '{}', elevenlabs_voice_model = NULL, player_audio_voice_profile = ?, player_name_pronunciation = ?, prism_default_bot_audio_voice_profile = NULL WHERE id = ?"
+      ).run(
+        JSON.stringify({ v: 1, baseVoiceId: "voice-2", pitch: 0, warmth: 0, pace: 0, lilt: 0 }),
+        "Keep me",
+        "user-1"
+      );
       importUserSnapshot(db, "user-1", snapshot, userKey);
 
       const restoredUser = db.prepare(
@@ -551,8 +555,8 @@ describe("backup audio voice settings", () => {
       assert.equal(restoredUser.default_elevenlabs_voice_id, "eleven-global");
       assert.equal(restoredUser.elevenlabs_voice_model, "eleven_flash_v2_5");
       assert.equal(JSON.parse(restoredUser.elevenlabs_voice_bank ?? "{}")["voice-1"], "eleven-a");
-      assert.equal(JSON.parse(restoredUser.player_audio_voice_profile ?? "{}").baseVoiceId, "voice-3");
-      assert.equal(restoredUser.player_name_pronunciation, "Jair-id");
+      assert.equal(JSON.parse(restoredUser.player_audio_voice_profile ?? "{}").baseVoiceId, "voice-2");
+      assert.equal(restoredUser.player_name_pronunciation, "Keep me");
 
       const restoredBot = db.prepare(
         "SELECT authored_audio_voice_profile, audio_voice_profile_override FROM bots WHERE id = ?"

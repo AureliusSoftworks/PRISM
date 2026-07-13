@@ -167,6 +167,34 @@ describe("composer cleanup", () => {
     assert.equal(cleaned.changed, false);
   });
 
+  it("bounds send cleanup so a stalled auxiliary model cannot wedge Chat", async () => {
+    const provider: LlmProvider = {
+      name: "local",
+      generateResponse(_messages, options) {
+        return new Promise((_resolve, reject) => {
+          options?.signal?.addEventListener(
+            "abort",
+            () => reject(options.signal?.reason ?? new Error("aborted")),
+            { once: true }
+          );
+        });
+      },
+      async embedText() {
+        return [];
+      },
+    };
+
+    await assert.rejects(
+      cleanupResolvedPromptWithModel({
+        prompt: "Bring one apple.",
+        replacements: [{ key: "NOUN", value: "apple", start: 10, end: 15 }],
+        provider,
+        timeoutMs: 20,
+      }),
+      /timed out|timeout/iu
+    );
+  });
+
   it("fixes a/an article agreement in send cleanup", async () => {
     const provider = mockProvider(
       JSON.stringify({

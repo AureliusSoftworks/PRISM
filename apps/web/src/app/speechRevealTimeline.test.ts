@@ -5,6 +5,7 @@ import {
   finishSpeechRevealTimeline,
   prepareSpeechRevealTimeline,
   speechRevealTimelineComplete,
+  speechRevealTimelineWaitingForAudio,
   speechRevealVisibleTokenCount,
   startAlignedSpeechRevealTimeline,
   startSpeechRevealPhraseTimeline,
@@ -17,6 +18,7 @@ describe("speech reveal timeline", () => {
     const timeline = prepareSpeechRevealTimeline("Hello there.");
     assert.equal(speechRevealVisibleTokenCount(timeline), 0);
     assert.equal(speechRevealTimelineComplete(timeline), false);
+    assert.equal(speechRevealTimelineWaitingForAudio(timeline), true);
   });
 
   it("reveals from the audio clock and lands exactly at the end", () => {
@@ -25,6 +27,7 @@ describe("speech reveal timeline", () => {
       "Hello there, friend.",
       1200
     );
+    assert.equal(speechRevealTimelineWaitingForAudio(started), false);
     assert.equal(speechRevealVisibleTokenCount(started), 1);
     const middle = updateSpeechRevealTimeline(started, 600);
     assert.equal(speechRevealVisibleTokenCount(middle) >= 2, true);

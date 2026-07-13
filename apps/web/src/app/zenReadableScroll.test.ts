@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   zenReadableAnchorMessageIds,
+  zenReadableGestureShouldDisarmFollow,
   zenReadableMaxScrollTop,
 } from "./zenReadableScroll.ts";
 
@@ -41,5 +42,27 @@ describe("zenReadableMaxScrollTop", () => {
   it("keeps the browser's full native range during opening-session layout", () => {
     assert.equal(zenReadableMaxScrollTop(1_240, 900), 340);
     assert.equal(zenReadableMaxScrollTop(760, 900), 0);
+  });
+});
+
+describe("zenReadableGestureShouldDisarmFollow", () => {
+  it("hands a downward opening-session gesture to the native scrollport", () => {
+    assert.equal(zenReadableGestureShouldDisarmFollow(0, 340, 42), true);
+  });
+
+  it("keeps edge-only gestures available for Zen's elastic treatment", () => {
+    assert.equal(zenReadableGestureShouldDisarmFollow(0, 340, -42), false);
+    assert.equal(zenReadableGestureShouldDisarmFollow(340, 340, 42), false);
+  });
+
+  it("hands either movable direction to the user from the middle", () => {
+    assert.equal(zenReadableGestureShouldDisarmFollow(170, 340, -42), true);
+    assert.equal(zenReadableGestureShouldDisarmFollow(170, 340, 42), true);
+  });
+
+  it("does not disarm for a nonexistent range or sub-threshold touch jitter", () => {
+    assert.equal(zenReadableGestureShouldDisarmFollow(0, 0, 42), false);
+    assert.equal(zenReadableGestureShouldDisarmFollow(170, 340, -4, 4), false);
+    assert.equal(zenReadableGestureShouldDisarmFollow(170, 340, -5, 4), true);
   });
 });

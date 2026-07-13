@@ -64,14 +64,22 @@ export function buildBottishPlan(
   const profile = normalizeBotAudioVoiceProfileV1(rawProfile);
   const voice = VOICE_BASES[profile.baseVoiceId];
   const pitchMultiplier = 2 ** (profile.pitch * 0.7);
-  const noteMs = 55;
-  const gapMs = 18;
-  const toneLowpass = Math.round(6200 + profile.bottishTone * 2600);
-  const waveform = profile.bottishTone > 0.65
-    ? "square"
-    : profile.bottishTone < -0.35
-      ? "sine"
-      : voice.waveform;
+  const tone = profile.bottishTone;
+  const organicAmount = Math.max(0, -tone);
+  const syntheticAmount = Math.max(0, tone);
+  const noteMs = Math.round(72 - tone * 18);
+  const gapMs = Math.round(10 + ((tone + 1) / 2) * 18);
+  const toneRegisterMultiplier = 2 ** ((tone * 5) / 12);
+  const syllableSteps = tone < -0.35
+    ? [-3, -1, 0, 0, 1, 3]
+    : tone > 0.35
+      ? [-9, -5, -2, 2, 5, 9]
+      : [-5, -2, 0, 2, 4, 7];
+  // Tone is a voice-performance control, not an effects control. Keep the
+  // oscillator, loudness, and bandwidth stable so moving the slider changes
+  // register, melody, articulation, and cadence instead of sounding harsher.
+  const waveform = voice.waveform;
+  const toneLowpass = 7600;
   const notes: BottishNote[] = [];
   const alignment: VoicePlaybackCharacterAlignment = {
     characters: [],
@@ -95,13 +103,23 @@ export function buildBottishPlan(
     if (notes.length >= 420) break;
 
     const random = stableUnit(`${seed}:${spokenIndex}:${character}`);
-    const syllableStep = [-5, -2, 0, 2, 4, 7][Math.floor(random * 6)] ?? 0;
+    const syllableStep = syllableSteps[Math.floor(random * syllableSteps.length)] ?? 0;
     const liltWave = Math.sin(spokenIndex * 0.82) * profile.lilt * 4.5;
+    const organicContour = Math.sin(spokenIndex * 0.42) * organicAmount * 2.8;
+    const syntheticContour = ([-3, 4, -1, 3][spokenIndex % 4] ?? 0) * syntheticAmount;
     const frequencyHz = Math.max(
       80,
-      Math.min(1400, voice.frequency * pitchMultiplier * 2 ** ((syllableStep + liltWave) / 12))
+      Math.min(
+        1400,
+        voice.frequency *
+          pitchMultiplier *
+          toneRegisterMultiplier *
+          2 ** ((syllableStep + liltWave + organicContour + syntheticContour) / 12)
+      )
     );
-    const glide = (random - 0.5) * (0.08 + Math.abs(profile.lilt) * 0.22);
+    const glide = (random - 0.5) * (
+      0.04 + organicAmount * 0.18 + Math.abs(profile.lilt) * 0.22
+    );
     notes.push({
       startMs: Math.round(cursorMs),
       durationMs: noteMs,

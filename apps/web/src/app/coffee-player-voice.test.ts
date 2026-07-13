@@ -45,10 +45,8 @@ describe("Coffee player voice", () => {
     assert.equal(profile.baseVoiceId, "voice-3");
   });
 
-  it("wires player settings and submitted Coffee speech into the page", () => {
+  it("uses Default Prism for submitted and replayed Coffee speech", () => {
     const source = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
-    assert.match(source, /Your table voice/);
-    assert.match(source, /Name pronunciation/);
     assert.match(source, /startCoffeePlayerVoiceForReveal\(trimmed\)/);
     assert.match(source, /settings\.voiceMode === "mute"/);
     assert.match(source, /enqueueBottishVoice\([\s\S]*?coffee-player:/);
@@ -56,39 +54,45 @@ describe("Coffee player voice", () => {
       source,
       /await startCoffeePlayerVoiceForReveal\(trimmed\)[\s\S]*?setCoffeeUserRevealText\(trimmed\)/
     );
-    assert.match(source, /playerAudioVoiceProfile/);
+    assert.match(source, /coffeePlayerPlaybackProfile\(settings\.prismDefaultBotAudioVoiceProfile\)/);
+    assert.match(source, /playerMessage[\s\S]*?coffeePlayerPlaybackProfile\(settings\.prismDefaultBotAudioVoiceProfile\)/);
   });
 
-  it("keeps player identity in Coffee settings and inherits the global mode", () => {
+  it("explains the Coffee persona in Default Prism's voice customizer", () => {
     const source = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
-    const voiceSettings = source.slice(
-      source.indexOf('activeSettingsScope === "voice"'),
-      source.indexOf('activeSettingsScope === "coffee"')
-    );
-    const coffeeSettings = source.slice(
-      source.indexOf('activeSettingsScope === "coffee"'),
-      source.indexOf('activeSettingsScope === "zen"')
-    );
-    assert.doesNotMatch(voiceSettings, /Your table voice/);
-    assert.doesNotMatch(voiceSettings, /playerNamePronunciation/);
-    assert.match(coffeeSettings, /Your table voice/);
-    assert.match(coffeeSettings, /Global voice · \{voiceModeDisplayName\(settings\.voiceMode\)\}/);
-    assert.match(coffeeSettings, /settings\.voiceMode === "mute"/);
-    assert.match(coffeeSettings, /settings\.voiceMode === "bottish"/);
-    assert.match(coffeeSettings, /Your System Classic voice/);
-    assert.match(coffeeSettings, /Your ElevenLabs voice/);
+    assert.match(source, /Prism represents you at the Coffee table/);
+    assert.match(source, /live messages and session[\s\S]*?replays use this voice/);
+    assert.doesNotMatch(source, /Your table voice|Name pronunciation/);
+    assert.doesNotMatch(source, /playerAudioVoiceProfile|playerNamePronunciation/);
+  });
+
+  it("houses replay-only Prism identity and state in the composer controls", () => {
+    const source = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+    const styles = readFileSync(new URL("./page.module.css", import.meta.url), "utf8");
     assert.match(
-      coffeeSettings,
-      /previewSelectedVoice\(\s*coffeePlayerPlaybackProfile\(settings\.playerAudioVoiceProfile\)/
+      source,
+      /coffeeComposerVisible[\s\S]*?renderViewSwitchOverlay\("workspace"\)[\s\S]*?coffeeFinishedControlsVisible/
+    );
+    assert.match(source, /coffeeGlobalComposer[^\n]*coffeeReplayComposerControls/);
+    assert.match(source, /className=\{styles\.coffeeReplayPersona\}/);
+    assert.match(source, /zenDefaultPrismGlyph/);
+    assert.match(source, /data-player-thinking=\{coffeeReplayPlayerThinking/);
+    assert.match(source, /data-table-speaking=\{replayPlayerTalking/);
+    assert.match(source, /className=\{styles\.coffeeReplayComposerPot\}/);
+    assert.match(source, /className=\{styles\.coffeeReplayPersonaGlyph\}/);
+    assert.doesNotMatch(source, /coffeeReplayPlayerSeat/);
+    assert.doesNotMatch(styles, /\.coffeeReplayPlayerSeat\b/);
+    assert.match(
+      styles,
+      /\.coffeeReplayComposerPot img\s*\{[\s\S]*?width:\s*68px;/
+    );
+    assert.match(
+      styles,
+      /\.coffeeReplayPlayerPotMotion\s*\{[\s\S]*?position:\s*fixed;/
     );
     assert.match(
       source,
-      /async function saveCoffeeModeSettings[\s\S]*?playerAudioVoiceProfile:[\s\S]*?playerNamePronunciation:/
+      /message\.role === "user"[\s\S]*?\? coffeeReplayActive \? coffeePlayerLabel : "You"/
     );
-    const voiceSave = source.slice(
-      source.indexOf("async function saveVoiceSettings"),
-      source.indexOf("async function previewSelectedVoice")
-    );
-    assert.doesNotMatch(voiceSave, /playerAudioVoiceProfile|playerNamePronunciation/);
   });
 });

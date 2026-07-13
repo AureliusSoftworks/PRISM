@@ -45,6 +45,23 @@ describe("Zen scroll experience", () => {
     assert.match(rule, /scroll-behavior:\s*auto/);
     assert.match(rule, /overflow-anchor:\s*none/);
     assert.doesNotMatch(rule, /will-change:\s*scroll-position/);
+    assert.match(pageSource, /zenReadableGestureShouldDisarmFollow\([\s\S]*event\.deltaY/);
+    assert.match(pageSource, /zenReadableGestureShouldDisarmFollow\([\s\S]*-touchDeltaY/);
+  });
+
+  it("keeps a native Zen runway when opening measurements request zero tail space", () => {
+    const rule = cssSource.match(
+      /\.appLayout\[data-zen-surface="true"\] \.messages\[data-chat-ephemeral="true"\]\s*\{([\s\S]*?)\n\}/,
+    )?.[1] ?? "";
+
+    assert.match(
+      rule,
+      /--zen-readable-tail-padding-floor:\s*var\(--zen-prose-runway-bottom\)/,
+    );
+    assert.match(
+      rule,
+      /padding-bottom:\s*max\([\s\S]*var\(--zen-readable-tail-padding-floor\)[\s\S]*var\(--zen-readable-tail-padding\)/,
+    );
   });
 
   it("windows mounted history and reserves per-character rendering for the latest rich reply", () => {
