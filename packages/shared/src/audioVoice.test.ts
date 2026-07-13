@@ -56,7 +56,7 @@ describe("audio voice normalization", () => {
     );
   });
 
-  it("normalizes v2 volume and texture controls", () => {
+  it("normalizes v2 volume and retires legacy texture controls to clean audio", () => {
     const profile = normalizeBotAudioVoiceProfileV1({
       ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
       volume: 4,
@@ -71,15 +71,7 @@ describe("audio voice normalization", () => {
       },
     });
     assert.equal(profile.volume, 1.25);
-    assert.deepEqual(profile.texture, {
-      preset: "tape",
-      amount: 1,
-      bandwidth: 0,
-      noise: 0.2,
-      instability: 0.3,
-      distortion: 0.4,
-      damage: 0.5,
-    });
+    assert.deepEqual(profile.texture, BOT_VOICE_TEXTURE_RECIPES.clean);
   });
 
   it("keeps provider-specific voice selections independent", () => {

@@ -144,19 +144,21 @@ describe("backup bot avatar face style", () => {
     withBackupDatabase((db, userKey) => {
       db.prepare(
         `INSERT INTO bots (
-          id, user_id, name, system_prompt, avatar_details_json,
+          id, user_id, name, system_prompt, voice_preview_line, avatar_details_json,
           face_eyes_font, face_eye_character, face_eye_animation,
           face_mouth_font, face_mouth_character, face_mouth_animation, face_font_weight,
           face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg,
           face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg,
-          face_blink_bar, face_thinking_frames,
+          face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y,
+          face_thinking_frames,
           created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         "bot-1",
         "user-1",
         "Avatar Bot",
         "You are Avatar Bot.",
+        "Testing this carefully calibrated voice.",
         '{"version":1,"screen":{"stamps":[{"id":"round-glasses","offsetX":2,"offsetY":-1,"scalePct":105}],"paintMaskBase64":null}}',
         "warm",
         "8",
@@ -174,6 +176,9 @@ describe("backup bot avatar face style", () => {
         0.06,
         35,
         "❘",
+        1.2,
+        -0.08,
+        0.06,
         '["·","*","✦","*"]',
         "2026-01-01T00:00:00.000Z",
         "2026-01-01T00:00:00.000Z"
@@ -184,6 +189,7 @@ describe("backup bot avatar face style", () => {
         id: "bot-1",
         name: "Avatar Bot",
         systemPrompt: "You are Avatar Bot.",
+        voicePreviewLine: "Testing this carefully calibrated voice.",
         exportHash: null,
         model: null,
         localModel: null,
@@ -229,6 +235,9 @@ describe("backup bot avatar face style", () => {
         faceMouthOffsetY: 0.06,
         faceMouthRotationDeg: 35,
         faceBlinkBar: "❘",
+        faceBlinkScale: 1.2,
+        faceBlinkOffsetX: -0.08,
+        faceBlinkOffsetY: 0.06,
         faceThinkingFrames: ["·", "*", "✦", "*"],
         authoredAudioVoiceProfile: {
           v: 2,
@@ -258,16 +267,17 @@ describe("backup bot avatar face style", () => {
       });
 
       db.prepare(
-        "UPDATE bots SET avatar_details_json = NULL, face_eyes_font = NULL, face_eye_character = NULL, face_eye_animation = NULL, face_mouth_font = NULL, face_mouth_character = NULL, face_mouth_animation = NULL, face_font_weight = NULL, face_eye_scale = NULL, face_eye_offset_x = NULL, face_eye_offset_y = NULL, face_eye_rotation_deg = NULL, face_mouth_scale = NULL, face_mouth_offset_x = NULL, face_mouth_offset_y = NULL, face_mouth_rotation_deg = NULL, face_blink_bar = NULL, face_thinking_frames = NULL WHERE id = ?"
+        "UPDATE bots SET voice_preview_line = NULL, avatar_details_json = NULL, face_eyes_font = NULL, face_eye_character = NULL, face_eye_animation = NULL, face_mouth_font = NULL, face_mouth_character = NULL, face_mouth_animation = NULL, face_font_weight = NULL, face_eye_scale = NULL, face_eye_offset_x = NULL, face_eye_offset_y = NULL, face_eye_rotation_deg = NULL, face_mouth_scale = NULL, face_mouth_offset_x = NULL, face_mouth_offset_y = NULL, face_mouth_rotation_deg = NULL, face_blink_bar = NULL, face_blink_scale = NULL, face_blink_offset_x = NULL, face_blink_offset_y = NULL, face_thinking_frames = NULL WHERE id = ?"
       ).run("bot-1");
 
       importUserSnapshot(db, "user-1", snapshot, userKey);
 
       const restored = db
         .prepare(
-          "SELECT avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_thinking_frames, profile_picture_image_id FROM bots WHERE id = ?"
+          "SELECT voice_preview_line, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, profile_picture_image_id FROM bots WHERE id = ?"
         )
         .get("bot-1") as {
+        voice_preview_line: string | null;
         avatar_details_json: string | null;
         face_eyes_font: string | null;
         face_eye_character: string | null;
@@ -285,9 +295,13 @@ describe("backup bot avatar face style", () => {
         face_mouth_offset_y: number | null;
         face_mouth_rotation_deg: number | null;
         face_blink_bar: string | null;
+        face_blink_scale: number | null;
+        face_blink_offset_x: number | null;
+        face_blink_offset_y: number | null;
         face_thinking_frames: string | null;
         profile_picture_image_id: string | null;
       };
+      assert.equal(restored.voice_preview_line, "Testing this carefully calibrated voice.");
       assert.equal(
         restored.avatar_details_json,
         '{"version":1,"screen":{"stamps":[{"id":"round-glasses","offsetX":2,"offsetY":-1,"scalePct":105}],"paintMaskBase64":null}}'
@@ -308,6 +322,9 @@ describe("backup bot avatar face style", () => {
       assert.equal(restored.face_mouth_offset_y, 0.06);
       assert.equal(restored.face_mouth_rotation_deg, 35);
       assert.equal(restored.face_blink_bar, "❘");
+      assert.equal(restored.face_blink_scale, 1.2);
+      assert.equal(restored.face_blink_offset_x, -0.08);
+      assert.equal(restored.face_blink_offset_y, 0.06);
       assert.equal(restored.face_thinking_frames, '["·","*","✦","*"]');
       assert.equal(restored.profile_picture_image_id, null);
     });

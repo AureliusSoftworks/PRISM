@@ -38,6 +38,9 @@ export interface BotCustomizerSavePristine {
   faceMouthOffsetY: number;
   faceMouthRotationDeg: number;
   faceBlinkBar: string;
+  faceBlinkScale: number;
+  faceBlinkOffsetX: number;
+  faceBlinkOffsetY: number;
   faceThinkingFrames: readonly string[];
   avatarDetails: BotAvatarDetailsV1 | null;
   profilePictureImageId: string | null;
@@ -82,6 +85,9 @@ export interface BotCustomizerSaveCurrent {
   faceMouthOffsetY: number;
   faceMouthRotationDeg: number;
   faceBlinkBar: string;
+  faceBlinkScale: number;
+  faceBlinkOffsetX: number;
+  faceBlinkOffsetY: number;
   faceThinkingFrames: readonly string[];
   avatarDetails: BotAvatarDetailsV1 | null;
   profilePictureImageId: string | null;
@@ -121,6 +127,9 @@ export interface BotCustomizerSavePatch {
   faceMouthOffsetY?: number;
   faceMouthRotationDeg?: number;
   faceBlinkBar?: string;
+  faceBlinkScale?: number;
+  faceBlinkOffsetX?: number;
+  faceBlinkOffsetY?: number;
   faceThinkingFrames?: readonly string[];
   avatarDetails?: BotAvatarDetailsV1 | null;
   profilePictureImageId?: string | null;
@@ -178,6 +187,9 @@ export function buildBotCustomizerSavePatch(
       faceMouthOffsetY: current.faceMouthOffsetY,
       faceMouthRotationDeg: current.faceMouthRotationDeg,
       faceBlinkBar: current.faceBlinkBar,
+      faceBlinkScale: current.faceBlinkScale,
+      faceBlinkOffsetX: current.faceBlinkOffsetX,
+      faceBlinkOffsetY: current.faceBlinkOffsetY,
       faceThinkingFrames: current.faceThinkingFrames,
       avatarDetails: current.avatarDetails,
       profilePictureImageId: current.profilePictureImageId,
@@ -273,6 +285,15 @@ export function buildBotCustomizerSavePatch(
   }
   if (current.faceBlinkBar !== pristine.faceBlinkBar) {
     patch.faceBlinkBar = current.faceBlinkBar;
+  }
+  if (current.faceBlinkScale !== pristine.faceBlinkScale) {
+    patch.faceBlinkScale = current.faceBlinkScale;
+  }
+  if (current.faceBlinkOffsetX !== pristine.faceBlinkOffsetX) {
+    patch.faceBlinkOffsetX = current.faceBlinkOffsetX;
+  }
+  if (current.faceBlinkOffsetY !== pristine.faceBlinkOffsetY) {
+    patch.faceBlinkOffsetY = current.faceBlinkOffsetY;
   }
   if (!thinkingFramesEqual(current.faceThinkingFrames, pristine.faceThinkingFrames)) {
     patch.faceThinkingFrames = current.faceThinkingFrames;

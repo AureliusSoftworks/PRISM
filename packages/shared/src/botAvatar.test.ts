@@ -10,6 +10,9 @@ import {
   BOT_FACE_MOUTH_SCALE_MAX,
   BOT_FACE_MOUTH_SCALE_MIN,
   DEFAULT_BOT_FACE_BLINK_BAR,
+  DEFAULT_BOT_FACE_BLINK_OFFSET_X,
+  DEFAULT_BOT_FACE_BLINK_OFFSET_Y,
+  DEFAULT_BOT_FACE_BLINK_SCALE,
   DEFAULT_BOT_FACE_EYE_OFFSET_X,
   DEFAULT_BOT_FACE_EYE_OFFSET_Y,
   DEFAULT_BOT_FACE_EYE_ROTATION_DEG,
@@ -24,6 +27,9 @@ import {
   DEFAULT_BOT_FACE_MOUTH_SCALE,
   DEFAULT_BOT_FACE_THINKING_FRAMES,
   normalizeBotFaceBlinkBar,
+  normalizeBotFaceBlinkOffsetX,
+  normalizeBotFaceBlinkOffsetY,
+  normalizeBotFaceBlinkScale,
   normalizeBotFaceEyeCharacter,
   normalizeBotFaceEyeOffsetX,
   normalizeBotFaceEyeOffsetY,
@@ -125,6 +131,9 @@ describe("bot avatar face style", () => {
       mouthOffsetY: DEFAULT_BOT_FACE_MOUTH_OFFSET_Y,
       mouthRotationDeg: DEFAULT_BOT_FACE_MOUTH_ROTATION_DEG,
       blinkBar: DEFAULT_BOT_FACE_BLINK_BAR,
+      blinkScale: DEFAULT_BOT_FACE_BLINK_SCALE,
+      blinkOffsetX: DEFAULT_BOT_FACE_BLINK_OFFSET_X,
+      blinkOffsetY: DEFAULT_BOT_FACE_BLINK_OFFSET_Y,
       thinkingFrames: DEFAULT_BOT_FACE_THINKING_FRAMES,
     });
     assert.deepEqual(resolveBotFaceStyle({}, null), {
@@ -144,6 +153,9 @@ describe("bot avatar face style", () => {
       mouthOffsetY: DEFAULT_BOT_FACE_MOUTH_OFFSET_Y,
       mouthRotationDeg: DEFAULT_BOT_FACE_MOUTH_ROTATION_DEG,
       blinkBar: DEFAULT_BOT_FACE_BLINK_BAR,
+      blinkScale: DEFAULT_BOT_FACE_BLINK_SCALE,
+      blinkOffsetX: DEFAULT_BOT_FACE_BLINK_OFFSET_X,
+      blinkOffsetY: DEFAULT_BOT_FACE_BLINK_OFFSET_Y,
       thinkingFrames: DEFAULT_BOT_FACE_THINKING_FRAMES,
     });
   });
@@ -168,6 +180,9 @@ describe("bot avatar face style", () => {
           faceMouthOffsetY: 0.071,
           faceMouthRotationDeg: 47,
           faceBlinkBar: "¦",
+          faceBlinkScale: 1.18,
+          faceBlinkOffsetX: -0.071,
+          faceBlinkOffsetY: 0.071,
           faceThinkingFrames: ["·", "*", "✦", "*"],
         },
         "formal"
@@ -189,6 +204,9 @@ describe("bot avatar face style", () => {
         mouthOffsetY: 0.08,
         mouthRotationDeg: 45,
         blinkBar: "¦",
+        blinkScale: 1.2,
+        blinkOffsetX: -0.08,
+        blinkOffsetY: 0.08,
         thinkingFrames: ["·", "*", "✦", "*"],
       }
     );
@@ -264,6 +282,15 @@ describe("bot avatar face style", () => {
       resolveBotFaceStyle({ faceBlinkBar: null }, null).blinkBar,
       DEFAULT_BOT_FACE_BLINK_BAR
     );
+  });
+
+  it("clamps and steps custom blink scale and placement", () => {
+    assert.equal(normalizeBotFaceBlinkScale(1.18), 1.2);
+    assert.equal(normalizeBotFaceBlinkScale(2), 1.3);
+    assert.equal(normalizeBotFaceBlinkOffsetX(-0.071), -0.08);
+    assert.equal(normalizeBotFaceBlinkOffsetY(0.071), 0.08);
+    assert.equal(normalizeBotFaceBlinkOffsetX(-2), -0.18);
+    assert.equal(normalizeBotFaceBlinkOffsetY(2), 0.18);
   });
 
   it("normalizes thinking frames from arrays and pasted strings", () => {

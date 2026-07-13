@@ -2,12 +2,19 @@ import type { DatabaseSync } from "node:sqlite";
 import { decryptJson, decryptText, encryptJson, encryptText } from "./security.ts";
 import { normalizeMemoryTier } from "./memory.ts";
 import type { ProviderName } from "./providers.ts";
+import { normalizeVoicePreviewLine } from "./voice-preview-line.ts";
 import {
   DEFAULT_BOT_FACE_BLINK_BAR,
+  DEFAULT_BOT_FACE_BLINK_OFFSET_X,
+  DEFAULT_BOT_FACE_BLINK_OFFSET_Y,
+  DEFAULT_BOT_FACE_BLINK_SCALE,
   DEFAULT_BOT_FACE_GLYPH_ANIMATION,
   DEFAULT_BOT_FACE_THINKING_FRAMES,
   parseStoredBotAvatarDetailsV1,
   normalizeBotFaceBlinkBar,
+  normalizeBotFaceBlinkOffsetX,
+  normalizeBotFaceBlinkOffsetY,
+  normalizeBotFaceBlinkScale,
   normalizeBotFaceEyeCharacter,
   normalizeBotFaceEyeOffsetX,
   normalizeBotFaceEyeOffsetY,
@@ -116,6 +123,7 @@ export interface BackupBotSnapshot {
   id: string;
   name: string;
   systemPrompt: string;
+  voicePreviewLine?: string | null;
   exportHash?: string | null;
   model?: string | null;
   localModel?: string | null;
@@ -148,6 +156,9 @@ export interface BackupBotSnapshot {
   faceMouthOffsetY?: number | null;
   faceMouthRotationDeg?: number | null;
   faceBlinkBar?: BotFaceBlinkBar | null;
+  faceBlinkScale?: number | null;
+  faceBlinkOffsetX?: number | null;
+  faceBlinkOffsetY?: number | null;
   faceThinkingFrames?: BotFaceThinkingFrames | null;
   chatEnabled: boolean;
   visibility: "private" | "public";
@@ -476,6 +487,7 @@ export function exportUserSnapshot(
          id,
          name,
          system_prompt,
+         voice_preview_line,
          export_hash,
          model,
          local_model,
@@ -509,6 +521,9 @@ export function exportUserSnapshot(
          face_mouth_offset_y,
          face_mouth_rotation_deg,
          face_blink_bar,
+         face_blink_scale,
+         face_blink_offset_x,
+         face_blink_offset_y,
          face_thinking_frames,
          authored_audio_voice_profile,
          audio_voice_profile_override,
@@ -524,6 +539,7 @@ export function exportUserSnapshot(
     id: string;
     name: string;
     system_prompt: string;
+    voice_preview_line: string | null;
     export_hash: string | null;
     model: string | null;
     local_model: string | null;
@@ -557,6 +573,9 @@ export function exportUserSnapshot(
     face_mouth_offset_y: number | null;
     face_mouth_rotation_deg: number | null;
     face_blink_bar: string | null;
+    face_blink_scale: number | null;
+    face_blink_offset_x: number | null;
+    face_blink_offset_y: number | null;
     face_thinking_frames: string | null;
     authored_audio_voice_profile: string | null;
     audio_voice_profile_override: string | null;
@@ -650,6 +669,9 @@ export function exportUserSnapshot(
         id: bot.id,
         name: bot.name,
         systemPrompt: bot.system_prompt,
+        ...(normalizeVoicePreviewLine(bot.voice_preview_line)
+          ? { voicePreviewLine: normalizeVoicePreviewLine(bot.voice_preview_line) }
+          : {}),
         exportHash: bot.export_hash,
         model: bot.model,
         localModel: bot.local_model,
@@ -687,6 +709,15 @@ export function exportUserSnapshot(
         faceBlinkBar:
           normalizeBotFaceBlinkBar(bot.face_blink_bar) ??
           DEFAULT_BOT_FACE_BLINK_BAR,
+        faceBlinkScale:
+          normalizeBotFaceBlinkScale(bot.face_blink_scale) ??
+          DEFAULT_BOT_FACE_BLINK_SCALE,
+        faceBlinkOffsetX:
+          normalizeBotFaceBlinkOffsetX(bot.face_blink_offset_x) ??
+          DEFAULT_BOT_FACE_BLINK_OFFSET_X,
+        faceBlinkOffsetY:
+          normalizeBotFaceBlinkOffsetY(bot.face_blink_offset_y) ??
+          DEFAULT_BOT_FACE_BLINK_OFFSET_Y,
         faceThinkingFrames:
           parseStoredBotFaceThinkingFrames(bot.face_thinking_frames) ??
           DEFAULT_BOT_FACE_THINKING_FRAMES,
@@ -1006,6 +1037,7 @@ function importUserSnapshotWithinTransaction(
         user_id,
         name,
         system_prompt,
+        voice_preview_line,
         export_hash,
         model,
         local_model,
@@ -1039,6 +1071,9 @@ function importUserSnapshotWithinTransaction(
         face_mouth_offset_y,
         face_mouth_rotation_deg,
         face_blink_bar,
+        face_blink_scale,
+        face_blink_offset_x,
+        face_blink_offset_y,
         face_thinking_frames,
         authored_audio_voice_profile,
         audio_voice_profile_override,
@@ -1046,7 +1081,7 @@ function importUserSnapshotWithinTransaction(
         visibility,
         created_at,
         updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const bot of snapshot.bots) {
       if (!bot || typeof bot.id !== "string" || bot.id.trim().length === 0) continue;
@@ -1056,6 +1091,7 @@ function importUserSnapshotWithinTransaction(
         userId,
         typeof bot.name === "string" && bot.name.trim().length > 0 ? bot.name.trim() : "Imported Bot",
         typeof bot.systemPrompt === "string" ? bot.systemPrompt : "",
+        normalizeVoicePreviewLine(bot.voicePreviewLine) || null,
         typeof bot.exportHash === "string" && bot.exportHash.trim().length > 0
           ? bot.exportHash.trim().toLowerCase()
           : null,
@@ -1103,6 +1139,11 @@ function importUserSnapshotWithinTransaction(
         normalizeBotFaceMouthOffsetY(bot.faceMouthOffsetY),
         normalizeBotFaceMouthRotationDeg(bot.faceMouthRotationDeg),
         normalizeBotFaceBlinkBar(bot.faceBlinkBar) ?? DEFAULT_BOT_FACE_BLINK_BAR,
+        normalizeBotFaceBlinkScale(bot.faceBlinkScale) ?? DEFAULT_BOT_FACE_BLINK_SCALE,
+        normalizeBotFaceBlinkOffsetX(bot.faceBlinkOffsetX) ??
+          DEFAULT_BOT_FACE_BLINK_OFFSET_X,
+        normalizeBotFaceBlinkOffsetY(bot.faceBlinkOffsetY) ??
+          DEFAULT_BOT_FACE_BLINK_OFFSET_Y,
         serializeBotFaceThinkingFrames(bot.faceThinkingFrames),
         serializeBotAudioVoiceProfileV1(bot.authoredAudioVoiceProfile),
         bot.audioVoiceProfileOverride === null || bot.audioVoiceProfileOverride === undefined

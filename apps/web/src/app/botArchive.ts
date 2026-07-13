@@ -54,10 +54,15 @@ export interface PrismBotArchiveJson {
     faceMouthOffsetY?: number | null;
     faceMouthRotationDeg?: number | null;
     faceBlinkBar?: BotFaceBlinkBar | null;
+    faceBlinkScale?: number | null;
+    faceBlinkOffsetX?: number | null;
+    faceBlinkOffsetY?: number | null;
     faceThinkingFrames?: BotFaceThinkingFrames | null;
     onlineEnabled?: boolean;
     flirtEnabled?: boolean;
     chatEnabled?: boolean;
+    /** Authored spoken sample copy; audio is synthesized by the importing installation. */
+    voicePreviewLine?: string | null;
     /** Portable profile values only; account voice-bank mappings are never exported. */
     authoredAudioVoiceProfile?: BotAudioVoiceProfileV1;
     audioVoiceProfileOverride?: BotAudioVoiceProfileV1 | null;

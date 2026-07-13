@@ -268,7 +268,9 @@ export function normalizeBotAudioVoiceProfileV1(
       fallbackProfile.bottishTone
     ),
     volume: normalizeBotVoiceVolume(record.volume, fallbackProfile.volume),
-    texture: legacy ? botVoiceTextureForPreset("clean") : normalizeBotVoiceTexture(record.texture),
+    // Voice texture presets are retired. Keep the field canonical for export
+    // compatibility, but always resolve old and new profiles to clean audio.
+    texture: botVoiceTextureForPreset("clean"),
   };
 }
 
@@ -277,7 +279,7 @@ function normalizeBotAudioVoiceProfileFallback(value: BotAudioVoiceProfile): Bot
     return {
       ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
       ...value,
-      texture: normalizeBotVoiceTexture(value.texture),
+      texture: botVoiceTextureForPreset("clean"),
     };
   }
   return {

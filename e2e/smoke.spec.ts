@@ -230,17 +230,27 @@ test.describe("PRISM desktop smoke", () => {
     await page.goto("/?view=chat");
 
     const surface = page.locator('[data-canvas-bot-marquee-surface="true"]');
+    const picker = surface.locator('[data-bot-picker-frame="true"]');
     const cards = surface.locator('[data-canvas-bot-marquee-item="true"]');
     await expect(surface).toBeVisible();
+    await expect(picker).toBeVisible();
     await expect(cards).toHaveCount(3);
 
+    const surfaceBox = await surface.boundingBox();
+    const pickerBox = await picker.boundingBox();
     const firstBox = await cards.nth(0).boundingBox();
     const secondBox = await cards.nth(1).boundingBox();
+    expect(surfaceBox).not.toBeNull();
+    expect(pickerBox).not.toBeNull();
     expect(firstBox).not.toBeNull();
     expect(secondBox).not.toBeNull();
-    if (!firstBox || !secondBox) return;
+    if (!surfaceBox || !pickerBox || !firstBox || !secondBox) return;
 
-    await page.mouse.move(firstBox.x + firstBox.width / 2, firstBox.y + firstBox.height / 2);
+    const dragStartX = Math.max(surfaceBox.x + 12, pickerBox.x - 80);
+    const dragStartY = firstBox.y + firstBox.height / 2;
+    expect(dragStartX).toBeLessThan(pickerBox.x);
+
+    await page.mouse.move(dragStartX, dragStartY);
     await page.mouse.down();
     await page.mouse.move(
       secondBox.x + secondBox.width / 2,
@@ -253,7 +263,7 @@ test.describe("PRISM desktop smoke", () => {
     await expect(surface).not.toHaveAttribute("data-canvas-bot-marquee-active", "true");
 
     await page.mouse.move(8, 120);
-    await expect.poll(async () => surface.evaluate((node) => ({
+    await expect.poll(async () => picker.evaluate((node) => ({
       x: (node as HTMLElement).style.getPropertyValue("--picker-parallax-x"),
       y: (node as HTMLElement).style.getPropertyValue("--picker-parallax-y"),
     }))).toEqual({ x: "0px", y: "0px" });
