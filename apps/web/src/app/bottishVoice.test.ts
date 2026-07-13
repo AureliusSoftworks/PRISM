@@ -102,11 +102,17 @@ describe("Bottish speech plan", () => {
 
   it("fits Bottish to the visible streaming window", () => {
     const original = buildBottishPlan("A streamed reply with several words.", neutral, "stream");
-    const fitted = fitBottishPlanToDuration(original, 640);
-    assert.equal(fitted.durationMs, 640);
+    const fitted = fitBottishPlanToDuration(original, original.durationMs + 640);
+    assert.equal(fitted.durationMs, original.durationMs + 640);
     assert.equal(fitted.notes.length, original.notes.length);
     assert.equal(fitted.notes[0]?.frequencyHz, original.notes[0]?.frequencyHz);
     assert.ok((fitted.notes.at(-1)?.startMs ?? 0) < fitted.durationMs);
+  });
+
+  it("never speeds Bottish up to fit a short streaming window", () => {
+    const original = buildBottishPlan("A streamed reply with several words.", neutral, "no-turbo");
+    const fitted = fitBottishPlanToDuration(original, 640);
+    assert.equal(fitted, original);
   });
 
   it("keeps the natural duration when no streaming window is supplied", () => {
