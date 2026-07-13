@@ -239,6 +239,9 @@ export interface CoffeeBotProfile {
   faceMouthOffsetY?: number | null;
   faceMouthRotationDeg?: number | null;
   faceBlinkBar?: string | null;
+  faceBlinkScale?: number | null;
+  faceBlinkOffsetX?: number | null;
+  faceBlinkOffsetY?: number | null;
   faceThinkingFrames?: string | null;
   profilePictureImageId?: string | null;
   localModel: string | null;
@@ -5058,6 +5061,9 @@ type CoffeeBotProfileRow = {
   face_mouth_offset_y: number | null;
   face_mouth_rotation_deg: number | null;
   face_blink_bar: string | null;
+  face_blink_scale: number | null;
+  face_blink_offset_x: number | null;
+  face_blink_offset_y: number | null;
   face_thinking_frames: string | null;
   profile_picture_image_id: string | null;
   model: string | null;
@@ -5106,6 +5112,12 @@ function mapCoffeeBotProfileRow(row: CoffeeBotProfileRow): CoffeeBotProfile {
         ? row.face_mouth_rotation_deg
         : null,
     faceBlinkBar: row.face_blink_bar ?? null,
+    faceBlinkScale:
+      typeof row.face_blink_scale === "number" ? row.face_blink_scale : null,
+    faceBlinkOffsetX:
+      typeof row.face_blink_offset_x === "number" ? row.face_blink_offset_x : null,
+    faceBlinkOffsetY:
+      typeof row.face_blink_offset_y === "number" ? row.face_blink_offset_y : null,
     faceThinkingFrames: row.face_thinking_frames ?? null,
     profilePictureImageId: row.profile_picture_image_id ?? null,
     localModel: row.local_model ?? null,
@@ -5158,6 +5170,9 @@ function loadCoffeeGroupProfileRows(
               ${selectOptionalBotColumn("face_mouth_offset_y")},
               ${selectOptionalBotColumn("face_mouth_rotation_deg")},
               ${selectOptionalBotColumn("face_blink_bar")},
+              ${selectOptionalBotColumn("face_blink_scale")},
+              ${selectOptionalBotColumn("face_blink_offset_x")},
+              ${selectOptionalBotColumn("face_blink_offset_y")},
               ${selectOptionalBotColumn("face_thinking_frames")},
               ${selectOptionalBotColumn("profile_picture_image_id")},
               model, local_model, online_model,

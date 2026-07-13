@@ -2,8 +2,10 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   COFFEE_SEAT_ANGRY_BRACKET_GLYPH,
+  COFFEE_SEAT_MOUTH_CHARACTERS_PER_PHASE,
   COFFEE_SEAT_SIP_FACE_ACTIVE_PROGRESS,
   COFFEE_SEAT_SIP_PLATE_GLYPH,
+  coffeeSeatMouthShapeFromVisibleLength,
   coffeeSeatPlateGlyph,
   coffeeSeatSipFaceActive,
   coffeeSeatSipMouthOffsetX,
@@ -12,6 +14,14 @@ import {
 } from "./coffee-seat-plate.ts";
 
 describe("coffeeSeatPlateGlyph", () => {
+  it("holds each talking mouth frame across several revealed characters", () => {
+    const speech = "Coffee should feel conversational.";
+    const firstShape = coffeeSeatMouthShapeFromVisibleLength(1, speech);
+    assert.equal(COFFEE_SEAT_MOUTH_CHARACTERS_PER_PHASE, 3);
+    assert.equal(coffeeSeatMouthShapeFromVisibleLength(2, speech), firstShape);
+    assert.equal(coffeeSeatMouthShapeFromVisibleLength(3, speech), firstShape);
+  });
+
   it("keeps joyful and warm closed-mouth faces distinct", () => {
     assert.deepEqual(coffeeSeatPlateGlyph("happy", "closed"), {
       text: ":)",
@@ -161,10 +171,10 @@ describe("coffeeSeatPlateGlyph", () => {
     );
   });
 
-  it("returns the sip face before the cup returns even while the action remains live", () => {
+  it("holds the sip face through most of the mug-up beat", () => {
     const durationMs = 1000;
     const releaseAtMs = durationMs * COFFEE_SEAT_SIP_FACE_ACTIVE_PROGRESS;
-    assert.equal(COFFEE_SEAT_SIP_FACE_ACTIVE_PROGRESS, 0.45);
+    assert.equal(COFFEE_SEAT_SIP_FACE_ACTIVE_PROGRESS, 0.68);
     assert.equal(
       coffeeSeatSipFaceActive({
         sipInProgress: false,
@@ -199,7 +209,7 @@ describe("coffeeSeatPlateGlyph", () => {
     );
   });
 
-  it("does not let cup sipping hold the sip face into the cup return", () => {
+  it("still releases the sip face before the cup return", () => {
     assert.equal(
       coffeeSeatSipFaceActive({
         sipInProgress: false,
