@@ -272,6 +272,13 @@ let generation = 0;
 let queue: Promise<void> = Promise.resolve();
 
 export async function prepareBottishVoice(): Promise<void> {
+  // A send gesture may already have authorized the fallback media element.
+  // Re-preparing after the model reply arrives must reuse that element: Safari
+  // will not grant a second autoplay authorization from a passive effect.
+  if (preparedMedia) {
+    if (await prepareRealtimeVoiceAudio()) releasePreparedMedia();
+    return;
+  }
   beginMediaUnlock();
   if (await prepareRealtimeVoiceAudio()) {
     releasePreparedMedia();
@@ -345,11 +352,13 @@ function stopScheduledNodes(): void {
   activeResolve = null;
 }
 
-export function stopBottishVoice(): void {
+export function stopBottishVoice(
+  options: { preservePreparedMedia?: boolean } = {}
+): void {
   generation += 1;
   stopRealtimeVoiceAudio();
   stopScheduledNodes();
-  releasePreparedMedia();
+  if (!options.preservePreparedMedia) releasePreparedMedia();
   queue = Promise.resolve();
 }
 

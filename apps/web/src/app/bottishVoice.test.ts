@@ -5,6 +5,8 @@ import {
   buildBottishPlan,
   encodeBottishPlanWave,
   fitBottishPlanToDuration,
+  prepareBottishVoice,
+  stopBottishVoice,
 } from "./bottishVoice.ts";
 
 const neutral = {
@@ -91,8 +93,102 @@ describe("Bottish speech plan", () => {
   it("pre-authorizes and reuses media fallback playback", () => {
     const source = readFileSync(new URL("./bottishVoice.ts", import.meta.url), "utf8");
     assert.match(source, /export async function prepareBottishVoice\(\)[\s\S]*?beginMediaUnlock\(\);/);
+    assert.match(
+      source,
+      /export async function prepareBottishVoice\(\)[\s\S]*?if \(preparedMedia\)[\s\S]*?return;[\s\S]*?beginMediaUnlock\(\);/
+    );
     assert.match(source, /const audio = preparedMedia \?\? new Audio\(\)/);
     assert.match(source, /releaseActiveMedia\(!error\)/);
+  });
+
+  it("keeps the authorized fallback element across a conversation handoff", async () => {
+    const originalAudio = globalThis.Audio;
+    const instances: FakeAudio[] = [];
+    class FakeAudio {
+      src: string;
+      preload = "";
+      volume = 1;
+      currentTime = 0;
+
+      constructor(src = "") {
+        this.src = src;
+        instances.push(this);
+      }
+
+      play(): Promise<void> {
+        return Promise.resolve();
+      }
+
+      pause(): void {}
+      load(): void {}
+      removeAttribute(name: string): void {
+        if (name === "src") this.src = "";
+      }
+    }
+
+    Object.defineProperty(globalThis, "Audio", {
+      configurable: true,
+      writable: true,
+      value: FakeAudio,
+    });
+    try {
+      await prepareBottishVoice();
+      const authorized = instances[0];
+      assert.ok(authorized);
+
+      stopBottishVoice({ preservePreparedMedia: true });
+      await prepareBottishVoice();
+
+      assert.equal(instances.length, 1);
+      assert.equal(instances[0], authorized);
+      stopBottishVoice();
+    } finally {
+      stopBottishVoice();
+      if (typeof originalAudio === "undefined") {
+        Reflect.deleteProperty(globalThis, "Audio");
+      } else {
+        Object.defineProperty(globalThis, "Audio", {
+          configurable: true,
+          writable: true,
+          value: originalAudio,
+        });
+      }
+    }
+  });
+
+  it("preserves the send gesture's media unlock until live Zen playback", () => {
+    const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+    const effectStart = pageSource.indexOf("const shouldRun =\n      view === \"chat\"");
+    const effectEnd = pageSource.indexOf("const zenLiveReplyActionText", effectStart);
+    assert.notEqual(effectStart, -1);
+    assert.notEqual(effectEnd, -1);
+    const liveBottishEffect = pageSource.slice(effectStart, effectEnd);
+    assert.match(liveBottishEffect, /liveBottishRevealKeyRef\.current = revealKey;/);
+    assert.match(
+      liveBottishEffect,
+      /stopBottishVoice\(\{ preservePreparedMedia: true \}\);/
+    );
+    assert.match(liveBottishEffect, /prepareBottishVoice\(\)/);
+    assert.doesNotMatch(
+      liveBottishEffect,
+      /liveBottishRevealKeyRef\.current = revealKey;[\s\S]*?stopBottishVoice\(\);[\s\S]*?prepareBottishVoice\(\)/
+    );
+
+    const conversationChangeStart = pageSource.indexOf(
+      "const conversationChanged = voiceConversationIdRef.current !== detail.id"
+    );
+    const conversationChangeEnd = pageSource.indexOf(
+      "const unseen = assistantMessages.filter",
+      conversationChangeStart
+    );
+    const conversationChange = pageSource.slice(
+      conversationChangeStart,
+      conversationChangeEnd
+    );
+    assert.match(
+      conversationChange,
+      /stopBottishVoice\(\{[\s\S]*?preservePreparedMedia:[\s\S]*?settings\?\.voiceMode === "bottish"/
+    );
   });
 
   it("caps extremely long replies", () => {

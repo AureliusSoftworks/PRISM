@@ -4,6 +4,7 @@ import {
   zenReadableAnchorMessageIds,
   zenReadableGestureShouldDisarmFollow,
   zenReadableMaxScrollTop,
+  zenReadableWheelShouldApplyElasticPull,
 } from "./zenReadableScroll.ts";
 
 describe("zenReadableAnchorMessageIds", () => {
@@ -64,5 +65,18 @@ describe("zenReadableGestureShouldDisarmFollow", () => {
     assert.equal(zenReadableGestureShouldDisarmFollow(0, 0, 42), false);
     assert.equal(zenReadableGestureShouldDisarmFollow(170, 340, -4, 4), false);
     assert.equal(zenReadableGestureShouldDisarmFollow(170, 340, -5, 4), true);
+  });
+});
+
+describe("zenReadableWheelShouldApplyElasticPull", () => {
+  it("leaves downward native scrolling alone, including at either edge", () => {
+    assert.equal(zenReadableWheelShouldApplyElasticPull(0, 42), false);
+    assert.equal(zenReadableWheelShouldApplyElasticPull(170, 42), false);
+    assert.equal(zenReadableWheelShouldApplyElasticPull(340, 42), false);
+  });
+
+  it("applies only the visual top-edge elastic cue to upward input", () => {
+    assert.equal(zenReadableWheelShouldApplyElasticPull(170, -42), false);
+    assert.equal(zenReadableWheelShouldApplyElasticPull(0, -42), true);
   });
 });

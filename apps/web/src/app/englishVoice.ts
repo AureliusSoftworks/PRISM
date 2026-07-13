@@ -118,6 +118,12 @@ let generation = 0;
 let queue: Promise<void> = Promise.resolve();
 
 export async function prepareEnglishVoice(): Promise<void> {
+  // Keep the media element authorized by the send gesture when a later
+  // render prepares playback outside that gesture (notably Safari PWAs).
+  if (preparedMedia) {
+    if (await prepareRealtimeVoiceAudio()) releasePreparedMedia();
+    return;
+  }
   beginMediaUnlock();
   if (await prepareRealtimeVoiceAudio()) {
     releasePreparedMedia();
@@ -203,11 +209,13 @@ function releaseActiveMedia(keepElement = false): void {
   if (keepElement && media) preparedMedia = media;
 }
 
-export function stopEnglishVoice(): void {
+export function stopEnglishVoice(
+  options: { preservePreparedMedia?: boolean } = {}
+): void {
   generation += 1;
   stopRealtimeVoiceAudio();
   releaseActiveMedia();
-  releasePreparedMedia();
+  if (!options.preservePreparedMedia) releasePreparedMedia();
   activeMediaResolve?.();
   activeMediaResolve = null;
   queue = Promise.resolve();

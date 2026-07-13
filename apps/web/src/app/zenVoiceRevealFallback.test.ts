@@ -5,6 +5,23 @@ import { describe, it } from "node:test";
 const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
 
 describe("Zen voice reveal fallback", () => {
+  it("keeps reveal-clock rerenders from restarting completed-message voice", () => {
+    assert.match(
+      pageSource,
+      /const effectiveChatRevealTiming = useMemo\([\s\S]*?zenCanvasTypingDelayMultiplier,[\s\S]*?\]\s*\)/
+    );
+    const effectStart = pageSource.indexOf("const assistantMessages = detail.messages.filter");
+    const effectEnd = pageSource.indexOf(
+      'if (settings?.voiceMode !== "mute") return;',
+      effectStart
+    );
+    assert.notEqual(effectStart, -1);
+    assert.notEqual(effectEnd, -1);
+    const voiceEffect = pageSource.slice(effectStart, effectEnd);
+    assert.match(voiceEffect, /settings\?\.preferredProvider,/);
+    assert.doesNotMatch(voiceEffect, /\n    settings,\n/);
+  });
+
   it("releases visual text when synthesized speech stays in preparation", () => {
     assert.match(
       pageSource,

@@ -902,6 +902,7 @@ import {
   zenReadableAnchorMessageIds,
   zenReadableGestureShouldDisarmFollow,
   zenReadableMaxScrollTop,
+  zenReadableWheelShouldApplyElasticPull,
 } from "./zenReadableScroll";
 import { zenRenderedMessageWindow } from "./zenMessageWindow";
 import {
@@ -7895,8 +7896,6 @@ const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_TARGET_RATIO = 0.52;
 const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_ACTIVATE_RATIO = 0.52;
 const ZEN_READABLE_LATEST_ANCHOR_TARGET_RATIO = 0.64;
 const ZEN_READABLE_LATEST_ANCHOR_MIN_PX = 320;
-const ZEN_READABLE_BOTTOM_SCROLL_DEADZONE_PX = 28;
-const ZEN_READABLE_BOTTOM_MOMENTUM_HOLD_MS = 520;
 const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_MAX_STEP_PX = 14;
 const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_MIN_STEP_PX = 0.35;
 const CHAT_MODE_USER_TURN_SMOOTH_SCROLL_MS = 520;
@@ -36082,13 +36081,21 @@ function HomeContent(): React.JSX.Element {
   }, []);
   const zenCanvasTypingDelayMultiplier =
     view === "chat" ? 1 / zenCanvasTypingSpeed : 1;
-  const effectiveChatRevealTiming =
-    devToolsRuntimeActive && view === "chat"
-      ? devZenPauseTiming
-      : scaleChatRevealTimingSettings(
-          DEFAULT_CHAT_REVEAL_TIMING,
-          zenCanvasTypingDelayMultiplier
-        );
+  const effectiveChatRevealTiming = useMemo(
+    () =>
+      devToolsRuntimeActive && view === "chat"
+        ? devZenPauseTiming
+        : scaleChatRevealTimingSettings(
+            DEFAULT_CHAT_REVEAL_TIMING,
+            zenCanvasTypingDelayMultiplier
+          ),
+    [
+      devToolsRuntimeActive,
+      devZenPauseTiming,
+      view,
+      zenCanvasTypingDelayMultiplier,
+    ]
+  );
   const effectiveChatRevealAnimationMultiplier =
     devToolsRuntimeActive && view === "chat" ? 1 : zenCanvasTypingDelayMultiplier;
 
@@ -36311,8 +36318,15 @@ function HomeContent(): React.JSX.Element {
       chatSpeechRevealVisualFallbackKeysRef.current.clear();
       voiceSynthesisAbortRef.current?.abort();
       liveBottishRevealKeyRef.current = null;
-      stopBottishVoice();
-      stopEnglishVoice();
+      const preservePreparedVoice = voiceAwaitingReplyRef.current && view === "chat";
+      stopBottishVoice({
+        preservePreparedMedia:
+          preservePreparedVoice && settings?.voiceMode === "bottish",
+      });
+      stopEnglishVoice({
+        preservePreparedMedia:
+          preservePreparedVoice && settings?.voiceMode === "english",
+      });
       if (!voiceAwaitingReplyRef.current) {
         voiceSeenAssistantMessageIdsRef.current = new Set(
           assistantMessages.map((message) => message.id)
@@ -36603,7 +36617,7 @@ function HomeContent(): React.JSX.Element {
     settings?.voiceEffectsEnabled,
     settings?.voiceMode,
     settings?.voiceVolume,
-    settings,
+    settings?.preferredProvider,
     startChatSpeechReveal,
     startChatSpeechRevealPhrase,
     view,
@@ -38088,7 +38102,6 @@ function HomeContent(): React.JSX.Element {
   const chatTouchScrollLastYRef = useRef<number | null>(null);
   const chatScrollElasticOffsetRef = useRef(0);
   const chatScrollElasticResetTimerRef = useRef<number | null>(null);
-  const zenReadableBottomMomentumHoldUntilMsRef = useRef(0);
   const chatLastScrollTopByConversationRef = useRef<Map<string, number>>(new Map());
   // Tracks scrollHeight alongside scrollTop so the manual-scroll-up detector
   // can distinguish a real upward gesture from a reflow-induced drop (e.g.
@@ -44252,7 +44265,9 @@ function HomeContent(): React.JSX.Element {
     );
 
     liveBottishRevealKeyRef.current = revealKey;
-    stopBottishVoice();
+    // Interrupt any older clip without discarding the media element authorized
+    // by the outgoing send gesture. Safari needs that same element later.
+    stopBottishVoice({ preservePreparedMedia: true });
     stopEnglishVoice();
     void prepareBottishVoice()
       .then(() => {
@@ -50454,54 +50469,6 @@ function HomeContent(): React.JSX.Element {
     top: number
   ): number {
     return Math.max(0, Math.min(resolveZenReadableMaxScrollTop(scrollRoot), top));
-  }
-
-  function shouldHoldZenReadableBottom(
-    scrollRoot: HTMLDivElement,
-    readableMaxScrollTop: number,
-    scrollDeltaY: number
-  ): boolean {
-    if (scrollDeltaY <= 1) return false;
-    if (view !== "chat" || !chatEphemeralMode || zenEmptyHeroVisible) return false;
-    const nativeMaxScrollTop = Math.max(
-      0,
-      scrollRoot.scrollHeight - scrollRoot.clientHeight
-    );
-    if (readableMaxScrollTop >= nativeMaxScrollTop - 0.5) return false;
-    const readableGuardTop =
-      readableMaxScrollTop - ZEN_READABLE_BOTTOM_SCROLL_DEADZONE_PX;
-    // Trackpad momentum can jump over the dead zone in one wheel event. Hold
-    // before the browser paints past the readable bottom instead of correcting
-    // the overshoot on the next scroll event.
-    const projectedScrollTop = scrollRoot.scrollTop + scrollDeltaY;
-    return (
-      scrollRoot.scrollTop >= readableGuardTop ||
-      projectedScrollTop >= readableGuardTop
-    );
-  }
-
-  function zenReadableBottomMomentumHoldActive(): boolean {
-    return Date.now() < zenReadableBottomMomentumHoldUntilMsRef.current;
-  }
-
-  function armZenReadableBottomMomentumHold(): void {
-    zenReadableBottomMomentumHoldUntilMsRef.current =
-      Date.now() + ZEN_READABLE_BOTTOM_MOMENTUM_HOLD_MS;
-  }
-
-  function clearZenReadableBottomMomentumHold(): void {
-    zenReadableBottomMomentumHoldUntilMsRef.current = 0;
-  }
-
-  function holdZenReadableBottom(
-    scrollRoot: HTMLDivElement,
-    conversationId: string | null | undefined,
-    readableMaxScrollTop: number
-  ): void {
-    armZenReadableBottomMomentumHold();
-    resetChatModeScrollElastic(scrollRoot);
-    if (Math.abs(scrollRoot.scrollTop - readableMaxScrollTop) <= 0.5) return;
-    commitChatModeScrollTop(scrollRoot, conversationId, readableMaxScrollTop, 80);
   }
 
   function commitChatModeScrollTop(
@@ -59410,26 +59377,11 @@ function HomeContent(): React.JSX.Element {
   function handleChatModeThreadWheel(event: React.WheelEvent<HTMLDivElement>): void {
     const el = event.currentTarget;
     if (zenEmptyHeroVisible) {
-      event.preventDefault();
       resetChatModeScrollElastic(el);
       return;
     }
     if (!chatEphemeralMode || !detail?.id) return;
     const maxScrollTop = resolveZenReadableMaxScrollTop(el);
-    const atTop = el.scrollTop <= 0.5;
-    const atBottom = el.scrollTop >= maxScrollTop - 0.5;
-    if (event.deltaY < -1) {
-      clearZenReadableBottomMomentumHold();
-    }
-    if (
-      event.deltaY > 1 &&
-      (zenReadableBottomMomentumHoldActive() ||
-        shouldHoldZenReadableBottom(el, maxScrollTop, event.deltaY))
-    ) {
-      event.preventDefault();
-      holdZenReadableBottom(el, detail.id, maxScrollTop);
-      return;
-    }
     if (
       zenReadableGestureShouldDisarmFollow(
         el.scrollTop,
@@ -59439,19 +59391,13 @@ function HomeContent(): React.JSX.Element {
     ) {
       disarmChatModeAutoscrollFromUserGesture();
     }
-    if (atTop && event.deltaY < -1) {
-      event.preventDefault();
+    if (zenReadableWheelShouldApplyElasticPull(el.scrollTop, event.deltaY)) {
       applyChatModeScrollElasticPull(
         el,
         1,
         Math.abs(event.deltaY),
         CHAT_MODE_SCROLL_ELASTIC_WHEEL_RESISTANCE
       );
-      return;
-    }
-    if (atBottom && event.deltaY > 1) {
-      event.preventDefault();
-      holdZenReadableBottom(el, detail.id, maxScrollTop);
       return;
     }
     if (chatScrollElasticOffsetRef.current !== 0) {
@@ -59465,13 +59411,11 @@ function HomeContent(): React.JSX.Element {
       return;
     }
     clearChatModeScrollElasticResetTimer();
-    clearZenReadableBottomMomentumHold();
     chatTouchScrollLastYRef.current = event.touches[0]?.clientY ?? null;
   }
   function handleChatModeThreadTouchMove(event: React.TouchEvent<HTMLDivElement>): void {
     const el = event.currentTarget;
     if (zenEmptyHeroVisible) {
-      event.preventDefault();
       resetChatModeScrollElastic(el);
       return;
     }
@@ -59483,16 +59427,6 @@ function HomeContent(): React.JSX.Element {
     const touchDeltaY = nextY - previousY;
     const maxScrollTop = resolveZenReadableMaxScrollTop(el);
     const atTop = el.scrollTop <= 0.5;
-    const atBottom = el.scrollTop >= maxScrollTop - 0.5;
-    if (
-      touchDeltaY < -1 &&
-      (zenReadableBottomMomentumHoldActive() ||
-        shouldHoldZenReadableBottom(el, maxScrollTop, Math.abs(touchDeltaY)))
-    ) {
-      event.preventDefault();
-      holdZenReadableBottom(el, detail.id, maxScrollTop);
-      return;
-    }
     // Finger movement is the inverse of the scroll direction: swiping up
     // moves toward newer content. Any gesture that can move natively owns the
     // transcript; edge-only pulls remain available for Zen's elastic effect.
@@ -59504,7 +59438,6 @@ function HomeContent(): React.JSX.Element {
         4
       )
     ) {
-      clearZenReadableBottomMomentumHold();
       disarmChatModeAutoscrollFromUserGesture();
     }
     if (atTop && touchDeltaY > 1) {
@@ -59514,11 +59447,6 @@ function HomeContent(): React.JSX.Element {
         touchDeltaY,
         CHAT_MODE_SCROLL_ELASTIC_TOUCH_RESISTANCE
       );
-      return;
-    }
-    if (atBottom && touchDeltaY < -1) {
-      event.preventDefault();
-      holdZenReadableBottom(el, detail.id, maxScrollTop);
       return;
     }
     if (chatScrollElasticOffsetRef.current !== 0) {

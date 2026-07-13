@@ -56,3 +56,18 @@ export function zenReadableGestureShouldDisarmFollow(
   if (scrollDeltaY > 0) return normalizedTop < normalizedMax - 0.5;
   return normalizedTop > 0.5;
 }
+
+/**
+ * Native overflow owns every non-empty Zen wheel gesture. The only custom
+ * response is a visual elastic cue for an upward pull at the true top edge;
+ * the event itself remains uncancelled. In particular, never cancel downward
+ * input: the transcript may have grown since the preceding trackpad event.
+ */
+export function zenReadableWheelShouldApplyElasticPull(
+  scrollTop: number,
+  scrollDeltaY: number,
+  activationThresholdPx = 1
+): boolean {
+  const threshold = Math.max(0, activationThresholdPx);
+  return scrollTop <= 0.5 && scrollDeltaY < -threshold;
+}
