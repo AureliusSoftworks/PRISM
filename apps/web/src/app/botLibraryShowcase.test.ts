@@ -122,7 +122,7 @@ describe("selected bot library showcase", () => {
     );
     assert.match(
       previewHandlerSource,
-      /setBotHubVoicePreview\(\{ botId: showcaseVoiceId, mode, status: "generating"/
+      /setBotHubVoicePreview\(\{[\s\S]*?botId: showcaseVoiceId,[\s\S]*?mode,[\s\S]*?status: "generating"/
     );
     assert.match(
       previewHandlerSource,
@@ -143,10 +143,16 @@ describe("selected bot library showcase", () => {
     assert.match(pageSource, /BOT_HUB_VOICE_CLICK_FEEDBACK_MS = 1400/);
     assert.match(
       pageSource,
-      /setBotHubVoicePreview\(\{ botId: showcaseVoiceId, mode, status: "complete", error: null \}\)/
+      /setBotHubVoicePreview\(\{[\s\S]*?botId: showcaseVoiceId,[\s\S]*?mode,[\s\S]*?status: "complete",[\s\S]*?error: null,[\s\S]*?\}\)/
     );
-    assert.match(pageSource, /data-feedback=\{previewMode === "english" \? previewStatus : undefined\}/);
-    assert.match(pageSource, /aria-busy=\{previewMode === "bottish" && previewStatus === "generating"\}/);
+    assert.match(
+      pageSource,
+      /data-feedback=\{\s*previewMode === "english" \? previewStatus : undefined\s*\}/
+    );
+    assert.match(
+      pageSource,
+      /aria-busy=\{\s*previewMode === "bottish" && previewStatus === "generating"\s*\}/
+    );
     assert.match(pageSource, /preview played\./);
     assert.match(cssSource, /button\[data-feedback="generating"\]::before/);
     assert.match(cssSource, /button\[data-feedback="complete"\]::before[\s\S]*?content: "✓"/);
@@ -171,7 +177,10 @@ describe("selected bot library showcase", () => {
     assert.match(pageSource, /panel === "memories" && memoryPanelScope === "bot"/);
     assert.match(pageSource, /panel === "images" && imagePanelScope === "bot"/);
     assert.match(pageSource, /zenLivePresenceBot\?\.id === botPanelShowcaseBotId/);
-    assert.match(pageSource, /zenLivePresenceRailVisible && !zenCanvasBotSuppressedForPanel/);
+    assert.match(
+      pageSource,
+      /zenLivePresenceRailVisible\s*&&\s*!zenCanvasBotSuppressedForPanel/
+    );
     assert.match(cssSource, /\.botPanelHubShowcase\[data-panel="images"\]/);
   });
 
@@ -227,7 +236,7 @@ describe("selected bot library showcase", () => {
   it("keeps each selected Library bot on its stable frame material seed", () => {
     assert.match(
       pageSource,
-      /bot \? botFrameMaterialSeedForBot\(bot, bot\.id\) : PRISM_FACTORY_CLEAN_FRAME_SEED/
+      /bot\s*\?\s*botFrameMaterialSeedForBot\(bot, bot\.id\)\s*:\s*PRISM_FACTORY_CLEAN_FRAME_SEED/
     );
   });
 
@@ -238,8 +247,14 @@ describe("selected bot library showcase", () => {
 
   it("caches generated English samples and replays them through the bot voice profile", () => {
     assert.match(pageSource, /voicePreviewAudioCacheRef/);
-    assert.match(pageSource, /voicePreviewAudioCacheRef\.current\.set\(options\.cacheKey, previewBytes\.slice\(0\)\)/);
-    assert.match(pageSource, /normalizeOptionalBotAudioVoiceProfileV1\(bot\.audio_voice_profile_override\)/);
+    assert.match(
+      pageSource,
+      /voicePreviewAudioCacheRef\.current\.set\(\s*options\.cacheKey,\s*previewBytes\.slice\(0\),?\s*\)/
+    );
+    assert.match(
+      pageSource,
+      /normalizeOptionalBotAudioVoiceProfileV1\(\s*bot\.audio_voice_profile_override,?\s*\)/
+    );
     assert.match(pageSource, /resolveBotHubVoicePreviewText\(bot\)/);
     assert.doesNotMatch(pageSource, /generateOnly/);
     assert.match(pageSource, /voice_preview_line: line/);

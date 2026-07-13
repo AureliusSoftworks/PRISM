@@ -465,6 +465,50 @@ describe("API request integration", () => {
     assert.deepEqual(fetchRecorder.calls.slice(beforeCalls), []);
   });
 
+  it("synthesizes Bottish through the system voice without provider traffic", async () => {
+    const client = createClient();
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({ username: "voice-bottish@example.com", password: "voice-password" })
+    );
+    assert.equal(register.status, 201);
+    const beforeCalls = fetchRecorder.calls.length;
+    const response = await client.request(
+      "/api/voices/synthesize",
+      jsonInit({
+        text: "Hello, curious robot 42!",
+        mode: "bottish",
+        engine: "elevenlabs",
+        explicitOnlineContext: true,
+        seed: "bottish-integration",
+        profile: {
+          v: 2,
+          enabled: true,
+          baseVoiceId: "voice-1",
+          pitch: 0.1,
+          warmth: 0,
+          pace: 0,
+          lilt: 0.2,
+          bottishTone: 0.5,
+          volume: 1,
+          texture: {
+            preset: "clean",
+            amount: 0,
+            bandwidth: 1,
+            noise: 0,
+            instability: 0,
+            distortion: 0,
+            damage: 0,
+          },
+        },
+      })
+    );
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("x-prism-voice-engine"), "builtin-bottish");
+    assert.equal(Buffer.from(await response.arrayBuffer()).subarray(0, 4).toString(), "RIFF");
+    assert.deepEqual(fetchRecorder.calls.slice(beforeCalls), []);
+  });
+
   it("persists authored bot voices separately from user overrides", async () => {
     const client = createClient();
     const register = await client.request(

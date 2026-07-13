@@ -2,14 +2,14 @@
 
 # Features and workflows
 
-The main Prism lanes and the latest settings, conversation, audio, Coffee, and interaction workflows.
+The main Prism lanes and the latest settings, conversation, voiced Bottish, Coffee, and interaction workflows.
 
 
 Categories: `Product`
 
 Aliases: `Workflows`, `Applets`, `Feature map`
 
-Files: `README.md`, `docs/applets.md`, `AGENTS.md`, `apps/web/src/app/SettingsPanel.tsx`, `apps/web/src/app/page.tsx`, `apps/api/src/composer-cleanup.ts`, `apps/api/src/voice-preview-line.ts`, `apps/api/src/bot-powers.ts`, `apps/web/src/app/coffee-replay.ts`
+Files: `README.md`, `docs/applets.md`, `docs/voices.md`, `AGENTS.md`, `apps/web/src/app/SettingsPanel.tsx`, `apps/web/src/app/page.tsx`, `apps/web/src/app/bottishVoice.ts`, `apps/web/src/app/voiceEffects.ts`, `apps/api/src/bottish-text.ts`, `apps/api/src/voices.ts`, `apps/api/src/composer-cleanup.ts`, `apps/api/src/voice-preview-line.ts`, `apps/api/src/bot-powers.ts`, `apps/web/src/app/coffee-replay.ts`
 
 ## Experience Lanes
 
@@ -26,6 +26,10 @@ Wildcard prompts use bounded cleanup so a resolved prompt cannot leave the conve
 ## Bots, Voice, And Memory
 
 Persona bots can carry behavior, visual identity, exports, memories, voices, and Coffee-only Powers. The selected Bot Library preview is display-only until the user chooses English or Bottish below it. English generates a fresh persona-specific line and plays it automatically in the same click; legacy mic-check and audio-check lines are rejected and regenerated.
+
+Bottish is a voiced robot language built from deterministic pronounceable pseudo-syllables spoken by the selected system voice. Sparse clicks, chirps, gating, and buzz shape the robotic character, while Bottish tone moves from fuller vocal body to a brighter and denser treatment. If Web Audio is unavailable, Prism keeps the voiced gibberish without accents; if system speech is unavailable, the original procedural Bottish engine is the complete fallback. Bottish is local in both LOCAL and ONLINE modes and never uses provider TTS.
+
+Voice playback remains audio-master across Chat, Zen, Coffee, Story, previews, and replay, so the synthesized carrier drives text reveal and mouth motion. Interruptions stop both carrier and accents.
 
 Normal conversations can use scoped continuity, while incognito/private paths avoid memory reads and writes.
 

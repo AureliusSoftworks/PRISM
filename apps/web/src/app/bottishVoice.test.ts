@@ -3,9 +3,12 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
   buildBottishPlan,
+  buildHybridBottishPlan,
   encodeBottishPlanWave,
   fitBottishPlanToDuration,
+  mixHybridBottishMediaWave,
   prepareBottishVoice,
+  readBottishVoiceSynthesisClip,
   stopBottishVoice,
 } from "./bottishVoice.ts";
 
@@ -19,6 +22,24 @@ const neutral = {
 };
 
 describe("Bottish speech plan", () => {
+  it("falls back procedurally for a startup-era metadata-only response", async () => {
+    const legacyResponse = Response.json({
+      ok: true,
+      synthesis: { text: "beep boop" },
+    });
+    assert.equal(await readBottishVoiceSynthesisClip(legacyResponse), null);
+
+    const timedResponse = Response.json({
+      ok: true,
+      audioBase64: Buffer.from([1, 2, 3]).toString("base64"),
+      audioContentType: "audio/wav",
+      alignment: null,
+    });
+    const clip = await readBottishVoiceSynthesisClip(timedResponse);
+    assert.ok(clip);
+    assert.deepEqual([...new Uint8Array(clip.bytes)], [1, 2, 3]);
+  });
+
   it("is deterministic for a message and profile", () => {
     assert.deepEqual(
       buildBottishPlan("Hello, bot!", neutral, "message-1"),
@@ -44,6 +65,78 @@ describe("Bottish speech plan", () => {
     assert.notEqual(changed.notes[0]?.frequencyHz, base.notes[0]?.frequencyHz);
     assert.notEqual(changed.notes[1]?.frequencyHz, base.notes[1]?.frequencyHz);
     assert.notEqual(changed.notes[1]?.startMs, base.notes[1]?.startMs);
+  });
+
+  it("builds deterministic hybrid accents whose intensity increases with tone", () => {
+    const organic = buildHybridBottishPlan(
+      "A longer conversational reply with enough syllables for robot punctuation.",
+      { ...neutral, signal: -1 },
+      "hybrid"
+    );
+    const synthetic = buildHybridBottishPlan(
+      "A longer conversational reply with enough syllables for robot punctuation.",
+      { ...neutral, signal: 1 },
+      "hybrid"
+    );
+    const neutralTone = buildHybridBottishPlan(
+      "A longer conversational reply with enough syllables for robot punctuation.",
+      { ...neutral, signal: 0 },
+      "hybrid"
+    );
+    assert.deepEqual(
+      synthetic,
+      buildHybridBottishPlan(
+        "A longer conversational reply with enough syllables for robot punctuation.",
+        { ...neutral, signal: 1 },
+        "hybrid"
+      )
+    );
+    assert.ok(neutralTone.accents.length >= organic.accents.length);
+    assert.ok(synthetic.accents.length >= neutralTone.accents.length);
+    assert.ok(neutralTone.gates.length >= organic.gates.length);
+    assert.ok(synthetic.gates.length >= neutralTone.gates.length);
+    assert.ok(organic.buzzDepth < neutralTone.buzzDepth);
+    assert.ok(neutralTone.buzzDepth < synthetic.buzzDepth);
+    assert.ok(organic.drive < neutralTone.drive);
+    assert.ok(neutralTone.drive < synthetic.drive);
+    assert.ok(organic.lowpassHz > neutralTone.lowpassHz);
+    assert.ok(neutralTone.lowpassHz > synthetic.lowpassHz);
+    assert.ok(organic.bitDepth > neutralTone.bitDepth);
+    assert.ok(neutralTone.bitDepth > synthetic.bitDepth);
+    assert.ok(organic.sampleHoldFrames <= neutralTone.sampleHoldFrames);
+    assert.ok(neutralTone.sampleHoldFrames <= synthetic.sampleHoldFrames);
+    assert.ok(synthetic.accents.every((accent) => accent.gain <= 0.22));
+    assert.ok(synthetic.gates.every((gate) => gate.depth <= 0.57));
+  });
+
+  it("bakes deterministic robot accents into the media fallback WAV", () => {
+    const silentCarrier = encodeBottishPlanWave({
+      notes: [],
+      durationMs: 1_200,
+      alignment: {
+        characters: [],
+        characterStartTimesSeconds: [],
+        characterEndTimesSeconds: [],
+      },
+    });
+    const mixed = mixHybridBottishMediaWave(
+      silentCarrier,
+      "The robot fallback should still sound like Bottish.",
+      neutral,
+      "media-hybrid",
+      true,
+    );
+    assert.deepEqual(
+      new Uint8Array(mixed),
+      new Uint8Array(mixHybridBottishMediaWave(
+        silentCarrier,
+        "The robot fallback should still sound like Bottish.",
+        neutral,
+        "media-hybrid",
+        true,
+      )),
+    );
+    assert.ok(new Int16Array(mixed, 44).some((sample) => sample !== 0));
   });
 
   it("ignores legacy Pace and Warmth values", () => {

@@ -8,9 +8,15 @@ import {
   playRealtimeVoiceBytes,
   prepareRealtimeVoiceAudio,
   stopRealtimeVoiceAudio,
+  voiceLiltDetuneCents,
   type VoicePlaybackCharacterAlignment,
   type VoicePlaybackLifecycle,
+  type VoiceRoboticPlan,
 } from "./voiceEffects.ts";
+import {
+  readEnglishVoiceSynthesisClip,
+  type EnglishVoiceSynthesisClip,
+} from "./englishVoice.ts";
 
 export interface BottishNote {
   startMs: number;
@@ -34,6 +40,23 @@ export interface BottishPlaybackTiming {
 
 const MEDIA_PLAY_START_TIMEOUT_MS = 1500;
 const BOTTISH_SAMPLE_RATE = 24_000;
+
+/** Accept current WAV/timed responses while treating an older metadata-only
+ * Bottish success as a deliberate signal to use procedural fallback. This can
+ * occur briefly when the web bundle hot-reloads before the API process. */
+export async function readBottishVoiceSynthesisClip(
+  response: Response,
+): Promise<EnglishVoiceSynthesisClip | null> {
+  const contentType = response.headers.get("content-type") ?? "application/octet-stream";
+  if (!contentType.toLowerCase().includes("application/json")) {
+    return readEnglishVoiceSynthesisClip(response);
+  }
+  const payload = (await response.clone().json()) as Record<string, unknown>;
+  if (typeof payload.audioBase64 !== "string" || !payload.audioBase64.trim()) {
+    return null;
+  }
+  return readEnglishVoiceSynthesisClip(response);
+}
 
 const VOICE_BASES = {
   "voice-1": { frequency: 310, waveform: "sine" as OscillatorType },
@@ -267,6 +290,7 @@ let activeMediaUrl: string | null = null;
 let preparedMedia: HTMLAudioElement | null = null;
 let preparedMediaUrl: string | null = null;
 let activeTimer: number | null = null;
+let activeMediaLiltTimer: number | null = null;
 let activeResolve: (() => void) | null = null;
 let generation = 0;
 let queue: Promise<void> = Promise.resolve();
@@ -338,6 +362,10 @@ function releaseActiveMedia(keepElement = false): void {
   if (activeMediaUrl) {
     URL.revokeObjectURL(activeMediaUrl);
     activeMediaUrl = null;
+  }
+  if (activeMediaLiltTimer !== null && typeof window !== "undefined") {
+    window.clearInterval(activeMediaLiltTimer);
+    activeMediaLiltTimer = null;
   }
   if (keepElement && media) preparedMedia = media;
 }
@@ -453,6 +481,311 @@ async function playPlan(
     alignment: plan.alignment,
   });
   if (!played) await playPlanWithMedia(plan, profile, expectedGeneration, lifecycle);
+}
+
+export function buildHybridBottishPlan(
+  text: string,
+  rawProfile: BotAudioVoiceProfileV1,
+  seed: string
+): VoiceRoboticPlan {
+  const profile = normalizeBotAudioVoiceProfileV1(rawProfile);
+  const sourcePlan = buildBottishPlan(text, profile, `${seed}:accent-source`);
+  const intensity = Math.max(0, Math.min(1, (profile.bottishTone + 1) / 2));
+  const targetCount = Math.max(
+    4,
+    Math.min(24, Math.round(4 + sourcePlan.notes.length * (0.09 + intensity * 0.11)))
+  );
+  const step = Math.max(1, Math.floor(sourcePlan.notes.length / targetCount));
+  const selected = sourcePlan.notes.filter((_, index) => index % step === 0).slice(0, targetCount);
+  const accents = selected.map((note, index) => {
+    const click = stableUnit(`${seed}:accent-kind:${index}`) < 0.38 + intensity * 0.24;
+    const register = click ? 2.6 + intensity * 1.8 : 1.55 + intensity * 1.15;
+    const frequencyHz = Math.max(180, Math.min(2600, note.frequencyHz * register));
+    const glide = 0.76 + stableUnit(`${seed}:accent-glide:${index}`) * 0.7;
+    return {
+      atRatio: sourcePlan.durationMs > 0 ? note.startMs / sourcePlan.durationMs : 0,
+      durationMs: Math.round(click
+        ? 10 + stableUnit(`${seed}:accent-length:${index}`) * 15
+        : 25 + stableUnit(`${seed}:accent-length:${index}`) * 34),
+      frequencyHz,
+      endFrequencyHz: Math.max(90, Math.min(3000, frequencyHz * glide)),
+      gain: Number((0.08 + intensity * 0.14).toFixed(3)),
+      waveform: click ? "square" as OscillatorType : note.waveform,
+    };
+  });
+  const gates = accents
+    .filter((_, index) => index % (intensity > 0.72 ? 2 : 3) === 1)
+    .map((accent, index) => ({
+      atRatio: Math.min(0.995, accent.atRatio + 0.008),
+      durationMs: Math.round(13 + intensity * 31 + stableUnit(`${seed}:gate:${index}`) * 14),
+      depth: Number((0.15 + intensity * 0.42).toFixed(3)),
+    }));
+  return {
+    accents,
+    gates,
+    buzzFrequencyHz: Number((20 + intensity * 28).toFixed(2)),
+    buzzDepth: Number((0.07 + intensity * 0.22).toFixed(3)),
+    drive: Number((0.08 + intensity * 0.32).toFixed(3)),
+    lowpassHz: Math.round(12_000 - intensity * 5_200),
+    bitDepth: Math.round(13 - intensity * 4),
+    sampleHoldFrames: 1 + Math.floor(intensity * 2.4),
+  };
+}
+
+function waveChunkId(view: DataView, offset: number): string {
+  return String.fromCharCode(
+    view.getUint8(offset),
+    view.getUint8(offset + 1),
+    view.getUint8(offset + 2),
+    view.getUint8(offset + 3),
+  );
+}
+
+/** Bakes the core Bottish treatment into a PCM WAV for browsers that cannot
+ * keep Web Audio active across async system-TTS synthesis. */
+export function mixHybridBottishMediaWave(
+  bytes: ArrayBuffer,
+  text: string,
+  rawProfile: BotAudioVoiceProfileV1,
+  seed: string,
+  effectsEnabled = true,
+): ArrayBuffer {
+  if (bytes.byteLength < 44) return bytes;
+  const input = new DataView(bytes);
+  if (waveChunkId(input, 0) !== "RIFF" || waveChunkId(input, 8) !== "WAVE") return bytes;
+  let formatOffset = -1;
+  let formatSize = 0;
+  let dataOffset = -1;
+  let dataSize = 0;
+  for (let offset = 12; offset + 8 <= bytes.byteLength;) {
+    const chunkId = waveChunkId(input, offset);
+    const chunkSize = input.getUint32(offset + 4, true);
+    const payloadOffset = offset + 8;
+    if (payloadOffset + chunkSize > bytes.byteLength) break;
+    if (chunkId === "fmt ") {
+      formatOffset = payloadOffset;
+      formatSize = chunkSize;
+    } else if (chunkId === "data") {
+      dataOffset = payloadOffset;
+      dataSize = chunkSize;
+      break;
+    }
+    offset = payloadOffset + chunkSize + (chunkSize % 2);
+  }
+  if (formatOffset < 0 || formatSize < 16 || dataOffset < 0) return bytes;
+  const audioFormat = input.getUint16(formatOffset, true);
+  const channelCount = input.getUint16(formatOffset + 2, true);
+  const sampleRate = input.getUint32(formatOffset + 4, true);
+  const bitsPerSample = input.getUint16(formatOffset + 14, true);
+  if (audioFormat !== 1 || channelCount < 1 || sampleRate < 8_000 || bitsPerSample !== 16) {
+    return bytes;
+  }
+  const frameSize = channelCount * 2;
+  const frameCount = Math.floor(Math.min(dataSize, bytes.byteLength - dataOffset) / frameSize);
+  if (frameCount < 1) return bytes;
+
+  const output = bytes.slice(0);
+  const view = new DataView(output);
+  const plan = buildHybridBottishPlan(text, rawProfile, seed);
+  const durationSeconds = frameCount / sampleRate;
+  const drive = effectsEnabled ? plan.drive : plan.drive * 0.35;
+  const driveScale = 1 + drive * 5;
+  const driveDivisor = Math.tanh(driveScale);
+  const bitDepth = effectsEnabled ? plan.bitDepth : Math.max(13, plan.bitDepth);
+  const quantizationSteps = 2 ** Math.max(4, Math.min(15, bitDepth - 1));
+  const sampleHoldFrames = effectsEnabled ? plan.sampleHoldFrames : 1;
+  const heldSamples = new Float32Array(channelCount);
+  for (let frame = 0; frame < frameCount; frame += 1) {
+    const timeSeconds = frame / sampleRate;
+    let gate = 1;
+    for (const event of plan.gates) {
+      const start = event.atRatio * durationSeconds;
+      const end = start + event.durationMs / 1000;
+      if (timeSeconds >= start && timeSeconds <= end) {
+        gate = Math.min(gate, 1 - event.depth);
+      }
+    }
+    const buzz = effectsEnabled && plan.buzzDepth > 0
+      ? 1 - plan.buzzDepth * (Math.sin(2 * Math.PI * plan.buzzFrequencyHz * timeSeconds) >= 0 ? 0 : 1)
+      : 1;
+    for (let channel = 0; channel < channelCount; channel += 1) {
+      const offset = dataOffset + frame * frameSize + channel * 2;
+      const sample = view.getInt16(offset, true) / 0x8000;
+      let processed = Math.tanh(sample * gate * buzz * driveScale) / driveDivisor;
+      processed = Math.round(processed * quantizationSteps) / quantizationSteps;
+      if (frame % sampleHoldFrames === 0) heldSamples[channel] = processed;
+      else processed = heldSamples[channel] ?? processed;
+      view.setInt16(offset, Math.round(Math.max(-1, Math.min(1, processed)) * 0x7fff), true);
+    }
+  }
+  for (const accent of plan.accents) {
+    const startFrame = Math.max(0, Math.floor(accent.atRatio * frameCount));
+    const accentFrames = Math.max(1, Math.floor((accent.durationMs / 1000) * sampleRate));
+    const frequencyRatio = Math.max(0.001, accent.endFrequencyHz / accent.frequencyHz);
+    let phase = 0;
+    for (let frameOffset = 0; frameOffset < accentFrames; frameOffset += 1) {
+      const frame = startFrame + frameOffset;
+      if (frame >= frameCount) break;
+      const progress = accentFrames <= 1 ? 0 : frameOffset / (accentFrames - 1);
+      const frequency = accent.frequencyHz * frequencyRatio ** progress;
+      phase += (2 * Math.PI * frequency) / sampleRate;
+      const envelope = Math.sin(Math.PI * progress) ** 0.7;
+      const accentSample = bottishWaveSample(accent.waveform, phase) * accent.gain * envelope;
+      for (let channel = 0; channel < channelCount; channel += 1) {
+        const offset = dataOffset + frame * frameSize + channel * 2;
+        const carrier = view.getInt16(offset, true) / 0x8000;
+        view.setInt16(
+          offset,
+          Math.round(Math.max(-1, Math.min(1, carrier + accentSample)) * 0x7fff),
+          true,
+        );
+      }
+    }
+  }
+  return output;
+}
+
+async function playHybridBytesWithMedia(
+  bytes: ArrayBuffer,
+  profile: BotAudioVoiceProfileV1,
+  expectedGeneration: number,
+  lifecycle?: VoicePlaybackLifecycle
+): Promise<void> {
+  if (expectedGeneration !== generation) return;
+  const url = URL.createObjectURL(new Blob([bytes.slice(0)], { type: "audio/wav" }));
+  const audio = preparedMedia ?? new Audio();
+  if (preparedMediaUrl) URL.revokeObjectURL(preparedMediaUrl);
+  preparedMedia = null;
+  preparedMediaUrl = null;
+  audio.pause();
+  audio.src = url;
+  audio.load();
+  audio.preload = "auto";
+  audio.volume = Math.min(1, normalizeBotAudioVoiceProfileV1(profile).volume);
+  audio.preservesPitch = false;
+  activeMedia = audio;
+  activeMediaUrl = url;
+
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    let started = false;
+    let progress: ReturnType<typeof beginVoicePlaybackProgress> | null = null;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      if (activeTimer !== null) {
+        window.clearTimeout(activeTimer);
+        activeTimer = null;
+      }
+      if (activeResolve === cancel) activeResolve = null;
+      if (error) progress?.cancel();
+      else progress?.finish();
+      progress = null;
+      releaseActiveMedia(!error);
+      lifecycle?.onEnd?.();
+      if (error) reject(error);
+      else resolve();
+    };
+    const cancel = () => finish();
+    activeResolve = cancel;
+    audio.addEventListener("ended", () => finish(), { once: true });
+    audio.addEventListener("error", () => finish(new Error("Bottish voice could not play.")), {
+      once: true,
+    });
+    activeTimer = window.setTimeout(() => {
+      if (!started) finish(new Error("Audio playback did not start. Check the browser tab's sound setting."));
+    }, MEDIA_PLAY_START_TIMEOUT_MS);
+    void audio.play().then(
+      () => {
+        started = true;
+        const normalized = normalizeBotAudioVoiceProfileV1(profile);
+        const updatePlaybackRate = () => {
+          const detuneCents = normalized.pitch * 650 +
+            voiceLiltDetuneCents(normalized.lilt, audio.currentTime);
+          audio.playbackRate = Math.max(0.7, Math.min(1.4, 2 ** (detuneCents / 1200)));
+        };
+        updatePlaybackRate();
+        if (normalized.lilt !== 0) {
+          activeMediaLiltTimer = window.setInterval(updatePlaybackRate, 100);
+        }
+        const durationMs = Number.isFinite(audio.duration) && audio.duration > 0
+          ? Math.round(audio.duration * 1000)
+          : null;
+        if (durationMs) {
+          progress = beginVoicePlaybackProgress(lifecycle, durationMs, () => audio.currentTime * 1000);
+        } else {
+          lifecycle?.onStart?.(null);
+        }
+        if (activeTimer !== null) {
+          window.clearTimeout(activeTimer);
+          activeTimer = null;
+        }
+      },
+      (error: unknown) => finish(
+        error instanceof Error ? error : new Error("Bottish voice could not play.")
+      )
+    );
+  });
+}
+
+async function playHybridBottish(
+  bytes: ArrayBuffer,
+  text: string,
+  profile: BotAudioVoiceProfileV1,
+  expectedGeneration: number,
+  seed: string,
+  effectsEnabled: boolean,
+  lifecycle?: VoicePlaybackLifecycle
+): Promise<void> {
+  if (expectedGeneration !== generation) return;
+  const normalized = normalizeBotAudioVoiceProfileV1(profile);
+  const roboticPlan = buildHybridBottishPlan(text, normalized, seed);
+  const played = await playRealtimeVoiceBytes({
+    bytes,
+    profile: normalized,
+    seed,
+    effectsEnabled,
+    detuneCents: Math.round(normalized.pitch * 650),
+    baseLowpassHz: Math.max(10_000, Math.min(20_000, Math.round(16_000 - normalized.warmth * 6000))),
+    lifecycle,
+    roboticPlan,
+  });
+  if (!played) {
+    await playHybridBytesWithMedia(
+      mixHybridBottishMediaWave(bytes, text, normalized, seed, effectsEnabled),
+      normalized,
+      expectedGeneration,
+      lifecycle,
+    );
+  }
+}
+
+export function enqueueHybridBottishVoice(
+  bytes: ArrayBuffer,
+  sourceText: string,
+  profile: BotAudioVoiceProfileV1,
+  seed: string,
+  effectsEnabled = true,
+  globalVolume = 1,
+  lifecycle?: VoicePlaybackLifecycle
+): Promise<void> {
+  const expectedGeneration = generation;
+  const playbackProfile = {
+    ...normalizeBotAudioVoiceProfileV1(profile),
+    volume: normalizeBotVoiceVolume(globalVolume),
+  };
+  queue = queue
+    .catch(() => undefined)
+    .then(() => playHybridBottish(
+      bytes,
+      sourceText,
+      playbackProfile,
+      expectedGeneration,
+      seed,
+      effectsEnabled,
+      lifecycle
+    ));
+  return queue;
 }
 
 export function enqueueBottishVoice(

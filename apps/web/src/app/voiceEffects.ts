@@ -18,6 +18,32 @@ export interface VoiceDamageEvent {
   depth: number;
 }
 
+export interface VoiceRoboticAccentEvent {
+  atRatio: number;
+  durationMs: number;
+  frequencyHz: number;
+  endFrequencyHz: number;
+  gain: number;
+  waveform: OscillatorType;
+}
+
+export interface VoiceRoboticGateEvent {
+  atRatio: number;
+  durationMs: number;
+  depth: number;
+}
+
+export interface VoiceRoboticPlan {
+  accents: VoiceRoboticAccentEvent[];
+  gates: VoiceRoboticGateEvent[];
+  buzzFrequencyHz: number;
+  buzzDepth: number;
+  drive: number;
+  lowpassHz: number;
+  bitDepth: number;
+  sampleHoldFrames: number;
+}
+
 export interface VoicePlaybackCharacterAlignment {
   characters: string[];
   characterStartTimesSeconds: number[];
@@ -140,13 +166,15 @@ export function buildVoiceDamageSchedule(
   }).sort((left, right) => left.atMs - right.atMs);
 }
 
-function distortionCurve(amount: number): Float32Array<ArrayBuffer> {
+function distortionCurve(amount: number, bitDepth = 16): Float32Array<ArrayBuffer> {
   const samples = 2048;
   const curve = new Float32Array(samples);
   const drive = 1 + amount * 28;
+  const quantizationSteps = 2 ** Math.max(4, Math.min(15, Math.round(bitDepth) - 1));
   for (let index = 0; index < samples; index += 1) {
     const x = (index * 2) / (samples - 1) - 1;
-    curve[index] = Math.tanh(x * drive) / Math.tanh(drive);
+    const shaped = Math.tanh(x * drive) / Math.tanh(drive);
+    curve[index] = Math.round(shaped * quantizationSteps) / quantizationSteps;
   }
   return curve;
 }
@@ -215,6 +243,7 @@ export async function playRealtimeVoiceBytes(args: {
   baseLowpassHz?: number;
   lifecycle?: VoicePlaybackLifecycle;
   alignment?: VoicePlaybackCharacterAlignment | null;
+  roboticPlan?: VoiceRoboticPlan | null;
 }): Promise<boolean> {
   const context = contextForPlayback();
   if (!context || !await prepareRealtimeVoiceAudio()) return false;
@@ -249,9 +278,13 @@ export async function playRealtimeVoiceBytes(args: {
   lowpass.type = "lowpass";
   lowpass.frequency.value = Math.min(
     args.baseLowpassHz ?? 20_000,
+    args.roboticPlan?.lowpassHz ?? 20_000,
     20_000 - (1 - texture.bandwidth) * 16_200
   );
-  shaper.curve = distortionCurve(texture.distortion);
+  shaper.curve = distortionCurve(
+    Math.max(texture.distortion, args.roboticPlan?.drive ?? 0),
+    args.roboticPlan?.bitDepth ?? 16,
+  );
   shaper.oversample = "2x";
   speechGain.gain.value = 1;
   outputGain.gain.value = Math.min(1.25, profile.volume) * 0.88;
@@ -271,7 +304,57 @@ export async function playRealtimeVoiceBytes(args: {
     speechGain.gain.linearRampToValueAtTime(1, end);
   }
 
+  for (const event of args.roboticPlan?.gates ?? []) {
+    const at = now + Math.max(0, Math.min(1, event.atRatio)) * playbackDurationSeconds;
+    const end = Math.min(
+      now + playbackDurationSeconds,
+      at + Math.max(0.006, event.durationMs / 1000)
+    );
+    speechGain.gain.setValueAtTime(1, at);
+    speechGain.gain.linearRampToValueAtTime(1 - event.depth, at + 0.002);
+    speechGain.gain.setValueAtTime(1 - event.depth, Math.max(at + 0.002, end - 0.003));
+    speechGain.gain.linearRampToValueAtTime(1, end);
+  }
+
   const scheduled: AudioScheduledSourceNode[] = [source];
+  for (const event of args.roboticPlan?.accents ?? []) {
+    const oscillator = context.createOscillator();
+    const accentGain = context.createGain();
+    const accentFilter = context.createBiquadFilter();
+    const startAt = now + Math.max(0, Math.min(1, event.atRatio)) * playbackDurationSeconds;
+    const endAt = Math.min(
+      now + playbackDurationSeconds,
+      startAt + Math.max(0.008, event.durationMs / 1000)
+    );
+    if (endAt <= startAt) continue;
+    oscillator.type = event.waveform;
+    oscillator.frequency.setValueAtTime(event.frequencyHz, startAt);
+    oscillator.frequency.exponentialRampToValueAtTime(
+      Math.max(40, event.endFrequencyHz),
+      endAt
+    );
+    accentFilter.type = "bandpass";
+    accentFilter.frequency.value = Math.min(3200, Math.max(280, event.frequencyHz));
+    accentFilter.Q.value = 1.4;
+    accentGain.gain.setValueAtTime(0, startAt);
+    accentGain.gain.linearRampToValueAtTime(event.gain, startAt + 0.003);
+    accentGain.gain.exponentialRampToValueAtTime(0.0001, endAt);
+    oscillator.connect(accentFilter).connect(accentGain).connect(outputGain);
+    oscillator.start(startAt);
+    oscillator.stop(endAt);
+    scheduled.push(oscillator);
+  }
+  if (args.effectsEnabled && args.roboticPlan && args.roboticPlan.buzzDepth > 0) {
+    const oscillator = context.createOscillator();
+    const modulation = context.createGain();
+    oscillator.type = "square";
+    oscillator.frequency.value = args.roboticPlan.buzzFrequencyHz;
+    modulation.gain.value = args.roboticPlan.buzzDepth;
+    oscillator.connect(modulation).connect(speechGain.gain);
+    oscillator.start(now);
+    oscillator.stop(now + playbackDurationSeconds);
+    scheduled.push(oscillator);
+  }
   if (texture.noise > 0) {
     const noise = context.createBufferSource();
     const noiseFilter = context.createBiquadFilter();

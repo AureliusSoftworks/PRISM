@@ -417,6 +417,7 @@ import {
   getSystemVoiceCapabilities,
   generateBuiltinEnglishWave,
 } from "./builtin-tts.ts";
+import { buildBottishSpeechText } from "./bottish-text.ts";
 import { deleteVector, deleteVectorsForUser } from "./qdrant.ts";
 let config: AppConfig = getAppConfig();
 let db: DatabaseSync = createDatabase();
@@ -451,7 +452,11 @@ function normalizeBotAudioVoiceProfilesForResponse<T extends Record<string, unkn
 function sendVoiceWave(
   response: ServerResponse,
   wave: Buffer,
-  engineUsed: "builtin" | "builtin-local-fallback" | "builtin-provider-fallback",
+  engineUsed:
+    | "builtin"
+    | "builtin-bottish"
+    | "builtin-local-fallback"
+    | "builtin-provider-fallback",
   characterCount: number,
   includeAlignment = false
 ): void {
@@ -6658,8 +6663,40 @@ function buildRoutes(): RouteDefinition[] {
         json(ctx.res, boundary.status, boundary);
         return;
       }
-      if (boundary.kind === "bottish-metadata") {
-        json(ctx.res, 200, { ok: true, synthesis: boundary });
+      if (boundary.kind === "builtin-bottish") {
+        const controller = new AbortController();
+        const onClose = () => controller.abort();
+        ctx.req.once("close", onClose);
+        const bottishText = buildBottishSpeechText({
+          text: boundary.text,
+          seed: request.seed ?? request.messageId ?? boundary.text,
+          tone: normalizeBotAudioVoiceProfileV1(boundary.profile).bottishTone,
+        });
+        try {
+          const wave = await generateBuiltinEnglishWave({
+            text: bottishText,
+            profile: boundary.profile,
+            signal: controller.signal,
+          });
+          sendVoiceWave(
+            ctx.res,
+            wave,
+            "builtin-bottish",
+            bottishText.length,
+            request.includeAlignment
+          );
+        } catch (error) {
+          if (controller.signal.aborted) return;
+          json(ctx.res, 503, {
+            ok: false,
+            code: "bottish-system-unavailable",
+            error: error instanceof Error
+              ? error.message
+              : "System Bottish voice is unavailable.",
+          });
+        } finally {
+          ctx.req.off("close", onClose);
+        }
         return;
       }
 

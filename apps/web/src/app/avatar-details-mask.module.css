@@ -1,4 +1,4 @@
-.mask {
+.layer {
   position: absolute;
   inset: 0;
   z-index: 4;
@@ -8,17 +8,27 @@
   pointer-events: none;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
-  transform: scaleX(var(--coffee-plate-emoji-face-scale-y, 1));
+  transform: scaleX(var(--avatar-details-scale-x, 1));
   transform-origin: center;
-  opacity: 0.9;
+}
+
+.halo {
+  opacity: 0.16;
+  mix-blend-mode: plus-lighter;
+  filter: blur(1.8px) saturate(1.35)
+    drop-shadow(0 0 4px color-mix(in srgb, currentColor 56%, transparent))
+    drop-shadow(0 0 7px color-mix(in srgb, currentColor 28%, transparent));
+}
+
+.bloom {
+  opacity: 0.58;
   mix-blend-mode: screen;
-  -webkit-mask-position: center;
-  -webkit-mask-repeat: no-repeat;
-  -webkit-mask-size: 100% 100%;
-  mask-position: center;
-  mask-repeat: no-repeat;
-  mask-size: 100% 100%;
-  filter:
-    drop-shadow(0 0 1px currentColor)
-    drop-shadow(0 0 3px color-mix(in srgb, currentColor 54%, transparent));
+  filter: blur(0.28px) saturate(1.18) drop-shadow(0 0 1.15px currentColor)
+    drop-shadow(0 0 2.6px color-mix(in srgb, currentColor 58%, transparent));
+}
+
+.core {
+  opacity: 1;
+  mix-blend-mode: screen;
+  filter: drop-shadow(0 0 0.45px rgba(255, 255, 255, 0.72));
 }
