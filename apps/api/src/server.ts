@@ -424,6 +424,7 @@ let db: DatabaseSync = createDatabase();
 let masterKey = deriveMasterKey(config.encryptionMasterKey);
 let providerFactoryOverride: typeof selectProvider = selectProvider;
 let auxiliaryProviderFactoryOverride: typeof getAuxiliaryProvider = getAuxiliaryProvider;
+let builtinVoiceWaveGeneratorOverride: typeof generateBuiltinEnglishWave = generateBuiltinEnglishWave;
 const activeCoffeeDepartureEpilogues = new Set<string>();
 /**
  * Runtime view of local-network access. `boundLanActive` reflects what the
@@ -6673,7 +6674,7 @@ function buildRoutes(): RouteDefinition[] {
           tone: normalizeBotAudioVoiceProfileV1(boundary.profile).bottishTone,
         });
         try {
-          const wave = await generateBuiltinEnglishWave({
+          const wave = await builtinVoiceWaveGeneratorOverride({
             text: bottishText,
             profile: boundary.profile,
             signal: controller.signal,
@@ -6705,7 +6706,7 @@ function buildRoutes(): RouteDefinition[] {
         const onClose = () => controller.abort();
         ctx.req.once("close", onClose);
         try {
-          const wave = await generateBuiltinEnglishWave({
+          const wave = await builtinVoiceWaveGeneratorOverride({
             text: boundary.text,
             profile: boundary.profile,
             signal: controller.signal,
@@ -6807,7 +6808,7 @@ function buildRoutes(): RouteDefinition[] {
         }
         if (!controller.signal.aborted) {
           try {
-            const wave = await generateBuiltinEnglishWave({
+            const wave = await builtinVoiceWaveGeneratorOverride({
               text: boundary.text,
               profile: boundary.profile,
               signal: controller.signal,
@@ -9374,6 +9375,8 @@ export interface PrismRequestHandlerOptions {
   providerFactory?: typeof selectProvider;
   /** Optional deterministic auxiliary-provider factory for integration/performance tests. */
   auxiliaryProviderFactory?: typeof getAuxiliaryProvider;
+  /** Optional deterministic system-speech boundary for cross-platform integration tests. */
+  builtinVoiceWaveGenerator?: typeof generateBuiltinEnglishWave;
 }
 
 async function dispatchRequest(
@@ -9441,6 +9444,7 @@ export function createPrismRequestHandler(
     const previousFetch = globalThis.fetch;
     const previousProviderFactory = providerFactoryOverride;
     const previousAuxiliaryProviderFactory = auxiliaryProviderFactoryOverride;
+    const previousBuiltinVoiceWaveGenerator = builtinVoiceWaveGeneratorOverride;
     if (options.db) db = options.db;
     if (options.config) {
       config = options.config;
@@ -9451,6 +9455,9 @@ export function createPrismRequestHandler(
     if (options.auxiliaryProviderFactory) {
       auxiliaryProviderFactoryOverride = options.auxiliaryProviderFactory;
     }
+    if (options.builtinVoiceWaveGenerator) {
+      builtinVoiceWaveGeneratorOverride = options.builtinVoiceWaveGenerator;
+    }
     try {
       await dispatchRequest(req, res, routes);
     } finally {
@@ -9460,6 +9467,7 @@ export function createPrismRequestHandler(
       globalThis.fetch = previousFetch;
       providerFactoryOverride = previousProviderFactory;
       auxiliaryProviderFactoryOverride = previousAuxiliaryProviderFactory;
+      builtinVoiceWaveGeneratorOverride = previousBuiltinVoiceWaveGenerator;
     }
   };
 }

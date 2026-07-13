@@ -7,7 +7,7 @@ import { describe, it } from "node:test";
 const pageSource = readFileSync(
   join(dirname(fileURLToPath(import.meta.url)), "page.tsx"),
   "utf8"
-);
+).replace(/\s+/gu, " ");
 
 describe("Coffee group dashboard composer routing", () => {
   it("renders a Start Session action instead of an editable composer", () => {

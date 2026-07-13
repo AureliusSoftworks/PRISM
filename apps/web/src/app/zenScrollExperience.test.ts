@@ -2,14 +2,15 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
-const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+const rawPageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+const pageSource = rawPageSource.replace(/\s+/gu, " ");
 const cssSource = readFileSync(new URL("./page.module.css", import.meta.url), "utf8");
 
 function functionBody(name: string): string {
-  const start = pageSource.indexOf(`function ${name}(`);
+  const start = rawPageSource.indexOf(`function ${name}(`);
   assert.notEqual(start, -1, `${name} should exist`);
-  const nextFunction = pageSource.indexOf("\n  function ", start + 1);
-  return pageSource.slice(start, nextFunction === -1 ? undefined : nextFunction);
+  const nextFunction = rawPageSource.indexOf("\n  function ", start + 1);
+  return rawPageSource.slice(start, nextFunction === -1 ? undefined : nextFunction);
 }
 
 describe("Zen scroll experience", () => {

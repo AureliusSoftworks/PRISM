@@ -45,7 +45,10 @@ describe("bot voice randomizer", () => {
   });
 
   it("keeps fresh bot drafts deterministic until the explicit randomizer is used", () => {
-    const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+    const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8").replace(
+      /\s+/gu,
+      " "
+    );
     assert.match(pageSource, /const randomBotVoiceProfileForCreation = useCallback/);
     assert.match(pageSource, /setNewBotAudioVoiceProfile\(randomBotVoiceProfileForCreation\(\)\)/);
     assert.match(
@@ -58,7 +61,7 @@ describe("bot voice randomizer", () => {
     );
     assert.match(
       pageSource,
-      /useState<string>\(\s*DEFAULT_PRISM_BOT_CUSTOMIZER_COLOR\s*\)/,
+      /useState<string>\(\s*DEFAULT_PRISM_BOT_CUSTOMIZER_COLOR\s*,?\s*\)/,
     );
     assert.match(
       pageSource,

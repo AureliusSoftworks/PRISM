@@ -5,7 +5,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const appDir = dirname(fileURLToPath(import.meta.url));
-const pageSource = readFileSync(resolve(appDir, "page.tsx"), "utf8");
+const pageSource = readFileSync(resolve(appDir, "page.tsx"), "utf8").replace(/\s+/gu, " ");
 const cssSource = readFileSync(resolve(appDir, "page.module.css"), "utf8");
 const globalCssSource = readFileSync(resolve(appDir, "globals.css"), "utf8");
 const apiServerSource = readFileSync(
@@ -136,7 +136,7 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   );
   assert.match(
     pageSource,
-    /handleNewBotFaceMouthRotationDegChange\(normalizedRotationDeg\);/,
+    /handleNewBotFaceMouthRotationDegChange\(\s*normalizedRotationDeg\s*,?\s*\);/,
   );
   assert.match(
     pageSource,
@@ -144,7 +144,7 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   );
   assert.match(
     pageSource,
-    /handleNewBotFaceThinkingFramesChange\(normalizedFrames\);/,
+    /handleNewBotFaceThinkingFramesChange\(\s*normalizedFrames\s*,?\s*\);/,
   );
   assert.match(pageSource, /const faceStyle = resolveBotFaceStyle\(/);
   assert.match(pageSource, /faceEyeCharacter,/);
@@ -261,7 +261,7 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.match(cssSource, /--bot-face-eye-offset-x:\s*var\(--bot-face-blink-offset-x, 0em\)/);
   assert.match(cssSource, /--bot-face-eye-offset-y:\s*var\(--bot-face-blink-offset-y, 0em\)/);
   const faceBranchStart = pageSource.indexOf(
-    '{activeTab === "face" ? (\n        <div className={styles.botAvatarFaceControls}>',
+    '{activeTab === "face" ? ( <div className={styles.botAvatarFaceControls}>',
   );
   const eyesBranchStart = pageSource.indexOf(
     ') : activeTab === "eyes" ? (',
@@ -272,7 +272,7 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
     eyesBranchStart,
   );
   const motionBranchStart = pageSource.indexOf(
-    ") : (\n        <div className={styles.botAvatarMotionControls}>",
+    ") : ( <div className={styles.botAvatarMotionControls}>",
     mouthBranchStart,
   );
   assert.notEqual(faceBranchStart, -1);
@@ -470,7 +470,10 @@ test("avatar save state is scoped and bounded so prompts cannot stay stuck", () 
 test("avatar and bot saves recover cleanly when the edit target no longer exists", () => {
   assert.match(pageSource, /function isBotNotFoundError\(err: unknown\): boolean/);
   assert.match(pageSource, /async function recoverMissingBotEditTarget\(id: string\)/);
-  assert.match(pageSource, /setPanelError\("That bot is no longer available\. I refreshed the bot library\."\);/);
+  assert.match(
+    pageSource,
+    /setPanelError\(\s*"That bot is no longer available\. I refreshed the bot library\."\s*,?\s*\);/
+  );
   assert.match(
     pageSource,
     /if \(!bots\.some\(\(bot\) => bot\.id === id\)\) \{[\s\S]*await recoverMissingBotEditTarget\(id\);[\s\S]*return false;/
@@ -510,7 +513,7 @@ test("avatar customizer keeps explicit save and dirty prompts for broader edits"
   assert.match(pageSource, /draftMode\s*\?\s*"Draft"\s*:\s*"Saved"/);
   assert.match(
     pageSource,
-    /draftMode=\{botPanelCreateMode && !editingBotId && !editingDefaultBot\}/,
+    /draftMode=\{\s*botPanelCreateMode\s*&&\s*!editingBotId\s*&&\s*!editingDefaultBot\s*\}/,
   );
   assert.match(pageSource, /draftMode \? "Create bot" : "Save"/);
   assert.match(pageSource, /const created = await createBot\(\);/);
@@ -578,7 +581,7 @@ test("avatar summary card previews identity, eyes, and mouth", () => {
   assert.match(pageSource, /botAvatarSummaryMouthRotationLabel/);
   assert.match(
     pageSource,
-    /\{botAvatarSummaryEyeLabel\} · \{botAvatarSummaryMouthLabel\}/,
+    /\{botAvatarSummaryEyeLabel\}\s*·\s*(?:\{" "\}\s*)?\{botAvatarSummaryMouthLabel\}/,
   );
 
   const summaryFaceStart = pageSource.indexOf(
@@ -912,7 +915,7 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   assert.match(pageSource, /activeControlTab === "profile" && identityControlsVisible/);
   assert.match(pageSource, /aria-label="Bot profile editor mode"/);
   assert.match(pageSource, /onProfilePageOpen\(category\)/);
-  assert.match(pageSource, /profileEditorLayer=\{!editingDefaultBot \? \(/);
+  assert.match(pageSource, /profileEditorLayer=\{\s*!editingDefaultBot\s*\?\s*\(/);
   assert.match(pageSource, /data-avatar-studio-layer=\{studioLayer \? "true" : undefined\}/);
   assert.match(cssSource, /\.botAvatarProfilePanel/);
   assert.match(cssSource, /\.botProfileBuilderBackdrop\[data-avatar-studio-layer="true"\]/);
@@ -924,7 +927,10 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   assert.match(cssSource, /\.botPowersPanel/);
   assert.match(cssSource, /grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/);
   assert.match(pageSource, /aria-label="Generation Lens and bot randomizer"/);
-  assert.match(pageSource, /resetLabel=\{isDefaultPrismBot \? "Reset voice" : "Restore original voice"\}/);
+  assert.match(
+    pageSource,
+    /resetLabel=\{\s*isDefaultPrismBot\s*\?\s*"Reset voice"\s*:\s*"Restore original voice"\s*\}/
+  );
   assert.match(pageSource, /setPreviewMode\("talking"\)/);
   assert.match(pageSource, /const avatarControlTabsVisible = true;/);
   assert.match(pageSource, /visibleAvatarTabs\.map\(\(tab\) =>/);
@@ -1102,12 +1108,12 @@ test("personality randomization is scoped away from identity and settings", () =
 test("avatar preview theme keeps persona ink on normalized color without Prism rainbow aura", () => {
   assert.match(
     pageSource,
-    /const \[previewTheme, setPreviewTheme\] = useState<"light" \| "dark">\(resolvedTheme\)/,
+    /const \[previewTheme, setPreviewTheme\]\s*=\s*useState<"light" \| "dark">\(\s*resolvedTheme\s*,?\s*\)/,
   );
   assert.match(pageSource, /setPreviewTheme\(resolvedTheme\)/);
   assert.match(
     pageSource,
-    /function botAvatarPreviewIdentityStyle\(rawHex: string, prismPersona = false\): CSSProperties/,
+    /function botAvatarPreviewIdentityStyle\(\s*rawHex: string\s*,\s*prismPersona = false\s*,?\s*\): CSSProperties/,
   );
   assert.match(pageSource, /if \(prismPersona\) return \{\};/);
   assert.match(
@@ -1344,14 +1350,14 @@ test("avatar customizer preview has explicit expression states", () => {
   assert.match(pageSource, /data-avatar-preview-mood=\{previewMood\}/);
   assert.match(
     pageSource,
-    /data-mouth-shape=\{previewTalking \? displayedPreviewMouthShape : undefined\}/,
+    /data-mouth-shape=\{\s*previewTalking\s*\?\s*displayedPreviewMouthShape\s*:\s*undefined\s*\}/,
   );
   assert.match(pageSource, /data-avatar-preview-mode=\{previewMode\}/);
   assert.match(pageSource, /onPreviewModeChange=\{setPreviewMode\}/);
   assert.match(pageSource, /onPreviewMoodCycle=\{\(\) =>/);
   assert.match(
     pageSource,
-    /setPreviewMoodIndex\(\(current\) => \(current \+ 1\) % BOT_AVATAR_PREVIEW_MOODS\.length\)/,
+    /setPreviewMoodIndex\(\s*\(current\) => \(current \+ 1\) % BOT_AVATAR_PREVIEW_MOODS\.length\s*,?\s*\)/,
   );
   assert.match(pageSource, /className=\{styles\.botAvatarMoodPreviewButton\}/);
   assert.match(pageSource, /isTalking=\{previewTalking\}/);

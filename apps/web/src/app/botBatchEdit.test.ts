@@ -15,7 +15,7 @@ import {
 } from "./botBatchEdit.ts";
 
 const appDir = dirname(fileURLToPath(import.meta.url));
-const pageSource = readFileSync(resolve(appDir, "page.tsx"), "utf8");
+const pageSource = readFileSync(resolve(appDir, "page.tsx"), "utf8").replace(/\s+/gu, " ");
 
 const botValues = (
   overrides: Partial<BotBatchEditValues> = {}
@@ -82,7 +82,7 @@ describe("bot batch edit helpers", () => {
     );
     assert.match(
       pageSource,
-      /api<\{ bot\?: Bot \}>\(`\/api\/bots\/\$\{encodeURIComponent\(id\)\}`/
+      /api<\{ bot\?: Bot \}>\(\s*`\/api\/bots\/\$\{encodeURIComponent\(id\)\}`/
     );
     assert.match(
       pageSource,

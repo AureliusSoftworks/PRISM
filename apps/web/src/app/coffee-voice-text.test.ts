@@ -7,7 +7,10 @@ import {
   coffeeVoiceSpokenText,
 } from "./coffee-voice-text.ts";
 
-const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8").replace(
+  /\s+/gu,
+  " "
+);
 
 describe("Coffee voice text", () => {
   it("keeps stage directions out of mixed spoken dialogue", () => {
@@ -56,12 +59,12 @@ describe("Coffee voice text", () => {
       /const synthesisSource = coffeeBotVoiceSynthesisSource\(message\);[\s\S]*?coffeeVoiceSeenMessageIdsRef\.current\.add\(message\.id\);[\s\S]*?if \(!synthesisSource\) return null;/
     );
     assert.ok(
-      pageSource.match(/\.\.\.synthesisSource,/g)?.length === 3,
-      "Expected resumed Bottish, resumed English, and live English to use the clean source"
+      pageSource.match(/\.\.\.synthesisSource,/g)?.length === 2,
+      "Expected resumed and live synthesis to use the clean source"
     );
     assert.ok(
-      pageSource.match(/\.\.\.botSynthesisSource/g)?.length === 2,
-      "Expected replay Bottish and English to use the clean source"
+      pageSource.match(/\.\.\.botSynthesisSource/g)?.length === 1,
+      "Expected replay synthesis to use the clean source"
     );
   });
 });
