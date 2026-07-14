@@ -1,10 +1,48 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   calculateZenAtmosphereLayerOpacitiesForReader,
   calculateZenAtmosphereLayerStatesForReader,
   maxZenAtmosphereLayerOpacity,
+  zenAtmosphereGrayscaleAmount,
 } from "./zenAtmosphere.ts";
+
+const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+
+describe("zenAtmosphereGrayscaleAmount", () => {
+  it("always desaturates persona Atmosphere wallpapers", () => {
+    assert.equal(zenAtmosphereGrayscaleAmount(true), "1");
+  });
+
+  it("keeps default Prism Atmosphere wallpapers in full color", () => {
+    assert.equal(zenAtmosphereGrayscaleAmount(false), "0");
+  });
+
+  it("does not expose the legacy grayscale preference in Zen settings", () => {
+    assert.doesNotMatch(pageSource, />\s*Grayscale atmosphere\s*</);
+    assert.doesNotMatch(
+      pageSource,
+      /settings-control-info-zen-wallpaper-grayscale/
+    );
+  });
+
+  it("does not let the stored legacy preference drive wallpaper rendering", () => {
+    const backdropStyleSource = pageSource.slice(
+      pageSource.indexOf("const zenAtmosphereBackdropStyle ="),
+      pageSource.indexOf("const zenFirstReplyPending")
+    );
+
+    assert.match(
+      backdropStyleSource,
+      /zenAtmosphereGrayscaleAmount\(\s*composeBotAccentId !== null/
+    );
+    assert.doesNotMatch(
+      backdropStyleSource,
+      /zenWallpaperGrayscaleEnabled/
+    );
+  });
+});
 
 describe("calculateZenAtmosphereLayerOpacitiesForReader", () => {
   const messageCountToY = (messageCount: number): number => messageCount * 100;
