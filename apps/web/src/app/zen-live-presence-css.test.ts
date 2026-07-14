@@ -449,7 +449,9 @@ describe("Zen live presence CSS", () => {
     const cleanProfileRule = ruleForExactSelector(
       '.zenLiveBotPresenceFaceEmissionMask[data-crt-profile="clean"]'
     );
-    assert.match(cleanProfileRule, /--crt-phosphor-midtone-strength:\s*0\.34\s*;/);
+    assert.match(cleanProfileRule, /--crt-core-opacity:\s*0\.94\s*;/);
+    assert.match(cleanProfileRule, /--crt-phosphor-midtone-strength:\s*0\.42\s*;/);
+    assert.match(cleanProfileRule, /--crt-phosphor-bright-strength:\s*0\.17\s*;/);
     assert.match(cleanProfileRule, /--crt-static-opacity:\s*0\.026\s*;/);
     assert.ok(ruleForExactSelector('.zenLiveBotPresenceFaceEmissionMask[data-crt-profile="arcade"]'));
     assert.ok(ruleForExactSelector('.zenLiveBotPresenceFaceEmissionMask[data-crt-profile="broadcast"]'));
@@ -579,8 +581,8 @@ describe("Zen live presence CSS", () => {
     assert.match(builtInGlyphCoreRule, /--crt-glyph-core-red-rgb:\s*255 255 255\s*;/);
     assert.match(builtInGlyphCoreRule, /--crt-glyph-core-green-rgb:\s*255 255 255\s*;/);
     assert.match(builtInGlyphCoreRule, /--crt-glyph-core-blue-rgb:\s*255 255 255\s*;/);
-    assert.match(builtInGlyphCoreRule, /--crt-glyph-phosphor-midtone-strength:\s*0\.14\s*;/);
-    assert.match(builtInGlyphCoreRule, /--crt-glyph-phosphor-bright-strength:\s*0\.04\s*;/);
+    assert.match(builtInGlyphCoreRule, /--crt-glyph-phosphor-midtone-strength:\s*0\.24\s*;/);
+    assert.match(builtInGlyphCoreRule, /--crt-glyph-phosphor-bright-strength:\s*0\.09\s*;/);
 
     const zenFaceGlyphRule = ruleForExactSelector(".coffeeSeatPlateEmoji.zenLiveBotPresenceFaceGlyph");
     assert.match(zenFaceGlyphRule, /--crt-glyph-core-paint-bleed:\s*0\.14em\s*;/);

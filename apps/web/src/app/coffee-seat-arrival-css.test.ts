@@ -598,8 +598,8 @@ describe("Coffee seat arrival CSS", () => {
     assert.match(builtInGlyphCoreRule, /--crt-glyph-core-red-rgb:\s*255 255 255\s*;/);
     assert.match(builtInGlyphCoreRule, /--crt-glyph-core-green-rgb:\s*255 255 255\s*;/);
     assert.match(builtInGlyphCoreRule, /--crt-glyph-core-blue-rgb:\s*255 255 255\s*;/);
-    assert.match(builtInGlyphCoreRule, /--crt-glyph-phosphor-midtone-strength:\s*0\.14\s*;/);
-    assert.match(builtInGlyphCoreRule, /--crt-glyph-phosphor-bright-strength:\s*0\.04\s*;/);
+    assert.match(builtInGlyphCoreRule, /--crt-glyph-phosphor-midtone-strength:\s*0\.24\s*;/);
+    assert.match(builtInGlyphCoreRule, /--crt-glyph-phosphor-bright-strength:\s*0\.09\s*;/);
 
     const cloneBaseRule = ruleForExactSelector(
       '.coffeeSeatPlateEmoji [data-crt-glyph-layer="true"]::before'
@@ -696,7 +696,7 @@ describe("Coffee seat arrival CSS", () => {
     assert.match(facePartRule, /drop-shadow\(0 0 calc\(1\.5px \* var\(--crt-face-glow-radius-scale,\s*1\)\) var\(--crt-face-edge-color\)\)/);
     assert.match(
       facePartRule,
-      /drop-shadow\(0 0 calc\(21px \* var\(--crt-face-glow-radius-scale,\s*1\)\) color-mix\(in srgb,\s*var\(--crt-face-edge-color\) 22%,\s*transparent\)\)/
+      /drop-shadow\(0 0 calc\(21px \* var\(--crt-face-glow-radius-scale,\s*1\)\) color-mix\(in srgb,\s*var\(--crt-face-edge-color\) var\(--crt-face-screen-wash-far-opacity,\s*22%\),\s*transparent\)\)/
     );
     assert.match(facePartRule, /--crt-face-glow-filter:\s*var\(--zen-live-bot-idle-face-glow-filter-high\)\s*;/);
     assert.match(facePartRule, /filter:\s*var\(--zen-live-bot-idle-face-glow-filter\)\s*;/);
@@ -719,7 +719,7 @@ describe("Coffee seat arrival CSS", () => {
     assert.match(liveFacePartRule, /drop-shadow\(0 0 calc\(1\.5px \* var\(--crt-face-glow-radius-scale,\s*1\)\) var\(--crt-face-edge-color\)\)/);
     assert.match(
       liveFacePartRule,
-      /drop-shadow\(0 0 calc\(21px \* var\(--crt-face-glow-radius-scale,\s*1\)\) color-mix\(in srgb,\s*var\(--crt-face-edge-color\) 22%,\s*transparent\)\)/
+      /drop-shadow\(0 0 calc\(21px \* var\(--crt-face-glow-radius-scale,\s*1\)\) color-mix\(in srgb,\s*var\(--crt-face-edge-color\) var\(--crt-face-screen-wash-far-opacity,\s*22%\),\s*transparent\)\)/
     );
     assert.match(
       liveFacePartRule,

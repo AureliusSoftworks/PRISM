@@ -12,6 +12,7 @@ import localFont from "next/font/local";
 import { BlockBrowserInspection } from "./BlockBrowserInspection";
 import { ClientInstallCoach } from "./ClientInstallCoach";
 import { DisableNativeTooltips } from "./DisableNativeTooltips";
+import { RenderPlatformAttribute } from "./RenderPlatformAttribute";
 import { TextFieldContextMenu } from "./TextFieldContextMenu";
 import "./globals.css";
 
@@ -99,6 +100,7 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body>
+        <RenderPlatformAttribute />
         <TextFieldContextMenu />
         <BlockBrowserInspection />
         <DisableNativeTooltips />
