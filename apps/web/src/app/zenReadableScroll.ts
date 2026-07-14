@@ -4,6 +4,10 @@ export interface ZenReadableAnchorMessageIds {
   latestUserMessageId: string | null;
 }
 
+interface ZenViewportMessage {
+  id: string;
+}
+
 /**
  * Orders Zen's readable-bottom anchor candidates from newest to fallback.
  *
@@ -34,6 +38,41 @@ export function zenReadableMaxScrollTop(
   clientHeight: number
 ): number {
   return Math.max(0, scrollHeight - clientHeight);
+}
+
+/**
+ * Finds the newest persisted row shared by the optimistic and resolved turns.
+ * That row can anchor the viewport while wildcard cleanup replaces the pending
+ * user row and appends the assistant reply.
+ */
+export function zenStableViewportAnchorMessageId(
+  previousMessages: readonly ZenViewportMessage[],
+  resolvedMessages: readonly ZenViewportMessage[]
+): string | null {
+  const resolvedMessageIds = new Set(
+    resolvedMessages.map((message) => message.id)
+  );
+  for (let index = previousMessages.length - 1; index >= 0; index -= 1) {
+    const messageId = previousMessages[index]?.id ?? "";
+    if (!messageId || messageId.startsWith("pending-")) continue;
+    if (resolvedMessageIds.has(messageId)) return messageId;
+  }
+  return null;
+}
+
+/**
+ * Keeps an anchored row at the same viewport Y after rows above it are
+ * windowed or replaced, while respecting the scrollport's current range.
+ */
+export function zenRestoredViewportScrollTop(
+  scrollTop: number,
+  anchorViewportTopBefore: number,
+  anchorViewportTopAfter: number,
+  maxScrollTop: number
+): number {
+  const restoredTop =
+    scrollTop + anchorViewportTopAfter - anchorViewportTopBefore;
+  return Math.max(0, Math.min(Math.max(0, maxScrollTop), restoredTop));
 }
 
 /**

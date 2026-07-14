@@ -927,6 +927,8 @@ import {
   zenReadableAnchorMessageIds,
   zenReadableGestureShouldDisarmFollow,
   zenReadableMaxScrollTop,
+  zenRestoredViewportScrollTop,
+  zenStableViewportAnchorMessageId,
   zenReadableWheelShouldApplyElasticPull,
 } from "./zenReadableScroll";
 import { zenRenderedMessageWindow } from "./zenMessageWindow";
@@ -41411,6 +41413,11 @@ function HomeContent(): React.JSX.Element {
     conversationId: string | null;
     targetTop: number;
   } | null>(null);
+  const zenPendingViewportRestoreRef = useRef<{
+    conversationId: string;
+    messageId: string;
+    viewportTop: number;
+  } | null>(null);
   const chatReplyFollowWasActiveRef = useRef(false);
   // True for any conversation where the user interrupted a streaming reply.
   // Survives the brief loop unmount/remount around the "...interrupted again."
@@ -55523,6 +55530,32 @@ function HomeContent(): React.JSX.Element {
     latestUserMessageId,
   ]);
 
+  // Wildcard cleanup replaces the optimistic user row at the same moment the
+  // assistant reply arrives. Preserve a shared persisted row across that DOM
+  // reconciliation so the live reply begins from the already-current viewport.
+  useLayoutEffect(() => {
+    const pendingRestore = zenPendingViewportRestoreRef.current;
+    if (!pendingRestore) return;
+    if (!detail || detail.id !== pendingRestore.conversationId) {
+      zenPendingViewportRestoreRef.current = null;
+      return;
+    }
+    const scrollRoot = messagesScrollRef.current;
+    const anchorRow = scrollRoot
+      ? findMessageRowById(scrollRoot, pendingRestore.messageId)
+      : null;
+    zenPendingViewportRestoreRef.current = null;
+    if (!scrollRoot || !anchorRow) return;
+    const nextTop = zenRestoredViewportScrollTop(
+      scrollRoot.scrollTop,
+      pendingRestore.viewportTop,
+      anchorRow.getBoundingClientRect().top,
+      resolveZenReadableMaxScrollTop(scrollRoot),
+    );
+    commitChatModeScrollTop(scrollRoot, detail.id, nextTop, 180);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detail?.id, detail?.messages]);
+
   // Auto-scroll for Chat mode while a reply is streaming or revealing.
   // Each animation frame eases scrollTop toward the active typed line's
   // centered reading-band position without pinning the user to the bottom
@@ -62220,6 +62253,29 @@ function HomeContent(): React.JSX.Element {
               })
             : [];
         startCleanupMessageReveal(cleanupRevealKeys);
+        if (
+          view === "chat" &&
+          pendingCleanupIdsForReveal.length > 0 &&
+          previousDetail
+        ) {
+          const scrollRoot = messagesScrollRef.current;
+          const anchorMessageId = zenStableViewportAnchorMessageId(
+            previousDetail.messages,
+            patchedConversation.messages,
+          );
+          const anchorRow =
+            scrollRoot && anchorMessageId
+              ? findMessageRowById(scrollRoot, anchorMessageId)
+              : null;
+          zenPendingViewportRestoreRef.current =
+            scrollRoot && anchorMessageId && anchorRow
+              ? {
+                  conversationId: patchedConversation.id,
+                  messageId: anchorMessageId,
+                  viewportTop: anchorRow.getBoundingClientRect().top,
+                }
+              : null;
+        }
         if (view === "chat") {
           if (!isZenAutonomy || zenAutonomySpoke) {
             hardResetChatArchiveStateForConversation(d.conversation.id);
