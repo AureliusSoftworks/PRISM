@@ -14,9 +14,9 @@ import {
   deleteSelectedBots,
   normalizeBotExportHash,
   patchSelectedBots,
-  readBotPreferredModelForCreate,
   resolveBotExportHashForCreate,
   setSelectedBotsDeleteProtection,
+  type SelectedBotPatch,
 } from "../bots.ts";
 
 /**
@@ -147,21 +147,6 @@ describe("bot export hash helpers", () => {
       createHash: () => "0123456789abcdef0123456789abcdef",
     });
     assert.equal(resolved, "0123456789abcdef0123456789abcdef");
-  });
-});
-
-describe("readBotPreferredModelForCreate", () => {
-  it("defaults omitted bot model preferences to disabled", () => {
-    assert.equal(readBotPreferredModelForCreate(undefined), "disabled");
-  });
-
-  it("keeps explicit blank or null preferences as inherited defaults", () => {
-    assert.equal(readBotPreferredModelForCreate("   "), null);
-    assert.equal(readBotPreferredModelForCreate(null), null);
-  });
-
-  it("stores explicit bot model preferences", () => {
-    assert.equal(readBotPreferredModelForCreate(" llama3.2 "), "llama3.2");
   });
 });
 
@@ -871,7 +856,7 @@ describe("patchSelectedBots", () => {
     );
   });
 
-  it("updates every batch-edit routing and identity field", () => {
+  it("updates every batch-edit identity field", () => {
     const db = createTestDb();
     seedBot(db, "user-1", "a");
     seedBot(db, "user-1", "b");
@@ -879,16 +864,12 @@ describe("patchSelectedBots", () => {
     const result = patchSelectedBots(db, "user-1", ["a", "b"], {
       color: "#abcdef",
       glyph: "triangle",
-      localModel: "llama3.2",
-      onlineModel: "gpt-4.1-mini",
-      localImageModel: "sdxl",
-      openaiImageModel: "gpt-image-2",
     });
 
     assert.equal(result.updated, 2);
     const rows = db
       .prepare(
-        `SELECT color, glyph, local_model, online_model, local_image_model, openai_image_model
+        `SELECT color, glyph
          FROM bots
          WHERE user_id = ?
          ORDER BY id`
@@ -896,28 +877,20 @@ describe("patchSelectedBots", () => {
       .all("user-1") as Array<{
         color: string | null;
         glyph: string | null;
-        local_model: string | null;
-        online_model: string | null;
-        local_image_model: string | null;
-        openai_image_model: string | null;
       }>;
     assert.deepEqual(
       rows.map((row) => [
         row.color,
         row.glyph,
-        row.local_model,
-        row.online_model,
-        row.local_image_model,
-        row.openai_image_model,
       ]),
       [
-        ["#abcdef", "triangle", "llama3.2", "gpt-4.1-mini", "sdxl", "gpt-image-2"],
-        ["#abcdef", "triangle", "llama3.2", "gpt-4.1-mini", "sdxl", "gpt-image-2"],
+        ["#abcdef", "triangle"],
+        ["#abcdef", "triangle"],
       ]
     );
   });
 
-  it("stores blank model fields as fallback nulls", () => {
+  it("ignores legacy per-bot model fields", () => {
     const db = createTestDb();
     seedBot(db, "user-1", "a");
     db.prepare(
@@ -929,14 +902,19 @@ describe("patchSelectedBots", () => {
        WHERE id = ?`
     ).run("a");
 
-    const result = patchSelectedBots(db, "user-1", ["a"], {
-      localModel: " ",
-      onlineModel: "",
-      localImageModel: "\t",
-      openaiImageModel: "   ",
-    });
+    const result = patchSelectedBots(
+      db,
+      "user-1",
+      ["a"],
+      {
+        localModel: "new-local",
+        onlineModel: "new-online",
+        localImageModel: "new-local-image",
+        openaiImageModel: "new-openai-image",
+      } as unknown as SelectedBotPatch
+    );
 
-    assert.equal(result.updated, 1);
+    assert.deepEqual(result, { updated: 0, ids: [] });
     const row = db
       .prepare(
         "SELECT local_model, online_model, local_image_model, openai_image_model FROM bots WHERE id = ?"
@@ -949,7 +927,7 @@ describe("patchSelectedBots", () => {
       };
     assert.deepEqual(
       [row.local_model, row.online_model, row.local_image_model, row.openai_image_model],
-      [null, null, null, null]
+      ["old-local", "old-online", "old-local-image", "old-openai-image"]
     );
   });
 

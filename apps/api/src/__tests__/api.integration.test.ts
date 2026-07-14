@@ -556,6 +556,78 @@ describe("API request integration", () => {
     assert.equal((await json(unavailableResponse)).code, "babble-system-unavailable");
   });
 
+  it("ignores legacy per-bot model fields on create and update", async () => {
+    const client = createClient();
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({ username: "inherited-models@example.com", password: "model-password" })
+    );
+    assert.equal(register.status, 201);
+
+    const created = await client.request(
+      "/api/bots",
+      jsonInit({
+        name: "Inherited model bot",
+        model: "legacy-default",
+        localModel: "legacy-local",
+        onlineModel: "legacy-online",
+        localImageModel: "legacy-local-image",
+        openaiImageModel: "legacy-online-image",
+      })
+    );
+    assert.equal(created.status, 201);
+    const createdPayload = await json(created);
+    const botId = String(createdPayload.bot.id);
+    assert.deepEqual(
+      [
+        createdPayload.bot.model,
+        createdPayload.bot.local_model,
+        createdPayload.bot.online_model,
+        createdPayload.bot.local_image_model,
+        createdPayload.bot.openai_image_model,
+      ],
+      [null, null, null, null, null]
+    );
+
+    const updated = await client.request(`/api/bots/${encodeURIComponent(botId)}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        color: "#123456",
+        model: "patched-default",
+        localModel: "patched-local",
+        onlineModel: "patched-online",
+        localImageModel: "patched-local-image",
+        openaiImageModel: "patched-online-image",
+      }),
+    });
+    assert.equal(updated.status, 200);
+    const row = db
+      .prepare(
+        `SELECT color, model, local_model, online_model, local_image_model, openai_image_model
+           FROM bots WHERE id = ?`
+      )
+      .get(botId) as {
+        color: string | null;
+        model: string | null;
+        local_model: string | null;
+        online_model: string | null;
+        local_image_model: string | null;
+        openai_image_model: string | null;
+      };
+    assert.equal(row.color, "#123456");
+    assert.deepEqual(
+      [
+        row.model,
+        row.local_model,
+        row.online_model,
+        row.local_image_model,
+        row.openai_image_model,
+      ],
+      [null, null, null, null, null]
+    );
+  });
+
   it("persists authored bot voices separately from user overrides", async () => {
     const client = createClient();
     const register = await client.request(

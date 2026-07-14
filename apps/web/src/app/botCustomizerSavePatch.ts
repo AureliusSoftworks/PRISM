@@ -101,10 +101,6 @@ export interface BotCustomizerSaveCurrent {
 export interface BotCustomizerSavePatch {
   name?: string;
   systemPrompt?: string;
-  localModel?: string;
-  onlineModel?: string;
-  localImageModel?: string;
-  openaiImageModel?: string;
   onlineEnabled?: boolean;
   deleteProtected?: boolean;
   flirtEnabled?: boolean;
@@ -162,10 +158,6 @@ export function buildBotCustomizerSavePatch(
     return {
       name: current.name,
       systemPrompt: current.storedSystemPrompt,
-      localModel: current.localModelForStorage,
-      onlineModel: current.onlineModelForStorage,
-      localImageModel: current.localImageModelForStorage,
-      openaiImageModel: current.openAiImageModelForStorage,
       onlineEnabled: current.onlineEnabled,
       deleteProtected: current.deleteProtected,
       flirtEnabled: current.flirtEnabled,
@@ -211,18 +203,6 @@ export function buildBotCustomizerSavePatch(
   if (current.name !== pristine.name) patch.name = current.name;
   if (current.storedSystemPrompt !== pristineSystemPrompt) {
     patch.systemPrompt = current.storedSystemPrompt;
-  }
-  if (current.localModel !== pristine.localModel) {
-    patch.localModel = current.localModelForStorage;
-  }
-  if (current.onlineModel !== pristine.onlineModel) {
-    patch.onlineModel = current.onlineModelForStorage;
-  }
-  if (current.localImageModel !== pristine.localImageModel) {
-    patch.localImageModel = current.localImageModelForStorage;
-  }
-  if (current.openAiImageModel !== pristine.openAiImageModel) {
-    patch.openaiImageModel = current.openAiImageModelForStorage;
   }
   if (current.onlineEnabled !== pristine.onlineEnabled) {
     patch.onlineEnabled = current.onlineEnabled;

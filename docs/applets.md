@@ -24,9 +24,9 @@ ship as `0.5.2` while Coffee is `v0.7` and Story is `v0.1`.
 
 | Applet | Version | Status | Notes |
 | --- | --- | --- | --- |
-| Chat | v1.0 | Active | Full playground for bots, providers, models, images, exports, and memory-aware conversations. |
-| Zen | v0.9 | Active | Calm one-to-one continuity surface; the standalone Zen lane is deprecating as this becomes Prism's default state. |
-| Coffee | v1.1 | Active | Multi-bot group table with Coffee Groups, session pacing, cups, transcripts, replay, and table controls. |
+| Chat | v1.1 | Active | Full playground for bots, providers, models, images, exports, and memory-aware conversations. |
+| Zen | v1.0 | Active | Calm one-to-one continuity surface; the standalone Zen lane is deprecating as this becomes Prism's default state. |
+| Coffee | v1.2 | Active | Multi-bot group table with Coffee Groups, session pacing, cups, transcripts, replay, and table controls. |
 | Story | v0.1 | Preview | Generated visual-novel episodes with bots, choices, maps, inventory, and transcripts. |
 | Arena | v0.0 | Planned | Moderated bot debate surface. |
 | Polling | v0.0 | Planned | AI-powered polling across bot groups. |
@@ -38,6 +38,12 @@ ship as `0.5.2` while Coffee is `v0.7` and Story is `v0.1`.
 | Surf | v0.0 | Planned | Simple browsing plus optional bot screen viewing. |
 
 ## Changelog
+
+### 2026-07-14
+
+- Bumped `Chat` to `v1.1`, `Zen` to `v1.0`, and `Coffee` to `v1.2` after
+  removing per-bot model routing. Bots now inherit account defaults, while
+  explicit workspace or session choices remain available.
 
 ### 2026-07-13
 

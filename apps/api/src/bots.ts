@@ -1,5 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
-import { DISABLED_MODEL_CHOICE, stripBotProfileMetaSuffix } from "@localai/shared";
+import { stripBotProfileMetaSuffix } from "@localai/shared";
 import { randomId } from "./security.ts";
 
 const BOT_EXPORT_HASH_PATTERN = /^[a-f0-9]{32}$/i;
@@ -11,10 +11,6 @@ const BOT_FLIRT_ENABLED_POLICY =
 export interface SelectedBotPatch {
   color?: string;
   glyph?: string;
-  localModel?: string;
-  onlineModel?: string;
-  localImageModel?: string;
-  openaiImageModel?: string;
 }
 
 function readSelectedBotPatchString(value: unknown, label: string): string {
@@ -26,14 +22,6 @@ function readSelectedBotPatchString(value: unknown, label: string): string {
     throw new Error(`${label} must not be blank.`);
   }
   return trimmed;
-}
-
-function readSelectedBotPatchOptionalString(value: unknown, label: string): string | null {
-  if (typeof value !== "string") {
-    throw new Error(`${label} must be a string.`);
-  }
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
 }
 
 function hasPatchField<K extends keyof SelectedBotPatch>(
@@ -140,13 +128,6 @@ export function resolveBotExportHashForCreate(options: {
     if (!options.hasExistingHash(candidate)) return candidate;
   }
   throw new Error("Could not generate a unique bot export hash.");
-}
-
-export function readBotPreferredModelForCreate(value: unknown): string | null {
-  if (value === undefined) return DISABLED_MODEL_CHOICE;
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
 }
 
 /**
@@ -400,22 +381,6 @@ export function patchSelectedBots(
   if (hasPatchField(patch, "glyph")) {
     fields.push("glyph = ?");
     values.push(readSelectedBotPatchString(patch.glyph, "Glyph"));
-  }
-  if (hasPatchField(patch, "localModel")) {
-    fields.push("local_model = ?");
-    values.push(readSelectedBotPatchOptionalString(patch.localModel, "Offline model"));
-  }
-  if (hasPatchField(patch, "onlineModel")) {
-    fields.push("online_model = ?");
-    values.push(readSelectedBotPatchOptionalString(patch.onlineModel, "Online model"));
-  }
-  if (hasPatchField(patch, "localImageModel")) {
-    fields.push("local_image_model = ?");
-    values.push(readSelectedBotPatchOptionalString(patch.localImageModel, "Offline image model"));
-  }
-  if (hasPatchField(patch, "openaiImageModel")) {
-    fields.push("openai_image_model = ?");
-    values.push(readSelectedBotPatchOptionalString(patch.openaiImageModel, "Online image model"));
   }
   if (!fields.length) {
     return { updated: 0, ids: [] };

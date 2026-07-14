@@ -116,3 +116,12 @@ Advanced runtime knobs sent from Chat are ignored server-side. Sandbox compactio
 ## Experience Principle
 
 Prism should not split people into "users" (utility) vs. "players" (experience). Every feature must satisfy both — practical clarity/control and experiential delight. A design that serves only one side is incomplete.
+
+## Tutorial Maintenance
+
+Treat onboarding and contextual tutorials as part of every user-visible feature, not as follow-up documentation.
+
+- In the same change, review `apps/web/src/app/firstRunOnboarding.ts` and `apps/web/src/app/modeTutorials.ts` for affected setup choices, copy, steps, and click targets.
+- Update the tutorial when a player-visible control, workflow, applet, or default changes. If no tutorial change is needed, record that review in the Bead or verification notes.
+- Keep tutorial target selectors stable and backed by tests. A missing, hidden, or stale target is a product regression.
+- Preserve skip, do-it-later, and reset paths so guidance never traps the player.

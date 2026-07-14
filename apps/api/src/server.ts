@@ -188,7 +188,6 @@ import {
   deleteSelectedBots,
   normalizeBotExportHash,
   patchSelectedBots,
-  readBotPreferredModelForCreate,
   resolveBotExportHashForCreate,
   setSelectedBotsDeleteProtection,
   type SelectedBotPatch,
@@ -2376,7 +2375,7 @@ function buildRoutes(): RouteDefinition[] {
       const resolvedAuto = resolveAutoModel({
         provider: effectiveProvider,
         explicitModelOverride: storyModelOverride,
-        botPreferredModel:
+        preferredModel:
           effectiveProvider === "local"
             ? REQUIRED_PRIMARY_LOCAL_MODEL_ID
             : readOptionalString(user.preferred_online_model),
@@ -2986,8 +2985,6 @@ function buildRoutes(): RouteDefinition[] {
                     ORDER BY m.created_at DESC
                     LIMIT 1) AS last_assistant_bot_id,
                   b.name AS bot_name, b.system_prompt AS bot_system_prompt,
-                  b.local_image_model AS bot_local_image_model,
-                  b.openai_image_model AS bot_openai_image_model,
                   b.online_enabled AS bot_online_enabled
              FROM conversations c
              LEFT JOIN bots b ON b.id = c.bot_id AND b.user_id = c.user_id
@@ -3007,8 +3004,6 @@ function buildRoutes(): RouteDefinition[] {
             last_assistant_bot_id: string | null;
             bot_name: string | null;
             bot_system_prompt: string | null;
-            bot_local_image_model: string | null;
-            bot_openai_image_model: string | null;
             bot_online_enabled: number | null;
           }
         | undefined;
@@ -3045,8 +3040,7 @@ function buildRoutes(): RouteDefinition[] {
       const wallpaperBot = wallpaperBotId
         ? (db
             .prepare(
-              `SELECT id, name, system_prompt, local_image_model,
-                      openai_image_model, online_enabled
+              `SELECT id, name, system_prompt, online_enabled
                  FROM bots
                 WHERE id = ? AND user_id = ?`
             )
@@ -3055,8 +3049,6 @@ function buildRoutes(): RouteDefinition[] {
                 id: string;
                 name: string | null;
                 system_prompt: string | null;
-                local_image_model: string | null;
-                openai_image_model: string | null;
                 online_enabled: number | null;
               }
             | undefined)
@@ -3156,40 +3148,28 @@ function buildRoutes(): RouteDefinition[] {
         botForcesLocal
           ? "local"
           : requestedProvider ?? (user.preferred_provider === "local" ? "local" : "openai");
-      const wallpaperLocalImageModel = wallpaperBot?.local_image_model?.trim() ?? "";
-      const conversationLocalImageModel = conversation.bot_local_image_model?.trim() ?? "";
       const preferredZenWallpaperLocalImageModel =
         user.preferred_zen_wallpaper_local_image_model?.trim() ?? "";
       const preferredLocalImageModel = user.preferred_local_image_model?.trim() ?? "";
-      const wallpaperOpenAiImageModel = wallpaperBot?.openai_image_model?.trim() ?? "";
-      const conversationOpenAiImageModel = conversation.bot_openai_image_model?.trim() ?? "";
       const preferredZenWallpaperOpenAiImageModel =
         user.preferred_zen_wallpaper_openai_image_model?.trim() ?? "";
       const preferredOpenAiImageModel = user.preferred_openai_image_model?.trim() ?? "";
       const localWallpaperDisabled =
         (effectiveProvider === "local" && bodyModelDisabled) ||
-        isDisabledModelChoice(wallpaperLocalImageModel) ||
-        isDisabledModelChoice(conversationLocalImageModel) ||
         isDisabledModelChoice(preferredZenWallpaperLocalImageModel) ||
         isDisabledModelChoice(preferredLocalImageModel);
       const onlineWallpaperDisabled =
         (effectiveProvider !== "local" && bodyModelDisabled) ||
-        isDisabledModelChoice(wallpaperOpenAiImageModel) ||
-        isDisabledModelChoice(conversationOpenAiImageModel) ||
         isDisabledModelChoice(preferredZenWallpaperOpenAiImageModel) ||
         isDisabledModelChoice(preferredOpenAiImageModel);
       const resolvedLocalImageModel = localWallpaperDisabled
         ? ""
         : (bodyModel && effectiveProvider === "local" ? bodyModel : "") ||
-          wallpaperLocalImageModel ||
-          conversationLocalImageModel ||
           preferredZenWallpaperLocalImageModel ||
           preferredLocalImageModel;
       const resolvedOpenAiImageModel = onlineWallpaperDisabled
         ? ""
         : (bodyModel && effectiveProvider !== "local" ? bodyModel : "") ||
-          wallpaperOpenAiImageModel ||
-          conversationOpenAiImageModel ||
           preferredZenWallpaperOpenAiImageModel ||
           preferredOpenAiImageModel;
       const shouldRunLocalWallpaper =
@@ -4137,7 +4117,6 @@ function buildRoutes(): RouteDefinition[] {
       const userKey = decryptUserKey(userId);
       let effectiveProvider = readProvider(body.preferredProvider) ?? user.preferred_provider;
       const explicitModelOverride = readModelOverride(body.modelOverride);
-      let botPreferredModel: string | null = null;
       let botName = "Prism";
       let botSystemPrompt: string | undefined;
       let botForcesLocalProvider = false;
@@ -4146,16 +4125,13 @@ function buildRoutes(): RouteDefinition[] {
       if (typeof effectiveBotId === "string" && effectiveBotId.trim().length > 0) {
         const bot = db
           .prepare(
-            "SELECT name, system_prompt, semantic_facets, model, local_model, online_model, online_enabled, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')"
+            "SELECT name, system_prompt, semantic_facets, online_enabled, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')"
           )
           .get(effectiveBotId, userId) as
           | {
               name?: string;
               system_prompt?: string;
               semantic_facets?: string | null;
-              model?: string | null;
-              local_model?: string | null;
-              online_model?: string | null;
               online_enabled?: number | null;
 	              flirt_enabled?: number | null;
 	              temperature?: number | null;
@@ -4180,10 +4156,6 @@ function buildRoutes(): RouteDefinition[] {
             effectiveProvider = "local";
             botForcesLocalProvider = true;
           }
-          botPreferredModel =
-            effectiveProvider === "local"
-              ? readOptionalString(bot.local_model) ?? readOptionalString(bot.model)
-              : readOptionalString(bot.online_model);
 	          if (typeof bot.temperature === "number") {
 	            generationOverrides.temperature = bot.temperature;
 	          }
@@ -4212,7 +4184,7 @@ function buildRoutes(): RouteDefinition[] {
         effectiveProvider === "local"
           ? readOptionalString(user.preferred_local_model)
           : readOptionalString(user.preferred_online_model);
-      const preferredModelForAuto = botPreferredModel ?? accountPreferredModel;
+      const preferredModelForAuto = accountPreferredModel;
       const explicitModelForAuto = botForcesLocalProvider ? null : explicitModelOverride;
       if (
         !explicitModelForAuto &&
@@ -4226,7 +4198,7 @@ function buildRoutes(): RouteDefinition[] {
       const resolvedAuto = resolveAutoModel({
         provider: effectiveProvider,
         explicitModelOverride: explicitModelForAuto,
-        botPreferredModel: preferredModelForAuto,
+        preferredModel: preferredModelForAuto,
         hiddenModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
         catalog,
       });
@@ -4582,20 +4554,16 @@ function buildRoutes(): RouteDefinition[] {
       let botSystemPrompt: string | undefined;
       let starterPromptLabel: string | undefined;
       let botForcesLocalProvider = false;
-      let botPreferredModel: string | null = null;
       const generationOverrides: GenerateOptions = {};
       if (runtimeBotId) {
         const bot = db
           .prepare(
-            "SELECT name, system_prompt, model, local_model, online_model, online_enabled, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')"
+            "SELECT name, system_prompt, online_enabled, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')"
           )
           .get(runtimeBotId, userId) as
           | {
               name?: string;
               system_prompt?: string;
-              model?: string | null;
-              local_model?: string | null;
-              online_model?: string | null;
               online_enabled?: number | null;
 	              flirt_enabled?: number | null;
 	              temperature?: number | null;
@@ -4620,9 +4588,6 @@ function buildRoutes(): RouteDefinition[] {
             effectiveProvider = "local";
             botForcesLocalProvider = true;
           }
-          botPreferredModel = effectiveProvider === "local"
-            ? readOptionalString(bot.local_model) ?? readOptionalString(bot.model)
-            : readOptionalString(bot.online_model);
           if (typeof bot.temperature === "number") {
             generationOverrides.temperature = bot.temperature;
           }
@@ -4658,11 +4623,10 @@ function buildRoutes(): RouteDefinition[] {
       const resolvedAuto = resolveAutoModel({
         provider: effectiveProvider,
         explicitModelOverride: botForcesLocalProvider ? null : explicitModelOverride,
-        botPreferredModel:
-          botPreferredModel ??
-          (effectiveProvider === "local"
+        preferredModel:
+          effectiveProvider === "local"
             ? readOptionalString(user.preferred_local_model)
-            : readOptionalString(user.preferred_online_model)),
+            : readOptionalString(user.preferred_online_model),
         hiddenModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
         catalog,
       });
@@ -5204,6 +5168,8 @@ function buildRoutes(): RouteDefinition[] {
                   conversationId,
                   {
                     preferredProvider: effectiveProvider,
+                    preferredLocalModel: user.preferred_local_model,
+                    preferredOnlineModel: user.preferred_online_model,
                     openAiApiKey,
                     anthropicApiKey,
                     secondaryOllamaHost: user.secondary_ollama_host,
@@ -5432,6 +5398,8 @@ function buildRoutes(): RouteDefinition[] {
         ctx.params.pollId,
         {
           preferredProvider: effectiveProvider,
+          preferredLocalModel: user.preferred_local_model,
+          preferredOnlineModel: user.preferred_online_model,
           openAiApiKey,
           anthropicApiKey,
           secondaryOllamaHost: user.secondary_ollama_host,
@@ -5537,6 +5505,8 @@ function buildRoutes(): RouteDefinition[] {
             ctx.params.id,
             {
               preferredProvider: effectiveProvider,
+              preferredLocalModel: user.preferred_local_model,
+              preferredOnlineModel: user.preferred_online_model,
               openAiApiKey,
               anthropicApiKey,
               secondaryOllamaHost: user.secondary_ollama_host,
@@ -5597,6 +5567,8 @@ function buildRoutes(): RouteDefinition[] {
             ctx.params.id,
             {
               preferredProvider: effectiveProvider,
+              preferredLocalModel: user.preferred_local_model,
+              preferredOnlineModel: user.preferred_online_model,
               openAiApiKey,
               anthropicApiKey,
               secondaryOllamaHost: user.secondary_ollama_host,
@@ -5693,6 +5665,8 @@ function buildRoutes(): RouteDefinition[] {
             },
             {
               preferredProvider: effectiveProvider,
+              preferredLocalModel: user.preferred_local_model,
+              preferredOnlineModel: user.preferred_online_model,
               openAiApiKey,
               anthropicApiKey,
               secondaryOllamaHost: user.secondary_ollama_host,
@@ -5801,6 +5775,8 @@ function buildRoutes(): RouteDefinition[] {
             () => {
               const settings = {
                 preferredProvider: effectiveProvider,
+                preferredLocalModel: user.preferred_local_model,
+                preferredOnlineModel: user.preferred_online_model,
                 openAiApiKey,
                 anthropicApiKey,
                 secondaryOllamaHost: user.secondary_ollama_host,
@@ -7672,14 +7648,12 @@ function buildRoutes(): RouteDefinition[] {
       type BotPersonaImageRow = {
         name: string;
         system_prompt: string;
-        local_image_model: string | null;
-        openai_image_model: string | null;
       };
       let botPersona: BotPersonaImageRow | undefined;
       if (personaBotId) {
         botPersona = db
           .prepare(
-            "SELECT name, system_prompt, local_image_model, openai_image_model FROM bots WHERE id = ? AND user_id = ?"
+            "SELECT name, system_prompt FROM bots WHERE id = ? AND user_id = ?"
           )
           .get(personaBotId, userId) as BotPersonaImageRow | undefined;
         if (botPersona) {
@@ -7692,28 +7666,22 @@ function buildRoutes(): RouteDefinition[] {
         }
       }
 
-      const botLocalImageModel = botPersona?.local_image_model?.trim() ?? "";
-      const botOpenAiImageModel = botPersona?.openai_image_model?.trim() ?? "";
       const preferredLocalImageModel = user.preferred_local_image_model?.trim() ?? "";
       const preferredOpenAiImageModel = user.preferred_openai_image_model?.trim() ?? "";
       const localImageDisabled =
         (effectiveProvider === "local" && bodyModelDisabled) ||
-        isDisabledModelChoice(botLocalImageModel) ||
         isDisabledModelChoice(preferredLocalImageModel);
       const openAiImageDisabled =
         (effectiveProvider !== "local" && bodyModelDisabled) ||
-        isDisabledModelChoice(botOpenAiImageModel) ||
         isDisabledModelChoice(preferredOpenAiImageModel);
       const resolvedLocalImageModel = localImageDisabled
         ? ""
         : (bodyModel && effectiveProvider === "local" ? bodyModel.trim() : "") ||
-          botLocalImageModel ||
           preferredLocalImageModel;
 
       const resolvedOpenAiImageModel = openAiImageDisabled
         ? ""
         : (bodyModel && effectiveProvider !== "local" ? bodyModel.trim() : "") ||
-          botOpenAiImageModel ||
           preferredOpenAiImageModel;
       const shouldRunLocal =
         effectiveProvider === "local" ||
@@ -8300,11 +8268,13 @@ function buildRoutes(): RouteDefinition[] {
       rejectUnsupportedBotAvatarPayload(body);
       const name = readString(body.name, "name");
       const systemPrompt = typeof body.systemPrompt === "string" ? body.systemPrompt : "";
-      const model = readOptionalString(body.model);
-      const localModel = readBotPreferredModelForCreate(body.localModel);
-      const onlineModel = readBotPreferredModelForCreate(body.onlineModel);
-      const localImageModel = readOptionalString(body.localImageModel);
-      const openaiImageModel = readOptionalString(body.openaiImageModel);
+      // Legacy model columns remain in the schema for import/backup compatibility,
+      // but new bots inherit account or explicit session model choices.
+      const model = null;
+      const localModel = null;
+      const onlineModel = null;
+      const localImageModel = null;
+      const openaiImageModel = null;
       const onlineEnabled = body.onlineEnabled === false ? 0 : 1;
       const deleteProtected = body.deleteProtected === true ? 1 : 0;
       const flirtEnabled = body.flirtEnabled === true ? 1 : 0;
@@ -8586,23 +8556,6 @@ function buildRoutes(): RouteDefinition[] {
         fields.push("system_prompt = ?");
         values.push(body.systemPrompt);
         shouldRefreshFacets = true;
-      }
-      if (typeof body.model === "string") { fields.push("model = ?"); values.push(body.model); }
-      if (typeof body.localModel === "string") {
-        fields.push("local_model = ?");
-        values.push(readOptionalString(body.localModel));
-      }
-      if (typeof body.onlineModel === "string") {
-        fields.push("online_model = ?");
-        values.push(readOptionalString(body.onlineModel));
-      }
-      if (typeof body.localImageModel === "string") {
-        fields.push("local_image_model = ?");
-        values.push(readOptionalString(body.localImageModel));
-      }
-      if (typeof body.openaiImageModel === "string") {
-        fields.push("openai_image_model = ?");
-        values.push(readOptionalString(body.openaiImageModel));
       }
       if (typeof body.onlineEnabled === "boolean") {
         fields.push("online_enabled = ?");
