@@ -58,7 +58,12 @@ const server = createServer(
     fetchImpl: fetchRecorder,
     providerFactory: () => deterministicProvider,
     auxiliaryProviderFactory: () => deterministicProvider,
-    builtinVoiceWaveGenerator: async () => deterministicVoiceWave(),
+    builtinVoiceWaveGenerator: async ({ profile }) => {
+      if (normalizeBotAudioVoiceProfileV1(profile).systemVoiceName === "Unavailable Test") {
+        throw new Error("System voice is still loading.");
+      }
+      return deterministicVoiceWave();
+    },
   })
 );
 await new Promise<void>((resolve, reject) => {
@@ -486,11 +491,11 @@ describe("API request integration", () => {
     assert.deepEqual(fetchRecorder.calls.slice(beforeCalls), []);
   });
 
-  it("synthesizes Bottish through the system voice without provider traffic", async () => {
+  it("synthesizes Babble through the system voice and keeps Bottish client-procedural", async () => {
     const client = createClient();
     const register = await client.request(
       "/api/auth/register",
-      jsonInit({ username: "voice-bottish@example.com", password: "voice-password" })
+      jsonInit({ username: "voice-babble@example.com", password: "voice-password" })
     );
     assert.equal(register.status, 201);
     const beforeCalls = fetchRecorder.calls.length;
@@ -498,10 +503,10 @@ describe("API request integration", () => {
       "/api/voices/synthesize",
       jsonInit({
         text: "Hello, curious robot 42!",
-        mode: "bottish",
+        mode: "babble",
         engine: "elevenlabs",
         explicitOnlineContext: true,
-        seed: "bottish-integration",
+        seed: "babble-integration",
         profile: {
           v: 2,
           enabled: true,
@@ -525,9 +530,30 @@ describe("API request integration", () => {
       })
     );
     assert.equal(response.status, 200);
-    assert.equal(response.headers.get("x-prism-voice-engine"), "builtin-bottish");
+    assert.equal(response.headers.get("x-prism-voice-engine"), "builtin-babble");
     assert.equal(Buffer.from(await response.arrayBuffer()).subarray(0, 4).toString(), "RIFF");
     assert.deepEqual(fetchRecorder.calls.slice(beforeCalls), []);
+    const bottishResponse = await client.request(
+      "/api/voices/synthesize",
+      jsonInit({ text: "Hello robot", mode: "bottish", engine: "builtin" })
+    );
+    assert.equal(bottishResponse.status, 409);
+    assert.equal((await json(bottishResponse)).code, "procedural-client-only");
+    assert.deepEqual(fetchRecorder.calls.slice(beforeCalls), []);
+    const unavailableResponse = await client.request(
+      "/api/voices/synthesize",
+      jsonInit({
+        text: "Try again shortly",
+        mode: "babble",
+        engine: "builtin",
+        profile: {
+          ...normalizeBotAudioVoiceProfileV1(undefined),
+          systemVoiceName: "Unavailable Test",
+        },
+      })
+    );
+    assert.equal(unavailableResponse.status, 503);
+    assert.equal((await json(unavailableResponse)).code, "babble-system-unavailable");
   });
 
   it("persists authored bot voices separately from user overrides", async () => {

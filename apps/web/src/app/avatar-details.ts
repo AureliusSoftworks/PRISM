@@ -46,6 +46,8 @@ export type AvatarDetailStampCategory = BotAvatarDetailStampCategory;
 export type AvatarDetailsBrushSize =
   (typeof AVATAR_DETAILS_BRUSH_SIZES)[number];
 export type AvatarDetailsPaintMode = "brush" | "eraser";
+export type AvatarDetailsTool =
+  AvatarDetailsPaintMode | "line" | "circle" | "move";
 
 export type AvatarDetailStampV1 = BotAvatarDetailStampV1;
 export type AvatarDetailsV1 = BotAvatarDetailsV1;
@@ -125,8 +127,28 @@ export function cloneAvatarDetails(details: AvatarDetailsV1): AvatarDetailsV1 {
     screen: {
       stamps: details.screen.stamps.map((stamp) => ({ ...stamp })),
       paintMaskBase64: details.screen.paintMaskBase64,
+      ...(details.screen.hideInkDuringBlink
+        ? { hideInkDuringBlink: true as const }
+        : {}),
     },
   };
+}
+
+export function setAvatarDetailsHideInkDuringBlink(
+  details: AvatarDetailsV1,
+  enabled: boolean,
+): AvatarDetailsV1 {
+  const screen = { ...details.screen };
+  if (enabled) screen.hideInkDuringBlink = true;
+  else delete screen.hideInkDuringBlink;
+  return normalizeAvatarDetails({ ...details, screen });
+}
+
+export function avatarDetailsInkHiddenForBlink(
+  details: AvatarDetailsV1 | null | undefined,
+  blinkPhase: "open" | "closed",
+): boolean {
+  return details?.screen.hideInkDuringBlink === true && blinkPhase === "closed";
 }
 
 export function avatarDetailsKey(
@@ -299,6 +321,110 @@ export function interpolateAvatarDetailsGridLine(
     }
   }
   return points;
+}
+
+/** Midpoint-circle traversal keeps outline previews crisp on the pixel grid. */
+export function avatarDetailsCirclePoints(
+  center: AvatarDetailsGridPoint,
+  edge: AvatarDetailsGridPoint,
+): AvatarDetailsGridPoint[] {
+  const centerX = Math.round(center.x);
+  const centerY = Math.round(center.y);
+  const radius = Math.round(
+    Math.hypot(Math.round(edge.x) - centerX, Math.round(edge.y) - centerY),
+  );
+  if (radius === 0) return [{ x: centerX, y: centerY }];
+
+  const points = new Map<string, AvatarDetailsGridPoint>();
+  const addPoint = (x: number, y: number): void => {
+    points.set(`${x}:${y}`, { x, y });
+  };
+  let x = radius;
+  let y = 0;
+  let error = 1 - radius;
+  while (x >= y) {
+    addPoint(centerX + x, centerY + y);
+    addPoint(centerX + y, centerY + x);
+    addPoint(centerX - y, centerY + x);
+    addPoint(centerX - x, centerY + y);
+    addPoint(centerX - x, centerY - y);
+    addPoint(centerX - y, centerY - x);
+    addPoint(centerX + y, centerY - x);
+    addPoint(centerX + x, centerY - y);
+    y += 1;
+    if (error < 0) {
+      error += 2 * y + 1;
+    } else {
+      x -= 1;
+      error += 2 * (y - x) + 1;
+    }
+  }
+  return [...points.values()];
+}
+
+export interface MoveAvatarDetailsPaintMaskResult {
+  mask: Uint8Array;
+  changed: boolean;
+  offset: AvatarDetailsGridPoint;
+}
+
+function avatarDetailsPaintTranslationIsValid(
+  source: Uint8Array,
+  offset: AvatarDetailsGridPoint,
+): boolean {
+  for (let y = 0; y < AVATAR_DETAILS_CANVAS_SIZE; y += 1) {
+    for (let x = 0; x < AVATAR_DETAILS_CANVAS_SIZE; x += 1) {
+      if (
+        avatarDetailsMaskPixel(source, x, y) &&
+        !avatarDetailsWritablePixel(x + offset.x, y + offset.y)
+      ) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+/**
+ * Moves all authored ink together and backs off toward the origin when the
+ * requested offset would clip any pixel outside the writable screen.
+ */
+export function moveAvatarDetailsPaintMask(
+  source: Uint8Array,
+  desiredOffset: AvatarDetailsGridPoint,
+): MoveAvatarDetailsPaintMaskResult {
+  if (source.length !== AVATAR_DETAILS_MASK_BYTE_LENGTH) {
+    throw new RangeError(
+      `Avatar detail mask must contain ${AVATAR_DETAILS_MASK_BYTE_LENGTH} bytes.`,
+    );
+  }
+  const requested = {
+    x: Math.round(desiredOffset.x),
+    y: Math.round(desiredOffset.y),
+  };
+  const candidates = interpolateAvatarDetailsGridLine(
+    { x: 0, y: 0 },
+    requested,
+  );
+  const offset = [...candidates]
+    .reverse()
+    .find((candidate) =>
+      avatarDetailsPaintTranslationIsValid(source, candidate),
+    ) ?? { x: 0, y: 0 };
+  const changed =
+    (offset.x !== 0 || offset.y !== 0) &&
+    avatarDetailsPaintPixelCount(source) > 0;
+  if (!changed) return { mask: source.slice(), changed: false, offset };
+
+  const mask = new Uint8Array(AVATAR_DETAILS_MASK_BYTE_LENGTH);
+  for (let y = 0; y < AVATAR_DETAILS_CANVAS_SIZE; y += 1) {
+    for (let x = 0; x < AVATAR_DETAILS_CANVAS_SIZE; x += 1) {
+      if (avatarDetailsMaskPixel(source, x, y)) {
+        setAvatarDetailsMaskPixel(mask, x + offset.x, y + offset.y, true);
+      }
+    }
+  }
+  return { mask, changed: true, offset };
 }
 
 export interface PaintAvatarDetailsMaskResult {

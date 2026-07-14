@@ -83,6 +83,7 @@ import {
 import {
   collectCoffeePollVotes,
   buildCoffeePollExportLines,
+  coffeeMessagesVisibleInExport,
   buildCoffeeTeamExportLines,
   createCoffeePoll,
   createCoffeeTeamsForSession,
@@ -417,7 +418,7 @@ import {
   getSystemVoiceCapabilities,
   generateBuiltinEnglishWave,
 } from "./builtin-tts.ts";
-import { buildBottishSpeechText } from "./bottish-text.ts";
+import { buildBabbleSpeechText } from "./babble-text.ts";
 import { deleteVector, deleteVectorsForUser } from "./qdrant.ts";
 let config: AppConfig = getAppConfig();
 let db: DatabaseSync = createDatabase();
@@ -455,7 +456,7 @@ function sendVoiceWave(
   wave: Buffer,
   engineUsed:
     | "builtin"
-    | "builtin-bottish"
+    | "builtin-babble"
     | "builtin-local-fallback"
     | "builtin-provider-fallback",
   characterCount: number,
@@ -6664,36 +6665,41 @@ function buildRoutes(): RouteDefinition[] {
         json(ctx.res, boundary.status, boundary);
         return;
       }
-      if (boundary.kind === "builtin-bottish") {
+      if (boundary.kind === "builtin-babble") {
         const controller = new AbortController();
         const onClose = () => controller.abort();
         ctx.req.once("close", onClose);
-        const bottishText = buildBottishSpeechText({
+        const babbleText = buildBabbleSpeechText({
           text: boundary.text,
           seed: request.seed ?? request.messageId ?? boundary.text,
-          tone: normalizeBotAudioVoiceProfileV1(boundary.profile).bottishTone,
         });
         try {
           const wave = await builtinVoiceWaveGeneratorOverride({
-            text: bottishText,
-            profile: boundary.profile,
+            text: babbleText,
+            profile: {
+              ...normalizeBotAudioVoiceProfileV1(boundary.profile),
+              warmth: 0,
+              pace: 0,
+              lilt: 0,
+              bottishTone: 0.45,
+            },
             signal: controller.signal,
           });
           sendVoiceWave(
             ctx.res,
             wave,
-            "builtin-bottish",
-            bottishText.length,
+            "builtin-babble",
+            babbleText.length,
             request.includeAlignment
           );
         } catch (error) {
           if (controller.signal.aborted) return;
           json(ctx.res, 503, {
             ok: false,
-            code: "bottish-system-unavailable",
+            code: "babble-system-unavailable",
             error: error instanceof Error
               ? error.message
-              : "System Bottish voice is unavailable.",
+              : "System Babble voice is unavailable.",
           });
         } finally {
           ctx.req.off("close", onClose);
@@ -6875,7 +6881,11 @@ function buildRoutes(): RouteDefinition[] {
           hasOpenAiApiKey: Boolean(user.openai_key_ciphertext),
           hasAnthropicApiKey: Boolean(user.anthropic_key_ciphertext),
           hasElevenLabsApiKey: Boolean(user.elevenlabs_key_ciphertext),
-          voiceMode: user.voice_mode === "bottish" || user.voice_mode === "english" ? user.voice_mode : "mute",
+          voiceMode: user.voice_mode === "bottish"
+            || user.voice_mode === "babble"
+            || user.voice_mode === "english"
+            ? user.voice_mode
+            : "mute",
           voiceEffectsEnabled: user.voice_effects_enabled !== 0,
           voiceVolume: normalizeBotVoiceVolume(user.voice_volume),
           englishVoiceEngine: user.english_voice_engine === "elevenlabs" ? "elevenlabs" : "builtin",
@@ -9041,7 +9051,7 @@ function buildRoutes(): RouteDefinition[] {
       if (conversation.conversation_mode === "zen") {
         throw new HttpError(400, "Zen conversations cannot be exported from the chat surface.");
       }
-      const messages = db.prepare(
+      const storedMessages = db.prepare(
         `SELECT m.role, m.content, m.created_at, b.name AS bot_name, b.color AS bot_color
            FROM messages m
            LEFT JOIN bots b ON b.id = m.bot_id
@@ -9054,6 +9064,9 @@ function buildRoutes(): RouteDefinition[] {
         bot_name: string | null;
         bot_color: string | null;
       }>;
+      const messages = conversation.conversation_mode === "coffee"
+        ? coffeeMessagesVisibleInExport(storedMessages)
+        : storedMessages;
       const lines = [
         `# ${conversation.title}`,
         `> Exported ${new Date().toISOString()}`,

@@ -17,6 +17,11 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"] },
     },
     {
+      name: "avatar-details-webkit",
+      grep: /Avatar Details/,
+      use: { ...devices["Desktop Safari"] },
+    },
+    {
       name: "marquee-webkit",
       grep: /@marquee/,
       use: { ...devices["Desktop Safari"] },

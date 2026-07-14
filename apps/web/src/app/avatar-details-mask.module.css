@@ -8,8 +8,14 @@
   pointer-events: none;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
-  transform: scaleX(var(--avatar-details-scale-x, 1));
+  transform:
+    scaleX(var(--avatar-details-scale-x, 1))
+    scaleX(var(--avatar-details-facing-scale-x, 1));
   transform-origin: center;
+}
+
+.layer[data-avatar-details-hidden-for-blink="true"] {
+  visibility: hidden;
 }
 
 .halo {

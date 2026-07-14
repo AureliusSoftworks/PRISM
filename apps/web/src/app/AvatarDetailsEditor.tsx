@@ -9,17 +9,28 @@ import {
   useRef,
   useState,
   type CSSProperties,
-  type KeyboardEvent,
   type PointerEvent,
 } from "react";
 import type { BotFaceStyle } from "@localai/shared";
-import { Brush, Eraser, Eye, EyeOff, Redo2, Trash2, Undo2 } from "lucide-react";
+import {
+  Brush,
+  Circle,
+  Eraser,
+  Eye,
+  EyeOff,
+  Minus,
+  Move,
+  Redo2,
+  Trash2,
+  Undo2,
+} from "lucide-react";
 
 import {
   AVATAR_DETAILS_BRUSH_SIZES,
   AVATAR_DETAILS_CANVAS_SIZE,
   AVATAR_DETAILS_MASK_BYTE_LENGTH,
   AVATAR_DETAILS_MAX_PAINT_PIXELS,
+  avatarDetailsCirclePoints,
   avatarDetailsGridPointFromClient,
   avatarDetailsEqual,
   avatarDetailsKey,
@@ -31,13 +42,16 @@ import {
   decodeAvatarDetailsPaintMask,
   encodeAvatarDetailsPaintMask,
   interpolateAvatarDetailsGridLine,
+  moveAvatarDetailsPaintMask,
   normalizeAvatarDetails,
   normalizeAvatarDetailsColor,
   paintAvatarDetailsMask,
   rasterizeAvatarDetailsRgba,
+  setAvatarDetailsHideInkDuringBlink,
   type AvatarDetailsBrushSize,
   type AvatarDetailsGridPoint,
   type AvatarDetailsPaintMode,
+  type AvatarDetailsTool,
   type AvatarDetailsV1,
 } from "./avatar-details";
 import {
@@ -76,14 +90,17 @@ export interface AvatarDetailsEditorProps {
 
 interface AvatarDetailsPointerStroke {
   pointerId: number;
+  tool: AvatarDetailsTool;
+  startPoint: AvatarDetailsGridPoint;
   lastPoint: AvatarDetailsGridPoint;
   before: AvatarDetailsV1;
+  beforeMask: Uint8Array;
   changed: boolean;
 }
 
 function pointerGridPoint(
   event: Pick<
-    PointerEvent<HTMLCanvasElement>,
+    PointerEvent<HTMLDivElement>,
     "clientX" | "clientY" | "currentTarget"
   >,
 ): AvatarDetailsGridPoint {
@@ -92,6 +109,19 @@ function pointerGridPoint(
     event.clientY,
     event.currentTarget.getBoundingClientRect(),
   );
+}
+
+function avatarDetailsWithPaintMask(
+  details: AvatarDetailsV1,
+  mask: Uint8Array,
+): AvatarDetailsV1 {
+  return normalizeAvatarDetails({
+    ...details,
+    screen: {
+      ...details.screen,
+      paintMaskBase64: encodeAvatarDetailsPaintMask(mask),
+    },
+  });
 }
 
 const AvatarDetailsEditorSession = forwardRef<
@@ -121,13 +151,9 @@ const AvatarDetailsEditorSession = forwardRef<
   const [redoHistory, setRedoHistory] = useState<AvatarDetailsV1[]>([]);
   const undoHistoryRef = useRef<readonly AvatarDetailsV1[]>(undoHistory);
   const redoHistoryRef = useRef<readonly AvatarDetailsV1[]>(redoHistory);
-  const [paintMode, setPaintMode] = useState<AvatarDetailsPaintMode>("brush");
+  const [paintMode, setPaintMode] = useState<AvatarDetailsTool>("brush");
   const [brushSize, setBrushSize] = useState<AvatarDetailsBrushSize>(3);
-  const [keyboardCursor, setKeyboardCursor] = useState<AvatarDetailsGridPoint>({
-    x: 64,
-    y: 64,
-  });
-  const [canvasFocused, setCanvasFocused] = useState(false);
+  const [pointerActive, setPointerActive] = useState(false);
   const [faceGuideVisible, setFaceGuideVisible] = useState(true);
   const [limitReached, setLimitReached] = useState(false);
   const [applying, setApplying] = useState(false);
@@ -156,6 +182,7 @@ const AvatarDetailsEditorSession = forwardRef<
     "--zen-live-bot-face-scale": BOT_AVATAR_SCREEN_EDITOR_FACE_PLACEMENT.scale,
     "--zen-live-bot-avatar-face-glyph-size": `${BOT_AVATAR_SCREEN_EDITOR_FACE_GLYPH_FRAME_RATIO * 100}cqw`,
     "--coffee-plate-emoji-face-scale-y": BOT_AVATAR_CANONICAL_FACE_SCALE_Y,
+    "--avatar-details-facing-scale-x": "1",
     zIndex: 1,
   } as CSSProperties;
   const phosphorGlowStyle = { color: normalizedAccentColor } as CSSProperties;
@@ -398,77 +425,154 @@ const AvatarDetailsEditorSession = forwardRef<
 
   const paintPoints = useCallback(
     (points: readonly AvatarDetailsGridPoint[]): boolean => {
+      if (paintMode !== "brush" && paintMode !== "eraser") return false;
       const current = workingRef.current;
       const currentMask =
         decodeAvatarDetailsPaintMask(current.screen.paintMaskBase64) ??
         new Uint8Array(AVATAR_DETAILS_MASK_BYTE_LENGTH);
+      const mode: AvatarDetailsPaintMode = paintMode;
       const result = paintAvatarDetailsMask(
         currentMask,
         points,
         brushSize,
-        paintMode,
+        mode,
       );
       setLimitReached(result.limitReached);
       if (!result.changed) return false;
-      const next = normalizeAvatarDetails({
-        ...current,
-        screen: {
-          ...current.screen,
-          paintMaskBase64: encodeAvatarDetailsPaintMask(result.mask),
-        },
-      });
-      updateWorking(next);
+      updateWorking(avatarDetailsWithPaintMask(current, result.mask));
       return true;
     },
     [brushSize, paintMode, updateWorking],
   );
 
-  const handlePointerDown = (event: PointerEvent<HTMLCanvasElement>): void => {
-    if (event.button !== 0 || event.isPrimary === false) return;
+  const previewCircleStroke = useCallback(
+    (
+      stroke: AvatarDetailsPointerStroke,
+      edge: AvatarDetailsGridPoint,
+    ): boolean => {
+      const result = paintAvatarDetailsMask(
+        stroke.beforeMask,
+        avatarDetailsCirclePoints(stroke.startPoint, edge),
+        brushSize,
+        "brush",
+      );
+      setLimitReached(result.limitReached);
+      updateWorking(avatarDetailsWithPaintMask(stroke.before, result.mask));
+      return result.changed;
+    },
+    [brushSize, updateWorking],
+  );
+
+  const previewLineStroke = useCallback(
+    (
+      stroke: AvatarDetailsPointerStroke,
+      edge: AvatarDetailsGridPoint,
+    ): boolean => {
+      const result = paintAvatarDetailsMask(
+        stroke.beforeMask,
+        interpolateAvatarDetailsGridLine(stroke.startPoint, edge),
+        brushSize,
+        "brush",
+      );
+      setLimitReached(result.limitReached);
+      updateWorking(avatarDetailsWithPaintMask(stroke.before, result.mask));
+      return result.changed;
+    },
+    [brushSize, updateWorking],
+  );
+
+  const previewMoveStroke = useCallback(
+    (
+      stroke: AvatarDetailsPointerStroke,
+      point: AvatarDetailsGridPoint,
+    ): boolean => {
+      const result = moveAvatarDetailsPaintMask(stroke.beforeMask, {
+        x: point.x - stroke.startPoint.x,
+        y: point.y - stroke.startPoint.y,
+      });
+      setLimitReached(false);
+      updateWorking(avatarDetailsWithPaintMask(stroke.before, result.mask));
+      return result.changed;
+    },
+    [updateWorking],
+  );
+
+  const handlePointerDown = (event: PointerEvent<HTMLDivElement>): void => {
+    if (
+      (event.button !== 0 && (event.buttons & 1) === 0) ||
+      event.isPrimary === false
+    )
+      return;
     const point = pointerGridPoint(event);
     event.currentTarget.focus();
-    event.currentTarget.setPointerCapture?.(event.pointerId);
-    pointerStrokeRef.current = {
+    try {
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+    } catch {
+      // Safari standalone web apps can reject pointer capture even while the
+      // pointer remains active. Painting must still begin in that case.
+    }
+    const before = cloneAvatarDetails(workingRef.current);
+    const beforeMask =
+      decodeAvatarDetailsPaintMask(before.screen.paintMaskBase64) ??
+      new Uint8Array(AVATAR_DETAILS_MASK_BYTE_LENGTH);
+    const stroke: AvatarDetailsPointerStroke = {
       pointerId: event.pointerId,
+      tool: paintMode,
+      startPoint: point,
       lastPoint: point,
-      before: cloneAvatarDetails(workingRef.current),
-      changed: paintPoints([point]),
+      before,
+      beforeMask,
+      changed: false,
     };
-    setKeyboardCursor(point);
+    pointerStrokeRef.current = stroke;
+    setPointerActive(true);
+    if (stroke.tool === "brush" || stroke.tool === "eraser") {
+      stroke.changed = paintPoints([point]);
+    } else if (stroke.tool === "line") {
+      stroke.changed = previewLineStroke(stroke, point);
+    } else if (stroke.tool === "circle") {
+      stroke.changed = previewCircleStroke(stroke, point);
+    }
     event.preventDefault();
   };
 
-  const handlePointerMove = (event: PointerEvent<HTMLCanvasElement>): void => {
+  const handlePointerMove = (event: PointerEvent<HTMLDivElement>): void => {
     const stroke = pointerStrokeRef.current;
     if (!stroke || stroke.pointerId !== event.pointerId) return;
     const samples =
       typeof event.nativeEvent.getCoalescedEvents === "function"
         ? event.nativeEvent.getCoalescedEvents()
         : [event.nativeEvent];
+    const bounds = event.currentTarget.getBoundingClientRect();
     let previous = stroke.lastPoint;
     for (const sample of samples) {
-      const bounds = event.currentTarget.getBoundingClientRect();
       const point = avatarDetailsGridPointFromClient(
         sample.clientX,
         sample.clientY,
         bounds,
       );
-      stroke.changed =
-        paintPoints(interpolateAvatarDetailsGridLine(previous, point)) ||
-        stroke.changed;
+      if (stroke.tool === "brush" || stroke.tool === "eraser") {
+        stroke.changed =
+          paintPoints(interpolateAvatarDetailsGridLine(previous, point)) ||
+          stroke.changed;
+      } else if (stroke.tool === "line") {
+        stroke.changed = previewLineStroke(stroke, point);
+      } else if (stroke.tool === "circle") {
+        stroke.changed = previewCircleStroke(stroke, point);
+      } else {
+        stroke.changed = previewMoveStroke(stroke, point);
+      }
       previous = point;
     }
     stroke.lastPoint = previous;
-    setKeyboardCursor(previous);
     event.preventDefault();
   };
 
-  const finishPointerStroke = (
-    event: PointerEvent<HTMLCanvasElement>,
-  ): void => {
+  const finishPointerStroke = (event: PointerEvent<HTMLDivElement>): void => {
     const stroke = pointerStrokeRef.current;
     if (!stroke || stroke.pointerId !== event.pointerId) return;
     pointerStrokeRef.current = null;
+    setPointerActive(false);
     try {
       event.currentTarget.releasePointerCapture?.(event.pointerId);
     } catch {
@@ -493,70 +597,6 @@ const AvatarDetailsEditorSession = forwardRef<
     event.preventDefault();
   };
 
-  const paintKeyboardCursor = (): void => {
-    const before = cloneAvatarDetails(workingRef.current);
-    if (!paintPoints([keyboardCursor])) return;
-    applyHistoryTransition(
-      commitAvatarDetailsHistory(
-        {
-          working: before,
-          undo: undoHistoryRef.current,
-          redo: redoHistoryRef.current,
-        },
-        workingRef.current,
-      ),
-    );
-  };
-
-  const handleCanvasKeyDown = (
-    event: KeyboardEvent<HTMLCanvasElement>,
-  ): void => {
-    const modifier = event.metaKey || event.ctrlKey;
-    if (modifier && event.key.toLowerCase() === "z") {
-      event.preventDefault();
-      if (event.shiftKey) redo();
-      else undo();
-      return;
-    }
-    if (modifier && event.key.toLowerCase() === "y") {
-      event.preventDefault();
-      redo();
-      return;
-    }
-    if (event.key === "b" || event.key === "B") {
-      setPaintMode("brush");
-      event.preventDefault();
-      return;
-    }
-    if (event.key === "e" || event.key === "E") {
-      setPaintMode("eraser");
-      event.preventDefault();
-      return;
-    }
-    if (event.key === "1" || event.key === "3" || event.key === "5") {
-      setBrushSize(Number(event.key) as AvatarDetailsBrushSize);
-      event.preventDefault();
-      return;
-    }
-    if (event.key === "Enter" || event.key === " ") {
-      paintKeyboardCursor();
-      event.preventDefault();
-      return;
-    }
-    const movement = event.shiftKey ? 5 : 1;
-    const next = { ...keyboardCursor };
-    if (event.key === "ArrowLeft") next.x -= movement;
-    else if (event.key === "ArrowRight") next.x += movement;
-    else if (event.key === "ArrowUp") next.y -= movement;
-    else if (event.key === "ArrowDown") next.y += movement;
-    else return;
-    setKeyboardCursor({
-      x: Math.max(0, Math.min(AVATAR_DETAILS_CANVAS_SIZE - 1, next.x)),
-      y: Math.max(0, Math.min(AVATAR_DETAILS_CANVAS_SIZE - 1, next.y)),
-    });
-    event.preventDefault();
-  };
-
   const clearPaint = (): void => {
     if (workingRef.current.screen.paintMaskBase64 === null) return;
     commitMutation({
@@ -565,11 +605,14 @@ const AvatarDetailsEditorSession = forwardRef<
     });
   };
 
-  const cursorStyle = {
-    "--avatar-details-cursor-x": `${keyboardCursor.x + 0.5}`,
-    "--avatar-details-cursor-y": `${keyboardCursor.y + 0.5}`,
-    "--avatar-details-cursor-size": `${brushSize}`,
-  } as CSSProperties;
+  const canvasInstruction =
+    paintMode === "move"
+      ? "Drag to move the illustration."
+      : paintMode === "line"
+        ? "Drag between two points to draw a straight line."
+        : paintMode === "circle"
+          ? "Drag from the center to draw a circle."
+          : "Drag to paint on the screen.";
 
   return (
     <section className={styles.editor} aria-label="Avatar details editor">
@@ -646,19 +689,47 @@ const AvatarDetailsEditorSession = forwardRef<
               <Eraser size={13} aria-hidden="true" />
               Eraser
             </button>
+            <button
+              type="button"
+              aria-pressed={paintMode === "line"}
+              data-selected={paintMode === "line" ? "true" : undefined}
+              onClick={() => setPaintMode("line")}
+            >
+              <Minus size={13} aria-hidden="true" />
+              Line
+            </button>
+            <button
+              type="button"
+              aria-pressed={paintMode === "circle"}
+              data-selected={paintMode === "circle" ? "true" : undefined}
+              onClick={() => setPaintMode("circle")}
+            >
+              <Circle size={13} aria-hidden="true" />
+              Circle
+            </button>
+            <button
+              type="button"
+              aria-pressed={paintMode === "move"}
+              data-selected={paintMode === "move" ? "true" : undefined}
+              onClick={() => setPaintMode("move")}
+            >
+              <Move size={13} aria-hidden="true" />
+              Drag
+            </button>
           </div>
           <div
             role="group"
-            aria-label="Brush size"
+            aria-label="Stroke size"
             className={styles.brushSizes}
           >
             {AVATAR_DETAILS_BRUSH_SIZES.map((size) => (
               <button
                 key={size}
                 type="button"
-                aria-label={`${size} pixel brush`}
+                aria-label={`${size} pixel stroke`}
                 aria-pressed={brushSize === size}
                 data-selected={brushSize === size ? "true" : undefined}
+                disabled={paintMode === "move"}
                 onClick={() => setBrushSize(size)}
               >
                 {size}
@@ -667,7 +738,29 @@ const AvatarDetailsEditorSession = forwardRef<
           </div>
         </div>
 
-        <div className={styles.canvasFrame} style={cursorStyle}>
+        <label className={styles.blinkInkControl}>
+          <input
+            type="checkbox"
+            checked={working.screen.hideInkDuringBlink === true}
+            onChange={(event) => {
+              commitMutation(
+                setAvatarDetailsHideInkDuringBlink(
+                  workingRef.current,
+                  event.currentTarget.checked,
+                ),
+              );
+            }}
+          />
+          <span>
+            <strong>Hide ink while blinking</strong>
+            <small>
+              Temporarily hides drawn pupils, eyelashes, and other screen ink
+              during the closed blink frame.
+            </small>
+          </span>
+        </label>
+
+        <div className={styles.canvasFrame}>
           <canvas
             ref={screenGuideRef}
             className={styles.screenBoundary}
@@ -736,28 +829,21 @@ const AvatarDetailsEditorSession = forwardRef<
             className={`${styles.canvas} ${styles.paintCore}`}
             width={AVATAR_DETAILS_CANVAS_SIZE}
             height={AVATAR_DETAILS_CANVAS_SIZE}
-            tabIndex={0}
+            data-avatar-details-editor-core="true"
+            aria-hidden="true"
+          />
+          <div
+            className={styles.inputSurface}
+            data-tool={paintMode}
+            data-dragging={pointerActive ? "true" : undefined}
             role="application"
-            aria-label={`Avatar pixel canvas. ${paintMode}, ${brushSize} pixel size. Arrow keys move the cursor; Space paints.`}
-            aria-describedby="avatar-details-keyboard-help"
-            onFocus={() => setCanvasFocused(true)}
-            onBlur={() => setCanvasFocused(false)}
-            onKeyDown={handleCanvasKeyDown}
+            aria-label={`Avatar pixel canvas. ${paintMode}, ${brushSize} pixel size. ${canvasInstruction}`}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={finishPointerStroke}
             onPointerCancel={finishPointerStroke}
           />
-          <span
-            className={styles.keyboardCursor}
-            data-visible={canvasFocused ? "true" : undefined}
-            aria-hidden="true"
-          />
         </div>
-        <p id="avatar-details-keyboard-help" className={styles.keyboardHelp}>
-          Keyboard: arrows move, Shift moves 5, Space paints, B/E switch tools,
-          1/3/5 size.
-        </p>
 
         <div className={styles.coverage} aria-live="polite">
           <div>

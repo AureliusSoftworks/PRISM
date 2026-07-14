@@ -2,14 +2,14 @@
 
 # Features and workflows
 
-The main Prism lanes and the latest settings, conversation, voiced Bottish, Coffee, and interaction workflows.
+The main Prism lanes and the latest settings, conversation, four-mode voice, Coffee, and interaction workflows.
 
 
 Categories: `Product`
 
 Aliases: `Workflows`, `Applets`, `Feature map`
 
-Files: `README.md`, `docs/applets.md`, `docs/voices.md`, `AGENTS.md`, `apps/web/src/app/SettingsPanel.tsx`, `apps/web/src/app/page.tsx`, `apps/web/src/app/bottishVoice.ts`, `apps/web/src/app/voiceEffects.ts`, `apps/api/src/bottish-text.ts`, `apps/api/src/voices.ts`, `apps/api/src/composer-cleanup.ts`, `apps/api/src/voice-preview-line.ts`, `apps/api/src/bot-powers.ts`, `apps/web/src/app/coffee-replay.ts`
+Files: `README.md`, `docs/applets.md`, `docs/voices.md`, `AGENTS.md`, `apps/web/src/app/SettingsPanel.tsx`, `apps/web/src/app/page.tsx`, `apps/web/src/app/bottishVoice.ts`, `apps/web/src/app/voiceEffects.ts`, `apps/web/src/app/voiceQuickToggle.ts`, `apps/api/src/babble-text.ts`, `apps/api/src/voices.ts`, `apps/api/src/server.ts`, `packages/shared/src/audioVoice.ts`
 
 ## Experience Lanes
 
@@ -17,31 +17,29 @@ Prism keeps its major workflows in separate lanes instead of one overloaded chat
 
 ## Settings That Follow The Experience
 
-Settings now has a first-class Chat category alongside Coffee and Zen. Chat owns conversation behavior such as memory and writing controls, while Coffee and Zen keep their mode-specific options and tutorial resets. This makes the panel easier to scan without blurring the boundaries between experiences.
+Settings has a first-class Chat category alongside Coffee and Zen. Chat owns conversation behavior such as memory and writing controls, while Coffee and Zen keep their mode-specific options and tutorial resets.
 
 ## Conversation Interaction
 
-Wildcard prompts use bounded cleanup so a resolved prompt cannot leave the conversation stuck indefinitely with the Shh control active. Multi-line code blocks can collapse without widening the normal Chat reading column; users can expand them, use Copy, or triple-click the block, with visible confirmation after copying. Custom context menus also show a brief confirmation when an item is selected.
+Wildcard prompts use bounded cleanup so a resolved prompt cannot leave the conversation stuck indefinitely with the Shh control active. Multi-line code blocks can collapse without widening the normal Chat reading column; users can expand them, use Copy, or triple-click the block, with visible confirmation after copying.
 
 ## Bots, Voice, And Memory
 
-Persona bots can carry behavior, visual identity, exports, memories, voices, and Coffee-only Powers. The selected Bot Library preview is display-only until the user chooses English or Bottish below it. English generates a fresh persona-specific line and plays it automatically in the same click; legacy mic-check and audio-check lines are rejected and regenerated.
+Persona bots can carry behavior, visual identity, exports, memories, voices, and Coffee-only Powers. The labeled voice selector offers Mute, English, Babble, and Bottish directly beside the app and model controls, with the same explicit choices in the constrained tools menu.
 
-Bottish is a voiced robot language built from deterministic pronounceable pseudo-syllables spoken by the selected system voice. Sparse clicks, chirps, gating, and buzz shape the robotic character, while Bottish tone moves from fuller vocal body to a brighter and denser treatment. If Web Audio is unavailable, Prism keeps the voiced gibberish without accents; if system speech is unavailable, the original procedural Bottish engine is the complete fallback. Bottish is local in both LOCAL and ONLINE modes and never uses provider TTS.
+English uses clean system speech. Babble speaks deterministic pronounceable gibberish through the selected system voice and adds bounded clicks, chirps, pops, gates, and sparse buzz bursts. Bottish is the restored procedural robot language and never calls system or provider synthesis. Pitch shapes all audible modes; lilt shapes English only, and the retired Bottish tone field remains ignored for compatibility.
 
-Voice playback remains audio-master across Chat, Zen, Coffee, Story, previews, and replay, so the synthesized carrier drives text reveal and mouth motion. Interruptions stop both carrier and accents.
+Voice playback remains audio-master across Chat, Zen, Coffee, Story, previews, and replay. Live Babble can deliberately fall back to Bottish if system speech is unavailable, while a Babble preview reports unavailability and offers retry instead of playing a misleading substitute. Interruptions stop both carriers and accent queues.
 
 Normal conversations can use scoped continuity, while incognito/private paths avoid memory reads and writes.
 
 ## Coffee Powers And Replay
 
-Coffee Powers are short rules or quirks attached to a bot and applied only during Coffee sessions. Prism compiles supported intents into structured session behavior, surfaces active-power badges, and keeps incomplete powers inactive instead of pretending they worked.
-
-Coffee replay reconstructs more of the saved table state, including arrivals, mood, top-offs, player presence and speech timing, so replay reads more like the session that actually happened.
+Coffee Powers are short rules or quirks attached to a bot and applied only during Coffee sessions. Prism compiles supported intents into structured session behavior, surfaces active-power badges, and keeps incomplete powers inactive instead of pretending they worked. Coffee replay reconstructs saved table state, arrivals, mood, top-offs, player presence, and speech timing.
 
 ## Creative Tools
 
-The current app includes online-gated image generation, bot export/import flows, applet versions, group conversations, and early Story episodes. Planned applets are tracked separately from release versions so experience changes can be discussed at the surface people actually touch.
+The current app includes online-gated image generation, bot export/import flows, applet versions, group conversations, and early Story episodes. Planned applets are tracked separately from release versions.
 
 ## Current Cursor State
 

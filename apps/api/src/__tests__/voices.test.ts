@@ -17,16 +17,32 @@ import {
 describe("voice Phase 1 boundary", () => {
   it("advertises native system speech instead of the retired neural model", () => {
     assert.equal(VOICE_CAPABILITIES.builtinEnglish.model, "system-native");
+    assert.deepEqual(VOICE_CAPABILITIES.modes, ["mute", "english", "babble", "bottish"]);
     assert.deepEqual(VOICE_CAPABILITIES.builtinBottish, {
+      available: true,
+      synthesis: "procedural",
+    });
+    assert.deepEqual(VOICE_CAPABILITIES.builtinBabble, {
       available: true,
       synthesis: "system-hybrid",
       proceduralFallback: true,
     });
   });
-  it("routes Bottish only to builtin system synthesis", () => {
-    const request = validateVoiceSynthesisRequest({
+  it("keeps Bottish client-procedural and routes Babble only to builtin system synthesis", () => {
+    const bottishRequest = validateVoiceSynthesisRequest({
       text: "hello",
       mode: "bottish",
+      engine: "elevenlabs",
+      explicitOnlineContext: true,
+    });
+    assert.deepEqual(resolveVoiceSynthesisBoundary(bottishRequest), {
+      ok: false,
+      status: 409,
+      code: "procedural-client-only",
+    });
+    const request = validateVoiceSynthesisRequest({
+      text: "hello",
+      mode: "babble",
       engine: "elevenlabs",
       explicitOnlineContext: true,
       seed: " message-1 ",
@@ -34,8 +50,8 @@ describe("voice Phase 1 boundary", () => {
     assert.equal(request.seed, "message-1");
     assert.deepEqual(resolveVoiceSynthesisBoundary(request), {
       ok: true,
-      kind: "builtin-bottish",
-      engineUsed: "builtin-bottish",
+      kind: "builtin-babble",
+      engineUsed: "builtin-babble",
       text: "hello",
       profile: request.profile,
     });

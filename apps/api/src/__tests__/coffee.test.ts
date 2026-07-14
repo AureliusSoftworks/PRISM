@@ -41,6 +41,7 @@ import {
   coffeeReplyRepeatsRecentMotifs,
   coffeeReplyRepeatsPollFallbackShape,
   coffeeReplyRepeatsStockFallbackShape,
+  coffeeRepairMaxTokensForTurn,
   coffeeSpeakerMaxTokensForTurn,
   coffeeUserMessageIsActionOnly,
   collectCoffeePollVotes,
@@ -56,6 +57,7 @@ import {
   deleteCoffeeGroup,
   deleteCoffeePreset,
   getCoffeeConversationTranscript,
+  coffeeMessagesVisibleInExport,
   getCoffeeSessionPoll,
   generateCoffeeSessionSynopsis,
   updateCoffeeConversationSettings,
@@ -833,11 +835,13 @@ async function withMockedCoffeeFetch<T>(
   fn: () => Promise<T>,
   options?: {
     chatBodies?: unknown[];
+    chatReplies?: string[];
     anthropicBodies?: unknown[];
     anthropicResponse?: unknown;
   }
 ): Promise<T> {
   const originalFetch = globalThis.fetch;
+  let chatReplyIndex = 0;
   const mockFetch: typeof fetch = async (input, init) => {
     const url = String(input);
     if (url.includes("api.anthropic.com")) {
@@ -869,7 +873,9 @@ async function withMockedCoffeeFetch<T>(
           options.chatBodies.push(null);
         }
       }
-      return new Response(JSON.stringify({ message: { content: replyText } }), {
+      const content = options?.chatReplies?.[chatReplyIndex] ?? replyText;
+      chatReplyIndex += 1;
+      return new Response(JSON.stringify({ message: { content } }), {
         status: 200,
         headers: { "content-type": "application/json" },
       });
@@ -4035,6 +4041,23 @@ describe("buildRouterPrompt", () => {
     assert.match(messages[0]!.content, /answer one concrete part of the previous line/);
   });
 
+  it("treats a player's direct mention as an invitation instead of a command", () => {
+    const messages = buildRouterPrompt({
+      group: [ALICE, BORIS],
+      history: [],
+      userMessage: "[Boris](prism-bot://bot-boris), what do you think?",
+      userAddressedBotId: BORIS.id,
+      lastSpeakerBotId: ALICE.id,
+      turnKind: "user",
+    });
+    const system = messages[0]!.content;
+
+    assert.match(system, /directed attention to Boris/);
+    assert.match(system, /social invitation, not a speaking command/);
+    assert.match(system, /another bot may step in/);
+    assert.match(system, /continue without directly answering the user/);
+  });
+
   it("threads attendance context without making absent bots selectable", () => {
     const messages = buildRouterPrompt({
       group: [ALICE, CARA],
@@ -4230,6 +4253,30 @@ describe("buildRouterPrompt", () => {
 
     assert.ok(override);
     assert.notEqual(override?.id, ALICE.id);
+    assert.ok([CARA.id, DANTE.id, ELENA.id].includes(override?.id ?? ""));
+  });
+
+  it("breaks a dominant 5-bot duo under the default table settings", () => {
+    const group = [ALICE, BORIS, CARA, DANTE, ELENA];
+    const now = new Date().toISOString();
+    const history: ChatMessage[] = [
+      { id: "m1", role: "assistant", botName: "Alice", content: "Patrick hid the map.", createdAt: now },
+      { id: "m2", role: "assistant", botName: "Boris", content: "The map was upside down.", createdAt: now },
+      { id: "m3", role: "assistant", botName: "Alice", content: "That still counts as hiding it.", createdAt: now },
+      { id: "m4", role: "assistant", botName: "Boris", content: "Only if he can find it again.", createdAt: now },
+      { id: "m5", role: "assistant", botName: "Alice", content: "He found the treasure by sitting on it.", createdAt: now },
+      { id: "m6", role: "assistant", botName: "Boris", content: "That was luck, not genius.", createdAt: now },
+    ];
+
+    const override = pickCoffeeSpeakerBalanceOverride({
+      group,
+      history,
+      pickedBotId: ALICE.id,
+      sessionSettings: normalizeCoffeeSessionSettings(undefined),
+      coffeeTopic: "What if Patrick is secretly a genius?",
+    });
+
+    assert.ok(override);
     assert.ok([CARA.id, DANTE.id, ELENA.id].includes(override?.id ?? ""));
   });
 
@@ -6740,6 +6787,34 @@ describe("coffee prompt leak cleanup", () => {
     );
     assert.equal(
       sanitizeCoffeeTableReply(
+        "brightens Maybe his genius is knowing exactly when to look clueless!",
+        "SpongeBob"
+      ),
+      "*brightens* Maybe his genius is knowing exactly when to look clueless!"
+    );
+    assert.equal(
+      sanitizeCoffeeTableReply(
+        "stacks a few coins beside the rulebook The payer gets a vote, lad.",
+        "Mr. Krabs"
+      ),
+      "*stacks a few coins beside the rulebook* The payer gets a vote, lad."
+    );
+    assert.equal(
+      sanitizeCoffeeTableReply(
+        "Patrick Star, opens the rulebook to the middle Then the handoff needs one honest question.",
+        "Patrick Star"
+      ),
+      "*opens the rulebook to the middle* Then the handoff needs one honest question."
+    );
+    assert.equal(
+      sanitizeCoffeeTableReply(
+        "Mr. Krabs, thumbs the rulebook shut A rule that serves itself gets rewritten.",
+        "Mr. Krabs"
+      ),
+      "*thumbs the rulebook shut* A rule that serves itself gets rewritten."
+    );
+    assert.equal(
+      sanitizeCoffeeTableReply(
         "claws are useful at work Now that is just common sense.",
         "Mr. Krabs"
       ),
@@ -7026,6 +7101,47 @@ describe("coffee prompt leak cleanup", () => {
       line,
       /\b(cost|test|case|detail|break|choice|rule|mistake|responsibility|purpose|failure|consequence)\b/i
     );
+  });
+
+  it("keeps emergency and fresh fallbacks anchored to the Coffee topic", () => {
+    const topic = "What if Patrick is secretly a genius?";
+    const oldCarousel =
+      /trust breaks|weakest handoff|follow the consequence|system can survive|who gets to call this a success|skeptical side/i;
+    const emergency = buildCoffeeEmergencyFallbackReply({
+      tableFocus: "Continue the table.",
+      topic,
+      speaker: { id: "bot-krabs", name: "Mr. Krabs" },
+      conversationId: "patrick-fallback",
+      historyLength: 12,
+      maxChars: 140,
+    });
+    const fresh = buildCoffeeFreshFallbackBeat({
+      tableFocus: "Continue the table.",
+      topic,
+      speaker: { id: "bot-patrick", name: "Patrick Star" },
+      conversationId: "patrick-fallback",
+      historyLength: 13,
+      maxChars: 140,
+    });
+
+    assert.match(emergency, /Patrick is secretly a genius/i);
+    assert.match(fresh, /Patrick is secretly a genius/i);
+    assert.doesNotMatch(emergency, oldCarousel);
+    assert.doesNotMatch(fresh, oldCarousel);
+  });
+
+  it("omits blank replay-only system rows from Coffee exports", () => {
+    const visible = coffeeMessagesVisibleInExport([
+      { role: "system", content: "" },
+      { role: "system", content: "   " },
+      { role: "assistant", content: "A real table line." },
+      { role: "system", content: "Session synopsis: The table stayed playful." },
+    ]);
+
+    assert.deepEqual(visible, [
+      { role: "assistant", content: "A real table line." },
+      { role: "system", content: "Session synopsis: The table stayed playful." },
+    ]);
   });
 
   it("avoids reported stock fallback lines in emergency and fresh fallback replies", () => {
@@ -7574,6 +7690,51 @@ describe("Coffee direct mention routing helpers", () => {
     });
 
     assert.equal(addressed, BORIS.id);
+  });
+
+  it("allows the router to choose another bot after a player mention", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+    const session = await createCoffeeConversation(db, userId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+    });
+    const chatBodies: unknown[] = [];
+
+    const turn = await withMockedCoffeeFetch(
+      "Alice continues the table without demanding an answer from Boris.",
+      () =>
+        processCoffeeTurn(
+          db,
+          userId,
+          {
+            conversationId: session.conversation.id,
+            message: "[Boris](prism-bot://bot-boris), what do you think?",
+          },
+          { preferredProvider: "local", sessionRemainingMs: 120_000 }
+        ),
+      {
+        chatBodies,
+        chatReplies: [
+          JSON.stringify({
+            botId: ALICE.id,
+            reason: "Alice has the most natural continuation.",
+            directive: "Continue the prior idea without forcing Boris to answer.",
+          }),
+          "Alice continues the table without demanding an answer from Boris.",
+        ],
+      }
+    );
+    const routerPrompt = (
+      (chatBodies[0] as { messages?: Array<{ content?: string }> } | undefined)
+        ?.messages ?? []
+    )
+      .map((message) => message.content ?? "")
+      .join("\n");
+
+    assert.equal(turn.speakerBotId, ALICE.id);
+    assert.match(routerPrompt, /social invitation, not a speaking command/);
   });
 
   it("keeps the original multi-mention prompt as focus for chained directed turns", async () => {
@@ -8798,6 +8959,34 @@ describe("coffeeReplyLengthCaps", () => {
         modelId: "gpt-4o-mini",
       }),
       96
+    );
+  });
+
+  it("keeps reasoning room for GPT-5.6 Luna repair passes", () => {
+    assert.equal(
+      coffeeRepairMaxTokensForTurn({
+        providerName: "openai",
+        modelId: "gpt-5.6-luna",
+        speakerMaxTokens: 384,
+      }),
+      384
+    );
+    assert.equal(
+      coffeeRepairMaxTokensForTurn({
+        providerName: "openai",
+        modelId: "gpt-5.6-luna",
+        reasoningEffort: "high",
+        speakerMaxTokens: 384,
+      }),
+      640
+    );
+    assert.equal(
+      coffeeRepairMaxTokensForTurn({
+        providerName: "openai",
+        modelId: "gpt-4o-mini",
+        speakerMaxTokens: 104,
+      }),
+      48
     );
   });
 });

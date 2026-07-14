@@ -147,9 +147,11 @@ export function coffeeCupSippingActive(args: {
   progress: number;
   durationMinutes?: number | null;
   speaking?: boolean;
+  thinking?: boolean;
 }): boolean {
   if (args.progress >= 0.96) return false;
   if (args.speaking === true) return false;
+  if (args.thinking === true) return false;
   if (!Number.isFinite(args.nowMs)) return false;
   const sipLikelihood = coffeeCupSipLikelihoodForProgress(args.progress);
   if (sipLikelihood <= 0) return false;
@@ -529,6 +531,7 @@ export function buildCoffeeCupVisualState(args: {
   sippingOverride?: boolean | null;
   sipLockedUntilMs?: number | null;
   speaking?: boolean;
+  thinking?: boolean;
   forceEmpty?: boolean;
   finished?: boolean;
   finishSeed?: string | null;
@@ -540,7 +543,8 @@ export function buildCoffeeCupVisualState(args: {
     Number.isFinite(args.sipLockedUntilMs) &&
     Number.isFinite(args.nowMs) &&
     args.nowMs < args.sipLockedUntilMs;
-  const sippingOverride = sipLocked ? false : args.sippingOverride;
+  const sippingOverride =
+    sipLocked || args.thinking === true ? false : args.sippingOverride;
   const sipBaseProgress =
     args.topOff && Number.isFinite(args.topOff.progressAfter)
       ? clampUnit(args.topOff.progressAfter)
@@ -704,6 +708,7 @@ export function buildCoffeeCupVisualState(args: {
             : sipTriggerProgress,
           durationMinutes: args.durationMinutes,
           speaking: args.speaking === true,
+          thinking: args.thinking === true,
         });
   const steam = coffeeCupSteamVisualState({
     nowMs: args.nowMs,

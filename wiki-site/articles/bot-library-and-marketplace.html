@@ -72,8 +72,8 @@
 <h2>Canvas Behavior</h2>
 <p>A focused group card is a drill-in view, not a dead end. Clicking open canvas outside the group card returns to the overview where all bots are visible. Interacting with the card, bot tiles, menus, dialogs, or composer controls does not trigger that return.</p>
 <h2>Selected Bot Preview</h2>
-<p>Selecting a bot opens a large persona preview on the left while the library remains available. The preview itself is intentionally silent. Use the English or Bottish buttons below it to hear the bot, so opening menus or interacting with the surrounding library never triggers surprise speech.</p>
-<p>An English click clears the previous generated sample, creates a fresh persona-specific line, waits for synthesis, and then plays it automatically. The button shows generation, playback, completion, and error feedback. Preview prompts reject microphone checks, audio checks, and generic testing language.</p>
+<p>Selecting a bot opens a large persona preview on the left while the library remains available. The preview itself is intentionally silent. Use the English, Babble, or Bottish buttons below it to hear the bot, so opening menus or interacting with the surrounding library never triggers surprise speech.</p>
+<p>English creates a fresh persona-specific line and plays clean system speech. Babble speaks that line as system-voiced gibberish with robot accents. If the system voice is not ready, the Babble preview reports that it is loading or unavailable and allows retry; it never silently previews Bottish. Bottish plays the restored procedural robot language directly. Preview prompts reject microphone checks, audio checks, and generic testing language.</p>
 <h2>Context Menus</h2>
 <p>Right-clicking the selected preview opens Avatar Studio, Memories, Images, and Settings. The menu remains authoritative even while Coffee Mode is active. Context-menu items use a pointer cursor and show a brief visual confirmation after selection before the requested action takes over.</p>
 <p>Multiple selected bots can create or update a group when the selection is eligible. A single bot can be added to an existing custom group from the context menu through a chooser that lists only groups where the bot is not already present and capacity remains.</p>
@@ -97,10 +97,12 @@
   <h2>Related files</h2>
   <ul><li><a class="source-link" href="../../apps/web/src/app/page.tsx"><code>apps/web/src/app/page.tsx</code></a></li>
 <li><a class="source-link" href="../../apps/web/src/app/page.module.css"><code>apps/web/src/app/page.module.css</code></a></li>
+<li><a class="source-link" href="../../apps/web/src/app/bottishVoice.ts"><code>apps/web/src/app/bottishVoice.ts</code></a></li>
 <li><a class="source-link" href="../../apps/web/src/app/botLibraryGroupFilter.ts"><code>apps/web/src/app/botLibraryGroupFilter.ts</code></a></li>
 <li><a class="source-link" href="../../apps/web/src/app/botLibraryShowcase.test.ts"><code>apps/web/src/app/botLibraryShowcase.test.ts</code></a></li>
 <li><a class="source-link" href="../../apps/web/src/app/context-menu-selection-feedback.test.ts"><code>apps/web/src/app/context-menu-selection-feedback.test.ts</code></a></li>
 <li><a class="source-link" href="../../apps/api/src/voice-preview-line.ts"><code>apps/api/src/voice-preview-line.ts</code></a></li>
+<li><a class="source-link" href="../../packages/shared/src/audioVoice.ts"><code>packages/shared/src/audioVoice.ts</code></a></li>
 <li><a class="source-link" href="../../packages/shared/src/botPower.ts"><code>packages/shared/src/botPower.ts</code></a></li></ul>
 </aside>
   <details class="record-meta">
@@ -111,14 +113,16 @@
     <div><dt>Authority</dt><dd>agent</dd></div>
     <div><dt>Confidence</dt><dd>high</dd></div>
     <div><dt>Created</dt><dd><time datetime="2026-07-05T04:14:25.411Z">2026-07-05</time></dd></div>
-    <div><dt>Updated</dt><dd><time datetime="2026-07-13T04:09:14.952Z">2026-07-13</time></dd></div>
+    <div><dt>Updated</dt><dd><time datetime="2026-07-14T01:44:01.344Z">2026-07-14</time></dd></div>
     <div><dt>Tags</dt><dd><code>audience:all</code> <code>bots</code> <code>groups</code> <code>marketplace</code> <code>ux</code></dd></div>
     <div><dt>Files</dt><dd><ul><li><a class="source-link" href="../../apps/web/src/app/page.tsx"><code>apps/web/src/app/page.tsx</code></a></li>
 <li><a class="source-link" href="../../apps/web/src/app/page.module.css"><code>apps/web/src/app/page.module.css</code></a></li>
+<li><a class="source-link" href="../../apps/web/src/app/bottishVoice.ts"><code>apps/web/src/app/bottishVoice.ts</code></a></li>
 <li><a class="source-link" href="../../apps/web/src/app/botLibraryGroupFilter.ts"><code>apps/web/src/app/botLibraryGroupFilter.ts</code></a></li>
 <li><a class="source-link" href="../../apps/web/src/app/botLibraryShowcase.test.ts"><code>apps/web/src/app/botLibraryShowcase.test.ts</code></a></li>
 <li><a class="source-link" href="../../apps/web/src/app/context-menu-selection-feedback.test.ts"><code>apps/web/src/app/context-menu-selection-feedback.test.ts</code></a></li>
 <li><a class="source-link" href="../../apps/api/src/voice-preview-line.ts"><code>apps/api/src/voice-preview-line.ts</code></a></li>
+<li><a class="source-link" href="../../packages/shared/src/audioVoice.ts"><code>packages/shared/src/audioVoice.ts</code></a></li>
 <li><a class="source-link" href="../../packages/shared/src/botPower.ts"><code>packages/shared/src/botPower.ts</code></a></li></ul></dd></div>
   </dl>
 </details>

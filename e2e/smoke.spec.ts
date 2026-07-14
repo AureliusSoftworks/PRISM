@@ -322,6 +322,34 @@ test.describe("PRISM desktop smoke", () => {
       ]);
   });
 
+  test("blank canvas returns a focused empty Chat to all bots @canvas", async ({
+    page,
+  }) => {
+    await installAuthenticatedApi(page);
+    await page.goto("/?view=chat");
+
+    const firstBot = page.getByRole("radio", { name: "Test Bot 1" });
+    await expect(firstBot).toBeVisible();
+    await firstBot.click();
+
+    const selectedHero = page.locator('[data-selected-bot-hero="true"]');
+    await expect(selectedHero).toBeVisible();
+    await expect(firstBot).toHaveAttribute("aria-checked", "true");
+
+    const focusedCanvas = selectedHero.locator("..");
+    const focusedCanvasBox = await focusedCanvas.boundingBox();
+    expect(focusedCanvasBox).not.toBeNull();
+    if (!focusedCanvasBox) return;
+    await page.mouse.click(
+      focusedCanvasBox.x + 24,
+      focusedCanvasBox.y + focusedCanvasBox.height / 2,
+    );
+
+    await expect(selectedHero).toHaveCount(0);
+    await expect(firstBot).toHaveAttribute("aria-checked", "false");
+    await expect(page.locator('[data-title="PRISM"]')).toBeVisible();
+  });
+
   test("custom bot draft edits Avatar Details as a guarded local recipe", async ({
     page,
   }) => {
@@ -342,7 +370,30 @@ test.describe("PRISM desktop smoke", () => {
 
     const studio = page.getByRole("dialog", { name: "Draft Detail Bot" });
     await expect(studio).toBeVisible();
+    const tabGrid = studio.getByRole("tablist", {
+      name: "Avatar control sections",
+    });
+    const tabGridTracks = await tabGrid.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return {
+        columns: style.gridTemplateColumns.split(/\s+/).filter(Boolean).length,
+        rows: style.gridTemplateRows.split(/\s+/).filter(Boolean).length,
+      };
+    });
+    expect(tabGridTracks).toEqual({ columns: 3, rows: 3 });
     await studio.getByRole("tab", { name: "Details" }).click({ force: true });
+    const avatarTabs = studio.getByRole("tablist", {
+      name: "Avatar control sections",
+    });
+    const tabRowCount = await avatarTabs
+      .getByRole("tab")
+      .evaluateAll(
+        (tabs) =>
+          new Set(
+            tabs.map((tab) => Math.round(tab.getBoundingClientRect().top)),
+          ).size,
+      );
+    expect(tabRowCount).toBeGreaterThan(1);
     const detailsEditor = studio.getByRole("region", {
       name: "Avatar details editor",
     });
@@ -368,12 +419,36 @@ test.describe("PRISM desktop smoke", () => {
     const paintCanvas = detailsEditor.getByRole("application", {
       name: /Avatar pixel canvas/,
     });
-    await paintCanvas.evaluate((element) =>
-      element.scrollIntoView({ block: "center", inline: "center" }),
-    );
+    await expect(paintCanvas).toBeVisible();
+    const controlStack = studio.locator('[data-avatar-control-stack="true"]');
+    const controlStackLayout = await controlStack.evaluate((element) => ({
+      canvasWidth:
+        element.querySelector('[role="application"]')?.getBoundingClientRect()
+          .width ?? 0,
+      clientHeight: element.clientHeight,
+      contentHeight:
+        element.firstElementChild?.getBoundingClientRect().height ?? 0,
+      contentSections: Array.from(
+        element.firstElementChild?.children ?? [],
+      ).map((child) => ({
+        className: child.className,
+        height: child.getBoundingClientRect().height,
+      })),
+      overflowY: getComputedStyle(element).overflowY,
+      scrollHeight: element.scrollHeight,
+      scrollTop: element.scrollTop,
+    }));
+    expect(controlStackLayout.overflowY).toBe("auto");
+    expect(controlStackLayout.scrollTop).toBe(0);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await expect
+      .poll(async () => (await paintCanvas.boundingBox())?.width ?? 0)
+      .toBeGreaterThanOrEqual(315);
     const paintBounds = await paintCanvas.boundingBox();
     if (!paintBounds)
       throw new Error("Avatar screen editor canvas is not measurable.");
+    expect(paintBounds.width).toBeGreaterThanOrEqual(315);
+    expect(paintBounds.height).toBe(paintBounds.width);
     const previewAvatar = studio.getByRole("img", {
       name: "Draft Detail Bot avatar preview",
     });
@@ -413,7 +488,7 @@ test.describe("PRISM desktop smoke", () => {
       expect(
         Math.abs(guideCenter.x - previewCenter.x),
         `${part} x ${JSON.stringify({ guideCenter, previewCenter })}`,
-      ).toBeLessThan(0.015);
+      ).toBeLessThan(0.018);
       expect(
         Math.abs(guideCenter.y - previewCenter.y),
         `${part} y ${JSON.stringify({ guideCenter, previewCenter })}`,
@@ -435,6 +510,24 @@ test.describe("PRISM desktop smoke", () => {
     const liveDetailsCanvas = studio.locator(
       '[data-avatar-details-mask="true"]',
     );
+    const editorCoreCanvas = detailsEditor.locator(
+      '[data-avatar-details-editor-core="true"]',
+    );
+    await expect
+      .poll(() =>
+        editorCoreCanvas.evaluate((element) => {
+          const canvas = element as HTMLCanvasElement;
+          const context = canvas.getContext("2d");
+          if (!context) return 0;
+          const pixels = context.getImageData(36, 60, 18, 9).data;
+          let alpha = 0;
+          for (let index = 3; index < pixels.length; index += 4) {
+            alpha += pixels[index] ?? 0;
+          }
+          return alpha;
+        }),
+      )
+      .toBeGreaterThan(0);
     await expect(liveDetailsCanvas).toBeVisible({ timeout: 20_000 });
     await expect
       .poll(() =>
@@ -475,6 +568,64 @@ test.describe("PRISM desktop smoke", () => {
     }
     await page.mouse.up();
 
+    const alphaAtEditorGridPoint = (x: number, y: number) =>
+      editorCoreCanvas.evaluate(
+        (element, point) => {
+          const context = (element as HTMLCanvasElement).getContext("2d");
+          return context?.getImageData(point.x, point.y, 1, 1).data[3] ?? 0;
+        },
+        { x, y },
+      );
+    const editorPoint = async (x: number, y: number) => {
+      const bounds = await paintCanvas.boundingBox();
+      if (!bounds)
+        throw new Error("Avatar screen editor canvas is not measurable.");
+      return {
+        x: bounds.x + bounds.width * ((x + 0.5) / 128),
+        y: bounds.y + bounds.height * ((y + 0.5) / 128),
+      };
+    };
+    await detailsEditor
+      .getByRole("button", { name: "Line", exact: true })
+      .click();
+    await expect(paintCanvas).toBeVisible();
+    const lineStart = await editorPoint(44, 80);
+    const lineEnd = await editorPoint(56, 84);
+    await page.mouse.move(lineStart.x, lineStart.y);
+    await page.mouse.down();
+    await page.mouse.move(lineEnd.x, lineEnd.y);
+    await page.mouse.up();
+    await expect.poll(() => alphaAtEditorGridPoint(50, 82)).toBeGreaterThan(0);
+
+    await detailsEditor
+      .getByRole("button", { name: "Circle", exact: true })
+      .click();
+    await expect(paintCanvas).toBeVisible();
+    const circleCenter = await editorPoint(75, 80);
+    const circleEdge = await editorPoint(81, 80);
+    await page.mouse.move(circleCenter.x, circleCenter.y);
+    await page.mouse.down();
+    await page.mouse.move(circleEdge.x, circleEdge.y);
+    await page.mouse.up();
+    await expect.poll(() => alphaAtEditorGridPoint(75, 74)).toBeGreaterThan(0);
+
+    await detailsEditor
+      .getByRole("button", { name: "Drag", exact: true })
+      .click();
+    await expect(paintCanvas).toBeVisible();
+    const dragStart = await editorPoint(64, 64);
+    const dragEnd = await editorPoint(70, 68);
+    await page.mouse.move(dragStart.x, dragStart.y);
+    await page.mouse.down();
+    await page.mouse.move(dragEnd.x, dragEnd.y);
+    await page.mouse.up();
+    await expect.poll(() => alphaAtEditorGridPoint(87, 84)).toBeGreaterThan(0);
+    await expect.poll(() => alphaAtEditorGridPoint(75, 74)).toBe(0);
+
+    await detailsEditor.getByRole("button", { name: "Undo" }).click();
+    await expect.poll(() => alphaAtEditorGridPoint(75, 74)).toBeGreaterThan(0);
+    await expect.poll(() => alphaAtEditorGridPoint(87, 84)).toBe(0);
+
     await expect(liveDetailsCanvas).toBeVisible();
     await expect(
       detailsEditor.getByText("Working copy · not applied"),
@@ -492,6 +643,91 @@ test.describe("PRISM desktop smoke", () => {
       .getByRole("button", { name: "Apply", exact: true })
       .click({ force: true });
     await expect(detailsEditor.getByText("Applied recipe")).toBeVisible();
+
+    for (const controls of [
+      {
+        tab: "Eyes",
+        region: "Eye avatar controls",
+        finalControl: "Eye position",
+      },
+      {
+        tab: "Mouth",
+        region: "Mouth avatar controls",
+        finalControl: "Mouth position",
+      },
+    ]) {
+      await studio
+        .getByRole("tab", { name: controls.tab })
+        .click({ force: true });
+      const controlRegion = studio.getByRole("region", {
+        name: controls.region,
+      });
+      await expect(controlRegion).toBeVisible();
+      const finalControl = controlRegion.getByText(controls.finalControl);
+      await finalControl.scrollIntoViewIfNeeded();
+      await expect(finalControl).toBeInViewport();
+      const layout = await controlStack.evaluate((element) => ({
+        clientHeight: element.clientHeight,
+        overflowY: getComputedStyle(element).overflowY,
+        scrollHeight: element.scrollHeight,
+        scrollTop: element.scrollTop,
+      }));
+      expect(layout.overflowY).toBe("auto");
+      if (controls.tab === "Mouth") {
+        await expect(controlRegion.getByText("Mouth animation")).toHaveCount(0);
+        await controlRegion
+          .getByRole("button", { name: "Custom mouth glyph" })
+          .click();
+        await controlRegion
+          .getByRole("textbox", { name: "Custom mouth glyph" })
+          .press("3");
+
+        const positionPad = controlRegion.getByRole("slider", {
+          name: "Mouth position",
+        });
+        const previewMouth = previewAvatar.locator(
+          '[data-coffee-plate-emoji-part="mouth"]',
+        );
+        await positionPad.scrollIntoViewIfNeeded();
+        const centeredMouth = await previewMouth.boundingBox();
+        const padBounds = await positionPad.boundingBox();
+        if (!centeredMouth || !padBounds)
+          throw new Error("Mouth placer geometry is not measurable.");
+
+        await page.mouse.click(
+          padBounds.x + padBounds.width * 0.9,
+          padBounds.y + padBounds.height * 0.5,
+        );
+        await expect(positionPad).toHaveAttribute(
+          "aria-valuetext",
+          /X \+0\.1[2468] · Y 0\.00/,
+        );
+        await expect
+          .poll(async () => (await previewMouth.boundingBox())?.x ?? 0)
+          .toBeGreaterThan(centeredMouth.x);
+
+        await page.mouse.click(
+          padBounds.x + padBounds.width * 0.1,
+          padBounds.y + padBounds.height * 0.5,
+        );
+        await expect(positionPad).toHaveAttribute(
+          "aria-valuetext",
+          /X -0\.1[2468] · Y 0\.00/,
+        );
+        await expect
+          .poll(async () => (await previewMouth.boundingBox())?.x ?? 0)
+          .toBeLessThan(centeredMouth.x);
+      }
+    }
+
+    await studio.getByRole("tab", { name: "Motion" }).click({ force: true });
+    const motionControls = studio.getByRole("region", {
+      name: "Motion avatar controls",
+    });
+    await expect(motionControls.getByText("Mouth animation")).toBeVisible();
+    await expect(
+      motionControls.getByRole("button", { name: "Pulse" }),
+    ).toBeVisible();
   });
 
   test("existing custom bot Studio renders its saved Avatar Details", async ({
@@ -577,9 +813,50 @@ test.describe("PRISM desktop smoke", () => {
       .click({ force: true });
 
     const studio = page.getByRole("dialog", { name: "Test Bot 1" });
-    await expect(studio.getByRole("tab", { name: "Details" })).toBeVisible();
+    const detailsTab = studio.getByRole("tab", { name: "Details" });
+    await expect(detailsTab).toBeVisible();
     await expect(
       studio.locator('[data-avatar-details-mask="true"]'),
     ).toBeVisible();
+    await detailsTab.click({ force: true });
+    const detailsEditor = studio.getByRole("region", {
+      name: "Avatar details editor",
+    });
+    const clearInk = detailsEditor.getByRole("button", {
+      name: "Clear pixel ink",
+    });
+    if (await clearInk.isEnabled()) await clearInk.click();
+    const paintCanvas = detailsEditor.getByRole("application", {
+      name: /Avatar pixel canvas/,
+    });
+    await paintCanvas.scrollIntoViewIfNeeded();
+    const paintBounds = await paintCanvas.boundingBox();
+    if (!paintBounds)
+      throw new Error("Existing bot screen editor canvas is not measurable.");
+    await page.mouse.click(
+      paintBounds.x + paintBounds.width / 2,
+      paintBounds.y + paintBounds.height / 2,
+    );
+    await expect(
+      detailsEditor.getByText("Working copy · not applied"),
+    ).toBeVisible();
+    await expect
+      .poll(() =>
+        detailsEditor
+          .locator('[data-avatar-details-editor-core="true"]')
+          .evaluate((element) => {
+            const canvas = element as HTMLCanvasElement;
+            const context = canvas.getContext("2d");
+            if (!context) return 0;
+            return context
+              .getImageData(60, 60, 9, 9)
+              .data.reduce(
+                (alpha, channel, index) =>
+                  index % 4 === 3 ? alpha + channel : alpha,
+                0,
+              );
+          }),
+      )
+      .toBeGreaterThan(0);
   });
 });

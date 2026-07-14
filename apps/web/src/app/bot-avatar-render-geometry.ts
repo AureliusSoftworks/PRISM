@@ -28,3 +28,20 @@ export const BOT_AVATAR_SCREEN_EDITOR_FACE_GLYPH_FRAME_RATIO = 0.2337;
 
 /** Authored punctuation faces read normally with this post-rotation flip. */
 export const BOT_AVATAR_CANONICAL_FACE_SCALE_Y = "-1";
+
+/**
+ * Authored screen ink is stored in the editor's front-facing coordinates.
+ * The face glyph always carries a canonical post-rotation `scaleY(-1)` just to
+ * make punctuation readable, so only the opposite runtime scale represents an
+ * actual horizontal bot flip for the authored canvas.
+ */
+export function botAvatarDetailsFacingScaleX(
+  faceScaleY: string | number,
+): "1" | "-1" {
+  const faceIsNegative =
+    typeof faceScaleY === "number"
+      ? faceScaleY < 0
+      : String(faceScaleY).trim().startsWith("-");
+  const canonicalIsNegative = BOT_AVATAR_CANONICAL_FACE_SCALE_Y.startsWith("-");
+  return faceIsNegative === canonicalIsNegative ? "1" : "-1";
+}

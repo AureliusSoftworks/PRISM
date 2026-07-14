@@ -6,20 +6,74 @@ import {
   coffeeAutoplayForceTurnShouldRun,
   coffeeAutoplayWatchdogShouldWake,
   coffeeCenterFeedMessagesDuringPendingReveal,
+  coffeeComposerUsesRichInput,
   coffeeDraftChangeCountsAsTyping,
   coffeeDirectedMentionBotIds,
   coffeeEmptyTurnAutoplayRetryDelayMs,
   coffeeGeneratedReplyRevealDeferralMs,
   coffeeLoopTimerOwnsAutoplayTurn,
   coffeePendingSubmittedUserLineVisible,
+  coffeePlayerResponseBeatMs,
   coffeeShouldQueueAssistantRevealAfterUserTyping,
   coffeeShouldIgnoreStaleTurnResponse,
   coffeeShouldWaitForPendingBotRevealBeforeNextTurn,
   coffeeTableTalkAutoplayDeferralMs,
+  coffeeVoicePlaybackOwnsAutoplayGate,
   coffeeVisibleDirectedMentionBotIds,
 } from "./coffee-user-reveal-flow.ts";
 
 describe("coffee user reveal flow", () => {
+  it("keeps the Coffee table composer rich so mentions render as chips", () => {
+    assert.equal(
+      coffeeComposerUsesRichInput({
+        variant: "coffee-table",
+        markdownEditorEnabled: false,
+      }),
+      true
+    );
+    assert.equal(
+      coffeeComposerUsesRichInput({
+        variant: "chat",
+        markdownEditorEnabled: false,
+      }),
+      false
+    );
+    assert.equal(
+      coffeeComposerUsesRichInput({
+        variant: "coffee-global",
+        markdownEditorEnabled: true,
+      }),
+      true
+    );
+  });
+
+  it("adds a deterministic social beat after the player's line", () => {
+    const base = {
+      conversationId: "coffee-1",
+      message: "Hi Light Yagami",
+      responseDelayBias: 50,
+      breathingRoom: 50,
+      crossTalk: "normal" as const,
+    };
+    const repeated = coffeePlayerResponseBeatMs(base);
+    assert.equal(coffeePlayerResponseBeatMs(base), repeated);
+    assert.ok(repeated >= 650 && repeated <= 2_600);
+    assert.ok(
+      coffeePlayerResponseBeatMs({
+        ...base,
+        responseDelayBias: 0,
+        breathingRoom: 100,
+        crossTalk: "rare",
+      }) >
+        coffeePlayerResponseBeatMs({
+          ...base,
+          responseDelayBias: 100,
+          breathingRoom: 0,
+          crossTalk: "pileup",
+        })
+    );
+  });
+
   it("queues assistant reveal while the user line is still typing", () => {
     assert.equal(coffeeShouldQueueAssistantRevealAfterUserTyping("userTableTyping"), true);
     assert.equal(coffeeShouldQueueAssistantRevealAfterUserTyping("botThinking"), false);
@@ -203,6 +257,37 @@ describe("coffee user reveal flow", () => {
         timerPresent: false,
         scheduledForMs: null,
         nowMs: 20_000,
+      }),
+      false
+    );
+  });
+
+  it("lets only an active Coffee voice message hold the autoplay gate", () => {
+    assert.equal(
+      coffeeVoicePlaybackOwnsAutoplayGate({
+        busy: true,
+        activeMessageId: "message-live",
+      }),
+      true
+    );
+    assert.equal(
+      coffeeVoicePlaybackOwnsAutoplayGate({
+        busy: true,
+        activeMessageId: null,
+      }),
+      false
+    );
+    assert.equal(
+      coffeeVoicePlaybackOwnsAutoplayGate({
+        busy: true,
+        activeMessageId: "  ",
+      }),
+      false
+    );
+    assert.equal(
+      coffeeVoicePlaybackOwnsAutoplayGate({
+        busy: false,
+        activeMessageId: "message-finished",
       }),
       false
     );

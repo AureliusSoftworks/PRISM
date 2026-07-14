@@ -16,6 +16,8 @@ import {
 describe("audio voice normalization", () => {
   it("keeps only supported modes and engines", () => {
     assert.equal(normalizeVoiceMode("english"), "english");
+    assert.equal(normalizeVoiceMode("babble"), "babble");
+    assert.equal(normalizeVoiceMode("bottish"), "bottish");
     assert.equal(normalizeVoiceMode("robot"), "mute");
     assert.equal(normalizeEnglishVoiceEngine("elevenlabs"), "elevenlabs");
     assert.equal(normalizeEnglishVoiceEngine("remote"), "builtin");
