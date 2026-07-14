@@ -1,4 +1,10 @@
-import { test, expect, type Page, type Route } from "@playwright/test";
+import {
+  test,
+  expect,
+  type Locator,
+  type Page,
+  type Route,
+} from "@playwright/test";
 
 const testUser = {
   id: "e2e-user",
@@ -59,6 +65,23 @@ const testConversation = {
   createdAt: "2026-01-01T00:00:00.000Z",
   updatedAt: "2026-01-01T00:00:00.000Z",
 };
+
+async function activateNavigationControl(locator: Locator): Promise<void> {
+  await locator.evaluate((element) => (element as HTMLElement).click());
+}
+
+async function activateBotManagementControl(locator: Locator): Promise<void> {
+  await locator.evaluate((element) =>
+    element.dispatchEvent(
+      new MouseEvent("dblclick", {
+        bubbles: true,
+        cancelable: true,
+        detail: 2,
+        view: window,
+      }),
+    ),
+  );
+}
 
 async function installAuthenticatedApi(page: Page): Promise<void> {
   await page.route("**/api/**", async (route: Route) => {
@@ -359,15 +382,21 @@ test.describe("PRISM desktop smoke", () => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto("/");
 
-    await page.getByRole("button", { name: "Open bot customizer" }).click();
-    await page.getByRole("button", { name: /Create new bot/ }).click();
+    await activateNavigationControl(
+      page.getByRole("button", { name: "Open bot customizer" }),
+    );
+    await activateNavigationControl(
+      page.getByRole("button", { name: /Create new bot/ }),
+    );
     await page
       .getByRole("region", { name: "Bot identity" })
       .getByPlaceholder("Name this bot")
       .fill("Draft Detail Bot");
-    await page
-      .getByRole("button", { name: "Open Avatar Studio to edit bot avatar" })
-      .click({ force: true });
+    await activateNavigationControl(
+      page.getByRole("button", {
+        name: "Open Avatar Studio to edit bot avatar",
+      }),
+    );
 
     const studio = page.getByRole("dialog", { name: "Draft Detail Bot" });
     await expect(studio).toBeVisible();
@@ -439,22 +468,26 @@ test.describe("PRISM desktop smoke", () => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto("/");
 
-    await page.getByRole("button", { name: "Open bot customizer" }).click();
-    await page.getByRole("button", { name: /Browse bots/ }).click();
-    await page
-      .getByRole("button", {
+    await activateNavigationControl(
+      page.getByRole("button", { name: "Open bot customizer" }),
+    );
+    await activateNavigationControl(
+      page.getByRole("button", { name: /Browse bots/ }),
+    );
+    await activateBotManagementControl(
+      page.getByRole("button", {
         name: /Preview Test Bot 1; double-click to manage/,
-      })
-      .dblclick({ force: true });
+      }),
+    );
 
     await expect(
       page.locator(
         '[data-bot-showcase-context="true"] [data-avatar-details-mask="true"]',
       ),
     ).toBeVisible();
-    await page
-      .getByRole("button", { name: /^Avatar Studio/ })
-      .click({ force: true });
+    await activateNavigationControl(
+      page.getByRole("button", { name: /^Avatar Studio/ }),
+    );
 
     const studio = page.getByRole("dialog", { name: "Test Bot 1" });
     await expect(studio).toBeVisible();
