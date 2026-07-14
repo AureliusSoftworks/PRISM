@@ -8,6 +8,49 @@ export type CoffeeUserRevealFlowState =
   | "userTableTyping"
   | "tableTyping";
 
+export function coffeeComposerUsesRichInput(args: {
+  variant: "chat" | "coffee-global" | "coffee-table";
+  markdownEditorEnabled: boolean;
+}): boolean {
+  return args.markdownEditorEnabled || args.variant === "coffee-table";
+}
+
+function stableUnitValue(seed: string): number {
+  let hash = 2166136261;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash ^= seed.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0) / 0xffffffff;
+}
+
+/** A short social beat after the player's table line finishes revealing. */
+export function coffeePlayerResponseBeatMs(args: {
+  conversationId: string;
+  message: string;
+  responseDelayBias: number;
+  breathingRoom: number;
+  crossTalk: "rare" | "normal" | "chatty" | "pileup";
+}): number {
+  const speed = Math.max(0, Math.min(1, args.responseDelayBias / 100));
+  const room = Math.max(0, Math.min(1, args.breathingRoom / 100));
+  const minMs = 900 + room * 350 - speed * 300;
+  const maxMs = 1_650 + room * 750 - speed * 500;
+  const crossTalkScale =
+    args.crossTalk === "pileup"
+      ? 0.76
+      : args.crossTalk === "chatty"
+        ? 0.88
+        : args.crossTalk === "rare"
+          ? 1.15
+          : 1;
+  const unit = stableUnitValue(
+    `${args.conversationId.trim() || "coffee"}:${args.message.trim()}:player-response`,
+  );
+  const delayMs = (minMs + (maxMs - minMs) * unit) * crossTalkScale;
+  return Math.max(650, Math.min(2_600, Math.round(delayMs)));
+}
+
 export function coffeeShouldQueueAssistantRevealAfterUserTyping(
   state: CoffeeUserRevealFlowState
 ): boolean {
@@ -87,6 +130,13 @@ export function coffeeLoopTimerOwnsAutoplayTurn(args: {
 }): boolean {
   if (!args.timerPresent) return false;
   return args.scheduledForMs === null || args.scheduledForMs > args.nowMs;
+}
+
+export function coffeeVoicePlaybackOwnsAutoplayGate(args: {
+  busy: boolean;
+  activeMessageId: string | null | undefined;
+}): boolean {
+  return args.busy && Boolean(args.activeMessageId?.trim());
 }
 
 export function coffeeAutoplayForceTurnShouldRun(args: {

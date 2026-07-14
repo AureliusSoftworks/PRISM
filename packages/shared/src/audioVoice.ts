@@ -1,6 +1,6 @@
 /** Account-wide voice mode. This is intentionally separate from BotVoicePreset,
  * which controls how a bot writes rather than how it sounds. */
-export type VoiceMode = "mute" | "bottish" | "english";
+export type VoiceMode = "mute" | "english" | "babble" | "bottish";
 export type EnglishVoiceEngine = "builtin" | "elevenlabs";
 
 export const BOT_AUDIO_VOICE_IDS = [
@@ -179,7 +179,9 @@ export function isBotVoiceTexturePreset(value: unknown): value is BotVoiceTextur
 }
 
 export function normalizeVoiceMode(value: unknown, fallback = DEFAULT_VOICE_MODE): VoiceMode {
-  return value === "mute" || value === "bottish" || value === "english" ? value : fallback;
+  return value === "mute" || value === "english" || value === "babble" || value === "bottish"
+    ? value
+    : fallback;
 }
 
 export function normalizeEnglishVoiceEngine(

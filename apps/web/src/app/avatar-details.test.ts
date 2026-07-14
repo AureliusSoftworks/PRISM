@@ -7,18 +7,26 @@ import {
   AVATAR_DETAILS_MASK_BYTE_LENGTH,
   AVATAR_DETAILS_MAX_PAINT_PIXELS,
   AVATAR_DETAIL_STAMP_DEFINITIONS,
+  avatarDetailsCirclePoints,
   avatarDetailStampBounds,
   avatarDetailsPhosphorCoreRgba,
   avatarDetailsGridPointFromClient,
+  avatarDetailsEqual,
+  avatarDetailsInkHiddenForBlink,
+  avatarDetailsKey,
   avatarDetailsMaskPixel,
   avatarDetailsPaintPixelCount,
+  avatarDetailsWritablePixel,
+  cloneAvatarDetails,
   decodeAvatarDetailsPaintMask,
   encodeAvatarDetailsPaintMask,
   interpolateAvatarDetailsGridLine,
+  moveAvatarDetailsPaintMask,
   paintAvatarDetailsMask,
   rasterizeAvatarDetailsAlpha,
   resolveAvatarDetailStampAnchor,
   replaceAvatarDetailStampForCategory,
+  setAvatarDetailsHideInkDuringBlink,
   toggleAvatarDetailStamp,
   type AvatarDetailStampV1,
   type AvatarDetailsV1,
@@ -27,6 +35,26 @@ import {
 const emptyDetails = (): AvatarDetailsV1 => ({
   version: 1,
   screen: { stamps: [], paintMaskBase64: null },
+});
+
+describe("avatar details blink ink preference", () => {
+  it("is opt-in, clone-safe, and participates in dirty-state equality", () => {
+    const original = emptyDetails();
+    const enabled = setAvatarDetailsHideInkDuringBlink(original, true);
+
+    assert.equal(original.screen.hideInkDuringBlink, undefined);
+    assert.equal(enabled.screen.hideInkDuringBlink, true);
+    assert.equal(avatarDetailsInkHiddenForBlink(enabled, "open"), false);
+    assert.equal(avatarDetailsInkHiddenForBlink(enabled, "closed"), true);
+    assert.equal(avatarDetailsInkHiddenForBlink(original, "closed"), false);
+    assert.deepEqual(cloneAvatarDetails(enabled), enabled);
+    assert.notEqual(avatarDetailsKey(original), avatarDetailsKey(enabled));
+    assert.equal(avatarDetailsEqual(original, enabled), false);
+    assert.deepEqual(
+      setAvatarDetailsHideInkDuringBlink(enabled, false),
+      original,
+    );
+  });
 });
 
 describe("avatar details packed paint mask", () => {
@@ -122,6 +150,56 @@ describe("avatar details input geometry", () => {
       { x: 4, y: 4 },
       { x: 5, y: 5 },
     ]);
+  });
+
+  it("rasterizes a crisp circle from a center and dragged radius", () => {
+    const points = avatarDetailsCirclePoints(
+      { x: 64, y: 64 },
+      { x: 68, y: 64 },
+    );
+    const keys = new Set(points.map(({ x, y }) => `${x}:${y}`));
+    assert.equal(keys.has("68:64"), true);
+    assert.equal(keys.has("60:64"), true);
+    assert.equal(keys.has("64:68"), true);
+    assert.equal(keys.has("64:60"), true);
+    assert.equal(keys.has("64:64"), false);
+    assert.deepEqual(
+      avatarDetailsCirclePoints({ x: 8, y: 9 }, { x: 8, y: 9 }),
+      [{ x: 8, y: 9 }],
+    );
+  });
+
+  it("moves the whole ink mask without dropping pixels at the writable edge", () => {
+    const source = new Uint8Array(AVATAR_DETAILS_MASK_BYTE_LENGTH);
+    const painted = paintAvatarDetailsMask(
+      source,
+      [
+        { x: 60, y: 60 },
+        { x: 61, y: 60 },
+      ],
+      1,
+      "brush",
+    ).mask;
+    const moved = moveAvatarDetailsPaintMask(painted, { x: 5, y: 3 });
+    assert.equal(moved.changed, true);
+    assert.deepEqual(moved.offset, { x: 5, y: 3 });
+    assert.equal(avatarDetailsMaskPixel(moved.mask, 65, 63), true);
+    assert.equal(avatarDetailsMaskPixel(moved.mask, 66, 63), true);
+    assert.equal(avatarDetailsPaintPixelCount(moved.mask), 2);
+
+    let rightEdge = AVATAR_DETAILS_CANVAS_SIZE - 1;
+    while (!avatarDetailsWritablePixel(rightEdge, 64)) rightEdge -= 1;
+    const edgeMask = paintAvatarDetailsMask(
+      source,
+      [{ x: rightEdge, y: 64 }],
+      1,
+      "brush",
+    ).mask;
+    const blocked = moveAvatarDetailsPaintMask(edgeMask, { x: 10, y: 0 });
+    assert.equal(blocked.changed, false);
+    assert.deepEqual(blocked.offset, { x: 0, y: 0 });
+    assert.equal(avatarDetailsMaskPixel(blocked.mask, rightEdge, 64), true);
+    assert.equal(avatarDetailsPaintPixelCount(blocked.mask), 1);
   });
 
   it("keeps every smart anchor in bounds at max scale and offset", () => {

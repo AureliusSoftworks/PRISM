@@ -1,4 +1,5 @@
 import {
+  DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
   normalizeBotAudioVoiceProfileV1,
   normalizeBotVoiceVolume,
   type BotAudioVoiceProfileV1,
@@ -41,10 +42,26 @@ export interface BottishPlaybackTiming {
 const MEDIA_PLAY_START_TIMEOUT_MS = 1500;
 const BOTTISH_SAMPLE_RATE = 24_000;
 
-/** Accept current WAV/timed responses while treating an older metadata-only
- * Bottish success as a deliberate signal to use procedural fallback. This can
+/** Keep the persisted field for profile/back-up compatibility, but do not let
+ * legacy or randomized tone values change Bottish gain or processing. */
+export const FIXED_BOTTISH_TONE = DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1.bottishTone;
+
+export function normalizeBottishPlaybackProfile(
+  rawProfile: BotAudioVoiceProfileV1,
+): ReturnType<typeof normalizeBotAudioVoiceProfileV1> {
+  return {
+    ...normalizeBotAudioVoiceProfileV1(rawProfile),
+    warmth: 0,
+    pace: 0,
+    lilt: 0,
+    bottishTone: FIXED_BOTTISH_TONE,
+  };
+}
+
+/** Accept current WAV/timed responses while treating a metadata-only Babble
+ * success as a deliberate signal to use procedural fallback. This can
  * occur briefly when the web bundle hot-reloads before the API process. */
-export async function readBottishVoiceSynthesisClip(
+export async function readBabbleVoiceSynthesisClip(
   response: Response,
 ): Promise<EnglishVoiceSynthesisClip | null> {
   const contentType = response.headers.get("content-type") ?? "application/octet-stream";
@@ -84,7 +101,7 @@ export function buildBottishPlan(
   rawProfile: BotAudioVoiceProfileV1,
   seed = text
 ): BottishPlan {
-  const profile = normalizeBotAudioVoiceProfileV1(rawProfile);
+  const profile = normalizeBottishPlaybackProfile(rawProfile);
   const voice = VOICE_BASES[profile.baseVoiceId];
   const pitchMultiplier = 2 ** (profile.pitch * 0.7);
   const tone = profile.bottishTone;
@@ -483,52 +500,64 @@ async function playPlan(
   if (!played) await playPlanWithMedia(plan, profile, expectedGeneration, lifecycle);
 }
 
-export function buildHybridBottishPlan(
+export function buildBabbleRoboticPlan(
   text: string,
   rawProfile: BotAudioVoiceProfileV1,
   seed: string
 ): VoiceRoboticPlan {
-  const profile = normalizeBotAudioVoiceProfileV1(rawProfile);
+  const profile = normalizeBottishPlaybackProfile(rawProfile);
   const sourcePlan = buildBottishPlan(text, profile, `${seed}:accent-source`);
-  const intensity = Math.max(0, Math.min(1, (profile.bottishTone + 1) / 2));
   const targetCount = Math.max(
-    4,
-    Math.min(24, Math.round(4 + sourcePlan.notes.length * (0.09 + intensity * 0.11)))
+    7,
+    Math.min(28, Math.round(9 + sourcePlan.notes.length * 0.28))
   );
   const step = Math.max(1, Math.floor(sourcePlan.notes.length / targetCount));
   const selected = sourcePlan.notes.filter((_, index) => index % step === 0).slice(0, targetCount);
   const accents = selected.map((note, index) => {
-    const click = stableUnit(`${seed}:accent-kind:${index}`) < 0.38 + intensity * 0.24;
-    const register = click ? 2.6 + intensity * 1.8 : 1.55 + intensity * 1.15;
-    const frequencyHz = Math.max(180, Math.min(2600, note.frequencyHz * register));
-    const glide = 0.76 + stableUnit(`${seed}:accent-glide:${index}`) * 0.7;
+    const kind = stableUnit(`${seed}:accent-kind:${index}`);
+    const buzzBurst = kind < 0.1;
+    const click = !buzzBurst && kind < 0.55;
+    const pop = !buzzBurst && !click && kind < 0.82;
+    const register = buzzBurst ? 0.22 : click ? 3.4 : pop ? 1.25 : 2.05;
+    const frequencyHz = Math.max(55, Math.min(3200, note.frequencyHz * register));
+    const glide = buzzBurst
+      ? 0.9 + stableUnit(`${seed}:accent-glide:${index}`) * 0.2
+      : 0.62 + stableUnit(`${seed}:accent-glide:${index}`) * 1.08;
     return {
       atRatio: sourcePlan.durationMs > 0 ? note.startMs / sourcePlan.durationMs : 0,
-      durationMs: Math.round(click
-        ? 10 + stableUnit(`${seed}:accent-length:${index}`) * 15
-        : 25 + stableUnit(`${seed}:accent-length:${index}`) * 34),
+      durationMs: Math.round(buzzBurst
+        ? 34 + stableUnit(`${seed}:accent-length:${index}`) * 38
+        : click
+          ? 8 + stableUnit(`${seed}:accent-length:${index}`) * 13
+          : pop
+            ? 14 + stableUnit(`${seed}:accent-length:${index}`) * 11
+            : 22 + stableUnit(`${seed}:accent-length:${index}`) * 30),
       frequencyHz,
       endFrequencyHz: Math.max(90, Math.min(3000, frequencyHz * glide)),
-      gain: Number((0.08 + intensity * 0.14).toFixed(3)),
-      waveform: click ? "square" as OscillatorType : note.waveform,
+      gain: Number((buzzBurst ? 0.09 : click ? 0.13 : pop ? 0.15 : 0.16).toFixed(3)),
+      waveform: buzzBurst || click
+        ? "square" as OscillatorType
+        : pop
+          ? "sine" as OscillatorType
+          : note.waveform,
     };
   });
   const gates = accents
-    .filter((_, index) => index % (intensity > 0.72 ? 2 : 3) === 1)
+    .filter((_, index) => index % 4 === 2)
     .map((accent, index) => ({
       atRatio: Math.min(0.995, accent.atRatio + 0.008),
-      durationMs: Math.round(13 + intensity * 31 + stableUnit(`${seed}:gate:${index}`) * 14),
-      depth: Number((0.15 + intensity * 0.42).toFixed(3)),
+      durationMs: Math.round(12 + stableUnit(`${seed}:gate:${index}`) * 12),
+      depth: Number((0.07 + stableUnit(`${seed}:gate-depth:${index}`) * 0.05).toFixed(3)),
     }));
   return {
     accents,
     gates,
-    buzzFrequencyHz: Number((20 + intensity * 28).toFixed(2)),
-    buzzDepth: Number((0.07 + intensity * 0.22).toFixed(3)),
-    drive: Number((0.08 + intensity * 0.32).toFixed(3)),
-    lowpassHz: Math.round(12_000 - intensity * 5_200),
-    bitDepth: Math.round(13 - intensity * 4),
-    sampleHoldFrames: 1 + Math.floor(intensity * 2.4),
+    buzzFrequencyHz: 0,
+    buzzDepth: 0,
+    drive: 0,
+    lowpassHz: 20_000,
+    bitDepth: 16,
+    sampleHoldFrames: 1,
   };
 }
 
@@ -541,14 +570,14 @@ function waveChunkId(view: DataView, offset: number): string {
   );
 }
 
-/** Bakes the core Bottish treatment into a PCM WAV for browsers that cannot
+/** Bakes clean additive Babble accents into a PCM WAV for browsers that cannot
  * keep Web Audio active across async system-TTS synthesis. */
-export function mixHybridBottishMediaWave(
+export function mixBabbleMediaWave(
   bytes: ArrayBuffer,
   text: string,
   rawProfile: BotAudioVoiceProfileV1,
   seed: string,
-  effectsEnabled = true,
+  _effectsEnabled = true,
 ): ArrayBuffer {
   if (bytes.byteLength < 44) return bytes;
   const input = new DataView(bytes);
@@ -586,15 +615,9 @@ export function mixHybridBottishMediaWave(
 
   const output = bytes.slice(0);
   const view = new DataView(output);
-  const plan = buildHybridBottishPlan(text, rawProfile, seed);
+  const plan = buildBabbleRoboticPlan(text, rawProfile, seed);
   const durationSeconds = frameCount / sampleRate;
-  const drive = effectsEnabled ? plan.drive : plan.drive * 0.35;
-  const driveScale = 1 + drive * 5;
-  const driveDivisor = Math.tanh(driveScale);
-  const bitDepth = effectsEnabled ? plan.bitDepth : Math.max(13, plan.bitDepth);
-  const quantizationSteps = 2 ** Math.max(4, Math.min(15, bitDepth - 1));
-  const sampleHoldFrames = effectsEnabled ? plan.sampleHoldFrames : 1;
-  const heldSamples = new Float32Array(channelCount);
+  const mixed = new Float32Array(frameCount * channelCount);
   for (let frame = 0; frame < frameCount; frame += 1) {
     const timeSeconds = frame / sampleRate;
     let gate = 1;
@@ -605,17 +628,10 @@ export function mixHybridBottishMediaWave(
         gate = Math.min(gate, 1 - event.depth);
       }
     }
-    const buzz = effectsEnabled && plan.buzzDepth > 0
-      ? 1 - plan.buzzDepth * (Math.sin(2 * Math.PI * plan.buzzFrequencyHz * timeSeconds) >= 0 ? 0 : 1)
-      : 1;
     for (let channel = 0; channel < channelCount; channel += 1) {
       const offset = dataOffset + frame * frameSize + channel * 2;
       const sample = view.getInt16(offset, true) / 0x8000;
-      let processed = Math.tanh(sample * gate * buzz * driveScale) / driveDivisor;
-      processed = Math.round(processed * quantizationSteps) / quantizationSteps;
-      if (frame % sampleHoldFrames === 0) heldSamples[channel] = processed;
-      else processed = heldSamples[channel] ?? processed;
-      view.setInt16(offset, Math.round(Math.max(-1, Math.min(1, processed)) * 0x7fff), true);
+      mixed[frame * channelCount + channel] = sample * gate;
     }
   }
   for (const accent of plan.accents) {
@@ -633,13 +649,19 @@ export function mixHybridBottishMediaWave(
       const accentSample = bottishWaveSample(accent.waveform, phase) * accent.gain * envelope;
       for (let channel = 0; channel < channelCount; channel += 1) {
         const offset = dataOffset + frame * frameSize + channel * 2;
-        const carrier = view.getInt16(offset, true) / 0x8000;
-        view.setInt16(
-          offset,
-          Math.round(Math.max(-1, Math.min(1, carrier + accentSample)) * 0x7fff),
-          true,
-        );
+        const sampleIndex = frame * channelCount + channel;
+        mixed[sampleIndex] = (mixed[sampleIndex] ?? 0) + accentSample;
       }
+    }
+  }
+  let peak = 0;
+  for (const sample of mixed) peak = Math.max(peak, Math.abs(sample));
+  const safetyGain = peak > 0.98 ? 0.98 / peak : 1;
+  for (let frame = 0; frame < frameCount; frame += 1) {
+    for (let channel = 0; channel < channelCount; channel += 1) {
+      const offset = dataOffset + frame * frameSize + channel * 2;
+      const sample = (mixed[frame * channelCount + channel] ?? 0) * safetyGain;
+      view.setInt16(offset, Math.round(Math.max(-1, Math.min(1, sample)) * 0x7fff), true);
     }
   }
   return output;
@@ -689,7 +711,7 @@ async function playHybridBytesWithMedia(
     const cancel = () => finish();
     activeResolve = cancel;
     audio.addEventListener("ended", () => finish(), { once: true });
-    audio.addEventListener("error", () => finish(new Error("Bottish voice could not play.")), {
+    audio.addEventListener("error", () => finish(new Error("Babble voice could not play.")), {
       once: true,
     });
     activeTimer = window.setTimeout(() => {
@@ -701,13 +723,10 @@ async function playHybridBytesWithMedia(
         const normalized = normalizeBotAudioVoiceProfileV1(profile);
         const updatePlaybackRate = () => {
           const detuneCents = normalized.pitch * 650 +
-            voiceLiltDetuneCents(normalized.lilt, audio.currentTime);
+            voiceLiltDetuneCents(0, audio.currentTime);
           audio.playbackRate = Math.max(0.7, Math.min(1.4, 2 ** (detuneCents / 1200)));
         };
         updatePlaybackRate();
-        if (normalized.lilt !== 0) {
-          activeMediaLiltTimer = window.setInterval(updatePlaybackRate, 100);
-        }
         const durationMs = Number.isFinite(audio.duration) && audio.duration > 0
           ? Math.round(audio.duration * 1000)
           : null;
@@ -722,13 +741,13 @@ async function playHybridBytesWithMedia(
         }
       },
       (error: unknown) => finish(
-        error instanceof Error ? error : new Error("Bottish voice could not play.")
+        error instanceof Error ? error : new Error("Babble voice could not play.")
       )
     );
   });
 }
 
-async function playHybridBottish(
+async function playBabble(
   bytes: ArrayBuffer,
   text: string,
   profile: BotAudioVoiceProfileV1,
@@ -738,21 +757,22 @@ async function playHybridBottish(
   lifecycle?: VoicePlaybackLifecycle
 ): Promise<void> {
   if (expectedGeneration !== generation) return;
-  const normalized = normalizeBotAudioVoiceProfileV1(profile);
-  const roboticPlan = buildHybridBottishPlan(text, normalized, seed);
+  const normalized = normalizeBottishPlaybackProfile(profile);
+  const roboticPlan = buildBabbleRoboticPlan(text, normalized, seed);
   const played = await playRealtimeVoiceBytes({
     bytes,
     profile: normalized,
     seed,
     effectsEnabled,
     detuneCents: Math.round(normalized.pitch * 650),
-    baseLowpassHz: Math.max(10_000, Math.min(20_000, Math.round(16_000 - normalized.warmth * 6000))),
+    baseLowpassHz: 20_000,
     lifecycle,
     roboticPlan,
+    cleanRoboticCarrier: true,
   });
   if (!played) {
     await playHybridBytesWithMedia(
-      mixHybridBottishMediaWave(bytes, text, normalized, seed, effectsEnabled),
+      mixBabbleMediaWave(bytes, text, normalized, seed, effectsEnabled),
       normalized,
       expectedGeneration,
       lifecycle,
@@ -760,7 +780,7 @@ async function playHybridBottish(
   }
 }
 
-export function enqueueHybridBottishVoice(
+export function enqueueBabbleVoice(
   bytes: ArrayBuffer,
   sourceText: string,
   profile: BotAudioVoiceProfileV1,
@@ -771,12 +791,12 @@ export function enqueueHybridBottishVoice(
 ): Promise<void> {
   const expectedGeneration = generation;
   const playbackProfile = {
-    ...normalizeBotAudioVoiceProfileV1(profile),
+    ...normalizeBottishPlaybackProfile(profile),
     volume: normalizeBotVoiceVolume(globalVolume),
   };
   queue = queue
     .catch(() => undefined)
-    .then(() => playHybridBottish(
+    .then(() => playBabble(
       bytes,
       sourceText,
       playbackProfile,
@@ -799,7 +819,7 @@ export function enqueueBottishVoice(
 ): Promise<void> {
   const expectedGeneration = generation;
   const playbackProfile = {
-    ...normalizeBotAudioVoiceProfileV1(profile),
+    ...normalizeBottishPlaybackProfile(profile),
     volume: normalizeBotVoiceVolume(globalVolume),
   };
   const plan = fitBottishPlanToDuration(
@@ -811,3 +831,8 @@ export function enqueueBottishVoice(
     .then(() => playPlan(plan, playbackProfile, expectedGeneration, seed, effectsEnabled, lifecycle));
   return queue;
 }
+
+/** Babble and procedural Bottish share the same unlocked media lane so mode
+ * switches cannot leave an old carrier or accent queue playing. */
+export const prepareBabbleVoice = prepareBottishVoice;
+export const stopBabbleVoice = stopBottishVoice;

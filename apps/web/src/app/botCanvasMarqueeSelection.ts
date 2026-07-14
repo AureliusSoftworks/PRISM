@@ -17,6 +17,22 @@ export function canvasBotDirectoryIsInteractive(args: {
   return false;
 }
 
+export function canvasBackgroundShouldZoomOutFocusedBot(args: {
+  view: CanvasBotDirectoryView;
+  conversationMessageCount: number | null;
+  focusedBotId: string | null;
+  pendingIncognito: boolean;
+  canZoomOutToAllBots: boolean;
+}): boolean {
+  return (
+    args.view === "chat" &&
+    args.conversationMessageCount === 0 &&
+    args.focusedBotId !== null &&
+    !args.pendingIncognito &&
+    args.canZoomOutToAllBots
+  );
+}
+
 export interface CanvasBotMarqueeSelectionInput {
   mode: CanvasBotMarqueeSelectionMode;
   baseSelectedBotIds: ReadonlySet<string>;

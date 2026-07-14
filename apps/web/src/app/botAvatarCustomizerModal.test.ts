@@ -5,7 +5,10 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const appDir = dirname(fileURLToPath(import.meta.url));
-const pageSource = readFileSync(resolve(appDir, "page.tsx"), "utf8").replace(/\s+/gu, " ");
+const pageSource = readFileSync(resolve(appDir, "page.tsx"), "utf8").replace(
+  /\s+/gu,
+  " ",
+);
 const cssSource = readFileSync(resolve(appDir, "page.module.css"), "utf8");
 const globalCssSource = readFileSync(resolve(appDir, "globals.css"), "utf8");
 const apiServerSource = readFileSync(
@@ -27,11 +30,25 @@ const tauriConfig = JSON.parse(
   };
 };
 
+function normalizeCssFormatting(value: string): string {
+  return value
+    .replace(/\s+/gu, " ")
+    .replace(/\(\s+/gu, "(")
+    .replace(/\s+\)/gu, ")")
+    .trim();
+}
+
+const normalizedCssSource = normalizeCssFormatting(cssSource);
+
 function cssRuleBody(selector: string): string {
-  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  const escaped = selector
+    .trim()
+    .split(/\s+/gu)
+    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"))
+    .join("\\s+");
   const match = cssSource.match(new RegExp(`${escaped}\\s*\\{([\\s\\S]*?)\\}`));
   assert.ok(match, `Expected CSS rule for ${selector}`);
-  return match[1] ?? "";
+  return normalizeCssFormatting(match[1] ?? "");
 }
 
 function globalCssRuleBody(selector: string): string {
@@ -87,8 +104,14 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.match(pageSource, /faceBlinkBar: BotFaceBlinkBar/);
   assert.match(pageSource, /faceThinkingFrames: BotFaceThinkingFrames/);
   assert.match(pageSource, /function BotAvatarCustomGlyphCapture\(/);
-  assert.match(pageSource, /normalize=\{\(raw\) => normalizeBotFaceEyeCharacter\(raw\)\}/);
-  assert.match(pageSource, /normalize=\{\(raw\) => normalizeBotFaceMouthCharacter\(raw\)\}/);
+  assert.match(
+    pageSource,
+    /normalize=\{\(raw\) => normalizeBotFaceEyeCharacter\(raw\)\}/,
+  );
+  assert.match(
+    pageSource,
+    /normalize=\{\(raw\) => normalizeBotFaceMouthCharacter\(raw\)\}/,
+  );
   assert.match(pageSource, /faceEyeCharacter=\{newBotFaceEyeCharacter\}/);
   assert.match(pageSource, /faceMouthCharacter=\{newBotFaceMouthCharacter\}/);
   assert.match(pageSource, /faceMouthAnimation=\{newBotFaceMouthAnimation\}/);
@@ -169,34 +192,29 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.match(cssSource, /\.botAvatarGlyphAnimationControl/);
   assert.match(
     cssSource,
-    /\.botAvatarGlyphAnimationControl > div\s*\{[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\)/
+    /\.botAvatarGlyphAnimationControl > div\s*\{[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\)/,
   );
   assert.match(pageSource, /pulsate:\s*"Pulse"/);
   assert.match(cssSource, /\.botAvatarIdentitySection/);
   assert.match(cssSource, /\.botAvatarCustomMotionRow/);
-  assert.match(cssSource, /\.botAvatarCustomMotionRowCombined/);
   assert.match(cssSource, /\.botAvatarGlyphRotationField/);
   assert.match(
     cssSource,
-    /\.botAvatarCustomMotionRowCombined\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 3fr\) minmax\(0, 1\.35fr\)/
+    /\.botAvatarGlyphRotationField\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\) minmax\(118px, 0\.82fr\)/,
   );
   assert.match(
     cssSource,
-    /\.botAvatarGlyphRotationField\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\) minmax\(118px, 0\.82fr\)/
+    /\.botAvatarGlyphRotationField \.botAvatarMouthRotationControl\s*\{[\s\S]*?border-left:/,
   );
   assert.match(
     cssSource,
-    /\.botAvatarGlyphRotationField \.botAvatarMouthRotationControl\s*\{[\s\S]*?border-left:/
-  );
-  assert.match(
-    cssSource,
-    /\.botAvatarGlyphAnimationControl > div\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\)/
+    /\.botAvatarGlyphAnimationControl > div\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\)/,
   );
   assert.doesNotMatch(
     cssSource,
     /\.botAvatarGlyphAnimationControl > div > button:first-child/,
   );
-  assert.match(pageSource, /const label = "Animation";/);
+  assert.match(pageSource, /label = "Animation"/);
   assert.doesNotMatch(cssSource, /\.botAvatarMouthAnimationRow/);
   assert.match(cssSource, /\.botAvatarThinkingControl/);
   assert.match(cssSource, /\.botAvatarInlineResetButton/);
@@ -245,21 +263,50 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.match(pageSource, /label="Mouth size"/);
   assert.match(pageSource, /label="Mouth position"/);
   assert.match(pageSource, /function BotAvatarCoordinateControl\(/);
+  assert.match(pageSource, /const visualX = -displayX;/);
+  assert.match(
+    pageSource,
+    /const xRatio = \(maxX - displayX\) \/ \(maxX - minX\);/,
+  );
+  assert.match(
+    pageSource,
+    /maxX - Math\.max\(0, Math\.min\(1, rawX\)\) \* \(maxX - minX\)/,
+  );
+  assert.match(
+    pageSource,
+    /event\.key === "ArrowLeft"[\s\S]*displayX \+ xStep[\s\S]*event\.key === "ArrowRight"[\s\S]*displayX - xStep/,
+  );
+  assert.match(
+    pageSource,
+    /aria-valuetext=\{botAvatarCoordinateLabel\(visualX, y\)\}/,
+  );
   assert.match(pageSource, /function BotAvatarMouthRotationWheel\(/);
   assert.match(pageSource, /const commitRotation = /);
   assert.match(pageSource, /if \(snapped === normalizedValue\) return;/);
   assert.match(pageSource, /aria-label=\{`\$\{partLabel\} rotation`\}/);
   assert.doesNotMatch(pageSource, /aria-label="Mouth rotation degrees"/);
-  assert.match(pageSource, /className=\{styles\.botAvatarMouthRotationGlyphText\}/);
+  assert.match(
+    pageSource,
+    /className=\{styles\.botAvatarMouthRotationGlyphText\}/,
+  );
   assert.match(pageSource, /normalizeBotFaceMouthRotationDeg/);
   assert.match(pageSource, /normalizeBotFaceEyeRotationDeg/);
   assert.match(pageSource, /label="Stroke weight"/);
   assert.match(cssRuleBody(".botAvatarCoordinatePad"), /cursor:\s*grab;/);
   assert.match(cssSource, /\.botAvatarCoordinatePad::before/);
   assert.match(cssRuleBody(".botAvatarCoordinateThumb"), /width:\s*20px;/);
-  assert.match(cssSource, /--bot-face-eye-scale:\s*var\(--bot-face-blink-scale, 1\)/);
-  assert.match(cssSource, /--bot-face-eye-offset-x:\s*var\(--bot-face-blink-offset-x, 0em\)/);
-  assert.match(cssSource, /--bot-face-eye-offset-y:\s*var\(--bot-face-blink-offset-y, 0em\)/);
+  assert.match(
+    cssSource,
+    /--bot-face-eye-scale:\s*var\(--bot-face-blink-scale, 1\)/,
+  );
+  assert.match(
+    cssSource,
+    /--bot-face-eye-offset-x:\s*var\(--bot-face-blink-offset-x, 0em\)/,
+  );
+  assert.match(
+    cssSource,
+    /--bot-face-eye-offset-y:\s*var\(--bot-face-blink-offset-y, 0em\)/,
+  );
   const faceBranchStart = pageSource.indexOf(
     '{activeTab === "face" ? ( <div className={styles.botAvatarFaceControls}>',
   );
@@ -281,9 +328,10 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.notEqual(motionBranchStart, -1);
   const faceTabSource = pageSource.slice(faceBranchStart, eyesBranchStart);
   const eyesTabSource = pageSource.slice(eyesBranchStart, mouthBranchStart);
-  const mouthTabSource = pageSource.slice(
-    mouthBranchStart,
+  const mouthTabSource = pageSource.slice(mouthBranchStart, motionBranchStart);
+  const motionTabSource = pageSource.slice(
     motionBranchStart,
+    pageSource.indexOf("function BotPowerBadge", motionBranchStart),
   );
   assert.doesNotMatch(faceTabSource, /label="Eye size"/);
   assert.doesNotMatch(faceTabSource, /label="Eye position"/);
@@ -305,11 +353,20 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.match(eyesTabSource, /handleEyeCharacterChange/);
   assert.match(eyesTabSource, /selected=\{faceEyesFont === fontId\}/);
   assert.match(eyesTabSource, /onClick=\{\(\) => selectEyeFont\(fontId\)\}/);
-  assert.doesNotMatch(eyesTabSource, /className=\{styles\.botAvatarCustomOptionInput\}/);
-  assert.doesNotMatch(eyesTabSource, /botAvatarFontOption\} \$\{styles\.botAvatarCustomOption\}/);
+  assert.doesNotMatch(
+    eyesTabSource,
+    /className=\{styles\.botAvatarCustomOptionInput\}/,
+  );
+  assert.doesNotMatch(
+    eyesTabSource,
+    /botAvatarFontOption\} \$\{styles\.botAvatarCustomOption\}/,
+  );
   assert.doesNotMatch(eyesTabSource, /botAvatarSingleGlyphInput/);
   assert.match(eyesTabSource, /disabled=\{!customEyeActive\}/);
-  assert.doesNotMatch(eyesTabSource, /Eye animation|BotAvatarGlyphAnimationControl|faceEyeAnimation/);
+  assert.doesNotMatch(
+    eyesTabSource,
+    /Eye animation|BotAvatarGlyphAnimationControl|faceEyeAnimation/,
+  );
   assert.match(eyesTabSource, /botAvatarCustomMotionRowSingle/);
   assert.match(eyesTabSource, /part="eyes"/);
   assert.match(eyesTabSource, /label="Eye size"/);
@@ -318,15 +375,18 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.match(eyesTabSource, /lockedX=\{DEFAULT_BOT_FACE_STYLE\.eyeOffsetX\}/);
   assert.ok(
     eyesTabSource.indexOf("<BotAvatarCustomGlyphCapture") <
-      eyesTabSource.indexOf('<BotAvatarMouthRotationWheel'),
-    "Custom glyph capture should sit left of the eye rotation wheel"
+      eyesTabSource.indexOf("<BotAvatarMouthRotationWheel"),
+    "Custom glyph capture should sit left of the eye rotation wheel",
   );
   assert.match(mouthTabSource, /ariaLabel="Custom mouth glyph"/);
   assert.match(mouthTabSource, /<BotAvatarCustomGlyphCapture/);
   assert.match(mouthTabSource, /handleMouthCharacterChange/);
   assert.match(mouthTabSource, /selected=\{faceMouthFont === fontId\}/);
   assert.match(mouthTabSource, /onClick=\{\(\) => selectMouthFont\(fontId\)\}/);
-  assert.doesNotMatch(mouthTabSource, /className=\{styles\.botAvatarCustomOptionInput\}/);
+  assert.doesNotMatch(
+    mouthTabSource,
+    /className=\{styles\.botAvatarCustomOptionInput\}/,
+  );
   assert.doesNotMatch(mouthTabSource, /botAvatarSingleGlyphInput/);
   assert.match(cssSource, /\.botAvatarCustomGlyphCapture/);
   assert.match(pageSource, /faceEyeRotationDeg: bot\?\.face_eye_rotation_deg/);
@@ -335,31 +395,32 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
     /data-custom-active=\{customMouthActive \? "true" : undefined\}/,
   );
   assert.match(mouthTabSource, /disabled=\{!customMouthActive\}/);
-  assert.match(mouthTabSource, /value=\{faceMouthAnimation\}/);
+  assert.doesNotMatch(mouthTabSource, /faceMouthAnimation/);
   assert.match(mouthTabSource, /label="Mouth size"/);
   assert.match(mouthTabSource, /<BotAvatarMouthRotationWheel/);
   assert.match(mouthTabSource, /label="Mouth position"/);
   assert.match(mouthTabSource, /lockX=\{!customMouthActive\}/);
-  assert.match(mouthTabSource, /lockedX=\{DEFAULT_BOT_FACE_STYLE\.mouthOffsetX\}/);
+  assert.match(
+    mouthTabSource,
+    /lockedX=\{DEFAULT_BOT_FACE_STYLE\.mouthOffsetX\}/,
+  );
   assert.doesNotMatch(mouthTabSource, /botAvatarCustomMotionRowSingle/);
   assert.doesNotMatch(mouthTabSource, /botAvatarMouthAnimationRow/);
-  assert.match(mouthTabSource, /botAvatarCustomMotionRowCombined/);
+  assert.doesNotMatch(mouthTabSource, /botAvatarCustomMotionRowCombined/);
   assert.match(mouthTabSource, /botAvatarGlyphRotationField/);
-  assert.match(mouthTabSource, /<BotAvatarGlyphAnimationControl/);
+  assert.doesNotMatch(mouthTabSource, /<BotAvatarGlyphAnimationControl/);
+  assert.match(motionTabSource, /label="Mouth animation"/);
+  assert.match(motionTabSource, /value=\{faceMouthAnimation\}/);
+  assert.match(motionTabSource, /onChange=\{onMouthAnimationChange\}/);
   assert.ok(
     mouthTabSource.indexOf("<BotAvatarCustomGlyphCapture") <
       mouthTabSource.indexOf("<BotAvatarMouthRotationWheel"),
-    "Custom glyph capture should sit left of mouth rotation in their shared field"
-  );
-  assert.ok(
-    mouthTabSource.indexOf("<BotAvatarMouthRotationWheel") <
-      mouthTabSource.indexOf("<BotAvatarGlyphAnimationControl"),
-    "The shared glyph and rotation field should sit before mouth animation"
+    "Custom glyph capture should sit left of mouth rotation in their shared field",
   );
   assert.ok(
     mouthTabSource.indexOf("<BotAvatarMouthRotationWheel") <
       mouthTabSource.indexOf('label="Mouth size"'),
-    "Mouth rotation should sit with the custom glyph controls above mouth size"
+    "Mouth rotation should sit with the custom glyph controls above mouth size",
   );
   const eyeFontHandlerStart = pageSource.indexOf("const selectEyeFont");
   const mouthFontHandlerStart = pageSource.indexOf("const selectMouthFont");
@@ -383,7 +444,10 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.doesNotMatch(eyeFontHandlerSource, /onEyeOffsetXChange/);
   assert.doesNotMatch(eyeFontHandlerSource, /onEyeRotationDegChange/);
   assert.match(mouthFontHandlerSource, /onMouthFontChange\(fontId\);/);
-  assert.doesNotMatch(mouthFontHandlerSource, /onMouthCharacterChange\(DEFAULT/);
+  assert.doesNotMatch(
+    mouthFontHandlerSource,
+    /onMouthCharacterChange\(DEFAULT/,
+  );
   assert.doesNotMatch(mouthFontHandlerSource, /onMouthOffsetXChange/);
   assert.doesNotMatch(mouthFontHandlerSource, /onMouthRotationDegChange/);
   assert.match(mouthFontHandlerSource, /handleEyeCharacterChange/);
@@ -400,7 +464,10 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
     cssSource,
     /\.botAvatarMouthRotationWheel \{[\s\S]*?transparent 2deg 5deg/,
   );
-  assert.match(cssRuleBody(".botAvatarMouthRotationGlyph"), /transform:\s*none\s*;/);
+  assert.match(
+    cssRuleBody(".botAvatarMouthRotationGlyph"),
+    /transform:\s*none\s*;/,
+  );
   assert.match(
     cssRuleBody(".botAvatarMouthRotationGlyphText"),
     /transform:\s*rotate\(var\(--bot-avatar-mouth-rotation,\s*0deg\)\)\s*;/,
@@ -414,8 +481,14 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
 });
 
 test("avatar edits stay local until Save and support multi-step undo", () => {
-  assert.doesNotMatch(pageSource, /queueBotAvatarAutosave|flushBotAvatarAutosaveQueue/);
-  assert.doesNotMatch(pageSource, /botAvatarAutoSaving|botAvatarAutoSaveQueuedPatchRef/);
+  assert.doesNotMatch(
+    pageSource,
+    /queueBotAvatarAutosave|flushBotAvatarAutosaveQueue/,
+  );
+  assert.doesNotMatch(
+    pageSource,
+    /botAvatarAutoSaving|botAvatarAutoSaveQueuedPatchRef/,
+  );
   assert.match(pageSource, /const avatarCustomizerSaving = busy;/);
   assert.match(pageSource, /const BOT_AVATAR_UNDO_HISTORY_LIMIT = 100;/);
   assert.match(pageSource, /const BOT_AVATAR_UNDO_STATIONARY_MS = 450;/);
@@ -431,8 +504,14 @@ test("avatar edits stay local until Save and support multi-step undo", () => {
     pageSource,
     /pushBotAvatarUndoSnapshot\("color"\);[\s\S]*handleNewBotColorChange\(next\);/,
   );
-  assert.match(pageSource, /pushBotAvatarUndoSnapshot\(\);[\s\S]*handleNewBotGlyphChange\(next\);/);
-  assert.match(pageSource, /pushBotAvatarUndoSnapshot\(\);[\s\S]*handleNewBotFaceEyesFontChange\(next\);/);
+  assert.match(
+    pageSource,
+    /pushBotAvatarUndoSnapshot\(\);[\s\S]*handleNewBotGlyphChange\(next\);/,
+  );
+  assert.match(
+    pageSource,
+    /pushBotAvatarUndoSnapshot\(\);[\s\S]*handleNewBotFaceEyesFontChange\(next\);/,
+  );
   assert.match(pageSource, /pushBotAvatarUndoSnapshot\("face-weight"\);/);
   assert.match(pageSource, /pushBotAvatarUndoSnapshot\("eye-position"\);/);
   assert.match(pageSource, /pushBotAvatarUndoSnapshot\("mouth-position"\);/);
@@ -442,12 +521,21 @@ test("avatar edits stay local until Save and support multi-step undo", () => {
   );
   assert.match(pageSource, /canUndo=\{botAvatarUndoDepth > 0\}/);
   assert.match(pageSource, /onUndo=\{undoBotAvatarDraft\}/);
-  assert.match(pageSource, /className=\{styles\.botAvatarCustomizerUndoButton\}/);
+  assert.match(
+    pageSource,
+    /className=\{styles\.botAvatarCustomizerUndoButton\}/,
+  );
   assert.match(pageSource, /Undo last edit \(Ctrl\/Cmd\+Z\)/);
-  assert.match(pageSource, /window\.addEventListener\("keydown", handleUndoKeyDown\);/);
+  assert.match(
+    pageSource,
+    /window\.addEventListener\("keydown", handleUndoKeyDown\);/,
+  );
   assert.match(pageSource, /event\.metaKey && !event\.ctrlKey/);
   assert.match(pageSource, /event\.preventDefault\(\);/);
-  assert.match(pageSource, /async function saveBot\(id: string\): Promise<boolean>/);
+  assert.match(
+    pageSource,
+    /async function saveBot\(id: string\): Promise<boolean>/,
+  );
   assert.match(pageSource, /const patch = buildBotCustomizerSavePatch/);
 });
 
@@ -468,19 +556,25 @@ test("avatar save state is scoped and bounded so prompts cannot stay stuck", () 
 });
 
 test("avatar and bot saves recover cleanly when the edit target no longer exists", () => {
-  assert.match(pageSource, /function isBotNotFoundError\(err: unknown\): boolean/);
-  assert.match(pageSource, /async function recoverMissingBotEditTarget\(id: string\)/);
   assert.match(
     pageSource,
-    /setPanelError\(\s*"That bot is no longer available\. I refreshed the bot library\."\s*,?\s*\);/
+    /function isBotNotFoundError\(err: unknown\): boolean/,
   );
   assert.match(
     pageSource,
-    /if \(!bots\.some\(\(bot\) => bot\.id === id\)\) \{[\s\S]*await recoverMissingBotEditTarget\(id\);[\s\S]*return false;/
+    /async function recoverMissingBotEditTarget\(id: string\)/,
   );
   assert.match(
     pageSource,
-    /if \(isBotNotFoundError\(err\)\) \{[\s\S]*await recoverMissingBotEditTarget\(id\);/
+    /setPanelError\(\s*"That bot is no longer available\. I refreshed the bot library\."\s*,?\s*\);/,
+  );
+  assert.match(
+    pageSource,
+    /if \(!bots\.some\(\(bot\) => bot\.id === id\)\) \{[\s\S]*await recoverMissingBotEditTarget\(id\);[\s\S]*return false;/,
+  );
+  assert.match(
+    pageSource,
+    /if \(isBotNotFoundError\(err\)\) \{[\s\S]*await recoverMissingBotEditTarget\(id\);/,
   );
 });
 
@@ -687,7 +781,10 @@ test("default Prism bot card opens an avatar-only customizer path", () => {
   );
   assert.match(pageSource, /!editingDefaultBot \? \(/);
   assert.match(pageSource, /onDoubleClick=\{openDefaultBotCustomizer\}/);
-  assert.match(pageSource, /aria-label="Preview Prism; double-click to customize"/);
+  assert.match(
+    pageSource,
+    /aria-label="Preview Prism; double-click to customize"/,
+  );
   assert.match(
     pageSource,
     /<button type="button" onClick=\{openDefaultBotCustomizer\}>\s*Customize Prism\s*<\/button>/,
@@ -900,8 +997,14 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   );
   assert.match(pageSource, /className=\{styles\.botAvatarThinkingTiles\}/);
   assert.match(pageSource, /const BOT_AVATAR_THINKING_PRESETS = \[/);
-  assert.match(pageSource, /id: "spark", label: "Spark", frames: \["◰", "◳", "◲", "◱"\]/);
-  assert.match(pageSource, /id: "mood", label: "Mood", frames: \["▖", "▘", "▝", "▗"\]/);
+  assert.match(
+    pageSource,
+    /id: "spark", label: "Spark", frames: \["◰", "◳", "◲", "◱"\]/,
+  );
+  assert.match(
+    pageSource,
+    /id: "mood", label: "Mood", frames: \["▖", "▘", "▝", "▗"\]/,
+  );
   assert.doesNotMatch(pageSource, /Random thinking preset/);
   assert.doesNotMatch(pageSource, /randomThinkingPreset/);
   assert.match(
@@ -912,24 +1015,48 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
     pageSource,
     /const BOT_AVATAR_CUSTOMIZER_TABS = \[\s*\{ value: "face", label: "Identity" \},\s*\{ value: "profile", label: "Profile" \},\s*\{ value: "powers", label: "Powers" \},\s*\{ value: "eyes", label: "Eyes" \},\s*\{ value: "mouth", label: "Mouth" \},\s*\{ value: "voice", label: "Voice" \},\s*\{ value: "settings", label: "Settings" \},\s*\{ value: "details", label: "Details" \},\s*\{ value: "motion", label: "Motion" \}/,
   );
-  assert.match(pageSource, /activeControlTab === "profile" && identityControlsVisible/);
+  assert.match(
+    pageSource,
+    /activeControlTab === "profile" && identityControlsVisible/,
+  );
   assert.match(pageSource, /aria-label="Bot profile editor mode"/);
   assert.match(pageSource, /onProfilePageOpen\(category\)/);
-  assert.match(pageSource, /profileEditorLayer=\{\s*!editingDefaultBot\s*\?\s*\(/);
-  assert.match(pageSource, /data-avatar-studio-layer=\{studioLayer \? "true" : undefined\}/);
+  assert.match(
+    pageSource,
+    /profileEditorLayer=\{\s*!editingDefaultBot\s*\?\s*\(/,
+  );
+  assert.match(
+    pageSource,
+    /data-avatar-studio-layer=\{studioLayer \? "true" : undefined\}/,
+  );
   assert.match(cssSource, /\.botAvatarProfilePanel/);
-  assert.match(cssSource, /\.botProfileBuilderBackdrop\[data-avatar-studio-layer="true"\]/);
+  assert.match(
+    cssSource,
+    /\.botProfileBuilderBackdrop\[data-avatar-studio-layer="true"\]/,
+  );
   assert.match(pageSource, /activeControlTab === "voice"/);
-  assert.match(pageSource, /activeControlTab === "settings" && identityControlsVisible/);
-  assert.match(pageSource, /activeControlTab === "powers" && identityControlsVisible/);
-  assert.match(pageSource, /<BotPowersEditor powers=\{newBotPowers\} onChange=\{setNewBotPowers\}/);
+  assert.match(
+    pageSource,
+    /activeControlTab === "settings" && identityControlsVisible/,
+  );
+  assert.match(
+    pageSource,
+    /activeControlTab === "powers" && identityControlsVisible/,
+  );
+  assert.match(
+    pageSource,
+    /<BotPowersEditor powers=\{newBotPowers\} onChange=\{setNewBotPowers\}/,
+  );
   assert.match(pageSource, /\/api\/bot-powers\/compile/);
   assert.match(cssSource, /\.botPowersPanel/);
-  assert.match(cssSource, /grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/);
+  assert.match(
+    cssSource,
+    /grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/,
+  );
   assert.match(pageSource, /aria-label="Generation Lens and bot randomizer"/);
   assert.match(
     pageSource,
-    /resetLabel=\{\s*isDefaultPrismBot\s*\?\s*"Reset voice"\s*:\s*"Restore original voice"\s*\}/
+    /resetLabel=\{\s*isDefaultPrismBot\s*\?\s*"Reset voice"\s*:\s*"Restore original voice"\s*\}/,
   );
   assert.match(pageSource, /setPreviewMode\("talking"\)/);
   assert.match(pageSource, /const avatarControlTabsVisible = true;/);
@@ -944,7 +1071,7 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   assert.match(pageSource, /Name, badge, presets, and stroke/);
   assert.match(pageSource, /Built-in style/);
   assert.match(pageSource, /Custom glyph/);
-  assert.match(pageSource, /Blink and thinking animation/);
+  assert.match(pageSource, /Blink, mouth, and thinking animation/);
   assert.match(pageSource, /type BotAvatarCustomizerTab =/);
   assert.match(pageSource, /\| "profile"/);
   assert.match(pageSource, /\| "powers"/);
@@ -1001,9 +1128,18 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
     cssRuleBody(".botAvatarMouthCustomRow"),
     /grid-template-columns:\s*minmax\(0,\s*1fr\) minmax\(132px,\s*148px\);/,
   );
-  assert.match(cssRuleBody(".botAvatarMouthRotationBody"), /place-items:\s*center;/);
-  assert.match(cssRuleBody(".botAvatarMouthRotationGlyphText"), /inline-size:\s*max-content;/);
-  assert.match(cssRuleBody(".botAvatarMouthRotationGlyphText"), /min-inline-size:\s*1em;/);
+  assert.match(
+    cssRuleBody(".botAvatarMouthRotationBody"),
+    /place-items:\s*center;/,
+  );
+  assert.match(
+    cssRuleBody(".botAvatarMouthRotationGlyphText"),
+    /inline-size:\s*max-content;/,
+  );
+  assert.match(
+    cssRuleBody(".botAvatarMouthRotationGlyphText"),
+    /min-inline-size:\s*1em;/,
+  );
   assert.doesNotMatch(cssSource, /\.botAvatarMouthRotationBody input/);
   assert.match(cssRuleBody(".botAvatarControlGroup::before"), /width:\s*3px;/);
   assert.doesNotMatch(cssSource, /\.botAvatarPreviewMeta/);
@@ -1022,11 +1158,15 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
     /grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/,
   );
   assert.match(
-    cssRuleBody(".colorGlyphInline .colorSquare,\n.colorGlyphInline .glyphGridShell"),
+    cssRuleBody(
+      ".colorGlyphInline .colorSquare,\n.colorGlyphInline .glyphGridShell",
+    ),
     /height:\s*100%;/,
   );
   assert.match(
-    cssRuleBody(".colorGlyphInline .colorSquare,\n.colorGlyphInline .glyphGridShell"),
+    cssRuleBody(
+      ".colorGlyphInline .colorSquare,\n.colorGlyphInline .glyphGridShell",
+    ),
     /min-height:\s*150px;/,
   );
   assert.match(
@@ -1042,7 +1182,10 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
 
 test("bot creation, customization, and settings open directly in Avatar Studio", () => {
   const createStart = pageSource.indexOf("function openNewBotCreator(): void");
-  const createEnd = pageSource.indexOf("function openFreshBotCustomizer", createStart);
+  const createEnd = pageSource.indexOf(
+    "function openFreshBotCustomizer",
+    createStart,
+  );
   assert.notEqual(createStart, -1);
   assert.notEqual(createEnd, -1);
   const createSource = pageSource.slice(createStart, createEnd);
@@ -1054,28 +1197,44 @@ test("bot creation, customization, and settings open directly in Avatar Studio",
   );
 
   const openStart = pageSource.indexOf("function openBotCustomizer(bot: Bot)");
-  const openEnd = pageSource.indexOf("function openBotSettings(bot: Bot)", openStart);
+  const openEnd = pageSource.indexOf(
+    "function openBotSettings(bot: Bot)",
+    openStart,
+  );
   assert.notEqual(openStart, -1);
   assert.notEqual(openEnd, -1);
   const openSource = pageSource.slice(openStart, openEnd);
   assert.match(openSource, /startEditBot\(bot\);/);
   assert.match(openSource, /setBotAvatarCustomizerOpen\(true\);/);
 
-  const settingsStart = pageSource.indexOf("function openBotSettings(bot: Bot)");
-  const settingsEnd = pageSource.indexOf("function exitBotEditorToLibrary", settingsStart);
+  const settingsStart = pageSource.indexOf(
+    "function openBotSettings(bot: Bot)",
+  );
+  const settingsEnd = pageSource.indexOf(
+    "function exitBotEditorToLibrary",
+    settingsStart,
+  );
   assert.notEqual(settingsStart, -1);
   assert.notEqual(settingsEnd, -1);
   const settingsSource = pageSource.slice(settingsStart, settingsEnd);
   assert.match(settingsSource, /setBotPanelView\("settings"\);/);
   assert.match(settingsSource, /setBotAvatarCustomizerOpen\(true\);/);
 
-  const closeStart = pageSource.indexOf("function closeBotAvatarStudioFlow(): void");
-  const closeEnd = pageSource.indexOf("function openBotCustomizerFacts", closeStart);
+  const closeStart = pageSource.indexOf(
+    "function closeBotAvatarStudioFlow(): void",
+  );
+  const closeEnd = pageSource.indexOf(
+    "function openBotCustomizerFacts",
+    closeStart,
+  );
   assert.notEqual(closeStart, -1);
   assert.notEqual(closeEnd, -1);
   const closeSource = pageSource.slice(closeStart, closeEnd);
   assert.match(closeSource, /closeBotAvatarCustomizer\(\);/);
-  assert.match(closeSource, /if \(editingBotId\) \{[\s\S]*?exitBotEditorToLibrary\(\);/);
+  assert.match(
+    closeSource,
+    /if \(editingBotId\) \{[\s\S]*?exitBotEditorToLibrary\(\);/,
+  );
   assert.match(
     closeSource,
     /if \(botPanelView === "defaultCustomize"\) \{[\s\S]*?setBotPanelView\("home"\);/,
@@ -1086,7 +1245,10 @@ test("bot creation, customization, and settings open directly in Avatar Studio",
   );
 
   assert.match(pageSource, /<strong>Avatar Studio<\/strong>/);
-  assert.match(pageSource, /\{botPanelCreateMode && !botAvatarCustomizerOpen \? \(/);
+  assert.match(
+    pageSource,
+    /\{botPanelCreateMode && !botAvatarCustomizerOpen \? \(/,
+  );
 });
 
 test("personality randomization is scoped away from identity and settings", () => {
@@ -1262,7 +1424,7 @@ test("avatar preview theme keeps persona ink on normalized color without Prism r
   );
   assert.match(previewPlateRule, /transform:\s*scale\(1\)\s*;/);
   assert.match(
-    cssSource,
+    normalizedCssSource,
     /\.botAvatarMannequinStage \.zenLiveBotPresencePlate\[data-avatar-customizer-preview="true"\]\s*\{[\s\S]*transform:\s*translateY\(-8px\) scale\(1\.16\);/,
   );
   assert.doesNotMatch(previewPlateRule, /scale\(1\.28\)/);
@@ -1422,7 +1584,10 @@ test("identity color/glyph popover is never trapped by studio panel chrome", () 
         `${selector} rule creates a containing block that traps the fixed-position color/glyph popover`,
       );
     }
-    assert.ok(seen > 0, `Expected at least one CSS rule mentioning ${selector}`);
+    assert.ok(
+      seen > 0,
+      `Expected at least one CSS rule mentioning ${selector}`,
+    );
   }
   // The popover itself must stay viewport-fixed so the JS anchor math holds.
   const popoverRule =

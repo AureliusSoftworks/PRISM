@@ -108,7 +108,7 @@ describe("resolveNextSettings — voice foundation", () => {
   it("keeps an account-wide mode, engine, and exactly five normalized ElevenLabs slots", () => {
     const next = resolveNextSettings(
       {
-        voiceMode: "english",
+        voiceMode: "babble",
         voiceEffectsEnabled: false,
         voiceVolume: 0.65,
         englishVoiceEngine: "elevenlabs",
@@ -119,7 +119,7 @@ describe("resolveNextSettings — voice foundation", () => {
       },
       baseline()
     );
-    assert.equal(next.voiceMode, "english");
+    assert.equal(next.voiceMode, "babble");
     assert.equal(next.voiceEffectsEnabled, false);
     assert.equal(next.voiceVolume, 0.65);
     assert.equal(next.englishVoiceEngine, "elevenlabs");

@@ -39,6 +39,10 @@ export interface VoiceCapabilities {
   englishEngines: EnglishVoiceEngine[];
   builtinBottish: {
     available: true;
+    synthesis: "procedural";
+  };
+  builtinBabble: {
+    available: true;
     synthesis: "system-hybrid";
     proceduralFallback: true;
   };
@@ -47,9 +51,13 @@ export interface VoiceCapabilities {
 }
 
 export const VOICE_CAPABILITIES: VoiceCapabilities = {
-  modes: ["mute", "bottish", "english"],
+  modes: ["mute", "english", "babble", "bottish"],
   englishEngines: ["builtin", "elevenlabs"],
   builtinBottish: {
+    available: true,
+    synthesis: "procedural",
+  },
+  builtinBabble: {
     available: true,
     synthesis: "system-hybrid",
     proceduralFallback: true,
@@ -353,20 +361,23 @@ export function validateVoiceSynthesisRequest(body: Record<string, unknown>): Vo
 export function resolveVoiceSynthesisBoundary(args: VoiceSynthesisRequest & {
   persistedMessageProvider?: string | null;
 }):
-  | { ok: true; kind: "builtin-bottish"; engineUsed: "builtin-bottish"; text: string; profile: BotAudioVoiceProfileV1 }
+  | { ok: true; kind: "builtin-babble"; engineUsed: "builtin-babble"; text: string; profile: BotAudioVoiceProfileV1 }
   | { ok: true; kind: "builtin-english"; engineUsed: "builtin" | "builtin-local-fallback"; text: string; profile: BotAudioVoiceProfileV1 }
   | { ok: true; kind: "elevenlabs-stream"; engineUsed: "elevenlabs"; text: string; profile: BotAudioVoiceProfileV1 }
-  | { ok: false; status: 409 | 503; code: "muted" | "online-context-required" | "english-worker-unavailable" | "elevenlabs-unavailable"; engineUsed?: "builtin-local-fallback" } {
+  | { ok: false; status: 409 | 503; code: "muted" | "procedural-client-only" | "online-context-required" | "english-worker-unavailable" | "elevenlabs-unavailable"; engineUsed?: "builtin-local-fallback" } {
   const localFallback = args.engine === "elevenlabs" && args.persistedMessageProvider === "local";
   const engineUsed = localFallback ? "builtin-local-fallback" : args.engine;
   if (args.mode === "mute") {
     return { ok: false, status: 409, code: "muted" };
   }
   if (args.mode === "bottish") {
+    return { ok: false, status: 409, code: "procedural-client-only" };
+  }
+  if (args.mode === "babble") {
     return {
       ok: true,
-      kind: "builtin-bottish",
-      engineUsed: "builtin-bottish",
+      kind: "builtin-babble",
+      engineUsed: "builtin-babble",
       text: args.text,
       profile: args.profile,
     };

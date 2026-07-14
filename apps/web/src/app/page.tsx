@@ -67,10 +67,12 @@ import { AvatarDetailsMask } from "./AvatarDetailsMask";
 import {
   BOT_AVATAR_CANONICAL_FACE_PLACEMENT,
   BOT_AVATAR_CANONICAL_FACE_SCALE_Y,
+  botAvatarDetailsFacingScaleX,
 } from "./bot-avatar-render-geometry";
 import {
   avatarDetailsEqual,
   avatarDetailsHasVisuals,
+  avatarDetailsInkHiddenForBlink,
   avatarDetailsKey,
   normalizeAvatarDetails,
 } from "./avatar-details";
@@ -138,16 +140,19 @@ import {
   coffeeAutoplayForceTurnShouldRun,
   coffeeAutoplayWatchdogShouldWake,
   coffeeCenterFeedMessagesDuringPendingReveal,
+  coffeeComposerUsesRichInput,
   coffeeDraftChangeCountsAsTyping,
   coffeeDirectedMentionBotIds,
   coffeeEmptyTurnAutoplayRetryDelayMs,
   coffeeGeneratedReplyRevealDeferralMs,
   coffeeLoopTimerOwnsAutoplayTurn,
   coffeePendingSubmittedUserLineVisible,
+  coffeePlayerResponseBeatMs,
   coffeeShouldQueueAssistantRevealAfterUserTyping,
   coffeeShouldIgnoreStaleTurnResponse,
   coffeeShouldWaitForPendingBotRevealBeforeNextTurn,
   coffeeTableTalkAutoplayDeferralMs,
+  coffeeVoicePlaybackOwnsAutoplayGate,
   coffeeVisibleDirectedMentionBotIds,
 } from "./coffee-user-reveal-flow";
 import {
@@ -310,6 +315,7 @@ import {
   upsertBotLibraryGroup,
 } from "./botLibraryGroupFilter";
 import {
+  canvasBackgroundShouldZoomOutFocusedBot,
   canvasBotDirectoryIsInteractive,
   resolveCanvasBotMarqueeSelection,
   type CanvasBotMarqueeSelectionMode,
@@ -375,7 +381,6 @@ import {
   Timer,
   Trash2,
   Volume2,
-  VolumeX,
   Waves,
   Zap,
   X,
@@ -606,10 +611,12 @@ import {
 } from "@localai/shared";
 import { PRISM_APP_VERSION } from "../prismAppVersion";
 import {
+  enqueueBabbleVoice,
   enqueueBottishVoice,
-  enqueueHybridBottishVoice,
+  normalizeBottishPlaybackProfile,
+  prepareBabbleVoice,
   prepareBottishVoice,
-  readBottishVoiceSynthesisClip,
+  readBabbleVoiceSynthesisClip,
   stopBottishVoice,
 } from "./bottishVoice";
 import {
@@ -618,10 +625,7 @@ import {
   readEnglishVoiceSynthesisClip,
   stopEnglishVoice,
 } from "./englishVoice";
-import {
-  voiceModeAfterQuickToggle,
-  voiceModeDisplayName,
-} from "./voiceQuickToggle";
+import { VOICE_MODE_OPTIONS, voiceModeDisplayName } from "./voiceQuickToggle";
 import {
   PRISM_APPLETS,
   prismAppletVersionLabel,
@@ -638,6 +642,12 @@ import {
   coffeePlayerPlaybackProfile,
 } from "./coffee-player-voice";
 import {
+  coffeeShellPolicy,
+  type UniversalNavbarAction,
+  type UniversalNavbarDisabledMap,
+} from "./coffee-shell-policy";
+import { selectBotLibraryAddToGroupDialogGroup } from "./botLibraryAddToGroupDialog";
+import {
   coffeeBotVoiceSynthesisSource,
   coffeeVoiceSpokenText,
 } from "./coffee-voice-text";
@@ -648,10 +658,7 @@ import {
   PRISM_WEB_DEV_CHAT_COMMANDS_ENABLED,
   resolvePrismDevPanelToggleAction,
 } from "./prismDevChatCommands";
-import {
-  prismAvatarDetailsPaneEnabled,
-  prismWebDevToolsEnabled,
-} from "./prismDevGating";
+import { prismWebDevToolsEnabled } from "./prismDevGating";
 import {
   ZEN_TOOL_LAB_TOOLS,
   buildZenToolLabMessageSample,
@@ -762,6 +769,7 @@ import {
 } from "./zenLiveActions";
 import {
   ZEN_LIVE_MOUTH_PHASE_MS,
+  crtSpeechMouthShapeAtElapsedMs,
   normalizeCrtSpeechText,
   zenLiveBotMouthShapeForTalkingState,
   zenLiveBotMouthShapeFromRevealProgress,
@@ -1160,10 +1168,6 @@ const DEV_TOOLS_ENABLED = prismWebDevToolsEnabled({
   NODE_ENV: process.env.NODE_ENV,
   NEXT_PUBLIC_DEV_TOOLS: process.env.NEXT_PUBLIC_DEV_TOOLS,
   NEXT_PUBLIC_PRISM_BRANCH: process.env.NEXT_PUBLIC_PRISM_BRANCH,
-});
-const AVATAR_DETAILS_PANE_ENABLED = prismAvatarDetailsPaneEnabled({
-  NEXT_PUBLIC_PRISM_BRANCH: process.env.NEXT_PUBLIC_PRISM_BRANCH,
-  NEXT_PUBLIC_AVATAR_DETAILS: process.env.NEXT_PUBLIC_AVATAR_DETAILS,
 });
 // Floating shell applets (phone hamburger/handle/gear) are dev-only by default.
 // Release builds keep shell controls anchored in-header unless explicitly re-enabled.
@@ -10759,9 +10763,9 @@ function BotVoiceEditor({
     ...normalizeBotAudioVoiceProfileV1(profile),
     texture: DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1.texture,
   };
-  const [previewing, setPreviewing] = useState<"bottish" | "english" | null>(
-    null,
-  );
+  const [previewing, setPreviewing] = useState<
+    "bottish" | "babble" | "english" | null
+  >(null);
   const [englishPreviewState, setEnglishPreviewState] = useState<
     "idle" | "generating" | "playing"
   >("idle");
@@ -10775,10 +10779,7 @@ function BotVoiceEditor({
     identityCatalog.options.some(
       (option) => option.value === selectedVoiceValue,
     );
-  const updateControl = (
-    key: "pitch" | "lilt" | "bottishTone",
-    value: number,
-  ): void => {
+  const updateControl = (key: "pitch" | "lilt", value: number): void => {
     onChange(
       normalizeBotAudioVoiceProfileV1({
         ...normalizedProfile,
@@ -10840,7 +10841,7 @@ function BotVoiceEditor({
       <div className={styles.botVoiceEditorHeader}>
         <div>
           <strong>Voice enabled</strong>
-          <small>The same identity speaks Bottish and English.</small>
+          <small>One identity carries English, Babble, and Bottish.</small>
         </div>
         <button
           type="button"
@@ -10897,7 +10898,7 @@ function BotVoiceEditor({
             ? "Loading available voices…"
             : identityCatalog.message ||
               (identityCatalog.engine === "builtin"
-                ? "This list comes directly from the voices installed by your operating system."
+                ? "This installed system voice speaks English and Babble; Bottish keeps its portable robot identity."
                 : "This list comes directly from your ElevenLabs account.")}
         </small>
       </div>
@@ -10926,27 +10927,8 @@ function BotVoiceEditor({
           </label>
         ))}
       </div>
-      <div className={styles.botVoiceSectionLabel}>Bottish tone</div>
-      <div className={styles.botVoiceControls}>
-        <label>
-          <span>Tone</span>
-          <input
-            type="range"
-            min={-1}
-            max={1}
-            step={0.05}
-            value={normalizedProfile.bottishTone}
-            aria-label="Bottish tone from full and soft to bright and robotic"
-            onChange={(event) =>
-              updateControl("bottishTone", Number(event.currentTarget.value))
-            }
-          />
-          <output>{normalizedProfile.bottishTone.toFixed(2)}</output>
-        </label>
-      </div>
       <small className={styles.botVoiceControlHint}>
-        Bottish only — lower keeps more vocal body; higher adds brighter clicks,
-        gating, and buzz.
+        Pitch shapes every voice. Lilt shapes English only.
       </small>
       <div className={styles.botVoiceActions}>
         <button type="button" onClick={onReset}>
@@ -10956,10 +10938,6 @@ function BotVoiceEditor({
           <Shuffle size={13} strokeWidth={2.3} aria-hidden="true" />
           Randomize
         </button>
-        <button type="button" onClick={() => void previewVoice("bottish")}>
-          <Play size={13} strokeWidth={2.3} aria-hidden="true" />
-          {previewing === "bottish" ? "Restart Bottish" : "Preview Bottish"}
-        </button>
         <button type="button" onClick={() => void previewVoice("english")}>
           <Play size={13} strokeWidth={2.3} aria-hidden="true" />
           {englishPreviewState === "generating"
@@ -10967,6 +10945,14 @@ function BotVoiceEditor({
             : englishPreviewState === "playing"
               ? "Playing English…"
               : "Preview English"}
+        </button>
+        <button type="button" onClick={() => void previewVoice("babble")}>
+          <Play size={13} strokeWidth={2.3} aria-hidden="true" />
+          {previewing === "babble" ? "Restart Babble" : "Preview Babble"}
+        </button>
+        <button type="button" onClick={() => void previewVoice("bottish")}>
+          <Play size={13} strokeWidth={2.3} aria-hidden="true" />
+          {previewing === "bottish" ? "Restart Bottish" : "Preview Bottish"}
         </button>
       </div>
     </div>
@@ -13100,6 +13086,7 @@ const BOT_HUB_VOICE_CLICK_FEEDBACK_MS = 1400;
 interface VoicePreviewPlaybackOptions {
   cacheKey?: string;
   onPlaybackStart?: () => void;
+  onPlaybackProgress?: (elapsedMs: number, durationMs: number) => void;
   onError?: (message: string) => void;
 }
 
@@ -17041,28 +17028,28 @@ async function fetchAuthenticated(
   });
 }
 
-type BottishSynthesisClip = Awaited<
+type BabbleSynthesisClip = Awaited<
   ReturnType<typeof readEnglishVoiceSynthesisClip>
 >;
 
-async function requestBottishSynthesisClip(args: {
+async function requestBabbleSynthesisClip(args: {
   source: Record<string, unknown>;
   profile: BotAudioVoiceProfileV1;
   seed: string;
   signal?: AbortSignal;
   includeAlignment?: boolean;
-}): Promise<BottishSynthesisClip | null> {
+}): Promise<BabbleSynthesisClip | null> {
   const response = await fetchAuthenticated("/api/voices/synthesize", {
     method: "POST",
     signal: args.signal,
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       ...args.source,
-      mode: "bottish",
+      mode: "babble",
       engine: "builtin",
       seed: args.seed,
       includeAlignment: args.includeAlignment === true,
-      profile: args.profile,
+      profile: normalizeBottishPlaybackProfile(args.profile),
     }),
   });
   if (!response.ok) {
@@ -17070,18 +17057,18 @@ async function requestBottishSynthesisClip(args: {
       code?: string;
       error?: string;
     } | null;
-    if (payload?.code === "bottish-system-unavailable") return null;
+    if (payload?.code === "babble-system-unavailable") return null;
     throw new Error(
       payload?.error ??
         payload?.code ??
-        `Bottish synthesis failed (${response.status}).`,
+        `Babble synthesis failed (${response.status}).`,
     );
   }
-  return readBottishVoiceSynthesisClip(response);
+  return readBabbleVoiceSynthesisClip(response);
 }
 
-function enqueueBottishClipOrFallback(args: {
-  clip: BottishSynthesisClip | null;
+function enqueueBabbleClipOrFallback(args: {
+  clip: BabbleSynthesisClip | null;
   sourceText: string;
   profile: BotAudioVoiceProfileV1;
   seed: string;
@@ -17091,7 +17078,7 @@ function enqueueBottishClipOrFallback(args: {
   proceduralTiming?: Parameters<typeof enqueueBottishVoice>[6];
 }): Promise<void> {
   return args.clip
-    ? enqueueHybridBottishVoice(
+    ? enqueueBabbleVoice(
         args.clip.bytes,
         args.sourceText,
         args.profile,
@@ -17109,6 +17096,79 @@ function enqueueBottishClipOrFallback(args: {
         args.lifecycle,
         args.proceduralTiming,
       );
+}
+
+class BabbleVoiceUnavailableError extends Error {
+  constructor() {
+    super("Babble voice is still loading/unavailable. Please try again.");
+    this.name = "BabbleVoiceUnavailableError";
+  }
+}
+
+async function prepareVoiceModePlayback(mode: VoiceMode): Promise<void> {
+  if (mode === "bottish") await prepareBottishVoice();
+  else if (mode === "babble") await prepareBabbleVoice();
+  else if (mode === "english") await prepareEnglishVoice();
+}
+
+function primeVoiceModePlaybackFromUserGesture(mode: VoiceMode): void {
+  if (mode === "mute") return;
+  void prepareVoiceModePlayback(mode).catch(() => undefined);
+}
+
+function stopVoicePlaybackPreservingPreparedMode(mode: VoiceMode): void {
+  stopBottishVoice({
+    preservePreparedMedia: mode === "bottish" || mode === "babble",
+  });
+  stopEnglishVoice({ preservePreparedMedia: mode === "english" });
+}
+
+async function enqueueRobotVoiceMode(args: {
+  mode: "bottish" | "babble";
+  source: Record<string, unknown>;
+  sourceText: string;
+  profile: BotAudioVoiceProfileV1;
+  seed: string;
+  effectsEnabled: boolean;
+  globalVolume: number;
+  signal?: AbortSignal;
+  lifecycle?: Parameters<typeof enqueueBottishVoice>[5];
+  proceduralTiming?: Parameters<typeof enqueueBottishVoice>[6];
+  allowBabbleFallback?: boolean;
+  prepare?: boolean;
+}): Promise<void> {
+  if (args.prepare !== false) await prepareVoiceModePlayback(args.mode);
+  if (args.mode === "bottish") {
+    return enqueueBottishVoice(
+      args.sourceText,
+      args.profile,
+      args.seed,
+      args.effectsEnabled,
+      args.globalVolume,
+      args.lifecycle,
+      args.proceduralTiming,
+    );
+  }
+  const clip = await requestBabbleSynthesisClip({
+    source: args.source,
+    profile: args.profile,
+    seed: args.seed,
+    signal: args.signal,
+  });
+  if (args.signal?.aborted) return;
+  if (!clip && args.allowBabbleFallback === false) {
+    throw new BabbleVoiceUnavailableError();
+  }
+  return enqueueBabbleClipOrFallback({
+    clip,
+    sourceText: args.sourceText,
+    profile: args.profile,
+    seed: args.seed,
+    effectsEnabled: args.effectsEnabled,
+    globalVolume: args.globalVolume,
+    lifecycle: args.lifecycle,
+    proceduralTiming: args.proceduralTiming,
+  });
 }
 
 function sanitizeForFilenameSegment(raw: string): string {
@@ -27141,6 +27201,29 @@ function ZenLiveBotMannequin({
   const frameMetalMaterialStyle = botFrameMetalMaterialStyle(
     frameMaterialSeed ?? `fallback:${scheduleKey}`,
   );
+  const [avatarDetailsBlinkState, setAvatarDetailsBlinkState] = useState<{
+    key: string;
+    phase: "open" | "closed";
+  }>(() => ({ key: scheduleKey, phase: forceBlinkPhase ?? "open" }));
+  const handleAvatarDetailsBlinkPhaseChange = useCallback(
+    (phase: "open" | "closed"): void => {
+      setAvatarDetailsBlinkState((current) =>
+        current.key === scheduleKey && current.phase === phase
+          ? current
+          : { key: scheduleKey, phase },
+      );
+    },
+    [scheduleKey],
+  );
+  const avatarDetailsBlinkPhase =
+    forceBlinkPhase ??
+    (avatarDetailsBlinkState.key === scheduleKey
+      ? avatarDetailsBlinkState.phase
+      : "open");
+  const hideAvatarDetailsForBlink = avatarDetailsInkHiddenForBlink(
+    avatarDetails,
+    avatarDetailsBlinkPhase,
+  );
 
   return (
     <span
@@ -27181,11 +27264,14 @@ function ZenLiveBotMannequin({
           style={screenMaterialStyle}
           aria-hidden="true"
         />
-        <AvatarDetailsMask
-          details={avatarDetails}
-          color={avatarDetailsColor}
-          faceGeometry={faceStyle}
-        />
+        {!showThinkingSpinner ? (
+          <AvatarDetailsMask
+            details={avatarDetails}
+            color={avatarDetailsColor}
+            faceGeometry={faceStyle}
+            hiddenForBlink={hideAvatarDetailsForBlink}
+          />
+        ) : null}
         {showThinkingSpinner ? (
           <span className={styles.zenLiveBotPresenceThinkingGlyphAnchor}>
             <CoffeeSeatPlateEmoji
@@ -27253,6 +27339,7 @@ function ZenLiveBotMannequin({
               faceBlinkOffsetY={faceStyle.blinkOffsetY}
               faceThinkingFrames={faceStyle.thinkingFrames}
               forceBlinkPhase={forceBlinkPhase}
+              onBlinkPhaseChange={handleAvatarDetailsBlinkPhaseChange}
               className={`${styles.coffeeSeatPlateEmoji} ${styles.zenLiveBotPresenceFaceGlyph}`}
             />
           </span>
@@ -28286,6 +28373,7 @@ function ZenLiveBotPresencePlate({
     ...botAccent,
     "--zen-live-bot-copy-offset-x": `${avatarCopyOffsetX}px`,
     "--coffee-plate-emoji-face-scale-y": faceScaleY,
+    "--avatar-details-facing-scale-x": botAvatarDetailsFacingScaleX(faceScaleY),
     "--zen-live-bot-face-x": `${facePlacement.xPct}%`,
     "--zen-live-bot-face-y": `${facePlacement.yPct}%`,
     "--zen-live-bot-face-scale": facePlacement.scale,
@@ -34003,7 +34091,8 @@ function BotAvatarCoordinateControl({
 }): React.JSX.Element {
   const padRef = useRef<HTMLDivElement | null>(null);
   const displayX = lockX ? lockedX : x;
-  const xRatio = (displayX - minX) / (maxX - minX);
+  const visualX = -displayX;
+  const xRatio = (maxX - displayX) / (maxX - minX);
   const yRatio = (y - minY) / (maxY - minY);
   const updateFromPointer = (event: ReactPointerEvent<HTMLDivElement>) => {
     const rect = padRef.current?.getBoundingClientRect();
@@ -34014,7 +34103,7 @@ function BotAvatarCoordinateControl({
       x: lockX
         ? lockedX
         : botAvatarSnapCoordinate(
-            minX + Math.max(0, Math.min(1, rawX)) * (maxX - minX),
+            maxX - Math.max(0, Math.min(1, rawX)) * (maxX - minX),
             minX,
             maxX,
             stepX,
@@ -34033,7 +34122,7 @@ function BotAvatarCoordinateControl({
       <header>
         <span>
           <strong>{label}</strong>
-          <small>{botAvatarCoordinateLabel(displayX, y)}</small>
+          <small>{botAvatarCoordinateLabel(visualX, y)}</small>
         </span>
         <button type="button" onClick={onReset} aria-label={`Reset ${label}`}>
           <RotateCcw size={12} strokeWidth={2.4} aria-hidden="true" />
@@ -34046,7 +34135,7 @@ function BotAvatarCoordinateControl({
         role="slider"
         tabIndex={0}
         aria-label={label}
-        aria-valuetext={botAvatarCoordinateLabel(displayX, y)}
+        aria-valuetext={botAvatarCoordinateLabel(visualX, y)}
         onPointerDown={(event) => {
           event.currentTarget.setPointerCapture(event.pointerId);
           updateFromPointer(event);
@@ -34062,14 +34151,14 @@ function BotAvatarCoordinateControl({
             event.preventDefault();
             if (!lockX)
               onChange({
-                x: botAvatarSnapCoordinate(displayX - xStep, minX, maxX, stepX),
+                x: botAvatarSnapCoordinate(displayX + xStep, minX, maxX, stepX),
                 y,
               });
           } else if (event.key === "ArrowRight") {
             event.preventDefault();
             if (!lockX)
               onChange({
-                x: botAvatarSnapCoordinate(displayX + xStep, minX, maxX, stepX),
+                x: botAvatarSnapCoordinate(displayX - xStep, minX, maxX, stepX),
                 y,
               });
           } else if (event.key === "ArrowUp") {
@@ -34260,15 +34349,16 @@ const BOT_AVATAR_GLYPH_ANIMATION_LABELS: Record<BotFaceGlyphAnimation, string> =
   };
 
 function BotAvatarGlyphAnimationControl({
+  label = "Animation",
   value,
   disabled,
   onChange,
 }: {
+  label?: string;
   value: BotFaceGlyphAnimation;
   disabled: boolean;
   onChange: (value: BotFaceGlyphAnimation) => void;
 }): React.JSX.Element {
-  const label = "Animation";
   return (
     <fieldset
       className={styles.botAvatarGlyphAnimationControl}
@@ -34491,7 +34581,7 @@ function BotAvatarFaceControls({
           ? customMouthActive
             ? "Custom glyph"
             : "Built-in style"
-          : "Blink and thinking animation";
+          : "Blink, mouth, and thinking animation";
 
   return (
     <section
@@ -34729,9 +34819,7 @@ function BotAvatarFaceControls({
               data-custom-active={customMouthActive ? "true" : undefined}
               aria-label="Mouth"
             >
-              <div
-                className={`${styles.botAvatarCustomMotionRow} ${styles.botAvatarCustomMotionRowCombined}`}
-              >
+              <div className={styles.botAvatarCustomMotionRow}>
                 <div className={styles.botAvatarGlyphRotationField}>
                   <BotAvatarCustomGlyphCapture
                     ariaLabel="Custom mouth glyph"
@@ -34753,11 +34841,6 @@ function BotAvatarFaceControls({
                     }
                   />
                 </div>
-                <BotAvatarGlyphAnimationControl
-                  value={faceMouthAnimation}
-                  disabled={!customMouthActive}
-                  onChange={onMouthAnimationChange}
-                />
               </div>
               <div className={styles.botAvatarCustomGeometry}>
                 <BotAvatarRangeControl
@@ -34889,6 +34972,13 @@ function BotAvatarFaceControls({
               </div>
             ) : null}
           </fieldset>
+
+          <BotAvatarGlyphAnimationControl
+            label="Mouth animation"
+            value={faceMouthAnimation}
+            disabled={!customMouthActive}
+            onChange={onMouthAnimationChange}
+          />
 
           <fieldset className={styles.botAvatarThinkingControl}>
             <legend>Thinking</legend>
@@ -35418,6 +35508,8 @@ function BotAvatarCustomizerModal({
   onAiParametersOpen,
 }: BotAvatarCustomizerModalProps): React.JSX.Element | null {
   const [mouthPhase, setMouthPhase] = useState(0);
+  const [previewSpeechMouthShape, setPreviewSpeechMouthShape] =
+    useState<ZenLiveBotMouthShape | null>(null);
   const [previewTheme, setPreviewTheme] = useState<"light" | "dark">(
     resolvedTheme,
   );
@@ -35453,7 +35545,7 @@ function BotAvatarCustomizerModal({
       mouthPhase % BOT_AVATAR_PREVIEW_MOUTH_SHAPES.length
     ] ?? "closed";
   const displayedPreviewMouthShape = previewTalking
-    ? previewMouthShape
+    ? (previewSpeechMouthShape ?? previewMouthShape)
     : "closed";
   const titleName = botName.trim() || "Bot";
   const bodySize = BOT_AVATAR_CUSTOMIZER_BODY_SIZE_PX;
@@ -35463,6 +35555,7 @@ function BotAvatarCustomizerModal({
     ...botAvatarPreviewIdentityStyle(color, isDefaultPrismBot),
     "--coffee-plate-emoji-face-scale-y": BOT_AVATAR_CANONICAL_FACE_SCALE_Y,
     "--avatar-details-scale-x": "1",
+    "--avatar-details-facing-scale-x": "1",
     "--zen-live-bot-face-x": `${facePlacement.xPct}%`,
     "--zen-live-bot-face-y": `${facePlacement.yPct}%`,
     "--zen-live-bot-face-scale": facePlacement.scale,
@@ -35509,6 +35602,7 @@ function BotAvatarCustomizerModal({
     setPreviewMoodIndex(0);
     setActiveControlTab(initialTab);
     setMouthPhase(0);
+    setPreviewSpeechMouthShape(null);
     setDetailsEditorDirty(false);
     setDetailsLeaveRequest(null);
     setDetailsLeaveApplying(false);
@@ -35920,7 +36014,10 @@ function BotAvatarCustomizerModal({
             </button>
           </div>
         </header>
-        <div className={styles.botAvatarCustomizerBody}>
+        <div
+          className={styles.botAvatarCustomizerBody}
+          data-active-control-tab={activeControlTab}
+        >
           <BotAvatarPreviewPanel
             titleName={titleName}
             glyph={glyph}
@@ -36006,7 +36103,10 @@ function BotAvatarCustomizerModal({
                 ))}
               </div>
             ) : null}
-            <div className={styles.botAvatarControlStack}>
+            <div
+              className={styles.botAvatarControlStack}
+              data-avatar-control-stack="true"
+            >
               {activeControlTab === "profile" && identityControlsVisible ? (
                 <section
                   className={styles.botAvatarProfilePanel}
@@ -36215,7 +36315,7 @@ function BotAvatarCustomizerModal({
                     <p className={styles.botVoiceCoffeePersonaNote}>
                       Prism represents you at the Coffee table. Your live
                       messages and session replays use this voice with your
-                      global Mute, Bottish, or English setting.
+                      global Mute, English, Babble, or Bottish setting.
                     </p>
                   ) : null}
                   <BotVoiceEditor
@@ -36238,14 +36338,40 @@ function BotAvatarCustomizerModal({
                       const runId = avatarVoicePreviewRunRef.current + 1;
                       avatarVoicePreviewRunRef.current = runId;
                       const previousMode = previewMode;
+                      const previewMouthText =
+                        previewText ?? VOICE_PREVIEW_TEXT;
                       let playbackStarted = false;
+                      setPreviewSpeechMouthShape(null);
                       try {
                         await onVoicePreview(profile, forcedMode, previewText, {
                           ...options,
                           onPlaybackStart: () => {
                             playbackStarted = true;
+                            if (forcedMode === "english") {
+                              setPreviewSpeechMouthShape(
+                                crtSpeechMouthShapeAtElapsedMs({
+                                  text: previewMouthText,
+                                  elapsedMs: 0,
+                                }),
+                              );
+                            }
                             setPreviewMode("talking");
                             options?.onPlaybackStart?.();
+                          },
+                          onPlaybackProgress: (elapsedMs, durationMs) => {
+                            if (forcedMode === "english") {
+                              setPreviewSpeechMouthShape(
+                                crtSpeechMouthShapeAtElapsedMs({
+                                  text: previewMouthText,
+                                  elapsedMs,
+                                  durationMs,
+                                }),
+                              );
+                            }
+                            options?.onPlaybackProgress?.(
+                              elapsedMs,
+                              durationMs,
+                            );
                           },
                         });
                       } finally {
@@ -36254,6 +36380,7 @@ function BotAvatarCustomizerModal({
                           avatarVoicePreviewRunRef.current === runId
                         ) {
                           setPreviewMode(previousMode);
+                          setPreviewSpeechMouthShape(null);
                         }
                       }
                     }}
@@ -38121,10 +38248,33 @@ function HomeContent(): React.JSX.Element {
     new Map(),
   );
   const [settings, setSettings] = useState<UserSettings | null>(null);
-  const voiceQuickToggleBusyRef = useRef(false);
+  const voiceModeSelectionBusyRef = useRef(false);
+  const voiceModeSelectorRef = useRef<HTMLDetailsElement | null>(null);
   const [voicePlaybackNotice, setVoicePlaybackNotice] = useState<string | null>(
     null,
   );
+  useEffect(() => {
+    const closeVoiceSelector = (event: PointerEvent | KeyboardEvent): void => {
+      const selector = voiceModeSelectorRef.current;
+      if (!selector?.open) return;
+      if (event instanceof KeyboardEvent && event.key === "Escape") {
+        selector.removeAttribute("open");
+        return;
+      }
+      if (event instanceof PointerEvent) {
+        const target = event.target;
+        if (target instanceof Node && !selector.contains(target)) {
+          selector.removeAttribute("open");
+        }
+      }
+    };
+    document.addEventListener("pointerdown", closeVoiceSelector, true);
+    document.addEventListener("keydown", closeVoiceSelector);
+    return () => {
+      document.removeEventListener("pointerdown", closeVoiceSelector, true);
+      document.removeEventListener("keydown", closeVoiceSelector);
+    };
+  }, []);
   const [elevenLabsVoiceCatalog, setElevenLabsVoiceCatalog] = useState<
     ElevenLabsVoiceCatalogEntry[]
   >([]);
@@ -39170,6 +39320,7 @@ function HomeContent(): React.JSX.Element {
   }, []);
   useEffect(() => {
     if (botHubVoicePreview.status !== "playing") return;
+    if (botHubVoicePreview.mode === "english") return;
     let mouthShapeIndex = 0;
     const advanceMouthShape = () => {
       setBotHubPreviewMouthShape(
@@ -39326,7 +39477,9 @@ function HomeContent(): React.JSX.Element {
         voiceAwaitingReplyRef.current && view === "chat";
       stopBottishVoice({
         preservePreparedMedia:
-          preservePreparedVoice && settings?.voiceMode === "bottish",
+          preservePreparedVoice &&
+          (settings?.voiceMode === "bottish" ||
+            settings?.voiceMode === "babble"),
       });
       stopEnglishVoice({
         preservePreparedMedia:
@@ -39357,9 +39510,13 @@ function HomeContent(): React.JSX.Element {
       stopEnglishVoice();
       return;
     }
-    // Chat/Zen Bottish follows the visible reveal below. Do not start a
+    // Chat/Zen robot speech follows the visible reveal below. Do not start a
     // second completed-message clip that can trail the bot's mouth.
-    if (view === "chat" && settings.voiceMode === "bottish") return;
+    if (
+      view === "chat" &&
+      (settings.voiceMode === "bottish" || settings.voiceMode === "babble")
+    )
+      return;
 
     const controller = new AbortController();
     voiceSynthesisAbortRef.current?.abort();
@@ -39367,8 +39524,7 @@ function HomeContent(): React.JSX.Element {
     void (async () => {
       let activeSpeechRevealKey: string | null = null;
       try {
-        if (settings.voiceMode === "bottish") await prepareBottishVoice();
-        else await prepareEnglishVoice();
+        await prepareVoiceModePlayback(settings.voiceMode);
         for (const message of unseen) {
           if (controller.signal.aborted) return;
           const speechRevealKey =
@@ -39411,22 +39567,21 @@ function HomeContent(): React.JSX.Element {
             }
             continue;
           }
-          if (settings.voiceMode === "bottish") {
-            const clip = await requestBottishSynthesisClip({
+          if (
+            settings.voiceMode === "bottish" ||
+            settings.voiceMode === "babble"
+          ) {
+            await enqueueRobotVoiceMode({
+              mode: settings.voiceMode,
               source: { messageId: message.id },
-              profile,
-              seed: message.id,
-              signal: controller.signal,
-            });
-            if (controller.signal.aborted) return;
-            await enqueueBottishClipOrFallback({
-              clip,
               sourceText:
                 resolveVisibleMessageContentForVoiceRef.current(message),
               profile,
               seed: message.id,
+              signal: controller.signal,
               effectsEnabled: settings.voiceEffectsEnabled !== false,
               globalVolume: settings.voiceVolume,
+              prepare: false,
             });
           } else {
             const effectiveEnglishEngine =
@@ -39699,21 +39854,16 @@ function HomeContent(): React.JSX.Element {
     stopBottishVoice();
     stopEnglishVoice();
     try {
-      if (settings.voiceMode === "bottish") {
-        await prepareBottishVoice();
+      if (settings.voiceMode === "bottish" || settings.voiceMode === "babble") {
         const sourceText =
           resolveVisibleMessageContentForVoiceRef.current(message);
-        const clip = await requestBottishSynthesisClip({
+        await enqueueRobotVoiceMode({
+          mode: settings.voiceMode,
           source: { messageId: message.id },
-          profile,
-          seed: message.id,
-          signal: controller.signal,
-        });
-        await enqueueBottishClipOrFallback({
-          clip,
           sourceText,
           profile,
           seed: message.id,
+          signal: controller.signal,
           effectsEnabled: settings.voiceEffectsEnabled !== false,
           globalVolume: settings.voiceVolume,
         });
@@ -41368,6 +41518,8 @@ function HomeContent(): React.JSX.Element {
   const sidebarEdgeSwipeRef = useRef<SidebarEdgeSwipeState | null>(null);
   const emptyStateSearchInputRef = useRef<HTMLInputElement | null>(null);
   const emptyStateSearchRef = useRef<HTMLDivElement | null>(null);
+  const emptyStateSpotlightInputRef = useRef<HTMLInputElement | null>(null);
+  const emptyStateSpotlightRef = useRef<HTMLDivElement | null>(null);
   const draftComposerRef = useRef<ComposerInputHandle | null>(null);
   const botImportInputRef = useRef<HTMLInputElement | null>(null);
   const accountImportInputRef = useRef<HTMLInputElement | null>(null);
@@ -43470,14 +43622,6 @@ function HomeContent(): React.JSX.Element {
     };
   }, []);
 
-  useEffect(() => {
-    if (!emptyStateSearchOpen) return;
-    const timeout = window.setTimeout(() => {
-      emptyStateSearchInputRef.current?.focus({ preventScroll: true });
-    }, 0);
-    return () => window.clearTimeout(timeout);
-  }, [emptyStateSearchOpen]);
-
   const cancelPendingEmptyStateSearchOpen = useCallback(() => {
     if (emptyStateSearchOpenTimerRef.current) {
       clearTimeout(emptyStateSearchOpenTimerRef.current);
@@ -43524,7 +43668,7 @@ function HomeContent(): React.JSX.Element {
       botPickerReturnEndAtRef.current - Date.now(),
     );
     window.setTimeout(() => {
-      emptyStateSearchInputRef.current?.focus({ preventScroll: true });
+      emptyStateSpotlightInputRef.current?.focus({ preventScroll: true });
     }, remainingReturnMs);
   }, [showEmptyStateSearchAfterReturn]);
 
@@ -45692,10 +45836,67 @@ function HomeContent(): React.JSX.Element {
       />
     );
   };
+  const renderVoiceModeSelector = (
+    options: { disabled?: boolean } = {},
+  ): React.ReactNode => {
+    const currentMode = normalizeVoiceMode(settings?.voiceMode);
+    const disabled = options.disabled === true || !settings;
+    return (
+      <details
+        ref={voiceModeSelectorRef}
+        className={styles.voiceModeSelector}
+        data-voice-mode={currentMode}
+      >
+        <summary
+          className={styles.voiceModeSelectorButton}
+          aria-label={`Voice mode: ${voiceModeDisplayName(currentMode)}`}
+          aria-disabled={disabled ? "true" : undefined}
+          onClick={(event) => {
+            if (!disabled) return;
+            event.preventDefault();
+          }}
+        >
+          <span>Voice</span>
+          <span aria-hidden="true">·</span>
+          <strong>{voiceModeDisplayName(currentMode)}</strong>
+          <ChevronDown size={13} strokeWidth={2.2} aria-hidden="true" />
+        </summary>
+        <div
+          className={styles.voiceModeSelectorMenu}
+          role="radiogroup"
+          aria-label="Voice mode"
+        >
+          {VOICE_MODE_OPTIONS.map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              role="radio"
+              aria-checked={mode === currentMode}
+              className={styles.voiceModeSelectorOption}
+              data-selected={mode === currentMode ? "true" : undefined}
+              onClick={() => {
+                voiceModeSelectorRef.current?.removeAttribute("open");
+                if (mode !== currentMode) void selectGlobalVoiceMode(mode);
+              }}
+            >
+              <span>{voiceModeDisplayName(mode)}</span>
+              <span
+                className={styles.voiceModeSelectorCheck}
+                aria-hidden="true"
+              >
+                {mode === currentMode ? "●" : ""}
+              </span>
+            </button>
+          ))}
+        </div>
+      </details>
+    );
+  };
   const renderCoffeeHeaderModelChrome = (): React.ReactNode => (
     <div className={styles.chatHeaderModelPicker}>
       {renderCoffeeProviderModeToggle()}
       {renderCoffeeHeaderModelPicker()}
+      {renderVoiceModeSelector()}
     </div>
   );
   const renderHeaderModelPicker = (
@@ -45749,7 +45950,7 @@ function HomeContent(): React.JSX.Element {
       view === "chat" &&
       !activeSideChat &&
       zenPersonaPickerBots.length > 0;
-    if (!showModelControls && !showBotPicker) return null;
+    if (!showModelControls && !showBotPicker) return renderVoiceModeSelector();
     return (
       <div className={styles.chatHeaderModelPicker}>
         {showModelControls ? (
@@ -45842,6 +46043,7 @@ function HomeContent(): React.JSX.Element {
             privateTone={appWidePrivateMode}
           />
         ) : null}
+        {renderVoiceModeSelector()}
       </div>
     );
   };
@@ -47942,6 +48144,7 @@ function HomeContent(): React.JSX.Element {
           chatEphemeralNowMs,
         startDelayMs: resolveMessageActionTextLagMs(latestAssistantMessage),
         phaseMs: zenLiveBotMouthPhaseMs,
+        phonemeAware: settings?.voiceMode === "english",
       });
     }, [
       chatAssistantRevealInProgress,
@@ -47953,6 +48156,7 @@ function HomeContent(): React.JSX.Element {
       resolveMessageActionTextLagMs,
       resolveVisibleMessageContent,
       resolveZenAssistantRevealDelayMultiplier,
+      settings?.voiceMode,
     ]);
   const zenLiveBotTalking =
     chatLikeSurface &&
@@ -47964,7 +48168,7 @@ function HomeContent(): React.JSX.Element {
     const revealKey = activeAssistantRevealKey;
     const shouldRun =
       view === "chat" &&
-      settings?.voiceMode === "bottish" &&
+      (settings?.voiceMode === "bottish" || settings?.voiceMode === "babble") &&
       settings.voiceVolume > 0 &&
       revealKey !== null &&
       latestAssistantMessage !== null;
@@ -47978,6 +48182,7 @@ function HomeContent(): React.JSX.Element {
       return;
     }
     if (liveBottishRevealKeyRef.current === revealKey) return;
+    const liveRobotVoiceMode = settings.voiceMode as "bottish" | "babble";
 
     const messageBot = resolveMessageBotIdentity(
       latestAssistantMessage,
@@ -48028,26 +48233,17 @@ function HomeContent(): React.JSX.Element {
     const controller = new AbortController();
     voiceSynthesisAbortRef.current?.abort();
     voiceSynthesisAbortRef.current = controller;
-    void prepareBottishVoice()
+    void Promise.resolve()
       .then(async () => {
         if (liveBottishRevealKeyRef.current !== revealKey) return;
         const seed = `live:${revealKey}`;
-        const clip = await requestBottishSynthesisClip({
+        return enqueueRobotVoiceMode({
+          mode: liveRobotVoiceMode,
           source: { text: speechText },
-          profile,
-          seed,
-          signal: controller.signal,
-        });
-        if (
-          liveBottishRevealKeyRef.current !== revealKey ||
-          controller.signal.aborted
-        )
-          return;
-        return enqueueBottishClipOrFallback({
-          clip,
           sourceText: speechText,
           profile,
           seed,
+          signal: controller.signal,
           effectsEnabled: settings.voiceEffectsEnabled !== false,
           globalVolume: settings.voiceVolume,
           lifecycle: {
@@ -48076,7 +48272,9 @@ function HomeContent(): React.JSX.Element {
         chatMessageFirstSeenAtRef.current.set(revealKey, Date.now());
         chatRevealPaceByKeyRef.current.delete(revealKey);
         if (!isAbortLikeError(error)) {
-          setVoicePlaybackNotice("Bottish playback could not start.");
+          setVoicePlaybackNotice(
+            `${voiceModeDisplayName(liveRobotVoiceMode)} playback could not start.`,
+          );
         }
       })
       .finally(() => {
@@ -49895,7 +50093,6 @@ function HomeContent(): React.JSX.Element {
     setBotAiParametersModalOpen(false);
     setBotPreferredModelsModalOpen(false);
     setCoffeeSettingsModalOpen(false);
-    if (panel === "settings") setPanel(null);
     if (
       panel === "bots" &&
       botPanelView !== "library" &&
@@ -49945,10 +50142,10 @@ function HomeContent(): React.JSX.Element {
     voiceSynthesisAbortRef.current?.abort();
     voiceSynthesisAbortRef.current = controller;
     coffeeVoicePlaybackBusyRef.current = true;
+    coffeeActiveVoiceMessageIdRef.current = unseen[0]?.id ?? null;
     void (async () => {
       try {
-        if (settings.voiceMode === "bottish") await prepareBottishVoice();
-        else await prepareEnglishVoice();
+        await prepareVoiceModePlayback(settings.voiceMode);
         for (const message of unseen) {
           if (controller.signal.aborted) return;
           const synthesisSource = coffeeBotVoiceSynthesisSource(message);
@@ -49962,20 +50159,21 @@ function HomeContent(): React.JSX.Element {
             ) ??
             normalizeBotAudioVoiceProfileV1(bot?.authored_audio_voice_profile);
           if (!profile.enabled || settings.voiceVolume <= 0) continue;
-          if (settings.voiceMode === "bottish") {
-            const clip = await requestBottishSynthesisClip({
+          coffeeActiveVoiceMessageIdRef.current = message.id;
+          if (
+            settings.voiceMode === "bottish" ||
+            settings.voiceMode === "babble"
+          ) {
+            await enqueueRobotVoiceMode({
+              mode: settings.voiceMode,
               source: { ...synthesisSource },
-              profile,
-              seed: message.id,
-              signal: controller.signal,
-            });
-            await enqueueBottishClipOrFallback({
-              clip,
               sourceText: synthesisSource.spokenText,
               profile,
               seed: message.id,
+              signal: controller.signal,
               effectsEnabled: settings.voiceEffectsEnabled !== false,
               globalVolume: settings.voiceVolume,
+              prepare: false,
             });
           } else {
             const response = await fetch(
@@ -50025,14 +50223,20 @@ function HomeContent(): React.JSX.Element {
           );
         }
       } finally {
-        coffeeVoicePlaybackBusyRef.current = false;
-        if (voiceSynthesisAbortRef.current === controller)
+        if (voiceSynthesisAbortRef.current === controller) {
+          coffeeActiveVoiceMessageIdRef.current = null;
+          coffeeVoicePlaybackBusyRef.current = false;
           voiceSynthesisAbortRef.current = null;
+        }
       }
     })();
     return () => {
       controller.abort();
-      coffeeVoicePlaybackBusyRef.current = false;
+      if (voiceSynthesisAbortRef.current === controller) {
+        coffeeActiveVoiceMessageIdRef.current = null;
+        coffeeVoicePlaybackBusyRef.current = false;
+        voiceSynthesisAbortRef.current = null;
+      }
     };
   }, [
     bots,
@@ -50330,6 +50534,7 @@ function HomeContent(): React.JSX.Element {
   const [coffeeUserRevealText, setCoffeeUserRevealText] = useState("");
   const coffeePendingRevealAfterUserRef =
     useRef<CoffeePendingRevealQueueArgs | null>(null);
+  const coffeeUserRevealSettledWaitersRef = useRef<Array<() => void>>([]);
   const coffeeRevealSettledWaitersRef = useRef<Array<() => void>>([]);
   /** Latest {@link queueCoffeeReveal} — the typewriter `useEffect` sits above its declaration in source order. */
   const queueCoffeeRevealFnRef = useRef<
@@ -50643,10 +50848,25 @@ function HomeContent(): React.JSX.Element {
     [],
   );
   useEffect(() => {
-    const moveEquippedPot = (event: PointerEvent) => {
+    const moveActivePot = (event: PointerEvent) => {
       const runtime = coffeePotDragRuntimeRef.current;
-      if (!runtime?.equipped) return;
+      if (!runtime || runtime.pointerId !== event.pointerId) return;
       moveEquippedCoffeePotRef.current(event.clientX, event.clientY);
+    };
+    const releaseDraggedPot = (event: PointerEvent) => {
+      const runtime = coffeePotDragRuntimeRef.current;
+      if (
+        !runtime ||
+        runtime.equipped ||
+        runtime.pointerId !== event.pointerId
+      ) {
+        return;
+      }
+      if (!runtime.moved) {
+        runtime.equipped = true;
+        return;
+      }
+      returnEquippedCoffeePotRef.current(runtime.pointerId);
     };
     const dropEquippedPot = (event: PointerEvent) => {
       const runtime = coffeePotDragRuntimeRef.current;
@@ -50655,11 +50875,29 @@ function HomeContent(): React.JSX.Element {
       event.stopImmediatePropagation();
       returnEquippedCoffeePotRef.current(runtime.pointerId);
     };
-    window.addEventListener("pointermove", moveEquippedPot);
+    const cancelEquippedPot = () => {
+      const runtime = coffeePotDragRuntimeRef.current;
+      if (!runtime?.equipped) return;
+      returnEquippedCoffeePotRef.current(runtime.pointerId);
+    };
+    const returnEquippedPotWithEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      const runtime = coffeePotDragRuntimeRef.current;
+      if (!runtime?.equipped) return;
+      event.preventDefault();
+      returnEquippedCoffeePotRef.current(runtime.pointerId);
+    };
+    window.addEventListener("pointermove", moveActivePot);
+    window.addEventListener("pointerup", releaseDraggedPot);
     window.addEventListener("pointerdown", dropEquippedPot, true);
+    window.addEventListener("pointercancel", cancelEquippedPot, true);
+    window.addEventListener("keydown", returnEquippedPotWithEscape, true);
     return () => {
-      window.removeEventListener("pointermove", moveEquippedPot);
+      window.removeEventListener("pointermove", moveActivePot);
+      window.removeEventListener("pointerup", releaseDraggedPot);
       window.removeEventListener("pointerdown", dropEquippedPot, true);
+      window.removeEventListener("pointercancel", cancelEquippedPot, true);
+      window.removeEventListener("keydown", returnEquippedPotWithEscape, true);
     };
   }, []);
   const [coffeeSessionSettings, setCoffeeSessionSettings] =
@@ -51343,8 +51581,7 @@ function HomeContent(): React.JSX.Element {
     coffeeReplayVoicePreparingKeyRef.current = messageKey;
     coffeeReplayOwnsVoicePlaybackRef.current = true;
     voiceSynthesisAbortRef.current?.abort();
-    stopBottishVoice();
-    stopEnglishVoice();
+    stopVoicePlaybackPreservingPreparedMode(settings.voiceMode);
     const controller = new AbortController();
     voiceSynthesisAbortRef.current = controller;
     const bot =
@@ -51402,22 +51639,20 @@ function HomeContent(): React.JSX.Element {
           startReveal(null);
           return;
         }
-        if (settings.voiceMode === "bottish") {
-          await prepareBottishVoice();
+        if (
+          settings.voiceMode === "bottish" ||
+          settings.voiceMode === "babble"
+        ) {
           const seed = `replay:${message.id}`;
-          const clip = await requestBottishSynthesisClip({
+          void enqueueRobotVoiceMode({
+            mode: settings.voiceMode,
             source: playerMessage
               ? { text: displayText }
               : { ...(botSynthesisSource ?? { text: displayText }) },
-            profile,
-            seed,
-            signal: controller.signal,
-          });
-          void enqueueBottishClipOrFallback({
-            clip,
             sourceText: displayText,
             profile,
             seed,
+            signal: controller.signal,
             effectsEnabled: settings.voiceEffectsEnabled !== false,
             globalVolume: settings.voiceVolume,
             lifecycle,
@@ -52112,6 +52347,7 @@ function HomeContent(): React.JSX.Element {
         } else {
           coffeeTypewriterRafRef.current = null;
           coffeePlayerVoiceClockRef.current = null;
+          resolveCoffeeUserRevealSettledWaiters();
           const queued = coffeePendingRevealAfterUserRef.current;
           coffeePendingRevealAfterUserRef.current = null;
           if (queued) {
@@ -52696,19 +52932,17 @@ function HomeContent(): React.JSX.Element {
     stopEnglishVoice();
     void (async () => {
       try {
-        if (settings.voiceMode === "bottish") {
-          await prepareBottishVoice();
-          const clip = await requestBottishSynthesisClip({
+        if (
+          settings.voiceMode === "bottish" ||
+          settings.voiceMode === "babble"
+        ) {
+          await enqueueRobotVoiceMode({
+            mode: settings.voiceMode,
             source: { text: beat.text },
-            profile,
-            seed,
-            signal: controller.signal,
-          });
-          await enqueueBottishClipOrFallback({
-            clip,
             sourceText: beat.text,
             profile,
             seed,
+            signal: controller.signal,
             effectsEnabled: settings.voiceEffectsEnabled !== false,
             globalVolume: settings.voiceVolume,
           });
@@ -53305,12 +53539,22 @@ function HomeContent(): React.JSX.Element {
           ) ?? null),
     [botLibraryGroupFilterId, botLibraryGroups],
   );
-  const botLibraryUngroupedFilterActive =
-    botLibraryGroupFilterId === BOT_LIBRARY_GROUP_FILTER_UNGROUPED;
   const ungroupedPanelBots = useMemo<readonly Bot[]>(
     () => filterUngroupedBotsByLibraryGroups(sortedPanelBots, botLibraryGroups),
     [botLibraryGroups, sortedPanelBots],
   );
+  const botLibraryUngroupedFilterActive =
+    botLibraryGroupFilterId === BOT_LIBRARY_GROUP_FILTER_UNGROUPED &&
+    ungroupedPanelBots.length > 0;
+  useEffect(() => {
+    if (
+      botLibraryGroupFilterId !== BOT_LIBRARY_GROUP_FILTER_UNGROUPED ||
+      ungroupedPanelBots.length > 0
+    ) {
+      return;
+    }
+    setBotLibraryGroupFilterId(BOT_LIBRARY_GROUP_FILTER_ALL);
+  }, [botLibraryGroupFilterId, ungroupedPanelBots.length]);
   const baseFilteredPanelBots = useMemo<readonly Bot[]>(() => {
     if (botLibraryUngroupedFilterActive) return ungroupedPanelBots;
     if (!activeBotLibraryGroupFilter) return sortedPanelBots;
@@ -53355,13 +53599,17 @@ function HomeContent(): React.JSX.Element {
         count: sortedPanelBots.length,
         bots: sortedPanelBots,
       },
-      {
-        id: BOT_LIBRARY_GROUP_FILTER_UNGROUPED,
-        name: "Ungrouped",
-        menuName: "Ungrouped bots",
-        count: ungroupedPanelBots.length,
-        bots: ungroupedPanelBots,
-      },
+      ...(ungroupedPanelBots.length > 0
+        ? [
+            {
+              id: BOT_LIBRARY_GROUP_FILTER_UNGROUPED,
+              name: "Ungrouped",
+              menuName: "Ungrouped bots",
+              count: ungroupedPanelBots.length,
+              bots: ungroupedPanelBots,
+            },
+          ]
+        : []),
       optionForGroup(favoritesGroup),
       ...customBotLibraryGroups.map(optionForGroup),
     ];
@@ -53381,6 +53629,11 @@ function HomeContent(): React.JSX.Element {
     }
     return BOT_LIBRARY_GROUP_FILTER_ALL;
   }, [activeBotLibraryGroupFilter, botLibraryUngroupedFilterActive]);
+  const ungroupedCoffeeBots = useMemo(
+    () =>
+      filterUngroupedBotsByLibraryGroups(coffeeBotsLibrary, botLibraryGroups),
+    [botLibraryGroups, coffeeBotsLibrary],
+  );
   const coffeeBotLibraryGroupFilterOptions = useMemo<
     BotLibraryGroupPickerOption[]
   >(() => {
@@ -53403,10 +53656,6 @@ function HomeContent(): React.JSX.Element {
       botLibraryGroups.find(
         (group) => group.id === BOT_LIBRARY_FAVORITES_GROUP_ID,
       ) ?? createFavoritesBotGroup();
-    const ungroupedCoffeeBots = filterUngroupedBotsByLibraryGroups(
-      coffeeBotsLibrary,
-      botLibraryGroups,
-    );
     return [
       {
         id: BOT_LIBRARY_GROUP_FILTER_ALL,
@@ -53416,17 +53665,35 @@ function HomeContent(): React.JSX.Element {
         count: coffeeBotsLibrary.length,
         bots: coffeeBotsLibrary,
       },
-      {
-        id: BOT_LIBRARY_GROUP_FILTER_UNGROUPED,
-        name: "Ungrouped",
-        menuName: "Ungrouped bots",
-        count: ungroupedCoffeeBots.length,
-        bots: ungroupedCoffeeBots,
-      },
+      ...(ungroupedCoffeeBots.length > 0
+        ? [
+            {
+              id: BOT_LIBRARY_GROUP_FILTER_UNGROUPED,
+              name: "Ungrouped",
+              menuName: "Ungrouped bots",
+              count: ungroupedCoffeeBots.length,
+              bots: ungroupedCoffeeBots,
+            },
+          ]
+        : []),
       optionForGroup(favoritesGroup),
       ...customBotLibraryGroups.map(optionForGroup),
     ];
-  }, [botLibraryGroups, coffeeBotsLibrary, customBotLibraryGroups]);
+  }, [
+    botLibraryGroups,
+    coffeeBotsLibrary,
+    customBotLibraryGroups,
+    ungroupedCoffeeBots,
+  ]);
+  useEffect(() => {
+    if (
+      coffeeBotLibraryGroupFilterId !== BOT_LIBRARY_GROUP_FILTER_UNGROUPED ||
+      ungroupedCoffeeBots.length > 0
+    ) {
+      return;
+    }
+    setCoffeeBotLibraryGroupFilterId(BOT_LIBRARY_GROUP_FILTER_ALL);
+  }, [coffeeBotLibraryGroupFilterId, ungroupedCoffeeBots.length]);
   const coffeeGroupFilteredBots = useMemo(
     () =>
       filterBotsByLibraryGroup(
@@ -53928,17 +54195,6 @@ function HomeContent(): React.JSX.Element {
   useLayoutEffect(() => {
     coffeeMentionBotsRef.current = coffeeMentionBotPicks;
   }, [coffeeMentionBotPicks]);
-  const findCoffeeDirectedMentionBotIds = useCallback(
-    (text: string): string[] => {
-      const mentionedBotIds = coffeeDirectedMentionBotIds(
-        text,
-        coffeeMentionBotsRef.current.map((bot) => bot.id),
-      );
-      if (coffeeSessionPhaseRef.current !== "arriving") return mentionedBotIds;
-      return mentionedBotIds.filter((botId) => coffeeBotIsFirmlySeated(botId));
-    },
-    [],
-  );
   const pickerSourceBots = useMemo(
     () => [...baseFilteredPanelBots],
     [baseFilteredPanelBots],
@@ -54014,6 +54270,17 @@ function HomeContent(): React.JSX.Element {
   }, [hueFilterCenter, viewportWidth]);
   const emptyStateSearchActive =
     emptyStateSearchOpen || normalizedEmptyStateBotNameFilter.length > 0;
+  useEffect(() => {
+    if (!emptyStateSearchActive) return;
+    const timeout = window.setTimeout(() => {
+      const input = emptyStateSpotlightInputRef.current;
+      if (!input || document.activeElement === input) return;
+      input.focus({ preventScroll: true });
+      const cursor = input.value.length;
+      input.setSelectionRange(cursor, cursor);
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, [emptyStateSearchActive]);
   const zenEmptyHeroVisible =
     chatLikeSurface &&
     (!detail || detail.messages.length === 0) &&
@@ -54088,7 +54355,7 @@ function HomeContent(): React.JSX.Element {
       zenInitialThinkingActive),
   );
   const emptyStateTypingSearchAvailable =
-    view !== "chat" &&
+    (view === "chat" || view === "sandbox") &&
     pickerSourceBots.length > 0 &&
     (!detail || detail.messages.length === 0) &&
     !privateChatActive;
@@ -54186,13 +54453,6 @@ function HomeContent(): React.JSX.Element {
     }
     return vars;
   }, [messagesFrameMode, hueLensTrackSegments]);
-  const botLibraryGroupDashboardActive =
-    view === "sandbox" &&
-    activeConversationIsEmpty &&
-    !pendingIncognito &&
-    !emptyStateSearchActive &&
-    !activeBot &&
-    Boolean(activeBotLibraryGroupFilter);
   const zenToneSpace = chatLikeSurface
     ? resolveZenToneSpaceFromAnnoyance(detail?.prismMood?.annoyance)
     : 0;
@@ -56305,7 +56565,8 @@ function HomeContent(): React.JSX.Element {
     };
   }, [view]);
 
-  async function refreshAll() {
+  async function refreshAll(options: { includeModels?: boolean } = {}) {
+    const includeModels = options.includeModels !== false;
     try {
       // Models request must see the same ComfyUI host as GET /api/settings — avoid racing
       // refreshSettings (setState is async) so refreshModels never calls /api/models with a stale host.
@@ -56317,10 +56578,13 @@ function HomeContent(): React.JSX.Element {
         view === "chat" ? refreshImagesChatGallery() : refreshImages(),
       ]);
       const { comfyUiHost } = await settingsPromise;
-      await refreshModels(comfyUiHost);
+      if (includeModels) {
+        await refreshModels(comfyUiHost);
+      }
     } catch (err) {
       /** Never toast the overlay for startup races (user may still browse cached UI). */
       console.warn("[refreshAll]", err);
+      if (!includeModels) return;
       try {
         await refreshModels();
       } catch {
@@ -58898,9 +59162,7 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  async function runZenSummaryForSessionBreak(
-    conversationId: string,
-  ): Promise<{
+  async function runZenSummaryForSessionBreak(conversationId: string): Promise<{
     displaySummary: string | null;
     internalSummary: string | null;
     summaryAt: string | null;
@@ -59663,9 +59925,8 @@ function HomeContent(): React.JSX.Element {
     });
   }
 
-  function refreshPrismFromNavbar(): void {
-    if (typeof window === "undefined") return;
-    window.location.reload();
+  async function refreshPrismFromNavbar(): Promise<void> {
+    await refreshAll({ includeModels: false });
   }
 
   function consumeDeprecatedRefreshCommand(
@@ -61217,12 +61478,9 @@ function HomeContent(): React.JSX.Element {
     voiceSynthesisAbortRef.current?.abort();
     stopBottishVoice();
     stopEnglishVoice();
-    if (settings?.voiceMode !== "mute") {
-      void (
-        settings?.voiceMode === "bottish"
-          ? prepareBottishVoice()
-          : prepareEnglishVoice()
-      ).catch(() => undefined);
+    const outgoingVoiceMode = settings?.voiceMode;
+    if (outgoingVoiceMode && outgoingVoiceMode !== "mute") {
+      void prepareVoiceModePlayback(outgoingVoiceMode).catch(() => undefined);
     }
     const chatRequestController = new AbortController();
     if (!isZenAutonomy) {
@@ -65048,7 +65306,10 @@ function HomeContent(): React.JSX.Element {
     const input = (
       <ComposerInput
         ref={editorRef}
-        enabled={composerMarkdownEditorEnabled}
+        enabled={coffeeComposerUsesRichInput({
+          variant,
+          markdownEditorEnabled: composerMarkdownEditorEnabled,
+        })}
         value={value}
         placeholder={placeholder}
         writingAssistEnabled={settings?.composerWritingAssist !== false}
@@ -65746,27 +66007,31 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  async function toggleGlobalVoicePlayback(): Promise<void> {
-    if (!settings || voiceQuickToggleBusyRef.current) return;
+  async function selectGlobalVoiceMode(nextMode: VoiceMode): Promise<void> {
+    if (!settings || voiceModeSelectionBusyRef.current) return;
     const previousMode = normalizeVoiceMode(settings.voiceMode);
-    const nextMode = voiceModeAfterQuickToggle(previousMode);
-    voiceQuickToggleBusyRef.current = true;
+    if (nextMode === previousMode) return;
+    voiceModeSelectionBusyRef.current = true;
+    voiceSynthesisAbortRef.current?.abort();
+    voiceSynthesisAbortRef.current = null;
+    stopBottishVoice();
+    stopEnglishVoice();
+    coffeeActiveVoiceMessageIdRef.current = null;
+    coffeeActivePlayerVoiceTextRef.current = null;
+    coffeeVoicePlaybackBusyRef.current = false;
+    primeVoiceModePlaybackFromUserGesture(nextMode);
     setSettings((previous) =>
       previous ? { ...previous, voiceMode: nextMode } : previous,
     );
     if (nextMode === "mute") {
-      stopBottishVoice();
-      stopEnglishVoice();
       showLocalCommandToast(
         "Voices muted",
-        "Click the voice button again for English.",
+        "Choose another mode whenever you want sound.",
       );
     } else {
       showLocalCommandToast(
         `Voice · ${voiceModeDisplayName(nextMode)}`,
-        `Enabled across Prism. Click again for ${voiceModeDisplayName(
-          voiceModeAfterQuickToggle(nextMode),
-        )}.`,
+        "Enabled across Prism.",
       );
     }
     try {
@@ -65789,7 +66054,7 @@ function HomeContent(): React.JSX.Element {
           : "Prism kept the previous voice setting.",
       );
     } finally {
-      voiceQuickToggleBusyRef.current = false;
+      voiceModeSelectionBusyRef.current = false;
     }
   }
 
@@ -65922,30 +66187,19 @@ function HomeContent(): React.JSX.Element {
     stopEnglishVoice();
     if (previewVoiceMode === "mute") {
       setVoicePlaybackNotice(
-        "Mute is silent. Choose Bottish or English to hear a preview.",
+        "Mute is silent. Choose English, Babble, or Bottish to hear a preview.",
       );
       return;
     }
     setBusy(true);
     try {
       if (previewVoiceMode === "bottish") {
-        await prepareBottishVoice();
-        setVoicePlaybackNotice("Preparing voiced Bottish preview…");
+        setVoicePlaybackNotice("Playing procedural Bottish preview…");
         const seed = `voice-preview:${previewText}`;
-        const clip = await requestBottishSynthesisClip({
-          source: { text: previewText },
-          profile: previewProfile,
-          seed,
-        });
-        if (!clip) {
-          throw new Error(
-            "Voiced Bottish is still loading. Try the preview again in a moment.",
-          );
-        }
-        setVoicePlaybackNotice("Playing new voiced Bottish preview…");
         options.onPlaybackStart?.();
-        await enqueueBottishClipOrFallback({
-          clip,
+        await enqueueRobotVoiceMode({
+          mode: "bottish",
+          source: { text: previewText },
           sourceText: previewText,
           profile: previewProfile,
           seed,
@@ -65954,6 +66208,25 @@ function HomeContent(): React.JSX.Element {
         });
         if (voicePreviewPlaybackRunRef.current === previewRunId) {
           setVoicePlaybackNotice("Played Bottish preview.");
+        }
+        return;
+      }
+      if (previewVoiceMode === "babble") {
+        setVoicePlaybackNotice("Preparing Babble preview…");
+        const seed = `voice-preview:${previewText}`;
+        options.onPlaybackStart?.();
+        await enqueueRobotVoiceMode({
+          mode: "babble",
+          source: { text: previewText },
+          sourceText: previewText,
+          profile: previewProfile,
+          seed,
+          effectsEnabled: settings.voiceEffectsEnabled !== false,
+          globalVolume: settings.voiceVolume,
+          allowBabbleFallback: false,
+        });
+        if (voicePreviewPlaybackRunRef.current === previewRunId) {
+          setVoicePlaybackNotice("Played Babble preview.");
         }
         return;
       }
@@ -66022,6 +66295,9 @@ function HomeContent(): React.JSX.Element {
         "settings-voice-preview",
         settings.voiceEffectsEnabled !== false,
         settings.voiceVolume,
+        options.onPlaybackProgress
+          ? { onProgress: options.onPlaybackProgress }
+          : undefined,
       );
       if (voicePreviewPlaybackRunRef.current === previewRunId) {
         setVoicePlaybackNotice("Played English preview.");
@@ -66105,12 +66381,34 @@ function HomeContent(): React.JSX.Element {
         cacheKey: audioCacheKey,
         onPlaybackStart: () => {
           if (botHubVoicePreviewRunRef.current === runId) {
+            if (mode === "english") {
+              setBotHubPreviewMouthShape(
+                crtSpeechMouthShapeAtElapsedMs({
+                  text: previewText,
+                  elapsedMs: 0,
+                }),
+              );
+            }
             setBotHubVoicePreview({
               botId: showcaseVoiceId,
               mode,
               status: "playing",
               error: null,
             });
+          }
+        },
+        onPlaybackProgress: (elapsedMs, durationMs) => {
+          if (
+            mode === "english" &&
+            botHubVoicePreviewRunRef.current === runId
+          ) {
+            setBotHubPreviewMouthShape(
+              crtSpeechMouthShapeAtElapsedMs({
+                text: previewText,
+                elapsedMs,
+                durationMs,
+              }),
+            );
           }
         },
         onError: (message) => {
@@ -67160,6 +67458,26 @@ function HomeContent(): React.JSX.Element {
       setChatOverflowMenuOpen(false);
     },
     [closeMessageContextOverlay],
+  );
+
+  const openCanvasBotContextMenu = useCallback(
+    (bot: Bot, x: number, y: number, selectedBotIds: string[]) => {
+      if (activeBotLibraryGroupFilter && selectedBotIds.length === 0) {
+        openBotLibraryGroupBotContextMenu(
+          activeBotLibraryGroupFilter.id,
+          bot,
+          x,
+          y,
+        );
+        return;
+      }
+      openBotContextMenu(bot, x, y, selectedBotIds);
+    },
+    [
+      activeBotLibraryGroupFilter,
+      openBotContextMenu,
+      openBotLibraryGroupBotContextMenu,
+    ],
   );
 
   const openBotShowcaseContextMenu = useCallback(
@@ -70598,71 +70916,76 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  const handleEmptyStateBackgroundClick = useCallback(
-    (event: React.MouseEvent<HTMLDivElement>) => {
-      if (canvasBotMarqueeSuppressClickRef.current) {
-        canvasBotMarqueeSuppressClickRef.current = false;
-        event.preventDefault();
-        event.stopPropagation();
-        return;
-      }
-      if (detail || pendingIncognito) return;
-      const target = event.target;
-      if (!(target instanceof Element)) return;
-      const interactiveTarget = target.closest(
-        BOT_CANVAS_BACKGROUND_INTERACTIVE_SELECTOR,
-      );
-      if (interactiveTarget) return;
-      if (event.shiftKey) {
-        event.preventDefault();
-        event.stopPropagation();
-        return;
-      }
-      const shouldReturnToBotDirectory =
-        bots.length > 0 &&
-        !pendingReplyVisible &&
-        (selectedBotId !== null ||
-          composerPrimed ||
-          hueFilterCenter !== null ||
-          botLibraryGroupFilterId !== BOT_LIBRARY_GROUP_FILTER_ALL ||
-          botPanelGroup !== BOT_LIBRARY_FILTER_ALL);
-      if (shouldReturnToBotDirectory) {
-        event.preventDefault();
-        event.stopPropagation();
-        setSelectedId(null);
-        setDetail(null);
-        setChatBotOverride(undefined);
-        setBotLibraryGroupFilterId(BOT_LIBRARY_GROUP_FILTER_ALL);
-        setBotPanelGroup(BOT_LIBRARY_FILTER_ALL);
-        setEmptyStateSearchOpen(false);
-        setEmptyStateBotNameFilter("");
-        startBotPickerReturnToAll();
-        setSelectedBotId(null);
-        setSandboxGridSelectedBotId(null);
-        setComposerPrimed(false);
-        setConversationStarterPrompts(null);
-        setCanvasSelectedBotIds((current) =>
-          current.size === 0 ? current : new Set(),
-        );
-        return;
-      }
+  function handleEmptyStateBackgroundClick(
+    event: React.MouseEvent<HTMLDivElement>,
+  ): void {
+    if (canvasBotMarqueeSuppressClickRef.current) {
+      canvasBotMarqueeSuppressClickRef.current = false;
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const interactiveTarget = target.closest(
+      BOT_CANVAS_BACKGROUND_INTERACTIVE_SELECTOR,
+    );
+    if (interactiveTarget) return;
+    if (event.shiftKey) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    if (
+      canvasBackgroundShouldZoomOutFocusedBot({
+        view:
+          view === "chat" || view === "sandbox" || view === "coffee"
+            ? view
+            : "other",
+        conversationMessageCount: detail ? detail.messages.length : null,
+        focusedBotId: zenPersonaBotId,
+        pendingIncognito,
+        canZoomOutToAllBots: zenCanZoomOutToAllBots,
+      })
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      zoomOutFromActiveZenConversation();
+      return;
+    }
+    if (detail || pendingIncognito) return;
+    const shouldReturnToBotDirectory =
+      bots.length > 0 &&
+      !pendingReplyVisible &&
+      (selectedBotId !== null ||
+        composerPrimed ||
+        hueFilterCenter !== null ||
+        botLibraryGroupFilterId !== BOT_LIBRARY_GROUP_FILTER_ALL ||
+        botPanelGroup !== BOT_LIBRARY_FILTER_ALL);
+    if (shouldReturnToBotDirectory) {
+      event.preventDefault();
+      event.stopPropagation();
+      setSelectedId(null);
+      setDetail(null);
+      setChatBotOverride(undefined);
+      setBotLibraryGroupFilterId(BOT_LIBRARY_GROUP_FILTER_ALL);
+      setBotPanelGroup(BOT_LIBRARY_FILTER_ALL);
+      setEmptyStateSearchOpen(false);
+      setEmptyStateBotNameFilter("");
+      startBotPickerReturnToAll();
+      setSelectedBotId(null);
+      setSandboxGridSelectedBotId(null);
+      setComposerPrimed(false);
+      setConversationStarterPrompts(null);
       setCanvasSelectedBotIds((current) =>
         current.size === 0 ? current : new Set(),
       );
-    },
-    [
-      bots.length,
-      botLibraryGroupFilterId,
-      botPanelGroup,
-      composerPrimed,
-      detail,
-      hueFilterCenter,
-      pendingIncognito,
-      pendingReplyVisible,
-      selectedBotId,
-      startBotPickerReturnToAll,
-    ],
-  );
+      return;
+    }
+    setCanvasSelectedBotIds((current) =>
+      current.size === 0 ? current : new Set(),
+    );
+  }
 
   const openEmptyStateBotSearch = useCallback(() => {
     cancelPendingEmptyStateSearchOpen();
@@ -70973,7 +71296,9 @@ function HomeContent(): React.JSX.Element {
         ) {
           return;
         }
-        const spotlightInput = emptyStateSearchInputRef.current;
+        const spotlightInput = emptyStateSearchActive
+          ? emptyStateSpotlightInputRef.current
+          : emptyStateSearchInputRef.current;
         const focusSpotlight = () => {
           if (hueFilterCenter !== null) {
             setEmptyStateSearchOpen(false);
@@ -71054,6 +71379,7 @@ function HomeContent(): React.JSX.Element {
     function handleDocumentClick(event: MouseEvent) {
       const target = event.target;
       if (!(target instanceof Node)) return;
+      if (emptyStateSpotlightRef.current?.contains(target)) return;
       if (emptyStateSearchRef.current?.contains(target)) return;
       closeEmptyStateBotSearch();
     }
@@ -71318,7 +71644,14 @@ function HomeContent(): React.JSX.Element {
   );
 
   const renderEmptyStateBotSearch = (): React.JSX.Element | null => {
-    if (!emptyStateSearchActive || pickerSourceBots.length === 0) return null;
+    const persistentEmptyCanvasSpotlight =
+      (view === "chat" || view === "sandbox") &&
+      (!detail || detail.messages.length === 0);
+    if (
+      (!emptyStateSearchActive && !persistentEmptyCanvasSpotlight) ||
+      pickerSourceBots.length === 0
+    )
+      return null;
     const resultLabel =
       normalizedEmptyStateBotNameFilter.length === 0
         ? "Start typing to filter bots by name."
@@ -71327,7 +71660,7 @@ function HomeContent(): React.JSX.Element {
           : `${filteredBots.length} bots found`;
     return (
       <div
-        ref={emptyStateSearchRef}
+        ref={emptyStateSpotlightRef}
         className={styles.emptyStateSearch}
         role="search"
         onBlur={(event) => {
@@ -71340,35 +71673,49 @@ function HomeContent(): React.JSX.Element {
           closeEmptyStateBotSearch();
         }}
       >
-        <div className={styles.emptyStateSearchField}>
-          <span className={styles.emptyStateSearchGlyph} aria-hidden="true">
-            ⌕
-          </span>
-          <input
-            ref={emptyStateSearchInputRef}
-            type="search"
-            value={emptyStateBotNameFilter}
-            onChange={(event) =>
-              setEmptyStateBotNameFilter(event.currentTarget.value)
-            }
-            onKeyDown={(event) => {
-              if (event.key === "Escape") {
-                event.preventDefault();
-                closeEmptyStateBotSearch();
-                return;
+        <div className={styles.emptyStateSearchRow}>
+          <div className={styles.emptyStateSearchField}>
+            <span className={styles.emptyStateSearchGlyph} aria-hidden="true">
+              ⌕
+            </span>
+            <input
+              ref={emptyStateSpotlightInputRef}
+              type="search"
+              value={emptyStateBotNameFilter}
+              onChange={(event) =>
+                setEmptyStateBotNameFilter(event.currentTarget.value)
               }
-              if (
-                event.key === "Backspace" &&
-                emptyStateBotNameFilter.length <= 1
-              ) {
-                event.preventDefault();
-                closeEmptyStateBotSearchAndFocusDraft();
-              }
-            }}
-            className={styles.emptyStateSearchInput}
-            placeholder="Search bots"
-            aria-label="Search bots by name"
-          />
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  closeEmptyStateBotSearch();
+                  return;
+                }
+                if (
+                  event.key === "Backspace" &&
+                  emptyStateBotNameFilter.length <= 1
+                ) {
+                  event.preventDefault();
+                  closeEmptyStateBotSearchAndFocusDraft();
+                }
+              }}
+              className={styles.emptyStateSearchInput}
+              placeholder="Search bots"
+              aria-label="Search bots by name"
+            />
+          </div>
+          {persistentEmptyCanvasSpotlight ? (
+            <div className={styles.emptyStateSearchGroupPicker}>
+              <BotLibraryGroupPicker
+                value={botLibraryGroupPickerValue}
+                options={botLibraryGroupFilterOptions}
+                onChange={applyBotLibraryHeaderFilter}
+                resolvedTheme={resolvedTheme}
+                showCounts={false}
+                dismissPopoversSignal={composerPopoverDismissSignal}
+              />
+            </div>
+          ) : null}
         </div>
         <div className={styles.emptyStateSearchMeta} aria-live="polite">
           {resultLabel}
@@ -71446,11 +71793,9 @@ function HomeContent(): React.JSX.Element {
     );
   };
 
-  const renderFocusedBotLibraryGroupDashboard = ({
-    emptyStateClassName,
+  const renderFocusedBotLibraryGroupHero = ({
     heroBot,
   }: {
-    emptyStateClassName: string;
     heroBot: Bot | null;
   }): React.JSX.Element | null => {
     const focusedBotLibraryGroup = activeBotLibraryGroupFilter;
@@ -71463,13 +71808,13 @@ function HomeContent(): React.JSX.Element {
       return null;
     }
 
-    const groupDashboardBots = baseFilteredPanelBots;
+    const groupHeroBots = baseFilteredPanelBots;
     const groupDescription = focusedBotLibraryGroup.description.trim();
-    const groupProtectedBotCount = groupDashboardBots.filter((bot) =>
+    const groupProtectedBotCount = groupHeroBots.filter((bot) =>
       isBotDeleteProtected(bot.id),
     ).length;
     const groupEyebrowLabel = botLibraryGroupDashboardEyebrowLabel(
-      groupDashboardBots.length,
+      groupHeroBots.length,
       focusedBotLibraryGroup.builtIn ? undefined : BOT_LIBRARY_GROUP_BOT_CAP,
       groupProtectedBotCount,
     );
@@ -71482,212 +71827,110 @@ function HomeContent(): React.JSX.Element {
       ? `Allow deletion for bots in ${focusedBotLibraryGroup.name}`
       : `Protect bots in ${focusedBotLibraryGroup.name} from deletion`;
     const groupExportTitle =
-      groupDashboardBots.length > 0
+      groupHeroBots.length > 0
         ? `Export ${focusedBotLibraryGroup.name} as a bot collection`
         : `${focusedBotLibraryGroup.name} has no bots to export`;
 
     return (
-      <div
-        className={`${emptyStateClassName} ${styles.emptyStateGroupDashboard}`}
-        onClick={handleEmptyStateBackgroundClick}
+      <section
+        className={styles.botGroupHero}
+        style={botLibraryGroupVisualStyle(
+          focusedBotLibraryGroup,
+          groupHeroBots,
+          resolvedTheme,
+        )}
+        data-starter-bot-affordance="true"
+        data-zen-live-bot-chrome-avoid="true"
+        aria-labelledby="bot-library-group-hero-title"
+        onClick={(event) => event.stopPropagation()}
       >
-        <section
-          className={styles.botGroupDashboard}
-          style={botLibraryGroupVisualStyle(
-            focusedBotLibraryGroup,
-            groupDashboardBots,
-            resolvedTheme,
-          )}
-          data-starter-bot-affordance="true"
-          data-zen-live-bot-chrome-avoid="true"
-          aria-labelledby="bot-library-group-dashboard-title"
-          onClick={(event) => event.stopPropagation()}
-        >
-          <header className={styles.botGroupDashboardHeader}>
-            <div className={styles.botGroupDashboardCopy}>
-              <span className={styles.botGroupDashboardEyebrow}>
-                {groupEyebrowLabel}
-              </span>
-              <h2 id="bot-library-group-dashboard-title">
-                {focusedBotLibraryGroup.name}
-              </h2>
-              {groupDescription ? <p>{groupDescription}</p> : null}
-            </div>
-            <div className={styles.botGroupDashboardActions}>
-              <button
-                type="button"
-                className={`${styles.botGroupDashboardAction} ${styles.botGroupDashboardProtectionAction}`}
-                data-active={groupDeleteProtected ? "true" : undefined}
-                onClick={() =>
-                  setBotLibraryGroupDeleteProtection(
-                    focusedBotLibraryGroup.id,
-                    nextGroupDeleteProtected,
-                  )
-                }
-                aria-label={groupProtectionTitle}
-                title={groupProtectionTitle}
-              >
-                <BotGlyph
-                  name={groupDeleteProtected ? "key" : "lock"}
-                  size={14}
-                  strokeWidth={2.05}
-                />
-                <span>{groupProtectionLabel}</span>
-              </button>
-              <button
-                type="button"
-                className={styles.botGroupDashboardAction}
-                disabled={groupDashboardBots.length === 0 || botTransferBusy}
-                onClick={() =>
-                  void exportBotsAsCollection(groupDashboardBots, {
-                    group: {
-                      name: focusedBotLibraryGroup.name,
-                      description: focusedBotLibraryGroup.description,
-                    },
-                  })
-                }
-                aria-label={groupExportTitle}
-                title={groupExportTitle}
-              >
-                <Download size={14} strokeWidth={2.1} aria-hidden="true" />
-                <span>Export group</span>
-              </button>
-              {!focusedBotLibraryGroup.builtIn ? (
-                <>
-                  <button
-                    type="button"
-                    className={styles.botGroupDashboardAction}
-                    onClick={() =>
-                      editBotLibraryGroup(focusedBotLibraryGroup.id)
-                    }
-                  >
-                    Edit
-                  </button>
-                  <button
-                    type="button"
-                    className={`${styles.botGroupDashboardAction} ${styles.botGroupDashboardDangerAction}`}
-                    onClick={() =>
-                      requestDeleteBotLibraryGroup(focusedBotLibraryGroup.id)
-                    }
-                    aria-label={`Delete ${focusedBotLibraryGroup.name}`}
-                  >
-                    <Trash2 size={14} strokeWidth={2.15} aria-hidden="true" />
-                    <span>Delete</span>
-                  </button>
-                </>
-              ) : null}
-            </div>
-          </header>
-          {groupDashboardBots.length > 0 ? (
-            <div
-              className={styles.botGroupDashboardBotGrid}
-              data-canvas-bot-marquee-surface="true"
-              role="list"
-              aria-label={`Bots in ${focusedBotLibraryGroup.name}`}
+        <header className={styles.botGroupHeroHeader}>
+          <div className={styles.botGroupHeroCopy}>
+            <span className={styles.botGroupHeroEyebrow}>
+              {groupEyebrowLabel}
+            </span>
+            <h2 id="bot-library-group-hero-title">
+              {focusedBotLibraryGroup.name}
+            </h2>
+            {groupDescription ? <p>{groupDescription}</p> : null}
+          </div>
+          <div className={styles.botGroupHeroActions}>
+            <button
+              type="button"
+              className={`${styles.botGroupHeroAction} ${styles.botGroupHeroProtectionAction}`}
+              data-active={groupDeleteProtected ? "true" : undefined}
+              onClick={() =>
+                setBotLibraryGroupDeleteProtection(
+                  focusedBotLibraryGroup.id,
+                  nextGroupDeleteProtected,
+                )
+              }
+              aria-label={groupProtectionTitle}
+              title={groupProtectionTitle}
             >
-              {groupDashboardBots.map((b) => {
-                const isMarqueeSelected = canvasSelectedBotIds.has(b.id);
-                const isProtected = isBotDeleteProtected(b.id);
-                const isFavorite = favoriteBotIdSet.has(b.id);
-                const tileTraits = [
-                  isFavorite ? "favorite" : null,
-                  isProtected ? "protected" : null,
-                ].filter(Boolean);
-                const rawColor = b.color?.trim();
-                const accent = rawColor
-                  ? displayAccentForMode(
-                      rawColor,
-                      resolvedTheme,
-                      appWidePrivateMode,
-                    )
-                  : null;
-                const tileStyle = accent
-                  ? ({ "--bot-color": accent } as React.CSSProperties)
-                  : undefined;
-                const tileClassName = [
-                  styles.chatBotTile,
-                  styles.chatBotTileWithName,
-                  styles.botGroupDashboardBotTile,
-                  isProtected ? styles.chatBotTileProtected : null,
-                  isMarqueeSelected ? styles.chatBotTileMarqueeSelected : null,
-                ]
-                  .filter(Boolean)
-                  .join(" ");
-                return (
-                  <button
-                    key={b.id}
-                    type="button"
-                    className={tileClassName}
-                    style={tileStyle}
-                    data-bot-id={b.id}
-                    data-canvas-bot-marquee-item="true"
-                    data-marquee-selected={
-                      isMarqueeSelected ? "true" : undefined
-                    }
-                    data-zen-live-bot-chrome-avoid="true"
-                    onContextMenu={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      openBotLibraryGroupBotContextMenu(
-                        focusedBotLibraryGroup.id,
-                        b,
-                        event.clientX,
-                        event.clientY,
-                      );
-                    }}
-                    onClick={(event) => {
-                      if (canvasBotMarqueeSuppressClickRef.current) {
-                        canvasBotMarqueeSuppressClickRef.current = false;
-                        event.preventDefault();
-                        event.stopPropagation();
-                        return;
-                      }
-                      if (event.shiftKey || event.ctrlKey || event.metaKey) {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        toggleCanvasBotSelection(b.id);
-                        return;
-                      }
-                      commitEmptyStateBotSelection(b.id);
-                    }}
-                    aria-label={
-                      tileTraits.length > 0
-                        ? `${b.name}, ${tileTraits.join(", ")}`
-                        : b.name
-                    }
-                    data-favorite={isFavorite ? "true" : undefined}
-                    data-delete-protected={isProtected ? "true" : undefined}
-                    title={b.name}
-                  >
-                    <span className={styles.chatBotTileBotGlyph}>
-                      <BotGlyph name={b.glyph} size={34} strokeWidth={1.9} />
-                    </span>
-                    <span className={styles.chatBotTileFeaturedName}>
-                      {b.name}
-                      <BotPowerBadge powers={b.powers} />
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          ) : (
-            <p className={styles.botGroupDashboardEmpty} role="status">
-              {focusedBotLibraryGroup.id === BOT_LIBRARY_FAVORITES_GROUP_ID
-                ? "No favorite bots yet."
-                : "No bots in this group yet."}
-            </p>
-          )}
-        </section>
-      </div>
+              <BotGlyph
+                name={groupDeleteProtected ? "key" : "lock"}
+                size={14}
+                strokeWidth={2.05}
+              />
+              <span>{groupProtectionLabel}</span>
+            </button>
+            <button
+              type="button"
+              className={styles.botGroupHeroAction}
+              disabled={groupHeroBots.length === 0 || botTransferBusy}
+              onClick={() =>
+                void exportBotsAsCollection(groupHeroBots, {
+                  group: {
+                    name: focusedBotLibraryGroup.name,
+                    description: focusedBotLibraryGroup.description,
+                  },
+                })
+              }
+              aria-label={groupExportTitle}
+              title={groupExportTitle}
+            >
+              <Download size={14} strokeWidth={2.1} aria-hidden="true" />
+              <span>Export group</span>
+            </button>
+            {!focusedBotLibraryGroup.builtIn ? (
+              <>
+                <button
+                  type="button"
+                  className={styles.botGroupHeroAction}
+                  onClick={() => editBotLibraryGroup(focusedBotLibraryGroup.id)}
+                >
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  className={`${styles.botGroupHeroAction} ${styles.botGroupHeroDangerAction}`}
+                  onClick={() =>
+                    requestDeleteBotLibraryGroup(focusedBotLibraryGroup.id)
+                  }
+                  aria-label={`Delete ${focusedBotLibraryGroup.name}`}
+                >
+                  <Trash2 size={14} strokeWidth={2.15} aria-hidden="true" />
+                  <span>Delete</span>
+                </button>
+              </>
+            ) : null}
+          </div>
+        </header>
+      </section>
     );
   };
 
   const renderChatCanvasPickerControls = (
     style?: React.CSSProperties,
   ): React.JSX.Element | null => {
+    const standaloneSpotlightOwnsSearch =
+      (view === "chat" || view === "sandbox") &&
+      (!detail || detail.messages.length === 0);
     if (
       (view !== "chat" && view !== "sandbox") ||
-      pickerSourceBots.length === 0
+      sortedPanelBots.length === 0 ||
+      standaloneSpotlightOwnsSearch
     )
       return null;
     const resultLabel =
@@ -71700,7 +71943,7 @@ function HomeContent(): React.JSX.Element {
     const botPickerBots = botHasCommenced ? bots : filteredBots;
     const showRailBotPicker = view === "sandbox" || botHasCommenced;
     const botPicker =
-      showRailBotPicker && bots.length > 0 ? (
+      showRailBotPicker && botPickerBots.length > 0 ? (
         <ComposerBotPicker
           value={selectedBotId ?? ""}
           onChange={handleComposerBotSelectionChange}
@@ -71957,7 +72200,7 @@ function HomeContent(): React.JSX.Element {
                     canvasSelectedBotIds.has(b.id)
                       ? Array.from(canvasSelectedBotIds)
                       : [];
-                  openBotContextMenu(
+                  openCanvasBotContextMenu(
                     b,
                     event.clientX,
                     event.clientY,
@@ -72286,15 +72529,6 @@ function HomeContent(): React.JSX.Element {
       if (shouldAllowNativeContextMenu(event.target)) return;
       event.preventDefault();
       event.stopPropagation();
-      if (botLibraryGroupDashboardActive) {
-        closeMessageContextOverlay();
-        setBotContextMenu(null);
-        setZenLiveBotContextMenu(null);
-        setConversationGroupContextMenu(null);
-        setCanvasToolsContextMenu(null);
-        setChatOverflowMenuOpen(false);
-        return;
-      }
       const clamped = clampContextMenuPosition(
         event.clientX,
         event.clientY,
@@ -72310,12 +72544,7 @@ function HomeContent(): React.JSX.Element {
       setConversationGroupContextMenu(null);
       setChatOverflowMenuOpen(false);
     },
-    [
-      shouldAllowNativeContextMenu,
-      botLibraryGroupDashboardActive,
-      closeMessageContextOverlay,
-      view,
-    ],
+    [shouldAllowNativeContextMenu, closeMessageContextOverlay, view],
   );
 
   // ── Hold-to-delete-all gesture ────────────────────────────────────────
@@ -78786,7 +79015,12 @@ function HomeContent(): React.JSX.Element {
 
   function renderContextMenuPortal(content: React.ReactNode): React.ReactNode {
     if (!content || typeof document === "undefined") return null;
-    return createPortal(content, document.body);
+    return createPortal(
+      <div className={`${styles.contextMenuThemeScope} ${themeClass}`}>
+        {content}
+      </div>,
+      document.body,
+    );
   }
 
   function renderContextMenuSelectionFeedback(): React.JSX.Element | null {
@@ -80720,13 +80954,12 @@ function HomeContent(): React.JSX.Element {
             <select
               value={selectedGroupId}
               autoFocus
-              onChange={(event) =>
+              onChange={(event) => {
+                const groupId = event.currentTarget.value;
                 setBotLibraryAddToGroupDialog((current) =>
-                  current
-                    ? { ...current, groupId: event.currentTarget.value }
-                    : current,
-                )
-              }
+                  selectBotLibraryAddToGroupDialogGroup(current, groupId),
+                );
+              }}
             >
               {options.map(({ group, count }) => (
                 <option key={group.id} value={group.id}>
@@ -81205,6 +81438,7 @@ function HomeContent(): React.JSX.Element {
 
   const renderUniversalNavbarButtons = ({
     disabled = false,
+    disabledActions = {},
     showAtmosphere = view === "chat",
     showHub = false,
     onBeforeAction,
@@ -81213,6 +81447,7 @@ function HomeContent(): React.JSX.Element {
     toolStyles = {},
   }: {
     disabled?: boolean;
+    disabledActions?: UniversalNavbarDisabledMap;
     showAtmosphere?: boolean;
     showHub?: boolean;
     onBeforeAction?: () => void;
@@ -81229,6 +81464,8 @@ function HomeContent(): React.JSX.Element {
       theme?: React.CSSProperties;
     };
   } = {}): React.ReactNode => {
+    const actionDisabled = (action: UniversalNavbarAction): boolean =>
+      disabled || disabledActions[action] === true;
     const runAction = (action: () => void): void => {
       onBeforeAction?.();
       action();
@@ -81278,7 +81515,9 @@ function HomeContent(): React.JSX.Element {
         ? zenWallpaperError
         : null;
     const zenAtmosphereDisabled =
-      disabled || zenAtmosphereBusy || !zenAtmosphereHasConversation;
+      actionDisabled("atmosphere") ||
+      zenAtmosphereBusy ||
+      !zenAtmosphereHasConversation;
     const zenAtmosphereTooltip = !zenAtmosphereHasConversation
       ? "Send a Zen message before enabling Atmosphere"
       : zenAtmosphereBusy
@@ -81321,12 +81560,6 @@ function HomeContent(): React.JSX.Element {
     const botsAriaLabel = navbarCustomizerBot
       ? `Edit ${navbarCustomizerBot.name}`
       : "Open bot customizer";
-    const currentVoiceMode = normalizeVoiceMode(settings?.voiceMode);
-    const voiceMuted = currentVoiceMode === "mute";
-    const nextVoiceMode = voiceModeAfterQuickToggle(currentVoiceMode);
-    const voiceTooltip = `Voices: ${voiceModeDisplayName(
-      currentVoiceMode,
-    )} · click for ${voiceModeDisplayName(nextVoiceMode)}`;
     const imagesButton = (
       <button
         type="button"
@@ -81334,7 +81567,7 @@ function HomeContent(): React.JSX.Element {
         onClick={() => runAsyncAction(openNavbarImages)}
         aria-label="Images"
         data-glyph-tooltip="Images"
-        disabled={disabled}
+        disabled={actionDisabled("images")}
         style={toolStyles.images}
       >
         <ImagesGlyph />
@@ -81349,17 +81582,17 @@ function HomeContent(): React.JSX.Element {
           onClick={() => runAction(() => openRightPanel("command-center"))}
           aria-label="Open Prompt Center"
           data-glyph-tooltip="Prompt Center"
-          disabled={disabled}
+          disabled={actionDisabled("promptCenter")}
         >
           <SlashCommandGlyph />
         </button>
         <button
           type="button"
           className={styles.headerIconButton}
-          onClick={() => runAction(refreshPrismFromNavbar)}
+          onClick={() => runAsyncAction(refreshPrismFromNavbar)}
           aria-label="Refresh Prism"
           data-glyph-tooltip="Refresh"
-          disabled={disabled}
+          disabled={actionDisabled("refresh")}
           style={toolStyles.refresh}
         >
           <Recycle size={18} strokeWidth={2.2} aria-hidden="true" />
@@ -81370,36 +81603,9 @@ function HomeContent(): React.JSX.Element {
           onClick={() => runAction(() => openSettingsPanel())}
           aria-label="Open settings"
           data-glyph-tooltip="Settings"
-          disabled={disabled}
+          disabled={actionDisabled("settings")}
         >
           <WrenchGlyph />
-        </button>
-        <button
-          type="button"
-          className={`${styles.headerIconButton} ${styles.voiceHeaderButton}`}
-          onClick={() => runAsyncAction(toggleGlobalVoicePlayback)}
-          aria-label={voiceTooltip}
-          aria-pressed={!voiceMuted}
-          data-glyph-tooltip={voiceTooltip}
-          data-voice-mode={currentVoiceMode}
-          disabled={disabled || !settings}
-          style={toolStyles.voice}
-        >
-          {voiceMuted ? (
-            <VolumeX
-              className={styles.headerIconGlyph}
-              size={18}
-              strokeWidth={2.15}
-              aria-hidden="true"
-            />
-          ) : (
-            <Volume2
-              className={styles.headerIconGlyph}
-              size={18}
-              strokeWidth={2.15}
-              aria-hidden="true"
-            />
-          )}
         </button>
         <button
           type="button"
@@ -81407,7 +81613,7 @@ function HomeContent(): React.JSX.Element {
           onClick={() => runAction(() => openRightPanel("usage"))}
           aria-label="Usage"
           data-glyph-tooltip="Usage"
-          disabled={disabled}
+          disabled={actionDisabled("usage")}
           style={toolStyles.usage}
         >
           <BarChart3 size={18} strokeWidth={2.2} aria-hidden="true" />
@@ -81418,7 +81624,7 @@ function HomeContent(): React.JSX.Element {
           onClick={() => runAction(openNavbarMemories)}
           aria-label="Memories"
           data-glyph-tooltip="Memories"
-          disabled={disabled}
+          disabled={actionDisabled("memories")}
           style={toolStyles.memories}
         >
           <BookmarkGlyph />
@@ -81452,7 +81658,7 @@ function HomeContent(): React.JSX.Element {
           onClick={() => runAction(openNavbarBots)}
           aria-label={botsAriaLabel}
           data-glyph-tooltip={botsTooltip}
-          disabled={disabled}
+          disabled={actionDisabled("bots")}
           style={toolStyles.bots}
         >
           <BotsGlyph />
@@ -81464,7 +81670,7 @@ function HomeContent(): React.JSX.Element {
           aria-label={themeAriaLabel}
           data-title={themeTooltip}
           data-glyph-tooltip={themeTooltip}
-          disabled={disabled}
+          disabled={actionDisabled("theme")}
           style={toolStyles.theme}
         >
           <ThemeGlyph mode={effectiveThemeMode} />
@@ -81476,7 +81682,7 @@ function HomeContent(): React.JSX.Element {
             onClick={() => runAction(onHub ?? handleHeaderHubClick)}
             aria-label="Open Chat"
             data-glyph-tooltip="Open Chat"
-            disabled={disabled}
+            disabled={actionDisabled("hub")}
           >
             <HomeGlyph />
           </button>
@@ -81676,7 +81882,7 @@ function HomeContent(): React.JSX.Element {
     };
     const handleRefreshPage = () => {
       closeMenu();
-      refreshPrismFromNavbar();
+      void refreshPrismFromNavbar();
     };
     const handleEditBot = () => {
       closeMenu();
@@ -81858,25 +82064,35 @@ function HomeContent(): React.JSX.Element {
               >
                 Settings
               </button>
-              <button
-                type="button"
-                role="menuitem"
-                className={styles.chatOverflowMenuItem}
-                disabled={headerActionsDisabled || !settings}
-                onClick={(event) => {
-                  swallowMenuEvent(event);
-                  setChatOverflowMenuOpen(false);
-                  void toggleGlobalVoicePlayback();
-                }}
+              <div
+                className={styles.chatOverflowVoiceGroup}
+                role="radiogroup"
+                aria-label="Voice mode"
               >
-                {settings
-                  ? `Switch to ${voiceModeDisplayName(
-                      voiceModeAfterQuickToggle(
-                        normalizeVoiceMode(settings.voiceMode),
-                      ),
-                    )}`
-                  : "Switch voice mode"}
-              </button>
+                <span className={styles.chatOverflowVoiceLabel}>Voice</span>
+                {VOICE_MODE_OPTIONS.map((mode) => {
+                  const selected =
+                    mode === normalizeVoiceMode(settings?.voiceMode);
+                  return (
+                    <button
+                      key={mode}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      className={styles.chatOverflowMenuItem}
+                      data-selected={selected ? "true" : undefined}
+                      disabled={!settings}
+                      onClick={(event) => {
+                        swallowMenuEvent(event);
+                        if (!selected) void selectGlobalVoiceMode(mode);
+                        setChatOverflowMenuOpen(false);
+                      }}
+                    >
+                      {voiceModeDisplayName(mode)}
+                    </button>
+                  );
+                })}
+              </div>
               {!isZenSurface ? (
                 <button
                   type="button"
@@ -83148,6 +83364,7 @@ function HomeContent(): React.JSX.Element {
       ? coffeeSeatMouthShapeFromVisibleLength(
           devMoodFaceVisibleLength,
           `dev-mood:${moodKey}:${activeBot?.id ?? "default"}`,
+          settings?.voiceMode === "english",
         )
       : "closed";
     return (
@@ -85592,11 +85809,11 @@ function HomeContent(): React.JSX.Element {
             {previewStatus === "generating"
               ? previewMode === "english"
                 ? "Generating audio sample…"
-                : "Preparing Bottish—please wait…"
+                : `Preparing ${previewMode ? voiceModeDisplayName(previewMode) : "voice"}—please wait…`
               : previewStatus === "playing"
-                ? `Playing ${previewMode === "bottish" ? "Bottish" : "English"}…`
+                ? `Playing ${previewMode ? voiceModeDisplayName(previewMode) : "voice"}…`
                 : previewStatus === "complete"
-                  ? `${previewMode === "bottish" ? "Bottish" : "English"} preview played.`
+                  ? `${previewMode ? voiceModeDisplayName(previewMode) : "Voice"} preview played.`
                   : previewStatus === "error"
                     ? (previewError ?? "Voice sample unavailable. Try again.")
                     : "Choose how to hear this bot"}
@@ -85630,6 +85847,22 @@ function HomeContent(): React.JSX.Element {
                 : previewMode === "english" && previewStatus === "complete"
                   ? "Played!"
                   : "English"}
+          </button>
+          <button
+            type="button"
+            data-active={previewMode === "babble" ? "true" : undefined}
+            data-feedback={previewMode === "babble" ? previewStatus : undefined}
+            aria-pressed={previewMode === "babble"}
+            aria-busy={
+              previewMode === "babble" && previewStatus === "generating"
+            }
+            onClick={() => void playBotHubVoicePreview(bot, "babble")}
+          >
+            {previewMode === "babble" && previewStatus === "generating"
+              ? "Preparing Babble…"
+              : previewMode === "babble" && previewStatus === "playing"
+                ? "Playing Babble…"
+                : "Babble"}
           </button>
           <button
             type="button"
@@ -88922,9 +89155,10 @@ function HomeContent(): React.JSX.Element {
                               id="settings-section-info-voice-playback"
                               label="About bot voices"
                             >
-                              Mute stays silent. Bottish is a system-voiced
-                              robot language with offline procedural fallback.
-                              English uses the selected speech engine.
+                              English speaks normally. Babble keeps that voice
+                              but swaps in robot gibberish and additive sounds.
+                              Bottish is Prism's fully procedural robot
+                              language.
                             </PanelSectionInfo>
                           </div>
                         </header>
@@ -88937,14 +89171,19 @@ function HomeContent(): React.JSX.Element {
                             [
                               ["mute", "Mute", "No bot speech."],
                               [
-                                "bottish",
-                                "Bottish",
-                                "Voiced robot language with clicks, chirps, and buzz.",
-                              ],
-                              [
                                 "english",
                                 "English",
                                 "Spoken English through the selected engine.",
+                              ],
+                              [
+                                "babble",
+                                "Babble",
+                                "System-voiced gibberish with robot clicks, chirps, pops, and buzz.",
+                              ],
+                              [
+                                "bottish",
+                                "Bottish",
+                                "Prism's fully procedural robot language.",
                               ],
                             ] as const
                           ).map(([value, label, description]) => (
@@ -88979,8 +89218,8 @@ function HomeContent(): React.JSX.Element {
                             <span>
                               <strong>Voice volume</strong>
                               <small>
-                                Master volume for Bottish and English across
-                                Prism.
+                                Master volume for English, Babble, and Bottish
+                                across Prism.
                               </small>
                             </span>
                             <span className={styles.settingsRangeValue}>
@@ -94074,9 +94313,7 @@ function HomeContent(): React.JSX.Element {
                         faceBlinkOffsetY={newBotFaceBlinkOffsetY}
                         faceThinkingFrames={newBotFaceThinkingFrames}
                         avatarDetails={newBotAvatarDetails}
-                        detailsEditorVisible={
-                          AVATAR_DETAILS_PANE_ENABLED && !editingDefaultBot
-                        }
+                        detailsEditorVisible={!editingDefaultBot}
                         audioVoiceProfile={newBotAudioVoiceProfile}
                         voiceMode={normalizeVoiceMode(settings?.voiceMode)}
                         voiceIdentityCatalog={
@@ -95495,15 +95732,17 @@ function HomeContent(): React.JSX.Element {
                                   <option value={BOT_LIBRARY_GROUP_FILTER_ALL}>
                                     No group selected
                                   </option>
-                                  <option
-                                    value={BOT_LIBRARY_GROUP_FILTER_UNGROUPED}
-                                  >
-                                    Ungrouped (
-                                    {botLibraryBotCountLabel(
-                                      ungroupedPanelBots.length,
-                                    )}
-                                    )
-                                  </option>
+                                  {ungroupedPanelBots.length > 0 ? (
+                                    <option
+                                      value={BOT_LIBRARY_GROUP_FILTER_UNGROUPED}
+                                    >
+                                      Ungrouped (
+                                      {botLibraryBotCountLabel(
+                                        ungroupedPanelBots.length,
+                                      )}
+                                      )
+                                    </option>
+                                  ) : null}
                                   <option
                                     value={BOT_LIBRARY_FAVORITES_GROUP_ID}
                                   >
@@ -97333,6 +97572,22 @@ function HomeContent(): React.JSX.Element {
     coffeeRevealSettledWaitersRef.current = [];
     for (const resolve of waiters) resolve();
   };
+  const resolveCoffeeUserRevealSettledWaiters = () => {
+    const waiters = coffeeUserRevealSettledWaitersRef.current;
+    if (waiters.length === 0) return;
+    coffeeUserRevealSettledWaitersRef.current = [];
+    for (const resolve of waiters) resolve();
+  };
+  const waitForCoffeeUserRevealToSettle = async (): Promise<void> => {
+    await Promise.race([
+      new Promise<void>((resolve) => {
+        coffeeUserRevealSettledWaitersRef.current.push(resolve);
+      }),
+      new Promise<void>((resolve) => {
+        window.setTimeout(resolve, COFFEE_BOT_REVEAL_DELAY_MAX_MS);
+      }),
+    ]);
+  };
   const waitForCoffeeRevealToSettle = async (): Promise<void> => {
     await Promise.race([
       new Promise<void>((resolve) => {
@@ -97349,6 +97604,7 @@ function HomeContent(): React.JSX.Element {
   const resetCoffeeRhythm = () => {
     clearCoffeeRhythmTimers();
     clearCoffeeDirectedTurnQueue();
+    resolveCoffeeUserRevealSettledWaiters();
     resolveCoffeeRevealSettledWaiters();
     setCoffeeTypewriterLength(0);
     setCoffeePendingSpeakerBotId(null);
@@ -97411,11 +97667,18 @@ function HomeContent(): React.JSX.Element {
     }).durationMs;
     coffeeActiveVoiceMessageIdRef.current = message.id;
     voiceSynthesisAbortRef.current?.abort();
-    stopBottishVoice();
-    stopEnglishVoice();
+    stopVoicePlaybackPreservingPreparedMode(settings.voiceMode);
     const controller = new AbortController();
     voiceSynthesisAbortRef.current = controller;
     coffeeVoicePlaybackBusyRef.current = true;
+    const releaseCoffeeVoicePlayback = () => {
+      if (coffeeActiveVoiceMessageIdRef.current !== message.id) return;
+      coffeeActiveVoiceMessageIdRef.current = null;
+      coffeeVoicePlaybackBusyRef.current = false;
+      if (voiceSynthesisAbortRef.current === controller) {
+        voiceSynthesisAbortRef.current = null;
+      }
+    };
     const started = new Promise<number | null>((resolve) => {
       let settled = false;
       const settle = (durationMs: number | null) => {
@@ -97441,26 +97704,23 @@ function HomeContent(): React.JSX.Element {
           if (coffeeActiveVoiceMessageIdRef.current === message.id) {
             setCoffeeTypewriterLength(getBotMentionDisplayLength(displayText));
             setCoffeeTypewriterHolding(false);
-            coffeeActiveVoiceMessageIdRef.current = null;
           }
-          coffeeVoicePlaybackBusyRef.current = false;
+          releaseCoffeeVoicePlayback();
         },
       };
       void (async () => {
         try {
-          if (settings.voiceMode === "bottish") {
-            await prepareBottishVoice();
-            const clip = await requestBottishSynthesisClip({
+          if (
+            settings.voiceMode === "bottish" ||
+            settings.voiceMode === "babble"
+          ) {
+            void enqueueRobotVoiceMode({
+              mode: settings.voiceMode,
               source: { ...synthesisSource },
-              profile,
-              seed: message.id,
-              signal: controller.signal,
-            });
-            void enqueueBottishClipOrFallback({
-              clip,
               sourceText: displayText,
               profile,
               seed: message.id,
+              signal: controller.signal,
               effectsEnabled: settings.voiceEffectsEnabled !== false,
               globalVolume: settings.voiceVolume,
               lifecycle,
@@ -97468,6 +97728,7 @@ function HomeContent(): React.JSX.Element {
             }).catch((error) => {
               if (!isAbortLikeError(error))
                 setVoicePlaybackNotice("Coffee voice playback failed.");
+              releaseCoffeeVoicePlayback();
               settle(null);
             });
           } else {
@@ -97509,12 +97770,13 @@ function HomeContent(): React.JSX.Element {
             ).catch((error) => {
               if (!isAbortLikeError(error))
                 setVoicePlaybackNotice("Coffee voice playback failed.");
+              releaseCoffeeVoicePlayback();
               settle(null);
             });
           }
           window.setTimeout(() => settle(null), 1800);
         } catch (error) {
-          coffeeVoicePlaybackBusyRef.current = false;
+          releaseCoffeeVoicePlayback();
           if (!isAbortLikeError(error)) {
             setVoicePlaybackNotice(
               error instanceof Error
@@ -97547,8 +97809,7 @@ function HomeContent(): React.JSX.Element {
     }).durationMs;
     coffeeActivePlayerVoiceTextRef.current = spokenText;
     voiceSynthesisAbortRef.current?.abort();
-    stopBottishVoice();
-    stopEnglishVoice();
+    stopVoicePlaybackPreservingPreparedMode(settings.voiceMode);
     const controller = new AbortController();
     voiceSynthesisAbortRef.current = controller;
     return await new Promise<number | null>((resolve) => {
@@ -97584,20 +97845,18 @@ function HomeContent(): React.JSX.Element {
       };
       void (async () => {
         try {
-          if (settings.voiceMode === "bottish") {
-            await prepareBottishVoice();
+          if (
+            settings.voiceMode === "bottish" ||
+            settings.voiceMode === "babble"
+          ) {
             const seed = `coffee-player:${spokenText}`;
-            const clip = await requestBottishSynthesisClip({
+            void enqueueRobotVoiceMode({
+              mode: settings.voiceMode,
               source: { text: spokenText },
-              profile,
-              seed,
-              signal: controller.signal,
-            });
-            void enqueueBottishClipOrFallback({
-              clip,
               sourceText: spokenText,
               profile,
               seed,
+              signal: controller.signal,
               effectsEnabled: settings.voiceEffectsEnabled !== false,
               globalVolume: settings.voiceVolume,
               lifecycle,
@@ -97762,7 +98021,10 @@ function HomeContent(): React.JSX.Element {
       if (coffeeActiveVoiceMessageIdRef.current === pendingMessage?.id) {
         stopBottishVoice();
         stopEnglishVoice();
+        voiceSynthesisAbortRef.current?.abort();
+        voiceSynthesisAbortRef.current = null;
         coffeeActiveVoiceMessageIdRef.current = null;
+        coffeeVoicePlaybackBusyRef.current = false;
       }
       setCoffeePendingSpeakerBotId(null);
       setCoffeeUserRevealText("");
@@ -98308,15 +98570,14 @@ function HomeContent(): React.JSX.Element {
       (activeTopOffBotId !== null &&
         runtime.completedBotIds.has(activeTopOffBotId));
     const trayRect = coffeePotTrayRef.current?.getBoundingClientRect();
-    if (!trayRect) return;
-    const returnPoint = coffeePotScenePointFromClient(
-      trayRect.left + trayRect.width / 2,
-      trayRect.top + trayRect.height / 2,
-      null,
-      false,
-    );
-    const returnX = returnPoint.x;
-    const returnY = returnPoint.y;
+    const returnPoint = trayRect
+      ? coffeePotScenePointFromClient(
+          trayRect.left + trayRect.width / 2,
+          trayRect.top + trayRect.height / 2,
+          null,
+          false,
+        )
+      : null;
     const prefersReducedMotion =
       typeof window !== "undefined" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -98330,11 +98591,11 @@ function HomeContent(): React.JSX.Element {
       clearTimeout(coffeePotReturnTimerRef.current);
       coffeePotReturnTimerRef.current = null;
     }
-    if (latest && !prefersReducedMotion) {
+    if (latest && returnPoint && !prefersReducedMotion) {
       const returningDrag: CoffeePotDragState = {
         ...latest,
-        returnX,
-        returnY,
+        returnX: returnPoint.x,
+        returnY: returnPoint.y,
         returning: true,
         pouringBotId: null,
         pourProgress: null,
@@ -99117,7 +99378,14 @@ function HomeContent(): React.JSX.Element {
       coffeeLoopDeadlineMsRef.current = null;
       if (coffeeAutoplayPausedRef.current || coffeeDevModeEnabledRef.current)
         return;
-      if (coffeeVoicePlaybackBusyRef.current) {
+      const voicePlaybackOwnsAutoplay = coffeeVoicePlaybackOwnsAutoplayGate({
+        busy: coffeeVoicePlaybackBusyRef.current,
+        activeMessageId: coffeeActiveVoiceMessageIdRef.current,
+      });
+      if (coffeeVoicePlaybackBusyRef.current && !voicePlaybackOwnsAutoplay) {
+        coffeeVoicePlaybackBusyRef.current = false;
+      }
+      if (voicePlaybackOwnsAutoplay) {
         scheduleCoffeeLoopTimer(startAutonomousTurn, 240);
         return;
       }
@@ -99365,6 +99633,9 @@ function HomeContent(): React.JSX.Element {
   ): Promise<boolean> => {
     const trimmed = topic.trim();
     if (!trimmed) return false;
+    primeVoiceModePlaybackFromUserGesture(
+      normalizeVoiceMode(settings?.voiceMode),
+    );
     try {
       const response = await api<{
         ok: true;
@@ -99396,6 +99667,9 @@ function HomeContent(): React.JSX.Element {
       );
       return false;
     }
+    primeVoiceModePlaybackFromUserGesture(
+      normalizeVoiceMode(settings?.voiceMode),
+    );
     setCoffeeBusy(true);
     setCoffeeError(null);
     try {
@@ -99437,6 +99711,9 @@ function HomeContent(): React.JSX.Element {
       );
       return false;
     }
+    primeVoiceModePlaybackFromUserGesture(
+      normalizeVoiceMode(settings?.voiceMode),
+    );
     setCoffeeBusy(true);
     setCoffeeError(null);
     try {
@@ -99609,6 +99886,9 @@ function HomeContent(): React.JSX.Element {
       return null;
     }
     const shouldStartArrival = options.startArrival ?? true;
+    primeVoiceModePlaybackFromUserGesture(
+      normalizeVoiceMode(settings?.voiceMode),
+    );
     setCoffeeBusy(true);
     setCoffeeError(null);
     try {
@@ -99819,6 +100099,9 @@ function HomeContent(): React.JSX.Element {
       );
       return null;
     }
+    primeVoiceModePlaybackFromUserGesture(
+      normalizeVoiceMode(settings?.voiceMode),
+    );
     setCoffeeBusy(true);
     setCoffeeError(null);
     try {
@@ -99896,6 +100179,9 @@ function HomeContent(): React.JSX.Element {
       const sourceConversation =
         coffeeConversationRef.current ?? coffeeConversation;
       if (!sourceConversation || coffeeBusy || coffeeAutoBusy) return null;
+      primeVoiceModePlaybackFromUserGesture(
+        normalizeVoiceMode(settings?.voiceMode),
+      );
       clearCoffeeArrivalTimer();
       clearCoffeeLoopTimer();
       resetCoffeeRhythm();
@@ -100910,8 +101196,9 @@ function HomeContent(): React.JSX.Element {
       overrideText ?? coffeeComposerRichRef.current?.getValue() ?? coffeeDraft;
     const trimmed = liveDraft.trim();
     if (!trimmed) return;
-    if (settings?.voiceMode === "bottish") void prepareBottishVoice();
-    if (settings?.voiceMode === "english") void prepareEnglishVoice();
+    if (settings?.voiceMode && settings.voiceMode !== "mute") {
+      void prepareVoiceModePlayback(settings.voiceMode);
+    }
     if (consumeDeprecatedRefreshCommand(trimmed, "coffee")) return;
     if (consumeGlobalClearCommand(trimmed, "coffee")) return;
     if (await consumeCoffeeNvmCommand(trimmed)) return;
@@ -101143,10 +101430,7 @@ function HomeContent(): React.JSX.Element {
     coffeeDraftRef.current = "";
     setCoffeeDraft("");
     setCoffeeError(null);
-    const directedMentionBotIds = findCoffeeDirectedMentionBotIds(trimmed);
-    const directedSpeakerBotId = directedMentionBotIds[0];
-    const directedFollowupBotIds = directedMentionBotIds.slice(1);
-    setCoffeePendingSpeakerBotId(directedSpeakerBotId ?? null);
+    setCoffeePendingSpeakerBotId(null);
     const playerVoiceDurationMs =
       draftTableText.length > 0
         ? await startCoffeePlayerVoiceForReveal(trimmed)
@@ -101165,26 +101449,23 @@ function HomeContent(): React.JSX.Element {
     const abortController = new AbortController();
     coffeeTurnAbortRef.current = abortController;
     try {
-      if (directedSpeakerBotId) {
-        await waitForCoffeeBotToBeFirmlySeated(directedSpeakerBotId);
-        if (
-          coffeeConversationRef.current?.id !== activeConversation.id ||
-          !coffeeBotIsFirmlySeated(directedSpeakerBotId)
-        ) {
-          setCoffeePendingSpeakerBotId(null);
-          setCoffeeUserRevealText("");
-          const nextRhythmState =
-            coffeeDraftRef.current.trim().length > 0
-              ? "playerComposing"
-              : "idle";
-          coffeeTurnRhythmStateRef.current = nextRhythmState;
-          setCoffeeTurnRhythmState(nextRhythmState);
-          return;
-        }
+      if (draftTableText.length > 0) {
+        await waitForCoffeeUserRevealToSettle();
+        if (abortController.signal.aborted) return;
       }
+      setCoffeeTurnRhythmState("botThinking");
+      await waitForCoffeeJobPoll(
+        abortController.signal,
+        coffeePlayerResponseBeatMs({
+          conversationId: activeConversation.id,
+          message: trimmed,
+          responseDelayBias: coffeeSessionSettingsRef.current.responseDelayBias,
+          breathingRoom: coffeeSessionSettingsRef.current.breathingRoom,
+          crossTalk: coffeeSessionSettingsRef.current.crossTalk,
+        }),
+      );
       const presentBotIds = currentCoffeePresentBotIdsForRequest(
         activeConversation.id,
-        directedSpeakerBotId,
       );
       const turnJob = await runCoffeeTurnJob(
         {
@@ -101195,7 +101476,6 @@ function HomeContent(): React.JSX.Element {
           sessionRemainingMs: currentCoffeeSessionRemainingMs(),
           ...(presentBotIds.length > 0 ? { presentBotIds } : {}),
           ...(playerInterruption ? { playerInterruption } : {}),
-          ...(directedSpeakerBotId ? { directedSpeakerBotId } : {}),
           ...(coffeeSessionReasoningEffortOverride
             ? { reasoningEffort: coffeeSessionReasoningEffortOverride }
             : {}),
@@ -101264,19 +101544,6 @@ function HomeContent(): React.JSX.Element {
           includeCooldown: true,
           turnJobId: turnJob.jobId,
           onReveal: () => {
-            const nextDirectedTurn = nextDirectedCoffeeTurnAfterReveal(
-              directedFollowupBotIds,
-            );
-            if (nextDirectedTurn) {
-              void continueCoffeeSession(
-                response.conversation.id,
-                undefined,
-                nextDirectedTurn.botId,
-                trimmed,
-                nextDirectedTurn.remainingBotIds,
-              );
-              return;
-            }
             if (coffeeAutoplayPausedRef.current) return;
             // Action-only beats should not freeze the room. Keep the loop
             // alive so the next bot can respond and carry the discussion.
@@ -101455,6 +101722,9 @@ function HomeContent(): React.JSX.Element {
   };
   const startCoffeeReplay = () => {
     if (!coffeeConversation || coffeeConversation.messages.length === 0) return;
+    primeVoiceModePlaybackFromUserGesture(
+      normalizeVoiceMode(settings?.voiceMode),
+    );
     clearCoffeeLoopTimer();
     abortCoffeeRequests();
     coffeeReplayTypewriterLengthRef.current = 0;
@@ -101473,6 +101743,9 @@ function HomeContent(): React.JSX.Element {
   };
   const restartCoffeeReplay = () => {
     if (!coffeeConversation || coffeeConversation.messages.length === 0) return;
+    primeVoiceModePlaybackFromUserGesture(
+      normalizeVoiceMode(settings?.voiceMode),
+    );
     coffeeReplayTypewriterLengthRef.current = 0;
     coffeeReplayTypewriterMessageKeyRef.current = null;
     coffeeReplayPlayerThoughtMessageKeyRef.current = null;
@@ -101485,6 +101758,18 @@ function HomeContent(): React.JSX.Element {
     setCoffeeReplayMessageIndex(0);
     setCoffeeReplayPlaybackVersion((version) => version + 1);
     setCoffeeReplayActionPanelBotId(null);
+  };
+  const toggleCoffeeReplayPlayback = () => {
+    if (!coffeeReplayActive) {
+      startCoffeeReplay();
+      return;
+    }
+    if (!coffeeReplayPlaying) {
+      primeVoiceModePlaybackFromUserGesture(
+        normalizeVoiceMode(settings?.voiceMode),
+      );
+    }
+    setCoffeeReplayPlaying((playing) => !playing);
   };
   const finishCoffeeReplayRevealAt = (
     conversation: CoffeeConversationState,
@@ -101768,7 +102053,6 @@ function HomeContent(): React.JSX.Element {
                     }
                   >
                     <button
-                      ref={coffeePotTrayRef}
                       type="button"
                       className={styles.coffeeGroupSessionButton}
                       data-current={
@@ -102655,6 +102939,10 @@ function HomeContent(): React.JSX.Element {
   };
   const renderCoffeeTableStage = (): React.JSX.Element => {
     const conversationActive = coffeeConversation !== null;
+    const shellPolicy = coffeeShellPolicy({
+      conversationActive,
+      phase: coffeeSessionPhase,
+    });
     const previewingSession = coffeeSessionPhase === "preview";
     const previewSessionStarted = coffeeSessionHasStarted(coffeeConversation);
     const previewCanResumeSession =
@@ -103323,6 +103611,23 @@ function HomeContent(): React.JSX.Element {
     );
     const coffeeSeatActionDisplays = visibleCoffeeSeats
       .map(({ seatIndex, layoutIndex, bot }) => {
+        const seatDebugOverride = coffeeSeatDebugOverrides[bot.id];
+        const seatCanvasLeftPercent = seatDebugOverride
+          ? seatDebugOverride.leftPct
+          : coffeeSeatCanvasLeftPercent({
+              compact: compactCoffeeStage,
+              seatIndex,
+              seatCount: coffeeSeatLayoutCount,
+              layoutIndex,
+              phase: coffeeSessionPhase,
+              groupReady: coffeeGroupReadyToStart,
+              autoplayDock: coffeeSessionJoinedDock,
+              experimentalTableAngle:
+                !coffeeReplayActive &&
+                (coffeeSessionPhase === "arriving" ||
+                  coffeeSessionPhase === "live"),
+              replayActive: coffeeReplayActive,
+            });
         const teamId = coffeeTeamsState?.bots[bot.id]?.currentTeamId ?? null;
         const seatTypingActionState =
           typingSeatActionByBotId.get(bot.id) ?? null;
@@ -103364,6 +103669,13 @@ function HomeContent(): React.JSX.Element {
             coffeeSeatLayoutCount,
             layoutIndex,
           ),
+          seatHorizontalSide:
+            coffeeSeatHorizontalSideFromLeftPercent(seatCanvasLeftPercent) < 0
+              ? "left"
+              : coffeeSeatHorizontalSideFromLeftPercent(seatCanvasLeftPercent) >
+                  0
+                ? "right"
+                : "center",
           seatActionGhostText,
           seatActionGhostVerbose: seatActionGhostText
             ? isZenLiveBotPresenceActionVerbose(seatActionGhostText)
@@ -103459,6 +103771,16 @@ function HomeContent(): React.JSX.Element {
       coffeeSessionPhase === "finished";
     const replayPlayerTalking =
       coffeeReplayActive && replayUserLineTyping && !coffeeReplayPlayerThinking;
+    const replayPlayerMouthShape = zenLiveBotMouthShapeForTalkingState({
+      mouthShape: replayPlayerTalking
+        ? coffeeSeatMouthShapeFromVisibleLength(
+            activeTypewriterLength,
+            userTypingDisplayText || coffeePlayerLabel,
+            settings?.voiceMode === "english",
+          )
+        : "closed",
+      isTalking: replayPlayerTalking,
+    });
     const replayActionPanelBot = coffeeReplayActionPanelBotId
       ? (coffeeBotsById.get(coffeeReplayActionPanelBotId) ?? null)
       : null;
@@ -103548,6 +103870,7 @@ function HomeContent(): React.JSX.Element {
         data-picker-visible={coffeeCanvasPickerVisible ? "true" : undefined}
         data-preview={previewingSession ? "true" : undefined}
         data-replay-active={coffeeReplayActive ? "true" : undefined}
+        data-review-active={shellPolicy.reviewActive ? "true" : undefined}
         data-autoplay-dock={coffeeSessionJoinedDock ? "true" : undefined}
         data-coffee-pot-dragging={coffeePotDrag ? "true" : undefined}
         data-team-mode={coffeeTeamsState ? "true" : undefined}
@@ -104174,10 +104497,72 @@ function HomeContent(): React.JSX.Element {
                 ) : null}
               </div>
             </div>
-            {coffeeSessionPhase === "finished" && coffeeReplayActive ? (
-              <p className={styles.coffeeReplayStageCaption}>
-                Replay mode — watching this session back.
-              </p>
+            {shellPolicy.reviewActive ? (
+              <div
+                className={styles.coffeeReplayPlayerSeat}
+                data-player-thinking={
+                  coffeeReplayPlayerThinking ? "true" : undefined
+                }
+                data-table-speaking={replayPlayerTalking ? "true" : undefined}
+                aria-label={`${coffeePlayerLabel}, represented by Prism`}
+              >
+                <span
+                  className={`${styles.zenLiveBotPresencePlate} ${styles.coffeeReplayPlayerAvatar}`}
+                  data-mood="warm"
+                  data-prism-mood="warm"
+                  data-source="prism"
+                  data-prism-persona="true"
+                  data-talking={replayPlayerTalking ? "true" : undefined}
+                  data-mouth-shape={
+                    replayPlayerTalking ? replayPlayerMouthShape : undefined
+                  }
+                  data-canvas-side="left"
+                  data-body-sized="true"
+                  aria-hidden="true"
+                >
+                  <ZenLiveBotMannequin
+                    glyph={zenDefaultPrismGlyph}
+                    faceStyle={zenDefaultPrismFaceStyle}
+                    voicePreset="warm"
+                    isTalking={replayPlayerTalking}
+                    mouthShape={replayPlayerMouthShape}
+                    moodHint="warm"
+                    scheduleKey={`coffee-replay-player-${coffeeConversation?.id ?? "review"}`}
+                    thinkingScheduleKey={`coffee-replay-player-thinking-${coffeeConversation?.id ?? "review"}`}
+                    showThinkingSpinner={coffeeReplayPlayerThinking}
+                    screenMaterialSeed="prism-default"
+                    frameMaterialSeed={PRISM_FACTORY_CLEAN_FRAME_SEED}
+                  />
+                </span>
+                <div className={styles.coffeeReplayPlayerNameplate}>
+                  <span
+                    ref={coffeeReplayPotDockRef}
+                    className={styles.coffeeReplayPlayerPot}
+                    data-pot-away={coffeeReplayPotMotion ? "true" : undefined}
+                    aria-hidden="true"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={coffeePotRestImageUrl(coffeePotAssetTheme)}
+                      alt=""
+                      draggable={false}
+                    />
+                  </span>
+                  <span className={styles.coffeeReplayPlayerName}>
+                    {coffeePlayerLabel}
+                  </span>
+                  <span
+                    className={styles.coffeeReplayPlayerGlyph}
+                    aria-hidden="true"
+                  >
+                    <BotGlyph
+                      name={zenDefaultPrismGlyph}
+                      size={25}
+                      strokeWidth={1.7}
+                    />
+                  </span>
+                </div>
+              </div>
             ) : null}
             {visibleCoffeeSeats.map(({ seatIndex, layoutIndex, bot }) => {
               const rosterPreviewSeat = compactCoffeeStage;
@@ -104255,6 +104640,7 @@ function HomeContent(): React.JSX.Element {
                     ? coffeeSeatMouthShapeFromVisibleLength(
                         activeTypewriterLength,
                         tableTypingAssistantSpeechText || bot.name,
+                        settings?.voiceMode === "english",
                       )
                     : "closed",
                   isTalking: isTableTypingThisSeat,
@@ -104380,9 +104766,9 @@ function HomeContent(): React.JSX.Element {
               );
               const refillSipLocked =
                 refillSipLockUntilMs > coffeeSessionClockMs;
-              const visualSeatSipInProgress = refillSipLocked
-                ? false
-                : seatSipInProgress;
+              const seatIsThinking = thinkingBotId === bot.id;
+              const visualSeatSipInProgress =
+                refillSipLocked || seatIsThinking ? false : seatSipInProgress;
               const completedSipAnimation =
                 coffeeCupLastSipAnimationByBotId.get(bot.id) ?? null;
               const completedSipAnimationTiming = completedSipAnimation
@@ -104397,6 +104783,7 @@ function HomeContent(): React.JSX.Element {
               const completedSipAnimationActive =
                 seatIsFirmlySeated &&
                 !refillSipLocked &&
+                !seatIsThinking &&
                 !isTableTypingThisSeat &&
                 !visualSeatSipInProgress &&
                 completedSipAnimationTiming != null &&
@@ -104458,16 +104845,21 @@ function HomeContent(): React.JSX.Element {
                         ? false
                         : null,
                 speaking: isTableTypingThisSeat,
+                thinking: seatIsThinking,
                 finishSeed: coffeeCupFinishSeed,
               });
               const seatSipPresentation = resolveCoffeeSeatSipFacePresentation({
                 sipInProgress: visualSeatSipInProgress,
-                completedSipAnimationAgeMs: refillSipLocked
-                  ? Number.POSITIVE_INFINITY
-                  : completedSipAnimationAgeMs,
+                completedSipAnimationAgeMs:
+                  refillSipLocked || seatIsThinking
+                    ? Number.POSITIVE_INFINITY
+                    : completedSipAnimationAgeMs,
                 completedSipAnimationDurationMs:
                   completedSipAnimationTiming?.durationMs ?? null,
-                cupSipping: refillSipLocked ? false : coffeeCupVisual.sipping,
+                cupSipping:
+                  refillSipLocked || seatIsThinking
+                    ? false
+                    : coffeeCupVisual.sipping,
                 seatIsFirmlySeated,
                 isSpeaking: isTableTypingThisSeat,
                 cupSide: coffeeCupSide,
@@ -104557,6 +104949,8 @@ function HomeContent(): React.JSX.Element {
               const coffeeHeadPlateStyle = {
                 ["--coffee-plate-emoji-face-scale-y" as string]:
                   coffeePlateFaceScaleY,
+                ["--avatar-details-facing-scale-x" as string]:
+                  botAvatarDetailsFacingScaleX(coffeePlateFaceScaleY),
                 ["--coffee-seat-sip-mouth-offset-x" as string]:
                   seatSipPresentation.mouthOffsetX,
                 ["--coffee-seat-sip-mouth-offset-y" as string]:
@@ -104904,6 +105298,7 @@ function HomeContent(): React.JSX.Element {
                         data-seat-count={display.seatCount}
                         data-team-id={display.teamId ?? undefined}
                         data-team-rank={display.teamRank ?? undefined}
+                        data-seat-horizontal-side={display.seatHorizontalSide}
                         style={anchorStyle}
                       >
                         <div
@@ -106332,16 +106727,22 @@ function HomeContent(): React.JSX.Element {
   };
   const renderCoffeeShell = (): React.JSX.Element => {
     const conversationActive = coffeeConversation !== null;
+    const shellPolicy = coffeeShellPolicy({
+      conversationActive,
+      phase: coffeeSessionPhase,
+    });
     /** Live at the table (not merely previewing a saved session from the sidebar). */
     const coffeeSessionJoined =
       conversationActive &&
       coffeeSessionPhase !== "preview" &&
       (coffeeSessionPhase !== "finished" || coffeeReplayActive);
+    const coffeeSessionSurfaceActive =
+      coffeeSessionJoined || shellPolicy.reviewActive;
     const coffeePreviewCanResume =
       coffeeSessionPhase === "preview" &&
       coffeeConversation != null &&
       !coffeeSessionHasStarted(coffeeConversation);
-    const coffeeTranscriptPermanent = coffeeSessionJoined;
+    const coffeeTranscriptPermanent = coffeeSessionSurfaceActive;
     const coffeeArrivalHasSeatedBot =
       coffeeSessionPhase !== "arriving" ||
       coffeeArrivedBotIds.some((id) => coffeeActiveSeatBotIds.includes(id));
@@ -106530,24 +106931,12 @@ function HomeContent(): React.JSX.Element {
         </button>
       </form>
     );
-    const coffeeFinishedControlsVisible =
-      conversationActive &&
-      coffeeSessionPhase === "finished" &&
-      coffeeReplayActive;
+    const coffeeFinishedControlsVisible = shellPolicy.reviewActive;
     const coffeeFinishedControlMessages = coffeeConversation?.messages ?? [];
-    const coffeePlayerLabel = user?.displayName?.trim() || "You";
     const coffeeFinishedReplayMessageIndex = clampCoffeeReplayMessageIndex(
       coffeeFinishedControlMessages.length,
       coffeeReplayMessageIndex,
     );
-    const coffeeFinishedReplayMessage =
-      coffeeFinishedControlMessages[coffeeFinishedReplayMessageIndex] ?? null;
-    const replayPlayerTalking =
-      coffeeReplayActive &&
-      !coffeeReplayPlayerThinking &&
-      coffeeFinishedReplayMessage?.role === "user" &&
-      coffeeReplayTypewriterLength <
-        coffeeReplayDisplayLengthForMessage(coffeeFinishedReplayMessage);
     const coffeeComposerPlaceholder =
       coffeeSessionPhase === "finished"
         ? "This Coffee Session has ended."
@@ -106590,13 +106979,13 @@ function HomeContent(): React.JSX.Element {
     return (
       <main
         className={`${styles.appLayout} ${themeClass} ${styles.coffeeShell}`}
-        data-session-active={coffeeSessionJoined ? "true" : undefined}
+        data-session-active={coffeeSessionSurfaceActive ? "true" : undefined}
         data-transcript-open={coffeeTranscriptPermanent ? "true" : undefined}
         data-accent-active={appShellStyle ? "true" : undefined}
         style={coffeeMainSurfaceStyle}
         onContextMenu={handleCoffeeShellContextMenu}
       >
-        {!coffeeSessionJoined && (
+        {!coffeeSessionSurfaceActive && (
           <aside
             className={styles.coffeeSidebar}
             data-dev-panel-safe-area="left"
@@ -106677,7 +107066,18 @@ function HomeContent(): React.JSX.Element {
             data-dev-panel-safe-area="top"
           >
             <div className={styles.chatHeaderIdentityGroup}>
-              {renderAppSwitcher()}
+              {shellPolicy.showEndSessionInSwitcher ? (
+                <button
+                  type="button"
+                  className={styles.coffeeExitSessionButton}
+                  onClick={() => void exitCoffeeSessionToSelectedView()}
+                  title="End Coffee Session and stop autonomous replies"
+                >
+                  End session
+                </button>
+              ) : (
+                renderAppSwitcher()
+              )}
             </div>
             {renderCoffeeHeaderModelChrome()}
             <h2
@@ -106700,18 +107100,7 @@ function HomeContent(): React.JSX.Element {
               >
                 <StarGlyph />
               </button>
-              {coffeeSessionJoined && coffeeSessionPhase !== "finished" ? (
-                <>
-                  <button
-                    type="button"
-                    className={styles.coffeeExitSessionButton}
-                    onClick={() => void exitCoffeeSessionToSelectedView()}
-                    title="End Coffee Session and stop autonomous replies"
-                  >
-                    End session
-                  </button>
-                </>
-              ) : coffeeSessionPhase === "preview" && coffeePreviewCanResume ? (
+              {coffeeSessionPhase === "preview" && coffeePreviewCanResume ? (
                 <button
                   type="button"
                   className={styles.coffeeExitSessionButton}
@@ -106723,7 +107112,7 @@ function HomeContent(): React.JSX.Element {
                 </button>
               ) : null}
               {renderUniversalNavbarButtons({
-                disabled: coffeeConfigurationLocked,
+                disabledActions: shellPolicy.disabledNavbarActions,
                 showAtmosphere: false,
                 onHub: () => {
                   void exitCoffeeToChat();
@@ -106875,45 +107264,10 @@ function HomeContent(): React.JSX.Element {
                 </span>
               </div>
               <div className={styles.coffeeReplayControlRail}>
-                <div className={styles.coffeeReplayUtilityControls}>
-                  <div
-                    className={styles.coffeeReplayPersona}
-                    data-player-thinking={
-                      coffeeReplayPlayerThinking ? "true" : undefined
-                    }
-                    data-table-speaking={
-                      replayPlayerTalking ? "true" : undefined
-                    }
-                    aria-label={`${coffeePlayerLabel}, represented by Prism`}
-                  >
-                    <span
-                      ref={coffeeReplayPotDockRef}
-                      className={styles.coffeeReplayComposerPot}
-                      data-pot-away={coffeeReplayPotMotion ? "true" : undefined}
-                      aria-hidden="true"
-                    >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={coffeePotRestImageUrl(coffeePotAssetTheme)}
-                        alt=""
-                        draggable={false}
-                      />
-                    </span>
-                    <span className={styles.coffeeReplayPersonaName}>
-                      {coffeePlayerLabel}
-                    </span>
-                    <span
-                      className={styles.coffeeReplayPersonaGlyph}
-                      aria-hidden="true"
-                    >
-                      <BotGlyph
-                        name={zenDefaultPrismGlyph}
-                        size={24}
-                        strokeWidth={1.7}
-                      />
-                    </span>
-                  </div>
-                </div>
+                <div
+                  className={styles.coffeeReplayUtilityControls}
+                  aria-hidden="true"
+                />
                 <div className={styles.coffeeReplayTransportControls}>
                   {coffeeReplayActive ? (
                     <>
@@ -106944,11 +107298,7 @@ function HomeContent(): React.JSX.Element {
                   <button
                     type="button"
                     className={`${styles.coffeeReplayIconButton} ${styles.coffeeReplayPrimaryButton}`}
-                    onClick={() =>
-                      coffeeReplayActive
-                        ? setCoffeeReplayPlaying((playing) => !playing)
-                        : startCoffeeReplay()
-                    }
+                    onClick={toggleCoffeeReplayPlayback}
                     disabled={coffeeFinishedControlMessages.length === 0}
                     aria-label={
                       coffeeReplayActive
@@ -107065,6 +107415,7 @@ function HomeContent(): React.JSX.Element {
                           data-coffee-pot-theme={coffeePotAssetTheme}
                         >
                           <button
+                            ref={coffeePotTrayRef}
                             type="button"
                             className={styles.coffeePotTray}
                             data-dragging={coffeePotDrag ? "true" : undefined}
@@ -107152,42 +107503,44 @@ function HomeContent(): React.JSX.Element {
               ? renderCoffeeSetupComposer()
               : coffeeGroupStartComposerVisible
                 ? renderCoffeeGroupStartComposer()
-                : renderShellComposer({
-                    variant: "coffee-global",
-                    className: styles.coffeeGlobalComposer,
-                    value: draft,
-                    editorRef: draftComposerRef,
-                    placeholder: "Say something...",
-                    submitDisabled: composerSubmitDisabled(draft),
-                    submitLabel: composerSubmitLabel(draft),
-                    submitAriaLabel: composerSubmitAriaLabel(draft),
-                    submitIconOnly: composerSubmitUsesRandomNudge(draft),
-                    hideSubmitButton: composerReplyInterruptActive
-                      ? false
-                      : hideMobileEmptySend,
-                    onSubmit: handleCoffeeGlobalComposerSubmit,
-                    onKeyDown: handleCoffeeGlobalComposerKeyDown,
-                    onChange: handleComposerChange,
-                    onValueChange: updateComposerDraft,
-                    onInputActivity: markComposerTypingActivity,
-                    onFocus: handleComposerFocus,
-                    mentionBots: chatMentionsEnabled
-                      ? composeMentionBotPicks
-                      : [],
-                    commandPicks: composerCommandPicks,
-                    toolPicks: COMPOSER_TOOL_PICKS,
-                    promptPicks: commandCenterPromptPicks,
-                    wildcardPicks: composerWildcardDeckPicks,
-                    errorContent: error ? (
-                      <p
-                        className={`${styles.error} ${styles.composeError}`}
-                        role="alert"
-                      >
-                        {error}
-                      </p>
-                    ) : null,
-                    stacked: true,
-                  })}
+                : shellPolicy.reviewActive
+                  ? null
+                  : renderShellComposer({
+                      variant: "coffee-global",
+                      className: styles.coffeeGlobalComposer,
+                      value: draft,
+                      editorRef: draftComposerRef,
+                      placeholder: "Say something...",
+                      submitDisabled: composerSubmitDisabled(draft),
+                      submitLabel: composerSubmitLabel(draft),
+                      submitAriaLabel: composerSubmitAriaLabel(draft),
+                      submitIconOnly: composerSubmitUsesRandomNudge(draft),
+                      hideSubmitButton: composerReplyInterruptActive
+                        ? false
+                        : hideMobileEmptySend,
+                      onSubmit: handleCoffeeGlobalComposerSubmit,
+                      onKeyDown: handleCoffeeGlobalComposerKeyDown,
+                      onChange: handleComposerChange,
+                      onValueChange: updateComposerDraft,
+                      onInputActivity: markComposerTypingActivity,
+                      onFocus: handleComposerFocus,
+                      mentionBots: chatMentionsEnabled
+                        ? composeMentionBotPicks
+                        : [],
+                      commandPicks: composerCommandPicks,
+                      toolPicks: COMPOSER_TOOL_PICKS,
+                      promptPicks: commandCenterPromptPicks,
+                      wildcardPicks: composerWildcardDeckPicks,
+                      errorContent: error ? (
+                        <p
+                          className={`${styles.error} ${styles.composeError}`}
+                          role="alert"
+                        >
+                          {error}
+                        </p>
+                      ) : null,
+                      stacked: true,
+                    })}
         </section>
 
         {coffeeTranscriptPermanent ? renderCoffeeTranscriptPanel() : null}
@@ -108510,7 +108863,7 @@ function HomeContent(): React.JSX.Element {
               ? renderHeaderModelPicker()
               : zenHeaderBotPickerActive
                 ? renderHeaderModelPicker({ showModelControls: false })
-                : null}
+                : renderVoiceModeSelector()}
             {!chatLikeSurface && view !== "chat" ? (
               <div className={styles.chatHeaderComposeToolsRow}>
                 <div className={styles.composeTools}>
@@ -108950,7 +109303,7 @@ function HomeContent(): React.JSX.Element {
                   })();
                   const emptyStateClassName = [
                     styles.emptyState,
-                    pickerSourceBots.length > 0
+                    sortedPanelBots.length > 0
                       ? styles.emptyStateHubPicker
                       : null,
                     emptyStateSearchActive ? styles.emptyStateSearching : null,
@@ -108958,11 +109311,9 @@ function HomeContent(): React.JSX.Element {
                   ]
                     .filter(Boolean)
                     .join(" ");
-                  const groupDashboard = renderFocusedBotLibraryGroupDashboard({
-                    emptyStateClassName,
+                  const groupHero = renderFocusedBotLibraryGroupHero({
                     heroBot,
                   });
-                  if (groupDashboard) return groupDashboard;
                   const titleSubject = heroBotName || "PRISM";
                   const titleSubjectLength = Array.from(titleSubject).length;
                   const titleSubjectLongestWordLength = titleSubject
@@ -109130,6 +109481,7 @@ function HomeContent(): React.JSX.Element {
                       style={emptyStateStyle}
                       onClick={handleEmptyStateBackgroundClick}
                     >
+                      {groupHero}
                       {/* Tap any hero (armed bot or default Prism) to dispatch a
                     starter prompt — the bot opens the conversation with its
                     own first message. Disabled mid-draft so accidental clicks
@@ -109154,9 +109506,7 @@ function HomeContent(): React.JSX.Element {
                           {renderHero()}
                         </button>
                       ) : null}
-                      {emptyStateSearchActive
-                        ? renderEmptyStateBotSearch()
-                        : null}
+                      {renderEmptyStateBotSearch()}
                       {!emptyStateSearchActive && heroBot ? (
                         <div
                           className={styles.emptyStateInfoBand}
@@ -109203,7 +109553,7 @@ function HomeContent(): React.JSX.Element {
                           </div>
                         </div>
                       ) : null}
-                      {!emptyStateSearchActive && !heroBot ? (
+                      {!emptyStateSearchActive && !heroBot && !groupHero ? (
                         <div className={styles.emptyStateTitleBlock}>
                           {immersiveEmptyState ? (
                             renderZenHeroTitle({ inlineHero: true })
@@ -109238,7 +109588,7 @@ function HomeContent(): React.JSX.Element {
                           {renderZenSplashControls()}
                         </div>
                       ) : null}
-                      {pickerSourceBots.length > 0 &&
+                      {sortedPanelBots.length > 0 &&
                         (() => {
                           const controlsStyle: React.CSSProperties = {
                             "--picker-width": `${emptyStatePickerGeometry?.pickerWidth ?? 820}px`,
@@ -110414,6 +110764,9 @@ function HomeContent(): React.JSX.Element {
               ? renderMemoryToasts()
               : null}
           </div>
+          {!chatLikeSurface && view !== "sandbox"
+            ? renderVoiceModeSelector()
+            : null}
           {chatLikeSurface || view === "sandbox" ? (
             renderHeaderModelPicker()
           ) : shouldShowHeaderConversationTitle &&
@@ -110673,6 +111026,9 @@ function HomeContent(): React.JSX.Element {
                 } as React.CSSProperties;
                 const emptyStateClassName = [
                   styles.emptyState,
+                  sortedPanelBots.length > 0
+                    ? styles.emptyStateHubPicker
+                    : null,
                   emptyStateSearchActive ? styles.emptyStateSearching : null,
                   suppressHeroCopy ? styles.emptyStateDensePicker : null,
                 ]
@@ -110719,17 +111075,16 @@ function HomeContent(): React.JSX.Element {
                   !pendingIncognito &&
                   Boolean(heroBot?.id) &&
                   selectedBotId === heroBot?.id;
-                const groupDashboard = renderFocusedBotLibraryGroupDashboard({
-                  emptyStateClassName,
+                const groupHero = renderFocusedBotLibraryGroupHero({
                   heroBot,
                 });
-                if (groupDashboard) return groupDashboard;
                 return (
                   <div
                     className={emptyStateClassName}
                     style={emptyStateStyle}
                     onClick={handleEmptyStateBackgroundClick}
                   >
+                    {groupHero}
                     {/* Tap any hero (armed bot or default Prism) to dispatch a
                     starter prompt — the bot opens the conversation with its
                     own first message. Disabled mid-draft so accidental clicks
@@ -110754,7 +111109,8 @@ function HomeContent(): React.JSX.Element {
                         {renderHero()}
                       </button>
                     ) : null}
-                    {!emptyStateSearchActive &&
+                    {!groupHero &&
+                    !emptyStateSearchActive &&
                     (!suppressHeroCopy ||
                       heroRecentConversations.length > 0 ||
                       heroBotMiniLibraryImages.length > 0) ? (
@@ -110927,7 +111283,7 @@ function HomeContent(): React.JSX.Element {
                     {/* Zen / Chat-like Sandbox hides compose bot picker; keep the
                     tile grid in this empty-thread shell so “show all bots”
                     and hue browsing stay grounded in the canvas. */}
-                    {pickerSourceBots.length > 0 &&
+                    {sortedPanelBots.length > 0 &&
                       (() => {
                         const controlsStyle: React.CSSProperties = {
                           "--picker-width": `${emptyStatePickerGeometry?.pickerWidth ?? 820}px`,
@@ -111204,7 +111560,7 @@ function HomeContent(): React.JSX.Element {
                                         canvasSelectedBotIds.has(b.id)
                                           ? Array.from(canvasSelectedBotIds)
                                           : [];
-                                      openBotContextMenu(
+                                      openCanvasBotContextMenu(
                                         b,
                                         event.clientX,
                                         event.clientY,

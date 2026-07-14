@@ -51,7 +51,7 @@
     <main id="content" class="content">
       <header class="page-header">
         <h1>Features and workflows</h1>
-        <p>The main Prism lanes and the latest settings, conversation, voiced Bottish, Coffee, and interaction workflows.</p>
+        <p>The main Prism lanes and the latest settings, conversation, four-mode voice, Coffee, and interaction workflows.</p>
       </header>
       <article class="record-page">
   <nav class="breadcrumbs" aria-label="Breadcrumb">
@@ -65,24 +65,23 @@
   </div>
   <section class="prose">
     <h2>Summary</h2>
-    <p>The main Prism lanes and the latest settings, conversation, voiced Bottish, Coffee, and interaction workflows.</p>
+    <p>The main Prism lanes and the latest settings, conversation, four-mode voice, Coffee, and interaction workflows.</p>
     <h2>Article</h2>
     <h2>Experience Lanes</h2>
 <p>Prism keeps its major workflows in separate lanes instead of one overloaded chat surface. Chat is the full playground, Zen is calmer one-to-one continuity, Coffee is multi-bot group conversation, Story is a preview narrative lane, and Sandbox carries the most explicit runtime controls.</p>
 <h2>Settings That Follow The Experience</h2>
-<p>Settings now has a first-class Chat category alongside Coffee and Zen. Chat owns conversation behavior such as memory and writing controls, while Coffee and Zen keep their mode-specific options and tutorial resets. This makes the panel easier to scan without blurring the boundaries between experiences.</p>
+<p>Settings has a first-class Chat category alongside Coffee and Zen. Chat owns conversation behavior such as memory and writing controls, while Coffee and Zen keep their mode-specific options and tutorial resets.</p>
 <h2>Conversation Interaction</h2>
-<p>Wildcard prompts use bounded cleanup so a resolved prompt cannot leave the conversation stuck indefinitely with the Shh control active. Multi-line code blocks can collapse without widening the normal Chat reading column; users can expand them, use Copy, or triple-click the block, with visible confirmation after copying. Custom context menus also show a brief confirmation when an item is selected.</p>
+<p>Wildcard prompts use bounded cleanup so a resolved prompt cannot leave the conversation stuck indefinitely with the Shh control active. Multi-line code blocks can collapse without widening the normal Chat reading column; users can expand them, use Copy, or triple-click the block, with visible confirmation after copying.</p>
 <h2>Bots, Voice, And Memory</h2>
-<p>Persona bots can carry behavior, visual identity, exports, memories, voices, and Coffee-only Powers. The selected Bot Library preview is display-only until the user chooses English or Bottish below it. English generates a fresh persona-specific line and plays it automatically in the same click; legacy mic-check and audio-check lines are rejected and regenerated.</p>
-<p>Bottish is a voiced robot language built from deterministic pronounceable pseudo-syllables spoken by the selected system voice. Sparse clicks, chirps, gating, and buzz shape the robotic character, while Bottish tone moves from fuller vocal body to a brighter and denser treatment. If Web Audio is unavailable, Prism keeps the voiced gibberish without accents; if system speech is unavailable, the original procedural Bottish engine is the complete fallback. Bottish is local in both LOCAL and ONLINE modes and never uses provider TTS.</p>
-<p>Voice playback remains audio-master across Chat, Zen, Coffee, Story, previews, and replay, so the synthesized carrier drives text reveal and mouth motion. Interruptions stop both carrier and accents.</p>
+<p>Persona bots can carry behavior, visual identity, exports, memories, voices, and Coffee-only Powers. The labeled voice selector offers Mute, English, Babble, and Bottish directly beside the app and model controls, with the same explicit choices in the constrained tools menu.</p>
+<p>English uses clean system speech. Babble speaks deterministic pronounceable gibberish through the selected system voice and adds bounded clicks, chirps, pops, gates, and sparse buzz bursts. Bottish is the restored procedural robot language and never calls system or provider synthesis. Pitch shapes all audible modes; lilt shapes English only, and the retired Bottish tone field remains ignored for compatibility.</p>
+<p>Voice playback remains audio-master across Chat, Zen, Coffee, Story, previews, and replay. Live Babble can deliberately fall back to Bottish if system speech is unavailable, while a Babble preview reports unavailability and offers retry instead of playing a misleading substitute. Interruptions stop both carriers and accent queues.</p>
 <p>Normal conversations can use scoped continuity, while incognito/private paths avoid memory reads and writes.</p>
 <h2>Coffee Powers And Replay</h2>
-<p>Coffee Powers are short rules or quirks attached to a bot and applied only during Coffee sessions. Prism compiles supported intents into structured session behavior, surfaces active-power badges, and keeps incomplete powers inactive instead of pretending they worked.</p>
-<p>Coffee replay reconstructs more of the saved table state, including arrivals, mood, top-offs, player presence and speech timing, so replay reads more like the session that actually happened.</p>
+<p>Coffee Powers are short rules or quirks attached to a bot and applied only during Coffee sessions. Prism compiles supported intents into structured session behavior, surfaces active-power badges, and keeps incomplete powers inactive instead of pretending they worked. Coffee replay reconstructs saved table state, arrivals, mood, top-offs, player presence, and speech timing.</p>
 <h2>Creative Tools</h2>
-<p>The current app includes online-gated image generation, bot export/import flows, applet versions, group conversations, and early Story episodes. Planned applets are tracked separately from release versions so experience changes can be discussed at the surface people actually touch.</p>
+<p>The current app includes online-gated image generation, bot export/import flows, applet versions, group conversations, and early Story episodes. Planned applets are tracked separately from release versions.</p>
 <h2>Current Cursor State</h2>
 <p>Prism currently uses native system cursors. The custom cursor controller remains in the codebase behind a disabled switch so it can be revisited without rebuilding the system.</p>
     <h2>Categories</h2><p><code>Product</code></p>
@@ -106,12 +105,11 @@
 <li><a class="source-link" href="../../apps/web/src/app/page.tsx"><code>apps/web/src/app/page.tsx</code></a></li>
 <li><a class="source-link" href="../../apps/web/src/app/bottishVoice.ts"><code>apps/web/src/app/bottishVoice.ts</code></a></li>
 <li><a class="source-link" href="../../apps/web/src/app/voiceEffects.ts"><code>apps/web/src/app/voiceEffects.ts</code></a></li>
-<li><a class="source-link" href="../../apps/api/src/bottish-text.ts"><code>apps/api/src/bottish-text.ts</code></a></li>
+<li><a class="source-link" href="../../apps/web/src/app/voiceQuickToggle.ts"><code>apps/web/src/app/voiceQuickToggle.ts</code></a></li>
+<li><a class="source-link" href="../../apps/api/src/babble-text.ts"><code>apps/api/src/babble-text.ts</code></a></li>
 <li><a class="source-link" href="../../apps/api/src/voices.ts"><code>apps/api/src/voices.ts</code></a></li>
-<li><a class="source-link" href="../../apps/api/src/composer-cleanup.ts"><code>apps/api/src/composer-cleanup.ts</code></a></li>
-<li><a class="source-link" href="../../apps/api/src/voice-preview-line.ts"><code>apps/api/src/voice-preview-line.ts</code></a></li>
-<li><a class="source-link" href="../../apps/api/src/bot-powers.ts"><code>apps/api/src/bot-powers.ts</code></a></li>
-<li><a class="source-link" href="../../apps/web/src/app/coffee-replay.ts"><code>apps/web/src/app/coffee-replay.ts</code></a></li></ul>
+<li><a class="source-link" href="../../apps/api/src/server.ts"><code>apps/api/src/server.ts</code></a></li>
+<li><a class="source-link" href="../../packages/shared/src/audioVoice.ts"><code>packages/shared/src/audioVoice.ts</code></a></li></ul>
 </aside>
   <details class="record-meta">
   <summary>Agent details</summary>
@@ -121,7 +119,7 @@
     <div><dt>Authority</dt><dd>agent</dd></div>
     <div><dt>Confidence</dt><dd>high</dd></div>
     <div><dt>Created</dt><dd><time datetime="2026-07-05T04:14:08.766Z">2026-07-05</time></dd></div>
-    <div><dt>Updated</dt><dd><time datetime="2026-07-13T06:45:13.572Z">2026-07-13</time></dd></div>
+    <div><dt>Updated</dt><dd><time datetime="2026-07-14T01:44:01.344Z">2026-07-14</time></dd></div>
     <div><dt>Tags</dt><dd><code>audience:all</code> <code>features</code> <code>ux</code> <code>applets</code></dd></div>
     <div><dt>Files</dt><dd><ul><li><a class="source-link" href="../../README.md"><code>README.md</code></a></li>
 <li><a class="source-link" href="../../docs/applets.md"><code>docs/applets.md</code></a></li>
@@ -131,12 +129,11 @@
 <li><a class="source-link" href="../../apps/web/src/app/page.tsx"><code>apps/web/src/app/page.tsx</code></a></li>
 <li><a class="source-link" href="../../apps/web/src/app/bottishVoice.ts"><code>apps/web/src/app/bottishVoice.ts</code></a></li>
 <li><a class="source-link" href="../../apps/web/src/app/voiceEffects.ts"><code>apps/web/src/app/voiceEffects.ts</code></a></li>
-<li><a class="source-link" href="../../apps/api/src/bottish-text.ts"><code>apps/api/src/bottish-text.ts</code></a></li>
+<li><a class="source-link" href="../../apps/web/src/app/voiceQuickToggle.ts"><code>apps/web/src/app/voiceQuickToggle.ts</code></a></li>
+<li><a class="source-link" href="../../apps/api/src/babble-text.ts"><code>apps/api/src/babble-text.ts</code></a></li>
 <li><a class="source-link" href="../../apps/api/src/voices.ts"><code>apps/api/src/voices.ts</code></a></li>
-<li><a class="source-link" href="../../apps/api/src/composer-cleanup.ts"><code>apps/api/src/composer-cleanup.ts</code></a></li>
-<li><a class="source-link" href="../../apps/api/src/voice-preview-line.ts"><code>apps/api/src/voice-preview-line.ts</code></a></li>
-<li><a class="source-link" href="../../apps/api/src/bot-powers.ts"><code>apps/api/src/bot-powers.ts</code></a></li>
-<li><a class="source-link" href="../../apps/web/src/app/coffee-replay.ts"><code>apps/web/src/app/coffee-replay.ts</code></a></li></ul></dd></div>
+<li><a class="source-link" href="../../apps/api/src/server.ts"><code>apps/api/src/server.ts</code></a></li>
+<li><a class="source-link" href="../../packages/shared/src/audioVoice.ts"><code>packages/shared/src/audioVoice.ts</code></a></li></ul></dd></div>
   </dl>
 </details>
 </article>

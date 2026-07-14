@@ -4,6 +4,10 @@ import { describe, it } from "node:test";
 
 const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
 const cssSource = readFileSync(new URL("./page.module.css", import.meta.url), "utf8");
+const normalizedCssSource = cssSource
+  .replace(/\s+/gu, " ")
+  .replace(/\(\s+/gu, "(")
+  .replace(/\s+\)/gu, ")");
 
 describe("selected bot library showcase", () => {
   it("renders a large interactive avatar over the left-side panel backdrop", () => {
@@ -21,7 +25,7 @@ describe("selected bot library showcase", () => {
     assert.match(cssSource, /\.botPanelHubShowcase\s*\{[\s\S]*?position:\s*fixed;[\s\S]*?inset:\s*0 min\(479px, calc\(100vw - 32px\)\) 0 0;/);
     assert.match(cssSource, /@keyframes botPanelHubAvatarIdle/);
     assert.match(
-      cssSource,
+      normalizedCssSource,
       /\.botPanelHubAvatarPlate \.zenLiveBotPresenceBody\s*\{[\s\S]*?--zen-live-bot-avatar-face-glyph-size:\s*calc\(var\(--zen-live-bot-body-frame-size\) \* 0\.217\)/
     );
   });
@@ -111,7 +115,7 @@ describe("selected bot library showcase", () => {
   it("uses thinking while generating and then plays on the same click", () => {
     assert.match(pageSource, /showThinkingSpinner=\{previewStatus === "generating"\}/);
     assert.match(pageSource, /Generating audio sample…/);
-    assert.match(pageSource, /English"\} preview played\./);
+    assert.match(pageSource, /voiceModeDisplayName\(previewMode\)[\s\S]*?preview played\./);
     assert.match(pageSource, /data-talking=\{previewStatus === "playing"/);
   });
 
@@ -184,11 +188,13 @@ describe("selected bot library showcase", () => {
     assert.match(cssSource, /\.botPanelHubShowcase\[data-panel="images"\]/);
   });
 
-  it("offers English and Bottish independently of the global voice mode", () => {
+  it("offers English, Babble, and Bottish independently of the global voice mode", () => {
     assert.match(pageSource, /mode: Exclude<VoiceMode, "mute">/);
     assert.match(pageSource, /playBotHubVoicePreview\(\s*bot: Bot \| null,\s*mode: Exclude<VoiceMode, "mute">/);
     assert.match(pageSource, /aria-label="Voice preview language"/);
     assert.match(pageSource, /aria-pressed=\{previewMode === "english"\}/);
+    assert.match(pageSource, /aria-pressed=\{previewMode === "babble"\}/);
+    assert.match(pageSource, /playBotHubVoicePreview\(bot, "babble"\)/);
     assert.match(pageSource, /Generating audio sample…/);
     assert.match(pageSource, /Playing Bottish…/);
     assert.doesNotMatch(

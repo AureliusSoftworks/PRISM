@@ -244,6 +244,7 @@ export async function playRealtimeVoiceBytes(args: {
   lifecycle?: VoicePlaybackLifecycle;
   alignment?: VoicePlaybackCharacterAlignment | null;
   roboticPlan?: VoiceRoboticPlan | null;
+  cleanRoboticCarrier?: boolean;
 }): Promise<boolean> {
   const context = contextForPlayback();
   if (!context || !await prepareRealtimeVoiceAudio()) return false;
@@ -288,12 +289,18 @@ export async function playRealtimeVoiceBytes(args: {
   shaper.oversample = "2x";
   speechGain.gain.value = 1;
   outputGain.gain.value = Math.min(1.25, profile.volume) * 0.88;
-  limiter.threshold.value = -4;
-  limiter.knee.value = 8;
-  limiter.ratio.value = 12;
-  limiter.attack.value = 0.003;
-  limiter.release.value = 0.12;
-  source.connect(highpass).connect(lowpass).connect(shaper).connect(speechGain).connect(outputGain).connect(limiter).connect(context.destination);
+  limiter.threshold.value = args.cleanRoboticCarrier ? -0.5 : -4;
+  limiter.knee.value = args.cleanRoboticCarrier ? 0 : 8;
+  limiter.ratio.value = args.cleanRoboticCarrier ? 20 : 12;
+  limiter.attack.value = args.cleanRoboticCarrier ? 0.001 : 0.003;
+  limiter.release.value = args.cleanRoboticCarrier ? 0.04 : 0.12;
+  source.connect(highpass).connect(lowpass);
+  if (args.cleanRoboticCarrier) {
+    lowpass.connect(speechGain);
+  } else {
+    lowpass.connect(shaper).connect(speechGain);
+  }
+  speechGain.connect(outputGain).connect(limiter).connect(context.destination);
 
   for (const event of buildVoiceDamageSchedule(args.seed, playbackDurationMs, texture.damage)) {
     const at = now + event.atMs / 1000;

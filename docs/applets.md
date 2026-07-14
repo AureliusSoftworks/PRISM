@@ -42,11 +42,12 @@ ship as `0.5.2` while Coffee is `v0.7` and Story is `v0.1`.
 ### 2026-07-13
 
 - Bumped `Chat` to `v0.9` for Avatar Details Studio, canonical live-avatar
-  rendering, and voiced Bottish previews and playback.
+  rendering, restored procedural Bottish, hybrid Babble, and an explicit voice
+  selector.
 - Bumped `Zen` to `v0.8` for shared authored screen details and audio-master
-  voiced Bottish reveal timing.
-- Bumped `Coffee` to `v1.0` for shared authored avatar details, voiced Bottish
-  table speech, and reliable navigation above bot-owned panels.
+  English, Babble, and Bottish reveal timing.
+- Bumped `Coffee` to `v1.0` for shared authored avatar details, four-mode table
+  speech, and reliable navigation above bot-owned panels.
 
 ### 2026-07-12
 

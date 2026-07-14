@@ -492,7 +492,7 @@ describe("backup audio voice settings", () => {
       db.prepare(
         "UPDATE users SET voice_mode = ?, voice_effects_enabled = 0, voice_volume = ?, english_voice_engine = ?, default_system_voice_name = ?, default_elevenlabs_voice_id = ?, elevenlabs_voice_bank = ?, elevenlabs_voice_model = ?, player_audio_voice_profile = ?, player_name_pronunciation = ?, prism_default_bot_audio_voice_profile = ? WHERE id = ?"
       ).run(
-        "english",
+        "babble",
         0.65,
         "elevenlabs",
         "Alex",
@@ -522,7 +522,7 @@ describe("backup audio voice settings", () => {
       );
 
       const snapshot = exportUserSnapshot(db, "user-1", userKey);
-      assert.equal(snapshot.settings?.voiceMode, "english");
+      assert.equal(snapshot.settings?.voiceMode, "babble");
       assert.equal(snapshot.settings?.voiceEffectsEnabled, false);
       assert.equal(snapshot.settings?.voiceVolume, 0.65);
       assert.equal(snapshot.settings?.prismDefaultBotAudioVoiceProfile?.baseVoiceId, "voice-5");
@@ -546,7 +546,7 @@ describe("backup audio voice settings", () => {
       const restoredUser = db.prepare(
         "SELECT voice_mode, voice_effects_enabled, voice_volume, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, player_audio_voice_profile, player_name_pronunciation, prism_default_bot_audio_voice_profile FROM users WHERE id = ?"
       ).get("user-1") as Record<string, string | null>;
-      assert.equal(restoredUser.voice_mode, "english");
+      assert.equal(restoredUser.voice_mode, "babble");
       assert.equal(restoredUser.voice_effects_enabled, 0);
       assert.equal(restoredUser.voice_volume, 0.65);
       assert.equal(JSON.parse(restoredUser.prism_default_bot_audio_voice_profile ?? "{}").baseVoiceId, "voice-5");

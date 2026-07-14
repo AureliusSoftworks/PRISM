@@ -11,7 +11,10 @@ const coffeeSeatPlateEmojiPath = join(
 );
 const pagePath = join(dirname(fileURLToPath(import.meta.url)), "page.tsx");
 const settingsPanelPath = join(dirname(fileURLToPath(import.meta.url)), "SettingsPanel.tsx");
-const css = readFileSync(cssPath, "utf8");
+const css = readFileSync(cssPath, "utf8")
+  .replace(/\s+/gu, " ")
+  .replace(/\(\s+/gu, "(")
+  .replace(/\s+\)/gu, ")");
 const coffeeSeatPlateEmojiSource = readFileSync(coffeeSeatPlateEmojiPath, "utf8");
 const pageSource = readFileSync(pagePath, "utf8").replace(/\s+/gu, " ");
 const settingsPanelSource = readFileSync(settingsPanelPath, "utf8");
@@ -195,7 +198,7 @@ describe("Coffee seat arrival CSS", () => {
       '.coffeeSeatPlateEmoji [data-coffee-plate-emoji-part][data-face-font="formal"]'
     );
     const sipMouthRuleIndex = css.indexOf(
-      ':not([data-face-mouth-character])\n  [data-coffee-plate-emoji-part="mouth"][data-coffee-plate-emoji-glyph="⁎"]'
+      ':not([data-face-mouth-character]) [data-coffee-plate-emoji-part="mouth"][data-coffee-plate-emoji-glyph="⁎"]'
     );
     assert.notEqual(formalFaceFontRuleIndex, -1);
     assert.ok(sipMouthRuleIndex > formalFaceFontRuleIndex);
@@ -264,7 +267,7 @@ describe("Coffee seat arrival CSS", () => {
     );
     assert.match(
       coffeeSeatPlateEmojiSource,
-      /const displayBlinkPhase: CoffeeSeatBlinkPhase =\s+!enabled \|\|\s+faceBlinkDisabled \|\|\s+talkingPausesBlink \|\|\s+thinkingSpinnerActive \|\|\s+questionGlyphActive\s+\? "open"\s+:\s+forcedBlinkPhase \?\? blinkPhase;/
+      /const displayBlinkPhase: CoffeeSeatBlinkPhase =\s+!enabled \|\|\s+faceBlinkDisabled \|\|\s+talkingPausesBlink \|\|\s+thinkingSpinnerActive \|\|\s+questionGlyphActive\s+\? "open"\s+:\s+\(?forcedBlinkPhase \?\? blinkPhase\)?;/
     );
   });
 
@@ -292,15 +295,15 @@ describe("Coffee seat arrival CSS", () => {
     assert.match(coffeeSeatPlateEmojiSource, /function screenRelativeFacePartRotationDeg/);
     assert.match(
       coffeeSeatPlateEmojiSource,
-      /const normalizedFaceMouthScale =\s+thinkingSpinnerActive \|\| questionGlyphActive\s+\? undefined\s+: normalizeBotFaceMouthScale\(faceMouthScale\) \?\? undefined;/
+      /const normalizedFaceMouthScale =\s+thinkingSpinnerActive \|\| questionGlyphActive\s+\? undefined\s+: \(?normalizeBotFaceMouthScale\(faceMouthScale\) \?\? undefined\)?;/
     );
     assert.match(
       coffeeSeatPlateEmojiSource,
-      /const normalizedFaceMouthOffsetX =\s+thinkingSpinnerActive \|\| questionGlyphActive\s+\? undefined\s+: normalizeBotFaceMouthOffsetX\(faceMouthOffsetX\) \?\? undefined;/
+      /const normalizedFaceMouthOffsetX =\s+thinkingSpinnerActive \|\| questionGlyphActive\s+\? undefined\s+: \(?normalizeBotFaceMouthOffsetX\(faceMouthOffsetX\) \?\? undefined\)?;/
     );
     assert.match(
       coffeeSeatPlateEmojiSource,
-      /const normalizedFaceMouthOffsetY =\s+thinkingSpinnerActive \|\| questionGlyphActive\s+\? undefined\s+: normalizeBotFaceMouthOffsetY\(faceMouthOffsetY\) \?\? undefined;/
+      /const normalizedFaceMouthOffsetY =\s+thinkingSpinnerActive \|\| questionGlyphActive\s+\? undefined\s+: \(?normalizeBotFaceMouthOffsetY\(faceMouthOffsetY\) \?\? undefined\)?;/
     );
     assert.match(
       coffeeSeatPlateEmojiSource,
@@ -312,7 +315,7 @@ describe("Coffee seat arrival CSS", () => {
     );
     assert.match(
       coffeeSeatPlateEmojiSource,
-      /screenRelativeFacePartRotationDeg\(normalizedFaceMouthRotationDeg, rotateDeg\)/
+      /screenRelativeFacePartRotationDeg\(\s*normalizedFaceMouthRotationDeg,\s*rotateDeg,?\s*\)/
     );
     assert.match(coffeeSeatPlateEmojiSource, /"--bot-face-mouth-rotation"/);
     assert.match(coffeeSeatPlateEmojiSource, /`\$\{faceMouthRotationCssDeg\}deg`/);
@@ -409,10 +412,10 @@ describe("Coffee seat arrival CSS", () => {
       "grid-area: mouth"
     );
     assert.match(sharedMouthSlotRule, /grid-area:\s*mouth\s*;/);
-    assert.match(
-      sharedMouthSlotRule,
-      /translate\(var\(--bot-face-mouth-offset-x,\s*0em\),\s*var\(--bot-face-mouth-offset-y,\s*0em\)\)/
-    );
+    assert.match(sharedMouthSlotRule, /var\(--bot-face-mouth-offset-x,\s*0em\)/);
+    assert.match(sharedMouthSlotRule, /var\(--bot-face-mouth-offset-y,\s*0em\)/);
+    assert.match(sharedMouthSlotRule, /var\(--bot-face-optical-offset-x,\s*0em\)/);
+    assert.match(sharedMouthSlotRule, /var\(--bot-face-optical-offset-y,\s*0em\)/);
     assert.doesNotMatch(sharedMouthSlotRule, /rotate\(var\(--bot-face-mouth-rotation,\s*0deg\)\)/);
     assert.match(sharedMouthSlotRule, /scale\(var\(--bot-face-mouth-scale,\s*1\)\)/);
     const sharedMouthGlyphLayerRule = ruleForSelectorNeedlesWithBody(
@@ -878,14 +881,10 @@ describe("Coffee seat arrival CSS", () => {
     assert.match(sharedEyeTransformRule, /--eye-blink-scale-y:\s*1\s*;/);
     assert.match(sharedEyeTransformRule, /--bot-face-mood-eye-shift-y:\s*0em\s*;/);
     assert.match(sharedEyeTransformRule, /--bot-face-mood-eye-scale-x:\s*1\s*;/);
-    assert.match(
-      sharedEyeTransformRule,
-      /calc\(\s*\(var\(--zen-live-bot-eye-local-x,\s*0\) \* 10px\) \+ var\(--bot-face-eye-offset-x,\s*0em\)\s*\)/
-    );
-    assert.match(
-      sharedEyeTransformRule,
-      /calc\(\s*\(var\(--zen-live-bot-eye-local-y,\s*0\) \* 18px\) \+ var\(--bot-face-eye-offset-y,\s*0em\) \+\s*var\(--bot-face-mood-eye-shift-y,\s*0em\)\s*\)/
-    );
+    assert.match(sharedEyeTransformRule, /var\(--bot-face-eye-offset-x,\s*0em\)/);
+    assert.match(sharedEyeTransformRule, /var\(--bot-face-eye-offset-y,\s*0em\)/);
+    assert.match(sharedEyeTransformRule, /var\(--bot-face-optical-offset-x,\s*0em\)/);
+    assert.match(sharedEyeTransformRule, /var\(--bot-face-optical-offset-y,\s*0em\)/);
     assert.match(sharedEyeTransformRule, /scale\(var\(--bot-face-eye-scale,\s*1\)\)/);
     assert.match(sharedEyeTransformRule, /scaleX\(var\(--eye-blink-scale-x\)\)/);
     assert.match(sharedEyeTransformRule, /scaleX\(var\(--bot-face-mood-eye-scale-x,\s*1\)\)/);
@@ -1292,7 +1291,14 @@ describe("Coffee seat arrival CSS", () => {
   });
 
   it("keeps Table Talk permanent for joined Coffee sessions", () => {
-    assert.match(pageSource, /const coffeeTranscriptPermanent = coffeeSessionJoined;/);
+    assert.match(
+      pageSource,
+      /const coffeeSessionSurfaceActive =\s*coffeeSessionJoined \|\| shellPolicy\.reviewActive;/,
+    );
+    assert.match(
+      pageSource,
+      /const coffeeTranscriptPermanent = coffeeSessionSurfaceActive;/,
+    );
     assert.match(
       pageSource,
       /data-transcript-open=\{coffeeTranscriptPermanent \? "true" : undefined\}/
@@ -1365,7 +1371,7 @@ describe("Coffee seat arrival CSS", () => {
     );
     assert.match(
       pageSource,
-      /: coffeeSetupComposerVisible\s*\?\s*renderCoffeeSetupComposer\(\)\s*:\s*coffeeGroupStartComposerVisible\s*\?\s*renderCoffeeGroupStartComposer\(\)\s*: renderShellComposer\(\{/
+      /: coffeeSetupComposerVisible\s*\?\s*renderCoffeeSetupComposer\(\)\s*:\s*coffeeGroupStartComposerVisible\s*\?\s*renderCoffeeGroupStartComposer\(\)\s*:\s*shellPolicy\.reviewActive\s*\?\s*null\s*:\s*renderShellComposer\(\{/
     );
 
     const setupButtonRule = ruleForExactSelector(".coffeeSetupComposerButton");
@@ -1401,8 +1407,8 @@ describe("Coffee seat arrival CSS", () => {
     );
     assert.match(
       css,
-      /@media\s*\(min-width:\s*1160px\)\s*\{[\s\S]*\.coffeeShell\[data-session-active="true"\]\[data-transcript-open="true"\][\s\S]*\.coffeeStage\[data-coffee-perspective="first-person"\]:is\([\s\S]*\.coffeeTableScene\s*\{[\s\S]*--coffee-table-asset-width:\s*min\(82%,\s*940px\)\s*;/,
-      "expected docked Table Talk to scale down the raster table asset on narrower live layouts"
+      /@media\s*\(min-width:\s*1160px\)\s*\{[\s\S]*\.coffeeShell\[data-session-active="true"\]\[data-transcript-open="true"\][\s\S]*\.coffeeStage\[data-coffee-perspective="first-person"\]:is\([\s\S]*\.coffeeTableScene\s*\{[\s\S]*--coffee-table-asset-width:\s*min\(104cqw,\s*1490px\)\s*;/,
+      "expected the first-person raster table to keep filling the narrower live stage"
     );
 
     const liveTableOffsetRule = ruleForExactSelector(
@@ -1736,13 +1742,13 @@ describe("Coffee seat arrival CSS", () => {
     assert.match(pageSource, /coffeeConversationRef\.current = args\.conversation;\s+setCoffeeConversation\(args\.conversation\);/);
   });
 
-  it("blocks sip visuals while the Coffee pot is filling a bot", () => {
+  it("blocks sip visuals while the Coffee pot is filling or the bot is thinking", () => {
     assert.match(pageSource, /const COFFEE_CUP_REFILL_SIP_LOCK_MS = 3_200;/);
     assert.match(pageSource, /const refillSipLocked = refillSipLockUntilMs > coffeeSessionClockMs;/);
-    assert.match(pageSource, /const visualSeatSipInProgress = refillSipLocked \? false : seatSipInProgress;/);
+    assert.match(pageSource, /const visualSeatSipInProgress = refillSipLocked \|\| seatIsThinking \? false : seatSipInProgress;/);
     assert.match(pageSource, /sipLockedUntilMs: refillSipLockUntilMs \|\| null,/);
     assert.match(pageSource, /refillSipLocked \|\| !seatIsFirmlySeated/);
-    assert.match(pageSource, /cupSipping: refillSipLocked \? false : coffeeCupVisual\.sipping,/);
+    assert.match(pageSource, /cupSipping: refillSipLocked \|\| seatIsThinking \? false : coffeeCupVisual\.sipping,/);
   });
 
   it("centers the thinking slash spinner within the bot face screen", () => {
@@ -1798,7 +1804,7 @@ describe("Coffee seat arrival CSS", () => {
     );
     assert.match(
       coffeeSeatPlateEmojiSource,
-      /data-coffee-plate-question-glyph=\{questionGlyphActive \? "true" : undefined\}/
+      /data-coffee-plate-question-glyph=\{\s*questionGlyphActive \? "true" : undefined\s*\}/,
     );
     assert.match(
       coffeeSeatPlateEmojiSource,

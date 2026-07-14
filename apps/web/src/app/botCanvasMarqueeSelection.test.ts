@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  canvasBackgroundShouldZoomOutFocusedBot,
   canvasBotDirectoryIsInteractive,
   resolveCanvasBotMarqueeSelection,
   resolveInactiveCanvasBotMarqueeSelection,
@@ -117,6 +118,39 @@ describe("bot canvas marquee selection", () => {
       view: "sandbox",
       conversationMessageCount: 0,
       pendingReplyVisible: false,
+    }), false);
+  });
+
+  it("zooms a focused empty Chat canvas back out to all bots", () => {
+    assert.equal(canvasBackgroundShouldZoomOutFocusedBot({
+      view: "chat",
+      conversationMessageCount: 0,
+      focusedBotId: "bot-a",
+      pendingIncognito: false,
+      canZoomOutToAllBots: true,
+    }), true);
+  });
+
+  it("keeps active, private, and unfocused canvases in place", () => {
+    const base = {
+      view: "chat" as const,
+      conversationMessageCount: 0,
+      focusedBotId: "bot-a",
+      pendingIncognito: false,
+      canZoomOutToAllBots: true,
+    };
+
+    assert.equal(canvasBackgroundShouldZoomOutFocusedBot({
+      ...base,
+      conversationMessageCount: 1,
+    }), false);
+    assert.equal(canvasBackgroundShouldZoomOutFocusedBot({
+      ...base,
+      pendingIncognito: true,
+    }), false);
+    assert.equal(canvasBackgroundShouldZoomOutFocusedBot({
+      ...base,
+      focusedBotId: null,
     }), false);
   });
 });

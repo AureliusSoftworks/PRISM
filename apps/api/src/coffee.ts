@@ -2007,7 +2007,7 @@ const COFFEE_CHARACTER_IMMERSION_BREAK_PATTERNS = [
 ] as const;
 
 const COFFEE_STAGE_ACTION_VERB_RE =
-  /^(?:(?:dryly|slowly|quietly|thoughtfully|carefully|softly|theatrically|excitedly|gently|nervously)\s+)?(?:adjusts?|arches?|arranges?|arrives?|blinks?|breathes?|chuckles?|crosses?|drums?|eyes?|eyeing|folds?|frowns?|gazes?|gestures?|glances?|grins?|grimaces?|heads?|laughs?|leans?|looks?|mutters?|nods?|nudges?|pauses?|picks?|places?|plucks?|points?|ponders?|pours?|pulls?|pulling|pushes?|pushing|raises?|rests?|rolls?|rubs?|scoffs?|scratches?|sets?|settles?|shakes?|shifts?|shrugs?|sighs?|sips?|sits?|slides?|sliding|smiles?|smirks?|snorts?|squints?|stands?|stares?|stirs?|straightens?|stretches?|strokes?|takes?|taking|taps?|tilts?|touches?|turns?|waves?|winces?|winks?)\b/i;
+  /^(?:(?:dryly|slowly|quietly|thoughtfully|carefully|softly|theatrically|excitedly|gently|nervously)\s+)?(?:adjusts?|arches?|arranges?|arrives?|blinks?|brightens?|breathes?|chuckles?|crosses?|drums?|eyes?|eyeing|folds?|frowns?|gazes?|gestures?|glances?|grins?|grimaces?|heads?|laughs?|leans?|looks?|mutters?|narrows?|nods?|nudges?|opens?|pauses?|picks?|places?|plucks?|points?|ponders?|pours?|pulls?|pulling|pushes?|pushing|raises?|rests?|rolls?|rubs?|scoffs?|scratches?|sets?|settles?|shakes?|shifts?|shrugs?|sighs?|sips?|sits?|slides?|sliding|smiles?|smirks?|snorts?|squints?|stacks?|stands?|stares?|stirs?|straightens?|stretches?|strokes?|takes?|taking|taps?|thumbs?|tilts?|touches?|traces?|turns?|waves?|winces?|winks?)\b/i;
 const COFFEE_STAGE_ACTION_BODY_PART_RE =
   /^(?:(?:his|her|their|my)\s+)?(?:brows?|claws?|eyes?|expression|fingers?|fists?|hands?|head|jaw|mouth|shoulders?|tentacles?|voice)\s+(?:clench(?:es)?|drum(?:s)?|fold(?:s)?|glance(?:s)?|grip(?:s)?|hover(?:s)?|lift(?:s)?|pause(?:s)?|raise(?:s)?|rest(?:s)?|sharpen(?:s)?|shift(?:s)?|slam(?:s)?|slap(?:s)?|snap(?:s)?|stead(?:y|ies)|tap(?:s)?|tighten(?:s)?|twitch(?:es)?|wave(?:s)?)\b/i;
 const COFFEE_THUMB_TWIDDLE_ACTION_RE =
@@ -2525,6 +2525,33 @@ export function coffeeSpeakerMaxTokensForTurn(
   return Math.max(base, reasoningFloor);
 }
 
+export function coffeeRepairMaxTokensForTurn(args: {
+  providerName: ProviderName;
+  modelId?: string | null;
+  reasoningEffort?: ReasoningEffort | null;
+  speakerMaxTokens?: number | null;
+}): number {
+  const configured =
+    typeof args.speakerMaxTokens === "number" && Number.isFinite(args.speakerMaxTokens)
+      ? Math.max(1, Math.floor(args.speakerMaxTokens))
+      : COFFEE_PROMPT_LEAK_REPAIR_MAX_TOKENS;
+  if (
+    args.providerName === "openai" &&
+    openAiModelUsesMaxCompletionTokens(args.modelId?.trim() ?? "")
+  ) {
+    return coffeeSpeakerMaxTokensForTurn(
+      configured,
+      COFFEE_PROMPT_LEAK_REPAIR_MAX_TOKENS,
+      {
+        effectiveProvider: "openai",
+        modelId: args.modelId,
+        reasoningEffort: args.reasoningEffort,
+      }
+    );
+  }
+  return Math.min(configured, COFFEE_PROMPT_LEAK_REPAIR_MAX_TOKENS);
+}
+
 function coffeeProviderReturnedEmptyResponse(
   error: unknown,
   effectiveProvider: ProviderName
@@ -3038,10 +3065,12 @@ async function repairCoffeePromptLeak(args: {
     }),
     {
       ...args.speakerOptions,
-      maxTokens: Math.min(
-        args.speakerOptions.maxTokens ?? COFFEE_PROMPT_LEAK_REPAIR_MAX_TOKENS,
-        COFFEE_PROMPT_LEAK_REPAIR_MAX_TOKENS
-      ),
+      maxTokens: coffeeRepairMaxTokensForTurn({
+        providerName: args.speakerProvider.name,
+        modelId: args.speakerOptions.model,
+        reasoningEffort: args.speakerOptions.reasoningEffort,
+        speakerMaxTokens: args.speakerOptions.maxTokens,
+      }),
       usagePurpose: "coffee_turn",
     }
   );
@@ -3114,10 +3143,12 @@ async function repairCoffeeRepeatedReply(args: {
     }),
     {
       ...args.speakerOptions,
-      maxTokens: Math.min(
-        args.speakerOptions.maxTokens ?? COFFEE_PROMPT_LEAK_REPAIR_MAX_TOKENS,
-        COFFEE_PROMPT_LEAK_REPAIR_MAX_TOKENS
-      ),
+      maxTokens: coffeeRepairMaxTokensForTurn({
+        providerName: args.speakerProvider.name,
+        modelId: args.speakerOptions.model,
+        reasoningEffort: args.speakerOptions.reasoningEffort,
+        speakerMaxTokens: args.speakerOptions.maxTokens,
+      }),
       usagePurpose: "coffee_turn",
     }
   );
@@ -3134,6 +3165,7 @@ async function repairCoffeeRepeatedReply(args: {
 
 export function buildCoffeeEmergencyFallbackReply(args: {
   tableFocus: string;
+  topic?: string | null;
   speaker: Pick<CoffeeBotProfile, "id" | "name">;
   conversationId: string;
   historyLength: number;
@@ -3152,6 +3184,7 @@ export function buildCoffeeEmergencyFallbackReply(args: {
       : typeof activePollVote?.deliberation?.leaningOptionIndex === "number"
         ? activePollVote.deliberation.leaningOptionIndex
         : null;
+  const topicOptions = buildCoffeeTopicFallbackOptions(args.topic);
   const options = pollOptions.length >= 2
     ? buildCoffeePollEmergencyFallbackOptions({
         pollOptions,
@@ -3161,6 +3194,8 @@ export function buildCoffeeEmergencyFallbackReply(args: {
         seedExtra: args.seedExtra,
         preferredOptionIndex: preferredPollOptionIndex,
       })
+    : topicOptions.length > 0
+    ? topicOptions
     : /\?\s*$/.test(args.tableFocus.trim())
     ? [
         "My answer turns on one detail: who bears the cost when this goes wrong?",
@@ -3192,6 +3227,34 @@ export function buildCoffeeEmergencyFallbackReply(args: {
     }
   }
   return clampCoffeeTableReplyText(fallback, args.maxChars);
+}
+
+function buildCoffeeTopicFallbackOptions(rawTopic: string | null | undefined): string[] {
+  const topic = (rawTopic ?? "")
+    .replace(/\s+/g, " ")
+    .replace(/[.!?…]+$/u, "")
+    .trim()
+    .slice(0, 140);
+  if (!topic) return [];
+  const whatIf = topic.match(/^what if\s+(.+)$/iu)?.[1]?.trim();
+  if (whatIf) {
+    return [
+      `If ${whatIf}, what would actually prove it?`,
+      `What changes if ${whatIf}?`,
+      `What is the strongest evidence that ${whatIf}?`,
+      `If ${whatIf}, who would notice first?`,
+      `What has everyone else missed if ${whatIf}?`,
+      `The funny version only works if ${whatIf}; what is the proof?`,
+    ];
+  }
+  return [
+    `Back to the question—${topic}—which detail changes the answer?`,
+    `Which example best answers this: ${topic}?`,
+    `What would change your answer to this: ${topic}?`,
+    `Where does this question become real: ${topic}?`,
+    `What has everyone missed about the question ${topic}?`,
+    `The disagreement is still here: ${topic}?`,
+  ];
 }
 
 function buildCoffeePollEmergencyFallbackOptions(args: {
@@ -3229,18 +3292,22 @@ export function buildCoffeeFreshFallbackBeat(args: {
   conversationId: string;
   historyLength: number;
   tableFocus?: string;
+  topic?: string | null;
   seedExtra?: string;
   avoidTexts?: readonly string[];
   maxChars: number;
 }): string {
-  const options = [
-    "Trust breaks before the machinery does; people work around rules they believe are rigged.",
-    "The weakest handoff matters most, because that is where responsibility disappears.",
-    "I would follow the consequence, not the promise; the person paying usually sees the truth first.",
-    "A system can survive a mistake, but not a habit of punishing whoever names it.",
-    "The part I cannot ignore is who gets to call this a success after someone else pays.",
-    "Then I take the skeptical side: the rule is serving itself, not its purpose.",
-  ];
+  const topicOptions = buildCoffeeTopicFallbackOptions(args.topic);
+  const options = topicOptions.length > 0
+    ? topicOptions
+    : [
+        "I need one concrete moment before I can choose a side.",
+        "The next example should show what everyone else has missed.",
+        "I want the detail that would actually change someone's mind.",
+        "One specific consequence would make this disagreement real.",
+        "The strongest answer is hiding in the exception nobody has tested.",
+        "Give me the moment where this idea becomes impossible to ignore.",
+      ];
   const seed = `${args.conversationId}:${args.speaker.id}:${args.historyLength}:${args.seedExtra ?? ""}:fresh-fallback`;
   const startIndex = Math.floor(stableUnitValue(seed) * options.length) % options.length;
   const avoidKeys = new Set((args.avoidTexts ?? []).map(coffeeReplyRepeatKey).filter(Boolean));
@@ -3604,9 +3671,10 @@ export function pickCoffeeSpeakerBalanceOverride(args: {
     sessionRemainingMs: args.sessionRemainingMs,
     activePollContext: args.activePollContext,
   });
-  if (state.guardrailStrength !== "strong") return null;
+  if (state.guardrailStrength === "light") return null;
   if (state.quietBotIds.length === 0) return null;
   if (state.quietBotIds.includes(args.pickedBotId)) return null;
+  if (state.guardrailStrength === "standard" && !state.dominantDuoDetected) return null;
   const picked = state.speakerDistribution.find((entry) => entry.botId === args.pickedBotId);
   if (!picked) return null;
   const quietEntries = state.speakerDistribution
@@ -8419,6 +8487,8 @@ export function buildRouterPrompt(args: {
   history: ChatMessage[];
   userMessage: string;
   userActionOnly?: boolean;
+  /** A direct player mention is an attention cue, not a forced speaker pick. */
+  userAddressedBotId?: string | null;
   lastSpeakerBotId: string | null;
   socialByBotId?: Record<string, CoffeeBotSocialSnapshot>;
   relationshipsBySource?: Record<string, Record<string, BotRelationshipSnapshot>>;
@@ -8449,6 +8519,7 @@ export function buildRouterPrompt(args: {
     history,
     userMessage,
     userActionOnly = false,
+    userAddressedBotId = null,
     lastSpeakerBotId,
     socialByBotId = {},
     relationshipsBySource,
@@ -8538,6 +8609,17 @@ export function buildRouterPrompt(args: {
           "Do not treat it as an interruption by default. Prefer a next speaker who can answer with a small action beat, or speak only if the action clearly invites a spoken response.",
         ]
       : [];
+  const userAddressedBot = userAddressedBotId
+    ? group.find((bot) => bot.id === userAddressedBotId) ?? null
+    : null;
+  const userAddressedBotLines =
+    turnKind === "user" && userAddressedBot
+      ? [
+          "",
+          `The user directed attention to ${userAddressedBot.name}. Treat that as a social invitation, not a speaking command.`,
+          `${userAddressedBot.name} may answer, another bot may step in, or the table may continue without directly answering the user. Choose what feels natural for these personalities and this moment.`,
+        ]
+      : [];
   const relationshipPrompt = formatCoffeeRelationshipPromptSummary({
     group,
     relationshipsBySource,
@@ -8625,6 +8707,7 @@ export function buildRouterPrompt(args: {
     ...relationshipLines,
     ...latestUserActionLines,
     ...userActionOnlyLines,
+    ...userAddressedBotLines,
     ...buildCoffeeConversationQualityAppendix(conversationQuality, "router"),
     ...speakerBalanceLines,
     ...buildCoffeeWrapUpRouterAppendix(sessionRemainingMs),
@@ -9607,6 +9690,14 @@ export function getCoffeeConversationTranscript(
     throw new Error("Coffee session not found.");
   }
   return loadAllMessages(db, userId, conversationId);
+}
+
+export function coffeeMessagesVisibleInExport<T extends { role: string; content: string }>(
+  messages: readonly T[]
+): T[] {
+  return messages.filter(
+    (message) => !(message.role === "system" && message.content.trim().length === 0)
+  );
 }
 
 /**
@@ -12390,12 +12481,8 @@ async function generateCoffeeBotReply(args: {
     pickedBotId = explicitDirectedSpeaker.id;
     routerReason = `Director mode picked ${explicitDirectedSpeaker.name}.`;
     routerDirective = "Start a fresh concrete beat tied to the latest table moment.";
-  } else if (currentUserAddressedSpeaker) {
-    pickedBotId = currentUserAddressedSpeaker.id;
-    routerReason = `Followed current user bot address to ${currentUserAddressedSpeaker.name}.`;
-    routerDirective = "Answer the direct call-out first, then add one concrete new angle.";
   } else {
-    if (addressedBotId) {
+    if (turnKind === "autonomous" && addressedBotId) {
       const addressedSpeaker = routableTurnGroup.find((bot) => bot.id === addressedBotId);
       if (addressedSpeaker) {
         pickedBotId = addressedSpeaker.id;
@@ -12413,6 +12500,7 @@ async function generateCoffeeBotReply(args: {
         history,
         userMessage: tableFocus,
         userActionOnly,
+        userAddressedBotId: currentUserAddressedSpeaker?.id ?? null,
         lastSpeakerBotId,
         socialByBotId: preTurnSocialByBotId,
         relationshipsBySource: durableRelationshipsBySource,
@@ -12763,6 +12851,7 @@ async function generateCoffeeBotReply(args: {
   if (!replyText) {
     replyText = buildCoffeeEmergencyFallbackReply({
       tableFocus,
+      topic: row.coffee_topic,
       speaker,
       conversationId: row.id,
       historyLength: history.length,
@@ -12774,6 +12863,7 @@ async function generateCoffeeBotReply(args: {
   if (coffeeReplyLooksLikePromptLeak(replyText) || coffeeReplyIsLowValueTableLine(replyText)) {
     replyText = buildCoffeeEmergencyFallbackReply({
       tableFocus,
+      topic: row.coffee_topic,
       speaker,
       conversationId: row.id,
       historyLength: history.length,
@@ -12811,6 +12901,7 @@ async function generateCoffeeBotReply(args: {
       conversationId: row.id,
       historyLength: history.length,
       tableFocus,
+      topic: row.coffee_topic,
       seedExtra: activePoll ? "poll-repeat" : "repeat",
       avoidTexts: recentCoffeeAssistantTexts(history),
       maxChars: replyCaps.tableReplyMaxChars,
