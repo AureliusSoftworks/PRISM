@@ -82,4 +82,15 @@ describe("Zen scroll experience", () => {
       /renderAsEphemeralLines=\{[\s\S]*msg\.id === latestAssistantMessageId \|\| Boolean\(msg\.zenDisplay\)/,
     );
   });
+
+  it("preserves the Zen viewport while wildcard cleanup swaps in the resolved turn", () => {
+    assert.match(
+      pageSource,
+      /pendingCleanupIdsForReveal\.length > 0[\s\S]*zenStableViewportAnchorMessageId\([\s\S]*zenPendingViewportRestoreRef\.current =/,
+    );
+    assert.match(
+      pageSource,
+      /const pendingRestore = zenPendingViewportRestoreRef\.current;[\s\S]*zenRestoredViewportScrollTop\([\s\S]*commitChatModeScrollTop\(/,
+    );
+  });
 });
