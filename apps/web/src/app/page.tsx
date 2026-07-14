@@ -633,7 +633,11 @@ import {
   readEnglishVoiceSynthesisClip,
   stopEnglishVoice,
 } from "./englishVoice";
-import { VOICE_MODE_OPTIONS, voiceModeDisplayName } from "./voiceQuickToggle";
+import {
+  VOICE_MODE_OPTIONS,
+  voiceModeDisplayName,
+  voiceModeDrivesCanvasReveal,
+} from "./voiceQuickToggle";
 import {
   PRISM_APPLETS,
   prismAppletVersionLabel,
@@ -47798,7 +47802,8 @@ function HomeContent(): React.JSX.Element {
       const displayContent = resolveVisibleMessageContent(latestAssistant);
       if (
         view === "chat" &&
-        settings?.voiceMode !== "mute" &&
+        settings &&
+        voiceModeDrivesCanvasReveal(settings.voiceMode) &&
         (settings?.voiceVolume ?? 0) > 0
       ) {
         prepareChatSpeechReveal(revealKey, displayContent);
@@ -48302,8 +48307,15 @@ function HomeContent(): React.JSX.Element {
       getBotMentionDisplayText(displayContent),
     );
     if (!speechText) return;
-    if (!chatSpeechRevealByKeyRef.current.has(revealKey)) {
+    const audioDrivesReveal =
+      voiceModeDrivesCanvasReveal(liveRobotVoiceMode);
+    if (
+      audioDrivesReveal &&
+      !chatSpeechRevealByKeyRef.current.has(revealKey)
+    ) {
       prepareChatSpeechReveal(revealKey, displayContent);
+    } else if (!audioDrivesReveal) {
+      releaseChatSpeechReveal(revealKey);
     }
     const revealTokens = tokenizeMessageReveal(displayContent);
     const targetDurationMs = Math.max(
@@ -48338,21 +48350,23 @@ function HomeContent(): React.JSX.Element {
           signal: controller.signal,
           effectsEnabled: settings.voiceEffectsEnabled !== false,
           globalVolume: settings.voiceVolume,
-          lifecycle: {
-            onStart: (durationMs, alignment) => {
-              chatMessageFirstSeenAtRef.current.set(revealKey, Date.now());
-              startChatSpeechReveal(
-                revealKey,
-                revealTokens,
-                displayContent,
-                durationMs ?? targetDurationMs,
-                alignment,
-              );
-            },
-            onProgress: (elapsedMs) =>
-              progressChatSpeechReveal(revealKey, elapsedMs),
-            onEnd: () => finishChatSpeechReveal(revealKey),
-          },
+          lifecycle: audioDrivesReveal
+            ? {
+                onStart: (durationMs, alignment) => {
+                  chatMessageFirstSeenAtRef.current.set(revealKey, Date.now());
+                  startChatSpeechReveal(
+                    revealKey,
+                    revealTokens,
+                    displayContent,
+                    durationMs ?? targetDurationMs,
+                    alignment,
+                  );
+                },
+                onProgress: (elapsedMs) =>
+                  progressChatSpeechReveal(revealKey, elapsedMs),
+                onEnd: () => finishChatSpeechReveal(revealKey),
+              }
+            : undefined,
           proceduralTiming: { targetDurationMs },
         });
       })
@@ -48360,9 +48374,11 @@ function HomeContent(): React.JSX.Element {
         if (liveBottishRevealKeyRef.current === revealKey) {
           liveBottishRevealKeyRef.current = null;
         }
-        releaseChatSpeechReveal(revealKey);
-        chatMessageFirstSeenAtRef.current.set(revealKey, Date.now());
-        chatRevealPaceByKeyRef.current.delete(revealKey);
+        if (audioDrivesReveal) {
+          releaseChatSpeechReveal(revealKey);
+          chatMessageFirstSeenAtRef.current.set(revealKey, Date.now());
+          chatRevealPaceByKeyRef.current.delete(revealKey);
+        }
         if (!isAbortLikeError(error)) {
           setVoicePlaybackNotice(
             `${voiceModeDisplayName(liveRobotVoiceMode)} playback could not start.`,

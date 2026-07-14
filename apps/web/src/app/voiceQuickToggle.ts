@@ -13,3 +13,8 @@ export function voiceModeDisplayName(mode: VoiceMode): string {
   if (mode === "english") return "English";
   return "Mute";
 }
+
+/** Procedural Bottish follows the canvas reveal clock instead of owning it. */
+export function voiceModeDrivesCanvasReveal(mode: VoiceMode): boolean {
+  return mode === "english" || mode === "babble";
+}

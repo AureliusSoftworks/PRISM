@@ -33,6 +33,42 @@ describe("Zen voice reveal fallback", () => {
     );
   });
 
+  it("keeps procedural Bottish on the canvas reveal clock", () => {
+    const eligibilityStart = pageSource.indexOf(
+      "const markLatestAssistantRevealEligible",
+    );
+    const eligibilityEnd = pageSource.indexOf(
+      "const latestUserMessageId",
+      eligibilityStart,
+    );
+    const eligibilitySource = pageSource.slice(
+      eligibilityStart,
+      eligibilityEnd,
+    );
+    assert.match(
+      eligibilitySource,
+      /voiceModeDrivesCanvasReveal\(settings\.voiceMode\)/,
+    );
+
+    const effectStart = pageSource.indexOf(
+      'const shouldRun =\n      view === "chat"',
+    );
+    const effectEnd = pageSource.indexOf(
+      "const zenLiveReplyActionText",
+      effectStart,
+    );
+    const effectSource = pageSource.slice(effectStart, effectEnd);
+    assert.match(
+      effectSource,
+      /const audioDrivesReveal =[\s\S]*?voiceModeDrivesCanvasReveal\(liveRobotVoiceMode\)/,
+    );
+    assert.match(
+      effectSource,
+      /else if \(!audioDrivesReveal\) \{[\s\S]*?releaseChatSpeechReveal\(revealKey\);/,
+    );
+    assert.match(effectSource, /lifecycle: audioDrivesReveal/);
+  });
+
   it("makes Shh non-destructive before audio playback begins", () => {
     const handlerStart = pageSource.indexOf("const handleTypingIndicatorPress");
     const handlerEnd = pageSource.indexOf(
