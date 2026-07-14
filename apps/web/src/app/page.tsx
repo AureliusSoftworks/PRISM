@@ -911,6 +911,7 @@ import {
 import {
   calculateZenAtmosphereLayerStatesForReader,
   maxZenAtmosphereLayerOpacity,
+  zenAtmosphereGrayscaleAmount,
   type ZenAtmosphereLayerState,
 } from "./zenAtmosphere";
 import {
@@ -90705,39 +90706,6 @@ function HomeContent(): React.JSX.Element {
                             <input
                               type="checkbox"
                               checked={
-                                effectiveZenModeSettings.zenWallpaperGrayscaleEnabled
-                              }
-                              onChange={(event) => {
-                                const next = event.target.checked;
-                                setSettings((previous) =>
-                                  previous
-                                    ? {
-                                        ...previous,
-                                        zenWallpaperGrayscaleEnabled: next,
-                                      }
-                                    : previous,
-                                );
-                              }}
-                            />
-                            <span className={styles.controlLabelWithInfo}>
-                              <span>Grayscale atmosphere</span>
-                              <PanelSectionInfo
-                                id="settings-control-info-zen-wallpaper-grayscale"
-                                label="About grayscale atmosphere"
-                                variant="control"
-                              >
-                                Shows generated Atmosphere wallpapers in
-                                grayscale. Turn it off to keep vivid colors from
-                                themed or persona-driven scenes.
-                              </PanelSectionInfo>
-                            </span>
-                          </label>
-                          <label
-                            className={`${styles.checkbox} ${styles.settingsInlineToggle} ${styles.settingsFieldFull}`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={
                                 effectiveZenModeSettings.zenWallpaperBlurredEdgesEnabled
                               }
                               onChange={(event) => {
@@ -109066,16 +109034,13 @@ function HomeContent(): React.JSX.Element {
       : undefined;
     const zenAtmospherePrismColorActive =
       chatLikeSurface && !appWidePrivateMode && composeBotAccentId === null;
-    const zenAtmosphereGrayscaleEnabled = normalizeZenWallpaperGrayscaleSetting(
-      settings?.zenWallpaperGrayscaleEnabled,
-    );
     const zenAtmosphereBackdropStyle = {
       "--zen-atmosphere-opacity": String(
         normalizeZenWallpaperOpacitySetting(settings?.zenWallpaperOpacity),
       ),
-      "--zen-atmosphere-grayscale-amount": zenAtmosphereGrayscaleEnabled
-        ? "1"
-        : "0",
+      "--zen-atmosphere-grayscale-amount": zenAtmosphereGrayscaleAmount(
+        composeBotAccentId !== null,
+      ),
       "--zen-atmosphere-color-amount": zenAtmospherePrismColorActive
         ? "1"
         : "0",
