@@ -27,6 +27,7 @@ services:
       context: .
       dockerfile: apps/api/Dockerfile
     restart: unless-stopped
+    # Loads optional provider credentials, including BRAVE_SEARCH_API_KEY.
     env_file: .env
     environment:
       - API_PORT=18787

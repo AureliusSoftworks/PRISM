@@ -1,6 +1,17 @@
 export const FIRST_RUN_WELCOME_STORAGE_KEY = "prism_first_run_welcome_v1";
 export const FIRST_RUN_SETUP_STORAGE_KEY = "prism_desktop_first_run_complete_v3";
 
+export function clearFirstRunSetupCompletion(storage: {
+  removeItem(key: string): void;
+}): boolean {
+  try {
+    storage.removeItem(FIRST_RUN_SETUP_STORAGE_KEY);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export type FirstRunSetupStepId =
   | "place"
   | "provider"
@@ -9,6 +20,7 @@ export type FirstRunSetupStepId =
   | "elevenlabs"
   | "local-model"
   | "online-model"
+  | "auto-models"
   | "ready";
 
 export interface FirstRunSetupStep {
@@ -26,6 +38,7 @@ export const FIRST_RUN_SETUP_STEPS: readonly FirstRunSetupStep[] = [
   { id: "elevenlabs", title: "Connect ElevenLabs", shortTitle: "Voice", optional: true },
   { id: "local-model", title: "Pick your local default", shortTitle: "Local model", optional: true },
   { id: "online-model", title: "Pick your online default", shortTitle: "Online model", optional: true },
+  { id: "auto-models", title: "Meet Auto recovery", shortTitle: "Auto", optional: true },
   { id: "ready", title: "Your place is ready", shortTitle: "Ready", optional: false },
 ] as const;
 

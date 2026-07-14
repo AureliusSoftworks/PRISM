@@ -15,6 +15,9 @@ import {
   normalizeBotVoiceVolume,
   normalizeVoiceMode,
   BOT_AUDIO_VOICE_IDS,
+  parseStoredAutoFallbackChain,
+  normalizeAutoFallbackChain,
+  serializeAutoFallbackChain,
   type BotAudioVoiceId,
 } from "@localai/shared";
 import { sanitizeHiddenModelIds } from "./model-routing.ts";
@@ -129,13 +132,14 @@ export interface CurrentSettings {
   experimentalAllModelEffortEnabled: number;
   coffeeExperimentalTableAngleEnabled: number;
   psychicModeEnabled: number;
-  /** 1 = show left-edge stripe on assistant bubbles when the copyright lenient fallback answered. */
-  fallbackModelMessageStripe: number;
+  /** Saved preference only. Auto is still gated per Zen/Coffee context. */
+  autoSwitchModel: number;
+  /** Versioned JSON stored in `users.auto_fallback_chain`. */
+  autoFallbackChain: string | null;
   hiddenBotModelIds: string;
   hiddenComfyUiWorkflowIds: string;
   preferredLocalModel: string | null;
   preferredOnlineModel: string | null;
-  lenientLocalFallbackModel: string | null;
   lenientLocalImageFallbackModel: string | null;
   secondaryOllamaHost: string | null;
   comfyUiHost: string | null;
@@ -189,12 +193,12 @@ export interface NextSettings {
   experimentalAllModelEffortEnabled: number;
   coffeeExperimentalTableAngleEnabled: number;
   psychicModeEnabled: number;
-  fallbackModelMessageStripe: number;
+  autoSwitchModel: number;
+  autoFallbackChain: string | null;
   hiddenBotModelIds: string[];
   hiddenComfyUiWorkflowIds: string[];
   preferredLocalModel: string | null;
   preferredOnlineModel: string | null;
-  lenientLocalFallbackModel: string | null;
   lenientLocalImageFallbackModel: string | null;
   secondaryOllamaHost: string | null;
   comfyUiHost: string | null;
@@ -240,6 +244,7 @@ export interface NextSettings {
   openAiKeyIntent: { action: "replace"; plaintext: string } | { action: "clear" } | { action: "keep" };
   anthropicKeyIntent: { action: "replace"; plaintext: string } | { action: "clear" } | { action: "keep" };
   elevenLabsKeyIntent: { action: "replace"; plaintext: string } | { action: "clear" } | { action: "keep" };
+  braveSearchKeyIntent: { action: "replace"; plaintext: string } | { action: "clear" } | { action: "keep" };
 }
 
 function isTheme(value: unknown): value is Theme {
@@ -777,6 +782,10 @@ export function sanitizeElevenLabsKeyInput(input: string): string {
   return sanitizeOpenAiKeyInput(input);
 }
 
+export function sanitizeBraveSearchKeyInput(input: string): string {
+  return sanitizeOpenAiKeyInput(input);
+}
+
 function isWrappedInMatchedQuotes(value: string): boolean {
   if (value.length < 2) return false;
   const first = value[0];
@@ -828,10 +837,27 @@ export function resolveNextSettings(
     typeof body.psychicModeEnabled === "boolean"
       ? Number(body.psychicModeEnabled)
       : current.psychicModeEnabled;
-  const fallbackModelMessageStripe =
-    typeof body.fallbackModelMessageStripe === "boolean"
-      ? Number(body.fallbackModelMessageStripe)
-      : current.fallbackModelMessageStripe;
+  const requestedAutoSwitchModel =
+    typeof body.autoModeEnabled === "boolean"
+      ? Number(body.autoModeEnabled)
+      : current.autoSwitchModel;
+  const currentAutoFallbackChain = parseStoredAutoFallbackChain(
+    current.autoFallbackChain
+  );
+  const requestedAutoFallbackChain =
+    body.autoFallbackChain === undefined
+      ? currentAutoFallbackChain
+      : typeof body.autoFallbackChain === "string"
+        ? parseStoredAutoFallbackChain(body.autoFallbackChain)
+        : normalizeAutoFallbackChain(body.autoFallbackChain);
+  const autoFallbackChain = requestedAutoFallbackChain
+    ? serializeAutoFallbackChain(requestedAutoFallbackChain)
+    : body.autoFallbackChain === null
+      ? null
+      : currentAutoFallbackChain
+        ? serializeAutoFallbackChain(currentAutoFallbackChain)
+        : null;
+  const autoSwitchModel = autoFallbackChain ? requestedAutoSwitchModel : 0;
   const hiddenBotModelIds = readHiddenBotModelIds(
     body.hiddenBotModelIds,
     current.hiddenBotModelIds
@@ -847,10 +873,6 @@ export function resolveNextSettings(
   const preferredOnlineModel = readPreferredModel(
     body.preferredOnlineModel,
     current.preferredOnlineModel
-  );
-  const lenientLocalFallbackModel = readPreferredModel(
-    body.lenientLocalFallbackModel,
-    current.lenientLocalFallbackModel
   );
   const lenientLocalImageFallbackModel = readPreferredModel(
     body.lenientLocalImageFallbackModel,
@@ -1143,6 +1165,16 @@ export function resolveNextSettings(
     elevenLabsKeyIntent = { action: "clear" };
   }
 
+  let braveSearchKeyIntent: NextSettings["braveSearchKeyIntent"] = { action: "keep" };
+  if (typeof body.braveSearchApiKey === "string") {
+    const sanitized = sanitizeBraveSearchKeyInput(body.braveSearchApiKey);
+    if (sanitized.length > 0) {
+      braveSearchKeyIntent = { action: "replace", plaintext: sanitized };
+    }
+  } else if (body.braveSearchApiKey === null) {
+    braveSearchKeyIntent = { action: "clear" };
+  }
+
   return {
     displayName,
     theme,
@@ -1154,12 +1186,12 @@ export function resolveNextSettings(
     experimentalAllModelEffortEnabled,
     coffeeExperimentalTableAngleEnabled,
     psychicModeEnabled,
-    fallbackModelMessageStripe,
+    autoSwitchModel,
+    autoFallbackChain,
     hiddenBotModelIds,
     hiddenComfyUiWorkflowIds,
     preferredLocalModel,
     preferredOnlineModel,
-    lenientLocalFallbackModel,
     lenientLocalImageFallbackModel,
     secondaryOllamaHost,
     comfyUiHost,
@@ -1198,5 +1230,6 @@ export function resolveNextSettings(
     openAiKeyIntent,
     anthropicKeyIntent,
     elevenLabsKeyIntent,
+    braveSearchKeyIntent,
   };
 }

@@ -1485,26 +1485,27 @@ describe("Coffee seat arrival CSS", () => {
     const nameplateRules = rulesForExactSelector(".coffeeSeatGlowPill");
     assert.ok(
       nameplateRules.some((rule) =>
-        /--coffee-seat-name-plate-y:\s*clamp\(-50px,\s*-4\.45vw,\s*-32px\)\s*;/.test(rule)
+        /--coffee-seat-name-plate-y:\s*clamp\(-42px,\s*-3\.65cqw,\s*-26px\)\s*;/.test(rule)
       ),
-      "expected nameplates to tuck into the bottom of the bot body"
+      "expected nameplates to sit below the prose corridor"
     );
     assert.ok(
-      nameplateRules.some((rule) => /--coffee-seat-glyph-slot-width:\s*35px\s*;/.test(rule)),
-      "expected nameplate glyph slot to fit the larger body glyph"
+      nameplateRules.some((rule) => /--coffee-seat-glyph-slot-width:\s*30px\s*;/.test(rule)),
+      "expected the compact nameplate glyph slot to preserve room for the bot name"
     );
     assert.ok(
       nameplateRules.some((rule) =>
-        /--coffee-seat-cup-slot-width:\s*clamp\(68px,\s*6vw,\s*80px\)\s*;/.test(rule)
+        /--coffee-seat-cup-slot-width:\s*clamp\(52px,\s*4\.6cqw,\s*60px\)\s*;/.test(rule)
       ),
-      "expected the table-facing mug to have its own nameplate slot"
+      "expected the table-facing mug slot to stay bounded"
     );
     assert.ok(
       nameplateRules.some((rule) =>
-        /width:\s*clamp\(284px,\s*23vw,\s*304px\)\s*;/.test(rule) &&
+        /--coffee-seat-name-plate-width:\s*clamp\(204px,\s*17cqw,\s*232px\)\s*;/.test(rule) &&
+        /width:\s*var\(--coffee-seat-name-plate-width\)\s*;/.test(rule) &&
         /grid-template-columns:\s*var\(--coffee-seat-glyph-slot-width\)\s*minmax\(0,\s*1fr\)\s*var\(--coffee-seat-cup-slot-width\)\s*;/.test(rule)
       ),
-      "expected full names between the outer glyph and table-facing mug"
+      "expected a bounded nameplate with flexible, truncating name space"
     );
     assert.ok(
       nameplateRules.some((rule) =>

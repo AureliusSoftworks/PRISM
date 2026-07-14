@@ -1,5 +1,28 @@
 import type { TellFictionalStoryPayload, WebSearchPayload } from "./prismTool.js";
 import type { PrismMoodIgnoredQuestionPenaltyLevel } from "./mood.js";
+import type { AutoRecoveryTraceV1 } from "./autoFallback.js";
+
+export {
+  AUTO_FALLBACK_CHAIN_FALLBACK_COUNT,
+  AUTO_FALLBACK_CHAIN_VERSION,
+  AUTO_FALLBACK_MODEL_ID_MAX_LENGTH,
+  autoFallbackModelKey,
+  autoFallbackResolvedChain,
+  isAutoFallbackProvider,
+  normalizeAutoFallbackChain,
+  normalizeAutoFallbackModelRef,
+  normalizeAutoRecoveryTrace,
+  normalizeResponseMode,
+  parseStoredAutoFallbackChain,
+  serializeAutoFallbackChain,
+  type AutoFallbackAttemptTraceV1,
+  type AutoFallbackChainV1,
+  type AutoFallbackFailureReason,
+  type AutoFallbackModelRef,
+  type AutoFallbackProvider,
+  type AutoRecoveryTraceV1,
+  type ResponseMode,
+} from "./autoFallback.js";
 
 export {
   BOT_POWER_INTENT_MAX_LENGTH,
@@ -303,6 +326,7 @@ export {
   type AskQuestionPayload,
   type CoffeeAmbientActionPayload,
   type CoffeeReplayArrivalEventPayload,
+  type CoffeeReplayBotDepartureEventPayload,
   type CoffeeReplayEventPayload,
   type CoffeeReplayMoodEventPayload,
   type CoffeeReplayPlayerDepartureEventPayload,
@@ -412,9 +436,14 @@ export {
 
 export {
   REASONING_EFFORT_VALUES,
+  anthropicModelSupportsReasoningEffort,
+  anthropicReasoningEffortForRequest,
+  modelSupportsNativeReasoningEffort,
   normalizeReasoningEffort,
   openAiModelSupportsReasoningEffort,
   reasoningEffortForRequest,
+  type AnthropicRequestReasoningEffort,
+  type NativeReasoningEffortProvider,
   type ReasoningEffort,
   type RequestReasoningEffort,
 } from "./reasoningEffort.js";
@@ -674,6 +703,8 @@ export interface ChatMessage {
   coffeeUserAction?: CoffeeUserActionPayload;
   /** Coffee-only hidden replay state beats; not shown in normal transcripts. */
   coffeeReplayEvents?: CoffeeReplayEventPayload[];
+  /** Privacy-safe provider/model attempt history when Auto recovered this reply. */
+  autoRecovery?: AutoRecoveryTraceV1;
   /** User-entered Prompt Center shortcut that resolved into this message content. */
   promptShortcut?: PromptShortcutMetadata;
   /** User-entered wildcard decks/options that resolved into this message content. */
@@ -1394,6 +1425,55 @@ export {
   type CoffeeReactionTone,
 } from "./coffeeInterruptionReactions.js";
 
+export type ConversationHistoryContextKind =
+  | "prism_home"
+  | "persona_home"
+  | "side_chat"
+  | "coffee_session"
+  | "coffee_group"
+  | "sandbox"
+  | "legacy";
+
+export type ConversationHistoryOriginKind =
+  | "relationship"
+  | "fork"
+  | "saved_group"
+  | "coffee"
+  | "sandbox"
+  | "legacy";
+
+/**
+ * Stable navigation metadata for one saved conversation episode.
+ *
+ * `contextKey` and `ownerBotId` describe where the episode belongs; neither
+ * changes when another persona is invited or speaks. `episodeId` is the saved
+ * conversation row, while `continuationConversationId` identifies the episode
+ * that should resume when the relationship Home is visited.
+ */
+export interface ConversationHistoryEntry {
+  contextKey: string;
+  contextKind: ConversationHistoryContextKind;
+  conversationId: string;
+  rootConversationId: string;
+  episodeId: string;
+  ownerBotId: string | null;
+  origin: {
+    kind: ConversationHistoryOriginKind;
+    id: string | null;
+  };
+  participantBotIds: string[];
+  createdAt: string;
+  updatedAt: string;
+  archived: boolean;
+  continuationConversationId: string | null;
+  nativeRoute: {
+    view: "chat" | "coffee" | "sandbox";
+    conversationId: string;
+    botId?: string | null;
+    coffeeGroupId?: string | null;
+  };
+}
+
 export interface Conversation {
   id: string;
   userId: string;
@@ -1416,6 +1496,8 @@ export interface Conversation {
   hubBotId?: string | null;
   /** Parent Hub conversation for side chats. Null/omitted for Hub roots. */
   parentHubId?: string | null;
+  /** Stable History ownership/navigation metadata. Older clients may ignore it. */
+  history?: ConversationHistoryEntry;
   /**
    * Coffee-only — ordered list of 2-5 bot ids that participate in this
    * live session. Captured once when the Coffee thread is created and
@@ -2049,6 +2131,8 @@ export interface CoffeeTurnResponse {
   stale?: boolean;
   /** Optional interruption event payload for live Coffee table presentation. */
   interruption?: CoffeeInterruptionEvent;
+  /** Privacy-safe details when Auto recovered through another model. */
+  autoRecovery?: AutoRecoveryTraceV1;
   /** Present when a Coffee user turn started an async image generation job. */
   pendingImageJob?: {
     jobId: string;

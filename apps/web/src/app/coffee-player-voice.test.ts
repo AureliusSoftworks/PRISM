@@ -141,7 +141,39 @@ describe("Coffee player voice", () => {
     );
     assert.match(
       styles,
-      /\.coffeeReplayPlayerAvatar\s*\{[\s\S]*?--zen-live-bot-avatar-size:\s*clamp\(126px,\s*12cqw,\s*168px\);/,
+      /\.coffeeReplayPlayerAvatar\s*\{[\s\S]*?--zen-live-bot-avatar-size:\s*var\(\s*--coffee-seat-responsive-avatar-size,\s*clamp\(148px,\s*12\.6vw,\s*196px\)\s*\);[\s\S]*?--zen-live-bot-avatar-body-size:\s*var\(--zen-live-bot-avatar-size\);/,
+    );
+    assert.doesNotMatch(
+      styles,
+      /\.coffeeReplayPlayerAvatar\s*\{[\s\S]*?clamp\(126px,\s*12cqw,\s*168px\)/,
+    );
+    assert.match(
+      styles,
+      /\.zenLiveBotPresenceHitTarget\s*\{[\s\S]*?width:\s*77\.4%;[\s\S]*?height:\s*78\.6%;/,
+    );
+    assert.match(
+      styles,
+      /\.coffeeReplayPlayerSeat\s*\{[\s\S]*?width:\s*min\(268px,\s*calc\(100%\s*-\s*32px\)\);[\s\S]*?pointer-events:\s*none;/,
+    );
+    assert.match(
+      styles,
+      /\.coffeeReplayPlayerNameplate\s*\{[\s\S]*?width:\s*clamp\(232px,\s*21cqw,\s*268px\);[\s\S]*?margin-top:\s*clamp\(-41px,\s*-3\.2cqw,\s*-30px\);/,
+    );
+    assert.doesNotMatch(
+      source,
+      /className=\{styles\.coffeeReplayPlayerGlyph\}[\s\S]{0,180}<BotGlyph/,
+    );
+    assert.match(
+      styles,
+      /\.coffeeReplayPlayerSeat\[data-player-thinking="true"\],[\s\S]*?\.coffeeReplayPlayerSeat\[data-table-speaking="true"\]\s*\{[\s\S]*?drop-shadow\(/,
+    );
+    assert.match(
+      styles,
+      /\.themeLight\.coffeeShell \.coffeeReplayPlayerNameplate\s*\{/,
+    );
+    assert.match(
+      source,
+      /const compactCoffeeStage =\s*coffeeSessionPhase === "selecting" && coffeeConversation === null;/,
     );
     assert.match(
       styles,

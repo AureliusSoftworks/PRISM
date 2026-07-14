@@ -17,6 +17,7 @@ import {
   coffeeShouldQueueAssistantRevealAfterUserTyping,
   coffeeShouldIgnoreStaleTurnResponse,
   coffeeShouldWaitForPendingBotRevealBeforeNextTurn,
+  coffeeSubmittedUserMessageFromTurn,
   coffeeTableTalkAutoplayDeferralMs,
   coffeeVoicePlaybackOwnsAutoplayGate,
   coffeeVisibleDirectedMentionBotIds,
@@ -125,6 +126,29 @@ describe("coffee user reveal flow", () => {
         sessionFinished: true,
       }),
       false
+    );
+  });
+
+  it("keeps tagged player message source intact for recall and follow-up flow", () => {
+    const tagged = "[Boris](prism-bot://bot-boris), what do you think?";
+    const message = coffeeSubmittedUserMessageFromTurn([
+      { id: "user-1", role: "user", content: tagged },
+      { id: "bot-1", role: "assistant", content: "I think it needs work." },
+    ]);
+
+    assert.equal(message?.id, "user-1");
+    assert.equal(message?.content, tagged);
+  });
+
+  it("does not append a pending player line when its stored message is already visible", () => {
+    assert.equal(
+      coffeePendingSubmittedUserLineVisible({
+        state: "botThinking",
+        userRevealText: "One visible line.",
+        sessionFinished: false,
+        persistedUserMessageVisible: true,
+      }),
+      false,
     );
   });
 

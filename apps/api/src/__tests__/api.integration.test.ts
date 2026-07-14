@@ -20,7 +20,10 @@ process.env.ENCRYPTION_MASTER_KEY = "integration-test-master-key";
 const { createPrismRequestHandler } = await import("../server.ts");
 const db = createTestDatabase();
 const fetchRecorder = createFetchRecorder();
-const deterministicProvider = createDeterministicProvider(["Deterministic API reply."]);
+const deterministicReply = "Deterministic API reply with enough detail to stay visible.";
+const deterministicProvider = createDeterministicProvider([deterministicReply]);
+deterministicProvider.diagnosticModel = "deterministic-test-model";
+const providerFactoryCalls: string[] = [];
 function deterministicVoiceWave(): Buffer {
   const sampleRate = 24_000;
   const sampleCount = 240;
@@ -50,13 +53,17 @@ const config = {
   openAiApiKey: "",
   anthropicApiKey: "",
   elevenLabsApiKey: "",
+  braveSearchApiKey: "",
 };
 const server = createServer(
   createPrismRequestHandler({
     db,
     config,
     fetchImpl: fetchRecorder,
-    providerFactory: () => deterministicProvider,
+    providerFactory: (provider) => {
+      providerFactoryCalls.push(provider);
+      return deterministicProvider;
+    },
     auxiliaryProviderFactory: () => deterministicProvider,
     builtinVoiceWaveGenerator: async ({ profile }) => {
       if (normalizeBotAudioVoiceProfileV1(profile).systemVoiceName === "Unavailable Test") {
@@ -113,6 +120,330 @@ after(() => {
 });
 
 describe("API request integration", () => {
+  it("preserves normal exports and produces a redacted developer transcript on request", async () => {
+    const client = createClient();
+    const email = "developer-export@example.com";
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({ username: email, password: "developer-export-password" })
+    );
+    assert.equal(register.status, 201);
+    const user = db
+      .prepare("SELECT id FROM users WHERE email = ?")
+      .get(email) as { id: string };
+    const conversationId = "developer-export-conversation";
+    const createdAt = "2026-07-14T19:00:00.000Z";
+    db.prepare(
+      `INSERT INTO conversations
+         (id, user_id, title, conversation_mode, coffee_topic, created_at, updated_at)
+       VALUES (?, ?, ?, 'coffee', ?, ?, ?)`
+    ).run(
+      conversationId,
+      user.id,
+      "Export fixture",
+      "A useful disagreement",
+      createdAt,
+      createdAt
+    );
+    db.prepare(
+      `INSERT INTO messages
+         (id, conversation_id, user_id, role, content, provider, model,
+          coffee_audience_bot_ids, tool_payload, created_at)
+       VALUES (?, ?, ?, 'assistant', ?, 'openai', 'gpt-test', ?, ?, ?)`
+    ).run(
+      "developer-export-message",
+      conversationId,
+      user.id,
+      "Visible answer",
+      '["bot-2"]',
+      JSON.stringify({
+        webSearch: { query: "today's news" },
+        coffeeAmbientAction: { action: "*sips*" },
+      }),
+      "2026-07-14T19:00:01.000Z"
+    );
+    const secret = "integration-secret-value-123";
+    process.env.PRISM_TEST_EXPORT_API_KEY = secret;
+    try {
+      db.prepare(
+        `INSERT INTO developer_transcript_events
+           (id, user_id, conversation_id, message_id, request_id, request_sequence,
+            event_kind, purpose, provider, model, payload_json, created_at)
+         VALUES (?, ?, ?, ?, ?, 1, 'llm', 'coffee_turn', 'openai', 'gpt-test', ?, ?)`
+      ).run(
+        "developer-export-event",
+        user.id,
+        conversationId,
+        "developer-export-message",
+        "developer-export-request",
+        JSON.stringify({
+          request: {
+            messages: [
+              { role: "system", content: `Never reveal ${secret}` },
+              { role: "user", content: "Answer" },
+            ],
+          },
+          rawOutput: { choices: [{ message: { content: "Visible answer" } }] },
+          parsedOutput: "Visible answer",
+          stopReason: "stop",
+          streaming: false,
+          durationMs: 42,
+          usage: { inputTokens: 5, outputTokens: 2, totalTokens: 7 },
+        }),
+        "2026-07-14T19:00:01.000Z"
+      );
+
+      const standard = await client.request(
+        `/api/conversations/${conversationId}/export`,
+        jsonInit({})
+      );
+      assert.equal(standard.status, 200);
+      const standardPayload = await json(standard);
+      assert.equal(standardPayload.format, "standard");
+      assert.match(standardPayload.markdown, /^# Export fixture/u);
+      assert.doesNotMatch(standardPayload.markdown, /PRISM Developer Transcript/u);
+
+      const developer = await client.request(
+        `/api/conversations/${conversationId}/export`,
+        jsonInit({ format: "developer" })
+      );
+      assert.equal(developer.status, 200);
+      const developerPayload = await json(developer);
+      assert.equal(developerPayload.format, "developer");
+      assert.match(developerPayload.markdown, /^# PRISM Developer Transcript/u);
+      assert.match(developerPayload.markdown, /Selected topic: A useful disagreement/u);
+      assert.match(developerPayload.markdown, /Purpose \/ routing decision: coffee_turn/u);
+      assert.match(developerPayload.markdown, /Input tokens: 5/u);
+      assert.match(developerPayload.markdown, /Mention resolution \/ audience bot IDs/u);
+      assert.match(developerPayload.markdown, /Ambient Events \(not LLM calls\)/u);
+      assert.doesNotMatch(developerPayload.markdown, new RegExp(secret, "u"));
+      assert.match(developerPayload.markdown, /\[REDACTED_ENV_VALUE\]/u);
+    } finally {
+      delete process.env.PRISM_TEST_EXPORT_API_KEY;
+    }
+  });
+
+  it("records ranked Coffee topic selection metadata in the developer transcript", async () => {
+    const client = createClient();
+    const email = "coffee-topic-trace@example.com";
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({ username: email, password: "coffee-topic-trace-password" })
+    );
+    assert.equal(register.status, 201);
+    const user = db
+      .prepare("SELECT id FROM users WHERE email = ?")
+      .get(email) as { id: string };
+    const createdAt = "2026-07-14T20:00:00.000Z";
+    const botIds = ["coffee-topic-trace-bot-1", "coffee-topic-trace-bot-2"];
+    const insertBot = db.prepare(
+      `INSERT INTO bots
+         (id, user_id, name, system_prompt, online_enabled, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 0, ?, ?)`
+    );
+    insertBot.run(
+      botIds[0],
+      user.id,
+      "Mediator",
+      "You value trust, careful compromise, and shared duty.",
+      createdAt,
+      createdAt
+    );
+    insertBot.run(
+      botIds[1],
+      user.id,
+      "Skeptic",
+      "You test certainty through dissent and practical consequences.",
+      createdAt,
+      createdAt
+    );
+    const created = await client.request(
+      "/api/coffee/sessions",
+      jsonInit({ groupBotIds: botIds })
+    );
+    const createdPayload = await json(created);
+    assert.equal(created.status, 200, JSON.stringify(createdPayload));
+    const conversationId = createdPayload.conversation.id as string;
+    const candidates = createdPayload.coffeeStarterTopics as string[];
+    assert.equal(candidates.length, 4);
+
+    const selected = await client.request(
+      `/api/coffee/sessions/${conversationId}/topic`,
+      jsonInit({
+        topic: candidates[1],
+        selectionSource: "suggestion",
+        candidates,
+      })
+    );
+    const selectedPayload = await json(selected);
+    assert.equal(selected.status, 200, JSON.stringify(selectedPayload));
+
+    const event = db
+      .prepare(
+        `SELECT event_kind, purpose, provider, payload_json
+           FROM developer_transcript_events
+          WHERE user_id = ? AND conversation_id = ? AND purpose = 'coffee_topic_selection'
+          ORDER BY request_sequence DESC
+          LIMIT 1`
+      )
+      .get(user.id, conversationId) as {
+      event_kind: string;
+      purpose: string;
+      provider: string | null;
+      payload_json: string;
+    };
+    const payload = JSON.parse(event.payload_json) as {
+      request: {
+        candidates: string[];
+        selectionMode: string;
+        source: string;
+        generationMetadata: {
+          strategy: string;
+          sourceCoffeeGroupId: string | null;
+          candidateCount: number;
+          selectedCandidateIndex: number;
+          selectedRank: number;
+          candidateScores: Array<{
+            label: string;
+            scores: Record<string, number>;
+          }>;
+        };
+      };
+      parsedOutput: { selectedTopic: string };
+    };
+    assert.equal(event.event_kind, "tool");
+    assert.equal(event.purpose, "coffee_topic_selection");
+    assert.equal(event.provider, "system");
+    assert.deepEqual(payload.request.candidates, candidates);
+    assert.equal(payload.request.selectionMode, "suggestion");
+    assert.equal(payload.request.source, "coffee_topic_picker");
+    assert.equal(
+      payload.request.generationMetadata.strategy,
+      "ranked_participant_topic_pool_v1"
+    );
+    assert.equal(payload.request.generationMetadata.sourceCoffeeGroupId, null);
+    assert.equal(payload.request.generationMetadata.candidateCount, 4);
+    assert.equal(payload.request.generationMetadata.selectedCandidateIndex, 1);
+    assert.equal(payload.request.generationMetadata.selectedRank, 2);
+    assert.deepEqual(
+      payload.request.generationMetadata.candidateScores.map((candidate) => candidate.label),
+      candidates
+    );
+    assert.ok(
+      payload.request.generationMetadata.candidateScores.every(
+        (candidate) =>
+          Object.keys(candidate.scores).sort().join(",") ===
+          "balance,depth,fit,novelty,relevance"
+      )
+    );
+    assert.equal(payload.parsedOutput.selectedTopic, candidates[1]);
+
+    const generationEvent = db
+      .prepare(
+        `SELECT event_kind, purpose, provider, model, payload_json
+           FROM developer_transcript_events
+          WHERE user_id = ? AND conversation_id = ? AND purpose = 'coffee_topic_candidate_ranking'
+          ORDER BY request_sequence ASC
+          LIMIT 1`
+      )
+      .get(user.id, conversationId) as {
+      event_kind: string;
+      purpose: string;
+      provider: string | null;
+      model: string | null;
+      payload_json: string;
+    };
+    const generationPayload = JSON.parse(generationEvent.payload_json) as {
+      request: {
+        participantBotIds: string[];
+        requestedCandidateCount: number;
+        rankingDimensions: string[];
+      };
+      rawOutput: string;
+      parsedOutput: {
+        rankedTopics: string[];
+        usedFallback: boolean;
+      };
+    };
+    assert.equal(generationEvent.event_kind, "tool");
+    assert.equal(generationEvent.provider, "local");
+    assert.equal(generationEvent.model, "deterministic-test-model");
+    assert.deepEqual(generationPayload.request.participantBotIds, botIds);
+    assert.equal(generationPayload.request.requestedCandidateCount, 8);
+    assert.deepEqual(generationPayload.request.rankingDimensions, [
+      "relevance",
+      "depth",
+      "novelty",
+      "balance",
+      "fit",
+    ]);
+    assert.equal(
+      generationPayload.rawOutput,
+      deterministicReply,
+      JSON.stringify(generationPayload)
+    );
+    assert.deepEqual(generationPayload.parsedOutput.rankedTopics, candidates);
+    assert.equal(generationPayload.parsedOutput.usedFallback, true);
+    fetchRecorder.calls.length = 0;
+  });
+
+  it("stores Brave Search credentials encrypted and returns only connection state", async () => {
+    const client = createClient();
+    const email = "brave-settings@example.com";
+    const plaintext = "brave-test-secret-value";
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({ username: email, password: "brave-settings-password" })
+    );
+    assert.equal(register.status, 201);
+
+    const saved = await client.request("/api/settings", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ braveSearchApiKey: plaintext }),
+    });
+    assert.equal(saved.status, 200);
+    const savedText = await saved.text();
+    assert.equal(savedText.includes(plaintext), false);
+    const savedPayload = JSON.parse(savedText);
+    assert.equal(savedPayload.settings.hasBraveSearchApiKey, true);
+    assert.equal(savedPayload.settings.braveSearchApiKeySource, "saved");
+    assert.equal("braveSearchApiKey" in savedPayload.settings, false);
+
+    const user = db
+      .prepare(
+        `SELECT brave_search_key_ciphertext, brave_search_key_iv, brave_search_key_tag
+           FROM users WHERE email = ?`
+      )
+      .get(email) as {
+      brave_search_key_ciphertext: string | null;
+      brave_search_key_iv: string | null;
+      brave_search_key_tag: string | null;
+    };
+    assert.ok(user.brave_search_key_ciphertext);
+    assert.notEqual(user.brave_search_key_ciphertext, plaintext);
+    assert.ok(user.brave_search_key_iv);
+    assert.ok(user.brave_search_key_tag);
+
+    const loaded = await client.request("/api/settings");
+    const loadedText = await loaded.text();
+    assert.equal(loadedText.includes(plaintext), false);
+    const loadedPayload = JSON.parse(loadedText);
+    assert.equal(loadedPayload.settings.hasBraveSearchApiKey, true);
+    assert.equal(loadedPayload.settings.braveSearchApiKeySource, "saved");
+    assert.equal("braveSearchApiKey" in loadedPayload.settings, false);
+
+    const cleared = await client.request("/api/settings", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ braveSearchApiKey: null }),
+    });
+    assert.equal(cleared.status, 200);
+    const clearedPayload = await json(cleared);
+    assert.equal(clearedPayload.settings.hasBraveSearchApiKey, false);
+    assert.equal(clearedPayload.settings.braveSearchApiKeySource, "none");
+  });
+
   it("uses account-wide voice defaults and ignores retired Coffee player voice fields", async () => {
     const client = createClient();
     const register = await client.request(
@@ -131,6 +462,14 @@ describe("API request integration", () => {
         playerNamePronunciation: "Jair-id",
         defaultSystemVoiceName: "Alex",
         defaultElevenLabsVoiceId: "eleven-global",
+        autoModeEnabled: true,
+        autoFallbackChain: {
+          v: 1,
+          fallbacks: [
+            { provider: "local", model: "qwen3:8b" },
+            { provider: "openai", model: "gpt-5-mini" },
+          ],
+        },
       }),
     });
     assert.equal(saved.status, 200);
@@ -141,13 +480,23 @@ describe("API request integration", () => {
     assert.equal("playerNamePronunciation" in settings, false);
     assert.equal(settings.defaultSystemVoiceName, "Alex");
     assert.equal(settings.defaultElevenLabsVoiceId, "eleven-global");
+    assert.equal(settings.autoModeEnabled, true);
+    assert.deepEqual(settings.autoFallbackChain, {
+      v: 1,
+      fallbacks: [
+        { provider: "local", model: "qwen3:8b" },
+        { provider: "openai", model: "gpt-5-mini" },
+      ],
+    });
+    assert.equal("fallbackModelMessageStripe" in settings, false);
+    assert.equal("lenientLocalFallbackModel" in settings, false);
 
     const preview = await client.request(
       "/api/voices/preview-line",
       jsonInit({ botName: "Plankton", systemPrompt: "A theatrical tiny villain." })
     );
     assert.equal(preview.status, 200);
-    assert.equal((await json(preview)).line, "Deterministic API reply.");
+    assert.equal((await json(preview)).line, deterministicReply);
   });
 
   it("records Coffee departure idempotently and completes one bounded local epilogue", async () => {
@@ -235,6 +584,30 @@ describe("API request integration", () => {
       "SELECT DISTINCT provider FROM messages WHERE conversation_id = ? AND user_id = ? AND role = 'assistant'"
     ).all(sessionId, userId) as Array<{ provider: string | null }>;
     assert.deepEqual(epilogueProviders.map((row) => row.provider), ["local"]);
+
+    const synopsis = await client.request(
+      `/api/coffee/sessions/${encodeURIComponent(sessionId)}/synopsis`,
+      jsonInit({ preferredProvider: "local" })
+    );
+    assert.equal(synopsis.status, 200);
+    const synopsisPayload = await json(synopsis);
+    const synopsisMessages = synopsisPayload.conversation.messages.filter(
+      (message: { role?: unknown; content?: unknown }) =>
+        message.role === "system" &&
+        typeof message.content === "string" &&
+        message.content.startsWith("Session synopsis:")
+    );
+    assert.equal(synopsisMessages.length, 1);
+    const finalAssistant = [...synopsisPayload.conversation.messages]
+      .reverse()
+      .find((message: { role?: unknown }) => message.role === "assistant");
+    assert.equal(
+      finalAssistant?.coffeeReplayEvents?.some(
+        (event: { kind?: unknown }) => event.kind === "botDeparture"
+      ),
+      true,
+      JSON.stringify(finalAssistant)
+    );
   });
 
   it("routes CORS preflight, root landing, and unknown paths without external services", async () => {
@@ -402,7 +775,7 @@ describe("API request integration", () => {
     assert.equal(response.status, 200);
     const payload = await json(response);
     assert.equal(payload.ok, true);
-    assert.equal(payload.conversation.messages.at(-1)?.content, "Deterministic API reply.");
+    assert.equal(payload.conversation.messages.at(-1)?.content, deterministicReply);
     assert.ok(deterministicProvider.calls.length > 0);
 
     const chatFetches = fetchRecorder.calls.slice(beforeCalls);
@@ -411,6 +784,60 @@ describe("API request integration", () => {
         ({ input }) =>
           !/api\.openai\.com|api\.anthropic\.com|api\.elevenlabs\.io|qdrant/i.test(input)
       )
+    );
+  });
+
+  it("forces an offline-only Zen bot out of Auto before any online provider is selected", async () => {
+    const client = createClient();
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({ username: "zen-private@example.com", password: "zen-private-password" })
+    );
+    assert.equal(register.status, 201);
+    const settings = await client.request("/api/settings", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        autoModeEnabled: true,
+        autoFallbackChain: {
+          v: 1,
+          fallbacks: [
+            { provider: "openai", model: "gpt-5-mini" },
+            { provider: "anthropic", model: "claude-haiku-4-5" },
+          ],
+        },
+      }),
+    });
+    assert.equal(settings.status, 200);
+    const created = await client.request(
+      "/api/bots",
+      jsonInit({ name: "Private Zen", onlineEnabled: false })
+    );
+    assert.equal(created.status, 201);
+    const botId = String((await json(created)).bot.id);
+    const callStart = providerFactoryCalls.length;
+
+    const response = await client.request(
+      "/api/chat",
+      jsonInit({
+        message: "Keep this on my machine.",
+        mode: "zen",
+        facetBotId: botId,
+        preferredProvider: "openai",
+        responseMode: "auto",
+        incognito: true,
+        ephemeralMessages: [],
+      })
+    );
+    assert.equal(response.status, 200);
+    const payload = await json(response);
+    assert.equal(payload.conversation.messages.at(-1)?.provider, "local");
+    assert.equal(payload.autoRecovery, undefined);
+    assert.equal(
+      providerFactoryCalls
+        .slice(callStart)
+        .some((provider) => provider === "openai" || provider === "anthropic"),
+      false
     );
   });
 
@@ -489,6 +916,52 @@ describe("API request integration", () => {
     assert.equal(alignedPayload.alignment, null);
     assert.equal(Buffer.from(alignedPayload.audioBase64, "base64").subarray(0, 4).toString(), "RIFF");
     assert.deepEqual(fetchRecorder.calls.slice(beforeCalls), []);
+  });
+
+  it("synthesizes a private reply by message id without persisting it", async () => {
+    const client = createClient();
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({ username: "voice-private@example.com", password: "voice-password" })
+    );
+    assert.equal(register.status, 201);
+    const userId = String((await json(register)).user.id);
+    const messageId = "voice-private-message";
+    const spokenText = "This private reply exists only in the live envelope.";
+
+    const untrustedMissingMessage = await client.request(
+      "/api/voices/synthesize",
+      jsonInit({
+        messageId,
+        spokenText,
+        mode: "english",
+        engine: "builtin",
+      })
+    );
+    assert.equal(untrustedMissingMessage.status, 404);
+
+    const response = await client.request(
+      "/api/voices/synthesize",
+      jsonInit({
+        messageId,
+        spokenText,
+        ephemeralMessage: true,
+        mode: "english",
+        engine: "builtin",
+        includeAlignment: true,
+      })
+    );
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("x-prism-voice-engine"), "builtin");
+    assert.equal(
+      response.headers.get("x-prism-voice-characters"),
+      String(spokenText.length)
+    );
+    assert.equal(
+      db.prepare("SELECT 1 AS found FROM messages WHERE id = ? AND user_id = ?")
+        .get(messageId, userId),
+      undefined
+    );
   });
 
   it("synthesizes Babble through the system voice and keeps Bottish client-procedural", async () => {

@@ -71,7 +71,7 @@ See [`docs/applets.md`](docs/applets.md) for applet-level versions and
 
 ```bash
 cp .env.example .env
-# edit .env with your secrets (ENCRYPTION_MASTER_KEY, OPENAI_API_KEY, etc.)
+# set ENCRYPTION_MASTER_KEY and any optional online provider keys
 docker compose up -d
 ```
 
@@ -84,6 +84,14 @@ Default local login in dev setups:
 
 - Username: `admin`
 - Password: `password`
+
+### Optional online services
+
+Provider credentials can be set server-wide in `.env` or saved encrypted per
+account under **Settings -> Connections**. `BRAVE_SEARCH_API_KEY` enables the
+WebSearch tool in ONLINE mode. When it is omitted, WebSearch stays unavailable
+with a clear status instead of failing a chat turn. LOCAL mode never contacts
+Brave Search, even when a key is configured.
 
 ---
 

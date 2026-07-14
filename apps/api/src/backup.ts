@@ -50,6 +50,9 @@ import {
   type CoffeePowerPlanV1,
   type EnglishVoiceEngine,
   type VoiceMode,
+  type AutoFallbackChainV1,
+  parseStoredAutoFallbackChain,
+  serializeAutoFallbackChain,
 } from "@localai/shared";
 import {
   normalizeZenAskQuestionPatienceEnabled,
@@ -76,12 +79,16 @@ export interface BackupUserSettings {
   experimentalAllModelEffortEnabled?: boolean;
   coffeeExperimentalTableAngleEnabled?: boolean;
   psychicModeEnabled?: boolean;
-  fallbackModelMessageStripe: boolean;
+  autoModeEnabled?: boolean;
+  autoFallbackChain?: AutoFallbackChainV1 | null;
+  /** Legacy import only. New backups no longer export this display preference. */
+  fallbackModelMessageStripe?: boolean;
   hiddenBotModelIds: string[];
   hiddenComfyUiWorkflowIds: string[];
   preferredLocalModel: string;
   preferredOnlineModel: string;
-  lenientLocalFallbackModel: string;
+  /** Legacy import only. Preserved as the first Auto setup suggestion. */
+  lenientLocalFallbackModel?: string;
   lenientLocalImageFallbackModel: string;
   secondaryOllamaHost: string;
   comfyUiHost: string;
@@ -249,6 +256,8 @@ export function exportUserSnapshot(
          experimental_all_model_effort_enabled,
          coffee_experimental_table_angle_enabled,
          psychic_mode_enabled,
+         auto_switch_model,
+         auto_fallback_chain,
          fallback_model_message_stripe,
          hidden_bot_model_ids,
          hidden_comfyui_workflow_ids,
@@ -304,6 +313,8 @@ export function exportUserSnapshot(
         experimental_all_model_effort_enabled: number;
         coffee_experimental_table_angle_enabled: number;
         psychic_mode_enabled: number;
+        auto_switch_model: number;
+        auto_fallback_chain: string | null;
         fallback_model_message_stripe: number;
         hidden_bot_model_ids: string | null;
         hidden_comfyui_workflow_ids: string | null;
@@ -366,12 +377,12 @@ export function exportUserSnapshot(
         coffeeExperimentalTableAngleEnabled:
           user.coffee_experimental_table_angle_enabled === 1,
         psychicModeEnabled: user.psychic_mode_enabled === 1,
-        fallbackModelMessageStripe: user.fallback_model_message_stripe !== 0,
+        autoModeEnabled: user.auto_switch_model === 1,
+        autoFallbackChain: parseStoredAutoFallbackChain(user.auto_fallback_chain),
         hiddenBotModelIds: safeParseStringArray(user.hidden_bot_model_ids),
         hiddenComfyUiWorkflowIds: safeParseStringArray(user.hidden_comfyui_workflow_ids),
         preferredLocalModel: user.preferred_local_model ?? "",
         preferredOnlineModel: user.preferred_online_model ?? "",
-        lenientLocalFallbackModel: user.lenient_local_fallback_model ?? "",
         lenientLocalImageFallbackModel: user.lenient_local_image_fallback_model ?? "",
         secondaryOllamaHost: user.secondary_ollama_host ?? "",
         comfyUiHost: user.comfyui_host ?? "",
@@ -908,6 +919,9 @@ function importUserSnapshotWithinTransaction(
       undefined,
       zenMessageFontMinPx
     );
+    const storedAutoFallbackChain = settings.autoFallbackChain
+      ? serializeAutoFallbackChain(settings.autoFallbackChain)
+      : null;
     db.prepare(`
       UPDATE users
       SET
@@ -920,6 +934,8 @@ function importUserSnapshotWithinTransaction(
         experimental_all_model_effort_enabled = ?,
         coffee_experimental_table_angle_enabled = ?,
         psychic_mode_enabled = ?,
+        auto_switch_model = ?,
+        auto_fallback_chain = ?,
         fallback_model_message_stripe = ?,
         hidden_bot_model_ids = ?,
         hidden_comfyui_workflow_ids = ?,
@@ -980,7 +996,9 @@ function importUserSnapshotWithinTransaction(
       settings.experimentalAllModelEffortEnabled === true ? 1 : 0,
       settings.coffeeExperimentalTableAngleEnabled === true ? 1 : 0,
       settings.psychicModeEnabled === true ? 1 : 0,
-      settings.fallbackModelMessageStripe ? 1 : 0,
+      settings.autoModeEnabled === true && storedAutoFallbackChain ? 1 : 0,
+      storedAutoFallbackChain,
+      settings.fallbackModelMessageStripe === false ? 0 : 1,
       JSON.stringify(
         Array.isArray(settings.hiddenBotModelIds)
           ? settings.hiddenBotModelIds.filter(

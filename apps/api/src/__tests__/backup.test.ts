@@ -15,6 +15,68 @@ import {
   MAX_ZEN_WALLPAPER_STYLE_NOTES_LENGTH,
 } from "../settings.ts";
 
+describe("backup Auto model settings", () => {
+  it("exports and restores Auto mode without exporting retired text fallback settings", () => {
+    withBackupDatabase((db, userKey) => {
+      const chain = {
+        v: 1 as const,
+        fallbacks: [
+          { provider: "local" as const, model: "qwen3:8b" },
+          { provider: "openai" as const, model: "gpt-5-mini" },
+        ] as const,
+      };
+      db.prepare(
+        "UPDATE users SET auto_switch_model = 1, auto_fallback_chain = ?, lenient_local_fallback_model = 'legacy:latest', fallback_model_message_stripe = 0 WHERE id = ?"
+      ).run(JSON.stringify(chain), "user-1");
+
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.equal(snapshot.settings?.autoModeEnabled, true);
+      assert.deepEqual(snapshot.settings?.autoFallbackChain, chain);
+      assert.equal("lenientLocalFallbackModel" in (snapshot.settings ?? {}), false);
+      assert.equal("fallbackModelMessageStripe" in (snapshot.settings ?? {}), false);
+
+      db.prepare(
+        "UPDATE users SET auto_switch_model = 0, auto_fallback_chain = NULL WHERE id = ?"
+      ).run("user-1");
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      const restored = db.prepare(
+        "SELECT auto_switch_model, auto_fallback_chain FROM users WHERE id = ?"
+      ).get("user-1") as { auto_switch_model: number; auto_fallback_chain: string | null };
+      assert.equal(restored.auto_switch_model, 1);
+      assert.deepEqual(JSON.parse(restored.auto_fallback_chain ?? "null"), chain);
+    });
+  });
+
+  it("keeps a legacy text fallback only as an Auto setup suggestion", () => {
+    withBackupDatabase((db, userKey) => {
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      const legacySettings = {
+        ...snapshot.settings!,
+        lenientLocalFallbackModel: "legacy:latest",
+      };
+      delete legacySettings.autoModeEnabled;
+      delete legacySettings.autoFallbackChain;
+
+      importUserSnapshot(
+        db,
+        "user-1",
+        { ...snapshot, settings: legacySettings },
+        userKey
+      );
+      const restored = db.prepare(
+        "SELECT auto_switch_model, auto_fallback_chain, lenient_local_fallback_model FROM users WHERE id = ?"
+      ).get("user-1") as {
+        auto_switch_model: number;
+        auto_fallback_chain: string | null;
+        lenient_local_fallback_model: string | null;
+      };
+      assert.equal(restored.auto_switch_model, 0);
+      assert.equal(restored.auto_fallback_chain, null);
+      assert.equal(restored.lenient_local_fallback_model, "legacy:latest");
+    });
+  });
+});
+
 describe("backup Zen Atmosphere style notes", () => {
   it("exports and restores normalized style notes", () => {
     withBackupDatabase((db, userKey) => {

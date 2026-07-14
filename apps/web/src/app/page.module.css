@@ -3457,6 +3457,36 @@
   line-height: 1.25;
 }
 
+.settingsFallbackDescription {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.settingsAutoPrimary {
+  display: grid;
+  gap: 2px;
+  padding: 9px 11px;
+  border: 1px solid color-mix(in srgb, var(--line-strong) 52%, var(--line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-surface) 94%, var(--bg) 6%);
+}
+
+.settingsAutoPrimary > span,
+.settingsAutoPrimary > small {
+  color: var(--fg-muted);
+  font-size: 11px;
+}
+
+.settingsAutoPrimary > strong {
+  overflow: hidden;
+  color: var(--fg);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 @media (max-width: 760px) {
   .settingsModelPairHeader {
     display: none;
@@ -10031,6 +10061,9 @@
 
 /* ── Chat pane ── */
 .chatPane {
+  --app-shell-top-nav-height: calc(
+    60px + env(safe-area-inset-top, 0px)
+  );
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   height: 100%;
@@ -10050,6 +10083,12 @@
   min-width: 0;
   position: relative;
   z-index: 180;
+}
+
+.chatHeader[data-app-shell-header="true"] {
+  padding-block-start: calc(14px + env(safe-area-inset-top, 0px));
+  padding-inline-start: calc(20px + env(safe-area-inset-left, 0px));
+  padding-inline-end: calc(20px + env(safe-area-inset-right, 0px));
 }
 
 .chatHeaderComposeToolsRow {
@@ -16628,14 +16667,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   background: color-mix(in srgb, var(--accent) 30%, var(--fg) 70%);
 }
 
-.messageAssistant[data-fallback-model-used="true"]::before {
-  background: repeating-linear-gradient(
-    45deg,
-    color-mix(in srgb, #f6b73c 82%, #ffffff 18%) 0 3px,
-    color-mix(in srgb, #283040 88%, #000000 12%) 3px 6px
-  );
-}
-
 .messageAssistant::after {
   content: "";
   position: absolute;
@@ -16664,15 +16695,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   background: linear-gradient(
     90deg,
     color-mix(in srgb, var(--accent) 8%, transparent),
-    transparent
-  );
-}
-
-.messageAssistant[data-fallback-model-used="true"]::after {
-  background: linear-gradient(
-    90deg,
-    color-mix(in srgb, #f6b73c 13%, transparent),
-    color-mix(in srgb, #283040 9%, transparent) 46%,
     transparent
   );
 }
@@ -21848,6 +21870,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   justify-content: center;
   padding: clamp(42px, 8vh, 88px) clamp(18px, 5vw, 72px)
     clamp(54px, 10vh, 104px);
+  padding-block-start: calc(
+    var(--app-shell-top-nav-height) + clamp(16px, 3dvh, 36px)
+  );
 }
 
 .appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
@@ -21978,6 +22003,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex-wrap: wrap;
+  max-width: 100%;
   gap: clamp(7px, 0.9vw, 12px);
   font-size: clamp(1.18rem, 2vw, 2.05rem);
   font-weight: 360;
@@ -21985,14 +22012,17 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   line-height: 1.05;
   text-transform: uppercase;
   color: color-mix(in srgb, var(--fg) 76%, var(--accent-ink) 24%);
-  white-space: nowrap;
+  text-wrap: balance;
+  white-space: normal;
 }
 
 .appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
   .messagesEmptyState
   .emptyStateTitleLead {
   display: inline;
-  white-space: nowrap;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
@@ -25196,6 +25226,19 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     var(--coffee-bot-color) 88%,
     #ffffff 12%
   );
+  --zen-action-text-rest-ink: color-mix(
+    in srgb,
+    var(--coffee-bot-color) 68%,
+    #ffffff 32%
+  );
+  --zen-action-text-active-ink: var(--zen-action-text-rest-ink);
+  --zen-action-text-muted-ink: var(--zen-action-text-rest-ink);
+  --zen-action-text-state-ink: var(--zen-action-text-rest-ink);
+  --zen-action-text-intro-opacity: 0.95;
+  --zen-action-text-rest-opacity: 0.9;
+  --zen-action-text-verbose-opacity: 0.92;
+  --zen-action-text-loading-opacity: 0.86;
+  --zen-action-text-reduced-motion-opacity: 0.86;
   --zen-live-bot-action-copy-start-transform: translateX(-50%) translateY(-8px)
     scale(0.982);
   --zen-live-bot-action-copy-mid-transform: translateX(-50%) translateY(4px)
@@ -25243,6 +25286,35 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     var(--coffee-bot-color) 72%,
     #2f241b 28%
   );
+  /* `--bot-ink` is normalized against the resolved Light Mode surface at the
+     project's 4.5:1 text contrast target. Keep the quote secondary through
+     its italic weight, scale, and motion instead of reducing text opacity. */
+  --zen-action-text-rest-ink: var(
+    --bot-ink,
+    var(--zen-presence-pill-ink)
+  );
+  --zen-action-text-intro-opacity: 1;
+  --zen-action-text-rest-opacity: 1;
+  --zen-action-text-verbose-opacity: 1;
+  --zen-action-text-loading-opacity: 1;
+  --zen-action-text-reduced-motion-opacity: 1;
+}
+
+.zenLiveBotPresenceCopy:is(
+    :hover,
+    :focus-visible,
+    [data-loading="true"],
+    [data-talking="true"],
+    [data-thinking="true"]
+  ) {
+  --zen-action-text-state-ink: var(--zen-action-text-active-ink);
+}
+
+.zenLiveBotPresenceCopy:is(
+    [aria-disabled="true"],
+    [data-muted="true"]
+  ) {
+  --zen-action-text-state-ink: var(--zen-action-text-muted-ink);
 }
 
 .zenLiveBotPresencePlate[data-copy-placement="top"] .zenLiveBotPresenceCopy,
@@ -25495,7 +25567,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   line-clamp: 2;
-  color: color-mix(in srgb, var(--coffee-bot-color) 68%, #ffffff 32%);
+  color: var(--zen-action-text-state-ink);
   font-style: italic;
   font-size: clamp(1rem, 1.05vw, 1.2rem);
   font-weight: 520;
@@ -25505,7 +25577,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   text-shadow:
     0 1px 8px rgba(0, 0, 0, 0.62),
     0 0 16px color-mix(in srgb, var(--coffee-bot-color) 24%, transparent);
-  opacity: 0.9;
+  opacity: var(--zen-action-text-rest-opacity);
 }
 
 .zenLiveBotPresencePlate[data-action-verbose="true"] .zenLiveBotPresenceText,
@@ -25514,13 +25586,13 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   -webkit-line-clamp: 3;
   line-clamp: 3;
   line-height: 1.2;
-  opacity: 0.92;
+  opacity: var(--zen-action-text-verbose-opacity);
 }
 
 .zenLiveBotPresencePlate[data-loading="true"]
   .zenLiveBotPresenceCopy[data-copy-anchored="true"],
 .zenLiveBotPresenceCopy[data-loading="true"][data-copy-anchored="true"] {
-  opacity: 0.86;
+  opacity: var(--zen-action-text-loading-opacity);
   animation: none;
 }
 
@@ -25532,12 +25604,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   }
 
   9% {
-    opacity: 0.95;
+    opacity: var(--zen-action-text-intro-opacity);
     filter: blur(0) saturate(1);
   }
 
   34% {
-    opacity: 0.9;
+    opacity: var(--zen-action-text-rest-opacity);
     transform: var(--zen-live-bot-action-copy-mid-transform);
   }
 
@@ -25619,7 +25691,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   }
 
   .zenLiveBotPresenceCopy[data-copy-anchored="true"] {
-    opacity: 0.86;
+    opacity: var(--zen-action-text-reduced-motion-opacity);
     animation: none;
   }
 }
@@ -29928,6 +30000,89 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     border-color 0.3s ease,
     box-shadow 0.3s ease,
     background 0.3s ease;
+}
+
+.autoModeControl {
+  gap: 2px;
+  padding: 2px;
+}
+
+.autoModeStatusCluster {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.autoRecoveryStatus {
+  max-width: 260px;
+  color: var(--fg-muted);
+  font-size: 11px;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.autoModeControl[data-auto-recovered="true"] {
+  animation: auto-mode-recovered 900ms ease-out;
+}
+
+@keyframes auto-mode-recovered {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 60%, transparent);
+  }
+  45% {
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 18%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+.autoModeOption {
+  appearance: none;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 9px;
+  font-weight: 820;
+  letter-spacing: 0.045em;
+  line-height: 1;
+  min-height: 28px;
+  padding: 0 9px;
+  transition: background 160ms ease, color 160ms ease, opacity 160ms ease;
+}
+
+.autoModeOption:hover:not(:disabled) {
+  color: var(--fg);
+  background: var(--bg-hover);
+}
+
+.autoModeOptionActive {
+  color: var(--accent-ink);
+  background: color-mix(in srgb, var(--accent) 22%, var(--bg-surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 42%, var(--line));
+}
+
+.autoModeOption:disabled {
+  cursor: not-allowed;
+  opacity: 0.38;
+}
+
+.autoRetryButton {
+  margin-left: 8px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 760;
+  padding: 3px 10px;
 }
 
 .modeControl:focus-within {
@@ -41116,7 +41271,11 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   border: 1px solid
     color-mix(in srgb, var(--editor-bot-color, var(--accent)) 18%, var(--line));
   border-radius: 8px;
-  background-color: rgba(0, 0, 0, 0.2);
+  background-color: color-mix(
+    in srgb,
+    var(--bg-deep) 78%,
+    var(--bg-surface) 22%
+  );
 }
 
 .colorGlyphInline .glyphGridInner {
@@ -41430,6 +41589,60 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
    (rendered on document.body, outside the app shell). Layout-neutral. */
 .botAvatarStudioThemeScope {
   display: contents;
+  color: var(--fg);
+  /* The studio is portaled outside the app shell. Bridge the shared theme
+     vocabulary used by older embedded editors while keeping one component
+     tree for both themes. Inline bot colors still override these defaults. */
+  --editor-bot-color: var(--accent);
+  --editor-bot-contrast: var(--accent-text);
+  --editor-bot-ink: var(--accent-ink);
+  --editor-bot-soft: var(--accent-soft);
+  --editor-bot-glow: var(--accent-glow);
+  --panel: var(--bg-surface);
+  --panel-strong: var(--bg-elevated);
+  --border: var(--line);
+  --muted: var(--fg-muted);
+  --avatar-editor-warning: #ffb27d;
+}
+
+.themeDark.botAvatarStudioThemeScope {
+  color-scheme: dark;
+}
+
+.themeLight.botAvatarStudioThemeScope {
+  color-scheme: light;
+  --avatar-studio-surface: var(--bg-surface);
+  --avatar-studio-panel: color-mix(
+    in srgb,
+    var(--bg-elevated) 82%,
+    var(--bg) 18%
+  );
+  --avatar-studio-control: color-mix(
+    in srgb,
+    var(--bg-elevated) 88%,
+    var(--bg) 12%
+  );
+  --avatar-studio-recessed: color-mix(
+    in srgb,
+    var(--bg-deep) 72%,
+    var(--bg-surface) 28%
+  );
+  --avatar-studio-selected: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 13%,
+    var(--bg-elevated)
+  );
+  --avatar-studio-hover: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 8%,
+    var(--bg-hover)
+  );
+  --avatar-studio-border: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 18%,
+    var(--line-strong)
+  );
+  --avatar-editor-warning: #92400e;
 }
 
 .botAvatarCustomizerBackdrop {
@@ -44795,6 +45008,457 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   justify-content: space-between;
   color: var(--fg-muted);
   font-size: 10px;
+}
+
+/* Avatar Studio Light Mode
+   The portal already carries .themeLight; these palette-only overrides keep
+   the same component tree and interaction layout while replacing the legacy
+   fixed-dark chrome with shared app surfaces and contrast tokens. The
+   mannequin stage intentionally retains its own independent preview theme. */
+.themeLight.botAvatarStudioThemeScope .botAvatarCustomizerBackdrop {
+  background: linear-gradient(
+    120deg,
+    color-mix(in srgb, var(--fg) 30%, transparent),
+    color-mix(in srgb, var(--fg) 18%, transparent)
+  );
+  backdrop-filter: blur(12px) saturate(104%);
+  -webkit-backdrop-filter: blur(12px) saturate(104%);
+}
+
+.themeLight.botAvatarStudioThemeScope .botAvatarCustomizer {
+  background: var(--avatar-studio-surface);
+  border-color: var(--avatar-studio-border);
+  box-shadow:
+    var(--shadow-lg),
+    0 0 0 1px
+      color-mix(
+        in srgb,
+        var(--editor-bot-color, var(--accent)) 12%,
+        transparent
+      );
+}
+
+.themeLight.botAvatarStudioThemeScope .botAvatarCustomizer::before {
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(
+        in srgb,
+        var(--editor-bot-color, var(--accent)) 9%,
+        transparent
+      ),
+      transparent 34%
+    ),
+    linear-gradient(
+      180deg,
+      var(--bg-elevated),
+      var(--bg-surface) 44%,
+      var(--bg)
+    );
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 88%, transparent),
+    inset 0 0 0 1px
+      color-mix(
+        in srgb,
+        var(--editor-bot-color, var(--accent)) 8%,
+        transparent
+      );
+}
+
+.themeLight.botAvatarStudioThemeScope
+  .botAvatarCustomizer
+  > .botProfileBuilderHeader {
+  border-bottom-color: var(--avatar-studio-border);
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(
+        in srgb,
+        var(--editor-bot-color, var(--accent)) 8%,
+        transparent
+      ),
+      transparent 48%
+    ),
+    color-mix(in srgb, var(--bg-elevated) 96%, transparent);
+}
+
+.themeLight.botAvatarStudioThemeScope .botAvatarCustomizerBody {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--bg-deep) 24%, transparent),
+    color-mix(in srgb, var(--bg-elevated) 46%, transparent)
+  );
+}
+
+.themeLight.botAvatarStudioThemeScope
+  :is(.botAvatarMannequinPanel, .botAvatarControlPanel) {
+  border-color: var(--avatar-studio-border);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(
+        in srgb,
+        var(--editor-bot-color, var(--accent)) 5%,
+        transparent
+      ),
+      transparent 180px
+    ),
+    var(--avatar-studio-panel);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 82%, transparent),
+    var(--shadow-sm);
+}
+
+.themeLight.botAvatarStudioThemeScope
+  :is(
+    .botAvatarControlGroup,
+    .botAvatarProfilePanel,
+    .botPowerCard,
+    .botAvatarEyeCharacterControl,
+    .botAvatarWeightControl,
+    .botAvatarEyeScalePresetControl,
+    .botAvatarOverrideControl,
+    .botAvatarMouthCustomRow .botAvatarGlyphInputField,
+    .botAvatarGlyphRotationField,
+    .botAvatarGlyphAnimationControl,
+    .botAvatarCustomChoiceGroup,
+    .botAvatarThinkingControl,
+    .botAvatarCoordinateControl,
+    .botAvatarMouthRotationControl,
+    .botAvatarRangeControl
+  ) {
+  border-color: var(--avatar-studio-border);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, #ffffff 54%, transparent),
+    var(--avatar-studio-control)
+  );
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 84%, transparent);
+}
+
+.themeLight.botAvatarStudioThemeScope
+  :is(
+    .botAvatarPreviewThemeToggle,
+    .botAvatarControlTabs,
+    .botAvatarGlyphModeControl
+  ) {
+  border-color: var(--avatar-studio-border);
+  background: var(--avatar-studio-recessed);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 64%, transparent);
+}
+
+.themeLight.botAvatarStudioThemeScope
+  :is(
+    .botAvatarSaveStatus,
+    .botProfileBuilderHeader .botAvatarCustomizerUndoButton,
+    .botAvatarCustomizerCloseButton,
+    .botAvatarSectionResetButton,
+    .botAvatarInlineResetButton,
+    .botAvatarPreviewModeToggle button,
+    .botAvatarMoodPreviewButton,
+    .botAvatarPresetButton,
+    .botAvatarFontOption,
+    .botAvatarEyeScalePresetButton,
+    .botAvatarGlyphAnimationControl button,
+    .botAvatarCustomSelectButton,
+    .botAvatarCustomGlyphCaptureButton,
+    .botAvatarCustomGlyphClearButton,
+    .botAvatarThinkingPresetButton,
+    .botAvatarThinkingIconButton,
+    .botAvatarCoordinateControl header button,
+    .botAvatarMouthRotationControl header button,
+    .botPowerRemoveButton,
+    .botPowerCompileStatus button,
+    .botPowerAddButton
+  ) {
+  border-color: var(--avatar-studio-border);
+  background: var(--avatar-studio-control);
+  color: var(--fg-muted);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 72%, transparent);
+}
+
+.themeLight.botAvatarStudioThemeScope
+  .botAvatarCustomizer
+  :is(
+    input:not([type="range"]):not([type="checkbox"]):not([type="color"]),
+    textarea,
+    select
+  ) {
+  border-color: var(--avatar-studio-border);
+  background: var(--bg-elevated);
+  color: var(--fg);
+  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--fg) 7%, transparent);
+}
+
+.themeLight.botAvatarStudioThemeScope
+  .botAvatarCustomizer
+  :is(input, textarea)::placeholder {
+  color: var(--fg-subtle);
+  opacity: 1;
+}
+
+.themeLight.botAvatarStudioThemeScope
+  .botAvatarCustomizer
+  :is(input, textarea, select):focus-visible {
+  outline: 2px solid
+    color-mix(
+      in srgb,
+      var(--editor-bot-color, var(--accent)) 48%,
+      transparent
+    );
+  outline-offset: 1px;
+  border-color: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 62%,
+    var(--line-strong)
+  );
+}
+
+.themeLight.botAvatarStudioThemeScope
+  .botAvatarCustomizer
+  :is(
+    .botAvatarPreviewThemeToggle button,
+    .botAvatarControlTabs button,
+    .botAvatarGlyphModeControl button
+  ) {
+  background: transparent;
+  color: var(--fg-muted);
+  box-shadow: none;
+}
+
+.themeLight.botAvatarStudioThemeScope
+  .botAvatarCustomizer
+  :is(
+    .botAvatarPreviewThemeToggle button[data-active="true"],
+    .botAvatarControlTabs button[data-active="true"],
+    .botAvatarPreviewModeToggle button[data-active="true"],
+    .botAvatarPresetButton[data-selected="true"],
+    .botAvatarFontOption[data-selected="true"],
+    .botAvatarEyeScalePresetButton[data-selected="true"],
+    .botAvatarGlyphModeControl button[data-active="true"],
+    .botAvatarGlyphAnimationControl button[data-selected="true"],
+    .botAvatarThinkingPresetButton[data-selected="true"]
+  ) {
+  border-color: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 54%,
+    var(--line-strong)
+  );
+  background: var(--avatar-studio-selected);
+  color: var(--fg);
+  box-shadow: inset 0 0 0 1px
+    color-mix(
+      in srgb,
+      var(--editor-bot-color, var(--accent)) 16%,
+      transparent
+    );
+}
+
+.themeLight.botAvatarStudioThemeScope
+  .botAvatarCustomizer
+  :is(
+    .botProfileBuilderHeader .botAvatarCustomizerUndoButton,
+    .botAvatarCustomizerCloseButton,
+    .botAvatarPreviewThemeToggle button,
+    .botAvatarControlTabs button,
+    .botAvatarSectionResetButton,
+    .botAvatarInlineResetButton,
+    .botAvatarPreviewModeToggle button,
+    .botAvatarMoodPreviewButton,
+    .botAvatarPresetButton,
+    .botAvatarFontOption,
+    .botAvatarEyeScalePresetButton,
+    .botAvatarGlyphModeControl button,
+    .botAvatarGlyphAnimationControl button,
+    .botAvatarCustomSelectButton,
+    .botAvatarCustomGlyphCaptureButton,
+    .botAvatarCustomGlyphClearButton,
+    .botAvatarThinkingPresetButton,
+    .botAvatarThinkingIconButton,
+    .botAvatarCoordinateControl header button,
+    .botAvatarMouthRotationControl header button,
+    .botPowerRemoveButton,
+    .botPowerCompileStatus button,
+    .botPowerAddButton
+  ):hover:not(:disabled),
+.themeLight.botAvatarStudioThemeScope
+  .botAvatarCustomizer
+  :is(
+    .botProfileBuilderHeader .botAvatarCustomizerUndoButton,
+    .botAvatarCustomizerCloseButton,
+    .botAvatarPreviewThemeToggle button,
+    .botAvatarControlTabs button,
+    .botAvatarSectionResetButton,
+    .botAvatarInlineResetButton,
+    .botAvatarPreviewModeToggle button,
+    .botAvatarMoodPreviewButton,
+    .botAvatarPresetButton,
+    .botAvatarFontOption,
+    .botAvatarEyeScalePresetButton,
+    .botAvatarGlyphModeControl button,
+    .botAvatarGlyphAnimationControl button,
+    .botAvatarCustomSelectButton,
+    .botAvatarCustomGlyphCaptureButton,
+    .botAvatarCustomGlyphClearButton,
+    .botAvatarThinkingPresetButton,
+    .botAvatarThinkingIconButton,
+    .botAvatarCoordinateControl header button,
+    .botAvatarMouthRotationControl header button,
+    .botPowerRemoveButton,
+    .botPowerCompileStatus button,
+    .botPowerAddButton
+  ):focus-visible {
+  outline: none;
+  border-color: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 46%,
+    var(--line-strong)
+  );
+  background: var(--avatar-studio-hover);
+  color: var(--fg);
+}
+
+.themeLight.botAvatarStudioThemeScope
+  .botAvatarCustomizer
+  :is(button, input, textarea, select):disabled {
+  opacity: 0.48;
+  color: var(--fg-subtle);
+  cursor: not-allowed;
+}
+
+.themeLight.botAvatarStudioThemeScope .botAvatarSaveStatus[data-state="dirty"] {
+  color: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 76%,
+    var(--fg)
+  );
+}
+
+.themeLight.botAvatarStudioThemeScope
+  .botAvatarSaveStatus[data-state="dirty"]::before {
+  background: var(--editor-bot-color, var(--accent));
+}
+
+.themeLight.botAvatarStudioThemeScope
+  .botAvatarSaveStatus[data-state="saving"] {
+  color: var(--fg);
+}
+
+.themeLight.botAvatarStudioThemeScope .botPowerSurfaceBadge {
+  border-color: var(--avatar-studio-border);
+  background: var(--avatar-studio-selected);
+  color: var(--fg);
+}
+
+.themeLight.botAvatarStudioThemeScope .botPowerSurfacePopover {
+  border-color: var(--avatar-studio-border);
+  background: var(--bg-elevated);
+  color: var(--fg);
+  box-shadow: var(--shadow-lg);
+}
+
+.themeLight.botAvatarStudioThemeScope .botPowerSurfacePopover em {
+  color: var(--avatar-editor-warning);
+}
+
+.themeLight.botAvatarStudioThemeScope .botAvatarControlGroupIcon {
+  border-color: var(--avatar-studio-border);
+  background: var(--avatar-studio-selected);
+  color: color-mix(
+    in srgb,
+    var(--bot-avatar-section-accent, var(--editor-bot-color, var(--accent))) 76%,
+    var(--fg)
+  );
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 72%, transparent);
+}
+
+.themeLight.botAvatarStudioThemeScope .botAvatarCoordinatePad {
+  border-color: var(--avatar-studio-border);
+  background:
+    linear-gradient(
+      90deg,
+      transparent calc(50% - 0.75px),
+      var(--line-strong) 50%,
+      transparent calc(50% + 0.75px)
+    ),
+    linear-gradient(
+      0deg,
+      transparent calc(50% - 0.75px),
+      var(--line-strong) 50%,
+      transparent calc(50% + 0.75px)
+    ),
+    radial-gradient(
+      circle at 50% 50%,
+      color-mix(
+        in srgb,
+        var(--editor-bot-color, var(--accent)) 12%,
+        transparent
+      ),
+      transparent 68%
+    ),
+    var(--avatar-studio-recessed);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #ffffff 62%, transparent);
+}
+
+.themeLight.botAvatarStudioThemeScope .botAvatarMouthRotationWheel {
+  border-color: var(--avatar-studio-border);
+  background:
+    repeating-conic-gradient(
+      from 0deg,
+      color-mix(
+          in srgb,
+          var(--editor-bot-color, var(--accent)) 24%,
+          transparent
+        )
+        0deg 2deg,
+      transparent 2deg 5deg
+    ),
+    radial-gradient(circle, var(--bg-elevated) 0 38%, var(--bg-deep) 39% 100%);
+  box-shadow:
+    inset 0 0 0 5px color-mix(in srgb, var(--fg) 7%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 74%, transparent);
+}
+
+.themeLight.botAvatarStudioThemeScope .botAvatarMouthRotationGlyph {
+  background: var(--bg-elevated);
+  color: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 76%,
+    var(--fg)
+  );
+}
+
+.themeLight.botAvatarStudioThemeScope .botAvatarMouthRotationNeedle {
+  background: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 78%,
+    var(--fg)
+  );
+}
+
+.themeLight.botAvatarStudioThemeScope .botAvatarSavePromptBackdrop {
+  background: color-mix(in srgb, var(--fg) 36%, transparent);
+}
+
+.themeLight.botAvatarStudioThemeScope .botAvatarSavePromptPanel {
+  background: linear-gradient(180deg, var(--bg-elevated), var(--bg-surface));
+  border-color: var(--avatar-studio-border);
+  box-shadow: var(--shadow-lg);
+}
+
+.themeLight.botAvatarStudioThemeScope
+  :is(.botAvatarSavePromptCancel, .botAvatarSavePromptDiscard) {
+  background: var(--avatar-studio-control);
+  color: var(--fg);
+}
+
+.themeLight.botAvatarStudioThemeScope
+  :is(
+    .botAvatarSaveError,
+    .botAvatarSavePromptError,
+    .botPowerCompileStatus[data-status="error"]
+  ) {
+  color: var(--danger);
 }
 
 /* Wide-screen affordance: when there's room to the left of the bot
@@ -56931,8 +57595,9 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   --coffee-seat-glyph-slot-width: 28px;
   --coffee-seat-cup-slot-width: 44px;
   --coffee-seat-name-glyph-gap: 3px;
-  --coffee-seat-name-plate-y: clamp(-24px, -3vw, -12px);
-  max-width: min(148px, 58vw);
+  --coffee-seat-name-plate-width: min(136px, 54vw);
+  --coffee-seat-name-plate-y: clamp(-17px, -2.1vw, -8px);
+  max-width: min(136px, 54vw);
   min-width: min(96px, 44vw);
   padding: 4px 8px;
   column-gap: 6px;
@@ -57623,6 +58288,19 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   );
 }
 
+.coffeeStage[data-phase="finished"][data-replay-active="true"]
+  .coffeeSeat[data-replay-departing="true"] {
+  pointer-events: none;
+  animation: coffeeSeatWalkAway 2600ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+  animation-delay: 0ms;
+}
+
+.coffeeStage[data-phase="finished"][data-replay-active="true"]
+  .coffeeSeat[data-replay-departing="true"]
+  .coffeeCup {
+  display: none;
+}
+
 .coffeeStage[data-phase="arriving"]
   .coffeeSeat[data-arrival-state="walking-in"],
 .coffeeStage[data-replay-active="true"]
@@ -57912,7 +58590,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeReplayPlayerAvatar {
-  --zen-live-bot-avatar-size: clamp(126px, 12cqw, 168px);
+  --zen-live-bot-avatar-size: var(
+    --coffee-seat-responsive-avatar-size,
+    clamp(148px, 12.6vw, 196px)
+  );
   --zen-live-bot-avatar-body-size: var(--zen-live-bot-avatar-size);
   --zen-live-bot-body-x: 50%;
   --zen-live-bot-body-y: 50%;
@@ -57941,7 +58622,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   align-items: center;
   width: clamp(232px, 21cqw, 268px);
   min-height: 46px;
-  margin-top: clamp(-31px, -2.5cqw, -22px);
+  margin-top: clamp(-41px, -3.2cqw, -30px);
   padding: 5px 10px;
   border: 1px solid
     color-mix(in srgb, var(--accent) 44%, rgba(255, 255, 255, 0.16));
@@ -58570,7 +59251,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   .coffeeTableFocalColumn,
 .coffeeStage[data-coffee-perspective="first-person"][data-phase="arriving"]
   .coffeeTableFocalColumn {
-  width: min(48cqw, 620px);
+  --coffee-table-prose-inline-size: min(42cqw, 560px);
+  width: var(--coffee-table-prose-inline-size);
   max-width: calc(100cqw - clamp(250px, 28cqw, 420px));
   min-width: 0;
   transform: translateY(clamp(42px, 6vh, 74px));
@@ -58602,6 +59284,17 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .coffeeStage[data-coffee-perspective="first-person"][data-phase="arriving"]
   .coffeeCenterMessageScroll {
   max-height: clamp(230px, 35vh, 380px);
+}
+
+@container (max-width: 980px) {
+  .coffeeStage[data-coffee-perspective="first-person"]:is(
+      [data-phase="arriving"],
+      [data-phase="live"]
+    )
+    .coffeeTableFocalColumn {
+    /* Preserve a side corridor for the responsive avatar and its nameplate. */
+    --coffee-table-prose-inline-size: min(38cqw, 400px);
+  }
 }
 
 @media (min-width: 1160px) {
@@ -58655,7 +59348,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
       [data-phase="finished"][data-replay-active="true"]
     )
     .coffeeTableFocalColumn {
-    width: min(48cqw, 620px);
+    width: var(--coffee-table-prose-inline-size, min(42cqw, 560px));
     max-width: calc(100cqw - clamp(250px, 28cqw, 420px));
   }
 }
@@ -59677,9 +60370,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeSeatGlowPill {
-  --coffee-seat-name-plate-y: clamp(-50px, -4.45vw, -32px);
-  --coffee-seat-glyph-slot-width: 35px;
-  --coffee-seat-cup-slot-width: clamp(68px, 6vw, 80px);
+  --coffee-seat-name-plate-width: clamp(204px, 17cqw, 232px);
+  --coffee-seat-name-plate-y: clamp(-42px, -3.65cqw, -26px);
+  --coffee-seat-glyph-slot-width: 30px;
+  --coffee-seat-cup-slot-width: clamp(52px, 4.6cqw, 60px);
   --coffee-seat-name-glyph-size: clamp(
     24px,
     calc(var(--coffee-seat-glyph-slot-width) * 0.86),
@@ -59695,7 +60389,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   transform: translateX(-50%) translateY(var(--coffee-seat-name-plate-y));
   z-index: 3;
   box-sizing: border-box;
-  width: clamp(284px, 23vw, 304px);
+  width: var(--coffee-seat-name-plate-width);
   min-width: 0;
   max-width: calc(100vw - 32px);
   padding: 6px 11px;
@@ -59889,6 +60583,55 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   will-change: transform;
 }
 
+.coffeeSeat,
+.coffeeReplayPlayerAvatar {
+  --coffee-speaker-gaze-body-shift-x: 0px;
+  --coffee-speaker-gaze-body-shift-y: 0px;
+  --coffee-speaker-gaze-body-rotation: 0deg;
+  --coffee-speaker-gaze-face-shift-x: 0px;
+}
+
+.coffeeSeat[data-gaze-direction="left"],
+.coffeeReplayPlayerAvatar[data-gaze-direction="left"] {
+  --coffee-speaker-gaze-body-shift-x: -3px;
+  --coffee-speaker-gaze-body-rotation: -1.4deg;
+  --coffee-speaker-gaze-face-shift-x: -2px;
+}
+
+.coffeeSeat[data-gaze-direction="right"],
+.coffeeReplayPlayerAvatar[data-gaze-direction="right"] {
+  --coffee-speaker-gaze-body-shift-x: 3px;
+  --coffee-speaker-gaze-body-rotation: 1.4deg;
+  --coffee-speaker-gaze-face-shift-x: 2px;
+}
+
+.coffeeSeat[data-gaze-direction="center"],
+.coffeeReplayPlayerAvatar[data-gaze-direction="center"] {
+  --coffee-speaker-gaze-body-shift-y: -1px;
+}
+
+.coffeeSeat .zenLiveBotPresenceBody,
+.coffeeReplayPlayerAvatar .zenLiveBotPresenceBody {
+  transform:
+    translateX(calc(var(--zen-live-bot-body-x, 50%) - 50%))
+    translateY(calc(var(--zen-live-bot-body-y, 50%) - 50%))
+    translateX(var(--coffee-speaker-gaze-body-shift-x))
+    translateY(var(--coffee-speaker-gaze-body-shift-y))
+    rotate(var(--coffee-speaker-gaze-body-rotation));
+  transform-origin: 50% 70%;
+  transition: transform 380ms cubic-bezier(0.22, 0.72, 0.24, 1);
+}
+
+.coffeeSeat .zenLiveBotPresenceFaceRig,
+.coffeeReplayPlayerAvatar .zenLiveBotPresenceFaceRig {
+  transform: translate(
+      calc(-50% + var(--coffee-speaker-gaze-face-shift-x)),
+      -50%
+    )
+    scale(var(--zen-live-bot-face-scale, 1));
+  transition: transform 380ms cubic-bezier(0.22, 0.72, 0.24, 1);
+}
+
 .coffeeSeatUnderglow {
   position: absolute;
   left: 50%;
@@ -59989,6 +60732,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .coffeeSeat .zenLiveBotPresenceBody,
+  .coffeeReplayPlayerAvatar .zenLiveBotPresenceBody,
+  .coffeeSeat .zenLiveBotPresenceFaceRig,
+  .coffeeReplayPlayerAvatar .zenLiveBotPresenceFaceRig,
   .coffeeSeatHoverBody,
   .coffeeSeat[data-hover-active="true"] .coffeeSeatHoverBody,
   .coffeeSeatUnderglow,
@@ -62349,6 +63096,63 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   }
 }
 
+.coffeeRefillAcknowledgement {
+  position: absolute;
+  top: -10px;
+  left: 50%;
+  z-index: 10;
+  width: max-content;
+  max-width: min(180px, calc(100vw - 24px));
+  padding: 6px 10px;
+  border: 1px solid
+    color-mix(in srgb, var(--coffee-bot-color) 42%, var(--line));
+  border-radius: 999px;
+  background: color-mix(
+    in srgb,
+    var(--bg-elevated) 88%,
+    var(--coffee-bot-color) 12%
+  );
+  color: var(--fg);
+  box-shadow:
+    0 10px 24px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  font-size: clamp(0.72rem, 0.78vw, 0.82rem);
+  font-weight: 650;
+  line-height: 1.25;
+  text-align: center;
+  pointer-events: none;
+  transform: translate(-50%, -100%);
+  animation: coffeeRefillAcknowledgement 3600ms ease both;
+}
+
+.coffeeSeat:is(
+    [data-seat-count="3"][data-layout-seat="0"],
+    [data-seat-count="5"][data-layout-seat="0"]
+  )
+  .coffeeRefillAcknowledgement {
+  top: 50%;
+  left: calc(100% + 8px);
+  transform: translateY(-50%);
+}
+
+@keyframes coffeeRefillAcknowledgement {
+  0%,
+  100% {
+    opacity: 0;
+  }
+
+  10%,
+  78% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .coffeeRefillAcknowledgement {
+    animation: none;
+  }
+}
+
 .coffeeSeatThoughtBubble {
   position: absolute;
   top: -14px;
@@ -62926,25 +63730,97 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeReplayActionPanel {
+  --coffee-replay-action-panel-surface: rgba(7, 7, 7, 0.94);
+  --coffee-replay-action-panel-border: color-mix(
+    in srgb,
+    var(--coffee-bot-color) 56%,
+    rgba(255, 255, 255, 0.18)
+  );
   position: absolute;
-  right: clamp(12px, 3vw, 28px);
-  bottom: clamp(12px, 3vh, 28px);
+  left: 0;
+  top: 0;
   z-index: 9;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
   width: min(260px, calc(100% - 24px));
   max-height: min(260px, 48vh);
-  overflow: hidden;
+  overflow: visible;
   border-radius: 12px;
-  border: 1px solid
-    color-mix(in srgb, var(--coffee-bot-color) 56%, rgba(255, 255, 255, 0.18));
-  background: rgba(7, 7, 7, 0.88);
+  border: 1px solid var(--coffee-replay-action-panel-border);
+  background: var(--coffee-replay-action-panel-surface);
   color: rgba(255, 255, 255, 0.9);
   box-shadow:
     0 18px 42px rgba(0, 0, 0, 0.5),
     0 0 28px color-mix(in srgb, var(--coffee-bot-color) 20%, transparent);
   backdrop-filter: blur(16px);
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.985);
+  transform-origin: center;
+  transition:
+    left 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    top 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 120ms ease,
+    transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.coffeeReplayActionPanel[data-positioned="true"] {
+  opacity: 1;
+  pointer-events: auto;
+  transform: scale(1);
+}
+
+.coffeeReplayActionPanel::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--coffee-replay-action-panel-border);
+  background: var(--coffee-replay-action-panel-surface);
+  transform: rotate(45deg);
+}
+
+.coffeeReplayActionPanel[data-placement="above"]::after {
+  left: var(--coffee-replay-action-pointer-offset, 50%);
+  bottom: -7px;
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.coffeeReplayActionPanel[data-placement="below"]::after {
+  left: var(--coffee-replay-action-pointer-offset, 50%);
+  top: -7px;
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.coffeeReplayActionPanel[data-placement="left"]::after {
+  top: var(--coffee-replay-action-pointer-offset, 50%);
+  right: -7px;
+  transform: translateY(-50%) rotate(45deg);
+}
+
+.coffeeReplayActionPanel[data-placement="right"]::after {
+  top: var(--coffee-replay-action-pointer-offset, 50%);
+  left: -7px;
+  transform: translateY(-50%) rotate(45deg);
+}
+
+.coffeeSeat[data-actions-popover-anchor="true"] .coffeeSeatGlowPill {
+  border-color: color-mix(
+    in srgb,
+    var(--coffee-seat-emotion-color) 76%,
+    rgba(255, 255, 255, 0.28)
+  );
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.48) inset,
+    0 0 34px
+      color-mix(in srgb, var(--coffee-seat-emotion-color) 52%, transparent),
+    0 14px 30px rgba(0, 0, 0, 0.5);
 }
 
 .coffeeReplayActionPanel header {
+  flex: 0 0 auto;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -62989,10 +63865,18 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   cursor: pointer;
 }
 
+.coffeeReplayActionPanel header button:focus-visible {
+  outline: 2px solid
+    color-mix(in srgb, var(--coffee-bot-color) 72%, #ffffff 28%);
+  outline-offset: 2px;
+}
+
 .coffeeReplayActionPanel ul {
   display: grid;
+  flex: 1 1 auto;
   gap: 8px;
-  max-height: 184px;
+  min-height: 0;
+  max-height: none;
   margin: 0;
   padding: 10px;
   overflow-y: auto;
@@ -67316,12 +68200,13 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   }
 
   .coffeeSeatGlowPill {
-    --coffee-seat-name-plate-y: clamp(-28px, -3.4vw, -14px);
-    --coffee-seat-glyph-slot-width: 30px;
-    --coffee-seat-cup-slot-width: 50px;
-    width: min(230px, calc(100% + 156px));
-    max-width: min(230px, 78vw);
-    min-width: min(164px, 58vw);
+    --coffee-seat-name-plate-width: min(168px, 28vw);
+    --coffee-seat-name-plate-y: clamp(-16px, -2.2vw, -8px);
+    --coffee-seat-glyph-slot-width: clamp(18px, 4.2vw, 26px);
+    --coffee-seat-cup-slot-width: clamp(22px, 6.25vw, 40px);
+    width: var(--coffee-seat-name-plate-width);
+    max-width: min(168px, 28vw);
+    min-width: min(104px, 28vw);
     border-radius: 12px;
     padding: 5px 9px;
     margin-top: clamp(-3px, -0.35vw, 1px);
@@ -68182,6 +69067,15 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     0 12px 26px rgba(51, 38, 26, 0.14);
 }
 
+.themeLight.coffeeShell .coffeeReplayActionPanel {
+  --coffee-replay-action-panel-surface: color-mix(
+    in srgb,
+    #ffffff 82%,
+    var(--coffee-bot-color) 18%
+  );
+  background: var(--coffee-replay-action-panel-surface);
+}
+
 .themeLight.coffeeShell .coffeeSeatNotifiedIndicator {
   border-color: color-mix(in srgb, var(--coffee-bot-color) 58%, #ffffff 42%);
   background: color-mix(in srgb, var(--coffee-bot-color) 74%, #2b2118 26%);
@@ -68570,6 +69464,300 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .themeLight.coffeeShell .coffeeError {
   background: color-mix(in srgb, var(--danger-soft) 74%, transparent);
   color: var(--danger);
+}
+
+/* Finished-session synopsis: keep every review surface on one semantic Light
+   Mode palette. The summary is prose-first, so bot identity remains visible
+   through the link token without allowing arbitrary bot colors to weaken text
+   contrast. Dark Mode keeps its existing treatment. */
+.themeLight.coffeeShell:has(
+    .coffeeStage[data-phase="finished"]:not([data-replay-active="true"])
+  ) {
+  --coffee-finished-summary-surface: color-mix(
+    in srgb,
+    var(--bg-surface) 96%,
+    var(--bg) 4%
+  );
+  --coffee-finished-summary-surface-raised: color-mix(
+    in srgb,
+    var(--bg-elevated) 90%,
+    var(--bg-hover) 10%
+  );
+  --coffee-finished-summary-ink: var(--fg);
+  --coffee-finished-summary-muted-ink: var(--fg-muted);
+  --coffee-finished-summary-link-ink: var(--accent-ink);
+  --coffee-finished-summary-divider: var(--line-strong);
+  --coffee-finished-summary-button-surface: var(--accent);
+  --coffee-finished-summary-button-hover-surface: var(--accent-hover);
+  --coffee-finished-summary-button-ink: var(--accent-text);
+  --coffee-finished-summary-disabled-surface: var(--bg-active);
+  --coffee-finished-summary-disabled-ink: var(--fg-muted);
+  --coffee-finished-summary-error-surface: var(--danger-soft);
+  --coffee-finished-summary-error-ink: color-mix(
+    in srgb,
+    var(--danger) 72%,
+    var(--fg) 28%
+  );
+}
+
+.themeLight.coffeeShell:has(
+    .coffeeStage[data-phase="finished"]:not([data-replay-active="true"])
+  )
+  .coffeeStage[data-phase="finished"]:not([data-replay-active="true"])
+  .coffeeCenterMessage {
+  border: 1px solid var(--coffee-finished-summary-divider);
+  background: var(--coffee-finished-summary-surface);
+  color: var(--coffee-finished-summary-ink);
+  box-shadow: var(--shadow-md);
+}
+
+.themeLight.coffeeShell:has(
+    .coffeeStage[data-phase="finished"]:not([data-replay-active="true"])
+  )
+  :where(
+    .coffeeCenterMessage > strong,
+    .coffeeTranscriptHeader .sectionLabel
+  ) {
+  color: var(--coffee-finished-summary-ink);
+}
+
+.themeLight.coffeeShell:has(
+    .coffeeStage[data-phase="finished"]:not([data-replay-active="true"])
+  )
+  :where(
+    .coffeeStage[data-phase="finished"]:not([data-replay-active="true"])
+      .coffeeCenterFeedLine,
+    .coffeeTranscriptPanel
+      .coffeeMessage[data-role="system"]
+      .coffeeMessageContent
+  ) {
+  color: var(--coffee-finished-summary-ink);
+}
+
+.themeLight.coffeeShell:has(
+    .coffeeStage[data-phase="finished"]:not([data-replay-active="true"])
+  )
+  :where(
+    .coffeeFinishedRecapCaption,
+    .coffeeCenterFeedSpeaker,
+    .coffeeCenterFeedLineFallback,
+    .coffeeCenterMessage[data-empty="true"] .coffeeCenterFeedLine,
+    .coffeeTranscriptHeader p,
+    .coffeeTranscriptStatus,
+    .coffeeTranscriptNotice,
+    .coffeeReplayPosition
+  ) {
+  color: var(--coffee-finished-summary-muted-ink);
+}
+
+.themeLight.coffeeShell:has(
+    .coffeeStage[data-phase="finished"]:not([data-replay-active="true"])
+  )
+  :where(
+    .coffeeStage[data-phase="finished"]:not([data-replay-active="true"])
+      .coffeeCenterMessage,
+    .coffeeTranscriptPanel .coffeeMessages,
+    .coffeeTranscriptPanel .coffeeMessage[data-role="system"],
+    .coffeeReplayComposerControls
+  ) {
+  border-color: var(--coffee-finished-summary-divider);
+}
+
+.themeLight.coffeeShell:has(
+    .coffeeStage[data-phase="finished"]:not([data-replay-active="true"])
+  )
+  :where(
+    .coffeeTranscriptPanel .coffeeMessages,
+    .coffeeTranscriptPanel .coffeeMessage[data-role="system"],
+    .coffeeReplayComposerControls
+  ) {
+  background: var(--coffee-finished-summary-surface);
+  color: var(--coffee-finished-summary-ink);
+}
+
+.themeLight.coffeeShell:has(
+    .coffeeStage[data-phase="finished"]:not([data-replay-active="true"])
+  )
+  .coffeeTranscriptPanel
+  .coffeeMessage[data-role="system"] {
+  border-left-color: var(--coffee-finished-summary-link-ink);
+}
+
+.themeLight.coffeeShell:has(
+    .coffeeStage[data-phase="finished"]:not([data-replay-active="true"])
+  )
+  :where(
+    .coffeeStage[data-phase="finished"]:not([data-replay-active="true"])
+      .coffeeCenterMessage,
+    .coffeeTranscriptPanel .coffeeMessage[data-role="system"]
+  )
+  :where(a, .botMentionChip, .botMentionInlineColor) {
+  color: var(--coffee-finished-summary-link-ink);
+}
+
+.themeLight.coffeeShell:has(
+    .coffeeStage[data-phase="finished"]:not([data-replay-active="true"])
+  )
+  :where(
+    .coffeeStage[data-phase="finished"]:not([data-replay-active="true"])
+      .coffeeCenterMessage,
+    .coffeeTranscriptPanel .coffeeMessage[data-role="system"]
+  )
+  :where(a, .botMentionChip) {
+  border-bottom-color: color-mix(
+    in srgb,
+    var(--coffee-finished-summary-link-ink) 64%,
+    transparent
+  );
+  text-decoration-color: var(--coffee-finished-summary-link-ink);
+}
+
+.themeLight.coffeeShell:has(
+    .coffeeStage[data-phase="finished"]:not([data-replay-active="true"])
+  )
+  :where(
+    .coffeeFinishedRecapControls .coffeeJoinSessionButton,
+    .coffeeFinishedRecapControls .coffeeTableStartButton,
+    .coffeeReplayPrimaryButton
+  ) {
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--coffee-finished-summary-button-surface) 64%,
+      var(--coffee-finished-summary-divider) 36%
+    );
+  background: var(--coffee-finished-summary-button-surface);
+  color: var(--coffee-finished-summary-button-ink);
+}
+
+.themeLight.coffeeShell:has(
+    .coffeeStage[data-phase="finished"]:not([data-replay-active="true"])
+  )
+  :where(
+    .coffeeFinishedRecapControls .coffeeJoinSessionButton:hover:not(:disabled),
+    .coffeeFinishedRecapControls .coffeeTableStartButton:hover:not(:disabled),
+    .coffeeReplayPrimaryButton:hover:not(:disabled)
+  ) {
+  background: var(--coffee-finished-summary-button-hover-surface);
+  color: var(--coffee-finished-summary-button-ink);
+}
+
+.themeLight.coffeeShell:has(
+    .coffeeStage[data-phase="finished"]:not([data-replay-active="true"])
+  )
+  :where(
+    .coffeeReplayIconButton:not(.coffeeReplayPrimaryButton),
+    .coffeeTranscriptHeaderActions .headerIconButton
+  ) {
+  border-color: var(--coffee-finished-summary-divider);
+  background: var(--coffee-finished-summary-surface-raised);
+  color: var(--coffee-finished-summary-ink);
+}
+
+.themeLight.coffeeShell:has(
+    .coffeeStage[data-phase="finished"]:not([data-replay-active="true"])
+  )
+  :where(
+    .coffeeReplayIconButton:hover:not(:disabled),
+    .coffeeReplayIconButton:focus-visible,
+    .coffeeTranscriptHeaderActions .headerIconButton:hover:not(:disabled),
+    .coffeeTranscriptHeaderActions .headerIconButton:focus-visible
+  ) {
+  border-color: var(--coffee-finished-summary-link-ink);
+  background: var(--coffee-finished-summary-surface-raised);
+  color: var(--coffee-finished-summary-link-ink);
+}
+
+.themeLight.coffeeShell:has(
+    .coffeeStage[data-phase="finished"]:not([data-replay-active="true"])
+  )
+  :where(
+    .coffeeFinishedRecapControls button,
+    .coffeeReplayComposerControls button,
+    .coffeeTranscriptHeaderActions button
+  ):focus-visible {
+  outline: 2px solid var(--coffee-finished-summary-link-ink);
+  outline-offset: 2px;
+}
+
+.themeLight.coffeeShell:has(
+    .coffeeStage[data-phase="finished"]:not([data-replay-active="true"])
+  )
+  :where(
+    .coffeeFinishedRecapControls button:disabled,
+    .coffeeReplayComposerControls button:disabled,
+    .coffeeTranscriptHeaderActions button:disabled
+  ) {
+  border-color: var(--coffee-finished-summary-divider);
+  background: var(--coffee-finished-summary-disabled-surface);
+  color: var(--coffee-finished-summary-disabled-ink);
+  box-shadow: none;
+  opacity: 1;
+}
+
+.themeLight.coffeeShell:has(
+    .coffeeStage[data-phase="finished"]:not([data-replay-active="true"])
+  )
+  .coffeeFinishedCopyButton[data-copy-state="copied"] {
+  color: var(--coffee-finished-summary-button-ink);
+}
+
+.themeLight.coffeeShell:has(
+    .coffeeStage[data-phase="finished"]:not([data-replay-active="true"])
+  )
+  :where(
+    .coffeeFinishedCopyButton[data-copy-state="failed"],
+    .coffeeTranscriptHeaderActions
+      .headerIconButton[data-copy-state="failed"]
+  ) {
+  border-color: var(--coffee-finished-summary-error-ink);
+  background: var(--coffee-finished-summary-error-surface);
+  color: var(--coffee-finished-summary-error-ink);
+}
+
+.themeLight.coffeeShell:has(
+    .coffeeStage[data-phase="finished"]:not([data-replay-active="true"])
+  )
+  .coffeeTranscriptHeaderActions
+  .headerIconButton[data-copy-state="copied"] {
+  color: var(--coffee-finished-summary-link-ink);
+}
+
+.themeLight.coffeeShell:has(
+    .coffeeStage[data-phase="finished"]:not([data-replay-active="true"])
+  )
+  .coffeeReplayScrubber
+  input:disabled {
+  opacity: 1;
+}
+
+.themeLight.coffeeShell:has(
+    .coffeeStage[data-phase="finished"]:not([data-replay-active="true"])
+  )
+  .coffeeReplayScrubber
+  input:disabled::-webkit-slider-runnable-track,
+.themeLight.coffeeShell:has(
+    .coffeeStage[data-phase="finished"]:not([data-replay-active="true"])
+  )
+  .coffeeReplayScrubber
+  input:disabled::-moz-range-track {
+  border-color: var(--coffee-finished-summary-divider);
+  background: var(--coffee-finished-summary-disabled-surface);
+}
+
+.themeLight.coffeeShell:has(
+    .coffeeStage[data-phase="finished"]:not([data-replay-active="true"])
+  )
+  .coffeeReplayScrubber
+  input:disabled::-webkit-slider-thumb,
+.themeLight.coffeeShell:has(
+    .coffeeStage[data-phase="finished"]:not([data-replay-active="true"])
+  )
+  .coffeeReplayScrubber
+  input:disabled::-moz-range-thumb {
+  border-color: var(--coffee-finished-summary-surface);
+  background: var(--coffee-finished-summary-disabled-ink);
+  box-shadow: none;
 }
 
 .themeLight.coffeeShell .coffeeComposerInputWrap .markdownComposerSurface {

@@ -10,6 +10,7 @@ import {
   COFFEE_CUP_SPRITE_COLORS,
   coffeeCupCanTopOff,
   coffeeCupColorForBotColor,
+  coffeeCupConsumptionTimingForSeat,
   coffeeCupConsumptionRate,
   coffeeCupFramePosition,
   coffeeCupProgressAfterTopOff,
@@ -130,6 +131,77 @@ describe("coffee cup sprites", () => {
     assert.ok(empty.frameIndex >= full.frameIndex);
     assert.equal(finished.frameIndex, 6);
     assert.equal(finished.amount, "empty");
+  });
+
+  it("starts delayed-arrival consumption only after the seat becomes active", () => {
+    const durationMinutes = 10;
+    const sessionStartedAtMs = 0;
+    const sessionEndsAtMs = durationMinutes * 60 * 1000;
+    const seatActivatedAtMs = 9 * 60 * 1000;
+    const inactiveTiming = coffeeCupConsumptionTimingForSeat({
+      seatActive: false,
+      seatActivatedAtMs,
+      fallbackSessionStartedAtMs: sessionStartedAtMs,
+      fallbackSessionEndsAtMs: sessionEndsAtMs,
+      durationMinutes,
+    });
+    const activeTiming = coffeeCupConsumptionTimingForSeat({
+      seatActive: true,
+      seatActivatedAtMs,
+      fallbackSessionStartedAtMs: sessionStartedAtMs,
+      fallbackSessionEndsAtMs: sessionEndsAtMs,
+      durationMinutes,
+    });
+
+    assert.deepEqual(inactiveTiming, {
+      sessionStartedAtMs: null,
+      sessionEndsAtMs: null,
+    });
+    assert.deepEqual(activeTiming, {
+      sessionStartedAtMs: seatActivatedAtMs,
+      sessionEndsAtMs: seatActivatedAtMs + durationMinutes * 60 * 1000,
+    });
+
+    const beforeArrival = buildCoffeeCupVisualState({
+      seed: "session:bot-late",
+      nowMs: seatActivatedAtMs - 1,
+      ...inactiveTiming,
+      durationMinutes,
+      sippingOverride: false,
+    });
+    const atArrival = buildCoffeeCupVisualState({
+      seed: "session:bot-late",
+      nowMs: seatActivatedAtMs,
+      ...activeTiming,
+      durationMinutes,
+    });
+    const incorrectlySessionTimed = buildCoffeeCupVisualState({
+      seed: "session:bot-late",
+      nowMs: seatActivatedAtMs,
+      sessionStartedAtMs,
+      sessionEndsAtMs,
+      durationMinutes,
+    });
+
+    assert.equal(beforeArrival.progress, 0);
+    assert.equal(beforeArrival.sipping, false);
+    assert.equal(atArrival.progress, 0);
+    assert.equal(atArrival.frameIndex, 0);
+    assert.ok(incorrectlySessionTimed.progress > atArrival.progress);
+
+    const sawAmbientSipAfterSeating = Array.from(
+      { length: 91 },
+      (_, second) => seatActivatedAtMs + second * 1000,
+    ).some(
+      (nowMs) =>
+        buildCoffeeCupVisualState({
+          seed: "session:bot-late",
+          nowMs,
+          ...activeTiming,
+          durationMinutes,
+        }).sipping,
+    );
+    assert.equal(sawAmbientSipAfterSeating, true);
   });
 
   it("keeps untopped cups depleted when another cup is topped off without an end time", () => {

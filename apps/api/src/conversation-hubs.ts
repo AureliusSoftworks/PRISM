@@ -142,7 +142,13 @@ export function getConversationHubMetadata(
   ) {
     return {
       hubRole: "hub",
-      hubBotId: null,
+      // Zen's persisted bot_id is its immutable relationship owner. Older
+      // global Zen rows keep NULL and therefore continue to resolve to Prism;
+      // the most recent speaker must never be allowed to redefine ownership.
+      hubBotId:
+        conversation.conversation_mode === "zen"
+          ? conversation.bot_id ?? null
+          : null,
       parentHubId: null,
     };
   }

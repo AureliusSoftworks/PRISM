@@ -34,4 +34,23 @@ describe("Coffee player response UI wiring", () => {
       /completedSipAnimationActive\s*=\s*[\s\S]*?!seatIsThinking/,
     );
   });
+
+  it("starts each bot's cup clock when that seat finishes arriving", () => {
+    assert.match(
+      pageSource,
+      /coffeeCupConsumptionStartedAtMsBySeatKeyRef = useRef<[\s\S]*?Map<string, number>/,
+    );
+    assert.match(
+      pageSource,
+      /nameplateTimer: setTimeout\(\(\) => \{[\s\S]*?coffeeCupConsumptionStartedAtMsBySeatKeyRef\.current\.set\([\s\S]*?Date\.now\(\)[\s\S]*?assignCoffeeNameplatePendingBotIds/,
+    );
+    assert.match(
+      pageSource,
+      /coffeeCupConsumptionTimingForSeat\(\{[\s\S]*?seatActive: seatIsFirmlySeated,[\s\S]*?seatActivatedAtMs:[\s\S]*?fallbackSessionStartedAtMs:[\s\S]*?fallbackSessionEndsAtMs:/,
+    );
+    assert.match(
+      pageSource,
+      /buildCoffeeCupVisualState\(\{[\s\S]*?\.\.\.coffeeCupConsumptionTiming,[\s\S]*?durationMinutes: coffeeCupDurationMinutes/,
+    );
+  });
 });

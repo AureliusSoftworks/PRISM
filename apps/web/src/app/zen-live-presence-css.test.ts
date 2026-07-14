@@ -1902,6 +1902,129 @@ describe("Zen live presence CSS", () => {
     assert.match(textRule, /line-clamp:\s*2\s*;/);
   });
 
+  it("keeps Light Mode action text on the contrast-safe theme ink across states", () => {
+    assert.match(
+      pageSource,
+      /const ink = ensureContrast\(accent, THEME_SURFACE_BG\[resolvedTheme\], 4\.5\);/
+    );
+    assert.match(pageSource, /\["--bot-ink" as string\]: ink/);
+    assert.match(
+      pageSource,
+      /const botAccent = botAccentStyle\(\s*bot\?\.color \?\? PRISM_DEFAULT_ACCENT,\s*resolvedTheme,\s*\);/
+    );
+    assert.match(
+      pageSource,
+      /const actionCopyStyle = actionCopyAnchorForRender \? \(\{ \.\.\.botAccent,/
+    );
+    assert.match(
+      pageSource,
+      /data-zen-live-bot-action-copy="true"[\s\S]*?data-theme=\{resolvedTheme\}/
+    );
+
+    const copyRule = ruleForExactSelector(".zenLiveBotPresenceCopy");
+    assert.match(
+      copyRule,
+      /--zen-action-text-rest-ink:\s*color-mix\(\s*in srgb,\s*var\(--coffee-bot-color\) 68%,\s*#ffffff 32%\s*\)\s*;/
+    );
+    assert.match(
+      copyRule,
+      /--zen-action-text-active-ink:\s*var\(--zen-action-text-rest-ink\)\s*;/
+    );
+    assert.match(
+      copyRule,
+      /--zen-action-text-muted-ink:\s*var\(--zen-action-text-rest-ink\)\s*;/
+    );
+    assert.match(
+      copyRule,
+      /--zen-action-text-state-ink:\s*var\(--zen-action-text-rest-ink\)\s*;/
+    );
+    assert.match(copyRule, /--zen-action-text-intro-opacity:\s*0\.95\s*;/);
+    assert.match(copyRule, /--zen-action-text-rest-opacity:\s*0\.9\s*;/);
+    assert.match(copyRule, /--zen-action-text-verbose-opacity:\s*0\.92\s*;/);
+    assert.match(copyRule, /--zen-action-text-loading-opacity:\s*0\.86\s*;/);
+    assert.match(
+      copyRule,
+      /--zen-action-text-reduced-motion-opacity:\s*0\.86\s*;/
+    );
+
+    const lightRule = ruleForExactSelector(
+      '.zenLiveBotPresenceCopy[data-theme="light"]'
+    );
+    assert.match(
+      lightRule,
+      /--zen-action-text-rest-ink:\s*var\(\s*--bot-ink,\s*var\(--zen-presence-pill-ink\)\s*\)\s*;/
+    );
+    assert.match(lightRule, /--zen-action-text-intro-opacity:\s*1\s*;/);
+    assert.match(lightRule, /--zen-action-text-rest-opacity:\s*1\s*;/);
+    assert.match(lightRule, /--zen-action-text-verbose-opacity:\s*1\s*;/);
+    assert.match(lightRule, /--zen-action-text-loading-opacity:\s*1\s*;/);
+    assert.match(
+      lightRule,
+      /--zen-action-text-reduced-motion-opacity:\s*1\s*;/
+    );
+
+    const activeStateRule = ruleForSelectorNeedles(
+      ":hover",
+      ":focus-visible",
+      '[data-loading="true"]',
+      '[data-talking="true"]',
+      '[data-thinking="true"]'
+    );
+    assert.match(
+      activeStateRule,
+      /--zen-action-text-state-ink:\s*var\(--zen-action-text-active-ink\)\s*;/
+    );
+    const mutedStateRule = ruleForSelectorNeedles(
+      '[aria-disabled="true"]',
+      '[data-muted="true"]'
+    );
+    assert.match(
+      mutedStateRule,
+      /--zen-action-text-state-ink:\s*var\(--zen-action-text-muted-ink\)\s*;/
+    );
+
+    const textRule = ruleForExactSelector(".zenLiveBotPresenceText");
+    assert.match(textRule, /color:\s*var\(--zen-action-text-state-ink\)\s*;/);
+    assert.match(
+      textRule,
+      /opacity:\s*var\(--zen-action-text-rest-opacity\)\s*;/
+    );
+    assert.match(textRule, /font-style:\s*italic\s*;/);
+    assert.match(textRule, /font-weight:\s*520\s*;/);
+    assert.doesNotMatch(
+      textRule,
+      /color:\s*color-mix\([^;]*#ffffff/
+    );
+    const verboseTextRule = ruleForExactSelector(
+      '.zenLiveBotPresenceCopy[data-action-verbose="true"] .zenLiveBotPresenceText'
+    );
+    assert.match(
+      verboseTextRule,
+      /opacity:\s*var\(--zen-action-text-verbose-opacity\)\s*;/
+    );
+
+    const loadingRule = ruleForExactSelector(
+      '.zenLiveBotPresenceCopy[data-loading="true"][data-copy-anchored="true"]'
+    );
+    assert.match(
+      loadingRule,
+      /opacity:\s*var\(--zen-action-text-loading-opacity\)\s*;/
+    );
+    assert.match(loadingRule, /animation:\s*none\s*;/);
+    assert.match(
+      css,
+      /@keyframes zenLiveBotActionQuoteDrift\s*\{[\s\S]*?9%\s*\{\s*opacity:\s*var\(--zen-action-text-intro-opacity\)\s*;[\s\S]*?34%\s*\{\s*opacity:\s*var\(--zen-action-text-rest-opacity\)\s*;/
+    );
+    const reducedMotionRule = ruleForSelectorNeedlesWithBody(
+      ['.zenLiveBotPresenceCopy[data-copy-anchored="true"]'],
+      "--zen-action-text-reduced-motion-opacity"
+    );
+    assert.match(
+      reducedMotionRule,
+      /opacity:\s*var\(--zen-action-text-reduced-motion-opacity\)\s*;/
+    );
+  });
+
   it("redirects live bot momentum down the visible Zen prose hill", () => {
     assert.match(
       pageSource,

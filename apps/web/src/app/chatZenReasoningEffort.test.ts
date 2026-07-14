@@ -66,17 +66,35 @@ describe("Chat/Zen reasoning effort policy", () => {
     assert.equal(reasoningEffortForSend("openai", "gpt-4o", "high", true), undefined);
   });
 
-  it("keeps Anthropic effort disabled even when experimental effort is on", () => {
+  it("enables native effort for supported Anthropic models", () => {
+    for (const model of ["claude-sonnet-4-6", "claude-opus-4-8"]) {
+      assert.deepEqual(
+        resolveChatZenReasoningEffortAvailability({
+          provider: "anthropic",
+          modelChoice: model,
+          experimentalAllModelEffortEnabled: false,
+        }),
+        { visible: true, enabled: true },
+        model
+      );
+      assert.equal(reasoningEffortForSend("anthropic", model, "xhigh", false), "xhigh");
+    }
+  });
+
+  it("clearly disables effort for unsupported Anthropic models", () => {
     const availability = resolveChatZenReasoningEffortAvailability({
       provider: "anthropic",
-      modelChoice: "claude-sonnet-4-6",
+      modelChoice: "claude-haiku-4-5",
       experimentalAllModelEffortEnabled: true,
     });
 
-    assert.equal(availability.visible, true);
-    assert.equal(availability.enabled, false);
+    assert.deepEqual(availability, {
+      visible: true,
+      enabled: false,
+      disabledReason: "This online model does not support native effort.",
+    });
     assert.equal(
-      reasoningEffortForSend("anthropic", "claude-sonnet-4-6", "xhigh", true),
+      reasoningEffortForSend("anthropic", "claude-haiku-4-5", "high", true),
       undefined
     );
   });

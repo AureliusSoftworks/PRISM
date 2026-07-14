@@ -2,9 +2,12 @@ import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import {
   BACKEND_UNAVAILABLE_CODE,
+  BACKEND_AVAILABLE_EVENT,
   BACKEND_UNAVAILABLE_EVENT,
   PrismBackendUnavailableError,
   createBackendUnavailableErrorFromPayload,
+  dispatchBackendAvailableEvent,
+  dispatchBackendUnavailableDetail,
   dispatchBackendUnavailableEvent,
   isBackendUnavailablePayload,
   isPrismBackendUnavailableError,
@@ -88,6 +91,43 @@ describe("backend unavailable helpers", () => {
         detail: "ECONNREFUSED",
       },
     ]);
+  });
+
+  it("emits connection events once per availability transition", () => {
+    const target = new EventTarget();
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: target,
+    });
+    const received: string[] = [];
+    target.addEventListener(BACKEND_UNAVAILABLE_EVENT, (event) => {
+      const detail = (event as CustomEvent<BackendUnavailableEventDetail>).detail;
+      received.push(`down:${detail.path}`);
+    });
+    target.addEventListener(BACKEND_AVAILABLE_EVENT, () => {
+      received.push("up");
+    });
+
+    dispatchBackendAvailableEvent();
+    dispatchBackendUnavailableDetail({
+      code: BACKEND_UNAVAILABLE_CODE,
+      message: "Reconnecting",
+      path: "/api/first",
+    });
+    dispatchBackendUnavailableDetail({
+      code: BACKEND_UNAVAILABLE_CODE,
+      message: "Reconnecting",
+      path: "/api/duplicate",
+    });
+    dispatchBackendAvailableEvent();
+    dispatchBackendAvailableEvent();
+    dispatchBackendUnavailableDetail({
+      code: BACKEND_UNAVAILABLE_CODE,
+      message: "Reconnecting again",
+      path: "/api/second",
+    });
+
+    assert.deepEqual(received, ["down:/api/first", "up", "down:/api/second"]);
   });
 
   it("preserves the current user when auth bootstrap hits a backend outage", () => {

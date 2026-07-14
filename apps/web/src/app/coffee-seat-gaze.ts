@@ -234,7 +234,66 @@ export function coffeeSeatIsTopHead(
 
 export interface CoffeeGazeMessage {
   role: string;
+  botId?: string | null;
   botName?: string;
+  content?: string;
+}
+
+export type CoffeeGazeParticipant =
+  | { kind: "player" }
+  | { kind: "bot"; botId: string };
+
+export interface CoffeeSpeakerGazeTarget {
+  participant: CoffeeGazeParticipant;
+  source: "explicit" | "inferred";
+}
+
+export type CoffeeGazeDirection = "left" | "center" | "right";
+
+/**
+ * Resolve who the active speaker is addressing. Explicit, currently visible
+ * mention chips win; otherwise the last other participant in the exchange is
+ * the natural conversational target.
+ */
+export function resolveCoffeeSpeakerGazeTarget(args: {
+  speaker: CoffeeGazeParticipant;
+  explicitMentionBotIds: readonly string[];
+  previousMessages: readonly CoffeeGazeMessage[];
+  seatedBotIds: ReadonlySet<string>;
+  botNameToId: ReadonlyMap<string, string>;
+}): CoffeeSpeakerGazeTarget | null {
+  const speakerBotId = args.speaker.kind === "bot" ? args.speaker.botId : null;
+  for (let index = args.explicitMentionBotIds.length - 1; index >= 0; index -= 1) {
+    const botId = args.explicitMentionBotIds[index]?.trim();
+    if (!botId || botId === speakerBotId || !args.seatedBotIds.has(botId)) {
+      continue;
+    }
+    return {
+      participant: { kind: "bot", botId },
+      source: "explicit",
+    };
+  }
+
+  for (let index = args.previousMessages.length - 1; index >= 0; index -= 1) {
+    const message = args.previousMessages[index];
+    if (!message) continue;
+    if (message.role === "user") {
+      if (args.speaker.kind === "player") continue;
+      return { participant: { kind: "player" }, source: "inferred" };
+    }
+    if (message.role !== "assistant") continue;
+    const botId =
+      message.botId?.trim() ||
+      (message.botName ? args.botNameToId.get(message.botName) : undefined);
+    if (!botId || botId === speakerBotId || !args.seatedBotIds.has(botId)) {
+      continue;
+    }
+    return {
+      participant: { kind: "bot", botId },
+      source: "inferred",
+    };
+  }
+  return null;
 }
 
 /**
@@ -270,6 +329,78 @@ export interface CoffeeVisibleSeatForGaze {
   botId: string;
   seatIndex: number;
   layoutIndex: number;
+  leftPercent?: number;
+}
+
+function coffeeGazeParticipantLeftPercent(args: {
+  participant: CoffeeGazeParticipant;
+  compact: boolean;
+  seatCount: number;
+  visibleSeats: readonly CoffeeVisibleSeatForGaze[];
+}): number | null {
+  if (args.participant.kind === "player") return 50;
+  const participantBotId = args.participant.botId;
+  const seat = args.visibleSeats.find(
+    (candidate) => candidate.botId === participantBotId
+  );
+  if (!seat) return null;
+  if (typeof seat.leftPercent === "number" && Number.isFinite(seat.leftPercent)) {
+    return finiteSeatLeftPercent(seat.leftPercent);
+  }
+  return coffeeSeatCanvasLeftPercent({
+    compact: args.compact,
+    seatIndex: seat.seatIndex,
+    seatCount: args.seatCount,
+    layoutIndex: seat.layoutIndex,
+  });
+}
+
+/** Screen-horizontal direction from the active speaker to their target. */
+export function coffeeSpeakerGazeHorizontalDirection(args: {
+  speaker: CoffeeGazeParticipant;
+  target: CoffeeGazeParticipant;
+  compact: boolean;
+  seatCount: number;
+  visibleSeats: readonly CoffeeVisibleSeatForGaze[];
+}): CoffeeSeatHorizontalSide | null {
+  const sourceLeftPercent = coffeeGazeParticipantLeftPercent({
+    participant: args.speaker,
+    compact: args.compact,
+    seatCount: args.seatCount,
+    visibleSeats: args.visibleSeats,
+  });
+  const targetLeftPercent = coffeeGazeParticipantLeftPercent({
+    participant: args.target,
+    compact: args.compact,
+    seatCount: args.seatCount,
+    visibleSeats: args.visibleSeats,
+  });
+  if (sourceLeftPercent === null || targetLeftPercent === null) return null;
+  const delta = targetLeftPercent - sourceLeftPercent;
+  if (delta < -1) return -1;
+  if (delta > 1) return 1;
+  return 0;
+}
+
+export function coffeeGazeDirectionValue(
+  direction: CoffeeSeatHorizontalSide
+): CoffeeGazeDirection {
+  if (direction < 0) return "left";
+  if (direction > 0) return "right";
+  return "center";
+}
+
+/**
+ * Screen-left targets use the unflipped face, while screen-right targets use
+ * the mirrored face. Center targets preserve the seat's authored neutral.
+ */
+export function coffeePlateFaceScaleYFromGazeDirection(
+  direction: CoffeeSeatHorizontalSide,
+  neutralScaleY = "1"
+): string {
+  if (direction < 0) return "1";
+  if (direction > 0) return "-1";
+  return neutralScaleY;
 }
 
 /**

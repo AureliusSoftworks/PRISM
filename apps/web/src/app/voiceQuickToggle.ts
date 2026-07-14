@@ -14,7 +14,7 @@ export function voiceModeDisplayName(mode: VoiceMode): string {
   return "Mute";
 }
 
-/** Procedural Bottish follows the canvas reveal clock instead of owning it. */
+/** Robot voices follow the canvas reveal clock instead of owning transcript text. */
 export function voiceModeDrivesCanvasReveal(mode: VoiceMode): boolean {
-  return mode === "english" || mode === "babble";
+  return mode === "english";
 }

@@ -3,8 +3,13 @@ import { randomId } from "./security.ts";
 import { upsertPrismMoodState } from "./db.ts";
 import {
   getConversationHubMetadataMap,
+  getHubConversationId,
   type ConversationHubMetadata,
 } from "./conversation-hubs.ts";
+import {
+  buildConversationHistoryEntry,
+  loadConversationParticipantBotIdsMap,
+} from "./conversation-history.ts";
 import {
   applyPrismMoodIgnoredQuestion,
   applyPrismMoodIgnoreCooldown,
@@ -17,6 +22,7 @@ import {
   decayPrismMood,
   shouldPrismMoodStartIgnoreCooldown,
   type CoffeeSessionDurationMinutes,
+  type ConversationHistoryEntry,
   type PrismMoodIgnoredQuestionPenaltyLevel,
   type PrismMoodInterruptionInput,
   type PrismMoodMode,
@@ -57,6 +63,7 @@ export interface ConversationSummary {
   hubRole?: ConversationHubMetadata["hubRole"];
   hubBotId?: string | null;
   parentHubId?: string | null;
+  history?: ConversationHistoryEntry;
   /** Coffee-only — the 2-5 bot ids participating in this group thread. */
   botGroupIds?: string[];
   /** Coffee-only — invited bot ids that did not attend this session. */
@@ -1006,7 +1013,7 @@ export function listConversationSummaries(
     .prepare(
       `SELECT c.id, c.title, c.conversation_mode, c.bot_id, c.bot_group_ids,
               c.coffee_group_id, c.coffee_duration_minutes, ${coffeeAbsentBotIdsSelect},
-              c.incognito, c.created_at, c.updated_at,
+              c.parent_id, c.archived_at, c.incognito, c.created_at, c.updated_at,
               ${zenWallpaperSelect}
               (SELECT m.bot_id FROM messages m
                  WHERE m.conversation_id = c.id
@@ -1035,6 +1042,8 @@ export function listConversationSummaries(
     coffee_absent_bot_ids: string | null;
     coffee_group_id: string | null;
     coffee_duration_minutes: number | null;
+    parent_id: string | null;
+    archived_at: string | null;
     incognito: number;
     created_at: string;
     updated_at: string;
@@ -1054,6 +1063,11 @@ export function listConversationSummaries(
     userId,
     rows.map((row) => row.id)
   );
+  const participantBotIdsByConversationId = loadConversationParticipantBotIdsMap(
+    db,
+    userId,
+    rows.map((row) => row.id)
+  );
 
   return rows.map((row) => {
     const mode: "zen" | "chat" | "sandbox" | "coffee" =
@@ -1067,6 +1081,15 @@ export function listConversationSummaries(
     const botGroupIds = parseBotGroupIdsForSummary(row.bot_group_ids);
     const coffeeAbsentBotIds = parseBotGroupIdsForSummary(row.coffee_absent_bot_ids);
     const hubMetadata = hubMetadataByConversationId.get(row.id);
+    const continuationConversationId =
+      hubMetadata?.hubRole === "hub"
+        ? getHubConversationId(db, userId, hubMetadata.hubBotId)
+        : row.id;
+    const history = buildConversationHistoryEntry(row, {
+      hubMetadata,
+      participantBotIds: participantBotIdsByConversationId.get(row.id) ?? [],
+      continuationConversationId,
+    });
     return {
       id: row.id,
       title: row.title,
@@ -1079,6 +1102,7 @@ export function listConversationSummaries(
             parentHubId: hubMetadata.parentHubId,
           }
         : {}),
+      history,
       ...(botGroupIds.length > 0 ? { botGroupIds } : {}),
       ...(mode === "coffee" && coffeeAbsentBotIds.length > 0
         ? { coffeeAbsentBotIds }

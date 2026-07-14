@@ -2,6 +2,7 @@ import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import {
   ANTHROPIC_DEFAULT_MODEL,
+  anthropicModelUsesFixedDefaultSampling,
   buildModelCatalog,
   checkAnthropicApiKeyStatus,
   checkDualOllamaWorkloadStatus,
@@ -10,6 +11,7 @@ import {
   embedTextLocal,
   getAuxiliaryProvider,
   AnthropicProvider,
+  LocalModelRequestError,
   LocalOllamaProvider,
   OpenAiProvider,
   openAiModelUsesMaxCompletionTokens,
@@ -744,6 +746,74 @@ describe("checkDualOllamaWorkloadStatus", () => {
   });
 });
 
+describe("local request diagnostics", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("redacts network failures and classifies the local service as unavailable", async () => {
+    globalThis.fetch = (async () => {
+      throw new TypeError(
+        "fetch failed for http://admin:super-secret@192.168.1.99:11434/api/chat?api_key=leaked"
+      );
+    }) as typeof fetch;
+
+    const provider = new LocalOllamaProvider();
+    await assert.rejects(
+      provider.generateResponse([{ role: "user", content: "hi" }]),
+      (error: unknown) => {
+        assert.ok(error instanceof LocalModelRequestError);
+        assert.equal(error.kind, "service_unavailable");
+        assert.equal(error.message, "Local model service is unavailable.");
+        assert.doesNotMatch(error.message, /192\.168|super-secret|api_key|http:/iu);
+        return true;
+      }
+    );
+  });
+
+  it("distinguishes missing models, missing endpoints, and authentication or configuration failures", async () => {
+    const scenarios: Array<{
+      status: number;
+      body: string;
+      expected: LocalModelRequestError["kind"];
+    }> = [
+      {
+        status: 404,
+        body: JSON.stringify({ error: "model 'missing' not found, try pulling it first" }),
+        expected: "model_unavailable",
+      },
+      {
+        status: 404,
+        body: "404 page not found",
+        expected: "endpoint_not_found",
+      },
+      {
+        status: 401,
+        body: JSON.stringify({ error: "invalid API key: super-secret" }),
+        expected: "authentication_or_configuration",
+      },
+    ];
+
+    for (const scenario of scenarios) {
+      globalThis.fetch = (async () =>
+        new Response(scenario.body, { status: scenario.status })) as typeof fetch;
+      const provider = new LocalOllamaProvider();
+      await assert.rejects(
+        provider.generateResponse([{ role: "user", content: "hi" }]),
+        (error: unknown) => {
+          assert.ok(error instanceof LocalModelRequestError);
+          assert.equal(error.kind, scenario.expected);
+          assert.equal(error.status, scenario.status);
+          assert.doesNotMatch(error.message, /missing|super-secret|api key/iu);
+          return true;
+        }
+      );
+    }
+  });
+});
+
 describe("system-owned local lanes", () => {
   const originalFetch = globalThis.fetch;
 
@@ -791,6 +861,7 @@ describe("system-owned local lanes", () => {
       maxTokens: 20,
     });
     assert.equal(requestedBody.model, "mistral:latest");
+    assert.equal(provider.diagnosticModel, "mistral:latest");
   });
 
   it("passes advanced sampler knobs to Ollama options", async () => {
@@ -946,6 +1017,32 @@ describe("openAiModelUsesFixedDefaultTemperature", () => {
 
   it("returns false for models that accept custom temperature", () => {
     assert.equal(openAiModelUsesFixedDefaultTemperature("gpt-4o-mini"), false);
+  });
+});
+
+describe("anthropicModelUsesFixedDefaultSampling", () => {
+  it("returns true for current Claude models that reject custom sampling", () => {
+    for (const model of [
+      "claude-opus-4-7",
+      "claude-opus-4-8",
+      "claude-sonnet-5",
+      "claude-fable-5",
+      "claude-mythos-5",
+      "claude-mythos-preview",
+    ]) {
+      assert.equal(anthropicModelUsesFixedDefaultSampling(model), true, model);
+    }
+  });
+
+  it("returns false for configured Claude models that accept custom sampling", () => {
+    for (const model of [
+      "claude-sonnet-4-6",
+      "claude-opus-4-6",
+      "claude-haiku-4-5",
+      "claude-sonnet-4-5-20250929",
+    ]) {
+      assert.equal(anthropicModelUsesFixedDefaultSampling(model), false, model);
+    }
   });
 });
 
@@ -1250,6 +1347,83 @@ describe("AnthropicProvider request shape", () => {
 
     assert.equal(body.temperature, 0.92);
     assert.equal("top_p" in body, false);
+  });
+
+  it("omits unsupported sampling controls for fixed-default Claude models", async () => {
+    let body: Record<string, unknown> = {};
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({ content: [{ type: "text", text: "ok" }] }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const provider = new AnthropicProvider({ apiKey: "sk-ant-test" });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "claude-opus-4-8",
+      temperature: 0.92,
+      topP: 0.8,
+      topK: 32,
+    });
+
+    assert.equal("temperature" in body, false);
+    assert.equal("top_p" in body, false);
+    assert.equal("top_k" in body, false);
+  });
+
+  it("translates PRISM reasoning effort into Anthropic output_config", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+      return new Response(
+        JSON.stringify({ content: [{ type: "text", text: "ok" }] }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const provider = new AnthropicProvider({ apiKey: "sk-ant-test" });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "claude-opus-4-8",
+      reasoningEffort: "xhigh",
+    });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "claude-sonnet-4-6",
+      reasoningEffort: "minimal",
+    });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "claude-sonnet-4-6",
+      reasoningEffort: "xhigh",
+    });
+
+    assert.deepEqual(bodies.map((body) => body.output_config), [
+      { effort: "xhigh" },
+      { effort: "low" },
+      { effort: "max" },
+    ]);
+  });
+
+  it("omits Anthropic effort for auto and unsupported models", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+      return new Response(
+        JSON.stringify({ content: [{ type: "text", text: "ok" }] }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const provider = new AnthropicProvider({ apiKey: "sk-ant-test" });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "claude-sonnet-4-6",
+      reasoningEffort: "auto",
+    });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "claude-haiku-4-5",
+      reasoningEffort: "high",
+    });
+
+    assert.deepEqual(bodies.map((body) => body.output_config), [undefined, undefined]);
   });
 
   it("still sends top_p when temperature is not configured", async () => {

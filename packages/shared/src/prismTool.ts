@@ -6,6 +6,72 @@
  * `tool_payload` (and is re-attached at read time as `chatMessage.askQuestion`).
  */
 
+import type {
+  AutoFallbackAttemptTraceV1,
+  AutoFallbackFailureReason,
+  AutoFallbackProvider,
+  AutoRecoveryTraceV1,
+} from "./autoFallback.js";
+
+function normalizeStoredAutoRecoveryTrace(
+  value: unknown
+): AutoRecoveryTraceV1 | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const row = value as Record<string, unknown>;
+  const provider = (candidate: unknown): AutoFallbackProvider | null =>
+    candidate === "local" || candidate === "openai" || candidate === "anthropic"
+      ? candidate
+      : null;
+  const finalProvider = provider(row.finalProvider);
+  const finalModel = typeof row.finalModel === "string" ? row.finalModel.trim().slice(0, 240) : "";
+  if (row.v !== 1 || !finalProvider || !finalModel || !Array.isArray(row.attempts)) {
+    return undefined;
+  }
+  const validReasons = new Set<AutoFallbackFailureReason>([
+    "timeout",
+    "provider_error",
+    "unavailable",
+    "empty",
+    "refusal",
+    "invalid_output",
+  ]);
+  const attempts = row.attempts
+    .slice(0, 3)
+    .map((candidate): AutoFallbackAttemptTraceV1 | null => {
+      if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return null;
+      const attempt = candidate as Record<string, unknown>;
+      const attemptProvider = provider(attempt.provider);
+      const model = typeof attempt.model === "string" ? attempt.model.trim().slice(0, 240) : "";
+      const outcome = attempt.outcome === "failed" || attempt.outcome === "succeeded"
+        ? attempt.outcome
+        : null;
+      const reason = typeof attempt.reason === "string" &&
+        validReasons.has(attempt.reason as AutoFallbackFailureReason)
+        ? attempt.reason as AutoFallbackFailureReason
+        : undefined;
+      if (!attemptProvider || !model || !outcome || (outcome === "failed" && !reason)) return null;
+      return {
+        provider: attemptProvider,
+        model,
+        durationMs:
+          typeof attempt.durationMs === "number" && Number.isFinite(attempt.durationMs)
+            ? Math.max(0, Math.round(attempt.durationMs))
+            : 0,
+        outcome,
+        ...(reason ? { reason } : {}),
+      };
+    })
+    .filter((attempt): attempt is AutoFallbackAttemptTraceV1 => attempt !== null);
+  if (attempts.length === 0 || attempts.at(-1)?.outcome !== "succeeded") return undefined;
+  return {
+    v: 1,
+    attempts,
+    finalProvider,
+    finalModel,
+    crossedOnline: row.crossedOnline === true,
+  };
+}
+
 export const PRISM_TOOL_START = "<<<PRISM_TOOL>>>";
 export const PRISM_TOOL_END = "<<<END_PRISM_TOOL>>>";
 
@@ -136,11 +202,21 @@ export interface CoffeeReplayPlayerDepartureEventPayload {
   occurredAt: string;
 }
 
+export interface CoffeeReplayBotDepartureEventPayload {
+  v: 1;
+  name: "coffeeReplayEvent";
+  kind: "botDeparture";
+  botId: string;
+  seatIndex: number;
+  occurredAt: string;
+}
+
 export type CoffeeReplayEventPayload =
   | CoffeeReplayArrivalEventPayload
   | CoffeeReplayMoodEventPayload
   | CoffeeReplayTopOffEventPayload
-  | CoffeeReplayPlayerDepartureEventPayload;
+  | CoffeeReplayPlayerDepartureEventPayload
+  | CoffeeReplayBotDepartureEventPayload;
 
 export type ZenDisplayAlign = "start" | "center" | "end";
 
@@ -202,6 +278,8 @@ export interface StoredAssistantToolEnvelope {
   coffeeUserAction?: CoffeeUserActionPayload;
   /** Coffee-only hidden state beats used by replay, not visible transcript prose. */
   coffeeReplayEvents?: CoffeeReplayEventPayload[];
+  /** Privacy-safe record of a successful Auto recovery. */
+  autoRecovery?: AutoRecoveryTraceV1;
 }
 
 /** Narrow storage shape for SQLite `messages.tool_payload` rows. */
@@ -237,6 +315,7 @@ export interface ParsedStoredAssistantToolPayload {
   coffeeAmbientAction?: CoffeeAmbientActionPayload;
   coffeeUserAction?: CoffeeUserActionPayload;
   coffeeReplayEvents?: CoffeeReplayEventPayload[];
+  autoRecovery?: AutoRecoveryTraceV1;
 }
 
 /// Many models wrap the envelope in a markdown fence; raw fences make JSON.parse fail
@@ -613,6 +692,24 @@ export function normalizeCoffeeReplayEventPayload(
   }
   const botId = normalizeCoffeeReplayBotId(row.botId);
   if (!botId) return undefined;
+  if (row.kind === "botDeparture") {
+    const seatIndex =
+      typeof row.seatIndex === "number" &&
+      Number.isInteger(row.seatIndex) &&
+      row.seatIndex >= 0 &&
+      row.seatIndex <= 4
+        ? row.seatIndex
+        : undefined;
+    if (seatIndex === undefined) return undefined;
+    return {
+      v: 1,
+      name: "coffeeReplayEvent",
+      kind: "botDeparture",
+      botId,
+      seatIndex,
+      occurredAt,
+    };
+  }
   if (row.kind === "arrival") {
     const walkDurationMs = normalizeCoffeeReplayDurationMs(row.walkDurationMs);
     const nameplateDelayMs = normalizeCoffeeReplayDurationMs(row.nameplateDelayMs);
@@ -1235,6 +1332,9 @@ export function parseStoredAssistantToolPayload(
       const coffeeReplayEvents = root
         ? normalizeCoffeeReplayEventPayloads(root.coffeeReplayEvents)
         : [];
+      const autoRecovery = root
+        ? normalizeStoredAutoRecoveryTrace(root.autoRecovery)
+        : undefined;
       return {
         askQuestion: normalizedAsk,
         ...(sent ? { sentGeneratedImage: sent } : {}),
@@ -1245,6 +1345,7 @@ export function parseStoredAssistantToolPayload(
         ...(coffeeAmbientAction ? { coffeeAmbientAction } : {}),
         ...(coffeeUserAction ? { coffeeUserAction } : {}),
         ...(coffeeReplayEvents.length > 0 ? { coffeeReplayEvents } : {}),
+        ...(autoRecovery ? { autoRecovery } : {}),
       };
     }
     if (!parsed || typeof parsed !== "object") return {};
@@ -1258,6 +1359,7 @@ export function parseStoredAssistantToolPayload(
     const coffeeAmbientAction = normalizeCoffeeAmbientActionPayload(row.coffeeAmbientAction);
     const coffeeUserAction = normalizeCoffeeUserActionPayload(row.coffeeUserAction);
     const coffeeReplayEvents = normalizeCoffeeReplayEventPayloads(row.coffeeReplayEvents);
+    const autoRecovery = normalizeStoredAutoRecoveryTrace(row.autoRecovery);
     const moodRow = row.mood;
     let moodKey: StoredMoodKey | undefined;
     let moodConfidence: number | undefined;
@@ -1290,6 +1392,7 @@ export function parseStoredAssistantToolPayload(
       ...(coffeeAmbientAction ? { coffeeAmbientAction } : {}),
       ...(coffeeUserAction ? { coffeeUserAction } : {}),
       ...(coffeeReplayEvents.length > 0 ? { coffeeReplayEvents } : {}),
+      ...(autoRecovery ? { autoRecovery } : {}),
     };
   } catch {
     return {};
@@ -1311,6 +1414,7 @@ export function hydrateAssistantMessageParts(args: {
   coffeeAmbientAction?: CoffeeAmbientActionPayload;
   coffeeUserAction?: CoffeeUserActionPayload;
   coffeeReplayEvents?: CoffeeReplayEventPayload[];
+  autoRecovery?: AutoRecoveryTraceV1;
 } {
   const stored = parseStoredAssistantToolPayload(args.toolPayload);
   const reparsed = parseAssistantPrismTools(args.content);
@@ -1335,6 +1439,7 @@ export function hydrateAssistantMessageParts(args: {
     ...(stored.coffeeReplayEvents && stored.coffeeReplayEvents.length > 0
       ? { coffeeReplayEvents: stored.coffeeReplayEvents }
       : {}),
+    ...(stored.autoRecovery ? { autoRecovery: stored.autoRecovery } : {}),
   };
 }
 
@@ -1356,6 +1461,7 @@ export function serializeAssistantToolPayload(args: {
   coffeeAmbientAction?: CoffeeAmbientActionPayload;
   coffeeUserAction?: CoffeeUserActionPayload;
   coffeeReplayEvents?: CoffeeReplayEventPayload[];
+  autoRecovery?: AutoRecoveryTraceV1;
 }): string | null {
   const hasAsk = args.askQuestion !== undefined;
   const hasStory = args.tellFictionalStory !== undefined;
@@ -1373,6 +1479,8 @@ export function serializeAssistantToolPayload(args: {
   const hasCoffeeUserAction = coffeeUserAction !== undefined;
   const coffeeReplayEvents = normalizeCoffeeReplayEventPayloads(args.coffeeReplayEvents);
   const hasCoffeeReplayEvents = coffeeReplayEvents.length > 0;
+  const autoRecovery = normalizeStoredAutoRecoveryTrace(args.autoRecovery);
+  const hasAutoRecovery = autoRecovery !== undefined;
   if (
     !hasAsk &&
     !hasStory &&
@@ -1383,7 +1491,8 @@ export function serializeAssistantToolPayload(args: {
     !hasZenTurn &&
     !hasCoffeeAmbientAction &&
     !hasCoffeeUserAction &&
-    !hasCoffeeReplayEvents
+    !hasCoffeeReplayEvents &&
+    !hasAutoRecovery
   ) {
     return null;
   }
@@ -1398,6 +1507,7 @@ export function serializeAssistantToolPayload(args: {
     !hasCoffeeAmbientAction &&
     !hasCoffeeUserAction &&
     !hasCoffeeReplayEvents &&
+    !hasAutoRecovery &&
     hasImage
   ) {
     return JSON.stringify({ v: 1 as const, sentGeneratedImage: args.sentGeneratedImage! });
@@ -1412,7 +1522,8 @@ export function serializeAssistantToolPayload(args: {
     !hasZenTurn &&
     !hasCoffeeAmbientAction &&
     !hasCoffeeUserAction &&
-    !hasCoffeeReplayEvents
+    !hasCoffeeReplayEvents &&
+    !hasAutoRecovery
   ) {
     return serializeAskQuestionTool(args.askQuestion!);
   }
@@ -1439,6 +1550,7 @@ export function serializeAssistantToolPayload(args: {
     ...(hasCoffeeAmbientAction ? { coffeeAmbientAction } : {}),
     ...(hasCoffeeUserAction ? { coffeeUserAction } : {}),
     ...(hasCoffeeReplayEvents ? { coffeeReplayEvents } : {}),
+    ...(hasAutoRecovery ? { autoRecovery } : {}),
   };
   return JSON.stringify(payload);
 }

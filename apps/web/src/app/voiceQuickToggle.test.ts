@@ -18,10 +18,10 @@ describe("global voice selector", () => {
     assert.equal(voiceModeDisplayName("english"), "English");
   });
 
-  it("keeps procedural Bottish from blocking the canvas reveal clock", () => {
+  it("keeps robot voice playback from blocking the canvas reveal clock", () => {
     assert.equal(voiceModeDrivesCanvasReveal("bottish"), false);
     assert.equal(voiceModeDrivesCanvasReveal("mute"), false);
-    assert.equal(voiceModeDrivesCanvasReveal("babble"), true);
+    assert.equal(voiceModeDrivesCanvasReveal("babble"), false);
     assert.equal(voiceModeDrivesCanvasReveal("english"), true);
   });
 });

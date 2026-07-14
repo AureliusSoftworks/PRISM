@@ -26,6 +26,7 @@ interface UsageSession {
   conversationId?: string | null;
   messageId?: string | null;
   botId?: string | null;
+  developerSequence: number;
 }
 
 export interface UsageSessionInput {
@@ -53,6 +54,31 @@ export interface UsageTextEventInput {
   loadDurationMs?: number | null;
   promptDurationMs?: number | null;
   completionDurationMs?: number | null;
+  createdAt?: string;
+  /** Provider-level diagnostic detail used only by explicit Developer Transcript exports. */
+  developer?: Omit<DeveloperTranscriptEventInput, "kind" | "purpose" | "provider" | "model" | "createdAt">;
+}
+
+export interface DeveloperTranscriptEventInput {
+  kind: "llm" | "search" | "tool";
+  purpose: string;
+  provider?: string | null;
+  model?: string | null;
+  request?: unknown;
+  rawOutput?: unknown;
+  parsedOutput?: unknown;
+  stopReason?: string | null;
+  streaming?: boolean;
+  error?: string | null;
+  durationMs?: number | null;
+  usage?: {
+    inputTokens?: number | null;
+    outputTokens?: number | null;
+    totalTokens?: number | null;
+    cachedInputTokens?: number | null;
+    tokenCountSource?: UsageTokenCountSource;
+  };
+  fallback?: boolean;
   createdAt?: string;
 }
 
@@ -575,6 +601,73 @@ function currentSession(): UsageSession | undefined {
   return usageStorage.getStore();
 }
 
+function safeDiagnosticJson(value: unknown): string {
+  const seen = new WeakSet<object>();
+  try {
+    return JSON.stringify(value, (_key, item: unknown) => {
+      if (typeof item === "bigint") return item.toString();
+      if (typeof item !== "object" || item === null) return item;
+      if (seen.has(item)) return "[Circular]";
+      seen.add(item);
+      return item;
+    });
+  } catch {
+    return JSON.stringify({ error: "Diagnostic payload could not be serialized." });
+  }
+}
+
+/**
+ * Persist one session-scoped developer diagnostic event. Private/incognito usage sessions
+ * deliberately skip this durable trace, matching their no-persistence contract.
+ */
+export function recordDeveloperTranscriptEvent(args: DeveloperTranscriptEventInput): void {
+  const session = currentSession();
+  if (!session || session.privacyScope === "private") return;
+  session.developerSequence += 1;
+  const payload = {
+    ...(args.request !== undefined ? { request: args.request } : {}),
+    ...(args.rawOutput !== undefined ? { rawOutput: args.rawOutput } : {}),
+    ...(args.parsedOutput !== undefined ? { parsedOutput: args.parsedOutput } : {}),
+    ...(args.stopReason !== undefined ? { stopReason: args.stopReason } : {}),
+    streaming: args.streaming === true,
+    ...(args.error ? { error: args.error } : {}),
+    ...(typeof args.durationMs === "number" && Number.isFinite(args.durationMs)
+      ? { durationMs: Math.max(0, args.durationMs) }
+      : {}),
+    ...(args.usage ? { usage: args.usage } : {}),
+    ...(args.fallback === true ? { fallback: true } : {}),
+  };
+  try {
+    session.db
+      .prepare(
+        `INSERT INTO developer_transcript_events (
+          id, user_id, conversation_id, message_id, bot_id, request_id,
+          request_sequence, event_kind, purpose, provider, model, payload_json, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        randomUUID(),
+        session.userId,
+        sessionLinkedValue(session, session.conversationId),
+        sessionLinkedValue(session, session.messageId),
+        sessionLinkedValue(session, session.botId),
+        session.requestId,
+        session.developerSequence,
+        args.kind,
+        args.purpose.trim() || "system_unlabeled",
+        args.provider?.trim() || null,
+        args.model?.trim() || null,
+        safeDiagnosticJson(payload),
+        args.createdAt ?? new Date().toISOString()
+      );
+  } catch (error) {
+    console.warn(
+      "[developer-transcript] failed to record event:",
+      error instanceof Error ? error.message : error
+    );
+  }
+}
+
 function sessionLinkedValue<T extends string | null | undefined>(
   session: UsageSession,
   value: T
@@ -680,6 +773,7 @@ function createUsageSession(input: UsageSessionInput): UsageSession {
     requestId: input.requestId ?? randomUUID(),
     privacyScope: input.privacyScope ?? "normal",
     surface: input.surface,
+    developerSequence: 0,
     ...(input.mode !== undefined ? { mode: input.mode } : {}),
     ...(input.conversationId !== undefined ? { conversationId: input.conversationId } : {}),
     ...(input.messageId !== undefined ? { messageId: input.messageId } : {}),
@@ -698,6 +792,42 @@ export function patchUsageSession(
   if (patch.botId !== undefined) session.botId = patch.botId;
   if (patch.mode !== undefined) session.mode = patch.mode;
   if (patch.surface !== undefined) session.surface = patch.surface;
+  if (session.privacyScope === "private") return;
+  if (
+    patch.conversationId === undefined &&
+    patch.messageId === undefined &&
+    patch.botId === undefined
+  ) {
+    return;
+  }
+  try {
+    const conversationId = sessionLinkedValue(session, session.conversationId);
+    const messageId = sessionLinkedValue(session, session.messageId);
+    const botId = sessionLinkedValue(session, session.botId);
+    session.db
+      .prepare(
+        `UPDATE usage_events
+         SET conversation_id = COALESCE(conversation_id, ?),
+             message_id = COALESCE(message_id, ?),
+             bot_id = COALESCE(bot_id, ?)
+         WHERE user_id = ? AND request_id = ? AND privacy_scope != 'private'`
+      )
+      .run(conversationId, messageId, botId, session.userId, session.requestId);
+    session.db
+      .prepare(
+        `UPDATE developer_transcript_events
+         SET conversation_id = COALESCE(conversation_id, ?),
+             message_id = COALESCE(message_id, ?),
+             bot_id = COALESCE(bot_id, ?)
+         WHERE user_id = ? AND request_id = ?`
+      )
+      .run(conversationId, messageId, botId, session.userId, session.requestId);
+  } catch (error) {
+    console.warn(
+      "[usage] failed to patch persisted request linkage:",
+      error instanceof Error ? error.message : error
+    );
+  }
 }
 
 export function attachUsageEventsToMessage(args: {
@@ -729,6 +859,23 @@ export function attachUsageEventsToMessage(args: {
         session.userId,
         session.requestId
       );
+    session.db
+      .prepare(
+        `UPDATE developer_transcript_events
+         SET conversation_id = COALESCE(conversation_id, ?),
+             message_id = COALESCE(message_id, ?),
+             bot_id = COALESCE(bot_id, ?)
+         WHERE user_id = ?
+           AND request_id = ?
+           AND message_id IS NULL`
+      )
+      .run(
+        args.conversationId,
+        args.messageId,
+        args.botId ?? null,
+        session.userId,
+        session.requestId
+      );
   } catch (error) {
     console.warn(
       "[usage] failed to attach usage events:",
@@ -740,10 +887,30 @@ export function attachUsageEventsToMessage(args: {
 export function recordTextUsage(args: UsageTextEventInput): void {
   const session = currentSession();
   if (!session) return;
+  const createdAt = args.createdAt ?? new Date().toISOString();
   insertUsageEvent(session, {
     ...args,
+    createdAt,
     eventType: "text",
   });
+  if (args.developer) {
+    recordDeveloperTranscriptEvent({
+      kind: "llm",
+      purpose: args.purpose ?? "system_unlabeled",
+      provider: args.provider,
+      model: args.model,
+      ...args.developer,
+      durationMs: args.developer.durationMs ?? args.durationMs ?? null,
+      usage: args.developer.usage ?? {
+        inputTokens: args.inputTokens,
+        outputTokens: args.outputTokens,
+        totalTokens: args.totalTokens,
+        cachedInputTokens: args.cachedInputTokens,
+        tokenCountSource: args.tokenCountSource,
+      },
+      createdAt,
+    });
+  }
 }
 
 export function recordEstimatedEmbeddingUsage(args: {

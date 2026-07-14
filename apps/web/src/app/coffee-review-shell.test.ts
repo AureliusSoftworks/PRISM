@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+const cssSource = readFileSync(new URL("./page.module.css", import.meta.url), "utf8");
 
 test("completed Coffee sessions enter read-only review before replay starts", () => {
   assert.match(
@@ -43,5 +44,29 @@ test("review renders Default Prism in a reserved bottom table seat", () => {
   assert.match(pageSource, /className=\{styles\.coffeeReplayPlayerName\}/);
   assert.match(pageSource, /className=\{styles\.coffeeReplayPlayerGlyph\}/);
   assert.match(pageSource, /\{coffeePlayerLabel\}/);
-  assert.match(pageSource, /name=\{zenDefaultPrismGlyph\}/);
+  assert.doesNotMatch(
+    pageSource,
+    /className=\{styles\.coffeeReplayPlayerGlyph\}[\s\S]{0,180}<BotGlyph/,
+  );
+});
+
+test("leaving Coffee returns immediately while the epilogue continues in the background", () => {
+  assert.match(
+    pageSource,
+    /const recordCoffeePlayerDepartureOnExit = \([\s\S]*?void api\([\s\S]*?keepalive: true/,
+  );
+  assert.match(
+    pageSource,
+    /recordCoffeePlayerDepartureOnExit\(conversation, coffeeSessionPhase\);[\s\S]*?setCoffeeConversation\(null\);[\s\S]*?setCoffeeSessionPhase\("selecting"\)/,
+  );
+});
+
+test("review restores departed seats and animates each recorded bot walk-out", () => {
+  assert.match(pageSource, /restoreCoffeeReviewSeatBotIds\(/);
+  assert.match(pageSource, /replayState\?\.departedBotIds\.has\(entry\.botId\)/);
+  assert.match(pageSource, /data-replay-departing=/);
+  assert.match(
+    cssSource,
+    /\.coffeeSeat\[data-replay-departing="true"\][\s\S]*?animation: coffeeSeatWalkAway 2600ms/,
+  );
 });

@@ -31,6 +31,7 @@ import {
   parseHiddenComfyUiWorkflowIds,
   resolveNextSettings,
   sanitizeAnthropicKeyInput,
+  sanitizeBraveSearchKeyInput,
   sanitizeElevenLabsKeyInput,
   sanitizeOpenAiKeyInput,
   type CurrentSettings,
@@ -57,12 +58,12 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     experimentalAllModelEffortEnabled: 0,
     coffeeExperimentalTableAngleEnabled: 0,
     psychicModeEnabled: 0,
-    fallbackModelMessageStripe: 1,
+    autoSwitchModel: 0,
+    autoFallbackChain: null,
     hiddenBotModelIds: "[]",
     hiddenComfyUiWorkflowIds: "[]",
     preferredLocalModel: null,
     preferredOnlineModel: null,
-    lenientLocalFallbackModel: null,
     lenientLocalImageFallbackModel: null,
     secondaryOllamaHost: null,
     comfyUiHost: null,
@@ -410,34 +411,75 @@ describe("resolveNextSettings — psychicModeEnabled", () => {
   });
 });
 
-describe("resolveNextSettings — fallbackModelMessageStripe", () => {
-  it("persists boolean values", () => {
-    assert.equal(
-      resolveNextSettings(
-        { fallbackModelMessageStripe: false },
-        baseline({ fallbackModelMessageStripe: 1 })
-      ).fallbackModelMessageStripe,
-      0
+describe("resolveNextSettings — retired text fallback settings", () => {
+  it("ignores legacy PATCH fields", () => {
+    const next = resolveNextSettings(
+      {
+        fallbackModelMessageStripe: false,
+        lenientLocalFallbackModel: "replacement:latest",
+      },
+      baseline()
     );
-    assert.equal(
-      resolveNextSettings(
-        { fallbackModelMessageStripe: true },
-        baseline({ fallbackModelMessageStripe: 0 })
-      ).fallbackModelMessageStripe,
-      1
+    assert.equal("fallbackModelMessageStripe" in next, false);
+    assert.equal("lenientLocalFallbackModel" in next, false);
+  });
+});
+
+describe("resolveNextSettings — Auto model chain", () => {
+  it("stores Auto-off by default and accepts a versioned two-model chain", () => {
+    const next = resolveNextSettings(
+      {
+        autoModeEnabled: true,
+        autoFallbackChain: {
+          v: 1,
+          fallbacks: [
+            { provider: "local", model: "qwen3:8b" },
+            { provider: "openai", model: "gpt-5-mini" },
+          ],
+        },
+      },
+      baseline()
     );
+    assert.equal(next.autoSwitchModel, 1);
+    assert.deepEqual(JSON.parse(next.autoFallbackChain ?? "null"), {
+      v: 1,
+      fallbacks: [
+        { provider: "local", model: "qwen3:8b" },
+        { provider: "openai", model: "gpt-5-mini" },
+      ],
+    });
   });
 
-  it("keeps the stored value when the field is missing or invalid", () => {
-    const current = baseline({ fallbackModelMessageStripe: 0 });
-    assert.equal(resolveNextSettings({}, current).fallbackModelMessageStripe, 0);
-    assert.equal(
-      resolveNextSettings(
-        { fallbackModelMessageStripe: "false" as unknown as boolean },
-        current
-      ).fallbackModelMessageStripe,
-      0
+  it("rejects duplicate entries and preserves the last valid chain", () => {
+    const stored = JSON.stringify({
+      v: 1,
+      fallbacks: [
+        { provider: "local", model: "qwen3:8b" },
+        { provider: "openai", model: "gpt-5-mini" },
+      ],
+    });
+    const next = resolveNextSettings(
+      {
+        autoFallbackChain: {
+          v: 1,
+          fallbacks: [
+            { provider: "local", model: "qwen3:8b" },
+            { provider: "local", model: "qwen3:8b" },
+          ],
+        },
+      },
+      baseline({ autoFallbackChain: stored })
     );
+    assert.equal(next.autoFallbackChain, stored);
+  });
+
+  it("cannot enable Auto without a valid saved chain", () => {
+    const next = resolveNextSettings(
+      { autoModeEnabled: true, autoFallbackChain: null },
+      baseline()
+    );
+    assert.equal(next.autoSwitchModel, 0);
+    assert.equal(next.autoFallbackChain, null);
   });
 });
 
@@ -565,20 +607,6 @@ describe("resolveNextSettings — preferred auto models", () => {
     );
     assert.equal(next.preferredLocalModel, "llama3.2");
     assert.equal(next.preferredOnlineModel, "gpt-4o-mini");
-  });
-
-  it("stores and clears the lenient local fallback model", () => {
-    const stored = resolveNextSettings(
-      { lenientLocalFallbackModel: " llama3.1:8b " },
-      baseline()
-    );
-    assert.equal(stored.lenientLocalFallbackModel, "llama3.1:8b");
-
-    const cleared = resolveNextSettings(
-      { lenientLocalFallbackModel: " " },
-      baseline({ lenientLocalFallbackModel: "llama3.1:8b" })
-    );
-    assert.equal(cleared.lenientLocalFallbackModel, null);
   });
 
   it("stores and clears the lenient local image fallback model", () => {
@@ -1348,6 +1376,29 @@ describe("resolveNextSettings — elevenLabsApiKey", () => {
   });
 });
 
+describe("resolveNextSettings — braveSearchApiKey", () => {
+  it("supports replace, keep, and clear without exposing the value elsewhere", () => {
+    assert.deepEqual(
+      resolveNextSettings(
+        { braveSearchApiKey: 'BRAVE_SEARCH_API_KEY="brave-test-key"' },
+        baseline()
+      ).braveSearchKeyIntent,
+      { action: "replace", plaintext: "brave-test-key" }
+    );
+    assert.deepEqual(
+      resolveNextSettings({ braveSearchApiKey: "   " }, baseline()).braveSearchKeyIntent,
+      { action: "keep" }
+    );
+    assert.deepEqual(
+      resolveNextSettings({ braveSearchApiKey: null }, baseline()).braveSearchKeyIntent,
+      { action: "clear" }
+    );
+    assert.deepEqual(resolveNextSettings({}, baseline()).braveSearchKeyIntent, {
+      action: "keep",
+    });
+  });
+});
+
 describe("sanitizeOpenAiKeyInput", () => {
   it("pass-through for a clean key", () => {
     assert.equal(sanitizeOpenAiKeyInput("sk-proj-abc123"), "sk-proj-abc123");
@@ -1424,6 +1475,15 @@ describe("sanitizeElevenLabsKeyInput", () => {
     assert.equal(
       sanitizeElevenLabsKeyInput("ELEVENLABS_API_KEY='xi-abc'"),
       "xi-abc"
+    );
+  });
+});
+
+describe("sanitizeBraveSearchKeyInput", () => {
+  it("uses the same env-line stripping behavior as other provider keys", () => {
+    assert.equal(
+      sanitizeBraveSearchKeyInput("BRAVE_SEARCH_API_KEY='brave-abc'"),
+      "brave-abc"
     );
   });
 });
@@ -1557,7 +1617,6 @@ describe("resolveNextSettings — independence", () => {
       providerLocked: 1,
       autoMemory: 0,
       composerWritingAssist: 0,
-      fallbackModelMessageStripe: 0,
     });
     const next = resolveNextSettings({ theme: "system" }, current);
     assert.equal(next.theme, "system");
@@ -1565,7 +1624,6 @@ describe("resolveNextSettings — independence", () => {
     assert.equal(next.providerLocked, 1);
     assert.equal(next.autoMemory, 0);
     assert.equal(next.composerWritingAssist, 0);
-    assert.equal(next.fallbackModelMessageStripe, 0);
     assert.deepEqual(next.openAiKeyIntent, { action: "keep" });
   });
 

@@ -69,6 +69,13 @@ describe("createDatabase bot export hash migration", () => {
         "2026-01-01T00:00:00.000Z",
         "2026-01-01T00:00:00.000Z"
       );
+      for (const name of [
+        "brave_search_key_ciphertext",
+        "brave_search_key_iv",
+        "brave_search_key_tag",
+      ]) {
+        db.exec(`ALTER TABLE users DROP COLUMN ${name};`);
+      }
       db.close();
 
       const reopened = createDatabase();
@@ -91,6 +98,16 @@ describe("createDatabase bot export hash migration", () => {
       assert.ok(userColumns.some((column) => column.name === "prism_default_bot_audio_voice_profile"));
       assert.ok(userColumns.some((column) => column.name === "default_system_voice_name"));
       assert.ok(userColumns.some((column) => column.name === "default_elevenlabs_voice_id"));
+      assert.deepEqual(
+        [
+          "brave_search_key_ciphertext",
+          "brave_search_key_iv",
+          "brave_search_key_tag",
+        ].filter(
+          (name) => !userColumns.some((column) => column.name === name)
+        ),
+        []
+      );
       assert.equal(
         userColumns.find((column) => column.name === "voice_effects_enabled")?.dflt_value,
         "1"
@@ -155,6 +172,23 @@ describe("createDatabase bot export hash migration", () => {
         .prepare("PRAGMA table_info(messages)")
         .all() as Array<{ name: string }>;
       assert.ok(messageColumns.some((column) => column.name === "coffee_audience_bot_ids"));
+      const developerTranscriptColumns = reopened
+        .prepare("PRAGMA table_info(developer_transcript_events)")
+        .all() as Array<{ name: string }>;
+      assert.deepEqual(
+        [
+          "conversation_id",
+          "message_id",
+          "request_id",
+          "request_sequence",
+          "event_kind",
+          "purpose",
+          "payload_json",
+        ].filter(
+          (name) => !developerTranscriptColumns.some((column) => column.name === name)
+        ),
+        []
+      );
       assert.ok(columns.some((column) => column.name === "export_hash"));
       assert.ok(columns.some((column) => column.name === "flirt_enabled"));
       assert.ok(columns.some((column) => column.name === "semantic_facets"));

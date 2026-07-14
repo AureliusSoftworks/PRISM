@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  createChatRevealPaceHandoffState,
   resolveChatRevealTypingPacing,
   resolvePacedChatRevealVisibleTokenCount,
   type ChatRevealPaceState,
@@ -73,6 +74,40 @@ describe("resolveChatRevealTypingPacing", () => {
 });
 
 describe("resolvePacedChatRevealVisibleTokenCount", () => {
+  it("continues after a speech failure without replaying visible text", () => {
+    const revealKey = "conversation:message";
+    const tokenSignature = "one two three four five";
+    const state = new Map<string, ChatRevealPaceState>([
+      [
+        revealKey,
+        createChatRevealPaceHandoffState({
+          tokenSignature,
+          visibleTokenCount: 3,
+          nowMs: 1000,
+        }),
+      ],
+    ]);
+    const args = {
+      revealKey,
+      tokenCount: 5,
+      tokenSignature,
+      stateByRevealKey: state,
+      resolveStepDelayMs: () => 100,
+    };
+    assert.equal(
+      resolvePacedChatRevealVisibleTokenCount({ ...args, nowMs: 1000 }),
+      3,
+    );
+    assert.equal(
+      resolvePacedChatRevealVisibleTokenCount({ ...args, nowMs: 1099 }),
+      3,
+    );
+    assert.equal(
+      resolvePacedChatRevealVisibleTokenCount({ ...args, nowMs: 1100 }),
+      4,
+    );
+  });
+
   it("starts a late reveal at one visible token instead of catching up immediately", () => {
     const state = new Map<string, ChatRevealPaceState>();
     assert.equal(
