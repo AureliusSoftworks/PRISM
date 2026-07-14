@@ -1,12 +1,14 @@
 import { createHash } from "node:crypto";
 import { getAppConfig } from "@localai/config";
 import {
+  anthropicReasoningEffortForRequest,
   openAiModelSupportsReasoningEffort,
   reasoningEffortForRequest,
   type ReasoningEffort,
   type UsagePurpose,
 } from "@localai/shared";
 import {
+  recordDeveloperTranscriptEvent,
   recordEstimatedEmbeddingUsage,
   recordTextUsage,
   usagePurpose,
@@ -43,6 +45,14 @@ export interface GenerateOptions {
 }
 
 export type ProviderName = "local" | "openai" | "anthropic";
+
+export function defaultModelIdForProvider(provider: ProviderName): string {
+  return provider === "local"
+    ? config.ollamaModel
+    : provider === "anthropic"
+      ? ANTHROPIC_DEFAULT_MODEL
+      : OPENAI_DEFAULT_MODEL;
+}
 
 export type ApiKeyAuthSource = "account" | "server" | "none";
 
@@ -103,11 +113,56 @@ export interface DualOllamaWorkloadStatus {
 
 export interface LlmProvider {
   name: ProviderName;
+  /** Safe, user-visible model context for provider diagnostics. */
+  diagnosticModel?: string;
   generateResponse(
     messages: ProviderMessage[],
     options?: GenerateOptions
   ): Promise<string>;
   embedText(text: string): Promise<number[]>;
+}
+
+export type LocalModelRequestFailureKind =
+  | "service_unavailable"
+  | "endpoint_not_found"
+  | "model_unavailable"
+  | "authentication_or_configuration"
+  | "request_failed";
+
+const LOCAL_MODEL_REQUEST_ERROR_MESSAGES: Record<
+  LocalModelRequestFailureKind,
+  string
+> = {
+  service_unavailable: "Local model service is unavailable.",
+  endpoint_not_found: "Local chat endpoint was not found.",
+  model_unavailable: "Configured local model is unavailable.",
+  authentication_or_configuration:
+    "Local model authentication or configuration failed.",
+  request_failed: "Local model request failed.",
+};
+
+/**
+ * Categorized local-provider failure with a deliberately redacted message.
+ * Hostnames, credentials, and raw response bodies must not cross this boundary.
+ */
+export class LocalModelRequestError extends Error {
+  public readonly kind: LocalModelRequestFailureKind;
+  public readonly status?: number;
+
+  public constructor(
+    kind: LocalModelRequestFailureKind,
+    status?: number,
+    options: { pairedHostMissing?: boolean } = {}
+  ) {
+    super(
+      options.pairedHostMissing
+        ? "Paired Ollama host is not configured."
+        : LOCAL_MODEL_REQUEST_ERROR_MESSAGES[kind]
+    );
+    this.name = "LocalModelRequestError";
+    this.kind = kind;
+    this.status = status;
+  }
 }
 
 interface OpenAiConfig {
@@ -256,6 +311,23 @@ export function openAiModelUsesMaxCompletionTokens(modelId: string): boolean {
  */
 export function openAiModelUsesFixedDefaultTemperature(modelId: string): boolean {
   return openAiReasoningStyleChatApi(modelId);
+}
+
+/**
+ * Anthropic models released after Claude Opus 4.6 reject non-default
+ * sampling controls. Keep this model capability centralized so newer Claude
+ * models can use their fixed defaults without changing legacy model behavior.
+ */
+export function anthropicModelUsesFixedDefaultSampling(modelId: string): boolean {
+  const normalized = modelId.trim().toLowerCase();
+  if (normalized === "claude-mythos-preview") return true;
+  const version = normalized.match(
+    /^claude-[a-z0-9]+-(\d+)(?:-(\d+))?(?:-\d{8})?$/
+  );
+  if (!version) return false;
+  const major = Number(version[1]);
+  const minor = Number(version[2] ?? 0);
+  return major > 4 || (major === 4 && minor >= 7);
 }
 
 /**
@@ -1093,6 +1165,56 @@ async function buildUncachedModelCatalog(
   };
 }
 
+function isAbortFailure(error: unknown, signal?: AbortSignal): boolean {
+  return signal?.aborted === true || (error instanceof Error && error.name === "AbortError");
+}
+
+async function classifyLocalModelHttpFailure(
+  response: Response
+): Promise<LocalModelRequestFailureKind> {
+  let evidence = "";
+  try {
+    const raw = (await response.text()).slice(0, 1_000);
+    try {
+      const payload = JSON.parse(raw) as unknown;
+      if (payload && typeof payload === "object") {
+        const record = payload as Record<string, unknown>;
+        evidence = [record.error, record.message]
+          .filter((value): value is string => typeof value === "string")
+          .join(" ");
+      } else if (typeof payload === "string") {
+        evidence = payload;
+      }
+    } catch {
+      evidence = raw;
+    }
+  } catch {
+    // Status-only classification still gives a safe, useful fallback.
+  }
+
+  const normalized = evidence.toLowerCase();
+  const modelUnavailable =
+    /\bmodel\b[\s\S]{0,120}\b(not found|missing|does not exist|unavailable|failed to load|cannot load)\b/u.test(
+      normalized
+    ) || /\b(pull|download)\b[\s\S]{0,80}\bmodel\b/u.test(normalized);
+  if (modelUnavailable) return "model_unavailable";
+
+  const authenticationOrConfiguration =
+    /\b(unauthori[sz]ed|forbidden|authentication|credentials?|api[-_ ]?key|permission denied|not configured|configuration error|invalid configuration)\b/u.test(
+      normalized
+    );
+  if (authenticationOrConfiguration) return "authentication_or_configuration";
+
+  if (response.status === 404) return "endpoint_not_found";
+  if ([400, 401, 403, 407, 422].includes(response.status)) {
+    return "authentication_or_configuration";
+  }
+  if ([408, 425, 429].includes(response.status) || response.status >= 500) {
+    return "service_unavailable";
+  }
+  return "request_failed";
+}
+
 export class LocalOllamaProvider implements LlmProvider {
   public readonly name = "local" as const;
   private readonly secondaryOllamaHost: string | null;
@@ -1110,7 +1232,11 @@ export class LocalOllamaProvider implements LlmProvider {
     const requestedModel = options?.model?.trim() || config.ollamaModel;
     const secondaryModel = parseSecondaryOllamaModelId(requestedModel);
     if (secondaryModel && !this.secondaryOllamaHost) {
-      throw new Error("Paired Ollama host is not configured.");
+      throw new LocalModelRequestError(
+        "authentication_or_configuration",
+        undefined,
+        { pairedHostMissing: true }
+      );
     }
     const dualWorkloadModel = secondaryModel
       ? null
@@ -1157,17 +1283,54 @@ export class LocalOllamaProvider implements LlmProvider {
     }
 
     const startedAt = Date.now();
-    const response = await fetch(`${ollamaHost}/api/chat`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(requestBody),
-      signal: options?.signal,
-    });
+    let response: Response;
+    try {
+      response = await fetch(`${ollamaHost}/api/chat`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(requestBody),
+        signal: options?.signal,
+      });
+    } catch (error) {
+      if (isAbortFailure(error, options?.signal)) {
+        recordDeveloperTranscriptEvent({
+          kind: "llm",
+          purpose: usagePurpose(options?.usagePurpose),
+          provider: "local",
+          model,
+          request: requestBody,
+          error: "Local model request was aborted by the caller.",
+          durationMs: Date.now() - startedAt,
+        });
+        throw error;
+      }
+      recordDeveloperTranscriptEvent({
+        kind: "llm",
+        purpose: usagePurpose(options?.usagePurpose),
+        provider: "local",
+        model,
+        request: requestBody,
+        error: "Local model service was unavailable.",
+        durationMs: Date.now() - startedAt,
+      });
+      throw new LocalModelRequestError("service_unavailable");
+    }
     if (!response.ok) {
-      throw new Error(`Local model request failed (${response.status})`);
+      const failureKind = await classifyLocalModelHttpFailure(response);
+      recordDeveloperTranscriptEvent({
+        kind: "llm",
+        purpose: usagePurpose(options?.usagePurpose),
+        provider: "local",
+        model,
+        request: requestBody,
+        error: LOCAL_MODEL_REQUEST_ERROR_MESSAGES[failureKind],
+        durationMs: Date.now() - startedAt,
+      });
+      throw new LocalModelRequestError(failureKind, response.status);
     }
     const payload = (await response.json()) as {
       message?: { content?: string; thinking?: string; tool_calls?: unknown };
+      done_reason?: string;
       prompt_eval_count?: number;
       eval_count?: number;
       total_duration?: number;
@@ -1191,10 +1354,32 @@ export class LocalOllamaProvider implements LlmProvider {
 
     if (!text) {
       if (hasToolCalls) {
+        recordDeveloperTranscriptEvent({
+          kind: "llm",
+          purpose: usagePurpose(options?.usagePurpose),
+          provider: "local",
+          model,
+          request: requestBody,
+          rawOutput: payload,
+          stopReason: payload.done_reason ?? null,
+          error: "Local model returned tool calls instead of assistant text.",
+          durationMs: Date.now() - startedAt,
+        });
         throw new Error(
           "Local model returned tool calls instead of assistant text. Prism chat expects normal prose in `message.content` — disable native tool calling for this model in Ollama, or pick a different chat model."
         );
       }
+      recordDeveloperTranscriptEvent({
+        kind: "llm",
+        purpose: usagePurpose(options?.usagePurpose),
+        provider: "local",
+        model,
+        request: requestBody,
+        rawOutput: payload,
+        stopReason: payload.done_reason ?? null,
+        error: "Local model returned no assistant text.",
+        durationMs: Date.now() - startedAt,
+      });
       throw new Error(
         "Local chat model returned no assistant text (empty `message.content`). " +
           "If you use a thinking-style model, update Ollama or try another chat model. " +
@@ -1204,6 +1389,10 @@ export class LocalOllamaProvider implements LlmProvider {
     const inputTokens =
       typeof payload.prompt_eval_count === "number" ? payload.prompt_eval_count : null;
     const outputTokens = typeof payload.eval_count === "number" ? payload.eval_count : null;
+    const durationMs =
+      typeof payload.total_duration === "number"
+        ? payload.total_duration / 1_000_000
+        : Date.now() - startedAt;
     recordTextUsage({
       provider: "local",
       model,
@@ -1216,10 +1405,7 @@ export class LocalOllamaProvider implements LlmProvider {
           : null,
       tokenCountSource:
         inputTokens !== null || outputTokens !== null ? "provider_reported" : "unavailable",
-      durationMs:
-        typeof payload.total_duration === "number"
-          ? payload.total_duration / 1_000_000
-          : Date.now() - startedAt,
+      durationMs,
       loadDurationMs:
         typeof payload.load_duration === "number" ? payload.load_duration / 1_000_000 : null,
       promptDurationMs:
@@ -1228,6 +1414,14 @@ export class LocalOllamaProvider implements LlmProvider {
           : null,
       completionDurationMs:
         typeof payload.eval_duration === "number" ? payload.eval_duration / 1_000_000 : null,
+      developer: {
+        request: requestBody,
+        rawOutput: payload,
+        parsedOutput: text,
+        stopReason: payload.done_reason ?? null,
+        streaming: false,
+        durationMs,
+      },
     });
     return text;
   }
@@ -1305,7 +1499,24 @@ export class OpenAiProvider implements LlmProvider {
       });
 
     let startedAt = Date.now();
-    let response = await sendRequest(requestBody);
+    let retriedWithoutReasoningEffort = false;
+    let response: Response;
+    try {
+      response = await sendRequest(requestBody);
+    } catch (error) {
+      recordDeveloperTranscriptEvent({
+        kind: "llm",
+        purpose: usagePurpose(options?.usagePurpose),
+        provider: "openai",
+        model: modelId,
+        request: requestBody,
+        error: isAbortFailure(error, options?.signal)
+          ? "OpenAI request was aborted by the caller."
+          : "OpenAI request could not reach the provider.",
+        durationMs: Date.now() - startedAt,
+      });
+      throw error;
+    }
     if (!response.ok) {
       // Surface OpenAI's actual reason (e.g. "model 'foo' does not exist",
       // "Incorrect API key provided", context-length errors) instead of a
@@ -1320,13 +1531,39 @@ export class OpenAiProvider implements LlmProvider {
       ) {
         const retryBody = { ...requestBody };
         delete retryBody.reasoning_effort;
+        recordDeveloperTranscriptEvent({
+          kind: "llm",
+          purpose: usagePurpose(options?.usagePurpose),
+          provider: "openai",
+          model: modelId,
+          request: requestBody,
+          error: "OpenAI rejected reasoning effort; retrying without it.",
+          durationMs: Date.now() - startedAt,
+        });
         console.warn(
           `[openai] reasoning_effort rejected for model=${modelUsed}; retrying without effort detail=${
             detail || "<empty body>"
           }`
         );
         startedAt = Date.now();
-        response = await sendRequest(retryBody);
+        retriedWithoutReasoningEffort = true;
+        try {
+          response = await sendRequest(retryBody);
+        } catch (error) {
+          recordDeveloperTranscriptEvent({
+            kind: "llm",
+            purpose: usagePurpose(options?.usagePurpose),
+            provider: "openai",
+            model: modelId,
+            request: retryBody,
+            fallback: true,
+            error: isAbortFailure(error, options?.signal)
+              ? "OpenAI retry was aborted by the caller."
+              : "OpenAI retry could not reach the provider.",
+            durationMs: Date.now() - startedAt,
+          });
+          throw error;
+        }
         if (response.ok) {
           delete requestBody.reasoning_effort;
         } else {
@@ -1336,6 +1573,16 @@ export class OpenAiProvider implements LlmProvider {
               retryDetail || "<empty body>"
             }`
           );
+          recordDeveloperTranscriptEvent({
+            kind: "llm",
+            purpose: usagePurpose(options?.usagePurpose),
+            provider: "openai",
+            model: modelId,
+            request: retryBody,
+            fallback: true,
+            error: `OpenAI retry failed with HTTP ${response.status}.`,
+            durationMs: Date.now() - startedAt,
+          });
           throw new Error(formatOpenAiError("OpenAI request failed", response.status, retryDetail));
         }
       } else {
@@ -1344,6 +1591,15 @@ export class OpenAiProvider implements LlmProvider {
             detail || "<empty body>"
           }`
         );
+        recordDeveloperTranscriptEvent({
+          kind: "llm",
+          purpose: usagePurpose(options?.usagePurpose),
+          provider: "openai",
+          model: modelId,
+          request: requestBody,
+          error: `OpenAI request failed with HTTP ${response.status}.`,
+          durationMs: Date.now() - startedAt,
+        });
         throw new Error(formatOpenAiError("OpenAI request failed", response.status, detail));
       }
     }
@@ -1361,6 +1617,14 @@ export class OpenAiProvider implements LlmProvider {
         };
       };
     };
+    const content = payload.choices?.[0]?.message?.content?.trim();
+    const refusal = payload.choices?.[0]?.message?.refusal?.trim();
+    const finishReason = payload.choices?.[0]?.finish_reason?.trim().toLowerCase();
+    const parsedOutput =
+      refusal ??
+      content ??
+      (finishReason === "content_filter" ? "I cannot help with that request." : null);
+    const durationMs = Date.now() - startedAt;
     recordTextUsage({
       provider: "openai",
       model: modelId,
@@ -1370,11 +1634,18 @@ export class OpenAiProvider implements LlmProvider {
       totalTokens: payload.usage?.total_tokens ?? null,
       cachedInputTokens: payload.usage?.prompt_tokens_details?.cached_tokens ?? null,
       tokenCountSource: payload.usage ? "provider_reported" : "unavailable",
-      durationMs: Date.now() - startedAt,
+      durationMs,
+      developer: {
+        request: requestBody,
+        rawOutput: payload,
+        parsedOutput,
+        stopReason: finishReason ?? null,
+        streaming: false,
+        fallback: retriedWithoutReasoningEffort,
+        ...(!parsedOutput ? { error: "OpenAI returned an empty response." } : {}),
+        durationMs,
+      },
     });
-    const content = payload.choices?.[0]?.message?.content?.trim();
-    const refusal = payload.choices?.[0]?.message?.refusal?.trim();
-    const finishReason = payload.choices?.[0]?.finish_reason?.trim().toLowerCase();
     if (refusal) {
       return refusal;
     }
@@ -1430,14 +1701,29 @@ export class AnthropicProvider implements LlmProvider {
     if (systemMessages.length > 0) {
       requestBody.system = systemMessages.join("\n\n");
     }
-    if (typeof options?.temperature === "number") {
+    const usesFixedDefaultSampling = anthropicModelUsesFixedDefaultSampling(modelId);
+    if (!usesFixedDefaultSampling && typeof options?.temperature === "number") {
       requestBody.temperature = options.temperature;
     }
-    if (typeof options?.topP === "number") {
+    // Legacy Anthropic models reject requests that specify both temperature
+    // and top_p. Prefer the bot's temperature when both are configured, while
+    // still honoring top_p on its own. Newer models reject all custom sampling.
+    if (
+      !usesFixedDefaultSampling &&
+      typeof options?.temperature !== "number" &&
+      typeof options?.topP === "number"
+    ) {
       requestBody.top_p = options.topP;
     }
-    if (typeof options?.topK === "number") {
+    if (!usesFixedDefaultSampling && typeof options?.topK === "number") {
       requestBody.top_k = options.topK;
+    }
+    const reasoningEffort = anthropicReasoningEffortForRequest(
+      modelId,
+      options?.reasoningEffort
+    );
+    if (reasoningEffort) {
+      requestBody.output_config = { effort: reasoningEffort };
     }
     if (options?.jsonSchema || options?.jsonMode) {
       const jsonInstruction = options.jsonSchema
@@ -1449,17 +1735,34 @@ export class AnthropicProvider implements LlmProvider {
           : jsonInstruction;
     }
 
+    const diagnosticRequest = { messages, providerRequest: requestBody };
     const startedAt = Date.now();
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": this.anthropicConfig.apiKey,
-        "anthropic-version": ANTHROPIC_API_VERSION,
-      },
-      body: JSON.stringify(requestBody),
-      signal: options?.signal,
-    });
+    let response: Response;
+    try {
+      response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-api-key": this.anthropicConfig.apiKey,
+          "anthropic-version": ANTHROPIC_API_VERSION,
+        },
+        body: JSON.stringify(requestBody),
+        signal: options?.signal,
+      });
+    } catch (error) {
+      recordDeveloperTranscriptEvent({
+        kind: "llm",
+        purpose: usagePurpose(options?.usagePurpose),
+        provider: "anthropic",
+        model: modelId,
+        request: diagnosticRequest,
+        error: isAbortFailure(error, options?.signal)
+          ? "Anthropic request was aborted by the caller."
+          : "Anthropic request could not reach the provider.",
+        durationMs: Date.now() - startedAt,
+      });
+      throw error;
+    }
     if (!response.ok) {
       const detail = await readOpenAiErrorMessage(response);
       console.error(
@@ -1467,6 +1770,15 @@ export class AnthropicProvider implements LlmProvider {
           detail || "<empty body>"
         }`
       );
+      recordDeveloperTranscriptEvent({
+        kind: "llm",
+        purpose: usagePurpose(options?.usagePurpose),
+        provider: "anthropic",
+        model: modelId,
+        request: diagnosticRequest,
+        error: `Anthropic request failed with HTTP ${response.status}.`,
+        durationMs: Date.now() - startedAt,
+      });
       throw new Error(formatOpenAiError("Anthropic request failed", response.status, detail));
     }
     const payload = (await response.json()) as {
@@ -1479,6 +1791,13 @@ export class AnthropicProvider implements LlmProvider {
         cache_creation_input_tokens?: number;
       };
     };
+    const content = (payload.content ?? [])
+      .map((block) => (block.type === "text" && typeof block.text === "string" ? block.text : ""))
+      .join("")
+      .trim();
+    const parsedOutput =
+      content || (payload.stop_reason === "refusal" ? "I cannot help with that request." : null);
+    const durationMs = Date.now() - startedAt;
     recordTextUsage({
       provider: "anthropic",
       model: modelId,
@@ -1492,12 +1811,17 @@ export class AnthropicProvider implements LlmProvider {
           : null,
       cachedInputTokens: payload.usage?.cache_read_input_tokens ?? null,
       tokenCountSource: payload.usage ? "provider_reported" : "unavailable",
-      durationMs: Date.now() - startedAt,
+      durationMs,
+      developer: {
+        request: diagnosticRequest,
+        rawOutput: payload,
+        parsedOutput,
+        stopReason: payload.stop_reason ?? null,
+        streaming: false,
+        ...(!parsedOutput ? { error: "Anthropic returned an empty response." } : {}),
+        durationMs,
+      },
     });
-    const content = (payload.content ?? [])
-      .map((block) => (block.type === "text" && typeof block.text === "string" ? block.text : ""))
-      .join("")
-      .trim();
     if (content) return content;
     if (payload.stop_reason === "refusal") {
       return "I cannot help with that request.";
@@ -1531,6 +1855,7 @@ export function getAuxiliaryProvider(
   const inner = new LocalOllamaProvider(options);
   return {
     name: "local",
+    diagnosticModel: auxiliaryModel,
     async generateResponse(
       messages: ProviderMessage[],
       options?: GenerateOptions

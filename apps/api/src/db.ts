@@ -169,6 +169,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       provider_locked INTEGER NOT NULL DEFAULT 0,
       auto_memory INTEGER NOT NULL DEFAULT 1,
       auto_switch_model INTEGER NOT NULL DEFAULT 0,
+      auto_fallback_chain TEXT,
       hidden_bot_model_ids TEXT NOT NULL DEFAULT '[]',
       hidden_comfyui_workflow_ids TEXT NOT NULL DEFAULT '[]',
       model_visibility_defaults_version INTEGER NOT NULL DEFAULT 0,
@@ -244,6 +245,9 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       elevenlabs_key_ciphertext TEXT,
       elevenlabs_key_iv TEXT,
       elevenlabs_key_tag TEXT,
+      brave_search_key_ciphertext TEXT,
+      brave_search_key_iv TEXT,
+      brave_search_key_tag TEXT,
       voice_mode TEXT NOT NULL DEFAULT 'mute',
       voice_effects_enabled INTEGER NOT NULL DEFAULT 1,
       voice_volume REAL NOT NULL DEFAULT 1,
@@ -370,6 +374,25 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       created_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE SET NULL,
+      FOREIGN KEY(message_id) REFERENCES messages(id) ON DELETE SET NULL,
+      FOREIGN KEY(bot_id) REFERENCES bots(id) ON DELETE SET NULL
+    );
+    CREATE TABLE IF NOT EXISTS developer_transcript_events (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      conversation_id TEXT,
+      message_id TEXT,
+      bot_id TEXT,
+      request_id TEXT NOT NULL,
+      request_sequence INTEGER NOT NULL,
+      event_kind TEXT NOT NULL,
+      purpose TEXT NOT NULL,
+      provider TEXT,
+      model TEXT,
+      payload_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
       FOREIGN KEY(message_id) REFERENCES messages(id) ON DELETE SET NULL,
       FOREIGN KEY(bot_id) REFERENCES bots(id) ON DELETE SET NULL
     );
@@ -845,6 +868,12 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   if (!hasLenientLocalFallbackModel) {
     db.exec("ALTER TABLE users ADD COLUMN lenient_local_fallback_model TEXT;");
   }
+  const hasAutoFallbackChain = userColumns.some(
+    (column) => column.name === "auto_fallback_chain"
+  );
+  if (!hasAutoFallbackChain) {
+    db.exec("ALTER TABLE users ADD COLUMN auto_fallback_chain TEXT;");
+  }
   const hasComposerWritingAssist = userColumns.some(
     (column) => column.name === "composer_writing_assist"
   );
@@ -1084,6 +1113,16 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   );
   if (!hasElevenLabsKeyTag) {
     db.exec("ALTER TABLE users ADD COLUMN elevenlabs_key_tag TEXT;");
+  }
+  const braveSearchKeyColumns = [
+    ["brave_search_key_ciphertext", "TEXT"],
+    ["brave_search_key_iv", "TEXT"],
+    ["brave_search_key_tag", "TEXT"],
+  ] as const;
+  for (const [name, type] of braveSearchKeyColumns) {
+    if (!userColumns.some((column) => column.name === name)) {
+      db.exec(`ALTER TABLE users ADD COLUMN ${name} ${type};`);
+    }
   }
   db.exec(`
     UPDATE users
@@ -1825,6 +1864,9 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   );
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_usage_events_user_purpose_created ON usage_events (user_id, purpose, created_at DESC);"
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_developer_transcript_events_conversation_created ON developer_transcript_events (user_id, conversation_id, created_at);"
   );
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_coffee_groups_user_updated ON coffee_groups (user_id, updated_at DESC);"

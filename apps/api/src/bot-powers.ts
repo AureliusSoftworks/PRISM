@@ -7,7 +7,11 @@ import {
   type BotPowerV1,
   type CompiledBotPowerV1,
 } from "@localai/shared";
-import type { LlmProvider, ProviderMessage } from "./providers.ts";
+import {
+  LocalModelRequestError,
+  type LlmProvider,
+  type ProviderMessage,
+} from "./providers.ts";
 
 const BOT_POWER_COMPILE_MAX_TOKENS = 900;
 type HardAudienceEffectType = "awareness" | "speech_audience";
@@ -274,15 +278,55 @@ function finalizeCompiledPowers(powers: BotPowerV1[]): {
   };
 }
 
-function compileFailureMessage(power: BotPowerV1): string {
+function safeDiagnosticModel(provider: LlmProvider): string {
+  const model = compact(provider.diagnosticModel, 200);
+  if (
+    !model ||
+    model.includes("://") ||
+    model.includes("@") ||
+    /\b(?:localhost|host\.docker\.internal)\b/iu.test(model) ||
+    /\b\d{1,3}(?:\.\d{1,3}){3}\b/u.test(model) ||
+    /(?:^|[._:/+-])(?:key|token|secret|password|credential)(?:[._:/+-]|$)/iu.test(model) ||
+    !/^[a-z0-9][a-z0-9._:+/-]*$/iu.test(model)
+  ) {
+    return "configured model";
+  }
+  return model.length > 32 ? `${model.slice(0, 31)}…` : model;
+}
+
+function compilerDiagnosticContext(provider: LlmProvider): string {
+  return `Provider: ${provider.name}; model: ${safeDiagnosticModel(provider)}`;
+}
+
+function providerFailureMessage(provider: LlmProvider, error: unknown): string {
+  const context = compilerDiagnosticContext(provider);
+  if (error instanceof LocalModelRequestError) {
+    switch (error.kind) {
+      case "service_unavailable":
+        return `Local power compilation failed: service unavailable. ${context}; start the local service, then retry.`;
+      case "endpoint_not_found":
+        return `Local power compilation failed: chat endpoint not found. ${context}; update the local service, then retry.`;
+      case "model_unavailable":
+        return `Local power compilation failed: configured model unavailable. ${context}; install or select that model, then retry.`;
+      case "authentication_or_configuration":
+        return `Local power compilation failed: authentication or configuration failure. ${context}; check local settings, then retry.`;
+      case "request_failed":
+        break;
+    }
+  }
+  return `Local power compilation failed: request failed. ${context}; check local settings, then retry.`;
+}
+
+function compileFailureMessage(power: BotPowerV1, provider: LlmProvider): string {
   const required = requiredHardAudienceEffect(power.intent);
+  const context = compilerDiagnosticContext(provider);
   if (required === "awareness") {
-    return "The local model omitted the required visibility rule. Try naming who can see this bot more directly.";
+    return `Local power compilation failed: invalid compiler output; required visibility rule missing. ${context}; name who sees it; retry.`;
   }
   if (required === "speech_audience") {
-    return "The local model omitted the required speech rule. Try naming who can hear this bot more directly.";
+    return `Local power compilation failed: invalid compiler output; required speech rule missing. ${context}; name who hears it; retry.`;
   }
-  return "The local model could not structure this Power. Try a shorter description with one effect.";
+  return `Local power compilation failed: invalid compiler output. ${context}; try one short description with one effect.`;
 }
 
 export async function compileBotPowers(args: {
@@ -349,9 +393,7 @@ export async function compileBotPowers(args: {
       usagePurpose: "memory_inference",
     });
   } catch (error) {
-    const detail = error instanceof Error && error.message.trim()
-      ? ` ${error.message.trim().slice(0, 120)}`
-      : "";
+    const compileError = providerFailureMessage(args.provider, error);
     return finalizeCompiledPowers(drafts.map((power) => {
       const deterministicPower = deterministic.get(power.id);
       return deterministicPower
@@ -359,7 +401,7 @@ export async function compileBotPowers(args: {
         : {
             ...power,
             compileStatus: "error" as const,
-            compileError: `Local power compilation failed.${detail}`,
+            compileError,
             compiled: null,
           };
     }));
@@ -408,7 +450,7 @@ export async function compileBotPowers(args: {
       : {
           ...power,
           compileStatus: "error" as const,
-          compileError: compileFailureMessage(power),
+          compileError: compileFailureMessage(power, args.provider),
           compiled: null,
         };
   }));

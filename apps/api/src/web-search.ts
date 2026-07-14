@@ -1,4 +1,5 @@
 import type { WebSearchPayload, WebSearchResult } from "@localai/shared";
+import { recordDeveloperTranscriptEvent } from "./usage.ts";
 
 const BRAVE_WEB_SEARCH_URL = "https://api.search.brave.com/res/v1/web/search";
 const WEB_SEARCH_RESULT_LIMIT = 5;
@@ -121,12 +122,31 @@ export async function searchWebWithBrave(args: {
   apiKey?: string;
   signal?: AbortSignal;
 }): Promise<WebSearchPayload> {
+  const startedAt = Date.now();
   const apiKey = args.apiKey?.trim();
   if (!apiKey) {
+    recordDeveloperTranscriptEvent({
+      kind: "search",
+      purpose: "web_search",
+      provider: "brave",
+      model: "web-search",
+      request: { query: args.query },
+      error: "Brave Search is not configured.",
+      durationMs: Date.now() - startedAt,
+    });
     throw new Error("BRAVE_SEARCH_API_KEY is required for WebSearch.");
   }
   const query = compactText(args.query, WEB_SEARCH_QUERY_MAX_CHARS);
   if (!query) {
+    recordDeveloperTranscriptEvent({
+      kind: "search",
+      purpose: "web_search",
+      provider: "brave",
+      model: "web-search",
+      request: { query: args.query },
+      error: "Search query was empty.",
+      durationMs: Date.now() - startedAt,
+    });
     throw new Error("Search query cannot be empty.");
   }
   const url = new URL(BRAVE_WEB_SEARCH_URL);
@@ -134,19 +154,81 @@ export async function searchWebWithBrave(args: {
   url.searchParams.set("count", String(WEB_SEARCH_RESULT_LIMIT));
   url.searchParams.set("text_decorations", "false");
   url.searchParams.set("spellcheck", "true");
-  const response = await fetch(url, {
+  const diagnosticRequest = {
     method: "GET",
+    url: url.toString(),
+    query,
     headers: {
       Accept: "application/json",
       "Accept-Encoding": "gzip",
-      "X-Subscription-Token": apiKey,
+      "X-Subscription-Token": "[REDACTED]",
     },
-    signal: args.signal,
-  });
+  };
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        "Accept-Encoding": "gzip",
+        "X-Subscription-Token": apiKey,
+      },
+      signal: args.signal,
+    });
+  } catch (error) {
+    recordDeveloperTranscriptEvent({
+      kind: "search",
+      purpose: "web_search",
+      provider: "brave",
+      model: "web-search",
+      request: diagnosticRequest,
+      error: args.signal?.aborted
+        ? "Brave Search was aborted by the caller."
+        : "Brave Search could not reach the provider.",
+      durationMs: Date.now() - startedAt,
+    });
+    throw error;
+  }
   if (!response.ok) {
+    recordDeveloperTranscriptEvent({
+      kind: "search",
+      purpose: "web_search",
+      provider: "brave",
+      model: "web-search",
+      request: diagnosticRequest,
+      error: `Brave Search failed with HTTP ${response.status}.`,
+      durationMs: Date.now() - startedAt,
+    });
     throw new Error(`Brave Search failed with HTTP ${response.status}.`);
   }
-  return normalizeBraveWebSearchPayload(query, await response.json());
+  const rawOutput = await response.json();
+  try {
+    const parsedOutput = normalizeBraveWebSearchPayload(query, rawOutput);
+    recordDeveloperTranscriptEvent({
+      kind: "search",
+      purpose: "web_search",
+      provider: "brave",
+      model: "web-search",
+      request: diagnosticRequest,
+      rawOutput,
+      parsedOutput,
+      streaming: false,
+      durationMs: Date.now() - startedAt,
+    });
+    return parsedOutput;
+  } catch (error) {
+    recordDeveloperTranscriptEvent({
+      kind: "search",
+      purpose: "web_search",
+      provider: "brave",
+      model: "web-search",
+      request: diagnosticRequest,
+      rawOutput,
+      error: error instanceof Error ? error.message : "Brave Search result parsing failed.",
+      durationMs: Date.now() - startedAt,
+    });
+    throw error;
+  }
 }
 
 export function formatWebSearchForModel(payload: WebSearchPayload): string {

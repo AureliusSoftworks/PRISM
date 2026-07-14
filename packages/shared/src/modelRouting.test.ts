@@ -133,7 +133,7 @@ describe("resolveAutoModel", () => {
     assert.deepEqual(
       resolveAutoModel({
         provider: "openai",
-        botPreferredModel: "claude-sonnet-4-6",
+        preferredModel: "claude-sonnet-4-6",
         hiddenModelIds: [],
         catalog,
       }),

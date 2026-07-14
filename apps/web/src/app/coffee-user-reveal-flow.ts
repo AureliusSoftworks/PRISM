@@ -85,12 +85,27 @@ export function coffeePendingSubmittedUserLineVisible(args: {
   state: CoffeeUserRevealFlowState;
   userRevealText: string;
   sessionFinished: boolean;
+  persistedUserMessageVisible?: boolean;
 }): boolean {
   return (
     args.state !== "userTableTyping" &&
     !args.sessionFinished &&
+    args.persistedUserMessageVisible !== true &&
     args.userRevealText.trim().length > 0
   );
+}
+
+/** The stored player message from a completed Coffee turn, without display rewriting. */
+export function coffeeSubmittedUserMessageFromTurn<
+  T extends { role: string; content: string },
+>(messages: readonly T[]): T | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.role === "user" && message.content.trim().length > 0) {
+      return message;
+    }
+  }
+  return null;
 }
 
 export function coffeeCenterFeedMessagesDuringPendingReveal<T extends { id: string }>(args: {

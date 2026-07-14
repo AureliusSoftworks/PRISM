@@ -1,6 +1,10 @@
 type FetchLike = typeof fetch;
 
-export type ApiKeyValidationProvider = "openai" | "anthropic" | "elevenlabs";
+export type ApiKeyValidationProvider =
+  | "openai"
+  | "anthropic"
+  | "elevenlabs"
+  | "brave";
 
 export interface ApiKeyValidationResult {
   valid: boolean;
@@ -18,6 +22,7 @@ function validationSignal(): AbortSignal {
 function providerLabel(provider: ApiKeyValidationProvider): string {
   if (provider === "openai") return "OpenAI";
   if (provider === "anthropic") return "Anthropic";
+  if (provider === "brave") return "Brave Search";
   return "ElevenLabs";
 }
 
@@ -43,6 +48,17 @@ function validationRequest(provider: ApiKeyValidationProvider, apiKey: string): 
         accept: "application/json",
         "anthropic-version": ANTHROPIC_API_VERSION,
         "x-api-key": apiKey,
+      },
+      signal: validationSignal(),
+    };
+  }
+  if (provider === "brave") {
+    return {
+      url: "https://api.search.brave.com/res/v1/web/search?q=prism&count=1",
+      method: "GET",
+      headers: {
+        accept: "application/json",
+        "x-subscription-token": apiKey,
       },
       signal: validationSignal(),
     };

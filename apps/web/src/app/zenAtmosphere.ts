@@ -27,6 +27,12 @@ export interface ZenAtmosphereLayerStateArgs extends ZenAtmosphereLayerOpacityAr
   parallaxMaxPx?: number;
 }
 
+export function zenAtmosphereGrayscaleAmount(
+  hasPersonaBot: boolean
+): "0" | "1" {
+  return hasPersonaBot ? "1" : "0";
+}
+
 function clampUnit(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(1, value));

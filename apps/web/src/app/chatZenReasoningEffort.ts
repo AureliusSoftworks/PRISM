@@ -1,5 +1,5 @@
 import {
-  openAiModelSupportsReasoningEffort,
+  modelSupportsNativeReasoningEffort,
   type ReasoningEffort,
 } from "@localai/shared";
 
@@ -33,9 +33,8 @@ export function resolveChatZenReasoningEffortAvailability({
   }
 
   if (
-    provider === "openai" &&
     modelChoice !== AUTO_MODEL_CHOICE &&
-    openAiModelSupportsReasoningEffort(modelChoice)
+    modelSupportsNativeReasoningEffort(provider, modelChoice)
   ) {
     return { visible: true, enabled: true };
   }
@@ -51,10 +50,7 @@ export function resolveChatZenReasoningEffortAvailability({
   return {
     visible: true,
     enabled: false,
-    disabledReason:
-      provider === "openai"
-        ? "This online model does not support native effort."
-        : "Online effort is only available for supported OpenAI reasoning models.",
+    disabledReason: "This online model does not support native effort.",
   };
 }
 
@@ -68,6 +64,8 @@ export function reasoningEffortForSend(
   if (provider === "local") {
     return experimentalAllModelEffortEnabled ? effort : undefined;
   }
-  if (provider !== "openai" || !modelOverride) return undefined;
-  return openAiModelSupportsReasoningEffort(modelOverride) ? effort : undefined;
+  if (!modelOverride) return undefined;
+  return modelSupportsNativeReasoningEffort(provider, modelOverride)
+    ? effort
+    : undefined;
 }

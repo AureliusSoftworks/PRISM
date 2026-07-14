@@ -54,7 +54,27 @@ const testBots = ["a", "b", "c"].map((id, index) => ({
   chat_enabled: 1,
 }));
 
-const testConversation = {
+interface TestConversationMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  createdAt: string;
+}
+
+interface TestConversation {
+  id: string;
+  title: string;
+  mode: "zen";
+  conversationMode: "zen";
+  botId: string | null;
+  incognito: boolean;
+  messages: TestConversationMessage[];
+  createdAt: string;
+  updatedAt: string;
+  hasAssistantReply?: boolean;
+}
+
+const testConversation: TestConversation = {
   id: "e2e-conversation",
   title: "E2E companion thread",
   mode: "zen",
@@ -84,6 +104,21 @@ async function activateBotManagementControl(locator: Locator): Promise<void> {
 }
 
 async function installAuthenticatedApi(page: Page): Promise<void> {
+  await page.addInitScript(
+    ({ userId }) => {
+      window.localStorage.setItem("prism_first_run_welcome_v1", "done");
+      window.localStorage.setItem(
+        "prism_desktop_first_run_complete_v3",
+        "done",
+      );
+      window.localStorage.setItem(
+        `prism_mode_tutorials_v1:${userId}`,
+        JSON.stringify({ zen: true, chat: true, coffee: true }),
+      );
+    },
+    { userId: testUser.id },
+  );
+
   await page.route("**/api/**", async (route: Route) => {
     const pathname = new URL(route.request().url()).pathname;
     const json = (payload: unknown, status = 200) =>
@@ -107,7 +142,8 @@ async function installAuthenticatedApi(page: Page): Promise<void> {
           experimentalAllModelEffortEnabled: false,
           coffeeExperimentalTableAngleEnabled: false,
           psychicModeEnabled: false,
-          fallbackModelMessageStripe: true,
+          autoModeEnabled: false,
+          autoFallbackChain: null,
           hiddenBotModelIds: [],
           hiddenComfyUiWorkflowIds: [],
           hasOpenAiApiKey: false,
@@ -152,7 +188,6 @@ async function installAuthenticatedApi(page: Page): Promise<void> {
           devMemoriesEnabled: false,
           devMemoriesText: "",
           comfyUiWorkflows: [],
-          lenientLocalFallbackModel: "",
           lenientLocalImageFallbackModel: "",
         },
       });
@@ -224,6 +259,102 @@ async function installAuthenticatedApi(page: Page): Promise<void> {
   });
 }
 
+interface StatefulZenFixture {
+  persistentConversation: TestConversation;
+  requests: Record<string, unknown>[];
+}
+
+async function installStatefulZenApi(
+  page: Page,
+): Promise<StatefulZenFixture> {
+  const state: StatefulZenFixture = {
+    persistentConversation: structuredClone(testConversation),
+    requests: [],
+  };
+  let turnIndex = 0;
+
+  await page.route("**/api/chat", async (route: Route) => {
+    const request = route.request();
+    if (request.method() !== "POST") return route.fallback();
+    const body = request.postDataJSON() as Record<string, unknown>;
+    state.requests.push(body);
+    turnIndex += 1;
+    const incognito = body.incognito === true;
+    const priorMessages = incognito
+      ? Array.isArray(body.ephemeralMessages)
+        ? (body.ephemeralMessages as TestConversationMessage[])
+        : []
+      : state.persistentConversation.messages;
+    const now = `2026-01-01T00:00:0${turnIndex}.000Z`;
+    const message = typeof body.message === "string" ? body.message : "";
+    const conversation: TestConversation = {
+      ...testConversation,
+      id: incognito ? `e2e-private-${turnIndex}` : testConversation.id,
+      incognito,
+      messages: [
+        ...priorMessages,
+        {
+          id: `e2e-user-${turnIndex}`,
+          role: "user",
+          content: message,
+          createdAt: now,
+        },
+        {
+          id: `e2e-assistant-${turnIndex}`,
+          role: "assistant",
+          content: incognito
+            ? "This reply is intentionally ephemeral."
+            : "This reply is saved locally.",
+          createdAt: now,
+        },
+      ],
+      updatedAt: now,
+      hasAssistantReply: true,
+    };
+    if (!incognito) state.persistentConversation = conversation;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ conversation }),
+    });
+  });
+
+  await page.route("**/api/conversations", async (route: Route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    const conversation = state.persistentConversation;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        conversations: [
+          {
+            ...conversation,
+            lastBotId: null,
+            lastBotColor: null,
+            hasAssistantReply: conversation.messages.some(
+              (message) => message.role === "assistant",
+            ),
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.route(
+    `**/api/conversations/${testConversation.id}`,
+    async (route: Route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ conversation: state.persistentConversation }),
+      });
+    },
+  );
+
+  return state;
+}
+
 test.describe("PRISM desktop smoke", () => {
   test("loads the app shell", async ({ page }) => {
     await page.goto("/");
@@ -270,6 +401,52 @@ test.describe("PRISM desktop smoke", () => {
     ).toBeVisible();
     await expect(page.locator('[data-mode="picker"]')).toBeVisible();
     await expect(page.getByText("Select bots to begin")).toBeVisible();
+  });
+
+  test("authenticated Zen persists LOCAL turns while Private chat stays ephemeral", async ({
+    page,
+  }) => {
+    await installAuthenticatedApi(page);
+    const state = await installStatefulZenApi(page);
+    await page.goto("/?view=chat");
+
+    const responseMode = page
+      .locator('[data-tutorial-target="auto-response-mode"]')
+      .first();
+    await expect(responseMode).toHaveAttribute("data-response-mode", "local");
+
+    const composer = page.getByRole("textbox").last();
+    await expect(composer).toBeVisible();
+    await composer.fill("Remember this persistent turn");
+    await composer.press("Enter");
+    await expect(page.getByText("This reply is saved locally.")).toBeVisible();
+    await expect.poll(() => state.requests.length).toBe(1);
+    expect(state.requests[0]?.preferredProvider).toBe("local");
+    expect(state.requests[0]?.responseMode).toBe("local");
+    expect(state.requests[0]?.incognito).not.toBe(true);
+
+    await page.reload();
+    await expect(page.getByText("This reply is saved locally.")).toBeVisible();
+
+    await page.getByRole("button", { name: "Open conversation panel" }).click();
+    const privateButton = page.getByRole("button", { name: "Private chat" });
+    await privateButton.click();
+    await expect(privateButton).toHaveAttribute("aria-pressed", "true");
+    await composer.fill("Forget this private turn");
+    await composer.press("Enter");
+    await expect(
+      page.getByText("This reply is intentionally ephemeral."),
+    ).toBeVisible();
+    await expect.poll(() => state.requests.length).toBe(2);
+    expect(state.requests[1]?.preferredProvider).toBe("local");
+    expect(state.requests[1]?.responseMode).toBe("local");
+    expect(state.requests[1]?.incognito).toBe(true);
+
+    await page.reload();
+    await expect(page.getByText("This reply is saved locally.")).toBeVisible();
+    await expect(
+      page.getByText("This reply is intentionally ephemeral."),
+    ).toHaveCount(0);
   });
 
   test("marquee selects bots in a hydrated empty Chat without leaving zoom behind @marquee", async ({

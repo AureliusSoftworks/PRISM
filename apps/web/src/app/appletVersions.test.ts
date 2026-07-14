@@ -40,11 +40,11 @@ describe("applet version helpers", () => {
   });
 
   it("tracks the current visual applet versions for release provenance", () => {
-    assert.equal(PRISM_APPLETS.chat.version, "1.0");
-    assert.equal(PRISM_APPLETS.zen.version, "0.9");
-    assert.equal(PRISM_APPLETS.coffee.version, "1.1");
-    assert.equal(prismAppletVersionLabel("chat"), "v1.0");
-    assert.equal(prismAppletVersionLabel("zen"), "v0.9");
-    assert.equal(prismAppletVersionLabel("coffee"), "v1.1");
+    assert.equal(PRISM_APPLETS.chat.version, "1.2");
+    assert.equal(PRISM_APPLETS.zen.version, "1.1");
+    assert.equal(PRISM_APPLETS.coffee.version, "1.3");
+    assert.equal(prismAppletVersionLabel("chat"), "v1.2");
+    assert.equal(prismAppletVersionLabel("zen"), "v1.1");
+    assert.equal(prismAppletVersionLabel("coffee"), "v1.3");
   });
 });

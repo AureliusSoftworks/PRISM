@@ -598,8 +598,8 @@ describe("Coffee seat arrival CSS", () => {
     assert.match(builtInGlyphCoreRule, /--crt-glyph-core-red-rgb:\s*255 255 255\s*;/);
     assert.match(builtInGlyphCoreRule, /--crt-glyph-core-green-rgb:\s*255 255 255\s*;/);
     assert.match(builtInGlyphCoreRule, /--crt-glyph-core-blue-rgb:\s*255 255 255\s*;/);
-    assert.match(builtInGlyphCoreRule, /--crt-glyph-phosphor-midtone-strength:\s*0\.14\s*;/);
-    assert.match(builtInGlyphCoreRule, /--crt-glyph-phosphor-bright-strength:\s*0\.04\s*;/);
+    assert.match(builtInGlyphCoreRule, /--crt-glyph-phosphor-midtone-strength:\s*0\.24\s*;/);
+    assert.match(builtInGlyphCoreRule, /--crt-glyph-phosphor-bright-strength:\s*0\.09\s*;/);
 
     const cloneBaseRule = ruleForExactSelector(
       '.coffeeSeatPlateEmoji [data-crt-glyph-layer="true"]::before'
@@ -696,7 +696,7 @@ describe("Coffee seat arrival CSS", () => {
     assert.match(facePartRule, /drop-shadow\(0 0 calc\(1\.5px \* var\(--crt-face-glow-radius-scale,\s*1\)\) var\(--crt-face-edge-color\)\)/);
     assert.match(
       facePartRule,
-      /drop-shadow\(0 0 calc\(21px \* var\(--crt-face-glow-radius-scale,\s*1\)\) color-mix\(in srgb,\s*var\(--crt-face-edge-color\) 22%,\s*transparent\)\)/
+      /drop-shadow\(0 0 calc\(21px \* var\(--crt-face-glow-radius-scale,\s*1\)\) color-mix\(in srgb,\s*var\(--crt-face-edge-color\) var\(--crt-face-screen-wash-far-opacity,\s*22%\),\s*transparent\)\)/
     );
     assert.match(facePartRule, /--crt-face-glow-filter:\s*var\(--zen-live-bot-idle-face-glow-filter-high\)\s*;/);
     assert.match(facePartRule, /filter:\s*var\(--zen-live-bot-idle-face-glow-filter\)\s*;/);
@@ -719,7 +719,7 @@ describe("Coffee seat arrival CSS", () => {
     assert.match(liveFacePartRule, /drop-shadow\(0 0 calc\(1\.5px \* var\(--crt-face-glow-radius-scale,\s*1\)\) var\(--crt-face-edge-color\)\)/);
     assert.match(
       liveFacePartRule,
-      /drop-shadow\(0 0 calc\(21px \* var\(--crt-face-glow-radius-scale,\s*1\)\) color-mix\(in srgb,\s*var\(--crt-face-edge-color\) 22%,\s*transparent\)\)/
+      /drop-shadow\(0 0 calc\(21px \* var\(--crt-face-glow-radius-scale,\s*1\)\) color-mix\(in srgb,\s*var\(--crt-face-edge-color\) var\(--crt-face-screen-wash-far-opacity,\s*22%\),\s*transparent\)\)/
     );
     assert.match(
       liveFacePartRule,
@@ -1485,26 +1485,27 @@ describe("Coffee seat arrival CSS", () => {
     const nameplateRules = rulesForExactSelector(".coffeeSeatGlowPill");
     assert.ok(
       nameplateRules.some((rule) =>
-        /--coffee-seat-name-plate-y:\s*clamp\(-50px,\s*-4\.45vw,\s*-32px\)\s*;/.test(rule)
+        /--coffee-seat-name-plate-y:\s*clamp\(-42px,\s*-3\.65cqw,\s*-26px\)\s*;/.test(rule)
       ),
-      "expected nameplates to tuck into the bottom of the bot body"
+      "expected nameplates to sit below the prose corridor"
     );
     assert.ok(
-      nameplateRules.some((rule) => /--coffee-seat-glyph-slot-width:\s*35px\s*;/.test(rule)),
-      "expected nameplate glyph slot to fit the larger body glyph"
+      nameplateRules.some((rule) => /--coffee-seat-glyph-slot-width:\s*30px\s*;/.test(rule)),
+      "expected the compact nameplate glyph slot to preserve room for the bot name"
     );
     assert.ok(
       nameplateRules.some((rule) =>
-        /--coffee-seat-cup-slot-width:\s*clamp\(68px,\s*6vw,\s*80px\)\s*;/.test(rule)
+        /--coffee-seat-cup-slot-width:\s*clamp\(52px,\s*4\.6cqw,\s*60px\)\s*;/.test(rule)
       ),
-      "expected the table-facing mug to have its own nameplate slot"
+      "expected the table-facing mug slot to stay bounded"
     );
     assert.ok(
       nameplateRules.some((rule) =>
-        /width:\s*clamp\(284px,\s*23vw,\s*304px\)\s*;/.test(rule) &&
+        /--coffee-seat-name-plate-width:\s*clamp\(204px,\s*17cqw,\s*232px\)\s*;/.test(rule) &&
+        /width:\s*var\(--coffee-seat-name-plate-width\)\s*;/.test(rule) &&
         /grid-template-columns:\s*var\(--coffee-seat-glyph-slot-width\)\s*minmax\(0,\s*1fr\)\s*var\(--coffee-seat-cup-slot-width\)\s*;/.test(rule)
       ),
-      "expected full names between the outer glyph and table-facing mug"
+      "expected a bounded nameplate with flexible, truncating name space"
     );
     assert.ok(
       nameplateRules.some((rule) =>

@@ -9,7 +9,7 @@ import {
   coffeePowerBotVisibleTo,
   resolveCoffeePowersForSession,
 } from "../coffee-powers.ts";
-import type { LlmProvider } from "../providers.ts";
+import { LocalModelRequestError, type LlmProvider } from "../providers.ts";
 
 const provider: LlmProvider = {
   name: "local",
@@ -177,6 +177,7 @@ test("compiler does not mark a cue-only hard visibility constraint ready", async
   let calls = 0;
   const cueOnlyProvider: LlmProvider = {
     name: "local",
+    diagnosticModel: "llama3.2",
     async generateResponse() {
       calls += 1;
       return JSON.stringify({ powers: [{
@@ -203,12 +204,63 @@ test("compiler does not mark a cue-only hard visibility constraint ready", async
   assert.equal(calls, 2);
   assert.equal(result.powers[0]?.compileStatus, "error");
   assert.match(result.powers[0]?.compileError ?? "", /required visibility rule/u);
+  assert.match(result.powers[0]?.compileError ?? "", /Provider: local; model: llama3\.2/u);
 });
 
-test("compiler preserves drafts as inactive errors when the local model fails", async () => {
+test("compiler preserves drafts and distinguishes categorized local failures", async () => {
+  const scenarios: Array<{
+    kind: LocalModelRequestError["kind"];
+    expected: RegExp;
+  }> = [
+    { kind: "service_unavailable", expected: /service unavailable/u },
+    { kind: "endpoint_not_found", expected: /chat endpoint not found/u },
+    { kind: "model_unavailable", expected: /configured model unavailable/u },
+    {
+      kind: "authentication_or_configuration",
+      expected: /authentication or configuration failure/u,
+    },
+  ];
+
+  for (const scenario of scenarios) {
+    const failingProvider: LlmProvider = {
+      name: "local",
+      diagnosticModel: "llama3.2",
+      async generateResponse() {
+        throw new LocalModelRequestError(scenario.kind);
+      },
+      async embedText() { return []; },
+    };
+    const result = await compileBotPowers({
+      provider: failingProvider,
+      powers: [{
+        version: 1,
+        id: "respirator",
+        name: "Respirator",
+        intent: "Mechanical breathing recurs in actions.",
+        enabled: true,
+        compileStatus: "draft",
+        compiled: null,
+      }],
+    });
+    const power = result.powers[0];
+    assert.equal(power?.name, "Respirator");
+    assert.equal(power?.intent, "Mechanical breathing recurs in actions.");
+    assert.equal(power?.compileStatus, "error");
+    assert.equal(power?.compiled, null);
+    assert.match(power?.compileError ?? "", scenario.expected);
+    assert.match(power?.compileError ?? "", /Provider: local; model: llama3\.2/u);
+  }
+});
+
+test("compiler redacts raw provider errors and unsafe model context", async () => {
   const failingProvider: LlmProvider = {
     name: "local",
-    async generateResponse() { throw new Error("model unavailable"); },
+    diagnosticModel: "http://admin:super-secret@192.168.1.99:11434",
+    async generateResponse() {
+      throw new Error(
+        "fetch failed for http://admin:super-secret@192.168.1.99:11434/api/chat?api_key=leaked"
+      );
+    },
     async embedText() { return []; },
   };
   const result = await compileBotPowers({
@@ -223,9 +275,90 @@ test("compiler preserves drafts as inactive errors when the local model fails", 
       compiled: null,
     }],
   });
+  const message = result.powers[0]?.compileError ?? "";
+  assert.match(message, /request failed/u);
+  assert.match(message, /Provider: local; model: configured model/u);
+  assert.doesNotMatch(message, /192\.168|super-secret|api_key|http:/iu);
+});
+
+test("compiler reports invalid output after one bounded repair attempt", async () => {
+  let calls = 0;
+  const malformedProvider: LlmProvider = {
+    name: "local",
+    diagnosticModel: "llama3.2",
+    async generateResponse() {
+      calls += 1;
+      return "not compiler JSON";
+    },
+    async embedText() { return []; },
+  };
+  const result = await compileBotPowers({
+    provider: malformedProvider,
+    powers: [{
+      version: 1,
+      id: "respirator",
+      name: "Respirator",
+      intent: "Mechanical breathing recurs in actions.",
+      enabled: true,
+      compileStatus: "draft",
+      compiled: null,
+    }],
+  });
+  assert.equal(calls, 2);
+  assert.equal(result.powers[0]?.name, "Respirator");
   assert.equal(result.powers[0]?.intent, "Mechanical breathing recurs in actions.");
   assert.equal(result.powers[0]?.compileStatus, "error");
-  assert.equal(result.powers[0]?.compiled, null);
+  assert.match(result.powers[0]?.compileError ?? "", /invalid compiler output/u);
+  assert.match(result.powers[0]?.compileError ?? "", /Provider: local; model: llama3\.2/u);
+});
+
+test("a failed draft can be retried without recreating it", async () => {
+  const failingProvider: LlmProvider = {
+    name: "local",
+    diagnosticModel: "llama3.2",
+    async generateResponse() {
+      throw new LocalModelRequestError("model_unavailable");
+    },
+    async embedText() { return []; },
+  };
+  const failed = await compileBotPowers({
+    provider: failingProvider,
+    powers: [{
+      version: 1,
+      id: "respirator",
+      name: "Respirator",
+      intent: "Mechanical breathing recurs in actions.",
+      enabled: true,
+      compileStatus: "draft",
+      compiled: null,
+    }],
+  });
+
+  const retryProvider: LlmProvider = {
+    name: "local",
+    diagnosticModel: "llama3.2",
+    async generateResponse() {
+      return JSON.stringify({ powers: [{
+        id: "respirator",
+        selfCue: "Mechanical breathing punctuates tense moments.",
+        effects: [{
+          type: "action_bias",
+          cue: "Mention mechanical breathing.",
+          frequency: "occasional",
+        }],
+        ruleLabels: ["Mechanical breathing"],
+      }] });
+    },
+    async embedText() { return []; },
+  };
+  const retried = await compileBotPowers({
+    provider: retryProvider,
+    powers: failed.powers,
+  });
+  assert.equal(retried.powers[0]?.name, "Respirator");
+  assert.equal(retried.powers[0]?.intent, "Mechanical breathing recurs in actions.");
+  assert.equal(retried.powers[0]?.compileStatus, "ready");
+  assert.equal(retried.powers[0]?.compiled?.effects[0]?.type, "action_bias");
 });
 
 test("compiler bounds strengths and blocks conflicting enabled hard audiences", async () => {

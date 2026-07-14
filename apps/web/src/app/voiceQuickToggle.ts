@@ -13,3 +13,8 @@ export function voiceModeDisplayName(mode: VoiceMode): string {
   if (mode === "english") return "English";
   return "Mute";
 }
+
+/** Robot voices follow the canvas reveal clock instead of owning transcript text. */
+export function voiceModeDrivesCanvasReveal(mode: VoiceMode): boolean {
+  return mode === "english";
+}

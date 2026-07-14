@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   VOICE_MODE_OPTIONS,
+  voiceModeDrivesCanvasReveal,
   voiceModeDisplayName,
 } from "./voiceQuickToggle.ts";
 
@@ -15,5 +16,12 @@ describe("global voice selector", () => {
     assert.equal(voiceModeDisplayName("babble"), "Babble");
     assert.equal(voiceModeDisplayName("bottish"), "Bottish");
     assert.equal(voiceModeDisplayName("english"), "English");
+  });
+
+  it("keeps robot voice playback from blocking the canvas reveal clock", () => {
+    assert.equal(voiceModeDrivesCanvasReveal("bottish"), false);
+    assert.equal(voiceModeDrivesCanvasReveal("mute"), false);
+    assert.equal(voiceModeDrivesCanvasReveal("babble"), false);
+    assert.equal(voiceModeDrivesCanvasReveal("english"), true);
   });
 });

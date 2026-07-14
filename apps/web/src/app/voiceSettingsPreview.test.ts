@@ -259,9 +259,16 @@ describe("voice settings preview", () => {
     );
   });
 
-  it("buffers native speech and requests exact provider timing", () => {
-    assert.match(pageSource, /buildSpeechRevealPhrases\(speechRevealTokens\)/);
-    assert.match(pageSource, /startChatSpeechRevealPhrase\(/);
+  it("synthesizes one canonical message and requests exact provider timing", () => {
+    assert.match(
+      pageSource,
+      /const requestEnglishClip = async \(input: \{[\s\S]*?messageId: string;[\s\S]*?messageId: input\.messageId,/,
+    );
+    assert.match(
+      pageSource,
+      /const clip = await requestEnglishClip\(\{[\s\S]*?messageId: message\.id,[\s\S]*?await enqueueEnglishVoice\([\s\S]*?message\.id,/,
+    );
+    assert.doesNotMatch(pageSource, /startChatSpeechRevealPhrase\(/);
     assert.match(pageSource, /includeAlignment: true/);
     assert.match(pageSource, /readEnglishVoiceSynthesisClip\(response\)/);
   });

@@ -4,6 +4,8 @@ import {
   zenReadableAnchorMessageIds,
   zenReadableGestureShouldDisarmFollow,
   zenReadableMaxScrollTop,
+  zenRestoredViewportScrollTop,
+  zenStableViewportAnchorMessageId,
   zenReadableWheelShouldApplyElasticPull,
 } from "./zenReadableScroll.ts";
 
@@ -43,6 +45,33 @@ describe("zenReadableMaxScrollTop", () => {
   it("keeps the browser's full native range during opening-session layout", () => {
     assert.equal(zenReadableMaxScrollTop(1_240, 900), 340);
     assert.equal(zenReadableMaxScrollTop(760, 900), 0);
+  });
+});
+
+describe("Zen resolved-turn viewport anchoring", () => {
+  it("anchors wildcard resolution to the latest persisted row shared by both turns", () => {
+    assert.equal(
+      zenStableViewportAnchorMessageId(
+        [
+          { id: "old-user" },
+          { id: "old-assistant" },
+          { id: "pending-wildcard" },
+        ],
+        [
+          { id: "old-user" },
+          { id: "old-assistant" },
+          { id: "resolved-user" },
+          { id: "new-assistant" },
+        ]
+      ),
+      "old-assistant"
+    );
+  });
+
+  it("preserves the anchored row's viewport position across transcript reflow", () => {
+    assert.equal(zenRestoredViewportScrollTop(920, 180, -240, 1_600), 500);
+    assert.equal(zenRestoredViewportScrollTop(920, 180, 180, 1_600), 920);
+    assert.equal(zenRestoredViewportScrollTop(920, 180, 900, 1_100), 1_100);
   });
 });
 

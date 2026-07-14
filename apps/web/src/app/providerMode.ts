@@ -3,6 +3,7 @@ import { DISABLED_MODEL_CHOICE, isDisabledModelChoice } from "@localai/shared";
 export type Provider = "local" | "openai" | "anthropic";
 export type OnlineProvider = Exclude<Provider, "local">;
 export type ResponseMode = "local" | "online";
+export type AutoResponseMode = ResponseMode | "auto";
 
 const AUTO_MODEL_CHOICE = "auto";
 export const OPENAI_FALLBACK_CHAT_MODEL_ID = "gpt-4o-mini";
@@ -30,6 +31,14 @@ export function responseModeForProvider(provider: Provider): ResponseMode {
 
 export function nextResponseMode(mode: ResponseMode): ResponseMode {
   return mode === "local" ? "online" : "local";
+}
+
+export function autoResponseModeForProvider(
+  provider: Provider,
+  autoEnabled: boolean,
+  autoAllowed = true
+): AutoResponseMode {
+  return autoEnabled && autoAllowed ? "auto" : responseModeForProvider(provider);
 }
 
 export function isOnlineProvider(provider: Provider): provider is OnlineProvider {

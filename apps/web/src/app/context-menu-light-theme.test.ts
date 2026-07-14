@@ -21,3 +21,30 @@ test("text-field menus disable blur in light mode while preserving dark blur", (
   assert.match(textFieldCss, /--text-field-menu-backdrop-filter/);
   assert.match(textFieldCss, /blur\(16px\) saturate\(1\.2\)/);
 });
+
+test("global canvas-tools menu follows dismiss patterns", () => {
+  assert.match(
+    pageSource,
+    /const handleAppContextMenu\s*=\s*useCallback\([\s\S]*?setZenLiveBotContextMenu\(null\);[\s\S]*?closeCanvasToolsContextMenu\(\);/,
+  );
+
+  assert.match(
+    pageSource,
+    /const handleMessagesFrameContextMenu\s*=\s*useCallback\([\s\S]*?if \(canvasToolsContextMenu\) \{[\s\S]*?closeCanvasToolsContextMenu\(\);[\s\S]*?return;/,
+  );
+
+  assert.match(
+    pageSource,
+    /useEffect\(\(\) => \{\s*if \(!canvasToolsContextMenu\) return;[\s\S]*?if \(event\.key === "Escape"\)[\s\S]*?closeCanvasToolsContextMenu\(\);/,
+  );
+
+  assert.match(
+    pageSource,
+    /if \(isContextMenuPointerGesture\(event\)\) return;[\s\S]*?if \(!isPrimaryPointerDismissal\(event\)\) return;[\s\S]*?closeCanvasToolsContextMenu\(\);/,
+  );
+
+  assert.match(
+    pageSource,
+    /document\.addEventListener\("pointerdown", handlePointerDown, true\);[\s\S]*?document\.removeEventListener\("pointerdown", handlePointerDown, true\);/,
+  );
+});

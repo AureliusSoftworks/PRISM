@@ -35,11 +35,11 @@ function catalog(overrides: Partial<ModelCatalog> = {}): ModelCatalog {
 }
 
 describe("resolveAutoModel", () => {
-  it("uses an explicit picker override before a bot preferred model", () => {
+  it("uses an explicit picker override before a saved preference", () => {
     const resolved = resolveAutoModel({
       provider: "openai",
       explicitModelOverride: "gpt-4o",
-      botPreferredModel: "gpt-4.1-mini",
+      preferredModel: "gpt-4.1-mini",
       hiddenModelIds: [],
       catalog: catalog(),
     });
@@ -51,10 +51,10 @@ describe("resolveAutoModel", () => {
     });
   });
 
-  it("uses a visible bot preferred model before catalog fallbacks", () => {
+  it("uses a visible saved preference before catalog fallbacks", () => {
     const resolved = resolveAutoModel({
       provider: "openai",
-      botPreferredModel: "gpt-4.1-mini",
+      preferredModel: "gpt-4.1-mini",
       hiddenModelIds: [],
       catalog: catalog(),
     });
@@ -66,10 +66,10 @@ describe("resolveAutoModel", () => {
     });
   });
 
-  it("skips hidden bot preferred and default models before choosing the next visible model", () => {
+  it("skips hidden saved preferences and defaults before choosing the next visible model", () => {
     const resolved = resolveAutoModel({
       provider: "openai",
-      botPreferredModel: "gpt-4o-mini",
+      preferredModel: "gpt-4o-mini",
       hiddenModelIds: ["gpt-4o-mini"],
       catalog: catalog(),
     });
@@ -84,7 +84,7 @@ describe("resolveAutoModel", () => {
   it("routes an Anthropic saved online default through Anthropic while in online auto", () => {
     const resolved = resolveAutoModel({
       provider: "openai",
-      botPreferredModel: "claude-sonnet-4-6",
+      preferredModel: "claude-sonnet-4-6",
       hiddenModelIds: [],
       catalog: catalog(),
     });
@@ -115,7 +115,7 @@ describe("resolveAutoModel", () => {
     const resolved = resolveAutoModel({
       provider: "local",
       explicitModelOverride: "claude-sonnet-4-6",
-      botPreferredModel: "gpt-4o",
+      preferredModel: "gpt-4o",
       hiddenModelIds: [],
       catalog: catalog(),
     });
@@ -142,7 +142,7 @@ describe("resolveAutoModel", () => {
     const resolved = resolveAutoModel({
       provider: "anthropic",
       explicitModelOverride: "gpt-5.3-chat-latest",
-      botPreferredModel: "gpt-4o-mini",
+      preferredModel: "gpt-4o-mini",
       hiddenModelIds: [],
       catalog: catalog(),
     });
@@ -158,7 +158,7 @@ describe("resolveAutoModel", () => {
     const resolved = resolveAutoModel({
       provider: "anthropic",
       explicitModelOverride: "gpt-4o-mini",
-      botPreferredModel: "claude-opus-4-8",
+      preferredModel: "claude-opus-4-8",
       hiddenModelIds: [],
       catalog: catalog(),
     });

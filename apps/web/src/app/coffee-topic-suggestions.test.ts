@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   coffeeStarterTopicPoolFromByBotId,
   formatCoffeeStarterTopicsClipboardText,
@@ -105,6 +106,26 @@ describe("coffee topic suggestions", () => {
         },
       }),
       null
+    );
+  });
+
+  it("lets the player regenerate ranked ideas before choosing a topic", () => {
+    const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+    assert.match(
+      pageSource,
+      /\/api\/coffee\/sessions\/\$\{encodeURIComponent\(conversation\.id\)\}\/topics\/regenerate/,
+    );
+    assert.match(pageSource, /Regenerate ideas/);
+    assert.match(pageSource, /data-tutorial-target="coffee-topic-picker"/);
+    assert.match(
+      pageSource,
+      /if \(!trimmed \|\| coffeeTopicRequestInFlightRef\.current\) return false;/,
+    );
+    assert.match(pageSource, /coffeeTopicRequestInFlightRef\.current = true;/);
+    assert.match(pageSource, /coffeeTopicRequestInFlightRef\.current = false;/);
+    assert.match(
+      pageSource,
+      /rankedServerPool\.slice\(0, COFFEE_STARTER_TOPIC_OPTION_COUNT\)/,
     );
   });
 });

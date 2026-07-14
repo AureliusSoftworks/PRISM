@@ -3,6 +3,7 @@ import {
   coffeeCupSipMessageGapForDuration,
   type CoffeeAmbientActionPayload,
   type CoffeeCupTopOffSnapshot,
+  type CoffeeReplayBotDepartureEventPayload,
   type CoffeeReplayEventPayload,
   type CoffeeReplayPlayerDepartureEventPayload,
   type CoffeeReplaySocialSnapshotPayload,
@@ -81,6 +82,9 @@ export interface CoffeeReplayState {
   topOffsByBotId: Record<string, CoffeeCupTopOffSnapshot>;
   currentEvents: CoffeeReplayEventPayload[];
   activeTopOffEvent: CoffeeReplayTopOffEventPayload | null;
+  departingBotIds: Set<string>;
+  departedBotIds: Set<string>;
+  botDepartureEvent: CoffeeReplayBotDepartureEventPayload | null;
   playerPresent: boolean;
   playerDeparting: boolean;
   playerDepartureEvent: CoffeeReplayPlayerDepartureEventPayload | null;
@@ -285,6 +289,9 @@ export function coffeeReplayStateAt(
   const currentEvents: CoffeeReplayEventPayload[] = [];
   let hasReplayEvents = false;
   let activeTopOffEvent: CoffeeReplayTopOffEventPayload | null = null;
+  const departingBotIds = new Set<string>();
+  const departedBotIds = new Set<string>();
+  let botDepartureEvent: CoffeeReplayBotDepartureEventPayload | null = null;
   let playerPresent = true;
   let playerDeparting = false;
   let playerDepartureEvent: CoffeeReplayPlayerDepartureEventPayload | null = null;
@@ -311,6 +318,13 @@ export function coffeeReplayStateAt(
         if (isCurrentMessage) {
           activeTopOffEvent = event;
         }
+      } else if (event.kind === "botDeparture") {
+        botDepartureEvent = event;
+        if (isCurrentMessage) {
+          departingBotIds.add(event.botId);
+        } else {
+          departedBotIds.add(event.botId);
+        }
       } else if (event.kind === "playerDeparture") {
         playerDepartureEvent = event;
         if (isCurrentMessage) {
@@ -331,6 +345,9 @@ export function coffeeReplayStateAt(
     topOffsByBotId,
     currentEvents,
     activeTopOffEvent,
+    departingBotIds,
+    departedBotIds,
+    botDepartureEvent,
     playerPresent,
     playerDeparting,
     playerDepartureEvent,
@@ -455,6 +472,9 @@ function coffeeReviewReplayEventLine(
     return `- ${event.occurredAt} topOff: ${bot} cup ${coffeeReviewPercent(
       event.progressBefore
     )} -> ${coffeeReviewPercent(event.progressAfter)}`;
+  }
+  if (event.kind === "botDeparture") {
+    return `- ${event.occurredAt} botDeparture: ${bot} left seat ${event.seatIndex + 1}`;
   }
   return `- ${event.occurredAt} mood: ${bot} disposition=${coffeeReviewUnitValue(
     event.social.disposition

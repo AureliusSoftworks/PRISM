@@ -42,6 +42,64 @@ export type CoffeeCupPlacementSide = "left" | "right";
 export type CoffeeCupPrismFamily = "p" | "r" | "i" | "s" | "m";
 export type CoffeeCupSpriteTheme = "dark" | "light";
 
+export interface CoffeeCupConsumptionTiming {
+  sessionStartedAtMs: number | null;
+  sessionEndsAtMs: number | null;
+}
+
+export function coffeeCupConsumptionTimingForSeat(args: {
+  seatActive: boolean;
+  seatActivatedAtMs?: number | null;
+  fallbackSessionStartedAtMs?: number | null;
+  fallbackSessionEndsAtMs?: number | null;
+  durationMinutes?: number | null;
+}): CoffeeCupConsumptionTiming {
+  if (!args.seatActive) {
+    return { sessionStartedAtMs: null, sessionEndsAtMs: null };
+  }
+
+  const durationMs =
+    typeof args.durationMinutes === "number" &&
+    Number.isFinite(args.durationMinutes) &&
+    args.durationMinutes > 0
+      ? args.durationMinutes * 60 * 1000
+      : null;
+  const seatActivatedAtMs =
+    typeof args.seatActivatedAtMs === "number" &&
+    Number.isFinite(args.seatActivatedAtMs)
+      ? args.seatActivatedAtMs
+      : null;
+  const fallbackSessionStartedAtMs =
+    typeof args.fallbackSessionStartedAtMs === "number" &&
+    Number.isFinite(args.fallbackSessionStartedAtMs)
+      ? args.fallbackSessionStartedAtMs
+      : null;
+  const fallbackSessionEndsAtMs =
+    typeof args.fallbackSessionEndsAtMs === "number" &&
+    Number.isFinite(args.fallbackSessionEndsAtMs)
+      ? args.fallbackSessionEndsAtMs
+      : null;
+  const sessionStartedAtMs =
+    seatActivatedAtMs ??
+    fallbackSessionStartedAtMs ??
+    (fallbackSessionEndsAtMs != null && durationMs != null
+      ? fallbackSessionEndsAtMs - durationMs
+      : null);
+
+  if (sessionStartedAtMs == null) {
+    return { sessionStartedAtMs: null, sessionEndsAtMs: null };
+  }
+
+  return {
+    sessionStartedAtMs,
+    sessionEndsAtMs:
+      seatActivatedAtMs != null && durationMs != null
+        ? sessionStartedAtMs + durationMs
+        : fallbackSessionEndsAtMs ??
+          (durationMs != null ? sessionStartedAtMs + durationMs : null),
+  };
+}
+
 interface CoffeeCupSeatPlacementArgs {
   compact: boolean;
   seatIndex: number;

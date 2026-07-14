@@ -11,6 +11,26 @@ export interface ChatRevealTypingPacing {
   delayMultiplier: number;
 }
 
+/** Continue a canvas reveal from text already shown by synchronized speech. */
+export function createChatRevealPaceHandoffState({
+  tokenSignature,
+  visibleTokenCount,
+  nowMs,
+}: {
+  tokenSignature: string;
+  visibleTokenCount: number;
+  nowMs: number;
+}): ChatRevealPaceState {
+  const now = Number.isFinite(nowMs) ? nowMs : 0;
+  return {
+    tokenSignature,
+    visibleTokenCount: Math.max(0, Math.floor(visibleTokenCount)),
+    nextAdvanceAtMs: now,
+    lastAdvanceAtMs: now,
+    lastResolvedAtMs: now - 1,
+  };
+}
+
 function normalizeDelayMultiplier(value: number | undefined): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 1;
 }

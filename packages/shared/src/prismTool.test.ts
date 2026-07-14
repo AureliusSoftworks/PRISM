@@ -661,6 +661,14 @@ describe("hydrateAssistantMessageParts", () => {
         kind: "playerDeparture",
         occurredAt: "2026-07-02T15:02:00.000Z",
       },
+      {
+        v: 1,
+        name: "coffeeReplayEvent",
+        kind: "botDeparture",
+        botId: "bot-1",
+        seatIndex: 2,
+        occurredAt: "2026-07-02T15:03:00.000Z",
+      },
     ];
     const stored = serializeAssistantToolPayload({ coffeeReplayEvents });
 
@@ -675,6 +683,37 @@ describe("hydrateAssistantMessageParts", () => {
       }).coffeeReplayEvents,
       coffeeReplayEvents
     );
+  });
+
+  it("hydrates only privacy-safe Auto recovery metadata", () => {
+    const autoRecovery = {
+      v: 1 as const,
+      attempts: [
+        {
+          provider: "local" as const,
+          model: "qwen3:8b",
+          durationMs: 30_000,
+          outcome: "failed" as const,
+          reason: "timeout" as const,
+        },
+        {
+          provider: "openai" as const,
+          model: "gpt-5-mini",
+          durationMs: 800,
+          outcome: "succeeded" as const,
+        },
+      ],
+      finalProvider: "openai" as const,
+      finalModel: "gpt-5-mini",
+      crossedOnline: true,
+    };
+    const stored = serializeAssistantToolPayload({ autoRecovery });
+    assert.deepEqual(
+      hydrateAssistantMessageParts({ content: "Recovered.", toolPayload: stored })
+        .autoRecovery,
+      autoRecovery
+    );
+    assert.equal(stored.includes("rawError"), false);
   });
 });
 

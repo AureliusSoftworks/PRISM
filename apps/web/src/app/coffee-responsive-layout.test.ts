@@ -11,7 +11,14 @@ const css = readFileSync(new URL("./page.module.css", import.meta.url), "utf8")
 test("first-person Coffee fills the stage with a bottom-anchored table and narrow prose", () => {
   assert.match(css, /--coffee-table-asset-width:\s*min\(104cqw,\s*1490px\)/);
   assert.match(css, /bottom:\s*clamp\(-92px,\s*-7vh,\s*-36px\)/);
-  assert.match(css, /width:\s*min\(48cqw,\s*620px\)/);
+  assert.match(
+    css,
+    /--coffee-table-prose-inline-size:\s*min\(42cqw,\s*560px\);\s*width:\s*var\(--coffee-table-prose-inline-size\)/,
+  );
+  assert.match(
+    css,
+    /@container \(max-width: 980px\)[\s\S]*?--coffee-table-prose-inline-size:\s*min\(38cqw,\s*400px\)/,
+  );
   assert.match(css, /min-height:\s*clamp\(620px,\s*82dvh,\s*920px\)/);
   assert.match(css, /--coffee-canvas-y:\s*clamp\(-70px,\s*-6vh,\s*-42px\)/);
 });

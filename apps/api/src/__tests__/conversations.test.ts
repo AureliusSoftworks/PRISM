@@ -870,6 +870,30 @@ describe("listConversationSummaries", () => {
     assert.equal(conversation?.hasAssistantReply, true);
   });
 
+  it("keeps Zen History ownership independent from the last speaker", () => {
+    const db = createTestDb();
+    seedListConversation(db, {
+      id: "persona-home",
+      userId: "user-1",
+      title: "Persona Home",
+      mode: "zen",
+      botId: "owner-bot",
+      assistantBotId: "guest-bot",
+      updatedAt: "2026-01-01T00:00:03.000Z",
+    });
+
+    const [conversation] = listConversationSummaries(db, "user-1");
+
+    assert.equal(conversation?.lastBotId, "guest-bot");
+    assert.equal(conversation?.hubBotId, "owner-bot");
+    assert.equal(conversation?.history?.contextKey, "bot:owner-bot");
+    assert.equal(conversation?.history?.ownerBotId, "owner-bot");
+    assert.deepEqual(conversation?.history?.participantBotIds, [
+      "owner-bot",
+      "guest-bot",
+    ]);
+  });
+
   it("hides archived conversations from the sidebar list", () => {
     const db = createTestDb();
     seedListConversation(db, {
@@ -908,6 +932,11 @@ describe("listConversationSummaries", () => {
     assert.equal(conversation?.mode, "coffee");
     assert.deepEqual(conversation?.botGroupIds, ["bot-alice", "bot-cara"]);
     assert.deepEqual(conversation?.coffeeAbsentBotIds, ["bot-boris"]);
+    assert.equal(conversation?.history?.contextKey, "coffee-group:group-1");
+    assert.deepEqual(conversation?.history?.participantBotIds, [
+      "bot-alice",
+      "bot-cara",
+    ]);
   });
 });
 
