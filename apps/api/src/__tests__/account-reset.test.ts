@@ -51,7 +51,7 @@ describe("restoreFactoryDefaultsInDatabase", () => {
           `
           SELECT
             email, display_name, theme, preferred_provider, provider_locked,
-            auto_memory, auto_switch_model, hidden_bot_model_ids,
+            auto_memory, auto_switch_model, auto_fallback_chain, hidden_bot_model_ids,
             hidden_comfyui_workflow_ids, model_visibility_defaults_version,
             preferred_local_model, preferred_online_model,
             lenient_local_fallback_model, lenient_local_image_fallback_model,
@@ -88,7 +88,8 @@ describe("restoreFactoryDefaultsInDatabase", () => {
             prism_default_bot_repetition_penalty,
             prism_default_llm_model, prism_image_tool_llm_model,
             dev_memories_enabled, dev_memories_text, openai_key_ciphertext,
-            anthropic_key_ciphertext, elevenlabs_key_ciphertext, last_active_at
+            anthropic_key_ciphertext, elevenlabs_key_ciphertext,
+            brave_search_key_ciphertext, last_active_at
           FROM users
           WHERE id = ?
         `
@@ -103,6 +104,7 @@ describe("restoreFactoryDefaultsInDatabase", () => {
       assert.equal(user.provider_locked, 0);
       assert.equal(user.auto_memory, 1);
       assert.equal(user.auto_switch_model, 0);
+      assert.equal(user.auto_fallback_chain, null);
       assert.equal(user.hidden_bot_model_ids, "[]");
       assert.equal(user.hidden_comfyui_workflow_ids, "[]");
       assert.equal(user.model_visibility_defaults_version, 0);
@@ -180,6 +182,7 @@ describe("restoreFactoryDefaultsInDatabase", () => {
       assert.equal(user.openai_key_ciphertext, null);
       assert.equal(user.anthropic_key_ciphertext, null);
       assert.equal(user.elevenlabs_key_ciphertext, null);
+      assert.equal(user.brave_search_key_ciphertext, null);
       assert.equal(user.last_active_at, "2026-06-19T12:00:00.000Z");
 
       db.close();
@@ -222,6 +225,7 @@ function seedResetFixture(db: DatabaseSync): void {
       provider_locked = 1,
       auto_memory = 0,
       auto_switch_model = 1,
+      auto_fallback_chain = '{"v":1,"fallbacks":[{"provider":"local","model":"fallback-a"},{"provider":"openai","model":"fallback-b"}]}',
       hidden_bot_model_ids = '["model-a"]',
       hidden_comfyui_workflow_ids = '["workflow-a"]',
       model_visibility_defaults_version = 99,
@@ -289,7 +293,10 @@ function seedResetFixture(db: DatabaseSync): void {
       anthropic_key_tag = 'anthropic-tag',
       elevenlabs_key_ciphertext = 'eleven-cipher',
       elevenlabs_key_iv = 'eleven-iv',
-      elevenlabs_key_tag = 'eleven-tag'
+      elevenlabs_key_tag = 'eleven-tag',
+      brave_search_key_ciphertext = 'brave-cipher',
+      brave_search_key_iv = 'brave-iv',
+      brave_search_key_tag = 'brave-tag'
     WHERE id = ?
   `
   ).run("user-1");
@@ -401,6 +408,23 @@ function seedResetFixture(db: DatabaseSync): void {
     "user-1",
     "conversation-1",
     "# Export",
+    "2026-01-01T00:00:00.000Z"
+  );
+  db.prepare(
+    `INSERT INTO developer_transcript_events
+       (id, user_id, conversation_id, message_id, request_id, request_sequence,
+        event_kind, purpose, payload_json, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    "developer-event-1",
+    "user-1",
+    "conversation-1",
+    "message-1",
+    "request-1",
+    1,
+    "llm",
+    "chat_reply",
+    '{}',
     "2026-01-01T00:00:00.000Z"
   );
   db.prepare(

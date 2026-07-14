@@ -1,7 +1,12 @@
 import type { DatabaseSync } from "node:sqlite";
 import { getAppConfig } from "@localai/config";
 import { randomId } from "./security.ts";
-import { getConversationHubMetadata } from "./conversation-hubs.ts";
+import {
+  bindConversationHub,
+  getConversationHubMetadata,
+  getHubConversationId,
+} from "./conversation-hubs.ts";
+import { buildConversationHistoryEntry } from "./conversation-history.ts";
 import {
   analyzeMemoryIntent,
   extractBotJudgmentMemoryCandidates,
@@ -65,6 +70,9 @@ import type {
   TellFictionalStoryPayload,
   WebSearchPayload,
   WebSearchRequestPayload,
+  AutoFallbackChainV1,
+  AutoRecoveryTraceV1,
+  ResponseMode,
   ZenAskQuestionPatienceInput,
   ZenAutonomyDecision,
   ZenAutonomyInput,
@@ -76,6 +84,8 @@ import type {
 } from "@localai/shared";
 import {
   applyPrismMoodExpiredIgnoreCooldown,
+  assistantContentHasPrismToolFraming,
+  autoFallbackResolvedChain,
   applyPrismMoodForgivenessSuccess,
   applyPrismMoodInterruption,
   applyPrismMoodIgnoreCooldown,
@@ -87,8 +97,8 @@ import {
   hydrateAssistantMessageParts,
   isDisabledModelChoice,
   isPrismMoodIgnoring,
+  modelSupportsNativeReasoningEffort,
   normalizeReasoningEffort,
-  openAiModelSupportsReasoningEffort,
   normalizePrismMoodSensitivity,
   prismMoodDeclineReason,
   prismMoodIgnoreForgivenessChance,
@@ -108,6 +118,11 @@ import {
   withPromptShortcutResolvedPrompt,
   withPromptWildcardResolvedPrompt,
 } from "@localai/shared";
+import {
+  AutoFallbackExhaustedError,
+  runAutoFallbackChain,
+  validateAutoFallbackText,
+} from "./auto-fallback.ts";
 import type { AssistantSentImageUserPrefs } from "./assistant-sent-image.ts";
 import {
   peekActiveImageJobForUser,
@@ -233,17 +248,7 @@ export interface PsychicDebugPayload {
 export interface ProcessChatMessageResult {
   conversation: Conversation;
   conversationStarters?: string[];
-  fallbackInvocation?: {
-    trigger:
-      | "copyright_refusal_text"
-      | "copyright_refusal_error"
-      | "generic_refusal_text"
-      | "generic_refusal_error"
-      | "generic_refusal_soft_error";
-    primaryProvider: ProviderName;
-    primaryModel: string;
-    fallbackModel: string;
-  };
+  autoRecovery?: AutoRecoveryTraceV1;
   opinion?: SessionOpinion;
   botOpinion?: BotOpinion;
   prismMood?: PrismMoodSnapshot;
@@ -676,146 +681,6 @@ function evaluateAssistantLanguageSignal(content: string): { warmHits: number; s
   };
 }
 
-const COPYRIGHT_REJECTION_KEYWORDS = [
-  "copyright",
-  "copyrighted",
-  "dmca",
-  "rights holder",
-  "intellectual property",
-];
-
-const REFUSAL_LANGUAGE_KEYWORDS = [
-  "can't",
-  "cannot",
-  "won't",
-  "unable",
-  "not able",
-  "i must refuse",
-  "i can't help with",
-  "i cannot help with",
-];
-
-const GENERIC_REFUSAL_PATTERNS: RegExp[] = [
-  /\bi can(?:no|['’])t\b/,
-  /\bi won[’']?t\b/,
-  /\bi(?:['’]m| am) unable\b/,
-  /\bi(?:'m| am) not able\b/,
-  /\bi must decline\b/,
-  /\bi have to decline\b/,
-  /\bi need to decline\b/,
-  /\bi refuse\b/,
-  /\bi(?: can(?:no|['’])t|cannot|won[’']?t|am unable to) comply\b/,
-];
-
-const REFUSAL_REQUEST_TARGET_PATTERNS: RegExp[] = [
-  /\bprovide\b/,
-  /\bshare\b/,
-  /\bhelp with\b/,
-  /\bassist with\b/,
-  /\bthat request\b/,
-  /\bthis request\b/,
-  /\blyrics?\b/,
-  /\bverbatim\b/,
-  /\bexact words?\b/,
-  /\bfull text\b/,
-];
-
-const SOFT_DENIAL_TONE_PATTERNS: RegExp[] = [
-  /\bsorry\b/,
-  /\bapolog(?:ize|ise|y)\b/,
-  /\bnot permitted\b/,
-  /\bcan(?:no|['’])t do that\b/,
-  /\bcannot do that\b/,
-  /\bcannot fulfill\b/,
-  /\bcan(?:no|['’])t fulfill\b/,
-  /\brequest blocked\b/,
-];
-
-const REFUSAL_ERROR_POLICY_KEYWORDS = [
-  "policy",
-  "safety",
-  "content",
-  "refused",
-  "refusal",
-  "denied",
-  "blocked",
-];
-
-function isCopyrightRefusalText(raw: string): boolean {
-  const normalized = raw.trim().toLowerCase();
-  if (!normalized) return false;
-  const hasCopyrightCue = COPYRIGHT_REJECTION_KEYWORDS.some((keyword) =>
-    normalized.includes(keyword)
-  );
-  if (!hasCopyrightCue) return false;
-  return REFUSAL_LANGUAGE_KEYWORDS.some((keyword) => normalized.includes(keyword));
-}
-
-function isGenericRefusalText(raw: string): boolean {
-  const normalized = raw.trim().toLowerCase();
-  if (!normalized) return false;
-  if (normalized.includes("sorry")) return true;
-  if (GENERIC_REFUSAL_PATTERNS.some((pattern) => pattern.test(normalized))) return true;
-  const hasSoftDenialTone = SOFT_DENIAL_TONE_PATTERNS.some((pattern) => pattern.test(normalized));
-  if (!hasSoftDenialTone) return false;
-  return REFUSAL_REQUEST_TARGET_PATTERNS.some((pattern) => pattern.test(normalized));
-}
-
-function isCopyrightRefusalError(error: unknown): boolean {
-  const message =
-    error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
-  return COPYRIGHT_REJECTION_KEYWORDS.some((keyword) => message.includes(keyword));
-}
-
-function isGenericRefusalError(error: unknown): boolean {
-  const message =
-    error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
-  if (message.includes("sorry")) return true;
-  const hasRefusal = GENERIC_REFUSAL_PATTERNS.some((pattern) => pattern.test(message));
-  const hasPolicyCue = REFUSAL_ERROR_POLICY_KEYWORDS.some((keyword) => message.includes(keyword));
-  return hasRefusal || hasPolicyCue;
-}
-
-function isLikelyDenialErrorNeedingFallback(error: unknown): boolean {
-  const message =
-    error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
-  const isOpenAiClientFailure = message.includes("openai request failed");
-  if (!isOpenAiClientFailure) return false;
-  const hasDenialLikeStatus = message.includes("status 400") || message.includes("status 403");
-  if (!hasDenialLikeStatus) return false;
-  const obviouslyNonDenialReasons = [
-    "api key",
-    "authentication",
-    "insufficient_quota",
-    "quota",
-    "rate limit",
-    "context length",
-    "model does not exist",
-    "not found",
-  ];
-  return !obviouslyNonDenialReasons.some((marker) => message.includes(marker));
-}
-
-function shouldSuppressAssistantReply(raw: string): boolean {
-  const normalized = raw.trim().toLowerCase();
-  if (!normalized) return false;
-  if (isCopyrightRefusalText(normalized) || isGenericRefusalText(normalized)) return true;
-  // Last-line guard: block obvious denial/prohibition prose from reaching chat.
-  const broadDenialCuePatterns: RegExp[] = [
-    /\bsorry\b/,
-    /\bi can(?:no|['’])t\b/,
-    /\bi cannot\b/,
-    /\bi won[’']?t\b/,
-    /\bi(?:['’]m| am) unable\b/,
-    /\bi refuse\b/,
-    /\bnot permitted\b/,
-    /\brequest blocked\b/,
-    /\bpolicy\b/,
-    /\bcopyright\b/,
-  ];
-  return broadDenialCuePatterns.some((pattern) => pattern.test(normalized));
-}
-
 export function shouldBypassSuppressionForImageIntent(
   isStarterPrompt: boolean,
   userMessage: string,
@@ -842,88 +707,10 @@ function withGenerationSignal(
   };
 }
 
-const ORGANIC_TEXT_BOUNDARY_FALLBACK =
-  "I want to keep a boundary there, but I can still help shape a softer version.";
-
 function clampBoundaryContext(text: string, max = 1800): string {
   const trimmed = text.trim();
   if (trimmed.length <= max) return trimmed;
   return `${trimmed.slice(0, max)}...`;
-}
-
-function normalizeOrganicBoundaryReply(raw: string, fallback: string): string {
-  const line = raw.replace(/\s+/g, " ").trim();
-  if (!line) return fallback;
-  if (line.length > 420) return fallback;
-  if (shouldSuppressAssistantReply(line)) return fallback;
-  return line;
-}
-
-async function generateOrganicTextBoundaryReply(args: {
-  boundaryProvider?: LlmProvider;
-  boundaryModel?: string;
-  botSystemPrompt?: string;
-  userMessage?: string;
-  signal?: AbortSignal;
-}): Promise<{
-  assistantReplyRaw: string;
-  providerNameUsed: ProviderName;
-  modelUsed: string;
-}> {
-  const provider = args.boundaryProvider;
-  const model = args.boundaryModel?.trim() || config.ollamaAuxiliaryModel || config.ollamaModel;
-  if (!provider) {
-    return {
-      assistantReplyRaw: ORGANIC_TEXT_BOUNDARY_FALLBACK,
-      providerNameUsed: "local",
-      modelUsed: model,
-    };
-  }
-  const persona = clampBoundaryContext(args.botSystemPrompt ?? "");
-  const messages: ProviderMessage[] = [
-    {
-      role: "system",
-      content: [
-        "You write one short in-character boundary after a chat model could not continue the exact request.",
-        persona ? `Bot persona excerpt:\n${persona}` : "",
-        "Reply as the bot, in first person.",
-        "Do not mention policy, safety systems, model refusal, fallback, moderation, or errors.",
-        "Do not start with an apology. Avoid phrases like \"I can't\" or \"I cannot\".",
-        "State the bot's own preference or comfort, then offer a softer alternative.",
-        "Return 1-2 sentences only. No markdown, JSON, or tool calls.",
-      ]
-        .filter(Boolean)
-        .join("\n\n"),
-    },
-    {
-      role: "user",
-      content: `User request to boundary gracefully:\n${clampBoundaryContext(args.userMessage ?? "")}`,
-    },
-  ];
-  try {
-    const raw = await provider.generateResponse(
-      messages,
-      withGenerationSignal(
-        {
-          temperature: 0.7,
-          maxTokens: 90,
-          usagePurpose: "chat_boundary",
-        },
-        args.signal
-      )
-    );
-    return {
-      assistantReplyRaw: normalizeOrganicBoundaryReply(raw, ORGANIC_TEXT_BOUNDARY_FALLBACK),
-      providerNameUsed: provider.name,
-      modelUsed: model,
-    };
-  } catch {
-    return {
-      assistantReplyRaw: ORGANIC_TEXT_BOUNDARY_FALLBACK,
-      providerNameUsed: provider.name,
-      modelUsed: model,
-    };
-  }
 }
 
 /**
@@ -1269,8 +1056,10 @@ function providerModelSupportsNativeReasoningEffort(
   provider: LlmProvider,
   botOverrides: GenerateOptions | undefined
 ): boolean {
-  if (provider.name !== "openai") return false;
-  return openAiModelSupportsReasoningEffort(describeRequestedModel(provider, botOverrides));
+  return modelSupportsNativeReasoningEffort(
+    provider.name,
+    describeRequestedModel(provider, botOverrides)
+  );
 }
 
 function simulatedEffortNoticeDetail(args: {
@@ -1738,18 +1527,18 @@ async function runPsychicPlanningPass(args: {
   };
 }
 
-async function generateWithLenientLocalFallback(args: {
+async function generateChatResponse(args: {
   provider: LlmProvider;
   promptMessages: ProviderMessage[];
   botOverrides: GenerateOptions | undefined;
   secondaryOllamaHost?: string | null;
-  lenientLocalFallbackModel?: string | null;
+  responseMode?: ResponseMode;
+  autoFallbackChain?: AutoFallbackChainV1 | null;
+  providerFactory?: typeof selectProvider;
+  openAiApiKey?: string;
+  anthropicApiKey?: string;
   experimentalAllModelEffortEnabled?: boolean;
   psychicModeEnabled?: boolean;
-  denialBoundaryProvider?: LlmProvider;
-  denialBoundaryModel?: string;
-  botSystemPrompt?: string;
-  userMessage?: string;
   signal?: AbortSignal;
   onPlanningWarning?: (detail: string) => void;
   onSimulatedEffortNotice?: (detail: string) => void;
@@ -1759,26 +1548,12 @@ async function generateWithLenientLocalFallback(args: {
   modelUsed: string;
   psychicThought?: PsychicThoughtPayload;
   psychicDebug?: PsychicDebugPayload;
-  fallbackInvocation?: {
-    trigger:
-      | "copyright_refusal_text"
-      | "copyright_refusal_error"
-      | "generic_refusal_text"
-      | "generic_refusal_error"
-      | "generic_refusal_soft_error";
-    primaryProvider: ProviderName;
-    primaryModel: string;
-    fallbackModel: string;
-  };
+  autoRecovery?: AutoRecoveryTraceV1;
 }> {
   const requestedModel = normalizeModelValue(args.botOverrides?.model);
   const primaryModel =
     requestedModel ??
     describeRequestedModel(args.provider, args.botOverrides);
-  const fallbackModel = normalizeModelValue(args.lenientLocalFallbackModel);
-  const canAttemptFallback =
-    fallbackModel !== null &&
-    !(args.provider.name === "local" && requestedModel === fallbackModel);
   const requestedEffort = normalizeReasoningEffort(args.botOverrides?.reasoningEffort);
   const simulatedEffort = shouldSimulateReasoningEffort({
     experimentalAllModelEffortEnabled: args.experimentalAllModelEffortEnabled,
@@ -1824,115 +1599,79 @@ async function generateWithLenientLocalFallback(args: {
     ...(planningTrace?.debug ? { psychicDebug: planningTrace.debug } : {}),
   });
 
-  const runOrganicBoundary = async () =>
-    withPlanningTrace(await generateOrganicTextBoundaryReply({
-      boundaryProvider: args.denialBoundaryProvider,
-      boundaryModel: args.denialBoundaryModel,
-      botSystemPrompt: args.botSystemPrompt,
-      userMessage: args.userMessage,
+  const resolvedChain = args.responseMode === "auto"
+    ? autoFallbackResolvedChain(
+        { provider: args.provider.name, model: primaryModel },
+        args.autoFallbackChain
+      )
+    : null;
+  if (args.responseMode === "auto" && !resolvedChain) {
+    throw new AutoFallbackExhaustedError([]);
+  }
+  if (resolvedChain) {
+    const providerFactory = args.providerFactory ?? selectProvider;
+    const result = await runAutoFallbackChain({
+      attempts: resolvedChain.map((attempt, index) => ({
+        ...attempt,
+        available:
+          index === 0 || args.providerFactory !== undefined || attempt.provider === "local" ||
+          (attempt.provider === "openai"
+            ? Boolean(args.openAiApiKey)
+            : Boolean(args.anthropicApiKey)),
+        run: async (signal: AbortSignal) => {
+          const provider = index === 0
+            ? args.provider
+            : providerFactory(
+                attempt.provider,
+                args.openAiApiKey,
+                args.secondaryOllamaHost,
+                args.anthropicApiKey
+              );
+          return provider.generateResponse(promptMessagesForFinalAnswer, {
+            ...args.botOverrides,
+            model: attempt.model,
+            usagePurpose: index === 0 ? "chat_reply" : "chat_fallback",
+            signal,
+          });
+        },
+      })),
+      perAttemptTimeoutMs: 60_000,
+      totalTimeoutMs: 150_000,
       signal: args.signal,
-    }));
-
-  const runLenientFallback = async (
-    trigger:
-      | "copyright_refusal_text"
-      | "copyright_refusal_error"
-      | "generic_refusal_text"
-      | "generic_refusal_error"
-      | "generic_refusal_soft_error"
-  ): Promise<{
-    assistantReplyRaw: string;
-    providerNameUsed: ProviderName;
-    modelUsed: string;
-    psychicThought?: PsychicThoughtPayload;
-    psychicDebug?: PsychicDebugPayload;
-    fallbackInvocation?: {
-      trigger:
-        | "copyright_refusal_text"
-        | "copyright_refusal_error"
-        | "generic_refusal_text"
-        | "generic_refusal_error"
-        | "generic_refusal_soft_error";
-      primaryProvider: ProviderName;
-      primaryModel: string;
-      fallbackModel: string;
-    };
-  }> => {
-    if (!fallbackModel) {
-      throw new Error("Lenient local fallback model is not configured.");
-    }
-    const fallbackProvider = new LocalOllamaProvider({
-      secondaryOllamaHost: args.secondaryOllamaHost,
-    });
-    let reply = "";
-    try {
-      reply = await fallbackProvider.generateResponse(promptMessagesForFinalAnswer, {
-        ...args.botOverrides,
-        model: fallbackModel,
-        usagePurpose: "chat_fallback",
-        ...(args.signal ? { signal: args.signal } : {}),
-      });
-    } catch (error) {
-      if (
-        isCopyrightRefusalError(error) ||
-        isGenericRefusalError(error) ||
-        isLikelyDenialErrorNeedingFallback(error)
-      ) {
-        return runOrganicBoundary();
-      }
-      throw error;
-    }
-    if (shouldSuppressAssistantReply(reply)) {
-      return runOrganicBoundary();
-    }
-    return withPlanningTrace({
-      assistantReplyRaw: reply,
-      providerNameUsed: "local",
-      modelUsed: fallbackModel,
-      fallbackInvocation: {
-        trigger,
-        primaryProvider: args.provider.name,
-        primaryModel,
-        fallbackModel,
+      validate: (raw) => {
+        const base = validateAutoFallbackText(raw);
+        if (!base.ok) return base;
+        if (assistantContentHasPrismToolFraming(raw)) {
+          const parsed = parseAssistantPrismTools(raw);
+          const hasKnownTool = Boolean(
+            parsed.askQuestion || parsed.tellFictionalStory || parsed.sendGeneratedImage ||
+            parsed.webSearch || parsed.zenDisplay
+          );
+          if (!hasKnownTool) return { ok: false, reason: "invalid_output" as const };
+        }
+        return base;
       },
     });
-  };
-
-  try {
-    const assistantReplyRaw = await args.provider.generateResponse(
-      promptMessagesForFinalAnswer,
-      withGenerationSignal(
-        { ...args.botOverrides, usagePurpose: "chat_reply" },
-        args.signal
-      )
-    );
-    if (shouldSuppressAssistantReply(assistantReplyRaw)) {
-      const trigger = isCopyrightRefusalText(assistantReplyRaw)
-        ? "copyright_refusal_text"
-        : "generic_refusal_text";
-      if (canAttemptFallback) return runLenientFallback(trigger);
-      return runOrganicBoundary();
-    }
     return withPlanningTrace({
-      assistantReplyRaw,
-      providerNameUsed: args.provider.name,
-      modelUsed: primaryModel,
+      assistantReplyRaw: result.value,
+      providerNameUsed: result.provider,
+      modelUsed: result.model,
+      ...(result.recovery ? { autoRecovery: result.recovery } : {}),
     });
-  } catch (error) {
-    const isDenialError =
-      isCopyrightRefusalError(error) ||
-      isGenericRefusalError(error) ||
-      isLikelyDenialErrorNeedingFallback(error);
-    if (isDenialError) {
-      if (canAttemptFallback) {
-        if (isCopyrightRefusalError(error)) return runLenientFallback("copyright_refusal_error");
-        if (isGenericRefusalError(error)) return runLenientFallback("generic_refusal_error");
-        return runLenientFallback("generic_refusal_soft_error");
-      }
-      return runOrganicBoundary();
-    }
-    throw error;
   }
+
+  const assistantReplyRaw = await args.provider.generateResponse(
+    promptMessagesForFinalAnswer,
+    withGenerationSignal(
+      { ...args.botOverrides, usagePurpose: "chat_reply" },
+      args.signal
+    )
+  );
+  return withPlanningTrace({
+    assistantReplyRaw,
+    providerNameUsed: args.provider.name,
+    modelUsed: primaryModel,
+  });
 }
 
 function evaluateAssistantMood(args: {
@@ -2595,6 +2334,7 @@ export interface UserChatSettings {
   autoMemory: boolean;
   openAiApiKey?: string;
   anthropicApiKey?: string;
+  braveSearchApiKey?: string;
   /** User-provided name from Settings for bot-side personal addressing. */
   userDisplayName?: string;
   /**
@@ -2623,8 +2363,13 @@ export interface UserChatSettings {
    * backwards-compatible Facet selector when `facetBotId` is not provided.
    */
   botId?: string | null;
-  /** Preferred Zen Facet selector. Keeps the conversation row bot_id NULL. */
+  /** Preferred Zen speaker/guest selector; independent from Home ownership. */
   facetBotId?: string | null;
+  /**
+   * Immutable Zen relationship owner. A different Facet may speak as a guest
+   * without changing this Home. Omitted by legacy callers.
+   */
+  zenHomeBotId?: string | null;
   incognito?: boolean;
   /**
    * Client-held prior messages for private chats. Used as prompt context only;
@@ -2650,8 +2395,9 @@ export interface UserChatSettings {
    * without reviving the old account-wide toggle.
    */
   psychicModeEnabled?: boolean;
-  /** Optional local-only fallback model used when copyright refusals happen. */
-  lenientLocalFallbackModel?: string | null;
+  /** Auto is a Zen-only response mode. Traditional Chat ignores it. */
+  responseMode?: ResponseMode;
+  autoFallbackChain?: AutoFallbackChainV1 | null;
   /**
    * Per-account override for Prism internal local LLM calls (titles, summaries,
    * memory inference, Coffee router, image prompt hints). Empty uses the
@@ -5103,6 +4849,7 @@ function hydrateMessages(
       ...(assembled.coffeeAmbientAction
         ? { coffeeAmbientAction: assembled.coffeeAmbientAction }
         : {}),
+      ...(assembled.autoRecovery ? { autoRecovery: assembled.autoRecovery } : {}),
     };
   });
 }
@@ -6289,7 +6036,10 @@ export function loadPersistedConversationForChatResponse(args: {
               'idle' AS zen_wallpaper_status, '[]' AS zen_wallpaper_history,`;
   const conversationRow = db
     .prepare(
-      `SELECT c.id, c.user_id, c.title, c.conversation_mode, c.bot_id, c.incognito, c.created_at, c.updated_at,
+      `SELECT c.id, c.user_id, c.title, c.conversation_mode, c.bot_id,
+              ${conversationColumnNames.has("parent_id") ? "c.parent_id" : "NULL AS parent_id"},
+              ${conversationColumnNames.has("archived_at") ? "c.archived_at" : "NULL AS archived_at"},
+              c.incognito, c.created_at, c.updated_at,
               ${zenWallpaperSelect}
               (SELECT m.bot_id FROM messages m
                  WHERE m.conversation_id = c.id
@@ -6313,6 +6063,8 @@ export function loadPersistedConversationForChatResponse(args: {
         title: string;
         conversation_mode: string | null;
         bot_id: string | null;
+        parent_id: string | null;
+        archived_at: string | null;
         incognito: number;
         zen_wallpaper_enabled: number | null;
         zen_wallpaper_image_id: string | null;
@@ -6387,6 +6139,14 @@ export function loadPersistedConversationForChatResponse(args: {
     "ignored_question"
   );
   const hubMetadata = getConversationHubMetadata(db, userId, activeConversationId);
+  const historyEntry = buildConversationHistoryEntry(conversationRow, {
+    hubMetadata,
+    participantBotIds: messageRows.map((row) => row.bot_id),
+    continuationConversationId:
+      hubMetadata?.hubRole === "hub"
+        ? getHubConversationId(db, userId, hubMetadata.hubBotId)
+        : activeConversationId,
+  });
   const includeZenWallpaper =
     conversationModeOut === "zen" || hubMetadata?.hubRole === "side";
 
@@ -6403,6 +6163,7 @@ export function loadPersistedConversationForChatResponse(args: {
           parentHubId: hubMetadata.parentHubId,
         }
       : {}),
+    history: historyEntry,
     incognito: conversationModeOut === "zen" ? false : conversationRow.incognito === 1,
     lastBotId: conversationRow.last_bot_id ?? null,
     lastBotColor: conversationRow.last_bot_color ?? null,
@@ -6446,8 +6207,8 @@ export async function processChatMessage(
   // local/online user setting; Sandbox ignores `incognito` entirely.
   const incognitoForTurn = settings.incognito === true && isCompanionMode(mode);
   // Bot scope comes from Chat's locked `botId` or Zen's optional Facet selector.
-  // In Zen this is per-turn Facet attribution; the conversation row itself
-  // still reports botId null so Zen remains one continuous PRISM thread.
+  // Zen speaker attribution is independent from the immutable Home owner stored
+  // on the conversation row / conversation_hubs binding.
   const activeBotId = isZenMode(mode)
     ? settings.facetBotId !== undefined
       ? settings.facetBotId
@@ -6508,6 +6269,9 @@ export async function processChatMessage(
   const modelUserMessage = promptInputOverride || message;
   const manualTool = !isStarterPrompt ? settings.manualTool : undefined;
   const manualWebSearchRequested = manualTool?.name === "webSearch";
+  const manualWebSearchQuery = manualWebSearchRequested
+    ? manualToolQueryOrMessage(manualTool, modelUserMessage)
+    : undefined;
   const manualImageGenRequested = manualTool?.name === "imageGen";
   const manualAskQuestionConstraint = readManualAskQuestionAnswerConstraint(manualTool);
   const explicitAskQuestionRequest =
@@ -6545,6 +6309,16 @@ export async function processChatMessage(
       )
     : promptUserMessageBase;
   const effectiveProvider = settings.preferredProvider;
+  const webSearchUnavailableReason =
+    effectiveProvider === "local"
+      ? "local_mode"
+      : settings.braveSearchApiKey?.trim()
+        ? null
+        : "not_configured";
+  const webSearchUnavailableMessage =
+    webSearchUnavailableReason === "local_mode"
+      ? "WebSearch is unavailable in LOCAL mode. Switch to ONLINE mode to search the web."
+      : "WebSearch is unavailable because a Brave Search API key is not configured. Add one in Settings → Connections or set BRAVE_SEARCH_API_KEY on the server.";
   const modeRuntimePlan = buildModeRuntimePlan(mode, incognitoForTurn);
   const { skipPersonalFacts, skipSummarization, retrievalMode } = modeRuntimePlan;
   pushBackendEvent(
@@ -6570,7 +6344,7 @@ export async function processChatMessage(
     pushBackendEvent("tool", "Running WebSearch", `source=${source}; query=${truncateToolCallPreview(query)}`);
     const payload = await searchWebWithBrave({
       query,
-      apiKey: config.braveSearchApiKey,
+      apiKey: settings.braveSearchApiKey,
       signal: settings.signal,
     });
     pushBackendEvent(
@@ -6584,9 +6358,9 @@ export async function processChatMessage(
   if (incognitoForTurn) {
     throwIfChatRequestCancelled(settings.signal);
     const history = sanitizeEphemeralMessages(settings.ephemeralMessages);
-    const manualWebSearchPayload = manualWebSearchRequested
+    const manualWebSearchPayload = manualWebSearchRequested && !webSearchUnavailableReason
       ? await executeWebSearch(
-          manualToolQueryOrMessage(manualTool, modelUserMessage),
+          manualWebSearchQuery!,
           "manual"
         )
       : undefined;
@@ -6656,21 +6430,21 @@ export async function processChatMessage(
       assistantReplyRaw,
       providerNameUsed,
       modelUsed,
-      fallbackInvocation,
+      autoRecovery,
       psychicThought,
       psychicDebug,
-    } = await generateWithLenientLocalFallback({
+    } = await generateChatResponse({
       provider: primaryProvider,
       promptMessages,
       botOverrides: primaryBotOverrides,
       secondaryOllamaHost: settings.secondaryOllamaHost,
-      lenientLocalFallbackModel: settings.lenientLocalFallbackModel,
+      responseMode: isZenMode(mode) ? settings.responseMode : undefined,
+      autoFallbackChain: settings.autoFallbackChain,
+      providerFactory: settings.providerFactory,
+      openAiApiKey: settings.openAiApiKey,
+      anthropicApiKey: settings.anthropicApiKey,
       experimentalAllModelEffortEnabled: settings.experimentalAllModelEffortEnabled,
       psychicModeEnabled: psychicModeEnabledForTurn,
-      denialBoundaryProvider: auxiliaryProvider,
-      denialBoundaryModel: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
-      botSystemPrompt: effectiveBotSystemPrompt,
-      userMessage: modelUserMessage,
       signal: settings.signal,
       onPlanningWarning: (detail) =>
         pushBackendEvent("model", "Psychic planning unavailable", detail),
@@ -6683,29 +6457,24 @@ export async function processChatMessage(
       "Model response received",
       `provider=${providerNameUsed}; model=${modelUsed}; rawChars=${assistantReplyRaw.length}`
     );
-    if (
-      shouldSuppressAssistantReply(assistantReplyRaw) &&
-      !shouldBypassSuppressionForImageIntent(isStarterPrompt, modelUserMessage, history)
-    ) {
-      const boundary = await generateOrganicTextBoundaryReply({
-        boundaryProvider: auxiliaryProvider,
-        boundaryModel: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
-        botSystemPrompt: effectiveBotSystemPrompt,
-        userMessage: modelUserMessage,
-        signal: settings.signal,
-      });
-      assistantReplyRaw = boundary.assistantReplyRaw;
-      providerNameUsed = boundary.providerNameUsed;
-      modelUsed = boundary.modelUsed;
-    }
 	    throwIfChatRequestCancelled(settings.signal);
 	    let parsedAssistant = parseAssistantPrismTools(assistantReplyRaw);
-	    let requestedWebSearchForTurn = parsedAssistant.webSearch;
+	    let requestedWebSearchForTurn = manualWebSearchRequested
+	      ? {
+	          v: 1 as const,
+	          name: "WebSearch" as const,
+	          query: manualWebSearchQuery!,
+	        }
+	      : parsedAssistant.webSearch;
 	    let webSearchForTurn = manualWebSearchPayload;
 	    let webSearchStatus: "blocked" | "completed" | "none" =
-	      manualWebSearchPayload ? "completed" : "none";
+	      manualWebSearchPayload
+	        ? "completed"
+	        : manualWebSearchRequested && webSearchUnavailableReason
+	          ? "blocked"
+	          : "none";
 	    if (!webSearchForTurn && requestedWebSearchForTurn) {
-	      if (effectiveProvider === "local") {
+	      if (webSearchUnavailableReason) {
 	        webSearchStatus = "blocked";
 	      } else {
 	        webSearchForTurn = await executeWebSearch(requestedWebSearchForTurn.query, "automatic");
@@ -6714,10 +6483,10 @@ export async function processChatMessage(
           assistantReplyRaw,
           providerNameUsed,
           modelUsed,
-          fallbackInvocation,
+          autoRecovery,
           psychicThought,
           psychicDebug,
-        } = await generateWithLenientLocalFallback({
+        } = await generateChatResponse({
           provider: primaryProvider,
           promptMessages: [
             ...promptMessages,
@@ -6739,13 +6508,13 @@ export async function processChatMessage(
           ],
           botOverrides: primaryBotOverrides,
           secondaryOllamaHost: settings.secondaryOllamaHost,
-          lenientLocalFallbackModel: settings.lenientLocalFallbackModel,
+          responseMode: isZenMode(mode) ? settings.responseMode : undefined,
+          autoFallbackChain: settings.autoFallbackChain,
+          providerFactory: settings.providerFactory,
+          openAiApiKey: settings.openAiApiKey,
+          anthropicApiKey: settings.anthropicApiKey,
           experimentalAllModelEffortEnabled: settings.experimentalAllModelEffortEnabled,
           psychicModeEnabled: psychicModeEnabledForTurn,
-          denialBoundaryProvider: auxiliaryProvider,
-          denialBoundaryModel: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
-          botSystemPrompt: effectiveBotSystemPrompt,
-          userMessage: modelUserMessage,
           signal: settings.signal,
         }));
         parsedAssistant = parseAssistantPrismTools(assistantReplyRaw);
@@ -6769,9 +6538,8 @@ export async function processChatMessage(
 	      parsedAssistant.displayContent,
 	      askQuestionForTurn
 	    );
-	    if (webSearchStatus === "blocked" && assistantDisplayRaw.trim().length === 0) {
-	      assistantDisplayRaw =
-	        "I can only run automatic web searches in ONLINE mode. Use the ? tool picker to search the web explicitly from LOCAL mode.";
+	    if (webSearchStatus === "blocked") {
+	      assistantDisplayRaw = webSearchUnavailableMessage;
 	    }
     const starterSendGeneratedImageRequested =
       isStarterPrompt && Boolean(parsedAssistant.sendGeneratedImage?.prompt?.trim());
@@ -7000,7 +6768,7 @@ export async function processChatMessage(
 
     return {
       conversation: conversationIncognito,
-      ...(fallbackInvocation ? { fallbackInvocation } : {}),
+      ...(autoRecovery ? { autoRecovery } : {}),
       opinion: incognitoOpinion,
       ...(pendingImageJobIncognito ? { pendingImageJob: pendingImageJobIncognito } : {}),
       ...(incognitoToolCallEvents.length > 0
@@ -7014,6 +6782,14 @@ export async function processChatMessage(
     };
   }
 
+  const explicitZenHomeBotId =
+    isZenMode(mode) && settings.zenHomeBotId !== undefined
+      ? normalizeChatBotId(settings.zenHomeBotId)
+      : undefined;
+  let zenHomeBotId: string | null =
+    explicitZenHomeBotId !== undefined
+      ? explicitZenHomeBotId
+      : activeMemoryBotId;
   let activeConversationId = conversationId;
   let createdConversationForTurn = false;
   if (isZenMode(mode)) {
@@ -7061,51 +6837,75 @@ export async function processChatMessage(
       if (requested.parent_id) {
         activeConversationId = requested.parent_id;
       } else if (requestedIsZenCompatible && !requestedIsUnfinishedZenTurn) {
-        // Keep the selected PRISM session as the canonical canvas. Bot picks
-        // become drawer-side child projections instead of switching to global
-        // per-bot hubs.
+        // The saved episode is valid; ownership is resolved below from stable
+        // Hub metadata / bot_id rather than from its most recent speaker.
       } else if (requestedIsUnfinishedZenTurn) {
         activeConversationId = undefined;
       } else {
-        throw new Error("Zen messages must be sent to a PRISM session.");
+        throw new Error("Zen messages must be sent to a relationship Home.");
+      }
+
+      if (activeConversationId) {
+        const activeHubMetadata = getConversationHubMetadata(
+          db,
+          userId,
+          activeConversationId
+        );
+        const activeHomeBotId =
+          activeHubMetadata?.hubRole === "hub"
+            ? activeHubMetadata.hubBotId
+            : requested.bot_id ?? null;
+        if (
+          explicitZenHomeBotId !== undefined &&
+          !sameChatBotId(activeHomeBotId, explicitZenHomeBotId)
+        ) {
+          // A stale client conversation id must never move a send into Prism
+          // or another persona's relationship. Resume the requested Home or
+          // create its first episode below.
+          activeConversationId =
+            getHubConversationId(db, userId, explicitZenHomeBotId) ?? undefined;
+          zenHomeBotId = explicitZenHomeBotId;
+        } else {
+          zenHomeBotId = activeHomeBotId;
+        }
       }
     }
     if (!activeConversationId && !settings.forceNewConversation) {
       const conversationColumnNames = conversationColumnSet(db);
-      const latestPrismFilters = ["c.user_id = ?"];
+      const boundConversationId = getHubConversationId(db, userId, zenHomeBotId);
+      if (boundConversationId) {
+        activeConversationId = boundConversationId;
+      }
+      const latestHomeFilters = ["c.user_id = ?"];
       if (conversationColumnNames.has("incognito")) {
-        latestPrismFilters.push("COALESCE(c.incognito, 0) = 0");
+        latestHomeFilters.push("COALESCE(c.incognito, 0) = 0");
       }
       if (conversationColumnNames.has("archived_at")) {
-        latestPrismFilters.push("c.archived_at IS NULL");
+        latestHomeFilters.push("c.archived_at IS NULL");
       }
       if (conversationColumnNames.has("parent_id")) {
-        latestPrismFilters.push("c.parent_id IS NULL");
+        latestHomeFilters.push("c.parent_id IS NULL");
       }
-      const hubTableExists = Boolean(
-        (
-          db
-            .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'conversation_hubs'")
-            .get() as { name?: string } | undefined
-        )?.name
-      );
-      const legacyBotHubExclusion = hubTableExists
-        ? `AND NOT EXISTS (
+      const homeIdentityFilter = zenHomeBotId
+        ? "c.conversation_mode = 'zen' AND c.bot_id = ?"
+        : `(c.conversation_mode = 'zen' AND c.bot_id IS NULL)
+              OR (c.conversation_mode = 'chat' AND c.bot_id IS NULL)`;
+      const legacyBotHubExclusion = zenHomeBotId
+        ? ""
+        : `AND NOT EXISTS (
                 SELECT 1 FROM conversation_hubs h
                  WHERE h.user_id = c.user_id
                    AND h.conversation_id = c.id
                    AND h.bot_key != '__prism__'
-              )`
-        : "";
-      const latestPrismConversation = db
-        .prepare(
-          `SELECT c.id, c.conversation_mode
-             FROM conversations c
-            WHERE ${latestPrismFilters.join("\n              AND ")}
-              AND (
-                c.conversation_mode = 'zen'
-                OR (c.conversation_mode = 'chat' AND c.bot_id IS NULL)
-              )
+              )`;
+      const latestHomeConversation = activeConversationId
+        ? undefined
+        : (db
+            .prepare(
+              `SELECT c.id, c.conversation_mode
+                 FROM conversations c
+                WHERE ${latestHomeFilters.join("\n              AND ")}
+                  AND (${homeIdentityFilter})
               ${legacyBotHubExclusion}
               AND (
                 NOT EXISTS (
@@ -7122,16 +6922,19 @@ export async function processChatMessage(
               )
             ORDER BY c.updated_at DESC
             LIMIT 1`
-        )
-        .get(userId) as { id?: string; conversation_mode?: string | null } | undefined;
-      if (latestPrismConversation?.id) {
-        activeConversationId = latestPrismConversation.id;
+            )
+            .get(...(zenHomeBotId ? [userId, zenHomeBotId] : [userId])) as
+            | { id?: string; conversation_mode?: string | null }
+            | undefined);
+      if (latestHomeConversation?.id) {
+        activeConversationId = latestHomeConversation.id;
       }
     }
     if (activeConversationId) {
       db.prepare(
         "UPDATE conversations SET conversation_mode = 'zen' WHERE id = ? AND user_id = ? AND conversation_mode = 'chat' AND bot_id IS NULL"
       ).run(activeConversationId, userId);
+      bindConversationHub(db, userId, zenHomeBotId, activeConversationId, now);
     }
   } else if (mode === "chat" && activeConversationId) {
     const requested = db
@@ -7152,7 +6955,7 @@ export async function processChatMessage(
   throwIfChatRequestCancelled(settings.signal);
   const rememberedZenWallpaperForNewConversation =
     !activeConversationId && isZenMode(mode) && !incognitoForTurn
-      ? getLatestRememberedZenWallpaperForBot(db, userId, activeMemoryBotId)
+      ? getLatestRememberedZenWallpaperForBot(db, userId, zenHomeBotId)
       : null;
   if (!activeConversationId) {
     activeConversationId = randomId(12);
@@ -7166,7 +6969,7 @@ export async function processChatMessage(
         : generateConversationTitle(modelUserMessage);
     const conversationTitle = baseConversationTitle;
     const conversationMode = isZenMode(mode) ? "zen" : mode;
-    const conversationBotId = isZenMode(mode) ? null : activeBotId ?? null;
+    const conversationBotId = isZenMode(mode) ? zenHomeBotId : activeBotId ?? null;
     if (rememberedZenWallpaperForNewConversation) {
       db.prepare(
         `INSERT INTO conversations (
@@ -7193,7 +6996,7 @@ export async function processChatMessage(
         now,
         now
       );
-    } else if (isZenMode(mode) && !incognitoForTurn && activeMemoryBotId) {
+    } else if (isZenMode(mode) && !incognitoForTurn && zenHomeBotId) {
       db.prepare(
         `INSERT INTO conversations (
           id, user_id, title, conversation_mode, bot_id, incognito,
@@ -7223,6 +7026,9 @@ export async function processChatMessage(
         now,
         now
       );
+    }
+    if (isZenMode(mode) && !incognitoForTurn) {
+      bindConversationHub(db, userId, zenHomeBotId, activeConversationId, now);
     }
   } else {
     const owned = db
@@ -7648,14 +7454,16 @@ export async function processChatMessage(
 	      `bot=${activeMemoryBotId ?? "default"}; checkpoints=${zenPersonaContinuityContext.sessionMemories.length}`
 	    );
 	  }
-	  const manualWebSearchPayload =
+	  const manualWebSearchEligible =
 	    manualWebSearchRequested &&
 	    !personaTransitionTurn &&
 	    !zenAutonomyTurn &&
 	    !zenAskQuestionPatienceTurn &&
-	    !zenLiveActionInterruptTurn
+	    !zenLiveActionInterruptTurn;
+	  const manualWebSearchPayload =
+	    manualWebSearchEligible && !webSearchUnavailableReason
 	      ? await executeWebSearch(
-	          manualToolQueryOrMessage(manualTool, modelUserMessage),
+	          manualWebSearchQuery!,
 	          "manual"
 	        )
 	      : undefined;
@@ -7701,9 +7509,12 @@ export async function processChatMessage(
 	  pushBackendEvent("context", "Prepared persisted chat prompt", describePromptMessages(promptMessages));
   insertUserMessageForTurn();
   let cancelledPersistedTurnRolledBack = false;
-  const rollbackIfCancelledBeforeAssistantReply = (error: unknown): void => {
+  const rollbackIfTurnFailedBeforeAssistantReply = (error: unknown): void => {
     if (cancelledPersistedTurnRolledBack) return;
-    if (!isChatRequestCancelledError(error, settings.signal)) return;
+    if (
+      !isChatRequestCancelledError(error, settings.signal) &&
+      !(error instanceof AutoFallbackExhaustedError)
+    ) return;
     cancelledPersistedTurnRolledBack = true;
     rollbackCancelledPersistedTurn({
       db,
@@ -7717,7 +7528,7 @@ export async function processChatMessage(
     try {
       throwIfChatRequestCancelled(settings.signal);
     } catch (error) {
-      rollbackIfCancelledBeforeAssistantReply(error);
+      rollbackIfTurnFailedBeforeAssistantReply(error);
       throw error;
     }
   };
@@ -7725,7 +7536,7 @@ export async function processChatMessage(
   let assistantReplyRaw = "";
   let providerNameUsed: ProviderName = provider.name;
 	  let modelUsed = prismMoodPauseTurn ? "prism-mood-pause" : "";
-	  let fallbackInvocation: ProcessChatMessageResult["fallbackInvocation"] = undefined;
+	  let autoRecovery: AutoRecoveryTraceV1 | undefined;
 	  let psychicThoughtForTurn: PsychicThoughtPayload | undefined;
 	  let psychicDebugForTurn: PsychicDebugPayload | undefined;
 	  let primaryProvider: LlmProvider = provider;
@@ -7764,21 +7575,21 @@ export async function processChatMessage(
         assistantReplyRaw,
         providerNameUsed,
         modelUsed,
-        fallbackInvocation,
+        autoRecovery,
         psychicThought: psychicThoughtForTurn,
         psychicDebug: psychicDebugForTurn,
-      } = await generateWithLenientLocalFallback({
+      } = await generateChatResponse({
         provider: primaryProvider,
         promptMessages,
         botOverrides: primaryBotOverrides,
         secondaryOllamaHost: settings.secondaryOllamaHost,
-        lenientLocalFallbackModel: settings.lenientLocalFallbackModel,
+        responseMode: isZenMode(mode) ? settings.responseMode : undefined,
+        autoFallbackChain: settings.autoFallbackChain,
+        providerFactory: settings.providerFactory,
+        openAiApiKey: settings.openAiApiKey,
+        anthropicApiKey: settings.anthropicApiKey,
         experimentalAllModelEffortEnabled: settings.experimentalAllModelEffortEnabled,
         psychicModeEnabled: psychicModeEnabledForTurn,
-        denialBoundaryProvider: auxiliaryProvider,
-        denialBoundaryModel: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
-        botSystemPrompt: effectiveBotSystemPrompt,
-        userMessage: modelUserMessage,
         signal: settings.signal,
         onPlanningWarning: (detail) =>
           pushBackendEvent("model", "Psychic planning unavailable", detail),
@@ -7786,7 +7597,7 @@ export async function processChatMessage(
           pushBackendEvent("model", "Simulated effort skipped", detail),
       }));
     } catch (error) {
-      rollbackIfCancelledBeforeAssistantReply(error);
+      rollbackIfTurnFailedBeforeAssistantReply(error);
       throw error;
     }
     throwIfCancelledBeforeAssistantReply();
@@ -7795,27 +7606,6 @@ export async function processChatMessage(
       "Model response received",
       `provider=${providerNameUsed}; model=${modelUsed}; rawChars=${assistantReplyRaw.length}`
     );
-    if (
-      shouldSuppressAssistantReply(assistantReplyRaw) &&
-      !shouldBypassSuppressionForImageIntent(isStarterPrompt, modelUserMessage, history)
-    ) {
-      let boundary: Awaited<ReturnType<typeof generateOrganicTextBoundaryReply>>;
-      try {
-        boundary = await generateOrganicTextBoundaryReply({
-          boundaryProvider: auxiliaryProvider,
-          boundaryModel: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
-          botSystemPrompt: effectiveBotSystemPrompt,
-          userMessage: modelUserMessage,
-          signal: settings.signal,
-        });
-      } catch (error) {
-        rollbackIfCancelledBeforeAssistantReply(error);
-        throw error;
-      }
-      assistantReplyRaw = boundary.assistantReplyRaw;
-      providerNameUsed = boundary.providerNameUsed;
-      modelUsed = boundary.modelUsed;
-    }
   }
   throwIfCancelledBeforeAssistantReply();
   if (userMessageId && psychicThoughtForTurn) {
@@ -7830,18 +7620,22 @@ export async function processChatMessage(
   }
   let parsedAssistant = parseAssistantPrismTools(assistantReplyRaw);
   const requestedWebSearchForTurn: WebSearchRequestPayload | undefined =
-    manualWebSearchPayload
+    manualWebSearchEligible
       ? {
           v: 1,
           name: "WebSearch",
-          query: manualWebSearchPayload.query,
+          query: manualWebSearchQuery!,
         }
       : parsedAssistant.webSearch;
   let webSearchForTurn = manualWebSearchPayload;
   let webSearchStatus: "blocked" | "completed" | "none" =
-    manualWebSearchPayload ? "completed" : "none";
+    manualWebSearchPayload
+      ? "completed"
+      : manualWebSearchEligible && webSearchUnavailableReason
+        ? "blocked"
+        : "none";
   if (!webSearchForTurn && requestedWebSearchForTurn) {
-    if (effectiveProvider === "local") {
+    if (webSearchUnavailableReason) {
       webSearchStatus = "blocked";
     } else {
       try {
@@ -7851,10 +7645,10 @@ export async function processChatMessage(
           assistantReplyRaw,
           providerNameUsed,
           modelUsed,
-          fallbackInvocation,
+          autoRecovery,
           psychicThought: psychicThoughtForTurn,
           psychicDebug: psychicDebugForTurn,
-        } = await generateWithLenientLocalFallback({
+        } = await generateChatResponse({
           provider: primaryProvider,
           promptMessages: [
             ...promptMessages,
@@ -7876,18 +7670,18 @@ export async function processChatMessage(
           ],
           botOverrides: primaryBotOverrides,
           secondaryOllamaHost: settings.secondaryOllamaHost,
-          lenientLocalFallbackModel: settings.lenientLocalFallbackModel,
+          responseMode: isZenMode(mode) ? settings.responseMode : undefined,
+          autoFallbackChain: settings.autoFallbackChain,
+          providerFactory: settings.providerFactory,
+          openAiApiKey: settings.openAiApiKey,
+          anthropicApiKey: settings.anthropicApiKey,
           experimentalAllModelEffortEnabled: settings.experimentalAllModelEffortEnabled,
           psychicModeEnabled: psychicModeEnabledForTurn,
-          denialBoundaryProvider: auxiliaryProvider,
-          denialBoundaryModel: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
-          botSystemPrompt: effectiveBotSystemPrompt,
-          userMessage: modelUserMessage,
           signal: settings.signal,
         }));
         parsedAssistant = parseAssistantPrismTools(assistantReplyRaw);
       } catch (error) {
-        rollbackIfCancelledBeforeAssistantReply(error);
+        rollbackIfTurnFailedBeforeAssistantReply(error);
         throw error;
       }
       throwIfCancelledBeforeAssistantReply();
@@ -7916,9 +7710,8 @@ export async function processChatMessage(
     parsedAssistant.displayContent,
     askQuestionForTurn
   );
-  if (webSearchStatus === "blocked" && assistantDisplayRaw.trim().length === 0) {
-    assistantDisplayRaw =
-      "I can only run automatic web searches in ONLINE mode. Use the ? tool picker to search the web explicitly from LOCAL mode.";
+  if (webSearchStatus === "blocked") {
+	    assistantDisplayRaw = webSearchUnavailableMessage;
   }
   const starterSendGeneratedImageRequested =
     isStarterPrompt && Boolean(parsedAssistant.sendGeneratedImage?.prompt?.trim());
@@ -7993,7 +7786,7 @@ export async function processChatMessage(
         requestedSize: chatToolRequestedSize,
       });
     } catch (error) {
-      rollbackIfCancelledBeforeAssistantReply(error);
+      rollbackIfTurnFailedBeforeAssistantReply(error);
       throw error;
     }
     if (!acq.ok) {
@@ -8108,6 +7901,7 @@ export async function processChatMessage(
 	    zenDisplay: zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn ? undefined : parsedAssistant.zenDisplay,
 	    zenTurn: zenTurnMarker,
 	    webSearch: webSearchForTurn,
+	    autoRecovery,
 	  });
   const toolPayloadImageOnly = sentGeneratedImagePersisted
     ? serializeAssistantToolPayload({ sentGeneratedImage: sentGeneratedImagePersisted })
@@ -8645,7 +8439,10 @@ export async function processChatMessage(
               'idle' AS zen_wallpaper_status, '[]' AS zen_wallpaper_history,`;
   const conversationRow = db
     .prepare(
-      `SELECT c.id, c.user_id, c.title, c.conversation_mode, c.bot_id, c.incognito, c.created_at, c.updated_at,
+      `SELECT c.id, c.user_id, c.title, c.conversation_mode, c.bot_id,
+              ${conversationColumnNames.has("parent_id") ? "c.parent_id" : "NULL AS parent_id"},
+              ${conversationColumnNames.has("archived_at") ? "c.archived_at" : "NULL AS archived_at"},
+              c.incognito, c.created_at, c.updated_at,
               ${zenWallpaperSelect}
               (SELECT m.bot_id FROM messages m
                  WHERE m.conversation_id = c.id
@@ -8668,6 +8465,8 @@ export async function processChatMessage(
     title: string;
     conversation_mode: string | null;
     bot_id: string | null;
+    parent_id: string | null;
+    archived_at: string | null;
     incognito: number;
     zen_wallpaper_enabled: number | null;
     zen_wallpaper_image_id: string | null;
@@ -8738,6 +8537,14 @@ export async function processChatMessage(
     "ignored_question"
   );
   const hubMetadata = getConversationHubMetadata(db, userId, activeConversationId);
+  const historyEntry = buildConversationHistoryEntry(conversationRow, {
+    hubMetadata,
+    participantBotIds: messageRows.map((row) => row.bot_id),
+    continuationConversationId:
+      hubMetadata?.hubRole === "hub"
+        ? getHubConversationId(db, userId, hubMetadata.hubBotId)
+        : activeConversationId,
+  });
   const includeZenWallpaper =
     conversationModeOut === "zen" || hubMetadata?.hubRole === "side";
 
@@ -8754,6 +8561,7 @@ export async function processChatMessage(
           parentHubId: hubMetadata.parentHubId,
         }
       : {}),
+    history: historyEntry,
     incognito: conversationModeOut === "zen" ? false : conversationRow.incognito === 1,
     lastBotId: conversationRow.last_bot_id ?? null,
     lastBotColor: conversationRow.last_bot_color ?? null,
@@ -8773,7 +8581,7 @@ export async function processChatMessage(
 
   return {
     conversation: conversationPersisted,
-    ...(fallbackInvocation ? { fallbackInvocation } : {}),
+    ...(autoRecovery ? { autoRecovery } : {}),
     opinion,
     ...(botOpinion ? { botOpinion } : {}),
     prismMood,

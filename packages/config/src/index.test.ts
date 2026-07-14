@@ -72,4 +72,25 @@ describe("configuration normalization", () => {
       }
     );
   });
+
+  it("prefers the canonical Brave Search environment key", () => {
+    withEnv(
+      {
+        BRAVE_SEARCH_API_KEY: "brave-canonical",
+        BRAVE_API_KEY: "legacy-value",
+      },
+      () => {
+        assert.equal(getAppConfig().braveSearchApiKey, "brave-canonical");
+      }
+    );
+    withEnv(
+      {
+        BRAVE_SEARCH_API_KEY: undefined,
+        BRAVE_API_KEY: "legacy-value",
+      },
+      () => {
+        assert.equal(getAppConfig().braveSearchApiKey, "legacy-value");
+      }
+    );
+  });
 });

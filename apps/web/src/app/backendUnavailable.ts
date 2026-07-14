@@ -18,6 +18,13 @@ export type BackendUnavailableEventDetail = {
   detail?: string;
 };
 
+type BackendConnectionEventState = "available" | "unavailable";
+
+const backendConnectionEventState = new WeakMap<
+  EventTarget,
+  BackendConnectionEventState
+>();
+
 type BackendUnavailableErrorOptions = {
   path?: string;
   status?: number;
@@ -91,21 +98,31 @@ export function createBackendUnavailableErrorFromPayload(
 export function dispatchBackendUnavailableEvent(
   error: PrismBackendUnavailableError
 ): void {
+  dispatchBackendUnavailableDetail({
+    code: BACKEND_UNAVAILABLE_CODE,
+    message: error.message,
+    path: error.path,
+    status: error.status,
+    detail: error.detail,
+  });
+}
+
+export function dispatchBackendUnavailableDetail(
+  detail: BackendUnavailableEventDetail
+): void {
   if (typeof window === "undefined") return;
+  if (backendConnectionEventState.get(window) === "unavailable") return;
+  backendConnectionEventState.set(window, "unavailable");
   window.dispatchEvent(
     new CustomEvent<BackendUnavailableEventDetail>(BACKEND_UNAVAILABLE_EVENT, {
-      detail: {
-        code: BACKEND_UNAVAILABLE_CODE,
-        message: error.message,
-        path: error.path,
-        status: error.status,
-        detail: error.detail,
-      },
+      detail,
     })
   );
 }
 
 export function dispatchBackendAvailableEvent(): void {
   if (typeof window === "undefined") return;
+  if (backendConnectionEventState.get(window) !== "unavailable") return;
+  backendConnectionEventState.set(window, "available");
   window.dispatchEvent(new CustomEvent(BACKEND_AVAILABLE_EVENT));
 }

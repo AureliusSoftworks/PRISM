@@ -174,6 +174,37 @@ describe("coffee replay helpers", () => {
     assert.equal(departed.playerDeparting, false);
   });
 
+  it("animates a bot departure on its closing turn, then removes that seat", () => {
+    const messages = [
+      { id: "a1", role: "assistant", content: "One last thought." },
+      {
+        id: "a2",
+        role: "assistant",
+        content: "Good night, everyone.",
+        coffeeReplayEvents: [
+          {
+            v: 1 as const,
+            name: "coffeeReplayEvent" as const,
+            kind: "botDeparture" as const,
+            botId: "bot-1",
+            seatIndex: 2,
+            occurredAt: "2026-07-02T15:03:00.000Z",
+          },
+        ],
+      },
+      { id: "a3", role: "assistant", content: "Take care." },
+    ];
+
+    const leaving = coffeeReplayStateAt(messages, 1);
+    assert.equal(leaving.departingBotIds.has("bot-1"), true);
+    assert.equal(leaving.departedBotIds.has("bot-1"), false);
+    assert.equal(leaving.botDepartureEvent?.seatIndex, 2);
+
+    const gone = coffeeReplayStateAt(messages, 2);
+    assert.equal(gone.departingBotIds.has("bot-1"), false);
+    assert.equal(gone.departedBotIds.has("bot-1"), true);
+  });
+
   it("scales simulated player thinking with message length and caps it", () => {
     assert.equal(coffeeReplayPlayerThinkingDurationMs("Hi"), 800);
     assert.ok(

@@ -5,6 +5,7 @@ import { DISABLED_MODEL_CHOICE } from "@localai/shared";
 
 import {
   applyOnlineModelChoice,
+  autoResponseModeForProvider,
   combinedOnlineModelOptions,
   fallbackOnlineModelIdsForProvider,
   filterVisibleModelOptions,
@@ -38,6 +39,12 @@ describe("provider mode helpers", () => {
     assert.equal(responseModeForProvider("anthropic"), "online");
     assert.equal(nextResponseMode("local"), "online");
     assert.equal(nextResponseMode("online"), "local");
+  });
+
+  it("adds Auto only for surfaces that explicitly allow it", () => {
+    assert.equal(autoResponseModeForProvider("local", true), "auto");
+    assert.equal(autoResponseModeForProvider("openai", true), "auto");
+    assert.equal(autoResponseModeForProvider("openai", true, false), "online");
   });
 
   it("combines OpenAI and Anthropic model lists without hiding provider identity", () => {

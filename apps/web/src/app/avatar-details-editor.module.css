@@ -7,7 +7,7 @@
 
 .applyError {
   margin: -8px 0 0;
-  color: #ff8f8f;
+  color: var(--danger);
   font-size: 10px;
   line-height: 1.35;
 }
@@ -51,8 +51,23 @@
 }
 
 .editor button:disabled {
-  opacity: 0.38;
+  opacity: 0.48;
   cursor: default;
+}
+
+.editor
+  button:not(.applyButton):not([data-selected="true"]):hover:not(:disabled) {
+  border-color: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 44%,
+    var(--line-strong)
+  );
+  background: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 9%,
+    var(--bg-hover)
+  );
+  color: var(--fg);
 }
 
 .editor button:focus-visible,
@@ -367,7 +382,7 @@
 }
 
 .limitMessage {
-  color: #ffb27d;
+  color: var(--avatar-editor-warning, #ffb27d);
 }
 
 .footer {

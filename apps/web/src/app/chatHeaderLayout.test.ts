@@ -1,0 +1,88 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { describe, it } from "node:test";
+
+import {
+  APP_SHELL_TOP_NAV_HEIGHT_FALLBACK_PX,
+  appShellTopNavHeightCssValue,
+} from "./chatHeaderLayout.ts";
+
+const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+const cssSource = readFileSync(
+  new URL("./page.module.css", import.meta.url),
+  "utf8",
+);
+
+describe("Chat shell header layout", () => {
+  it("rounds zoomed header measurements upward and has a safe fallback", () => {
+    assert.equal(appShellTopNavHeightCssValue(60), "60px");
+    assert.equal(appShellTopNavHeightCssValue(60.25), "61px");
+    assert.equal(
+      appShellTopNavHeightCssValue(Number.NaN),
+      `${APP_SHELL_TOP_NAV_HEIGHT_FALLBACK_PX}px`,
+    );
+  });
+
+  it("publishes the live navigation height from the shared header observer", () => {
+    assert.match(
+      pageSource,
+      /appShellTopNavHeightCssValue\(header\.getBoundingClientRect\(\)\.height\)/,
+    );
+    assert.match(
+      pageSource,
+      /shell\.style\.setProperty\(\s*"--app-shell-top-nav-height"/,
+    );
+    assert.equal(
+      pageSource.match(/data-app-shell-header="true"/g)?.length,
+      2,
+    );
+  });
+
+  it("offsets the collapsed Chat hero while sidebar-open layout stays in flow", () => {
+    assert.match(
+      cssSource,
+      /\.chatPane\s*\{[\s\S]*--app-shell-top-nav-height:\s*calc\(\s*60px\s*\+\s*env\(safe-area-inset-top, 0px\)\s*\)/,
+    );
+    assert.match(
+      cssSource,
+      /\.appLayout\[data-zen-surface="true"\]\[data-chat-sidebar-hidden="true"\][\s\S]*\.messagesEmptyState[\s\S]*> \.emptyState\s*\{[\s\S]*padding-block-start:\s*calc\([\s\S]*var\(--app-shell-top-nav-height\)[\s\S]*clamp\(/,
+    );
+    assert.match(
+      cssSource,
+      /\.appLayout\[data-zen-surface="true"\]:not\(\[data-chat-sidebar-hidden="true"\]\)\s*\{[\s\S]*grid-template-columns:/,
+    );
+  });
+
+  it("keeps content below normal and wrapped headers at short and tall heights", () => {
+    for (const viewportHeight of [480, 900, 1_440]) {
+      const responsiveGap = Math.max(
+        16,
+        Math.min(36, viewportHeight * 0.03),
+      );
+      for (const measuredHeaderHeight of [60, 84, 112.25]) {
+        const roundedHeaderHeight = Number.parseInt(
+          appShellTopNavHeightCssValue(measuredHeaderHeight),
+          10,
+        );
+        assert.ok(
+          roundedHeaderHeight + responsiveGap > measuredHeaderHeight,
+        );
+      }
+    }
+  });
+
+  it("includes safe-area padding and lets long localized title parts wrap", () => {
+    assert.match(
+      cssSource,
+      /\.chatHeader\[data-app-shell-header="true"\]\s*\{[\s\S]*env\(safe-area-inset-top, 0px\)[\s\S]*env\(safe-area-inset-left, 0px\)[\s\S]*env\(safe-area-inset-right, 0px\)/,
+    );
+    assert.match(
+      cssSource,
+      /\.emptyStateTitlePhrase\s*\{[\s\S]*flex-wrap:\s*wrap;[\s\S]*white-space:\s*normal;/,
+    );
+    assert.match(
+      cssSource,
+      /\.emptyStateTitleLead\s*\{[\s\S]*overflow-wrap:\s*anywhere;[\s\S]*white-space:\s*normal;/,
+    );
+  });
+});

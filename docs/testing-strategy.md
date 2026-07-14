@@ -28,9 +28,9 @@ node --test --experimental-strip-types apps/web/src/app/coffee-cup-sprites.test.
   production schema, ownership rules, persistence, and provider boundaries are
   exercised without external services.
 - Browser smoke tests cover the desktop-first auth shell, route/surface loading,
-  and the authenticated Coffee picker with mocked API responses. Chat and Zen
-  behavioral coverage remains concentrated in the deterministic API and unit
-  suites until the large dirty page surface has a stable browser fixture.
+  the authenticated Coffee picker, and authenticated Chat/Zen behavior with
+  mocked API responses. The stateful Zen fixture pins LOCAL request policy,
+  persisted turn hydration, and Private chat staying ephemeral across reloads.
 - Visual snapshots are kept in a separate platform-specific lane so ordinary
   PR checks do not fail because macOS and Linux font rasterization differs.
 - Performance tests are manual/nightly and report p50/p95 latency plus SQLite

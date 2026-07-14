@@ -57,6 +57,22 @@ describe("validateApiKeyCredential", () => {
     assert.equal(calls[0]?.headers.get("xi-api-key"), "xi-test");
   });
 
+  it("checks Brave Search keys with the subscription token header", async () => {
+    const calls: Array<{ url: string; headers: Headers }> = [];
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(input), headers: new Headers(init?.headers) });
+      return new Response("{}", { status: 200 });
+    }) as typeof fetch;
+
+    const result = await validateApiKeyCredential("brave", "brave-test", fetchImpl);
+
+    assert.equal(result.valid, true);
+    const url = new URL(calls[0]?.url ?? "");
+    assert.equal(url.origin + url.pathname, "https://api.search.brave.com/res/v1/web/search");
+    assert.equal(url.searchParams.get("count"), "1");
+    assert.equal(calls[0]?.headers.get("x-subscription-token"), "brave-test");
+  });
+
   it("reports rejected provider keys without throwing", async () => {
     const fetchImpl = (async () =>
       new Response(JSON.stringify({ detail: { status: "invalid_api_key" } }), {
@@ -67,6 +83,7 @@ describe("validateApiKeyCredential", () => {
       "openai",
       "anthropic",
       "elevenlabs",
+      "brave",
     ];
     for (const provider of providers) {
       const result = await validateApiKeyCredential(provider, "bad-key", fetchImpl);

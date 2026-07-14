@@ -13,6 +13,10 @@ import {
   upsertPrismMoodState,
 } from "./db.ts";
 import { buildApiRootLandingHtml } from "./api-root-landing.ts";
+import {
+  buildDeveloperTranscript,
+  sensitiveEnvironmentValues,
+} from "./developer-transcript.ts";
 import { clearCookie, html, HttpError, json, readJsonBody, setCookie, setCorsHeaders } from "./utils.http.ts";
 import { decryptJson, decryptText, deriveMasterKey, encryptText, hashPassword, randomId, verifyPassword } from "./security.ts";
 import type { RouteDefinition, RequestContext } from "./types.ts";
@@ -65,8 +69,11 @@ import {
   type ManualChatToolRequest,
 } from "./chat.ts";
 import {
+  bindConversationHub,
   getConversationHubMetadata,
+  getHubConversationId,
 } from "./conversation-hubs.ts";
+import { buildConversationHistoryEntry } from "./conversation-history.ts";
 import {
   generateZenLiveActionReaction,
   normalizeZenLiveActionContextInput,
@@ -96,12 +103,14 @@ import {
   getCoffeeConversationTranscript,
   getCoffeeSessionPoll,
   generateCoffeeSessionSynopsis,
+  coffeePlayerDepartureEpilogueShouldStop,
   listCoffeeGroups,
   listCoffeePresets,
   parseStoredCoffeeSessionSettings,
   processCoffeeAutonomousTurn,
   processCoffeeTurn,
   recordCoffeePlayerDeparture,
+  regenerateCoffeeConversationStarterTopics,
   recordCoffeeUserAction,
   recordCoffeeReplayEvents,
   recordCoffeeInterruptionPause,
@@ -230,6 +239,7 @@ import {
   parseStoredElevenLabsVoiceBank,
   resolveNextSettings,
   sanitizeAnthropicKeyInput,
+  sanitizeBraveSearchKeyInput,
   sanitizeElevenLabsKeyInput,
   sanitizeOpenAiKeyInput,
 } from "./settings.ts";
@@ -327,6 +337,8 @@ import {
   reasoningEffortForRequest,
   parseBuiltInPromptWildcardReference,
   parseStoredManualAskQuestionPayload,
+  parseStoredAutoFallbackChain,
+  normalizeResponseMode,
   parseStoredPromptShortcutPayload,
   parseStoredPromptWildcardPayload,
   parseStoredToolPayload,
@@ -362,6 +374,7 @@ import {
 import { generateImage } from "./image-provider.ts";
 import { generateLocalImageBytesByModelId } from "./image-local-by-model.ts";
 import { shouldAttemptLenientLocalImageFallback } from "./image-lenient-fallback.ts";
+import { AutoFallbackExhaustedError } from "./auto-fallback.ts";
 import {
   checkComfyUiHostStatus,
   listComfyUiWorkflowJsonRelPaths,
@@ -425,7 +438,7 @@ let masterKey = deriveMasterKey(config.encryptionMasterKey);
 let providerFactoryOverride: typeof selectProvider = selectProvider;
 let auxiliaryProviderFactoryOverride: typeof getAuxiliaryProvider = getAuxiliaryProvider;
 let builtinVoiceWaveGeneratorOverride: typeof generateBuiltinEnglishWave = generateBuiltinEnglishWave;
-const activeCoffeeDepartureEpilogues = new Set<string>();
+const activeCoffeeDepartureEpilogues = new Map<string, Promise<void>>();
 /**
  * Runtime view of local-network access. `boundLanActive` reflects what the
  * process actually bound at startup (immutable for the process lifetime);
@@ -650,10 +663,10 @@ interface UserDbRow {
   auto_memory: number;
   composer_writing_assist: number;
   auto_switch_model: number;
+  auto_fallback_chain: string | null;
   hidden_bot_model_ids: string;
   hidden_comfyui_workflow_ids: string;
   model_visibility_defaults_version: number;
-  fallback_model_message_stripe: number;
   preferred_local_model: string | null;
   preferred_online_model: string | null;
   lenient_local_fallback_model: string | null;
@@ -727,6 +740,9 @@ interface UserDbRow {
   elevenlabs_key_ciphertext: string | null;
   elevenlabs_key_iv: string | null;
   elevenlabs_key_tag: string | null;
+  brave_search_key_ciphertext: string | null;
+  brave_search_key_iv: string | null;
+  brave_search_key_tag: string | null;
   voice_mode: string | null;
   voice_effects_enabled: number;
   voice_volume: number;
@@ -884,7 +900,7 @@ function getOrCreateLocalOwnerUser(): string {
 function getUserRow(userId: string): UserDbRow {
   const row = db
     .prepare(
-      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, auto_switch_model, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, fallback_model_message_stripe, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, zen_persona_transition_choice, prism_default_bot_name, prism_default_bot_system_prompt, prism_default_bot_color, prism_default_bot_glyph, prism_default_bot_face_eyes_font, prism_default_bot_face_eye_character, prism_default_bot_face_eye_animation, prism_default_bot_face_mouth_font, prism_default_bot_face_mouth_character, prism_default_bot_face_mouth_animation, prism_default_bot_face_font_weight, prism_default_bot_face_eye_scale, prism_default_bot_face_eye_offset_x, prism_default_bot_face_eye_offset_y, prism_default_bot_face_mouth_scale, prism_default_bot_face_mouth_offset_x, prism_default_bot_face_mouth_offset_y, prism_default_bot_face_mouth_rotation_deg, prism_default_bot_face_blink_bar, prism_default_bot_face_blink_scale, prism_default_bot_face_blink_offset_x, prism_default_bot_face_blink_offset_y, prism_default_bot_face_thinking_frames, prism_default_bot_audio_voice_profile, prism_default_bot_temperature, prism_default_bot_max_tokens, prism_default_bot_top_p, prism_default_bot_top_k, prism_default_bot_repetition_penalty, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, voice_mode, voice_effects_enabled, voice_volume, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, player_audio_voice_profile, player_name_pronunciation, created_at, last_active_at FROM users WHERE id = ?"
+      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, auto_switch_model, auto_fallback_chain, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, zen_persona_transition_choice, prism_default_bot_name, prism_default_bot_system_prompt, prism_default_bot_color, prism_default_bot_glyph, prism_default_bot_face_eyes_font, prism_default_bot_face_eye_character, prism_default_bot_face_eye_animation, prism_default_bot_face_mouth_font, prism_default_bot_face_mouth_character, prism_default_bot_face_mouth_animation, prism_default_bot_face_font_weight, prism_default_bot_face_eye_scale, prism_default_bot_face_eye_offset_x, prism_default_bot_face_eye_offset_y, prism_default_bot_face_mouth_scale, prism_default_bot_face_mouth_offset_x, prism_default_bot_face_mouth_offset_y, prism_default_bot_face_mouth_rotation_deg, prism_default_bot_face_blink_bar, prism_default_bot_face_blink_scale, prism_default_bot_face_blink_offset_x, prism_default_bot_face_blink_offset_y, prism_default_bot_face_thinking_frames, prism_default_bot_audio_voice_profile, prism_default_bot_temperature, prism_default_bot_max_tokens, prism_default_bot_top_p, prism_default_bot_top_k, prism_default_bot_repetition_penalty, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, brave_search_key_ciphertext, brave_search_key_iv, brave_search_key_tag, voice_mode, voice_effects_enabled, voice_volume, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, player_audio_voice_profile, player_name_pronunciation, created_at, last_active_at FROM users WHERE id = ?"
     )
     .get(userId) as UserDbRow | undefined;
   if (!row) {
@@ -1082,6 +1098,25 @@ function getElevenLabsApiKeyForUser(userId: string, userKey: Buffer): string | u
   );
 }
 
+function getBraveSearchApiKeyForUser(userId: string, userKey: Buffer): string | undefined {
+  const user = getUserRow(userId);
+  if (
+    !user.brave_search_key_ciphertext ||
+    !user.brave_search_key_iv ||
+    !user.brave_search_key_tag
+  ) {
+    return undefined;
+  }
+  return decryptText(
+    {
+      ciphertext: user.brave_search_key_ciphertext,
+      iv: user.brave_search_key_iv,
+      tag: user.brave_search_key_tag,
+    },
+    userKey
+  );
+}
+
 function readProvider(value: unknown): ProviderName | undefined {
   return value === "local" || value === "openai" || value === "anthropic"
     ? value
@@ -1089,7 +1124,12 @@ function readProvider(value: unknown): ProviderName | undefined {
 }
 
 function readApiKeyValidationProvider(value: unknown): ApiKeyValidationProvider {
-  if (value === "openai" || value === "anthropic" || value === "elevenlabs") {
+  if (
+    value === "openai" ||
+    value === "anthropic" ||
+    value === "elevenlabs" ||
+    value === "brave"
+  ) {
     return value;
   }
   throw new Error("provider is required.");
@@ -1101,6 +1141,7 @@ function sanitizeApiKeyForProvider(
 ): string {
   if (provider === "anthropic") return sanitizeAnthropicKeyInput(value);
   if (provider === "elevenlabs") return sanitizeElevenLabsKeyInput(value);
+  if (provider === "brave") return sanitizeBraveSearchKeyInput(value);
   return sanitizeOpenAiKeyInput(value);
 }
 
@@ -2508,35 +2549,70 @@ function buildRoutes(): RouteDefinition[] {
         throw new HttpError(404, "Bot not found.");
       }
       if (!forceNewSession) {
-        const existingSession = db
-          .prepare(
-            `SELECT id
-               FROM conversations
-              WHERE user_id = ?
-                AND COALESCE(incognito, 0) = 0
-                AND archived_at IS NULL
-                AND parent_id IS NULL
-                AND (
-                  conversation_mode = 'zen'
-                  OR (conversation_mode = 'chat' AND bot_id IS NULL)
-                )
-              ORDER BY updated_at DESC
-              LIMIT 1`
-          )
-          .get(userId) as { id: string } | undefined;
+        const boundConversationId = getHubConversationId(
+          db,
+          userId,
+          requestedBotId
+        );
+        const existingSession = boundConversationId
+          ? { id: boundConversationId }
+          : (db
+              .prepare(
+                requestedBotId
+                  ? `SELECT c.id
+                       FROM conversations c
+                      WHERE c.user_id = ?
+                        AND COALESCE(c.incognito, 0) = 0
+                        AND c.archived_at IS NULL
+                        AND c.parent_id IS NULL
+                        AND c.conversation_mode = 'zen'
+                        AND c.bot_id = ?
+                      ORDER BY c.updated_at DESC
+                      LIMIT 1`
+                  : `SELECT c.id
+                       FROM conversations c
+                      WHERE c.user_id = ?
+                        AND COALESCE(c.incognito, 0) = 0
+                        AND c.archived_at IS NULL
+                        AND c.parent_id IS NULL
+                        AND (
+                          (c.conversation_mode = 'zen' AND c.bot_id IS NULL)
+                          OR (c.conversation_mode = 'chat' AND c.bot_id IS NULL)
+                        )
+                        AND NOT EXISTS (
+                          SELECT 1
+                            FROM conversation_hubs h
+                           WHERE h.user_id = c.user_id
+                             AND h.conversation_id = c.id
+                             AND h.bot_key != '__prism__'
+                        )
+                      ORDER BY c.updated_at DESC
+                      LIMIT 1`
+              )
+              .get(...(requestedBotId ? [userId, requestedBotId] : [userId])) as
+              | { id: string }
+              | undefined);
         if (existingSession?.id) {
+          bindConversationHub(
+            db,
+            userId,
+            requestedBotId,
+            existingSession.id,
+            new Date().toISOString()
+          );
           json(ctx.res, 200, { ok: true, conversationId: existingSession.id });
           return;
         }
       }
       const now = new Date().toISOString();
       const conversationId = randomId(12);
-      const title = "PRISM";
+      const title = requestedBot?.name?.trim() || "PRISM";
       db.prepare(
         `INSERT INTO conversations (
           id, user_id, title, conversation_mode, bot_id, incognito, created_at, updated_at
-        ) VALUES (?, ?, ?, 'zen', NULL, 0, ?, ?)`
-      ).run(conversationId, userId, title, now, now);
+        ) VALUES (?, ?, ?, 'zen', ?, 0, ?, ?)`
+      ).run(conversationId, userId, title, requestedBotId, now, now);
+      bindConversationHub(db, userId, requestedBotId, conversationId, now);
       json(ctx.res, 200, { ok: true, conversationId });
     }),
     route("POST", "/api/conversations/:id/zen-starter-replay", async (ctx) => {
@@ -2570,7 +2646,7 @@ function buildRoutes(): RouteDefinition[] {
                   c.zen_wallpaper_enabled, c.zen_wallpaper_image_id,
                   c.zen_wallpaper_prompt_seed, c.zen_wallpaper_message_count,
                   c.zen_wallpaper_status, c.zen_wallpaper_history,
-                  c.incognito, c.created_at, c.updated_at,
+                  c.parent_id, c.archived_at, c.incognito, c.created_at, c.updated_at,
                   (SELECT m.bot_id FROM messages m
                      WHERE m.conversation_id = c.id
                        AND m.role = 'assistant'
@@ -2598,6 +2674,8 @@ function buildRoutes(): RouteDefinition[] {
             coffee_duration_minutes: number | null;
             coffee_topic: string | null;
             coffee_absent_bot_ids: string | null;
+            parent_id: string | null;
+            archived_at: string | null;
             zen_wallpaper_enabled: number | null;
             zen_wallpaper_image_id: string | null;
             zen_wallpaper_prompt_seed: string | null;
@@ -2740,6 +2818,14 @@ function buildRoutes(): RouteDefinition[] {
         };
       });
       const hubMetadata = getConversationHubMetadata(db, userId, conversationId);
+      const history = buildConversationHistoryEntry(conversation, {
+        hubMetadata,
+        participantBotIds: messageRows.map((row) => row.bot_id),
+        continuationConversationId:
+          hubMetadata?.hubRole === "hub"
+            ? getHubConversationId(db, userId, hubMetadata.hubBotId)
+            : conversationId,
+      });
       const effectiveConversationBotId =
         hubMetadata?.hubBotId ?? conversation.bot_id ?? null;
       const opinionRow = db
@@ -2857,6 +2943,7 @@ function buildRoutes(): RouteDefinition[] {
                 parentHubId: hubMetadata.parentHubId,
               }
             : {}),
+          history,
           ...(botGroupIdsOut.length > 0 ? { botGroupIds: botGroupIdsOut } : {}),
           ...(conversationModeOut === "coffee"
             ? { coffeeGroupId: conversation.coffee_group_id ?? null }
@@ -4396,6 +4483,9 @@ function buildRoutes(): RouteDefinition[] {
           ? body.mode
           : "sandbox";
       const psychicModeRequested = body.psychicModeEnabled === true;
+      const requestedResponseMode = mode === "zen"
+        ? normalizeResponseMode(body.responseMode, undefined)
+        : undefined;
       const requestedPersonaTransition =
         mode === "zen"
           ? readZenPersonaTransition(body.facetTransition ?? body.personaTransition)
@@ -4448,9 +4538,21 @@ function buildRoutes(): RouteDefinition[] {
           : body.facetBotId === null
             ? null
             : undefined;
+      const zenHomeBotId: string | null | undefined =
+        typeof body.zenHomeBotId === "string"
+          ? body.zenHomeBotId
+          : body.zenHomeBotId === null
+            ? null
+            : undefined;
       const requestedBotId = mode === "zen" && facetBotId !== undefined ? facetBotId : botId;
       if (mode === "chat" && (typeof requestedBotId !== "string" || requestedBotId.trim().length === 0)) {
         throw new HttpError(400, "Choose a bot before chatting.");
+      }
+      if (mode === "zen" && typeof zenHomeBotId === "string") {
+        const homeBotExists = db
+          .prepare("SELECT 1 FROM bots WHERE id = ? AND user_id = ?")
+          .get(zenHomeBotId.trim(), userId);
+        if (!homeBotExists) throw new HttpError(404, "Zen Home bot not found.");
       }
       // Companion private mode keeps the visible branch client-held: the request can
       // carry an ephemeral transcript snapshot, but the server skips memory and
@@ -4615,6 +4717,8 @@ function buildRoutes(): RouteDefinition[] {
         getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
       const anthropicApiKey =
         getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey;
+      const braveSearchApiKey =
+        getBraveSearchApiKeyForUser(userId, userKey) ?? config.braveSearchApiKey;
       const catalog = await buildModelCatalog(
         openAiApiKey,
         user.secondary_ollama_host,
@@ -4767,12 +4871,14 @@ function buildRoutes(): RouteDefinition[] {
             autoMemory: !commandCenterPrompt && !incognito && Boolean(user.auto_memory),
             openAiApiKey,
             anthropicApiKey,
+            braveSearchApiKey,
             userDisplayName: user.display_name,
             starterPrompt,
             starterPromptWarrantsIntro,
             starterPromptLabel,
             secondaryOllamaHost: user.secondary_ollama_host,
-            lenientLocalFallbackModel: user.lenient_local_fallback_model,
+            responseMode: botForcesLocalProvider ? "local" : requestedResponseMode,
+            autoFallbackChain: parseStoredAutoFallbackChain(user.auto_fallback_chain),
             prismDefaultLlmModel: user.prism_default_llm_model,
             prismImageToolLlmModel: user.prism_image_tool_llm_model,
             recentContextMessageLimit: normalizeZenRecentContextMessages(
@@ -4797,6 +4903,9 @@ function buildRoutes(): RouteDefinition[] {
             },
             botId: mode === "zen" ? undefined : effectiveBotId,
             ...(mode === "zen" ? { facetBotId: effectiveBotId ?? null } : {}),
+            ...(mode === "zen" && zenHomeBotId !== undefined
+              ? { zenHomeBotId }
+              : {}),
             ...(personaTransition ? { facetTransition: personaTransition } : {}),
             ...(zenAutonomy ? { zenAutonomy } : {}),
             ...(zenAskQuestionPatience ? { zenAskQuestionPatience } : {}),
@@ -4822,6 +4931,14 @@ function buildRoutes(): RouteDefinition[] {
           conversationId
         );
       } catch (error) {
+        if (error instanceof AutoFallbackExhaustedError) {
+          json(ctx.res, 503, {
+            ok: false,
+            error: "auto_fallback_exhausted",
+            attempts: error.attempts,
+          });
+          return;
+        }
         if (resolvedAuto.usedRequiredLocalFallback) {
           throw new Error(
             `Prism Server setup problem: the required primary ${REQUIRED_PRIMARY_LOCAL_MODEL_ID} model is unavailable. Install it in Ollama, then try again.`
@@ -4836,7 +4953,7 @@ function buildRoutes(): RouteDefinition[] {
       const {
         conversation,
         conversationStarters,
-        fallbackInvocation,
+        autoRecovery,
         memoryLearned,
         opinion,
         botOpinion,
@@ -4851,7 +4968,7 @@ function buildRoutes(): RouteDefinition[] {
       json(ctx.res, 200, {
         ok: true,
         conversation,
-        ...(fallbackInvocation ? { fallbackInvocation } : {}),
+        ...(autoRecovery ? { autoRecovery } : {}),
         ...(opinion ? { opinion } : {}),
         ...(botOpinion ? { botOpinion } : {}),
         ...(prismMood ? { prismMood } : {}),
@@ -5000,23 +5117,38 @@ function buildRoutes(): RouteDefinition[] {
             }
           : undefined;
       const initialTeams = readCoffeeTeamCreateInput(body.initialTeams);
-      const result = await createCoffeeConversationFromGroup(
-        db,
-        userId,
-        ctx.params.id,
+      const result = await runWithUsageSession(
         {
-          coffeeSettings: body.coffeeSettings,
-          durationMinutes: body.durationMinutes,
-          presetId: body.presetId,
-          excludedBotIds: body.excludedBotIds,
-          initialPoll,
-          initialTeams,
+          db,
+          userId,
+          privacyScope: "normal",
+          mode: "coffee",
+          surface: "coffee_topic",
         },
-        {
-          prismDefaultLlmModel: user.prism_default_llm_model,
-          secondaryOllamaHost: user.secondary_ollama_host,
-          experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
-          userKey,
+        async () => {
+          const created = await createCoffeeConversationFromGroup(
+            db,
+            userId,
+            ctx.params.id,
+            {
+              coffeeSettings: body.coffeeSettings,
+              durationMinutes: body.durationMinutes,
+              presetId: body.presetId,
+              excludedBotIds: body.excludedBotIds,
+              initialPoll,
+              initialTeams,
+            },
+            {
+              prismDefaultLlmModel: user.prism_default_llm_model,
+              secondaryOllamaHost: user.secondary_ollama_host,
+              experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
+              auxiliaryProviderFactory: auxiliaryProviderFactoryOverride,
+              userKey,
+              rerankStarterTopicsForSession: true,
+            }
+          );
+          patchUsageSession({ conversationId: created.conversation.id });
+          return created;
         }
       );
       json(ctx.res, 201, {
@@ -5040,20 +5172,34 @@ function buildRoutes(): RouteDefinition[] {
             }
           : undefined;
       const initialTeams = readCoffeeTeamCreateInput(body.initialTeams);
-      const result = await createCoffeeConversation(
-        db,
-        userId,
+      const result = await runWithUsageSession(
         {
-          groupBotIds,
-          coffeeSettings: body.coffeeSettings,
-          initialPoll,
-          initialTeams,
+          db,
+          userId,
+          privacyScope: "normal",
+          mode: "coffee",
+          surface: "coffee_topic",
         },
-        {
-          prismDefaultLlmModel: user.prism_default_llm_model,
-          secondaryOllamaHost: user.secondary_ollama_host,
-          experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
-          userKey,
+        async () => {
+          const created = await createCoffeeConversation(
+            db,
+            userId,
+            {
+              groupBotIds,
+              coffeeSettings: body.coffeeSettings,
+              initialPoll,
+              initialTeams,
+            },
+            {
+              prismDefaultLlmModel: user.prism_default_llm_model,
+              secondaryOllamaHost: user.secondary_ollama_host,
+              experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
+              auxiliaryProviderFactory: auxiliaryProviderFactoryOverride,
+              userKey,
+            }
+          );
+          patchUsageSession({ conversationId: created.conversation.id });
+          return created;
         }
       );
       json(ctx.res, 200, {
@@ -5139,18 +5285,100 @@ function buildRoutes(): RouteDefinition[] {
       const departureProviderFactory = providerFactoryOverride;
       const departureAuxiliaryProviderFactory = auxiliaryProviderFactoryOverride;
       const jobKey = `${userId}:${conversationId}`;
+      const departureTurnSettings = {
+        preferredProvider: effectiveProvider,
+        preferredLocalModel: user.preferred_local_model,
+        preferredOnlineModel: user.preferred_online_model,
+        responseMode: normalizeResponseMode(
+          body.responseMode,
+          effectiveProvider === "local" ? "local" : "online"
+        ),
+        autoFallbackChain: parseStoredAutoFallbackChain(user.auto_fallback_chain),
+        openAiApiKey,
+        anthropicApiKey,
+        secondaryOllamaHost: user.secondary_ollama_host,
+        experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
+        experimentalAllModelEffortEnabled:
+          user.experimental_all_model_effort_enabled === 1,
+        userDisplayName: user.display_name,
+        userKey,
+        prismDefaultLlmModel: user.prism_default_llm_model,
+        providerFactory: departureProviderFactory,
+        auxiliaryProviderFactory: departureAuxiliaryProviderFactory,
+        assistantImageUserPrefs: {
+          preferredLocalImageModel: user.preferred_local_image_model,
+          preferredOpenAiImageModel: user.preferred_openai_image_model,
+          lenientLocalImageFallbackModel: user.lenient_local_image_fallback_model,
+          comfyuiHost: user.comfyui_host,
+          comfyUiWorkflows: parseStoredComfyUiWorkflows(user.comfyui_workflows),
+          secondaryOllamaHost: user.secondary_ollama_host,
+        },
+        sessionRemainingMs,
+        ...(sessionSpeakerModel ? { sessionSpeakerModel } : {}),
+        ...(requestedReasoningEffort
+          ? { reasoningEffort: requestedReasoningEffort }
+          : {}),
+      };
       const shouldStart =
         departure.recorded &&
         departure.completedTurns < departure.targetTurns &&
         !activeCoffeeDepartureEpilogues.has(jobKey);
       if (shouldStart) {
-        activeCoffeeDepartureEpilogues.add(jobKey);
-        void (async () => {
-          for (
-            let turnIndex = departure.completedTurns;
-            turnIndex < departure.targetTurns;
-            turnIndex += 1
-          ) {
+        const epilogueJob = (async () => {
+          try {
+            for (
+              let turnIndex = departure.completedTurns;
+              turnIndex < departure.targetTurns;
+              turnIndex += 1
+            ) {
+              const turn = await runWithUsageSession(
+                {
+                  db: departureDb,
+                  userId,
+                  privacyScope: "normal",
+                  mode: "coffee",
+                  surface: "coffee",
+                  conversationId,
+                  botId: null,
+                },
+                () =>
+                  processCoffeeAutonomousTurn(
+                    departureDb,
+                    userId,
+                    conversationId,
+                    departureTurnSettings,
+                    false,
+                    undefined,
+                    undefined,
+                    undefined,
+                    { turnIndex, totalTurns: departure.targetTurns }
+                  )
+              );
+              const remainingBotIds = turn.conversation.botGroupIds ?? [];
+              const latestReply = [...turn.conversation.messages]
+                .reverse()
+                .find((message) => message.role === "assistant")?.content ?? "";
+              if (
+                coffeePlayerDepartureEpilogueShouldStop({
+                  completedTurns: turnIndex + 1,
+                  targetTurns: departure.targetTurns,
+                  replyText: latestReply,
+                  speakerDeparted:
+                    turn.speakerBotId !== null &&
+                    !remainingBotIds.includes(turn.speakerBotId),
+                  remainingBotCount: remainingBotIds.length,
+                })
+              ) {
+                break;
+              }
+            }
+          } catch (error) {
+            console.warn(
+              `[coffee] player departure epilogue stopped conversation=${conversationId}`,
+              error
+            );
+          }
+          try {
             await runWithUsageSession(
               {
                 db: departureDb,
@@ -5159,62 +5387,25 @@ function buildRoutes(): RouteDefinition[] {
                 mode: "coffee",
                 surface: "coffee",
                 conversationId,
-                botId: null,
               },
               () =>
-                processCoffeeAutonomousTurn(
+                generateCoffeeSessionSynopsis(
                   departureDb,
                   userId,
                   conversationId,
-                  {
-                    preferredProvider: effectiveProvider,
-                    preferredLocalModel: user.preferred_local_model,
-                    preferredOnlineModel: user.preferred_online_model,
-                    openAiApiKey,
-                    anthropicApiKey,
-                    secondaryOllamaHost: user.secondary_ollama_host,
-                    experimentalDualOllamaEnabled:
-                      user.experimental_dual_ollama_enabled === 1,
-                    experimentalAllModelEffortEnabled:
-                      user.experimental_all_model_effort_enabled === 1,
-                    userDisplayName: user.display_name,
-                    userKey,
-                    prismDefaultLlmModel: user.prism_default_llm_model,
-                    providerFactory: departureProviderFactory,
-                    auxiliaryProviderFactory: departureAuxiliaryProviderFactory,
-                    assistantImageUserPrefs: {
-                      preferredLocalImageModel: user.preferred_local_image_model,
-                      preferredOpenAiImageModel: user.preferred_openai_image_model,
-                      lenientLocalImageFallbackModel:
-                        user.lenient_local_image_fallback_model,
-                      comfyuiHost: user.comfyui_host,
-                      comfyUiWorkflows: parseStoredComfyUiWorkflows(user.comfyui_workflows),
-                      secondaryOllamaHost: user.secondary_ollama_host,
-                    },
-                    sessionRemainingMs,
-                    ...(sessionSpeakerModel ? { sessionSpeakerModel } : {}),
-                    ...(requestedReasoningEffort
-                      ? { reasoningEffort: requestedReasoningEffort }
-                      : {}),
-                  },
-                  false,
-                  undefined,
-                  undefined,
-                  undefined,
-                  { turnIndex, totalTurns: departure.targetTurns }
+                  departureTurnSettings
                 )
             );
-          }
-        })()
-          .catch((error) => {
+          } catch (error) {
             console.warn(
-              `[coffee] player departure epilogue stopped conversation=${conversationId}`,
+              `[coffee] player departure synopsis stopped conversation=${conversationId}`,
               error
             );
-          })
-          .finally(() => {
-            activeCoffeeDepartureEpilogues.delete(jobKey);
-          });
+          }
+        })().finally(() => {
+          activeCoffeeDepartureEpilogues.delete(jobKey);
+        });
+        activeCoffeeDepartureEpilogues.set(jobKey, epilogueJob);
       }
       json(ctx.res, 202, {
         ok: true,
@@ -5228,16 +5419,58 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/coffee/sessions/:id/topic", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
-      const conversation = await setCoffeeConversationTopic(
-        db,
-        userId,
-        ctx.params.id,
-        body.topic
+      const conversationId = ctx.params.id;
+      const conversation = await runWithUsageSession(
+        {
+          db,
+          userId,
+          privacyScope: "normal",
+          mode: "coffee",
+          surface: "coffee_topic",
+          conversationId,
+        },
+        () =>
+          setCoffeeConversationTopic(db, userId, conversationId, body.topic, {
+            selectionSource: body.selectionSource,
+            candidates: body.candidates,
+            source: "coffee_topic_picker",
+          })
       );
       json(ctx.res, 200, {
         ok: true,
         conversation,
       });
+    }),
+    route("POST", "/api/coffee/sessions/:id/topics/regenerate", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const userKey = decryptUserKey(userId);
+      const conversationId = ctx.params.id;
+      const coffeeStarterTopics = await runWithUsageSession(
+        {
+          db,
+          userId,
+          privacyScope: "normal",
+          mode: "coffee",
+          surface: "coffee_topic",
+          conversationId,
+        },
+        () =>
+          regenerateCoffeeConversationStarterTopics(
+            db,
+            userId,
+            conversationId,
+            {
+              prismDefaultLlmModel: user.prism_default_llm_model,
+              secondaryOllamaHost: user.secondary_ollama_host,
+              experimentalDualOllamaEnabled:
+                user.experimental_dual_ollama_enabled === 1,
+              auxiliaryProviderFactory: auxiliaryProviderFactoryOverride,
+              userKey,
+            }
+          )
+      );
+      json(ctx.res, 200, { ok: true, coffeeStarterTopics });
     }),
     route("POST", "/api/coffee/sessions/:id/teams", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -5400,6 +5633,11 @@ function buildRoutes(): RouteDefinition[] {
           preferredProvider: effectiveProvider,
           preferredLocalModel: user.preferred_local_model,
           preferredOnlineModel: user.preferred_online_model,
+          responseMode: normalizeResponseMode(
+            body.responseMode,
+            effectiveProvider === "local" ? "local" : "online"
+          ),
+          autoFallbackChain: parseStoredAutoFallbackChain(user.auto_fallback_chain),
           openAiApiKey,
           anthropicApiKey,
           secondaryOllamaHost: user.secondary_ollama_host,
@@ -5507,6 +5745,11 @@ function buildRoutes(): RouteDefinition[] {
               preferredProvider: effectiveProvider,
               preferredLocalModel: user.preferred_local_model,
               preferredOnlineModel: user.preferred_online_model,
+              responseMode: normalizeResponseMode(
+                body.responseMode,
+                effectiveProvider === "local" ? "local" : "online"
+              ),
+              autoFallbackChain: parseStoredAutoFallbackChain(user.auto_fallback_chain),
               openAiApiKey,
               anthropicApiKey,
               secondaryOllamaHost: user.secondary_ollama_host,
@@ -5542,6 +5785,12 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/coffee/sessions/:id/synopsis", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
+      const pendingDepartureEpilogue = activeCoffeeDepartureEpilogues.get(
+        `${userId}:${ctx.params.id}`
+      );
+      if (pendingDepartureEpilogue) {
+        await pendingDepartureEpilogue;
+      }
       const requestedProvider = readProvider(body.preferredProvider);
       const requestedReasoningEffort = reasoningEffortForRequest(body.reasoningEffort);
       const user = getUserRow(userId);
@@ -5578,6 +5827,7 @@ function buildRoutes(): RouteDefinition[] {
               userDisplayName: user.display_name,
               userKey,
               prismDefaultLlmModel: user.prism_default_llm_model,
+              providerFactory: providerFactoryOverride,
               ...(requestedReasoningEffort ? { reasoningEffort: requestedReasoningEffort } : {}),
             }
           )
@@ -5667,6 +5917,11 @@ function buildRoutes(): RouteDefinition[] {
               preferredProvider: effectiveProvider,
               preferredLocalModel: user.preferred_local_model,
               preferredOnlineModel: user.preferred_online_model,
+              responseMode: normalizeResponseMode(
+                body.responseMode,
+                effectiveProvider === "local" ? "local" : "online"
+              ),
+              autoFallbackChain: parseStoredAutoFallbackChain(user.auto_fallback_chain),
               openAiApiKey,
               anthropicApiKey,
               secondaryOllamaHost: user.secondary_ollama_host,
@@ -5777,6 +6032,11 @@ function buildRoutes(): RouteDefinition[] {
                 preferredProvider: effectiveProvider,
                 preferredLocalModel: user.preferred_local_model,
                 preferredOnlineModel: user.preferred_online_model,
+                responseMode: normalizeResponseMode(
+                  body.responseMode,
+                  effectiveProvider === "local" ? "local" : "online"
+                ),
+                autoFallbackChain: parseStoredAutoFallbackChain(user.auto_fallback_chain),
                 openAiApiKey,
                 anthropicApiKey,
                 secondaryOllamaHost: user.secondary_ollama_host,
@@ -6608,15 +6868,24 @@ function buildRoutes(): RouteDefinition[] {
           provider?: string | null;
           role?: string;
         } | undefined;
-        if (!message || message.role !== "assistant") {
+        const ephemeralAssistantMessage =
+          !message &&
+          raw.ephemeralMessage === true &&
+          Object.prototype.hasOwnProperty.call(raw, "spokenText");
+        if (
+          (!message && !ephemeralAssistantMessage) ||
+          (message && message.role !== "assistant")
+        ) {
           throw new HttpError(404, "Assistant message not found.");
         }
         // Keep messageId as the provider/privacy authority, but allow clients
         // to supply a derived spoken-only view that omits visual action cues.
+        // Private messages are intentionally absent from SQLite, so their
+        // authenticated live envelope supplies the same derived text explicitly.
         sourceText = Object.prototype.hasOwnProperty.call(raw, "spokenText")
           ? raw.spokenText
-          : message.content ?? "";
-        persistedMessageProvider = message.provider ?? null;
+          : message?.content ?? "";
+        persistedMessageProvider = message?.provider ?? null;
       }
       const explicitOnlineContext = persistedMessageProvider
         ? persistedMessageProvider !== "local"
@@ -6842,14 +7111,19 @@ function buildRoutes(): RouteDefinition[] {
           coffeeExperimentalTableAngleEnabled:
             user.coffee_experimental_table_angle_enabled === 1,
           psychicModeEnabled: user.psychic_mode_enabled === 1,
-          fallbackModelMessageStripe: user.fallback_model_message_stripe !== 0,
+          autoModeEnabled: user.auto_switch_model === 1,
+          autoFallbackChain: parseStoredAutoFallbackChain(user.auto_fallback_chain),
           hiddenBotModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
           hiddenComfyUiWorkflowIds: parseHiddenComfyUiWorkflowIds(
             user.hidden_comfyui_workflow_ids
           ),
           preferredLocalModel: user.preferred_local_model ?? "",
           preferredOnlineModel: user.preferred_online_model ?? "",
-          lenientLocalFallbackModel: user.lenient_local_fallback_model ?? "",
+          legacyAutoFallbackModelSuggestion:
+            !parseStoredAutoFallbackChain(user.auto_fallback_chain) &&
+            user.lenient_local_fallback_model
+              ? user.lenient_local_fallback_model
+              : "",
           lenientLocalImageFallbackModel: user.lenient_local_image_fallback_model ?? "",
           ...normalizeDefaultBotSettingsForResponse(user),
           prismDefaultLlmModel: user.prism_default_llm_model ?? "",
@@ -6857,6 +7131,7 @@ function buildRoutes(): RouteDefinition[] {
           hasOpenAiApiKey: Boolean(user.openai_key_ciphertext),
           hasAnthropicApiKey: Boolean(user.anthropic_key_ciphertext),
           hasElevenLabsApiKey: Boolean(user.elevenlabs_key_ciphertext),
+          hasBraveSearchApiKey: Boolean(user.brave_search_key_ciphertext),
           voiceMode: user.voice_mode === "bottish"
             || user.voice_mode === "babble"
             || user.voice_mode === "english"
@@ -6880,6 +7155,10 @@ function buildRoutes(): RouteDefinition[] {
           elevenLabsApiKeySource: apiKeySource(
             user.elevenlabs_key_ciphertext,
             config.elevenLabsApiKey
+          ),
+          braveSearchApiKeySource: apiKeySource(
+            user.brave_search_key_ciphertext,
+            config.braveSearchApiKey
           ),
           // Surface the server's configured local model so the sidebar can
           // show users which Ollama model they're hitting in LOCAL mode.
@@ -7253,12 +7532,12 @@ function buildRoutes(): RouteDefinition[] {
         coffeeExperimentalTableAngleEnabled:
           user.coffee_experimental_table_angle_enabled,
         psychicModeEnabled: user.psychic_mode_enabled,
-        fallbackModelMessageStripe: user.fallback_model_message_stripe,
+        autoSwitchModel: user.auto_switch_model,
+        autoFallbackChain: user.auto_fallback_chain,
         hiddenBotModelIds: user.hidden_bot_model_ids,
         hiddenComfyUiWorkflowIds: user.hidden_comfyui_workflow_ids,
         preferredLocalModel: user.preferred_local_model,
         preferredOnlineModel: user.preferred_online_model,
-        lenientLocalFallbackModel: user.lenient_local_fallback_model,
         lenientLocalImageFallbackModel: user.lenient_local_image_fallback_model,
         secondaryOllamaHost: user.secondary_ollama_host,
         comfyUiHost: user.comfyui_host,
@@ -7310,6 +7589,9 @@ function buildRoutes(): RouteDefinition[] {
       let elevenLabsCipher = user.elevenlabs_key_ciphertext;
       let elevenLabsIv = user.elevenlabs_key_iv;
       let elevenLabsTag = user.elevenlabs_key_tag;
+      let braveSearchCipher = user.brave_search_key_ciphertext;
+      let braveSearchIv = user.brave_search_key_iv;
+      let braveSearchTag = user.brave_search_key_tag;
       if (next.openAiKeyIntent.action === "replace") {
         const encrypted = encryptText(next.openAiKeyIntent.plaintext, userKey);
         openAiCipher = encrypted.ciphertext;
@@ -7340,19 +7622,25 @@ function buildRoutes(): RouteDefinition[] {
         elevenLabsIv = null;
         elevenLabsTag = null;
       }
+      if (next.braveSearchKeyIntent.action === "replace") {
+        const encrypted = encryptText(next.braveSearchKeyIntent.plaintext, userKey);
+        braveSearchCipher = encrypted.ciphertext;
+        braveSearchIv = encrypted.iv;
+        braveSearchTag = encrypted.tag;
+      } else if (next.braveSearchKeyIntent.action === "clear") {
+        braveSearchCipher = null;
+        braveSearchIv = null;
+        braveSearchTag = null;
+      }
 
-      // `auto_switch_model` is intentionally not updated here. The old
-      // cross-mode escalation setting has been retired; the DB column
-      // stays so a future intra-mode model switcher can adopt it without
-      // another migration.
       const modelVisibilityDefaultsVersion =
         body.hiddenBotModelIds === undefined
           ? user.model_visibility_defaults_version
           : MODEL_VISIBILITY_DEFAULTS_VERSION;
       db.prepare(`
         UPDATE users
-        SET display_name = ?, theme = ?, preferred_provider = ?, provider_locked = ?, auto_memory = ?, composer_writing_assist = ?, fallback_model_message_stripe = ?, hidden_bot_model_ids = ?, hidden_comfyui_workflow_ids = ?, model_visibility_defaults_version = ?,
-            experimental_dual_ollama_enabled = ?, experimental_all_model_effort_enabled = ?, coffee_experimental_table_angle_enabled = ?, psychic_mode_enabled = ?, preferred_local_model = ?, preferred_online_model = ?, lenient_local_fallback_model = ?, lenient_local_image_fallback_model = ?, secondary_ollama_host = ?, comfyui_host = ?,
+        SET display_name = ?, theme = ?, preferred_provider = ?, provider_locked = ?, auto_memory = ?, composer_writing_assist = ?, hidden_bot_model_ids = ?, hidden_comfyui_workflow_ids = ?, model_visibility_defaults_version = ?,
+            experimental_dual_ollama_enabled = ?, experimental_all_model_effort_enabled = ?, coffee_experimental_table_angle_enabled = ?, psychic_mode_enabled = ?, auto_switch_model = ?, auto_fallback_chain = ?, preferred_local_model = ?, preferred_online_model = ?, lenient_local_image_fallback_model = ?, secondary_ollama_host = ?, comfyui_host = ?,
             preferred_local_image_model = ?, preferred_openai_image_model = ?, preferred_zen_wallpaper_local_image_model = ?, preferred_zen_wallpaper_openai_image_model = ?, zen_wallpaper_opacity = ?, zen_wallpaper_text_mask_enabled = ?, zen_wallpaper_grayscale_enabled = ?, zen_wallpaper_blurred_edges_enabled = ?, zen_wallpaper_style_notes = ?,
             zen_session_idle_gap_ms = ?, zen_fresh_start_gap_ms = ?, zen_recent_context_messages = ?, zen_wallpaper_regen_message_interval = ?, zen_mood_sensitivity = ?, zen_canvas_typing_speed = ?, zen_message_font_min_px = ?, zen_message_font_max_px = ?, zen_ask_question_patience_enabled = ?, zen_ask_question_patience_ms = ?, zen_autonomy_enabled = ?, zen_persona_transition_choice = ?,
             comfyui_workflows = ?, prism_default_llm_model = ?, prism_image_tool_llm_model = ?,
@@ -7360,7 +7648,8 @@ function buildRoutes(): RouteDefinition[] {
             dev_memories_enabled = ?, dev_memories_text = ?,
             openai_key_ciphertext = ?, openai_key_iv = ?, openai_key_tag = ?,
             anthropic_key_ciphertext = ?, anthropic_key_iv = ?, anthropic_key_tag = ?,
-            elevenlabs_key_ciphertext = ?, elevenlabs_key_iv = ?, elevenlabs_key_tag = ?
+            elevenlabs_key_ciphertext = ?, elevenlabs_key_iv = ?, elevenlabs_key_tag = ?,
+            brave_search_key_ciphertext = ?, brave_search_key_iv = ?, brave_search_key_tag = ?
         WHERE id = ?
       `).run(
         next.displayName,
@@ -7369,7 +7658,6 @@ function buildRoutes(): RouteDefinition[] {
         next.providerLocked,
         next.autoMemory,
         next.composerWritingAssist,
-        next.fallbackModelMessageStripe,
         JSON.stringify(next.hiddenBotModelIds),
         JSON.stringify(next.hiddenComfyUiWorkflowIds),
         modelVisibilityDefaultsVersion,
@@ -7377,9 +7665,10 @@ function buildRoutes(): RouteDefinition[] {
         next.experimentalAllModelEffortEnabled,
         next.coffeeExperimentalTableAngleEnabled,
         next.psychicModeEnabled,
+        next.autoSwitchModel,
+        next.autoFallbackChain,
         next.preferredLocalModel,
         next.preferredOnlineModel,
-        next.lenientLocalFallbackModel,
         next.lenientLocalImageFallbackModel,
         next.secondaryOllamaHost,
         next.comfyUiHost,
@@ -7426,6 +7715,9 @@ function buildRoutes(): RouteDefinition[] {
         elevenLabsCipher,
         elevenLabsIv,
         elevenLabsTag,
+        braveSearchCipher,
+        braveSearchIv,
+        braveSearchTag,
         userId
       );
       json(ctx.res, 200, {
@@ -7437,6 +7729,8 @@ function buildRoutes(): RouteDefinition[] {
           coffeeExperimentalTableAngleEnabled:
             next.coffeeExperimentalTableAngleEnabled === 1,
           psychicModeEnabled: next.psychicModeEnabled === 1,
+          autoModeEnabled: next.autoSwitchModel === 1,
+          autoFallbackChain: parseStoredAutoFallbackChain(next.autoFallbackChain),
           zenPersonaTransitionChoice: next.zenPersonaTransitionChoice,
           voiceMode: next.voiceMode,
           voiceEffectsEnabled: next.voiceEffectsEnabled,
@@ -7449,6 +7743,7 @@ function buildRoutes(): RouteDefinition[] {
           hasOpenAiApiKey: Boolean(openAiCipher),
           hasAnthropicApiKey: Boolean(anthropicCipher),
           hasElevenLabsApiKey: Boolean(elevenLabsCipher),
+          hasBraveSearchApiKey: Boolean(braveSearchCipher),
           openAiApiKeySource: apiKeySource(openAiCipher, config.openAiApiKey),
           anthropicApiKeySource: apiKeySource(
             anthropicCipher,
@@ -7457,6 +7752,10 @@ function buildRoutes(): RouteDefinition[] {
           elevenLabsApiKeySource: apiKeySource(
             elevenLabsCipher,
             config.elevenLabsApiKey
+          ),
+          braveSearchApiKeySource: apiKeySource(
+            braveSearchCipher,
+            config.braveSearchApiKey
           ),
         },
       });
@@ -8983,8 +9282,11 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/conversations/:id/export", async (ctx) => {
       const userId = requireAuth(ctx);
       const conversationId = ctx.params.id;
+      const exportBody = ctx.body as Record<string, unknown>;
+      const developerTranscript =
+        exportBody.format === "developer" || exportBody.developer === true;
       const conversation = db.prepare(
-        "SELECT id, title, conversation_mode, bot_id, bot_group_ids, coffee_settings, coffee_group_id, coffee_duration_minutes, coffee_preset_id, created_at, updated_at FROM conversations WHERE id = ? AND user_id = ?"
+        "SELECT id, title, conversation_mode, bot_id, bot_group_ids, coffee_settings, coffee_group_id, coffee_duration_minutes, coffee_preset_id, coffee_topic, created_at, updated_at FROM conversations WHERE id = ? AND user_id = ?"
       ).get(conversationId, userId) as {
         id: string;
         title: string;
@@ -8995,6 +9297,7 @@ function buildRoutes(): RouteDefinition[] {
         coffee_group_id: string | null;
         coffee_duration_minutes: number | null;
         coffee_preset_id: string | null;
+        coffee_topic: string | null;
         created_at: string;
         updated_at: string;
       } | undefined;
@@ -9003,6 +9306,163 @@ function buildRoutes(): RouteDefinition[] {
       }
       if (conversation.conversation_mode === "zen") {
         throw new HttpError(400, "Zen conversations cannot be exported from the chat surface.");
+      }
+      if (developerTranscript) {
+        const diagnosticMessages = db.prepare(
+          `SELECT id, role, content, provider, model, bot_id,
+                  coffee_audience_bot_ids, tool_payload, created_at
+             FROM messages
+            WHERE conversation_id = ? AND user_id = ?
+            ORDER BY created_at ASC, rowid ASC`
+        ).all(conversationId, userId) as Array<{
+          id: string;
+          role: string;
+          content: string;
+          provider: string | null;
+          model: string | null;
+          bot_id: string | null;
+          coffee_audience_bot_ids: string | null;
+          tool_payload: string | null;
+          created_at: string;
+        }>;
+        const diagnosticEvents = db.prepare(
+          `SELECT id, request_id, request_sequence, message_id, event_kind, purpose,
+                  provider, model, payload_json, created_at
+             FROM developer_transcript_events
+            WHERE conversation_id = ? AND user_id = ?
+            ORDER BY created_at ASC, request_sequence ASC, rowid ASC`
+        ).all(conversationId, userId) as Array<{
+          id: string;
+          request_id: string;
+          request_sequence: number;
+          message_id: string | null;
+          event_kind: "llm" | "search" | "tool";
+          purpose: string;
+          provider: string | null;
+          model: string | null;
+          payload_json: string;
+          created_at: string;
+        }>;
+        const usageRows = db.prepare(
+          `SELECT id, request_id, message_id, event_type, purpose, provider, model,
+                  input_tokens, output_tokens, total_tokens, cached_input_tokens,
+                  token_count_source, duration_ms, created_at
+             FROM usage_events
+            WHERE conversation_id = ? AND user_id = ? AND privacy_scope != 'private'
+            ORDER BY created_at ASC, rowid ASC`
+        ).all(conversationId, userId) as Array<{
+          id: string;
+          request_id: string;
+          message_id: string | null;
+          event_type: string;
+          purpose: string;
+          provider: string;
+          model: string;
+          input_tokens: number | null;
+          output_tokens: number | null;
+          total_tokens: number | null;
+          cached_input_tokens: number | null;
+          token_count_source: string;
+          duration_ms: number | null;
+          created_at: string;
+        }>;
+        const eventKey = (event: {
+          request_id: string;
+          purpose: string;
+          provider: string | null;
+          model: string | null;
+          created_at: string;
+        }): string =>
+          [
+            event.request_id,
+            event.purpose,
+            event.provider ?? "",
+            event.model ?? "",
+            event.created_at,
+          ].join("\u0000");
+        const detailedEventKeys = new Set(diagnosticEvents.map(eventKey));
+        const legacyRequestSequences = new Map<string, number>();
+        const legacyUsageEvents = usageRows
+          .filter((event) => !detailedEventKeys.has(eventKey(event)))
+          .map((event) => {
+            const requestSequence = (legacyRequestSequences.get(event.request_id) ?? 0) + 1;
+            legacyRequestSequences.set(event.request_id, requestSequence);
+            return {
+              id: `usage-${event.id}`,
+              request_id: event.request_id,
+              request_sequence: requestSequence,
+              message_id: event.message_id,
+              event_kind: (event.event_type === "text" ? "llm" : "tool") as
+                | "llm"
+                | "tool",
+              purpose: event.purpose,
+              provider: event.provider,
+              model: event.model,
+              payload_json: JSON.stringify({
+                streaming: false,
+                ...(event.duration_ms !== null ? { durationMs: event.duration_ms } : {}),
+                usage: {
+                  inputTokens: event.input_tokens,
+                  outputTokens: event.output_tokens,
+                  totalTokens: event.total_tokens,
+                  cachedInputTokens: event.cached_input_tokens,
+                  tokenCountSource: event.token_count_source,
+                },
+              }),
+              created_at: event.created_at,
+            };
+          });
+        const allDiagnosticEvents = [...diagnosticEvents, ...legacyUsageEvents].sort(
+          (left, right) =>
+            left.created_at.localeCompare(right.created_at) ||
+            left.request_sequence - right.request_sequence ||
+            left.id.localeCompare(right.id)
+        );
+        const markdown = buildDeveloperTranscript({
+          conversation: {
+            id: conversation.id,
+            title: conversation.title,
+            mode: conversation.conversation_mode,
+            topic: conversation.coffee_topic,
+            createdAt: conversation.created_at,
+            updatedAt: conversation.updated_at,
+          },
+          messages: diagnosticMessages.map((message) => ({
+            id: message.id,
+            role: message.role,
+            content: message.content,
+            provider: message.provider,
+            model: message.model,
+            botId: message.bot_id,
+            audienceBotIds: message.coffee_audience_bot_ids,
+            toolPayload: message.tool_payload,
+            createdAt: message.created_at,
+          })),
+          events: allDiagnosticEvents.map((event) => ({
+            id: event.id,
+            requestId: event.request_id,
+            requestSequence: event.request_sequence,
+            messageId: event.message_id,
+            kind: event.event_kind,
+            purpose: event.purpose,
+            provider: event.provider,
+            model: event.model,
+            payloadJson: event.payload_json,
+            createdAt: event.created_at,
+          })),
+          secretValues: sensitiveEnvironmentValues(),
+        });
+        const exportId = randomId(12);
+        db.prepare(
+          "INSERT INTO conversation_exports (id, user_id, conversation_id, markdown, bot_id, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+        ).run(exportId, userId, conversationId, markdown, conversation.bot_id, new Date().toISOString());
+        json(ctx.res, 200, {
+          ok: true,
+          exportId,
+          format: "developer",
+          markdown,
+        });
+        return;
       }
       const storedMessages = db.prepare(
         `SELECT m.role, m.content, m.created_at, b.name AS bot_name, b.color AS bot_color
@@ -9097,7 +9557,7 @@ function buildRoutes(): RouteDefinition[] {
       db.prepare(
         "INSERT INTO conversation_exports (id, user_id, conversation_id, markdown, bot_id, created_at) VALUES (?, ?, ?, ?, ?, ?)"
       ).run(exportId, userId, conversationId, markdown, conversation.bot_id, new Date().toISOString());
-      json(ctx.res, 200, { ok: true, exportId, markdown });
+      json(ctx.res, 200, { ok: true, exportId, format: "standard", markdown });
     }),
     route("GET", "/api/exports", async (ctx) => {
       const userId = requireAuth(ctx);

@@ -23,7 +23,7 @@ import {
 import { rewindConversation } from "../conversations.ts";
 import { persistMemoryCandidates, restoreMemory } from "../memory.ts";
 import { RECENT_WINDOW_SIZE, summarizeThreadCompact } from "../memory-summarizer.ts";
-import { fallbackEmbedding, LocalOllamaProvider, type LlmProvider } from "../providers.ts";
+import { fallbackEmbedding, LocalOllamaProvider, selectProvider, type LlmProvider } from "../providers.ts";
 import {
   createZenSessionMemoryCheckpoint,
   listZenSessionMemories,
@@ -1076,7 +1076,7 @@ describe("processChatMessage Psychic planning", () => {
     assert.equal(userMessage?.psychicThought, undefined);
   });
 
-  it("does not run simulated effort passes for Anthropic models", async () => {
+  it("preserves native Anthropic reasoning without simulated private passes", async () => {
     const db = createChatTestDb();
     const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -1112,6 +1112,7 @@ describe("processChatMessage Psychic planning", () => {
     );
 
     assert.equal(requests.length, 1);
+    assert.deepEqual(requests[0]?.body.output_config, { effort: "xhigh" });
     assert.equal(
       result.conversation.messages.find((message) => message.role === "assistant")?.content,
       "Anthropic answer."
@@ -1121,7 +1122,7 @@ describe("processChatMessage Psychic planning", () => {
       result.backendEvents?.some(
         (event) =>
           event.message === "Simulated effort skipped" &&
-          event.detail?.includes("online_simulated_effort_disabled") &&
+          event.detail?.includes("native_reasoning_preserved") &&
           event.detail?.includes("provider=anthropic")
       )
     );
@@ -2234,7 +2235,7 @@ describe("processChatMessage starter prompts", () => {
   });
 });
 
-describe("processChatMessage copyright fallback", () => {
+describe.skip("retired processChatMessage copyright fallback", () => {
   it("falls back to the configured local model when OpenAI rejects with copyright policy", async () => {
     const db = createChatTestDb();
     let localCalls = 0;
@@ -2760,6 +2761,182 @@ describe("processChatMessage copyright fallback", () => {
   });
 });
 
+describe("processChatMessage Auto response mode", () => {
+  it("keeps traditional Chat on its direct model and does not invoke the retired fallback", async () => {
+    const db = createChatTestDb();
+    db.prepare(
+      "INSERT INTO bots (id, name, color, glyph, delete_protected) VALUES (?, ?, ?, ?, 0)"
+    ).run("bot-direct", "Direct Bot", "#5b8cff", "north");
+    const calls: string[] = [];
+    const providerFactory = ((provider: "local" | "openai" | "anthropic") => ({
+      name: provider,
+      async generateResponse(_messages: unknown, options?: { model?: string }) {
+        calls.push(`${provider}:${options?.model ?? ""}`);
+        return "Sorry, I can't help with that request.";
+      },
+    })) as typeof selectProvider;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "continue",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        providerFactory,
+        autoMemory: false,
+        botId: "bot-direct",
+        botOverrides: { model: "direct-model" },
+        responseMode: "auto",
+        autoFallbackChain: {
+          v: 1,
+          fallbacks: [
+            { provider: "openai", model: "fallback-one" },
+            { provider: "anthropic", model: "fallback-two" },
+          ],
+        },
+        mode: "chat",
+      }
+    );
+
+    const assistant = result.conversation.messages.find((message) => message.role === "assistant");
+    assert.ok(calls.includes("local:direct-model"));
+    assert.equal(calls.some((call) => call.startsWith("openai:") || call.startsWith("anthropic:")), false);
+    assert.equal(assistant?.content, "Sorry, I can't help with that request.");
+    assert.equal("fallbackInvocation" in result, false);
+    assert.equal(result.autoRecovery, undefined);
+  });
+
+  it("retries a Zen turn once and persists only the winning reply and safe trace", async () => {
+    const db = createChatTestDb();
+    const calls: string[] = [];
+    const providerFactory = ((provider: "local" | "openai" | "anthropic") => ({
+      name: provider,
+      async generateResponse(_messages: unknown, options?: { model?: string }) {
+        const model = options?.model ?? "";
+        calls.push(`${provider}:${model}`);
+        return model === "primary-model"
+          ? "I cannot help with that request."
+          : "Recovered Zen reply.";
+      },
+    })) as typeof selectProvider;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "hello",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        providerFactory,
+        autoMemory: false,
+        botOverrides: { model: "primary-model" },
+        responseMode: "auto",
+        autoFallbackChain: {
+          v: 1,
+          fallbacks: [
+            { provider: "openai", model: "fallback-one" },
+            { provider: "anthropic", model: "fallback-two" },
+          ],
+        },
+        mode: "zen",
+      }
+    );
+
+    assert.deepEqual(calls.slice(0, 2), [
+      "local:primary-model",
+      "openai:fallback-one",
+    ]);
+    assert.equal(result.conversation.messages.filter((message) => message.role === "user").length, 1);
+    assert.equal(result.conversation.messages.filter((message) => message.role === "assistant").length, 1);
+    const assistant = result.conversation.messages.find((message) => message.role === "assistant");
+    assert.equal(assistant?.content, "Recovered Zen reply.");
+    assert.equal(assistant?.provider, "openai");
+    assert.equal(assistant?.model, "fallback-one");
+    assert.equal(assistant?.autoRecovery?.attempts[0]?.reason, "refusal");
+    assert.equal(result.autoRecovery?.crossedOnline, true);
+  });
+
+  it("advances past malformed Zen tool-shaped output", async () => {
+    const db = createChatTestDb();
+    const providerFactory = ((provider: "local" | "openai" | "anthropic") => ({
+      name: provider,
+      async generateResponse(_messages: unknown, options?: { model?: string }) {
+        return options?.model === "primary-model"
+          ? '<<<PRISM_TOOL>>>\n{"v":1,"name":"UnknownTool"}\n<<<END_PRISM_TOOL>>>'
+          : "Recovered from malformed tool output.";
+      },
+    })) as typeof selectProvider;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "hello",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        providerFactory,
+        autoMemory: false,
+        botOverrides: { model: "primary-model" },
+        responseMode: "auto",
+        autoFallbackChain: {
+          v: 1,
+          fallbacks: [
+            { provider: "openai", model: "fallback-one" },
+            { provider: "anthropic", model: "fallback-two" },
+          ],
+        },
+        mode: "zen",
+      }
+    );
+
+    assert.equal(result.autoRecovery?.attempts[0]?.reason, "invalid_output");
+    assert.equal(
+      result.conversation.messages.find((message) => message.role === "assistant")?.content,
+      "Recovered from malformed tool output."
+    );
+  });
+
+  it("persists no Zen turn when all three Auto attempts fail", async () => {
+    const db = createChatTestDb();
+    const providerFactory = ((provider: "local" | "openai" | "anthropic") => ({
+      name: provider,
+      async generateResponse() {
+        return "";
+      },
+    })) as typeof selectProvider;
+
+    await assert.rejects(
+      () => processChatMessage(
+        db,
+        "user-1",
+        "hello",
+        CHAT_TEST_USER_KEY,
+        {
+          preferredProvider: "local",
+          providerFactory,
+          autoMemory: false,
+          botOverrides: { model: "primary-model" },
+          responseMode: "auto",
+          autoFallbackChain: {
+            v: 1,
+            fallbacks: [
+              { provider: "openai", model: "fallback-one" },
+              { provider: "anthropic", model: "fallback-two" },
+            ],
+          },
+          mode: "zen",
+        }
+      ),
+      (error: unknown) => error instanceof Error && error.name === "AutoFallbackExhaustedError"
+    );
+    const row = db.prepare(
+      "SELECT COUNT(*) AS n FROM messages WHERE user_id = ?"
+    ).get("user-1") as { n: number };
+    assert.equal(row.n, 0);
+  });
+});
+
 describe("processChatMessage AskQuestion tool", () => {
   it("persists stripped prose and attaches askQuestion hydration", async () => {
     const db = createChatTestDb();
@@ -2858,6 +3035,7 @@ describe("processChatMessage AskQuestion tool", () => {
 
     const lastAssistant = result.conversation.messages.filter((m) => m.role === "assistant").pop();
     assert.equal(lastAssistant?.webSearch, undefined);
+    assert.match(lastAssistant?.content ?? "", /unavailable in LOCAL mode/i);
     assert.ok(seenUrls.every((url) => !url.includes("api.search.brave.com")));
     const webSearchStatuses =
       result.toolCalls
@@ -2866,6 +3044,139 @@ describe("processChatMessage AskQuestion tool", () => {
     assert.ok(webSearchStatuses.includes("detected"));
     assert.ok(webSearchStatuses.includes("blocked"));
     assert.equal(webSearchStatuses.includes("completed"), false);
+  });
+
+  it("blocks manual WebSearch in LOCAL mode before any Brave request", async () => {
+    const db = createChatTestDb();
+    const seenUrls: string[] = [];
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      seenUrls.push(String(input));
+      return new Response(
+        JSON.stringify({ message: { content: "A local model reply." } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Search for current Prism news",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: true,
+        mode: "sandbox",
+        manualTool: { name: "webSearch", query: "current Prism news" },
+        braveSearchApiKey: "must-not-be-sent",
+      }
+    );
+
+    const assistant = result.conversation.messages.find((message) => message.role === "assistant");
+    assert.match(assistant?.content ?? "", /unavailable in LOCAL mode/i);
+    assert.ok(seenUrls.every((url) => !url.includes("api.search.brave.com")));
+    assert.deepEqual(
+      result.toolCalls
+        ?.filter((event) => event.name === "webSearch")
+        .map((event) => event.status),
+      ["detected", "blocked"]
+    );
+  });
+
+  it("disables WebSearch cleanly when ONLINE has no Brave key", async () => {
+    const db = createChatTestDb();
+    const seenUrls: string[] = [];
+    const providerFactory = ((provider: "local" | "openai" | "anthropic") => ({
+      name: provider,
+      async generateResponse() {
+        return `I should search.\n<<<PRISM_TOOL>>>\n${JSON.stringify({
+          v: 1,
+          webSearch: { query: "latest Prism news" },
+        })}\n<<<END_PRISM_TOOL>>>`;
+      },
+    })) as typeof selectProvider;
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      seenUrls.push(String(input));
+      return new Response("{}", { status: 200 });
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "What is new?",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "openai",
+        providerFactory,
+        autoMemory: false,
+        mode: "sandbox",
+      }
+    );
+
+    const assistant = result.conversation.messages.filter((m) => m.role === "assistant").pop();
+    assert.match(assistant?.content ?? "", /Brave Search API key is not configured/i);
+    assert.equal(assistant?.webSearch, undefined);
+    assert.ok(seenUrls.every((url) => !url.includes("api.search.brave.com")));
+    const statuses = result.toolCalls
+      ?.filter((event) => event.name === "webSearch")
+      .map((event) => event.status);
+    assert.ok(statuses?.includes("detected"));
+    assert.ok(statuses?.includes("blocked"));
+    assert.equal(statuses?.includes("completed"), false);
+  });
+
+  it("uses the resolved Brave key for an explicit ONLINE WebSearch", async () => {
+    const db = createChatTestDb();
+    let subscriptionToken = "";
+    globalThis.fetch = (async (_input, init) => {
+      subscriptionToken =
+        new Headers(init?.headers).get("x-subscription-token") ?? "";
+      return new Response(
+        JSON.stringify({
+          web: {
+            results: [
+              {
+                title: "Prism result",
+                url: "https://example.com/prism",
+                description: "Fresh context",
+              },
+            ],
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+    const providerFactory = ((provider: "local" | "openai" | "anthropic") => ({
+      name: provider,
+      async generateResponse() {
+        return "Here is the fresh result.";
+      },
+    })) as typeof selectProvider;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Find current Prism news",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "openai",
+        providerFactory,
+        autoMemory: false,
+        incognito: true,
+        mode: "sandbox",
+        manualTool: { name: "webSearch", query: "current Prism news" },
+        braveSearchApiKey: "resolved-brave-key",
+      }
+    );
+
+    assert.equal(subscriptionToken, "resolved-brave-key");
+    const assistant = result.conversation.messages.find((message) => message.role === "assistant");
+    assert.equal(assistant?.webSearch?.provider, "brave");
+    assert.equal(assistant?.content, "Here is the fresh result.");
+    const statuses = result.toolCalls
+      ?.filter((event) => event.name === "webSearch")
+      .map((event) => event.status);
+    assert.ok(statuses?.includes("completed"));
   });
 
   it("persists binary yes/no AskQuestion choices", async () => {
@@ -5103,7 +5414,7 @@ describe("processChatMessage conversational memory cues", () => {
     assert.ok((result.memoryLearned?.created[0]?.confidence ?? 0) >= 0.82);
   });
 
-  it("scopes Zen Facet turns and memories to the active bot without locking the Zen conversation", async () => {
+  it("scopes Zen turns and memories to the owning persona Home", async () => {
     const db = createChatTestDb();
     const userKey = Buffer.alloc(32, 7);
     db.prepare(
@@ -5126,6 +5437,7 @@ describe("processChatMessage conversational memory cues", () => {
     );
 
     assert.equal(result.conversation.botId, null);
+    assert.equal(result.conversation.history?.contextKey, "bot:bot-1");
     assert.equal(result.conversation.lastBotId, "bot-1");
     assert.equal(result.conversation.lastBotColor, "#b11f2b");
     assert.deepEqual(
@@ -5143,7 +5455,7 @@ describe("processChatMessage conversational memory cues", () => {
     const conversationRow = db
       .prepare("SELECT bot_id FROM conversations WHERE id = ?")
       .get(result.conversation.id) as { bot_id: string | null };
-    assert.equal(conversationRow.bot_id, null);
+    assert.equal(conversationRow.bot_id, "bot-1");
     const messageRows = db
       .prepare(
         "SELECT role, bot_id FROM messages WHERE conversation_id = ? ORDER BY created_at ASC"
@@ -5283,7 +5595,7 @@ describe("processChatMessage conversational memory cues", () => {
         zen_wallpaper_status: string;
         zen_wallpaper_history: string;
       };
-    assert.equal(conversationRow.bot_id, null);
+    assert.equal(conversationRow.bot_id, "bot-1");
     assert.equal(conversationRow.zen_wallpaper_enabled, 1);
     assert.equal(conversationRow.zen_wallpaper_image_id, "wallpaper-new");
     assert.equal(conversationRow.zen_wallpaper_prompt_seed, "moonlit reef");
@@ -7010,7 +7322,7 @@ describe("buildAskQuestionFallback", () => {
 });
 
 describe("processChatMessage Zen Facet transitions", () => {
-  it("keeps handoffs in one PRISM session and creates bot child projections", async () => {
+  it("keeps guest handoffs in one persona Home and creates bot child projections", async () => {
     const db = createChatTestDb();
     db.prepare(
       "INSERT INTO bots (id, user_id, name, color, glyph) VALUES (?, ?, ?, ?, ?)"
@@ -7026,6 +7338,7 @@ describe("processChatMessage Zen Facet transitions", () => {
         preferredProvider: "local",
         autoMemory: true,
         botId: "bot-1",
+        zenHomeBotId: "bot-1",
         incognito: false,
         mode: "zen",
         personaTransition: {
@@ -7038,7 +7351,8 @@ describe("processChatMessage Zen Facet transitions", () => {
 
     assert.equal(personaResult.conversation.botId, null);
     assert.equal(personaResult.conversation.hubRole, "hub");
-    assert.equal(personaResult.conversation.hubBotId, null);
+    assert.equal(personaResult.conversation.hubBotId, "bot-1");
+    assert.equal(personaResult.conversation.history?.contextKey, "bot:bot-1");
     assert.equal(personaResult.conversation.lastBotId, "bot-1");
     assert.equal(personaResult.conversation.lastBotColor, "#b11f2b");
     assert.deepEqual(
@@ -7058,6 +7372,7 @@ describe("processChatMessage Zen Facet transitions", () => {
         preferredProvider: "local",
         autoMemory: true,
         botId: null,
+        zenHomeBotId: "bot-1",
         incognito: false,
         mode: "zen",
         personaTransition: {
@@ -7071,7 +7386,8 @@ describe("processChatMessage Zen Facet transitions", () => {
 
     assert.equal(defaultResult.conversation.botId, null);
     assert.equal(defaultResult.conversation.hubRole, "hub");
-    assert.equal(defaultResult.conversation.hubBotId, null);
+    assert.equal(defaultResult.conversation.hubBotId, "bot-1");
+    assert.equal(defaultResult.conversation.history?.ownerBotId, "bot-1");
     assert.equal(defaultResult.conversation.id, personaResult.conversation.id);
     assert.equal(defaultResult.conversation.lastBotId, null);
     assert.equal(defaultResult.conversation.lastBotColor, null);
@@ -7136,12 +7452,76 @@ describe("processChatMessage Zen Facet transitions", () => {
       (db.prepare("SELECT bot_id FROM conversations WHERE id = ?").get(
         defaultResult.conversation.id
       ) as { bot_id: string | null }).bot_id,
-      null
+      "bot-1"
     );
     const hubRows = db
       .prepare("SELECT bot_key, conversation_id FROM conversation_hubs ORDER BY bot_key ASC")
       .all() as Array<{ bot_key: string; conversation_id: string }>;
-    assert.deepEqual(hubRows, []);
+    assert.deepEqual(hubRows.map((row) => ({ ...row })), [
+      { bot_key: "bot-1", conversation_id: defaultResult.conversation.id },
+    ]);
+  });
+
+  it("isolates Prism and persona Homes, episodes, and stale conversation ids", async () => {
+    const db = createChatTestDb();
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, color, glyph) VALUES (?, ?, ?, ?, ?)"
+    ).run("bot-a", "user-1", "A", "#aa0000", "spark");
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, color, glyph) VALUES (?, ?, ?, ?, ?)"
+    ).run("bot-b", "user-1", "B", "#0000aa", "moon");
+    installChatFetchStub("Home reply.");
+
+    const send = (
+      facetBotId: string | null,
+      zenHomeBotId: string | null,
+      conversationId?: string,
+      forceNewConversation = false
+    ) =>
+      processChatMessage(
+        db,
+        "user-1",
+        `hello ${facetBotId ?? "Prism"}`,
+        CHAT_TEST_USER_KEY,
+        {
+          preferredProvider: "local",
+          autoMemory: false,
+          facetBotId,
+          zenHomeBotId,
+          mode: "zen",
+          forceNewConversation,
+        },
+        conversationId
+      );
+
+    const prism = await send(null, null);
+    const personaA = await send("bot-a", "bot-a");
+    const personaB = await send("bot-b", "bot-b");
+    assert.notEqual(prism.conversation.id, personaA.conversation.id);
+    assert.notEqual(personaA.conversation.id, personaB.conversation.id);
+    assert.equal(prism.conversation.history?.contextKey, "prism");
+    assert.equal(personaA.conversation.history?.contextKey, "bot:bot-a");
+    assert.equal(personaB.conversation.history?.contextKey, "bot:bot-b");
+
+    const resumedA = await send("bot-a", "bot-a");
+    assert.equal(resumedA.conversation.id, personaA.conversation.id);
+
+    const nextEpisodeA = await send("bot-a", "bot-a", undefined, true);
+    assert.notEqual(nextEpisodeA.conversation.id, personaA.conversation.id);
+    assert.equal(nextEpisodeA.conversation.history?.contextKey, "bot:bot-a");
+    assert.equal(
+      nextEpisodeA.conversation.history?.continuationConversationId,
+      nextEpisodeA.conversation.id
+    );
+
+    const guestReply = await send("bot-b", "bot-a", nextEpisodeA.conversation.id);
+    assert.equal(guestReply.conversation.id, nextEpisodeA.conversation.id);
+    assert.equal(guestReply.conversation.history?.ownerBotId, "bot-a");
+    assert.equal(guestReply.conversation.lastBotId, "bot-b");
+
+    const staleConversationId = await send("bot-a", "bot-a", personaB.conversation.id);
+    assert.equal(staleConversationId.conversation.id, nextEpisodeA.conversation.id);
+    assert.notEqual(staleConversationId.conversation.id, personaB.conversation.id);
   });
 
   it("attributes previous-introduces handoffs to the outgoing Facet", async () => {
@@ -7534,7 +7914,7 @@ describe("processChatMessage Zen Facet transitions", () => {
       (db.prepare("SELECT bot_id FROM conversations WHERE id = ?").get(
         result.conversation.id
       ) as { bot_id: string | null }).bot_id,
-      null
+      "bot-auto"
     );
   });
 

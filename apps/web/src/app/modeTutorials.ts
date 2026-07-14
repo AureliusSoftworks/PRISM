@@ -18,9 +18,15 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
     steps: [
       {
         heading: "Stay with PRISM",
-        body: "Zen is one continuous PRISM-only conversation. There are no bot or model pickers here.",
+        body: "Zen is one continuous PRISM conversation. Choose LOCAL, AUTO, or ONLINE from the header; Auto uses the recovery chain you set in Settings.",
         clickLabel: "the message box at the bottom",
         targetSelector: '[data-tutorial-target="composer"]',
+      },
+      {
+        heading: "Choose how replies recover",
+        body: "AUTO keeps the current model as Primary, then quietly tries your two saved fallbacks if a reply fails validation.",
+        clickLabel: "the LOCAL, AUTO, ONLINE control",
+        targetSelector: '[data-tutorial-target="auto-response-mode"]',
       },
       {
         heading: "Let context breathe",
@@ -70,9 +76,21 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Set the table",
-        body: "Duration, presets, and group settings steer the whole session together. The table model picker is a temporary session choice.",
+        body: "Duration, presets, and group settings steer the whole session together. The table model is Primary; AUTO can recover through your two saved fallbacks.",
         clickLabel: "New session setup or Configure settings",
         targetSelector: '[data-tutorial-target="coffee-session-setup"]',
+      },
+      {
+        heading: "Choose the spark",
+        body: "Pick a topic tailored to this group, type your own, or regenerate the ideas before the table starts.",
+        clickLabel: "a topic suggestion or Regenerate ideas",
+        targetSelector: '[data-tutorial-target="coffee-topic-picker"]',
+      },
+      {
+        heading: "Keep the table moving",
+        body: "Choose AUTO to retry failed or malformed table turns without adding error dialogue to the transcript.",
+        clickLabel: "the LOCAL, AUTO, ONLINE control",
+        targetSelector: '[data-tutorial-target="auto-response-mode"]',
       },
       {
         heading: "Join the conversation",

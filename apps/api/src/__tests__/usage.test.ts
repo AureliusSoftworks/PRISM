@@ -6,7 +6,9 @@ import { join } from "node:path";
 import { createDatabase } from "../db.ts";
 import {
   getUsageReport,
+  patchUsageSession,
   recordEstimatedEmbeddingUsage,
+  recordDeveloperTranscriptEvent,
   recordImageUsage,
   recordTextUsage,
   runWithUsageSession,
@@ -102,6 +104,134 @@ function seedUsageFixtures(db: ReturnType<typeof createDatabase>): void {
 }
 
 describe("usage accounting", () => {
+  it("records ordered provider and tool diagnostics only for persisted sessions", () => {
+    withUsageTestDb((db) => {
+      runWithUsageSession(
+        {
+          db,
+          userId: "user-1",
+          privacyScope: "normal",
+          mode: "sandbox",
+          surface: "chat",
+          conversationId: "conv-1",
+          messageId: "msg-1",
+          botId: "bot-1",
+          requestId: "developer-request",
+        },
+        () => {
+          recordTextUsage({
+            provider: "openai",
+            model: "gpt-5",
+            purpose: "chat_reply",
+            inputTokens: 10,
+            outputTokens: 4,
+            totalTokens: 14,
+            tokenCountSource: "provider_reported",
+            developer: {
+              request: { messages: [{ role: "user", content: "Hello" }] },
+              rawOutput: { choices: [{ message: { content: "Hi" } }] },
+              parsedOutput: "Hi",
+              stopReason: "stop",
+              streaming: false,
+            },
+          });
+          recordDeveloperTranscriptEvent({
+            kind: "tool",
+            purpose: "coffee_topic_selection",
+            parsedOutput: { selectedTopic: "A useful disagreement" },
+          });
+        }
+      );
+
+      const rows = db
+        .prepare(
+          `SELECT request_sequence, event_kind, purpose, provider, model, payload_json
+             FROM developer_transcript_events
+            WHERE user_id = ? AND conversation_id = ?
+            ORDER BY request_sequence ASC`
+        )
+        .all("user-1", "conv-1") as Array<{
+        request_sequence: number;
+        event_kind: string;
+        purpose: string;
+        provider: string | null;
+        model: string | null;
+        payload_json: string;
+      }>;
+      assert.equal(rows.length, 2);
+      assert.deepEqual(rows.map((row) => row.request_sequence), [1, 2]);
+      assert.deepEqual(rows.map((row) => row.event_kind), ["llm", "tool"]);
+      assert.equal(rows[0]?.provider, "openai");
+      assert.equal(rows[0]?.model, "gpt-5");
+      assert.match(rows[0]?.payload_json ?? "", /"parsedOutput":"Hi"/u);
+      assert.equal(rows[1]?.purpose, "coffee_topic_selection");
+
+      runWithUsageSession(
+        {
+          db,
+          userId: "user-1",
+          privacyScope: "private",
+          mode: "sandbox",
+          surface: "chat",
+        },
+        () => {
+          recordDeveloperTranscriptEvent({
+            kind: "llm",
+            purpose: "chat_reply",
+            parsedOutput: "private",
+          });
+        }
+      );
+      assert.equal(
+        (
+          db
+            .prepare("SELECT COUNT(*) AS count FROM developer_transcript_events")
+            .get() as { count: number }
+        ).count,
+        2
+      );
+    });
+  });
+
+  it("retroactively attaches calls recorded before a new conversation id exists", () => {
+    withUsageTestDb((db) => {
+      runWithUsageSession(
+        {
+          db,
+          userId: "user-1",
+          privacyScope: "normal",
+          mode: "coffee",
+          surface: "coffee_topic",
+          requestId: "late-conversation-request",
+        },
+        () => {
+          recordTextUsage({
+            provider: "local",
+            model: "topic-model",
+            purpose: "coffee_router",
+            inputTokens: 2,
+            outputTokens: 2,
+            totalTokens: 4,
+            tokenCountSource: "provider_reported",
+            developer: { parsedOutput: '{"topics":[]}' },
+          });
+          patchUsageSession({ conversationId: "conv-1" });
+        }
+      );
+
+      const usage = db
+        .prepare("SELECT conversation_id FROM usage_events WHERE request_id = ?")
+        .get("late-conversation-request") as { conversation_id: string | null };
+      const diagnostic = db
+        .prepare(
+          "SELECT conversation_id FROM developer_transcript_events WHERE request_id = ?"
+        )
+        .get("late-conversation-request") as { conversation_id: string | null };
+      assert.equal(usage.conversation_id, "conv-1");
+      assert.equal(diagnostic.conversation_id, "conv-1");
+    });
+  });
+
   it("aggregates text, image, and embedding events with estimated online cost", () => {
     withUsageTestDb((db) => {
       runWithUsageSession(
