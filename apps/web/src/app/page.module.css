@@ -22930,11 +22930,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .zenLiveBotPresenceFaceEmissionMask[data-crt-profile="clean"] {
-  --crt-core-opacity: 0.84;
+  --crt-core-opacity: 0.94;
   --crt-bloom-narrow-strength: 0.28;
   --crt-bloom-wide-strength: 0.075;
-  --crt-phosphor-midtone-strength: 0.34;
-  --crt-phosphor-bright-strength: 0.12;
+  --crt-phosphor-midtone-strength: 0.42;
+  --crt-phosphor-bright-strength: 0.17;
   --crt-static-opacity: 0.026;
 }
 
@@ -24407,6 +24407,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --crt-bloom-narrow-radius: 1.8px;
   --crt-bloom-wide-strength: 0.22;
   --crt-bloom-wide-radius: 12px;
+  --crt-glyph-bloom-wide-inner-opacity: 30%;
+  --crt-glyph-bloom-wide-outer-opacity: 18%;
+  --crt-face-screen-wash-near-opacity: 58%;
+  --crt-face-screen-wash-mid-opacity: 36%;
+  --crt-face-screen-wash-far-opacity: 22%;
   --zen-live-bot-idle-face-glow-filter-high: drop-shadow(
       0 0 calc(0.72px * var(--crt-face-glow-radius-scale, 1))
         var(--crt-face-edge-color)
@@ -24421,21 +24426,53 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     )
     drop-shadow(
       0 0 calc(6px * var(--crt-face-glow-radius-scale, 1))
-        color-mix(in srgb, var(--crt-face-edge-color) 58%, transparent)
+        color-mix(
+          in srgb,
+          var(--crt-face-edge-color)
+            var(--crt-face-screen-wash-near-opacity, 58%),
+          transparent
+        )
     )
     drop-shadow(
       0 0 calc(12px * var(--crt-face-glow-radius-scale, 1))
-        color-mix(in srgb, var(--crt-face-edge-color) 36%, transparent)
+        color-mix(
+          in srgb,
+          var(--crt-face-edge-color)
+            var(--crt-face-screen-wash-mid-opacity, 36%),
+          transparent
+        )
     )
     drop-shadow(
       0 0 calc(21px * var(--crt-face-glow-radius-scale, 1))
-        color-mix(in srgb, var(--crt-face-edge-color) 22%, transparent)
+        color-mix(
+          in srgb,
+          var(--crt-face-edge-color)
+            var(--crt-face-screen-wash-far-opacity, 22%),
+          transparent
+        )
     );
   --zen-live-bot-idle-face-glow-filter: var(
     --zen-live-bot-idle-face-glow-filter-high
   );
   --crt-face-glow-filter: var(--zen-live-bot-idle-face-glow-filter-high);
   filter: var(--zen-live-bot-idle-face-glow-filter);
+}
+
+:global(html[data-prism-render-platform="windows"])
+  .zenLiveBotPresenceFaceGlyph
+  [data-coffee-plate-emoji-part],
+:global(html[data-prism-render-platform="windows"])
+  .coffeeSeatPlate[data-live-body-style="zen"]
+  .coffeeSeatPlateEmoji
+  [data-coffee-plate-emoji-part] {
+  /* WebView2 compounds the nested drop-shadow stack much more aggressively
+     than macOS WebKit. Keep the close phosphor bloom and trim only the broad
+     screen wash so the ink remains crisp and emissive on both renderers. */
+  --crt-glyph-bloom-wide-inner-opacity: 14%;
+  --crt-glyph-bloom-wide-outer-opacity: 7%;
+  --crt-face-screen-wash-near-opacity: 28%;
+  --crt-face-screen-wash-mid-opacity: 13%;
+  --crt-face-screen-wash-far-opacity: 6%;
 }
 
 .zenLiveBotPresenceFaceGlyph
@@ -60915,8 +60952,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   --crt-glyph-core-red-rgb: 255 255 255;
   --crt-glyph-core-green-rgb: 255 255 255;
   --crt-glyph-core-blue-rgb: 255 255 255;
-  --crt-glyph-phosphor-midtone-strength: 0.14;
-  --crt-glyph-phosphor-bright-strength: 0.04;
+  --crt-glyph-phosphor-midtone-strength: 0.24;
+  --crt-glyph-phosphor-bright-strength: 0.09;
 }
 
 .coffeeSeatPlateEmoji [data-crt-glyph-layer="true"]::before,
@@ -60973,14 +61010,20 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
       color-mix(
         in srgb,
         var(--crt-face-edge-color)
-          calc(30% * var(--crt-glyph-bloom-strength-scale, 1)),
+          calc(
+            var(--crt-glyph-bloom-wide-inner-opacity, 30%) *
+              var(--crt-glyph-bloom-strength-scale, 1)
+          ),
         transparent
       ),
     0 0 calc(var(--crt-glyph-bloom-wide-radius) * 1.45)
       color-mix(
         in srgb,
         var(--crt-face-edge-color)
-          calc(18% * var(--crt-glyph-bloom-strength-scale, 1)),
+          calc(
+            var(--crt-glyph-bloom-wide-outer-opacity, 18%) *
+              var(--crt-glyph-bloom-strength-scale, 1)
+          ),
         transparent
       );
   filter: blur(var(--crt-glyph-beam-softness)) var(--crt-face-glow-filter);
