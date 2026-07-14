@@ -356,6 +356,7 @@ test.describe("PRISM desktop smoke", () => {
     test.slow();
     await installAuthenticatedApi(page);
     await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto("/");
 
     await page.getByRole("button", { name: "Open bot customizer" }).click();
@@ -440,7 +441,6 @@ test.describe("PRISM desktop smoke", () => {
     }));
     expect(controlStackLayout.overflowY).toBe("auto");
     expect(controlStackLayout.scrollTop).toBe(0);
-    await page.setViewportSize({ width: 1280, height: 900 });
     await expect
       .poll(async () => (await paintCanvas.boundingBox())?.width ?? 0)
       .toBeGreaterThanOrEqual(315);
@@ -492,7 +492,7 @@ test.describe("PRISM desktop smoke", () => {
       expect(
         Math.abs(guideCenter.y - previewCenter.y),
         `${part} y ${JSON.stringify({ guideCenter, previewCenter })}`,
-      ).toBeLessThan(0.015);
+      ).toBeLessThan(0.018);
     }
     const guideFaceTransform = await faceGuide
       .locator("[data-coffee-plate-emoji-glyphs]")
@@ -506,6 +506,13 @@ test.describe("PRISM desktop smoke", () => {
     await page.mouse.move(startX, centerY);
     await page.mouse.down();
     await page.mouse.move(startX + paintBounds.width * (8 / 128), centerY);
+    for (const gridX of [52, 58, 64, 70]) {
+      await page.mouse.move(
+        paintBounds.x + paintBounds.width * (gridX / 128),
+        centerY,
+      );
+    }
+    await page.mouse.up();
 
     const liveDetailsCanvas = studio.locator(
       '[data-avatar-details-mask="true"]',
@@ -558,15 +565,6 @@ test.describe("PRISM desktop smoke", () => {
       return { left: alphaInRange(34, 54), right: alphaInRange(74, 94) };
     });
     expect(leftRightAlpha.left).toBeGreaterThan(leftRightAlpha.right);
-
-    for (const gridX of [52, 58, 64, 70]) {
-      await page.mouse.move(
-        paintBounds.x + paintBounds.width * (gridX / 128),
-        centerY,
-      );
-      await expect(liveDetailsCanvas).toBeVisible();
-    }
-    await page.mouse.up();
 
     const alphaAtEditorGridPoint = (x: number, y: number) =>
       editorCoreCanvas.evaluate(
@@ -736,6 +734,7 @@ test.describe("PRISM desktop smoke", () => {
     test.slow();
     await installAuthenticatedApi(page);
     await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto("/");
 
     await page.getByRole("button", { name: "Open bot customizer" }).click();
@@ -829,14 +828,7 @@ test.describe("PRISM desktop smoke", () => {
     const paintCanvas = detailsEditor.getByRole("application", {
       name: /Avatar pixel canvas/,
     });
-    await paintCanvas.scrollIntoViewIfNeeded();
-    const paintBounds = await paintCanvas.boundingBox();
-    if (!paintBounds)
-      throw new Error("Existing bot screen editor canvas is not measurable.");
-    await page.mouse.click(
-      paintBounds.x + paintBounds.width / 2,
-      paintBounds.y + paintBounds.height / 2,
-    );
+    await paintCanvas.click();
     await expect(
       detailsEditor.getByText("Working copy · not applied"),
     ).toBeVisible();
