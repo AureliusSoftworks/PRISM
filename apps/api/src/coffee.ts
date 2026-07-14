@@ -4255,6 +4255,8 @@ export async function kickoffCoffeeMeetingSummaryRefresh(args: {
 /** Settings forwarded from the HTTP route. */
 export interface CoffeeTurnSettings {
   preferredProvider: ProviderName;
+  preferredLocalModel?: string | null;
+  preferredOnlineModel?: string | null;
   openAiApiKey?: string;
   anthropicApiKey?: string;
   secondaryOllamaHost?: string | null;
@@ -4270,7 +4272,7 @@ export interface CoffeeTurnSettings {
   sessionRemainingMs?: number | null;
   /**
    * When set, bot-authored Coffee output uses this model id for the effective
-   * provider, ignoring per-bot local/online checkpoint fields.
+   * provider instead of the account default.
    */
   sessionSpeakerModel?: string | null;
   reasoningEffort?: ReasoningEffort;
@@ -10913,7 +10915,10 @@ async function generateCoffeePollStructuredBallots(args: {
       const model = pickSpeakerModel(
         bot,
         effectiveProvider,
-        args.settings.sessionSpeakerModel
+        args.settings.sessionSpeakerModel,
+        effectiveProvider === "local"
+          ? args.settings.preferredLocalModel
+          : args.settings.preferredOnlineModel
       );
       const ballot = await generateCoffeePollStructuredBallot({
         provider,
@@ -11913,19 +11918,19 @@ function pickSpeakerProvider(
 }
 
 function pickSpeakerModel(
-  speaker: CoffeeBotProfile,
-  effectiveProvider: ProviderName,
-  sessionOverride?: string | null
+  _speaker: CoffeeBotProfile,
+  _effectiveProvider: ProviderName,
+  sessionOverride?: string | null,
+  accountPreference?: string | null
 ): string | undefined {
   const trimmed =
     typeof sessionOverride === "string" ? sessionOverride.trim() : "";
   if (trimmed.length > 0 && trimmed.toLowerCase() !== "auto") {
     return trimmed;
   }
-  if (effectiveProvider === "local") {
-    return speaker.localModel ?? speaker.defaultModel ?? undefined;
-  }
-  return speaker.onlineModel ?? speaker.defaultModel ?? undefined;
+  const accountModel =
+    typeof accountPreference === "string" ? accountPreference.trim() : "";
+  return accountModel.length > 0 ? accountModel : undefined;
 }
 
 export async function createCoffeeConversation(
@@ -12665,7 +12670,10 @@ async function generateCoffeeBotReply(args: {
   const speakerModel = pickSpeakerModel(
     speaker,
     effectiveProvider,
-    settings.sessionSpeakerModel
+    settings.sessionSpeakerModel,
+    effectiveProvider === "local"
+      ? settings.preferredLocalModel
+      : settings.preferredOnlineModel
   );
   if (speakerModel) speakerOptions.model = speakerModel;
   const effectiveReasoningEffort = coffeeEffectiveReasoningEffort({

@@ -143,16 +143,18 @@ describe("bot customizer save patch", () => {
     );
   });
 
-  it("uses the storage value when an auto image model changes", () => {
+  it("ignores legacy per-bot model changes", () => {
     assert.deepEqual(
       buildBotCustomizerSavePatch(
         currentFromPristine({
+          localModel: "qwen3:14b",
+          localModelForStorage: "qwen3:14b",
           localImageModel: "sdxl",
           localImageModelForStorage: "sdxl",
         }),
         pristine
       ),
-      { localImageModel: "sdxl" }
+      {}
     );
   });
 

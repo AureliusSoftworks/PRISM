@@ -58,6 +58,14 @@ import {
   type AuthReauthRequiredDetail,
 } from "./authReauth";
 import { decideAuthBootstrapFailure, isAbortLikeError } from "./authBootstrap";
+import {
+  FIRST_RUN_SETUP_STEPS,
+  FIRST_RUN_SETUP_STORAGE_KEY,
+  FIRST_RUN_WELCOME_STORAGE_KEY,
+  firstRunSetupProgressPercent,
+  firstRunSetupStepAt,
+} from "./firstRunOnboarding";
+import { MODE_TUTORIALS, type TutorialMode } from "./modeTutorials";
 import { CoffeeSeatPlateEmoji } from "./CoffeeSeatPlateEmoji";
 import {
   AvatarDetailsEditor,
@@ -1178,11 +1186,8 @@ const FLOATING_SHELL_APPLETS_ENABLED =
 // Keep a legacy override for emergency rollback.
 const CLIENT_ACCESS_REQUIRED =
   process.env.NEXT_PUBLIC_PRISM_LEGACY_PAIRING_REQUIRED === "1";
-const DESKTOP_FIRST_RUN_CHECKLIST_KEY = "prism_desktop_first_run_complete_v2";
 const DESKTOP_FIRST_RUN_CHECKLIST_AUTO_REFRESH_MS = 5000;
 const MODE_TUTORIAL_STORAGE_PREFIX = "prism_mode_tutorials_v1";
-
-type TutorialMode = "zen" | "chat" | "coffee";
 
 type TutorialProgress = Record<TutorialMode, boolean>;
 
@@ -10620,73 +10625,6 @@ interface DualOllamaWorkloadStatus {
 }
 type SecondaryOllamaUiStatus =
   "unconfigured" | "checking" | "connected" | "empty" | "error";
-
-type ProviderKeyPillStatus =
-  "idle" | "ready" | "unsaved" | "checking" | "connected" | "error";
-
-function providerKeyPillStatus(
-  hasAccountKey: boolean,
-  hasDraftKey: boolean,
-  checking: boolean,
-  status?: ProviderApiKeyAuthStatus,
-): ProviderKeyPillStatus {
-  if (hasDraftKey) return "unsaved";
-  if (checking && (hasAccountKey || status?.configured)) return "checking";
-  if (status?.authenticated) return "connected";
-  if (status?.status === "invalid" || status?.status === "unreachable")
-    return "error";
-  if (hasAccountKey || status?.configured) return "ready";
-  return "idle";
-}
-
-function providerKeyPillText(
-  label: string,
-  hasAccountKey: boolean,
-  hasDraftKey: boolean,
-  checking: boolean,
-  status?: ProviderApiKeyAuthStatus,
-): string {
-  if (hasDraftKey) return `${label} unsaved`;
-  if (checking && (hasAccountKey || status?.configured))
-    return `${label} checking`;
-  if (status?.authenticated) {
-    return status.source === "server"
-      ? `${label} server auth`
-      : `${label} authenticated`;
-  }
-  if (status?.status === "invalid") return `${label} invalid key`;
-  if (status?.status === "unreachable") return `${label} check failed`;
-  if (hasAccountKey) return `${label} saved`;
-  if (status?.source === "server" && status.configured)
-    return `${label} server key`;
-  return `${label} unset`;
-}
-
-function providerKeyPillTitle(
-  label: string,
-  hasAccountKey: boolean,
-  status?: ProviderApiKeyAuthStatus,
-): string {
-  if (!status?.configured) {
-    return hasAccountKey
-      ? `${label} key is saved but has not been checked yet.`
-      : `${label} key is not configured.`;
-  }
-  if (status.authenticated) {
-    const source =
-      status.source === "server"
-        ? "server environment key"
-        : "saved account key";
-    return `${label} authenticated with the ${source}.`;
-  }
-  if (status.status === "invalid") {
-    return status.message || `${label} rejected this key.`;
-  }
-  if (status.status === "unreachable") {
-    return status.message || `Could not check ${label} key status.`;
-  }
-  return `${label} key is saved but has not been checked yet.`;
-}
 interface Bot {
   id: string;
   name: string;
@@ -31089,6 +31027,7 @@ const DesktopMarkdownComposer = forwardRef<
     <div
       ref={markdownComposerSurfaceRef}
       className={styles.markdownComposerSurface}
+      data-tutorial-target="composer"
       data-disabled={disabled ? "true" : undefined}
       data-random-prompt-busy={generatingRandomPrompt ? "true" : undefined}
       aria-disabled={disabled ? "true" : undefined}
@@ -38464,10 +38403,25 @@ function HomeContent(): React.JSX.Element {
   );
   const [desktopFirstRunChecklistOpen, setDesktopFirstRunChecklistOpen] =
     useState(false);
+  const [firstRunSetupPending, setFirstRunSetupPending] = useState(false);
+  const [firstRunWelcomeHydrated, setFirstRunWelcomeHydrated] = useState(false);
+  const [firstRunWelcomeDismissed, setFirstRunWelcomeDismissed] = useState(false);
+  const [firstRunGuidedSetupRequested, setFirstRunGuidedSetupRequested] =
+    useState(false);
   const [
     desktopFirstRunChecklistStepIndex,
     setDesktopFirstRunChecklistStepIndex,
   ] = useState(0);
+  const [desktopFirstRunPreferredProvider, setDesktopFirstRunPreferredProvider] =
+    useState<Provider>("local");
+  const [desktopFirstRunPreferredLocalModel, setDesktopFirstRunPreferredLocalModel] =
+    useState("");
+  const [desktopFirstRunPreferredOnlineModel, setDesktopFirstRunPreferredOnlineModel] =
+    useState("");
+  const [desktopFirstRunStepBusy, setDesktopFirstRunStepBusy] = useState(false);
+  const [desktopFirstRunStepError, setDesktopFirstRunStepError] = useState<
+    string | null
+  >(null);
   const [desktopFirstRunChecklistBusy, setDesktopFirstRunChecklistBusy] =
     useState(false);
   const [desktopFirstRunAutoSetupBusy, setDesktopFirstRunAutoSetupBusy] =
@@ -40129,7 +40083,7 @@ function HomeContent(): React.JSX.Element {
       anthropic: AUTO_MODEL_CHOICE,
     });
   // Do not sync this from `settings.preferred*ImageModel`: "Auto" in the header means
-  // "follow the chain" (picker → bot → account default in Settings → catalog). Copying
+  // "follow the chain" (picker → account default in Settings → catalog). Copying
   // the account default into state would replace the Auto label with a concrete id.
   // Active hue lens center, in degrees on the 360° color wheel. `null`
   // means "show all bots" for the pre-chat starter-grid filter. After a
@@ -40795,6 +40749,12 @@ function HomeContent(): React.JSX.Element {
   const [activeTutorialMode, setActiveTutorialMode] =
     useState<TutorialMode | null>(null);
   const [activeTutorialStepIndex, setActiveTutorialStepIndex] = useState(0);
+  const [activeTutorialTargetRect, setActiveTutorialTargetRect] = useState<{
+    top: number;
+    left: number;
+    width: number;
+    height: number;
+  } | null>(null);
   const [changePasswordModalOpen, setChangePasswordModalOpen] = useState(false);
   const [factoryResetArmed, setFactoryResetArmed] = useState(false);
   const [deleteAccountArmed, setDeleteAccountArmed] = useState(false);
@@ -43186,11 +43146,12 @@ function HomeContent(): React.JSX.Element {
 
   const completeDesktopFirstRunChecklist = useCallback(() => {
     try {
-      localStorage.setItem(DESKTOP_FIRST_RUN_CHECKLIST_KEY, "done");
+      localStorage.setItem(FIRST_RUN_SETUP_STORAGE_KEY, "done");
     } catch {
       // Ignore storage failures; checklist still closes for this session.
     }
     setDesktopFirstRunChecklistOpen(false);
+    setFirstRunSetupPending(false);
     setDesktopFirstRunChecklistStepIndex(0);
     if (user) {
       setPanelNotice(
@@ -43200,10 +43161,139 @@ function HomeContent(): React.JSX.Element {
   }, [user]);
 
   const continueFromPreAuthChecklist = useCallback(() => {
-    completeDesktopFirstRunChecklist();
     setPreAuthChecklistComplete(true);
     setError(null);
-  }, [completeDesktopFirstRunChecklist]);
+  }, []);
+
+  useEffect(() => {
+    let dismissed = hasAnyAccounts;
+    try {
+      dismissed =
+        dismissed ||
+        localStorage.getItem(FIRST_RUN_WELCOME_STORAGE_KEY) === "done";
+    } catch {
+      // The welcome can still be dismissed for this session when storage is blocked.
+    }
+    setFirstRunWelcomeDismissed(dismissed);
+    setFirstRunWelcomeHydrated(true);
+  }, [hasAnyAccounts]);
+
+  const dismissFirstRunWelcome = useCallback((skipSetup: boolean) => {
+    try {
+      localStorage.setItem(FIRST_RUN_WELCOME_STORAGE_KEY, "done");
+      if (skipSetup) {
+        localStorage.setItem(FIRST_RUN_SETUP_STORAGE_KEY, "done");
+      }
+    } catch {
+      // Storage is helpful, not required; state still advances this launch.
+    }
+    setFirstRunWelcomeDismissed(true);
+    setFirstRunGuidedSetupRequested(!skipSetup);
+    setError(null);
+    if (skipSetup) {
+      setPreAuthChecklistComplete(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if ((!desktopFirstRunChecklistOpen && !firstRunSetupPending) || !settings)
+      return;
+    setDesktopFirstRunPreferredProvider(settings.preferredProvider);
+    setDesktopFirstRunPreferredLocalModel(
+      modelChoiceIsDisabled(settings.preferredLocalModel)
+        ? ""
+        : settings.preferredLocalModel.trim(),
+    );
+    setDesktopFirstRunPreferredOnlineModel(
+      modelChoiceIsDisabled(settings.preferredOnlineModel)
+        ? ""
+        : settings.preferredOnlineModel.trim(),
+    );
+  }, [desktopFirstRunChecklistOpen, firstRunSetupPending, settings]);
+
+  const advanceDesktopFirstRunStep = useCallback(() => {
+    setDesktopFirstRunStepError(null);
+    setDesktopFirstRunChecklistStepIndex((current) =>
+      Math.min(FIRST_RUN_SETUP_STEPS.length - 1, current + 1),
+    );
+  }, []);
+
+  async function saveAndAdvanceDesktopFirstRunStep(
+    skip = false,
+  ): Promise<void> {
+    const step = firstRunSetupStepAt(desktopFirstRunChecklistStepIndex);
+    if (step.id === "ready") {
+      completeDesktopFirstRunChecklist();
+      return;
+    }
+    if (skip) {
+      advanceDesktopFirstRunStep();
+      return;
+    }
+
+    const patch: Record<string, unknown> = {};
+    let keyProvider: ApiKeyValidationProvider | null = null;
+    let keyValue = "";
+    if (step.id === "provider") {
+      patch.preferredProvider = desktopFirstRunPreferredProvider;
+    } else if (step.id === "openai") {
+      keyProvider = "openai";
+      keyValue = openAiKey.trim();
+      if (keyValue) patch.openAiApiKey = keyValue;
+    } else if (step.id === "anthropic") {
+      keyProvider = "anthropic";
+      keyValue = anthropicKey.trim();
+      if (keyValue) patch.anthropicApiKey = keyValue;
+    } else if (step.id === "elevenlabs") {
+      keyProvider = "elevenlabs";
+      keyValue = elevenLabsKey.trim();
+      if (keyValue) patch.elevenLabsApiKey = keyValue;
+    } else if (step.id === "local-model") {
+      patch.preferredLocalModel = desktopFirstRunPreferredLocalModel;
+    } else if (step.id === "online-model") {
+      patch.preferredOnlineModel = desktopFirstRunPreferredOnlineModel;
+    }
+
+    setDesktopFirstRunStepBusy(true);
+    setDesktopFirstRunStepError(null);
+    try {
+      if (keyProvider && keyValue) {
+        const validation = await api<ApiKeyStatusResponse>(
+          "/api/settings/api-key-status",
+          {
+            method: "POST",
+            body: JSON.stringify({ provider: keyProvider, apiKey: keyValue }),
+          },
+        );
+        if (!validation.status.reachable) {
+          throw new Error(
+            validation.status.detail ||
+              `Prism could not verify that ${keyProvider} key.`,
+          );
+        }
+      }
+      if (Object.keys(patch).length > 0) {
+        await api("/api/settings", {
+          method: "PATCH",
+          body: JSON.stringify(patch),
+        });
+        await refreshSettings();
+        if (keyProvider || step.id.endsWith("model")) {
+          await refreshModels();
+        }
+      }
+      if (keyProvider) clearSettingsApiKeyDrafts([keyProvider]);
+      advanceDesktopFirstRunStep();
+    } catch (error) {
+      setDesktopFirstRunStepError(
+        error instanceof Error
+          ? error.message
+          : "That setup step could not be saved.",
+      );
+    } finally {
+      setDesktopFirstRunStepBusy(false);
+    }
+  }
 
   useEffect(() => {
     if (CLIENT_ACCESS_REQUIRED) return;
@@ -43254,7 +43344,6 @@ function HomeContent(): React.JSX.Element {
     desktopFirstRunAutoSetupAttemptedRef.current = true;
     void runDesktopFirstRunAutoSetup();
   }, [
-    CLIENT_ACCESS_REQUIRED,
     user,
     preAuthChecklistComplete,
     hasAnyAccounts,
@@ -43268,20 +43357,18 @@ function HomeContent(): React.JSX.Element {
     let completed = false;
     try {
       completed =
-        localStorage.getItem(DESKTOP_FIRST_RUN_CHECKLIST_KEY) === "done";
+        localStorage.getItem(FIRST_RUN_SETUP_STORAGE_KEY) === "done";
     } catch {
       completed = false;
     }
     if (completed) return;
     setDesktopFirstRunChecklistStepIndex(0);
+    setFirstRunSetupPending(true);
     setDesktopFirstRunChecklistOpen(true);
-    openSettingsPanel();
     void refreshDesktopFirstRunHealth();
   }, [
     user,
-    CLIENT_ACCESS_REQUIRED,
     hasAnyAccounts,
-    openSettingsPanel,
     refreshDesktopFirstRunHealth,
   ]);
 
@@ -45816,8 +45903,8 @@ function HomeContent(): React.JSX.Element {
         placement="down"
         minMenuWidthPx={180}
         statusMessage={pickerStatusMessage}
-        autoOptionLabel="Auto (per bot)"
-        autoOptionMetaOverride="uses each bot's model preference"
+        autoOptionLabel="Auto (account)"
+        autoOptionMetaOverride="uses your Settings default"
         settingsDefaultModelId={chatSettingsSavedDefaultModelId(
           settings,
           isLocal ? "local" : "online",
@@ -48303,6 +48390,82 @@ function HomeContent(): React.JSX.Element {
     startChatSpeechReveal,
     view,
   ]);
+  useEffect(() => {
+    if (!activeTutorialMode || typeof document === "undefined") {
+      setActiveTutorialTargetRect(null);
+      return;
+    }
+    const tutorial = MODE_TUTORIALS[activeTutorialMode];
+    const safeStepIndex = Math.max(
+      0,
+      Math.min(activeTutorialStepIndex, tutorial.steps.length - 1),
+    );
+    const step = tutorial.steps[safeStepIndex];
+    const target = Array.from(
+      document.querySelectorAll<HTMLElement>(step.targetSelector),
+    ).find((candidate) => {
+      const rect = candidate.getBoundingClientRect();
+      const style = window.getComputedStyle(candidate);
+      return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden";
+    });
+    if (!target) {
+      setActiveTutorialTargetRect(null);
+      return;
+    }
+    const updateTargetRect = (): void => {
+      const rect = target.getBoundingClientRect();
+      const intersectsViewport =
+        rect.bottom > 0 &&
+        rect.right > 0 &&
+        rect.top < window.innerHeight &&
+        rect.left < window.innerWidth;
+      if (!intersectsViewport) {
+        setActiveTutorialTargetRect(null);
+        return;
+      }
+      setActiveTutorialTargetRect({
+        top: rect.top,
+        left: rect.left,
+        width: rect.width,
+        height: rect.height,
+      });
+    };
+    const advanceFromTarget = (): void => {
+      if (safeStepIndex >= tutorial.steps.length - 1) {
+        setTutorialProgress((current) => ({
+          ...current,
+          [activeTutorialMode]: true,
+        }));
+        setActiveTutorialMode(null);
+        setActiveTutorialStepIndex(0);
+        return;
+      }
+      setActiveTutorialStepIndex(safeStepIndex + 1);
+    };
+    updateTargetRect();
+    target.scrollIntoView({
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "auto"
+        : "smooth",
+      block: "center",
+      inline: "nearest",
+    });
+    const settleTimer = window.setTimeout(updateTargetRect, 280);
+    const resizeObserver = new ResizeObserver(updateTargetRect);
+    resizeObserver.observe(target);
+    target.addEventListener("click", advanceFromTarget);
+    target.addEventListener("contextmenu", advanceFromTarget);
+    window.addEventListener("resize", updateTargetRect);
+    window.addEventListener("scroll", updateTargetRect, true);
+    return () => {
+      window.clearTimeout(settleTimer);
+      resizeObserver.disconnect();
+      target.removeEventListener("click", advanceFromTarget);
+      target.removeEventListener("contextmenu", advanceFromTarget);
+      window.removeEventListener("resize", updateTargetRect);
+      window.removeEventListener("scroll", updateTargetRect, true);
+    };
+  }, [activeTutorialMode, activeTutorialStepIndex]);
   const zenLiveReplyActionText = useMemo(() => {
     if (!zenLiveBotTalking || !detail?.id || !latestAssistantMessageId)
       return null;
@@ -55056,7 +55219,12 @@ function HomeContent(): React.JSX.Element {
   }, [tutorialProgress, user?.id]);
   useEffect(() => {
     if (!user) return;
-    if (view === "hub" || panel !== null) {
+    if (
+      desktopFirstRunChecklistOpen ||
+      firstRunSetupPending ||
+      view === "hub" ||
+      panel !== null
+    ) {
       setActiveTutorialMode(null);
       return;
     }
@@ -55080,7 +55248,15 @@ function HomeContent(): React.JSX.Element {
     }
     setActiveTutorialMode(mode);
     setActiveTutorialStepIndex(0);
-  }, [activeTutorialMode, panel, tutorialProgress, user, view]);
+  }, [
+    activeTutorialMode,
+    desktopFirstRunChecklistOpen,
+    firstRunSetupPending,
+    panel,
+    tutorialProgress,
+    user,
+    view,
+  ]);
   useEffect(() => {
     if (!devToolsOpen) return;
     void refreshSummaryDebug(summaryModeForView(view));
@@ -58066,6 +58242,19 @@ function HomeContent(): React.JSX.Element {
       const bootstrappedUser = await bootstrap();
       if (isRegistering && bootstrappedUser?.id) {
         starterPackFreshAccountEligibleUserRef.current = bootstrappedUser.id;
+        let setupAlreadyCompleted = false;
+        try {
+          setupAlreadyCompleted =
+            localStorage.getItem(FIRST_RUN_SETUP_STORAGE_KEY) === "done";
+        } catch {
+          setupAlreadyCompleted = false;
+        }
+        if (firstRunGuidedSetupRequested || !setupAlreadyCompleted) {
+          setDesktopFirstRunChecklistStepIndex(0);
+          setFirstRunSetupPending(true);
+          setDesktopFirstRunChecklistOpen(true);
+          void refreshDesktopFirstRunHealth();
+        }
       }
       setUsername(normalizedUsername);
       setPassword("");
@@ -58541,7 +58730,7 @@ function HomeContent(): React.JSX.Element {
   //
   // Mode semantics (kept aligned with the server-side contract):
   //   - Chat: companion lane (single persona, minimal knobs). An explicit
-  //     model picker choice still overrides the bot/account default; Auto
+  //     model picker choice still overrides the account default; Auto
   //     keeps using the server's normal model chain.
   //   - Sandbox: full runtime lane (provider/model/bot controls).
   //   - Private sends intentionally reuse the Chat-mode incognito contract so
@@ -65342,6 +65531,7 @@ function HomeContent(): React.JSX.Element {
       <form
         ref={formRef}
         className={formClassName}
+        data-tutorial-target="composer"
         data-dev-panel-safe-area="bottom"
         data-starter-compose-surface="true"
         data-compose-bot-selected={composeBotSelected ? "true" : undefined}
@@ -68106,10 +68296,6 @@ function HomeContent(): React.JSX.Element {
         repetitionPenalty: normalizeBotRepetitionPenalty(
           bot.repetition_penalty,
         ),
-        localModel: bot.local_model ?? bot.model ?? null,
-        onlineModel: bot.online_model ?? null,
-        localImageModel: bot.local_image_model ?? null,
-        openaiImageModel: bot.openai_image_model ?? null,
         faceEyesFont: faceStyle.eyesFont,
         faceEyeCharacter: faceStyle.eyeCharacter,
         faceEyeAnimation: faceStyle.eyeAnimation,
@@ -72043,6 +72229,7 @@ function HomeContent(): React.JSX.Element {
     return (
       <div
         className={styles.chatBotPickerFrame}
+        data-tutorial-target="chat-bot-picker"
         data-starter-bot-affordance="true"
         data-bot-picker-frame="true"
         data-single-bot={geom.singleBot ? "true" : undefined}
@@ -77835,19 +78022,11 @@ function HomeContent(): React.JSX.Element {
     );
   }
 
-  /** Effective image model for generate + overlay: picker (unless Auto) → bot → account Settings → catalog. */
+  /** Effective image model for generate + overlay: picker (unless Auto) → account Settings → catalog. */
   function resolveImagesPanelImageModels(): {
     localModelId: string;
     openAiModelId: string;
   } {
-    const scopeBotId = imagesPanelAttributionBotId;
-    const scopeBot =
-      scopeBotId && bots.length > 0
-        ? (bots.find((b) => b.id === scopeBotId) ?? null)
-        : null;
-    const botLocalImage = scopeBot?.local_image_model?.trim() ?? "";
-    const botOpenAiImage = scopeBot?.openai_image_model?.trim() ?? "";
-
     const headerLocalRaw = imageGenModelChoiceByProvider.local?.trim() ?? "";
     const headerLocal =
       headerLocalRaw === AUTO_MODEL_CHOICE || headerLocalRaw === ""
@@ -77857,7 +78036,6 @@ function HomeContent(): React.JSX.Element {
     const localModelId = imagesPanelImageLaneDisabled("local")
       ? ""
       : headerLocal ||
-        visibleLocalImageCandidateOrEmpty(botLocalImage) ||
         visibleLocalImageCandidateOrEmpty(settings?.preferredLocalImageModel) ||
         localImageModelCatalogEntries[0]?.id ||
         "";
@@ -77878,7 +78056,6 @@ function HomeContent(): React.JSX.Element {
         ? []
         : [
             headerOpenAi,
-            visibleOpenAiImageCandidateOrEmpty(botOpenAiImage),
             visibleOpenAiImageCandidateOrEmpty(
               settings?.preferredOpenAiImageModel,
             ),
@@ -77918,12 +78095,6 @@ function HomeContent(): React.JSX.Element {
     localModelId: string;
     openAiModelId: string;
   } {
-    const conversationBot =
-      detail?.botId && bots.length > 0
-        ? (bots.find((bot) => bot.id === detail.botId) ?? null)
-        : null;
-    const botLocalImage = conversationBot?.local_image_model?.trim() ?? "";
-    const botOpenAiImage = conversationBot?.openai_image_model?.trim() ?? "";
     const headerLocalRaw = imageGenModelChoiceByProvider.local?.trim() ?? "";
     const headerLocal =
       headerLocalRaw === AUTO_MODEL_CHOICE || headerLocalRaw === ""
@@ -77932,7 +78103,6 @@ function HomeContent(): React.JSX.Element {
     const localModelId = zenWallpaperImageLaneDisabled("local")
       ? ""
       : headerLocal ||
-        visibleLocalImageCandidateOrEmpty(botLocalImage) ||
         visibleLocalImageCandidateOrEmpty(
           settings?.preferredZenWallpaperLocalImageModel,
         ) ||
@@ -77954,7 +78124,6 @@ function HomeContent(): React.JSX.Element {
         ? []
         : [
             headerOpenAi,
-            visibleOpenAiImageCandidateOrEmpty(botOpenAiImage),
             visibleOpenAiImageCandidateOrEmpty(
               settings?.preferredZenWallpaperOpenAiImageModel,
             ),
@@ -78605,34 +78774,16 @@ function HomeContent(): React.JSX.Element {
           : comfyUiUiStatus === "error"
             ? "Not reachable"
             : "Optional";
-  const openAiKeyPillStatus = providerKeyPillStatus(
-    settings?.hasOpenAiApiKey === true,
-    openAiKey.trim().length > 0,
-    providerKeyStatusChecking,
-    providerKeyStatus?.openai,
-  );
-  const anthropicKeyPillStatus = providerKeyPillStatus(
-    settings?.hasAnthropicApiKey === true,
-    anthropicKey.trim().length > 0,
-    providerKeyStatusChecking,
-    providerKeyStatus?.anthropic,
-  );
-  const openAiKeyPillText = providerKeyPillText(
-    "OpenAI",
-    settings?.hasOpenAiApiKey === true,
-    openAiKey.trim().length > 0,
-    providerKeyStatusChecking,
-    providerKeyStatus?.openai,
-  );
-  const anthropicKeyPillText = providerKeyPillText(
-    "Anthropic",
-    settings?.hasAnthropicApiKey === true,
-    anthropicKey.trim().length > 0,
-    providerKeyStatusChecking,
-    providerKeyStatus?.anthropic,
-  );
+  const shouldShowFirstLaunchWelcome =
+    !user &&
+    !hasAnyAccounts &&
+    firstRunWelcomeHydrated &&
+    !firstRunWelcomeDismissed;
   const shouldShowPreAuthChecklist =
-    !user && !hasAnyAccounts && !preAuthChecklistComplete;
+    !user &&
+    !hasAnyAccounts &&
+    firstRunWelcomeDismissed &&
+    !preAuthChecklistComplete;
   const shouldShowAuthForm =
     !user && (hasAnyAccounts || preAuthChecklistComplete);
 
@@ -78683,63 +78834,7 @@ function HomeContent(): React.JSX.Element {
 
   function renderModeTutorialOverlay(): React.JSX.Element | null {
     if (!activeTutorialMode) return null;
-    const tutorialContent: Record<
-      TutorialMode,
-      { title: string; steps: Array<{ heading: string; body: string }> }
-    > = {
-      zen: {
-        title: "Zen walkthrough",
-        steps: [
-          {
-            heading: "Stay with PRISM",
-            body: "Zen is one continuous PRISM-only conversation. There are no bot or model pickers here.",
-          },
-          {
-            heading: "Let context breathe",
-            body: "Recent messages stay visible while older continuity is carried through summaries and memory.",
-          },
-          {
-            heading: "Use Atmosphere gently",
-            body: "Turn Atmosphere on from the header when you want the conversation backdrop to evolve.",
-          },
-        ],
-      },
-      chat: {
-        title: "Chat mode walkthrough",
-        steps: [
-          {
-            heading: "Start with a bot",
-            body: "Pick a bot from the panel, then send your first message to start the conversation.",
-          },
-          {
-            heading: "Use quick tools",
-            body: "Right-click in the canvas for shortcuts to settings, memories, images, and bot actions.",
-          },
-          {
-            heading: "Fix and refine",
-            body: "Use message actions like Edit and Resend to tune replies without losing your flow.",
-          },
-        ],
-      },
-      coffee: {
-        title: "Coffee mode walkthrough",
-        steps: [
-          {
-            heading: "Pick your table",
-            body: "Choose a Coffee Group and seat bots to set the conversation vibe before starting.",
-          },
-          {
-            heading: "Guide the session",
-            body: "Use settings and transcript controls to steer pacing, topic flow, and recap visibility.",
-          },
-          {
-            heading: "Return anytime",
-            body: "You can reset Coffee tutorials from Settings if you want another guided pass later.",
-          },
-        ],
-      },
-    };
-    const content = tutorialContent[activeTutorialMode];
+    const content = MODE_TUTORIALS[activeTutorialMode];
     const safeStepIndex = Math.min(
       activeTutorialStepIndex,
       content.steps.length - 1,
@@ -78749,15 +78844,37 @@ function HomeContent(): React.JSX.Element {
     return (
       <div
         className={styles.modeTutorialOverlay}
-        role="dialog"
-        aria-modal="true"
+        role="region"
+        aria-label={content.title}
+        data-has-target={activeTutorialTargetRect ? "true" : "false"}
       >
+        {activeTutorialTargetRect ? (
+          <div
+            className={styles.modeTutorialSpotlight}
+            style={
+              {
+                top: `${activeTutorialTargetRect.top - 7}px`,
+                left: `${activeTutorialTargetRect.left - 7}px`,
+                width: `${activeTutorialTargetRect.width + 14}px`,
+                height: `${activeTutorialTargetRect.height + 14}px`,
+              } as React.CSSProperties
+            }
+            aria-hidden="true"
+          />
+        ) : null}
         <div className={styles.modeTutorialCard}>
           <p className={styles.modeTutorialEyebrow}>
             {content.title} · Step {safeStepIndex + 1} of {content.steps.length}
           </p>
           <h3>{step.heading}</h3>
           <p>{step.body}</p>
+          <p className={styles.modeTutorialClickCue}>
+            <span aria-hidden="true">↗</span>
+            Click {step.clickLabel}.
+            {activeTutorialTargetRect
+              ? " The highlight follows the live control."
+              : " If it is not visible yet, use Next and return later."}
+          </p>
           <div className={styles.modeTutorialTimeline} aria-hidden="true">
             {content.steps.map((_, index) => (
               <span
@@ -78814,78 +78931,89 @@ function HomeContent(): React.JSX.Element {
   }
 
   function renderDesktopFirstRunChecklist(): React.JSX.Element | null {
-    if (!desktopFirstRunChecklistOpen) return null;
-    const qdrantState = desktopFirstRunHealth?.services?.qdrant ?? "unknown";
-    const ollamaState = desktopFirstRunHealth?.services?.ollama ?? "unknown";
-    const qdrantReady = qdrantState === "ready" || qdrantState === "configured";
-    const ollamaReady = ollamaState === "ready" || ollamaState === "configured";
-    const onlineKeyConfigured = Boolean(
-      settings &&
-      (settings.openAiApiKeySource !== "none" ||
-        settings.anthropicApiKeySource !== "none"),
-    );
-    const backupConfigured = Boolean(
-      settings?.secondaryOllamaHost?.trim() || settings?.comfyUiHost?.trim(),
-    );
-    const steps = [
-      {
-        id: "account",
-        title: "Account",
-        subtitle: "Create or sign in to your Prism account.",
-        state: user ? "done" : "pending",
-      },
-      {
-        id: "ollama",
-        title: "Local AI engine",
-        subtitle: "Confirm Ollama is reachable.",
-        state: ollamaReady ? "done" : "pending",
-      },
-      {
-        id: "qdrant",
-        title: "Memory engine",
-        subtitle: "Confirm Qdrant is reachable.",
-        state: qdrantReady ? "done" : "pending",
-      },
-      {
-        id: "api-keys",
-        title: "API key (optional)",
-        subtitle: "Add an OpenAI or Anthropic key for online models.",
-        state: onlineKeyConfigured ? "done" : "optional",
-      },
-      {
-        id: "extras",
-        title: "Extra servers (optional)",
-        subtitle:
-          "Use paired Ollama models or add ComfyUI for local image workflows.",
-        state: backupConfigured ? "done" : "optional",
-      },
-    ] as const;
+    if (!desktopFirstRunChecklistOpen && !firstRunSetupPending) return null;
     const activeStepIndex = Math.min(
       desktopFirstRunChecklistStepIndex,
-      steps.length - 1,
+      FIRST_RUN_SETUP_STEPS.length - 1,
     );
-    const activeStep = steps[activeStepIndex];
-    const completedCount = steps.filter((step) => step.state === "done").length;
-    const progressPercent = (completedCount / steps.length) * 100;
-    const canCompleteChecklist = user !== null && qdrantReady && ollamaReady;
+    const activeStep = firstRunSetupStepAt(activeStepIndex);
+    const progressPercent = firstRunSetupProgressPercent(activeStepIndex);
+    const hiddenModels = new Set(settings?.hiddenBotModelIds ?? []);
+    const localModelChoices = (modelCatalog?.local ?? []).filter(
+      (model) => !hiddenModels.has(model.id),
+    );
+    const onlineModelChoices = (modelCatalog?.online ?? []).filter(
+      (model) => !hiddenModels.has(model.id),
+    );
+    const activeKeyProvider: ApiKeyValidationProvider | null =
+      activeStep.id === "openai" ||
+      activeStep.id === "anthropic" ||
+      activeStep.id === "elevenlabs"
+        ? activeStep.id
+        : null;
+    const activeKeyValue =
+      activeKeyProvider === "openai"
+        ? openAiKey
+        : activeKeyProvider === "anthropic"
+          ? anthropicKey
+          : activeKeyProvider === "elevenlabs"
+            ? elevenLabsKey
+            : "";
+    const activeKeyIsAlreadySaved = Boolean(
+      activeKeyProvider === "openai"
+        ? settings?.openAiApiKeySource !== "none"
+        : activeKeyProvider === "anthropic"
+          ? settings?.anthropicApiKeySource !== "none"
+          : activeKeyProvider === "elevenlabs"
+            ? settings?.elevenLabsApiKeySource !== "none"
+            : false,
+    );
+    const primaryActionLabel =
+      activeStep.id === "ready"
+        ? "Enter Prism"
+        : activeKeyProvider && activeKeyValue.trim()
+          ? "Verify, save & continue"
+          : activeStep.id === "provider" || activeStep.id.endsWith("model")
+            ? "Save & continue"
+            : "Continue";
     return (
       <div
         className={styles.desktopChecklistOverlay}
         role="dialog"
         aria-modal="true"
       >
-        <div className={styles.desktopChecklistCard}>
-          <h3>First-time setup checklist</h3>
-          <p className={styles.muted}>
-            Walk through each setup step. Completed steps get checkmarks in the
-            timeline.
-          </p>
+        <div
+          className={`${styles.desktopChecklistCard} ${styles.firstRunSetupCard}`}
+        >
+          <header className={styles.firstRunSetupHeader}>
+            <div className={styles.firstRunSetupBrand}>
+              <PrismTriangleMark />
+              <span>PRISM</span>
+            </div>
+            <button
+              type="button"
+              className={styles.firstRunSetupClose}
+              onClick={completeDesktopFirstRunChecklist}
+              aria-label="Close setup and enter Prism"
+              title="Do this later"
+            >
+              <X size={18} strokeWidth={2} aria-hidden="true" />
+            </button>
+          </header>
+          <div className={styles.firstRunSetupIntro}>
+            <p className={styles.firstRunSetupEyebrow}>MAKE IT YOURS</p>
+            <h3>{activeStep.title}</h3>
+            <p>
+              Prism asks one thing at a time. Every connection is optional, and
+              you can change any choice later in Settings.
+            </p>
+          </div>
           <div
             className={styles.desktopChecklistProgressRow}
             aria-live="polite"
           >
             <p className={styles.desktopChecklistProgressLabel}>
-              {completedCount} of {steps.length} completed
+              Step {activeStepIndex + 1} of {FIRST_RUN_SETUP_STEPS.length}
             </p>
             <div
               className={styles.desktopChecklistProgressBar}
@@ -78897,115 +79025,255 @@ function HomeContent(): React.JSX.Element {
               />
             </div>
           </div>
-          <ol className={styles.desktopChecklistList}>
-            {steps.map((step, index) => (
-              <li
-                key={step.id}
-                className={styles.desktopChecklistItem}
-                data-active={index === activeStepIndex ? "true" : undefined}
-              >
-                <div className={styles.desktopChecklistItemBody}>
-                  <span className={styles.desktopChecklistItemTitle}>
-                    {step.title}
-                  </span>
-                  <span className={styles.desktopChecklistItemHint}>
-                    {step.subtitle}
-                  </span>
-                </div>
-                <strong
-                  className={styles.desktopChecklistStatus}
-                  data-state={step.state}
+          <ol
+            className={`${styles.desktopChecklistList} ${styles.firstRunSetupTimeline}`}
+            aria-label="Setup steps"
+          >
+            {FIRST_RUN_SETUP_STEPS.map((step, index) => (
+              <li key={step.id}>
+                <button
+                  type="button"
+                  key={step.id}
+                  className={styles.desktopChecklistItem}
+                  data-active={index === activeStepIndex ? "true" : undefined}
+                  data-complete={index < activeStepIndex ? "true" : undefined}
+                  onClick={() => {
+                    setDesktopFirstRunStepError(null);
+                    setDesktopFirstRunChecklistStepIndex(index);
+                  }}
                 >
-                  {step.state === "done"
-                    ? "✓ Done"
-                    : step.state === "optional"
-                      ? "Optional"
-                      : "Pending"}
-                </strong>
+                  <div className={styles.desktopChecklistItemBody}>
+                    <span className={styles.desktopChecklistItemTitle}>
+                      {step.shortTitle}
+                    </span>
+                    <span className={styles.desktopChecklistItemHint}>
+                      {step.optional ? "Optional" : "Guided"}
+                    </span>
+                  </div>
+                  <strong
+                    className={styles.desktopChecklistStatus}
+                    data-state={
+                      index < activeStepIndex
+                        ? "done"
+                        : index === activeStepIndex
+                          ? "next"
+                          : step.optional
+                            ? "optional"
+                            : "pending"
+                    }
+                  >
+                    {index < activeStepIndex
+                      ? "✓"
+                      : index === activeStepIndex
+                        ? "Now"
+                        : `${index + 1}`}
+                  </strong>
+                </button>
               </li>
             ))}
           </ol>
-          <section className={styles.desktopChecklistStepCard}>
-            <p className={styles.desktopChecklistStepEyebrow}>
-              Step {activeStepIndex + 1} of {steps.length}
-            </p>
-            <h4>{activeStep.title}</h4>
-            <p>{activeStep.subtitle}</p>
-            <div className={styles.desktopChecklistStepActions}>
-              {activeStep.id === "api-keys" || activeStep.id === "extras" ? (
+          <section
+            className={`${styles.desktopChecklistStepCard} ${styles.firstRunSetupStepCard}`}
+            data-step={activeStep.id}
+          >
+            {activeStep.id === "place" ? (
+              <div className={styles.firstRunPlaceStep}>
+                <p>
+                  This is a private, local-first place for conversations,
+                  characters, images, and shared tables. The setup ahead simply
+                  decides which doors you want unlocked.
+                </p>
+                <div className={styles.firstRunRoomGrid}>
+                  <span>
+                    <strong>Local room</strong>
+                    Your Ollama models stay on this machine.
+                  </span>
+                  <span>
+                    <strong>Online room</strong>
+                    Your encrypted API keys unlock cloud models.
+                  </span>
+                  <span>
+                    <strong>One set of defaults</strong>
+                    Every bot inherits your workspace model choices.
+                  </span>
+                </div>
+                <div className={styles.firstRunServiceLine}>
+                  <span>
+                    Ollama: {desktopFirstRunHealth?.services?.ollama ?? "checking"}
+                  </span>
+                  <span>
+                    Qdrant: {desktopFirstRunHealth?.services?.qdrant ?? "checking"}
+                  </span>
+                </div>
+              </div>
+            ) : null}
+            {activeStep.id === "provider" ? (
+              <div className={styles.firstRunChoiceGrid}>
                 <button
                   type="button"
-                  className={styles.linkButton}
-                  onClick={() => openSettingsPanel("connections")}
+                  data-selected={
+                    desktopFirstRunPreferredProvider === "local"
+                      ? "true"
+                      : undefined
+                  }
+                  onClick={() => setDesktopFirstRunPreferredProvider("local")}
                 >
-                  Open Settings
+                  <span className={styles.firstRunChoiceGlyph}>⌂</span>
+                  <strong>Local first</strong>
+                  <small>Recommended · private by default</small>
                 </button>
-              ) : null}
-              {(activeStep.id === "ollama" || activeStep.id === "qdrant") && (
                 <button
                   type="button"
-                  className={styles.linkButton}
-                  onClick={() => void refreshDesktopFirstRunHealth()}
-                  disabled={desktopFirstRunChecklistBusy}
+                  data-selected={
+                    desktopFirstRunPreferredProvider !== "local"
+                      ? "true"
+                      : undefined
+                  }
+                  onClick={() => setDesktopFirstRunPreferredProvider("openai")}
                 >
-                  {desktopFirstRunChecklistBusy
-                    ? "Checking..."
-                    : "Refresh checks"}
+                  <span className={styles.firstRunChoiceGlyph}>↗</span>
+                  <strong>Online first</strong>
+                  <small>Use your online model default when available</small>
                 </button>
-              )}
-              {activeStep.id === "account" && !user && (
-                <button
-                  type="button"
-                  className={styles.linkButton}
-                  onClick={completeDesktopFirstRunChecklist}
-                >
-                  Continue to login
-                </button>
-              )}
-            </div>
+              </div>
+            ) : null}
+            {activeKeyProvider ? (
+              <div className={styles.firstRunKeyStep}>
+                <label>
+                  <span>
+                    {activeKeyProvider === "openai"
+                      ? "OpenAI API key"
+                      : activeKeyProvider === "anthropic"
+                        ? "Anthropic API key"
+                        : "ElevenLabs API key"}
+                  </span>
+                  <input
+                    type="password"
+                    value={activeKeyValue}
+                    autoComplete="off"
+                    placeholder={
+                      activeKeyIsAlreadySaved
+                        ? "A key is already connected"
+                        : "Paste a key, or skip for now"
+                    }
+                    onChange={(event) =>
+                      setApiKeyDraftValue(activeKeyProvider, event.target.value)
+                    }
+                  />
+                </label>
+                <p>
+                  {activeKeyIsAlreadySaved
+                    ? "Already connected. Leave this blank to keep the saved key."
+                    : "Prism verifies this before saving it encrypted to your account."}
+                </p>
+              </div>
+            ) : null}
+            {activeStep.id === "local-model" ? (
+              <div className={styles.firstRunModelStep}>
+                <label>
+                  <span>Default local model</span>
+                  <select
+                    value={desktopFirstRunPreferredLocalModel}
+                    onChange={(event) =>
+                      setDesktopFirstRunPreferredLocalModel(event.target.value)
+                    }
+                  >
+                    <option value="">Automatic · first available model</option>
+                    {localModelChoices.map((model) => (
+                      <option key={model.id} value={model.id}>
+                        {model.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <p>Bots inherit this choice whenever the workspace is LOCAL.</p>
+              </div>
+            ) : null}
+            {activeStep.id === "online-model" ? (
+              <div className={styles.firstRunModelStep}>
+                <label>
+                  <span>Default online model</span>
+                  <select
+                    value={desktopFirstRunPreferredOnlineModel}
+                    onChange={(event) =>
+                      setDesktopFirstRunPreferredOnlineModel(event.target.value)
+                    }
+                  >
+                    <option value="">Automatic · first available model</option>
+                    {onlineModelChoices.map((model) => (
+                      <option key={`${model.provider}:${model.id}`} value={model.id}>
+                        {model.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <p>Bots inherit this choice whenever the workspace is ONLINE.</p>
+              </div>
+            ) : null}
+            {activeStep.id === "ready" ? (
+              <div className={styles.firstRunReadyStep}>
+                <PrismTriangleMark />
+                <p>
+                  You can wander straight in. Prism will introduce each room as
+                  you reach it, and Settings keeps every choice available later.
+                </p>
+                <div>
+                  <span>
+                    Home base
+                    <strong>
+                      {desktopFirstRunPreferredProvider === "local"
+                        ? "LOCAL"
+                        : "ONLINE"}
+                    </strong>
+                  </span>
+                  <span>
+                    Bot routing
+                    <strong>Account defaults</strong>
+                  </span>
+                </div>
+              </div>
+            ) : null}
+            {desktopFirstRunStepError ? (
+              <p className={styles.error} role="alert">
+                {desktopFirstRunStepError}
+              </p>
+            ) : null}
           </section>
-          <div className={styles.desktopChecklistActions}>
+          <div
+            className={`${styles.desktopChecklistActions} ${styles.firstRunSetupActions}`}
+          >
             <button
               type="button"
               className={styles.linkButton}
-              onClick={() =>
+              onClick={() => {
+                setDesktopFirstRunStepError(null);
                 setDesktopFirstRunChecklistStepIndex((current) =>
                   Math.max(0, current - 1),
-                )
-              }
-              disabled={activeStepIndex === 0}
+                );
+              }}
+              disabled={activeStepIndex === 0 || desktopFirstRunStepBusy}
             >
-              Previous step
+              Back
             </button>
-            <button
-              type="button"
-              className={styles.linkButton}
-              onClick={() => void runDesktopFirstRunAutoSetup()}
-              disabled={desktopFirstRunAutoSetupBusy}
-            >
-              {desktopFirstRunAutoSetupBusy
-                ? "Running auto-setup..."
-                : "Run automatic setup"}
-            </button>
-            <button
-              type="button"
-              className={styles.linkButton}
-              onClick={() =>
-                setDesktopFirstRunChecklistStepIndex((current) =>
-                  Math.min(steps.length - 1, current + 1),
-                )
-              }
-              disabled={activeStepIndex >= steps.length - 1}
-            >
-              Next step
-            </button>
+            {activeStep.optional ? (
+              <button
+                type="button"
+                className={styles.linkButton}
+                onClick={() => void saveAndAdvanceDesktopFirstRunStep(true)}
+                disabled={desktopFirstRunStepBusy}
+              >
+                Skip for now
+              </button>
+            ) : (
+              <span />
+            )}
             <button
               type="button"
               className={styles.accountLogoutButton}
-              onClick={completeDesktopFirstRunChecklist}
-              disabled={!canCompleteChecklist}
+              onClick={() => void saveAndAdvanceDesktopFirstRunStep(false)}
+              disabled={desktopFirstRunStepBusy}
             >
-              Continue to Prism
+              {desktopFirstRunStepBusy ? "Saving..." : primaryActionLabel}
             </button>
           </div>
         </div>
@@ -79627,6 +79895,63 @@ function HomeContent(): React.JSX.Element {
           </span>
         </button>
       </div>
+    );
+  }
+
+  // ── First-launch welcome ──
+  if (shouldShowFirstLaunchWelcome) {
+    return (
+      <main className={`${styles.firstRunWelcome} ${themeClass}`}>
+        <div className={styles.firstRunWelcomeAtmosphere} aria-hidden="true">
+          <span data-room="chat" />
+          <span data-room="zen" />
+          <span data-room="coffee" />
+          <i />
+        </div>
+        <button
+          type="button"
+          className={styles.firstRunWelcomeClose}
+          onClick={() => dismissFirstRunWelcome(true)}
+          aria-label="Close welcome and jump into Prism"
+          title="Jump into Prism"
+        >
+          <X size={20} strokeWidth={2} aria-hidden="true" />
+        </button>
+        <section className={styles.firstRunWelcomeContent}>
+          <div className={styles.firstRunWelcomeBrand}>
+            <PrismTriangleMark />
+            <span>PRISM</span>
+          </div>
+          <p className={styles.firstRunWelcomeEyebrow}>YOUR LOCAL AI PLACE</p>
+          <h1>Make yourself at home.</h1>
+          <p className={styles.firstRunWelcomeLead}>
+            Prism is a private place for conversations, characters, quiet
+            rooms, and lively tables. We can get everything ready together,
+            one choice at a time.
+          </p>
+          <div className={styles.firstRunWelcomeActions}>
+            <button
+              type="button"
+              className={styles.firstRunWelcomePrimary}
+              onClick={() => dismissFirstRunWelcome(false)}
+            >
+              Show me around
+              <span aria-hidden="true">→</span>
+            </button>
+            <button
+              type="button"
+              className={styles.firstRunWelcomeSecondary}
+              onClick={() => dismissFirstRunWelcome(true)}
+            >
+              Jump into Prism
+            </button>
+          </div>
+          <p className={styles.firstRunWelcomeNote}>
+            About 3 minutes · Every connection is optional · Reopen anytime
+          </p>
+        </section>
+        <GlyphTooltipLayer />
+      </main>
     );
   }
 
@@ -81633,6 +81958,7 @@ function HomeContent(): React.JSX.Element {
           <button
             type="button"
             className={`${styles.headerIconButton} ${styles.atmosphereHeaderButton}`}
+            data-tutorial-target="zen-atmosphere"
             onClick={() => runAction(toggleZenAtmosphere)}
             aria-label={zenAtmosphereTooltip}
             aria-pressed={zenAtmosphereEnabled}
@@ -94220,7 +94546,7 @@ function HomeContent(): React.JSX.Element {
                                         </strong>
                                         <small>
                                           {newBotOnlineEnabled
-                                            ? "This bot may use its preferred online model."
+                                            ? "This bot may use the workspace's online model."
                                             : "This bot will refuse online routing."}
                                         </small>
                                       </button>
@@ -94256,34 +94582,6 @@ function HomeContent(): React.JSX.Element {
                                         </small>
                                       </button>
                                     </label>
-                                  </div>
-                                  <div className={styles.botParameterField}>
-                                    <span>Models &amp; routing</span>
-                                    <button
-                                      type="button"
-                                      className={
-                                        styles.botPreferredModelsButton
-                                      }
-                                      aria-haspopup="dialog"
-                                      aria-expanded={
-                                        botPreferredModelsModalOpen
-                                          ? "true"
-                                          : undefined
-                                      }
-                                      onClick={() => {
-                                        setActiveFieldHelp(null);
-                                        setBotModelRoutingPage("chat");
-                                        setBotPreferredModelsModalOpen(true);
-                                      }}
-                                    >
-                                      <strong>
-                                        Open model &amp; image routing
-                                      </strong>
-                                      <span>
-                                        Offline / online chat models and
-                                        image-generation defaults
-                                      </span>
-                                    </button>
                                   </div>
                                 </div>
                               </div>
@@ -94922,8 +95220,7 @@ function HomeContent(): React.JSX.Element {
                     >
                       <div className={styles.botParameterHeader}>
                         <small>
-                          Plain-language choices for permissions and model
-                          routing.
+                          Plain-language choices for permissions and behavior.
                         </small>
                       </div>
                       <div className={styles.botResponseSettingsGrid}>
@@ -94954,7 +95251,7 @@ function HomeContent(): React.JSX.Element {
                                 </strong>
                                 <small>
                                   {newBotOnlineEnabled
-                                    ? "This bot may use its preferred online model."
+                                    ? "This bot may use the workspace's online model."
                                     : "This bot will refuse online routing. Flip Allowed to lift the protection."}
                                 </small>
                               </button>
@@ -94984,32 +95281,6 @@ function HomeContent(): React.JSX.Element {
                                 </small>
                               </button>
                             </label>
-                          </div>
-                          <div className={styles.botParameterField}>
-                            <span>Models & routing</span>
-                            <button
-                              type="button"
-                              className={styles.botPreferredModelsButton}
-                              aria-haspopup="dialog"
-                              aria-expanded={
-                                botPreferredModelsModalOpen ? "true" : undefined
-                              }
-                              onClick={() => {
-                                setActiveFieldHelp(null);
-                                setBotModelRoutingPage("chat");
-                                setBotPreferredModelsModalOpen(true);
-                              }}
-                            >
-                              <strong>
-                                {mobileBotsPanel
-                                  ? "Open models & routing"
-                                  : "Open model & image routing"}
-                              </strong>
-                              <span>
-                                Offline / online chat models and
-                                image-generation defaults
-                              </span>
-                            </button>
                           </div>
                         </div>
                       </div>
@@ -95891,7 +96162,10 @@ function HomeContent(): React.JSX.Element {
                                           </small>
                                         </div>
                                       </div>
-                                      <div className={styles.botBatchEditField}>
+                                      <div
+                                        className={styles.botBatchEditField}
+                                        hidden
+                                      >
                                         <span>Offline chat model</span>
                                         <ComposerModelPicker
                                           value={batchFieldDisplayValue(
@@ -95920,7 +96194,10 @@ function HomeContent(): React.JSX.Element {
                                           }
                                         />
                                       </div>
-                                      <div className={styles.botBatchEditField}>
+                                      <div
+                                        className={styles.botBatchEditField}
+                                        hidden
+                                      >
                                         <span>Online chat model</span>
                                         <ComposerModelPicker
                                           value={batchFieldDisplayValue(
@@ -95949,7 +96226,10 @@ function HomeContent(): React.JSX.Element {
                                           }
                                         />
                                       </div>
-                                      <div className={styles.botBatchEditField}>
+                                      <div
+                                        className={styles.botBatchEditField}
+                                        hidden
+                                      >
                                         <span>Offline image model</span>
                                         <ComposerModelPicker
                                           value={batchFieldDisplayValue(
@@ -95986,7 +96266,10 @@ function HomeContent(): React.JSX.Element {
                                           }
                                         />
                                       </div>
-                                      <div className={styles.botBatchEditField}>
+                                      <div
+                                        className={styles.botBatchEditField}
+                                        hidden
+                                      >
                                         <span>Online image model</span>
                                         <ComposerModelPicker
                                           value={batchFieldDisplayValue(
@@ -106499,7 +106782,10 @@ function HomeContent(): React.JSX.Element {
               {groupSessions.length} saved sessions
             </p>
           </div>
-          <div className={styles.coffeeGroupStartPanel}>
+          <div
+            className={styles.coffeeGroupStartPanel}
+            data-tutorial-target="coffee-session-setup"
+          >
             <span className={styles.coffeeGroupStartLabel}>
               New session setup
             </span>
@@ -106988,6 +107274,7 @@ function HomeContent(): React.JSX.Element {
         {!coffeeSessionSurfaceActive && (
           <aside
             className={styles.coffeeSidebar}
+            data-tutorial-target="coffee-groups"
             data-dev-panel-safe-area="left"
           >
             <button
@@ -107557,6 +107844,9 @@ function HomeContent(): React.JSX.Element {
         {renderContextMenuPortal(renderCoffeeShellContextMenu())}
         {renderContextMenuPortal(renderCoffeeBotContextMenu())}
         {renderContextMenuSelectionFeedback()}
+        {renderViewSwitchOverlay()}
+        {renderModeTutorialOverlay()}
+        {renderDesktopFirstRunChecklist()}
         <GlyphTooltipLayer />
       </main>
     );
@@ -108394,6 +108684,8 @@ function HomeContent(): React.JSX.Element {
         </section>
         {renderSharedPanels()}
         {renderViewSwitchOverlay()}
+        {renderModeTutorialOverlay()}
+        {renderDesktopFirstRunChecklist()}
         {renderBackendUnavailableNotice("banner")}
         {renderDeleteAllModal()}
         {renderSelectedBotDeleteModal()}
@@ -108500,6 +108792,8 @@ function HomeContent(): React.JSX.Element {
         {renderDevToolsPanel()}
         {renderDevMoodVisual()}
         {renderViewSwitchOverlay()}
+        {renderModeTutorialOverlay()}
+        {renderDesktopFirstRunChecklist()}
         {renderBackendUnavailableNotice("banner")}
         <GlyphTooltipLayer />
       </main>
@@ -109053,6 +109347,7 @@ function HomeContent(): React.JSX.Element {
 
           <div
             className={styles.messagesFrame}
+            data-tutorial-target="conversation-canvas"
             data-mode={messagesFrameMode}
             data-chat-focus={chatLikeSurface ? "true" : undefined}
             data-replying-live={
@@ -110229,6 +110524,7 @@ function HomeContent(): React.JSX.Element {
                           return (
                             <div
                               className={styles.messageActionsSlot}
+                              data-tutorial-target="chat-message-actions"
                               data-copied={copied ? "true" : undefined}
                               data-model-revealed={
                                 modelRevealMessageId === msg.id
@@ -110301,6 +110597,7 @@ function HomeContent(): React.JSX.Element {
 
           <form
             className={styles.compose}
+            data-tutorial-target="composer"
             data-dev-panel-safe-area="bottom"
             data-starter-compose-surface="true"
             data-compose-bot-selected={
@@ -110515,6 +110812,8 @@ function HomeContent(): React.JSX.Element {
           />
         )}
         {renderViewSwitchOverlay()}
+        {renderModeTutorialOverlay()}
+        {renderDesktopFirstRunChecklist()}
         {renderBackendUnavailableNotice("banner")}
         <GlyphTooltipLayer />
       </main>
@@ -110811,6 +111110,7 @@ function HomeContent(): React.JSX.Element {
 
         <div
           className={styles.messagesFrame}
+          data-tutorial-target="conversation-canvas"
           data-mode={messagesFrameMode}
           data-chat-focus={chatLikeSurface ? "true" : undefined}
           data-replying-live={
@@ -111356,6 +111656,7 @@ function HomeContent(): React.JSX.Element {
                         return (
                           <div
                             className={styles.chatBotPickerFrame}
+                            data-tutorial-target="chat-bot-picker"
                             data-starter-bot-affordance="true"
                             data-bot-picker-frame="true"
                             data-single-bot={
@@ -112262,6 +112563,7 @@ function HomeContent(): React.JSX.Element {
                         return (
                           <div
                             className={styles.messageActionsSlot}
+                            data-tutorial-target="chat-message-actions"
                             data-copied={copied ? "true" : undefined}
                             data-model-revealed={
                               modelRevealMessageId === msg.id

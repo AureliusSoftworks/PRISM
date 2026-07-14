@@ -1707,7 +1707,11 @@ describe("createCoffeeConversation", () => {
       userId,
       result.conversation.id,
       result.poll?.id ?? "",
-      { preferredProvider: "local", sessionRemainingMs: 120_000 },
+      {
+        preferredProvider: "local",
+        preferredLocalModel: "account-poll-local",
+        sessionRemainingMs: 120_000,
+      },
       { structuredBallots: true, pollVoteProvider: provider }
     );
     const optionByBotId = new Map(
@@ -1719,8 +1723,8 @@ describe("createCoffeeConversation", () => {
     assert.match(calls[0] ?? "", /public\/common persona knowledge/);
     assert.match(calls[0] ?? "", /knowledgeBasis/);
     assert.match(calls[0] ?? "", /personaInstinct/);
-    assert.equal(modelByBotName.get("Alice"), "alice-poll-local");
-    assert.equal(modelByBotName.get("Boris"), "boris-poll-local");
+    assert.equal(modelByBotName.get("Alice"), "account-poll-local");
+    assert.equal(modelByBotName.get("Boris"), "account-poll-local");
     assert.equal(optionByBotId.get(ALICE.id), "Ask questions");
     assert.equal(optionByBotId.get(BORIS.id), "Cook first");
     assert.match(
@@ -3251,7 +3255,7 @@ describe("Coffee group foundation", () => {
     assert.deepEqual(payload.moodAbsentBotIds, [BORIS.id]);
   });
 
-  it("uses each directed Coffee speaker's own local model when the session model is Auto", async () => {
+  it("uses the account local model for every Coffee speaker when the session model is Auto", async () => {
     const db = createCoffeeTestDb();
     const userId = "user-1";
     const conversationId = "conv-speaker-model-auto";
@@ -3279,7 +3283,11 @@ describe("Coffee group foundation", () => {
           message: "Alice, what should we test?",
           directedSpeakerBotId: ALICE.id,
         },
-        { preferredProvider: "local", sessionSpeakerModel: "auto" }
+        {
+          preferredProvider: "local",
+          preferredLocalModel: "account-local-model",
+          sessionSpeakerModel: "auto",
+        }
       )
     );
     await withMockedCoffeeFetch("Boris turns it into a kitchen check.", () =>
@@ -3291,7 +3299,10 @@ describe("Coffee group foundation", () => {
           message: "Boris, what would you add?",
           directedSpeakerBotId: BORIS.id,
         },
-        { preferredProvider: "local" }
+        {
+          preferredProvider: "local",
+          preferredLocalModel: "account-local-model",
+        }
       )
     );
 
@@ -3302,8 +3313,8 @@ describe("Coffee group foundation", () => {
       .all(conversationId) as Array<{ bot_id: string; model: string | null }>;
     const modelByBotId = new Map(rows.map((row) => [row.bot_id, row.model]));
 
-    assert.equal(modelByBotId.get(ALICE.id), "alice-local-model");
-    assert.equal(modelByBotId.get(BORIS.id), "boris-local-model");
+    assert.equal(modelByBotId.get(ALICE.id), "account-local-model");
+    assert.equal(modelByBotId.get(BORIS.id), "account-local-model");
   });
 
   it("uses an explicit Coffee session model for every directed speaker", async () => {

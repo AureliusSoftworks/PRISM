@@ -25,7 +25,7 @@ export interface CatalogShapeForAuto {
 export interface ResolveAutoModelInput {
   provider: AutoModelProvider;
   explicitModelOverride?: string | null;
-  botPreferredModel?: string | null;
+  preferredModel?: string | null;
   hiddenModelIds: string[];
   catalog: CatalogShapeForAuto;
 }
@@ -223,9 +223,9 @@ function firstVisibleRoutableModel(
 export function resolveAutoModel(input: ResolveAutoModelInput): ResolvedAutoModel {
   const hidden = new Set(sanitizeHiddenModelIds(input.hiddenModelIds));
   const explicit = input.explicitModelOverride?.trim() || null;
-  const botPreferred = input.botPreferredModel?.trim() || null;
+  const preferred = input.preferredModel?.trim() || null;
   const providerCatalog = providerCatalogIds(input.catalog, input.provider);
-  const leadingCandidates = [explicit, botPreferred].filter(
+  const leadingCandidates = [explicit, preferred].filter(
     (model): model is string => Boolean(model)
   );
   const leadingCandidateSet = new Set(leadingCandidates);

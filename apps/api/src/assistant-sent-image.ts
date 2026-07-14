@@ -356,8 +356,6 @@ function isMissingComfyWorkflowError(error: unknown): boolean {
 type BotPersonaImageRow = {
   name: string;
   system_prompt: string;
-  local_image_model: string | null;
-  openai_image_model: string | null;
 };
 
 export interface AssistantSentImageUserPrefs {
@@ -446,7 +444,7 @@ export async function runAssistantSentImageGeneration(args: {
   if (personaBotId) {
     botPersona = args.db
       .prepare(
-        `SELECT name, system_prompt, local_image_model, openai_image_model
+        `SELECT name, system_prompt
            FROM bots WHERE id = ? AND user_id = ?`
       )
       .get(personaBotId, args.userId) as BotPersonaImageRow | undefined;
@@ -471,22 +469,16 @@ export async function runAssistantSentImageGeneration(args: {
     }
   }
 
-  const botLocalImageModel = botPersona?.local_image_model?.trim() ?? "";
   const preferredLocalImageModel = args.prefs.preferredLocalImageModel?.trim() ?? "";
-  const botOpenAiImageModel = botPersona?.openai_image_model?.trim() ?? "";
   const preferredOpenAiImageModel = args.prefs.preferredOpenAiImageModel?.trim() ?? "";
-  const localImageDisabled =
-    isDisabledModelChoice(botLocalImageModel) ||
-    isDisabledModelChoice(preferredLocalImageModel);
-  const onlineImageDisabled =
-    isDisabledModelChoice(botOpenAiImageModel) ||
-    isDisabledModelChoice(preferredOpenAiImageModel);
+  const localImageDisabled = isDisabledModelChoice(preferredLocalImageModel);
+  const onlineImageDisabled = isDisabledModelChoice(preferredOpenAiImageModel);
   const resolvedLocalImageModel = localImageDisabled
     ? ""
-    : botLocalImageModel || preferredLocalImageModel;
+    : preferredLocalImageModel;
   const resolvedOpenAiImageModel = onlineImageDisabled
     ? ""
-    : botOpenAiImageModel || preferredOpenAiImageModel;
+    : preferredOpenAiImageModel;
   const lenientFbRaw = args.prefs.lenientLocalImageFallbackModel?.trim() ?? "";
   const lenientFb = isDisabledModelChoice(lenientFbRaw) ? "" : lenientFbRaw;
 
@@ -628,14 +620,6 @@ export async function runAssistantSentImageGeneration(args: {
           const fallbackCandidates: string[] = [];
           const primaryModel = resolvedLocalImageModel.trim();
           const isWorkflowMissing = isMissingComfyWorkflowError(primaryError);
-          // Bot-specific model can point at a stale workflow; retry with account default.
-          if (
-            botLocalImageModel &&
-            preferredLocalImageModel &&
-            preferredLocalImageModel !== primaryModel
-          ) {
-            fallbackCandidates.push(preferredLocalImageModel);
-          }
           if (
             lenientFb &&
             lenientFb !== primaryModel &&
