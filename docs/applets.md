@@ -24,9 +24,9 @@ ship as `0.5.2` while Coffee is `v0.7` and Story is `v0.1`.
 
 | Applet | Version | Status | Notes |
 | --- | --- | --- | --- |
-| Chat | v0.9 | Active | Full playground for bots, providers, models, images, exports, and memory-aware conversations. |
-| Zen | v0.8 | Active | Calm one-to-one continuity surface; the standalone Zen lane is deprecating as this becomes Prism's default state. |
-| Coffee | v1.0 | Active | Multi-bot group table with Coffee Groups, session pacing, cups, transcripts, replay, and table controls. |
+| Chat | v1.0 | Active | Full playground for bots, providers, models, images, exports, and memory-aware conversations. |
+| Zen | v0.9 | Active | Calm one-to-one continuity surface; the standalone Zen lane is deprecating as this becomes Prism's default state. |
+| Coffee | v1.1 | Active | Multi-bot group table with Coffee Groups, session pacing, cups, transcripts, replay, and table controls. |
 | Story | v0.1 | Preview | Generated visual-novel episodes with bots, choices, maps, inventory, and transcripts. |
 | Arena | v0.0 | Planned | Moderated bot debate surface. |
 | Polling | v0.0 | Planned | AI-powered polling across bot groups. |
@@ -41,6 +41,12 @@ ship as `0.5.2` while Coffee is `v0.7` and Story is `v0.1`.
 
 ### 2026-07-13
 
+- Bumped `Chat` to `v1.0` for the four-mode voice selector, hybrid Babble,
+  phoneme-aware mouths, persistent Spotlight search, and filtered group heroes.
+- Bumped `Zen` to `v0.9` for phoneme-aware English speech and the restored
+  procedural/hybrid robot voice split.
+- Bumped `Coffee` to `v1.1` for live navbar policy, first-person table layout,
+  read-only review controls, player presence, pot cleanup, and responsive text.
 - Bumped `Chat` to `v0.9` for Avatar Details Studio, canonical live-avatar
   rendering, restored procedural Bottish, hybrid Babble, and an explicit voice
   selector.
