@@ -10994,11 +10994,13 @@ interface AccountExportBundleV1 {
   exportedAt: string;
   snapshot: unknown;
   botLibraryGroups?: BotLibraryGroup[];
+  commandCenter?: CommandCenterStateV1;
 }
 
 interface ParsedAccountBackupV1 {
   snapshot: unknown;
   botLibraryGroups?: BotLibraryGroup[];
+  commandCenter?: CommandCenterStateV1;
 }
 
 interface BotLibraryGroup {
@@ -68573,6 +68575,12 @@ function HomeContent(): React.JSX.Element {
         exportedAt,
         snapshot: response.snapshot,
         botLibraryGroups: normalizeBotLibraryGroups(botLibraryGroups),
+        commandCenter: {
+          schema: "prism-command-center-v1",
+          preferredModel: commandCenterPreferredModel,
+          commands: commandCenterCommands,
+          wildcardDecks: commandCenterWildcardDecks,
+        },
       };
       const files: Record<string, Uint8Array> = {
         "backup.json": strToU8(`${JSON.stringify(bundle, null, 2)}\n`),
@@ -68622,6 +68630,14 @@ function HomeContent(): React.JSX.Element {
               ),
             }
           : {}),
+        ...("commandCenter" in record
+          ? {
+              commandCenter: {
+                schema: "prism-command-center-v1",
+                ...normalizeCommandCenterState(record.commandCenter),
+              },
+            }
+          : {}),
       };
     }
     if (
@@ -68648,6 +68664,35 @@ function HomeContent(): React.JSX.Element {
         );
       } catch {
         // Non-fatal: the in-memory group state is already restored for this page session.
+      }
+    }
+  }
+
+  function restoreAccountCommandCenter(
+    commandCenter: CommandCenterStateV1 | undefined,
+  ): void {
+    if (!commandCenter) return;
+    const normalized = normalizeCommandCenterState(commandCenter);
+    setCommandCenterPreferredModel(normalized.preferredModel);
+    setCommandCenterCommands(normalized.commands);
+    setCommandCenterWildcardDecks(normalized.wildcardDecks);
+    setCommandCenterDraft(null);
+    setCommandCenterWildcardDraft(null);
+    setCommandCenterSelectedCommandId(null);
+    setCommandCenterSelectedWildcardDeckId(null);
+    if (user?.id && typeof window !== "undefined") {
+      try {
+        window.localStorage.setItem(
+          commandCenterStateStorageKey(user.id),
+          JSON.stringify({
+            schema: "prism-command-center-v1",
+            preferredModel: normalized.preferredModel,
+            commands: normalized.commands,
+            wildcardDecks: normalized.wildcardDecks,
+          }),
+        );
+      } catch {
+        // Non-fatal: the in-memory Prompt Center state is already restored for this page session.
       }
     }
   }
@@ -68685,9 +68730,14 @@ function HomeContent(): React.JSX.Element {
     });
     await refreshAll();
     restoreAccountBotLibraryGroups(backup.botLibraryGroups);
+    restoreAccountCommandCenter(backup.commandCenter);
+    const restoredLocalState = [
+      backup.botLibraryGroups ? "bot groups" : null,
+      backup.commandCenter ? "Prompt Center" : null,
+    ].filter((label): label is string => Boolean(label));
     setPanelNotice(
-      backup.botLibraryGroups
-        ? "Account backup imported, including bot groups."
+      restoredLocalState.length > 0
+        ? `Account backup imported, including ${restoredLocalState.join(" and ")}.`
         : "Account backup imported.",
     );
   }
