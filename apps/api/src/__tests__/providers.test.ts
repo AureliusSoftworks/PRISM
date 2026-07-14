@@ -1231,6 +1231,47 @@ describe("AnthropicProvider request shape", () => {
     assert.equal(body.model, "claude-opus-4-8");
   });
 
+  it("does not send temperature and top_p together", async () => {
+    let body: Record<string, unknown> = {};
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({ content: [{ type: "text", text: "ok" }] }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const provider = new AnthropicProvider({ apiKey: "sk-ant-test" });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "claude-sonnet-4-6",
+      temperature: 0.92,
+      topP: 1,
+    });
+
+    assert.equal(body.temperature, 0.92);
+    assert.equal("top_p" in body, false);
+  });
+
+  it("still sends top_p when temperature is not configured", async () => {
+    let body: Record<string, unknown> = {};
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({ content: [{ type: "text", text: "ok" }] }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const provider = new AnthropicProvider({ apiKey: "sk-ant-test" });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "claude-sonnet-4-6",
+      topP: 0.8,
+    });
+
+    assert.equal(body.top_p, 0.8);
+    assert.equal("temperature" in body, false);
+  });
+
   it("falls back to the Anthropic default for a stale OpenAI model override", async () => {
     let body: Record<string, unknown> = {};
     globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {

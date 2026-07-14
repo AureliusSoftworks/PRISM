@@ -1433,7 +1433,13 @@ export class AnthropicProvider implements LlmProvider {
     if (typeof options?.temperature === "number") {
       requestBody.temperature = options.temperature;
     }
-    if (typeof options?.topP === "number") {
+    // Anthropic rejects requests that specify both sampling controls. Prefer
+    // the bot's temperature when both are configured (top_p commonly remains
+    // at its default of 1), while still honoring top_p on its own.
+    if (
+      typeof options?.temperature !== "number" &&
+      typeof options?.topP === "number"
+    ) {
       requestBody.top_p = options.topP;
     }
     if (typeof options?.topK === "number") {
