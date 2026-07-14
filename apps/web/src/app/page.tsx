@@ -16911,19 +16911,22 @@ function nextThemeMode(current: Theme): Theme {
   return "light";
 }
 
+function isContextMenuPointerGesture(
+  event: MouseEvent | PointerEvent,
+): boolean {
+  const isMouseEvent =
+    !("pointerType" in event) || event.pointerType === "mouse";
+  return (
+    isMouseEvent &&
+    (event.button === 2 || (event.ctrlKey && event.button === 0))
+  );
+}
+
 function isPrimaryPointerDismissal(event: MouseEvent | PointerEvent): boolean {
   // Dismiss on normal primary clicks/taps, and also on desktop context-menu
   // gestures (right-click / Ctrl+click) so users can close menus without an
   // extra left-click.
-  const isMouseEvent =
-    !("pointerType" in event) || event.pointerType === "mouse";
-  if (
-    isMouseEvent &&
-    (event.button === 2 || (event.ctrlKey && event.button === 0))
-  ) {
-    return true;
-  }
-  return event.button === 0;
+  return isContextMenuPointerGesture(event) || event.button === 0;
 }
 
 function authHeadersForFetch(): HeadersInit {
@@ -67947,6 +67950,10 @@ function HomeContent(): React.JSX.Element {
     if (!canvasToolsContextMenu) return;
 
     function handlePointerDown(event: PointerEvent) {
+      // Let the following `contextmenu` event own right-click/Ctrl+click.
+      // Closing here first lets React re-render before that event and makes
+      // the menu immediately reopen instead of toggling off.
+      if (isContextMenuPointerGesture(event)) return;
       if (!isPrimaryPointerDismissal(event)) return;
       const target = event.target;
       if (
@@ -67965,10 +67972,10 @@ function HomeContent(): React.JSX.Element {
       }
     }
 
-    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("pointerdown", handlePointerDown, true);
     document.addEventListener("keydown", handleKey);
     return () => {
-      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("pointerdown", handlePointerDown, true);
       document.removeEventListener("keydown", handleKey);
     };
   }, [canvasToolsContextMenu, closeCanvasToolsContextMenu]);
@@ -72635,8 +72642,9 @@ function HomeContent(): React.JSX.Element {
       if (shouldAllowNativeContextMenu(event.target)) return;
       event.preventDefault();
       setZenLiveBotContextMenu(null);
+      closeCanvasToolsContextMenu();
     },
-    [shouldAllowNativeContextMenu],
+    [closeCanvasToolsContextMenu, shouldAllowNativeContextMenu],
   );
 
   /**
@@ -72716,6 +72724,10 @@ function HomeContent(): React.JSX.Element {
       if (shouldAllowNativeContextMenu(event.target)) return;
       event.preventDefault();
       event.stopPropagation();
+      if (canvasToolsContextMenu) {
+        closeCanvasToolsContextMenu();
+        return;
+      }
       const clamped = clampContextMenuPosition(
         event.clientX,
         event.clientY,
@@ -72731,7 +72743,13 @@ function HomeContent(): React.JSX.Element {
       setConversationGroupContextMenu(null);
       setChatOverflowMenuOpen(false);
     },
-    [shouldAllowNativeContextMenu, closeMessageContextOverlay, view],
+    [
+      canvasToolsContextMenu,
+      closeCanvasToolsContextMenu,
+      closeMessageContextOverlay,
+      shouldAllowNativeContextMenu,
+      view,
+    ],
   );
 
   // ── Hold-to-delete-all gesture ────────────────────────────────────────
