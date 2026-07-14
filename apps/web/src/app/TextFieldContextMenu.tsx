@@ -28,6 +28,7 @@ type MenuThemeStyle = React.CSSProperties & {
   "--text-field-menu-fg"?: string;
   "--text-field-menu-hover"?: string;
   "--text-field-menu-disabled"?: string;
+  "--text-field-menu-backdrop-filter"?: string;
 };
 
 interface TextFieldContextMenuState {
@@ -43,9 +44,30 @@ function cssVar(style: CSSStyleDeclaration, name: string, fallback: string): str
   return value.length > 0 ? value : fallback;
 }
 
+function cssColorIsLight(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  const hex = normalized.match(/^#([0-9a-f]{6})$/);
+  const rgb = normalized.match(
+    /^rgba?\(\s*(\d+(?:\.\d+)?)\s*[, ]\s*(\d+(?:\.\d+)?)\s*[, ]\s*(\d+(?:\.\d+)?)/,
+  );
+  const channels = hex
+    ? [
+        Number.parseInt(hex[1].slice(0, 2), 16),
+        Number.parseInt(hex[1].slice(2, 4), 16),
+        Number.parseInt(hex[1].slice(4, 6), 16),
+      ]
+    : rgb
+      ? [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])]
+      : null;
+  if (!channels) return false;
+  return (channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722) / 255 > 0.62;
+}
+
 function themeForTarget(target: HTMLElement): MenuThemeStyle {
   const style = window.getComputedStyle(target);
   const bg = cssVar(style, "--bg-surface", cssVar(style, "--bg", "#111520"));
+  const lightTheme =
+    style.colorScheme.split(" ").includes("light") || cssColorIsLight(bg);
   const border = cssVar(style, "--line-strong", cssVar(style, "--line", "rgba(255,255,255,0.16)"));
   const fg = cssVar(style, "--fg", "#f2f5fb");
   const hover = cssVar(style, "--bg-hover", "rgba(255,255,255,0.1)");
@@ -57,6 +79,9 @@ function themeForTarget(target: HTMLElement): MenuThemeStyle {
     "--text-field-menu-fg": fg,
     "--text-field-menu-hover": hover,
     "--text-field-menu-disabled": muted,
+    "--text-field-menu-backdrop-filter": lightTheme
+      ? "none"
+      : "blur(16px) saturate(1.2)",
   };
 }
 

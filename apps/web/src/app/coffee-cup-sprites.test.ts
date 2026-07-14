@@ -66,6 +66,37 @@ describe("coffee cup sprites", () => {
     }
   });
 
+  it("suppresses ambient and explicit sipping while a bot is thinking", () => {
+    assert.equal(
+      coffeeCupSippingActive({
+        seed: "thinking-cup",
+        nowMs: 10_000,
+        progress: 0.4,
+        thinking: true,
+      }),
+      false
+    );
+
+    const thinking = buildCoffeeCupVisualState({
+      seed: "thinking-cup",
+      nowMs: 10_000,
+      progressOverride: 0.4,
+      sippingOverride: true,
+      thinking: true,
+    });
+    const idle = buildCoffeeCupVisualState({
+      seed: "thinking-cup",
+      nowMs: 10_000,
+      progressOverride: 0.4,
+      sippingOverride: true,
+      thinking: false,
+    });
+
+    assert.equal(thinking.sipping, false);
+    assert.equal(idle.sipping, true);
+    assert.equal(thinking.frameIndex, idle.frameIndex);
+  });
+
   it("advances cup state over session time and force-empties finished cups", () => {
     const full = buildCoffeeCupVisualState({
       seed: "session:bot-alice",

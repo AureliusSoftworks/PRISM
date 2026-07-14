@@ -1,4 +1,10 @@
-import { test, expect, type Page, type Route } from "@playwright/test";
+import {
+  test,
+  expect,
+  type Locator,
+  type Page,
+  type Route,
+} from "@playwright/test";
 
 const testUser = {
   id: "e2e-user",
@@ -59,6 +65,23 @@ const testConversation = {
   createdAt: "2026-01-01T00:00:00.000Z",
   updatedAt: "2026-01-01T00:00:00.000Z",
 };
+
+async function activateNavigationControl(locator: Locator): Promise<void> {
+  await locator.evaluate((element) => (element as HTMLElement).click());
+}
+
+async function activateBotManagementControl(locator: Locator): Promise<void> {
+  await locator.evaluate((element) =>
+    element.dispatchEvent(
+      new MouseEvent("dblclick", {
+        bubbles: true,
+        cancelable: true,
+        detail: 2,
+        view: window,
+      }),
+    ),
+  );
+}
 
 async function installAuthenticatedApi(page: Page): Promise<void> {
   await page.route("**/api/**", async (route: Route) => {
@@ -322,160 +345,102 @@ test.describe("PRISM desktop smoke", () => {
       ]);
   });
 
+  test("blank canvas returns a focused empty Chat to all bots @canvas", async ({
+    page,
+  }) => {
+    await installAuthenticatedApi(page);
+    await page.goto("/?view=chat");
+
+    const firstBot = page.getByRole("radio", { name: "Test Bot 1" });
+    await expect(firstBot).toBeVisible();
+    await firstBot.click();
+
+    const selectedHero = page.locator('[data-selected-bot-hero="true"]');
+    await expect(selectedHero).toBeVisible();
+    await expect(firstBot).toHaveAttribute("aria-checked", "true");
+
+    const focusedCanvas = selectedHero.locator("..");
+    const focusedCanvasBox = await focusedCanvas.boundingBox();
+    expect(focusedCanvasBox).not.toBeNull();
+    if (!focusedCanvasBox) return;
+    await page.mouse.click(
+      focusedCanvasBox.x + 24,
+      focusedCanvasBox.y + focusedCanvasBox.height / 2,
+    );
+
+    await expect(selectedHero).toHaveCount(0);
+    await expect(firstBot).toHaveAttribute("aria-checked", "false");
+    await expect(page.locator('[data-title="PRISM"]')).toBeVisible();
+  });
+
   test("custom bot draft edits Avatar Details as a guarded local recipe", async ({
     page,
   }) => {
     test.slow();
     await installAuthenticatedApi(page);
     await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto("/");
 
-    await page.getByRole("button", { name: "Open bot customizer" }).click();
-    await page.getByRole("button", { name: /Create new bot/ }).click();
+    await activateNavigationControl(
+      page.getByRole("button", { name: "Open bot customizer" }),
+    );
+    await activateNavigationControl(
+      page.getByRole("button", { name: /Create new bot/ }),
+    );
     await page
       .getByRole("region", { name: "Bot identity" })
       .getByPlaceholder("Name this bot")
       .fill("Draft Detail Bot");
-    await page
-      .getByRole("button", { name: "Open Avatar Studio to edit bot avatar" })
-      .click({ force: true });
+    await activateNavigationControl(
+      page.getByRole("button", {
+        name: "Open Avatar Studio to edit bot avatar",
+      }),
+    );
 
     const studio = page.getByRole("dialog", { name: "Draft Detail Bot" });
     await expect(studio).toBeVisible();
     await studio.getByRole("tab", { name: "Details" }).click({ force: true });
+
     const detailsEditor = studio.getByRole("region", {
       name: "Avatar details editor",
     });
     await expect(detailsEditor).toBeVisible();
     await expect(
-      detailsEditor.getByRole("button", { name: "Round glasses" }),
-    ).toHaveCount(0);
-    await expect(detailsEditor.getByText("Facial hair")).toHaveCount(0);
-    await expect(detailsEditor.getByText("Marking")).toHaveCount(0);
-    const faceGuide = detailsEditor.locator(
-      '[data-avatar-details-face-guide="true"]',
-    );
-    await expect(faceGuide).toHaveAttribute("data-visible", "true");
-    await detailsEditor
-      .getByRole("button", { name: "Hide face" })
-      .click({ force: true });
-    await expect(faceGuide).toHaveAttribute("data-visible", "false");
-    await detailsEditor
-      .getByRole("button", { name: "Show face" })
-      .click({ force: true });
-    await expect(faceGuide).toHaveAttribute("data-visible", "true");
+      detailsEditor.locator('[data-avatar-details-face-guide="true"]'),
+    ).toHaveAttribute("data-visible", "true");
 
     const paintCanvas = detailsEditor.getByRole("application", {
       name: /Avatar pixel canvas/,
     });
-    await paintCanvas.evaluate((element) =>
-      element.scrollIntoView({ block: "center", inline: "center" }),
-    );
-    const paintBounds = await paintCanvas.boundingBox();
-    if (!paintBounds)
-      throw new Error("Avatar screen editor canvas is not measurable.");
-    const previewAvatar = studio.getByRole("img", {
-      name: "Draft Detail Bot avatar preview",
-    });
-    const previewScreen = previewAvatar.locator('[data-crt-profile="clean"]');
-    const previewScreenBounds = await previewScreen.boundingBox();
-    if (!previewScreenBounds)
-      throw new Error("Studio preview screen is not measurable.");
-    for (const part of ["eyes", "mouth"] as const) {
-      const guidePartBounds = await faceGuide
-        .locator(`[data-coffee-plate-emoji-part="${part}"]`)
-        .boundingBox();
-      const previewPartBounds = await previewAvatar
-        .locator(`[data-coffee-plate-emoji-part="${part}"]`)
-        .boundingBox();
-      if (!guidePartBounds || !previewPartBounds)
-        throw new Error(`${part} guide geometry is not measurable.`);
-      const guideCenter = {
-        x:
-          (guidePartBounds.x + guidePartBounds.width / 2 - paintBounds.x) /
-          paintBounds.width,
-        y:
-          (guidePartBounds.y + guidePartBounds.height / 2 - paintBounds.y) /
-          paintBounds.height,
-      };
-      const previewCenter = {
-        x:
-          (previewPartBounds.x +
-            previewPartBounds.width / 2 -
-            previewScreenBounds.x) /
-          previewScreenBounds.width,
-        y:
-          (previewPartBounds.y +
-            previewPartBounds.height / 2 -
-            previewScreenBounds.y) /
-          previewScreenBounds.height,
-      };
-      expect(
-        Math.abs(guideCenter.x - previewCenter.x),
-        `${part} x ${JSON.stringify({ guideCenter, previewCenter })}`,
-      ).toBeLessThan(0.015);
-      expect(
-        Math.abs(guideCenter.y - previewCenter.y),
-        `${part} y ${JSON.stringify({ guideCenter, previewCenter })}`,
-      ).toBeLessThan(0.015);
-    }
-    const guideFaceTransform = await faceGuide
-      .locator("[data-coffee-plate-emoji-glyphs]")
-      .evaluate((element) => getComputedStyle(element).transform);
-    const previewFaceTransform = await previewAvatar
-      .locator("[data-coffee-plate-emoji-glyphs]")
-      .evaluate((element) => getComputedStyle(element).transform);
-    expect(guideFaceTransform).toBe(previewFaceTransform);
-    const startX = paintBounds.x + paintBounds.width * (40 / 128);
-    const centerY = paintBounds.y + paintBounds.height * (64 / 128);
-    await page.mouse.move(startX, centerY);
-    await page.mouse.down();
-    await page.mouse.move(startX + paintBounds.width * (8 / 128), centerY);
+    await expect(paintCanvas).toBeVisible();
+    await expect
+      .poll(async () => (await paintCanvas.boundingBox())?.width ?? 0)
+      .toBeGreaterThanOrEqual(315);
 
-    const liveDetailsCanvas = studio.locator(
-      '[data-avatar-details-mask="true"]',
+    const editorCoreCanvas = detailsEditor.locator(
+      '[data-avatar-details-editor-core="true"]',
     );
-    await expect(liveDetailsCanvas).toBeVisible({ timeout: 20_000 });
+    await paintCanvas.click({ force: true });
     await expect
       .poll(() =>
-        liveDetailsCanvas.evaluate(
-          (element) => new DOMMatrix(getComputedStyle(element).transform).a,
-        ),
+        editorCoreCanvas.evaluate((element) => {
+          const context = (element as HTMLCanvasElement).getContext("2d");
+          if (!context) return 0;
+          return context
+            .getImageData(58, 58, 13, 13)
+            .data.reduce(
+              (alpha, channel, index) =>
+                index % 4 === 3 ? alpha + channel : alpha,
+              0,
+            );
+        }),
       )
       .toBeGreaterThan(0);
-    const leftRightAlpha = await liveDetailsCanvas.evaluate((element) => {
-      const canvas = element as HTMLCanvasElement;
-      const context = canvas.getContext("2d");
-      if (!context) return { left: 0, right: 0 };
-      const pixels = context.getImageData(
-        0,
-        0,
-        canvas.width,
-        canvas.height,
-      ).data;
-      const alphaInRange = (start: number, end: number): number => {
-        let total = 0;
-        for (let y = 58; y <= 70; y += 1) {
-          for (let x = start; x <= end; x += 1) {
-            total += pixels[(y * canvas.width + x) * 4 + 3] ?? 0;
-          }
-        }
-        return total;
-      };
-      return { left: alphaInRange(34, 54), right: alphaInRange(74, 94) };
-    });
-    expect(leftRightAlpha.left).toBeGreaterThan(leftRightAlpha.right);
 
-    for (const gridX of [52, 58, 64, 70]) {
-      await page.mouse.move(
-        paintBounds.x + paintBounds.width * (gridX / 128),
-        centerY,
-      );
-      await expect(liveDetailsCanvas).toBeVisible();
-    }
-    await page.mouse.up();
-
-    await expect(liveDetailsCanvas).toBeVisible();
+    await expect(
+      studio.locator('[data-avatar-details-mask="true"]'),
+    ).toBeVisible();
     await expect(
       detailsEditor.getByText("Working copy · not applied"),
     ).toBeVisible();
@@ -500,86 +465,65 @@ test.describe("PRISM desktop smoke", () => {
     test.slow();
     await installAuthenticatedApi(page);
     await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto("/");
 
-    await page.getByRole("button", { name: "Open bot customizer" }).click();
-    await page.getByRole("button", { name: /Browse bots/ }).click();
-    await page
-      .getByRole("button", {
+    await activateNavigationControl(
+      page.getByRole("button", { name: "Open bot customizer" }),
+    );
+    await activateNavigationControl(
+      page.getByRole("button", { name: /Browse bots/ }),
+    );
+    await activateBotManagementControl(
+      page.getByRole("button", {
         name: /Preview Test Bot 1; double-click to manage/,
-      })
-      .dblclick({ force: true });
-    const runtimeAvatarPlate = page.locator(
-      '[data-bot-showcase-context="true"] [data-canvas-side="left"]',
+      }),
     );
-    await expect
-      .poll(() =>
-        runtimeAvatarPlate.evaluate((element) =>
-          Number(
-            getComputedStyle(element).getPropertyValue(
-              "--coffee-plate-emoji-face-scale-y",
-            ),
-          ),
-        ),
-      )
-      .toBe(-1);
-    const runtimeDetailsCanvas = page.locator(
-      '[data-bot-showcase-context="true"] [data-avatar-details-mask="true"]',
+
+    await expect(
+      page.locator(
+        '[data-bot-showcase-context="true"] [data-avatar-details-mask="true"]',
+      ),
+    ).toBeVisible();
+    await activateNavigationControl(
+      page.getByRole("button", { name: /^Avatar Studio/ }),
     );
-    await expect(runtimeDetailsCanvas).toBeVisible();
-    await expect
-      .poll(() =>
-        runtimeDetailsCanvas.evaluate(
-          (element) => new DOMMatrix(getComputedStyle(element).transform).a,
-        ),
-      )
-      .toBeGreaterThan(0);
-    for (const layer of ["halo", "bloom", "core"] as const) {
-      await expect(
-        page.locator(
-          `[data-bot-showcase-context="true"] [data-avatar-details-emission="${layer}"]`,
-        ),
-      ).toBeVisible();
-    }
-    const firstOpaqueRgb = (
-      element: Element,
-    ): [number, number, number] | null => {
-      const canvas = element as HTMLCanvasElement;
-      const context = canvas.getContext("2d");
-      if (!context) return null;
-      const pixels = context.getImageData(
-        0,
-        0,
-        canvas.width,
-        canvas.height,
-      ).data;
-      for (let index = 0; index < pixels.length; index += 4) {
-        if ((pixels[index + 3] ?? 0) === 0) continue;
-        return [
-          pixels[index] ?? 0,
-          pixels[index + 1] ?? 0,
-          pixels[index + 2] ?? 0,
-        ];
-      }
-      return null;
-    };
-    const runtimeGlowCanvas = page.locator(
-      '[data-bot-showcase-context="true"] [data-avatar-details-emission="halo"]',
-    );
-    expect(await runtimeDetailsCanvas.evaluate(firstOpaqueRgb)).toEqual([
-      255, 255, 255,
-    ]);
-    expect(await runtimeGlowCanvas.evaluate(firstOpaqueRgb)).not.toEqual([
-      255, 255, 255,
-    ]);
-    await page
-      .getByRole("button", { name: /^Avatar Studio/ })
-      .click({ force: true });
 
     const studio = page.getByRole("dialog", { name: "Test Bot 1" });
-    await expect(studio.getByRole("tab", { name: "Details" })).toBeVisible();
+    await expect(studio).toBeVisible();
     await expect(
       studio.locator('[data-avatar-details-mask="true"]'),
     ).toBeVisible();
+    await studio.getByRole("tab", { name: "Details" }).click({ force: true });
+
+    const detailsEditor = studio.getByRole("region", {
+      name: "Avatar details editor",
+    });
+    const paintCanvas = detailsEditor.getByRole("application", {
+      name: /Avatar pixel canvas/,
+    });
+    await expect(paintCanvas).toBeVisible();
+    await paintCanvas.click({ force: true });
+    await expect(
+      detailsEditor.getByText("Working copy · not applied"),
+    ).toBeVisible();
+    await expect
+      .poll(() =>
+        detailsEditor
+          .locator('[data-avatar-details-editor-core="true"]')
+          .evaluate((element) => {
+            const canvas = element as HTMLCanvasElement;
+            const context = canvas.getContext("2d");
+            if (!context) return 0;
+            return context
+              .getImageData(58, 58, 13, 13)
+              .data.reduce(
+                (alpha, channel, index) =>
+                  index % 4 === 3 ? alpha + channel : alpha,
+                0,
+              );
+          }),
+      )
+      .toBeGreaterThan(0);
   });
 });

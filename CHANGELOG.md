@@ -12,6 +12,53 @@ Active development happens on the `dev` branch; every release is a merge into
 
 _Staging area - nothing queued for release yet._
 
+## [0.9.0] - 2026-07-13
+
+### Added
+
+- **Babble joins Prism's voice continuum.** The new system-native hybrid speaks
+  deterministic pseudo-language with bounded clicks, chirps, pops, gates, and
+  buzz, while explicit Mute, English, Babble, and Bottish choices replace the
+  ambiguous speaker cycle.
+- **English speech now drives phoneme-aware CRT mouths.** Vowels, consonants,
+  diphthongs, closures, punctuation, and spoken numbers use distinct timed
+  mouth shapes across previews and live conversation surfaces.
+- **Filtered bot groups have a first-class Library hero.** Choosing a saved
+  group now filters its bots beneath a combined-color identity panel with the
+  group's description and management controls.
+
+### Changed
+
+- **Bottish is restored as Prism's procedural robot language.** It no longer
+  depends on native synthesis, while Pitch remains the shared character
+  control and retired Bottish Tone data stays compatible but inactive.
+- **Coffee uses a roomier first-person table and clearer review stage.** Live
+  prose stays inside avatar-aware bounds, completed sessions expose playback
+  instead of an editable composer, and the player's Prism occupies a proper
+  bottom-center seat with a nameplate and coffee pot.
+- **Avatar Details is easier to author and trust.** The production editor uses
+  a larger aligned drawing surface, shared canonical geometry, mirrored ink
+  when bots turn, and deliberate blink/thinking visibility rules.
+- **Spotlight and bot-group discovery stay on the canvas.** Search preserves
+  keyboard focus without covering bot cards, group selection filters instead
+  of navigating away, and empty Ungrouped categories disappear.
+
+### Fixed
+
+- **Coffee navigation remains usable during live sessions.** End Session takes
+  the mode-switcher position while settings and safe navbar controls remain
+  available; only session-conflicting actions are disabled.
+- **Coffee interaction and replay state clean up reliably.** The pot can be
+  released by click, pointer cancellation, Escape, phase changes, or unmount;
+  review playback keeps speech, mouth state, table timing, and player presence
+  synchronized.
+- **Coffee presentation adapts across themes and viewports.** Light-mode table
+  prose and preview orbs remain legible, action text repositions inward, and
+  compact nameplates, cups, glyphs, and avatars avoid clipping.
+- **Bot management no longer crashes during group assignment.** Add-to-group
+  captures the selected group safely, persists membership, and keeps light-mode
+  context menus opaque and readable.
+
 ## [0.8.0] - 2026-07-13
 
 ### Added

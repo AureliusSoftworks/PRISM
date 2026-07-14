@@ -3,12 +3,14 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
   buildBottishPlan,
-  buildHybridBottishPlan,
+  buildBabbleRoboticPlan,
   encodeBottishPlanWave,
+  FIXED_BOTTISH_TONE,
   fitBottishPlanToDuration,
-  mixHybridBottishMediaWave,
+  mixBabbleMediaWave,
+  normalizeBottishPlaybackProfile,
   prepareBottishVoice,
-  readBottishVoiceSynthesisClip,
+  readBabbleVoiceSynthesisClip,
   stopBottishVoice,
 } from "./bottishVoice.ts";
 
@@ -27,7 +29,7 @@ describe("Bottish speech plan", () => {
       ok: true,
       synthesis: { text: "beep boop" },
     });
-    assert.equal(await readBottishVoiceSynthesisClip(legacyResponse), null);
+    assert.equal(await readBabbleVoiceSynthesisClip(legacyResponse), null);
 
     const timedResponse = Response.json({
       ok: true,
@@ -35,7 +37,7 @@ describe("Bottish speech plan", () => {
       audioContentType: "audio/wav",
       alignment: null,
     });
-    const clip = await readBottishVoiceSynthesisClip(timedResponse);
+    const clip = await readBabbleVoiceSynthesisClip(timedResponse);
     assert.ok(clip);
     assert.deepEqual([...new Uint8Array(clip.bytes)], [1, 2, 3]);
   });
@@ -47,7 +49,7 @@ describe("Bottish speech plan", () => {
     );
   });
 
-  it("maps pitch, lilt, tone, and base voice into audible plan changes", () => {
+  it("maps Pitch and base voice into audible plan changes", () => {
     const base = buildBottishPlan("Testing voice controls.", neutral, "same");
     const changed = buildBottishPlan(
       "Testing voice controls.",
@@ -58,55 +60,46 @@ describe("Bottish speech plan", () => {
         warmth: 0,
         pace: 0,
         lilt: 0.9,
-        signal: 1,
       },
       "same"
     );
     assert.notEqual(changed.notes[0]?.frequencyHz, base.notes[0]?.frequencyHz);
     assert.notEqual(changed.notes[1]?.frequencyHz, base.notes[1]?.frequencyHz);
-    assert.notEqual(changed.notes[1]?.startMs, base.notes[1]?.startMs);
   });
 
-  it("builds deterministic hybrid accents whose intensity increases with tone", () => {
-    const organic = buildHybridBottishPlan(
+  it("builds deterministic clean Babble accents with bounded processing", () => {
+    const lowSavedTone = buildBabbleRoboticPlan(
       "A longer conversational reply with enough syllables for robot punctuation.",
       { ...neutral, signal: -1 },
       "hybrid"
     );
-    const synthetic = buildHybridBottishPlan(
+    const highSavedTone = buildBabbleRoboticPlan(
       "A longer conversational reply with enough syllables for robot punctuation.",
       { ...neutral, signal: 1 },
       "hybrid"
     );
-    const neutralTone = buildHybridBottishPlan(
-      "A longer conversational reply with enough syllables for robot punctuation.",
-      { ...neutral, signal: 0 },
-      "hybrid"
+    assert.deepEqual(
+      lowSavedTone,
+      highSavedTone,
     );
     assert.deepEqual(
-      synthetic,
-      buildHybridBottishPlan(
+      highSavedTone,
+      buildBabbleRoboticPlan(
         "A longer conversational reply with enough syllables for robot punctuation.",
         { ...neutral, signal: 1 },
         "hybrid"
       )
     );
-    assert.ok(neutralTone.accents.length >= organic.accents.length);
-    assert.ok(synthetic.accents.length >= neutralTone.accents.length);
-    assert.ok(neutralTone.gates.length >= organic.gates.length);
-    assert.ok(synthetic.gates.length >= neutralTone.gates.length);
-    assert.ok(organic.buzzDepth < neutralTone.buzzDepth);
-    assert.ok(neutralTone.buzzDepth < synthetic.buzzDepth);
-    assert.ok(organic.drive < neutralTone.drive);
-    assert.ok(neutralTone.drive < synthetic.drive);
-    assert.ok(organic.lowpassHz > neutralTone.lowpassHz);
-    assert.ok(neutralTone.lowpassHz > synthetic.lowpassHz);
-    assert.ok(organic.bitDepth > neutralTone.bitDepth);
-    assert.ok(neutralTone.bitDepth > synthetic.bitDepth);
-    assert.ok(organic.sampleHoldFrames <= neutralTone.sampleHoldFrames);
-    assert.ok(neutralTone.sampleHoldFrames <= synthetic.sampleHoldFrames);
-    assert.ok(synthetic.accents.every((accent) => accent.gain <= 0.22));
-    assert.ok(synthetic.gates.every((gate) => gate.depth <= 0.57));
+    assert.ok(highSavedTone.accents.length <= 28);
+    assert.ok(highSavedTone.accents.length >= 18);
+    assert.ok(highSavedTone.accents.every((accent) => accent.gain <= 0.16));
+    assert.ok(highSavedTone.gates.every((gate) => gate.depth <= 0.12));
+    assert.ok(highSavedTone.gates.every((gate) => gate.durationMs <= 24));
+    assert.equal(highSavedTone.drive, 0);
+    assert.equal(highSavedTone.buzzDepth, 0);
+    assert.equal(highSavedTone.lowpassHz, 20_000);
+    assert.equal(highSavedTone.bitDepth, 16);
+    assert.equal(highSavedTone.sampleHoldFrames, 1);
   });
 
   it("bakes deterministic robot accents into the media fallback WAV", () => {
@@ -119,7 +112,7 @@ describe("Bottish speech plan", () => {
         characterEndTimesSeconds: [],
       },
     });
-    const mixed = mixHybridBottishMediaWave(
+    const mixed = mixBabbleMediaWave(
       silentCarrier,
       "The robot fallback should still sound like Bottish.",
       neutral,
@@ -128,7 +121,7 @@ describe("Bottish speech plan", () => {
     );
     assert.deepEqual(
       new Uint8Array(mixed),
-      new Uint8Array(mixHybridBottishMediaWave(
+      new Uint8Array(mixBabbleMediaWave(
         silentCarrier,
         "The robot fallback should still sound like Bottish.",
         neutral,
@@ -139,11 +132,11 @@ describe("Bottish speech plan", () => {
     assert.ok(new Int16Array(mixed, 44).some((sample) => sample !== 0));
   });
 
-  it("ignores legacy Pace and Warmth values", () => {
+  it("ignores legacy Tone, Lilt, Pace, and Warmth values", () => {
     const base = buildBottishPlan("Testing removed controls.", neutral, "same");
     const legacyValues = buildBottishPlan(
       "Testing removed controls.",
-      { ...neutral, pace: 1, warmth: -1 },
+      { ...neutral, pace: 1, warmth: -1, lilt: 1, signal: -1 },
       "same"
     );
     assert.deepEqual(legacyValues, base);
@@ -155,23 +148,26 @@ describe("Bottish speech plan", () => {
     assert.ok((plan.notes[0]?.lowpassHz ?? 0) >= 6000);
   });
 
-  it("uses tone to change voice character without adding loudness or distortion", () => {
-    const organic = buildBottishPlan(
+  it("ignores persisted tone values and normalizes synthesis to the safe fixed tone", () => {
+    const lowSavedTone = buildBottishPlan(
       "Signal check",
       { ...neutral, signal: -1 },
       "signal"
     );
-    const synthetic = buildBottishPlan(
+    const highSavedTone = buildBottishPlan(
       "Signal check",
       { ...neutral, signal: 1 },
       "signal"
     );
-    assert.notEqual(organic.notes[0]?.frequencyHz, synthetic.notes[0]?.frequencyHz);
-    assert.notEqual(organic.notes[1]?.startMs, synthetic.notes[1]?.startMs);
-    assert.ok(organic.durationMs > synthetic.durationMs);
-    assert.equal(organic.notes[0]?.waveform, synthetic.notes[0]?.waveform);
-    assert.equal(organic.notes[0]?.lowpassHz, synthetic.notes[0]?.lowpassHz);
-    assert.equal(organic.notes[0]?.gain, synthetic.notes[0]?.gain);
+    assert.deepEqual(lowSavedTone, highSavedTone);
+    assert.equal(
+      normalizeBottishPlaybackProfile({ ...neutral, signal: -1 }).bottishTone,
+      FIXED_BOTTISH_TONE,
+    );
+    assert.equal(
+      normalizeBottishPlaybackProfile({ ...neutral, signal: 1 }).bottishTone,
+      FIXED_BOTTISH_TONE,
+    );
   });
 
   it("renders a playable PCM wave for the media fallback", () => {
@@ -261,10 +257,11 @@ describe("Bottish speech plan", () => {
       liveBottishEffect,
       /stopBottishVoice\(\{ preservePreparedMedia: true \}\);/
     );
-    assert.match(liveBottishEffect, /prepareBottishVoice\(\)/);
+    assert.match(liveBottishEffect, /enqueueRobotVoiceMode\(\{/);
+    assert.match(liveBottishEffect, /mode: liveRobotVoiceMode/);
     assert.doesNotMatch(
       liveBottishEffect,
-      /liveBottishRevealKeyRef\.current = revealKey;[\s\S]*?stopBottishVoice\(\);[\s\S]*?prepareBottishVoice\(\)/
+      /liveBottishRevealKeyRef\.current = revealKey;[\s\S]*?stopBottishVoice\(\);[\s\S]*?enqueueRobotVoiceMode\(\{/
     );
 
     const conversationChangeStart = pageSource.indexOf(
@@ -280,7 +277,7 @@ describe("Bottish speech plan", () => {
     );
     assert.match(
       conversationChange,
-      /stopBottishVoice\(\{[\s\S]*?preservePreparedMedia:[\s\S]*?settings\?\.voiceMode === "bottish"/
+      /stopBottishVoice\(\{[\s\S]*?preservePreparedMedia:[\s\S]*?settings\?\.voiceMode === "bottish"[\s\S]*?settings\?\.voiceMode === "babble"/
     );
   });
 

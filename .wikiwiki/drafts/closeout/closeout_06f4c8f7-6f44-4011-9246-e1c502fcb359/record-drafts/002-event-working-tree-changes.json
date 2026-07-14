@@ -1,0 +1,73 @@
+{
+  "type": "event",
+  "title": "Working tree changes",
+  "reason": "Repo has meaningful working tree changes.",
+  "audience": "developer",
+  "tags": [
+    "audience:developer",
+    "devlog"
+  ],
+  "confidence": "medium",
+  "files": [
+    "DESIGN.md",
+    "apps/api/src/__tests__/api.integration.test.ts",
+    "apps/api/src/__tests__/voices.test.ts",
+    "apps/api/src/server.ts",
+    "apps/api/src/voices.ts",
+    "apps/web/src/app/AvatarDetailsEditor.tsx",
+    "apps/web/src/app/AvatarDetailsMask.tsx",
+    "apps/web/src/app/avatar-details-editor.module.css",
+    "apps/web/src/app/avatar-details-integration.test.ts",
+    "apps/web/src/app/avatar-details-mask.module.css",
+    "apps/web/src/app/avatar-details.test.ts",
+    "apps/web/src/app/avatar-details.ts",
+    "apps/web/src/app/bottishVoice.test.ts",
+    "apps/web/src/app/bottishVoice.ts",
+    "apps/web/src/app/coffee-player-voice.test.ts",
+    "apps/web/src/app/page.tsx",
+    "apps/web/src/app/voiceEffects.ts",
+    "apps/web/src/app/voiceSettingsPreview.test.ts",
+    "docs/voices.md",
+    "e2e/smoke.spec.ts",
+    "apps/api/src/__tests__/bottish-text.test.ts",
+    "apps/api/src/bottish-text.ts",
+    "apps/web/src/app/bot-avatar-render-geometry.ts"
+  ],
+  "draft": {
+    "source": "git-diff",
+    "authority": "agent",
+    "confidence": "medium",
+    "files": [
+      "DESIGN.md",
+      "apps/api/src/__tests__/api.integration.test.ts",
+      "apps/api/src/__tests__/voices.test.ts",
+      "apps/api/src/server.ts",
+      "apps/api/src/voices.ts",
+      "apps/web/src/app/AvatarDetailsEditor.tsx",
+      "apps/web/src/app/AvatarDetailsMask.tsx",
+      "apps/web/src/app/avatar-details-editor.module.css",
+      "apps/web/src/app/avatar-details-integration.test.ts",
+      "apps/web/src/app/avatar-details-mask.module.css",
+      "apps/web/src/app/avatar-details.test.ts",
+      "apps/web/src/app/avatar-details.ts",
+      "apps/web/src/app/bottishVoice.test.ts",
+      "apps/web/src/app/bottishVoice.ts",
+      "apps/web/src/app/coffee-player-voice.test.ts",
+      "apps/web/src/app/page.tsx",
+      "apps/web/src/app/voiceEffects.ts",
+      "apps/web/src/app/voiceSettingsPreview.test.ts",
+      "docs/voices.md",
+      "e2e/smoke.spec.ts",
+      "apps/api/src/__tests__/bottish-text.test.ts",
+      "apps/api/src/bottish-text.ts",
+      "apps/web/src/app/bot-avatar-render-geometry.ts"
+    ],
+    "tags": [
+      "audience:developer",
+      "devlog"
+    ],
+    "summary": "Working tree changes",
+    "details": "TODO: capture what changed and why it matters."
+  },
+  "command_hint": "wk event add --json '{\"source\":\"git-diff\",\"authority\":\"agent\",\"confidence\":\"medium\",\"files\":[\"DESIGN.md\",\"apps/api/src/__tests__/api.integration.test.ts\",\"apps/api/src/__tests__/voices.test.ts\",\"apps/api/src/server.ts\",\"apps/api/src/voices.ts\",\"apps/web/src/app/AvatarDetailsEditor.tsx\",\"apps/web/src/app/AvatarDetailsMask.tsx\",\"apps/web/src/app/avatar-details-editor.module.css\",\"apps/web/src/app/avatar-details-integration.test.ts\",\"apps/web/src/app/avatar-details-mask.module.css\",\"apps/web/src/app/avatar-details.test.ts\",\"apps/web/src/app/avatar-details.ts\",\"apps/web/src/app/bottishVoice.test.ts\",\"apps/web/src/app/bottishVoice.ts\",\"apps/web/src/app/coffee-player-voice.test.ts\",\"apps/web/src/app/page.tsx\",\"apps/web/src/app/voiceEffects.ts\",\"apps/web/src/app/voiceSettingsPreview.test.ts\",\"docs/voices.md\",\"e2e/smoke.spec.ts\",\"apps/api/src/__tests__/bottish-text.test.ts\",\"apps/api/src/bottish-text.ts\",\"apps/web/src/app/bot-avatar-render-geometry.ts\"],\"tags\":[\"audience:developer\",\"devlog\"],\"summary\":\"Working tree changes\",\"details\":\"TODO: capture what changed and why it matters.\"}'"
+}

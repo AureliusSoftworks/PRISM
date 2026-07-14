@@ -22,6 +22,28 @@ describe("coffeeSeatPlateGlyph", () => {
     assert.equal(coffeeSeatMouthShapeFromVisibleLength(3, speech), firstShape);
   });
 
+  it("uses phoneme-aware English visemes without changing robot rhythm", () => {
+    assert.equal(coffeeSeatMouthShapeFromVisibleLength(1, "lamp", true), "at");
+    assert.deepEqual(
+      coffeeSeatPlateGlyph(
+        "warm",
+        coffeeSeatMouthShapeFromVisibleLength(1, "lamp", true),
+      ),
+      { text: ":@", rotateDeg: 90 },
+    );
+    assert.deepEqual(
+      coffeeSeatPlateGlyph(
+        "warm",
+        coffeeSeatMouthShapeFromVisibleLength(1, "river", true),
+      ),
+      { text: ":o", rotateDeg: 90 },
+    );
+    assert.equal(
+      coffeeSeatMouthShapeFromVisibleLength(1, "lamp", false),
+      "speech-closed",
+    );
+  });
+
   it("keeps joyful and warm closed-mouth faces distinct", () => {
     assert.deepEqual(coffeeSeatPlateGlyph("happy", "closed"), {
       text: ":)",
@@ -122,7 +144,7 @@ describe("coffeeSeatPlateGlyph", () => {
         faceScaleY: "1",
         seatHorizontalSide: 1,
       }).reason,
-      "cup-visual-sip"
+      "cup-visual-sip",
     );
     assert.equal(
       resolveCoffeeSeatSipFacePresentation({
@@ -134,7 +156,7 @@ describe("coffeeSeatPlateGlyph", () => {
         faceScaleY: "1",
         seatHorizontalSide: 1,
       }).reason,
-      "none"
+      "none",
     );
   });
 
@@ -167,7 +189,7 @@ describe("coffeeSeatPlateGlyph", () => {
         completedSipAnimationDurationMs: null,
         cupSipping: true,
       }),
-      true
+      true,
     );
   });
 
@@ -181,7 +203,7 @@ describe("coffeeSeatPlateGlyph", () => {
         completedSipAnimationAgeMs: releaseAtMs,
         completedSipAnimationDurationMs: durationMs,
       }),
-      true
+      true,
     );
     assert.equal(
       coffeeSeatSipFaceActive({
@@ -189,7 +211,7 @@ describe("coffeeSeatPlateGlyph", () => {
         completedSipAnimationAgeMs: releaseAtMs + 1,
         completedSipAnimationDurationMs: durationMs,
       }),
-      false
+      false,
     );
     assert.equal(
       coffeeSeatSipFaceActive({
@@ -197,7 +219,7 @@ describe("coffeeSeatPlateGlyph", () => {
         completedSipAnimationAgeMs: releaseAtMs,
         completedSipAnimationDurationMs: durationMs,
       }),
-      true
+      true,
     );
     assert.equal(
       coffeeSeatSipFaceActive({
@@ -205,7 +227,7 @@ describe("coffeeSeatPlateGlyph", () => {
         completedSipAnimationAgeMs: 1000,
         completedSipAnimationDurationMs: 1000,
       }),
-      false
+      false,
     );
   });
 
@@ -217,7 +239,7 @@ describe("coffeeSeatPlateGlyph", () => {
         completedSipAnimationDurationMs: 1000,
         cupSipping: true,
       }),
-      false
+      false,
     );
   });
 
@@ -230,7 +252,7 @@ describe("coffeeSeatPlateGlyph", () => {
     ] as const) {
       assert.equal(
         coffeeSeatSipMouthOffsetY({ cupSide, faceScaleY, seatHorizontalSide }),
-        expected
+        expected,
       );
       assert.equal(
         resolveCoffeeSeatSipFacePresentation({
@@ -242,33 +264,58 @@ describe("coffeeSeatPlateGlyph", () => {
           faceScaleY,
           seatHorizontalSide,
         }).mouthOffsetY,
-        expected
+        expected,
       );
     }
   });
 
   it("drops the sip mouth toward the cup rim instead of lifting it away", () => {
-    assert.equal(coffeeSeatSipMouthOffsetX({ seatHorizontalSide: -1 }), "0.17em");
-    assert.equal(coffeeSeatSipMouthOffsetX({ seatHorizontalSide: 1 }), "0.17em");
-    assert.equal(coffeeSeatSipMouthOffsetX({ seatHorizontalSide: 0 }), "0.13em");
+    assert.equal(
+      coffeeSeatSipMouthOffsetX({ seatHorizontalSide: -1 }),
+      "0.17em",
+    );
+    assert.equal(
+      coffeeSeatSipMouthOffsetX({ seatHorizontalSide: 1 }),
+      "0.17em",
+    );
+    assert.equal(
+      coffeeSeatSipMouthOffsetX({ seatHorizontalSide: 0 }),
+      "0.13em",
+    );
   });
 
   it("keeps center-band sip mouths on the cup side even when the top head flips gaze", () => {
     assert.equal(
-      coffeeSeatSipMouthOffsetY({ cupSide: "left", faceScaleY: "1", seatHorizontalSide: 0 }),
-      "0.36em"
+      coffeeSeatSipMouthOffsetY({
+        cupSide: "left",
+        faceScaleY: "1",
+        seatHorizontalSide: 0,
+      }),
+      "0.36em",
     );
     assert.equal(
-      coffeeSeatSipMouthOffsetY({ cupSide: "left", faceScaleY: "-1", seatHorizontalSide: 0 }),
-      "0.36em"
+      coffeeSeatSipMouthOffsetY({
+        cupSide: "left",
+        faceScaleY: "-1",
+        seatHorizontalSide: 0,
+      }),
+      "0.36em",
     );
     assert.equal(
-      coffeeSeatSipMouthOffsetY({ cupSide: "right", faceScaleY: "1", seatHorizontalSide: 0 }),
-      "-0.36em"
+      coffeeSeatSipMouthOffsetY({
+        cupSide: "right",
+        faceScaleY: "1",
+        seatHorizontalSide: 0,
+      }),
+      "-0.36em",
     );
     assert.equal(
-      coffeeSeatSipMouthOffsetY({ cupSide: "right", faceScaleY: "-1", seatHorizontalSide: 0 }),
-      "-0.36em"
+      coffeeSeatSipMouthOffsetY({
+        cupSide: "right",
+        faceScaleY: "-1",
+        seatHorizontalSide: 0,
+      }),
+      "-0.36em",
     );
   });
 });

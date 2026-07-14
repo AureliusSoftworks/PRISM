@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  crtSpeechMouthShapeAtElapsedMs,
   crtSpeechMouthShapeAtTextCursor,
+  crtSpeechMouthShapeFromVisibleTextProgress,
+  englishCrtVisemeTimeline,
   normalizeCrtSpeechText,
   zenLiveBotMouthOpenFromRevealProgress,
   zenLiveBotMouthShapeForTalkingState,
@@ -40,83 +43,230 @@ function collectZenLiveMouthShapes(
     Parameters<typeof zenLiveBotMouthShapeFromRevealProgress>[0],
     "nowMs"
   >,
-  phaseCount: number
+  phaseCount: number,
 ) {
   return Array.from({ length: phaseCount }, (_, index) =>
     zenLiveBotMouthShapeFromRevealProgress({
       ...input,
       nowMs: input.firstSeenAtMs + input.startDelayMs + input.phaseMs! * index,
-    })
+    }),
   );
 }
 
-test("CRT speech maps English letters onto distinct abrupt viseme frames", () => {
-  const text = "may fit a round clock";
+test("CRT speech maps core English phoneme groups onto distinct visemes", () => {
+  const text = "may fit a loud river clock";
   const at = (character: string) =>
-    crtSpeechMouthShapeAtTextCursor({ text, cursorIndex: text.indexOf(character) });
+    crtSpeechMouthShapeAtTextCursor({
+      text,
+      cursorIndex: text.indexOf(character),
+    });
 
   assert.equal(at("m"), "speech-closed");
+  assert.equal(at("f"), "dot");
   assert.equal(at("i"), "narrow");
   assert.equal(at("a"), "open-wide");
   assert.equal(at("u"), "open-round");
-  assert.equal(at("c"), "open-small");
+  assert.equal(at("l"), "at");
+  assert.equal(at("r"), "narrow");
+  assert.equal(at("c"), "open-round");
 });
 
-test("CRT speech gives digraphs precedence over individual letters", () => {
+test("English CRT visemes expose the intended mouth glyph vocabulary", () => {
+  assert.equal(
+    crtSpeechMouthShapeFromVisibleTextProgress({
+      text: "lamp",
+      visibleLength: 1,
+    }),
+    "at",
+  );
+  assert.equal(
+    crtSpeechMouthShapeFromVisibleTextProgress({
+      text: "river",
+      visibleLength: 1,
+    }),
+    "narrow",
+  );
+  assert.equal(
+    crtSpeechMouthShapeFromVisibleTextProgress({
+      text: "map",
+      visibleLength: 1,
+    }),
+    "speech-closed",
+  );
+  assert.equal(
+    crtSpeechMouthShapeFromVisibleTextProgress({
+      text: "face",
+      visibleLength: 1,
+    }),
+    "dot",
+  );
+});
+
+test("English preview visemes hold vowels longer than consonants", () => {
+  const text = "lamp";
+  const at = (elapsedMs: number) =>
+    crtSpeechMouthShapeAtElapsedMs({
+      text,
+      elapsedMs,
+      durationMs: 1_000,
+    });
+  assert.equal(at(0), "at");
+  assert.equal(at(300), "open-wide");
+  assert.equal(at(550), "open-wide");
+  assert.equal(at(700), "speech-closed");
+});
+
+test("English viseme timelines give vowels more time than closures", () => {
+  const beats = englishCrtVisemeTimeline("map");
+  const vowel = beats.find((beat) => beat.kind === "vowel");
+  const consonants = beats.filter((beat) => beat.kind === "consonant");
+  assert.ok(vowel);
+  assert.ok(consonants.length > 0);
+  for (const consonant of consonants) {
+    assert.ok(vowel.durationUnits > consonant.durationUnits);
+  }
+});
+
+test("English diphthongs transition through their opening and closing shapes", () => {
+  const nonRestShapes = (text: string) =>
+    englishCrtVisemeTimeline(text)
+      .filter((beat) => beat.kind !== "rest")
+      .map((beat) => beat.shape);
+  assert.equal(
+    nonRestShapes("day").join(" "),
+    "open-wide open-wide narrow",
+  );
+  assert.equal(
+    nonRestShapes("out").join(" "),
+    "open-wide open-round open-small",
+  );
+  assert.equal(
+    nonRestShapes("boy").join(" "),
+    "speech-closed open-round narrow",
+  );
+});
+
+test("CRT speech gives consonant and vowel graphemes precedence", () => {
   for (const [text, cursorIndex, expected] of [
-    ["thin", 0, "narrow"],
+    ["thin", 0, "at"],
     ["ship", 0, "narrow"],
     ["chip", 0, "narrow"],
-    ["phone", 0, "narrow"],
+    ["phone", 0, "dot"],
     ["green", 2, "narrow"],
     ["food", 1, "open-round"],
-    ["out", 0, "open-round"],
-    ["owl", 0, "open-round"],
     ["queen", 0, "open-round"],
     ["what", 0, "open-round"],
     ["ahead", 0, "open-wide"],
   ] as const) {
-    assert.equal(crtSpeechMouthShapeAtTextCursor({ text, cursorIndex }), expected);
-    assert.equal(crtSpeechMouthShapeAtTextCursor({ text, cursorIndex: cursorIndex + 1 }), expected);
+    assert.equal(
+      crtSpeechMouthShapeAtTextCursor({ text, cursorIndex }),
+      expected,
+    );
+    assert.equal(
+      crtSpeechMouthShapeAtTextCursor({ text, cursorIndex: cursorIndex + 1 }),
+      expected,
+    );
   }
+  assert.equal(
+    crtSpeechMouthShapeAtTextCursor({ text: "out", cursorIndex: 0 }),
+    "open-wide",
+  );
+  assert.equal(
+    crtSpeechMouthShapeAtTextCursor({ text: "out", cursorIndex: 1 }),
+    "open-round",
+  );
+  assert.equal(
+    crtSpeechMouthShapeAtTextCursor({ text: "owl", cursorIndex: 0 }),
+    "open-wide",
+  );
+  assert.equal(
+    crtSpeechMouthShapeAtTextCursor({ text: "owl", cursorIndex: 1 }),
+    "open-round",
+  );
+});
+
+test("neutral consonants anticipate the next vowel without overriding closures", () => {
+  assert.equal(
+    crtSpeechMouthShapeAtTextCursor({ text: "cat", cursorIndex: 0 }),
+    "open-wide",
+  );
+  assert.equal(
+    crtSpeechMouthShapeAtTextCursor({ text: "ship", cursorIndex: 0 }),
+    "narrow",
+  );
+  assert.equal(
+    crtSpeechMouthShapeAtTextCursor({ text: "map", cursorIndex: 0 }),
+    "speech-closed",
+  );
+});
+
+test("punctuation rests longer than spaces and closes the mouth", () => {
+  const beats = englishCrtVisemeTimeline("hi, you!");
+  const space = beats.find((beat) => beat.sourceStart === 3);
+  const comma = beats.find((beat) => beat.sourceStart === 2);
+  const terminal = beats.find((beat) => beat.sourceStart === 7);
+  assert.equal(space?.shape, "closed");
+  assert.equal(comma?.shape, "closed");
+  assert.equal(terminal?.shape, "closed");
+  assert.ok((comma?.durationUnits ?? 0) > (space?.durationUnits ?? 0));
+  assert.ok((terminal?.durationUnits ?? 0) > (comma?.durationUnits ?? 0));
+});
+
+test("numbers expand into deterministic spoken viseme timelines", () => {
+  const first = englishCrtVisemeTimeline("42");
+  const second = englishCrtVisemeTimeline("42");
+  assert.deepEqual(first, second);
+  assert.ok(first.length > 2);
+  assert.ok(first.every((beat) => beat.sourceStart === 0 || beat.sourceStart === 1));
+  assert.ok(first.some((beat) => beat.shape === "dot"));
+  assert.ok(first.some((beat) => beat.shape === "open-round"));
 });
 
 test("CRT speech normalizes case and accented Latin letters", () => {
   assert.equal(
     crtSpeechMouthShapeAtTextCursor({ text: "É", cursorIndex: 0 }),
-    "narrow"
+    "narrow",
   );
   assert.equal(
     crtSpeechMouthShapeAtTextCursor({ text: "Á", cursorIndex: 0 }),
-    "open-wide"
+    "open-wide",
   );
   assert.equal(
-    crtSpeechMouthShapeAtTextCursor({ text: "Ü", cursorIndex: 0 }),
-    "open-round"
+    crtSpeechMouthShapeAtTextCursor({ text: "flüte", cursorIndex: 2 }),
+    "open-round",
   );
 });
 
 test("CRT speech restores the mood mouth for whitespace and punctuation", () => {
   for (const text of [" ", ",", ".", "!", "?", "—", "🙂"]) {
-    assert.equal(crtSpeechMouthShapeAtTextCursor({ text, cursorIndex: 0 }), "closed");
+    assert.equal(
+      crtSpeechMouthShapeAtTextCursor({ text, cursorIndex: 0 }),
+      "closed",
+    );
   }
 });
 
 test("CRT speech clamps invalid cursors and handles empty input", () => {
-  assert.equal(crtSpeechMouthShapeAtTextCursor({ text: "", cursorIndex: 4 }), "closed");
+  assert.equal(
+    crtSpeechMouthShapeAtTextCursor({ text: "", cursorIndex: 4 }),
+    "closed",
+  );
   assert.equal(
     crtSpeechMouthShapeAtTextCursor({ text: "map", cursorIndex: Number.NaN }),
-    "speech-closed"
+    "speech-closed",
   );
   assert.equal(
     crtSpeechMouthShapeAtTextCursor({ text: "map", cursorIndex: 99 }),
-    "speech-closed"
+    "speech-closed",
   );
 });
 
 test("CRT speech uses a deterministic non-Latin fallback", () => {
   const first = crtSpeechMouthShapeAtTextCursor({ text: "界", cursorIndex: 0 });
-  const second = crtSpeechMouthShapeAtTextCursor({ text: "界", cursorIndex: 0 });
+  const second = crtSpeechMouthShapeAtTextCursor({
+    text: "界",
+    cursorIndex: 0,
+  });
   assert.equal(first, second);
   assert.notEqual(first, "closed");
   assert.notEqual(first, "speech-closed");
@@ -138,7 +288,9 @@ test("Coffee-visible progress advances the transition graph every character", ()
 
 test("Zen live mouth stays bounded for late phases in long replies", () => {
   const input = {
-    tokens: Array.from({ length: 240 }, (_, index) => (index % 2 === 0 ? "word" : " ")),
+    tokens: Array.from({ length: 240 }, (_, index) =>
+      index % 2 === 0 ? "word" : " ",
+    ),
     visibleTokenCount: 240,
     firstSeenAtMs: 1_000,
     startDelayMs: 0,
@@ -150,14 +302,14 @@ test("Zen live mouth stays bounded for late phases in long replies", () => {
   });
 
   assert.ok(
-      lateShape === "closed" ||
+    lateShape === "closed" ||
       lateShape === "speech-closed" ||
       lateShape === "dot" ||
       lateShape === "narrow" ||
       lateShape === "open-small" ||
       lateShape === "open-wide" ||
       lateShape === "open-round" ||
-      lateShape === "at"
+      lateShape === "at",
   );
 });
 
@@ -170,7 +322,7 @@ test("Zen live mouth waits until spoken content is visible", () => {
       firstSeenAtMs: 1_000,
       startDelayMs: 0,
     }),
-    null
+    null,
   );
   assert.equal(
     zenLiveBotMouthOpenFromRevealProgress({
@@ -180,7 +332,7 @@ test("Zen live mouth waits until spoken content is visible", () => {
       firstSeenAtMs: 1_000,
       startDelayMs: 120,
     }),
-    null
+    null,
   );
 });
 
@@ -198,15 +350,53 @@ test("Zen live mouth walks the currently revealed word at the CRT phase cadence"
   for (let index = 1; index < shapes.length; index += 1) {
     assert.notEqual(shapes[index], shapes[index - 1]);
   }
-  assert.equal(zenLiveBotMouthOpenFromRevealProgress({ ...input, nowMs: 1_000 }), false);
+  assert.equal(
+    zenLiveBotMouthOpenFromRevealProgress({ ...input, nowMs: 1_000 }),
+    false,
+  );
+});
+
+test("English Zen speech follows phoneme timing while robot speech keeps its transition rhythm", () => {
+  const input = {
+    tokens: ["lamp "],
+    visibleTokenCount: 1,
+    firstSeenAtMs: 1_000,
+    startDelayMs: 0,
+    phaseMs: 120,
+  };
+  assert.equal(
+    zenLiveBotMouthShapeFromRevealProgress({
+      ...input,
+      nowMs: 1_000,
+      phonemeAware: true,
+    }),
+    "at",
+  );
+  assert.equal(
+    zenLiveBotMouthShapeFromRevealProgress({
+      ...input,
+      nowMs: 1_120,
+      phonemeAware: true,
+    }),
+    "open-wide",
+  );
+  assert.equal(
+    zenLiveBotMouthShapeFromRevealProgress({
+      ...input,
+      nowMs: 1_000,
+    }),
+    "speech-closed",
+  );
 });
 
 test("speech normalization removes code, URLs, and markdown targets", () => {
   assert.equal(
     normalizeCrtSpeechText(
-      "Say `hidden()` [Mira](prism-bot://bot-1) https://example.com ```secret``` now"
-    ).replace(/\s+/gu, " ").trim(),
-    "Say Mira now"
+      "Say `hidden()` [Mira](prism-bot://bot-1) https://example.com ```secret``` now",
+    )
+      .replace(/\s+/gu, " ")
+      .trim(),
+    "Say Mira now",
   );
 });
 
@@ -215,7 +405,7 @@ test("Zen live mouth follows the shape-aware transition graph", () => {
     zenLiveBotMouthShapeFromSpeechPhase({
       speechSeedText: "Coffee can reuse the Zen mouth rhythm",
       phaseIndex,
-    })
+    }),
   );
   const allowedTransitions = {
     "speech-closed": ["open-wide", "open-small", "dot"],

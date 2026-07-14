@@ -24,7 +24,7 @@ Record: `article_e250c780-976e-443d-9cc5-5199c0d38422`
 
 ## [Features and workflows](./articles/features-and-workflows.md)
 
-The main Prism lanes and the latest settings, conversation, voiced Bottish, Coffee, and interaction workflows.
+The main Prism lanes and the latest settings, conversation, four-mode voice, Coffee, and interaction workflows.
 
 Categories: `Product`
 

@@ -9,7 +9,7 @@ Categories: `Product`, `Guides`
 
 Aliases: `Bot groups`, `Marketplace installs`, `Bot library groups`
 
-Files: `apps/web/src/app/page.tsx`, `apps/web/src/app/page.module.css`, `apps/web/src/app/botLibraryGroupFilter.ts`, `apps/web/src/app/botLibraryShowcase.test.ts`, `apps/web/src/app/context-menu-selection-feedback.test.ts`, `apps/api/src/voice-preview-line.ts`, `packages/shared/src/botPower.ts`
+Files: `apps/web/src/app/page.tsx`, `apps/web/src/app/page.module.css`, `apps/web/src/app/bottishVoice.ts`, `apps/web/src/app/botLibraryGroupFilter.ts`, `apps/web/src/app/botLibraryShowcase.test.ts`, `apps/web/src/app/context-menu-selection-feedback.test.ts`, `apps/api/src/voice-preview-line.ts`, `packages/shared/src/audioVoice.ts`, `packages/shared/src/botPower.ts`
 
 ## Bot Library Groups
 
@@ -21,9 +21,9 @@ A focused group card is a drill-in view, not a dead end. Clicking open canvas ou
 
 ## Selected Bot Preview
 
-Selecting a bot opens a large persona preview on the left while the library remains available. The preview itself is intentionally silent. Use the English or Bottish buttons below it to hear the bot, so opening menus or interacting with the surrounding library never triggers surprise speech.
+Selecting a bot opens a large persona preview on the left while the library remains available. The preview itself is intentionally silent. Use the English, Babble, or Bottish buttons below it to hear the bot, so opening menus or interacting with the surrounding library never triggers surprise speech.
 
-An English click clears the previous generated sample, creates a fresh persona-specific line, waits for synthesis, and then plays it automatically. The button shows generation, playback, completion, and error feedback. Preview prompts reject microphone checks, audio checks, and generic testing language.
+English creates a fresh persona-specific line and plays clean system speech. Babble speaks that line as system-voiced gibberish with robot accents. If the system voice is not ready, the Babble preview reports that it is loading or unavailable and allows retry; it never silently previews Bottish. Bottish plays the restored procedural robot language directly. Preview prompts reject microphone checks, audio checks, and generic testing language.
 
 ## Context Menus
 

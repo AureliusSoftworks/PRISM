@@ -72,6 +72,50 @@ describe("BotAvatarDetailsV1", () => {
     );
   });
 
+  it("keeps legacy screens unchanged and persists only an opted-in blink ink setting", () => {
+    const legacy = details([stamp("freckles")]);
+    assert.deepEqual(parseBotAvatarDetailsV1(legacy), legacy);
+
+    assert.deepEqual(
+      parseBotAvatarDetailsV1({
+        ...legacy,
+        screen: { ...legacy.screen, hideInkDuringBlink: true },
+      }).screen,
+      {
+        stamps: [stamp("freckles")],
+        paintMaskBase64: null,
+        hideInkDuringBlink: true,
+      }
+    );
+
+    assert.deepEqual(
+      parseBotAvatarDetailsV1({
+        ...legacy,
+        screen: { ...legacy.screen, hideInkDuringBlink: false },
+      }),
+      legacy
+    );
+  });
+
+  it("rejects invalid blink ink settings and unknown screen keys", () => {
+    assert.throws(
+      () =>
+        parseBotAvatarDetailsV1({
+          ...details(),
+          screen: { ...details().screen, hideInkDuringBlink: "yes" },
+        }),
+      /hideInkDuringBlink must be a boolean/i
+    );
+    assert.throws(
+      () =>
+        parseBotAvatarDetailsV1({
+          ...details(),
+          screen: { ...details().screen, hideInkDuringBlink: true, extra: true },
+        }),
+      /contain exactly/i
+    );
+  });
+
   it("rejects non-v1, extra keys, rotation, unknown stamps, and invalid transforms", () => {
     assert.throws(
       () => parseBotAvatarDetailsV1({ ...details(), version: 2 }),

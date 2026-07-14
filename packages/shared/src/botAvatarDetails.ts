@@ -153,6 +153,8 @@ export interface BotAvatarDetailsV1 {
      * most-significant bit first, encoded as canonical standard padded Base64.
      */
     paintMaskBase64: string | null;
+    /** Hide stamps and paint only while the avatar is blinking. */
+    hideInkDuringBlink?: true;
   };
 }
 
@@ -169,6 +171,11 @@ const BASE64_VALUE_BY_CHARACTER = new Map(
 );
 const ROOT_KEYS = ["screen", "version"] as const;
 const SCREEN_KEYS = ["paintMaskBase64", "stamps"] as const;
+const SCREEN_KEYS_WITH_BLINK_INK = [
+  "hideInkDuringBlink",
+  "paintMaskBase64",
+  "stamps",
+] as const;
 const STAMP_KEYS = ["id", "offsetX", "offsetY", "scalePct"] as const;
 const UTF8_ENCODER = new TextEncoder();
 const STAMP_DEFINITION_BY_ID = new Map(
@@ -468,11 +475,23 @@ export function parseBotAvatarDetailsV1(value: unknown): BotAvatarDetailsV1 {
   if (value.version !== BOT_AVATAR_DETAILS_VERSION) {
     fail(`version must be ${BOT_AVATAR_DETAILS_VERSION}.`);
   }
-  if (!isRecord(value.screen) || !hasExactKeys(value.screen, SCREEN_KEYS)) {
-    fail("screen must contain exactly stamps and paintMaskBase64.");
+  if (
+    !isRecord(value.screen) ||
+    (!hasExactKeys(value.screen, SCREEN_KEYS) &&
+      !hasExactKeys(value.screen, SCREEN_KEYS_WITH_BLINK_INK))
+  ) {
+    fail(
+      "screen must contain exactly stamps and paintMaskBase64, with optional hideInkDuringBlink."
+    );
   }
   if (!Array.isArray(value.screen.stamps)) {
     fail("screen.stamps must be an array.");
+  }
+  if (
+    "hideInkDuringBlink" in value.screen &&
+    typeof value.screen.hideInkDuringBlink !== "boolean"
+  ) {
+    fail("screen.hideInkDuringBlink must be a boolean when provided.");
   }
   const stamps = value.screen.stamps.map(readStamp);
   const ids = new Set<BotAvatarDetailStampId>();
@@ -519,6 +538,9 @@ export function parseBotAvatarDetailsV1(value: unknown): BotAvatarDetailsV1 {
     screen: {
       stamps,
       paintMaskBase64,
+      ...(value.screen.hideInkDuringBlink === true
+        ? { hideInkDuringBlink: true as const }
+        : {}),
     },
   };
   const canonicalJson = JSON.stringify(parsed);

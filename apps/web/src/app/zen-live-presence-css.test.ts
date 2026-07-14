@@ -34,7 +34,10 @@ const opaquePaintMaskNames = [
   "bot-frame-weathered-ring-mask.png",
   "bot-frame-weathered-gap-mask.png",
 ] as const;
-const css = readFileSync(cssPath, "utf8");
+const css = readFileSync(cssPath, "utf8")
+  .replace(/\s+/gu, " ")
+  .replace(/\(\s+/gu, "(")
+  .replace(/\s+\)/gu, ")");
 const pageSource = readFileSync(pagePath, "utf8").replace(/\s+/gu, " ");
 const coffeeSeatPlateEmojiSource = readFileSync(coffeeSeatPlateEmojiPath, "utf8");
 
@@ -2456,9 +2459,13 @@ describe("Zen live presence CSS", () => {
 
   it("moves refresh to the permanent recycle navbar button", () => {
     assert.match(pageSource, /Recycle,/);
-    assert.match(pageSource, /onClick=\{\(\) => runAction\(refreshPrismFromNavbar\)\}/);
+    assert.match(pageSource, /onClick=\{\(\) => runAsyncAction\(refreshPrismFromNavbar\)\}/);
     assert.match(pageSource, /aria-label="Refresh Prism"/);
-    assert.match(pageSource, /window\.location\.reload\(\)/);
+    assert.match(
+      pageSource,
+      /await refreshAll\(\{ includeModels: false \}\);/
+    );
+    assert.doesNotMatch(pageSource, /window\.location\.reload\(\)/);
     assert.doesNotMatch(pageSource, /createBuiltInRefreshCommand/);
     assert.doesNotMatch(pageSource, /id:\s*"builtin:\/refresh"/);
     assert.doesNotMatch(pageSource, /renderNavbarRefreshSplash/);

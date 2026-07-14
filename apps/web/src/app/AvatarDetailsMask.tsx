@@ -17,6 +17,7 @@ export interface AvatarDetailsMaskProps {
   details: AvatarDetailsV1 | null | undefined;
   color: string | null | undefined;
   faceGeometry?: Partial<AvatarDetailsFaceGeometry> | null;
+  hiddenForBlink?: boolean;
 }
 
 /**
@@ -28,6 +29,7 @@ export function AvatarDetailsMask({
   details,
   color,
   faceGeometry,
+  hiddenForBlink = false,
 }: AvatarDetailsMaskProps): React.JSX.Element | null {
   const haloCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const bloomCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -78,6 +80,9 @@ export function AvatarDetailsMask({
         width={AVATAR_DETAILS_CANVAS_SIZE}
         height={AVATAR_DETAILS_CANVAS_SIZE}
         style={canvasStyle}
+        data-avatar-details-hidden-for-blink={
+          hiddenForBlink ? "true" : undefined
+        }
         data-avatar-details-emission="halo"
         aria-hidden="true"
       />
@@ -87,6 +92,9 @@ export function AvatarDetailsMask({
         width={AVATAR_DETAILS_CANVAS_SIZE}
         height={AVATAR_DETAILS_CANVAS_SIZE}
         style={canvasStyle}
+        data-avatar-details-hidden-for-blink={
+          hiddenForBlink ? "true" : undefined
+        }
         data-avatar-details-emission="bloom"
         aria-hidden="true"
       />
@@ -96,6 +104,9 @@ export function AvatarDetailsMask({
         width={AVATAR_DETAILS_CANVAS_SIZE}
         height={AVATAR_DETAILS_CANVAS_SIZE}
         style={canvasStyle}
+        data-avatar-details-hidden-for-blink={
+          hiddenForBlink ? "true" : undefined
+        }
         data-avatar-details-mask="true"
         data-avatar-details-emission="core"
         data-avatar-details-rendering="nearest-neighbor"

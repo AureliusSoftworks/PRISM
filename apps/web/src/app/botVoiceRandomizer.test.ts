@@ -8,7 +8,7 @@ import {
 } from "./botVoiceRandomizer.ts";
 
 describe("bot voice randomizer", () => {
-  it("randomizes the exposed Bottish controls and installed voice identity", () => {
+  it("randomizes exposed voice controls while keeping Bottish tone fixed", () => {
     const values = [0.99, 0, 0.25, 0.5, 0.75, 0.99];
     const profile = randomizeBotAudioVoiceProfile(
       DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
@@ -20,7 +20,10 @@ describe("bot voice randomizer", () => {
     assert.equal(profile.baseVoiceId, "voice-1");
     assert.equal(profile.pitch, -0.35);
     assert.equal(profile.lilt, 0);
-    assert.equal(profile.bottishTone, 0.35);
+    assert.equal(
+      profile.bottishTone,
+      DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1.bottishTone,
+    );
     assert.equal(profile.texture.preset, "clean");
     assert.equal(profile.enabled, true);
   });

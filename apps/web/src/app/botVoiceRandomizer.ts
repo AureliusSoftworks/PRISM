@@ -29,7 +29,7 @@ export function randomizeBotAudioVoiceProfile(
     baseVoiceId: choose(BOT_AUDIO_VOICE_IDS, random),
     pitch: randomControl(random),
     lilt: randomControl(random),
-    bottishTone: randomControl(random),
+    bottishTone: DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1.bottishTone,
     texture: DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1.texture,
     ...(engine === "builtin"
       ? { systemVoiceName: identity }

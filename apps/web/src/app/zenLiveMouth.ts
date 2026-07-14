@@ -36,7 +36,9 @@ const ZEN_LIVE_TALKING_MOUTH_TRANSITIONS = {
   readonly ZenLiveTalkingMouthShape[]
 >;
 
-function zenLiveMouthShapeIsOpen(mouthShape: ZenLiveTalkingMouthShape): boolean {
+function zenLiveMouthShapeIsOpen(
+  mouthShape: ZenLiveTalkingMouthShape,
+): boolean {
   return (
     mouthShape === "open-small" ||
     mouthShape === "open-wide" ||
@@ -71,27 +73,6 @@ function zenLiveTalkingMouthShapeAtPhase(
   return mouthShape;
 }
 
-const CRT_SPEECH_DIGRAPH_SHAPES: Readonly<Record<string, ZenLiveBotMouthShape>> = {
-  ah: "open-wide",
-  ai: "open-wide",
-  ay: "open-wide",
-  ch: "narrow",
-  ea: "narrow",
-  ee: "narrow",
-  ei: "narrow",
-  ey: "narrow",
-  ie: "narrow",
-  ph: "narrow",
-  sh: "narrow",
-  th: "narrow",
-  zh: "narrow",
-  oo: "open-round",
-  ou: "open-round",
-  ow: "open-round",
-  qu: "open-round",
-  wh: "open-round",
-};
-
 const CRT_SPEECH_FALLBACK_SHAPES = [
   "narrow",
   "open-small",
@@ -109,28 +90,444 @@ function zenLiveMouthHashText(text: string): number {
 }
 
 function normalizedCrtSpeechCharacters(text: string): string[] {
-  return Array.from(
-    text
-      .normalize("NFD")
-      .replace(/\p{M}/gu, "")
-      .toLowerCase()
-  );
+  return Array.from(text.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase());
 }
 
-function crtSpeechDigraphShape(
-  characters: readonly string[],
-  cursorIndex: number
+export type EnglishCrtVisemeBeat = {
+  shape: ZenLiveBotMouthShape;
+  sourceStart: number;
+  sourceEnd: number;
+  durationUnits: number;
+  kind: "consonant" | "rest" | "vowel";
+};
+
+type EnglishCrtVisemeStep = Pick<
+  EnglishCrtVisemeBeat,
+  "durationUnits" | "kind" | "shape"
+>;
+
+type EnglishCrtGraphemeRule = {
+  length: number;
+  steps: readonly EnglishCrtVisemeStep[];
+};
+
+const ENGLISH_CRT_VOWEL_HOLD_UNITS = 1.7;
+const ENGLISH_CRT_CONSONANT_HOLD_UNITS = 0.62;
+const ENGLISH_CRT_CLOSURE_HOLD_UNITS = 0.72;
+const ENGLISH_CRT_DIGIT_PRONUNCIATIONS = [
+  "zero",
+  "one",
+  "two",
+  "three",
+  "four",
+  "five",
+  "six",
+  "seven",
+  "eight",
+  "nine",
+] as const;
+const ENGLISH_CRT_SHORT_FINAL_E_WORDS = new Set([
+  "above",
+  "are",
+  "come",
+  "done",
+  "give",
+  "gone",
+  "have",
+  "live",
+  "love",
+  "none",
+  "one",
+  "some",
+]);
+const ENGLISH_CRT_PRONOUNCED_FINAL_E_WORDS = new Set([
+  "be",
+  "cafe",
+  "he",
+  "me",
+  "recipe",
+  "she",
+  "the",
+  "we",
+]);
+const ENGLISH_CRT_WIDE_O_WORDS = new Set([
+  "above",
+  "come",
+  "done",
+  "love",
+  "none",
+  "one",
+  "some",
+]);
+
+function englishCrtVisemeStep(
+  shape: ZenLiveBotMouthShape,
+  durationUnits: number,
+  kind: EnglishCrtVisemeBeat["kind"],
+): EnglishCrtVisemeStep {
+  return { shape, durationUnits, kind };
+}
+
+function englishCrtRestDurationUnits(character: string): number {
+  if (/\s/u.test(character)) return 0.34;
+  if (/[.!?…]/u.test(character)) return 1.45;
+  if (/[,;:]/u.test(character)) return 0.92;
+  if (/[—–-]/u.test(character)) return 0.78;
+  return 0.5;
+}
+
+function englishCrtSilentFinalEIndex(word: string): number | null {
+  if (
+    !word.endsWith("e") ||
+    word.length <= 2 ||
+    ENGLISH_CRT_PRONOUNCED_FINAL_E_WORDS.has(word)
+  ) {
+    return null;
+  }
+  return word.length - 1;
+}
+
+function englishCrtMagicELeadIndex(
+  word: string,
+  silentFinalEIndex: number | null,
+): number | null {
+  if (
+    silentFinalEIndex === null ||
+    ENGLISH_CRT_SHORT_FINAL_E_WORDS.has(word)
+  ) {
+    return null;
+  }
+  const leadIndex = silentFinalEIndex - 2;
+  const middle = word[silentFinalEIndex - 1] ?? "";
+  return leadIndex >= 0 &&
+    /[aeiou]/u.test(word[leadIndex] ?? "") &&
+    /[b-df-hj-np-tv-z]/u.test(middle)
+    ? leadIndex
+    : null;
+}
+
+function englishCrtVowelRuleAt(
+  word: readonly string[],
+  index: number,
+  options: {
+    magicELeadIndex: number | null;
+    silentFinalEIndex: number | null;
+    wordText: string;
+  },
+): EnglishCrtGraphemeRule | null {
+  if (index === options.silentFinalEIndex) return null;
+  const current = word[index] ?? "";
+  const next = word[index + 1] ?? "";
+  const third = word[index + 2] ?? "";
+  const pair = `${current}${next}`;
+  const triple = `${pair}${third}`;
+  const wide = englishCrtVisemeStep(
+    "open-wide",
+    ENGLISH_CRT_VOWEL_HOLD_UNITS,
+    "vowel",
+  );
+  const narrow = englishCrtVisemeStep(
+    "narrow",
+    ENGLISH_CRT_VOWEL_HOLD_UNITS,
+    "vowel",
+  );
+  const round = englishCrtVisemeStep(
+    "open-round",
+    ENGLISH_CRT_VOWEL_HOLD_UNITS,
+    "vowel",
+  );
+  const transition = (shape: ZenLiveBotMouthShape) =>
+    englishCrtVisemeStep(shape, 0.92, "vowel");
+
+  if (index === options.magicELeadIndex) {
+    if (current === "a" || current === "i") {
+      return { length: 1, steps: [wide, transition("narrow")] };
+    }
+    if (current === "o") {
+      return { length: 1, steps: [round, transition("narrow")] };
+    }
+    if (current === "u") return { length: 1, steps: [round] };
+    return { length: 1, steps: [narrow] };
+  }
+
+  if (triple === "igh") {
+    return { length: 3, steps: [wide, transition("narrow")] };
+  }
+  if (/^(ai|ay|ey|ie)$/u.test(pair)) {
+    return { length: 2, steps: [wide, transition("narrow")] };
+  }
+  if (/^(ou|ow)$/u.test(pair)) {
+    return { length: 2, steps: [wide, transition("open-round")] };
+  }
+  if (/^(oi|oy)$/u.test(pair)) {
+    return { length: 2, steps: [round, transition("narrow")] };
+  }
+  if (/^(ee|ea|ei)$/u.test(pair)) {
+    return {
+      length: 2,
+      steps: [
+        englishCrtVisemeStep("narrow", 2.15, "vowel"),
+      ],
+    };
+  }
+  if (/^(oo|oa|oe|ue|ui|ew|aw|au)$/u.test(pair)) {
+    return {
+      length: 2,
+      steps: [
+        englishCrtVisemeStep("open-round", 2.15, "vowel"),
+      ],
+    };
+  }
+  if (pair === "ah") {
+    return {
+      length: 2,
+      steps: [englishCrtVisemeStep("open-wide", 2.05, "vowel")],
+    };
+  }
+  if (/^(er|ir|ur)$/u.test(pair)) {
+    return {
+      length: 2,
+      steps: [englishCrtVisemeStep("narrow", 1.95, "vowel")],
+    };
+  }
+  if (pair === "ar") {
+    return { length: 2, steps: [wide, transition("narrow")] };
+  }
+  if (pair === "or") {
+    return { length: 2, steps: [round, transition("narrow")] };
+  }
+
+  if (current === "a") return { length: 1, steps: [wide] };
+  if (current === "e" || current === "i") {
+    return { length: 1, steps: [narrow] };
+  }
+  if (current === "o") {
+    return {
+      length: 1,
+      steps: [
+        ENGLISH_CRT_WIDE_O_WORDS.has(options.wordText) ? wide : round,
+      ],
+    };
+  }
+  if (current === "u") return { length: 1, steps: [wide] };
+  if (current === "y" && !(index === 0 && /[aeiou]/u.test(next))) {
+    return { length: 1, steps: [narrow] };
+  }
+  return null;
+}
+
+function appendEnglishCrtRule(
+  target: EnglishCrtVisemeBeat[],
+  rule: EnglishCrtGraphemeRule,
+  sourceStart: number,
+): void {
+  for (let index = 0; index < rule.steps.length; index += 1) {
+    const step = rule.steps[index]!;
+    const sourceOffset = Math.min(
+      rule.length - 1,
+      Math.floor((index * rule.length) / rule.steps.length),
+    );
+    target.push({
+      ...step,
+      sourceStart: sourceStart + sourceOffset,
+      sourceEnd:
+        sourceStart +
+        (rule.steps.length === 1 ? rule.length : sourceOffset + 1),
+    });
+  }
+}
+
+function englishCrtNextVowelShape(
+  word: readonly string[],
+  fromIndex: number,
+  options: Parameters<typeof englishCrtVowelRuleAt>[2],
 ): ZenLiveBotMouthShape | null {
-  const current = characters[cursorIndex] ?? "";
-  const forward = `${current}${characters[cursorIndex + 1] ?? ""}`;
-  const backward = `${characters[cursorIndex - 1] ?? ""}${current}`;
-  return CRT_SPEECH_DIGRAPH_SHAPES[forward] ?? CRT_SPEECH_DIGRAPH_SHAPES[backward] ?? null;
+  for (let index = fromIndex; index < word.length; index += 1) {
+    const rule = englishCrtVowelRuleAt(word, index, options);
+    if (rule) return rule.steps[0]?.shape ?? null;
+  }
+  return null;
+}
+
+function englishCrtWordVisemeBeats(
+  word: readonly string[],
+  sourceStart: number,
+): EnglishCrtVisemeBeat[] {
+  const beats: EnglishCrtVisemeBeat[] = [];
+  const wordText = word.join("");
+  const silentFinalEIndex = englishCrtSilentFinalEIndex(wordText);
+  const options = {
+    magicELeadIndex: englishCrtMagicELeadIndex(
+      wordText,
+      silentFinalEIndex,
+    ),
+    silentFinalEIndex,
+    wordText,
+  };
+
+  for (let index = 0; index < word.length; ) {
+    if (index === silentFinalEIndex) {
+      index += 1;
+      continue;
+    }
+    const vowelRule = englishCrtVowelRuleAt(word, index, options);
+    if (vowelRule) {
+      appendEnglishCrtRule(beats, vowelRule, sourceStart + index);
+      index += vowelRule.length;
+      continue;
+    }
+
+    const current = word[index] ?? "";
+    const pair = `${current}${word[index + 1] ?? ""}`;
+    const digit = Number.parseInt(current, 10);
+    if (/\d/u.test(current) && Number.isInteger(digit)) {
+      const pronunciation = ENGLISH_CRT_DIGIT_PRONUNCIATIONS[digit] ?? "";
+      const digitBeats = englishCrtWordVisemeBeats(
+        Array.from(pronunciation),
+        sourceStart + index,
+      );
+      beats.push(
+        ...digitBeats.map((beat) => ({
+          ...beat,
+          sourceStart: sourceStart + index,
+          sourceEnd: sourceStart + index + 1,
+        })),
+      );
+      index += 1;
+      continue;
+    }
+    if (!/[a-z]/u.test(current)) {
+      beats.push({
+        shape:
+          CRT_SPEECH_FALLBACK_SHAPES[
+            zenLiveMouthHashText(current) % CRT_SPEECH_FALLBACK_SHAPES.length
+          ]!,
+        sourceStart: sourceStart + index,
+        sourceEnd: sourceStart + index + 1,
+        durationUnits: 1,
+        kind: "vowel",
+      });
+      index += 1;
+      continue;
+    }
+
+    let length = 1;
+    let shape: ZenLiveBotMouthShape;
+    let durationUnits = ENGLISH_CRT_CONSONANT_HOLD_UNITS;
+    if (pair === "th") {
+      length = 2;
+      shape = "at";
+      durationUnits = 0.9;
+    } else if (pair === "ph") {
+      length = 2;
+      shape = "dot";
+      durationUnits = 0.78;
+    } else if (pair === "wh" || pair === "qu") {
+      length = 2;
+      shape = "open-round";
+      durationUnits = 0.82;
+    } else if (/^(sh|ch|zh|ng|ck|gh)$/u.test(pair)) {
+      length = 2;
+      shape =
+        englishCrtNextVowelShape(word, index + length, options) ??
+        "open-small";
+    } else if (/[bmp]/u.test(current)) {
+      shape = "speech-closed";
+      durationUnits = ENGLISH_CRT_CLOSURE_HOLD_UNITS;
+    } else if (/[fv]/u.test(current)) {
+      shape = "dot";
+      durationUnits = 0.68;
+    } else if (current === "l") {
+      shape = "at";
+      durationUnits = 0.86;
+    } else if (current === "r") {
+      shape = "narrow";
+      durationUnits = 0.84;
+    } else if (current === "w" || current === "q") {
+      shape = "open-round";
+      durationUnits = 0.76;
+    } else {
+      shape =
+        englishCrtNextVowelShape(word, index + 1, options) ?? "open-small";
+      if (current === "h") durationUnits = 0.48;
+    }
+    beats.push({
+      shape,
+      sourceStart: sourceStart + index,
+      sourceEnd: sourceStart + index + length,
+      durationUnits,
+      kind: "consonant",
+    });
+    index += length;
+  }
+  return beats;
 }
 
 /**
- * Maps one visible text cursor position onto PRISM's deliberately small CRT
- * viseme vocabulary. This is spelling-aware rather than audio-grade lip sync:
- * the goal is a readable illusion that stays synchronized with the typewriter.
+ * Builds a deterministic, fully local approximation of English pronunciation.
+ * It deliberately targets a small CRT viseme vocabulary rather than linguistic
+ * transcription, but follows lip closure, tongue, rounding, vowel, and
+ * diphthong motion closely enough to read as speech instead of letter cycling.
+ */
+export function englishCrtVisemeTimeline(
+  text: string,
+): EnglishCrtVisemeBeat[] {
+  const characters = normalizedCrtSpeechCharacters(text);
+  const beats: EnglishCrtVisemeBeat[] = [];
+  for (let index = 0; index < characters.length; ) {
+    const current = characters[index] ?? "";
+    if (/[\p{L}\p{N}]/u.test(current)) {
+      let end = index + 1;
+      while (
+        end < characters.length &&
+        /[\p{L}\p{N}]/u.test(characters[end] ?? "")
+      ) {
+        end += 1;
+      }
+      beats.push(
+        ...englishCrtWordVisemeBeats(characters.slice(index, end), index),
+      );
+      index = end;
+      continue;
+    }
+    beats.push({
+      shape: "closed",
+      sourceStart: index,
+      sourceEnd: index + 1,
+      durationUnits: englishCrtRestDurationUnits(current),
+      kind: "rest",
+    });
+    index += 1;
+  }
+  return beats;
+}
+
+function englishCrtVisemeTimelineDurationUnits(
+  beats: readonly EnglishCrtVisemeBeat[],
+): number {
+  return beats.reduce((total, beat) => total + beat.durationUnits, 0);
+}
+
+function englishCrtVisemeShapeAtUnit(
+  beats: readonly EnglishCrtVisemeBeat[],
+  rawUnit: number,
+): ZenLiveBotMouthShape {
+  const durationUnits = englishCrtVisemeTimelineDurationUnits(beats);
+  if (beats.length === 0 || durationUnits <= 0) return "closed";
+  const safeRawUnit = Number.isFinite(rawUnit) ? rawUnit : 0;
+  const unit = ((safeRawUnit % durationUnits) + durationUnits) % durationUnits;
+  let elapsedUnits = 0;
+  for (const beat of beats) {
+    elapsedUnits += beat.durationUnits;
+    if (unit < elapsedUnits) return beat.shape;
+  }
+  return beats.at(-1)?.shape ?? "closed";
+}
+
+/**
+ * Maps one visible text cursor position through PRISM's local pronunciation
+ * timeline. It remains deterministic and network-free while accounting for
+ * closures, vowel families, consonant anticipation, and diphthongs.
  */
 export function crtSpeechMouthShapeAtTextCursor({
   text,
@@ -143,22 +540,77 @@ export function crtSpeechMouthShapeAtTextCursor({
   if (characters.length === 0) return "closed";
   const safeCursorIndex = Math.max(
     0,
-    Math.min(characters.length - 1, Math.floor(Number.isFinite(cursorIndex) ? cursorIndex : 0))
+    Math.min(
+      characters.length - 1,
+      Math.floor(Number.isFinite(cursorIndex) ? cursorIndex : 0),
+    ),
   );
-  const current = characters[safeCursorIndex] ?? "";
-  if (!/[\p{L}\p{N}]/u.test(current)) return "closed";
+  const beats = englishCrtVisemeTimeline(text);
+  const coveringBeat = beats.find(
+    (beat) =>
+      safeCursorIndex >= beat.sourceStart && safeCursorIndex < beat.sourceEnd,
+  );
+  if (coveringBeat) return coveringBeat.shape;
+  for (let index = beats.length - 1; index >= 0; index -= 1) {
+    const beat = beats[index]!;
+    if (beat.sourceEnd <= safeCursorIndex + 1) return beat.shape;
+  }
+  return "closed";
+}
 
-  const digraphShape = crtSpeechDigraphShape(characters, safeCursorIndex);
-  if (digraphShape) return digraphShape;
-  if (/[bmp]/u.test(current)) return "speech-closed";
-  if (current === "a") return "open-wide";
-  if (/[ouwq]/u.test(current)) return "open-round";
-  if (/[eiyfvsztdnlr]/u.test(current)) return "narrow";
-  if (/[a-z]/u.test(current)) return "open-small";
+export function crtSpeechMouthShapeFromVisibleTextProgress({
+  text,
+  visibleLength,
+  charactersPerPhase = 1,
+}: {
+  text: string;
+  visibleLength: number;
+  charactersPerPhase?: number;
+}): ZenLiveBotMouthShape {
+  const characters = Array.from(text);
+  const safeVisibleLength = Math.max(
+    0,
+    Math.min(
+      characters.length,
+      Math.floor(Number.isFinite(visibleLength) ? visibleLength : 0),
+    ),
+  );
+  if (safeVisibleLength <= 0) return "closed";
+  const safeCharactersPerPhase = Math.max(1, Math.floor(charactersPerPhase));
+  const cursorIndex =
+    Math.floor((safeVisibleLength - 1) / safeCharactersPerPhase) *
+    safeCharactersPerPhase;
+  return crtSpeechMouthShapeAtTextCursor({ text, cursorIndex });
+}
 
-  return CRT_SPEECH_FALLBACK_SHAPES[
-    zenLiveMouthHashText(current) % CRT_SPEECH_FALLBACK_SHAPES.length
-  ]!;
+export function crtSpeechMouthShapeAtElapsedMs({
+  text,
+  elapsedMs,
+  durationMs,
+  phaseMs = ZEN_LIVE_MOUTH_PHASE_MS,
+}: {
+  text: string;
+  elapsedMs: number;
+  durationMs?: number;
+  phaseMs?: number;
+}): ZenLiveBotMouthShape {
+  const beats = englishCrtVisemeTimeline(text);
+  const durationUnits = englishCrtVisemeTimelineDurationUnits(beats);
+  if (beats.length === 0 || durationUnits <= 0) return "closed";
+  const safeElapsedMs = Math.max(
+    0,
+    Number.isFinite(elapsedMs) ? elapsedMs : 0,
+  );
+  if (
+    typeof durationMs === "number" &&
+    Number.isFinite(durationMs) &&
+    durationMs > 0
+  ) {
+    const progress = Math.min(0.999_999, safeElapsedMs / durationMs);
+    return englishCrtVisemeShapeAtUnit(beats, progress * durationUnits);
+  }
+  const safePhaseMs = Math.max(1, phaseMs);
+  return englishCrtVisemeShapeAtUnit(beats, safeElapsedMs / safePhaseMs);
 }
 
 /** Removes content that is visible as formatting or a card rather than speech. */
@@ -184,11 +636,16 @@ export function zenLiveBotMouthShapeFromVisibleTextProgress({
   const characters = Array.from(text);
   const safeVisibleLength = Math.max(
     0,
-    Math.min(characters.length, Math.floor(Number.isFinite(visibleLength) ? visibleLength : 0))
+    Math.min(
+      characters.length,
+      Math.floor(Number.isFinite(visibleLength) ? visibleLength : 0),
+    ),
   );
   if (safeVisibleLength <= 0) return "closed";
   const safeCharactersPerPhase = Math.max(1, Math.floor(charactersPerPhase));
-  const phaseIndex = Math.floor((safeVisibleLength - 1) / safeCharactersPerPhase);
+  const phaseIndex = Math.floor(
+    (safeVisibleLength - 1) / safeCharactersPerPhase,
+  );
   return zenLiveTalkingMouthShapeAtPhase(phaseIndex, text);
 }
 
@@ -214,6 +671,7 @@ export function zenLiveBotMouthShapeFromRevealProgress({
   firstSeenAtMs,
   startDelayMs,
   phaseMs = ZEN_LIVE_MOUTH_PHASE_MS,
+  phonemeAware = false,
 }: {
   tokens: readonly string[];
   visibleTokenCount: number;
@@ -221,10 +679,11 @@ export function zenLiveBotMouthShapeFromRevealProgress({
   firstSeenAtMs: number;
   startDelayMs: number;
   phaseMs?: number;
+  phonemeAware?: boolean;
 }): ZenLiveBotMouthShape | null {
   const clampedVisibleTokenCount = Math.min(
     tokens.length,
-    Math.max(0, Math.floor(visibleTokenCount))
+    Math.max(0, Math.floor(visibleTokenCount)),
   );
   if (clampedVisibleTokenCount <= 0) return null;
   const hasVisibleWord = tokens
@@ -237,11 +696,23 @@ export function zenLiveBotMouthShapeFromRevealProgress({
 
   const safePhaseMs = Math.max(1, phaseMs);
   const phaseIndex = Math.floor(elapsedSpeechMs / safePhaseMs);
+  if (phonemeAware) {
+    const activeTokenIndex = tokens
+      .slice(0, clampedVisibleTokenCount)
+      .findLastIndex(zenLiveRevealTokenHasWord);
+    if (activeTokenIndex < 0) return null;
+    const activeToken = tokens[activeTokenIndex] ?? "";
+    return crtSpeechMouthShapeAtElapsedMs({
+      text: activeToken,
+      elapsedMs: elapsedSpeechMs,
+      phaseMs: safePhaseMs,
+    });
+  }
   return zenLiveTalkingMouthShapeAtPhase(phaseIndex, tokens.join(""));
 }
 
 export function zenLiveBotMouthOpenFromRevealProgress(
-  input: Parameters<typeof zenLiveBotMouthShapeFromRevealProgress>[0]
+  input: Parameters<typeof zenLiveBotMouthShapeFromRevealProgress>[0],
 ): boolean | null {
   const mouthShape = zenLiveBotMouthShapeFromRevealProgress(input);
   return mouthShape === null

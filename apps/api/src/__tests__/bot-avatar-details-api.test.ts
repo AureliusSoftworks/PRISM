@@ -137,6 +137,7 @@ describe("bot avatar details API persistence", () => {
               { id: "monocle", offsetX: 0, offsetY: 0, scalePct: 100 },
             ],
             paintMaskBase64: null,
+            hideInkDuringBlink: true,
           },
         },
       },
@@ -149,6 +150,10 @@ describe("bot avatar details API persistence", () => {
         (row: { id: string }) => row.id
       ),
       ["monocle", "circuit-mark"]
+    );
+    assert.equal(
+      created.payload.bot.avatarDetails.screen.hideInkDuringBlink,
+      true
     );
     assert.equal("avatar_details_json" in created.payload.bot, false);
     assert.equal(
