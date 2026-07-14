@@ -12,6 +12,61 @@ Active development happens on the `dev` branch; every release is a merge into
 
 _Staging area - nothing queued for release yet._
 
+## [0.9.1] - 2026-07-14
+
+### Added
+
+- **Auto response recovery can follow an explicit model chain.** Account-level
+  routing can try a saved local or online fallback while recording concise
+  recovery provenance and preserving Prism's LOCAL privacy boundary.
+- **Developer transcripts make difficult sessions diagnosable.** Shift-clicking
+  session copy or download captures provider, model, routing, tool, usage,
+  Coffee, retry, and fallback events in a deterministic secret-redacted report.
+- **Brave Web Search credentials can be saved per account.** Connections now
+  supports an encrypted key alongside the optional server environment value,
+  with clear unavailable behavior and no WebSearch egress in LOCAL mode.
+- **Saved conversation history has stable Home ownership.** Prism and persona
+  Homes, forks, Coffee sessions, and legacy conversations now retain explicit
+  origin and continuation metadata as different participants speak.
+
+### Changed
+
+- **Coffee topics and table behavior are more intentional.** Group topics are
+  generated and ranked against the attending personas, while arrivals, coffee
+  consumption, refills, acknowledgements, speaker gaze, contextual actions,
+  review seating, nameplates, and player scale follow explicit session state.
+- **Coffee endings continue naturally after the player leaves.** The player
+  exits immediately while a short bounded bot epilogue finishes in the
+  background and remains available in replay and synopsis generation.
+- **Onboarding and response-mode guidance cover the expanded model flow.** The
+  guided setup, settings, tutorials, and authenticated smoke coverage now
+  explain account defaults, recovery choices, and LOCAL persistence behavior.
+- **Avatar Studio, Zen, and shared bot presentation honor both themes.** Avatar
+  editing has a complete token-driven Light Mode, Zen action text remains
+  readable, atmosphere colors follow persona policy, and avatar glow stays
+  consistent across desktop renderers.
+
+### Fixed
+
+- **Chat remains readable through dynamic transcript changes.** Second replies,
+  long or streaming messages, `/undo`, rapid edits, header offsets, and brief
+  server reconnects no longer trap scrolling, overlap navigation, or reload the
+  active workspace.
+- **Coffee preserves one canonical player turn.** Tagged messages are no longer
+  rewritten or duplicated, explicit addressees win routing, table text stays
+  synchronized with speech, and punctuation-only replies get one bounded retry
+  before a visible fallback.
+- **Speech reveal stays synchronized across Babble and English.** Missing,
+  partial, and duplicate visible text paths now converge on the canonical
+  message while Bottish continues to follow canvas reveal pacing.
+- **Provider and local-tool compatibility is stricter.** Anthropic requests only
+  send supported sampling and reasoning controls, local Power compilation uses
+  the correct endpoint, and provider failures redact credentials and local
+  network details.
+- **Zen and account state survive common UI transitions.** Wildcard resolution
+  preserves the viewport, context menus dismiss consistently, and Prompt Center
+  content remains included in account backups.
+
 ## [0.9.0] - 2026-07-13
 
 ### Added
