@@ -1,0 +1,30 @@
+{
+  "type": "note",
+  "title": "TODO: capture the useful documentation context from these changes.",
+  "reason": "Documentation or generated wiki files changed.",
+  "audience": "all",
+  "tags": [
+    "audience:all",
+    "docs"
+  ],
+  "confidence": "medium",
+  "files": [
+    "DESIGN.md",
+    "docs/voices.md"
+  ],
+  "draft": {
+    "source": "git-diff",
+    "authority": "agent",
+    "confidence": "medium",
+    "files": [
+      "DESIGN.md",
+      "docs/voices.md"
+    ],
+    "tags": [
+      "audience:all",
+      "docs"
+    ],
+    "body": "TODO: capture the useful documentation context from these changes."
+  },
+  "command_hint": "wk note add --json '{\"source\":\"git-diff\",\"authority\":\"agent\",\"confidence\":\"medium\",\"files\":[\"DESIGN.md\",\"docs/voices.md\"],\"tags\":[\"audience:all\",\"docs\"],\"body\":\"TODO: capture the useful documentation context from these changes.\"}'"
+}
