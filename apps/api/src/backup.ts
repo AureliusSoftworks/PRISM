@@ -215,6 +215,63 @@ export interface BackupSnapshot {
     payload: Record<string, unknown>;
     createdAt: string;
   }>;
+  /** Optional in older v1 snapshots. Signal is non-canonical but its show archive is user data. */
+  botcast?: {
+    shows: Array<{
+      id: string;
+      hostBotId: string;
+      name: string;
+      premise: string;
+      hostingStyle: string;
+      accentColor: string;
+      atmosphereJson: string;
+      createdAt: string;
+      updatedAt: string;
+    }>;
+    episodes: Array<{
+      id: string;
+      showId: string;
+      hostBotId: string;
+      guestBotId: string;
+      title: string;
+      topic: string;
+      producerBrief: string;
+      status: string;
+      segment: string;
+      outcome: string | null;
+      tensionLevel: number;
+      warningCount: number;
+      startedAt: string;
+      completedAt: string | null;
+      runtimeMs: number | null;
+      createdAt: string;
+      updatedAt: string;
+    }>;
+    segments: Array<{
+      id: string;
+      episodeId: string;
+      segment: string;
+      ordinal: number;
+      startedAt: string;
+      endedAt: string | null;
+    }>;
+    messages: Array<{
+      id: string;
+      episodeId: string;
+      speakerRole: string;
+      botId: string;
+      content: string;
+      createdAt: string;
+    }>;
+    events: Array<{
+      id: string;
+      episodeId: string;
+      sequence: number;
+      kind: string;
+      payloadJson: string;
+      occurredAt: string;
+    }>;
+  };
 }
 
 export interface BackupAdapter {
@@ -697,6 +754,28 @@ export function exportUserSnapshot(
     created_at: string;
   }>;
 
+  const botcastShows = db.prepare(
+    `SELECT id, host_bot_id, name, premise, hosting_style, accent_color,
+            atmosphere_json, created_at, updated_at
+       FROM botcast_shows WHERE user_id = ? ORDER BY created_at`,
+  ).all(userId) as Array<{
+    id: string; host_bot_id: string; name: string; premise: string;
+    hosting_style: string; accent_color: string; atmosphere_json: string;
+    created_at: string; updated_at: string;
+  }>;
+  const botcastEpisodes = db.prepare(
+    "SELECT * FROM botcast_episodes WHERE user_id = ? ORDER BY created_at",
+  ).all(userId) as Array<Record<string, unknown>>;
+  const botcastSegments = db.prepare(
+    "SELECT * FROM botcast_episode_segments WHERE user_id = ? ORDER BY episode_id, ordinal",
+  ).all(userId) as Array<Record<string, unknown>>;
+  const botcastMessages = db.prepare(
+    "SELECT * FROM botcast_messages WHERE user_id = ? ORDER BY episode_id, created_at, rowid",
+  ).all(userId) as Array<Record<string, unknown>>;
+  const botcastEvents = db.prepare(
+    "SELECT * FROM botcast_events WHERE user_id = ? ORDER BY episode_id, sequence",
+  ).all(userId) as Array<Record<string, unknown>>;
+
   return {
     version: 1,
     exportedAt: new Date().toISOString(),
@@ -773,6 +852,62 @@ export function exportUserSnapshot(
         updatedAt: bot.updated_at,
       })),
     conversations: conversationPayload,
+    botcast: {
+      shows: botcastShows.map((row) => ({
+        id: row.id,
+        hostBotId: row.host_bot_id,
+        name: row.name,
+        premise: row.premise,
+        hostingStyle: row.hosting_style,
+        accentColor: row.accent_color,
+        atmosphereJson: row.atmosphere_json,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      })),
+      episodes: botcastEpisodes.map((row) => ({
+        id: String(row.id),
+        showId: String(row.show_id),
+        hostBotId: String(row.host_bot_id),
+        guestBotId: String(row.guest_bot_id),
+        title: String(row.title),
+        topic: String(row.topic),
+        producerBrief: String(row.producer_brief ?? ""),
+        status: String(row.status),
+        segment: String(row.segment),
+        outcome: typeof row.outcome === "string" ? row.outcome : null,
+        tensionLevel: Number(row.tension_level ?? 0),
+        warningCount: Number(row.warning_count ?? 0),
+        startedAt: String(row.started_at),
+        completedAt: typeof row.completed_at === "string" ? row.completed_at : null,
+        runtimeMs: typeof row.runtime_ms === "number" ? row.runtime_ms : null,
+        createdAt: String(row.created_at),
+        updatedAt: String(row.updated_at),
+      })),
+      segments: botcastSegments.map((row) => ({
+        id: String(row.id),
+        episodeId: String(row.episode_id),
+        segment: String(row.segment),
+        ordinal: Number(row.ordinal ?? 0),
+        startedAt: String(row.started_at),
+        endedAt: typeof row.ended_at === "string" ? row.ended_at : null,
+      })),
+      messages: botcastMessages.map((row) => ({
+        id: String(row.id),
+        episodeId: String(row.episode_id),
+        speakerRole: String(row.speaker_role),
+        botId: String(row.bot_id),
+        content: String(row.content),
+        createdAt: String(row.created_at),
+      })),
+      events: botcastEvents.map((row) => ({
+        id: String(row.id),
+        episodeId: String(row.episode_id),
+        sequence: Number(row.sequence ?? 0),
+        kind: String(row.kind),
+        payloadJson: String(row.payload_json ?? "{}"),
+        occurredAt: String(row.occurred_at),
+      })),
+    },
     memories: memories.map((memory) => ({
       id: memory.id,
       conversationId: memory.conversation_id ?? undefined,
@@ -800,7 +935,16 @@ function assertSnapshotIdsStayWithinTenant(
   snapshot: BackupSnapshot
 ): void {
   const assertIds = (
-    table: "bots" | "conversations" | "messages" | "memories",
+    table:
+      | "bots"
+      | "conversations"
+      | "messages"
+      | "memories"
+      | "botcast_shows"
+      | "botcast_episodes"
+      | "botcast_episode_segments"
+      | "botcast_messages"
+      | "botcast_events",
     ids: readonly string[]
   ): void => {
     const seen = new Set<string>();
@@ -856,6 +1000,14 @@ function assertSnapshotIdsStayWithinTenant(
         )
       : []
   );
+  const botcast = snapshot.botcast;
+  if (botcast) {
+    assertIds("botcast_shows", botcast.shows.map((item) => item.id));
+    assertIds("botcast_episodes", botcast.episodes.map((item) => item.id));
+    assertIds("botcast_episode_segments", botcast.segments.map((item) => item.id));
+    assertIds("botcast_messages", botcast.messages.map((item) => item.id));
+    assertIds("botcast_events", botcast.events.map((item) => item.id));
+  }
 }
 
 export function importUserSnapshot(
@@ -1205,6 +1357,73 @@ function importUserSnapshotWithinTransaction(
         bot.faceMouthCoffeePucker === true ? 1 : 0,
         bot.id.trim(),
         userId
+      );
+    }
+  }
+
+  if (snapshot.botcast) {
+    const botcast = snapshot.botcast;
+    const showIds = new Set(botcast.shows.map((show) => show.id));
+    const episodeIds = new Set(botcast.episodes.map((episode) => episode.id));
+    for (const show of botcast.shows) {
+      db.prepare(
+        `INSERT OR REPLACE INTO botcast_shows
+          (id, user_id, host_bot_id, name, premise, hosting_style, accent_color,
+           atmosphere_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        show.id, userId, show.hostBotId, show.name, show.premise,
+        show.hostingStyle, show.accentColor, show.atmosphereJson,
+        show.createdAt, show.updatedAt,
+      );
+    }
+    for (const episode of botcast.episodes) {
+      if (!showIds.has(episode.showId)) continue;
+      db.prepare(
+        `INSERT OR REPLACE INTO botcast_episodes
+          (id, user_id, show_id, host_bot_id, guest_bot_id, title, topic,
+           producer_brief, status, segment, outcome, tension_level, warning_count,
+           started_at, completed_at, runtime_ms, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        episode.id, userId, episode.showId, episode.hostBotId, episode.guestBotId,
+        episode.title, episode.topic, episode.producerBrief, episode.status,
+        episode.segment, episode.outcome, episode.tensionLevel, episode.warningCount,
+        episode.startedAt, episode.completedAt, episode.runtimeMs,
+        episode.createdAt, episode.updatedAt,
+      );
+    }
+    for (const segment of botcast.segments) {
+      if (!episodeIds.has(segment.episodeId)) continue;
+      db.prepare(
+        `INSERT OR REPLACE INTO botcast_episode_segments
+          (id, user_id, episode_id, segment, ordinal, started_at, ended_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        segment.id, userId, segment.episodeId, segment.segment, segment.ordinal,
+        segment.startedAt, segment.endedAt,
+      );
+    }
+    for (const message of botcast.messages) {
+      if (!episodeIds.has(message.episodeId)) continue;
+      db.prepare(
+        `INSERT OR REPLACE INTO botcast_messages
+          (id, user_id, episode_id, speaker_role, bot_id, content, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        message.id, userId, message.episodeId, message.speakerRole,
+        message.botId, message.content, message.createdAt,
+      );
+    }
+    for (const event of botcast.events) {
+      if (!episodeIds.has(event.episodeId)) continue;
+      db.prepare(
+        `INSERT OR REPLACE INTO botcast_events
+          (id, user_id, episode_id, sequence, kind, payload_json, occurred_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        event.id, userId, event.episodeId, event.sequence, event.kind,
+        event.payloadJson, event.occurredAt,
       );
     }
   }

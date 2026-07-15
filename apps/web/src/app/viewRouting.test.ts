@@ -11,6 +11,7 @@ describe("view routing helpers", () => {
     assert.equal(prismSurfaceViewForRouteParam("chat"), "chat");
     assert.equal(prismSurfaceViewForRouteParam("zen"), "chat");
     assert.equal(prismSurfaceViewForRouteParam("coffee"), "coffee");
+    assert.equal(prismSurfaceViewForRouteParam("botcast"), "botcast");
     assert.equal(prismSurfaceViewForRouteParam("story"), "story");
     assert.equal(prismSurfaceViewForRouteParam(null), "chat");
     assert.equal(prismSurfaceViewForRouteParam("unknown"), "chat");
@@ -21,5 +22,6 @@ describe("view routing helpers", () => {
     assert.equal(prismHrefForSurfaceView("sandbox"), "/?view=chat");
     assert.equal(prismHrefForSurfaceView("chat"), "/?view=chat");
     assert.equal(prismHrefForSurfaceView("hub"), "/?view=chat");
+    assert.equal(prismHrefForSurfaceView("botcast"), "/?view=botcast");
   });
 });

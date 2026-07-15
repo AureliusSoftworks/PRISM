@@ -1,4 +1,4 @@
-export type TutorialMode = "zen" | "chat" | "coffee";
+export type TutorialMode = "zen" | "chat" | "coffee" | "botcast";
 
 export interface ModeTutorialStep {
   heading: string;
@@ -97,6 +97,35 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
         body: "Once the table starts, type into the message box or let the bots carry the room for a while.",
         clickLabel: "the Coffee message box",
         targetSelector: '[data-tutorial-target="composer"]',
+      },
+    ],
+  },
+  botcast: {
+    title: "Signal producer walkthrough",
+    steps: [
+      {
+        heading: "Give a bot a show",
+        body: "Each host owns one persistent show with its own name, premise, studio identity, and episode shelf.",
+        clickLabel: "a show or the Create show producer card",
+        targetSelector: '[data-tutorial-target="botcast-shows"]',
+      },
+      {
+        heading: "Book tonight’s episode",
+        body: "Choose one guest, set the topic, and write an optional private angle. The brief shapes the host but never goes on mic.",
+        clickLabel: "the episode setup desk",
+        targetSelector: '[data-tutorial-target="botcast-setup"]',
+      },
+      {
+        heading: "Produce from the control room",
+        body: "Ask about a detail, press harder, move on, or lighten up. Repeated pressure can earn a warning and, rarely, a walkout.",
+        clickLabel: "a private producer cue",
+        targetSelector: '[data-tutorial-target="botcast-cues"]',
+      },
+      {
+        heading: "Direct the replay",
+        body: "Replay defaults to Auto. Left, Right, and Wide lock the viewer’s camera without rewriting the saved director track.",
+        clickLabel: "an archived episode",
+        targetSelector: '[data-tutorial-target="botcast-replay"]',
       },
     ],
   },

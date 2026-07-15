@@ -698,6 +698,77 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(group_id) REFERENCES coffee_groups(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS botcast_shows (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      host_bot_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      premise TEXT NOT NULL,
+      hosting_style TEXT NOT NULL,
+      accent_color TEXT NOT NULL,
+      atmosphere_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(user_id, host_bot_id),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS botcast_episodes (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      show_id TEXT NOT NULL,
+      host_bot_id TEXT NOT NULL,
+      guest_bot_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      topic TEXT NOT NULL,
+      producer_brief TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'live',
+      segment TEXT NOT NULL DEFAULT 'opening',
+      outcome TEXT,
+      tension_level INTEGER NOT NULL DEFAULT 0,
+      warning_count INTEGER NOT NULL DEFAULT 0,
+      started_at TEXT NOT NULL,
+      completed_at TEXT,
+      runtime_ms INTEGER,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(show_id) REFERENCES botcast_shows(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS botcast_episode_segments (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      episode_id TEXT NOT NULL,
+      segment TEXT NOT NULL,
+      ordinal INTEGER NOT NULL,
+      started_at TEXT NOT NULL,
+      ended_at TEXT,
+      UNIQUE(user_id, episode_id, ordinal),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(episode_id) REFERENCES botcast_episodes(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS botcast_messages (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      episode_id TEXT NOT NULL,
+      speaker_role TEXT NOT NULL,
+      bot_id TEXT NOT NULL,
+      content TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(episode_id) REFERENCES botcast_episodes(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS botcast_events (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      episode_id TEXT NOT NULL,
+      sequence INTEGER NOT NULL,
+      kind TEXT NOT NULL,
+      payload_json TEXT NOT NULL DEFAULT '{}',
+      occurred_at TEXT NOT NULL,
+      UNIQUE(user_id, episode_id, sequence),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(episode_id) REFERENCES botcast_episodes(id) ON DELETE CASCADE
+    );
     CREATE TABLE IF NOT EXISTS coffee_polls (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -1887,6 +1958,18 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   );
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_coffee_group_events_group ON coffee_group_events (user_id, group_id, created_at DESC);"
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_botcast_shows_user_updated ON botcast_shows (user_id, updated_at DESC);"
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_botcast_episodes_show_updated ON botcast_episodes (user_id, show_id, updated_at DESC);"
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_botcast_messages_episode_created ON botcast_messages (user_id, episode_id, created_at);"
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_botcast_events_episode_sequence ON botcast_events (user_id, episode_id, sequence);"
   );
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_conversations_coffee_group ON conversations (user_id, coffee_group_id, updated_at DESC);"

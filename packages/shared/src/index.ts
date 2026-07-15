@@ -575,6 +575,7 @@ export type UsagePurpose =
   | "chat_fallback"
   | "chat_web_search_followup"
   | "conversation_title"
+  | "botcast_turn"
   | "coffee_turn"
   | "coffee_router"
   | "coffee_summary"
@@ -2199,3 +2200,4 @@ export interface CoffeePollPlayerVoteRequest {
 export interface CoffeePollPlayerVoteResponse {
   poll: CoffeePoll;
 }
+export * from "./botcast.js";
