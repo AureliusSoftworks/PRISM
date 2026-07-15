@@ -23,6 +23,7 @@ import {
   type BotcastShow,
 } from "@localai/shared";
 import { nextBotcastShowIdAfterDeletion } from "./botcastDeletion";
+import { PrismBlockingLoader } from "./PrismBlockingLoader";
 import styles from "./botcast.module.css";
 
 export interface BotcastBotSummary {
@@ -64,6 +65,13 @@ type ImageGenerationResponse = {
 };
 
 type SignalArtworkKind = "studio" | "logo";
+
+type SignalArtworkProgress = {
+  title: string;
+  detail: string;
+  stepLabel: string;
+  progress: number | null;
+};
 
 type SignalDeleteTarget =
   | {
@@ -277,6 +285,7 @@ export function BotcastExperience({
   const [replayPlaying, setReplayPlaying] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<SignalDeleteTarget | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [artworkProgress, setArtworkProgress] = useState<SignalArtworkProgress | null>(null);
   const advanceInFlightRef = useRef(false);
   const replayVoiceMessageIdRef = useRef<string | null>(null);
   const speakingTimerRef = useRef<number | null>(null);
@@ -529,85 +538,115 @@ export function BotcastExperience({
     generatedCount: number;
     failureMessage: string | null;
   }> => {
-    let workingShow = sourceShow;
-    if (regenerate) {
-      const reset = await request<{ show: BotcastShow }>(
-        `/api/botcast/shows/${encodeURIComponent(sourceShow.id)}`,
-        {
-          method: "PATCH",
-          body: JSON.stringify({
-            ...(kinds.includes("studio") ? { regenerateAtmosphere: true } : {}),
-            ...(kinds.includes("logo") ? { regenerateLogo: true } : {}),
-          }),
-        },
-      );
-      workingShow = reset.show;
-      replaceShow(workingShow);
-    }
-    let generatedCount = 0;
-    let failureMessage: string | null = null;
-    const artwork = ([
-      {
-        kind: "daytime studio",
-        artworkKind: "studio",
-        prompt: workingShow.dayAtmosphere.prompt,
-        size: "1536x1024",
-        imageUrlKey: "dayAtmosphereImageUrl",
-        imageIdKey: "dayAtmosphereImageId",
-      },
-      {
-        kind: "nighttime studio",
-        artworkKind: "studio",
-        prompt: workingShow.nightAtmosphere.prompt,
-        size: "1536x1024",
-        imageUrlKey: "nightAtmosphereImageUrl",
-        imageIdKey: "nightAtmosphereImageId",
-      },
-      {
-        kind: "logo",
-        artworkKind: "logo",
-        prompt: workingShow.logo.prompt,
-        size: "1024x1024",
-        imageUrlKey: "logoImageUrl",
-        imageIdKey: "logoImageId",
-      },
-    ] as const).filter((asset) => kinds.includes(asset.artworkKind));
-    for (const asset of artwork) {
-      try {
-        setNotice(`Synthesizing the ${asset.kind}…`);
-        const generated = await request<ImageGenerationResponse>("/api/images/generate", {
-          method: "POST",
-          body: JSON.stringify({
-            prompt: asset.prompt,
-            size: asset.size,
-            quality: "standard",
-            preferredProvider: preferredImageProvider,
-            botId: workingShow.hostBotId,
-            origin: "botcast",
-          }),
-        });
-        const imageUrl = generated.image.displayUrl ?? generated.image.url;
-        if (!imageUrl) throw new Error(`${asset.kind} image has no usable local URL.`);
-        const saved = await request<{ show: BotcastShow }>(
+    const includesStudios = kinds.includes("studio");
+    const includesLogo = kinds.includes("logo");
+    setArtworkProgress({
+      title: includesStudios && includesLogo
+        ? `Giving ${sourceShow.name} a visual identity`
+        : includesStudios
+          ? "Building the day and night studios"
+          : "Designing a new show mark",
+      detail: includesStudios && includesLogo
+        ? "PRISM is rendering a matched studio pair and its companion logo."
+        : includesStudios
+          ? "PRISM is preserving one persona-specific set while changing only its light."
+          : "PRISM is distilling the show’s personality into one memorable symbol.",
+      stepLabel: regenerate ? "Preparing fresh art direction" : "Preparing the visual identity",
+      progress: 0,
+    });
+    try {
+      let workingShow = sourceShow;
+      if (regenerate) {
+        const reset = await request<{ show: BotcastShow }>(
           `/api/botcast/shows/${encodeURIComponent(sourceShow.id)}`,
           {
             method: "PATCH",
             body: JSON.stringify({
-              [asset.imageUrlKey]: imageUrl,
-              [asset.imageIdKey]: generated.image.id,
+              ...(includesStudios ? { regenerateAtmosphere: true } : {}),
+              ...(includesLogo ? { regenerateLogo: true } : {}),
             }),
           },
         );
-        workingShow = saved.show;
-        generatedCount += 1;
+        workingShow = reset.show;
         replaceShow(workingShow);
-      } catch (artworkError) {
-        failureMessage ??= errorMessage(artworkError);
-        // Each asset owns a deterministic fallback, so one failed synthesis
-        // never blocks the rest of the show setup.
       }
+      let generatedCount = 0;
+      let failureMessage: string | null = null;
+      const artwork = ([
+        {
+          kind: "daytime studio",
+          artworkKind: "studio",
+          prompt: workingShow.dayAtmosphere.prompt,
+          size: "1536x1024",
+          imageUrlKey: "dayAtmosphereImageUrl",
+          imageIdKey: "dayAtmosphereImageId",
+        },
+        {
+          kind: "nighttime studio",
+          artworkKind: "studio",
+          prompt: workingShow.nightAtmosphere.prompt,
+          size: "1536x1024",
+          imageUrlKey: "nightAtmosphereImageUrl",
+          imageIdKey: "nightAtmosphereImageId",
+        },
+        {
+          kind: "logo",
+          artworkKind: "logo",
+          prompt: workingShow.logo.prompt,
+          size: "1024x1024",
+          imageUrlKey: "logoImageUrl",
+          imageIdKey: "logoImageId",
+        },
+      ] as const).filter((asset) => kinds.includes(asset.artworkKind));
+      for (const [index, asset] of artwork.entries()) {
+        setArtworkProgress((current) => current ? {
+          ...current,
+          stepLabel: `Rendering ${asset.kind} · ${index + 1} of ${artwork.length}`,
+          progress: index / artwork.length,
+        } : null);
+        try {
+          setNotice(`Synthesizing the ${asset.kind}…`);
+          const generated = await request<ImageGenerationResponse>("/api/images/generate", {
+            method: "POST",
+            body: JSON.stringify({
+              prompt: asset.prompt,
+              size: asset.size,
+              quality: "standard",
+              preferredProvider: preferredImageProvider,
+              botId: workingShow.hostBotId,
+              origin: "botcast",
+            }),
+          });
+          const imageUrl = generated.image.displayUrl ?? generated.image.url;
+          if (!imageUrl) throw new Error(`${asset.kind} image has no usable local URL.`);
+          const saved = await request<{ show: BotcastShow }>(
+            `/api/botcast/shows/${encodeURIComponent(sourceShow.id)}`,
+            {
+              method: "PATCH",
+              body: JSON.stringify({
+                [asset.imageUrlKey]: imageUrl,
+                [asset.imageIdKey]: generated.image.id,
+              }),
+            },
+          );
+          workingShow = saved.show;
+          generatedCount += 1;
+          replaceShow(workingShow);
+        } catch (artworkError) {
+          failureMessage ??= errorMessage(artworkError);
+          // Each asset owns a deterministic fallback, so one failed synthesis
+          // never blocks the rest of the show setup.
+        } finally {
+          setArtworkProgress((current) => current ? {
+            ...current,
+            progress: (index + 1) / artwork.length,
+          } : null);
+        }
+      }
+      return { show: workingShow, generatedCount, failureMessage };
+    } finally {
+      setArtworkProgress(null);
     }
-    return { show: workingShow, generatedCount, failureMessage };
   };
 
   const createShow = async (): Promise<void> => {
@@ -1189,6 +1228,7 @@ export function BotcastExperience({
       episode!.messages.at(-1)?.speakerRole === "guest");
 
   return (
+    <>
     <main className={styles.shell} data-botcast-mode="true" data-theme={theme}>
       {renderLibrary()}
       <section className={styles.main}>
@@ -1461,5 +1501,14 @@ export function BotcastExperience({
         </div>
       ) : null}
     </main>
+    <PrismBlockingLoader
+      open={artworkProgress !== null}
+      title={artworkProgress?.title ?? "PRISM is working"}
+      detail={artworkProgress?.detail ?? "Preparing your workspace."}
+      stepLabel={artworkProgress?.stepLabel ?? "Working"}
+      progress={artworkProgress?.progress}
+      theme={theme}
+    />
+    </>
   );
 }

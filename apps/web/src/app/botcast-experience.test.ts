@@ -4,6 +4,10 @@ import { describe, it } from "node:test";
 
 const source = readFileSync(new URL("./BotcastExperience.tsx", import.meta.url), "utf8");
 const css = readFileSync(new URL("./botcast.module.css", import.meta.url), "utf8");
+const blockingLoaderSource = readFileSync(
+  new URL("./PrismBlockingLoader.tsx", import.meta.url),
+  "utf8",
+);
 const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
 
 describe("Signal experience shell", () => {
@@ -60,6 +64,17 @@ describe("Signal experience shell", () => {
     assert.match(css, /--prism-s:\s*#2fd3e3/iu);
     assert.match(css, /\.shell\[data-theme="light"\]/u);
     assert.match(css, /data-atmosphere="fallback"/u);
+  });
+
+  it("blocks navigation with progress while Signal renders show artwork", () => {
+    assert.match(source, /import \{ PrismBlockingLoader \}/u);
+    assert.match(source, /setArtworkProgress\(\{/u);
+    assert.match(source, /Rendering \$\{asset\.kind\} · \$\{index \+ 1\} of \$\{artwork\.length\}/u);
+    assert.match(source, /progress: index \/ artwork\.length/u);
+    assert.match(source, /progress: \(index \+ 1\) \/ artwork\.length/u);
+    assert.match(source, /<PrismBlockingLoader/u);
+    assert.match(source, /open=\{artworkProgress !== null\}/u);
+    assert.match(blockingLoaderSource, /data-prism-blocking-loader="true"/u);
   });
 
   it("shows the selected logo and studio artwork on the dashboard", () => {
