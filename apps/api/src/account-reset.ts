@@ -67,6 +67,7 @@ export function restoreFactoryDefaultsInDatabase(
         SET
           theme = 'system',
           preferred_provider = 'local',
+          preferred_image_provider = 'local',
           provider_locked = 0,
           auto_memory = 1,
           auto_switch_model = 0,

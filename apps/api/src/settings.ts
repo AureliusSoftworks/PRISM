@@ -19,6 +19,8 @@ import {
   normalizeAutoFallbackChain,
   serializeAutoFallbackChain,
   type BotAudioVoiceId,
+  type ImageProviderName,
+  isImageProviderName,
 } from "@localai/shared";
 import { sanitizeHiddenModelIds } from "./model-routing.ts";
 
@@ -125,6 +127,7 @@ export interface CurrentSettings {
   displayName: string;
   theme: Theme;
   preferredProvider: Provider;
+  preferredImageProvider: ImageProviderName;
   providerLocked: number;
   autoMemory: number;
   composerWritingAssist: number;
@@ -186,6 +189,7 @@ export interface NextSettings {
   displayName: string;
   theme: Theme;
   preferredProvider: Provider;
+  preferredImageProvider: ImageProviderName;
   providerLocked: number;
   autoMemory: number;
   composerWritingAssist: number;
@@ -809,6 +813,11 @@ export function resolveNextSettings(
   const preferredProvider: Provider = isProvider(body.preferredProvider)
     ? body.preferredProvider
     : current.preferredProvider;
+  const preferredImageProvider: ImageProviderName = isImageProviderName(
+    body.preferredImageProvider
+  )
+    ? body.preferredImageProvider
+    : current.preferredImageProvider;
   const providerLocked =
     typeof body.providerLocked === "boolean"
       ? Number(body.providerLocked)
@@ -1179,6 +1188,7 @@ export function resolveNextSettings(
     displayName,
     theme,
     preferredProvider,
+    preferredImageProvider,
     providerLocked,
     autoMemory,
     composerWritingAssist,

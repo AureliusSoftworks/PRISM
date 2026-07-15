@@ -72,6 +72,7 @@ import type {
   WebSearchRequestPayload,
   AutoFallbackChainV1,
   AutoRecoveryTraceV1,
+  ImageProviderName,
   ResponseMode,
   ZenAskQuestionPatienceInput,
   ZenAutonomyDecision,
@@ -405,6 +406,13 @@ function describeRequestedModel(provider: LlmProvider, botOverrides?: GenerateOp
 
 function imagePreferredProviderForTextProvider(provider: ProviderName): "local" | "openai" {
   return provider === "local" ? "local" : "openai";
+}
+
+function imagePreferredProviderForTurn(
+  preferredImageProvider: ImageProviderName | undefined,
+  textProvider: ProviderName
+): ImageProviderName {
+  return preferredImageProvider ?? imagePreferredProviderForTextProvider(textProvider);
 }
 
 const NEGATIVE_PHRASES = [
@@ -2327,6 +2335,8 @@ export async function refreshConversationTitle(
 
 export interface UserChatSettings {
   preferredProvider: ProviderName;
+  /** Independent image-render lane; omitted legacy callers follow the text provider. */
+  preferredImageProvider?: ImageProviderName;
   /** Test seam for deterministic HTTP integration and performance runs. */
   providerFactory?: typeof selectProvider;
   /** Test seam for Prism-owned auxiliary work such as summaries and cleanup. */
@@ -6603,7 +6613,10 @@ export async function processChatMessage(
         startChatImageBackgroundJob({
           db,
           job: acq.job,
-          preferredProvider: imagePreferredProviderForTextProvider(effectiveProvider),
+          preferredProvider: imagePreferredProviderForTurn(
+            settings.preferredImageProvider,
+            effectiveProvider
+          ),
           openAiApiKey: settings.openAiApiKey,
           prefs: assistantImagePrefsForTurn(settings),
           prismDefaultLlmModel: settings.prismDefaultLlmModel,
@@ -7807,7 +7820,10 @@ export async function processChatMessage(
       startChatImageBackgroundJob({
         db,
         job: acq.job,
-        preferredProvider: imagePreferredProviderForTextProvider(effectiveProvider),
+        preferredProvider: imagePreferredProviderForTurn(
+          settings.preferredImageProvider,
+          effectiveProvider
+        ),
         openAiApiKey: settings.openAiApiKey,
         prefs: assistantImagePrefsForTurn(settings),
         prismDefaultLlmModel: settings.prismDefaultLlmModel,

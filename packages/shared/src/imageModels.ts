@@ -1,6 +1,27 @@
 /**
  * OpenAI Images API models surfaced in Prism (chat catalog lists text models only).
  */
+export type ImageProviderName = "local" | "openai";
+
+export function isImageProviderName(value: unknown): value is ImageProviderName {
+  return value === "local" || value === "openai";
+}
+
+/**
+ * Resolve image routing independently from chat response routing. An explicit
+ * offline-only context is a hard ceiling and always wins over saved/requested
+ * image preferences.
+ */
+export function resolveImageProviderName(args: {
+  savedProvider: unknown;
+  requestedProvider?: unknown;
+  offlineOnly?: boolean;
+}): ImageProviderName {
+  if (args.offlineOnly === true) return "local";
+  if (isImageProviderName(args.requestedProvider)) return args.requestedProvider;
+  return isImageProviderName(args.savedProvider) ? args.savedProvider : "local";
+}
+
 export const OPENAI_IMAGE_MODEL_IDS = [
   "gpt-image-2",
   "gpt-image-1.5",

@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import {
   botBelongsToUser,
   conversationHasAssistantWithBotId,
+  imageContextIncludesOfflineOnlyBot,
   resolveConversationForSandboxImageGenerate,
   resolveImageGeneratePersistence,
   resolveSandboxImageBotAttribution,
@@ -76,7 +77,8 @@ function makeDb(): DatabaseSync {
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       name TEXT NOT NULL,
-      system_prompt TEXT NOT NULL DEFAULT ''
+      system_prompt TEXT NOT NULL DEFAULT '',
+      online_enabled INTEGER NOT NULL DEFAULT 1
     );
     CREATE TABLE messages (
       id TEXT PRIMARY KEY,
@@ -89,8 +91,8 @@ function makeDb(): DatabaseSync {
     );
   `);
   db.prepare(
-    "INSERT INTO bots (id, user_id, name, system_prompt) VALUES (?, ?, ?, ?)"
-  ).run("bot-a", "u1", "A", "");
+    "INSERT INTO bots (id, user_id, name, system_prompt, online_enabled) VALUES (?, ?, ?, ?, ?)"
+  ).run("bot-a", "u1", "A", "", 0);
   db.prepare(
     "INSERT INTO bots (id, user_id, name, system_prompt) VALUES (?, ?, ?, ?)"
   ).run("bot-b", "u1", "B", "");
@@ -218,7 +220,8 @@ function makePersistenceIntegrationDb(): DatabaseSync {
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       name TEXT NOT NULL,
-      system_prompt TEXT NOT NULL DEFAULT ''
+      system_prompt TEXT NOT NULL DEFAULT '',
+      online_enabled INTEGER NOT NULL DEFAULT 1
     );
     CREATE TABLE messages (
       id TEXT PRIMARY KEY,
@@ -264,8 +267,8 @@ function makePersistenceIntegrationDb(): DatabaseSync {
     "2026-01-01T00:00:00.000Z"
   );
   db.prepare(
-    "INSERT INTO bots (id, user_id, name, system_prompt) VALUES (?, ?, ?, ?)"
-  ).run("bot-a", "u1", "A", "");
+    "INSERT INTO bots (id, user_id, name, system_prompt, online_enabled) VALUES (?, ?, ?, ?, ?)"
+  ).run("bot-a", "u1", "A", "", 0);
   db.prepare(
     "INSERT INTO bots (id, user_id, name, system_prompt) VALUES (?, ?, ?, ?)"
   ).run("bot-b", "u1", "B", "");
@@ -364,6 +367,22 @@ describe("resolveImageGeneratePersistence (POST /api/images/generate)", () => {
 });
 
 describe("helpers", () => {
+  it("detects offline-only bots included in image prompt context", () => {
+    const db = makePersistenceIntegrationDb();
+    assert.equal(
+      imageContextIncludesOfflineOnlyBot(db, "u1", ["bot-b"]),
+      false,
+    );
+    assert.equal(
+      imageContextIncludesOfflineOnlyBot(db, "u1", ["bot-b", "bot-a"]),
+      true,
+    );
+    assert.equal(
+      imageContextIncludesOfflineOnlyBot(db, "other", ["bot-a"]),
+      false,
+    );
+  });
+
   it("botBelongsToUser is scoped to the account", () => {
     const db = makeDb();
     assert.equal(botBelongsToUser(db, "u1", "bot-a"), true);
