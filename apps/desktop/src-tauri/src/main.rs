@@ -111,6 +111,7 @@ impl CommandNoWindow for Command {
 
 use tauri::menu::MenuBuilder;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::utils::config::BackgroundThrottlingPolicy;
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use url::Url;
 
@@ -712,6 +713,7 @@ fn main() {
                 .resizable(true)
                 .maximizable(true)
                 .fullscreen(true)
+                .background_throttling(BackgroundThrottlingPolicy::Disabled)
                 .build() {
                     emit_log(&app_handle, "prism", &format!("Window build failed: {error}"));
                 }
