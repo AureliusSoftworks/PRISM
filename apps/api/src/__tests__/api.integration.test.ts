@@ -884,6 +884,115 @@ describe("API request integration", () => {
     assert.equal(missing.status, 404);
   });
 
+  it("deletes Signal episodes and shows through tenant-safe HTTP routes", async () => {
+    const owner = createClient();
+    const stranger = createClient();
+    const ownerRegistration = await owner.request(
+      "/api/auth/register",
+      jsonInit({ username: "signal-delete-owner@example.com", password: "signal-delete-owner" })
+    );
+    const strangerRegistration = await stranger.request(
+      "/api/auth/register",
+      jsonInit({ username: "signal-delete-stranger@example.com", password: "signal-delete-stranger" })
+    );
+    assert.equal(ownerRegistration.status, 201);
+    assert.equal(strangerRegistration.status, 201);
+    const ownerId = String((await json(ownerRegistration)).user.id);
+
+    const hostId = "signal-route-host";
+    const guestId = "signal-route-guest";
+    const createdAt = "2026-07-15T00:00:00.000Z";
+    const insertSignalBot = db.prepare(
+      `INSERT INTO bots
+         (id, user_id, name, system_prompt, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    );
+    insertSignalBot.run(
+      hostId,
+      ownerId,
+      "Signal Route Host",
+      "A precise and curious interviewer.",
+      createdAt,
+      createdAt
+    );
+    insertSignalBot.run(
+      guestId,
+      ownerId,
+      "Signal Route Guest",
+      "A thoughtful and candid guest.",
+      createdAt,
+      createdAt
+    );
+
+    const showResponse = await owner.request(
+      "/api/botcast/shows",
+      jsonInit({ hostBotId: hostId })
+    );
+    assert.equal(showResponse.status, 201);
+    const showId = String((await json(showResponse)).show.id);
+    const episodeResponse = await owner.request(
+      `/api/botcast/shows/${encodeURIComponent(showId)}/episodes`,
+      jsonInit({ guestBotId: guestId, topic: "Why routes deserve tests" })
+    );
+    assert.equal(episodeResponse.status, 201);
+    const episodeId = String((await json(episodeResponse)).episode.id);
+
+    const foreignEpisodeDelete = await stranger.request(
+      `/api/botcast/episodes/${encodeURIComponent(episodeId)}`,
+      { method: "DELETE" }
+    );
+    const foreignShowDelete = await stranger.request(
+      `/api/botcast/shows/${encodeURIComponent(showId)}`,
+      { method: "DELETE" }
+    );
+    assert.equal(foreignEpisodeDelete.status, 404);
+    assert.equal(foreignShowDelete.status, 404);
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS count FROM botcast_episodes WHERE id = ? AND user_id = ?")
+        .get(episodeId, ownerId) as { count: number }).count,
+      1
+    );
+
+    const episodeDelete = await owner.request(
+      `/api/botcast/episodes/${encodeURIComponent(episodeId)}`,
+      { method: "DELETE" }
+    );
+    assert.equal(episodeDelete.status, 200);
+    assert.deepEqual(await json(episodeDelete), { ok: true });
+    assert.equal(
+      (await owner.request(`/api/botcast/episodes/${encodeURIComponent(episodeId)}`, {
+        method: "DELETE",
+      })).status,
+      404
+    );
+
+    const replacementEpisode = await owner.request(
+      `/api/botcast/shows/${encodeURIComponent(showId)}/episodes`,
+      jsonInit({ guestBotId: guestId, topic: "The show cascade" })
+    );
+    assert.equal(replacementEpisode.status, 201);
+    const showDelete = await owner.request(
+      `/api/botcast/shows/${encodeURIComponent(showId)}`,
+      { method: "DELETE" }
+    );
+    assert.equal(showDelete.status, 200);
+    assert.deepEqual(await json(showDelete), { ok: true });
+    assert.equal(
+      (await owner.request(`/api/botcast/shows/${encodeURIComponent(showId)}`, {
+        method: "DELETE",
+      })).status,
+      404
+    );
+    const listedShows = await owner.request("/api/botcast/shows");
+    assert.equal(listedShows.status, 200);
+    assert.deepEqual((await json(listedShows)).shows, []);
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS count FROM botcast_episodes WHERE user_id = ?")
+        .get(ownerId) as { count: number }).count,
+      0
+    );
+  });
+
   it("registers, authenticates, scopes conversations, gates local image generation, and logs out", async () => {
     const first = createClient();
     const register = await first.request(

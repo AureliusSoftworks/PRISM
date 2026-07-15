@@ -22,6 +22,7 @@ import {
   type BotcastProducerCue,
   type BotcastShow,
 } from "@localai/shared";
+import { nextBotcastShowIdAfterDeletion } from "./botcastDeletion";
 import styles from "./botcast.module.css";
 
 export interface BotcastBotSummary {
@@ -40,6 +41,8 @@ export interface BotcastExperienceProps {
   bots: BotcastBotSummary[];
   request: BotcastApiRequest;
   preferredProvider: "local" | "openai" | "anthropic";
+  preferredImageProvider: "local" | "openai";
+  theme?: "light" | "dark";
   renderAvatar?: (
     bot: BotcastBotSummary,
     state: { talking: boolean; thinking: boolean; role: "host" | "guest" },
@@ -52,6 +55,50 @@ export interface BotcastExperienceProps {
 type ImageGenerationResponse = {
   image: { id: string; displayUrl?: string; url?: string };
 };
+
+type SignalDeleteTarget =
+  | {
+      kind: "show";
+      id: string;
+      name: string;
+      episodeCount: number;
+    }
+  | {
+      kind: "episode";
+      id: string;
+      showId: string;
+      title: string;
+      status: BotcastEpisodeSummary["status"];
+    };
+
+function deleteConfirmationCopy(target: SignalDeleteTarget): {
+  title: string;
+  body: string;
+  action: string;
+} {
+  if (target.kind === "show") {
+    const archiveCopy = target.episodeCount
+      ? `, ${target.episodeCount} episode${target.episodeCount === 1 ? "" : "s"}, and every transcript and replay`
+      : "";
+    return {
+      title: `Delete “${target.name}”?`,
+      body: `This permanently removes the show${archiveCopy}. Saved studio and logo artwork stays in Images.`,
+      action: "Delete show",
+    };
+  }
+  if (target.status === "live") {
+    return {
+      title: `Discard “${target.title}”?`,
+      body: "This stops the rundown and permanently removes the live episode, its transcript, and producer cues. The show stays.",
+      action: "Discard episode",
+    };
+  }
+  return {
+    title: `Delete “${target.title}”?`,
+    body: "This permanently removes the episode and replay. The show stays.",
+    action: "Delete episode",
+  };
+}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Signal request failed.";
@@ -89,10 +136,79 @@ function avatarFallback(bot: BotcastBotSummary): ReactNode {
   );
 }
 
+function SignalShowLogo({
+  show,
+  compact = false,
+}: {
+  show: BotcastShow;
+  compact?: boolean;
+}): React.JSX.Element {
+  if (show.logo.imageUrl) {
+    return (
+      <span
+        className={styles.showLogo}
+        data-compact={compact ? "true" : undefined}
+        data-generated="true"
+      >
+        {/* Authenticated generated artwork is already locally sized and cannot use Next's optimizer. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={show.logo.imageUrl} alt="" />
+      </span>
+    );
+  }
+  const glyph = show.logo.fallbackGlyph;
+  return (
+    <span
+      className={styles.showLogo}
+      data-compact={compact ? "true" : undefined}
+      data-glyph={glyph}
+      data-generated="false"
+    >
+      <svg viewBox="0 0 64 64" aria-hidden="true">
+        {glyph === "frequency" ? (
+          <>
+            <path className={styles.spectrumP} d="M10 26c5-7 9-7 14 0s9 7 14 0 9-7 16 0" />
+            <path className={styles.spectrumS} d="M10 38c5-7 9-7 14 0s9 7 14 0 9-7 16 0" />
+          </>
+        ) : glyph === "orbit" ? (
+          <>
+            <ellipse className={styles.spectrumM} cx="32" cy="32" rx="23" ry="10" />
+            <ellipse className={styles.spectrumS} cx="32" cy="32" rx="10" ry="23" />
+            <circle className={styles.spectrumRFill} cx="48" cy="24" r="4" />
+          </>
+        ) : glyph === "aperture" ? (
+          <>
+            <path className={styles.spectrumPFill} d="M32 8 45 16 32 31 18 23Z" />
+            <path className={styles.spectrumRFill} d="m45 16 9 13-20 8-2-6Z" />
+            <path className={styles.spectrumIFill} d="m54 29-3 16-21-6 4-2Z" />
+            <path className={styles.spectrumSFill} d="m51 45-15 11-10-17h4Z" />
+            <path className={styles.spectrumMFill} d="m36 56-18-5 8-12Z" />
+          </>
+        ) : glyph === "spark" ? (
+          <>
+            <path className={styles.spectrumRFill} d="m32 6 5 19 19 7-19 7-5 19-5-19-19-7 19-7Z" />
+            <circle className={styles.spectrumSFill} cx="50" cy="14" r="4" />
+            <circle className={styles.spectrumMFill} cx="14" cy="49" r="3" />
+          </>
+        ) : (
+          <>
+            <circle className={styles.spectrumM} cx="32" cy="32" r="23" />
+            <text className={styles.spectrumMonogram} x="32" y="42">
+              {show.name.trim().slice(0, 1).toUpperCase() || "S"}
+            </text>
+          </>
+        )}
+      </svg>
+    </span>
+  );
+}
+
 export function BotcastExperience({
   bots,
   request,
   preferredProvider,
+  preferredImageProvider,
+  theme = "dark",
   renderAvatar,
   onUtterance,
   onExit,
@@ -117,6 +233,7 @@ export function BotcastExperience({
   const [producerBriefDraft, setProducerBriefDraft] = useState("");
   const [askAboutDraft, setAskAboutDraft] = useState("");
   const [showNameDraft, setShowNameDraft] = useState("");
+  const [synthesizeArtwork, setSynthesizeArtwork] = useState(true);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [autoRun, setAutoRun] = useState(false);
@@ -126,9 +243,13 @@ export function BotcastExperience({
   const [replayCamera, setReplayCamera] = useState<BotcastCameraShot>("auto");
   const [replayElapsedMs, setReplayElapsedMs] = useState(0);
   const [replayPlaying, setReplayPlaying] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<SignalDeleteTarget | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const advanceInFlightRef = useRef(false);
   const replayVoiceMessageIdRef = useRef<string | null>(null);
   const speakingTimerRef = useRef<number | null>(null);
+  const deleteCancelButtonRef = useRef<HTMLButtonElement | null>(null);
+  const deleteReturnFocusRef = useRef<HTMLElement | null>(null);
 
   const selectedShow = shows.find((show) => show.id === selectedShowId) ?? null;
   const hostBot = selectedShow ? botsById.get(selectedShow.hostBotId) ?? null : null;
@@ -209,19 +330,274 @@ export function BotcastExperience({
     [loadEpisodes],
   );
 
+  const replaceShow = (nextShow: BotcastShow): void => {
+    setShows((current) => {
+      const exists = current.some((show) => show.id === nextShow.id);
+      return exists
+        ? current.map((show) => (show.id === nextShow.id ? nextShow : show))
+        : [nextShow, ...current];
+    });
+    if (nextShow.id === selectedShowId) setShowNameDraft(nextShow.name);
+  };
+
+  const resetEpisodePlayback = (): void => {
+    setAutoRun(false);
+    setReplayPlaying(false);
+    setReplayElapsedMs(0);
+    setReplayCamera("auto");
+    setSpeakingMessageId(null);
+    replayVoiceMessageIdRef.current = null;
+    if (speakingTimerRef.current !== null) {
+      window.clearTimeout(speakingTimerRef.current);
+      speakingTimerRef.current = null;
+    }
+  };
+
+  const openShowDeletion = (show: BotcastShow, opener: HTMLElement): void => {
+    resetEpisodePlayback();
+    deleteReturnFocusRef.current = opener;
+    setDeleteError(null);
+    setDeleteTarget({
+      kind: "show",
+      id: show.id,
+      name: show.name,
+      episodeCount: show.episodeCount,
+    });
+  };
+
+  const openEpisodeDeletion = (
+    item: Pick<BotcastEpisodeSummary, "id" | "showId" | "title" | "status">,
+    opener: HTMLElement,
+  ): void => {
+    resetEpisodePlayback();
+    deleteReturnFocusRef.current = opener;
+    setDeleteError(null);
+    setDeleteTarget({
+      kind: "episode",
+      id: item.id,
+      showId: item.showId,
+      title: item.title,
+      status: item.status,
+    });
+  };
+
+  const dismissDeletion = (): void => {
+    if (busy) return;
+    setDeleteError(null);
+    setDeleteTarget(null);
+  };
+
+  useEffect(() => {
+    if (!deleteTarget) {
+      const focusTarget = deleteReturnFocusRef.current?.isConnected
+        ? deleteReturnFocusRef.current
+        : document.querySelector<HTMLElement>("[data-botcast-delete-focus-fallback='true']");
+      deleteReturnFocusRef.current = null;
+      focusTarget?.focus();
+      return;
+    }
+    deleteCancelButtonRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === "Escape" && !busy) {
+        event.preventDefault();
+        setDeleteError(null);
+        setDeleteTarget(null);
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const dialog = deleteCancelButtonRef.current?.closest<HTMLElement>("[role='alertdialog']");
+      const focusable = dialog
+        ? Array.from(dialog.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"))
+        : [];
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (!first || !last) return;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [busy, deleteTarget]);
+
+  const deleteConfirmedTarget = async (): Promise<void> => {
+    if (!deleteTarget) return;
+    const target = deleteTarget;
+    setBusy(true);
+    setDeleteError(null);
+    setError(null);
+    try {
+      if (target.kind === "show") {
+        const nextShowId = nextBotcastShowIdAfterDeletion(shows, target.id);
+        await request(`/api/botcast/shows/${encodeURIComponent(target.id)}`, {
+          method: "DELETE",
+        });
+        resetEpisodePlayback();
+        setEpisode(null);
+        setReplayEpisode(null);
+        setEpisodes([]);
+        setGuestDraftId("");
+        setTopicDraft("");
+        setProducerBriefDraft("");
+        setAskAboutDraft("");
+        const nextShows = await loadShows();
+        const nextShow = nextShows.find((show) => show.id === nextShowId) ?? nextShows[0] ?? null;
+        setSelectedShowId(nextShow?.id ?? null);
+        setShowNameDraft(nextShow?.name ?? "");
+        if (nextShow) await loadEpisodes(nextShow.id);
+        setNotice(
+          target.episodeCount
+            ? `${target.name} and ${target.episodeCount} episode${target.episodeCount === 1 ? "" : "s"} deleted.`
+            : `${target.name} deleted.`,
+        );
+      } else {
+        await request(`/api/botcast/episodes/${encodeURIComponent(target.id)}`, {
+          method: "DELETE",
+        });
+        resetEpisodePlayback();
+        setEpisode((current) => (current?.id === target.id ? null : current));
+        setReplayEpisode((current) => (current?.id === target.id ? null : current));
+        await Promise.all([loadShows(), loadEpisodes(target.showId)]);
+        setNotice(
+          target.status === "live"
+            ? `“${target.title}” discarded.`
+            : `“${target.title}” deleted from the archive.`,
+        );
+      }
+      setDeleteTarget(null);
+    } catch (deleteRequestError) {
+      setDeleteError(errorMessage(deleteRequestError));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const generateShowArtwork = async (
+    sourceShow: BotcastShow,
+    regenerate: boolean,
+  ): Promise<{
+    show: BotcastShow;
+    generatedCount: number;
+    failureMessage: string | null;
+  }> => {
+    let workingShow = sourceShow;
+    if (regenerate) {
+      const reset = await request<{ show: BotcastShow }>(
+        `/api/botcast/shows/${encodeURIComponent(sourceShow.id)}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ regenerateAtmosphere: true, regenerateLogo: true }),
+        },
+      );
+      workingShow = reset.show;
+      replaceShow(workingShow);
+    }
+    let generatedCount = 0;
+    let failureMessage: string | null = null;
+    const artwork = [
+      {
+        kind: "studio",
+        prompt: workingShow.atmosphere.prompt,
+        size: "1536x1024",
+        imageUrlKey: "atmosphereImageUrl",
+        imageIdKey: "atmosphereImageId",
+      },
+      {
+        kind: "logo",
+        prompt: workingShow.logo.prompt,
+        size: "1024x1024",
+        imageUrlKey: "logoImageUrl",
+        imageIdKey: "logoImageId",
+      },
+    ] as const;
+    for (const asset of artwork) {
+      try {
+        setNotice(`Synthesizing the ${asset.kind}…`);
+        const generated = await request<ImageGenerationResponse>("/api/images/generate", {
+          method: "POST",
+          body: JSON.stringify({
+            prompt: asset.prompt,
+            size: asset.size,
+            quality: "standard",
+            preferredProvider: preferredImageProvider,
+            botId: workingShow.hostBotId,
+          }),
+        });
+        const imageUrl = generated.image.displayUrl ?? generated.image.url;
+        if (!imageUrl) throw new Error(`${asset.kind} image has no usable local URL.`);
+        const saved = await request<{ show: BotcastShow }>(
+          `/api/botcast/shows/${encodeURIComponent(sourceShow.id)}`,
+          {
+            method: "PATCH",
+            body: JSON.stringify({
+              [asset.imageUrlKey]: imageUrl,
+              [asset.imageIdKey]: generated.image.id,
+            }),
+          },
+        );
+        workingShow = saved.show;
+        generatedCount += 1;
+        replaceShow(workingShow);
+      } catch (artworkError) {
+        failureMessage ??= errorMessage(artworkError);
+        // Each asset owns a deterministic fallback, so one failed synthesis
+        // never blocks the rest of the show setup.
+      }
+    }
+    return { show: workingShow, generatedCount, failureMessage };
+  };
+
   const createShow = async (): Promise<void> => {
     if (!hostDraftId) return;
     setBusy(true);
     setError(null);
+    setNotice("Finding the show hidden inside this host…");
     try {
       const response = await request<{ show: BotcastShow }>("/api/botcast/shows", {
         method: "POST",
         body: JSON.stringify({ hostBotId: hostDraftId }),
       });
-      await loadShows();
       await selectShow(response.show);
+      replaceShow(response.show);
+      let show = response.show;
+      let identityGenerated = false;
+      try {
+        const branded = await request<{ show: BotcastShow; generated: boolean }>(
+          `/api/botcast/shows/${encodeURIComponent(show.id)}/brand`,
+          {
+            method: "POST",
+            body: JSON.stringify({ preferredProvider }),
+          },
+        );
+        show = branded.show;
+        identityGenerated = branded.generated;
+        replaceShow(show);
+        setShowNameDraft(show.name);
+      } catch {
+        // The initial show already includes a host-shaped deterministic identity.
+      }
+      if (synthesizeArtwork) {
+        const artwork = await generateShowArtwork(show, false);
+        show = artwork.show;
+        if (artwork.failureMessage) setError(artwork.failureMessage);
+        setNotice(
+          artwork.generatedCount === 2
+            ? `${show.name} has its name, mark, and studio.`
+            : artwork.generatedCount === 1
+              ? `${show.name} is ready; one visual uses its PRISM fallback.`
+              : `${show.name} is ready in its procedural PRISM studio.`,
+        );
+      } else {
+        setNotice(
+          `${show.name} is ready with its procedural studio and ${identityGenerated ? "generated" : "host-shaped"} identity.`,
+        );
+      }
       setHostDraftId("");
-      setNotice(`${response.show.name} is on the slate.`);
+      await loadShows();
     } catch (createError) {
       setError(errorMessage(createError));
     } finally {
@@ -250,47 +626,23 @@ export function BotcastExperience({
     }
   };
 
-  const generateAtmosphere = async (): Promise<void> => {
+  const regenerateBrandArtwork = async (): Promise<void> => {
     if (!selectedShow) return;
     setBusy(true);
     setError(null);
-    setNotice("Building a new camera-safe studio atmosphere…");
+    setNotice("Refreshing the show’s studio and mark…");
     try {
-      const reset = await request<{ show: BotcastShow }>(
-        `/api/botcast/shows/${encodeURIComponent(selectedShow.id)}`,
-        { method: "PATCH", body: JSON.stringify({ regenerateAtmosphere: true }) },
+      const artwork = await generateShowArtwork(selectedShow, true);
+      if (artwork.failureMessage) setError(artwork.failureMessage);
+      setNotice(
+        artwork.generatedCount === 2
+          ? "The refreshed studio and logo are locked to this show."
+          : artwork.generatedCount === 1
+            ? "One new visual is live; the other is using its PRISM fallback."
+            : "Synthesis was unavailable, so the refreshed PRISM fallbacks are live.",
       );
-      setShows((current) =>
-        current.map((show) => (show.id === reset.show.id ? reset.show : show)),
-      );
-      const generated = await request<ImageGenerationResponse>("/api/images/generate", {
-        method: "POST",
-        body: JSON.stringify({
-          prompt: reset.show.atmosphere.prompt,
-          size: "1536x1024",
-          quality: "standard",
-          preferredProvider,
-        }),
-      });
-      const imageUrl = generated.image.displayUrl ?? generated.image.url;
-      if (!imageUrl) throw new Error("Studio image generated without a usable local URL.");
-      const saved = await request<{ show: BotcastShow }>(
-        `/api/botcast/shows/${encodeURIComponent(selectedShow.id)}`,
-        {
-          method: "PATCH",
-          body: JSON.stringify({
-            atmosphereImageUrl: imageUrl,
-            atmosphereImageId: generated.image.id,
-          }),
-        },
-      );
-      setShows((current) =>
-        current.map((show) => (show.id === saved.show.id ? saved.show : show)),
-      );
-      setNotice("The new studio atmosphere is locked to this show.");
-    } catch (generationError) {
-      setNotice("The procedural studio fallback is active; no show setup was lost.");
-      setError(errorMessage(generationError));
+    } catch {
+      setNotice("The procedural studio and logo are active; no show setup was lost.");
     } finally {
       setBusy(false);
     }
@@ -507,17 +859,14 @@ export function BotcastExperience({
         className={styles.stageViewport}
         data-shot={args.shot}
         data-replay={args.replay ? "true" : undefined}
+        data-atmosphere={args.show.atmosphere.status}
         style={atmosphereStyle}
         aria-label={`Signal studio, ${args.shot} camera`}
       >
         <div className={styles.stageScene}>
           <div className={styles.atmosphere} aria-hidden="true" />
           <div className={styles.wordmark}>
-            <span className={styles.logoMark} aria-hidden="true">
-              <i />
-              <i />
-              <i />
-            </span>
+            <SignalShowLogo show={args.show} />
             <strong>{args.show.name}</strong>
           </div>
           <div className={styles.studioGlow} aria-hidden="true" />
@@ -531,7 +880,7 @@ export function BotcastExperience({
             ) : null}
             <div className={styles.boomMic} aria-hidden="true"><span /></div>
             <div className={`${styles.mug} ${styles.hostMug}`} aria-label="Host logo mug">
-              <span className={styles.mugLogo}><i /><i /><i /></span>
+              <span className={styles.mugLogo}><i /><i /><i /><i /><i /></span>
             </div>
             <strong className={styles.nameplate}>{args.host?.name ?? "Host"}</strong>
           </div>
@@ -584,8 +933,9 @@ export function BotcastExperience({
               data-selected={show.id === selectedShowId ? "true" : undefined}
               onClick={() => void selectShow(show)}
               style={{ ["--show-accent" as string]: show.accentColor } as CSSProperties}
+              data-botcast-show-id={show.id}
             >
-              <span className={styles.showDot} />
+              <SignalShowLogo show={show} compact />
               <span>
                 <strong>{show.name}</strong>
                 <small>{host?.name ?? "Unknown host"} · {show.episodeCount} episodes</small>
@@ -597,18 +947,33 @@ export function BotcastExperience({
           <p className={styles.emptyCopy}>Every great show starts with a host.</p>
         ) : null}
       </div>
-      <div className={styles.createShowCard}>
+      <div
+        className={styles.createShowCard}
+        data-tutorial-target="botcast-brand-controls"
+      >
         <label htmlFor="botcast-host-picker">Create a show</label>
         <select
           id="botcast-host-picker"
           value={hostDraftId}
           onChange={(event) => setHostDraftId(event.target.value)}
+          data-botcast-delete-focus-fallback="true"
         >
           <option value="">Choose a host…</option>
           {eligibleBots
             .filter((bot) => !shows.some((show) => show.hostBotId === bot.id))
             .map((bot) => <option key={bot.id} value={bot.id}>{bot.name}</option>)}
         </select>
+        <label className={styles.synthesisToggle}>
+          <input
+            type="checkbox"
+            checked={synthesizeArtwork}
+            onChange={(event) => setSynthesizeArtwork(event.target.checked)}
+          />
+          <span>
+            Synthesize studio + logo
+            <small>Off uses the built-in PRISM set.</small>
+          </span>
+        </label>
         <button type="button" onClick={() => void createShow()} disabled={!hostDraftId || busy}>
           Create show
         </button>
@@ -626,8 +991,8 @@ export function BotcastExperience({
             <span className={styles.eyebrow}>Tonight’s production</span>
             <h2>Book the guest. Set the angle.</h2>
           </div>
-          <button type="button" onClick={() => void generateAtmosphere()} disabled={busy}>
-            Regenerate studio
+          <button type="button" onClick={() => void regenerateBrandArtwork()} disabled={busy}>
+            Refresh studio + logo
           </button>
         </div>
         <div className={styles.setupGrid}>
@@ -675,14 +1040,29 @@ export function BotcastExperience({
       </div>
       <div className={styles.episodeGrid}>
         {episodes.map((item, index) => (
-          <button key={item.id} type="button" onClick={() => void openReplay(item)}>
-            <span className={styles.episodeNumber}>EP {String(episodes.length - index).padStart(2, "0")}</span>
-            <strong>{item.title}</strong>
-            <span>{botsById.get(item.guestBotId)?.name ?? "Guest"}</span>
-            <small>
-              {new Date(item.startedAt).toLocaleDateString()} · {runtimeLabel(item.runtimeMs)} · {item.status === "live" ? "Resume episode" : episodeOutcomeLabel(item)}
-            </small>
-          </button>
+          <article key={item.id} className={styles.episodeCard}>
+            <button
+              type="button"
+              className={styles.episodeOpenButton}
+              onClick={() => void openReplay(item)}
+            >
+              <span className={styles.episodeNumber}>EP {String(episodes.length - index).padStart(2, "0")}</span>
+              <strong>{item.title}</strong>
+              <span>{botsById.get(item.guestBotId)?.name ?? "Guest"}</span>
+              <small>
+                {new Date(item.startedAt).toLocaleDateString()} · {runtimeLabel(item.runtimeMs)} · {item.status === "live" ? "Resume episode" : episodeOutcomeLabel(item)}
+              </small>
+            </button>
+            <button
+              type="button"
+              className={styles.episodeDeleteButton}
+              onClick={(event) => openEpisodeDeletion(item, event.currentTarget)}
+              disabled={busy}
+              aria-label={`${item.status === "live" ? "Discard" : "Delete"} episode ${item.title}`}
+            >
+              {item.status === "live" ? "Discard" : "Delete"}
+            </button>
+          </article>
         ))}
       </div>
     </section>
@@ -697,26 +1077,38 @@ export function BotcastExperience({
       episode!.messages.at(-1)?.speakerRole === "guest");
 
   return (
-    <main className={styles.shell} data-botcast-mode="true">
+    <main className={styles.shell} data-botcast-mode="true" data-theme={theme}>
       {renderLibrary()}
       <section className={styles.main}>
         <header className={styles.header}>
           <div>
             <span className={styles.eyebrow}>{episode ? "Live control room" : replayEpisode ? "Episode replay" : "Host-owned shows"}</span>
             {selectedShow ? (
-              <input
-                className={styles.showNameInput}
-                value={showNameDraft}
-                onChange={(event) => setShowNameDraft(event.target.value)}
-                onBlur={(event) => void renameShow(event.currentTarget.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    void renameShow(event.currentTarget.value);
-                    event.currentTarget.blur();
-                  }
-                }}
-                aria-label="Show name"
-              />
+              <div className={styles.showTitleRow}>
+                <input
+                  className={styles.showNameInput}
+                  value={showNameDraft}
+                  onChange={(event) => setShowNameDraft(event.target.value)}
+                  onBlur={(event) => void renameShow(event.currentTarget.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      void renameShow(event.currentTarget.value);
+                      event.currentTarget.blur();
+                    }
+                  }}
+                  aria-label="Show name"
+                  data-botcast-delete-focus-fallback="true"
+                />
+                <button
+                  type="button"
+                  className={styles.showDeleteButton}
+                  onClick={(event) => openShowDeletion(selectedShow, event.currentTarget)}
+                  disabled={busy}
+                  aria-label={`Delete show ${selectedShow.name}`}
+                >
+                  Delete show
+                </button>
+              </div>
             ) : <h1>Signal</h1>}
             <p>{selectedShow?.premise ?? "A bot owns the show. You produce the episode."}</p>
           </div>
@@ -736,6 +1128,14 @@ export function BotcastExperience({
               <span>{episode.tensionStage === "calm" ? "Guest settled" : `Guest: ${episode.tensionStage}`}</span>
               <button type="button" onClick={() => setAutoRun((value) => !value)} disabled={episode.status === "completed"}>
                 {autoRun ? "Pause rundown" : "Resume rundown"}
+              </button>
+              <button
+                type="button"
+                className={styles.dangerButton}
+                onClick={(event) => openEpisodeDeletion(episode, event.currentTarget)}
+                disabled={busy}
+              >
+                {episode.status === "live" ? "Discard episode" : "Delete episode"}
               </button>
             </div>
             {renderStage({
@@ -804,7 +1204,17 @@ export function BotcastExperience({
                 <h2>{replayEpisode.title}</h2>
                 <p>{new Date(replayEpisode.startedAt).toLocaleString()} · {episodeOutcomeLabel(replayEpisode)}</p>
               </div>
-              <button type="button" onClick={() => setReplayEpisode(null)}>Close replay</button>
+              <div className={styles.replayHeaderActions}>
+                <button type="button" onClick={() => setReplayEpisode(null)}>Close replay</button>
+                <button
+                  type="button"
+                  className={styles.dangerButton}
+                  onClick={(event) => openEpisodeDeletion(replayEpisode, event.currentTarget)}
+                  disabled={busy}
+                >
+                  Delete episode
+                </button>
+              </div>
             </div>
             {renderStage({
               show: selectedShow,
@@ -868,6 +1278,48 @@ export function BotcastExperience({
           </div>
         )}
       </section>
+      {deleteTarget ? (
+        <div className={styles.deleteBackdrop}>
+          <button
+            type="button"
+            className={styles.deleteBackdropDismiss}
+            onClick={dismissDeletion}
+            disabled={busy}
+            tabIndex={-1}
+            aria-label="Cancel deletion"
+          />
+          <section
+            className={styles.deleteDialog}
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="signal-delete-title"
+            aria-describedby="signal-delete-description"
+          >
+            <span className={styles.eyebrow}>Permanent edit</span>
+            <h2 id="signal-delete-title">{deleteConfirmationCopy(deleteTarget).title}</h2>
+            <p id="signal-delete-description">{deleteConfirmationCopy(deleteTarget).body}</p>
+            {deleteError ? <p className={styles.deleteError} role="alert">{deleteError}</p> : null}
+            <div className={styles.deleteDialogActions}>
+              <button
+                ref={deleteCancelButtonRef}
+                type="button"
+                onClick={dismissDeletion}
+                disabled={busy}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className={styles.deleteConfirmButton}
+                onClick={() => void deleteConfirmedTarget()}
+                disabled={busy}
+              >
+                {busy ? "Removing…" : deleteConfirmationCopy(deleteTarget).action}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </main>
   );
 }

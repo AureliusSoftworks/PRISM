@@ -17,6 +17,8 @@ import type {
   BotcastShow,
   BotcastShowCreateRequest,
   BotcastShowPatchRequest,
+  BotcastLogoGlyph,
+  BotcastLogoState,
   BotcastSpeakerRole,
   BotcastTensionState,
 } from "@localai/shared";
@@ -135,9 +137,9 @@ function cleanText(raw: unknown, fallback: string, max = BOTCAST_TEXT_MAX): stri
 }
 
 function normalizeAccentColor(raw: unknown): string {
-  if (typeof raw !== "string") return "#d9903d";
+  if (typeof raw !== "string") return "#7b5cff";
   const value = raw.trim();
-  return /^#[0-9a-f]{6}$/iu.test(value) ? value.toLowerCase() : "#d9903d";
+  return /^#[0-9a-f]{6}$/iu.test(value) ? value.toLowerCase() : "#7b5cff";
 }
 
 function stableHash(raw: string): number {
@@ -152,11 +154,11 @@ function stableHash(raw: string): number {
 export function synthesizeBotcastShowName(host: Pick<BotcastBotProfile, "id" | "name" | "systemPrompt">): string {
   const name = cleanText(host.name, "The Host", 48);
   const formats = [
-    `${name} After Hours`,
-    `${name} in Focus`,
-    `The ${name} Signal`,
-    `${name}, Unscripted`,
-    `Inside ${name}`,
+    `The ${name} Frequency`,
+    `Between Questions with ${name}`,
+    `${name}: Off Script`,
+    `The Curious Mind of ${name}`,
+    `${name} in the Margins`,
   ];
   return formats[stableHash(`${host.id}:${host.systemPrompt}`) % formats.length]!;
 }
@@ -182,13 +184,61 @@ function atmosphereForHost(host: BotcastBotProfile, revision = 1): BotcastAtmosp
     prompt: [
       "Wide cinematic two-person podcast studio backdrop, neutral believable architecture, no people, no readable text.",
       `Evoke this host through mood, materials, rhythm, and light rather than literal illustration: ${host.systemPrompt.slice(0, 700)}`,
-      `Use ${normalizeAccentColor(host.color)} only as selective practical light, rim light, microphone LED, and environmental glow.`,
-      "Camera-safe negative space at left and right for seated avatars, central elevated logo-safe zone, generous overscan, restrained graphical emblem allowed.",
+      `Use ${normalizeAccentColor(host.color)} with selective PRISM-spectrum practical light, rim light, microphone LED, and environmental bounce glow.`,
+      "Camera-safe negative space at left and right for seated avatars, central elevated logo-safe zone, generous overscan, no logos or graphical emblems.",
     ].join(" "),
     imageUrl: null,
     imageId: null,
     revision,
     status: "fallback",
+  };
+}
+
+const BOTCAST_LOGO_GLYPHS: readonly BotcastLogoGlyph[] = [
+  "frequency",
+  "orbit",
+  "aperture",
+  "spark",
+  "monogram",
+];
+
+function fallbackGlyphFor(seed: string): BotcastLogoGlyph {
+  return BOTCAST_LOGO_GLYPHS[stableHash(seed) % BOTCAST_LOGO_GLYPHS.length]!;
+}
+
+function logoForHost(
+  host: BotcastBotProfile,
+  showName: string,
+  revision = 1,
+): BotcastLogoState {
+  const seed = `botcast:${host.id}:logo:${revision}`;
+  return {
+    seed,
+    prompt: [
+      `Square symbol-only podcast show logo for “${showName}”, hosted by ${host.name}.`,
+      `Translate the host's worldview into a clever abstract broadcast mark: ${host.systemPrompt.slice(0, 700)}`,
+      "One luminous source refracting into the five PRISM colors: coral pink, amber orange, electric lime, cyan, and violet.",
+      `Let ${normalizeAccentColor(host.color)} lead without overwhelming the spectrum.`,
+      "Premium editorial identity, bold simple silhouette, generous negative space, no people, no mockup, no microphone cliché, no letters, no words, no readable text.",
+    ].join(" "),
+    imageUrl: null,
+    imageId: null,
+    revision,
+    status: "fallback",
+    fallbackGlyph: fallbackGlyphFor(seed),
+  };
+}
+
+function logoFallbackForRow(row: BotcastShowRow): BotcastLogoState {
+  const seed = `botcast:${row.host_bot_id}:logo:1`;
+  return {
+    seed,
+    prompt: `Square symbol-only podcast logo for “${row.name}”, one light refracting into five vivid colors, no people, no letters, no words.`,
+    imageUrl: null,
+    imageId: null,
+    revision: 1,
+    status: "fallback",
+    fallbackGlyph: fallbackGlyphFor(seed),
   };
 }
 
@@ -221,6 +271,40 @@ function parseAtmosphere(raw: string): BotcastAtmosphereState {
   }
 }
 
+function parseLogo(raw: string, row: BotcastShowRow): BotcastLogoState {
+  const fallback = logoFallbackForRow(row);
+  try {
+    const container = JSON.parse(raw) as { logo?: Partial<BotcastLogoState> };
+    const parsed = container.logo;
+    if (!parsed || typeof parsed.seed !== "string" || typeof parsed.prompt !== "string") {
+      return fallback;
+    }
+    return {
+      seed: parsed.seed,
+      prompt: parsed.prompt,
+      imageUrl: typeof parsed.imageUrl === "string" ? parsed.imageUrl : null,
+      imageId: typeof parsed.imageId === "string" ? parsed.imageId : null,
+      revision: typeof parsed.revision === "number" ? parsed.revision : 1,
+      status:
+        parsed.status === "ready" || parsed.status === "failed"
+          ? parsed.status
+          : "fallback",
+      fallbackGlyph: BOTCAST_LOGO_GLYPHS.includes(parsed.fallbackGlyph as BotcastLogoGlyph)
+        ? (parsed.fallbackGlyph as BotcastLogoGlyph)
+        : fallback.fallbackGlyph,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function serializeShowVisuals(
+  atmosphere: BotcastAtmosphereState,
+  logo: BotcastLogoState,
+): string {
+  return JSON.stringify({ ...atmosphere, logo });
+}
+
 function mapShow(row: BotcastShowRow): BotcastShow {
   return {
     id: row.id,
@@ -230,6 +314,7 @@ function mapShow(row: BotcastShowRow): BotcastShow {
     hostingStyle: row.hosting_style,
     accentColor: normalizeAccentColor(row.accent_color),
     atmosphere: parseAtmosphere(row.atmosphere_json),
+    logo: parseLogo(row.atmosphere_json, row),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     episodeCount: Number(row.episode_count ?? 0),
@@ -354,6 +439,17 @@ export function listBotcastShows(db: DatabaseSync, userId: string): BotcastShow[
   return rows.map(mapShow);
 }
 
+export function deleteBotcastShow(
+  db: DatabaseSync,
+  userId: string,
+  showId: string,
+): boolean {
+  const result = db
+    .prepare("DELETE FROM botcast_shows WHERE id = ? AND user_id = ?")
+    .run(showId, userId);
+  return Number(result.changes ?? 0) > 0;
+}
+
 export function createBotcastShow(
   db: DatabaseSync,
   userId: string,
@@ -367,6 +463,12 @@ export function createBotcastShow(
   const id = randomId(12);
   const now = new Date().toISOString();
   const atmosphere = atmosphereForHost(host);
+  const name = cleanText(
+    input.name,
+    synthesizeBotcastShowName(host),
+    BOTCAST_SHOW_NAME_MAX,
+  );
+  const logo = logoForHost(host, name);
   db.prepare(
     `INSERT INTO botcast_shows
       (id, user_id, host_bot_id, name, premise, hosting_style, accent_color,
@@ -376,11 +478,11 @@ export function createBotcastShow(
     id,
     userId,
     host.id,
-    cleanText(input.name, synthesizeBotcastShowName(host), BOTCAST_SHOW_NAME_MAX),
+    name,
     cleanText(input.premise, defaultShowPremise(host)),
     cleanText(input.hostingStyle, defaultHostingStyle(host)),
     normalizeAccentColor(host.color),
-    JSON.stringify(atmosphere),
+    serializeShowVisuals(atmosphere, logo),
     now,
     now,
   );
@@ -407,6 +509,7 @@ export function updateBotcastShow(
   const current = getBotcastShow(db, userId, showId);
   const host = loadBotProfile(db, userId, current.hostBotId);
   let atmosphere = current.atmosphere;
+  let logo = current.logo;
   if (patch.regenerateAtmosphere) {
     atmosphere = atmosphereForHost(host, current.atmosphere.revision + 1);
   } else if (patch.atmosphereImageUrl !== undefined || patch.atmosphereImageId !== undefined) {
@@ -423,6 +526,26 @@ export function updateBotcastShow(
       status: patch.atmosphereImageUrl ? "ready" : "fallback",
     };
   }
+  if (patch.regenerateLogo) {
+    logo = logoForHost(
+      host,
+      cleanText(patch.name, current.name, BOTCAST_SHOW_NAME_MAX),
+      current.logo.revision + 1,
+    );
+  } else if (patch.logoImageUrl !== undefined || patch.logoImageId !== undefined) {
+    logo = {
+      ...logo,
+      imageUrl:
+        patch.logoImageUrl === undefined
+          ? logo.imageUrl
+          : cleanText(patch.logoImageUrl, "", 2_000) || null,
+      imageId:
+        patch.logoImageId === undefined
+          ? logo.imageId
+          : cleanText(patch.logoImageId, "", 256) || null,
+      status: patch.logoImageUrl ? "ready" : "fallback",
+    };
+  }
   const now = new Date().toISOString();
   db.prepare(
     `UPDATE botcast_shows
@@ -432,12 +555,73 @@ export function updateBotcastShow(
     cleanText(patch.name, current.name, BOTCAST_SHOW_NAME_MAX),
     cleanText(patch.premise, current.premise),
     cleanText(patch.hostingStyle, current.hostingStyle),
-    JSON.stringify(atmosphere),
+    serializeShowVisuals(atmosphere, logo),
     now,
     showId,
     userId,
   );
   return getBotcastShow(db, userId, showId);
+}
+
+function parseGeneratedShowIdentity(raw: string): { name: string; premise: string } | null {
+  const candidate = raw.match(/\{[\s\S]*\}/u)?.[0] ?? raw;
+  try {
+    const parsed = JSON.parse(candidate) as Record<string, unknown>;
+    const name = cleanText(parsed.name, "", BOTCAST_SHOW_NAME_MAX);
+    const premise = cleanText(parsed.premise, "", 360);
+    return name && premise ? { name, premise } : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function generateBotcastShowIdentity(
+  db: DatabaseSync,
+  userId: string,
+  showId: string,
+  generation: BotcastGenerationOptions,
+): Promise<{ show: BotcastShow; generated: boolean }> {
+  const current = getBotcastShow(db, userId, showId);
+  const host = loadBotProfile(db, userId, current.hostBotId);
+  try {
+    const selected = speakerProvider(host, generation);
+    const raw = await selected.provider.generateResponse(
+      [
+        {
+          role: "system",
+          content: [
+            "You are naming a premium podcast show around its host's singular voice.",
+            "Return one JSON object with exactly two strings: name and premise.",
+            "The name must be clever, memorable, natural to say aloud, 2-6 words, and derived from the host's ideas or temperament—not merely their full name plus a generic podcast phrase.",
+            "The premise must be one crisp sentence describing the conversational promise. Do not use markdown.",
+          ].join(" "),
+        },
+        {
+          role: "user",
+          content: `Host: ${host.name}\nHost persona:\n${host.systemPrompt.slice(0, 2_400)}`,
+        },
+      ],
+      {
+        ...(selected.model ? { model: selected.model } : {}),
+        temperature: 0.82,
+        maxTokens: 240,
+        jsonMode: true,
+        usagePurpose: "botcast_brand",
+      },
+    );
+    const identity = parseGeneratedShowIdentity(raw);
+    if (!identity) return { show: current, generated: false };
+    return {
+      show: updateBotcastShow(db, userId, showId, {
+        ...identity,
+        regenerateAtmosphere: true,
+        regenerateLogo: true,
+      }),
+      generated: true,
+    };
+  } catch {
+    return { show: current, generated: false };
+  }
 }
 
 export function listBotcastEpisodes(
@@ -457,6 +641,17 @@ export function listBotcastEpisodes(
          WHERE e.user_id = ? ORDER BY e.created_at DESC`,
       ).all(userId)) as unknown as BotcastEpisodeRow[];
   return rows.map(mapEpisodeSummary);
+}
+
+export function deleteBotcastEpisode(
+  db: DatabaseSync,
+  userId: string,
+  episodeId: string,
+): boolean {
+  const result = db
+    .prepare("DELETE FROM botcast_episodes WHERE id = ? AND user_id = ?")
+    .run(episodeId, userId);
+  return Number(result.changes ?? 0) > 0;
 }
 
 function loadEpisodeRow(db: DatabaseSync, userId: string, episodeId: string): BotcastEpisodeRow {

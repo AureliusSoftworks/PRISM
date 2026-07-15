@@ -20,6 +20,23 @@ export interface BotcastAtmosphereState {
   status: "fallback" | "ready" | "failed";
 }
 
+export type BotcastLogoGlyph =
+  | "frequency"
+  | "orbit"
+  | "aperture"
+  | "spark"
+  | "monogram";
+
+export interface BotcastLogoState {
+  seed: string;
+  prompt: string;
+  imageUrl: string | null;
+  imageId: string | null;
+  revision: number;
+  status: "fallback" | "ready" | "failed";
+  fallbackGlyph: BotcastLogoGlyph;
+}
+
 export interface BotcastShow {
   id: string;
   hostBotId: string;
@@ -28,6 +45,7 @@ export interface BotcastShow {
   hostingStyle: string;
   accentColor: string;
   atmosphere: BotcastAtmosphereState;
+  logo: BotcastLogoState;
   createdAt: string;
   updatedAt: string;
   episodeCount: number;
@@ -131,6 +149,9 @@ export interface BotcastShowPatchRequest {
   atmosphereImageUrl?: string | null;
   atmosphereImageId?: string | null;
   regenerateAtmosphere?: boolean;
+  logoImageUrl?: string | null;
+  logoImageId?: string | null;
+  regenerateLogo?: boolean;
 }
 
 export interface BotcastEpisodeCreateRequest {
