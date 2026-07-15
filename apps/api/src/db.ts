@@ -34,6 +34,7 @@ export interface DbUserRecord {
   wrappedUserKeyTag: string;
   theme: "light" | "dark" | "system";
   preferredProvider: "local" | "openai" | "anthropic";
+  preferredImageProvider: "local" | "openai";
   providerLocked: number;
   autoMemory: number;
   autoSwitchModel: number;
@@ -166,6 +167,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       wrapped_user_key_tag TEXT NOT NULL,
       theme TEXT NOT NULL DEFAULT 'system',
       preferred_provider TEXT NOT NULL DEFAULT 'local',
+      preferred_image_provider TEXT NOT NULL DEFAULT 'local',
       provider_locked INTEGER NOT NULL DEFAULT 0,
       auto_memory INTEGER NOT NULL DEFAULT 1,
       auto_switch_model INTEGER NOT NULL DEFAULT 0,
@@ -455,6 +457,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       user_id TEXT NOT NULL,
       title TEXT NOT NULL,
       spark TEXT NOT NULL,
+      spark_wildcards_json TEXT NOT NULL DEFAULT '',
       premise TEXT NOT NULL DEFAULT '',
       voice TEXT NOT NULL DEFAULT '',
       non_negotiables_json TEXT NOT NULL DEFAULT '[]',
@@ -854,6 +857,15 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
     );
   `);
+  const slateProjectColumns = db
+    .prepare("PRAGMA table_info(slate_projects)")
+    .all() as Array<{ name: string }>;
+  const hasSlateSparkWildcards = slateProjectColumns.some(
+    (column) => column.name === "spark_wildcards_json"
+  );
+  if (!hasSlateSparkWildcards) {
+    db.exec("ALTER TABLE slate_projects ADD COLUMN spark_wildcards_json TEXT NOT NULL DEFAULT '';");
+  }
   const userColumns = db
     .prepare("PRAGMA table_info(users)")
     .all() as Array<{ name: string }>;
@@ -986,6 +998,23 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   );
   if (!hasPreferredOnlineModel) {
     db.exec("ALTER TABLE users ADD COLUMN preferred_online_model TEXT;");
+  }
+  const hasPreferredImageProvider = userColumns.some(
+    (column) => column.name === "preferred_image_provider"
+  );
+  if (!hasPreferredImageProvider) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN preferred_image_provider TEXT NOT NULL DEFAULT 'local';"
+    );
+    // Preserve the previously coupled behavior for existing accounts while
+    // letting new accounts start with the privacy-safe local image default.
+    db.exec(
+      `UPDATE users
+          SET preferred_image_provider = CASE
+            WHEN preferred_provider = 'local' THEN 'local'
+            ELSE 'openai'
+          END;`
+    );
   }
   const hasLenientLocalFallbackModel = userColumns.some(
     (column) => column.name === "lenient_local_fallback_model"

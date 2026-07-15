@@ -406,6 +406,8 @@ export {
   OPENAI_IMAGE_MODEL_OPTIONS_FOR_UI,
   DEFAULT_OPENAI_IMAGE_MODEL_ID,
   DEFAULT_OLLAMA_IN_APP_PULL_MODEL,
+  isImageProviderName,
+  resolveImageProviderName,
   isAllowedOpenAiImageModelId,
   isGptImageModelId,
   normalizeOpenAiImageModelId,
@@ -416,6 +418,7 @@ export {
   isComfyUiModelId,
   parseComfyUiCheckpointName,
   isAllowedInAppOllamaPullModelName,
+  type ImageProviderName,
   type OpenAiImageModelId,
   type OpenAiImageSizeGpt,
   type NormalizedOpenAiImageSize,
@@ -538,6 +541,8 @@ export {
   type SlateRevisionRequest,
   type SlateRevisionScope,
   type SlateRevisionStatus,
+  type SlateResolveSparkWildcardsRequest,
+  type SlateResolveSparkWildcardsResponse,
   type SlateStructureItem,
   type SlateStructureKind,
   type SlateStructureStatus,
@@ -609,6 +614,7 @@ export type UsagePurpose =
   | "chat_fallback"
   | "chat_web_search_followup"
   | "conversation_title"
+  | "botcast_brand"
   | "botcast_turn"
   | "coffee_turn"
   | "coffee_router"

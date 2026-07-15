@@ -18,10 +18,39 @@ describe("mode tutorials", () => {
     assert.equal(modeTutorialStep("zen", -1).heading, "Choose a relationship");
     assert.equal(modeTutorialStep("coffee", 99).heading, "Join the conversation");
     assert.equal(modeTutorialStep("botcast", 99).heading, "Direct the replay");
+    assert.equal(modeTutorialStep("slate", 99).heading, "Approve revisions deliberately");
   });
 
   it("presents the production applet as Signal", () => {
     assert.equal(MODE_TUTORIALS.botcast.title, "Signal producer walkthrough");
+    assert.equal(MODE_TUTORIALS.botcast.steps[1]?.heading, "Choose the artwork path");
+    assert.equal(
+      MODE_TUTORIALS.botcast.steps[1]?.targetSelector,
+      '[data-tutorial-target="botcast-brand-controls"]',
+    );
+  });
+
+  it("teaches Slate as a directed document workflow with stable targets", () => {
+    const headings = MODE_TUTORIALS.slate.steps.map((step) => step.heading);
+    const selectors = MODE_TUTORIALS.slate.steps.map((step) => step.targetSelector);
+    assert.deepEqual(headings, [
+      "Start from a spark",
+      "Shape before drafting",
+      "Direct the structure",
+      "Let Slate carry the draft",
+      "Keep your hands on the prose",
+      "Approve revisions deliberately",
+    ]);
+    assert.deepEqual(selectors, [
+      '[data-tutorial-target="slate-create-project"]',
+      '[data-tutorial-target="slate-shape"]',
+      '[data-tutorial-target="slate-structure"]',
+      '[data-tutorial-target="slate-draft"]',
+      '[data-tutorial-target="slate-manuscript"]',
+      '[data-tutorial-target="slate-revision"]',
+    ]);
+    assert.match(MODE_TUTORIALS.slate.steps[0]?.body ?? "", /\{wildcards\}/i);
+    assert.match(MODE_TUTORIALS.slate.steps.at(-1)?.body ?? "", /accept or reject/i);
   });
 
   it("teaches Zen navigation as relationship-specific Homes", () => {
@@ -90,6 +119,14 @@ describe("mode tutorials", () => {
       routing?.body ?? "",
       /changes response routing, not the Account default model choice/,
     );
+    assert.match(routing?.body ?? "", /separate Images provider/);
+  });
+
+  it("teaches that Zen response and image routing are separate", () => {
+    const routing = MODE_TUTORIALS.zen.steps.find(
+      (step) => step.heading === "Choose how replies recover",
+    );
+    assert.match(routing?.body ?? "", /Image generation keeps its own LOCAL\/ONLINE choice/);
   });
 
   it("teaches canonical Coffee prompts without a regeneration step", () => {

@@ -1,4 +1,4 @@
-export type TutorialMode = "zen" | "chat" | "coffee" | "botcast";
+export type TutorialMode = "zen" | "chat" | "coffee" | "botcast" | "slate";
 
 export interface ModeTutorialStep {
   heading: string;
@@ -36,7 +36,7 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Choose how replies recover",
-        body: "AUTO keeps the current model as Primary, then quietly tries your two saved fallbacks if a reply fails validation.",
+        body: "AUTO keeps the current response model as Primary, then quietly tries your two saved fallbacks if a reply fails validation. Image generation keeps its own LOCAL/ONLINE choice in Images.",
         clickLabel: "the LOCAL, AUTO, ONLINE control",
         targetSelector: '[data-tutorial-target="auto-response-mode"]',
       },
@@ -100,7 +100,7 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Keep the table moving",
-        body: "Choose AUTO in the LOCAL, AUTO, ONLINE control to retry failed or malformed table turns. It changes response routing, not the Account default model choice.",
+        body: "Choose AUTO in the LOCAL, AUTO, ONLINE control to retry failed or malformed table turns. It changes response routing, not the Account default model choice or the separate Images provider.",
         clickLabel: "the LOCAL, AUTO, ONLINE control",
         targetSelector: '[data-tutorial-target="auto-response-mode"]',
       },
@@ -117,9 +117,15 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
     steps: [
       {
         heading: "Give a bot a show",
-        body: "Each host owns one persistent show with its own name, premise, studio identity, and episode shelf.",
+        body: "Each host gets a clever, editable show name and a persistent brand shaped by their voice—not a generic template.",
         clickLabel: "a show or the Create show producer card",
         targetSelector: '[data-tutorial-target="botcast-shows"]',
+      },
+      {
+        heading: "Choose the artwork path",
+        body: "Signal can synthesize a matching studio and logo. Turn it off—or let a call fail—and the built-in PRISM studio and glyph mark keep the show camera-ready.",
+        clickLabel: "the studio and logo option",
+        targetSelector: '[data-tutorial-target="botcast-brand-controls"]',
       },
       {
         heading: "Book tonight’s episode",
@@ -138,6 +144,47 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
         body: "Replay defaults to Auto. Left, Right, and Wide lock the viewer’s camera without rewriting the saved director track.",
         clickLabel: "an archived episode",
         targetSelector: '[data-tutorial-target="botcast-replay"]',
+      },
+    ],
+  },
+  slate: {
+    title: "Slate writing desk walkthrough",
+    steps: [
+      {
+        heading: "Start from a spark",
+        body: "Name the prose project, give Slate the creative spark, optionally roll {wildcards}, and bring material you already wrote if you have it.",
+        clickLabel: "the Create project card",
+        targetSelector: '[data-tutorial-target="slate-create-project"]',
+      },
+      {
+        heading: "Shape before drafting",
+        body: "Ask Slate for a premise, cast, unresolved threads, and a practical scene plan. You remain free to redirect every part.",
+        clickLabel: "Shape with Slate",
+        targetSelector: '[data-tutorial-target="slate-shape"]',
+      },
+      {
+        heading: "Direct the structure",
+        body: "Select, edit, rearrange, remove, add, or lock structural cards. A lock tells Slate not to rewrite that approved material.",
+        clickLabel: "a structure card",
+        targetSelector: '[data-tutorial-target="slate-structure"]',
+      },
+      {
+        heading: "Let Slate carry the draft",
+        body: "Select a planned section, add one concise instruction, and generate manuscript prose without repeating a chat prompt.",
+        clickLabel: "Draft selected section",
+        targetSelector: '[data-tutorial-target="slate-draft"]',
+      },
+      {
+        heading: "Keep your hands on the prose",
+        body: "Edit the manuscript directly. Human edits autosave and remain authoritative over older AI proposals.",
+        clickLabel: "the manuscript canvas",
+        targetSelector: '[data-tutorial-target="slate-manuscript"]',
+      },
+      {
+        heading: "Approve revisions deliberately",
+        body: "Choose Deepen, Condense, Rewrite, Reframe, or Cut. Slate previews the replacement; you decide whether to accept or reject it.",
+        clickLabel: "a Refine action",
+        targetSelector: '[data-tutorial-target="slate-revision"]',
       },
     ],
   },

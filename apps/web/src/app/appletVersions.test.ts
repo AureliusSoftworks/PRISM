@@ -9,18 +9,18 @@ import {
 } from "./appletVersions.ts";
 
 describe("applet version helpers", () => {
-  it("keeps the app switcher focused on active top-level applets", () => {
+  it("keeps the app switcher focused on usable top-level applets", () => {
     assert.deepEqual(
       prismTopLevelSwitcherApplets().map((applet) => applet.id),
-      ["chat", "coffee", "botcast"]
+      ["chat", "coffee", "botcast", "slate"]
     );
     assert.deepEqual(
       new Set(prismTopLevelSwitcherApplets().map((applet) => applet.status)),
-      new Set(["active"])
+      new Set(["active", "preview"])
     );
   });
 
-  it("keeps planned and preview applets out of release navigation", () => {
+  it("keeps planned applets and non-switcher previews out of release navigation", () => {
     const plannedIds = prismPlannedRoadmapApplets().map((applet) => applet.id);
     const switcherIds = prismTopLevelSwitcherApplets().map((applet) => applet.id);
 
@@ -30,7 +30,6 @@ describe("applet version helpers", () => {
       "feed",
       "games",
       "gym",
-      "slate",
       "pseudo",
       "surf",
     ]);
@@ -45,9 +44,12 @@ describe("applet version helpers", () => {
     assert.equal(PRISM_APPLETS.coffee.version, "1.3");
     assert.equal(PRISM_APPLETS.botcast.version, "2.0");
     assert.equal(PRISM_APPLETS.botcast.name, "Signal");
+    assert.equal(PRISM_APPLETS.slate.version, "0.3");
+    assert.equal(PRISM_APPLETS.slate.status, "preview");
     assert.equal(prismAppletVersionLabel("chat"), "v1.2");
     assert.equal(prismAppletVersionLabel("zen"), "v1.1");
     assert.equal(prismAppletVersionLabel("coffee"), "v1.3");
     assert.equal(prismAppletVersionLabel("botcast"), "v2.0");
+    assert.equal(prismAppletVersionLabel("slate"), "v0.3");
   });
 });

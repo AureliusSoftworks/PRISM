@@ -70,6 +70,19 @@ describe("universal voice selector", () => {
       /@media \(max-width: 560px\)[\s\S]*?\.voiceModeSelector\s*\{\s*display:\s*none/,
     );
   });
+
+  it("keeps the selector in the header without repeating it in the Zen hero", () => {
+    assert.match(
+      pageSource,
+      /const renderZenSplashControls[\s\S]*?showVoiceSelector: false/,
+    );
+
+    const chatHeader = pageSource.slice(
+      pageSource.indexOf('className={styles.chatHeader}'),
+      pageSource.indexOf("{!chatLikeSurface && view !== \"chat\" ?"),
+    );
+    assert.match(chatHeader, /renderVoiceModeSelector\(\)/);
+  });
 });
 
 describe("Coffee voice authorization", () => {
