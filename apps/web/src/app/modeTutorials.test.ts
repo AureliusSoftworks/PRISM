@@ -17,5 +17,10 @@ describe("mode tutorials", () => {
   it("clamps restored progress to a valid step", () => {
     assert.equal(modeTutorialStep("zen", -1).heading, "Stay with PRISM");
     assert.equal(modeTutorialStep("coffee", 99).heading, "Join the conversation");
+    assert.equal(modeTutorialStep("botcast", 99).heading, "Direct the replay");
+  });
+
+  it("presents the production applet as Signal", () => {
+    assert.equal(MODE_TUTORIALS.botcast.title, "Signal producer walkthrough");
   });
 });

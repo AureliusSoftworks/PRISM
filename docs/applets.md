@@ -1,6 +1,6 @@
 # Prism Applets
 
-Prism applets are experience modules: Chat, Zen, Coffee, Story, Slate, and
+Prism applets are experience modules: Chat, Zen, Coffee, Signal, Story, Slate, and
 future mode surfaces. Their versions track felt product behavior, not internal
 implementation churn.
 
@@ -27,6 +27,7 @@ ship as `0.5.2` while Coffee is `v0.7` and Story is `v0.1`.
 | Chat | v1.2 | Active | Full playground for bots, providers, models, images, exports, and memory-aware conversations. |
 | Zen | v1.1 | Active | Calm one-to-one continuity surface; the standalone Zen lane is deprecating as this becomes Prism's default state. |
 | Coffee | v1.3 | Active | Multi-bot group table with Coffee Groups, session pacing, cups, transcripts, replay, and table controls. |
+| Signal | v2.0 | Active | Bot-owned interview shows with private producer direction, persistent studios, episode archives, and directed replay. |
 | Story | v0.1 | Preview | Generated visual-novel episodes with bots, choices, maps, inventory, and transcripts. |
 | Arena | v0.0 | Planned | Moderated bot debate surface. |
 | Polling | v0.0 | Planned | AI-powered polling across bot groups. |
@@ -38,6 +39,11 @@ ship as `0.5.2` while Coffee is `v0.7` and Story is `v0.1`.
 | Surf | v0.0 | Planned | Simple browsing plus optional bot screen viewing. |
 
 ## Changelog
+
+### 2026-07-15
+
+- Added `Signal v2.0`, the bot-owned interview-show applet with private producer
+  direction, persistent studio identity, episode archives, and directed replay.
 
 ### 2026-07-14
 

@@ -4,6 +4,7 @@ export const PRISM_APPLET_ORDER = [
   "arena",
   "polling",
   "coffee",
+  "botcast",
   "feed",
   "games",
   "story",
@@ -55,6 +56,12 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
     version: "1.3",
     status: "active",
   },
+  botcast: {
+    id: "botcast",
+    name: "Signal",
+    version: "2.0",
+    status: "active",
+  },
   feed: {
     id: "feed",
     name: "Feed",
@@ -102,6 +109,7 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
 export const PRISM_TOP_LEVEL_SWITCHER_APPLET_IDS = [
   "chat",
   "coffee",
+  "botcast",
 ] as const satisfies readonly PrismAppletId[];
 
 export function prismTopLevelSwitcherApplets(): PrismAppletVersion[] {

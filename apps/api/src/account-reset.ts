@@ -15,6 +15,11 @@ import {
 
 export const FACTORY_RESET_USER_DATA_TABLES = [
   "pairing_codes",
+  "botcast_events",
+  "botcast_messages",
+  "botcast_episode_segments",
+  "botcast_episodes",
+  "botcast_shows",
   "coffee_poll_votes",
   "coffee_polls",
   "coffee_group_events",
