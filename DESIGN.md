@@ -25,6 +25,22 @@ Prism should not split people into "users" (utility) versus "players"
 
 A design is incomplete if it serves only one side.
 
+## Brand Ethos: The User Is the Light
+
+> **You are the light. Prism reveals the spectrum.**
+
+PRISM treats the person—not the model, bot, or application—as the source of
+creative light. The product is the prism: a private creative sanctum and
+instrument that helps one intent refract into many voices, perspectives, forms,
+and possibilities.
+
+The primary public slogan is **“One light. Many colors.”** This should guide
+both experience and implementation: preserve authorship, make multiplicity
+useful, let personas interact without fragmenting the workspace, and treat
+privacy as part of the sanctum itself. The full philosophy, mark hierarchy, and
+future first-time animated-poem guardrails live in
+[`docs/brand-ethos.md`](docs/brand-ethos.md).
+
 ## Applet Ethos and Versioning
 
 Prism applets are distinct experience modules, not just routes. Each applet

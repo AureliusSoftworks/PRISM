@@ -9,7 +9,7 @@ Categories: `Overview`
 
 Aliases: `Home`, `Prism overview`
 
-Files: `README.md`, `AGENTS.md`, `docs/applets.md`
+Files: `README.md`, `AGENTS.md`, `docs/applets.md`, `docs/brand-ethos.md`
 
 ## What Prism Is
 
@@ -27,6 +27,8 @@ Prism is a local-first AI workspace for calm, multi-perspective thinking. It kee
 
 Prism is private by default, creative by design, and explicit about control. The LOCAL/ONLINE toggle is a privacy boundary rather than a suggestion. Experience lanes stay separated so practical controls and experiential presence do not blur into one overloaded chat surface.
 
+PRISM also begins with a creative belief: You are the light. Prism reveals the spectrum. Its primary public slogan is One light. Many colors. The person remains the source of intent and authorship; the workspace is the private instrument and sanctum where one light can refract into many useful voices, forms, and possibilities.
+
 ## Architecture Snapshot
 
 The app is a monorepo with a Next.js web surface, a Node.js API, an Electron desktop wrapper, SQLite data, Qdrant search, Ollama local models, and shared packages for cross-surface contracts.
@@ -38,5 +40,7 @@ The app is a monorepo with a Next.js web surface, a Node.js API, an Electron des
 - `concept_bbdc911a-c8a6-417e-8a32-a5650c8be316` (concept)
 - `concept_17097483-9143-4f39-91de-8ad33a73b888` (concept)
 - `decision_a19295be-77fe-4e95-9a6a-57206331a0a5` (decision)
+- `concept_b2c6156c-2c09-41c8-a87c-4ee626cebde3` (concept)
+- `decision_d604f433-273f-48e5-a4dc-38c728d79b78` (decision)
 
 Record: `article_d9ba11bc-3099-4f1e-bf47-1ebe10122438` | Slug: `project-overview` | Authority: agent | Confidence: high

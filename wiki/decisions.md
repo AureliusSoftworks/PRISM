@@ -57,3 +57,17 @@ Files: `AGENTS.md`, `README.md`, `apps/api/src/server.ts`
 Tags: `audience:all`, `ux`, `architecture`
 
 Record: `decision_d8f8761e-d67c-4d96-8217-3af3b67ec403` | Authority: agent | Confidence: medium
+
+## Adopt the refraction emblem as PRISM primary narrative mark
+
+Context: The former Sandbox glyph already depicts one source ray entering a triangular prism and five signature colors emerging. The new user-as-light ethos makes that symbol product-wide rather than mode-specific.
+
+Decision: Promote the exact original Sandbox prism-and-rays design without redrawing its geometry, stroke weights, ray spacing, or P/R/I/S/M color order. Use it as the refraction emblem for first contact, hero moments, onboarding, marketing, and prominent brand lockups; use the wordmark as the signature and the triangle as compact shorthand. Use One light. Many colors. as the primary public slogan, with private by default retained as supporting product positioning. Preserve the shared first-run poem seed about a colossal pyramid on the border between art and logic for a future skippable, replayable, reduced-motion-aware cutscene.
+
+Consequences: Sandbox no longer owns the prism-and-rays glyph. Brand implementations should share the canonical P/R/I/S/M palette and keep the user—not the system—as the source of light and creativity.
+
+Files: `docs/brand-ethos.md`, `apps/web/public/refraction-emblem.svg`, `apps/web/public/wordmark.svg`, `apps/web/public/icon-triangle.svg`, `apps/web/src/app/page.tsx`
+
+Tags: `audience:all`, `brand`, `design`, `onboarding`
+
+Record: `decision_d604f433-273f-48e5-a4dc-38c728d79b78` | Authority: user | Confidence: high

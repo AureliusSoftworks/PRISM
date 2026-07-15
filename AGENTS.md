@@ -117,6 +117,17 @@ Advanced runtime knobs sent from Chat are ignored server-side. Sandbox compactio
 
 Prism should not split people into "users" (utility) vs. "players" (experience). Every feature must satisfy both — practical clarity/control and experiential delight. A design that serves only one side is incomplete.
 
+## Brand Ethos
+
+The person is the creative source: **“You are the light. Prism reveals the
+spectrum.”** The primary public slogan is **“One light. Many colors.”** PRISM is
+the private instrument and sanctum where that light can refract into many
+voices, forms, and possibilities. Preserve user authorship, agency, and
+explicit privacy boundaries. Use the refraction emblem as the primary
+narrative mark, the wordmark as the signature, and the triangle as the compact
+shorthand. See `docs/brand-ethos.md` before changing brand identity, first-run
+narrative, or prominent product framing.
+
 ## Tutorial Maintenance
 
 Treat onboarding and contextual tutorials as part of every user-visible feature, not as follow-up documentation.
