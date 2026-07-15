@@ -4,6 +4,7 @@ export type PrismSurfaceView =
   | "sandbox"
   | "coffee"
   | "botcast"
+  | "slate"
   | "story";
 
 /**
@@ -16,6 +17,7 @@ export function prismSurfaceViewForRouteParam(viewParam: string | null): PrismSu
   }
   if (viewParam === "coffee") return "coffee";
   if (viewParam === "botcast") return "botcast";
+  if (viewParam === "slate") return "slate";
   if (viewParam === "story") return "story";
   return "chat";
 }

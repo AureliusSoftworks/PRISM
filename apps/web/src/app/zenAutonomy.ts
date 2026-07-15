@@ -18,7 +18,7 @@ export type ZenAutonomyEligibilityReason =
   | "idle";
 
 export interface ZenAutonomyEligibilityInput {
-  view: "hub" | "chat" | "sandbox" | "coffee" | "botcast" | "story";
+  view: "hub" | "chat" | "sandbox" | "coffee" | "botcast" | "slate" | "story";
   enabled: boolean;
   documentVisible: boolean;
   hasConversation: boolean;
