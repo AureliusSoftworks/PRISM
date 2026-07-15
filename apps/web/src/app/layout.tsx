@@ -12,6 +12,7 @@ import localFont from "next/font/local";
 import { BlockBrowserInspection } from "./BlockBrowserInspection";
 import { ClientInstallCoach } from "./ClientInstallCoach";
 import { DisableNativeTooltips } from "./DisableNativeTooltips";
+import { PRISM_BRAND_COPY } from "./prismBrand";
 import { RenderPlatformAttribute } from "./RenderPlatformAttribute";
 import { TextFieldContextMenu } from "./TextFieldContextMenu";
 import "./globals.css";
@@ -65,7 +66,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Prism",
-  description: "Local-first AI playground with per-account isolation.",
+  description: `${PRISM_BRAND_COPY.slogan} A private, local-first AI workspace.`,
   icons: {
     icon: [
       { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
