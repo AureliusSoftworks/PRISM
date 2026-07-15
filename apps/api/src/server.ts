@@ -134,6 +134,15 @@ import {
   startCoffeeTurnJob,
 } from "./coffee-turn-jobs.ts";
 import {
+  advanceBotcastEpisode,
+  createBotcastEpisode,
+  createBotcastShow,
+  getBotcastEpisode,
+  listBotcastEpisodes,
+  listBotcastShows,
+  updateBotcastShow,
+} from "./botcast.ts";
+import {
   createDevSeedMemories,
   demoteMemoryToShortTerm,
   deleteMemoriesForBotScope,
@@ -362,6 +371,7 @@ import {
   type BotFaceGlyphAnimation,
   type BotFaceThinkingFrames,
   type BotAudioVoiceProfileV1,
+  type BotcastProducerCue,
   type OpinionBand,
   type OpinionTrend,
   type PromptShortcutMetadata,
@@ -5024,6 +5034,119 @@ function buildRoutes(): RouteDefinition[] {
         return;
       }
       json(ctx.res, 200, { ok: true, status: "failed", error: result.error });
+    }),
+    // Signal is a deliberately isolated anthology pipeline. Its internal
+    // botcast namespace reuses bot personas/providers but never enters
+    // Chat/Coffee memory or relationship paths.
+    route("GET", "/api/botcast/shows", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, { ok: true, shows: listBotcastShows(db, userId) });
+    }),
+    route("POST", "/api/botcast/shows", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const show = createBotcastShow(db, userId, {
+        hostBotId: typeof body.hostBotId === "string" ? body.hostBotId : "",
+        ...(body.name !== undefined ? { name: body.name as string } : {}),
+        ...(body.premise !== undefined ? { premise: body.premise as string } : {}),
+        ...(body.hostingStyle !== undefined
+          ? { hostingStyle: body.hostingStyle as string }
+          : {}),
+      });
+      json(ctx.res, 201, { ok: true, show });
+    }),
+    route("PATCH", "/api/botcast/shows/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const show = updateBotcastShow(db, userId, ctx.params.id, {
+        ...(body.name !== undefined ? { name: body.name as string } : {}),
+        ...(body.premise !== undefined ? { premise: body.premise as string } : {}),
+        ...(body.hostingStyle !== undefined
+          ? { hostingStyle: body.hostingStyle as string }
+          : {}),
+        ...(body.atmosphereImageUrl !== undefined
+          ? { atmosphereImageUrl: body.atmosphereImageUrl as string | null }
+          : {}),
+        ...(body.atmosphereImageId !== undefined
+          ? { atmosphereImageId: body.atmosphereImageId as string | null }
+          : {}),
+        ...(body.regenerateAtmosphere === true ? { regenerateAtmosphere: true } : {}),
+      });
+      json(ctx.res, 200, { ok: true, show });
+    }),
+    route("GET", "/api/botcast/shows/:id/episodes", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        episodes: listBotcastEpisodes(db, userId, ctx.params.id),
+      });
+    }),
+    route("POST", "/api/botcast/shows/:id/episodes", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const episode = createBotcastEpisode(db, userId, ctx.params.id, {
+        guestBotId: typeof body.guestBotId === "string" ? body.guestBotId : "",
+        topic: typeof body.topic === "string" ? body.topic : "",
+        ...(body.producerBrief !== undefined
+          ? { producerBrief: body.producerBrief as string }
+          : {}),
+      });
+      json(ctx.res, 201, { ok: true, episode });
+    }),
+    route("GET", "/api/botcast/episodes/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        episode: getBotcastEpisode(db, userId, ctx.params.id),
+      });
+    }),
+    route("POST", "/api/botcast/episodes/:id/advance", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const userKey = decryptUserKey(userId);
+      const body = ctx.body as Record<string, unknown>;
+      const cueRecord =
+        body.cue && typeof body.cue === "object" && !Array.isArray(body.cue)
+          ? (body.cue as Record<string, unknown>)
+          : null;
+      const cueKind = cueRecord?.kind;
+      const cue: BotcastProducerCue | undefined =
+        cueKind === "ask_about" ||
+        cueKind === "press_harder" ||
+        cueKind === "move_on" ||
+        cueKind === "lighten_up"
+          ? {
+              kind: cueKind,
+              ...(typeof cueRecord?.detail === "string"
+                ? { detail: cueRecord.detail }
+                : {}),
+            }
+          : undefined;
+      const requestedProvider = body.preferredProvider;
+      const preferredProvider: ProviderName =
+        requestedProvider === "local" ||
+        requestedProvider === "openai" ||
+        requestedProvider === "anthropic"
+          ? requestedProvider
+          : user.preferred_provider;
+      const result = await advanceBotcastEpisode(
+        db,
+        userId,
+        ctx.params.id,
+        cue ? { cue } : {},
+        {
+          preferredProvider,
+          openAiApiKey:
+            getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey,
+          anthropicApiKey:
+            getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey,
+          secondaryOllamaHost: user.secondary_ollama_host,
+          preferredLocalModel: user.preferred_local_model,
+          preferredOnlineModel: user.preferred_online_model,
+          providerFactory: providerFactoryOverride,
+        },
+      );
+      json(ctx.res, 200, { ok: true, ...result });
     }),
     // Coffee mode (timed live sessions for 3-5 reactive bots). Lives on its own
     // endpoint rather than inside /api/chat so the lighter coffee

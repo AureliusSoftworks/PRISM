@@ -1,4 +1,10 @@
-export type PrismSurfaceView = "hub" | "chat" | "sandbox" | "coffee" | "story";
+export type PrismSurfaceView =
+  | "hub"
+  | "chat"
+  | "sandbox"
+  | "coffee"
+  | "botcast"
+  | "story";
 
 /**
  * Product Chat now owns the immersive canvas. Deprecated Zen/Sandbox route
@@ -9,6 +15,7 @@ export function prismSurfaceViewForRouteParam(viewParam: string | null): PrismSu
     return "chat";
   }
   if (viewParam === "coffee") return "coffee";
+  if (viewParam === "botcast") return "botcast";
   if (viewParam === "story") return "story";
   return "chat";
 }
