@@ -1,7 +1,7 @@
 import { coffeeCupTopOffProgressForFrameIndex } from "@localai/shared";
 
 export const COFFEE_POT_FINAL_POUR_FRAME_INDEX = 4;
-export const COFFEE_POT_HOVER_HOLD_BEFORE_POUR_MS = 180;
+export const COFFEE_POT_HOVER_HOLD_BEFORE_POUR_MS = 90;
 export const COFFEE_POT_POUR_FRAME_MS = 40;
 export const COFFEE_POT_FILL_FRAME_MS = 180;
 export const COFFEE_POT_FILL_CLEAR_MS = 360;
@@ -183,6 +183,45 @@ export function coffeeCupTopOffFrameIndexForPour(
     Math.floor((pourFrame / COFFEE_POT_FINAL_POUR_FRAME_INDEX) * (startFrame + 1))
   );
   return startFrame - fillStep;
+}
+
+export function coffeeCupTopOffFirstVisiblePourFrameIndex(
+  fromFrameIndex: number
+): number | null {
+  const startFrame = Math.max(0, Math.min(6, Math.round(fromFrameIndex)));
+  if (startFrame <= 0) return null;
+  for (
+    let pourFrameIndex = 1;
+    pourFrameIndex <= COFFEE_POT_FINAL_POUR_FRAME_INDEX;
+    pourFrameIndex += 1
+  ) {
+    const nextFrameIndex = coffeeCupTopOffFrameIndexForPour(
+      startFrame,
+      pourFrameIndex
+    );
+    if (nextFrameIndex != null && nextFrameIndex < startFrame) {
+      return pourFrameIndex;
+    }
+  }
+  return COFFEE_POT_FINAL_POUR_FRAME_INDEX;
+}
+
+export function coffeeCupTopOffFillFrameSchedule(
+  fromFrameIndex: number
+): Array<{ frameIndex: number; delayMs: number }> {
+  const firstVisibleFrameIndex =
+    coffeeCupTopOffFirstVisiblePourFrameIndex(fromFrameIndex);
+  if (firstVisibleFrameIndex == null) return [];
+  return Array.from(
+    {
+      length:
+        COFFEE_POT_FINAL_POUR_FRAME_INDEX - firstVisibleFrameIndex + 1,
+    },
+    (_, offset) => ({
+      frameIndex: firstVisibleFrameIndex + offset,
+      delayMs: coffeePotFillFrameDelayMs(offset),
+    })
+  );
 }
 
 export function coffeeCupTopOffFillFrameIndices(fromFrameIndex: number): number[] {
