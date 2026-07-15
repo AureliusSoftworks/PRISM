@@ -3,6 +3,10 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
 const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+const cssSource = readFileSync(
+  new URL("./page.module.css", import.meta.url),
+  "utf8",
+);
 const tutorialSource = readFileSync(
   new URL("./modeTutorials.ts", import.meta.url),
   "utf8",
@@ -79,6 +83,10 @@ describe("relationship-depth page integration", () => {
       zenSettings,
       /\{renderZenPersonaTransitionChoiceControl\(\)\}/,
     );
+    assert.match(
+      cssSource,
+      /\.zenPersonaTransitionSegmentButton,\s*\.form \.zenPersonaTransitionSegmentButton\s*\{/,
+    );
   });
 
   it("exposes one shared identity-anchor contract across Library, room, and Home", () => {
@@ -115,7 +123,7 @@ describe("relationship-depth page integration", () => {
     assert.match(pageSource, /returnFromRelationshipDepth\("back"\)/);
   });
 
-  it("runs reduced motion as a native crossfade with matched manual fallback beats", () => {
+  it("gates native transitions by handoff safety and keeps matched manual fallback beats", () => {
     const forwardRoute = sourceSlice(
       "async function runRelationshipDepthTransition",
       "async function returnFromRelationshipDepth",
@@ -151,6 +159,39 @@ describe("relationship-depth page integration", () => {
         /waitForRelationshipDepthBeat\(manualBeatTiming\.sourceMs\)[\s\S]{0,180}waitForRelationshipDepthBeat\(manualBeatTiming\.destinationMs\)/,
       );
     }
+  });
+
+  it("opens persona Homes from category rows while keeping nested episodes read-only", () => {
+    const sidebarRows = sourceSlice(
+      "function selectZenPersonaFromSidebar",
+      "function renderConversationGroupDeleteButton",
+    );
+    const categoryTile = sourceSlice(
+      "const renderConversationGroupTile = (",
+      "const renderConversationListContents =",
+    );
+
+    assert.match(
+      sidebarRows,
+      /visitZenHome\(botId, \{ destination: \{ kind: "resolve" \} \}\)/,
+    );
+    assert.match(sidebarRows, /nested \? \([\s\S]*?<span/);
+    assert.match(sidebarRows, /data-history-timeline-entry="true"/);
+    assert.doesNotMatch(
+      sourceSlice(
+        'data-history-timeline-entry="true"',
+        ") : (\n          <button",
+      ),
+      /onClick|refreshConversation/,
+    );
+    assert.match(
+      categoryTile,
+      /view === "chat" && group\.botId[\s\S]{0,120}selectZenPersonaFromSidebar\(group\.botId\)/,
+    );
+    assert.match(
+      cssSource,
+      /\.conversationTimelineEntry\s*\{[\s\S]{0,100}cursor: default/,
+    );
   });
 
   it("locks the whole surface only during transition beats", () => {

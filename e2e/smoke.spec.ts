@@ -1370,6 +1370,63 @@ test.describe("PRISM desktop smoke", () => {
     await expect(homePicker).toContainText("Default");
     await expect(homePicker).toBeFocused();
     expect(chatWrites).toEqual([]);
+
+    // Sidebar persona categories resolve the same persistent Home without
+    // mounting a historical episode as an interactive conversation. This
+    // reduced-motion path previously entered a native async View Transition
+    // and could freeze WebKit while the live editor was being replaced.
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.getByRole("button", { name: "Open conversation panel" }).click();
+    await page
+      .getByRole("button", {
+        name: "Select and expand Test Bot 1 conversations",
+      })
+      .click();
+    await expect(page.getByText("Welcome to Test Bot 1 Home.")).toBeVisible();
+    await expect(
+      page
+        .locator('[data-history-timeline-entry="true"]')
+        .filter({ hasText: "Test Bot 1 Home" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Test Bot 1 Home", exact: true }),
+    ).toHaveCount(0);
+    await expect(shell).toHaveAttribute(
+      "data-relationship-depth-transition",
+      "settled",
+    );
+    expect(zenOpenBodies).toEqual([]);
+
+    // Zen keeps its lived timeline intact: mutation/branch actions stay out
+    // of both the context menu and the sidebar-open message presentation.
+    await page
+      .locator('[data-message-id="bot-home-user"]')
+      .click({ button: "right" });
+    const zenMessageActions = page.getByRole("menu", {
+      name: "Message actions",
+    });
+    await expect(zenMessageActions).toBeVisible();
+    await expect(
+      zenMessageActions.getByRole("menuitem", { name: "Copy", exact: true }),
+    ).toBeVisible();
+    for (const removedAction of [
+      "Edit",
+      "Resend",
+      "Fork",
+      "Delete",
+    ] as const) {
+      await expect(
+        zenMessageActions.getByRole("menuitem", {
+          name: removedAction,
+          exact: true,
+        }),
+      ).toHaveCount(0);
+    }
+    await page.mouse.click(4, 4);
+    await expect(zenMessageActions).toHaveCount(0);
+    await expect(
+      page.locator('[data-tutorial-target="chat-message-actions"]'),
+    ).toHaveCount(0);
     expect(pageErrors).toEqual([]);
   });
 

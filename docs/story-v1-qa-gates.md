@@ -74,3 +74,13 @@ Legend: P0 = release blocker, P1 = must-fix before release candidate sign-off, P
 2. Preserve existing sessions as read-only when possible; avoid destructive state transitions.
 3. Route users to safe fallback (`Back to Hub`/library) with clear message.
 4. Re-open rollout only after failed P0 gate is re-verified and documented.
+
+## 7) Future Story and Slate integration gates
+
+When snapshot handoffs are implemented, add P0 checks proving that the original
+source remains unchanged, tenant scoping applies to both the source and snapshot,
+the handoff is structured rather than a transcript dump, provenance survives the
+round trip, and no content is incorporated without an explicit writer choice.
+Those gates belong to the later roadmap stages in
+`docs/slate-v1-product-ux-contract.md`; they do not block the standalone Slate
+foundation or current Story V1 preview.

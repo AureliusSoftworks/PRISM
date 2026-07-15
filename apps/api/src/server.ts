@@ -8660,7 +8660,10 @@ function buildRoutes(): RouteDefinition[] {
           surface: "bots",
         },
         () => compileBotPowers({
-          provider: getAuxiliaryProvider(user.prism_default_llm_model ?? undefined),
+          provider: auxiliaryProviderFactoryOverride(
+            user.prism_default_llm_model ?? undefined,
+            dualOllamaWorkloadOptions(user)
+          ),
           botName: typeof body.botName === "string" ? body.botName : "",
           systemPrompt: typeof body.systemPrompt === "string" ? body.systemPrompt : "",
           powers: body.powers,

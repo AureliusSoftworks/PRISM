@@ -574,6 +574,14 @@ test("avatar save state is scoped and bounded so prompts cannot stay stuck", () 
     /withBotAvatarSaveTimeout\(\(signal\) =>\s*api<\{ bot\?: Bot \}>/,
   );
   assert.match(pageSource, /const avatarCustomizerSaving = busy;/);
+  assert.match(
+    pageSource,
+    /if \(dismissOuterSavePrompt\) onCancelSavePrompt\(\);[\s\S]*?void onSave\(\);/,
+  );
+  assert.match(
+    pageSource,
+    /onRequestClose=\{\(\) => \{\s*if \(avatarCustomizerSaving\) \{\s*closeBotAvatarStudioFlow\(\);\s*return;/,
+  );
 });
 
 test("avatar and bot saves recover cleanly when the edit target no longer exists", () => {

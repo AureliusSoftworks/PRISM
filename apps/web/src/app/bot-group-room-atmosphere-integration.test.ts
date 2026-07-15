@@ -192,6 +192,10 @@ describe("saved group room atmosphere integration", () => {
     assert.match(cssSource, /\.botGroupHeroStage[\s\S]*?z-index: 2/u);
     assert.match(
       cssSource,
+      /\.emptyStateSearchMeta\s*\{[\s\S]*?background:\s*color-mix\(in srgb, var\(--bg-surface\) 88%, transparent\)[\s\S]*?color:\s*var\(--fg\)/u,
+    );
+    assert.match(
+      cssSource,
       /data-relationship-depth-transition="source-beat"\] \.messagesFrame/u,
     );
     assert.match(tutorialSource, /Shape a saved group's room/u);

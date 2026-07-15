@@ -20,14 +20,18 @@ export const RELATIONSHIP_DEPTH_REDUCED_CROSSFADE_MS = 140;
 
 export function relationshipDepthNativeViewTransitionEligible({
   supported,
-  reducedMotion,
+  reducedMotion: _reducedMotion,
   asyncHandoffSafe,
 }: {
   supported: boolean;
   reducedMotion: boolean;
   asyncHandoffSafe: boolean;
 }): boolean {
-  return supported && (reducedMotion || asyncHandoffSafe);
+  // WebKit can lose DOM ownership when an async route commit removes the live
+  // editor inside a native View Transition callback. Reduced motion changes
+  // the animation, not that lifecycle constraint, so async handoffs always
+  // use the manual crossfade.
+  return supported && asyncHandoffSafe;
 }
 
 export function relationshipDepthManualBeatTiming({

@@ -38,6 +38,21 @@ describe("Chat shell header layout", () => {
     );
   });
 
+  it("distinguishes the account model default from Auto response routing", () => {
+    assert.match(
+      pageSource,
+      /const ACCOUNT_DEFAULT_MODEL_LABEL = "Account default";/,
+    );
+    assert.match(
+      pageSource,
+      /autoOptionLabel = ACCOUNT_DEFAULT_MODEL_LABEL/,
+    );
+    assert.match(
+      pageSource,
+      /const AUTO_MODEL_SETTINGS_SUBTEXT = "uses the model saved in Settings";/,
+    );
+  });
+
   it("offsets the collapsed Chat hero while sidebar-open layout stays in flow", () => {
     assert.match(
       cssSource,

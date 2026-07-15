@@ -238,6 +238,22 @@ describe("bot group waiting-room integration", () => {
     );
   });
 
+  it("keeps ambient theater running while the pointer merely rests over the room", () => {
+    const renderStart = pageSource.indexOf(
+      "const renderFocusedBotLibraryGroupWaitingRoom",
+    );
+    const renderEnd = pageSource.indexOf(
+      "const renderFocusedBotLibraryGroupHero",
+      renderStart,
+    );
+    assert.ok(renderStart >= 0 && renderEnd > renderStart);
+    const renderSource = pageSource.slice(renderStart, renderEnd);
+    assert.doesNotMatch(renderSource, /onPointerEnter=/);
+    assert.doesNotMatch(renderSource, /onPointerLeave=/);
+    assert.match(renderSource, /onPointerDownCapture=/);
+    assert.match(renderSource, /onFocusCapture=/);
+  });
+
   it("keeps ambient cues out of the accessibility tree and lowers roamer work", () => {
     const renderStart = pageSource.indexOf(
       "const renderFocusedBotLibraryGroupWaitingRoom",

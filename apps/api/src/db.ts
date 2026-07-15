@@ -450,6 +450,58 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       updated_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS slate_projects (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      spark TEXT NOT NULL,
+      premise TEXT NOT NULL DEFAULT '',
+      voice TEXT NOT NULL DEFAULT '',
+      non_negotiables_json TEXT NOT NULL DEFAULT '[]',
+      phase TEXT NOT NULL DEFAULT 'shape',
+      structure_json TEXT NOT NULL DEFAULT '[]',
+      characters_json TEXT NOT NULL DEFAULT '[]',
+      unresolved_threads_json TEXT NOT NULL DEFAULT '[]',
+      manuscript TEXT NOT NULL DEFAULT '',
+      direction TEXT NOT NULL DEFAULT '',
+      locked_ranges_json TEXT NOT NULL DEFAULT '[]',
+      last_provider TEXT,
+      last_model TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS slate_revisions (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      action TEXT NOT NULL,
+      scope TEXT NOT NULL,
+      structure_item_id TEXT,
+      selection_start INTEGER,
+      selection_end INTEGER,
+      direction TEXT NOT NULL DEFAULT '',
+      original_text TEXT NOT NULL,
+      proposed_text TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      provider TEXT NOT NULL,
+      model TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      resolved_at TEXT,
+      FOREIGN KEY(project_id) REFERENCES slate_projects(id) ON DELETE CASCADE,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS slate_versions (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      structure_json TEXT NOT NULL,
+      manuscript TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(project_id) REFERENCES slate_projects(id) ON DELETE CASCADE,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
     CREATE TABLE IF NOT EXISTS bots (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -1896,6 +1948,15 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   );
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_story_sessions_user_status ON story_sessions (user_id, status, updated_at DESC);"
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_slate_projects_user_updated ON slate_projects (user_id, updated_at DESC);"
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_slate_revisions_project_created ON slate_revisions (user_id, project_id, created_at DESC);"
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_slate_versions_project_created ON slate_versions (user_id, project_id, created_at DESC);"
   );
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_coffee_polls_session_updated ON coffee_polls (user_id, conversation_id, updated_at DESC);"

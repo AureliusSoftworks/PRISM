@@ -10,14 +10,14 @@ import {
 const never = new Promise<void>(() => undefined);
 
 describe("relationship-depth native View Transition guard", () => {
-  it("keeps reduced motion on the native crossfade even for async handoffs", () => {
+  it("keeps async handoffs on the manual crossfade even with reduced motion", () => {
     assert.equal(
       relationshipDepthNativeViewTransitionEligible({
         supported: true,
         reducedMotion: true,
         asyncHandoffSafe: false,
       }),
-      true,
+      false,
     );
     assert.equal(
       relationshipDepthNativeViewTransitionEligible({
