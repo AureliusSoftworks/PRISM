@@ -1558,6 +1558,18 @@ describe("Coffee seat arrival CSS", () => {
   });
 
   it("selects first-person Coffee automatically while keeping current Coffee settings discoverable", () => {
+    const perspectiveDeclarationIndex = pageSource.indexOf(
+      "const coffeeFirstPersonPerspective =",
+    );
+    const gazeSeatLayoutIndex = pageSource.indexOf(
+      "const coffeeGazeVisibleSeats =",
+    );
+    assert.ok(perspectiveDeclarationIndex >= 0);
+    assert.ok(gazeSeatLayoutIndex >= 0);
+    assert.ok(
+      perspectiveDeclarationIndex < gazeSeatLayoutIndex,
+      "first-person perspective must be initialized before draft Coffee seats calculate gaze geometry",
+    );
     assert.match(
       pageSource,
       /const coffeeFirstPersonPerspective =[\s\S]*?!coffeeReplayActive[\s\S]*?coffeeSessionPhase === "arriving"[\s\S]*?coffeeSessionPhase === "live"/

@@ -259,6 +259,79 @@ async function installAuthenticatedApi(page: Page): Promise<void> {
   });
 }
 
+async function installCoffeeGroupRegressionApi(
+  page: Page,
+  coffeeBots: Array<(typeof testBots)[number]>,
+): Promise<void> {
+  await installAuthenticatedApi(page);
+  await page.addInitScript(
+    ({ userId, group }) => {
+      window.localStorage.setItem(
+        `prism_bot_library_groups:${userId}`,
+        JSON.stringify([group]),
+      );
+    },
+    {
+      userId: testUser.id,
+      group: {
+        id: "e2e-coffee-filter",
+        name: "Coffee Filter Trio",
+        description: "A deterministic Coffee picker filter.",
+        botIds: coffeeBots.slice(0, 3).map((bot) => bot.id),
+        deleteProtected: false,
+        builtIn: false,
+        createdAt: "2026-07-14T23:44:00.000Z",
+        updatedAt: "2026-07-14T23:44:00.000Z",
+      },
+    },
+  );
+  await page.route("**/api/bots", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ bots: coffeeBots }),
+    });
+  });
+  await page.route("**/api/models", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        catalog: {
+          local: [
+            {
+              id: "llama3.2",
+              label: "Llama 3.2",
+              provider: "local",
+              isDefault: true,
+            },
+            {
+              id: "qwen3:8b",
+              label: "Qwen 3 8B",
+              provider: "local",
+            },
+          ],
+          online: [
+            {
+              id: "gpt-4o-mini",
+              label: "GPT-4o mini",
+              provider: "openai",
+              isDefault: true,
+            },
+          ],
+          defaults: { local: "llama3.2", online: "gpt-4o-mini" },
+        },
+        comfyUi: {
+          configured: false,
+          reachable: false,
+          checkpoints: [],
+          allCheckpoints: [],
+        },
+      }),
+    });
+  });
+}
+
 interface StatefulZenFixture {
   persistentConversation: TestConversation;
   requests: Record<string, unknown>[];
@@ -401,6 +474,276 @@ test.describe("PRISM desktop smoke", () => {
     ).toBeVisible();
     await expect(page.locator('[data-mode="picker"]')).toBeVisible();
     await expect(page.getByText("Select bots to begin")).toBeVisible();
+  });
+
+  test("Coffee group setup selects every bot, enforces five seats, and enters a saved session", async ({
+    page,
+  }) => {
+    test.setTimeout(60_000);
+    const coffeeBots = Array.from({ length: 6 }, (_, index) => ({
+      ...testBots[index % testBots.length]!,
+      id: `e2e-coffee-bot-${index + 1}`,
+      name: `Coffee Seat ${index + 1}`,
+      online_enabled: 1,
+      avatarDetails: null,
+    }));
+    const runtimeErrors: Error[] = [];
+    const integrityConsoleErrors: string[] = [];
+    page.on("pageerror", (error) => runtimeErrors.push(error));
+    page.on("console", (message) => {
+      if (message.type() !== "error") return;
+      const text = message.text();
+      if (
+        /ReferenceError|Maximum update depth|same key|Cannot update a component while rendering|NaN|Infinity/u.test(
+          text,
+        )
+      ) {
+        integrityConsoleErrors.push(text);
+      }
+    });
+
+    await installCoffeeGroupRegressionApi(page, coffeeBots);
+
+    type SavedCoffeeGroup = {
+      id: string;
+      name: string;
+      botGroupIds: string[];
+      coffeeSeatBotIds: Array<string | null>;
+      coffeeSettings: Record<string, unknown>;
+      presetMode: "manual";
+      starterTopicsByBotId: Record<string, string[]>;
+      createdAt: string;
+      updatedAt: string;
+    };
+    let savedGroup: SavedCoffeeGroup | null = null;
+    const fulfillJson = (
+      route: Route,
+      payload: unknown,
+      status = 200,
+    ): Promise<void> =>
+      route.fulfill({
+        status,
+        contentType: "application/json",
+        body: JSON.stringify(payload),
+      });
+
+    await page.route("**/api/coffee/groups", async (route) => {
+      const request = route.request();
+      if (request.method() === "GET") {
+        await fulfillJson(route, {
+          ok: true,
+          groups: savedGroup ? [savedGroup] : [],
+        });
+        return;
+      }
+      if (request.method() !== "POST") {
+        await route.fallback();
+        return;
+      }
+      const body = request.postDataJSON() as {
+        groupBotIds?: Array<string | null>;
+        coffeeSettings?: Record<string, unknown>;
+      };
+      const requestedSeatIds = Array.isArray(body.groupBotIds)
+        ? body.groupBotIds
+        : [];
+      const coffeeSeatBotIds = Array.from(
+        { length: 5 },
+        (_, index) => requestedSeatIds[index] ?? null,
+      );
+      const now = "2026-07-14T23:45:00.000Z";
+      savedGroup = {
+        id: "e2e-coffee-group",
+        name: "Regression Circle",
+        botGroupIds: coffeeSeatBotIds.filter(
+          (botId): botId is string => typeof botId === "string",
+        ),
+        coffeeSeatBotIds,
+        coffeeSettings: body.coffeeSettings ?? {},
+        presetMode: "manual",
+        starterTopicsByBotId: {},
+        createdAt: now,
+        updatedAt: now,
+      };
+      await fulfillJson(route, { ok: true, group: savedGroup }, 201);
+    });
+    await page.route(
+      "**/api/coffee/groups/e2e-coffee-group/sessions",
+      async (route) => {
+        if (route.request().method() !== "POST" || !savedGroup) {
+          await route.fallback();
+          return;
+        }
+        await fulfillJson(
+          route,
+          {
+            ok: true,
+            arrivalScenario: "user-first",
+            coffeeStarterTopics: [
+              "A regression worth catching",
+              "When systems fight back",
+              "The cost of clean logic",
+              "A bug worth keeping",
+            ],
+            conversation: {
+              id: "e2e-coffee-session",
+              title: savedGroup.name,
+              mode: "coffee",
+              coffeeGroupId: savedGroup.id,
+              botGroupIds: savedGroup.botGroupIds,
+              coffeeSeatBotIds: savedGroup.coffeeSeatBotIds,
+              coffeeSettings: savedGroup.coffeeSettings,
+              coffeeSessionDurationMinutes: 10,
+              coffeeTopic: null,
+              messages: [],
+              createdAt: "2026-07-14T23:46:00.000Z",
+              updatedAt: "2026-07-14T23:46:00.000Z",
+            },
+          },
+          201,
+        );
+      },
+    );
+
+    await page.goto("/?view=coffee");
+    const picker = page.getByRole("listbox", {
+      name: "Bots available for Coffee",
+    });
+    await expect(picker.getByRole("option")).toHaveCount(6);
+
+    for (const bot of coffeeBots) {
+      const tile = picker.getByRole("option", { name: bot.name });
+      await tile.click();
+      await expect(tile).toHaveAttribute("aria-selected", "true");
+      await expect(page.getByText("1 / 5 seats filled")).toBeVisible();
+      await expect(
+        page.getByRole("heading", { name: "Prism needs a quick refresh." }),
+      ).toHaveCount(0);
+      await tile.click();
+      await expect(tile).toHaveAttribute("aria-selected", "false");
+      await expect(page.getByText("0 / 5 seats filled")).toBeVisible();
+    }
+
+    const variantTile = picker.getByRole("option", {
+      name: "Coffee Seat 2",
+    });
+    await expect(
+      page.getByRole("button", { name: "AUTO", exact: true }),
+    ).toBeDisabled();
+    for (const mode of ["ONLINE", "LOCAL"] as const) {
+      const modeButton = page.getByRole("button", { name: mode, exact: true });
+      await expect(modeButton).toBeEnabled();
+      await modeButton.click();
+      await expect(modeButton).toHaveAttribute("aria-pressed", "true");
+      await variantTile.click();
+      await expect(variantTile).toHaveAttribute("aria-selected", "true");
+      await variantTile.click();
+      await expect(variantTile).toHaveAttribute("aria-selected", "false");
+    }
+
+    const modelPicker = page.getByRole("button", {
+      name: "Coffee session model for local replies",
+    });
+    await modelPicker.click();
+    await page.getByRole("option", { name: /Qwen 3 8B/u }).click();
+    await expect(modelPicker).toContainText("Qwen 3 8B");
+    await variantTile.click();
+    await variantTile.click();
+    await expect(variantTile).toHaveAttribute("aria-selected", "false");
+
+    const rapidTiles = picker.getByRole("option");
+    await rapidTiles.evaluateAll((tiles) => {
+      for (const tile of tiles.slice(0, 3)) (tile as HTMLElement).click();
+    });
+    await expect(page.getByText("3 / 5 seats filled")).toBeVisible();
+    await rapidTiles.evaluateAll((tiles) => {
+      for (const tile of tiles.slice(0, 3)) (tile as HTMLElement).click();
+    });
+    await expect(page.getByText("0 / 5 seats filled")).toBeVisible();
+
+    await page.goto("/?view=chat");
+    await expect(page.getByRole("textbox").last()).toBeVisible();
+    await page.goto("/?view=coffee");
+    await expect(page.getByText("0 / 5 seats filled")).toBeVisible();
+
+    await page
+      .getByRole("button", { name: "Bot group filter: All bots" })
+      .click();
+    await page
+      .getByRole("option", { name: /Coffee Filter Trio/u })
+      .click();
+    await expect(picker.getByRole("option")).toHaveCount(3);
+    const groupFilteredTile = picker.getByRole("option", {
+      name: coffeeBots[0]!.name,
+    });
+    await groupFilteredTile.click();
+    await expect(groupFilteredTile).toHaveAttribute("aria-selected", "true");
+    await groupFilteredTile.click();
+    await page
+      .getByRole("button", { name: "Bot group filter: Coffee Filter Trio" })
+      .click();
+    await page.getByRole("option", { name: "Show all bots" }).click();
+    await expect(picker.getByRole("option")).toHaveCount(6);
+
+    const search = page.getByRole("searchbox", {
+      name: "Search bots for Coffee Session",
+    });
+    await search.fill("Seat 6");
+    await expect(picker.getByRole("option")).toHaveCount(1);
+    const filteredTile = picker.getByRole("option", {
+      name: "Coffee Seat 6",
+    });
+    await filteredTile.click();
+    await expect(filteredTile).toHaveAttribute("aria-selected", "true");
+    await filteredTile.click();
+    await search.fill("");
+    await expect(picker.getByRole("option")).toHaveCount(6);
+
+    const createGroupButton = page.getByRole("button", {
+      name: "Create Coffee Group →",
+    });
+    for (const [index, bot] of coffeeBots.slice(0, 5).entries()) {
+      await picker.getByRole("option", { name: bot.name }).click();
+      if (index === 1) await expect(createGroupButton).toBeEnabled();
+    }
+    await expect(page.getByText("5 / 5 seats filled")).toBeVisible();
+    const sixthTile = picker.getByRole("option", { name: "Coffee Seat 6" });
+    await expect(sixthTile).toBeDisabled();
+
+    const firstTile = picker.getByRole("option", { name: "Coffee Seat 1" });
+    await firstTile.click();
+    await sixthTile.click();
+    await expect(page.getByText("5 / 5 seats filled")).toBeVisible();
+    await expect(sixthTile).toHaveAttribute("aria-selected", "true");
+
+    await createGroupButton.click();
+    const savedGroupButton = page
+      .locator('[data-tutorial-target="coffee-groups"]')
+      .getByRole("button", {
+        name: "Open Coffee Group Regression Circle",
+        exact: true,
+      });
+    await expect(savedGroupButton).toBeVisible();
+    expect(savedGroup?.botGroupIds).toHaveLength(5);
+
+    await page.reload();
+    await expect(savedGroupButton).toBeVisible();
+    await savedGroupButton.click();
+    const coffeeTable = page.getByRole("region", { name: "Coffee table" });
+    const startSessionButton = coffeeTable.getByRole("button", {
+      name: "Start session with 5",
+      exact: true,
+    });
+    await expect(startSessionButton).toBeEnabled();
+
+    await startSessionButton.click();
+    await expect(page.locator('[data-phase="topic"]')).toBeVisible();
+    await expect(page.getByText("Choose a topic to begin.")).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Prism needs a quick refresh." }),
+    ).toHaveCount(0);
+    expect(runtimeErrors).toEqual([]);
+    expect(integrityConsoleErrors).toEqual([]);
   });
 
   test("authenticated Zen persists LOCAL turns while Private chat stays ephemeral", async ({
