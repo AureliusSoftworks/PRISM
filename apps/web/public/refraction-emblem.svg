@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  PRISM's primary narrative emblem.
+
+  One neutral source ray (the user) enters a prism (the creative sanctum) and
+  emerges as the five P/R/I/S/M signature colors (voices, perspectives, tools,
+  and creative possibilities). The wordmark is the signature; icon-triangle.svg
+  remains the compact shorthand for small or monochrome contexts.
+-->
+<svg
+  viewBox="0 0 48 48"
+  xmlns="http://www.w3.org/2000/svg"
+  fill="none"
+  color="#6e665e"
+>
+  <g stroke-linecap="round" stroke-linejoin="round">
+    <path
+      d="M24 8 L10 34 L38 34 Z"
+      stroke="currentColor"
+      stroke-width="2.5"
+      data-prism-refraction-part="instrument"
+    />
+    <path
+      d="M2 24 L15 24"
+      stroke="currentColor"
+      stroke-width="2"
+      opacity="0.55"
+      data-prism-refraction-part="source-light"
+    />
+    <g data-prism-refraction-part="spectrum" stroke-width="2.5">
+      <path d="M31 24 L46 8" stroke="#ff4d6d" data-prism-spectrum="p" />
+      <path d="M31 24 L46 16" stroke="#ff9f1c" data-prism-spectrum="r" />
+      <path d="M31 24 L46 24" stroke="#b7e63a" data-prism-spectrum="i" />
+      <path d="M31 24 L46 32" stroke="#2fd3e3" data-prism-spectrum="s" />
+      <path d="M31 24 L46 40" stroke="#7b5cff" data-prism-spectrum="m" />
+    </g>
+  </g>
+</svg>

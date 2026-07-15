@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { PRISM_BRAND_COPY } from "../prismBrand";
 import styles from "./page.module.css";
 
 export const metadata: Metadata = {
-  title: "PRISM | Local-first AI, softly held",
-  description:
-    "A calm landing page for PRISM, the local-first AI workspace built around privacy, clarity, and human-paced interaction.",
+  title: `PRISM | ${PRISM_BRAND_COPY.slogan}`,
+  description: `${PRISM_BRAND_COPY.coreBelief} A private, local-first AI workspace built around clarity and human-paced interaction.`,
 };
 
 const pillars = [
@@ -42,8 +42,8 @@ export default function PrismPage() {
         </div>
 
         <div className={styles.heroCopy}>
-          <p className={styles.kicker}>Local-first AI workspace</p>
-          <h1 id="prism-title">PRISM turns one thought into many usable angles.</h1>
+          <p className={styles.kicker}>{PRISM_BRAND_COPY.slogan}</p>
+          <h1 id="prism-title">{PRISM_BRAND_COPY.coreBelief}</h1>
           <p className={styles.lede}>
             A private, human-paced place to talk with specialized bots, compare
             perspectives, and keep the work that actually clarifies the next move.
@@ -69,8 +69,8 @@ export default function PrismPage() {
             <span />
           </div>
           <p>
-            One prompt enters. Five colors return. You decide which refraction is
-            true enough to keep.
+            One light enters. Many colors emerge. You decide which refractions
+            become part of the work.
           </p>
         </aside>
       </section>
