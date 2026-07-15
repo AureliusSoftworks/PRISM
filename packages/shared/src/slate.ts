@@ -1,3 +1,5 @@
+import type { PromptWildcardRunMetadata } from "./promptShortcut.js";
+
 export type SlateProjectPhase = "shape" | "draft" | "refine";
 
 export type SlateStructureKind = "act" | "chapter" | "scene";
@@ -82,6 +84,7 @@ export interface SlateProjectSummary {
 }
 
 export interface SlateProjectDetail extends SlateProjectSummary {
+  sparkWildcards: PromptWildcardRunMetadata | null;
   voice: string;
   nonNegotiables: string[];
   structure: SlateStructureItem[];
@@ -113,6 +116,17 @@ export interface SlateProjectDeleteResponse {
 export interface SlateCreateProjectRequest {
   title: string;
   spark: string;
+  sparkWildcards?: PromptWildcardRunMetadata;
+}
+
+export interface SlateResolveSparkWildcardsRequest {
+  template: string;
+}
+
+export interface SlateResolveSparkWildcardsResponse {
+  ok: true;
+  spark: string;
+  sparkWildcards: PromptWildcardRunMetadata;
 }
 
 export type SlateProjectPatchRequest = Partial<
@@ -120,6 +134,7 @@ export type SlateProjectPatchRequest = Partial<
     SlateProjectDetail,
     | "title"
     | "spark"
+    | "sparkWildcards"
     | "premise"
     | "phase"
     | "voice"

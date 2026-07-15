@@ -60,6 +60,9 @@ The workspace moves through three phases without forcing a rigid wizard:
 ### Shape
 
 - Start from a title and creative spark, or bring existing material.
+- Wildcard-assisted starts are optional: a writer may place supported uppercase
+  `{WILDCARDS}` in the spark, preview or reroll the concrete result, and create
+  from that roll. Slate preserves both the resolved spark and its source template.
 - Establish premise, intent, cast, voice, structure, and non-negotiables.
 - Ask Slate for a proposed story spine and scene plan.
 - Rearrange, remove, pin, lock, or redirect structural elements before drafting.
@@ -117,7 +120,8 @@ permit reading or mutation.
 Slate becomes preview `v0.1` only when a player can:
 
 1. Enter Slate from PRISM's applet surface.
-2. Create a persistent prose project from a title and creative spark.
+2. Create a persistent prose project from a title and creative spark, optionally
+   resolving `{WILDCARDS}` before creation.
 3. Shape a generated premise and scene plan.
 4. Open the three-region manuscript workspace.
 5. Draft at least one planned scene.
