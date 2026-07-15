@@ -12,6 +12,16 @@ Aliases: `Bot groups`, `Marketplace installs`, `Bot library groups`
 
 Record: `article_a85cd666-f08f-43b5-911b-d03d411293a2`
 
+## [Brand ethos](./articles/brand-ethos.md)
+
+Why the person is the light, what the refraction emblem means, and how the future first-run poem should express the idea.
+
+Categories: `Overview`, `Product`
+
+Aliases: `PRISM ethos`, `One light many colors`, `Visual identity`
+
+Record: `article_99bea382-e515-4640-ab79-91e1c309380b`
+
 ## [Developer guide](./articles/developer-guide.md)
 
 Repo structure, common commands, automatic local test login, privacy invariants, and Wikiwiki maintenance.

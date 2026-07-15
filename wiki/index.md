@@ -2,7 +2,7 @@
 
 # PRISM Wiki
 
-Private by default. Creative by design. A local-first AI workspace for calm, multi-perspective thinking.
+One light. Many colors. A private, local-first AI workspace for calm, multi-perspective thinking.
 
 This is the generated human-readable view of PRISM's structured project knowledge.
 
@@ -18,9 +18,9 @@ This is the generated human-readable view of PRISM's structured project knowledg
 
 ## Record Counts
 
-- Article: 5
-- Concept: 7
-- Decision: 4
+- Article: 6
+- Concept: 8
+- Decision: 5
 - Event: 7
 - Note: 3
 - Symbol: 4

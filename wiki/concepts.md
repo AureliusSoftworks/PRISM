@@ -85,3 +85,15 @@ Files: `README.md`, `apps/web/src/app/prism/page.tsx`, `docs/distribution-model.
 Tags: `audience:all`, `product`, `overview`, `homepage`
 
 Record: `concept_6fbe4496-b766-4a5a-abca-987acdd7d770` | Authority: agent | Confidence: high
+
+## The user is the light
+
+PRISM treats the person as the source of creative light and the product as the private instrument and sanctum that reveals a spectrum of voices, forms, perspectives, and possibilities.
+
+Core belief: You are the light. Prism reveals the spectrum. Primary public slogan: One light. Many colors. Privacy remains a supporting product promise rather than a competing tagline. The metaphor preserves human authorship and agency: models and bots can refract, challenge, and combine human intent, but they are not the source of creativity.
+
+Files: `docs/brand-ethos.md`, `DESIGN.md`, `apps/web/src/app/prismBrand.ts`
+
+Tags: `audience:all`, `brand`, `ethos`, `product`
+
+Record: `concept_b2c6156c-2c09-41c8-a87c-4ee626cebde3` | Authority: user | Confidence: high
