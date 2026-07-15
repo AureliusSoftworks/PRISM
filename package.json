@@ -2,7 +2,7 @@
   "name": "localai-chatgov",
   "private": true,
   "type": "module",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "workspaces": [
     "apps/*",
     "packages/*"
