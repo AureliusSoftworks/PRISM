@@ -691,6 +691,7 @@ describe("API request integration", () => {
         faceEyeRotationDeg: -25,
         faceMouthCharacter: "△",
         faceMouthAnimation: "wobble",
+        faceMouthCoffeePucker: true,
         faceBlinkScale: 1.2,
         faceBlinkOffsetX: -0.08,
         faceBlinkOffsetY: 0.06,
@@ -702,6 +703,7 @@ describe("API request integration", () => {
     assert.equal(createdPayload.bot.face_eye_animation, undefined);
     assert.equal(createdPayload.bot.face_eye_rotation_deg, -25);
     assert.equal(createdPayload.bot.face_mouth_animation, "wobble");
+    assert.equal(createdPayload.bot.face_mouth_coffee_pucker, 1);
     assert.equal(createdPayload.bot.face_blink_scale, 1.2);
     assert.equal(createdPayload.bot.face_blink_offset_x, -0.08);
     assert.equal(createdPayload.bot.face_blink_offset_y, 0.06);
@@ -714,6 +716,7 @@ describe("API request integration", () => {
         faceEyeAnimation: "flicker",
         faceEyeRotationDeg: 35,
         faceMouthAnimation: "pulsate",
+        faceMouthCoffeePucker: false,
         faceBlinkScale: 0.85,
         faceBlinkOffsetX: 0.1,
         faceBlinkOffsetY: -0.12,
@@ -725,6 +728,7 @@ describe("API request integration", () => {
     assert.equal(updatedPayload.bot.face_eye_animation, "none");
     assert.equal(updatedPayload.bot.face_eye_rotation_deg, 35);
     assert.equal(updatedPayload.bot.face_mouth_animation, "pulsate");
+    assert.equal(updatedPayload.bot.face_mouth_coffee_pucker, 0);
     assert.equal(updatedPayload.bot.face_blink_scale, 0.85);
     assert.equal(updatedPayload.bot.face_blink_offset_x, 0.1);
     assert.equal(updatedPayload.bot.face_blink_offset_y, -0.12);
@@ -738,6 +742,7 @@ describe("API request integration", () => {
         faceEyeRotationDeg: -45,
         faceMouthCharacter: "△",
         faceMouthAnimation: "wobble",
+        faceMouthCoffeePucker: true,
         faceBlinkScale: 1.25,
         faceBlinkOffsetX: -0.06,
         faceBlinkOffsetY: 0.08,
@@ -748,6 +753,10 @@ describe("API request integration", () => {
     assert.equal(defaultPayload.defaultBot.prismDefaultBotFaceEyeAnimation, undefined);
     assert.equal(defaultPayload.defaultBot.prismDefaultBotFaceEyeRotationDeg, -45);
     assert.equal(defaultPayload.defaultBot.prismDefaultBotFaceMouthAnimation, "wobble");
+    assert.equal(
+      defaultPayload.defaultBot.prismDefaultBotFaceMouthCoffeePucker,
+      true
+    );
     assert.equal(defaultPayload.defaultBot.prismDefaultBotFaceBlinkScale, 1.25);
     assert.equal(defaultPayload.defaultBot.prismDefaultBotFaceBlinkOffsetX, -0.06);
     assert.equal(defaultPayload.defaultBot.prismDefaultBotFaceBlinkOffsetY, 0.08);

@@ -33,6 +33,21 @@ export interface CoffeeSeatSipPresentation {
   mouthOffsetY: string;
 }
 
+export function coffeeSeatCustomMouthCharacterForSip(args: {
+  mouthCharacter: string | null;
+  coffeePuckerEnabled: boolean;
+  sipActive: boolean;
+}): string | null {
+  if (
+    args.sipActive &&
+    args.coffeePuckerEnabled &&
+    args.mouthCharacter !== null
+  ) {
+    return null;
+  }
+  return args.mouthCharacter;
+}
+
 export function coffeeSeatMouthShapeFromVisibleLength(
   visibleLength: number,
   speechSeedText: string,

@@ -93,6 +93,7 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.match(pageSource, /faceEyeCharacter: string \| null/);
   assert.match(pageSource, /faceMouthCharacter: string \| null/);
   assert.match(pageSource, /faceMouthAnimation: BotFaceGlyphAnimation/);
+  assert.match(pageSource, /faceMouthCoffeePucker: boolean/);
   assert.match(pageSource, /faceEyeScale: number/);
   assert.match(pageSource, /faceEyeOffsetX: number/);
   assert.match(pageSource, /faceEyeOffsetY: number/);
@@ -115,6 +116,10 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.match(pageSource, /faceEyeCharacter=\{newBotFaceEyeCharacter\}/);
   assert.match(pageSource, /faceMouthCharacter=\{newBotFaceMouthCharacter\}/);
   assert.match(pageSource, /faceMouthAnimation=\{newBotFaceMouthAnimation\}/);
+  assert.match(
+    pageSource,
+    /faceMouthCoffeePucker=\{newBotFaceMouthCoffeePucker\}/,
+  );
   assert.match(pageSource, /faceEyeScale=\{newBotFaceEyeScale\}/);
   assert.match(pageSource, /faceEyeOffsetX=\{newBotFaceEyeOffsetX\}/);
   assert.match(pageSource, /faceEyeOffsetY=\{newBotFaceEyeOffsetY\}/);
@@ -395,6 +400,17 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
     /data-custom-active=\{customMouthActive \? "true" : undefined\}/,
   );
   assert.match(mouthTabSource, /disabled=\{!customMouthActive\}/);
+  assert.match(mouthTabSource, /botAvatarMouthGlyphColumn/);
+  assert.match(mouthTabSource, /\* on sip/);
+  assert.match(
+    mouthTabSource,
+    /Swap the custom mouth to \* while sipping in Coffee mode\./,
+  );
+  assert.match(mouthTabSource, /role="switch"/);
+  assert.match(mouthTabSource, /aria-checked=\{faceMouthCoffeePucker\}/);
+  assert.match(mouthTabSource, /data-enabled=\{\s*faceMouthCoffeePucker/);
+  assert.match(mouthTabSource, /onMouthCoffeePuckerChange/);
+  assert.match(mouthTabSource, /customMouthActive \? \(/);
   assert.doesNotMatch(mouthTabSource, /faceMouthAnimation/);
   assert.match(mouthTabSource, /label="Mouth size"/);
   assert.match(mouthTabSource, /<BotAvatarMouthRotationWheel/);
@@ -862,6 +878,10 @@ test("default Prism bot card opens an avatar-only customizer path", () => {
     saveDefaultSource,
     /faceMouthRotationDeg: newBotFaceMouthRotationDeg/,
   );
+  assert.match(
+    saveDefaultSource,
+    /faceMouthCoffeePucker: newBotFaceMouthCoffeePucker/,
+  );
   assert.match(saveDefaultSource, /faceBlinkBar: newBotFaceBlinkBar/);
   assert.match(
     saveDefaultSource,
@@ -887,6 +907,7 @@ test("default Prism bot card opens an avatar-only customizer path", () => {
   assert.doesNotMatch(defaultDirtySource, /newBotGlyph/);
   assert.match(defaultDirtySource, /newBotFaceMouthCharacter/);
   assert.match(defaultDirtySource, /newBotFaceMouthRotationDeg/);
+  assert.match(defaultDirtySource, /newBotFaceMouthCoffeePucker/);
 
   const defaultBotRouteStart = apiServerSource.indexOf(
     'route("PATCH", "/api/default-bot"',

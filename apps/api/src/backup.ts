@@ -153,6 +153,7 @@ export interface BackupBotSnapshot {
   faceMouthFont?: BotFaceFontId | null;
   faceMouthCharacter?: string | null;
   faceMouthAnimation?: BotFaceGlyphAnimation | null;
+  faceMouthCoffeePucker?: boolean;
   faceFontWeight?: number | null;
   faceEyeScale?: number | null;
   faceEyeOffsetX?: number | null;
@@ -517,6 +518,7 @@ export function exportUserSnapshot(
          face_mouth_font,
          face_mouth_character,
          face_mouth_animation,
+         face_mouth_coffee_pucker,
          face_font_weight,
          face_eye_scale,
          face_eye_offset_x,
@@ -570,6 +572,7 @@ export function exportUserSnapshot(
     face_mouth_font: string | null;
     face_mouth_character: string | null;
     face_mouth_animation: string | null;
+    face_mouth_coffee_pucker: number | null;
     face_font_weight: number | null;
     face_eye_scale: number | null;
     face_eye_offset_x: number | null;
@@ -731,6 +734,7 @@ export function exportUserSnapshot(
         faceMouthFont: normalizeBotFaceFontId(bot.face_mouth_font),
         faceMouthCharacter: normalizeBotFaceMouthCharacter(bot.face_mouth_character),
         faceMouthAnimation: normalizeBotFaceGlyphAnimation(bot.face_mouth_animation),
+        faceMouthCoffeePucker: bot.face_mouth_coffee_pucker === 1,
         faceFontWeight: normalizeBotFaceFontWeight(bot.face_font_weight),
         faceEyeScale: normalizeBotFaceEyeScale(bot.face_eye_scale),
         faceEyeOffsetX: normalizeBotFaceEyeOffsetX(bot.face_eye_offset_x),
@@ -1195,6 +1199,13 @@ function importUserSnapshotWithinTransaction(
       );
       db.prepare("UPDATE bots SET powers_json = ? WHERE id = ? AND user_id = ?")
         .run(serializeBotPowersV1(bot.powers ?? []), bot.id.trim(), userId);
+      db.prepare(
+        "UPDATE bots SET face_mouth_coffee_pucker = ? WHERE id = ? AND user_id = ?"
+      ).run(
+        bot.faceMouthCoffeePucker === true ? 1 : 0,
+        bot.id.trim(),
+        userId
+      );
     }
   }
 

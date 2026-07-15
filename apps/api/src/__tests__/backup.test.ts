@@ -208,13 +208,14 @@ describe("backup bot avatar face style", () => {
         `INSERT INTO bots (
           id, user_id, name, system_prompt, voice_preview_line, avatar_details_json,
           face_eyes_font, face_eye_character, face_eye_animation,
-          face_mouth_font, face_mouth_character, face_mouth_animation, face_font_weight,
+          face_mouth_font, face_mouth_character, face_mouth_animation,
+          face_mouth_coffee_pucker, face_font_weight,
           face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg,
           face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg,
           face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y,
           face_thinking_frames,
           created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         "bot-1",
         "user-1",
@@ -228,6 +229,7 @@ describe("backup bot avatar face style", () => {
         "formal",
         "△",
         "flicker",
+        1,
         725,
         1.15,
         0.06,
@@ -287,6 +289,7 @@ describe("backup bot avatar face style", () => {
         faceMouthFont: "formal",
         faceMouthCharacter: "△",
         faceMouthAnimation: "flicker",
+        faceMouthCoffeePucker: true,
         faceFontWeight: 725,
         faceEyeScale: 1.15,
         faceEyeOffsetX: 0.06,
@@ -329,14 +332,14 @@ describe("backup bot avatar face style", () => {
       });
 
       db.prepare(
-        "UPDATE bots SET voice_preview_line = NULL, avatar_details_json = NULL, face_eyes_font = NULL, face_eye_character = NULL, face_eye_animation = NULL, face_mouth_font = NULL, face_mouth_character = NULL, face_mouth_animation = NULL, face_font_weight = NULL, face_eye_scale = NULL, face_eye_offset_x = NULL, face_eye_offset_y = NULL, face_eye_rotation_deg = NULL, face_mouth_scale = NULL, face_mouth_offset_x = NULL, face_mouth_offset_y = NULL, face_mouth_rotation_deg = NULL, face_blink_bar = NULL, face_blink_scale = NULL, face_blink_offset_x = NULL, face_blink_offset_y = NULL, face_thinking_frames = NULL WHERE id = ?"
+        "UPDATE bots SET voice_preview_line = NULL, avatar_details_json = NULL, face_eyes_font = NULL, face_eye_character = NULL, face_eye_animation = NULL, face_mouth_font = NULL, face_mouth_character = NULL, face_mouth_animation = NULL, face_mouth_coffee_pucker = 0, face_font_weight = NULL, face_eye_scale = NULL, face_eye_offset_x = NULL, face_eye_offset_y = NULL, face_eye_rotation_deg = NULL, face_mouth_scale = NULL, face_mouth_offset_x = NULL, face_mouth_offset_y = NULL, face_mouth_rotation_deg = NULL, face_blink_bar = NULL, face_blink_scale = NULL, face_blink_offset_x = NULL, face_blink_offset_y = NULL, face_thinking_frames = NULL WHERE id = ?"
       ).run("bot-1");
 
       importUserSnapshot(db, "user-1", snapshot, userKey);
 
       const restored = db
         .prepare(
-          "SELECT voice_preview_line, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, profile_picture_image_id FROM bots WHERE id = ?"
+          "SELECT voice_preview_line, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, profile_picture_image_id FROM bots WHERE id = ?"
         )
         .get("bot-1") as {
         voice_preview_line: string | null;
@@ -347,6 +350,7 @@ describe("backup bot avatar face style", () => {
         face_mouth_font: string | null;
         face_mouth_character: string | null;
         face_mouth_animation: string | null;
+        face_mouth_coffee_pucker: number;
         face_font_weight: number | null;
         face_eye_scale: number | null;
         face_eye_offset_x: number | null;
@@ -374,6 +378,7 @@ describe("backup bot avatar face style", () => {
       assert.equal(restored.face_mouth_font, "formal");
       assert.equal(restored.face_mouth_character, "△");
       assert.equal(restored.face_mouth_animation, "flicker");
+      assert.equal(restored.face_mouth_coffee_pucker, 1);
       assert.equal(restored.face_font_weight, 725);
       assert.equal(restored.face_eye_scale, 1.15);
       assert.equal(restored.face_eye_offset_x, 0.06);

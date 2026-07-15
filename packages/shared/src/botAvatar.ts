@@ -30,6 +30,8 @@ export type BotFaceGlyphAnimation = (typeof BOT_FACE_GLYPH_ANIMATIONS)[number];
 export const DEFAULT_BOT_FACE_GLYPH_ANIMATION: BotFaceGlyphAnimation = "none";
 export const DEFAULT_BOT_FACE_EYE_CHARACTER: string | null = null;
 export const DEFAULT_BOT_FACE_MOUTH_CHARACTER: string | null = null;
+/** Existing custom mouths stay visible during Coffee sips until explicitly opted in. */
+export const DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER = false;
 export const DEFAULT_BOT_FACE_FONT_WEIGHT = 600;
 export const BOT_FACE_FONT_WEIGHT_MIN = 300;
 export const BOT_FACE_FONT_WEIGHT_MAX = 800;
@@ -99,6 +101,7 @@ export interface BotFaceStyle {
   mouthFont: BotFaceFontId;
   mouthCharacter: string | null;
   mouthAnimation: BotFaceGlyphAnimation;
+  mouthCoffeePucker: boolean;
   weight: number;
   eyeScale: number;
   eyeOffsetX: number;
@@ -122,6 +125,7 @@ export interface BotFaceStyleInput {
   faceMouthFont?: unknown;
   faceMouthCharacter?: unknown;
   faceMouthAnimation?: unknown;
+  faceMouthCoffeePucker?: unknown;
   faceFontWeight?: unknown;
   faceEyeScale?: unknown;
   faceEyeOffsetX?: unknown;
@@ -176,6 +180,15 @@ export function normalizeBotFaceEyeCharacter(value: unknown): string | null {
 
 export function normalizeBotFaceMouthCharacter(value: unknown): string | null {
   return normalizeBotFaceEyeCharacter(value);
+}
+
+export function normalizeBotFaceMouthCoffeePucker(
+  value: unknown
+): boolean | null {
+  if (typeof value === "boolean") return value;
+  if (value === 1) return true;
+  if (value === 0) return false;
+  return null;
 }
 
 export function normalizeBotFaceFontWeight(value: unknown): number | null {
@@ -414,6 +427,9 @@ export function resolveBotFaceStyle(
     mouthAnimation:
       normalizeBotFaceGlyphAnimation(input.faceMouthAnimation) ??
       DEFAULT_BOT_FACE_GLYPH_ANIMATION,
+    mouthCoffeePucker:
+      normalizeBotFaceMouthCoffeePucker(input.faceMouthCoffeePucker) ??
+      DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER,
     weight:
       normalizeBotFaceFontWeight(input.faceFontWeight) ??
       DEFAULT_BOT_FACE_FONT_WEIGHT,
@@ -492,6 +508,7 @@ export function randomBotFaceStyle(random = Math.random): BotFaceStyle {
     mouthFont: pickFont(),
     mouthCharacter: DEFAULT_BOT_FACE_MOUTH_CHARACTER,
     mouthAnimation: DEFAULT_BOT_FACE_GLYPH_ANIMATION,
+    mouthCoffeePucker: DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER,
     weight,
     eyeScale: randomSteppedBotFaceScale(
       random,

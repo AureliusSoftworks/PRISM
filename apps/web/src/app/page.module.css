@@ -43914,8 +43914,20 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
 }
 
-.botAvatarGlyphRotationField .botAvatarCustomGlyphCapture {
+.botAvatarGlyphRotationField > .botAvatarCustomGlyphCapture {
   min-height: 146px;
+}
+
+.botAvatarMouthGlyphColumn {
+  min-width: 0;
+  min-height: 146px;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 6px;
+}
+
+.botAvatarMouthGlyphColumn > .botAvatarCustomGlyphCapture {
+  min-height: 0;
 }
 
 .botAvatarGlyphRotationField .botAvatarMouthRotationControl {
@@ -44521,6 +44533,73 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   min-width: 0;
   display: grid;
   gap: 12px;
+}
+
+.botAvatarCoffeePuckerToggle {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
+  padding: 5px 7px;
+  border: 1px solid
+    color-mix(in srgb, var(--editor-bot-color, var(--accent)) 18%, #303846);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.16);
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.botAvatarCoffeePuckerToggle strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-muted);
+  font-size: 10px;
+  font-weight: 780;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.botAvatarCoffeePuckerToggle::after {
+  content: "";
+  width: 28px;
+  height: 16px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background:
+    radial-gradient(
+      circle at 8px 50%,
+      var(--fg-muted) 0 5px,
+      transparent 5.5px
+    ),
+    var(--line);
+  transition: background 0.16s ease;
+}
+
+.botAvatarCoffeePuckerToggle[data-enabled="true"]::after {
+  background:
+    radial-gradient(
+      circle at 20px 50%,
+      var(--editor-bot-color, var(--accent)) 0 5px,
+      transparent 5.5px
+    ),
+    color-mix(in srgb, var(--editor-bot-color, var(--accent)) 22%, var(--line));
+}
+
+.botAvatarCoffeePuckerToggle:focus-visible {
+  border-color: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 48%,
+    #ffffff
+  );
+  box-shadow: 0 0 0 2px
+    color-mix(in srgb, var(--editor-bot-color, var(--accent)) 16%, transparent);
 }
 
 .botAvatarCoordinateControl {
@@ -45163,6 +45242,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     .botAvatarCustomSelectButton,
     .botAvatarCustomGlyphCaptureButton,
     .botAvatarCustomGlyphClearButton,
+    .botAvatarCoffeePuckerToggle,
     .botAvatarThinkingPresetButton,
     .botAvatarThinkingIconButton,
     .botAvatarCoordinateControl header button,
@@ -45273,6 +45353,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     .botAvatarCustomSelectButton,
     .botAvatarCustomGlyphCaptureButton,
     .botAvatarCustomGlyphClearButton,
+    .botAvatarCoffeePuckerToggle,
     .botAvatarThinkingPresetButton,
     .botAvatarThinkingIconButton,
     .botAvatarCoordinateControl header button,
@@ -45300,6 +45381,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     .botAvatarCustomSelectButton,
     .botAvatarCustomGlyphCaptureButton,
     .botAvatarCustomGlyphClearButton,
+    .botAvatarCoffeePuckerToggle,
     .botAvatarThinkingPresetButton,
     .botAvatarThinkingIconButton,
     .botAvatarCoordinateControl header button,
