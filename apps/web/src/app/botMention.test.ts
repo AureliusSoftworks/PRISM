@@ -815,6 +815,32 @@ describe("extractStageDirections", () => {
     ]);
   });
 
+  it("lifts grab verbs instead of leaking them into table dialogue", () => {
+    const cases = [
+      {
+        input: "snatches a coupon The savings are mine!",
+        mainText: "The savings are mine!",
+        action: "snatches a coupon",
+      },
+      {
+        input: "grabs the sugar bowl Listen, this belongs by me.",
+        mainText: "Listen, this belongs by me.",
+        action: "grabs the sugar bowl",
+      },
+      {
+        input: "seizes the last napkin Now that's efficiency.",
+        mainText: "Now that's efficiency.",
+        action: "seizes the last napkin",
+      },
+    ];
+
+    for (const { input, mainText, action } of cases) {
+      const out = extractStageDirections(input);
+      assert.equal(out.mainText, mainText);
+      assert.deepEqual(out.actions, [action]);
+    }
+  });
+
   it("lifts eyes-as-verb actions before article-led spoken prose", () => {
     const out = extractStageDirections(
       "eyes the tiny napkin hat with visible disdain A nickel wearing a hat doesn't change what it's worth, Mr. Krabs — that's just origami with delusions of grandeur."
