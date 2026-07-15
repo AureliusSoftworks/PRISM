@@ -3,7 +3,12 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createDatabase, resolveDbPath } from "../db.ts";
+import {
+  SQLITE_BUSY_TIMEOUT_MS,
+  createDatabase,
+  initializeDatabase,
+  resolveDbPath,
+} from "../db.ts";
 
 describe("resolveDbPath", () => {
   it("prefers DB_PATH for existing explicit deployments", () => {
@@ -31,6 +36,26 @@ describe("resolveDbPath", () => {
     } finally {
       restoreEnv("DB_PATH", previousDbPath);
       restoreEnv("LOCALAI_DATA_DIR", previousDataDir);
+    }
+  });
+});
+
+describe("createDatabase runtime pragmas", () => {
+  it("waits through short-lived SQLite writer contention", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "localai-db-pragmas-"));
+    const previousDbPath = process.env.DB_PATH;
+    const previousDataDir = process.env.LOCALAI_DATA_DIR;
+    process.env.DB_PATH = join(tempDir, "runtime.db");
+    delete process.env.LOCALAI_DATA_DIR;
+    try {
+      const db = createDatabase();
+      const row = db.prepare("PRAGMA busy_timeout").get() as { timeout: number };
+      assert.equal(row.timeout, SQLITE_BUSY_TIMEOUT_MS);
+      db.close();
+    } finally {
+      restoreEnv("DB_PATH", previousDbPath);
+      restoreEnv("LOCALAI_DATA_DIR", previousDataDir);
+      rmSync(tempDir, { recursive: true, force: true });
     }
   });
 });
@@ -357,8 +382,8 @@ describe("createDatabase bot export hash migration", () => {
   });
 });
 
-describe("createDatabase images.bot_id migration", () => {
-  it("adds bot_id and round-trips inserts", () => {
+describe("createDatabase image provenance migration", () => {
+  it("adds ownership and origin columns with safe defaults", () => {
     const tempDir = mkdtempSync(join(tmpdir(), "localai-db-images-"));
     const previousDbPath = process.env.DB_PATH;
     const previousDataDir = process.env.LOCALAI_DATA_DIR;
@@ -384,6 +409,8 @@ describe("createDatabase images.bot_id migration", () => {
         .prepare("PRAGMA table_info(images)")
         .all() as Array<{ name: string }>;
       assert.ok(columns.some((column) => column.name === "bot_id"));
+      assert.ok(columns.some((column) => column.name === "related_bot_ids"));
+      assert.ok(columns.some((column) => column.name === "origin"));
       assert.ok(columns.some((column) => column.name === "local_rel_path"));
       assert.ok(columns.some((column) => column.name === "model"));
       db.prepare(
@@ -402,9 +429,102 @@ describe("createDatabase images.bot_id migration", () => {
         "2026-01-02T00:00:00.000Z"
       );
       const row = db
-        .prepare("SELECT bot_id FROM images WHERE id = ?")
-        .get("img-1") as { bot_id: string | null } | undefined;
+        .prepare("SELECT bot_id, related_bot_ids, origin FROM images WHERE id = ?")
+        .get("img-1") as
+        | { bot_id: string | null; related_bot_ids: string; origin: string }
+        | undefined;
       assert.equal(row?.bot_id, "bot-9");
+      assert.equal(row?.related_bot_ids, "[]");
+      assert.equal(row?.origin, "images_panel");
+      db.close();
+    } finally {
+      restoreEnv("DB_PATH", previousDbPath);
+      restoreEnv("LOCALAI_DATA_DIR", previousDataDir);
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("recovers legacy Signal studio and logo ownership from show metadata", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "localai-db-image-backfill-"));
+    const previousDbPath = process.env.DB_PATH;
+    const previousDataDir = process.env.LOCALAI_DATA_DIR;
+    process.env.DB_PATH = join(tempDir, "images.db");
+    delete process.env.LOCALAI_DATA_DIR;
+    try {
+      const db = createDatabase();
+      const now = "2026-07-15T00:00:00.000Z";
+      db.prepare(
+        "INSERT INTO users (id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, created_at, last_active_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      ).run(
+        "user-signal",
+        "signal@example.com",
+        "Signal",
+        "hash",
+        "salt",
+        "cipher",
+        "iv",
+        "tag",
+        now,
+        now,
+      );
+      for (const imageId of ["studio-image", "logo-image"]) {
+        db.prepare(
+          "INSERT INTO images (id, user_id, prompt, url, created_at) VALUES (?, ?, ?, ?, ?)",
+        ).run(imageId, "user-signal", imageId, `/images/${imageId}`, now);
+      }
+      db.prepare(
+        `INSERT INTO botcast_shows
+          (id, user_id, host_bot_id, name, premise, hosting_style, accent_color,
+           atmosphere_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        "show-1",
+        "user-signal",
+        "bob-ross",
+        "Happy Little Signals",
+        "Paint the airwaves.",
+        "Gentle",
+        "#5f8f6b",
+        JSON.stringify({
+          dayAtmosphere: { imageId: "studio-image" },
+          logo: { imageId: "logo-image" },
+        }),
+        now,
+        now,
+      );
+
+      initializeDatabase(db);
+
+      const rows = db
+        .prepare(
+          "SELECT id, bot_id, related_bot_ids, origin FROM images ORDER BY id",
+        )
+        .all() as Array<{
+        id: string;
+        bot_id: string | null;
+        related_bot_ids: string;
+        origin: string;
+      }>;
+      assert.deepEqual(
+        rows.map((row) => ({
+          ...row,
+          related_bot_ids: JSON.parse(row.related_bot_ids),
+        })),
+        [
+          {
+            id: "logo-image",
+            bot_id: "bob-ross",
+            related_bot_ids: ["bob-ross"],
+            origin: "botcast",
+          },
+          {
+            id: "studio-image",
+            bot_id: "bob-ross",
+            related_bot_ids: ["bob-ross"],
+            origin: "botcast",
+          },
+        ],
+      );
       db.close();
     } finally {
       restoreEnv("DB_PATH", previousDbPath);

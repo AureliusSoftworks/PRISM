@@ -416,6 +416,13 @@ import {
   resolveImageGeneratePersistence,
 } from "./image-generate-resolve.ts";
 import {
+  IMAGE_BOT_MEMBERSHIP_SQL,
+  imageOriginForGenerate,
+  normalizeImageRelatedBotIds,
+  serializeImageRelatedBotIds,
+  type ImageOrigin,
+} from "./image-provenance.ts";
+import {
   composeZenWallpaperPrompt,
   normalizeZenWallpaperPromptOverride,
 } from "./zen-wallpaper-prompt.ts";
@@ -1718,6 +1725,8 @@ function mapImageRowToClient(row: {
   quality: string;
   provider: string;
   bot_id: string | null;
+  related_bot_ids: string | null;
+  origin: string | null;
   created_at: string;
   local_rel_path: string | null;
   model: string | null;
@@ -1730,6 +1739,8 @@ function mapImageRowToClient(row: {
   return {
     id: row.id,
     botId: row.bot_id,
+    botIds: normalizeImageRelatedBotIds(row.related_bot_ids, row.bot_id),
+    origin: row.origin ?? "images_panel",
     prompt: row.prompt,
     revisedPrompt: row.revised_prompt,
     size: row.size,
@@ -2064,6 +2075,8 @@ function apiKeySource(
 type ImageInsertPersistence = {
   conversationIdForInsert: string | null;
   persistedBotId: string | null;
+  relatedBotIds: string[];
+  origin: ImageOrigin;
 };
 
 /** Persists a ComfyUI or Ollama image and returns the standard JSON success body. */
@@ -2100,12 +2113,17 @@ async function finalizeComfyOrOllamaGeneratedImageResponse(
   try {
     const createdAt = new Date().toISOString();
     db.prepare(
-      "INSERT INTO images (id, user_id, conversation_id, bot_id, prompt, revised_prompt, url, size, quality, provider, model, local_rel_path, purpose, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      "INSERT INTO images (id, user_id, conversation_id, bot_id, related_bot_ids, origin, prompt, revised_prompt, url, size, quality, provider, model, local_rel_path, purpose, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     ).run(
       args.imageId,
       args.userId,
       args.persistence.conversationIdForInsert,
       args.persistence.persistedBotId,
+      serializeImageRelatedBotIds(
+        args.persistence.relatedBotIds,
+        args.persistence.persistedBotId,
+      ),
+      args.persistence.origin,
       args.prompt,
       args.prompt,
       storedUrl,
@@ -2152,6 +2170,12 @@ async function finalizeComfyOrOllamaGeneratedImageResponse(
     ok: true,
     image: {
       id: args.imageId,
+      botId: args.persistence.persistedBotId,
+      botIds: normalizeImageRelatedBotIds(
+        args.persistence.relatedBotIds,
+        args.persistence.persistedBotId,
+      ),
+      origin: args.persistence.origin,
       url: storedUrl,
       revisedPrompt: args.prompt,
       displayUrl,
@@ -3630,12 +3654,16 @@ function buildRoutes(): RouteDefinition[] {
           const wallpaperCreatedAt = new Date().toISOString();
           try {
             db.prepare(
-              "INSERT INTO images (id, user_id, conversation_id, bot_id, prompt, revised_prompt, url, size, quality, provider, model, local_rel_path, purpose, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'wallpaper', ?)"
+              "INSERT INTO images (id, user_id, conversation_id, bot_id, related_bot_ids, origin, prompt, revised_prompt, url, size, quality, provider, model, local_rel_path, purpose, created_at) VALUES (?, ?, ?, ?, ?, 'zen_wallpaper', ?, ?, ?, ?, ?, ?, ?, ?, 'wallpaper', ?)"
             ).run(
               imageId,
               userId,
               conversationId,
               wallpaperPersonaBotId,
+              serializeImageRelatedBotIds(
+                wallpaperPersonaBotId ? [wallpaperPersonaBotId] : [],
+                wallpaperPersonaBotId,
+              ),
               prompt,
               prompt,
               storedUrl,
@@ -3691,12 +3719,16 @@ function buildRoutes(): RouteDefinition[] {
             const wallpaperCreatedAt = new Date().toISOString();
             try {
               db.prepare(
-                "INSERT INTO images (id, user_id, conversation_id, bot_id, prompt, revised_prompt, url, size, quality, provider, model, local_rel_path, purpose, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'wallpaper', ?)"
+                "INSERT INTO images (id, user_id, conversation_id, bot_id, related_bot_ids, origin, prompt, revised_prompt, url, size, quality, provider, model, local_rel_path, purpose, created_at) VALUES (?, ?, ?, ?, ?, 'zen_wallpaper', ?, ?, ?, ?, ?, ?, ?, ?, 'wallpaper', ?)"
               ).run(
                 imageId,
                 userId,
                 conversationId,
                 wallpaperPersonaBotId,
+                serializeImageRelatedBotIds(
+                  wallpaperPersonaBotId ? [wallpaperPersonaBotId] : [],
+                  wallpaperPersonaBotId,
+                ),
                 prompt,
                 prompt,
                 storedUrl,
@@ -3739,12 +3771,16 @@ function buildRoutes(): RouteDefinition[] {
         const wallpaperCreatedAt = new Date().toISOString();
         try {
           db.prepare(
-            "INSERT INTO images (id, user_id, conversation_id, bot_id, prompt, revised_prompt, url, size, quality, provider, model, local_rel_path, purpose, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'openai', ?, ?, 'wallpaper', ?)"
+            "INSERT INTO images (id, user_id, conversation_id, bot_id, related_bot_ids, origin, prompt, revised_prompt, url, size, quality, provider, model, local_rel_path, purpose, created_at) VALUES (?, ?, ?, ?, ?, 'zen_wallpaper', ?, ?, ?, ?, ?, 'openai', ?, ?, 'wallpaper', ?)"
           ).run(
             imageId,
             userId,
             conversationId,
             wallpaperPersonaBotId,
+            serializeImageRelatedBotIds(
+              wallpaperPersonaBotId ? [wallpaperPersonaBotId] : [],
+              wallpaperPersonaBotId,
+            ),
             prompt,
             result.revisedPrompt,
             storedUrl,
@@ -5243,6 +5279,18 @@ function buildRoutes(): RouteDefinition[] {
         ...(body.atmosphereImageId !== undefined
           ? { atmosphereImageId: body.atmosphereImageId as string | null }
           : {}),
+        ...(body.dayAtmosphereImageUrl !== undefined
+          ? { dayAtmosphereImageUrl: body.dayAtmosphereImageUrl as string | null }
+          : {}),
+        ...(body.dayAtmosphereImageId !== undefined
+          ? { dayAtmosphereImageId: body.dayAtmosphereImageId as string | null }
+          : {}),
+        ...(body.nightAtmosphereImageUrl !== undefined
+          ? { nightAtmosphereImageUrl: body.nightAtmosphereImageUrl as string | null }
+          : {}),
+        ...(body.nightAtmosphereImageId !== undefined
+          ? { nightAtmosphereImageId: body.nightAtmosphereImageId as string | null }
+          : {}),
         ...(body.regenerateAtmosphere === true ? { regenerateAtmosphere: true } : {}),
         ...(body.logoImageUrl !== undefined
           ? { logoImageUrl: body.logoImageUrl as string | null }
@@ -5254,6 +5302,8 @@ function buildRoutes(): RouteDefinition[] {
       });
       json(ctx.res, 200, { ok: true, show });
     }),
+    // The web proxy forwards DELETE verbatim; keep both Signal deletion paths
+    // registered in the primary API table so shows and episodes cannot drift.
     route("DELETE", "/api/botcast/shows/:id", async (ctx) => {
       const userId = requireAuth(ctx);
       if (!deleteBotcastShow(db, userId, ctx.params.id)) {
@@ -5270,13 +5320,26 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("POST", "/api/botcast/shows/:id/episodes", async (ctx) => {
       const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
       const body = ctx.body as Record<string, unknown>;
+      const preferredProvider = user.preferred_provider;
+      const modelOverride = readCoffeeSessionSpeakerModel(body.modelOverride);
+      const accountModel =
+        preferredProvider === "local"
+          ? user.preferred_local_model
+          : user.preferred_online_model;
       const episode = createBotcastEpisode(db, userId, ctx.params.id, {
         guestBotId: typeof body.guestBotId === "string" ? body.guestBotId : "",
         topic: typeof body.topic === "string" ? body.topic : "",
         ...(body.producerBrief !== undefined
           ? { producerBrief: body.producerBrief as string }
           : {}),
+        preferredProvider,
+        modelOverride:
+          modelOverride ??
+          (accountModel && !isDisabledModelChoice(accountModel)
+            ? accountModel
+            : null),
       });
       json(ctx.res, 201, { ok: true, episode });
     }),
@@ -8261,6 +8324,23 @@ function buildRoutes(): RouteDefinition[] {
       if (!persistence.ok) {
         throw new Error(persistence.message);
       }
+      const imageOrigin = imageOriginForGenerate({
+        purpose: imagePurpose,
+        requestedOrigin: body.origin,
+      });
+      if (imageOrigin === "botcast" && !persistence.persistedBotId) {
+        throw new Error("Signal artwork requires a host bot.");
+      }
+      // The standalone Images panel is PRISM's own library, even while a bot
+      // is being used as prompt/persona context. Applet and chat surfaces keep
+      // their explicit owner attribution.
+      const persistedOwnerBotId =
+        imageOrigin === "images_panel" && imagePurpose === "gallery"
+          ? null
+          : persistence.persistedBotId;
+      let relatedBotIdsForInsert = persistedOwnerBotId
+        ? [persistedOwnerBotId]
+        : [];
       // Image routing is independent from chat routing. The only hard ceiling
       // is protected bot context: no request can send an offline-only persona,
       // conversation, or group member to an online image provider.
@@ -8280,7 +8360,7 @@ function buildRoutes(): RouteDefinition[] {
       });
       if (
         imagePurpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE &&
-        (!persistence.persistedBotId || persistence.persistedBotId !== bodyBotId)
+        (!persistedOwnerBotId || persistedOwnerBotId !== bodyBotId)
       ) {
         throw new Error("Profile picture generation requires a bot-owned image.");
       }
@@ -8303,7 +8383,7 @@ function buildRoutes(): RouteDefinition[] {
         mode: "sandbox",
         surface: "images",
         conversationId: persistence.conversationIdForInsert,
-        botId: persistence.persistedBotId,
+        botId: persistedOwnerBotId,
       });
 
       let promptForModel = prompt;
@@ -8315,6 +8395,7 @@ function buildRoutes(): RouteDefinition[] {
           userId,
           groupRoomWallpaperContext.memberBotIds
         );
+        relatedBotIdsForInsert = members.map((member) => member.id);
         composedPrompt = composeGroupRoomWallpaperPrompt({
           userPrompt: prompt,
           groupName: groupRoomWallpaperContext.groupName,
@@ -8449,7 +8530,9 @@ function buildRoutes(): RouteDefinition[] {
           userId,
           persistence: {
             conversationIdForInsert: persistence.conversationIdForInsert,
-            persistedBotId: persistence.persistedBotId,
+            persistedBotId: persistedOwnerBotId,
+            relatedBotIds: relatedBotIdsForInsert,
+            origin: imageOrigin,
           },
           prompt: promptForPersistence,
           localRelPath,
@@ -8499,7 +8582,9 @@ function buildRoutes(): RouteDefinition[] {
             userId,
             persistence: {
               conversationIdForInsert: persistence.conversationIdForInsert,
-              persistedBotId: persistence.persistedBotId,
+              persistedBotId: persistedOwnerBotId,
+              relatedBotIds: relatedBotIdsForInsert,
+              origin: imageOrigin,
             },
             prompt: promptForPersistence,
             localRelPath,
@@ -8546,12 +8631,17 @@ function buildRoutes(): RouteDefinition[] {
       const createdAt = new Date().toISOString();
       try {
         db.prepare(
-          "INSERT INTO images (id, user_id, conversation_id, bot_id, prompt, revised_prompt, url, size, quality, provider, model, local_rel_path, purpose, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'openai', ?, ?, ?, ?)"
+          "INSERT INTO images (id, user_id, conversation_id, bot_id, related_bot_ids, origin, prompt, revised_prompt, url, size, quality, provider, model, local_rel_path, purpose, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'openai', ?, ?, ?, ?)"
         ).run(
           imageId,
           userId,
           persistence.conversationIdForInsert,
-          persistence.persistedBotId,
+          persistedOwnerBotId,
+          serializeImageRelatedBotIds(
+            relatedBotIdsForInsert,
+            persistedOwnerBotId,
+          ),
+          imageOrigin,
           promptForPersistence,
           result.revisedPrompt,
           storedUrl,
@@ -8591,6 +8681,12 @@ function buildRoutes(): RouteDefinition[] {
         ok: true,
         image: {
           id: imageId,
+          botId: persistedOwnerBotId,
+          botIds: normalizeImageRelatedBotIds(
+            relatedBotIdsForInsert,
+            persistedOwnerBotId,
+          ),
+          origin: imageOrigin,
           url: storedUrl,
           revisedPrompt: result.revisedPrompt,
           displayUrl,
@@ -8674,9 +8770,10 @@ function buildRoutes(): RouteDefinition[] {
         await tryGenerateThumbAfterPngWrite(localRelPath);
         db.prepare(
           `INSERT INTO images
-             (id, user_id, prompt, url, size, quality, provider, model,
-              local_rel_path, purpose, created_at)
-           VALUES (?, ?, ?, '', ?, 'standard', 'local', 'backup-import', ?, ?, ?)`
+             (id, user_id, related_bot_ids, origin, prompt, url, size, quality,
+              provider, model, local_rel_path, purpose, created_at)
+           VALUES (?, ?, '[]', 'bot_group_room_import', ?, '', ?, 'standard',
+                   'local', 'backup-import', ?, ?, ?)`
         ).run(
           imageId,
           userId,
@@ -8701,6 +8798,8 @@ function buildRoutes(): RouteDefinition[] {
           quality: "standard",
           provider: "local",
           bot_id: null,
+          related_bot_ids: "[]",
+          origin: "bot_group_room_import",
           created_at: createdAt,
           local_rel_path: localRelPath,
           model: "backup-import",
@@ -8729,22 +8828,31 @@ function buildRoutes(): RouteDefinition[] {
       const rows = generalOnly
         ? db
             .prepare(
-              `SELECT id, prompt, revised_prompt, url, size, quality, provider, bot_id, created_at, local_rel_path, model, purpose
-               FROM images WHERE user_id = ? AND bot_id IS NULL AND ${GALLERY_EXCLUDED_PURPOSE_SQL}
+              `SELECT id, prompt, revised_prompt, url, size, quality, provider, bot_id, related_bot_ids, origin, created_at, local_rel_path, model, purpose
+               FROM images
+              WHERE user_id = ?
+                AND bot_id IS NULL
+                AND json_array_length(
+                  CASE
+                    WHEN json_valid(related_bot_ids) THEN related_bot_ids
+                    ELSE '[]'
+                  END
+                ) = 0
+                AND ${GALLERY_EXCLUDED_PURPOSE_SQL}
                ORDER BY created_at DESC LIMIT ?`
             )
             .all(userId, limit)
         : filterBotId
           ? db
               .prepare(
-                `SELECT id, prompt, revised_prompt, url, size, quality, provider, bot_id, created_at, local_rel_path, model, purpose
-                 FROM images WHERE user_id = ? AND bot_id = ? AND ${GALLERY_EXCLUDED_PURPOSE_SQL}
+                `SELECT id, prompt, revised_prompt, url, size, quality, provider, bot_id, related_bot_ids, origin, created_at, local_rel_path, model, purpose
+                 FROM images WHERE user_id = ? AND ${IMAGE_BOT_MEMBERSHIP_SQL} AND ${GALLERY_EXCLUDED_PURPOSE_SQL}
                  ORDER BY created_at DESC LIMIT ?`
               )
-              .all(userId, filterBotId, limit)
+              .all(userId, filterBotId, filterBotId, limit)
           : db
               .prepare(
-                `SELECT id, prompt, revised_prompt, url, size, quality, provider, bot_id, created_at, local_rel_path, model, purpose
+                `SELECT id, prompt, revised_prompt, url, size, quality, provider, bot_id, related_bot_ids, origin, created_at, local_rel_path, model, purpose
                  FROM images WHERE user_id = ? AND ${GALLERY_EXCLUDED_PURPOSE_SQL}
                  ORDER BY created_at DESC LIMIT ?`
               )
@@ -8758,6 +8866,8 @@ function buildRoutes(): RouteDefinition[] {
         quality: string;
         provider: string;
         bot_id: string | null;
+        related_bot_ids: string | null;
+        origin: string | null;
         created_at: string;
         local_rel_path: string | null;
         model: string | null;
@@ -8826,9 +8936,9 @@ function buildRoutes(): RouteDefinition[] {
         filterBotId
           ? db
               .prepare(
-                `SELECT id, local_rel_path FROM images WHERE user_id = ? AND bot_id = ? AND ${GALLERY_EXCLUDED_PURPOSE_SQL}`
+                `SELECT id, local_rel_path FROM images WHERE user_id = ? AND ${IMAGE_BOT_MEMBERSHIP_SQL} AND ${GALLERY_EXCLUDED_PURPOSE_SQL}`
               )
-              .all(userId, filterBotId)
+              .all(userId, filterBotId, filterBotId)
           : db
               .prepare(`SELECT id, local_rel_path FROM images WHERE user_id = ? AND ${GALLERY_EXCLUDED_PURPOSE_SQL}`)
               .all(userId)
@@ -8839,9 +8949,10 @@ function buildRoutes(): RouteDefinition[] {
       }
       if (filterBotId) {
         db.prepare(
-          `DELETE FROM images WHERE user_id = ? AND bot_id = ? AND ${GALLERY_EXCLUDED_PURPOSE_SQL}`
+          `DELETE FROM images WHERE user_id = ? AND ${IMAGE_BOT_MEMBERSHIP_SQL} AND ${GALLERY_EXCLUDED_PURPOSE_SQL}`
         ).run(
           userId,
+          filterBotId,
           filterBotId
         );
       } else {
@@ -8931,11 +9042,12 @@ function buildRoutes(): RouteDefinition[] {
       const displayUrl = `/api/images/${encodeURIComponent(imageId)}/file`;
       try {
         db.prepare(
-          "INSERT INTO images (id, user_id, conversation_id, bot_id, prompt, revised_prompt, url, size, quality, provider, model, local_rel_path, purpose, created_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+          "INSERT INTO images (id, user_id, conversation_id, bot_id, related_bot_ids, origin, prompt, revised_prompt, url, size, quality, provider, model, local_rel_path, purpose, created_at) VALUES (?, ?, NULL, ?, ?, 'bot_profile_picture', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         ).run(
           imageId,
           userId,
           botId,
+          serializeImageRelatedBotIds([botId], botId),
           "Uploaded bot profile picture",
           "Uploaded bot profile picture",
           displayUrl,

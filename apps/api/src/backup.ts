@@ -239,6 +239,8 @@ export interface BackupSnapshot {
       title: string;
       topic: string;
       producerBrief: string;
+      provider?: ProviderName;
+      model?: string | null;
       status: string;
       segment: string;
       outcome: string | null;
@@ -878,6 +880,11 @@ export function exportUserSnapshot(
         title: String(row.title),
         topic: String(row.topic),
         producerBrief: String(row.producer_brief ?? ""),
+        provider:
+          row.provider === "openai" || row.provider === "anthropic"
+            ? row.provider
+            : "local",
+        model: typeof row.model === "string" ? row.model : null,
         status: String(row.status),
         segment: String(row.segment),
         outcome: typeof row.outcome === "string" ? row.outcome : null,
@@ -1394,15 +1401,20 @@ function importUserSnapshotWithinTransaction(
       db.prepare(
         `INSERT OR REPLACE INTO botcast_episodes
           (id, user_id, show_id, host_bot_id, guest_bot_id, title, topic,
-           producer_brief, status, segment, outcome, tension_level, warning_count,
-           started_at, completed_at, runtime_ms, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           producer_brief, provider, model, status, segment, outcome,
+           tension_level, warning_count, started_at, completed_at, runtime_ms,
+           created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         episode.id, userId, episode.showId, episode.hostBotId, episode.guestBotId,
-        episode.title, episode.topic, episode.producerBrief, episode.status,
-        episode.segment, episode.outcome, episode.tensionLevel, episode.warningCount,
-        episode.startedAt, episode.completedAt, episode.runtimeMs,
-        episode.createdAt, episode.updatedAt,
+        episode.title, episode.topic, episode.producerBrief,
+        episode.provider === "openai" || episode.provider === "anthropic"
+          ? episode.provider
+          : "local",
+        typeof episode.model === "string" ? episode.model : null,
+        episode.status, episode.segment, episode.outcome, episode.tensionLevel,
+        episode.warningCount, episode.startedAt, episode.completedAt,
+        episode.runtimeMs, episode.createdAt, episode.updatedAt,
       );
     }
     for (const segment of botcast.segments) {

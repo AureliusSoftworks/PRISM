@@ -1,6 +1,7 @@
 export type BotcastEpisodeSegment = "opening" | "interview" | "closing";
 export type BotcastEpisodeStatus = "live" | "completed";
 export type BotcastEpisodeOutcome = "completed" | "guest_departed";
+export type BotcastEpisodeProvider = "local" | "openai" | "anthropic";
 export type BotcastSpeakerRole = "host" | "guest";
 export type BotcastProducerCueKind =
   | "ask_about"
@@ -44,7 +45,11 @@ export interface BotcastShow {
   premise: string;
   hostingStyle: string;
   accentColor: string;
+  /** Compatibility alias for the original single-studio contract. Mirrors nightAtmosphere. */
   atmosphere: BotcastAtmosphereState;
+  studioIdentity: string;
+  dayAtmosphere: BotcastAtmosphereState;
+  nightAtmosphere: BotcastAtmosphereState;
   logo: BotcastLogoState;
   createdAt: string;
   updatedAt: string;
@@ -116,6 +121,8 @@ export interface BotcastEpisodeSummary {
   hostBotId: string;
   guestBotId: string;
   topic: string;
+  provider: BotcastEpisodeProvider;
+  model: string | null;
   status: BotcastEpisodeStatus;
   segment: BotcastEpisodeSegment;
   outcome: BotcastEpisodeOutcome | null;
@@ -146,8 +153,13 @@ export interface BotcastShowPatchRequest {
   name?: string;
   premise?: string;
   hostingStyle?: string;
+  studioIdentity?: string;
   atmosphereImageUrl?: string | null;
   atmosphereImageId?: string | null;
+  dayAtmosphereImageUrl?: string | null;
+  dayAtmosphereImageId?: string | null;
+  nightAtmosphereImageUrl?: string | null;
+  nightAtmosphereImageId?: string | null;
   regenerateAtmosphere?: boolean;
   logoImageUrl?: string | null;
   logoImageId?: string | null;
@@ -158,6 +170,8 @@ export interface BotcastEpisodeCreateRequest {
   guestBotId: string;
   topic: string;
   producerBrief?: string;
+  preferredProvider?: BotcastEpisodeProvider;
+  modelOverride?: string | null;
 }
 
 export interface BotcastEpisodeAdvanceRequest {

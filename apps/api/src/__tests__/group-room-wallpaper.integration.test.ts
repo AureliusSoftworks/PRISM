@@ -150,6 +150,8 @@ describe("group-room wallpaper image generation route", () => {
     assert.match(payload.image.displayUrl, /^\/api\/images\//u);
     assert.equal(payload.image.hasLocalFile, true);
     assert.equal(payload.image.purpose, GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE);
+    assert.deepEqual(payload.image.botIds, ["wall-bot-a", "wall-bot-b"]);
+    assert.equal(payload.image.origin, "bot_group_room");
     assert.match(payload.composedPrompt, /widescreen 16:9/u);
     assert.match(payload.composedPrompt, /Group: Night Shift/u);
     assert.match(payload.composedPrompt, /Ada; accent #abcdef/u);
@@ -171,19 +173,26 @@ describe("group-room wallpaper image generation route", () => {
 
     const stored = db
       .prepare(
-        `SELECT conversation_id, bot_id, prompt, purpose, size
+        `SELECT conversation_id, bot_id, related_bot_ids, origin, prompt, purpose, size
            FROM images
           WHERE id = ? AND user_id = ?`
       )
       .get(payload.image.id, userId) as {
       conversation_id: string | null;
       bot_id: string | null;
+      related_bot_ids: string;
+      origin: string;
       prompt: string;
       purpose: string;
       size: string;
     };
     assert.equal(stored.conversation_id, null);
     assert.equal(stored.bot_id, null);
+    assert.deepEqual(JSON.parse(stored.related_bot_ids), [
+      "wall-bot-a",
+      "wall-bot-b",
+    ]);
+    assert.equal(stored.origin, "bot_group_room");
     assert.equal(stored.prompt, payload.composedPrompt);
     assert.equal(stored.purpose, GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE);
     assert.equal(stored.size, "1536x1024");
@@ -194,6 +203,24 @@ describe("group-room wallpaper image generation route", () => {
       (await json(gallery)).images.some((image: { id?: unknown }) => image.id === payload.image.id),
       true
     );
+    const generalGallery = await client.request("/api/images?general=1");
+    assert.equal(
+      (await json(generalGallery)).images.some(
+        (image: { id?: unknown }) => image.id === payload.image.id,
+      ),
+      false,
+    );
+    for (const botId of ["wall-bot-a", "wall-bot-b"]) {
+      const botGallery = await client.request(
+        `/api/images?botId=${encodeURIComponent(botId)}`,
+      );
+      assert.equal(
+        (await json(botGallery)).images.some(
+          (image: { id?: unknown }) => image.id === payload.image.id,
+        ),
+        true,
+      );
+    }
 
     const restoreCallStart = fetchRecorder.calls.length;
     const restoredResponse = await client.request(
@@ -321,5 +348,66 @@ describe("group-room wallpaper image generation route", () => {
     assert.equal(response.status, 400);
     assert.match((await json(response)).error, /Local image generation is disabled/u);
     assert.equal(fetchRecorder.calls.length, callStart);
+  });
+
+  it("keeps panel generations in PRISM and Signal generations with their host", async () => {
+    const client = createClient();
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "image-origin@example.com",
+        password: "image-origin-password",
+      }),
+    );
+    assert.equal(register.status, 201);
+    const userId = String((await json(register)).user.id);
+    db.prepare(
+      `UPDATE users
+          SET preferred_provider = 'openai',
+              preferred_openai_image_model = 'gpt-image-1'
+        WHERE id = ?`,
+    ).run(userId);
+    insertBot(userId, "host-bot", "Host", "A thoughtful broadcaster.", "#456789");
+
+    const panelResponse = await client.request(
+      "/api/images/generate",
+      jsonInit({
+        prompt: "A quiet studio still life",
+        botId: "host-bot",
+        origin: "images_panel",
+        preferredProvider: "openai",
+      }),
+    );
+    const panelPayload = await json(panelResponse);
+    assert.equal(panelResponse.status, 200, JSON.stringify(panelPayload));
+    assert.equal(panelPayload.image.botId, null);
+    assert.deepEqual(panelPayload.image.botIds, []);
+    assert.equal(panelPayload.image.origin, "images_panel");
+
+    const signalResponse = await client.request(
+      "/api/images/generate",
+      jsonInit({
+        prompt: "A cinematic podcast studio",
+        botId: "host-bot",
+        origin: "botcast",
+        preferredProvider: "openai",
+      }),
+    );
+    const signalPayload = await json(signalResponse);
+    assert.equal(signalResponse.status, 200, JSON.stringify(signalPayload));
+    assert.equal(signalPayload.image.botId, "host-bot");
+    assert.deepEqual(signalPayload.image.botIds, ["host-bot"]);
+    assert.equal(signalPayload.image.origin, "botcast");
+
+    const prismGallery = await client.request("/api/images?general=1");
+    assert.deepEqual(
+      (await json(prismGallery)).images.map((image: { id: string }) => image.id),
+      [panelPayload.image.id],
+    );
+    const hostGallery = await client.request("/api/images?botId=host-bot");
+    assert.deepEqual(
+      (await json(hostGallery)).images.map((image: { id: string }) => image.id),
+      [signalPayload.image.id],
+    );
   });
 });

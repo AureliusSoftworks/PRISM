@@ -7,6 +7,7 @@ import type {
   BotcastEpisodeAdvanceResponse,
   BotcastEpisodeCreateRequest,
   BotcastEpisodeOutcome,
+  BotcastEpisodeProvider,
   BotcastEpisodeSegment,
   BotcastEpisodeSummary,
   BotcastMessage,
@@ -42,6 +43,7 @@ import { randomId } from "./security.ts";
 const BOTCAST_SHOW_NAME_MAX = 80;
 const BOTCAST_TEXT_MAX = 2_000;
 const BOTCAST_TOPIC_MAX = 280;
+const BOTCAST_STUDIO_IDENTITY_MAX = 2_400;
 
 type BotcastShowRow = {
   id: string;
@@ -65,6 +67,8 @@ type BotcastEpisodeRow = {
   title: string;
   topic: string;
   producer_brief: string;
+  provider: BotcastEpisodeProvider;
+  model: string | null;
   status: "live" | "completed";
   segment: BotcastEpisodeSegment;
   outcome: BotcastEpisodeOutcome | null;
@@ -109,10 +113,6 @@ type BotcastBotProfile = {
   name: string;
   systemPrompt: string;
   color: string | null;
-  onlineEnabled: boolean;
-  model: string | null;
-  localModel: string | null;
-  onlineModel: string | null;
   temperature: number;
   maxTokens: number;
   topP: number | null;
@@ -177,14 +177,42 @@ function defaultHostingStyle(host: BotcastBotProfile): string {
   return styles[stableHash(`${host.id}:hosting-style`) % styles.length]!;
 }
 
-function atmosphereForHost(host: BotcastBotProfile, revision = 1): BotcastAtmosphereState {
-  const seed = `botcast:${host.id}:atmosphere:${revision}`;
+type BotcastStudioLighting = "day" | "night";
+
+function defaultStudioIdentity(host: BotcastBotProfile): string {
+  return [
+    `Canonical persona-first set bible for ${host.name}.`,
+    `Identity source: ${host.systemPrompt.slice(0, 1_800)}`,
+    "Translate that identity into at least six concrete, physically plausible environmental storytelling details: signature objects, cultural or intellectual references, landscape or view, materials, art, collections, and spatial motifs.",
+    "Make every detail specific to this host; generic books, plants, acoustic panels, luxury furniture, and podcast décor do not count unless their subject, provenance, or arrangement reveals the persona.",
+  ].join(" ");
+}
+
+function atmosphereForHost(
+  host: BotcastBotProfile,
+  lighting: BotcastStudioLighting,
+  revision = 1,
+  identity = defaultStudioIdentity(host),
+): BotcastAtmosphereState {
+  const pairSeed = `botcast:${host.id}:studio-pair:${revision}`;
+  const seed = `${pairSeed}:${lighting}`;
+  const studioIdentity = cleanText(
+    identity,
+    defaultStudioIdentity(host),
+    BOTCAST_STUDIO_IDENTITY_MAX,
+  );
+  const lightingDirection = lighting === "day"
+    ? "Daylight variant: bright but not blown out, soft natural window light, open sky fill, quiet sunlit bounce, practical lamps off, clean midtones, and an airy editorial atmosphere compatible with a light interface."
+    : "Nighttime variant: night visible beyond the windows, warm practical lamp pools, deep controlled shadows, luminous microphone LEDs, and selective saturated PRISM-spectrum bounce compatible with a dark interface.";
   return {
     seed,
     prompt: [
-      "Wide cinematic two-person podcast studio backdrop, neutral believable architecture, no people, no readable text.",
-      `Evoke this host through mood, materials, rhythm, and light rather than literal illustration: ${host.systemPrompt.slice(0, 700)}`,
-      `Use ${normalizeAccentColor(host.color)} with selective PRISM-spectrum practical light, rim light, microphone LED, and environmental bounce glow.`,
+      `Wide cinematic two-person podcast studio backdrop designed unmistakably for ${host.name}; no people and no readable text.`,
+      `Canonical set bible shared verbatim by the matched day and night pair: ${studioIdentity}`,
+      `The room must be identifiable as ${host.name}'s world without showing their name, portrait, show logo, or written exposition.`,
+      "Preserve the exact architecture, furniture, view, collections, and identity-defining objects in both variants. Change illumination and exterior time of day only; do not redesign or genericize the set.",
+      `Use ${normalizeAccentColor(host.color)} as the lead accent within the five PRISM colors: coral pink, amber orange, electric lime, cyan, and violet.`,
+      lightingDirection,
       "Camera-safe negative space at left and right for seated avatars, central elevated logo-safe zone, generous overscan, no logos or graphical emblems.",
     ].join(" "),
     imageUrl: null,
@@ -216,10 +244,12 @@ function logoForHost(
     seed,
     prompt: [
       `Square symbol-only podcast show logo for “${showName}”, hosted by ${host.name}.`,
-      `Translate the host's worldview into a clever abstract broadcast mark: ${host.systemPrompt.slice(0, 700)}`,
-      "One luminous source refracting into the five PRISM colors: coral pink, amber orange, electric lime, cyan, and violet.",
-      `Let ${normalizeAccentColor(host.color)} lead without overwhelming the spectrum.`,
-      "Premium editorial identity, bold simple silhouette, generous negative space, no people, no mockup, no microphone cliché, no letters, no words, no readable text.",
+      `Begin with a persona-specific visual idea drawn from the host's worldview, temperament, signature imagery, craft, setting, or era: ${host.systemPrompt.slice(0, 700)}`,
+      "Make its podcast purpose immediately legible by integrating one fitting audio or broadcast archetype: a condenser microphone capsule or grille, waveform, headphones, speech bubble, ON AIR lamp, recording dial, mixer fader, tape reel, or sound rings.",
+      "Fuse the persona idea and the audio artifact into one clever, inseparable symbol rather than placing two icons beside each other.",
+      `Build a distinctive persona-led palette around ${normalizeAccentColor(host.color)} with only the complementary colors the concept needs.`,
+      "Avoid multicolor light beams, radiating color wedges, and generic geometric optical motifs unless the host persona specifically requires them.",
+      "Premium editorial identity, bold simple silhouette, generous negative space, no portrait, no full person, no mockup, no letters, no words, no readable text.",
     ].join(" "),
     imageUrl: null,
     imageId: null,
@@ -233,7 +263,7 @@ function logoFallbackForRow(row: BotcastShowRow): BotcastLogoState {
   const seed = `botcast:${row.host_bot_id}:logo:1`;
   return {
     seed,
-    prompt: `Square symbol-only podcast logo for “${row.name}”, one light refracting into five vivid colors, no people, no letters, no words.`,
+    prompt: `Square symbol-only podcast logo for “${row.name}”, combining a distinctive host-inspired motif with one microphone, waveform, broadcast dial, or sound-ring archetype as a single bold mark; use ${normalizeAccentColor(row.accent_color)} with a restrained complementary palette; no multicolor light beams, no radiating color wedges, no people, no letters, no words.`,
     imageUrl: null,
     imageId: null,
     revision: 1,
@@ -242,31 +272,66 @@ function logoFallbackForRow(row: BotcastShowRow): BotcastLogoState {
   };
 }
 
-function parseAtmosphere(raw: string): BotcastAtmosphereState {
+function fallbackAtmosphere(lighting: BotcastStudioLighting): BotcastAtmosphereState {
+  return {
+    seed: `botcast:fallback:${lighting}`,
+    prompt: lighting === "day"
+      ? "Neutral two-person podcast studio in soft natural daylight."
+      : "Neutral two-person podcast studio with warm nighttime practical lighting.",
+    imageUrl: null,
+    imageId: null,
+    revision: 1,
+    status: "fallback",
+  };
+}
+
+function normalizeAtmosphere(
+  parsed: Partial<BotcastAtmosphereState> | undefined,
+  fallback: BotcastAtmosphereState,
+): BotcastAtmosphereState {
+  if (!parsed || typeof parsed.seed !== "string" || typeof parsed.prompt !== "string") {
+    return fallback;
+  }
+  return {
+    seed: parsed.seed,
+    prompt: parsed.prompt,
+    imageUrl: typeof parsed.imageUrl === "string" ? parsed.imageUrl : null,
+    imageId: typeof parsed.imageId === "string" ? parsed.imageId : null,
+    revision: typeof parsed.revision === "number" ? parsed.revision : 1,
+    status:
+      parsed.status === "ready" || parsed.status === "failed"
+        ? parsed.status
+        : "fallback",
+  };
+}
+
+function parseAtmospheres(raw: string): {
+  studioIdentity: string;
+  dayAtmosphere: BotcastAtmosphereState;
+  nightAtmosphere: BotcastAtmosphereState;
+} {
   try {
-    const parsed = JSON.parse(raw) as Partial<BotcastAtmosphereState>;
-    if (typeof parsed.seed !== "string" || typeof parsed.prompt !== "string") {
-      throw new Error("invalid atmosphere");
-    }
+    const container = JSON.parse(raw) as Partial<BotcastAtmosphereState> & {
+      studioIdentity?: unknown;
+      dayAtmosphere?: Partial<BotcastAtmosphereState>;
+      nightAtmosphere?: Partial<BotcastAtmosphereState>;
+    };
+    const legacy = normalizeAtmosphere(container, fallbackAtmosphere("night"));
     return {
-      seed: parsed.seed,
-      prompt: parsed.prompt,
-      imageUrl: typeof parsed.imageUrl === "string" ? parsed.imageUrl : null,
-      imageId: typeof parsed.imageId === "string" ? parsed.imageId : null,
-      revision: typeof parsed.revision === "number" ? parsed.revision : 1,
-      status:
-        parsed.status === "ready" || parsed.status === "failed"
-          ? parsed.status
-          : "fallback",
+      studioIdentity:
+        typeof container.studioIdentity === "string"
+          ? cleanText(container.studioIdentity, "", BOTCAST_STUDIO_IDENTITY_MAX)
+          : "",
+      // Existing single-studio shows remain visible in both themes until the
+      // owner refreshes them into a purpose-built matched pair.
+      dayAtmosphere: normalizeAtmosphere(container.dayAtmosphere, legacy),
+      nightAtmosphere: normalizeAtmosphere(container.nightAtmosphere, legacy),
     };
   } catch {
     return {
-      seed: "botcast:fallback",
-      prompt: "Neutral two-person podcast studio with warm practical lighting.",
-      imageUrl: null,
-      imageId: null,
-      revision: 1,
-      status: "fallback",
+      studioIdentity: "",
+      dayAtmosphere: fallbackAtmosphere("day"),
+      nightAtmosphere: fallbackAtmosphere("night"),
     };
   }
 }
@@ -299,13 +364,24 @@ function parseLogo(raw: string, row: BotcastShowRow): BotcastLogoState {
 }
 
 function serializeShowVisuals(
-  atmosphere: BotcastAtmosphereState,
+  dayAtmosphere: BotcastAtmosphereState,
+  nightAtmosphere: BotcastAtmosphereState,
   logo: BotcastLogoState,
+  studioIdentity: string,
 ): string {
-  return JSON.stringify({ ...atmosphere, logo });
+  // Preserve the original root atmosphere shape for older clients and backup
+  // readers while storing explicit variants for current Signal builds.
+  return JSON.stringify({
+    ...nightAtmosphere,
+    studioIdentity,
+    dayAtmosphere,
+    nightAtmosphere,
+    logo,
+  });
 }
 
 function mapShow(row: BotcastShowRow): BotcastShow {
+  const atmospheres = parseAtmospheres(row.atmosphere_json);
   return {
     id: row.id,
     hostBotId: row.host_bot_id,
@@ -313,7 +389,8 @@ function mapShow(row: BotcastShowRow): BotcastShow {
     premise: row.premise,
     hostingStyle: row.hosting_style,
     accentColor: normalizeAccentColor(row.accent_color),
-    atmosphere: parseAtmosphere(row.atmosphere_json),
+    atmosphere: atmospheres.nightAtmosphere,
+    ...atmospheres,
     logo: parseLogo(row.atmosphere_json, row),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -374,6 +451,8 @@ function mapEpisodeSummary(row: BotcastEpisodeRow): BotcastEpisodeSummary {
     hostBotId: row.host_bot_id,
     guestBotId: row.guest_bot_id,
     topic: row.topic,
+    provider: row.provider,
+    model: row.model,
     status: row.status,
     segment: row.segment,
     outcome: row.outcome,
@@ -389,8 +468,8 @@ function mapEpisodeSummary(row: BotcastEpisodeRow): BotcastEpisodeSummary {
 
 function loadBotProfile(db: DatabaseSync, userId: string, botId: string): BotcastBotProfile {
   const row = db.prepare(
-    `SELECT id, name, system_prompt, color, online_enabled, model, local_model,
-            online_model, temperature, max_tokens, top_p, top_k, repetition_penalty
+    `SELECT id, name, system_prompt, color, temperature, max_tokens, top_p,
+            top_k, repetition_penalty
        FROM bots WHERE id = ? AND user_id = ? AND chat_enabled = 1`,
   ).get(botId, userId) as
     | {
@@ -398,10 +477,6 @@ function loadBotProfile(db: DatabaseSync, userId: string, botId: string): Botcas
         name: string;
         system_prompt: string;
         color: string | null;
-        online_enabled: number;
-        model: string | null;
-        local_model: string | null;
-        online_model: string | null;
         temperature: number;
         max_tokens: number;
         top_p: number | null;
@@ -415,10 +490,6 @@ function loadBotProfile(db: DatabaseSync, userId: string, botId: string): Botcas
     name: row.name,
     systemPrompt: row.system_prompt,
     color: row.color,
-    onlineEnabled: row.online_enabled !== 0,
-    model: row.model,
-    localModel: row.local_model,
-    onlineModel: row.online_model,
     temperature: row.temperature,
     maxTokens: row.max_tokens,
     topP: row.top_p,
@@ -462,7 +533,9 @@ export function createBotcastShow(
   if (existing) return getBotcastShow(db, userId, existing.id);
   const id = randomId(12);
   const now = new Date().toISOString();
-  const atmosphere = atmosphereForHost(host);
+  const dayAtmosphere = atmosphereForHost(host, "day");
+  const nightAtmosphere = atmosphereForHost(host, "night");
+  const studioIdentity = defaultStudioIdentity(host);
   const name = cleanText(
     input.name,
     synthesizeBotcastShowName(host),
@@ -482,7 +555,7 @@ export function createBotcastShow(
     cleanText(input.premise, defaultShowPremise(host)),
     cleanText(input.hostingStyle, defaultHostingStyle(host)),
     normalizeAccentColor(host.color),
-    serializeShowVisuals(atmosphere, logo),
+    serializeShowVisuals(dayAtmosphere, nightAtmosphere, logo, studioIdentity),
     now,
     now,
   );
@@ -508,23 +581,74 @@ export function updateBotcastShow(
 ): BotcastShow {
   const current = getBotcastShow(db, userId, showId);
   const host = loadBotProfile(db, userId, current.hostBotId);
-  let atmosphere = current.atmosphere;
+  let dayAtmosphere = current.dayAtmosphere;
+  let nightAtmosphere = current.nightAtmosphere;
   let logo = current.logo;
+  const studioIdentity = cleanText(
+    patch.studioIdentity,
+    current.studioIdentity || defaultStudioIdentity(host),
+    BOTCAST_STUDIO_IDENTITY_MAX,
+  );
   if (patch.regenerateAtmosphere) {
-    atmosphere = atmosphereForHost(host, current.atmosphere.revision + 1);
-  } else if (patch.atmosphereImageUrl !== undefined || patch.atmosphereImageId !== undefined) {
-    atmosphere = {
-      ...atmosphere,
+    const revision = Math.max(
+      current.dayAtmosphere.revision,
+      current.nightAtmosphere.revision,
+    ) + 1;
+    dayAtmosphere = atmosphereForHost(host, "day", revision, studioIdentity);
+    nightAtmosphere = atmosphereForHost(host, "night", revision, studioIdentity);
+  } else {
+    if (
+      patch.dayAtmosphereImageUrl !== undefined ||
+      patch.dayAtmosphereImageId !== undefined
+    ) {
+      dayAtmosphere = {
+        ...dayAtmosphere,
+        imageUrl:
+          patch.dayAtmosphereImageUrl === undefined
+            ? dayAtmosphere.imageUrl
+            : cleanText(patch.dayAtmosphereImageUrl, "", 2_000) || null,
+        imageId:
+          patch.dayAtmosphereImageId === undefined
+            ? dayAtmosphere.imageId
+            : cleanText(patch.dayAtmosphereImageId, "", 256) || null,
+        status:
+          patch.dayAtmosphereImageUrl === undefined
+            ? dayAtmosphere.status
+            : patch.dayAtmosphereImageUrl
+              ? "ready"
+              : "fallback",
+      };
+    }
+    const nightImageUrl = patch.nightAtmosphereImageUrl !== undefined
+      ? patch.nightAtmosphereImageUrl
+      : patch.atmosphereImageUrl;
+    const nightImageId = patch.nightAtmosphereImageId !== undefined
+      ? patch.nightAtmosphereImageId
+      : patch.atmosphereImageId;
+    if (
+      patch.nightAtmosphereImageUrl !== undefined ||
+      patch.nightAtmosphereImageId !== undefined ||
+      patch.atmosphereImageUrl !== undefined ||
+      patch.atmosphereImageId !== undefined
+    ) {
+      nightAtmosphere = {
+        ...nightAtmosphere,
       imageUrl:
-        patch.atmosphereImageUrl === undefined
-          ? atmosphere.imageUrl
-          : cleanText(patch.atmosphereImageUrl, "", 2_000) || null,
+          nightImageUrl === undefined
+            ? nightAtmosphere.imageUrl
+            : cleanText(nightImageUrl, "", 2_000) || null,
       imageId:
-        patch.atmosphereImageId === undefined
-          ? atmosphere.imageId
-          : cleanText(patch.atmosphereImageId, "", 256) || null,
-      status: patch.atmosphereImageUrl ? "ready" : "fallback",
-    };
+          nightImageId === undefined
+            ? nightAtmosphere.imageId
+            : cleanText(nightImageId, "", 256) || null,
+        status:
+          nightImageUrl === undefined
+            ? nightAtmosphere.status
+            : nightImageUrl
+              ? "ready"
+              : "fallback",
+      };
+    }
   }
   if (patch.regenerateLogo) {
     logo = logoForHost(
@@ -555,7 +679,7 @@ export function updateBotcastShow(
     cleanText(patch.name, current.name, BOTCAST_SHOW_NAME_MAX),
     cleanText(patch.premise, current.premise),
     cleanText(patch.hostingStyle, current.hostingStyle),
-    serializeShowVisuals(atmosphere, logo),
+    serializeShowVisuals(dayAtmosphere, nightAtmosphere, logo, studioIdentity),
     now,
     showId,
     userId,
@@ -563,13 +687,24 @@ export function updateBotcastShow(
   return getBotcastShow(db, userId, showId);
 }
 
-function parseGeneratedShowIdentity(raw: string): { name: string; premise: string } | null {
+function parseGeneratedShowIdentity(raw: string): {
+  name: string;
+  premise: string;
+  studioIdentity?: string;
+} | null {
   const candidate = raw.match(/\{[\s\S]*\}/u)?.[0] ?? raw;
   try {
     const parsed = JSON.parse(candidate) as Record<string, unknown>;
     const name = cleanText(parsed.name, "", BOTCAST_SHOW_NAME_MAX);
     const premise = cleanText(parsed.premise, "", 360);
-    return name && premise ? { name, premise } : null;
+    const studioIdentity = cleanText(
+      parsed.studioIdentity,
+      "",
+      BOTCAST_STUDIO_IDENTITY_MAX,
+    );
+    return name && premise
+      ? { name, premise, ...(studioIdentity ? { studioIdentity } : {}) }
+      : null;
   } catch {
     return null;
   }
@@ -584,16 +719,21 @@ export async function generateBotcastShowIdentity(
   const current = getBotcastShow(db, userId, showId);
   const host = loadBotProfile(db, userId, current.hostBotId);
   try {
-    const selected = speakerProvider(host, generation);
+    const selected = generationProvider(generation);
     const raw = await selected.provider.generateResponse(
       [
         {
           role: "system",
           content: [
             "You are naming a premium podcast show around its host's singular voice.",
-            "Return one JSON object with exactly two strings: name and premise.",
-            "The name must be clever, memorable, natural to say aloud, 2-6 words, and derived from the host's ideas or temperament—not merely their full name plus a generic podcast phrase.",
+            "Return one JSON object with exactly three strings: name, premise, and studioIdentity.",
+            "Find a title that can stand on its own without the host's name: a surprising phrase, vivid metaphor, double meaning, or conceptual tension drawn from the host's worldview.",
+            "Silently draft several candidates, reject generic patterns such as 'Inside [Name]', 'The [Name] Show', 'Conversations with [Name]', and 'The Curious Mind of [Name]', then return only the strongest.",
+            "Keep the title memorable, natural to say aloud, and 1-5 words. Use the host's name only when indispensable to genuinely excellent wordplay.",
             "The premise must be one crisp sentence describing the conversational promise. Do not use markdown.",
+            "studioIdentity is a compact persona-first set bible, not a mood board: define distinctive architecture or landscape, materials, spatial motifs, and at least six concrete artifacts whose subjects and arrangement reveal this host.",
+            "The room should be recognizable as the host's world without their name, portrait, logo, or readable text. Generic books, plants, luxury chairs, acoustic panels, and podcast gear do not count as identity details unless made meaningfully specific.",
+            "Do not specify lighting or time of day in studioIdentity; the same physical set will be rendered in both daylight and nighttime variants.",
           ].join(" "),
         },
         {
@@ -604,7 +744,7 @@ export async function generateBotcastShowIdentity(
       {
         ...(selected.model ? { model: selected.model } : {}),
         temperature: 0.82,
-        maxTokens: 240,
+        maxTokens: 520,
         jsonMode: true,
         usagePurpose: "botcast_brand",
       },
@@ -725,13 +865,16 @@ export function createBotcastEpisode(
   if (!topic) throw new Error("Episode topic is required.");
   const id = randomId(12);
   const now = new Date().toISOString();
+  const provider = input.preferredProvider ?? "local";
+  const model = cleanText(input.modelOverride, "", 240) || null;
   db.exec("BEGIN IMMEDIATE");
   try {
     db.prepare(
       `INSERT INTO botcast_episodes
         (id, user_id, show_id, host_bot_id, guest_bot_id, title, topic,
-         producer_brief, status, segment, started_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'live', 'opening', ?, ?, ?)`,
+         producer_brief, provider, model, status, segment, started_at, created_at,
+         updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'live', 'opening', ?, ?, ?)`,
     ).run(
       id,
       userId,
@@ -741,6 +884,8 @@ export function createBotcastEpisode(
       topic.slice(0, 96),
       topic,
       cleanText(input.producerBrief, "", BOTCAST_TEXT_MAX),
+      provider,
+      model,
       now,
       now,
       now,
@@ -930,11 +1075,11 @@ function sanitizeUtterance(raw: string, fallback: string, speakerName: string): 
   return cleaned || fallback;
 }
 
-function speakerProvider(
-  speaker: BotcastBotProfile,
+function generationProvider(
   options: BotcastGenerationOptions,
+  providerName = options.preferredProvider,
+  modelOverride?: string | null,
 ): { provider: LlmProvider; providerName: ProviderName; model?: string } {
-  const providerName = speaker.onlineEnabled ? options.preferredProvider : "local";
   const provider = (options.providerFactory ?? selectProvider)(
     providerName,
     options.openAiApiKey,
@@ -942,9 +1087,11 @@ function speakerProvider(
     options.anthropicApiKey,
   );
   const model =
-    providerName === "local"
-      ? speaker.localModel ?? options.preferredLocalModel ?? speaker.model ?? undefined
-      : speaker.onlineModel ?? options.preferredOnlineModel ?? speaker.model ?? undefined;
+    modelOverride !== undefined
+      ? modelOverride ?? undefined
+      : (providerName === "local"
+          ? options.preferredLocalModel
+          : options.preferredOnlineModel) ?? undefined;
   return { provider, providerName, ...(model ? { model } : {}) };
 }
 
@@ -1058,7 +1205,7 @@ export async function advanceBotcastEpisode(
     ...(input.cue ? { cue: input.cue } : {}),
     departureRequired,
   });
-  const selected = speakerProvider(speaker, generation);
+  const selected = generationProvider(generation, episode.provider, episode.model);
   const raw = await selected.provider.generateResponse(prompt, {
     ...(selected.model ? { model: selected.model } : {}),
     temperature: Math.min(1.15, Math.max(0.2, speaker.temperature)),

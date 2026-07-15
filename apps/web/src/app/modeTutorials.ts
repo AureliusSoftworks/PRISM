@@ -123,13 +123,13 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Choose the artwork path",
-        body: "Signal can synthesize a matching studio and logo. Turn it off—or let a call fail—and the built-in PRISM studio and glyph mark keep the show camera-ready.",
-        clickLabel: "the studio and logo option",
+        body: "Signal can synthesize matching day and night studios plus a logo, then follow your Light or Dark theme automatically. Turn it off—or let a call fail—and the built-in PRISM studios and glyph mark keep the show camera-ready.",
+        clickLabel: "the studios and logo option",
         targetSelector: '[data-tutorial-target="botcast-brand-controls"]',
       },
       {
         heading: "Book tonight’s episode",
-        body: "Choose one guest, set the topic, and write an optional private angle. The brief shapes the host but never goes on mic.",
+        body: "Choose one guest, set the topic, and write an optional private angle. Keep the account model or choose another for this recording; Signal locks that choice when the episode begins. The brief shapes the host but never goes on mic.",
         clickLabel: "the episode setup desk",
         targetSelector: '[data-tutorial-target="botcast-setup"]',
       },

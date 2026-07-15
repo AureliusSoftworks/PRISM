@@ -33,6 +33,11 @@ export interface BotcastBotSummary {
   online_enabled?: number | null;
 }
 
+export interface BotcastModelOption {
+  id: string;
+  label: string;
+}
+
 export interface BotcastApiRequest {
   <T>(path: string, options?: RequestInit): Promise<T>;
 }
@@ -42,6 +47,8 @@ export interface BotcastExperienceProps {
   request: BotcastApiRequest;
   preferredProvider: "local" | "openai" | "anthropic";
   preferredImageProvider: "local" | "openai";
+  modelOptions: BotcastModelOption[];
+  accountDefaultModel: string | null;
   theme?: "light" | "dark";
   renderAvatar?: (
     bot: BotcastBotSummary,
@@ -55,6 +62,8 @@ export interface BotcastExperienceProps {
 type ImageGenerationResponse = {
   image: { id: string; displayUrl?: string; url?: string };
 };
+
+type SignalArtworkKind = "studio" | "logo";
 
 type SignalDeleteTarget =
   | {
@@ -101,7 +110,11 @@ function deleteConfirmationCopy(target: SignalDeleteTarget): {
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "Signal request failed.";
+  if (!(error instanceof Error)) return "Signal request failed.";
+  if (/database is locked|SQLITE_BUSY/iu.test(error.message)) {
+    return "Signal is finishing another save. Try again in a moment.";
+  }
+  return error.message;
 }
 
 function runtimeLabel(runtimeMs: number | null): string {
@@ -110,6 +123,18 @@ function runtimeLabel(runtimeMs: number | null): string {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+function providerLabel(provider: BotcastEpisodeSummary["provider"]): string {
+  if (provider === "local") return "LOCAL";
+  return provider === "anthropic" ? "Anthropic" : "OpenAI";
+}
+
+function activeShowAtmosphere(
+  show: BotcastShow,
+  theme: "light" | "dark",
+): BotcastShow["atmosphere"] {
+  return theme === "light" ? show.dayAtmosphere : show.nightAtmosphere;
 }
 
 function episodeOutcomeLabel(episode: Pick<BotcastEpisodeSummary, "outcome">): string {
@@ -208,6 +233,8 @@ export function BotcastExperience({
   request,
   preferredProvider,
   preferredImageProvider,
+  modelOptions,
+  accountDefaultModel,
   theme = "dark",
   renderAvatar,
   onUtterance,
@@ -222,6 +249,10 @@ export function BotcastExperience({
     () => new Map(eligibleBots.map((bot) => [bot.id, bot])),
     [eligibleBots],
   );
+  const modelLabels = useMemo(
+    () => new Map(modelOptions.map((option) => [option.id, option.label])),
+    [modelOptions],
+  );
   const [shows, setShows] = useState<BotcastShow[]>([]);
   const [selectedShowId, setSelectedShowId] = useState<string | null>(null);
   const [episodes, setEpisodes] = useState<BotcastEpisodeSummary[]>([]);
@@ -231,6 +262,7 @@ export function BotcastExperience({
   const [guestDraftId, setGuestDraftId] = useState("");
   const [topicDraft, setTopicDraft] = useState("");
   const [producerBriefDraft, setProducerBriefDraft] = useState("");
+  const [episodeModelDraft, setEpisodeModelDraft] = useState("");
   const [askAboutDraft, setAskAboutDraft] = useState("");
   const [showNameDraft, setShowNameDraft] = useState("");
   const [synthesizeArtwork, setSynthesizeArtwork] = useState(true);
@@ -251,7 +283,19 @@ export function BotcastExperience({
   const deleteCancelButtonRef = useRef<HTMLButtonElement | null>(null);
   const deleteReturnFocusRef = useRef<HTMLElement | null>(null);
 
+  useEffect(() => {
+    if (
+      episodeModelDraft &&
+      !modelOptions.some((option) => option.id === episodeModelDraft)
+    ) {
+      setEpisodeModelDraft("");
+    }
+  }, [episodeModelDraft, modelOptions]);
+
   const selectedShow = shows.find((show) => show.id === selectedShowId) ?? null;
+  const dashboardAtmosphere = selectedShow
+    ? activeShowAtmosphere(selectedShow, theme)
+    : null;
   const hostBot = selectedShow ? botsById.get(selectedShow.hostBotId) ?? null : null;
   const liveGuestBot = episode ? botsById.get(episode.guestBotId) ?? null : null;
   const replayHostBot = replayEpisode
@@ -479,6 +523,7 @@ export function BotcastExperience({
   const generateShowArtwork = async (
     sourceShow: BotcastShow,
     regenerate: boolean,
+    kinds: readonly SignalArtworkKind[] = ["studio", "logo"],
   ): Promise<{
     show: BotcastShow;
     generatedCount: number;
@@ -490,7 +535,10 @@ export function BotcastExperience({
         `/api/botcast/shows/${encodeURIComponent(sourceShow.id)}`,
         {
           method: "PATCH",
-          body: JSON.stringify({ regenerateAtmosphere: true, regenerateLogo: true }),
+          body: JSON.stringify({
+            ...(kinds.includes("studio") ? { regenerateAtmosphere: true } : {}),
+            ...(kinds.includes("logo") ? { regenerateLogo: true } : {}),
+          }),
         },
       );
       workingShow = reset.show;
@@ -498,22 +546,32 @@ export function BotcastExperience({
     }
     let generatedCount = 0;
     let failureMessage: string | null = null;
-    const artwork = [
+    const artwork = ([
       {
-        kind: "studio",
-        prompt: workingShow.atmosphere.prompt,
+        kind: "daytime studio",
+        artworkKind: "studio",
+        prompt: workingShow.dayAtmosphere.prompt,
         size: "1536x1024",
-        imageUrlKey: "atmosphereImageUrl",
-        imageIdKey: "atmosphereImageId",
+        imageUrlKey: "dayAtmosphereImageUrl",
+        imageIdKey: "dayAtmosphereImageId",
+      },
+      {
+        kind: "nighttime studio",
+        artworkKind: "studio",
+        prompt: workingShow.nightAtmosphere.prompt,
+        size: "1536x1024",
+        imageUrlKey: "nightAtmosphereImageUrl",
+        imageIdKey: "nightAtmosphereImageId",
       },
       {
         kind: "logo",
+        artworkKind: "logo",
         prompt: workingShow.logo.prompt,
         size: "1024x1024",
         imageUrlKey: "logoImageUrl",
         imageIdKey: "logoImageId",
       },
-    ] as const;
+    ] as const).filter((asset) => kinds.includes(asset.artworkKind));
     for (const asset of artwork) {
       try {
         setNotice(`Synthesizing the ${asset.kind}…`);
@@ -525,6 +583,7 @@ export function BotcastExperience({
             quality: "standard",
             preferredProvider: preferredImageProvider,
             botId: workingShow.hostBotId,
+            origin: "botcast",
           }),
         });
         const imageUrl = generated.image.displayUrl ?? generated.image.url;
@@ -585,11 +644,11 @@ export function BotcastExperience({
         show = artwork.show;
         if (artwork.failureMessage) setError(artwork.failureMessage);
         setNotice(
-          artwork.generatedCount === 2
-            ? `${show.name} has its name, mark, and studio.`
-            : artwork.generatedCount === 1
-              ? `${show.name} is ready; one visual uses its PRISM fallback.`
-              : `${show.name} is ready in its procedural PRISM studio.`,
+          artwork.generatedCount === 3
+            ? `${show.name} has its name, mark, and day-to-night studio pair.`
+            : artwork.generatedCount > 0
+              ? `${show.name} is ready; ${3 - artwork.generatedCount} visual${artwork.generatedCount === 2 ? " uses" : "s use"} its PRISM fallback.`
+              : `${show.name} is ready in its procedural PRISM studios.`,
         );
       } else {
         setNotice(
@@ -626,23 +685,43 @@ export function BotcastExperience({
     }
   };
 
-  const regenerateBrandArtwork = async (): Promise<void> => {
+  const regenerateStudio = async (): Promise<void> => {
     if (!selectedShow) return;
     setBusy(true);
     setError(null);
-    setNotice("Refreshing the show’s studio and mark…");
+    setNotice("Refreshing the show’s studio…");
     try {
-      const artwork = await generateShowArtwork(selectedShow, true);
+      const artwork = await generateShowArtwork(selectedShow, true, ["studio"]);
       if (artwork.failureMessage) setError(artwork.failureMessage);
       setNotice(
         artwork.generatedCount === 2
-          ? "The refreshed studio and logo are locked to this show."
+          ? "The refreshed day and night studios are live."
           : artwork.generatedCount === 1
-            ? "One new visual is live; the other is using its PRISM fallback."
-            : "Synthesis was unavailable, so the refreshed PRISM fallbacks are live.",
+            ? "One refreshed studio is live; its partner is using the PRISM fallback."
+            : "Synthesis was unavailable, so the refreshed PRISM studios are live.",
       );
     } catch {
-      setNotice("The procedural studio and logo are active; no show setup was lost.");
+      setNotice("The procedural day and night studios are active; no show setup was lost.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const regenerateLogo = async (): Promise<void> => {
+    if (!selectedShow) return;
+    setBusy(true);
+    setError(null);
+    setNotice("Refreshing the show’s logo…");
+    try {
+      const artwork = await generateShowArtwork(selectedShow, true, ["logo"]);
+      if (artwork.failureMessage) setError(artwork.failureMessage);
+      setNotice(
+        artwork.generatedCount === 1
+          ? "The refreshed logo is live."
+          : "Synthesis was unavailable, so the refreshed PRISM logo is live.",
+      );
+    } catch {
+      setNotice("The procedural logo is active; no show setup was lost.");
     } finally {
       setBusy(false);
     }
@@ -661,6 +740,7 @@ export function BotcastExperience({
             guestBotId: guestDraftId,
             topic: topicDraft,
             producerBrief: producerBriefDraft,
+            modelOverride: episodeModelDraft || accountDefaultModel,
           }),
         },
       );
@@ -669,6 +749,7 @@ export function BotcastExperience({
       setAutoRun(true);
       setTopicDraft("");
       setProducerBriefDraft("");
+      setEpisodeModelDraft("");
       setAskAboutDraft("");
       await loadEpisodes(selectedShow.id);
     } catch (startError) {
@@ -690,7 +771,6 @@ export function BotcastExperience({
           {
             method: "POST",
             body: JSON.stringify({
-              preferredProvider,
               ...(cue ? { cue } : {}),
             }),
           },
@@ -729,7 +809,6 @@ export function BotcastExperience({
       episode,
       loadEpisodes,
       onUtterance,
-      preferredProvider,
       request,
       selectedShowId,
     ],
@@ -842,10 +921,11 @@ export function BotcastExperience({
     guestDeparted?: boolean;
   }): React.JSX.Element => {
     const departed = args.guestDeparted ?? guestHasDeparted(args.currentEpisode);
+    const stageAtmosphere = activeShowAtmosphere(args.show, theme);
     const atmosphereStyle = {
       ["--botcast-accent" as string]: args.show.accentColor,
-      ...(args.show.atmosphere.imageUrl
-        ? { ["--botcast-atmosphere" as string]: `url("${args.show.atmosphere.imageUrl}")` }
+      ...(stageAtmosphere.imageUrl
+        ? { ["--botcast-atmosphere" as string]: `url("${stageAtmosphere.imageUrl}")` }
         : {}),
     } as CSSProperties;
     const avatar = (
@@ -859,7 +939,7 @@ export function BotcastExperience({
         className={styles.stageViewport}
         data-shot={args.shot}
         data-replay={args.replay ? "true" : undefined}
-        data-atmosphere={args.show.atmosphere.status}
+        data-atmosphere={stageAtmosphere.status}
         style={atmosphereStyle}
         aria-label={`Signal studio, ${args.shot} camera`}
       >
@@ -970,8 +1050,8 @@ export function BotcastExperience({
             onChange={(event) => setSynthesizeArtwork(event.target.checked)}
           />
           <span>
-            Synthesize studio + logo
-            <small>Off uses the built-in PRISM set.</small>
+            Synthesize studios + logo
+            <small>Creates matching Light and Dark sets.</small>
           </span>
         </label>
         <button type="button" onClick={() => void createShow()} disabled={!hostDraftId || busy}>
@@ -991,9 +1071,19 @@ export function BotcastExperience({
             <span className={styles.eyebrow}>Tonight’s production</span>
             <h2>Book the guest. Set the angle.</h2>
           </div>
-          <button type="button" onClick={() => void regenerateBrandArtwork()} disabled={busy}>
-            Refresh studio + logo
-          </button>
+          <div className={styles.productionArtworkActions}>
+            <button
+              type="button"
+              title="Regenerate matching Light and Dark studios"
+              onClick={() => void regenerateStudio()}
+              disabled={busy}
+            >
+              Refresh studio
+            </button>
+            <button type="button" onClick={() => void regenerateLogo()} disabled={busy}>
+              Refresh logo
+            </button>
+          </div>
         </div>
         <div className={styles.setupGrid}>
           <label>
@@ -1020,14 +1110,36 @@ export function BotcastExperience({
             />
           </label>
         </div>
-        <button
-          type="button"
-          className={styles.goLiveButton}
-          onClick={() => void startEpisode()}
-          disabled={busy || !guestDraftId || !topicDraft.trim()}
-        >
-          Begin episode
-        </button>
+        <div className={styles.episodeLaunchRow}>
+          <label className={styles.episodeModelControl}>
+            <span>Episode model</span>
+            <select
+              value={episodeModelDraft}
+              onChange={(event) => setEpisodeModelDraft(event.target.value)}
+              aria-label="Signal episode model"
+            >
+              <option value="">
+                {`Account default · ${accountDefaultModel ? modelLabels.get(accountDefaultModel) ?? accountDefaultModel : "Provider default"}`}
+              </option>
+              {modelOptions
+                .filter((option) => option.id !== accountDefaultModel)
+                .map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+            </select>
+            <small>{providerLabel(preferredProvider)} · locked for this recording</small>
+          </label>
+          <button
+            type="button"
+            className={styles.goLiveButton}
+            onClick={() => void startEpisode()}
+            disabled={busy || !guestDraftId || !topicDraft.trim()}
+          >
+            Begin episode
+          </button>
+        </div>
       </div>
     );
   };
@@ -1050,7 +1162,7 @@ export function BotcastExperience({
               <strong>{item.title}</strong>
               <span>{botsById.get(item.guestBotId)?.name ?? "Guest"}</span>
               <small>
-                {new Date(item.startedAt).toLocaleDateString()} · {runtimeLabel(item.runtimeMs)} · {item.status === "live" ? "Resume episode" : episodeOutcomeLabel(item)}
+                {new Date(item.startedAt).toLocaleDateString()} · {runtimeLabel(item.runtimeMs)} · {providerLabel(item.provider)} · {item.model ? modelLabels.get(item.model) ?? item.model : "Provider default"} · {item.status === "live" ? "Resume episode" : episodeOutcomeLabel(item)}
               </small>
             </button>
             <button
@@ -1125,6 +1237,9 @@ export function BotcastExperience({
                 {episode.status === "live" ? "● ON AIR" : episodeOutcomeLabel(episode)}
               </span>
               <strong>{episode.segment === "interview" ? "MAIN INTERVIEW" : episode.segment.toUpperCase()}</strong>
+              <span className={styles.modelProvenance}>
+                {providerLabel(episode.provider)} · {episode.model ? modelLabels.get(episode.model) ?? episode.model : "Provider default"}
+              </span>
               <span>{episode.tensionStage === "calm" ? "Guest settled" : `Guest: ${episode.tensionStage}`}</span>
               <button type="button" onClick={() => setAutoRun((value) => !value)} disabled={episode.status === "completed"}>
                 {autoRun ? "Pause rundown" : "Resume rundown"}
@@ -1202,7 +1317,7 @@ export function BotcastExperience({
               <div>
                 <span className={styles.eyebrow}>From the archive</span>
                 <h2>{replayEpisode.title}</h2>
-                <p>{new Date(replayEpisode.startedAt).toLocaleString()} · {episodeOutcomeLabel(replayEpisode)}</p>
+                <p>{new Date(replayEpisode.startedAt).toLocaleString()} · {providerLabel(replayEpisode.provider)} · {replayEpisode.model ? modelLabels.get(replayEpisode.model) ?? replayEpisode.model : "Provider default"} · {episodeOutcomeLabel(replayEpisode)}</p>
               </div>
               <div className={styles.replayHeaderActions}>
                 <button type="button" onClick={() => setReplayEpisode(null)}>Close replay</button>
@@ -1265,8 +1380,33 @@ export function BotcastExperience({
               ))}
             </div>
           </div>
-        ) : selectedShow ? (
+        ) : selectedShow && dashboardAtmosphere ? (
           <div className={styles.showDashboard}>
+            <section
+              className={styles.showBrandPreview}
+              data-atmosphere={dashboardAtmosphere.status}
+              style={
+                {
+                  "--botcast-accent": selectedShow.accentColor,
+                  ...(dashboardAtmosphere.imageUrl
+                    ? {
+                        "--botcast-dashboard-atmosphere": `url("${dashboardAtmosphere.imageUrl}")`,
+                      }
+                    : {}),
+                } as CSSProperties
+              }
+              aria-label={`${selectedShow.name} show identity`}
+            >
+              <div className={styles.showBrandAtmosphere} aria-hidden="true" />
+              <div className={styles.showBrandContent}>
+                <SignalShowLogo show={selectedShow} />
+                <div>
+                  <span className={styles.eyebrow}>Show identity</span>
+                  <h2>{selectedShow.name}</h2>
+                  <p>{hostBot?.name ?? "Host"}</p>
+                </div>
+              </div>
+            </section>
             {renderEpisodeSetup()}
             {renderArchive()}
           </div>

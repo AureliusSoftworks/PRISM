@@ -28,6 +28,9 @@ describe("mode tutorials", () => {
       MODE_TUTORIALS.botcast.steps[1]?.targetSelector,
       '[data-tutorial-target="botcast-brand-controls"]',
     );
+    assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /day and night studios/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /Light or Dark theme/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[2]?.body ?? "", /locks that choice/u);
   });
 
   it("teaches Slate as a directed document workflow with stable targets", () => {

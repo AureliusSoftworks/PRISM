@@ -36008,6 +36008,15 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   flex: 0 0 auto;
 }
 
+.imageLibrarySection {
+  display: grid;
+  gap: 8px;
+}
+
+.imageLibrarySection + .imageLibrarySection {
+  margin-top: 8px;
+}
+
 .opinionPanelBody {
   display: grid;
   gap: 14px;
