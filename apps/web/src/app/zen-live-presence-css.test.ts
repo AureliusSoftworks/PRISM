@@ -2483,7 +2483,14 @@ describe("Zen live presence CSS", () => {
       wordmarkSource,
       /if \(zenCanZoomOutToAllBots\) \{\s*zoomOutFromActiveZenConversation\(\);\s*return;\s*\}/
     );
-    assert.match(pageSource, /const zenWordmarkActionLabel = zenCanZoomOutToAllBots/);
+    assert.match(
+      pageSource,
+      /const zenWordmarkActionLabel = relationshipDepthReturnBlockedByReply/
+    );
+    assert.match(
+      pageSource,
+      /relationshipDepthReturnDepth > 0[\s\S]{0,180}zenCanZoomOutToAllBots/
+    );
     assert.match(pageSource, /aria-label=\{zenWordmarkActionLabel\}/);
     assert.doesNotMatch(pageSource, /function renderZenZoomNavigationButton\(\)/);
     assert.doesNotMatch(pageSource, /function renderZenZoomReturnButton\(\)/);
@@ -2584,13 +2591,12 @@ describe("Zen live presence CSS", () => {
 
   it("moves refresh to the permanent recycle navbar button", () => {
     assert.match(pageSource, /Recycle,/);
-    assert.match(pageSource, /onClick=\{\(\) => runAsyncAction\(refreshPrismFromNavbar\)\}/);
+    assert.match(pageSource, /onClick=\{\(\) => runAction\(refreshPrismFromNavbar\)\}/);
     assert.match(pageSource, /aria-label="Refresh Prism"/);
     assert.match(
       pageSource,
-      /await refreshAll\(\{ includeModels: false \}\);/
+      /function refreshPrismFromNavbar\(\): void \{ reloadPrismPage\(typeof window === "undefined" \? null : window\.location\); \}/
     );
-    assert.doesNotMatch(pageSource, /window\.location\.reload\(\)/);
     assert.doesNotMatch(pageSource, /createBuiltInRefreshCommand/);
     assert.doesNotMatch(pageSource, /id:\s*"builtin:\/refresh"/);
     assert.doesNotMatch(pageSource, /renderNavbarRefreshSplash/);

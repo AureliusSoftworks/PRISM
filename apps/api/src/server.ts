@@ -110,7 +110,6 @@ import {
   processCoffeeAutonomousTurn,
   processCoffeeTurn,
   recordCoffeePlayerDeparture,
-  regenerateCoffeeConversationStarterTopics,
   recordCoffeeUserAction,
   recordCoffeeReplayEvents,
   recordCoffeeInterruptionPause,
@@ -122,7 +121,7 @@ import {
   topOffCoffeeCupForBot,
   undoLatestCoffeeDebugMessage,
   updateCoffeePreset,
-  updateCoffeeGroup,
+  updateCoffeeGroupWithGeneratedTopics,
   updateCoffeeBotSocialDebug,
   updateCoffeeConversationSettings,
 } from "./coffee.ts";
@@ -297,6 +296,7 @@ import {
   DEFAULT_BOT_FACE_MOUTH_SCALE,
   DEFAULT_BOT_FACE_THINKING_FRAMES,
   DEFAULT_OPENAI_IMAGE_MODEL_ID,
+  GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE,
   normalizeBotFaceThinkingFrames,
   normalizeBotFaceBlinkBar,
   normalizeBotFaceBlinkOffsetX,
@@ -389,6 +389,13 @@ import {
   composeZenWallpaperPrompt,
   normalizeZenWallpaperPromptOverride,
 } from "./zen-wallpaper-prompt.ts";
+import {
+  composeGroupRoomWallpaperPrompt,
+  loadOwnedGroupRoomWallpaperMembers,
+  normalizeGroupRoomWallpaperBackupPrompt,
+  normalizeGroupRoomWallpaperBackupUpload,
+  readGroupRoomWallpaperRequestContext,
+} from "./group-room-wallpaper.ts";
 import {
   buildGeneratedImageRelativePath,
   downloadRemoteImage,
@@ -2021,6 +2028,7 @@ async function finalizeComfyOrOllamaGeneratedImageResponse(
     modelUsed: string;
     provider: "comfyui" | "ollama";
     purpose?: string;
+    composedPrompt?: string;
     profilePictureBotId?: string | null;
     previousProfilePictureImageId?: string | null;
   }
@@ -2070,9 +2078,12 @@ async function finalizeComfyOrOllamaGeneratedImageResponse(
     recordImageUsage({
       provider: args.provider,
       model: args.modelUsed,
-      purpose: args.purpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE
-        ? BOT_PROFILE_PICTURE_IMAGE_PURPOSE
-        : "image_generation",
+      purpose:
+        args.purpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE
+          ? BOT_PROFILE_PICTURE_IMAGE_PURPOSE
+          : args.purpose === GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE
+            ? GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE
+            : "image_generation",
       imageCount: 1,
       imageSize: args.size,
       imageQuality: args.quality,
@@ -2095,6 +2106,7 @@ async function finalizeComfyOrOllamaGeneratedImageResponse(
       model: args.modelUsed,
       purpose: args.purpose ?? "gallery",
     },
+    ...(args.composedPrompt ? { composedPrompt: args.composedPrompt } : {}),
   });
 }
 
@@ -5074,10 +5086,17 @@ function buildRoutes(): RouteDefinition[] {
         ...(body.modelChoiceByProvider !== undefined
           ? { modelChoiceByProvider: body.modelChoiceByProvider }
           : {}),
+        ...(body.starterTopics !== undefined
+          ? { starterTopics: body.starterTopics }
+          : {}),
+        ...(body.starterTopicsByBotId !== undefined
+          ? { starterTopicsByBotId: body.starterTopicsByBotId }
+          : {}),
       }, {
         prismDefaultLlmModel: user.prism_default_llm_model,
         secondaryOllamaHost: user.secondary_ollama_host,
         experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
+        auxiliaryProviderFactory: auxiliaryProviderFactoryOverride,
       });
       json(ctx.res, 201, {
         ok: true,
@@ -5090,7 +5109,8 @@ function buildRoutes(): RouteDefinition[] {
       const groupBotIds = Array.isArray(body.groupBotIds)
         ? body.groupBotIds
         : undefined;
-      const group = updateCoffeeGroup(db, userId, ctx.params.id, {
+      const user = getUserRow(userId);
+      const group = await updateCoffeeGroupWithGeneratedTopics(db, userId, ctx.params.id, {
         ...(body.name !== undefined ? { name: body.name } : {}),
         ...(groupBotIds !== undefined ? { groupBotIds } : {}),
         ...(body.coffeeSettings !== undefined ? { coffeeSettings: body.coffeeSettings } : {}),
@@ -5099,6 +5119,17 @@ function buildRoutes(): RouteDefinition[] {
         ...(body.modelChoiceByProvider !== undefined
           ? { modelChoiceByProvider: body.modelChoiceByProvider }
           : {}),
+        ...(body.starterTopics !== undefined
+          ? { starterTopics: body.starterTopics }
+          : {}),
+        ...(body.starterTopicsByBotId !== undefined
+          ? { starterTopicsByBotId: body.starterTopicsByBotId }
+          : {}),
+      }, {
+        prismDefaultLlmModel: user.prism_default_llm_model,
+        secondaryOllamaHost: user.secondary_ollama_host,
+        experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
+        auxiliaryProviderFactory: auxiliaryProviderFactoryOverride,
       });
       json(ctx.res, 200, {
         ok: true,
@@ -5139,8 +5170,10 @@ function buildRoutes(): RouteDefinition[] {
             {
               coffeeSettings: body.coffeeSettings,
               durationMinutes: body.durationMinutes,
+              initialTopic: body.initialTopic,
               presetId: body.presetId,
               excludedBotIds: body.excludedBotIds,
+              forceAttendance: body.forceAttendance,
               initialPoll,
               initialTeams,
             },
@@ -5150,7 +5183,6 @@ function buildRoutes(): RouteDefinition[] {
               experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
               auxiliaryProviderFactory: auxiliaryProviderFactoryOverride,
               userKey,
-              rerankStarterTopicsForSession: true,
             }
           );
           patchUsageSession({ conversationId: created.conversation.id });
@@ -5193,6 +5225,7 @@ function buildRoutes(): RouteDefinition[] {
             {
               groupBotIds,
               coffeeSettings: body.coffeeSettings,
+              initialTopic: body.initialTopic,
               initialPoll,
               initialTeams,
             },
@@ -5446,37 +5479,6 @@ function buildRoutes(): RouteDefinition[] {
         ok: true,
         conversation,
       });
-    }),
-    route("POST", "/api/coffee/sessions/:id/topics/regenerate", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const user = getUserRow(userId);
-      const userKey = decryptUserKey(userId);
-      const conversationId = ctx.params.id;
-      const coffeeStarterTopics = await runWithUsageSession(
-        {
-          db,
-          userId,
-          privacyScope: "normal",
-          mode: "coffee",
-          surface: "coffee_topic",
-          conversationId,
-        },
-        () =>
-          regenerateCoffeeConversationStarterTopics(
-            db,
-            userId,
-            conversationId,
-            {
-              prismDefaultLlmModel: user.prism_default_llm_model,
-              secondaryOllamaHost: user.secondary_ollama_host,
-              experimentalDualOllamaEnabled:
-                user.experimental_dual_ollama_enabled === 1,
-              auxiliaryProviderFactory: auxiliaryProviderFactoryOverride,
-              userKey,
-            }
-          )
-      );
-      json(ctx.res, 200, { ok: true, coffeeStarterTopics });
     }),
     route("POST", "/api/coffee/sessions/:id/teams", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -7876,12 +7878,23 @@ function buildRoutes(): RouteDefinition[] {
       ctx.req.once("close", onImageGenClientClose);
       try {
       const body = ctx.body as Record<string, unknown>;
-      const prompt = readString(body.prompt, "prompt");
+      const rawImagePurpose = body.purpose ?? body.imagePurpose;
+      const imagePurpose =
+        rawImagePurpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE
+          ? BOT_PROFILE_PICTURE_IMAGE_PURPOSE
+          : rawImagePurpose === GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE
+            ? GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE
+            : "gallery";
+      const prompt = imagePurpose === GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE
+        ? (typeof body.prompt === "string" ? body.prompt.trim() : "")
+        : readString(body.prompt, "prompt");
       const requestedSize =
         typeof body.size === "string" ? body.size.trim() : IMAGE_GENERATION_DEFAULT_SIZE;
-      const size = IMAGE_GENERATION_ALLOWED_SIZES.has(requestedSize)
-        ? requestedSize
-        : inferImageGenerationSizeFromPrompt(prompt);
+      const size = imagePurpose === GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE
+        ? ZEN_WALLPAPER_SIZE
+        : IMAGE_GENERATION_ALLOWED_SIZES.has(requestedSize)
+          ? requestedSize
+          : inferImageGenerationSizeFromPrompt(prompt);
       const quality = (body.quality as string) ?? "standard";
       const bodyModelRaw =
         typeof body.model === "string" && body.model.trim().length > 0
@@ -7895,24 +7908,34 @@ function buildRoutes(): RouteDefinition[] {
         typeof body.botId === "string" && body.botId.trim().length > 0
           ? body.botId.trim()
           : undefined;
-      const rawImagePurpose = body.purpose ?? body.imagePurpose;
-      const imagePurpose =
-        rawImagePurpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE
-          ? BOT_PROFILE_PICTURE_IMAGE_PURPOSE
-          : "gallery";
       if (imagePurpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE && !bodyBotId) {
         throw new Error("Profile picture generation requires a bot.");
       }
+      if (
+        imagePurpose === GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE &&
+        (bodyBotId || conversationIdRaw)
+      ) {
+        throw new Error(
+          "Group-room wallpaper generation cannot be attributed to a bot or conversation."
+        );
+      }
+      const groupRoomWallpaperContext =
+        imagePurpose === GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE
+          ? readGroupRoomWallpaperRequestContext(body)
+          : null;
 
       // ONLINE → OpenAI Images API; LOCAL → Ollama image checkpoint on this Mac.
-      // Body may override `preferredProvider` for this request (same pattern as chat).
+      // A stored LOCAL account is authoritative: a request body cannot opt it
+      // into an outbound provider. ONLINE accounts may still request LOCAL.
       const user = getUserRow(userId);
       const requestedProvider =
         body.preferredProvider === "openai" || body.preferredProvider === "local"
           ? body.preferredProvider
           : undefined;
       const effectiveProvider =
-        requestedProvider ?? (user.preferred_provider === "local" ? "local" : "openai");
+        user.preferred_provider === "local"
+          ? "local"
+          : (requestedProvider ?? "openai");
 
       const persistence = resolveImageGeneratePersistence({
         db,
@@ -7952,13 +7975,33 @@ function buildRoutes(): RouteDefinition[] {
       });
 
       let promptForModel = prompt;
+      let promptForPersistence = prompt;
+      let composedPrompt: string | undefined;
+      if (groupRoomWallpaperContext) {
+        const members = loadOwnedGroupRoomWallpaperMembers(
+          db,
+          userId,
+          groupRoomWallpaperContext.memberBotIds
+        );
+        composedPrompt = composeGroupRoomWallpaperPrompt({
+          userPrompt: prompt,
+          groupName: groupRoomWallpaperContext.groupName,
+          groupDescription: groupRoomWallpaperContext.groupDescription,
+          members,
+          zenWallpaperStyleNotes: normalizeZenWallpaperStyleNotes(
+            user.zen_wallpaper_style_notes
+          ),
+        });
+        promptForModel = composedPrompt;
+        promptForPersistence = composedPrompt;
+      }
       const personaBotId = persistence.personaBotId;
       type BotPersonaImageRow = {
         name: string;
         system_prompt: string;
       };
       let botPersona: BotPersonaImageRow | undefined;
-      if (personaBotId) {
+      if (personaBotId && !groupRoomWallpaperContext) {
         botPersona = db
           .prepare(
             "SELECT name, system_prompt FROM bots WHERE id = ? AND user_id = ?"
@@ -7974,8 +8017,14 @@ function buildRoutes(): RouteDefinition[] {
         }
       }
 
-      const preferredLocalImageModel = user.preferred_local_image_model?.trim() ?? "";
-      const preferredOpenAiImageModel = user.preferred_openai_image_model?.trim() ?? "";
+      const preferredLocalImageModel =
+        (imagePurpose === GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE
+          ? user.preferred_zen_wallpaper_local_image_model?.trim()
+          : "") || user.preferred_local_image_model?.trim() || "";
+      const preferredOpenAiImageModel =
+        (imagePurpose === GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE
+          ? user.preferred_zen_wallpaper_openai_image_model?.trim()
+          : "") || user.preferred_openai_image_model?.trim() || "";
       const localImageDisabled =
         (effectiveProvider === "local" && bodyModelDisabled) ||
         isDisabledModelChoice(preferredLocalImageModel);
@@ -8018,8 +8067,10 @@ function buildRoutes(): RouteDefinition[] {
         botId: bodyBotId ?? null,
         mode: "sandbox",
         incognito: false,
-        captionPrompt: prompt,
-        userMessage: `[Images panel] ${prompt.slice(0, 500)}`,
+        captionPrompt: prompt || groupRoomWallpaperContext?.groupName || "Group room atmosphere",
+        userMessage: `[Images panel] ${(
+          prompt || groupRoomWallpaperContext?.groupName || "Group room atmosphere"
+        ).slice(0, 500)}`,
         source: "images_panel",
       });
       if (!acqPanel.ok) {
@@ -8068,7 +8119,7 @@ function buildRoutes(): RouteDefinition[] {
             conversationIdForInsert: persistence.conversationIdForInsert,
             persistedBotId: persistence.persistedBotId,
           },
-          prompt,
+          prompt: promptForPersistence,
           localRelPath,
           size,
           quality,
@@ -8076,6 +8127,7 @@ function buildRoutes(): RouteDefinition[] {
           modelUsed: localOut.modelUsed,
           provider: localOut.provider,
           purpose: imagePurpose,
+          composedPrompt,
           profilePictureBotId:
             imagePurpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE ? bodyBotId : null,
           previousProfilePictureImageId,
@@ -8117,7 +8169,7 @@ function buildRoutes(): RouteDefinition[] {
               conversationIdForInsert: persistence.conversationIdForInsert,
               persistedBotId: persistence.persistedBotId,
             },
-            prompt,
+            prompt: promptForPersistence,
             localRelPath,
             size,
             quality,
@@ -8125,6 +8177,7 @@ function buildRoutes(): RouteDefinition[] {
             modelUsed: localOut.modelUsed,
             provider: localOut.provider,
             purpose: imagePurpose,
+            composedPrompt,
             profilePictureBotId:
               imagePurpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE ? bodyBotId : null,
             previousProfilePictureImageId,
@@ -8167,7 +8220,7 @@ function buildRoutes(): RouteDefinition[] {
           userId,
           persistence.conversationIdForInsert,
           persistence.persistedBotId,
-          prompt,
+          promptForPersistence,
           result.revisedPrompt,
           storedUrl,
           size,
@@ -8191,9 +8244,7 @@ function buildRoutes(): RouteDefinition[] {
         recordImageUsage({
           provider: "openai",
           model: result.model,
-          purpose: imagePurpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE
-            ? BOT_PROFILE_PICTURE_IMAGE_PURPOSE
-            : "image_generation",
+          purpose: imagePurpose === "gallery" ? "image_generation" : imagePurpose,
           imageCount: 1,
           imageSize: size,
           imageQuality: quality,
@@ -8215,6 +8266,7 @@ function buildRoutes(): RouteDefinition[] {
           model: result.model,
           purpose: imagePurpose,
         },
+        ...(composedPrompt ? { composedPrompt } : {}),
       });
       } finally {
         ctx.req.off("close", onImageGenClientClose);
@@ -8276,6 +8328,53 @@ function buildRoutes(): RouteDefinition[] {
           ctx.res.destroy();
         }
       }
+    }),
+    route("POST", "/api/images/group-room-wallpaper/upload", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const upload = await normalizeGroupRoomWallpaperBackupUpload(body.dataUrl);
+      const prompt = normalizeGroupRoomWallpaperBackupPrompt(body.prompt);
+      const imageId = randomId(12);
+      const localRelPath = buildGeneratedImageRelativePath(userId, imageId);
+      const createdAt = new Date().toISOString();
+      try {
+        writeGeneratedImageBytes(localRelPath, upload.pngBytes);
+        await tryGenerateThumbAfterPngWrite(localRelPath);
+        db.prepare(
+          `INSERT INTO images
+             (id, user_id, prompt, url, size, quality, provider, model,
+              local_rel_path, purpose, created_at)
+           VALUES (?, ?, ?, '', ?, 'standard', 'local', 'backup-import', ?, ?, ?)`
+        ).run(
+          imageId,
+          userId,
+          prompt,
+          `${upload.width}x${upload.height}`,
+          localRelPath,
+          GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE,
+          createdAt
+        );
+      } catch (error) {
+        tryUnlinkGeneratedImageFile(localRelPath);
+        throw error;
+      }
+      json(ctx.res, 201, {
+        ok: true,
+        image: mapImageRowToClient({
+          id: imageId,
+          prompt,
+          revised_prompt: null,
+          url: "",
+          size: `${upload.width}x${upload.height}`,
+          quality: "standard",
+          provider: "local",
+          bot_id: null,
+          created_at: createdAt,
+          local_rel_path: localRelPath,
+          model: "backup-import",
+          purpose: GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE,
+        }),
+      });
     }),
     route("GET", "/api/images", async (ctx) => {
       const userId = requireAuth(ctx);

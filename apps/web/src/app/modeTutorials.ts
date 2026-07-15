@@ -17,8 +17,20 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
     title: "Zen walkthrough",
     steps: [
       {
-        heading: "Stay with PRISM",
-        body: "Zen is one continuous PRISM conversation. Choose LOCAL, AUTO, or ONLINE from the header; Auto uses the recovery chain you set in Settings.",
+        heading: "Choose a relationship",
+        body: "Choose PRISM or a persona to enter that relationship’s Home. Back or Escape returns you to the wider Library or group room exactly where you left it. Inviting a guest keeps you in the current Home.",
+        clickLabel: "a PRISM or persona tile",
+        targetSelector: '[data-tutorial-target="chat-bot-picker"]',
+      },
+      {
+        heading: "Shape a saved group's room",
+        body: "When a saved group is selected, Atmosphere keeps its reusable room backdrop. In a larger waiting room, a Listen up prompt stages 2-5 bots with that exact Coffee topic.",
+        clickLabel: "Atmosphere in the saved group header",
+        targetSelector: '[data-tutorial-target="chat-group-atmosphere"]',
+      },
+      {
+        heading: "Continue this Home",
+        body: "Each Home keeps its own Zen relationship and episodes. Type here to continue the one you are visiting.",
         clickLabel: "the message box at the bottom",
         targetSelector: '[data-tutorial-target="composer"]',
       },
@@ -30,7 +42,7 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Let context breathe",
-        body: "Recent messages stay visible while older continuity is carried through summaries and memory.",
+        body: "Recent messages stay visible while older continuity for this Home is carried through summaries and memory.",
         clickLabel: "the conversation canvas",
         targetSelector: '[data-tutorial-target="conversation-canvas"]',
       },
@@ -47,7 +59,7 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
     steps: [
       {
         heading: "Start with a bot",
-        body: "Pick a bot, then send your first message. Bots inherit your account model defaults unless you choose a temporary workspace override.",
+        body: "Pick a bot, then send your first message.",
         clickLabel: "a bot tile in the center picker",
         targetSelector: '[data-tutorial-target="chat-bot-picker"]',
       },
@@ -69,26 +81,26 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
     title: "Coffee mode walkthrough",
     steps: [
       {
-        heading: "Pick your table",
-        body: "Choose a Coffee Group and seat bots to set the conversation vibe before starting.",
+        heading: "Pick or stage your table",
+        body: "Choose a Coffee Group here, or arrive from a group waiting room with its Listen up topic and locally ranked table already staged.",
         clickLabel: "a Coffee Group in the left sidebar",
         targetSelector: '[data-tutorial-target="coffee-groups"]',
       },
       {
         heading: "Set the table",
-        body: "Duration, presets, and group settings steer the whole session together. The table model is Primary; AUTO can recover through your two saved fallbacks.",
+        body: "Duration, presets, and group settings steer the whole session together. Account default uses the model saved in Settings; AUTO is the separate response-routing control and can recover through your saved fallbacks.",
         clickLabel: "New session setup or Configure settings",
         targetSelector: '[data-tutorial-target="coffee-session-setup"]',
       },
       {
         heading: "Choose the spark",
-        body: "Pick a topic tailored to this group, type your own, or regenerate the ideas before the table starts.",
-        clickLabel: "a topic suggestion or Regenerate ideas",
+        body: "Pick one of the four prompts created for this group, or type your own before the table starts.",
+        clickLabel: "a topic suggestion",
         targetSelector: '[data-tutorial-target="coffee-topic-picker"]',
       },
       {
         heading: "Keep the table moving",
-        body: "Choose AUTO to retry failed or malformed table turns without adding error dialogue to the transcript.",
+        body: "Choose AUTO in the LOCAL, AUTO, ONLINE control to retry failed or malformed table turns. It changes response routing, not the Account default model choice.",
         clickLabel: "the LOCAL, AUTO, ONLINE control",
         targetSelector: '[data-tutorial-target="auto-response-mode"]',
       },

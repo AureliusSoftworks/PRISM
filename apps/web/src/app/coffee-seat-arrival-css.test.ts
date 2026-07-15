@@ -912,7 +912,7 @@ describe("Coffee seat arrival CSS", () => {
     assert.doesNotMatch(livePlateRule, /--bot-face-screen-glass-opacity/);
     assert.match(
       pageSource,
-      /data-live-body-style="zen"[\s\S]*<ZenLiveBotMannequin[\s\S]*glyph=\{seatGlyphName\}[\s\S]*faceStyle=\{seatFaceStyle\}[\s\S]*plateFace=\{seatPlateGlyph\}[\s\S]*frameMaterialSeed=\{\s*botFrameMaterialSeedForBot\(\s*bot\s*,\s*bot\.id\s*,?\s*\)\s*\}/
+      /data-live-body-style="zen"[\s\S]*<ZenLiveBotMannequin[\s\S]*glyph=\{seatGlyphName\}[\s\S]*faceStyle=\{seatRenderedFaceStyle\}[\s\S]*plateFace=\{seatPlateGlyph\}[\s\S]*frameMaterialSeed=\{\s*botFrameMaterialSeedForBot\(\s*bot\s*,\s*bot\.id\s*,?\s*\)\s*\}/
     );
     assert.match(
       pageSource,
@@ -1757,7 +1757,7 @@ describe("Coffee seat arrival CSS", () => {
 
   it("blocks sip visuals while the Coffee pot is filling or the bot is thinking", () => {
     assert.match(pageSource, /const COFFEE_CUP_REFILL_SIP_LOCK_MS = 3_200;/);
-    assert.match(pageSource, /const refillSipLocked = refillSipLockUntilMs > coffeeSessionClockMs;/);
+    assert.match(pageSource, /const refillSipLocked = refillSipLockUntilMs > coffeeCupClockMs;/);
     assert.match(pageSource, /const visualSeatSipInProgress = refillSipLocked \|\| seatIsThinking \? false : seatSipInProgress;/);
     assert.match(pageSource, /sipLockedUntilMs: refillSipLockUntilMs \|\| null,/);
     assert.match(pageSource, /refillSipLocked \|\| !seatIsFirmlySeated/);

@@ -98,6 +98,29 @@ describe("coffee topic suggestions", () => {
     );
   });
 
+  it("formats canonical group topics without inventing per-bot ownership", () => {
+    const text = formatCoffeeStarterTopicsClipboardText({
+      groupName: "Canonical Table",
+      groupId: "group-2",
+      topics: [
+        "When should evidence outrank tradition?",
+        "Which promise survives a hard deadline?",
+      ],
+    });
+
+    assert.equal(
+      text,
+      [
+        "PRISM Coffee Group starter topics",
+        "Group: Canonical Table",
+        "Group ID: group-2",
+        "",
+        "1. When should evidence outrank tradition?",
+        "2. Which promise survives a hard deadline?",
+      ].join("\n"),
+    );
+  });
+
   it("returns no clipboard text when stored starter topics are empty", () => {
     assert.equal(
       formatCoffeeStarterTopicsClipboardText({
@@ -109,13 +132,10 @@ describe("coffee topic suggestions", () => {
     );
   });
 
-  it("lets the player regenerate ranked ideas before choosing a topic", () => {
+  it("reuses canonical group topics without a session regeneration action", () => {
     const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
-    assert.match(
-      pageSource,
-      /\/api\/coffee\/sessions\/\$\{encodeURIComponent\(conversation\.id\)\}\/topics\/regenerate/,
-    );
-    assert.match(pageSource, /Regenerate ideas/);
+    assert.doesNotMatch(pageSource, /topics\/regenerate/);
+    assert.doesNotMatch(pageSource, /Regenerate ideas/);
     assert.match(pageSource, /data-tutorial-target="coffee-topic-picker"/);
     assert.match(
       pageSource,
@@ -123,9 +143,7 @@ describe("coffee topic suggestions", () => {
     );
     assert.match(pageSource, /coffeeTopicRequestInFlightRef\.current = true;/);
     assert.match(pageSource, /coffeeTopicRequestInFlightRef\.current = false;/);
-    assert.match(
-      pageSource,
-      /rankedServerPool\.slice\(0, COFFEE_STARTER_TOPIC_OPTION_COUNT\)/,
-    );
+    assert.match(pageSource, /\.\.\.\(args\.group\.starterTopics \?\? \[\]\)/);
+    assert.match(pageSource, /pool\.slice\(0, COFFEE_STARTER_TOPIC_OPTION_COUNT\)/);
   });
 });

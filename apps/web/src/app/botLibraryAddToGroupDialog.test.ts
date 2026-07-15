@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { selectBotLibraryAddToGroupDialogGroup } from "./botLibraryAddToGroupDialog.ts";
+import {
+  selectBotLibraryAddToGroupDialogBot,
+  selectBotLibraryAddToGroupDialogGroup,
+} from "./botLibraryAddToGroupDialog.ts";
 
 describe("add-to-group dialog selection", () => {
   it("copies a captured group id into the current dialog", () => {
@@ -17,6 +20,16 @@ describe("add-to-group dialog selection", () => {
     assert.equal(
       selectBotLibraryAddToGroupDialogGroup(null, "group-2"),
       null,
+    );
+  });
+
+  it("copies a captured bot id into a group-first dialog", () => {
+    assert.deepEqual(
+      selectBotLibraryAddToGroupDialogBot(
+        { mode: "pick-bot", botId: "bot-1", groupId: "group-1" },
+        "bot-2",
+      ),
+      { mode: "pick-bot", botId: "bot-2", groupId: "group-1" },
     );
   });
 });

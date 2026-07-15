@@ -63,10 +63,21 @@ export function pickCoffeeStarterTopicOptions(
 export function formatCoffeeStarterTopicsClipboardText(args: {
   groupName?: string | null;
   groupId?: string | null;
+  topics?: readonly string[] | null;
   topicsByBotId?: CoffeeStarterTopicsByBotId | null;
   orderedBotIds?: readonly (string | null | undefined)[];
   botNamesById?: Readonly<Record<string, string | undefined>>;
 }): string | null {
+  const canonicalTopics = normalizeCoffeeStarterTopicPool(args.topics ?? []);
+  if (canonicalTopics.length > 0) {
+    const lines = ["PRISM Coffee Group starter topics"];
+    const groupName = args.groupName?.replace(/\s+/g, " ").trim();
+    const groupId = args.groupId?.replace(/\s+/g, " ").trim();
+    if (groupName) lines.push(`Group: ${groupName}`);
+    if (groupId) lines.push(`Group ID: ${groupId}`);
+    lines.push("", ...canonicalTopics.map((topic, index) => `${index + 1}. ${topic}`));
+    return lines.join("\n");
+  }
   const topicsByBotId = args.topicsByBotId;
   if (!topicsByBotId) return null;
 

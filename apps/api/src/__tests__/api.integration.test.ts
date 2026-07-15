@@ -5,7 +5,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { getAppConfig } from "@localai/config";
-import { normalizeBotAudioVoiceProfileV1 } from "@localai/shared";
+import {
+  COFFEE_TOPIC_MAX_LENGTH,
+  normalizeBotAudioVoiceProfileV1,
+} from "@localai/shared";
 import {
   createDeterministicProvider,
   createFetchRecorder,
@@ -384,6 +387,200 @@ describe("API request integration", () => {
     );
     assert.deepEqual(generationPayload.parsedOutput.rankedTopics, candidates);
     assert.equal(generationPayload.parsedOutput.usedFallback, true);
+    fetchRecorder.calls.length = 0;
+  });
+
+  it("forwards bounded initial topics through direct and saved-group Coffee routes", async () => {
+    const client = createClient();
+    const email = "coffee-initial-topic@example.com";
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({ username: email, password: "coffee-initial-topic-password" })
+    );
+    assert.equal(register.status, 201);
+    const user = db
+      .prepare("SELECT id FROM users WHERE email = ?")
+      .get(email) as { id: string };
+    const createdAt = "2026-07-14T20:30:00.000Z";
+    const botIds = ["coffee-initial-topic-bot-1", "coffee-initial-topic-bot-2"];
+    const insertBot = db.prepare(
+      `INSERT INTO bots
+         (id, user_id, name, system_prompt, online_enabled, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 0, ?, ?)`
+    );
+    insertBot.run(
+      botIds[0],
+      user.id,
+      "Listener",
+      "You listen closely and answer the question at hand.",
+      createdAt,
+      createdAt
+    );
+    insertBot.run(
+      botIds[1],
+      user.id,
+      "Builder",
+      "You turn a prompt into a practical next step.",
+      createdAt,
+      createdAt
+    );
+    const exactTopic = `Listen up: ${"x".repeat(COFFEE_TOPIC_MAX_LENGTH - 11)}`;
+
+    const direct = await client.request(
+      "/api/coffee/sessions",
+      jsonInit({ groupBotIds: botIds, initialTopic: `  ${exactTopic}  ` })
+    );
+    const directPayload = await json(direct);
+    assert.equal(direct.status, 200, JSON.stringify(directPayload));
+    assert.equal(directPayload.conversation.coffeeTopic, exactTopic);
+    assert.equal("coffeeStarterTopics" in directPayload, false);
+
+    const genericDirect = await client.request(
+      "/api/coffee/sessions",
+      jsonInit({ groupBotIds: botIds })
+    );
+    const genericDirectPayload = await json(genericDirect);
+    assert.equal(genericDirect.status, 200, JSON.stringify(genericDirectPayload));
+    assert.equal(genericDirectPayload.conversation.coffeeTopic ?? null, null);
+    assert.ok(genericDirectPayload.coffeeStarterTopics.length > 0);
+
+    const oversizedDirect = await client.request(
+      "/api/coffee/sessions",
+      jsonInit({
+        groupBotIds: botIds,
+        initialTopic: "x".repeat(COFFEE_TOPIC_MAX_LENGTH + 1),
+      })
+    );
+    const oversizedDirectPayload = await json(oversizedDirect);
+    assert.equal(oversizedDirect.status, 400, JSON.stringify(oversizedDirectPayload));
+    assert.equal(oversizedDirectPayload.error, "Coffee topic is too long.");
+
+    const createdGroup = await client.request(
+      "/api/coffee/groups",
+      jsonInit({ name: "Prompted Table", groupBotIds: botIds })
+    );
+    const createdGroupPayload = await json(createdGroup);
+    assert.equal(createdGroup.status, 201, JSON.stringify(createdGroupPayload));
+    const groupId = createdGroupPayload.group.id as string;
+
+    const savedGroupSession = await client.request(
+      `/api/coffee/groups/${encodeURIComponent(groupId)}/sessions`,
+      jsonInit({ initialTopic: "  What should this room build next?  " })
+    );
+    const savedGroupPayload = await json(savedGroupSession);
+    assert.equal(savedGroupSession.status, 201, JSON.stringify(savedGroupPayload));
+    assert.equal(
+      savedGroupPayload.conversation.coffeeTopic,
+      "What should this room build next?"
+    );
+    assert.equal(savedGroupPayload.conversation.coffeeGroupId, groupId);
+    assert.equal("coffeeStarterTopics" in savedGroupPayload, false);
+
+    const genericSavedGroupSession = await client.request(
+      `/api/coffee/groups/${encodeURIComponent(groupId)}/sessions`,
+      jsonInit({})
+    );
+    const genericSavedGroupPayload = await json(genericSavedGroupSession);
+    assert.equal(
+      genericSavedGroupSession.status,
+      201,
+      JSON.stringify(genericSavedGroupPayload)
+    );
+    assert.equal(genericSavedGroupPayload.conversation.coffeeTopic ?? null, null);
+    assert.ok(genericSavedGroupPayload.coffeeStarterTopics.length > 0);
+
+    const oversizedSavedGroupSession = await client.request(
+      `/api/coffee/groups/${encodeURIComponent(groupId)}/sessions`,
+      jsonInit({ initialTopic: "x".repeat(COFFEE_TOPIC_MAX_LENGTH + 1) })
+    );
+    const oversizedSavedGroupPayload = await json(oversizedSavedGroupSession);
+    assert.equal(
+      oversizedSavedGroupSession.status,
+      400,
+      JSON.stringify(oversizedSavedGroupPayload)
+    );
+    assert.equal(oversizedSavedGroupPayload.error, "Coffee topic is too long.");
+    fetchRecorder.calls.length = 0;
+  });
+
+  it("forwards exact attendance through saved-group Coffee routes", async () => {
+    const client = createClient();
+    const email = "coffee-force-attendance@example.com";
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({ username: email, password: "coffee-force-attendance-password" })
+    );
+    assert.equal(register.status, 201);
+    const user = db
+      .prepare("SELECT id FROM users WHERE email = ?")
+      .get(email) as { id: string };
+    const createdAt = "2026-07-14T20:45:00.000Z";
+    const botIds = [
+      "coffee-force-attendance-bot-1",
+      "coffee-force-attendance-bot-2",
+      "coffee-force-attendance-bot-3",
+    ];
+    const insertBot = db.prepare(
+      `INSERT INTO bots
+         (id, user_id, name, system_prompt, online_enabled, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 0, ?, ?)`
+    );
+    for (const [index, botId] of botIds.entries()) {
+      insertBot.run(
+        botId,
+        user.id,
+        `Invitee ${index + 1}`,
+        "Join the table and respond directly to its topic.",
+        createdAt,
+        createdAt
+      );
+    }
+    const createdGroup = await client.request(
+      "/api/coffee/groups",
+      jsonInit({ name: "Exact Attendance Table", groupBotIds: botIds })
+    );
+    const createdGroupPayload = await json(createdGroup);
+    assert.equal(createdGroup.status, 201, JSON.stringify(createdGroupPayload));
+    const groupId = createdGroupPayload.group.id as string;
+    const baseline = await client.request(
+      `/api/coffee/groups/${encodeURIComponent(groupId)}/sessions`,
+      jsonInit({})
+    );
+    const baselinePayload = await json(baseline);
+    assert.equal(baseline.status, 201, JSON.stringify(baselinePayload));
+    db.prepare(
+      `UPDATE coffee_bot_social_state
+          SET disposition = ?, values_friction = ?, restraint = ?, engagement = ?, leave_pressure = ?
+        WHERE conversation_id = ? AND bot_id = ?`
+    ).run(
+      0.04,
+      0.96,
+      0.82,
+      0.08,
+      0.94,
+      baselinePayload.conversation.id,
+      botIds[1]
+    );
+
+    const originalRandom = Math.random;
+    Math.random = () => 0;
+    let forcedSession: Awaited<ReturnType<typeof client.request>>;
+    try {
+      forcedSession = await client.request(
+        `/api/coffee/groups/${encodeURIComponent(groupId)}/sessions`,
+        jsonInit({ forceAttendance: true })
+      );
+    } finally {
+      Math.random = originalRandom;
+    }
+    const forcedPayload = await json(forcedSession);
+
+    assert.equal(forcedSession.status, 201, JSON.stringify(forcedPayload));
+    assert.deepEqual(
+      [...forcedPayload.conversation.botGroupIds].sort(),
+      [...botIds].sort()
+    );
+    assert.deepEqual(forcedPayload.conversation.coffeeAbsentBotIds ?? [], []);
     fetchRecorder.calls.length = 0;
   });
 

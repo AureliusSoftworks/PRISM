@@ -394,6 +394,10 @@ function normalizeStageDirectionMainText(raw: string): string {
   return mainText;
 }
 
+function isBotMentionAddressPrefix(raw: string): boolean {
+  return /^\s*\[[^\]\n]+\]\(prism-bot:\/\/[^)\s]+\),?\s*$/u.test(raw);
+}
+
 function parseStageDirectionsDetailed(text: string): {
   mainText: string;
   actions: string[];
@@ -430,7 +434,8 @@ function parseStageDirectionsDetailed(text: string): {
         hasSpokenBefore &&
         hasSpokenAfter &&
         !looksLikeStageDirectionAction(trimmed) &&
-        !looksLikeInlineActionAtSentenceBoundary(before, after)
+        !looksLikeInlineActionAtSentenceBoundary(before, after) &&
+        !isBotMentionAddressPrefix(before)
       ) {
         // Inline emphasis in ordinary prose.
         spokenRaw += trimmed;

@@ -64,10 +64,6 @@ describe("Zen live presence body hit target", () => {
     );
     assert.match(
       pageSource,
-      /function measureZenLiveBotGrabGeometry\(\s*node: HTMLElement\s*,?\s*\): ZenLiveBotGrabGeometry \| null \{\s*return measureZenLiveBotGrabGeometries\(node\)\[0\] \?\? null;/
-    );
-    assert.match(
-      pageSource,
       /function zenLiveBotAvatarPointerIsInsideBody\([\s\S]*?measureZenLiveBotGrabGeometries\(node\)\.some/
     );
     assert.match(

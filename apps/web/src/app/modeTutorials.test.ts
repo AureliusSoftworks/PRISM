@@ -15,7 +15,72 @@ describe("mode tutorials", () => {
   });
 
   it("clamps restored progress to a valid step", () => {
-    assert.equal(modeTutorialStep("zen", -1).heading, "Stay with PRISM");
+    assert.equal(modeTutorialStep("zen", -1).heading, "Choose a relationship");
     assert.equal(modeTutorialStep("coffee", 99).heading, "Join the conversation");
+  });
+
+  it("teaches Zen navigation as relationship-specific Homes", () => {
+    const [chooseRelationship, groupRoom, continueHome, , context] =
+      MODE_TUTORIALS.zen.steps;
+
+    assert.deepEqual(chooseRelationship, {
+      heading: "Choose a relationship",
+      body: "Choose PRISM or a persona to enter that relationship’s Home. Back or Escape returns you to the wider Library or group room exactly where you left it. Inviting a guest keeps you in the current Home.",
+      clickLabel: "a PRISM or persona tile",
+      targetSelector: '[data-tutorial-target="chat-bot-picker"]',
+    });
+    assert.deepEqual(continueHome, {
+      heading: "Continue this Home",
+      body: "Each Home keeps its own Zen relationship and episodes. Type here to continue the one you are visiting.",
+      clickLabel: "the message box at the bottom",
+      targetSelector: '[data-tutorial-target="composer"]',
+    });
+    assert.equal(
+      groupRoom?.targetSelector,
+      '[data-tutorial-target="chat-group-atmosphere"]',
+    );
+    assert.equal(
+      context?.body,
+      "Recent messages stay visible while older continuity for this Home is carried through summaries and memory.",
+    );
+  });
+
+  it("introduces saved room Atmospheres alongside waiting-room Coffee staging", () => {
+    const atmosphere = MODE_TUTORIALS.zen.steps.find(
+      (step) => step.heading === "Shape a saved group's room",
+    );
+    assert.match(atmosphere?.body ?? "", /reusable room backdrop/);
+    assert.match(atmosphere?.body ?? "", /Listen up prompt stages 2-5 bots/);
+    assert.equal(
+      atmosphere?.targetSelector,
+      '[data-tutorial-target="chat-group-atmosphere"]',
+    );
+  });
+
+  it("distinguishes Coffee response routing from the account default model", () => {
+    const [, setup, , routing] = MODE_TUTORIALS.coffee.steps;
+
+    assert.match(
+      setup?.body ?? "",
+      /Account default uses the model saved in Settings/,
+    );
+    assert.match(
+      setup?.body ?? "",
+      /AUTO is the separate response-routing control/,
+    );
+    assert.match(
+      routing?.body ?? "",
+      /changes response routing, not the Account default model choice/,
+    );
+  });
+
+  it("teaches canonical Coffee prompts without a regeneration step", () => {
+    const topicStep = MODE_TUTORIALS.coffee.steps.find(
+      (step) => step.heading === "Choose the spark",
+    );
+
+    assert.match(topicStep?.body ?? "", /four prompts created for this group/);
+    assert.doesNotMatch(topicStep?.body ?? "", /regenerate/i);
+    assert.doesNotMatch(topicStep?.clickLabel ?? "", /regenerate/i);
   });
 });

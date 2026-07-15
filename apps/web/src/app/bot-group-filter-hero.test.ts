@@ -39,13 +39,62 @@ describe("bot group canvas filtering", () => {
     assert.match(heroSource, /className=\{styles\.botGroupHero\}/);
     assert.match(heroSource, /botLibraryGroupVisualStyle\(/);
     assert.match(heroSource, /focusedBotLibraryGroup\.description\.trim\(\)/);
+    assert.match(heroSource, /Explore \{focusedBotLibraryGroup\.name\}/);
     assert.match(heroSource, /"Protect group"/);
     assert.match(heroSource, />Export group</);
+    assert.match(
+      heroSource,
+      /openAddBotFromLibraryGroupDialog\(\s*focusedBotLibraryGroup\.id,?\s*\)/,
+    );
+    assert.match(heroSource, />Add bots</);
     assert.match(heroSource, />\s*Edit\s*</);
     assert.match(heroSource, />Delete</);
     assert.match(
       cssSource,
       /\.botGroupHero\s*\{[\s\S]*?width:\s*min\([\s\S]*?--empty-state-browser-width[\s\S]*?var\(--bot-library-group-gradient\)/,
+    );
+  });
+
+  it("keeps future built-in groups selectable while reserving mutable hero controls", () => {
+    assert.match(
+      pageSource,
+      /const selectableBotLibraryGroups = useMemo\([\s\S]*?group\.id !== BOT_LIBRARY_FAVORITES_GROUP_ID/,
+    );
+    assert.equal(
+      pageSource.match(/\.\.\.selectableBotLibraryGroups\.map\(optionForGroup\)/g)
+        ?.length,
+      2,
+    );
+    assert.doesNotMatch(
+      pageSource,
+      /\.\.\.customBotLibraryGroups\.map\(optionForGroup\)/,
+    );
+
+    const heroSource = pageSource.slice(
+      pageSource.indexOf("const renderFocusedBotLibraryGroupHero"),
+      pageSource.indexOf("const renderChatCanvasPickerControls"),
+    );
+    assert.match(
+      heroSource,
+      /!focusedBotLibraryGroup\.builtIn \? \([\s\S]*?>Add bots<[\s\S]*?>\s*Edit\s*<[\s\S]*?>Delete</,
+    );
+  });
+
+  it("suppresses compact grid placeholders while a group filter is active", () => {
+    assert.match(
+      pageSource,
+      /if \(\s*!b\s*\) \{[\s\S]*?pickerBots\.length\s*<[\s\S]*?pickerSourceBots\.length[\s\S]*?return null;[\s\S]*?styles\.chatBotTilePlaceholder/,
+    );
+  });
+
+  it("returns group-picker focus after selection and focuses the group-first dialog", () => {
+    assert.match(
+      pageSource,
+      /const pick = \(nextValue: string\): void => \{[\s\S]*?setOpen\(false\);[\s\S]*?triggerRef\.current\?\.focus\(\);/,
+    );
+    assert.match(
+      pageSource,
+      /const pickBotMode = dialog\.mode === "pick-bot"[\s\S]*?<select[\s\S]*?value=\{pickBotMode \? selectedBotId : selectedGroupId\}[\s\S]*?autoFocus/,
     );
   });
 

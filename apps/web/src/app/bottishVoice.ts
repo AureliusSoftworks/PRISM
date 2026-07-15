@@ -577,8 +577,9 @@ export function mixBabbleMediaWave(
   text: string,
   rawProfile: BotAudioVoiceProfileV1,
   seed: string,
-  _effectsEnabled = true,
+  effectsEnabled = true,
 ): ArrayBuffer {
+  if (!effectsEnabled) return bytes;
   if (bytes.byteLength < 44) return bytes;
   const input = new DataView(bytes);
   if (waveChunkId(input, 0) !== "RIFF" || waveChunkId(input, 8) !== "WAVE") return bytes;
@@ -648,7 +649,6 @@ export function mixBabbleMediaWave(
       const envelope = Math.sin(Math.PI * progress) ** 0.7;
       const accentSample = bottishWaveSample(accent.waveform, phase) * accent.gain * envelope;
       for (let channel = 0; channel < channelCount; channel += 1) {
-        const offset = dataOffset + frame * frameSize + channel * 2;
         const sampleIndex = frame * channelCount + channel;
         mixed[sampleIndex] = (mixed[sampleIndex] ?? 0) + accentSample;
       }

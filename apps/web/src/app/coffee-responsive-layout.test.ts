@@ -44,12 +44,28 @@ test("light first-person Coffee uses a readable light prose surface", () => {
     css,
     /\.themeLight\.coffeeShell\s+:where\([\s\S]*\.coffeeCenterFeedLine[\s\S]*\)\s*\{\s*color:\s*var\(--fg\)/,
   );
+  assert.match(
+    css,
+    /\.themeLight\.coffeeShell \.coffeeCenterFeedLine\[data-role="assistant"\],[\s\S]*?\.coffeeCenterFeedLineTyping\[data-role="assistant"\][\s\S]*?\.coffeeTableTypingLine,[\s\S]*?\.coffeeTypewriterCaret\s*\{\s*color:\s*var\(--coffee-center-line-color,\s*var\(--fg\)\)/,
+  );
+  assert.match(
+    pageSource,
+    /"--coffee-center-line-color":\s*coffeeBotTranscriptTextColor\([\s\S]*?visibleTableTypingBot\.color,[\s\S]*?resolvedTheme/,
+  );
 });
 
 test("Coffee action text repositions inward from container-relative seat sides", () => {
   assert.match(pageSource, /data-seat-horizontal-side=\{display\.seatHorizontalSide\}/);
-  assert.match(css, /data-seat-horizontal-side="left"[\s\S]*--coffee-action-quote-x:\s*-20%/);
-  assert.match(css, /data-seat-horizontal-side="right"[\s\S]*--coffee-action-quote-x:\s*-80%/);
+  assert.match(
+    pageSource,
+    /"--coffee-action-seat-left" as string\]: `\$\{display\.seatCanvasLeftPercent\}cqw`/,
+  );
+  assert.match(css, /data-seat-horizontal-side="left"[\s\S]*--coffee-action-quote-preferred-x:\s*-20%/);
+  assert.match(css, /data-seat-horizontal-side="right"[\s\S]*--coffee-action-quote-preferred-x:\s*-80%/);
+  assert.match(
+    css,
+    /--coffee-action-quote-x:\s*clamp\(\s*calc\(var\(--coffee-action-edge-safe\) - var\(--coffee-action-seat-left\)\),\s*var\(--coffee-action-quote-preferred-x\),\s*calc\([\s\S]*?100cqw[\s\S]*?var\(--coffee-action-seat-left\) - 100%/,
+  );
   assert.match(css, /width:\s*min\(260px,\s*28cqw,\s*calc\(100cqw - 32px\)\)/);
   assert.match(css, /font-size:\s*clamp\(0\.78rem,\s*1\.15cqw,\s*0\.96rem\)/);
   assert.match(css, /@container\s*\(max-width:\s*980px\)/);

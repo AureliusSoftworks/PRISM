@@ -213,7 +213,10 @@ test("keeps every two-to-five-seat placement bounded at wide and narrow sizes", 
 
 test("wires one moving dialog to the selected replay seat", () => {
   assert.match(pageSource, /data-bot-id=\{bot\.id\}/);
-  assert.match(pageSource, /aria-haspopup=\{replayActionReviewEnabled \? "dialog"/);
+  assert.match(
+    pageSource,
+    /aria-haspopup=\{\s*replayActionReviewEnabled \? "dialog"/,
+  );
   assert.match(pageSource, /aria-expanded=\{[\s\S]*?replayActionPopoverSelected/);
   assert.match(pageSource, /aria-controls=\{[\s\S]*?replayActionPopoverId/);
   assert.match(pageSource, /ref=\{coffeeReplayActionPanelRef\}/);

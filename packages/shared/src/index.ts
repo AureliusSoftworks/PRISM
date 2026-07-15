@@ -392,6 +392,16 @@ export {
 } from "./elevenLabsImageModels.js";
 
 export {
+  GROUP_ROOM_WALLPAPER_GROUP_DESCRIPTION_MAX_LENGTH,
+  GROUP_ROOM_WALLPAPER_GROUP_NAME_MAX_LENGTH,
+  GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE,
+  GROUP_ROOM_WALLPAPER_MEMBER_BOT_ID_MAX_LENGTH,
+  GROUP_ROOM_WALLPAPER_MEMBER_COUNT_MAX,
+  GROUP_ROOM_WALLPAPER_MEMBER_COUNT_MIN,
+  type GroupRoomWallpaperImageGenerationRequest,
+} from "./groupRoomWallpaper.js";
+
+export {
   OPENAI_IMAGE_MODEL_IDS,
   OPENAI_IMAGE_MODEL_OPTIONS_FOR_UI,
   DEFAULT_OPENAI_IMAGE_MODEL_ID,
@@ -582,6 +592,7 @@ export type UsagePurpose =
   | "embedding"
   | "image_generation"
   | "bot_profile_picture"
+  | "group-room-wallpaper"
   | "image_prompt"
   | "memory_inference"
   | "memory_summary"
@@ -1344,7 +1355,10 @@ export type CoffeePresetMode = "manual" | "auto";
 /** How new Coffee Sessions pick a table topic for a saved Coffee Group. */
 export type CoffeeTopicSelectionMode = "manual" | "auto";
 
-/** Stored Coffee Group starter topics keyed by bot id. */
+/** Maximum length for a persisted Coffee session topic. */
+export const COFFEE_TOPIC_MAX_LENGTH = 500;
+
+/** Legacy Coffee Group starter topics keyed by bot id. */
 export type CoffeeGroupStarterTopicsByBotId = Record<string, string[]>;
 
 export interface CoffeePreset {
@@ -1393,7 +1407,9 @@ export interface CoffeeGroup {
   topicSelectionMode?: CoffeeTopicSelectionMode;
   /** Server-persisted Coffee model picker per provider. Empty = Auto. */
   modelChoiceByProvider?: CoffeeGroupModelChoice;
-  /** Coffee-only persisted topic pool generated from each seated bot. */
+  /** Canonical Coffee-only prompts generated once for this group composition. */
+  starterTopics?: string[];
+  /** Legacy import/backup shape. New writes use `starterTopics`. */
   starterTopicsByBotId?: CoffeeGroupStarterTopicsByBotId;
   moodSummary?: Record<string, unknown>;
   createdAt: string;
@@ -2006,6 +2022,8 @@ export interface CoffeeSessionCreateRequest {
   coffeeSettings?: unknown;
   /** Optional timed session length in whole minutes, from 3 to 30. */
   durationMinutes?: CoffeeSessionDurationMinutes;
+  /** Optional opening topic, trimmed and limited to {@link COFFEE_TOPIC_MAX_LENGTH} characters. */
+  initialTopic?: string;
   /** Optional opening poll that seeds the initial table topic. */
   initialPoll?: CoffeePollCreateRequest;
   /** Optional opening teams mode that seeds left/right social dynamics. */
@@ -2018,10 +2036,14 @@ export interface CoffeeGroupSessionCreateRequest {
   coffeeSettings?: unknown;
   /** Optional timed session length in whole minutes, from 3 to 30. */
   durationMinutes?: CoffeeSessionDurationMinutes;
+  /** Optional opening topic, trimmed and limited to {@link COFFEE_TOPIC_MAX_LENGTH} characters. */
+  initialTopic?: string;
   /** Optional preset id, or `__auto__` for auto preset selection. */
   presetId?: string;
   /** Bot ids from this Coffee Group that should sit out this one session. */
   excludedBotIds?: string[];
+  /** Require every non-excluded group member to attend this session. */
+  forceAttendance?: boolean;
   /** Optional opening poll that seeds the initial table topic. */
   initialPoll?: CoffeePollCreateRequest;
   /** Optional opening teams mode that seeds left/right social dynamics. */
