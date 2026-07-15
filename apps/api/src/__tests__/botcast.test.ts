@@ -7,7 +7,11 @@ import {
   advanceBotcastEpisode,
   createBotcastEpisode,
   createBotcastShow,
+  deleteBotcastEpisode,
+  deleteBotcastShow,
+  generateBotcastShowIdentity,
   getBotcastEpisode,
+  getBotcastShow,
   updateBotcastShow,
 } from "../botcast.ts";
 import { exportUserSnapshot, importUserSnapshot } from "../backup.ts";
@@ -81,11 +85,49 @@ describe("Botcast persistence and isolation", () => {
       assert.match(show.name, /Mara Vale/u);
       assert.equal(show.accentColor, "#a355e8");
       assert.equal(show.atmosphere.status, "fallback");
+      assert.equal(show.logo.status, "fallback");
+      assert.match(show.logo.prompt, /Mara Vale/u);
+      assert.ok(
+        ["frequency", "orbit", "aperture", "spark", "monogram"].includes(
+          show.logo.fallbackGlyph,
+        ),
+      );
       const renamed = updateBotcastShow(db, "user-1", show.id, {
         name: "The Vale Frequency",
       });
       assert.equal(renamed.name, "The Vale Frequency");
       assert.equal(createBotcastShow(db, "user-1", { hostBotId: "host-1" }).id, show.id);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("generates an editable host-shaped show identity and refreshes its visual prompts", async () => {
+    const db = fixture();
+    const captures: ProviderMessage[][] = [];
+    const provider = recordingProvider(
+      ['{"name":"The Vale Index","premise":"Precise conversations that inventory the stories culture tells itself."}'],
+      captures,
+    );
+    try {
+      const original = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const result = await generateBotcastShowIdentity(
+        db,
+        "user-1",
+        original.id,
+        generation(provider),
+      );
+      assert.equal(result.generated, true);
+      assert.equal(result.show.name, "The Vale Index");
+      assert.match(result.show.premise, /inventory the stories/u);
+      assert.equal(result.show.atmosphere.revision, 2);
+      assert.equal(result.show.logo.revision, 2);
+      assert.match(result.show.logo.prompt, /The Vale Index/u);
+      assert.match(captures[0]?.[1]?.content ?? "", /forensic cultural critic/u);
+      const renamed = updateBotcastShow(db, "user-1", original.id, {
+        name: "A User Chosen Name",
+      });
+      assert.equal(renamed.name, "A User Chosen Name");
     } finally {
       db.close();
     }
@@ -119,6 +161,83 @@ describe("Botcast persistence and isolation", () => {
       ]) {
         const count = db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number };
         assert.equal(count.count, 0, `${table} must remain untouched`);
+      }
+    } finally {
+      db.close();
+    }
+  });
+
+  it("deletes one episode and cascades its private production records", async () => {
+    const db = fixture();
+    const captures: ProviderMessage[][] = [];
+    const provider = recordingProvider(["A line bound for deletion."], captures);
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "A disposable recording",
+      });
+      const sibling = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "A recording that stays",
+      });
+      await advanceBotcastEpisode(db, "user-1", episode.id, {}, generation(provider));
+
+      assert.equal(deleteBotcastEpisode(db, "another-user", episode.id), false);
+      assert.equal(getBotcastEpisode(db, "user-1", episode.id).messages.length, 1);
+      assert.equal(deleteBotcastEpisode(db, "user-1", episode.id), true);
+      assert.throws(
+        () => getBotcastEpisode(db, "user-1", episode.id),
+        /Signal episode not found/u,
+      );
+      const episodeCount = db.prepare(
+        "SELECT COUNT(*) AS count FROM botcast_episodes WHERE id = ?",
+      ).get(episode.id) as { count: number };
+      assert.equal(episodeCount.count, 0);
+      for (const table of ["botcast_episode_segments", "botcast_messages", "botcast_events"]) {
+        const count = db.prepare(
+          `SELECT COUNT(*) AS count FROM ${table} WHERE episode_id = ?`,
+        ).get(episode.id) as { count: number };
+        assert.equal(count.count, 0, `${table} should not retain deleted episode rows`);
+      }
+      assert.equal(getBotcastEpisode(db, "user-1", sibling.id).topic, "A recording that stays");
+      assert.equal(getBotcastShow(db, "user-1", show.id).episodeCount, 1);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("deletes a show and cascades every episode archive beneath it", () => {
+    const db = fixture();
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "First archived episode",
+      });
+      createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Second archived episode",
+      });
+
+      assert.equal(deleteBotcastShow(db, "another-user", show.id), false);
+      assert.equal(getBotcastShow(db, "user-1", show.id).episodeCount, 2);
+      assert.equal(deleteBotcastShow(db, "user-1", show.id), true);
+      assert.throws(
+        () => getBotcastShow(db, "user-1", show.id),
+        /Signal show not found/u,
+      );
+      for (const table of [
+        "botcast_shows",
+        "botcast_episodes",
+        "botcast_episode_segments",
+        "botcast_messages",
+        "botcast_events",
+      ]) {
+        const count = db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as {
+          count: number;
+        };
+        assert.equal(count.count, 0, `${table} should be empty after show deletion`);
       }
     } finally {
       db.close();
