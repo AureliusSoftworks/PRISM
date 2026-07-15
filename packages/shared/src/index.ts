@@ -522,6 +522,30 @@ export {
 } from "./storyRuntime.js";
 
 export {
+  type SlateCharacter,
+  type SlateCreateProjectRequest,
+  type SlateDraftRequest,
+  type SlateLockedRange,
+  type SlateProjectDeleteResponse,
+  type SlateProjectDetail,
+  type SlateProjectListResponse,
+  type SlateProjectPatchRequest,
+  type SlateProjectPhase,
+  type SlateProjectResponse,
+  type SlateProjectSummary,
+  type SlateRevision,
+  type SlateRevisionAction,
+  type SlateRevisionRequest,
+  type SlateRevisionScope,
+  type SlateRevisionStatus,
+  type SlateStructureItem,
+  type SlateStructureKind,
+  type SlateStructureStatus,
+  type SlateUnresolvedThread,
+  type SlateVersionSummary,
+} from "./slate.js";
+
+export {
   ACCENT_LUMINANCE_MAX_LIGHT,
   ACCENT_LUMINANCE_MAX_LIGHT_YELLOW,
   ACCENT_LIGHTNESS_MAX,
@@ -598,6 +622,9 @@ export type UsagePurpose =
   | "memory_summary"
   | "prompt_wildcard"
   | "psychic_planning"
+  | "slate_draft"
+  | "slate_revision"
+  | "slate_shape"
   | "story_generation"
   | "voice_preview"
   | "zen_live_action"

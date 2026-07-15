@@ -40,6 +40,16 @@ test("Avatar Studio carries the resolved app theme through its portal", () => {
   );
 });
 
+test("Avatar Studio includes the app-wide theme cycle control", () => {
+  assert.match(pageSource, /themeMode: Theme;/);
+  assert.match(pageSource, /onThemeCycle: \(\) => void \| Promise<void>;/);
+  assert.match(pageSource, /data-avatar-customizer-theme-toggle="true"/);
+  assert.match(pageSource, /onClick=\{\(\) => void onThemeCycle\(\)\}/);
+  assert.match(pageSource, /<ThemeGlyph mode=\{themeMode\} \/>/);
+  assert.match(pageSource, /themeMode=\{effectiveThemeMode\}/);
+  assert.match(pageSource, /onThemeCycle=\{cycleThemeMode\}/);
+});
+
 test("Avatar Studio Light Mode is a shared-token palette, not a duplicated component", () => {
   const scope = sourceSection(
     cssSource,

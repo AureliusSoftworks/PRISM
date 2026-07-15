@@ -7,6 +7,10 @@ const IMAGE_ID_PATTERN = /^[a-zA-Z0-9_-]+$/u;
 const ISO_TIMESTAMP_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/u;
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/u;
+const INELIGIBLE_IMAGE_PURPOSES = new Set([
+  "bot_accessory",
+  "bot_upload",
+]);
 
 export interface BotGroupRoomAtmosphere {
   imageId: string;
@@ -106,6 +110,13 @@ function normalizeTimestamp(value: unknown): string | null {
   return canonical === canonicalInput ? canonical : null;
 }
 
+function isIneligibleRoomAtmosphereImagePurpose(value: unknown): boolean {
+  const purpose = normalizeBoundedText(value, 128);
+  return Boolean(
+    purpose && INELIGIBLE_IMAGE_PURPOSES.has(purpose.toLowerCase()),
+  );
+}
+
 /**
  * Reads the optional, storage-backed atmosphere model. Missing and malformed
  * legacy values intentionally collapse to `null`, leaving the color gradient
@@ -158,6 +169,7 @@ export function eligibleBotGroupRoomAtmosphereImages(
   for (const candidate of images) {
     const record = recordFrom(candidate);
     if (!record || record.hasLocalFile !== true) continue;
+    if (isIneligibleRoomAtmosphereImagePurpose(record.purpose)) continue;
 
     const id = normalizeImageId(record.id);
     if (!id || privateIds.has(id) || seen.has(id)) continue;

@@ -37,6 +37,32 @@ ship as `0.5.2` while Coffee is `v0.7` and Story is `v0.1`.
 | Pseudo | v0.0 | Planned | Sketch/system space for almost-code. |
 | Surf | v0.0 | Planned | Simple browsing plus optional bot screen viewing. |
 
+## Slate roadmap
+
+Slate is PRISM's next major applet: a quiet prose-fiction production desk where
+the AI writes and the writer directs. Its three-region workspace combines a
+structure rail, editable manuscript canvas, and concise direction panel across
+Shape, Draft, and Refine phases.
+
+Delivery is staged:
+
+1. Standalone Slate foundation for persistent projects, structure, drafting,
+   direct edits, revision previews, locks, and version safety.
+2. Story -> Slate through an explicit `Develop in Slate` narrative source
+   snapshot.
+3. Slate -> Story through an explicit `Rehearse in Story` scene or outline
+   snapshot.
+4. Selective, provenance-aware incorporation of rehearsal discoveries back into
+   Slate.
+
+Story remains a separate preview applet. It is the procedural "discover what
+happens" experience; Slate is the editorial "turn this into something good"
+workspace. Cross-applet stages never silently synchronize or rewrite content.
+See [Slate V1 Product and UX Contract](./slate-v1-product-ux-contract.md).
+
+Slate stays planned `v0.0` until its first functional vertical slice is usable
+end to end. At that point it may become preview `v0.1`.
+
 ## Changelog
 
 ### 2026-07-14

@@ -45,6 +45,19 @@ describe("mode tutorials", () => {
     );
   });
 
+  it("keeps Zen history intact while teaching the deliberate undo path", () => {
+    const correction = MODE_TUTORIALS.chat.steps.find(
+      (step) => step.heading === "Keep the moment honest",
+    );
+
+    assert.match(correction?.body ?? "", /Type \/undo/);
+    assert.doesNotMatch(correction?.body ?? "", /fork|resend|delete/i);
+    assert.equal(
+      correction?.targetSelector,
+      '[data-tutorial-target="composer"]',
+    );
+  });
+
   it("introduces saved room Atmospheres alongside waiting-room Coffee staging", () => {
     const atmosphere = MODE_TUTORIALS.zen.steps.find(
       (step) => step.heading === "Shape a saved group's room",

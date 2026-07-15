@@ -82,6 +82,16 @@ describe("bot group room atmosphere image eligibility", () => {
         { id: "private", hasLocalFile: true },
         { id: "bad/path", hasLocalFile: true },
         {
+          id: "legacy-accessory",
+          purpose: "bot_accessory",
+          hasLocalFile: true,
+        },
+        {
+          id: "legacy-upload",
+          purpose: " bot_upload ",
+          hasLocalFile: true,
+        },
+        {
           id: " first ",
           prompt: "  Moonlit library ",
           createdAt: "2026-07-14T10:00:00Z",

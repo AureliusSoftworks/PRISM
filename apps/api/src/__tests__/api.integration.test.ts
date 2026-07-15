@@ -27,6 +27,11 @@ const deterministicReply = "Deterministic API reply with enough detail to stay v
 const deterministicProvider = createDeterministicProvider([deterministicReply]);
 deterministicProvider.diagnosticModel = "deterministic-test-model";
 const providerFactoryCalls: string[] = [];
+const auxiliaryProviderFactoryCalls: Array<{
+  prismDefaultLlmModel: string | null | undefined;
+  secondaryOllamaHost: string | null | undefined;
+  experimentalDualOllama: boolean | undefined;
+}> = [];
 function deterministicVoiceWave(): Buffer {
   const sampleRate = 24_000;
   const sampleCount = 240;
@@ -67,7 +72,14 @@ const server = createServer(
       providerFactoryCalls.push(provider);
       return deterministicProvider;
     },
-    auxiliaryProviderFactory: () => deterministicProvider,
+    auxiliaryProviderFactory: (prismDefaultLlmModel, options) => {
+      auxiliaryProviderFactoryCalls.push({
+        prismDefaultLlmModel,
+        secondaryOllamaHost: options.secondaryOllamaHost,
+        experimentalDualOllama: options.experimentalDualOllama,
+      });
+      return deterministicProvider;
+    },
     builtinVoiceWaveGenerator: async ({ profile }) => {
       if (normalizeBotAudioVoiceProfileV1(profile).systemVoiceName === "Unavailable Test") {
         throw new Error("System voice is still loading.");
@@ -639,6 +651,59 @@ describe("API request integration", () => {
     const clearedPayload = await json(cleared);
     assert.equal(clearedPayload.settings.hasBraveSearchApiKey, false);
     assert.equal(clearedPayload.settings.braveSearchApiKeySource, "none");
+  });
+
+  it("routes bot power compilation through the configured paired auxiliary host", async () => {
+    const client = createClient();
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "paired-power-compiler@example.com",
+        password: "paired-power-compiler-password",
+      })
+    );
+    assert.equal(register.status, 201);
+
+    db.prepare(
+      `UPDATE users
+          SET prism_default_llm_model = ?,
+              secondary_ollama_host = ?,
+              experimental_dual_ollama_enabled = 0
+        WHERE email = ?`
+    ).run(
+      "ollama-secondary:gemma3:latest",
+      "http://127.0.0.1:11434",
+      "paired-power-compiler@example.com"
+    );
+
+    const callStart = auxiliaryProviderFactoryCalls.length;
+    const response = await client.request(
+      "/api/bot-powers/compile",
+      jsonInit({
+        botName: "Darth Vader",
+        systemPrompt: "A commanding machine-assisted presence.",
+        powers: [
+          {
+            version: 1,
+            id: "mechanical-cadence",
+            name: "Mechanical cadence",
+            intent: "Speaks with a clipped mechanical rhythm.",
+            enabled: true,
+            compileStatus: "draft",
+            compiled: null,
+          },
+        ],
+      })
+    );
+    assert.equal(response.status, 200);
+    assert.equal((await json(response)).ok, true);
+    assert.deepEqual(auxiliaryProviderFactoryCalls.slice(callStart), [
+      {
+        prismDefaultLlmModel: "ollama-secondary:gemma3:latest",
+        secondaryOllamaHost: "http://127.0.0.1:11434",
+        experimentalDualOllama: false,
+      },
+    ]);
   });
 
   it("uses account-wide voice defaults and ignores retired Coffee player voice fields", async () => {

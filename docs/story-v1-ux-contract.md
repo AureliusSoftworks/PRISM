@@ -215,3 +215,14 @@ These clarifications are now part of the Story V1 UX contract for implementation
 - Treat this document as the source of truth for Story V1 UX behavior.
 - If technical constraints force a contract change, escalate and update this doc
   before implementation diverges.
+
+## Slate integration boundary
+
+Story remains an immersive procedural preview applet while Slate is a separate
+editorial production workspace. The future `Develop in Slate` action exports an
+explicit structured source snapshot; it never turns the Story transcript into a
+live shared document or mutates the original run. The later `Rehearse in Story`
+flow likewise consumes an immutable Slate snapshot and returns only discoveries
+the writer may selectively incorporate. See
+`docs/slate-v1-product-ux-contract.md` for the staged handoff and Story graduation
+criteria. These handoffs are not part of the current Story V1 runtime contract.
