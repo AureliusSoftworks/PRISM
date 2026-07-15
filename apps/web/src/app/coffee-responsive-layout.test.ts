@@ -54,3 +54,22 @@ test("Coffee action text repositions inward from container-relative seat sides",
   assert.match(css, /font-size:\s*clamp\(0\.78rem,\s*1\.15cqw,\s*0\.96rem\)/);
   assert.match(css, /@container\s*\(max-width:\s*980px\)/);
 });
+
+test("Coffee replay action text stays inside the review canvas", () => {
+  assert.match(
+    css,
+    /\.coffeeStage\[data-replay-active="true"\]:not\(\[data-compact="true"\]\) \.coffeeSeatActionBadgeStack \{ --coffee-action-quote-x:\s*-50%/,
+  );
+  assert.match(
+    css,
+    /\.coffeeStage\[data-replay-active="true"\]:not\(\[data-compact="true"\]\)[\s\S]*?width:\s*min\(260px,\s*28cqw,\s*calc\(100cqw - 32px\)\)/,
+  );
+  assert.match(
+    css,
+    /data-replay-active="true"[\s\S]*?data-seat-horizontal-side="left"[\s\S]*?--coffee-action-quote-x:\s*-20%/,
+  );
+  assert.match(
+    css,
+    /data-replay-active="true"[\s\S]*?data-seat-horizontal-side="right"[\s\S]*?--coffee-action-quote-x:\s*-80%/,
+  );
+});

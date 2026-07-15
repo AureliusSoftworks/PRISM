@@ -58781,15 +58781,6 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   margin-top: 0;
 }
 
-.coffeeStage[data-review-active="true"][data-phase="finished"]:not(
-    [data-replay-active="true"]
-  )
-  .coffeeTableFocalColumn {
-  transform: translateY(
-    calc(var(--coffee-finished-table-y, 0px) - clamp(150px, 16vh, 180px))
-  );
-}
-
 .coffeeStage[data-review-active="true"][data-phase="finished"]
   .coffeeFinishedRecapControls
   :is(.coffeeJoinSessionButton, .coffeeTableStartButton) {
@@ -63566,6 +63557,117 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   padding-inline: 0;
   border-left: 0;
   text-align: center;
+}
+
+/* Replay seats use a separate review layout. Keep captions above or below the
+ * avatar, then bias side seats inward so prose never exits the review canvas. */
+.coffeeStage[data-replay-active="true"]:not([data-compact="true"])
+  .coffeeSeatActionBadgeStack {
+  --coffee-action-quote-x: -50%;
+}
+
+.coffeeStage[data-replay-active="true"]:not([data-compact="true"])
+  .coffeeSeatActionAnchor:is(
+    [data-seat-count="2"][data-layout-seat="0"],
+    [data-seat-count="2"][data-layout-seat="1"],
+    [data-seat-count="3"][data-layout-seat="0"],
+    [data-seat-count="4"][data-layout-seat="0"],
+    [data-seat-count="4"][data-layout-seat="1"],
+    [data-seat-count="5"][data-layout-seat="0"],
+    [data-seat-count="5"][data-layout-seat="1"],
+    [data-seat-count="5"][data-layout-seat="2"]
+  )
+  .coffeeSeatActionBadgeStack {
+  top: auto;
+  right: auto;
+  bottom: calc(100% + clamp(8px, 1.2vw, 16px));
+  left: 50%;
+  width: min(260px, 28cqw, calc(100cqw - 32px));
+  min-width: 0;
+  flex-direction: column-reverse;
+  --coffee-action-quote-x: -50%;
+  --coffee-action-quote-y: 0px;
+  transform-origin: bottom center;
+  text-align: center;
+}
+
+.coffeeStage[data-replay-active="true"]:not([data-compact="true"])
+  .coffeeSeatActionAnchor:is(
+    [data-seat-count="3"][data-layout-seat="1"],
+    [data-seat-count="3"][data-layout-seat="2"],
+    [data-seat-count="4"][data-layout-seat="2"],
+    [data-seat-count="4"][data-layout-seat="3"],
+    [data-seat-count="5"][data-layout-seat="3"],
+    [data-seat-count="5"][data-layout-seat="4"]
+  )
+  .coffeeSeatActionBadgeStack {
+  top: calc(100% + clamp(8px, 1.2vw, 16px));
+  right: auto;
+  bottom: auto;
+  left: 50%;
+  width: min(260px, 28cqw, calc(100cqw - 32px));
+  min-width: 0;
+  flex-direction: column;
+  --coffee-action-quote-x: -50%;
+  --coffee-action-quote-y: 0px;
+  transform-origin: top center;
+  text-align: center;
+}
+
+.coffeeStage[data-replay-active="true"]:not([data-compact="true"])
+  .coffeeSeatActionAnchor[data-seat-horizontal-side="left"]
+  .coffeeSeatActionBadgeStack {
+  --coffee-action-quote-x: -20%;
+}
+
+.coffeeStage[data-replay-active="true"]:not([data-compact="true"])
+  .coffeeSeatActionAnchor[data-seat-horizontal-side="center"]
+  .coffeeSeatActionBadgeStack {
+  --coffee-action-quote-x: -50%;
+}
+
+.coffeeStage[data-replay-active="true"]:not([data-compact="true"])
+  .coffeeSeatActionAnchor[data-seat-horizontal-side="right"]
+  .coffeeSeatActionBadgeStack {
+  --coffee-action-quote-x: -80%;
+}
+
+.coffeeStage[data-replay-active="true"]:not([data-compact="true"])
+  .coffeeSeatActionBadgeText {
+  font-size: clamp(0.78rem, 1.15cqw, 0.96rem);
+}
+
+.coffeeStage[data-replay-active="true"]:not([data-compact="true"])
+  .coffeeSeatActionAnchor:is(
+    [data-seat-count="2"],
+    [data-seat-count="3"],
+    [data-seat-count="4"],
+    [data-seat-count="5"]
+  )
+  .coffeeSeatActionBadge {
+  justify-content: center;
+  padding-inline: 0;
+  border-left: 0;
+  text-align: center;
+}
+
+@container (max-width: 980px) {
+  .coffeeStage[data-replay-active="true"]:not([data-compact="true"])
+    .coffeeSeatActionAnchor[data-seat-horizontal-side="left"]
+    .coffeeSeatActionBadgeStack {
+    --coffee-action-quote-x: -10%;
+  }
+
+  .coffeeStage[data-replay-active="true"]:not([data-compact="true"])
+    .coffeeSeatActionAnchor[data-seat-horizontal-side="right"]
+    .coffeeSeatActionBadgeStack {
+    --coffee-action-quote-x: -90%;
+  }
+
+  .coffeeStage[data-replay-active="true"]:not([data-compact="true"])
+    .coffeeSeatActionBadgeStack {
+    width: min(220px, 36cqw, calc(100cqw - 24px));
+  }
 }
 
 .coffeeSeatActionBadgeText {
