@@ -12,6 +12,15 @@ Active development happens on the `dev` branch; every release is a merge into
 
 _Staging area - nothing queued for release yet._
 
+## [0.9.2] - 2026-07-14
+
+### Fixed
+
+- **Coffee Groups can be created from a fresh setup again.** Selecting the
+  first bot no longer triggers a render-order crash and the global error
+  screen; canonical 2-5 seat selection, saved group creation, and session entry
+  now have focused regression coverage.
+
 ## [0.9.1] - 2026-07-14
 
 ### Added
