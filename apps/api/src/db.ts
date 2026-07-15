@@ -23,6 +23,8 @@ import {
   type CoffeeSessionDurationMinutes,
 } from "@localai/shared";
 
+export const SQLITE_BUSY_TIMEOUT_MS = 5_000;
+
 export interface DbUserRecord {
   id: string;
   email: string;
@@ -154,6 +156,7 @@ export function resolveDbPath(): string {
  */
 export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   db.exec(`
+    PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS};
     PRAGMA foreign_keys = ON;
     PRAGMA journal_mode = WAL;
     CREATE TABLE IF NOT EXISTS users (
@@ -422,6 +425,8 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       user_id TEXT NOT NULL,
       conversation_id TEXT,
       bot_id TEXT,
+      related_bot_ids TEXT NOT NULL DEFAULT '[]',
+      origin TEXT NOT NULL DEFAULT 'images_panel',
       prompt TEXT NOT NULL,
       revised_prompt TEXT,
       url TEXT NOT NULL,
@@ -776,6 +781,8 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       title TEXT NOT NULL,
       topic TEXT NOT NULL,
       producer_brief TEXT NOT NULL DEFAULT '',
+      provider TEXT NOT NULL DEFAULT 'local',
+      model TEXT,
       status TEXT NOT NULL DEFAULT 'live',
       segment TEXT NOT NULL DEFAULT 'opening',
       outcome TEXT,
@@ -1660,6 +1667,79 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     db.exec("ALTER TABLE images ADD COLUMN bot_id TEXT;");
   }
 
+  const hasImageRelatedBotIdsColumn = imageColumns.some(
+    (column) => column.name === "related_bot_ids"
+  );
+  if (!hasImageRelatedBotIdsColumn) {
+    db.exec("ALTER TABLE images ADD COLUMN related_bot_ids TEXT NOT NULL DEFAULT '[]';");
+  }
+
+  const hasImageOriginColumn = imageColumns.some(
+    (column) => column.name === "origin"
+  );
+  if (!hasImageOriginColumn) {
+    db.exec("ALTER TABLE images ADD COLUMN origin TEXT NOT NULL DEFAULT 'images_panel';");
+  }
+
+  // Recover ownership for Signal artwork created before image provenance was
+  // stored. Show JSON is authoritative because it retains the exact image ids
+  // selected for the host's day/night studios and logo.
+  db.exec(`
+    UPDATE images
+       SET bot_id = (
+             SELECT shows.host_bot_id
+              FROM botcast_shows AS shows
+              WHERE shows.user_id = images.user_id
+                AND json_valid(shows.atmosphere_json)
+                AND (
+                  json_extract(shows.atmosphere_json, '$.imageId') = images.id
+                  OR json_extract(shows.atmosphere_json, '$.dayAtmosphere.imageId') = images.id
+                  OR json_extract(shows.atmosphere_json, '$.nightAtmosphere.imageId') = images.id
+                  OR json_extract(shows.atmosphere_json, '$.logo.imageId') = images.id
+                )
+              LIMIT 1
+           ),
+           origin = 'botcast'
+     WHERE EXISTS (
+             SELECT 1
+              FROM botcast_shows AS shows
+              WHERE shows.user_id = images.user_id
+                AND json_valid(shows.atmosphere_json)
+                AND (
+                  json_extract(shows.atmosphere_json, '$.imageId') = images.id
+                  OR json_extract(shows.atmosphere_json, '$.dayAtmosphere.imageId') = images.id
+                  OR json_extract(shows.atmosphere_json, '$.nightAtmosphere.imageId') = images.id
+                  OR json_extract(shows.atmosphere_json, '$.logo.imageId') = images.id
+                )
+           );
+
+    UPDATE images
+       SET origin = CASE
+         WHEN purpose = 'group-room-wallpaper' THEN 'bot_group_room'
+         WHEN purpose = 'wallpaper' THEN 'zen_wallpaper'
+         WHEN purpose = 'bot_profile_picture' THEN 'bot_profile_picture'
+         WHEN conversation_id IS NOT NULL AND EXISTS (
+           SELECT 1 FROM conversations
+            WHERE conversations.id = images.conversation_id
+              AND conversations.user_id = images.user_id
+              AND conversations.conversation_mode = 'chat'
+         ) THEN 'zen_chat'
+         WHEN conversation_id IS NOT NULL AND EXISTS (
+           SELECT 1 FROM conversations
+            WHERE conversations.id = images.conversation_id
+              AND conversations.user_id = images.user_id
+              AND conversations.conversation_mode = 'sandbox'
+         ) THEN 'sandbox_chat'
+         ELSE origin
+       END
+     WHERE origin = 'images_panel';
+
+    UPDATE images
+       SET related_bot_ids = json_array(bot_id)
+     WHERE bot_id IS NOT NULL
+       AND TRIM(COALESCE(related_bot_ids, '')) IN ('', '[]');
+  `);
+
   const hasImageLocalRelPathColumn = imageColumns.some(
     (column) => column.name === "local_rel_path"
   );
@@ -1905,6 +1985,17 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   );
   if (!hasBotOpenaiImageModelColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN openai_image_model TEXT;");
+  }
+  const botcastEpisodeColumns = db.prepare(
+    "PRAGMA table_info(botcast_episodes)"
+  ).all() as Array<{ name: string }>;
+  if (!botcastEpisodeColumns.some((column) => column.name === "provider")) {
+    db.exec(
+      "ALTER TABLE botcast_episodes ADD COLUMN provider TEXT NOT NULL DEFAULT 'local';"
+    );
+  }
+  if (!botcastEpisodeColumns.some((column) => column.name === "model")) {
+    db.exec("ALTER TABLE botcast_episodes ADD COLUMN model TEXT;");
   }
   const hasBotTopPColumn = botColumns.some(
     (column) => column.name === "top_p"

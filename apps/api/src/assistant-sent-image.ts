@@ -11,6 +11,7 @@ import { generateLocalImageBytesByModelId } from "./image-local-by-model.ts";
 import { shouldAttemptLenientLocalImageFallback } from "./image-lenient-fallback.ts";
 import type { LlmProvider, ProviderMessage } from "./providers.ts";
 import { resolveImageGeneratePersistence } from "./image-generate-resolve.ts";
+import { serializeImageRelatedBotIds } from "./image-provenance.ts";
 import {
   buildGeneratedImageRelativePath,
   downloadRemoteImage,
@@ -497,16 +498,21 @@ export async function runAssistantSentImageGeneration(args: {
     args.db
       .prepare(
         `INSERT INTO images (
-          id, user_id, conversation_id, bot_id,
+          id, user_id, conversation_id, bot_id, related_bot_ids, origin,
           prompt, revised_prompt, url, size, quality,
           provider, model, local_rel_path, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         imageId,
         args.userId,
         persistence.conversationIdForInsert,
         persistence.persistedBotId,
+        serializeImageRelatedBotIds(
+          persistence.persistedBotId ? [persistence.persistedBotId] : [],
+          persistence.persistedBotId,
+        ),
+        args.mode === "chat" ? "zen_chat" : "sandbox_chat",
         prompt,
         argsInsert.revisedPrompt,
         argsInsert.urlForDb,

@@ -41,8 +41,18 @@ describe("Signal experience shell", () => {
   });
 
   it("brands shows with synthesis controls and resilient PRISM fallbacks", () => {
-    assert.match(source, /Synthesize studio \+ logo/u);
+    assert.match(source, /Synthesize studios \+ logo/u);
+    assert.match(source, /Creates matching Light and Dark sets/u);
     assert.match(source, /regenerateLogo: true/u);
+    assert.match(source, />\s*Refresh studio\s*</u);
+    assert.match(source, />\s*Refresh logo\s*</u);
+    assert.match(source, /generateShowArtwork\(selectedShow, true, \["studio"\]\)/u);
+    assert.match(source, /generateShowArtwork\(selectedShow, true, \["logo"\]\)/u);
+    assert.match(source, /dayAtmosphereImageUrl/u);
+    assert.match(source, /nightAtmosphereImageUrl/u);
+    assert.match(source, /workingShow\.dayAtmosphere\.prompt/u);
+    assert.match(source, /workingShow\.nightAtmosphere\.prompt/u);
+    assert.doesNotMatch(source, /Refresh studio \+ logo/u);
     assert.match(source, /function SignalShowLogo/u);
     assert.match(source, /show\.logo\.fallbackGlyph/u);
     assert.match(source, /data-theme=\{theme\}/u);
@@ -50,6 +60,58 @@ describe("Signal experience shell", () => {
     assert.match(css, /--prism-s:\s*#2fd3e3/iu);
     assert.match(css, /\.shell\[data-theme="light"\]/u);
     assert.match(css, /data-atmosphere="fallback"/u);
+  });
+
+  it("shows the selected logo and studio artwork on the dashboard", () => {
+    assert.match(
+      source,
+      /className=\{styles\.showBrandPreview\}[\s\S]*?<SignalShowLogo show=\{selectedShow\}/u,
+    );
+    assert.match(source, /function activeShowAtmosphere/u);
+    assert.match(source, /theme === "light" \? show\.dayAtmosphere : show\.nightAtmosphere/u);
+    assert.match(
+      source,
+      /const dashboardAtmosphere = selectedShow[\s\S]{0,100}activeShowAtmosphere\(selectedShow, theme\)/u,
+    );
+    assert.match(source, /const stageAtmosphere = activeShowAtmosphere\(args\.show, theme\)/u);
+    assert.match(css, /\.showBrandPreview\s*\{/u);
+    assert.match(css, /\.showBrandAtmosphere\s*\{/u);
+    assert.match(
+      css,
+      /\.shell\[data-theme="light"\] \.showBrandAtmosphere\s*\{[^}]*mix-blend-mode:\s*normal/iu,
+    );
+    assert.doesNotMatch(css, /\.shell\[data-theme="light"\] \.showBrandPreview::after\s*\{[^}]*mix-blend-mode:\s*screen/iu);
+    assert.match(
+      css,
+      /\.shell\[data-theme="light"\] \.showBrandContent h2\s*\{[^}]*color:\s*var\(--botcast-ink\)/iu,
+    );
+  });
+
+  it("turns SQLite contention into a useful Signal message", () => {
+    assert.match(source, /database is locked\|SQLITE_BUSY/u);
+    assert.match(
+      source,
+      /Signal is finishing another save\. Try again in a moment\./u,
+    );
+  });
+
+  it("locks one account or episode model before recording", () => {
+    assert.match(source, /aria-label="Signal episode model"/u);
+    assert.match(source, /Account default ·/u);
+    assert.match(source, /locked for this recording/u);
+    assert.match(
+      source,
+      /guestBotId: guestDraftId,[\s\S]{0,180}modelOverride: episodeModelDraft \|\| accountDefaultModel/u,
+    );
+    assert.match(source, /providerLabel\(episode\.provider\)/u);
+    assert.match(source, /providerLabel\(replayEpisode\.provider\)/u);
+    assert.doesNotMatch(
+      source,
+      /`\/api\/botcast\/episodes\/\$\{encodeURIComponent\(episode\.id\)\}\/advance`[\s\S]{0,220}preferredProvider/u,
+    );
+    assert.match(pageSource, /modelOptions=\{signalModelOptions\}/u);
+    assert.match(pageSource, /accountDefaultModel=/u);
+    assert.match(css, /\.episodeModelControl\s*\{/u);
   });
 
   it("inherits the active theme in shared panels and uses image settings for artwork", () => {
@@ -62,6 +124,7 @@ describe("Signal experience shell", () => {
       /preferredImageProvider=\{settings\?\.preferredImageProvider \?\? "local"\}/u,
     );
     assert.match(source, /preferredProvider: preferredImageProvider/u);
+    assert.match(source, /origin: "botcast"/u);
     assert.match(source, /botId: workingShow\.hostBotId/u);
     assert.match(source, /failureMessage \?\?= errorMessage\(artworkError\)/u);
     assert.match(source, /if \(artwork\.failureMessage\) setError\(artwork\.failureMessage\)/u);
