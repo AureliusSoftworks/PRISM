@@ -51,6 +51,7 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     displayName: "Alex",
     theme: "dark",
     preferredProvider: "local",
+    preferredImageProvider: "local",
     providerLocked: 0,
     autoMemory: 1,
     composerWritingAssist: 1,
@@ -205,6 +206,27 @@ describe("resolveNextSettings — preferredProvider", () => {
     assert.equal(
       resolveNextSettings({ preferredProvider: "azure" }, current).preferredProvider,
       "openai"
+    );
+  });
+});
+
+describe("resolveNextSettings — preferredImageProvider", () => {
+  it("accepts local and OpenAI independently from the chat provider", () => {
+    const next = resolveNextSettings(
+      { preferredProvider: "local", preferredImageProvider: "openai" },
+      baseline(),
+    );
+    assert.equal(next.preferredProvider, "local");
+    assert.equal(next.preferredImageProvider, "openai");
+  });
+
+  it("keeps the stored image provider when the field is missing or invalid", () => {
+    const current = baseline({ preferredImageProvider: "openai" });
+    assert.equal(resolveNextSettings({}, current).preferredImageProvider, "openai");
+    assert.equal(
+      resolveNextSettings({ preferredImageProvider: "anthropic" }, current)
+        .preferredImageProvider,
+      "openai",
     );
   });
 });

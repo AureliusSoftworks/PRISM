@@ -51,7 +51,9 @@ import {
   type EnglishVoiceEngine,
   type VoiceMode,
   type AutoFallbackChainV1,
+  type ImageProviderName,
   parseStoredAutoFallbackChain,
+  resolveImageProviderName,
   serializeAutoFallbackChain,
 } from "@localai/shared";
 import {
@@ -72,6 +74,7 @@ import {
 export interface BackupUserSettings {
   theme: "light" | "dark" | "system";
   preferredProvider: ProviderName;
+  preferredImageProvider?: ImageProviderName;
   providerLocked: boolean;
   autoMemory: boolean;
   composerWritingAssist: boolean;
@@ -307,6 +310,7 @@ export function exportUserSnapshot(
       `SELECT
          theme,
          preferred_provider,
+         preferred_image_provider,
          provider_locked,
          auto_memory,
          composer_writing_assist,
@@ -364,6 +368,7 @@ export function exportUserSnapshot(
     | {
         theme: "light" | "dark" | "system";
         preferred_provider: ProviderName;
+        preferred_image_provider: ImageProviderName;
         provider_locked: number;
         auto_memory: number;
         composer_writing_assist: number;
@@ -426,6 +431,7 @@ export function exportUserSnapshot(
     ? {
         theme: user.theme,
         preferredProvider: user.preferred_provider,
+        preferredImageProvider: user.preferred_image_provider,
         providerLocked: user.provider_locked === 1,
         autoMemory: user.auto_memory === 1,
         composerWritingAssist: user.composer_writing_assist !== 0,
@@ -1083,6 +1089,7 @@ function importUserSnapshotWithinTransaction(
       SET
         theme = ?,
         preferred_provider = ?,
+        preferred_image_provider = ?,
         provider_locked = ?,
         auto_memory = ?,
         composer_writing_assist = ?,
@@ -1145,6 +1152,11 @@ function importUserSnapshotWithinTransaction(
       settings.preferredProvider === "openai" || settings.preferredProvider === "anthropic"
         ? settings.preferredProvider
         : "local",
+      resolveImageProviderName({
+        savedProvider:
+          settings.preferredImageProvider ??
+          (settings.preferredProvider === "local" ? "local" : "openai"),
+      }),
       settings.providerLocked ? 1 : 0,
       settings.autoMemory ? 1 : 0,
       settings.composerWritingAssist ? 1 : 0,

@@ -32,7 +32,7 @@ export interface FirstRunSetupStep {
 
 export const FIRST_RUN_SETUP_STEPS: readonly FirstRunSetupStep[] = [
   { id: "place", title: "Welcome home", shortTitle: "Welcome", optional: false },
-  { id: "provider", title: "Choose your home base", shortTitle: "Privacy", optional: false },
+  { id: "provider", title: "Choose your chat home base", shortTitle: "Chat privacy", optional: false },
   { id: "openai", title: "Connect OpenAI", shortTitle: "OpenAI", optional: true },
   { id: "anthropic", title: "Connect Anthropic", shortTitle: "Anthropic", optional: true },
   { id: "elevenlabs", title: "Connect ElevenLabs", shortTitle: "Voice", optional: true },

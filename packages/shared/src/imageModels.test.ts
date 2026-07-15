@@ -5,12 +5,36 @@ import {
   encodeComfyUiModelId,
   isAllowedInAppOllamaPullModelName,
   isComfyUiModelId,
+  isImageProviderName,
   normalizeOpenAiImageGenerationParams,
   normalizeOpenAiImageModelId,
   parseComfyUiCheckpointName,
+  resolveImageProviderName,
 } from "./imageModels.ts";
 
 describe("imageModels", () => {
+  it("resolves image routing independently while preserving offline-only ceilings", () => {
+    assert.equal(isImageProviderName("openai"), true);
+    assert.equal(isImageProviderName("anthropic"), false);
+    assert.equal(resolveImageProviderName({ savedProvider: "openai" }), "openai");
+    assert.equal(
+      resolveImageProviderName({
+        savedProvider: "local",
+        requestedProvider: "openai",
+      }),
+      "openai",
+    );
+    assert.equal(
+      resolveImageProviderName({
+        savedProvider: "openai",
+        requestedProvider: "openai",
+        offlineOnly: true,
+      }),
+      "local",
+    );
+    assert.equal(resolveImageProviderName({ savedProvider: "anthropic" }), "local");
+  });
+
   it("normalizes OpenAI image model allowlist", () => {
     assert.equal(normalizeOpenAiImageModelId(undefined), "gpt-image-2");
     assert.equal(normalizeOpenAiImageModelId("gpt-image-2"), "gpt-image-2");

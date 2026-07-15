@@ -77,6 +77,55 @@ describe("backup Auto model settings", () => {
   });
 });
 
+describe("backup image provider settings", () => {
+  it("exports and restores image routing independently from chat routing", () => {
+    withBackupDatabase((db, userKey) => {
+      db.prepare(
+        "UPDATE users SET preferred_provider = 'local', preferred_image_provider = 'openai' WHERE id = ?",
+      ).run("user-1");
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.equal(snapshot.settings?.preferredProvider, "local");
+      assert.equal(snapshot.settings?.preferredImageProvider, "openai");
+
+      db.prepare(
+        "UPDATE users SET preferred_provider = 'openai', preferred_image_provider = 'local' WHERE id = ?",
+      ).run("user-1");
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      const restored = db
+        .prepare(
+          "SELECT preferred_provider, preferred_image_provider FROM users WHERE id = ?",
+        )
+        .get("user-1") as {
+        preferred_provider: string;
+        preferred_image_provider: string;
+      };
+      assert.equal(restored.preferred_provider, "local");
+      assert.equal(restored.preferred_image_provider, "openai");
+    });
+  });
+
+  it("derives the legacy image lane from the old coupled chat provider", () => {
+    withBackupDatabase((db, userKey) => {
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      const legacySettings = {
+        ...snapshot.settings!,
+        preferredProvider: "openai" as const,
+      };
+      delete legacySettings.preferredImageProvider;
+      importUserSnapshot(
+        db,
+        "user-1",
+        { ...snapshot, settings: legacySettings },
+        userKey,
+      );
+      const restored = db
+        .prepare("SELECT preferred_image_provider AS provider FROM users WHERE id = ?")
+        .get("user-1") as { provider: string };
+      assert.equal(restored.provider, "openai");
+    });
+  });
+});
+
 describe("backup Zen Atmosphere style notes", () => {
   it("exports and restores normalized style notes", () => {
     withBackupDatabase((db, userKey) => {

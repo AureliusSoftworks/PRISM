@@ -290,16 +290,21 @@ describe("group-room wallpaper image generation route", () => {
     assert.equal(fetchRecorder.calls.length, callStart);
   });
 
-  it("keeps stored LOCAL privacy authoritative over an OpenAI body override", async () => {
+  it("keeps offline-only member privacy authoritative over an OpenAI body override", async () => {
     const client = createClient();
     const register = await client.request(
       "/api/auth/register",
       jsonInit({ username: "group-local@example.com", password: "group-local-password" })
     );
     const userId = String((await json(register)).user.id);
-    db.prepare("UPDATE users SET preferred_provider = 'local' WHERE id = ?").run(userId);
+    db.prepare(
+      "UPDATE users SET preferred_provider = 'local', preferred_image_provider = 'local' WHERE id = ?"
+    ).run(userId);
     insertBot(userId, "local-bot-a", "Local A", "Local persona A", "#223344");
     insertBot(userId, "local-bot-b", "Local B", "Local persona B", "#556677");
+    db.prepare(
+      "UPDATE bots SET online_enabled = 0 WHERE user_id = ? AND id IN (?, ?)"
+    ).run(userId, "local-bot-a", "local-bot-b");
     const callStart = fetchRecorder.calls.length;
 
     const response = await client.request(

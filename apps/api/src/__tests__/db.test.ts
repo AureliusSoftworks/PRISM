@@ -76,6 +76,10 @@ describe("createDatabase bot export hash migration", () => {
       ]) {
         db.exec(`ALTER TABLE users DROP COLUMN ${name};`);
       }
+      db.prepare("UPDATE users SET preferred_provider = 'openai' WHERE id = ?").run(
+        "user-1"
+      );
+      db.exec("ALTER TABLE users DROP COLUMN preferred_image_provider;");
       db.close();
 
       const reopened = createDatabase();
@@ -117,6 +121,15 @@ describe("createDatabase bot export hash migration", () => {
         "1"
       );
       assert.ok(userColumns.some((column) => column.name === "hidden_comfyui_workflow_ids"));
+      assert.ok(userColumns.some((column) => column.name === "preferred_image_provider"));
+      assert.equal(
+        (
+          reopened
+            .prepare("SELECT preferred_image_provider AS provider FROM users WHERE id = ?")
+            .get("user-1") as { provider?: string } | undefined
+        )?.provider,
+        "openai"
+      );
       assert.ok(userColumns.some((column) => column.name === "zen_wallpaper_text_mask_enabled"));
       assert.ok(
         userColumns.some((column) => column.name === "prism_default_bot_face_eye_animation")

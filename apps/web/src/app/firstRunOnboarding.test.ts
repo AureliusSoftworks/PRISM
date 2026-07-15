@@ -47,6 +47,15 @@ describe("first-run onboarding", () => {
     }
   });
 
+  it("names chat routing separately from image routing", () => {
+    const providerStep = FIRST_RUN_SETUP_STEPS.find(
+      (step) => step.id === "provider",
+    );
+    assert.equal(providerStep?.title, "Choose your chat home base");
+    assert.match(pageSource, /Image generation has its own LOCAL\/ONLINE choice/u);
+    assert.match(pageSource, /Chat home base/u);
+  });
+
   it("clamps restored progress and reaches a full final bar", () => {
     assert.equal(firstRunSetupStepAt(-4).id, "place");
     assert.equal(firstRunSetupStepAt(999).id, "ready");

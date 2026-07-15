@@ -40,6 +40,29 @@ export function botBelongsToUser(
   return Boolean(row?.id);
 }
 
+/** True when image prompt/persona context includes at least one owned offline-only bot. */
+export function imageContextIncludesOfflineOnlyBot(
+  db: DatabaseSync,
+  userId: string,
+  botIds: readonly string[]
+): boolean {
+  const uniqueBotIds = Array.from(
+    new Set(botIds.map((botId) => botId.trim()).filter(Boolean))
+  );
+  if (uniqueBotIds.length === 0) return false;
+  const row = db
+    .prepare(
+      `SELECT 1 AS locked
+         FROM bots
+        WHERE user_id = ?
+          AND online_enabled = 0
+          AND id IN (${uniqueBotIds.map(() => "?").join(", ")})
+        LIMIT 1`
+    )
+    .get(userId, ...uniqueBotIds) as { locked?: number } | undefined;
+  return row?.locked === 1;
+}
+
 export function conversationHasAssistantWithBotId(
   db: DatabaseSync,
   conversationId: string,
