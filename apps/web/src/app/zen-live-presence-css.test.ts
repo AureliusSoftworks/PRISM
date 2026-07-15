@@ -2505,7 +2505,7 @@ describe("Zen live presence CSS", () => {
     );
     assert.match(
       pageSource,
-      /renderHeaderModelPicker\(\{\s*modelMenuClassName: styles\.zenSplashModelMenu,\s*modelMenuWidthPx: 220,\s*showBotPicker: false,\s*\}\)/
+      /renderHeaderModelPicker\(\{\s*modelMenuClassName: styles\.zenSplashModelMenu,\s*modelMenuWidthPx: 220,\s*showBotPicker: false,\s*showVoiceSelector: false,\s*\}\)/
     );
     assert.match(
       pageSource,

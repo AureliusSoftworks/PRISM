@@ -34,7 +34,7 @@ describe("Chat shell header layout", () => {
     );
     assert.equal(
       pageSource.match(/data-app-shell-header="true"/g)?.length,
-      2,
+      3,
     );
   });
 

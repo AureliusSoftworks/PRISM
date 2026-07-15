@@ -2031,6 +2031,11 @@
   height: 30px;
 }
 
+.firstRunWelcomeBrand .brandEmblem {
+  width: 52px;
+  height: 36px;
+}
+
 .firstRunWelcomeEyebrow,
 .firstRunSetupEyebrow {
   margin: 12px 0 0;
@@ -2328,6 +2333,14 @@
 
 .firstRunChoiceGrid small {
   color: var(--fg-muted);
+}
+
+.firstRunChoiceGrid > p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .firstRunChoiceGlyph {
@@ -2692,11 +2705,9 @@
   margin-top: 0;
 }
 
-/* Brand lockup: static rainbow-prism icon + per-letter color wordmark.
-   The icon itself stays still; the motion happens in two heavily-blurred
-   conic-gradient halos BEHIND it. The halos rotate in opposite directions at
-   different speeds so their colors drift through one another like prism
-   interference instead of the whole icon simply hue-shifting as one unit. */
+/* Brand lockup: primary refraction emblem + per-letter color wordmark.
+   The emblem preserves the narrative sequence (source, sanctum, spectrum),
+   while the older triangle remains available as the compact system mark. */
 .brandLockup {
   display: flex;
   align-items: center;
@@ -2743,6 +2754,22 @@
   flex-shrink: 0;
   isolation: isolate;
   color: var(--fg);
+}
+
+.brandEmblemShell {
+  overflow: visible;
+}
+
+.brandEmblem {
+  width: 100%;
+  height: 100%;
+  display: block;
+  position: relative;
+  z-index: 1;
+  overflow: visible;
+  color: var(--fg);
+  filter: drop-shadow(0 0 9px rgba(255, 159, 28, 0.16))
+    drop-shadow(0 0 16px rgba(47, 211, 227, 0.12));
 }
 
 .brandIconButton {
@@ -2965,6 +2992,11 @@
      subtle keyline, so no drop-shadow is needed in light mode. */
   filter: hue-rotate(var(--brand-icon-light-hue-shift));
   animation: brandIconLightHueDrift 6s linear infinite;
+}
+
+.themeLight .brandEmblem {
+  color: #0f0f0f;
+  filter: none;
 }
 
 .themeLight .userHeroAvatar .brandIconLight {
@@ -3240,11 +3272,26 @@
 }
 
 .settingsModelPairTitle {
+  display: grid;
+  gap: 6px;
   min-width: 0;
   color: var(--fg);
   font-size: 13px;
   font-weight: 760;
   line-height: 1.25;
+}
+
+.settingsModelPairTitle > small {
+  color: var(--fg-muted);
+  font-size: 10px;
+  font-weight: 560;
+}
+
+.settingsImageProviderMode {
+  justify-self: start;
+  width: fit-content;
+  margin: 2px;
+  padding-inline: 5px;
 }
 
 .settingsModelLane {
@@ -5468,7 +5515,9 @@
   position: absolute;
   top: calc(100% + 8px);
   left: 0;
-  width: 190px;
+  width: min(300px, calc(100vw - 24px));
+  max-height: min(620px, calc(100vh - 72px));
+  overflow-y: auto;
   padding: 6px;
   border-radius: 12px;
   border: 1px solid var(--line);
@@ -5477,6 +5526,16 @@
     var(--shadow-sm),
     0 16px 42px color-mix(in srgb, var(--bg-deep) 34%, transparent);
   z-index: 870;
+}
+
+.appSwitcherMenuLabel {
+  padding: 5px 8px 4px;
+  color: var(--fg-muted);
+  font-size: 0.62rem;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
 }
 
 .appSwitcherMenuItem {
@@ -5524,6 +5583,146 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.appSwitcherRoadmap {
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px solid var(--line);
+}
+
+.appSwitcherRoadmapButton {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  min-height: 46px;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) 16px;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.appSwitcherRoadmapButton:hover,
+.appSwitcherRoadmapButton:focus-visible,
+.appSwitcherRoadmapButton[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg-hover));
+  outline: none;
+}
+
+.appSwitcherRoadmapButtonGlyph {
+  width: 24px;
+  height: 24px;
+  display: inline-grid;
+  place-items: center;
+  color: color-mix(in srgb, var(--accent) 72%, var(--fg));
+}
+
+.appSwitcherRoadmapButtonCopy,
+.appSwitcherRoadmapAppletCopy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.appSwitcherRoadmapButtonCopy > span,
+.appSwitcherRoadmapAppletCopy > span {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.82rem;
+  font-weight: 760;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.appSwitcherRoadmapButtonCopy > small,
+.appSwitcherRoadmapAppletCopy > small {
+  color: var(--fg-muted);
+  font-size: 0.66rem;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.appSwitcherRoadmapChevron {
+  opacity: 0.66;
+  transition: transform 140ms ease;
+}
+
+.appSwitcherRoadmapButton[aria-expanded="true"] .appSwitcherRoadmapChevron {
+  transform: rotate(180deg);
+}
+
+.appSwitcherRoadmapPanel {
+  margin: 3px 2px 2px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+  border-radius: 9px;
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--accent) 7%, transparent),
+      transparent 60%
+    ),
+    color-mix(in srgb, var(--bg) 72%, transparent);
+}
+
+.appSwitcherRoadmapHeading {
+  display: grid;
+  gap: 3px;
+  margin-bottom: 9px;
+}
+
+.appSwitcherRoadmapHeading > span {
+  color: var(--fg);
+  font-size: 0.73rem;
+  font-weight: 780;
+}
+
+.appSwitcherRoadmapHeading > small {
+  color: var(--fg-muted);
+  font-size: 0.65rem;
+  line-height: 1.35;
+}
+
+.appSwitcherRoadmapList {
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+  list-style: none;
+}
+
+.appSwitcherRoadmapList li {
+  min-width: 0;
+  min-height: 42px;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  padding: 6px 7px;
+  border: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-surface) 66%, transparent);
+}
+
+.appSwitcherRoadmapList .appSwitcherMenuGlyph,
+.appSwitcherRoadmapList .appSwitcherMenuGlyph svg {
+  width: 20px;
+  height: 20px;
+}
+
+@media (max-width: 380px) {
+  .appSwitcherRoadmapList {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .voiceModeSelector {
@@ -10091,6 +10290,81 @@
   padding-block-start: calc(14px + env(safe-area-inset-top, 0px));
   padding-inline-start: calc(20px + env(safe-area-inset-left, 0px));
   padding-inline-end: calc(20px + env(safe-area-inset-right, 0px));
+}
+
+.slateHeader {
+  position: sticky;
+  top: 0;
+  width: 100%;
+  box-sizing: border-box;
+  z-index: 180;
+  overflow: visible;
+}
+
+.slateHeader::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    #ff4d6d,
+    #ff9f1c,
+    #b7e63a,
+    #2fd3e3,
+    #7b5cff
+  );
+  opacity: 0.64;
+  pointer-events: none;
+}
+
+.slateHeaderContext {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  padding-inline: 12px;
+}
+
+.slateHeaderContext small {
+  overflow: hidden;
+  max-width: 30ch;
+  color: var(--fg-muted);
+  font-size: 0.66rem;
+  letter-spacing: 0.035em;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.slateHeaderActions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+@media (max-width: 980px) {
+  .slateHeaderContext {
+    display: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .slateHeader[data-app-shell-header="true"] {
+    flex-wrap: wrap;
+    padding: 10px 12px;
+  }
+
+  .slateHeaderActions {
+    width: 100%;
+    justify-content: space-between;
+  }
 }
 
 .chatHeaderComposeToolsRow {

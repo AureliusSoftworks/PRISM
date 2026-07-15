@@ -89,8 +89,8 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   slate: {
     id: "slate",
     name: "Slate",
-    version: "0.0",
-    status: "planned",
+    version: "0.3",
+    status: "preview",
   },
   pseudo: {
     id: "pseudo",
@@ -110,11 +110,12 @@ export const PRISM_TOP_LEVEL_SWITCHER_APPLET_IDS = [
   "chat",
   "coffee",
   "botcast",
+  "slate",
 ] as const satisfies readonly PrismAppletId[];
 
 export function prismTopLevelSwitcherApplets(): PrismAppletVersion[] {
   return PRISM_TOP_LEVEL_SWITCHER_APPLET_IDS.map((appletId) => PRISM_APPLETS[appletId]).filter(
-    (applet) => applet.status === "active"
+    (applet) => applet.status !== "planned"
   );
 }
 

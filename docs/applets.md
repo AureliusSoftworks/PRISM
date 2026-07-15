@@ -27,14 +27,14 @@ ship as `0.5.2` while Coffee is `v0.7` and Story is `v0.1`.
 | Chat | v1.2 | Active | Full playground for bots, providers, models, images, exports, and memory-aware conversations. |
 | Zen | v1.1 | Active | Calm one-to-one continuity surface; the standalone Zen lane is deprecating as this becomes Prism's default state. |
 | Coffee | v1.3 | Active | Multi-bot group table with Coffee Groups, session pacing, cups, transcripts, replay, and table controls. |
-| Signal | v2.0 | Active | Bot-owned interview shows with private producer direction, persistent studios, episode archives, and directed replay. |
+| Signal | v2.0 | Active | Bot-owned interview shows with editable host-shaped names, generated or procedural studio and logo identities, private producer direction, episode archives, and directed replay. |
 | Story | v0.1 | Preview | Generated visual-novel episodes with bots, choices, maps, inventory, and transcripts. |
 | Arena | v0.0 | Planned | Moderated bot debate surface. |
 | Polling | v0.0 | Planned | AI-powered polling across bot groups. |
 | Feed | v0.0 | Planned | BotBook-style social feed. |
 | Games | v0.0 | Planned | Boardgame-like bot matches. |
 | Gym | v0.0 | Planned | Bot training and memory-development surface. |
-| Slate | v0.0 | Planned | Document-first writing canvas. |
+| Slate | v0.3 | Preview | Prose-fiction production desk with persistent Shape, Draft, and Refine workflows, optional wildcard-assisted starts, and shared PRISM navigation and theming. |
 | Pseudo | v0.0 | Planned | Sketch/system space for almost-code. |
 | Surf | v0.0 | Planned | Simple browsing plus optional bot screen viewing. |
 
@@ -61,15 +61,24 @@ happens" experience; Slate is the editorial "turn this into something good"
 workspace. Cross-applet stages never silently synchronize or rewrite content.
 See [Slate V1 Product and UX Contract](./slate-v1-product-ux-contract.md).
 
-Slate stays planned `v0.0` until its first functional vertical slice is usable
-end to end. At that point it may become preview `v0.1`.
+Slate stayed planned `v0.0` until its first functional vertical slice became
+usable end to end. It entered preview at `v0.1` and is now `v0.3`; later snapshot
+stages do not block the standalone preview.
 
 ## Changelog
 
 ### 2026-07-15
 
-- Added `Signal v2.0`, the bot-owned interview-show applet with private producer
-  direction, persistent studio identity, episode archives, and directed replay.
+- Bumped `Slate` to preview `v0.3` with shared PRISM wordmark and utility
+  navigation plus branded light/dark workspace treatments.
+- Bumped `Slate` to preview `v0.2` with optional `{WILDCARD}` project sparks,
+  preview/reroll controls, and persisted source-template provenance.
+- Promoted `Slate` to preview `v0.1` for persistent prose projects, generated
+  structure, scoped drafting, direct autosaved edits, locks, and explicit
+  revision previews with accept/reject version safety.
+- Added `Signal v2.0`, the bot-owned interview-show applet with editable host-shaped
+  brands, persistent generated-or-procedural studios and logos, private producer
+  direction, episode archives, and directed replay.
 
 ### 2026-07-14
 
