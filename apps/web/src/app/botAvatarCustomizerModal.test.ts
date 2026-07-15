@@ -400,17 +400,18 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
     /data-custom-active=\{customMouthActive \? "true" : undefined\}/,
   );
   assert.match(mouthTabSource, /disabled=\{!customMouthActive\}/);
-  assert.match(mouthTabSource, /botAvatarMouthGlyphColumn/);
-  assert.match(mouthTabSource, /\* on sip/);
+  assert.doesNotMatch(mouthTabSource, /botAvatarCoffeePuckerToggle/);
+  assert.match(pageSource, /botAvatarControlGroupActions/);
+  assert.match(pageSource, /activeTab === "mouth" && customMouthActive/);
+  assert.match(pageSource, /Coffee \*/);
   assert.match(
-    mouthTabSource,
+    pageSource,
     /Swap the custom mouth to \* while sipping in Coffee mode\./,
   );
-  assert.match(mouthTabSource, /role="switch"/);
-  assert.match(mouthTabSource, /aria-checked=\{faceMouthCoffeePucker\}/);
-  assert.match(mouthTabSource, /data-enabled=\{\s*faceMouthCoffeePucker/);
-  assert.match(mouthTabSource, /onMouthCoffeePuckerChange/);
-  assert.match(mouthTabSource, /customMouthActive \? \(/);
+  assert.match(pageSource, /role="switch"/);
+  assert.match(pageSource, /aria-checked=\{faceMouthCoffeePucker\}/);
+  assert.match(pageSource, /data-enabled=\{faceMouthCoffeePucker/);
+  assert.match(pageSource, /onMouthCoffeePuckerChange/);
   assert.doesNotMatch(mouthTabSource, /faceMouthAnimation/);
   assert.match(mouthTabSource, /label="Mouth size"/);
   assert.match(mouthTabSource, /<BotAvatarMouthRotationWheel/);
@@ -424,6 +425,10 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.doesNotMatch(mouthTabSource, /botAvatarMouthAnimationRow/);
   assert.doesNotMatch(mouthTabSource, /botAvatarCustomMotionRowCombined/);
   assert.match(mouthTabSource, /botAvatarGlyphRotationField/);
+  assert.match(
+    cssSource,
+    /\.botAvatarGlyphRotationField\s*\{[\s\S]*?grid-column:\s*1\s*\/\s*-1/,
+  );
   assert.doesNotMatch(mouthTabSource, /<BotAvatarGlyphAnimationControl/);
   assert.match(motionTabSource, /label="Mouth animation"/);
   assert.match(motionTabSource, /value=\{faceMouthAnimation\}/);

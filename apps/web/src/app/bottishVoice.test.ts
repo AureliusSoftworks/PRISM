@@ -129,7 +129,39 @@ describe("Bottish speech plan", () => {
         true,
       )),
     );
+    assert.deepEqual(
+      new Uint8Array(mixed),
+      new Uint8Array(mixBabbleMediaWave(
+        silentCarrier,
+        "The robot fallback should still sound like Bottish.",
+        neutral,
+        "media-hybrid",
+      )),
+    );
     assert.ok(new Int16Array(mixed, 44).some((sample) => sample !== 0));
+  });
+
+  it("leaves the media fallback WAV untouched when voice effects are disabled", () => {
+    const silentCarrier = encodeBottishPlanWave({
+      notes: [],
+      durationMs: 1_200,
+      alignment: {
+        characters: [],
+        characterStartTimesSeconds: [],
+        characterEndTimesSeconds: [],
+      },
+    });
+    const originalBytes = new Uint8Array(silentCarrier.slice(0));
+    const unmixed = mixBabbleMediaWave(
+      silentCarrier,
+      "The clean fallback should remain clean.",
+      neutral,
+      "media-hybrid-clean",
+      false,
+    );
+
+    assert.strictEqual(unmixed, silentCarrier);
+    assert.deepEqual(new Uint8Array(unmixed), originalBytes);
   });
 
   it("ignores legacy Tone, Lilt, Pace, and Warmth values", () => {

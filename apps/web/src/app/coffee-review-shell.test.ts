@@ -29,7 +29,11 @@ test("completed Coffee sessions enter read-only review before replay starts", ()
   );
 });
 
-test("review renders Default Prism in a reserved bottom table seat", () => {
+test("replay renders Default Prism in a reserved bottom table seat", () => {
+  assert.match(
+    pageSource,
+    /\{coffeeReplayActive \? \(\s*<div\s*className=\{styles\.coffeeReplayPlayerSeat\}/,
+  );
   assert.match(pageSource, /className=\{styles\.coffeeReplayPlayerSeat\}/);
   assert.match(pageSource, /glyph=\{zenDefaultPrismGlyph\}/);
   assert.match(pageSource, /faceStyle=\{zenDefaultPrismFaceStyle\}/);
@@ -44,9 +48,9 @@ test("review renders Default Prism in a reserved bottom table seat", () => {
   assert.match(pageSource, /className=\{styles\.coffeeReplayPlayerName\}/);
   assert.match(pageSource, /className=\{styles\.coffeeReplayPlayerGlyph\}/);
   assert.match(pageSource, /\{coffeePlayerLabel\}/);
-  assert.doesNotMatch(
+  assert.match(
     pageSource,
-    /className=\{styles\.coffeeReplayPlayerGlyph\}[\s\S]{0,180}<BotGlyph/,
+    /className=\{styles\.coffeeReplayPlayerGlyph\}[\s\S]{0,180}<BotGlyph\s+name=\{zenDefaultPrismGlyph\}/,
   );
 });
 

@@ -77,11 +77,7 @@ function parseEchoStringExpression(source: string): { message: string; tail: str
   };
 }
 
-export function parseCoffeeDevCommand(
-  text: string,
-  _unusedBotsForBackCompat?: unknown,
-  _unusedRandomForBackCompat?: unknown
-): ParsedCoffeeDevCommand {
+export function parseCoffeeDevCommand(text: string): ParsedCoffeeDevCommand {
   const trimmed = text.trim();
   if (/^\/dev(?:\s|$)/i.test(trimmed)) {
     return trimmed.replace(/^\/dev/i, "").trim().length === 0

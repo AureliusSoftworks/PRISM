@@ -79,3 +79,94 @@ select,
   width: 0;
   height: 0;
 }
+
+/* Native View Transitions for relationship-depth navigation. Only the named
+   identity artwork scales; transcript and interface copy remain in the root
+   atmosphere crossfade. */
+html[data-relationship-depth-motion]::view-transition-old(root),
+html[data-relationship-depth-motion]::view-transition-new(root) {
+  animation-duration: 320ms;
+  animation-fill-mode: both;
+  animation-timing-function: ease;
+}
+
+html[data-relationship-depth-motion]::view-transition-old(root) {
+  animation-name: relationship-depth-atmosphere-out;
+}
+
+html[data-relationship-depth-motion]::view-transition-new(root) {
+  animation-name: relationship-depth-atmosphere-in;
+}
+
+html[data-relationship-depth-motion="shared-anchor"][data-relationship-depth-direction="forward"]::view-transition-group(relationship-depth-anchor) {
+  animation-duration: 360ms;
+  animation-timing-function: cubic-bezier(0.22, 0.7, 0.18, 1);
+}
+
+html[data-relationship-depth-motion="shared-anchor"][data-relationship-depth-direction="reverse"]::view-transition-group(relationship-depth-anchor) {
+  animation-duration: 300ms;
+  animation-timing-function: cubic-bezier(0.3, 0.62, 0.2, 1);
+}
+
+html[data-relationship-depth-motion="pullback-swap"]::view-transition-group(relationship-depth-anchor) {
+  animation-duration: 280ms;
+  animation-timing-function: cubic-bezier(0.3, 0.62, 0.2, 1);
+}
+
+html[data-relationship-depth-motion="pullback-swap"]::view-transition-old(relationship-depth-anchor) {
+  animation: relationship-depth-pull-away 140ms ease-in both;
+}
+
+html[data-relationship-depth-motion="pullback-swap"]::view-transition-new(relationship-depth-anchor) {
+  animation: relationship-depth-push-in 160ms 120ms ease-out both;
+}
+
+@keyframes relationship-depth-atmosphere-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes relationship-depth-atmosphere-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes relationship-depth-pull-away {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+}
+
+@keyframes relationship-depth-push-in {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-relationship-depth-motion="crossfade"]::view-transition-group(root),
+  html[data-relationship-depth-motion="crossfade"]::view-transition-old(root),
+  html[data-relationship-depth-motion="crossfade"]::view-transition-new(root) {
+    animation-duration: 140ms;
+    animation-timing-function: ease;
+    transform: none;
+  }
+}

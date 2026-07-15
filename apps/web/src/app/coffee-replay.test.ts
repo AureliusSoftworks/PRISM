@@ -11,6 +11,9 @@ import {
   coffeeActionSipMessageGapForDuration,
   coffeeConversationHasMeaningfulTableDialogue,
   coffeeReplayMessageHasStateEvent,
+  coffeeReplayMessageRevealInProgress,
+  coffeeReplayPlayhead,
+  coffeeReplayShouldWaitForVoiceClock,
   coffeeReplayPlayerThinkingDurationMs,
   coffeeReplayStateAt,
   coffeeReplayTopOffsChain,
@@ -36,6 +39,124 @@ describe("coffee replay helpers", () => {
     assert.deepEqual(coffeeReplayVisibleMessages(messages, 0), ["a"]);
     assert.deepEqual(coffeeReplayVisibleMessages(messages, 1), ["a", "b"]);
     assert.deepEqual(coffeeReplayVisibleMessages(messages, 20), ["a", "b", "c"]);
+  });
+
+  it("derives a pausable, seekable playhead from message time and reveal progress", () => {
+    const messages = [
+      { createdAt: "2026-07-14T20:00:00.000Z" },
+      { createdAt: "2026-07-14T20:00:20.000Z" },
+      { createdAt: "2026-07-14T20:00:50.000Z" },
+    ];
+    const paused = coffeeReplayPlayhead({
+      conversationStartedAt: "2026-07-14T20:00:00.000Z",
+      durationMinutes: 1,
+      messages,
+      messageIndex: 1,
+      revealFraction: 0.5,
+    });
+    const stillPaused = coffeeReplayPlayhead({
+      conversationStartedAt: "2026-07-14T20:00:00.000Z",
+      durationMinutes: 1,
+      messages,
+      messageIndex: 1,
+      revealFraction: 0.5,
+    });
+    const resumed = coffeeReplayPlayhead({
+      conversationStartedAt: "2026-07-14T20:00:00.000Z",
+      durationMinutes: 1,
+      messages,
+      messageIndex: 1,
+      revealFraction: 0.75,
+    });
+    const soughtBack = coffeeReplayPlayhead({
+      conversationStartedAt: "2026-07-14T20:00:00.000Z",
+      durationMinutes: 1,
+      messages,
+      messageIndex: 0,
+      revealFraction: 0,
+    });
+
+    assert.deepEqual(stillPaused, paused);
+    assert.ok(resumed.nowMs > paused.nowMs);
+    assert.equal(soughtBack.progress, 0);
+    assert.equal(paused.nowMs, Date.parse("2026-07-14T20:00:35.000Z"));
+  });
+
+  it("falls back to normalized progress when replay timestamps are invalid", () => {
+    const playhead = coffeeReplayPlayhead({
+      conversationStartedAt: "2026-07-14T20:00:00.000Z",
+      durationMinutes: 2,
+      messages: [
+        { createdAt: "invalid" },
+        { createdAt: undefined },
+        { createdAt: "also-invalid" },
+      ],
+      messageIndex: 1,
+      revealFraction: 0.5,
+    });
+
+    assert.equal(playhead.progress, 0.75);
+    assert.equal(playhead.nowMs, Date.parse("2026-07-14T20:01:30.000Z"));
+  });
+
+  it("keeps late recorded messages on the playhead instead of collapsing them", () => {
+    const playhead = coffeeReplayPlayhead({
+      conversationStartedAt: "2026-07-14T20:00:00.000Z",
+      durationMinutes: 1,
+      messages: [
+        { createdAt: "2026-07-14T20:00:00.000Z" },
+        { createdAt: "2026-07-14T20:01:30.000Z" },
+      ],
+      messageIndex: 1,
+      revealFraction: 1,
+    });
+
+    assert.equal(playhead.sessionEndsAtMs, Date.parse("2026-07-14T20:01:30.000Z"));
+    assert.equal(playhead.progress, 1);
+  });
+
+  it("keeps a newly advanced replay line hidden until its typewriter owns it", () => {
+    assert.equal(
+      coffeeReplayMessageRevealInProgress({
+        replayActive: true,
+        replayMessageKey: "new-short-player-line",
+        typewriterMessageKey: "previous-long-bot-line",
+        displayLength: 28,
+        visibleLength: 90,
+      }),
+      true,
+    );
+    assert.equal(
+      coffeeReplayMessageRevealInProgress({
+        replayActive: true,
+        replayMessageKey: "new-short-player-line",
+        typewriterMessageKey: "new-short-player-line",
+        displayLength: 28,
+        visibleLength: 28,
+      }),
+      false,
+    );
+  });
+
+  it("resumes a partially revealed replay line without waiting for voice preparation", () => {
+    assert.equal(
+      coffeeReplayShouldWaitForVoiceClock({
+        replayPlaying: true,
+        voiceEnabled: true,
+        visibleLength: 18,
+        voiceClockReady: false,
+      }),
+      false,
+    );
+    assert.equal(
+      coffeeReplayShouldWaitForVoiceClock({
+        replayPlaying: true,
+        voiceEnabled: true,
+        visibleLength: 0,
+        voiceClockReady: false,
+      }),
+      true,
+    );
   });
 
   it("hides action timeline messages on the finished preview until replay starts", () => {

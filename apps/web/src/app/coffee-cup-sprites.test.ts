@@ -32,6 +32,7 @@ import {
   coffeeCupTopOffSnapshotForProgress,
   coffeeCupVisualSipCountForAnimation,
 } from "./coffee-cup-sprites.ts";
+import { coffeeReplayPlayhead } from "./coffee-replay.ts";
 
 function coffeeCupAssetPngSize(assetName: string): { width: number; height: number } {
   const data = readFileSync(
@@ -44,7 +45,54 @@ function coffeeCupAssetPngSize(assetName: string): { width: number; height: numb
   };
 }
 
+function replayCupState(
+  messageIndex: number,
+  revealFraction: number,
+  topOff: ReturnType<typeof coffeeCupTopOffSnapshotForProgress> = null,
+) {
+  const startedAt = "2026-07-14T20:00:00.000Z";
+  const playhead = coffeeReplayPlayhead({
+    conversationStartedAt: startedAt,
+    durationMinutes: 1,
+    messages: [
+      { createdAt: startedAt },
+      { createdAt: "2026-07-14T20:00:30.000Z" },
+      { createdAt: "2026-07-14T20:01:00.000Z" },
+    ],
+    messageIndex,
+    revealFraction,
+  });
+  return buildCoffeeCupVisualState({
+    seed: "replay-cup",
+    nowMs: playhead.nowMs,
+    sessionStartedAtMs: playhead.sessionStartedAtMs,
+    sessionEndsAtMs: playhead.sessionEndsAtMs,
+    durationMinutes: 1,
+    topOff,
+    sippingOverride: false,
+  });
+}
+
 describe("coffee cup sprites", () => {
+  it("freezes, resumes, seeks, and tops off from the replay playhead", () => {
+    const paused = replayCupState(1, 0.25);
+    const stillPaused = replayCupState(1, 0.25);
+    const resumed = replayCupState(1, 0.75);
+    const soughtBack = replayCupState(0, 0);
+    const topOff = coffeeCupTopOffSnapshotForProgress(
+      0.5,
+      "2026-07-14T20:00:30.000Z",
+      0.1,
+    );
+    assert.notEqual(topOff, null);
+    const toppedOff = replayCupState(1, 0.75, topOff);
+
+    assert.equal(stillPaused.frameIndex, paused.frameIndex);
+    assert.equal(stillPaused.progress, paused.progress);
+    assert.ok(resumed.progress > paused.progress);
+    assert.ok(soughtBack.progress < paused.progress);
+    assert.ok(toppedOff.progress < resumed.progress);
+  });
   it("maps drink levels to authored sheet positions", () => {
     assert.deepEqual(coffeeCupFramePosition(0), { frameX: "0%", frameY: "0%" });
     assert.deepEqual(coffeeCupFramePosition(2), { frameX: "100%", frameY: "0%" });

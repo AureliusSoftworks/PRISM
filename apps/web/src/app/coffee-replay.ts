@@ -40,6 +40,91 @@ export interface CoffeeReplayMessageLike {
   coffeeReplayEvents?: CoffeeReplayEventPayload[];
 }
 
+export interface CoffeeReplayPlayhead {
+  nowMs: number;
+  sessionStartedAtMs: number;
+  sessionEndsAtMs: number;
+  progress: number;
+}
+
+function clampReplayUnit(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(1, value));
+}
+
+export function coffeeReplayPlayhead(args: {
+  conversationStartedAt?: string | null;
+  durationMinutes?: number | null;
+  messages: readonly Pick<CoffeeReplayMessageLike, "createdAt">[];
+  messageIndex: number;
+  revealFraction: number;
+}): CoffeeReplayPlayhead {
+  const durationMinutes =
+    typeof args.durationMinutes === "number" &&
+    Number.isFinite(args.durationMinutes) &&
+    args.durationMinutes > 0
+      ? args.durationMinutes
+      : 1;
+  const durationMs = durationMinutes * 60_000;
+  const parsedConversationStart = Date.parse(args.conversationStartedAt ?? "");
+  const parsedMessageTimes = args.messages
+    .map((message) => Date.parse(message.createdAt ?? ""))
+    .filter((value) => Number.isFinite(value));
+  const firstValidMessageAt = parsedMessageTimes[0];
+  const sessionStartedAtMs = Number.isFinite(parsedConversationStart)
+    ? parsedConversationStart
+    : (firstValidMessageAt ?? 0);
+  const nominalSessionEndsAtMs = sessionStartedAtMs + durationMs;
+  const latestValidMessageAt = parsedMessageTimes.length > 0
+    ? Math.max(...parsedMessageTimes)
+    : Number.NEGATIVE_INFINITY;
+  const sessionEndsAtMs = Math.max(
+    nominalSessionEndsAtMs,
+    latestValidMessageAt,
+  );
+  const replayDurationMs = sessionEndsAtMs - sessionStartedAtMs;
+  const messageCount = args.messages.length;
+  if (messageCount === 0) {
+    return {
+      nowMs: sessionStartedAtMs,
+      sessionStartedAtMs,
+      sessionEndsAtMs,
+      progress: 0,
+    };
+  }
+  const fallbackAt = (index: number): number =>
+    messageCount <= 1
+      ? sessionStartedAtMs
+      : sessionStartedAtMs +
+        replayDurationMs * (Math.max(0, Math.min(messageCount - 1, index)) / (messageCount - 1));
+  let previousAt = sessionStartedAtMs;
+  const messageTimeline = args.messages.map((message, index) => {
+    const parsed = Date.parse(message.createdAt ?? "");
+    const candidate = Number.isFinite(parsed) ? parsed : fallbackAt(index);
+    const bounded = Math.max(
+      sessionStartedAtMs,
+      Math.min(sessionEndsAtMs, candidate),
+    );
+    previousAt = Math.max(previousAt, bounded);
+    return previousAt;
+  });
+  const messageIndex = clampCoffeeReplayMessageIndex(
+    messageCount,
+    args.messageIndex,
+  );
+  const currentAt = messageTimeline[messageIndex] ?? sessionStartedAtMs;
+  const nextAt =
+    messageTimeline[messageIndex + 1] ?? sessionEndsAtMs;
+  const revealFraction = clampReplayUnit(args.revealFraction);
+  const nowMs = currentAt + Math.max(0, nextAt - currentAt) * revealFraction;
+  return {
+    nowMs,
+    sessionStartedAtMs,
+    sessionEndsAtMs,
+    progress: clampReplayUnit((nowMs - sessionStartedAtMs) / replayDurationMs),
+  };
+}
+
 export interface CoffeeReviewClipboardBotLike {
   id: string;
   name: string;
@@ -252,6 +337,36 @@ export function coffeeReplayVisibleMessages<T>(
   if (messages.length === 0) return [];
   const clampedIndex = clampCoffeeReplayMessageIndex(messages.length, replayMessageIndex);
   return messages.slice(0, clampedIndex + 1);
+}
+
+export function coffeeReplayMessageRevealInProgress(args: {
+  replayActive: boolean;
+  replayMessageKey: string | null;
+  typewriterMessageKey: string | null;
+  displayLength: number;
+  visibleLength: number;
+}): boolean {
+  if (!args.replayActive || !args.replayMessageKey || args.displayLength <= 0) {
+    return false;
+  }
+  return (
+    args.typewriterMessageKey !== args.replayMessageKey ||
+    args.visibleLength < args.displayLength
+  );
+}
+
+export function coffeeReplayShouldWaitForVoiceClock(args: {
+  replayPlaying: boolean;
+  voiceEnabled: boolean;
+  visibleLength: number;
+  voiceClockReady: boolean;
+}): boolean {
+  return (
+    args.replayPlaying &&
+    args.voiceEnabled &&
+    args.visibleLength <= 0 &&
+    !args.voiceClockReady
+  );
 }
 
 export function coffeeStageActionTimelineMessages<T>(args: {
