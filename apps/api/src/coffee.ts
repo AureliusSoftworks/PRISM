@@ -253,6 +253,7 @@ export interface CoffeeBotProfile {
   faceMouthFont?: string | null;
   faceMouthCharacter?: string | null;
   faceMouthAnimation?: string | null;
+  faceMouthCoffeePucker?: boolean;
   faceFontWeight?: number | null;
   faceEyeScale?: number | null;
   faceEyeOffsetX?: number | null;
@@ -5467,6 +5468,7 @@ type CoffeeBotProfileRow = {
   face_mouth_font: string | null;
   face_mouth_character: string | null;
   face_mouth_animation: string | null;
+  face_mouth_coffee_pucker: number | null;
   face_font_weight: number | null;
   face_eye_scale: number | null;
   face_eye_offset_x: number | null;
@@ -5509,6 +5511,7 @@ function mapCoffeeBotProfileRow(row: CoffeeBotProfileRow): CoffeeBotProfile {
     faceMouthFont: row.face_mouth_font ?? null,
     faceMouthCharacter: row.face_mouth_character ?? null,
     faceMouthAnimation: row.face_mouth_animation ?? null,
+    faceMouthCoffeePucker: row.face_mouth_coffee_pucker === 1,
     faceFontWeight: typeof row.face_font_weight === "number" ? row.face_font_weight : null,
     faceEyeScale: typeof row.face_eye_scale === "number" ? row.face_eye_scale : null,
     faceEyeOffsetX:
@@ -5576,6 +5579,7 @@ function loadCoffeeGroupProfileRows(
               ${selectOptionalBotColumn("face_mouth_font")},
               ${selectOptionalBotColumn("face_mouth_character")},
               ${selectOptionalBotColumn("face_mouth_animation")},
+              ${selectOptionalBotColumn("face_mouth_coffee_pucker")},
               ${selectOptionalBotColumn("face_font_weight")},
               ${selectOptionalBotColumn("face_eye_scale")},
               ${selectOptionalBotColumn("face_eye_offset_x")},

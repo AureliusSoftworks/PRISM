@@ -30,6 +30,7 @@ export interface BotCustomizerSavePristine {
   faceMouthFont: string;
   faceMouthCharacter: string | null;
   faceMouthAnimation: string;
+  faceMouthCoffeePucker: boolean;
   faceFontWeight: number;
   faceEyeScale: number;
   faceEyeOffsetX: number;
@@ -78,6 +79,7 @@ export interface BotCustomizerSaveCurrent {
   faceMouthFont: string;
   faceMouthCharacter: string | null;
   faceMouthAnimation: string;
+  faceMouthCoffeePucker: boolean;
   faceFontWeight: number;
   faceEyeScale: number;
   faceEyeOffsetX: number;
@@ -117,6 +119,7 @@ export interface BotCustomizerSavePatch {
   faceMouthFont?: string;
   faceMouthCharacter?: string | null;
   faceMouthAnimation?: string;
+  faceMouthCoffeePucker?: boolean;
   faceFontWeight?: number;
   faceEyeScale?: number;
   faceEyeOffsetX?: number;
@@ -174,6 +177,7 @@ export function buildBotCustomizerSavePatch(
       faceMouthFont: current.faceMouthFont,
       faceMouthCharacter: current.faceMouthCharacter,
       faceMouthAnimation: current.faceMouthAnimation,
+      faceMouthCoffeePucker: current.faceMouthCoffeePucker,
       faceFontWeight: current.faceFontWeight,
       faceEyeScale: current.faceEyeScale,
       faceEyeOffsetX: current.faceEyeOffsetX,
@@ -244,6 +248,9 @@ export function buildBotCustomizerSavePatch(
   }
   if (current.faceMouthAnimation !== pristine.faceMouthAnimation) {
     patch.faceMouthAnimation = current.faceMouthAnimation;
+  }
+  if (current.faceMouthCoffeePucker !== pristine.faceMouthCoffeePucker) {
+    patch.faceMouthCoffeePucker = current.faceMouthCoffeePucker;
   }
   if (current.faceFontWeight !== pristine.faceFontWeight) {
     patch.faceFontWeight = current.faceFontWeight;

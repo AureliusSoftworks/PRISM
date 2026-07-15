@@ -32,6 +32,7 @@ const pristine: BotCustomizerSavePristine = {
   faceMouthFont: "warm",
   faceMouthCharacter: null,
   faceMouthAnimation: "none",
+  faceMouthCoffeePucker: false,
   faceFontWeight: 500,
   faceEyeScale: 1,
   faceEyeOffsetX: 0,
@@ -82,6 +83,7 @@ const currentFromPristine = (
   faceMouthFont: pristine.faceMouthFont,
   faceMouthCharacter: pristine.faceMouthCharacter,
   faceMouthAnimation: pristine.faceMouthAnimation,
+  faceMouthCoffeePucker: pristine.faceMouthCoffeePucker,
   faceFontWeight: pristine.faceFontWeight,
   faceEyeScale: pristine.faceEyeScale,
   faceEyeOffsetX: pristine.faceEyeOffsetX,
@@ -204,6 +206,16 @@ describe("bot customizer save patch", () => {
         { ...pristine, faceMouthCharacter: "V" }
       ),
       { faceMouthCharacter: null }
+    );
+  });
+
+  it("patches the Coffee sip pucker preference independently", () => {
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(
+        currentFromPristine({ faceMouthCoffeePucker: true }),
+        pristine
+      ),
+      { faceMouthCoffeePucker: true }
     );
   });
 

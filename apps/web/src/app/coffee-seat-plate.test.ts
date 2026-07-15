@@ -5,6 +5,7 @@ import {
   COFFEE_SEAT_MOUTH_CHARACTERS_PER_PHASE,
   COFFEE_SEAT_SIP_FACE_ACTIVE_PROGRESS,
   COFFEE_SEAT_SIP_PLATE_GLYPH,
+  coffeeSeatCustomMouthCharacterForSip,
   coffeeSeatMouthShapeFromVisibleLength,
   coffeeSeatPlateGlyph,
   coffeeSeatSipFaceActive,
@@ -111,6 +112,33 @@ describe("coffeeSeatPlateGlyph", () => {
       text: ":⁎",
       rotateDeg: 90,
     });
+  });
+
+  it("lets custom mouths opt into the Coffee sip pucker", () => {
+    assert.equal(
+      coffeeSeatCustomMouthCharacterForSip({
+        mouthCharacter: "△",
+        coffeePuckerEnabled: true,
+        sipActive: true,
+      }),
+      null,
+    );
+    assert.equal(
+      coffeeSeatCustomMouthCharacterForSip({
+        mouthCharacter: "△",
+        coffeePuckerEnabled: false,
+        sipActive: true,
+      }),
+      "△",
+    );
+    assert.equal(
+      coffeeSeatCustomMouthCharacterForSip({
+        mouthCharacter: "△",
+        coffeePuckerEnabled: true,
+        sipActive: false,
+      }),
+      "△",
+    );
   });
 
   it("resolves explicit sips into one active presentation contract", () => {

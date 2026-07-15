@@ -47,6 +47,7 @@ function baseBotJson(overrides: Partial<PrismBotArchiveJson> = {}): PrismBotArch
       faceEyeRotationDeg: -35,
       faceMouthCharacter: "△",
       faceMouthAnimation: "flicker",
+      faceMouthCoffeePucker: true,
       faceMouthScale: 1.25,
       faceMouthOffsetX: -0.04,
       faceMouthOffsetY: 0.06,
@@ -92,6 +93,7 @@ describe("botArchive", () => {
     assert.equal(parsed.botJson.bot.faceEyeOffsetY, -0.08);
     assert.equal(parsed.botJson.bot.faceEyeRotationDeg, -35);
     assert.equal(parsed.botJson.bot.faceMouthAnimation, "flicker");
+    assert.equal(parsed.botJson.bot.faceMouthCoffeePucker, true);
     assert.equal(parsed.botJson.bot.faceMouthScale, 1.25);
     assert.equal(parsed.botJson.bot.faceMouthOffsetX, -0.04);
     assert.equal(parsed.botJson.bot.faceMouthOffsetY, 0.06);

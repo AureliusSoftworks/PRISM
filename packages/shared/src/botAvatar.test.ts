@@ -21,6 +21,7 @@ import {
   DEFAULT_BOT_FACE_FONT_WEIGHT,
   DEFAULT_BOT_FACE_GLYPH_ANIMATION,
   DEFAULT_BOT_FACE_MOUTH_CHARACTER,
+  DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER,
   DEFAULT_BOT_FACE_MOUTH_OFFSET_X,
   DEFAULT_BOT_FACE_MOUTH_OFFSET_Y,
   DEFAULT_BOT_FACE_MOUTH_ROTATION_DEG,
@@ -38,6 +39,7 @@ import {
   normalizeBotFaceFontWeight,
   normalizeBotFaceGlyphAnimation,
   normalizeBotFaceMouthCharacter,
+  normalizeBotFaceMouthCoffeePucker,
   normalizeBotFaceMouthOffsetX,
   normalizeBotFaceMouthOffsetY,
   normalizeBotFaceMouthRotationDeg,
@@ -121,6 +123,7 @@ describe("bot avatar face style", () => {
       mouthFont: "formal",
       mouthCharacter: DEFAULT_BOT_FACE_MOUTH_CHARACTER,
       mouthAnimation: DEFAULT_BOT_FACE_GLYPH_ANIMATION,
+      mouthCoffeePucker: DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER,
       weight: DEFAULT_BOT_FACE_FONT_WEIGHT,
       eyeScale: DEFAULT_BOT_FACE_EYE_SCALE,
       eyeOffsetX: DEFAULT_BOT_FACE_EYE_OFFSET_X,
@@ -143,6 +146,7 @@ describe("bot avatar face style", () => {
       mouthFont: DEFAULT_BOT_FACE_FONT_ID,
       mouthCharacter: DEFAULT_BOT_FACE_MOUTH_CHARACTER,
       mouthAnimation: DEFAULT_BOT_FACE_GLYPH_ANIMATION,
+      mouthCoffeePucker: DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER,
       weight: DEFAULT_BOT_FACE_FONT_WEIGHT,
       eyeScale: DEFAULT_BOT_FACE_EYE_SCALE,
       eyeOffsetX: DEFAULT_BOT_FACE_EYE_OFFSET_X,
@@ -170,6 +174,7 @@ describe("bot avatar face style", () => {
           faceMouthFont: "playful",
           faceMouthCharacter: "△▽",
           faceMouthAnimation: "flicker",
+          faceMouthCoffeePucker: true,
           faceFontWeight: 725,
           faceEyeScale: 1.18,
           faceEyeOffsetX: 0.071,
@@ -194,6 +199,7 @@ describe("bot avatar face style", () => {
         mouthFont: "playful",
         mouthCharacter: "△",
         mouthAnimation: "flicker",
+        mouthCoffeePucker: true,
         weight: 725,
         eyeScale: 1.2,
         eyeOffsetX: 0.08,
@@ -209,6 +215,18 @@ describe("bot avatar face style", () => {
         blinkOffsetY: 0.08,
         thinkingFrames: ["·", "*", "✦", "*"],
       }
+    );
+  });
+
+  it("normalizes Coffee pucker choices while keeping legacy custom mouths unchanged", () => {
+    assert.equal(normalizeBotFaceMouthCoffeePucker(true), true);
+    assert.equal(normalizeBotFaceMouthCoffeePucker(1), true);
+    assert.equal(normalizeBotFaceMouthCoffeePucker(false), false);
+    assert.equal(normalizeBotFaceMouthCoffeePucker(0), false);
+    assert.equal(normalizeBotFaceMouthCoffeePucker("true"), null);
+    assert.equal(
+      resolveBotFaceStyle({ faceMouthCharacter: "△" }).mouthCoffeePucker,
+      false,
     );
   });
 

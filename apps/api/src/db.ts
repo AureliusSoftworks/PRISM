@@ -214,6 +214,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       prism_default_bot_face_mouth_font TEXT,
       prism_default_bot_face_mouth_character TEXT,
       prism_default_bot_face_mouth_animation TEXT,
+      prism_default_bot_face_mouth_coffee_pucker INTEGER NOT NULL DEFAULT 0,
       prism_default_bot_face_font_weight INTEGER,
       prism_default_bot_face_eye_scale REAL,
       prism_default_bot_face_eye_offset_x REAL,
@@ -479,6 +480,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       face_mouth_font TEXT,
       face_mouth_character TEXT,
       face_mouth_animation TEXT,
+      face_mouth_coffee_pucker INTEGER NOT NULL DEFAULT 0,
       face_font_weight INTEGER,
       face_eye_scale REAL,
       face_eye_offset_x REAL,
@@ -1021,6 +1023,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     ["prism_default_bot_face_mouth_font", "TEXT"],
     ["prism_default_bot_face_mouth_character", "TEXT"],
     ["prism_default_bot_face_mouth_animation", "TEXT"],
+    ["prism_default_bot_face_mouth_coffee_pucker", "INTEGER NOT NULL DEFAULT 0"],
     ["prism_default_bot_face_font_weight", "INTEGER"],
     ["prism_default_bot_face_eye_scale", "REAL"],
     ["prism_default_bot_face_eye_offset_x", "REAL"],
@@ -1585,6 +1588,14 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   );
   if (!hasBotFaceMouthAnimationColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN face_mouth_animation TEXT;");
+  }
+  const hasBotFaceMouthCoffeePuckerColumn = botColumns.some(
+    (column) => column.name === "face_mouth_coffee_pucker"
+  );
+  if (!hasBotFaceMouthCoffeePuckerColumn) {
+    db.exec(
+      "ALTER TABLE bots ADD COLUMN face_mouth_coffee_pucker INTEGER NOT NULL DEFAULT 0;"
+    );
   }
   const hasBotFaceFontWeightColumn = botColumns.some(
     (column) => column.name === "face_font_weight"

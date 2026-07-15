@@ -74,6 +74,7 @@ describe("restoreFactoryDefaultsInDatabase", () => {
             prism_default_bot_face_eye_animation,
             prism_default_bot_face_mouth_font, prism_default_bot_face_mouth_character,
             prism_default_bot_face_mouth_animation,
+            prism_default_bot_face_mouth_coffee_pucker,
             prism_default_bot_face_font_weight,
             prism_default_bot_face_eye_scale,
             prism_default_bot_face_eye_offset_x, prism_default_bot_face_eye_offset_y,
@@ -159,6 +160,7 @@ describe("restoreFactoryDefaultsInDatabase", () => {
       assert.equal(user.prism_default_bot_face_mouth_font, null);
       assert.equal(user.prism_default_bot_face_mouth_character, null);
       assert.equal(user.prism_default_bot_face_mouth_animation, null);
+      assert.equal(user.prism_default_bot_face_mouth_coffee_pucker, 0);
       assert.equal(user.prism_default_bot_face_font_weight, null);
       assert.equal(user.prism_default_bot_face_eye_scale, null);
       assert.equal(user.prism_default_bot_face_eye_offset_x, null);
@@ -265,6 +267,7 @@ function seedResetFixture(db: DatabaseSync): void {
       prism_default_bot_face_mouth_font = 'playful',
       prism_default_bot_face_mouth_character = '△',
       prism_default_bot_face_mouth_animation = 'flicker',
+      prism_default_bot_face_mouth_coffee_pucker = 1,
       prism_default_bot_face_font_weight = 700,
       prism_default_bot_face_eye_scale = 1.15,
       prism_default_bot_face_eye_offset_x = 0.06,
