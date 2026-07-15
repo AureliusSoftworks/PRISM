@@ -12,7 +12,7 @@ describe("applet version helpers", () => {
   it("keeps the app switcher focused on active top-level applets", () => {
     assert.deepEqual(
       prismTopLevelSwitcherApplets().map((applet) => applet.id),
-      ["chat", "coffee"]
+      ["chat", "coffee", "botcast"]
     );
     assert.deepEqual(
       new Set(prismTopLevelSwitcherApplets().map((applet) => applet.status)),
@@ -43,8 +43,11 @@ describe("applet version helpers", () => {
     assert.equal(PRISM_APPLETS.chat.version, "1.2");
     assert.equal(PRISM_APPLETS.zen.version, "1.1");
     assert.equal(PRISM_APPLETS.coffee.version, "1.3");
+    assert.equal(PRISM_APPLETS.botcast.version, "2.0");
+    assert.equal(PRISM_APPLETS.botcast.name, "Signal");
     assert.equal(prismAppletVersionLabel("chat"), "v1.2");
     assert.equal(prismAppletVersionLabel("zen"), "v1.1");
     assert.equal(prismAppletVersionLabel("coffee"), "v1.3");
+    assert.equal(prismAppletVersionLabel("botcast"), "v2.0");
   });
 });
