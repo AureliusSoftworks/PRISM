@@ -54,6 +54,7 @@ import {
   normalizeVoiceDeliveryMood,
   normalizeBotcastStudioLayout,
   parseStoredBotPowersV1,
+  rankSignalPersonaTemperaments,
   autoFallbackResolvedChain,
 } from "@localai/shared";
 import {
@@ -316,41 +317,6 @@ function fallbackGlyphFor(seed: string): BotcastLogoGlyph {
   return BOTCAST_LOGO_GLYPHS[stableHash(seed) % BOTCAST_LOGO_GLYPHS.length]!;
 }
 
-const BOTCAST_LOGO_TEMPERAMENTS = [
-  {
-    keywords: ["authority", "command", "disciplined", "control", "power", "intimidating"],
-    direction: "disciplined gravity, restraint, and controlled tension",
-  },
-  {
-    keywords: ["philosophy", "philosophical", "wisdom", "meaning", "truth", "contemplative"],
-    direction: "contemplative depth, paradox, and a quiet center",
-  },
-  {
-    keywords: ["playful", "funny", "humor", "whimsical", "optimistic", "cheerful"],
-    direction: "playful curiosity, buoyancy, and an unexpected turn",
-  },
-  {
-    keywords: ["forensic", "detective", "evidence", "investigative", "analytical", "precise"],
-    direction: "analytical precision, discovery, and a revealing interruption",
-  },
-  {
-    keywords: ["inventor", "engineer", "scientist", "technical", "research", "logic"],
-    direction: "inventive rigor, elegant mechanics, and forward motion",
-  },
-  {
-    keywords: ["kind", "warm", "empathetic", "gentle", "nurturing", "compassion"],
-    direction: "warm attention, openness, and a protected inner space",
-  },
-  {
-    keywords: ["artist", "creative", "paint", "music", "writer", "imagination"],
-    direction: "creative fluency, expressive rhythm, and confident asymmetry",
-  },
-  {
-    keywords: ["adventure", "exploration", "heroic", "journey", "discovery", "daring"],
-    direction: "exploration, momentum, and a clear point beyond the frame",
-  },
-] as const;
-
 const BOTCAST_LOGO_AUDIO_FORMS = [
   "one interrupted signal ring around a small central pulse",
   "a compact waveform folded into a circular seal",
@@ -368,18 +334,7 @@ const BOTCAST_LOGO_COMPOSITIONS = [
 ] as const;
 
 function copyrightSafeLogoTemperament(host: BotcastBotProfile): string {
-  const source = host.systemPrompt.toLocaleLowerCase();
-  const ranked = BOTCAST_LOGO_TEMPERAMENTS
-    .map((entry, index) => ({
-      direction: entry.direction,
-      index,
-      score: entry.keywords.reduce(
-        (total, keyword) => total + Number(source.includes(keyword)),
-        0,
-      ),
-    }))
-    .filter((entry) => entry.score > 0)
-    .sort((left, right) => right.score - left.score || left.index - right.index)
+  const ranked = rankSignalPersonaTemperaments(host.systemPrompt)
     .slice(0, 2)
     .map((entry) => entry.direction);
   return ranked.length > 0

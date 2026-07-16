@@ -3,6 +3,14 @@ import type { PrismMoodIgnoredQuestionPenaltyLevel } from "./mood.js";
 import type { AutoRecoveryTraceV1 } from "./autoFallback.js";
 
 export {
+  SIGNAL_PERSONA_TEMPERAMENTS,
+  rankSignalPersonaTemperaments,
+  signalPersonaTemperamentFor,
+  type SignalPersonaTemperament,
+  type SignalPersonaTemperamentMatch,
+} from "./signalPersonaTemperament.js";
+
+export {
   AUTO_FALLBACK_CHAIN_FALLBACK_COUNT,
   AUTO_FALLBACK_CHAIN_VERSION,
   AUTO_FALLBACK_MODEL_ID_MAX_LENGTH,

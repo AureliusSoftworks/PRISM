@@ -30,15 +30,15 @@ describe("voice settings preview", () => {
   it("previews Bottish, Babble, and English with the same resolved phrase", () => {
     assert.match(
       pageSource,
-      /mode: "bottish",[\s\S]*?source: \{ text: previewText \}[\s\S]*?sourceText: previewText/,
+      /mode: "bottish",[\s\S]*?source: \{ text: spokenPreviewText \}[\s\S]*?sourceText: spokenPreviewText/,
     );
     assert.match(
       pageSource,
-      /mode: "babble",[\s\S]*?source: \{ text: previewText \}[\s\S]*?sourceText: previewText/,
+      /mode: "babble",[\s\S]*?source: \{ text: spokenPreviewText \}[\s\S]*?sourceText: spokenPreviewText/,
     );
     assert.match(pageSource, /allowBabbleFallback: false/);
     assert.match(pageSource, /Babble voice is still loading\/unavailable/);
-    assert.match(pageSource, /text: previewText,\s*mode: "english"/);
+    assert.match(pageSource, /text: spokenPreviewText,\s*mode: "english"/);
     assert.match(
       pageSource,
       /explicitOnlineContext: true,[\s\S]*?includeAlignment: true,[\s\S]*?profile: previewProfile/,
@@ -182,6 +182,21 @@ describe("voice settings preview", () => {
       /\["Fred", "Zarvox", "Trinoids", "Junior", "Ralph"\]/,
     );
     assert.doesNotMatch(pageSource, /className=\{styles\.botVoiceSlots\}/);
+  });
+
+  it("loads the configured ElevenLabs catalog from Avatar Studio in any response mode", () => {
+    const catalogEffectSource = pageSource.slice(
+      pageSource.indexOf("if (!botAvatarCustomizerOpen)"),
+      pageSource.indexOf("const [botAvatarSavePromptOpen"),
+    );
+    assert.match(catalogEffectSource, /settings\.elevenLabsApiKeySource === "none"/);
+    assert.match(catalogEffectSource, /void loadElevenLabsVoiceCatalog\(true\)/);
+    assert.match(
+      catalogEffectSource,
+      /const attemptKey = `\$\{user\.id\}:\$\{settings\.elevenLabsApiKeySource\}`/,
+    );
+    assert.doesNotMatch(catalogEffectSource, /preferredProvider/);
+    assert.doesNotMatch(pageSource, /Switch to ONLINE to load your ElevenLabs voice catalog/);
   });
 
   it("shows per-profile effects only for the saved ElevenLabs lane", () => {

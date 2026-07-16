@@ -1,4 +1,7 @@
-import { BOTCAST_ELEVENLABS_INTRO_DURATION_MS } from "@localai/shared";
+import {
+  BOTCAST_ELEVENLABS_INTRO_DURATION_MS,
+  type SignalPersonaTemperament,
+} from "@localai/shared";
 
 export const SIGNAL_ELEVENLABS_MUSIC_MODEL = "music_v2";
 const SIGNAL_INTRO_AUDIO_MAX_BYTES = 4 * 1024 * 1024;
@@ -13,6 +16,105 @@ export class ElevenLabsMusicError extends Error {
   }
 }
 
+type SignalElevenLabsTemperamentRecipe = {
+  tempoBpm: number;
+  lead: string;
+  pulse: string;
+  register: string;
+  contour: string;
+  ending: string;
+  negativeStyles?: readonly string[];
+};
+
+const SIGNAL_ELEVENLABS_TEMPERAMENT_RECIPES: Record<
+  SignalPersonaTemperament,
+  SignalElevenLabsTemperamentRecipe
+> = {
+  commanding: {
+    tempoBpm: 92,
+    lead: "low brass-synth and dark metallic-pluck lead",
+    pulse: "deliberate severe low pulse with disciplined restraint",
+    register: "low register",
+    contour: "descending minor-tonal four-note motif",
+    ending: "abrupt dry hard-button ending",
+    negativeStyles: [
+      "cheerful",
+      "whimsical",
+      "cute",
+      "playful",
+      "upbeat corporate",
+      "inspirational uplift",
+      "resolving chime",
+      "uplifting ending",
+      "major-key triumph",
+    ],
+  },
+  contemplative: {
+    tempoBpm: 94,
+    lead: "restrained soft-bell and felt electric-key lead",
+    pulse: "sparse measured movement with deliberate silence",
+    register: "low-middle register",
+    contour: "gently turning four-note motif with a downward final step",
+    ending: "quiet dry resolve",
+  },
+  playful: {
+    tempoBpm: 118,
+    lead: "bright articulated mallet-synth lead",
+    pulse: "buoyant compact rhythmic pulse",
+    register: "middle-high register",
+    contour: "bouncing four-note motif with one light upward turn",
+    ending: "brief lifted button ending",
+  },
+  analytical: {
+    tempoBpm: 108,
+    lead: "precise modular-pluck lead",
+    pulse: "measured geometric pulse with clean spacing",
+    register: "middle register",
+    contour: "stepwise four-note motif with one revealing interval",
+    ending: "exact dry broadcast button ending",
+  },
+  inventive: {
+    tempoBpm: 114,
+    lead: "mechanical modular-pluck and clean synth lead",
+    pulse: "compact syncopated machine pulse",
+    register: "middle register",
+    contour: "asymmetric rising four-note motif",
+    ending: "crisp engineered button ending",
+  },
+  warm: {
+    tempoBpm: 100,
+    lead: "rounded electric-key lead",
+    pulse: "gentle human-scale pulse with clean articulation",
+    register: "middle register",
+    contour: "rounded arch-shaped four-note motif",
+    ending: "soft compact resolved button ending",
+  },
+  creative: {
+    tempoBpm: 110,
+    lead: "glassy tuned-percussion and expressive mallet lead",
+    pulse: "confident asymmetric rhythmic support",
+    register: "middle-high register",
+    contour: "expressive asymmetric four-note motif",
+    ending: "confident dry resolve",
+  },
+  adventurous: {
+    tempoBpm: 120,
+    lead: "bold brass-pluck and articulated synth lead",
+    pulse: "driving forward pulse",
+    register: "middle register",
+    contour: "ascending four-note motif with decisive momentum",
+    ending: "decisive compact button ending",
+  },
+  neutral: {
+    tempoBpm: 104,
+    lead: "clean bell-synth and restrained pluck lead",
+    pulse: "restrained broadcast pulse",
+    register: "middle register",
+    contour: "balanced arch-shaped four-note motif",
+    ending: "dry neutral broadcast button ending",
+  },
+};
+
 function stableHash(value: string): number {
   let hash = 2166136261;
   for (let index = 0; index < value.length; index += 1) {
@@ -22,12 +124,10 @@ function stableHash(value: string): number {
   return hash >>> 0;
 }
 
-const SIGNAL_IDENT_DIRECTIONS = [
-  "glassy tuned-percussion lead over a restrained analog pulse",
-  "warm electric-key melody over a subtle low broadcast pulse",
-  "precise modular-pluck melody with soft sub-bass punctuation",
-  "clean bell-synth melody over a quiet cinematic bed",
-  "playful mallet-synth melody over gentle bass movement",
+const SIGNAL_IDENT_ACCENT_TEXTURES = [
+  "dry muted pulse punctuation",
+  "short tactile percussion accents",
+  "restrained analog pulse accents",
 ] as const;
 
 export type SignalElevenLabsMusicCompositionPlan = {
@@ -41,22 +141,27 @@ export type SignalElevenLabsMusicCompositionPlan = {
 };
 
 export function buildSignalElevenLabsMusicCompositionPlan(args: {
-  showId: string;
-  accentColor: string;
+  temperament: SignalPersonaTemperament;
+  seed: string;
 }): SignalElevenLabsMusicCompositionPlan {
-  const direction = SIGNAL_IDENT_DIRECTIONS[
-    stableHash(args.showId) % SIGNAL_IDENT_DIRECTIONS.length
+  const recipe = SIGNAL_ELEVENLABS_TEMPERAMENT_RECIPES[args.temperament];
+  const accentTexture = SIGNAL_IDENT_ACCENT_TEXTURES[
+    stableHash(args.seed) % SIGNAL_IDENT_ACCENT_TEXTURES.length
   ]!;
-  const color = /^#[0-9a-f]{6}$/iu.test(args.accentColor.trim())
-    ? args.accentColor.trim().toLowerCase()
-    : "#7b5cff";
   const halfDurationMs = BOTCAST_ELEVENLABS_INTRO_DURATION_MS / 2;
   const sharedNegativeStyles = [
+    "ambient",
+    "ambient pad",
+    "pad-only",
+    "soundscape",
+    "cinematic atmosphere",
+    "background underscore",
+    "wash",
     "single sustained chord",
     "one-chord sting",
     "drone",
-    "ambient pad-only",
     "static harmony",
+    "atmospheric introduction",
     "simultaneous motif notes",
     "vocals",
     "speech",
@@ -74,32 +179,38 @@ export function buildSignalElevenLabsMusicCompositionPlan(args: {
         duration_ms: halfDurationMs,
         positive_styles: [
           "wholly original instrumental interview-podcast ident",
-          direction,
+          recipe.lead,
+          recipe.pulse,
+          accentTexture,
+          `${recipe.tempoBpm} BPM`,
+          recipe.register,
+          recipe.contour,
+          "foreground four-note hook begins immediately and dominates the clip",
           "four clearly separated monophonic pitches played one after another",
           "short articulated attacks with audible space between notes",
-          "foreground melody with harmony only as quiet support",
-          `understated modern warmth analogous to ${color}`,
-          "begin immediately",
-          "112 BPM",
-        ],
-        negative_styles: [...sharedNegativeStyles, "fade in", "long reverb tail"],
-        context_adherence: "high",
-      },
-      {
-        text: "[Motif variation and button ending]",
-        duration_ms: halfDurationMs,
-        positive_styles: [
-          "instrumental continuation of the same podcast ident",
-          "repeat the four-note melody as a concise rising variation",
-          "four clearly separated sequential pitches",
-          "one brief resolving chime only after the melodic phrase",
-          "decisive broadcast button ending",
-          "polished, understated, warm, and modern",
         ],
         negative_styles: [
           ...sharedNegativeStyles,
+          ...(recipe.negativeStyles ?? []),
+          "fade in",
+          "long reverb tail",
+        ],
+        context_adherence: "high",
+      },
+      {
+        text: "[Motif variation and ending]",
+        duration_ms: halfDurationMs,
+        positive_styles: [
+          "instrumental continuation of the same podcast ident",
+          `repeat the hook as ${recipe.contour}`,
+          "four clearly separated sequential pitches",
+          recipe.ending,
+          "foreground melody remains unmistakable through the final note",
+        ],
+        negative_styles: [
+          ...sharedNegativeStyles,
+          ...(recipe.negativeStyles ?? []),
           "sustained ending",
-          "ambient wash",
           "fade out",
           "long reverb tail",
         ],

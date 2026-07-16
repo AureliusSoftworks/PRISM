@@ -36,7 +36,7 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Choose how replies recover",
-        body: "AUTO keeps the current response model as Primary, then quietly tries your two saved fallbacks if a reply fails validation. Image generation keeps its own LOCAL/ONLINE choice in Images. Voices default to System TTS; selecting an ElevenLabs voice in Prism or bot customization overrides it only for eligible ONLINE speech.",
+        body: "AUTO keeps the current response model as Primary, then quietly tries your two saved fallbacks if a reply fails validation. Image generation keeps its own LOCAL/ONLINE choice in Images. Voices default to System TTS. You can choose an ElevenLabs voice in bot customization from any response mode; Prism uses it only for eligible ONLINE speech.",
         clickLabel: "the LOCAL, AUTO, ONLINE control",
         targetSelector: '[data-tutorial-target="auto-response-mode"]',
       },
@@ -123,13 +123,13 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Shape the show’s identity",
-        body: "A custom identity is optional. Create this show’s look once to let Signal find a clever name, then keep using PRISM while the activity card tracks its persona-shaped logo and matching Dark-to-Light studio pair in the background. Afterward, edit or regenerate the name, refresh the linked studio pair together, refresh the logo independently, or replace either studio visual with your own image.",
-        clickLabel: "Create this show’s look or an independent refresh or replace control",
+        body: "A custom identity is optional. Create this show’s look once to let Signal find a clever name, then keep using PRISM while the activity card tracks its persona-shaped logo and matching Dark-to-Light studio pair in the background. Afterward, open the gear at the bottom-right of the show card to tune the name, logo, linked studio pair, and opening ident, or replace either studio visual with your own image.",
+        clickLabel: "Create this show’s look or the show-card gear",
         targetSelector: '[data-tutorial-target="botcast-brand-controls"]',
       },
       {
         heading: "Give it an opening sound",
-        body: "Every show has a deterministic Signal Synth ident made and played locally—no key or network required. Use Play intro to audition exactly what the next episode will use. While Online, you can optionally create a six-second ElevenLabs instrumental once and cache it for future episodes. Signal never generates music when an episode begins.",
+        body: "Every show has a deterministic, host-persona-led Signal Synth ident made and played locally—no key or network required. Playback stays here in the strip: use Play intro to audition exactly what the next episode will use. Once the show has custom art, open its gear to create or refresh a cached six-second ElevenLabs intro, or switch back to Signal Synth. Until then, those tuning actions stay in this strip. Signal never generates music when an episode begins.",
         clickLabel: "the opening ident controls",
         targetSelector: '[data-tutorial-target="botcast-intro-audio"]',
       },

@@ -14,21 +14,44 @@ describe("Signal Synth ident", () => {
     assert.equal(SIGNAL_EPISODE_INTRO_LEAD_IN_MS, 180);
   });
 
-  it("builds one deterministic, layered MIDI-like plan per show seed", () => {
-    const first = buildSignalSynthIdentPlan("show-a:host-a");
-    const again = buildSignalSynthIdentPlan("show-a:host-a");
-    const other = buildSignalSynthIdentPlan("show-b:host-a");
-    assert.deepEqual(first, again);
-    assert.notDeepEqual(first, other);
-    assert.equal(first.durationMs, SIGNAL_SYNTH_IDENT_DURATION_MS);
-    assert.ok(first.notes.length >= 12);
-    assert.ok(first.notes.some((note) => note.waveform === "soft-square"));
-    assert.ok(first.notes.some((note) => note.waveform === "triangle"));
+  it("pins commanding and playful recipes to different emotional directions", () => {
+    const commanding = buildSignalSynthIdentPlan({
+      temperament: "commanding",
+      seed: "show-a:host-a",
+    });
+    const commandingAgain = buildSignalSynthIdentPlan({
+      temperament: "commanding",
+      seed: "show-a:host-a",
+    });
+    const playful = buildSignalSynthIdentPlan({
+      temperament: "playful",
+      seed: "show-a:host-a",
+    });
+    assert.deepEqual(commanding, commandingAgain);
+    assert.notDeepEqual(commanding, playful);
+    assert.equal(commanding.durationMs, SIGNAL_SYNTH_IDENT_DURATION_MS);
+    assert.equal(commanding.tempoBpm, 92);
+    assert.equal(commanding.register, "low");
+    assert.equal(commanding.contour, "descending");
+    assert.equal(commanding.ending, "hard");
+    assert.equal(playful.tempoBpm, 118);
+    assert.equal(playful.register, "middle-high");
+    assert.equal(playful.contour, "bouncing");
+    assert.equal(playful.ending, "lift");
+    assert.ok(
+      Math.max(...commanding.notes.map((note) => note.midi)) <
+        Math.max(...playful.notes.map((note) => note.midi)),
+    );
+    assert.ok(commanding.notes.some((note) => note.waveform === "soft-square"));
+    assert.ok(playful.notes.some((note) => note.lowpassHz === 3_650));
   });
 
   it("renders an ordinary mono PCM wave without a live AudioContext", () => {
     const bytes = encodeSignalSynthIdentWave(
-      buildSignalSynthIdentPlan("show-a:host-a"),
+      buildSignalSynthIdentPlan({
+        temperament: "neutral",
+        seed: "show-a:host-a",
+      }),
       8_000,
     );
     const view = new DataView(bytes);

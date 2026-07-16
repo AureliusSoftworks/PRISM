@@ -38,6 +38,7 @@ import {
   type BotcastSessionDurationMinutes,
   type BotcastStudioLayout,
   type BotcastStudioLayoutItem,
+  type SignalPersonaTemperament,
 } from "@localai/shared";
 import {
   buildCoffeeCupVisualState,
@@ -85,6 +86,7 @@ export interface BotcastBotSummary {
   color: string | null;
   glyph: string | null;
   online_enabled?: number | null;
+  personaTemperament: SignalPersonaTemperament;
 }
 
 export interface BotcastModelOption {
@@ -333,6 +335,16 @@ function activeShowAtmosphere(
   return theme === "light" ? show.dayAtmosphere : show.nightAtmosphere;
 }
 
+function signalIntroIdentityForShow(
+  show: BotcastShow,
+  hostBot: BotcastBotSummary | null,
+) {
+  return {
+    temperament: hostBot?.personaTemperament ?? "neutral",
+    seed: `${show.id}:${show.logo.seed}`,
+  } as const;
+}
+
 function showHasCustomArtwork(show: BotcastShow): boolean {
   return Boolean(
     show.dayAtmosphere.imageUrl ||
@@ -505,6 +517,8 @@ export function BotcastExperience({
     useState<BotcastSessionDurationMinutes | null>(null);
   const [askAboutDraft, setAskAboutDraft] = useState("");
   const [showNameDraft, setShowNameDraft] = useState("");
+  const [showIdentityControlsShowId, setShowIdentityControlsShowId] =
+    useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [autoRun, setAutoRun] = useState(false);
@@ -826,6 +840,9 @@ export function BotcastExperience({
   }, [episodeModelDraft, modelOptions]);
 
   const selectedShow = shows.find((show) => show.id === selectedShowId) ?? null;
+  const showIdentityControlsExpanded = Boolean(
+    selectedShow && showIdentityControlsShowId === selectedShow.id,
+  );
   const selectedShowArtworkBusy = Boolean(
     selectedShow &&
       artworkJob?.showId === selectedShow.id &&
@@ -963,6 +980,7 @@ export function BotcastExperience({
       setReplayVoicePending(false);
       setReplaySpeechActive(false);
       setSelectedShowId(show.id);
+      setShowIdentityControlsShowId(null);
       setShowNameDraft(show.name);
       setEpisode(null);
       setReplayEpisode(null);
@@ -1578,7 +1596,7 @@ export function BotcastExperience({
     introPreviewRunIdRef.current = runId;
     setError(null);
     const playback = playSignalIntroAudio({
-      seed: `${selectedShow.id}:${selectedShow.hostBotId}:${selectedShow.logo.seed}`,
+      ...signalIntroIdentityForShow(selectedShow, hostBot),
       introAudio: selectedShow.introAudio,
       enabled: true,
       volume: introAudioVolume,
@@ -1649,7 +1667,7 @@ export function BotcastExperience({
     preRollSkipRequestedRef.current = false;
     setEpisodePreRoll(preRoll);
     const introPlayback = playSignalIntroAudio({
-      seed: `${selectedShow.id}:${selectedShow.hostBotId}:${selectedShow.logo.seed}`,
+      ...signalIntroIdentityForShow(selectedShow, hostBot),
       introAudio: selectedShow.introAudio,
       enabled: introAudioEnabled,
       volume: introAudioVolume,
@@ -3227,6 +3245,7 @@ export function BotcastExperience({
             <section
               className={styles.showBrandPreview}
               data-studio-source={dashboardAtmosphere.imageUrl ? "image" : "fallback"}
+              data-identity-settings-open={showIdentityControlsExpanded ? "true" : undefined}
               data-tutorial-target="botcast-brand-controls"
               style={
                 {
@@ -3277,8 +3296,10 @@ export function BotcastExperience({
                   </div>
                 ) : (
                   <div
+                    id={`signal-show-identity-controls-${selectedShow.id}`}
                     className={styles.showLookControls}
                     aria-label="Show identity controls"
+                    hidden={!showIdentityControlsExpanded}
                   >
                     <input
                       ref={lightStudioUploadRef}
@@ -3320,7 +3341,7 @@ export function BotcastExperience({
                       }}
                     />
                     <strong>Tune the identity.</strong>
-                    <small>Refresh the linked studio pair together, or tune the name and logo independently.</small>
+                    <small>Refresh the linked studio pair, tune the name and logo, or shape the opening ident.</small>
                     <div className={styles.showLookControlGrid}>
                       <div className={styles.showLookControlGroup}>
                         <label htmlFor={`signal-show-name-${selectedShow.id}`}>Name</label>
@@ -3415,10 +3436,55 @@ export function BotcastExperience({
                           Replace logo
                         </button>
                       </div>
+                      <div className={styles.showLookControlGroup}>
+                        <span>Opening ident</span>
+                        <button
+                          type="button"
+                          onClick={() => void generateShowIntroAudio()}
+                          disabled={busy || preferredProvider === "local"}
+                          title={preferredProvider === "local"
+                            ? "Switch to Online to create an ElevenLabs intro"
+                            : undefined}
+                        >
+                          {selectedShow.introAudio.source === "elevenlabs"
+                            ? "Refresh with ElevenLabs"
+                            : "Create with ElevenLabs"}
+                        </button>
+                        {selectedShow.introAudio.source === "elevenlabs" ? (
+                          <button
+                            type="button"
+                            className={styles.showIntroLocalButton}
+                            onClick={() => void selectLocalShowIntro()}
+                            disabled={busy}
+                          >
+                            Use Signal Synth
+                          </button>
+                        ) : null}
+                      </div>
                     </div>
                   </div>
                 )}
               </div>
+              {showHasCustomArtwork(selectedShow) ? (
+                <button
+                  type="button"
+                  className={styles.showIdentityGearButton}
+                  data-expanded={showIdentityControlsExpanded ? "true" : undefined}
+                  aria-label={showIdentityControlsExpanded
+                    ? "Hide show identity settings"
+                    : "Open show identity settings"}
+                  aria-expanded={showIdentityControlsExpanded}
+                  aria-controls={`signal-show-identity-controls-${selectedShow.id}`}
+                  title={showIdentityControlsExpanded
+                    ? "Hide show identity settings"
+                    : "Tune this show’s identity"}
+                  onClick={() => setShowIdentityControlsShowId((current) =>
+                    current === selectedShow.id ? null : selectedShow.id
+                  )}
+                >
+                  <span aria-hidden="true">⚙</span>
+                </button>
+              ) : null}
             </section>
             <section
               className={styles.showIntroControl}
@@ -3438,7 +3504,7 @@ export function BotcastExperience({
                 <p>
                   {selectedShow.introAudio.source === "elevenlabs"
                     ? "A cached six-second instrumental made for this show. No generation happens when an episode begins."
-                    : "A private, deterministic synth motif made locally from this show’s identity. No key or network needed."}
+                    : "A private, deterministic synth motif made locally from the host’s persona. No key or network needed."}
                 </p>
               </div>
               <div className={styles.showIntroActions}>
@@ -3460,27 +3526,31 @@ export function BotcastExperience({
                     ? "■ Stop preview"
                     : "▶ Play intro"}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => void generateShowIntroAudio()}
-                  disabled={busy || preferredProvider === "local"}
-                  title={preferredProvider === "local"
-                    ? "Switch to Online to create an ElevenLabs intro"
-                    : undefined}
-                >
-                  {selectedShow.introAudio.source === "elevenlabs"
-                    ? "Refresh with ElevenLabs"
-                    : "Create with ElevenLabs"}
-                </button>
-                {selectedShow.introAudio.source === "elevenlabs" ? (
-                  <button
-                    type="button"
-                    className={styles.showIntroLocalButton}
-                    onClick={() => void selectLocalShowIntro()}
-                    disabled={busy}
-                  >
-                    Use Signal Synth
-                  </button>
+                {!showHasCustomArtwork(selectedShow) ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => void generateShowIntroAudio()}
+                      disabled={busy || preferredProvider === "local"}
+                      title={preferredProvider === "local"
+                        ? "Switch to Online to create an ElevenLabs intro"
+                        : undefined}
+                    >
+                      {selectedShow.introAudio.source === "elevenlabs"
+                        ? "Refresh with ElevenLabs"
+                        : "Create with ElevenLabs"}
+                    </button>
+                    {selectedShow.introAudio.source === "elevenlabs" ? (
+                      <button
+                        type="button"
+                        className={styles.showIntroLocalButton}
+                        onClick={() => void selectLocalShowIntro()}
+                        disabled={busy}
+                      >
+                        Use Signal Synth
+                      </button>
+                    ) : null}
+                  </>
                 ) : null}
                 {!introAudioEnabled ? (
                   <small>Turn voice audio on to hear the intro preview.</small>

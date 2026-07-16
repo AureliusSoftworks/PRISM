@@ -42,11 +42,13 @@ describe("mode tutorials", () => {
     assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /keep using PRISM/u);
     assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /activity card/u);
     assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /Dark-to-Light studio pair/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /edit or regenerate the name/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /refresh the linked studio pair together/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /gear at the bottom-right/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /opening ident/u);
     assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /replace either studio visual/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[2]?.body ?? "", /Signal Synth ident/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[2]?.body ?? "", /host-persona-led Signal Synth ident/u);
     assert.match(MODE_TUTORIALS.botcast.steps[2]?.body ?? "", /Play intro/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[2]?.body ?? "", /Playback stays here in the strip/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[2]?.body ?? "", /open its gear/u);
     assert.match(MODE_TUTORIALS.botcast.steps[2]?.body ?? "", /no key or network/u);
     assert.match(MODE_TUTORIALS.botcast.steps[4]?.body ?? "", /default stage places both bots/u);
     assert.equal(MODE_TUTORIALS.botcast.steps[3]?.heading, "Choose how the bots speak");
@@ -175,8 +177,9 @@ describe("mode tutorials", () => {
     assert.match(routing?.body ?? "", /Image generation keeps its own LOCAL\/ONLINE choice/);
     assert.match(
       routing?.body ?? "",
-      /Voices default to System TTS; selecting an ElevenLabs voice in Prism or bot customization overrides it only for eligible ONLINE speech/,
+      /choose an ElevenLabs voice in bot customization from any response mode/,
     );
+    assert.match(routing?.body ?? "", /only for eligible ONLINE speech/);
   });
 
   it("teaches canonical Coffee prompts without a regeneration step", () => {

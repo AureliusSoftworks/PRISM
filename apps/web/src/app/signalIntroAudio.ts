@@ -1,6 +1,7 @@
 import {
   BOTCAST_LOCAL_INTRO_DURATION_MS,
   type BotcastIntroAudioState,
+  type SignalPersonaTemperament,
 } from "@localai/shared";
 
 export const SIGNAL_SYNTH_IDENT_DURATION_MS = BOTCAST_LOCAL_INTRO_DURATION_MS;
@@ -21,7 +22,197 @@ export type SignalSynthNote = {
 export type SignalSynthIdentPlan = {
   durationMs: number;
   tempoBpm: number;
+  temperament: SignalPersonaTemperament;
+  register: "low" | "low-middle" | "middle" | "middle-high";
+  contour: "descending" | "turning" | "bouncing" | "stepwise" | "asymmetric" | "arch" | "ascending" | "balanced";
+  ending: "hard" | "resolve" | "lift" | "button";
   notes: SignalSynthNote[];
+};
+
+type SignalSynthTemperamentRecipe = Omit<
+  SignalSynthIdentPlan,
+  "durationMs" | "temperament" | "notes"
+> & {
+  rootMidi: number;
+  motif: readonly [number, number, number, number];
+  supportIntervals: readonly number[];
+  pulseBeats: readonly number[];
+  melodyWaveform: SignalSynthNote["waveform"];
+  supportWaveform: SignalSynthNote["waveform"];
+  supportAttackMs: number;
+  supportReleaseMs: number;
+  pulseGain: number;
+  melodyGain: number;
+  melodyLowpassHz: number;
+  accentInterval: number | null;
+};
+
+const SIGNAL_SYNTH_TEMPERAMENT_RECIPES: Record<
+  SignalPersonaTemperament,
+  SignalSynthTemperamentRecipe
+> = {
+  commanding: {
+    tempoBpm: 92,
+    register: "low",
+    contour: "descending",
+    ending: "hard",
+    rootMidi: 43,
+    motif: [7, 5, 3, 0],
+    supportIntervals: [0, 7, 10],
+    pulseBeats: [0, 2, 4, 6],
+    melodyWaveform: "soft-square",
+    supportWaveform: "sine",
+    supportAttackMs: 120,
+    supportReleaseMs: 420,
+    pulseGain: 0.108,
+    melodyGain: 0.112,
+    melodyLowpassHz: 1_750,
+    accentInterval: null,
+  },
+  contemplative: {
+    tempoBpm: 94,
+    register: "low-middle",
+    contour: "turning",
+    ending: "resolve",
+    rootMidi: 46,
+    motif: [0, 3, 7, 5],
+    supportIntervals: [0, 7],
+    pulseBeats: [0, 3, 6],
+    melodyWaveform: "triangle",
+    supportWaveform: "sine",
+    supportAttackMs: 520,
+    supportReleaseMs: 900,
+    pulseGain: 0.052,
+    melodyGain: 0.096,
+    melodyLowpassHz: 2_250,
+    accentInterval: null,
+  },
+  playful: {
+    tempoBpm: 118,
+    register: "middle-high",
+    contour: "bouncing",
+    ending: "lift",
+    rootMidi: 51,
+    motif: [0, 7, 4, 12],
+    supportIntervals: [0, 4, 7],
+    pulseBeats: [0, 1.5, 3, 4.5, 6],
+    melodyWaveform: "triangle",
+    supportWaveform: "triangle",
+    supportAttackMs: 180,
+    supportReleaseMs: 620,
+    pulseGain: 0.088,
+    melodyGain: 0.116,
+    melodyLowpassHz: 3_650,
+    accentInterval: 19,
+  },
+  analytical: {
+    tempoBpm: 108,
+    register: "middle",
+    contour: "stepwise",
+    ending: "button",
+    rootMidi: 48,
+    motif: [0, 2, 5, 7],
+    supportIntervals: [0, 7],
+    pulseBeats: [0, 2, 4, 6],
+    melodyWaveform: "soft-square",
+    supportWaveform: "sine",
+    supportAttackMs: 160,
+    supportReleaseMs: 540,
+    pulseGain: 0.082,
+    melodyGain: 0.105,
+    melodyLowpassHz: 3_000,
+    accentInterval: null,
+  },
+  inventive: {
+    tempoBpm: 114,
+    register: "middle",
+    contour: "asymmetric",
+    ending: "button",
+    rootMidi: 48,
+    motif: [0, 3, 7, 9],
+    supportIntervals: [0, 4, 7],
+    pulseBeats: [0, 1.5, 3, 4.5, 6],
+    melodyWaveform: "soft-square",
+    supportWaveform: "sine",
+    supportAttackMs: 140,
+    supportReleaseMs: 520,
+    pulseGain: 0.09,
+    melodyGain: 0.108,
+    melodyLowpassHz: 3_300,
+    accentInterval: 16,
+  },
+  warm: {
+    tempoBpm: 100,
+    register: "middle",
+    contour: "arch",
+    ending: "resolve",
+    rootMidi: 48,
+    motif: [0, 5, 7, 3],
+    supportIntervals: [0, 3, 7],
+    pulseBeats: [0, 2, 4, 6],
+    melodyWaveform: "triangle",
+    supportWaveform: "sine",
+    supportAttackMs: 430,
+    supportReleaseMs: 820,
+    pulseGain: 0.068,
+    melodyGain: 0.104,
+    melodyLowpassHz: 2_700,
+    accentInterval: 12,
+  },
+  creative: {
+    tempoBpm: 110,
+    register: "middle-high",
+    contour: "asymmetric",
+    ending: "resolve",
+    rootMidi: 50,
+    motif: [0, 5, 3, 10],
+    supportIntervals: [0, 5, 10],
+    pulseBeats: [0, 2, 3.5, 5, 6],
+    melodyWaveform: "triangle",
+    supportWaveform: "triangle",
+    supportAttackMs: 250,
+    supportReleaseMs: 700,
+    pulseGain: 0.078,
+    melodyGain: 0.11,
+    melodyLowpassHz: 3_400,
+    accentInterval: 17,
+  },
+  adventurous: {
+    tempoBpm: 120,
+    register: "middle",
+    contour: "ascending",
+    ending: "button",
+    rootMidi: 49,
+    motif: [0, 5, 7, 12],
+    supportIntervals: [0, 5, 7],
+    pulseBeats: [0, 1.5, 3, 4.5, 6],
+    melodyWaveform: "soft-square",
+    supportWaveform: "sine",
+    supportAttackMs: 150,
+    supportReleaseMs: 520,
+    pulseGain: 0.104,
+    melodyGain: 0.112,
+    melodyLowpassHz: 3_200,
+    accentInterval: 19,
+  },
+  neutral: {
+    tempoBpm: 104,
+    register: "middle",
+    contour: "balanced",
+    ending: "button",
+    rootMidi: 48,
+    motif: [0, 2, 7, 5],
+    supportIntervals: [0, 7, 10],
+    pulseBeats: [0, 2, 4, 6],
+    melodyWaveform: "triangle",
+    supportWaveform: "sine",
+    supportAttackMs: 300,
+    supportReleaseMs: 620,
+    pulseGain: 0.078,
+    melodyGain: 0.102,
+    melodyLowpassHz: 2_800,
+    accentInterval: null,
+  },
 };
 
 function stableHash(value: string): number {
@@ -37,78 +228,97 @@ function midiFrequency(midi: number): number {
   return 440 * 2 ** ((midi - 69) / 12);
 }
 
-/** Builds a compact, deterministic broadcast ident from MIDI-like events. */
-export function buildSignalSynthIdentPlan(seed: string): SignalSynthIdentPlan {
-  const hash = stableHash(seed);
-  const tempoBpm = 108 + (hash % 17);
+/** Builds a compact broadcast ident from one host-persona temperament. */
+export function buildSignalSynthIdentPlan(args: {
+  temperament: SignalPersonaTemperament;
+  seed: string;
+}): SignalSynthIdentPlan {
+  const recipe = SIGNAL_SYNTH_TEMPERAMENT_RECIPES[args.temperament];
+  const hash = stableHash(args.seed);
+  const tempoBpm = recipe.tempoBpm;
   const beatMs = 60_000 / tempoBpm;
-  const root = 47 + ((hash >>> 5) % 9);
-  const scales = [
-    [0, 2, 3, 7, 10],
-    [0, 3, 5, 7, 10],
-    [0, 2, 5, 7, 9],
-  ] as const;
-  const scale = scales[(hash >>> 9) % scales.length]!;
-  const motif = [
-    scale[(hash >>> 12) % scale.length]!,
-    scale[(hash >>> 15) % scale.length]!,
-    scale[(hash >>> 18) % scale.length]!,
-    12,
-  ];
+  const root = recipe.rootMidi + (hash % 3);
   const notes: SignalSynthNote[] = [];
 
-  for (const interval of [0, 7, 10]) {
+  for (const interval of recipe.supportIntervals) {
     notes.push({
       startMs: 0,
-      durationMs: SIGNAL_SYNTH_IDENT_DURATION_MS - 260,
+      durationMs: beatMs * (args.temperament === "commanding" ? 0.9 : 1.45),
       midi: root + interval,
-      gain: interval === 0 ? 0.032 : 0.022,
-      waveform: "sine",
-      attackMs: 520,
-      releaseMs: 900,
-      lowpassHz: 1_150,
+      gain: interval === 0 ? 0.036 : 0.021,
+      waveform: recipe.supportWaveform,
+      attackMs: recipe.supportAttackMs,
+      releaseMs: recipe.supportReleaseMs,
+      lowpassHz: Math.max(950, recipe.melodyLowpassHz - 1_450),
     });
   }
 
-  for (const beat of [0, 2, 4, 6]) {
+  for (const beat of recipe.pulseBeats) {
     notes.push({
       startMs: 180 + beat * beatMs,
       durationMs: beatMs * 0.82,
-      midi: root - 12 + (beat === 6 ? 7 : 0),
-      gain: 0.085,
+      midi: root - 12 + (
+        beat === recipe.pulseBeats[recipe.pulseBeats.length - 1] &&
+        recipe.ending !== "hard"
+          ? 7
+          : 0
+      ),
+      gain: recipe.pulseGain,
       waveform: "soft-square",
-      attackMs: 12,
+      attackMs: recipe.ending === "hard" ? 5 : 12,
       releaseMs: 190,
-      lowpassHz: 420,
+      lowpassHz: recipe.ending === "hard" ? 620 : 470,
     });
   }
 
-  const motifBeats = [0.5, 1.5, 2.75, 4.25];
-  motif.forEach((interval, index) => {
+  const motifBeats = [0, 1, 2.25, 3.75];
+  const melodyOffset = args.temperament === "commanding"
+    ? 0
+    : args.temperament === "contemplative"
+      ? 7
+      : 12;
+  recipe.motif.forEach((interval, index) => {
+    const finalNote = index === recipe.motif.length - 1;
     notes.push({
-      startMs: 260 + motifBeats[index]! * beatMs,
-      durationMs: index === motif.length - 1 ? beatMs * 2.1 : beatMs * 0.74,
-      midi: root + 12 + interval,
-      gain: index === motif.length - 1 ? 0.13 : 0.105,
-      waveform: "triangle",
-      attackMs: 8,
-      releaseMs: index === motif.length - 1 ? 720 : 240,
-      lowpassHz: 2_900,
+      startMs: 60 + motifBeats[index]! * beatMs,
+      durationMs: finalNote
+        ? beatMs * (recipe.ending === "hard" ? 0.72 : 1.8)
+        : beatMs * 0.7,
+      midi: root + melodyOffset + interval,
+      gain: finalNote ? recipe.melodyGain + 0.012 : recipe.melodyGain,
+      waveform: recipe.melodyWaveform,
+      attackMs: recipe.ending === "hard" ? 4 : 10,
+      releaseMs: finalNote
+        ? recipe.ending === "hard" || recipe.ending === "button"
+          ? 220
+          : 620
+        : 210,
+      lowpassHz: recipe.melodyLowpassHz,
     });
   });
 
-  notes.push({
-    startMs: 260 + 4.25 * beatMs,
-    durationMs: beatMs * 2.1,
-    midi: root + 19,
-    gain: 0.047,
-    waveform: "sine",
-    attackMs: 16,
-    releaseMs: 760,
-    lowpassHz: 3_600,
-  });
+  if (recipe.accentInterval !== null) {
+    notes.push({
+      startMs: 60 + 3.75 * beatMs,
+      durationMs: beatMs * 1.35,
+      midi: root + recipe.accentInterval,
+      gain: 0.042,
+      waveform: recipe.supportWaveform,
+      attackMs: 16,
+      releaseMs: recipe.ending === "button" ? 360 : 620,
+      lowpassHz: recipe.melodyLowpassHz + 450,
+    });
+  }
 
-  return { durationMs: SIGNAL_SYNTH_IDENT_DURATION_MS, tempoBpm, notes };
+  return {
+    durationMs: SIGNAL_SYNTH_IDENT_DURATION_MS,
+    tempoBpm,
+    temperament: args.temperament,
+    register: recipe.register,
+    contour: recipe.contour,
+    ending: recipe.ending,
+    notes,
+  };
 }
 
 /** Builds a shorter resolving cadence for the end of a Signal episode. */
@@ -152,6 +362,10 @@ export function buildSignalSynthOutroPlan(seed: string): SignalSynthIdentPlan {
   return {
     durationMs: SIGNAL_SYNTH_OUTRO_DURATION_MS,
     tempoBpm: 100,
+    temperament: "neutral",
+    register: "middle",
+    contour: "descending",
+    ending: "resolve",
     notes,
   };
 }
@@ -233,6 +447,7 @@ export function stopSignalIntroAudio(): void {
 }
 
 export function playSignalIntroAudio(args: {
+  temperament: SignalPersonaTemperament;
   seed: string;
   introAudio: BotcastIntroAudioState;
   enabled: boolean;
@@ -257,7 +472,10 @@ export function playSignalIntroAudio(args: {
   if (args.introAudio.source === "elevenlabs" && args.introAudio.audioUrl) {
     audio.src = args.introAudio.audioUrl;
   } else {
-    const wave = encodeSignalSynthIdentWave(buildSignalSynthIdentPlan(args.seed));
+    const wave = encodeSignalSynthIdentWave(buildSignalSynthIdentPlan({
+      temperament: args.temperament,
+      seed: args.seed,
+    }));
     activeObjectUrl = URL.createObjectURL(new Blob([wave], { type: "audio/wav" }));
     audio.src = activeObjectUrl;
   }
