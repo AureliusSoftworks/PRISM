@@ -263,6 +263,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       default_elevenlabs_voice_id TEXT,
       elevenlabs_voice_bank TEXT NOT NULL DEFAULT '{}',
       elevenlabs_voice_model TEXT,
+      elevenlabs_voice_collection_id TEXT,
       player_audio_voice_profile TEXT,
       player_name_pronunciation TEXT NOT NULL DEFAULT '',
       prism_default_bot_audio_voice_profile TEXT,
@@ -1357,6 +1358,12 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   if (!hasElevenLabsVoiceBank) db.exec("ALTER TABLE users ADD COLUMN elevenlabs_voice_bank TEXT NOT NULL DEFAULT '{}';");
   const hasElevenLabsVoiceModel = userColumns.some((column) => column.name === "elevenlabs_voice_model");
   if (!hasElevenLabsVoiceModel) db.exec("ALTER TABLE users ADD COLUMN elevenlabs_voice_model TEXT;");
+  const hasElevenLabsVoiceCollectionId = userColumns.some(
+    (column) => column.name === "elevenlabs_voice_collection_id"
+  );
+  if (!hasElevenLabsVoiceCollectionId) {
+    db.exec("ALTER TABLE users ADD COLUMN elevenlabs_voice_collection_id TEXT;");
+  }
   const hasPlayerAudioVoiceProfile = userColumns.some(
     (column) => column.name === "player_audio_voice_profile"
   );

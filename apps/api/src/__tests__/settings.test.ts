@@ -102,6 +102,7 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     defaultElevenLabsVoiceId: null,
     elevenLabsVoiceBank: "{}",
     elevenLabsVoiceModel: null,
+    elevenLabsVoiceCollectionId: null,
     primaryOllamaHost: "http://localhost:11434",
     ...overrides,
   };
@@ -140,6 +141,7 @@ describe("resolveNextSettings — voice foundation", () => {
         defaultElevenLabsVoiceId: " eleven-default ",
         elevenLabsVoiceBank: { "voice-1": "  voice_alpha  ", "voice-3": 17, extra: "ignore" },
         elevenLabsVoiceModel: " eleven_multilingual_v2 ",
+        elevenLabsVoiceCollectionId: " collection-main ",
       },
       baseline()
     );
@@ -153,6 +155,21 @@ describe("resolveNextSettings — voice foundation", () => {
       "voice-1": "voice_alpha", "voice-2": null, "voice-3": null, "voice-4": null, "voice-5": null,
     });
     assert.equal(next.elevenLabsVoiceModel, "eleven_multilingual_v2");
+    assert.equal(next.elevenLabsVoiceCollectionId, "collection-main");
+    assert.equal(
+      resolveNextSettings(
+        { elevenLabsVoiceCollectionId: "" },
+        baseline({ elevenLabsVoiceCollectionId: "collection-old" }),
+      ).elevenLabsVoiceCollectionId,
+      null,
+    );
+    assert.equal(
+      resolveNextSettings(
+        {},
+        baseline({ elevenLabsVoiceCollectionId: "collection-old" }),
+      ).elevenLabsVoiceCollectionId,
+      "collection-old",
+    );
   });
 });
 

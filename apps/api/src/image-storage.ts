@@ -62,6 +62,16 @@ export function writeGeneratedImageBytes(localRelPath: string, bytes: Buffer): v
   writeFileSync(absolute, bytes);
 }
 
+/** Restore/import writes must never replace an existing file on an id collision. */
+export function writeGeneratedImageBytesExclusive(
+  localRelPath: string,
+  bytes: Buffer,
+): void {
+  const absolute = resolveAbsoluteUnderDataRoot(localRelPath);
+  mkdirSync(dirname(absolute), { recursive: true });
+  writeFileSync(absolute, bytes, { flag: "wx" });
+}
+
 export function readGeneratedImageBytes(localRelPath: string): Buffer {
   const absolute = resolveAbsoluteUnderDataRoot(localRelPath);
   return readFileSync(absolute);

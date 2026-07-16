@@ -178,6 +178,7 @@ export function restoreFactoryDefaultsInDatabase(
           default_elevenlabs_voice_id = NULL,
           elevenlabs_voice_bank = '{}',
           elevenlabs_voice_model = NULL,
+          elevenlabs_voice_collection_id = NULL,
           player_audio_voice_profile = NULL,
           player_name_pronunciation = '',
           last_active_at = ?

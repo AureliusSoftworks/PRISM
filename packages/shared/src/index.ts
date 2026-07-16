@@ -11,6 +11,24 @@ export {
 } from "./signalPersonaTemperament.js";
 
 export {
+  PROJECT_OWNED_ASSET_BLOB_PREFIX,
+  PROJECT_OWNED_ASSET_MANIFEST_PATH,
+  PROJECT_OWNED_ASSET_MANIFEST_SCHEMA,
+  isProjectOwnedAssetBlobArchivePath,
+  projectOwnedAssetBlobArchivePathForChecksum,
+  type ProjectOwnedAssetBackupReferenceV1,
+  type ProjectOwnedAssetExportPayloadV1,
+  type ProjectOwnedAssetManifestEntryV1,
+  type ProjectOwnedAssetManifestV1,
+  type ProjectOwnedAssetMediaTypeV1,
+  type ProjectOwnedAssetOwnerTypeV1,
+  type ProjectOwnedAssetRestoreMetadataV1,
+  type SignalProjectAudioRestoreMetadataV1,
+  type SignalProjectImageRestoreMetadataV1,
+  type SignalProjectOwnedAssetSlotV1,
+} from "./projectOwnedAssetBackup.js";
+
+export {
   AUTO_FALLBACK_CHAIN_FALLBACK_COUNT,
   AUTO_FALLBACK_CHAIN_VERSION,
   AUTO_FALLBACK_MODEL_ID_MAX_LENGTH,

@@ -9,6 +9,7 @@ import {
   requestElevenLabsSpeech,
   requestElevenLabsSpeechWithTimestamps,
   requestElevenLabsVoiceCatalog,
+  requestElevenLabsVoiceCollections,
   resolveElevenLabsVoiceId,
   resolveVoiceSynthesisBoundary,
   validateVoiceSynthesisRequest,
@@ -423,18 +424,30 @@ describe("voice Phase 1 boundary", () => {
   });
 
   it("normalizes the ElevenLabs voice catalog", async () => {
+    let requestedUrl = "";
     const voices = await requestElevenLabsVoiceCatalog({
       apiKey: "secret-key",
-      fetchImpl: (async () => new Response(JSON.stringify({
-        voices: [{
-          voice_id: "voice-a",
-          name: "Alex",
-          category: "premade",
-          preview_url: "https://example.test/alex.mp3",
-          labels: { accent: "American", ignored: 3 },
-        }],
-      }), { status: 200 })) as typeof fetch,
+      collectionId: " collection-main ",
+      fetchImpl: (async (input) => {
+        requestedUrl = String(input);
+        return new Response(
+          JSON.stringify({
+            voices: [{
+              voice_id: "voice-a",
+              name: "Alex",
+              category: "premade",
+              preview_url: "https://example.test/alex.mp3",
+              labels: { accent: "American", ignored: 3 },
+            }],
+          }),
+          { status: 200 },
+        );
+      }) as typeof fetch,
     });
+    assert.equal(
+      new URL(requestedUrl).searchParams.get("collection_id"),
+      "collection-main",
+    );
     assert.deepEqual(voices, [{
       voiceId: "voice-a",
       name: "Alex",
@@ -445,6 +458,71 @@ describe("voice Phase 1 boundary", () => {
     }]);
   });
 
+  it("discovers and names authenticated ElevenLabs voice collections", async () => {
+    const requestedUrls: URL[] = [];
+    const collections = await requestElevenLabsVoiceCollections({
+      apiKey: "secret-key",
+      fetchImpl: (async (input) => {
+        const url = new URL(String(input));
+        requestedUrls.push(url);
+        if (url.pathname === "/v2/voices") {
+          if (!url.searchParams.has("next_page_token")) {
+            return new Response(JSON.stringify({
+              voices: [{
+                voice_id: "voice-a",
+                name: "Alex",
+                collection_ids: ["col-red", "col-blue"],
+              }],
+              has_more: true,
+              next_page_token: "page-2",
+            }));
+          }
+          return new Response(JSON.stringify({
+            voices: [{
+              voice_id: "voice-b",
+              name: "Bill",
+              collection_ids: ["col-red"],
+            }],
+            has_more: false,
+            next_page_token: null,
+          }));
+        }
+        if (url.pathname.endsWith("/col-red")) {
+          return new Response(JSON.stringify({ resource_name: "Studio Cast" }));
+        }
+        return new Response("Forbidden", { status: 403 });
+      }) as typeof fetch,
+    });
+    assert.deepEqual(collections, [
+      {
+        collectionId: "col-blue",
+        name: "Collection col-blue",
+        voiceCount: 1,
+        sampleVoiceNames: ["Alex"],
+      },
+      {
+        collectionId: "col-red",
+        name: "Studio Cast",
+        voiceCount: 2,
+        sampleVoiceNames: ["Alex", "Bill"],
+      },
+    ]);
+    assert.equal(
+      requestedUrls.filter((url) => url.pathname === "/v2/voices").length,
+      2,
+    );
+    assert.equal(
+      requestedUrls.find((url) => url.pathname === "/v2/voices")
+        ?.searchParams.get("voice_type"),
+      "saved",
+    );
+    assert.equal(
+      requestedUrls.find((url) => url.pathname.endsWith("/col-red"))
+        ?.searchParams.get("resource_type"),
+      "voice_collection",
+    );
+  });
+
   it("keeps voice catalog configuration independent from the active response lane", () => {
     const serverSource = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
     const catalogRoute = serverSource.slice(
@@ -452,6 +530,11 @@ describe("voice Phase 1 boundary", () => {
       serverSource.indexOf('route("POST", "/api/voices/preview-line"'),
     );
     assert.match(catalogRoute, /requestElevenLabsVoiceCatalog\(\{/u);
+    assert.match(catalogRoute, /requestElevenLabsVoiceCollections\(\{/u);
+    assert.match(
+      catalogRoute,
+      /collectionId: user\.elevenlabs_voice_collection_id/u,
+    );
     assert.doesNotMatch(catalogRoute, /preferred_provider|Switch to Online/u);
     assert.match(
       serverSource,
