@@ -683,6 +683,95 @@ test.describe("PRISM desktop smoke", () => {
     await expect(page.getByText("Select bots to begin")).toBeVisible();
   });
 
+  test("Coffee GPU atmosphere becomes ready, preserves controls, and cleans up across mode switches", async ({
+    page,
+  }) => {
+    const runtimeErrors: Error[] = [];
+    page.on("pageerror", (error) => runtimeErrors.push(error));
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+    await installAuthenticatedApi(page);
+    await page.goto("/?view=coffee");
+
+    const atmosphere = page.locator('[data-coffee-atmosphere="true"]');
+    await expect(atmosphere).toHaveAttribute("data-renderer-status", "webgl", {
+      timeout: 20_000,
+    });
+    await expect(atmosphere.locator("canvas")).toHaveCount(1);
+    await expect(atmosphere).toHaveCSS("pointer-events", "none");
+    await expect(page.locator('[class*="coffeeTableGlow"]')).toBeHidden();
+    await expect(page.getByText("Select bots to begin")).toBeVisible();
+    await expect(
+      page.getByRole("option", { name: testBots[0]!.name }),
+    ).toBeVisible();
+
+    await activateNavigationControl(
+      page.locator('button[aria-controls="prism-app-switcher-menu"]'),
+    );
+    await activateNavigationControl(
+      page.getByRole("menuitem", { name: /Chat/ }),
+    );
+    await expect(atmosphere).toHaveCount(0);
+
+    await activateNavigationControl(
+      page.locator('button[aria-controls="prism-app-switcher-menu"]'),
+    );
+    await activateNavigationControl(
+      page.getByRole("menuitem", { name: /Coffee/ }),
+    );
+    const restoredAtmosphere = page.locator(
+      '[data-coffee-atmosphere="true"]',
+    );
+    await expect(restoredAtmosphere).toHaveAttribute(
+      "data-renderer-status",
+      "webgl",
+      { timeout: 20_000 },
+    );
+    expect(runtimeErrors).toEqual([]);
+  });
+
+  test("Coffee GPU initialization failure retains the unchanged CSS fallback", async ({
+    page,
+  }) => {
+    await page.addInitScript(() => {
+      window.__PRISM_FORCE_WEBGL_FAILURE__ = true;
+    });
+    await installAuthenticatedApi(page);
+    await page.goto("/?view=coffee");
+
+    const atmosphere = page.locator('[data-coffee-atmosphere="true"]');
+    await expect(atmosphere).toHaveAttribute(
+      "data-renderer-status",
+      "fallback",
+      { timeout: 10_000 },
+    );
+    await expect(atmosphere.locator("canvas")).toHaveCount(0);
+    await expect(page.locator('[class*="coffeeTableGlow"]')).toBeVisible();
+    await expect(page.getByText("Select bots to begin")).toBeVisible();
+  });
+
+  test("Coffee Light atmosphere is static and cool under reduced motion @visual", async ({
+    page,
+  }) => {
+    await installAuthenticatedApi(page, { theme: "light" });
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/?view=coffee");
+
+    const atmosphere = page.locator('[data-coffee-atmosphere="true"]');
+    await expect(atmosphere).toHaveAttribute("data-theme", "light");
+    await expect(atmosphere).toHaveAttribute("data-renderer-status", "webgl", {
+      timeout: 20_000,
+    });
+    await expect(page).toHaveScreenshot(
+      "coffee-atmosphere-light-reduced-motion.png",
+      {
+        animations: "disabled",
+        caret: "hide",
+        scale: "css",
+      },
+    );
+  });
+
   test("Coffee group setup selects every bot, enforces five seats, and enters a saved session", async ({
     page,
   }) => {
@@ -811,7 +900,6 @@ test.describe("PRISM desktop smoke", () => {
         );
       },
     );
-
     await page.goto("/?view=coffee");
     const picker = page.getByRole("listbox", {
       name: "Bots available for Coffee",
