@@ -271,7 +271,7 @@ describe("selected bot library showcase", () => {
     assert.match(pageSource, /voicePreviewAudioCacheRef/);
     assert.match(
       pageSource,
-      /voicePreviewAudioCacheRef\.current\.set\(\s*options\.cacheKey,\s*\{[\s\S]*?bytes: previewClip\.bytes\.slice\(0\),[\s\S]*?engineUsed: previewClip\.engineUsed,[\s\S]*?\},\s*\)/
+      /voicePreviewAudioCacheRef\.current\.set\(\s*effectiveCacheKey,\s*\{[\s\S]*?bytes: previewClip\.bytes\.slice\(0\),[\s\S]*?engineUsed: previewClip\.engineUsed,[\s\S]*?\},\s*\)/
     );
     assert.match(
       pageSource,

@@ -20,8 +20,8 @@ _Staging area - nothing queued for release yet._
   can shape show identity, generate or upload light and dark studios and logos,
   direct episodes privately, archive finished productions, and replay them with
   synchronized speech and artwork progress. Branded pre-rolls synthesize local
-  idents, optionally cache ElevenLabs music, and prepare opening turns in the
-  background.
+  idents, shape optional ElevenLabs music around the host's temperament, and
+  prepare opening turns in the background.
 - **Slate introduces a persistent, writer-directed fiction desk.** Projects
   move through Shape, Draft, and Refine with optional wildcard sparks, editable
   manuscripts, locks, revision previews, and explicit version-safe acceptance.
@@ -40,6 +40,9 @@ _Staging area - nothing queued for release yet._
 - **Image generation has explicit provider routing and provenance.** Local
   packages and online engines are selected independently, while generated
   assets retain source and model context across the Library and Signal.
+- **Account backups preserve creative assets and voice-library choices.**
+  Portable archives carry active Signal media and restore ElevenLabs voice
+  collection settings without retaining stale account-local identifiers.
 - **Coffee, Signal, and Slate share a more coherent production shell.** Their
   navigation, responsive layouts, Light Mode treatment, progress surfaces, and
   contextual tutorials now follow the same applet conventions.

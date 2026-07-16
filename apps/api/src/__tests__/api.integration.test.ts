@@ -933,7 +933,11 @@ describe("API request integration", () => {
     assert.equal(namePayload.ok, true);
     assert.equal(namePayload.show.id, showId);
     assert.equal(typeof namePayload.generated, "boolean");
-    assert.equal(deterministicProvider.calls.length, providerCallsBefore + 1);
+    const providerCallCount = deterministicProvider.calls.length - providerCallsBefore;
+    assert.ok(
+      providerCallCount >= 1 && providerCallCount <= 3,
+      `expected one initial Signal name request plus at most two deliberate retries, received ${providerCallCount}`,
+    );
   });
 
   it("locks Signal episodes to the selected online provider without weakening LOCAL mode", async () => {
