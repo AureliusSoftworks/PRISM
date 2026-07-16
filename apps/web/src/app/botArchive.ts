@@ -1,6 +1,7 @@
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import {
   parseBotAvatarDetailsV1,
+  normalizeBotNamePronunciation,
   normalizeBotPowersV1,
   type BotAvatarDetailsV1,
   type BotFaceBlinkBar,
@@ -28,6 +29,7 @@ export interface PrismBotArchiveJson {
   exportedAt: string;
   bot: {
     name: string;
+    namePronunciation?: string;
     color?: string | null;
     glyph?: string | null;
     avatarDetails?: BotAvatarDetailsV1 | null;
@@ -189,6 +191,9 @@ function validateBotJson(parsed: unknown): PrismBotArchiveJson {
     ...(botJson as PrismBotArchiveJson),
     bot: {
       ...botJson.bot,
+      ...(bot.namePronunciation !== undefined
+        ? { namePronunciation: normalizeBotNamePronunciation(bot.namePronunciation) }
+        : {}),
       ...(avatarDetails !== undefined ? { avatarDetails } : {}),
       ...(bot.powers !== undefined ? { powers: normalizeBotPowersV1(bot.powers) } : {}),
     },

@@ -2,12 +2,14 @@
 
 import type { ReactNode } from "react";
 import {
+  BookOpen,
   Coffee,
   FlaskConical,
   Info,
   KeyRound,
   MessageCircle,
   Network,
+  Radio,
   SlidersHorizontal,
   Sparkles,
   UserRound,
@@ -19,6 +21,8 @@ export type SettingsScope =
   | "chat"
   | "zen"
   | "coffee"
+  | "botcast"
+  | "slate"
   | "connections"
   | "network"
   | "experimental"
@@ -63,6 +67,8 @@ const SETTINGS_NAV_GROUPS: readonly {
       { scope: "chat", title: "Chat", icon: <MessageCircle size={16} strokeWidth={2} /> },
       { scope: "zen", title: "Zen", icon: <Sparkles size={16} strokeWidth={2} /> },
       { scope: "coffee", title: "Coffee", icon: <Coffee size={16} strokeWidth={2} /> },
+      { scope: "botcast", title: "Signal", icon: <Radio size={16} strokeWidth={2} /> },
+      { scope: "slate", title: "Slate", icon: <BookOpen size={16} strokeWidth={2} /> },
     ],
   },
   {

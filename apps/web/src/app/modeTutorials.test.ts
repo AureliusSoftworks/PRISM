@@ -143,7 +143,7 @@ describe("mode tutorials", () => {
     assert.match(routing?.body ?? "", /Image generation keeps its own LOCAL\/ONLINE choice/);
     assert.match(
       routing?.body ?? "",
-      /Voice settings keep English speech on System Classic unless you explicitly enable online voices/,
+      /Voices default to System TTS; selecting an ElevenLabs voice in Prism or bot customization overrides it only for eligible ONLINE speech/,
     );
   });
 

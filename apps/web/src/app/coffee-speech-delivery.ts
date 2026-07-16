@@ -1,3 +1,9 @@
+import {
+  buildSpeechActivityWindows,
+  speechActivityAtMs,
+  type SpeechActivityWindow,
+} from "./speechActivity.ts";
+
 export type CoffeeDeliveryMood = "joyful" | "warm" | "neutral" | "guarded" | "strained";
 
 export interface CoffeeDeliveryPlan {
@@ -6,6 +12,7 @@ export interface CoffeeDeliveryPlan {
   durationMs: number;
   baseCharacterMs: number;
   emphasis: { start: number; end: number } | null;
+  speechActivityWindows: SpeechActivityWindow[] | null;
 }
 
 export interface CoffeeDeliveryCharacterAlignment {
@@ -88,7 +95,14 @@ export function buildCoffeeDeliveryPlan({
 }): CoffeeDeliveryPlan {
   const characters = Array.from(text);
   if (characters.length === 0) {
-    return { text, revealAtMs: [], durationMs: 0, baseCharacterMs: 0, emphasis: null };
+    return {
+      text,
+      revealAtMs: [],
+      durationMs: 0,
+      baseCharacterMs: 0,
+      emphasis: null,
+      speechActivityWindows: null,
+    };
   }
   const intensity = clamp(humanPacing, 0, 100) / 50;
   const baseCharacterMs =
@@ -154,6 +168,10 @@ export function buildCoffeeDeliveryPlan({
       durationMs: Math.round(targetDuration),
       baseCharacterMs: targetDuration / Math.max(1, characters.length),
       emphasis: resolveEmphasis(text),
+      speechActivityWindows: buildSpeechActivityWindows(
+        audioAlignment,
+        targetDuration,
+      ),
     };
   }
   const scale = targetDuration / elapsedMs;
@@ -163,6 +181,7 @@ export function buildCoffeeDeliveryPlan({
     durationMs: Math.round(targetDuration),
     baseCharacterMs: baseCharacterMs * scale,
     emphasis: resolveEmphasis(text),
+    speechActivityWindows: null,
   };
 }
 
@@ -186,6 +205,13 @@ export function coffeeDeliveryIsHoldingAtMs(
   plan: CoffeeDeliveryPlan,
   elapsedMs: number
 ): boolean {
+  const alignedActivity = speechActivityAtMs(
+    plan.speechActivityWindows,
+    elapsedMs,
+  );
+  if (alignedActivity !== null) {
+    return elapsedMs < plan.durationMs && !alignedActivity;
+  }
   const visible = coffeeDeliveryVisibleLengthAtMs(plan, elapsedMs);
   if (visible <= 0 || visible >= plan.revealAtMs.length) return false;
   const previousAt = plan.revealAtMs[visible - 1] ?? 0;

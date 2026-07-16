@@ -27,6 +27,7 @@ import type {
   AutoFallbackChainV1,
 } from "@localai/shared";
 import {
+  BOTCAST_IMMERSIVE_VOICE_TAGS,
   BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS,
   applyBotcastProducerCueToTension,
   botcastFallbackStudioAccentVariantForSeed,
@@ -114,6 +115,7 @@ type BotcastMessageRow = {
   speaker_role: BotcastSpeakerRole;
   bot_id: string;
   content: string;
+  voice_performance_text: string | null;
   created_at: string;
 };
 
@@ -155,6 +157,7 @@ export interface BotcastGenerationOptions {
   preferredLocalModel?: string | null;
   preferredOnlineModel?: string | null;
   autoFallbackChain?: AutoFallbackChainV1 | null;
+  immersiveVoiceEffectsEnabled?: boolean;
   providerFactory?: typeof selectProvider;
 }
 
@@ -291,7 +294,9 @@ function logoForHost(
       "Fuse the persona idea and the audio artifact into one clever, inseparable symbol rather than placing two icons beside each other.",
       `Build a distinctive persona-led palette around ${normalizeAccentColor(host.color)} with only the complementary colors the concept needs.`,
       "Avoid multicolor light beams, radiating color wedges, and generic geometric optical motifs unless the host persona specifically requires them.",
-      "Premium editorial identity, bold simple silhouette, generous negative space, no portrait, no full person, no mockup, no letters, no words, no readable text.",
+      "This must be a compact graphic emblem, never a profile picture, character design, mascot, or scene. Use the host only as conceptual source material; do not depict the host or a humanlike proxy.",
+      "Absolutely no person, face, head, eyes, skin, hair, shoulders, body, mask, helmet, mannequin, robot, cyborg, creature, or humanoid figure, even partially or abstractly.",
+      "Premium editorial icon with one centered bold silhouette, restrained detail, generous negative space, and strong recognition at 64 pixels. No mockup, letters, words, or readable text.",
     ].join(" "),
     imageUrl: null,
     imageId: null,
@@ -305,7 +310,7 @@ function logoFallbackForRow(row: BotcastShowRow): BotcastLogoState {
   const seed = `botcast:${row.host_bot_id}:logo:1`;
   return {
     seed,
-    prompt: `Square symbol-only podcast logo for “${row.name}”, combining a distinctive host-inspired motif with one microphone, waveform, broadcast dial, or sound-ring archetype as a single bold mark; use ${normalizeAccentColor(row.accent_color)} with a restrained complementary palette; no multicolor light beams, no radiating color wedges, no people, no letters, no words.`,
+    prompt: `Square symbol-only podcast logo for “${row.name}”, combining a distinctive host-inspired motif with one microphone, waveform, broadcast dial, or sound-ring archetype as a single bold mark; use ${normalizeAccentColor(row.accent_color)} with a restrained complementary palette; compact editorial emblem readable at 64 pixels; not a profile picture, character, mascot, or scene; absolutely no person, face, head, eyes, skin, hair, body, mask, helmet, mannequin, robot, cyborg, creature, or humanoid figure; no multicolor light beams, radiating color wedges, letters, or words.`,
     imageUrl: null,
     imageId: null,
     revision: 1,
@@ -452,6 +457,7 @@ function mapMessage(row: BotcastMessageRow): BotcastMessage {
     speakerRole: row.speaker_role,
     botId: row.bot_id,
     content: row.content,
+    voicePerformanceText: row.voice_performance_text ?? null,
     createdAt: row.created_at,
   };
 }
@@ -1133,6 +1139,7 @@ export interface BotcastPromptBuildArgs {
   speakerRole: BotcastSpeakerRole;
   cue?: BotcastProducerCue;
   departureRequired?: boolean;
+  immersiveVoiceEffectsEnabled?: boolean;
 }
 
 /**
@@ -1169,6 +1176,13 @@ export function buildBotcastSpeakerPrompt(args: BotcastPromptBuildArgs): Provide
                 ? "Show discomfort, resistance, or deflection without leaving yet."
                 : "Answer with substance. You may challenge the premise instead of agreeing automatically.",
         ];
+  const immersiveVoiceRule = args.immersiveVoiceEffectsEnabled
+    ? [
+        "You may add zero, one, or at most two natural vocal reactions when the moment genuinely earns them.",
+        `Use only these exact square-bracket tags: ${BOTCAST_IMMERSIVE_VOICE_TAGS.map((tag) => `[${tag}]`).join(", ")}.`,
+        "Put a reaction only at the very beginning or very end of the spoken line. Keep it rare and character-appropriate; most lines should have no tag.",
+      ].join(" ")
+    : "Do not include bracketed directions, delivery notes, or sound-effect tags.";
   return [
     {
       role: "system",
@@ -1176,6 +1190,7 @@ export function buildBotcastSpeakerPrompt(args: BotcastPromptBuildArgs): Provide
         `You are ${speaker.name} in a fictional, non-canonical Signal episode.`,
         "This is an anthology. Treat the host and guest as meeting for the first time. Never mention prior appearances, episode numbers, archives, memories, relationship history, or earlier Signal events.",
         "Return only the next spoken line. No speaker label, no analysis, no camera directions, and no markdown.",
+        immersiveVoiceRule,
         `Persona:\n${speaker.systemPrompt}`,
         ...roleRules,
       ].join("\n\n"),
@@ -1199,6 +1214,46 @@ export function buildBotcastSpeakerPrompt(args: BotcastPromptBuildArgs): Provide
       ].join("\n\n"),
     },
   ];
+}
+
+const BOTCAST_BRACKETED_DIRECTION_PATTERN = /\[([^\]\n]{1,48})\]/giu;
+
+function extractBotcastVoicePerformance(
+  value: string,
+  enabled: boolean,
+): { content: string; voicePerformanceText: string | null } {
+  const allowedTags = new Set<string>(BOTCAST_IMMERSIVE_VOICE_TAGS);
+  const matches = [...value.matchAll(BOTCAST_BRACKETED_DIRECTION_PATTERN)];
+  const content = value
+    .replace(BOTCAST_BRACKETED_DIRECTION_PATTERN, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  if (!enabled || !content) {
+    return { content, voicePerformanceText: null };
+  }
+  const supported = matches
+    .filter((match) => allowedTags.has((match[1] ?? "").trim().toLowerCase()))
+    .slice(0, 2);
+  if (supported.length === 0) {
+    return { content, voicePerformanceText: null };
+  }
+  const leading: string[] = [];
+  const trailing: string[] = [];
+  for (const match of supported) {
+    const tag = `[${(match[1] ?? "").trim().toLowerCase()}]`;
+    const before = value
+      .slice(0, match.index ?? 0)
+      .replace(BOTCAST_BRACKETED_DIRECTION_PATTERN, "")
+      .trim();
+    if (!before) leading.push(tag);
+    else trailing.push(tag);
+  }
+  const voicePerformanceText = [
+    leading.join(" "),
+    content,
+    trailing.join(" "),
+  ].filter(Boolean).join(" ");
+  return { content, voicePerformanceText };
 }
 
 function sanitizeUtterance(raw: string, fallback: string, speakerName: string): string {
@@ -1346,6 +1401,7 @@ export async function advanceBotcastEpisode(
     speakerRole,
     ...(input.cue ? { cue: input.cue } : {}),
     departureRequired,
+    immersiveVoiceEffectsEnabled: generation.immersiveVoiceEffectsEnabled === true,
   });
   const selected = generationProvider(generation, episode.provider, episode.model);
   const generationOptions = {
@@ -1428,18 +1484,35 @@ export async function advanceBotcastEpisode(
         ? "I warned you. We are done here."
         : "I do not accept the premise as stated, but I will answer the part that matters.";
   const generatedContent = sanitizeUtterance(raw, fallback, speaker.name);
+  const performance = extractBotcastVoicePerformance(
+    generatedContent,
+    generation.immersiveVoiceEffectsEnabled === true,
+  );
+  const cleanGeneratedContent = performance.content || fallback;
   const content =
     speakerRole === "host" &&
     episode.segment === "closing" &&
-    /\?\s*$/u.test(generatedContent)
+    /\?\s*$/u.test(cleanGeneratedContent)
       ? fallback
-      : generatedContent;
+      : cleanGeneratedContent;
+  const voicePerformanceText = content === cleanGeneratedContent
+    ? performance.voicePerformanceText
+    : null;
   const messageId = randomId(12);
   db.prepare(
     `INSERT INTO botcast_messages
-      (id, user_id, episode_id, speaker_role, bot_id, content, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-  ).run(messageId, userId, episode.id, speakerRole, speaker.id, content, now);
+      (id, user_id, episode_id, speaker_role, bot_id, content, voice_performance_text, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    messageId,
+    userId,
+    episode.id,
+    speakerRole,
+    speaker.id,
+    content,
+    voicePerformanceText,
+    now,
+  );
   recordEvent(db, userId, episode.id, "utterance", {
     messageId,
     speakerRole,
@@ -1448,6 +1521,7 @@ export async function advanceBotcastEpisode(
     provider: providerUsed,
     model: modelUsed,
     responseMode: episode.responseMode,
+    immersiveVoiceEffect: voicePerformanceText !== null,
     ...(autoRecovery ? { autoRecovery } : {}),
   }, now);
 
@@ -1498,6 +1572,7 @@ export async function advanceBotcastEpisode(
     speaker_role: speakerRole,
     bot_id: speaker.id,
     content,
+    voice_performance_text: voicePerformanceText,
     created_at: now,
   });
   return { episode: getBotcastEpisode(db, userId, episode.id), message };

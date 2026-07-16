@@ -1,7 +1,9 @@
 import {
+  normalizeElevenLabsVoiceEffect,
   normalizeBotAudioVoiceProfileV1,
   normalizeBotVoiceVolume,
   type BotAudioVoiceProfileV1,
+  type ElevenLabsVoiceEffect,
 } from "@localai/shared";
 import {
   beginVoicePlaybackProgress,
@@ -28,6 +30,7 @@ export interface EnglishVoiceSynthesisClip {
   bytes: ArrayBuffer;
   alignment: EnglishVoiceCharacterAlignment | null;
   audioContentType: string;
+  engineUsed: string | null;
 }
 
 const MEDIA_PLAY_START_TIMEOUT_MS = 1500;
@@ -74,11 +77,13 @@ export async function readEnglishVoiceSynthesisClip(
   response: Response
 ): Promise<EnglishVoiceSynthesisClip> {
   const contentType = response.headers.get("content-type") ?? "application/octet-stream";
+  const engineUsed = response.headers.get("x-prism-voice-engine");
   if (!contentType.toLowerCase().includes("application/json")) {
     return {
       bytes: await response.arrayBuffer(),
       alignment: null,
       audioContentType: contentType,
+      engineUsed,
     };
   }
   const payload = await response.json() as Record<string, unknown>;
@@ -90,7 +95,19 @@ export async function readEnglishVoiceSynthesisClip(
     audioContentType: typeof payload.audioContentType === "string"
       ? payload.audioContentType
       : response.headers.get("x-prism-audio-content-type") ?? "application/octet-stream",
+    engineUsed,
   };
+}
+
+export function elevenLabsEffectForEngine(
+  rawProfile: BotAudioVoiceProfileV1,
+  engineUsed: string | null
+): ElevenLabsVoiceEffect {
+  return engineUsed === "elevenlabs"
+    ? normalizeElevenLabsVoiceEffect(
+        normalizeBotAudioVoiceProfileV1(rawProfile).elevenLabsEffect
+      )
+    : "clean";
 }
 
 export function resolveEnglishVoicePostProcessing(
@@ -315,6 +332,7 @@ async function playAudio(
   expectedGeneration: number,
   seed: string,
   effectsEnabled: boolean,
+  engineUsed: string | null,
   lifecycle?: VoicePlaybackLifecycle
 ): Promise<void> {
   if (expectedGeneration !== generation) return;
@@ -326,7 +344,9 @@ async function playAudio(
     effectsEnabled,
     detuneCents: processing.detuneCents,
     baseLowpassHz: processing.lowpassHz,
+    elevenLabsEffect: elevenLabsEffectForEngine(profile, engineUsed),
     lifecycle,
+    isCurrent: () => expectedGeneration === generation,
   });
   if (!played) {
     await playBytesWithMedia(bytes, profile, expectedGeneration, lifecycle);
@@ -340,7 +360,8 @@ export function enqueueEnglishVoice(
   seed = "english-preview",
   effectsEnabled = true,
   globalVolume = 1,
-  lifecycle?: VoicePlaybackLifecycle
+  lifecycle?: VoicePlaybackLifecycle,
+  engineUsed: string | null = null
 ): Promise<void> {
   const expectedGeneration = generation;
   const playbackProfile = {
@@ -349,6 +370,14 @@ export function enqueueEnglishVoice(
   };
   queue = queue
     .catch(() => undefined)
-    .then(() => playAudio(bytes, playbackProfile, expectedGeneration, seed, effectsEnabled, lifecycle));
+    .then(() => playAudio(
+      bytes,
+      playbackProfile,
+      expectedGeneration,
+      seed,
+      effectsEnabled,
+      engineUsed,
+      lifecycle
+    ));
   return queue;
 }

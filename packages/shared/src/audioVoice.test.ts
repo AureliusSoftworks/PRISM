@@ -2,11 +2,15 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   BOT_VOICE_TEXTURE_RECIPES,
+  applyBotNamePronunciations,
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
   botVoiceTextureIsModified,
   normalizeBotAudioVoiceProfileV1,
+  normalizeBotNamePronunciation,
   normalizeBotVoiceTexture,
   normalizeEnglishVoiceEngine,
+  normalizeElevenLabsVoiceDirection,
+  normalizeElevenLabsVoiceEffect,
   normalizeOptionalBotAudioVoiceProfileV1,
   normalizeVoiceMode,
   parseStoredBotAudioVoiceProfileV1,
@@ -14,6 +18,20 @@ import {
 } from "./audioVoice.ts";
 
 describe("audio voice normalization", () => {
+  it("normalizes and applies bot name pronunciations without changing visible-name boundaries", () => {
+    assert.equal(normalizeBotNamePronunciation("  Light   Yah-gah-mee  "), "Light Yah-gah-mee");
+    assert.equal(
+      applyBotNamePronunciations(
+        "Light Yagami asked Light for help; Yagamilight stays written.",
+        [
+          { name: "Light", namePronunciation: "Lite" },
+          { name: "Light Yagami", name_pronunciation: "Light Yah-gah-mee" },
+        ],
+      ),
+      "Light Yah-gah-mee asked Lite for help; Yagamilight stays written.",
+    );
+  });
+
   it("keeps only supported modes and engines", () => {
     assert.equal(normalizeVoiceMode("english"), "english");
     assert.equal(normalizeVoiceMode("babble"), "babble");
@@ -28,6 +46,7 @@ describe("audio voice normalization", () => {
       v: 2,
       enabled: true,
       baseVoiceId: "voice-4",
+      elevenLabsEffect: "clean",
       pitch: 1,
       warmth: -1,
       pace: 0.125,
@@ -81,13 +100,49 @@ describe("audio voice normalization", () => {
       ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
       systemVoiceName: "  Alex  ",
       elevenLabsVoiceId: " eleven-voice-id ",
+      elevenLabsEffect: "radio",
     });
     assert.equal(profile.systemVoiceName, "Alex");
     assert.equal(profile.elevenLabsVoiceId, "eleven-voice-id");
+    assert.equal(profile.elevenLabsEffect, "radio");
     assert.deepEqual(
       parseStoredBotAudioVoiceProfileV1(serializeBotAudioVoiceProfileV1(profile)),
       profile
     );
+  });
+
+  it("normalizes ElevenLabs-only effects to a clean default", () => {
+    assert.equal(normalizeElevenLabsVoiceEffect("robot"), "robot");
+    assert.equal(normalizeElevenLabsVoiceEffect("distortion"), "chorus");
+    assert.equal(normalizeElevenLabsVoiceEffect("crt-speaker"), "clean");
+    assert.equal(
+      normalizeBotAudioVoiceProfileV1({
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+        elevenLabsEffect: "deep-space",
+      }).elevenLabsEffect,
+      "deep-space"
+    );
+  });
+
+  it("normalizes and persists a compact ElevenLabs voice direction deck", () => {
+    assert.equal(
+      normalizeElevenLabsVoiceDirection(
+        " warm , [hushed]; warm\nwith measured pauses, mischievously ",
+      ),
+      "warm, hushed, with measured pauses, mischievously",
+    );
+    const profile = normalizeBotAudioVoiceProfileV1({
+      ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+      elevenLabsVoiceId: "voice-id",
+      elevenLabsEffect: "chorus",
+      elevenLabsDirection: "warm, hushed, with measured pauses",
+    });
+    assert.deepEqual(
+      parseStoredBotAudioVoiceProfileV1(serializeBotAudioVoiceProfileV1(profile)),
+      profile,
+    );
+    assert.equal(profile.elevenLabsEffect, "chorus");
+    assert.equal(profile.elevenLabsDirection, "warm, hushed, with measured pauses");
   });
 
   it("detects modified texture recipes and restores canonical defaults", () => {

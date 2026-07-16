@@ -255,7 +255,7 @@ describe("backup bot avatar face style", () => {
     withBackupDatabase((db, userKey) => {
       db.prepare(
         `INSERT INTO bots (
-          id, user_id, name, system_prompt, voice_preview_line, avatar_details_json,
+          id, user_id, name, name_pronunciation, system_prompt, voice_preview_line, avatar_details_json,
           face_eyes_font, face_eye_character, face_eye_animation,
           face_mouth_font, face_mouth_character, face_mouth_animation,
           face_mouth_coffee_pucker, face_font_weight,
@@ -264,11 +264,12 @@ describe("backup bot avatar face style", () => {
           face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y,
           face_thinking_frames,
           created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         "bot-1",
         "user-1",
         "Avatar Bot",
+        "Ah-vah-tar Bot",
         "You are Avatar Bot.",
         "Testing this carefully calibrated voice.",
         '{"version":1,"screen":{"stamps":[{"id":"round-glasses","offsetX":2,"offsetY":-1,"scalePct":105}],"paintMaskBase64":null}}',
@@ -301,6 +302,7 @@ describe("backup bot avatar face style", () => {
       assert.deepEqual(snapshot.bots?.[0], {
         id: "bot-1",
         name: "Avatar Bot",
+        namePronunciation: "Ah-vah-tar Bot",
         systemPrompt: "You are Avatar Bot.",
         voicePreviewLine: "Testing this carefully calibrated voice.",
         exportHash: null,
@@ -353,11 +355,12 @@ describe("backup bot avatar face style", () => {
         faceBlinkOffsetX: -0.08,
         faceBlinkOffsetY: 0.06,
         faceThinkingFrames: ["·", "*", "✦", "*"],
-        authoredAudioVoiceProfile: {
-          v: 2,
-          enabled: true,
-          baseVoiceId: "voice-1",
-          pitch: 0,
+          authoredAudioVoiceProfile: {
+            v: 2,
+            enabled: true,
+            baseVoiceId: "voice-1",
+            elevenLabsEffect: "clean",
+            pitch: 0,
           warmth: 0,
           pace: 0,
           lilt: 0,
@@ -381,16 +384,17 @@ describe("backup bot avatar face style", () => {
       });
 
       db.prepare(
-        "UPDATE bots SET voice_preview_line = NULL, avatar_details_json = NULL, face_eyes_font = NULL, face_eye_character = NULL, face_eye_animation = NULL, face_mouth_font = NULL, face_mouth_character = NULL, face_mouth_animation = NULL, face_mouth_coffee_pucker = 0, face_font_weight = NULL, face_eye_scale = NULL, face_eye_offset_x = NULL, face_eye_offset_y = NULL, face_eye_rotation_deg = NULL, face_mouth_scale = NULL, face_mouth_offset_x = NULL, face_mouth_offset_y = NULL, face_mouth_rotation_deg = NULL, face_blink_bar = NULL, face_blink_scale = NULL, face_blink_offset_x = NULL, face_blink_offset_y = NULL, face_thinking_frames = NULL WHERE id = ?"
+        "UPDATE bots SET name_pronunciation = '', voice_preview_line = NULL, avatar_details_json = NULL, face_eyes_font = NULL, face_eye_character = NULL, face_eye_animation = NULL, face_mouth_font = NULL, face_mouth_character = NULL, face_mouth_animation = NULL, face_mouth_coffee_pucker = 0, face_font_weight = NULL, face_eye_scale = NULL, face_eye_offset_x = NULL, face_eye_offset_y = NULL, face_eye_rotation_deg = NULL, face_mouth_scale = NULL, face_mouth_offset_x = NULL, face_mouth_offset_y = NULL, face_mouth_rotation_deg = NULL, face_blink_bar = NULL, face_blink_scale = NULL, face_blink_offset_x = NULL, face_blink_offset_y = NULL, face_thinking_frames = NULL WHERE id = ?"
       ).run("bot-1");
 
       importUserSnapshot(db, "user-1", snapshot, userKey);
 
       const restored = db
         .prepare(
-          "SELECT voice_preview_line, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, profile_picture_image_id FROM bots WHERE id = ?"
+          "SELECT name_pronunciation, voice_preview_line, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, profile_picture_image_id FROM bots WHERE id = ?"
         )
         .get("bot-1") as {
+        name_pronunciation: string;
         voice_preview_line: string | null;
         avatar_details_json: string | null;
         face_eyes_font: string | null;
@@ -416,6 +420,7 @@ describe("backup bot avatar face style", () => {
         face_thinking_frames: string | null;
         profile_picture_image_id: string | null;
       };
+      assert.equal(restored.name_pronunciation, "Ah-vah-tar Bot");
       assert.equal(restored.voice_preview_line, "Testing this carefully calibrated voice.");
       assert.equal(
         restored.avatar_details_json,
@@ -606,7 +611,7 @@ describe("backup audio voice settings", () => {
   it("round-trips account and bot profiles without touching retired Coffee player columns", () => {
     withBackupDatabase((db, userKey) => {
       db.prepare(
-        "UPDATE users SET voice_mode = ?, voice_effects_enabled = 0, voice_volume = ?, english_voice_engine = ?, default_system_voice_name = ?, default_elevenlabs_voice_id = ?, elevenlabs_voice_bank = ?, elevenlabs_voice_model = ?, player_audio_voice_profile = ?, player_name_pronunciation = ?, prism_default_bot_audio_voice_profile = ? WHERE id = ?"
+        "UPDATE users SET voice_mode = ?, voice_effects_enabled = 0, signal_immersive_voice_effects_enabled = 1, voice_volume = ?, english_voice_engine = ?, default_system_voice_name = ?, default_elevenlabs_voice_id = ?, elevenlabs_voice_bank = ?, elevenlabs_voice_model = ?, player_audio_voice_profile = ?, player_name_pronunciation = ?, prism_default_bot_audio_voice_profile = ? WHERE id = ?"
       ).run(
         "babble",
         0.65,
@@ -617,7 +622,7 @@ describe("backup audio voice settings", () => {
         "eleven_flash_v2_5",
         JSON.stringify({ v: 1, baseVoiceId: "voice-3", pitch: 0, warmth: 0, pace: 0, lilt: 0 }),
         "Jair-id",
-        JSON.stringify({ v: 1, baseVoiceId: "voice-5", pitch: 0.4, warmth: 0, pace: 0, lilt: 0 }),
+        JSON.stringify({ v: 2, baseVoiceId: "voice-5", elevenLabsEffect: "radio", pitch: 0.4, warmth: 0, pace: 0, lilt: 0 }),
         "user-1"
       );
       db.prepare(
@@ -631,8 +636,8 @@ describe("backup audio voice settings", () => {
         "user-1",
         "Voice Bot",
         "You are Voice Bot.",
-        JSON.stringify({ v: 1, baseVoiceId: "voice-4", pitch: 0.2, warmth: -0.1, pace: 0.3, lilt: 0.4 }),
-        JSON.stringify({ v: 1, baseVoiceId: "voice-2", pitch: -0.4, warmth: 0.6, pace: 0, lilt: -0.2 }),
+        JSON.stringify({ v: 2, baseVoiceId: "voice-4", elevenLabsEffect: "echo", pitch: 0.2, warmth: -0.1, pace: 0.3, lilt: 0.4 }),
+        JSON.stringify({ v: 2, baseVoiceId: "voice-2", elevenLabsEffect: "robot", pitch: -0.4, warmth: 0.6, pace: 0, lilt: -0.2 }),
         "2026-01-01T00:00:00.000Z",
         "2026-01-01T00:00:00.000Z"
       );
@@ -640,8 +645,10 @@ describe("backup audio voice settings", () => {
       const snapshot = exportUserSnapshot(db, "user-1", userKey);
       assert.equal(snapshot.settings?.voiceMode, "babble");
       assert.equal(snapshot.settings?.voiceEffectsEnabled, false);
+      assert.equal(snapshot.settings?.signalImmersiveVoiceEffectsEnabled, true);
       assert.equal(snapshot.settings?.voiceVolume, 0.65);
       assert.equal(snapshot.settings?.prismDefaultBotAudioVoiceProfile?.baseVoiceId, "voice-5");
+      assert.equal(snapshot.settings?.prismDefaultBotAudioVoiceProfile?.elevenLabsEffect, "radio");
       assert.equal(snapshot.settings?.englishVoiceEngine, "elevenlabs");
       assert.equal(snapshot.settings?.defaultSystemVoiceName, "Alex");
       assert.equal(snapshot.settings?.defaultElevenLabsVoiceId, "eleven-global");
@@ -651,7 +658,7 @@ describe("backup audio voice settings", () => {
       assert.equal("playerNamePronunciation" in (snapshot.settings ?? {}), false);
 
       db.prepare(
-        "UPDATE users SET voice_mode = 'mute', voice_effects_enabled = 1, voice_volume = 1, english_voice_engine = 'builtin', default_system_voice_name = NULL, default_elevenlabs_voice_id = NULL, elevenlabs_voice_bank = '{}', elevenlabs_voice_model = NULL, player_audio_voice_profile = ?, player_name_pronunciation = ?, prism_default_bot_audio_voice_profile = NULL WHERE id = ?"
+        "UPDATE users SET voice_mode = 'mute', voice_effects_enabled = 1, signal_immersive_voice_effects_enabled = 0, voice_volume = 1, english_voice_engine = 'builtin', default_system_voice_name = NULL, default_elevenlabs_voice_id = NULL, elevenlabs_voice_bank = '{}', elevenlabs_voice_model = NULL, player_audio_voice_profile = ?, player_name_pronunciation = ?, prism_default_bot_audio_voice_profile = NULL WHERE id = ?"
       ).run(
         JSON.stringify({ v: 1, baseVoiceId: "voice-2", pitch: 0, warmth: 0, pace: 0, lilt: 0 }),
         "Keep me",
@@ -660,12 +667,14 @@ describe("backup audio voice settings", () => {
       importUserSnapshot(db, "user-1", snapshot, userKey);
 
       const restoredUser = db.prepare(
-        "SELECT voice_mode, voice_effects_enabled, voice_volume, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, player_audio_voice_profile, player_name_pronunciation, prism_default_bot_audio_voice_profile FROM users WHERE id = ?"
+        "SELECT voice_mode, voice_effects_enabled, signal_immersive_voice_effects_enabled, voice_volume, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, player_audio_voice_profile, player_name_pronunciation, prism_default_bot_audio_voice_profile FROM users WHERE id = ?"
       ).get("user-1") as Record<string, string | null>;
       assert.equal(restoredUser.voice_mode, "babble");
       assert.equal(restoredUser.voice_effects_enabled, 0);
+      assert.equal(restoredUser.signal_immersive_voice_effects_enabled, 1);
       assert.equal(restoredUser.voice_volume, 0.65);
       assert.equal(JSON.parse(restoredUser.prism_default_bot_audio_voice_profile ?? "{}").baseVoiceId, "voice-5");
+      assert.equal(JSON.parse(restoredUser.prism_default_bot_audio_voice_profile ?? "{}").elevenLabsEffect, "radio");
       assert.equal(restoredUser.english_voice_engine, "elevenlabs");
       assert.equal(restoredUser.default_system_voice_name, "Alex");
       assert.equal(restoredUser.default_elevenlabs_voice_id, "eleven-global");
@@ -678,7 +687,9 @@ describe("backup audio voice settings", () => {
         "SELECT authored_audio_voice_profile, audio_voice_profile_override FROM bots WHERE id = ?"
       ).get("voice-bot") as Record<string, string>;
       assert.equal(JSON.parse(restoredBot.authored_audio_voice_profile).baseVoiceId, "voice-4");
+      assert.equal(JSON.parse(restoredBot.authored_audio_voice_profile).elevenLabsEffect, "echo");
       assert.equal(JSON.parse(restoredBot.audio_voice_profile_override).baseVoiceId, "voice-2");
+      assert.equal(JSON.parse(restoredBot.audio_voice_profile_override).elevenLabsEffect, "robot");
     });
   });
 });

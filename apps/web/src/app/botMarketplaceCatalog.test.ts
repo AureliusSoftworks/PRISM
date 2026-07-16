@@ -62,6 +62,7 @@ describe("bot marketplace static catalog", () => {
           v: 2,
           enabled: true,
           baseVoiceId: BOT_AUDIO_VOICE_IDS[index],
+          elevenLabsEffect: "clean",
           pitch: 0,
           warmth: 0,
           pace: 0,

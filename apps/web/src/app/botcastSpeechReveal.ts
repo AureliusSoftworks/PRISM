@@ -1,4 +1,9 @@
 import type { SpeechCharacterAlignment } from "./speechRevealTimeline";
+import {
+  buildSpeechActivityWindows,
+  speechActivityAtMs,
+  type SpeechActivityWindow,
+} from "./speechActivity.ts";
 
 export type BotcastSpeechRevealPhase = "preparing" | "playing" | "ended";
 
@@ -16,6 +21,7 @@ export interface BotcastSpeechRevealState {
   elapsedMs: number;
   progress: number;
   phase: BotcastSpeechRevealPhase;
+  speechActivityWindows: SpeechActivityWindow[] | null;
 }
 
 interface SourceToken {
@@ -131,6 +137,7 @@ export function prepareBotcastSpeechReveal(text: string): BotcastSpeechRevealSta
     elapsedMs: 0,
     progress: 0,
     phase: "preparing",
+    speechActivityWindows: null,
   };
 }
 
@@ -165,6 +172,10 @@ export function startBotcastSpeechReveal({
     elapsedMs: 0,
     progress: 0,
     phase: "playing",
+    speechActivityWindows: buildSpeechActivityWindows(
+      alignment,
+      normalizedDurationMs,
+    ),
   };
 }
 
@@ -211,6 +222,14 @@ export function botcastSpeechRevealVisibleTokenCount(
     }
   }
   return low;
+}
+
+/** Null preserves the existing animation when no provider timing is present. */
+export function botcastSpeechRevealIsVoicing(
+  state: BotcastSpeechRevealState | null | undefined,
+): boolean | null {
+  if (!state || state.phase !== "playing") return false;
+  return speechActivityAtMs(state.speechActivityWindows, state.elapsedMs);
 }
 
 /** Exact transcript prefix containing only fully spoken tokens. */

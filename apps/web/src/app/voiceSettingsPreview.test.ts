@@ -14,7 +14,7 @@ describe("voice settings preview", () => {
     assert.match(pageSource, />\s*Preview\s*<\/button>/);
     assert.match(
       pageSource,
-      /resolveVoicePreviewProfileWithGlobalDefaults\([\s\S]*?rawProfile \?\? \{[\s\S]*?DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,[\s\S]*?systemVoiceName: settings\.defaultSystemVoiceName,[\s\S]*?elevenLabsVoiceId: settings\.defaultElevenLabsVoiceId,[\s\S]*?settings\s*\)/,
+      /resolveVoicePreviewProfile\(\s*rawProfile \?\? settings\.prismDefaultBotAudioVoiceProfile/,
     );
   });
 
@@ -39,6 +39,10 @@ describe("voice settings preview", () => {
     assert.match(pageSource, /allowBabbleFallback: false/);
     assert.match(pageSource, /Babble voice is still loading\/unavailable/);
     assert.match(pageSource, /text: previewText,\s*mode: "english"/);
+    assert.match(
+      pageSource,
+      /explicitOnlineContext: true,[\s\S]*?includeAlignment: true,[\s\S]*?profile: previewProfile/,
+    );
     assert.match(pageSource, /await enqueueEnglishVoice\(/);
   });
 
@@ -78,11 +82,11 @@ describe("voice settings preview", () => {
     assert.doesNotMatch(pageSource, /previewMode !== "bottish"/);
   });
 
-  it("supports global defaults, randomization, and session-cached persona previews", () => {
-    assert.match(pageSource, /<span>System Classic default voice<\/span>/);
-    assert.match(pageSource, /<span>ElevenLabs default voice<\/span>/);
-    assert.match(pageSource, /defaultSystemVoiceName/);
-    assert.match(pageSource, /defaultElevenLabsVoiceId/);
+  it("uses profile-owned identities for randomization and session-cached previews", () => {
+    assert.doesNotMatch(pageSource, /System Classic default voice/);
+    assert.doesNotMatch(pageSource, /ElevenLabs default voice/);
+    assert.doesNotMatch(pageSource, /defaultSystemVoiceName/);
+    assert.doesNotMatch(pageSource, /defaultElevenLabsVoiceId/);
     assert.match(pageSource, />\s*Randomize\s*<\/button>/);
     assert.match(pageSource, /voicePreviewLineCacheRef/);
     assert.match(pageSource, /\/api\/voices\/preview-line/);
@@ -119,33 +123,32 @@ describe("voice settings preview", () => {
 
   it("presents offline English as native system speech rather than a bundled neural voice", () => {
     assert.match(pageSource, /aria-label="Offline English voice engine"/);
-    assert.match(pageSource, /<option value="builtin">System Classic<\/option>/);
+    assert.match(pageSource, /System TTS · Installed/);
     assert.match(
       pageSource,
-      /installed system voice speaks English and Babble/,
+      /Default for every bot and every LOCAL reply/,
     );
     assert.doesNotMatch(pageSource, /Built-in English is packaged with Prism/);
   });
 
-  it("keeps System Classic offline and makes online ElevenLabs an explicit opt-in", () => {
+  it("shows only installed offline and available online engine dropdowns", () => {
+    const settingsSource = pageSource.slice(
+      pageSource.indexOf('aria-labelledby="voice-engine-settings-title"'),
+      pageSource.indexOf("<div className={styles.settingsSaveDock}"),
+    );
     assert.match(
-      pageSource,
+      settingsSource,
       /<span>Offline engine<\/span>[\s\S]*?aria-label="Offline English voice engine"/,
     );
     assert.match(
-      pageSource,
-      /checked=\{\s*settings\.englishVoiceEngine === "elevenlabs"\s*\}[\s\S]*?aria-label="Use ElevenLabs for online English voices"/,
+      settingsSource,
+      /<span>Online engine<\/span>[\s\S]*?aria-label="Online English voice engine"[\s\S]*?<option value="elevenlabs">ElevenLabs<\/option>/,
     );
-    assert.match(pageSource, /<strong>Use ElevenLabs online<\/strong>/);
-    assert.match(pageSource, /Off by default\. Connect an ElevenLabs key/);
-    assert.match(
-      pageSource,
-      /event\.currentTarget[\s\S]*?\.checked[\s\S]*?\? "elevenlabs"[\s\S]*?: "builtin"/,
-    );
-    assert.match(
-      pageSource,
-      /LOCAL turns never use this engine;[\s\S]*?unavailable, Prism uses System Classic/,
-    );
+    assert.doesNotMatch(settingsSource, /Use ElevenLabs online/);
+    assert.doesNotMatch(settingsSource, /type="checkbox"/);
+    assert.doesNotMatch(settingsSource, /ElevenLabs model/);
+    assert.doesNotMatch(settingsSource, /Load voices/);
+    assert.match(settingsSource, /Selecting an ElevenLabs voice in Prism or bot customization overrides/);
   });
 
   it("removes the legacy five-slot ElevenLabs mapping from Voice settings", () => {
@@ -156,23 +159,74 @@ describe("voice settings preview", () => {
     assert.doesNotMatch(settingsSource, /Map the five portable Prism slots/);
     assert.doesNotMatch(settingsSource, /BOT_AUDIO_VOICE_IDS\.map/);
     assert.doesNotMatch(settingsSource, /elevenLabsVoiceBank/);
-    assert.match(
-      settingsSource,
-      /Each bot can choose an ElevenLabs voice in Voice Identity/,
-    );
+    assert.doesNotMatch(settingsSource, /default voice/);
   });
 
-  it("selects real provider voices from a dropdown instead of five fixed slots", () => {
-    assert.match(pageSource, /<select[\s\S]*aria-label="Voice identity"/);
-    assert.match(pageSource, /Voices on this computer/);
-    assert.match(pageSource, /ElevenLabs voices/);
+  it("shows separate per-profile system and ElevenLabs voice identities", () => {
+    const editorSource = pageSource.slice(
+      pageSource.indexOf("function BotVoiceEditor("),
+      pageSource.indexOf("type BotEditOriginalSnapshot"),
+    );
+    assert.match(editorSource, /System voice · OFFLINE/);
+    assert.match(editorSource, /aria-label="System voice identity"/);
+    assert.match(editorSource, /ElevenLabs voice · ONLINE/);
+    assert.match(editorSource, /aria-label="ElevenLabs voice identity"/);
+    assert.match(editorSource, /disabled=\{identityCatalog\.elevenLabs\.loading\}/);
+    assert.match(editorSource, /Use System TTS/);
+    assert.match(editorSource, /Selecting one overrides this profile's System TTS voice/);
     assert.match(pageSource, /systemVoiceName: value/);
     assert.match(pageSource, /elevenLabsVoiceId: value/);
+    assert.doesNotMatch(editorSource, /identityCatalog\.onlineEnabled/);
     assert.doesNotMatch(
       pageSource,
       /\["Fred", "Zarvox", "Trinoids", "Junior", "Ralph"\]/,
     );
     assert.doesNotMatch(pageSource, /className=\{styles\.botVoiceSlots\}/);
+  });
+
+  it("shows per-profile effects only for the saved ElevenLabs lane", () => {
+    const editorSource = pageSource.slice(
+      pageSource.indexOf("function BotVoiceEditor("),
+      pageSource.indexOf("type BotEditOriginalSnapshot"),
+    );
+    assert.match(
+      editorSource,
+      /selectedElevenLabsVoiceValue \? \([\s\S]*?ElevenLabs effect · ONLINE only/,
+    );
+    assert.match(editorSource, /aria-label="ElevenLabs voice effect"/);
+    assert.match(editorSource, /ELEVENLABS_VOICE_EFFECTS\.map/);
+    assert.match(editorSource, /ELEVENLABS_VOICE_EFFECT_DESCRIPTIONS/);
+    assert.match(
+      editorSource,
+      /Applied locally only to ElevenLabs audio; System TTS stays clean\./,
+    );
+    assert.match(
+      pageSource,
+      /enqueueEnglishVoice\([\s\S]*?clip\.engineUsed/,
+    );
+    assert.match(
+      editorSource,
+      /elevenLabsEffect:[\s\S]*?saveImmediately: true/,
+    );
+    assert.match(pageSource, /async function flushBotVoiceAutosaveQueue/);
+    assert.match(pageSource, /voiceAutosavePendingRef/);
+    assert.match(pageSource, /voiceAutosaveInFlightRef/);
+  });
+
+  it("offers a persisted keyword deck for Eleven v3 performance direction", () => {
+    const editorSource = pageSource.slice(
+      pageSource.indexOf("function BotVoiceEditor("),
+      pageSource.indexOf("type BotEditOriginalSnapshot"),
+    );
+    assert.match(editorSource, /Voice direction · ELEVENLABS v3/);
+    assert.match(
+      editorSource,
+      /aria-label="ElevenLabs voice direction keywords"/,
+    );
+    assert.match(editorSource, /defaultValue=\{normalizedProfile\.elevenLabsDirection/);
+    assert.match(editorSource, /elevenLabsDirection: direction/);
+    assert.match(editorSource, /normalizeElevenLabsVoiceDirection/);
+    assert.match(editorSource, /up to eight[\s\S]*?Eleven v3 audio tags/);
   });
 
   it("keeps only audible performance controls and removes custom textures", () => {
@@ -185,7 +239,7 @@ describe("voice settings preview", () => {
     assert.doesNotMatch(editorSource, /<span>Tone<\/span>/);
     assert.match(
       editorSource,
-      /Pitch shapes every voice\. Lilt shapes English only\./,
+      /Pitch shapes every voice, including ElevenLabs\. Lilt shapes English in\s*both lanes\./,
     );
     assert.doesNotMatch(editorSource, /\["pace", "Pace"\]/);
     assert.doesNotMatch(editorSource, /\["warmth", "Warmth"\]/);
@@ -202,6 +256,37 @@ describe("voice settings preview", () => {
     assert.match(
       pageSource,
       /voiceVolume: normalizeBotVoiceVolume\(settings\.voiceVolume\)/,
+    );
+  });
+
+  it("commits pitch and lilt through the selected bot profile instead of global settings", () => {
+    const editorSource = pageSource.slice(
+      pageSource.indexOf("function BotVoiceEditor("),
+      pageSource.indexOf("type BotEditOriginalSnapshot"),
+    );
+    const autosaveSource = pageSource.slice(
+      pageSource.indexOf("async function flushBotVoiceAutosaveQueue"),
+      pageSource.indexOf("// Single submit handler for the top form"),
+    );
+
+    assert.match(editorSource, /\["pitch", "Pitch"\]/);
+    assert.match(editorSource, /\["lilt", "Lilt"\]/);
+    assert.match(
+      editorSource,
+      /onPointerUp=\{\(event\) =>[\s\S]*?saveImmediately: true/,
+    );
+    assert.match(
+      editorSource,
+      /onKeyUp=\{\(event\) =>[\s\S]*?saveImmediately: true/,
+    );
+    assert.match(autosaveSource, /targetId: editingBotId/);
+    assert.match(
+      autosaveSource,
+      /`\/api\/bots\/\$\{pending\.targetId\}`/,
+    );
+    assert.doesNotMatch(
+      autosaveSource,
+      /\/api\/settings|prismDefaultBotAudioVoiceProfile/,
     );
   });
 
@@ -288,8 +373,9 @@ describe("voice settings preview", () => {
     );
     assert.match(
       pageSource,
-      /onPlaybackProgress\?: \(elapsedMs: number, durationMs: number\)/,
+      /onPlaybackProgress\?: \([\s\S]*?elapsedMs: number,[\s\S]*?durationMs: number,[\s\S]*?alignment\?: SpeechCharacterAlignment \| null/,
     );
+    assert.match(pageSource, /speechActivityAtMs\(/);
     assert.match(
       pageSource,
       /mode === "english"[\s\S]*?crtSpeechMouthShapeAtElapsedMs/,

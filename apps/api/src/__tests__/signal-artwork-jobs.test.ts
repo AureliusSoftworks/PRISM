@@ -2,8 +2,68 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   SignalArtworkJobManager,
+  normalizeSignalArtworkAssetKinds,
   type SignalArtworkJobSnapshot,
 } from "../signal-artwork-jobs.ts";
+
+test("normalizes each partial artwork request without adding historical assets", () => {
+  assert.deepEqual(normalizeSignalArtworkAssetKinds(["logo"]), ["logo"]);
+  assert.deepEqual(normalizeSignalArtworkAssetKinds(["day-studio"]), ["day-studio"]);
+  assert.deepEqual(normalizeSignalArtworkAssetKinds(["night-studio"]), ["night-studio"]);
+  assert.deepEqual(
+    normalizeSignalArtworkAssetKinds(["logo", "night-studio"]),
+    ["night-studio", "logo"],
+  );
+  assert.deepEqual(normalizeSignalArtworkAssetKinds(undefined), [
+    "night-studio",
+    "day-studio",
+    "logo",
+  ]);
+  assert.deepEqual(normalizeSignalArtworkAssetKinds(["unknown"]), []);
+  assert.deepEqual(normalizeSignalArtworkAssetKinds("logo"), []);
+});
+
+test("live progress contains only the specifically requested artwork asset", async () => {
+  for (const kind of ["logo", "day-studio", "night-studio"] as const) {
+    let releaseGeneration!: () => void;
+    const generationGate = new Promise<void>((resolve) => {
+      releaseGeneration = resolve;
+    });
+    const userId = `user-${kind}`;
+    const manager = new SignalArtworkJobManager(
+      () => new Date(),
+      () => `job-${kind}`,
+    );
+    const initial = manager.start({
+      userId,
+      showId: `show-${kind}`,
+      showName: `Only ${kind}`,
+      kinds: [kind],
+      sourceNightImageId: kind === "day-studio" ? "saved-night" : null,
+      releaseSlot: async () => undefined,
+      generate: async (generatedKind) => {
+        await generationGate;
+        return {
+          imageId: `image-${generatedKind}`,
+          imageUrl: `/images/${generatedKind}`,
+        };
+      },
+      attach: async () => undefined,
+    });
+
+    assert.equal(initial.completedCount, 0);
+    assert.equal(initial.totalCount, 1);
+    assert.equal(initial.currentAsset, kind);
+    assert.deepEqual(initial.assets.map((asset) => asset.kind), [kind]);
+    assert.deepEqual(initial.assets.map((asset) => asset.status), ["generating"]);
+
+    releaseGeneration();
+    const completed = await waitForTerminal(manager, userId);
+    assert.equal(completed.completedCount, 1);
+    assert.equal(completed.totalCount, 1);
+    assert.deepEqual(completed.assets.map((asset) => asset.kind), [kind]);
+  }
+});
 
 async function waitForTerminal(
   manager: SignalArtworkJobManager,
@@ -148,4 +208,85 @@ test("an attachment failure keeps the generated canonical Dark image available t
     job.assets.find((asset) => asset.kind === "night-studio")?.imageId,
     "image-night-studio",
   );
+});
+
+test("runs a single requested logo as a one-asset background job", async () => {
+  const generated: string[] = [];
+  const manager = new SignalArtworkJobManager(() => new Date(), () => "job-logo");
+  manager.start({
+    userId: "user-logo",
+    showId: "show-logo",
+    showName: "Small Mark",
+    kinds: ["logo"],
+    releaseSlot: async () => undefined,
+    generate: async (kind, sourceNightImageId) => {
+      generated.push(`${kind}:${sourceNightImageId ?? "none"}`);
+      return { imageId: "image-logo", imageUrl: "/images/logo" };
+    },
+    attach: async () => undefined,
+  });
+
+  const job = await waitForTerminal(manager, "user-logo");
+  assert.equal(job.status, "completed");
+  assert.equal(job.completedCount, 1);
+  assert.equal(job.totalCount, 1);
+  assert.deepEqual(job.assets.map((asset) => asset.kind), ["logo"]);
+  assert.deepEqual(generated, ["logo:none"]);
+});
+
+test("uses the saved Dark studio as the source for a Light-only refresh", async () => {
+  const sources: Array<string | null> = [];
+  const manager = new SignalArtworkJobManager(() => new Date(), () => "job-day");
+  manager.start({
+    userId: "user-day",
+    showId: "show-day",
+    showName: "Day Shift",
+    kinds: ["day-studio"],
+    sourceNightImageId: "saved-night",
+    releaseSlot: async () => undefined,
+    generate: async (_kind, sourceNightImageId) => {
+      sources.push(sourceNightImageId);
+      return { imageId: "image-day", imageUrl: "/images/day" };
+    },
+    attach: async () => undefined,
+  });
+
+  const job = await waitForTerminal(manager, "user-day");
+  assert.equal(job.status, "completed");
+  assert.equal(job.totalCount, 1);
+  assert.deepEqual(sources, ["saved-night"]);
+});
+
+test("can render the independent online logo while preserving the Dark-to-Light dependency", async () => {
+  const started: string[] = [];
+  let releaseNight: (() => void) | null = null;
+  const nightGate = new Promise<void>((resolve) => {
+    releaseNight = resolve;
+  });
+  const manager = new SignalArtworkJobManager(() => new Date(), () => "job-parallel");
+  manager.start({
+    userId: "user-parallel",
+    showId: "show-parallel",
+    showName: "Faster Signal",
+    parallelIndependentAssets: true,
+    releaseSlot: async () => undefined,
+    generate: async (kind, sourceNightImageId) => {
+      started.push(`${kind}:${sourceNightImageId ?? "none"}`);
+      if (kind === "night-studio") await nightGate;
+      return { imageId: `image-${kind}`, imageUrl: `/images/${kind}` };
+    },
+    attach: async () => undefined,
+  });
+
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.deepEqual(started, ["night-studio:none", "logo:none"]);
+  releaseNight?.();
+  const job = await waitForTerminal(manager, "user-parallel");
+  assert.equal(job.status, "completed");
+  assert.equal(job.completedCount, 3);
+  assert.deepEqual(started, [
+    "night-studio:none",
+    "logo:none",
+    "day-studio:image-night-studio",
+  ]);
 });

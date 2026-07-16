@@ -79,4 +79,23 @@ describe("Coffee speech delivery", () => {
     assert.equal(coffeeDeliveryVisibleLengthAtMs(plan, 750), 2);
     assert.equal(coffeeDeliveryVisibleLengthAtMs(plan, 850), 3);
   });
+
+  it("rests the speaking face during provider-timed phrase pauses", () => {
+    const text = "Hi. There";
+    const plan = buildCoffeeDeliveryPlan({
+      text,
+      seed: "aligned-pause",
+      humanPacing: 0,
+      audioDurationMs: 1_000,
+      audioAlignment: {
+        characters: Array.from(text),
+        characterStartTimesSeconds: [0, 0.08, 0.16, 0.35, 0.58, 0.66, 0.74, 0.82, 0.9],
+        characterEndTimesSeconds: [0.08, 0.16, 0.35, 0.58, 0.66, 0.74, 0.82, 0.9, 1],
+      },
+    });
+
+    assert.equal(coffeeDeliveryIsHoldingAtMs(plan, 100), false);
+    assert.equal(coffeeDeliveryIsHoldingAtMs(plan, 400), true);
+    assert.equal(coffeeDeliveryIsHoldingAtMs(plan, 620), false);
+  });
 });

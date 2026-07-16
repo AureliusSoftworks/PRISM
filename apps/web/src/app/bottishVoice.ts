@@ -496,6 +496,7 @@ async function playPlan(
     effectsEnabled,
     lifecycle,
     alignment: plan.alignment,
+    isCurrent: () => expectedGeneration === generation,
   });
   if (!played) await playPlanWithMedia(plan, profile, expectedGeneration, lifecycle);
 }
@@ -769,6 +770,7 @@ async function playBabble(
     lifecycle,
     roboticPlan,
     cleanRoboticCarrier: true,
+    isCurrent: () => expectedGeneration === generation,
   });
   if (!played) {
     await playHybridBytesWithMedia(

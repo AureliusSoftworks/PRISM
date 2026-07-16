@@ -43,6 +43,15 @@ editor panels, and branching-fiction authoring are later roadmap items.
 Slate inherits the account's effective provider and model defaults. V1 does not
 add per-project provider, model, sampling, or reasoning controls.
 
+## Continuity versioning
+
+Continuity is a larger narrative framework with a capability version independent
+from the Slate applet version. Its shared version contract begins at planned
+`v0.0` and remains visible in Slate settings. Promote it only when the
+corresponding end-to-end capability is genuinely usable; internal schema,
+extractor, resolver, and prompt-projection revisions may advance separately
+without presenting implementation noise to the writer.
+
 ## Workspace contract
 
 The primary workspace has three conceptual regions:

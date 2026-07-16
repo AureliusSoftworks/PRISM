@@ -10,6 +10,7 @@ import { DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1, botPowerSourceHashV1 } from "@local
 
 const pristine: BotCustomizerSavePristine = {
   name: "Iris",
+  namePronunciation: "",
   prompt: "stored prompt",
   rawPrompt: "raw stored prompt",
   localModel: "llama3.2",
@@ -57,6 +58,7 @@ const currentFromPristine = (
   overrides: Partial<BotCustomizerSaveCurrent> = {}
 ): BotCustomizerSaveCurrent => ({
   name: pristine.name,
+  namePronunciation: pristine.namePronunciation,
   storedSystemPrompt: pristine.prompt,
   advancedMode: false,
   localModel: pristine.localModel,
@@ -110,6 +112,16 @@ describe("bot customizer save patch", () => {
     assert.deepEqual(
       buildBotCustomizerSavePatch(currentFromPristine({ name: "Iriss" }), pristine),
       { name: "Iriss" }
+    );
+  });
+
+  it("patches a normalized bot-owned name pronunciation independently", () => {
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(
+        currentFromPristine({ namePronunciation: "  Eye-riss  " }),
+        pristine,
+      ),
+      { namePronunciation: "Eye-riss" },
     );
   });
 
@@ -344,6 +356,9 @@ describe("bot customizer save patch", () => {
     const audioVoiceProfile = {
       ...pristine.audioVoiceProfile,
       baseVoiceId: "voice-4" as const,
+      elevenLabsVoiceId: "voice-id",
+      elevenLabsEffect: "deep-space" as const,
+      elevenLabsDirection: "warm, conspiratorial",
       pitch: 0.35,
     };
     assert.deepEqual(

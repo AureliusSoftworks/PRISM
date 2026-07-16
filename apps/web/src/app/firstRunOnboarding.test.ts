@@ -55,15 +55,15 @@ describe("first-run onboarding", () => {
     assert.match(pageSource, /Image generation has its own LOCAL\/ONLINE choice/u);
     assert.match(
       pageSource,
-      /Voice settings keep English speech on\s*System Classic unless you explicitly enable online voices/u,
+      /Voices default to System TTS; selecting\s*an ElevenLabs voice in Prism or bot customization overrides\s*it only for eligible ONLINE speech/u,
     );
     assert.match(pageSource, /Chat home base/u);
   });
 
-  it("explains that ElevenLabs is an optional online voice preference", () => {
+  it("explains that an ElevenLabs profile voice is the online override", () => {
     assert.match(
       pageSource,
-      /Speech stays on System Classic until you opt in to ElevenLabs/u,
+      /Speech stays on System TTS until you select an ElevenLabs voice in Prism or bot customization/u,
     );
   });
 

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   SIGNAL_ARTWORK_JOB_EVENT,
   signalArtworkAssetLabel,
+  signalArtworkJobHeadline,
   signalArtworkJobIsActive,
   type SignalArtworkJobSnapshot,
 } from "./signalArtworkJob";
@@ -23,19 +24,6 @@ function elapsedLabel(startedAt: string, nowMs: number): string {
   const minutes = Math.floor(elapsedSeconds / 60);
   const seconds = elapsedSeconds % 60;
   return minutes > 0 ? `${minutes}m ${String(seconds).padStart(2, "0")}s` : `${seconds}s`;
-}
-
-function headline(job: SignalArtworkJobSnapshot): string {
-  if (job.status === "cancelling") return "Stopping safely…";
-  if (job.status === "completed") return "Show look complete";
-  if (job.status === "partial") return "Show look partially complete";
-  if (job.status === "failed") return "Show look needs attention";
-  if (job.status === "cancelled") return "Show look cancelled";
-  if (job.currentAsset === "day-studio") {
-    return "Relighting the completed Dark studio";
-  }
-  if (job.currentAsset) return `Generating ${signalArtworkAssetLabel(job.currentAsset)}`;
-  return "Preparing show artwork";
 }
 
 export function SignalArtworkJobActivity({
@@ -135,7 +123,7 @@ export function SignalArtworkJobActivity({
       <header>
         <div>
           <span className={styles.eyebrow}>Signal · {job.showName}</span>
-          <strong>{headline(job)}</strong>
+          <strong>{signalArtworkJobHeadline(job)}</strong>
         </div>
         <span className={styles.count}>{job.completedCount}/{job.totalCount}</span>
       </header>

@@ -19,6 +19,7 @@ function baseBotJson(overrides: Partial<PrismBotArchiveJson> = {}): PrismBotArch
     exportedAt: "2026-07-07T00:00:00.000Z",
     bot: {
       name: "Plato",
+      namePronunciation: "  Play-toe  ",
       color: "#4F46A5",
       glyph: "lucideDrama",
       voicePreviewLine: "The examined voice is worth hearing.",
@@ -71,6 +72,7 @@ describe("botArchive", () => {
 
     assert.equal(parsed.botJson.schema, PRISM_BOT_ARCHIVE_SCHEMA);
     assert.equal(parsed.botJson.bot.name, "Plato");
+    assert.equal(parsed.botJson.bot.namePronunciation, "Play-toe");
     assert.equal(parsed.botJson.bot.voicePreviewLine, "The examined voice is worth hearing.");
     assert.deepEqual(parsed.botJson.bot.avatarDetails, {
       version: 1,

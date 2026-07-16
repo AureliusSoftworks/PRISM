@@ -36,7 +36,7 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Choose how replies recover",
-        body: "AUTO keeps the current response model as Primary, then quietly tries your two saved fallbacks if a reply fails validation. Image generation keeps its own LOCAL/ONLINE choice in Images. Voice settings keep English speech on System Classic unless you explicitly enable online voices.",
+        body: "AUTO keeps the current response model as Primary, then quietly tries your two saved fallbacks if a reply fails validation. Image generation keeps its own LOCAL/ONLINE choice in Images. Voices default to System TTS; selecting an ElevenLabs voice in Prism or bot customization overrides it only for eligible ONLINE speech.",
         clickLabel: "the LOCAL, AUTO, ONLINE control",
         targetSelector: '[data-tutorial-target="auto-response-mode"]',
       },
@@ -129,7 +129,7 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Book tonight’s episode",
-        body: "Choose one guest, set the topic, and write an optional private angle. Pick LOCAL, AUTO, or ONLINE. AUTO keeps the account primary and recovers through your configured fallback chain; the other lanes can use the account model or a recording-only override. Signal locks that routing when the episode begins. The brief shapes the host but never goes on mic.",
+        body: "Choose one guest, set the topic, and write an optional private angle. Pick LOCAL, AUTO, or ONLINE. AUTO keeps the account primary and recovers through your configured fallback chain; the other lanes can use the account model or a recording-only override. Signal locks that routing when the episode begins. The brief shapes the host but never goes on mic. Signal Settings can also opt ElevenLabs voices into sparse, saved vocal reactions.",
         clickLabel: "the episode setup desk",
         targetSelector: '[data-tutorial-target="botcast-setup"]',
       },

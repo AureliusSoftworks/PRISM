@@ -18,7 +18,7 @@ export type SignalArtworkJobSnapshot = {
   status: SignalArtworkJobStatus;
   currentAsset: SignalArtworkAssetKind | null;
   completedCount: number;
-  totalCount: 3;
+  totalCount: number;
   assets: Array<{
     kind: SignalArtworkAssetKind;
     status:
@@ -67,4 +67,25 @@ export function signalArtworkAssetLabel(kind: SignalArtworkAssetKind): string {
   if (kind === "night-studio") return "Dark studio";
   if (kind === "day-studio") return "Light relight";
   return "Logo";
+}
+
+export function signalArtworkJobHeadline(
+  job: SignalArtworkJobSnapshot,
+): string {
+  if (job.status === "cancelling") return "Stopping safely…";
+  if (job.status === "completed") {
+    return job.totalCount === 1
+      ? `${signalArtworkAssetLabel(job.assets[0]!.kind)} ready`
+      : "Show look complete";
+  }
+  if (job.status === "partial") return "Show look partially complete";
+  if (job.status === "failed") return "Show look needs attention";
+  if (job.status === "cancelled") return "Show look cancelled";
+  if (job.currentAsset === "day-studio") {
+    return "Relighting the completed Dark studio";
+  }
+  if (job.currentAsset) {
+    return `Generating ${signalArtworkAssetLabel(job.currentAsset)}`;
+  }
+  return "Preparing show artwork";
 }

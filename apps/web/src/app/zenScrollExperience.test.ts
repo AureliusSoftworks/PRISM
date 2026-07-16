@@ -23,6 +23,22 @@ describe("Zen scroll experience", () => {
     assert.doesNotMatch(scrollHandlerBody, /MANUAL_SCROLL_UP_THRESHOLD_PX|previousScrollTop/);
   });
 
+  it("remeasures the live tail when the current Zen reply grows or settles", () => {
+    assert.match(
+      pageSource,
+      /observeCurrentZenReadableAnchorRow\(\)[\s\S]*reconcileChatScrollAfterLayoutChange/,
+    );
+    assert.match(
+      pageSource,
+      /mutationObserver\?\.observe\(scrollRoot, \{ childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: \[ "data-chat-typing-line", "data-chat-render-kind", "data-reply-runway-active", \], \}\)/,
+    );
+    assert.match(
+      pageSource,
+      /resizeObserver\?\.unobserve\(observedAnchorRow\)[\s\S]*resizeObserver\?\.observe\(observedAnchorRow\)/,
+    );
+    assert.match(pageSource, /latestUserMessageId, replyRunwayActive, \]\)/);
+  });
+
   it("uses one explicit follow loop and one wheel path", () => {
     assert.doesNotMatch(pageSource, /handleNativeWheel/);
     assert.doesNotMatch(pageSource, /CHAT_MODE_ASSISTANT_ANCHOR_SMOOTH_SCROLL_MS/);

@@ -1,11 +1,12 @@
 import {
+  BOTCAST_IMMERSIVE_VOICE_TAGS,
   normalizeBotAudioVoiceProfileV1,
   normalizeEnglishVoiceEngine,
+  normalizeElevenLabsVoiceDirection,
   normalizeVoiceMode,
   applyPlayerNamePronunciation as applySharedPlayerNamePronunciation,
   type BotAudioVoiceProfileV1,
   type EnglishVoiceEngine,
-  type NormalizedBotAudioVoiceProfileV1,
   type VoiceMode,
 } from "@localai/shared";
 
@@ -14,23 +15,6 @@ export function resolveElevenLabsVoiceId(
 ): string | null {
   const normalized = normalizeBotAudioVoiceProfileV1(profile);
   return normalized.elevenLabsVoiceId || null;
-}
-
-export function applyGlobalEnglishVoiceDefault(
-  profile: unknown,
-  _engine: EnglishVoiceEngine,
-  defaults: { systemVoiceName?: string | null; elevenLabsVoiceId?: string | null }
-): NormalizedBotAudioVoiceProfileV1 {
-  const normalized = normalizeBotAudioVoiceProfileV1(profile);
-  return {
-    ...normalized,
-    ...(!normalized.systemVoiceName && defaults.systemVoiceName
-      ? { systemVoiceName: defaults.systemVoiceName }
-      : {}),
-    ...(!normalized.elevenLabsVoiceId && defaults.elevenLabsVoiceId
-      ? { elevenLabsVoiceId: defaults.elevenLabsVoiceId }
-      : {}),
-  };
 }
 
 export interface VoiceCapabilities {
@@ -142,10 +126,73 @@ type ElevenLabsSpeechArgs = {
   fetchImpl?: typeof fetch;
 };
 
+const ELEVENLABS_AUDIO_TAG_PATTERN = /\[([^\]\n]{1,48})\]/giu;
+
+function normalizeElevenLabsTaggedText(
+  value: unknown,
+  spokenText: string,
+): string | null {
+  if (typeof value !== "string") return null;
+  const taggedText = value.replace(/\s+/gu, " ").trim().slice(0, 4_200);
+  if (!taggedText) return null;
+  const allowed = new Set<string>(BOTCAST_IMMERSIVE_VOICE_TAGS);
+  const matches = [...taggedText.matchAll(ELEVENLABS_AUDIO_TAG_PATTERN)];
+  if (
+    matches.length === 0 ||
+    matches.length > 2 ||
+    matches.some((match) => !allowed.has((match[1] ?? "").trim().toLowerCase()))
+  ) {
+    return null;
+  }
+  const withoutTags = taggedText
+    .replace(ELEVENLABS_AUDIO_TAG_PATTERN, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  if (withoutTags !== spokenText.replace(/\s+/gu, " ").trim()) return null;
+  const firstTag = matches[0];
+  const lastTag = matches.at(-1);
+  const firstTagAtStart = taggedText.slice(0, firstTag?.index ?? 0).trim() === "";
+  const lastTagEnd = (lastTag?.index ?? 0) + (lastTag?.[0]?.length ?? 0);
+  const lastTagAtEnd = taggedText.slice(lastTagEnd).trim() === "";
+  if (!firstTagAtStart && !lastTagAtEnd) return null;
+  return taggedText;
+}
+
+function elevenLabsSpeechInput(args: ElevenLabsSpeechArgs): {
+  text: string;
+  model: ElevenLabsTtsModel;
+  directionPrefix: string;
+} {
+  const direction = normalizeElevenLabsVoiceDirection(
+    normalizeBotAudioVoiceProfileV1(args.profile).elevenLabsDirection
+  );
+  const hasAudioTags = [...args.text.matchAll(ELEVENLABS_AUDIO_TAG_PATTERN)].some(
+    (match) =>
+      (BOTCAST_IMMERSIVE_VOICE_TAGS as readonly string[]).includes(
+        (match[1] ?? "").trim().toLowerCase(),
+      ),
+  );
+  const model = direction || hasAudioTags
+    ? "eleven_v3"
+    : normalizeElevenLabsTtsModel(args.model);
+  const directionPrefix = direction
+    ? `${direction
+        .split(",")
+        .map((entry) => `[${entry.trim().replace(/[\[\]]/gu, "")}]`)
+        .join(" ")} `
+    : "";
+  return {
+    text: `${directionPrefix}${args.text}`,
+    model,
+    directionPrefix,
+  };
+}
+
 function elevenLabsSpeechRequestBody(args: ElevenLabsSpeechArgs): string {
+  const input = elevenLabsSpeechInput(args);
   return JSON.stringify({
-    text: args.text,
-    model_id: normalizeElevenLabsTtsModel(args.model),
+    text: input.text,
+    model_id: input.model,
     voice_settings: elevenLabsVoiceSettings(args.profile),
   });
 }
@@ -184,6 +231,60 @@ function normalizeVoiceCharacterAlignment(value: unknown): VoiceCharacterAlignme
   };
 }
 
+function withoutDirectionPrefixAlignment(
+  alignment: VoiceCharacterAlignment | null,
+  directionPrefix: string
+): VoiceCharacterAlignment | null {
+  if (!alignment || !directionPrefix) return alignment;
+  const prefixLength = Array.from(directionPrefix).length;
+  if (alignment.characters.slice(0, prefixLength).join("") !== directionPrefix) {
+    return alignment;
+  }
+  return {
+    characters: alignment.characters.slice(prefixLength),
+    characterStartTimesSeconds: alignment.characterStartTimesSeconds.slice(prefixLength),
+    characterEndTimesSeconds: alignment.characterEndTimesSeconds.slice(prefixLength),
+  };
+}
+
+function withoutEmbeddedAudioTagAlignment(
+  alignment: VoiceCharacterAlignment | null,
+  speechText: string,
+): VoiceCharacterAlignment | null {
+  if (!alignment || !speechText.includes("[")) return alignment;
+  const characters = Array.from(speechText);
+  if (alignment.characters.join("") !== characters.join("")) return alignment;
+  const remove = new Set<number>();
+  const allowed = new Set<string>(BOTCAST_IMMERSIVE_VOICE_TAGS);
+  for (let index = 0; index < characters.length; index += 1) {
+    if (characters[index] !== "[") continue;
+    const end = characters.indexOf("]", index + 1);
+    if (end < 0) continue;
+    const tag = characters.slice(index + 1, end).join("").trim().toLowerCase();
+    if (!allowed.has(tag)) continue;
+    for (let tagIndex = index; tagIndex <= end; tagIndex += 1) {
+      remove.add(tagIndex);
+    }
+    index = end;
+  }
+  if (remove.size === 0) return alignment;
+  const kept = characters
+    .map((character, index) => ({ character, index }))
+    .filter(({ index }) => !remove.has(index));
+  while (kept[0]?.character.trim() === "") kept.shift();
+  while (kept.at(-1)?.character.trim() === "") kept.pop();
+  const indexes = kept.map(({ index }) => index);
+  return {
+    characters: indexes.map((index) => alignment.characters[index]!),
+    characterStartTimesSeconds: indexes.map(
+      (index) => alignment.characterStartTimesSeconds[index]!,
+    ),
+    characterEndTimesSeconds: indexes.map(
+      (index) => alignment.characterEndTimesSeconds[index]!,
+    ),
+  };
+}
+
 export async function requestElevenLabsSpeech(args: {
   apiKey: string;
   voiceId: string;
@@ -216,6 +317,7 @@ export async function requestElevenLabsSpeech(args: {
 export async function requestElevenLabsSpeechWithTimestamps(
   args: ElevenLabsSpeechArgs
 ): Promise<ElevenLabsTimestampedSpeech> {
+  const input = elevenLabsSpeechInput(args);
   const fetchImpl = args.fetchImpl ?? fetch;
   const response = await fetchImpl(
     `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(args.voiceId)}/with-timestamps?output_format=mp3_44100_128`,
@@ -242,11 +344,22 @@ export async function requestElevenLabsSpeechWithTimestamps(
   if (!audioBase64) {
     throw new ElevenLabsVoiceError(502, "ElevenLabs returned empty timestamped audio.");
   }
+  const alignment = withoutDirectionPrefixAlignment(
+    normalizeVoiceCharacterAlignment(payload.alignment),
+    input.directionPrefix
+  );
+  const normalizedAlignment = withoutDirectionPrefixAlignment(
+    normalizeVoiceCharacterAlignment(payload.normalized_alignment),
+    input.directionPrefix
+  );
   return {
     audioBase64,
     audioContentType: "audio/mpeg",
-    alignment: normalizeVoiceCharacterAlignment(payload.alignment),
-    normalizedAlignment: normalizeVoiceCharacterAlignment(payload.normalized_alignment),
+    alignment: withoutEmbeddedAudioTagAlignment(alignment, args.text),
+    normalizedAlignment: withoutEmbeddedAudioTagAlignment(
+      normalizedAlignment,
+      args.text,
+    ),
     providerRequestId: response.headers.get("request-id"),
   };
 }
@@ -303,6 +416,7 @@ export async function requestElevenLabsVoiceCatalog(args: {
 
 export type VoiceSynthesisRequest = {
   text: string;
+  elevenLabsText: string | null;
   mode: VoiceMode;
   engine: EnglishVoiceEngine;
   profile: BotAudioVoiceProfileV1;
@@ -345,6 +459,7 @@ export function validateVoiceSynthesisRequest(body: Record<string, unknown>): Vo
     : null;
   return {
     text,
+    elevenLabsText: normalizeElevenLabsTaggedText(body.elevenLabsText, text),
     mode: normalizeVoiceMode(body.mode),
     engine: normalizeEnglishVoiceEngine(body.engine),
     profile: normalizeBotAudioVoiceProfileV1(body.profile),
@@ -362,7 +477,7 @@ export function resolveVoiceSynthesisBoundary(args: VoiceSynthesisRequest & {
 }):
   | { ok: true; kind: "builtin-babble"; engineUsed: "builtin-babble"; text: string; profile: BotAudioVoiceProfileV1 }
   | { ok: true; kind: "builtin-english"; engineUsed: "builtin" | "builtin-local-fallback"; text: string; profile: BotAudioVoiceProfileV1 }
-  | { ok: true; kind: "elevenlabs-stream"; engineUsed: "elevenlabs"; text: string; profile: BotAudioVoiceProfileV1 }
+  | { ok: true; kind: "elevenlabs-stream"; engineUsed: "elevenlabs"; text: string; elevenLabsText: string; profile: BotAudioVoiceProfileV1 }
   | { ok: false; status: 409 | 503; code: "muted" | "procedural-client-only" | "online-context-required" | "english-worker-unavailable" | "elevenlabs-unavailable"; engineUsed?: "builtin-local-fallback" } {
   const localFallback = args.engine === "elevenlabs" && args.persistedMessageProvider === "local";
   const engineUsed = localFallback ? "builtin-local-fallback" : args.engine;
@@ -399,6 +514,7 @@ export function resolveVoiceSynthesisBoundary(args: VoiceSynthesisRequest & {
       kind: "elevenlabs-stream",
       engineUsed: "elevenlabs",
       text: args.text,
+      elevenLabsText: args.elevenLabsText ?? args.text,
       profile: args.profile,
     };
   }
