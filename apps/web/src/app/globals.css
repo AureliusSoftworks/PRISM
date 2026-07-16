@@ -47,6 +47,18 @@ body {
   margin: 0;
 }
 
+/* Decorative motion follows the shared visual lifecycle. Semantic arrivals,
+   transitions, typewriters, audio, clocks, and network work are intentionally
+   not marked with this attribute and continue independently. */
+html[data-prism-visual-lifecycle="suspended"]
+  [data-prism-decorative-motion="true"],
+html[data-prism-visual-lifecycle="suspended"]
+  [data-prism-decorative-motion="true"]::before,
+html[data-prism-visual-lifecycle="suspended"]
+  [data-prism-decorative-motion="true"]::after {
+  animation-play-state: paused !important;
+}
+
 a {
   color: inherit;
   text-decoration: none;
