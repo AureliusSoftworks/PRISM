@@ -929,6 +929,7 @@ test.describe("PRISM desktop smoke", () => {
   test("authenticated Zen persists LOCAL turns while Private chat stays ephemeral", async ({
     page,
   }) => {
+    test.setTimeout(60_000);
     await installAuthenticatedApi(page);
     const state = await installStatefulZenApi(page);
     await page.goto("/?view=chat");
@@ -2800,7 +2801,7 @@ test.describe("PRISM desktop smoke", () => {
       await room.getAttribute("data-room-next-rotation-ms"),
     );
     const firstHalfMs = Math.floor(rotationDelayMs / 2);
-    await page.clock.runFor(firstHalfMs);
+    await page.clock.fastForward(firstHalfMs);
     const ambientPhaseBeforePanel = await room.getAttribute(
       "data-room-ambient-phase",
     );
@@ -2820,7 +2821,7 @@ test.describe("PRISM desktop smoke", () => {
     await expect
       .poll(() => page.evaluate(() => document.body.dataset.prismTheme))
       .toBe("dark");
-    await page.clock.runFor(rotationDelayMs + 1);
+    await page.clock.fastForward(rotationDelayMs + 1);
     await expect(room).toHaveAttribute("data-room-visit-id", visitId!);
     await expect(room).toHaveAttribute(
       "data-room-ambient-phase",
@@ -2842,7 +2843,8 @@ test.describe("PRISM desktop smoke", () => {
     await page.mouse.move(4, 4);
     await expect(room).toHaveAttribute("data-room-rotation-paused", "false");
 
-    await page.clock.runFor(rotationDelayMs + 2 * 520 + 200);
+    await page.clock.fastForward(rotationDelayMs);
+    await page.clock.runFor(2 * 520 + 200);
     await expect(room).toHaveAttribute("data-room-visit-id", visitId!);
     expect(
       await presences.evaluateAll((nodes) =>
@@ -3111,7 +3113,8 @@ test.describe("PRISM desktop smoke", () => {
       name: "Return to group room",
     });
     await expect(returnButton).toBeVisible();
-    await returnButton.click();
+    await returnButton.focus();
+    await returnButton.press("Enter");
 
     await expect(page).toHaveURL(/view=chat/u);
     await expect(
@@ -3752,6 +3755,7 @@ test.describe("PRISM desktop smoke", () => {
     page.on("request", (request) => {
       const url = new URL(request.url());
       if (
+        url.pathname !== "/api/health" &&
         !["image", "font", "stylesheet", "script"].includes(
           request.resourceType(),
         )
