@@ -485,6 +485,7 @@ import {
   type BotFaceThinkingFrames,
   type BotAudioVoiceProfileV1,
   BOTCAST_ELEVENLABS_INTRO_DURATION_MS,
+  signalPersonaTemperamentFor,
   type BotcastProducerCue,
   type BotcastShowPatchRequest,
   type OpinionBand,
@@ -6568,9 +6569,13 @@ function buildRoutes(): RouteDefinition[] {
       if (!apiKey) {
         throw new HttpError(409, "Add an ElevenLabs API key in Settings first.");
       }
+      const host = db
+        .prepare("SELECT system_prompt FROM bots WHERE id = ? AND user_id = ?")
+        .get(show.hostBotId, userId) as { system_prompt: string } | undefined;
+      if (!host) throw new HttpError(404, "Signal host bot not found.");
       const compositionPlan = buildSignalElevenLabsMusicCompositionPlan({
-        showId: show.id,
-        accentColor: show.accentColor,
+        temperament: signalPersonaTemperamentFor(host.system_prompt),
+        seed: `${show.id}:${show.logo.seed}`,
       });
       const controller = new AbortController();
       const onClose = () => controller.abort();
@@ -8607,10 +8612,8 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("GET", "/api/voices/elevenlabs", async (ctx) => {
       const userId = requireAuth(ctx);
-      const user = getUserRow(userId);
-      if (user.preferred_provider === "local") {
-        throw new HttpError(409, "Switch to Online before loading ElevenLabs voices.");
-      }
+      // Catalog browsing configures a future ONLINE voice and is independent
+      // of the active response lane. Synthesis keeps its own LOCAL boundary.
       const userKey = decryptUserKey(userId);
       const apiKey = getElevenLabsApiKeyForUser(userId, userKey) ?? config.elevenLabsApiKey;
       if (!apiKey) throw new HttpError(409, "Add an ElevenLabs API key in Settings first.");

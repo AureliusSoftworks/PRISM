@@ -202,6 +202,9 @@ describe("Signal experience shell", () => {
     assert.match(source, /stopIntroPreview\(\);\s*onPrepareUtterance/u);
     assert.match(source, /Create with ElevenLabs/u);
     assert.match(source, /Use Signal Synth/u);
+    assert.match(source, /<span>Opening ident<\/span>/u);
+    assert.match(source, /!showHasCustomArtwork\(selectedShow\) \? \(/u);
+    assert.match(pageSource, /personaTemperament: signalPersonaTemperamentFor\(bot\.system_prompt\)/u);
     assert.match(css, /\.episodePreRoll\s*\{[^}]*position:\s*fixed/u);
     assert.match(
       css,
@@ -339,6 +342,12 @@ describe("Signal experience shell", () => {
     assert.match(source, /aria-label="Optional custom show artwork"/u);
     assert.match(source, /data-tutorial-target="botcast-brand-controls"/u);
     assert.match(css, /\.showLookInvitation button\s*\{[^}]*linear-gradient/iu);
+    assert.match(source, /className=\{styles\.showIdentityGearButton\}/u);
+    assert.match(source, /aria-expanded=\{showIdentityControlsExpanded\}/u);
+    assert.match(source, /aria-controls=\{`signal-show-identity-controls-\$\{selectedShow\.id\}`\}/u);
+    assert.match(source, /hidden=\{!showIdentityControlsExpanded\}/u);
+    assert.match(source, /setShowIdentityControlsShowId\(null\)/u);
+    assert.match(css, /\.showIdentityGearButton\s*\{[^}]*right:\s*18px;[^}]*bottom:\s*18px/iu);
     assert.match(source, /regenerateLogo: true/u);
     assert.match(source, /aria-label="Edit show name"/u);
     assert.match(source, />\s*Save name\s*</u);
@@ -443,6 +452,9 @@ describe("Signal experience shell", () => {
     );
     assert.match(source, /const stageAtmosphere = activeShowAtmosphere\(args\.show, theme\)/u);
     assert.match(css, /\.showBrandPreview\s*\{/u);
+    assert.match(css, /\.showBrandPreview\s*\{[^}]*min-height:\s*360px/iu);
+    assert.match(css, /\.showBrandContent\s*\{[^}]*min-height:\s*360px/iu);
+    assert.match(css, /\.showBrandPreview, \.showBrandContent\s*\{\s*min-height:\s*260px/iu);
     assert.match(css, /\.showBrandAtmosphere\s*\{/u);
     assert.match(
       css,

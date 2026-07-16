@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
   VOICE_CAPABILITIES,
@@ -442,5 +443,19 @@ describe("voice Phase 1 boundary", () => {
       previewUrl: "https://example.test/alex.mp3",
       labels: { accent: "American" },
     }]);
+  });
+
+  it("keeps voice catalog configuration independent from the active response lane", () => {
+    const serverSource = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
+    const catalogRoute = serverSource.slice(
+      serverSource.indexOf('route("GET", "/api/voices/elevenlabs"'),
+      serverSource.indexOf('route("POST", "/api/voices/preview-line"'),
+    );
+    assert.match(catalogRoute, /requestElevenLabsVoiceCatalog\(\{/u);
+    assert.doesNotMatch(catalogRoute, /preferred_provider|Switch to Online/u);
+    assert.match(
+      serverSource,
+      /raw\.explicitOnlineContext === true && user\.preferred_provider !== "local"/u,
+    );
   });
 });

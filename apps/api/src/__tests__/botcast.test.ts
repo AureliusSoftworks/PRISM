@@ -394,6 +394,11 @@ describe("Botcast persistence and isolation", () => {
       /user\.preferred_provider === "local"[\s\S]{0,280}Switch to Online before creating an ElevenLabs Signal intro/u,
     );
     assert.match(serverSource, /buildSignalElevenLabsMusicCompositionPlan\(\{/u);
+    assert.match(
+      serverSource,
+      /temperament: signalPersonaTemperamentFor\(host\.system_prompt\)/u,
+    );
+    assert.match(serverSource, /seed: `\$\{show\.id\}:\$\{show\.logo\.seed\}`/u);
     assert.match(serverSource, /requestSignalElevenLabsIntroMusic\(\{/u);
     assert.match(serverSource, /prompt: JSON\.stringify\(compositionPlan\)/u);
     assert.match(serverSource, /storeBotcastShowIntroAudio\(db, userId, show\.id, \{/u);

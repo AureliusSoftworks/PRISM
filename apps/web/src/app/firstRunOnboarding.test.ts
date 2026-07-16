@@ -55,7 +55,7 @@ describe("first-run onboarding", () => {
     assert.match(pageSource, /Image generation has its own LOCAL\/ONLINE choice/u);
     assert.match(
       pageSource,
-      /Voices default to System TTS; selecting\s*an ElevenLabs voice in Prism or bot customization overrides\s*it only for eligible ONLINE speech/u,
+      /choose an ElevenLabs voice in bot customization from any chat\s*mode; Prism uses it only for eligible ONLINE speech/u,
     );
     assert.match(pageSource, /Chat home base/u);
   });
