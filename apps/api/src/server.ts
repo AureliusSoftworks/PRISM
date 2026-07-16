@@ -140,11 +140,17 @@ import {
   deleteBotcastEpisode,
   deleteBotcastShow,
   generateBotcastShowIdentity,
+  generateBotcastShowName,
   getBotcastEpisode,
+  getBotcastShow,
   listBotcastEpisodes,
   listBotcastShows,
   updateBotcastShow,
 } from "./botcast.ts";
+import {
+  normalizeSignalAssetUpload,
+  readSignalAssetSlot,
+} from "./signal-asset-upload.ts";
 import {
   createDevSeedMemories,
   demoteMemoryToShortTerm,
@@ -299,7 +305,7 @@ import {
 } from "./model-routing.ts";
 import { LocalOnlyBackupAdapter, exportUserSnapshot, importUserSnapshot, type BackupSnapshot } from "./backup.ts";
 import {
-  composeVerbatimFirstImagePrompt,
+  BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT,
   COFFEE_SESSION_DURATION_MINUTES_MAX,
   COFFEE_SESSION_DURATION_MINUTES_MIN,
   DEFAULT_BOT_FACE_BLINK_BAR,
@@ -401,7 +407,7 @@ import {
   type ZenPersonaTransitionInput,
   type ImageProviderName,
 } from "@localai/shared";
-import { generateImage } from "./image-provider.ts";
+import { editImage, generateImage } from "./image-provider.ts";
 import { generateLocalImageBytesByModelId } from "./image-local-by-model.ts";
 import { shouldAttemptLenientLocalImageFallback } from "./image-lenient-fallback.ts";
 import { AutoFallbackExhaustedError } from "./auto-fallback.ts";
@@ -415,6 +421,7 @@ import {
   imageContextIncludesOfflineOnlyBot,
   resolveImageGeneratePersistence,
 } from "./image-generate-resolve.ts";
+import { resolveImagePromptForGeneration } from "./image-prompt-routing.ts";
 import {
   IMAGE_BOT_MEMBERSHIP_SQL,
   imageOriginForGenerate,
@@ -5264,6 +5271,117 @@ function buildRoutes(): RouteDefinition[] {
       });
       json(ctx.res, 200, { ok: true, ...result });
     }),
+    route("POST", "/api/botcast/shows/:id/name", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const userKey = decryptUserKey(userId);
+      const body = ctx.body as Record<string, unknown>;
+      const requestedProvider = body.preferredProvider;
+      const preferredProvider: ProviderName =
+        requestedProvider === "local" ||
+        requestedProvider === "openai" ||
+        requestedProvider === "anthropic"
+          ? requestedProvider
+          : user.preferred_provider;
+      const result = await generateBotcastShowName(db, userId, ctx.params.id, {
+        preferredProvider,
+        openAiApiKey:
+          getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey,
+        anthropicApiKey:
+          getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey,
+        secondaryOllamaHost: user.secondary_ollama_host,
+        preferredLocalModel: user.preferred_local_model,
+        preferredOnlineModel: user.preferred_online_model,
+        providerFactory: providerFactoryOverride,
+      });
+      json(ctx.res, 200, { ok: true, ...result });
+    }),
+    route("POST", "/api/botcast/shows/:id/assets/:slot/upload", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const show = getBotcastShow(db, userId, ctx.params.id);
+      const slot = readSignalAssetSlot(ctx.params.slot);
+      const body = ctx.body as Record<string, unknown>;
+      const upload = await normalizeSignalAssetUpload(body.dataUrl, slot);
+      const imageId = randomId(12);
+      const localRelPath = buildGeneratedImageRelativePath(userId, imageId);
+      const createdAt = new Date().toISOString();
+      const displayUrl = `/api/images/${encodeURIComponent(imageId)}/file`;
+      const assetLabel = slot === "day-studio"
+        ? "Light studio"
+        : slot === "night-studio"
+          ? "Dark studio"
+          : "logo";
+      const prompt = `Uploaded Signal ${assetLabel} for ${show.name}`;
+      const relatedBotIds = serializeImageRelatedBotIds(
+        [show.hostBotId],
+        show.hostBotId,
+      );
+      let savedShow = show;
+      try {
+        writeGeneratedImageBytes(localRelPath, upload.pngBytes);
+        await tryGenerateThumbAfterPngWrite(localRelPath);
+        db.prepare(
+          `INSERT INTO images
+             (id, user_id, conversation_id, bot_id, related_bot_ids, origin,
+              prompt, revised_prompt, url, size, quality, provider, model,
+              local_rel_path, purpose, created_at)
+           VALUES (?, ?, NULL, ?, ?, 'botcast', ?, ?, ?, ?, 'upload',
+                   'upload', 'upload', ?, 'gallery', ?)`,
+        ).run(
+          imageId,
+          userId,
+          show.hostBotId,
+          relatedBotIds,
+          prompt,
+          prompt,
+          displayUrl,
+          `${upload.width}x${upload.height}`,
+          localRelPath,
+          createdAt,
+        );
+        try {
+          savedShow = updateBotcastShow(
+            db,
+            userId,
+            show.id,
+            slot === "day-studio"
+              ? { dayAtmosphereImageUrl: displayUrl, dayAtmosphereImageId: imageId }
+              : slot === "night-studio"
+                ? { nightAtmosphereImageUrl: displayUrl, nightAtmosphereImageId: imageId }
+                : { logoImageUrl: displayUrl, logoImageId: imageId },
+          );
+        } catch (error) {
+          db.prepare("DELETE FROM images WHERE id = ? AND user_id = ?").run(
+            imageId,
+            userId,
+          );
+          throw error;
+        }
+      } catch (error) {
+        tryUnlinkGeneratedImageFile(localRelPath);
+        throw error;
+      }
+      json(ctx.res, 201, {
+        ok: true,
+        show: savedShow,
+        image: mapImageRowToClient({
+          id: imageId,
+          prompt,
+          revised_prompt: prompt,
+          url: displayUrl,
+          size: `${upload.width}x${upload.height}`,
+          quality: "upload",
+          provider: "upload",
+          bot_id: show.hostBotId,
+          related_bot_ids: relatedBotIds,
+          origin: "botcast",
+          created_at: createdAt,
+          local_rel_path: localRelPath,
+          model: "upload",
+          purpose: "gallery",
+        }),
+      });
+    }),
     route("PATCH", "/api/botcast/shows/:id", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
@@ -5292,6 +5410,12 @@ function buildRoutes(): RouteDefinition[] {
           ? { nightAtmosphereImageId: body.nightAtmosphereImageId as string | null }
           : {}),
         ...(body.regenerateAtmosphere === true ? { regenerateAtmosphere: true } : {}),
+        ...(body.regenerateDayAtmosphere === true
+          ? { regenerateDayAtmosphere: true }
+          : {}),
+        ...(body.regenerateNightAtmosphere === true
+          ? { regenerateNightAtmosphere: true }
+          : {}),
         ...(body.logoImageUrl !== undefined
           ? { logoImageUrl: body.logoImageUrl as string | null }
           : {}),
@@ -5322,8 +5446,31 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
       const body = ctx.body as Record<string, unknown>;
-      const preferredProvider = user.preferred_provider;
-      const modelOverride = readCoffeeSessionSpeakerModel(body.modelOverride);
+      const requestedProvider = readProvider(body.preferredProvider);
+      const autoFallbackChain = parseStoredAutoFallbackChain(
+        user.auto_fallback_chain,
+      );
+      const requestedResponseMode = normalizeResponseMode(
+        body.responseMode,
+        user.preferred_provider === "local" ? "local" : "online",
+      );
+      const autoEnabled =
+        requestedResponseMode === "auto" &&
+        user.auto_switch_model === 1 &&
+        autoFallbackChain !== null;
+      const localModeLocked =
+        user.preferred_provider === "local" && !autoEnabled;
+      const preferredProvider =
+        localModeLocked
+          ? "local"
+          : requestedProvider ?? user.preferred_provider;
+      const requestedModelOverride = readCoffeeSessionSpeakerModel(body.modelOverride);
+      const modelOverride =
+        localModeLocked &&
+        requestedProvider !== undefined &&
+        requestedProvider !== "local"
+          ? null
+          : requestedModelOverride;
       const accountModel =
         preferredProvider === "local"
           ? user.preferred_local_model
@@ -5335,6 +5482,11 @@ function buildRoutes(): RouteDefinition[] {
           ? { producerBrief: body.producerBrief as string }
           : {}),
         preferredProvider,
+        responseMode: autoEnabled
+          ? "auto"
+          : preferredProvider === "local"
+            ? "local"
+            : "online",
         modelOverride:
           modelOverride ??
           (accountModel && !isDisabledModelChoice(accountModel)
@@ -5400,6 +5552,9 @@ function buildRoutes(): RouteDefinition[] {
           secondaryOllamaHost: user.secondary_ollama_host,
           preferredLocalModel: user.preferred_local_model,
           preferredOnlineModel: user.preferred_online_model,
+          autoFallbackChain: parseStoredAutoFallbackChain(
+            user.auto_fallback_chain,
+          ),
           providerFactory: providerFactoryOverride,
         },
       );
@@ -8280,7 +8435,7 @@ function buildRoutes(): RouteDefinition[] {
         : IMAGE_GENERATION_ALLOWED_SIZES.has(requestedSize)
           ? requestedSize
           : inferImageGenerationSizeFromPrompt(prompt);
-      const quality = (body.quality as string) ?? "standard";
+      const requestedQuality = (body.quality as string) ?? "standard";
       const bodyModelRaw =
         typeof body.model === "string" && body.model.trim().length > 0
           ? body.model.trim()
@@ -8338,6 +8493,51 @@ function buildRoutes(): RouteDefinition[] {
         imageOrigin === "images_panel" && imagePurpose === "gallery"
           ? null
           : persistence.persistedBotId;
+      const sourceImageId =
+        typeof body.sourceImageId === "string" ? body.sourceImageId.trim() : "";
+      let sourceEditPrompt = "";
+      let sourceImageBytes: Buffer | undefined;
+      if (sourceImageId) {
+        if (imageOrigin !== "botcast" || !persistedOwnerBotId) {
+          throw new HttpError(400, "Source-image editing is only available for Signal artwork.");
+        }
+        if (body.sourceEditKind !== "daylight-relight") {
+          throw new HttpError(
+            400,
+            'Signal source-image edits require sourceEditKind "daylight-relight".',
+          );
+        }
+        sourceEditPrompt = BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT;
+        const sourceImage = db
+          .prepare(
+            `SELECT bot_id, origin, local_rel_path
+               FROM images
+              WHERE id = ? AND user_id = ?`,
+          )
+          .get(sourceImageId, userId) as
+          | {
+              bot_id: string | null;
+              origin: string | null;
+              local_rel_path: string | null;
+            }
+          | undefined;
+        if (
+          !sourceImage ||
+          sourceImage.origin !== "botcast" ||
+          sourceImage.bot_id !== persistedOwnerBotId
+        ) {
+          throw new HttpError(404, "Signal source image not found.");
+        }
+        const sourcePath = sourceImage.local_rel_path?.trim();
+        if (!sourcePath) {
+          throw new HttpError(400, "Signal source image is not available locally.");
+        }
+        try {
+          sourceImageBytes = readGeneratedImageBytes(sourcePath);
+        } catch {
+          throw new HttpError(404, "Signal source image file not found.");
+        }
+      }
       let relatedBotIdsForInsert = persistedOwnerBotId
         ? [persistedOwnerBotId]
         : [];
@@ -8388,6 +8588,8 @@ function buildRoutes(): RouteDefinition[] {
 
       let promptForModel = prompt;
       let promptForPersistence = prompt;
+      let localPromptForModel = prompt;
+      let onlinePromptForModel = prompt;
       let composedPrompt: string | undefined;
       if (groupRoomWallpaperContext) {
         const members = loadOwnedGroupRoomWallpaperMembers(
@@ -8407,6 +8609,8 @@ function buildRoutes(): RouteDefinition[] {
         });
         promptForModel = composedPrompt;
         promptForPersistence = composedPrompt;
+        localPromptForModel = composedPrompt;
+        onlinePromptForModel = composedPrompt;
       }
       const personaBotId = persistence.personaBotId;
       type BotPersonaImageRow = {
@@ -8420,14 +8624,25 @@ function buildRoutes(): RouteDefinition[] {
             "SELECT name, system_prompt FROM bots WHERE id = ? AND user_id = ?"
           )
           .get(personaBotId, userId) as BotPersonaImageRow | undefined;
-        if (botPersona) {
-          promptForModel = composeVerbatimFirstImagePrompt({
-            userPrompt: prompt,
-            botName: botPersona.name,
-            systemPrompt: botPersona.system_prompt,
-            mode: "strict_verbatim",
-          });
-        }
+      }
+
+      if (!groupRoomWallpaperContext) {
+        localPromptForModel = resolveImagePromptForGeneration({
+          prompt,
+          origin: imageOrigin,
+          sourceEditPrompt,
+          useSourceEdit: false,
+          botName: botPersona?.name,
+          botSystemPrompt: botPersona?.system_prompt,
+        });
+        onlinePromptForModel = resolveImagePromptForGeneration({
+          prompt,
+          origin: imageOrigin,
+          sourceEditPrompt,
+          useSourceEdit: Boolean(sourceImageBytes),
+          botName: botPersona?.name,
+          botSystemPrompt: botPersona?.system_prompt,
+        });
       }
 
       const preferredLocalImageModel =
@@ -8451,8 +8666,10 @@ function buildRoutes(): RouteDefinition[] {
 
       const resolvedOpenAiImageModel = openAiImageDisabled
         ? ""
-        : (bodyModel && effectiveProvider !== "local" ? bodyModel.trim() : "") ||
-          preferredOpenAiImageModel;
+        : imageOrigin === "botcast" && effectiveProvider !== "local"
+          ? DEFAULT_OPENAI_IMAGE_MODEL_ID
+          : (bodyModel && effectiveProvider !== "local" ? bodyModel.trim() : "") ||
+            preferredOpenAiImageModel;
       const shouldRunLocal =
         effectiveProvider === "local" ||
         (openAiImageDisabled && Boolean(resolvedLocalImageModel));
@@ -8472,6 +8689,13 @@ function buildRoutes(): RouteDefinition[] {
         throw new Error(
           "Pick a local image model in the Images panel header, then try again."
         );
+      }
+      const quality = imageOrigin === "botcast" && !shouldRunLocal
+        ? "high"
+        : requestedQuality;
+      promptForModel = shouldRunLocal ? localPromptForModel : onlinePromptForModel;
+      if (imageOrigin === "botcast") {
+        promptForPersistence = promptForModel;
       }
 
       const acqPanel = await tryAcquireImageSlot({
@@ -8556,12 +8780,19 @@ function buildRoutes(): RouteDefinition[] {
 
       let openAiResult: Awaited<ReturnType<typeof generateImage>> | null = null;
       try {
-        openAiResult = await generateImage(promptForModel, apiKey, {
-          model: resolvedOpenAiImageModel || undefined,
-          size,
-          quality,
-          signal: imageGenAbort.signal,
-        });
+        openAiResult = sourceImageBytes
+          ? await editImage(promptForModel, sourceImageBytes, apiKey, {
+              model: resolvedOpenAiImageModel || undefined,
+              size,
+              quality,
+              signal: imageGenAbort.signal,
+            })
+          : await generateImage(promptForModel, apiKey, {
+              model: resolvedOpenAiImageModel || undefined,
+              size,
+              quality,
+              signal: imageGenAbort.signal,
+            });
       } catch (primaryError) {
         if (
           lenientImageFbOnline &&
@@ -8569,7 +8800,7 @@ function buildRoutes(): RouteDefinition[] {
         ) {
           const localOut = await generateLocalImageBytesByModelId({
             modelId: lenientImageFbOnline,
-            promptForModel,
+            promptForModel: localPromptForModel,
             size,
             signal: imageGenAbort.signal,
             comfyUiHost: user.comfyui_host,
@@ -8586,7 +8817,9 @@ function buildRoutes(): RouteDefinition[] {
               relatedBotIds: relatedBotIdsForInsert,
               origin: imageOrigin,
             },
-            prompt: promptForPersistence,
+            prompt: imageOrigin === "botcast"
+              ? localPromptForModel
+              : promptForPersistence,
             localRelPath,
             size,
             quality,

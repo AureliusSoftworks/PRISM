@@ -4,6 +4,7 @@ import { createServer, type AddressInfo } from "node:http";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import sharp from "sharp";
 import { getAppConfig } from "@localai/config";
 import {
   COFFEE_TOPIC_MAX_LENGTH,
@@ -884,7 +885,134 @@ describe("API request integration", () => {
     assert.equal(missing.status, 404);
   });
 
-  it("deletes Signal episodes and shows through tenant-safe HTTP routes", async () => {
+  it("dispatches authenticated Signal name regeneration through the real route table", async () => {
+    const client = createClient();
+    const registration = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "signal-name-route@example.com",
+        password: "signal-name-route-password",
+      }),
+    );
+    assert.equal(registration.status, 201);
+    const userId = String((await json(registration)).user.id);
+    const hostId = "signal-name-route-host";
+    const createdAt = "2026-07-15T00:00:00.000Z";
+    db.prepare(
+      `INSERT INTO bots
+         (id, user_id, name, system_prompt, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(
+      hostId,
+      userId,
+      "Signal Name Route Host",
+      "A precise host with a taste for unexpected titles.",
+      createdAt,
+      createdAt,
+    );
+
+    const showResponse = await client.request(
+      "/api/botcast/shows",
+      jsonInit({ hostBotId: hostId }),
+    );
+    const showPayload = await json(showResponse);
+    assert.equal(showResponse.status, 201, JSON.stringify(showPayload));
+    const showId = String(showPayload.show.id);
+    const providerCallsBefore = deterministicProvider.calls.length;
+
+    const nameResponse = await client.request(
+      `/api/botcast/shows/${encodeURIComponent(showId)}/name`,
+      jsonInit({ preferredProvider: "local" }),
+    );
+    const namePayload = await json(nameResponse);
+    assert.notEqual(nameResponse.status, 404, JSON.stringify(namePayload));
+    assert.equal(nameResponse.status, 200, JSON.stringify(namePayload));
+    assert.equal(namePayload.ok, true);
+    assert.equal(namePayload.show.id, showId);
+    assert.equal(typeof namePayload.generated, "boolean");
+    assert.equal(deterministicProvider.calls.length, providerCallsBefore + 1);
+  });
+
+  it("locks Signal episodes to the selected online provider without weakening LOCAL mode", async () => {
+    const client = createClient();
+    const registration = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "signal-model-routing@example.com",
+        password: "signal-model-routing",
+      }),
+    );
+    assert.equal(registration.status, 201);
+    const userId = String((await json(registration)).user.id);
+    const createdAt = "2026-07-15T00:00:00.000Z";
+    const insertBot = db.prepare(
+      `INSERT INTO bots
+         (id, user_id, name, system_prompt, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    );
+    insertBot.run(
+      "signal-model-host",
+      userId,
+      "Signal Model Host",
+      "A provider-aware host.",
+      createdAt,
+      createdAt,
+    );
+    insertBot.run(
+      "signal-model-guest",
+      userId,
+      "Signal Model Guest",
+      "A provider-aware guest.",
+      createdAt,
+      createdAt,
+    );
+    const showResponse = await client.request(
+      "/api/botcast/shows",
+      jsonInit({ hostBotId: "signal-model-host" }),
+    );
+    assert.equal(showResponse.status, 201);
+    const showId = String((await json(showResponse)).show.id);
+
+    db.prepare(
+      `UPDATE users
+       SET preferred_provider = 'openai',
+           preferred_online_model = 'gpt-account-default',
+           preferred_local_model = 'gemma-account-default'
+       WHERE id = ?`,
+    ).run(userId);
+    const onlineResponse = await client.request(
+      `/api/botcast/shows/${encodeURIComponent(showId)}/episodes`,
+      jsonInit({
+        guestBotId: "signal-model-guest",
+        topic: "Route this online recording",
+        preferredProvider: "anthropic",
+        modelOverride: "claude-signal",
+      }),
+    );
+    const onlinePayload = await json(onlineResponse);
+    assert.equal(onlineResponse.status, 201, JSON.stringify(onlinePayload));
+    assert.equal(onlinePayload.episode.provider, "anthropic");
+    assert.equal(onlinePayload.episode.model, "claude-signal");
+
+    db.prepare("UPDATE users SET preferred_provider = 'local' WHERE id = ?").run(
+      userId,
+    );
+    const localResponse = await client.request(
+      `/api/botcast/shows/${encodeURIComponent(showId)}/episodes`,
+      jsonInit({
+        guestBotId: "signal-model-guest",
+        topic: "Keep this recording local",
+        preferredProvider: "anthropic",
+        modelOverride: "claude-stale-selection",
+      }),
+    );
+    const localPayload = await json(localResponse);
+    assert.equal(localResponse.status, 201, JSON.stringify(localPayload));
+    assert.equal(localPayload.episode.provider, "local");
+    assert.equal(localPayload.episode.model, "gemma-account-default");
+  });
+
+  it("uploads Signal assets and deletes episodes and shows through tenant-safe HTTP routes", async () => {
     const owner = createClient();
     const stranger = createClient();
     const ownerRegistration = await owner.request(
@@ -930,6 +1058,46 @@ describe("API request integration", () => {
     );
     assert.equal(showResponse.status, 201);
     const showId = String((await json(showResponse)).show.id);
+    const uploadedAssetBytes = await sharp({
+      create: {
+        width: 8,
+        height: 6,
+        channels: 4,
+        background: { r: 38, g: 96, b: 164, alpha: 1 },
+      },
+    }).png().toBuffer();
+    const uploadedAssetDataUrl =
+      `data:image/png;base64,${uploadedAssetBytes.toString("base64")}`;
+    const uploadedImageIds: string[] = [];
+    for (const slot of ["day-studio", "night-studio", "logo"] as const) {
+      const uploadResponse = await owner.request(
+        `/api/botcast/shows/${encodeURIComponent(showId)}/assets/${slot}/upload`,
+        jsonInit({ dataUrl: uploadedAssetDataUrl }),
+      );
+      const uploadPayload = await json(uploadResponse);
+      assert.equal(uploadResponse.status, 201, JSON.stringify(uploadPayload));
+      assert.equal(uploadPayload.image.origin, "botcast");
+      assert.equal(uploadPayload.image.provider, "upload");
+      assert.equal(uploadPayload.image.botId, hostId);
+      uploadedImageIds.push(String(uploadPayload.image.id));
+      const assignedImageId = slot === "day-studio"
+        ? uploadPayload.show.dayAtmosphere.imageId
+        : slot === "night-studio"
+          ? uploadPayload.show.nightAtmosphere.imageId
+          : uploadPayload.show.logo.imageId;
+      assert.equal(assignedImageId, uploadPayload.image.id);
+    }
+    assert.equal(
+      (db.prepare(
+        "SELECT COUNT(*) AS count FROM images WHERE user_id = ? AND origin = 'botcast' AND provider = 'upload'",
+      ).get(ownerId) as { count: number }).count,
+      3,
+    );
+    const foreignAssetUpload = await stranger.request(
+      `/api/botcast/shows/${encodeURIComponent(showId)}/assets/logo/upload`,
+      jsonInit({ dataUrl: uploadedAssetDataUrl }),
+    );
+    assert.equal(foreignAssetUpload.status, 400);
     const episodeResponse = await owner.request(
       `/api/botcast/shows/${encodeURIComponent(showId)}/episodes`,
       jsonInit({ guestBotId: guestId, topic: "Why routes deserve tests" })
@@ -986,6 +1154,14 @@ describe("API request integration", () => {
     const listedShows = await owner.request("/api/botcast/shows");
     assert.equal(listedShows.status, 200);
     assert.deepEqual((await json(listedShows)).shows, []);
+    assert.equal(
+      (db.prepare(
+        `SELECT COUNT(*) AS count FROM images
+          WHERE user_id = ? AND id IN (${uploadedImageIds.map(() => "?").join(", ")})`,
+      ).get(ownerId, ...uploadedImageIds) as { count: number }).count,
+      3,
+      "replacing or deleting a show keeps prior uploaded artwork available in Images",
+    );
     assert.equal(
       (db.prepare("SELECT COUNT(*) AS count FROM botcast_episodes WHERE user_id = ?")
         .get(ownerId) as { count: number }).count,

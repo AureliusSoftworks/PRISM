@@ -2,8 +2,11 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT,
   BOTCAST_DIRECTOR_MIN_SHOT_MS,
+  BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS,
   applyBotcastProducerCueToTension,
+  botcastFallbackStudioAccentVariantForSeed,
   botcastCameraShotAt,
   botcastDirectorSuggestion,
   botcastGuestDepartureEligible,
@@ -12,8 +15,39 @@ import {
   botcastReplayTimeline,
   botcastNextSpeakerRole,
   botcastSegmentForTurn,
+  isBotcastFallbackStudioAccentVariant,
   type BotcastReplayEvent,
 } from "./botcast.ts";
+
+describe("Signal fallback studio accents", () => {
+  it("recognizes the three variants and deterministically assigns legacy shows", () => {
+    assert.deepEqual(BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS, [0, 1, 2]);
+    for (const variant of BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS) {
+      assert.equal(isBotcastFallbackStudioAccentVariant(variant), true);
+    }
+    assert.equal(isBotcastFallbackStudioAccentVariant(-1), false);
+    assert.equal(isBotcastFallbackStudioAccentVariant(3), false);
+    assert.equal(isBotcastFallbackStudioAccentVariant("1"), false);
+
+    const first = botcastFallbackStudioAccentVariantForSeed("legacy-show-1");
+    assert.equal(
+      botcastFallbackStudioAccentVariantForSeed("legacy-show-1"),
+      first,
+    );
+    assert.equal(isBotcastFallbackStudioAccentVariant(first), true);
+  });
+});
+
+describe("Signal studio relighting", () => {
+  it("requests one replacement frame without persona reconstruction or comparison layouts", () => {
+    assert.match(BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT, /sole canonical source frame/iu);
+    assert.match(BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT, /change only the illumination and exterior sky/iu);
+    assert.match(BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT, /single daytime replacement frame/iu);
+    assert.match(BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT, /do not show a nighttime state/iu);
+    assert.match(BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT, /diptych|split screen|comparison/iu);
+    assert.doesNotMatch(BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT, /persona|set bible|host/iu);
+  });
+});
 
 describe("Botcast episode state", () => {
   it("moves through opening, interview, and closing with asymmetric turns", () => {

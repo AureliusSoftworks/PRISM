@@ -45,7 +45,10 @@ import {
   serializeBotAudioVoiceProfileV1,
   parseStoredBotPowersV1,
   serializeBotPowersV1,
+  botcastFallbackStudioAccentVariantForSeed,
+  isBotcastFallbackStudioAccentVariant,
   type BotAudioVoiceProfileV1,
+  type BotcastFallbackStudioAccentVariant,
   type BotPowerV1,
   type CoffeePowerPlanV1,
   type EnglishVoiceEngine,
@@ -227,6 +230,7 @@ export interface BackupSnapshot {
       premise: string;
       hostingStyle: string;
       accentColor: string;
+      fallbackStudioAccentVariant?: BotcastFallbackStudioAccentVariant;
       atmosphereJson: string;
       createdAt: string;
       updatedAt: string;
@@ -764,11 +768,12 @@ export function exportUserSnapshot(
 
   const botcastShows = db.prepare(
     `SELECT id, host_bot_id, name, premise, hosting_style, accent_color,
-            atmosphere_json, created_at, updated_at
+            fallback_studio_accent_variant, atmosphere_json, created_at, updated_at
        FROM botcast_shows WHERE user_id = ? ORDER BY created_at`,
   ).all(userId) as Array<{
     id: string; host_bot_id: string; name: string; premise: string;
-    hosting_style: string; accent_color: string; atmosphere_json: string;
+    hosting_style: string; accent_color: string;
+    fallback_studio_accent_variant: number; atmosphere_json: string;
     created_at: string; updated_at: string;
   }>;
   const botcastEpisodes = db.prepare(
@@ -868,6 +873,11 @@ export function exportUserSnapshot(
         premise: row.premise,
         hostingStyle: row.hosting_style,
         accentColor: row.accent_color,
+        fallbackStudioAccentVariant: isBotcastFallbackStudioAccentVariant(
+          row.fallback_studio_accent_variant,
+        )
+          ? row.fallback_studio_accent_variant
+          : botcastFallbackStudioAccentVariantForSeed(row.id),
         atmosphereJson: row.atmosphere_json,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
@@ -1388,11 +1398,15 @@ function importUserSnapshotWithinTransaction(
       db.prepare(
         `INSERT OR REPLACE INTO botcast_shows
           (id, user_id, host_bot_id, name, premise, hosting_style, accent_color,
-           atmosphere_json, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           fallback_studio_accent_variant, atmosphere_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         show.id, userId, show.hostBotId, show.name, show.premise,
-        show.hostingStyle, show.accentColor, show.atmosphereJson,
+        show.hostingStyle, show.accentColor,
+        isBotcastFallbackStudioAccentVariant(show.fallbackStudioAccentVariant)
+          ? show.fallbackStudioAccentVariant
+          : botcastFallbackStudioAccentVariantForSeed(show.id),
+        show.atmosphereJson,
         show.createdAt, show.updatedAt,
       );
     }
