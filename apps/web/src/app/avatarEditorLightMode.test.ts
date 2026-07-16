@@ -116,9 +116,9 @@ test("Light Mode preserves clear interactive states", () => {
 });
 
 test("Light Mode text, muted copy, errors, and warnings meet readable contrast", () => {
-  const lightSurface = "#fffdf8";
-  assert.ok(contrastRatio("#161514", lightSurface) >= 7);
-  assert.ok(contrastRatio("#5f5b55", lightSurface) >= 4.5);
+  const lightSurface = "#f8fbff";
+  assert.ok(contrastRatio("#172638", lightSurface) >= 7);
+  assert.ok(contrastRatio("#5c7186", lightSurface) >= 4.5);
   assert.ok(contrastRatio("#dc2626", lightSurface) >= 4.5);
   assert.ok(contrastRatio("#92400e", lightSurface) >= 4.5);
 });

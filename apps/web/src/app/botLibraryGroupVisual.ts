@@ -19,7 +19,7 @@ export interface BotLibraryGroupVisualVariables {
 
 const DEFAULT_GROUP_COLORS: Record<BotLibraryGroupTheme, readonly string[]> = {
   dark: ["#626875", "#24262d", "#a6a095"],
-  light: ["#d9d5ca", "#f7f3ea", "#a9b0ba"],
+  light: ["#cfdbe5", "#f4f9fd", "#9fb2c2"],
 };
 
 function stableUnitValue(seed: string): number {

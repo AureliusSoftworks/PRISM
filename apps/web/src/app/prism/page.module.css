@@ -2,7 +2,7 @@
   min-height: 100dvh;
   padding: clamp(24px, 5vw, 72px);
   overflow: hidden;
-  color: #f4efe7;
+  color: #edf4fa;
   background:
     radial-gradient(circle at 18% 16%, rgba(255, 77, 109, 0.24), transparent 28%),
     radial-gradient(circle at 82% 20%, rgba(47, 211, 227, 0.2), transparent 30%),
@@ -58,7 +58,7 @@
   font-family: var(--font-geist-mono), ui-monospace, monospace;
   font-size: 0.72rem;
   font-weight: 700;
-  color: rgba(244, 239, 231, 0.58);
+  color: rgba(237, 244, 250, 0.58);
 }
 
 .hero h1 {
@@ -74,7 +74,7 @@
 .lede {
   max-width: 650px;
   margin-top: 28px;
-  color: rgba(244, 239, 231, 0.72);
+  color: rgba(237, 244, 250, 0.72);
   font-size: clamp(1.1rem, 2vw, 1.35rem);
   line-height: 1.65;
 }
@@ -103,14 +103,14 @@
 
 .primaryAction {
   color: #0a0908;
-  background: linear-gradient(135deg, #f4efe7, #c9fff7);
+  background: linear-gradient(135deg, #edf4fa, #c9fff7);
   box-shadow: 0 18px 52px rgba(47, 211, 227, 0.18);
 }
 
 .secondaryAction {
-  color: rgba(244, 239, 231, 0.78);
-  border: 1px solid rgba(244, 239, 231, 0.16);
-  background: rgba(244, 239, 231, 0.05);
+  color: rgba(237, 244, 250, 0.78);
+  border: 1px solid rgba(237, 244, 250, 0.16);
+  background: rgba(237, 244, 250, 0.05);
 }
 
 .primaryAction:hover,
@@ -119,8 +119,8 @@
 }
 
 .secondaryAction:hover {
-  border-color: rgba(244, 239, 231, 0.32);
-  background: rgba(244, 239, 231, 0.08);
+  border-color: rgba(237, 244, 250, 0.32);
+  background: rgba(237, 244, 250, 0.08);
 }
 
 .orb {
@@ -152,7 +152,7 @@
   z-index: 1;
   align-self: end;
   padding: 24px;
-  border: 1px solid rgba(244, 239, 231, 0.14);
+  border: 1px solid rgba(237, 244, 250, 0.14);
   border-radius: 28px;
   background: rgba(15, 13, 11, 0.72);
   box-shadow: 0 26px 80px rgba(0, 0, 0, 0.3);
@@ -161,7 +161,7 @@
 
 .signalCard p:last-child {
   margin-top: 18px;
-  color: rgba(244, 239, 231, 0.74);
+  color: rgba(237, 244, 250, 0.74);
   line-height: 1.65;
 }
 
@@ -217,9 +217,9 @@
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  border: 1px solid rgba(244, 239, 231, 0.12);
+  border: 1px solid rgba(237, 244, 250, 0.12);
   border-radius: 26px;
-  background: rgba(244, 239, 231, 0.055);
+  background: rgba(237, 244, 250, 0.055);
 }
 
 .pillar h2 {
@@ -232,7 +232,7 @@
 }
 
 .pillar span {
-  color: rgba(244, 239, 231, 0.68);
+  color: rgba(237, 244, 250, 0.68);
   line-height: 1.6;
 }
 
@@ -243,7 +243,7 @@
   grid-template-columns: minmax(0, 0.85fr) minmax(320px, 1fr);
   gap: clamp(28px, 6vw, 72px);
   align-items: center;
-  border: 1px solid rgba(244, 239, 231, 0.12);
+  border: 1px solid rgba(237, 244, 250, 0.12);
   border-radius: 32px;
   background: rgba(4, 3, 3, 0.28);
 }
@@ -269,8 +269,8 @@
   padding: 18px 18px 18px 58px;
   position: relative;
   border-radius: 18px;
-  color: rgba(244, 239, 231, 0.78);
-  background: rgba(244, 239, 231, 0.055);
+  color: rgba(237, 244, 250, 0.78);
+  background: rgba(237, 244, 250, 0.055);
 }
 
 .workflowSteps li::before {

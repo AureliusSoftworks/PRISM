@@ -942,7 +942,7 @@ describe("Zen live presence CSS", () => {
     );
     assert.match(prismLightRule, /--coffee-bot-color:\s*#242a33\s*;/);
     assert.match(prismLightRule, /--zen-presence-face-ink:\s*#ffffff\s*;/);
-    assert.match(prismLightRule, /--zen-live-bot-frame-tint-color:\s*#f7f7f2\s*;/);
+    assert.match(prismLightRule, /--zen-live-bot-frame-tint-color:\s*#f7fbff\s*;/);
     assert.doesNotMatch(prismLightRule, /--bot-face-frame-glow-filter/);
     assert.doesNotMatch(prismLightRule, /--zen-prism-ambient/);
 
@@ -1133,7 +1133,7 @@ describe("Zen live presence CSS", () => {
     assert.match(paintRule, /z-index:\s*var\(--bot-face-frame-paint-z,\s*7\)\s*;/);
     assert.match(
       paintRule,
-      /--bot-face-frame-paint-substrate-image,[\s\S]*?url\("\/bot-frame\/bot-frame-base\.png\?v=1000"\)[\s\S]*?center \/ contain no-repeat,[\s\S]*?#a3a3a3\s*;/
+      /--bot-face-frame-paint-substrate-image,[\s\S]*?url\("\/bot-frame\/bot-frame-base\.png\?v=1001"\)[\s\S]*?center \/ contain no-repeat,[\s\S]*?#a3a3a3\s*;/
     );
     assert.match(paintRule, /background-blend-mode:\s*soft-light\s*;/);
     assert.match(paintRule, /isolation:\s*isolate\s*;/);
@@ -1185,7 +1185,7 @@ describe("Zen live presence CSS", () => {
     assert.doesNotMatch(paintPlasticLightRule, /bot-frame-metal\.png/);
     assert.match(
       css,
-      /\.themeLight \.botFaceFramePaintLayer,[\s\S]*?--bot-face-frame-paint-substrate-image:\s*url\("\/bot-frame\/bot-frame-light-base\.png\?v=1000"\)\s*;/
+      /\.themeLight \.botFaceFramePaintLayer,[\s\S]*?--bot-face-frame-paint-substrate-image:\s*url\("\/bot-frame\/bot-frame-light-base\.png\?v=1001"\)\s*;/
     );
 
     const ambientGlowRule = ruleForExactSelector(".zenLiveBotPresenceFace::before");
@@ -1550,7 +1550,7 @@ describe("Zen live presence CSS", () => {
     const prismRule = ruleForExactSelector(
       '.zenLiveBotPresencePlate[data-prism-persona="true"]'
     );
-    assert.match(prismRule, /--coffee-bot-color:\s*#f7f7f2\s*;/);
+    assert.match(prismRule, /--coffee-bot-color:\s*#f7fbff\s*;/);
     assert.match(prismRule, /--zen-live-bot-face-crt-border-color:\s*#ffffff\s*;/);
     assert.match(prismRule, /--bot-face-frame-tint-background:\s*[\s\S]*conic-gradient/);
     assert.match(prismRule, /--bot-face-frame-tint-opacity:\s*0\.64\s*;/);
