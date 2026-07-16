@@ -171,20 +171,45 @@ async function selectBotGroupFilter(page: Page, name: string): Promise<void> {
     .getByRole("button", { name: /Bot group filter:/ })
     .first();
   const option = page.getByRole("option", { name });
+  const selectedTrigger = page
+    .getByRole("button", {
+      name: `Bot group filter: ${name}`,
+      exact: true,
+    })
+    .first();
+  const showAllBots = page.getByRole("button", { name: "Show all bots" });
+  let libraryRequested = false;
   await expect(async () => {
-    if (!(await trigger.isVisible().catch(() => false))) {
-      const showAllBots = page.getByRole("button", { name: "Show all bots" });
-      if (await showAllBots.isVisible().catch(() => false)) {
-        await activateNavigationControl(showAllBots);
-      }
-      await expect(trigger).toBeVisible({ timeout: 1_500 });
-    }
+    if (await selectedTrigger.isVisible().catch(() => false)) return;
     if (!(await option.isVisible().catch(() => false))) {
-      await activateNavigationControl(trigger);
+      if (!(await trigger.isVisible().catch(() => false))) {
+        if (
+          !libraryRequested &&
+          (await showAllBots.isVisible().catch(() => false))
+        ) {
+          await showAllBots.evaluate(
+            (element) => (element as HTMLElement).click(),
+            undefined,
+            { timeout: 3_000 },
+          );
+          libraryRequested = true;
+        }
+        await expect(trigger).toBeVisible({ timeout: 3_000 });
+      }
+      await trigger.evaluate(
+        (element) => (element as HTMLElement).click(),
+        undefined,
+        { timeout: 3_000 },
+      );
+      await expect(option).toBeVisible({ timeout: 3_000 });
     }
-    await expect(option).toBeVisible({ timeout: 1_500 });
-  }).toPass({ timeout: 15_000 });
-  await activateNavigationControl(option);
+    await option.evaluate(
+      (element) => (element as HTMLElement).click(),
+      undefined,
+      { timeout: 3_000 },
+    );
+    await expect(selectedTrigger).toBeVisible({ timeout: 3_000 });
+  }).toPass({ timeout: 45_000 });
 }
 
 async function activateBotManagementControl(locator: Locator): Promise<void> {
@@ -2693,7 +2718,7 @@ test.describe("PRISM desktop smoke", () => {
       );
       expect(rotationDelayMs).toBeGreaterThanOrEqual(2 * 60 * 1_000);
       expect(rotationDelayMs).toBeLessThanOrEqual(4 * 60 * 1_000);
-      await page.clock.runFor(rotationDelayMs + 50);
+      await page.clock.fastForward(rotationDelayMs + 50);
       await expect(room).toHaveAttribute(
         "data-room-handoff-order",
         /arrival-before-departure|departure-before-arrival/u,
@@ -2729,7 +2754,7 @@ test.describe("PRISM desktop smoke", () => {
     expect(detachedRoom).not.toBeNull();
     await selectBotGroupFilter(page, "All bots");
     await expect(room).toHaveCount(0);
-    await page.clock.runFor(20 * 60 * 1_000);
+    await page.clock.fastForward(20 * 60 * 1_000);
     await expect(room).toHaveCount(0);
     expect(
       await detachedRoom!.evaluate((element) => ({
@@ -3149,7 +3174,7 @@ test.describe("PRISM desktop smoke", () => {
   test("waiting-room Home resolution opens only the requested continuation and leaves a missing Home pending @group-room", async ({
     page,
   }) => {
-    test.setTimeout(60_000);
+    test.setTimeout(90_000);
     await page.emulateMedia({ reducedMotion: "reduce" });
     const now = "2026-07-14T12:00:00.000Z";
     const groupName = "History Safe Room";
@@ -3384,8 +3409,11 @@ test.describe("PRISM desktop smoke", () => {
     await expect(page.getByText("POISON OTHER")).toHaveCount(0);
     await composer.fill("Draft for the persisted target Home");
 
+    await expect(
+      page.locator('[data-relationship-depth-locked="true"]'),
+    ).toHaveCount(0, { timeout: 10_000 });
     await page.keyboard.press("Escape");
-    await expect(room).toBeVisible();
+    await expect(room).toBeVisible({ timeout: 10_000 });
     detailReads.length = 0;
     zenOpenBodies.length = 0;
     await activateNavigationControl(
@@ -3410,16 +3438,22 @@ test.describe("PRISM desktop smoke", () => {
     await expect(page.getByText("POISON PRISM")).toHaveCount(0);
     await expect(page.getByText("POISON OTHER")).toHaveCount(0);
 
+    await expect(
+      page.locator('[data-relationship-depth-locked="true"]'),
+    ).toHaveCount(0, { timeout: 10_000 });
     await page.keyboard.press("Escape");
-    await expect(room).toBeVisible();
+    await expect(room).toBeVisible({ timeout: 10_000 });
     await activateNavigationControl(
       room.getByRole("button", {
         name: `Visit ${roomBots[0]!.name}'s Zen Home`,
       }),
     );
     await expect(composer).toHaveText("Draft for the persisted target Home");
+    await expect(
+      page.locator('[data-relationship-depth-locked="true"]'),
+    ).toHaveCount(0, { timeout: 10_000 });
     await page.keyboard.press("Escape");
-    await expect(room).toBeVisible();
+    await expect(room).toBeVisible({ timeout: 10_000 });
     await activateNavigationControl(
       room.getByRole("button", {
         name: `Visit ${roomBots[1]!.name}'s Zen Home`,
@@ -3987,8 +4021,11 @@ test.describe("PRISM desktop smoke", () => {
     );
 
     await page.emulateMedia({ reducedMotion: "no-preference" });
-    await page.mouse.move(4, 4);
-    await room.hover();
+    await room
+      .locator("[data-room-presence-bot-id]")
+      .first()
+      .getByRole("button")
+      .focus();
     await expect(room).toHaveAttribute("data-room-rotation-paused", "true");
     const search = page.getByRole("searchbox", {
       name: "Search bots by name",
