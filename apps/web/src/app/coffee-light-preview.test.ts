@@ -10,7 +10,7 @@ test("Coffee group roster previews share light-aware glyph orbs", () => {
   assert.match(pageSource, /rosterPreviewSeat[\s\S]*<BotFaceScreenFill \/>[\s\S]*coffeeSeatPlateGlyph/);
   assert.match(
     css,
-    /\.themeLight\.coffeeShell[\s\S]*\.coffeeSeat\[data-roster-preview="true"\][\s\S]*\.botFaceScreenFill\s*\{[\s\S]*--bot-face-screen-background:[\s\S]*#fffdf8[\s\S]*--bot-face-screen-border:/,
+    /\.themeLight\.coffeeShell[\s\S]*\.coffeeSeat\[data-roster-preview="true"\][\s\S]*\.botFaceScreenFill\s*\{[\s\S]*--bot-face-screen-background:[\s\S]*#f8fbff[\s\S]*--bot-face-screen-border:/,
   );
   assert.match(
     css,

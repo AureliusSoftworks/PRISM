@@ -9,9 +9,9 @@ const textFieldCss = readFileSync(new URL("./TextFieldContextMenu.module.css", i
 
 test("ported message, bot, and canvas menus retain a light theme scope", () => {
   assert.match(pageSource, /contextMenuThemeScope\} \$\{themeClass\}/);
-  assert.match(pageCss, /\.themeLight \.messageContextMenu\s*\{[\s\S]*background:\s*#fffdf8/);
+  assert.match(pageCss, /\.themeLight \.messageContextMenu\s*\{[\s\S]*background:\s*#f8fbff/);
   assert.match(pageCss, /\.themeLight \.messageContextMenu\s*\{[\s\S]*backdrop-filter:\s*none/);
-  assert.match(pageCss, /\.themeLight \.messageContextMenu button:disabled\s*\{[\s\S]*color:\s*#8b8175/);
+  assert.match(pageCss, /\.themeLight \.messageContextMenu button:disabled\s*\{[\s\S]*color:\s*#718496/);
   assert.match(pageCss, /\.canvasToolsContextMenu\s*\{/);
 });
 
