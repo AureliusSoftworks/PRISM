@@ -2,7 +2,36 @@ export type BotcastEpisodeSegment = "opening" | "interview" | "closing";
 export type BotcastEpisodeStatus = "live" | "completed";
 export type BotcastEpisodeOutcome = "completed" | "guest_departed";
 export type BotcastEpisodeProvider = "local" | "openai" | "anthropic";
+export type BotcastEpisodeResponseMode = "local" | "auto" | "online";
 export type BotcastSpeakerRole = "host" | "guest";
+export const BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS = [0, 1, 2] as const;
+export type BotcastFallbackStudioAccentVariant =
+  (typeof BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS)[number];
+
+export function isBotcastFallbackStudioAccentVariant(
+  value: unknown,
+): value is BotcastFallbackStudioAccentVariant {
+  return (
+    typeof value === "number" &&
+    BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS.includes(
+      value as BotcastFallbackStudioAccentVariant,
+    )
+  );
+}
+
+export function botcastFallbackStudioAccentVariantForSeed(
+  seed: string,
+): BotcastFallbackStudioAccentVariant {
+  let hash = 2166136261;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash ^= seed.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS[
+    (hash >>> 0) % BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS.length
+  ]!;
+}
+
 export type BotcastProducerCueKind =
   | "ask_about"
   | "press_harder"
@@ -20,6 +49,21 @@ export interface BotcastAtmosphereState {
   revision: number;
   status: "fallback" | "ready" | "failed";
 }
+
+/**
+ * Source-edit instruction for the online Signal daylight render. The canonical
+ * night image already carries the persona and set design, so this deliberately
+ * excludes descriptive identity prose that could make an image model rebuild
+ * the room instead of relighting it.
+ */
+export const BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT = [
+  "The attached image is the sole canonical source frame.",
+  "Produce one finished replacement image of that exact studio in natural daytime lighting.",
+  "Preserve the identical camera position, lens, crop, perspective, room geometry, windows and view, furniture, microphones, props, artwork, materials, object placement, scale, and negative space.",
+  "Do not redesign, restage, add, remove, substitute, duplicate, relocate, crop, zoom, or recompose anything.",
+  "Change only the illumination and exterior sky: daylight through the existing windows, open-sky fill, subtle sunlit bounce, practical lamps off, clean midtones, and restrained shadows.",
+  "Output only the single daytime replacement frame. The source is a reference, not content to display. Do not show a nighttime state, source image, before-and-after, diptych, split screen, comparison, grid, collage, inset, border, divider, caption, or multiple panels.",
+].join(" ");
 
 export type BotcastLogoGlyph =
   | "frequency"
@@ -45,6 +89,7 @@ export interface BotcastShow {
   premise: string;
   hostingStyle: string;
   accentColor: string;
+  fallbackStudioAccentVariant: BotcastFallbackStudioAccentVariant;
   /** Compatibility alias for the original single-studio contract. Mirrors nightAtmosphere. */
   atmosphere: BotcastAtmosphereState;
   studioIdentity: string;
@@ -123,6 +168,7 @@ export interface BotcastEpisodeSummary {
   topic: string;
   provider: BotcastEpisodeProvider;
   model: string | null;
+  responseMode: BotcastEpisodeResponseMode;
   status: BotcastEpisodeStatus;
   segment: BotcastEpisodeSegment;
   outcome: BotcastEpisodeOutcome | null;
@@ -161,6 +207,8 @@ export interface BotcastShowPatchRequest {
   nightAtmosphereImageUrl?: string | null;
   nightAtmosphereImageId?: string | null;
   regenerateAtmosphere?: boolean;
+  regenerateDayAtmosphere?: boolean;
+  regenerateNightAtmosphere?: boolean;
   logoImageUrl?: string | null;
   logoImageId?: string | null;
   regenerateLogo?: boolean;
@@ -172,6 +220,7 @@ export interface BotcastEpisodeCreateRequest {
   producerBrief?: string;
   preferredProvider?: BotcastEpisodeProvider;
   modelOverride?: string | null;
+  responseMode?: BotcastEpisodeResponseMode;
 }
 
 export interface BotcastEpisodeAdvanceRequest {

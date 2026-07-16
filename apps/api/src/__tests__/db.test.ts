@@ -105,6 +105,9 @@ describe("createDatabase bot export hash migration", () => {
         "user-1"
       );
       db.exec("ALTER TABLE users DROP COLUMN preferred_image_provider;");
+      db.exec(
+        "ALTER TABLE botcast_shows DROP COLUMN fallback_studio_accent_variant;"
+      );
       db.close();
 
       const reopened = createDatabase();
@@ -114,6 +117,14 @@ describe("createDatabase bot export hash migration", () => {
       const userColumns = reopened
         .prepare("PRAGMA table_info(users)")
         .all() as Array<{ name: string; dflt_value: string | null }>;
+      const botcastShowColumns = reopened
+        .prepare("PRAGMA table_info(botcast_shows)")
+        .all() as Array<{ name: string }>;
+      assert.ok(
+        botcastShowColumns.some(
+          (column) => column.name === "fallback_studio_accent_variant"
+        )
+      );
       assert.ok(
         userColumns.some(
           (column) => column.name === "model_visibility_defaults_version"

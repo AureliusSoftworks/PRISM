@@ -384,6 +384,7 @@ describe("group-room wallpaper image generation route", () => {
     assert.deepEqual(panelPayload.image.botIds, []);
     assert.equal(panelPayload.image.origin, "images_panel");
 
+    const signalCallStart = fetchRecorder.calls.length;
     const signalResponse = await client.request(
       "/api/images/generate",
       jsonInit({
@@ -391,6 +392,7 @@ describe("group-room wallpaper image generation route", () => {
         botId: "host-bot",
         origin: "botcast",
         preferredProvider: "openai",
+        quality: "low",
       }),
     );
     const signalPayload = await json(signalResponse);
@@ -398,6 +400,32 @@ describe("group-room wallpaper image generation route", () => {
     assert.equal(signalPayload.image.botId, "host-bot");
     assert.deepEqual(signalPayload.image.botIds, ["host-bot"]);
     assert.equal(signalPayload.image.origin, "botcast");
+    const signalProviderCalls = fetchRecorder.calls.slice(signalCallStart);
+    assert.equal(signalProviderCalls.length, 1);
+    const signalProviderBody = JSON.parse(
+      String(signalProviderCalls[0]!.init?.body),
+    ) as { model: string; quality: string };
+    assert.equal(signalProviderBody.model, "gpt-image-2");
+    assert.equal(signalProviderBody.quality, "high");
+
+    const invalidEditCallStart = fetchRecorder.calls.length;
+    for (const sourceEditKind of [undefined, "unsupported-edit"] as const) {
+      const invalidEditResponse = await client.request(
+        "/api/images/generate",
+        jsonInit({
+          prompt: "Relight this studio",
+          botId: "host-bot",
+          origin: "botcast",
+          preferredProvider: "openai",
+          sourceImageId: signalPayload.image.id,
+          ...(sourceEditKind ? { sourceEditKind } : {}),
+        }),
+      );
+      const invalidEditPayload = await json(invalidEditResponse);
+      assert.equal(invalidEditResponse.status, 400, JSON.stringify(invalidEditPayload));
+      assert.match(invalidEditPayload.error, /sourceEditKind "daylight-relight"/u);
+    }
+    assert.equal(fetchRecorder.calls.length, invalidEditCallStart);
 
     const prismGallery = await client.request("/api/images?general=1");
     assert.deepEqual(

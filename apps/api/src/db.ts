@@ -766,6 +766,8 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       premise TEXT NOT NULL,
       hosting_style TEXT NOT NULL,
       accent_color TEXT NOT NULL,
+      fallback_studio_accent_variant INTEGER NOT NULL DEFAULT 0
+        CHECK (fallback_studio_accent_variant IN (0, 1, 2)),
       atmosphere_json TEXT NOT NULL DEFAULT '{}',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
@@ -783,6 +785,8 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       producer_brief TEXT NOT NULL DEFAULT '',
       provider TEXT NOT NULL DEFAULT 'local',
       model TEXT,
+      response_mode TEXT NOT NULL DEFAULT 'local'
+        CHECK (response_mode IN ('local', 'auto', 'online')),
       status TEXT NOT NULL DEFAULT 'live',
       segment TEXT NOT NULL DEFAULT 'opening',
       outcome TEXT,
@@ -1986,6 +1990,20 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   if (!hasBotOpenaiImageModelColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN openai_image_model TEXT;");
   }
+  const botcastShowColumns = db.prepare(
+    "PRAGMA table_info(botcast_shows)"
+  ).all() as Array<{ name: string }>;
+  const hasBotcastFallbackStudioAccentVariantColumn = botcastShowColumns.some(
+    (column) => column.name === "fallback_studio_accent_variant"
+  );
+  if (!hasBotcastFallbackStudioAccentVariantColumn) {
+    db.exec(
+      "ALTER TABLE botcast_shows ADD COLUMN fallback_studio_accent_variant INTEGER NOT NULL DEFAULT 0 CHECK (fallback_studio_accent_variant IN (0, 1, 2));"
+    );
+    db.exec(
+      "UPDATE botcast_shows SET fallback_studio_accent_variant = (rowid - 1) % 3;"
+    );
+  }
   const botcastEpisodeColumns = db.prepare(
     "PRAGMA table_info(botcast_episodes)"
   ).all() as Array<{ name: string }>;
@@ -1996,6 +2014,18 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   }
   if (!botcastEpisodeColumns.some((column) => column.name === "model")) {
     db.exec("ALTER TABLE botcast_episodes ADD COLUMN model TEXT;");
+  }
+  if (!botcastEpisodeColumns.some((column) => column.name === "response_mode")) {
+    db.exec(
+      "ALTER TABLE botcast_episodes ADD COLUMN response_mode TEXT NOT NULL DEFAULT 'local' CHECK (response_mode IN ('local', 'auto', 'online'));"
+    );
+    db.exec(
+      `UPDATE botcast_episodes
+          SET response_mode = CASE
+            WHEN provider = 'local' THEN 'local'
+            ELSE 'online'
+          END;`
+    );
   }
   const hasBotTopPColumn = botColumns.some(
     (column) => column.name === "top_p"
@@ -2133,6 +2163,9 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   );
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_botcast_shows_user_updated ON botcast_shows (user_id, updated_at DESC);"
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_botcast_shows_user_created ON botcast_shows (user_id, created_at DESC);"
   );
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_botcast_episodes_show_updated ON botcast_episodes (user_id, show_id, updated_at DESC);"

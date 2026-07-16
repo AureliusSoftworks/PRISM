@@ -8,8 +8,10 @@ import type {
   BotcastEpisodeCreateRequest,
   BotcastEpisodeOutcome,
   BotcastEpisodeProvider,
+  BotcastEpisodeResponseMode,
   BotcastEpisodeSegment,
   BotcastEpisodeSummary,
+  BotcastFallbackStudioAccentVariant,
   BotcastMessage,
   BotcastProducerCue,
   BotcastReplayEvent,
@@ -22,28 +24,51 @@ import type {
   BotcastLogoState,
   BotcastSpeakerRole,
   BotcastTensionState,
+  AutoFallbackChainV1,
 } from "@localai/shared";
 import {
+  BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS,
   applyBotcastProducerCueToTension,
+  botcastFallbackStudioAccentVariantForSeed,
   botcastDirectorSuggestion,
   botcastGuestDepartureEligible,
   botcastNextSpeakerRole,
   botcastReplayTimeline,
   botcastSegmentForTurn,
   botcastTensionStageForLevel,
+  isBotcastFallbackStudioAccentVariant,
+  autoFallbackResolvedChain,
 } from "@localai/shared";
 import {
+  defaultModelIdForProvider,
   selectProvider,
   type LlmProvider,
   type ProviderMessage,
   type ProviderName,
 } from "./providers.ts";
+import { runAutoFallbackChain } from "./auto-fallback.ts";
 import { randomId } from "./security.ts";
 
 const BOTCAST_SHOW_NAME_MAX = 80;
 const BOTCAST_TEXT_MAX = 2_000;
 const BOTCAST_TOPIC_MAX = 280;
 const BOTCAST_STUDIO_IDENTITY_MAX = 2_400;
+
+export function nextBotcastFallbackStudioAccentVariant(
+  previous: unknown,
+  random: () => number = Math.random,
+): BotcastFallbackStudioAccentVariant {
+  const candidates = isBotcastFallbackStudioAccentVariant(previous)
+    ? BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS.filter(
+        (variant) => variant !== previous,
+      )
+    : [...BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS];
+  const randomValue = random();
+  const unit = Number.isFinite(randomValue)
+    ? Math.max(0, Math.min(0.999999999999, randomValue))
+    : 0;
+  return candidates[Math.floor(unit * candidates.length)]!;
+}
 
 type BotcastShowRow = {
   id: string;
@@ -52,6 +77,7 @@ type BotcastShowRow = {
   premise: string;
   hosting_style: string;
   accent_color: string;
+  fallback_studio_accent_variant: number;
   atmosphere_json: string;
   created_at: string;
   updated_at: string;
@@ -69,6 +95,7 @@ type BotcastEpisodeRow = {
   producer_brief: string;
   provider: BotcastEpisodeProvider;
   model: string | null;
+  response_mode: BotcastEpisodeResponseMode;
   status: "live" | "completed";
   segment: BotcastEpisodeSegment;
   outcome: BotcastEpisodeOutcome | null;
@@ -127,6 +154,7 @@ export interface BotcastGenerationOptions {
   secondaryOllamaHost?: string | null;
   preferredLocalModel?: string | null;
   preferredOnlineModel?: string | null;
+  autoFallbackChain?: AutoFallbackChainV1 | null;
   providerFactory?: typeof selectProvider;
 }
 
@@ -162,6 +190,12 @@ export function synthesizeBotcastShowName(host: Pick<BotcastBotProfile, "id" | "
   ];
   return formats[stableHash(`${host.id}:${host.systemPrompt}`) % formats.length]!;
 }
+
+const BOTCAST_SHOW_NAME_DIRECTIONS = [
+  "Find a title that can stand on its own without the host's name: a surprising phrase, vivid metaphor, double meaning, or conceptual tension drawn from the host's worldview.",
+  "Silently draft several candidates, reject generic patterns such as 'Inside [Name]', 'The [Name] Show', 'Conversations with [Name]', and 'The Curious Mind of [Name]', then return only the strongest.",
+  "Keep the title memorable, natural to say aloud, and 1-5 words. Use the host's name only when indispensable to genuinely excellent wordplay.",
+] as const;
 
 function defaultShowPremise(host: BotcastBotProfile): string {
   return `${host.name} hosts candid, idea-led conversations that follow conviction, contradiction, and the revealing detail beneath the first answer.`;
@@ -201,20 +235,28 @@ function atmosphereForHost(
     defaultStudioIdentity(host),
     BOTCAST_STUDIO_IDENTITY_MAX,
   );
-  const lightingDirection = lighting === "day"
-    ? "Daylight variant: bright but not blown out, soft natural window light, open sky fill, quiet sunlit bounce, practical lamps off, clean midtones, and an airy editorial atmosphere compatible with a light interface."
-    : "Nighttime variant: night visible beyond the windows, warm practical lamp pools, deep controlled shadows, luminous microphone LEDs, and selective saturated PRISM-spectrum bounce compatible with a dark interface.";
+  const prompt = lighting === "day"
+    ? [
+        `Wide cinematic two-person podcast studio backdrop designed unmistakably for ${host.name}; no people and no readable text.`,
+        `Canonical persona-first set bible: ${studioIdentity}`,
+        `The room must be identifiable as ${host.name}'s world without showing their name, portrait, show logo, or written exposition.`,
+        `When it naturally belongs in this host's world, use ${normalizeAccentColor(host.color)} as one restrained lighting or material accent; never force a rainbow palette or let house colors overpower the persona.`,
+        "Render this one scene in natural daytime light: daylight visible beyond the windows, open-sky fill, soft sunlit bounce, practical lamps off, clean midtones, and restrained shadows compatible with a light interface.",
+        "Camera-safe negative space at left and right for seated avatars, central elevated logo-safe zone, generous overscan, no logos or graphical emblems.",
+        "Output only one finished full-frame daytime studio. Never create a diptych, split screen, before-and-after comparison, grid, collage, inset, border, divider, caption, or multiple panels.",
+      ].join(" ")
+    : [
+        `Wide cinematic two-person podcast studio backdrop designed unmistakably for ${host.name}; no people and no readable text.`,
+        `Canonical persona-first set bible: ${studioIdentity}`,
+        `The room must be identifiable as ${host.name}'s world without showing their name, portrait, show logo, or written exposition.`,
+        `When it naturally belongs in this host's world, use ${normalizeAccentColor(host.color)} as one restrained lighting or material accent; never force a rainbow palette or let house colors overpower the persona.`,
+        "Render this one scene at night: night visible beyond the windows, warm practical lamp pools, deep controlled shadows, luminous microphone LEDs, and selective saturated PRISM-spectrum bounce compatible with a dark interface.",
+        "Camera-safe negative space at left and right for seated avatars, central elevated logo-safe zone, generous overscan, no logos or graphical emblems.",
+        "Output only one finished full-frame nighttime studio. Never create a diptych, split screen, before-and-after comparison, grid, collage, inset, border, divider, caption, or multiple panels.",
+      ].join(" ");
   return {
     seed,
-    prompt: [
-      `Wide cinematic two-person podcast studio backdrop designed unmistakably for ${host.name}; no people and no readable text.`,
-      `Canonical set bible shared verbatim by the matched day and night pair: ${studioIdentity}`,
-      `The room must be identifiable as ${host.name}'s world without showing their name, portrait, show logo, or written exposition.`,
-      "Preserve the exact architecture, furniture, view, collections, and identity-defining objects in both variants. Change illumination and exterior time of day only; do not redesign or genericize the set.",
-      `Use ${normalizeAccentColor(host.color)} as the lead accent within the five PRISM colors: coral pink, amber orange, electric lime, cyan, and violet.`,
-      lightingDirection,
-      "Camera-safe negative space at left and right for seated avatars, central elevated logo-safe zone, generous overscan, no logos or graphical emblems.",
-    ].join(" "),
+    prompt,
     imageUrl: null,
     imageId: null,
     revision,
@@ -389,6 +431,11 @@ function mapShow(row: BotcastShowRow): BotcastShow {
     premise: row.premise,
     hostingStyle: row.hosting_style,
     accentColor: normalizeAccentColor(row.accent_color),
+    fallbackStudioAccentVariant: isBotcastFallbackStudioAccentVariant(
+      row.fallback_studio_accent_variant,
+    )
+      ? row.fallback_studio_accent_variant
+      : botcastFallbackStudioAccentVariantForSeed(row.id),
     atmosphere: atmospheres.nightAtmosphere,
     ...atmospheres,
     logo: parseLogo(row.atmosphere_json, row),
@@ -453,6 +500,7 @@ function mapEpisodeSummary(row: BotcastEpisodeRow): BotcastEpisodeSummary {
     topic: row.topic,
     provider: row.provider,
     model: row.model,
+    responseMode: row.response_mode,
     status: row.status,
     segment: row.segment,
     outcome: row.outcome,
@@ -531,6 +579,16 @@ export function createBotcastShow(
     "SELECT id FROM botcast_shows WHERE user_id = ? AND host_bot_id = ?",
   ).get(userId, host.id) as { id: string } | undefined;
   if (existing) return getBotcastShow(db, userId, existing.id);
+  const previousShow = db.prepare(
+    `SELECT fallback_studio_accent_variant
+       FROM botcast_shows
+      WHERE user_id = ?
+      ORDER BY created_at DESC, rowid DESC
+      LIMIT 1`,
+  ).get(userId) as { fallback_studio_accent_variant: number } | undefined;
+  const fallbackStudioAccentVariant = nextBotcastFallbackStudioAccentVariant(
+    previousShow?.fallback_studio_accent_variant,
+  );
   const id = randomId(12);
   const now = new Date().toISOString();
   const dayAtmosphere = atmosphereForHost(host, "day");
@@ -545,8 +603,8 @@ export function createBotcastShow(
   db.prepare(
     `INSERT INTO botcast_shows
       (id, user_id, host_bot_id, name, premise, hosting_style, accent_color,
-       atmosphere_json, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       fallback_studio_accent_variant, atmosphere_json, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     userId,
@@ -555,6 +613,7 @@ export function createBotcastShow(
     cleanText(input.premise, defaultShowPremise(host)),
     cleanText(input.hostingStyle, defaultHostingStyle(host)),
     normalizeAccentColor(host.color),
+    fallbackStudioAccentVariant,
     serializeShowVisuals(dayAtmosphere, nightAtmosphere, logo, studioIdentity),
     now,
     now,
@@ -589,73 +648,96 @@ export function updateBotcastShow(
     current.studioIdentity || defaultStudioIdentity(host),
     BOTCAST_STUDIO_IDENTITY_MAX,
   );
-  if (patch.regenerateAtmosphere) {
-    const revision = Math.max(
-      current.dayAtmosphere.revision,
-      current.nightAtmosphere.revision,
-    ) + 1;
-    dayAtmosphere = atmosphereForHost(host, "day", revision, studioIdentity);
-    nightAtmosphere = atmosphereForHost(host, "night", revision, studioIdentity);
-  } else {
-    if (
-      patch.dayAtmosphereImageUrl !== undefined ||
-      patch.dayAtmosphereImageId !== undefined
-    ) {
-      dayAtmosphere = {
-        ...dayAtmosphere,
-        imageUrl:
-          patch.dayAtmosphereImageUrl === undefined
-            ? dayAtmosphere.imageUrl
-            : cleanText(patch.dayAtmosphereImageUrl, "", 2_000) || null,
-        imageId:
-          patch.dayAtmosphereImageId === undefined
-            ? dayAtmosphere.imageId
-            : cleanText(patch.dayAtmosphereImageId, "", 256) || null,
-        status:
-          patch.dayAtmosphereImageUrl === undefined
-            ? dayAtmosphere.status
-            : patch.dayAtmosphereImageUrl
-              ? "ready"
-              : "fallback",
-      };
-    }
-    const nightImageUrl = patch.nightAtmosphereImageUrl !== undefined
-      ? patch.nightAtmosphereImageUrl
-      : patch.atmosphereImageUrl;
-    const nightImageId = patch.nightAtmosphereImageId !== undefined
-      ? patch.nightAtmosphereImageId
-      : patch.atmosphereImageId;
-    if (
-      patch.nightAtmosphereImageUrl !== undefined ||
-      patch.nightAtmosphereImageId !== undefined ||
-      patch.atmosphereImageUrl !== undefined ||
-      patch.atmosphereImageId !== undefined
-    ) {
-      nightAtmosphere = {
-        ...nightAtmosphere,
+  const regenerateBothAtmospheres = patch.regenerateAtmosphere === true;
+  const regenerateDayAtmosphere =
+    regenerateBothAtmospheres || patch.regenerateDayAtmosphere === true;
+  const regenerateNightAtmosphere =
+    regenerateBothAtmospheres || patch.regenerateNightAtmosphere === true;
+  const pairedRevision = regenerateBothAtmospheres
+    ? Math.max(
+        current.dayAtmosphere.revision,
+        current.nightAtmosphere.revision,
+      ) + 1
+    : null;
+  if (regenerateDayAtmosphere) {
+    const revision = pairedRevision ?? current.dayAtmosphere.revision + 1;
+    dayAtmosphere = {
+      ...atmosphereForHost(host, "day", revision, studioIdentity),
+      imageUrl: current.dayAtmosphere.imageUrl,
+      imageId: current.dayAtmosphere.imageId,
+      status: current.dayAtmosphere.status,
+    };
+  } else if (
+    patch.dayAtmosphereImageUrl !== undefined ||
+    patch.dayAtmosphereImageId !== undefined
+  ) {
+    dayAtmosphere = {
+      ...dayAtmosphere,
       imageUrl:
-          nightImageUrl === undefined
-            ? nightAtmosphere.imageUrl
-            : cleanText(nightImageUrl, "", 2_000) || null,
+        patch.dayAtmosphereImageUrl === undefined
+          ? dayAtmosphere.imageUrl
+          : cleanText(patch.dayAtmosphereImageUrl, "", 2_000) || null,
       imageId:
-          nightImageId === undefined
-            ? nightAtmosphere.imageId
-            : cleanText(nightImageId, "", 256) || null,
-        status:
-          nightImageUrl === undefined
-            ? nightAtmosphere.status
-            : nightImageUrl
-              ? "ready"
-              : "fallback",
-      };
-    }
+        patch.dayAtmosphereImageId === undefined
+          ? dayAtmosphere.imageId
+          : cleanText(patch.dayAtmosphereImageId, "", 256) || null,
+      status:
+        patch.dayAtmosphereImageUrl === undefined
+          ? dayAtmosphere.status
+          : patch.dayAtmosphereImageUrl
+            ? "ready"
+            : "fallback",
+    };
+  }
+  const nightImageUrl = patch.nightAtmosphereImageUrl !== undefined
+    ? patch.nightAtmosphereImageUrl
+    : patch.atmosphereImageUrl;
+  const nightImageId = patch.nightAtmosphereImageId !== undefined
+    ? patch.nightAtmosphereImageId
+    : patch.atmosphereImageId;
+  if (regenerateNightAtmosphere) {
+    const revision = pairedRevision ?? current.nightAtmosphere.revision + 1;
+    nightAtmosphere = {
+      ...atmosphereForHost(host, "night", revision, studioIdentity),
+      imageUrl: current.nightAtmosphere.imageUrl,
+      imageId: current.nightAtmosphere.imageId,
+      status: current.nightAtmosphere.status,
+    };
+  } else if (
+    patch.nightAtmosphereImageUrl !== undefined ||
+    patch.nightAtmosphereImageId !== undefined ||
+    patch.atmosphereImageUrl !== undefined ||
+    patch.atmosphereImageId !== undefined
+  ) {
+    nightAtmosphere = {
+      ...nightAtmosphere,
+      imageUrl:
+        nightImageUrl === undefined
+          ? nightAtmosphere.imageUrl
+          : cleanText(nightImageUrl, "", 2_000) || null,
+      imageId:
+        nightImageId === undefined
+          ? nightAtmosphere.imageId
+          : cleanText(nightImageId, "", 256) || null,
+      status:
+        nightImageUrl === undefined
+          ? nightAtmosphere.status
+          : nightImageUrl
+            ? "ready"
+            : "fallback",
+    };
   }
   if (patch.regenerateLogo) {
-    logo = logoForHost(
-      host,
-      cleanText(patch.name, current.name, BOTCAST_SHOW_NAME_MAX),
-      current.logo.revision + 1,
-    );
+    logo = {
+      ...logoForHost(
+        host,
+        cleanText(patch.name, current.name, BOTCAST_SHOW_NAME_MAX),
+        current.logo.revision + 1,
+      ),
+      imageUrl: current.logo.imageUrl,
+      imageId: current.logo.imageId,
+      status: current.logo.status,
+    };
   } else if (patch.logoImageUrl !== undefined || patch.logoImageId !== undefined) {
     logo = {
       ...logo,
@@ -710,6 +792,16 @@ function parseGeneratedShowIdentity(raw: string): {
   }
 }
 
+function parseGeneratedShowName(raw: string): string | null {
+  const candidate = raw.match(/\{[\s\S]*\}/u)?.[0] ?? raw;
+  try {
+    const parsed = JSON.parse(candidate) as Record<string, unknown>;
+    return cleanText(parsed.name, "", BOTCAST_SHOW_NAME_MAX) || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function generateBotcastShowIdentity(
   db: DatabaseSync,
   userId: string,
@@ -727,9 +819,7 @@ export async function generateBotcastShowIdentity(
           content: [
             "You are naming a premium podcast show around its host's singular voice.",
             "Return one JSON object with exactly three strings: name, premise, and studioIdentity.",
-            "Find a title that can stand on its own without the host's name: a surprising phrase, vivid metaphor, double meaning, or conceptual tension drawn from the host's worldview.",
-            "Silently draft several candidates, reject generic patterns such as 'Inside [Name]', 'The [Name] Show', 'Conversations with [Name]', and 'The Curious Mind of [Name]', then return only the strongest.",
-            "Keep the title memorable, natural to say aloud, and 1-5 words. Use the host's name only when indispensable to genuinely excellent wordplay.",
+            ...BOTCAST_SHOW_NAME_DIRECTIONS,
             "The premise must be one crisp sentence describing the conversational promise. Do not use markdown.",
             "studioIdentity is a compact persona-first set bible, not a mood board: define distinctive architecture or landscape, materials, spatial motifs, and at least six concrete artifacts whose subjects and arrangement reveal this host.",
             "The room should be recognizable as the host's world without their name, portrait, logo, or readable text. Generic books, plants, luxury chairs, acoustic panels, and podcast gear do not count as identity details unless made meaningfully specific.",
@@ -757,6 +847,51 @@ export async function generateBotcastShowIdentity(
         regenerateAtmosphere: true,
         regenerateLogo: true,
       }),
+      generated: true,
+    };
+  } catch {
+    return { show: current, generated: false };
+  }
+}
+
+export async function generateBotcastShowName(
+  db: DatabaseSync,
+  userId: string,
+  showId: string,
+  generation: BotcastGenerationOptions,
+): Promise<{ show: BotcastShow; generated: boolean }> {
+  const current = getBotcastShow(db, userId, showId);
+  const host = loadBotProfile(db, userId, current.hostBotId);
+  try {
+    const selected = generationProvider(generation);
+    const raw = await selected.provider.generateResponse(
+      [
+        {
+          role: "system",
+          content: [
+            "You are renaming a premium podcast show around its host's singular voice.",
+            "Return one JSON object with exactly one string: name.",
+            ...BOTCAST_SHOW_NAME_DIRECTIONS,
+            "Return a genuinely different title from the current one. Do not use markdown.",
+          ].join(" "),
+        },
+        {
+          role: "user",
+          content: `Host: ${host.name}\nCurrent show name: ${current.name}\nHost persona:\n${host.systemPrompt.slice(0, 2_400)}`,
+        },
+      ],
+      {
+        ...(selected.model ? { model: selected.model } : {}),
+        temperature: 0.9,
+        maxTokens: 120,
+        jsonMode: true,
+        usagePurpose: "botcast_brand",
+      },
+    );
+    const name = parseGeneratedShowName(raw);
+    if (!name || name === current.name) return { show: current, generated: false };
+    return {
+      show: updateBotcastShow(db, userId, showId, { name }),
       generated: true,
     };
   } catch {
@@ -867,14 +1002,20 @@ export function createBotcastEpisode(
   const now = new Date().toISOString();
   const provider = input.preferredProvider ?? "local";
   const model = cleanText(input.modelOverride, "", 240) || null;
+  const responseMode: BotcastEpisodeResponseMode =
+    input.responseMode === "auto"
+      ? "auto"
+      : provider === "local"
+        ? "local"
+        : "online";
   db.exec("BEGIN IMMEDIATE");
   try {
     db.prepare(
       `INSERT INTO botcast_episodes
         (id, user_id, show_id, host_bot_id, guest_bot_id, title, topic,
-         producer_brief, provider, model, status, segment, started_at, created_at,
-         updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'live', 'opening', ?, ?, ?)`,
+         producer_brief, provider, model, response_mode, status, segment,
+         started_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'live', 'opening', ?, ?, ?)`,
     ).run(
       id,
       userId,
@@ -886,6 +1027,7 @@ export function createBotcastEpisode(
       cleanText(input.producerBrief, "", BOTCAST_TEXT_MAX),
       provider,
       model,
+      responseMode,
       now,
       now,
       now,
@@ -1206,8 +1348,7 @@ export async function advanceBotcastEpisode(
     departureRequired,
   });
   const selected = generationProvider(generation, episode.provider, episode.model);
-  const raw = await selected.provider.generateResponse(prompt, {
-    ...(selected.model ? { model: selected.model } : {}),
+  const generationOptions = {
     temperature: Math.min(1.15, Math.max(0.2, speaker.temperature)),
     maxTokens: Math.min(520, Math.max(120, speaker.maxTokens)),
     ...(speaker.topP != null ? { topP: speaker.topP } : {}),
@@ -1215,8 +1356,67 @@ export async function advanceBotcastEpisode(
     ...(speaker.repetitionPenalty != null
       ? { repetitionPenalty: speaker.repetitionPenalty }
       : {}),
-    usagePurpose: "botcast_turn",
-  });
+    usagePurpose: "botcast_turn" as const,
+  };
+  let providerUsed = selected.providerName;
+  let modelUsed =
+    selected.model ?? defaultModelIdForProvider(selected.providerName);
+  let autoRecovery: Awaited<
+    ReturnType<typeof runAutoFallbackChain>
+  >["recovery"];
+  let raw: string;
+  if (episode.responseMode === "auto") {
+    const resolvedChain = autoFallbackResolvedChain(
+      { provider: episode.provider, model: modelUsed },
+      generation.autoFallbackChain,
+    );
+    if (!resolvedChain) {
+      throw new Error(
+        "Signal AUTO needs one primary model and two distinct fallbacks in Settings.",
+      );
+    }
+    const providerFactory = generation.providerFactory ?? selectProvider;
+    const result = await runAutoFallbackChain({
+      attempts: resolvedChain.map((attempt, index) => ({
+        ...attempt,
+        available:
+          index === 0 ||
+          generation.providerFactory !== undefined ||
+          attempt.provider === "local" ||
+          (attempt.provider === "openai"
+            ? Boolean(generation.openAiApiKey)
+            : Boolean(generation.anthropicApiKey)),
+        run: (signal) => {
+          const provider =
+            index === 0
+              ? selected.provider
+              : providerFactory(
+                  attempt.provider,
+                  generation.openAiApiKey,
+                  generation.secondaryOllamaHost,
+                  generation.anthropicApiKey,
+                );
+          return provider.generateResponse(prompt, {
+            ...generationOptions,
+            model: attempt.model,
+            usagePurpose: index === 0 ? "botcast_turn" : "chat_fallback",
+            signal,
+          });
+        },
+      })),
+      perAttemptTimeoutMs: 60_000,
+      totalTimeoutMs: 150_000,
+    });
+    raw = result.value;
+    providerUsed = result.provider;
+    modelUsed = result.model;
+    autoRecovery = result.recovery;
+  } else {
+    raw = await selected.provider.generateResponse(prompt, {
+      ...generationOptions,
+      ...(selected.model ? { model: selected.model } : {}),
+    });
+  }
   const fallback =
     speakerRole === "host"
       ? episode.segment === "closing"
@@ -1245,7 +1445,10 @@ export async function advanceBotcastEpisode(
     speakerRole,
     botId: speaker.id,
     segment: episode.segment,
-    provider: selected.providerName,
+    provider: providerUsed,
+    model: modelUsed,
+    responseMode: episode.responseMode,
+    ...(autoRecovery ? { autoRecovery } : {}),
   }, now);
 
   if (departureRequired) {

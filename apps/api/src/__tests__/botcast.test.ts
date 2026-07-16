@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { describe, it } from "node:test";
-import { botcastReplayTimeline } from "@localai/shared";
+import {
+  BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS,
+  botcastFallbackStudioAccentVariantForSeed,
+  botcastReplayTimeline,
+} from "@localai/shared";
 
 import {
   advanceBotcastEpisode,
@@ -11,9 +15,11 @@ import {
   deleteBotcastEpisode,
   deleteBotcastShow,
   generateBotcastShowIdentity,
+  generateBotcastShowName,
   getBotcastEpisode,
   getBotcastShow,
   listBotcastEpisodes,
+  nextBotcastFallbackStudioAccentVariant,
   updateBotcastShow,
 } from "../botcast.ts";
 import { exportUserSnapshot, importUserSnapshot } from "../backup.ts";
@@ -84,6 +90,33 @@ function generation(provider: LlmProvider) {
 }
 
 describe("Botcast persistence and isolation", () => {
+  it("randomly chooses from all three fallback accents without repeating the last show", () => {
+    assert.equal(nextBotcastFallbackStudioAccentVariant(undefined, () => 0), 0);
+    assert.equal(nextBotcastFallbackStudioAccentVariant(undefined, () => 0.34), 1);
+    assert.equal(nextBotcastFallbackStudioAccentVariant(undefined, () => 0.99), 2);
+    assert.deepEqual(
+      [
+        nextBotcastFallbackStudioAccentVariant(0, () => 0),
+        nextBotcastFallbackStudioAccentVariant(0, () => 0.99),
+      ],
+      [1, 2],
+    );
+    assert.deepEqual(
+      [
+        nextBotcastFallbackStudioAccentVariant(1, () => 0),
+        nextBotcastFallbackStudioAccentVariant(1, () => 0.99),
+      ],
+      [0, 2],
+    );
+    assert.deepEqual(
+      [
+        nextBotcastFallbackStudioAccentVariant(2, () => 0),
+        nextBotcastFallbackStudioAccentVariant(2, () => 0.99),
+      ],
+      [0, 1],
+    );
+  });
+
   it("registers Signal show and episode deletion routes", () => {
     const serverSource = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
     assert.match(
@@ -94,6 +127,50 @@ describe("Botcast persistence and isolation", () => {
       serverSource,
       /route\("DELETE", "\/api\/botcast\/episodes\/:id"/u,
     );
+    assert.match(
+      serverSource,
+      /route\("POST", "\/api\/botcast\/shows\/:id\/name"/u,
+    );
+    assert.match(
+      serverSource,
+      /route\("POST", "\/api\/botcast\/shows\/:id\/assets\/:slot\/upload"/u,
+    );
+    assert.match(
+      serverSource,
+      /body\.regenerateDayAtmosphere === true[\s\S]{0,100}regenerateDayAtmosphere: true/u,
+    );
+    assert.match(
+      serverSource,
+      /body\.regenerateNightAtmosphere === true[\s\S]{0,100}regenerateNightAtmosphere: true/u,
+    );
+    assert.match(serverSource, /body\.sourceImageId/u);
+    assert.match(serverSource, /body\.sourceEditKind !== "daylight-relight"/u);
+    assert.match(
+      serverSource,
+      /Signal source-image edits require sourceEditKind "daylight-relight"/u,
+    );
+    assert.match(serverSource, /sourceImage\.origin !== "botcast"/u);
+    assert.match(serverSource, /sourceImage\.bot_id !== persistedOwnerBotId/u);
+    assert.match(
+      serverSource,
+      /editImage\(promptForModel, sourceImageBytes, apiKey/u,
+    );
+    assert.match(
+      serverSource,
+      /imageOrigin === "botcast" && effectiveProvider !== "local"[\s\S]{0,120}DEFAULT_OPENAI_IMAGE_MODEL_ID/u,
+    );
+    assert.match(
+      serverSource,
+      /promptForModel = shouldRunLocal \? localPromptForModel : onlinePromptForModel/u,
+    );
+    assert.match(
+      serverSource,
+      /const quality = imageOrigin === "botcast" && !shouldRunLocal\s*\? "high"/u,
+    );
+    assert.match(
+      serverSource,
+      /modelId: lenientImageFbOnline,[\s\S]{0,120}promptForModel: localPromptForModel/u,
+    );
   });
 
   it("creates and renames a stable host-owned show", () => {
@@ -103,12 +180,23 @@ describe("Botcast persistence and isolation", () => {
       assert.equal(show.hostBotId, "host-1");
       assert.match(show.name, /Mara Vale/u);
       assert.equal(show.accentColor, "#a355e8");
+      assert.ok(
+        BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS.includes(
+          show.fallbackStudioAccentVariant,
+        ),
+      );
       assert.equal(show.atmosphere.status, "fallback");
       assert.equal(show.dayAtmosphere.status, "fallback");
       assert.equal(show.nightAtmosphere.status, "fallback");
       assert.equal(show.atmosphere.seed, show.nightAtmosphere.seed);
-      assert.match(show.dayAtmosphere.prompt, /daylight variant/iu);
-      assert.match(show.nightAtmosphere.prompt, /nighttime variant/iu);
+      assert.match(show.dayAtmosphere.prompt, /render this one scene in natural daytime light/iu);
+      assert.match(show.nightAtmosphere.prompt, /render this one scene at night/iu);
+      assert.match(show.dayAtmosphere.prompt, /only one finished full-frame daytime studio/iu);
+      assert.match(show.dayAtmosphere.prompt, /never create a diptych|split screen/iu);
+      assert.match(show.nightAtmosphere.prompt, /never force a rainbow palette/iu);
+      assert.doesNotMatch(show.dayAtmosphere.prompt, /daylight variant/iu);
+      assert.doesNotMatch(show.nightAtmosphere.prompt, /nighttime variant/iu);
+      assert.doesNotMatch(show.nightAtmosphere.prompt, /matched day and night studio pair/iu);
       assert.match(show.studioIdentity, /Mara Vale/iu);
       assert.match(show.studioIdentity, /forensic cultural critic/iu);
       assert.match(show.dayAtmosphere.prompt, /at least six concrete/iu);
@@ -128,8 +216,16 @@ describe("Botcast persistence and isolation", () => {
         name: "The Vale Frequency",
       });
       assert.equal(renamed.name, "The Vale Frequency");
+      assert.equal(
+        renamed.fallbackStudioAccentVariant,
+        show.fallbackStudioAccentVariant,
+      );
       assert.equal(createBotcastShow(db, "user-1", { hostBotId: "host-1" }).id, show.id);
       const inventorShow = createBotcastShow(db, "user-1", { hostBotId: "guest-1" });
+      assert.notEqual(
+        inventorShow.fallbackStudioAccentVariant,
+        show.fallbackStudioAccentVariant,
+      );
       assert.match(inventorShow.studioIdentity, /Ivo Stone/iu);
       assert.match(inventorShow.studioIdentity, /guarded inventor/iu);
       assert.notEqual(inventorShow.studioIdentity, show.studioIdentity);
@@ -194,7 +290,42 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
-  it("persists matched studios and refreshes their generated images independently", () => {
+  it("regenerates only the clever show name without touching its brand assets", async () => {
+    const db = fixture();
+    const captures: ProviderMessage[][] = [];
+    const provider = recordingProvider(['{"name":"The Unsaid Index"}'], captures);
+    try {
+      const created = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const branded = updateBotcastShow(db, "user-1", created.id, {
+        dayAtmosphereImageUrl: "/images/name-day.png",
+        dayAtmosphereImageId: "name-day",
+        nightAtmosphereImageUrl: "/images/name-night.png",
+        nightAtmosphereImageId: "name-night",
+        logoImageUrl: "/images/name-logo.png",
+        logoImageId: "name-logo",
+      });
+      const result = await generateBotcastShowName(
+        db,
+        "user-1",
+        branded.id,
+        generation(provider),
+      );
+
+      assert.equal(result.generated, true);
+      assert.equal(result.show.name, "The Unsaid Index");
+      assert.equal(result.show.premise, branded.premise);
+      assert.equal(result.show.studioIdentity, branded.studioIdentity);
+      assert.deepEqual(result.show.dayAtmosphere, branded.dayAtmosphere);
+      assert.deepEqual(result.show.nightAtmosphere, branded.nightAtmosphere);
+      assert.deepEqual(result.show.logo, branded.logo);
+      assert.match(captures[0]?.[0]?.content ?? "", /exactly one string: name/iu);
+      assert.match(captures[0]?.[0]?.content ?? "", /reject generic patterns/iu);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("persists matched studios and regenerates each atmosphere independently", () => {
     const db = fixture();
     try {
       const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
@@ -209,19 +340,69 @@ describe("Botcast persistence and isolation", () => {
       const pairReady = updateBotcastShow(db, "user-1", show.id, {
         nightAtmosphereImageUrl: "/images/night.png",
         nightAtmosphereImageId: "night-image",
+        logoImageUrl: "/images/logo.png",
+        logoImageId: "logo-image",
       });
       assert.equal(pairReady.dayAtmosphere.imageId, "day-image");
       assert.equal(pairReady.nightAtmosphere.imageId, "night-image");
       assert.equal(pairReady.atmosphere.imageId, "night-image");
 
+      const refreshedDay = updateBotcastShow(db, "user-1", show.id, {
+        regenerateDayAtmosphere: true,
+      });
+      assert.equal(refreshedDay.dayAtmosphere.revision, 2);
+      assert.equal(refreshedDay.dayAtmosphere.imageUrl, "/images/day.png");
+      assert.equal(refreshedDay.dayAtmosphere.imageId, "day-image");
+      assert.equal(refreshedDay.dayAtmosphere.status, "ready");
+      assert.notEqual(refreshedDay.dayAtmosphere.seed, pairReady.dayAtmosphere.seed);
+      assert.deepEqual(refreshedDay.nightAtmosphere, pairReady.nightAtmosphere);
+      assert.deepEqual(refreshedDay.logo, pairReady.logo);
+
+      const refreshedNight = updateBotcastShow(db, "user-1", show.id, {
+        regenerateNightAtmosphere: true,
+      });
+      assert.deepEqual(refreshedNight.dayAtmosphere, refreshedDay.dayAtmosphere);
+      assert.equal(refreshedNight.nightAtmosphere.revision, 2);
+      assert.equal(refreshedNight.nightAtmosphere.imageUrl, "/images/night.png");
+      assert.equal(refreshedNight.nightAtmosphere.imageId, "night-image");
+      assert.equal(refreshedNight.nightAtmosphere.status, "ready");
+      assert.notEqual(refreshedNight.nightAtmosphere.seed, pairReady.nightAtmosphere.seed);
+      assert.deepEqual(refreshedNight.logo, pairReady.logo);
+
       const refreshed = updateBotcastShow(db, "user-1", show.id, {
         regenerateAtmosphere: true,
       });
-      assert.equal(refreshed.dayAtmosphere.imageUrl, null);
-      assert.equal(refreshed.nightAtmosphere.imageUrl, null);
+      assert.equal(refreshed.dayAtmosphere.imageUrl, "/images/day.png");
+      assert.equal(refreshed.nightAtmosphere.imageUrl, "/images/night.png");
+      assert.equal(refreshed.dayAtmosphere.imageId, "day-image");
+      assert.equal(refreshed.nightAtmosphere.imageId, "night-image");
       assert.equal(refreshed.studioIdentity, show.studioIdentity);
-      assert.equal(refreshed.dayAtmosphere.revision, 2);
-      assert.equal(refreshed.nightAtmosphere.revision, 2);
+      assert.equal(refreshed.dayAtmosphere.revision, 3);
+      assert.equal(refreshed.nightAtmosphere.revision, 3);
+
+      const refreshedLogo = updateBotcastShow(db, "user-1", show.id, {
+        regenerateLogo: true,
+      });
+      assert.equal(refreshedLogo.logo.imageUrl, "/images/logo.png");
+      assert.equal(refreshedLogo.logo.imageId, "logo-image");
+      assert.equal(refreshedLogo.logo.revision, 2);
+
+      const fallbackDay = updateBotcastShow(db, "user-1", show.id, {
+        dayAtmosphereImageUrl: null,
+        dayAtmosphereImageId: null,
+      });
+      assert.equal(fallbackDay.dayAtmosphere.status, "fallback");
+      const refreshedFallbackDay = updateBotcastShow(db, "user-1", show.id, {
+        regenerateDayAtmosphere: true,
+      });
+      assert.equal(refreshedFallbackDay.dayAtmosphere.revision, 4);
+      assert.equal(refreshedFallbackDay.dayAtmosphere.imageUrl, null);
+      assert.equal(refreshedFallbackDay.dayAtmosphere.imageId, null);
+      assert.equal(refreshedFallbackDay.dayAtmosphere.status, "fallback");
+      assert.deepEqual(
+        refreshedFallbackDay.nightAtmosphere,
+        fallbackDay.nightAtmosphere,
+      );
     } finally {
       db.close();
     }
@@ -542,6 +723,7 @@ describe("Botcast persistence and isolation", () => {
   it("round-trips shows, episodes, transcript, and director events through account backup", async () => {
     const source = fixture();
     const target = fixture();
+    const legacyTarget = fixture();
     const captures: ProviderMessage[][] = [];
     const provider = recordingProvider(["Welcome to the archive."], captures);
     try {
@@ -562,6 +744,10 @@ describe("Botcast persistence and isolation", () => {
       const key = Buffer.alloc(32, 7);
       const snapshot = exportUserSnapshot(source, "user-1", key);
       assert.equal(snapshot.botcast?.shows.length, 1);
+      assert.equal(
+        snapshot.botcast?.shows[0]?.fallbackStudioAccentVariant,
+        show.fallbackStudioAccentVariant,
+      );
       assert.equal(snapshot.botcast?.events.length, 4);
       assert.equal(snapshot.botcast?.episodes[0]?.provider, "openai");
       assert.equal(snapshot.botcast?.episodes[0]?.model, "gpt-archive");
@@ -570,15 +756,29 @@ describe("Botcast persistence and isolation", () => {
       assert.equal(restoredShow.dayAtmosphere.imageId, "archive-day");
       assert.equal(restoredShow.nightAtmosphere.imageId, "archive-night");
       assert.equal(restoredShow.studioIdentity, show.studioIdentity);
+      assert.equal(
+        restoredShow.fallbackStudioAccentVariant,
+        show.fallbackStudioAccentVariant,
+      );
       const restored = getBotcastEpisode(target, "user-1", episode.id);
       assert.equal(restored.topic, "What survives an edit");
       assert.equal(restored.provider, "openai");
       assert.equal(restored.model, "gpt-archive");
       assert.equal(restored.messages[0]?.content, "Welcome to the archive.");
       assert.ok(restored.events.some((event) => event.kind === "camera_suggestion"));
+
+      const legacySnapshot = structuredClone(snapshot);
+      const legacyShow = legacySnapshot.botcast?.shows[0];
+      if (legacyShow) delete legacyShow.fallbackStudioAccentVariant;
+      importUserSnapshot(legacyTarget, "user-1", legacySnapshot, key);
+      assert.equal(
+        getBotcastShow(legacyTarget, "user-1", show.id).fallbackStudioAccentVariant,
+        botcastFallbackStudioAccentVariantForSeed(show.id),
+      );
     } finally {
       source.close();
       target.close();
+      legacyTarget.close();
     }
   });
 });
