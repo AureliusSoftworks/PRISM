@@ -29,7 +29,8 @@ import styles from "./slateWorkspace.module.css";
 
 interface SlateWorkspaceProps {
   className?: string;
-  header: ReactNode;
+  sidebarHeader: ReactNode;
+  navigationHeader: ReactNode;
   theme: "light" | "dark";
 }
 
@@ -88,7 +89,8 @@ function revisionLabel(action: SlateRevisionAction): string {
 
 export default function SlateWorkspace({
   className = "",
-  header,
+  sidebarHeader,
+  navigationHeader,
   theme,
 }: SlateWorkspaceProps): React.JSX.Element {
   const [projects, setProjects] = useState<SlateProjectSummary[]>([]);
@@ -465,7 +467,8 @@ export default function SlateWorkspace({
   if (loading) {
     return (
       <main className={`${styles.shell} ${className}`} data-theme={theme}>
-        {header}
+        <div className={styles.sidebarNavigation}>{sidebarHeader}</div>
+        <div className={styles.mainNavigation}>{navigationHeader}</div>
         <p className={styles.loading}>Opening the writing desk…</p>
       </main>
     );
@@ -477,7 +480,8 @@ export default function SlateWorkspace({
       data-slate-workspace="true"
       data-theme={theme}
     >
-      {header}
+      <div className={styles.sidebarNavigation}>{sidebarHeader}</div>
+      <div className={styles.mainNavigation}>{navigationHeader}</div>
 
       {error ? (
         <div className={styles.error} role="alert">

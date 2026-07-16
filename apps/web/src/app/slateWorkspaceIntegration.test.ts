@@ -49,11 +49,18 @@ describe("Slate workspace integration", () => {
       pageSource.indexOf('if (view === "slate")'),
       pageSource.indexOf('if (view === "story")'),
     );
-    assert.match(slateBranch, /PrismWordmarkWithVersion/);
-    assert.match(slateBranch, /renderAppSwitcher\(\)/);
-    assert.match(slateBranch, /renderUniversalNavbarButtons/);
+    assert.match(
+      slateBranch,
+      /sidebarHeader=\{renderSharedAppletSidebarHeader\("slate"\)\}/,
+    );
+    assert.match(
+      slateBranch,
+      /navigationHeader=\{renderSharedAppletNavbar\("Slate tools"\)\}/,
+    );
     assert.match(slateBranch, /renderSharedPanels\(\)/);
     assert.match(slateBranch, /renderModeTutorialOverlay\(\)/);
+    assert.match(source, /sidebarHeader:\s*ReactNode/);
+    assert.match(source, /navigationHeader:\s*ReactNode/);
     assert.match(source, /data-theme=\{theme\}/);
   });
 });

@@ -23,14 +23,19 @@ describe("mode tutorials", () => {
 
   it("presents the production applet as Signal", () => {
     assert.equal(MODE_TUTORIALS.botcast.title, "Signal producer walkthrough");
-    assert.equal(MODE_TUTORIALS.botcast.steps[1]?.heading, "Choose the artwork path");
+    assert.equal(MODE_TUTORIALS.botcast.steps[1]?.heading, "Shape the show’s identity");
     assert.equal(
       MODE_TUTORIALS.botcast.steps[1]?.targetSelector,
       '[data-tutorial-target="botcast-brand-controls"]',
     );
-    assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /day and night studios/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /Light or Dark theme/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[2]?.body ?? "", /locks that choice/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[0]?.body ?? "", /never waits on synthesis/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /Create this show’s look once/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /find a clever name/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /matching Light and Dark studios/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /refresh the name, either studio, or the logo independently/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /replace any visual/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[2]?.body ?? "", /Pick LOCAL or ONLINE/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[2]?.body ?? "", /locks that lane and choice/u);
   });
 
   it("teaches Slate as a directed document workflow with stable targets", () => {
@@ -140,5 +145,14 @@ describe("mode tutorials", () => {
     assert.match(topicStep?.body ?? "", /four prompts created for this group/);
     assert.doesNotMatch(topicStep?.body ?? "", /regenerate/i);
     assert.doesNotMatch(topicStep?.clickLabel ?? "", /regenerate/i);
+  });
+
+  it("explains the shared Coffee topic and Table Talk rail", () => {
+    const joinStep = MODE_TUTORIALS.coffee.steps.find(
+      (step) => step.heading === "Join the conversation",
+    );
+
+    assert.match(joinStep?.body ?? "", /Poll votes and team choices share/);
+    assert.match(joinStep?.body ?? "", /drag its left edge or the topic divider/);
   });
 });

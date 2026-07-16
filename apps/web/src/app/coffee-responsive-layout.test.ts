@@ -35,10 +35,38 @@ test("three-seat first-person Coffee keeps its head avatar below the stage edge"
   );
 });
 
+test("four-seat first-person Coffee keeps its upper pair below the stage edge", () => {
+  for (const layoutIndex of [0, 1]) {
+    assert.match(
+      css,
+      new RegExp(
+        String.raw`\[data-seat-count="4"\]\[data-layout-seat="${layoutIndex}"\]\s*\{[\s\S]*?top:\s*max\(\s*calc\(48% - var\(--coffee-experimental-seat-lift\) - var\(--coffee-experimental-seat-extra-lift\)\),\s*calc\(clamp\(74px,\s*6\.3cqw,\s*98px\) - var\(--coffee-canvas-y\) \+ 10px\)\s*\);`,
+      ),
+      `four-seat upper layout ${layoutIndex} must stay inside the stage`,
+    );
+  }
+});
+
+test("Coffee resets the workspace scroll when session or replay state changes", () => {
+  assert.match(
+    pageSource,
+    /const coffeeWorkspaceRef = useRef<HTMLDivElement \| null>\(null\)/,
+  );
+  assert.match(
+    pageSource,
+    /useLayoutEffect\(\(\) => \{[\s\S]*?const workspace = coffeeWorkspaceRef\.current;[\s\S]*?workspace\.scrollTop = 0;[\s\S]*?window\.requestAnimationFrame\(resetWorkspaceScroll\);[\s\S]*?\}, \[coffeeConversation\?\.id, coffeeReplayActive, coffeeSessionPhase\]\);/,
+  );
+  assert.match(
+    pageSource,
+    /ref=\{coffeeWorkspaceRef\}[\s\S]*?data-mode=\{coffeeWorkspaceMode\}/,
+  );
+  assert.match(css, /\.coffeeWorkspace\s*\{[\s\S]*?overflow-anchor:\s*none/);
+});
+
 test("light first-person Coffee uses a readable light prose surface", () => {
   assert.match(
     css,
-    /\.themeLight\.coffeeShell[\s\S]*\.coffeeStage\[data-coffee-perspective="first-person"\][\s\S]*\.coffeeCenterMessage\s*\{[\s\S]*linear-gradient\(180deg,\s*rgba\(255,\s*253,\s*248,\s*0\.94\),\s*rgba\(246,\s*239,\s*229,\s*0\.96\)\)/,
+    /\.themeLight\.coffeeShell\[data-chrome-language="studio"\][\s\S]*?\.coffeeStage\[data-coffee-perspective="first-person"\][\s\S]*?\.coffeeCenterMessage\s*\{[\s\S]*?linear-gradient\(180deg,\s*rgba\(253,\s*254,\s*255,\s*0\.96\),\s*rgba\(235,\s*245,\s*253,\s*0\.97\)\)/,
   );
   assert.match(
     css,
@@ -55,13 +83,22 @@ test("light first-person Coffee uses a readable light prose surface", () => {
 });
 
 test("Coffee action text repositions inward from container-relative seat sides", () => {
-  assert.match(pageSource, /data-seat-horizontal-side=\{display\.seatHorizontalSide\}/);
+  assert.match(
+    pageSource,
+    /data-seat-horizontal-side=\{display\.seatHorizontalSide\}/,
+  );
   assert.match(
     pageSource,
     /"--coffee-action-seat-left" as string\]: `\$\{display\.seatCanvasLeftPercent\}cqw`/,
   );
-  assert.match(css, /data-seat-horizontal-side="left"[\s\S]*--coffee-action-quote-preferred-x:\s*-20%/);
-  assert.match(css, /data-seat-horizontal-side="right"[\s\S]*--coffee-action-quote-preferred-x:\s*-80%/);
+  assert.match(
+    css,
+    /data-seat-horizontal-side="left"[\s\S]*--coffee-action-quote-preferred-x:\s*-20%/,
+  );
+  assert.match(
+    css,
+    /data-seat-horizontal-side="right"[\s\S]*--coffee-action-quote-preferred-x:\s*-80%/,
+  );
   assert.match(
     css,
     /--coffee-action-quote-x:\s*clamp\(\s*calc\(var\(--coffee-action-edge-safe\) - var\(--coffee-action-seat-left\)\),\s*var\(--coffee-action-quote-preferred-x\),\s*calc\([\s\S]*?100cqw[\s\S]*?var\(--coffee-action-seat-left\) - 100%/,
