@@ -12,6 +12,7 @@ import {
 import {
   botcastCameraShotAt,
   botcastGuestHasDepartedAt,
+  botcastNextSpeakerRole,
   botcastReplayMessageIndexAt,
   botcastReplayTimeline,
   normalizeAccentForTheme,
@@ -25,7 +26,26 @@ import {
   type BotcastShow,
 } from "@localai/shared";
 import { nextBotcastShowIdAfterDeletion } from "./botcastDeletion";
+import {
+  botcastSpeechRevealVisibleText,
+  finishBotcastSpeechReveal,
+  prepareBotcastSpeechReveal,
+  startBotcastSpeechReveal,
+  updateBotcastSpeechReveal,
+  type BotcastSpeechRevealState,
+} from "./botcastSpeechReveal";
 import { PrismBlockingLoader } from "./PrismBlockingLoader";
+import {
+  SIGNAL_ARTWORK_JOB_EVENT,
+  announceSignalArtworkJob,
+  signalArtworkJobIsActive,
+  type SignalArtworkJobSnapshot,
+} from "./signalArtworkJob";
+import type { VoicePlaybackLifecycle } from "./voiceEffects";
+import {
+  crtSpeechMouthShapeAtElapsedMs,
+  type ZenLiveBotMouthShape,
+} from "./zenLiveMouth";
 import styles from "./botcast.module.css";
 
 export interface BotcastBotSummary {
@@ -58,12 +78,32 @@ export interface BotcastExperienceProps {
   theme?: "light" | "dark";
   renderAvatar?: (
     bot: BotcastBotSummary,
-    state: { talking: boolean; thinking: boolean; role: "host" | "guest" },
+    state: {
+      talking: boolean;
+      thinking: boolean;
+      role: "host" | "guest";
+      mouthShape: ZenLiveBotMouthShape;
+    },
   ) => ReactNode;
-  onUtterance?: (message: BotcastMessage, bot: BotcastBotSummary) => void;
+  renderMug?: (
+    bot: BotcastBotSummary,
+    state: { role: "host" | "guest" },
+  ) => ReactNode;
+  onUtterance?: (
+    message: BotcastMessage,
+    bot: BotcastBotSummary,
+    lifecycle: VoicePlaybackLifecycle,
+  ) => boolean | Promise<boolean>;
+  onPrepareUtterance?: () => void;
+  onStopUtterance?: () => void;
   sidebarHeader: ReactNode;
   navigationHeader: ReactNode;
 }
+
+type BotcastLiveSpeech = {
+  messageId: string;
+  reveal: BotcastSpeechRevealState;
+};
 
 type ImageGenerationResponse = {
   image: { id: string; displayUrl?: string; url?: string };
@@ -177,6 +217,14 @@ function runtimeLabel(runtimeMs: number | null): string {
 function providerLabel(provider: BotcastEpisodeSummary["provider"]): string {
   if (provider === "local") return "LOCAL";
   return provider === "anthropic" ? "Anthropic" : "OpenAI";
+}
+
+function episodeModeLabel(
+  episode: Pick<BotcastEpisodeSummary, "provider" | "responseMode">,
+): string {
+  return episode.responseMode === "auto"
+    ? "AUTO"
+    : providerLabel(episode.provider);
 }
 
 function activeShowAtmosphere(
@@ -315,7 +363,10 @@ export function BotcastExperience({
   providerModeToggle,
   theme = "dark",
   renderAvatar,
+  renderMug,
   onUtterance,
+  onPrepareUtterance,
+  onStopUtterance,
   sidebarHeader,
   navigationHeader,
 }: BotcastExperienceProps): React.JSX.Element {
@@ -356,16 +407,24 @@ export function BotcastExperience({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
+  const [liveSpeech, setLiveSpeech] = useState<BotcastLiveSpeech | null>(null);
   const [replayCamera, setReplayCamera] = useState<BotcastCameraShot>("auto");
   const [replayElapsedMs, setReplayElapsedMs] = useState(0);
   const [replayPlaying, setReplayPlaying] = useState(false);
+  const [replayVoicePending, setReplayVoicePending] = useState(false);
+  const [replaySpeechActive, setReplaySpeechActive] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<SignalDeleteTarget | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [blockingOperation, setBlockingOperation] = useState<SignalBlockingOperation | null>(null);
+  const [artworkJob, setArtworkJob] = useState<SignalArtworkJobSnapshot | null>(null);
   const blockingAbortRef = useRef<AbortController | null>(null);
+  const handledArtworkJobIdsRef = useRef(new Set<string>());
   const advanceInFlightRef = useRef(false);
+  const activeSpeechMessageIdRef = useRef<string | null>(null);
+  const episodeOperationAbortRef = useRef<AbortController | null>(null);
+  const episodeRunIdRef = useRef(0);
   const replayVoiceMessageIdRef = useRef<string | null>(null);
-  const speakingTimerRef = useRef<number | null>(null);
+  const replayVoiceRunIdRef = useRef(0);
   const deleteCancelButtonRef = useRef<HTMLButtonElement | null>(null);
   const deleteReturnFocusRef = useRef<HTMLElement | null>(null);
   const lightStudioUploadRef = useRef<HTMLInputElement | null>(null);
@@ -374,16 +433,54 @@ export function BotcastExperience({
 
   useEffect(() => () => blockingAbortRef.current?.abort(), []);
 
+  const stopUtterance = useCallback((): void => {
+    activeSpeechMessageIdRef.current = null;
+    setSpeakingMessageId(null);
+    setLiveSpeech(null);
+    onStopUtterance?.();
+  }, [onStopUtterance]);
+
+  const invalidateEpisodeOperation = useCallback((): void => {
+    episodeRunIdRef.current += 1;
+    episodeOperationAbortRef.current?.abort();
+    episodeOperationAbortRef.current = null;
+    advanceInFlightRef.current = false;
+    setAutoRun(false);
+    setBusy(false);
+    stopUtterance();
+  }, [stopUtterance]);
+
+  const beginEpisodeOperation = useCallback((): {
+    controller: AbortController;
+    runId: number;
+  } => {
+    episodeOperationAbortRef.current?.abort();
+    const controller = new AbortController();
+    const runId = episodeRunIdRef.current + 1;
+    episodeRunIdRef.current = runId;
+    episodeOperationAbortRef.current = controller;
+    return { controller, runId };
+  }, []);
+
+  const episodeOperationIsCurrent = useCallback(
+    (controller: AbortController, runId: number): boolean =>
+      !controller.signal.aborted &&
+      episodeOperationAbortRef.current === controller &&
+      episodeRunIdRef.current === runId,
+    [],
+  );
+
+  useEffect(
+    () => () => invalidateEpisodeOperation(),
+    [invalidateEpisodeOperation],
+  );
+
   const cancelBlockingOperation = (): void => {
     const controller = blockingAbortRef.current;
     if (!controller || controller.signal.aborted) return;
     controller.abort();
-    setBlockingOperation((current) => current ? {
-      ...current,
-      stepLabel: "Cancelling…",
-      progress: null,
-      cancellable: false,
-    } : null);
+    setBlockingOperation(null);
+    setBusy(false);
   };
 
   useEffect(() => {
@@ -402,6 +499,11 @@ export function BotcastExperience({
   }, [episodeModelDraft, modelOptions]);
 
   const selectedShow = shows.find((show) => show.id === selectedShowId) ?? null;
+  const selectedShowArtworkBusy = Boolean(
+    selectedShow &&
+      artworkJob?.showId === selectedShow.id &&
+      signalArtworkJobIsActive(artworkJob),
+  );
   const dashboardAtmosphere = selectedShow
     ? activeShowAtmosphere(selectedShow, theme)
     : null;
@@ -419,6 +521,63 @@ export function BotcastExperience({
     setShows(response.shows);
     return response.shows;
   }, [request]);
+
+  const refreshArtworkJob = useCallback(async (): Promise<void> => {
+    try {
+      const response = await request<{ job: SignalArtworkJobSnapshot | null }>(
+        "/api/botcast/artwork-jobs/active",
+      );
+      setArtworkJob(response.job);
+    } catch {
+      // Preserve the last state through temporary API disconnects.
+    }
+  }, [request]);
+
+  useEffect(() => {
+    void refreshArtworkJob();
+    const onArtworkJob = (event: Event): void => {
+      setArtworkJob((event as CustomEvent<SignalArtworkJobSnapshot>).detail);
+    };
+    window.addEventListener(SIGNAL_ARTWORK_JOB_EVENT, onArtworkJob);
+    return () => window.removeEventListener(SIGNAL_ARTWORK_JOB_EVENT, onArtworkJob);
+  }, [refreshArtworkJob]);
+
+  useEffect(() => {
+    if (!artworkJob || !signalArtworkJobIsActive(artworkJob)) return;
+    const interval = window.setInterval(() => {
+      void request<{ job: SignalArtworkJobSnapshot }>(
+        `/api/botcast/artwork-jobs/${encodeURIComponent(artworkJob.id)}`,
+      )
+        .then((response) => setArtworkJob(response.job))
+        .catch(() => undefined);
+    }, 1_500);
+    return () => window.clearInterval(interval);
+  }, [artworkJob, request]);
+
+  useEffect(() => {
+    if (
+      !artworkJob ||
+      signalArtworkJobIsActive(artworkJob) ||
+      handledArtworkJobIdsRef.current.has(artworkJob.id)
+    ) {
+      return;
+    }
+    handledArtworkJobIdsRef.current.add(artworkJob.id);
+    void loadShows().then((nextShows) => {
+      const refreshedShow = nextShows.find((show) => show.id === selectedShowId);
+      if (refreshedShow) setShowNameDraft(refreshedShow.name);
+    });
+    if (artworkJob.status === "completed") {
+      setNotice("The custom logo and matching Light and Dark studios are live.");
+    } else if (artworkJob.status === "partial") {
+      setNotice("Finished custom artwork is live; the PRISM set covers anything still missing.");
+      setError(artworkJob.errors.at(-1)?.message ?? "Some Signal artwork could not be completed.");
+    } else if (artworkJob.status === "failed") {
+      setError(artworkJob.errors.at(-1)?.message ?? "Signal artwork could not be completed.");
+    } else if (artworkJob.status === "cancelled") {
+      setNotice("Artwork synthesis stopped. Finished visuals were kept.");
+    }
+  }, [artworkJob, loadShows, selectedShowId]);
 
   const loadEpisodes = useCallback(
     async (showId: string): Promise<BotcastEpisodeSummary[]> => {
@@ -466,6 +625,12 @@ export function BotcastExperience({
 
   const selectShow = useCallback(
     async (show: BotcastShow): Promise<void> => {
+      invalidateEpisodeOperation();
+      replayVoiceRunIdRef.current += 1;
+      replayVoiceMessageIdRef.current = null;
+      setReplayPlaying(false);
+      setReplayVoicePending(false);
+      setReplaySpeechActive(false);
       setSelectedShowId(show.id);
       setShowNameDraft(show.name);
       setEpisode(null);
@@ -480,7 +645,7 @@ export function BotcastExperience({
         setLoading(false);
       }
     },
-    [loadEpisodes],
+    [invalidateEpisodeOperation, loadEpisodes],
   );
 
   const replaceShow = (nextShow: BotcastShow): void => {
@@ -494,16 +659,14 @@ export function BotcastExperience({
   };
 
   const resetEpisodePlayback = (): void => {
-    setAutoRun(false);
+    invalidateEpisodeOperation();
+    replayVoiceRunIdRef.current += 1;
     setReplayPlaying(false);
+    setReplayVoicePending(false);
+    setReplaySpeechActive(false);
     setReplayElapsedMs(0);
     setReplayCamera("auto");
-    setSpeakingMessageId(null);
     replayVoiceMessageIdRef.current = null;
-    if (speakingTimerRef.current !== null) {
-      window.clearTimeout(speakingTimerRef.current);
-      speakingTimerRef.current = null;
-    }
   };
 
   const openShowDeletion = (show: BotcastShow, opener: HTMLElement): void => {
@@ -633,7 +796,6 @@ export function BotcastExperience({
     sourceShow: BotcastShow,
     regenerate: boolean,
     kinds: readonly SignalArtworkKind[] = ["night-studio", "day-studio", "logo"],
-    prepareShowIdentity = false,
   ): Promise<{
     show: BotcastShow;
     generatedCount: number;
@@ -675,33 +837,6 @@ export function BotcastExperience({
     let generatedCount = 0;
     let failureMessage: string | null = null;
     try {
-      if (prepareShowIdentity) {
-        setBlockingOperation((current) => current ? {
-          ...current,
-          stepLabel: "Finding the name and visual identity",
-          progress: 0,
-        } : null);
-        try {
-          const identity = await request<{ show: BotcastShow; generated: boolean }>(
-            `/api/botcast/shows/${encodeURIComponent(sourceShow.id)}/brand`,
-            {
-              method: "POST",
-              body: JSON.stringify({ preferredProvider }),
-              signal: controller.signal,
-            },
-          );
-          if (identity.generated) {
-            workingShow = identity.show;
-            replaceShow(workingShow);
-            setShowNameDraft(workingShow.name);
-          }
-        } catch (identityError) {
-          if (isAbortError(identityError)) {
-            return { show: workingShow, generatedCount, failureMessage, cancelled: true };
-          }
-          failureMessage ??= errorMessage(identityError);
-        }
-      }
       if (regenerate) {
         const reset = await request<{ show: BotcastShow }>(
           `/api/botcast/shows/${encodeURIComponent(sourceShow.id)}`,
@@ -993,31 +1128,76 @@ export function BotcastExperience({
 
   const synthesizeShowLook = async (): Promise<void> => {
     if (!selectedShow) return;
+    const controller = new AbortController();
+    const identityStartedAt = performance.now();
+    let identityFailure: string | null = null;
     setBusy(true);
     setError(null);
-    setNotice("Creating a custom look for this show…");
+    setNotice("Finding this show’s identity…");
+    blockingAbortRef.current = controller;
+    setBlockingOperation({
+      title: `Finding ${selectedShow.name}’s visual identity`,
+      detail: "PRISM is finding the show’s name and persona-shaped art direction before the renderer continues in the background.",
+      stepLabel: "Finding the name and visual identity",
+      progress: null,
+      cancellable: true,
+    });
     try {
-      const artwork = await generateShowArtwork(
-        selectedShow,
-        false,
-        ["night-studio", "day-studio", "logo"],
-        true,
+      try {
+        const identity = await request<{ show: BotcastShow; generated: boolean }>(
+          `/api/botcast/shows/${encodeURIComponent(selectedShow.id)}/brand`,
+          {
+            method: "POST",
+            body: JSON.stringify({ preferredProvider }),
+            signal: controller.signal,
+          },
+        );
+        if (identity.generated) {
+          replaceShow(identity.show);
+          setShowNameDraft(identity.show.name);
+        }
+      } catch (identityError) {
+        if (isAbortError(identityError)) throw identityError;
+        identityFailure = errorMessage(identityError);
+      }
+      const identityMs = Math.max(0, Math.round(performance.now() - identityStartedAt));
+      console.info("[signal-artwork] identity prepared", {
+        showId: selectedShow.id,
+        identityMs,
+        fallbackUsed: Boolean(identityFailure),
+      });
+      setBlockingOperation((current) =>
+        current
+          ? {
+              ...current,
+              stepLabel: "Handing the artwork to the background renderer",
+            }
+          : current,
       );
-      if (artwork.cancelled) {
-        setNotice("Artwork synthesis cancelled. Finished visuals were kept; the PRISM set covers the rest.");
+      const response = await request<{ job: SignalArtworkJobSnapshot }>(
+        `/api/botcast/shows/${encodeURIComponent(selectedShow.id)}/artwork-job`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            preferredProvider: preferredImageProvider,
+            identityMs,
+          }),
+          signal: controller.signal,
+        },
+      );
+      setArtworkJob(response.job);
+      announceSignalArtworkJob(response.job);
+      if (identityFailure) setError(identityFailure);
+      setNotice("The Dark studio is rendering in the background. You can keep using PRISM.");
+    } catch (artworkError) {
+      if (isAbortError(artworkError)) {
+        setNotice("Show look setup cancelled. No artwork job was started.");
         return;
       }
-      if (artwork.failureMessage) setError(artwork.failureMessage);
-      setNotice(
-        artwork.generatedCount === 3
-          ? "The new name, custom logo, and matching Light and Dark studios are live."
-          : artwork.generatedCount > 0
-            ? "The new identity and finished custom artwork are live; the PRISM set covers anything still missing."
-            : "Synthesis was unavailable, so the built-in PRISM set remains live.",
-      );
-    } catch (artworkError) {
       setError(errorMessage(artworkError));
     } finally {
+      if (blockingAbortRef.current === controller) blockingAbortRef.current = null;
+      setBlockingOperation(null);
       setBusy(false);
     }
   };
@@ -1113,6 +1293,8 @@ export function BotcastExperience({
 
   const startEpisode = async (): Promise<void> => {
     if (!selectedShow || !guestDraftId || !topicDraft.trim()) return;
+    onPrepareUtterance?.();
+    const { controller, runId } = beginEpisodeOperation();
     const selectedModelOption = responseMode !== "auto" && episodeModelDraft
       ? modelOptions.find((option) => option.id === episodeModelDraft) ?? null
       : null;
@@ -1127,6 +1309,7 @@ export function BotcastExperience({
         `/api/botcast/shows/${encodeURIComponent(selectedShow.id)}/episodes`,
         {
           method: "POST",
+          signal: controller.signal,
           body: JSON.stringify({
             guestBotId: guestDraftId,
             topic: topicDraft,
@@ -1137,6 +1320,7 @@ export function BotcastExperience({
           }),
         },
       );
+      if (!episodeOperationIsCurrent(controller, runId)) return;
       setEpisode(response.episode);
       setReplayEpisode(null);
       setAutoRun(true);
@@ -1144,18 +1328,56 @@ export function BotcastExperience({
       setProducerBriefDraft("");
       setEpisodeModelDraft("");
       setAskAboutDraft("");
-      await loadEpisodes(selectedShow.id);
+      void loadEpisodes(selectedShow.id).catch(() => undefined);
     } catch (startError) {
-      setError(errorMessage(startError));
+      if (episodeOperationIsCurrent(controller, runId)) {
+        setError(errorMessage(startError));
+      }
     } finally {
-      setBusy(false);
+      if (episodeOperationIsCurrent(controller, runId)) {
+        episodeOperationAbortRef.current = null;
+        setBusy(false);
+      }
     }
   };
+
+  const revealUtteranceWithoutAudio = useCallback(
+    async (message: BotcastMessage): Promise<void> => {
+      const messageId = message.id;
+      const tokenCount = Math.max(1, message.content.trim().split(/\s+/u).length);
+      const durationMs = Math.min(6_500, Math.max(720, tokenCount * 175));
+      setLiveSpeech({
+        messageId,
+        reveal: startBotcastSpeechReveal({
+          text: message.content,
+          durationMs,
+        }),
+      });
+      const startedAt = performance.now();
+      while (activeSpeechMessageIdRef.current === messageId) {
+        const elapsedMs = Math.min(durationMs, performance.now() - startedAt);
+        setLiveSpeech((current) => current?.messageId === messageId
+          ? {
+              ...current,
+              reveal: updateBotcastSpeechReveal(current.reveal, elapsedMs),
+            }
+          : current);
+        if (elapsedMs >= durationMs) break;
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 50));
+      }
+      if (activeSpeechMessageIdRef.current !== messageId) return;
+      setLiveSpeech((current) => current?.messageId === messageId
+        ? { ...current, reveal: finishBotcastSpeechReveal(current.reveal) }
+        : current);
+    },
+    [],
+  );
 
   const advanceEpisode = useCallback(
     async (cue?: BotcastProducerCue): Promise<void> => {
       if (!episode || episode.status === "completed" || advanceInFlightRef.current) return;
       advanceInFlightRef.current = true;
+      const { controller, runId } = beginEpisodeOperation();
       setBusy(true);
       setError(null);
       try {
@@ -1163,47 +1385,120 @@ export function BotcastExperience({
           `/api/botcast/episodes/${encodeURIComponent(episode.id)}/advance`,
           {
             method: "POST",
+            signal: controller.signal,
             body: JSON.stringify({
               ...(cue ? { cue } : {}),
             }),
           },
         );
-        setEpisode(response.episode);
+        if (!episodeOperationIsCurrent(controller, runId)) return;
         if (response.message) {
+          const message = response.message;
+          activeSpeechMessageIdRef.current = message.id;
+          setLiveSpeech({
+            messageId: message.id,
+            reveal: prepareBotcastSpeechReveal(message.content),
+          });
           setSpeakingMessageId(response.message.id);
-          if (speakingTimerRef.current !== null) {
-            window.clearTimeout(speakingTimerRef.current);
+          setEpisode(response.episode);
+          const bot = botsById.get(message.botId);
+          let playbackStarted = false;
+          const lifecycle: VoicePlaybackLifecycle = {
+            onStart: (durationMs, alignment) => {
+              if (
+                activeSpeechMessageIdRef.current !== message.id ||
+                !episodeOperationIsCurrent(controller, runId)
+              ) return;
+              playbackStarted = true;
+              setLiveSpeech({
+                messageId: message.id,
+                reveal: startBotcastSpeechReveal({
+                  text: message.content,
+                  durationMs: durationMs ?? Math.max(720, message.content.length * 34),
+                  alignment,
+                }),
+              });
+            },
+            onProgress: (elapsedMs, durationMs) => {
+              if (
+                activeSpeechMessageIdRef.current !== message.id ||
+                !episodeOperationIsCurrent(controller, runId)
+              ) return;
+              setLiveSpeech((current) => {
+                if (!current || current.messageId !== message.id) return current;
+                const reveal = current.reveal.phase === "preparing"
+                  ? startBotcastSpeechReveal({
+                      text: message.content,
+                      durationMs,
+                    })
+                  : current.reveal;
+                return {
+                  ...current,
+                  reveal: updateBotcastSpeechReveal(reveal, elapsedMs),
+                };
+              });
+            },
+            onEnd: () => {
+              if (
+                activeSpeechMessageIdRef.current !== message.id ||
+                !episodeOperationIsCurrent(controller, runId)
+              ) return;
+              setLiveSpeech((current) => current?.messageId === message.id
+                ? { ...current, reveal: finishBotcastSpeechReveal(current.reveal) }
+                : current);
+            },
+          };
+          const played = bot && onUtterance
+            ? await onUtterance(message, bot, lifecycle)
+            : false;
+          if (
+            activeSpeechMessageIdRef.current !== message.id ||
+            !episodeOperationIsCurrent(controller, runId)
+          ) return;
+          if (!played && !playbackStarted) {
+            await revealUtteranceWithoutAudio(message);
+          } else {
+            setLiveSpeech((current) => current?.messageId === message.id
+              ? { ...current, reveal: finishBotcastSpeechReveal(current.reveal) }
+              : current);
           }
-          const speakingMs = Math.min(
-            9_000,
-            Math.max(1_800, response.message.content.split(/\s+/u).length * 280),
-          );
-          speakingTimerRef.current = window.setTimeout(() => {
+          if (activeSpeechMessageIdRef.current === message.id) {
+            activeSpeechMessageIdRef.current = null;
             setSpeakingMessageId(null);
-            speakingTimerRef.current = null;
-          }, speakingMs);
-          const bot = botsById.get(response.message.botId);
-          if (bot) onUtterance?.(response.message, bot);
+            setLiveSpeech(null);
+          }
+        } else {
+          setEpisode(response.episode);
         }
         if (response.episode.status === "completed") {
           setAutoRun(false);
-          if (selectedShowId) await loadEpisodes(selectedShowId);
+          if (selectedShowId) void loadEpisodes(selectedShowId).catch(() => undefined);
         }
       } catch (advanceError) {
-        setAutoRun(false);
-        setError(errorMessage(advanceError));
+        if (episodeOperationIsCurrent(controller, runId)) {
+          if (activeSpeechMessageIdRef.current !== null) stopUtterance();
+          setAutoRun(false);
+          setError(errorMessage(advanceError));
+        }
       } finally {
-        setBusy(false);
-        advanceInFlightRef.current = false;
+        if (episodeOperationIsCurrent(controller, runId)) {
+          episodeOperationAbortRef.current = null;
+          setBusy(false);
+          advanceInFlightRef.current = false;
+        }
       }
     },
     [
       botsById,
+      beginEpisodeOperation,
       episode,
+      episodeOperationIsCurrent,
       loadEpisodes,
       onUtterance,
+      revealUtteranceWithoutAudio,
       request,
       selectedShowId,
+      stopUtterance,
     ],
   );
 
@@ -1216,20 +1511,31 @@ export function BotcastExperience({
       speakingMessageId !== null
     )
       return;
-    const timer = window.setTimeout(() => void advanceEpisode(), episode.messages.length ? 2_600 : 450);
+    const timer = window.setTimeout(
+      () => void advanceEpisode(),
+      episode.messages.length ? 360 : 0,
+    );
     return () => window.clearTimeout(timer);
   }, [advanceEpisode, autoRun, busy, episode, speakingMessageId]);
 
   const sendCue = (cue: BotcastProducerCue): void => {
+    onPrepareUtterance?.();
     setAutoRun(true);
     void advanceEpisode(cue);
   };
 
   const openReplay = async (summary: BotcastEpisodeSummary): Promise<void> => {
+    invalidateEpisodeOperation();
+    const replayRunId = replayVoiceRunIdRef.current + 1;
+    replayVoiceRunIdRef.current = replayRunId;
+    replayVoiceMessageIdRef.current = null;
+    setReplayVoicePending(false);
+    setReplaySpeechActive(false);
     setLoading(true);
     setError(null);
     try {
       const detail = await loadEpisode(summary.id);
+      if (replayVoiceRunIdRef.current !== replayRunId) return;
       if (detail.status === "live") {
         setEpisode(detail);
         setReplayEpisode(null);
@@ -1242,9 +1548,11 @@ export function BotcastExperience({
       setReplayElapsedMs(0);
       setReplayPlaying(false);
     } catch (replayError) {
-      setError(errorMessage(replayError));
+      if (replayVoiceRunIdRef.current === replayRunId) {
+        setError(errorMessage(replayError));
+      }
     } finally {
-      setLoading(false);
+      if (replayVoiceRunIdRef.current === replayRunId) setLoading(false);
     }
   };
 
@@ -1257,7 +1565,7 @@ export function BotcastExperience({
   );
   const replayDurationMs = replayTimeline.durationMs;
   useEffect(() => {
-    if (!replayEpisode || !replayPlaying) return;
+    if (!replayEpisode || !replayPlaying || replayVoicePending) return;
     const timer = window.setInterval(() => {
       setReplayElapsedMs((current) => {
         const next = Math.min(replayDurationMs, current + 100);
@@ -1266,7 +1574,7 @@ export function BotcastExperience({
       });
     }, 100);
     return () => window.clearInterval(timer);
-  }, [replayDurationMs, replayEpisode, replayPlaying]);
+  }, [replayDurationMs, replayEpisode, replayPlaying, replayVoicePending]);
 
   const replayShot = replayEpisode
     ? botcastCameraShotAt({
@@ -1288,20 +1596,71 @@ export function BotcastExperience({
     if (replayVoiceMessageIdRef.current === replayActiveMessage.id) return;
     replayVoiceMessageIdRef.current = replayActiveMessage.id;
     const bot = botsById.get(replayActiveMessage.botId);
-    if (bot) onUtterance?.(replayActiveMessage, bot);
-  }, [botsById, onUtterance, replayActiveMessage, replayPlaying]);
+    if (!bot || !onUtterance) return;
+    const runId = replayVoiceRunIdRef.current + 1;
+    replayVoiceRunIdRef.current = runId;
+    const messageStartMs = replayTimeline.messageStartMs[replayMessageIndex] ?? 0;
+    const messageEndMs =
+      replayTimeline.messageStartMs[replayMessageIndex + 1] ?? replayDurationMs;
+    setReplayVoicePending(true);
+    setReplaySpeechActive(false);
+    void (async () => {
+      try {
+        const played = await onUtterance(replayActiveMessage, bot, {
+          onStart: () => {
+            if (replayVoiceRunIdRef.current !== runId) return;
+            setReplaySpeechActive(true);
+          },
+          onProgress: (elapsedMs, durationMs) => {
+            if (replayVoiceRunIdRef.current !== runId) return;
+            const progress = Math.max(0, Math.min(1, elapsedMs / Math.max(1, durationMs)));
+            setReplayElapsedMs(
+              messageStartMs + (messageEndMs - messageStartMs) * progress,
+            );
+          },
+          onEnd: () => {
+            if (replayVoiceRunIdRef.current !== runId) return;
+            setReplaySpeechActive(false);
+          },
+        });
+        if (replayVoiceRunIdRef.current !== runId) return;
+        if (played) {
+          await new Promise<void>((resolve) => window.setTimeout(resolve, 280));
+          if (replayVoiceRunIdRef.current !== runId) return;
+          setReplayElapsedMs(messageEndMs);
+          if (messageEndMs >= replayDurationMs) setReplayPlaying(false);
+        }
+      } catch {
+        // Replay falls back to its saved director clock when speech is unavailable.
+      } finally {
+        if (replayVoiceRunIdRef.current === runId) {
+          setReplaySpeechActive(false);
+          setReplayVoicePending(false);
+        }
+      }
+    })();
+  }, [
+    botsById,
+    onUtterance,
+    replayActiveMessage,
+    replayDurationMs,
+    replayMessageIndex,
+    replayPlaying,
+    replayTimeline.messageStartMs,
+  ]);
   useEffect(() => {
     if (replayEpisode) return;
     replayVoiceMessageIdRef.current = null;
   }, [replayEpisode]);
-  useEffect(
-    () => () => {
-      if (speakingTimerRef.current !== null) {
-        window.clearTimeout(speakingTimerRef.current);
-      }
-    },
-    [],
-  );
+
+  const stopReplayPlayback = (): void => {
+    replayVoiceRunIdRef.current += 1;
+    replayVoiceMessageIdRef.current = null;
+    setReplayPlaying(false);
+    setReplayVoicePending(false);
+    setReplaySpeechActive(false);
+    onStopUtterance?.();
+  };
 
   const renderStage = (args: {
     show: BotcastShow;
@@ -1314,7 +1673,33 @@ export function BotcastExperience({
     guestDeparted?: boolean;
   }): React.JSX.Element => {
     const departed = args.guestDeparted ?? guestHasDeparted(args.currentEpisode);
+    const thinkingRole = botcastNextSpeakerRole({
+      messages: args.currentEpisode.messages,
+      segment: args.currentEpisode.segment,
+      guestDeparted: departed,
+    });
     const stageAtmosphere = activeShowAtmosphere(args.show, theme);
+    const replayMessageStartMs = replayTimeline.messageStartMs[replayMessageIndex] ?? 0;
+    const replayMessageEndMs =
+      replayTimeline.messageStartMs[replayMessageIndex + 1] ?? replayDurationMs;
+    const speechReveal =
+      !args.replay && args.activeMessage && liveSpeech?.messageId === args.activeMessage.id
+        ? liveSpeech.reveal
+        : null;
+    const speechElapsedMs = args.replay
+      ? Math.max(0, replayElapsedMs - replayMessageStartMs)
+      : speechReveal?.elapsedMs ?? 0;
+    const speechDurationMs = args.replay
+      ? Math.max(1, replayMessageEndMs - replayMessageStartMs)
+      : speechReveal?.durationMs ?? 0;
+    const speechIsPlaying = args.replay
+      ? replayPlaying && replaySpeechActive
+      : speechReveal?.phase === "playing";
+    const roleIsThinking = (role: "host" | "guest"): boolean =>
+      !args.replay && (
+        (speechReveal?.phase === "preparing" && args.activeMessage?.speakerRole === role) ||
+        (busy && speakingMessageId === null && thinkingRole === role)
+      );
     const atmosphereStyle = {
       ["--botcast-accent" as string]: args.show.accentColor,
       ["--botcast-studio-accent" as string]: normalizeAccentForTheme(
@@ -1329,8 +1714,17 @@ export function BotcastExperience({
       bot: BotcastBotSummary,
       role: "host" | "guest",
       talking: boolean,
-    ): ReactNode =>
-      renderAvatar?.(bot, { talking, thinking: false, role }) ?? avatarFallback(bot);
+      thinking: boolean,
+    ): ReactNode => {
+      const mouthShape = talking && args.activeMessage
+        ? crtSpeechMouthShapeAtElapsedMs({
+            text: args.activeMessage.content,
+            elapsedMs: speechElapsedMs,
+            ...(speechDurationMs > 0 ? { durationMs: speechDurationMs } : {}),
+          })
+        : "closed";
+      return renderAvatar?.(bot, { talking, thinking, role, mouthShape }) ?? avatarFallback(bot);
+    };
     return (
       <section
         className={styles.stageViewport}
@@ -1354,43 +1748,81 @@ export function BotcastExperience({
             <strong>{args.show.name}</strong>
           </div>
           <div className={styles.studioGlow} aria-hidden="true" />
-          <div className={`${styles.seat} ${styles.hostSeat}`} data-role="host">
-            <span className={styles.roleBadge}>Host</span>
-            <div className={styles.chair} aria-hidden="true" />
+          <div
+            className={`${styles.seat} ${styles.hostSeat}`}
+            data-role="host"
+            aria-label={`Host ${args.host?.name ?? "Host"}`}
+          >
             {args.host ? (
-              <div className={styles.avatarRig}>
-                {avatar(args.host, "host", args.activeMessage?.speakerRole === "host")}
+              <div
+                className={styles.avatarRig}
+                data-signal-presence="host"
+                data-talking={
+                  speechIsPlaying && args.activeMessage?.speakerRole === "host"
+                    ? "true"
+                    : undefined
+                }
+                data-thinking={
+                  roleIsThinking("host") ? "true" : undefined
+                }
+              >
+                {avatar(
+                  args.host,
+                  "host",
+                  speechIsPlaying && args.activeMessage?.speakerRole === "host",
+                  roleIsThinking("host"),
+                )}
               </div>
             ) : null}
-            <div className={styles.boomMic} aria-hidden="true"><span /></div>
-            <div className={`${styles.mug} ${styles.hostMug}`} aria-label="Host logo mug">
-              <span className={styles.mugLogo}><i /><i /><i /><i /><i /></span>
-            </div>
-            <strong className={styles.nameplate}>{args.host?.name ?? "Host"}</strong>
+            {args.host && renderMug ? (
+              <div className={`${styles.stageMug} ${styles.hostMug}`} aria-label="Host coffee mug">
+                {renderMug(args.host, { role: "host" })}
+              </div>
+            ) : null}
+            <strong className={styles.nameplate}>
+              <span>Host</span>
+              {args.host?.name ?? "Host"}
+            </strong>
           </div>
           <div
             className={`${styles.seat} ${styles.guestSeat}`}
             data-role="guest"
             data-departed={departed ? "true" : undefined}
+            aria-label={`Guest ${args.guest?.name ?? "Guest"}`}
           >
-            <span className={styles.roleBadge}>Guest</span>
-            <div className={styles.chair} aria-hidden="true" />
             {!departed && args.guest ? (
-              <div className={styles.avatarRig}>
-                {avatar(args.guest, "guest", args.activeMessage?.speakerRole === "guest")}
+              <div
+                className={styles.avatarRig}
+                data-signal-presence="guest"
+                data-talking={
+                  speechIsPlaying && args.activeMessage?.speakerRole === "guest"
+                    ? "true"
+                    : undefined
+                }
+                data-thinking={
+                  roleIsThinking("guest") ? "true" : undefined
+                }
+              >
+                {avatar(
+                  args.guest,
+                  "guest",
+                  speechIsPlaying && args.activeMessage?.speakerRole === "guest",
+                  roleIsThinking("guest"),
+                )}
               </div>
             ) : (
               <span className={styles.emptyChairLabel}>Guest has left the studio</span>
             )}
-            <div className={styles.boomMic} aria-hidden="true"><span /></div>
-            <div
-              className={`${styles.mug} ${styles.guestMug}`}
-              style={{ ["--guest-accent" as string]: args.guest?.color ?? "#8da1b9" } as CSSProperties}
-              aria-label="Guest accent mug"
-            />
-            <strong className={styles.nameplate}>{args.guest?.name ?? "Guest"}</strong>
+            {!departed && args.guest && renderMug ? (
+              <div className={`${styles.stageMug} ${styles.guestMug}`} aria-label="Guest coffee mug">
+                {renderMug(args.guest, { role: "guest" })}
+              </div>
+            ) : null}
+            <strong className={styles.nameplate}>
+              <span>Guest</span>
+              {args.guest?.name ?? "Guest"}
+            </strong>
           </div>
-          <div className={styles.studioDesk} aria-hidden="true" />
         </div>
       </section>
     );
@@ -1554,7 +1986,7 @@ export function BotcastExperience({
               <strong>{item.title}</strong>
               <span>{botsById.get(item.guestBotId)?.name ?? "Guest"}</span>
               <small>
-                {new Date(item.startedAt).toLocaleDateString()} · {runtimeLabel(item.runtimeMs)} · {providerLabel(item.provider)} · {item.model ? modelLabels.get(item.model) ?? item.model : "Provider default"} · {item.status === "live" ? "Resume episode" : episodeOutcomeLabel(item)}
+                {new Date(item.startedAt).toLocaleDateString()} · {runtimeLabel(item.runtimeMs)} · {episodeModeLabel(item)} · {item.model ? modelLabels.get(item.model) ?? item.model : "Provider default"} · {item.status === "live" ? "Resume episode" : episodeOutcomeLabel(item)}
               </small>
             </button>
             <button
@@ -1611,7 +2043,7 @@ export function BotcastExperience({
                     type="button"
                     className={styles.showDeleteButton}
                     onClick={(event) => openShowDeletion(selectedShow, event.currentTarget)}
-                    disabled={busy}
+                    disabled={busy || selectedShowArtworkBusy}
                     aria-label={`Delete show ${selectedShow.name}`}
                   >
                     Delete show
@@ -1634,10 +2066,17 @@ export function BotcastExperience({
               </span>
               <strong>{episode.segment === "interview" ? "MAIN INTERVIEW" : episode.segment.toUpperCase()}</strong>
               <span className={styles.modelProvenance}>
-                {providerLabel(episode.provider)} · {episode.model ? modelLabels.get(episode.model) ?? episode.model : "Provider default"}
+                {episodeModeLabel(episode)} · {episode.model ? modelLabels.get(episode.model) ?? episode.model : "Provider default"}
               </span>
               <span>{episode.tensionStage === "calm" ? "Guest settled" : `Guest: ${episode.tensionStage}`}</span>
-              <button type="button" onClick={() => setAutoRun((value) => !value)} disabled={episode.status === "completed"}>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!autoRun) onPrepareUtterance?.();
+                  setAutoRun((value) => !value);
+                }}
+                disabled={episode.status === "completed"}
+              >
                 {autoRun ? "Pause rundown" : "Resume rundown"}
               </button>
               <button
@@ -1663,10 +2102,22 @@ export function BotcastExperience({
                 {episode.messages.map((message) => (
                   <article key={message.id} data-role={message.speakerRole}>
                     <strong>{botsById.get(message.botId)?.name ?? message.speakerRole}</strong>
-                    <p>{message.content}</p>
+                    <p
+                      data-revealing={
+                        liveSpeech?.messageId === message.id ? "true" : undefined
+                      }
+                    >
+                      {liveSpeech?.messageId === message.id
+                        ? botcastSpeechRevealVisibleText(liveSpeech.reveal)
+                        : message.content}
+                    </p>
                   </article>
                 ))}
-                {busy ? <p className={styles.thinking}>The studio is thinking…</p> : null}
+                {liveSpeech?.reveal.phase === "preparing" ? (
+                  <p className={styles.thinking}>Warming the mic…</p>
+                ) : busy && speakingMessageId === null ? (
+                  <p className={styles.thinking}>The studio is thinking…</p>
+                ) : null}
               </div>
               <aside
                 className={styles.producerControls}
@@ -1713,10 +2164,18 @@ export function BotcastExperience({
               <div>
                 <span className={styles.eyebrow}>From the archive</span>
                 <h2>{replayEpisode.title}</h2>
-                <p>{new Date(replayEpisode.startedAt).toLocaleString()} · {providerLabel(replayEpisode.provider)} · {replayEpisode.model ? modelLabels.get(replayEpisode.model) ?? replayEpisode.model : "Provider default"} · {episodeOutcomeLabel(replayEpisode)}</p>
+                <p>{new Date(replayEpisode.startedAt).toLocaleString()} · {episodeModeLabel(replayEpisode)} · {replayEpisode.model ? modelLabels.get(replayEpisode.model) ?? replayEpisode.model : "Provider default"} · {episodeOutcomeLabel(replayEpisode)}</p>
               </div>
               <div className={styles.replayHeaderActions}>
-                <button type="button" onClick={() => setReplayEpisode(null)}>Close replay</button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    stopReplayPlayback();
+                    setReplayEpisode(null);
+                  }}
+                >
+                  Close replay
+                </button>
                 <button
                   type="button"
                   className={styles.dangerButton}
@@ -1738,14 +2197,33 @@ export function BotcastExperience({
               guestDeparted: replayGuestDeparted,
             })}
             <div className={styles.replayControls} aria-label="Signal replay cameras">
-              <button type="button" onClick={() => setReplayPlaying((value) => !value)}>{replayPlaying ? "Pause" : "Play"}</button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (replayPlaying) {
+                    stopReplayPlayback();
+                  } else {
+                    replayVoiceRunIdRef.current += 1;
+                    onPrepareUtterance?.();
+                    replayVoiceMessageIdRef.current = null;
+                    setReplaySpeechActive(false);
+                    if (replayElapsedMs >= replayDurationMs) setReplayElapsedMs(0);
+                    setReplayPlaying(true);
+                  }
+                }}
+              >
+                {replayPlaying ? "Pause" : "Play"}
+              </button>
               <input
                 type="range"
                 min={0}
                 max={replayDurationMs}
                 step={100}
                 value={replayElapsedMs}
-                onChange={(event) => setReplayElapsedMs(Number(event.target.value))}
+                onChange={(event) => {
+                  stopReplayPlayback();
+                  setReplayElapsedMs(Number(event.target.value));
+                }}
                 aria-label="Replay position"
               />
               <div className={styles.cameraButtons}>
@@ -1766,9 +2244,10 @@ export function BotcastExperience({
                   type="button"
                   data-botcast-replay-row="true"
                   data-active={index === replayMessageIndex ? "true" : undefined}
-                  onClick={() =>
-                    setReplayElapsedMs(replayTimeline.messageStartMs[index] ?? 0)
-                  }
+                  onClick={() => {
+                    stopReplayPlayback();
+                    setReplayElapsedMs(replayTimeline.messageStartMs[index] ?? 0);
+                  }}
                 >
                   <strong>{botsById.get(message.botId)?.name ?? message.speakerRole}</strong>
                   <span>{message.content}</span>
@@ -1824,7 +2303,7 @@ export function BotcastExperience({
                       type="button"
                       data-signal-first-look-action="create"
                       onClick={() => void synthesizeShowLook()}
-                      disabled={busy}
+                      disabled={busy || selectedShowArtworkBusy}
                     >
                       Create this show’s look
                     </button>
@@ -1839,7 +2318,7 @@ export function BotcastExperience({
                       className={styles.assetUploadInput}
                       type="file"
                       accept={SIGNAL_ASSET_ACCEPT}
-                      disabled={busy}
+                      disabled={busy || selectedShowArtworkBusy}
                       aria-label="Upload replacement Light studio"
                       onChange={(event) => {
                         const file = event.currentTarget.files?.[0];
@@ -1852,7 +2331,7 @@ export function BotcastExperience({
                       className={styles.assetUploadInput}
                       type="file"
                       accept={SIGNAL_ASSET_ACCEPT}
-                      disabled={busy}
+                      disabled={busy || selectedShowArtworkBusy}
                       aria-label="Upload replacement Dark studio"
                       onChange={(event) => {
                         const file = event.currentTarget.files?.[0];
@@ -1865,7 +2344,7 @@ export function BotcastExperience({
                       className={styles.assetUploadInput}
                       type="file"
                       accept={SIGNAL_ASSET_ACCEPT}
-                      disabled={busy}
+                      disabled={busy || selectedShowArtworkBusy}
                       aria-label="Upload replacement show logo"
                       onChange={(event) => {
                         const file = event.currentTarget.files?.[0];
@@ -1896,7 +2375,11 @@ export function BotcastExperience({
                             ? "Regenerate only the Light Mode studio"
                             : "Create or upload the Dark studio first"}
                           onClick={() => void regenerateStudioVariant("day")}
-                          disabled={busy || !selectedShow.nightAtmosphere.imageId}
+                          disabled={
+                            busy ||
+                            selectedShowArtworkBusy ||
+                            !selectedShow.nightAtmosphere.imageId
+                          }
                         >
                           Refresh Light
                         </button>
@@ -1905,7 +2388,7 @@ export function BotcastExperience({
                           className={styles.assetUploadButton}
                           title="Upload a replacement for the Light Mode studio"
                           onClick={() => lightStudioUploadRef.current?.click()}
-                          disabled={busy}
+                          disabled={busy || selectedShowArtworkBusy}
                         >
                           Replace Light
                         </button>
@@ -1916,7 +2399,7 @@ export function BotcastExperience({
                           type="button"
                           data-signal-artwork-action="night-studio"
                           onClick={() => void regenerateStudioVariant("night")}
-                          disabled={busy}
+                          disabled={busy || selectedShowArtworkBusy}
                         >
                           Refresh Dark
                         </button>
@@ -1925,7 +2408,7 @@ export function BotcastExperience({
                           className={styles.assetUploadButton}
                           title="Upload a replacement for the Dark Mode studio"
                           onClick={() => darkStudioUploadRef.current?.click()}
-                          disabled={busy}
+                          disabled={busy || selectedShowArtworkBusy}
                         >
                           Replace Dark
                         </button>
@@ -1936,7 +2419,7 @@ export function BotcastExperience({
                           type="button"
                           data-signal-artwork-action="logo"
                           onClick={() => void regenerateLogo()}
-                          disabled={busy}
+                          disabled={busy || selectedShowArtworkBusy}
                         >
                           Refresh logo
                         </button>
@@ -1945,7 +2428,7 @@ export function BotcastExperience({
                           className={styles.assetUploadButton}
                           title="Upload a replacement show logo"
                           onClick={() => logoUploadRef.current?.click()}
-                          disabled={busy}
+                          disabled={busy || selectedShowArtworkBusy}
                         >
                           Replace logo
                         </button>

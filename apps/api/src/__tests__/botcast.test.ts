@@ -117,7 +117,7 @@ describe("Botcast persistence and isolation", () => {
     );
   });
 
-  it("registers Signal show and episode deletion routes", () => {
+  it("registers Signal background artwork lifecycle and show routes", () => {
     const serverSource = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
     assert.match(
       serverSource,
@@ -135,6 +135,35 @@ describe("Botcast persistence and isolation", () => {
       serverSource,
       /route\("POST", "\/api\/botcast\/shows\/:id\/assets\/:slot\/upload"/u,
     );
+    assert.match(
+      serverSource,
+      /route\("POST", "\/api\/botcast\/shows\/:id\/artwork-job"/u,
+    );
+    assert.match(
+      serverSource,
+      /route\("GET", "\/api\/botcast\/artwork-jobs\/active"/u,
+    );
+    assert.match(
+      serverSource,
+      /route\("POST", "\/api\/botcast\/artwork-jobs\/:id\/cancel"/u,
+    );
+    assert.match(
+      serverSource,
+      /route\("DELETE", "\/api\/botcast\/artwork-jobs\/:id"/u,
+    );
+    assert.match(serverSource, /source: "signal_artwork"/u);
+    assert.match(serverSource, /releaseImageSlotIfOwned\(userId, acquired\.job\.id\)/u);
+    assert.match(serverSource, /sourceNightImageId: args\.sourceNightImageId/u);
+    assert.match(
+      serverSource,
+      /sourceImageBytes\s*\? await editImage\(onlinePrompt, sourceImageBytes/u,
+    );
+    assert.match(
+      serverSource,
+      /const resolvedOpenAiImageModel = openAiImageDisabled[\s\S]{0,100}DEFAULT_OPENAI_IMAGE_MODEL_ID/u,
+    );
+    assert.match(serverSource, /const quality = shouldRunLocal \? "standard" : "high"/u);
+    assert.match(serverSource, /signalArtworkJobs\.hasActiveJobForShow/u);
     assert.match(
       serverSource,
       /body\.regenerateDayAtmosphere === true[\s\S]{0,100}regenerateDayAtmosphere: true/u,
@@ -510,6 +539,7 @@ describe("Botcast persistence and isolation", () => {
 
       assert.equal(episode.provider, "openai");
       assert.equal(episode.model, "gpt-signal");
+      assert.equal(episode.responseMode, "online");
       assert.equal(listBotcastEpisodes(db, "user-1", show.id)[0]?.model, "gpt-signal");
 
       const generationOptions = {
@@ -522,6 +552,67 @@ describe("Botcast persistence and isolation", () => {
 
       assert.deepEqual(providers, ["openai", "openai"]);
       assert.deepEqual(models, ["gpt-signal", "gpt-signal"]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps an AUTO episode primary identity while recovering each turn through its fallback chain", async () => {
+    const db = fixture();
+    const attempts: Array<{ provider: string; model: string | undefined }> = [];
+    const providerFactory: typeof selectProvider = (providerName) => ({
+      name: providerName,
+      async generateResponse(_messages, options) {
+        attempts.push({ provider: providerName, model: options.model });
+        if (providerName === "local") {
+          throw new Error("Primary model unavailable");
+        }
+        return "Recovered with a specific answer.";
+      },
+      async embedText() {
+        return [];
+      },
+    });
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Recover without changing the show route",
+        preferredProvider: "local",
+        modelOverride: "primary-local",
+        responseMode: "auto",
+      });
+
+      const result = await advanceBotcastEpisode(db, "user-1", episode.id, {}, {
+        preferredProvider: "local",
+        providerFactory,
+        autoFallbackChain: {
+          v: 1,
+          fallbacks: [
+            { provider: "openai", model: "gpt-signal-fallback" },
+            { provider: "anthropic", model: "claude-signal-fallback" },
+          ],
+        },
+      });
+
+      assert.deepEqual(attempts, [
+        { provider: "local", model: "primary-local" },
+        { provider: "openai", model: "gpt-signal-fallback" },
+      ]);
+      assert.equal(result.episode.provider, "local");
+      assert.equal(result.episode.model, "primary-local");
+      assert.equal(result.episode.responseMode, "auto");
+      const utterance = result.episode.events.find(
+        (event) => event.kind === "utterance",
+      );
+      assert.equal(utterance?.payload.provider, "openai");
+      assert.equal(utterance?.payload.model, "gpt-signal-fallback");
+      assert.equal(utterance?.payload.responseMode, "auto");
+      assert.equal(
+        (utterance?.payload.autoRecovery as { finalProvider?: unknown })
+          ?.finalProvider,
+        "openai",
+      );
     } finally {
       db.close();
     }
@@ -739,8 +830,18 @@ describe("Botcast persistence and isolation", () => {
         topic: "What survives an edit",
         preferredProvider: "openai",
         modelOverride: "gpt-archive",
+        responseMode: "auto",
       });
-      await advanceBotcastEpisode(source, "user-1", episode.id, {}, generation(provider));
+      await advanceBotcastEpisode(source, "user-1", episode.id, {}, {
+        ...generation(provider),
+        autoFallbackChain: {
+          v: 1,
+          fallbacks: [
+            { provider: "local", model: "qwen-signal-fallback" },
+            { provider: "anthropic", model: "claude-signal-fallback" },
+          ],
+        },
+      });
       const key = Buffer.alloc(32, 7);
       const snapshot = exportUserSnapshot(source, "user-1", key);
       assert.equal(snapshot.botcast?.shows.length, 1);
@@ -751,6 +852,7 @@ describe("Botcast persistence and isolation", () => {
       assert.equal(snapshot.botcast?.events.length, 4);
       assert.equal(snapshot.botcast?.episodes[0]?.provider, "openai");
       assert.equal(snapshot.botcast?.episodes[0]?.model, "gpt-archive");
+      assert.equal(snapshot.botcast?.episodes[0]?.responseMode, "auto");
       importUserSnapshot(target, "user-1", snapshot, key);
       const restoredShow = getBotcastShow(target, "user-1", show.id);
       assert.equal(restoredShow.dayAtmosphere.imageId, "archive-day");
@@ -764,16 +866,23 @@ describe("Botcast persistence and isolation", () => {
       assert.equal(restored.topic, "What survives an edit");
       assert.equal(restored.provider, "openai");
       assert.equal(restored.model, "gpt-archive");
+      assert.equal(restored.responseMode, "auto");
       assert.equal(restored.messages[0]?.content, "Welcome to the archive.");
       assert.ok(restored.events.some((event) => event.kind === "camera_suggestion"));
 
       const legacySnapshot = structuredClone(snapshot);
       const legacyShow = legacySnapshot.botcast?.shows[0];
       if (legacyShow) delete legacyShow.fallbackStudioAccentVariant;
+      const legacyEpisode = legacySnapshot.botcast?.episodes[0];
+      if (legacyEpisode) delete legacyEpisode.responseMode;
       importUserSnapshot(legacyTarget, "user-1", legacySnapshot, key);
       assert.equal(
         getBotcastShow(legacyTarget, "user-1", show.id).fallbackStudioAccentVariant,
         botcastFallbackStudioAccentVariantForSeed(show.id),
+      );
+      assert.equal(
+        getBotcastEpisode(legacyTarget, "user-1", episode.id).responseMode,
+        "online",
       );
     } finally {
       source.close();

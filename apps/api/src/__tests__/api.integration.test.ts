@@ -993,6 +993,7 @@ describe("API request integration", () => {
     assert.equal(onlineResponse.status, 201, JSON.stringify(onlinePayload));
     assert.equal(onlinePayload.episode.provider, "anthropic");
     assert.equal(onlinePayload.episode.model, "claude-signal");
+    assert.equal(onlinePayload.episode.responseMode, "online");
 
     db.prepare("UPDATE users SET preferred_provider = 'local' WHERE id = ?").run(
       userId,
@@ -1010,6 +1011,35 @@ describe("API request integration", () => {
     assert.equal(localResponse.status, 201, JSON.stringify(localPayload));
     assert.equal(localPayload.episode.provider, "local");
     assert.equal(localPayload.episode.model, "gemma-account-default");
+    assert.equal(localPayload.episode.responseMode, "local");
+
+    db.prepare(
+      "UPDATE users SET auto_switch_model = 1, auto_fallback_chain = ? WHERE id = ?",
+    ).run(
+      JSON.stringify({
+        v: 1,
+        fallbacks: [
+          { provider: "openai", model: "gpt-signal-fallback" },
+          { provider: "anthropic", model: "claude-signal-fallback" },
+        ],
+      }),
+      userId,
+    );
+    const autoResponse = await client.request(
+      `/api/botcast/shows/${encodeURIComponent(showId)}/episodes`,
+      jsonInit({
+        guestBotId: "signal-model-guest",
+        topic: "Recover this recording automatically",
+        preferredProvider: "local",
+        modelOverride: "gemma-account-default",
+        responseMode: "auto",
+      }),
+    );
+    const autoPayload = await json(autoResponse);
+    assert.equal(autoResponse.status, 201, JSON.stringify(autoPayload));
+    assert.equal(autoPayload.episode.provider, "local");
+    assert.equal(autoPayload.episode.model, "gemma-account-default");
+    assert.equal(autoPayload.episode.responseMode, "auto");
   });
 
   it("uploads Signal assets and deletes episodes and shows through tenant-safe HTTP routes", async () => {
@@ -1405,6 +1435,9 @@ describe("API request integration", () => {
     );
     assert.equal(register.status, 201);
     const userId = String((await json(register)).user.id);
+    db.prepare("UPDATE users SET english_voice_engine = 'elevenlabs' WHERE id = ?").run(
+      userId
+    );
     const now = "2026-07-11T18:00:00.000Z";
     db.prepare(
       "INSERT INTO conversations (id, user_id, title, conversation_mode, created_at, updated_at) VALUES (?, ?, ?, 'chat', ?, ?)"
@@ -1472,6 +1505,125 @@ describe("API request integration", () => {
     assert.equal(alignedPayload.alignment, null);
     assert.equal(Buffer.from(alignedPayload.audioBase64, "base64").subarray(0, 4).toString(), "RIFF");
     assert.deepEqual(fetchRecorder.calls.slice(beforeCalls), []);
+  });
+
+  it("uses System Classic until ONLINE ElevenLabs is explicitly enabled", async () => {
+    const client = createClient();
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "voice-online-fallback@example.com",
+        password: "voice-password",
+      })
+    );
+    assert.equal(register.status, 201);
+    const userId = String((await json(register)).user.id);
+    const initialSettings = await client.request("/api/settings");
+    assert.equal(initialSettings.status, 200);
+    assert.equal((await json(initialSettings)).settings.englishVoiceEngine, "builtin");
+    db.prepare("UPDATE users SET preferred_provider = 'openai' WHERE id = ?").run(
+      userId
+    );
+
+    const beforeCalls = fetchRecorder.calls.length;
+    config.elevenLabsApiKey = "integration-elevenlabs-key";
+    try {
+      const response = await client.request(
+        "/api/voices/synthesize",
+        jsonInit({
+          text: "Keep speaking locally until ElevenLabs is enabled.",
+          mode: "english",
+          engine: "elevenlabs",
+          explicitOnlineContext: true,
+          profile: {
+            ...normalizeBotAudioVoiceProfileV1(undefined),
+            elevenLabsVoiceId: "configured-provider-voice",
+          },
+        })
+      );
+
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("x-prism-voice-engine"), "builtin");
+      assert.equal(
+        Buffer.from(await response.arrayBuffer()).subarray(0, 4).toString(),
+        "RIFF"
+      );
+      assert.deepEqual(fetchRecorder.calls.slice(beforeCalls), []);
+    } finally {
+      config.elevenLabsApiKey = "";
+    }
+  });
+
+  it("ignores legacy ElevenLabs slot mappings during synthesis", async () => {
+    const client = createClient();
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "voice-legacy-bank@example.com",
+        password: "voice-password",
+      })
+    );
+    assert.equal(register.status, 201);
+    const userId = String((await json(register)).user.id);
+    db.prepare(
+      "UPDATE users SET preferred_provider = 'openai', english_voice_engine = 'elevenlabs', elevenlabs_voice_bank = ? WHERE id = ?"
+    ).run(JSON.stringify({ "voice-1": "legacy-provider-voice" }), userId);
+
+    const beforeCalls = fetchRecorder.calls.length;
+    config.elevenLabsApiKey = "integration-elevenlabs-key";
+    try {
+      const response = await client.request(
+        "/api/voices/synthesize",
+        jsonInit({
+          text: "A legacy slot must not select my voice.",
+          mode: "english",
+          engine: "elevenlabs",
+          explicitOnlineContext: true,
+          profile: {
+            v: 1,
+            baseVoiceId: "voice-1",
+            pitch: 0,
+            warmth: 0,
+            pace: 0,
+            lilt: 0,
+          },
+        })
+      );
+
+      assert.equal(response.status, 200);
+      assert.equal(
+        response.headers.get("x-prism-voice-engine"),
+        "builtin-provider-fallback"
+      );
+      assert.deepEqual(fetchRecorder.calls.slice(beforeCalls), []);
+
+      const selectedVoiceResponse = await client.request(
+        "/api/voices/synthesize",
+        jsonInit({
+          text: "Use the voice selected for this bot.",
+          mode: "english",
+          engine: "elevenlabs",
+          explicitOnlineContext: true,
+          profile: {
+            ...normalizeBotAudioVoiceProfileV1(undefined),
+            elevenLabsVoiceId: "chosen-provider-voice",
+          },
+        })
+      );
+      assert.equal(selectedVoiceResponse.status, 200);
+      assert.equal(
+        selectedVoiceResponse.headers.get("x-prism-voice-engine"),
+        "elevenlabs"
+      );
+      const providerCalls = fetchRecorder.calls.slice(beforeCalls);
+      assert.equal(providerCalls.length, 1);
+      assert.match(
+        providerCalls[0]?.input ?? "",
+        /text-to-speech\/chosen-provider-voice\/stream/
+      );
+    } finally {
+      config.elevenLabsApiKey = "";
+    }
   });
 
   it("synthesizes a private reply by message id without persisting it", async () => {

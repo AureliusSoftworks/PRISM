@@ -1,16 +1,35 @@
 # Voices
 
 Prism Voices is account-wide: **Mute** (the default), **English**, **Babble**, or
-**Bottish**. A bot owns one compatible voice profile with a selected system
-voice, volume, pitch, lilt, pace, and warmth. Existing profiles and backups may
-still contain the retired `bottishTone` field, but Prism no longer exposes,
+**Bottish**. A bot owns one compatible voice profile with a selected voice
+identity, volume, pitch, lilt, pace, and warmth. Existing profiles and backups
+may still contain the retired `bottishTone` field, but Prism no longer exposes,
 randomizes, or applies it.
 
 Use the labeled `Voice · <mode>` selector beside the app, provider, and model
 controls to choose a mode directly. At constrained widths, the same four radio
 choices move into the tools menu instead of becoming an ambiguous cycle button.
 
-## Engines
+## English engine preferences
+
+English speech has separate privacy-lane preferences, matching Prism's
+offline/online model settings:
+
+- **Offline engine** is always System Classic. It uses a voice installed by the
+  operating system and never sends speech text off-device.
+- **Online voices** also use System Classic by default. The user must explicitly
+  enable ElevenLabs before Prism loads its voice catalog or sends speech text
+  to the service. Once enabled, each bot's Voice Identity dropdown uses that
+  catalog. The existing `englishVoiceEngine` setting stores this opt-in for
+  backup compatibility.
+
+If ElevenLabs is preferred but no API key or matching provider voice is
+available, Prism keeps playback working through System Classic. A persisted
+LOCAL reply always uses System Classic regardless of the online preference.
+Legacy five-slot `elevenLabsVoiceBank` backup data remains importable but is no
+longer shown in settings or consulted during synthesis.
+
+## Voice modes
 
 - English uses clean system-native speech. Its selected voice, pitch, lilt,
   pace, and warmth controls remain available.
@@ -47,5 +66,6 @@ sent to provider TTS.
 
 Marketplace bundles carry an authored profile. A user's later customization is
 stored separately as an override, so catalog updates can improve the authored
-voice without overwriting the user's choice. The five Prism Originals use
-Voices 1–5 respectively at neutral controls.
+voice without overwriting the user's choice. Each bot can keep separate system
+and ElevenLabs identities so switching the online preference does not erase its
+offline voice.

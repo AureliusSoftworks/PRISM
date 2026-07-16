@@ -245,6 +245,7 @@ export interface BackupSnapshot {
       producerBrief: string;
       provider?: ProviderName;
       model?: string | null;
+      responseMode?: "local" | "auto" | "online";
       status: string;
       segment: string;
       outcome: string | null;
@@ -895,6 +896,10 @@ export function exportUserSnapshot(
             ? row.provider
             : "local",
         model: typeof row.model === "string" ? row.model : null,
+        responseMode:
+          row.response_mode === "auto" || row.response_mode === "online"
+            ? row.response_mode
+            : "local",
         status: String(row.status),
         segment: String(row.segment),
         outcome: typeof row.outcome === "string" ? row.outcome : null,
@@ -1415,10 +1420,10 @@ function importUserSnapshotWithinTransaction(
       db.prepare(
         `INSERT OR REPLACE INTO botcast_episodes
           (id, user_id, show_id, host_bot_id, guest_bot_id, title, topic,
-           producer_brief, provider, model, status, segment, outcome,
+           producer_brief, provider, model, response_mode, status, segment, outcome,
            tension_level, warning_count, started_at, completed_at, runtime_ms,
            created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         episode.id, userId, episode.showId, episode.hostBotId, episode.guestBotId,
         episode.title, episode.topic, episode.producerBrief,
@@ -1426,6 +1431,11 @@ function importUserSnapshotWithinTransaction(
           ? episode.provider
           : "local",
         typeof episode.model === "string" ? episode.model : null,
+        episode.responseMode === "auto" || episode.responseMode === "online"
+          ? episode.responseMode
+          : episode.provider === "openai" || episode.provider === "anthropic"
+            ? "online"
+            : "local",
         episode.status, episode.segment, episode.outcome, episode.tensionLevel,
         episode.warningCount, episode.startedAt, episode.completedAt,
         episode.runtimeMs, episode.createdAt, episode.updatedAt,

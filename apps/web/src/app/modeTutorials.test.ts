@@ -31,11 +31,16 @@ describe("mode tutorials", () => {
     assert.match(MODE_TUTORIALS.botcast.steps[0]?.body ?? "", /never waits on synthesis/u);
     assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /Create this show’s look once/u);
     assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /find a clever name/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /matching Light and Dark studios/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /keep using PRISM/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /activity card/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /Dark-to-Light studio pair/u);
     assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /refresh the name, either studio, or the logo independently/u);
     assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /replace any visual/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[2]?.body ?? "", /Pick LOCAL or ONLINE/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[2]?.body ?? "", /locks that lane and choice/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[2]?.body ?? "", /Pick LOCAL, AUTO, or ONLINE/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[2]?.body ?? "", /configured fallback chain/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[2]?.body ?? "", /locks that routing/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[3]?.body ?? "", /one speaker on mic at a time/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[3]?.body ?? "", /words they have finished saying/u);
   });
 
   it("teaches Slate as a directed document workflow with stable targets", () => {
@@ -128,13 +133,18 @@ describe("mode tutorials", () => {
       /changes response routing, not the Account default model choice/,
     );
     assert.match(routing?.body ?? "", /separate Images provider/);
+    assert.match(routing?.body ?? "", /English voice preference/);
   });
 
-  it("teaches that Zen response and image routing are separate", () => {
+  it("teaches that Zen response, image, and voice routing are separate", () => {
     const routing = MODE_TUTORIALS.zen.steps.find(
       (step) => step.heading === "Choose how replies recover",
     );
     assert.match(routing?.body ?? "", /Image generation keeps its own LOCAL\/ONLINE choice/);
+    assert.match(
+      routing?.body ?? "",
+      /Voice settings keep English speech on System Classic unless you explicitly enable online voices/,
+    );
   });
 
   it("teaches canonical Coffee prompts without a regeneration step", () => {

@@ -7,6 +7,7 @@ import {
   peekActiveImageJobForUser,
   pollImageJobForUser,
   releaseImageSlot,
+  releaseImageSlotIfOwned,
   tryAcquireImageSlot,
 } from "../image-job-slot.ts";
 
@@ -120,5 +121,26 @@ describe("image-job-slot", () => {
       conversationIdForImageGeneration({ conversationId: "conversation-1", incognito: false }),
       "conversation-1"
     );
+  });
+
+  it("releases a Signal-owned slot only for its exact background job", async () => {
+    const userId = "user-signal-slot";
+    const acquired = await tryAcquireImageSlot({
+      userId,
+      conversationId: null,
+      botId: "signal-host",
+      mode: "sandbox",
+      incognito: false,
+      captionPrompt: "Signal studio",
+      userMessage: "Create show look",
+      source: "signal_artwork",
+    });
+    assert.equal(acquired.ok, true);
+    if (!acquired.ok) return;
+
+    assert.equal(await releaseImageSlotIfOwned(userId, "another-job"), false);
+    assert.equal(peekActiveImageJobForUser(userId)?.id, acquired.job.id);
+    assert.equal(await releaseImageSlotIfOwned(userId, acquired.job.id), true);
+    assert.equal(peekActiveImageJobForUser(userId), undefined);
   });
 });

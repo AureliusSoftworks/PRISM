@@ -109,7 +109,7 @@ test("long bot and player names truncate safely in live and review layouts", () 
   );
   assert.match(
     pageSource,
-    /aria-label=\{\s*coffeeDevModeEnabled[\s\S]*?`\$\{bot\.name\} at the coffee table`/,
+    /const seatAriaLabel = coffeeDevModeEnabled[\s\S]*?`\$\{bot\.name\} at the coffee table`[\s\S]*?aria-label=\{seatAriaLabel\}/,
   );
 });
 

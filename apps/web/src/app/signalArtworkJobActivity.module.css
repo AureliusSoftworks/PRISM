@@ -1,0 +1,194 @@
+.activity {
+  position: fixed;
+  z-index: 760;
+  right: 22px;
+  bottom: 22px;
+  width: min(390px, calc(100vw - 28px));
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, #8c74ff 30%, rgba(255, 255, 255, 0.18));
+  border-radius: 18px;
+  padding: 18px;
+  color: #f8f7ff;
+  background:
+    radial-gradient(circle at 100% 100%, rgba(36, 207, 224, 0.13), transparent 48%),
+    linear-gradient(145deg, rgba(25, 22, 40, 0.98), rgba(10, 13, 22, 0.98));
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.48);
+  backdrop-filter: blur(20px);
+}
+
+.activity[data-theme="light"] {
+  color: #161321;
+  border-color: rgba(87, 68, 175, 0.22);
+  background:
+    radial-gradient(circle at 100% 100%, rgba(36, 207, 224, 0.13), transparent 48%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(244, 242, 252, 0.98));
+  box-shadow: 0 20px 60px rgba(43, 36, 75, 0.2);
+}
+
+.spectrum {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 3px;
+  background: linear-gradient(90deg, #ff536d, #ff9f32, #dbe83f, #4cd89b, #31cce6, #8a6cff);
+}
+
+.activity header,
+.meta,
+.activity footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.activity header > div {
+  display: grid;
+  gap: 4px;
+}
+
+.eyebrow {
+  color: #b9a8ff;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.activity[data-theme="light"] .eyebrow {
+  color: #654bc3;
+}
+
+.activity header strong {
+  font-size: 0.97rem;
+  line-height: 1.25;
+}
+
+.count {
+  flex: none;
+  border: 1px solid rgba(174, 157, 255, 0.25);
+  border-radius: 999px;
+  padding: 5px 9px;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.track {
+  position: relative;
+  height: 5px;
+  margin: 15px 0 9px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(159, 148, 192, 0.2);
+}
+
+.track span {
+  position: absolute;
+  inset: 0;
+  transform-origin: left;
+  background: linear-gradient(90deg, #ff5d74, #ffad36, #9fe35f, #3bd5db, #8d72ff);
+}
+
+.track[data-active="true"] span {
+  width: 38%;
+  animation: signal-artwork-scan 1.7s ease-in-out infinite alternate;
+}
+
+@keyframes signal-artwork-scan {
+  from { transform: translateX(-85%); }
+  to { transform: translateX(250%); }
+}
+
+.meta {
+  color: rgba(235, 232, 248, 0.68);
+  font-size: 0.71rem;
+}
+
+.activity[data-theme="light"] .meta {
+  color: rgba(42, 35, 65, 0.64);
+}
+
+.assets {
+  display: grid;
+  gap: 7px;
+  margin: 14px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.assets li {
+  display: grid;
+  grid-template-columns: 8px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.75rem;
+}
+
+.assets li > span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgba(174, 167, 194, 0.45);
+}
+
+.assets li[data-status="generating"] > span,
+.assets li[data-status="attaching"] > span {
+  background: #44d6d9;
+  box-shadow: 0 0 12px rgba(68, 214, 217, 0.85);
+}
+
+.assets li[data-status="complete"] > span { background: #86df72; }
+.assets li[data-status="failed"] > span { background: #ff6b82; }
+
+.assets small {
+  color: rgba(235, 232, 248, 0.56);
+  text-transform: capitalize;
+}
+
+.activity[data-theme="light"] .assets small {
+  color: rgba(42, 35, 65, 0.55);
+}
+
+.error {
+  margin: 10px 0;
+  border: 1px solid rgba(255, 96, 123, 0.3);
+  border-radius: 10px;
+  padding: 8px 10px;
+  color: #ff9bad;
+  background: rgba(133, 25, 48, 0.17);
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
+.activity footer {
+  justify-content: flex-end;
+}
+
+.activity button {
+  border: 1px solid rgba(174, 157, 255, 0.3);
+  border-radius: 999px;
+  padding: 7px 11px;
+  color: inherit;
+  background: rgba(135, 111, 240, 0.12);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.activity button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+@media (max-width: 620px) {
+  .activity {
+    right: 14px;
+    bottom: 14px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .track[data-active="true"] span {
+    animation-duration: 4s;
+  }
+}

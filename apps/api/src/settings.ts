@@ -177,6 +177,7 @@ export interface CurrentSettings {
   voiceMode: VoiceMode | string | null;
   voiceEffectsEnabled: number;
   voiceVolume: number | null;
+  /** Compatibility column storing the ONLINE preference; LOCAL is always builtin. */
   englishVoiceEngine: EnglishVoiceEngine | string | null;
   defaultSystemVoiceName: string | null;
   defaultElevenLabsVoiceId: string | null;
@@ -233,6 +234,7 @@ export interface NextSettings {
   voiceMode: VoiceMode;
   voiceEffectsEnabled: boolean;
   voiceVolume: number;
+  /** ONLINE preference only; LOCAL English always resolves to builtin. */
   englishVoiceEngine: EnglishVoiceEngine;
   defaultSystemVoiceName: string | null;
   defaultElevenLabsVoiceId: string | null;
