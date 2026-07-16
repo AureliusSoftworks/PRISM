@@ -27,14 +27,14 @@ ship as `0.5.2` while Coffee is `v0.7` and Story is `v0.1`.
 | Chat | v1.3 | Active | Full playground for bots, providers, models, images, exports, memory-aware conversations, and per-bot online voice identity. |
 | Zen | v1.2 | Active | Calm one-to-one continuity surface with shared bot voice identity; the standalone Zen lane is deprecating as this becomes Prism's default state. |
 | Coffee | v1.4 | Active | Multi-bot group table with Coffee Groups, session pacing, cups, transcripts, replay, table controls, and synchronized online speech. |
-| Signal | v0.3 | Active | Bot-owned interview shows with source-linked identity, scoped studio and logo generation, private direction, immersive online voice reactions, archives, and directed replay. |
+| Signal | v0.4 | Active | Bot-owned interview shows with animated audio pre-roll, background opening preparation, local synthesized idents, optional cached ElevenLabs music, private direction, archives, and directed replay. |
 | Story | v0.1 | Preview | Generated visual-novel episodes with bots, choices, maps, inventory, and transcripts. |
 | Arena | v0.0 | Planned | Moderated bot debate surface. |
 | Polling | v0.0 | Planned | AI-powered polling across bot groups. |
 | Feed | v0.0 | Planned | BotBook-style social feed. |
 | Games | v0.0 | Planned | Boardgame-like bot matches. |
 | Gym | v0.0 | Planned | Bot training and memory-development surface. |
-| Slate | v0.4 | Preview | Prose-fiction production desk with persistent Shape, Draft, and Refine workflows, optional wildcard-assisted starts, and refined shared navigation, theming, and settings. |
+| Slate | v0.5 | Preview | Prose-fiction production desk with long-form section storage, private Continuity guidance, return sessions, recovery archives, and clean manuscript exports. |
 | Pseudo | v0.0 | Planned | Sketch/system space for almost-code. |
 | Surf | v0.0 | Planned | Simple browsing plus optional bot screen viewing. |
 
@@ -60,15 +60,23 @@ Story remains a separate preview applet. It is the procedural "discover what
 happens" experience; Slate is the editorial "turn this into something good"
 workspace. Cross-applet stages never silently synchronize or rewrite content.
 See [Slate V1 Product and UX Contract](./slate-v1-product-ux-contract.md).
+The phased Continuity, Review Circle, Atmosphere, safety, export, and publishing
+contracts are indexed in [Slate Master Plan](./slate-master-plan.md).
 
 Slate stayed planned `v0.0` until its first functional vertical slice became
-usable end to end. It entered preview at `v0.1` and is now `v0.4`; later snapshot
+usable end to end. It entered preview at `v0.1` and is now `v0.5`; later snapshot
 stages do not block the standalone preview.
 
 ## Changelog
 
 ### 2026-07-16
 
+- Bumped `Slate` to preview `v0.5` for long-form focused sections, private
+  Continuity concerns and reconciliation, grounded return sessions, portable
+  recovery archives, and clean DOCX/Markdown/text export.
+- Bumped `Signal` to `v0.4` for its skippable show-branded pre-roll, locally
+  synthesized intro ident, optional cached ElevenLabs music, and background
+  opening-turn preparation.
 - Bumped `Chat` to `v1.3` and `Zen` to `v1.2` for per-bot online voice
   identity, pronunciation, saved performance controls, and reliable previews.
 - Bumped `Coffee` to `v1.4` for synchronized online speech, canonical arrivals,

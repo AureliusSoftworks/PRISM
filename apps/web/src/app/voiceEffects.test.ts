@@ -63,12 +63,25 @@ describe("ElevenLabs-only effects", () => {
     assert.ok(robot.modulationDepth > 0);
     assert.ok(robot.parallelVoices.some((voice) => voice.detuneCents < 0));
     assert.equal(echo.parallelVoices.length, 2);
-    assert.ok(chorus.parallelVoices.some((voice) => voice.detuneCents < 0));
-    assert.ok(chorus.parallelVoices.some((voice) => voice.detuneCents > 0));
+    assert.equal(chorus.parallelVoices.length, 2);
     assert.ok(deepSpace.parallelVoices.some((voice) => voice.detuneCents <= -500));
     assert.ok(processed.every((plan) => plan.outputTrim < 0.8));
     assert.ok(processed.every((plan) => plan.drive === 0 && plan.bitDepth === 16));
     assert.equal(new Set(processed.map((plan) => JSON.stringify(plan))).size, processed.length);
+  });
+
+  it("keeps Chorus doubling bounded throughout long replies", () => {
+    const chorus = resolveElevenLabsVoiceEffectPlan("chorus");
+    for (const voice of chorus.parallelVoices) {
+      const modulationDepthSeconds = Math.abs(
+        voice.delayModulationDepthSeconds ?? 0
+      );
+      assert.equal(voice.detuneCents, 0);
+      assert.ok((voice.delayModulationFrequencyHz ?? 0) > 0);
+      assert.ok(modulationDepthSeconds > 0);
+      assert.ok(voice.delaySeconds - modulationDepthSeconds >= 0);
+      assert.ok(voice.delaySeconds + modulationDepthSeconds <= 0.03);
+    }
   });
 
   it("does not let a stale asynchronous decode stop newer playback", () => {

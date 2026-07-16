@@ -6,12 +6,49 @@ import {
   comfyWorkflowKindFromCheckpoint,
   extractCheckpointNames,
   extractFirstOutputImageFromComfyHistoryJson,
+  fetchComfyUiCheckpointNames,
+  generateImageWithComfyUi,
   inferComfyUiWorkflowPatchMap,
   listComfyUiWorkflowJsonRelPaths,
   parseComfyUiDimensions,
   parseComfyUiUserdataWorkflowFileToApiGraph,
+  probeComfyUiHostReachable,
   randomizeComfyUiWorkflowSeedInputs,
 } from "../comfyui-image.ts";
+
+describe("ComfyUI private-network boundary", () => {
+  it("does not probe or generate through a public host", async () => {
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    try {
+      globalThis.fetch = (async () => {
+        fetchCalls += 1;
+        throw new Error("public host must not be contacted");
+      }) as typeof fetch;
+
+      assert.deepEqual(
+        await fetchComfyUiCheckpointNames("https://images.public.example"),
+        [],
+      );
+      assert.equal(
+        await probeComfyUiHostReachable("https://images.public.example"),
+        false,
+      );
+      await assert.rejects(
+        () => generateImageWithComfyUi({
+          comfyUiHost: "https://images.public.example",
+          checkpointName: "model.safetensors",
+          prompt: "private scene",
+          size: "512x512",
+        }),
+        /loopback, private-LAN IP address, or \.local hostname/,
+      );
+      assert.equal(fetchCalls, 0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
 
 describe("comfyWorkflowKindFromCheckpoint", () => {
   it("uses flux sampling defaults when filename mentions Flux", () => {

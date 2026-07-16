@@ -93,6 +93,7 @@ import {
   applyPrismMoodIgnoredTurn,
   applyPrismMoodNegativeTurn,
   applyPrismMoodPositiveTurn,
+  botPowerObserverCueLinesV1,
   createDefaultPrismMoodState,
   decayPrismMood,
   hydrateAssistantMessageParts,
@@ -3381,6 +3382,7 @@ interface MentionedBotContextRow {
   id: string;
   name: string | null;
   system_prompt?: string | null;
+  powers_json?: string | null;
 }
 
 function getTableColumnNames(db: DatabaseSync, tableName: string): Set<string> {
@@ -3472,6 +3474,9 @@ export async function buildMentionedBotPromptContexts(args: {
   const systemPromptSelect = botColumns.has("system_prompt")
     ? "system_prompt"
     : "'' AS system_prompt";
+  const powersSelect = botColumns.has("powers_json")
+    ? "powers_json"
+    : "'[]' AS powers_json";
   const visibilityPredicate = botColumns.has("visibility")
     ? "(user_id = ? OR visibility = 'public')"
     : "user_id = ?";
@@ -3482,7 +3487,7 @@ export async function buildMentionedBotPromptContexts(args: {
   try {
     rows = args.db
       .prepare(
-        `SELECT id, name, ${systemPromptSelect}
+        `SELECT id, name, ${systemPromptSelect}, ${powersSelect}
          FROM bots
          WHERE id IN (${placeholders})
            AND ${visibilityPredicate}${chatEnabledPredicate}`
@@ -3511,6 +3516,10 @@ export async function buildMentionedBotPromptContexts(args: {
     const lines = [`- ${displayName} (id: ${row.id})`];
     if (profileExcerpt) {
       lines.push(`  Profile excerpt: ${profileExcerpt}`);
+    }
+    const powerLines = botPowerObserverCueLinesV1(displayName, row.powers_json);
+    if (powerLines.length > 0) {
+      lines.push(`  Active Powers: ${powerLines.join(" ")}`);
     }
 
     if (args.includeMemories) {

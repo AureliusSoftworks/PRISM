@@ -9,18 +9,20 @@ Categories: `Overview`
 
 Aliases: `Home`, `Prism overview`
 
-Files: `README.md`, `AGENTS.md`, `docs/applets.md`, `docs/brand-ethos.md`
+Files: `README.md`, `AGENTS.md`, `docs/applets.md`, `docs/brand-ethos.md`, `docs/slate-master-plan.md`
 
 ## What Prism Is
 
-Prism is a local-first AI workspace for calm, multi-perspective thinking. It keeps everyday and sensitive work on the local machine, while still allowing explicit cloud-provider use when stronger online models are worth it.
+Prism is a local-first AI workspace for calm, multi-perspective thinking and creative production. It keeps everyday and sensitive work on the local machine while still allowing explicit cloud-provider use when stronger online models are worth it.
 
 ## Available Now
 
-- Chat v0.5 is the full playground for bots, model controls, images, exports, and memory-aware conversations.
-- Zen v0.3 is the calmer one-to-one continuity lane.
-- Coffee v0.6 is the multi-bot group conversation lane.
-- Story v0.1 is a preview visual-novel lane with bots, choices, maps, and transcripts.
+- Chat v1.3 is the full playground for bots, model controls, images, exports, and memory-aware conversations.
+- Zen v1.2 is the calmer one-to-one continuity lane.
+- Coffee v1.4 is the multi-bot group conversation lane.
+- Signal v0.4 is the bot-led interview and show-production lane.
+- Story v0.1 is a preview procedural narrative lane.
+- Slate v0.5 is the preview prose-fiction production desk where the AI writes and the writer directs.
 - Account login, tenant isolation, encrypted key handling, and memory features are part of the current core.
 
 ## Product Principles
@@ -31,7 +33,7 @@ PRISM also begins with a creative belief: You are the light. Prism reveals the s
 
 ## Architecture Snapshot
 
-The app is a monorepo with a Next.js web surface, a Node.js API, an Electron desktop wrapper, SQLite data, Qdrant search, Ollama local models, and shared packages for cross-surface contracts.
+The app is a monorepo with a Next.js web surface, a Node.js API, an Electron desktop wrapper, SQLite data, Qdrant search, Ollama local models, and shared packages for cross-surface contracts and data types.
 
 ## Source Records
 
@@ -42,5 +44,6 @@ The app is a monorepo with a Next.js web surface, a Node.js API, an Electron des
 - `decision_a19295be-77fe-4e95-9a6a-57206331a0a5` (decision)
 - `concept_b2c6156c-2c09-41c8-a87c-4ee626cebde3` (concept)
 - `decision_d604f433-273f-48e5-a4dc-38c728d79b78` (decision)
+- `decision_a09fe27e-a4d9-44d4-88f4-9d5551a3677a` (decision)
 
 Record: `article_d9ba11bc-3099-4f1e-bf47-1ebe10122438` | Slug: `project-overview` | Authority: agent | Confidence: high

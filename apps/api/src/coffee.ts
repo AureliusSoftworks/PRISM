@@ -13224,7 +13224,10 @@ export async function createCoffeeConversationFromGroup(
             : {}),
         });
   const presetId = pickedPreset?.id ?? null;
-  const durationMinutes = normalizeCoffeeSessionDurationMinutes(input.durationMinutes);
+  const durationMinutes =
+    input.durationMinutes === undefined || input.durationMinutes === null
+      ? null
+      : normalizeCoffeeSessionDurationMinutes(input.durationMinutes);
   const autoPickStarterTopic = group.topicSelectionMode === "auto";
   const exclusionAttendance = applyCoffeeGroupSessionExclusions(
     group.coffeeSeatBotIds,

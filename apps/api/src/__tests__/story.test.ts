@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
+import { botPowerSourceHashV1 } from "@localai/shared";
 import type { GenerateOptions, LlmProvider, ProviderMessage } from "../providers.ts";
 import {
   chooseStorySessionChoice,
@@ -39,6 +40,7 @@ function createTestDb(): DatabaseSync {
       user_id TEXT NOT NULL,
       name TEXT NOT NULL,
       system_prompt TEXT NOT NULL DEFAULT '',
+      powers_json TEXT NOT NULL DEFAULT '[]',
       model TEXT,
       local_model TEXT,
       online_model TEXT,
@@ -402,6 +404,49 @@ describe("Story API helpers", () => {
     assert.equal(generated.progress?.currentSceneId, "scene-1");
     assert.equal(generated.transcript.length, 1);
     assert.equal(listStorySessions(db, "user-1").length, 1);
+  });
+
+  it("bakes selected bot Powers into Story generation", async () => {
+    const db = createTestDb();
+    seedBot(db, "bot-a", "Ada");
+    seedBot(db, "bot-b", "Bert");
+    const name = "Echo Step";
+    const intent = "Every arrival echoes twice.";
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'bot-a'").run(JSON.stringify([{
+      version: 1,
+      id: "echo-step",
+      name,
+      intent,
+      enabled: true,
+      compileStatus: "ready",
+      compiled: {
+        version: 1,
+        sourceHash: botPowerSourceHashV1(name, intent),
+        selfCue: "Make every arrival echo twice.",
+        observerCue: "Ada's arrivals echo twice for everyone nearby.",
+        effects: [],
+        ruleLabels: [],
+      },
+    }]));
+    const bots = loadStoryBotProfiles(db, "user-1", ["bot-a", "bot-b"]);
+    const created = createStorySession(db, "user-1", {
+      botIds: ["bot-a", "bot-b"],
+      provider: "local",
+      model: "test-model",
+    });
+    const provider = new SequenceProvider([episodeJson()]);
+
+    await generateStorySessionEpisode(db, "user-1", created.id, {
+      provider,
+      providerName: "local",
+      model: "test-model",
+      bots,
+    });
+
+    const prompt = provider.calls[0]?.messages.map((message) => message.content).join("\n") ?? "";
+    assert.match(prompt, /Active Powers:/u);
+    assert.match(prompt, /Echo Step: Make every arrival echo twice/u);
+    assert.match(prompt, /Ada — Echo Step: Ada's arrivals echo twice/u);
   });
 
   it("compiles llama3.2 compact Story outlines into playable manifests", async () => {

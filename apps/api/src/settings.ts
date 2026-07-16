@@ -22,6 +22,7 @@ import {
   isImageProviderName,
 } from "@localai/shared";
 import { sanitizeHiddenModelIds } from "./model-routing.ts";
+import { requirePrivateNetworkHttpUrl } from "./local-network-host.ts";
 
 /**
  * Pure validation + merge logic for PATCH /api/settings.
@@ -305,7 +306,7 @@ function normalizeOllamaHostValue(input: string): string {
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     throw new Error("Paired Ollama host must use http:// or https://.");
   }
-  return normalized;
+  return requirePrivateNetworkHttpUrl(normalized, "Paired Ollama host");
 }
 
 function normalizeComfyUiHostValue(input: string): string {
@@ -333,7 +334,7 @@ function normalizeComfyUiHostValue(input: string): string {
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     throw new Error("ComfyUI host must use http:// or https://.");
   }
-  return normalized;
+  return requirePrivateNetworkHttpUrl(normalized, "ComfyUI host");
 }
 
 function canonicalOllamaHostname(host: string): string {

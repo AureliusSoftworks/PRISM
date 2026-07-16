@@ -186,6 +186,34 @@ export interface BackupBotSnapshot {
   powers?: BotPowerV1[];
 }
 
+/**
+ * Slate rows stay as scalar database records inside the key-bearing account
+ * backup. This is deliberately separate from the future portable, keyless
+ * `.slate` archive contract.
+ */
+export type BackupSlateRow = Record<string, string | number | null>;
+
+export interface BackupSlateSnapshot {
+  series: BackupSlateRow[];
+  projects: BackupSlateRow[];
+  revisions: BackupSlateRow[];
+  versions: BackupSlateRow[];
+  sections: BackupSlateRow[];
+  sectionVersions: BackupSlateRow[];
+  manuscriptStates: BackupSlateRow[];
+  continuitySources: BackupSlateRow[];
+  continuityEntities: BackupSlateRow[];
+  continuityAliases: BackupSlateRow[];
+  continuityClaims: BackupSlateRow[];
+  continuityEvents: BackupSlateRow[];
+  continuityRelationships: BackupSlateRow[];
+  continuityKnowledge: BackupSlateRow[];
+  continuityThreads: BackupSlateRow[];
+  continuityConcerns: BackupSlateRow[];
+  continuityGenerations: BackupSlateRow[];
+  continuityJobs: BackupSlateRow[];
+}
+
 export interface BackupSnapshot {
   version: 1;
   exportedAt: string;
@@ -224,6 +252,8 @@ export interface BackupSnapshot {
     payload: Record<string, unknown>;
     createdAt: string;
   }>;
+  /** Optional in older v1 snapshots. This remains an account backup, not a `.slate` archive. */
+  slate?: BackupSlateSnapshot;
   /** Optional in older v1 snapshots. Signal is non-canonical but its show archive is user data. */
   botcast?: {
     shows: Array<{
@@ -235,6 +265,17 @@ export interface BackupSnapshot {
       accentColor: string;
       fallbackStudioAccentVariant?: BotcastFallbackStudioAccentVariant;
       atmosphereJson: string;
+      introAudio?: {
+        provider: "elevenlabs";
+        model: string;
+        prompt: string;
+        contentType: string;
+        audioBase64: string;
+        durationMs: number;
+        revision: number;
+        createdAt: string;
+        updatedAt: string;
+      };
       createdAt: string;
       updatedAt: string;
     }>;
@@ -249,6 +290,7 @@ export interface BackupSnapshot {
       provider?: ProviderName;
       model?: string | null;
       responseMode?: "local" | "auto" | "online";
+      durationMinutes?: number | null;
       status: string;
       segment: string;
       outcome: string | null;
@@ -288,6 +330,276 @@ export interface BackupSnapshot {
   };
 }
 
+type SlateBackupCollectionKey = keyof BackupSlateSnapshot;
+
+type SlateBackupTable =
+  | "slate_series"
+  | "slate_projects"
+  | "slate_revisions"
+  | "slate_versions"
+  | "slate_sections"
+  | "slate_section_versions"
+  | "slate_manuscript_state"
+  | "slate_continuity_sources"
+  | "slate_continuity_entities"
+  | "slate_continuity_aliases"
+  | "slate_continuity_claims"
+  | "slate_continuity_events"
+  | "slate_continuity_relationships"
+  | "slate_continuity_knowledge"
+  | "slate_continuity_threads"
+  | "slate_continuity_concerns"
+  | "slate_continuity_generations"
+  | "slate_continuity_jobs";
+
+interface SlateBackupTableSpec {
+  key: SlateBackupCollectionKey;
+  table: SlateBackupTable;
+  primaryKey: "id" | "project_id";
+  columns: readonly string[];
+  deferredFields?: readonly string[];
+}
+
+const SLATE_BACKUP_TABLES: readonly SlateBackupTableSpec[] = [
+  {
+    key: "series",
+    table: "slate_series",
+    primaryKey: "id",
+    columns: ["id", "title", "description", "created_at", "updated_at"],
+  },
+  {
+    key: "projects",
+    table: "slate_projects",
+    primaryKey: "id",
+    columns: [
+      "id", "series_id", "book_ordinal", "title", "spark", "spark_wildcards_json",
+      "premise", "voice", "non_negotiables_json", "phase", "structure_json",
+      "characters_json", "unresolved_threads_json", "manuscript", "direction",
+      "locked_ranges_json", "last_provider", "last_model", "continuity_active_version",
+      "continuity_target_version", "continuity_active_generation",
+      "continuity_previous_generation", "continuity_upgrade_status",
+      "continuity_last_success_at", "created_at", "updated_at",
+    ],
+  },
+  {
+    key: "revisions",
+    table: "slate_revisions",
+    primaryKey: "id",
+    columns: [
+      "id", "project_id", "action", "scope", "structure_item_id", "selection_start",
+      "selection_end", "direction", "original_text", "proposed_text", "status",
+      "provider", "model", "created_at", "resolved_at",
+    ],
+  },
+  {
+    key: "versions",
+    table: "slate_versions",
+    primaryKey: "id",
+    columns: [
+      "id", "project_id", "reason", "structure_json", "manuscript", "created_at",
+    ],
+  },
+  {
+    key: "sections",
+    table: "slate_sections",
+    primaryKey: "id",
+    columns: [
+      "id", "project_id", "series_id", "parent_section_id", "structure_item_id", "kind",
+      "ordinal", "title", "summary", "direction", "prose", "locked_ranges_json",
+      "locked", "status", "revision", "content_hash", "last_mutation_id", "created_at",
+      "updated_at",
+    ],
+    deferredFields: ["parent_section_id"],
+  },
+  {
+    key: "sectionVersions",
+    table: "slate_section_versions",
+    primaryKey: "id",
+    columns: [
+      "id", "project_id", "section_id", "revision", "reason", "title", "summary",
+      "direction", "prose", "locked", "status", "content_hash", "created_at",
+    ],
+  },
+  {
+    key: "manuscriptStates",
+    table: "slate_manuscript_state",
+    primaryKey: "project_id",
+    columns: [
+      "project_id", "storage_version", "structure_revision", "original_manuscript_hash",
+      "migrated_at", "updated_at",
+    ],
+  },
+  {
+    key: "continuitySources",
+    table: "slate_continuity_sources",
+    primaryKey: "id",
+    columns: [
+      "id", "series_id", "project_id", "section_id", "scope_kind", "kind",
+      "source_revision", "content", "content_hash", "authority", "provider", "model",
+      "producer_versions_json", "supersedes_source_id", "created_at",
+    ],
+    deferredFields: ["supersedes_source_id"],
+  },
+  {
+    key: "continuityEntities",
+    table: "slate_continuity_entities",
+    primaryKey: "id",
+    columns: [
+      "id", "series_id", "kind", "canonical_name", "description", "locked", "anchors_json", "source_id",
+      "producer_versions_json", "created_at", "updated_at",
+    ],
+  },
+  {
+    key: "continuityAliases",
+    table: "slate_continuity_aliases",
+    primaryKey: "id",
+    columns: [
+      "id", "series_id", "entity_id", "alias", "normalized_alias", "source_id", "created_at",
+    ],
+  },
+  {
+    key: "continuityClaims",
+    table: "slate_continuity_claims",
+    primaryKey: "id",
+    columns: [
+      "id", "series_id", "project_id", "section_id", "scope_kind", "subject_entity_id",
+      "predicate", "object_entity_id", "value", "epistemic_status", "perspective_entity_id",
+      "confidence", "anchors_json", "source_id", "supersedes_claim_id",
+      "producer_versions_json", "created_at",
+    ],
+    deferredFields: ["supersedes_claim_id"],
+  },
+  {
+    key: "continuityEvents",
+    table: "slate_continuity_events",
+    primaryKey: "id",
+    columns: [
+      "id", "series_id", "project_id", "section_id", "scope_kind", "title", "description",
+      "chronology_key", "participant_entity_ids_json", "location_entity_id", "anchors_json",
+      "source_id", "producer_versions_json", "created_at",
+    ],
+  },
+  {
+    key: "continuityRelationships",
+    table: "slate_continuity_relationships",
+    primaryKey: "id",
+    columns: [
+      "id", "series_id", "from_entity_id", "to_entity_id", "kind", "state",
+      "epistemic_status", "anchors_json", "source_id", "producer_versions_json", "created_at",
+    ],
+  },
+  {
+    key: "continuityKnowledge",
+    table: "slate_continuity_knowledge",
+    primaryKey: "id",
+    columns: [
+      "id", "series_id", "character_entity_id", "claim_id", "learned_event_id", "status",
+      "anchors_json", "source_id", "producer_versions_json", "created_at",
+    ],
+  },
+  {
+    key: "continuityThreads",
+    table: "slate_continuity_threads",
+    primaryKey: "id",
+    columns: [
+      "id", "series_id", "project_id", "section_id", "scope_kind", "label", "status",
+      "due_section_id", "anchors_json", "source_id", "producer_versions_json", "created_at",
+      "updated_at",
+    ],
+  },
+  {
+    key: "continuityConcerns",
+    table: "slate_continuity_concerns",
+    primaryKey: "id",
+    columns: [
+      "id", "series_id", "project_id", "section_id", "scope_kind", "kind", "severity",
+      "status", "summary", "explanation", "claim_ids_json", "anchors_json",
+      "recommended_resolution", "resolution_json", "producer_versions_json", "created_at",
+      "resolved_at",
+    ],
+  },
+  {
+    key: "continuityGenerations",
+    table: "slate_continuity_generations",
+    primaryKey: "id",
+    columns: [
+      "id", "project_id", "generation", "status", "target_version", "source_fingerprint",
+      "comparison_summary", "producer_versions_json", "created_at", "completed_at",
+    ],
+  },
+  {
+    key: "continuityJobs",
+    table: "slate_continuity_jobs",
+    primaryKey: "id",
+    columns: [
+      "id", "series_id", "project_id", "section_id", "source_id", "source_revision", "kind",
+      "status", "attempts", "input_fingerprint", "error", "available_at", "started_at",
+      "completed_at", "created_at", "updated_at",
+    ],
+  },
+];
+
+const SLATE_REFERENCE_RULES: ReadonlyArray<{
+  source: SlateBackupCollectionKey;
+  field: string;
+  target: SlateBackupCollectionKey;
+  targetTable: SlateBackupTable;
+}> = [
+  { source: "projects", field: "series_id", target: "series", targetTable: "slate_series" },
+  { source: "revisions", field: "project_id", target: "projects", targetTable: "slate_projects" },
+  { source: "versions", field: "project_id", target: "projects", targetTable: "slate_projects" },
+  { source: "sections", field: "project_id", target: "projects", targetTable: "slate_projects" },
+  { source: "sections", field: "series_id", target: "series", targetTable: "slate_series" },
+  { source: "sections", field: "parent_section_id", target: "sections", targetTable: "slate_sections" },
+  { source: "sectionVersions", field: "project_id", target: "projects", targetTable: "slate_projects" },
+  { source: "sectionVersions", field: "section_id", target: "sections", targetTable: "slate_sections" },
+  { source: "manuscriptStates", field: "project_id", target: "projects", targetTable: "slate_projects" },
+  { source: "continuitySources", field: "series_id", target: "series", targetTable: "slate_series" },
+  { source: "continuitySources", field: "project_id", target: "projects", targetTable: "slate_projects" },
+  { source: "continuitySources", field: "section_id", target: "sections", targetTable: "slate_sections" },
+  { source: "continuitySources", field: "supersedes_source_id", target: "continuitySources", targetTable: "slate_continuity_sources" },
+  { source: "continuityEntities", field: "series_id", target: "series", targetTable: "slate_series" },
+  { source: "continuityEntities", field: "source_id", target: "continuitySources", targetTable: "slate_continuity_sources" },
+  { source: "continuityAliases", field: "series_id", target: "series", targetTable: "slate_series" },
+  { source: "continuityAliases", field: "entity_id", target: "continuityEntities", targetTable: "slate_continuity_entities" },
+  { source: "continuityAliases", field: "source_id", target: "continuitySources", targetTable: "slate_continuity_sources" },
+  { source: "continuityClaims", field: "series_id", target: "series", targetTable: "slate_series" },
+  { source: "continuityClaims", field: "project_id", target: "projects", targetTable: "slate_projects" },
+  { source: "continuityClaims", field: "section_id", target: "sections", targetTable: "slate_sections" },
+  { source: "continuityClaims", field: "subject_entity_id", target: "continuityEntities", targetTable: "slate_continuity_entities" },
+  { source: "continuityClaims", field: "object_entity_id", target: "continuityEntities", targetTable: "slate_continuity_entities" },
+  { source: "continuityClaims", field: "perspective_entity_id", target: "continuityEntities", targetTable: "slate_continuity_entities" },
+  { source: "continuityClaims", field: "source_id", target: "continuitySources", targetTable: "slate_continuity_sources" },
+  { source: "continuityClaims", field: "supersedes_claim_id", target: "continuityClaims", targetTable: "slate_continuity_claims" },
+  { source: "continuityEvents", field: "series_id", target: "series", targetTable: "slate_series" },
+  { source: "continuityEvents", field: "project_id", target: "projects", targetTable: "slate_projects" },
+  { source: "continuityEvents", field: "section_id", target: "sections", targetTable: "slate_sections" },
+  { source: "continuityEvents", field: "location_entity_id", target: "continuityEntities", targetTable: "slate_continuity_entities" },
+  { source: "continuityEvents", field: "source_id", target: "continuitySources", targetTable: "slate_continuity_sources" },
+  { source: "continuityRelationships", field: "series_id", target: "series", targetTable: "slate_series" },
+  { source: "continuityRelationships", field: "from_entity_id", target: "continuityEntities", targetTable: "slate_continuity_entities" },
+  { source: "continuityRelationships", field: "to_entity_id", target: "continuityEntities", targetTable: "slate_continuity_entities" },
+  { source: "continuityRelationships", field: "source_id", target: "continuitySources", targetTable: "slate_continuity_sources" },
+  { source: "continuityKnowledge", field: "series_id", target: "series", targetTable: "slate_series" },
+  { source: "continuityKnowledge", field: "character_entity_id", target: "continuityEntities", targetTable: "slate_continuity_entities" },
+  { source: "continuityKnowledge", field: "claim_id", target: "continuityClaims", targetTable: "slate_continuity_claims" },
+  { source: "continuityKnowledge", field: "learned_event_id", target: "continuityEvents", targetTable: "slate_continuity_events" },
+  { source: "continuityKnowledge", field: "source_id", target: "continuitySources", targetTable: "slate_continuity_sources" },
+  { source: "continuityThreads", field: "series_id", target: "series", targetTable: "slate_series" },
+  { source: "continuityThreads", field: "project_id", target: "projects", targetTable: "slate_projects" },
+  { source: "continuityThreads", field: "section_id", target: "sections", targetTable: "slate_sections" },
+  { source: "continuityThreads", field: "due_section_id", target: "sections", targetTable: "slate_sections" },
+  { source: "continuityThreads", field: "source_id", target: "continuitySources", targetTable: "slate_continuity_sources" },
+  { source: "continuityConcerns", field: "series_id", target: "series", targetTable: "slate_series" },
+  { source: "continuityConcerns", field: "project_id", target: "projects", targetTable: "slate_projects" },
+  { source: "continuityConcerns", field: "section_id", target: "sections", targetTable: "slate_sections" },
+  { source: "continuityGenerations", field: "project_id", target: "projects", targetTable: "slate_projects" },
+  { source: "continuityJobs", field: "series_id", target: "series", targetTable: "slate_series" },
+  { source: "continuityJobs", field: "project_id", target: "projects", targetTable: "slate_projects" },
+  { source: "continuityJobs", field: "section_id", target: "sections", targetTable: "slate_sections" },
+  { source: "continuityJobs", field: "source_id", target: "continuitySources", targetTable: "slate_continuity_sources" },
+];
+
 export interface BackupAdapter {
   upload(userId: string, payload: BackupSnapshot): Promise<void>;
   download(userId: string): Promise<BackupSnapshot | null>;
@@ -308,6 +620,113 @@ export class LocalOnlyBackupAdapter implements BackupAdapter {
   public async listVersions(userId: string): Promise<string[]> {
     const snapshot = this.snapshots.get(userId);
     return snapshot ? [snapshot.exportedAt] : [];
+  }
+}
+
+function getSlateBackupRows(
+  slate: BackupSlateSnapshot,
+  key: SlateBackupCollectionKey,
+): BackupSlateRow[] {
+  const value = (slate as unknown as Record<string, unknown>)[key];
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    throw new Error(`Account backup Slate collection ${key} must be an array.`);
+  }
+  return value.map((row) => {
+    if (!row || typeof row !== "object" || Array.isArray(row)) {
+      throw new Error(`Account backup Slate collection ${key} contains an invalid row.`);
+    }
+    return row as BackupSlateRow;
+  });
+}
+
+function readSlateBackupScalar(
+  row: BackupSlateRow,
+  field: string,
+  table: SlateBackupTable,
+): string | number | null {
+  if (!Object.prototype.hasOwnProperty.call(row, field)) {
+    throw new Error(`Account backup ${table} row is missing ${field}.`);
+  }
+  const value = row[field];
+  if (value === null || typeof value === "string" || typeof value === "number") {
+    return value;
+  }
+  throw new Error(`Account backup ${table}.${field} must be a scalar value.`);
+}
+
+function exportSlateSnapshot(db: DatabaseSync, userId: string): BackupSlateSnapshot {
+  const snapshot = {} as BackupSlateSnapshot;
+  for (const spec of SLATE_BACKUP_TABLES) {
+    const rows = db
+      .prepare(
+        `SELECT ${spec.columns.join(", ")} FROM ${spec.table} WHERE user_id = ? ORDER BY ${spec.primaryKey}`,
+      )
+      .all(userId) as Array<Record<string, unknown>>;
+    snapshot[spec.key] = rows.map((row) => {
+      const exported: BackupSlateRow = {};
+      for (const column of spec.columns) {
+        const value = row[column];
+        if (value === null || typeof value === "string" || typeof value === "number") {
+          exported[column] = value;
+          continue;
+        }
+        throw new Error(`Unable to export non-scalar ${spec.table}.${column}.`);
+      }
+      return exported;
+    });
+  }
+  return snapshot;
+}
+
+function importSlateSnapshot(
+  db: DatabaseSync,
+  userId: string,
+  slate: BackupSlateSnapshot,
+): void {
+  for (const spec of SLATE_BACKUP_TABLES) {
+    const rows = getSlateBackupRows(slate, spec.key);
+    if (rows.length === 0) continue;
+    const columns = ["user_id", ...spec.columns];
+    const updates = [
+      "user_id = excluded.user_id",
+      ...spec.columns
+        .filter((column) => column !== spec.primaryKey)
+        .map((column) => `${column} = excluded.${column}`),
+    ];
+    const statement = db.prepare(
+      `INSERT INTO ${spec.table} (${columns.join(", ")})
+       VALUES (${columns.map(() => "?").join(", ")})
+       ON CONFLICT(${spec.primaryKey}) DO UPDATE SET ${updates.join(", ")}`,
+    );
+    const deferredFields = new Set(spec.deferredFields ?? []);
+    for (const row of rows) {
+      statement.run(
+        userId,
+        ...spec.columns.map((column) =>
+          deferredFields.has(column)
+            ? null
+            : readSlateBackupScalar(row, column, spec.table),
+        ),
+      );
+    }
+  }
+
+  for (const spec of SLATE_BACKUP_TABLES) {
+    if (!spec.deferredFields || spec.deferredFields.length === 0) continue;
+    const rows = getSlateBackupRows(slate, spec.key);
+    for (const field of spec.deferredFields) {
+      const statement = db.prepare(
+        `UPDATE ${spec.table} SET ${field} = ? WHERE ${spec.primaryKey} = ? AND user_id = ?`,
+      );
+      for (const row of rows) {
+        statement.run(
+          readSlateBackupScalar(row, field, spec.table),
+          readSlateBackupScalar(row, spec.primaryKey, spec.table),
+          userId,
+        );
+      }
+    }
   }
 }
 
@@ -799,6 +1218,25 @@ export function exportUserSnapshot(
   const botcastEvents = db.prepare(
     "SELECT * FROM botcast_events WHERE user_id = ? ORDER BY episode_id, sequence",
   ).all(userId) as Array<Record<string, unknown>>;
+  const botcastIntroAudio = db.prepare(
+    `SELECT show_id, provider, model, prompt, content_type, audio_bytes,
+            duration_ms, revision, created_at, updated_at
+       FROM botcast_show_intro_audio WHERE user_id = ?`,
+  ).all(userId) as Array<{
+    show_id: string;
+    provider: "elevenlabs";
+    model: string;
+    prompt: string;
+    content_type: string;
+    audio_bytes: Uint8Array;
+    duration_ms: number;
+    revision: number;
+    created_at: string;
+    updated_at: string;
+  }>;
+  const botcastIntroAudioByShowId = new Map(
+    botcastIntroAudio.map((row) => [row.show_id, row] as const),
+  );
 
   return {
     version: 1,
@@ -879,6 +1317,7 @@ export function exportUserSnapshot(
         updatedAt: bot.updated_at,
       })),
     conversations: conversationPayload,
+    slate: exportSlateSnapshot(db, userId),
     botcast: {
       shows: botcastShows.map((row) => ({
         id: row.id,
@@ -893,6 +1332,23 @@ export function exportUserSnapshot(
           ? row.fallback_studio_accent_variant
           : botcastFallbackStudioAccentVariantForSeed(row.id),
         atmosphereJson: row.atmosphere_json,
+        ...(botcastIntroAudioByShowId.get(row.id)
+          ? {
+              introAudio: {
+                provider: "elevenlabs" as const,
+                model: botcastIntroAudioByShowId.get(row.id)!.model,
+                prompt: botcastIntroAudioByShowId.get(row.id)!.prompt,
+                contentType: botcastIntroAudioByShowId.get(row.id)!.content_type,
+                audioBase64: Buffer.from(
+                  botcastIntroAudioByShowId.get(row.id)!.audio_bytes,
+                ).toString("base64"),
+                durationMs: botcastIntroAudioByShowId.get(row.id)!.duration_ms,
+                revision: botcastIntroAudioByShowId.get(row.id)!.revision,
+                createdAt: botcastIntroAudioByShowId.get(row.id)!.created_at,
+                updatedAt: botcastIntroAudioByShowId.get(row.id)!.updated_at,
+              },
+            }
+          : {}),
         createdAt: row.created_at,
         updatedAt: row.updated_at,
       })),
@@ -913,6 +1369,8 @@ export function exportUserSnapshot(
           row.response_mode === "auto" || row.response_mode === "online"
             ? row.response_mode
             : "local",
+        durationMinutes:
+          typeof row.duration_minutes === "number" ? row.duration_minutes : null,
         status: String(row.status),
         segment: String(row.segment),
         outcome: typeof row.outcome === "string" ? row.outcome : null,
@@ -989,11 +1447,13 @@ function assertSnapshotIdsStayWithinTenant(
       | "botcast_episodes"
       | "botcast_episode_segments"
       | "botcast_messages"
-      | "botcast_events",
-    ids: readonly string[]
+      | "botcast_events"
+      | SlateBackupTable,
+    ids: readonly string[],
+    idColumn: "id" | "project_id" = "id",
   ): void => {
     const seen = new Set<string>();
-    const findOwner = db.prepare(`SELECT user_id FROM ${table} WHERE id = ?`);
+    const findOwner = db.prepare(`SELECT user_id FROM ${table} WHERE ${idColumn} = ?`);
     for (const rawId of ids) {
       const id = rawId.trim();
       if (!id) continue;
@@ -1052,6 +1512,60 @@ function assertSnapshotIdsStayWithinTenant(
     assertIds("botcast_episode_segments", botcast.segments.map((item) => item.id));
     assertIds("botcast_messages", botcast.messages.map((item) => item.id));
     assertIds("botcast_events", botcast.events.map((item) => item.id));
+  }
+  const slate = snapshot.slate;
+  if (slate) {
+    const idsByCollection = new Map<SlateBackupCollectionKey, Set<string>>();
+    for (const spec of SLATE_BACKUP_TABLES) {
+      const ids = getSlateBackupRows(slate, spec.key).map((row) => {
+        const value = readSlateBackupScalar(row, spec.primaryKey, spec.table);
+        if (
+          typeof value !== "string" ||
+          value.trim().length === 0 ||
+          value !== value.trim()
+        ) {
+          throw new Error(
+            `Account backup ${spec.table}.${spec.primaryKey} must be a non-empty string.`,
+          );
+        }
+        return value;
+      });
+      assertIds(spec.table, ids, spec.primaryKey);
+      idsByCollection.set(spec.key, new Set(ids));
+    }
+
+    const ownerStatements = new Map<SlateBackupTable, ReturnType<DatabaseSync["prepare"]>>();
+    for (const rule of SLATE_REFERENCE_RULES) {
+      const targetIds = idsByCollection.get(rule.target) ?? new Set<string>();
+      let findOwner = ownerStatements.get(rule.targetTable);
+      if (!findOwner) {
+        findOwner = db.prepare(`SELECT user_id FROM ${rule.targetTable} WHERE id = ?`);
+        ownerStatements.set(rule.targetTable, findOwner);
+      }
+      for (const row of getSlateBackupRows(slate, rule.source)) {
+        const value = readSlateBackupScalar(
+          row,
+          rule.field,
+          SLATE_BACKUP_TABLES.find((spec) => spec.key === rule.source)!.table,
+        );
+        if (value === null || value === "") continue;
+        if (typeof value !== "string") {
+          throw new Error(`Account backup Slate reference ${rule.source}.${rule.field} is invalid.`);
+        }
+        if (targetIds.has(value)) continue;
+        const owner = findOwner.get(value) as { user_id?: string } | undefined;
+        if (owner?.user_id && owner.user_id !== userId) {
+          throw new Error(
+            `Account backup ${rule.targetTable} reference belongs to another user.`,
+          );
+        }
+        if (!owner?.user_id) {
+          throw new Error(
+            `Account backup ${rule.source}.${rule.field} references missing ${rule.targetTable} data.`,
+          );
+        }
+      }
+    }
   }
 }
 
@@ -1436,16 +1950,42 @@ function importUserSnapshotWithinTransaction(
         show.atmosphereJson,
         show.createdAt, show.updatedAt,
       );
+      if (show.introAudio?.provider === "elevenlabs") {
+        const audioBytes = Buffer.from(show.introAudio.audioBase64, "base64");
+        if (
+          audioBytes.length > 0 &&
+          audioBytes.length <= 4 * 1024 * 1024 &&
+          /^audio\/(?:mpeg|mp3)$/iu.test(show.introAudio.contentType)
+        ) {
+          db.prepare(
+            `INSERT OR REPLACE INTO botcast_show_intro_audio
+              (show_id, user_id, provider, model, prompt, content_type,
+               audio_bytes, duration_ms, revision, created_at, updated_at)
+             VALUES (?, ?, 'elevenlabs', ?, ?, ?, ?, ?, ?, ?, ?)`,
+          ).run(
+            show.id,
+            userId,
+            show.introAudio.model,
+            show.introAudio.prompt,
+            show.introAudio.contentType,
+            audioBytes,
+            Math.max(3_000, Math.round(show.introAudio.durationMs)),
+            Math.max(1, Math.round(show.introAudio.revision)),
+            show.introAudio.createdAt || show.createdAt,
+            show.introAudio.updatedAt || show.updatedAt,
+          );
+        }
+      }
     }
     for (const episode of botcast.episodes) {
       if (!showIds.has(episode.showId)) continue;
       db.prepare(
         `INSERT OR REPLACE INTO botcast_episodes
           (id, user_id, show_id, host_bot_id, guest_bot_id, title, topic,
-           producer_brief, provider, model, response_mode, status, segment, outcome,
+           producer_brief, provider, model, response_mode, duration_minutes, status, segment, outcome,
            tension_level, warning_count, started_at, completed_at, runtime_ms,
            created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         episode.id, userId, episode.showId, episode.hostBotId, episode.guestBotId,
         episode.title, episode.topic, episode.producerBrief,
@@ -1458,6 +1998,12 @@ function importUserSnapshotWithinTransaction(
           : episode.provider === "openai" || episode.provider === "anthropic"
             ? "online"
             : "local",
+        typeof episode.durationMinutes === "number" &&
+        Number.isInteger(episode.durationMinutes) &&
+        episode.durationMinutes >= 3 &&
+        episode.durationMinutes <= 30
+          ? episode.durationMinutes
+          : null,
         episode.status, episode.segment, episode.outcome, episode.tensionLevel,
         episode.warningCount, episode.startedAt, episode.completedAt,
         episode.runtimeMs, episode.createdAt, episode.updatedAt,
@@ -1497,6 +2043,10 @@ function importUserSnapshotWithinTransaction(
         event.payloadJson, event.occurredAt,
       );
     }
+  }
+
+  if (snapshot.slate) {
+    importSlateSnapshot(db, userId, snapshot.slate);
   }
 
   const insertConversation = db.prepare(`

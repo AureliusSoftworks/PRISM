@@ -7,6 +7,7 @@ import {
   encodeBottishPlanWave,
   FIXED_BOTTISH_TONE,
   fitBottishPlanToDuration,
+  scaleBottishPlanForDeliveryRate,
   mixBabbleMediaWave,
   normalizeBottishPlaybackProfile,
   prepareBottishVoice,
@@ -24,6 +25,18 @@ const neutral = {
 };
 
 describe("Bottish speech plan", () => {
+  it("changes mood delivery tempo without reviving authored Bottish pace", () => {
+    const source = buildBottishPlan("Mood changes this line.", neutral, "mood-rate");
+    const joyful = scaleBottishPlanForDeliveryRate(source, 1.18);
+    const strained = scaleBottishPlanForDeliveryRate(source, 0.94);
+    assert.ok(joyful.durationMs < source.durationMs);
+    assert.ok(strained.durationMs > source.durationMs);
+    assert.equal(
+      joyful.alignment.characters.join(""),
+      source.alignment.characters.join(""),
+    );
+  });
+
   it("falls back procedurally for a startup-era metadata-only response", async () => {
     const legacyResponse = Response.json({
       ok: true,

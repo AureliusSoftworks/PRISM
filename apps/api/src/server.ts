@@ -2,6 +2,7 @@ import { utimesSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { getAppConfig, type AppConfig } from "@localai/config";
@@ -10,6 +11,7 @@ import {
   loadPrismMoodEventMessageIds,
   loadPrismMoodState,
   recordPrismMoodEventOnce,
+  resolveDbPath,
   upsertPrismMoodState,
 } from "./db.ts";
 import { buildApiRootLandingHtml } from "./api-root-landing.ts";
@@ -17,7 +19,16 @@ import {
   buildDeveloperTranscript,
   sensitiveEnvironmentValues,
 } from "./developer-transcript.ts";
-import { clearCookie, html, HttpError, json, readJsonBody, setCookie, setCorsHeaders } from "./utils.http.ts";
+import {
+  clearCookie,
+  html,
+  HttpError,
+  json,
+  readBinaryBody,
+  readJsonBody,
+  setCookie,
+  setCorsHeaders,
+} from "./utils.http.ts";
 import { decryptJson, decryptText, deriveMasterKey, encryptText, hashPassword, randomId, verifyPassword } from "./security.ts";
 import type { RouteDefinition, RequestContext } from "./types.ts";
 import {
@@ -146,14 +157,24 @@ import {
   createBotcastShow,
   deleteBotcastEpisode,
   deleteBotcastShow,
+  deleteBotcastShowIntroAudio,
+  forceEndBotcastEpisode,
   generateBotcastShowIdentity,
   generateBotcastShowName,
   getBotcastEpisode,
   getBotcastShow,
   listBotcastEpisodes,
   listBotcastShows,
+  readBotcastShowIntroAudio,
+  storeBotcastShowIntroAudio,
   updateBotcastShow,
 } from "./botcast.ts";
+import {
+  ElevenLabsMusicError,
+  SIGNAL_ELEVENLABS_MUSIC_MODEL,
+  buildSignalElevenLabsMusicCompositionPlan,
+  requestSignalElevenLabsIntroMusic,
+} from "./elevenlabs-music.ts";
 import {
   normalizeSignalAssetUpload,
   readSignalAssetSlot,
@@ -225,8 +246,67 @@ import {
   rejectSlateRevision,
   resolveSlateAccountDefaults,
   resolveSlateProjectSparkWildcards,
+  SlateShapeWriteConflictError,
   updateSlateProject,
 } from "./slate.ts";
+import {
+  SlateSectionAiWriteConflictError,
+  SlateSectionRevisionConflictError,
+  createSlateSeries,
+  getSlateContinuityStatus,
+  getSlateManuscriptPage,
+  getSlateProjectSection,
+  getSlateSeries,
+  listSlateProjectSections,
+  listSlateSeries,
+  saveSlateProjectSection,
+} from "./slate-continuity.ts";
+import {
+  processSlateContinuityAuxiliaryModelJob,
+  processSlateContinuityJobDeterministically,
+} from "./slate-continuity-processing.ts";
+import {
+  startSlateContinuityWorker,
+  type SlateContinuityWorkerHandle,
+} from "./slate-continuity-worker.ts";
+import {
+  SlateRecoveryCoordinator,
+  type SlateRecoveryCoordinatorStatus,
+} from "./slate-recovery-coordinator.ts";
+import {
+  listSlateRecoveryGenerations,
+  purgeSlateRecoveryProjectGenerations,
+  writeSlateRecoveryGeneration,
+} from "./slate-author-safety.ts";
+import {
+  createSlateManuscriptExport,
+  listSlateManuscriptExportHistory,
+  SlateManuscriptExportServiceError,
+} from "./slate-manuscript-export-service.ts";
+import {
+  createSlateProjectArchive,
+  importSlateProjectArchiveAsCopy,
+  previewSlateProjectArchiveImport,
+  SlateArchiveImportError,
+} from "./slate-archive-import-service.ts";
+import {
+  MAX_SLATE_ARCHIVE_BYTES,
+  SlateArchiveZipError,
+} from "./slate-archive-zip.ts";
+import {
+  getSlateReturnSession,
+  listSlateReturnSessions,
+  openSlateReturnSession,
+} from "./slate-return-sessions.ts";
+import {
+  chooseSlateConcernResolutionKind,
+  getNextSlateContinuityConcern,
+  linkSlateConcernRevisionProposal,
+  resolveSlateContinuityConcern,
+  settleSlateConcernRevision,
+  slateRevisionRequestForContinuityConcern,
+  SlateContinuityReconciliationError,
+} from "./slate-continuity-reconciliation.ts";
 import {
   composeBotSystemPrompt,
   deleteAllBots,
@@ -404,7 +484,9 @@ import {
   type BotFaceGlyphAnimation,
   type BotFaceThinkingFrames,
   type BotAudioVoiceProfileV1,
+  BOTCAST_ELEVENLABS_INTRO_DURATION_MS,
   type BotcastProducerCue,
+  type BotcastShowPatchRequest,
   type OpinionBand,
   type OpinionTrend,
   type PromptShortcutMetadata,
@@ -499,6 +581,7 @@ let masterKey = deriveMasterKey(config.encryptionMasterKey);
 let providerFactoryOverride: typeof selectProvider = selectProvider;
 let auxiliaryProviderFactoryOverride: typeof getAuxiliaryProvider = getAuxiliaryProvider;
 let builtinVoiceWaveGeneratorOverride: typeof generateBuiltinEnglishWave = generateBuiltinEnglishWave;
+let slateRecoveryCoordinator: SlateRecoveryCoordinator | null = null;
 const activeCoffeeDepartureEpilogues = new Map<string, Promise<void>>();
 /**
  * Runtime view of local-network access. `boundLanActive` reflects what the
@@ -511,6 +594,111 @@ const networkState: { desiredLanAccess: boolean; boundLanActive: boolean } = {
   boundLanActive: false,
 };
 const backupAdapter = new LocalOnlyBackupAdapter();
+
+function slateRecoveryRootDirectory(): string {
+  const configured = process.env.SLATE_RECOVERY_DIR?.trim();
+  return configured || join(dirname(resolveDbPath()), "slate-recovery");
+}
+
+function slateRecoveryMirrorDirectory(): string | null {
+  return process.env.SLATE_RECOVERY_MIRROR_DIR?.trim() || null;
+}
+
+function protectSlateMutation<T>(
+  value: T,
+  userId: string,
+  projectId: string,
+  reason: string,
+  milestone = false,
+): T {
+  if (!slateRecoveryCoordinator) return value;
+  const input = { userId, projectId, reason };
+  if (milestone) slateRecoveryCoordinator.scheduleMilestone(input);
+  else slateRecoveryCoordinator.schedulePostMutation(input);
+  return value;
+}
+
+function protectSlateBeforeRisk(
+  userId: string,
+  projectId: string,
+): void {
+  if (!slateRecoveryCoordinator) return;
+  writeSlateRecoveryGeneration(
+    db,
+    userId,
+    projectId,
+    slateRecoveryRootDirectory(),
+    { mirrorDirectory: slateRecoveryMirrorDirectory() },
+  );
+}
+
+function slateRecoveryStatus(
+  userId: string,
+  projectId: string,
+): SlateRecoveryCoordinatorStatus | null {
+  return slateRecoveryCoordinator?.status({ userId, projectId }) ?? null;
+}
+
+function slateProjectIdsForUser(userId: string): string[] {
+  return (
+    db.prepare("SELECT id FROM slate_projects WHERE user_id = ? ORDER BY id")
+      .all(userId) as Array<{ id: string }>
+  ).map((row) => row.id);
+}
+
+/**
+ * Quiesces recovery writers before removing their local and mirror copies.
+ * The returned callback is used only when the following SQLite deletion/reset
+ * fails and the still-existing projects need protection enabled again.
+ */
+async function retireAndPurgeSlateRecoveryProjects(
+  userId: string,
+  projectIds: readonly string[],
+): Promise<() => void> {
+  const coordinator = slateRecoveryCoordinator;
+  const references = projectIds.map((projectId) => ({ userId, projectId }));
+  if (coordinator) {
+    await Promise.all(
+      references.map((reference) => coordinator.retireProject(reference)),
+    );
+  }
+  const resume = () => {
+    if (!coordinator) return;
+    for (const reference of references) coordinator.resumeProject(reference);
+  };
+
+  try {
+    const roots = new Set<string>([slateRecoveryRootDirectory()]);
+    const mirror = slateRecoveryMirrorDirectory();
+    if (mirror) roots.add(mirror);
+    for (const root of roots) {
+      for (const projectId of projectIds) {
+        purgeSlateRecoveryProjectGenerations(root, projectId);
+      }
+    }
+  } catch (error) {
+    resume();
+    throw error;
+  }
+  return resume;
+}
+
+function slateArchivePayload(body: unknown): Uint8Array {
+  if (!(body instanceof Uint8Array)) {
+    throw new HttpError(400, "A .slate archive file is required.");
+  }
+  return body;
+}
+
+function rethrowSlateArchiveError(error: unknown): never {
+  if (error instanceof SlateArchiveImportError || error instanceof SlateArchiveZipError) {
+    throw new HttpError(400, error.message);
+  }
+  if (error instanceof Error && /(?:project|series) not found/i.test(error.message)) {
+    throw new HttpError(404, error.message);
+  }
+  throw error;
+}
 
 function normalizeBotAudioVoiceProfilesForResponse<T extends Record<string, unknown>>(bot: T): T & {
   authored_audio_voice_profile: BotAudioVoiceProfileV1;
@@ -1680,6 +1868,10 @@ function touchUserActivity(userId: string): void {
 }
 
 async function deleteUserAccount(userId: string): Promise<void> {
+  const resumeSlateRecovery = await retireAndPurgeSlateRecoveryProjects(
+    userId,
+    slateProjectIdsForUser(userId),
+  );
   db.exec("BEGIN IMMEDIATE TRANSACTION");
   try {
     db.prepare("DELETE FROM sessions WHERE user_id = ?").run(userId);
@@ -1695,6 +1887,7 @@ async function deleteUserAccount(userId: string): Promise<void> {
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
+    resumeSlateRecovery();
     throw error;
   }
 
@@ -1712,7 +1905,16 @@ async function deleteUserAccount(userId: string): Promise<void> {
 }
 
 async function restoreUserFactoryDefaults(userId: string): Promise<void> {
-  restoreFactoryDefaultsInDatabase(db, userId);
+  const resumeSlateRecovery = await retireAndPurgeSlateRecoveryProjects(
+    userId,
+    slateProjectIdsForUser(userId),
+  );
+  try {
+    restoreFactoryDefaultsInDatabase(db, userId);
+  } catch (error) {
+    resumeSlateRecovery();
+    throw error;
+  }
 
   try {
     removeGeneratedImagesDirectoryForUser(userId);
@@ -2889,6 +3091,28 @@ function buildRoutes(): RouteDefinition[] {
       deleteStorySession(db, userId, ctx.params.id);
       json(ctx.res, 200, { ok: true });
     }),
+    route("GET", "/api/slate/series", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, { ok: true, series: listSlateSeries(db, userId) });
+    }),
+    route("POST", "/api/slate/series", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      json(ctx.res, 201, {
+        ok: true,
+        series: createSlateSeries(db, userId, {
+          title: body.title,
+          description: body.description,
+        }),
+      });
+    }),
+    route("GET", "/api/slate/series/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        series: getSlateSeries(db, userId, ctx.params.id),
+      });
+    }),
     route("GET", "/api/slate/projects", async (ctx) => {
       const userId = requireAuth(ctx);
       json(ctx.res, 200, { ok: true, projects: listSlateProjects(db, userId) });
@@ -2915,57 +3139,492 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/slate/projects", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
+      const project = createSlateProject(db, userId, {
+        title: body.title,
+        spark: body.spark,
+        seriesId: body.seriesId,
+        sparkWildcards: body.sparkWildcards,
+      });
       json(ctx.res, 201, {
         ok: true,
-        project: createSlateProject(db, userId, {
-          title: body.title,
-          spark: body.spark,
-          sparkWildcards: body.sparkWildcards,
-        }),
+        project: protectSlateMutation(
+          project,
+          userId,
+          project.id,
+          "Project created",
+          true,
+        ),
       });
     }),
     route("GET", "/api/slate/projects/:id", async (ctx) => {
       const userId = requireAuth(ctx);
       json(ctx.res, 200, { ok: true, project: getSlateProject(db, userId, ctx.params.id) });
     }),
-    route("PATCH", "/api/slate/projects/:id", async (ctx) => {
+    route("POST", "/api/slate/projects/:id/return-sessions", async (ctx) => {
+      const userId = requireAuth(ctx);
+      try {
+        json(ctx.res, 201, {
+          ok: true,
+          session: openSlateReturnSession(db, userId, ctx.params.id, new Date(), {
+            maxReuseAgeMs: 12 * 60 * 60 * 1_000,
+          }),
+        });
+      } catch (error) {
+        if (error instanceof Error && /project not found/i.test(error.message)) {
+          throw new HttpError(404, error.message);
+        }
+        throw error;
+      }
+    }),
+    route("GET", "/api/slate/projects/:id/return-sessions", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const rawLimit = ctx.query.get("limit");
+      try {
+        json(ctx.res, 200, {
+          ok: true,
+          sessions: listSlateReturnSessions(
+            db,
+            userId,
+            ctx.params.id,
+            rawLimit ? Number.parseInt(rawLimit, 10) : undefined,
+          ),
+        });
+      } catch (error) {
+        if (error instanceof Error && /project not found/i.test(error.message)) {
+          throw new HttpError(404, error.message);
+        }
+        throw error;
+      }
+    }),
+    route("GET", "/api/slate/projects/:id/return-sessions/:sessionId", async (ctx) => {
+      const userId = requireAuth(ctx);
+      try {
+        json(ctx.res, 200, {
+          ok: true,
+          session: getSlateReturnSession(
+            db,
+            userId,
+            ctx.params.id,
+            ctx.params.sessionId,
+          ),
+        });
+      } catch (error) {
+        if (error instanceof Error && /(?:project|session) not found/i.test(error.message)) {
+          throw new HttpError(404, error.message);
+        }
+        throw error;
+      }
+    }),
+    route("GET", "/api/slate/projects/:id/sections", async (ctx) => {
       const userId = requireAuth(ctx);
       json(ctx.res, 200, {
         ok: true,
-        project: updateSlateProject(db, userId, ctx.params.id, ctx.body),
+        sections: listSlateProjectSections(db, userId, ctx.params.id),
+      });
+    }),
+    route("GET", "/api/slate/projects/:id/sections/:sectionId", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        section: getSlateProjectSection(
+          db,
+          userId,
+          ctx.params.id,
+          ctx.params.sectionId,
+        ),
+      });
+    }),
+    route("PATCH", "/api/slate/projects/:id/sections/:sectionId", async (ctx) => {
+      const userId = requireAuth(ctx);
+      try {
+        const section = saveSlateProjectSection(
+          db,
+          userId,
+          ctx.params.id,
+          ctx.params.sectionId,
+          ctx.body as never,
+        );
+        json(ctx.res, 200, {
+          ok: true,
+          section: protectSlateMutation(
+            section,
+            userId,
+            ctx.params.id,
+            "Section saved",
+          ),
+        });
+      } catch (error) {
+        if (error instanceof SlateSectionRevisionConflictError) {
+          json(ctx.res, 409, {
+            ok: false,
+            code: error.code,
+            error: error.message,
+            sectionId: error.sectionId,
+            currentRevision: error.currentRevision,
+            currentContentHash: error.currentContentHash,
+          });
+          return;
+        }
+        throw error;
+      }
+    }),
+    route("GET", "/api/slate/projects/:id/manuscript", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const rawLimit = ctx.query.get("limit");
+      const manuscriptPage = getSlateManuscriptPage(db, userId, ctx.params.id, {
+          cursor: ctx.query.get("cursor"),
+          limit: rawLimit ? Number.parseInt(rawLimit, 10) : undefined,
+        });
+      json(ctx.res, 200, { ...manuscriptPage });
+    }),
+    route("GET", "/api/slate/projects/:id/exports", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const rawLimit = ctx.query.get("limit");
+      try {
+        json(ctx.res, 200, {
+          ok: true,
+          exports: listSlateManuscriptExportHistory(
+            db,
+            userId,
+            ctx.params.id,
+            rawLimit ? Number.parseInt(rawLimit, 10) : undefined,
+          ),
+        });
+      } catch (error) {
+        if (error instanceof SlateManuscriptExportServiceError) {
+          throw new HttpError(error.status, error.message);
+        }
+        throw error;
+      }
+    }),
+    route("POST", "/api/slate/projects/:id/exports", async (ctx) => {
+      const userId = requireAuth(ctx);
+      try {
+        const exported = await createSlateManuscriptExport(
+          db,
+          userId,
+          ctx.params.id,
+          ctx.body as never,
+        );
+        ctx.res.statusCode = 200;
+        ctx.res.setHeader("Content-Type", exported.mediaType);
+        ctx.res.setHeader(
+          "Content-Disposition",
+          `attachment; filename="${exported.filename}"`,
+        );
+        ctx.res.setHeader("Content-Length", String(exported.payload.byteLength));
+        ctx.res.setHeader("Cache-Control", "private, no-store");
+        ctx.res.setHeader("X-Content-Type-Options", "nosniff");
+        ctx.res.setHeader("X-Prism-Export-Id", exported.id);
+        ctx.res.setHeader(
+          "X-Prism-Export-Sha256",
+          exported.manifest.payloadSha256,
+        );
+        ctx.res.end(Buffer.from(exported.payload));
+      } catch (error) {
+        if (error instanceof SlateManuscriptExportServiceError) {
+          throw new HttpError(error.status, error.message);
+        }
+        throw error;
+      }
+    }),
+    route("GET", "/api/slate/projects/:id/archive", async (ctx) => {
+      const userId = requireAuth(ctx);
+      try {
+        const archive = createSlateProjectArchive(db, userId, ctx.params.id);
+        ctx.res.statusCode = 200;
+        ctx.res.setHeader("Content-Type", archive.mediaType);
+        ctx.res.setHeader(
+          "Content-Disposition",
+          `attachment; filename="${archive.filename}"`,
+        );
+        ctx.res.setHeader("Content-Length", String(archive.payload.byteLength));
+        ctx.res.setHeader("Cache-Control", "private, no-store");
+        ctx.res.setHeader("X-Content-Type-Options", "nosniff");
+        ctx.res.setHeader("X-Prism-Slate-Format", archive.manifest.format);
+        ctx.res.setHeader("X-Prism-Slate-Version", String(archive.manifest.version));
+        ctx.res.end(Buffer.from(archive.payload));
+      } catch (error) {
+        rethrowSlateArchiveError(error);
+      }
+    }),
+    route("POST", "/api/slate/archives/preview", async (ctx) => {
+      const userId = requireAuth(ctx);
+      try {
+        json(ctx.res, 200, {
+          ok: true,
+          preview: previewSlateProjectArchiveImport(
+            db,
+            userId,
+            slateArchivePayload(ctx.body),
+          ),
+        });
+      } catch (error) {
+        rethrowSlateArchiveError(error);
+      }
+    }),
+    route("POST", "/api/slate/archives/import", async (ctx) => {
+      const userId = requireAuth(ctx);
+      try {
+        const imported = importSlateProjectArchiveAsCopy(
+          db,
+          userId,
+          slateArchivePayload(ctx.body),
+        );
+        json(ctx.res, 201, {
+          ok: true,
+          import: protectSlateMutation(
+            imported,
+            userId,
+            imported.projectId,
+            "Archive restored as a copy",
+            true,
+          ),
+        });
+      } catch (error) {
+        rethrowSlateArchiveError(error);
+      }
+    }),
+    route("GET", "/api/slate/projects/:id/continuity/status", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        continuity: getSlateContinuityStatus(db, userId, ctx.params.id),
+      });
+    }),
+    route("GET", "/api/slate/projects/:id/continuity/concerns/next", async (ctx) => {
+      const userId = requireAuth(ctx);
+      try {
+        json(ctx.res, 200, {
+          ok: true,
+          concern: getNextSlateContinuityConcern(db, userId, ctx.params.id),
+        });
+      } catch (error) {
+        if (error instanceof SlateContinuityReconciliationError) {
+          throw new HttpError(error.status, error.message);
+        }
+        throw error;
+      }
+    }),
+    route(
+      "POST",
+      "/api/slate/projects/:id/continuity/concerns/:concernId/resolve",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        const body = ctx.body as Record<string, unknown>;
+        try {
+          const current = getNextSlateContinuityConcern(db, userId, ctx.params.id);
+          if (!current) {
+            throw new SlateContinuityReconciliationError(
+              "Continuity has no open concern for this project.",
+              404,
+              "slate_concern_not_found",
+            );
+          }
+          if (current.id !== ctx.params.concernId) {
+            throw new SlateContinuityReconciliationError(
+              "Direct the current Continuity concern before moving to another.",
+              409,
+              "slate_concern_not_current",
+            );
+          }
+          const appliedResolution = chooseSlateConcernResolutionKind(
+            body.direction,
+            body.resolutionKind,
+            current.suggestedAction.kind,
+          );
+          if (appliedResolution === "revise_prose") {
+            const prepared = slateRevisionRequestForContinuityConcern(
+              db,
+              userId,
+              ctx.params.id,
+              ctx.params.concernId,
+              body.direction,
+            );
+            const ai = slateAiForUser(userId);
+            const project = await runWithUsageSession(
+              { db, userId, privacyScope: "normal", mode: "slate", surface: "slate" },
+              () => proposeSlateRevision(db, userId, ctx.params.id, prepared.request, ai),
+            );
+            const revision = project.revisions.find((candidate) => candidate.status === "pending");
+            if (!revision) throw new Error("Slate did not preserve the Continuity revision preview.");
+            linkSlateConcernRevisionProposal(
+              db,
+              userId,
+              ctx.params.id,
+              ctx.params.concernId,
+              revision.id,
+              prepared.direction,
+            );
+            json(ctx.res, 200, {
+              ok: true,
+              project: protectSlateMutation(
+                project,
+                userId,
+                ctx.params.id,
+                "Continuity revision proposal created",
+              ),
+              appliedResolution,
+              revisionId: revision.id,
+              nextConcern: null,
+            });
+            return;
+          }
+          resolveSlateContinuityConcern(
+            db,
+            userId,
+            ctx.params.id,
+            ctx.params.concernId,
+            { direction: body.direction, resolutionKind: appliedResolution },
+          );
+          json(ctx.res, 200, {
+            ok: true,
+            project: protectSlateMutation(
+              getSlateProject(db, userId, ctx.params.id),
+              userId,
+              ctx.params.id,
+              "Continuity direction recorded",
+              true,
+            ),
+            appliedResolution,
+            revisionId: null,
+            nextConcern: getNextSlateContinuityConcern(db, userId, ctx.params.id),
+          });
+        } catch (error) {
+          if (error instanceof SlateContinuityReconciliationError) {
+            throw new HttpError(error.status, error.message);
+          }
+          throw error;
+        }
+      },
+    ),
+    route("GET", "/api/slate/projects/:id/recovery/status", async (ctx) => {
+      const userId = requireAuth(ctx);
+      getSlateProject(db, userId, ctx.params.id);
+      const generations = listSlateRecoveryGenerations(
+        slateRecoveryRootDirectory(),
+        ctx.params.id,
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        recovery: {
+          coordinator: slateRecoveryStatus(userId, ctx.params.id),
+          verifiedGenerationCount: generations.filter(
+            (generation) => generation.status === "verified",
+          ).length,
+          corruptGenerationCount: generations.filter(
+            (generation) => generation.status === "corrupt",
+          ).length,
+          newestVerifiedAt:
+            generations.find((generation) => generation.status === "verified")
+              ?.capturedAt ?? null,
+        },
+      });
+    }),
+    route("PATCH", "/api/slate/projects/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const project = updateSlateProject(db, userId, ctx.params.id, ctx.body);
+      json(ctx.res, 200, {
+        ok: true,
+        project: protectSlateMutation(
+          project,
+          userId,
+          ctx.params.id,
+          "Project direction or structure saved",
+        ),
       });
     }),
     route("DELETE", "/api/slate/projects/:id", async (ctx) => {
       const userId = requireAuth(ctx);
-      deleteSlateProject(db, userId, ctx.params.id);
+      getSlateProject(db, userId, ctx.params.id);
+      const resumeSlateRecovery = await retireAndPurgeSlateRecoveryProjects(
+        userId,
+        [ctx.params.id],
+      );
+      try {
+        deleteSlateProject(db, userId, ctx.params.id);
+      } catch (error) {
+        resumeSlateRecovery();
+        throw error;
+      }
       json(ctx.res, 200, { ok: true });
     }),
     route("POST", "/api/slate/projects/:id/shape", async (ctx) => {
       const userId = requireAuth(ctx);
+      protectSlateBeforeRisk(userId, ctx.params.id);
       const ai = slateAiForUser(userId);
-      const project = await runWithUsageSession(
-        { db, userId, privacyScope: "normal", mode: "slate", surface: "slate" },
-        () => generateSlateShape(db, userId, ctx.params.id, ai),
-      );
-      json(ctx.res, 200, { ok: true, project });
+      try {
+        const project = await runWithUsageSession(
+          { db, userId, privacyScope: "normal", mode: "slate", surface: "slate" },
+          () => generateSlateShape(db, userId, ctx.params.id, ai),
+        );
+        json(ctx.res, 200, {
+          ok: true,
+          project: protectSlateMutation(
+            project,
+            userId,
+            ctx.params.id,
+            "Story shape approved",
+            true,
+          ),
+        });
+      } catch (error) {
+        if (error instanceof SlateShapeWriteConflictError) {
+          json(ctx.res, 409, {
+            ok: false,
+            code: error.code,
+            error: error.message,
+            reason: error.reason,
+            projectId: error.projectId,
+            currentUpdatedAt: error.currentUpdatedAt,
+          });
+          return;
+        }
+        throw error;
+      }
     }),
     route("POST", "/api/slate/projects/:id/draft", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
       const ai = slateAiForUser(userId);
-      const project = await runWithUsageSession(
-        { db, userId, privacyScope: "normal", mode: "slate", surface: "slate" },
-        () =>
-          draftSlateStructureItem(
-            db,
+      try {
+        const project = await runWithUsageSession(
+          { db, userId, privacyScope: "normal", mode: "slate", surface: "slate" },
+          () =>
+            draftSlateStructureItem(
+              db,
+              userId,
+              ctx.params.id,
+              readString(body.structureItemId, "structureItemId"),
+              body.direction,
+              ai,
+            ),
+        );
+        json(ctx.res, 200, {
+          ok: true,
+          project: protectSlateMutation(
+            project,
             userId,
             ctx.params.id,
-            readString(body.structureItemId, "structureItemId"),
-            body.direction,
-            ai,
+            "Scene drafted",
+            true,
           ),
-      );
-      json(ctx.res, 200, { ok: true, project });
+        });
+      } catch (error) {
+        if (error instanceof SlateSectionAiWriteConflictError) {
+          json(ctx.res, 409, {
+            ok: false,
+            code: error.code,
+            error: error.message,
+            reason: error.reason,
+            sectionId: error.sectionId,
+            currentRevision: error.currentRevision,
+            currentContentHash: error.currentContentHash,
+          });
+          return;
+        }
+        throw error;
+      }
     }),
     route("POST", "/api/slate/projects/:id/revisions", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -2974,20 +3633,66 @@ function buildRoutes(): RouteDefinition[] {
         { db, userId, privacyScope: "normal", mode: "slate", surface: "slate" },
         () => proposeSlateRevision(db, userId, ctx.params.id, ctx.body, ai),
       );
-      json(ctx.res, 200, { ok: true, project });
+      json(ctx.res, 200, {
+        ok: true,
+        project: protectSlateMutation(
+          project,
+          userId,
+          ctx.params.id,
+          "Revision proposal created",
+        ),
+      });
     }),
     route("POST", "/api/slate/projects/:id/revisions/:revisionId/accept", async (ctx) => {
       const userId = requireAuth(ctx);
+      protectSlateBeforeRisk(userId, ctx.params.id);
+      const project = acceptSlateRevision(
+        db,
+        userId,
+        ctx.params.id,
+        ctx.params.revisionId,
+      );
+      settleSlateConcernRevision(
+        db,
+        userId,
+        ctx.params.id,
+        ctx.params.revisionId,
+        "accepted",
+      );
       json(ctx.res, 200, {
         ok: true,
-        project: acceptSlateRevision(db, userId, ctx.params.id, ctx.params.revisionId),
+        project: protectSlateMutation(
+          project,
+          userId,
+          ctx.params.id,
+          "Revision accepted",
+          true,
+        ),
       });
     }),
     route("POST", "/api/slate/projects/:id/revisions/:revisionId/reject", async (ctx) => {
       const userId = requireAuth(ctx);
+      const project = rejectSlateRevision(
+        db,
+        userId,
+        ctx.params.id,
+        ctx.params.revisionId,
+      );
+      settleSlateConcernRevision(
+        db,
+        userId,
+        ctx.params.id,
+        ctx.params.revisionId,
+        "rejected",
+      );
       json(ctx.res, 200, {
         ok: true,
-        project: rejectSlateRevision(db, userId, ctx.params.id, ctx.params.revisionId),
+        project: protectSlateMutation(
+          project,
+          userId,
+          ctx.params.id,
+          "Revision rejected",
+        ),
       });
     }),
     route("GET", "/api/conversations/sweep/state", async (ctx) => {
@@ -4716,13 +5421,14 @@ function buildRoutes(): RouteDefinition[] {
       if (typeof effectiveBotId === "string" && effectiveBotId.trim().length > 0) {
         const bot = db
           .prepare(
-            "SELECT name, system_prompt, semantic_facets, online_enabled, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')"
+            "SELECT name, system_prompt, semantic_facets, powers_json, online_enabled, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')"
           )
           .get(effectiveBotId, userId) as
           | {
               name?: string;
               system_prompt?: string;
               semantic_facets?: string | null;
+              powers_json?: string | null;
               online_enabled?: number | null;
 	              flirt_enabled?: number | null;
 	              temperature?: number | null;
@@ -4740,7 +5446,8 @@ function buildRoutes(): RouteDefinition[] {
           botSystemPrompt = composeBotSystemPrompt(
             botName,
             bot.system_prompt,
-            bot.flirt_enabled === 1
+            bot.flirt_enabled === 1,
+            bot.powers_json
           );
           facetLines.push(...readBotSemanticFacetSummary(bot.semantic_facets));
           if (bot.online_enabled === 0 && effectiveProvider !== "local") {
@@ -4914,12 +5621,13 @@ function buildRoutes(): RouteDefinition[] {
       if (request.activeBotId) {
         const bot = db
           .prepare(
-            "SELECT name, system_prompt, flirt_enabled FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')"
+            "SELECT name, system_prompt, powers_json, flirt_enabled FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')"
           )
           .get(request.activeBotId, userId) as
           | {
               name?: string;
               system_prompt?: string;
+              powers_json?: string | null;
               flirt_enabled?: number | null;
             }
           | undefined;
@@ -4928,7 +5636,8 @@ function buildRoutes(): RouteDefinition[] {
           personaSystemPrompt = composeBotSystemPrompt(
             personaName,
             bot.system_prompt,
-            bot.flirt_enabled === 1
+            bot.flirt_enabled === 1,
+            bot.powers_json
           );
         }
       }
@@ -5164,12 +5873,13 @@ function buildRoutes(): RouteDefinition[] {
       if (runtimeBotId) {
         const bot = db
           .prepare(
-            "SELECT name, system_prompt, online_enabled, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')"
+            "SELECT name, system_prompt, powers_json, online_enabled, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')"
           )
           .get(runtimeBotId, userId) as
           | {
               name?: string;
               system_prompt?: string;
+              powers_json?: string | null;
               online_enabled?: number | null;
 	              flirt_enabled?: number | null;
 	              temperature?: number | null;
@@ -5188,7 +5898,8 @@ function buildRoutes(): RouteDefinition[] {
           botSystemPrompt = composeBotSystemPrompt(
             bot.name,
             bot.system_prompt,
-            bot.flirt_enabled === 1
+            bot.flirt_enabled === 1,
+            bot.powers_json
           );
           if (bot.online_enabled === 0 && effectiveProvider !== "local") {
             effectiveProvider = "local";
@@ -5842,6 +6553,78 @@ function buildRoutes(): RouteDefinition[] {
         }),
       });
     }),
+    route("POST", "/api/botcast/shows/:id/intro-audio/generate", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      if (user.preferred_provider === "local") {
+        throw new HttpError(
+          409,
+          "Switch to Online before creating an ElevenLabs Signal intro.",
+        );
+      }
+      const show = getBotcastShow(db, userId, ctx.params.id);
+      const userKey = decryptUserKey(userId);
+      const apiKey = getElevenLabsApiKeyForUser(userId, userKey) ?? config.elevenLabsApiKey;
+      if (!apiKey) {
+        throw new HttpError(409, "Add an ElevenLabs API key in Settings first.");
+      }
+      const compositionPlan = buildSignalElevenLabsMusicCompositionPlan({
+        showId: show.id,
+        accentColor: show.accentColor,
+      });
+      const controller = new AbortController();
+      const onClose = () => controller.abort();
+      ctx.req.once("close", onClose);
+      try {
+        const music = await requestSignalElevenLabsIntroMusic({
+          apiKey,
+          compositionPlan,
+          signal: controller.signal,
+        });
+        if (controller.signal.aborted) return;
+        const savedShow = storeBotcastShowIntroAudio(db, userId, show.id, {
+          model: SIGNAL_ELEVENLABS_MUSIC_MODEL,
+          prompt: JSON.stringify(compositionPlan),
+          contentType: music.contentType,
+          audioBytes: music.audioBytes,
+          durationMs: BOTCAST_ELEVENLABS_INTRO_DURATION_MS,
+        });
+        if (music.requestId) {
+          ctx.res.setHeader("x-prism-provider-request-id", music.requestId);
+        }
+        json(ctx.res, 201, { ok: true, show: savedShow });
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        if (error instanceof ElevenLabsMusicError) {
+          throw new HttpError(
+            error.status === 401 || error.status === 403
+              ? 401
+              : error.status === 429
+                ? 429
+                : 502,
+            error.message,
+          );
+        }
+        throw error;
+      } finally {
+        ctx.req.off("close", onClose);
+      }
+    }),
+    route("GET", "/api/botcast/shows/:id/intro-audio", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const intro = readBotcastShowIntroAudio(db, userId, ctx.params.id);
+      if (!intro) throw new HttpError(404, "Signal intro not found.");
+      ctx.res.statusCode = 200;
+      ctx.res.setHeader("content-type", intro.contentType);
+      ctx.res.setHeader("content-length", String(intro.audioBytes.byteLength));
+      ctx.res.setHeader("cache-control", "private, no-store");
+      ctx.res.end(intro.audioBytes);
+    }),
+    route("DELETE", "/api/botcast/shows/:id/intro-audio", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const show = deleteBotcastShowIntroAudio(db, userId, ctx.params.id);
+      json(ctx.res, 200, { ok: true, show });
+    }),
     route("PATCH", "/api/botcast/shows/:id", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
@@ -5887,6 +6670,9 @@ function buildRoutes(): RouteDefinition[] {
           : {}),
         ...(body.nightAtmosphereImageId !== undefined
           ? { nightAtmosphereImageId: body.nightAtmosphereImageId as string | null }
+          : {}),
+        ...(body.studioLayout !== undefined
+          ? { studioLayout: body.studioLayout as BotcastShowPatchRequest["studioLayout"] }
           : {}),
         ...(body.regenerateAtmosphere === true ? { regenerateAtmosphere: true } : {}),
         ...(body.regenerateDayAtmosphere === true
@@ -5974,6 +6760,10 @@ function buildRoutes(): RouteDefinition[] {
           (accountModel && !isDisabledModelChoice(accountModel)
             ? accountModel
             : null),
+        durationMinutes:
+          body.durationMinutes === null || body.durationMinutes === undefined
+            ? null
+            : Number(body.durationMinutes),
       });
       json(ctx.res, 201, { ok: true, episode });
     }),
@@ -5991,6 +6781,13 @@ function buildRoutes(): RouteDefinition[] {
       }
       json(ctx.res, 200, { ok: true });
     }),
+    route("POST", "/api/botcast/episodes/:id/end", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        episode: forceEndBotcastEpisode(db, userId, ctx.params.id),
+      });
+    }),
     route("POST", "/api/botcast/episodes/:id/advance", async (ctx) => {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
@@ -6005,7 +6802,8 @@ function buildRoutes(): RouteDefinition[] {
         cueKind === "ask_about" ||
         cueKind === "press_harder" ||
         cueKind === "move_on" ||
-        cueKind === "lighten_up"
+        cueKind === "lighten_up" ||
+        cueKind === "wrap_up"
           ? {
               kind: cueKind,
               ...(typeof cueRecord?.detail === "string"
@@ -7976,7 +8774,6 @@ function buildRoutes(): RouteDefinition[] {
             profile: {
               ...normalizeBotAudioVoiceProfileV1(boundary.profile),
               warmth: 0,
-              pace: 0,
               lilt: 0,
               bottishTone: 0.45,
             },
@@ -10863,7 +11660,11 @@ function buildRoutes(): RouteDefinition[] {
         }
         lines.push("## Coffee Session");
         lines.push("");
-        lines.push(`- Duration: ${conversation.coffee_duration_minutes ?? "legacy"} minute(s)`);
+        lines.push(
+          conversation.coffee_duration_minutes === null
+            ? "- Duration: Auto (open-ended)"
+            : `- Duration: ${conversation.coffee_duration_minutes} minute(s)`,
+        );
         lines.push(`- Coffee Group: ${conversation.coffee_group_id ?? "legacy / ungrouped"}`);
         lines.push(`- Preset: ${conversation.coffee_preset_id ?? "group defaults / legacy"}`);
         lines.push(`- Bots: ${botLabels.length > 0 ? botLabels.join(", ") : "unknown"}`);
@@ -11174,9 +11975,15 @@ async function dispatchRequest(
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
     const pathname = url.pathname;
     const method = req.method ?? "GET";
+    const slateArchiveUpload =
+      method === "POST" &&
+      (pathname === "/api/slate/archives/preview" ||
+        pathname === "/api/slate/archives/import");
     const body =
       method === "POST" || method === "PATCH" || method === "DELETE"
-        ? await readJsonBody(req)
+        ? slateArchiveUpload
+          ? await readBinaryBody(req, MAX_SLATE_ARCHIVE_BYTES)
+          : await readJsonBody(req)
         : {};
     const matchingRoute = routeTable.find(
       (candidate) => candidate.method === method && candidate.pattern.test(pathname)
@@ -11252,6 +12059,7 @@ export function createPrismRequestHandler(
 }
 
 let stopDiscovery: StopDiscovery | null = null;
+let slateContinuityWorker: SlateContinuityWorkerHandle | null = null;
 let shuttingDown = false;
 
 let server: ReturnType<typeof createServer> | null = null;
@@ -11262,6 +12070,16 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
   }
   shuttingDown = true;
   console.log(`Received ${signal}; shutting down Prism API.`);
+
+  if (slateContinuityWorker) {
+    await slateContinuityWorker.stop();
+    slateContinuityWorker = null;
+  }
+
+  if (slateRecoveryCoordinator) {
+    await slateRecoveryCoordinator.dispose({ flush: true });
+    slateRecoveryCoordinator = null;
+  }
 
   if (stopDiscovery) {
     await stopDiscovery();
@@ -11278,6 +12096,38 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
 }
 
 if (process.env.PRISM_API_DISABLE_AUTOSTART !== "1") {
+  slateRecoveryCoordinator = new SlateRecoveryCoordinator({
+    db,
+    rootDirectory: slateRecoveryRootDirectory(),
+    mirrorDirectoryForProject: () => slateRecoveryMirrorDirectory(),
+    onFailure(event) {
+      console.error(
+        `Slate recovery ${event.phase} failed for ${event.projectId}.`,
+        event.error,
+      );
+    },
+  });
+  slateContinuityWorker = startSlateContinuityWorker({
+    db,
+    processors: {
+      deterministic: processSlateContinuityJobDeterministically,
+      async localModel({ db: workerDb, job, modelInput }) {
+        const user = getUserRow(job.userId);
+        await processSlateContinuityAuxiliaryModelJob({
+          db: workerDb,
+          job,
+          modelInput,
+          provider: auxiliaryProviderFactoryOverride(
+            user.prism_default_llm_model,
+            dualOllamaWorkloadOptions(user),
+          ),
+        });
+      },
+    },
+    onCycleError(error) {
+      console.error("Slate Continuity worker cycle failed.", error);
+    },
+  });
   void purgeInactiveAccounts();
   setInterval(() => {
     void purgeInactiveAccounts();

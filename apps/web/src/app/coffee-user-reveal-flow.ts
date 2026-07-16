@@ -208,7 +208,7 @@ export function coffeeAutoplayForceTurnShouldRun(args: {
   )
     return false;
   if (args.requestInFlight || args.pendingReveal) return false;
-  if (args.sessionEndsAtMs === null || args.nowMs >= args.sessionEndsAtMs)
+  if (args.sessionEndsAtMs !== null && args.nowMs >= args.sessionEndsAtMs)
     return false;
   const deadlineGraceMs = Math.max(0, args.deadlineGraceMs ?? 1_500);
   const silenceRecoveryMs = Math.max(1_000, args.silenceRecoveryMs ?? 35_000);
@@ -247,7 +247,7 @@ export function coffeeAutoplayWatchdogShouldWake(args: {
   if (args.draft.trim().length > 0) return false;
   if (!coffeeArrivalAutoplayCanScheduleNow(args.rhythmState)) return false;
   if (args.loopScheduled || args.requestInFlight) return false;
-  return args.sessionEndsAtMs !== null && args.nowMs < args.sessionEndsAtMs;
+  return args.sessionEndsAtMs === null || args.nowMs < args.sessionEndsAtMs;
 }
 
 export function coffeeTableTalkAutoplayDeferralMs(args: {

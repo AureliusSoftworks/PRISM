@@ -694,6 +694,504 @@ describe("backup audio voice settings", () => {
   });
 });
 
+describe("backup Slate account data", () => {
+  it("round-trips the complete tenant-scoped Slate and Continuity graph", () => {
+    withBackupDatabase((db, userKey) => {
+      seedSlateBackupFixture(db, "user-1", "slate-one");
+
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.ok(snapshot.slate);
+      for (const [collection, rows] of Object.entries(snapshot.slate)) {
+        assert.equal(rows.length, 1, `${collection} should be present in the account backup`);
+        assert.equal("user_id" in rows[0]!, false, `${collection} must not carry a source tenant id`);
+      }
+
+      db.prepare("DELETE FROM slate_series WHERE id = ? AND user_id = ?").run(
+        "slate-one-series",
+        "user-1",
+      );
+      for (const table of SLATE_BACKUP_TEST_TABLES) {
+        const count = db
+          .prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE user_id = ?`)
+          .get("user-1") as { count: number };
+        assert.equal(count.count, 0, `${table} should be cleared before restore`);
+      }
+
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+
+      for (const table of SLATE_BACKUP_TEST_TABLES) {
+        const restored = db
+          .prepare(`SELECT COUNT(*) AS count, MIN(user_id) AS owner FROM ${table} WHERE user_id = ?`)
+          .get("user-1") as { count: number; owner: string };
+        assert.equal(restored.count, 1, `${table} should be restored`);
+        assert.equal(restored.owner, "user-1", `${table} should remain tenant scoped`);
+      }
+      const project = db
+        .prepare(
+          "SELECT series_id, manuscript, continuity_active_version FROM slate_projects WHERE id = ?",
+        )
+        .get("slate-one-project") as {
+        series_id: string;
+        manuscript: string;
+        continuity_active_version: string;
+      };
+      assert.deepEqual({ ...project }, {
+        series_id: "slate-one-series",
+        manuscript: "The restored manuscript.",
+        continuity_active_version: "0.0",
+      });
+      assert.equal(
+        (
+          db.prepare("SELECT prose FROM slate_sections WHERE id = ?").get("slate-one-section") as {
+            prose: string;
+          }
+        ).prose,
+        "The restored section.",
+      );
+      assert.equal(
+        (
+          db.prepare("SELECT status FROM slate_continuity_concerns WHERE id = ?").get(
+            "slate-one-concern",
+          ) as { status: string }
+        ).status,
+        "open",
+      );
+    });
+  });
+
+  it("rejects a Slate foreign reference owned by another tenant and rolls back", () => {
+    withBackupDatabase((db, userKey) => {
+      seedSlateBackupFixture(db, "user-1", "slate-one");
+      db.prepare(
+        `INSERT INTO users (
+          id, email, display_name, password_hash, password_salt,
+          wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag,
+          created_at, last_active_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        "user-2",
+        "user-2@example.com",
+        "User Two",
+        "hash",
+        "salt",
+        "cipher",
+        "iv",
+        "tag",
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-02T00:00:00.000Z",
+      );
+      db.prepare(
+        "INSERT INTO slate_series (id, user_id, title, description, created_at, updated_at) VALUES (?, ?, ?, '', ?, ?)",
+      ).run(
+        "tenant-two-series",
+        "user-2",
+        "Tenant Two Saga",
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-01T00:00:00.000Z",
+      );
+
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      snapshot.settings = { ...snapshot.settings!, theme: "dark" };
+      snapshot.slate!.projects[0]!.series_id = "tenant-two-series";
+
+      assert.throws(
+        () => importUserSnapshot(db, "user-1", snapshot, userKey),
+        /belongs to another user/i,
+      );
+      assert.equal(
+        (
+          db.prepare("SELECT title FROM slate_series WHERE id = ?").get("tenant-two-series") as {
+            title: string;
+          }
+        ).title,
+        "Tenant Two Saga",
+      );
+      assert.equal(
+        (db.prepare("SELECT theme FROM users WHERE id = ?").get("user-1") as { theme: string })
+          .theme,
+        "system",
+      );
+    });
+  });
+
+  it("continues to import pre-Slate version 1 account backups", () => {
+    withBackupDatabase((db, userKey) => {
+      seedSlateBackupFixture(db, "user-1", "slate-one");
+      const legacy = exportUserSnapshot(db, "user-1", userKey);
+      delete legacy.slate;
+
+      assert.doesNotThrow(() => importUserSnapshot(db, "user-1", legacy, userKey));
+      assert.equal(
+        (
+          db.prepare("SELECT COUNT(*) AS count FROM slate_projects WHERE user_id = ?").get(
+            "user-1",
+          ) as { count: number }
+        ).count,
+        1,
+      );
+    });
+  });
+});
+
+const SLATE_BACKUP_TEST_TABLES = [
+  "slate_series",
+  "slate_projects",
+  "slate_revisions",
+  "slate_versions",
+  "slate_sections",
+  "slate_section_versions",
+  "slate_manuscript_state",
+  "slate_continuity_sources",
+  "slate_continuity_entities",
+  "slate_continuity_aliases",
+  "slate_continuity_claims",
+  "slate_continuity_events",
+  "slate_continuity_relationships",
+  "slate_continuity_knowledge",
+  "slate_continuity_threads",
+  "slate_continuity_concerns",
+  "slate_continuity_generations",
+  "slate_continuity_jobs",
+] as const;
+
+function seedSlateBackupFixture(
+  db: ReturnType<typeof createDatabase>,
+  userId: string,
+  prefix: string,
+): void {
+  const now = "2026-07-16T12:00:00.000Z";
+  const seriesId = `${prefix}-series`;
+  const projectId = `${prefix}-project`;
+  const sectionId = `${prefix}-section`;
+  const sourceId = `${prefix}-source`;
+  const entityId = `${prefix}-entity`;
+  const claimId = `${prefix}-claim`;
+  const eventId = `${prefix}-event`;
+  const producerVersions = JSON.stringify({ schema: 1, extraction: 1 });
+
+  db.prepare(
+    "INSERT INTO slate_series (id, user_id, title, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+  ).run(seriesId, userId, "The Long Saga", "A restored saga.", now, now);
+  db.prepare(
+    `INSERT INTO slate_projects (
+      id, user_id, series_id, book_ordinal, title, spark, spark_wildcards_json,
+      premise, phase, structure_json, manuscript, direction,
+      continuity_active_version, continuity_target_version,
+      continuity_active_generation, continuity_upgrade_status, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    projectId,
+    userId,
+    seriesId,
+    1,
+    "Book One",
+    "A vanished crown returns.",
+    JSON.stringify({ realm: "Ashfall" }),
+    "A succession crisis.",
+    "draft",
+    "[]",
+    "The restored manuscript.",
+    "Continue quietly.",
+    "0.0",
+    "0.0",
+    0,
+    "current",
+    now,
+    now,
+  );
+  db.prepare(
+    `INSERT INTO slate_revisions (
+      id, project_id, user_id, action, scope, direction, original_text, proposed_text,
+      status, provider, model, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    `${prefix}-revision`,
+    projectId,
+    userId,
+    "rewrite",
+    "selection",
+    "Sharpen this.",
+    "Old line.",
+    "New line.",
+    "pending",
+    "local",
+    "llama3.2",
+    now,
+  );
+  db.prepare(
+    "INSERT INTO slate_versions (id, project_id, user_id, reason, structure_json, manuscript, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  ).run(`${prefix}-version`, projectId, userId, "checkpoint", "[]", "Before rewrite.", now);
+  db.prepare(
+    `INSERT INTO slate_sections (
+      id, project_id, series_id, user_id, kind, ordinal, title, summary, direction,
+      prose, locked_ranges_json, locked, status, revision, content_hash,
+      last_mutation_id, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    sectionId,
+    projectId,
+    seriesId,
+    userId,
+    "scene",
+    0,
+    "The Return",
+    "The crown appears.",
+    "Keep the witness uncertain.",
+    "The restored section.",
+    "[]",
+    0,
+    "drafted",
+    3,
+    "section-hash",
+    "mutation-3",
+    now,
+    now,
+  );
+  db.prepare(
+    `INSERT INTO slate_section_versions (
+      id, project_id, section_id, user_id, revision, reason, title, summary,
+      direction, prose, locked, status, content_hash, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    `${prefix}-section-version`,
+    projectId,
+    sectionId,
+    userId,
+    2,
+    "human_edit",
+    "The Return",
+    "The crown appears.",
+    "Keep the witness uncertain.",
+    "Earlier section text.",
+    0,
+    "drafted",
+    "section-version-hash",
+    now,
+  );
+  db.prepare(
+    `INSERT INTO slate_manuscript_state (
+      project_id, user_id, storage_version, structure_revision,
+      original_manuscript_hash, migrated_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(projectId, userId, 1, 4, "manuscript-hash", now, now);
+  db.prepare(
+    `INSERT INTO slate_continuity_sources (
+      id, user_id, series_id, project_id, section_id, scope_kind, kind,
+      source_revision, content, content_hash, authority, provider, model,
+      producer_versions_json, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    sourceId,
+    userId,
+    seriesId,
+    projectId,
+    sectionId,
+    "section",
+    "human_edit",
+    3,
+    "The crown is iron.",
+    "source-hash",
+    "authoritative",
+    "local",
+    "llama3.2",
+    producerVersions,
+    now,
+  );
+  db.prepare(
+    `INSERT INTO slate_continuity_entities (
+      id, user_id, series_id, kind, canonical_name, description, locked,
+      source_id, producer_versions_json, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    entityId,
+    userId,
+    seriesId,
+    "character",
+    "Mara",
+    "The reluctant witness.",
+    0,
+    sourceId,
+    producerVersions,
+    now,
+    now,
+  );
+  db.prepare(
+    `INSERT INTO slate_continuity_aliases (
+      id, user_id, series_id, entity_id, alias, normalized_alias, source_id, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(`${prefix}-alias`, userId, seriesId, entityId, "The Witness", "the witness", sourceId, now);
+  db.prepare(
+    `INSERT INTO slate_continuity_claims (
+      id, user_id, series_id, project_id, section_id, scope_kind,
+      subject_entity_id, predicate, value, epistemic_status, confidence,
+      anchors_json, source_id, producer_versions_json, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    claimId,
+    userId,
+    seriesId,
+    projectId,
+    sectionId,
+    "section",
+    entityId,
+    "saw",
+    "the iron crown",
+    "demonstrated",
+    0.98,
+    "[]",
+    sourceId,
+    producerVersions,
+    now,
+  );
+  db.prepare(
+    `INSERT INTO slate_continuity_events (
+      id, user_id, series_id, project_id, section_id, scope_kind, title,
+      description, chronology_key, participant_entity_ids_json,
+      location_entity_id, anchors_json, source_id, producer_versions_json, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    eventId,
+    userId,
+    seriesId,
+    projectId,
+    sectionId,
+    "section",
+    "The crown returns",
+    "Mara sees it.",
+    "book-1:scene-1",
+    JSON.stringify([entityId]),
+    entityId,
+    "[]",
+    sourceId,
+    producerVersions,
+    now,
+  );
+  db.prepare(
+    `INSERT INTO slate_continuity_relationships (
+      id, user_id, series_id, from_entity_id, to_entity_id, kind, state,
+      epistemic_status, anchors_json, source_id, producer_versions_json, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    `${prefix}-relationship`,
+    userId,
+    seriesId,
+    entityId,
+    entityId,
+    "self_trust",
+    "fractured",
+    "demonstrated",
+    "[]",
+    sourceId,
+    producerVersions,
+    now,
+  );
+  db.prepare(
+    `INSERT INTO slate_continuity_knowledge (
+      id, user_id, series_id, character_entity_id, claim_id, learned_event_id,
+      status, anchors_json, source_id, producer_versions_json, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    `${prefix}-knowledge`,
+    userId,
+    seriesId,
+    entityId,
+    claimId,
+    eventId,
+    "knows",
+    "[]",
+    sourceId,
+    producerVersions,
+    now,
+  );
+  db.prepare(
+    `INSERT INTO slate_continuity_threads (
+      id, user_id, series_id, project_id, section_id, scope_kind, label,
+      status, due_section_id, anchors_json, source_id, producer_versions_json,
+      created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    `${prefix}-thread`,
+    userId,
+    seriesId,
+    projectId,
+    sectionId,
+    "book",
+    "Who forged the crown?",
+    "open",
+    sectionId,
+    "[]",
+    sourceId,
+    producerVersions,
+    now,
+    now,
+  );
+  db.prepare(
+    `INSERT INTO slate_continuity_concerns (
+      id, user_id, series_id, project_id, section_id, scope_kind, kind,
+      severity, status, summary, explanation, claim_ids_json, anchors_json,
+      recommended_resolution, producer_versions_json, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    `${prefix}-concern`,
+    userId,
+    seriesId,
+    projectId,
+    sectionId,
+    "book",
+    "ambiguity",
+    "gentle",
+    "open",
+    "The crown's maker is unclear.",
+    "Two clues point in different directions.",
+    JSON.stringify([claimId]),
+    "[]",
+    "Choose which clue is true.",
+    producerVersions,
+    now,
+  );
+  db.prepare(
+    `INSERT INTO slate_continuity_generations (
+      id, user_id, project_id, generation, status, target_version,
+      source_fingerprint, comparison_summary, producer_versions_json,
+      created_at, completed_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    `${prefix}-generation`,
+    userId,
+    projectId,
+    1,
+    "active",
+    "0.0",
+    "fingerprint",
+    "No material drift.",
+    producerVersions,
+    now,
+    now,
+  );
+  db.prepare(
+    `INSERT INTO slate_continuity_jobs (
+      id, user_id, series_id, project_id, section_id, source_id,
+      source_revision, kind, status, attempts, input_fingerprint,
+      available_at, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    `${prefix}-job`,
+    userId,
+    seriesId,
+    projectId,
+    sectionId,
+    sourceId,
+    3,
+    "extract",
+    "completed",
+    1,
+    "job-fingerprint",
+    now,
+    now,
+    now,
+  );
+}
+
 function withBackupDatabase(
   run: (db: ReturnType<typeof createDatabase>, userKey: Buffer) => void
 ): void {

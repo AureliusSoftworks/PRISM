@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import {
   normalizePromptWildcardRunMetadata,
+  transformSlateLockedRangesForTextEdit,
   type PromptWildcardRunMetadata,
   type SlateCharacter,
   type SlateLockedRange,
@@ -24,6 +25,21 @@ import {
   type PromptBotWildcardCandidate,
 } from "./prompt-wildcards.ts";
 import { randomId } from "./security.ts";
+import { compileSlateDraftContinuityContext } from "./slate-continuity-processing.ts";
+import {
+  applyAcceptedSlateRevisionWithinTransaction,
+  assertSlateRevisionTargetUnlocked,
+  ensureSlateProjectSections,
+  getSlateProjectSection,
+  listSlateProjectSections,
+  replaceSlateSectionWithAiProse,
+  replaceSlateProjectStructure,
+  replaceSlateProjectStructureWithinTransaction,
+  resolveSlateSeriesPlacementForNewProject,
+  SlateSectionAiWriteConflictError,
+  slateSectionProjectionSpans,
+  synchronizeSlateStructureSections,
+} from "./slate-continuity.ts";
 
 const SLATE_TITLE_MAX = 180;
 const SLATE_SPARK_MAX = 8_000;
@@ -36,6 +52,8 @@ const SLATE_THREAD_MAX = 160;
 interface SlateProjectRow {
   id: string;
   user_id: string;
+  series_id: string;
+  book_ordinal: number;
   title: string;
   spark: string;
   spark_wildcards_json: string;
@@ -80,10 +98,59 @@ interface SlateVersionRow {
   created_at: string;
 }
 
+interface SlateShapeSectionStateRow {
+  id: string;
+  parent_section_id: string | null;
+  structure_item_id: string | null;
+  kind: string;
+  ordinal: number;
+  title: string;
+  summary: string;
+  direction: string;
+  prose: string;
+  locked_ranges_json: string;
+  locked: number;
+  status: string;
+  revision: number;
+  content_hash: string;
+  updated_at: string;
+}
+
 export interface SlateAiOperationInput {
   provider: LlmProvider;
   providerName: ProviderName;
   model: string;
+}
+
+export type SlateShapeWriteConflictReason =
+  | "changed"
+  | "locked"
+  | "structure_changed";
+
+/** A recoverable refusal to replace newer writer-owned Shape state. */
+export class SlateShapeWriteConflictError extends Error {
+  readonly code = "slate_shape_write_conflict";
+  readonly projectId: string;
+  readonly currentUpdatedAt: string | null;
+  readonly reason: SlateShapeWriteConflictReason;
+
+  constructor(
+    projectId: string,
+    currentUpdatedAt: string | null,
+    reason: SlateShapeWriteConflictReason,
+  ) {
+    const message =
+      reason === "locked"
+        ? "Slate found material the writer locked, so the story plan was left untouched. Unlock it before reshaping."
+        : reason === "structure_changed"
+          ? "The story plan changed while Slate was shaping it. The newer writer structure was kept."
+          : "The project changed while Slate was shaping it. The newer writer work was kept.";
+    super(message);
+    this.name = "SlateShapeWriteConflictError";
+    this.projectId = projectId;
+    this.currentUpdatedAt = currentUpdatedAt;
+    this.reason = reason;
+  }
 }
 
 export interface SlateAccountDefaults {
@@ -272,6 +339,72 @@ function storedLockedRanges(row: SlateProjectRow): SlateLockedRange[] {
   }
 }
 
+function slateShapeSectionStateRows(
+  db: DatabaseSync,
+  userId: string,
+  projectId: string,
+): SlateShapeSectionStateRow[] {
+  return db.prepare(
+    `SELECT id, parent_section_id, structure_item_id, kind, ordinal, title,
+            summary, direction, prose, locked_ranges_json, locked, status,
+            revision, content_hash, updated_at
+       FROM slate_sections
+      WHERE project_id = ? AND user_id = ?
+      ORDER BY ordinal ASC, id ASC`,
+  ).all(projectId, userId) as unknown as SlateShapeSectionStateRow[];
+}
+
+function slateShapeProjectStateToken(row: SlateProjectRow): string {
+  return JSON.stringify([
+    row.series_id,
+    row.book_ordinal,
+    row.title,
+    row.spark,
+    row.spark_wildcards_json,
+    row.premise,
+    row.voice,
+    row.non_negotiables_json,
+    row.phase,
+    row.structure_json,
+    row.characters_json,
+    row.unresolved_threads_json,
+    row.manuscript,
+    row.direction,
+    row.locked_ranges_json,
+    row.last_provider,
+    row.last_model,
+    row.updated_at,
+  ]);
+}
+
+function slateShapeSectionStateToken(
+  rows: readonly SlateShapeSectionStateRow[],
+): string {
+  return JSON.stringify(rows);
+}
+
+function storedLockPayloadHasRanges(raw: string): boolean {
+  const parsed = parseJson(raw, null);
+  return !Array.isArray(parsed) || parsed.length > 0;
+}
+
+function slateShapeStateHasLocks(
+  project: SlateProjectRow,
+  sections: readonly SlateShapeSectionStateRow[],
+): boolean {
+  return (
+    storedStructure(project).some((item) => item.locked) ||
+    storedCharacters(project).some((character) => character.locked) ||
+    storedThreads(project).some((thread) => thread.locked) ||
+    storedLockPayloadHasRanges(project.locked_ranges_json) ||
+    sections.some(
+      (section) =>
+        section.locked === 1 ||
+        storedLockPayloadHasRanges(section.locked_ranges_json),
+    )
+  );
+}
+
 function normalizedSparkWildcards(
   value: unknown,
   resolvedSpark: string,
@@ -377,6 +510,8 @@ function revisionsForProject(db: DatabaseSync, userId: string, projectId: string
 function summaryFromRow(row: SlateProjectRow): SlateProjectSummary {
   return {
     id: row.id,
+    seriesId: row.series_id,
+    bookOrdinal: row.book_ordinal,
     title: row.title,
     spark: row.spark,
     premise: row.premise,
@@ -431,18 +566,47 @@ export function getSlateProject(db: DatabaseSync, userId: string, projectId: str
 export function createSlateProject(
   db: DatabaseSync,
   userId: string,
-  input: { title: unknown; spark: unknown; sparkWildcards?: unknown },
+  input: {
+    title: unknown;
+    spark: unknown;
+    sparkWildcards?: unknown;
+    seriesId?: unknown;
+  },
 ): SlateProjectDetail {
   const id = randomId();
   const now = new Date().toISOString();
   const title = boundedString(input.title, "Project title", SLATE_TITLE_MAX, { required: true });
   const spark = boundedString(input.spark, "Creative spark", SLATE_SPARK_MAX, { required: true });
   const sparkWildcards = normalizedSparkWildcards(input.sparkWildcards, spark);
-  db.prepare(
-    `INSERT INTO slate_projects
-      (id, user_id, title, spark, spark_wildcards_json, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-  ).run(id, userId, title, spark, sparkWildcards ? JSON.stringify(sparkWildcards) : "", now, now);
+  db.exec("BEGIN IMMEDIATE TRANSACTION");
+  try {
+    const placement = resolveSlateSeriesPlacementForNewProject(
+      db,
+      userId,
+      title,
+      input.seriesId,
+    );
+    db.prepare(
+      `INSERT INTO slate_projects
+        (id, user_id, series_id, book_ordinal, title, spark,
+         spark_wildcards_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      id,
+      userId,
+      placement.seriesId,
+      placement.ordinal,
+      title,
+      spark,
+      sparkWildcards ? JSON.stringify(sparkWildcards) : "",
+      now,
+      now,
+    );
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
   return getSlateProject(db, userId, id);
 }
 
@@ -459,6 +623,7 @@ export function updateSlateProject(
   const values: Array<string | number | null> = [];
   let nextManuscript = current.manuscript;
   let nextSpark = current.spark;
+  let nextStructure: SlateStructureItem[] | null = null;
 
   const assign = (column: string, value: string): void => {
     assignments.push(`${column} = ?`);
@@ -479,7 +644,9 @@ export function updateSlateProject(
   if (Object.hasOwn(patch, "direction")) assign("direction", boundedString(patch.direction, "Direction", SLATE_DIRECTION_MAX));
   if (Object.hasOwn(patch, "phase")) assign("phase", phaseValue(patch.phase));
   if (Object.hasOwn(patch, "nonNegotiables")) assign("non_negotiables_json", JSON.stringify(stringArray(patch.nonNegotiables, "Non-negotiables", 60)));
-  if (Object.hasOwn(patch, "structure")) assign("structure_json", JSON.stringify(normalizeStructure(patch.structure)));
+  if (Object.hasOwn(patch, "structure")) {
+    nextStructure = normalizeStructure(patch.structure);
+  }
   if (Object.hasOwn(patch, "characters")) assign("characters_json", JSON.stringify(normalizeCharacters(patch.characters)));
   if (Object.hasOwn(patch, "unresolvedThreads")) assign("unresolved_threads_json", JSON.stringify(normalizeThreads(patch.unresolvedThreads)));
   if (Object.hasOwn(patch, "manuscript")) {
@@ -489,18 +656,50 @@ export function updateSlateProject(
     assign("manuscript", nextManuscript);
   }
   if (Object.hasOwn(patch, "lockedRanges")) {
-    assign("locked_ranges_json", JSON.stringify(normalizeLockedRanges(patch.lockedRanges, nextManuscript.length)));
-  } else if (nextManuscript.length < current.manuscript.length) {
-    const remaining = storedLockedRanges(current).filter((range) => range.end <= nextManuscript.length);
-    assign("locked_ranges_json", JSON.stringify(remaining));
+    const currentLockedRanges = storedLockedRanges(current);
+    let suppliedCurrentRanges: SlateLockedRange[] | null = null;
+    try {
+      suppliedCurrentRanges = normalizeLockedRanges(
+        patch.lockedRanges,
+        current.manuscript.length,
+      );
+    } catch {
+      // It may be an intentional range authored against the new manuscript.
+    }
+    const lockedRanges =
+      current.manuscript !== nextManuscript &&
+      JSON.stringify(suppliedCurrentRanges) === JSON.stringify(currentLockedRanges)
+        ? transformSlateLockedRangesForTextEdit(
+            current.manuscript,
+            nextManuscript,
+            currentLockedRanges,
+          )
+        : normalizeLockedRanges(patch.lockedRanges, nextManuscript.length);
+    assign("locked_ranges_json", JSON.stringify(lockedRanges));
+  } else if (nextManuscript !== current.manuscript) {
+    assign(
+      "locked_ranges_json",
+      JSON.stringify(
+        transformSlateLockedRangesForTextEdit(
+          current.manuscript,
+          nextManuscript,
+          storedLockedRanges(current),
+        ),
+      ),
+    );
   }
 
-  if (assignments.length === 0) return detailFromRow(db, current);
-  assignments.push("updated_at = ?");
-  values.push(new Date().toISOString(), projectId, userId);
-  db.prepare(
-    `UPDATE slate_projects SET ${assignments.join(", ")} WHERE id = ? AND user_id = ?`,
-  ).run(...values);
+  if (assignments.length === 0 && !nextStructure) return detailFromRow(db, current);
+  if (assignments.length > 0) {
+    assignments.push("updated_at = ?");
+    values.push(new Date().toISOString(), projectId, userId);
+    db.prepare(
+      `UPDATE slate_projects SET ${assignments.join(", ")} WHERE id = ? AND user_id = ?`,
+    ).run(...values);
+  }
+  if (nextStructure) {
+    replaceSlateProjectStructure(db, userId, projectId, nextStructure);
+  }
   return getSlateProject(db, userId, projectId);
 }
 
@@ -687,7 +886,20 @@ export async function generateSlateShape(
   projectId: string,
   ai: SlateAiOperationInput,
 ): Promise<SlateProjectDetail> {
-  const project = getSlateProject(db, userId, projectId);
+  // Section migration and its hierarchy backfill must settle before capturing
+  // the Shape compare-and-swap token. No migration is attempted inside the
+  // later atomic commit.
+  ensureSlateProjectSections(db, userId, projectId);
+  const projectSnapshot = projectRow(db, userId, projectId);
+  const sectionSnapshot = slateShapeSectionStateRows(db, userId, projectId);
+  if (slateShapeStateHasLocks(projectSnapshot, sectionSnapshot)) {
+    throw new SlateShapeWriteConflictError(
+      projectId,
+      projectSnapshot.updated_at,
+      "locked",
+    );
+  }
+  const project = detailFromRow(db, projectSnapshot);
   const raw = await ai.provider.generateResponse(
     [
       {
@@ -716,25 +928,70 @@ export async function generateSlateShape(
   );
   const shape = generatedShape(parseGeneratedJson(raw));
   const now = new Date().toISOString();
-  db.prepare(
-    `UPDATE slate_projects
-        SET premise = ?, voice = ?, non_negotiables_json = ?, structure_json = ?,
-            characters_json = ?, unresolved_threads_json = ?, last_provider = ?,
-            last_model = ?, phase = 'shape', updated_at = ?
-      WHERE id = ? AND user_id = ?`,
-  ).run(
-    shape.premise,
-    shape.voice,
-    JSON.stringify(shape.nonNegotiables),
-    JSON.stringify(shape.structure),
-    JSON.stringify(shape.characters),
-    JSON.stringify(shape.unresolvedThreads),
-    ai.providerName,
-    ai.model,
-    now,
-    projectId,
-    userId,
-  );
+  db.exec("BEGIN IMMEDIATE TRANSACTION");
+  try {
+    const current = db.prepare(
+      "SELECT * FROM slate_projects WHERE id = ? AND user_id = ?",
+    ).get(projectId, userId) as SlateProjectRow | undefined;
+    if (!current) {
+      throw new SlateShapeWriteConflictError(projectId, null, "changed");
+    }
+    const currentSections = slateShapeSectionStateRows(db, userId, projectId);
+    const projectChanged =
+      slateShapeProjectStateToken(current) !==
+      slateShapeProjectStateToken(projectSnapshot);
+    const sectionsChanged =
+      slateShapeSectionStateToken(currentSections) !==
+      slateShapeSectionStateToken(sectionSnapshot);
+    if (projectChanged || sectionsChanged) {
+      const reason: SlateShapeWriteConflictReason = slateShapeStateHasLocks(
+        current,
+        currentSections,
+      )
+        ? "locked"
+        : current.structure_json !== projectSnapshot.structure_json || sectionsChanged
+          ? "structure_changed"
+          : "changed";
+      throw new SlateShapeWriteConflictError(
+        projectId,
+        current.updated_at,
+        reason,
+      );
+    }
+
+    const projectUpdate = db.prepare(
+      `UPDATE slate_projects
+          SET premise = ?, voice = ?, non_negotiables_json = ?,
+              characters_json = ?, unresolved_threads_json = ?, last_provider = ?,
+              last_model = ?, phase = 'shape', updated_at = ?
+        WHERE id = ? AND user_id = ?`,
+    ).run(
+      shape.premise,
+      shape.voice,
+      JSON.stringify(shape.nonNegotiables),
+      JSON.stringify(shape.characters),
+      JSON.stringify(shape.unresolvedThreads),
+      ai.providerName,
+      ai.model,
+      now,
+      projectId,
+      userId,
+    );
+    if (projectUpdate.changes !== 1) {
+      throw new SlateShapeWriteConflictError(projectId, null, "changed");
+    }
+    replaceSlateProjectStructureWithinTransaction(
+      db,
+      userId,
+      projectId,
+      shape.structure,
+      now,
+    );
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
   return getSlateProject(db, userId, projectId);
 }
 
@@ -748,6 +1005,16 @@ function structureContext(structure: readonly SlateStructureItem[]): string {
   return structure.map((item, index) => `${index + 1}. [${item.kind}] ${item.title}: ${item.summary}${item.locked ? " (LOCKED)" : ""}`).join("\n");
 }
 
+function focusedStructureContext(
+  structure: readonly SlateStructureItem[],
+  structureItemId: string,
+): string {
+  const index = structure.findIndex((item) => item.id === structureItemId);
+  if (index < 0) return structureContext(structure.slice(0, 5));
+  const start = Math.max(0, index - 2);
+  return structureContext(structure.slice(start, index + 3));
+}
+
 export async function draftSlateStructureItem(
   db: DatabaseSync,
   userId: string,
@@ -756,13 +1023,48 @@ export async function draftSlateStructureItem(
   direction: unknown,
   ai: SlateAiOperationInput,
 ): Promise<SlateProjectDetail> {
-  const project = getSlateProject(db, userId, projectId);
+  synchronizeSlateStructureSections(db, userId, projectId);
+  const projectSnapshot = projectRow(db, userId, projectId);
+  const project = detailFromRow(db, projectSnapshot);
   const item = project.structure.find((candidate) => candidate.id === structureItemId);
   if (!item) throw new Error("Slate structure item not found.");
   if (item.status === "drafted") {
     throw new Error("This section is already drafted. Use Refine to propose a replacement.");
   }
+  const sectionSummary = listSlateProjectSections(db, userId, projectId).find(
+    (section) => section.structureItemId === structureItemId,
+  );
+  if (!sectionSummary) throw new Error("Slate section not found.");
+  const sectionSnapshot = getSlateProjectSection(
+    db,
+    userId,
+    projectId,
+    sectionSummary.id,
+  );
+  if (item.locked || sectionSnapshot.locked || sectionSnapshot.lockedRanges.length > 0) {
+    throw new SlateSectionAiWriteConflictError(
+      sectionSnapshot.id,
+      sectionSnapshot.revision,
+      sectionSnapshot.contentHash,
+      "locked",
+    );
+  }
+  if (sectionSnapshot.prose.length > 0) {
+    throw new SlateSectionAiWriteConflictError(
+      sectionSnapshot.id,
+      sectionSnapshot.revision,
+      sectionSnapshot.contentHash,
+      "contains_prose",
+    );
+  }
   const focusedDirection = boundedString(direction, "Draft direction", SLATE_DIRECTION_MAX);
+  const continuity = compileSlateDraftContinuityContext(
+    db,
+    userId,
+    projectId,
+    item.id,
+    focusedDirection,
+  );
   const raw = await ai.provider.generateResponse(
     [
       {
@@ -776,13 +1078,14 @@ export async function draftSlateStructureItem(
           `Premise: ${project.premise || project.spark}`,
           `Voice: ${project.voice || "Choose a voice that serves the premise."}`,
           `Non-negotiables: ${project.nonNegotiables.join("; ") || "None stated."}`,
-          `Characters: ${project.characters.map((character) => `${character.name} — ${character.role}; voice: ${character.voice}`).join(" | ") || "Infer only what the scene needs."}`,
-          "Approved structure:",
-          structureContext(project.structure),
+          `Characters: ${project.characters.slice(0, 16).map((character) => `${character.name} — ${character.role}; voice: ${character.voice}`).join(" | ") || "Infer only what the scene needs."}`,
+          "Approved nearby structure:",
+          focusedStructureContext(project.structure, item.id),
+          "Private Continuity brief:",
+          continuity.renderedBrief,
           `Write now: ${item.kind} "${item.title}" — ${item.summary}`,
           `Section direction: ${item.direction || "Follow the approved summary."}`,
           `Writer's immediate direction: ${focusedDirection || project.direction || "Draft the section cleanly and move the story."}`,
-          `Existing manuscript tail for continuity:\n${project.manuscript.slice(-12_000) || "(This is the opening.)"}`,
           "Return only the new prose for this section. Do not repeat the section title.",
         ].join("\n\n"),
       },
@@ -795,18 +1098,23 @@ export async function draftSlateStructureItem(
     },
   );
   const prose = cleanGeneratedProse(raw);
-  const separator = project.manuscript.trim() ? "\n\n\n" : "";
-  const manuscript = `${project.manuscript.trimEnd()}${separator}${item.title}\n\n${prose}`;
-  if (manuscript.length > SLATE_MANUSCRIPT_MAX) throw new Error("This draft would exceed Slate V1's manuscript size limit.");
-  const structure = project.structure.map((candidate) =>
-    candidate.id === item.id ? { ...candidate, status: "drafted" as const } : candidate,
+  replaceSlateSectionWithAiProse(
+    db,
+    userId,
+    projectId,
+    item.id,
+    {
+      prose,
+      status: "drafted",
+      sourceKind: "ai_draft",
+      provider: ai.providerName,
+      model: ai.model,
+      expectedSectionId: sectionSnapshot.id,
+      expectedRevision: sectionSnapshot.revision,
+      expectedContentHash: sectionSnapshot.contentHash,
+      expectedStructureJson: projectSnapshot.structure_json,
+    },
   );
-  db.prepare(
-    `UPDATE slate_projects
-        SET manuscript = ?, structure_json = ?, phase = 'draft', last_provider = ?,
-            last_model = ?, updated_at = ?
-      WHERE id = ? AND user_id = ?`,
-  ).run(manuscript, JSON.stringify(structure), ai.providerName, ai.model, new Date().toISOString(), projectId, userId);
   return getSlateProject(db, userId, projectId);
 }
 
@@ -874,11 +1182,31 @@ export async function proposeSlateRevision(
   if (!isRecord(rawRequest)) throw new Error("Slate revision request must be an object.");
   const request = rawRequest as unknown as SlateRevisionRequest;
   const action = revisionAction(request.action);
+  ensureSlateProjectSections(db, userId, projectId);
   const project = getSlateProject(db, userId, projectId);
   if (project.revisions.some((revision) => revision.status === "pending")) {
     throw new Error("Accept or reject the current Slate revision before requesting another.");
   }
   const target = revisionTarget(project, request);
+  const projectionSpans = slateSectionProjectionSpans(db, userId, projectId);
+  if (target.scope === "project" && projectionSpans.length > 1) {
+    throw new Error(
+      "Project-wide revision spans multiple sections. Refine one section or selection at a time.",
+    );
+  }
+  if (
+    target.scope === "selection" &&
+    !projectionSpans.some(
+      (span) => target.start! >= span.bodyStart && target.end! <= span.bodyEnd,
+    )
+  ) {
+    throw new Error("Select prose within one section before requesting a revision.");
+  }
+  assertSlateRevisionTargetUnlocked(db, userId, projectId, {
+    structureItemId: target.structureItemId,
+    start: target.start,
+    end: target.end,
+  });
   const direction = boundedString(request.direction, "Revision direction", SLATE_DIRECTION_MAX);
   const raw = await ai.provider.generateResponse(
     [
@@ -969,6 +1297,7 @@ export function acceptSlateRevision(
   revisionId: string,
 ): SlateProjectDetail {
   const revision = pendingRevisionRow(db, userId, projectId, revisionId);
+  ensureSlateProjectSections(db, userId, projectId);
   const project = projectRow(db, userId, projectId);
   const currentLockedRanges = storedLockedRanges(project);
   let manuscript: string;
@@ -1001,11 +1330,10 @@ export function acceptSlateRevision(
       throw new Error("The revised passage changed after this proposal. Request a fresh revision so your edits stay authoritative.");
     }
     manuscript = `${project.manuscript.slice(0, selectionStart)}${revision.proposed_text}${project.manuscript.slice(selectionEnd)}`;
-    const delta = revision.proposed_text.length - (selectionEnd - selectionStart);
-    lockedRanges = currentLockedRanges.map((range) =>
-      range.start >= selectionEnd
-        ? { ...range, start: range.start + delta, end: range.end + delta }
-        : range,
+    lockedRanges = transformSlateLockedRangesForTextEdit(
+      project.manuscript,
+      manuscript,
+      currentLockedRanges,
     );
   }
   if (manuscript.length > SLATE_MANUSCRIPT_MAX) throw new Error("This revision would exceed Slate V1's manuscript size limit.");
@@ -1017,6 +1345,19 @@ export function acceptSlateRevision(
         (id, project_id, user_id, reason, structure_json, manuscript, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
     ).run(randomId(), projectId, userId, `Before ${revision.action} revision`, project.structure_json, project.manuscript, now);
+    manuscript = applyAcceptedSlateRevisionWithinTransaction(db, {
+      userId,
+      projectId,
+      structureItemId: revision.structure_item_id,
+      selectionStart: revision.selection_start,
+      selectionEnd: revision.selection_end,
+      originalText: revision.original_text,
+      proposedText: revision.proposed_text,
+      provider: providerValue(revision.provider) ?? "local",
+      model: revision.model,
+      reason: `Before ${revision.action} revision`,
+      now,
+    });
     db.prepare(
       `UPDATE slate_projects
           SET manuscript = ?, locked_ranges_json = ?, phase = 'refine', updated_at = ?

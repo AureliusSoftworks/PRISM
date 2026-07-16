@@ -8,12 +8,16 @@ import {
   STORY_ITEM_GLYPH_CATEGORIES,
   STORY_LOCATION_COUNT_MAX,
   STORY_LOCATION_COUNT_MIN,
+  botPowerObserverCueLinesV1,
+  botPowerSelfCueLinesV1,
+  buildBotPowersPromptBlock,
   STORY_SCENE_COUNT_MIN,
   applyStoryChoice,
   applyStoryItemPickup,
   applyStoryTravel,
   createInitialStoryProgress,
   createInitialStoryTranscript,
+  parseStoredBotPowersV1,
   validateStoryEpisodeManifest,
   type StoryEpisodeManifest,
   type StorySessionDetail,
@@ -22,6 +26,7 @@ import {
   type StorySessionSummary,
   type StoryTranscriptEntry,
   type ReasoningEffort,
+  type BotPowerV1,
 } from "@localai/shared";
 import { randomId } from "./security.ts";
 import type { GenerateOptions, LlmProvider, ProviderName } from "./providers.ts";
@@ -30,6 +35,7 @@ export interface StoryBotProfile {
   id: string;
   name: string;
   systemPrompt: string;
+  powers?: BotPowerV1[];
   color: string | null;
   glyph: string | null;
   localModel: string | null;
@@ -412,7 +418,7 @@ export function loadStoryBotProfiles(
   const placeholders = botIds.map(() => "?").join(", ");
   const rows = db
     .prepare(
-      `SELECT id, name, system_prompt, color, glyph, model, local_model, online_model,
+      `SELECT id, name, system_prompt, powers_json, color, glyph, model, local_model, online_model,
               temperature, max_tokens, online_enabled, chat_enabled
          FROM bots
         WHERE user_id = ? AND id IN (${placeholders})`
@@ -421,6 +427,7 @@ export function loadStoryBotProfiles(
     id: string;
     name: string;
     system_prompt: string | null;
+    powers_json: string | null;
     color: string | null;
     glyph: string | null;
     model: string | null;
@@ -441,6 +448,7 @@ export function loadStoryBotProfiles(
       id: row.id,
       name: row.name,
       systemPrompt: row.system_prompt ?? "",
+      powers: parseStoredBotPowersV1(row.powers_json),
       color: row.color,
       glyph: row.glyph,
       localModel: row.local_model,
@@ -1200,9 +1208,13 @@ function validateEpisodeNarrativeQuality(episode: StoryEpisodeManifest): void {
 
 function storyGenerationPrompt(args: StoryGenerationInput): string {
   const botLines = args.bots
-    .map((bot) =>
-      `- ${bot.id}: ${bot.name}. Persona: ${(bot.systemPrompt || "A distinct PRISM actor.").slice(0, 900)}`
-    )
+    .map((bot) => {
+      const powers = buildBotPowersPromptBlock([
+        ...botPowerSelfCueLinesV1(bot.powers),
+        ...botPowerObserverCueLinesV1(bot.name, bot.powers),
+      ]).replace(/\s+/gu, " ").trim();
+      return `- ${bot.id}: ${bot.name}. Persona: ${(bot.systemPrompt || "A distinct PRISM actor.").slice(0, 900)}${powers ? ` ${powers}` : ""}`;
+    })
     .join("\n");
   const premise = args.premise?.trim()
     ? args.premise.trim()

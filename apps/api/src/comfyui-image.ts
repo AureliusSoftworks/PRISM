@@ -20,6 +20,10 @@ import {
   MODEL_TIMEOUT_USER_MESSAGE,
   MODEL_WARMUP_USER_MESSAGE,
 } from "./image-warmup-heuristics.ts";
+import {
+  isPrivateNetworkHttpUrl,
+  requirePrivateNetworkHttpUrl,
+} from "./local-network-host.ts";
 
 const POLL_INTERVAL_MS = 400;
 
@@ -90,6 +94,7 @@ export function parseComfyUiDimensions(size: string): { width: number; height: n
  * Reads checkpoint filenames from ComfyUI `/object_info` (see `extractCheckpointNames`).
  */
 export async function fetchComfyUiCheckpointNames(baseUrl: string): Promise<string[]> {
+  if (!isPrivateNetworkHttpUrl(baseUrl)) return [];
   const base = baseUrl.replace(/\/$/, "");
   let response: Response;
   try {
@@ -180,6 +185,7 @@ export function extractCheckpointNames(objectInfo: unknown): string[] {
 }
 
 export async function probeComfyUiHostReachable(baseUrl: string): Promise<boolean> {
+  if (!isPrivateNetworkHttpUrl(baseUrl)) return false;
   const base = baseUrl.replace(/\/$/, "");
   try {
     const response = await fetch(`${base}/object_info`, {
@@ -237,7 +243,7 @@ async function comfyUiTryFetch(
   pathAndQuery: string,
   signal?: AbortSignal
 ): Promise<Response | null> {
-  const b = base.replace(/\/$/, "");
+  const b = requirePrivateNetworkHttpUrl(base.replace(/\/$/, ""), "ComfyUI host");
   const p = pathAndQuery.startsWith("/") ? pathAndQuery : `/${pathAndQuery}`;
   const candidates = [`${b}${p}`];
   if (!p.startsWith("/api/")) {
@@ -966,7 +972,10 @@ export async function generateImageWithComfyUiRegisteredWorkflow(options: {
   /** When set (e.g. `comfyui-remote:…`), overrides the default `comfyui-workflow:<registration.id>` tag. */
   modelUsedTag?: string;
 }): Promise<{ imageBytes: Buffer; modelUsed: string }> {
-  const base = options.comfyUiHost.replace(/\/$/, "");
+  const base = requirePrivateNetworkHttpUrl(
+    options.comfyUiHost.replace(/\/$/, ""),
+    "ComfyUI host",
+  );
   const { width, height } = parseComfyUiDimensions(options.size);
   const wf = options.registration.workflow;
   if (!wf || typeof wf !== "object") {
@@ -1008,7 +1017,10 @@ export async function generateImageWithComfyUi(options: {
   size: string;
   signal?: AbortSignal;
 }): Promise<{ imageBytes: Buffer; modelUsed: string }> {
-  const base = options.comfyUiHost.replace(/\/$/, "");
+  const base = requirePrivateNetworkHttpUrl(
+    options.comfyUiHost.replace(/\/$/, ""),
+    "ComfyUI host",
+  );
   const { width, height } = parseComfyUiDimensions(options.size);
   const kind = comfyWorkflowKindFromCheckpoint(options.checkpointName);
   const negative = options.negativePrompt?.trim() ?? "";

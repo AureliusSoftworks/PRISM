@@ -8,6 +8,7 @@ import sharp from "sharp";
 import { getAppConfig } from "@localai/config";
 import {
   COFFEE_TOPIC_MAX_LENGTH,
+  botPowerSourceHashV1,
   normalizeBotAudioVoiceProfileV1,
 } from "@localai/shared";
 import {
@@ -1373,6 +1374,63 @@ describe("API request integration", () => {
           !/api\.openai\.com|api\.anthropic\.com|api\.elevenlabs\.io|qdrant/i.test(input)
       )
     );
+  });
+
+  it("sends ready bot Powers through the real Chat and Zen route", async () => {
+    const client = createClient();
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({ username: "powered-chat@example.com", password: "powered-chat-password" })
+    );
+    assert.equal(register.status, 201);
+    const name = "Respirator";
+    const intent = "Mechanical breathing punctuates each answer.";
+    const created = await client.request(
+      "/api/bots",
+      jsonInit({
+        name: "Powered Vader",
+        powers: [{
+          version: 1,
+          id: "respirator",
+          name,
+          intent,
+          enabled: true,
+          compileStatus: "ready",
+          compiled: {
+            version: 1,
+            sourceHash: botPowerSourceHashV1(name, intent),
+            selfCue: "Breathe mechanically during each answer.",
+            observerCue: "Others hear a mechanical breath.",
+            effects: [],
+            ruleLabels: ["Mechanical breathing"],
+          },
+        }],
+      })
+    );
+    assert.equal(created.status, 201);
+    const botId = String((await json(created)).bot.id);
+    const callStart = deterministicProvider.calls.length;
+
+    const response = await client.request(
+      "/api/chat",
+      jsonInit({
+        message: "Show me that this Power is active.",
+        mode: "zen",
+        facetBotId: botId,
+        preferredProvider: "local",
+        incognito: true,
+        ephemeralMessages: [],
+      })
+    );
+
+    assert.equal(response.status, 200);
+    const prompt = deterministicProvider.calls
+      .slice(callStart)
+      .flat()
+      .map((message) => message.content)
+      .join("\n");
+    assert.match(prompt, /Active Powers:/u);
+    assert.match(prompt, /Respirator: Breathe mechanically during each answer/u);
   });
 
   it("forces an offline-only Zen bot out of Auto before any online provider is selected", async () => {

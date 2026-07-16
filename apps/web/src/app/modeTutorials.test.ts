@@ -23,10 +23,18 @@ describe("mode tutorials", () => {
 
   it("presents the production applet as Signal", () => {
     assert.equal(MODE_TUTORIALS.botcast.title, "Signal producer walkthrough");
+    const signalCopy = MODE_TUTORIALS.botcast.steps.map((step) => step.body).join(" ");
+    assert.match(signalCopy, /Cut show immediately cuts away and archives the recording/u);
+    assert.match(signalCopy, /short, locally synthesized outro/u);
     assert.equal(MODE_TUTORIALS.botcast.steps[1]?.heading, "Shape the show’s identity");
     assert.equal(
       MODE_TUTORIALS.botcast.steps[1]?.targetSelector,
       '[data-tutorial-target="botcast-brand-controls"]',
+    );
+    assert.equal(MODE_TUTORIALS.botcast.steps[2]?.heading, "Give it an opening sound");
+    assert.equal(
+      MODE_TUTORIALS.botcast.steps[2]?.targetSelector,
+      '[data-tutorial-target="botcast-intro-audio"]',
     );
     assert.match(MODE_TUTORIALS.botcast.steps[0]?.body ?? "", /never waits on synthesis/u);
     assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /Create this show’s look once/u);
@@ -34,13 +42,32 @@ describe("mode tutorials", () => {
     assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /keep using PRISM/u);
     assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /activity card/u);
     assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /Dark-to-Light studio pair/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /refresh the name, either studio, or the logo independently/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /replace any visual/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[2]?.body ?? "", /Pick LOCAL, AUTO, or ONLINE/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[2]?.body ?? "", /configured fallback chain/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[2]?.body ?? "", /locks that routing/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[3]?.body ?? "", /one speaker on mic at a time/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[3]?.body ?? "", /words they have finished saying/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /edit or regenerate the name/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /refresh the linked studio pair together/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /replace either studio visual/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[2]?.body ?? "", /Signal Synth ident/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[2]?.body ?? "", /Play intro/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[2]?.body ?? "", /no key or network/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[4]?.body ?? "", /default stage places both bots/u);
+    assert.equal(MODE_TUTORIALS.botcast.steps[3]?.heading, "Choose how the bots speak");
+    assert.equal(
+      MODE_TUTORIALS.botcast.steps[3]?.targetSelector,
+      '[data-tutorial-target="botcast-voice-mode"]',
+    );
+    assert.match(MODE_TUTORIALS.botcast.steps[3]?.body ?? "", /matches Zen/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[3]?.body ?? "", /both host and guest/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[4]?.body ?? "", /Pick LOCAL, AUTO, or ONLINE/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[4]?.body ?? "", /configured fallback chain/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[4]?.body ?? "", /locks that routing/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[4]?.body ?? "", /skippable show-branded pre-roll/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[4]?.body ?? "", /Randomize booking/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[4]?.body ?? "", /fill all three locally/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[4]?.body ?? "", /Episode length defaults to Auto/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[4]?.body ?? "", /close-up pans center/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /one speaker on mic at a time/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /words they have finished saying/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /Wrap it up is shared episode direction/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /both bots/u);
   });
 
   it("teaches Slate as a directed document workflow with stable targets", () => {
@@ -63,7 +90,11 @@ describe("mode tutorials", () => {
       '[data-tutorial-target="slate-revision"]',
     ]);
     assert.match(MODE_TUTORIALS.slate.steps[0]?.body ?? "", /\{wildcards\}/i);
+    assert.match(MODE_TUTORIALS.slate.steps[0]?.body ?? "", /one creative spark or pages/i);
+    assert.match(MODE_TUTORIALS.slate.steps[0]?.body ?? "", /waits for your confirmation/i);
+    assert.match(MODE_TUTORIALS.slate.steps[0]?.body ?? "", /story-so-far/i);
     assert.match(MODE_TUTORIALS.slate.steps.at(-1)?.body ?? "", /accept or reject/i);
+    assert.match(MODE_TUTORIALS.slate.steps.at(-1)?.body ?? "", /Continuity/i);
   });
 
   it("teaches Zen navigation as relationship-specific Homes", () => {
@@ -72,7 +103,7 @@ describe("mode tutorials", () => {
 
     assert.deepEqual(chooseRelationship, {
       heading: "Choose a relationship",
-      body: "Choose PRISM or a persona to enter that relationship’s Home. Back or Escape returns you to the wider Library or group room exactly where you left it. Inviting a guest keeps you in the current Home.",
+      body: "Choose PRISM or a persona to enter that relationship’s Home. Ready Powers stay active with that persona here and across PRISM. Back or Escape returns you to the wider Library or group room exactly where you left it. Inviting a guest keeps you in the current Home.",
       clickLabel: "a PRISM or persona tile",
       targetSelector: '[data-tutorial-target="chat-bot-picker"]',
     });
@@ -128,6 +159,7 @@ describe("mode tutorials", () => {
       setup?.body ?? "",
       /AUTO is the separate response-routing control/,
     );
+    assert.match(setup?.body ?? "", /Auto duration is open-ended with no countdown/);
     assert.match(
       routing?.body ?? "",
       /changes response routing, not the Account default model choice/,

@@ -360,7 +360,7 @@ export async function compileBotPowers(args: {
     {
       role: "system",
       content: [
-        "You compile Coffee Mode character powers into compact prose and safe structured rules.",
+        "You compile PRISM character Powers into compact prose and safe structured rules used across conversations, Signal, Story, and Coffee.",
         "Reply with JSON only. Never create code, tools, instructions for the human, or effects outside the allowed schema.",
         "Powers supplement the character profile; preserve personality and use the fewest useful words.",
       ].join(" "),
@@ -414,7 +414,7 @@ export async function compileBotPowers(args: {
       {
         role: "system",
         content: [
-          "Repair malformed Coffee Power compiler output.",
+          "Repair malformed PRISM Power compiler output.",
           "Reply with JSON only and preserve the supplied power IDs exactly.",
           "Every exclusive visibility or hearing intent must include its matching awareness or speech_audience effect, not only prose cues.",
         ].join(" "),

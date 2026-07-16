@@ -2,6 +2,8 @@ export const BOT_POWER_VERSION = 1 as const;
 export const BOT_POWER_MAX_COUNT = 3;
 export const BOT_POWER_NAME_MAX_LENGTH = 40;
 export const BOT_POWER_INTENT_MAX_LENGTH = 300;
+export const BOT_POWER_PROMPT_MAX_CHARS = 640;
+export const BOT_POWER_PROMPT_MAX_TOKENS = 160;
 export const COFFEE_POWER_PROMPT_MAX_CHARS = 640;
 export const COFFEE_POWER_PROMPT_MAX_TOKENS = 160;
 
@@ -256,6 +258,68 @@ export function activeBotPowersV1(value: unknown): BotPowerV1[] {
   );
 }
 
+export function botPowerSelfCueLinesV1(value: unknown): string[] {
+  return activeBotPowersV1(value).flatMap((power) => {
+    const cue = power.compiled?.selfCue.trim();
+    const fallback =
+      power.compiled?.ruleLabels.find((label) => label.trim()) ||
+      power.intent.trim();
+    const instruction = cue || fallback;
+    return instruction ? [`${power.name || "Power"}: ${instruction}`] : [];
+  });
+}
+
+export function botPowerObserverCueLinesV1(
+  botName: string,
+  value: unknown
+): string[] {
+  const subject = compactText(botName, 100) || "This character";
+  return activeBotPowersV1(value).flatMap((power) => {
+    const cue = power.compiled?.observerCue.trim();
+    const fallback =
+      power.compiled?.ruleLabels.find((label) => label.trim()) ||
+      power.intent.trim();
+    const instruction = cue || fallback;
+    return instruction
+      ? [`${subject} — ${power.name || "Power"}: ${instruction}`]
+      : [];
+  });
+}
+
+export function buildBotPowersPromptBlock(
+  lines: readonly string[],
+  maxChars = BOT_POWER_PROMPT_MAX_CHARS,
+  maxTokens = BOT_POWER_PROMPT_MAX_TOKENS
+): string {
+  const deduped = Array.from(
+    new Set(lines.map((line) => compactText(line, 280)).filter(Boolean))
+  );
+  if (deduped.length === 0) return "";
+  const prefix = "Active Powers:\n";
+  let body = "";
+  for (const line of deduped) {
+    const candidate = `${body}${body ? "\n" : ""}- ${line}`;
+    if (
+      prefix.length + candidate.length > maxChars ||
+      estimateBotPowerTokensV1(`${prefix}${candidate}`) > maxTokens
+    ) break;
+    body = candidate;
+  }
+  return body ? `${prefix}${body}` : "";
+}
+
+export function buildBotPowersSelfPromptV1(value: unknown): string {
+  return buildBotPowersPromptBlock(botPowerSelfCueLinesV1(value));
+}
+
+export function botPowerCupRateMultiplierForBotV1(value: unknown): number {
+  const effect = activeBotPowersV1(value)
+    .flatMap((power) => power.compiled?.effects ?? [])
+    .find((candidate) => candidate.type === "cup_rate");
+  if (!effect || effect.type !== "cup_rate") return 1;
+  return effect.rate === "slow" ? 0.55 : effect.rate === "very_fast" ? 2.5 : 1.65;
+}
+
 export function buildCoffeePowersPromptBlock(
   lines: readonly string[],
   maxChars = COFFEE_POWER_PROMPT_MAX_CHARS,
@@ -271,7 +335,7 @@ export function buildCoffeePowersPromptBlock(
     const candidate = `${body}${body ? "\n" : ""}- ${line}`;
     if (
       prefix.length + candidate.length > maxChars ||
-      estimateCoffeePowerTokensV1(`${prefix}${candidate}`) > maxTokens
+      estimateBotPowerTokensV1(`${prefix}${candidate}`) > maxTokens
     ) break;
     body = candidate;
   }
@@ -279,6 +343,10 @@ export function buildCoffeePowersPromptBlock(
 }
 
 export function estimateCoffeePowerTokensV1(value: string): number {
+  return estimateBotPowerTokensV1(value);
+}
+
+export function estimateBotPowerTokensV1(value: string): number {
   const parts = value.match(/[\p{L}\p{N}_]+|[^\s\p{L}\p{N}_]/gu) ?? [];
   return parts.reduce(
     (total, part) => total + (/^[\p{L}\p{N}_]+$/u.test(part) ? Math.max(1, Math.ceil(part.length / 4)) : 1),
