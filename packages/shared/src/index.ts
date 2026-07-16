@@ -32,10 +32,16 @@ export {
   COFFEE_POWER_PROMPT_MAX_CHARS,
   COFFEE_POWER_PROMPT_MAX_TOKENS,
   activeBotPowersV1,
+  botPowerCupRateMultiplierForBotV1,
+  botPowerObserverCueLinesV1,
+  botPowerSelfCueLinesV1,
   botPowerSourceHashV1,
+  buildBotPowersPromptBlock,
+  buildBotPowersSelfPromptV1,
   buildCoffeePowersPromptBlock,
   coffeePowerCupRateMultiplierV1,
   estimateCoffeePowerTokensV1,
+  estimateBotPowerTokensV1,
   normalizeBotPowerEffectV1,
   normalizeBotPowerV1,
   normalizeBotPowersV1,
@@ -164,6 +170,7 @@ export {
   isBotAudioVoiceId,
   isBotVoiceTexturePreset,
   normalizeBotAudioVoiceControl,
+  applyVoiceDeliveryMoodToProfile,
   normalizeBotAudioVoiceProfileV1,
   normalizeBotVoiceTexture,
   normalizeBotVoiceTextureUnit,
@@ -173,7 +180,15 @@ export {
   normalizeElevenLabsVoiceEffect,
   normalizeOptionalBotAudioVoiceProfileV1,
   normalizeVoiceMode,
+  normalizeVoiceDeliveryMood,
+  resolveElevenLabsVoicePerformance,
+  voiceDeliveryRateForMood,
   NEUTRAL_COFFEE_VOICE_DELIVERY_ENVELOPE,
+  VOICE_DELIVERY_RATE_BY_MOOD,
+  ELEVENLABS_VOICE_SPEED_MIN,
+  ELEVENLABS_VOICE_SPEED_MAX,
+  BOT_AUDIO_VOICE_PACE_RATE_DEPTH,
+  BOT_AUDIO_VOICE_PITCH_DEPTH_CENTS,
   BOT_NAME_PRONUNCIATION_MAX_LENGTH,
   applyBotNamePronunciations,
   applyPlayerNamePronunciation,
@@ -187,6 +202,8 @@ export {
   type BotVoiceTexturePreset,
   type BotVoiceTextureV1,
   type CoffeeVoiceDeliveryEnvelope,
+  type VoiceDeliveryMood,
+  type ElevenLabsVoicePerformanceV1,
   type LegacyBotAudioVoiceProfileV1,
   type NormalizedBotAudioVoiceProfileV1,
   type BotNamePronunciationEntry,
@@ -535,7 +552,40 @@ export {
 } from "./storyRuntime.js";
 
 export {
+  SLATE_RETURN_SESSION_SCHEMA_VERSION,
+  SLATE_SECTION_CONTRACT_VERSION,
+  transformSlateLockedRangesForTextEdit,
+  type SlateBookSummary,
   type SlateCharacter,
+  type SlateContinuityAuthority,
+  type SlateContinuityClaim,
+  type SlateContinuityConcern,
+  type SlateContinuityConcernCard,
+  type SlateContinuityConcernKind,
+  type SlateContinuityConcernNextResponse,
+  type SlateContinuityConcernPassage,
+  type SlateContinuityConcernResolveRequest,
+  type SlateContinuityConcernResolveResponse,
+  type SlateContinuityConcernSeverity,
+  type SlateContinuityConcernStatus,
+  type SlateContinuityContextBrief,
+  type SlateContinuityEntity,
+  type SlateContinuityEntityKind,
+  type SlateContinuityEpistemicStatus,
+  type SlateContinuityEvent,
+  type SlateContinuityGeneration,
+  type SlateContinuityKnowledgeState,
+  type SlateContinuityProvenance,
+  type SlateContinuityRelationship,
+  type SlateContinuityResolutionKind,
+  type SlateContinuityScope,
+  type SlateContinuityScopeKind,
+  type SlateContinuitySource,
+  type SlateContinuitySourceAnchor,
+  type SlateContinuitySourceKind,
+  type SlateContinuityStatus,
+  type SlateContinuityThread,
+  type SlateCreateSeriesRequest,
   type SlateCreateProjectRequest,
   type SlateDraftRequest,
   type SlateLockedRange,
@@ -553,6 +603,26 @@ export {
   type SlateRevisionStatus,
   type SlateResolveSparkWildcardsRequest,
   type SlateResolveSparkWildcardsResponse,
+  type SlateReturnNextCard,
+  type SlateReturnNextCardKind,
+  type SlateReturnSectionReference,
+  type SlateReturnSession,
+  type SlateReturnSessionListResponse,
+  type SlateReturnSessionResponse,
+  type SlateReturnSessionSynopsis,
+  type SlateReturnThreadReference,
+  type SlateManuscriptPageResponse,
+  type SlateSectionDetail,
+  type SlateSectionKind,
+  type SlateSectionListResponse,
+  type SlateSectionResponse,
+  type SlateSectionSaveRequest,
+  type SlateSectionStatus,
+  type SlateSectionSummary,
+  type SlateSeriesSummary,
+  type SlateSeriesDetail,
+  type SlateSeriesListResponse,
+  type SlateSeriesResponse,
   type SlateStructureItem,
   type SlateStructureKind,
   type SlateStructureStatus,
@@ -1603,7 +1673,8 @@ export interface Conversation {
    */
   coffeeSettings?: CoffeeSessionSettings;
   /** Coffee-only — selected timed session duration, once group sessions own starts. */
-  coffeeSessionDurationMinutes?: CoffeeSessionDurationMinutes;
+  /** Null means Auto/open-ended with no countdown. */
+  coffeeSessionDurationMinutes?: CoffeeSessionDurationMinutes | null;
   /** Coffee-only — shared anchor topic for this session (null until chosen). */
   coffeeTopic?: string | null;
   /** Coffee-only — optional team-mode social state for this timed session. */
@@ -2064,8 +2135,8 @@ export interface CoffeeSessionCreateRequest {
   groupBotIds: Array<string | null>;
   /** Optional session tuning; omitted rows use server defaults. */
   coffeeSettings?: unknown;
-  /** Optional timed session length in whole minutes, from 3 to 30. */
-  durationMinutes?: CoffeeSessionDurationMinutes;
+  /** Null selects Auto/open-ended; otherwise whole minutes from 3 to 30. */
+  durationMinutes?: CoffeeSessionDurationMinutes | null;
   /** Optional opening topic, trimmed and limited to {@link COFFEE_TOPIC_MAX_LENGTH} characters. */
   initialTopic?: string;
   /** Optional opening poll that seeds the initial table topic. */
@@ -2078,8 +2149,8 @@ export interface CoffeeSessionCreateRequest {
 export interface CoffeeGroupSessionCreateRequest {
   /** Optional session tuning; omitted rows use Coffee Group defaults. */
   coffeeSettings?: unknown;
-  /** Optional timed session length in whole minutes, from 3 to 30. */
-  durationMinutes?: CoffeeSessionDurationMinutes;
+  /** Null selects Auto/open-ended; otherwise whole minutes from 3 to 30. */
+  durationMinutes?: CoffeeSessionDurationMinutes | null;
   /** Optional opening topic, trimmed and limited to {@link COFFEE_TOPIC_MAX_LENGTH} characters. */
   initialTopic?: string;
   /** Optional preset id, or `__auto__` for auto preset selection. */

@@ -121,6 +121,19 @@ function assertNoAnimatedTransition(selector: string): void {
 }
 
 describe("Coffee seat arrival CSS", () => {
+  it("defaults Coffee duration to open-ended Auto without a countdown deadline", () => {
+    assert.match(
+      pageSource,
+      /useState<CoffeeSessionDurationMinutes \| null>\(null\)/,
+    );
+    assert.match(pageSource, /Open-ended · no countdown/);
+    assert.match(pageSource, /durationMinutes: coffeeSelectedDurationMinutes/);
+    assert.match(
+      pageSource,
+      /conversation\?\.coffeeSessionDurationMinutes == null \? null : startedAtMs \+ coffeeSessionDurationMs/,
+    );
+  });
+
   it("uses visual layout slots for walk-in vectors so bots enter from their side", () => {
     const genericSeatRuleIndex = css.indexOf(
       '.coffeeStage[data-phase="arriving"] .coffeeSeat[data-arrival-state="walking-in"][data-seat="4"]'

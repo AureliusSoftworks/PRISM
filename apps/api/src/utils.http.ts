@@ -27,6 +27,27 @@ export async function readJsonBody(
   return JSON.parse(raw);
 }
 
+export async function readBinaryBody(
+  req: IncomingMessage,
+  maxBytes: number,
+): Promise<Uint8Array> {
+  const contentLength = Number(req.headers["content-length"] ?? 0);
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+    throw new HttpError(413, "Binary request body is too large.");
+  }
+  const chunks: Buffer[] = [];
+  let totalBytes = 0;
+  for await (const chunk of req) {
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    totalBytes += bytes.length;
+    if (totalBytes > maxBytes) {
+      throw new HttpError(413, "Binary request body is too large.");
+    }
+    chunks.push(bytes);
+  }
+  return Buffer.concat(chunks);
+}
+
 export class HttpError extends Error {
   readonly statusCode: number;
 

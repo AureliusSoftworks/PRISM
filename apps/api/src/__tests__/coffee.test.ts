@@ -4418,6 +4418,23 @@ describe("Coffee group foundation", () => {
     assert.equal(result.conversation.coffeeSessionDurationMinutes, 30);
   });
 
+  it("defaults new Coffee group sessions to Auto with no stored deadline", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+    const group = createCoffeeGroup(db, userId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+    });
+
+    const result = await createCoffeeConversationFromGroup(db, userId, group.id, {});
+    assert.equal(result.conversation.coffeeSessionDurationMinutes ?? null, null);
+    const row = db.prepare(
+      "SELECT coffee_duration_minutes FROM conversations WHERE id = ?",
+    ).get(result.conversation.id) as { coffee_duration_minutes: number | null };
+    assert.equal(row.coffee_duration_minutes, null);
+  });
+
   it("rejects out-of-range group session durations", async () => {
     const db = createCoffeeTestDb();
     const userId = "user-1";

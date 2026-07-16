@@ -13,6 +13,7 @@ import {
   recordTextUsage,
   usagePurpose,
 } from "./usage.ts";
+import { isPrivateNetworkHttpUrl } from "./local-network-host.ts";
 
 /**
  * Caps how long `/api/models` hangs while probing `/api/tags` or OpenAI’s model list.
@@ -152,10 +153,12 @@ export class LocalModelRequestError extends Error {
   public constructor(
     kind: LocalModelRequestFailureKind,
     status?: number,
-    options: { pairedHostMissing?: boolean } = {}
+    options: { pairedHostMissing?: boolean; pairedHostUnsafe?: boolean } = {}
   ) {
     super(
-      options.pairedHostMissing
+      options.pairedHostUnsafe
+        ? "Paired Ollama host must be on the private network."
+        : options.pairedHostMissing
         ? "Paired Ollama host is not configured."
         : LOCAL_MODEL_REQUEST_ERROR_MESSAGES[kind]
     );
@@ -186,16 +189,24 @@ const config = getAppConfig();
 // load feel like the models themselves are restarting.
 const modelCatalogCache = new Map<string, Promise<ModelCatalog>>();
 
+function privateSecondaryOllamaHost(
+  secondaryOllamaHost: string | null | undefined,
+): string | null {
+  const trimmed = secondaryOllamaHost?.trim();
+  return trimmed && isPrivateNetworkHttpUrl(trimmed) ? trimmed : null;
+}
+
 function modelCatalogCacheKey(
   openAiApiKey?: string,
   secondaryOllamaHost?: string | null,
   anthropicApiKey?: string
 ): string {
+  const privateSecondaryHost = privateSecondaryOllamaHost(secondaryOllamaHost);
   return createHash("sha256")
     .update(JSON.stringify({
       primaryOllamaHost: config.ollamaHost,
       primaryOllamaModel: config.ollamaModel,
-      secondaryOllamaHost: secondaryOllamaHost?.trim() ?? "",
+      secondaryOllamaHost: privateSecondaryHost ?? "",
       openAiApiKey: openAiApiKey?.trim() ?? "",
       anthropicApiKey: anthropicApiKey?.trim() ?? "",
     }))
@@ -769,6 +780,9 @@ export async function checkLocalModelHostStatus(
   if (!normalizedHost) {
     return { configured: false, reachable: false, modelCount: 0 };
   }
+  if (!isPrivateNetworkHttpUrl(normalizedHost)) {
+    return { configured: true, reachable: false, modelCount: 0 };
+  }
 
   const discovered = await discoverLocalModels(normalizedHost);
   return {
@@ -815,9 +829,13 @@ export async function checkDualOllamaWorkloadStatus(
   secondaryOllamaHost: string | null | undefined,
   options: { useCache?: boolean } = {}
 ): Promise<DualOllamaWorkloadStatus> {
-  const secondaryHost = secondaryOllamaHost?.trim();
-  if (!secondaryHost) {
+  const configuredHost = secondaryOllamaHost?.trim();
+  const secondaryHost = privateSecondaryOllamaHost(secondaryOllamaHost);
+  if (!configuredHost) {
     return disabledDualOllamaStatus("not_configured", { configured: false });
+  }
+  if (!secondaryHost) {
+    return disabledDualOllamaStatus("secondary_unreachable", { configured: true });
   }
 
   const cacheKey = `${config.ollamaHost} -> ${secondaryHost}`;
@@ -1109,6 +1127,7 @@ async function buildUncachedModelCatalog(
   secondaryOllamaHost?: string | null,
   anthropicApiKey?: string
 ): Promise<ModelCatalog> {
+  const privateSecondaryHost = privateSecondaryOllamaHost(secondaryOllamaHost);
   const [
     discoveredLocal,
     discoveredSecondaryLocal,
@@ -1116,7 +1135,7 @@ async function buildUncachedModelCatalog(
     discoveredAnthropic,
   ] = await Promise.all([
     discoverLocalModelIds(config.ollamaHost),
-    secondaryOllamaHost ? discoverLocalModelIds(secondaryOllamaHost) : Promise.resolve([]),
+    privateSecondaryHost ? discoverLocalModelIds(privateSecondaryHost) : Promise.resolve([]),
     discoverOpenAiModelIds(openAiApiKey),
     discoverAnthropicModelIds(anthropicApiKey),
   ]);
@@ -1218,10 +1237,15 @@ async function classifyLocalModelHttpFailure(
 export class LocalOllamaProvider implements LlmProvider {
   public readonly name = "local" as const;
   private readonly secondaryOllamaHost: string | null;
+  private readonly secondaryOllamaHostRejected: boolean;
   private readonly experimentalDualOllama: boolean;
 
   public constructor(options: DualOllamaWorkloadOptions = {}) {
-    this.secondaryOllamaHost = options.secondaryOllamaHost?.trim() || null;
+    const configuredSecondaryHost = options.secondaryOllamaHost?.trim() || null;
+    this.secondaryOllamaHost = privateSecondaryOllamaHost(configuredSecondaryHost);
+    this.secondaryOllamaHostRejected = Boolean(
+      configuredSecondaryHost && !this.secondaryOllamaHost,
+    );
     this.experimentalDualOllama = options.experimentalDualOllama === true;
   }
 
@@ -1235,7 +1259,9 @@ export class LocalOllamaProvider implements LlmProvider {
       throw new LocalModelRequestError(
         "authentication_or_configuration",
         undefined,
-        { pairedHostMissing: true }
+        this.secondaryOllamaHostRejected
+          ? { pairedHostUnsafe: true }
+          : { pairedHostMissing: true }
       );
     }
     const dualWorkloadModel = secondaryModel

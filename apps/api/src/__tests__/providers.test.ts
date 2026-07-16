@@ -528,6 +528,51 @@ describe("LocalOllamaProvider secondary routing", () => {
     assert.equal(requestedBody.think, false);
   });
 
+  it("never contacts a public paired host for a LOCAL request", async () => {
+    let fetchCalls = 0;
+    globalThis.fetch = (async () => {
+      fetchCalls += 1;
+      throw new Error("public host must not be contacted");
+    }) as typeof fetch;
+
+    const provider = new LocalOllamaProvider({
+      secondaryOllamaHost: "https://public.example:11434",
+    });
+    await assert.rejects(
+      () => provider.generateResponse(
+        [{ role: "user", content: "private manuscript" }],
+        { model: `${SECONDARY_OLLAMA_MODEL_PREFIX}mistral:latest` },
+      ),
+      /Paired Ollama host must be on the private network/,
+    );
+    assert.equal(fetchCalls, 0);
+  });
+
+  it("does not probe a public paired host during status or model discovery", async () => {
+    let publicFetches = 0;
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.startsWith("https://public.example")) publicFetches += 1;
+      return new Response(JSON.stringify({ models: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    assert.deepEqual(
+      await checkLocalModelHostStatus("https://public.example:11434"),
+      { configured: true, reachable: false, modelCount: 0 },
+    );
+    const dual = await checkDualOllamaWorkloadStatus(
+      "https://public.example:11434",
+      { useCache: false },
+    );
+    assert.equal(dual.enabled, false);
+    assert.equal(dual.reason, "secondary_unreachable");
+    await buildModelCatalog(undefined, "https://public.example:11434");
+    assert.equal(publicFetches, 0);
+  });
+
   it("sends think:false and falls back to message.thinking when content is empty", async () => {
     let requestedBody: Record<string, unknown> = {};
     globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {

@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import {
+  botPowerSourceHashV1,
   parseStoredBotPrompt,
   serializeStoredBotPrompt,
 } from "@localai/shared";
@@ -104,6 +105,52 @@ describe("composeBotSystemPrompt", () => {
     assert.ok(prompt);
     assert.match(prompt!, /engage in consensual flirt or romantic roleplay/i);
     assert.match(prompt!, /stays respectful and in character/i);
+  });
+
+  it("appends only ready enabled Powers to every composed bot persona", () => {
+    const name = "Respirator";
+    const intent = "Mechanical breathing punctuates physical beats.";
+    const prompt = composeBotSystemPrompt("Vader", "Stay imposing.", false, [
+      {
+        version: 1,
+        id: "respirator",
+        name,
+        intent,
+        enabled: true,
+        compileStatus: "ready",
+        compiled: {
+          version: 1,
+          sourceHash: botPowerSourceHashV1(name, intent),
+          selfCue: "Breathe mechanically during physical beats.",
+          observerCue: "Others hear the respirator.",
+          effects: [],
+          ruleLabels: [],
+        },
+      },
+      {
+        version: 1,
+        id: "draft-power",
+        name: "Draft Power",
+        intent: "DRAFT_MARKER must never reach a provider.",
+        enabled: true,
+        compileStatus: "draft",
+        compiled: null,
+      },
+      {
+        version: 1,
+        id: "disabled-power",
+        name: "Disabled Power",
+        intent: "DISABLED_MARKER must never reach a provider.",
+        enabled: false,
+        compileStatus: "draft",
+        compiled: null,
+      },
+    ]);
+
+    assert.match(prompt ?? "", /Active Powers:/u);
+    assert.match(prompt ?? "", /Respirator: Breathe mechanically/u);
+    assert.match(prompt ?? "", /the user can always perceive and hear you/u);
+    assert.doesNotMatch(prompt ?? "", /DRAFT_MARKER|DISABLED_MARKER/u);
   });
 });
 

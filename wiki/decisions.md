@@ -71,3 +71,17 @@ Files: `docs/brand-ethos.md`, `apps/web/public/refraction-emblem.svg`, `apps/web
 Tags: `audience:all`, `brand`, `design`, `onboarding`
 
 Record: `decision_d604f433-273f-48e5-a4dc-38c728d79b78` | Authority: user | Confidence: high
+
+## Slate is writer-directed and snapshot-separated from Story
+
+Context: PRISM needs a novel-scale creative workspace without turning the manuscript into a chat transcript or weakening Story as a procedural experience.
+
+Decision: Slate remains a quiet document-first production desk governed by The AI writes. The writer directs. Continuity works privately in the background and presents one contextual decision at a time. Story remains separate; every Story and Slate handoff is an explicit immutable snapshot with selective incorporation.
+
+Consequences: Human prose, locks, approvals, and rejections stay authoritative. Cross-applet work never silently synchronizes. Review Circle, Atmosphere, series UX, recovery browsing, and publishing layers build on the Slate foundation without overloading the writing desk.
+
+Files: `docs/slate-master-plan.md`, `docs/slate-v1-product-ux-contract.md`, `docs/slate-continuity-contract.md`, `docs/story-v1-backend-contract.md`
+
+Tags: `audience:all`, `slate`, `product`, `privacy`, `story`
+
+Record: `decision_a09fe27e-a4d9-44d4-88f4-9d5551a3677a` | Authority: user | Confidence: high

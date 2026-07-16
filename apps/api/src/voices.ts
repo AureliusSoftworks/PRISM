@@ -1,13 +1,17 @@
 import {
   BOTCAST_IMMERSIVE_VOICE_TAGS,
+  applyVoiceDeliveryMoodToProfile,
   normalizeBotAudioVoiceProfileV1,
   normalizeEnglishVoiceEngine,
   normalizeElevenLabsVoiceDirection,
   normalizeVoiceMode,
+  normalizeVoiceDeliveryMood,
+  resolveElevenLabsVoicePerformance,
   applyPlayerNamePronunciation as applySharedPlayerNamePronunciation,
   type BotAudioVoiceProfileV1,
   type EnglishVoiceEngine,
   type VoiceMode,
+  type VoiceDeliveryMood,
 } from "@localai/shared";
 
 export function resolveElevenLabsVoiceId(
@@ -78,17 +82,12 @@ export function elevenLabsVoiceSettings(profile: BotAudioVoiceProfileV1): {
   speed: number;
 } {
   const normalized = normalizeBotAudioVoiceProfileV1(profile);
-  const pitchPlaybackRatio = 2 ** ((normalized.pitch * 650) / 1200);
   return {
     stability: Number(clamp(0.52 - normalized.lilt * 0.24, 0.18, 0.86).toFixed(3)),
     similarity_boost: 0.75,
     style: Number(clamp(0.18 + normalized.lilt * 0.18, 0, 0.45).toFixed(3)),
     use_speaker_boost: true,
-    speed: Number(clamp(
-      (1 + normalized.pace * 0.24) / pitchPlaybackRatio,
-      0.7,
-      1.2
-    ).toFixed(3)),
+    speed: resolveElevenLabsVoicePerformance(normalized).speed,
   };
 }
 
@@ -420,6 +419,7 @@ export type VoiceSynthesisRequest = {
   mode: VoiceMode;
   engine: EnglishVoiceEngine;
   profile: BotAudioVoiceProfileV1;
+  deliveryMood: VoiceDeliveryMood;
   messageId: string | null;
   explicitOnlineContext: boolean;
   includeAlignment: boolean;
@@ -457,12 +457,17 @@ export function validateVoiceSynthesisRequest(body: Record<string, unknown>): Vo
   const messageId = typeof body.messageId === "string" && body.messageId.trim()
     ? body.messageId.trim().slice(0, 160)
     : null;
+  const deliveryMood = normalizeVoiceDeliveryMood(body.moodKey);
   return {
     text,
     elevenLabsText: normalizeElevenLabsTaggedText(body.elevenLabsText, text),
     mode: normalizeVoiceMode(body.mode),
     engine: normalizeEnglishVoiceEngine(body.engine),
-    profile: normalizeBotAudioVoiceProfileV1(body.profile),
+    profile: applyVoiceDeliveryMoodToProfile(
+      normalizeBotAudioVoiceProfileV1(body.profile),
+      deliveryMood,
+    ),
+    deliveryMood,
     messageId,
     explicitOnlineContext: body.explicitOnlineContext === true,
     includeAlignment: body.includeAlignment === true,

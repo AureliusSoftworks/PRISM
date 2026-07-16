@@ -20,6 +20,8 @@ export interface ElevenLabsVoiceEffectPlan {
     delaySeconds: number;
     detuneCents: number;
     gain: number;
+    delayModulationFrequencyHz?: number;
+    delayModulationDepthSeconds?: number;
   }>;
 }
 
@@ -87,8 +89,20 @@ export function resolveElevenLabsVoiceEffectPlan(
         modulationDepth: 0,
         modulationBaseGain: 1,
         parallelVoices: [
-          { delaySeconds: 0.012, detuneCents: -14, gain: 0.34 },
-          { delaySeconds: 0.021, detuneCents: 14, gain: 0.34 },
+          {
+            delaySeconds: 0.012,
+            detuneCents: 0,
+            gain: 0.34,
+            delayModulationFrequencyHz: 0.31,
+            delayModulationDepthSeconds: 0.004,
+          },
+          {
+            delaySeconds: 0.021,
+            detuneCents: 0,
+            gain: 0.34,
+            delayModulationFrequencyHz: 0.27,
+            delayModulationDepthSeconds: -0.005,
+          },
         ],
       };
     case "deep-space":
@@ -472,9 +486,35 @@ export async function playRealtimeVoiceBytes(args: {
     source: AudioBufferSourceNode;
     startAt: number;
   }> = [{ source, startAt: now }];
-  let completionSource: AudioBufferSourceNode = source;
+  let completionSource: AudioScheduledSourceNode = source;
   let completionEndAt = now + playbackDurationSeconds;
   for (const voice of elevenLabsEffect.parallelVoices) {
+    const delayModulationFrequencyHz = voice.delayModulationFrequencyHz ?? 0;
+    const delayModulationDepthSeconds = voice.delayModulationDepthSeconds ?? 0;
+    if (delayModulationFrequencyHz > 0 && delayModulationDepthSeconds !== 0) {
+      const delay = context.createDelay();
+      const parallelGain = context.createGain();
+      const oscillator = context.createOscillator();
+      const modulation = context.createGain();
+      const maximumDelaySeconds =
+        voice.delaySeconds + Math.abs(delayModulationDepthSeconds);
+      delay.delayTime.setValueAtTime(voice.delaySeconds, now);
+      parallelGain.gain.value = voice.gain;
+      oscillator.type = "sine";
+      oscillator.frequency.value = delayModulationFrequencyHz;
+      modulation.gain.value = delayModulationDepthSeconds;
+      oscillator.connect(modulation).connect(delay.delayTime);
+      source.connect(delay).connect(parallelGain).connect(highpass);
+      const endAt = now + playbackDurationSeconds + maximumDelaySeconds;
+      oscillator.start(now);
+      oscillator.stop(endAt);
+      scheduled.push(oscillator);
+      if (endAt > completionEndAt) {
+        completionSource = oscillator;
+        completionEndAt = endAt;
+      }
+      continue;
+    }
     const startAt = now + voice.delaySeconds;
     const parallelSource = createSpeechSource(startAt, voice.detuneCents);
     const parallelGain = context.createGain();

@@ -37,8 +37,10 @@ Slate V1 is for prose fiction:
 - novel projects
 - imported prose or planning material
 
-Screenplays, poetry-specific tooling, publishing layout, collaboration, persona
-editor panels, and branching-fiction authoring are later roadmap items.
+Screenplays, poetry-specific tooling, publishing-grade EPUB/PDF layout,
+collaboration, persona editor panels, and branching-fiction authoring are later
+roadmap items. Clean manuscript export to DOCX, Markdown, and text is part of
+the author-safety foundation.
 
 Slate inherits the account's effective provider and model defaults. V1 does not
 add per-project provider, model, sampling, or reasoning controls.
@@ -51,6 +53,15 @@ from the Slate applet version. Its shared version contract begins at planned
 corresponding end-to-end capability is genuinely usable; internal schema,
 extractor, resolver, and prompt-projection revisions may advance separately
 without presenting implementation noise to the writer.
+
+For the first promotion, “genuinely usable” includes the visible concern and
+reconciliation loop, safe shadow-generation promotion/rollback, and
+representative multi-book cohesion—not merely persisted tables or background
+jobs.
+
+The normative series-scale ledger, provenance, privacy, upgrade, context, and
+reconciliation contract lives in `docs/slate-continuity-contract.md`. The
+cross-workstream dependency index lives in `docs/slate-master-plan.md`.
 
 ## Workspace contract
 
@@ -207,5 +218,5 @@ The long-term loop is:
 - a conversational writing buddy or chat transcript
 - persona-guided editor panels and multi-editor panels
 - screenplay-specific structure and formatting
-- collaborative editing, comments by other people, export/publishing layout,
-  and branching-fiction authoring
+- collaborative editing, comments by other people, publishing-grade EPUB/PDF
+  layout, and branching-fiction authoring

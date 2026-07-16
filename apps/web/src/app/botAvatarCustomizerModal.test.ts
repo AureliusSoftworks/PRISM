@@ -1012,6 +1012,14 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   assert.match(pageSource, /placeholder="How bots should say this name"/);
   assert.match(pageSource, /aria-label="Preview bot name pronunciation"/);
   assert.match(pageSource, /My name is \$\{trimmedName\}\./);
+  const invalidChatDetailEffect = pageSource.slice(
+    pageSource.indexOf('detail.id === "pending"'),
+    pageSource.indexOf("useEffect(() =>", pageSource.indexOf('detail.id === "pending"')),
+  );
+  assert.doesNotMatch(
+    invalidChatDetailEffect,
+    /setNewBotNamePronunciation\(""\)/,
+  );
   assert.match(
     pageSource,
     /onVoicePreview\(\s*audioVoiceProfile,\s*"english",\s*previewText/,
@@ -1675,4 +1683,13 @@ test("desktop kiosk shell shows a full-screen notice below the viewport floor", 
     cssSource,
     /@media\s*\(max-width:\s*1279px\)[\s\S]*\.desktopViewportNotice\s*\{[\s\S]*inset:\s*0;/,
   );
+});
+
+test("Powers read as an app-wide bot trait across active surfaces", () => {
+  assert.match(pageSource, /Short rules and quirks that follow this bot throughout PRISM\./u);
+  assert.doesNotMatch(pageSource, /apply only during Coffee sessions/u);
+  assert.match(pageSource, /<BotPowerBadge powers=\{selectedBot\.powers\} passive \/>/u);
+  assert.match(pageSource, /<BotPowerBadge powers=\{bot\.powers\} passive \/>/u);
+  assert.match(pageSource, /<BotPowerBadge powers=\{npcActor\?\.bot\.powers\} \/>/u);
+  assert.match(pageSource, /botPowerCupRateMultiplierForBotV1/u);
 });

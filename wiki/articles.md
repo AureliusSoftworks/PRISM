@@ -61,3 +61,13 @@ Categories: `Overview`
 Aliases: `Home`, `Prism overview`
 
 Record: `article_d9ba11bc-3099-4f1e-bf47-1ebe10122438`
+
+## [Slate creative writing workspace](./articles/slate.md)
+
+How Slate combines writer-directed AI drafting, private Continuity, long-form persistence, and author-safety foundations.
+
+Categories: `Product`, `Guides`
+
+Aliases: `Slate`, `Continuity`, `Creative writing`
+
+Record: `article_92325f0d-8f92-400e-a52d-2b32ea6909b9`

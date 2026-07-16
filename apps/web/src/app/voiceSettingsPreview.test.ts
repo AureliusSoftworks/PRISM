@@ -284,6 +284,14 @@ describe("voice settings preview", () => {
       autosaveSource,
       /`\/api\/bots\/\$\{pending\.targetId\}`/,
     );
+    assert.match(
+      autosaveSource,
+      /payload\.namePronunciation = pending\.namePronunciation/,
+    );
+    assert.match(
+      pageSource,
+      /onBotNamePronunciationChange=\{\(next\) => \{[\s\S]*?queueBotNamePronunciationAutosave\(next\)/,
+    );
     assert.doesNotMatch(
       autosaveSource,
       /\/api\/settings|prismDefaultBotAudioVoiceProfile/,

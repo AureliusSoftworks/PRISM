@@ -40,26 +40,30 @@ test("Slate and Signal consume one shared PRISM navbar contract", () => {
   assert.match(navbarHelper, /styles\.chatHeader/);
   assert.match(navbarHelper, /styles\.sharedAppletHeader/);
   assert.match(navbarHelper, /renderAppSwitcher\(\)/);
+  assert.match(
+    navbarHelper,
+    /options\.showVoiceSelector[\s\S]*renderVoiceModeSelector\(\{ tutorialTarget: "botcast-voice-mode" \}\)/,
+  );
+  assert.match(pageSource, /data-tutorial-target=\{options\.tutorialTarget\}/);
   assert.match(navbarHelper, /renderUniversalNavbarButtons/);
   assert.match(navbarHelper, /data-shared-app-navbar="true"/);
 
-  for (const [appletId, toolsLabel] of [
-    ["botcast", "Signal tools"],
-    ["slate", "Slate tools"],
-  ]) {
+  for (const appletId of ["botcast", "slate"]) {
     assert.match(
       pageSource,
       new RegExp(
         `sidebarHeader=\\{renderSharedAppletSidebarHeader\\("${appletId}"\\)\\}`,
       ),
     );
-    assert.match(
-      pageSource,
-      new RegExp(
-        `navigationHeader=\\{renderSharedAppletNavbar\\("${toolsLabel}"\\)\\}`,
-      ),
-    );
   }
+  assert.match(
+    pageSource,
+    /navigationHeader=\{renderSharedAppletNavbar\("Signal tools", \{[\s\S]{0,100}showVoiceSelector: true,[\s\S]{0,40}\}\)\}/,
+  );
+  assert.match(
+    pageSource,
+    /navigationHeader=\{renderSharedAppletNavbar\("Slate tools"\)\}/,
+  );
 });
 
 test("Signal gives shared navigation its own aligned shell row", () => {

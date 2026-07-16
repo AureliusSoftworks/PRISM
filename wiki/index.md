@@ -18,9 +18,9 @@ This is the generated human-readable view of PRISM's structured project knowledg
 
 ## Record Counts
 
-- Article: 6
+- Article: 7
 - Concept: 8
-- Decision: 5
+- Decision: 6
 - Event: 7
 - Note: 3
 - Symbol: 4

@@ -83,7 +83,7 @@ describe("voice Phase 1 boundary", () => {
         elevenLabsEffect: "clean",
         pitch: 0,
         warmth: 0,
-        pace: 0,
+        pace: 0.333,
         lilt: 0,
         bottishTone: 0.45,
         volume: 1,
@@ -195,6 +195,27 @@ describe("voice Phase 1 boundary", () => {
         speed: 0.852,
       }
     );
+  });
+
+  it("applies mood pace ephemerally before selecting a synthesis boundary", () => {
+    const request = validateVoiceSynthesisRequest({
+      text: "A quick answer.",
+      mode: "english",
+      engine: "elevenlabs",
+      explicitOnlineContext: true,
+      moodKey: "joyful",
+      profile: {
+        v: 1,
+        baseVoiceId: "voice-1",
+        pitch: 0,
+        warmth: 0,
+        pace: 0,
+        lilt: 0,
+      },
+    });
+    assert.equal(request.deliveryMood, "joyful");
+    assert.equal(request.profile.pace, 0.75);
+    assert.equal(elevenLabsVoiceSettings(request.profile).speed, 1.18);
   });
 
   it("keeps the ElevenLabs key server-side and sends the expected streaming payload", async () => {

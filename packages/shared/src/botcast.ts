@@ -1,9 +1,20 @@
+import type { VoiceDeliveryMood } from "./audioVoice.js";
+
 export type BotcastEpisodeSegment = "opening" | "interview" | "closing";
 export type BotcastEpisodeStatus = "live" | "completed";
 export type BotcastEpisodeOutcome = "completed" | "guest_departed";
 export type BotcastEpisodeProvider = "local" | "openai" | "anthropic";
 export type BotcastEpisodeResponseMode = "local" | "auto" | "online";
 export type BotcastSpeakerRole = "host" | "guest";
+export type BotcastSessionDurationMinutes = number;
+export const BOTCAST_SESSION_DURATION_MINUTES_MIN = 3;
+export const BOTCAST_SESSION_DURATION_MINUTES_MAX = 30;
+export const BOTCAST_SESSION_DURATION_MINUTES_STEP = 1;
+export const BOTCAST_AUTO_MIN_EXCHANGES = 3;
+export const BOTCAST_AUTO_MAX_EXCHANGES = 60;
+export const BOTCAST_TIMED_MAX_UTTERANCES = 120;
+export const BOTCAST_LOCAL_INTRO_DURATION_MS = 5_600;
+export const BOTCAST_ELEVENLABS_INTRO_DURATION_MS = 6_000;
 export const BOTCAST_IMMERSIVE_VOICE_TAGS = [
   "sighs",
   "exhales",
@@ -50,7 +61,8 @@ export type BotcastProducerCueKind =
   | "ask_about"
   | "press_harder"
   | "move_on"
-  | "lighten_up";
+  | "lighten_up"
+  | "wrap_up";
 export type BotcastTensionStage = "calm" | "resistance" | "warning" | "departed";
 export type BotcastCameraShot = "auto" | "left" | "right" | "wide";
 export type BotcastDirectedCameraShot = Exclude<BotcastCameraShot, "auto">;
@@ -62,6 +74,127 @@ export interface BotcastAtmosphereState {
   imageId: string | null;
   revision: number;
   status: "fallback" | "ready" | "failed";
+}
+
+export interface BotcastStudioPoint {
+  x: number;
+  y: number;
+}
+
+export type BotcastStudioLayoutItem =
+  | "hostBot"
+  | "guestBot"
+  | "hostCup"
+  | "guestCup";
+
+export type BotcastStudioLayout = Record<
+  BotcastStudioLayoutItem,
+  BotcastStudioPoint
+>;
+
+export const BOTCAST_DEFAULT_STUDIO_LAYOUT: BotcastStudioLayout = {
+  hostBot: { x: 22.5, y: 71.25 },
+  guestBot: { x: 77.5, y: 71.25 },
+  hostCup: { x: 36.25, y: 90 },
+  guestCup: { x: 63.75, y: 90 },
+};
+
+const BOTCAST_LEGACY_DEFAULT_STUDIO_LAYOUT: BotcastStudioLayout = {
+  hostBot: { x: 22.5, y: 64 },
+  guestBot: { x: 77.5, y: 64 },
+  hostCup: { x: 36.25, y: 80 },
+  guestCup: { x: 63.75, y: 80 },
+};
+
+export const BOTCAST_CLOSEUP_CAMERA_SCALE = 1.42;
+
+/** Keeps a close-up horizontally centered on the saved bot placement. */
+export function botcastCameraOffsetXPercent(
+  shot: BotcastDirectedCameraShot,
+  layout: BotcastStudioLayout,
+): number {
+  if (shot === "wide") return 0;
+  const focusX = shot === "left" ? layout.hostBot.x : layout.guestBot.x;
+  return Math.round((50 - focusX) * BOTCAST_CLOSEUP_CAMERA_SCALE * 100) / 100;
+}
+
+/** Uses the scene's authored 55% focal line while following saved vertical placement. */
+export function botcastCameraOffsetYPercent(
+  shot: BotcastDirectedCameraShot,
+  layout: BotcastStudioLayout,
+): number {
+  if (shot === "wide") return 0;
+  const focusY = shot === "left" ? layout.hostBot.y : layout.guestBot.y;
+  return Math.round((55 - focusY) * BOTCAST_CLOSEUP_CAMERA_SCALE * 100) / 100;
+}
+
+const BOTCAST_STUDIO_LAYOUT_BOUNDS: Record<
+  BotcastStudioLayoutItem,
+  { minX: number; maxX: number; minY: number; maxY: number }
+> = {
+  hostBot: { minX: 10, maxX: 90, minY: 19, maxY: 82 },
+  guestBot: { minX: 10, maxX: 90, minY: 19, maxY: 82 },
+  hostCup: { minX: 4, maxX: 96, minY: 12, maxY: 94 },
+  guestCup: { minX: 4, maxX: 96, minY: 12, maxY: 94 },
+};
+
+function botcastStudioCoordinate(
+  value: unknown,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  const numeric = typeof value === "number" && Number.isFinite(value)
+    ? value
+    : fallback;
+  return Math.round(Math.max(min, Math.min(max, numeric)) * 100) / 100;
+}
+
+export function normalizeBotcastStudioLayout(
+  value: unknown,
+  fallback: BotcastStudioLayout = BOTCAST_DEFAULT_STUDIO_LAYOUT,
+): BotcastStudioLayout {
+  const rawContainer = value && typeof value === "object" && !Array.isArray(value)
+    ? value as Partial<Record<BotcastStudioLayoutItem, unknown>>
+    : {};
+  const isLegacyDefault =
+    (Object.keys(BOTCAST_LEGACY_DEFAULT_STUDIO_LAYOUT) as BotcastStudioLayoutItem[])
+      .every((item) => {
+        const point = rawContainer[item];
+        return Boolean(
+          point &&
+          typeof point === "object" &&
+          !Array.isArray(point) &&
+          (point as Partial<BotcastStudioPoint>).x ===
+            BOTCAST_LEGACY_DEFAULT_STUDIO_LAYOUT[item].x &&
+          (point as Partial<BotcastStudioPoint>).y ===
+            BOTCAST_LEGACY_DEFAULT_STUDIO_LAYOUT[item].y,
+        );
+      });
+  const container = isLegacyDefault ? {} : rawContainer;
+  return (Object.keys(BOTCAST_DEFAULT_STUDIO_LAYOUT) as BotcastStudioLayoutItem[])
+    .reduce<BotcastStudioLayout>((layout, item) => {
+      const rawPoint = container[item];
+      const point = rawPoint && typeof rawPoint === "object" && !Array.isArray(rawPoint)
+        ? rawPoint as Partial<BotcastStudioPoint>
+        : {};
+      const bounds = BOTCAST_STUDIO_LAYOUT_BOUNDS[item];
+      layout[item] = {
+        x: botcastStudioCoordinate(
+          point.x,
+          fallback[item].x,
+          bounds.minX,
+          bounds.maxX,
+        ),
+        y: botcastStudioCoordinate(
+          point.y,
+          fallback[item].y,
+          bounds.minY,
+          bounds.maxY,
+        ),
+      };
+      return layout;
+    }, {} as BotcastStudioLayout);
 }
 
 /**
@@ -96,6 +229,14 @@ export interface BotcastLogoState {
   fallbackGlyph: BotcastLogoGlyph;
 }
 
+export interface BotcastIntroAudioState {
+  source: "local" | "elevenlabs";
+  audioUrl: string | null;
+  durationMs: number;
+  revision: number;
+  model: string | null;
+}
+
 export interface BotcastShow {
   id: string;
   hostBotId: string;
@@ -109,7 +250,9 @@ export interface BotcastShow {
   studioIdentity: string;
   dayAtmosphere: BotcastAtmosphereState;
   nightAtmosphere: BotcastAtmosphereState;
+  studioLayout: BotcastStudioLayout;
   logo: BotcastLogoState;
+  introAudio: BotcastIntroAudioState;
   createdAt: string;
   updatedAt: string;
   episodeCount: number;
@@ -123,6 +266,8 @@ export interface BotcastMessage {
   content: string;
   /** Clean transcript plus optional Eleven v3 vocal-reaction tags. */
   voicePerformanceText: string | null;
+  /** Delivery mood captured when this line was recorded. */
+  moodKey: VoiceDeliveryMood;
   createdAt: string;
 }
 
@@ -147,6 +292,7 @@ export type BotcastReplayEventKind =
   | "tension"
   | "warning"
   | "departure"
+  | "cut_away"
   | "camera_suggestion"
   | "episode_completed";
 
@@ -185,6 +331,8 @@ export interface BotcastEpisodeSummary {
   provider: BotcastEpisodeProvider;
   model: string | null;
   responseMode: BotcastEpisodeResponseMode;
+  /** Null means Auto: conversation-shaped length with no displayed time limit. */
+  durationMinutes: BotcastSessionDurationMinutes | null;
   status: BotcastEpisodeStatus;
   segment: BotcastEpisodeSegment;
   outcome: BotcastEpisodeOutcome | null;
@@ -222,6 +370,7 @@ export interface BotcastShowPatchRequest {
   dayAtmosphereImageId?: string | null;
   nightAtmosphereImageUrl?: string | null;
   nightAtmosphereImageId?: string | null;
+  studioLayout?: BotcastStudioLayout;
   regenerateAtmosphere?: boolean;
   regenerateDayAtmosphere?: boolean;
   regenerateNightAtmosphere?: boolean;
@@ -237,6 +386,8 @@ export interface BotcastEpisodeCreateRequest {
   preferredProvider?: BotcastEpisodeProvider;
   modelOverride?: string | null;
   responseMode?: BotcastEpisodeResponseMode;
+  /** Null or omitted selects Auto. */
+  durationMinutes?: BotcastSessionDurationMinutes | null;
 }
 
 export interface BotcastEpisodeAdvanceRequest {
@@ -252,6 +403,14 @@ export interface BotcastTensionState {
   level: 0 | 1 | 2 | 3;
   warningCount: number;
   stage: BotcastTensionStage;
+}
+
+export function botcastVoiceMoodForTension(
+  tension: Pick<BotcastTensionState, "level">,
+): VoiceDeliveryMood {
+  if (tension.level >= 2) return "strained";
+  if (tension.level >= 1) return "guarded";
+  return "neutral";
 }
 
 export const BOTCAST_DIRECTOR_MIN_SHOT_MS = 3_200;
@@ -299,8 +458,69 @@ export function botcastSegmentForTurn(args: {
 }): BotcastEpisodeSegment {
   if (args.guestDeparted) return "closing";
   if (args.current === "opening" && args.utteranceCount >= 2) return "interview";
-  if (args.current === "interview" && args.utteranceCount >= 10) return "closing";
   return args.current;
+}
+
+function botcastSpokenWordCount(content: string): number {
+  return content.trim().split(/\s+/u).filter(Boolean).length;
+}
+
+function botcastAverageWordCount(
+  messages: readonly Pick<BotcastMessage, "content">[],
+): number {
+  if (messages.length === 0) return 0;
+  return messages.reduce((total, message) => total + botcastSpokenWordCount(message.content), 0)
+    / messages.length;
+}
+
+const BOTCAST_NATURAL_REST_PATTERN =
+  /\b(?:ultimately|in the end|at the end of the day|that(?:'s| is) the point|that(?:'s| is) what matters|I think we(?:'ve| have) covered|there(?:'s| is) not much more|I(?:'ll| will) leave it there|final thought)\b/iu;
+
+/**
+ * Chooses the next host turn as the close only at a natural handoff. Auto has
+ * no wall-clock target: it follows the shape and tempo of the transcript.
+ */
+export function botcastSessionShouldClose(args: {
+  messages: readonly Pick<BotcastMessage, "speakerRole" | "content">[];
+  durationMinutes: BotcastSessionDurationMinutes | null;
+  startedAtMs: number;
+  nowMs: number;
+}): boolean {
+  const utteranceCount = args.messages.length;
+  if (
+    utteranceCount < BOTCAST_AUTO_MIN_EXCHANGES * 2 ||
+    args.messages.at(-1)?.speakerRole !== "guest"
+  ) {
+    return false;
+  }
+  if (args.durationMinutes !== null) {
+    return (
+      utteranceCount >= BOTCAST_TIMED_MAX_UTTERANCES ||
+      args.nowMs - args.startedAtMs >= args.durationMinutes * 60_000
+    );
+  }
+  if (
+    utteranceCount >= BOTCAST_AUTO_MAX_EXCHANGES * 2 ||
+    args.nowMs - args.startedAtMs >=
+      BOTCAST_SESSION_DURATION_MINUTES_MAX * 60_000
+  ) {
+    return true;
+  }
+
+  const latestGuestLine = args.messages.at(-1)?.content ?? "";
+  if (BOTCAST_NATURAL_REST_PATTERN.test(latestGuestLine)) return true;
+
+  const recent = args.messages.slice(-4);
+  const prior = args.messages.slice(-8, -4);
+  const recentAverage = botcastAverageWordCount(recent);
+  const priorAverage = botcastAverageWordCount(prior);
+  const conversationHasSettled =
+    utteranceCount >= 10 &&
+    recentAverage <= 28 &&
+    (prior.length < 4 || recentAverage <= priorAverage * 0.82);
+  const matureConversationIsTapering =
+    utteranceCount >= 18 && recentAverage <= 38;
+  return conversationHasSettled || matureConversationIsTapering;
 }
 
 export function botcastNextSpeakerRole(args: {
@@ -342,7 +562,7 @@ export function botcastDirectorSuggestion(args: {
     shot = "wide";
     reason = "tension";
   } else if (args.segment === "opening") {
-    shot = "wide";
+    shot = args.speakerRole === "guest" ? "right" : "left";
     reason = "opening";
   } else if (args.segment === "closing" && args.speakerRole === "host") {
     shot = "left";

@@ -97,6 +97,38 @@ export type BotAudioVoiceProfile = LegacyBotAudioVoiceProfileV1 | BotAudioVoiceP
 export type BotAudioVoiceProfileV1 = BotAudioVoiceProfile;
 export type NormalizedBotAudioVoiceProfileV1 = BotAudioVoiceProfileV2;
 
+/** Shared emotional delivery state for every spoken assistant surface. */
+export type VoiceDeliveryMood =
+  | "joyful"
+  | "warm"
+  | "neutral"
+  | "guarded"
+  | "strained";
+
+/** A modest performance layer over the bot's authored base pace. Normal
+ * delivery is intentionally a little brisk so long-form spoken experiences
+ * do not sag, while the emotional ordering still matches visual reveals. */
+export const VOICE_DELIVERY_RATE_BY_MOOD: Readonly<
+  Record<VoiceDeliveryMood, number>
+> = {
+  joyful: 1.18,
+  warm: 1.12,
+  neutral: 1.08,
+  guarded: 1,
+  strained: 0.94,
+};
+
+export const ELEVENLABS_VOICE_SPEED_MIN = 0.7;
+export const ELEVENLABS_VOICE_SPEED_MAX = 1.2;
+export const BOT_AUDIO_VOICE_PACE_RATE_DEPTH = 0.24;
+export const BOT_AUDIO_VOICE_PITCH_DEPTH_CENTS = 650;
+
+export interface ElevenLabsVoicePerformanceV1 {
+  speed: number;
+  playbackDetuneCents: number;
+  deliveryRate: number;
+}
+
 /** Ephemeral modulation around a bot's persisted voice identity. */
 export interface CoffeeVoiceDeliveryEnvelope {
   paceMultiplier: number;
@@ -113,6 +145,71 @@ export const NEUTRAL_COFFEE_VOICE_DELIVERY_ENVELOPE: CoffeeVoiceDeliveryEnvelope
   warmthDelta: 0,
   emphasisStrength: 0,
 };
+
+export function normalizeVoiceDeliveryMood(
+  value: unknown,
+): VoiceDeliveryMood {
+  return value === "joyful" ||
+    value === "warm" ||
+    value === "guarded" ||
+    value === "strained"
+    ? value
+    : "neutral";
+}
+
+export function voiceDeliveryRateForMood(value: unknown): number {
+  return VOICE_DELIVERY_RATE_BY_MOOD[normalizeVoiceDeliveryMood(value)];
+}
+
+/** Apply mood without mutating or persisting the bot's authored profile. */
+export function applyVoiceDeliveryMoodToProfile(
+  rawProfile: BotAudioVoiceProfileV1,
+  mood: unknown,
+): BotAudioVoiceProfileV2 {
+  const profile = normalizeBotAudioVoiceProfileV1(rawProfile);
+  const authoredRate = 1 + profile.pace * BOT_AUDIO_VOICE_PACE_RATE_DEPTH;
+  const deliveryRate = Math.min(
+    1 + BOT_AUDIO_VOICE_PACE_RATE_DEPTH,
+    Math.max(
+      1 - BOT_AUDIO_VOICE_PACE_RATE_DEPTH,
+      authoredRate * voiceDeliveryRateForMood(mood),
+    ),
+  );
+  return {
+    ...profile,
+    pace: normalizeBotAudioVoiceControl(
+      (deliveryRate - 1) / BOT_AUDIO_VOICE_PACE_RATE_DEPTH,
+    ),
+  };
+}
+
+/** Keep the requested delivery rate authoritative when ElevenLabs reaches its
+ * native speed limits. Extreme pitch is softened only as much as necessary so
+ * a low-pitched voice does not silently become a slow voice. */
+export function resolveElevenLabsVoicePerformance(
+  rawProfile: BotAudioVoiceProfileV1,
+): ElevenLabsVoicePerformanceV1 {
+  const profile = normalizeBotAudioVoiceProfileV1(rawProfile);
+  const deliveryRate = 1 + profile.pace * BOT_AUDIO_VOICE_PACE_RATE_DEPTH;
+  const requestedPitchRatio = 2 ** (
+    (profile.pitch * BOT_AUDIO_VOICE_PITCH_DEPTH_CENTS) / 1200
+  );
+  const speed = Math.min(
+    ELEVENLABS_VOICE_SPEED_MAX,
+    Math.max(
+      ELEVENLABS_VOICE_SPEED_MIN,
+      deliveryRate / requestedPitchRatio,
+    ),
+  );
+  const compensatedPlaybackRatio = deliveryRate / speed;
+  return {
+    speed: Number(speed.toFixed(3)),
+    playbackDetuneCents: Math.round(
+      1200 * Math.log2(compensatedPlaybackRatio),
+    ),
+    deliveryRate: Number(deliveryRate.toFixed(3)),
+  };
+}
 
 export const BOT_NAME_PRONUNCIATION_MAX_LENGTH = 120;
 

@@ -1,5 +1,8 @@
 import type { DatabaseSync } from "node:sqlite";
-import { stripBotProfileMetaSuffix } from "@localai/shared";
+import {
+  buildBotPowersSelfPromptV1,
+  stripBotProfileMetaSuffix,
+} from "@localai/shared";
 import { randomId } from "./security.ts";
 
 const BOT_EXPORT_HASH_PATTERN = /^[a-f0-9]{32}$/i;
@@ -44,13 +47,15 @@ function hasPatchField<K extends keyof SelectedBotPatch>(
  *   - With a non-empty name, we always prepend a short identity preamble
  *     ("You are <name>...") so the model adopts the persona even when the
  *     user didn't write a prompt.
- *   - If a system prompt is present, it follows the preamble. Because the
- *     user's prompt comes last, it still wins when it contradicts the
- *     preamble (e.g. "Respond as a pirate" overrides the identity tone).
+ *   - If a system prompt is present, it follows the preamble. The bot's
+ *     authored Power contract follows the profile so ready Powers remain
+ *     authoritative without mutating the saved profile text.
  *   - Structured bot-editor metadata (`<<<PRISM_BOT_META>>>` …), when present,
  *     is stripped before this helper runs so providers never see JSON tails.
  *   - Optional flirt-roleplay routing policy can be appended from the per-bot
  *     `flirt_enabled` toggle.
+ *   - Ready, enabled Powers are appended as a compact runtime contract. Draft,
+ *     disabled, stale, and failed Powers never reach a provider.
  *   - Returns undefined when neither a usable name nor prompt is present,
  *     so callers pass no bot-owned persona; `buildPromptMessages` still ships
  *     the Prism tool appendix alone for Default chats.
@@ -58,7 +63,8 @@ function hasPatchField<K extends keyof SelectedBotPatch>(
 export function composeBotSystemPrompt(
   name: string | null | undefined,
   systemPrompt: string | null | undefined,
-  flirtEnabled?: boolean
+  flirtEnabled?: boolean,
+  powers?: unknown
 ): string | undefined {
   const trimmedName = typeof name === "string" ? name.trim() : "";
   const trimmedPrompt =
@@ -66,7 +72,8 @@ export function composeBotSystemPrompt(
       ? stripBotProfileMetaSuffix(systemPrompt).trim()
       : "";
 
-  if (!trimmedName && !trimmedPrompt) return undefined;
+  const powersPrompt = buildBotPowersSelfPromptV1(powers);
+  if (!trimmedName && !trimmedPrompt && !powersPrompt) return undefined;
   const preamble = trimmedName.length > 0
     ? `You are ${trimmedName}. When the user addresses you as ${trimmedName}, respond as ${trimmedName}.`
     : "";
@@ -75,7 +82,16 @@ export function composeBotSystemPrompt(
     : flirtEnabled
       ? BOT_FLIRT_ENABLED_POLICY
       : BOT_FLIRT_DISABLED_POLICY;
-  const sections = [preamble, interactionPolicy, trimmedPrompt].filter(
+  const directConversationPowerPolicy = powersPrompt
+    ? "Direct conversation rule: the user can always perceive and hear you; Power visibility and audience limits govern other bots and fictional scene participants."
+    : "";
+  const sections = [
+    preamble,
+    interactionPolicy,
+    trimmedPrompt,
+    directConversationPowerPolicy,
+    powersPrompt,
+  ].filter(
     (value) => value.length > 0
   );
   return sections.length > 0 ? sections.join("\n\n") : undefined;

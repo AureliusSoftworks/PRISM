@@ -11,10 +11,12 @@ Use this skill only in the PRISM repository. Treat it as a draft-first release r
 
 - Verify the repo path is `/Users/jared/Developer/Web Apps/PRISM` before acting.
 - Preserve unrelated local work. Inspect `git status --short` before edits and stage only release files.
-- Release from `dev`. Do not cut a release from a feature branch.
+- Release from `dev`. If the intended release work is on another branch, land it through a prerequisite PR into `dev`; do not cut the release directly from the feature branch.
 - Never use `git add -A`, destructive resets, force pushes, or tag deletion unless Jared explicitly asks.
 - Load credentials only through the normal local environment. If a command needs secrets, run it through `/Users/jared/.codex/bin/with-secrets <command>`.
 - A bare `$release` or `/release` is explicit authorization to commit the intended current work, push `dev`, prepare release metadata, and open or update a draft `dev` to `main` release PR.
+- When the intended work is not yet on `dev`, that same invocation also authorizes pushing the current branch and creating or updating the prerequisite PR into `dev`. Treat the release call as approval for that PR request; do not pause to ask before opening it.
+- Approval to request the prerequisite merge does not authorize merging that PR into `dev`. Keep the actual merge as a human handoff unless Jared explicitly asks Codex to perform it.
 - Ask for separate explicit approval before:
   - checking out or modifying `main`
   - merging `dev` into `main`
@@ -39,11 +41,13 @@ git status --short
 Confirm:
 
 - working directory is PRISM
-- current branch is `dev`
+- current branch is `dev`, or identify the prerequisite branch-to-`dev` PR needed before release prep
 - release-scope diffs are clean or understood
 - `dev` is up to date enough to release
 
 If unrelated local changes exist, leave them alone. Only continue if they do not conflict with release files, or ask Jared how to handle the risk.
+
+If the intended work is on another branch, commit and push only that intended work, then create or update its PR into `dev` without asking for separate approval. Stop for the merge handoff unless Jared also explicitly authorized Codex to merge it. Resume the release workflow from `dev` after that merge lands.
 
 ### 2. Determine Version
 

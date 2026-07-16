@@ -115,7 +115,7 @@ describe("coffee cup sprites", () => {
     }
   });
 
-  it("suppresses ambient and explicit sipping while a bot is thinking", () => {
+  it("suppresses ambient and explicit sipping while a bot is speaking or thinking", () => {
     assert.equal(
       coffeeCupSippingActive({
         seed: "thinking-cup",
@@ -140,8 +140,16 @@ describe("coffee cup sprites", () => {
       sippingOverride: true,
       thinking: false,
     });
+    const speaking = buildCoffeeCupVisualState({
+      seed: "speaking-cup",
+      nowMs: 10_000,
+      progressOverride: 0.4,
+      sippingOverride: true,
+      speaking: true,
+    });
 
     assert.equal(thinking.sipping, false);
+    assert.equal(speaking.sipping, false);
     assert.equal(idle.sipping, true);
     assert.equal(thinking.frameIndex, idle.frameIndex);
   });

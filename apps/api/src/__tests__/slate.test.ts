@@ -12,6 +12,7 @@ import {
   rejectSlateRevision,
   resolveSlateAccountDefaults,
   resolveSlateProjectSparkWildcards,
+  SlateShapeWriteConflictError,
   updateSlateProject,
 } from "../slate.ts";
 import {
@@ -23,7 +24,14 @@ import {
   LocalOllamaProvider,
   OpenAiProvider,
   selectProvider,
+  type LlmProvider,
 } from "../providers.ts";
+import {
+  getSlateProjectSection,
+  listSlateProjectSections,
+  saveSlateProjectSection,
+  SlateSectionAiWriteConflictError,
+} from "../slate-continuity.ts";
 
 function seedUser(db: DatabaseSync, id: string): void {
   db.prepare(
@@ -43,6 +51,40 @@ function scene(id = "scene-1") {
     direction: "Keep the discovery intimate.",
     status: "planned" as const,
     locked: false,
+  };
+}
+
+function createDelayedProvider(response: string): {
+  provider: LlmProvider;
+  started: Promise<void>;
+  release: () => void;
+  callCount: () => number;
+} {
+  let release!: () => void;
+  let markStarted!: () => void;
+  let calls = 0;
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve;
+  });
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return {
+    provider: {
+      name: "local",
+      async generateResponse() {
+        calls += 1;
+        markStarted();
+        await gate;
+        return response;
+      },
+      async embedText() {
+        return [];
+      },
+    },
+    started,
+    release,
+    callCount: () => calls,
   };
 }
 
@@ -188,6 +230,332 @@ describe("Slate persistence and writing operations", () => {
     assert.equal(provider.calls.length, 2);
   });
 
+  it("refuses to Shape over locked author material before calling the model", async () => {
+    const project = createSlateProject(db, "user-1", {
+      title: "Glass City",
+      spark: "A buried future calls its architect.",
+    });
+    updateSlateProject(db, "user-1", project.id, {
+      structure: [{ ...scene(), locked: true }],
+    });
+    const provider = createDeterministicProvider([
+      JSON.stringify({ premise: "Must not be used." }),
+    ]);
+
+    await assert.rejects(
+      generateSlateShape(db, "user-1", project.id, {
+        provider,
+        providerName: "local",
+        model: "llama3.2",
+      }),
+      (error: unknown) =>
+        error instanceof SlateShapeWriteConflictError &&
+        error.reason === "locked",
+    );
+    assert.equal(provider.calls.length, 0);
+    assert.equal(getSlateProject(db, "user-1", project.id).structure[0]?.locked, true);
+  });
+
+  it("keeps author edits made while Shape is in flight", async () => {
+    const project = createSlateProject(db, "user-1", {
+      title: "Glass City",
+      spark: "A buried future calls its architect.",
+    });
+    updateSlateProject(db, "user-1", project.id, {
+      premise: "The writer's first premise.",
+      direction: "Keep the city unknowable.",
+      structure: [scene()],
+    });
+    const delayed = createDelayedProvider(
+      JSON.stringify({
+        premise: "A generated premise that arrived too late.",
+        voice: "Generated voice.",
+        nonNegotiables: [],
+        structure: [
+          {
+            kind: "scene",
+            title: "Replacement",
+            summary: "This must not replace the writer's plan.",
+            direction: "Overwrite it.",
+          },
+        ],
+        characters: [],
+        unresolvedThreads: [],
+      }),
+    );
+    const shaping = generateSlateShape(db, "user-1", project.id, {
+      provider: delayed.provider,
+      providerName: "local",
+      model: "llama3.2",
+    });
+
+    await delayed.started;
+    const section = listSlateProjectSections(db, "user-1", project.id)[0]!;
+    saveSlateProjectSection(db, "user-1", project.id, section.id, {
+      expectedRevision: section.revision,
+      mutationId: "writer-during-shape",
+      prose: "The writer opened the scene while Slate was still thinking.",
+      lockedRanges: [
+        { id: "writer-lock", start: 0, end: 10, label: "Writer opening" },
+      ],
+    });
+    updateSlateProject(db, "user-1", project.id, {
+      premise: "The writer's newer premise.",
+      direction: "Follow the writer's newer direction.",
+      structure: [{ ...scene(), summary: "The writer's revised plan.", locked: true }],
+    });
+    delayed.release();
+
+    await assert.rejects(
+      shaping,
+      (error: unknown) =>
+        error instanceof SlateShapeWriteConflictError &&
+        error.code === "slate_shape_write_conflict" &&
+        error.reason === "locked",
+    );
+    const reopened = getSlateProject(db, "user-1", project.id);
+    assert.equal(reopened.premise, "The writer's newer premise.");
+    assert.equal(reopened.direction, "Follow the writer's newer direction.");
+    assert.equal(reopened.structure[0]?.summary, "The writer's revised plan.");
+    assert.equal(reopened.structure[0]?.locked, true);
+    assert.match(reopened.manuscript, /writer opened the scene/i);
+    assert.equal(reopened.lastProvider, null);
+    assert.equal(delayed.callCount(), 1);
+  });
+
+  it("rejects a stale Shape when unlocked premise, direction, or structure changes", async () => {
+    const project = createSlateProject(db, "user-1", {
+      title: "Glass City",
+      spark: "A buried future calls its architect.",
+    });
+    updateSlateProject(db, "user-1", project.id, { structure: [scene()] });
+    const delayed = createDelayedProvider(
+      JSON.stringify({
+        premise: "Late generated premise.",
+        voice: "Late generated voice.",
+        nonNegotiables: [],
+        structure: [
+          {
+            kind: "scene",
+            title: "Late Plan",
+            summary: "This result is stale.",
+            direction: "Do not commit it.",
+          },
+        ],
+        characters: [],
+        unresolvedThreads: [],
+      }),
+    );
+    const shaping = generateSlateShape(db, "user-1", project.id, {
+      provider: delayed.provider,
+      providerName: "local",
+      model: "llama3.2",
+    });
+
+    await delayed.started;
+    updateSlateProject(db, "user-1", project.id, {
+      premise: "The writer changed the premise.",
+      direction: "The writer changed the direction.",
+      structure: [
+        {
+          ...scene(),
+          summary: "The writer changed the unlocked plan.",
+        },
+      ],
+    });
+    delayed.release();
+
+    await assert.rejects(
+      shaping,
+      (error: unknown) =>
+        error instanceof SlateShapeWriteConflictError &&
+        error.reason === "structure_changed",
+    );
+    const reopened = getSlateProject(db, "user-1", project.id);
+    assert.equal(reopened.premise, "The writer changed the premise.");
+    assert.equal(reopened.direction, "The writer changed the direction.");
+    assert.equal(
+      reopened.structure[0]?.summary,
+      "The writer changed the unlocked plan.",
+    );
+    assert.equal(reopened.lastProvider, null);
+  });
+
+  it("refuses to draft over existing writer prose without calling the model", async () => {
+    const project = createSlateProject(db, "user-1", {
+      title: "Glass City",
+      spark: "A buried future calls its architect.",
+    });
+    updateSlateProject(db, "user-1", project.id, { structure: [scene()] });
+    const section = listSlateProjectSections(db, "user-1", project.id)[0]!;
+    saveSlateProjectSection(db, "user-1", project.id, section.id, {
+      expectedRevision: section.revision,
+      mutationId: "writer-before-draft",
+      prose: "Mara put her own sentence on the page.",
+    });
+    const provider = createDeterministicProvider(["Slate must not replace this."]);
+
+    await assert.rejects(
+      draftSlateStructureItem(
+        db,
+        "user-1",
+        project.id,
+        scene().id,
+        "Continue.",
+        { provider, providerName: "local", model: "llama3.2" },
+      ),
+      (error: unknown) =>
+        error instanceof SlateSectionAiWriteConflictError &&
+        error.reason === "contains_prose",
+    );
+
+    assert.equal(provider.calls.length, 0);
+    assert.equal(
+      getSlateProjectSection(db, "user-1", project.id, section.id).prose,
+      "Mara put her own sentence on the page.",
+    );
+    assert.equal(getSlateProject(db, "user-1", project.id).structure[0]?.status, "planned");
+  });
+
+  it("refuses to draft a locked planned section without calling the model", async () => {
+    const project = createSlateProject(db, "user-1", {
+      title: "Glass City",
+      spark: "A buried future calls its architect.",
+    });
+    updateSlateProject(db, "user-1", project.id, {
+      structure: [{ ...scene(), locked: true }],
+    });
+    const section = listSlateProjectSections(db, "user-1", project.id)[0]!;
+    const provider = createDeterministicProvider(["Slate must not write here."]);
+
+    await assert.rejects(
+      draftSlateStructureItem(
+        db,
+        "user-1",
+        project.id,
+        scene().id,
+        "Draft it.",
+        { provider, providerName: "local", model: "llama3.2" },
+      ),
+      (error: unknown) =>
+        error instanceof SlateSectionAiWriteConflictError && error.reason === "locked",
+    );
+
+    assert.equal(provider.calls.length, 0);
+    assert.equal(
+      getSlateProjectSection(db, "user-1", project.id, section.id).prose,
+      "",
+    );
+  });
+
+  it("keeps edits and locks made while an AI draft is in flight", async () => {
+    const project = createSlateProject(db, "user-1", {
+      title: "Glass City",
+      spark: "A buried future calls its architect.",
+    });
+    updateSlateProject(db, "user-1", project.id, { structure: [scene()] });
+    const section = listSlateProjectSections(db, "user-1", project.id)[0]!;
+    const delayed = createDelayedProvider("Generated prose that arrived too late.");
+    const draft = draftSlateStructureItem(
+      db,
+      "user-1",
+      project.id,
+      scene().id,
+      "Continue.",
+      { provider: delayed.provider, providerName: "local", model: "llama3.2" },
+    );
+
+    await delayed.started;
+    saveSlateProjectSection(db, "user-1", project.id, section.id, {
+      expectedRevision: section.revision,
+      mutationId: "writer-during-draft",
+      prose: "The writer changed this while Slate was working.",
+      lockedRanges: [
+        { id: "writer-lock", start: 0, end: 10, label: "Keep this opening" },
+      ],
+    });
+    delayed.release();
+
+    await assert.rejects(
+      draft,
+      (error: unknown) =>
+        error instanceof SlateSectionAiWriteConflictError && error.reason === "changed",
+    );
+    assert.equal(delayed.callCount(), 1);
+    const reopened = getSlateProjectSection(db, "user-1", project.id, section.id);
+    assert.equal(reopened.prose, "The writer changed this while Slate was working.");
+    assert.deepEqual(reopened.lockedRanges, [
+      { id: "writer-lock", start: 0, end: 10, label: "Keep this opening" },
+    ]);
+    assert.equal(getSlateProject(db, "user-1", project.id).structure[0]?.status, "planned");
+    const aiSources = db
+      .prepare(
+        "SELECT COUNT(*) AS count FROM slate_continuity_sources WHERE section_id = ? AND kind = 'ai_draft'",
+      )
+      .get(section.id) as { count: number };
+    assert.equal(aiSources.count, 0);
+  });
+
+  it("re-anchors manuscript locks across direct insertions, deletions, and overlapping edits", () => {
+    const project = createSlateProject(db, "user-1", {
+      title: "Glass City",
+      spark: "A buried future calls its architect.",
+    });
+    updateSlateProject(db, "user-1", project.id, { structure: [scene()] });
+    const summary = listSlateProjectSections(db, "user-1", project.id)[0]!;
+    const original = "Hello world!";
+    const initial = saveSlateProjectSection(db, "user-1", project.id, summary.id, {
+      expectedRevision: summary.revision,
+      mutationId: "lock-anchor-original",
+      prose: original,
+      lockedRanges: [
+        { id: "locked-world", start: 6, end: 11, label: "Keep the world" },
+      ],
+    });
+
+    const inserted = saveSlateProjectSection(db, "user-1", project.id, summary.id, {
+      expectedRevision: initial.revision,
+      mutationId: "lock-anchor-insert",
+      prose: "Bright Hello world!",
+      // The browser may still send the coordinates from the previous prose.
+      lockedRanges: initial.lockedRanges,
+    });
+    assert.equal(
+      inserted.prose.slice(
+        inserted.lockedRanges[0]!.start,
+        inserted.lockedRanges[0]!.end,
+      ),
+      "world",
+    );
+
+    const deleted = saveSlateProjectSection(db, "user-1", project.id, summary.id, {
+      expectedRevision: inserted.revision,
+      mutationId: "lock-anchor-delete",
+      prose: "Hello world!",
+    });
+    assert.equal(
+      deleted.prose.slice(
+        deleted.lockedRanges[0]!.start,
+        deleted.lockedRanges[0]!.end,
+      ),
+      "world",
+    );
+
+    const overlapping = saveSlateProjectSection(db, "user-1", project.id, summary.id, {
+      expectedRevision: deleted.revision,
+      mutationId: "lock-anchor-overlap",
+      prose: "Hello wide world!",
+      lockedRanges: deleted.lockedRanges,
+    });
+    assert.equal(
+      overlapping.prose.slice(
+        overlapping.lockedRanges[0]!.start,
+        overlapping.lockedRanges[0]!.end,
+      ),
+      "wide world",
+    );
+  });
+
   it("persists revision previews and keeps reject and accept outcomes explicit", async () => {
     const project = createSlateProject(db, "user-1", {
       title: "Glass City",
@@ -228,8 +596,36 @@ describe("Slate persistence and writing operations", () => {
     );
     assert.equal(accepted.manuscript, "The pavement spoke Mara's name through every bolt in the plaza.");
     assert.equal(accepted.revisions[0]?.status, "accepted");
-    assert.equal(accepted.versions.length, 1);
+    assert.equal(accepted.versions.length, 2);
     assert.equal(accepted.versions[0]?.reason, "Before rewrite revision");
+    const acceptedSection = db
+      .prepare(
+        `SELECT prose, revision FROM slate_sections
+          WHERE project_id = ? AND user_id = ?`,
+      )
+      .get(project.id, "user-1") as { prose: string; revision: number };
+    assert.equal(
+      acceptedSection.prose,
+      "The pavement spoke Mara's name through every bolt in the plaza.",
+    );
+    assert.equal(acceptedSection.revision, 1);
+    const acceptedSource = db
+      .prepare(
+        `SELECT kind, authority, provider, model FROM slate_continuity_sources
+          WHERE project_id = ? AND user_id = ? AND source_revision = ?`,
+      )
+      .get(project.id, "user-1", acceptedSection.revision) as {
+      kind: string;
+      authority: string;
+      provider: string;
+      model: string;
+    };
+    assert.deepEqual({ ...acceptedSource }, {
+      kind: "accepted_revision",
+      authority: "ai",
+      provider: "local",
+      model: "llama3.2",
+    });
   });
 
   it("refuses to accept a stale proposal over newer human edits", async () => {

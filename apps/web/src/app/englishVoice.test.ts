@@ -5,6 +5,7 @@ import { DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1 } from "@localai/shared";
 import {
   elevenLabsEffectForEngine,
   readEnglishVoiceSynthesisClip,
+  resolveEnglishVoicePlaybackDetuneCents,
   resolveEnglishVoicePostProcessing,
 } from "./englishVoice.ts";
 
@@ -49,6 +50,19 @@ describe("English voice post processing", () => {
       lilt: 0,
     });
     assert.equal(processing.lowpassHz, 16000);
+  });
+
+  it("softens only the uncompensated low-pitch tail at ElevenLabs' speed ceiling", () => {
+    const profile = {
+      v: 1 as const,
+      baseVoiceId: "voice-1" as const,
+      pitch: -0.75,
+      warmth: 0,
+      pace: 0.333,
+      lilt: 0,
+    };
+    assert.equal(resolveEnglishVoicePlaybackDetuneCents(profile, "elevenlabs"), -183);
+    assert.equal(resolveEnglishVoicePlaybackDetuneCents(profile, "builtin"), -487);
   });
 });
 

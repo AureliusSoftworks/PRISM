@@ -37,6 +37,8 @@ export interface BottishPlan {
 
 export interface BottishPlaybackTiming {
   targetDurationMs?: number;
+  /** Ephemeral mood delivery rate; authored Bottish pace remains ignored. */
+  deliveryRate?: number;
 }
 
 const MEDIA_PLAY_START_TIMEOUT_MS = 1500;
@@ -223,6 +225,35 @@ export function fitBottishPlanToDuration(
       ),
       characterEndTimesSeconds: plan.alignment.characterEndTimesSeconds.map(
         (seconds) => seconds * scale
+      ),
+    },
+  };
+}
+
+export function scaleBottishPlanForDeliveryRate(
+  plan: BottishPlan,
+  rawDeliveryRate: number | undefined,
+): BottishPlan {
+  const deliveryRate = typeof rawDeliveryRate === "number" &&
+      Number.isFinite(rawDeliveryRate)
+    ? Math.max(0.76, Math.min(1.24, rawDeliveryRate))
+    : 1;
+  if (plan.durationMs <= 0 || Math.abs(deliveryRate - 1) < 0.001) return plan;
+  const scale = 1 / deliveryRate;
+  return {
+    notes: plan.notes.map((note) => ({
+      ...note,
+      startMs: Math.round(note.startMs * scale),
+      durationMs: Math.max(8, Math.round(note.durationMs * scale)),
+    })),
+    durationMs: Math.max(1, Math.round(plan.durationMs * scale)),
+    alignment: {
+      characters: [...plan.alignment.characters],
+      characterStartTimesSeconds: plan.alignment.characterStartTimesSeconds.map(
+        (seconds) => seconds * scale,
+      ),
+      characterEndTimesSeconds: plan.alignment.characterEndTimesSeconds.map(
+        (seconds) => seconds * scale,
       ),
     },
   };
@@ -825,7 +856,10 @@ export function enqueueBottishVoice(
     volume: normalizeBotVoiceVolume(globalVolume),
   };
   const plan = fitBottishPlanToDuration(
-    buildBottishPlan(text, playbackProfile, seed),
+    scaleBottishPlanForDeliveryRate(
+      buildBottishPlan(text, playbackProfile, seed),
+      timing?.deliveryRate,
+    ),
     timing?.targetDurationMs
   );
   queue = queue

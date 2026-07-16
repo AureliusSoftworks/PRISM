@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { ChatMode, ComfyUiWorkflowRegistration, SentGeneratedImagePayload } from "@localai/shared";
 import {
   composeVerbatimFirstImagePrompt,
+  buildBotPowersSelfPromptV1,
   isDisabledModelChoice,
 } from "@localai/shared";
 import { getAppConfig } from "@localai/config";
@@ -357,6 +358,7 @@ function isMissingComfyWorkflowError(error: unknown): boolean {
 type BotPersonaImageRow = {
   name: string;
   system_prompt: string;
+  powers_json: string | null;
 };
 
 export interface AssistantSentImageUserPrefs {
@@ -445,16 +447,20 @@ export async function runAssistantSentImageGeneration(args: {
   if (personaBotId) {
     botPersona = args.db
       .prepare(
-        `SELECT name, system_prompt
+        `SELECT name, system_prompt, powers_json
            FROM bots WHERE id = ? AND user_id = ?`
       )
       .get(personaBotId, args.userId) as BotPersonaImageRow | undefined;
     if (botPersona) {
+      const poweredSystemPrompt = [
+        botPersona.system_prompt,
+        buildBotPowersSelfPromptV1(botPersona.powers_json),
+      ].filter(Boolean).join("\n\n");
       if (subjectPolicy.allowPersonaPortrait) {
         promptForModel = composeVerbatimFirstImagePrompt({
           userPrompt: contextAwareUserPrompt,
           botName: botPersona.name,
-          systemPrompt: botPersona.system_prompt,
+          systemPrompt: poweredSystemPrompt,
           mode: "chat_balanced",
         });
         if (sceneOnlyHardConstraint) {
@@ -553,7 +559,12 @@ export async function runAssistantSentImageGeneration(args: {
   });
 
   const botNameForRecovery = botPersona?.name?.trim() || "Assistant";
-  const botPromptForRecovery = botPersona?.system_prompt?.trim() || "";
+  const botPromptForRecovery = botPersona
+    ? [
+        botPersona.system_prompt,
+        buildBotPowersSelfPromptV1(botPersona.powers_json),
+      ].filter(Boolean).join("\n\n").trim()
+    : "";
   const buildRepairPrompt = () =>
     inferImagePromptRepair({
       provider: args.promptRepairProvider,

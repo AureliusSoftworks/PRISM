@@ -729,6 +729,44 @@ describe("resolveNextSettings — secondaryOllamaHost", () => {
       /different IP address/
     );
   });
+
+  it("rejects public paired hosts so LOCAL cannot leave the private network", () => {
+    for (const secondaryOllamaHost of [
+      "https://public.example:11434",
+      "http://8.8.8.8:11434",
+      "http://203.0.113.8:11434",
+      "http://user:password@192.168.1.50:11434",
+    ]) {
+      assert.throws(
+        () => resolveNextSettings({ secondaryOllamaHost }, baseline()),
+        /loopback, private-LAN IP address, or \.local hostname/,
+      );
+    }
+  });
+
+  it("accepts private IPv4, unique-local IPv6, and mDNS paired hosts", () => {
+    assert.equal(
+      resolveNextSettings(
+        { secondaryOllamaHost: "10.42.0.12:11434" },
+        baseline(),
+      ).secondaryOllamaHost,
+      "http://10.42.0.12:11434",
+    );
+    assert.equal(
+      resolveNextSettings(
+        { secondaryOllamaHost: "http://[fd12:3456::9]:11434" },
+        baseline(),
+      ).secondaryOllamaHost,
+      "http://[fd12:3456::9]:11434",
+    );
+    assert.equal(
+      resolveNextSettings(
+        { secondaryOllamaHost: "http://writing-room.local:11434" },
+        baseline(),
+      ).secondaryOllamaHost,
+      "http://writing-room.local:11434",
+    );
+  });
 });
 
 describe("resolveNextSettings — comfyUiHost", () => {
@@ -757,6 +795,16 @@ describe("resolveNextSettings — comfyUiHost", () => {
 
   it("throws on malformed URL", () => {
     assert.throws(() => resolveNextSettings({ comfyUiHost: "http://" }, baseline()), /ComfyUI host/);
+  });
+
+  it("rejects public ComfyUI endpoints from the LOCAL image lane", () => {
+    assert.throws(
+      () => resolveNextSettings(
+        { comfyUiHost: "https://images.public.example" },
+        baseline(),
+      ),
+      /loopback, private-LAN IP address, or \.local hostname/,
+    );
   });
 });
 

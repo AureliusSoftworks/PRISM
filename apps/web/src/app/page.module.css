@@ -574,7 +574,7 @@
   background: rgba(255, 255, 255, 0.07);
   color: inherit;
   display: grid;
-  grid-template-columns: 42px minmax(0, 1fr);
+  grid-template-columns: 42px minmax(0, 1fr) auto;
   align-items: center;
   gap: 11px;
   padding: 10px;
@@ -993,12 +993,16 @@
 }
 
 .storyDialogueHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin-bottom: 9px;
   color: color-mix(in srgb, var(--accent, #9de7dd) 72%, currentColor);
   font-weight: 900;
 }
 
 .storyDialogueHeader small {
+  margin-left: auto;
   opacity: 0.65;
   text-transform: uppercase;
   font-size: 0.7rem;
@@ -24374,6 +24378,13 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   animation: none;
 }
 
+.signalBotPresencePlate > .botPowerSurfaceBadgeWrap {
+  position: absolute;
+  z-index: 6;
+  top: 8px;
+  right: 0;
+}
+
 .zenLiveBotPresenceBody {
   --zen-live-bot-body-frame-size: var(
     --zen-live-bot-avatar-body-size,
@@ -30548,6 +30559,13 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   white-space: nowrap;
   font-weight: 500;
   max-width: 11ch; /* bot names beyond ~11 chars ellipsize gracefully */
+}
+
+.composeBotTrigger .botPowerSurfaceBadge {
+  min-width: 20px;
+  height: 16px;
+  padding: 0 4px;
+  font-size: 8px;
 }
 
 .composeBotTrigger:disabled .composeBotTriggerGlyph,
@@ -44412,6 +44430,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   display: inline-flex;
   flex: 0 0 auto;
   outline: none;
+}
+
+.botPowerSurfaceBadgeWrap[data-passive="true"] {
+  pointer-events: none;
 }
 
 .botPowerSurfaceBadge {
@@ -68278,6 +68300,38 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   line-height: 1;
 }
 
+.coffeeDurationModePicker {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.coffeeDurationModePicker button {
+  border: 0;
+  border-radius: 6px;
+  padding: 6px 9px;
+  color: rgba(255, 255, 255, 0.58);
+  background: transparent;
+  font-size: 0.7rem;
+  font-weight: 780;
+  cursor: pointer;
+}
+
+.coffeeDurationModePicker button[data-active="true"] {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.13);
+}
+
+.coffeeDurationAutoNote {
+  color: rgba(255, 255, 255, 0.56);
+  font-size: 0.68rem;
+  line-height: 1.25;
+}
+
 .coffeeDurationSliderRange {
   color: rgba(255, 255, 255, 0.56);
   font-size: 0.68rem;
@@ -71071,6 +71125,24 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .themeLight.coffeeShell .coffeeDurationSliderRange {
+  color: var(--fg-muted);
+}
+
+.themeLight.coffeeShell .coffeeDurationModePicker {
+  border-color: var(--coffee-line);
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+}
+
+.themeLight.coffeeShell .coffeeDurationModePicker button {
+  color: var(--fg-muted);
+}
+
+.themeLight.coffeeShell .coffeeDurationModePicker button[data-active="true"] {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.themeLight.coffeeShell .coffeeDurationAutoNote {
   color: var(--fg-muted);
 }
 

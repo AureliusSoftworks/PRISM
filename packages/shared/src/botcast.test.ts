@@ -3,11 +3,14 @@ import { describe, it } from "node:test";
 
 import {
   BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT,
+  BOTCAST_DEFAULT_STUDIO_LAYOUT,
   BOTCAST_DIRECTOR_MIN_SHOT_MS,
   BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS,
   applyBotcastProducerCueToTension,
   botcastFallbackStudioAccentVariantForSeed,
   botcastCameraShotAt,
+  botcastCameraOffsetXPercent,
+  botcastCameraOffsetYPercent,
   botcastDirectorSuggestion,
   botcastGuestDepartureEligible,
   botcastGuestHasDepartedAt,
@@ -15,7 +18,10 @@ import {
   botcastReplayTimeline,
   botcastNextSpeakerRole,
   botcastSegmentForTurn,
+  botcastSessionShouldClose,
+  botcastVoiceMoodForTension,
   isBotcastFallbackStudioAccentVariant,
+  normalizeBotcastStudioLayout,
   type BotcastReplayEvent,
 } from "./botcast.ts";
 
@@ -49,7 +55,57 @@ describe("Signal studio relighting", () => {
   });
 });
 
+describe("Signal studio layout", () => {
+  it("defaults missing positions and clamps saved props inside the stage", () => {
+    assert.deepEqual(normalizeBotcastStudioLayout(undefined), BOTCAST_DEFAULT_STUDIO_LAYOUT);
+    assert.equal(BOTCAST_DEFAULT_STUDIO_LAYOUT.hostBot.y, 71.25);
+    assert.equal(BOTCAST_DEFAULT_STUDIO_LAYOUT.guestBot.y, 71.25);
+    assert.equal(BOTCAST_DEFAULT_STUDIO_LAYOUT.hostCup.y, 90);
+    assert.equal(BOTCAST_DEFAULT_STUDIO_LAYOUT.guestCup.y, 90);
+    assert.deepEqual(
+      normalizeBotcastStudioLayout({
+        hostBot: { x: 22.5, y: 64 },
+        guestBot: { x: 77.5, y: 64 },
+        hostCup: { x: 36.25, y: 80 },
+        guestCup: { x: 63.75, y: 80 },
+      }),
+      BOTCAST_DEFAULT_STUDIO_LAYOUT,
+    );
+    assert.deepEqual(
+      normalizeBotcastStudioLayout({
+        hostBot: { x: -40, y: 150 },
+        guestCup: { x: 42.1234, y: 60.5678 },
+      }),
+      {
+        ...BOTCAST_DEFAULT_STUDIO_LAYOUT,
+        hostBot: { x: 10, y: 82 },
+        guestCup: { x: 42.12, y: 60.57 },
+      },
+    );
+  });
+
+  it("centers close-ups on each saved bot position", () => {
+    const layout = normalizeBotcastStudioLayout({
+      hostBot: { x: 14, y: 42 },
+      guestBot: { x: 68, y: 75 },
+    });
+    assert.equal(botcastCameraOffsetXPercent("left", layout), 51.12);
+    assert.equal(botcastCameraOffsetXPercent("right", layout), -25.56);
+    assert.equal(botcastCameraOffsetXPercent("wide", layout), 0);
+    assert.equal(botcastCameraOffsetYPercent("left", layout), 18.46);
+    assert.equal(botcastCameraOffsetYPercent("right", layout), -28.4);
+    assert.equal(botcastCameraOffsetYPercent("wide", layout), 0);
+  });
+});
+
 describe("Botcast episode state", () => {
+  it("maps recorded tension into a stable voice-delivery mood", () => {
+    assert.equal(botcastVoiceMoodForTension({ level: 0 }), "neutral");
+    assert.equal(botcastVoiceMoodForTension({ level: 1 }), "guarded");
+    assert.equal(botcastVoiceMoodForTension({ level: 2 }), "strained");
+    assert.equal(botcastVoiceMoodForTension({ level: 3 }), "strained");
+  });
+
   it("moves through opening, interview, and closing with asymmetric turns", () => {
     assert.equal(
       botcastNextSpeakerRole({ messages: [], segment: "opening", guestDeparted: false }),
@@ -69,7 +125,7 @@ describe("Botcast episode state", () => {
     );
     assert.equal(
       botcastSegmentForTurn({ current: "interview", utteranceCount: 10, guestDeparted: false }),
-      "closing",
+      "interview",
     );
     assert.equal(
       botcastNextSpeakerRole({
@@ -79,6 +135,66 @@ describe("Botcast episode state", () => {
       }),
       null,
     );
+  });
+
+  it("lets Auto follow conversation tempo before closing at a safe ceiling", () => {
+    const messages = Array.from({ length: 8 }, (_, index) => ({
+      speakerRole: index % 2 === 0 ? "host" as const : "guest" as const,
+      content: "A substantial answer keeps opening another useful direction for the conversation tonight.",
+    }));
+    assert.equal(botcastSessionShouldClose({
+      messages,
+      durationMinutes: null,
+      startedAtMs: 0,
+      nowMs: 29 * 60_000,
+    }), false);
+    assert.equal(botcastSessionShouldClose({
+      messages,
+      durationMinutes: null,
+      startedAtMs: 0,
+      nowMs: 30 * 60_000,
+    }), true);
+    assert.equal(botcastSessionShouldClose({
+      messages: [
+        ...messages.slice(0, 5),
+        { speakerRole: "guest", content: "Ultimately, that is what matters." },
+      ],
+      durationMinutes: null,
+      startedAtMs: 0,
+      nowMs: 1,
+    }), true);
+    assert.equal(botcastSessionShouldClose({
+      messages: Array.from({ length: 30 }, (_, index) => ({
+        speakerRole: index % 2 === 0 ? "host" as const : "guest" as const,
+        content: "The subject remains active and unresolved across this exchange.",
+      })),
+      durationMinutes: null,
+      startedAtMs: 0,
+      nowMs: 1,
+    }), true);
+  });
+
+  it("uses elapsed time for a timed Signal session without ending before three exchanges", () => {
+    const twoExchanges = Array.from({ length: 4 }, (_, index) => ({
+      speakerRole: index % 2 === 0 ? "host" as const : "guest" as const,
+      content: "A line.",
+    }));
+    assert.equal(botcastSessionShouldClose({
+      messages: twoExchanges,
+      durationMinutes: 3,
+      startedAtMs: 0,
+      nowMs: 4 * 60_000,
+    }), false);
+    assert.equal(botcastSessionShouldClose({
+      messages: [
+        ...twoExchanges,
+        { speakerRole: "host", content: "One more question." },
+        { speakerRole: "guest", content: "One more answer." },
+      ],
+      durationMinutes: 3,
+      startedAtMs: 0,
+      nowMs: 4 * 60_000,
+    }), true);
   });
 
   it("requires resistance and a warning before departure", () => {
@@ -101,6 +217,22 @@ describe("Botcast episode state", () => {
 });
 
 describe("Botcast replay director", () => {
+  it("opens every episode on the host before dynamic direction takes over", () => {
+    assert.deepEqual(
+      botcastDirectorSuggestion({
+        atMs: 0,
+        speakerRole: "host",
+        segment: "opening",
+      }),
+      {
+        shot: "left",
+        reason: "opening",
+        atMs: 0,
+        minimumHoldMs: 3_200,
+      },
+    );
+  });
+
   it("holds short opposing lines instead of thrashing cameras", () => {
     const host = botcastDirectorSuggestion({
       atMs: 4_000,

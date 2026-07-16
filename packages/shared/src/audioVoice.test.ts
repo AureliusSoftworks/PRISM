@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   BOT_VOICE_TEXTURE_RECIPES,
+  VOICE_DELIVERY_RATE_BY_MOOD,
+  applyVoiceDeliveryMoodToProfile,
   applyBotNamePronunciations,
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
   botVoiceTextureIsModified,
@@ -13,6 +15,7 @@ import {
   normalizeElevenLabsVoiceEffect,
   normalizeOptionalBotAudioVoiceProfileV1,
   normalizeVoiceMode,
+  resolveElevenLabsVoicePerformance,
   parseStoredBotAudioVoiceProfileV1,
   serializeBotAudioVoiceProfileV1,
 } from "./audioVoice.ts";
@@ -39,6 +42,56 @@ describe("audio voice normalization", () => {
     assert.equal(normalizeVoiceMode("robot"), "mute");
     assert.equal(normalizeEnglishVoiceEngine("elevenlabs"), "elevenlabs");
     assert.equal(normalizeEnglishVoiceEngine("remote"), "builtin");
+  });
+
+  it("layers a bounded app-wide mood rate over the authored voice pace", () => {
+    assert.deepEqual(VOICE_DELIVERY_RATE_BY_MOOD, {
+      joyful: 1.18,
+      warm: 1.12,
+      neutral: 1.08,
+      guarded: 1,
+      strained: 0.94,
+    });
+    assert.equal(
+      applyVoiceDeliveryMoodToProfile(
+        { v: 1, baseVoiceId: "voice-1", pitch: 0, warmth: 0, pace: 0, lilt: 0 },
+        "joyful",
+      ).pace,
+      0.75,
+    );
+    assert.equal(
+      applyVoiceDeliveryMoodToProfile(
+        { v: 1, baseVoiceId: "voice-1", pitch: 0, warmth: 0, pace: 0, lilt: 0 },
+        "strained",
+      ).pace,
+      -0.25,
+    );
+    assert.equal(
+      applyVoiceDeliveryMoodToProfile(
+        { v: 1, baseVoiceId: "voice-1", pitch: 0, warmth: 0, pace: 1, lilt: 0 },
+        "joyful",
+      ).pace,
+      1,
+    );
+  });
+
+  it("preserves delivery tempo when low pitch exhausts ElevenLabs speed", () => {
+    const profile = applyVoiceDeliveryMoodToProfile(
+      {
+        v: 1,
+        baseVoiceId: "voice-1",
+        pitch: -0.75,
+        warmth: 0,
+        pace: 0,
+        lilt: 0,
+      },
+      "neutral",
+    );
+    assert.deepEqual(resolveElevenLabsVoicePerformance(profile), {
+      speed: 1.2,
+      playbackDetuneCents: -183,
+      deliveryRate: 1.08,
+    });
   });
   it("uses a deterministic portable profile and clamps controls", () => {
     assert.deepEqual(normalizeBotAudioVoiceProfileV1(undefined), DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1);

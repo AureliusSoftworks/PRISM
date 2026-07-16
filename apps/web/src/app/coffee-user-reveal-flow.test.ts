@@ -310,6 +310,13 @@ describe("coffee user reveal flow", () => {
     assert.equal(
       coffeeAutoplayWatchdogShouldWake({
         ...strandedRoom,
+        sessionEndsAtMs: null,
+      }),
+      true,
+    );
+    assert.equal(
+      coffeeAutoplayWatchdogShouldWake({
+        ...strandedRoom,
         sessionPhase: "arriving",
       }),
       true,
@@ -432,6 +439,13 @@ describe("coffee user reveal flow", () => {
       nowMs: 11_500,
     };
     assert.equal(coffeeAutoplayForceTurnShouldRun(activeRoom), true);
+    assert.equal(
+      coffeeAutoplayForceTurnShouldRun({
+        ...activeRoom,
+        sessionEndsAtMs: null,
+      }),
+      true,
+    );
     assert.equal(
       coffeeAutoplayForceTurnShouldRun({ ...activeRoom, nowMs: 11_499 }),
       false,
