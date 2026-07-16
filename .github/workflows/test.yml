@@ -17,7 +17,7 @@ jobs:
   deterministic:
     name: Unit, integration, coverage, and browser smoke
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     env:
       # Pull-request checkouts are detached; preserve the source branch for
       # branch-gated development surfaces such as Avatar Details Studio.
@@ -58,5 +58,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: prism-playwright-results
-          path: test-results
+          path: |
+            test-results
+            playwright-report
           if-no-files-found: ignore

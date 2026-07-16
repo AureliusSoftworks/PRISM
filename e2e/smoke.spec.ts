@@ -2015,11 +2015,11 @@ test.describe("PRISM desktop smoke", () => {
     await expect(
       page.locator(`[data-room-atmosphere-image-id="${firstImage.id}"]`),
     ).toBeVisible();
-    await page
-      .getByRole("button", {
-        name: `Replace or clear ${groupName}'s room atmosphere`,
-      })
-      .click();
+    const atmosphereButton = page.getByRole("button", {
+      name: `Replace or clear ${groupName}'s room atmosphere`,
+    });
+    await atmosphereButton.focus();
+    await atmosphereButton.press("Enter");
     const dialog = page.getByRole("dialog", {
       name: `${groupName} atmosphere`,
     });
