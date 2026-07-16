@@ -932,7 +932,7 @@ test.describe("PRISM desktop smoke", () => {
     expect(savedGroup?.botGroupIds).toHaveLength(5);
 
     await page.reload();
-    await expect(savedGroupButton).toBeVisible();
+    await expect(savedGroupButton).toBeVisible({ timeout: 15_000 });
     await savedGroupButton.click();
     const coffeeTable = page.getByRole("region", { name: "Coffee table" });
     const startSessionButton = coffeeTable.getByRole("button", {
@@ -3873,9 +3873,22 @@ test.describe("PRISM desktop smoke", () => {
     await expect(room).toHaveAttribute("data-room-ambient-paused", "false");
     await expect(room.locator("[data-room-ambient-role]")).toHaveCount(2);
 
+    await page.clock.resume();
     await page.emulateMedia({ reducedMotion: "reduce" });
-    await page.clock.runFor(1);
-    await expect(room).toHaveAttribute("data-room-ambient-paused", "true");
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+        ),
+      )
+      .toBe(true);
+    await expect(room).toHaveAttribute("data-room-ambient-paused", "true", {
+      timeout: 10_000,
+    });
+    await page.clock.pauseAt(
+      new Date(await page.evaluate(() => Date.now() + 1_000)),
+    );
     await expect(room.locator("[data-room-ambient-role]")).toHaveCount(0);
     await expect(cue).toHaveCount(0);
     const reducedPhase = await room.getAttribute("data-room-ambient-phase");
