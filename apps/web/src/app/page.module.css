@@ -1,8 +1,8 @@
 /* ── Theme tokens ──
    Near-neutral base: the app chrome avoids saturated color except where
-   `--accent` supplies it. Dark theme stays warm grayscale; light theme uses
-   low-chroma warm neutrals so the page reads softly instead of as a
-   blue-white sheet. When a bot is selected, `--accent` and
+   `--accent` supplies it. Light theme uses cool white and blue-gray materials
+   so PRISM reads as a luminous instrument rather than warm paper. When a bot
+   is selected, `--accent` and
    `--accent-text` are overridden inline on the app shell to the bot's
    color — every derived token below (hover, soft, glow, user bubble,
    ambient gradient) is built with `color-mix()` so they all recompute
@@ -21,15 +21,15 @@
   --bg-hover: #211e1b;
   --bg-active: #2b2723;
 
-  --fg: #eee7df;
-  --fg-muted: #938b82;
-  --fg-subtle: #625b53;
+  --fg: #edf3f8;
+  --fg-muted: #93a2af;
+  --fg-subtle: #667684;
 
   --line: #25211e;
   --line-strong: #342f2a;
 
   /* Grayscale default; overridden inline when a bot is selected. */
-  --accent: #d7cfc3;
+  --accent: #cbd8e3;
   --accent-hover: color-mix(in srgb, var(--accent) 88%, #ffffff 12%);
   --accent-soft: color-mix(in srgb, var(--accent) 18%, var(--bg) 82%);
   --accent-glow: color-mix(in srgb, var(--accent) 22%, transparent);
@@ -81,15 +81,15 @@
 
   /* Dark mode: keep AskQuestion backdrop neutral/shadowed (less intrusive). */
   --askq-rail-tone: #181512;
-  --askq-rail-heading: color-mix(in srgb, #f7efe4 92%, var(--fg));
+  --askq-rail-heading: color-mix(in srgb, #eff6fc 92%, var(--fg));
   --askq-rail-heading-shadow: rgba(0, 0, 0, 0.32);
-  --askq-chip-bg: color-mix(in srgb, #cabba8 14%, var(--bg-surface));
-  --askq-chip-bg-hover: color-mix(in srgb, #d8c8b3 22%, var(--bg-hover));
-  --askq-chip-border: color-mix(in srgb, #d8c7b2 38%, var(--line));
-  --askq-chip-border-hover: color-mix(in srgb, #e3d2bf 50%, var(--line));
-  --askq-chip-text: color-mix(in srgb, #f7efe4 88%, var(--fg));
-  --askq-chip-inset: color-mix(in srgb, #f7efe4 10%, transparent);
-  --askq-chip-focus: color-mix(in srgb, #eadcc9 54%, transparent);
+  --askq-chip-bg: color-mix(in srgb, #aabdcf 14%, var(--bg-surface));
+  --askq-chip-bg-hover: color-mix(in srgb, #b9ccdc 22%, var(--bg-hover));
+  --askq-chip-border: color-mix(in srgb, #b6c9d9 38%, var(--line));
+  --askq-chip-border-hover: color-mix(in srgb, #c7d8e6 50%, var(--line));
+  --askq-chip-text: color-mix(in srgb, #eff6fc 88%, var(--fg));
+  --askq-chip-inset: color-mix(in srgb, #eff6fc 10%, transparent);
+  --askq-chip-focus: color-mix(in srgb, #d5e3ee 54%, transparent);
 
   /* LOCAL/ONLINE crescent: the “lit” track slot (pure contrast behind the thumb). */
   --mode-toggle-track: #ffffff;
@@ -650,7 +650,7 @@
 
 .storyPrimaryButton {
   color: #0f1012;
-  background: linear-gradient(90deg, #f4f1e9, #a7f1e8, #c8bcff, #f1b3c5);
+  background: linear-gradient(90deg, #f2f7fb, #a7f1e8, #c8bcff, #f1b3c5);
 }
 
 .storySecondaryButton,
@@ -679,7 +679,7 @@
   overflow: hidden;
   background:
     linear-gradient(110deg, rgba(82, 201, 180, 0.12), transparent 34%),
-    linear-gradient(135deg, rgba(232, 230, 222, 0.72), rgba(38, 38, 42, 0.72));
+    linear-gradient(135deg, rgba(230, 239, 247, 0.72), rgba(38, 38, 42, 0.72));
   isolation: isolate;
 }
 
@@ -947,9 +947,9 @@
   height: 54px;
   transform: translate(-50%, -50%);
   border-radius: 8px;
-  border: 1px solid rgba(245, 241, 231, 0.62);
+  border: 1px solid rgba(237, 244, 250, 0.62);
   background: rgba(22, 22, 24, 0.42);
-  color: #f2ead9;
+  color: #edf4fa;
   display: grid;
   place-items: center;
   font-size: 1.45rem;
@@ -988,7 +988,7 @@
 
 .themeLight .storyDialogueBox {
   color: #19181d;
-  background: rgba(248, 246, 239, 0.78);
+  background: rgba(248, 251, 255, 0.78);
   border-color: rgba(32, 30, 35, 0.16);
 }
 
@@ -1105,7 +1105,7 @@
 
 .themeLight .storyOverlayPanel {
   color: #19181d;
-  background: rgba(250, 247, 240, 0.82);
+  background: rgba(248, 252, 255, 0.82);
   border-color: rgba(32, 30, 35, 0.16);
 }
 
@@ -1121,7 +1121,7 @@
       rgba(255, 255, 255, 0.07) 50%,
       transparent 53%
     ),
-    linear-gradient(145deg, rgba(230, 226, 214, 0.16), rgba(63, 62, 68, 0.18));
+    linear-gradient(145deg, rgba(225, 236, 245, 0.16), rgba(63, 62, 68, 0.18));
   border: 1px solid rgba(255, 255, 255, 0.12);
 }
 
@@ -1169,10 +1169,10 @@
 }
 
 .storyMapNode[data-current="true"] {
-  border-color: rgba(245, 241, 231, 0.78);
+  border-color: rgba(237, 244, 250, 0.78);
   box-shadow:
-    0 0 0 1px rgba(245, 241, 231, 0.28),
-    0 0 22px rgba(245, 241, 231, 0.18);
+    0 0 0 1px rgba(237, 244, 250, 0.28),
+    0 0 22px rgba(237, 244, 250, 0.18);
 }
 
 .storyMapNode:disabled {
@@ -1344,24 +1344,24 @@
 }
 
 .themeLight {
-  /* Crisp Paper light theme:
-     cleaner paper neutrals with just enough warmth to avoid a blue-white app
-     shell. Color is reserved for Prism accents, bot identity, and focus. */
-  --bg: #f4f2ee;
-  --bg-deep: #e6e1d9;
-  --bg-surface: #fffdf8;
+  /* Cool Instrument light theme:
+     neutral white and blue-gray glass keep the shell luminous. Warmth is
+     reserved for semantic accents, authored imagery, and bot identity. */
+  --bg: #edf5fc;
+  --bg-deep: #dce8f2;
+  --bg-surface: #f8fbff;
   --bg-elevated: #ffffff;
-  --bg-hover: #ebe7df;
-  --bg-active: #dcd5cb;
+  --bg-hover: #e8f1f9;
+  --bg-active: #d8e5ef;
 
-  --fg: #161514;
-  --fg-muted: #5f5b55;
-  --fg-subtle: #8d857b;
+  --fg: #172638;
+  --fg-muted: #5c7186;
+  --fg-subtle: #8496a6;
 
-  --line: #d8d1c8;
-  --line-strong: #bcb2a6;
+  --line: #cfdce7;
+  --line-strong: #b7c9d8;
 
-  --accent: #1f1d1b;
+  --accent: #172638;
   --accent-hover: color-mix(in srgb, var(--accent) 85%, #000000 15%);
   --accent-soft: color-mix(in srgb, var(--accent) 9%, var(--bg) 91%);
   --accent-glow: color-mix(in srgb, var(--accent) 11%, transparent);
@@ -1390,9 +1390,9 @@
   --prism-doto-face-weight: 700;
   --prism-doto-face-letter-spacing: 0.015em;
 
-  --shadow-sm: 0 1px 2px rgba(22, 21, 20, 0.08);
-  --shadow-md: 0 10px 30px rgba(22, 21, 20, 0.1);
-  --shadow-lg: 0 26px 58px rgba(22, 21, 20, 0.14);
+  --shadow-sm: 0 1px 2px rgba(23, 38, 56, 0.08);
+  --shadow-md: 0 10px 30px rgba(31, 74, 112, 0.1);
+  --shadow-lg: 0 26px 58px rgba(31, 74, 112, 0.14);
 
   --app-gradient:
     radial-gradient(
@@ -1411,7 +1411,7 @@
       transparent 62%
     );
 
-  --askq-rail-tone: color-mix(in srgb, var(--accent) 34%, #fffdf8 66%);
+  --askq-rail-tone: color-mix(in srgb, var(--accent) 34%, #f8fbff 66%);
   --askq-rail-heading: #000000;
   --askq-rail-heading-shadow: rgba(255, 255, 255, 0.56);
   --askq-chip-bg: color-mix(in srgb, #ffffff 82%, var(--bg-surface));
@@ -1422,7 +1422,7 @@
     var(--accent) 30%,
     var(--line-strong)
   );
-  --askq-chip-text: #13100d;
+  --askq-chip-text: #142437;
   --askq-chip-inset: color-mix(in srgb, #ffffff 54%, transparent);
   --askq-chip-focus: color-mix(in srgb, var(--accent) 28%, transparent);
 
@@ -4495,7 +4495,7 @@
 }
 
 .zenWallpaperStyleOptionButton[data-default="true"] .zenWallpaperStyleOrb {
-  color: #fffdf4;
+  color: #f8fbff;
   background:
     radial-gradient(
       circle at 38% 28%,
@@ -4667,7 +4667,7 @@
 .themeDark
   .zenWallpaperStyleOptionButton[data-default="true"]
   .zenWallpaperStyleOrb {
-  color: #fffdf4;
+  color: #f8fbff;
   background:
     radial-gradient(
       circle at 38% 28%,
@@ -6802,7 +6802,7 @@
 }
 
 .themeLight.appLayout[data-accent-active="true"] .newChatButton {
-  border-color: color-mix(in srgb, var(--accent-ink) 42%, #f3eee5 18%);
+  border-color: color-mix(in srgb, var(--accent-ink) 42%, #e4eef7 18%);
   background:
     radial-gradient(
       circle at 82% 50%,
@@ -6829,7 +6829,7 @@
 }
 
 .themeLight.appLayout[data-accent-active="true"] .newChatButton:hover {
-  border-color: color-mix(in srgb, var(--accent-ink) 50%, #f3eee5 24%);
+  border-color: color-mix(in srgb, var(--accent-ink) 50%, #e4eef7 24%);
   background:
     radial-gradient(
       circle at 82% 50%,
@@ -6911,12 +6911,12 @@
 }
 
 /* Light mode: clamp private-chat chroma to a darker ink so pale accents
-   (e.g. cyan) remain readable on ivory surfaces. */
+   (e.g. cyan) remain readable on cool white surfaces. */
 .themeLight .privateChatButton {
   --private-chat-ink: color-mix(
     in srgb,
     var(--private-chat-color, var(--fg)) 60%,
-    #17130f 40%
+    #172638 40%
   );
   border-color: var(--private-chat-ink);
   color: var(--private-chat-ink);
@@ -10292,16 +10292,22 @@
   padding-inline-end: calc(20px + env(safe-area-inset-right, 0px));
 }
 
-.slateHeader {
-  position: sticky;
-  top: 0;
+.sharedAppletHeader {
+  min-height: 66px;
   width: 100%;
+  height: 100%;
   box-sizing: border-box;
-  z-index: 180;
+  padding: 10px 14px;
   overflow: visible;
 }
 
-.slateHeader::after {
+.sharedAppletHeader[data-app-shell-header="true"] {
+  padding-block-start: calc(10px + env(safe-area-inset-top, 0px));
+  padding-inline-start: calc(14px + env(safe-area-inset-left, 0px));
+  padding-inline-end: calc(14px + env(safe-area-inset-right, 0px));
+}
+
+.sharedAppletHeader::after {
   content: "";
   position: absolute;
   right: 0;
@@ -10316,55 +10322,8 @@
     #2fd3e3,
     #7b5cff
   );
-  opacity: 0.64;
+  opacity: 0.44;
   pointer-events: none;
-}
-
-.slateHeaderContext {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: grid;
-  justify-items: center;
-  gap: 4px;
-  padding-inline: 12px;
-}
-
-.slateHeaderContext small {
-  overflow: hidden;
-  max-width: 30ch;
-  color: var(--fg-muted);
-  font-size: 0.66rem;
-  letter-spacing: 0.035em;
-  line-height: 1;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.slateHeaderActions {
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 6px;
-  flex: 0 0 auto;
-  margin-left: auto;
-}
-
-@media (max-width: 980px) {
-  .slateHeaderContext {
-    display: none;
-  }
-}
-
-@media (max-width: 720px) {
-  .slateHeader[data-app-shell-header="true"] {
-    flex-wrap: wrap;
-    padding: 10px 12px;
-  }
-
-  .slateHeaderActions {
-    width: 100%;
-    justify-content: space-between;
-  }
 }
 
 .chatHeaderComposeToolsRow {
@@ -11398,7 +11357,7 @@
       color-mix(in srgb, #ffffff 26%, transparent),
       transparent 74%
     ),
-    var(--bot-library-group-gradient), #fffaf2;
+    var(--bot-library-group-gradient), #f8fbff;
 }
 
 .themeLight .botGroupRoomAtmosphereBackdrop img {
@@ -11423,11 +11382,11 @@
       ellipse 76% 56% at 50% 44%,
       transparent 18%,
       color-mix(in srgb, #ffffff 16%, transparent) 74%,
-      color-mix(in srgb, #fffaf2 54%, transparent) 100%
+      color-mix(in srgb, #f8fbff 54%, transparent) 100%
     ),
     linear-gradient(
       180deg,
-      color-mix(in srgb, #fffaf2 44%, transparent),
+      color-mix(in srgb, #f8fbff 44%, transparent),
       transparent 24%,
       transparent 68%,
       color-mix(in srgb, var(--bg-surface) 74%, transparent)
@@ -11914,19 +11873,19 @@
   background:
     radial-gradient(
       ellipse 86% 58% at 12% 10%,
-      color-mix(in srgb, #fffdf8 84%, transparent),
+      color-mix(in srgb, #f8fbff 84%, transparent),
       transparent 74%
     ),
     radial-gradient(
       ellipse 82% 56% at 88% 20%,
-      color-mix(in srgb, #f2e4d2 46%, transparent),
+      color-mix(in srgb, #dcebf7 46%, transparent),
       transparent 76%
     ),
     linear-gradient(
       to bottom,
-      #fffaf2 0%,
-      color-mix(in srgb, var(--bg-surface) 88%, #f4e7d7 12%) 56%,
-      color-mix(in srgb, var(--bg) 90%, #e9d8c2 10%) 100%
+      #f8fbff 0%,
+      color-mix(in srgb, var(--bg-surface) 88%, #dceaf5 12%) 56%,
+      color-mix(in srgb, var(--bg) 90%, #ccdeec 10%) 100%
     );
 }
 
@@ -16973,7 +16932,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 /* Light mode needs a stronger edge treatment because warm bot colors sit on
-   warm ivory instead of near-black. Keep chat-picker fills soft, but lean
+   cool white instead of near-black. Keep chat-picker fills soft, but lean
    tile outlines slightly toward foreground so bright oranges/yellows remain
    legible. Editor previews use solid bot-color tiles and opt out above. */
 .themeLight .chatBotTile:not(.chatBotTileSolidSwatch) {
@@ -18263,7 +18222,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   .messages[data-chat-ephemeral="true"]
   .messageUser[data-command-display="prompt"]
   .markdownBody {
-  color: color-mix(in srgb, #fffaf2 90%, var(--fg));
+  color: color-mix(in srgb, #f8fbff 90%, var(--fg));
 }
 
 .themeLight.appLayout[data-chat-sidebar-hidden="true"]
@@ -20711,13 +20670,13 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   border-color: color-mix(
     in srgb,
     var(--message-context-accent, var(--accent-ink)) 30%,
-    #b9ad9d
+    #aec1d0
   );
-  background: #fffdf8;
-  color: #2b2118;
+  background: #f8fbff;
+  color: #172638;
   box-shadow:
     0 1px 0 rgba(255, 255, 255, 0.92) inset,
-    0 18px 42px rgba(50, 38, 25, 0.2);
+    0 18px 42px rgba(35, 61, 84, 0.18);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
@@ -20726,14 +20685,14 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   border-color: color-mix(
     in srgb,
     var(--message-context-accent, var(--accent-ink)) 22%,
-    #b9ad9d
+    #aec1d0
   );
   opacity: 0.44;
 }
 
 .themeLight .messageContextMenu button {
-  background: #fffaf1;
-  color: #2b2118;
+  background: #f4f9fd;
+  color: #172638;
 }
 
 .themeLight .messageContextMenu button:hover,
@@ -20742,17 +20701,17 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   border-color: color-mix(
     in srgb,
     var(--message-context-accent, var(--accent-ink)) 38%,
-    #c8b9a6
+    #b9cedd
   );
   background: color-mix(
     in srgb,
     var(--message-context-accent, var(--accent-ink)) 10%,
-    #fff7e8
+    #edf5fc
   );
 }
 
 .themeLight .messageContextMenu button:disabled {
-  color: #8b8175;
+  color: #718496;
   opacity: 1;
 }
 
@@ -21347,7 +21306,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
       color-mix(in srgb, #d9a800 8%, transparent) 0 20%,
       transparent 46%
     ),
-    color-mix(in srgb, #fffaf2 78%, transparent);
+    color-mix(in srgb, #f8fbff 78%, transparent);
 }
 
 .zenInitialThinkingOverlay[data-persona="bot"] {
@@ -21387,7 +21346,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
       color-mix(in srgb, var(--bot-ink, var(--fg)) 6%, transparent) 0 20%,
       transparent 46%
     ),
-    color-mix(in srgb, #fffaf2 78%, transparent);
+    color-mix(in srgb, #f8fbff 78%, transparent);
 }
 
 .zenInitialThinkingOverlay[data-phase="compact"] {
@@ -21454,11 +21413,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   border-color: color-mix(in srgb, var(--fg) 12%, transparent);
   background: linear-gradient(
     135deg,
-    color-mix(in srgb, #fffaf2 78%, transparent),
-    color-mix(in srgb, #f5ead9 88%, transparent)
+    color-mix(in srgb, #f8fbff 78%, transparent),
+    color-mix(in srgb, #e4eff8 88%, transparent)
   );
   box-shadow:
-    0 14px 30px rgba(67, 48, 28, 0.14),
+    0 14px 30px rgba(42, 79, 108, 0.14),
     0 0 30px color-mix(in srgb, #1aa6c3 10%, transparent),
     inset 0 1px 0 rgba(255, 255, 255, 0.56);
 }
@@ -22985,10 +22944,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   background: linear-gradient(
     to bottom,
     transparent 0%,
-    color-mix(in srgb, #fffaf2 62%, transparent) 20%,
-    color-mix(in srgb, #fffaf2 96%, transparent) 42%,
-    color-mix(in srgb, #fffaf2 94%, #f4e7d7 6%) 58%,
-    color-mix(in srgb, #fffaf2 94%, #f4e7d7 6%) 100%
+    color-mix(in srgb, #f8fbff 62%, transparent) 20%,
+    color-mix(in srgb, #f8fbff 96%, transparent) 42%,
+    color-mix(in srgb, #f8fbff 94%, #dceaf5 6%) 58%,
+    color-mix(in srgb, #f8fbff 94%, #dceaf5 6%) 100%
   );
   backdrop-filter: blur(7px) saturate(0.98);
   -webkit-backdrop-filter: blur(7px) saturate(0.98);
@@ -23048,9 +23007,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   .messagesFrame[data-chat-focus="true"]::after {
   background: linear-gradient(
     to bottom,
-    color-mix(in srgb, #fffaf2 96%, transparent) 0%,
-    color-mix(in srgb, #fffaf2 80%, transparent) 34%,
-    color-mix(in srgb, #fffaf2 30%, transparent) 72%,
+    color-mix(in srgb, #f8fbff 96%, transparent) 0%,
+    color-mix(in srgb, #f8fbff 80%, transparent) 34%,
+    color-mix(in srgb, #f8fbff 30%, transparent) 72%,
     transparent 100%
   );
   backdrop-filter: blur(24px) saturate(0.98);
@@ -25784,12 +25743,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .zenLiveBotPresencePlate[data-prism-persona="true"] {
-  --coffee-bot-color: #f7f7f2;
+  --coffee-bot-color: #f7fbff;
   --zen-live-bot-face-crt-border-color: #ffffff;
   --zen-live-bot-face-phosphor-ink: #ffffff;
   --zen-live-bot-face-ink: #ffffff;
   --zen-live-bot-glyph-ink: #ffffff;
-  --zen-live-bot-frame-tint-color: #f7f7f2;
+  --zen-live-bot-frame-tint-color: #f7fbff;
   --bot-face-frame-tint-background: conic-gradient(
     from 210deg at 50% 52%,
     rgba(255, 63, 111, 0.92),
@@ -25826,7 +25785,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --zen-presence-pill-border: color-mix(in srgb, #ffffff 18%, transparent);
   --zen-presence-pill-shadow:
     0 0 0 1px rgba(0, 0, 0, 0.58) inset, 0 14px 30px rgba(0, 0, 0, 0.5);
-  --zen-presence-pill-ink: #f7f7f2;
+  --zen-presence-pill-ink: #f7fbff;
 }
 
 .zenLiveBotPresencePlate[data-prism-persona="true"] .zenLiveBotPresenceFace {
@@ -25838,7 +25797,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .themeLight .zenLiveBotPresencePlate[data-prism-persona="true"],
 .zenLiveBotPresencePlate[data-theme="light"][data-prism-persona="true"] {
   --coffee-bot-color: #242a33;
-  --zen-live-bot-frame-tint-color: #f7f7f2;
+  --zen-live-bot-frame-tint-color: #f7fbff;
   --bot-face-frame-tint-filter: saturate(1.18) contrast(1.02);
   --bot-face-frame-tint-opacity: 0.84;
   --bot-face-frame-tint-talking-opacity-high: 0.94;
@@ -26986,9 +26945,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     ),
     radial-gradient(
       circle at 50% 62%,
-      color-mix(in srgb, #fffdf8 78%, var(--coffee-bot-color) 22%),
-      color-mix(in srgb, #f5eee4 70%, var(--coffee-bot-color) 30%) 66%,
-      color-mix(in srgb, #e8ded2 56%, var(--coffee-bot-color) 44%) 100%
+      color-mix(in srgb, #f8fbff 78%, var(--coffee-bot-color) 22%),
+      color-mix(in srgb, #e6f1fa 70%, var(--coffee-bot-color) 30%) 66%,
+      color-mix(in srgb, #d2e3ef 56%, var(--coffee-bot-color) 44%) 100%
     );
   --zen-presence-face-border: color-mix(
     in srgb,
@@ -27000,7 +26959,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --zen-presence-face-ink: var(--coffee-bot-color);
   --zen-presence-pill-bg: color-mix(
     in srgb,
-    #fffdf8 70%,
+    #f8fbff 70%,
     var(--coffee-bot-color) 30%
   );
   --zen-presence-pill-border: color-mix(
@@ -27030,7 +26989,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --zen-presence-face-shadow: none;
   --zen-presence-pill-bg: color-mix(
     in srgb,
-    #fffdf8 74%,
+    #f8fbff 74%,
     var(--coffee-bot-color) 26%
   );
   --zen-presence-pill-shadow:
@@ -28669,8 +28628,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   border-color: color-mix(in srgb, var(--accent) 36%, #ffffff 36%);
   background: linear-gradient(
     135deg,
-    color-mix(in srgb, #fffaf2 82%, var(--accent) 8%),
-    color-mix(in srgb, #fffaf2 68%, transparent)
+    color-mix(in srgb, #f8fbff 82%, var(--accent) 8%),
+    color-mix(in srgb, #f8fbff 68%, transparent)
   );
   color: color-mix(in srgb, var(--fg) 90%, #15120f 10%);
   box-shadow:
@@ -31804,12 +31763,12 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .themeDark .modeThumb {
   background: #0b0a09;
   box-shadow: 0 0 0 3px #0b0a09;
-  color: #eee7df;
+  color: #edf3f8;
 }
 
 .themeLight .modeThumb {
-  background: #faf3e9;
-  box-shadow: 0 0 0 3px #faf3e9;
+  background: #f8fbff;
+  box-shadow: 0 0 0 3px #f8fbff;
   color: #0b0a09;
 }
 
@@ -31894,12 +31853,12 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .themeDark .modeControl[data-protected="true"].modeControlLocked .modeThumb {
   background: #0b0a09;
   box-shadow: 0 0 0 3px #0b0a09;
-  color: #eee7df;
+  color: #edf3f8;
 }
 
 .themeLight .modeControl[data-protected="true"].modeControlLocked .modeThumb {
-  background: #faf3e9;
-  box-shadow: 0 0 0 3px #faf3e9;
+  background: #f8fbff;
+  box-shadow: 0 0 0 3px #f8fbff;
   color: #0b0a09;
 }
 
@@ -35916,7 +35875,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   .panelImages[data-image-scope="general"]
   .form
   button[type="submit"] {
-  border-color: color-mix(in srgb, var(--accent-ink) 42%, #f3eee5 18%);
+  border-color: color-mix(in srgb, var(--accent-ink) 42%, #e4eef7 18%);
   background:
     radial-gradient(
       circle at 82% 50%,
@@ -35950,7 +35909,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   .panelImages[data-image-scope="general"]
   .form
   button[type="submit"]:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--accent-ink) 50%, #f3eee5 24%);
+  border-color: color-mix(in srgb, var(--accent-ink) 50%, #e4eef7 24%);
   background:
     radial-gradient(
       circle at 82% 50%,
@@ -49645,15 +49604,15 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     inset 0 0 0 1px color-mix(in srgb, #ffffff 4%, transparent);
 }
 
-/* Light theme uses watercolor bubbles on cream paper, so the dark vignette
-   tuned for the dark theme would compete with them. Swap to a warm paper
+/* Light theme uses watercolor bubbles on cool white, so the dark vignette
+   tuned for the dark theme would compete with them. Swap to a blue-white
    wash that adds gentle depth without darkening the surround. */
 .themeLight .panelMemories[data-memory-scope="all"] .memoryBubbleCloud,
 .themeLight .panelMemories[data-memory-scope="default"] .memoryBubbleCloud {
   background:
     radial-gradient(
       ellipse 44% 34% at 76% 28%,
-      color-mix(in srgb, #fff8ef 60%, transparent),
+      color-mix(in srgb, #f5faff 60%, transparent),
       transparent 70%
     ),
     radial-gradient(
@@ -49663,7 +49622,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     ),
     radial-gradient(
       ellipse 40% 30% at 44% 74%,
-      color-mix(in srgb, #fff8ef 38%, transparent),
+      color-mix(in srgb, #f5faff 38%, transparent),
       transparent 70%
     ),
     radial-gradient(
@@ -49673,7 +49632,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     ),
     linear-gradient(
       135deg,
-      color-mix(in srgb, #fff8ef 30%, transparent),
+      color-mix(in srgb, #f5faff 30%, transparent),
       transparent 48%,
       color-mix(in srgb, #2a1d0e 5%, transparent)
     );
@@ -51199,7 +51158,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   letter-spacing: -0.025em;
   line-height: 1.16;
   /* Shadow color is computed in JS so a dark watercolor ink (light theme)
-     gets a soft paper highlight instead of a muddy dark smudge. Falls back
+     gets a soft white highlight instead of a muddy dark smudge. Falls back
      to the original ink-tinted shadow if the var is not present. */
   text-shadow: var(
     --memory-bubble-text-shadow,
@@ -54819,7 +54778,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   background: var(--bg-hover) !important;
 }
 
-/* ── Light Mode: Crisp Paper polish ───────────────────────────────────
+/* ── Light Mode: Cool Instrument polish ───────────────────────────────
    A late, light-only pass over the core shell. Keep this scoped to
    `.themeLight` so Dark Mode keeps its existing cinematic contrast. */
 .themeLight.authLayout {
@@ -54839,7 +54798,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
       color-mix(in srgb, #ff4d6d 3%, transparent),
       transparent 70%
     ),
-    linear-gradient(180deg, #f8f6f2 0%, var(--bg) 100%);
+    linear-gradient(180deg, #f7fbff 0%, var(--bg) 100%);
 }
 
 .themeLight .card,
@@ -55224,27 +55183,27 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .themeLight .panel.panelImages[data-image-scope="all"],
 .themeLight .panel.panelImages[data-image-scope="general"] {
-  --bg: #f4f2ee;
-  --bg-deep: #e6e1d9;
-  --bg-surface: #fffdf8;
+  --bg: #edf5fc;
+  --bg-deep: #dce8f2;
+  --bg-surface: #f8fbff;
   --bg-elevated: #ffffff;
-  --bg-hover: #ebe7df;
-  --bg-active: #dcd5cb;
-  --fg: #161514;
-  --fg-muted: #5f5b55;
-  --fg-subtle: #8d857b;
-  --line: #d8d1c8;
-  --line-strong: #bcb2a6;
-  --accent: #1f1d1b;
+  --bg-hover: #e8f1f9;
+  --bg-active: #d8e5ef;
+  --fg: #172638;
+  --fg-muted: #5c7186;
+  --fg-subtle: #8496a6;
+  --line: #cfdce7;
+  --line-strong: #b7c9d8;
+  --accent: #172638;
   --accent-hover: color-mix(in srgb, var(--accent) 85%, #000000 15%);
   --accent-soft: color-mix(in srgb, var(--accent) 9%, var(--bg) 91%);
   --accent-glow: color-mix(in srgb, var(--accent) 11%, transparent);
   --accent-text: #ffffff;
   --accent-ink: var(--accent);
-  --shadow-lg: 0 26px 58px rgba(22, 21, 20, 0.14);
+  --shadow-lg: 0 26px 58px rgba(31, 74, 112, 0.14);
   --images-panel-color: #20899a;
   --images-panel-ink: #126f7d;
-  --images-panel-text: #161514;
+  --images-panel-text: #172638;
   border-color: color-mix(
     in srgb,
     var(--images-panel-ink) 24%,
@@ -56281,7 +56240,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     color: color-mix(
       in srgb,
       var(--user-msg-tink, var(--accent-ink)) 26%,
-      color-mix(in srgb, #faf7f3 92%, var(--bg))
+      color-mix(in srgb, #f7fbff 92%, var(--bg))
     );
   }
 
@@ -58676,6 +58635,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   gap: 12px;
   overflow-x: hidden;
   overflow-y: auto;
+  overflow-anchor: none;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
   -webkit-overflow-scrolling: touch;
@@ -59208,28 +59168,28 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .coffeeStage[data-phase="selecting"][data-compact="true"]:not(
     [data-group-ready="true"]
   )
-  .coffeeSeat[data-seat="0"] {
+  .coffeeSeat:not([data-seat-count="4"])[data-seat="0"] {
   top: 8.5%;
 }
 
 .coffeeStage[data-phase="selecting"][data-compact="true"]:not(
     [data-group-ready="true"]
   )
-  .coffeeSeat[data-seat="1"] {
+  .coffeeSeat:not([data-seat-count="4"])[data-seat="1"] {
   left: 28%;
 }
 
 .coffeeStage[data-phase="selecting"][data-compact="true"]:not(
     [data-group-ready="true"]
   )
-  .coffeeSeat[data-seat="2"] {
+  .coffeeSeat:not([data-seat-count="4"])[data-seat="2"] {
   left: 72%;
 }
 
 .coffeeStage[data-phase="selecting"][data-compact="true"]:not(
     [data-group-ready="true"]
   )
-  .coffeeSeat[data-seat="3"] {
+  .coffeeSeat:not([data-seat-count="4"])[data-seat="3"] {
   left: 32%;
   top: 77%;
 }
@@ -59237,7 +59197,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .coffeeStage[data-phase="selecting"][data-compact="true"]:not(
     [data-group-ready="true"]
   )
-  .coffeeSeat[data-seat="4"] {
+  .coffeeSeat:not([data-seat-count="4"])[data-seat="4"] {
   left: 68%;
   top: 77%;
 }
@@ -61889,9 +61849,12 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     .coffeeSeatActionAnchor
   )[data-seat-count="4"][data-layout-seat="0"] {
   left: 18%;
-  top: calc(
-    40% - var(--coffee-experimental-seat-lift) -
-      var(--coffee-experimental-seat-extra-lift)
+  top: max(
+    calc(
+      48% - var(--coffee-experimental-seat-lift) -
+        var(--coffee-experimental-seat-extra-lift)
+    ),
+    calc(clamp(74px, 6.3cqw, 98px) - var(--coffee-canvas-y) + 10px)
   );
 }
 
@@ -61904,9 +61867,12 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     .coffeeSeatActionAnchor
   )[data-seat-count="4"][data-layout-seat="1"] {
   left: 82%;
-  top: calc(
-    40% - var(--coffee-experimental-seat-lift) -
-      var(--coffee-experimental-seat-extra-lift)
+  top: max(
+    calc(
+      48% - var(--coffee-experimental-seat-lift) -
+        var(--coffee-experimental-seat-extra-lift)
+    ),
+    calc(clamp(74px, 6.3cqw, 98px) - var(--coffee-canvas-y) + 10px)
   );
 }
 
@@ -62796,7 +62762,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .botFaceFrame {
-  --bot-face-frame-base-image: url("/bot-frame/bot-frame-base.png?v=1000");
+  --bot-face-frame-base-image: url("/bot-frame/bot-frame-base.png?v=1001");
   --bot-face-frame-tint-mask: url("/bot-frame/bot-frame-tint-mask.png?v=1000");
   --bot-face-metal-scratch-mask-image: url("/bot-frame/bot-frame-metal-mask.png?v=1000");
   --bot-face-metal-scratch-opacity: 0;
@@ -62897,7 +62863,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   background:
     var(
         --bot-face-frame-paint-substrate-image,
-        url("/bot-frame/bot-frame-base.png?v=1000")
+        url("/bot-frame/bot-frame-base.png?v=1001")
       )
       center / contain no-repeat,
     #a3a3a3;
@@ -63123,7 +63089,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .themeLight .botFaceFrame,
 .themeLight.coffeeShell .botFaceFrame,
 .zenLiveBotPresencePlate[data-theme="light"] .botFaceFrame {
-  --bot-face-frame-base-image: url("/bot-frame/bot-frame-light-base.png?v=1000");
+  --bot-face-frame-base-image: url("/bot-frame/bot-frame-light-base.png?v=1001");
   --bot-face-frame-wear-theme-gain: 0.9;
   --bot-face-frame-wear-background: linear-gradient(
     145deg,
@@ -63135,7 +63101,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .themeLight .botFaceFramePaintLayer,
 .themeLight.coffeeShell .botFaceFramePaintLayer,
 .zenLiveBotPresencePlate[data-theme="light"] .botFaceFramePaintLayer {
-  --bot-face-frame-paint-substrate-image: url("/bot-frame/bot-frame-light-base.png?v=1000");
+  --bot-face-frame-paint-substrate-image: url("/bot-frame/bot-frame-light-base.png?v=1001");
 }
 
 .messageMoodBadge .botFaceScreenGlass {
@@ -66841,21 +66807,14 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeTeamsStatusPanel {
-  position: fixed;
-  z-index: 145;
-  width: min(376px, calc(100vw - 24px));
-  min-width: min(230px, calc(100vw - 24px));
-  min-height: 190px;
-  max-width: calc(100vw - 24px);
-  max-height: min(74vh, 600px);
+  width: 100%;
+  min-width: 0;
   display: grid;
   gap: 9px;
-  overflow: auto;
-  resize: both;
   padding: 12px;
   box-sizing: border-box;
   container-type: inline-size;
-  border-radius: 16px;
+  border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.14);
   background:
     radial-gradient(
@@ -66870,27 +66829,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     ),
     rgba(9, 10, 13, 0.92);
   box-shadow:
-    0 18px 52px rgba(0, 0, 0, 0.46),
+    0 12px 32px rgba(0, 0, 0, 0.26),
     inset 0 1px 0 rgba(255, 255, 255, 0.07);
-  backdrop-filter: blur(16px);
-  pointer-events: auto;
-  scrollbar-gutter: stable;
-}
-
-.coffeeTeamsStatusPanel::after {
-  content: "";
-  position: absolute;
-  right: 7px;
-  bottom: 7px;
-  width: 12px;
-  height: 12px;
-  pointer-events: none;
-  opacity: 0.38;
-  background:
-    linear-gradient(135deg, transparent 50%, rgba(255, 255, 255, 0.7) 50%) 8px
-      8px / 4px 4px no-repeat,
-    linear-gradient(135deg, transparent 50%, rgba(255, 255, 255, 0.48) 50%) 4px
-      4px / 8px 8px no-repeat;
 }
 
 .coffeeTeamsStatusHeader {
@@ -66898,13 +66838,6 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  cursor: grab;
-  user-select: none;
-  touch-action: none;
-}
-
-.coffeeTeamsStatusHeader:active {
-  cursor: grabbing;
 }
 
 .coffeeTeamsStatusHeader > div {
@@ -66928,28 +66861,6 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   white-space: nowrap;
   color: rgba(255, 255, 255, 0.92);
   font-size: 0.8rem;
-}
-
-.coffeeTeamsStatusHeader button {
-  width: 28px;
-  height: 28px;
-  flex: 0 0 auto;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.86);
-  font: inherit;
-  font-size: 1rem;
-  font-weight: 800;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.coffeeTeamsStatusHeader button:hover,
-.coffeeTeamsStatusHeader button:focus-visible {
-  border-color: rgba(255, 255, 255, 0.28);
-  background: rgba(255, 255, 255, 0.12);
-  outline: none;
 }
 
 .coffeeTeamsScoreRow {
@@ -67344,88 +67255,14 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   }
 }
 
-.coffeeTeamsBubble {
-  position: fixed;
-  z-index: 145;
-  min-width: 74px;
-  height: 58px;
-  display: grid;
-  place-items: center;
-  gap: 2px;
-  padding: 0 12px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 190, 112, 0.36);
-  background:
-    radial-gradient(
-      circle at 30% 22%,
-      rgba(255, 255, 255, 0.26),
-      transparent 24%
-    ),
-    radial-gradient(
-      circle at 24% 78%,
-      rgba(255, 176, 86, 0.28),
-      transparent 44%
-    ),
-    radial-gradient(
-      circle at 78% 72%,
-      rgba(92, 190, 255, 0.24),
-      transparent 46%
-    ),
-    rgba(12, 13, 16, 0.9);
-  color: rgba(255, 241, 218, 0.96);
-  font: inherit;
-  line-height: 1;
-  box-shadow:
-    0 16px 42px rgba(0, 0, 0, 0.38),
-    0 0 38px rgba(255, 176, 86, 0.14),
-    inset 0 1px 0 rgba(255, 255, 255, 0.16);
-  backdrop-filter: blur(14px);
-  cursor: grab;
-  user-select: none;
-  touch-action: none;
-}
-
-.coffeeTeamsBubble:active {
-  cursor: grabbing;
-}
-
-.coffeeTeamsBubble:focus-visible {
-  outline: none;
-  box-shadow:
-    0 0 0 4px rgba(255, 190, 112, 0.18),
-    0 16px 42px rgba(0, 0, 0, 0.38),
-    0 0 42px rgba(92, 190, 255, 0.18),
-    inset 0 1px 0 rgba(255, 255, 255, 0.16);
-}
-
-.coffeeTeamsBubble span {
-  color: rgba(255, 255, 255, 0.6);
-  font-size: 0.58rem;
-  font-weight: 840;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.coffeeTeamsBubble strong {
-  color: rgba(255, 255, 255, 0.94);
-  font-size: 1rem;
-  font-weight: 860;
-}
-
 .coffeePollResultsPanel {
-  position: fixed;
-  z-index: 145;
-  width: min(360px, calc(100vw - 24px));
-  min-width: min(210px, calc(100vw - 24px));
-  min-height: 156px;
-  max-width: calc(100vw - 24px);
-  max-height: min(72vh, 560px);
+  width: 100%;
+  min-width: 0;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto;
   overflow: hidden;
-  resize: both;
   container-type: inline-size;
-  border-radius: 16px;
+  border-radius: 12px;
   border: 1px solid rgba(120, 200, 255, 0.3);
   background:
     radial-gradient(
@@ -67435,25 +67272,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     ),
     rgba(12, 13, 16, 0.94);
   box-shadow:
-    0 18px 52px rgba(0, 0, 0, 0.46),
+    0 12px 32px rgba(0, 0, 0, 0.26),
     inset 0 1px 0 rgba(255, 255, 255, 0.07);
-  backdrop-filter: blur(16px);
-}
-
-.coffeePollResultsPanel::after {
-  content: "";
-  position: absolute;
-  right: 7px;
-  bottom: 7px;
-  width: 12px;
-  height: 12px;
-  pointer-events: none;
-  opacity: 0.42;
-  background:
-    linear-gradient(135deg, transparent 50%, rgba(255, 255, 255, 0.72) 50%) 8px
-      8px / 4px 4px no-repeat,
-    linear-gradient(135deg, transparent 50%, rgba(255, 255, 255, 0.52) 50%) 4px
-      4px / 8px 8px no-repeat;
 }
 
 .coffeePollResultsHeader {
@@ -67462,13 +67282,6 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   gap: 12px;
   padding: 12px 12px 10px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-  cursor: grab;
-  user-select: none;
-  touch-action: none;
-}
-
-.coffeePollResultsHeader:active {
-  cursor: grabbing;
 }
 
 .coffeePollResultsHeader span {
@@ -67486,74 +67299,11 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   line-height: 1.22;
 }
 
-.coffeePollResultsHeader button {
-  width: 28px;
-  height: 28px;
-  flex: 0 0 auto;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.86);
-  font-size: 1rem;
-  cursor: pointer;
-}
-
-.coffeePollBubble {
-  position: fixed;
-  z-index: 145;
-  width: 58px;
-  height: 58px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  border: 1px solid rgba(120, 200, 255, 0.42);
-  background:
-    radial-gradient(
-      circle at 30% 22%,
-      rgba(255, 255, 255, 0.32),
-      transparent 24%
-    ),
-    radial-gradient(
-      circle at 66% 76%,
-      rgba(120, 200, 255, 0.34),
-      transparent 44%
-    ),
-    rgba(12, 13, 16, 0.88);
-  color: rgba(235, 248, 255, 0.96);
-  font: inherit;
-  font-size: 1.65rem;
-  font-weight: 860;
-  line-height: 1;
-  box-shadow:
-    0 16px 42px rgba(0, 0, 0, 0.38),
-    0 0 38px rgba(120, 200, 255, 0.2),
-    inset 0 1px 0 rgba(255, 255, 255, 0.16);
-  backdrop-filter: blur(14px);
-  cursor: grab;
-  user-select: none;
-  touch-action: none;
-}
-
-.coffeePollBubble:active {
-  cursor: grabbing;
-}
-
-.coffeePollBubble:focus-visible {
-  outline: none;
-  box-shadow:
-    0 0 0 4px rgba(120, 200, 255, 0.2),
-    0 16px 42px rgba(0, 0, 0, 0.38),
-    0 0 42px rgba(120, 200, 255, 0.24),
-    inset 0 1px 0 rgba(255, 255, 255, 0.16);
-}
-
 .coffeePollResultsBody {
   min-height: 0;
   display: grid;
   gap: 10px;
-  overflow-y: auto;
   padding: 11px 12px 12px;
-  scrollbar-gutter: stable;
 }
 
 .coffeePollResultsSummary {
@@ -67766,12 +67516,6 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     line-height: 1.16;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 2;
-  }
-
-  .coffeePollResultsHeader button {
-    width: 24px;
-    height: 24px;
-    font-size: 0.9rem;
   }
 
   .coffeePollResultsBody {
@@ -69119,15 +68863,14 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeTranscriptPanel {
-  --coffee-transcript-width: min(340px, calc(100vw - 32px));
   position: fixed;
   top: 0;
   right: 0;
   bottom: 0;
   z-index: 100;
-  width: var(--coffee-transcript-width);
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  width: min(var(--coffee-transcript-width, 340px), calc(100vw - 24px));
+  display: flex;
+  flex-direction: column;
   gap: 12px;
   min-height: 100dvh;
   padding: 18px 14px;
@@ -69145,6 +68888,54 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   animation: panelIn 0.2s ease-out;
 }
 
+.coffeeTranscriptResizeHandle {
+  position: absolute;
+  z-index: 3;
+  top: 0;
+  bottom: 0;
+  left: -7px;
+  width: 14px;
+  border: 0;
+  outline: 0;
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.coffeeTranscriptResizeHandle::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 5px;
+  width: 3px;
+  height: 42px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  transform: translateY(-50%);
+  transition:
+    background 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.coffeeTranscriptResizeHandle:is(:hover, :focus-visible)::after {
+  background: color-mix(in srgb, var(--accent) 68%, #ffffff);
+  box-shadow: 0 0 16px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.coffeeTopicStatusSlot {
+  min-width: 0;
+  min-height: 156px;
+  height: clamp(210px, 36dvh, 420px);
+  max-height: min(56dvh, 520px);
+  display: grid;
+  gap: 10px;
+  flex: 0 0 auto;
+  overflow: auto;
+  resize: vertical;
+  padding: 0 4px 12px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  scrollbar-gutter: stable;
+}
+
 .coffeeTranscriptPanel[data-closing="true"] {
   pointer-events: none;
   animation: panelOut 0.18s ease-in forwards;
@@ -69153,7 +68944,9 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 /* Wide viewports: dock Table Talk in-layout (chat-like), not overlay. */
 @media (min-width: 1160px) {
   .coffeeShell[data-session-active="true"][data-transcript-open="true"] {
-    grid-template-columns: minmax(0, 1fr) minmax(300px, 340px);
+    grid-template-columns:
+      minmax(0, 1fr)
+      minmax(300px, var(--coffee-transcript-width, 340px));
   }
 
   .coffeeShell[data-session-active="true"][data-transcript-open="true"]
@@ -70017,11 +69810,6 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     width: min(8rem, 42vw);
   }
 
-  .coffeeTeamsStatusPanel {
-    width: min(340px, calc(100vw - 20px));
-    min-width: min(220px, calc(100vw - 20px));
-  }
-
   .coffeeTeamsScoreRow {
     gap: 5px;
   }
@@ -70275,7 +70063,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .themeLight.coffeeShell {
-  --coffee-bg: #f8f5ef;
+  --coffee-bg: #edf5fc;
   --coffee-panel: color-mix(in srgb, #ffffff 78%, var(--bg) 22%);
   --coffee-panel-strong: color-mix(in srgb, #ffffff 92%, var(--bg-surface) 8%);
   --coffee-line: color-mix(in srgb, var(--line-strong) 62%, #ffffff 38%);
@@ -70292,7 +70080,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
       rgba(226, 137, 60, 0.12),
       transparent 30%
     ),
-    linear-gradient(180deg, #fffefa 0%, #f2ede5 100%);
+    linear-gradient(180deg, #fbfdff 0%, #e6f1fa 100%);
 }
 
 .themeLight.coffeeShell .coffeeTranscriptPanel {
@@ -70313,7 +70101,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .themeLight.coffeeShell
   :where(.coffeeSettingsModalBackdrop, .coffeePollModalBackdrop) {
-  background: rgba(244, 240, 232, 0.64);
+  background: rgba(229, 240, 250, 0.64);
 }
 
 .themeLight.coffeeShell .coffeeHeader {
@@ -70372,7 +70160,6 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     .coffeePollResultsVote small,
     .coffeePollPlayerVoteHeader small,
     .coffeeTeamsStatusHeader span,
-    .coffeeTeamsBubble span,
     .coffeeTeamsPlayerControl > span,
     .coffeeTeamsPlayerPicker > span,
     .coffeeTeamsRosterCard small,
@@ -70411,7 +70198,6 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     .coffeeOpeningPollFields input,
     .coffeeTopicChip,
     .coffeePollResultsPanel,
-    .coffeePollResultsHeader button,
     .coffeePollPlayerOption,
     .coffeePollModal,
     .coffeePollModalHeader button,
@@ -70420,8 +70206,6 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     .coffeePollOptionAddChip,
     .coffeePollModalActions button,
     .coffeeTeamsStatusPanel,
-    .coffeeTeamsStatusHeader button,
-    .coffeeTeamsBubble,
     .coffeeTeamsRosterCard,
     .coffeeTeamsPlayerControl,
     .coffeeTeamsPlayerControl button,
@@ -70470,9 +70254,6 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     .coffeeGroupSessionButton[data-current="true"],
     .coffeeTopicChip:hover:not(:disabled),
     .coffeePollPlayerOption:hover:not(:disabled),
-    .coffeeTeamsStatusHeader button:hover,
-    .coffeeTeamsStatusHeader button:focus-visible,
-    .coffeeTeamsBubble:focus-visible,
     .coffeeTeamsPlayerControl button:hover:not(:disabled),
     .coffeeTeamsPlayerControl button:focus-visible,
     .coffeeTeamsPlayerPicker button:hover:not(:disabled),
@@ -70497,7 +70278,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     linear-gradient(
       135deg,
       rgba(255, 255, 255, 0.94),
-      rgba(255, 248, 235, 0.9)
+      rgba(244, 249, 253, 0.9)
     ),
     var(--coffee-panel);
   color: #2f2418;
@@ -70513,10 +70294,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   background:
     linear-gradient(
       135deg,
-      rgba(255, 250, 239, 0.98),
+      rgba(250, 253, 255, 0.98),
       rgba(246, 225, 188, 0.96)
     ),
-    color-mix(in srgb, var(--accent-soft) 44%, #fff8ea);
+    color-mix(in srgb, var(--accent-soft) 44%, #f3f9fd);
   color: #21170e;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.96),
@@ -70560,7 +70341,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
       rgba(74, 157, 218, 0.16),
       transparent 52%
     ),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(255, 243, 224, 0.9));
+    linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(241, 248, 253, 0.9));
 }
 
 .themeLight.coffeeShell
@@ -70580,7 +70361,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     ),
     linear-gradient(
       135deg,
-      rgba(255, 250, 239, 0.98),
+      rgba(250, 253, 255, 0.98),
       rgba(247, 226, 195, 0.96)
     );
 }
@@ -70769,7 +70550,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
       rgba(255, 255, 255, 0.96),
       transparent 32%
     ),
-    radial-gradient(circle at 50% 50%, #fffdf8 0%, #f3e8d9 66%, #e4d6c2 100%);
+    radial-gradient(circle at 50% 50%, #f8fbff 0%, #e5f1fa 66%, #ccdeec 100%);
   border-color: color-mix(in srgb, #c8ad88 56%, #ffffff 44%);
   box-shadow:
     inset 0 0 32px rgba(255, 255, 255, 0.66),
@@ -70784,8 +70565,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   background:
     linear-gradient(
       180deg,
-      rgba(255, 253, 248, 0.94),
-      rgba(246, 239, 229, 0.96)
+      rgba(253, 254, 255, 0.94),
+      rgba(235, 245, 253, 0.96)
     ),
     radial-gradient(
       circle at 50% 0%,
@@ -70871,11 +70652,11 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
       color-mix(in srgb, var(--coffee-seat-emotion-color) 16%, transparent),
       transparent 62%
     ),
-    linear-gradient(180deg, #fffdf8, #eee5d8);
+    linear-gradient(180deg, #f8fbff, #e7f1f9);
   --bot-face-screen-border: color-mix(
     in srgb,
     var(--coffee-seat-emotion-color) 42%,
-    #b8aa98
+    #a8bdcc
   );
   --bot-face-screen-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.94),
@@ -70929,7 +70710,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   );
   background: color-mix(
     in srgb,
-    #fffefa 76%,
+    #fbfdff 76%,
     var(--coffee-seat-emotion-color) 24%
   );
   color: color-mix(in srgb, var(--coffee-seat-emotion-color) 66%, #2b2118 34%);
@@ -70947,7 +70728,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .themeLight.coffeeShell .coffeeReplayPlayerNameplate {
   border-color: color-mix(in srgb, var(--accent) 38%, rgba(95, 70, 45, 0.2));
-  background: color-mix(in srgb, #fffefa 78%, var(--accent) 22%);
+  background: color-mix(in srgb, #fbfdff 78%, var(--accent) 22%);
   color: color-mix(in srgb, var(--accent) 64%, #2b2118 36%);
   box-shadow:
     0 0 0 1px rgba(255, 255, 255, 0.72) inset,
@@ -71127,7 +70908,6 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     .coffeeOpeningPollPanel[data-enabled="true"],
     .coffeeTopicChip[data-kind="poll"],
     .coffeePollResultsPanel,
-    .coffeePollBubble,
     .coffeePollModal,
     .coffeePollOptionChip[data-filled="true"],
     .coffeePollOptionAddChip
@@ -71142,20 +70922,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     rgba(255, 255, 255, 0.9);
 }
 
-.themeLight.coffeeShell .coffeePollBubble {
-  color: #0b3144;
-  box-shadow:
-    0 16px 36px rgba(39, 31, 23, 0.16),
-    0 0 30px rgba(44, 157, 200, 0.14),
-    inset 0 1px 0 rgba(255, 255, 255, 0.76);
-}
-
 .themeLight.coffeeShell
-  :where(
-    .coffeeTopicChip[data-kind="teams"],
-    .coffeeTeamsStatusPanel,
-    .coffeeTeamsBubble
-  ) {
+  :where(.coffeeTopicChip[data-kind="teams"], .coffeeTeamsStatusPanel) {
   border-color: color-mix(in srgb, #c46f24 28%, var(--line));
   background:
     radial-gradient(
@@ -71171,23 +70939,6 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     rgba(255, 255, 255, 0.9);
 }
 
-.themeLight.coffeeShell .coffeeTeamsBubble {
-  color: #473017;
-  box-shadow:
-    0 16px 36px rgba(39, 31, 23, 0.16),
-    0 0 30px rgba(210, 122, 42, 0.12),
-    inset 0 1px 0 rgba(255, 255, 255, 0.76);
-}
-
-.themeLight.coffeeShell
-  :where(.coffeePollResultsPanel, .coffeeTeamsStatusPanel)::after {
-  background:
-    linear-gradient(135deg, transparent 50%, rgba(11, 49, 68, 0.58) 50%) 8px
-      8px / 4px 4px no-repeat,
-    linear-gradient(135deg, transparent 50%, rgba(11, 49, 68, 0.38) 50%) 4px
-      4px / 8px 8px no-repeat;
-}
-
 .themeLight.coffeeShell
   :where(
     .coffeePollResultsHeader h4,
@@ -71195,7 +70946,6 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     .coffeePollResultsVote strong,
     .coffeePollPlayerVoteHeader strong,
     .coffeePollModalHeader h4,
-    .coffeeTeamsBubble strong,
     .coffeeTeamsRosterCard header span,
     .coffeeTeamsRosterCard strong,
     .coffeeGroupOverviewCard h3,
@@ -71315,7 +71065,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .themeLight.coffeeShell .coffeeSettingsSelect option,
 .themeLight.coffeeShell .coffeeSettingsSelect optgroup {
-  background: #fffdf8;
+  background: #f8fbff;
   color: var(--fg);
 }
 
@@ -72260,5 +72010,867 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     [data-relationship-depth-anchor="home"] {
     transition-duration: 140ms;
     transform: none;
+  }
+}
+
+/* ── Coffee studio chrome ────────────────────────────────────────────────
+   Carries Avatar Studio's compact instrument-panel language into Coffee.
+   The social table remains the performance; this layer only reframes the
+   shell, drawers, setup controls, menus, and composer around it. */
+.coffeeShell[data-chrome-language="studio"] {
+  --coffee-studio-bg: #070a0f;
+  --coffee-studio-surface: rgba(10, 14, 20, 0.96);
+  --coffee-studio-surface-raised: rgba(15, 20, 28, 0.94);
+  --coffee-studio-control: rgba(255, 255, 255, 0.035);
+  --coffee-studio-control-hover: rgba(255, 255, 255, 0.075);
+  --coffee-studio-line: rgba(216, 226, 242, 0.105);
+  --coffee-studio-line-strong: rgba(216, 226, 242, 0.18);
+  --coffee-studio-ink: #f1f4f8;
+  --coffee-studio-soft: #bcc3cd;
+  --coffee-studio-muted: #838b98;
+  --coffee-studio-accent: #48dbe5;
+  --coffee-studio-warm: #ffad3d;
+  --coffee-studio-danger: #ff7d91;
+  --coffee-panel-radius: 8px;
+  position: relative;
+  isolation: isolate;
+  color: var(--coffee-studio-ink);
+  background:
+    radial-gradient(
+      circle at 74% 16%,
+      rgba(72, 219, 229, 0.075),
+      transparent 28%
+    ),
+    radial-gradient(
+      circle at 14% 88%,
+      rgba(255, 173, 61, 0.055),
+      transparent 30%
+    ),
+    var(--coffee-studio-bg);
+}
+
+.coffeeShell[data-chrome-language="studio"]::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 400;
+  height: 2px;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    #f04586,
+    #ffad3d 25%,
+    #b9e831 48%,
+    #48dbe5 72%,
+    #8d6dff
+  );
+  box-shadow: 0 0 14px rgba(72, 219, 229, 0.14);
+}
+
+.coffeeShell[data-chrome-language="studio"] .coffeeSidebar {
+  gap: 10px;
+  padding: 14px 12px 12px;
+  border-right-color: var(--coffee-studio-line);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.022), transparent 150px),
+    var(--coffee-studio-surface);
+  box-shadow:
+    inset -1px 0 rgba(0, 0, 0, 0.44),
+    16px 0 42px rgba(0, 0, 0, 0.16);
+  backdrop-filter: blur(20px);
+}
+
+.coffeeShell[data-chrome-language="studio"] .coffeeSidebarHeader {
+  min-height: 42px;
+  margin: 0;
+  padding: 7px 8px;
+  border: 1px solid var(--coffee-studio-line);
+  border-radius: var(--coffee-panel-radius);
+  background: var(--coffee-studio-control);
+}
+
+.coffeeShell[data-chrome-language="studio"]
+  :where(.coffeeNewSessionButton, .coffeeDeleteAllSessionsButton) {
+  width: 32px;
+  height: 32px;
+  border-color: var(--coffee-studio-line);
+  border-radius: 7px;
+  color: var(--coffee-studio-soft);
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.045),
+    rgba(255, 255, 255, 0.012)
+  );
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.035);
+}
+
+.coffeeShell[data-chrome-language="studio"]
+  :where(.coffeeGroupButton, .coffeeSessionButton) {
+  border-color: var(--coffee-studio-line);
+  border-radius: var(--coffee-panel-radius);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent),
+    var(--coffee-studio-control);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.025);
+}
+
+.coffeeShell[data-chrome-language="studio"]
+  .coffeeCanvasBotTile.chatBotTileSelected,
+.coffeeShell[data-chrome-language="studio"]
+  .coffeeCanvasBotTile.chatBotTileSelected:is(:hover, :focus-visible, :active) {
+  border-color: color-mix(
+    in srgb,
+    var(--coffee-bot-color) 62%,
+    var(--coffee-studio-line-strong)
+  );
+  color: var(--coffee-studio-ink);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--coffee-bot-color) 11%, transparent),
+      transparent
+    ),
+    var(--coffee-studio-surface-raised);
+  box-shadow:
+    inset 3px 0 color-mix(in srgb, var(--coffee-bot-color) 72%, transparent),
+    inset 0 1px rgba(255, 255, 255, 0.045),
+    0 0 22px color-mix(in srgb, var(--coffee-bot-color) 12%, transparent);
+  transform: none;
+}
+
+.coffeeShell[data-chrome-language="studio"]
+  .coffeeCanvasBotTile.chatBotTileSelected
+  :where(
+    .chatBotTileBotGlyph,
+    .chatBotTileBotGlyph > svg,
+    .chatBotTileSelectedDotGlyph,
+    .chatBotTileSelectedHoverGlyph,
+    .chatBotTileFeaturedName
+  ) {
+  color: color-mix(in srgb, var(--coffee-bot-color) 72%, #ffffff) !important;
+  opacity: 1;
+  text-shadow: none;
+  filter: none;
+}
+
+.coffeeShell[data-chrome-language="studio"] .coffeeGroupButton {
+  min-height: 78px;
+  padding: 11px 46px 11px 11px;
+  background:
+    linear-gradient(135deg, rgba(4, 7, 11, 0.78), rgba(4, 7, 11, 0.92)),
+    var(--coffee-group-gradient);
+}
+
+.coffeeShell[data-chrome-language="studio"]
+  .coffeeGroupRow[data-current="true"]
+  .coffeeGroupButton {
+  border-color: color-mix(
+    in srgb,
+    var(--coffee-studio-accent) 48%,
+    var(--coffee-studio-line)
+  );
+  box-shadow:
+    inset 3px 0 color-mix(in srgb, var(--coffee-studio-accent) 74%, transparent),
+    inset 0 1px rgba(255, 255, 255, 0.04),
+    0 0 28px color-mix(in srgb, var(--coffee-studio-accent) 8%, transparent);
+}
+
+.coffeeShell[data-chrome-language="studio"] .coffeeMain {
+  --coffee-shell-inline-padding: clamp(10px, 1.4vw, 16px);
+  --coffee-shell-block-start-padding: 0px;
+  gap: 10px;
+  padding-block-start: 0;
+  background:
+    radial-gradient(
+      circle at 52% 38%,
+      rgba(72, 219, 229, 0.032),
+      transparent 30%
+    ),
+    transparent;
+}
+
+.coffeeShell[data-chrome-language="studio"] .coffeeHeader {
+  min-height: 66px;
+  margin-block-start: 0;
+  padding: 10px 14px;
+  border-bottom-color: var(--coffee-studio-line);
+  background: rgba(8, 11, 17, 0.91);
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.025),
+    0 12px 28px rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(20px);
+}
+
+.coffeeShell[data-chrome-language="studio"]
+  :where(
+    .coffeeHeaderActions .headerIconButton,
+    .coffeeHeaderActions .themeToggleButton
+  ) {
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+  border: 1px solid var(--coffee-studio-line);
+  border-radius: 7px;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.045),
+    rgba(255, 255, 255, 0.012)
+  );
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.035);
+}
+
+.coffeeShell[data-chrome-language="studio"] .coffeeExitSessionButton {
+  min-height: 34px;
+  border-color: color-mix(
+    in srgb,
+    var(--coffee-studio-danger) 24%,
+    var(--coffee-studio-line)
+  );
+  border-radius: 7px;
+  color: var(--coffee-studio-danger);
+  background: color-mix(in srgb, var(--coffee-studio-danger) 5%, transparent);
+  letter-spacing: 0.04em;
+}
+
+.coffeeShell[data-chrome-language="studio"] .coffeeWorkspace {
+  gap: 10px;
+  padding-inline: 0;
+}
+
+.coffeeShell[data-chrome-language="studio"] .coffeeStage {
+  box-sizing: border-box;
+  border: 1px solid var(--coffee-studio-line);
+  border-radius: var(--coffee-panel-radius);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.018), transparent 150px),
+    rgba(6, 9, 14, 0.52);
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.025),
+    inset 0 -1px rgba(0, 0, 0, 0.44);
+}
+
+.coffeeShell[data-chrome-language="studio"] .coffeeStageStatus {
+  padding: 7px 10px;
+  border-color: var(--coffee-studio-line);
+  border-radius: 999px;
+  color: var(--coffee-studio-soft);
+  background: rgba(7, 10, 15, 0.76);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.03);
+}
+
+.coffeeShell[data-chrome-language="studio"]
+  :where(.coffeeGroupOverview, .coffeeTranscriptPanel) {
+  border-color: var(--coffee-studio-line);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 140px),
+    var(--coffee-studio-surface);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.03);
+}
+
+.coffeeShell[data-chrome-language="studio"] .coffeeGroupOverview {
+  border-radius: var(--coffee-panel-radius);
+}
+
+.coffeeShell[data-chrome-language="studio"]
+  :where(.coffeeGroupStartPanel, .coffeeGroupOverviewCard) {
+  border-color: var(--coffee-studio-line);
+  border-radius: var(--coffee-panel-radius);
+  background: var(--coffee-studio-control);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.025);
+}
+
+.coffeeShell[data-chrome-language="studio"]
+  :where(
+    .coffeeGroupGuestButton,
+    .coffeeGroupToolButton,
+    .coffeeGroupRecentSessions button
+  ) {
+  border-radius: 7px;
+  box-shadow: none;
+}
+
+.coffeeShell[data-chrome-language="studio"] .coffeeGroupToolButtonIcon {
+  border-radius: 7px;
+  background: color-mix(
+    in srgb,
+    var(--coffee-studio-accent) 6%,
+    rgba(0, 0, 0, 0.28)
+  );
+}
+
+.coffeeShell[data-chrome-language="studio"] .coffeeTranscriptPanel {
+  padding: 12px 10px;
+  border-left-color: var(--coffee-studio-line);
+  box-shadow: -22px 0 64px rgba(0, 0, 0, 0.36);
+}
+
+.coffeeShell[data-chrome-language="studio"] .coffeeTranscriptHeader {
+  min-height: 48px;
+  padding: 2px 2px 10px;
+  border-bottom: 1px solid var(--coffee-studio-line);
+}
+
+.coffeeShell[data-chrome-language="studio"] .coffeeMessages {
+  gap: 7px;
+  padding: 8px;
+  border-color: var(--coffee-studio-line);
+  border-radius: var(--coffee-panel-radius);
+  background: rgba(2, 5, 9, 0.34);
+}
+
+.coffeeShell[data-chrome-language="studio"] .coffeeMessage {
+  max-width: 100%;
+  padding: 9px 10px 9px 12px;
+  border: 1px solid var(--coffee-studio-line);
+  border-left: 3px solid var(--coffee-bot-color);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.coffeeShell[data-chrome-language="studio"] .coffeeMessage[data-role="user"] {
+  border-left: 1px solid var(--coffee-studio-line);
+  border-right: 3px solid var(--coffee-studio-accent);
+  background: rgba(72, 219, 229, 0.035);
+}
+
+.coffeeShell[data-chrome-language="studio"] .coffeeGlobalComposer {
+  box-sizing: border-box;
+  padding: 10px clamp(10px, 1.4vw, 16px) 12px;
+  border-top: 1px solid var(--coffee-studio-line);
+  background:
+    radial-gradient(
+      ellipse 64% 50% at var(--lens-thumb-x, 50%) 0%,
+      color-mix(in srgb, var(--accent) 7%, transparent),
+      transparent 72%
+    ),
+    rgba(8, 11, 17, 0.94);
+  box-shadow: 0 -14px 34px rgba(0, 0, 0, 0.24);
+}
+
+.coffeeShell[data-chrome-language="studio"] .coffeeComposerInputWrap {
+  border-color: var(--coffee-studio-line-strong);
+  border-radius: var(--coffee-panel-radius);
+  background: rgba(0, 0, 0, 0.22);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.025);
+}
+
+.coffeeShell[data-chrome-language="studio"] .coffeeSend {
+  min-height: 40px;
+  border: 1px solid
+    color-mix(in srgb, var(--coffee-studio-warm) 28%, var(--coffee-studio-line));
+  border-radius: 7px;
+  color: #e9c69d;
+  background: color-mix(
+    in srgb,
+    var(--coffee-studio-warm) 7%,
+    rgba(7, 10, 15, 0.82)
+  );
+  font-size: 0.76rem;
+  font-weight: 820;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.coffeeShell[data-chrome-language="studio"]
+  :where(.coffeeJoinSessionButton, .coffeeReplayIconButton) {
+  border: 1px solid var(--coffee-studio-line-strong);
+  color: var(--coffee-studio-ink);
+  background: var(--coffee-studio-control);
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.04),
+    0 10px 24px rgba(0, 0, 0, 0.18);
+}
+
+.coffeeShell[data-chrome-language="studio"] .coffeeJoinSessionButton {
+  border-radius: 7px;
+}
+
+.coffeeShell[data-chrome-language="studio"]
+  :where(.coffeeJoinSessionButton, .coffeeReplayIconButton):is(
+    :hover,
+    :focus-visible
+  ):not(:disabled) {
+  border-color: color-mix(
+    in srgb,
+    var(--coffee-studio-accent) 42%,
+    var(--coffee-studio-line-strong)
+  );
+  color: var(--coffee-studio-ink);
+  background: var(--coffee-studio-control-hover);
+}
+
+.coffeeShell[data-chrome-language="studio"] .coffeeReplayPrimaryButton {
+  border-color: color-mix(
+    in srgb,
+    var(--coffee-studio-accent) 54%,
+    var(--coffee-studio-line-strong)
+  );
+  color: var(--coffee-studio-accent);
+  background: color-mix(
+    in srgb,
+    var(--coffee-studio-accent) 8%,
+    var(--coffee-studio-control)
+  );
+}
+
+.coffeeShell[data-chrome-language="studio"]:has(
+    .coffeeStage[data-phase="finished"]:not([data-replay-active="true"])
+  )
+  :where(
+    .coffeeFinishedRecapControls .coffeeJoinSessionButton,
+    .coffeeFinishedRecapControls .coffeeTableStartButton,
+    .coffeeReplayPrimaryButton
+  ) {
+  border: 1px solid var(--coffee-studio-line-strong);
+  color: var(--coffee-studio-ink);
+  background: var(--coffee-studio-control);
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.04),
+    0 10px 24px rgba(0, 0, 0, 0.18);
+}
+
+.coffeeShell[data-chrome-language="studio"]:has(
+    .coffeeStage[data-phase="finished"]:not([data-replay-active="true"])
+  )
+  .coffeeReplayPrimaryButton {
+  border-color: color-mix(
+    in srgb,
+    var(--coffee-studio-accent) 54%,
+    var(--coffee-studio-line-strong)
+  );
+  color: var(--coffee-studio-accent);
+}
+
+.coffeeShell[data-chrome-language="studio"]
+  :where(.coffeePotTray, .coffeeShhButton, .coffeeShhMenuButton) {
+  border-color: var(--coffee-studio-line-strong);
+  background: var(--coffee-studio-surface-raised);
+}
+
+.coffeeShell[data-chrome-language="studio"] .coffeePotTray {
+  border-radius: 7px;
+}
+
+.coffeeShell[data-chrome-language="studio"] .coffeeShhButton {
+  border-radius: 7px 0 0 7px;
+}
+
+.coffeeShell[data-chrome-language="studio"] .coffeeShhMenuButton {
+  border-radius: 0 7px 7px 0;
+}
+
+.coffeeShell[data-chrome-language="studio"] .coffeeShhMenu {
+  padding: 6px;
+  border-color: color-mix(
+    in srgb,
+    var(--coffee-studio-accent) 30%,
+    var(--coffee-studio-line)
+  );
+  border-radius: var(--coffee-panel-radius);
+  background: rgba(10, 13, 19, 0.985);
+  box-shadow:
+    inset 3px 0 color-mix(in srgb, var(--coffee-studio-accent) 54%, transparent),
+    0 28px 70px rgba(0, 0, 0, 0.52);
+}
+
+.coffeeShell[data-chrome-language="studio"]
+  :where(.coffeeSettingsModal, .coffeePollModal) {
+  border-color: color-mix(
+    in srgb,
+    var(--coffee-studio-accent) 24%,
+    var(--coffee-studio-line)
+  );
+  border-radius: 10px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 160px),
+    rgba(10, 13, 19, 0.985);
+  box-shadow:
+    inset 3px 0 color-mix(in srgb, var(--coffee-studio-accent) 48%, transparent),
+    inset 0 1px rgba(255, 255, 255, 0.04),
+    0 30px 84px rgba(0, 0, 0, 0.56);
+}
+
+.coffeeShell[data-chrome-language="studio"]
+  :where(
+    .coffeeSettingsModalPane,
+    .coffeeTeamsSideFields label,
+    .coffeeTeamsSetupColumns > section
+  ) {
+  border-color: var(--coffee-studio-line);
+  border-radius: var(--coffee-panel-radius);
+  background: var(--coffee-studio-control);
+}
+
+.themeLight.coffeeShell[data-chrome-language="studio"] {
+  --bg: #edf5fc;
+  --bg-surface: #f8fbff;
+  --fg: #172638;
+  --fg-muted: #5c7186;
+  --line: rgba(31, 74, 112, 0.12);
+  --line-strong: rgba(31, 74, 112, 0.22);
+  --coffee-bg: #edf5fc;
+  --coffee-panel: rgba(248, 252, 255, 0.9);
+  --coffee-panel-strong: rgba(255, 255, 255, 0.98);
+  --coffee-line: rgba(31, 74, 112, 0.14);
+  --coffee-muted: #5c7186;
+  --coffee-studio-bg: #eaf3fb;
+  --coffee-studio-surface: rgba(247, 251, 255, 0.97);
+  --coffee-studio-surface-raised: rgba(255, 255, 255, 0.98);
+  --coffee-studio-control: rgba(25, 68, 105, 0.04);
+  --coffee-studio-control-hover: rgba(25, 68, 105, 0.085);
+  --coffee-studio-line: rgba(31, 74, 112, 0.14);
+  --coffee-studio-line-strong: rgba(31, 74, 112, 0.24);
+  --coffee-studio-ink: #172638;
+  --coffee-studio-soft: #405b73;
+  --coffee-studio-muted: #5c7186;
+  --coffee-studio-accent: #087fa5;
+  --coffee-studio-warm: #a45e12;
+  --coffee-studio-danger: #b23d52;
+  color: var(--coffee-studio-ink);
+  background:
+    radial-gradient(
+      circle at 74% 16%,
+      rgba(49, 167, 211, 0.13),
+      transparent 30%
+    ),
+    radial-gradient(
+      circle at 14% 88%,
+      rgba(91, 119, 215, 0.075),
+      transparent 32%
+    ),
+    var(--coffee-studio-bg);
+}
+
+.themeLight.coffeeShell[data-chrome-language="studio"] .coffeeSidebar,
+.themeLight.coffeeShell[data-chrome-language="studio"] .coffeeHeader,
+.themeLight.coffeeShell[data-chrome-language="studio"] .coffeeGlobalComposer {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.58), transparent 150px),
+    var(--coffee-studio-surface);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.76);
+}
+
+.themeLight.coffeeShell[data-chrome-language="studio"] .coffeeStage {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.72), transparent 160px),
+    rgba(235, 245, 253, 0.72);
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.78),
+    inset 0 -1px rgba(31, 74, 112, 0.07);
+}
+
+.themeLight.coffeeShell[data-chrome-language="studio"]
+  :where(
+    .coffeeHeaderActions .headerIconButton,
+    .coffeeHeaderActions .themeToggleButton
+  ) {
+  color: var(--coffee-studio-soft);
+  background: linear-gradient(180deg, #ffffff, rgba(238, 246, 253, 0.9));
+  box-shadow: inset 0 1px #ffffff;
+}
+
+.themeLight.coffeeShell[data-chrome-language="studio"] .coffeeStageStatus {
+  color: var(--coffee-studio-soft);
+  background: rgba(250, 253, 255, 0.88);
+  box-shadow: inset 0 1px #ffffff;
+}
+
+.themeLight.coffeeShell[data-chrome-language="studio"] .coffeeGroupButton {
+  border-color: color-mix(
+    in srgb,
+    var(--coffee-studio-accent) 24%,
+    var(--coffee-studio-line)
+  );
+  color: var(--coffee-studio-ink);
+  background:
+    linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.94),
+      rgba(235, 245, 253, 0.84)
+    ),
+    var(--coffee-group-gradient);
+  box-shadow:
+    inset 0 1px #ffffff,
+    0 10px 24px rgba(31, 74, 112, 0.09);
+}
+
+.themeLight.coffeeShell[data-chrome-language="studio"]
+  .coffeeCanvasBotTile.chatBotTileSelected,
+.themeLight.coffeeShell[data-chrome-language="studio"]
+  .coffeeCanvasBotTile.chatBotTileSelected:is(:hover, :focus-visible, :active) {
+  border-color: color-mix(
+    in srgb,
+    var(--coffee-bot-color) 56%,
+    var(--coffee-studio-line-strong)
+  );
+  color: var(--coffee-studio-ink);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--coffee-bot-color) 7%, #ffffff),
+      rgba(239, 247, 254, 0.96)
+    ),
+    #ffffff;
+  box-shadow:
+    inset 3px 0 color-mix(in srgb, var(--coffee-bot-color) 68%, transparent),
+    inset 0 1px #ffffff,
+    0 8px 18px rgba(31, 74, 112, 0.1);
+}
+
+.themeLight.coffeeShell[data-chrome-language="studio"]
+  .coffeeCanvasBotTile.chatBotTileSelected
+  :where(.chatBotTileBotGlyph, .chatBotTileFeaturedName) {
+  color: color-mix(
+    in srgb,
+    var(--coffee-bot-color) 78%,
+    var(--coffee-studio-ink)
+  );
+}
+
+.themeLight.coffeeShell[data-chrome-language="studio"]
+  :where(
+    .coffeeGroupOverview,
+    .coffeeTranscriptPanel,
+    .coffeeSettingsModal,
+    .coffeePollModal
+  ) {
+  color: var(--coffee-studio-ink);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.72), transparent 150px),
+    var(--coffee-studio-surface);
+}
+
+.themeLight.coffeeShell[data-chrome-language="studio"] .coffeeMessages {
+  background: rgba(31, 74, 112, 0.03);
+}
+
+.themeLight.coffeeShell[data-chrome-language="studio"] .coffeeMessage {
+  color: var(--coffee-studio-ink);
+  background: rgba(255, 255, 255, 0.62);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.78);
+}
+
+.themeLight.coffeeShell[data-chrome-language="studio"]
+  .coffeeMessage[data-role="user"] {
+  border-right-color: var(--coffee-studio-accent);
+  background: rgba(8, 127, 157, 0.045);
+}
+
+.themeLight.coffeeShell[data-chrome-language="studio"]
+  .coffeeComposerInputWrap {
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: inset 0 1px #ffffff;
+}
+
+.themeLight.coffeeShell[data-chrome-language="studio"] .coffeeSend {
+  color: #77400c;
+  background: rgba(164, 94, 18, 0.075);
+}
+
+.themeLight.coffeeShell[data-chrome-language="studio"]
+  :where(.coffeeJoinSessionButton, .coffeeReplayIconButton) {
+  border-color: var(--coffee-studio-line-strong);
+  color: var(--coffee-studio-ink);
+  background: var(--coffee-studio-surface-raised);
+  box-shadow:
+    inset 0 1px #ffffff,
+    0 8px 18px rgba(31, 74, 112, 0.1);
+}
+
+.themeLight.coffeeShell[data-chrome-language="studio"]
+  :where(.coffeeJoinSessionButton, .coffeeReplayIconButton):is(
+    :hover,
+    :focus-visible
+  ):not(:disabled) {
+  border-color: color-mix(
+    in srgb,
+    var(--coffee-studio-accent) 38%,
+    var(--coffee-studio-line-strong)
+  );
+  color: var(--coffee-studio-ink);
+  background: color-mix(
+    in srgb,
+    var(--coffee-studio-accent) 5%,
+    var(--coffee-studio-surface-raised)
+  );
+}
+
+.themeLight.coffeeShell[data-chrome-language="studio"]
+  .coffeeReplayPrimaryButton {
+  border-color: color-mix(
+    in srgb,
+    var(--coffee-studio-accent) 46%,
+    var(--coffee-studio-line-strong)
+  );
+  color: var(--coffee-studio-accent);
+  background: color-mix(
+    in srgb,
+    var(--coffee-studio-accent) 7%,
+    var(--coffee-studio-surface-raised)
+  );
+}
+
+.themeLight.coffeeShell[data-chrome-language="studio"]:has(
+    .coffeeStage[data-phase="finished"]:not([data-replay-active="true"])
+  )
+  :where(
+    .coffeeFinishedRecapControls .coffeeJoinSessionButton,
+    .coffeeFinishedRecapControls .coffeeTableStartButton,
+    .coffeeReplayPrimaryButton
+  ) {
+  border-color: var(--coffee-studio-line-strong);
+  color: var(--coffee-studio-ink);
+  background: var(--coffee-studio-surface-raised);
+  box-shadow:
+    inset 0 1px #ffffff,
+    0 8px 18px rgba(31, 74, 112, 0.1);
+}
+
+.themeLight.coffeeShell[data-chrome-language="studio"]:has(
+    .coffeeStage[data-phase="finished"]:not([data-replay-active="true"])
+  )
+  .coffeeReplayPrimaryButton {
+  border-color: color-mix(
+    in srgb,
+    var(--coffee-studio-accent) 46%,
+    var(--coffee-studio-line-strong)
+  );
+  color: var(--coffee-studio-accent);
+}
+
+.themeLight.coffeeShell[data-chrome-language="studio"]
+  :where(
+    .coffeePotTray,
+    .coffeeShhButton,
+    .coffeeShhMenuButton,
+    .coffeeShhMenu
+  ) {
+  color: var(--coffee-studio-ink);
+  background: var(--coffee-studio-surface-raised);
+}
+
+.themeLight.coffeeShell[data-chrome-language="studio"] .coffeeTableAsset {
+  filter: grayscale(1) brightness(1.04) contrast(0.98)
+    drop-shadow(0 24px 58px rgba(31, 74, 112, 0.2));
+}
+
+.themeLight.coffeeShell[data-chrome-language="studio"] .coffeeTableDisk {
+  border-color: color-mix(in srgb, #8eb8d4 58%, #ffffff 42%);
+  background:
+    radial-gradient(
+      circle at 42% 34%,
+      rgba(255, 255, 255, 0.98),
+      transparent 32%
+    ),
+    radial-gradient(circle at 50% 50%, #fbfdff 0%, #e5f1fa 66%, #ccdeec 100%);
+  box-shadow:
+    inset 0 0 32px rgba(255, 255, 255, 0.72),
+    inset 0 -34px 72px rgba(46, 107, 151, 0.14),
+    0 24px 54px rgba(31, 74, 112, 0.2);
+}
+
+.themeLight.coffeeShell[data-chrome-language="studio"]
+  .coffeeStage[data-coffee-perspective="first-person"]
+  .coffeeCenterMessage {
+  background:
+    linear-gradient(
+      180deg,
+      rgba(253, 254, 255, 0.96),
+      rgba(235, 245, 253, 0.97)
+    ),
+    radial-gradient(
+      circle at 50% 0%,
+      color-mix(in srgb, var(--coffee-studio-accent) 11%, transparent),
+      transparent 62%
+    );
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.94),
+    0 18px 42px rgba(31, 74, 112, 0.17),
+    0 0 38px color-mix(in srgb, var(--coffee-studio-accent) 9%, transparent);
+}
+
+.themeLight.coffeeShell[data-chrome-language="studio"] .coffeeSeatPlate {
+  box-shadow:
+    0 0 0 8px rgba(248, 252, 255, 0.66),
+    0 0 24px
+      color-mix(in srgb, var(--coffee-seat-emotion-color) 22%, transparent),
+    0 16px 26px rgba(31, 74, 112, 0.2);
+}
+
+.themeLight.coffeeShell[data-chrome-language="studio"]
+  .coffeeSeat[data-roster-preview="true"]
+  .botFaceScreenFill {
+  --bot-face-screen-background:
+    radial-gradient(
+      circle at 34% 24%,
+      rgba(255, 255, 255, 0.96),
+      rgba(255, 255, 255, 0.46) 24%,
+      transparent 46%
+    ),
+    radial-gradient(
+      circle at 50% 62%,
+      color-mix(in srgb, var(--coffee-seat-emotion-color) 15%, transparent),
+      transparent 62%
+    ),
+    linear-gradient(180deg, #fbfdff, #e7f1f9);
+  --bot-face-screen-border: color-mix(
+    in srgb,
+    var(--coffee-seat-emotion-color) 40%,
+    #91abc0
+  );
+  --bot-face-screen-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.96),
+    inset 0 -10px 18px rgba(39, 92, 132, 0.12),
+    0 0 0 7px
+      color-mix(in srgb, var(--coffee-seat-emotion-color) 8%, transparent),
+    0 12px 24px rgba(31, 74, 112, 0.18);
+}
+
+.themeLight.coffeeShell[data-chrome-language="studio"]
+  .coffeeSeat[data-roster-preview="true"]
+  .coffeeSeatPlateGlyph {
+  color: color-mix(in srgb, var(--coffee-seat-emotion-color) 58%, #172638);
+}
+
+.themeLight.coffeeShell[data-chrome-language="studio"] .coffeeAutoplayDock {
+  border-color: var(--coffee-studio-line-strong);
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.86),
+      rgba(236, 246, 253, 0.78)
+    ),
+    rgba(240, 248, 255, 0.82);
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.94),
+    0 14px 38px rgba(31, 74, 112, 0.16);
+}
+
+.themeLight.coffeeShell[data-chrome-language="studio"]
+  .coffeeAutoplayGlyphButton {
+  border-color: var(--coffee-studio-line-strong);
+  color: var(--coffee-studio-ink);
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.themeLight.coffeeShell[data-chrome-language="studio"]
+  :where(.coffeeSettingsModalBackdrop, .coffeePollModalBackdrop) {
+  background: rgba(229, 240, 250, 0.68);
+}
+
+.themeLight.coffeeShell[data-chrome-language="studio"]
+  .coffeeSettingsSelect
+  :where(option, optgroup) {
+  background: #f8fbff;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .coffeeShell[data-chrome-language="studio"]
+    :where(.coffeeGroupToolButton, .coffeeSend, .coffeeExitSessionButton) {
+    transition: none;
   }
 }

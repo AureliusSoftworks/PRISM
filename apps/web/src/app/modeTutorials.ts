@@ -106,7 +106,7 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Join the conversation",
-        body: "Once the table starts, type into the message box or let the bots carry the room for a while.",
+        body: "Once the table starts, type into the message box or let the bots carry the room. Poll votes and team choices share the Table Talk rail; drag its left edge or the topic divider when you want more room.",
         clickLabel: "the Coffee message box",
         targetSelector: '[data-tutorial-target="composer"]',
       },
@@ -117,19 +117,19 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
     steps: [
       {
         heading: "Give a bot a show",
-        body: "Each host gets a clever, editable show name and a persistent brand shaped by their voice—not a generic template.",
+        body: "Each host starts with an editable fallback name and a camera-ready PRISM set, so creating the show never waits on synthesis.",
         clickLabel: "a show or the Create show producer card",
         targetSelector: '[data-tutorial-target="botcast-shows"]',
       },
       {
-        heading: "Choose the artwork path",
-        body: "Signal can synthesize matching day and night studios plus a logo, then follow your Light or Dark theme automatically. Turn it off—or let a call fail—and the built-in PRISM studios and glyph mark keep the show camera-ready.",
-        clickLabel: "the studios and logo option",
+        heading: "Shape the show’s identity",
+        body: "A custom identity is optional. Create this show’s look once to let Signal find a clever name and synthesize a persona-shaped logo with matching Light and Dark studios. Afterward, refresh the name, either studio, or the logo independently—or replace any visual with your own image.",
+        clickLabel: "Create this show’s look or an independent refresh or replace control",
         targetSelector: '[data-tutorial-target="botcast-brand-controls"]',
       },
       {
         heading: "Book tonight’s episode",
-        body: "Choose one guest, set the topic, and write an optional private angle. Keep the account model or choose another for this recording; Signal locks that choice when the episode begins. The brief shapes the host but never goes on mic.",
+        body: "Choose one guest, set the topic, and write an optional private angle. Pick LOCAL or ONLINE, then keep the account model or choose another for this recording; Signal locks that lane and choice when the episode begins. The brief shapes the host but never goes on mic.",
         clickLabel: "the episode setup desk",
         targetSelector: '[data-tutorial-target="botcast-setup"]',
       },

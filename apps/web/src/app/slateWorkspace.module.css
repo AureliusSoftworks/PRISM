@@ -5,7 +5,12 @@
   --slate-s: #2fd3e3;
   --slate-m: #7b5cff;
   min-height: 100dvh;
-  color: var(--fg, #eee7df);
+  height: 100dvh;
+  display: grid;
+  grid-template-columns: minmax(250px, 320px) minmax(0, 1fr);
+  grid-template-rows: 66px minmax(0, 1fr);
+  overflow: hidden;
+  color: var(--fg, #edf3f8);
   background:
     radial-gradient(circle at 10% -8%, color-mix(in srgb, var(--slate-p) 9%, transparent), transparent 32%),
     radial-gradient(circle at 88% 2%, color-mix(in srgb, var(--slate-m) 11%, transparent), transparent 34%),
@@ -14,12 +19,41 @@
   font-family: var(--font-ui-sans), system-ui, sans-serif;
 }
 
+.sidebarNavigation,
+.mainNavigation {
+  position: relative;
+  z-index: 20;
+  min-width: 0;
+  background: var(--bg-surface, #151311);
+}
+
+.sidebarNavigation {
+  grid-column: 1;
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  padding: 10px 12px;
+  border-right: 1px solid var(--line, #25211e);
+  border-bottom: 1px solid var(--line, #25211e);
+}
+
+.mainNavigation {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.mainNavigation > * {
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+}
+
 .shell[data-theme="light"] {
   background:
     radial-gradient(circle at 9% -8%, color-mix(in srgb, var(--slate-p) 8%, transparent), transparent 32%),
     radial-gradient(circle at 88% 1%, color-mix(in srgb, var(--slate-m) 8%, transparent), transparent 34%),
     radial-gradient(circle at 48% 110%, color-mix(in srgb, var(--slate-s) 7%, transparent), transparent 42%),
-    linear-gradient(180deg, var(--bg-surface, #ffffff), var(--bg, #f5f2ec));
+    linear-gradient(180deg, var(--bg-surface, #ffffff), var(--bg, #edf5fc));
 }
 
 .shell button,
@@ -46,12 +80,14 @@
 .quietButton:hover,
 .addButton:hover,
 .secondaryButton:hover {
-  color: var(--fg, #eee7df);
+  color: var(--fg, #edf3f8);
   background: var(--bg-hover, #211e1b);
 }
 
 .loading {
-  min-height: calc(100dvh - 61px);
+  grid-column: 1 / -1;
+  grid-row: 2;
+  min-height: 100%;
   display: grid;
   place-items: center;
   margin: 0;
@@ -84,6 +120,8 @@
 }
 
 .welcome {
+  grid-column: 1 / -1;
+  grid-row: 2;
   width: min(1120px, calc(100vw - 40px));
   margin: 0 auto;
   padding: clamp(48px, 8vh, 96px) 0 64px;
@@ -154,7 +192,7 @@
   box-sizing: border-box;
   border: 1px solid var(--line-strong, #342f2a);
   border-radius: 9px;
-  color: var(--fg, #eee7df);
+  color: var(--fg, #edf3f8);
   background: var(--bg, #0b0a09);
   outline: none;
 }
@@ -185,7 +223,7 @@
 }
 
 .wildcardBuilder[data-enabled="true"] {
-  border-color: color-mix(in srgb, var(--accent, #d7cfc3) 32%, var(--line));
+  border-color: color-mix(in srgb, var(--accent, #cbd8e3) 32%, var(--line));
 }
 
 .wildcardToggle {
@@ -204,8 +242,8 @@
 
 .wildcardToggle:hover,
 .wildcardToggle[aria-pressed="true"] {
-  color: var(--fg, #eee7df) !important;
-  background: color-mix(in srgb, var(--accent, #d7cfc3) 7%, transparent);
+  color: var(--fg, #edf3f8) !important;
+  background: color-mix(in srgb, var(--accent, #cbd8e3) 7%, transparent);
 }
 
 .wildcardToggle span {
@@ -248,14 +286,14 @@
 }
 
 .wildcardChips button:hover {
-  color: var(--fg, #eee7df);
-  border-color: color-mix(in srgb, var(--accent, #d7cfc3) 52%, var(--line));
+  color: var(--fg, #edf3f8);
+  border-color: color-mix(in srgb, var(--accent, #cbd8e3) 52%, var(--line));
 }
 
 .wildcardPreview {
   padding: 10px 11px;
-  border-left: 2px solid color-mix(in srgb, var(--accent, #d7cfc3) 65%, transparent);
-  background: color-mix(in srgb, var(--accent, #d7cfc3) 5%, transparent);
+  border-left: 2px solid color-mix(in srgb, var(--accent, #cbd8e3) 65%, transparent);
+  background: color-mix(in srgb, var(--accent, #cbd8e3) 5%, transparent);
 }
 
 .wildcardPreview span,
@@ -269,7 +307,7 @@
 
 .wildcardPreview p {
   margin: 5px 0 0;
-  color: var(--fg, #eee7df);
+  color: var(--fg, #edf3f8);
   font: 0.88rem/1.5 Georgia, "Times New Roman", serif;
 }
 
@@ -347,7 +385,7 @@
 }
 
 .wildcardOrigin summary {
-  color: var(--fg, #eee7df);
+  color: var(--fg, #edf3f8);
   cursor: pointer;
 }
 
@@ -363,7 +401,10 @@
 }
 
 .workspace {
-  height: calc(100dvh - 69px);
+  grid-column: 1 / -1;
+  grid-row: 2;
+  height: 100%;
+  min-height: 0;
   display: grid;
   grid-template-columns: minmax(250px, 320px) minmax(420px, 1fr) minmax(280px, 360px);
   overflow: hidden;
@@ -486,7 +527,7 @@
 
 .structureCardTop button:hover,
 .removeStructureButton:hover {
-  color: var(--fg, #eee7df);
+  color: var(--fg, #edf3f8);
   background: var(--bg-hover, #211e1b);
 }
 
@@ -547,7 +588,7 @@
 }
 
 .railFacts p strong {
-  color: var(--fg, #eee7df);
+  color: var(--fg, #edf3f8);
 }
 
 .manuscriptPane {
@@ -594,7 +635,7 @@
   outline: none;
   resize: vertical;
   overflow: auto;
-  color: var(--fg, #eee7df);
+  color: var(--fg, #edf3f8);
   background: transparent;
   padding: 18px 8px 120px;
   font: 1.08rem/1.82 Georgia, "Times New Roman", serif;
@@ -683,7 +724,7 @@
 
 .actionGrid button[data-selected="true"] {
   border-color: color-mix(in srgb, var(--slate-m) 62%, var(--slate-s));
-  color: var(--fg, #eee7df);
+  color: var(--fg, #edf3f8);
   background: color-mix(in srgb, var(--slate-m) 11%, var(--bg));
 }
 
@@ -742,6 +783,10 @@
 }
 
 @media (max-width: 1100px) {
+  .shell {
+    grid-template-columns: 250px minmax(0, 1fr);
+  }
+
   .workspace {
     grid-template-columns: 250px minmax(400px, 1fr) 300px;
   }
@@ -752,6 +797,13 @@
 }
 
 @media (max-width: 880px) {
+  .shell {
+    height: auto;
+    min-height: 100dvh;
+    grid-template-rows: 66px auto;
+    overflow: visible;
+  }
+
   .workspace {
     height: auto;
     min-height: calc(100dvh - 69px);
@@ -781,6 +833,20 @@
 }
 
 @media (max-width: 680px) {
+  .shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebarNavigation {
+    display: none;
+  }
+
+  .mainNavigation {
+    grid-column: 1;
+    grid-row: 1;
+    min-height: 66px;
+  }
+
   .welcome {
     width: min(100% - 24px, 520px);
     grid-template-columns: 1fr;

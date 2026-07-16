@@ -110,7 +110,10 @@ test("review layout does not duplicate a departed bot already in the roster", ()
 });
 
 test("desktop Coffee supplies a distinct avatar slot for every two-to-five participant layout", () => {
-  const css = readFileSync(new URL("./page.module.css", import.meta.url), "utf8");
+  const css = readFileSync(
+    new URL("./page.module.css", import.meta.url),
+    "utf8",
+  );
 
   for (let count = 2; count <= 5; count += 1) {
     const coordinates: Array<{ left: number; top: number }> = [];
@@ -119,7 +122,11 @@ test("desktop Coffee supplies a distinct avatar slot for every two-to-five parti
         `.coffeeStage:not([data-compact="true"])\n` +
         `  .coffeeSeat[data-seat-count="${count}"][data-layout-seat="${layoutIndex}"]`;
       const ruleStart = css.indexOf(`${selector} {`);
-      assert.notEqual(ruleStart, -1, `missing Coffee seat ${layoutIndex} of ${count}`);
+      assert.notEqual(
+        ruleStart,
+        -1,
+        `missing Coffee seat ${layoutIndex} of ${count}`,
+      );
       const ruleEnd = css.indexOf("}", ruleStart);
       const rule = css.slice(ruleStart, ruleEnd);
       const left = Number(rule.match(/\bleft:\s*([0-9.]+)%/)?.[1]);
@@ -140,6 +147,26 @@ test("desktop Coffee supplies a distinct avatar slot for every two-to-five parti
       new Set(coordinates.map(({ left, top }) => `${left}:${top}`)).size,
       count,
       `${count}-participant layout must not stack avatars`,
+    );
+  }
+});
+
+test("four-bot picker preview ignores raw five-slot seat coordinates", () => {
+  const css = readFileSync(
+    new URL("./page.module.css", import.meta.url),
+    "utf8",
+  )
+    .replace(/\s+/gu, " ")
+    .replace(/\(\s+/gu, "(")
+    .replace(/\s+\)/gu, ")");
+
+  for (let seatIndex = 0; seatIndex < 5; seatIndex += 1) {
+    assert.match(
+      css,
+      new RegExp(
+        String.raw`\.coffeeStage\[data-phase="selecting"\]\[data-compact="true"\]:not\(\[data-group-ready="true"\]\) \.coffeeSeat:not\(\[data-seat-count="4"\]\)\[data-seat="${seatIndex}"\]`,
+      ),
+      `raw picker seat ${seatIndex} must not override the four-bot visual ring`,
     );
   }
 });

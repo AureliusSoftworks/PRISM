@@ -60,16 +60,23 @@ describe("relationship-depth motion CSS", () => {
   });
 
   it("pins the reduced-motion fallback to a short non-spatial fade", () => {
-    const reducedMotion = pageCss.slice(
-      pageCss.lastIndexOf("@media (prefers-reduced-motion: reduce)"),
+    const reducedMotion = sourceSlice(
+      pageCss,
+      '@media (prefers-reduced-motion: reduce) {\n  .appLayout[data-relationship-depth-transition] .messagesFrame',
+      '.coffeeShell[data-chrome-language="studio"] {',
     );
     assert.match(
       reducedMotion,
       new RegExp(
-        `transition-duration: ${RELATIONSHIP_DEPTH_REDUCED_CROSSFADE_MS}ms`,
+        String.raw`\.appLayout\[data-relationship-depth-transition\] \.messagesFrame\s*\{[\s\S]*?transition-duration: ${RELATIONSHIP_DEPTH_REDUCED_CROSSFADE_MS}ms;[\s\S]*?transform: none;`,
       ),
     );
-    assert.match(reducedMotion, /transform: none/);
+    assert.match(
+      reducedMotion,
+      new RegExp(
+        String.raw`\.appLayout\[data-relationship-depth-motion="pullback-swap"\]\s*\[data-relationship-depth-anchor="home"\]\s*\{[\s\S]*?transition-duration: ${RELATIONSHIP_DEPTH_REDUCED_CROSSFADE_MS}ms;[\s\S]*?transform: none;`,
+      ),
+    );
 
     assert.match(
       pageCss,

@@ -14,9 +14,11 @@ import {
   botcastGuestHasDepartedAt,
   botcastReplayMessageIndexAt,
   botcastReplayTimeline,
+  normalizeAccentForTheme,
   type BotcastCameraShot,
   type BotcastEpisode,
   type BotcastEpisodeAdvanceResponse,
+  type BotcastEpisodeResponseMode,
   type BotcastEpisodeSummary,
   type BotcastMessage,
   type BotcastProducerCue,
@@ -37,6 +39,7 @@ export interface BotcastBotSummary {
 export interface BotcastModelOption {
   id: string;
   label: string;
+  provider: "local" | "openai" | "anthropic";
 }
 
 export interface BotcastApiRequest {
@@ -50,28 +53,66 @@ export interface BotcastExperienceProps {
   preferredImageProvider: "local" | "openai";
   modelOptions: BotcastModelOption[];
   accountDefaultModel: string | null;
+  responseMode: BotcastEpisodeResponseMode;
+  providerModeToggle?: ReactNode;
   theme?: "light" | "dark";
   renderAvatar?: (
     bot: BotcastBotSummary,
     state: { talking: boolean; thinking: boolean; role: "host" | "guest" },
   ) => ReactNode;
   onUtterance?: (message: BotcastMessage, bot: BotcastBotSummary) => void;
-  onExit: () => void;
-  headerActions?: ReactNode;
+  sidebarHeader: ReactNode;
+  navigationHeader: ReactNode;
 }
 
 type ImageGenerationResponse = {
   image: { id: string; displayUrl?: string; url?: string };
 };
 
-type SignalArtworkKind = "studio" | "logo";
+type SignalAssetSlot = "day-studio" | "night-studio" | "logo";
+type SignalArtworkKind = SignalAssetSlot;
 
-type SignalArtworkProgress = {
+const SIGNAL_ASSET_ACCEPT = "image/png,image/jpeg,image/webp";
+const SIGNAL_ASSET_UPLOAD_MAX_BYTES = 16 * 1024 * 1024;
+
+const SIGNAL_ASSET_LABELS: Record<SignalAssetSlot, string> = {
+  "day-studio": "Light studio",
+  "night-studio": "Dark studio",
+  logo: "logo",
+};
+
+type SignalBlockingOperation = {
   title: string;
   detail: string;
   stepLabel: string;
   progress: number | null;
+  cancellable: boolean;
 };
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
+}
+
+function readSignalAssetFile(file: File): Promise<string> {
+  if (!SIGNAL_ASSET_ACCEPT.split(",").includes(file.type)) {
+    return Promise.reject(new Error("Choose a PNG, JPEG, or WebP image."));
+  }
+  if (file.size <= 0 || file.size > SIGNAL_ASSET_UPLOAD_MAX_BYTES) {
+    return Promise.reject(new Error("Choose an image smaller than 16 MB."));
+  }
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Signal could not read that image."));
+    reader.onload = () => {
+      if (typeof reader.result !== "string") {
+        reject(new Error("Signal could not read that image."));
+        return;
+      }
+      resolve(reader.result);
+    };
+    reader.readAsDataURL(file);
+  });
+}
 
 type SignalDeleteTarget =
   | {
@@ -143,6 +184,14 @@ function activeShowAtmosphere(
   theme: "light" | "dark",
 ): BotcastShow["atmosphere"] {
   return theme === "light" ? show.dayAtmosphere : show.nightAtmosphere;
+}
+
+function showHasCustomArtwork(show: BotcastShow): boolean {
+  return Boolean(
+    show.dayAtmosphere.imageUrl ||
+      show.nightAtmosphere.imageUrl ||
+      show.logo.imageUrl,
+  );
 }
 
 function episodeOutcomeLabel(episode: Pick<BotcastEpisodeSummary, "outcome">): string {
@@ -236,6 +285,25 @@ function SignalShowLogo({
   );
 }
 
+function SignalFallbackStudio({
+  surface,
+  accentVariant,
+}: {
+  surface: "dashboard" | "stage";
+  accentVariant: BotcastShow["fallbackStudioAccentVariant"];
+}): React.JSX.Element {
+  return (
+    <div
+      className={styles.signalFallbackStudio}
+      data-surface={surface}
+      data-accent-variant={accentVariant}
+      aria-hidden="true"
+    >
+      <span className={styles.signalFallbackStudioAccent} />
+    </div>
+  );
+}
+
 export function BotcastExperience({
   bots,
   request,
@@ -243,11 +311,13 @@ export function BotcastExperience({
   preferredImageProvider,
   modelOptions,
   accountDefaultModel,
+  responseMode,
+  providerModeToggle,
   theme = "dark",
   renderAvatar,
   onUtterance,
-  onExit,
-  headerActions,
+  sidebarHeader,
+  navigationHeader,
 }: BotcastExperienceProps): React.JSX.Element {
   const eligibleBots = useMemo(
     () => [...bots].sort((a, b) => a.name.localeCompare(b.name)),
@@ -261,6 +331,13 @@ export function BotcastExperience({
     () => new Map(modelOptions.map((option) => [option.id, option.label])),
     [modelOptions],
   );
+  const accountDefaultModelOption = useMemo(
+    () =>
+      accountDefaultModel
+        ? modelOptions.find((option) => option.id === accountDefaultModel) ?? null
+        : null,
+    [accountDefaultModel, modelOptions],
+  );
   const [shows, setShows] = useState<BotcastShow[]>([]);
   const [selectedShowId, setSelectedShowId] = useState<string | null>(null);
   const [episodes, setEpisodes] = useState<BotcastEpisodeSummary[]>([]);
@@ -273,7 +350,6 @@ export function BotcastExperience({
   const [episodeModelDraft, setEpisodeModelDraft] = useState("");
   const [askAboutDraft, setAskAboutDraft] = useState("");
   const [showNameDraft, setShowNameDraft] = useState("");
-  const [synthesizeArtwork, setSynthesizeArtwork] = useState(true);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [autoRun, setAutoRun] = useState(false);
@@ -285,12 +361,36 @@ export function BotcastExperience({
   const [replayPlaying, setReplayPlaying] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<SignalDeleteTarget | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [artworkProgress, setArtworkProgress] = useState<SignalArtworkProgress | null>(null);
+  const [blockingOperation, setBlockingOperation] = useState<SignalBlockingOperation | null>(null);
+  const blockingAbortRef = useRef<AbortController | null>(null);
   const advanceInFlightRef = useRef(false);
   const replayVoiceMessageIdRef = useRef<string | null>(null);
   const speakingTimerRef = useRef<number | null>(null);
   const deleteCancelButtonRef = useRef<HTMLButtonElement | null>(null);
   const deleteReturnFocusRef = useRef<HTMLElement | null>(null);
+  const lightStudioUploadRef = useRef<HTMLInputElement | null>(null);
+  const darkStudioUploadRef = useRef<HTMLInputElement | null>(null);
+  const logoUploadRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => () => blockingAbortRef.current?.abort(), []);
+
+  const cancelBlockingOperation = (): void => {
+    const controller = blockingAbortRef.current;
+    if (!controller || controller.signal.aborted) return;
+    controller.abort();
+    setBlockingOperation((current) => current ? {
+      ...current,
+      stepLabel: "Cancelling…",
+      progress: null,
+      cancellable: false,
+    } : null);
+  };
+
+  useEffect(() => {
+    if (responseMode === "auto" && episodeModelDraft) {
+      setEpisodeModelDraft("");
+    }
+  }, [episodeModelDraft, responseMode]);
 
   useEffect(() => {
     if (
@@ -532,62 +632,125 @@ export function BotcastExperience({
   const generateShowArtwork = async (
     sourceShow: BotcastShow,
     regenerate: boolean,
-    kinds: readonly SignalArtworkKind[] = ["studio", "logo"],
+    kinds: readonly SignalArtworkKind[] = ["night-studio", "day-studio", "logo"],
+    prepareShowIdentity = false,
   ): Promise<{
     show: BotcastShow;
     generatedCount: number;
     failureMessage: string | null;
+    cancelled: boolean;
   }> => {
-    const includesStudios = kinds.includes("studio");
+    const includesNightStudio = kinds.includes("night-studio");
+    const includesDayStudio = kinds.includes("day-studio");
+    const includesStudios = includesNightStudio || includesDayStudio;
     const includesLogo = kinds.includes("logo");
-    setArtworkProgress({
+    const controller = new AbortController();
+    const studioTitle = includesNightStudio && includesDayStudio
+      ? "Building the day and night studios"
+      : includesDayStudio
+        ? "Relighting the Light studio"
+        : "Building a new Dark studio";
+    const studioDetail = includesNightStudio && includesDayStudio
+      ? "PRISM is preserving one persona-specific set while changing only its light."
+      : includesDayStudio
+        ? "PRISM is preserving the set while giving it natural daylight."
+        : "PRISM is creating a fresh persona-shaped studio after dark.";
+    blockingAbortRef.current = controller;
+    setBlockingOperation({
       title: includesStudios && includesLogo
         ? `Giving ${sourceShow.name} a visual identity`
         : includesStudios
-          ? "Building the day and night studios"
+          ? studioTitle
           : "Designing a new show mark",
       detail: includesStudios && includesLogo
         ? "PRISM is rendering a matched studio pair and its companion logo."
         : includesStudios
-          ? "PRISM is preserving one persona-specific set while changing only its light."
+          ? studioDetail
           : "PRISM is distilling the show’s personality into one memorable symbol.",
       stepLabel: regenerate ? "Preparing fresh art direction" : "Preparing the visual identity",
       progress: 0,
+      cancellable: true,
     });
+    let workingShow = sourceShow;
+    let generatedCount = 0;
+    let failureMessage: string | null = null;
     try {
-      let workingShow = sourceShow;
+      if (prepareShowIdentity) {
+        setBlockingOperation((current) => current ? {
+          ...current,
+          stepLabel: "Finding the name and visual identity",
+          progress: 0,
+        } : null);
+        try {
+          const identity = await request<{ show: BotcastShow; generated: boolean }>(
+            `/api/botcast/shows/${encodeURIComponent(sourceShow.id)}/brand`,
+            {
+              method: "POST",
+              body: JSON.stringify({ preferredProvider }),
+              signal: controller.signal,
+            },
+          );
+          if (identity.generated) {
+            workingShow = identity.show;
+            replaceShow(workingShow);
+            setShowNameDraft(workingShow.name);
+          }
+        } catch (identityError) {
+          if (isAbortError(identityError)) {
+            return { show: workingShow, generatedCount, failureMessage, cancelled: true };
+          }
+          failureMessage ??= errorMessage(identityError);
+        }
+      }
       if (regenerate) {
         const reset = await request<{ show: BotcastShow }>(
           `/api/botcast/shows/${encodeURIComponent(sourceShow.id)}`,
           {
             method: "PATCH",
             body: JSON.stringify({
-              ...(includesStudios ? { regenerateAtmosphere: true } : {}),
+              ...(includesNightStudio && includesDayStudio
+                ? { regenerateAtmosphere: true }
+                : {}),
+              ...(includesDayStudio && !includesNightStudio
+                ? { regenerateDayAtmosphere: true }
+                : {}),
+              ...(includesNightStudio && !includesDayStudio
+                ? { regenerateNightAtmosphere: true }
+                : {}),
               ...(includesLogo ? { regenerateLogo: true } : {}),
             }),
+            signal: controller.signal,
           },
         );
         workingShow = reset.show;
         replaceShow(workingShow);
       }
-      let generatedCount = 0;
-      let failureMessage: string | null = null;
+      let canonicalNightImageId = workingShow.nightAtmosphere.imageId;
+      type PendingStudioAttachment = {
+        imageId: string;
+        imageUrl: string;
+        errorMessage: string;
+      };
+      let pendingNightAttachment: PendingStudioAttachment | null = null;
+      let pendingDayAttachment: PendingStudioAttachment | null = null;
       const artwork = ([
         {
-          kind: "daytime studio",
-          artworkKind: "studio",
-          prompt: workingShow.dayAtmosphere.prompt,
-          size: "1536x1024",
-          imageUrlKey: "dayAtmosphereImageUrl",
-          imageIdKey: "dayAtmosphereImageId",
-        },
-        {
           kind: "nighttime studio",
-          artworkKind: "studio",
+          artworkKind: "night-studio",
           prompt: workingShow.nightAtmosphere.prompt,
           size: "1536x1024",
           imageUrlKey: "nightAtmosphereImageUrl",
           imageIdKey: "nightAtmosphereImageId",
+          source: null,
+        },
+        {
+          kind: "daytime studio",
+          artworkKind: "day-studio",
+          prompt: workingShow.dayAtmosphere.prompt,
+          size: "1536x1024",
+          imageUrlKey: "dayAtmosphereImageUrl",
+          imageIdKey: "dayAtmosphereImageId",
+          source: "night",
         },
         {
           kind: "logo",
@@ -596,56 +759,155 @@ export function BotcastExperience({
           size: "1024x1024",
           imageUrlKey: "logoImageUrl",
           imageIdKey: "logoImageId",
+          source: null,
         },
       ] as const).filter((asset) => kinds.includes(asset.artworkKind));
       for (const [index, asset] of artwork.entries()) {
-        setArtworkProgress((current) => current ? {
+        if (controller.signal.aborted) {
+          return { show: workingShow, generatedCount, failureMessage, cancelled: true };
+        }
+        setBlockingOperation((current) => current ? {
           ...current,
           stepLabel: `Rendering ${asset.kind} · ${index + 1} of ${artwork.length}`,
           progress: index / artwork.length,
         } : null);
         try {
           setNotice(`Synthesizing the ${asset.kind}…`);
+          const sourceImageId = asset.source === "night"
+            ? canonicalNightImageId
+            : null;
+          if (asset.source === "night" && !sourceImageId) {
+            throw new Error("The nighttime studio must finish before its daytime edit.");
+          }
           const generated = await request<ImageGenerationResponse>("/api/images/generate", {
             method: "POST",
             body: JSON.stringify({
               prompt: asset.prompt,
               size: asset.size,
-              quality: "standard",
+              quality: preferredImageProvider === "openai" ? "high" : "standard",
               preferredProvider: preferredImageProvider,
               botId: workingShow.hostBotId,
               origin: "botcast",
+              ...(sourceImageId ? {
+                sourceImageId,
+                sourceEditKind: "daylight-relight",
+              } : {}),
             }),
+            signal: controller.signal,
           });
           const imageUrl = generated.image.displayUrl ?? generated.image.url;
           if (!imageUrl) throw new Error(`${asset.kind} image has no usable local URL.`);
-          const saved = await request<{ show: BotcastShow }>(
-            `/api/botcast/shows/${encodeURIComponent(sourceShow.id)}`,
-            {
-              method: "PATCH",
-              body: JSON.stringify({
-                [asset.imageUrlKey]: imageUrl,
-                [asset.imageIdKey]: generated.image.id,
-              }),
-            },
-          );
-          workingShow = saved.show;
-          generatedCount += 1;
-          replaceShow(workingShow);
+          if (asset.kind === "nighttime studio") {
+            // Preserve the canonical source immediately. A transient show PATCH
+            // must not make the daylight edit fall back to an older studio.
+            canonicalNightImageId = generated.image.id;
+          }
+          const recoveringNightAttachment = asset.kind === "daytime studio"
+            ? pendingNightAttachment
+            : null;
+          try {
+            const saved = await request<{ show: BotcastShow }>(
+              `/api/botcast/shows/${encodeURIComponent(sourceShow.id)}`,
+              {
+                method: "PATCH",
+                body: JSON.stringify({
+                  ...(recoveringNightAttachment ? {
+                    nightAtmosphereImageUrl: recoveringNightAttachment.imageUrl,
+                    nightAtmosphereImageId: recoveringNightAttachment.imageId,
+                  } : {}),
+                  [asset.imageUrlKey]: imageUrl,
+                  [asset.imageIdKey]: generated.image.id,
+                }),
+                signal: controller.signal,
+              },
+            );
+            workingShow = saved.show;
+            generatedCount += recoveringNightAttachment ? 2 : 1;
+            if (recoveringNightAttachment) pendingNightAttachment = null;
+            replaceShow(workingShow);
+          } catch (attachmentError) {
+            if (isAbortError(attachmentError)) throw attachmentError;
+            if (asset.kind === "nighttime studio") {
+              pendingNightAttachment = {
+                imageId: generated.image.id,
+                imageUrl,
+                errorMessage: errorMessage(attachmentError),
+              };
+              continue;
+            }
+            if (asset.kind === "daytime studio") {
+              pendingDayAttachment = {
+                imageId: generated.image.id,
+                imageUrl,
+                errorMessage: errorMessage(attachmentError),
+              };
+              continue;
+            }
+            throw attachmentError;
+          }
         } catch (artworkError) {
+          if (isAbortError(artworkError)) {
+            return { show: workingShow, generatedCount, failureMessage, cancelled: true };
+          }
           failureMessage ??= errorMessage(artworkError);
-          // Each asset owns a deterministic fallback, so one failed synthesis
-          // never blocks the rest of the show setup.
+          // Each asset is isolated, so one failed synthesis never blocks the rest.
         } finally {
-          setArtworkProgress((current) => current ? {
+          setBlockingOperation((current) => current ? {
             ...current,
             progress: (index + 1) / artwork.length,
           } : null);
         }
       }
-      return { show: workingShow, generatedCount, failureMessage };
+      if ((pendingNightAttachment || pendingDayAttachment) && !controller.signal.aborted) {
+        const pendingNight = pendingNightAttachment;
+        const pendingDay = pendingDayAttachment;
+        try {
+          const saved = await request<{ show: BotcastShow }>(
+            `/api/botcast/shows/${encodeURIComponent(sourceShow.id)}`,
+            {
+              method: "PATCH",
+              body: JSON.stringify({
+                ...(pendingNight ? {
+                  nightAtmosphereImageUrl: pendingNight.imageUrl,
+                  nightAtmosphereImageId: pendingNight.imageId,
+                } : {}),
+                ...(pendingDay ? {
+                  dayAtmosphereImageUrl: pendingDay.imageUrl,
+                  dayAtmosphereImageId: pendingDay.imageId,
+                } : {}),
+              }),
+              signal: controller.signal,
+            },
+          );
+          workingShow = saved.show;
+          generatedCount += Number(Boolean(pendingNight)) + Number(Boolean(pendingDay));
+          pendingNightAttachment = null;
+          pendingDayAttachment = null;
+          replaceShow(workingShow);
+        } catch (attachmentError) {
+          if (isAbortError(attachmentError)) {
+            return { show: workingShow, generatedCount, failureMessage, cancelled: true };
+          }
+          failureMessage ??=
+            pendingNight?.errorMessage ||
+            pendingDay?.errorMessage ||
+            errorMessage(attachmentError);
+        }
+      }
+      return {
+        show: workingShow,
+        generatedCount,
+        failureMessage,
+        cancelled: controller.signal.aborted,
+      };
+    } catch (artworkError) {
+      if (isAbortError(artworkError)) {
+        return { show: workingShow, generatedCount, failureMessage, cancelled: true };
+      }
+      throw artworkError;
     } finally {
-      setArtworkProgress(null);
+      if (blockingAbortRef.current === controller) blockingAbortRef.current = null;
+      setBlockingOperation(null);
     }
   };
 
@@ -661,39 +923,10 @@ export function BotcastExperience({
       });
       await selectShow(response.show);
       replaceShow(response.show);
-      let show = response.show;
-      let identityGenerated = false;
-      try {
-        const branded = await request<{ show: BotcastShow; generated: boolean }>(
-          `/api/botcast/shows/${encodeURIComponent(show.id)}/brand`,
-          {
-            method: "POST",
-            body: JSON.stringify({ preferredProvider }),
-          },
-        );
-        show = branded.show;
-        identityGenerated = branded.generated;
-        replaceShow(show);
-        setShowNameDraft(show.name);
-      } catch {
-        // The initial show already includes a host-shaped deterministic identity.
-      }
-      if (synthesizeArtwork) {
-        const artwork = await generateShowArtwork(show, false);
-        show = artwork.show;
-        if (artwork.failureMessage) setError(artwork.failureMessage);
-        setNotice(
-          artwork.generatedCount === 3
-            ? `${show.name} has its name, mark, and day-to-night studio pair.`
-            : artwork.generatedCount > 0
-              ? `${show.name} is ready; ${3 - artwork.generatedCount} visual${artwork.generatedCount === 2 ? " uses" : "s use"} its PRISM fallback.`
-              : `${show.name} is ready in its procedural PRISM studios.`,
-        );
-      } else {
-        setNotice(
-          `${show.name} is ready with its procedural studio and ${identityGenerated ? "generated" : "host-shaped"} identity.`,
-        );
-      }
+      setShowNameDraft(response.show.name);
+      setNotice(
+        `${response.show.name} is ready with its built-in PRISM set. Create its custom look whenever you want one.`,
+      );
       setHostDraftId("");
       await loadShows();
     } catch (createError) {
@@ -724,23 +957,94 @@ export function BotcastExperience({
     }
   };
 
-  const regenerateStudio = async (): Promise<void> => {
+  const regenerateShowName = async (): Promise<void> => {
     if (!selectedShow) return;
     setBusy(true);
     setError(null);
-    setNotice("Refreshing the show’s studio…");
+    setBlockingOperation({
+      title: "Finding another name",
+      detail: `PRISM is listening for the idea at the heart of ${selectedShow.name}.`,
+      stepLabel: "Drafting and rejecting the obvious titles",
+      progress: null,
+      cancellable: false,
+    });
     try {
-      const artwork = await generateShowArtwork(selectedShow, true, ["studio"]);
+      const response = await request<{ show: BotcastShow; generated: boolean }>(
+        `/api/botcast/shows/${encodeURIComponent(selectedShow.id)}/name`,
+        {
+          method: "POST",
+          body: JSON.stringify({ preferredProvider }),
+        },
+      );
+      if (!response.generated) {
+        setNotice("The current name still won. Try again whenever you want another pass.");
+        return;
+      }
+      replaceShow(response.show);
+      setShowNameDraft(response.show.name);
+      setNotice(`“${response.show.name}” is now on the marquee. You can still edit it.`);
+    } catch (nameError) {
+      setError(errorMessage(nameError));
+    } finally {
+      setBlockingOperation(null);
+      setBusy(false);
+    }
+  };
+
+  const synthesizeShowLook = async (): Promise<void> => {
+    if (!selectedShow) return;
+    setBusy(true);
+    setError(null);
+    setNotice("Creating a custom look for this show…");
+    try {
+      const artwork = await generateShowArtwork(
+        selectedShow,
+        false,
+        ["night-studio", "day-studio", "logo"],
+        true,
+      );
+      if (artwork.cancelled) {
+        setNotice("Artwork synthesis cancelled. Finished visuals were kept; the PRISM set covers the rest.");
+        return;
+      }
       if (artwork.failureMessage) setError(artwork.failureMessage);
       setNotice(
-        artwork.generatedCount === 2
-          ? "The refreshed day and night studios are live."
-          : artwork.generatedCount === 1
-            ? "One refreshed studio is live; its partner is using the PRISM fallback."
-            : "Synthesis was unavailable, so the refreshed PRISM studios are live.",
+        artwork.generatedCount === 3
+          ? "The new name, custom logo, and matching Light and Dark studios are live."
+          : artwork.generatedCount > 0
+            ? "The new identity and finished custom artwork are live; the PRISM set covers anything still missing."
+            : "Synthesis was unavailable, so the built-in PRISM set remains live.",
+      );
+    } catch (artworkError) {
+      setError(errorMessage(artworkError));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const regenerateStudioVariant = async (
+    lighting: "day" | "night",
+  ): Promise<void> => {
+    if (!selectedShow) return;
+    const label = lighting === "day" ? "Light" : "Dark";
+    const kind: SignalArtworkKind = lighting === "day" ? "day-studio" : "night-studio";
+    setBusy(true);
+    setError(null);
+    setNotice(`Refreshing the show’s ${label} studio…`);
+    try {
+      const artwork = await generateShowArtwork(selectedShow, true, [kind]);
+      if (artwork.cancelled) {
+        setNotice(`${label} studio synthesis cancelled. The previous artwork remains in place.`);
+        return;
+      }
+      if (artwork.failureMessage) setError(artwork.failureMessage);
+      setNotice(
+        artwork.generatedCount === 1
+          ? `The refreshed ${label} studio is live.`
+          : `Synthesis was unavailable, so the previous ${label} studio remains in place.`,
       );
     } catch {
-      setNotice("The procedural day and night studios are active; no show setup was lost.");
+      setNotice(`The procedural ${label} studio is active; no show setup was lost.`);
     } finally {
       setBusy(false);
     }
@@ -753,11 +1057,15 @@ export function BotcastExperience({
     setNotice("Refreshing the show’s logo…");
     try {
       const artwork = await generateShowArtwork(selectedShow, true, ["logo"]);
+      if (artwork.cancelled) {
+        setNotice("Logo synthesis cancelled. The previous logo remains in place.");
+        return;
+      }
       if (artwork.failureMessage) setError(artwork.failureMessage);
       setNotice(
         artwork.generatedCount === 1
           ? "The refreshed logo is live."
-          : "Synthesis was unavailable, so the refreshed PRISM logo is live.",
+          : "Synthesis was unavailable, so the previous logo remains in place.",
       );
     } catch {
       setNotice("The procedural logo is active; no show setup was lost.");
@@ -766,8 +1074,52 @@ export function BotcastExperience({
     }
   };
 
+  const uploadShowAsset = async (
+    slot: SignalAssetSlot,
+    file: File,
+  ): Promise<void> => {
+    if (!selectedShow) return;
+    const label = SIGNAL_ASSET_LABELS[slot];
+    setBusy(true);
+    setError(null);
+    setBlockingOperation({
+      title: `Replacing ${label}`,
+      detail: `Saving ${file.name} to ${selectedShow.name}.`,
+      stepLabel: "Reading image",
+      progress: null,
+      cancellable: false,
+    });
+    try {
+      const dataUrl = await readSignalAssetFile(file);
+      setBlockingOperation((current) => current
+        ? { ...current, stepLabel: "Saving to Signal" }
+        : null);
+      const response = await request<{ show: BotcastShow }>(
+        `/api/botcast/shows/${encodeURIComponent(selectedShow.id)}/assets/${slot}/upload`,
+        {
+          method: "POST",
+          body: JSON.stringify({ dataUrl }),
+        },
+      );
+      replaceShow(response.show);
+      setNotice(`The ${label} has been replaced. Its previous artwork remains in Images.`);
+    } catch (uploadError) {
+      setError(errorMessage(uploadError));
+    } finally {
+      setBlockingOperation(null);
+      setBusy(false);
+    }
+  };
+
   const startEpisode = async (): Promise<void> => {
     if (!selectedShow || !guestDraftId || !topicDraft.trim()) return;
+    const selectedModelOption = responseMode !== "auto" && episodeModelDraft
+      ? modelOptions.find((option) => option.id === episodeModelDraft) ?? null
+      : null;
+    const episodeProvider =
+      selectedModelOption?.provider ??
+      accountDefaultModelOption?.provider ??
+      preferredProvider;
     setBusy(true);
     setError(null);
     try {
@@ -779,7 +1131,9 @@ export function BotcastExperience({
             guestBotId: guestDraftId,
             topic: topicDraft,
             producerBrief: producerBriefDraft,
-            modelOverride: episodeModelDraft || accountDefaultModel,
+            preferredProvider: episodeProvider,
+            responseMode,
+            modelOverride: selectedModelOption?.id ?? accountDefaultModel,
           }),
         },
       );
@@ -963,6 +1317,10 @@ export function BotcastExperience({
     const stageAtmosphere = activeShowAtmosphere(args.show, theme);
     const atmosphereStyle = {
       ["--botcast-accent" as string]: args.show.accentColor,
+      ["--botcast-studio-accent" as string]: normalizeAccentForTheme(
+        args.host?.color ?? args.show.accentColor,
+        theme,
+      ),
       ...(stageAtmosphere.imageUrl
         ? { ["--botcast-atmosphere" as string]: `url("${stageAtmosphere.imageUrl}")` }
         : {}),
@@ -978,12 +1336,19 @@ export function BotcastExperience({
         className={styles.stageViewport}
         data-shot={args.shot}
         data-replay={args.replay ? "true" : undefined}
-        data-atmosphere={stageAtmosphere.status}
+        data-studio-source={stageAtmosphere.imageUrl ? "image" : "fallback"}
         style={atmosphereStyle}
         aria-label={`Signal studio, ${args.shot} camera`}
       >
         <div className={styles.stageScene}>
-          <div className={styles.atmosphere} aria-hidden="true" />
+          <div className={styles.atmosphere} aria-hidden="true">
+            {!stageAtmosphere.imageUrl ? (
+              <SignalFallbackStudio
+                surface="stage"
+                accentVariant={args.show.fallbackStudioAccentVariant}
+              />
+            ) : null}
+          </div>
           <div className={styles.wordmark}>
             <SignalShowLogo show={args.show} />
             <strong>{args.show.name}</strong>
@@ -1033,10 +1398,6 @@ export function BotcastExperience({
 
   const renderLibrary = (): React.JSX.Element => (
     <aside className={styles.library} aria-label="Signal shows">
-      <div className={styles.libraryBrand}>
-        <button type="button" onClick={onExit} aria-label="Back to Chat">PRISM</button>
-        <span>SIGNAL</span>
-      </div>
       <div className={styles.libraryHeader}>
         <span>Your shows</span>
         <small>{shows.length}</small>
@@ -1066,10 +1427,7 @@ export function BotcastExperience({
           <p className={styles.emptyCopy}>Every great show starts with a host.</p>
         ) : null}
       </div>
-      <div
-        className={styles.createShowCard}
-        data-tutorial-target="botcast-brand-controls"
-      >
+      <div className={styles.createShowCard}>
         <label htmlFor="botcast-host-picker">Create a show</label>
         <select
           id="botcast-host-picker"
@@ -1082,17 +1440,6 @@ export function BotcastExperience({
             .filter((bot) => !shows.some((show) => show.hostBotId === bot.id))
             .map((bot) => <option key={bot.id} value={bot.id}>{bot.name}</option>)}
         </select>
-        <label className={styles.synthesisToggle}>
-          <input
-            type="checkbox"
-            checked={synthesizeArtwork}
-            onChange={(event) => setSynthesizeArtwork(event.target.checked)}
-          />
-          <span>
-            Synthesize studios + logo
-            <small>Creates matching Light and Dark sets.</small>
-          </span>
-        </label>
         <button type="button" onClick={() => void createShow()} disabled={!hostDraftId || busy}>
           Create show
         </button>
@@ -1103,25 +1450,19 @@ export function BotcastExperience({
   const renderEpisodeSetup = (): React.JSX.Element | null => {
     if (!selectedShow || !hostBot) return null;
     const guestOptions = eligibleBots.filter((bot) => bot.id !== hostBot.id);
+    const selectedEpisodeModelOption = episodeModelDraft
+      ? modelOptions.find((option) => option.id === episodeModelDraft) ?? null
+      : null;
+    const episodeModelProvider =
+      selectedEpisodeModelOption?.provider ??
+      accountDefaultModelOption?.provider ??
+      preferredProvider;
     return (
       <div className={styles.productionDesk} data-tutorial-target="botcast-setup">
         <div className={styles.productionHeading}>
           <div>
             <span className={styles.eyebrow}>Tonight’s production</span>
             <h2>Book the guest. Set the angle.</h2>
-          </div>
-          <div className={styles.productionArtworkActions}>
-            <button
-              type="button"
-              title="Regenerate matching Light and Dark studios"
-              onClick={() => void regenerateStudio()}
-              disabled={busy}
-            >
-              Refresh studio
-            </button>
-            <button type="button" onClick={() => void regenerateLogo()} disabled={busy}>
-              Refresh logo
-            </button>
           </div>
         </div>
         <div className={styles.setupGrid}>
@@ -1150,12 +1491,20 @@ export function BotcastExperience({
           </label>
         </div>
         <div className={styles.episodeLaunchRow}>
+          {providerModeToggle ? (
+            <div className={styles.episodeProviderControl}>
+              <span>Episode mode</span>
+              {providerModeToggle}
+              <small>Choose the response lane for this recording.</small>
+            </div>
+          ) : null}
           <label className={styles.episodeModelControl}>
             <span>Episode model</span>
             <select
               value={episodeModelDraft}
               onChange={(event) => setEpisodeModelDraft(event.target.value)}
               aria-label="Signal episode model"
+              disabled={responseMode === "auto"}
             >
               <option value="">
                 {`Account default · ${accountDefaultModel ? modelLabels.get(accountDefaultModel) ?? accountDefaultModel : "Provider default"}`}
@@ -1168,7 +1517,11 @@ export function BotcastExperience({
                   </option>
                 ))}
             </select>
-            <small>{providerLabel(preferredProvider)} · locked for this recording</small>
+            <small>
+              {responseMode === "auto"
+                ? "AUTO · primary may recover through your fallback chain"
+                : `${providerLabel(episodeModelProvider)} · locked for this recording`}
+            </small>
           </label>
           <button
             type="button"
@@ -1230,6 +1583,8 @@ export function BotcastExperience({
   return (
     <>
     <main className={styles.shell} data-botcast-mode="true" data-theme={theme}>
+      <div className={styles.sidebarNavigation}>{sidebarHeader}</div>
+      <div className={styles.mainNavigation}>{navigationHeader}</div>
       {renderLibrary()}
       <section className={styles.main}>
         <header className={styles.header}>
@@ -1251,20 +1606,21 @@ export function BotcastExperience({
                   aria-label="Show name"
                   data-botcast-delete-focus-fallback="true"
                 />
-                <button
-                  type="button"
-                  className={styles.showDeleteButton}
-                  onClick={(event) => openShowDeletion(selectedShow, event.currentTarget)}
-                  disabled={busy}
-                  aria-label={`Delete show ${selectedShow.name}`}
-                >
-                  Delete show
-                </button>
+                <div className={styles.showNameActions}>
+                  <button
+                    type="button"
+                    className={styles.showDeleteButton}
+                    onClick={(event) => openShowDeletion(selectedShow, event.currentTarget)}
+                    disabled={busy}
+                    aria-label={`Delete show ${selectedShow.name}`}
+                  >
+                    Delete show
+                  </button>
+                </div>
               </div>
             ) : <h1>Signal</h1>}
             <p>{selectedShow?.premise ?? "A bot owns the show. You produce the episode."}</p>
           </div>
-          <div className={styles.headerActions}>{headerActions}</div>
         </header>
 
         {error ? <div className={styles.error} role="alert">{error}</div> : null}
@@ -1424,10 +1780,15 @@ export function BotcastExperience({
           <div className={styles.showDashboard}>
             <section
               className={styles.showBrandPreview}
-              data-atmosphere={dashboardAtmosphere.status}
+              data-studio-source={dashboardAtmosphere.imageUrl ? "image" : "fallback"}
+              data-tutorial-target="botcast-brand-controls"
               style={
                 {
                   "--botcast-accent": selectedShow.accentColor,
+                  "--botcast-studio-accent": normalizeAccentForTheme(
+                    hostBot?.color ?? selectedShow.accentColor,
+                    theme,
+                  ),
                   ...(dashboardAtmosphere.imageUrl
                     ? {
                         "--botcast-dashboard-atmosphere": `url("${dashboardAtmosphere.imageUrl}")`,
@@ -1437,7 +1798,14 @@ export function BotcastExperience({
               }
               aria-label={`${selectedShow.name} show identity`}
             >
-              <div className={styles.showBrandAtmosphere} aria-hidden="true" />
+              {dashboardAtmosphere.imageUrl ? (
+                <div className={styles.showBrandAtmosphere} aria-hidden="true" />
+              ) : (
+                <SignalFallbackStudio
+                  surface="dashboard"
+                  accentVariant={selectedShow.fallbackStudioAccentVariant}
+                />
+              )}
               <div className={styles.showBrandContent}>
                 <SignalShowLogo show={selectedShow} />
                 <div>
@@ -1445,6 +1813,146 @@ export function BotcastExperience({
                   <h2>{selectedShow.name}</h2>
                   <p>{hostBot?.name ?? "Host"}</p>
                 </div>
+                {!showHasCustomArtwork(selectedShow) ? (
+                  <div
+                    className={styles.showLookInvitation}
+                    aria-label="Optional custom show artwork"
+                  >
+                    <strong>Make it unmistakably theirs.</strong>
+                    <small>One clever name, one persona-shaped logo, and matching Light and Dark studios—in a single pass.</small>
+                    <button
+                      type="button"
+                      data-signal-first-look-action="create"
+                      onClick={() => void synthesizeShowLook()}
+                      disabled={busy}
+                    >
+                      Create this show’s look
+                    </button>
+                  </div>
+                ) : (
+                  <div
+                    className={styles.showLookControls}
+                    aria-label="Show identity controls"
+                  >
+                    <input
+                      ref={lightStudioUploadRef}
+                      className={styles.assetUploadInput}
+                      type="file"
+                      accept={SIGNAL_ASSET_ACCEPT}
+                      disabled={busy}
+                      aria-label="Upload replacement Light studio"
+                      onChange={(event) => {
+                        const file = event.currentTarget.files?.[0];
+                        event.currentTarget.value = "";
+                        if (file) void uploadShowAsset("day-studio", file);
+                      }}
+                    />
+                    <input
+                      ref={darkStudioUploadRef}
+                      className={styles.assetUploadInput}
+                      type="file"
+                      accept={SIGNAL_ASSET_ACCEPT}
+                      disabled={busy}
+                      aria-label="Upload replacement Dark studio"
+                      onChange={(event) => {
+                        const file = event.currentTarget.files?.[0];
+                        event.currentTarget.value = "";
+                        if (file) void uploadShowAsset("night-studio", file);
+                      }}
+                    />
+                    <input
+                      ref={logoUploadRef}
+                      className={styles.assetUploadInput}
+                      type="file"
+                      accept={SIGNAL_ASSET_ACCEPT}
+                      disabled={busy}
+                      aria-label="Upload replacement show logo"
+                      onChange={(event) => {
+                        const file = event.currentTarget.files?.[0];
+                        event.currentTarget.value = "";
+                        if (file) void uploadShowAsset("logo", file);
+                      }}
+                    />
+                    <strong>Tune the identity.</strong>
+                    <small>Refresh or replace each piece without disturbing the others.</small>
+                    <div className={styles.showLookControlGrid}>
+                      <div className={styles.showLookControlGroup}>
+                        <span>Name</span>
+                        <button
+                          type="button"
+                          data-signal-artwork-action="name"
+                          onClick={() => void regenerateShowName()}
+                          disabled={busy}
+                        >
+                          Refresh name
+                        </button>
+                      </div>
+                      <div className={styles.showLookControlGroup}>
+                        <span>Light studio</span>
+                        <button
+                          type="button"
+                          data-signal-artwork-action="day-studio"
+                          title={selectedShow.nightAtmosphere.imageId
+                            ? "Regenerate only the Light Mode studio"
+                            : "Create or upload the Dark studio first"}
+                          onClick={() => void regenerateStudioVariant("day")}
+                          disabled={busy || !selectedShow.nightAtmosphere.imageId}
+                        >
+                          Refresh Light
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.assetUploadButton}
+                          title="Upload a replacement for the Light Mode studio"
+                          onClick={() => lightStudioUploadRef.current?.click()}
+                          disabled={busy}
+                        >
+                          Replace Light
+                        </button>
+                      </div>
+                      <div className={styles.showLookControlGroup}>
+                        <span>Dark studio</span>
+                        <button
+                          type="button"
+                          data-signal-artwork-action="night-studio"
+                          onClick={() => void regenerateStudioVariant("night")}
+                          disabled={busy}
+                        >
+                          Refresh Dark
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.assetUploadButton}
+                          title="Upload a replacement for the Dark Mode studio"
+                          onClick={() => darkStudioUploadRef.current?.click()}
+                          disabled={busy}
+                        >
+                          Replace Dark
+                        </button>
+                      </div>
+                      <div className={styles.showLookControlGroup}>
+                        <span>Logo</span>
+                        <button
+                          type="button"
+                          data-signal-artwork-action="logo"
+                          onClick={() => void regenerateLogo()}
+                          disabled={busy}
+                        >
+                          Refresh logo
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.assetUploadButton}
+                          title="Upload a replacement show logo"
+                          onClick={() => logoUploadRef.current?.click()}
+                          disabled={busy}
+                        >
+                          Replace logo
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </section>
             {renderEpisodeSetup()}
@@ -1502,12 +2010,14 @@ export function BotcastExperience({
       ) : null}
     </main>
     <PrismBlockingLoader
-      open={artworkProgress !== null}
-      title={artworkProgress?.title ?? "PRISM is working"}
-      detail={artworkProgress?.detail ?? "Preparing your workspace."}
-      stepLabel={artworkProgress?.stepLabel ?? "Working"}
-      progress={artworkProgress?.progress}
+      open={blockingOperation !== null}
+      title={blockingOperation?.title ?? "PRISM is working"}
+      detail={blockingOperation?.detail ?? "Preparing your workspace."}
+      stepLabel={blockingOperation?.stepLabel ?? "Working"}
+      progress={blockingOperation?.progress}
       theme={theme}
+      onCancel={blockingOperation?.cancellable ? cancelBlockingOperation : undefined}
+      cancelLabel="Cancel synthesis"
     />
     </>
   );

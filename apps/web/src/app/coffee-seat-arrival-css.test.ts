@@ -1317,13 +1317,13 @@ describe("Coffee seat arrival CSS", () => {
 
     assert.match(
       css,
-      /@media\s*\(min-width:\s*1160px\)\s*\{[\s\S]*\.coffeeShell\[data-session-active="true"\]\[data-transcript-open="true"\]\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s*minmax\(300px,\s*340px\)\s*;/
+      /@media\s*\(min-width:\s*1160px\)\s*\{[\s\S]*\.coffeeShell\[data-session-active="true"\]\[data-transcript-open="true"\]\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s*minmax\(300px,\s*var\(--coffee-transcript-width,\s*340px\)\)\s*;/
     );
 
     const panelRule = ruleForExactSelector(".coffeeTranscriptPanel");
     assert.match(
       panelRule,
-      /--coffee-transcript-width:\s*min\(340px,\s*calc\(100vw - 32px\)\)\s*;/
+      /width:\s*min\(var\(--coffee-transcript-width,\s*340px\),\s*calc\(100vw - 24px\)\)\s*;/
     );
   });
 
