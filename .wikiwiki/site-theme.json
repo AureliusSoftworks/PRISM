@@ -1,7 +1,7 @@
 {
   "project_name": "PRISM",
-  "project_description": "Private by default. Creative by design. A local-first AI workspace for calm, multi-perspective thinking.",
-  "logo_path": "apps/web/public/icon-triangle.svg",
+  "project_description": "One light. Many colors. A private, local-first AI workspace for calm, multi-perspective thinking.",
+  "logo_path": "apps/web/public/refraction-emblem.svg",
   "wordmark_path": "apps/web/public/wordmark.svg",
   "favicon_path": "apps/web/public/icon-triangle.svg",
   "default_color_scheme": "dark",

@@ -4,6 +4,7 @@ export const PRISM_APPLET_ORDER = [
   "arena",
   "polling",
   "coffee",
+  "botcast",
   "feed",
   "games",
   "story",
@@ -28,13 +29,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   chat: {
     id: "chat",
     name: "Chat",
-    version: "1.2",
+    version: "1.3",
     status: "active",
   },
   zen: {
     id: "zen",
     name: "Zen",
-    version: "1.1",
+    version: "1.2",
     status: "active",
   },
   arena: {
@@ -52,7 +53,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   coffee: {
     id: "coffee",
     name: "Coffee",
-    version: "1.3",
+    version: "1.4",
+    status: "active",
+  },
+  botcast: {
+    id: "botcast",
+    name: "Signal",
+    version: "0.4",
     status: "active",
   },
   feed: {
@@ -82,8 +89,8 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   slate: {
     id: "slate",
     name: "Slate",
-    version: "0.0",
-    status: "planned",
+    version: "0.5",
+    status: "preview",
   },
   pseudo: {
     id: "pseudo",
@@ -102,11 +109,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
 export const PRISM_TOP_LEVEL_SWITCHER_APPLET_IDS = [
   "chat",
   "coffee",
+  "botcast",
+  "slate",
 ] as const satisfies readonly PrismAppletId[];
 
 export function prismTopLevelSwitcherApplets(): PrismAppletVersion[] {
   return PRISM_TOP_LEVEL_SWITCHER_APPLET_IDS.map((appletId) => PRISM_APPLETS[appletId]).filter(
-    (applet) => applet.status === "active"
+    (applet) => applet.status !== "planned"
   );
 }
 

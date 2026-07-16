@@ -428,6 +428,9 @@ function normalizeUsagePurpose(value: string | null | undefined): UsagePurpose {
     case "memory_summary":
     case "prompt_wildcard":
     case "psychic_planning":
+    case "slate_draft":
+    case "slate_revision":
+    case "slate_shape":
     case "story_generation":
     case "zen_live_action":
     case "system_unlabeled":

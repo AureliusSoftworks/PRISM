@@ -12,6 +12,16 @@ Aliases: `Bot groups`, `Marketplace installs`, `Bot library groups`
 
 Record: `article_a85cd666-f08f-43b5-911b-d03d411293a2`
 
+## [Brand ethos](./articles/brand-ethos.md)
+
+Why the person is the light, what the refraction emblem means, and how the future first-run poem should express the idea.
+
+Categories: `Overview`, `Product`
+
+Aliases: `PRISM ethos`, `One light many colors`, `Visual identity`
+
+Record: `article_99bea382-e515-4640-ab79-91e1c309380b`
+
 ## [Developer guide](./articles/developer-guide.md)
 
 Repo structure, common commands, automatic local test login, privacy invariants, and Wikiwiki maintenance.
@@ -51,3 +61,13 @@ Categories: `Overview`
 Aliases: `Home`, `Prism overview`
 
 Record: `article_d9ba11bc-3099-4f1e-bf47-1ebe10122438`
+
+## [Slate creative writing workspace](./articles/slate.md)
+
+How Slate combines writer-directed AI drafting, private Continuity, long-form persistence, and author-safety foundations.
+
+Categories: `Product`, `Guides`
+
+Aliases: `Slate`, `Continuity`, `Creative writing`
+
+Record: `article_92325f0d-8f92-400e-a52d-2b32ea6909b9`

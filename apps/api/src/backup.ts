@@ -37,6 +37,7 @@ import {
   type BotFaceGlyphAnimation,
   type BotFaceThinkingFrames,
   normalizeBotAudioVoiceProfileV1,
+  normalizeBotNamePronunciation,
   normalizeBotVoiceVolume,
   normalizeEnglishVoiceEngine,
   normalizeOptionalBotAudioVoiceProfileV1,
@@ -45,13 +46,18 @@ import {
   serializeBotAudioVoiceProfileV1,
   parseStoredBotPowersV1,
   serializeBotPowersV1,
+  botcastFallbackStudioAccentVariantForSeed,
+  isBotcastFallbackStudioAccentVariant,
   type BotAudioVoiceProfileV1,
+  type BotcastFallbackStudioAccentVariant,
   type BotPowerV1,
   type CoffeePowerPlanV1,
   type EnglishVoiceEngine,
   type VoiceMode,
   type AutoFallbackChainV1,
+  type ImageProviderName,
   parseStoredAutoFallbackChain,
+  resolveImageProviderName,
   serializeAutoFallbackChain,
 } from "@localai/shared";
 import {
@@ -65,19 +71,29 @@ import {
   normalizeZenWallpaperOpacity,
   normalizeZenWallpaperStyleNotes,
   normalizeZenWallpaperTextMaskEnabled,
+  normalizeElevenLabsVoiceCollectionId,
   normalizeElevenLabsVoiceBank,
   parseStoredElevenLabsVoiceBank,
 } from "./settings.ts";
+import {
+  applyPreparedProjectOwnedAssetsWithinTransaction,
+  cleanupPreparedProjectOwnedAssetFiles,
+  prepareProjectOwnedAssetImport,
+  stagePreparedProjectOwnedAssetFiles,
+  type ProjectOwnedAssetArchiveBundleV1,
+} from "./project-owned-assets.ts";
 
 export interface BackupUserSettings {
   theme: "light" | "dark" | "system";
   preferredProvider: ProviderName;
+  preferredImageProvider?: ImageProviderName;
   providerLocked: boolean;
   autoMemory: boolean;
   composerWritingAssist: boolean;
   experimentalDualOllamaEnabled: boolean;
   experimentalAllModelEffortEnabled?: boolean;
   coffeeExperimentalTableAngleEnabled?: boolean;
+  signalImmersiveVoiceEffectsEnabled?: boolean;
   psychicModeEnabled?: boolean;
   autoModeEnabled?: boolean;
   autoFallbackChain?: AutoFallbackChainV1 | null;
@@ -124,11 +140,13 @@ export interface BackupUserSettings {
   defaultElevenLabsVoiceId?: string | null;
   elevenLabsVoiceBank?: Record<string, string | null>;
   elevenLabsVoiceModel?: string;
+  elevenLabsVoiceCollectionId?: string;
 }
 
 export interface BackupBotSnapshot {
   id: string;
   name: string;
+  namePronunciation?: string;
   systemPrompt: string;
   voicePreviewLine?: string | null;
   exportHash?: string | null;
@@ -153,6 +171,7 @@ export interface BackupBotSnapshot {
   faceMouthFont?: BotFaceFontId | null;
   faceMouthCharacter?: string | null;
   faceMouthAnimation?: BotFaceGlyphAnimation | null;
+  faceMouthCoffeePucker?: boolean;
   faceFontWeight?: number | null;
   faceEyeScale?: number | null;
   faceEyeOffsetX?: number | null;
@@ -174,6 +193,34 @@ export interface BackupBotSnapshot {
   authoredAudioVoiceProfile?: BotAudioVoiceProfileV1;
   audioVoiceProfileOverride?: BotAudioVoiceProfileV1 | null;
   powers?: BotPowerV1[];
+}
+
+/**
+ * Slate rows stay as scalar database records inside the key-bearing account
+ * backup. This is deliberately separate from the future portable, keyless
+ * `.slate` archive contract.
+ */
+export type BackupSlateRow = Record<string, string | number | null>;
+
+export interface BackupSlateSnapshot {
+  series: BackupSlateRow[];
+  projects: BackupSlateRow[];
+  revisions: BackupSlateRow[];
+  versions: BackupSlateRow[];
+  sections: BackupSlateRow[];
+  sectionVersions: BackupSlateRow[];
+  manuscriptStates: BackupSlateRow[];
+  continuitySources: BackupSlateRow[];
+  continuityEntities: BackupSlateRow[];
+  continuityAliases: BackupSlateRow[];
+  continuityClaims: BackupSlateRow[];
+  continuityEvents: BackupSlateRow[];
+  continuityRelationships: BackupSlateRow[];
+  continuityKnowledge: BackupSlateRow[];
+  continuityThreads: BackupSlateRow[];
+  continuityConcerns: BackupSlateRow[];
+  continuityGenerations: BackupSlateRow[];
+  continuityJobs: BackupSlateRow[];
 }
 
 export interface BackupSnapshot {
@@ -214,7 +261,354 @@ export interface BackupSnapshot {
     payload: Record<string, unknown>;
     createdAt: string;
   }>;
+  /** Optional in older v1 snapshots. This remains an account backup, not a `.slate` archive. */
+  slate?: BackupSlateSnapshot;
+  /** Optional in older v1 snapshots. Signal is non-canonical but its show archive is user data. */
+  botcast?: {
+    shows: Array<{
+      id: string;
+      hostBotId: string;
+      name: string;
+      premise: string;
+      hostingStyle: string;
+      accentColor: string;
+      fallbackStudioAccentVariant?: BotcastFallbackStudioAccentVariant;
+      atmosphereJson: string;
+      introAudio?: {
+        provider: "elevenlabs";
+        model: string;
+        prompt: string;
+        contentType: string;
+        /** Legacy v1 snapshots store audio inline; new `.prism` archives use project blobs. */
+        audioBase64?: string;
+        durationMs: number;
+        revision: number;
+        createdAt: string;
+        updatedAt: string;
+      };
+      createdAt: string;
+      updatedAt: string;
+    }>;
+    episodes: Array<{
+      id: string;
+      showId: string;
+      hostBotId: string;
+      guestBotId: string;
+      title: string;
+      topic: string;
+      producerBrief: string;
+      provider?: ProviderName;
+      model?: string | null;
+      responseMode?: "local" | "auto" | "online";
+      durationMinutes?: number | null;
+      status: string;
+      segment: string;
+      outcome: string | null;
+      tensionLevel: number;
+      warningCount: number;
+      startedAt: string;
+      completedAt: string | null;
+      runtimeMs: number | null;
+      createdAt: string;
+      updatedAt: string;
+    }>;
+    segments: Array<{
+      id: string;
+      episodeId: string;
+      segment: string;
+      ordinal: number;
+      startedAt: string;
+      endedAt: string | null;
+    }>;
+    messages: Array<{
+      id: string;
+      episodeId: string;
+      speakerRole: string;
+      botId: string;
+      content: string;
+      voicePerformanceText?: string | null;
+      createdAt: string;
+    }>;
+    events: Array<{
+      id: string;
+      episodeId: string;
+      sequence: number;
+      kind: string;
+      payloadJson: string;
+      occurredAt: string;
+    }>;
+  };
 }
+
+type SlateBackupCollectionKey = keyof BackupSlateSnapshot;
+
+type SlateBackupTable =
+  | "slate_series"
+  | "slate_projects"
+  | "slate_revisions"
+  | "slate_versions"
+  | "slate_sections"
+  | "slate_section_versions"
+  | "slate_manuscript_state"
+  | "slate_continuity_sources"
+  | "slate_continuity_entities"
+  | "slate_continuity_aliases"
+  | "slate_continuity_claims"
+  | "slate_continuity_events"
+  | "slate_continuity_relationships"
+  | "slate_continuity_knowledge"
+  | "slate_continuity_threads"
+  | "slate_continuity_concerns"
+  | "slate_continuity_generations"
+  | "slate_continuity_jobs";
+
+interface SlateBackupTableSpec {
+  key: SlateBackupCollectionKey;
+  table: SlateBackupTable;
+  primaryKey: "id" | "project_id";
+  columns: readonly string[];
+  deferredFields?: readonly string[];
+}
+
+const SLATE_BACKUP_TABLES: readonly SlateBackupTableSpec[] = [
+  {
+    key: "series",
+    table: "slate_series",
+    primaryKey: "id",
+    columns: ["id", "title", "description", "created_at", "updated_at"],
+  },
+  {
+    key: "projects",
+    table: "slate_projects",
+    primaryKey: "id",
+    columns: [
+      "id", "series_id", "book_ordinal", "title", "spark", "spark_wildcards_json",
+      "premise", "voice", "non_negotiables_json", "phase", "structure_json",
+      "characters_json", "unresolved_threads_json", "manuscript", "direction",
+      "locked_ranges_json", "last_provider", "last_model", "continuity_active_version",
+      "continuity_target_version", "continuity_active_generation",
+      "continuity_previous_generation", "continuity_upgrade_status",
+      "continuity_last_success_at", "created_at", "updated_at",
+    ],
+  },
+  {
+    key: "revisions",
+    table: "slate_revisions",
+    primaryKey: "id",
+    columns: [
+      "id", "project_id", "action", "scope", "structure_item_id", "selection_start",
+      "selection_end", "direction", "original_text", "proposed_text", "status",
+      "provider", "model", "created_at", "resolved_at",
+    ],
+  },
+  {
+    key: "versions",
+    table: "slate_versions",
+    primaryKey: "id",
+    columns: [
+      "id", "project_id", "reason", "structure_json", "manuscript", "created_at",
+    ],
+  },
+  {
+    key: "sections",
+    table: "slate_sections",
+    primaryKey: "id",
+    columns: [
+      "id", "project_id", "series_id", "parent_section_id", "structure_item_id", "kind",
+      "ordinal", "title", "summary", "direction", "prose", "locked_ranges_json",
+      "locked", "status", "revision", "content_hash", "last_mutation_id", "created_at",
+      "updated_at",
+    ],
+    deferredFields: ["parent_section_id"],
+  },
+  {
+    key: "sectionVersions",
+    table: "slate_section_versions",
+    primaryKey: "id",
+    columns: [
+      "id", "project_id", "section_id", "revision", "reason", "title", "summary",
+      "direction", "prose", "locked", "status", "content_hash", "created_at",
+    ],
+  },
+  {
+    key: "manuscriptStates",
+    table: "slate_manuscript_state",
+    primaryKey: "project_id",
+    columns: [
+      "project_id", "storage_version", "structure_revision", "original_manuscript_hash",
+      "migrated_at", "updated_at",
+    ],
+  },
+  {
+    key: "continuitySources",
+    table: "slate_continuity_sources",
+    primaryKey: "id",
+    columns: [
+      "id", "series_id", "project_id", "section_id", "scope_kind", "kind",
+      "source_revision", "content", "content_hash", "authority", "provider", "model",
+      "producer_versions_json", "supersedes_source_id", "created_at",
+    ],
+    deferredFields: ["supersedes_source_id"],
+  },
+  {
+    key: "continuityEntities",
+    table: "slate_continuity_entities",
+    primaryKey: "id",
+    columns: [
+      "id", "series_id", "kind", "canonical_name", "description", "locked", "anchors_json", "source_id",
+      "producer_versions_json", "created_at", "updated_at",
+    ],
+  },
+  {
+    key: "continuityAliases",
+    table: "slate_continuity_aliases",
+    primaryKey: "id",
+    columns: [
+      "id", "series_id", "entity_id", "alias", "normalized_alias", "source_id", "created_at",
+    ],
+  },
+  {
+    key: "continuityClaims",
+    table: "slate_continuity_claims",
+    primaryKey: "id",
+    columns: [
+      "id", "series_id", "project_id", "section_id", "scope_kind", "subject_entity_id",
+      "predicate", "object_entity_id", "value", "epistemic_status", "perspective_entity_id",
+      "confidence", "anchors_json", "source_id", "supersedes_claim_id",
+      "producer_versions_json", "created_at",
+    ],
+    deferredFields: ["supersedes_claim_id"],
+  },
+  {
+    key: "continuityEvents",
+    table: "slate_continuity_events",
+    primaryKey: "id",
+    columns: [
+      "id", "series_id", "project_id", "section_id", "scope_kind", "title", "description",
+      "chronology_key", "participant_entity_ids_json", "location_entity_id", "anchors_json",
+      "source_id", "producer_versions_json", "created_at",
+    ],
+  },
+  {
+    key: "continuityRelationships",
+    table: "slate_continuity_relationships",
+    primaryKey: "id",
+    columns: [
+      "id", "series_id", "from_entity_id", "to_entity_id", "kind", "state",
+      "epistemic_status", "anchors_json", "source_id", "producer_versions_json", "created_at",
+    ],
+  },
+  {
+    key: "continuityKnowledge",
+    table: "slate_continuity_knowledge",
+    primaryKey: "id",
+    columns: [
+      "id", "series_id", "character_entity_id", "claim_id", "learned_event_id", "status",
+      "anchors_json", "source_id", "producer_versions_json", "created_at",
+    ],
+  },
+  {
+    key: "continuityThreads",
+    table: "slate_continuity_threads",
+    primaryKey: "id",
+    columns: [
+      "id", "series_id", "project_id", "section_id", "scope_kind", "label", "status",
+      "due_section_id", "anchors_json", "source_id", "producer_versions_json", "created_at",
+      "updated_at",
+    ],
+  },
+  {
+    key: "continuityConcerns",
+    table: "slate_continuity_concerns",
+    primaryKey: "id",
+    columns: [
+      "id", "series_id", "project_id", "section_id", "scope_kind", "kind", "severity",
+      "status", "summary", "explanation", "claim_ids_json", "anchors_json",
+      "recommended_resolution", "resolution_json", "producer_versions_json", "created_at",
+      "resolved_at",
+    ],
+  },
+  {
+    key: "continuityGenerations",
+    table: "slate_continuity_generations",
+    primaryKey: "id",
+    columns: [
+      "id", "project_id", "generation", "status", "target_version", "source_fingerprint",
+      "comparison_summary", "producer_versions_json", "created_at", "completed_at",
+    ],
+  },
+  {
+    key: "continuityJobs",
+    table: "slate_continuity_jobs",
+    primaryKey: "id",
+    columns: [
+      "id", "series_id", "project_id", "section_id", "source_id", "source_revision", "kind",
+      "status", "attempts", "input_fingerprint", "error", "available_at", "started_at",
+      "completed_at", "created_at", "updated_at",
+    ],
+  },
+];
+
+const SLATE_REFERENCE_RULES: ReadonlyArray<{
+  source: SlateBackupCollectionKey;
+  field: string;
+  target: SlateBackupCollectionKey;
+  targetTable: SlateBackupTable;
+}> = [
+  { source: "projects", field: "series_id", target: "series", targetTable: "slate_series" },
+  { source: "revisions", field: "project_id", target: "projects", targetTable: "slate_projects" },
+  { source: "versions", field: "project_id", target: "projects", targetTable: "slate_projects" },
+  { source: "sections", field: "project_id", target: "projects", targetTable: "slate_projects" },
+  { source: "sections", field: "series_id", target: "series", targetTable: "slate_series" },
+  { source: "sections", field: "parent_section_id", target: "sections", targetTable: "slate_sections" },
+  { source: "sectionVersions", field: "project_id", target: "projects", targetTable: "slate_projects" },
+  { source: "sectionVersions", field: "section_id", target: "sections", targetTable: "slate_sections" },
+  { source: "manuscriptStates", field: "project_id", target: "projects", targetTable: "slate_projects" },
+  { source: "continuitySources", field: "series_id", target: "series", targetTable: "slate_series" },
+  { source: "continuitySources", field: "project_id", target: "projects", targetTable: "slate_projects" },
+  { source: "continuitySources", field: "section_id", target: "sections", targetTable: "slate_sections" },
+  { source: "continuitySources", field: "supersedes_source_id", target: "continuitySources", targetTable: "slate_continuity_sources" },
+  { source: "continuityEntities", field: "series_id", target: "series", targetTable: "slate_series" },
+  { source: "continuityEntities", field: "source_id", target: "continuitySources", targetTable: "slate_continuity_sources" },
+  { source: "continuityAliases", field: "series_id", target: "series", targetTable: "slate_series" },
+  { source: "continuityAliases", field: "entity_id", target: "continuityEntities", targetTable: "slate_continuity_entities" },
+  { source: "continuityAliases", field: "source_id", target: "continuitySources", targetTable: "slate_continuity_sources" },
+  { source: "continuityClaims", field: "series_id", target: "series", targetTable: "slate_series" },
+  { source: "continuityClaims", field: "project_id", target: "projects", targetTable: "slate_projects" },
+  { source: "continuityClaims", field: "section_id", target: "sections", targetTable: "slate_sections" },
+  { source: "continuityClaims", field: "subject_entity_id", target: "continuityEntities", targetTable: "slate_continuity_entities" },
+  { source: "continuityClaims", field: "object_entity_id", target: "continuityEntities", targetTable: "slate_continuity_entities" },
+  { source: "continuityClaims", field: "perspective_entity_id", target: "continuityEntities", targetTable: "slate_continuity_entities" },
+  { source: "continuityClaims", field: "source_id", target: "continuitySources", targetTable: "slate_continuity_sources" },
+  { source: "continuityClaims", field: "supersedes_claim_id", target: "continuityClaims", targetTable: "slate_continuity_claims" },
+  { source: "continuityEvents", field: "series_id", target: "series", targetTable: "slate_series" },
+  { source: "continuityEvents", field: "project_id", target: "projects", targetTable: "slate_projects" },
+  { source: "continuityEvents", field: "section_id", target: "sections", targetTable: "slate_sections" },
+  { source: "continuityEvents", field: "location_entity_id", target: "continuityEntities", targetTable: "slate_continuity_entities" },
+  { source: "continuityEvents", field: "source_id", target: "continuitySources", targetTable: "slate_continuity_sources" },
+  { source: "continuityRelationships", field: "series_id", target: "series", targetTable: "slate_series" },
+  { source: "continuityRelationships", field: "from_entity_id", target: "continuityEntities", targetTable: "slate_continuity_entities" },
+  { source: "continuityRelationships", field: "to_entity_id", target: "continuityEntities", targetTable: "slate_continuity_entities" },
+  { source: "continuityRelationships", field: "source_id", target: "continuitySources", targetTable: "slate_continuity_sources" },
+  { source: "continuityKnowledge", field: "series_id", target: "series", targetTable: "slate_series" },
+  { source: "continuityKnowledge", field: "character_entity_id", target: "continuityEntities", targetTable: "slate_continuity_entities" },
+  { source: "continuityKnowledge", field: "claim_id", target: "continuityClaims", targetTable: "slate_continuity_claims" },
+  { source: "continuityKnowledge", field: "learned_event_id", target: "continuityEvents", targetTable: "slate_continuity_events" },
+  { source: "continuityKnowledge", field: "source_id", target: "continuitySources", targetTable: "slate_continuity_sources" },
+  { source: "continuityThreads", field: "series_id", target: "series", targetTable: "slate_series" },
+  { source: "continuityThreads", field: "project_id", target: "projects", targetTable: "slate_projects" },
+  { source: "continuityThreads", field: "section_id", target: "sections", targetTable: "slate_sections" },
+  { source: "continuityThreads", field: "due_section_id", target: "sections", targetTable: "slate_sections" },
+  { source: "continuityThreads", field: "source_id", target: "continuitySources", targetTable: "slate_continuity_sources" },
+  { source: "continuityConcerns", field: "series_id", target: "series", targetTable: "slate_series" },
+  { source: "continuityConcerns", field: "project_id", target: "projects", targetTable: "slate_projects" },
+  { source: "continuityConcerns", field: "section_id", target: "sections", targetTable: "slate_sections" },
+  { source: "continuityGenerations", field: "project_id", target: "projects", targetTable: "slate_projects" },
+  { source: "continuityJobs", field: "series_id", target: "series", targetTable: "slate_series" },
+  { source: "continuityJobs", field: "project_id", target: "projects", targetTable: "slate_projects" },
+  { source: "continuityJobs", field: "section_id", target: "sections", targetTable: "slate_sections" },
+  { source: "continuityJobs", field: "source_id", target: "continuitySources", targetTable: "slate_continuity_sources" },
+];
 
 export interface BackupAdapter {
   upload(userId: string, payload: BackupSnapshot): Promise<void>;
@@ -239,6 +633,113 @@ export class LocalOnlyBackupAdapter implements BackupAdapter {
   }
 }
 
+function getSlateBackupRows(
+  slate: BackupSlateSnapshot,
+  key: SlateBackupCollectionKey,
+): BackupSlateRow[] {
+  const value = (slate as unknown as Record<string, unknown>)[key];
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    throw new Error(`Account backup Slate collection ${key} must be an array.`);
+  }
+  return value.map((row) => {
+    if (!row || typeof row !== "object" || Array.isArray(row)) {
+      throw new Error(`Account backup Slate collection ${key} contains an invalid row.`);
+    }
+    return row as BackupSlateRow;
+  });
+}
+
+function readSlateBackupScalar(
+  row: BackupSlateRow,
+  field: string,
+  table: SlateBackupTable,
+): string | number | null {
+  if (!Object.prototype.hasOwnProperty.call(row, field)) {
+    throw new Error(`Account backup ${table} row is missing ${field}.`);
+  }
+  const value = row[field];
+  if (value === null || typeof value === "string" || typeof value === "number") {
+    return value;
+  }
+  throw new Error(`Account backup ${table}.${field} must be a scalar value.`);
+}
+
+function exportSlateSnapshot(db: DatabaseSync, userId: string): BackupSlateSnapshot {
+  const snapshot = {} as BackupSlateSnapshot;
+  for (const spec of SLATE_BACKUP_TABLES) {
+    const rows = db
+      .prepare(
+        `SELECT ${spec.columns.join(", ")} FROM ${spec.table} WHERE user_id = ? ORDER BY ${spec.primaryKey}`,
+      )
+      .all(userId) as Array<Record<string, unknown>>;
+    snapshot[spec.key] = rows.map((row) => {
+      const exported: BackupSlateRow = {};
+      for (const column of spec.columns) {
+        const value = row[column];
+        if (value === null || typeof value === "string" || typeof value === "number") {
+          exported[column] = value;
+          continue;
+        }
+        throw new Error(`Unable to export non-scalar ${spec.table}.${column}.`);
+      }
+      return exported;
+    });
+  }
+  return snapshot;
+}
+
+function importSlateSnapshot(
+  db: DatabaseSync,
+  userId: string,
+  slate: BackupSlateSnapshot,
+): void {
+  for (const spec of SLATE_BACKUP_TABLES) {
+    const rows = getSlateBackupRows(slate, spec.key);
+    if (rows.length === 0) continue;
+    const columns = ["user_id", ...spec.columns];
+    const updates = [
+      "user_id = excluded.user_id",
+      ...spec.columns
+        .filter((column) => column !== spec.primaryKey)
+        .map((column) => `${column} = excluded.${column}`),
+    ];
+    const statement = db.prepare(
+      `INSERT INTO ${spec.table} (${columns.join(", ")})
+       VALUES (${columns.map(() => "?").join(", ")})
+       ON CONFLICT(${spec.primaryKey}) DO UPDATE SET ${updates.join(", ")}`,
+    );
+    const deferredFields = new Set(spec.deferredFields ?? []);
+    for (const row of rows) {
+      statement.run(
+        userId,
+        ...spec.columns.map((column) =>
+          deferredFields.has(column)
+            ? null
+            : readSlateBackupScalar(row, column, spec.table),
+        ),
+      );
+    }
+  }
+
+  for (const spec of SLATE_BACKUP_TABLES) {
+    if (!spec.deferredFields || spec.deferredFields.length === 0) continue;
+    const rows = getSlateBackupRows(slate, spec.key);
+    for (const field of spec.deferredFields) {
+      const statement = db.prepare(
+        `UPDATE ${spec.table} SET ${field} = ? WHERE ${spec.primaryKey} = ? AND user_id = ?`,
+      );
+      for (const row of rows) {
+        statement.run(
+          readSlateBackupScalar(row, field, spec.table),
+          readSlateBackupScalar(row, spec.primaryKey, spec.table),
+          userId,
+        );
+      }
+    }
+  }
+}
+
 export function exportUserSnapshot(
   db: DatabaseSync,
   userId: string,
@@ -249,12 +750,14 @@ export function exportUserSnapshot(
       `SELECT
          theme,
          preferred_provider,
+         preferred_image_provider,
          provider_locked,
          auto_memory,
          composer_writing_assist,
          experimental_dual_ollama_enabled,
          experimental_all_model_effort_enabled,
          coffee_experimental_table_angle_enabled,
+         signal_immersive_voice_effects_enabled,
          psychic_mode_enabled,
          auto_switch_model,
          auto_fallback_chain,
@@ -298,7 +801,8 @@ export function exportUserSnapshot(
          elevenlabs_key_tag
          ,voice_mode, voice_effects_enabled, voice_volume, english_voice_engine,
          default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank,
-         elevenlabs_voice_model, prism_default_bot_audio_voice_profile
+         elevenlabs_voice_model, elevenlabs_voice_collection_id,
+         prism_default_bot_audio_voice_profile
        FROM users
        WHERE id = ?`
     )
@@ -306,12 +810,14 @@ export function exportUserSnapshot(
     | {
         theme: "light" | "dark" | "system";
         preferred_provider: ProviderName;
+        preferred_image_provider: ImageProviderName;
         provider_locked: number;
         auto_memory: number;
         composer_writing_assist: number;
         experimental_dual_ollama_enabled: number;
         experimental_all_model_effort_enabled: number;
         coffee_experimental_table_angle_enabled: number;
+        signal_immersive_voice_effects_enabled: number;
         psychic_mode_enabled: number;
         auto_switch_model: number;
         auto_fallback_chain: string | null;
@@ -361,6 +867,7 @@ export function exportUserSnapshot(
         default_elevenlabs_voice_id: string | null;
         elevenlabs_voice_bank: string | null;
         elevenlabs_voice_model: string | null;
+        elevenlabs_voice_collection_id: string | null;
         prism_default_bot_audio_voice_profile: string | null;
       }
     | undefined;
@@ -368,6 +875,7 @@ export function exportUserSnapshot(
     ? {
         theme: user.theme,
         preferredProvider: user.preferred_provider,
+        preferredImageProvider: user.preferred_image_provider,
         providerLocked: user.provider_locked === 1,
         autoMemory: user.auto_memory === 1,
         composerWritingAssist: user.composer_writing_assist !== 0,
@@ -376,6 +884,8 @@ export function exportUserSnapshot(
           user.experimental_all_model_effort_enabled === 1,
         coffeeExperimentalTableAngleEnabled:
           user.coffee_experimental_table_angle_enabled === 1,
+        signalImmersiveVoiceEffectsEnabled:
+          user.signal_immersive_voice_effects_enabled === 1,
         psychicModeEnabled: user.psychic_mode_enabled === 1,
         autoModeEnabled: user.auto_switch_model === 1,
         autoFallbackChain: parseStoredAutoFallbackChain(user.auto_fallback_chain),
@@ -442,6 +952,8 @@ export function exportUserSnapshot(
         defaultElevenLabsVoiceId: user.default_elevenlabs_voice_id,
         elevenLabsVoiceBank: parseStoredElevenLabsVoiceBank(user.elevenlabs_voice_bank),
         elevenLabsVoiceModel: user.elevenlabs_voice_model ?? "",
+        elevenLabsVoiceCollectionId:
+          user.elevenlabs_voice_collection_id ?? "",
         devMemoriesEnabled: user.dev_memories_enabled === 1,
         devMemoriesText: user.dev_memories_text ?? "",
         ...(user.openai_key_ciphertext && user.openai_key_iv && user.openai_key_tag
@@ -491,6 +1003,7 @@ export function exportUserSnapshot(
       `SELECT
          id,
          name,
+         name_pronunciation,
          system_prompt,
          voice_preview_line,
          export_hash,
@@ -517,6 +1030,7 @@ export function exportUserSnapshot(
          face_mouth_font,
          face_mouth_character,
          face_mouth_animation,
+         face_mouth_coffee_pucker,
          face_font_weight,
          face_eye_scale,
          face_eye_offset_x,
@@ -544,6 +1058,7 @@ export function exportUserSnapshot(
     .all(userId) as Array<{
     id: string;
     name: string;
+    name_pronunciation: string | null;
     system_prompt: string;
     voice_preview_line: string | null;
     export_hash: string | null;
@@ -570,6 +1085,7 @@ export function exportUserSnapshot(
     face_mouth_font: string | null;
     face_mouth_character: string | null;
     face_mouth_animation: string | null;
+    face_mouth_coffee_pucker: number | null;
     face_font_weight: number | null;
     face_eye_scale: number | null;
     face_eye_offset_x: number | null;
@@ -694,6 +1210,48 @@ export function exportUserSnapshot(
     created_at: string;
   }>;
 
+  const botcastShows = db.prepare(
+    `SELECT id, host_bot_id, name, premise, hosting_style, accent_color,
+            fallback_studio_accent_variant, atmosphere_json, created_at, updated_at
+       FROM botcast_shows WHERE user_id = ? ORDER BY created_at`,
+  ).all(userId) as Array<{
+    id: string; host_bot_id: string; name: string; premise: string;
+    hosting_style: string; accent_color: string;
+    fallback_studio_accent_variant: number; atmosphere_json: string;
+    created_at: string; updated_at: string;
+  }>;
+  const botcastEpisodes = db.prepare(
+    "SELECT * FROM botcast_episodes WHERE user_id = ? ORDER BY created_at",
+  ).all(userId) as Array<Record<string, unknown>>;
+  const botcastSegments = db.prepare(
+    "SELECT * FROM botcast_episode_segments WHERE user_id = ? ORDER BY episode_id, ordinal",
+  ).all(userId) as Array<Record<string, unknown>>;
+  const botcastMessages = db.prepare(
+    "SELECT * FROM botcast_messages WHERE user_id = ? ORDER BY episode_id, created_at, rowid",
+  ).all(userId) as Array<Record<string, unknown>>;
+  const botcastEvents = db.prepare(
+    "SELECT * FROM botcast_events WHERE user_id = ? ORDER BY episode_id, sequence",
+  ).all(userId) as Array<Record<string, unknown>>;
+  const botcastIntroAudio = db.prepare(
+    `SELECT show_id, provider, model, prompt, content_type, audio_bytes,
+            duration_ms, revision, created_at, updated_at
+       FROM botcast_show_intro_audio WHERE user_id = ?`,
+  ).all(userId) as Array<{
+    show_id: string;
+    provider: "elevenlabs";
+    model: string;
+    prompt: string;
+    content_type: string;
+    audio_bytes: Uint8Array;
+    duration_ms: number;
+    revision: number;
+    created_at: string;
+    updated_at: string;
+  }>;
+  const botcastIntroAudioByShowId = new Map(
+    botcastIntroAudio.map((row) => [row.show_id, row] as const),
+  );
+
   return {
     version: 1,
     exportedAt: new Date().toISOString(),
@@ -701,6 +1259,9 @@ export function exportUserSnapshot(
     bots: bots.map((bot) => ({
         id: bot.id,
         name: bot.name,
+        ...(normalizeBotNamePronunciation(bot.name_pronunciation)
+          ? { namePronunciation: normalizeBotNamePronunciation(bot.name_pronunciation) }
+          : {}),
         systemPrompt: bot.system_prompt,
         ...(normalizeVoicePreviewLine(bot.voice_preview_line)
           ? { voicePreviewLine: normalizeVoicePreviewLine(bot.voice_preview_line) }
@@ -731,6 +1292,7 @@ export function exportUserSnapshot(
         faceMouthFont: normalizeBotFaceFontId(bot.face_mouth_font),
         faceMouthCharacter: normalizeBotFaceMouthCharacter(bot.face_mouth_character),
         faceMouthAnimation: normalizeBotFaceGlyphAnimation(bot.face_mouth_animation),
+        faceMouthCoffeePucker: bot.face_mouth_coffee_pucker === 1,
         faceFontWeight: normalizeBotFaceFontWeight(bot.face_font_weight),
         faceEyeScale: normalizeBotFaceEyeScale(bot.face_eye_scale),
         faceEyeOffsetX: normalizeBotFaceEyeOffsetX(bot.face_eye_offset_x),
@@ -769,6 +1331,100 @@ export function exportUserSnapshot(
         updatedAt: bot.updated_at,
       })),
     conversations: conversationPayload,
+    slate: exportSlateSnapshot(db, userId),
+    botcast: {
+      shows: botcastShows.map((row) => ({
+        id: row.id,
+        hostBotId: row.host_bot_id,
+        name: row.name,
+        premise: row.premise,
+        hostingStyle: row.hosting_style,
+        accentColor: row.accent_color,
+        fallbackStudioAccentVariant: isBotcastFallbackStudioAccentVariant(
+          row.fallback_studio_accent_variant,
+        )
+          ? row.fallback_studio_accent_variant
+          : botcastFallbackStudioAccentVariantForSeed(row.id),
+        atmosphereJson: row.atmosphere_json,
+        ...(botcastIntroAudioByShowId.get(row.id)
+          ? {
+              introAudio: {
+                provider: "elevenlabs" as const,
+                model: botcastIntroAudioByShowId.get(row.id)!.model,
+                prompt: botcastIntroAudioByShowId.get(row.id)!.prompt,
+                contentType: botcastIntroAudioByShowId.get(row.id)!.content_type,
+                audioBase64: Buffer.from(
+                  botcastIntroAudioByShowId.get(row.id)!.audio_bytes,
+                ).toString("base64"),
+                durationMs: botcastIntroAudioByShowId.get(row.id)!.duration_ms,
+                revision: botcastIntroAudioByShowId.get(row.id)!.revision,
+                createdAt: botcastIntroAudioByShowId.get(row.id)!.created_at,
+                updatedAt: botcastIntroAudioByShowId.get(row.id)!.updated_at,
+              },
+            }
+          : {}),
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      })),
+      episodes: botcastEpisodes.map((row) => ({
+        id: String(row.id),
+        showId: String(row.show_id),
+        hostBotId: String(row.host_bot_id),
+        guestBotId: String(row.guest_bot_id),
+        title: String(row.title),
+        topic: String(row.topic),
+        producerBrief: String(row.producer_brief ?? ""),
+        provider:
+          row.provider === "openai" || row.provider === "anthropic"
+            ? row.provider
+            : "local",
+        model: typeof row.model === "string" ? row.model : null,
+        responseMode:
+          row.response_mode === "auto" || row.response_mode === "online"
+            ? row.response_mode
+            : "local",
+        durationMinutes:
+          typeof row.duration_minutes === "number" ? row.duration_minutes : null,
+        status: String(row.status),
+        segment: String(row.segment),
+        outcome: typeof row.outcome === "string" ? row.outcome : null,
+        tensionLevel: Number(row.tension_level ?? 0),
+        warningCount: Number(row.warning_count ?? 0),
+        startedAt: String(row.started_at),
+        completedAt: typeof row.completed_at === "string" ? row.completed_at : null,
+        runtimeMs: typeof row.runtime_ms === "number" ? row.runtime_ms : null,
+        createdAt: String(row.created_at),
+        updatedAt: String(row.updated_at),
+      })),
+      segments: botcastSegments.map((row) => ({
+        id: String(row.id),
+        episodeId: String(row.episode_id),
+        segment: String(row.segment),
+        ordinal: Number(row.ordinal ?? 0),
+        startedAt: String(row.started_at),
+        endedAt: typeof row.ended_at === "string" ? row.ended_at : null,
+      })),
+      messages: botcastMessages.map((row) => ({
+        id: String(row.id),
+        episodeId: String(row.episode_id),
+        speakerRole: String(row.speaker_role),
+        botId: String(row.bot_id),
+        content: String(row.content),
+        voicePerformanceText:
+          typeof row.voice_performance_text === "string"
+            ? row.voice_performance_text
+            : null,
+        createdAt: String(row.created_at),
+      })),
+      events: botcastEvents.map((row) => ({
+        id: String(row.id),
+        episodeId: String(row.episode_id),
+        sequence: Number(row.sequence ?? 0),
+        kind: String(row.kind),
+        payloadJson: String(row.payload_json ?? "{}"),
+        occurredAt: String(row.occurred_at),
+      })),
+    },
     memories: memories.map((memory) => ({
       id: memory.id,
       conversationId: memory.conversation_id ?? undefined,
@@ -796,11 +1452,22 @@ function assertSnapshotIdsStayWithinTenant(
   snapshot: BackupSnapshot
 ): void {
   const assertIds = (
-    table: "bots" | "conversations" | "messages" | "memories",
-    ids: readonly string[]
+    table:
+      | "bots"
+      | "conversations"
+      | "messages"
+      | "memories"
+      | "botcast_shows"
+      | "botcast_episodes"
+      | "botcast_episode_segments"
+      | "botcast_messages"
+      | "botcast_events"
+      | SlateBackupTable,
+    ids: readonly string[],
+    idColumn: "id" | "project_id" = "id",
   ): void => {
     const seen = new Set<string>();
-    const findOwner = db.prepare(`SELECT user_id FROM ${table} WHERE id = ?`);
+    const findOwner = db.prepare(`SELECT user_id FROM ${table} WHERE ${idColumn} = ?`);
     for (const rawId of ids) {
       const id = rawId.trim();
       if (!id) continue;
@@ -852,13 +1519,76 @@ function assertSnapshotIdsStayWithinTenant(
         )
       : []
   );
+  const botcast = snapshot.botcast;
+  if (botcast) {
+    assertIds("botcast_shows", botcast.shows.map((item) => item.id));
+    assertIds("botcast_episodes", botcast.episodes.map((item) => item.id));
+    assertIds("botcast_episode_segments", botcast.segments.map((item) => item.id));
+    assertIds("botcast_messages", botcast.messages.map((item) => item.id));
+    assertIds("botcast_events", botcast.events.map((item) => item.id));
+  }
+  const slate = snapshot.slate;
+  if (slate) {
+    const idsByCollection = new Map<SlateBackupCollectionKey, Set<string>>();
+    for (const spec of SLATE_BACKUP_TABLES) {
+      const ids = getSlateBackupRows(slate, spec.key).map((row) => {
+        const value = readSlateBackupScalar(row, spec.primaryKey, spec.table);
+        if (
+          typeof value !== "string" ||
+          value.trim().length === 0 ||
+          value !== value.trim()
+        ) {
+          throw new Error(
+            `Account backup ${spec.table}.${spec.primaryKey} must be a non-empty string.`,
+          );
+        }
+        return value;
+      });
+      assertIds(spec.table, ids, spec.primaryKey);
+      idsByCollection.set(spec.key, new Set(ids));
+    }
+
+    const ownerStatements = new Map<SlateBackupTable, ReturnType<DatabaseSync["prepare"]>>();
+    for (const rule of SLATE_REFERENCE_RULES) {
+      const targetIds = idsByCollection.get(rule.target) ?? new Set<string>();
+      let findOwner = ownerStatements.get(rule.targetTable);
+      if (!findOwner) {
+        findOwner = db.prepare(`SELECT user_id FROM ${rule.targetTable} WHERE id = ?`);
+        ownerStatements.set(rule.targetTable, findOwner);
+      }
+      for (const row of getSlateBackupRows(slate, rule.source)) {
+        const value = readSlateBackupScalar(
+          row,
+          rule.field,
+          SLATE_BACKUP_TABLES.find((spec) => spec.key === rule.source)!.table,
+        );
+        if (value === null || value === "") continue;
+        if (typeof value !== "string") {
+          throw new Error(`Account backup Slate reference ${rule.source}.${rule.field} is invalid.`);
+        }
+        if (targetIds.has(value)) continue;
+        const owner = findOwner.get(value) as { user_id?: string } | undefined;
+        if (owner?.user_id && owner.user_id !== userId) {
+          throw new Error(
+            `Account backup ${rule.targetTable} reference belongs to another user.`,
+          );
+        }
+        if (!owner?.user_id) {
+          throw new Error(
+            `Account backup ${rule.source}.${rule.field} references missing ${rule.targetTable} data.`,
+          );
+        }
+      }
+    }
+  }
 }
 
 export function importUserSnapshot(
   db: DatabaseSync,
   userId: string,
   snapshot: BackupSnapshot,
-  userKey: Buffer
+  userKey: Buffer,
+  projectOwnedAssets?: ProjectOwnedAssetArchiveBundleV1,
 ): void {
   const snapshotRecord = snapshot as unknown as Record<string, unknown>;
   const unsupportedSnapshotField = Object.keys(snapshotRecord).find((key) => {
@@ -873,13 +1603,27 @@ export function importUserSnapshot(
     );
   }
   validateBackupBotAvatarDetails(snapshot.bots);
-  db.exec("BEGIN IMMEDIATE;");
+  const preparedAssets = projectOwnedAssets
+    ? prepareProjectOwnedAssetImport(userId, snapshot, projectOwnedAssets, {
+        imageIdExists: (imageId) =>
+          Boolean(db.prepare("SELECT 1 FROM images WHERE id = ?").get(imageId)),
+      })
+    : null;
+  let transactionStarted = false;
   try {
+    if (preparedAssets) stagePreparedProjectOwnedAssetFiles(preparedAssets);
+    db.exec("BEGIN IMMEDIATE;");
+    transactionStarted = true;
     assertSnapshotIdsStayWithinTenant(db, userId, snapshot);
     importUserSnapshotWithinTransaction(db, userId, snapshot, userKey);
+    if (preparedAssets) {
+      applyPreparedProjectOwnedAssetsWithinTransaction(db, userId, preparedAssets);
+    }
     db.exec("COMMIT;");
+    transactionStarted = false;
   } catch (error) {
-    db.exec("ROLLBACK;");
+    if (transactionStarted) db.exec("ROLLBACK;");
+    if (preparedAssets) cleanupPreparedProjectOwnedAssetFiles(preparedAssets);
     throw error;
   }
 }
@@ -927,6 +1671,7 @@ function importUserSnapshotWithinTransaction(
       SET
         theme = ?,
         preferred_provider = ?,
+        preferred_image_provider = ?,
         provider_locked = ?,
         auto_memory = ?,
         composer_writing_assist = ?,
@@ -982,6 +1727,7 @@ function importUserSnapshotWithinTransaction(
         default_elevenlabs_voice_id = ?,
         elevenlabs_voice_bank = ?,
         elevenlabs_voice_model = ?,
+        elevenlabs_voice_collection_id = ?,
         prism_default_bot_audio_voice_profile = ?
       WHERE id = ?
     `).run(
@@ -989,6 +1735,11 @@ function importUserSnapshotWithinTransaction(
       settings.preferredProvider === "openai" || settings.preferredProvider === "anthropic"
         ? settings.preferredProvider
         : "local",
+      resolveImageProviderName({
+        savedProvider:
+          settings.preferredImageProvider ??
+          (settings.preferredProvider === "local" ? "local" : "openai"),
+      }),
       settings.providerLocked ? 1 : 0,
       settings.autoMemory ? 1 : 0,
       settings.composerWritingAssist ? 1 : 0,
@@ -1064,9 +1815,15 @@ function importUserSnapshotWithinTransaction(
       typeof settings.elevenLabsVoiceModel === "string"
         ? settings.elevenLabsVoiceModel.trim().slice(0, 160) || null
         : null,
+      normalizeElevenLabsVoiceCollectionId(
+        settings.elevenLabsVoiceCollectionId,
+      ),
       serializeBotAudioVoiceProfileV1(settings.prismDefaultBotAudioVoiceProfile),
       userId
     );
+    db.prepare(
+      "UPDATE users SET signal_immersive_voice_effects_enabled = ? WHERE id = ?"
+    ).run(settings.signalImmersiveVoiceEffectsEnabled === true ? 1 : 0, userId);
   }
 
   if (Array.isArray(snapshot.bots)) {
@@ -1075,6 +1832,7 @@ function importUserSnapshotWithinTransaction(
         id,
         user_id,
         name,
+        name_pronunciation,
         system_prompt,
         voice_preview_line,
         export_hash,
@@ -1120,7 +1878,7 @@ function importUserSnapshotWithinTransaction(
         visibility,
         created_at,
         updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const bot of snapshot.bots) {
       if (!bot || typeof bot.id !== "string" || bot.id.trim().length === 0) continue;
@@ -1129,6 +1887,7 @@ function importUserSnapshotWithinTransaction(
         bot.id.trim(),
         userId,
         typeof bot.name === "string" && bot.name.trim().length > 0 ? bot.name.trim() : "Imported Bot",
+        normalizeBotNamePronunciation(bot.namePronunciation),
         typeof bot.systemPrompt === "string" ? bot.systemPrompt : "",
         normalizeVoicePreviewLine(bot.voicePreviewLine) || null,
         typeof bot.exportHash === "string" && bot.exportHash.trim().length > 0
@@ -1195,7 +1954,135 @@ function importUserSnapshotWithinTransaction(
       );
       db.prepare("UPDATE bots SET powers_json = ? WHERE id = ? AND user_id = ?")
         .run(serializeBotPowersV1(bot.powers ?? []), bot.id.trim(), userId);
+      db.prepare(
+        "UPDATE bots SET face_mouth_coffee_pucker = ? WHERE id = ? AND user_id = ?"
+      ).run(
+        bot.faceMouthCoffeePucker === true ? 1 : 0,
+        bot.id.trim(),
+        userId
+      );
     }
+  }
+
+  if (snapshot.botcast) {
+    const botcast = snapshot.botcast;
+    const showIds = new Set(botcast.shows.map((show) => show.id));
+    const episodeIds = new Set(botcast.episodes.map((episode) => episode.id));
+    for (const show of botcast.shows) {
+      db.prepare(
+        `INSERT OR REPLACE INTO botcast_shows
+          (id, user_id, host_bot_id, name, premise, hosting_style, accent_color,
+           fallback_studio_accent_variant, atmosphere_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        show.id, userId, show.hostBotId, show.name, show.premise,
+        show.hostingStyle, show.accentColor,
+        isBotcastFallbackStudioAccentVariant(show.fallbackStudioAccentVariant)
+          ? show.fallbackStudioAccentVariant
+          : botcastFallbackStudioAccentVariantForSeed(show.id),
+        show.atmosphereJson,
+        show.createdAt, show.updatedAt,
+      );
+      if (
+        show.introAudio?.provider === "elevenlabs" &&
+        typeof show.introAudio.audioBase64 === "string"
+      ) {
+        const audioBytes = Buffer.from(show.introAudio.audioBase64, "base64");
+        if (
+          audioBytes.length > 0 &&
+          audioBytes.length <= 4 * 1024 * 1024 &&
+          /^audio\/(?:mpeg|mp3)$/iu.test(show.introAudio.contentType)
+        ) {
+          db.prepare(
+            `INSERT OR REPLACE INTO botcast_show_intro_audio
+              (show_id, user_id, provider, model, prompt, content_type,
+               audio_bytes, duration_ms, revision, created_at, updated_at)
+             VALUES (?, ?, 'elevenlabs', ?, ?, ?, ?, ?, ?, ?, ?)`,
+          ).run(
+            show.id,
+            userId,
+            show.introAudio.model,
+            show.introAudio.prompt,
+            show.introAudio.contentType,
+            audioBytes,
+            Math.max(3_000, Math.round(show.introAudio.durationMs)),
+            Math.max(1, Math.round(show.introAudio.revision)),
+            show.introAudio.createdAt || show.createdAt,
+            show.introAudio.updatedAt || show.updatedAt,
+          );
+        }
+      }
+    }
+    for (const episode of botcast.episodes) {
+      if (!showIds.has(episode.showId)) continue;
+      db.prepare(
+        `INSERT OR REPLACE INTO botcast_episodes
+          (id, user_id, show_id, host_bot_id, guest_bot_id, title, topic,
+           producer_brief, provider, model, response_mode, duration_minutes, status, segment, outcome,
+           tension_level, warning_count, started_at, completed_at, runtime_ms,
+           created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        episode.id, userId, episode.showId, episode.hostBotId, episode.guestBotId,
+        episode.title, episode.topic, episode.producerBrief,
+        episode.provider === "openai" || episode.provider === "anthropic"
+          ? episode.provider
+          : "local",
+        typeof episode.model === "string" ? episode.model : null,
+        episode.responseMode === "auto" || episode.responseMode === "online"
+          ? episode.responseMode
+          : episode.provider === "openai" || episode.provider === "anthropic"
+            ? "online"
+            : "local",
+        typeof episode.durationMinutes === "number" &&
+        Number.isInteger(episode.durationMinutes) &&
+        episode.durationMinutes >= 3 &&
+        episode.durationMinutes <= 30
+          ? episode.durationMinutes
+          : null,
+        episode.status, episode.segment, episode.outcome, episode.tensionLevel,
+        episode.warningCount, episode.startedAt, episode.completedAt,
+        episode.runtimeMs, episode.createdAt, episode.updatedAt,
+      );
+    }
+    for (const segment of botcast.segments) {
+      if (!episodeIds.has(segment.episodeId)) continue;
+      db.prepare(
+        `INSERT OR REPLACE INTO botcast_episode_segments
+          (id, user_id, episode_id, segment, ordinal, started_at, ended_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        segment.id, userId, segment.episodeId, segment.segment, segment.ordinal,
+        segment.startedAt, segment.endedAt,
+      );
+    }
+    for (const message of botcast.messages) {
+      if (!episodeIds.has(message.episodeId)) continue;
+      db.prepare(
+        `INSERT OR REPLACE INTO botcast_messages
+          (id, user_id, episode_id, speaker_role, bot_id, content, voice_performance_text, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        message.id, userId, message.episodeId, message.speakerRole,
+        message.botId, message.content, message.voicePerformanceText ?? null,
+        message.createdAt,
+      );
+    }
+    for (const event of botcast.events) {
+      if (!episodeIds.has(event.episodeId)) continue;
+      db.prepare(
+        `INSERT OR REPLACE INTO botcast_events
+          (id, user_id, episode_id, sequence, kind, payload_json, occurred_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        event.id, userId, event.episodeId, event.sequence, event.kind,
+        event.payloadJson, event.occurredAt,
+      );
+    }
+  }
+
+  if (snapshot.slate) {
+    importSlateSnapshot(db, userId, snapshot.slate);
   }
 
   const insertConversation = db.prepare(`

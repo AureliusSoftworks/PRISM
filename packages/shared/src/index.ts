@@ -3,6 +3,32 @@ import type { PrismMoodIgnoredQuestionPenaltyLevel } from "./mood.js";
 import type { AutoRecoveryTraceV1 } from "./autoFallback.js";
 
 export {
+  SIGNAL_PERSONA_TEMPERAMENTS,
+  rankSignalPersonaTemperaments,
+  signalPersonaTemperamentFor,
+  type SignalPersonaTemperament,
+  type SignalPersonaTemperamentMatch,
+} from "./signalPersonaTemperament.js";
+
+export {
+  PROJECT_OWNED_ASSET_BLOB_PREFIX,
+  PROJECT_OWNED_ASSET_MANIFEST_PATH,
+  PROJECT_OWNED_ASSET_MANIFEST_SCHEMA,
+  isProjectOwnedAssetBlobArchivePath,
+  projectOwnedAssetBlobArchivePathForChecksum,
+  type ProjectOwnedAssetBackupReferenceV1,
+  type ProjectOwnedAssetExportPayloadV1,
+  type ProjectOwnedAssetManifestEntryV1,
+  type ProjectOwnedAssetManifestV1,
+  type ProjectOwnedAssetMediaTypeV1,
+  type ProjectOwnedAssetOwnerTypeV1,
+  type ProjectOwnedAssetRestoreMetadataV1,
+  type SignalProjectAudioRestoreMetadataV1,
+  type SignalProjectImageRestoreMetadataV1,
+  type SignalProjectOwnedAssetSlotV1,
+} from "./projectOwnedAssetBackup.js";
+
+export {
   AUTO_FALLBACK_CHAIN_FALLBACK_COUNT,
   AUTO_FALLBACK_CHAIN_VERSION,
   AUTO_FALLBACK_MODEL_ID_MAX_LENGTH,
@@ -32,10 +58,16 @@ export {
   COFFEE_POWER_PROMPT_MAX_CHARS,
   COFFEE_POWER_PROMPT_MAX_TOKENS,
   activeBotPowersV1,
+  botPowerCupRateMultiplierForBotV1,
+  botPowerObserverCueLinesV1,
+  botPowerSelfCueLinesV1,
   botPowerSourceHashV1,
+  buildBotPowersPromptBlock,
+  buildBotPowersSelfPromptV1,
   buildCoffeePowersPromptBlock,
   coffeePowerCupRateMultiplierV1,
   estimateCoffeePowerTokensV1,
+  estimateBotPowerTokensV1,
   normalizeBotPowerEffectV1,
   normalizeBotPowerV1,
   normalizeBotPowersV1,
@@ -156,20 +188,37 @@ export {
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
   DEFAULT_ENGLISH_VOICE_ENGINE,
   DEFAULT_VOICE_MODE,
+  ELEVENLABS_VOICE_EFFECTS,
+  ELEVENLABS_VOICE_EFFECT_DESCRIPTIONS,
+  ELEVENLABS_VOICE_EFFECT_LABELS,
   botVoiceTextureForPreset,
   botVoiceTextureIsModified,
   isBotAudioVoiceId,
   isBotVoiceTexturePreset,
   normalizeBotAudioVoiceControl,
+  applyVoiceDeliveryMoodToProfile,
   normalizeBotAudioVoiceProfileV1,
   normalizeBotVoiceTexture,
   normalizeBotVoiceTextureUnit,
   normalizeBotVoiceVolume,
   normalizeEnglishVoiceEngine,
+  normalizeElevenLabsVoiceDirection,
+  normalizeElevenLabsVoiceEffect,
   normalizeOptionalBotAudioVoiceProfileV1,
   normalizeVoiceMode,
+  normalizeVoiceDeliveryMood,
+  resolveElevenLabsVoicePerformance,
+  voiceDeliveryRateForMood,
   NEUTRAL_COFFEE_VOICE_DELIVERY_ENVELOPE,
+  VOICE_DELIVERY_RATE_BY_MOOD,
+  ELEVENLABS_VOICE_SPEED_MIN,
+  ELEVENLABS_VOICE_SPEED_MAX,
+  BOT_AUDIO_VOICE_PACE_RATE_DEPTH,
+  BOT_AUDIO_VOICE_PITCH_DEPTH_CENTS,
+  BOT_NAME_PRONUNCIATION_MAX_LENGTH,
+  applyBotNamePronunciations,
   applyPlayerNamePronunciation,
+  normalizeBotNamePronunciation,
   parseStoredBotAudioVoiceProfileV1,
   serializeBotAudioVoiceProfileV1,
   type BotAudioVoiceId,
@@ -179,9 +228,13 @@ export {
   type BotVoiceTexturePreset,
   type BotVoiceTextureV1,
   type CoffeeVoiceDeliveryEnvelope,
+  type VoiceDeliveryMood,
+  type ElevenLabsVoicePerformanceV1,
   type LegacyBotAudioVoiceProfileV1,
   type NormalizedBotAudioVoiceProfileV1,
+  type BotNamePronunciationEntry,
   type EnglishVoiceEngine,
+  type ElevenLabsVoiceEffect,
   type VoiceMode,
 } from "./audioVoice.js";
 
@@ -240,6 +293,7 @@ export {
   DEFAULT_BOT_FACE_GLYPH_ANIMATION,
   DEFAULT_BOT_FACE_FONT_WEIGHT,
   DEFAULT_BOT_FACE_MOUTH_CHARACTER,
+  DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER,
   DEFAULT_BOT_FACE_MOUTH_OFFSET_X,
   DEFAULT_BOT_FACE_MOUTH_OFFSET_Y,
   DEFAULT_BOT_FACE_MOUTH_ROTATION_DEG,
@@ -261,6 +315,7 @@ export {
   normalizeBotFaceFontWeight,
   normalizeBotFaceGlyphAnimation,
   normalizeBotFaceMouthCharacter,
+  normalizeBotFaceMouthCoffeePucker,
   normalizeBotFaceMouthOffsetX,
   normalizeBotFaceMouthOffsetY,
   normalizeBotFaceMouthRotationDeg,
@@ -390,10 +445,22 @@ export {
 } from "./elevenLabsImageModels.js";
 
 export {
+  GROUP_ROOM_WALLPAPER_GROUP_DESCRIPTION_MAX_LENGTH,
+  GROUP_ROOM_WALLPAPER_GROUP_NAME_MAX_LENGTH,
+  GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE,
+  GROUP_ROOM_WALLPAPER_MEMBER_BOT_ID_MAX_LENGTH,
+  GROUP_ROOM_WALLPAPER_MEMBER_COUNT_MAX,
+  GROUP_ROOM_WALLPAPER_MEMBER_COUNT_MIN,
+  type GroupRoomWallpaperImageGenerationRequest,
+} from "./groupRoomWallpaper.js";
+
+export {
   OPENAI_IMAGE_MODEL_IDS,
   OPENAI_IMAGE_MODEL_OPTIONS_FOR_UI,
   DEFAULT_OPENAI_IMAGE_MODEL_ID,
   DEFAULT_OLLAMA_IN_APP_PULL_MODEL,
+  isImageProviderName,
+  resolveImageProviderName,
   isAllowedOpenAiImageModelId,
   isGptImageModelId,
   normalizeOpenAiImageModelId,
@@ -404,6 +471,7 @@ export {
   isComfyUiModelId,
   parseComfyUiCheckpointName,
   isAllowedInAppOllamaPullModelName,
+  type ImageProviderName,
   type OpenAiImageModelId,
   type OpenAiImageSizeGpt,
   type NormalizedOpenAiImageSize,
@@ -510,6 +578,85 @@ export {
 } from "./storyRuntime.js";
 
 export {
+  SLATE_RETURN_SESSION_SCHEMA_VERSION,
+  SLATE_SECTION_CONTRACT_VERSION,
+  transformSlateLockedRangesForTextEdit,
+  type SlateBookSummary,
+  type SlateCharacter,
+  type SlateContinuityAuthority,
+  type SlateContinuityClaim,
+  type SlateContinuityConcern,
+  type SlateContinuityConcernCard,
+  type SlateContinuityConcernKind,
+  type SlateContinuityConcernNextResponse,
+  type SlateContinuityConcernPassage,
+  type SlateContinuityConcernResolveRequest,
+  type SlateContinuityConcernResolveResponse,
+  type SlateContinuityConcernSeverity,
+  type SlateContinuityConcernStatus,
+  type SlateContinuityContextBrief,
+  type SlateContinuityEntity,
+  type SlateContinuityEntityKind,
+  type SlateContinuityEpistemicStatus,
+  type SlateContinuityEvent,
+  type SlateContinuityGeneration,
+  type SlateContinuityKnowledgeState,
+  type SlateContinuityProvenance,
+  type SlateContinuityRelationship,
+  type SlateContinuityResolutionKind,
+  type SlateContinuityScope,
+  type SlateContinuityScopeKind,
+  type SlateContinuitySource,
+  type SlateContinuitySourceAnchor,
+  type SlateContinuitySourceKind,
+  type SlateContinuityStatus,
+  type SlateContinuityThread,
+  type SlateCreateSeriesRequest,
+  type SlateCreateProjectRequest,
+  type SlateDraftRequest,
+  type SlateLockedRange,
+  type SlateProjectDeleteResponse,
+  type SlateProjectDetail,
+  type SlateProjectListResponse,
+  type SlateProjectPatchRequest,
+  type SlateProjectPhase,
+  type SlateProjectResponse,
+  type SlateProjectSummary,
+  type SlateRevision,
+  type SlateRevisionAction,
+  type SlateRevisionRequest,
+  type SlateRevisionScope,
+  type SlateRevisionStatus,
+  type SlateResolveSparkWildcardsRequest,
+  type SlateResolveSparkWildcardsResponse,
+  type SlateReturnNextCard,
+  type SlateReturnNextCardKind,
+  type SlateReturnSectionReference,
+  type SlateReturnSession,
+  type SlateReturnSessionListResponse,
+  type SlateReturnSessionResponse,
+  type SlateReturnSessionSynopsis,
+  type SlateReturnThreadReference,
+  type SlateManuscriptPageResponse,
+  type SlateSectionDetail,
+  type SlateSectionKind,
+  type SlateSectionListResponse,
+  type SlateSectionResponse,
+  type SlateSectionSaveRequest,
+  type SlateSectionStatus,
+  type SlateSectionSummary,
+  type SlateSeriesSummary,
+  type SlateSeriesDetail,
+  type SlateSeriesListResponse,
+  type SlateSeriesResponse,
+  type SlateStructureItem,
+  type SlateStructureKind,
+  type SlateStructureStatus,
+  type SlateUnresolvedThread,
+  type SlateVersionSummary,
+} from "./slate.js";
+
+export {
   ACCENT_LUMINANCE_MAX_LIGHT,
   ACCENT_LUMINANCE_MAX_LIGHT_YELLOW,
   ACCENT_LIGHTNESS_MAX,
@@ -573,6 +720,8 @@ export type UsagePurpose =
   | "chat_fallback"
   | "chat_web_search_followup"
   | "conversation_title"
+  | "botcast_brand"
+  | "botcast_turn"
   | "coffee_turn"
   | "coffee_router"
   | "coffee_summary"
@@ -580,11 +729,15 @@ export type UsagePurpose =
   | "embedding"
   | "image_generation"
   | "bot_profile_picture"
+  | "group-room-wallpaper"
   | "image_prompt"
   | "memory_inference"
   | "memory_summary"
   | "prompt_wildcard"
   | "psychic_planning"
+  | "slate_draft"
+  | "slate_revision"
+  | "slate_shape"
   | "story_generation"
   | "voice_preview"
   | "zen_live_action"
@@ -1342,7 +1495,10 @@ export type CoffeePresetMode = "manual" | "auto";
 /** How new Coffee Sessions pick a table topic for a saved Coffee Group. */
 export type CoffeeTopicSelectionMode = "manual" | "auto";
 
-/** Stored Coffee Group starter topics keyed by bot id. */
+/** Maximum length for a persisted Coffee session topic. */
+export const COFFEE_TOPIC_MAX_LENGTH = 500;
+
+/** Legacy Coffee Group starter topics keyed by bot id. */
 export type CoffeeGroupStarterTopicsByBotId = Record<string, string[]>;
 
 export interface CoffeePreset {
@@ -1391,7 +1547,9 @@ export interface CoffeeGroup {
   topicSelectionMode?: CoffeeTopicSelectionMode;
   /** Server-persisted Coffee model picker per provider. Empty = Auto. */
   modelChoiceByProvider?: CoffeeGroupModelChoice;
-  /** Coffee-only persisted topic pool generated from each seated bot. */
+  /** Canonical Coffee-only prompts generated once for this group composition. */
+  starterTopics?: string[];
+  /** Legacy import/backup shape. New writes use `starterTopics`. */
   starterTopicsByBotId?: CoffeeGroupStarterTopicsByBotId;
   moodSummary?: Record<string, unknown>;
   createdAt: string;
@@ -1541,7 +1699,8 @@ export interface Conversation {
    */
   coffeeSettings?: CoffeeSessionSettings;
   /** Coffee-only — selected timed session duration, once group sessions own starts. */
-  coffeeSessionDurationMinutes?: CoffeeSessionDurationMinutes;
+  /** Null means Auto/open-ended with no countdown. */
+  coffeeSessionDurationMinutes?: CoffeeSessionDurationMinutes | null;
   /** Coffee-only — shared anchor topic for this session (null until chosen). */
   coffeeTopic?: string | null;
   /** Coffee-only — optional team-mode social state for this timed session. */
@@ -2002,8 +2161,10 @@ export interface CoffeeSessionCreateRequest {
   groupBotIds: Array<string | null>;
   /** Optional session tuning; omitted rows use server defaults. */
   coffeeSettings?: unknown;
-  /** Optional timed session length in whole minutes, from 3 to 30. */
-  durationMinutes?: CoffeeSessionDurationMinutes;
+  /** Null selects Auto/open-ended; otherwise whole minutes from 3 to 30. */
+  durationMinutes?: CoffeeSessionDurationMinutes | null;
+  /** Optional opening topic, trimmed and limited to {@link COFFEE_TOPIC_MAX_LENGTH} characters. */
+  initialTopic?: string;
   /** Optional opening poll that seeds the initial table topic. */
   initialPoll?: CoffeePollCreateRequest;
   /** Optional opening teams mode that seeds left/right social dynamics. */
@@ -2014,12 +2175,16 @@ export interface CoffeeSessionCreateRequest {
 export interface CoffeeGroupSessionCreateRequest {
   /** Optional session tuning; omitted rows use Coffee Group defaults. */
   coffeeSettings?: unknown;
-  /** Optional timed session length in whole minutes, from 3 to 30. */
-  durationMinutes?: CoffeeSessionDurationMinutes;
+  /** Null selects Auto/open-ended; otherwise whole minutes from 3 to 30. */
+  durationMinutes?: CoffeeSessionDurationMinutes | null;
+  /** Optional opening topic, trimmed and limited to {@link COFFEE_TOPIC_MAX_LENGTH} characters. */
+  initialTopic?: string;
   /** Optional preset id, or `__auto__` for auto preset selection. */
   presetId?: string;
   /** Bot ids from this Coffee Group that should sit out this one session. */
   excludedBotIds?: string[];
+  /** Require every non-excluded group member to attend this session. */
+  forceAttendance?: boolean;
   /** Optional opening poll that seeds the initial table topic. */
   initialPoll?: CoffeePollCreateRequest;
   /** Optional opening teams mode that seeds left/right social dynamics. */
@@ -2197,3 +2362,5 @@ export interface CoffeePollPlayerVoteRequest {
 export interface CoffeePollPlayerVoteResponse {
   poll: CoffeePoll;
 }
+export * from "./botcast.js";
+export * from "./continuityVersion.js";

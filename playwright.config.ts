@@ -5,7 +5,10 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 2 : 0,
-  reporter: process.env.CI ? [["list"], ["html", { outputFolder: "test-results/playwright" }]] : "list",
+  workers: process.env.CI ? 1 : undefined,
+  reporter: process.env.CI
+    ? [["list"], ["html", { outputFolder: "playwright-report" }]]
+    : "list",
   use: {
     baseURL: process.env.PRISM_E2E_BASE_URL ?? "http://127.0.0.1:18788",
     trace: "retain-on-failure",

@@ -12,6 +12,58 @@ Active development happens on the `dev` branch; every release is a merge into
 
 _Staging area - nothing queued for release yet._
 
+## [0.10.0] - 2026-07-16
+
+### Added
+
+- **Signal turns bot-owned shows into a complete production workspace.** Hosts
+  can shape show identity, generate or upload light and dark studios and logos,
+  direct episodes privately, archive finished productions, and replay them with
+  synchronized speech and artwork progress. Branded pre-rolls synthesize local
+  idents, shape optional ElevenLabs music around the host's temperament, and
+  prepare opening turns in the background.
+- **Slate introduces a persistent, writer-directed fiction desk.** Projects
+  move through Shape, Draft, and Refine with optional wildcard sparks, editable
+  manuscripts, locks, revision previews, and explicit version-safe acceptance.
+  Private Continuity guidance, recovery generations, portable `.slate`
+  archives, and clean manuscript exports keep long-form work durable.
+- **Online voice identity can be authored per bot.** ElevenLabs voices now
+  override the bot's system voice when selected, with saved effects, delivery
+  directions, pronunciation guidance, immersive Signal reactions, and local
+  preview controls.
+- **PRISM has a unified refraction identity.** The new emblem, wordmark,
+  light/dark treatments, and documented brand ethos carry through the shared
+  shell and creative workspaces.
+
+### Changed
+
+- **Image generation has explicit provider routing and provenance.** Local
+  packages and online engines are selected independently, while generated
+  assets retain source and model context across the Library and Signal.
+- **Account backups preserve creative assets and voice-library choices.**
+  Portable archives carry active Signal media and restore ElevenLabs voice
+  collection settings without retaining stale account-local identifiers.
+- **Coffee, Signal, and Slate share a more coherent production shell.** Their
+  navigation, responsive layouts, Light Mode treatment, progress surfaces, and
+  contextual tutorials now follow the same applet conventions.
+- **Long-running creative operations expose scoped progress and cancellation.**
+  Signal artwork generation reports only the requested assets and can be
+  cancelled without implying unrelated work is being regenerated.
+- **Desktop playback remains active while the app is backgrounded.** The native
+  wrapper no longer throttles active voice and workspace behavior.
+
+### Fixed
+
+- **ElevenLabs previews and bot voice settings are reliable.** Samples no
+  longer end prematurely, effects remain limited to online audio, and each
+  bot's voice, pitch, lilt, effect, and pronunciation settings persist.
+- **Coffee replay and live seating remain synchronized.** Finished sessions,
+  refills, arrivals, speech delivery, and Auto routing now preserve canonical
+  session state and responsive presentation.
+- **Signal asset jobs describe the work actually requested.** Logo-only and
+  studio-only regeneration no longer display already-complete unrelated assets
+  as part of the active job.
+
 ## [0.9.2] - 2026-07-14
 
 ### Fixed

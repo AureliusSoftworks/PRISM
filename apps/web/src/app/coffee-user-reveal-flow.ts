@@ -1,4 +1,7 @@
-import { PRISM_BOT_MARKDOWN_LINK_RE, tokenizeBotMentionSource } from "./botMention.ts";
+import {
+  PRISM_BOT_MARKDOWN_LINK_RE,
+  tokenizeBotMentionSource,
+} from "./botMention.ts";
 
 export type CoffeeUserRevealFlowState =
   | "idle"
@@ -15,67 +18,44 @@ export function coffeeComposerUsesRichInput(args: {
   return args.markdownEditorEnabled || args.variant === "coffee-table";
 }
 
-function stableUnitValue(seed: string): number {
-  let hash = 2166136261;
-  for (let index = 0; index < seed.length; index += 1) {
-    hash ^= seed.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0) / 0xffffffff;
-}
-
-/** A short social beat after the player's table line finishes revealing. */
-export function coffeePlayerResponseBeatMs(args: {
-  conversationId: string;
-  message: string;
-  responseDelayBias: number;
-  breathingRoom: number;
-  crossTalk: "rare" | "normal" | "chatty" | "pileup";
-}): number {
-  const speed = Math.max(0, Math.min(1, args.responseDelayBias / 100));
-  const room = Math.max(0, Math.min(1, args.breathingRoom / 100));
-  const minMs = 900 + room * 350 - speed * 300;
-  const maxMs = 1_650 + room * 750 - speed * 500;
-  const crossTalkScale =
-    args.crossTalk === "pileup"
-      ? 0.76
-      : args.crossTalk === "chatty"
-        ? 0.88
-        : args.crossTalk === "rare"
-          ? 1.15
-          : 1;
-  const unit = stableUnitValue(
-    `${args.conversationId.trim() || "coffee"}:${args.message.trim()}:player-response`,
-  );
-  const delayMs = (minMs + (maxMs - minMs) * unit) * crossTalkScale;
-  return Math.max(650, Math.min(2_600, Math.round(delayMs)));
-}
-
 export function coffeeShouldQueueAssistantRevealAfterUserTyping(
-  state: CoffeeUserRevealFlowState
+  state: CoffeeUserRevealFlowState,
 ): boolean {
   return state === "userTableTyping";
 }
 
 export function coffeeShouldWaitForPendingBotRevealBeforeNextTurn(
-  state: CoffeeUserRevealFlowState
+  state: CoffeeUserRevealFlowState,
 ): boolean {
   return state === "tableTyping";
 }
 
-export function coffeeArrivalAutoplayCanScheduleNow(state: CoffeeUserRevealFlowState): boolean {
+export function coffeeRevealPreparationMayCommit(args: {
+  preparedEpoch: number;
+  currentEpoch: number;
+}): boolean {
+  return args.preparedEpoch === args.currentEpoch;
+}
+
+export function coffeeArrivalAutoplayCanScheduleNow(
+  state: CoffeeUserRevealFlowState,
+): boolean {
   return state === "idle" || state === "playerComposing";
 }
 
 export function coffeeArrivalAutoplayRetryDelayMs(
   state: CoffeeUserRevealFlowState,
-  requestedDelayMs = 850
+  requestedDelayMs = 850,
 ): number {
   if (coffeeArrivalAutoplayCanScheduleNow(state)) return 0;
   const boundedDelayMs = Number.isFinite(requestedDelayMs)
     ? Math.max(120, Math.round(requestedDelayMs))
     : 850;
-  if (state === "tableTyping" || state === "cooldown" || state === "userTableTyping") {
+  if (
+    state === "tableTyping" ||
+    state === "cooldown" ||
+    state === "userTableTyping"
+  ) {
     return Math.min(420, boundedDelayMs);
   }
   return Math.min(900, Math.max(320, boundedDelayMs));
@@ -108,13 +88,56 @@ export function coffeeSubmittedUserMessageFromTurn<
   return null;
 }
 
-export function coffeeCenterFeedMessagesDuringPendingReveal<T extends { id: string }>(args: {
+export function coffeePersistedUserLineOwnsPendingReveal<
+  T extends { role: string; content: string },
+>(args: { messages: readonly T[]; userRevealText: string }): boolean {
+  const normalizedPending = args.userRevealText.replace(/\s+/g, " ").trim();
+  if (!normalizedPending) return false;
+  const latestStoredUserMessage = coffeeSubmittedUserMessageFromTurn(
+    args.messages,
+  );
+  return (
+    latestStoredUserMessage?.content.replace(/\s+/g, " ").trim() ===
+    normalizedPending
+  );
+}
+
+export function coffeeTableMessageContentIsVisible(content: string): boolean {
+  const normalized = content.trim();
+  return normalized.length > 0 && !/^[\p{P}\s]+$/u.test(normalized);
+}
+
+/** Sentence-case player prose for display without rewriting persisted message source. */
+export function coffeeSentenceCaseTableProse(text: string): string {
+  for (const segment of tokenizeBotMentionSource(text)) {
+    if (segment.kind === "mention") {
+      if (/\p{L}/u.test(segment.displayName)) return text;
+      continue;
+    }
+    const firstLetter = segment.text.match(/\p{L}/u);
+    if (!firstLetter || firstLetter.index === undefined) continue;
+    const sourceIndex = segment.srcStart + firstLetter.index;
+    const sentenceInitial = firstLetter[0].toLocaleUpperCase();
+    if (sentenceInitial === firstLetter[0]) return text;
+    return `${text.slice(0, sourceIndex)}${sentenceInitial}${text.slice(
+      sourceIndex + firstLetter[0].length,
+    )}`;
+  }
+  return text;
+}
+
+export function coffeeCenterFeedMessagesDuringPendingReveal<
+  T extends { id: string },
+>(args: {
   messages: readonly T[];
   pendingMessageId?: string | null;
   revealInProgress: boolean;
 }): T[] {
-  if (!args.revealInProgress || !args.pendingMessageId) return [...args.messages];
-  return args.messages.filter((message) => message.id !== args.pendingMessageId);
+  if (!args.revealInProgress || !args.pendingMessageId)
+    return [...args.messages];
+  return args.messages.filter(
+    (message) => message.id !== args.pendingMessageId,
+  );
 }
 
 export function coffeeShouldIgnoreStaleTurnResponse(response: {
@@ -133,8 +156,10 @@ export function coffeeEmptyTurnAutoplayRetryDelayMs(args: {
 }): number | null {
   if (args.speakerBotId) return null;
   if (args.autoplayPaused) return null;
-  if (args.sessionPhase !== "arriving" && args.sessionPhase !== "live") return null;
-  if (args.sessionRemainingMs !== null && args.sessionRemainingMs <= 0) return null;
+  if (args.sessionPhase !== "arriving" && args.sessionPhase !== "live")
+    return null;
+  if (args.sessionRemainingMs !== null && args.sessionRemainingMs <= 0)
+    return null;
   return args.stale === true ? 360 : 850;
 }
 
@@ -174,13 +199,23 @@ export function coffeeAutoplayForceTurnShouldRun(args: {
   silenceRecoveryMs?: number;
 }): boolean {
   if (!args.hasConversation || !args.hasPresentBot) return false;
-  if (args.sessionPhase !== "arriving" && args.sessionPhase !== "live") return false;
-  if (args.autoplayPaused || args.devModeEnabled || args.draft.trim().length > 0) return false;
+  if (args.sessionPhase !== "arriving" && args.sessionPhase !== "live")
+    return false;
+  if (
+    args.autoplayPaused ||
+    args.devModeEnabled ||
+    args.draft.trim().length > 0
+  )
+    return false;
   if (args.requestInFlight || args.pendingReveal) return false;
-  if (args.sessionEndsAtMs === null || args.nowMs >= args.sessionEndsAtMs) return false;
+  if (args.sessionEndsAtMs !== null && args.nowMs >= args.sessionEndsAtMs)
+    return false;
   const deadlineGraceMs = Math.max(0, args.deadlineGraceMs ?? 1_500);
   const silenceRecoveryMs = Math.max(1_000, args.silenceRecoveryMs ?? 35_000);
-  if (args.lastForcedAtMs > 0 && args.nowMs - args.lastForcedAtMs < deadlineGraceMs) {
+  if (
+    args.lastForcedAtMs > 0 &&
+    args.nowMs - args.lastForcedAtMs < deadlineGraceMs
+  ) {
     return false;
   }
   if (args.timerPresent && args.timerScheduledForMs !== null) {
@@ -188,7 +223,9 @@ export function coffeeAutoplayForceTurnShouldRun(args: {
   }
   if (args.timerPresent) return false;
   const progressAtMs = args.lastAssistantAtMs ?? args.sessionStartedAtMs;
-  return progressAtMs !== null && args.nowMs - progressAtMs >= silenceRecoveryMs;
+  return (
+    progressAtMs !== null && args.nowMs - progressAtMs >= silenceRecoveryMs
+  );
 }
 
 export function coffeeAutoplayWatchdogShouldWake(args: {
@@ -204,12 +241,13 @@ export function coffeeAutoplayWatchdogShouldWake(args: {
   nowMs: number;
 }): boolean {
   if (!args.hasConversation) return false;
-  if (args.sessionPhase !== "arriving" && args.sessionPhase !== "live") return false;
+  if (args.sessionPhase !== "arriving" && args.sessionPhase !== "live")
+    return false;
   if (args.autoplayPaused || args.devModeEnabled) return false;
   if (args.draft.trim().length > 0) return false;
   if (!coffeeArrivalAutoplayCanScheduleNow(args.rhythmState)) return false;
   if (args.loopScheduled || args.requestInFlight) return false;
-  return args.sessionEndsAtMs !== null && args.nowMs < args.sessionEndsAtMs;
+  return args.sessionEndsAtMs === null || args.nowMs < args.sessionEndsAtMs;
 }
 
 export function coffeeTableTalkAutoplayDeferralMs(args: {
@@ -240,16 +278,21 @@ export function coffeeGeneratedReplyRevealDeferralMs(args: {
   return coffeeTableTalkAutoplayDeferralMs(args);
 }
 
-export function coffeeDraftChangeCountsAsTyping(previousDraft: string, nextDraft: string): boolean {
+export function coffeeDraftChangeCountsAsTyping(
+  previousDraft: string,
+  nextDraft: string,
+): boolean {
   if (previousDraft === nextDraft) return false;
   return previousDraft.trim().length > 0 || nextDraft.trim().length > 0;
 }
 
 export function coffeeDirectedMentionBotIds(
   text: string,
-  seatedBotIds: Iterable<string>
+  seatedBotIds: Iterable<string>,
 ): string[] {
-  const allowed = new Set([...seatedBotIds].map((id) => id.trim()).filter(Boolean));
+  const allowed = new Set(
+    [...seatedBotIds].map((id) => id.trim()).filter(Boolean),
+  );
   if (allowed.size === 0 || text.length === 0) return [];
   const seen = new Set<string>();
   const out: string[] = [];
@@ -272,10 +315,13 @@ export function coffeeDirectedMentionBotIds(
 export function coffeeVisibleDirectedMentionBotIds(
   text: string,
   seatedBotIds: Iterable<string>,
-  revealedDisplayLength: number
+  revealedDisplayLength: number,
 ): string[] {
-  const allowed = new Set([...seatedBotIds].map((id) => id.trim()).filter(Boolean));
-  if (allowed.size === 0 || text.length === 0 || revealedDisplayLength <= 0) return [];
+  const allowed = new Set(
+    [...seatedBotIds].map((id) => id.trim()).filter(Boolean),
+  );
+  if (allowed.size === 0 || text.length === 0 || revealedDisplayLength <= 0)
+    return [];
   const seen = new Set<string>();
   const out: string[] = [];
   let displayCursor = 0;

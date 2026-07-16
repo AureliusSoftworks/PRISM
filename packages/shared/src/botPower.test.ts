@@ -3,7 +3,10 @@ import test from "node:test";
 import {
   COFFEE_POWER_PROMPT_MAX_TOKENS,
   BOT_POWER_MAX_COUNT,
+  botPowerCupRateMultiplierForBotV1,
+  botPowerObserverCueLinesV1,
   botPowerSourceHashV1,
+  buildBotPowersSelfPromptV1,
   buildCoffeePowersPromptBlock,
   coffeePowerCupRateMultiplierV1,
   estimateCoffeePowerTokensV1,
@@ -95,4 +98,32 @@ test("resolved cup-rate powers return shared multipliers", () => {
   };
   assert.equal(coffeePowerCupRateMultiplierV1(plan, "voltaire"), 2.5);
   assert.equal(coffeePowerCupRateMultiplierV1(plan, "other"), 1);
+});
+
+test("ready Powers produce bounded app-wide self and observer cues", () => {
+  const name = "Respirator";
+  const intent = "Mechanical breathing punctuates physical beats.";
+  const powers = [{
+    version: 1,
+    id: "respirator",
+    name,
+    intent,
+    enabled: true,
+    compileStatus: "ready",
+    compiled: {
+      version: 1,
+      sourceHash: botPowerSourceHashV1(name, intent),
+      selfCue: "Breathe mechanically during physical beats.",
+      observerCue: "Others hear a mechanical breath before movement.",
+      effects: [{ type: "cup_rate", rate: "very_fast" }],
+      ruleLabels: ["Mechanical breathing"],
+    },
+  }];
+
+  assert.match(buildBotPowersSelfPromptV1(powers), /^Active Powers:/u);
+  assert.match(buildBotPowersSelfPromptV1(powers), /Respirator: Breathe mechanically/u);
+  assert.deepEqual(botPowerObserverCueLinesV1("Vader", powers), [
+    "Vader — Respirator: Others hear a mechanical breath before movement.",
+  ]);
+  assert.equal(botPowerCupRateMultiplierForBotV1(powers), 2.5);
 });

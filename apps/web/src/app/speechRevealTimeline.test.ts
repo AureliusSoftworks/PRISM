@@ -4,6 +4,7 @@ import {
   buildSpeechRevealPhrases,
   finishSpeechRevealTimeline,
   prepareSpeechRevealTimeline,
+  speechRevealTimelineIsVoicing,
   speechRevealTimelineComplete,
   speechRevealTimelineWaitingForAudio,
   speechRevealVisibleTokenCount,
@@ -63,6 +64,14 @@ describe("speech reveal timeline", () => {
     assert.equal(timeline.revealAtMs[1], 600);
     assert.equal(speechRevealVisibleTokenCount(updateSpeechRevealTimeline(timeline, 590)), 1);
     assert.equal(speechRevealVisibleTokenCount(updateSpeechRevealTimeline(timeline, 610)), 2);
+    assert.equal(
+      speechRevealTimelineIsVoicing(updateSpeechRevealTimeline(timeline, 200)),
+      true,
+    );
+    assert.equal(
+      speechRevealTimelineIsVoicing(updateSpeechRevealTimeline(timeline, 450)),
+      false,
+    );
   });
 
   it("builds short phrase buffers without changing the utterance", () => {

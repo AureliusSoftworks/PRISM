@@ -109,22 +109,18 @@ test("long bot and player names truncate safely in live and review layouts", () 
   );
   assert.match(
     pageSource,
-    /aria-label=\{\s*coffeeDevModeEnabled[\s\S]*?`\$\{bot\.name\} at the coffee table`/,
+    /const seatAriaLabel = coffeeDevModeEnabled[\s\S]*?`\$\{bot\.name\} at the coffee table`[\s\S]*?aria-label=\{seatAriaLabel\}/,
   );
 });
 
-test("review lifts the player plate and keeps its circular marker glyph-free", () => {
+test("review lifts the player plate and keeps its Prism marker glyph", () => {
   assert.match(
     ruleFor(".coffeeReplayPlayerNameplate"),
     /margin-top: clamp\(-41px, -3\.2cqw, -30px\)/,
   );
   assert.match(
     pageSource,
-    /className=\{styles\.coffeeReplayPlayerGlyph\}\s+aria-hidden="true"\s*\/>/,
-  );
-  assert.doesNotMatch(
-    pageSource,
-    /className=\{styles\.coffeeReplayPlayerGlyph\}[\s\S]{0,180}<BotGlyph/,
+    /className=\{styles\.coffeeReplayPlayerGlyph\}[\s\S]{0,180}<BotGlyph\s+name=\{zenDefaultPrismGlyph\}/,
   );
   assert.match(
     css,

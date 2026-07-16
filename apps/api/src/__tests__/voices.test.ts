@@ -1,14 +1,15 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
   VOICE_CAPABILITIES,
-  applyGlobalEnglishVoiceDefault,
   applyPlayerNamePronunciation,
   cleanSpeakableAssistantProse,
   elevenLabsVoiceSettings,
   requestElevenLabsSpeech,
   requestElevenLabsSpeechWithTimestamps,
   requestElevenLabsVoiceCatalog,
+  requestElevenLabsVoiceCollections,
   resolveElevenLabsVoiceId,
   resolveVoiceSynthesisBoundary,
   validateVoiceSynthesisRequest,
@@ -81,9 +82,10 @@ describe("voice Phase 1 boundary", () => {
         v: 2,
         enabled: true,
         baseVoiceId: "voice-1",
+        elevenLabsEffect: "clean",
         pitch: 0,
         warmth: 0,
-        pace: 0,
+        pace: 0.333,
         lilt: 0,
         bottishTone: 0.45,
         volume: 1,
@@ -114,8 +116,38 @@ describe("voice Phase 1 boundary", () => {
     assert.equal(resolveVoiceSynthesisBoundary(request).ok, true);
   });
 
-  it("prefers a bot-specific ElevenLabs selection over the account fallback", () => {
-    const bank = { "voice-1": "account-voice" };
+  it("keeps Signal reaction tags in the ElevenLabs lane only", () => {
+    const request = validateVoiceSynthesisRequest({
+      text: "Welcome back.",
+      elevenLabsText: "[sighs] Welcome back. [laughs]",
+      mode: "english",
+      engine: "elevenlabs",
+      explicitOnlineContext: true,
+    });
+    assert.equal(request.text, "Welcome back.");
+    assert.equal(
+      request.elevenLabsText,
+      "[sighs] Welcome back. [laughs]",
+    );
+    const online = resolveVoiceSynthesisBoundary(request);
+    assert.equal(online.ok && online.kind === "elevenlabs-stream"
+      ? online.elevenLabsText
+      : null, "[sighs] Welcome back. [laughs]");
+    const local = resolveVoiceSynthesisBoundary({
+      ...request,
+      persistedMessageProvider: "local",
+    });
+    assert.equal(local.ok ? local.text : null, "Welcome back.");
+    assert.equal(
+      validateVoiceSynthesisRequest({
+        ...request,
+        elevenLabsText: "[explosion] Welcome back.",
+      }).elevenLabsText,
+      null,
+    );
+  });
+
+  it("uses only an explicit per-profile ElevenLabs identity", () => {
     assert.equal(resolveElevenLabsVoiceId({
       v: 2,
       enabled: true,
@@ -136,7 +168,7 @@ describe("voice Phase 1 boundary", () => {
         distortion: 0,
         damage: 0,
       },
-    }, bank), "bot-voice");
+    }), "bot-voice");
     assert.equal(resolveElevenLabsVoiceId({
       v: 1,
       baseVoiceId: "voice-1",
@@ -144,25 +176,10 @@ describe("voice Phase 1 boundary", () => {
       warmth: 0,
       pace: 0,
       lilt: 0,
-    }, bank), "account-voice");
+    }), null);
   });
 
-  it("applies the global voice only when the bot has no explicit selection", () => {
-    assert.equal(
-      applyGlobalEnglishVoiceDefault({}, "builtin", { systemVoiceName: "Alex" }).systemVoiceName,
-      "Alex"
-    );
-    assert.equal(
-      applyGlobalEnglishVoiceDefault({ systemVoiceName: "Fred" }, "builtin", { systemVoiceName: "Alex" }).systemVoiceName,
-      "Fred"
-    );
-    assert.equal(
-      applyGlobalEnglishVoiceDefault({}, "elevenlabs", { elevenLabsVoiceId: "global-eleven" }).elevenLabsVoiceId,
-      "global-eleven"
-    );
-  });
-
-  it("maps portable pace and lilt controls into bounded ElevenLabs settings", () => {
+  it("maps profile performance effects into bounded ElevenLabs settings", () => {
     assert.deepEqual(
       elevenLabsVoiceSettings({
         v: 1,
@@ -180,6 +197,27 @@ describe("voice Phase 1 boundary", () => {
         speed: 0.852,
       }
     );
+  });
+
+  it("applies mood pace ephemerally before selecting a synthesis boundary", () => {
+    const request = validateVoiceSynthesisRequest({
+      text: "A quick answer.",
+      mode: "english",
+      engine: "elevenlabs",
+      explicitOnlineContext: true,
+      moodKey: "joyful",
+      profile: {
+        v: 1,
+        baseVoiceId: "voice-1",
+        pitch: 0,
+        warmth: 0,
+        pace: 0,
+        lilt: 0,
+      },
+    });
+    assert.equal(request.deliveryMood, "joyful");
+    assert.equal(request.profile.pace, 0.75);
+    assert.equal(elevenLabsVoiceSettings(request.profile).speed, 1.18);
   });
 
   it("keeps the ElevenLabs key server-side and sends the expected streaming payload", async () => {
@@ -204,6 +242,131 @@ describe("voice Phase 1 boundary", () => {
     const body = JSON.parse(String(request?.init?.body));
     assert.equal(body.model_id, "eleven_flash_v2_5");
     assert.equal(body.text, "hello");
+  });
+
+  it("turns a saved voice direction deck into Eleven v3 audio tags", async () => {
+    let requestBody: Record<string, unknown> | null = null;
+    await requestElevenLabsSpeech({
+      apiKey: "secret-key",
+      voiceId: "voice-id",
+      model: "eleven_flash_v2_5",
+      text: "The door is already open.",
+      profile: {
+        v: 2,
+        enabled: true,
+        baseVoiceId: "voice-1",
+        elevenLabsVoiceId: "voice-id",
+        elevenLabsEffect: "clean",
+        elevenLabsDirection: "warm, hushed, with measured pauses",
+        pitch: 0,
+        warmth: 0,
+        pace: 0,
+        lilt: 0,
+        bottishTone: 0.45,
+        volume: 1,
+        texture: {
+          preset: "clean",
+          amount: 0,
+          bandwidth: 1,
+          noise: 0,
+          instability: 0,
+          distortion: 0,
+          damage: 0,
+        },
+      },
+      fetchImpl: (async (_url, init) => {
+        requestBody = JSON.parse(String(init?.body));
+        return new Response(new Uint8Array([1]), { status: 200 });
+      }) as typeof fetch,
+    });
+    assert.equal(requestBody?.model_id, "eleven_v3");
+    assert.equal(
+      requestBody?.text,
+      "[warm] [hushed] [with measured pauses] The door is already open.",
+    );
+  });
+
+  it("removes non-spoken direction tags from provider timing alignment", async () => {
+    const providerText = "[warm] Hi";
+    const characters = Array.from(providerText);
+    const speech = await requestElevenLabsSpeechWithTimestamps({
+      apiKey: "secret-key",
+      voiceId: "voice-id",
+      model: "eleven_flash_v2_5",
+      text: "Hi",
+      profile: {
+        v: 2,
+        enabled: true,
+        baseVoiceId: "voice-1",
+        elevenLabsVoiceId: "voice-id",
+        elevenLabsEffect: "clean",
+        elevenLabsDirection: "warm",
+        pitch: 0,
+        warmth: 0,
+        pace: 0,
+        lilt: 0,
+        bottishTone: 0.45,
+        volume: 1,
+        texture: {
+          preset: "clean",
+          amount: 0,
+          bandwidth: 1,
+          noise: 0,
+          instability: 0,
+          distortion: 0,
+          damage: 0,
+        },
+      },
+      fetchImpl: (async (_url, init) => {
+        const body = JSON.parse(String(init?.body));
+        assert.equal(body.text, providerText);
+        return new Response(JSON.stringify({
+          audio_base64: "AQID",
+          alignment: {
+            characters,
+            character_start_times_seconds: characters.map((_, index) => index * 0.05),
+            character_end_times_seconds: characters.map((_, index) => (index + 1) * 0.05),
+          },
+        }), { status: 200 });
+      }) as typeof fetch,
+    });
+    assert.deepEqual(speech.alignment?.characters, ["H", "i"]);
+    assert.ok(
+      Math.abs((speech.alignment?.characterStartTimesSeconds[0] ?? 0) - 0.35) < 0.000_001,
+    );
+    assert.equal(speech.alignment?.characterStartTimesSeconds[1], 0.4);
+  });
+
+  it("uses Eleven v3 and removes Signal reaction tags from timing alignment", async () => {
+    const taggedText = "[sighs] Hi there. [laughs]";
+    const characters = Array.from(taggedText);
+    const speech = await requestElevenLabsSpeechWithTimestamps({
+      apiKey: "secret-key",
+      voiceId: "voice-id",
+      model: "eleven_flash_v2_5",
+      text: taggedText,
+      profile: {
+        v: 1,
+        baseVoiceId: "voice-1",
+        pitch: 0,
+        warmth: 0,
+        pace: 0,
+        lilt: 0,
+      },
+      fetchImpl: (async (_url, init) => {
+        const body = JSON.parse(String(init?.body));
+        assert.equal(body.model_id, "eleven_v3");
+        return new Response(JSON.stringify({
+          audio_base64: "AQID",
+          alignment: {
+            characters,
+            character_start_times_seconds: characters.map((_, index) => index * 0.05),
+            character_end_times_seconds: characters.map((_, index) => (index + 1) * 0.05),
+          },
+        }), { status: 200 });
+      }) as typeof fetch,
+    });
+    assert.equal(speech.alignment?.characters.join(""), "Hi there.");
   });
 
   it("normalizes timestamped ElevenLabs audio and character alignment", async () => {
@@ -261,18 +424,30 @@ describe("voice Phase 1 boundary", () => {
   });
 
   it("normalizes the ElevenLabs voice catalog", async () => {
+    let requestedUrl = "";
     const voices = await requestElevenLabsVoiceCatalog({
       apiKey: "secret-key",
-      fetchImpl: (async () => new Response(JSON.stringify({
-        voices: [{
-          voice_id: "voice-a",
-          name: "Alex",
-          category: "premade",
-          preview_url: "https://example.test/alex.mp3",
-          labels: { accent: "American", ignored: 3 },
-        }],
-      }), { status: 200 })) as typeof fetch,
+      collectionId: " collection-main ",
+      fetchImpl: (async (input) => {
+        requestedUrl = String(input);
+        return new Response(
+          JSON.stringify({
+            voices: [{
+              voice_id: "voice-a",
+              name: "Alex",
+              category: "premade",
+              preview_url: "https://example.test/alex.mp3",
+              labels: { accent: "American", ignored: 3 },
+            }],
+          }),
+          { status: 200 },
+        );
+      }) as typeof fetch,
     });
+    assert.equal(
+      new URL(requestedUrl).searchParams.get("collection_id"),
+      "collection-main",
+    );
     assert.deepEqual(voices, [{
       voiceId: "voice-a",
       name: "Alex",
@@ -281,5 +456,89 @@ describe("voice Phase 1 boundary", () => {
       previewUrl: "https://example.test/alex.mp3",
       labels: { accent: "American" },
     }]);
+  });
+
+  it("discovers and names authenticated ElevenLabs voice collections", async () => {
+    const requestedUrls: URL[] = [];
+    const collections = await requestElevenLabsVoiceCollections({
+      apiKey: "secret-key",
+      fetchImpl: (async (input) => {
+        const url = new URL(String(input));
+        requestedUrls.push(url);
+        if (url.pathname === "/v2/voices") {
+          if (!url.searchParams.has("next_page_token")) {
+            return new Response(JSON.stringify({
+              voices: [{
+                voice_id: "voice-a",
+                name: "Alex",
+                collection_ids: ["col-red", "col-blue"],
+              }],
+              has_more: true,
+              next_page_token: "page-2",
+            }));
+          }
+          return new Response(JSON.stringify({
+            voices: [{
+              voice_id: "voice-b",
+              name: "Bill",
+              collection_ids: ["col-red"],
+            }],
+            has_more: false,
+            next_page_token: null,
+          }));
+        }
+        if (url.pathname.endsWith("/col-red")) {
+          return new Response(JSON.stringify({ resource_name: "Studio Cast" }));
+        }
+        return new Response("Forbidden", { status: 403 });
+      }) as typeof fetch,
+    });
+    assert.deepEqual(collections, [
+      {
+        collectionId: "col-blue",
+        name: "Collection col-blue",
+        voiceCount: 1,
+        sampleVoiceNames: ["Alex"],
+      },
+      {
+        collectionId: "col-red",
+        name: "Studio Cast",
+        voiceCount: 2,
+        sampleVoiceNames: ["Alex", "Bill"],
+      },
+    ]);
+    assert.equal(
+      requestedUrls.filter((url) => url.pathname === "/v2/voices").length,
+      2,
+    );
+    assert.equal(
+      requestedUrls.find((url) => url.pathname === "/v2/voices")
+        ?.searchParams.get("voice_type"),
+      "saved",
+    );
+    assert.equal(
+      requestedUrls.find((url) => url.pathname.endsWith("/col-red"))
+        ?.searchParams.get("resource_type"),
+      "voice_collection",
+    );
+  });
+
+  it("keeps voice catalog configuration independent from the active response lane", () => {
+    const serverSource = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
+    const catalogRoute = serverSource.slice(
+      serverSource.indexOf('route("GET", "/api/voices/elevenlabs"'),
+      serverSource.indexOf('route("POST", "/api/voices/preview-line"'),
+    );
+    assert.match(catalogRoute, /requestElevenLabsVoiceCatalog\(\{/u);
+    assert.match(catalogRoute, /requestElevenLabsVoiceCollections\(\{/u);
+    assert.match(
+      catalogRoute,
+      /collectionId: user\.elevenlabs_voice_collection_id/u,
+    );
+    assert.doesNotMatch(catalogRoute, /preferred_provider|Switch to Online/u);
+    assert.match(
+      serverSource,
+      /raw\.explicitOnlineContext === true && user\.preferred_provider !== "local"/u,
+    );
   });
 });

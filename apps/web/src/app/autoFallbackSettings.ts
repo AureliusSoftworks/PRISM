@@ -6,6 +6,10 @@ import {
   type AutoFallbackChainV1,
   type AutoFallbackModelRef,
 } from "@localai/shared";
+import {
+  autoResponseModeForProvider,
+  type AutoResponseMode,
+} from "./providerMode.ts";
 
 const PICKER_SEPARATOR = "::";
 
@@ -57,5 +61,18 @@ export function autoFallbackAvailableForPrimary(args: {
   const resolved = autoFallbackResolvedChain(args.primary, args.chain);
   return Boolean(
     resolved && resolved.every((entry) => runnableKeys.has(autoFallbackModelKey(entry)))
+  );
+}
+
+export function autoFallbackResponseModeForSend(args: {
+  autoEnabled: boolean;
+  primary: AutoFallbackModelRef;
+  chain: AutoFallbackChainV1 | null | undefined;
+  runnable: readonly AutoFallbackModelRef[];
+}): AutoResponseMode {
+  return autoResponseModeForProvider(
+    args.primary.provider,
+    args.autoEnabled,
+    autoFallbackAvailableForPrimary(args),
   );
 }

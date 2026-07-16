@@ -38,6 +38,24 @@ test("finished Coffee review renders the synopsis and its loading state on one s
   assert.match(pageSource, /className=\{styles\.coffeeTranscriptStatus\}/);
 });
 
+test("finished Coffee keeps the synopsis centered with the shifted table", () => {
+  const focalRule = scopedRule(
+    [
+      '.coffeeStage[data-phase="finished"][data-autoplay-dock="true"]',
+      ".coffeeTableFocalColumn",
+    ],
+    "transform: translateY(var(--coffee-finished-table-y))",
+  );
+  assert.match(
+    focalRule,
+    /transform:\s*translateY\(var\(--coffee-finished-table-y\)\)/,
+  );
+  assert.doesNotMatch(
+    css,
+    /--coffee-finished-table-y,\s*0px\)\s*-\s*clamp\(150px,\s*16vh,\s*180px\)/,
+  );
+});
+
 test("Light Mode finished Coffee summary defines semantic contrast tokens", () => {
   const tokenRule = scopedRule(
     [

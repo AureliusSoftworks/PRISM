@@ -17,17 +17,17 @@ jobs:
   deterministic:
     name: Unit, integration, coverage, and browser smoke
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     env:
       # Pull-request checkouts are detached; preserve the source branch for
       # branch-gated development surfaces such as Avatar Details Studio.
       PRISM_BRANCH: ${{ github.head_ref || github.ref_name }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
@@ -55,8 +55,10 @@ jobs:
 
       - name: Upload browser diagnostics
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: prism-playwright-results
-          path: test-results
+          path: |
+            test-results
+            playwright-report
           if-no-files-found: ignore

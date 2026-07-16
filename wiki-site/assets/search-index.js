@@ -17,7 +17,7 @@ window.WIKIWIKI_SEARCH_INDEX = [
     "confidence": "high",
     "audienceLabel": "For everyone",
     "url": "articles/project-overview.html",
-    "text": "article_d9ba11bc-3099-4f1e-bf47-1ebe10122438 agent agent high 2026-07-05T04:13:35.817Z 2026-07-05T04:14:50.583Z article Project overview project-overview What Prism is, what is available now, and which product principles shape the workspace. ## What Prism Is\n\nPrism is a local-first AI workspace for calm, multi-perspective thinking. It keeps everyday and sensitive work on the local machine, while still allowing explicit cloud-provider use when stronger online models are worth it.\n\n## Available Now\n\n- Chat v0.5 is the full playground for bots, model controls, images, exports, and memory-aware conversations.\n- Zen v0.3 is the calmer one-to-one continuity lane.\n- Coffee v0.6 is the multi-bot group conversation lane.\n- Story v0.1 is a preview visual-novel lane with bots, choices, maps, and transcripts.\n- Account login, tenant isolation, encrypted key handling, and memory features are part of the current core.\n\n## Product Principles\n\nPrism is private by default, creative by design, and explicit about control. The LOCAL/ONLINE toggle is a privacy boundary rather than a suggestion. Experience lanes stay separated so practical controls and experiential presence do not blur into one overloaded chat surface.\n\n## Architecture Snapshot\n\nThe app is a monorepo with a Next.js web surface, a Node.js API, an Electron desktop wrapper, SQLite data, Qdrant search, Ollama local models, and shared packages for cross-surface contracts. Overview Home Prism overview concept_6fbe4496-b766-4a5a-abca-987acdd7d770 concept_d8ee0648-129b-427a-b6a7-dea62bb82e3e concept_bbdc911a-c8a6-417e-8a32-a5650c8be316 concept_17097483-9143-4f39-91de-8ad33a73b888 decision_a19295be-77fe-4e95-9a6a-57206331a0a5 README.md AGENTS.md docs/applets.md audience:all overview product"
+    "text": "article_d9ba11bc-3099-4f1e-bf47-1ebe10122438 agent agent high 2026-07-05T04:13:35.817Z 2026-07-16T13:25:14.866Z article Project overview project-overview What Prism is, what is available now, and which product principles shape the workspace. ## What Prism Is\n\nPrism is a local-first AI workspace for calm, multi-perspective thinking and creative production. It keeps everyday and sensitive work on the local machine while still allowing explicit cloud-provider use when stronger online models are worth it.\n\n## Available Now\n\n- Chat v1.3 is the full playground for bots, model controls, images, exports, and memory-aware conversations.\n- Zen v1.2 is the calmer one-to-one continuity lane.\n- Coffee v1.4 is the multi-bot group conversation lane.\n- Signal v0.4 is the bot-led interview and show-production lane.\n- Story v0.1 is a preview procedural narrative lane.\n- Slate v0.5 is the preview prose-fiction production desk where the AI writes and the writer directs.\n- Account login, tenant isolation, encrypted key handling, and memory features are part of the current core.\n\n## Product Principles\n\nPrism is private by default, creative by design, and explicit about control. The LOCAL/ONLINE toggle is a privacy boundary rather than a suggestion. Experience lanes stay separated so practical controls and experiential presence do not blur into one overloaded chat surface.\n\nPRISM also begins with a creative belief: You are the light. Prism reveals the spectrum. Its primary public slogan is One light. Many colors. The person remains the source of intent and authorship; the workspace is the private instrument and sanctum where one light can refract into many useful voices, forms, and possibilities.\n\n## Architecture Snapshot\n\nThe app is a monorepo with a Next.js web surface, a Node.js API, an Electron desktop wrapper, SQLite data, Qdrant search, Ollama local models, and shared packages for cross-surface contracts and data types. Overview Home Prism overview concept_6fbe4496-b766-4a5a-abca-987acdd7d770 concept_d8ee0648-129b-427a-b6a7-dea62bb82e3e concept_bbdc911a-c8a6-417e-8a32-a5650c8be316 concept_17097483-9143-4f39-91de-8ad33a73b888 decision_a19295be-77fe-4e95-9a6a-57206331a0a5 concept_b2c6156c-2c09-41c8-a87c-4ee626cebde3 decision_d604f433-273f-48e5-a4dc-38c728d79b78 decision_a09fe27e-a4d9-44d4-88f4-9d5551a3677a README.md AGENTS.md docs/applets.md docs/brand-ethos.md docs/slate-master-plan.md audience:all overview product"
   },
   {
     "type": "article",
@@ -103,6 +103,52 @@ window.WIKIWIKI_SEARCH_INDEX = [
     "audienceLabel": "For developers",
     "url": "articles/developer-guide.html",
     "text": "article_e250c780-976e-443d-9cc5-5199c0d38422 agent agent high 2026-07-05T04:14:41.666Z 2026-07-13T04:09:15.115Z article Developer guide developer-guide Repo structure, common commands, automatic local test login, privacy invariants, and Wikiwiki maintenance. ## Repo Shape\n\nPrism is organized as apps plus shared packages. `apps/api` owns local data, auth, providers, memory, and orchestration. `apps/web` owns the product UI. `apps/desktop` wraps and stages the local runtime. `packages/shared` and `packages/config` hold cross-surface contracts and configuration.\n\n## Common Commands\n\nUse `npm run dev` for the full local stack, `npm run dev:api` or `npm run dev:web` for one side, `npm run typecheck` for workspace type checks, `npm run lint` for linting, and `npm run build` for production build coverage. API tests run with `npm run test --prefix apps/api`.\n\n## Automatic Local UI Test Login\n\nWhen browser or agent-driven testing reaches Prism's login screen, log in automatically with:\n\n- Username: `admin`\n- Password: `password`\n\nThis is the default local development account. Treat it as a testing convenience, not a production-safe credential.\n\n## Privacy Invariant\n\nLOCAL mode is a hard boundary. New outbound network work must either target configured local services or have an explicit LOCAL guard with matching UI behavior and tests. Do not weaken the provider tests that pin this behavior.\n\n## Testing Current Interaction Work\n\nPrefer focused tests for the touched behavior before broad workspace checks. Current regression coverage pins Chat settings navigation, bounded composer cleanup, code-block copy/collapse interaction, Bot Library showcase actions and audio, context-menu feedback, persona preview-line filtering, Coffee Powers, Coffee replay behavior, and the temporarily disabled custom cursor switch.\n\n## Wikiwiki Workflow\n\nTreat `.wikiwiki/records/*.jsonl` as the source of truth. Add or revise records first, then regenerate Markdown and the static site with `wk validate`, `wk render`, and `wk site --audience all`. Do not hand-edit generated `wiki/` or `wiki-site/` output.\n\n## Distribution And Launch\n\nOfficial desktop builds are free, with optional non-gating support. Launch copy should remain restrained until platform smoke tests, first-run setup, LOCAL privacy, support boundaries, and outreach materials have pass evidence. Developer Maintainer guide Repo guide Wikiwiki workflow concept_17097483-9143-4f39-91de-8ad33a73b888 concept_d8ee0648-129b-427a-b6a7-dea62bb82e3e decision_74d88333-8a92-47f5-897a-2f0458817e74 note_5850980f-5230-4d48-ae29-08c98e6ed3a3 decision_791a7b3c-d069-4543-907d-3c0cda50f452 note_fb321679-5908-4454-b01f-3dc5e09fd0da event_9049a96d-ec0f-4c0e-9444-d9c9997799ec AGENTS.md README.md package.json .wikiwiki/config.json apps/web/src/app/chat-settings-navigation.test.ts apps/web/src/app/botLibraryShowcase.test.ts apps/web/src/app/prism-app-cursor.test.ts apps/api/src/__tests__/voice-preview-line.test.ts apps/api/src/__tests__/bot-powers.test.ts audience:developer dx architecture docs"
+  },
+  {
+    "type": "article",
+    "typeLabel": "Article",
+    "id": "article_99bea382-e515-4640-ab79-91e1c309380b",
+    "title": "Brand ethos",
+    "summary": "Why the person is the light, what the refraction emblem means, and how the future first-run poem should express the idea.",
+    "tags": [
+      "Overview",
+      "Product",
+      "PRISM ethos",
+      "One light many colors",
+      "Visual identity",
+      "brand",
+      "ethos",
+      "onboarding",
+      "product"
+    ],
+    "authority": "agent",
+    "confidence": "high",
+    "audienceLabel": "For everyone",
+    "url": "articles/brand-ethos.html",
+    "text": "article_99bea382-e515-4640-ab79-91e1c309380b agent agent high 2026-07-15T19:26:00.649Z 2026-07-15T19:54:20.062Z article Brand ethos brand-ethos Why the person is the light, what the refraction emblem means, and how the future first-run poem should express the idea. ## You Are the Light\n\nPRISM begins with one belief: You are the light. Prism reveals the spectrum. The person brings intent, history, imagination, taste, and judgment. PRISM is the private creative sanctum and instrument where that light can be examined, refracted, and expressed.\n\nThe primary public slogan is One light. Many colors. Bots, tools, modes, and media can reveal different voices and possibilities, but they do not replace human authorship. Private by default remains an important supporting promise rather than a competing slogan.\n\n## The Mark System\n\nThe refraction emblem is the primary narrative mark: one neutral ray enters the triangular prism and five P/R/I/S/M colors emerge. Its exact original Sandbox geometry, stroke weights, ray spacing, and color order are promoted unchanged. The wordmark is the signature. The hollow triangle remains the compact shorthand for favicons, small controls, monochrome contexts, and private/default treatments.\n\nThe emblem now belongs to PRISM as a whole. Colors communicate plurality and interplay rather than a rigid persona taxonomy.\n\n## Product Meaning\n\nPRISM should expand agency through useful multiplicity, keep privacy and explicit online boundaries part of the creative sanctum, and make persona interplay produce more than a list of isolated answers. Practical clarity and experiential wonder remain inseparable.\n\n## Future First-Time Introduction\n\nThe eventual animated poem grows from the line: \"On the border between art and logic, there stood a colossal pyramid...\" The sequence should let the person arrive as light, cross the threshold, refract into voices and forms, and leave with agency intact. It should feel like a threshold ritual rather than a feature tour, while remaining skippable, replayable, reduced-motion aware, and separate from required setup. Overview Product PRISM ethos One light many colors Visual identity concept_b2c6156c-2c09-41c8-a87c-4ee626cebde3 decision_d604f433-273f-48e5-a4dc-38c728d79b78 docs/brand-ethos.md DESIGN.md README.md apps/web/src/app/prismBrand.ts apps/web/public/refraction-emblem.svg audience:all brand ethos onboarding product"
+  },
+  {
+    "type": "article",
+    "typeLabel": "Article",
+    "id": "article_92325f0d-8f92-400e-a52d-2b32ea6909b9",
+    "title": "Slate creative writing workspace",
+    "summary": "How Slate combines writer-directed AI drafting, private Continuity, long-form persistence, and author-safety foundations.",
+    "tags": [
+      "Product",
+      "Guides",
+      "Slate",
+      "Continuity",
+      "Creative writing",
+      "slate",
+      "features",
+      "writing",
+      "privacy"
+    ],
+    "authority": "agent",
+    "confidence": "high",
+    "audienceLabel": "For everyone",
+    "url": "articles/slate.html",
+    "text": "article_92325f0d-8f92-400e-a52d-2b32ea6909b9 agent agent high 2026-07-16T13:24:57.808Z 2026-07-16T13:24:57.808Z article Slate creative writing workspace slate How Slate combines writer-directed AI drafting, private Continuity, long-form persistence, and author-safety foundations. ## What Slate Is\n\nSlate v0.5 is PRISM's preview prose-fiction production desk. Its governing principle is: The AI writes. The writer directs. The primary workspace is a structure rail, a directly editable manuscript canvas, and a concise direction panel rather than a chat transcript.\n\n## Writing Flow\n\nA project begins with one creative spark or imported passage. Slate suggests a working title, supports optional `{WILDCARDS}`, and creates the project only after confirmation. Shape proposes a premise and scene plan. Draft writes an approved section. Refine turns natural-language direction into a preview that the writer accepts or rejects. Projects reopen with their hierarchy, focused sections, manuscript, locks, and pending revision state intact.\n\n## Continuity\n\nContinuity is Slate's private narrative mind. It stores source-anchored series, book, character, location, object, relationship, chronology, knowledge, promise, and thread state in tenant-scoped SQLite. Deterministic indexing and constraints do the routine sorting; bounded local auxiliary calls improve semantic extraction and reconciliation. The writer sees a grounded return synopsis and at most one source-linked concern at a time, never an exposed maintenance wiki.\n\nContinuity stays visibly planned at v0.0 until shadow-generation upgrades, rollback, representative multi-book cohesion, and the complete concern loop are proven together. The functional floor remains local `llama3.2`; stronger models improve nuance and prose rather than supply basic memory or authority.\n\n## Authority, Privacy, And Safety\n\nHuman edits, locks, and explicit decisions are authoritative. Compare-and-swap saves and AI commits reject stale work instead of overwriting newer prose. Lock ranges follow the protected text through direct edits and accepted revisions.\n\nLOCAL mode never escalates Slate work online. Account-configured Ollama and ComfyUI endpoints must be loopback, private-LAN, or local hostnames. Automatic owner-only recovery generations, project-scoped `.slate` backups, restore-as-copy, and clean DOCX, Markdown, or text exports protect portable work without exporting credentials or Continuity internals.\n\n## Roadmap\n\nStory remains the separate procedural discovery applet. Future `Develop in Slate` and `Rehearse in Story` flows exchange explicit immutable snapshots and never silently synchronize. Review Circle Personas, story-reactive Atmosphere, series library UX, recovery browsing, crash journals, EPUB/PDF, and dynamic covers remain tracked follow-on work. Product Guides Slate Continuity Creative writing decision_a09fe27e-a4d9-44d4-88f4-9d5551a3677a docs/applets.md docs/slate-master-plan.md docs/slate-v1-product-ux-contract.md docs/slate-continuity-contract.md apps/web/src/app/SlateWorkspace.tsx apps/api/src/slate.ts audience:all slate features writing privacy"
   },
   {
     "type": "concept",
@@ -224,6 +270,40 @@ window.WIKIWIKI_SEARCH_INDEX = [
     "text": "concept_6fbe4496-b766-4a5a-abca-987acdd7d770 agent agent high 2026-07-05T00:07:18.700Z 2026-07-05T00:07:18.700Z concept Product promise Prism is a private-by-default, creative-by-design AI workspace for calm, multi-perspective thinking. Prism gives people one controlled place to think, create, and experiment with AI while keeping routine and sensitive work local. Cloud models are available when they earn their place, but provider choice and behavior remain visible to the user. README.md apps/web/src/app/prism/page.tsx docs/distribution-model.md audience:all product overview homepage"
   },
   {
+    "type": "concept",
+    "typeLabel": "Concept",
+    "id": "concept_b2c6156c-2c09-41c8-a87c-4ee626cebde3",
+    "title": "The user is the light",
+    "summary": "PRISM treats the person as the source of creative light and the product as the private instrument and sanctum that reveals a spectrum of voices...",
+    "tags": [
+      "brand",
+      "ethos",
+      "product"
+    ],
+    "authority": "user",
+    "confidence": "high",
+    "audienceLabel": "For everyone",
+    "url": "records/concept/concept_b2c6156c-2c09-41c8-a87c-4ee626cebde3.html",
+    "text": "concept_b2c6156c-2c09-41c8-a87c-4ee626cebde3 manual user high 2026-07-15T19:25:43.064Z 2026-07-15T19:54:19.845Z concept The user is the light PRISM treats the person as the source of creative light and the product as the private instrument and sanctum that reveals a spectrum of voices, forms, perspectives, and possibilities. Core belief: You are the light. Prism reveals the spectrum. Primary public slogan: One light. Many colors. Privacy remains a supporting product promise rather than a competing tagline. The metaphor preserves human authorship and agency: models and bots can refract, challenge, and combine human intent, but they are not the source of creativity. docs/brand-ethos.md DESIGN.md apps/web/src/app/prismBrand.ts audience:all brand ethos product"
+  },
+  {
+    "type": "decision",
+    "typeLabel": "Decision",
+    "id": "decision_d604f433-273f-48e5-a4dc-38c728d79b78",
+    "title": "Adopt the refraction emblem as PRISM primary narrative mark",
+    "summary": "Promote the exact original Sandbox prism-and-rays design without redrawing its geometry, stroke weights, ray spacing, or P/R/I/S/M color order.",
+    "tags": [
+      "brand",
+      "design",
+      "onboarding"
+    ],
+    "authority": "user",
+    "confidence": "high",
+    "audienceLabel": "For everyone",
+    "url": "records/decision/decision_d604f433-273f-48e5-a4dc-38c728d79b78.html",
+    "text": "decision_d604f433-273f-48e5-a4dc-38c728d79b78 manual user high 2026-07-15T19:25:49.349Z 2026-07-15T19:54:19.953Z decision Adopt the refraction emblem as PRISM primary narrative mark The former Sandbox glyph already depicts one source ray entering a triangular prism and five signature colors emerging. The new user-as-light ethos makes that symbol product-wide rather than mode-specific. Promote the exact original Sandbox prism-and-rays design without redrawing its geometry, stroke weights, ray spacing, or P/R/I/S/M color order. Use it as the refraction emblem for first contact, hero moments, onboarding, marketing, and prominent brand lockups; use the wordmark as the signature and the triangle as compact shorthand. Use One light. Many colors. as the primary public slogan, with private by default retained as supporting product positioning. Preserve the shared first-run poem seed about a colossal pyramid on the border between art and logic for a future skippable, replayable, reduced-motion-aware cutscene. Sandbox no longer owns the prism-and-rays glyph. Brand implementations should share the canonical P/R/I/S/M palette and keep the user—not the system—as the source of light and creativity. docs/brand-ethos.md apps/web/public/refraction-emblem.svg apps/web/public/wordmark.svg apps/web/public/icon-triangle.svg apps/web/src/app/page.tsx audience:all brand design onboarding"
+  },
+  {
     "type": "decision",
     "typeLabel": "Decision",
     "id": "decision_74d88333-8a92-47f5-897a-2f0458817e74",
@@ -287,6 +367,24 @@ window.WIKIWIKI_SEARCH_INDEX = [
     "audienceLabel": "For everyone",
     "url": "records/decision/decision_791a7b3c-d069-4543-907d-3c0cda50f452.html",
     "text": "decision_791a7b3c-d069-4543-907d-3c0cda50f452 agent agent high 2026-07-05T00:07:19.417Z 2026-07-05T00:07:19.417Z decision Keep support non-gating Prism currently uses optional support rather than paid access, and public copy must not imply that core use depends on an account or subscription. Official builds stay free to download and use. Patreon support remains a quiet external link with no tiers, feature gates, activation checks, supporter-only core functionality, or runtime support verification. Product surfaces can mention support only as optional patronage. Launch docs and release copy should keep download, privacy, and limitation language clearer than the support ask. docs/distribution-model.md docs/product-worthy-launch.md README.md audience:all distribution support product"
+  },
+  {
+    "type": "decision",
+    "typeLabel": "Decision",
+    "id": "decision_a09fe27e-a4d9-44d4-88f4-9d5551a3677a",
+    "title": "Slate is writer-directed and snapshot-separated from Story",
+    "summary": "Slate remains a quiet document-first production desk governed by The AI writes. The writer directs.",
+    "tags": [
+      "slate",
+      "product",
+      "privacy",
+      "story"
+    ],
+    "authority": "user",
+    "confidence": "high",
+    "audienceLabel": "For everyone",
+    "url": "records/decision/decision_a09fe27e-a4d9-44d4-88f4-9d5551a3677a.html",
+    "text": "decision_a09fe27e-a4d9-44d4-88f4-9d5551a3677a manual user high 2026-07-16T13:24:37.103Z 2026-07-16T13:24:37.103Z decision Slate is writer-directed and snapshot-separated from Story PRISM needs a novel-scale creative workspace without turning the manuscript into a chat transcript or weakening Story as a procedural experience. Slate remains a quiet document-first production desk governed by The AI writes. The writer directs. Continuity works privately in the background and presents one contextual decision at a time. Story remains separate; every Story and Slate handoff is an explicit immutable snapshot with selective incorporation. Human prose, locks, approvals, and rejections stay authoritative. Cross-applet work never silently synchronizes. Review Circle, Atmosphere, series UX, recovery browsing, and publishing layers build on the Slate foundation without overloading the writing desk. docs/slate-master-plan.md docs/slate-v1-product-ux-contract.md docs/slate-continuity-contract.md docs/story-v1-backend-contract.md audience:all slate product privacy story"
   },
   {
     "type": "event",

@@ -1,13 +1,12 @@
 # Prism
 
 <p align="center">
-  <img alt="Prism logo" width="96" height="96" src="https://github.com/user-attachments/assets/8cea9f54-52de-4fa4-92b9-fce3460ba34a" />
-
+  <img alt="PRISM refraction emblem" width="112" height="112" src="apps/web/public/refraction-emblem.svg" />
 </p>
 
 <p align="center">
-  <strong>Private by default. Creative by design.</strong><br />
-  A local-first AI workspace that keeps routine work on your own machine and reaches for cloud models only when needed.
+  <strong>One light. Many colors.</strong><br />
+  A private, local-first AI workspace where one human intent can refract through many voices, tools, and creative possibilities.
 </p>
 
 <p align="center">
@@ -215,6 +214,7 @@ prism reset --force
 ## Documentation Map
 
 - Product/architecture: [`DESIGN.md`](DESIGN.md)
+- Brand philosophy and mark system: [`docs/brand-ethos.md`](docs/brand-ethos.md)
 - Applet versions and ethos: [`docs/applets.md`](docs/applets.md)
 - Release runbook: [`docs/release-process.md`](docs/release-process.md)
 - Desktop packaging: [`docs/prism-desktop-app.md`](docs/prism-desktop-app.md)

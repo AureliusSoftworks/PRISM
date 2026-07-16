@@ -2,6 +2,7 @@ import { utimesSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { getAppConfig, type AppConfig } from "@localai/config";
@@ -10,6 +11,7 @@ import {
   loadPrismMoodEventMessageIds,
   loadPrismMoodState,
   recordPrismMoodEventOnce,
+  resolveDbPath,
   upsertPrismMoodState,
 } from "./db.ts";
 import { buildApiRootLandingHtml } from "./api-root-landing.ts";
@@ -17,7 +19,16 @@ import {
   buildDeveloperTranscript,
   sensitiveEnvironmentValues,
 } from "./developer-transcript.ts";
-import { clearCookie, html, HttpError, json, readJsonBody, setCookie, setCorsHeaders } from "./utils.http.ts";
+import {
+  clearCookie,
+  html,
+  HttpError,
+  json,
+  readBinaryBody,
+  readJsonBody,
+  setCookie,
+  setCorsHeaders,
+} from "./utils.http.ts";
 import { decryptJson, decryptText, deriveMasterKey, encryptText, hashPassword, randomId, verifyPassword } from "./security.ts";
 import type { RouteDefinition, RequestContext } from "./types.ts";
 import {
@@ -85,8 +96,15 @@ import {
   peekActiveImageJobForUser,
   pollImageJobForUser,
   releaseImageSlot,
+  releaseImageSlotIfOwned,
   tryAcquireImageSlot,
 } from "./image-job-slot.ts";
+import {
+  SignalArtworkJobManager,
+  normalizeSignalArtworkAssetKinds,
+  type SignalArtworkAssetKind,
+  type SignalArtworkGeneratedAsset,
+} from "./signal-artwork-jobs.ts";
 import {
   collectCoffeePollVotes,
   buildCoffeePollExportLines,
@@ -110,7 +128,6 @@ import {
   processCoffeeAutonomousTurn,
   processCoffeeTurn,
   recordCoffeePlayerDeparture,
-  regenerateCoffeeConversationStarterTopics,
   recordCoffeeUserAction,
   recordCoffeeReplayEvents,
   recordCoffeeInterruptionPause,
@@ -122,7 +139,7 @@ import {
   topOffCoffeeCupForBot,
   undoLatestCoffeeDebugMessage,
   updateCoffeePreset,
-  updateCoffeeGroup,
+  updateCoffeeGroupWithGeneratedTopics,
   updateCoffeeBotSocialDebug,
   updateCoffeeConversationSettings,
 } from "./coffee.ts";
@@ -134,6 +151,34 @@ import {
   setCoffeeTurnJobPhase,
   startCoffeeTurnJob,
 } from "./coffee-turn-jobs.ts";
+import {
+  advanceBotcastEpisode,
+  createBotcastEpisode,
+  createBotcastShow,
+  deleteBotcastEpisode,
+  deleteBotcastShow,
+  deleteBotcastShowIntroAudio,
+  forceEndBotcastEpisode,
+  generateBotcastShowIdentity,
+  generateBotcastShowName,
+  getBotcastEpisode,
+  getBotcastShow,
+  listBotcastEpisodes,
+  listBotcastShows,
+  readBotcastShowIntroAudio,
+  storeBotcastShowIntroAudio,
+  updateBotcastShow,
+} from "./botcast.ts";
+import {
+  ElevenLabsMusicError,
+  SIGNAL_ELEVENLABS_MUSIC_MODEL,
+  buildSignalElevenLabsMusicCompositionPlan,
+  requestSignalElevenLabsIntroMusic,
+} from "./elevenlabs-music.ts";
+import {
+  normalizeSignalAssetUpload,
+  readSignalAssetSlot,
+} from "./signal-asset-upload.ts";
 import {
   createDevSeedMemories,
   demoteMemoryToShortTerm,
@@ -189,6 +234,79 @@ import {
   pickupStorySessionItem,
   travelStorySession,
 } from "./story.ts";
+import {
+  acceptSlateRevision,
+  createSlateProject,
+  deleteSlateProject,
+  draftSlateStructureItem,
+  generateSlateShape,
+  getSlateProject,
+  listSlateProjects,
+  proposeSlateRevision,
+  rejectSlateRevision,
+  resolveSlateAccountDefaults,
+  resolveSlateProjectSparkWildcards,
+  SlateShapeWriteConflictError,
+  updateSlateProject,
+} from "./slate.ts";
+import {
+  SlateSectionAiWriteConflictError,
+  SlateSectionRevisionConflictError,
+  createSlateSeries,
+  getSlateContinuityStatus,
+  getSlateManuscriptPage,
+  getSlateProjectSection,
+  getSlateSeries,
+  listSlateProjectSections,
+  listSlateSeries,
+  saveSlateProjectSection,
+} from "./slate-continuity.ts";
+import {
+  processSlateContinuityAuxiliaryModelJob,
+  processSlateContinuityJobDeterministically,
+} from "./slate-continuity-processing.ts";
+import {
+  startSlateContinuityWorker,
+  type SlateContinuityWorkerHandle,
+} from "./slate-continuity-worker.ts";
+import {
+  SlateRecoveryCoordinator,
+  type SlateRecoveryCoordinatorStatus,
+} from "./slate-recovery-coordinator.ts";
+import {
+  listSlateRecoveryGenerations,
+  purgeSlateRecoveryProjectGenerations,
+  writeSlateRecoveryGeneration,
+} from "./slate-author-safety.ts";
+import {
+  createSlateManuscriptExport,
+  listSlateManuscriptExportHistory,
+  SlateManuscriptExportServiceError,
+} from "./slate-manuscript-export-service.ts";
+import {
+  createSlateProjectArchive,
+  importSlateProjectArchiveAsCopy,
+  previewSlateProjectArchiveImport,
+  SlateArchiveImportError,
+} from "./slate-archive-import-service.ts";
+import {
+  MAX_SLATE_ARCHIVE_BYTES,
+  SlateArchiveZipError,
+} from "./slate-archive-zip.ts";
+import {
+  getSlateReturnSession,
+  listSlateReturnSessions,
+  openSlateReturnSession,
+} from "./slate-return-sessions.ts";
+import {
+  chooseSlateConcernResolutionKind,
+  getNextSlateContinuityConcern,
+  linkSlateConcernRevisionProposal,
+  resolveSlateContinuityConcern,
+  settleSlateConcernRevision,
+  slateRevisionRequestForContinuityConcern,
+  SlateContinuityReconciliationError,
+} from "./slate-continuity-reconciliation.ts";
 import {
   composeBotSystemPrompt,
   deleteAllBots,
@@ -274,7 +392,17 @@ import {
 } from "./model-routing.ts";
 import { LocalOnlyBackupAdapter, exportUserSnapshot, importUserSnapshot, type BackupSnapshot } from "./backup.ts";
 import {
-  composeVerbatimFirstImagePrompt,
+  ACCOUNT_BACKUP_ARCHIVE_CONTENT_TYPE,
+  ACCOUNT_BACKUP_ARCHIVE_MAX_BYTES,
+  decodeAccountBackupArchive,
+} from "./account-backup-archive.ts";
+import {
+  exportProjectOwnedAssets,
+  omitInlineProjectOwnedAssetBinaries,
+  projectOwnedAssetExportPayload,
+} from "./project-owned-assets.ts";
+import {
+  BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT,
   COFFEE_SESSION_DURATION_MINUTES_MAX,
   COFFEE_SESSION_DURATION_MINUTES_MIN,
   DEFAULT_BOT_FACE_BLINK_BAR,
@@ -290,12 +418,14 @@ import {
   DEFAULT_BOT_FACE_FONT_WEIGHT,
   DEFAULT_BOT_FACE_GLYPH_ANIMATION,
   DEFAULT_BOT_FACE_MOUTH_CHARACTER,
+  DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER,
   DEFAULT_BOT_FACE_MOUTH_OFFSET_X,
   DEFAULT_BOT_FACE_MOUTH_OFFSET_Y,
   DEFAULT_BOT_FACE_MOUTH_ROTATION_DEG,
   DEFAULT_BOT_FACE_MOUTH_SCALE,
   DEFAULT_BOT_FACE_THINKING_FRAMES,
   DEFAULT_OPENAI_IMAGE_MODEL_ID,
+  GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE,
   normalizeBotFaceThinkingFrames,
   normalizeBotFaceBlinkBar,
   normalizeBotFaceBlinkOffsetX,
@@ -319,6 +449,8 @@ import {
   serializeBotAvatarDetailsV1,
   serializeBotFaceThinkingFrames,
   normalizeBotAudioVoiceProfileV1,
+  applyBotNamePronunciations,
+  normalizeBotNamePronunciation,
   normalizeBotVoiceVolume,
   normalizeOptionalBotAudioVoiceProfileV1,
   parseStoredBotAudioVoiceProfileV1,
@@ -339,6 +471,7 @@ import {
   parseStoredManualAskQuestionPayload,
   parseStoredAutoFallbackChain,
   normalizeResponseMode,
+  resolveImageProviderName,
   parseStoredPromptShortcutPayload,
   parseStoredPromptWildcardPayload,
   parseStoredToolPayload,
@@ -361,6 +494,10 @@ import {
   type BotFaceGlyphAnimation,
   type BotFaceThinkingFrames,
   type BotAudioVoiceProfileV1,
+  BOTCAST_ELEVENLABS_INTRO_DURATION_MS,
+  signalPersonaTemperamentFor,
+  type BotcastProducerCue,
+  type BotcastShowPatchRequest,
   type OpinionBand,
   type OpinionTrend,
   type PromptShortcutMetadata,
@@ -370,8 +507,9 @@ import {
   type ZenAskQuestionPatienceInput,
   type ZenAutonomyInput,
   type ZenPersonaTransitionInput,
+  type ImageProviderName,
 } from "@localai/shared";
-import { generateImage } from "./image-provider.ts";
+import { editImage, generateImage } from "./image-provider.ts";
 import { generateLocalImageBytesByModelId } from "./image-local-by-model.ts";
 import { shouldAttemptLenientLocalImageFallback } from "./image-lenient-fallback.ts";
 import { AutoFallbackExhaustedError } from "./auto-fallback.ts";
@@ -382,12 +520,28 @@ import {
 } from "./comfyui-image.ts";
 import {
   botBelongsToUser,
+  imageContextIncludesOfflineOnlyBot,
   resolveImageGeneratePersistence,
 } from "./image-generate-resolve.ts";
+import { resolveImagePromptForGeneration } from "./image-prompt-routing.ts";
+import {
+  IMAGE_BOT_MEMBERSHIP_SQL,
+  imageOriginForGenerate,
+  normalizeImageRelatedBotIds,
+  serializeImageRelatedBotIds,
+  type ImageOrigin,
+} from "./image-provenance.ts";
 import {
   composeZenWallpaperPrompt,
   normalizeZenWallpaperPromptOverride,
 } from "./zen-wallpaper-prompt.ts";
+import {
+  composeGroupRoomWallpaperPrompt,
+  loadOwnedGroupRoomWallpaperMembers,
+  normalizeGroupRoomWallpaperBackupPrompt,
+  normalizeGroupRoomWallpaperBackupUpload,
+  readGroupRoomWallpaperRequestContext,
+} from "./group-room-wallpaper.ts";
 import {
   buildGeneratedImageRelativePath,
   downloadRemoteImage,
@@ -416,12 +570,12 @@ import { restoreFactoryDefaultsInDatabase } from "./account-reset.ts";
 import {
   ElevenLabsVoiceError,
   VOICE_CAPABILITIES,
-  applyGlobalEnglishVoiceDefault,
   normalizeElevenLabsTtsModel,
   requestElevenLabsSpeech,
   requestElevenLabsSpeechWithTimestamps,
   resolveElevenLabsVoiceId,
   requestElevenLabsVoiceCatalog,
+  requestElevenLabsVoiceCollections,
   resolveVoiceSynthesisBoundary,
   validateVoiceSynthesisRequest,
 } from "./voices.ts";
@@ -434,10 +588,12 @@ import { buildBabbleSpeechText } from "./babble-text.ts";
 import { deleteVector, deleteVectorsForUser } from "./qdrant.ts";
 let config: AppConfig = getAppConfig();
 let db: DatabaseSync = createDatabase();
+const signalArtworkJobs = new SignalArtworkJobManager();
 let masterKey = deriveMasterKey(config.encryptionMasterKey);
 let providerFactoryOverride: typeof selectProvider = selectProvider;
 let auxiliaryProviderFactoryOverride: typeof getAuxiliaryProvider = getAuxiliaryProvider;
 let builtinVoiceWaveGeneratorOverride: typeof generateBuiltinEnglishWave = generateBuiltinEnglishWave;
+let slateRecoveryCoordinator: SlateRecoveryCoordinator | null = null;
 const activeCoffeeDepartureEpilogues = new Map<string, Promise<void>>();
 /**
  * Runtime view of local-network access. `boundLanActive` reflects what the
@@ -450,6 +606,111 @@ const networkState: { desiredLanAccess: boolean; boundLanActive: boolean } = {
   boundLanActive: false,
 };
 const backupAdapter = new LocalOnlyBackupAdapter();
+
+function slateRecoveryRootDirectory(): string {
+  const configured = process.env.SLATE_RECOVERY_DIR?.trim();
+  return configured || join(dirname(resolveDbPath()), "slate-recovery");
+}
+
+function slateRecoveryMirrorDirectory(): string | null {
+  return process.env.SLATE_RECOVERY_MIRROR_DIR?.trim() || null;
+}
+
+function protectSlateMutation<T>(
+  value: T,
+  userId: string,
+  projectId: string,
+  reason: string,
+  milestone = false,
+): T {
+  if (!slateRecoveryCoordinator) return value;
+  const input = { userId, projectId, reason };
+  if (milestone) slateRecoveryCoordinator.scheduleMilestone(input);
+  else slateRecoveryCoordinator.schedulePostMutation(input);
+  return value;
+}
+
+function protectSlateBeforeRisk(
+  userId: string,
+  projectId: string,
+): void {
+  if (!slateRecoveryCoordinator) return;
+  writeSlateRecoveryGeneration(
+    db,
+    userId,
+    projectId,
+    slateRecoveryRootDirectory(),
+    { mirrorDirectory: slateRecoveryMirrorDirectory() },
+  );
+}
+
+function slateRecoveryStatus(
+  userId: string,
+  projectId: string,
+): SlateRecoveryCoordinatorStatus | null {
+  return slateRecoveryCoordinator?.status({ userId, projectId }) ?? null;
+}
+
+function slateProjectIdsForUser(userId: string): string[] {
+  return (
+    db.prepare("SELECT id FROM slate_projects WHERE user_id = ? ORDER BY id")
+      .all(userId) as Array<{ id: string }>
+  ).map((row) => row.id);
+}
+
+/**
+ * Quiesces recovery writers before removing their local and mirror copies.
+ * The returned callback is used only when the following SQLite deletion/reset
+ * fails and the still-existing projects need protection enabled again.
+ */
+async function retireAndPurgeSlateRecoveryProjects(
+  userId: string,
+  projectIds: readonly string[],
+): Promise<() => void> {
+  const coordinator = slateRecoveryCoordinator;
+  const references = projectIds.map((projectId) => ({ userId, projectId }));
+  if (coordinator) {
+    await Promise.all(
+      references.map((reference) => coordinator.retireProject(reference)),
+    );
+  }
+  const resume = () => {
+    if (!coordinator) return;
+    for (const reference of references) coordinator.resumeProject(reference);
+  };
+
+  try {
+    const roots = new Set<string>([slateRecoveryRootDirectory()]);
+    const mirror = slateRecoveryMirrorDirectory();
+    if (mirror) roots.add(mirror);
+    for (const root of roots) {
+      for (const projectId of projectIds) {
+        purgeSlateRecoveryProjectGenerations(root, projectId);
+      }
+    }
+  } catch (error) {
+    resume();
+    throw error;
+  }
+  return resume;
+}
+
+function slateArchivePayload(body: unknown): Uint8Array {
+  if (!(body instanceof Uint8Array)) {
+    throw new HttpError(400, "A .slate archive file is required.");
+  }
+  return body;
+}
+
+function rethrowSlateArchiveError(error: unknown): never {
+  if (error instanceof SlateArchiveImportError || error instanceof SlateArchiveZipError) {
+    throw new HttpError(400, error.message);
+  }
+  if (error instanceof Error && /(?:project|series) not found/i.test(error.message)) {
+    throw new HttpError(404, error.message);
+  }
+  throw error;
+}
 
 function normalizeBotAudioVoiceProfilesForResponse<T extends Record<string, unknown>>(bot: T): T & {
   authored_audio_voice_profile: BotAudioVoiceProfileV1;
@@ -659,6 +920,7 @@ interface UserDbRow {
   wrapped_user_key_tag: string;
   theme: "light" | "dark" | "system";
   preferred_provider: ProviderName;
+  preferred_image_provider: ImageProviderName;
   provider_locked: number;
   auto_memory: number;
   composer_writing_assist: number;
@@ -675,6 +937,7 @@ interface UserDbRow {
   experimental_dual_ollama_enabled: number;
   experimental_all_model_effort_enabled: number;
   coffee_experimental_table_angle_enabled: number;
+  signal_immersive_voice_effects_enabled: number;
   psychic_mode_enabled: number;
   comfyui_host: string | null;
   preferred_local_image_model: string | null;
@@ -708,6 +971,7 @@ interface UserDbRow {
   prism_default_bot_face_mouth_font: string | null;
   prism_default_bot_face_mouth_character: string | null;
   prism_default_bot_face_mouth_animation: string | null;
+  prism_default_bot_face_mouth_coffee_pucker: number | null;
   prism_default_bot_face_font_weight: number | null;
   prism_default_bot_face_eye_scale: number | null;
   prism_default_bot_face_eye_offset_x: number | null;
@@ -751,6 +1015,7 @@ interface UserDbRow {
   default_elevenlabs_voice_id: string | null;
   elevenlabs_voice_bank: string | null;
   elevenlabs_voice_model: string | null;
+  elevenlabs_voice_collection_id: string | null;
   player_audio_voice_profile: string | null;
   player_name_pronunciation: string | null;
   prism_default_bot_audio_voice_profile: string | null;
@@ -900,12 +1165,19 @@ function getOrCreateLocalOwnerUser(): string {
 function getUserRow(userId: string): UserDbRow {
   const row = db
     .prepare(
-      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, auto_switch_model, auto_fallback_chain, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, zen_persona_transition_choice, prism_default_bot_name, prism_default_bot_system_prompt, prism_default_bot_color, prism_default_bot_glyph, prism_default_bot_face_eyes_font, prism_default_bot_face_eye_character, prism_default_bot_face_eye_animation, prism_default_bot_face_mouth_font, prism_default_bot_face_mouth_character, prism_default_bot_face_mouth_animation, prism_default_bot_face_font_weight, prism_default_bot_face_eye_scale, prism_default_bot_face_eye_offset_x, prism_default_bot_face_eye_offset_y, prism_default_bot_face_mouth_scale, prism_default_bot_face_mouth_offset_x, prism_default_bot_face_mouth_offset_y, prism_default_bot_face_mouth_rotation_deg, prism_default_bot_face_blink_bar, prism_default_bot_face_blink_scale, prism_default_bot_face_blink_offset_x, prism_default_bot_face_blink_offset_y, prism_default_bot_face_thinking_frames, prism_default_bot_audio_voice_profile, prism_default_bot_temperature, prism_default_bot_max_tokens, prism_default_bot_top_p, prism_default_bot_top_k, prism_default_bot_repetition_penalty, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, brave_search_key_ciphertext, brave_search_key_iv, brave_search_key_tag, voice_mode, voice_effects_enabled, voice_volume, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, player_audio_voice_profile, player_name_pronunciation, created_at, last_active_at FROM users WHERE id = ?"
+      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, preferred_image_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, auto_switch_model, auto_fallback_chain, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, zen_persona_transition_choice, prism_default_bot_name, prism_default_bot_system_prompt, prism_default_bot_color, prism_default_bot_glyph, prism_default_bot_face_eyes_font, prism_default_bot_face_eye_character, prism_default_bot_face_eye_animation, prism_default_bot_face_mouth_font, prism_default_bot_face_mouth_character, prism_default_bot_face_mouth_animation, prism_default_bot_face_mouth_coffee_pucker, prism_default_bot_face_font_weight, prism_default_bot_face_eye_scale, prism_default_bot_face_eye_offset_x, prism_default_bot_face_eye_offset_y, prism_default_bot_face_mouth_scale, prism_default_bot_face_mouth_offset_x, prism_default_bot_face_mouth_offset_y, prism_default_bot_face_mouth_rotation_deg, prism_default_bot_face_blink_bar, prism_default_bot_face_blink_scale, prism_default_bot_face_blink_offset_x, prism_default_bot_face_blink_offset_y, prism_default_bot_face_thinking_frames, prism_default_bot_audio_voice_profile, prism_default_bot_temperature, prism_default_bot_max_tokens, prism_default_bot_top_p, prism_default_bot_top_k, prism_default_bot_repetition_penalty, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, brave_search_key_ciphertext, brave_search_key_iv, brave_search_key_tag, voice_mode, voice_effects_enabled, voice_volume, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, elevenlabs_voice_collection_id, player_audio_voice_profile, player_name_pronunciation, created_at, last_active_at FROM users WHERE id = ?"
     )
     .get(userId) as UserDbRow | undefined;
   if (!row) {
     throw new Error("User not found.");
   }
+  const signalSettings = db.prepare(
+    "SELECT signal_immersive_voice_effects_enabled FROM users WHERE id = ?"
+  ).get(userId) as
+    | { signal_immersive_voice_effects_enabled: number | null }
+    | undefined;
+  row.signal_immersive_voice_effects_enabled =
+    signalSettings?.signal_immersive_voice_effects_enabled === 1 ? 1 : 0;
   const faceRotation = db.prepare(
     "SELECT prism_default_bot_face_eye_rotation_deg FROM users WHERE id = ?"
   ).get(userId) as { prism_default_bot_face_eye_rotation_deg: number | null } | undefined;
@@ -1081,6 +1353,28 @@ function getAnthropicApiKeyForUser(userId: string, userKey: Buffer): string | un
     },
     userKey
   );
+}
+
+function slateAiForUser(userId: string) {
+  const user = getUserRow(userId);
+  const resolved = resolveSlateAccountDefaults({
+    preferredProvider: user.preferred_provider,
+    preferredLocalModel: user.preferred_local_model,
+    preferredOnlineModel: user.preferred_online_model,
+  });
+  const userKey = decryptUserKey(userId);
+  const openAiApiKey = getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
+  const anthropicApiKey = getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey;
+  return {
+    provider: selectProvider(
+      resolved.provider,
+      openAiApiKey,
+      user.secondary_ollama_host,
+      anthropicApiKey,
+    ),
+    providerName: resolved.provider,
+    model: resolved.model,
+  };
 }
 
 function getElevenLabsApiKeyForUser(userId: string, userKey: Buffer): string | undefined {
@@ -1587,6 +1881,10 @@ function touchUserActivity(userId: string): void {
 }
 
 async function deleteUserAccount(userId: string): Promise<void> {
+  const resumeSlateRecovery = await retireAndPurgeSlateRecoveryProjects(
+    userId,
+    slateProjectIdsForUser(userId),
+  );
   db.exec("BEGIN IMMEDIATE TRANSACTION");
   try {
     db.prepare("DELETE FROM sessions WHERE user_id = ?").run(userId);
@@ -1602,6 +1900,7 @@ async function deleteUserAccount(userId: string): Promise<void> {
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
+    resumeSlateRecovery();
     throw error;
   }
 
@@ -1619,7 +1918,16 @@ async function deleteUserAccount(userId: string): Promise<void> {
 }
 
 async function restoreUserFactoryDefaults(userId: string): Promise<void> {
-  restoreFactoryDefaultsInDatabase(db, userId);
+  const resumeSlateRecovery = await retireAndPurgeSlateRecoveryProjects(
+    userId,
+    slateProjectIdsForUser(userId),
+  );
+  try {
+    restoreFactoryDefaultsInDatabase(db, userId);
+  } catch (error) {
+    resumeSlateRecovery();
+    throw error;
+  }
 
   try {
     removeGeneratedImagesDirectoryForUser(userId);
@@ -1656,6 +1964,8 @@ function mapImageRowToClient(row: {
   quality: string;
   provider: string;
   bot_id: string | null;
+  related_bot_ids: string | null;
+  origin: string | null;
   created_at: string;
   local_rel_path: string | null;
   model: string | null;
@@ -1668,6 +1978,8 @@ function mapImageRowToClient(row: {
   return {
     id: row.id,
     botId: row.bot_id,
+    botIds: normalizeImageRelatedBotIds(row.related_bot_ids, row.bot_id),
+    origin: row.origin ?? "images_panel",
     prompt: row.prompt,
     revisedPrompt: row.revised_prompt,
     size: row.size,
@@ -1843,6 +2155,10 @@ function normalizeDefaultBotSettingsForResponse(user: UserDbRow) {
     prismDefaultBotFaceMouthAnimation:
       normalizeBotFaceGlyphAnimation(user.prism_default_bot_face_mouth_animation) ??
       DEFAULT_BOT_FACE_GLYPH_ANIMATION,
+    prismDefaultBotFaceMouthCoffeePucker:
+      user.prism_default_bot_face_mouth_coffee_pucker === 1
+        ? true
+        : DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER,
     prismDefaultBotFaceFontWeight:
       normalizeBotFaceFontWeight(user.prism_default_bot_face_font_weight) ??
       DEFAULT_BOT_FACE_FONT_WEIGHT,
@@ -1998,6 +2314,8 @@ function apiKeySource(
 type ImageInsertPersistence = {
   conversationIdForInsert: string | null;
   persistedBotId: string | null;
+  relatedBotIds: string[];
+  origin: ImageOrigin;
 };
 
 /** Persists a ComfyUI or Ollama image and returns the standard JSON success body. */
@@ -2015,6 +2333,7 @@ async function finalizeComfyOrOllamaGeneratedImageResponse(
     modelUsed: string;
     provider: "comfyui" | "ollama";
     purpose?: string;
+    composedPrompt?: string;
     profilePictureBotId?: string | null;
     previousProfilePictureImageId?: string | null;
   }
@@ -2033,12 +2352,17 @@ async function finalizeComfyOrOllamaGeneratedImageResponse(
   try {
     const createdAt = new Date().toISOString();
     db.prepare(
-      "INSERT INTO images (id, user_id, conversation_id, bot_id, prompt, revised_prompt, url, size, quality, provider, model, local_rel_path, purpose, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      "INSERT INTO images (id, user_id, conversation_id, bot_id, related_bot_ids, origin, prompt, revised_prompt, url, size, quality, provider, model, local_rel_path, purpose, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     ).run(
       args.imageId,
       args.userId,
       args.persistence.conversationIdForInsert,
       args.persistence.persistedBotId,
+      serializeImageRelatedBotIds(
+        args.persistence.relatedBotIds,
+        args.persistence.persistedBotId,
+      ),
+      args.persistence.origin,
       args.prompt,
       args.prompt,
       storedUrl,
@@ -2064,9 +2388,12 @@ async function finalizeComfyOrOllamaGeneratedImageResponse(
     recordImageUsage({
       provider: args.provider,
       model: args.modelUsed,
-      purpose: args.purpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE
-        ? BOT_PROFILE_PICTURE_IMAGE_PURPOSE
-        : "image_generation",
+      purpose:
+        args.purpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE
+          ? BOT_PROFILE_PICTURE_IMAGE_PURPOSE
+          : args.purpose === GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE
+            ? GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE
+            : "image_generation",
       imageCount: 1,
       imageSize: args.size,
       imageQuality: args.quality,
@@ -2082,6 +2409,12 @@ async function finalizeComfyOrOllamaGeneratedImageResponse(
     ok: true,
     image: {
       id: args.imageId,
+      botId: args.persistence.persistedBotId,
+      botIds: normalizeImageRelatedBotIds(
+        args.persistence.relatedBotIds,
+        args.persistence.persistedBotId,
+      ),
+      origin: args.persistence.origin,
       url: storedUrl,
       revisedPrompt: args.prompt,
       displayUrl,
@@ -2089,6 +2422,7 @@ async function finalizeComfyOrOllamaGeneratedImageResponse(
       model: args.modelUsed,
       purpose: args.purpose ?? "gallery",
     },
+    ...(args.composedPrompt ? { composedPrompt: args.composedPrompt } : {}),
   });
 }
 
@@ -2103,6 +2437,277 @@ async function readOpenAiGeneratedImageBytes(
     throw new Error("OpenAI returned no downloadable image URL.");
   }
   return downloadRemoteImage(result.url, { signal });
+}
+
+async function generateAndPersistSignalArtworkAsset(args: {
+  userId: string;
+  hostBotId: string;
+  kind: SignalArtworkAssetKind;
+  prompt: string;
+  size: "1536x1024" | "1024x1024";
+  preferredProvider: ImageProviderName;
+  sourceNightImageId: string | null;
+  signal: AbortSignal;
+}): Promise<SignalArtworkGeneratedAsset> {
+  const user = getUserRow(args.userId);
+  const effectiveProvider = resolveImageProviderName({
+    savedProvider: user.preferred_image_provider,
+    requestedProvider: args.preferredProvider,
+    offlineOnly: imageContextIncludesOfflineOnlyBot(db, args.userId, [args.hostBotId]),
+  });
+  const persona = db
+    .prepare("SELECT name, system_prompt FROM bots WHERE id = ? AND user_id = ?")
+    .get(args.hostBotId, args.userId) as
+    | { name: string; system_prompt: string }
+    | undefined;
+  if (!persona) throw new HttpError(404, "Signal host bot not found.");
+
+  let sourceImageBytes: Buffer | undefined;
+  if (args.sourceNightImageId) {
+    const source = db
+      .prepare(
+        `SELECT bot_id, origin, local_rel_path
+           FROM images
+          WHERE id = ? AND user_id = ?`,
+      )
+      .get(args.sourceNightImageId, args.userId) as
+      | { bot_id: string | null; origin: string | null; local_rel_path: string | null }
+      | undefined;
+    if (
+      !source ||
+      source.origin !== "botcast" ||
+      source.bot_id !== args.hostBotId ||
+      !source.local_rel_path?.trim()
+    ) {
+      throw new HttpError(404, "The canonical Dark studio source is unavailable.");
+    }
+    try {
+      sourceImageBytes = readGeneratedImageBytes(source.local_rel_path);
+    } catch {
+      throw new HttpError(404, "The canonical Dark studio file is unavailable.");
+    }
+  }
+
+  const localPrompt = resolveImagePromptForGeneration({
+    prompt: args.prompt,
+    origin: "botcast",
+    sourceEditPrompt: args.sourceNightImageId
+      ? BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT
+      : "",
+    useSourceEdit: false,
+    botName: persona.name,
+    botSystemPrompt: persona.system_prompt,
+  });
+  const onlinePrompt = resolveImagePromptForGeneration({
+    prompt: args.prompt,
+    origin: "botcast",
+    sourceEditPrompt: args.sourceNightImageId
+      ? BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT
+      : "",
+    useSourceEdit: Boolean(sourceImageBytes),
+    botName: persona.name,
+    botSystemPrompt: persona.system_prompt,
+  });
+  const preferredLocalImageModel = user.preferred_local_image_model?.trim() ?? "";
+  const preferredOpenAiImageModel = user.preferred_openai_image_model?.trim() ?? "";
+  const localImageDisabled = isDisabledModelChoice(preferredLocalImageModel);
+  const openAiImageDisabled = isDisabledModelChoice(preferredOpenAiImageModel);
+  const resolvedLocalImageModel = localImageDisabled ? "" : preferredLocalImageModel;
+  const resolvedOpenAiImageModel = openAiImageDisabled
+    ? ""
+    : DEFAULT_OPENAI_IMAGE_MODEL_ID;
+  const shouldRunLocal =
+    effectiveProvider === "local" ||
+    (openAiImageDisabled && Boolean(resolvedLocalImageModel));
+  if (effectiveProvider === "local" && localImageDisabled) {
+    throw new HttpError(
+      400,
+      "Local image generation is disabled. Choose a local image model before generating.",
+    );
+  }
+  if (!shouldRunLocal && openAiImageDisabled) {
+    throw new HttpError(
+      400,
+      "Online image generation is disabled. Choose an online image model before generating.",
+    );
+  }
+  if (shouldRunLocal && !resolvedLocalImageModel) {
+    throw new Error("Pick a local image model in the Images panel header, then try again.");
+  }
+
+  enterUsageSession({
+    db,
+    userId: args.userId,
+    privacyScope: "normal",
+    mode: "sandbox",
+    surface: "images",
+    conversationId: null,
+    botId: args.hostBotId,
+  });
+
+  const imageId = randomId(12);
+  const localRelPath = buildGeneratedImageRelativePath(args.userId, imageId);
+  const displayUrl = `/api/images/${encodeURIComponent(imageId)}/file`;
+  const quality = shouldRunLocal
+    ? "standard"
+    : args.kind === "logo"
+      ? "low"
+      : "high";
+  const relatedBotIds = [args.hostBotId];
+  let provider: "openai" | "comfyui" | "ollama";
+  let model: string;
+  let revisedPrompt: string;
+  let storedUrl = displayUrl;
+  let imageBytes: Buffer;
+  let downloadMs = 0;
+
+  if (shouldRunLocal) {
+    const lenientFallbackModel = user.lenient_local_image_fallback_model?.trim() ?? "";
+    const runLocal = (modelId: string) =>
+      generateLocalImageBytesByModelId({
+        modelId,
+        promptForModel: localPrompt,
+        size: args.size,
+        signal: args.signal,
+        comfyUiHost: user.comfyui_host,
+        comfyUiWorkflows: parseStoredComfyUiWorkflows(user.comfyui_workflows),
+        secondaryOllamaHost: user.secondary_ollama_host,
+        primaryOllamaHost: config.ollamaHost,
+      });
+    let output: Awaited<ReturnType<typeof generateLocalImageBytesByModelId>>;
+    try {
+      output = await runLocal(resolvedLocalImageModel);
+    } catch (error) {
+      if (
+        lenientFallbackModel &&
+        lenientFallbackModel !== resolvedLocalImageModel &&
+        shouldAttemptLenientLocalImageFallback(error)
+      ) {
+        output = await runLocal(lenientFallbackModel);
+      } else {
+        throw error;
+      }
+    }
+    provider = output.provider;
+    model = output.modelUsed;
+    revisedPrompt = localPrompt;
+    imageBytes = output.imageBytes;
+  } else {
+    const userKey = decryptUserKey(args.userId);
+    const apiKey = getOpenAiApiKeyForUser(args.userId, userKey) ?? config.openAiApiKey;
+    const lenientFallbackModel = user.lenient_local_image_fallback_model?.trim() ?? "";
+    try {
+      const result = sourceImageBytes
+        ? await editImage(onlinePrompt, sourceImageBytes, apiKey, {
+            model: resolvedOpenAiImageModel,
+            size: args.size,
+            quality,
+            signal: args.signal,
+          })
+        : await generateImage(onlinePrompt, apiKey, {
+            model: resolvedOpenAiImageModel,
+            size: args.size,
+            quality,
+            signal: args.signal,
+          });
+      const downloadStartedAt = Date.now();
+      try {
+        imageBytes = await readOpenAiGeneratedImageBytes(result, args.signal);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "download failed";
+        throw new Error(`Could not download image for local storage (${detail}).`);
+      }
+      downloadMs = Date.now() - downloadStartedAt;
+      provider = "openai";
+      model = result.model;
+      revisedPrompt = result.revisedPrompt;
+      storedUrl = result.url || displayUrl;
+    } catch (error) {
+      if (!lenientFallbackModel || !shouldAttemptLenientLocalImageFallback(error)) {
+        throw error;
+      }
+      const output = await generateLocalImageBytesByModelId({
+        modelId: lenientFallbackModel,
+        promptForModel: localPrompt,
+        size: args.size,
+        signal: args.signal,
+        comfyUiHost: user.comfyui_host,
+        comfyUiWorkflows: parseStoredComfyUiWorkflows(user.comfyui_workflows),
+        secondaryOllamaHost: user.secondary_ollama_host,
+        primaryOllamaHost: config.ollamaHost,
+      });
+      provider = output.provider;
+      model = output.modelUsed;
+      revisedPrompt = localPrompt;
+      imageBytes = output.imageBytes;
+    }
+  }
+
+  if (args.signal.aborted) {
+    throw new DOMException("Signal artwork generation cancelled.", "AbortError");
+  }
+  const persistenceStartedAt = Date.now();
+  try {
+    writeGeneratedImageBytes(localRelPath, imageBytes);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "write failed";
+    throw new Error(`Could not save generated image (${detail}).`);
+  }
+  await tryGenerateThumbAfterPngWrite(localRelPath);
+  const createdAt = new Date().toISOString();
+  try {
+    db.prepare(
+      `INSERT INTO images
+         (id, user_id, conversation_id, bot_id, related_bot_ids, origin, prompt,
+          revised_prompt, url, size, quality, provider, model, local_rel_path,
+          purpose, created_at)
+       VALUES (?, ?, NULL, ?, ?, 'botcast', ?, ?, ?, ?, ?, ?, ?, ?, 'gallery', ?)`,
+    ).run(
+      imageId,
+      args.userId,
+      args.hostBotId,
+      serializeImageRelatedBotIds(relatedBotIds, args.hostBotId),
+      shouldRunLocal ? localPrompt : onlinePrompt,
+      revisedPrompt,
+      storedUrl,
+      args.size,
+      quality,
+      provider,
+      model,
+      localRelPath,
+      createdAt,
+    );
+    recordImageUsage({
+      provider,
+      model,
+      purpose: "image_generation",
+      imageCount: 1,
+      imageSize: args.size,
+      imageQuality: quality,
+      createdAt,
+    });
+  } catch (error) {
+    tryUnlinkGeneratedImageFile(localRelPath);
+    throw error;
+  }
+  const localPersistenceMs = Date.now() - persistenceStartedAt;
+  console.info("[signal-artwork] asset persisted", {
+    userId: args.userId,
+    hostBotId: args.hostBotId,
+    kind: args.kind,
+    sourceNightImageId: args.sourceNightImageId,
+    provider,
+    model,
+    size: args.size,
+    quality,
+    downloadMs,
+    localPersistenceMs,
+  });
+  return {
+    imageId,
+    imageUrl: displayUrl,
+    timings: { downloadMs, localPersistenceMs },
+  };
 }
 
 function buildRoutes(): RouteDefinition[] {
@@ -2498,6 +3103,610 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       deleteStorySession(db, userId, ctx.params.id);
       json(ctx.res, 200, { ok: true });
+    }),
+    route("GET", "/api/slate/series", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, { ok: true, series: listSlateSeries(db, userId) });
+    }),
+    route("POST", "/api/slate/series", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      json(ctx.res, 201, {
+        ok: true,
+        series: createSlateSeries(db, userId, {
+          title: body.title,
+          description: body.description,
+        }),
+      });
+    }),
+    route("GET", "/api/slate/series/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        series: getSlateSeries(db, userId, ctx.params.id),
+      });
+    }),
+    route("GET", "/api/slate/projects", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, { ok: true, projects: listSlateProjects(db, userId) });
+    }),
+    route("POST", "/api/slate/wildcards/resolve", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const ai = slateAiForUser(userId);
+      const botCandidates = db
+        .prepare(
+          `SELECT id, name
+             FROM bots
+            WHERE (user_id = ? OR visibility = 'public')
+              AND chat_enabled = 1
+            ORDER BY created_at ASC, id ASC`,
+        )
+        .all(userId) as Array<{ id: string; name: string }>;
+      const resolution = await runWithUsageSession(
+        { db, userId, privacyScope: "normal", mode: "slate", surface: "slate" },
+        () => resolveSlateProjectSparkWildcards(body.template, ai, botCandidates),
+      );
+      json(ctx.res, 200, { ok: true, ...resolution });
+    }),
+    route("POST", "/api/slate/projects", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const project = createSlateProject(db, userId, {
+        title: body.title,
+        spark: body.spark,
+        seriesId: body.seriesId,
+        sparkWildcards: body.sparkWildcards,
+      });
+      json(ctx.res, 201, {
+        ok: true,
+        project: protectSlateMutation(
+          project,
+          userId,
+          project.id,
+          "Project created",
+          true,
+        ),
+      });
+    }),
+    route("GET", "/api/slate/projects/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, { ok: true, project: getSlateProject(db, userId, ctx.params.id) });
+    }),
+    route("POST", "/api/slate/projects/:id/return-sessions", async (ctx) => {
+      const userId = requireAuth(ctx);
+      try {
+        json(ctx.res, 201, {
+          ok: true,
+          session: openSlateReturnSession(db, userId, ctx.params.id, new Date(), {
+            maxReuseAgeMs: 12 * 60 * 60 * 1_000,
+          }),
+        });
+      } catch (error) {
+        if (error instanceof Error && /project not found/i.test(error.message)) {
+          throw new HttpError(404, error.message);
+        }
+        throw error;
+      }
+    }),
+    route("GET", "/api/slate/projects/:id/return-sessions", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const rawLimit = ctx.query.get("limit");
+      try {
+        json(ctx.res, 200, {
+          ok: true,
+          sessions: listSlateReturnSessions(
+            db,
+            userId,
+            ctx.params.id,
+            rawLimit ? Number.parseInt(rawLimit, 10) : undefined,
+          ),
+        });
+      } catch (error) {
+        if (error instanceof Error && /project not found/i.test(error.message)) {
+          throw new HttpError(404, error.message);
+        }
+        throw error;
+      }
+    }),
+    route("GET", "/api/slate/projects/:id/return-sessions/:sessionId", async (ctx) => {
+      const userId = requireAuth(ctx);
+      try {
+        json(ctx.res, 200, {
+          ok: true,
+          session: getSlateReturnSession(
+            db,
+            userId,
+            ctx.params.id,
+            ctx.params.sessionId,
+          ),
+        });
+      } catch (error) {
+        if (error instanceof Error && /(?:project|session) not found/i.test(error.message)) {
+          throw new HttpError(404, error.message);
+        }
+        throw error;
+      }
+    }),
+    route("GET", "/api/slate/projects/:id/sections", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        sections: listSlateProjectSections(db, userId, ctx.params.id),
+      });
+    }),
+    route("GET", "/api/slate/projects/:id/sections/:sectionId", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        section: getSlateProjectSection(
+          db,
+          userId,
+          ctx.params.id,
+          ctx.params.sectionId,
+        ),
+      });
+    }),
+    route("PATCH", "/api/slate/projects/:id/sections/:sectionId", async (ctx) => {
+      const userId = requireAuth(ctx);
+      try {
+        const section = saveSlateProjectSection(
+          db,
+          userId,
+          ctx.params.id,
+          ctx.params.sectionId,
+          ctx.body as never,
+        );
+        json(ctx.res, 200, {
+          ok: true,
+          section: protectSlateMutation(
+            section,
+            userId,
+            ctx.params.id,
+            "Section saved",
+          ),
+        });
+      } catch (error) {
+        if (error instanceof SlateSectionRevisionConflictError) {
+          json(ctx.res, 409, {
+            ok: false,
+            code: error.code,
+            error: error.message,
+            sectionId: error.sectionId,
+            currentRevision: error.currentRevision,
+            currentContentHash: error.currentContentHash,
+          });
+          return;
+        }
+        throw error;
+      }
+    }),
+    route("GET", "/api/slate/projects/:id/manuscript", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const rawLimit = ctx.query.get("limit");
+      const manuscriptPage = getSlateManuscriptPage(db, userId, ctx.params.id, {
+          cursor: ctx.query.get("cursor"),
+          limit: rawLimit ? Number.parseInt(rawLimit, 10) : undefined,
+        });
+      json(ctx.res, 200, { ...manuscriptPage });
+    }),
+    route("GET", "/api/slate/projects/:id/exports", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const rawLimit = ctx.query.get("limit");
+      try {
+        json(ctx.res, 200, {
+          ok: true,
+          exports: listSlateManuscriptExportHistory(
+            db,
+            userId,
+            ctx.params.id,
+            rawLimit ? Number.parseInt(rawLimit, 10) : undefined,
+          ),
+        });
+      } catch (error) {
+        if (error instanceof SlateManuscriptExportServiceError) {
+          throw new HttpError(error.status, error.message);
+        }
+        throw error;
+      }
+    }),
+    route("POST", "/api/slate/projects/:id/exports", async (ctx) => {
+      const userId = requireAuth(ctx);
+      try {
+        const exported = await createSlateManuscriptExport(
+          db,
+          userId,
+          ctx.params.id,
+          ctx.body as never,
+        );
+        ctx.res.statusCode = 200;
+        ctx.res.setHeader("Content-Type", exported.mediaType);
+        ctx.res.setHeader(
+          "Content-Disposition",
+          `attachment; filename="${exported.filename}"`,
+        );
+        ctx.res.setHeader("Content-Length", String(exported.payload.byteLength));
+        ctx.res.setHeader("Cache-Control", "private, no-store");
+        ctx.res.setHeader("X-Content-Type-Options", "nosniff");
+        ctx.res.setHeader("X-Prism-Export-Id", exported.id);
+        ctx.res.setHeader(
+          "X-Prism-Export-Sha256",
+          exported.manifest.payloadSha256,
+        );
+        ctx.res.end(Buffer.from(exported.payload));
+      } catch (error) {
+        if (error instanceof SlateManuscriptExportServiceError) {
+          throw new HttpError(error.status, error.message);
+        }
+        throw error;
+      }
+    }),
+    route("GET", "/api/slate/projects/:id/archive", async (ctx) => {
+      const userId = requireAuth(ctx);
+      try {
+        const archive = createSlateProjectArchive(db, userId, ctx.params.id);
+        ctx.res.statusCode = 200;
+        ctx.res.setHeader("Content-Type", archive.mediaType);
+        ctx.res.setHeader(
+          "Content-Disposition",
+          `attachment; filename="${archive.filename}"`,
+        );
+        ctx.res.setHeader("Content-Length", String(archive.payload.byteLength));
+        ctx.res.setHeader("Cache-Control", "private, no-store");
+        ctx.res.setHeader("X-Content-Type-Options", "nosniff");
+        ctx.res.setHeader("X-Prism-Slate-Format", archive.manifest.format);
+        ctx.res.setHeader("X-Prism-Slate-Version", String(archive.manifest.version));
+        ctx.res.end(Buffer.from(archive.payload));
+      } catch (error) {
+        rethrowSlateArchiveError(error);
+      }
+    }),
+    route("POST", "/api/slate/archives/preview", async (ctx) => {
+      const userId = requireAuth(ctx);
+      try {
+        json(ctx.res, 200, {
+          ok: true,
+          preview: previewSlateProjectArchiveImport(
+            db,
+            userId,
+            slateArchivePayload(ctx.body),
+          ),
+        });
+      } catch (error) {
+        rethrowSlateArchiveError(error);
+      }
+    }),
+    route("POST", "/api/slate/archives/import", async (ctx) => {
+      const userId = requireAuth(ctx);
+      try {
+        const imported = importSlateProjectArchiveAsCopy(
+          db,
+          userId,
+          slateArchivePayload(ctx.body),
+        );
+        json(ctx.res, 201, {
+          ok: true,
+          import: protectSlateMutation(
+            imported,
+            userId,
+            imported.projectId,
+            "Archive restored as a copy",
+            true,
+          ),
+        });
+      } catch (error) {
+        rethrowSlateArchiveError(error);
+      }
+    }),
+    route("GET", "/api/slate/projects/:id/continuity/status", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        continuity: getSlateContinuityStatus(db, userId, ctx.params.id),
+      });
+    }),
+    route("GET", "/api/slate/projects/:id/continuity/concerns/next", async (ctx) => {
+      const userId = requireAuth(ctx);
+      try {
+        json(ctx.res, 200, {
+          ok: true,
+          concern: getNextSlateContinuityConcern(db, userId, ctx.params.id),
+        });
+      } catch (error) {
+        if (error instanceof SlateContinuityReconciliationError) {
+          throw new HttpError(error.status, error.message);
+        }
+        throw error;
+      }
+    }),
+    route(
+      "POST",
+      "/api/slate/projects/:id/continuity/concerns/:concernId/resolve",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        const body = ctx.body as Record<string, unknown>;
+        try {
+          const current = getNextSlateContinuityConcern(db, userId, ctx.params.id);
+          if (!current) {
+            throw new SlateContinuityReconciliationError(
+              "Continuity has no open concern for this project.",
+              404,
+              "slate_concern_not_found",
+            );
+          }
+          if (current.id !== ctx.params.concernId) {
+            throw new SlateContinuityReconciliationError(
+              "Direct the current Continuity concern before moving to another.",
+              409,
+              "slate_concern_not_current",
+            );
+          }
+          const appliedResolution = chooseSlateConcernResolutionKind(
+            body.direction,
+            body.resolutionKind,
+            current.suggestedAction.kind,
+          );
+          if (appliedResolution === "revise_prose") {
+            const prepared = slateRevisionRequestForContinuityConcern(
+              db,
+              userId,
+              ctx.params.id,
+              ctx.params.concernId,
+              body.direction,
+            );
+            const ai = slateAiForUser(userId);
+            const project = await runWithUsageSession(
+              { db, userId, privacyScope: "normal", mode: "slate", surface: "slate" },
+              () => proposeSlateRevision(db, userId, ctx.params.id, prepared.request, ai),
+            );
+            const revision = project.revisions.find((candidate) => candidate.status === "pending");
+            if (!revision) throw new Error("Slate did not preserve the Continuity revision preview.");
+            linkSlateConcernRevisionProposal(
+              db,
+              userId,
+              ctx.params.id,
+              ctx.params.concernId,
+              revision.id,
+              prepared.direction,
+            );
+            json(ctx.res, 200, {
+              ok: true,
+              project: protectSlateMutation(
+                project,
+                userId,
+                ctx.params.id,
+                "Continuity revision proposal created",
+              ),
+              appliedResolution,
+              revisionId: revision.id,
+              nextConcern: null,
+            });
+            return;
+          }
+          resolveSlateContinuityConcern(
+            db,
+            userId,
+            ctx.params.id,
+            ctx.params.concernId,
+            { direction: body.direction, resolutionKind: appliedResolution },
+          );
+          json(ctx.res, 200, {
+            ok: true,
+            project: protectSlateMutation(
+              getSlateProject(db, userId, ctx.params.id),
+              userId,
+              ctx.params.id,
+              "Continuity direction recorded",
+              true,
+            ),
+            appliedResolution,
+            revisionId: null,
+            nextConcern: getNextSlateContinuityConcern(db, userId, ctx.params.id),
+          });
+        } catch (error) {
+          if (error instanceof SlateContinuityReconciliationError) {
+            throw new HttpError(error.status, error.message);
+          }
+          throw error;
+        }
+      },
+    ),
+    route("GET", "/api/slate/projects/:id/recovery/status", async (ctx) => {
+      const userId = requireAuth(ctx);
+      getSlateProject(db, userId, ctx.params.id);
+      const generations = listSlateRecoveryGenerations(
+        slateRecoveryRootDirectory(),
+        ctx.params.id,
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        recovery: {
+          coordinator: slateRecoveryStatus(userId, ctx.params.id),
+          verifiedGenerationCount: generations.filter(
+            (generation) => generation.status === "verified",
+          ).length,
+          corruptGenerationCount: generations.filter(
+            (generation) => generation.status === "corrupt",
+          ).length,
+          newestVerifiedAt:
+            generations.find((generation) => generation.status === "verified")
+              ?.capturedAt ?? null,
+        },
+      });
+    }),
+    route("PATCH", "/api/slate/projects/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const project = updateSlateProject(db, userId, ctx.params.id, ctx.body);
+      json(ctx.res, 200, {
+        ok: true,
+        project: protectSlateMutation(
+          project,
+          userId,
+          ctx.params.id,
+          "Project direction or structure saved",
+        ),
+      });
+    }),
+    route("DELETE", "/api/slate/projects/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      getSlateProject(db, userId, ctx.params.id);
+      const resumeSlateRecovery = await retireAndPurgeSlateRecoveryProjects(
+        userId,
+        [ctx.params.id],
+      );
+      try {
+        deleteSlateProject(db, userId, ctx.params.id);
+      } catch (error) {
+        resumeSlateRecovery();
+        throw error;
+      }
+      json(ctx.res, 200, { ok: true });
+    }),
+    route("POST", "/api/slate/projects/:id/shape", async (ctx) => {
+      const userId = requireAuth(ctx);
+      protectSlateBeforeRisk(userId, ctx.params.id);
+      const ai = slateAiForUser(userId);
+      try {
+        const project = await runWithUsageSession(
+          { db, userId, privacyScope: "normal", mode: "slate", surface: "slate" },
+          () => generateSlateShape(db, userId, ctx.params.id, ai),
+        );
+        json(ctx.res, 200, {
+          ok: true,
+          project: protectSlateMutation(
+            project,
+            userId,
+            ctx.params.id,
+            "Story shape approved",
+            true,
+          ),
+        });
+      } catch (error) {
+        if (error instanceof SlateShapeWriteConflictError) {
+          json(ctx.res, 409, {
+            ok: false,
+            code: error.code,
+            error: error.message,
+            reason: error.reason,
+            projectId: error.projectId,
+            currentUpdatedAt: error.currentUpdatedAt,
+          });
+          return;
+        }
+        throw error;
+      }
+    }),
+    route("POST", "/api/slate/projects/:id/draft", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const ai = slateAiForUser(userId);
+      try {
+        const project = await runWithUsageSession(
+          { db, userId, privacyScope: "normal", mode: "slate", surface: "slate" },
+          () =>
+            draftSlateStructureItem(
+              db,
+              userId,
+              ctx.params.id,
+              readString(body.structureItemId, "structureItemId"),
+              body.direction,
+              ai,
+            ),
+        );
+        json(ctx.res, 200, {
+          ok: true,
+          project: protectSlateMutation(
+            project,
+            userId,
+            ctx.params.id,
+            "Scene drafted",
+            true,
+          ),
+        });
+      } catch (error) {
+        if (error instanceof SlateSectionAiWriteConflictError) {
+          json(ctx.res, 409, {
+            ok: false,
+            code: error.code,
+            error: error.message,
+            reason: error.reason,
+            sectionId: error.sectionId,
+            currentRevision: error.currentRevision,
+            currentContentHash: error.currentContentHash,
+          });
+          return;
+        }
+        throw error;
+      }
+    }),
+    route("POST", "/api/slate/projects/:id/revisions", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const ai = slateAiForUser(userId);
+      const project = await runWithUsageSession(
+        { db, userId, privacyScope: "normal", mode: "slate", surface: "slate" },
+        () => proposeSlateRevision(db, userId, ctx.params.id, ctx.body, ai),
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        project: protectSlateMutation(
+          project,
+          userId,
+          ctx.params.id,
+          "Revision proposal created",
+        ),
+      });
+    }),
+    route("POST", "/api/slate/projects/:id/revisions/:revisionId/accept", async (ctx) => {
+      const userId = requireAuth(ctx);
+      protectSlateBeforeRisk(userId, ctx.params.id);
+      const project = acceptSlateRevision(
+        db,
+        userId,
+        ctx.params.id,
+        ctx.params.revisionId,
+      );
+      settleSlateConcernRevision(
+        db,
+        userId,
+        ctx.params.id,
+        ctx.params.revisionId,
+        "accepted",
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        project: protectSlateMutation(
+          project,
+          userId,
+          ctx.params.id,
+          "Revision accepted",
+          true,
+        ),
+      });
+    }),
+    route("POST", "/api/slate/projects/:id/revisions/:revisionId/reject", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const project = rejectSlateRevision(
+        db,
+        userId,
+        ctx.params.id,
+        ctx.params.revisionId,
+      );
+      settleSlateConcernRevision(
+        db,
+        userId,
+        ctx.params.id,
+        ctx.params.revisionId,
+        "rejected",
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        project: protectSlateMutation(
+          project,
+          userId,
+          ctx.params.id,
+          "Revision rejected",
+        ),
+      });
     }),
     route("GET", "/api/conversations/sweep/state", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -3231,10 +4440,11 @@ function buildRoutes(): RouteDefinition[] {
 
       const botForcesLocal =
         (wallpaperBot?.online_enabled ?? conversation.bot_online_enabled) === 0;
-      const effectiveProvider =
-        botForcesLocal
-          ? "local"
-          : requestedProvider ?? (user.preferred_provider === "local" ? "local" : "openai");
+      const effectiveProvider = resolveImageProviderName({
+        savedProvider: user.preferred_image_provider,
+        requestedProvider,
+        offlineOnly: botForcesLocal,
+      });
       const preferredZenWallpaperLocalImageModel =
         user.preferred_zen_wallpaper_local_image_model?.trim() ?? "";
       const preferredLocalImageModel = user.preferred_local_image_model?.trim() ?? "";
@@ -3457,12 +4667,16 @@ function buildRoutes(): RouteDefinition[] {
           const wallpaperCreatedAt = new Date().toISOString();
           try {
             db.prepare(
-              "INSERT INTO images (id, user_id, conversation_id, bot_id, prompt, revised_prompt, url, size, quality, provider, model, local_rel_path, purpose, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'wallpaper', ?)"
+              "INSERT INTO images (id, user_id, conversation_id, bot_id, related_bot_ids, origin, prompt, revised_prompt, url, size, quality, provider, model, local_rel_path, purpose, created_at) VALUES (?, ?, ?, ?, ?, 'zen_wallpaper', ?, ?, ?, ?, ?, ?, ?, ?, 'wallpaper', ?)"
             ).run(
               imageId,
               userId,
               conversationId,
               wallpaperPersonaBotId,
+              serializeImageRelatedBotIds(
+                wallpaperPersonaBotId ? [wallpaperPersonaBotId] : [],
+                wallpaperPersonaBotId,
+              ),
               prompt,
               prompt,
               storedUrl,
@@ -3518,12 +4732,16 @@ function buildRoutes(): RouteDefinition[] {
             const wallpaperCreatedAt = new Date().toISOString();
             try {
               db.prepare(
-                "INSERT INTO images (id, user_id, conversation_id, bot_id, prompt, revised_prompt, url, size, quality, provider, model, local_rel_path, purpose, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'wallpaper', ?)"
+                "INSERT INTO images (id, user_id, conversation_id, bot_id, related_bot_ids, origin, prompt, revised_prompt, url, size, quality, provider, model, local_rel_path, purpose, created_at) VALUES (?, ?, ?, ?, ?, 'zen_wallpaper', ?, ?, ?, ?, ?, ?, ?, ?, 'wallpaper', ?)"
               ).run(
                 imageId,
                 userId,
                 conversationId,
                 wallpaperPersonaBotId,
+                serializeImageRelatedBotIds(
+                  wallpaperPersonaBotId ? [wallpaperPersonaBotId] : [],
+                  wallpaperPersonaBotId,
+                ),
                 prompt,
                 prompt,
                 storedUrl,
@@ -3566,12 +4784,16 @@ function buildRoutes(): RouteDefinition[] {
         const wallpaperCreatedAt = new Date().toISOString();
         try {
           db.prepare(
-            "INSERT INTO images (id, user_id, conversation_id, bot_id, prompt, revised_prompt, url, size, quality, provider, model, local_rel_path, purpose, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'openai', ?, ?, 'wallpaper', ?)"
+            "INSERT INTO images (id, user_id, conversation_id, bot_id, related_bot_ids, origin, prompt, revised_prompt, url, size, quality, provider, model, local_rel_path, purpose, created_at) VALUES (?, ?, ?, ?, ?, 'zen_wallpaper', ?, ?, ?, ?, ?, 'openai', ?, ?, 'wallpaper', ?)"
           ).run(
             imageId,
             userId,
             conversationId,
             wallpaperPersonaBotId,
+            serializeImageRelatedBotIds(
+              wallpaperPersonaBotId ? [wallpaperPersonaBotId] : [],
+              wallpaperPersonaBotId,
+            ),
             prompt,
             result.revisedPrompt,
             storedUrl,
@@ -4212,13 +5434,14 @@ function buildRoutes(): RouteDefinition[] {
       if (typeof effectiveBotId === "string" && effectiveBotId.trim().length > 0) {
         const bot = db
           .prepare(
-            "SELECT name, system_prompt, semantic_facets, online_enabled, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')"
+            "SELECT name, system_prompt, semantic_facets, powers_json, online_enabled, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')"
           )
           .get(effectiveBotId, userId) as
           | {
               name?: string;
               system_prompt?: string;
               semantic_facets?: string | null;
+              powers_json?: string | null;
               online_enabled?: number | null;
 	              flirt_enabled?: number | null;
 	              temperature?: number | null;
@@ -4236,7 +5459,8 @@ function buildRoutes(): RouteDefinition[] {
           botSystemPrompt = composeBotSystemPrompt(
             botName,
             bot.system_prompt,
-            bot.flirt_enabled === 1
+            bot.flirt_enabled === 1,
+            bot.powers_json
           );
           facetLines.push(...readBotSemanticFacetSummary(bot.semantic_facets));
           if (bot.online_enabled === 0 && effectiveProvider !== "local") {
@@ -4410,12 +5634,13 @@ function buildRoutes(): RouteDefinition[] {
       if (request.activeBotId) {
         const bot = db
           .prepare(
-            "SELECT name, system_prompt, flirt_enabled FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')"
+            "SELECT name, system_prompt, powers_json, flirt_enabled FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')"
           )
           .get(request.activeBotId, userId) as
           | {
               name?: string;
               system_prompt?: string;
+              powers_json?: string | null;
               flirt_enabled?: number | null;
             }
           | undefined;
@@ -4424,7 +5649,8 @@ function buildRoutes(): RouteDefinition[] {
           personaSystemPrompt = composeBotSystemPrompt(
             personaName,
             bot.system_prompt,
-            bot.flirt_enabled === 1
+            bot.flirt_enabled === 1,
+            bot.powers_json
           );
         }
       }
@@ -4660,12 +5886,13 @@ function buildRoutes(): RouteDefinition[] {
       if (runtimeBotId) {
         const bot = db
           .prepare(
-            "SELECT name, system_prompt, online_enabled, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')"
+            "SELECT name, system_prompt, powers_json, online_enabled, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')"
           )
           .get(runtimeBotId, userId) as
           | {
               name?: string;
               system_prompt?: string;
+              powers_json?: string | null;
               online_enabled?: number | null;
 	              flirt_enabled?: number | null;
 	              temperature?: number | null;
@@ -4684,7 +5911,8 @@ function buildRoutes(): RouteDefinition[] {
           botSystemPrompt = composeBotSystemPrompt(
             bot.name,
             bot.system_prompt,
-            bot.flirt_enabled === 1
+            bot.flirt_enabled === 1,
+            bot.powers_json
           );
           if (bot.online_enabled === 0 && effectiveProvider !== "local") {
             effectiveProvider = "local";
@@ -4866,6 +6094,9 @@ function buildRoutes(): RouteDefinition[] {
           userKey,
           {
             preferredProvider: effectiveProvider,
+            preferredImageProvider: botForcesLocalProvider
+              ? "local"
+              : user.preferred_image_provider,
             providerFactory: providerFactoryOverride,
             auxiliaryProviderFactory: auxiliaryProviderFactoryOverride,
             autoMemory: !commandCenterPrompt && !incognito && Boolean(user.auto_memory),
@@ -5007,6 +6238,627 @@ function buildRoutes(): RouteDefinition[] {
       }
       json(ctx.res, 200, { ok: true, status: "failed", error: result.error });
     }),
+    // Signal is a deliberately isolated anthology pipeline. Its internal
+    // botcast namespace reuses bot personas/providers but never enters
+    // Chat/Coffee memory or relationship paths.
+    route("GET", "/api/botcast/shows", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, { ok: true, shows: listBotcastShows(db, userId) });
+    }),
+    route("POST", "/api/botcast/shows", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const show = createBotcastShow(db, userId, {
+        hostBotId: typeof body.hostBotId === "string" ? body.hostBotId : "",
+        ...(body.name !== undefined ? { name: body.name as string } : {}),
+        ...(body.premise !== undefined ? { premise: body.premise as string } : {}),
+        ...(body.hostingStyle !== undefined
+          ? { hostingStyle: body.hostingStyle as string }
+          : {}),
+      });
+      json(ctx.res, 201, { ok: true, show });
+    }),
+    route("GET", "/api/botcast/artwork-jobs/active", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        job: signalArtworkJobs.getLatest(userId),
+      });
+    }),
+    route("GET", "/api/botcast/artwork-jobs/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const job = signalArtworkJobs.get(userId, ctx.params.id);
+      if (!job) throw new HttpError(404, "Signal artwork job not found.");
+      json(ctx.res, 200, { ok: true, job });
+    }),
+    route("POST", "/api/botcast/artwork-jobs/:id/cancel", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const job = signalArtworkJobs.cancel(userId, ctx.params.id);
+      if (!job) throw new HttpError(404, "Signal artwork job not found.");
+      json(ctx.res, 202, { ok: true, job });
+    }),
+    route("DELETE", "/api/botcast/artwork-jobs/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      if (!signalArtworkJobs.dismiss(userId, ctx.params.id)) {
+        throw new HttpError(409, "Signal artwork can be dismissed after it stops.");
+      }
+      json(ctx.res, 200, { ok: true });
+    }),
+    route("POST", "/api/botcast/shows/:id/artwork-job", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const show = getBotcastShow(db, userId, ctx.params.id);
+      const user = getUserRow(userId);
+      const body = ctx.body as Record<string, unknown>;
+      const preferredProvider: ImageProviderName =
+        body.preferredProvider === "local" || body.preferredProvider === "openai"
+          ? body.preferredProvider
+          : user.preferred_image_provider;
+      const requestedArtworkKinds = body.kinds;
+      const requestedKinds = normalizeSignalArtworkAssetKinds(
+        requestedArtworkKinds,
+      );
+      if (requestedKinds.length === 0) {
+        throw new HttpError(400, "Choose at least one Signal artwork asset.");
+      }
+      const usesExistingNightSource =
+        requestedKinds.includes("day-studio") &&
+        !requestedKinds.includes("night-studio");
+      if (usesExistingNightSource && !show.nightAtmosphere.imageId) {
+        throw new HttpError(
+          409,
+          "Create or upload the Dark studio before refreshing the Light studio.",
+        );
+      }
+      const effectiveArtworkProvider = resolveImageProviderName({
+        savedProvider: user.preferred_image_provider,
+        requestedProvider: preferredProvider,
+        offlineOnly: imageContextIncludesOfflineOnlyBot(
+          db,
+          userId,
+          [show.hostBotId],
+        ),
+      });
+      const identityMs =
+        typeof body.identityMs === "number" && Number.isFinite(body.identityMs)
+          ? Math.max(0, Math.round(body.identityMs))
+          : null;
+      const acquired = await tryAcquireImageSlot({
+        userId,
+        conversationId: null,
+        botId: show.hostBotId,
+        mode: "sandbox",
+        incognito: false,
+        captionPrompt:
+          requestedKinds.length === 1
+            ? `${show.name} ${requestedKinds[0]} refresh`
+            : `${show.name} Signal visual identity`,
+        userMessage:
+          requestedKinds.length === 1
+            ? `[Signal] Refresh ${show.name}'s ${requestedKinds[0]}`
+            : `[Signal] Create ${show.name}'s show look`,
+        source: "signal_artwork",
+        requestedSize:
+          requestedKinds.length === 1 && requestedKinds[0] === "logo"
+            ? "1024x1024"
+            : "1536x1024",
+      });
+      if (!acquired.ok) {
+        throw new HttpError(
+          503,
+          "Another image is generating right now. Let it finish before starting Signal artwork.",
+        );
+      }
+
+      try {
+        const promptByKind: Record<SignalArtworkAssetKind, string> = {
+          "night-studio": show.nightAtmosphere.prompt,
+          "day-studio": show.dayAtmosphere.prompt,
+          logo: show.logo.prompt,
+        };
+        const job = signalArtworkJobs.start({
+          userId,
+          showId: show.id,
+          showName: show.name,
+          identityMs,
+          kinds: requestedKinds,
+          sourceNightImageId: usesExistingNightSource
+            ? show.nightAtmosphere.imageId
+            : null,
+          parallelIndependentAssets: effectiveArtworkProvider === "openai",
+          controller: acquired.job.abortController,
+          releaseSlot: async () => {
+            await releaseImageSlotIfOwned(userId, acquired.job.id);
+          },
+          generate: (kind, sourceNightImageId, signal) =>
+            generateAndPersistSignalArtworkAsset({
+              userId,
+              hostBotId: show.hostBotId,
+              kind,
+              prompt: promptByKind[kind],
+              size: kind === "logo" ? "1024x1024" : "1536x1024",
+              preferredProvider,
+              sourceNightImageId,
+              signal,
+            }),
+          attach: async (kind, asset) => {
+            let attachmentError: unknown;
+            for (let attempt = 0; attempt < 3; attempt += 1) {
+              try {
+                updateBotcastShow(
+                  db,
+                  userId,
+                  show.id,
+                  kind === "night-studio"
+                    ? {
+                        nightAtmosphereImageUrl: asset.imageUrl,
+                        nightAtmosphereImageId: asset.imageId,
+                      }
+                    : kind === "day-studio"
+                      ? {
+                          dayAtmosphereImageUrl: asset.imageUrl,
+                          dayAtmosphereImageId: asset.imageId,
+                        }
+                      : {
+                          logoImageUrl: asset.imageUrl,
+                          logoImageId: asset.imageId,
+                        },
+                );
+                return;
+              } catch (error) {
+                attachmentError = error;
+                if (attempt < 2) {
+                  await new Promise<void>((resolve) => setTimeout(resolve, 120 * (attempt + 1)));
+                }
+              }
+            }
+            throw attachmentError;
+          },
+        });
+        console.info("[signal-artwork] background job started", {
+          jobId: job.id,
+          userId,
+          showId: show.id,
+          identityMs,
+          provider: preferredProvider,
+        });
+        json(ctx.res, 202, { ok: true, job });
+      } catch (error) {
+        await releaseImageSlotIfOwned(userId, acquired.job.id);
+        throw error;
+      }
+    }),
+    route("POST", "/api/botcast/shows/:id/brand", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const userKey = decryptUserKey(userId);
+      const body = ctx.body as Record<string, unknown>;
+      const requestedProvider = body.preferredProvider;
+      const preferredProvider: ProviderName =
+        requestedProvider === "local" ||
+        requestedProvider === "openai" ||
+        requestedProvider === "anthropic"
+          ? requestedProvider
+          : user.preferred_provider;
+      const result = await generateBotcastShowIdentity(db, userId, ctx.params.id, {
+        preferredProvider,
+        openAiApiKey:
+          getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey,
+        anthropicApiKey:
+          getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey,
+        secondaryOllamaHost: user.secondary_ollama_host,
+        preferredLocalModel: user.preferred_local_model,
+        preferredOnlineModel: user.preferred_online_model,
+        providerFactory: providerFactoryOverride,
+      });
+      json(ctx.res, 200, { ok: true, ...result });
+    }),
+    route("POST", "/api/botcast/shows/:id/name", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const userKey = decryptUserKey(userId);
+      const body = ctx.body as Record<string, unknown>;
+      const requestedProvider = body.preferredProvider;
+      const preferredProvider: ProviderName =
+        requestedProvider === "local" ||
+        requestedProvider === "openai" ||
+        requestedProvider === "anthropic"
+          ? requestedProvider
+          : user.preferred_provider;
+      const result = await generateBotcastShowName(db, userId, ctx.params.id, {
+        preferredProvider,
+        openAiApiKey:
+          getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey,
+        anthropicApiKey:
+          getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey,
+        secondaryOllamaHost: user.secondary_ollama_host,
+        preferredLocalModel: user.preferred_local_model,
+        preferredOnlineModel: user.preferred_online_model,
+        providerFactory: providerFactoryOverride,
+      });
+      json(ctx.res, 200, { ok: true, ...result });
+    }),
+    route("POST", "/api/botcast/shows/:id/assets/:slot/upload", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const show = getBotcastShow(db, userId, ctx.params.id);
+      if (signalArtworkJobs.hasActiveJobForShow(userId, show.id)) {
+        throw new HttpError(409, "This show’s custom look is still generating.");
+      }
+      const slot = readSignalAssetSlot(ctx.params.slot);
+      const body = ctx.body as Record<string, unknown>;
+      const upload = await normalizeSignalAssetUpload(body.dataUrl, slot);
+      const imageId = randomId(12);
+      const localRelPath = buildGeneratedImageRelativePath(userId, imageId);
+      const createdAt = new Date().toISOString();
+      const displayUrl = `/api/images/${encodeURIComponent(imageId)}/file`;
+      const assetLabel = slot === "day-studio"
+        ? "Light studio"
+        : slot === "night-studio"
+          ? "Dark studio"
+          : "logo";
+      const prompt = `Uploaded Signal ${assetLabel} for ${show.name}`;
+      const relatedBotIds = serializeImageRelatedBotIds(
+        [show.hostBotId],
+        show.hostBotId,
+      );
+      let savedShow = show;
+      try {
+        writeGeneratedImageBytes(localRelPath, upload.pngBytes);
+        await tryGenerateThumbAfterPngWrite(localRelPath);
+        db.prepare(
+          `INSERT INTO images
+             (id, user_id, conversation_id, bot_id, related_bot_ids, origin,
+              prompt, revised_prompt, url, size, quality, provider, model,
+              local_rel_path, purpose, created_at)
+           VALUES (?, ?, NULL, ?, ?, 'botcast', ?, ?, ?, ?, 'upload',
+                   'upload', 'upload', ?, 'gallery', ?)`,
+        ).run(
+          imageId,
+          userId,
+          show.hostBotId,
+          relatedBotIds,
+          prompt,
+          prompt,
+          displayUrl,
+          `${upload.width}x${upload.height}`,
+          localRelPath,
+          createdAt,
+        );
+        try {
+          savedShow = updateBotcastShow(
+            db,
+            userId,
+            show.id,
+            slot === "day-studio"
+              ? { dayAtmosphereImageUrl: displayUrl, dayAtmosphereImageId: imageId }
+              : slot === "night-studio"
+                ? { nightAtmosphereImageUrl: displayUrl, nightAtmosphereImageId: imageId }
+                : { logoImageUrl: displayUrl, logoImageId: imageId },
+          );
+        } catch (error) {
+          db.prepare("DELETE FROM images WHERE id = ? AND user_id = ?").run(
+            imageId,
+            userId,
+          );
+          throw error;
+        }
+      } catch (error) {
+        tryUnlinkGeneratedImageFile(localRelPath);
+        throw error;
+      }
+      json(ctx.res, 201, {
+        ok: true,
+        show: savedShow,
+        image: mapImageRowToClient({
+          id: imageId,
+          prompt,
+          revised_prompt: prompt,
+          url: displayUrl,
+          size: `${upload.width}x${upload.height}`,
+          quality: "upload",
+          provider: "upload",
+          bot_id: show.hostBotId,
+          related_bot_ids: relatedBotIds,
+          origin: "botcast",
+          created_at: createdAt,
+          local_rel_path: localRelPath,
+          model: "upload",
+          purpose: "gallery",
+        }),
+      });
+    }),
+    route("POST", "/api/botcast/shows/:id/intro-audio/generate", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      if (user.preferred_provider === "local") {
+        throw new HttpError(
+          409,
+          "Switch to Online before creating an ElevenLabs Signal intro.",
+        );
+      }
+      const show = getBotcastShow(db, userId, ctx.params.id);
+      const userKey = decryptUserKey(userId);
+      const apiKey = getElevenLabsApiKeyForUser(userId, userKey) ?? config.elevenLabsApiKey;
+      if (!apiKey) {
+        throw new HttpError(409, "Add an ElevenLabs API key in Settings first.");
+      }
+      const host = db
+        .prepare("SELECT system_prompt FROM bots WHERE id = ? AND user_id = ?")
+        .get(show.hostBotId, userId) as { system_prompt: string } | undefined;
+      if (!host) throw new HttpError(404, "Signal host bot not found.");
+      const compositionPlan = buildSignalElevenLabsMusicCompositionPlan({
+        temperament: signalPersonaTemperamentFor(host.system_prompt),
+        seed: `${show.id}:${show.logo.seed}`,
+      });
+      const controller = new AbortController();
+      const onClose = () => controller.abort();
+      ctx.req.once("close", onClose);
+      try {
+        const music = await requestSignalElevenLabsIntroMusic({
+          apiKey,
+          compositionPlan,
+          signal: controller.signal,
+        });
+        if (controller.signal.aborted) return;
+        const savedShow = storeBotcastShowIntroAudio(db, userId, show.id, {
+          model: SIGNAL_ELEVENLABS_MUSIC_MODEL,
+          prompt: JSON.stringify(compositionPlan),
+          contentType: music.contentType,
+          audioBytes: music.audioBytes,
+          durationMs: BOTCAST_ELEVENLABS_INTRO_DURATION_MS,
+        });
+        if (music.requestId) {
+          ctx.res.setHeader("x-prism-provider-request-id", music.requestId);
+        }
+        json(ctx.res, 201, { ok: true, show: savedShow });
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        if (error instanceof ElevenLabsMusicError) {
+          throw new HttpError(
+            error.status === 401 || error.status === 403
+              ? 401
+              : error.status === 429
+                ? 429
+                : 502,
+            error.message,
+          );
+        }
+        throw error;
+      } finally {
+        ctx.req.off("close", onClose);
+      }
+    }),
+    route("GET", "/api/botcast/shows/:id/intro-audio", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const intro = readBotcastShowIntroAudio(db, userId, ctx.params.id);
+      if (!intro) throw new HttpError(404, "Signal intro not found.");
+      ctx.res.statusCode = 200;
+      ctx.res.setHeader("content-type", intro.contentType);
+      ctx.res.setHeader("content-length", String(intro.audioBytes.byteLength));
+      ctx.res.setHeader("cache-control", "private, no-store");
+      ctx.res.end(intro.audioBytes);
+    }),
+    route("DELETE", "/api/botcast/shows/:id/intro-audio", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const show = deleteBotcastShowIntroAudio(db, userId, ctx.params.id);
+      json(ctx.res, 200, { ok: true, show });
+    }),
+    route("PATCH", "/api/botcast/shows/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const changesArtwork =
+        body.atmosphereImageUrl !== undefined ||
+        body.atmosphereImageId !== undefined ||
+        body.dayAtmosphereImageUrl !== undefined ||
+        body.dayAtmosphereImageId !== undefined ||
+        body.nightAtmosphereImageUrl !== undefined ||
+        body.nightAtmosphereImageId !== undefined ||
+        body.logoImageUrl !== undefined ||
+        body.logoImageId !== undefined ||
+        body.regenerateAtmosphere === true ||
+        body.regenerateDayAtmosphere === true ||
+        body.regenerateNightAtmosphere === true ||
+        body.regenerateLogo === true;
+      if (
+        changesArtwork &&
+        signalArtworkJobs.hasActiveJobForShow(userId, ctx.params.id)
+      ) {
+        throw new HttpError(409, "This show’s custom look is still generating.");
+      }
+      const show = updateBotcastShow(db, userId, ctx.params.id, {
+        ...(body.name !== undefined ? { name: body.name as string } : {}),
+        ...(body.premise !== undefined ? { premise: body.premise as string } : {}),
+        ...(body.hostingStyle !== undefined
+          ? { hostingStyle: body.hostingStyle as string }
+          : {}),
+        ...(body.atmosphereImageUrl !== undefined
+          ? { atmosphereImageUrl: body.atmosphereImageUrl as string | null }
+          : {}),
+        ...(body.atmosphereImageId !== undefined
+          ? { atmosphereImageId: body.atmosphereImageId as string | null }
+          : {}),
+        ...(body.dayAtmosphereImageUrl !== undefined
+          ? { dayAtmosphereImageUrl: body.dayAtmosphereImageUrl as string | null }
+          : {}),
+        ...(body.dayAtmosphereImageId !== undefined
+          ? { dayAtmosphereImageId: body.dayAtmosphereImageId as string | null }
+          : {}),
+        ...(body.nightAtmosphereImageUrl !== undefined
+          ? { nightAtmosphereImageUrl: body.nightAtmosphereImageUrl as string | null }
+          : {}),
+        ...(body.nightAtmosphereImageId !== undefined
+          ? { nightAtmosphereImageId: body.nightAtmosphereImageId as string | null }
+          : {}),
+        ...(body.studioLayout !== undefined
+          ? { studioLayout: body.studioLayout as BotcastShowPatchRequest["studioLayout"] }
+          : {}),
+        ...(body.regenerateAtmosphere === true ? { regenerateAtmosphere: true } : {}),
+        ...(body.regenerateDayAtmosphere === true
+          ? { regenerateDayAtmosphere: true }
+          : {}),
+        ...(body.regenerateNightAtmosphere === true
+          ? { regenerateNightAtmosphere: true }
+          : {}),
+        ...(body.logoImageUrl !== undefined
+          ? { logoImageUrl: body.logoImageUrl as string | null }
+          : {}),
+        ...(body.logoImageId !== undefined
+          ? { logoImageId: body.logoImageId as string | null }
+          : {}),
+        ...(body.regenerateLogo === true ? { regenerateLogo: true } : {}),
+      });
+      json(ctx.res, 200, { ok: true, show });
+    }),
+    // The web proxy forwards DELETE verbatim; keep both Signal deletion paths
+    // registered in the primary API table so shows and episodes cannot drift.
+    route("DELETE", "/api/botcast/shows/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      if (signalArtworkJobs.hasActiveJobForShow(userId, ctx.params.id)) {
+        throw new HttpError(409, "Cancel this show’s artwork job before deleting it.");
+      }
+      if (!deleteBotcastShow(db, userId, ctx.params.id)) {
+        throw new HttpError(404, "Signal show not found.");
+      }
+      json(ctx.res, 200, { ok: true });
+    }),
+    route("GET", "/api/botcast/shows/:id/episodes", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        episodes: listBotcastEpisodes(db, userId, ctx.params.id),
+      });
+    }),
+    route("POST", "/api/botcast/shows/:id/episodes", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const body = ctx.body as Record<string, unknown>;
+      const requestedProvider = readProvider(body.preferredProvider);
+      const autoFallbackChain = parseStoredAutoFallbackChain(
+        user.auto_fallback_chain,
+      );
+      const requestedResponseMode = normalizeResponseMode(
+        body.responseMode,
+        user.preferred_provider === "local" ? "local" : "online",
+      );
+      const autoEnabled =
+        requestedResponseMode === "auto" &&
+        user.auto_switch_model === 1 &&
+        autoFallbackChain !== null;
+      const localModeLocked =
+        user.preferred_provider === "local" && !autoEnabled;
+      const preferredProvider =
+        localModeLocked
+          ? "local"
+          : requestedProvider ?? user.preferred_provider;
+      const requestedModelOverride = readCoffeeSessionSpeakerModel(body.modelOverride);
+      const modelOverride =
+        localModeLocked &&
+        requestedProvider !== undefined &&
+        requestedProvider !== "local"
+          ? null
+          : requestedModelOverride;
+      const accountModel =
+        preferredProvider === "local"
+          ? user.preferred_local_model
+          : user.preferred_online_model;
+      const episode = createBotcastEpisode(db, userId, ctx.params.id, {
+        guestBotId: typeof body.guestBotId === "string" ? body.guestBotId : "",
+        topic: typeof body.topic === "string" ? body.topic : "",
+        ...(body.producerBrief !== undefined
+          ? { producerBrief: body.producerBrief as string }
+          : {}),
+        preferredProvider,
+        responseMode: autoEnabled
+          ? "auto"
+          : preferredProvider === "local"
+            ? "local"
+            : "online",
+        modelOverride:
+          modelOverride ??
+          (accountModel && !isDisabledModelChoice(accountModel)
+            ? accountModel
+            : null),
+        durationMinutes:
+          body.durationMinutes === null || body.durationMinutes === undefined
+            ? null
+            : Number(body.durationMinutes),
+      });
+      json(ctx.res, 201, { ok: true, episode });
+    }),
+    route("GET", "/api/botcast/episodes/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        episode: getBotcastEpisode(db, userId, ctx.params.id),
+      });
+    }),
+    route("DELETE", "/api/botcast/episodes/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      if (!deleteBotcastEpisode(db, userId, ctx.params.id)) {
+        throw new HttpError(404, "Signal episode not found.");
+      }
+      json(ctx.res, 200, { ok: true });
+    }),
+    route("POST", "/api/botcast/episodes/:id/end", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        episode: forceEndBotcastEpisode(db, userId, ctx.params.id),
+      });
+    }),
+    route("POST", "/api/botcast/episodes/:id/advance", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const userKey = decryptUserKey(userId);
+      const body = ctx.body as Record<string, unknown>;
+      const cueRecord =
+        body.cue && typeof body.cue === "object" && !Array.isArray(body.cue)
+          ? (body.cue as Record<string, unknown>)
+          : null;
+      const cueKind = cueRecord?.kind;
+      const cue: BotcastProducerCue | undefined =
+        cueKind === "ask_about" ||
+        cueKind === "press_harder" ||
+        cueKind === "move_on" ||
+        cueKind === "lighten_up" ||
+        cueKind === "wrap_up"
+          ? {
+              kind: cueKind,
+              ...(typeof cueRecord?.detail === "string"
+                ? { detail: cueRecord.detail }
+                : {}),
+            }
+          : undefined;
+      const requestedProvider = body.preferredProvider;
+      const preferredProvider: ProviderName =
+        requestedProvider === "local" ||
+        requestedProvider === "openai" ||
+        requestedProvider === "anthropic"
+          ? requestedProvider
+          : user.preferred_provider;
+      const result = await advanceBotcastEpisode(
+        db,
+        userId,
+        ctx.params.id,
+        cue ? { cue } : {},
+        {
+          preferredProvider,
+          openAiApiKey:
+            getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey,
+          anthropicApiKey:
+            getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey,
+          secondaryOllamaHost: user.secondary_ollama_host,
+          preferredLocalModel: user.preferred_local_model,
+          preferredOnlineModel: user.preferred_online_model,
+          autoFallbackChain: parseStoredAutoFallbackChain(
+            user.auto_fallback_chain,
+          ),
+          immersiveVoiceEffectsEnabled:
+            user.signal_immersive_voice_effects_enabled === 1,
+          providerFactory: providerFactoryOverride,
+        },
+      );
+      json(ctx.res, 200, { ok: true, ...result });
+    }),
     // Coffee mode (timed live sessions for 3-5 reactive bots). Lives on its own
     // endpoint rather than inside /api/chat so the lighter coffee
     // pipeline (router LLM + per-bot reply, no cross-thread memory) can
@@ -5068,10 +6920,17 @@ function buildRoutes(): RouteDefinition[] {
         ...(body.modelChoiceByProvider !== undefined
           ? { modelChoiceByProvider: body.modelChoiceByProvider }
           : {}),
+        ...(body.starterTopics !== undefined
+          ? { starterTopics: body.starterTopics }
+          : {}),
+        ...(body.starterTopicsByBotId !== undefined
+          ? { starterTopicsByBotId: body.starterTopicsByBotId }
+          : {}),
       }, {
         prismDefaultLlmModel: user.prism_default_llm_model,
         secondaryOllamaHost: user.secondary_ollama_host,
         experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
+        auxiliaryProviderFactory: auxiliaryProviderFactoryOverride,
       });
       json(ctx.res, 201, {
         ok: true,
@@ -5084,7 +6943,8 @@ function buildRoutes(): RouteDefinition[] {
       const groupBotIds = Array.isArray(body.groupBotIds)
         ? body.groupBotIds
         : undefined;
-      const group = updateCoffeeGroup(db, userId, ctx.params.id, {
+      const user = getUserRow(userId);
+      const group = await updateCoffeeGroupWithGeneratedTopics(db, userId, ctx.params.id, {
         ...(body.name !== undefined ? { name: body.name } : {}),
         ...(groupBotIds !== undefined ? { groupBotIds } : {}),
         ...(body.coffeeSettings !== undefined ? { coffeeSettings: body.coffeeSettings } : {}),
@@ -5093,6 +6953,17 @@ function buildRoutes(): RouteDefinition[] {
         ...(body.modelChoiceByProvider !== undefined
           ? { modelChoiceByProvider: body.modelChoiceByProvider }
           : {}),
+        ...(body.starterTopics !== undefined
+          ? { starterTopics: body.starterTopics }
+          : {}),
+        ...(body.starterTopicsByBotId !== undefined
+          ? { starterTopicsByBotId: body.starterTopicsByBotId }
+          : {}),
+      }, {
+        prismDefaultLlmModel: user.prism_default_llm_model,
+        secondaryOllamaHost: user.secondary_ollama_host,
+        experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
+        auxiliaryProviderFactory: auxiliaryProviderFactoryOverride,
       });
       json(ctx.res, 200, {
         ok: true,
@@ -5133,8 +7004,10 @@ function buildRoutes(): RouteDefinition[] {
             {
               coffeeSettings: body.coffeeSettings,
               durationMinutes: body.durationMinutes,
+              initialTopic: body.initialTopic,
               presetId: body.presetId,
               excludedBotIds: body.excludedBotIds,
+              forceAttendance: body.forceAttendance,
               initialPoll,
               initialTeams,
             },
@@ -5144,7 +7017,6 @@ function buildRoutes(): RouteDefinition[] {
               experimentalDualOllamaEnabled: user.experimental_dual_ollama_enabled === 1,
               auxiliaryProviderFactory: auxiliaryProviderFactoryOverride,
               userKey,
-              rerankStarterTopicsForSession: true,
             }
           );
           patchUsageSession({ conversationId: created.conversation.id });
@@ -5187,6 +7059,7 @@ function buildRoutes(): RouteDefinition[] {
             {
               groupBotIds,
               coffeeSettings: body.coffeeSettings,
+              initialTopic: body.initialTopic,
               initialPoll,
               initialTeams,
             },
@@ -5440,37 +7313,6 @@ function buildRoutes(): RouteDefinition[] {
         ok: true,
         conversation,
       });
-    }),
-    route("POST", "/api/coffee/sessions/:id/topics/regenerate", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const user = getUserRow(userId);
-      const userKey = decryptUserKey(userId);
-      const conversationId = ctx.params.id;
-      const coffeeStarterTopics = await runWithUsageSession(
-        {
-          db,
-          userId,
-          privacyScope: "normal",
-          mode: "coffee",
-          surface: "coffee_topic",
-          conversationId,
-        },
-        () =>
-          regenerateCoffeeConversationStarterTopics(
-            db,
-            userId,
-            conversationId,
-            {
-              prismDefaultLlmModel: user.prism_default_llm_model,
-              secondaryOllamaHost: user.secondary_ollama_host,
-              experimentalDualOllamaEnabled:
-                user.experimental_dual_ollama_enabled === 1,
-              auxiliaryProviderFactory: auxiliaryProviderFactoryOverride,
-              userKey,
-            }
-          )
-      );
-      json(ctx.res, 200, { ok: true, coffeeStarterTopics });
     }),
     route("POST", "/api/coffee/sessions/:id/teams", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -6782,10 +8624,9 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("GET", "/api/voices/elevenlabs", async (ctx) => {
       const userId = requireAuth(ctx);
+      // Catalog browsing configures a future ONLINE voice and is independent
+      // of the active response lane. Synthesis keeps its own LOCAL boundary.
       const user = getUserRow(userId);
-      if (user.preferred_provider === "local") {
-        throw new HttpError(409, "Switch to Online before loading ElevenLabs voices.");
-      }
       const userKey = decryptUserKey(userId);
       const apiKey = getElevenLabsApiKeyForUser(userId, userKey) ?? config.elevenLabsApiKey;
       if (!apiKey) throw new HttpError(409, "Add an ElevenLabs API key in Settings first.");
@@ -6795,6 +8636,7 @@ function buildRoutes(): RouteDefinition[] {
       try {
         const voices = await requestElevenLabsVoiceCatalog({
           apiKey,
+          collectionId: user.elevenlabs_voice_collection_id,
           signal: controller.signal,
         });
         json(ctx.res, 200, { ok: true, voices });
@@ -6803,6 +8645,39 @@ function buildRoutes(): RouteDefinition[] {
           throw new HttpError(
             error.status === 401 || error.status === 403 ? 401 : 502,
             error.message
+          );
+        }
+        throw error;
+      } finally {
+        ctx.req.off("close", onClose);
+      }
+    }),
+    route("GET", "/api/voices/elevenlabs/collections", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const userKey = decryptUserKey(userId);
+      const apiKey =
+        getElevenLabsApiKeyForUser(userId, userKey) ??
+        config.elevenLabsApiKey;
+      if (!apiKey) {
+        throw new HttpError(
+          409,
+          "Add an ElevenLabs API key in Settings first.",
+        );
+      }
+      const controller = new AbortController();
+      const onClose = () => controller.abort();
+      ctx.req.once("close", onClose);
+      try {
+        const collections = await requestElevenLabsVoiceCollections({
+          apiKey,
+          signal: controller.signal,
+        });
+        json(ctx.res, 200, { ok: true, collections });
+      } catch (error) {
+        if (error instanceof ElevenLabsVoiceError) {
+          throw new HttpError(
+            error.status === 401 || error.status === 403 ? 401 : 502,
+            error.message,
           );
         }
         throw error;
@@ -6887,23 +8762,48 @@ function buildRoutes(): RouteDefinition[] {
           : message?.content ?? "";
         persistedMessageProvider = message?.provider ?? null;
       }
+      const botNamePronunciations = db.prepare(
+        `SELECT name, name_pronunciation
+           FROM bots
+          WHERE user_id = ? OR visibility = 'public'
+          ORDER BY CASE WHEN user_id = ? THEN 0 ELSE 1 END, LENGTH(name) DESC`
+      ).all(userId, userId) as Array<{
+        name: string;
+        name_pronunciation: string | null;
+      }>;
+      const spokenSourceText = applyBotNamePronunciations(
+        sourceText,
+        botNamePronunciations
+      );
+      const spokenElevenLabsText =
+        typeof raw.elevenLabsText === "string"
+          ? raw.elevenLabsText
+              .split(/(\[[^\]\r\n]{1,64}\]|<[^>\r\n]{1,64}>)/gu)
+              .map((segment, index) =>
+                index % 2 === 1
+                  ? segment
+                  : applyBotNamePronunciations(segment, botNamePronunciations),
+              )
+              .join("")
+          : raw.elevenLabsText;
       const explicitOnlineContext = persistedMessageProvider
         ? persistedMessageProvider !== "local"
         : raw.explicitOnlineContext === true && user.preferred_provider !== "local";
-      const requestedEngine = raw.engine === "elevenlabs" ? "elevenlabs" : "builtin";
-      const profileWithGlobalDefault = applyGlobalEnglishVoiceDefault(
-        raw.profile,
-        requestedEngine,
-        {
-          systemVoiceName: user.default_system_voice_name,
-          elevenLabsVoiceId: user.default_elevenlabs_voice_id,
-        }
-      );
+      const profile = normalizeBotAudioVoiceProfileV1(raw.profile);
+      // An online engine is available account-wide, but a profile opts into
+      // it by selecting a provider voice. Profiles without one stay on the
+      // installed system TTS voice.
+      const requestedEngine =
+        raw.engine === "elevenlabs" && resolveElevenLabsVoiceId(profile)
+          ? "elevenlabs"
+          : "builtin";
       const request = validateVoiceSynthesisRequest({
         ...raw,
-        text: sourceText,
+        text: spokenSourceText,
+        elevenLabsText: spokenElevenLabsText,
+        engine: requestedEngine,
         explicitOnlineContext,
-        profile: profileWithGlobalDefault,
+        profile,
       });
       const boundary = resolveVoiceSynthesisBoundary({ ...request, persistedMessageProvider });
       if (!boundary.ok) {
@@ -6924,7 +8824,6 @@ function buildRoutes(): RouteDefinition[] {
             profile: {
               ...normalizeBotAudioVoiceProfileV1(boundary.profile),
               warmth: 0,
-              pace: 0,
               lilt: 0,
               bottishTone: 0.45,
             },
@@ -6983,18 +8882,44 @@ function buildRoutes(): RouteDefinition[] {
         return;
       }
 
-      const voiceBank = parseStoredElevenLabsVoiceBank(user.elevenlabs_voice_bank);
       const normalizedProfile = normalizeBotAudioVoiceProfileV1(boundary.profile);
-      const voiceId = resolveElevenLabsVoiceId(normalizedProfile, voiceBank);
-      if (!voiceId) {
-        throw new HttpError(
-          409,
-          `Choose an ElevenLabs voice for ${boundary.profile.baseVoiceId} in Settings.`
-        );
-      }
+      const voiceId = resolveElevenLabsVoiceId(normalizedProfile);
       const userKey = decryptUserKey(userId);
       const apiKey = getElevenLabsApiKeyForUser(userId, userKey) ?? config.elevenLabsApiKey;
-      if (!apiKey) throw new HttpError(409, "Add an ElevenLabs API key in Settings first.");
+
+      // An explicit profile voice selects ElevenLabs, but the provider is not
+      // a playback requirement. If its key or identity is unavailable, keep
+      // speech available through System TTS without making any egress.
+      if (!voiceId || !apiKey) {
+        const controller = new AbortController();
+        const onClose = () => controller.abort();
+        ctx.req.once("close", onClose);
+        try {
+          const wave = await builtinVoiceWaveGeneratorOverride({
+            text: boundary.text,
+            profile: boundary.profile,
+            signal: controller.signal,
+          });
+          sendVoiceWave(
+            ctx.res,
+            wave,
+            "builtin-provider-fallback",
+            boundary.text.length,
+            request.includeAlignment
+          );
+        } catch (error) {
+          if (controller.signal.aborted) return;
+          throw new HttpError(
+            503,
+            error instanceof Error
+              ? error.message
+              : "System Classic voice is unavailable."
+          );
+        } finally {
+          ctx.req.off("close", onClose);
+        }
+        return;
+      }
 
       const controller = new AbortController();
       const onClose = () => controller.abort();
@@ -7005,7 +8930,7 @@ function buildRoutes(): RouteDefinition[] {
             apiKey,
             voiceId,
             model: normalizeElevenLabsTtsModel(user.elevenlabs_voice_model),
-            text: boundary.text,
+            text: boundary.elevenLabsText,
             profile: boundary.profile,
             signal: controller.signal,
           });
@@ -7034,7 +8959,7 @@ function buildRoutes(): RouteDefinition[] {
           apiKey,
           voiceId,
           model: normalizeElevenLabsTtsModel(user.elevenlabs_voice_model),
-          text: boundary.text,
+          text: boundary.elevenLabsText,
           profile: boundary.profile,
           signal: controller.signal,
         });
@@ -7102,6 +9027,7 @@ function buildRoutes(): RouteDefinition[] {
           displayName: user.display_name,
           theme: user.theme,
           preferredProvider: user.preferred_provider,
+          preferredImageProvider: user.preferred_image_provider,
           providerLocked: Boolean(user.provider_locked),
           autoMemory: Boolean(user.auto_memory),
           composerWritingAssist: user.composer_writing_assist !== 0,
@@ -7110,6 +9036,8 @@ function buildRoutes(): RouteDefinition[] {
             user.experimental_all_model_effort_enabled === 1,
           coffeeExperimentalTableAngleEnabled:
             user.coffee_experimental_table_angle_enabled === 1,
+          signalImmersiveVoiceEffectsEnabled:
+            user.signal_immersive_voice_effects_enabled === 1,
           psychicModeEnabled: user.psychic_mode_enabled === 1,
           autoModeEnabled: user.auto_switch_model === 1,
           autoFallbackChain: parseStoredAutoFallbackChain(user.auto_fallback_chain),
@@ -7139,11 +9067,11 @@ function buildRoutes(): RouteDefinition[] {
             : "mute",
           voiceEffectsEnabled: user.voice_effects_enabled !== 0,
           voiceVolume: normalizeBotVoiceVolume(user.voice_volume),
-          englishVoiceEngine: user.english_voice_engine === "elevenlabs" ? "elevenlabs" : "builtin",
-          defaultSystemVoiceName: user.default_system_voice_name,
-          defaultElevenLabsVoiceId: user.default_elevenlabs_voice_id,
+          englishVoiceEngine: "elevenlabs",
           elevenLabsVoiceBank: parseStoredElevenLabsVoiceBank(user.elevenlabs_voice_bank),
           elevenLabsVoiceModel: user.elevenlabs_voice_model ?? "",
+          elevenLabsVoiceCollectionId:
+            user.elevenlabs_voice_collection_id ?? "",
           openAiApiKeySource: apiKeySource(
             user.openai_key_ciphertext,
             config.openAiApiKey
@@ -7394,6 +9322,7 @@ function buildRoutes(): RouteDefinition[] {
       const faceMouthAnimation =
         readBotFaceGlyphAnimationForStorage(body.faceMouthAnimation) ??
         DEFAULT_BOT_FACE_GLYPH_ANIMATION;
+      const faceMouthCoffeePucker = body.faceMouthCoffeePucker === true ? 1 : 0;
       const faceFontWeight =
         readBotFaceWeightForStorage(body.faceFontWeight) ?? DEFAULT_BOT_FACE_FONT_WEIGHT;
       const faceEyeScale =
@@ -7452,6 +9381,7 @@ function buildRoutes(): RouteDefinition[] {
             prism_default_bot_face_mouth_font = ?,
             prism_default_bot_face_mouth_character = ?,
             prism_default_bot_face_mouth_animation = ?,
+            prism_default_bot_face_mouth_coffee_pucker = ?,
             prism_default_bot_face_font_weight = ?,
             prism_default_bot_face_eye_scale = ?,
             prism_default_bot_face_eye_offset_x = ?,
@@ -7479,6 +9409,7 @@ function buildRoutes(): RouteDefinition[] {
         faceMouthFont,
         faceMouthCharacter,
         faceMouthAnimation,
+        faceMouthCoffeePucker,
         faceFontWeight,
         faceEyeScale,
         faceEyeOffsetX,
@@ -7523,6 +9454,7 @@ function buildRoutes(): RouteDefinition[] {
         displayName: user.display_name,
         theme: user.theme,
         preferredProvider: user.preferred_provider,
+        preferredImageProvider: user.preferred_image_provider,
         providerLocked: user.provider_locked,
         autoMemory: user.auto_memory,
         composerWritingAssist: user.composer_writing_assist,
@@ -7531,6 +9463,8 @@ function buildRoutes(): RouteDefinition[] {
           user.experimental_all_model_effort_enabled,
         coffeeExperimentalTableAngleEnabled:
           user.coffee_experimental_table_angle_enabled,
+        signalImmersiveVoiceEffectsEnabled:
+          user.signal_immersive_voice_effects_enabled,
         psychicModeEnabled: user.psychic_mode_enabled,
         autoSwitchModel: user.auto_switch_model,
         autoFallbackChain: user.auto_fallback_chain,
@@ -7577,6 +9511,7 @@ function buildRoutes(): RouteDefinition[] {
         defaultElevenLabsVoiceId: user.default_elevenlabs_voice_id,
         elevenLabsVoiceBank: user.elevenlabs_voice_bank,
         elevenLabsVoiceModel: user.elevenlabs_voice_model,
+        elevenLabsVoiceCollectionId: user.elevenlabs_voice_collection_id,
         primaryOllamaHost: config.ollamaHost,
       });
 
@@ -7639,12 +9574,12 @@ function buildRoutes(): RouteDefinition[] {
           : MODEL_VISIBILITY_DEFAULTS_VERSION;
       db.prepare(`
         UPDATE users
-        SET display_name = ?, theme = ?, preferred_provider = ?, provider_locked = ?, auto_memory = ?, composer_writing_assist = ?, hidden_bot_model_ids = ?, hidden_comfyui_workflow_ids = ?, model_visibility_defaults_version = ?,
+        SET display_name = ?, theme = ?, preferred_provider = ?, preferred_image_provider = ?, provider_locked = ?, auto_memory = ?, composer_writing_assist = ?, hidden_bot_model_ids = ?, hidden_comfyui_workflow_ids = ?, model_visibility_defaults_version = ?,
             experimental_dual_ollama_enabled = ?, experimental_all_model_effort_enabled = ?, coffee_experimental_table_angle_enabled = ?, psychic_mode_enabled = ?, auto_switch_model = ?, auto_fallback_chain = ?, preferred_local_model = ?, preferred_online_model = ?, lenient_local_image_fallback_model = ?, secondary_ollama_host = ?, comfyui_host = ?,
             preferred_local_image_model = ?, preferred_openai_image_model = ?, preferred_zen_wallpaper_local_image_model = ?, preferred_zen_wallpaper_openai_image_model = ?, zen_wallpaper_opacity = ?, zen_wallpaper_text_mask_enabled = ?, zen_wallpaper_grayscale_enabled = ?, zen_wallpaper_blurred_edges_enabled = ?, zen_wallpaper_style_notes = ?,
             zen_session_idle_gap_ms = ?, zen_fresh_start_gap_ms = ?, zen_recent_context_messages = ?, zen_wallpaper_regen_message_interval = ?, zen_mood_sensitivity = ?, zen_canvas_typing_speed = ?, zen_message_font_min_px = ?, zen_message_font_max_px = ?, zen_ask_question_patience_enabled = ?, zen_ask_question_patience_ms = ?, zen_autonomy_enabled = ?, zen_persona_transition_choice = ?,
             comfyui_workflows = ?, prism_default_llm_model = ?, prism_image_tool_llm_model = ?,
-            voice_mode = ?, voice_effects_enabled = ?, voice_volume = ?, english_voice_engine = ?, default_system_voice_name = ?, default_elevenlabs_voice_id = ?, elevenlabs_voice_bank = ?, elevenlabs_voice_model = ?,
+            voice_mode = ?, voice_effects_enabled = ?, voice_volume = ?, english_voice_engine = ?, default_system_voice_name = ?, default_elevenlabs_voice_id = ?, elevenlabs_voice_bank = ?, elevenlabs_voice_model = ?, elevenlabs_voice_collection_id = ?,
             dev_memories_enabled = ?, dev_memories_text = ?,
             openai_key_ciphertext = ?, openai_key_iv = ?, openai_key_tag = ?,
             anthropic_key_ciphertext = ?, anthropic_key_iv = ?, anthropic_key_tag = ?,
@@ -7655,6 +9590,7 @@ function buildRoutes(): RouteDefinition[] {
         next.displayName,
         next.theme,
         next.preferredProvider,
+        next.preferredImageProvider,
         next.providerLocked,
         next.autoMemory,
         next.composerWritingAssist,
@@ -7704,6 +9640,7 @@ function buildRoutes(): RouteDefinition[] {
         next.defaultElevenLabsVoiceId,
         JSON.stringify(next.elevenLabsVoiceBank),
         next.elevenLabsVoiceModel,
+        next.elevenLabsVoiceCollectionId,
         devMemoriesEnabled,
         devMemoriesText,
         openAiCipher,
@@ -7720,14 +9657,21 @@ function buildRoutes(): RouteDefinition[] {
         braveSearchTag,
         userId
       );
+      db.prepare(
+        "UPDATE users SET signal_immersive_voice_effects_enabled = ? WHERE id = ?"
+      ).run(next.signalImmersiveVoiceEffectsEnabled ? 1 : 0, userId);
       json(ctx.res, 200, {
         ok: true,
         settings: {
           displayName: next.displayName,
+          preferredProvider: next.preferredProvider,
+          preferredImageProvider: next.preferredImageProvider,
           experimentalAllModelEffortEnabled:
             next.experimentalAllModelEffortEnabled === 1,
           coffeeExperimentalTableAngleEnabled:
             next.coffeeExperimentalTableAngleEnabled === 1,
+          signalImmersiveVoiceEffectsEnabled:
+            next.signalImmersiveVoiceEffectsEnabled,
           psychicModeEnabled: next.psychicModeEnabled === 1,
           autoModeEnabled: next.autoSwitchModel === 1,
           autoFallbackChain: parseStoredAutoFallbackChain(next.autoFallbackChain),
@@ -7736,10 +9680,10 @@ function buildRoutes(): RouteDefinition[] {
           voiceEffectsEnabled: next.voiceEffectsEnabled,
           voiceVolume: next.voiceVolume,
           englishVoiceEngine: next.englishVoiceEngine,
-          defaultSystemVoiceName: next.defaultSystemVoiceName,
-          defaultElevenLabsVoiceId: next.defaultElevenLabsVoiceId,
           elevenLabsVoiceBank: next.elevenLabsVoiceBank,
           elevenLabsVoiceModel: next.elevenLabsVoiceModel ?? "",
+          elevenLabsVoiceCollectionId:
+            next.elevenLabsVoiceCollectionId ?? "",
           hasOpenAiApiKey: Boolean(openAiCipher),
           hasAnthropicApiKey: Boolean(anthropicCipher),
           hasElevenLabsApiKey: Boolean(elevenLabsCipher),
@@ -7764,17 +9708,40 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       const userKey = decryptUserKey(userId);
       const snapshot = exportUserSnapshot(db, userId, userKey);
+      const projectOwnedAssetBundle = exportProjectOwnedAssets(db, userId);
+      omitInlineProjectOwnedAssetBinaries(
+        snapshot,
+        projectOwnedAssetBundle.manifest,
+      );
       await backupAdapter.upload(userId, snapshot);
-      json(ctx.res, 200, { ok: true, snapshot });
+      json(ctx.res, 200, {
+        ok: true,
+        snapshot,
+        projectOwnedAssets: projectOwnedAssetExportPayload(
+          projectOwnedAssetBundle,
+        ),
+      });
     }),
     route("POST", "/api/backup/import", async (ctx) => {
       const userId = requireAuth(ctx);
-      const body = ctx.body as { snapshot?: BackupSnapshot };
-      if (!body.snapshot) {
-        throw new Error("snapshot is required.");
-      }
       const userKey = decryptUserKey(userId);
-      importUserSnapshot(db, userId, body.snapshot, userKey);
+      if (ctx.body instanceof Uint8Array) {
+        const decoded = decodeAccountBackupArchive(ctx.body);
+        importUserSnapshot(
+          db,
+          userId,
+          decoded.snapshot,
+          userKey,
+          decoded.projectOwnedAssets,
+        );
+      } else {
+        const body = ctx.body as { snapshot?: BackupSnapshot };
+        if (!body.snapshot) {
+          throw new Error("snapshot is required.");
+        }
+        // JSON remains accepted for legacy callers and old `.prism` archives.
+        importUserSnapshot(db, userId, body.snapshot, userKey);
+      }
       json(ctx.res, 200, { ok: true });
     }),
     route("GET", "/api/backup/versions", async (ctx) => {
@@ -7863,17 +9830,29 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/images/generate", async (ctx) => {
       const userId = requireAuth(ctx);
       const imageGenAbort = new AbortController();
+      let ownedImageSlotJobId: string | null = null;
       const onImageGenClientClose = () => imageGenAbort.abort();
       ctx.req.once("close", onImageGenClientClose);
       try {
       const body = ctx.body as Record<string, unknown>;
-      const prompt = readString(body.prompt, "prompt");
+      const rawImagePurpose = body.purpose ?? body.imagePurpose;
+      const imagePurpose =
+        rawImagePurpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE
+          ? BOT_PROFILE_PICTURE_IMAGE_PURPOSE
+          : rawImagePurpose === GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE
+            ? GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE
+            : "gallery";
+      const prompt = imagePurpose === GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE
+        ? (typeof body.prompt === "string" ? body.prompt.trim() : "")
+        : readString(body.prompt, "prompt");
       const requestedSize =
         typeof body.size === "string" ? body.size.trim() : IMAGE_GENERATION_DEFAULT_SIZE;
-      const size = IMAGE_GENERATION_ALLOWED_SIZES.has(requestedSize)
-        ? requestedSize
-        : inferImageGenerationSizeFromPrompt(prompt);
-      const quality = (body.quality as string) ?? "standard";
+      const size = imagePurpose === GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE
+        ? ZEN_WALLPAPER_SIZE
+        : IMAGE_GENERATION_ALLOWED_SIZES.has(requestedSize)
+          ? requestedSize
+          : inferImageGenerationSizeFromPrompt(prompt);
+      const requestedQuality = (body.quality as string) ?? "standard";
       const bodyModelRaw =
         typeof body.model === "string" && body.model.trim().length > 0
           ? body.model.trim()
@@ -7886,24 +9865,27 @@ function buildRoutes(): RouteDefinition[] {
         typeof body.botId === "string" && body.botId.trim().length > 0
           ? body.botId.trim()
           : undefined;
-      const rawImagePurpose = body.purpose ?? body.imagePurpose;
-      const imagePurpose =
-        rawImagePurpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE
-          ? BOT_PROFILE_PICTURE_IMAGE_PURPOSE
-          : "gallery";
       if (imagePurpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE && !bodyBotId) {
         throw new Error("Profile picture generation requires a bot.");
       }
+      if (
+        imagePurpose === GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE &&
+        (bodyBotId || conversationIdRaw)
+      ) {
+        throw new Error(
+          "Group-room wallpaper generation cannot be attributed to a bot or conversation."
+        );
+      }
+      const groupRoomWallpaperContext =
+        imagePurpose === GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE
+          ? readGroupRoomWallpaperRequestContext(body)
+          : null;
 
-      // ONLINE → OpenAI Images API; LOCAL → Ollama image checkpoint on this Mac.
-      // Body may override `preferredProvider` for this request (same pattern as chat).
       const user = getUserRow(userId);
       const requestedProvider =
         body.preferredProvider === "openai" || body.preferredProvider === "local"
           ? body.preferredProvider
           : undefined;
-      const effectiveProvider =
-        requestedProvider ?? (user.preferred_provider === "local" ? "local" : "openai");
 
       const persistence = resolveImageGeneratePersistence({
         db,
@@ -7914,9 +9896,88 @@ function buildRoutes(): RouteDefinition[] {
       if (!persistence.ok) {
         throw new Error(persistence.message);
       }
+      const imageOrigin = imageOriginForGenerate({
+        purpose: imagePurpose,
+        requestedOrigin: body.origin,
+      });
+      if (imageOrigin === "botcast" && !persistence.persistedBotId) {
+        throw new Error("Signal artwork requires a host bot.");
+      }
+      // The standalone Images panel is PRISM's own library, even while a bot
+      // is being used as prompt/persona context. Applet and chat surfaces keep
+      // their explicit owner attribution.
+      const persistedOwnerBotId =
+        imageOrigin === "images_panel" && imagePurpose === "gallery"
+          ? null
+          : persistence.persistedBotId;
+      const sourceImageId =
+        typeof body.sourceImageId === "string" ? body.sourceImageId.trim() : "";
+      let sourceEditPrompt = "";
+      let sourceImageBytes: Buffer | undefined;
+      if (sourceImageId) {
+        if (imageOrigin !== "botcast" || !persistedOwnerBotId) {
+          throw new HttpError(400, "Source-image editing is only available for Signal artwork.");
+        }
+        if (body.sourceEditKind !== "daylight-relight") {
+          throw new HttpError(
+            400,
+            'Signal source-image edits require sourceEditKind "daylight-relight".',
+          );
+        }
+        sourceEditPrompt = BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT;
+        const sourceImage = db
+          .prepare(
+            `SELECT bot_id, origin, local_rel_path
+               FROM images
+              WHERE id = ? AND user_id = ?`,
+          )
+          .get(sourceImageId, userId) as
+          | {
+              bot_id: string | null;
+              origin: string | null;
+              local_rel_path: string | null;
+            }
+          | undefined;
+        if (
+          !sourceImage ||
+          sourceImage.origin !== "botcast" ||
+          sourceImage.bot_id !== persistedOwnerBotId
+        ) {
+          throw new HttpError(404, "Signal source image not found.");
+        }
+        const sourcePath = sourceImage.local_rel_path?.trim();
+        if (!sourcePath) {
+          throw new HttpError(400, "Signal source image is not available locally.");
+        }
+        try {
+          sourceImageBytes = readGeneratedImageBytes(sourcePath);
+        } catch {
+          throw new HttpError(404, "Signal source image file not found.");
+        }
+      }
+      let relatedBotIdsForInsert = persistedOwnerBotId
+        ? [persistedOwnerBotId]
+        : [];
+      // Image routing is independent from chat routing. The only hard ceiling
+      // is protected bot context: no request can send an offline-only persona,
+      // conversation, or group member to an online image provider.
+      const imageContextBotIds = groupRoomWallpaperContext
+        ? groupRoomWallpaperContext.memberBotIds
+        : persistence.personaBotId
+          ? [persistence.personaBotId]
+          : [];
+      const effectiveProvider = resolveImageProviderName({
+        savedProvider: user.preferred_image_provider,
+        requestedProvider,
+        offlineOnly: imageContextIncludesOfflineOnlyBot(
+          db,
+          userId,
+          imageContextBotIds
+        ),
+      });
       if (
         imagePurpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE &&
-        (!persistence.persistedBotId || persistence.persistedBotId !== bodyBotId)
+        (!persistedOwnerBotId || persistedOwnerBotId !== bodyBotId)
       ) {
         throw new Error("Profile picture generation requires a bot-owned image.");
       }
@@ -7939,34 +10000,76 @@ function buildRoutes(): RouteDefinition[] {
         mode: "sandbox",
         surface: "images",
         conversationId: persistence.conversationIdForInsert,
-        botId: persistence.persistedBotId,
+        botId: persistedOwnerBotId,
       });
 
       let promptForModel = prompt;
+      let promptForPersistence = prompt;
+      let localPromptForModel = prompt;
+      let onlinePromptForModel = prompt;
+      let composedPrompt: string | undefined;
+      if (groupRoomWallpaperContext) {
+        const members = loadOwnedGroupRoomWallpaperMembers(
+          db,
+          userId,
+          groupRoomWallpaperContext.memberBotIds
+        );
+        relatedBotIdsForInsert = members.map((member) => member.id);
+        composedPrompt = composeGroupRoomWallpaperPrompt({
+          userPrompt: prompt,
+          groupName: groupRoomWallpaperContext.groupName,
+          groupDescription: groupRoomWallpaperContext.groupDescription,
+          members,
+          zenWallpaperStyleNotes: normalizeZenWallpaperStyleNotes(
+            user.zen_wallpaper_style_notes
+          ),
+        });
+        promptForModel = composedPrompt;
+        promptForPersistence = composedPrompt;
+        localPromptForModel = composedPrompt;
+        onlinePromptForModel = composedPrompt;
+      }
       const personaBotId = persistence.personaBotId;
       type BotPersonaImageRow = {
         name: string;
         system_prompt: string;
       };
       let botPersona: BotPersonaImageRow | undefined;
-      if (personaBotId) {
+      if (personaBotId && !groupRoomWallpaperContext) {
         botPersona = db
           .prepare(
             "SELECT name, system_prompt FROM bots WHERE id = ? AND user_id = ?"
           )
           .get(personaBotId, userId) as BotPersonaImageRow | undefined;
-        if (botPersona) {
-          promptForModel = composeVerbatimFirstImagePrompt({
-            userPrompt: prompt,
-            botName: botPersona.name,
-            systemPrompt: botPersona.system_prompt,
-            mode: "strict_verbatim",
-          });
-        }
       }
 
-      const preferredLocalImageModel = user.preferred_local_image_model?.trim() ?? "";
-      const preferredOpenAiImageModel = user.preferred_openai_image_model?.trim() ?? "";
+      if (!groupRoomWallpaperContext) {
+        localPromptForModel = resolveImagePromptForGeneration({
+          prompt,
+          origin: imageOrigin,
+          sourceEditPrompt,
+          useSourceEdit: false,
+          botName: botPersona?.name,
+          botSystemPrompt: botPersona?.system_prompt,
+        });
+        onlinePromptForModel = resolveImagePromptForGeneration({
+          prompt,
+          origin: imageOrigin,
+          sourceEditPrompt,
+          useSourceEdit: Boolean(sourceImageBytes),
+          botName: botPersona?.name,
+          botSystemPrompt: botPersona?.system_prompt,
+        });
+      }
+
+      const preferredLocalImageModel =
+        (imagePurpose === GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE
+          ? user.preferred_zen_wallpaper_local_image_model?.trim()
+          : "") || user.preferred_local_image_model?.trim() || "";
+      const preferredOpenAiImageModel =
+        (imagePurpose === GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE
+          ? user.preferred_zen_wallpaper_openai_image_model?.trim()
+          : "") || user.preferred_openai_image_model?.trim() || "";
       const localImageDisabled =
         (effectiveProvider === "local" && bodyModelDisabled) ||
         isDisabledModelChoice(preferredLocalImageModel);
@@ -7980,8 +10083,10 @@ function buildRoutes(): RouteDefinition[] {
 
       const resolvedOpenAiImageModel = openAiImageDisabled
         ? ""
-        : (bodyModel && effectiveProvider !== "local" ? bodyModel.trim() : "") ||
-          preferredOpenAiImageModel;
+        : imageOrigin === "botcast" && effectiveProvider !== "local"
+          ? DEFAULT_OPENAI_IMAGE_MODEL_ID
+          : (bodyModel && effectiveProvider !== "local" ? bodyModel.trim() : "") ||
+            preferredOpenAiImageModel;
       const shouldRunLocal =
         effectiveProvider === "local" ||
         (openAiImageDisabled && Boolean(resolvedLocalImageModel));
@@ -8002,6 +10107,13 @@ function buildRoutes(): RouteDefinition[] {
           "Pick a local image model in the Images panel header, then try again."
         );
       }
+      const quality = imageOrigin === "botcast" && !shouldRunLocal
+        ? "high"
+        : requestedQuality;
+      promptForModel = shouldRunLocal ? localPromptForModel : onlinePromptForModel;
+      if (imageOrigin === "botcast") {
+        promptForPersistence = promptForModel;
+      }
 
       const acqPanel = await tryAcquireImageSlot({
         userId,
@@ -8009,8 +10121,10 @@ function buildRoutes(): RouteDefinition[] {
         botId: bodyBotId ?? null,
         mode: "sandbox",
         incognito: false,
-        captionPrompt: prompt,
-        userMessage: `[Images panel] ${prompt.slice(0, 500)}`,
+        captionPrompt: prompt || groupRoomWallpaperContext?.groupName || "Group room atmosphere",
+        userMessage: `[Images panel] ${(
+          prompt || groupRoomWallpaperContext?.groupName || "Group room atmosphere"
+        ).slice(0, 500)}`,
         source: "images_panel",
       });
       if (!acqPanel.ok) {
@@ -8019,6 +10133,7 @@ function buildRoutes(): RouteDefinition[] {
           "Another image is generating right now. Wait for it to finish, then try again."
         );
       }
+      ownedImageSlotJobId = acqPanel.job.id;
 
       const imageId = randomId(12);
       const localRelPath = buildGeneratedImageRelativePath(userId, imageId);
@@ -8057,9 +10172,11 @@ function buildRoutes(): RouteDefinition[] {
           userId,
           persistence: {
             conversationIdForInsert: persistence.conversationIdForInsert,
-            persistedBotId: persistence.persistedBotId,
+            persistedBotId: persistedOwnerBotId,
+            relatedBotIds: relatedBotIdsForInsert,
+            origin: imageOrigin,
           },
-          prompt,
+          prompt: promptForPersistence,
           localRelPath,
           size,
           quality,
@@ -8067,6 +10184,7 @@ function buildRoutes(): RouteDefinition[] {
           modelUsed: localOut.modelUsed,
           provider: localOut.provider,
           purpose: imagePurpose,
+          composedPrompt,
           profilePictureBotId:
             imagePurpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE ? bodyBotId : null,
           previousProfilePictureImageId,
@@ -8080,12 +10198,19 @@ function buildRoutes(): RouteDefinition[] {
 
       let openAiResult: Awaited<ReturnType<typeof generateImage>> | null = null;
       try {
-        openAiResult = await generateImage(promptForModel, apiKey, {
-          model: resolvedOpenAiImageModel || undefined,
-          size,
-          quality,
-          signal: imageGenAbort.signal,
-        });
+        openAiResult = sourceImageBytes
+          ? await editImage(promptForModel, sourceImageBytes, apiKey, {
+              model: resolvedOpenAiImageModel || undefined,
+              size,
+              quality,
+              signal: imageGenAbort.signal,
+            })
+          : await generateImage(promptForModel, apiKey, {
+              model: resolvedOpenAiImageModel || undefined,
+              size,
+              quality,
+              signal: imageGenAbort.signal,
+            });
       } catch (primaryError) {
         if (
           lenientImageFbOnline &&
@@ -8093,7 +10218,7 @@ function buildRoutes(): RouteDefinition[] {
         ) {
           const localOut = await generateLocalImageBytesByModelId({
             modelId: lenientImageFbOnline,
-            promptForModel,
+            promptForModel: localPromptForModel,
             size,
             signal: imageGenAbort.signal,
             comfyUiHost: user.comfyui_host,
@@ -8106,9 +10231,13 @@ function buildRoutes(): RouteDefinition[] {
             userId,
             persistence: {
               conversationIdForInsert: persistence.conversationIdForInsert,
-              persistedBotId: persistence.persistedBotId,
+              persistedBotId: persistedOwnerBotId,
+              relatedBotIds: relatedBotIdsForInsert,
+              origin: imageOrigin,
             },
-            prompt,
+            prompt: imageOrigin === "botcast"
+              ? localPromptForModel
+              : promptForPersistence,
             localRelPath,
             size,
             quality,
@@ -8116,6 +10245,7 @@ function buildRoutes(): RouteDefinition[] {
             modelUsed: localOut.modelUsed,
             provider: localOut.provider,
             purpose: imagePurpose,
+            composedPrompt,
             profilePictureBotId:
               imagePurpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE ? bodyBotId : null,
             previousProfilePictureImageId,
@@ -8152,13 +10282,18 @@ function buildRoutes(): RouteDefinition[] {
       const createdAt = new Date().toISOString();
       try {
         db.prepare(
-          "INSERT INTO images (id, user_id, conversation_id, bot_id, prompt, revised_prompt, url, size, quality, provider, model, local_rel_path, purpose, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'openai', ?, ?, ?, ?)"
+          "INSERT INTO images (id, user_id, conversation_id, bot_id, related_bot_ids, origin, prompt, revised_prompt, url, size, quality, provider, model, local_rel_path, purpose, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'openai', ?, ?, ?, ?)"
         ).run(
           imageId,
           userId,
           persistence.conversationIdForInsert,
-          persistence.persistedBotId,
-          prompt,
+          persistedOwnerBotId,
+          serializeImageRelatedBotIds(
+            relatedBotIdsForInsert,
+            persistedOwnerBotId,
+          ),
+          imageOrigin,
+          promptForPersistence,
           result.revisedPrompt,
           storedUrl,
           size,
@@ -8182,9 +10317,7 @@ function buildRoutes(): RouteDefinition[] {
         recordImageUsage({
           provider: "openai",
           model: result.model,
-          purpose: imagePurpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE
-            ? BOT_PROFILE_PICTURE_IMAGE_PURPOSE
-            : "image_generation",
+          purpose: imagePurpose === "gallery" ? "image_generation" : imagePurpose,
           imageCount: 1,
           imageSize: size,
           imageQuality: quality,
@@ -8199,6 +10332,12 @@ function buildRoutes(): RouteDefinition[] {
         ok: true,
         image: {
           id: imageId,
+          botId: persistedOwnerBotId,
+          botIds: normalizeImageRelatedBotIds(
+            relatedBotIdsForInsert,
+            persistedOwnerBotId,
+          ),
+          origin: imageOrigin,
           url: storedUrl,
           revisedPrompt: result.revisedPrompt,
           displayUrl,
@@ -8206,10 +10345,13 @@ function buildRoutes(): RouteDefinition[] {
           model: result.model,
           purpose: imagePurpose,
         },
+        ...(composedPrompt ? { composedPrompt } : {}),
       });
       } finally {
         ctx.req.off("close", onImageGenClientClose);
-        await releaseImageSlot(userId);
+        if (ownedImageSlotJobId) {
+          await releaseImageSlotIfOwned(userId, ownedImageSlotJobId);
+        }
       }
     }),
     route("POST", "/api/ollama/pull-primary", async (ctx) => {
@@ -8268,6 +10410,56 @@ function buildRoutes(): RouteDefinition[] {
         }
       }
     }),
+    route("POST", "/api/images/group-room-wallpaper/upload", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const upload = await normalizeGroupRoomWallpaperBackupUpload(body.dataUrl);
+      const prompt = normalizeGroupRoomWallpaperBackupPrompt(body.prompt);
+      const imageId = randomId(12);
+      const localRelPath = buildGeneratedImageRelativePath(userId, imageId);
+      const createdAt = new Date().toISOString();
+      try {
+        writeGeneratedImageBytes(localRelPath, upload.pngBytes);
+        await tryGenerateThumbAfterPngWrite(localRelPath);
+        db.prepare(
+          `INSERT INTO images
+             (id, user_id, related_bot_ids, origin, prompt, url, size, quality,
+              provider, model, local_rel_path, purpose, created_at)
+           VALUES (?, ?, '[]', 'bot_group_room_import', ?, '', ?, 'standard',
+                   'local', 'backup-import', ?, ?, ?)`
+        ).run(
+          imageId,
+          userId,
+          prompt,
+          `${upload.width}x${upload.height}`,
+          localRelPath,
+          GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE,
+          createdAt
+        );
+      } catch (error) {
+        tryUnlinkGeneratedImageFile(localRelPath);
+        throw error;
+      }
+      json(ctx.res, 201, {
+        ok: true,
+        image: mapImageRowToClient({
+          id: imageId,
+          prompt,
+          revised_prompt: null,
+          url: "",
+          size: `${upload.width}x${upload.height}`,
+          quality: "standard",
+          provider: "local",
+          bot_id: null,
+          related_bot_ids: "[]",
+          origin: "bot_group_room_import",
+          created_at: createdAt,
+          local_rel_path: localRelPath,
+          model: "backup-import",
+          purpose: GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE,
+        }),
+      });
+    }),
     route("GET", "/api/images", async (ctx) => {
       const userId = requireAuth(ctx);
       const filterBotId = readOptionalString(ctx.query.get("botId"));
@@ -8289,22 +10481,31 @@ function buildRoutes(): RouteDefinition[] {
       const rows = generalOnly
         ? db
             .prepare(
-              `SELECT id, prompt, revised_prompt, url, size, quality, provider, bot_id, created_at, local_rel_path, model, purpose
-               FROM images WHERE user_id = ? AND bot_id IS NULL AND ${GALLERY_EXCLUDED_PURPOSE_SQL}
+              `SELECT id, prompt, revised_prompt, url, size, quality, provider, bot_id, related_bot_ids, origin, created_at, local_rel_path, model, purpose
+               FROM images
+              WHERE user_id = ?
+                AND bot_id IS NULL
+                AND json_array_length(
+                  CASE
+                    WHEN json_valid(related_bot_ids) THEN related_bot_ids
+                    ELSE '[]'
+                  END
+                ) = 0
+                AND ${GALLERY_EXCLUDED_PURPOSE_SQL}
                ORDER BY created_at DESC LIMIT ?`
             )
             .all(userId, limit)
         : filterBotId
           ? db
               .prepare(
-                `SELECT id, prompt, revised_prompt, url, size, quality, provider, bot_id, created_at, local_rel_path, model, purpose
-                 FROM images WHERE user_id = ? AND bot_id = ? AND ${GALLERY_EXCLUDED_PURPOSE_SQL}
+                `SELECT id, prompt, revised_prompt, url, size, quality, provider, bot_id, related_bot_ids, origin, created_at, local_rel_path, model, purpose
+                 FROM images WHERE user_id = ? AND ${IMAGE_BOT_MEMBERSHIP_SQL} AND ${GALLERY_EXCLUDED_PURPOSE_SQL}
                  ORDER BY created_at DESC LIMIT ?`
               )
-              .all(userId, filterBotId, limit)
+              .all(userId, filterBotId, filterBotId, limit)
           : db
               .prepare(
-                `SELECT id, prompt, revised_prompt, url, size, quality, provider, bot_id, created_at, local_rel_path, model, purpose
+                `SELECT id, prompt, revised_prompt, url, size, quality, provider, bot_id, related_bot_ids, origin, created_at, local_rel_path, model, purpose
                  FROM images WHERE user_id = ? AND ${GALLERY_EXCLUDED_PURPOSE_SQL}
                  ORDER BY created_at DESC LIMIT ?`
               )
@@ -8318,6 +10519,8 @@ function buildRoutes(): RouteDefinition[] {
         quality: string;
         provider: string;
         bot_id: string | null;
+        related_bot_ids: string | null;
+        origin: string | null;
         created_at: string;
         local_rel_path: string | null;
         model: string | null;
@@ -8386,9 +10589,9 @@ function buildRoutes(): RouteDefinition[] {
         filterBotId
           ? db
               .prepare(
-                `SELECT id, local_rel_path FROM images WHERE user_id = ? AND bot_id = ? AND ${GALLERY_EXCLUDED_PURPOSE_SQL}`
+                `SELECT id, local_rel_path FROM images WHERE user_id = ? AND ${IMAGE_BOT_MEMBERSHIP_SQL} AND ${GALLERY_EXCLUDED_PURPOSE_SQL}`
               )
-              .all(userId, filterBotId)
+              .all(userId, filterBotId, filterBotId)
           : db
               .prepare(`SELECT id, local_rel_path FROM images WHERE user_id = ? AND ${GALLERY_EXCLUDED_PURPOSE_SQL}`)
               .all(userId)
@@ -8399,9 +10602,10 @@ function buildRoutes(): RouteDefinition[] {
       }
       if (filterBotId) {
         db.prepare(
-          `DELETE FROM images WHERE user_id = ? AND bot_id = ? AND ${GALLERY_EXCLUDED_PURPOSE_SQL}`
+          `DELETE FROM images WHERE user_id = ? AND ${IMAGE_BOT_MEMBERSHIP_SQL} AND ${GALLERY_EXCLUDED_PURPOSE_SQL}`
         ).run(
           userId,
+          filterBotId,
           filterBotId
         );
       } else {
@@ -8491,11 +10695,12 @@ function buildRoutes(): RouteDefinition[] {
       const displayUrl = `/api/images/${encodeURIComponent(imageId)}/file`;
       try {
         db.prepare(
-          "INSERT INTO images (id, user_id, conversation_id, bot_id, prompt, revised_prompt, url, size, quality, provider, model, local_rel_path, purpose, created_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+          "INSERT INTO images (id, user_id, conversation_id, bot_id, related_bot_ids, origin, prompt, revised_prompt, url, size, quality, provider, model, local_rel_path, purpose, created_at) VALUES (?, ?, NULL, ?, ?, 'bot_profile_picture', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         ).run(
           imageId,
           userId,
           botId,
+          serializeImageRelatedBotIds([botId], botId),
           "Uploaded bot profile picture",
           "Uploaded bot profile picture",
           displayUrl,
@@ -8523,7 +10728,7 @@ function buildRoutes(): RouteDefinition[] {
 
       const updatedBot = db
         .prepare(
-          "SELECT id, name, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?"
+          "SELECT id, name, name_pronunciation, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?"
         )
         .get(botId, userId) as Record<string, unknown>;
       json(ctx.res, 200, {
@@ -8552,7 +10757,10 @@ function buildRoutes(): RouteDefinition[] {
           surface: "bots",
         },
         () => compileBotPowers({
-          provider: getAuxiliaryProvider(user.prism_default_llm_model ?? undefined),
+          provider: auxiliaryProviderFactoryOverride(
+            user.prism_default_llm_model ?? undefined,
+            dualOllamaWorkloadOptions(user)
+          ),
           botName: typeof body.botName === "string" ? body.botName : "",
           systemPrompt: typeof body.systemPrompt === "string" ? body.systemPrompt : "",
           powers: body.powers,
@@ -8591,6 +10799,7 @@ function buildRoutes(): RouteDefinition[] {
       const faceMouthAnimation =
         readBotFaceGlyphAnimationForStorage(body.faceMouthAnimation) ??
         DEFAULT_BOT_FACE_GLYPH_ANIMATION;
+      const faceMouthCoffeePucker = body.faceMouthCoffeePucker === true ? 1 : 0;
       const faceFontWeight = readBotFaceWeightForStorage(body.faceFontWeight);
       const faceEyeScale = readBotFaceEyeScaleForStorage(body.faceEyeScale);
       const faceEyeOffsetX = readBotFaceEyeOffsetXForStorage(body.faceEyeOffsetX);
@@ -8645,6 +10854,7 @@ function buildRoutes(): RouteDefinition[] {
           : readBotAvatarDetailsForStorage(body.avatarDetails);
       const chatEnabled = body.chatEnabled === false ? 0 : 1;
       const voicePreviewLine = normalizeVoicePreviewLine(body.voicePreviewLine) || null;
+      const namePronunciation = normalizeBotNamePronunciation(body.namePronunciation);
       const authoredAudioVoiceProfile = normalizeBotAudioVoiceProfileV1(
         body.authoredAudioVoiceProfile
       );
@@ -8707,6 +10917,12 @@ function buildRoutes(): RouteDefinition[] {
         now,
         now
       );
+      db.prepare(
+        "UPDATE bots SET face_mouth_coffee_pucker = ? WHERE id = ? AND user_id = ?"
+      ).run(faceMouthCoffeePucker, botId, userId);
+      db.prepare(
+        "UPDATE bots SET name_pronunciation = ? WHERE id = ? AND user_id = ?"
+      ).run(namePronunciation, botId, userId);
       if (powers.length > 0) {
         db.prepare("UPDATE bots SET powers_json = ? WHERE id = ? AND user_id = ?")
           .run(serializeBotPowersV1(powers), botId, userId);
@@ -8722,6 +10938,7 @@ function buildRoutes(): RouteDefinition[] {
         bot: {
           id: botId,
           name,
+          name_pronunciation: namePronunciation,
           systemPrompt,
           export_hash: exportHash,
           model,
@@ -8745,6 +10962,7 @@ function buildRoutes(): RouteDefinition[] {
           face_mouth_font: faceMouthFont,
           face_mouth_character: faceMouthCharacter,
           face_mouth_animation: faceMouthAnimation,
+          face_mouth_coffee_pucker: faceMouthCoffeePucker,
           face_font_weight: faceFontWeight,
           face_eye_scale: faceEyeScale,
           face_eye_offset_x: faceEyeOffsetX,
@@ -8771,7 +10989,7 @@ function buildRoutes(): RouteDefinition[] {
     route("GET", "/api/bots", async (ctx) => {
       const userId = requireAuth(ctx);
       const rows = db.prepare(
-        "SELECT id, name, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC"
+        "SELECT id, name, name_pronunciation, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC"
       ).all(userId) as Record<string, unknown>[];
       json(ctx.res, 200, { ok: true, bots: botRowsForResponse(rows) });
     }),
@@ -8818,7 +11036,7 @@ function buildRoutes(): RouteDefinition[] {
       const updatedBots = result.ids.length > 0
         ? db
             .prepare(
-              `SELECT id, name, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? AND id IN (${result.ids.map(() => "?").join(", ")})`
+              `SELECT id, name, name_pronunciation, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? AND id IN (${result.ids.map(() => "?").join(", ")})`
             )
             .all(userId, ...result.ids) as Record<string, unknown>[]
         : [];
@@ -8939,6 +11157,13 @@ function buildRoutes(): RouteDefinition[] {
         if (faceMouthAnimation === null) throw new Error("Invalid face mouth animation.");
         fields.push("face_mouth_animation = ?");
         values.push(faceMouthAnimation);
+      }
+      if (body.faceMouthCoffeePucker !== undefined) {
+        if (typeof body.faceMouthCoffeePucker !== "boolean") {
+          throw new Error("Invalid face mouth Coffee pucker choice.");
+        }
+        fields.push("face_mouth_coffee_pucker = ?");
+        values.push(body.faceMouthCoffeePucker ? 1 : 0);
       }
       if (body.faceFontWeight !== undefined) {
         if (body.faceFontWeight === null) {
@@ -9177,6 +11402,10 @@ function buildRoutes(): RouteDefinition[] {
         fields.push("voice_preview_line = ?");
         values.push(voicePreviewLine || null);
       }
+      if (body.namePronunciation !== undefined) {
+        fields.push("name_pronunciation = ?");
+        values.push(normalizeBotNamePronunciation(body.namePronunciation));
+      }
       if (body.exportHash !== undefined) {
         const normalizedExportHash = normalizeBotExportHash(body.exportHash);
         if (!normalizedExportHash) {
@@ -9238,7 +11467,7 @@ function buildRoutes(): RouteDefinition[] {
       }
       const updatedBot = db
         .prepare(
-          "SELECT id, name, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?"
+          "SELECT id, name, name_pronunciation, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?"
         )
         .get(botId, userId) as Record<string, unknown>;
       json(ctx.res, 200, { ok: true, bot: botRowForResponse(updatedBot) });
@@ -9510,7 +11739,11 @@ function buildRoutes(): RouteDefinition[] {
         }
         lines.push("## Coffee Session");
         lines.push("");
-        lines.push(`- Duration: ${conversation.coffee_duration_minutes ?? "legacy"} minute(s)`);
+        lines.push(
+          conversation.coffee_duration_minutes === null
+            ? "- Duration: Auto (open-ended)"
+            : `- Duration: ${conversation.coffee_duration_minutes} minute(s)`,
+        );
         lines.push(`- Coffee Group: ${conversation.coffee_group_id ?? "legacy / ungrouped"}`);
         lines.push(`- Preset: ${conversation.coffee_preset_id ?? "group defaults / legacy"}`);
         lines.push(`- Bots: ${botLabels.length > 0 ? botLabels.join(", ") : "unknown"}`);
@@ -9821,9 +12054,26 @@ async function dispatchRequest(
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
     const pathname = url.pathname;
     const method = req.method ?? "GET";
+    const slateArchiveUpload =
+      method === "POST" &&
+      (pathname === "/api/slate/archives/preview" ||
+        pathname === "/api/slate/archives/import");
+    const accountBackupArchiveUpload =
+      method === "POST" &&
+      pathname === "/api/backup/import" &&
+      String(req.headers["content-type"] ?? "")
+        .toLowerCase()
+        .startsWith(ACCOUNT_BACKUP_ARCHIVE_CONTENT_TYPE);
     const body =
       method === "POST" || method === "PATCH" || method === "DELETE"
-        ? await readJsonBody(req)
+        ? slateArchiveUpload || accountBackupArchiveUpload
+          ? await readBinaryBody(
+              req,
+              slateArchiveUpload
+                ? MAX_SLATE_ARCHIVE_BYTES
+                : ACCOUNT_BACKUP_ARCHIVE_MAX_BYTES,
+            )
+          : await readJsonBody(req)
         : {};
     const matchingRoute = routeTable.find(
       (candidate) => candidate.method === method && candidate.pattern.test(pathname)
@@ -9899,6 +12149,7 @@ export function createPrismRequestHandler(
 }
 
 let stopDiscovery: StopDiscovery | null = null;
+let slateContinuityWorker: SlateContinuityWorkerHandle | null = null;
 let shuttingDown = false;
 
 let server: ReturnType<typeof createServer> | null = null;
@@ -9909,6 +12160,16 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
   }
   shuttingDown = true;
   console.log(`Received ${signal}; shutting down Prism API.`);
+
+  if (slateContinuityWorker) {
+    await slateContinuityWorker.stop();
+    slateContinuityWorker = null;
+  }
+
+  if (slateRecoveryCoordinator) {
+    await slateRecoveryCoordinator.dispose({ flush: true });
+    slateRecoveryCoordinator = null;
+  }
 
   if (stopDiscovery) {
     await stopDiscovery();
@@ -9925,6 +12186,38 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
 }
 
 if (process.env.PRISM_API_DISABLE_AUTOSTART !== "1") {
+  slateRecoveryCoordinator = new SlateRecoveryCoordinator({
+    db,
+    rootDirectory: slateRecoveryRootDirectory(),
+    mirrorDirectoryForProject: () => slateRecoveryMirrorDirectory(),
+    onFailure(event) {
+      console.error(
+        `Slate recovery ${event.phase} failed for ${event.projectId}.`,
+        event.error,
+      );
+    },
+  });
+  slateContinuityWorker = startSlateContinuityWorker({
+    db,
+    processors: {
+      deterministic: processSlateContinuityJobDeterministically,
+      async localModel({ db: workerDb, job, modelInput }) {
+        const user = getUserRow(job.userId);
+        await processSlateContinuityAuxiliaryModelJob({
+          db: workerDb,
+          job,
+          modelInput,
+          provider: auxiliaryProviderFactoryOverride(
+            user.prism_default_llm_model,
+            dualOllamaWorkloadOptions(user),
+          ),
+        });
+      },
+    },
+    onCycleError(error) {
+      console.error("Slate Continuity worker cycle failed.", error);
+    },
+  });
   void purgeInactiveAccounts();
   setInterval(() => {
     void purgeInactiveAccounts();

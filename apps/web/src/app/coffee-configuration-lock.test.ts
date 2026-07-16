@@ -7,11 +7,11 @@ const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
 test("active Coffee centrally locks configuration while preserving End Session", () => {
   assert.match(
     pageSource,
-    /coffeeSessionPhase === "arriving" \|\| coffeeSessionPhase === "live"/u
+    /coffeeSessionPhase === "arriving" \|\| coffeeSessionPhase === "live"/u,
   );
   assert.match(
     pageSource,
-    /End the Coffee session to change bots, settings, or modes\./u
+    /End the Coffee session to change bots, settings, or modes\./u,
   );
   assert.match(pageSource, /blockCoffeeConfigurationMutation/u);
   assert.match(pageSource, /coffeeConfigurationLockedRef\.current/u);
@@ -24,6 +24,21 @@ test("active Coffee centrally locks configuration while preserving End Session",
   assert.match(
     pageSource,
     /disabledActions:\s*shellPolicy\.disabledNavbarActions/u,
+  );
+  assert.match(
+    pageSource,
+    /disabledActionTooltips:\s*shellPolicy\.disabledNavbarActionTooltips/u,
+  );
+  assert.doesNotMatch(pageSource, /Favorites unavailable in Coffee/u);
+  assert.match(
+    pageSource,
+    /const coffeeHeaderModelControlsLocked = \(\): boolean =>\s*coffeeBusy \|\| coffeeAutoBusy/u,
+  );
+  assert.match(pageSource, /disabled=\{coffeeHeaderModelControlsLocked\(\)\}/u);
+  assert.match(pageSource, /disabled:\s*coffeeHeaderModelControlsLocked\(\)/u);
+  assert.match(
+    pageSource,
+    /renderCoffeeHeaderModelPicker\(\)[\s\S]*renderVoiceModeSelector\(\)/u,
   );
   assert.match(
     pageSource,

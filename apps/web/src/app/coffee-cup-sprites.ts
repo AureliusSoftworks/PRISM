@@ -602,7 +602,9 @@ export function buildCoffeeCupVisualState(args: {
     Number.isFinite(args.nowMs) &&
     args.nowMs < args.sipLockedUntilMs;
   const sippingOverride =
-    sipLocked || args.thinking === true ? false : args.sippingOverride;
+    sipLocked || args.speaking === true || args.thinking === true
+      ? false
+      : args.sippingOverride;
   const sipBaseProgress =
     args.topOff && Number.isFinite(args.topOff.progressAfter)
       ? clampUnit(args.topOff.progressAfter)

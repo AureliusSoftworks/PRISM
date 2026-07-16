@@ -20,6 +20,12 @@ describe("Coffee voice text", () => {
       ),
       "And the fair test is who can absorb it."
     );
+    assert.equal(
+      coffeeVoiceSpokenText(
+        "[Plankton](prism-bot://15abcff04cbb78591bab82fd), *slaps a claw on the table* Aye, it has!"
+      ),
+      "Plankton, Aye, it has!"
+    );
   });
 
   it("returns no synthesis source for action-only turns", () => {

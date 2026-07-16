@@ -255,3 +255,8 @@ Use this checklist when implementing Story shell work in `page.tsx` / `page.modu
 - Backend API design details and storage schema.
 - Full implementation of generation engine.
 - Refactoring unrelated Chat/Sandbox runtime behavior.
+- Slate workspace UI and cross-applet handoff UI. Story remains independently
+  routed. A later `Develop in Slate` entry creates an explicit source snapshot
+  and asks for output scale and faithfulness before opening Slate; it must not
+  pass a raw transcript or silently share mutable state. See
+  `docs/slate-v1-product-ux-contract.md`.

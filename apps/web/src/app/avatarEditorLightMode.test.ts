@@ -40,6 +40,16 @@ test("Avatar Studio carries the resolved app theme through its portal", () => {
   );
 });
 
+test("Avatar Studio includes the app-wide theme cycle control", () => {
+  assert.match(pageSource, /themeMode: Theme;/);
+  assert.match(pageSource, /onThemeCycle: \(\) => void \| Promise<void>;/);
+  assert.match(pageSource, /data-avatar-customizer-theme-toggle="true"/);
+  assert.match(pageSource, /onClick=\{\(\) => void onThemeCycle\(\)\}/);
+  assert.match(pageSource, /<ThemeGlyph mode=\{themeMode\} \/>/);
+  assert.match(pageSource, /themeMode=\{effectiveThemeMode\}/);
+  assert.match(pageSource, /onThemeCycle=\{cycleThemeMode\}/);
+});
+
 test("Avatar Studio Light Mode is a shared-token palette, not a duplicated component", () => {
   const scope = sourceSection(
     cssSource,
@@ -106,9 +116,9 @@ test("Light Mode preserves clear interactive states", () => {
 });
 
 test("Light Mode text, muted copy, errors, and warnings meet readable contrast", () => {
-  const lightSurface = "#fffdf8";
-  assert.ok(contrastRatio("#161514", lightSurface) >= 7);
-  assert.ok(contrastRatio("#5f5b55", lightSurface) >= 4.5);
+  const lightSurface = "#f8fbff";
+  assert.ok(contrastRatio("#172638", lightSurface) >= 7);
+  assert.ok(contrastRatio("#5c7186", lightSurface) >= 4.5);
   assert.ok(contrastRatio("#dc2626", lightSurface) >= 4.5);
   assert.ok(contrastRatio("#92400e", lightSurface) >= 4.5);
 });

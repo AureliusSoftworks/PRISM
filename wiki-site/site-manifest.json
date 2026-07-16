@@ -28,6 +28,8 @@
     "articles/features-and-workflows.html",
     "articles/bot-library-and-marketplace.html",
     "articles/developer-guide.html",
+    "articles/brand-ethos.html",
+    "articles/slate.html",
     "records/concept/concept_38af8f30-6915-43a6-814b-76ca3e5b63cf.html",
     "records/concept/concept_bbdc911a-c8a6-417e-8a32-a5650c8be316.html",
     "records/concept/concept_98e450e7-a536-4429-9c00-75d47211ac3e.html",
@@ -35,10 +37,13 @@
     "records/concept/concept_c2d00b3b-6b79-4faf-ac21-b3b4e7e022e6.html",
     "records/concept/concept_17097483-9143-4f39-91de-8ad33a73b888.html",
     "records/concept/concept_6fbe4496-b766-4a5a-abca-987acdd7d770.html",
+    "records/concept/concept_b2c6156c-2c09-41c8-a87c-4ee626cebde3.html",
+    "records/decision/decision_d604f433-273f-48e5-a4dc-38c728d79b78.html",
     "records/decision/decision_74d88333-8a92-47f5-897a-2f0458817e74.html",
     "records/decision/decision_d8f8761e-d67c-4d96-8217-3af3b67ec403.html",
     "records/decision/decision_a19295be-77fe-4e95-9a6a-57206331a0a5.html",
     "records/decision/decision_791a7b3c-d069-4543-907d-3c0cda50f452.html",
+    "records/decision/decision_a09fe27e-a4d9-44d4-88f4-9d5551a3677a.html",
     "records/event/event_f3ec88b8-87fb-4521-ae5e-1cf42592c6b6.html",
     "records/event/event_9049a96d-ec0f-4c0e-9444-d9c9997799ec.html",
     "records/event/event_752b90fc-e23c-4000-afe3-fbb07affebba.html",
@@ -105,6 +110,18 @@
       "title": "Developer guide",
       "slug": "developer-guide",
       "url": "articles/developer-guide.html"
+    },
+    {
+      "id": "article_99bea382-e515-4640-ab79-91e1c309380b",
+      "title": "Brand ethos",
+      "slug": "brand-ethos",
+      "url": "articles/brand-ethos.html"
+    },
+    {
+      "id": "article_92325f0d-8f92-400e-a52d-2b32ea6909b9",
+      "title": "Slate creative writing workspace",
+      "slug": "slate",
+      "url": "articles/slate.html"
     }
   ],
   "records": [
@@ -151,6 +168,18 @@
       "url": "records/concept/concept_6fbe4496-b766-4a5a-abca-987acdd7d770.html"
     },
     {
+      "type": "concept",
+      "id": "concept_b2c6156c-2c09-41c8-a87c-4ee626cebde3",
+      "title": "The user is the light",
+      "url": "records/concept/concept_b2c6156c-2c09-41c8-a87c-4ee626cebde3.html"
+    },
+    {
+      "type": "decision",
+      "id": "decision_d604f433-273f-48e5-a4dc-38c728d79b78",
+      "title": "Adopt the refraction emblem as PRISM primary narrative mark",
+      "url": "records/decision/decision_d604f433-273f-48e5-a4dc-38c728d79b78.html"
+    },
+    {
       "type": "decision",
       "id": "decision_74d88333-8a92-47f5-897a-2f0458817e74",
       "title": "Adopt Wikiwiki for repo-local project knowledge",
@@ -173,6 +202,12 @@
       "id": "decision_791a7b3c-d069-4543-907d-3c0cda50f452",
       "title": "Keep support non-gating",
       "url": "records/decision/decision_791a7b3c-d069-4543-907d-3c0cda50f452.html"
+    },
+    {
+      "type": "decision",
+      "id": "decision_a09fe27e-a4d9-44d4-88f4-9d5551a3677a",
+      "title": "Slate is writer-directed and snapshot-separated from Story",
+      "url": "records/decision/decision_a09fe27e-a4d9-44d4-88f4-9d5551a3677a.html"
     },
     {
       "type": "event",

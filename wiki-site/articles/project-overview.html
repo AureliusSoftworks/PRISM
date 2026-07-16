@@ -36,12 +36,12 @@
         <nav class="nav">
 <p class="nav-heading">Start Here</p>
 <a class="nav-link" href="../index.html">Home</a>
-<a class="nav-link active" href="../articles.html" aria-current="page">Articles<span>5</span></a>
+<a class="nav-link active" href="../articles.html" aria-current="page">Articles<span>7</span></a>
 <a class="nav-link" href="../guides.html">Guides</a>
 <a class="nav-link" href="../search.html">Search</a>
 <p class="nav-heading">Agent records</p>
-<a class="nav-link" href="../concepts.html">Concepts<span>7</span></a>
-<a class="nav-link" href="../decisions.html">Decisions<span>4</span></a>
+<a class="nav-link" href="../concepts.html">Concepts<span>8</span></a>
+<a class="nav-link" href="../decisions.html">Decisions<span>6</span></a>
 <a class="nav-link" href="../devlog.html">Devlog<span>7</span></a>
 <a class="nav-link" href="../notes.html">Notes<span>3</span></a>
 <a class="nav-link" href="../symbols.html">Symbols<span>4</span></a>
@@ -68,17 +68,20 @@
     <p>What Prism is, what is available now, and which product principles shape the workspace.</p>
     <h2>Article</h2>
     <h2>What Prism Is</h2>
-<p>Prism is a local-first AI workspace for calm, multi-perspective thinking. It keeps everyday and sensitive work on the local machine, while still allowing explicit cloud-provider use when stronger online models are worth it.</p>
+<p>Prism is a local-first AI workspace for calm, multi-perspective thinking and creative production. It keeps everyday and sensitive work on the local machine while still allowing explicit cloud-provider use when stronger online models are worth it.</p>
 <h2>Available Now</h2>
-<ul><li>Chat v0.5 is the full playground for bots, model controls, images, exports, and memory-aware conversations.</li>
-<li>Zen v0.3 is the calmer one-to-one continuity lane.</li>
-<li>Coffee v0.6 is the multi-bot group conversation lane.</li>
-<li>Story v0.1 is a preview visual-novel lane with bots, choices, maps, and transcripts.</li>
+<ul><li>Chat v1.3 is the full playground for bots, model controls, images, exports, and memory-aware conversations.</li>
+<li>Zen v1.2 is the calmer one-to-one continuity lane.</li>
+<li>Coffee v1.4 is the multi-bot group conversation lane.</li>
+<li>Signal v0.4 is the bot-led interview and show-production lane.</li>
+<li>Story v0.1 is a preview procedural narrative lane.</li>
+<li>Slate v0.5 is the preview prose-fiction production desk where the AI writes and the writer directs.</li>
 <li>Account login, tenant isolation, encrypted key handling, and memory features are part of the current core.</li></ul>
 <h2>Product Principles</h2>
 <p>Prism is private by default, creative by design, and explicit about control. The LOCAL/ONLINE toggle is a privacy boundary rather than a suggestion. Experience lanes stay separated so practical controls and experiential presence do not blur into one overloaded chat surface.</p>
+<p>PRISM also begins with a creative belief: You are the light. Prism reveals the spectrum. Its primary public slogan is One light. Many colors. The person remains the source of intent and authorship; the workspace is the private instrument and sanctum where one light can refract into many useful voices, forms, and possibilities.</p>
 <h2>Architecture Snapshot</h2>
-<p>The app is a monorepo with a Next.js web surface, a Node.js API, an Electron desktop wrapper, SQLite data, Qdrant search, Ollama local models, and shared packages for cross-surface contracts.</p>
+<p>The app is a monorepo with a Next.js web surface, a Node.js API, an Electron desktop wrapper, SQLite data, Qdrant search, Ollama local models, and shared packages for cross-surface contracts and data types.</p>
     <h2>Categories</h2><p><code>Overview</code></p>
     <h2>Aliases</h2><p><code>Home</code> <code>Prism overview</code></p>
   </section>
@@ -88,13 +91,18 @@
 <li><a href="../records/concept/concept_d8ee0648-129b-427a-b6a7-dea62bb82e3e.html">LOCAL mode privacy boundary</a> <code>concept_d8ee0648-129b-427a-b6a7-dea62bb82e3e</code></li>
 <li><a href="../records/concept/concept_bbdc911a-c8a6-417e-8a32-a5650c8be316.html">Experience lanes</a> <code>concept_bbdc911a-c8a6-417e-8a32-a5650c8be316</code></li>
 <li><a href="../records/concept/concept_17097483-9143-4f39-91de-8ad33a73b888.html">Monorepo architecture</a> <code>concept_17097483-9143-4f39-91de-8ad33a73b888</code></li>
-<li><a href="../records/decision/decision_a19295be-77fe-4e95-9a6a-57206331a0a5.html">Keep LOCAL mode strict</a> <code>decision_a19295be-77fe-4e95-9a6a-57206331a0a5</code></li></ul>
+<li><a href="../records/decision/decision_a19295be-77fe-4e95-9a6a-57206331a0a5.html">Keep LOCAL mode strict</a> <code>decision_a19295be-77fe-4e95-9a6a-57206331a0a5</code></li>
+<li><a href="../records/concept/concept_b2c6156c-2c09-41c8-a87c-4ee626cebde3.html">The user is the light</a> <code>concept_b2c6156c-2c09-41c8-a87c-4ee626cebde3</code></li>
+<li><a href="../records/decision/decision_d604f433-273f-48e5-a4dc-38c728d79b78.html">Adopt the refraction emblem as PRISM primary narrative mark</a> <code>decision_d604f433-273f-48e5-a4dc-38c728d79b78</code></li>
+<li><a href="../records/decision/decision_a09fe27e-a4d9-44d4-88f4-9d5551a3677a.html">Slate is writer-directed and snapshot-separated from Story</a> <code>decision_a09fe27e-a4d9-44d4-88f4-9d5551a3677a</code></li></ul>
 </aside>
   <aside class="sources-panel">
   <h2>Related files</h2>
   <ul><li><a class="source-link" href="../../README.md"><code>README.md</code></a></li>
 <li><a class="source-link" href="../../AGENTS.md"><code>AGENTS.md</code></a></li>
-<li><a class="source-link" href="../../docs/applets.md"><code>docs/applets.md</code></a></li></ul>
+<li><a class="source-link" href="../../docs/applets.md"><code>docs/applets.md</code></a></li>
+<li><a class="source-link" href="../../docs/brand-ethos.md"><code>docs/brand-ethos.md</code></a></li>
+<li><a class="source-link" href="../../docs/slate-master-plan.md"><code>docs/slate-master-plan.md</code></a></li></ul>
 </aside>
   <details class="record-meta">
   <summary>Agent details</summary>
@@ -104,11 +112,13 @@
     <div><dt>Authority</dt><dd>agent</dd></div>
     <div><dt>Confidence</dt><dd>high</dd></div>
     <div><dt>Created</dt><dd><time datetime="2026-07-05T04:13:35.817Z">2026-07-05</time></dd></div>
-    <div><dt>Updated</dt><dd><time datetime="2026-07-05T04:14:50.583Z">2026-07-05</time></dd></div>
+    <div><dt>Updated</dt><dd><time datetime="2026-07-16T13:25:14.866Z">2026-07-16</time></dd></div>
     <div><dt>Tags</dt><dd><code>audience:all</code> <code>overview</code> <code>product</code></dd></div>
     <div><dt>Files</dt><dd><ul><li><a class="source-link" href="../../README.md"><code>README.md</code></a></li>
 <li><a class="source-link" href="../../AGENTS.md"><code>AGENTS.md</code></a></li>
-<li><a class="source-link" href="../../docs/applets.md"><code>docs/applets.md</code></a></li></ul></dd></div>
+<li><a class="source-link" href="../../docs/applets.md"><code>docs/applets.md</code></a></li>
+<li><a class="source-link" href="../../docs/brand-ethos.md"><code>docs/brand-ethos.md</code></a></li>
+<li><a class="source-link" href="../../docs/slate-master-plan.md"><code>docs/slate-master-plan.md</code></a></li></ul></dd></div>
   </dl>
 </details>
 </article>

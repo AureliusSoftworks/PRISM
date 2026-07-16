@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
 import {
+  backendHealthPollDelayMs,
   backendReconnectDelayMs,
   backendRecoveryPlan,
 } from "./connectionRecovery.ts";
@@ -22,10 +23,23 @@ describe("backend connection recovery", () => {
     });
   });
 
-  it("backs off automatic probes and caps the delay", () => {
+  it("keeps unavailable retries frequent and caps the delay at two seconds", () => {
     assert.deepEqual(
       [0, 1, 2, 3, 4, 50].map(backendReconnectDelayMs),
-      [750, 1_250, 2_000, 3_000, 5_000, 5_000],
+      [500, 750, 1_000, 1_500, 2_000, 2_000],
+    );
+  });
+
+  it("checks healthy foreground sessions often without hot-looping hidden tabs", () => {
+    assert.equal(backendHealthPollDelayMs(false), 2_000);
+    assert.equal(backendHealthPollDelayMs(true), 10_000);
+  });
+
+  it("proactively checks health before another API action reports a failure", () => {
+    const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+    assert.match(
+      pageSource,
+      /if \(backendUnavailable\) return;[\s\S]*?requestApiWithLoopbackFallback\("\/api\/health"\)[\s\S]*?backendHealthPollDelayMs\(document\.hidden\)[\s\S]*?addEventListener\("visibilitychange"/,
     );
   });
 

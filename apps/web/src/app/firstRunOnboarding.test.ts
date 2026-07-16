@@ -47,6 +47,27 @@ describe("first-run onboarding", () => {
     }
   });
 
+  it("names chat routing separately from image and voice routing", () => {
+    const providerStep = FIRST_RUN_SETUP_STEPS.find(
+      (step) => step.id === "provider",
+    );
+    assert.equal(providerStep?.title, "Choose your chat home base");
+    assert.match(pageSource, /Image generation has its own LOCAL\/ONLINE choice/u);
+    assert.match(
+      pageSource,
+      /choose an ElevenLabs voice in bot customization from any chat\s*mode; Prism uses it only for eligible ONLINE speech/u,
+    );
+    assert.match(pageSource, /Chat home base/u);
+  });
+
+  it("explains that an ElevenLabs profile voice is the online override", () => {
+    assert.match(
+      pageSource,
+      /Speech stays on System TTS until you select an ElevenLabs voice in Prism or bot customization/u,
+    );
+    assert.match(pageSource, /Voice Settings can limit bot menus to one ElevenLabs voice collection/u);
+  });
+
   it("clamps restored progress and reaches a full final bar", () => {
     assert.equal(firstRunSetupStepAt(-4).id, "place");
     assert.equal(firstRunSetupStepAt(999).id, "ready");

@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
   autoFallbackAvailableForPrimary,
   autoFallbackChainWithEntry,
+  autoFallbackResponseModeForSend,
   decodeAutoFallbackPickerValue,
   encodeAutoFallbackPickerValue,
 } from "./autoFallbackSettings.ts";
@@ -33,6 +34,33 @@ describe("Auto fallback settings", () => {
     assert.equal(
       autoFallbackAvailableForPrimary({ primary: openai, chain, runnable: [local, openai, anthropic] }),
       false
+    );
+  });
+
+  it("does not send Auto when the contextual primary duplicates a fallback", () => {
+    const chain = {
+      v: 1 as const,
+      fallbacks: [openai, anthropic] as [typeof openai, typeof anthropic],
+    };
+    const runnable = [local, openai, anthropic];
+
+    assert.equal(
+      autoFallbackResponseModeForSend({
+        autoEnabled: true,
+        primary: local,
+        chain,
+        runnable,
+      }),
+      "auto",
+    );
+    assert.equal(
+      autoFallbackResponseModeForSend({
+        autoEnabled: true,
+        primary: openai,
+        chain,
+        runnable,
+      }),
+      "online",
     );
   });
 });

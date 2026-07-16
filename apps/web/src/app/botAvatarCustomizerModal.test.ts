@@ -93,6 +93,7 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.match(pageSource, /faceEyeCharacter: string \| null/);
   assert.match(pageSource, /faceMouthCharacter: string \| null/);
   assert.match(pageSource, /faceMouthAnimation: BotFaceGlyphAnimation/);
+  assert.match(pageSource, /faceMouthCoffeePucker: boolean/);
   assert.match(pageSource, /faceEyeScale: number/);
   assert.match(pageSource, /faceEyeOffsetX: number/);
   assert.match(pageSource, /faceEyeOffsetY: number/);
@@ -115,6 +116,10 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.match(pageSource, /faceEyeCharacter=\{newBotFaceEyeCharacter\}/);
   assert.match(pageSource, /faceMouthCharacter=\{newBotFaceMouthCharacter\}/);
   assert.match(pageSource, /faceMouthAnimation=\{newBotFaceMouthAnimation\}/);
+  assert.match(
+    pageSource,
+    /faceMouthCoffeePucker=\{newBotFaceMouthCoffeePucker\}/,
+  );
   assert.match(pageSource, /faceEyeScale=\{newBotFaceEyeScale\}/);
   assert.match(pageSource, /faceEyeOffsetX=\{newBotFaceEyeOffsetX\}/);
   assert.match(pageSource, /faceEyeOffsetY=\{newBotFaceEyeOffsetY\}/);
@@ -395,6 +400,18 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
     /data-custom-active=\{customMouthActive \? "true" : undefined\}/,
   );
   assert.match(mouthTabSource, /disabled=\{!customMouthActive\}/);
+  assert.doesNotMatch(mouthTabSource, /botAvatarCoffeePuckerToggle/);
+  assert.match(pageSource, /botAvatarControlGroupActions/);
+  assert.match(pageSource, /activeTab === "mouth" && customMouthActive/);
+  assert.match(pageSource, /Coffee \*/);
+  assert.match(
+    pageSource,
+    /Swap the custom mouth to \* while sipping in Coffee mode\./,
+  );
+  assert.match(pageSource, /role="switch"/);
+  assert.match(pageSource, /aria-checked=\{faceMouthCoffeePucker\}/);
+  assert.match(pageSource, /data-enabled=\{faceMouthCoffeePucker/);
+  assert.match(pageSource, /onMouthCoffeePuckerChange/);
   assert.doesNotMatch(mouthTabSource, /faceMouthAnimation/);
   assert.match(mouthTabSource, /label="Mouth size"/);
   assert.match(mouthTabSource, /<BotAvatarMouthRotationWheel/);
@@ -408,6 +425,10 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.doesNotMatch(mouthTabSource, /botAvatarMouthAnimationRow/);
   assert.doesNotMatch(mouthTabSource, /botAvatarCustomMotionRowCombined/);
   assert.match(mouthTabSource, /botAvatarGlyphRotationField/);
+  assert.match(
+    cssSource,
+    /\.botAvatarGlyphRotationField\s*\{[\s\S]*?grid-column:\s*1\s*\/\s*-1/,
+  );
   assert.doesNotMatch(mouthTabSource, /<BotAvatarGlyphAnimationControl/);
   assert.match(motionTabSource, /label="Mouth animation"/);
   assert.match(motionTabSource, /value=\{faceMouthAnimation\}/);
@@ -553,6 +574,14 @@ test("avatar save state is scoped and bounded so prompts cannot stay stuck", () 
     /withBotAvatarSaveTimeout\(\(signal\) =>\s*api<\{ bot\?: Bot \}>/,
   );
   assert.match(pageSource, /const avatarCustomizerSaving = busy;/);
+  assert.match(
+    pageSource,
+    /if \(dismissOuterSavePrompt\) onCancelSavePrompt\(\);[\s\S]*?void onSave\(\);/,
+  );
+  assert.match(
+    pageSource,
+    /onRequestClose=\{\(\) => \{\s*if \(avatarCustomizerSaving\) \{\s*closeBotAvatarStudioFlow\(\);\s*return;/,
+  );
 });
 
 test("avatar and bot saves recover cleanly when the edit target no longer exists", () => {
@@ -862,6 +891,10 @@ test("default Prism bot card opens an avatar-only customizer path", () => {
     saveDefaultSource,
     /faceMouthRotationDeg: newBotFaceMouthRotationDeg/,
   );
+  assert.match(
+    saveDefaultSource,
+    /faceMouthCoffeePucker: newBotFaceMouthCoffeePucker/,
+  );
   assert.match(saveDefaultSource, /faceBlinkBar: newBotFaceBlinkBar/);
   assert.match(
     saveDefaultSource,
@@ -887,6 +920,7 @@ test("default Prism bot card opens an avatar-only customizer path", () => {
   assert.doesNotMatch(defaultDirtySource, /newBotGlyph/);
   assert.match(defaultDirtySource, /newBotFaceMouthCharacter/);
   assert.match(defaultDirtySource, /newBotFaceMouthRotationDeg/);
+  assert.match(defaultDirtySource, /newBotFaceMouthCoffeePucker/);
 
   const defaultBotRouteStart = apiServerSource.indexOf(
     'route("PATCH", "/api/default-bot"',
@@ -973,6 +1007,23 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   assert.match(pageSource, /<span>Avatar Studio<\/span>/);
   assert.match(pageSource, /function BotAvatarPreviewPanel\(/);
   assert.match(pageSource, /function BotAvatarIdentityControls\(/);
+  assert.match(pageSource, /<span>Pronunciation<\/span>/);
+  assert.match(pageSource, /aria-label="Bot name pronunciation"/);
+  assert.match(pageSource, /placeholder="How bots should say this name"/);
+  assert.match(pageSource, /aria-label="Preview bot name pronunciation"/);
+  assert.match(pageSource, /My name is \$\{trimmedName\}\./);
+  const invalidChatDetailEffect = pageSource.slice(
+    pageSource.indexOf('detail.id === "pending"'),
+    pageSource.indexOf("useEffect(() =>", pageSource.indexOf('detail.id === "pending"')),
+  );
+  assert.doesNotMatch(
+    invalidChatDetailEffect,
+    /setNewBotNamePronunciation\(""\)/,
+  );
+  assert.match(
+    pageSource,
+    /onVoicePreview\(\s*audioVoiceProfile,\s*"english",\s*previewText/,
+  );
   assert.match(pageSource, /function BotAvatarFaceControls\(/);
   assert.match(pageSource, /function BotAvatarSavePrompt\(/);
   assert.match(pageSource, /className=\{styles\.botAvatarPanelHeader\}/);
@@ -1171,8 +1222,17 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   );
   assert.match(
     cssRuleBody(".botAvatarFaceControls"),
-    /grid-template-rows:\s*auto auto auto minmax\(150px,\s*1fr\);/,
+    /grid-template-rows:\s*auto auto auto auto;/,
   );
+  assert.match(
+    cssRuleBody(".botAvatarIdentityPicker"),
+    /height:\s*clamp\(165px,\s*22dvh,\s*260px\);/,
+  );
+  assert.match(
+    cssRuleBody(".botAvatarIdentityPronunciationRow"),
+    /grid-template-columns:\s*minmax\(0,\s*1fr\) auto;/,
+  );
+  assert.match(cssRuleBody(".botAvatarIdentityNameSampleButton"), /height:\s*36px;/);
   assert.match(cssRuleBody(".glyphGridScroll"), /overflow-y:\s*auto;/);
 
   const stageRule = cssRuleBody(".botAvatarMannequinStage");
@@ -1493,7 +1553,12 @@ test("avatar customizer preview has explicit expression states", () => {
   );
   assert.match(pageSource, /const BOT_AVATAR_PREVIEW_MODES = \[/);
   assert.match(pageSource, /const BOT_AVATAR_PREVIEW_MOODS = \[/);
-  assert.match(pageSource, /const previewTalking = previewMode === "talking";/);
+  assert.match(
+    pageSource,
+    /const previewTalking = previewMode === "talking" && !previewSpeechPaused;/,
+  );
+  assert.match(pageSource, /buildSpeechActivityWindows\(/);
+  assert.match(pageSource, /setPreviewSpeechPaused\(/);
   assert.match(pageSource, /const previewBlink = previewMode === "blink";/);
   assert.doesNotMatch(pageSource, /previewHovered/);
   assert.doesNotMatch(pageSource, /onPreviewHoveredChange/);
@@ -1618,4 +1683,13 @@ test("desktop kiosk shell shows a full-screen notice below the viewport floor", 
     cssSource,
     /@media\s*\(max-width:\s*1279px\)[\s\S]*\.desktopViewportNotice\s*\{[\s\S]*inset:\s*0;/,
   );
+});
+
+test("Powers read as an app-wide bot trait across active surfaces", () => {
+  assert.match(pageSource, /Short rules and quirks that follow this bot throughout PRISM\./u);
+  assert.doesNotMatch(pageSource, /apply only during Coffee sessions/u);
+  assert.match(pageSource, /<BotPowerBadge powers=\{selectedBot\.powers\} passive \/>/u);
+  assert.match(pageSource, /<BotPowerBadge powers=\{bot\.powers\} passive \/>/u);
+  assert.match(pageSource, /<BotPowerBadge powers=\{npcActor\?\.bot\.powers\} \/>/u);
+  assert.match(pageSource, /botPowerCupRateMultiplierForBotV1/u);
 });

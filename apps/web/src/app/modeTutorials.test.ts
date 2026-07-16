@@ -15,7 +15,191 @@ describe("mode tutorials", () => {
   });
 
   it("clamps restored progress to a valid step", () => {
-    assert.equal(modeTutorialStep("zen", -1).heading, "Stay with PRISM");
+    assert.equal(modeTutorialStep("zen", -1).heading, "Choose a relationship");
     assert.equal(modeTutorialStep("coffee", 99).heading, "Join the conversation");
+    assert.equal(modeTutorialStep("botcast", 99).heading, "Direct the replay");
+    assert.equal(modeTutorialStep("slate", 99).heading, "Approve revisions deliberately");
+  });
+
+  it("presents the production applet as Signal", () => {
+    assert.equal(MODE_TUTORIALS.botcast.title, "Signal producer walkthrough");
+    const signalCopy = MODE_TUTORIALS.botcast.steps.map((step) => step.body).join(" ");
+    assert.match(signalCopy, /Cut show immediately cuts away and archives the recording/u);
+    assert.match(signalCopy, /short, locally synthesized outro/u);
+    assert.equal(MODE_TUTORIALS.botcast.steps[1]?.heading, "Shape the show’s identity");
+    assert.equal(
+      MODE_TUTORIALS.botcast.steps[1]?.targetSelector,
+      '[data-tutorial-target="botcast-brand-controls"]',
+    );
+    assert.equal(MODE_TUTORIALS.botcast.steps[2]?.heading, "Give it an opening sound");
+    assert.equal(
+      MODE_TUTORIALS.botcast.steps[2]?.targetSelector,
+      '[data-tutorial-target="botcast-intro-audio"]',
+    );
+    assert.match(MODE_TUTORIALS.botcast.steps[0]?.body ?? "", /never waits on synthesis/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /Create this show’s look once/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /find a clever name/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /keep using PRISM/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /activity card/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /Dark-to-Light studio pair/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /gear at the bottom-right/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /opening ident/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /replace either studio visual/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[2]?.body ?? "", /host-persona-led Signal Synth ident/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[2]?.body ?? "", /Play intro/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[2]?.body ?? "", /Playback stays here in the strip/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[2]?.body ?? "", /open its gear/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[2]?.body ?? "", /no key or network/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[4]?.body ?? "", /default stage places both bots/u);
+    assert.equal(MODE_TUTORIALS.botcast.steps[3]?.heading, "Choose how the bots speak");
+    assert.equal(
+      MODE_TUTORIALS.botcast.steps[3]?.targetSelector,
+      '[data-tutorial-target="botcast-voice-mode"]',
+    );
+    assert.match(MODE_TUTORIALS.botcast.steps[3]?.body ?? "", /matches Zen/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[3]?.body ?? "", /both host and guest/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[4]?.body ?? "", /Pick LOCAL, AUTO, or ONLINE/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[4]?.body ?? "", /configured fallback chain/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[4]?.body ?? "", /locks that routing/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[4]?.body ?? "", /skippable show-branded pre-roll/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[4]?.body ?? "", /Randomize booking/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[4]?.body ?? "", /fill all three locally/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[4]?.body ?? "", /Episode length defaults to Auto/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[4]?.body ?? "", /close-up pans center/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /one speaker on mic at a time/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /words they have finished saying/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /Wrap it up is shared episode direction/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /both bots/u);
+  });
+
+  it("teaches Slate as a directed document workflow with stable targets", () => {
+    const headings = MODE_TUTORIALS.slate.steps.map((step) => step.heading);
+    const selectors = MODE_TUTORIALS.slate.steps.map((step) => step.targetSelector);
+    assert.deepEqual(headings, [
+      "Start from a spark",
+      "Shape before drafting",
+      "Direct the structure",
+      "Let Slate carry the draft",
+      "Keep your hands on the prose",
+      "Approve revisions deliberately",
+    ]);
+    assert.deepEqual(selectors, [
+      '[data-tutorial-target="slate-create-project"]',
+      '[data-tutorial-target="slate-shape"]',
+      '[data-tutorial-target="slate-structure"]',
+      '[data-tutorial-target="slate-draft"]',
+      '[data-tutorial-target="slate-manuscript"]',
+      '[data-tutorial-target="slate-revision"]',
+    ]);
+    assert.match(MODE_TUTORIALS.slate.steps[0]?.body ?? "", /\{wildcards\}/i);
+    assert.match(MODE_TUTORIALS.slate.steps[0]?.body ?? "", /one creative spark or pages/i);
+    assert.match(MODE_TUTORIALS.slate.steps[0]?.body ?? "", /waits for your confirmation/i);
+    assert.match(MODE_TUTORIALS.slate.steps[0]?.body ?? "", /story-so-far/i);
+    assert.match(MODE_TUTORIALS.slate.steps.at(-1)?.body ?? "", /accept or reject/i);
+    assert.match(MODE_TUTORIALS.slate.steps.at(-1)?.body ?? "", /Continuity/i);
+  });
+
+  it("teaches Zen navigation as relationship-specific Homes", () => {
+    const [chooseRelationship, groupRoom, continueHome, , context] =
+      MODE_TUTORIALS.zen.steps;
+
+    assert.deepEqual(chooseRelationship, {
+      heading: "Choose a relationship",
+      body: "Choose PRISM or a persona to enter that relationship’s Home. Ready Powers stay active with that persona here and across PRISM. Back or Escape returns you to the wider Library or group room exactly where you left it. Inviting a guest keeps you in the current Home.",
+      clickLabel: "a PRISM or persona tile",
+      targetSelector: '[data-tutorial-target="chat-bot-picker"]',
+    });
+    assert.deepEqual(continueHome, {
+      heading: "Continue this Home",
+      body: "Each Home keeps its own Zen relationship and episodes. Type here to continue the one you are visiting.",
+      clickLabel: "the message box at the bottom",
+      targetSelector: '[data-tutorial-target="composer"]',
+    });
+    assert.equal(
+      groupRoom?.targetSelector,
+      '[data-tutorial-target="chat-group-atmosphere"]',
+    );
+    assert.equal(
+      context?.body,
+      "Recent messages stay visible while older continuity for this Home is carried through summaries and memory.",
+    );
+  });
+
+  it("keeps Zen history intact while teaching the deliberate undo path", () => {
+    const correction = MODE_TUTORIALS.chat.steps.find(
+      (step) => step.heading === "Keep the moment honest",
+    );
+
+    assert.match(correction?.body ?? "", /Type \/undo/);
+    assert.doesNotMatch(correction?.body ?? "", /fork|resend|delete/i);
+    assert.equal(
+      correction?.targetSelector,
+      '[data-tutorial-target="composer"]',
+    );
+  });
+
+  it("introduces saved room Atmospheres alongside waiting-room Coffee staging", () => {
+    const atmosphere = MODE_TUTORIALS.zen.steps.find(
+      (step) => step.heading === "Shape a saved group's room",
+    );
+    assert.match(atmosphere?.body ?? "", /reusable room backdrop/);
+    assert.match(atmosphere?.body ?? "", /Listen up prompt stages 2-5 bots/);
+    assert.equal(
+      atmosphere?.targetSelector,
+      '[data-tutorial-target="chat-group-atmosphere"]',
+    );
+  });
+
+  it("distinguishes Coffee response routing from the account default model", () => {
+    const [, setup, , routing] = MODE_TUTORIALS.coffee.steps;
+
+    assert.match(
+      setup?.body ?? "",
+      /Account default uses the model saved in Settings/,
+    );
+    assert.match(
+      setup?.body ?? "",
+      /AUTO is the separate response-routing control/,
+    );
+    assert.match(setup?.body ?? "", /Auto duration is open-ended with no countdown/);
+    assert.match(
+      routing?.body ?? "",
+      /changes response routing, not the Account default model choice/,
+    );
+    assert.match(routing?.body ?? "", /separate Images provider/);
+    assert.match(routing?.body ?? "", /English voice preference/);
+  });
+
+  it("teaches that Zen response, image, and voice routing are separate", () => {
+    const routing = MODE_TUTORIALS.zen.steps.find(
+      (step) => step.heading === "Choose how replies recover",
+    );
+    assert.match(routing?.body ?? "", /Image generation keeps its own LOCAL\/ONLINE choice/);
+    assert.match(
+      routing?.body ?? "",
+      /choose an ElevenLabs voice in bot customization from any response mode/,
+    );
+    assert.match(routing?.body ?? "", /only for eligible ONLINE speech/);
+    assert.match(routing?.body ?? "", /Voice Settings can narrow/);
+    assert.match(routing?.body ?? "", /one ElevenLabs voice collection/);
+  });
+
+  it("teaches canonical Coffee prompts without a regeneration step", () => {
+    const topicStep = MODE_TUTORIALS.coffee.steps.find(
+      (step) => step.heading === "Choose the spark",
+    );
+
+    assert.match(topicStep?.body ?? "", /four prompts created for this group/);
+    assert.doesNotMatch(topicStep?.body ?? "", /regenerate/i);
+    assert.doesNotMatch(topicStep?.clickLabel ?? "", /regenerate/i);
+  });
+
+  it("explains the shared Coffee topic and Table Talk rail", () => {
+    const joinStep = MODE_TUTORIALS.coffee.steps.find(
+      (step) => step.heading === "Join the conversation",
+    );
+
+    assert.match(joinStep?.body ?? "", /Poll votes and team choices share/);
+    assert.match(joinStep?.body ?? "", /drag its left edge or the topic divider/);
   });
 });

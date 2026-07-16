@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import sharp from "sharp";
+import { GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE } from "@localai/shared";
 import {
   BOT_PROFILE_PICTURE_IMAGE_PURPOSE,
   GALLERY_EXCLUDED_PURPOSE_SQL,
@@ -172,20 +173,27 @@ describe("bot profile picture ownership", () => {
 });
 
 describe("bot profile picture gallery filtering", () => {
-  it("excludes profile pictures and wallpapers from normal image gallery queries", () => {
+  it("excludes profile pictures and Zen wallpapers while keeping reusable group-room art manageable", () => {
     const db = createAvatarDb();
     seedImage(db, "avatar", "user-1", "bot-1", BOT_PROFILE_PICTURE_IMAGE_PURPOSE);
     seedImage(db, "gallery", "user-1", null, "gallery");
     seedImage(db, "legacy", "user-1", null, null);
     seedImage(db, "other-upload", "user-1", "bot-1", "bot_upload");
     seedImage(db, "wallpaper", "user-1", null, "wallpaper");
+    seedImage(
+      db,
+      "group-room-wallpaper",
+      "user-1",
+      null,
+      GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE
+    );
 
     const listed = db
       .prepare(`SELECT id FROM images WHERE user_id = ? AND ${GALLERY_EXCLUDED_PURPOSE_SQL} ORDER BY id`)
       .all("user-1") as Array<{ id: string }>;
     assert.deepEqual(
       listed.map((row) => row.id),
-      ["gallery", "legacy", "other-upload"]
+      ["gallery", "group-room-wallpaper", "legacy", "other-upload"]
     );
 
     db.prepare(`DELETE FROM images WHERE user_id = ? AND ${GALLERY_EXCLUDED_PURPOSE_SQL}`).run("user-1");

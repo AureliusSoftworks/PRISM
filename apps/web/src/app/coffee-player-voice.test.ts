@@ -8,7 +8,7 @@ import {
 } from "./coffee-player-voice.ts";
 
 describe("Coffee player voice", () => {
-  it("keeps every LOCAL or offline-protected table on System Classic", () => {
+  it("keeps every LOCAL or offline-protected table on System TTS", () => {
     assert.equal(coffeePlayerEnglishEngine({
       accountProvider: "openai",
       coffeeProvider: "local",
@@ -159,9 +159,9 @@ describe("Coffee player voice", () => {
       styles,
       /\.coffeeReplayPlayerNameplate\s*\{[\s\S]*?width:\s*clamp\(232px,\s*21cqw,\s*268px\);[\s\S]*?margin-top:\s*clamp\(-41px,\s*-3\.2cqw,\s*-30px\);/,
     );
-    assert.doesNotMatch(
+    assert.match(
       source,
-      /className=\{styles\.coffeeReplayPlayerGlyph\}[\s\S]{0,180}<BotGlyph/,
+      /className=\{styles\.coffeeReplayPlayerGlyph\}[\s\S]{0,180}<BotGlyph\s+name=\{zenDefaultPrismGlyph\}\s+size=\{16\}\s+strokeWidth=\{2\}/,
     );
     assert.match(
       styles,

@@ -34,7 +34,22 @@ describe("Chat shell header layout", () => {
     );
     assert.equal(
       pageSource.match(/data-app-shell-header="true"/g)?.length,
-      2,
+      3,
+    );
+  });
+
+  it("distinguishes the account model default from Auto response routing", () => {
+    assert.match(
+      pageSource,
+      /const ACCOUNT_DEFAULT_MODEL_LABEL = "Account default";/,
+    );
+    assert.match(
+      pageSource,
+      /autoOptionLabel = ACCOUNT_DEFAULT_MODEL_LABEL/,
+    );
+    assert.match(
+      pageSource,
+      /const AUTO_MODEL_SETTINGS_SUBTEXT = "uses the model saved in Settings";/,
     );
   });
 

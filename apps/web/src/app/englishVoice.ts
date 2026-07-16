@@ -1,7 +1,12 @@
 import {
+  applyVoiceDeliveryMoodToProfile,
+  normalizeElevenLabsVoiceEffect,
   normalizeBotAudioVoiceProfileV1,
   normalizeBotVoiceVolume,
+  resolveElevenLabsVoicePerformance,
   type BotAudioVoiceProfileV1,
+  type ElevenLabsVoiceEffect,
+  type VoiceDeliveryMood,
 } from "@localai/shared";
 import {
   beginVoicePlaybackProgress,
@@ -28,6 +33,7 @@ export interface EnglishVoiceSynthesisClip {
   bytes: ArrayBuffer;
   alignment: EnglishVoiceCharacterAlignment | null;
   audioContentType: string;
+  engineUsed: string | null;
 }
 
 const MEDIA_PLAY_START_TIMEOUT_MS = 1500;
@@ -74,11 +80,13 @@ export async function readEnglishVoiceSynthesisClip(
   response: Response
 ): Promise<EnglishVoiceSynthesisClip> {
   const contentType = response.headers.get("content-type") ?? "application/octet-stream";
+  const engineUsed = response.headers.get("x-prism-voice-engine");
   if (!contentType.toLowerCase().includes("application/json")) {
     return {
       bytes: await response.arrayBuffer(),
       alignment: null,
       audioContentType: contentType,
+      engineUsed,
     };
   }
   const payload = await response.json() as Record<string, unknown>;
@@ -90,7 +98,19 @@ export async function readEnglishVoiceSynthesisClip(
     audioContentType: typeof payload.audioContentType === "string"
       ? payload.audioContentType
       : response.headers.get("x-prism-audio-content-type") ?? "application/octet-stream",
+    engineUsed,
   };
+}
+
+export function elevenLabsEffectForEngine(
+  rawProfile: BotAudioVoiceProfileV1,
+  engineUsed: string | null
+): ElevenLabsVoiceEffect {
+  return engineUsed === "elevenlabs"
+    ? normalizeElevenLabsVoiceEffect(
+        normalizeBotAudioVoiceProfileV1(rawProfile).elevenLabsEffect
+      )
+    : "clean";
 }
 
 export function resolveEnglishVoicePostProcessing(
@@ -105,6 +125,15 @@ export function resolveEnglishVoicePostProcessing(
     lowpassHz: Math.max(10_000, Math.min(20_000, Math.round(16_000 - profile.warmth * 6000))),
     gain: Number((0.92 + profile.warmth * 0.04).toFixed(3)),
   };
+}
+
+export function resolveEnglishVoicePlaybackDetuneCents(
+  rawProfile: BotAudioVoiceProfileV1,
+  engineUsed: string | null,
+): number {
+  return engineUsed === "elevenlabs"
+    ? resolveElevenLabsVoicePerformance(rawProfile).playbackDetuneCents
+    : resolveEnglishVoicePostProcessing(rawProfile).detuneCents;
 }
 
 let activeMedia: HTMLAudioElement | null = null;
@@ -225,6 +254,7 @@ async function playBytesWithMedia(
   bytes: ArrayBuffer,
   profile: BotAudioVoiceProfileV1,
   expectedGeneration: number,
+  detuneCents: number,
   lifecycle?: VoicePlaybackLifecycle
 ): Promise<void> {
   if (expectedGeneration !== generation) return;
@@ -275,24 +305,30 @@ async function playBytesWithMedia(
       () => {
         started = true;
         const normalizedProfile = normalizeBotAudioVoiceProfileV1(profile);
+        const startedAtMs = performance.now();
+        let playbackRate = 1;
         const updatePlaybackRate = () => {
-          const detuneCents =
-            normalizedProfile.pitch * 650 +
+          const liveDetuneCents =
+            detuneCents +
             voiceLiltDetuneCents(normalizedProfile.lilt, audio.currentTime);
-          audio.playbackRate = Math.max(0.7, Math.min(1.4, 2 ** (detuneCents / 1200)));
+          playbackRate = Math.max(
+            0.7,
+            Math.min(1.4, 2 ** (liveDetuneCents / 1200)),
+          );
+          audio.playbackRate = playbackRate;
         };
         updatePlaybackRate();
         if (normalizedProfile.lilt !== 0) {
           activeMediaLiltTimer = window.setInterval(updatePlaybackRate, 100);
         }
         const durationMs = Number.isFinite(audio.duration) && audio.duration > 0
-          ? Math.round(audio.duration * 1000)
+          ? Math.round((audio.duration * 1000) / playbackRate)
           : null;
         if (durationMs) {
           progress = beginVoicePlaybackProgress(
             lifecycle,
             durationMs,
-            () => audio.currentTime * 1000
+            () => performance.now() - startedAtMs
           );
         } else {
           lifecycle?.onStart?.(null);
@@ -315,21 +351,34 @@ async function playAudio(
   expectedGeneration: number,
   seed: string,
   effectsEnabled: boolean,
+  engineUsed: string | null,
   lifecycle?: VoicePlaybackLifecycle
 ): Promise<void> {
   if (expectedGeneration !== generation) return;
   const processing = resolveEnglishVoicePostProcessing(profile);
+  const detuneCents = resolveEnglishVoicePlaybackDetuneCents(
+    profile,
+    engineUsed,
+  );
   const played = await playRealtimeVoiceBytes({
     bytes,
     profile,
     seed,
     effectsEnabled,
-    detuneCents: processing.detuneCents,
+    detuneCents,
     baseLowpassHz: processing.lowpassHz,
+    elevenLabsEffect: elevenLabsEffectForEngine(profile, engineUsed),
     lifecycle,
+    isCurrent: () => expectedGeneration === generation,
   });
   if (!played) {
-    await playBytesWithMedia(bytes, profile, expectedGeneration, lifecycle);
+    await playBytesWithMedia(
+      bytes,
+      profile,
+      expectedGeneration,
+      detuneCents,
+      lifecycle,
+    );
     return;
   }
 }
@@ -340,15 +389,25 @@ export function enqueueEnglishVoice(
   seed = "english-preview",
   effectsEnabled = true,
   globalVolume = 1,
-  lifecycle?: VoicePlaybackLifecycle
+  lifecycle?: VoicePlaybackLifecycle,
+  engineUsed: string | null = null,
+  deliveryMood?: VoiceDeliveryMood | null,
 ): Promise<void> {
   const expectedGeneration = generation;
   const playbackProfile = {
-    ...normalizeBotAudioVoiceProfileV1(profile),
+    ...applyVoiceDeliveryMoodToProfile(profile, deliveryMood),
     volume: normalizeBotVoiceVolume(globalVolume),
   };
   queue = queue
     .catch(() => undefined)
-    .then(() => playAudio(bytes, playbackProfile, expectedGeneration, seed, effectsEnabled, lifecycle));
+    .then(() => playAudio(
+      bytes,
+      playbackProfile,
+      expectedGeneration,
+      seed,
+      effectsEnabled,
+      engineUsed,
+      lifecycle
+    ));
   return queue;
 }

@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1, botVoiceTextureForPreset } from "@localai/shared";
 import {
   VOICE_LILT_DEPTH_CENTS,
   buildVoiceDamageSchedule,
+  resolveElevenLabsVoiceEffectPlan,
   resolveVoiceTexture,
   voiceLiltDetuneCents,
 } from "./voiceEffects.ts";
@@ -39,6 +41,60 @@ describe("voice textures", () => {
     assert.deepEqual(first, buildVoiceDamageSchedule("message-1:bot-2", 4200, 0.7));
     assert.notDeepEqual(first, buildVoiceDamageSchedule("message-2:bot-2", 4200, 0.7));
     assert.ok(first.every((event) => event.atMs >= 0 && event.atMs < 4200));
+  });
+});
+
+describe("ElevenLabs-only effects", () => {
+  it("keeps Clean transparent and gives every preset a distinct, level-controlled character", () => {
+    const clean = resolveElevenLabsVoiceEffectPlan("clean");
+    const radio = resolveElevenLabsVoiceEffectPlan("radio");
+    const robot = resolveElevenLabsVoiceEffectPlan("robot");
+    const echo = resolveElevenLabsVoiceEffectPlan("echo");
+    const chorus = resolveElevenLabsVoiceEffectPlan("chorus");
+    const deepSpace = resolveElevenLabsVoiceEffectPlan("deep-space");
+    const processed = [radio, robot, echo, chorus, deepSpace];
+
+    assert.equal(clean.drive, 0);
+    assert.equal(clean.parallelVoices.length, 0);
+    assert.equal(clean.outputTrim, 1);
+    assert.ok(radio.highpassHz > clean.highpassHz);
+    assert.ok(radio.lowpassHz < clean.lowpassHz);
+    assert.ok(radio.noiseGain > 0);
+    assert.ok(robot.modulationDepth > 0);
+    assert.ok(robot.parallelVoices.some((voice) => voice.detuneCents < 0));
+    assert.equal(echo.parallelVoices.length, 2);
+    assert.equal(chorus.parallelVoices.length, 2);
+    assert.ok(deepSpace.parallelVoices.some((voice) => voice.detuneCents <= -500));
+    assert.ok(processed.every((plan) => plan.outputTrim < 0.8));
+    assert.ok(processed.every((plan) => plan.drive === 0 && plan.bitDepth === 16));
+    assert.equal(new Set(processed.map((plan) => JSON.stringify(plan))).size, processed.length);
+  });
+
+  it("keeps Chorus doubling bounded throughout long replies", () => {
+    const chorus = resolveElevenLabsVoiceEffectPlan("chorus");
+    for (const voice of chorus.parallelVoices) {
+      const modulationDepthSeconds = Math.abs(
+        voice.delayModulationDepthSeconds ?? 0
+      );
+      assert.equal(voice.detuneCents, 0);
+      assert.ok((voice.delayModulationFrequencyHz ?? 0) > 0);
+      assert.ok(modulationDepthSeconds > 0);
+      assert.ok(voice.delaySeconds - modulationDepthSeconds >= 0);
+      assert.ok(voice.delaySeconds + modulationDepthSeconds <= 0.03);
+    }
+  });
+
+  it("does not let a stale asynchronous decode stop newer playback", () => {
+    const source = readFileSync(new URL("./voiceEffects.ts", import.meta.url), "utf8");
+    const decodeAt = source.indexOf("await context.decodeAudioData");
+    const currentGuardAt = source.indexOf(
+      "if (args.isCurrent && !args.isCurrent()) return true;",
+      decodeAt,
+    );
+    const stopAt = source.indexOf("stopRealtimeVoiceAudio();", decodeAt);
+    assert.ok(decodeAt >= 0);
+    assert.ok(currentGuardAt > decodeAt);
+    assert.ok(stopAt > currentGuardAt);
   });
 });
 

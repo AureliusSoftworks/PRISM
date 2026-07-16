@@ -121,6 +121,19 @@ function assertNoAnimatedTransition(selector: string): void {
 }
 
 describe("Coffee seat arrival CSS", () => {
+  it("defaults Coffee duration to open-ended Auto without a countdown deadline", () => {
+    assert.match(
+      pageSource,
+      /useState<CoffeeSessionDurationMinutes \| null>\(null\)/,
+    );
+    assert.match(pageSource, /Open-ended · no countdown/);
+    assert.match(pageSource, /durationMinutes: coffeeSelectedDurationMinutes/);
+    assert.match(
+      pageSource,
+      /conversation\?\.coffeeSessionDurationMinutes == null \? null : startedAtMs \+ coffeeSessionDurationMs/,
+    );
+  });
+
   it("uses visual layout slots for walk-in vectors so bots enter from their side", () => {
     const genericSeatRuleIndex = css.indexOf(
       '.coffeeStage[data-phase="arriving"] .coffeeSeat[data-arrival-state="walking-in"][data-seat="4"]'
@@ -268,6 +281,41 @@ describe("Coffee seat arrival CSS", () => {
     assert.match(
       coffeeSeatPlateEmojiSource,
       /const displayBlinkPhase: CoffeeSeatBlinkPhase =\s+!enabled \|\|\s+faceBlinkDisabled \|\|\s+talkingPausesBlink \|\|\s+thinkingSpinnerActive \|\|\s+questionGlyphActive\s+\? "open"\s+:\s+\(?forcedBlinkPhase \?\? blinkPhase\)?;/
+    );
+  });
+
+  it("keeps live bot blinks running during speech with a calmer cadence", () => {
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /const COFFEE_SEAT_TALKING_BLINK_GAP_MULTIPLIER = 1\.35;/
+    );
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /function coffeeSeatBlinkGapMs\(talking = false\): number \{\s+const gapMs = randomBetween\(1500, 4000\);\s+return talking\s+\? gapMs \* COFFEE_SEAT_TALKING_BLINK_GAP_MULTIPLIER\s+: gapMs;/
+    );
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /if \(talking\) \{\s+if \(roll < 0\.03\) return 2;\s+if \(roll < 0\.14\) return 1;/
+    );
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /const isTalkingRef = useRef\(isTalking\);\s+const blinkPhase[\s\S]*?useEffect\(\(\) => \{\s+isTalkingRef\.current = isTalking;\s+\}, \[isTalking\]\);/
+    );
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /const talking = blinkWhileTalking && isTalkingRef\.current;\s+armBlink\(\s+coffeeSeatBlinkGapMs\(talking\),\s+coffeeSeatExtraBlinkCount\(talking\),/
+    );
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /const blinkKey = `\$\{enabled \? "enabled" : "disabled"\}:\$\{talkingPausesBlink \? "talking" : "idle"\}/
+    );
+    assert.match(
+      pageSource,
+      /isTalking=\{faceTalking\} blinkWhileTalking mouthShape=\{faceMouthShape\}/
+    );
+    assert.match(
+      pageSource,
+      /isTalking=\{isTableTypingThisSeat\} blinkWhileTalking mouthShape=\{mouthShapeWhileTyping\}/
     );
   });
 
@@ -912,7 +960,7 @@ describe("Coffee seat arrival CSS", () => {
     assert.doesNotMatch(livePlateRule, /--bot-face-screen-glass-opacity/);
     assert.match(
       pageSource,
-      /data-live-body-style="zen"[\s\S]*<ZenLiveBotMannequin[\s\S]*glyph=\{seatGlyphName\}[\s\S]*faceStyle=\{seatFaceStyle\}[\s\S]*plateFace=\{seatPlateGlyph\}[\s\S]*frameMaterialSeed=\{\s*botFrameMaterialSeedForBot\(\s*bot\s*,\s*bot\.id\s*,?\s*\)\s*\}/
+      /data-live-body-style="zen"[\s\S]*<ZenLiveBotMannequin[\s\S]*glyph=\{seatGlyphName\}[\s\S]*faceStyle=\{seatRenderedFaceStyle\}[\s\S]*plateFace=\{seatPlateGlyph\}[\s\S]*frameMaterialSeed=\{\s*botFrameMaterialSeedForBot\(\s*bot\s*,\s*bot\.id\s*,?\s*\)\s*\}/
     );
     assert.match(
       pageSource,
@@ -1317,13 +1365,13 @@ describe("Coffee seat arrival CSS", () => {
 
     assert.match(
       css,
-      /@media\s*\(min-width:\s*1160px\)\s*\{[\s\S]*\.coffeeShell\[data-session-active="true"\]\[data-transcript-open="true"\]\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s*minmax\(300px,\s*340px\)\s*;/
+      /@media\s*\(min-width:\s*1160px\)\s*\{[\s\S]*\.coffeeShell\[data-session-active="true"\]\[data-transcript-open="true"\]\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s*minmax\(300px,\s*var\(--coffee-transcript-width,\s*340px\)\)\s*;/
     );
 
     const panelRule = ruleForExactSelector(".coffeeTranscriptPanel");
     assert.match(
       panelRule,
-      /--coffee-transcript-width:\s*min\(340px,\s*calc\(100vw - 32px\)\)\s*;/
+      /width:\s*min\(var\(--coffee-transcript-width,\s*340px\),\s*calc\(100vw - 24px\)\)\s*;/
     );
   });
 
@@ -1719,10 +1767,17 @@ describe("Coffee seat arrival CSS", () => {
     );
   });
 
-  it("keeps early Coffee turns, director clicks, and Enter submission connected", () => {
+  it("keeps Coffee turns organic while preserving autoplay and Enter submission", () => {
+    assert.doesNotMatch(pageSource, /directorTapEnabled/);
+    assert.doesNotMatch(pageSource, /triggerDirectedCoffeeTurn/);
+    assert.doesNotMatch(pageSource, /queueDirectedCoffeeTurn/);
+    assert.doesNotMatch(pageSource, /toggleCoffeeAutoplay/);
+    assert.doesNotMatch(pageSource, /data-director-enabled/);
+    assert.doesNotMatch(pageSource, /Pause bot autoplay for director mode/);
+    assert.doesNotMatch(css, /data-director-enabled/);
     assert.match(
       pageSource,
-      /const directorTapEnabled =[\s\S]*coffeeAutoplayPaused[\s\S]*coffeeSessionPhase === "live"[\s\S]*coffeeSessionPhase === "arriving"/
+      /Bots take turns naturally as the conversation unfolds\./
     );
     assert.match(
       pageSource,
@@ -1741,12 +1796,6 @@ describe("Coffee seat arrival CSS", () => {
       pageSource,
       /if \(!conversationId \|\| coffeeBusy \|\| coffeeAutoBusy\) return;/
     );
-    assert.match(pageSource, /const coffeeDirectedTurnQueueRef = useRef<string\[\]>\(\[\]\);/);
-    assert.match(
-      pageSource,
-      /const nextDirectedTurn = nextDirectedCoffeeTurnAfterReveal\(\s*directedFollowupBotIds\s*,?\s*\);/
-    );
-    assert.match(pageSource, /queueDirectedCoffeeTurn\(botId\);/);
     assert.match(
       pageSource,
       /event\.key !== "ArrowUp" && event\.key !== "Enter"[\s\S]*void sendCoffeeTurn\(\);/
@@ -1757,7 +1806,7 @@ describe("Coffee seat arrival CSS", () => {
 
   it("blocks sip visuals while the Coffee pot is filling or the bot is thinking", () => {
     assert.match(pageSource, /const COFFEE_CUP_REFILL_SIP_LOCK_MS = 3_200;/);
-    assert.match(pageSource, /const refillSipLocked = refillSipLockUntilMs > coffeeSessionClockMs;/);
+    assert.match(pageSource, /const refillSipLocked = refillSipLockUntilMs > coffeeCupClockMs;/);
     assert.match(pageSource, /const visualSeatSipInProgress = refillSipLocked \|\| seatIsThinking \? false : seatSipInProgress;/);
     assert.match(pageSource, /sipLockedUntilMs: refillSipLockUntilMs \|\| null,/);
     assert.match(pageSource, /refillSipLocked \|\| !seatIsFirmlySeated/);

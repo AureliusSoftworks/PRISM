@@ -13,11 +13,14 @@ import {
   coffeeGeneratedReplyRevealDeferralMs,
   coffeeLoopTimerOwnsAutoplayTurn,
   coffeePendingSubmittedUserLineVisible,
-  coffeePlayerResponseBeatMs,
+  coffeePersistedUserLineOwnsPendingReveal,
+  coffeeRevealPreparationMayCommit,
+  coffeeSentenceCaseTableProse,
   coffeeShouldQueueAssistantRevealAfterUserTyping,
   coffeeShouldIgnoreStaleTurnResponse,
   coffeeShouldWaitForPendingBotRevealBeforeNextTurn,
   coffeeSubmittedUserMessageFromTurn,
+  coffeeTableMessageContentIsVisible,
   coffeeTableTalkAutoplayDeferralMs,
   coffeeVoicePlaybackOwnsAutoplayGate,
   coffeeVisibleDirectedMentionBotIds,
@@ -30,60 +33,66 @@ describe("coffee user reveal flow", () => {
         variant: "coffee-table",
         markdownEditorEnabled: false,
       }),
-      true
+      true,
     );
     assert.equal(
       coffeeComposerUsesRichInput({
         variant: "chat",
         markdownEditorEnabled: false,
       }),
-      false
+      false,
     );
     assert.equal(
       coffeeComposerUsesRichInput({
         variant: "coffee-global",
         markdownEditorEnabled: true,
       }),
-      true
-    );
-  });
-
-  it("adds a deterministic social beat after the player's line", () => {
-    const base = {
-      conversationId: "coffee-1",
-      message: "Hi Light Yagami",
-      responseDelayBias: 50,
-      breathingRoom: 50,
-      crossTalk: "normal" as const,
-    };
-    const repeated = coffeePlayerResponseBeatMs(base);
-    assert.equal(coffeePlayerResponseBeatMs(base), repeated);
-    assert.ok(repeated >= 650 && repeated <= 2_600);
-    assert.ok(
-      coffeePlayerResponseBeatMs({
-        ...base,
-        responseDelayBias: 0,
-        breathingRoom: 100,
-        crossTalk: "rare",
-      }) >
-        coffeePlayerResponseBeatMs({
-          ...base,
-          responseDelayBias: 100,
-          breathingRoom: 0,
-          crossTalk: "pileup",
-        })
+      true,
     );
   });
 
   it("queues assistant reveal while the user line is still typing", () => {
-    assert.equal(coffeeShouldQueueAssistantRevealAfterUserTyping("userTableTyping"), true);
-    assert.equal(coffeeShouldQueueAssistantRevealAfterUserTyping("botThinking"), false);
+    assert.equal(
+      coffeeShouldQueueAssistantRevealAfterUserTyping("userTableTyping"),
+      true,
+    );
+    assert.equal(
+      coffeeShouldQueueAssistantRevealAfterUserTyping("botThinking"),
+      false,
+    );
   });
 
   it("waits before starting another bot turn while a bot line is still revealing", () => {
-    assert.equal(coffeeShouldWaitForPendingBotRevealBeforeNextTurn("tableTyping"), true);
-    assert.equal(coffeeShouldWaitForPendingBotRevealBeforeNextTurn("userTableTyping"), false);
-    assert.equal(coffeeShouldWaitForPendingBotRevealBeforeNextTurn("botThinking"), false);
+    assert.equal(
+      coffeeShouldWaitForPendingBotRevealBeforeNextTurn("tableTyping"),
+      true,
+    );
+    assert.equal(
+      coffeeShouldWaitForPendingBotRevealBeforeNextTurn("userTableTyping"),
+      false,
+    );
+    assert.equal(
+      coffeeShouldWaitForPendingBotRevealBeforeNextTurn("botThinking"),
+      false,
+    );
+  });
+
+  it("prevents canceled voice preparation from reclaiming a newer Coffee reveal", () => {
+    const interruptedRevealEpoch = 12;
+    assert.equal(
+      coffeeRevealPreparationMayCommit({
+        preparedEpoch: interruptedRevealEpoch,
+        currentEpoch: interruptedRevealEpoch,
+      }),
+      true,
+    );
+    assert.equal(
+      coffeeRevealPreparationMayCommit({
+        preparedEpoch: interruptedRevealEpoch,
+        currentEpoch: interruptedRevealEpoch + 1,
+      }),
+      false,
+    );
   });
 
   it("keeps arrival autoplay waking while the opener reveal is still busy", () => {
@@ -106,7 +115,7 @@ describe("coffee user reveal flow", () => {
         userRevealText: "Mr Krabs has not said anything yet.",
         sessionFinished: false,
       }),
-      true
+      true,
     );
   });
 
@@ -117,7 +126,7 @@ describe("coffee user reveal flow", () => {
         userRevealText: "Still typing.",
         sessionFinished: false,
       }),
-      false
+      false,
     );
     assert.equal(
       coffeePendingSubmittedUserLineVisible({
@@ -125,7 +134,7 @@ describe("coffee user reveal flow", () => {
         userRevealText: "Done.",
         sessionFinished: true,
       }),
-      false
+      false,
     );
   });
 
@@ -152,6 +161,53 @@ describe("coffee user reveal flow", () => {
     );
   });
 
+  it("hands a pending player line to a matching persisted row during refresh", () => {
+    const messages = [
+      { role: "user", content: "Earlier question" },
+      { role: "assistant", content: "Earlier answer" },
+      { role: "user", content: "  One visible   line.  " },
+    ];
+
+    assert.equal(
+      coffeePersistedUserLineOwnsPendingReveal({
+        messages,
+        userRevealText: "One visible line.",
+      }),
+      true,
+    );
+    assert.equal(
+      coffeePersistedUserLineOwnsPendingReveal({
+        messages,
+        userRevealText: "A different line.",
+      }),
+      false,
+    );
+  });
+
+  it("hides punctuation-only interruption pause rows from the table", () => {
+    assert.equal(coffeeTableMessageContentIsVisible("..."), false);
+    assert.equal(coffeeTableMessageContentIsVisible(" … "), false);
+    assert.equal(coffeeTableMessageContentIsVisible("*pauses*"), true);
+    assert.equal(coffeeTableMessageContentIsVisible("Still here."), true);
+  });
+
+  it("sentence-cases player table prose without rewriting mention targets", () => {
+    assert.equal(
+      coffeeSentenceCaseTableProse("but krabby patties are yummy"),
+      "But krabby patties are yummy",
+    );
+    assert.equal(
+      coffeeSentenceCaseTableProse(
+        "[SpongeBob](prism-bot://bot-sponge), what do you think?",
+      ),
+      "[SpongeBob](prism-bot://bot-sponge), what do you think?",
+    );
+    assert.equal(
+      coffeeSentenceCaseTableProse("...already ready"),
+      "...Already ready",
+    );
+  });
+
   it("gives a pending assistant message one center-table owner while it streams", () => {
     const messages = [
       { id: "earlier", content: "Earlier line." },
@@ -164,7 +220,7 @@ describe("coffee user reveal flow", () => {
         pendingMessageId: "first-bot-reply",
         revealInProgress: true,
       }),
-      [{ id: "earlier", content: "Earlier line." }]
+      [{ id: "earlier", content: "Earlier line." }],
     );
     assert.deepEqual(
       coffeeCenterFeedMessagesDuringPendingReveal({
@@ -172,14 +228,23 @@ describe("coffee user reveal flow", () => {
         pendingMessageId: "first-bot-reply",
         revealInProgress: false,
       }),
-      messages
+      messages,
     );
   });
 
   it("ignores stale Coffee turn responses without a visible speaker", () => {
-    assert.equal(coffeeShouldIgnoreStaleTurnResponse({ stale: true, speakerBotId: null }), true);
-    assert.equal(coffeeShouldIgnoreStaleTurnResponse({ speakerBotId: null }), true);
-    assert.equal(coffeeShouldIgnoreStaleTurnResponse({ speakerBotId: "bot-vader" }), false);
+    assert.equal(
+      coffeeShouldIgnoreStaleTurnResponse({ stale: true, speakerBotId: null }),
+      true,
+    );
+    assert.equal(
+      coffeeShouldIgnoreStaleTurnResponse({ speakerBotId: null }),
+      true,
+    );
+    assert.equal(
+      coffeeShouldIgnoreStaleTurnResponse({ speakerBotId: "bot-vader" }),
+      false,
+    );
   });
 
   it("rearms autoplay after a stale or empty Coffee turn", () => {
@@ -191,11 +256,11 @@ describe("coffee user reveal flow", () => {
     };
     assert.equal(
       coffeeEmptyTurnAutoplayRetryDelayMs({ ...activeTurn, stale: true }),
-      360
+      360,
     );
     assert.equal(
       coffeeEmptyTurnAutoplayRetryDelayMs({ ...activeTurn, stale: false }),
-      850
+      850,
     );
     assert.equal(
       coffeeEmptyTurnAutoplayRetryDelayMs({
@@ -203,19 +268,28 @@ describe("coffee user reveal flow", () => {
         speakerBotId: "bot-jefferson",
         stale: false,
       }),
-      null
+      null,
     );
     assert.equal(
-      coffeeEmptyTurnAutoplayRetryDelayMs({ ...activeTurn, autoplayPaused: true }),
-      null
+      coffeeEmptyTurnAutoplayRetryDelayMs({
+        ...activeTurn,
+        autoplayPaused: true,
+      }),
+      null,
     );
     assert.equal(
-      coffeeEmptyTurnAutoplayRetryDelayMs({ ...activeTurn, sessionPhase: "finished" }),
-      null
+      coffeeEmptyTurnAutoplayRetryDelayMs({
+        ...activeTurn,
+        sessionPhase: "finished",
+      }),
+      null,
     );
     assert.equal(
-      coffeeEmptyTurnAutoplayRetryDelayMs({ ...activeTurn, sessionRemainingMs: 0 }),
-      null
+      coffeeEmptyTurnAutoplayRetryDelayMs({
+        ...activeTurn,
+        sessionRemainingMs: 0,
+      }),
+      null,
     );
   });
 
@@ -234,28 +308,57 @@ describe("coffee user reveal flow", () => {
     };
     assert.equal(coffeeAutoplayWatchdogShouldWake(strandedRoom), true);
     assert.equal(
-      coffeeAutoplayWatchdogShouldWake({ ...strandedRoom, sessionPhase: "arriving" }),
-      true
+      coffeeAutoplayWatchdogShouldWake({
+        ...strandedRoom,
+        sessionEndsAtMs: null,
+      }),
+      true,
     );
     assert.equal(
-      coffeeAutoplayWatchdogShouldWake({ ...strandedRoom, loopScheduled: true }),
-      false
+      coffeeAutoplayWatchdogShouldWake({
+        ...strandedRoom,
+        sessionPhase: "arriving",
+      }),
+      true,
     );
     assert.equal(
-      coffeeAutoplayWatchdogShouldWake({ ...strandedRoom, requestInFlight: true }),
-      false
+      coffeeAutoplayWatchdogShouldWake({
+        ...strandedRoom,
+        loopScheduled: true,
+      }),
+      false,
     );
     assert.equal(
-      coffeeAutoplayWatchdogShouldWake({ ...strandedRoom, draft: "still typing" }),
-      false
+      coffeeAutoplayWatchdogShouldWake({
+        ...strandedRoom,
+        autoplayPaused: true,
+      }),
+      false,
     );
     assert.equal(
-      coffeeAutoplayWatchdogShouldWake({ ...strandedRoom, rhythmState: "tableTyping" }),
-      false
+      coffeeAutoplayWatchdogShouldWake({
+        ...strandedRoom,
+        requestInFlight: true,
+      }),
+      false,
+    );
+    assert.equal(
+      coffeeAutoplayWatchdogShouldWake({
+        ...strandedRoom,
+        draft: "still typing",
+      }),
+      false,
+    );
+    assert.equal(
+      coffeeAutoplayWatchdogShouldWake({
+        ...strandedRoom,
+        rhythmState: "tableTyping",
+      }),
+      false,
     );
     assert.equal(
       coffeeAutoplayWatchdogShouldWake({ ...strandedRoom, nowMs: 70_000 }),
-      false
+      false,
     );
   });
 
@@ -266,7 +369,7 @@ describe("coffee user reveal flow", () => {
         scheduledForMs: 20_000,
         nowMs: 19_999,
       }),
-      true
+      true,
     );
     assert.equal(
       coffeeLoopTimerOwnsAutoplayTurn({
@@ -274,7 +377,7 @@ describe("coffee user reveal flow", () => {
         scheduledForMs: 20_000,
         nowMs: 20_000,
       }),
-      false
+      false,
     );
     assert.equal(
       coffeeLoopTimerOwnsAutoplayTurn({
@@ -282,7 +385,7 @@ describe("coffee user reveal flow", () => {
         scheduledForMs: null,
         nowMs: 20_000,
       }),
-      false
+      false,
     );
   });
 
@@ -292,28 +395,28 @@ describe("coffee user reveal flow", () => {
         busy: true,
         activeMessageId: "message-live",
       }),
-      true
+      true,
     );
     assert.equal(
       coffeeVoicePlaybackOwnsAutoplayGate({
         busy: true,
         activeMessageId: null,
       }),
-      false
+      false,
     );
     assert.equal(
       coffeeVoicePlaybackOwnsAutoplayGate({
         busy: true,
         activeMessageId: "  ",
       }),
-      false
+      false,
     );
     assert.equal(
       coffeeVoicePlaybackOwnsAutoplayGate({
         busy: false,
         activeMessageId: "message-finished",
       }),
-      false
+      false,
     );
   });
 
@@ -337,8 +440,15 @@ describe("coffee user reveal flow", () => {
     };
     assert.equal(coffeeAutoplayForceTurnShouldRun(activeRoom), true);
     assert.equal(
+      coffeeAutoplayForceTurnShouldRun({
+        ...activeRoom,
+        sessionEndsAtMs: null,
+      }),
+      true,
+    );
+    assert.equal(
       coffeeAutoplayForceTurnShouldRun({ ...activeRoom, nowMs: 11_499 }),
-      false
+      false,
     );
     assert.equal(
       coffeeAutoplayForceTurnShouldRun({
@@ -348,19 +458,22 @@ describe("coffee user reveal flow", () => {
         lastAssistantAtMs: 20_000,
         nowMs: 55_000,
       }),
-      true
+      true,
     );
     assert.equal(
-      coffeeAutoplayForceTurnShouldRun({ ...activeRoom, requestInFlight: true }),
-      false
+      coffeeAutoplayForceTurnShouldRun({
+        ...activeRoom,
+        requestInFlight: true,
+      }),
+      false,
     );
     assert.equal(
       coffeeAutoplayForceTurnShouldRun({ ...activeRoom, pendingReveal: true }),
-      false
+      false,
     );
     assert.equal(
       coffeeAutoplayForceTurnShouldRun({ ...activeRoom, hasPresentBot: false }),
-      false
+      false,
     );
   });
 
@@ -374,7 +487,7 @@ describe("coffee user reveal flow", () => {
         nowMs: 10_000,
         graceMs: 5200,
       }),
-      5200
+      5200,
     );
     assert.equal(
       coffeeTableTalkAutoplayDeferralMs({
@@ -385,7 +498,7 @@ describe("coffee user reveal flow", () => {
         nowMs: 12_000,
         graceMs: 5200,
       }),
-      3200
+      3200,
     );
     assert.equal(
       coffeeTableTalkAutoplayDeferralMs({
@@ -396,7 +509,7 @@ describe("coffee user reveal flow", () => {
         nowMs: 12_000,
         graceMs: 5200,
       }),
-      0
+      0,
     );
   });
 
@@ -411,7 +524,7 @@ describe("coffee user reveal flow", () => {
         nowMs: 12_000,
         graceMs: 5200,
       }),
-      0
+      0,
     );
     assert.equal(
       coffeeGeneratedReplyRevealDeferralMs({
@@ -423,7 +536,7 @@ describe("coffee user reveal flow", () => {
         nowMs: 12_000,
         graceMs: 5200,
       }),
-      5200
+      5200,
     );
     assert.equal(
       coffeeGeneratedReplyRevealDeferralMs({
@@ -435,7 +548,7 @@ describe("coffee user reveal flow", () => {
         nowMs: 12_000,
         graceMs: 5200,
       }),
-      0
+      0,
     );
   });
 
@@ -457,10 +570,10 @@ describe("coffee user reveal flow", () => {
       "[Squidward](prism-bot://bot-squidward)",
     ].join(" ");
 
-    assert.deepEqual(coffeeDirectedMentionBotIds(text, ["bot-patrick", "bot-sponge"]), [
-      "bot-sponge",
-      "bot-patrick",
-    ]);
+    assert.deepEqual(
+      coffeeDirectedMentionBotIds(text, ["bot-patrick", "bot-sponge"]),
+      ["bot-sponge", "bot-patrick"],
+    );
   });
 
   it("reveals directed mention ids when the displayed bot name starts streaming", () => {
@@ -472,17 +585,21 @@ describe("coffee user reveal flow", () => {
     ].join(" ");
     const seatedBotIds = ["bot-patrick", "bot-sponge"];
 
-    assert.deepEqual(coffeeVisibleDirectedMentionBotIds(text, seatedBotIds, "Hey ".length), []);
-    assert.deepEqual(coffeeVisibleDirectedMentionBotIds(text, seatedBotIds, "Hey P".length), [
-      "bot-patrick",
-    ]);
+    assert.deepEqual(
+      coffeeVisibleDirectedMentionBotIds(text, seatedBotIds, "Hey ".length),
+      [],
+    );
+    assert.deepEqual(
+      coffeeVisibleDirectedMentionBotIds(text, seatedBotIds, "Hey P".length),
+      ["bot-patrick"],
+    );
     assert.deepEqual(
       coffeeVisibleDirectedMentionBotIds(
         text,
         seatedBotIds,
-        "Hey Patrick Star, look at S".length
+        "Hey Patrick Star, look at S".length,
       ),
-      ["bot-patrick", "bot-sponge"]
+      ["bot-patrick", "bot-sponge"],
     );
   });
 });

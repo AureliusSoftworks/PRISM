@@ -77,6 +77,55 @@ describe("backup Auto model settings", () => {
   });
 });
 
+describe("backup image provider settings", () => {
+  it("exports and restores image routing independently from chat routing", () => {
+    withBackupDatabase((db, userKey) => {
+      db.prepare(
+        "UPDATE users SET preferred_provider = 'local', preferred_image_provider = 'openai' WHERE id = ?",
+      ).run("user-1");
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.equal(snapshot.settings?.preferredProvider, "local");
+      assert.equal(snapshot.settings?.preferredImageProvider, "openai");
+
+      db.prepare(
+        "UPDATE users SET preferred_provider = 'openai', preferred_image_provider = 'local' WHERE id = ?",
+      ).run("user-1");
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      const restored = db
+        .prepare(
+          "SELECT preferred_provider, preferred_image_provider FROM users WHERE id = ?",
+        )
+        .get("user-1") as {
+        preferred_provider: string;
+        preferred_image_provider: string;
+      };
+      assert.equal(restored.preferred_provider, "local");
+      assert.equal(restored.preferred_image_provider, "openai");
+    });
+  });
+
+  it("derives the legacy image lane from the old coupled chat provider", () => {
+    withBackupDatabase((db, userKey) => {
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      const legacySettings = {
+        ...snapshot.settings!,
+        preferredProvider: "openai" as const,
+      };
+      delete legacySettings.preferredImageProvider;
+      importUserSnapshot(
+        db,
+        "user-1",
+        { ...snapshot, settings: legacySettings },
+        userKey,
+      );
+      const restored = db
+        .prepare("SELECT preferred_image_provider AS provider FROM users WHERE id = ?")
+        .get("user-1") as { provider: string };
+      assert.equal(restored.provider, "openai");
+    });
+  });
+});
+
 describe("backup Zen Atmosphere style notes", () => {
   it("exports and restores normalized style notes", () => {
     withBackupDatabase((db, userKey) => {
@@ -206,19 +255,21 @@ describe("backup bot avatar face style", () => {
     withBackupDatabase((db, userKey) => {
       db.prepare(
         `INSERT INTO bots (
-          id, user_id, name, system_prompt, voice_preview_line, avatar_details_json,
+          id, user_id, name, name_pronunciation, system_prompt, voice_preview_line, avatar_details_json,
           face_eyes_font, face_eye_character, face_eye_animation,
-          face_mouth_font, face_mouth_character, face_mouth_animation, face_font_weight,
+          face_mouth_font, face_mouth_character, face_mouth_animation,
+          face_mouth_coffee_pucker, face_font_weight,
           face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg,
           face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg,
           face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y,
           face_thinking_frames,
           created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         "bot-1",
         "user-1",
         "Avatar Bot",
+        "Ah-vah-tar Bot",
         "You are Avatar Bot.",
         "Testing this carefully calibrated voice.",
         '{"version":1,"screen":{"stamps":[{"id":"round-glasses","offsetX":2,"offsetY":-1,"scalePct":105}],"paintMaskBase64":null}}',
@@ -228,6 +279,7 @@ describe("backup bot avatar face style", () => {
         "formal",
         "△",
         "flicker",
+        1,
         725,
         1.15,
         0.06,
@@ -250,6 +302,7 @@ describe("backup bot avatar face style", () => {
       assert.deepEqual(snapshot.bots?.[0], {
         id: "bot-1",
         name: "Avatar Bot",
+        namePronunciation: "Ah-vah-tar Bot",
         systemPrompt: "You are Avatar Bot.",
         voicePreviewLine: "Testing this carefully calibrated voice.",
         exportHash: null,
@@ -287,6 +340,7 @@ describe("backup bot avatar face style", () => {
         faceMouthFont: "formal",
         faceMouthCharacter: "△",
         faceMouthAnimation: "flicker",
+        faceMouthCoffeePucker: true,
         faceFontWeight: 725,
         faceEyeScale: 1.15,
         faceEyeOffsetX: 0.06,
@@ -301,11 +355,12 @@ describe("backup bot avatar face style", () => {
         faceBlinkOffsetX: -0.08,
         faceBlinkOffsetY: 0.06,
         faceThinkingFrames: ["·", "*", "✦", "*"],
-        authoredAudioVoiceProfile: {
-          v: 2,
-          enabled: true,
-          baseVoiceId: "voice-1",
-          pitch: 0,
+          authoredAudioVoiceProfile: {
+            v: 2,
+            enabled: true,
+            baseVoiceId: "voice-1",
+            elevenLabsEffect: "clean",
+            pitch: 0,
           warmth: 0,
           pace: 0,
           lilt: 0,
@@ -329,16 +384,17 @@ describe("backup bot avatar face style", () => {
       });
 
       db.prepare(
-        "UPDATE bots SET voice_preview_line = NULL, avatar_details_json = NULL, face_eyes_font = NULL, face_eye_character = NULL, face_eye_animation = NULL, face_mouth_font = NULL, face_mouth_character = NULL, face_mouth_animation = NULL, face_font_weight = NULL, face_eye_scale = NULL, face_eye_offset_x = NULL, face_eye_offset_y = NULL, face_eye_rotation_deg = NULL, face_mouth_scale = NULL, face_mouth_offset_x = NULL, face_mouth_offset_y = NULL, face_mouth_rotation_deg = NULL, face_blink_bar = NULL, face_blink_scale = NULL, face_blink_offset_x = NULL, face_blink_offset_y = NULL, face_thinking_frames = NULL WHERE id = ?"
+        "UPDATE bots SET name_pronunciation = '', voice_preview_line = NULL, avatar_details_json = NULL, face_eyes_font = NULL, face_eye_character = NULL, face_eye_animation = NULL, face_mouth_font = NULL, face_mouth_character = NULL, face_mouth_animation = NULL, face_mouth_coffee_pucker = 0, face_font_weight = NULL, face_eye_scale = NULL, face_eye_offset_x = NULL, face_eye_offset_y = NULL, face_eye_rotation_deg = NULL, face_mouth_scale = NULL, face_mouth_offset_x = NULL, face_mouth_offset_y = NULL, face_mouth_rotation_deg = NULL, face_blink_bar = NULL, face_blink_scale = NULL, face_blink_offset_x = NULL, face_blink_offset_y = NULL, face_thinking_frames = NULL WHERE id = ?"
       ).run("bot-1");
 
       importUserSnapshot(db, "user-1", snapshot, userKey);
 
       const restored = db
         .prepare(
-          "SELECT voice_preview_line, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, profile_picture_image_id FROM bots WHERE id = ?"
+          "SELECT name_pronunciation, voice_preview_line, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, profile_picture_image_id FROM bots WHERE id = ?"
         )
         .get("bot-1") as {
+        name_pronunciation: string;
         voice_preview_line: string | null;
         avatar_details_json: string | null;
         face_eyes_font: string | null;
@@ -347,6 +403,7 @@ describe("backup bot avatar face style", () => {
         face_mouth_font: string | null;
         face_mouth_character: string | null;
         face_mouth_animation: string | null;
+        face_mouth_coffee_pucker: number;
         face_font_weight: number | null;
         face_eye_scale: number | null;
         face_eye_offset_x: number | null;
@@ -363,6 +420,7 @@ describe("backup bot avatar face style", () => {
         face_thinking_frames: string | null;
         profile_picture_image_id: string | null;
       };
+      assert.equal(restored.name_pronunciation, "Ah-vah-tar Bot");
       assert.equal(restored.voice_preview_line, "Testing this carefully calibrated voice.");
       assert.equal(
         restored.avatar_details_json,
@@ -374,6 +432,7 @@ describe("backup bot avatar face style", () => {
       assert.equal(restored.face_mouth_font, "formal");
       assert.equal(restored.face_mouth_character, "△");
       assert.equal(restored.face_mouth_animation, "flicker");
+      assert.equal(restored.face_mouth_coffee_pucker, 1);
       assert.equal(restored.face_font_weight, 725);
       assert.equal(restored.face_eye_scale, 1.15);
       assert.equal(restored.face_eye_offset_x, 0.06);
@@ -552,7 +611,7 @@ describe("backup audio voice settings", () => {
   it("round-trips account and bot profiles without touching retired Coffee player columns", () => {
     withBackupDatabase((db, userKey) => {
       db.prepare(
-        "UPDATE users SET voice_mode = ?, voice_effects_enabled = 0, voice_volume = ?, english_voice_engine = ?, default_system_voice_name = ?, default_elevenlabs_voice_id = ?, elevenlabs_voice_bank = ?, elevenlabs_voice_model = ?, player_audio_voice_profile = ?, player_name_pronunciation = ?, prism_default_bot_audio_voice_profile = ? WHERE id = ?"
+        "UPDATE users SET voice_mode = ?, voice_effects_enabled = 0, signal_immersive_voice_effects_enabled = 1, voice_volume = ?, english_voice_engine = ?, default_system_voice_name = ?, default_elevenlabs_voice_id = ?, elevenlabs_voice_bank = ?, elevenlabs_voice_model = ?, elevenlabs_voice_collection_id = ?, player_audio_voice_profile = ?, player_name_pronunciation = ?, prism_default_bot_audio_voice_profile = ? WHERE id = ?"
       ).run(
         "babble",
         0.65,
@@ -561,9 +620,10 @@ describe("backup audio voice settings", () => {
         "eleven-global",
         JSON.stringify({ "voice-1": "eleven-a" }),
         "eleven_flash_v2_5",
+        "collection-main",
         JSON.stringify({ v: 1, baseVoiceId: "voice-3", pitch: 0, warmth: 0, pace: 0, lilt: 0 }),
         "Jair-id",
-        JSON.stringify({ v: 1, baseVoiceId: "voice-5", pitch: 0.4, warmth: 0, pace: 0, lilt: 0 }),
+        JSON.stringify({ v: 2, baseVoiceId: "voice-5", elevenLabsEffect: "radio", pitch: 0.4, warmth: 0, pace: 0, lilt: 0 }),
         "user-1"
       );
       db.prepare(
@@ -577,8 +637,8 @@ describe("backup audio voice settings", () => {
         "user-1",
         "Voice Bot",
         "You are Voice Bot.",
-        JSON.stringify({ v: 1, baseVoiceId: "voice-4", pitch: 0.2, warmth: -0.1, pace: 0.3, lilt: 0.4 }),
-        JSON.stringify({ v: 1, baseVoiceId: "voice-2", pitch: -0.4, warmth: 0.6, pace: 0, lilt: -0.2 }),
+        JSON.stringify({ v: 2, baseVoiceId: "voice-4", elevenLabsEffect: "echo", pitch: 0.2, warmth: -0.1, pace: 0.3, lilt: 0.4 }),
+        JSON.stringify({ v: 2, baseVoiceId: "voice-2", elevenLabsEffect: "robot", pitch: -0.4, warmth: 0.6, pace: 0, lilt: -0.2 }),
         "2026-01-01T00:00:00.000Z",
         "2026-01-01T00:00:00.000Z"
       );
@@ -586,18 +646,21 @@ describe("backup audio voice settings", () => {
       const snapshot = exportUserSnapshot(db, "user-1", userKey);
       assert.equal(snapshot.settings?.voiceMode, "babble");
       assert.equal(snapshot.settings?.voiceEffectsEnabled, false);
+      assert.equal(snapshot.settings?.signalImmersiveVoiceEffectsEnabled, true);
       assert.equal(snapshot.settings?.voiceVolume, 0.65);
       assert.equal(snapshot.settings?.prismDefaultBotAudioVoiceProfile?.baseVoiceId, "voice-5");
+      assert.equal(snapshot.settings?.prismDefaultBotAudioVoiceProfile?.elevenLabsEffect, "radio");
       assert.equal(snapshot.settings?.englishVoiceEngine, "elevenlabs");
       assert.equal(snapshot.settings?.defaultSystemVoiceName, "Alex");
       assert.equal(snapshot.settings?.defaultElevenLabsVoiceId, "eleven-global");
       assert.equal(snapshot.settings?.elevenLabsVoiceModel, "eleven_flash_v2_5");
+      assert.equal(snapshot.settings?.elevenLabsVoiceCollectionId, "collection-main");
       assert.equal(snapshot.settings?.elevenLabsVoiceBank?.["voice-1"], "eleven-a");
       assert.equal("playerAudioVoiceProfile" in (snapshot.settings ?? {}), false);
       assert.equal("playerNamePronunciation" in (snapshot.settings ?? {}), false);
 
       db.prepare(
-        "UPDATE users SET voice_mode = 'mute', voice_effects_enabled = 1, voice_volume = 1, english_voice_engine = 'builtin', default_system_voice_name = NULL, default_elevenlabs_voice_id = NULL, elevenlabs_voice_bank = '{}', elevenlabs_voice_model = NULL, player_audio_voice_profile = ?, player_name_pronunciation = ?, prism_default_bot_audio_voice_profile = NULL WHERE id = ?"
+        "UPDATE users SET voice_mode = 'mute', voice_effects_enabled = 1, signal_immersive_voice_effects_enabled = 0, voice_volume = 1, english_voice_engine = 'builtin', default_system_voice_name = NULL, default_elevenlabs_voice_id = NULL, elevenlabs_voice_bank = '{}', elevenlabs_voice_model = NULL, elevenlabs_voice_collection_id = NULL, player_audio_voice_profile = ?, player_name_pronunciation = ?, prism_default_bot_audio_voice_profile = NULL WHERE id = ?"
       ).run(
         JSON.stringify({ v: 1, baseVoiceId: "voice-2", pitch: 0, warmth: 0, pace: 0, lilt: 0 }),
         "Keep me",
@@ -606,16 +669,19 @@ describe("backup audio voice settings", () => {
       importUserSnapshot(db, "user-1", snapshot, userKey);
 
       const restoredUser = db.prepare(
-        "SELECT voice_mode, voice_effects_enabled, voice_volume, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, player_audio_voice_profile, player_name_pronunciation, prism_default_bot_audio_voice_profile FROM users WHERE id = ?"
+        "SELECT voice_mode, voice_effects_enabled, signal_immersive_voice_effects_enabled, voice_volume, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, elevenlabs_voice_collection_id, player_audio_voice_profile, player_name_pronunciation, prism_default_bot_audio_voice_profile FROM users WHERE id = ?"
       ).get("user-1") as Record<string, string | null>;
       assert.equal(restoredUser.voice_mode, "babble");
       assert.equal(restoredUser.voice_effects_enabled, 0);
+      assert.equal(restoredUser.signal_immersive_voice_effects_enabled, 1);
       assert.equal(restoredUser.voice_volume, 0.65);
       assert.equal(JSON.parse(restoredUser.prism_default_bot_audio_voice_profile ?? "{}").baseVoiceId, "voice-5");
+      assert.equal(JSON.parse(restoredUser.prism_default_bot_audio_voice_profile ?? "{}").elevenLabsEffect, "radio");
       assert.equal(restoredUser.english_voice_engine, "elevenlabs");
       assert.equal(restoredUser.default_system_voice_name, "Alex");
       assert.equal(restoredUser.default_elevenlabs_voice_id, "eleven-global");
       assert.equal(restoredUser.elevenlabs_voice_model, "eleven_flash_v2_5");
+      assert.equal(restoredUser.elevenlabs_voice_collection_id, "collection-main");
       assert.equal(JSON.parse(restoredUser.elevenlabs_voice_bank ?? "{}")["voice-1"], "eleven-a");
       assert.equal(JSON.parse(restoredUser.player_audio_voice_profile ?? "{}").baseVoiceId, "voice-2");
       assert.equal(restoredUser.player_name_pronunciation, "Keep me");
@@ -624,10 +690,510 @@ describe("backup audio voice settings", () => {
         "SELECT authored_audio_voice_profile, audio_voice_profile_override FROM bots WHERE id = ?"
       ).get("voice-bot") as Record<string, string>;
       assert.equal(JSON.parse(restoredBot.authored_audio_voice_profile).baseVoiceId, "voice-4");
+      assert.equal(JSON.parse(restoredBot.authored_audio_voice_profile).elevenLabsEffect, "echo");
       assert.equal(JSON.parse(restoredBot.audio_voice_profile_override).baseVoiceId, "voice-2");
+      assert.equal(JSON.parse(restoredBot.audio_voice_profile_override).elevenLabsEffect, "robot");
     });
   });
 });
+
+describe("backup Slate account data", () => {
+  it("round-trips the complete tenant-scoped Slate and Continuity graph", () => {
+    withBackupDatabase((db, userKey) => {
+      seedSlateBackupFixture(db, "user-1", "slate-one");
+
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.ok(snapshot.slate);
+      for (const [collection, rows] of Object.entries(snapshot.slate)) {
+        assert.equal(rows.length, 1, `${collection} should be present in the account backup`);
+        assert.equal("user_id" in rows[0]!, false, `${collection} must not carry a source tenant id`);
+      }
+
+      db.prepare("DELETE FROM slate_series WHERE id = ? AND user_id = ?").run(
+        "slate-one-series",
+        "user-1",
+      );
+      for (const table of SLATE_BACKUP_TEST_TABLES) {
+        const count = db
+          .prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE user_id = ?`)
+          .get("user-1") as { count: number };
+        assert.equal(count.count, 0, `${table} should be cleared before restore`);
+      }
+
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+
+      for (const table of SLATE_BACKUP_TEST_TABLES) {
+        const restored = db
+          .prepare(`SELECT COUNT(*) AS count, MIN(user_id) AS owner FROM ${table} WHERE user_id = ?`)
+          .get("user-1") as { count: number; owner: string };
+        assert.equal(restored.count, 1, `${table} should be restored`);
+        assert.equal(restored.owner, "user-1", `${table} should remain tenant scoped`);
+      }
+      const project = db
+        .prepare(
+          "SELECT series_id, manuscript, continuity_active_version FROM slate_projects WHERE id = ?",
+        )
+        .get("slate-one-project") as {
+        series_id: string;
+        manuscript: string;
+        continuity_active_version: string;
+      };
+      assert.deepEqual({ ...project }, {
+        series_id: "slate-one-series",
+        manuscript: "The restored manuscript.",
+        continuity_active_version: "0.0",
+      });
+      assert.equal(
+        (
+          db.prepare("SELECT prose FROM slate_sections WHERE id = ?").get("slate-one-section") as {
+            prose: string;
+          }
+        ).prose,
+        "The restored section.",
+      );
+      assert.equal(
+        (
+          db.prepare("SELECT status FROM slate_continuity_concerns WHERE id = ?").get(
+            "slate-one-concern",
+          ) as { status: string }
+        ).status,
+        "open",
+      );
+    });
+  });
+
+  it("rejects a Slate foreign reference owned by another tenant and rolls back", () => {
+    withBackupDatabase((db, userKey) => {
+      seedSlateBackupFixture(db, "user-1", "slate-one");
+      db.prepare(
+        `INSERT INTO users (
+          id, email, display_name, password_hash, password_salt,
+          wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag,
+          created_at, last_active_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        "user-2",
+        "user-2@example.com",
+        "User Two",
+        "hash",
+        "salt",
+        "cipher",
+        "iv",
+        "tag",
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-02T00:00:00.000Z",
+      );
+      db.prepare(
+        "INSERT INTO slate_series (id, user_id, title, description, created_at, updated_at) VALUES (?, ?, ?, '', ?, ?)",
+      ).run(
+        "tenant-two-series",
+        "user-2",
+        "Tenant Two Saga",
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-01T00:00:00.000Z",
+      );
+
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      snapshot.settings = { ...snapshot.settings!, theme: "dark" };
+      snapshot.slate!.projects[0]!.series_id = "tenant-two-series";
+
+      assert.throws(
+        () => importUserSnapshot(db, "user-1", snapshot, userKey),
+        /belongs to another user/i,
+      );
+      assert.equal(
+        (
+          db.prepare("SELECT title FROM slate_series WHERE id = ?").get("tenant-two-series") as {
+            title: string;
+          }
+        ).title,
+        "Tenant Two Saga",
+      );
+      assert.equal(
+        (db.prepare("SELECT theme FROM users WHERE id = ?").get("user-1") as { theme: string })
+          .theme,
+        "system",
+      );
+    });
+  });
+
+  it("continues to import pre-Slate version 1 account backups", () => {
+    withBackupDatabase((db, userKey) => {
+      seedSlateBackupFixture(db, "user-1", "slate-one");
+      const legacy = exportUserSnapshot(db, "user-1", userKey);
+      delete legacy.slate;
+
+      assert.doesNotThrow(() => importUserSnapshot(db, "user-1", legacy, userKey));
+      assert.equal(
+        (
+          db.prepare("SELECT COUNT(*) AS count FROM slate_projects WHERE user_id = ?").get(
+            "user-1",
+          ) as { count: number }
+        ).count,
+        1,
+      );
+    });
+  });
+});
+
+const SLATE_BACKUP_TEST_TABLES = [
+  "slate_series",
+  "slate_projects",
+  "slate_revisions",
+  "slate_versions",
+  "slate_sections",
+  "slate_section_versions",
+  "slate_manuscript_state",
+  "slate_continuity_sources",
+  "slate_continuity_entities",
+  "slate_continuity_aliases",
+  "slate_continuity_claims",
+  "slate_continuity_events",
+  "slate_continuity_relationships",
+  "slate_continuity_knowledge",
+  "slate_continuity_threads",
+  "slate_continuity_concerns",
+  "slate_continuity_generations",
+  "slate_continuity_jobs",
+] as const;
+
+function seedSlateBackupFixture(
+  db: ReturnType<typeof createDatabase>,
+  userId: string,
+  prefix: string,
+): void {
+  const now = "2026-07-16T12:00:00.000Z";
+  const seriesId = `${prefix}-series`;
+  const projectId = `${prefix}-project`;
+  const sectionId = `${prefix}-section`;
+  const sourceId = `${prefix}-source`;
+  const entityId = `${prefix}-entity`;
+  const claimId = `${prefix}-claim`;
+  const eventId = `${prefix}-event`;
+  const producerVersions = JSON.stringify({ schema: 1, extraction: 1 });
+
+  db.prepare(
+    "INSERT INTO slate_series (id, user_id, title, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+  ).run(seriesId, userId, "The Long Saga", "A restored saga.", now, now);
+  db.prepare(
+    `INSERT INTO slate_projects (
+      id, user_id, series_id, book_ordinal, title, spark, spark_wildcards_json,
+      premise, phase, structure_json, manuscript, direction,
+      continuity_active_version, continuity_target_version,
+      continuity_active_generation, continuity_upgrade_status, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    projectId,
+    userId,
+    seriesId,
+    1,
+    "Book One",
+    "A vanished crown returns.",
+    JSON.stringify({ realm: "Ashfall" }),
+    "A succession crisis.",
+    "draft",
+    "[]",
+    "The restored manuscript.",
+    "Continue quietly.",
+    "0.0",
+    "0.0",
+    0,
+    "current",
+    now,
+    now,
+  );
+  db.prepare(
+    `INSERT INTO slate_revisions (
+      id, project_id, user_id, action, scope, direction, original_text, proposed_text,
+      status, provider, model, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    `${prefix}-revision`,
+    projectId,
+    userId,
+    "rewrite",
+    "selection",
+    "Sharpen this.",
+    "Old line.",
+    "New line.",
+    "pending",
+    "local",
+    "llama3.2",
+    now,
+  );
+  db.prepare(
+    "INSERT INTO slate_versions (id, project_id, user_id, reason, structure_json, manuscript, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  ).run(`${prefix}-version`, projectId, userId, "checkpoint", "[]", "Before rewrite.", now);
+  db.prepare(
+    `INSERT INTO slate_sections (
+      id, project_id, series_id, user_id, kind, ordinal, title, summary, direction,
+      prose, locked_ranges_json, locked, status, revision, content_hash,
+      last_mutation_id, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    sectionId,
+    projectId,
+    seriesId,
+    userId,
+    "scene",
+    0,
+    "The Return",
+    "The crown appears.",
+    "Keep the witness uncertain.",
+    "The restored section.",
+    "[]",
+    0,
+    "drafted",
+    3,
+    "section-hash",
+    "mutation-3",
+    now,
+    now,
+  );
+  db.prepare(
+    `INSERT INTO slate_section_versions (
+      id, project_id, section_id, user_id, revision, reason, title, summary,
+      direction, prose, locked, status, content_hash, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    `${prefix}-section-version`,
+    projectId,
+    sectionId,
+    userId,
+    2,
+    "human_edit",
+    "The Return",
+    "The crown appears.",
+    "Keep the witness uncertain.",
+    "Earlier section text.",
+    0,
+    "drafted",
+    "section-version-hash",
+    now,
+  );
+  db.prepare(
+    `INSERT INTO slate_manuscript_state (
+      project_id, user_id, storage_version, structure_revision,
+      original_manuscript_hash, migrated_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(projectId, userId, 1, 4, "manuscript-hash", now, now);
+  db.prepare(
+    `INSERT INTO slate_continuity_sources (
+      id, user_id, series_id, project_id, section_id, scope_kind, kind,
+      source_revision, content, content_hash, authority, provider, model,
+      producer_versions_json, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    sourceId,
+    userId,
+    seriesId,
+    projectId,
+    sectionId,
+    "section",
+    "human_edit",
+    3,
+    "The crown is iron.",
+    "source-hash",
+    "authoritative",
+    "local",
+    "llama3.2",
+    producerVersions,
+    now,
+  );
+  db.prepare(
+    `INSERT INTO slate_continuity_entities (
+      id, user_id, series_id, kind, canonical_name, description, locked,
+      source_id, producer_versions_json, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    entityId,
+    userId,
+    seriesId,
+    "character",
+    "Mara",
+    "The reluctant witness.",
+    0,
+    sourceId,
+    producerVersions,
+    now,
+    now,
+  );
+  db.prepare(
+    `INSERT INTO slate_continuity_aliases (
+      id, user_id, series_id, entity_id, alias, normalized_alias, source_id, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(`${prefix}-alias`, userId, seriesId, entityId, "The Witness", "the witness", sourceId, now);
+  db.prepare(
+    `INSERT INTO slate_continuity_claims (
+      id, user_id, series_id, project_id, section_id, scope_kind,
+      subject_entity_id, predicate, value, epistemic_status, confidence,
+      anchors_json, source_id, producer_versions_json, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    claimId,
+    userId,
+    seriesId,
+    projectId,
+    sectionId,
+    "section",
+    entityId,
+    "saw",
+    "the iron crown",
+    "demonstrated",
+    0.98,
+    "[]",
+    sourceId,
+    producerVersions,
+    now,
+  );
+  db.prepare(
+    `INSERT INTO slate_continuity_events (
+      id, user_id, series_id, project_id, section_id, scope_kind, title,
+      description, chronology_key, participant_entity_ids_json,
+      location_entity_id, anchors_json, source_id, producer_versions_json, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    eventId,
+    userId,
+    seriesId,
+    projectId,
+    sectionId,
+    "section",
+    "The crown returns",
+    "Mara sees it.",
+    "book-1:scene-1",
+    JSON.stringify([entityId]),
+    entityId,
+    "[]",
+    sourceId,
+    producerVersions,
+    now,
+  );
+  db.prepare(
+    `INSERT INTO slate_continuity_relationships (
+      id, user_id, series_id, from_entity_id, to_entity_id, kind, state,
+      epistemic_status, anchors_json, source_id, producer_versions_json, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    `${prefix}-relationship`,
+    userId,
+    seriesId,
+    entityId,
+    entityId,
+    "self_trust",
+    "fractured",
+    "demonstrated",
+    "[]",
+    sourceId,
+    producerVersions,
+    now,
+  );
+  db.prepare(
+    `INSERT INTO slate_continuity_knowledge (
+      id, user_id, series_id, character_entity_id, claim_id, learned_event_id,
+      status, anchors_json, source_id, producer_versions_json, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    `${prefix}-knowledge`,
+    userId,
+    seriesId,
+    entityId,
+    claimId,
+    eventId,
+    "knows",
+    "[]",
+    sourceId,
+    producerVersions,
+    now,
+  );
+  db.prepare(
+    `INSERT INTO slate_continuity_threads (
+      id, user_id, series_id, project_id, section_id, scope_kind, label,
+      status, due_section_id, anchors_json, source_id, producer_versions_json,
+      created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    `${prefix}-thread`,
+    userId,
+    seriesId,
+    projectId,
+    sectionId,
+    "book",
+    "Who forged the crown?",
+    "open",
+    sectionId,
+    "[]",
+    sourceId,
+    producerVersions,
+    now,
+    now,
+  );
+  db.prepare(
+    `INSERT INTO slate_continuity_concerns (
+      id, user_id, series_id, project_id, section_id, scope_kind, kind,
+      severity, status, summary, explanation, claim_ids_json, anchors_json,
+      recommended_resolution, producer_versions_json, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    `${prefix}-concern`,
+    userId,
+    seriesId,
+    projectId,
+    sectionId,
+    "book",
+    "ambiguity",
+    "gentle",
+    "open",
+    "The crown's maker is unclear.",
+    "Two clues point in different directions.",
+    JSON.stringify([claimId]),
+    "[]",
+    "Choose which clue is true.",
+    producerVersions,
+    now,
+  );
+  db.prepare(
+    `INSERT INTO slate_continuity_generations (
+      id, user_id, project_id, generation, status, target_version,
+      source_fingerprint, comparison_summary, producer_versions_json,
+      created_at, completed_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    `${prefix}-generation`,
+    userId,
+    projectId,
+    1,
+    "active",
+    "0.0",
+    "fingerprint",
+    "No material drift.",
+    producerVersions,
+    now,
+    now,
+  );
+  db.prepare(
+    `INSERT INTO slate_continuity_jobs (
+      id, user_id, series_id, project_id, section_id, source_id,
+      source_revision, kind, status, attempts, input_fingerprint,
+      available_at, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    `${prefix}-job`,
+    userId,
+    seriesId,
+    projectId,
+    sectionId,
+    sourceId,
+    3,
+    "extract",
+    "completed",
+    1,
+    "job-fingerprint",
+    now,
+    now,
+    now,
+  );
+}
 
 function withBackupDatabase(
   run: (db: ReturnType<typeof createDatabase>, userKey: Buffer) => void

@@ -57,7 +57,11 @@ function mutexFor(userId: string): PerUserMutex {
   return m;
 }
 
-export type ImageJobSource = "chat_tool" | "images_panel" | "zen_wallpaper";
+export type ImageJobSource =
+  | "chat_tool"
+  | "images_panel"
+  | "zen_wallpaper"
+  | "signal_artwork";
 
 export type RunningImageJob = {
   id: string;
@@ -148,6 +152,19 @@ export async function releaseImageSlot(userId: string): Promise<void> {
       runningByUser.delete(userId);
       runningByJobId.delete(job.id);
     }
+  });
+}
+
+export async function releaseImageSlotIfOwned(
+  userId: string,
+  jobId: string,
+): Promise<boolean> {
+  return mutexFor(userId).runExclusive(() => {
+    const job = runningByUser.get(userId);
+    if (!job || job.id !== jobId) return false;
+    runningByUser.delete(userId);
+    runningByJobId.delete(job.id);
+    return true;
   });
 }
 

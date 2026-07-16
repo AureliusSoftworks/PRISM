@@ -1,3 +1,9 @@
+import {
+  buildSpeechActivityWindows,
+  speechActivityAtMs,
+  type SpeechActivityWindow,
+} from "./speechActivity.ts";
+
 export type SpeechRevealPhase = "preparing" | "playing" | "ended";
 
 export interface SpeechRevealTimeline {
@@ -12,6 +18,8 @@ export interface SpeechRevealTimeline {
   totalTokenCount?: number;
   /** True when the active phrase is the final phrase in the utterance. */
   finalSegment?: boolean;
+  /** Provider-timed regions where the face should actively articulate. */
+  speechActivityWindows: SpeechActivityWindow[] | null;
 }
 
 export interface SpeechCharacterAlignment {
@@ -45,6 +53,7 @@ export function prepareSpeechRevealTimeline(tokenSignature: string): SpeechRevea
     visiblePrefixTokenCount: 0,
     totalTokenCount: 0,
     finalSegment: true,
+    speechActivityWindows: null,
   };
 }
 
@@ -126,6 +135,10 @@ function buildSpeechRevealTimeline(args: {
       visiblePrefixTokenCount,
       totalTokenCount,
       finalSegment: args.finalSegment ?? true,
+      speechActivityWindows: buildSpeechActivityWindows(
+        args.alignment,
+        normalizedDurationMs,
+      ),
     };
   }
   const alignedRevealAtMs = args.alignment
@@ -155,6 +168,10 @@ function buildSpeechRevealTimeline(args: {
     visiblePrefixTokenCount,
     totalTokenCount,
     finalSegment: args.finalSegment ?? true,
+    speechActivityWindows: buildSpeechActivityWindows(
+      args.alignment,
+      normalizedDurationMs,
+    ),
   };
 }
 
@@ -278,6 +295,14 @@ export function speechRevealVisibleTokenCount(timeline: SpeechRevealTimeline): n
     }
   }
   return prefix + low;
+}
+
+/** Null preserves the legacy cadence when provider alignment is unavailable. */
+export function speechRevealTimelineIsVoicing(
+  timeline: SpeechRevealTimeline | null | undefined,
+): boolean | null {
+  if (!timeline || timeline.phase !== "playing") return false;
+  return speechActivityAtMs(timeline.speechActivityWindows, timeline.elapsedMs);
 }
 
 export function speechRevealTimelineComplete(timeline: SpeechRevealTimeline): boolean {

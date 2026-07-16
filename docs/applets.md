@@ -1,6 +1,6 @@
 # Prism Applets
 
-Prism applets are experience modules: Chat, Zen, Coffee, Story, Slate, and
+Prism applets are experience modules: Chat, Zen, Coffee, Signal, Story, Slate, and
 future mode surfaces. Their versions track felt product behavior, not internal
 implementation churn.
 
@@ -24,20 +24,80 @@ ship as `0.5.2` while Coffee is `v0.7` and Story is `v0.1`.
 
 | Applet | Version | Status | Notes |
 | --- | --- | --- | --- |
-| Chat | v1.2 | Active | Full playground for bots, providers, models, images, exports, and memory-aware conversations. |
-| Zen | v1.1 | Active | Calm one-to-one continuity surface; the standalone Zen lane is deprecating as this becomes Prism's default state. |
-| Coffee | v1.3 | Active | Multi-bot group table with Coffee Groups, session pacing, cups, transcripts, replay, and table controls. |
+| Chat | v1.3 | Active | Full playground for bots, providers, models, images, exports, memory-aware conversations, and per-bot online voice identity. |
+| Zen | v1.2 | Active | Calm one-to-one continuity surface with shared bot voice identity; the standalone Zen lane is deprecating as this becomes Prism's default state. |
+| Coffee | v1.4 | Active | Multi-bot group table with Coffee Groups, session pacing, cups, transcripts, replay, table controls, and synchronized online speech. |
+| Signal | v0.4 | Active | Bot-owned interview shows with animated audio pre-roll, background opening preparation, local synthesized idents, optional cached ElevenLabs music, private direction, archives, and directed replay. |
 | Story | v0.1 | Preview | Generated visual-novel episodes with bots, choices, maps, inventory, and transcripts. |
 | Arena | v0.0 | Planned | Moderated bot debate surface. |
 | Polling | v0.0 | Planned | AI-powered polling across bot groups. |
 | Feed | v0.0 | Planned | BotBook-style social feed. |
 | Games | v0.0 | Planned | Boardgame-like bot matches. |
 | Gym | v0.0 | Planned | Bot training and memory-development surface. |
-| Slate | v0.0 | Planned | Document-first writing canvas. |
+| Slate | v0.5 | Preview | Prose-fiction production desk with long-form section storage, private Continuity guidance, return sessions, recovery archives, and clean manuscript exports. |
 | Pseudo | v0.0 | Planned | Sketch/system space for almost-code. |
 | Surf | v0.0 | Planned | Simple browsing plus optional bot screen viewing. |
 
+## Slate roadmap
+
+Slate is PRISM's next major applet: a quiet prose-fiction production desk where
+the AI writes and the writer directs. Its three-region workspace combines a
+structure rail, editable manuscript canvas, and concise direction panel across
+Shape, Draft, and Refine phases.
+
+Delivery is staged:
+
+1. Standalone Slate foundation for persistent projects, structure, drafting,
+   direct edits, revision previews, locks, and version safety.
+2. Story -> Slate through an explicit `Develop in Slate` narrative source
+   snapshot.
+3. Slate -> Story through an explicit `Rehearse in Story` scene or outline
+   snapshot.
+4. Selective, provenance-aware incorporation of rehearsal discoveries back into
+   Slate.
+
+Story remains a separate preview applet. It is the procedural "discover what
+happens" experience; Slate is the editorial "turn this into something good"
+workspace. Cross-applet stages never silently synchronize or rewrite content.
+See [Slate V1 Product and UX Contract](./slate-v1-product-ux-contract.md).
+The phased Continuity, Review Circle, Atmosphere, safety, export, and publishing
+contracts are indexed in [Slate Master Plan](./slate-master-plan.md).
+
+Slate stayed planned `v0.0` until its first functional vertical slice became
+usable end to end. It entered preview at `v0.1` and is now `v0.5`; later snapshot
+stages do not block the standalone preview.
+
 ## Changelog
+
+### 2026-07-16
+
+- Bumped `Slate` to preview `v0.5` for long-form focused sections, private
+  Continuity concerns and reconciliation, grounded return sessions, portable
+  recovery archives, and clean DOCX/Markdown/text export.
+- Bumped `Signal` to `v0.4` for its skippable show-branded pre-roll, locally
+  synthesized intro ident, optional cached ElevenLabs music, and background
+  opening-turn preparation.
+- Bumped `Chat` to `v1.3` and `Zen` to `v1.2` for per-bot online voice
+  identity, pronunciation, saved performance controls, and reliable previews.
+- Bumped `Coffee` to `v1.4` for synchronized online speech, canonical arrivals,
+  replay, refills, Auto routing, and responsive table presentation.
+- Bumped `Signal` to `v0.3` for source-linked show identity, scoped artwork
+  regeneration, production progress, and immersive ElevenLabs reactions.
+- Bumped `Slate` to preview `v0.4` for refined navigation, themes, settings,
+  and production-workspace polish.
+
+### 2026-07-15
+
+- Bumped `Slate` to preview `v0.3` with shared PRISM wordmark and utility
+  navigation plus branded light/dark workspace treatments.
+- Bumped `Slate` to preview `v0.2` with optional `{WILDCARD}` project sparks,
+  preview/reroll controls, and persisted source-template provenance.
+- Promoted `Slate` to preview `v0.1` for persistent prose projects, generated
+  structure, scoped drafting, direct autosaved edits, locks, and explicit
+  revision previews with accept/reject version safety.
+- Added `Signal v0.2`, the bot-owned interview-show applet with editable host-shaped
+  brands, persistent generated-or-procedural studios and logos, private producer
+  direction, episode archives, and directed replay.
 
 ### 2026-07-14
 

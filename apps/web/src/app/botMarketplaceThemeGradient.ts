@@ -57,7 +57,7 @@ export function buildBotMarketplaceThemeVisualStyle(
       ? colors
       : theme === "dark"
         ? ["#626875", "#24262d", "#a6a095"]
-        : ["#d9d5ca", "#f7f3ea", "#a9b0ba"];
+        : ["#cfdbe5", "#f4f9fd", "#9fb2c2"];
   const nodeCount = Math.min(9, Math.max(4, gradientColors.length * 2));
   const nodeLayers: string[] = [];
   for (let index = 0; index < nodeCount; index += 1) {

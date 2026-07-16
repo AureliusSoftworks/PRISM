@@ -1,15 +1,51 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-export async function readJsonBody(req: IncomingMessage): Promise<unknown> {
+export const MAX_JSON_REQUEST_BODY_BYTES = 80 * 1024 * 1024;
+
+export async function readJsonBody(
+  req: IncomingMessage,
+  maxBytes = MAX_JSON_REQUEST_BODY_BYTES
+): Promise<unknown> {
+  const contentLength = Number(req.headers["content-length"] ?? 0);
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+    throw new HttpError(413, "JSON request body is too large.");
+  }
   const chunks: Buffer[] = [];
+  let totalBytes = 0;
   for await (const chunk of req) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    totalBytes += bytes.length;
+    if (totalBytes > maxBytes) {
+      throw new HttpError(413, "JSON request body is too large.");
+    }
+    chunks.push(bytes);
   }
   if (chunks.length === 0) {
     return {};
   }
   const raw = Buffer.concat(chunks).toString("utf8");
   return JSON.parse(raw);
+}
+
+export async function readBinaryBody(
+  req: IncomingMessage,
+  maxBytes: number,
+): Promise<Uint8Array> {
+  const contentLength = Number(req.headers["content-length"] ?? 0);
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+    throw new HttpError(413, "Binary request body is too large.");
+  }
+  const chunks: Buffer[] = [];
+  let totalBytes = 0;
+  for await (const chunk of req) {
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    totalBytes += bytes.length;
+    if (totalBytes > maxBytes) {
+      throw new HttpError(413, "Binary request body is too large.");
+    }
+    chunks.push(bytes);
+  }
+  return Buffer.concat(chunks);
 }
 
 export class HttpError extends Error {

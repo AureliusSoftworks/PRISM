@@ -132,7 +132,7 @@ export function ComposerBotMentionPopover({
     return () => {
       window.cancelAnimationFrame(frame);
     };
-  }, [open, caretRect, portalStyle, bots.length]);
+  }, [open, caretRect, portalStyle, bots.length, excludeInteractionRef]);
 
   const safeHighlight = Math.max(0, Math.min(highlightIndex, Math.max(0, bots.length - 1)));
 

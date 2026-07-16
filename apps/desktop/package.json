@@ -1,9 +1,10 @@
 {
   "name": "@localai/desktop",
-  "version": "0.9.2",
+  "version": "0.10.0",
   "private": true,
   "type": "module",
   "scripts": {
+    "test": "node --test --experimental-strip-types src-tauri/*.test.ts",
     "icons": "node scripts/run-tauri.mjs icon ../../design/app-icons/prism-client-app-icon.png --output src-tauri/icons",
     "dev": "node scripts/run-tauri.mjs dev",
     "build": "npm run icons && node scripts/run-tauri.mjs build",

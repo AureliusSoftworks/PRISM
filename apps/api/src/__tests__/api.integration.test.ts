@@ -4,8 +4,13 @@ import { createServer, type AddressInfo } from "node:http";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import sharp from "sharp";
 import { getAppConfig } from "@localai/config";
-import { normalizeBotAudioVoiceProfileV1 } from "@localai/shared";
+import {
+  COFFEE_TOPIC_MAX_LENGTH,
+  botPowerSourceHashV1,
+  normalizeBotAudioVoiceProfileV1,
+} from "@localai/shared";
 import {
   createDeterministicProvider,
   createFetchRecorder,
@@ -24,6 +29,12 @@ const deterministicReply = "Deterministic API reply with enough detail to stay v
 const deterministicProvider = createDeterministicProvider([deterministicReply]);
 deterministicProvider.diagnosticModel = "deterministic-test-model";
 const providerFactoryCalls: string[] = [];
+const builtinVoiceTexts: string[] = [];
+const auxiliaryProviderFactoryCalls: Array<{
+  prismDefaultLlmModel: string | null | undefined;
+  secondaryOllamaHost: string | null | undefined;
+  experimentalDualOllama: boolean | undefined;
+}> = [];
 function deterministicVoiceWave(): Buffer {
   const sampleRate = 24_000;
   const sampleCount = 240;
@@ -64,8 +75,16 @@ const server = createServer(
       providerFactoryCalls.push(provider);
       return deterministicProvider;
     },
-    auxiliaryProviderFactory: () => deterministicProvider,
-    builtinVoiceWaveGenerator: async ({ profile }) => {
+    auxiliaryProviderFactory: (prismDefaultLlmModel, options) => {
+      auxiliaryProviderFactoryCalls.push({
+        prismDefaultLlmModel,
+        secondaryOllamaHost: options.secondaryOllamaHost,
+        experimentalDualOllama: options.experimentalDualOllama,
+      });
+      return deterministicProvider;
+    },
+    builtinVoiceWaveGenerator: async ({ profile, text }) => {
+      builtinVoiceTexts.push(text);
       if (normalizeBotAudioVoiceProfileV1(profile).systemVoiceName === "Unavailable Test") {
         throw new Error("System voice is still loading.");
       }
@@ -387,6 +406,200 @@ describe("API request integration", () => {
     fetchRecorder.calls.length = 0;
   });
 
+  it("forwards bounded initial topics through direct and saved-group Coffee routes", async () => {
+    const client = createClient();
+    const email = "coffee-initial-topic@example.com";
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({ username: email, password: "coffee-initial-topic-password" })
+    );
+    assert.equal(register.status, 201);
+    const user = db
+      .prepare("SELECT id FROM users WHERE email = ?")
+      .get(email) as { id: string };
+    const createdAt = "2026-07-14T20:30:00.000Z";
+    const botIds = ["coffee-initial-topic-bot-1", "coffee-initial-topic-bot-2"];
+    const insertBot = db.prepare(
+      `INSERT INTO bots
+         (id, user_id, name, system_prompt, online_enabled, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 0, ?, ?)`
+    );
+    insertBot.run(
+      botIds[0],
+      user.id,
+      "Listener",
+      "You listen closely and answer the question at hand.",
+      createdAt,
+      createdAt
+    );
+    insertBot.run(
+      botIds[1],
+      user.id,
+      "Builder",
+      "You turn a prompt into a practical next step.",
+      createdAt,
+      createdAt
+    );
+    const exactTopic = `Listen up: ${"x".repeat(COFFEE_TOPIC_MAX_LENGTH - 11)}`;
+
+    const direct = await client.request(
+      "/api/coffee/sessions",
+      jsonInit({ groupBotIds: botIds, initialTopic: `  ${exactTopic}  ` })
+    );
+    const directPayload = await json(direct);
+    assert.equal(direct.status, 200, JSON.stringify(directPayload));
+    assert.equal(directPayload.conversation.coffeeTopic, exactTopic);
+    assert.equal("coffeeStarterTopics" in directPayload, false);
+
+    const genericDirect = await client.request(
+      "/api/coffee/sessions",
+      jsonInit({ groupBotIds: botIds })
+    );
+    const genericDirectPayload = await json(genericDirect);
+    assert.equal(genericDirect.status, 200, JSON.stringify(genericDirectPayload));
+    assert.equal(genericDirectPayload.conversation.coffeeTopic ?? null, null);
+    assert.ok(genericDirectPayload.coffeeStarterTopics.length > 0);
+
+    const oversizedDirect = await client.request(
+      "/api/coffee/sessions",
+      jsonInit({
+        groupBotIds: botIds,
+        initialTopic: "x".repeat(COFFEE_TOPIC_MAX_LENGTH + 1),
+      })
+    );
+    const oversizedDirectPayload = await json(oversizedDirect);
+    assert.equal(oversizedDirect.status, 400, JSON.stringify(oversizedDirectPayload));
+    assert.equal(oversizedDirectPayload.error, "Coffee topic is too long.");
+
+    const createdGroup = await client.request(
+      "/api/coffee/groups",
+      jsonInit({ name: "Prompted Table", groupBotIds: botIds })
+    );
+    const createdGroupPayload = await json(createdGroup);
+    assert.equal(createdGroup.status, 201, JSON.stringify(createdGroupPayload));
+    const groupId = createdGroupPayload.group.id as string;
+
+    const savedGroupSession = await client.request(
+      `/api/coffee/groups/${encodeURIComponent(groupId)}/sessions`,
+      jsonInit({ initialTopic: "  What should this room build next?  " })
+    );
+    const savedGroupPayload = await json(savedGroupSession);
+    assert.equal(savedGroupSession.status, 201, JSON.stringify(savedGroupPayload));
+    assert.equal(
+      savedGroupPayload.conversation.coffeeTopic,
+      "What should this room build next?"
+    );
+    assert.equal(savedGroupPayload.conversation.coffeeGroupId, groupId);
+    assert.equal("coffeeStarterTopics" in savedGroupPayload, false);
+
+    const genericSavedGroupSession = await client.request(
+      `/api/coffee/groups/${encodeURIComponent(groupId)}/sessions`,
+      jsonInit({})
+    );
+    const genericSavedGroupPayload = await json(genericSavedGroupSession);
+    assert.equal(
+      genericSavedGroupSession.status,
+      201,
+      JSON.stringify(genericSavedGroupPayload)
+    );
+    assert.equal(genericSavedGroupPayload.conversation.coffeeTopic ?? null, null);
+    assert.ok(genericSavedGroupPayload.coffeeStarterTopics.length > 0);
+
+    const oversizedSavedGroupSession = await client.request(
+      `/api/coffee/groups/${encodeURIComponent(groupId)}/sessions`,
+      jsonInit({ initialTopic: "x".repeat(COFFEE_TOPIC_MAX_LENGTH + 1) })
+    );
+    const oversizedSavedGroupPayload = await json(oversizedSavedGroupSession);
+    assert.equal(
+      oversizedSavedGroupSession.status,
+      400,
+      JSON.stringify(oversizedSavedGroupPayload)
+    );
+    assert.equal(oversizedSavedGroupPayload.error, "Coffee topic is too long.");
+    fetchRecorder.calls.length = 0;
+  });
+
+  it("forwards exact attendance through saved-group Coffee routes", async () => {
+    const client = createClient();
+    const email = "coffee-force-attendance@example.com";
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({ username: email, password: "coffee-force-attendance-password" })
+    );
+    assert.equal(register.status, 201);
+    const user = db
+      .prepare("SELECT id FROM users WHERE email = ?")
+      .get(email) as { id: string };
+    const createdAt = "2026-07-14T20:45:00.000Z";
+    const botIds = [
+      "coffee-force-attendance-bot-1",
+      "coffee-force-attendance-bot-2",
+      "coffee-force-attendance-bot-3",
+    ];
+    const insertBot = db.prepare(
+      `INSERT INTO bots
+         (id, user_id, name, system_prompt, online_enabled, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 0, ?, ?)`
+    );
+    for (const [index, botId] of botIds.entries()) {
+      insertBot.run(
+        botId,
+        user.id,
+        `Invitee ${index + 1}`,
+        "Join the table and respond directly to its topic.",
+        createdAt,
+        createdAt
+      );
+    }
+    const createdGroup = await client.request(
+      "/api/coffee/groups",
+      jsonInit({ name: "Exact Attendance Table", groupBotIds: botIds })
+    );
+    const createdGroupPayload = await json(createdGroup);
+    assert.equal(createdGroup.status, 201, JSON.stringify(createdGroupPayload));
+    const groupId = createdGroupPayload.group.id as string;
+    const baseline = await client.request(
+      `/api/coffee/groups/${encodeURIComponent(groupId)}/sessions`,
+      jsonInit({})
+    );
+    const baselinePayload = await json(baseline);
+    assert.equal(baseline.status, 201, JSON.stringify(baselinePayload));
+    db.prepare(
+      `UPDATE coffee_bot_social_state
+          SET disposition = ?, values_friction = ?, restraint = ?, engagement = ?, leave_pressure = ?
+        WHERE conversation_id = ? AND bot_id = ?`
+    ).run(
+      0.04,
+      0.96,
+      0.82,
+      0.08,
+      0.94,
+      baselinePayload.conversation.id,
+      botIds[1]
+    );
+
+    const originalRandom = Math.random;
+    Math.random = () => 0;
+    let forcedSession: Awaited<ReturnType<typeof client.request>>;
+    try {
+      forcedSession = await client.request(
+        `/api/coffee/groups/${encodeURIComponent(groupId)}/sessions`,
+        jsonInit({ forceAttendance: true })
+      );
+    } finally {
+      Math.random = originalRandom;
+    }
+    const forcedPayload = await json(forcedSession);
+
+    assert.equal(forcedSession.status, 201, JSON.stringify(forcedPayload));
+    assert.deepEqual(
+      [...forcedPayload.conversation.botGroupIds].sort(),
+      [...botIds].sort()
+    );
+    assert.deepEqual(forcedPayload.conversation.coffeeAbsentBotIds ?? [], []);
+    fetchRecorder.calls.length = 0;
+  });
+
   it("stores Brave Search credentials encrypted and returns only connection state", async () => {
     const client = createClient();
     const email = "brave-settings@example.com";
@@ -444,7 +657,60 @@ describe("API request integration", () => {
     assert.equal(clearedPayload.settings.braveSearchApiKeySource, "none");
   });
 
-  it("uses account-wide voice defaults and ignores retired Coffee player voice fields", async () => {
+  it("routes bot power compilation through the configured paired auxiliary host", async () => {
+    const client = createClient();
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "paired-power-compiler@example.com",
+        password: "paired-power-compiler-password",
+      })
+    );
+    assert.equal(register.status, 201);
+
+    db.prepare(
+      `UPDATE users
+          SET prism_default_llm_model = ?,
+              secondary_ollama_host = ?,
+              experimental_dual_ollama_enabled = 0
+        WHERE email = ?`
+    ).run(
+      "ollama-secondary:gemma3:latest",
+      "http://127.0.0.1:11434",
+      "paired-power-compiler@example.com"
+    );
+
+    const callStart = auxiliaryProviderFactoryCalls.length;
+    const response = await client.request(
+      "/api/bot-powers/compile",
+      jsonInit({
+        botName: "Darth Vader",
+        systemPrompt: "A commanding machine-assisted presence.",
+        powers: [
+          {
+            version: 1,
+            id: "mechanical-cadence",
+            name: "Mechanical cadence",
+            intent: "Speaks with a clipped mechanical rhythm.",
+            enabled: true,
+            compileStatus: "draft",
+            compiled: null,
+          },
+        ],
+      })
+    );
+    assert.equal(response.status, 200);
+    assert.equal((await json(response)).ok, true);
+    assert.deepEqual(auxiliaryProviderFactoryCalls.slice(callStart), [
+      {
+        prismDefaultLlmModel: "ollama-secondary:gemma3:latest",
+        secondaryOllamaHost: "http://127.0.0.1:11434",
+        experimentalDualOllama: false,
+      },
+    ]);
+  });
+
+  it("ignores retired account-wide voice defaults and Coffee player voice fields", async () => {
     const client = createClient();
     const register = await client.request(
       "/api/auth/register",
@@ -478,8 +744,8 @@ describe("API request integration", () => {
     const settings = (await json(loaded)).settings;
     assert.equal("playerAudioVoiceProfile" in settings, false);
     assert.equal("playerNamePronunciation" in settings, false);
-    assert.equal(settings.defaultSystemVoiceName, "Alex");
-    assert.equal(settings.defaultElevenLabsVoiceId, "eleven-global");
+    assert.equal("defaultSystemVoiceName" in settings, false);
+    assert.equal("defaultElevenLabsVoiceId" in settings, false);
     assert.equal(settings.autoModeEnabled, true);
     assert.deepEqual(settings.autoFallbackChain, {
       v: 1,
@@ -622,6 +888,324 @@ describe("API request integration", () => {
     assert.equal(missing.status, 404);
   });
 
+  it("dispatches authenticated Signal name regeneration through the real route table", async () => {
+    const client = createClient();
+    const registration = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "signal-name-route@example.com",
+        password: "signal-name-route-password",
+      }),
+    );
+    assert.equal(registration.status, 201);
+    const userId = String((await json(registration)).user.id);
+    const hostId = "signal-name-route-host";
+    const createdAt = "2026-07-15T00:00:00.000Z";
+    db.prepare(
+      `INSERT INTO bots
+         (id, user_id, name, system_prompt, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(
+      hostId,
+      userId,
+      "Signal Name Route Host",
+      "A precise host with a taste for unexpected titles.",
+      createdAt,
+      createdAt,
+    );
+
+    const showResponse = await client.request(
+      "/api/botcast/shows",
+      jsonInit({ hostBotId: hostId }),
+    );
+    const showPayload = await json(showResponse);
+    assert.equal(showResponse.status, 201, JSON.stringify(showPayload));
+    const showId = String(showPayload.show.id);
+    const providerCallsBefore = deterministicProvider.calls.length;
+
+    const nameResponse = await client.request(
+      `/api/botcast/shows/${encodeURIComponent(showId)}/name`,
+      jsonInit({ preferredProvider: "local" }),
+    );
+    const namePayload = await json(nameResponse);
+    assert.notEqual(nameResponse.status, 404, JSON.stringify(namePayload));
+    assert.equal(nameResponse.status, 200, JSON.stringify(namePayload));
+    assert.equal(namePayload.ok, true);
+    assert.equal(namePayload.show.id, showId);
+    assert.equal(typeof namePayload.generated, "boolean");
+    const providerCallCount = deterministicProvider.calls.length - providerCallsBefore;
+    assert.ok(
+      providerCallCount >= 1 && providerCallCount <= 3,
+      `expected one initial Signal name request plus at most two deliberate retries, received ${providerCallCount}`,
+    );
+  });
+
+  it("locks Signal episodes to the selected online provider without weakening LOCAL mode", async () => {
+    const client = createClient();
+    const registration = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "signal-model-routing@example.com",
+        password: "signal-model-routing",
+      }),
+    );
+    assert.equal(registration.status, 201);
+    const userId = String((await json(registration)).user.id);
+    const createdAt = "2026-07-15T00:00:00.000Z";
+    const insertBot = db.prepare(
+      `INSERT INTO bots
+         (id, user_id, name, system_prompt, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    );
+    insertBot.run(
+      "signal-model-host",
+      userId,
+      "Signal Model Host",
+      "A provider-aware host.",
+      createdAt,
+      createdAt,
+    );
+    insertBot.run(
+      "signal-model-guest",
+      userId,
+      "Signal Model Guest",
+      "A provider-aware guest.",
+      createdAt,
+      createdAt,
+    );
+    const showResponse = await client.request(
+      "/api/botcast/shows",
+      jsonInit({ hostBotId: "signal-model-host" }),
+    );
+    assert.equal(showResponse.status, 201);
+    const showId = String((await json(showResponse)).show.id);
+
+    db.prepare(
+      `UPDATE users
+       SET preferred_provider = 'openai',
+           preferred_online_model = 'gpt-account-default',
+           preferred_local_model = 'gemma-account-default'
+       WHERE id = ?`,
+    ).run(userId);
+    const onlineResponse = await client.request(
+      `/api/botcast/shows/${encodeURIComponent(showId)}/episodes`,
+      jsonInit({
+        guestBotId: "signal-model-guest",
+        topic: "Route this online recording",
+        preferredProvider: "anthropic",
+        modelOverride: "claude-signal",
+      }),
+    );
+    const onlinePayload = await json(onlineResponse);
+    assert.equal(onlineResponse.status, 201, JSON.stringify(onlinePayload));
+    assert.equal(onlinePayload.episode.provider, "anthropic");
+    assert.equal(onlinePayload.episode.model, "claude-signal");
+    assert.equal(onlinePayload.episode.responseMode, "online");
+
+    db.prepare("UPDATE users SET preferred_provider = 'local' WHERE id = ?").run(
+      userId,
+    );
+    const localResponse = await client.request(
+      `/api/botcast/shows/${encodeURIComponent(showId)}/episodes`,
+      jsonInit({
+        guestBotId: "signal-model-guest",
+        topic: "Keep this recording local",
+        preferredProvider: "anthropic",
+        modelOverride: "claude-stale-selection",
+      }),
+    );
+    const localPayload = await json(localResponse);
+    assert.equal(localResponse.status, 201, JSON.stringify(localPayload));
+    assert.equal(localPayload.episode.provider, "local");
+    assert.equal(localPayload.episode.model, "gemma-account-default");
+    assert.equal(localPayload.episode.responseMode, "local");
+
+    db.prepare(
+      "UPDATE users SET auto_switch_model = 1, auto_fallback_chain = ? WHERE id = ?",
+    ).run(
+      JSON.stringify({
+        v: 1,
+        fallbacks: [
+          { provider: "openai", model: "gpt-signal-fallback" },
+          { provider: "anthropic", model: "claude-signal-fallback" },
+        ],
+      }),
+      userId,
+    );
+    const autoResponse = await client.request(
+      `/api/botcast/shows/${encodeURIComponent(showId)}/episodes`,
+      jsonInit({
+        guestBotId: "signal-model-guest",
+        topic: "Recover this recording automatically",
+        preferredProvider: "local",
+        modelOverride: "gemma-account-default",
+        responseMode: "auto",
+      }),
+    );
+    const autoPayload = await json(autoResponse);
+    assert.equal(autoResponse.status, 201, JSON.stringify(autoPayload));
+    assert.equal(autoPayload.episode.provider, "local");
+    assert.equal(autoPayload.episode.model, "gemma-account-default");
+    assert.equal(autoPayload.episode.responseMode, "auto");
+  });
+
+  it("uploads Signal assets and deletes episodes and shows through tenant-safe HTTP routes", async () => {
+    const owner = createClient();
+    const stranger = createClient();
+    const ownerRegistration = await owner.request(
+      "/api/auth/register",
+      jsonInit({ username: "signal-delete-owner@example.com", password: "signal-delete-owner" })
+    );
+    const strangerRegistration = await stranger.request(
+      "/api/auth/register",
+      jsonInit({ username: "signal-delete-stranger@example.com", password: "signal-delete-stranger" })
+    );
+    assert.equal(ownerRegistration.status, 201);
+    assert.equal(strangerRegistration.status, 201);
+    const ownerId = String((await json(ownerRegistration)).user.id);
+
+    const hostId = "signal-route-host";
+    const guestId = "signal-route-guest";
+    const createdAt = "2026-07-15T00:00:00.000Z";
+    const insertSignalBot = db.prepare(
+      `INSERT INTO bots
+         (id, user_id, name, system_prompt, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    );
+    insertSignalBot.run(
+      hostId,
+      ownerId,
+      "Signal Route Host",
+      "A precise and curious interviewer.",
+      createdAt,
+      createdAt
+    );
+    insertSignalBot.run(
+      guestId,
+      ownerId,
+      "Signal Route Guest",
+      "A thoughtful and candid guest.",
+      createdAt,
+      createdAt
+    );
+
+    const showResponse = await owner.request(
+      "/api/botcast/shows",
+      jsonInit({ hostBotId: hostId })
+    );
+    assert.equal(showResponse.status, 201);
+    const showId = String((await json(showResponse)).show.id);
+    const uploadedAssetBytes = await sharp({
+      create: {
+        width: 8,
+        height: 6,
+        channels: 4,
+        background: { r: 38, g: 96, b: 164, alpha: 1 },
+      },
+    }).png().toBuffer();
+    const uploadedAssetDataUrl =
+      `data:image/png;base64,${uploadedAssetBytes.toString("base64")}`;
+    const uploadedImageIds: string[] = [];
+    for (const slot of ["day-studio", "night-studio", "logo"] as const) {
+      const uploadResponse = await owner.request(
+        `/api/botcast/shows/${encodeURIComponent(showId)}/assets/${slot}/upload`,
+        jsonInit({ dataUrl: uploadedAssetDataUrl }),
+      );
+      const uploadPayload = await json(uploadResponse);
+      assert.equal(uploadResponse.status, 201, JSON.stringify(uploadPayload));
+      assert.equal(uploadPayload.image.origin, "botcast");
+      assert.equal(uploadPayload.image.provider, "upload");
+      assert.equal(uploadPayload.image.botId, hostId);
+      uploadedImageIds.push(String(uploadPayload.image.id));
+      const assignedImageId = slot === "day-studio"
+        ? uploadPayload.show.dayAtmosphere.imageId
+        : slot === "night-studio"
+          ? uploadPayload.show.nightAtmosphere.imageId
+          : uploadPayload.show.logo.imageId;
+      assert.equal(assignedImageId, uploadPayload.image.id);
+    }
+    assert.equal(
+      (db.prepare(
+        "SELECT COUNT(*) AS count FROM images WHERE user_id = ? AND origin = 'botcast' AND provider = 'upload'",
+      ).get(ownerId) as { count: number }).count,
+      3,
+    );
+    const foreignAssetUpload = await stranger.request(
+      `/api/botcast/shows/${encodeURIComponent(showId)}/assets/logo/upload`,
+      jsonInit({ dataUrl: uploadedAssetDataUrl }),
+    );
+    assert.equal(foreignAssetUpload.status, 400);
+    const episodeResponse = await owner.request(
+      `/api/botcast/shows/${encodeURIComponent(showId)}/episodes`,
+      jsonInit({ guestBotId: guestId, topic: "Why routes deserve tests" })
+    );
+    assert.equal(episodeResponse.status, 201);
+    const episodeId = String((await json(episodeResponse)).episode.id);
+
+    const foreignEpisodeDelete = await stranger.request(
+      `/api/botcast/episodes/${encodeURIComponent(episodeId)}`,
+      { method: "DELETE" }
+    );
+    const foreignShowDelete = await stranger.request(
+      `/api/botcast/shows/${encodeURIComponent(showId)}`,
+      { method: "DELETE" }
+    );
+    assert.equal(foreignEpisodeDelete.status, 404);
+    assert.equal(foreignShowDelete.status, 404);
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS count FROM botcast_episodes WHERE id = ? AND user_id = ?")
+        .get(episodeId, ownerId) as { count: number }).count,
+      1
+    );
+
+    const episodeDelete = await owner.request(
+      `/api/botcast/episodes/${encodeURIComponent(episodeId)}`,
+      { method: "DELETE" }
+    );
+    assert.equal(episodeDelete.status, 200);
+    assert.deepEqual(await json(episodeDelete), { ok: true });
+    assert.equal(
+      (await owner.request(`/api/botcast/episodes/${encodeURIComponent(episodeId)}`, {
+        method: "DELETE",
+      })).status,
+      404
+    );
+
+    const replacementEpisode = await owner.request(
+      `/api/botcast/shows/${encodeURIComponent(showId)}/episodes`,
+      jsonInit({ guestBotId: guestId, topic: "The show cascade" })
+    );
+    assert.equal(replacementEpisode.status, 201);
+    const showDelete = await owner.request(
+      `/api/botcast/shows/${encodeURIComponent(showId)}`,
+      { method: "DELETE" }
+    );
+    assert.equal(showDelete.status, 200);
+    assert.deepEqual(await json(showDelete), { ok: true });
+    assert.equal(
+      (await owner.request(`/api/botcast/shows/${encodeURIComponent(showId)}`, {
+        method: "DELETE",
+      })).status,
+      404
+    );
+    const listedShows = await owner.request("/api/botcast/shows");
+    assert.equal(listedShows.status, 200);
+    assert.deepEqual((await json(listedShows)).shows, []);
+    assert.equal(
+      (db.prepare(
+        `SELECT COUNT(*) AS count FROM images
+          WHERE user_id = ? AND id IN (${uploadedImageIds.map(() => "?").join(", ")})`,
+      ).get(ownerId, ...uploadedImageIds) as { count: number }).count,
+      3,
+      "replacing or deleting a show keeps prior uploaded artwork available in Images",
+    );
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS count FROM botcast_episodes WHERE user_id = ?")
+        .get(ownerId) as { count: number }).count,
+      0
+    );
+  });
+
   it("registers, authenticates, scopes conversations, gates local image generation, and logs out", async () => {
     const first = createClient();
     const register = await first.request(
@@ -691,6 +1275,7 @@ describe("API request integration", () => {
         faceEyeRotationDeg: -25,
         faceMouthCharacter: "△",
         faceMouthAnimation: "wobble",
+        faceMouthCoffeePucker: true,
         faceBlinkScale: 1.2,
         faceBlinkOffsetX: -0.08,
         faceBlinkOffsetY: 0.06,
@@ -702,6 +1287,7 @@ describe("API request integration", () => {
     assert.equal(createdPayload.bot.face_eye_animation, undefined);
     assert.equal(createdPayload.bot.face_eye_rotation_deg, -25);
     assert.equal(createdPayload.bot.face_mouth_animation, "wobble");
+    assert.equal(createdPayload.bot.face_mouth_coffee_pucker, 1);
     assert.equal(createdPayload.bot.face_blink_scale, 1.2);
     assert.equal(createdPayload.bot.face_blink_offset_x, -0.08);
     assert.equal(createdPayload.bot.face_blink_offset_y, 0.06);
@@ -714,6 +1300,7 @@ describe("API request integration", () => {
         faceEyeAnimation: "flicker",
         faceEyeRotationDeg: 35,
         faceMouthAnimation: "pulsate",
+        faceMouthCoffeePucker: false,
         faceBlinkScale: 0.85,
         faceBlinkOffsetX: 0.1,
         faceBlinkOffsetY: -0.12,
@@ -725,6 +1312,7 @@ describe("API request integration", () => {
     assert.equal(updatedPayload.bot.face_eye_animation, "none");
     assert.equal(updatedPayload.bot.face_eye_rotation_deg, 35);
     assert.equal(updatedPayload.bot.face_mouth_animation, "pulsate");
+    assert.equal(updatedPayload.bot.face_mouth_coffee_pucker, 0);
     assert.equal(updatedPayload.bot.face_blink_scale, 0.85);
     assert.equal(updatedPayload.bot.face_blink_offset_x, 0.1);
     assert.equal(updatedPayload.bot.face_blink_offset_y, -0.12);
@@ -738,6 +1326,7 @@ describe("API request integration", () => {
         faceEyeRotationDeg: -45,
         faceMouthCharacter: "△",
         faceMouthAnimation: "wobble",
+        faceMouthCoffeePucker: true,
         faceBlinkScale: 1.25,
         faceBlinkOffsetX: -0.06,
         faceBlinkOffsetY: 0.08,
@@ -748,6 +1337,10 @@ describe("API request integration", () => {
     assert.equal(defaultPayload.defaultBot.prismDefaultBotFaceEyeAnimation, undefined);
     assert.equal(defaultPayload.defaultBot.prismDefaultBotFaceEyeRotationDeg, -45);
     assert.equal(defaultPayload.defaultBot.prismDefaultBotFaceMouthAnimation, "wobble");
+    assert.equal(
+      defaultPayload.defaultBot.prismDefaultBotFaceMouthCoffeePucker,
+      true
+    );
     assert.equal(defaultPayload.defaultBot.prismDefaultBotFaceBlinkScale, 1.25);
     assert.equal(defaultPayload.defaultBot.prismDefaultBotFaceBlinkOffsetX, -0.06);
     assert.equal(defaultPayload.defaultBot.prismDefaultBotFaceBlinkOffsetY, 0.08);
@@ -785,6 +1378,63 @@ describe("API request integration", () => {
           !/api\.openai\.com|api\.anthropic\.com|api\.elevenlabs\.io|qdrant/i.test(input)
       )
     );
+  });
+
+  it("sends ready bot Powers through the real Chat and Zen route", async () => {
+    const client = createClient();
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({ username: "powered-chat@example.com", password: "powered-chat-password" })
+    );
+    assert.equal(register.status, 201);
+    const name = "Respirator";
+    const intent = "Mechanical breathing punctuates each answer.";
+    const created = await client.request(
+      "/api/bots",
+      jsonInit({
+        name: "Powered Vader",
+        powers: [{
+          version: 1,
+          id: "respirator",
+          name,
+          intent,
+          enabled: true,
+          compileStatus: "ready",
+          compiled: {
+            version: 1,
+            sourceHash: botPowerSourceHashV1(name, intent),
+            selfCue: "Breathe mechanically during each answer.",
+            observerCue: "Others hear a mechanical breath.",
+            effects: [],
+            ruleLabels: ["Mechanical breathing"],
+          },
+        }],
+      })
+    );
+    assert.equal(created.status, 201);
+    const botId = String((await json(created)).bot.id);
+    const callStart = deterministicProvider.calls.length;
+
+    const response = await client.request(
+      "/api/chat",
+      jsonInit({
+        message: "Show me that this Power is active.",
+        mode: "zen",
+        facetBotId: botId,
+        preferredProvider: "local",
+        incognito: true,
+        ephemeralMessages: [],
+      })
+    );
+
+    assert.equal(response.status, 200);
+    const prompt = deterministicProvider.calls
+      .slice(callStart)
+      .flat()
+      .map((message) => message.content)
+      .join("\n");
+    assert.match(prompt, /Active Powers:/u);
+    assert.match(prompt, /Respirator: Breathe mechanically during each answer/u);
   });
 
   it("forces an offline-only Zen bot out of Auto before any online provider is selected", async () => {
@@ -849,6 +1499,9 @@ describe("API request integration", () => {
     );
     assert.equal(register.status, 201);
     const userId = String((await json(register)).user.id);
+    db.prepare("UPDATE users SET english_voice_engine = 'elevenlabs' WHERE id = ?").run(
+      userId
+    );
     const now = "2026-07-11T18:00:00.000Z";
     db.prepare(
       "INSERT INTO conversations (id, user_id, title, conversation_mode, created_at, updated_at) VALUES (?, ?, ?, 'chat', ?, ?)"
@@ -876,6 +1529,7 @@ describe("API request integration", () => {
         profile: {
           v: 1,
           baseVoiceId: "voice-3",
+          elevenLabsVoiceId: "configured-provider-voice",
           pitch: 0.1,
           warmth: 0.2,
           pace: 0,
@@ -900,6 +1554,7 @@ describe("API request integration", () => {
         profile: {
           v: 1,
           baseVoiceId: "voice-3",
+          elevenLabsVoiceId: "configured-provider-voice",
           pitch: 0.1,
           warmth: 0.2,
           pace: 0,
@@ -916,6 +1571,175 @@ describe("API request integration", () => {
     assert.equal(alignedPayload.alignment, null);
     assert.equal(Buffer.from(alignedPayload.audioBase64, "base64").subarray(0, 4).toString(), "RIFF");
     assert.deepEqual(fetchRecorder.calls.slice(beforeCalls), []);
+  });
+
+  it("uses System TTS until the profile selects an ElevenLabs voice", async () => {
+    const client = createClient();
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "voice-online-fallback@example.com",
+        password: "voice-password",
+      })
+    );
+    assert.equal(register.status, 201);
+    const userId = String((await json(register)).user.id);
+    const initialSettings = await client.request("/api/settings");
+    assert.equal(initialSettings.status, 200);
+    assert.equal((await json(initialSettings)).settings.englishVoiceEngine, "elevenlabs");
+    db.prepare("UPDATE users SET preferred_provider = 'openai' WHERE id = ?").run(
+      userId
+    );
+
+    const beforeCalls = fetchRecorder.calls.length;
+    config.elevenLabsApiKey = "integration-elevenlabs-key";
+    try {
+      const response = await client.request(
+        "/api/voices/synthesize",
+        jsonInit({
+          text: "Keep using System TTS without an online voice override.",
+          mode: "english",
+          engine: "elevenlabs",
+          explicitOnlineContext: true,
+          profile: normalizeBotAudioVoiceProfileV1(undefined),
+        })
+      );
+
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("x-prism-voice-engine"), "builtin");
+      assert.equal(
+        Buffer.from(await response.arrayBuffer()).subarray(0, 4).toString(),
+        "RIFF"
+      );
+      assert.deepEqual(fetchRecorder.calls.slice(beforeCalls), []);
+    } finally {
+      config.elevenLabsApiKey = "";
+    }
+  });
+
+  it("persists a bot name pronunciation and uses it only for synthesized speech", async () => {
+    const client = createClient();
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "bot-pronunciation@example.com",
+        password: "voice-password",
+      }),
+    );
+    assert.equal(register.status, 201);
+
+    const created = await client.request(
+      "/api/bots",
+      jsonInit({
+        name: "Light Yagami",
+        namePronunciation: "  Light   Yah-gah-mee  ",
+      }),
+    );
+    assert.equal(created.status, 201);
+    const createdBot = (await json(created)).bot;
+    assert.equal(createdBot.name, "Light Yagami");
+    assert.equal(createdBot.name_pronunciation, "Light Yah-gah-mee");
+
+    const listed = await client.request("/api/bots");
+    assert.equal(listed.status, 200);
+    const listedBot = (await json(listed)).bots.find(
+      (bot: { id?: string }) => bot.id === createdBot.id,
+    );
+    assert.equal(listedBot.name, "Light Yagami");
+    assert.equal(listedBot.name_pronunciation, "Light Yah-gah-mee");
+
+    const updated = await client.request(`/api/bots/${createdBot.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ namePronunciation: "Light Ya-ga-mi" }),
+    });
+    assert.equal(updated.status, 200);
+    assert.equal((await json(updated)).bot.name_pronunciation, "Light Ya-ga-mi");
+
+    const beforeVoiceCount = builtinVoiceTexts.length;
+    const response = await client.request(
+      "/api/voices/synthesize",
+      jsonInit({
+        text: "Ask Light Yagami now.",
+        mode: "english",
+        engine: "builtin",
+      }),
+    );
+    assert.equal(response.status, 200);
+    assert.equal(builtinVoiceTexts.length, beforeVoiceCount + 1);
+    assert.equal(builtinVoiceTexts.at(-1), "Ask Light Ya-ga-mi now.");
+  });
+
+  it("ignores legacy ElevenLabs slot mappings during synthesis", async () => {
+    const client = createClient();
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "voice-legacy-bank@example.com",
+        password: "voice-password",
+      })
+    );
+    assert.equal(register.status, 201);
+    const userId = String((await json(register)).user.id);
+    db.prepare(
+      "UPDATE users SET preferred_provider = 'openai', english_voice_engine = 'elevenlabs', elevenlabs_voice_bank = ? WHERE id = ?"
+    ).run(JSON.stringify({ "voice-1": "legacy-provider-voice" }), userId);
+
+    const beforeCalls = fetchRecorder.calls.length;
+    config.elevenLabsApiKey = "integration-elevenlabs-key";
+    try {
+      const response = await client.request(
+        "/api/voices/synthesize",
+        jsonInit({
+          text: "A legacy slot must not select my voice.",
+          mode: "english",
+          engine: "elevenlabs",
+          explicitOnlineContext: true,
+          profile: {
+            v: 1,
+            baseVoiceId: "voice-1",
+            pitch: 0,
+            warmth: 0,
+            pace: 0,
+            lilt: 0,
+          },
+        })
+      );
+
+      assert.equal(response.status, 200);
+      assert.equal(
+        response.headers.get("x-prism-voice-engine"),
+        "builtin"
+      );
+      assert.deepEqual(fetchRecorder.calls.slice(beforeCalls), []);
+
+      const selectedVoiceResponse = await client.request(
+        "/api/voices/synthesize",
+        jsonInit({
+          text: "Use the voice selected for this bot.",
+          mode: "english",
+          engine: "elevenlabs",
+          explicitOnlineContext: true,
+          profile: {
+            ...normalizeBotAudioVoiceProfileV1(undefined),
+            elevenLabsVoiceId: "chosen-provider-voice",
+          },
+        })
+      );
+      assert.equal(selectedVoiceResponse.status, 200);
+      assert.equal(
+        selectedVoiceResponse.headers.get("x-prism-voice-engine"),
+        "elevenlabs"
+      );
+      const providerCalls = fetchRecorder.calls.slice(beforeCalls);
+      assert.equal(providerCalls.length, 1);
+      assert.match(
+        providerCalls[0]?.input ?? "",
+        /text-to-speech\/chosen-provider-voice\/stream/
+      );
+    } finally {
+      config.elevenLabsApiKey = "";
+    }
   });
 
   it("synthesizes a private reply by message id without persisting it", async () => {
@@ -1169,9 +1993,11 @@ describe("API request integration", () => {
       pitch: -0.25,
       warmth: authored.warmth,
       pace: authored.pace,
-      lilt: authored.lilt,
+      lilt: -0.4,
       systemVoiceName: "Alex",
       elevenLabsVoiceId: "eleven-voice-id",
+      elevenLabsEffect: "deep-space",
+      elevenLabsDirection: "warm, conspiratorial",
     };
     const updated = await client.request(`/api/bots/${createdPayload.bot.id}`, {
       method: "PATCH",
@@ -1188,5 +2014,61 @@ describe("API request integration", () => {
       updatedPayload.bot.audio_voice_profile_override,
       normalizeBotAudioVoiceProfileV1(override)
     );
+    assert.equal(updatedPayload.bot.audio_voice_profile_override.elevenLabsEffect, "deep-space");
+    assert.equal(
+      updatedPayload.bot.audio_voice_profile_override.elevenLabsDirection,
+      "warm, conspiratorial"
+    );
+
+    const secondCreated = await client.request(
+      "/api/bots",
+      jsonInit({
+        name: "Second voiced bot",
+        authoredAudioVoiceProfile: { ...authored, pitch: 0.65 },
+      })
+    );
+    assert.equal(secondCreated.status, 201);
+    const secondPayload = await json(secondCreated);
+    const secondOverride = { ...override, pitch: 0.8, lilt: 0.6 };
+    const secondUpdated = await client.request(`/api/bots/${secondPayload.bot.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ audioVoiceProfileOverride: secondOverride }),
+    });
+    assert.equal(secondUpdated.status, 200);
+
+    const botsResponse = await client.request("/api/bots");
+    assert.equal(botsResponse.status, 200);
+    const persistedBots = (await json(botsResponse)).bots as Array<{
+      id: string;
+      audio_voice_profile_override: { pitch: number; lilt: number } | null;
+    }>;
+    assert.equal(
+      persistedBots.find((bot) => bot.id === createdPayload.bot.id)
+        ?.audio_voice_profile_override?.pitch,
+      -0.25
+    );
+    assert.equal(
+      persistedBots.find((bot) => bot.id === createdPayload.bot.id)
+        ?.audio_voice_profile_override?.lilt,
+      -0.4
+    );
+    assert.equal(
+      persistedBots.find((bot) => bot.id === secondPayload.bot.id)
+        ?.audio_voice_profile_override?.pitch,
+      0.8
+    );
+    assert.equal(
+      persistedBots.find((bot) => bot.id === secondPayload.bot.id)
+        ?.audio_voice_profile_override?.lilt,
+      0.6
+    );
+
+    const settingsResponse = await client.request("/api/settings");
+    assert.equal(settingsResponse.status, 200);
+    const accountDefaultVoice = (await json(settingsResponse)).settings
+      .prismDefaultBotAudioVoiceProfile;
+    assert.equal(accountDefaultVoice.pitch, 0);
+    assert.equal(accountDefaultVoice.lilt, 0);
   });
 });

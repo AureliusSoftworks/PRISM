@@ -116,7 +116,7 @@ describe("selected bot library showcase", () => {
     assert.match(pageSource, /showThinkingSpinner=\{previewStatus === "generating"\}/);
     assert.match(pageSource, /Generating audio sample…/);
     assert.match(pageSource, /voiceModeDisplayName\(previewMode\)[\s\S]*?preview played\./);
-    assert.match(pageSource, /data-talking=\{previewStatus === "playing"/);
+    assert.match(pageSource, /data-talking=\{previewTalking \? "true"/);
   });
 
   it("awaits persona copy and plays the first English sample", () => {
@@ -173,6 +173,22 @@ describe("selected bot library showcase", () => {
         pageSource.indexOf("const renderSharedPanels")
       ),
       /mouthShape=\{previewStatus === "playing" \? "open-small"/
+    );
+  });
+
+  it("rests the English preview mouth in provider-timed phrase gaps", () => {
+    const previewHandlerSource = pageSource.slice(
+      pageSource.indexOf("async function playBotHubVoicePreview"),
+      pageSource.indexOf("async function loadElevenLabsVoiceCatalog"),
+    );
+    assert.match(
+      previewHandlerSource,
+      /buildSpeechActivityWindows\(\s*alignment,\s*durationMs/,
+    );
+    assert.match(previewHandlerSource, /speechActivityAtMs\(/);
+    assert.match(
+      pageSource,
+      /const previewTalking =\s*previewStatus === "playing" && botHubPreviewVoicing/,
     );
   });
 
@@ -255,7 +271,7 @@ describe("selected bot library showcase", () => {
     assert.match(pageSource, /voicePreviewAudioCacheRef/);
     assert.match(
       pageSource,
-      /voicePreviewAudioCacheRef\.current\.set\(\s*options\.cacheKey,\s*previewBytes\.slice\(0\),?\s*\)/
+      /voicePreviewAudioCacheRef\.current\.set\(\s*effectiveCacheKey,\s*\{[\s\S]*?bytes: previewClip\.bytes\.slice\(0\),[\s\S]*?engineUsed: previewClip\.engineUsed,[\s\S]*?\},\s*\)/
     );
     assert.match(
       pageSource,
@@ -267,23 +283,13 @@ describe("selected bot library showcase", () => {
     assert.match(pageSource, /onPlaybackStart:/);
   });
 
-  it("invalidates bot audio when the global TTS voice changes", () => {
-    assert.match(pageSource, /function resolveVoicePreviewProfileWithGlobalDefaults\(/);
+  it("keeps preview audio scoped to the profile-owned voice identity", () => {
+    assert.match(pageSource, /function resolveVoicePreviewProfile\(/);
+    assert.doesNotMatch(pageSource, /defaultSystemVoiceName/);
+    assert.doesNotMatch(pageSource, /defaultElevenLabsVoiceId/);
     assert.match(
       pageSource,
-      /normalized\.systemVoiceName \?\? settings\.defaultSystemVoiceName/
-    );
-    assert.match(
-      pageSource,
-      /normalized\.elevenLabsVoiceId \?\? settings\.defaultElevenLabsVoiceId/
-    );
-    assert.match(
-      pageSource,
-      /voicePreviewAudioCacheRef\.current\.clear\(\);[\s\S]*?settings\?\.defaultSystemVoiceName,[\s\S]*?settings\?\.defaultElevenLabsVoiceId/
-    );
-    assert.match(
-      pageSource,
-      /const profile = resolveVoicePreviewProfileWithGlobalDefaults\([\s\S]*?JSON\.stringify\(profile\)/
+      /const profile = resolveVoicePreviewProfile\(authoredProfile\);[\s\S]*?JSON\.stringify\(profile\)/
     );
   });
 });

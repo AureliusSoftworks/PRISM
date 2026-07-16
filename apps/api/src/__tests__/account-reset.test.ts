@@ -50,14 +50,15 @@ describe("restoreFactoryDefaultsInDatabase", () => {
         .prepare(
           `
           SELECT
-            email, display_name, theme, preferred_provider, provider_locked,
+            email, display_name, theme, preferred_provider, preferred_image_provider, provider_locked,
             auto_memory, auto_switch_model, auto_fallback_chain, hidden_bot_model_ids,
             hidden_comfyui_workflow_ids, model_visibility_defaults_version,
             preferred_local_model, preferred_online_model,
             lenient_local_fallback_model, lenient_local_image_fallback_model,
             secondary_ollama_host, experimental_dual_ollama_enabled,
             experimental_all_model_effort_enabled,
-            coffee_experimental_table_angle_enabled, psychic_mode_enabled,
+            coffee_experimental_table_angle_enabled,
+            signal_immersive_voice_effects_enabled, psychic_mode_enabled,
             comfyui_host, comfyui_workflows, preferred_local_image_model,
             preferred_openai_image_model, preferred_zen_wallpaper_local_image_model,
             preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity,
@@ -74,6 +75,7 @@ describe("restoreFactoryDefaultsInDatabase", () => {
             prism_default_bot_face_eye_animation,
             prism_default_bot_face_mouth_font, prism_default_bot_face_mouth_character,
             prism_default_bot_face_mouth_animation,
+            prism_default_bot_face_mouth_coffee_pucker,
             prism_default_bot_face_font_weight,
             prism_default_bot_face_eye_scale,
             prism_default_bot_face_eye_offset_x, prism_default_bot_face_eye_offset_y,
@@ -101,6 +103,7 @@ describe("restoreFactoryDefaultsInDatabase", () => {
       assert.equal(user.display_name, "User One");
       assert.equal(user.theme, "system");
       assert.equal(user.preferred_provider, "local");
+      assert.equal(user.preferred_image_provider, "local");
       assert.equal(user.provider_locked, 0);
       assert.equal(user.auto_memory, 1);
       assert.equal(user.auto_switch_model, 0);
@@ -116,6 +119,7 @@ describe("restoreFactoryDefaultsInDatabase", () => {
       assert.equal(user.experimental_dual_ollama_enabled, 0);
       assert.equal(user.experimental_all_model_effort_enabled, 0);
       assert.equal(user.coffee_experimental_table_angle_enabled, 0);
+      assert.equal(user.signal_immersive_voice_effects_enabled, 0);
       assert.equal(user.psychic_mode_enabled, 0);
       assert.equal(user.comfyui_host, null);
       assert.equal(user.comfyui_workflows, "[]");
@@ -159,6 +163,7 @@ describe("restoreFactoryDefaultsInDatabase", () => {
       assert.equal(user.prism_default_bot_face_mouth_font, null);
       assert.equal(user.prism_default_bot_face_mouth_character, null);
       assert.equal(user.prism_default_bot_face_mouth_animation, null);
+      assert.equal(user.prism_default_bot_face_mouth_coffee_pucker, 0);
       assert.equal(user.prism_default_bot_face_font_weight, null);
       assert.equal(user.prism_default_bot_face_eye_scale, null);
       assert.equal(user.prism_default_bot_face_eye_offset_x, null);
@@ -222,6 +227,7 @@ function seedResetFixture(db: DatabaseSync): void {
     SET
       theme = 'dark',
       preferred_provider = 'openai',
+      preferred_image_provider = 'openai',
       provider_locked = 1,
       auto_memory = 0,
       auto_switch_model = 1,
@@ -237,6 +243,7 @@ function seedResetFixture(db: DatabaseSync): void {
       experimental_dual_ollama_enabled = 1,
       experimental_all_model_effort_enabled = 1,
       coffee_experimental_table_angle_enabled = 1,
+      signal_immersive_voice_effects_enabled = 1,
       psychic_mode_enabled = 1,
       comfyui_host = 'http://192.168.1.8:8188',
       comfyui_workflows = '[{"id":"workflow-a"}]',
@@ -265,6 +272,7 @@ function seedResetFixture(db: DatabaseSync): void {
       prism_default_bot_face_mouth_font = 'playful',
       prism_default_bot_face_mouth_character = '△',
       prism_default_bot_face_mouth_animation = 'flicker',
+      prism_default_bot_face_mouth_coffee_pucker = 1,
       prism_default_bot_face_font_weight = 700,
       prism_default_bot_face_eye_scale = 1.15,
       prism_default_bot_face_eye_offset_x = 0.06,

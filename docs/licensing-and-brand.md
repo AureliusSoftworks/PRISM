@@ -43,6 +43,11 @@ copy, release copy, and contributor guidance together.
 
 ## Brand Boundary
 
+The identity and experience rules for the refraction emblem, wordmark,
+triangle, and user-as-light philosophy live in
+[`brand-ethos.md`](brand-ethos.md). Those rules define how official PRISM
+surfaces should express the protected brand assets described here.
+
 Allowed for community discussion:
 
 - Refer factually to compatibility with Prism.

@@ -411,3 +411,14 @@ Failure semantics:
 - [ ] Strict V1 `.story` validation boundary is defined with only core checks.
 - [ ] Existing backend touchpoints are mapped so implementation owners know where changes belong.
 
+## 8) Future Slate snapshot boundary
+
+Story and Slate keep separate tenant-scoped persistence. Future integration must
+create immutable, linked snapshots rather than sharing live rows or synchronizing
+content. `Develop in Slate` emits a structured narrative source packet containing
+chosen and important discarded branches, demonstrated voices, world facts,
+dramatic beats, bookmarks, visual references, and procedural-versus-player
+provenance. `Rehearse in Story` consumes a Slate scene/outline snapshot and writes
+discoveries only to the resulting Story run until the writer explicitly imports
+selected material. Runtime endpoints and tables for these later stages are out of
+the current Story V1 backend scope. See `docs/slate-v1-product-ux-contract.md`.

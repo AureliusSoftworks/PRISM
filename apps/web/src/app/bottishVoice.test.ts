@@ -7,6 +7,7 @@ import {
   encodeBottishPlanWave,
   FIXED_BOTTISH_TONE,
   fitBottishPlanToDuration,
+  scaleBottishPlanForDeliveryRate,
   mixBabbleMediaWave,
   normalizeBottishPlaybackProfile,
   prepareBottishVoice,
@@ -24,6 +25,18 @@ const neutral = {
 };
 
 describe("Bottish speech plan", () => {
+  it("changes mood delivery tempo without reviving authored Bottish pace", () => {
+    const source = buildBottishPlan("Mood changes this line.", neutral, "mood-rate");
+    const joyful = scaleBottishPlanForDeliveryRate(source, 1.18);
+    const strained = scaleBottishPlanForDeliveryRate(source, 0.94);
+    assert.ok(joyful.durationMs < source.durationMs);
+    assert.ok(strained.durationMs > source.durationMs);
+    assert.equal(
+      joyful.alignment.characters.join(""),
+      source.alignment.characters.join(""),
+    );
+  });
+
   it("falls back procedurally for a startup-era metadata-only response", async () => {
     const legacyResponse = Response.json({
       ok: true,
@@ -129,7 +142,39 @@ describe("Bottish speech plan", () => {
         true,
       )),
     );
+    assert.deepEqual(
+      new Uint8Array(mixed),
+      new Uint8Array(mixBabbleMediaWave(
+        silentCarrier,
+        "The robot fallback should still sound like Bottish.",
+        neutral,
+        "media-hybrid",
+      )),
+    );
     assert.ok(new Int16Array(mixed, 44).some((sample) => sample !== 0));
+  });
+
+  it("leaves the media fallback WAV untouched when voice effects are disabled", () => {
+    const silentCarrier = encodeBottishPlanWave({
+      notes: [],
+      durationMs: 1_200,
+      alignment: {
+        characters: [],
+        characterStartTimesSeconds: [],
+        characterEndTimesSeconds: [],
+      },
+    });
+    const originalBytes = new Uint8Array(silentCarrier.slice(0));
+    const unmixed = mixBabbleMediaWave(
+      silentCarrier,
+      "The clean fallback should remain clean.",
+      neutral,
+      "media-hybrid-clean",
+      false,
+    );
+
+    assert.strictEqual(unmixed, silentCarrier);
+    assert.deepEqual(new Uint8Array(unmixed), originalBytes);
   });
 
   it("ignores legacy Tone, Lilt, Pace, and Warmth values", () => {

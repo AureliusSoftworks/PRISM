@@ -1,0 +1,665 @@
+import type { VoiceDeliveryMood } from "./audioVoice.js";
+
+export type BotcastEpisodeSegment = "opening" | "interview" | "closing";
+export type BotcastEpisodeStatus = "live" | "completed";
+export type BotcastEpisodeOutcome = "completed" | "guest_departed";
+export type BotcastEpisodeProvider = "local" | "openai" | "anthropic";
+export type BotcastEpisodeResponseMode = "local" | "auto" | "online";
+export type BotcastSpeakerRole = "host" | "guest";
+export type BotcastSessionDurationMinutes = number;
+export const BOTCAST_SESSION_DURATION_MINUTES_MIN = 3;
+export const BOTCAST_SESSION_DURATION_MINUTES_MAX = 30;
+export const BOTCAST_SESSION_DURATION_MINUTES_STEP = 1;
+export const BOTCAST_AUTO_MIN_EXCHANGES = 3;
+export const BOTCAST_AUTO_MAX_EXCHANGES = 60;
+export const BOTCAST_TIMED_MAX_UTTERANCES = 120;
+export const BOTCAST_LOCAL_INTRO_DURATION_MS = 5_600;
+export const BOTCAST_ELEVENLABS_INTRO_DURATION_MS = 6_000;
+export const BOTCAST_IMMERSIVE_VOICE_TAGS = [
+  "sighs",
+  "exhales",
+  "laughs",
+  "chuckles",
+  "coughs",
+  "clears throat",
+  "gasps",
+  "gulps",
+  "breathes deeply",
+  "growls",
+] as const;
+export type BotcastImmersiveVoiceTag =
+  (typeof BOTCAST_IMMERSIVE_VOICE_TAGS)[number];
+export const BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS = [0, 1, 2] as const;
+export type BotcastFallbackStudioAccentVariant =
+  (typeof BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS)[number];
+
+export function isBotcastFallbackStudioAccentVariant(
+  value: unknown,
+): value is BotcastFallbackStudioAccentVariant {
+  return (
+    typeof value === "number" &&
+    BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS.includes(
+      value as BotcastFallbackStudioAccentVariant,
+    )
+  );
+}
+
+export function botcastFallbackStudioAccentVariantForSeed(
+  seed: string,
+): BotcastFallbackStudioAccentVariant {
+  let hash = 2166136261;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash ^= seed.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS[
+    (hash >>> 0) % BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS.length
+  ]!;
+}
+
+export type BotcastProducerCueKind =
+  | "ask_about"
+  | "press_harder"
+  | "move_on"
+  | "lighten_up"
+  | "wrap_up";
+export type BotcastTensionStage = "calm" | "resistance" | "warning" | "departed";
+export type BotcastCameraShot = "auto" | "left" | "right" | "wide";
+export type BotcastDirectedCameraShot = Exclude<BotcastCameraShot, "auto">;
+
+export interface BotcastAtmosphereState {
+  seed: string;
+  prompt: string;
+  imageUrl: string | null;
+  imageId: string | null;
+  revision: number;
+  status: "fallback" | "ready" | "failed";
+}
+
+export interface BotcastStudioPoint {
+  x: number;
+  y: number;
+}
+
+export type BotcastStudioLayoutItem =
+  | "hostBot"
+  | "guestBot"
+  | "hostCup"
+  | "guestCup";
+
+export type BotcastStudioLayout = Record<
+  BotcastStudioLayoutItem,
+  BotcastStudioPoint
+>;
+
+export const BOTCAST_DEFAULT_STUDIO_LAYOUT: BotcastStudioLayout = {
+  hostBot: { x: 22.5, y: 71.25 },
+  guestBot: { x: 77.5, y: 71.25 },
+  hostCup: { x: 36.25, y: 90 },
+  guestCup: { x: 63.75, y: 90 },
+};
+
+const BOTCAST_LEGACY_DEFAULT_STUDIO_LAYOUT: BotcastStudioLayout = {
+  hostBot: { x: 22.5, y: 64 },
+  guestBot: { x: 77.5, y: 64 },
+  hostCup: { x: 36.25, y: 80 },
+  guestCup: { x: 63.75, y: 80 },
+};
+
+export const BOTCAST_CLOSEUP_CAMERA_SCALE = 1.42;
+
+/** Keeps a close-up horizontally centered on the saved bot placement. */
+export function botcastCameraOffsetXPercent(
+  shot: BotcastDirectedCameraShot,
+  layout: BotcastStudioLayout,
+): number {
+  if (shot === "wide") return 0;
+  const focusX = shot === "left" ? layout.hostBot.x : layout.guestBot.x;
+  return Math.round((50 - focusX) * BOTCAST_CLOSEUP_CAMERA_SCALE * 100) / 100;
+}
+
+/** Uses the scene's authored 55% focal line while following saved vertical placement. */
+export function botcastCameraOffsetYPercent(
+  shot: BotcastDirectedCameraShot,
+  layout: BotcastStudioLayout,
+): number {
+  if (shot === "wide") return 0;
+  const focusY = shot === "left" ? layout.hostBot.y : layout.guestBot.y;
+  return Math.round((55 - focusY) * BOTCAST_CLOSEUP_CAMERA_SCALE * 100) / 100;
+}
+
+const BOTCAST_STUDIO_LAYOUT_BOUNDS: Record<
+  BotcastStudioLayoutItem,
+  { minX: number; maxX: number; minY: number; maxY: number }
+> = {
+  hostBot: { minX: 10, maxX: 90, minY: 19, maxY: 82 },
+  guestBot: { minX: 10, maxX: 90, minY: 19, maxY: 82 },
+  hostCup: { minX: 4, maxX: 96, minY: 12, maxY: 94 },
+  guestCup: { minX: 4, maxX: 96, minY: 12, maxY: 94 },
+};
+
+function botcastStudioCoordinate(
+  value: unknown,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  const numeric = typeof value === "number" && Number.isFinite(value)
+    ? value
+    : fallback;
+  return Math.round(Math.max(min, Math.min(max, numeric)) * 100) / 100;
+}
+
+export function normalizeBotcastStudioLayout(
+  value: unknown,
+  fallback: BotcastStudioLayout = BOTCAST_DEFAULT_STUDIO_LAYOUT,
+): BotcastStudioLayout {
+  const rawContainer = value && typeof value === "object" && !Array.isArray(value)
+    ? value as Partial<Record<BotcastStudioLayoutItem, unknown>>
+    : {};
+  const isLegacyDefault =
+    (Object.keys(BOTCAST_LEGACY_DEFAULT_STUDIO_LAYOUT) as BotcastStudioLayoutItem[])
+      .every((item) => {
+        const point = rawContainer[item];
+        return Boolean(
+          point &&
+          typeof point === "object" &&
+          !Array.isArray(point) &&
+          (point as Partial<BotcastStudioPoint>).x ===
+            BOTCAST_LEGACY_DEFAULT_STUDIO_LAYOUT[item].x &&
+          (point as Partial<BotcastStudioPoint>).y ===
+            BOTCAST_LEGACY_DEFAULT_STUDIO_LAYOUT[item].y,
+        );
+      });
+  const container = isLegacyDefault ? {} : rawContainer;
+  return (Object.keys(BOTCAST_DEFAULT_STUDIO_LAYOUT) as BotcastStudioLayoutItem[])
+    .reduce<BotcastStudioLayout>((layout, item) => {
+      const rawPoint = container[item];
+      const point = rawPoint && typeof rawPoint === "object" && !Array.isArray(rawPoint)
+        ? rawPoint as Partial<BotcastStudioPoint>
+        : {};
+      const bounds = BOTCAST_STUDIO_LAYOUT_BOUNDS[item];
+      layout[item] = {
+        x: botcastStudioCoordinate(
+          point.x,
+          fallback[item].x,
+          bounds.minX,
+          bounds.maxX,
+        ),
+        y: botcastStudioCoordinate(
+          point.y,
+          fallback[item].y,
+          bounds.minY,
+          bounds.maxY,
+        ),
+      };
+      return layout;
+    }, {} as BotcastStudioLayout);
+}
+
+/**
+ * Source-edit instruction for the online Signal daylight render. The canonical
+ * night image already carries the persona and set design, so this deliberately
+ * excludes descriptive identity prose that could make an image model rebuild
+ * the room instead of relighting it.
+ */
+export const BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT = [
+  "The attached image is the sole canonical source frame.",
+  "Produce one finished replacement image of that exact studio in natural daytime lighting.",
+  "Preserve the identical camera position, lens, crop, perspective, room geometry, windows and view, furniture, microphones, props, artwork, materials, object placement, scale, and negative space.",
+  "Do not redesign, restage, add, remove, substitute, duplicate, relocate, crop, zoom, or recompose anything.",
+  "Change only the illumination and exterior sky: daylight through the existing windows, open-sky fill, subtle sunlit bounce, practical lamps off, clean midtones, and restrained shadows.",
+  "Output only the single daytime replacement frame. The source is a reference, not content to display. Do not show a nighttime state, source image, before-and-after, diptych, split screen, comparison, grid, collage, inset, border, divider, caption, or multiple panels.",
+].join(" ");
+
+export type BotcastLogoGlyph =
+  | "frequency"
+  | "orbit"
+  | "aperture"
+  | "spark"
+  | "monogram";
+
+export interface BotcastLogoState {
+  seed: string;
+  prompt: string;
+  imageUrl: string | null;
+  imageId: string | null;
+  revision: number;
+  status: "fallback" | "ready" | "failed";
+  fallbackGlyph: BotcastLogoGlyph;
+}
+
+export interface BotcastIntroAudioState {
+  source: "local" | "elevenlabs";
+  audioUrl: string | null;
+  durationMs: number;
+  revision: number;
+  model: string | null;
+}
+
+export interface BotcastShow {
+  id: string;
+  hostBotId: string;
+  name: string;
+  premise: string;
+  hostingStyle: string;
+  accentColor: string;
+  fallbackStudioAccentVariant: BotcastFallbackStudioAccentVariant;
+  /** Compatibility alias for the original single-studio contract. Mirrors nightAtmosphere. */
+  atmosphere: BotcastAtmosphereState;
+  studioIdentity: string;
+  dayAtmosphere: BotcastAtmosphereState;
+  nightAtmosphere: BotcastAtmosphereState;
+  studioLayout: BotcastStudioLayout;
+  logo: BotcastLogoState;
+  introAudio: BotcastIntroAudioState;
+  createdAt: string;
+  updatedAt: string;
+  episodeCount: number;
+}
+
+export interface BotcastMessage {
+  id: string;
+  episodeId: string;
+  speakerRole: BotcastSpeakerRole;
+  botId: string;
+  content: string;
+  /** Clean transcript plus optional Eleven v3 vocal-reaction tags. */
+  voicePerformanceText: string | null;
+  /** Delivery mood captured when this line was recorded. */
+  moodKey: VoiceDeliveryMood;
+  createdAt: string;
+}
+
+export interface BotcastSegmentRecord {
+  id: string;
+  episodeId: string;
+  segment: BotcastEpisodeSegment;
+  ordinal: number;
+  startedAt: string;
+  endedAt: string | null;
+}
+
+export interface BotcastProducerCue {
+  kind: BotcastProducerCueKind;
+  detail?: string;
+}
+
+export type BotcastReplayEventKind =
+  | "segment"
+  | "producer_cue"
+  | "utterance"
+  | "tension"
+  | "warning"
+  | "departure"
+  | "cut_away"
+  | "camera_suggestion"
+  | "episode_completed";
+
+export interface BotcastReplayEvent {
+  id: string;
+  episodeId: string;
+  sequence: number;
+  kind: BotcastReplayEventKind;
+  payload: Record<string, unknown>;
+  occurredAt: string;
+}
+
+export interface BotcastCameraSuggestion {
+  shot: BotcastDirectedCameraShot;
+  reason:
+    | "opening"
+    | "speaker"
+    | "listener_reaction"
+    | "transition"
+    | "tension"
+    | "departure"
+    | "empty_chair"
+    | "closing";
+  atMs: number;
+  minimumHoldMs: number;
+}
+
+export interface BotcastEpisodeSummary {
+  id: string;
+  showId: string;
+  showName: string;
+  title: string;
+  hostBotId: string;
+  guestBotId: string;
+  topic: string;
+  provider: BotcastEpisodeProvider;
+  model: string | null;
+  responseMode: BotcastEpisodeResponseMode;
+  /** Null means Auto: conversation-shaped length with no displayed time limit. */
+  durationMinutes: BotcastSessionDurationMinutes | null;
+  status: BotcastEpisodeStatus;
+  segment: BotcastEpisodeSegment;
+  outcome: BotcastEpisodeOutcome | null;
+  tensionStage: BotcastTensionStage;
+  warningCount: number;
+  startedAt: string;
+  completedAt: string | null;
+  runtimeMs: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BotcastEpisode extends BotcastEpisodeSummary {
+  producerBrief: string;
+  messages: BotcastMessage[];
+  segments: BotcastSegmentRecord[];
+  events: BotcastReplayEvent[];
+}
+
+export interface BotcastShowCreateRequest {
+  hostBotId: string;
+  name?: string;
+  premise?: string;
+  hostingStyle?: string;
+}
+
+export interface BotcastShowPatchRequest {
+  name?: string;
+  premise?: string;
+  hostingStyle?: string;
+  studioIdentity?: string;
+  atmosphereImageUrl?: string | null;
+  atmosphereImageId?: string | null;
+  dayAtmosphereImageUrl?: string | null;
+  dayAtmosphereImageId?: string | null;
+  nightAtmosphereImageUrl?: string | null;
+  nightAtmosphereImageId?: string | null;
+  studioLayout?: BotcastStudioLayout;
+  regenerateAtmosphere?: boolean;
+  regenerateDayAtmosphere?: boolean;
+  regenerateNightAtmosphere?: boolean;
+  logoImageUrl?: string | null;
+  logoImageId?: string | null;
+  regenerateLogo?: boolean;
+}
+
+export interface BotcastEpisodeCreateRequest {
+  guestBotId: string;
+  topic: string;
+  producerBrief?: string;
+  preferredProvider?: BotcastEpisodeProvider;
+  modelOverride?: string | null;
+  responseMode?: BotcastEpisodeResponseMode;
+  /** Null or omitted selects Auto. */
+  durationMinutes?: BotcastSessionDurationMinutes | null;
+}
+
+export interface BotcastEpisodeAdvanceRequest {
+  cue?: BotcastProducerCue;
+}
+
+export interface BotcastEpisodeAdvanceResponse {
+  episode: BotcastEpisode;
+  message: BotcastMessage | null;
+}
+
+export interface BotcastTensionState {
+  level: 0 | 1 | 2 | 3;
+  warningCount: number;
+  stage: BotcastTensionStage;
+}
+
+export function botcastVoiceMoodForTension(
+  tension: Pick<BotcastTensionState, "level">,
+): VoiceDeliveryMood {
+  if (tension.level >= 2) return "strained";
+  if (tension.level >= 1) return "guarded";
+  return "neutral";
+}
+
+export const BOTCAST_DIRECTOR_MIN_SHOT_MS = 3_200;
+export const BOTCAST_DIRECTOR_HYSTERESIS_MS = 1_100;
+
+export function botcastTensionStageForLevel(level: number): BotcastTensionStage {
+  if (level >= 3) return "departed";
+  if (level >= 2) return "warning";
+  if (level >= 1) return "resistance";
+  return "calm";
+}
+
+export function applyBotcastProducerCueToTension(
+  current: BotcastTensionState,
+  cue: BotcastProducerCue,
+): BotcastTensionState {
+  const boundaryLanguage =
+    cue.kind === "ask_about" &&
+    /\b(trauma|abuse|crime|death|family|secret|scandal|failure|fear|regret)\b/iu.test(
+      cue.detail ?? "",
+    );
+  const delta =
+    cue.kind === "press_harder" || boundaryLanguage
+      ? 1
+      : cue.kind === "move_on" || cue.kind === "lighten_up"
+        ? -1
+        : 0;
+  const level = Math.max(0, Math.min(3, current.level + delta)) as 0 | 1 | 2 | 3;
+  const enteredWarning = current.level < 2 && level >= 2;
+  return {
+    level,
+    warningCount: current.warningCount + (enteredWarning ? 1 : 0),
+    stage: botcastTensionStageForLevel(level),
+  };
+}
+
+export function botcastGuestDepartureEligible(state: BotcastTensionState): boolean {
+  return state.level >= 3 && state.warningCount >= 1;
+}
+
+export function botcastSegmentForTurn(args: {
+  current: BotcastEpisodeSegment;
+  utteranceCount: number;
+  guestDeparted: boolean;
+}): BotcastEpisodeSegment {
+  if (args.guestDeparted) return "closing";
+  if (args.current === "opening" && args.utteranceCount >= 2) return "interview";
+  return args.current;
+}
+
+function botcastSpokenWordCount(content: string): number {
+  return content.trim().split(/\s+/u).filter(Boolean).length;
+}
+
+function botcastAverageWordCount(
+  messages: readonly Pick<BotcastMessage, "content">[],
+): number {
+  if (messages.length === 0) return 0;
+  return messages.reduce((total, message) => total + botcastSpokenWordCount(message.content), 0)
+    / messages.length;
+}
+
+const BOTCAST_NATURAL_REST_PATTERN =
+  /\b(?:ultimately|in the end|at the end of the day|that(?:'s| is) the point|that(?:'s| is) what matters|I think we(?:'ve| have) covered|there(?:'s| is) not much more|I(?:'ll| will) leave it there|final thought)\b/iu;
+
+/**
+ * Chooses the next host turn as the close only at a natural handoff. Auto has
+ * no wall-clock target: it follows the shape and tempo of the transcript.
+ */
+export function botcastSessionShouldClose(args: {
+  messages: readonly Pick<BotcastMessage, "speakerRole" | "content">[];
+  durationMinutes: BotcastSessionDurationMinutes | null;
+  startedAtMs: number;
+  nowMs: number;
+}): boolean {
+  const utteranceCount = args.messages.length;
+  if (
+    utteranceCount < BOTCAST_AUTO_MIN_EXCHANGES * 2 ||
+    args.messages.at(-1)?.speakerRole !== "guest"
+  ) {
+    return false;
+  }
+  if (args.durationMinutes !== null) {
+    return (
+      utteranceCount >= BOTCAST_TIMED_MAX_UTTERANCES ||
+      args.nowMs - args.startedAtMs >= args.durationMinutes * 60_000
+    );
+  }
+  if (
+    utteranceCount >= BOTCAST_AUTO_MAX_EXCHANGES * 2 ||
+    args.nowMs - args.startedAtMs >=
+      BOTCAST_SESSION_DURATION_MINUTES_MAX * 60_000
+  ) {
+    return true;
+  }
+
+  const latestGuestLine = args.messages.at(-1)?.content ?? "";
+  if (BOTCAST_NATURAL_REST_PATTERN.test(latestGuestLine)) return true;
+
+  const recent = args.messages.slice(-4);
+  const prior = args.messages.slice(-8, -4);
+  const recentAverage = botcastAverageWordCount(recent);
+  const priorAverage = botcastAverageWordCount(prior);
+  const conversationHasSettled =
+    utteranceCount >= 10 &&
+    recentAverage <= 28 &&
+    (prior.length < 4 || recentAverage <= priorAverage * 0.82);
+  const matureConversationIsTapering =
+    utteranceCount >= 18 && recentAverage <= 38;
+  return conversationHasSettled || matureConversationIsTapering;
+}
+
+export function botcastNextSpeakerRole(args: {
+  messages: readonly Pick<BotcastMessage, "speakerRole">[];
+  segment: BotcastEpisodeSegment;
+  guestDeparted: boolean;
+}): BotcastSpeakerRole | null {
+  if (args.guestDeparted) {
+    return args.messages.at(-1)?.speakerRole === "host" ? null : "host";
+  }
+  if (args.messages.length === 0) return "host";
+  if (args.segment === "closing" && args.messages.at(-1)?.speakerRole === "host") {
+    return null;
+  }
+  return args.messages.at(-1)?.speakerRole === "host" ? "guest" : "host";
+}
+
+export function botcastDirectorSuggestion(args: {
+  previous?: BotcastCameraSuggestion | null;
+  atMs: number;
+  speakerRole?: BotcastSpeakerRole | null;
+  utteranceDurationMs?: number;
+  segment: BotcastEpisodeSegment;
+  event?: "utterance" | "transition" | "tension" | "departure" | "empty_chair";
+}): BotcastCameraSuggestion {
+  const event = args.event ?? "utterance";
+  let shot: BotcastDirectedCameraShot;
+  let reason: BotcastCameraSuggestion["reason"];
+  if (event === "departure") {
+    shot = "wide";
+    reason = "departure";
+  } else if (event === "empty_chair") {
+    shot = "wide";
+    reason = "empty_chair";
+  } else if (event === "transition") {
+    shot = "wide";
+    reason = "transition";
+  } else if (event === "tension") {
+    shot = "wide";
+    reason = "tension";
+  } else if (args.segment === "opening") {
+    shot = args.speakerRole === "guest" ? "right" : "left";
+    reason = "opening";
+  } else if (args.segment === "closing" && args.speakerRole === "host") {
+    shot = "left";
+    reason = "closing";
+  } else {
+    shot = args.speakerRole === "guest" ? "right" : "left";
+    reason = "speaker";
+  }
+
+  const previous = args.previous;
+  const heldMs = previous ? args.atMs - previous.atMs : Number.POSITIVE_INFINITY;
+  const shortUtterance = (args.utteranceDurationMs ?? 0) < BOTCAST_DIRECTOR_HYSTERESIS_MS;
+  if (
+    previous &&
+    shot !== previous.shot &&
+    event === "utterance" &&
+    (heldMs < previous.minimumHoldMs || shortUtterance)
+  ) {
+    return previous;
+  }
+  return {
+    shot,
+    reason,
+    atMs: Math.max(0, Math.round(args.atMs)),
+    minimumHoldMs: BOTCAST_DIRECTOR_MIN_SHOT_MS,
+  };
+}
+
+export function botcastCameraShotAt(args: {
+  events: readonly BotcastReplayEvent[];
+  elapsedMs: number;
+  manualShot: BotcastCameraShot;
+}): BotcastDirectedCameraShot {
+  if (args.manualShot !== "auto") return args.manualShot;
+  let shot: BotcastDirectedCameraShot = "wide";
+  for (const event of args.events) {
+    if (event.kind !== "camera_suggestion") continue;
+    const atMs = Number(event.payload.atMs);
+    const candidate = event.payload.shot;
+    if (Number.isFinite(atMs) && atMs <= args.elapsedMs) {
+      if (candidate === "left" || candidate === "right" || candidate === "wide") {
+        shot = candidate;
+      }
+    }
+  }
+  return shot;
+}
+
+export function botcastGuestHasDepartedAt(
+  events: readonly BotcastReplayEvent[],
+  elapsedMs: number,
+): boolean {
+  if (!events.some((event) => event.kind === "departure")) return false;
+  const departureShot = events.find(
+    (event) =>
+      event.kind === "camera_suggestion" && event.payload.reason === "departure",
+  );
+  const departureAtMs = Number(departureShot?.payload.atMs);
+  return Number.isFinite(departureAtMs) && elapsedMs >= departureAtMs;
+}
+
+export function botcastReplayTimeline(
+  messages: readonly Pick<BotcastMessage, "content">[],
+  events: readonly BotcastReplayEvent[],
+): { durationMs: number; messageStartMs: number[] } {
+  let cursorMs = 0;
+  const messageStartMs = messages.map((message) => {
+    const startMs = cursorMs;
+    const wordCount = message.content.split(/\s+/u).filter(Boolean).length;
+    cursorMs += Math.max(BOTCAST_DIRECTOR_MIN_SHOT_MS, wordCount * 310);
+    return startMs;
+  });
+  const directorEndMs = events.reduce((latest, event) => {
+    if (event.kind !== "camera_suggestion") return latest;
+    const atMs = Number(event.payload.atMs);
+    const minimumHoldMs = Number(event.payload.minimumHoldMs);
+    if (!Number.isFinite(atMs)) return latest;
+    return Math.max(
+      latest,
+      atMs + (Number.isFinite(minimumHoldMs) ? minimumHoldMs : BOTCAST_DIRECTOR_MIN_SHOT_MS),
+    );
+  }, 0);
+  return {
+    durationMs: Math.max(8_000, cursorMs + 3_500, directorEndMs),
+    messageStartMs,
+  };
+}
+
+export function botcastReplayMessageIndexAt(
+  messageStartMs: readonly number[],
+  elapsedMs: number,
+): number {
+  if (messageStartMs.length === 0) return -1;
+  let activeIndex = 0;
+  for (let index = 1; index < messageStartMs.length; index += 1) {
+    if (messageStartMs[index]! > elapsedMs) break;
+    activeIndex = index;
+  }
+  return activeIndex;
+}

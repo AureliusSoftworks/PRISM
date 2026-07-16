@@ -12,19 +12,82 @@ describe("Coffee player response UI wiring", () => {
     );
   });
 
-  it("waits for the player line and a social beat before requesting a reply", () => {
+  it("requests the bot response immediately after the player line settles", () => {
     assert.match(
       pageSource,
-      /await waitForCoffeeUserRevealToSettle\(\);[\s\S]*?await waitForCoffeeJobPoll\([\s\S]*?coffeePlayerResponseBeatMs\(/,
+      /await waitForCoffeeUserRevealToSettle\(\);[\s\S]*?setCoffeeTurnRhythmState\("botThinking"\);[\s\S]*?const presentBotIds =[\s\S]*?runCoffeeTurnJob\(/,
     );
+    assert.doesNotMatch(pageSource, /coffeePlayerResponseBeatMs/);
     assert.match(
       pageSource,
       /resolveCoffeeUserRevealSettledWaiters\(\);[\s\S]*?setCoffeeTurnRhythmState\("botThinking"\)/,
     );
+    assert.match(
+      pageSource,
+      /const revealArgs: CoffeePendingRevealQueueArgs = \{[\s\S]*?includeCooldown: false,/,
+    );
+  });
+
+  it("keeps the responding bot thinking until speaking actually begins", () => {
+    assert.match(
+      pageSource,
+      /const beginSpeaking = async[\s\S]*?await startCoffeeVoiceForReveal\([\s\S]*?setCoffeeTurnRhythmState\("tableTyping"\)/,
+    );
+    assert.match(
+      pageSource,
+      /coffeeDraftRef\.current\.trim\(\)\.length > 0[\s\S]*?\? "playerComposing"[\s\S]*?: "botThinking"/,
+    );
+  });
+
+  it("does not let canceled voice preparation reclaim the table", () => {
+    assert.match(
+      pageSource,
+      /const beginSpeaking = async[\s\S]*?await startCoffeeVoiceForReveal\([\s\S]*?if \(!revealDeliveryIsCurrent\(\)\) return null;[\s\S]*?setCoffeeTurnRhythmState\("tableTyping"\)/,
+    );
+    assert.match(
+      pageSource,
+      /const beginSpeakingAndScheduleReveal[\s\S]*?durationMs === null \|\| !revealDeliveryIsCurrent\(\)[\s\S]*?setTimeout\(applyReveal, durationMs\)/,
+    );
+    assert.match(
+      pageSource,
+      /const applyReveal = \(\) => \{[\s\S]*?if \(!revealDeliveryIsCurrent\(\)\) return;/,
+    );
+  });
+
+  it("hands a refreshed player line to one visible owner", () => {
+    assert.match(
+      pageSource,
+      /persistedUserMessageVisible:[\s\S]*?coffeePersistedUserLineOwnsPendingReveal\(\{[\s\S]*?messages:\s*centerFeedSourceMessages,[\s\S]*?userRevealText:\s*coffeeUserRevealText/,
+    );
+  });
+
+  it("hides a pending bot response through cooldown and voice preparation", () => {
+    assert.match(
+      pageSource,
+      /const pendingAssistantRevealActive =\s*pendingLatestMessage\?\.role === "assistant";/,
+    );
+    assert.match(
+      pageSource,
+      /const tableTimelineMessages = coffeeCenterFeedMessagesDuringPendingReveal\(\{[\s\S]*?messages: tableTimelineMessagesRaw,[\s\S]*?revealInProgress: pendingAssistantRevealActive/,
+    );
+    assert.match(
+      pageSource,
+      /const centerFeedSourceMessages =[\s\S]*?revealInProgress: pendingAssistantRevealActive/,
+    );
+  });
+
+  it("keeps punctuation-only interruption rows out of visible table text", () => {
+    assert.match(
+      pageSource,
+      /function coffeeMessageHasTableText[\s\S]*?coffeeTableMessageContentIsVisible\([\s\S]*?coffeeTableDisplayText\(message\.content\)/,
+    );
   });
 
   it("lets the active thinking state suppress the matching seat's sip", () => {
-    assert.match(pageSource, /const seatIsThinking = thinkingBotId === bot\.id;/);
+    assert.match(
+      pageSource,
+      /const seatIsThinking = thinkingBotId === bot\.id;/,
+    );
     assert.match(
       pageSource,
       /buildCoffeeCupVisualState\(\{[\s\S]*?thinking:\s*seatIsThinking,/,

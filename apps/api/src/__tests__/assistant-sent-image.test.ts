@@ -22,6 +22,7 @@ function createImageTestDb(): DatabaseSync {
       user_id TEXT NOT NULL,
       name TEXT NOT NULL,
       system_prompt TEXT NOT NULL DEFAULT '',
+      powers_json TEXT NOT NULL DEFAULT '[]',
       local_image_model TEXT,
       openai_image_model TEXT
     );

@@ -51,12 +51,14 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     displayName: "Alex",
     theme: "dark",
     preferredProvider: "local",
+    preferredImageProvider: "local",
     providerLocked: 0,
     autoMemory: 1,
     composerWritingAssist: 1,
     experimentalDualOllamaEnabled: 0,
     experimentalAllModelEffortEnabled: 0,
     coffeeExperimentalTableAngleEnabled: 0,
+    signalImmersiveVoiceEffectsEnabled: 0,
     psychicModeEnabled: 0,
     autoSwitchModel: 0,
     autoFallbackChain: null,
@@ -95,28 +97,51 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     voiceMode: "mute",
     voiceEffectsEnabled: 1,
     voiceVolume: 1,
-    englishVoiceEngine: "builtin",
+    englishVoiceEngine: "elevenlabs",
     defaultSystemVoiceName: null,
     defaultElevenLabsVoiceId: null,
     elevenLabsVoiceBank: "{}",
     elevenLabsVoiceModel: null,
+    elevenLabsVoiceCollectionId: null,
     primaryOllamaHost: "http://localhost:11434",
     ...overrides,
   };
 }
 
 describe("resolveNextSettings — voice foundation", () => {
-  it("keeps an account-wide mode, engine, and exactly five normalized ElevenLabs slots", () => {
+  it("keeps Signal immersive vocal reactions opt-in", () => {
+    assert.equal(
+      resolveNextSettings({}, baseline()).signalImmersiveVoiceEffectsEnabled,
+      false,
+    );
+    assert.equal(
+      resolveNextSettings(
+        { signalImmersiveVoiceEffectsEnabled: true },
+        baseline(),
+      ).signalImmersiveVoiceEffectsEnabled,
+      true,
+    );
+    assert.equal(
+      resolveNextSettings(
+        { signalImmersiveVoiceEffectsEnabled: "yes" },
+        baseline({ signalImmersiveVoiceEffectsEnabled: 1 }),
+      ).signalImmersiveVoiceEffectsEnabled,
+      true,
+    );
+  });
+
+  it("keeps ElevenLabs available online while retiring account-level voice identities", () => {
     const next = resolveNextSettings(
       {
         voiceMode: "babble",
         voiceEffectsEnabled: false,
         voiceVolume: 0.65,
-        englishVoiceEngine: "elevenlabs",
+        englishVoiceEngine: "builtin",
         defaultSystemVoiceName: "  Alex  ",
         defaultElevenLabsVoiceId: " eleven-default ",
         elevenLabsVoiceBank: { "voice-1": "  voice_alpha  ", "voice-3": 17, extra: "ignore" },
         elevenLabsVoiceModel: " eleven_multilingual_v2 ",
+        elevenLabsVoiceCollectionId: " collection-main ",
       },
       baseline()
     );
@@ -124,12 +149,27 @@ describe("resolveNextSettings — voice foundation", () => {
     assert.equal(next.voiceEffectsEnabled, false);
     assert.equal(next.voiceVolume, 0.65);
     assert.equal(next.englishVoiceEngine, "elevenlabs");
-    assert.equal(next.defaultSystemVoiceName, "Alex");
-    assert.equal(next.defaultElevenLabsVoiceId, "eleven-default");
+    assert.equal(next.defaultSystemVoiceName, null);
+    assert.equal(next.defaultElevenLabsVoiceId, null);
     assert.deepEqual(next.elevenLabsVoiceBank, {
       "voice-1": "voice_alpha", "voice-2": null, "voice-3": null, "voice-4": null, "voice-5": null,
     });
     assert.equal(next.elevenLabsVoiceModel, "eleven_multilingual_v2");
+    assert.equal(next.elevenLabsVoiceCollectionId, "collection-main");
+    assert.equal(
+      resolveNextSettings(
+        { elevenLabsVoiceCollectionId: "" },
+        baseline({ elevenLabsVoiceCollectionId: "collection-old" }),
+      ).elevenLabsVoiceCollectionId,
+      null,
+    );
+    assert.equal(
+      resolveNextSettings(
+        {},
+        baseline({ elevenLabsVoiceCollectionId: "collection-old" }),
+      ).elevenLabsVoiceCollectionId,
+      "collection-old",
+    );
   });
 });
 
@@ -205,6 +245,27 @@ describe("resolveNextSettings — preferredProvider", () => {
     assert.equal(
       resolveNextSettings({ preferredProvider: "azure" }, current).preferredProvider,
       "openai"
+    );
+  });
+});
+
+describe("resolveNextSettings — preferredImageProvider", () => {
+  it("accepts local and OpenAI independently from the chat provider", () => {
+    const next = resolveNextSettings(
+      { preferredProvider: "local", preferredImageProvider: "openai" },
+      baseline(),
+    );
+    assert.equal(next.preferredProvider, "local");
+    assert.equal(next.preferredImageProvider, "openai");
+  });
+
+  it("keeps the stored image provider when the field is missing or invalid", () => {
+    const current = baseline({ preferredImageProvider: "openai" });
+    assert.equal(resolveNextSettings({}, current).preferredImageProvider, "openai");
+    assert.equal(
+      resolveNextSettings({ preferredImageProvider: "anthropic" }, current)
+        .preferredImageProvider,
+      "openai",
     );
   });
 });
@@ -685,6 +746,44 @@ describe("resolveNextSettings — secondaryOllamaHost", () => {
       /different IP address/
     );
   });
+
+  it("rejects public paired hosts so LOCAL cannot leave the private network", () => {
+    for (const secondaryOllamaHost of [
+      "https://public.example:11434",
+      "http://8.8.8.8:11434",
+      "http://203.0.113.8:11434",
+      "http://user:password@192.168.1.50:11434",
+    ]) {
+      assert.throws(
+        () => resolveNextSettings({ secondaryOllamaHost }, baseline()),
+        /loopback, private-LAN IP address, or \.local hostname/,
+      );
+    }
+  });
+
+  it("accepts private IPv4, unique-local IPv6, and mDNS paired hosts", () => {
+    assert.equal(
+      resolveNextSettings(
+        { secondaryOllamaHost: "10.42.0.12:11434" },
+        baseline(),
+      ).secondaryOllamaHost,
+      "http://10.42.0.12:11434",
+    );
+    assert.equal(
+      resolveNextSettings(
+        { secondaryOllamaHost: "http://[fd12:3456::9]:11434" },
+        baseline(),
+      ).secondaryOllamaHost,
+      "http://[fd12:3456::9]:11434",
+    );
+    assert.equal(
+      resolveNextSettings(
+        { secondaryOllamaHost: "http://writing-room.local:11434" },
+        baseline(),
+      ).secondaryOllamaHost,
+      "http://writing-room.local:11434",
+    );
+  });
 });
 
 describe("resolveNextSettings — comfyUiHost", () => {
@@ -713,6 +812,16 @@ describe("resolveNextSettings — comfyUiHost", () => {
 
   it("throws on malformed URL", () => {
     assert.throws(() => resolveNextSettings({ comfyUiHost: "http://" }, baseline()), /ComfyUI host/);
+  });
+
+  it("rejects public ComfyUI endpoints from the LOCAL image lane", () => {
+    assert.throws(
+      () => resolveNextSettings(
+        { comfyUiHost: "https://images.public.example" },
+        baseline(),
+      ),
+      /loopback, private-LAN IP address, or \.local hostname/,
+    );
   });
 });
 

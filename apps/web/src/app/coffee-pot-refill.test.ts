@@ -10,6 +10,8 @@ import {
   COFFEE_POT_TARGET_HIT_SLOP_PX,
   COFFEE_POT_TEXT_FORCEFIELD_PADDING_PX,
   coffeeCupTopOffFillFrameIndices,
+  coffeeCupTopOffFillFrameSchedule,
+  coffeeCupTopOffFirstVisiblePourFrameIndex,
   coffeeCupTopOffFrameIndexForPour,
   coffeeCupTopOffProgressAfterForPour,
   coffeePotFillFrameDelayMs,
@@ -25,8 +27,8 @@ import {
 } from "./coffee-pot-refill.ts";
 
 describe("Coffee pot refill timing", () => {
-  it("starts pouring quickly and keeps a visible fill cadence", () => {
-    assert.ok(COFFEE_POT_HOVER_HOLD_BEFORE_POUR_MS <= 220);
+  it("recognizes a held cup quickly and keeps a visible fill cadence", () => {
+    assert.equal(COFFEE_POT_HOVER_HOLD_BEFORE_POUR_MS, 90);
     assert.ok(COFFEE_POT_POUR_FRAME_MS <= 50);
     assert.ok(COFFEE_POT_FILL_FRAME_MS >= 160);
     assert.equal(COFFEE_POT_RETURN_MS, 280);
@@ -41,6 +43,31 @@ describe("Coffee pot refill timing", () => {
     assert.ok(
       coffeePotPourFrameDelayMs(COFFEE_POT_FINAL_POUR_FRAME_INDEX) <
         coffeePotFillFrameDelayMs(2)
+    );
+  });
+
+  it("starts on the first pour frame that visibly changes the cup", () => {
+    assert.equal(coffeeCupTopOffFirstVisiblePourFrameIndex(0), null);
+    assert.equal(coffeeCupTopOffFirstVisiblePourFrameIndex(1), 2);
+    assert.equal(coffeeCupTopOffFirstVisiblePourFrameIndex(2), 2);
+    assert.equal(coffeeCupTopOffFirstVisiblePourFrameIndex(3), 1);
+    assert.equal(coffeeCupTopOffFirstVisiblePourFrameIndex(6), 1);
+    assert.deepEqual(coffeeCupTopOffFillFrameSchedule(2), [
+      { frameIndex: 2, delayMs: 0 },
+      { frameIndex: 3, delayMs: 180 },
+      { frameIndex: 4, delayMs: 360 },
+    ]);
+    const emptiestCupSchedule = coffeeCupTopOffFillFrameSchedule(6);
+    assert.deepEqual(emptiestCupSchedule, [
+      { frameIndex: 1, delayMs: 0 },
+      { frameIndex: 2, delayMs: 180 },
+      { frameIndex: 3, delayMs: 360 },
+      { frameIndex: 4, delayMs: 540 },
+    ]);
+    assert.ok(
+      COFFEE_POT_HOVER_HOLD_BEFORE_POUR_MS +
+        emptiestCupSchedule[emptiestCupSchedule.length - 1]!.delayMs <=
+        650,
     );
   });
 

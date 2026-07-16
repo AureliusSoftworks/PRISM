@@ -3,6 +3,37 @@
 export type VoiceMode = "mute" | "english" | "babble" | "bottish";
 export type EnglishVoiceEngine = "builtin" | "elevenlabs";
 
+export const ELEVENLABS_VOICE_EFFECTS = [
+  "clean",
+  "radio",
+  "robot",
+  "echo",
+  "chorus",
+  "deep-space",
+] as const;
+export type ElevenLabsVoiceEffect = (typeof ELEVENLABS_VOICE_EFFECTS)[number];
+
+export const ELEVENLABS_VOICE_EFFECT_LABELS: Record<ElevenLabsVoiceEffect, string> = {
+  clean: "Clean",
+  radio: "Radio",
+  robot: "Robot",
+  echo: "Echo",
+  chorus: "Chorus",
+  "deep-space": "Deep Space",
+};
+
+export const ELEVENLABS_VOICE_EFFECT_DESCRIPTIONS: Record<
+  ElevenLabsVoiceEffect,
+  string
+> = {
+  clean: "Unprocessed ElevenLabs voice.",
+  radio: "Narrow-band broadcast tone with a trace of radio noise.",
+  robot: "Mechanical pulse and a subtly doubled synthetic carrier.",
+  echo: "Two level-controlled repeats behind the original voice.",
+  chorus: "A wide, gently detuned double without extra loudness.",
+  "deep-space": "A lower spectral double with a distant trailing reflection.",
+};
+
 export const BOT_AUDIO_VOICE_IDS = [
   "voice-1",
   "voice-2",
@@ -47,6 +78,9 @@ export interface BotAudioVoiceProfileV2 {
   baseVoiceId: BotAudioVoiceId;
   systemVoiceName?: string | null;
   elevenLabsVoiceId?: string | null;
+  elevenLabsEffect: ElevenLabsVoiceEffect;
+  /** Comma-separated Eleven v3 audio directions such as "warm, hushed". */
+  elevenLabsDirection?: string | null;
   pitch: number;
   warmth: number;
   pace: number;
@@ -62,6 +96,38 @@ export type BotAudioVoiceProfile = LegacyBotAudioVoiceProfileV1 | BotAudioVoiceP
  * persistence always writes v2 through serializeBotAudioVoiceProfileV1. */
 export type BotAudioVoiceProfileV1 = BotAudioVoiceProfile;
 export type NormalizedBotAudioVoiceProfileV1 = BotAudioVoiceProfileV2;
+
+/** Shared emotional delivery state for every spoken assistant surface. */
+export type VoiceDeliveryMood =
+  | "joyful"
+  | "warm"
+  | "neutral"
+  | "guarded"
+  | "strained";
+
+/** A modest performance layer over the bot's authored base pace. Normal
+ * delivery is intentionally a little brisk so long-form spoken experiences
+ * do not sag, while the emotional ordering still matches visual reveals. */
+export const VOICE_DELIVERY_RATE_BY_MOOD: Readonly<
+  Record<VoiceDeliveryMood, number>
+> = {
+  joyful: 1.18,
+  warm: 1.12,
+  neutral: 1.08,
+  guarded: 1,
+  strained: 0.94,
+};
+
+export const ELEVENLABS_VOICE_SPEED_MIN = 0.7;
+export const ELEVENLABS_VOICE_SPEED_MAX = 1.2;
+export const BOT_AUDIO_VOICE_PACE_RATE_DEPTH = 0.24;
+export const BOT_AUDIO_VOICE_PITCH_DEPTH_CENTS = 650;
+
+export interface ElevenLabsVoicePerformanceV1 {
+  speed: number;
+  playbackDetuneCents: number;
+  deliveryRate: number;
+}
 
 /** Ephemeral modulation around a bot's persisted voice identity. */
 export interface CoffeeVoiceDeliveryEnvelope {
@@ -80,19 +146,130 @@ export const NEUTRAL_COFFEE_VOICE_DELIVERY_ENVELOPE: CoffeeVoiceDeliveryEnvelope
   emphasisStrength: 0,
 };
 
+export function normalizeVoiceDeliveryMood(
+  value: unknown,
+): VoiceDeliveryMood {
+  return value === "joyful" ||
+    value === "warm" ||
+    value === "guarded" ||
+    value === "strained"
+    ? value
+    : "neutral";
+}
+
+export function voiceDeliveryRateForMood(value: unknown): number {
+  return VOICE_DELIVERY_RATE_BY_MOOD[normalizeVoiceDeliveryMood(value)];
+}
+
+/** Apply mood without mutating or persisting the bot's authored profile. */
+export function applyVoiceDeliveryMoodToProfile(
+  rawProfile: BotAudioVoiceProfileV1,
+  mood: unknown,
+): BotAudioVoiceProfileV2 {
+  const profile = normalizeBotAudioVoiceProfileV1(rawProfile);
+  const authoredRate = 1 + profile.pace * BOT_AUDIO_VOICE_PACE_RATE_DEPTH;
+  const deliveryRate = Math.min(
+    1 + BOT_AUDIO_VOICE_PACE_RATE_DEPTH,
+    Math.max(
+      1 - BOT_AUDIO_VOICE_PACE_RATE_DEPTH,
+      authoredRate * voiceDeliveryRateForMood(mood),
+    ),
+  );
+  return {
+    ...profile,
+    pace: normalizeBotAudioVoiceControl(
+      (deliveryRate - 1) / BOT_AUDIO_VOICE_PACE_RATE_DEPTH,
+    ),
+  };
+}
+
+/** Keep the requested delivery rate authoritative when ElevenLabs reaches its
+ * native speed limits. Extreme pitch is softened only as much as necessary so
+ * a low-pitched voice does not silently become a slow voice. */
+export function resolveElevenLabsVoicePerformance(
+  rawProfile: BotAudioVoiceProfileV1,
+): ElevenLabsVoicePerformanceV1 {
+  const profile = normalizeBotAudioVoiceProfileV1(rawProfile);
+  const deliveryRate = 1 + profile.pace * BOT_AUDIO_VOICE_PACE_RATE_DEPTH;
+  const requestedPitchRatio = 2 ** (
+    (profile.pitch * BOT_AUDIO_VOICE_PITCH_DEPTH_CENTS) / 1200
+  );
+  const speed = Math.min(
+    ELEVENLABS_VOICE_SPEED_MAX,
+    Math.max(
+      ELEVENLABS_VOICE_SPEED_MIN,
+      deliveryRate / requestedPitchRatio,
+    ),
+  );
+  const compensatedPlaybackRatio = deliveryRate / speed;
+  return {
+    speed: Number(speed.toFixed(3)),
+    playbackDetuneCents: Math.round(
+      1200 * Math.log2(compensatedPlaybackRatio),
+    ),
+    deliveryRate: Number(deliveryRate.toFixed(3)),
+  };
+}
+
+export const BOT_NAME_PRONUNCIATION_MAX_LENGTH = 120;
+
+export interface BotNamePronunciationEntry {
+  name: string | null | undefined;
+  namePronunciation?: string | null | undefined;
+  name_pronunciation?: string | null | undefined;
+}
+
+export function normalizeBotNamePronunciation(value: unknown): string {
+  if (typeof value !== "string") return "";
+  return value
+    .replace(/\s+/gu, " ")
+    .trim()
+    .slice(0, BOT_NAME_PRONUNCIATION_MAX_LENGTH);
+}
+
+export function applyBotNamePronunciations(
+  text: unknown,
+  entries: readonly BotNamePronunciationEntry[],
+): unknown {
+  if (typeof text !== "string" || entries.length === 0) return text;
+  const replacements = new Map<string, { written: string; spoken: string }>();
+  for (const entry of entries) {
+    const written = entry.name?.replace(/\s+/gu, " ").trim() ?? "";
+    const spoken = normalizeBotNamePronunciation(
+      entry.namePronunciation ?? entry.name_pronunciation,
+    );
+    const key = written.toLocaleLowerCase();
+    if (
+      !written ||
+      !spoken ||
+      key === spoken.toLocaleLowerCase() ||
+      replacements.has(key)
+    ) {
+      continue;
+    }
+    replacements.set(key, { written, spoken });
+  }
+  if (replacements.size === 0) return text;
+  const alternatives = [...replacements.values()]
+    .sort((left, right) => right.written.length - left.written.length)
+    .map(({ written }) => written.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const pattern = new RegExp(
+    `(?<![\\p{L}\\p{N}])(?:${alternatives.join("|")})(?![\\p{L}\\p{N}])`,
+    "giu",
+  );
+  return text.replace(pattern, (match) =>
+    replacements.get(match.toLocaleLowerCase())?.spoken ?? match,
+  );
+}
+
 export function applyPlayerNamePronunciation(
   text: unknown,
   displayName: string | null | undefined,
   pronunciation: string | null | undefined
 ): unknown {
-  if (typeof text !== "string") return text;
-  const written = displayName?.replace(/\s+/gu, " ").trim() ?? "";
-  const spoken = pronunciation?.replace(/\s+/gu, " ").trim() ?? "";
-  if (!written || !spoken || written.toLocaleLowerCase() === spoken.toLocaleLowerCase()) {
-    return text;
-  }
-  const escaped = written.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return text.replace(new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, "giu"), spoken);
+  return applyBotNamePronunciations(text, [
+    { name: displayName, namePronunciation: pronunciation },
+  ]);
 }
 
 export const BOT_VOICE_TEXTURE_PRESET_LABELS: Record<BotVoiceTexturePreset, string> = {
@@ -159,6 +336,7 @@ export const DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2: Readonly<BotAudioVoiceProfileV2
   v: 2,
   enabled: true,
   baseVoiceId: "voice-1",
+  elevenLabsEffect: "clean",
   pitch: 0,
   warmth: 0,
   pace: 0,
@@ -189,6 +367,41 @@ export function normalizeEnglishVoiceEngine(
   fallback = DEFAULT_ENGLISH_VOICE_ENGINE
 ): EnglishVoiceEngine {
   return value === "builtin" || value === "elevenlabs" ? value : fallback;
+}
+
+export function normalizeElevenLabsVoiceEffect(value: unknown): ElevenLabsVoiceEffect {
+  // Migrate the original harsh bit-crusher preset to the more musical chorus.
+  if (value === "distortion") return "chorus";
+  return typeof value === "string" &&
+    (ELEVENLABS_VOICE_EFFECTS as readonly string[]).includes(value)
+    ? value as ElevenLabsVoiceEffect
+    : "clean";
+}
+
+export function normalizeElevenLabsVoiceDirection(
+  value: unknown,
+  fallback: string | null = null
+): string | null {
+  if (value === null) return null;
+  if (typeof value !== "string") return fallback;
+  const directions: string[] = [];
+  const seen = new Set<string>();
+  for (const rawDirection of value.split(/[,;\n]+/u)) {
+    const direction = rawDirection
+      .replace(/[\u0000-\u001f\u007f]/gu, " ")
+      .trim()
+      .replace(/^\[+|\]+$/gu, "")
+      .replace(/\s+/gu, " ")
+      .trim()
+      .slice(0, 48);
+    if (!direction) continue;
+    const key = direction.toLocaleLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    directions.push(direction);
+    if (directions.length >= 8) break;
+  }
+  return directions.length > 0 ? directions.join(", ").slice(0, 240) : null;
 }
 
 /** Clamp finite values to the portable [-1, 1] performance range. */
@@ -253,6 +466,10 @@ export function normalizeBotAudioVoiceProfileV1(
     record.elevenLabsVoiceId,
     fallbackProfile.elevenLabsVoiceId ?? null
   );
+  const elevenLabsDirection = normalizeElevenLabsVoiceDirection(
+    record.elevenLabsDirection,
+    fallbackProfile.elevenLabsDirection ?? null
+  );
   return {
     v: 2,
     enabled: legacy ? true : record.enabled !== false,
@@ -261,6 +478,8 @@ export function normalizeBotAudioVoiceProfileV1(
       : fallbackProfile.baseVoiceId,
     ...(systemVoiceName ? { systemVoiceName } : {}),
     ...(elevenLabsVoiceId ? { elevenLabsVoiceId } : {}),
+    elevenLabsEffect: normalizeElevenLabsVoiceEffect(record.elevenLabsEffect),
+    ...(elevenLabsDirection ? { elevenLabsDirection } : {}),
     pitch: normalizeBotAudioVoiceControl(record.pitch, fallbackProfile.pitch),
     warmth: normalizeBotAudioVoiceControl(record.warmth, fallbackProfile.warmth),
     pace: normalizeBotAudioVoiceControl(record.pace, fallbackProfile.pace),
@@ -278,9 +497,14 @@ export function normalizeBotAudioVoiceProfileV1(
 
 function normalizeBotAudioVoiceProfileFallback(value: BotAudioVoiceProfile): BotAudioVoiceProfileV2 {
   if (value.v === 2) {
+    const elevenLabsDirection = normalizeElevenLabsVoiceDirection(value.elevenLabsDirection);
     return {
       ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
       ...value,
+      elevenLabsEffect: normalizeElevenLabsVoiceEffect(value.elevenLabsEffect),
+      ...(elevenLabsDirection
+        ? { elevenLabsDirection }
+        : { elevenLabsDirection: undefined }),
       texture: botVoiceTextureForPreset("clean"),
     };
   }

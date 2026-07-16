@@ -11,7 +11,6 @@ import {
   MIN_PRISM_MOOD_SENSITIVITY,
   normalizePrismMoodSensitivity,
   validateComfyUiWorkflowsPayload,
-  normalizeEnglishVoiceEngine,
   normalizeBotVoiceVolume,
   normalizeVoiceMode,
   BOT_AUDIO_VOICE_IDS,
@@ -19,8 +18,11 @@ import {
   normalizeAutoFallbackChain,
   serializeAutoFallbackChain,
   type BotAudioVoiceId,
+  type ImageProviderName,
+  isImageProviderName,
 } from "@localai/shared";
 import { sanitizeHiddenModelIds } from "./model-routing.ts";
+import { requirePrivateNetworkHttpUrl } from "./local-network-host.ts";
 
 /**
  * Pure validation + merge logic for PATCH /api/settings.
@@ -62,6 +64,17 @@ export function parseStoredElevenLabsVoiceBank(value: string | null | undefined)
 }
 
 function normalizeElevenLabsVoiceModel(value: unknown, fallback: string | null): string | null {
+  if (value === undefined) return fallback;
+  if (value === null) return null;
+  if (typeof value !== "string") return fallback;
+  const normalized = value.trim().slice(0, 160);
+  return normalized || null;
+}
+
+export function normalizeElevenLabsVoiceCollectionId(
+  value: unknown,
+  fallback: string | null = null
+): string | null {
   if (value === undefined) return fallback;
   if (value === null) return null;
   if (typeof value !== "string") return fallback;
@@ -125,12 +138,14 @@ export interface CurrentSettings {
   displayName: string;
   theme: Theme;
   preferredProvider: Provider;
+  preferredImageProvider: ImageProviderName;
   providerLocked: number;
   autoMemory: number;
   composerWritingAssist: number;
   experimentalDualOllamaEnabled: number;
   experimentalAllModelEffortEnabled: number;
   coffeeExperimentalTableAngleEnabled: number;
+  signalImmersiveVoiceEffectsEnabled: number;
   psychicModeEnabled: number;
   /** Saved preference only. Auto is still gated per Zen/Coffee context. */
   autoSwitchModel: number;
@@ -174,11 +189,13 @@ export interface CurrentSettings {
   voiceMode: VoiceMode | string | null;
   voiceEffectsEnabled: number;
   voiceVolume: number | null;
+  /** Compatibility column storing the selected ONLINE engine; LOCAL is always builtin. */
   englishVoiceEngine: EnglishVoiceEngine | string | null;
   defaultSystemVoiceName: string | null;
   defaultElevenLabsVoiceId: string | null;
   elevenLabsVoiceBank: string | null;
   elevenLabsVoiceModel: string | null;
+  elevenLabsVoiceCollectionId: string | null;
 }
 
 /** Shape of the next-settings result, with OpenAI key intent captured separately. */
@@ -186,12 +203,14 @@ export interface NextSettings {
   displayName: string;
   theme: Theme;
   preferredProvider: Provider;
+  preferredImageProvider: ImageProviderName;
   providerLocked: number;
   autoMemory: number;
   composerWritingAssist: number;
   experimentalDualOllamaEnabled: number;
   experimentalAllModelEffortEnabled: number;
   coffeeExperimentalTableAngleEnabled: number;
+  signalImmersiveVoiceEffectsEnabled: boolean;
   psychicModeEnabled: number;
   autoSwitchModel: number;
   autoFallbackChain: string | null;
@@ -229,11 +248,13 @@ export interface NextSettings {
   voiceMode: VoiceMode;
   voiceEffectsEnabled: boolean;
   voiceVolume: number;
+  /** Selected ONLINE engine only; LOCAL English always resolves to builtin. */
   englishVoiceEngine: EnglishVoiceEngine;
   defaultSystemVoiceName: string | null;
   defaultElevenLabsVoiceId: string | null;
   elevenLabsVoiceBank: ElevenLabsVoiceBank;
   elevenLabsVoiceModel: string | null;
+  elevenLabsVoiceCollectionId: string | null;
   /**
    * Intent for the OpenAI API key:
    *   - "replace": caller sent a non-empty string; encrypt it
@@ -298,7 +319,7 @@ function normalizeOllamaHostValue(input: string): string {
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     throw new Error("Paired Ollama host must use http:// or https://.");
   }
-  return normalized;
+  return requirePrivateNetworkHttpUrl(normalized, "Paired Ollama host");
 }
 
 function normalizeComfyUiHostValue(input: string): string {
@@ -326,7 +347,7 @@ function normalizeComfyUiHostValue(input: string): string {
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     throw new Error("ComfyUI host must use http:// or https://.");
   }
-  return normalized;
+  return requirePrivateNetworkHttpUrl(normalized, "ComfyUI host");
 }
 
 function canonicalOllamaHostname(host: string): string {
@@ -809,6 +830,11 @@ export function resolveNextSettings(
   const preferredProvider: Provider = isProvider(body.preferredProvider)
     ? body.preferredProvider
     : current.preferredProvider;
+  const preferredImageProvider: ImageProviderName = isImageProviderName(
+    body.preferredImageProvider
+  )
+    ? body.preferredImageProvider
+    : current.preferredImageProvider;
   const providerLocked =
     typeof body.providerLocked === "boolean"
       ? Number(body.providerLocked)
@@ -833,6 +859,10 @@ export function resolveNextSettings(
     typeof body.coffeeExperimentalTableAngleEnabled === "boolean"
       ? Number(body.coffeeExperimentalTableAngleEnabled)
       : current.coffeeExperimentalTableAngleEnabled;
+  const signalImmersiveVoiceEffectsEnabled =
+    typeof body.signalImmersiveVoiceEffectsEnabled === "boolean"
+      ? body.signalImmersiveVoiceEffectsEnabled
+      : current.signalImmersiveVoiceEffectsEnabled === 1;
   const psychicModeEnabled =
     typeof body.psychicModeEnabled === "boolean"
       ? Number(body.psychicModeEnabled)
@@ -1098,30 +1128,23 @@ export function resolveNextSettings(
   const voiceVolume = body.voiceVolume === undefined
     ? normalizeBotVoiceVolume(current.voiceVolume)
     : normalizeBotVoiceVolume(body.voiceVolume, normalizeBotVoiceVolume(current.voiceVolume));
-  const englishVoiceEngine = normalizeEnglishVoiceEngine(
-    body.englishVoiceEngine,
-    normalizeEnglishVoiceEngine(current.englishVoiceEngine)
-  );
-  const normalizeDefaultVoiceSelection = (value: unknown, fallback: string | null): string | null => {
-    if (value === undefined) return fallback;
-    if (value === null) return null;
-    if (typeof value !== "string") return fallback;
-    return value.trim().slice(0, 200) || null;
-  };
-  const defaultSystemVoiceName = normalizeDefaultVoiceSelection(
-    body.defaultSystemVoiceName,
-    current.defaultSystemVoiceName
-  );
-  const defaultElevenLabsVoiceId = normalizeDefaultVoiceSelection(
-    body.defaultElevenLabsVoiceId,
-    current.defaultElevenLabsVoiceId
-  );
+  // The online selector currently has one installed provider. It is not an
+  // opt-in toggle; the per-profile ElevenLabs voice is the explicit override.
+  const englishVoiceEngine: EnglishVoiceEngine = "elevenlabs";
+  // Account-level voice identities are retired. A settings save clears any
+  // legacy values so only Prism/bot customization owns voice identity.
+  const defaultSystemVoiceName = null;
+  const defaultElevenLabsVoiceId = null;
   const elevenLabsVoiceBank = body.elevenLabsVoiceBank === undefined
     ? parseStoredElevenLabsVoiceBank(current.elevenLabsVoiceBank)
     : normalizeElevenLabsVoiceBank(body.elevenLabsVoiceBank);
   const elevenLabsVoiceModel = normalizeElevenLabsVoiceModel(
     body.elevenLabsVoiceModel,
     current.elevenLabsVoiceModel
+  );
+  const elevenLabsVoiceCollectionId = normalizeElevenLabsVoiceCollectionId(
+    body.elevenLabsVoiceCollectionId,
+    current.elevenLabsVoiceCollectionId
   );
   const comfyUiWorkflows =
     body.comfyUiWorkflows === undefined
@@ -1179,12 +1202,14 @@ export function resolveNextSettings(
     displayName,
     theme,
     preferredProvider,
+    preferredImageProvider,
     providerLocked,
     autoMemory,
     composerWritingAssist,
     experimentalDualOllamaEnabled,
     experimentalAllModelEffortEnabled,
     coffeeExperimentalTableAngleEnabled,
+    signalImmersiveVoiceEffectsEnabled,
     psychicModeEnabled,
     autoSwitchModel,
     autoFallbackChain,
@@ -1227,6 +1252,7 @@ export function resolveNextSettings(
     defaultElevenLabsVoiceId,
     elevenLabsVoiceBank,
     elevenLabsVoiceModel,
+    elevenLabsVoiceCollectionId,
     openAiKeyIntent,
     anthropicKeyIntent,
     elevenLabsKeyIntent,

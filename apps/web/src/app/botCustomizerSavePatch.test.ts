@@ -10,6 +10,7 @@ import { DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1, botPowerSourceHashV1 } from "@local
 
 const pristine: BotCustomizerSavePristine = {
   name: "Iris",
+  namePronunciation: "",
   prompt: "stored prompt",
   rawPrompt: "raw stored prompt",
   localModel: "llama3.2",
@@ -32,6 +33,7 @@ const pristine: BotCustomizerSavePristine = {
   faceMouthFont: "warm",
   faceMouthCharacter: null,
   faceMouthAnimation: "none",
+  faceMouthCoffeePucker: false,
   faceFontWeight: 500,
   faceEyeScale: 1,
   faceEyeOffsetX: 0,
@@ -56,6 +58,7 @@ const currentFromPristine = (
   overrides: Partial<BotCustomizerSaveCurrent> = {}
 ): BotCustomizerSaveCurrent => ({
   name: pristine.name,
+  namePronunciation: pristine.namePronunciation,
   storedSystemPrompt: pristine.prompt,
   advancedMode: false,
   localModel: pristine.localModel,
@@ -82,6 +85,7 @@ const currentFromPristine = (
   faceMouthFont: pristine.faceMouthFont,
   faceMouthCharacter: pristine.faceMouthCharacter,
   faceMouthAnimation: pristine.faceMouthAnimation,
+  faceMouthCoffeePucker: pristine.faceMouthCoffeePucker,
   faceFontWeight: pristine.faceFontWeight,
   faceEyeScale: pristine.faceEyeScale,
   faceEyeOffsetX: pristine.faceEyeOffsetX,
@@ -108,6 +112,16 @@ describe("bot customizer save patch", () => {
     assert.deepEqual(
       buildBotCustomizerSavePatch(currentFromPristine({ name: "Iriss" }), pristine),
       { name: "Iriss" }
+    );
+  });
+
+  it("patches a normalized bot-owned name pronunciation independently", () => {
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(
+        currentFromPristine({ namePronunciation: "  Eye-riss  " }),
+        pristine,
+      ),
+      { namePronunciation: "Eye-riss" },
     );
   });
 
@@ -204,6 +218,16 @@ describe("bot customizer save patch", () => {
         { ...pristine, faceMouthCharacter: "V" }
       ),
       { faceMouthCharacter: null }
+    );
+  });
+
+  it("patches the Coffee sip pucker preference independently", () => {
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(
+        currentFromPristine({ faceMouthCoffeePucker: true }),
+        pristine
+      ),
+      { faceMouthCoffeePucker: true }
     );
   });
 
@@ -332,6 +356,9 @@ describe("bot customizer save patch", () => {
     const audioVoiceProfile = {
       ...pristine.audioVoiceProfile,
       baseVoiceId: "voice-4" as const,
+      elevenLabsVoiceId: "voice-id",
+      elevenLabsEffect: "deep-space" as const,
+      elevenLabsDirection: "warm, conspiratorial",
       pitch: 0.35,
     };
     assert.deepEqual(

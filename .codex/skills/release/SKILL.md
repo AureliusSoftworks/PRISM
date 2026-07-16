@@ -1,26 +1,31 @@
 ---
 name: release
-description: Prepare or cut a PRISM release from dev to main. A bare $release or /release commits and pushes the intended dev work, prepares version notes, and opens a draft dev-to-main release PR for Jared to review on GitHub. Final merge, tag, and build steps remain separately guarded.
+description: Cut a PRISM release from dev to main. A bare $release or /release commits and pushes the intended work, prepares version notes, merges dev into main through a release PR, tags and pushes the release, triggers the release workflow, and watches it through completion. Draft-only preparation must be requested explicitly.
 ---
 
 # Release
 
-Use this skill only in the PRISM repository. Treat it as a draft-first release runbook: prepare and push `dev`, open a draft release PR, then stop for Jared's GitHub handoff. Merge, tag, publication, and workflow-trigger steps require a separate explicit approval.
+Use this skill only in the PRISM repository. Treat a bare `$release` or `/release` as an end-to-end release runbook: prepare and push `dev`, merge it into `main` through a release PR, create and push the release tag, trigger the release workflow, and watch the result. Do not pause for another approval between those normal release stages.
+
+Only stop at the PR when Jared explicitly asks to `prepare`, `draft`, or `open a draft` release.
 
 ## Safety Rules
 
 - Verify the repo path is `/Users/jared/Developer/Web Apps/PRISM` before acting.
 - Preserve unrelated local work. Inspect `git status --short` before edits and stage only release files.
-- Release from `dev`. Do not cut a release from a feature branch.
+- Release from `dev`. If the intended release work is on another branch, land it through a prerequisite PR into `dev`; do not cut the release directly from the feature branch.
 - Never use `git add -A`, destructive resets, force pushes, or tag deletion unless Jared explicitly asks.
 - Load credentials only through the normal local environment. If a command needs secrets, run it through `/Users/jared/.codex/bin/with-secrets <command>`.
-- A bare `$release` or `/release` is explicit authorization to commit the intended current work, push `dev`, prepare release metadata, and open or update a draft `dev` to `main` release PR.
-- Ask for separate explicit approval before:
-  - checking out or modifying `main`
-  - merging `dev` into `main`
-  - creating a release tag
-  - pushing `main` or release tags
-  - triggering GitHub Actions
+- A bare `$release` or `/release` is standing authorization to:
+  - commit the intended current work and release metadata
+  - push the current branch and merge a prerequisite PR into `dev` when needed
+  - push `dev` and open or update the `dev` to `main` release PR
+  - mark the release PR ready and merge `dev` into `main`
+  - create and push the release tag
+  - trigger the release workflow and watch it through completion
+- Do not ask for separate approval for those normal release actions.
+- An explicitly requested draft-only release authorizes preparation, commits, pushes, and a draft PR, but not the merge, tag, or release workflow.
+- Never bypass required checks, force a push, overwrite or delete an existing tag, discard unrelated work, or resolve a meaningful merge conflict by guessing. Diagnose and repair ordinary release blockers on `dev`; stop only when completion requires a meaningful product decision, destructive action, or check bypass.
 
 ## Workflow
 
@@ -39,11 +44,13 @@ git status --short
 Confirm:
 
 - working directory is PRISM
-- current branch is `dev`
+- current branch is `dev`, or identify the prerequisite branch-to-`dev` PR needed before release prep
 - release-scope diffs are clean or understood
 - `dev` is up to date enough to release
 
 If unrelated local changes exist, leave them alone. Only continue if they do not conflict with release files, or ask Jared how to handle the risk.
+
+If the intended work is on another branch, commit and push only that intended work, then create or update its PR into `dev` without asking for separate approval. For a bare release, merge that prerequisite PR once its required checks pass, then resume from `dev`. For a draft-only request, stop before the prerequisite merge unless Jared explicitly authorized it.
 
 ### 2. Determine Version
 
@@ -122,7 +129,7 @@ One-line summary of what the release covers.
 
 Do not commit unrelated files.
 
-### 7. Push dev And Open The Draft Release PR
+### 7. Push dev And Open The Release PR
 
 Push the prepared `dev` branch:
 
@@ -130,47 +137,42 @@ Push the prepared `dev` branch:
 git push origin dev
 ```
 
-Check whether an open `dev` to `main` PR already exists. Reuse and update it when appropriate; otherwise create a new draft PR:
+Check whether an open `dev` to `main` PR already exists. Reuse and update it when appropriate; otherwise create a new PR. Use `--draft` only for an explicitly requested draft-only release:
 
 ```bash
 gh pr list --base main --head dev --state open
-gh pr create --draft --base main --head dev --title "Release vX.Y.Z" --body "..."
+gh pr create --base main --head dev --title "Release vX.Y.Z" --body "..."
 ```
 
-The PR body should summarize the version, release notes, verification, and the human handoff. Confirm with `gh pr view` that `isDraft` is true. Do not merge, tag, publish a GitHub Release, or trigger the build workflow in this default path.
+The PR body should summarize the version, release notes, and verification. Confirm its live state with `gh pr view`.
 
-Tell Jared when the PR is in draft status so he can mark it ready and complete his GitHub step.
-
-### 8. Approval Gate: Merge, Tag, Push, Build
-
-Only after Jared separately authorizes finalization, summarize:
-
-- version
-- current branch and commit
-- files committed
-- release notes summary
-- planned commands
-
-Ask Jared for explicit approval to proceed.
-
-After that approval:
+For a draft-only release, confirm `isDraft` is true and stop for Jared's handoff. For a bare release, mark an existing draft ready, wait for required checks, and repair ordinary failures on `dev` rather than bypassing them. Then merge with the repository's normal merge-commit strategy and verify the PR reports `MERGED`:
 
 ```bash
-git checkout main
-git merge --no-ff dev -m "Release vX.Y.Z"
-git tag vX.Y.Z
-git checkout dev
-git push origin main
-git push origin dev
+gh pr ready <pr-number>
+gh pr merge <pr-number> --merge
+gh pr view <pr-number>
+```
+
+### 8. Tag, Push, And Trigger The Release
+
+After the release PR merges, fetch the remote state and verify that `origin/main` contains the released `dev` head. Confirm that neither the local nor remote release tag already exists before creating it; never move an existing tag.
+
+Tag the merged `main` commit without switching away from a dirty `dev` worktree:
+
+```bash
+git fetch --prune origin
+git merge-base --is-ancestor <released-dev-sha> origin/main
+git tag vX.Y.Z origin/main
 git push origin vX.Y.Z
 gh workflow run release-main.yml --ref main --field version=X.Y.Z --field desktop_release_channel=github
 ```
 
-If GitHub CLI needs credentials, wrap only that command with `/Users/jared/.codex/bin/with-secrets`.
+This avoids disturbing unrelated local changes while still tagging the exact merged `main` commit. If GitHub CLI needs credentials, wrap only that command with `/Users/jared/.codex/bin/with-secrets`.
 
 ### 9. Watch And Report
 
-After triggering the workflow, find the run id with `gh run list` if needed, then watch it:
+After triggering the workflow, find the new run id with `gh run list`, verify that its head branch/ref and version match this release, then watch it:
 
 ```bash
 gh run watch <run-id>
@@ -183,4 +185,4 @@ Report:
 - workflow result
 - release page: `https://github.com/AureliusSoftworks/PRISM/releases`
 
-If the build workflow fails, do not delete the tag or revert the merge by default. Diagnose the failure, fix on `dev`, and re-run the workflow when appropriate.
+If the build workflow fails, do not delete the tag or revert the merge by default. Diagnose the failure, fix on `dev`, merge the repair into `main`, and re-run the workflow when appropriate. Continue until the release completes or a non-bypassable blocker requires Jared's decision.

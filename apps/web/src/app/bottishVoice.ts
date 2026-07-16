@@ -37,6 +37,8 @@ export interface BottishPlan {
 
 export interface BottishPlaybackTiming {
   targetDurationMs?: number;
+  /** Ephemeral mood delivery rate; authored Bottish pace remains ignored. */
+  deliveryRate?: number;
 }
 
 const MEDIA_PLAY_START_TIMEOUT_MS = 1500;
@@ -223,6 +225,35 @@ export function fitBottishPlanToDuration(
       ),
       characterEndTimesSeconds: plan.alignment.characterEndTimesSeconds.map(
         (seconds) => seconds * scale
+      ),
+    },
+  };
+}
+
+export function scaleBottishPlanForDeliveryRate(
+  plan: BottishPlan,
+  rawDeliveryRate: number | undefined,
+): BottishPlan {
+  const deliveryRate = typeof rawDeliveryRate === "number" &&
+      Number.isFinite(rawDeliveryRate)
+    ? Math.max(0.76, Math.min(1.24, rawDeliveryRate))
+    : 1;
+  if (plan.durationMs <= 0 || Math.abs(deliveryRate - 1) < 0.001) return plan;
+  const scale = 1 / deliveryRate;
+  return {
+    notes: plan.notes.map((note) => ({
+      ...note,
+      startMs: Math.round(note.startMs * scale),
+      durationMs: Math.max(8, Math.round(note.durationMs * scale)),
+    })),
+    durationMs: Math.max(1, Math.round(plan.durationMs * scale)),
+    alignment: {
+      characters: [...plan.alignment.characters],
+      characterStartTimesSeconds: plan.alignment.characterStartTimesSeconds.map(
+        (seconds) => seconds * scale,
+      ),
+      characterEndTimesSeconds: plan.alignment.characterEndTimesSeconds.map(
+        (seconds) => seconds * scale,
       ),
     },
   };
@@ -496,6 +527,7 @@ async function playPlan(
     effectsEnabled,
     lifecycle,
     alignment: plan.alignment,
+    isCurrent: () => expectedGeneration === generation,
   });
   if (!played) await playPlanWithMedia(plan, profile, expectedGeneration, lifecycle);
 }
@@ -577,8 +609,9 @@ export function mixBabbleMediaWave(
   text: string,
   rawProfile: BotAudioVoiceProfileV1,
   seed: string,
-  _effectsEnabled = true,
+  effectsEnabled = true,
 ): ArrayBuffer {
+  if (!effectsEnabled) return bytes;
   if (bytes.byteLength < 44) return bytes;
   const input = new DataView(bytes);
   if (waveChunkId(input, 0) !== "RIFF" || waveChunkId(input, 8) !== "WAVE") return bytes;
@@ -648,7 +681,6 @@ export function mixBabbleMediaWave(
       const envelope = Math.sin(Math.PI * progress) ** 0.7;
       const accentSample = bottishWaveSample(accent.waveform, phase) * accent.gain * envelope;
       for (let channel = 0; channel < channelCount; channel += 1) {
-        const offset = dataOffset + frame * frameSize + channel * 2;
         const sampleIndex = frame * channelCount + channel;
         mixed[sampleIndex] = (mixed[sampleIndex] ?? 0) + accentSample;
       }
@@ -769,6 +801,7 @@ async function playBabble(
     lifecycle,
     roboticPlan,
     cleanRoboticCarrier: true,
+    isCurrent: () => expectedGeneration === generation,
   });
   if (!played) {
     await playHybridBytesWithMedia(
@@ -823,7 +856,10 @@ export function enqueueBottishVoice(
     volume: normalizeBotVoiceVolume(globalVolume),
   };
   const plan = fitBottishPlanToDuration(
-    buildBottishPlan(text, playbackProfile, seed),
+    scaleBottishPlanForDeliveryRate(
+      buildBottishPlan(text, playbackProfile, seed),
+      timing?.deliveryRate,
+    ),
     timing?.targetDurationMs
   );
   queue = queue
