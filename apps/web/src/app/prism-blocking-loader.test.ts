@@ -28,4 +28,13 @@ describe("PrismBlockingLoader", () => {
     assert.match(css, /prefers-reduced-motion:\s*reduce/iu);
     assert.match(css, /\.backdrop\[data-theme="light"\]/u);
   });
+
+  it("offers explicit click and keyboard cancellation only when supported", () => {
+    assert.match(source, /onCancel\?: \(\) => void/u);
+    assert.match(source, /aria-label=\{cancelLabel\}/u);
+    assert.match(source, /className=\{styles\.cancelButton\}/u);
+    assert.match(source, /event\.key === "Escape"[\s\S]{0,100}onCancel\?\.\(\)/u);
+    assert.match(source, /cancelButtonRef\.current \?\? rootRef\.current/u);
+    assert.match(css, /\.cancelButton\s*\{/u);
+  });
 });

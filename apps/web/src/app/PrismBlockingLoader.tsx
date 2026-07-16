@@ -16,6 +16,8 @@ export interface PrismBlockingLoaderProps {
   stepLabel: string;
   progress?: number | null;
   theme?: "light" | "dark";
+  onCancel?: () => void;
+  cancelLabel?: string;
 }
 
 function normalizedProgress(progress: number | null | undefined): number | null {
@@ -30,8 +32,11 @@ export function PrismBlockingLoader({
   stepLabel,
   progress = null,
   theme = "dark",
+  onCancel,
+  cancelLabel = "Cancel operation",
 }: PrismBlockingLoaderProps): React.JSX.Element | null {
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const cancelButtonRef = useRef<HTMLButtonElement | null>(null);
   const titleId = useId();
   const detailId = useId();
   const normalized = normalizedProgress(progress);
@@ -84,10 +89,28 @@ export function PrismBlockingLoader({
       aria-describedby={detailId}
       tabIndex={-1}
       onKeyDown={(event) => {
-        if (event.key === "Escape" || event.key === "Tab") event.preventDefault();
+        if (event.key === "Escape") {
+          event.preventDefault();
+          onCancel?.();
+        } else if (event.key === "Tab") {
+          event.preventDefault();
+          (cancelButtonRef.current ?? rootRef.current)?.focus({ preventScroll: true });
+        }
       }}
     >
       <section className={styles.card} role="status" aria-live="polite">
+        {onCancel ? (
+          <button
+            ref={cancelButtonRef}
+            type="button"
+            className={styles.cancelButton}
+            onClick={onCancel}
+            aria-label={cancelLabel}
+            title={cancelLabel}
+          >
+            <span aria-hidden="true">×</span>
+          </button>
+        ) : null}
         <div className={styles.prismMark} aria-hidden="true">
           <span className={styles.lightCore} />
           <span className={styles.rayPink} />
