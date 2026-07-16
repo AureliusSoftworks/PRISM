@@ -2,7 +2,128 @@ import {
   normalizeBotAudioVoiceProfileV1,
   type BotAudioVoiceProfileV1,
   type CoffeeVoiceDeliveryEnvelope,
+  type ElevenLabsVoiceEffect,
 } from "@localai/shared";
+
+export interface ElevenLabsVoiceEffectPlan {
+  highpassHz: number;
+  lowpassHz: number;
+  drive: number;
+  bitDepth: number;
+  dryGain: number;
+  outputTrim: number;
+  noiseGain: number;
+  modulationFrequencyHz: number;
+  modulationDepth: number;
+  modulationBaseGain: number;
+  parallelVoices: Array<{
+    delaySeconds: number;
+    detuneCents: number;
+    gain: number;
+  }>;
+}
+
+export function resolveElevenLabsVoiceEffectPlan(
+  effect: ElevenLabsVoiceEffect
+): ElevenLabsVoiceEffectPlan {
+  switch (effect) {
+    case "radio":
+      return {
+        highpassHz: 320,
+        lowpassHz: 3200,
+        drive: 0,
+        bitDepth: 16,
+        dryGain: 0.92,
+        outputTrim: 0.76,
+        noiseGain: 0.012,
+        modulationFrequencyHz: 0,
+        modulationDepth: 0,
+        modulationBaseGain: 1,
+        parallelVoices: [],
+      };
+    case "robot":
+      return {
+        highpassHz: 80,
+        lowpassHz: 6200,
+        drive: 0,
+        bitDepth: 16,
+        dryGain: 0.9,
+        outputTrim: 0.74,
+        noiseGain: 0,
+        modulationFrequencyHz: 34,
+        modulationDepth: 0.38,
+        modulationBaseGain: 0.62,
+        parallelVoices: [
+          { delaySeconds: 0.008, detuneCents: -70, gain: 0.28 },
+        ],
+      };
+    case "echo":
+      return {
+        highpassHz: 25,
+        lowpassHz: 20_000,
+        drive: 0,
+        bitDepth: 16,
+        dryGain: 1,
+        outputTrim: 0.72,
+        noiseGain: 0,
+        modulationFrequencyHz: 0,
+        modulationDepth: 0,
+        modulationBaseGain: 1,
+        parallelVoices: [
+          { delaySeconds: 0.17, detuneCents: 0, gain: 0.32 },
+          { delaySeconds: 0.34, detuneCents: 0, gain: 0.15 },
+        ],
+      };
+    case "chorus":
+      return {
+        highpassHz: 25,
+        lowpassHz: 18_000,
+        drive: 0,
+        bitDepth: 16,
+        dryGain: 0.74,
+        outputTrim: 0.68,
+        noiseGain: 0,
+        modulationFrequencyHz: 0,
+        modulationDepth: 0,
+        modulationBaseGain: 1,
+        parallelVoices: [
+          { delaySeconds: 0.012, detuneCents: -14, gain: 0.34 },
+          { delaySeconds: 0.021, detuneCents: 14, gain: 0.34 },
+        ],
+      };
+    case "deep-space":
+      return {
+        highpassHz: 35,
+        lowpassHz: 10_000,
+        drive: 0,
+        bitDepth: 16,
+        dryGain: 0.6,
+        outputTrim: 0.68,
+        noiseGain: 0,
+        modulationFrequencyHz: 0,
+        modulationDepth: 0,
+        modulationBaseGain: 1,
+        parallelVoices: [
+          { delaySeconds: 0.018, detuneCents: -500, gain: 0.5 },
+          { delaySeconds: 0.22, detuneCents: -500, gain: 0.16 },
+        ],
+      };
+    case "clean":
+      return {
+        highpassHz: 25,
+        lowpassHz: 20_000,
+        drive: 0,
+        bitDepth: 16,
+        dryGain: 1,
+        outputTrim: 1,
+        noiseGain: 0,
+        modulationFrequencyHz: 0,
+        modulationDepth: 0,
+        modulationBaseGain: 1,
+        parallelVoices: [],
+      };
+  }
+}
 
 export interface ResolvedVoiceTexture {
   bandwidth: number;
@@ -245,56 +366,79 @@ export async function playRealtimeVoiceBytes(args: {
   alignment?: VoicePlaybackCharacterAlignment | null;
   roboticPlan?: VoiceRoboticPlan | null;
   cleanRoboticCarrier?: boolean;
+  elevenLabsEffect?: ElevenLabsVoiceEffect;
+  /** Prevents an older asynchronous decode from replacing newer playback. */
+  isCurrent?: () => boolean;
 }): Promise<boolean> {
   const context = contextForPlayback();
   if (!context || !await prepareRealtimeVoiceAudio()) return false;
+  if (args.isCurrent && !args.isCurrent()) return true;
   const profile = normalizeBotAudioVoiceProfileV1(args.profile);
   if (!profile.enabled || profile.volume <= 0) return true;
   const decoded = await context.decodeAudioData(args.bytes.slice(0));
+  if (args.isCurrent && !args.isCurrent()) return true;
   stopRealtimeVoiceAudio();
   const texture = resolveVoiceTexture(profile, args.effectsEnabled);
+  const elevenLabsEffect = resolveElevenLabsVoiceEffectPlan(
+    args.effectsEnabled ? args.elevenLabsEffect ?? "clean" : "clean"
+  );
   const now = context.currentTime;
   const playbackRateRatio = 2 ** ((args.detuneCents ?? 0) / 1200);
   const playbackDurationSeconds = decoded.duration / playbackRateRatio;
   const playbackDurationMs = Math.max(1, Math.round(playbackDurationSeconds * 1000));
-  const source = context.createBufferSource();
-  source.buffer = decoded;
-  source.detune.setValueAtTime(args.detuneCents ?? 0, now);
-  if (profile.lilt !== 0) {
-    const contourStep = 0.32;
-    for (let at = contourStep; at < decoded.duration; at += contourStep) {
-      const cents = (args.detuneCents ?? 0) + voiceLiltDetuneCents(profile.lilt, at);
-      source.detune.linearRampToValueAtTime(cents, now + at);
+  const createSpeechSource = (
+    startAt: number,
+    effectDetuneCents = 0,
+  ): AudioBufferSourceNode => {
+    const speechSource = context.createBufferSource();
+    speechSource.buffer = decoded;
+    const baseDetuneCents = (args.detuneCents ?? 0) + effectDetuneCents;
+    speechSource.detune.setValueAtTime(baseDetuneCents, startAt);
+    if (profile.lilt !== 0) {
+      const contourStep = 0.32;
+      for (let at = contourStep; at < decoded.duration; at += contourStep) {
+        const cents = baseDetuneCents + voiceLiltDetuneCents(profile.lilt, at);
+        speechSource.detune.linearRampToValueAtTime(cents, startAt + at);
+      }
     }
-  }
+    return speechSource;
+  };
+  const source = createSpeechSource(now);
 
   const highpass = context.createBiquadFilter();
   const lowpass = context.createBiquadFilter();
   const shaper = context.createWaveShaper();
+  const dryGain = context.createGain();
   const speechGain = context.createGain();
   const outputGain = context.createGain();
   const limiter = context.createDynamicsCompressor();
   highpass.type = "highpass";
-  highpass.frequency.value = 25 + (1 - texture.bandwidth) * 300;
+  highpass.frequency.value = Math.max(
+    elevenLabsEffect.highpassHz,
+    25 + (1 - texture.bandwidth) * 300
+  );
   lowpass.type = "lowpass";
   lowpass.frequency.value = Math.min(
     args.baseLowpassHz ?? 20_000,
     args.roboticPlan?.lowpassHz ?? 20_000,
+    elevenLabsEffect.lowpassHz,
     20_000 - (1 - texture.bandwidth) * 16_200
   );
   shaper.curve = distortionCurve(
-    Math.max(texture.distortion, args.roboticPlan?.drive ?? 0),
-    args.roboticPlan?.bitDepth ?? 16,
+    Math.max(texture.distortion, args.roboticPlan?.drive ?? 0, elevenLabsEffect.drive),
+    Math.min(args.roboticPlan?.bitDepth ?? 16, elevenLabsEffect.bitDepth),
   );
   shaper.oversample = "2x";
-  speechGain.gain.value = 1;
-  outputGain.gain.value = Math.min(1.25, profile.volume) * 0.88;
+  dryGain.gain.value = elevenLabsEffect.dryGain;
+  speechGain.gain.value = elevenLabsEffect.modulationBaseGain;
+  outputGain.gain.value =
+    Math.min(1.25, profile.volume) * 0.88 * elevenLabsEffect.outputTrim;
   limiter.threshold.value = args.cleanRoboticCarrier ? -0.5 : -4;
   limiter.knee.value = args.cleanRoboticCarrier ? 0 : 8;
   limiter.ratio.value = args.cleanRoboticCarrier ? 20 : 12;
   limiter.attack.value = args.cleanRoboticCarrier ? 0.001 : 0.003;
   limiter.release.value = args.cleanRoboticCarrier ? 0.04 : 0.12;
-  source.connect(highpass).connect(lowpass);
+  source.connect(dryGain).connect(highpass).connect(lowpass);
   if (args.cleanRoboticCarrier) {
     lowpass.connect(speechGain);
   } else {
@@ -324,6 +468,29 @@ export async function playRealtimeVoiceBytes(args: {
   }
 
   const scheduled: AudioScheduledSourceNode[] = [source];
+  const speechStarts: Array<{
+    source: AudioBufferSourceNode;
+    startAt: number;
+  }> = [{ source, startAt: now }];
+  let completionSource: AudioBufferSourceNode = source;
+  let completionEndAt = now + playbackDurationSeconds;
+  for (const voice of elevenLabsEffect.parallelVoices) {
+    const startAt = now + voice.delaySeconds;
+    const parallelSource = createSpeechSource(startAt, voice.detuneCents);
+    const parallelGain = context.createGain();
+    parallelGain.gain.value = voice.gain;
+    parallelSource.connect(parallelGain).connect(highpass);
+    scheduled.push(parallelSource);
+    speechStarts.push({ source: parallelSource, startAt });
+    const rateRatio = 2 ** (
+      ((args.detuneCents ?? 0) + voice.detuneCents) / 1200
+    );
+    const endAt = startAt + decoded.duration / rateRatio;
+    if (endAt > completionEndAt) {
+      completionSource = parallelSource;
+      completionEndAt = endAt;
+    }
+  }
   for (const event of args.roboticPlan?.accents ?? []) {
     const oscillator = context.createOscillator();
     const accentGain = context.createGain();
@@ -362,18 +529,33 @@ export async function playRealtimeVoiceBytes(args: {
     oscillator.stop(now + playbackDurationSeconds);
     scheduled.push(oscillator);
   }
-  if (texture.noise > 0) {
+  if (args.effectsEnabled && elevenLabsEffect.modulationDepth > 0) {
+    const oscillator = context.createOscillator();
+    const modulation = context.createGain();
+    oscillator.type = "square";
+    oscillator.frequency.value = elevenLabsEffect.modulationFrequencyHz;
+    modulation.gain.value = elevenLabsEffect.modulationDepth;
+    oscillator.connect(modulation).connect(speechGain.gain);
+    oscillator.start(now);
+    oscillator.stop(completionEndAt);
+    scheduled.push(oscillator);
+  }
+  if (texture.noise > 0 || elevenLabsEffect.noiseGain > 0) {
     const noise = context.createBufferSource();
     const noiseFilter = context.createBiquadFilter();
     const noiseGain = context.createGain();
-    noise.buffer = createNoiseBuffer(context, Math.max(0.25, playbackDurationSeconds), `${args.seed}:noise`);
+    noise.buffer = createNoiseBuffer(
+      context,
+      Math.max(0.25, completionEndAt - now),
+      `${args.seed}:noise`,
+    );
     noiseFilter.type = "bandpass";
     noiseFilter.frequency.value = 1800;
     noiseFilter.Q.value = 0.55;
-    noiseGain.gain.value = texture.noise * 0.075;
+    noiseGain.gain.value = texture.noise * 0.075 + elevenLabsEffect.noiseGain;
     noise.connect(noiseFilter).connect(noiseGain).connect(outputGain);
     noise.start(now);
-    noise.stop(now + playbackDurationSeconds);
+    noise.stop(completionEndAt);
     scheduled.push(noise);
   }
   if (texture.instability > 0) {
@@ -391,7 +573,7 @@ export async function playRealtimeVoiceBytes(args: {
   await new Promise<void>((resolve) => {
     let progress: VoicePlaybackProgressController | null = null;
     activeResolve = resolve;
-    source.addEventListener("ended", () => {
+    completionSource.addEventListener("ended", () => {
       progress?.finish();
       if (activeProgress === progress) activeProgress = null;
       progress = null;
@@ -403,7 +585,9 @@ export async function playRealtimeVoiceBytes(args: {
       args.lifecycle?.onEnd?.();
       resolve();
     }, { once: true });
-    source.start(now);
+    for (const speechStart of speechStarts) {
+      speechStart.source.start(speechStart.startAt);
+    }
     progress = beginVoicePlaybackProgress(
       args.lifecycle,
       playbackDurationMs,

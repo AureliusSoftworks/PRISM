@@ -16,6 +16,10 @@ const artworkActivitySource = readFileSync(
   new URL("./SignalArtworkJobActivity.tsx", import.meta.url),
   "utf8",
 );
+const artworkJobSource = readFileSync(
+  new URL("./signalArtworkJob.ts", import.meta.url),
+  "utf8",
+);
 const artworkActivityCss = readFileSync(
   new URL("./signalArtworkJobActivity.module.css", import.meta.url),
   "utf8",
@@ -114,8 +118,10 @@ describe("Signal experience shell", () => {
       /coffeePlateFaceScaleYFromSeatHorizontalSide\(\s*avatarState\.role === "host" \? -1 : 1/u,
     );
     assert.match(pageSource, /botAvatarDetailsFacingScaleX\(faceScaleY\)/u);
-    assert.match(pageSource, /blinkWhileTalking/u);
-    assert.match(pageSource, /mouthShape=\{avatarState\.mouthShape\}/u);
+    assert.match(
+      pageSource,
+      /<ZenLiveBotMannequin[\s\S]{0,320}isTalking=\{avatarState\.talking\}\s+blinkWhileTalking\s+mouthShape=\{avatarState\.mouthShape\}/u,
+    );
     assert.match(css, /\.avatarRig\[data-talking="true"\][^}]*signalBotTalking/iu);
     assert.match(css, /@keyframes signalBotIdle/u);
     assert.match(css, /@keyframes signalBotThinking/u);
@@ -127,10 +133,6 @@ describe("Signal experience shell", () => {
     const createShowSource = source.slice(
       source.indexOf("const createShow"),
       source.indexOf("const renameShow"),
-    );
-    const artworkSource = source.slice(
-      source.indexOf("const generateShowArtwork"),
-      source.indexOf("const createShow"),
     );
     assert.doesNotMatch(source, /synthesizeArtwork|Synthesize studios \+ logo/u);
     assert.doesNotMatch(createShowSource, /generateShowArtwork|\/brand|\/name/u);
@@ -153,13 +155,9 @@ describe("Signal experience shell", () => {
     );
     assert.match(source, /announceSignalArtworkJob\(response\.job\)/u);
     assert.match(source, /You can keep using PRISM/u);
-    assert.doesNotMatch(
-      source,
-      /generateShowArtwork\(\s*selectedShow,\s*false/u,
-    );
     assert.match(
       source,
-      /kinds: readonly SignalArtworkKind\[\] = \["night-studio", "day-studio", "logo"\]/u,
+      /kinds: \["night-studio", "day-studio", "logo"\]/u,
     );
     assert.match(source, /aria-label="Optional custom show artwork"/u);
     assert.match(source, /data-tutorial-target="botcast-brand-controls"/u);
@@ -173,46 +171,11 @@ describe("Signal experience shell", () => {
       source,
       /const kind: SignalArtworkKind = lighting === "day" \? "day-studio" : "night-studio"/u,
     );
-    assert.match(source, /generateShowArtwork\(selectedShow, true, \[kind\]\)/u);
+    assert.match(source, /startSignalArtworkJob\(reset\.show, \[kind\]\)/u);
     assert.match(source, /regenerateStudioVariant\("day"\)/u);
     assert.match(source, /regenerateStudioVariant\("night"\)/u);
-    assert.match(source, /generateShowArtwork\(selectedShow, true, \["logo"\]\)/u);
-    assert.match(source, /dayAtmosphereImageUrl/u);
-    assert.match(source, /nightAtmosphereImageUrl/u);
-    assert.match(source, /workingShow\.dayAtmosphere\.prompt/u);
-    assert.match(source, /workingShow\.nightAtmosphere\.prompt/u);
-    assert.ok(
-      source.indexOf('kind: "nighttime studio"') < source.indexOf('kind: "daytime studio"'),
-      "Signal must render the canonical night studio before deriving its day edit",
-    );
-    assert.match(source, /sourceImageId,/u);
-    assert.match(source, /sourceEditKind: "daylight-relight"/u);
-    assert.match(source, /quality: preferredImageProvider === "openai" \? "high" : "standard"/u);
-    assert.match(
-      artworkSource,
-      /const sourceImageId = asset\.source === "night"\s*\? canonicalNightImageId/u,
-    );
-    assert.match(
-      artworkSource,
-      /canonicalNightImageId = generated\.image\.id;[\s\S]*pendingNightAttachment/u,
-    );
-    assert.ok(
-      artworkSource.indexOf("canonicalNightImageId = generated.image.id") <
-        artworkSource.indexOf('method: "PATCH"', artworkSource.indexOf("canonicalNightImageId = generated.image.id")),
-      "Signal must retain the new canonical night id before attaching it to the show",
-    );
-    assert.match(
-      artworkSource,
-      /nightAtmosphereImageId: recoveringNightAttachment\.imageId/u,
-    );
-    assert.match(
-      artworkSource,
-      /pendingDayAttachment = \{[\s\S]*imageId: generated\.image\.id/u,
-    );
-    assert.match(
-      artworkSource,
-      /pendingNight \? \{[\s\S]*pendingDay \? \{[\s\S]*dayAtmosphereImageId: pendingDay\.imageId/u,
-    );
+    assert.match(source, /startSignalArtworkJob\(reset\.show, \["logo"\]\)/u);
+    assert.doesNotMatch(source, /const generateShowArtwork/u);
     assert.doesNotMatch(source, />\s*Refresh studio(?: \+ logo)?\s*</u);
     assert.match(source, /function SignalShowLogo/u);
     assert.match(source, /show\.logo\.fallbackGlyph/u);
@@ -224,6 +187,14 @@ describe("Signal experience shell", () => {
   });
 
   it("blocks only for identity handoff, then exposes honest persistent background progress", () => {
+    const studioRefreshSource = source.slice(
+      source.indexOf("const regenerateStudioVariant"),
+      source.indexOf("const regenerateLogo"),
+    );
+    const logoRefreshSource = source.slice(
+      source.indexOf("const regenerateLogo"),
+      source.indexOf("const uploadShowAsset"),
+    );
     assert.match(source, /import \{ PrismBlockingLoader \}/u);
     assert.match(source, /setBlockingOperation\(\{/u);
     assert.match(source, /Handing the artwork to the background renderer/u);
@@ -243,9 +214,14 @@ describe("Signal experience shell", () => {
     assert.match(artworkActivitySource, /completedCount/u);
     assert.match(artworkActivitySource, /Elapsed \{elapsed\}/u);
     assert.match(artworkActivitySource, /Waiting for Dark studio/u);
-    assert.match(artworkActivitySource, /Relighting the completed Dark studio/u);
+    assert.match(artworkJobSource, /Relighting the completed Dark studio/u);
+    assert.match(artworkJobSource, /job\.totalCount === 1/u);
     assert.match(artworkActivitySource, /\/cancel/u);
     assert.match(artworkActivityCss, /signal-artwork-scan/u);
+    assert.doesNotMatch(studioRefreshSource, /setBlockingOperation/u);
+    assert.doesNotMatch(logoRefreshSource, /setBlockingOperation/u);
+    assert.match(studioRefreshSource, /rendering in the background\. You can keep using PRISM/u);
+    assert.match(logoRefreshSource, /rendering in the background\. You can keep using PRISM/u);
   });
 
   it("refreshes a clever show name without refreshing its visual identity", () => {
@@ -445,10 +421,10 @@ describe("Signal experience shell", () => {
       /preferredImageProvider=\{settings\?\.preferredImageProvider \?\? "local"\}/u,
     );
     assert.match(source, /preferredProvider: preferredImageProvider/u);
-    assert.match(source, /origin: "botcast"/u);
-    assert.match(source, /botId: workingShow\.hostBotId/u);
-    assert.match(source, /failureMessage \?\?= errorMessage\(artworkError\)/u);
-    assert.match(source, /if \(artwork\.failureMessage\) setError\(artwork\.failureMessage\)/u);
+    assert.match(source, /const startSignalArtworkJob = async/u);
+    assert.match(source, /kinds,\s*\.\.\.\(identityMs === null/u);
+    assert.match(source, /startSignalArtworkJob\(reset\.show, \[kind\]\)/u);
+    assert.match(source, /startSignalArtworkJob\(reset\.show, \["logo"\]\)/u);
   });
 
   it("offers confirmed show deletion and episode delete or discard without nesting actions", () => {

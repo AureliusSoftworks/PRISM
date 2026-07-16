@@ -4123,6 +4123,10 @@
   --settings-section-color: #d69a3a;
 }
 
+.settingsSection[data-settings-section="botcast"] {
+  --settings-section-color: #55d6da;
+}
+
 .settingsSection[data-settings-section="zen"] {
   --settings-section-color: #8c8bff;
 }
@@ -4721,7 +4725,13 @@
   gap: 2px;
 }
 
+[data-settings-section="botcast"] .settingsInlineToggle > span {
+  display: grid;
+  gap: 2px;
+}
+
 [data-settings-section="voice"] .settingsInlineToggle small,
+[data-settings-section="botcast"] .settingsInlineToggle small,
 .settingsSectionHint {
   color: var(--settings-section-quiet);
   font-size: 12px;
@@ -42719,6 +42729,57 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   gap: 6px;
 }
 
+.botAvatarIdentityPronunciationRow {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.botAvatarIdentityNameSampleButton {
+  height: 36px;
+  min-width: 92px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border-radius: 8px;
+  border: 1px solid
+    color-mix(in srgb, var(--editor-bot-color, var(--accent)) 30%, var(--line));
+  background: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 10%,
+    rgba(0, 0, 0, 0.3)
+  );
+  color: var(--fg);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 720;
+  cursor: pointer;
+}
+
+.botAvatarIdentityNameSampleButton:hover:not(:disabled),
+.botAvatarIdentityNameSampleButton:focus-visible {
+  outline: none;
+  border-color: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 58%,
+    var(--line)
+  );
+  background: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 17%,
+    rgba(0, 0, 0, 0.28)
+  );
+}
+
+.botAvatarIdentityNameSampleButton:disabled {
+  opacity: 0.48;
+  cursor: default;
+}
+
 .botAvatarIdentityNameField > span {
   color: color-mix(
     in srgb,
@@ -42767,7 +42828,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   min-width: 0;
   width: 100%;
   min-height: 150px;
-  height: 100%;
+  height: clamp(165px, 22dvh, 260px);
 }
 
 .botAvatarIdentityPicker .colorPickerWrapper {
@@ -44949,7 +45010,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   min-height: 0;
   height: 100%;
   display: grid;
-  grid-template-rows: auto auto auto minmax(150px, 1fr);
+  grid-template-rows: auto auto auto auto;
+  align-content: start;
   gap: 14px;
 }
 
@@ -71844,7 +71906,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   font-weight: 720;
 }
 
-.botVoiceIdentityField select {
+.botVoiceIdentityField select,
+.botVoiceIdentityField input {
   width: 100%;
   min-width: 0;
   padding: 10px 34px 10px 11px;
@@ -71854,6 +71917,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   color: var(--fg);
   font: inherit;
   font-size: 12px;
+}
+
+.botVoiceIdentityField input {
+  padding-right: 11px;
 }
 
 .botVoiceControls {

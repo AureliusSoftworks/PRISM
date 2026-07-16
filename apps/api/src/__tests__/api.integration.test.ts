@@ -28,6 +28,7 @@ const deterministicReply = "Deterministic API reply with enough detail to stay v
 const deterministicProvider = createDeterministicProvider([deterministicReply]);
 deterministicProvider.diagnosticModel = "deterministic-test-model";
 const providerFactoryCalls: string[] = [];
+const builtinVoiceTexts: string[] = [];
 const auxiliaryProviderFactoryCalls: Array<{
   prismDefaultLlmModel: string | null | undefined;
   secondaryOllamaHost: string | null | undefined;
@@ -81,7 +82,8 @@ const server = createServer(
       });
       return deterministicProvider;
     },
-    builtinVoiceWaveGenerator: async ({ profile }) => {
+    builtinVoiceWaveGenerator: async ({ profile, text }) => {
+      builtinVoiceTexts.push(text);
       if (normalizeBotAudioVoiceProfileV1(profile).systemVoiceName === "Unavailable Test") {
         throw new Error("System voice is still loading.");
       }
@@ -707,7 +709,7 @@ describe("API request integration", () => {
     ]);
   });
 
-  it("uses account-wide voice defaults and ignores retired Coffee player voice fields", async () => {
+  it("ignores retired account-wide voice defaults and Coffee player voice fields", async () => {
     const client = createClient();
     const register = await client.request(
       "/api/auth/register",
@@ -741,8 +743,8 @@ describe("API request integration", () => {
     const settings = (await json(loaded)).settings;
     assert.equal("playerAudioVoiceProfile" in settings, false);
     assert.equal("playerNamePronunciation" in settings, false);
-    assert.equal(settings.defaultSystemVoiceName, "Alex");
-    assert.equal(settings.defaultElevenLabsVoiceId, "eleven-global");
+    assert.equal("defaultSystemVoiceName" in settings, false);
+    assert.equal("defaultElevenLabsVoiceId" in settings, false);
     assert.equal(settings.autoModeEnabled, true);
     assert.deepEqual(settings.autoFallbackChain, {
       v: 1,
@@ -1465,6 +1467,7 @@ describe("API request integration", () => {
         profile: {
           v: 1,
           baseVoiceId: "voice-3",
+          elevenLabsVoiceId: "configured-provider-voice",
           pitch: 0.1,
           warmth: 0.2,
           pace: 0,
@@ -1489,6 +1492,7 @@ describe("API request integration", () => {
         profile: {
           v: 1,
           baseVoiceId: "voice-3",
+          elevenLabsVoiceId: "configured-provider-voice",
           pitch: 0.1,
           warmth: 0.2,
           pace: 0,
@@ -1507,7 +1511,7 @@ describe("API request integration", () => {
     assert.deepEqual(fetchRecorder.calls.slice(beforeCalls), []);
   });
 
-  it("uses System Classic until ONLINE ElevenLabs is explicitly enabled", async () => {
+  it("uses System TTS until the profile selects an ElevenLabs voice", async () => {
     const client = createClient();
     const register = await client.request(
       "/api/auth/register",
@@ -1520,7 +1524,7 @@ describe("API request integration", () => {
     const userId = String((await json(register)).user.id);
     const initialSettings = await client.request("/api/settings");
     assert.equal(initialSettings.status, 200);
-    assert.equal((await json(initialSettings)).settings.englishVoiceEngine, "builtin");
+    assert.equal((await json(initialSettings)).settings.englishVoiceEngine, "elevenlabs");
     db.prepare("UPDATE users SET preferred_provider = 'openai' WHERE id = ?").run(
       userId
     );
@@ -1531,14 +1535,11 @@ describe("API request integration", () => {
       const response = await client.request(
         "/api/voices/synthesize",
         jsonInit({
-          text: "Keep speaking locally until ElevenLabs is enabled.",
+          text: "Keep using System TTS without an online voice override.",
           mode: "english",
           engine: "elevenlabs",
           explicitOnlineContext: true,
-          profile: {
-            ...normalizeBotAudioVoiceProfileV1(undefined),
-            elevenLabsVoiceId: "configured-provider-voice",
-          },
+          profile: normalizeBotAudioVoiceProfileV1(undefined),
         })
       );
 
@@ -1552,6 +1553,59 @@ describe("API request integration", () => {
     } finally {
       config.elevenLabsApiKey = "";
     }
+  });
+
+  it("persists a bot name pronunciation and uses it only for synthesized speech", async () => {
+    const client = createClient();
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "bot-pronunciation@example.com",
+        password: "voice-password",
+      }),
+    );
+    assert.equal(register.status, 201);
+
+    const created = await client.request(
+      "/api/bots",
+      jsonInit({
+        name: "Light Yagami",
+        namePronunciation: "  Light   Yah-gah-mee  ",
+      }),
+    );
+    assert.equal(created.status, 201);
+    const createdBot = (await json(created)).bot;
+    assert.equal(createdBot.name, "Light Yagami");
+    assert.equal(createdBot.name_pronunciation, "Light Yah-gah-mee");
+
+    const listed = await client.request("/api/bots");
+    assert.equal(listed.status, 200);
+    const listedBot = (await json(listed)).bots.find(
+      (bot: { id?: string }) => bot.id === createdBot.id,
+    );
+    assert.equal(listedBot.name, "Light Yagami");
+    assert.equal(listedBot.name_pronunciation, "Light Yah-gah-mee");
+
+    const updated = await client.request(`/api/bots/${createdBot.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ namePronunciation: "Light Ya-ga-mi" }),
+    });
+    assert.equal(updated.status, 200);
+    assert.equal((await json(updated)).bot.name_pronunciation, "Light Ya-ga-mi");
+
+    const beforeVoiceCount = builtinVoiceTexts.length;
+    const response = await client.request(
+      "/api/voices/synthesize",
+      jsonInit({
+        text: "Ask Light Yagami now.",
+        mode: "english",
+        engine: "builtin",
+      }),
+    );
+    assert.equal(response.status, 200);
+    assert.equal(builtinVoiceTexts.length, beforeVoiceCount + 1);
+    assert.equal(builtinVoiceTexts.at(-1), "Ask Light Ya-ga-mi now.");
   });
 
   it("ignores legacy ElevenLabs slot mappings during synthesis", async () => {
@@ -1593,7 +1647,7 @@ describe("API request integration", () => {
       assert.equal(response.status, 200);
       assert.equal(
         response.headers.get("x-prism-voice-engine"),
-        "builtin-provider-fallback"
+        "builtin"
       );
       assert.deepEqual(fetchRecorder.calls.slice(beforeCalls), []);
 
@@ -1877,9 +1931,11 @@ describe("API request integration", () => {
       pitch: -0.25,
       warmth: authored.warmth,
       pace: authored.pace,
-      lilt: authored.lilt,
+      lilt: -0.4,
       systemVoiceName: "Alex",
       elevenLabsVoiceId: "eleven-voice-id",
+      elevenLabsEffect: "deep-space",
+      elevenLabsDirection: "warm, conspiratorial",
     };
     const updated = await client.request(`/api/bots/${createdPayload.bot.id}`, {
       method: "PATCH",
@@ -1896,5 +1952,61 @@ describe("API request integration", () => {
       updatedPayload.bot.audio_voice_profile_override,
       normalizeBotAudioVoiceProfileV1(override)
     );
+    assert.equal(updatedPayload.bot.audio_voice_profile_override.elevenLabsEffect, "deep-space");
+    assert.equal(
+      updatedPayload.bot.audio_voice_profile_override.elevenLabsDirection,
+      "warm, conspiratorial"
+    );
+
+    const secondCreated = await client.request(
+      "/api/bots",
+      jsonInit({
+        name: "Second voiced bot",
+        authoredAudioVoiceProfile: { ...authored, pitch: 0.65 },
+      })
+    );
+    assert.equal(secondCreated.status, 201);
+    const secondPayload = await json(secondCreated);
+    const secondOverride = { ...override, pitch: 0.8, lilt: 0.6 };
+    const secondUpdated = await client.request(`/api/bots/${secondPayload.bot.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ audioVoiceProfileOverride: secondOverride }),
+    });
+    assert.equal(secondUpdated.status, 200);
+
+    const botsResponse = await client.request("/api/bots");
+    assert.equal(botsResponse.status, 200);
+    const persistedBots = (await json(botsResponse)).bots as Array<{
+      id: string;
+      audio_voice_profile_override: { pitch: number; lilt: number } | null;
+    }>;
+    assert.equal(
+      persistedBots.find((bot) => bot.id === createdPayload.bot.id)
+        ?.audio_voice_profile_override?.pitch,
+      -0.25
+    );
+    assert.equal(
+      persistedBots.find((bot) => bot.id === createdPayload.bot.id)
+        ?.audio_voice_profile_override?.lilt,
+      -0.4
+    );
+    assert.equal(
+      persistedBots.find((bot) => bot.id === secondPayload.bot.id)
+        ?.audio_voice_profile_override?.pitch,
+      0.8
+    );
+    assert.equal(
+      persistedBots.find((bot) => bot.id === secondPayload.bot.id)
+        ?.audio_voice_profile_override?.lilt,
+      0.6
+    );
+
+    const settingsResponse = await client.request("/api/settings");
+    assert.equal(settingsResponse.status, 200);
+    const accountDefaultVoice = (await json(settingsResponse)).settings
+      .prismDefaultBotAudioVoiceProfile;
+    assert.equal(accountDefaultVoice.pitch, 0);
+    assert.equal(accountDefaultVoice.lilt, 0);
   });
 });

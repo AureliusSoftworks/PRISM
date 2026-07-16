@@ -11,7 +11,6 @@ import {
   MIN_PRISM_MOOD_SENSITIVITY,
   normalizePrismMoodSensitivity,
   validateComfyUiWorkflowsPayload,
-  normalizeEnglishVoiceEngine,
   normalizeBotVoiceVolume,
   normalizeVoiceMode,
   BOT_AUDIO_VOICE_IDS,
@@ -134,6 +133,7 @@ export interface CurrentSettings {
   experimentalDualOllamaEnabled: number;
   experimentalAllModelEffortEnabled: number;
   coffeeExperimentalTableAngleEnabled: number;
+  signalImmersiveVoiceEffectsEnabled: number;
   psychicModeEnabled: number;
   /** Saved preference only. Auto is still gated per Zen/Coffee context. */
   autoSwitchModel: number;
@@ -177,7 +177,7 @@ export interface CurrentSettings {
   voiceMode: VoiceMode | string | null;
   voiceEffectsEnabled: number;
   voiceVolume: number | null;
-  /** Compatibility column storing the ONLINE preference; LOCAL is always builtin. */
+  /** Compatibility column storing the selected ONLINE engine; LOCAL is always builtin. */
   englishVoiceEngine: EnglishVoiceEngine | string | null;
   defaultSystemVoiceName: string | null;
   defaultElevenLabsVoiceId: string | null;
@@ -197,6 +197,7 @@ export interface NextSettings {
   experimentalDualOllamaEnabled: number;
   experimentalAllModelEffortEnabled: number;
   coffeeExperimentalTableAngleEnabled: number;
+  signalImmersiveVoiceEffectsEnabled: boolean;
   psychicModeEnabled: number;
   autoSwitchModel: number;
   autoFallbackChain: string | null;
@@ -234,7 +235,7 @@ export interface NextSettings {
   voiceMode: VoiceMode;
   voiceEffectsEnabled: boolean;
   voiceVolume: number;
-  /** ONLINE preference only; LOCAL English always resolves to builtin. */
+  /** Selected ONLINE engine only; LOCAL English always resolves to builtin. */
   englishVoiceEngine: EnglishVoiceEngine;
   defaultSystemVoiceName: string | null;
   defaultElevenLabsVoiceId: string | null;
@@ -844,6 +845,10 @@ export function resolveNextSettings(
     typeof body.coffeeExperimentalTableAngleEnabled === "boolean"
       ? Number(body.coffeeExperimentalTableAngleEnabled)
       : current.coffeeExperimentalTableAngleEnabled;
+  const signalImmersiveVoiceEffectsEnabled =
+    typeof body.signalImmersiveVoiceEffectsEnabled === "boolean"
+      ? body.signalImmersiveVoiceEffectsEnabled
+      : current.signalImmersiveVoiceEffectsEnabled === 1;
   const psychicModeEnabled =
     typeof body.psychicModeEnabled === "boolean"
       ? Number(body.psychicModeEnabled)
@@ -1109,24 +1114,13 @@ export function resolveNextSettings(
   const voiceVolume = body.voiceVolume === undefined
     ? normalizeBotVoiceVolume(current.voiceVolume)
     : normalizeBotVoiceVolume(body.voiceVolume, normalizeBotVoiceVolume(current.voiceVolume));
-  const englishVoiceEngine = normalizeEnglishVoiceEngine(
-    body.englishVoiceEngine,
-    normalizeEnglishVoiceEngine(current.englishVoiceEngine)
-  );
-  const normalizeDefaultVoiceSelection = (value: unknown, fallback: string | null): string | null => {
-    if (value === undefined) return fallback;
-    if (value === null) return null;
-    if (typeof value !== "string") return fallback;
-    return value.trim().slice(0, 200) || null;
-  };
-  const defaultSystemVoiceName = normalizeDefaultVoiceSelection(
-    body.defaultSystemVoiceName,
-    current.defaultSystemVoiceName
-  );
-  const defaultElevenLabsVoiceId = normalizeDefaultVoiceSelection(
-    body.defaultElevenLabsVoiceId,
-    current.defaultElevenLabsVoiceId
-  );
+  // The online selector currently has one installed provider. It is not an
+  // opt-in toggle; the per-profile ElevenLabs voice is the explicit override.
+  const englishVoiceEngine: EnglishVoiceEngine = "elevenlabs";
+  // Account-level voice identities are retired. A settings save clears any
+  // legacy values so only Prism/bot customization owns voice identity.
+  const defaultSystemVoiceName = null;
+  const defaultElevenLabsVoiceId = null;
   const elevenLabsVoiceBank = body.elevenLabsVoiceBank === undefined
     ? parseStoredElevenLabsVoiceBank(current.elevenLabsVoiceBank)
     : normalizeElevenLabsVoiceBank(body.elevenLabsVoiceBank);
@@ -1197,6 +1191,7 @@ export function resolveNextSettings(
     experimentalDualOllamaEnabled,
     experimentalAllModelEffortEnabled,
     coffeeExperimentalTableAngleEnabled,
+    signalImmersiveVoiceEffectsEnabled,
     psychicModeEnabled,
     autoSwitchModel,
     autoFallbackChain,

@@ -4,6 +4,20 @@ export type BotcastEpisodeOutcome = "completed" | "guest_departed";
 export type BotcastEpisodeProvider = "local" | "openai" | "anthropic";
 export type BotcastEpisodeResponseMode = "local" | "auto" | "online";
 export type BotcastSpeakerRole = "host" | "guest";
+export const BOTCAST_IMMERSIVE_VOICE_TAGS = [
+  "sighs",
+  "exhales",
+  "laughs",
+  "chuckles",
+  "coughs",
+  "clears throat",
+  "gasps",
+  "gulps",
+  "breathes deeply",
+  "growls",
+] as const;
+export type BotcastImmersiveVoiceTag =
+  (typeof BOTCAST_IMMERSIVE_VOICE_TAGS)[number];
 export const BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS = [0, 1, 2] as const;
 export type BotcastFallbackStudioAccentVariant =
   (typeof BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS)[number];
@@ -107,6 +121,8 @@ export interface BotcastMessage {
   speakerRole: BotcastSpeakerRole;
   botId: string;
   content: string;
+  /** Clean transcript plus optional Eleven v3 vocal-reaction tags. */
+  voicePerformanceText: string | null;
   createdAt: string;
 }
 

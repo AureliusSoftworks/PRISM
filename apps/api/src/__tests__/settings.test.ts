@@ -58,6 +58,7 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     experimentalDualOllamaEnabled: 0,
     experimentalAllModelEffortEnabled: 0,
     coffeeExperimentalTableAngleEnabled: 0,
+    signalImmersiveVoiceEffectsEnabled: 0,
     psychicModeEnabled: 0,
     autoSwitchModel: 0,
     autoFallbackChain: null,
@@ -96,7 +97,7 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     voiceMode: "mute",
     voiceEffectsEnabled: 1,
     voiceVolume: 1,
-    englishVoiceEngine: "builtin",
+    englishVoiceEngine: "elevenlabs",
     defaultSystemVoiceName: null,
     defaultElevenLabsVoiceId: null,
     elevenLabsVoiceBank: "{}",
@@ -107,13 +108,34 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
 }
 
 describe("resolveNextSettings — voice foundation", () => {
-  it("keeps the online opt-in and normalizes legacy voice-bank backup data", () => {
+  it("keeps Signal immersive vocal reactions opt-in", () => {
+    assert.equal(
+      resolveNextSettings({}, baseline()).signalImmersiveVoiceEffectsEnabled,
+      false,
+    );
+    assert.equal(
+      resolveNextSettings(
+        { signalImmersiveVoiceEffectsEnabled: true },
+        baseline(),
+      ).signalImmersiveVoiceEffectsEnabled,
+      true,
+    );
+    assert.equal(
+      resolveNextSettings(
+        { signalImmersiveVoiceEffectsEnabled: "yes" },
+        baseline({ signalImmersiveVoiceEffectsEnabled: 1 }),
+      ).signalImmersiveVoiceEffectsEnabled,
+      true,
+    );
+  });
+
+  it("keeps ElevenLabs available online while retiring account-level voice identities", () => {
     const next = resolveNextSettings(
       {
         voiceMode: "babble",
         voiceEffectsEnabled: false,
         voiceVolume: 0.65,
-        englishVoiceEngine: "elevenlabs",
+        englishVoiceEngine: "builtin",
         defaultSystemVoiceName: "  Alex  ",
         defaultElevenLabsVoiceId: " eleven-default ",
         elevenLabsVoiceBank: { "voice-1": "  voice_alpha  ", "voice-3": 17, extra: "ignore" },
@@ -125,8 +147,8 @@ describe("resolveNextSettings — voice foundation", () => {
     assert.equal(next.voiceEffectsEnabled, false);
     assert.equal(next.voiceVolume, 0.65);
     assert.equal(next.englishVoiceEngine, "elevenlabs");
-    assert.equal(next.defaultSystemVoiceName, "Alex");
-    assert.equal(next.defaultElevenLabsVoiceId, "eleven-default");
+    assert.equal(next.defaultSystemVoiceName, null);
+    assert.equal(next.defaultElevenLabsVoiceId, null);
     assert.deepEqual(next.elevenLabsVoiceBank, {
       "voice-1": "voice_alpha", "voice-2": null, "voice-3": null, "voice-4": null, "voice-5": null,
     });

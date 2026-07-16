@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  botcastSpeechRevealIsVoicing,
   botcastSpeechRevealVisibleText,
   finishBotcastSpeechReveal,
   prepareBotcastSpeechReveal,
@@ -36,6 +37,23 @@ describe("Signal transcript speech reveal", () => {
     assert.equal(botcastSpeechRevealVisibleText(updateBotcastSpeechReveal(state, 200)), "Hi ");
     assert.equal(botcastSpeechRevealVisibleText(updateBotcastSpeechReveal(state, 899)), "Hi ");
     assert.equal(botcastSpeechRevealVisibleText(updateBotcastSpeechReveal(state, 900)), text);
+  });
+
+  it("rests the avatar through provider-timed phrase pauses", () => {
+    const text = "Hi. There";
+    const state = startBotcastSpeechReveal({
+      text,
+      durationMs: 1_000,
+      alignment: {
+        characters: Array.from(text),
+        characterStartTimesSeconds: [0, 0.08, 0.16, 0.35, 0.58, 0.66, 0.74, 0.82, 0.9],
+        characterEndTimesSeconds: [0.08, 0.16, 0.35, 0.58, 0.66, 0.74, 0.82, 0.9, 1],
+      },
+    });
+
+    assert.equal(botcastSpeechRevealIsVoicing(updateBotcastSpeechReveal(state, 100)), true);
+    assert.equal(botcastSpeechRevealIsVoicing(updateBotcastSpeechReveal(state, 400)), false);
+    assert.equal(botcastSpeechRevealIsVoicing(updateBotcastSpeechReveal(state, 620)), true);
   });
 
   it("falls back to weighted cumulative completion times for invalid alignment", () => {

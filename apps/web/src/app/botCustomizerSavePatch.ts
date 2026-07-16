@@ -1,4 +1,5 @@
 import {
+  normalizeBotNamePronunciation,
   serializeBotAvatarDetailsV1,
   serializeBotPowersV1,
   type BotAudioVoiceProfileV1,
@@ -8,6 +9,7 @@ import {
 
 export interface BotCustomizerSavePristine {
   name: string;
+  namePronunciation: string;
   prompt: string;
   rawPrompt?: string;
   localModel: string;
@@ -53,6 +55,7 @@ export interface BotCustomizerSavePristine {
 
 export interface BotCustomizerSaveCurrent {
   name: string;
+  namePronunciation: string;
   storedSystemPrompt: string;
   advancedMode: boolean;
   localModel: string;
@@ -102,6 +105,7 @@ export interface BotCustomizerSaveCurrent {
 
 export interface BotCustomizerSavePatch {
   name?: string;
+  namePronunciation?: string;
   systemPrompt?: string;
   onlineEnabled?: boolean;
   deleteProtected?: boolean;
@@ -160,6 +164,7 @@ export function buildBotCustomizerSavePatch(
   if (!pristine) {
     return {
       name: current.name,
+      namePronunciation: normalizeBotNamePronunciation(current.namePronunciation),
       systemPrompt: current.storedSystemPrompt,
       onlineEnabled: current.onlineEnabled,
       deleteProtected: current.deleteProtected,
@@ -205,6 +210,14 @@ export function buildBotCustomizerSavePatch(
     : pristine.prompt;
 
   if (current.name !== pristine.name) patch.name = current.name;
+  if (
+    normalizeBotNamePronunciation(current.namePronunciation) !==
+    normalizeBotNamePronunciation(pristine.namePronunciation)
+  ) {
+    patch.namePronunciation = normalizeBotNamePronunciation(
+      current.namePronunciation,
+    );
+  }
   if (current.storedSystemPrompt !== pristineSystemPrompt) {
     patch.systemPrompt = current.storedSystemPrompt;
   }

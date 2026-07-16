@@ -156,6 +156,9 @@ export {
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
   DEFAULT_ENGLISH_VOICE_ENGINE,
   DEFAULT_VOICE_MODE,
+  ELEVENLABS_VOICE_EFFECTS,
+  ELEVENLABS_VOICE_EFFECT_DESCRIPTIONS,
+  ELEVENLABS_VOICE_EFFECT_LABELS,
   botVoiceTextureForPreset,
   botVoiceTextureIsModified,
   isBotAudioVoiceId,
@@ -166,10 +169,15 @@ export {
   normalizeBotVoiceTextureUnit,
   normalizeBotVoiceVolume,
   normalizeEnglishVoiceEngine,
+  normalizeElevenLabsVoiceDirection,
+  normalizeElevenLabsVoiceEffect,
   normalizeOptionalBotAudioVoiceProfileV1,
   normalizeVoiceMode,
   NEUTRAL_COFFEE_VOICE_DELIVERY_ENVELOPE,
+  BOT_NAME_PRONUNCIATION_MAX_LENGTH,
+  applyBotNamePronunciations,
   applyPlayerNamePronunciation,
+  normalizeBotNamePronunciation,
   parseStoredBotAudioVoiceProfileV1,
   serializeBotAudioVoiceProfileV1,
   type BotAudioVoiceId,
@@ -181,7 +189,9 @@ export {
   type CoffeeVoiceDeliveryEnvelope,
   type LegacyBotAudioVoiceProfileV1,
   type NormalizedBotAudioVoiceProfileV1,
+  type BotNamePronunciationEntry,
   type EnglishVoiceEngine,
+  type ElevenLabsVoiceEffect,
   type VoiceMode,
 } from "./audioVoice.js";
 
@@ -2256,3 +2266,4 @@ export interface CoffeePollPlayerVoteResponse {
   poll: CoffeePoll;
 }
 export * from "./botcast.js";
+export * from "./continuityVersion.js";

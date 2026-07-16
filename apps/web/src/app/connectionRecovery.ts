@@ -3,7 +3,9 @@ export type BackendRecoveryPlan = {
   refreshWorkspace: false;
 };
 
-const BACKEND_RECONNECT_DELAYS_MS = [750, 1_250, 2_000, 3_000, 5_000] as const;
+const BACKEND_RECONNECT_DELAYS_MS = [500, 750, 1_000, 1_500, 2_000] as const;
+const BACKEND_HEALTH_POLL_FOREGROUND_MS = 2_000;
+const BACKEND_HEALTH_POLL_BACKGROUND_MS = 10_000;
 
 /**
  * A signed-in workspace already has the route, conversation, draft, scroll,
@@ -25,4 +27,10 @@ export function backendReconnectDelayMs(failedAttempts: number): number {
     BACKEND_RECONNECT_DELAYS_MS.length - 1,
   );
   return BACKEND_RECONNECT_DELAYS_MS[index];
+}
+
+export function backendHealthPollDelayMs(documentHidden: boolean): number {
+  return documentHidden
+    ? BACKEND_HEALTH_POLL_BACKGROUND_MS
+    : BACKEND_HEALTH_POLL_FOREGROUND_MS;
 }

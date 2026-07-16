@@ -162,7 +162,20 @@ describe("Botcast persistence and isolation", () => {
       serverSource,
       /const resolvedOpenAiImageModel = openAiImageDisabled[\s\S]{0,100}DEFAULT_OPENAI_IMAGE_MODEL_ID/u,
     );
-    assert.match(serverSource, /const quality = shouldRunLocal \? "standard" : "high"/u);
+    assert.match(
+      serverSource,
+      /const quality = shouldRunLocal[\s\S]{0,120}args\.kind === "logo"[\s\S]{0,60}"low"[\s\S]{0,60}"high"/u,
+    );
+    assert.match(serverSource, /const requestedArtworkKinds = body\.kinds/u);
+    assert.match(
+      serverSource,
+      /normalizeSignalArtworkAssetKinds\(\s*requestedArtworkKinds/u,
+    );
+    assert.match(serverSource, /kinds: requestedKinds/u);
+    assert.match(
+      serverSource,
+      /parallelIndependentAssets: effectiveArtworkProvider === "openai"/u,
+    );
     assert.match(serverSource, /signalArtworkJobs\.hasActiveJobForShow/u);
     assert.match(
       serverSource,
@@ -236,6 +249,9 @@ describe("Botcast persistence and isolation", () => {
       );
       assert.equal(show.logo.status, "fallback");
       assert.match(show.logo.prompt, /Mara Vale/u);
+      assert.match(show.logo.prompt, /never a profile picture/iu);
+      assert.match(show.logo.prompt, /no person, face, head, eyes/iu);
+      assert.match(show.logo.prompt, /recognition at 64 pixels/iu);
       assert.ok(
         ["frequency", "orbit", "aperture", "spark", "monogram"].includes(
           show.logo.fallbackGlyph,
@@ -300,6 +316,9 @@ describe("Botcast persistence and isolation", () => {
         /condenser microphone capsule|waveform|headphones|ON AIR lamp|tape reel/iu,
       );
       assert.match(result.show.logo.prompt, /fuse.*one clever.*symbol/iu);
+      assert.match(result.show.logo.prompt, /never a profile picture/iu);
+      assert.match(result.show.logo.prompt, /no person, face, head, eyes/iu);
+      assert.match(result.show.logo.prompt, /recognition at 64 pixels/iu);
       assert.doesNotMatch(
         result.show.logo.prompt,
         /\bPRISM\b|rainbow|refraction|spectrum ray|five colors/iu,
@@ -510,6 +529,73 @@ describe("Botcast persistence and isolation", () => {
         const count = db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number };
         assert.equal(count.count, 0, `${table} must remain untouched`);
       }
+    } finally {
+      db.close();
+    }
+  });
+
+  it("stores immersive vocal reactions separately from the Signal transcript", async () => {
+    const db = fixture();
+    const captures: ProviderMessage[][] = [];
+    const provider = recordingProvider(
+      ["[sighs] Welcome to the difficult part. [laughs]"],
+      captures,
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "A performed transcript",
+      });
+      const advanced = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        {
+          ...generation(provider),
+          immersiveVoiceEffectsEnabled: true,
+        },
+      );
+      assert.equal(advanced.message?.content, "Welcome to the difficult part.");
+      assert.equal(
+        advanced.message?.voicePerformanceText,
+        "[sighs] Welcome to the difficult part. [laughs]",
+      );
+      assert.equal(
+        getBotcastEpisode(db, "user-1", episode.id).messages[0]
+          ?.voicePerformanceText,
+        "[sighs] Welcome to the difficult part. [laughs]",
+      );
+      const prompt = captures[0]!.map((message) => message.content).join("\n");
+      assert.match(prompt, /Use only these exact square-bracket tags/u);
+      assert.match(prompt, /most lines should have no tag/u);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("strips stray vocal tags when Signal immersion is disabled", async () => {
+    const db = fixture();
+    const captures: ProviderMessage[][] = [];
+    const provider = recordingProvider(["[coughs] A clean system line."], captures);
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Clean fallback speech",
+      });
+      const advanced = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+      assert.equal(advanced.message?.content, "A clean system line.");
+      assert.equal(advanced.message?.voicePerformanceText, null);
+      const prompt = captures[0]!.map((message) => message.content).join("\n");
+      assert.match(prompt, /Do not include bracketed directions/u);
     } finally {
       db.close();
     }
@@ -816,7 +902,7 @@ describe("Botcast persistence and isolation", () => {
     const target = fixture();
     const legacyTarget = fixture();
     const captures: ProviderMessage[][] = [];
-    const provider = recordingProvider(["Welcome to the archive."], captures);
+    const provider = recordingProvider(["[sighs] Welcome to the archive."], captures);
     try {
       const createdShow = createBotcastShow(source, "user-1", { hostBotId: "host-1" });
       const show = updateBotcastShow(source, "user-1", createdShow.id, {
@@ -834,6 +920,7 @@ describe("Botcast persistence and isolation", () => {
       });
       await advanceBotcastEpisode(source, "user-1", episode.id, {}, {
         ...generation(provider),
+        immersiveVoiceEffectsEnabled: true,
         autoFallbackChain: {
           v: 1,
           fallbacks: [
@@ -853,6 +940,10 @@ describe("Botcast persistence and isolation", () => {
       assert.equal(snapshot.botcast?.episodes[0]?.provider, "openai");
       assert.equal(snapshot.botcast?.episodes[0]?.model, "gpt-archive");
       assert.equal(snapshot.botcast?.episodes[0]?.responseMode, "auto");
+      assert.equal(
+        snapshot.botcast?.messages[0]?.voicePerformanceText,
+        "[sighs] Welcome to the archive.",
+      );
       importUserSnapshot(target, "user-1", snapshot, key);
       const restoredShow = getBotcastShow(target, "user-1", show.id);
       assert.equal(restoredShow.dayAtmosphere.imageId, "archive-day");
@@ -868,6 +959,10 @@ describe("Botcast persistence and isolation", () => {
       assert.equal(restored.model, "gpt-archive");
       assert.equal(restored.responseMode, "auto");
       assert.equal(restored.messages[0]?.content, "Welcome to the archive.");
+      assert.equal(
+        restored.messages[0]?.voicePerformanceText,
+        "[sighs] Welcome to the archive.",
+      );
       assert.ok(restored.events.some((event) => event.kind === "camera_suggestion"));
 
       const legacySnapshot = structuredClone(snapshot);

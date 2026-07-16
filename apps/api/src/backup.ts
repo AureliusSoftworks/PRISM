@@ -37,6 +37,7 @@ import {
   type BotFaceGlyphAnimation,
   type BotFaceThinkingFrames,
   normalizeBotAudioVoiceProfileV1,
+  normalizeBotNamePronunciation,
   normalizeBotVoiceVolume,
   normalizeEnglishVoiceEngine,
   normalizeOptionalBotAudioVoiceProfileV1,
@@ -84,6 +85,7 @@ export interface BackupUserSettings {
   experimentalDualOllamaEnabled: boolean;
   experimentalAllModelEffortEnabled?: boolean;
   coffeeExperimentalTableAngleEnabled?: boolean;
+  signalImmersiveVoiceEffectsEnabled?: boolean;
   psychicModeEnabled?: boolean;
   autoModeEnabled?: boolean;
   autoFallbackChain?: AutoFallbackChainV1 | null;
@@ -135,6 +137,7 @@ export interface BackupUserSettings {
 export interface BackupBotSnapshot {
   id: string;
   name: string;
+  namePronunciation?: string;
   systemPrompt: string;
   voicePreviewLine?: string | null;
   exportHash?: string | null;
@@ -271,6 +274,7 @@ export interface BackupSnapshot {
       speakerRole: string;
       botId: string;
       content: string;
+      voicePerformanceText?: string | null;
       createdAt: string;
     }>;
     events: Array<{
@@ -324,6 +328,7 @@ export function exportUserSnapshot(
          experimental_dual_ollama_enabled,
          experimental_all_model_effort_enabled,
          coffee_experimental_table_angle_enabled,
+         signal_immersive_voice_effects_enabled,
          psychic_mode_enabled,
          auto_switch_model,
          auto_fallback_chain,
@@ -382,6 +387,7 @@ export function exportUserSnapshot(
         experimental_dual_ollama_enabled: number;
         experimental_all_model_effort_enabled: number;
         coffee_experimental_table_angle_enabled: number;
+        signal_immersive_voice_effects_enabled: number;
         psychic_mode_enabled: number;
         auto_switch_model: number;
         auto_fallback_chain: string | null;
@@ -447,6 +453,8 @@ export function exportUserSnapshot(
           user.experimental_all_model_effort_enabled === 1,
         coffeeExperimentalTableAngleEnabled:
           user.coffee_experimental_table_angle_enabled === 1,
+        signalImmersiveVoiceEffectsEnabled:
+          user.signal_immersive_voice_effects_enabled === 1,
         psychicModeEnabled: user.psychic_mode_enabled === 1,
         autoModeEnabled: user.auto_switch_model === 1,
         autoFallbackChain: parseStoredAutoFallbackChain(user.auto_fallback_chain),
@@ -562,6 +570,7 @@ export function exportUserSnapshot(
       `SELECT
          id,
          name,
+         name_pronunciation,
          system_prompt,
          voice_preview_line,
          export_hash,
@@ -616,6 +625,7 @@ export function exportUserSnapshot(
     .all(userId) as Array<{
     id: string;
     name: string;
+    name_pronunciation: string | null;
     system_prompt: string;
     voice_preview_line: string | null;
     export_hash: string | null;
@@ -797,6 +807,9 @@ export function exportUserSnapshot(
     bots: bots.map((bot) => ({
         id: bot.id,
         name: bot.name,
+        ...(normalizeBotNamePronunciation(bot.name_pronunciation)
+          ? { namePronunciation: normalizeBotNamePronunciation(bot.name_pronunciation) }
+          : {}),
         systemPrompt: bot.system_prompt,
         ...(normalizeVoicePreviewLine(bot.voice_preview_line)
           ? { voicePreviewLine: normalizeVoicePreviewLine(bot.voice_preview_line) }
@@ -925,6 +938,10 @@ export function exportUserSnapshot(
         speakerRole: String(row.speaker_role),
         botId: String(row.bot_id),
         content: String(row.content),
+        voicePerformanceText:
+          typeof row.voice_performance_text === "string"
+            ? row.voice_performance_text
+            : null,
         createdAt: String(row.created_at),
       })),
       events: botcastEvents.map((row) => ({
@@ -1257,6 +1274,9 @@ function importUserSnapshotWithinTransaction(
       serializeBotAudioVoiceProfileV1(settings.prismDefaultBotAudioVoiceProfile),
       userId
     );
+    db.prepare(
+      "UPDATE users SET signal_immersive_voice_effects_enabled = ? WHERE id = ?"
+    ).run(settings.signalImmersiveVoiceEffectsEnabled === true ? 1 : 0, userId);
   }
 
   if (Array.isArray(snapshot.bots)) {
@@ -1265,6 +1285,7 @@ function importUserSnapshotWithinTransaction(
         id,
         user_id,
         name,
+        name_pronunciation,
         system_prompt,
         voice_preview_line,
         export_hash,
@@ -1310,7 +1331,7 @@ function importUserSnapshotWithinTransaction(
         visibility,
         created_at,
         updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const bot of snapshot.bots) {
       if (!bot || typeof bot.id !== "string" || bot.id.trim().length === 0) continue;
@@ -1319,6 +1340,7 @@ function importUserSnapshotWithinTransaction(
         bot.id.trim(),
         userId,
         typeof bot.name === "string" && bot.name.trim().length > 0 ? bot.name.trim() : "Imported Bot",
+        normalizeBotNamePronunciation(bot.namePronunciation),
         typeof bot.systemPrompt === "string" ? bot.systemPrompt : "",
         normalizeVoicePreviewLine(bot.voicePreviewLine) || null,
         typeof bot.exportHash === "string" && bot.exportHash.trim().length > 0
@@ -1456,11 +1478,12 @@ function importUserSnapshotWithinTransaction(
       if (!episodeIds.has(message.episodeId)) continue;
       db.prepare(
         `INSERT OR REPLACE INTO botcast_messages
-          (id, user_id, episode_id, speaker_role, bot_id, content, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          (id, user_id, episode_id, speaker_role, bot_id, content, voice_performance_text, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         message.id, userId, message.episodeId, message.speakerRole,
-        message.botId, message.content, message.createdAt,
+        message.botId, message.content, message.voicePerformanceText ?? null,
+        message.createdAt,
       );
     }
     for (const event of botcast.events) {

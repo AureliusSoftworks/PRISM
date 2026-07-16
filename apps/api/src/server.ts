@@ -90,6 +90,7 @@ import {
 } from "./image-job-slot.ts";
 import {
   SignalArtworkJobManager,
+  normalizeSignalArtworkAssetKinds,
   type SignalArtworkAssetKind,
   type SignalArtworkGeneratedAsset,
 } from "./signal-artwork-jobs.ts";
@@ -358,6 +359,8 @@ import {
   serializeBotAvatarDetailsV1,
   serializeBotFaceThinkingFrames,
   normalizeBotAudioVoiceProfileV1,
+  applyBotNamePronunciations,
+  normalizeBotNamePronunciation,
   normalizeBotVoiceVolume,
   normalizeOptionalBotAudioVoiceProfileV1,
   parseStoredBotAudioVoiceProfileV1,
@@ -474,7 +477,6 @@ import { restoreFactoryDefaultsInDatabase } from "./account-reset.ts";
 import {
   ElevenLabsVoiceError,
   VOICE_CAPABILITIES,
-  applyGlobalEnglishVoiceDefault,
   normalizeElevenLabsTtsModel,
   requestElevenLabsSpeech,
   requestElevenLabsSpeechWithTimestamps,
@@ -735,6 +737,7 @@ interface UserDbRow {
   experimental_dual_ollama_enabled: number;
   experimental_all_model_effort_enabled: number;
   coffee_experimental_table_angle_enabled: number;
+  signal_immersive_voice_effects_enabled: number;
   psychic_mode_enabled: number;
   comfyui_host: string | null;
   preferred_local_image_model: string | null;
@@ -967,6 +970,13 @@ function getUserRow(userId: string): UserDbRow {
   if (!row) {
     throw new Error("User not found.");
   }
+  const signalSettings = db.prepare(
+    "SELECT signal_immersive_voice_effects_enabled FROM users WHERE id = ?"
+  ).get(userId) as
+    | { signal_immersive_voice_effects_enabled: number | null }
+    | undefined;
+  row.signal_immersive_voice_effects_enabled =
+    signalSettings?.signal_immersive_voice_effects_enabled === 1 ? 1 : 0;
   const faceRotation = db.prepare(
     "SELECT prism_default_bot_face_eye_rotation_deg FROM users WHERE id = ?"
   ).get(userId) as { prism_default_bot_face_eye_rotation_deg: number | null } | undefined;
@@ -2217,6 +2227,7 @@ async function readOpenAiGeneratedImageBytes(
 async function generateAndPersistSignalArtworkAsset(args: {
   userId: string;
   hostBotId: string;
+  kind: SignalArtworkAssetKind;
   prompt: string;
   size: "1536x1024" | "1024x1024";
   preferredProvider: ImageProviderName;
@@ -2322,7 +2333,11 @@ async function generateAndPersistSignalArtworkAsset(args: {
   const imageId = randomId(12);
   const localRelPath = buildGeneratedImageRelativePath(args.userId, imageId);
   const displayUrl = `/api/images/${encodeURIComponent(imageId)}/file`;
-  const quality = shouldRunLocal ? "standard" : "high";
+  const quality = shouldRunLocal
+    ? "standard"
+    : args.kind === "logo"
+      ? "low"
+      : "high";
   const relatedBotIds = [args.hostBotId];
   let provider: "openai" | "comfyui" | "ollama";
   let model: string;
@@ -2464,6 +2479,7 @@ async function generateAndPersistSignalArtworkAsset(args: {
   console.info("[signal-artwork] asset persisted", {
     userId: args.userId,
     hostBotId: args.hostBotId,
+    kind: args.kind,
     sourceNightImageId: args.sourceNightImageId,
     provider,
     model,
@@ -5553,6 +5569,31 @@ function buildRoutes(): RouteDefinition[] {
         body.preferredProvider === "local" || body.preferredProvider === "openai"
           ? body.preferredProvider
           : user.preferred_image_provider;
+      const requestedArtworkKinds = body.kinds;
+      const requestedKinds = normalizeSignalArtworkAssetKinds(
+        requestedArtworkKinds,
+      );
+      if (requestedKinds.length === 0) {
+        throw new HttpError(400, "Choose at least one Signal artwork asset.");
+      }
+      const usesExistingNightSource =
+        requestedKinds.includes("day-studio") &&
+        !requestedKinds.includes("night-studio");
+      if (usesExistingNightSource && !show.nightAtmosphere.imageId) {
+        throw new HttpError(
+          409,
+          "Create or upload the Dark studio before refreshing the Light studio.",
+        );
+      }
+      const effectiveArtworkProvider = resolveImageProviderName({
+        savedProvider: user.preferred_image_provider,
+        requestedProvider: preferredProvider,
+        offlineOnly: imageContextIncludesOfflineOnlyBot(
+          db,
+          userId,
+          [show.hostBotId],
+        ),
+      });
       const identityMs =
         typeof body.identityMs === "number" && Number.isFinite(body.identityMs)
           ? Math.max(0, Math.round(body.identityMs))
@@ -5563,15 +5604,24 @@ function buildRoutes(): RouteDefinition[] {
         botId: show.hostBotId,
         mode: "sandbox",
         incognito: false,
-        captionPrompt: `${show.name} Signal visual identity`,
-        userMessage: `[Signal] Create ${show.name}'s show look`,
+        captionPrompt:
+          requestedKinds.length === 1
+            ? `${show.name} ${requestedKinds[0]} refresh`
+            : `${show.name} Signal visual identity`,
+        userMessage:
+          requestedKinds.length === 1
+            ? `[Signal] Refresh ${show.name}'s ${requestedKinds[0]}`
+            : `[Signal] Create ${show.name}'s show look`,
         source: "signal_artwork",
-        requestedSize: "1536x1024",
+        requestedSize:
+          requestedKinds.length === 1 && requestedKinds[0] === "logo"
+            ? "1024x1024"
+            : "1536x1024",
       });
       if (!acquired.ok) {
         throw new HttpError(
           503,
-          "Another image is generating right now. Let it finish before creating this show’s look.",
+          "Another image is generating right now. Let it finish before starting Signal artwork.",
         );
       }
 
@@ -5586,6 +5636,11 @@ function buildRoutes(): RouteDefinition[] {
           showId: show.id,
           showName: show.name,
           identityMs,
+          kinds: requestedKinds,
+          sourceNightImageId: usesExistingNightSource
+            ? show.nightAtmosphere.imageId
+            : null,
+          parallelIndependentAssets: effectiveArtworkProvider === "openai",
           controller: acquired.job.abortController,
           releaseSlot: async () => {
             await releaseImageSlotIfOwned(userId, acquired.job.id);
@@ -5594,6 +5649,7 @@ function buildRoutes(): RouteDefinition[] {
             generateAndPersistSignalArtworkAsset({
               userId,
               hostBotId: show.hostBotId,
+              kind,
               prompt: promptByKind[kind],
               size: kind === "logo" ? "1024x1024" : "1536x1024",
               preferredProvider,
@@ -5981,6 +6037,8 @@ function buildRoutes(): RouteDefinition[] {
           autoFallbackChain: parseStoredAutoFallbackChain(
             user.auto_fallback_chain,
           ),
+          immersiveVoiceEffectsEnabled:
+            user.signal_immersive_voice_effects_enabled === 1,
           providerFactory: providerFactoryOverride,
         },
       );
@@ -7856,27 +7914,48 @@ function buildRoutes(): RouteDefinition[] {
           : message?.content ?? "";
         persistedMessageProvider = message?.provider ?? null;
       }
+      const botNamePronunciations = db.prepare(
+        `SELECT name, name_pronunciation
+           FROM bots
+          WHERE user_id = ? OR visibility = 'public'
+          ORDER BY CASE WHEN user_id = ? THEN 0 ELSE 1 END, LENGTH(name) DESC`
+      ).all(userId, userId) as Array<{
+        name: string;
+        name_pronunciation: string | null;
+      }>;
+      const spokenSourceText = applyBotNamePronunciations(
+        sourceText,
+        botNamePronunciations
+      );
+      const spokenElevenLabsText =
+        typeof raw.elevenLabsText === "string"
+          ? raw.elevenLabsText
+              .split(/(\[[^\]\r\n]{1,64}\]|<[^>\r\n]{1,64}>)/gu)
+              .map((segment, index) =>
+                index % 2 === 1
+                  ? segment
+                  : applyBotNamePronunciations(segment, botNamePronunciations),
+              )
+              .join("")
+          : raw.elevenLabsText;
       const explicitOnlineContext = persistedMessageProvider
         ? persistedMessageProvider !== "local"
         : raw.explicitOnlineContext === true && user.preferred_provider !== "local";
+      const profile = normalizeBotAudioVoiceProfileV1(raw.profile);
+      // An online engine is available account-wide, but a profile opts into
+      // it by selecting a provider voice. Profiles without one stay on the
+      // installed system TTS voice.
       const requestedEngine =
-        raw.engine === "elevenlabs" && user.english_voice_engine === "elevenlabs"
+        raw.engine === "elevenlabs" && resolveElevenLabsVoiceId(profile)
           ? "elevenlabs"
           : "builtin";
-      const profileWithGlobalDefault = applyGlobalEnglishVoiceDefault(
-        raw.profile,
-        requestedEngine,
-        {
-          systemVoiceName: user.default_system_voice_name,
-          elevenLabsVoiceId: user.default_elevenlabs_voice_id,
-        }
-      );
       const request = validateVoiceSynthesisRequest({
         ...raw,
-        text: sourceText,
+        text: spokenSourceText,
+        elevenLabsText: spokenElevenLabsText,
         engine: requestedEngine,
         explicitOnlineContext,
-        profile: profileWithGlobalDefault,
+        profile,
       });
       const boundary = resolveVoiceSynthesisBoundary({ ...request, persistedMessageProvider });
       if (!boundary.ok) {
@@ -7961,9 +8040,9 @@ function buildRoutes(): RouteDefinition[] {
       const userKey = decryptUserKey(userId);
       const apiKey = getElevenLabsApiKeyForUser(userId, userKey) ?? config.elevenLabsApiKey;
 
-      // ElevenLabs is an ONLINE preference, not a requirement. If the account
-      // has no usable provider key or voice identity, keep speech available
-      // through the configured System Classic voice without making any egress.
+      // An explicit profile voice selects ElevenLabs, but the provider is not
+      // a playback requirement. If its key or identity is unavailable, keep
+      // speech available through System TTS without making any egress.
       if (!voiceId || !apiKey) {
         const controller = new AbortController();
         const onClose = () => controller.abort();
@@ -8004,7 +8083,7 @@ function buildRoutes(): RouteDefinition[] {
             apiKey,
             voiceId,
             model: normalizeElevenLabsTtsModel(user.elevenlabs_voice_model),
-            text: boundary.text,
+            text: boundary.elevenLabsText,
             profile: boundary.profile,
             signal: controller.signal,
           });
@@ -8033,7 +8112,7 @@ function buildRoutes(): RouteDefinition[] {
           apiKey,
           voiceId,
           model: normalizeElevenLabsTtsModel(user.elevenlabs_voice_model),
-          text: boundary.text,
+          text: boundary.elevenLabsText,
           profile: boundary.profile,
           signal: controller.signal,
         });
@@ -8110,6 +8189,8 @@ function buildRoutes(): RouteDefinition[] {
             user.experimental_all_model_effort_enabled === 1,
           coffeeExperimentalTableAngleEnabled:
             user.coffee_experimental_table_angle_enabled === 1,
+          signalImmersiveVoiceEffectsEnabled:
+            user.signal_immersive_voice_effects_enabled === 1,
           psychicModeEnabled: user.psychic_mode_enabled === 1,
           autoModeEnabled: user.auto_switch_model === 1,
           autoFallbackChain: parseStoredAutoFallbackChain(user.auto_fallback_chain),
@@ -8139,9 +8220,7 @@ function buildRoutes(): RouteDefinition[] {
             : "mute",
           voiceEffectsEnabled: user.voice_effects_enabled !== 0,
           voiceVolume: normalizeBotVoiceVolume(user.voice_volume),
-          englishVoiceEngine: user.english_voice_engine === "elevenlabs" ? "elevenlabs" : "builtin",
-          defaultSystemVoiceName: user.default_system_voice_name,
-          defaultElevenLabsVoiceId: user.default_elevenlabs_voice_id,
+          englishVoiceEngine: "elevenlabs",
           elevenLabsVoiceBank: parseStoredElevenLabsVoiceBank(user.elevenlabs_voice_bank),
           elevenLabsVoiceModel: user.elevenlabs_voice_model ?? "",
           openAiApiKeySource: apiKeySource(
@@ -8535,6 +8614,8 @@ function buildRoutes(): RouteDefinition[] {
           user.experimental_all_model_effort_enabled,
         coffeeExperimentalTableAngleEnabled:
           user.coffee_experimental_table_angle_enabled,
+        signalImmersiveVoiceEffectsEnabled:
+          user.signal_immersive_voice_effects_enabled,
         psychicModeEnabled: user.psychic_mode_enabled,
         autoSwitchModel: user.auto_switch_model,
         autoFallbackChain: user.auto_fallback_chain,
@@ -8725,6 +8806,9 @@ function buildRoutes(): RouteDefinition[] {
         braveSearchTag,
         userId
       );
+      db.prepare(
+        "UPDATE users SET signal_immersive_voice_effects_enabled = ? WHERE id = ?"
+      ).run(next.signalImmersiveVoiceEffectsEnabled ? 1 : 0, userId);
       json(ctx.res, 200, {
         ok: true,
         settings: {
@@ -8735,6 +8819,8 @@ function buildRoutes(): RouteDefinition[] {
             next.experimentalAllModelEffortEnabled === 1,
           coffeeExperimentalTableAngleEnabled:
             next.coffeeExperimentalTableAngleEnabled === 1,
+          signalImmersiveVoiceEffectsEnabled:
+            next.signalImmersiveVoiceEffectsEnabled,
           psychicModeEnabled: next.psychicModeEnabled === 1,
           autoModeEnabled: next.autoSwitchModel === 1,
           autoFallbackChain: parseStoredAutoFallbackChain(next.autoFallbackChain),
@@ -8743,8 +8829,6 @@ function buildRoutes(): RouteDefinition[] {
           voiceEffectsEnabled: next.voiceEffectsEnabled,
           voiceVolume: next.voiceVolume,
           englishVoiceEngine: next.englishVoiceEngine,
-          defaultSystemVoiceName: next.defaultSystemVoiceName,
-          defaultElevenLabsVoiceId: next.defaultElevenLabsVoiceId,
           elevenLabsVoiceBank: next.elevenLabsVoiceBank,
           elevenLabsVoiceModel: next.elevenLabsVoiceModel ?? "",
           hasOpenAiApiKey: Boolean(openAiCipher),
@@ -9768,7 +9852,7 @@ function buildRoutes(): RouteDefinition[] {
 
       const updatedBot = db
         .prepare(
-          "SELECT id, name, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?"
+          "SELECT id, name, name_pronunciation, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?"
         )
         .get(botId, userId) as Record<string, unknown>;
       json(ctx.res, 200, {
@@ -9894,6 +9978,7 @@ function buildRoutes(): RouteDefinition[] {
           : readBotAvatarDetailsForStorage(body.avatarDetails);
       const chatEnabled = body.chatEnabled === false ? 0 : 1;
       const voicePreviewLine = normalizeVoicePreviewLine(body.voicePreviewLine) || null;
+      const namePronunciation = normalizeBotNamePronunciation(body.namePronunciation);
       const authoredAudioVoiceProfile = normalizeBotAudioVoiceProfileV1(
         body.authoredAudioVoiceProfile
       );
@@ -9959,6 +10044,9 @@ function buildRoutes(): RouteDefinition[] {
       db.prepare(
         "UPDATE bots SET face_mouth_coffee_pucker = ? WHERE id = ? AND user_id = ?"
       ).run(faceMouthCoffeePucker, botId, userId);
+      db.prepare(
+        "UPDATE bots SET name_pronunciation = ? WHERE id = ? AND user_id = ?"
+      ).run(namePronunciation, botId, userId);
       if (powers.length > 0) {
         db.prepare("UPDATE bots SET powers_json = ? WHERE id = ? AND user_id = ?")
           .run(serializeBotPowersV1(powers), botId, userId);
@@ -9974,6 +10062,7 @@ function buildRoutes(): RouteDefinition[] {
         bot: {
           id: botId,
           name,
+          name_pronunciation: namePronunciation,
           systemPrompt,
           export_hash: exportHash,
           model,
@@ -10024,7 +10113,7 @@ function buildRoutes(): RouteDefinition[] {
     route("GET", "/api/bots", async (ctx) => {
       const userId = requireAuth(ctx);
       const rows = db.prepare(
-        "SELECT id, name, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC"
+        "SELECT id, name, name_pronunciation, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC"
       ).all(userId) as Record<string, unknown>[];
       json(ctx.res, 200, { ok: true, bots: botRowsForResponse(rows) });
     }),
@@ -10071,7 +10160,7 @@ function buildRoutes(): RouteDefinition[] {
       const updatedBots = result.ids.length > 0
         ? db
             .prepare(
-              `SELECT id, name, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? AND id IN (${result.ids.map(() => "?").join(", ")})`
+              `SELECT id, name, name_pronunciation, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? AND id IN (${result.ids.map(() => "?").join(", ")})`
             )
             .all(userId, ...result.ids) as Record<string, unknown>[]
         : [];
@@ -10437,6 +10526,10 @@ function buildRoutes(): RouteDefinition[] {
         fields.push("voice_preview_line = ?");
         values.push(voicePreviewLine || null);
       }
+      if (body.namePronunciation !== undefined) {
+        fields.push("name_pronunciation = ?");
+        values.push(normalizeBotNamePronunciation(body.namePronunciation));
+      }
       if (body.exportHash !== undefined) {
         const normalizedExportHash = normalizeBotExportHash(body.exportHash);
         if (!normalizedExportHash) {
@@ -10498,7 +10591,7 @@ function buildRoutes(): RouteDefinition[] {
       }
       const updatedBot = db
         .prepare(
-          "SELECT id, name, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?"
+          "SELECT id, name, name_pronunciation, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?"
         )
         .get(botId, userId) as Record<string, unknown>;
       json(ctx.res, 200, { ok: true, bot: botRowForResponse(updatedBot) });

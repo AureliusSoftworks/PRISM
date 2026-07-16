@@ -271,6 +271,41 @@ describe("Coffee seat arrival CSS", () => {
     );
   });
 
+  it("keeps live bot blinks running during speech with a calmer cadence", () => {
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /const COFFEE_SEAT_TALKING_BLINK_GAP_MULTIPLIER = 1\.35;/
+    );
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /function coffeeSeatBlinkGapMs\(talking = false\): number \{\s+const gapMs = randomBetween\(1500, 4000\);\s+return talking\s+\? gapMs \* COFFEE_SEAT_TALKING_BLINK_GAP_MULTIPLIER\s+: gapMs;/
+    );
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /if \(talking\) \{\s+if \(roll < 0\.03\) return 2;\s+if \(roll < 0\.14\) return 1;/
+    );
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /const isTalkingRef = useRef\(isTalking\);\s+const blinkPhase[\s\S]*?useEffect\(\(\) => \{\s+isTalkingRef\.current = isTalking;\s+\}, \[isTalking\]\);/
+    );
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /const talking = blinkWhileTalking && isTalkingRef\.current;\s+armBlink\(\s+coffeeSeatBlinkGapMs\(talking\),\s+coffeeSeatExtraBlinkCount\(talking\),/
+    );
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /const blinkKey = `\$\{enabled \? "enabled" : "disabled"\}:\$\{talkingPausesBlink \? "talking" : "idle"\}/
+    );
+    assert.match(
+      pageSource,
+      /isTalking=\{faceTalking\} blinkWhileTalking mouthShape=\{faceMouthShape\}/
+    );
+    assert.match(
+      pageSource,
+      /isTalking=\{isTableTypingThisSeat\} blinkWhileTalking mouthShape=\{mouthShapeWhileTyping\}/
+    );
+  });
+
   it("threads custom blink bars through Coffee face rendering", () => {
     assert.match(coffeeSeatPlateEmojiSource, /faceBlinkBar\?: BotFaceBlinkBar \| null/);
     assert.match(coffeeSeatPlateEmojiSource, /forceBlinkPhase\?: CoffeeSeatBlinkPhase \| null/);

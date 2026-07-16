@@ -1007,6 +1007,15 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   assert.match(pageSource, /<span>Avatar Studio<\/span>/);
   assert.match(pageSource, /function BotAvatarPreviewPanel\(/);
   assert.match(pageSource, /function BotAvatarIdentityControls\(/);
+  assert.match(pageSource, /<span>Pronunciation<\/span>/);
+  assert.match(pageSource, /aria-label="Bot name pronunciation"/);
+  assert.match(pageSource, /placeholder="How bots should say this name"/);
+  assert.match(pageSource, /aria-label="Preview bot name pronunciation"/);
+  assert.match(pageSource, /My name is \$\{trimmedName\}\./);
+  assert.match(
+    pageSource,
+    /onVoicePreview\(\s*audioVoiceProfile,\s*"english",\s*previewText/,
+  );
   assert.match(pageSource, /function BotAvatarFaceControls\(/);
   assert.match(pageSource, /function BotAvatarSavePrompt\(/);
   assert.match(pageSource, /className=\{styles\.botAvatarPanelHeader\}/);
@@ -1205,8 +1214,17 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   );
   assert.match(
     cssRuleBody(".botAvatarFaceControls"),
-    /grid-template-rows:\s*auto auto auto minmax\(150px,\s*1fr\);/,
+    /grid-template-rows:\s*auto auto auto auto;/,
   );
+  assert.match(
+    cssRuleBody(".botAvatarIdentityPicker"),
+    /height:\s*clamp\(165px,\s*22dvh,\s*260px\);/,
+  );
+  assert.match(
+    cssRuleBody(".botAvatarIdentityPronunciationRow"),
+    /grid-template-columns:\s*minmax\(0,\s*1fr\) auto;/,
+  );
+  assert.match(cssRuleBody(".botAvatarIdentityNameSampleButton"), /height:\s*36px;/);
   assert.match(cssRuleBody(".glyphGridScroll"), /overflow-y:\s*auto;/);
 
   const stageRule = cssRuleBody(".botAvatarMannequinStage");
@@ -1527,7 +1545,12 @@ test("avatar customizer preview has explicit expression states", () => {
   );
   assert.match(pageSource, /const BOT_AVATAR_PREVIEW_MODES = \[/);
   assert.match(pageSource, /const BOT_AVATAR_PREVIEW_MOODS = \[/);
-  assert.match(pageSource, /const previewTalking = previewMode === "talking";/);
+  assert.match(
+    pageSource,
+    /const previewTalking = previewMode === "talking" && !previewSpeechPaused;/,
+  );
+  assert.match(pageSource, /buildSpeechActivityWindows\(/);
+  assert.match(pageSource, /setPreviewSpeechPaused\(/);
   assert.match(pageSource, /const previewBlink = previewMode === "blink";/);
   assert.doesNotMatch(pageSource, /previewHovered/);
   assert.doesNotMatch(pageSource, /onPreviewHoveredChange/);

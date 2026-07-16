@@ -27,6 +27,7 @@ import {
 } from "@localai/shared";
 import { nextBotcastShowIdAfterDeletion } from "./botcastDeletion";
 import {
+  botcastSpeechRevealIsVoicing,
   botcastSpeechRevealVisibleText,
   finishBotcastSpeechReveal,
   prepareBotcastSpeechReveal,
@@ -38,6 +39,7 @@ import { PrismBlockingLoader } from "./PrismBlockingLoader";
 import {
   SIGNAL_ARTWORK_JOB_EVENT,
   announceSignalArtworkJob,
+  signalArtworkAssetLabel,
   signalArtworkJobIsActive,
   type SignalArtworkJobSnapshot,
 } from "./signalArtworkJob";
@@ -103,10 +105,6 @@ export interface BotcastExperienceProps {
 type BotcastLiveSpeech = {
   messageId: string;
   reveal: BotcastSpeechRevealState;
-};
-
-type ImageGenerationResponse = {
-  image: { id: string; displayUrl?: string; url?: string };
 };
 
 type SignalAssetSlot = "day-studio" | "night-studio" | "logo";
@@ -568,7 +566,11 @@ export function BotcastExperience({
       if (refreshedShow) setShowNameDraft(refreshedShow.name);
     });
     if (artworkJob.status === "completed") {
-      setNotice("The custom logo and matching Light and Dark studios are live.");
+      setNotice(
+        artworkJob.totalCount === 1
+          ? `The refreshed ${signalArtworkAssetLabel(artworkJob.assets[0]!.kind)} is live.`
+          : "The custom logo and matching Light and Dark studios are live.",
+      );
     } else if (artworkJob.status === "partial") {
       setNotice("Finished custom artwork is live; the PRISM set covers anything still missing.");
       setError(artworkJob.errors.at(-1)?.message ?? "Some Signal artwork could not be completed.");
@@ -792,260 +794,6 @@ export function BotcastExperience({
     }
   };
 
-  const generateShowArtwork = async (
-    sourceShow: BotcastShow,
-    regenerate: boolean,
-    kinds: readonly SignalArtworkKind[] = ["night-studio", "day-studio", "logo"],
-  ): Promise<{
-    show: BotcastShow;
-    generatedCount: number;
-    failureMessage: string | null;
-    cancelled: boolean;
-  }> => {
-    const includesNightStudio = kinds.includes("night-studio");
-    const includesDayStudio = kinds.includes("day-studio");
-    const includesStudios = includesNightStudio || includesDayStudio;
-    const includesLogo = kinds.includes("logo");
-    const controller = new AbortController();
-    const studioTitle = includesNightStudio && includesDayStudio
-      ? "Building the day and night studios"
-      : includesDayStudio
-        ? "Relighting the Light studio"
-        : "Building a new Dark studio";
-    const studioDetail = includesNightStudio && includesDayStudio
-      ? "PRISM is preserving one persona-specific set while changing only its light."
-      : includesDayStudio
-        ? "PRISM is preserving the set while giving it natural daylight."
-        : "PRISM is creating a fresh persona-shaped studio after dark.";
-    blockingAbortRef.current = controller;
-    setBlockingOperation({
-      title: includesStudios && includesLogo
-        ? `Giving ${sourceShow.name} a visual identity`
-        : includesStudios
-          ? studioTitle
-          : "Designing a new show mark",
-      detail: includesStudios && includesLogo
-        ? "PRISM is rendering a matched studio pair and its companion logo."
-        : includesStudios
-          ? studioDetail
-          : "PRISM is distilling the show’s personality into one memorable symbol.",
-      stepLabel: regenerate ? "Preparing fresh art direction" : "Preparing the visual identity",
-      progress: 0,
-      cancellable: true,
-    });
-    let workingShow = sourceShow;
-    let generatedCount = 0;
-    let failureMessage: string | null = null;
-    try {
-      if (regenerate) {
-        const reset = await request<{ show: BotcastShow }>(
-          `/api/botcast/shows/${encodeURIComponent(sourceShow.id)}`,
-          {
-            method: "PATCH",
-            body: JSON.stringify({
-              ...(includesNightStudio && includesDayStudio
-                ? { regenerateAtmosphere: true }
-                : {}),
-              ...(includesDayStudio && !includesNightStudio
-                ? { regenerateDayAtmosphere: true }
-                : {}),
-              ...(includesNightStudio && !includesDayStudio
-                ? { regenerateNightAtmosphere: true }
-                : {}),
-              ...(includesLogo ? { regenerateLogo: true } : {}),
-            }),
-            signal: controller.signal,
-          },
-        );
-        workingShow = reset.show;
-        replaceShow(workingShow);
-      }
-      let canonicalNightImageId = workingShow.nightAtmosphere.imageId;
-      type PendingStudioAttachment = {
-        imageId: string;
-        imageUrl: string;
-        errorMessage: string;
-      };
-      let pendingNightAttachment: PendingStudioAttachment | null = null;
-      let pendingDayAttachment: PendingStudioAttachment | null = null;
-      const artwork = ([
-        {
-          kind: "nighttime studio",
-          artworkKind: "night-studio",
-          prompt: workingShow.nightAtmosphere.prompt,
-          size: "1536x1024",
-          imageUrlKey: "nightAtmosphereImageUrl",
-          imageIdKey: "nightAtmosphereImageId",
-          source: null,
-        },
-        {
-          kind: "daytime studio",
-          artworkKind: "day-studio",
-          prompt: workingShow.dayAtmosphere.prompt,
-          size: "1536x1024",
-          imageUrlKey: "dayAtmosphereImageUrl",
-          imageIdKey: "dayAtmosphereImageId",
-          source: "night",
-        },
-        {
-          kind: "logo",
-          artworkKind: "logo",
-          prompt: workingShow.logo.prompt,
-          size: "1024x1024",
-          imageUrlKey: "logoImageUrl",
-          imageIdKey: "logoImageId",
-          source: null,
-        },
-      ] as const).filter((asset) => kinds.includes(asset.artworkKind));
-      for (const [index, asset] of artwork.entries()) {
-        if (controller.signal.aborted) {
-          return { show: workingShow, generatedCount, failureMessage, cancelled: true };
-        }
-        setBlockingOperation((current) => current ? {
-          ...current,
-          stepLabel: `Rendering ${asset.kind} · ${index + 1} of ${artwork.length}`,
-          progress: index / artwork.length,
-        } : null);
-        try {
-          setNotice(`Synthesizing the ${asset.kind}…`);
-          const sourceImageId = asset.source === "night"
-            ? canonicalNightImageId
-            : null;
-          if (asset.source === "night" && !sourceImageId) {
-            throw new Error("The nighttime studio must finish before its daytime edit.");
-          }
-          const generated = await request<ImageGenerationResponse>("/api/images/generate", {
-            method: "POST",
-            body: JSON.stringify({
-              prompt: asset.prompt,
-              size: asset.size,
-              quality: preferredImageProvider === "openai" ? "high" : "standard",
-              preferredProvider: preferredImageProvider,
-              botId: workingShow.hostBotId,
-              origin: "botcast",
-              ...(sourceImageId ? {
-                sourceImageId,
-                sourceEditKind: "daylight-relight",
-              } : {}),
-            }),
-            signal: controller.signal,
-          });
-          const imageUrl = generated.image.displayUrl ?? generated.image.url;
-          if (!imageUrl) throw new Error(`${asset.kind} image has no usable local URL.`);
-          if (asset.kind === "nighttime studio") {
-            // Preserve the canonical source immediately. A transient show PATCH
-            // must not make the daylight edit fall back to an older studio.
-            canonicalNightImageId = generated.image.id;
-          }
-          const recoveringNightAttachment = asset.kind === "daytime studio"
-            ? pendingNightAttachment
-            : null;
-          try {
-            const saved = await request<{ show: BotcastShow }>(
-              `/api/botcast/shows/${encodeURIComponent(sourceShow.id)}`,
-              {
-                method: "PATCH",
-                body: JSON.stringify({
-                  ...(recoveringNightAttachment ? {
-                    nightAtmosphereImageUrl: recoveringNightAttachment.imageUrl,
-                    nightAtmosphereImageId: recoveringNightAttachment.imageId,
-                  } : {}),
-                  [asset.imageUrlKey]: imageUrl,
-                  [asset.imageIdKey]: generated.image.id,
-                }),
-                signal: controller.signal,
-              },
-            );
-            workingShow = saved.show;
-            generatedCount += recoveringNightAttachment ? 2 : 1;
-            if (recoveringNightAttachment) pendingNightAttachment = null;
-            replaceShow(workingShow);
-          } catch (attachmentError) {
-            if (isAbortError(attachmentError)) throw attachmentError;
-            if (asset.kind === "nighttime studio") {
-              pendingNightAttachment = {
-                imageId: generated.image.id,
-                imageUrl,
-                errorMessage: errorMessage(attachmentError),
-              };
-              continue;
-            }
-            if (asset.kind === "daytime studio") {
-              pendingDayAttachment = {
-                imageId: generated.image.id,
-                imageUrl,
-                errorMessage: errorMessage(attachmentError),
-              };
-              continue;
-            }
-            throw attachmentError;
-          }
-        } catch (artworkError) {
-          if (isAbortError(artworkError)) {
-            return { show: workingShow, generatedCount, failureMessage, cancelled: true };
-          }
-          failureMessage ??= errorMessage(artworkError);
-          // Each asset is isolated, so one failed synthesis never blocks the rest.
-        } finally {
-          setBlockingOperation((current) => current ? {
-            ...current,
-            progress: (index + 1) / artwork.length,
-          } : null);
-        }
-      }
-      if ((pendingNightAttachment || pendingDayAttachment) && !controller.signal.aborted) {
-        const pendingNight = pendingNightAttachment;
-        const pendingDay = pendingDayAttachment;
-        try {
-          const saved = await request<{ show: BotcastShow }>(
-            `/api/botcast/shows/${encodeURIComponent(sourceShow.id)}`,
-            {
-              method: "PATCH",
-              body: JSON.stringify({
-                ...(pendingNight ? {
-                  nightAtmosphereImageUrl: pendingNight.imageUrl,
-                  nightAtmosphereImageId: pendingNight.imageId,
-                } : {}),
-                ...(pendingDay ? {
-                  dayAtmosphereImageUrl: pendingDay.imageUrl,
-                  dayAtmosphereImageId: pendingDay.imageId,
-                } : {}),
-              }),
-              signal: controller.signal,
-            },
-          );
-          workingShow = saved.show;
-          generatedCount += Number(Boolean(pendingNight)) + Number(Boolean(pendingDay));
-          pendingNightAttachment = null;
-          pendingDayAttachment = null;
-          replaceShow(workingShow);
-        } catch (attachmentError) {
-          if (isAbortError(attachmentError)) {
-            return { show: workingShow, generatedCount, failureMessage, cancelled: true };
-          }
-          failureMessage ??=
-            pendingNight?.errorMessage ||
-            pendingDay?.errorMessage ||
-            errorMessage(attachmentError);
-        }
-      }
-      return {
-        show: workingShow,
-        generatedCount,
-        failureMessage,
-        cancelled: controller.signal.aborted,
-      };
-    } catch (artworkError) {
-      if (isAbortError(artworkError)) {
-        return { show: workingShow, generatedCount, failureMessage, cancelled: true };
-      }
-      throw artworkError;
-    } finally {
-      if (blockingAbortRef.current === controller) blockingAbortRef.current = null;
-      setBlockingOperation(null);
-    }
-  };
-
   const createShow = async (): Promise<void> => {
     if (!hostDraftId) return;
     setBusy(true);
@@ -1126,6 +874,27 @@ export function BotcastExperience({
     }
   };
 
+  const startSignalArtworkJob = async (
+    sourceShow: BotcastShow,
+    kinds: readonly SignalArtworkKind[],
+    identityMs: number | null = null,
+  ): Promise<SignalArtworkJobSnapshot> => {
+    const response = await request<{ job: SignalArtworkJobSnapshot }>(
+      `/api/botcast/shows/${encodeURIComponent(sourceShow.id)}/artwork-job`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          preferredProvider: preferredImageProvider,
+          kinds,
+          ...(identityMs === null ? {} : { identityMs }),
+        }),
+      },
+    );
+    setArtworkJob(response.job);
+    announceSignalArtworkJob(response.job);
+    return response.job;
+  };
+
   const synthesizeShowLook = async (): Promise<void> => {
     if (!selectedShow) return;
     const controller = new AbortController();
@@ -1180,6 +949,7 @@ export function BotcastExperience({
           method: "POST",
           body: JSON.stringify({
             preferredProvider: preferredImageProvider,
+            kinds: ["night-studio", "day-studio", "logo"],
             identityMs,
           }),
           signal: controller.signal,
@@ -1212,19 +982,25 @@ export function BotcastExperience({
     setError(null);
     setNotice(`Refreshing the show’s ${label} studio…`);
     try {
-      const artwork = await generateShowArtwork(selectedShow, true, [kind]);
-      if (artwork.cancelled) {
-        setNotice(`${label} studio synthesis cancelled. The previous artwork remains in place.`);
-        return;
-      }
-      if (artwork.failureMessage) setError(artwork.failureMessage);
-      setNotice(
-        artwork.generatedCount === 1
-          ? `The refreshed ${label} studio is live.`
-          : `Synthesis was unavailable, so the previous ${label} studio remains in place.`,
+      const reset = await request<{ show: BotcastShow }>(
+        `/api/botcast/shows/${encodeURIComponent(selectedShow.id)}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify(
+            lighting === "day"
+              ? { regenerateDayAtmosphere: true }
+              : { regenerateNightAtmosphere: true },
+          ),
+        },
       );
-    } catch {
-      setNotice(`The procedural ${label} studio is active; no show setup was lost.`);
+      replaceShow(reset.show);
+      await startSignalArtworkJob(reset.show, [kind]);
+      setNotice(
+        `The refreshed ${label} studio is rendering in the background. You can keep using PRISM.`,
+      );
+    } catch (studioError) {
+      setError(errorMessage(studioError));
+      setNotice(`The previous ${label} studio remains in place.`);
     } finally {
       setBusy(false);
     }
@@ -1236,19 +1012,21 @@ export function BotcastExperience({
     setError(null);
     setNotice("Refreshing the show’s logo…");
     try {
-      const artwork = await generateShowArtwork(selectedShow, true, ["logo"]);
-      if (artwork.cancelled) {
-        setNotice("Logo synthesis cancelled. The previous logo remains in place.");
-        return;
-      }
-      if (artwork.failureMessage) setError(artwork.failureMessage);
-      setNotice(
-        artwork.generatedCount === 1
-          ? "The refreshed logo is live."
-          : "Synthesis was unavailable, so the previous logo remains in place.",
+      const reset = await request<{ show: BotcastShow }>(
+        `/api/botcast/shows/${encodeURIComponent(selectedShow.id)}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ regenerateLogo: true }),
+        },
       );
-    } catch {
-      setNotice("The procedural logo is active; no show setup was lost.");
+      replaceShow(reset.show);
+      await startSignalArtworkJob(reset.show, ["logo"]);
+      setNotice(
+        "The refreshed logo is rendering in the background. You can keep using PRISM.",
+      );
+    } catch (logoError) {
+      setError(errorMessage(logoError));
+      setNotice("The previous logo remains in place.");
     } finally {
       setBusy(false);
     }
@@ -1695,6 +1473,10 @@ export function BotcastExperience({
     const speechIsPlaying = args.replay
       ? replayPlaying && replaySpeechActive
       : speechReveal?.phase === "playing";
+    const speechMouthActive = Boolean(
+      speechIsPlaying &&
+        (args.replay || botcastSpeechRevealIsVoicing(speechReveal) !== false),
+    );
     const roleIsThinking = (role: "host" | "guest"): boolean =>
       !args.replay && (
         (speechReveal?.phase === "preparing" && args.activeMessage?.speakerRole === role) ||
@@ -1758,7 +1540,7 @@ export function BotcastExperience({
                 className={styles.avatarRig}
                 data-signal-presence="host"
                 data-talking={
-                  speechIsPlaying && args.activeMessage?.speakerRole === "host"
+                  speechMouthActive && args.activeMessage?.speakerRole === "host"
                     ? "true"
                     : undefined
                 }
@@ -1769,7 +1551,7 @@ export function BotcastExperience({
                 {avatar(
                   args.host,
                   "host",
-                  speechIsPlaying && args.activeMessage?.speakerRole === "host",
+                  speechMouthActive && args.activeMessage?.speakerRole === "host",
                   roleIsThinking("host"),
                 )}
               </div>
@@ -1795,7 +1577,7 @@ export function BotcastExperience({
                 className={styles.avatarRig}
                 data-signal-presence="guest"
                 data-talking={
-                  speechIsPlaying && args.activeMessage?.speakerRole === "guest"
+                  speechMouthActive && args.activeMessage?.speakerRole === "guest"
                     ? "true"
                     : undefined
                 }
@@ -1806,7 +1588,7 @@ export function BotcastExperience({
                 {avatar(
                   args.guest,
                   "guest",
-                  speechIsPlaying && args.activeMessage?.speakerRole === "guest",
+                  speechMouthActive && args.activeMessage?.speakerRole === "guest",
                   roleIsThinking("guest"),
                 )}
               </div>

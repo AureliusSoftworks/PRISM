@@ -3,6 +3,37 @@
 export type VoiceMode = "mute" | "english" | "babble" | "bottish";
 export type EnglishVoiceEngine = "builtin" | "elevenlabs";
 
+export const ELEVENLABS_VOICE_EFFECTS = [
+  "clean",
+  "radio",
+  "robot",
+  "echo",
+  "chorus",
+  "deep-space",
+] as const;
+export type ElevenLabsVoiceEffect = (typeof ELEVENLABS_VOICE_EFFECTS)[number];
+
+export const ELEVENLABS_VOICE_EFFECT_LABELS: Record<ElevenLabsVoiceEffect, string> = {
+  clean: "Clean",
+  radio: "Radio",
+  robot: "Robot",
+  echo: "Echo",
+  chorus: "Chorus",
+  "deep-space": "Deep Space",
+};
+
+export const ELEVENLABS_VOICE_EFFECT_DESCRIPTIONS: Record<
+  ElevenLabsVoiceEffect,
+  string
+> = {
+  clean: "Unprocessed ElevenLabs voice.",
+  radio: "Narrow-band broadcast tone with a trace of radio noise.",
+  robot: "Mechanical pulse and a subtly doubled synthetic carrier.",
+  echo: "Two level-controlled repeats behind the original voice.",
+  chorus: "A wide, gently detuned double without extra loudness.",
+  "deep-space": "A lower spectral double with a distant trailing reflection.",
+};
+
 export const BOT_AUDIO_VOICE_IDS = [
   "voice-1",
   "voice-2",
@@ -47,6 +78,9 @@ export interface BotAudioVoiceProfileV2 {
   baseVoiceId: BotAudioVoiceId;
   systemVoiceName?: string | null;
   elevenLabsVoiceId?: string | null;
+  elevenLabsEffect: ElevenLabsVoiceEffect;
+  /** Comma-separated Eleven v3 audio directions such as "warm, hushed". */
+  elevenLabsDirection?: string | null;
   pitch: number;
   warmth: number;
   pace: number;
@@ -80,19 +114,65 @@ export const NEUTRAL_COFFEE_VOICE_DELIVERY_ENVELOPE: CoffeeVoiceDeliveryEnvelope
   emphasisStrength: 0,
 };
 
+export const BOT_NAME_PRONUNCIATION_MAX_LENGTH = 120;
+
+export interface BotNamePronunciationEntry {
+  name: string | null | undefined;
+  namePronunciation?: string | null | undefined;
+  name_pronunciation?: string | null | undefined;
+}
+
+export function normalizeBotNamePronunciation(value: unknown): string {
+  if (typeof value !== "string") return "";
+  return value
+    .replace(/\s+/gu, " ")
+    .trim()
+    .slice(0, BOT_NAME_PRONUNCIATION_MAX_LENGTH);
+}
+
+export function applyBotNamePronunciations(
+  text: unknown,
+  entries: readonly BotNamePronunciationEntry[],
+): unknown {
+  if (typeof text !== "string" || entries.length === 0) return text;
+  const replacements = new Map<string, { written: string; spoken: string }>();
+  for (const entry of entries) {
+    const written = entry.name?.replace(/\s+/gu, " ").trim() ?? "";
+    const spoken = normalizeBotNamePronunciation(
+      entry.namePronunciation ?? entry.name_pronunciation,
+    );
+    const key = written.toLocaleLowerCase();
+    if (
+      !written ||
+      !spoken ||
+      key === spoken.toLocaleLowerCase() ||
+      replacements.has(key)
+    ) {
+      continue;
+    }
+    replacements.set(key, { written, spoken });
+  }
+  if (replacements.size === 0) return text;
+  const alternatives = [...replacements.values()]
+    .sort((left, right) => right.written.length - left.written.length)
+    .map(({ written }) => written.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const pattern = new RegExp(
+    `(?<![\\p{L}\\p{N}])(?:${alternatives.join("|")})(?![\\p{L}\\p{N}])`,
+    "giu",
+  );
+  return text.replace(pattern, (match) =>
+    replacements.get(match.toLocaleLowerCase())?.spoken ?? match,
+  );
+}
+
 export function applyPlayerNamePronunciation(
   text: unknown,
   displayName: string | null | undefined,
   pronunciation: string | null | undefined
 ): unknown {
-  if (typeof text !== "string") return text;
-  const written = displayName?.replace(/\s+/gu, " ").trim() ?? "";
-  const spoken = pronunciation?.replace(/\s+/gu, " ").trim() ?? "";
-  if (!written || !spoken || written.toLocaleLowerCase() === spoken.toLocaleLowerCase()) {
-    return text;
-  }
-  const escaped = written.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return text.replace(new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, "giu"), spoken);
+  return applyBotNamePronunciations(text, [
+    { name: displayName, namePronunciation: pronunciation },
+  ]);
 }
 
 export const BOT_VOICE_TEXTURE_PRESET_LABELS: Record<BotVoiceTexturePreset, string> = {
@@ -159,6 +239,7 @@ export const DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2: Readonly<BotAudioVoiceProfileV2
   v: 2,
   enabled: true,
   baseVoiceId: "voice-1",
+  elevenLabsEffect: "clean",
   pitch: 0,
   warmth: 0,
   pace: 0,
@@ -189,6 +270,41 @@ export function normalizeEnglishVoiceEngine(
   fallback = DEFAULT_ENGLISH_VOICE_ENGINE
 ): EnglishVoiceEngine {
   return value === "builtin" || value === "elevenlabs" ? value : fallback;
+}
+
+export function normalizeElevenLabsVoiceEffect(value: unknown): ElevenLabsVoiceEffect {
+  // Migrate the original harsh bit-crusher preset to the more musical chorus.
+  if (value === "distortion") return "chorus";
+  return typeof value === "string" &&
+    (ELEVENLABS_VOICE_EFFECTS as readonly string[]).includes(value)
+    ? value as ElevenLabsVoiceEffect
+    : "clean";
+}
+
+export function normalizeElevenLabsVoiceDirection(
+  value: unknown,
+  fallback: string | null = null
+): string | null {
+  if (value === null) return null;
+  if (typeof value !== "string") return fallback;
+  const directions: string[] = [];
+  const seen = new Set<string>();
+  for (const rawDirection of value.split(/[,;\n]+/u)) {
+    const direction = rawDirection
+      .replace(/[\u0000-\u001f\u007f]/gu, " ")
+      .trim()
+      .replace(/^\[+|\]+$/gu, "")
+      .replace(/\s+/gu, " ")
+      .trim()
+      .slice(0, 48);
+    if (!direction) continue;
+    const key = direction.toLocaleLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    directions.push(direction);
+    if (directions.length >= 8) break;
+  }
+  return directions.length > 0 ? directions.join(", ").slice(0, 240) : null;
 }
 
 /** Clamp finite values to the portable [-1, 1] performance range. */
@@ -253,6 +369,10 @@ export function normalizeBotAudioVoiceProfileV1(
     record.elevenLabsVoiceId,
     fallbackProfile.elevenLabsVoiceId ?? null
   );
+  const elevenLabsDirection = normalizeElevenLabsVoiceDirection(
+    record.elevenLabsDirection,
+    fallbackProfile.elevenLabsDirection ?? null
+  );
   return {
     v: 2,
     enabled: legacy ? true : record.enabled !== false,
@@ -261,6 +381,8 @@ export function normalizeBotAudioVoiceProfileV1(
       : fallbackProfile.baseVoiceId,
     ...(systemVoiceName ? { systemVoiceName } : {}),
     ...(elevenLabsVoiceId ? { elevenLabsVoiceId } : {}),
+    elevenLabsEffect: normalizeElevenLabsVoiceEffect(record.elevenLabsEffect),
+    ...(elevenLabsDirection ? { elevenLabsDirection } : {}),
     pitch: normalizeBotAudioVoiceControl(record.pitch, fallbackProfile.pitch),
     warmth: normalizeBotAudioVoiceControl(record.warmth, fallbackProfile.warmth),
     pace: normalizeBotAudioVoiceControl(record.pace, fallbackProfile.pace),
@@ -278,9 +400,14 @@ export function normalizeBotAudioVoiceProfileV1(
 
 function normalizeBotAudioVoiceProfileFallback(value: BotAudioVoiceProfile): BotAudioVoiceProfileV2 {
   if (value.v === 2) {
+    const elevenLabsDirection = normalizeElevenLabsVoiceDirection(value.elevenLabsDirection);
     return {
       ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
       ...value,
+      elevenLabsEffect: normalizeElevenLabsVoiceEffect(value.elevenLabsEffect),
+      ...(elevenLabsDirection
+        ? { elevenLabsDirection }
+        : { elevenLabsDirection: undefined }),
       texture: botVoiceTextureForPreset("clean"),
     };
   }

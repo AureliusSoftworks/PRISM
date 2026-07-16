@@ -209,6 +209,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       zen_ask_question_patience_ms INTEGER NOT NULL DEFAULT 60000,
       zen_autonomy_enabled INTEGER NOT NULL DEFAULT 0,
       zen_persona_transition_choice TEXT NOT NULL DEFAULT 'random',
+      signal_immersive_voice_effects_enabled INTEGER NOT NULL DEFAULT 0,
       prism_default_bot_name TEXT,
       prism_default_bot_system_prompt TEXT,
       prism_default_bot_color TEXT,
@@ -257,7 +258,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       voice_mode TEXT NOT NULL DEFAULT 'mute',
       voice_effects_enabled INTEGER NOT NULL DEFAULT 1,
       voice_volume REAL NOT NULL DEFAULT 1,
-      english_voice_engine TEXT NOT NULL DEFAULT 'builtin',
+      english_voice_engine TEXT NOT NULL DEFAULT 'elevenlabs',
       default_system_voice_name TEXT,
       default_elevenlabs_voice_id TEXT,
       elevenlabs_voice_bank TEXT NOT NULL DEFAULT '{}',
@@ -514,6 +515,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       name TEXT NOT NULL,
+      name_pronunciation TEXT NOT NULL DEFAULT '',
       system_prompt TEXT NOT NULL DEFAULT '',
       voice_preview_line TEXT,
       export_hash TEXT,
@@ -819,6 +821,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       speaker_role TEXT NOT NULL,
       bot_id TEXT NOT NULL,
       content TEXT NOT NULL,
+      voice_performance_text TEXT,
       created_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(episode_id) REFERENCES botcast_episodes(id) ON DELETE CASCADE
@@ -898,12 +901,21 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   }
   const hasVoiceMode = userColumns.some((column) => column.name === "voice_mode");
   if (!hasVoiceMode) db.exec("ALTER TABLE users ADD COLUMN voice_mode TEXT NOT NULL DEFAULT 'mute';");
+  const hasSignalImmersiveVoiceEffectsEnabled = userColumns.some(
+    (column) => column.name === "signal_immersive_voice_effects_enabled"
+  );
+  if (!hasSignalImmersiveVoiceEffectsEnabled) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN signal_immersive_voice_effects_enabled INTEGER NOT NULL DEFAULT 0;"
+    );
+  }
   const hasVoiceEffectsEnabled = userColumns.some((column) => column.name === "voice_effects_enabled");
   if (!hasVoiceEffectsEnabled) db.exec("ALTER TABLE users ADD COLUMN voice_effects_enabled INTEGER NOT NULL DEFAULT 1;");
   const hasVoiceVolume = userColumns.some((column) => column.name === "voice_volume");
   if (!hasVoiceVolume) db.exec("ALTER TABLE users ADD COLUMN voice_volume REAL NOT NULL DEFAULT 1;");
   const hasEnglishVoiceEngine = userColumns.some((column) => column.name === "english_voice_engine");
-  if (!hasEnglishVoiceEngine) db.exec("ALTER TABLE users ADD COLUMN english_voice_engine TEXT NOT NULL DEFAULT 'builtin';");
+  if (!hasEnglishVoiceEngine) db.exec("ALTER TABLE users ADD COLUMN english_voice_engine TEXT NOT NULL DEFAULT 'elevenlabs';");
+  db.exec("UPDATE users SET english_voice_engine = 'elevenlabs' WHERE english_voice_engine IS NULL OR english_voice_engine = 'builtin';");
   const hasDefaultSystemVoiceName = userColumns.some((column) => column.name === "default_system_voice_name");
   if (!hasDefaultSystemVoiceName) db.exec("ALTER TABLE users ADD COLUMN default_system_voice_name TEXT;");
   const hasDefaultElevenLabsVoiceId = userColumns.some((column) => column.name === "default_elevenlabs_voice_id");
@@ -929,6 +941,15 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   );
   if (!hasPrismDefaultBotAudioVoiceProfile) {
     db.exec("ALTER TABLE users ADD COLUMN prism_default_bot_audio_voice_profile TEXT;");
+  }
+  const botcastMessageColumns = db
+    .prepare("PRAGMA table_info(botcast_messages)")
+    .all() as Array<{ name: string }>;
+  const hasBotcastVoicePerformanceText = botcastMessageColumns.some(
+    (column) => column.name === "voice_performance_text"
+  );
+  if (!hasBotcastVoicePerformanceText) {
+    db.exec("ALTER TABLE botcast_messages ADD COLUMN voice_performance_text TEXT;");
   }
   const hasProviderLocked = userColumns.some((column) => column.name === "provider_locked");
   if (!hasProviderLocked) {
@@ -1953,6 +1974,12 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   );
   if (!hasBotVoicePreviewLineColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN voice_preview_line TEXT;");
+  }
+  const hasBotNamePronunciationColumn = botColumns.some(
+    (column) => column.name === "name_pronunciation"
+  );
+  if (!hasBotNamePronunciationColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN name_pronunciation TEXT NOT NULL DEFAULT '';");
   }
   const hasAuthoredAudioVoiceProfileColumn = botColumns.some(
     (column) => column.name === "authored_audio_voice_profile"
