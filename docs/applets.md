@@ -27,7 +27,7 @@ ship as `0.5.2` while Coffee is `v0.7` and Story is `v0.1`.
 | Chat | v1.2 | Active | Full playground for bots, providers, models, images, exports, and memory-aware conversations. |
 | Zen | v1.1 | Active | Calm one-to-one continuity surface; the standalone Zen lane is deprecating as this becomes Prism's default state. |
 | Coffee | v1.3 | Active | Multi-bot group table with Coffee Groups, session pacing, cups, transcripts, replay, and table controls. |
-| Signal | v2.0 | Active | Bot-owned interview shows with editable host-shaped names, generated or procedural studio and logo identities, private producer direction, episode archives, and directed replay. |
+| Signal | v0.2 | Active | Bot-owned interview shows with editable host-shaped names, generated or procedural studio and logo identities, private producer direction, episode archives, and directed replay. |
 | Story | v0.1 | Preview | Generated visual-novel episodes with bots, choices, maps, inventory, and transcripts. |
 | Arena | v0.0 | Planned | Moderated bot debate surface. |
 | Polling | v0.0 | Planned | AI-powered polling across bot groups. |
@@ -76,7 +76,7 @@ stages do not block the standalone preview.
 - Promoted `Slate` to preview `v0.1` for persistent prose projects, generated
   structure, scoped drafting, direct autosaved edits, locks, and explicit
   revision previews with accept/reject version safety.
-- Added `Signal v2.0`, the bot-owned interview-show applet with editable host-shaped
+- Added `Signal v0.2`, the bot-owned interview-show applet with editable host-shaped
   brands, persistent generated-or-procedural studios and logos, private producer
   direction, episode archives, and directed replay.
 

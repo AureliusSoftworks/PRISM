@@ -107,7 +107,7 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
 }
 
 describe("resolveNextSettings — voice foundation", () => {
-  it("keeps an account-wide mode, engine, and exactly five normalized ElevenLabs slots", () => {
+  it("keeps the online opt-in and normalizes legacy voice-bank backup data", () => {
     const next = resolveNextSettings(
       {
         voiceMode: "babble",

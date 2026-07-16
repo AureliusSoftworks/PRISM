@@ -36,7 +36,7 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Choose how replies recover",
-        body: "AUTO keeps the current response model as Primary, then quietly tries your two saved fallbacks if a reply fails validation. Image generation keeps its own LOCAL/ONLINE choice in Images.",
+        body: "AUTO keeps the current response model as Primary, then quietly tries your two saved fallbacks if a reply fails validation. Image generation keeps its own LOCAL/ONLINE choice in Images. Voice settings keep English speech on System Classic unless you explicitly enable online voices.",
         clickLabel: "the LOCAL, AUTO, ONLINE control",
         targetSelector: '[data-tutorial-target="auto-response-mode"]',
       },
@@ -100,7 +100,7 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Keep the table moving",
-        body: "Choose AUTO in the LOCAL, AUTO, ONLINE control to retry failed or malformed table turns. It changes response routing, not the Account default model choice or the separate Images provider.",
+        body: "Choose AUTO in the LOCAL, AUTO, ONLINE control to retry failed or malformed table turns. It changes response routing, not the Account default model choice, separate Images provider, or English voice preference.",
         clickLabel: "the LOCAL, AUTO, ONLINE control",
         targetSelector: '[data-tutorial-target="auto-response-mode"]',
       },
@@ -123,19 +123,19 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Shape the show’s identity",
-        body: "A custom identity is optional. Create this show’s look once to let Signal find a clever name and synthesize a persona-shaped logo with matching Light and Dark studios. Afterward, refresh the name, either studio, or the logo independently—or replace any visual with your own image.",
+        body: "A custom identity is optional. Create this show’s look once to let Signal find a clever name, then keep using PRISM while the activity card tracks its persona-shaped logo and matching Dark-to-Light studio pair in the background. Afterward, refresh the name, either studio, or the logo independently—or replace any visual with your own image.",
         clickLabel: "Create this show’s look or an independent refresh or replace control",
         targetSelector: '[data-tutorial-target="botcast-brand-controls"]',
       },
       {
         heading: "Book tonight’s episode",
-        body: "Choose one guest, set the topic, and write an optional private angle. Pick LOCAL or ONLINE, then keep the account model or choose another for this recording; Signal locks that lane and choice when the episode begins. The brief shapes the host but never goes on mic.",
+        body: "Choose one guest, set the topic, and write an optional private angle. Pick LOCAL, AUTO, or ONLINE. AUTO keeps the account primary and recovers through your configured fallback chain; the other lanes can use the account model or a recording-only override. Signal locks that routing when the episode begins. The brief shapes the host but never goes on mic.",
         clickLabel: "the episode setup desk",
         targetSelector: '[data-tutorial-target="botcast-setup"]',
       },
       {
         heading: "Produce from the control room",
-        body: "Ask about a detail, press harder, move on, or lighten up. Repeated pressure can earn a warning and, rarely, a walkout.",
+        body: "Signal keeps one speaker on mic at a time: their face comes alive and the transcript follows only the words they have finished saying. Ask about a detail, press harder, move on, or lighten up. Repeated pressure can earn a warning and, rarely, a walkout.",
         clickLabel: "a private producer cue",
         targetSelector: '[data-tutorial-target="botcast-cues"]',
       },

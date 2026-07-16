@@ -79,7 +79,8 @@ describe("voice settings preview", () => {
   });
 
   it("supports global defaults, randomization, and session-cached persona previews", () => {
-    assert.match(pageSource, /<span>Global default voice<\/span>/);
+    assert.match(pageSource, /<span>System Classic default voice<\/span>/);
+    assert.match(pageSource, /<span>ElevenLabs default voice<\/span>/);
     assert.match(pageSource, /defaultSystemVoiceName/);
     assert.match(pageSource, /defaultElevenLabsVoiceId/);
     assert.match(pageSource, />\s*Randomize\s*<\/button>/);
@@ -117,12 +118,48 @@ describe("voice settings preview", () => {
   });
 
   it("presents offline English as native system speech rather than a bundled neural voice", () => {
-    assert.match(pageSource, /System Classic \(Offline\)/);
+    assert.match(pageSource, /aria-label="Offline English voice engine"/);
+    assert.match(pageSource, /<option value="builtin">System Classic<\/option>/);
     assert.match(
       pageSource,
       /installed system voice speaks English and Babble/,
     );
     assert.doesNotMatch(pageSource, /Built-in English is packaged with Prism/);
+  });
+
+  it("keeps System Classic offline and makes online ElevenLabs an explicit opt-in", () => {
+    assert.match(
+      pageSource,
+      /<span>Offline engine<\/span>[\s\S]*?aria-label="Offline English voice engine"/,
+    );
+    assert.match(
+      pageSource,
+      /checked=\{\s*settings\.englishVoiceEngine === "elevenlabs"\s*\}[\s\S]*?aria-label="Use ElevenLabs for online English voices"/,
+    );
+    assert.match(pageSource, /<strong>Use ElevenLabs online<\/strong>/);
+    assert.match(pageSource, /Off by default\. Connect an ElevenLabs key/);
+    assert.match(
+      pageSource,
+      /event\.currentTarget[\s\S]*?\.checked[\s\S]*?\? "elevenlabs"[\s\S]*?: "builtin"/,
+    );
+    assert.match(
+      pageSource,
+      /LOCAL turns never use this engine;[\s\S]*?unavailable, Prism uses System Classic/,
+    );
+  });
+
+  it("removes the legacy five-slot ElevenLabs mapping from Voice settings", () => {
+    const settingsSource = pageSource.slice(
+      pageSource.indexOf('aria-labelledby="voice-engine-settings-title"'),
+      pageSource.indexOf("<div className={styles.settingsSaveDock}"),
+    );
+    assert.doesNotMatch(settingsSource, /Map the five portable Prism slots/);
+    assert.doesNotMatch(settingsSource, /BOT_AUDIO_VOICE_IDS\.map/);
+    assert.doesNotMatch(settingsSource, /elevenLabsVoiceBank/);
+    assert.match(
+      settingsSource,
+      /Each bot can choose an ElevenLabs voice in Voice Identity/,
+    );
   });
 
   it("selects real provider voices from a dropdown instead of five fixed slots", () => {

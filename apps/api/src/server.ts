@@ -85,8 +85,14 @@ import {
   peekActiveImageJobForUser,
   pollImageJobForUser,
   releaseImageSlot,
+  releaseImageSlotIfOwned,
   tryAcquireImageSlot,
 } from "./image-job-slot.ts";
+import {
+  SignalArtworkJobManager,
+  type SignalArtworkAssetKind,
+  type SignalArtworkGeneratedAsset,
+} from "./signal-artwork-jobs.ts";
 import {
   collectCoffeePollVotes,
   buildCoffeePollExportLines,
@@ -486,6 +492,7 @@ import { buildBabbleSpeechText } from "./babble-text.ts";
 import { deleteVector, deleteVectorsForUser } from "./qdrant.ts";
 let config: AppConfig = getAppConfig();
 let db: DatabaseSync = createDatabase();
+const signalArtworkJobs = new SignalArtworkJobManager();
 let masterKey = deriveMasterKey(config.encryptionMasterKey);
 let providerFactoryOverride: typeof selectProvider = selectProvider;
 let auxiliaryProviderFactoryOverride: typeof getAuxiliaryProvider = getAuxiliaryProvider;
@@ -2205,6 +2212,271 @@ async function readOpenAiGeneratedImageBytes(
     throw new Error("OpenAI returned no downloadable image URL.");
   }
   return downloadRemoteImage(result.url, { signal });
+}
+
+async function generateAndPersistSignalArtworkAsset(args: {
+  userId: string;
+  hostBotId: string;
+  prompt: string;
+  size: "1536x1024" | "1024x1024";
+  preferredProvider: ImageProviderName;
+  sourceNightImageId: string | null;
+  signal: AbortSignal;
+}): Promise<SignalArtworkGeneratedAsset> {
+  const user = getUserRow(args.userId);
+  const effectiveProvider = resolveImageProviderName({
+    savedProvider: user.preferred_image_provider,
+    requestedProvider: args.preferredProvider,
+    offlineOnly: imageContextIncludesOfflineOnlyBot(db, args.userId, [args.hostBotId]),
+  });
+  const persona = db
+    .prepare("SELECT name, system_prompt FROM bots WHERE id = ? AND user_id = ?")
+    .get(args.hostBotId, args.userId) as
+    | { name: string; system_prompt: string }
+    | undefined;
+  if (!persona) throw new HttpError(404, "Signal host bot not found.");
+
+  let sourceImageBytes: Buffer | undefined;
+  if (args.sourceNightImageId) {
+    const source = db
+      .prepare(
+        `SELECT bot_id, origin, local_rel_path
+           FROM images
+          WHERE id = ? AND user_id = ?`,
+      )
+      .get(args.sourceNightImageId, args.userId) as
+      | { bot_id: string | null; origin: string | null; local_rel_path: string | null }
+      | undefined;
+    if (
+      !source ||
+      source.origin !== "botcast" ||
+      source.bot_id !== args.hostBotId ||
+      !source.local_rel_path?.trim()
+    ) {
+      throw new HttpError(404, "The canonical Dark studio source is unavailable.");
+    }
+    try {
+      sourceImageBytes = readGeneratedImageBytes(source.local_rel_path);
+    } catch {
+      throw new HttpError(404, "The canonical Dark studio file is unavailable.");
+    }
+  }
+
+  const localPrompt = resolveImagePromptForGeneration({
+    prompt: args.prompt,
+    origin: "botcast",
+    sourceEditPrompt: args.sourceNightImageId
+      ? BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT
+      : "",
+    useSourceEdit: false,
+    botName: persona.name,
+    botSystemPrompt: persona.system_prompt,
+  });
+  const onlinePrompt = resolveImagePromptForGeneration({
+    prompt: args.prompt,
+    origin: "botcast",
+    sourceEditPrompt: args.sourceNightImageId
+      ? BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT
+      : "",
+    useSourceEdit: Boolean(sourceImageBytes),
+    botName: persona.name,
+    botSystemPrompt: persona.system_prompt,
+  });
+  const preferredLocalImageModel = user.preferred_local_image_model?.trim() ?? "";
+  const preferredOpenAiImageModel = user.preferred_openai_image_model?.trim() ?? "";
+  const localImageDisabled = isDisabledModelChoice(preferredLocalImageModel);
+  const openAiImageDisabled = isDisabledModelChoice(preferredOpenAiImageModel);
+  const resolvedLocalImageModel = localImageDisabled ? "" : preferredLocalImageModel;
+  const resolvedOpenAiImageModel = openAiImageDisabled
+    ? ""
+    : DEFAULT_OPENAI_IMAGE_MODEL_ID;
+  const shouldRunLocal =
+    effectiveProvider === "local" ||
+    (openAiImageDisabled && Boolean(resolvedLocalImageModel));
+  if (effectiveProvider === "local" && localImageDisabled) {
+    throw new HttpError(
+      400,
+      "Local image generation is disabled. Choose a local image model before generating.",
+    );
+  }
+  if (!shouldRunLocal && openAiImageDisabled) {
+    throw new HttpError(
+      400,
+      "Online image generation is disabled. Choose an online image model before generating.",
+    );
+  }
+  if (shouldRunLocal && !resolvedLocalImageModel) {
+    throw new Error("Pick a local image model in the Images panel header, then try again.");
+  }
+
+  enterUsageSession({
+    db,
+    userId: args.userId,
+    privacyScope: "normal",
+    mode: "sandbox",
+    surface: "images",
+    conversationId: null,
+    botId: args.hostBotId,
+  });
+
+  const imageId = randomId(12);
+  const localRelPath = buildGeneratedImageRelativePath(args.userId, imageId);
+  const displayUrl = `/api/images/${encodeURIComponent(imageId)}/file`;
+  const quality = shouldRunLocal ? "standard" : "high";
+  const relatedBotIds = [args.hostBotId];
+  let provider: "openai" | "comfyui" | "ollama";
+  let model: string;
+  let revisedPrompt: string;
+  let storedUrl = displayUrl;
+  let imageBytes: Buffer;
+  let downloadMs = 0;
+
+  if (shouldRunLocal) {
+    const lenientFallbackModel = user.lenient_local_image_fallback_model?.trim() ?? "";
+    const runLocal = (modelId: string) =>
+      generateLocalImageBytesByModelId({
+        modelId,
+        promptForModel: localPrompt,
+        size: args.size,
+        signal: args.signal,
+        comfyUiHost: user.comfyui_host,
+        comfyUiWorkflows: parseStoredComfyUiWorkflows(user.comfyui_workflows),
+        secondaryOllamaHost: user.secondary_ollama_host,
+        primaryOllamaHost: config.ollamaHost,
+      });
+    let output: Awaited<ReturnType<typeof generateLocalImageBytesByModelId>>;
+    try {
+      output = await runLocal(resolvedLocalImageModel);
+    } catch (error) {
+      if (
+        lenientFallbackModel &&
+        lenientFallbackModel !== resolvedLocalImageModel &&
+        shouldAttemptLenientLocalImageFallback(error)
+      ) {
+        output = await runLocal(lenientFallbackModel);
+      } else {
+        throw error;
+      }
+    }
+    provider = output.provider;
+    model = output.modelUsed;
+    revisedPrompt = localPrompt;
+    imageBytes = output.imageBytes;
+  } else {
+    const userKey = decryptUserKey(args.userId);
+    const apiKey = getOpenAiApiKeyForUser(args.userId, userKey) ?? config.openAiApiKey;
+    const lenientFallbackModel = user.lenient_local_image_fallback_model?.trim() ?? "";
+    try {
+      const result = sourceImageBytes
+        ? await editImage(onlinePrompt, sourceImageBytes, apiKey, {
+            model: resolvedOpenAiImageModel,
+            size: args.size,
+            quality,
+            signal: args.signal,
+          })
+        : await generateImage(onlinePrompt, apiKey, {
+            model: resolvedOpenAiImageModel,
+            size: args.size,
+            quality,
+            signal: args.signal,
+          });
+      const downloadStartedAt = Date.now();
+      try {
+        imageBytes = await readOpenAiGeneratedImageBytes(result, args.signal);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "download failed";
+        throw new Error(`Could not download image for local storage (${detail}).`);
+      }
+      downloadMs = Date.now() - downloadStartedAt;
+      provider = "openai";
+      model = result.model;
+      revisedPrompt = result.revisedPrompt;
+      storedUrl = result.url || displayUrl;
+    } catch (error) {
+      if (!lenientFallbackModel || !shouldAttemptLenientLocalImageFallback(error)) {
+        throw error;
+      }
+      const output = await generateLocalImageBytesByModelId({
+        modelId: lenientFallbackModel,
+        promptForModel: localPrompt,
+        size: args.size,
+        signal: args.signal,
+        comfyUiHost: user.comfyui_host,
+        comfyUiWorkflows: parseStoredComfyUiWorkflows(user.comfyui_workflows),
+        secondaryOllamaHost: user.secondary_ollama_host,
+        primaryOllamaHost: config.ollamaHost,
+      });
+      provider = output.provider;
+      model = output.modelUsed;
+      revisedPrompt = localPrompt;
+      imageBytes = output.imageBytes;
+    }
+  }
+
+  if (args.signal.aborted) {
+    throw new DOMException("Signal artwork generation cancelled.", "AbortError");
+  }
+  const persistenceStartedAt = Date.now();
+  try {
+    writeGeneratedImageBytes(localRelPath, imageBytes);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "write failed";
+    throw new Error(`Could not save generated image (${detail}).`);
+  }
+  await tryGenerateThumbAfterPngWrite(localRelPath);
+  const createdAt = new Date().toISOString();
+  try {
+    db.prepare(
+      `INSERT INTO images
+         (id, user_id, conversation_id, bot_id, related_bot_ids, origin, prompt,
+          revised_prompt, url, size, quality, provider, model, local_rel_path,
+          purpose, created_at)
+       VALUES (?, ?, NULL, ?, ?, 'botcast', ?, ?, ?, ?, ?, ?, ?, ?, 'gallery', ?)`,
+    ).run(
+      imageId,
+      args.userId,
+      args.hostBotId,
+      serializeImageRelatedBotIds(relatedBotIds, args.hostBotId),
+      shouldRunLocal ? localPrompt : onlinePrompt,
+      revisedPrompt,
+      storedUrl,
+      args.size,
+      quality,
+      provider,
+      model,
+      localRelPath,
+      createdAt,
+    );
+    recordImageUsage({
+      provider,
+      model,
+      purpose: "image_generation",
+      imageCount: 1,
+      imageSize: args.size,
+      imageQuality: quality,
+      createdAt,
+    });
+  } catch (error) {
+    tryUnlinkGeneratedImageFile(localRelPath);
+    throw error;
+  }
+  const localPersistenceMs = Date.now() - persistenceStartedAt;
+  console.info("[signal-artwork] asset persisted", {
+    userId: args.userId,
+    hostBotId: args.hostBotId,
+    sourceNightImageId: args.sourceNightImageId,
+    provider,
+    model,
+    size: args.size,
+    quality,
+    downloadMs,
+    localPersistenceMs,
+  });
+  return {
+    imageId,
+    imageUrl: displayUrl,
+    timings: { downloadMs, localPersistenceMs },
+  };
 }
 
 function buildRoutes(): RouteDefinition[] {
@@ -5246,6 +5518,135 @@ function buildRoutes(): RouteDefinition[] {
       });
       json(ctx.res, 201, { ok: true, show });
     }),
+    route("GET", "/api/botcast/artwork-jobs/active", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        job: signalArtworkJobs.getLatest(userId),
+      });
+    }),
+    route("GET", "/api/botcast/artwork-jobs/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const job = signalArtworkJobs.get(userId, ctx.params.id);
+      if (!job) throw new HttpError(404, "Signal artwork job not found.");
+      json(ctx.res, 200, { ok: true, job });
+    }),
+    route("POST", "/api/botcast/artwork-jobs/:id/cancel", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const job = signalArtworkJobs.cancel(userId, ctx.params.id);
+      if (!job) throw new HttpError(404, "Signal artwork job not found.");
+      json(ctx.res, 202, { ok: true, job });
+    }),
+    route("DELETE", "/api/botcast/artwork-jobs/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      if (!signalArtworkJobs.dismiss(userId, ctx.params.id)) {
+        throw new HttpError(409, "Signal artwork can be dismissed after it stops.");
+      }
+      json(ctx.res, 200, { ok: true });
+    }),
+    route("POST", "/api/botcast/shows/:id/artwork-job", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const show = getBotcastShow(db, userId, ctx.params.id);
+      const user = getUserRow(userId);
+      const body = ctx.body as Record<string, unknown>;
+      const preferredProvider: ImageProviderName =
+        body.preferredProvider === "local" || body.preferredProvider === "openai"
+          ? body.preferredProvider
+          : user.preferred_image_provider;
+      const identityMs =
+        typeof body.identityMs === "number" && Number.isFinite(body.identityMs)
+          ? Math.max(0, Math.round(body.identityMs))
+          : null;
+      const acquired = await tryAcquireImageSlot({
+        userId,
+        conversationId: null,
+        botId: show.hostBotId,
+        mode: "sandbox",
+        incognito: false,
+        captionPrompt: `${show.name} Signal visual identity`,
+        userMessage: `[Signal] Create ${show.name}'s show look`,
+        source: "signal_artwork",
+        requestedSize: "1536x1024",
+      });
+      if (!acquired.ok) {
+        throw new HttpError(
+          503,
+          "Another image is generating right now. Let it finish before creating this show’s look.",
+        );
+      }
+
+      try {
+        const promptByKind: Record<SignalArtworkAssetKind, string> = {
+          "night-studio": show.nightAtmosphere.prompt,
+          "day-studio": show.dayAtmosphere.prompt,
+          logo: show.logo.prompt,
+        };
+        const job = signalArtworkJobs.start({
+          userId,
+          showId: show.id,
+          showName: show.name,
+          identityMs,
+          controller: acquired.job.abortController,
+          releaseSlot: async () => {
+            await releaseImageSlotIfOwned(userId, acquired.job.id);
+          },
+          generate: (kind, sourceNightImageId, signal) =>
+            generateAndPersistSignalArtworkAsset({
+              userId,
+              hostBotId: show.hostBotId,
+              prompt: promptByKind[kind],
+              size: kind === "logo" ? "1024x1024" : "1536x1024",
+              preferredProvider,
+              sourceNightImageId,
+              signal,
+            }),
+          attach: async (kind, asset) => {
+            let attachmentError: unknown;
+            for (let attempt = 0; attempt < 3; attempt += 1) {
+              try {
+                updateBotcastShow(
+                  db,
+                  userId,
+                  show.id,
+                  kind === "night-studio"
+                    ? {
+                        nightAtmosphereImageUrl: asset.imageUrl,
+                        nightAtmosphereImageId: asset.imageId,
+                      }
+                    : kind === "day-studio"
+                      ? {
+                          dayAtmosphereImageUrl: asset.imageUrl,
+                          dayAtmosphereImageId: asset.imageId,
+                        }
+                      : {
+                          logoImageUrl: asset.imageUrl,
+                          logoImageId: asset.imageId,
+                        },
+                );
+                return;
+              } catch (error) {
+                attachmentError = error;
+                if (attempt < 2) {
+                  await new Promise<void>((resolve) => setTimeout(resolve, 120 * (attempt + 1)));
+                }
+              }
+            }
+            throw attachmentError;
+          },
+        });
+        console.info("[signal-artwork] background job started", {
+          jobId: job.id,
+          userId,
+          showId: show.id,
+          identityMs,
+          provider: preferredProvider,
+        });
+        json(ctx.res, 202, { ok: true, job });
+      } catch (error) {
+        await releaseImageSlotIfOwned(userId, acquired.job.id);
+        throw error;
+      }
+    }),
     route("POST", "/api/botcast/shows/:id/brand", async (ctx) => {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
@@ -5299,6 +5700,9 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/botcast/shows/:id/assets/:slot/upload", async (ctx) => {
       const userId = requireAuth(ctx);
       const show = getBotcastShow(db, userId, ctx.params.id);
+      if (signalArtworkJobs.hasActiveJobForShow(userId, show.id)) {
+        throw new HttpError(409, "This show’s custom look is still generating.");
+      }
       const slot = readSignalAssetSlot(ctx.params.slot);
       const body = ctx.body as Record<string, unknown>;
       const upload = await normalizeSignalAssetUpload(body.dataUrl, slot);
@@ -5385,6 +5789,25 @@ function buildRoutes(): RouteDefinition[] {
     route("PATCH", "/api/botcast/shows/:id", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
+      const changesArtwork =
+        body.atmosphereImageUrl !== undefined ||
+        body.atmosphereImageId !== undefined ||
+        body.dayAtmosphereImageUrl !== undefined ||
+        body.dayAtmosphereImageId !== undefined ||
+        body.nightAtmosphereImageUrl !== undefined ||
+        body.nightAtmosphereImageId !== undefined ||
+        body.logoImageUrl !== undefined ||
+        body.logoImageId !== undefined ||
+        body.regenerateAtmosphere === true ||
+        body.regenerateDayAtmosphere === true ||
+        body.regenerateNightAtmosphere === true ||
+        body.regenerateLogo === true;
+      if (
+        changesArtwork &&
+        signalArtworkJobs.hasActiveJobForShow(userId, ctx.params.id)
+      ) {
+        throw new HttpError(409, "This show’s custom look is still generating.");
+      }
       const show = updateBotcastShow(db, userId, ctx.params.id, {
         ...(body.name !== undefined ? { name: body.name as string } : {}),
         ...(body.premise !== undefined ? { premise: body.premise as string } : {}),
@@ -5430,6 +5853,9 @@ function buildRoutes(): RouteDefinition[] {
     // registered in the primary API table so shows and episodes cannot drift.
     route("DELETE", "/api/botcast/shows/:id", async (ctx) => {
       const userId = requireAuth(ctx);
+      if (signalArtworkJobs.hasActiveJobForShow(userId, ctx.params.id)) {
+        throw new HttpError(409, "Cancel this show’s artwork job before deleting it.");
+      }
       if (!deleteBotcastShow(db, userId, ctx.params.id)) {
         throw new HttpError(404, "Signal show not found.");
       }
@@ -7433,7 +7859,10 @@ function buildRoutes(): RouteDefinition[] {
       const explicitOnlineContext = persistedMessageProvider
         ? persistedMessageProvider !== "local"
         : raw.explicitOnlineContext === true && user.preferred_provider !== "local";
-      const requestedEngine = raw.engine === "elevenlabs" ? "elevenlabs" : "builtin";
+      const requestedEngine =
+        raw.engine === "elevenlabs" && user.english_voice_engine === "elevenlabs"
+          ? "elevenlabs"
+          : "builtin";
       const profileWithGlobalDefault = applyGlobalEnglishVoiceDefault(
         raw.profile,
         requestedEngine,
@@ -7445,6 +7874,7 @@ function buildRoutes(): RouteDefinition[] {
       const request = validateVoiceSynthesisRequest({
         ...raw,
         text: sourceText,
+        engine: requestedEngine,
         explicitOnlineContext,
         profile: profileWithGlobalDefault,
       });
@@ -7526,18 +7956,44 @@ function buildRoutes(): RouteDefinition[] {
         return;
       }
 
-      const voiceBank = parseStoredElevenLabsVoiceBank(user.elevenlabs_voice_bank);
       const normalizedProfile = normalizeBotAudioVoiceProfileV1(boundary.profile);
-      const voiceId = resolveElevenLabsVoiceId(normalizedProfile, voiceBank);
-      if (!voiceId) {
-        throw new HttpError(
-          409,
-          `Choose an ElevenLabs voice for ${boundary.profile.baseVoiceId} in Settings.`
-        );
-      }
+      const voiceId = resolveElevenLabsVoiceId(normalizedProfile);
       const userKey = decryptUserKey(userId);
       const apiKey = getElevenLabsApiKeyForUser(userId, userKey) ?? config.elevenLabsApiKey;
-      if (!apiKey) throw new HttpError(409, "Add an ElevenLabs API key in Settings first.");
+
+      // ElevenLabs is an ONLINE preference, not a requirement. If the account
+      // has no usable provider key or voice identity, keep speech available
+      // through the configured System Classic voice without making any egress.
+      if (!voiceId || !apiKey) {
+        const controller = new AbortController();
+        const onClose = () => controller.abort();
+        ctx.req.once("close", onClose);
+        try {
+          const wave = await builtinVoiceWaveGeneratorOverride({
+            text: boundary.text,
+            profile: boundary.profile,
+            signal: controller.signal,
+          });
+          sendVoiceWave(
+            ctx.res,
+            wave,
+            "builtin-provider-fallback",
+            boundary.text.length,
+            request.includeAlignment
+          );
+        } catch (error) {
+          if (controller.signal.aborted) return;
+          throw new HttpError(
+            503,
+            error instanceof Error
+              ? error.message
+              : "System Classic voice is unavailable."
+          );
+        } finally {
+          ctx.req.off("close", onClose);
+        }
+        return;
+      }
 
       const controller = new AbortController();
       const onClose = () => controller.abort();
@@ -8414,6 +8870,7 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/images/generate", async (ctx) => {
       const userId = requireAuth(ctx);
       const imageGenAbort = new AbortController();
+      let ownedImageSlotJobId: string | null = null;
       const onImageGenClientClose = () => imageGenAbort.abort();
       ctx.req.once("close", onImageGenClientClose);
       try {
@@ -8716,6 +9173,7 @@ function buildRoutes(): RouteDefinition[] {
           "Another image is generating right now. Wait for it to finish, then try again."
         );
       }
+      ownedImageSlotJobId = acqPanel.job.id;
 
       const imageId = randomId(12);
       const localRelPath = buildGeneratedImageRelativePath(userId, imageId);
@@ -8931,7 +9389,9 @@ function buildRoutes(): RouteDefinition[] {
       });
       } finally {
         ctx.req.off("close", onImageGenClientClose);
-        await releaseImageSlot(userId);
+        if (ownedImageSlotJobId) {
+          await releaseImageSlotIfOwned(userId, ownedImageSlotJobId);
+        }
       }
     }),
     route("POST", "/api/ollama/pull-primary", async (ctx) => {

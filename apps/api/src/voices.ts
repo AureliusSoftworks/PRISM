@@ -10,11 +10,10 @@ import {
 } from "@localai/shared";
 
 export function resolveElevenLabsVoiceId(
-  profile: BotAudioVoiceProfileV1,
-  voiceBank: Partial<Record<string, string | null>>
+  profile: BotAudioVoiceProfileV1
 ): string | null {
   const normalized = normalizeBotAudioVoiceProfileV1(profile);
-  return normalized.elevenLabsVoiceId || voiceBank[normalized.baseVoiceId] || null;
+  return normalized.elevenLabsVoiceId || null;
 }
 
 export function applyGlobalEnglishVoiceDefault(

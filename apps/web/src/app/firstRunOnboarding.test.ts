@@ -47,13 +47,24 @@ describe("first-run onboarding", () => {
     }
   });
 
-  it("names chat routing separately from image routing", () => {
+  it("names chat routing separately from image and voice routing", () => {
     const providerStep = FIRST_RUN_SETUP_STEPS.find(
       (step) => step.id === "provider",
     );
     assert.equal(providerStep?.title, "Choose your chat home base");
     assert.match(pageSource, /Image generation has its own LOCAL\/ONLINE choice/u);
+    assert.match(
+      pageSource,
+      /Voice settings keep English speech on\s*System Classic unless you explicitly enable online voices/u,
+    );
     assert.match(pageSource, /Chat home base/u);
+  });
+
+  it("explains that ElevenLabs is an optional online voice preference", () => {
+    assert.match(
+      pageSource,
+      /Speech stays on System Classic until you opt in to ElevenLabs/u,
+    );
   });
 
   it("clamps restored progress and reaches a full final bar", () => {

@@ -1719,10 +1719,17 @@ describe("Coffee seat arrival CSS", () => {
     );
   });
 
-  it("keeps early Coffee turns, director clicks, and Enter submission connected", () => {
+  it("keeps Coffee turns organic while preserving autoplay and Enter submission", () => {
+    assert.doesNotMatch(pageSource, /directorTapEnabled/);
+    assert.doesNotMatch(pageSource, /triggerDirectedCoffeeTurn/);
+    assert.doesNotMatch(pageSource, /queueDirectedCoffeeTurn/);
+    assert.doesNotMatch(pageSource, /toggleCoffeeAutoplay/);
+    assert.doesNotMatch(pageSource, /data-director-enabled/);
+    assert.doesNotMatch(pageSource, /Pause bot autoplay for director mode/);
+    assert.doesNotMatch(css, /data-director-enabled/);
     assert.match(
       pageSource,
-      /const directorTapEnabled =[\s\S]*coffeeAutoplayPaused[\s\S]*coffeeSessionPhase === "live"[\s\S]*coffeeSessionPhase === "arriving"/
+      /Bots take turns naturally as the conversation unfolds\./
     );
     assert.match(
       pageSource,
@@ -1741,12 +1748,6 @@ describe("Coffee seat arrival CSS", () => {
       pageSource,
       /if \(!conversationId \|\| coffeeBusy \|\| coffeeAutoBusy\) return;/
     );
-    assert.match(pageSource, /const coffeeDirectedTurnQueueRef = useRef<string\[\]>\(\[\]\);/);
-    assert.match(
-      pageSource,
-      /const nextDirectedTurn = nextDirectedCoffeeTurnAfterReveal\(\s*directedFollowupBotIds\s*,?\s*\);/
-    );
-    assert.match(pageSource, /queueDirectedCoffeeTurn\(botId\);/);
     assert.match(
       pageSource,
       /event\.key !== "ArrowUp" && event\.key !== "Enter"[\s\S]*void sendCoffeeTurn\(\);/

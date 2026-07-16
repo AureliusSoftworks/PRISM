@@ -114,8 +114,7 @@ describe("voice Phase 1 boundary", () => {
     assert.equal(resolveVoiceSynthesisBoundary(request).ok, true);
   });
 
-  it("prefers a bot-specific ElevenLabs selection over the account fallback", () => {
-    const bank = { "voice-1": "account-voice" };
+  it("uses only the resolved per-bot or account-default ElevenLabs identity", () => {
     assert.equal(resolveElevenLabsVoiceId({
       v: 2,
       enabled: true,
@@ -136,7 +135,7 @@ describe("voice Phase 1 boundary", () => {
         distortion: 0,
         damage: 0,
       },
-    }, bank), "bot-voice");
+    }), "bot-voice");
     assert.equal(resolveElevenLabsVoiceId({
       v: 1,
       baseVoiceId: "voice-1",
@@ -144,7 +143,7 @@ describe("voice Phase 1 boundary", () => {
       warmth: 0,
       pace: 0,
       lilt: 0,
-    }, bank), "account-voice");
+    }), null);
   });
 
   it("applies the global voice only when the bot has no explicit selection", () => {
