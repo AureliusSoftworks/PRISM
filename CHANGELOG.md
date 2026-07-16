@@ -19,10 +19,14 @@ _Staging area - nothing queued for release yet._
 - **Signal turns bot-owned shows into a complete production workspace.** Hosts
   can shape show identity, generate or upload light and dark studios and logos,
   direct episodes privately, archive finished productions, and replay them with
-  synchronized speech and artwork progress.
+  synchronized speech and artwork progress. Branded pre-rolls synthesize local
+  idents, optionally cache ElevenLabs music, and prepare opening turns in the
+  background.
 - **Slate introduces a persistent, writer-directed fiction desk.** Projects
   move through Shape, Draft, and Refine with optional wildcard sparks, editable
   manuscripts, locks, revision previews, and explicit version-safe acceptance.
+  Private Continuity guidance, recovery generations, portable `.slate`
+  archives, and clean manuscript exports keep long-form work durable.
 - **Online voice identity can be authored per bot.** ElevenLabs voices now
   override the bot's system voice when selected, with saved effects, delivery
   directions, pronunciation guidance, immersive Signal reactions, and local
