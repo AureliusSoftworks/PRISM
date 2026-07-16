@@ -60994,6 +60994,24 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   z-index: 0;
 }
 
+.coffeeAtmosphereScene {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  contain: strict;
+}
+
+.coffeeAtmosphereScene canvas {
+  pointer-events: none;
+}
+
+.coffeeAtmosphereScene[data-renderer-status="webgl"] + .coffeeTableGlow {
+  opacity: 0 !important;
+  visibility: hidden !important;
+}
+
 .coffeeTableAsset {
   position: absolute;
   left: 50%;
