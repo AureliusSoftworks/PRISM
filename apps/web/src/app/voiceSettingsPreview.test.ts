@@ -193,10 +193,32 @@ describe("voice settings preview", () => {
     assert.match(catalogEffectSource, /void loadElevenLabsVoiceCatalog\(true\)/);
     assert.match(
       catalogEffectSource,
-      /const attemptKey = `\$\{user\.id\}:\$\{settings\.elevenLabsApiKeySource\}`/,
+      /const attemptKey = `\$\{user\.id\}:\$\{settings\.elevenLabsApiKeySource\}:\$\{settings\.elevenLabsVoiceCollectionId\}`/,
     );
     assert.doesNotMatch(catalogEffectSource, /preferredProvider/);
     assert.doesNotMatch(pageSource, /Switch to ONLINE to load your ElevenLabs voice catalog/);
+  });
+
+  it("lets Voice Settings pick an authenticated ElevenLabs collection", () => {
+    const catalogEffectSource = pageSource.slice(
+      pageSource.indexOf("if (!botAvatarCustomizerOpen)"),
+      pageSource.indexOf("const [botAvatarSavePromptOpen"),
+    );
+    assert.match(pageSource, /data-elevenlabs-collection-picker/);
+    assert.match(pageSource, /aria-label="ElevenLabs voice collection"/);
+    assert.match(pageSource, /All ElevenLabs voices/);
+    assert.match(pageSource, /\/api\/voices\/elevenlabs\/collections/);
+    assert.match(pageSource, /Collections come directly from your connected/);
+    assert.match(
+      pageSource,
+      /elevenLabsVoiceCollectionId:\s*settings\.elevenLabsVoiceCollectionId/,
+    );
+    assert.doesNotMatch(pageSource, /Collection ID \(blank = all voices\)/);
+    assert.match(
+      pageSource,
+      /Saved ElevenLabs voice \(outside selected collection\)/,
+    );
+    assert.doesNotMatch(catalogEffectSource, /elevenLabsVoiceCatalog\.length > 0/);
   });
 
   it("shows per-profile effects only for the saved ElevenLabs lane", () => {

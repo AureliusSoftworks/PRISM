@@ -71,6 +71,17 @@ function normalizeElevenLabsVoiceModel(value: unknown, fallback: string | null):
   return normalized || null;
 }
 
+export function normalizeElevenLabsVoiceCollectionId(
+  value: unknown,
+  fallback: string | null = null
+): string | null {
+  if (value === undefined) return fallback;
+  if (value === null) return null;
+  if (typeof value !== "string") return fallback;
+  const normalized = value.trim().slice(0, 160);
+  return normalized || null;
+}
+
 export const DEFAULT_ZEN_WALLPAPER_OPACITY = 0.28;
 export const MIN_ZEN_WALLPAPER_OPACITY = 0.05;
 export const MAX_ZEN_WALLPAPER_OPACITY = 1;
@@ -184,6 +195,7 @@ export interface CurrentSettings {
   defaultElevenLabsVoiceId: string | null;
   elevenLabsVoiceBank: string | null;
   elevenLabsVoiceModel: string | null;
+  elevenLabsVoiceCollectionId: string | null;
 }
 
 /** Shape of the next-settings result, with OpenAI key intent captured separately. */
@@ -242,6 +254,7 @@ export interface NextSettings {
   defaultElevenLabsVoiceId: string | null;
   elevenLabsVoiceBank: ElevenLabsVoiceBank;
   elevenLabsVoiceModel: string | null;
+  elevenLabsVoiceCollectionId: string | null;
   /**
    * Intent for the OpenAI API key:
    *   - "replace": caller sent a non-empty string; encrypt it
@@ -1129,6 +1142,10 @@ export function resolveNextSettings(
     body.elevenLabsVoiceModel,
     current.elevenLabsVoiceModel
   );
+  const elevenLabsVoiceCollectionId = normalizeElevenLabsVoiceCollectionId(
+    body.elevenLabsVoiceCollectionId,
+    current.elevenLabsVoiceCollectionId
+  );
   const comfyUiWorkflows =
     body.comfyUiWorkflows === undefined
       ? current.comfyUiWorkflows
@@ -1235,6 +1252,7 @@ export function resolveNextSettings(
     defaultElevenLabsVoiceId,
     elevenLabsVoiceBank,
     elevenLabsVoiceModel,
+    elevenLabsVoiceCollectionId,
     openAiKeyIntent,
     anthropicKeyIntent,
     elevenLabsKeyIntent,

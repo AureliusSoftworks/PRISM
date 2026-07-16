@@ -180,6 +180,8 @@ describe("mode tutorials", () => {
       /choose an ElevenLabs voice in bot customization from any response mode/,
     );
     assert.match(routing?.body ?? "", /only for eligible ONLINE speech/);
+    assert.match(routing?.body ?? "", /Voice Settings can narrow/);
+    assert.match(routing?.body ?? "", /one ElevenLabs voice collection/);
   });
 
   it("teaches canonical Coffee prompts without a regeneration step", () => {

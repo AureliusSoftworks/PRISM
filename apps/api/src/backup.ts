@@ -71,9 +71,17 @@ import {
   normalizeZenWallpaperOpacity,
   normalizeZenWallpaperStyleNotes,
   normalizeZenWallpaperTextMaskEnabled,
+  normalizeElevenLabsVoiceCollectionId,
   normalizeElevenLabsVoiceBank,
   parseStoredElevenLabsVoiceBank,
 } from "./settings.ts";
+import {
+  applyPreparedProjectOwnedAssetsWithinTransaction,
+  cleanupPreparedProjectOwnedAssetFiles,
+  prepareProjectOwnedAssetImport,
+  stagePreparedProjectOwnedAssetFiles,
+  type ProjectOwnedAssetArchiveBundleV1,
+} from "./project-owned-assets.ts";
 
 export interface BackupUserSettings {
   theme: "light" | "dark" | "system";
@@ -132,6 +140,7 @@ export interface BackupUserSettings {
   defaultElevenLabsVoiceId?: string | null;
   elevenLabsVoiceBank?: Record<string, string | null>;
   elevenLabsVoiceModel?: string;
+  elevenLabsVoiceCollectionId?: string;
 }
 
 export interface BackupBotSnapshot {
@@ -270,7 +279,8 @@ export interface BackupSnapshot {
         model: string;
         prompt: string;
         contentType: string;
-        audioBase64: string;
+        /** Legacy v1 snapshots store audio inline; new `.prism` archives use project blobs. */
+        audioBase64?: string;
         durationMs: number;
         revision: number;
         createdAt: string;
@@ -791,7 +801,8 @@ export function exportUserSnapshot(
          elevenlabs_key_tag
          ,voice_mode, voice_effects_enabled, voice_volume, english_voice_engine,
          default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank,
-         elevenlabs_voice_model, prism_default_bot_audio_voice_profile
+         elevenlabs_voice_model, elevenlabs_voice_collection_id,
+         prism_default_bot_audio_voice_profile
        FROM users
        WHERE id = ?`
     )
@@ -856,6 +867,7 @@ export function exportUserSnapshot(
         default_elevenlabs_voice_id: string | null;
         elevenlabs_voice_bank: string | null;
         elevenlabs_voice_model: string | null;
+        elevenlabs_voice_collection_id: string | null;
         prism_default_bot_audio_voice_profile: string | null;
       }
     | undefined;
@@ -940,6 +952,8 @@ export function exportUserSnapshot(
         defaultElevenLabsVoiceId: user.default_elevenlabs_voice_id,
         elevenLabsVoiceBank: parseStoredElevenLabsVoiceBank(user.elevenlabs_voice_bank),
         elevenLabsVoiceModel: user.elevenlabs_voice_model ?? "",
+        elevenLabsVoiceCollectionId:
+          user.elevenlabs_voice_collection_id ?? "",
         devMemoriesEnabled: user.dev_memories_enabled === 1,
         devMemoriesText: user.dev_memories_text ?? "",
         ...(user.openai_key_ciphertext && user.openai_key_iv && user.openai_key_tag
@@ -1573,7 +1587,8 @@ export function importUserSnapshot(
   db: DatabaseSync,
   userId: string,
   snapshot: BackupSnapshot,
-  userKey: Buffer
+  userKey: Buffer,
+  projectOwnedAssets?: ProjectOwnedAssetArchiveBundleV1,
 ): void {
   const snapshotRecord = snapshot as unknown as Record<string, unknown>;
   const unsupportedSnapshotField = Object.keys(snapshotRecord).find((key) => {
@@ -1588,13 +1603,27 @@ export function importUserSnapshot(
     );
   }
   validateBackupBotAvatarDetails(snapshot.bots);
-  db.exec("BEGIN IMMEDIATE;");
+  const preparedAssets = projectOwnedAssets
+    ? prepareProjectOwnedAssetImport(userId, snapshot, projectOwnedAssets, {
+        imageIdExists: (imageId) =>
+          Boolean(db.prepare("SELECT 1 FROM images WHERE id = ?").get(imageId)),
+      })
+    : null;
+  let transactionStarted = false;
   try {
+    if (preparedAssets) stagePreparedProjectOwnedAssetFiles(preparedAssets);
+    db.exec("BEGIN IMMEDIATE;");
+    transactionStarted = true;
     assertSnapshotIdsStayWithinTenant(db, userId, snapshot);
     importUserSnapshotWithinTransaction(db, userId, snapshot, userKey);
+    if (preparedAssets) {
+      applyPreparedProjectOwnedAssetsWithinTransaction(db, userId, preparedAssets);
+    }
     db.exec("COMMIT;");
+    transactionStarted = false;
   } catch (error) {
-    db.exec("ROLLBACK;");
+    if (transactionStarted) db.exec("ROLLBACK;");
+    if (preparedAssets) cleanupPreparedProjectOwnedAssetFiles(preparedAssets);
     throw error;
   }
 }
@@ -1698,6 +1727,7 @@ function importUserSnapshotWithinTransaction(
         default_elevenlabs_voice_id = ?,
         elevenlabs_voice_bank = ?,
         elevenlabs_voice_model = ?,
+        elevenlabs_voice_collection_id = ?,
         prism_default_bot_audio_voice_profile = ?
       WHERE id = ?
     `).run(
@@ -1785,6 +1815,9 @@ function importUserSnapshotWithinTransaction(
       typeof settings.elevenLabsVoiceModel === "string"
         ? settings.elevenLabsVoiceModel.trim().slice(0, 160) || null
         : null,
+      normalizeElevenLabsVoiceCollectionId(
+        settings.elevenLabsVoiceCollectionId,
+      ),
       serializeBotAudioVoiceProfileV1(settings.prismDefaultBotAudioVoiceProfile),
       userId
     );
@@ -1950,7 +1983,10 @@ function importUserSnapshotWithinTransaction(
         show.atmosphereJson,
         show.createdAt, show.updatedAt,
       );
-      if (show.introAudio?.provider === "elevenlabs") {
+      if (
+        show.introAudio?.provider === "elevenlabs" &&
+        typeof show.introAudio.audioBase64 === "string"
+      ) {
         const audioBytes = Buffer.from(show.introAudio.audioBase64, "base64");
         if (
           audioBytes.length > 0 &&

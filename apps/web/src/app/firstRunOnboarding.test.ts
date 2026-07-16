@@ -65,6 +65,7 @@ describe("first-run onboarding", () => {
       pageSource,
       /Speech stays on System TTS until you select an ElevenLabs voice in Prism or bot customization/u,
     );
+    assert.match(pageSource, /Voice Settings can limit bot menus to one ElevenLabs voice collection/u);
   });
 
   it("clamps restored progress and reaches a full final bar", () => {

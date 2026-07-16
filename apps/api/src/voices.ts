@@ -372,16 +372,31 @@ export interface ElevenLabsVoiceCatalogEntry {
   labels: Record<string, string>;
 }
 
+export interface ElevenLabsVoiceCollectionCatalogEntry {
+  collectionId: string;
+  name: string;
+  voiceCount: number;
+  sampleVoiceNames: string[];
+}
+
 export async function requestElevenLabsVoiceCatalog(args: {
   apiKey: string;
+  collectionId?: string | null;
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
 }): Promise<ElevenLabsVoiceCatalogEntry[]> {
   const fetchImpl = args.fetchImpl ?? fetch;
-  const response = await fetchImpl(
-    "https://api.elevenlabs.io/v2/voices?page_size=100&sort=name&sort_direction=asc&include_total_count=false",
-    { headers: { "xi-api-key": args.apiKey }, signal: args.signal }
-  );
+  const url = new URL("https://api.elevenlabs.io/v2/voices");
+  url.searchParams.set("page_size", "100");
+  url.searchParams.set("sort", "name");
+  url.searchParams.set("sort_direction", "asc");
+  url.searchParams.set("include_total_count", "false");
+  const collectionId = args.collectionId?.trim();
+  if (collectionId) url.searchParams.set("collection_id", collectionId);
+  const response = await fetchImpl(url, {
+    headers: { "xi-api-key": args.apiKey },
+    signal: args.signal,
+  });
   if (!response.ok) {
     const detail = (await response.text()).trim();
     throw new ElevenLabsVoiceError(
@@ -411,6 +426,130 @@ export async function requestElevenLabsVoiceCatalog(args: {
       labels,
     }];
   });
+}
+
+export async function requestElevenLabsVoiceCollections(args: {
+  apiKey: string;
+  signal?: AbortSignal;
+  fetchImpl?: typeof fetch;
+}): Promise<ElevenLabsVoiceCollectionCatalogEntry[]> {
+  const fetchImpl = args.fetchImpl ?? fetch;
+  const collections = new Map<
+    string,
+    { voiceIds: Set<string>; voiceNames: string[] }
+  >();
+  let nextPageToken: string | null = null;
+
+  for (let page = 0; page < 25; page += 1) {
+    const url = new URL("https://api.elevenlabs.io/v2/voices");
+    url.searchParams.set("page_size", "100");
+    url.searchParams.set("sort", "name");
+    url.searchParams.set("sort_direction", "asc");
+    url.searchParams.set("include_total_count", "false");
+    url.searchParams.set("voice_type", "saved");
+    if (nextPageToken) {
+      url.searchParams.set("next_page_token", nextPageToken);
+    }
+    const response = await fetchImpl(url, {
+      headers: { "xi-api-key": args.apiKey },
+      signal: args.signal,
+    });
+    if (!response.ok) {
+      const detail = (await response.text()).trim();
+      throw new ElevenLabsVoiceError(
+        response.status,
+        detail || `ElevenLabs voice collections failed (${response.status}).`,
+      );
+    }
+    const payload = (await response.json()) as {
+      voices?: unknown[];
+      has_more?: unknown;
+      next_page_token?: unknown;
+    };
+    for (const value of Array.isArray(payload.voices) ? payload.voices : []) {
+      if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+      const record = value as Record<string, unknown>;
+      const voiceId =
+        typeof record.voice_id === "string" ? record.voice_id.trim() : "";
+      const voiceName =
+        typeof record.name === "string" ? record.name.trim() : "";
+      const collectionIds = Array.isArray(record.collection_ids)
+        ? record.collection_ids
+            .filter((candidate): candidate is string =>
+              typeof candidate === "string",
+            )
+            .map((candidate) => candidate.trim())
+            .filter(Boolean)
+        : [];
+      if (!voiceId) continue;
+      for (const collectionId of collectionIds) {
+        const collection = collections.get(collectionId) ?? {
+          voiceIds: new Set<string>(),
+          voiceNames: [],
+        };
+        if (!collection.voiceIds.has(voiceId)) {
+          collection.voiceIds.add(voiceId);
+          if (voiceName && collection.voiceNames.length < 3) {
+            collection.voiceNames.push(voiceName);
+          }
+        }
+        collections.set(collectionId, collection);
+      }
+    }
+
+    const candidateNextPageToken =
+      typeof payload.next_page_token === "string"
+        ? payload.next_page_token.trim()
+        : "";
+    if (
+      payload.has_more !== true ||
+      !candidateNextPageToken ||
+      candidateNextPageToken === nextPageToken
+    ) {
+      break;
+    }
+    nextPageToken = candidateNextPageToken;
+  }
+
+  const entries = await Promise.all(
+    Array.from(collections.entries()).map(
+      async ([collectionId, collection]) => {
+        let name = "";
+        const metadataUrl = new URL(
+          `https://api.elevenlabs.io/v1/workspace/resources/${encodeURIComponent(collectionId)}`,
+        );
+        metadataUrl.searchParams.set("resource_type", "voice_collection");
+        try {
+          const response = await fetchImpl(metadataUrl, {
+            headers: { "xi-api-key": args.apiKey },
+            signal: args.signal,
+          });
+          if (response.ok) {
+            const payload = (await response.json()) as {
+              resource_name?: unknown;
+            };
+            name =
+              typeof payload.resource_name === "string"
+                ? payload.resource_name.trim()
+                : "";
+          }
+        } catch (error) {
+          if (args.signal?.aborted) throw error;
+        }
+        return {
+          collectionId,
+          name: name || `Collection ${collectionId.slice(0, 8)}`,
+          voiceCount: collection.voiceIds.size,
+          sampleVoiceNames: collection.voiceNames,
+        };
+      },
+    ),
+  );
+  return entries.sort(
+    (left, right) =>
+      left.name.localeCompare(right.name) ||
+      left.collectionId.localeCompare(right.collectionId),
+  );
 }
 
 export type VoiceSynthesisRequest = {
