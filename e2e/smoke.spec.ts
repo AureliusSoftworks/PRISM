@@ -4434,6 +4434,12 @@ test.describe("PRISM desktop smoke", () => {
     await expect(
       detailsEditor.locator('[data-avatar-details-face-guide="true"]'),
     ).toHaveAttribute("data-visible", "true");
+    const speechInk = detailsEditor.getByRole("radio", {
+      name: /Speech ink/,
+    });
+    await expect(speechInk).toBeVisible();
+    await speechInk.click({ force: true });
+    await expect(speechInk).toHaveAttribute("aria-checked", "true");
 
     const paintCanvas = detailsEditor.getByRole("application", {
       name: /Avatar pixel canvas/,
