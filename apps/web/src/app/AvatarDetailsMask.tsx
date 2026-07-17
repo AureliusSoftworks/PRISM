@@ -71,7 +71,10 @@ export function AvatarDetailsMask({
 
   if (!hasVisuals) return null;
 
-  const canvasStyle = { color: normalizedColor } as CSSProperties;
+  const canvasStyle = {
+    color: normalizedColor,
+    ["--avatar-details-phosphor-glow-color" as string]: normalizedColor,
+  } as CSSProperties;
   return (
     <>
       <canvas

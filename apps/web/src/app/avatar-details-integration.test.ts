@@ -223,7 +223,7 @@ describe("Avatar Details Studio integration", () => {
 });
 
 describe("Avatar Details shared mannequin rendering", () => {
-  it("places persistent phosphor canvases under glyphs and glass", () => {
+  it("composites persistent phosphor canvases with glyphs beneath glass", () => {
     const maskIndex = pageSource.indexOf("<AvatarDetailsMask");
     const faceRigIndex = pageSource.indexOf(
       "className={styles.zenLiveBotPresenceFaceRig}",
@@ -249,12 +249,40 @@ describe("Avatar Details shared mannequin rendering", () => {
       /data-avatar-details-rendering="nearest-neighbor"/,
     );
     assert.match(maskCss, /image-rendering: pixelated/);
-    assert.match(maskCss, /z-index: 4/);
+    assert.match(maskCss, /z-index: 7/);
     assert.match(maskSource, /data-avatar-details-emission="halo"/);
     assert.match(maskSource, /data-avatar-details-emission="bloom"/);
     assert.match(maskSource, /data-avatar-details-emission="core"/);
-    assert.match(maskCss, /\.halo[\s\S]*mix-blend-mode: plus-lighter/);
-    assert.match(maskCss, /\.bloom[\s\S]*drop-shadow/);
+    assert.match(
+      maskCss,
+      /--avatar-details-phosphor-glow-color:\s*var\(\s*--crt-face-edge-color,\s*currentColor\s*\)/,
+    );
+    assert.match(
+      maskSource,
+      /\["--avatar-details-phosphor-glow-color" as string\]: normalizedColor/,
+    );
+    assert.match(maskCss, /\.halo[\s\S]*mix-blend-mode: screen/);
+    assert.match(maskCss, /\.halo[\s\S]*opacity:\s*1/);
+    assert.match(
+      maskCss,
+      /\.halo[\s\S]*0 0 6px[\s\S]*0 0 12px[\s\S]*0 0 21px/,
+    );
+    assert.match(maskCss, /\.bloom[\s\S]*opacity:\s*1/);
+    assert.match(
+      maskCss,
+      /\.bloom[\s\S]*0 0 0\.72px[\s\S]*0 0 1\.5px[\s\S]*0 0 3px[\s\S]*0 0 6px[\s\S]*0 0 12px[\s\S]*0 0 21px/,
+    );
+    assert.match(
+      editorCss,
+      /\.paintEmission[\s\S]*--avatar-details-phosphor-glow-color/,
+    );
+    assert.match(editorCss, /\.paintHalo[\s\S]*mix-blend-mode: screen/);
+    assert.match(editorCss, /\.paintHalo[\s\S]*opacity:\s*1/);
+    assert.match(editorCss, /\.paintBloom[\s\S]*opacity:\s*1/);
+    assert.match(
+      editorCss,
+      /\.paintBloom[\s\S]*0 0 0\.6px[\s\S]*0 0 1\.2px[\s\S]*0 0 2\.4px[\s\S]*0 0 4\.8px[\s\S]*0 0 9\.6px[\s\S]*0 0 16\.8px/,
+    );
     assert.match(maskSource, /avatarDetailsPhosphorCoreRgba\(pixels\)/);
     assert.match(maskCss, /\.core[\s\S]*opacity:\s*1[\s\S]*drop-shadow/);
   });

@@ -330,6 +330,10 @@
 }
 
 .paintEmission {
+  --avatar-details-phosphor-glow-color: var(
+    --crt-face-edge-color,
+    currentColor
+  );
   position: absolute;
   inset: 0;
   z-index: 3;
@@ -342,18 +346,73 @@
 }
 
 .paintHalo {
-  opacity: 0.16;
-  mix-blend-mode: plus-lighter;
-  filter: blur(1.4px) saturate(1.35)
-    drop-shadow(0 0 3px color-mix(in srgb, currentColor 54%, transparent))
-    drop-shadow(0 0 5px color-mix(in srgb, currentColor 26%, transparent));
+  opacity: 1;
+  mix-blend-mode: screen;
+  filter: blur(1.05px) saturate(1.28)
+    drop-shadow(
+      0 0 4.8px
+        color-mix(
+          in srgb,
+          var(--avatar-details-phosphor-glow-color) 58%,
+          transparent
+        )
+    )
+    drop-shadow(
+      0 0 9.6px
+        color-mix(
+          in srgb,
+          var(--avatar-details-phosphor-glow-color) 36%,
+          transparent
+        )
+    )
+    drop-shadow(
+      0 0 16.8px
+        color-mix(
+          in srgb,
+          var(--avatar-details-phosphor-glow-color) 22%,
+          transparent
+        )
+    );
 }
 
 .paintBloom {
-  opacity: 0.58;
+  opacity: 1;
   mix-blend-mode: screen;
-  filter: blur(0.22px) saturate(1.18) drop-shadow(0 0 1px currentColor)
-    drop-shadow(0 0 2px color-mix(in srgb, currentColor 56%, transparent));
+  filter: blur(0.28px) saturate(1.18)
+    drop-shadow(0 0 0.6px var(--avatar-details-phosphor-glow-color))
+    drop-shadow(0 0 1.2px var(--avatar-details-phosphor-glow-color))
+    drop-shadow(
+      0 0 2.4px
+        color-mix(
+          in srgb,
+          var(--avatar-details-phosphor-glow-color) 82%,
+          transparent
+        )
+    )
+    drop-shadow(
+      0 0 4.8px
+        color-mix(
+          in srgb,
+          var(--avatar-details-phosphor-glow-color) 58%,
+          transparent
+        )
+    )
+    drop-shadow(
+      0 0 9.6px
+        color-mix(
+          in srgb,
+          var(--avatar-details-phosphor-glow-color) 36%,
+          transparent
+        )
+    )
+    drop-shadow(
+      0 0 16.8px
+        color-mix(
+          in srgb,
+          var(--avatar-details-phosphor-glow-color) 22%,
+          transparent
+        )
+    );
 }
 
 .paintCore {
