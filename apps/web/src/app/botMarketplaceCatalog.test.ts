@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
@@ -6,16 +7,20 @@ import { fileURLToPath } from "node:url";
 
 import {
   DEFAULT_BOT_FACE_BLINK_BAR,
+  botPowerSourceHashV1,
   normalizeBotFaceBlinkBar,
   normalizeBotFaceEyeCharacter,
+  normalizeBotFaceEyeCount,
   normalizeBotFaceEyeOffsetX,
   normalizeBotFaceEyeOffsetY,
+  normalizeBotFaceEyeRotationDeg,
   normalizeBotFaceEyeScale,
   normalizeBotFaceMouthCharacter,
   normalizeBotFaceMouthOffsetY,
   normalizeBotFaceMouthScale,
   normalizeBotFaceThinkingFrames,
   normalizeOptionalBotAudioVoiceProfileV1,
+  normalizeBotPowersV1
 } from "@localai/shared";
 import {
   marketplaceBotEyeCharacterIsSideways,
@@ -23,17 +28,25 @@ import {
   marketplaceLensEntriesForCategory,
   marketplaceVisibleBotEntries,
   marketplaceVisibleLensEntries,
-  normalizeBotMarketplaceManifest,
+  normalizeBotMarketplaceManifest
 } from "./botMarketplace.ts";
 import {
   botMarketplaceThemeGradientColors,
-  buildBotMarketplaceThemeVisualStyle,
+  buildBotMarketplaceThemeVisualStyle
 } from "./botMarketplaceThemeGradient.ts";
 import { parsePrismBotArchive } from "./botArchive.ts";
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const publicRoot = path.join(appRoot, "public");
 const faceFontIds = new Set(["neutral", "warm", "concise", "playful", "formal"]);
+const precomposedPairEyeIds = new Set([
+  "alan-watts",
+  "aristotle",
+  "thomas-hobbes",
+  "claude-monet",
+  "joseph-campbell",
+  "sigmund-freud",
+]);
 
 function readJsonFile<T>(filePath: string): T {
   return JSON.parse(readFileSync(filePath, "utf8")) as T;
@@ -44,25 +57,199 @@ function readBotBundle(filePath: string) {
 }
 
 describe("bot marketplace static catalog", () => {
+  it("keeps the curated catalog persona-specific paired eyes", () => {
+    const manifest = normalizeBotMarketplaceManifest(
+      readJsonFile(path.join(publicRoot, "bot-marketplace/manifest.json"))
+    );
+    const expectedCustomEyes = new Map([
+      ["pia", "♥"],
+      ["rowan", "⌁"],
+      ["iris", "◇"],
+      ["sol", "☀"],
+      ["mira", "✦"],
+      ["benjamin-franklin", "⌁"],
+      ["socrates", "?"],
+      ["the-buddha", "○"],
+      ["rumi", "∞"],
+      ["leonardo-da-vinci", "◇"],
+      ["salvador-dali", "∿"],
+      ["vincent-van-gogh", "⊙"],
+      ["georgia-okeeffe", "◉"],
+      ["machiavelli", "⌃"],
+      ["sun-tzu", "⌖"],
+      ["carl-von-clausewitz", "⊕"],
+      ["alan-watts", "="],
+      ["nikola-tesla", "ϟ"],
+      ["albert-einstein", "∗"],
+      ["isaac-newton", "●"],
+      ["marie-curie", "✣"],
+      ["charles-darwin", "◌"],
+      ["martin-luther-king-jr", "✦"],
+      ["harriet-tubman", "◆"],
+      ["edgar-allan-poe", "†"],
+      ["aristotle", "≑"],
+      ["thomas-hobbes", "="],
+      ["claude-monet", "≍"],
+      ["joseph-campbell", "≈"],
+      ["sigmund-freud", "≎"]
+    ]);
+    let customEyeCount = 0;
+    let defaultEyeCount = 0;
+
+    for (const entry of manifest.bots) {
+      const bundle = readBotBundle(path.join(publicRoot, entry.bundlePath));
+      const bot = bundle.botJson.bot;
+      const eyeGlyph = normalizeBotFaceEyeCharacter(bot.faceEyeCharacter);
+      const expectedGlyph = expectedCustomEyes.get(entry.id) ?? null;
+
+      assert.equal(eyeGlyph, expectedGlyph, entry.name);
+      if (expectedGlyph === null) {
+        defaultEyeCount += 1;
+        assert.equal(bot.faceEyeCount, 1, entry.name);
+        assert.equal(
+          bot.faceEyeRotationDeg ?? null,
+          entry.id === "carl-jung" ? 0 : null,
+          entry.name,
+        );
+      } else {
+        customEyeCount += 1;
+        assert.equal(
+          bot.faceEyeCount,
+          precomposedPairEyeIds.has(entry.id) ? 1 : 2,
+          entry.name,
+        );
+        assert.equal(
+          bot.faceEyeRotationDeg,
+          precomposedPairEyeIds.has(entry.id) ? 0 : -90,
+          entry.name,
+        );
+      }
+    }
+
+    assert.equal(expectedCustomEyes.size, 30);
+    assert.equal(customEyeCount, 30);
+    assert.equal(defaultEyeCount, 20);
+  });
+
+  it("ships the approved Carl Jung and Alan Watts avatar customizations", () => {
+    const manifest = normalizeBotMarketplaceManifest(
+      readJsonFile(path.join(publicRoot, "bot-marketplace/manifest.json"))
+    );
+    const byName = new Map(
+      manifest.bots.map((entry) => [entry.name, readBotBundle(path.join(publicRoot, entry.bundlePath)).botJson.bot])
+    );
+    const alanWatts = byName.get("Alan Watts");
+    const carlJung = byName.get("Carl Jung");
+
+    assert.ok(alanWatts);
+    assert.equal(alanWatts.faceEyeCharacter, "=");
+    assert.equal(alanWatts.faceEyeCount, 1);
+    assert.equal(alanWatts.faceEyeRotationDeg, 0);
+    assert.equal(alanWatts.faceEyesFont, "warm");
+    assert.equal(alanWatts.faceMouthFont, "formal");
+    assert.equal(alanWatts.faceEyeOffsetX, 0);
+    assert.equal(alanWatts.faceEyeOffsetY, -0.18);
+    assert.equal(alanWatts.faceMouthScale, 0.9);
+    assert.equal(alanWatts.faceMouthOffsetY, -0.06);
+    assert.equal(alanWatts.audioVoiceProfileOverride ?? null, null);
+    assert.equal(
+      createHash("sha256")
+        .update(alanWatts.avatarDetails?.screen.paintColorMapBase64 ?? "")
+        .digest("hex"),
+      "f2839d145374a4512ba0f8e35f9f0b96a744b11d32dcf097c06bdd20c71c7dcb"
+    );
+
+    assert.ok(carlJung);
+    assert.equal(carlJung.faceEyeCharacter, null);
+    assert.equal(carlJung.faceEyeCount, 1);
+    assert.equal(carlJung.faceEyeRotationDeg, 0);
+    assert.equal(carlJung.faceEyesFont, "playful");
+    assert.equal(carlJung.faceEyeOffsetX, 0.02);
+    assert.equal(carlJung.faceEyeOffsetY, -0.02);
+    assert.equal(carlJung.faceMouthOffsetY, 0.1);
+    assert.equal(carlJung.audioVoiceProfileOverride ?? null, null);
+    assert.equal(
+      createHash("sha256")
+        .update(carlJung.avatarDetails?.screen.paintColorMapBase64 ?? "")
+        .digest("hex"),
+      "a7360b41a12b75c0fb1d718ed144b83b791300dd776f760bc7390d0294822382"
+    );
+  });
+
+  it("ships the approved signature Powers as ready portable rules", () => {
+    const manifest = normalizeBotMarketplaceManifest(
+      readJsonFile(path.join(publicRoot, "bot-marketplace/manifest.json"))
+    );
+    const expected = new Map<string, { name: string; effects: string[] }>([
+      ["Carl Jung", { name: "Depth Perception", effects: ["insight"] }],
+      ["Jane Austen", { name: "Social Scalpel", effects: ["insight"] }],
+      ["Sigmund Freud", { name: "Analytic Suspicion", effects: ["insight"] }],
+      ["Machiavelli", { name: "Political Instinct", effects: ["insight"] }],
+      ["Socrates", { name: "The Gadfly", effects: ["response_bond"] }],
+      ["Marcus Aurelius", { name: "Inner Citadel", effects: ["mood_resistance"] }],
+      [
+        "Nelson Mandela",
+        {
+          name: "Reconciliation",
+          effects: ["mood_resistance", "social_influence"]
+        }
+      ],
+      [
+        "Harriet Tubman",
+        {
+          name: "Unshaken Resolve",
+          effects: ["mood_resistance", "turn_gravity"]
+        }
+      ],
+      ["Benjamin Franklin", { name: "Civic Spark", effects: ["turn_gravity", "social_influence"] }],
+      ["Homer", { name: "Epic Memory", effects: ["selective_memory"] }],
+      ["Edgar Allan Poe", { name: "Gothic Gravity", effects: ["topic_gravity"] }],
+      ["Nikola Tesla", { name: "No Stimulants", effects: ["cup_rate:none"] }],
+      ["Mahatma Gandhi", { name: "Coffee Abstinence", effects: ["cup_rate:none"] }],
+      [
+        "Salvador Dalí",
+        {
+          name: "Surreal Intrusion",
+          effects: ["action_bias", "topic_gravity"]
+        }
+      ]
+    ]);
+
+    for (const entry of manifest.bots) {
+      const expectation = expected.get(entry.name);
+      if (!expectation) continue;
+      const bundle = readBotBundle(path.join(publicRoot, entry.bundlePath));
+      const powers = normalizeBotPowersV1(bundle.botJson.bot.powers);
+
+      assert.equal(powers.length, 1, entry.name);
+      const power = powers[0]!;
+      assert.equal(power.name, expectation.name, entry.name);
+      assert.equal(power.compileStatus, "ready", entry.name);
+      assert.equal(power.compiled?.sourceHash, botPowerSourceHashV1(power.name, power.intent), entry.name);
+      assert.deepEqual(
+        power.compiled?.effects.map((effect) =>
+          effect.type === "cup_rate" ? `${effect.type}:${effect.rate}` : effect.type
+        ),
+        expectation.effects,
+        entry.name
+      );
+    }
+
+    assert.equal(expected.size, 14);
+  });
+
   it("ships a portable, persona-crafted ElevenLabs voice for every bot", () => {
     const manifest = normalizeBotMarketplaceManifest(
       readJsonFile(path.join(publicRoot, "bot-marketplace/manifest.json"))
     );
     for (const entry of manifest.bots) {
       const bundle = readBotBundle(path.join(publicRoot, entry.bundlePath));
-      const profile = normalizeOptionalBotAudioVoiceProfileV1(
-        bundle.botJson.bot.authoredAudioVoiceProfile
-      );
+      const profile = normalizeOptionalBotAudioVoiceProfileV1(bundle.botJson.bot.authoredAudioVoiceProfile);
       assert.notEqual(profile, null, `${entry.name} must include an authored voice`);
       assert.equal(profile?.enabled, true, entry.name);
       assert.equal(typeof profile?.elevenLabsVoiceIdOverride, "string", entry.name);
-      assert.equal(
-        (profile?.elevenLabsVoiceIdOverride?.length ?? 0) > 0,
-        true,
-        entry.name
-      );
-      const directions =
-        profile?.elevenLabsDirection?.split(",").map((value) => value.trim()) ?? [];
+      assert.equal((profile?.elevenLabsVoiceIdOverride?.length ?? 0) > 0, true, entry.name);
+      const directions = profile?.elevenLabsDirection?.split(",").map((value) => value.trim()) ?? [];
       assert.equal(directions.length >= 2 && directions.length <= 3, true, entry.name);
       assert.equal(
         directions.every((value) => value.length > 0 && value.length <= 48),
@@ -70,14 +257,12 @@ describe("bot marketplace static catalog", () => {
         entry.name
       );
       assert.equal(
-        Math.abs((profile?.pitch ?? 0) * 20 - Math.round((profile?.pitch ?? 0) * 20)) <
-          1e-9,
+        Math.abs((profile?.pitch ?? 0) * 20 - Math.round((profile?.pitch ?? 0) * 20)) < 1e-9,
         true,
         `${entry.name} pitch`
       );
       assert.equal(
-        Math.abs((profile?.lilt ?? 0) * 20 - Math.round((profile?.lilt ?? 0) * 20)) <
-          1e-9,
+        Math.abs((profile?.lilt ?? 0) * 20 - Math.round((profile?.lilt ?? 0) * 20)) < 1e-9,
         true,
         `${entry.name} lilt`
       );
@@ -90,7 +275,7 @@ describe("bot marketplace static catalog", () => {
           noise: 0,
           instability: 0,
           distortion: 0,
-          damage: 0,
+          damage: 0
         },
         entry.name
       );
@@ -118,11 +303,30 @@ describe("bot marketplace static catalog", () => {
       assert.equal(bot.name, entry.name, entry.name);
       assert.equal(bot.color, entry.color, entry.name);
       assert.equal(bot.glyph, entry.glyph, entry.name);
-      assert.equal(
-        marketplaceBotEyeCharacterIsSideways(bot.faceEyeCharacter),
-        true,
-        `${entry.name} must use a sideways pair-like eye glyph`
-      );
+      const eyeCount = normalizeBotFaceEyeCount(bot.faceEyeCount);
+      assert.notEqual(eyeCount, null, `${entry.name} eye count`);
+      if (bot.faceEyeCharacter === null) {
+        assert.equal(eyeCount, 1, `${entry.name} default eye count`);
+        assert.equal(
+          bot.faceEyeRotationDeg ?? null,
+          entry.id === "carl-jung" ? 0 : null,
+          `${entry.name} default eye rotation`,
+        );
+        assert.equal(marketplaceBotEyeCharacterIsSideways(bot.faceEyeCharacter), true, `${entry.name} default eyes`);
+      } else if (precomposedPairEyeIds.has(entry.id)) {
+        assert.equal(eyeCount, 1, `${entry.name} precomposed pair eyes`);
+        assert.equal(bot.faceEyeRotationDeg, 0, `${entry.name} precomposed eye rotation`);
+      } else {
+        assert.equal(eyeCount, 2, `${entry.name} paired custom eyes`);
+        assert.equal(bot.faceEyeRotationDeg, -90, `${entry.name} paired custom eye rotation`);
+      }
+      if (bot.faceEyeRotationDeg !== null) {
+        assert.equal(
+          normalizeBotFaceEyeRotationDeg(bot.faceEyeRotationDeg),
+          bot.faceEyeRotationDeg,
+          `${entry.name} eye rotation`,
+        );
+      }
       assert.equal(faceFontIds.has(bot.faceEyesFont as string), true, entry.name);
       assert.equal(faceFontIds.has(bot.faceMouthFont as string), true, entry.name);
       assert.equal(typeof bot.faceFontWeight, "number", entry.name);
@@ -155,7 +359,7 @@ describe("bot marketplace static catalog", () => {
         mouthScale: bot.faceMouthScale,
         mouthOffsetY: bot.faceMouthOffsetY,
         blinkBar: bot.faceBlinkBar,
-        thinkingFrames,
+        thinkingFrames
       });
       assert.equal(seenFaceSignatures.has(faceSignature), false, entry.name);
       seenFaceSignatures.add(faceSignature);
@@ -170,99 +374,30 @@ describe("bot marketplace static catalog", () => {
     const themeIds = new Map(manifest.themes.map((theme) => [theme.id, theme.botIds]));
     const visibleBots = marketplaceVisibleBotEntries(manifest);
     const expectedThemes = new Map([
-      [
-        "originals",
-        [
-          "pia",
-          "rowan",
-          "iris",
-          "sol",
-          "mira",
-        ],
-      ],
+      ["originals", ["pia", "rowan", "iris", "sol", "mira"]],
       [
         "founders-nation-builders",
-        [
-          "george-washington",
-          "benjamin-franklin",
-          "john-adams",
-          "thomas-jefferson",
-          "james-madison",
-        ],
+        ["george-washington", "benjamin-franklin", "john-adams", "thomas-jefferson", "james-madison"]
       ],
-      [
-        "classical-wisdom",
-        [
-          "socrates",
-          "plato",
-          "aristotle",
-          "confucius",
-          "marcus-aurelius",
-        ],
-      ],
+      ["classical-wisdom", ["socrates", "plato", "aristotle", "confucius", "marcus-aurelius"]],
       [
         "visionary-artists",
-        [
-          "leonardo-da-vinci",
-          "salvador-dali",
-          "vincent-van-gogh",
-          "claude-monet",
-          "georgia-okeeffe",
-        ],
+        ["leonardo-da-vinci", "salvador-dali", "vincent-van-gogh", "claude-monet", "georgia-okeeffe"]
       ],
-      [
-        "power-strategy",
-        [
-          "machiavelli",
-          "sun-tzu",
-          "carl-von-clausewitz",
-          "chanakya",
-          "thomas-hobbes",
-        ],
-      ],
-      [
-        "modern-minds",
-        [
-          "alan-watts",
-          "sigmund-freud",
-          "carl-jung",
-          "friedrich-nietzsche",
-          "joseph-campbell",
-        ],
-      ],
-      [
-        "science-invention",
-        [
-          "nikola-tesla",
-          "albert-einstein",
-          "isaac-newton",
-          "marie-curie",
-          "charles-darwin",
-        ],
-      ],
+      ["power-strategy", ["machiavelli", "sun-tzu", "carl-von-clausewitz", "chanakya", "thomas-hobbes"]],
+      ["modern-minds", ["alan-watts", "sigmund-freud", "carl-jung", "friedrich-nietzsche", "joseph-campbell"]],
+      ["science-invention", ["nikola-tesla", "albert-einstein", "isaac-newton", "marie-curie", "charles-darwin"]],
       [
         "justice-reform",
-        [
-          "martin-luther-king-jr",
-          "mahatma-gandhi",
-          "nelson-mandela",
-          "frederick-douglass",
-          "harriet-tubman",
-        ],
+        ["martin-luther-king-jr", "mahatma-gandhi", "nelson-mandela", "frederick-douglass", "harriet-tubman"]
       ],
-      [
-        "story-literature",
-        [
-          "william-shakespeare",
-          "mary-shelley",
-          "edgar-allan-poe",
-          "jane-austen",
-          "homer",
-        ],
-      ],
+      ["story-literature", ["william-shakespeare", "mary-shelley", "edgar-allan-poe", "jane-austen", "homer"]]
     ]);
 
-    assert.deepEqual(manifest.themes.map((theme) => theme.id), Array.from(expectedThemes.keys()));
+    assert.deepEqual(
+      manifest.themes.map((theme) => theme.id),
+      Array.from(expectedThemes.keys())
+    );
     for (const [themeId, botIds] of expectedThemes) {
       assert.deepEqual(themeIds.get(themeId), botIds);
     }
@@ -290,11 +425,7 @@ describe("bot marketplace static catalog", () => {
     const colors = botMarketplaceThemeGradientColors(scienceEntries, "dark");
     assert.deepEqual(colors, ["#2da8ff", "#4f83cc", "#7c9131", "#4a8f7a", "#54843d"]);
 
-    const style = buildBotMarketplaceThemeVisualStyle(
-      "science-invention",
-      scienceEntries,
-      "dark"
-    );
+    const style = buildBotMarketplaceThemeVisualStyle("science-invention", scienceEntries, "dark");
     const styleText = Object.values(style).join(" ");
     assert.equal(style["--marketplace-category-edge"], "#2da8ff");
     assert.equal(style["--marketplace-category-edge-2"], "#54843d");
@@ -310,50 +441,20 @@ describe("bot marketplace static catalog", () => {
 
     assert.deepEqual(
       manifest.lensCategories.map((category) => category.id),
-      [
-        "sacred-wisdom",
-        "adventure-roleplay",
-        "creative-styles",
-        "thinking-styles",
-        "civic-perspectives",
-      ]
+      ["sacred-wisdom", "adventure-roleplay", "creative-styles", "thinking-styles", "civic-perspectives"]
     );
     const expectedLensIdsByCategory = {
-      "sacred-wisdom": [
-        "christian_wisdom",
-        "islamic_wisdom",
-        "buddhist_wisdom",
-        "taoist_wisdom",
-        "sikh_wisdom",
-      ],
-      "adventure-roleplay": [
-        "pirate",
-        "space_opera",
-        "high_fantasy_quest",
-        "cozy_mystery",
-        "cyberpunk_runner",
-      ],
-      "creative-styles": [
-        "surrealist",
-        "cozy_storybook",
-        "mythic_epic",
-        "noir_mood",
-        "minimalist_design",
-      ],
-      "thinking-styles": [
-        "stoic",
-        "systems_thinker",
-        "dialectical_skeptic",
-        "scientific_method",
-        "first_principles",
-      ],
+      "sacred-wisdom": ["christian_wisdom", "islamic_wisdom", "buddhist_wisdom", "taoist_wisdom", "sikh_wisdom"],
+      "adventure-roleplay": ["pirate", "space_opera", "high_fantasy_quest", "cozy_mystery", "cyberpunk_runner"],
+      "creative-styles": ["surrealist", "cozy_storybook", "mythic_epic", "noir_mood", "minimalist_design"],
+      "thinking-styles": ["stoic", "systems_thinker", "dialectical_skeptic", "scientific_method", "first_principles"],
       "civic-perspectives": [
         "republican_civic",
         "democratic_civic",
         "libertarian_autonomy",
         "municipal_builder",
-        "civic_futurist",
-      ],
+        "civic_futurist"
+      ]
     };
     for (const [categoryId, expectedLensIds] of Object.entries(expectedLensIdsByCategory)) {
       assert.deepEqual(
@@ -385,7 +486,10 @@ describe("bot marketplace static catalog", () => {
     const byId = new Map(manifest.bots.map((entry) => [entry.id, entry]));
     const visibleBotIds = new Set(marketplaceVisibleBotEntries(manifest).map((entry) => entry.id));
 
-    assert.equal(manifest.themes.some((theme) => theme.id === "sacred-teachers"), false);
+    assert.equal(
+      manifest.themes.some((theme) => theme.id === "sacred-teachers"),
+      false
+    );
     for (const botId of ["jesus-christ", "the-buddha", "laozi", "rumi", "guru-nanak"]) {
       assert.equal(visibleBotIds.has(botId), false, botId);
       assert.equal(byId.get(botId)?.marketplaceVisible, false, botId);
@@ -399,12 +503,8 @@ describe("bot marketplace static catalog", () => {
       readJsonFile(path.join(publicRoot, "bot-marketplace/manifest.json"))
     );
     const byId = new Map(manifest.bots.map((entry) => [entry.id, entry]));
-    const jesusBundle = readBotBundle(
-      path.join(publicRoot, "bot-marketplace/bots/bot-jesus-christ.bot")
-    );
-    const alanWattsBundle = readBotBundle(
-      path.join(publicRoot, "bot-marketplace/bots/bot-alan-watts.bot")
-    );
+    const jesusBundle = readBotBundle(path.join(publicRoot, "bot-marketplace/bots/bot-jesus-christ.bot"));
+    const alanWattsBundle = readBotBundle(path.join(publicRoot, "bot-marketplace/bots/bot-alan-watts.bot"));
 
     assert.equal(byId.get("jesus-christ")?.color, "#2563A8");
     assert.equal(byId.get("jesus-christ")?.glyph, "lucideFishSymbol");
@@ -420,13 +520,7 @@ describe("bot marketplace static catalog", () => {
     const byId = new Map(manifest.bots.map((entry) => [entry.id, entry]));
     const originals = manifest.themes.find((theme) => theme.id === "originals");
 
-    assert.deepEqual(originals?.botIds, [
-      "pia",
-      "rowan",
-      "iris",
-      "sol",
-      "mira",
-    ]);
+    assert.deepEqual(originals?.botIds, ["pia", "rowan", "iris", "sol", "mira"]);
     assert.equal(byId.get("pia")?.name, "Pia");
     assert.equal(byId.get("rowan")?.name, "Rowan");
     assert.equal(byId.get("iris")?.name, "Iris");
@@ -455,8 +549,8 @@ describe("bot marketplace static catalog", () => {
           weight: 600,
           eyeScale: 1,
           eyeOffsetY: 0,
-          thinkingFrames: ["·", "p", "P", "p"],
-        },
+          thinkingFrames: ["·", "p", "P", "p"]
+        }
       ],
       [
         "rowan",
@@ -467,8 +561,8 @@ describe("bot marketplace static catalog", () => {
           weight: 625,
           eyeScale: 1.05,
           eyeOffsetY: -0.02,
-          thinkingFrames: ["<", "^", ">", "v"],
-        },
+          thinkingFrames: ["<", "^", ">", "v"]
+        }
       ],
       [
         "iris",
@@ -479,8 +573,8 @@ describe("bot marketplace static catalog", () => {
           weight: 575,
           eyeScale: 1.05,
           eyeOffsetY: 0,
-          thinkingFrames: [".", "i", "I", "i"],
-        },
+          thinkingFrames: [".", "i", "I", "i"]
+        }
       ],
       [
         "sol",
@@ -491,8 +585,8 @@ describe("bot marketplace static catalog", () => {
           weight: 600,
           eyeScale: 1,
           eyeOffsetY: 0,
-          thinkingFrames: [".", "*", "+", "*"],
-        },
+          thinkingFrames: [".", "*", "+", "*"]
+        }
       ],
       [
         "mira",
@@ -503,9 +597,16 @@ describe("bot marketplace static catalog", () => {
           weight: 575,
           eyeScale: 0.95,
           eyeOffsetY: 0,
-          thinkingFrames: ["?", "!", "?", "…"],
-        },
-      ],
+          thinkingFrames: ["?", "!", "?", "…"]
+        }
+      ]
+    ]);
+    const originalEyeGlyphs = new Map([
+      ["pia", "♥"],
+      ["rowan", "⌁"],
+      ["iris", "◇"],
+      ["sol", "☀"],
+      ["mira", "✦"]
     ]);
 
     assert.deepEqual(originals?.botIds, Array.from(expectedPresets.keys()));
@@ -515,7 +616,9 @@ describe("bot marketplace static catalog", () => {
       const bundle = readBotBundle(path.join(publicRoot, entry.bundlePath));
       const bot = bundle.botJson.bot;
 
-      assert.equal(bot.faceEyeCharacter, null, `${botId} ${preset.preset} custom eye`);
+      const expectedEyeGlyph = originalEyeGlyphs.get(botId) ?? null;
+      assert.equal(bot.faceEyeCharacter, expectedEyeGlyph, `${botId} ${preset.preset} custom eye`);
+      assert.equal(bot.faceEyeCount, expectedEyeGlyph === null ? 1 : 2, `${botId} ${preset.preset} eye count`);
       assert.equal(bot.faceMouthCharacter, null, `${botId} ${preset.preset} custom mouth`);
       assert.equal(bot.faceEyesFont, preset.eyesFont, `${botId} ${preset.preset} eyes font`);
       assert.equal(bot.faceMouthFont, preset.mouthFont, `${botId} ${preset.preset} mouth font`);
@@ -527,11 +630,7 @@ describe("bot marketplace static catalog", () => {
       assert.equal(bot.faceMouthOffsetY, 0, `${botId} ${preset.preset} mouth y`);
       assert.equal(bot.faceMouthRotationDeg, 0, `${botId} ${preset.preset} mouth rotation`);
       assert.equal(bot.faceBlinkBar, " ", `${botId} ${preset.preset} blink bar`);
-      assert.deepEqual(
-        bot.faceThinkingFrames,
-        preset.thinkingFrames,
-        `${botId} ${preset.preset} thinking frames`
-      );
+      assert.deepEqual(bot.faceThinkingFrames, preset.thinkingFrames, `${botId} ${preset.preset} thinking frames`);
     }
   });
 });
