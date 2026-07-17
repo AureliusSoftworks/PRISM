@@ -36,7 +36,7 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Choose how replies recover",
-        body: "AUTO keeps the current response model as Primary, then quietly tries your two saved fallbacks if a reply fails validation. Image generation keeps its own LOCAL/ONLINE choice in Images. Voices default to System TTS. You can choose an ElevenLabs voice in bot customization from any response mode; Prism uses it only for eligible ONLINE speech. Voice Settings can narrow those bot menus to one ElevenLabs voice collection.",
+        body: "AUTO keeps the current response model as Primary, then quietly tries your two saved fallbacks if a reply fails validation. Image generation keeps its own LOCAL/ONLINE choice in Images. Voices default to System TTS. In bot customization, choose an ElevenLabs voice from the list or paste a Voice ID override; Prism uses it only for eligible ONLINE speech. Voice Settings can narrow those bot menus to one ElevenLabs voice collection.",
         clickLabel: "the LOCAL, AUTO, ONLINE control",
         targetSelector: '[data-tutorial-target="auto-response-mode"]',
       },

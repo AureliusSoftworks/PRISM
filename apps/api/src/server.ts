@@ -577,6 +577,7 @@ import {
   resolveElevenLabsVoiceId,
   requestElevenLabsVoiceCatalog,
   requestElevenLabsVoiceCollections,
+  requestElevenLabsVoiceIdentity,
   resolveVoiceSynthesisBoundary,
   validateVoiceSynthesisRequest,
 } from "./voices.ts";
@@ -6806,7 +6807,6 @@ function buildRoutes(): RouteDefinition[] {
         episode: forceEndBotcastEpisode(db, userId, ctx.params.id),
       });
     }),
-    route("POST", "/api/botcast/episodes/:id/advance", async (ctx) => {
     route("POST", "/api/botcast/episodes/:id/camera", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
@@ -6835,6 +6835,7 @@ function buildRoutes(): RouteDefinition[] {
         }),
       });
     }),
+    route("POST", "/api/botcast/episodes/:id/advance", async (ctx) => {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
@@ -8714,6 +8715,42 @@ function buildRoutes(): RouteDefinition[] {
         ctx.req.off("close", onClose);
       }
     }),
+    route("GET", "/api/voices/elevenlabs/:voiceId", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const userKey = decryptUserKey(userId);
+      const apiKey =
+        getElevenLabsApiKeyForUser(userId, userKey) ?? config.elevenLabsApiKey;
+      if (!apiKey) {
+        throw new HttpError(
+          409,
+          "Add an ElevenLabs API key in Settings first.",
+        );
+      }
+      const controller = new AbortController();
+      const onClose = () => controller.abort();
+      ctx.req.once("close", onClose);
+      try {
+        const voice = await requestElevenLabsVoiceIdentity({
+          apiKey,
+          voiceId: ctx.params.voiceId,
+          signal: controller.signal,
+        });
+        json(ctx.res, 200, { ok: true, voice });
+      } catch (error) {
+        if (error instanceof ElevenLabsVoiceError) {
+          const status =
+            error.status === 401 || error.status === 403
+              ? 401
+              : error.status === 400 || error.status === 404
+                ? error.status
+                : 502;
+          throw new HttpError(status, error.message);
+        }
+        throw error;
+      } finally {
+        ctx.req.off("close", onClose);
+      }
+    }),
     route("POST", "/api/voices/preview-line", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
@@ -8820,8 +8857,8 @@ function buildRoutes(): RouteDefinition[] {
         : raw.explicitOnlineContext === true && user.preferred_provider !== "local";
       const profile = normalizeBotAudioVoiceProfileV1(raw.profile);
       // An online engine is available account-wide, but a profile opts into
-      // it by selecting a provider voice. Profiles without one stay on the
-      // installed system TTS voice.
+      // it through a selected provider voice or explicit voice ID override.
+      // Profiles without either stay on the installed system TTS voice.
       const requestedEngine =
         raw.engine === "elevenlabs" && resolveElevenLabsVoiceId(profile)
           ? "elevenlabs"

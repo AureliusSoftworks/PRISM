@@ -357,6 +357,7 @@ describe("bot customizer save patch", () => {
       ...pristine.audioVoiceProfile,
       baseVoiceId: "voice-4" as const,
       elevenLabsVoiceId: "voice-id",
+      elevenLabsVoiceIdOverride: "portable-voice-id",
       elevenLabsEffect: "deep-space" as const,
       elevenLabsDirection: "warm, conspiratorial",
       pitch: 0.35,

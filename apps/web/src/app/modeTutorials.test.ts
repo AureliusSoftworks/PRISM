@@ -196,7 +196,7 @@ describe("mode tutorials", () => {
     assert.match(routing?.body ?? "", /Image generation keeps its own LOCAL\/ONLINE choice/);
     assert.match(
       routing?.body ?? "",
-      /choose an ElevenLabs voice in bot customization from any response mode/,
+      /choose an ElevenLabs voice from the list or paste a Voice ID override/,
     );
     assert.match(routing?.body ?? "", /only for eligible ONLINE speech/);
     assert.match(routing?.body ?? "", /Voice Settings can narrow/);
