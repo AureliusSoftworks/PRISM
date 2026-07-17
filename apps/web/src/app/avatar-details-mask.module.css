@@ -5,9 +5,9 @@
   );
   position: absolute;
   inset: 0;
-  /* The authored raster is screen ink, not artwork behind the face glyphs.
-     Keep it above the glyph rig while the screen scanlines and glass remain
-     above both emission sources. */
+  /* Keep every ink emission canvas in the CRT root stacking context. A
+     positioned wrapper would flatten them before screen-blending with the
+     face, making connected ink look pasted on as a separate layer. */
   z-index: 7;
   display: block;
   width: 100%;
@@ -19,10 +19,6 @@
     scaleX(var(--avatar-details-scale-x, 1))
     scaleX(var(--avatar-details-facing-scale-x, 1));
   transform-origin: center;
-}
-
-.layer[data-avatar-details-hidden-for-blink="true"] {
-  visibility: hidden;
 }
 
 .halo {

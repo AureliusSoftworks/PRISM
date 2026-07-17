@@ -3,6 +3,9 @@ export const BOT_AVATAR_DETAILS_CANVAS_SIZE = 128;
 export const BOT_AVATAR_DETAILS_PAINT_MASK_BYTE_LENGTH =
   (BOT_AVATAR_DETAILS_CANVAS_SIZE * BOT_AVATAR_DETAILS_CANVAS_SIZE) / 8;
 export const BOT_AVATAR_DETAILS_PAINT_MASK_BASE64_LENGTH = 2732;
+export const BOT_AVATAR_DETAILS_PAINT_COLOR_MAP_BYTE_LENGTH =
+  (BOT_AVATAR_DETAILS_CANVAS_SIZE * BOT_AVATAR_DETAILS_CANVAS_SIZE) / 4;
+export const BOT_AVATAR_DETAILS_PAINT_COLOR_MAP_BASE64_LENGTH = 5464;
 export const BOT_AVATAR_DETAILS_MAX_JSON_BYTES = 8 * 1024;
 export const BOT_AVATAR_DETAIL_OFFSET_MIN = -16;
 export const BOT_AVATAR_DETAIL_OFFSET_MAX = 16;
@@ -153,8 +156,15 @@ export interface BotAvatarDetailsV1 {
      * most-significant bit first, encoded as canonical standard padded Base64.
      */
     paintMaskBase64: string | null;
-    /** Hide stamps and paint only while the avatar is blinking. */
+    /**
+     * 128x128 row-major 2-bit semantic ink map. Values are 0 empty, 1 blink,
+     * 2 talking, and 3 effect, encoded as canonical standard padded Base64.
+     */
+    paintColorMapBase64?: string;
+    /** @deprecated Legacy all-ink visibility preference. */
     hideInkDuringBlink?: true;
+    /** @deprecated Legacy all-ink visibility preference. */
+    hideInkDuringTalking?: true;
   };
 }
 
@@ -170,12 +180,13 @@ const BASE64_VALUE_BY_CHARACTER = new Map(
   Array.from(BASE64_ALPHABET, (character, value) => [character, value] as const)
 );
 const ROOT_KEYS = ["screen", "version"] as const;
-const SCREEN_KEYS = ["paintMaskBase64", "stamps"] as const;
-const SCREEN_KEYS_WITH_BLINK_INK = [
+const SCREEN_REQUIRED_KEYS = ["paintMaskBase64", "stamps"] as const;
+const SCREEN_ALLOWED_KEYS = new Set([
+  ...SCREEN_REQUIRED_KEYS,
+  "paintColorMapBase64",
   "hideInkDuringBlink",
-  "paintMaskBase64",
-  "stamps",
-] as const;
+  "hideInkDuringTalking",
+]);
 const STAMP_KEYS = ["id", "offsetX", "offsetY", "scalePct"] as const;
 const UTF8_ENCODER = new TextEncoder();
 const STAMP_DEFINITION_BY_ID = new Map(
@@ -303,8 +314,12 @@ function encodeBase64Unchecked(bytes: Uint8Array): string {
   return encoded;
 }
 
-function decodeBase64Unchecked(value: string): Uint8Array {
-  const bytes = new Uint8Array(BOT_AVATAR_DETAILS_PAINT_MASK_BYTE_LENGTH);
+function decodeBase64Unchecked(
+  value: string,
+  byteLength: number,
+  label: string
+): Uint8Array {
+  const bytes = new Uint8Array(byteLength);
   let outputIndex = 0;
   for (let index = 0; index < value.length; index += 4) {
     const first = BASE64_VALUE_BY_CHARACTER.get(value[index] ?? "");
@@ -316,26 +331,24 @@ function decodeBase64Unchecked(value: string): Uint8Array {
     if (
       first === undefined ||
       second === undefined ||
-      third === undefined ||
+      (third === undefined && thirdCharacter !== "=") ||
       (fourth === undefined && fourthCharacter !== "=")
     ) {
-      fail("paintMaskBase64 must use the standard Base64 alphabet.");
+      fail(`${label} must use the standard Base64 alphabet.`);
     }
     bytes[outputIndex] = (first << 2) | (second >> 4);
     outputIndex += 1;
     if (thirdCharacter !== "=") {
-      bytes[outputIndex] = ((second & 0x0f) << 4) | (third >> 2);
+      bytes[outputIndex] = ((second & 0x0f) << 4) | ((third ?? 0) >> 2);
       outputIndex += 1;
     }
     if (fourthCharacter !== "=") {
-      bytes[outputIndex] = ((third & 0x03) << 6) | (fourth as number);
+      bytes[outputIndex] = (((third ?? 0) & 0x03) << 6) | (fourth ?? 0);
       outputIndex += 1;
     }
   }
-  if (outputIndex !== BOT_AVATAR_DETAILS_PAINT_MASK_BYTE_LENGTH) {
-    fail(
-      `paintMaskBase64 must decode to exactly ${BOT_AVATAR_DETAILS_PAINT_MASK_BYTE_LENGTH} bytes.`
-    );
+  if (outputIndex !== byteLength) {
+    fail(`${label} must decode to exactly ${byteLength} bytes.`);
   }
   return bytes;
 }
@@ -377,7 +390,11 @@ export function decodeBotAvatarDetailsPaintMask(value: unknown): Uint8Array {
       `paintMaskBase64 must be canonical padded Base64 with exactly ${BOT_AVATAR_DETAILS_PAINT_MASK_BASE64_LENGTH} characters.`
     );
   }
-  const bytes = decodeBase64Unchecked(value);
+  const bytes = decodeBase64Unchecked(
+    value,
+    BOT_AVATAR_DETAILS_PAINT_MASK_BYTE_LENGTH,
+    "paintMaskBase64"
+  );
   if (encodeBase64Unchecked(bytes) !== value) {
     fail("paintMaskBase64 must use canonical standard padded Base64.");
   }
@@ -404,6 +421,103 @@ export function encodeBotAvatarDetailsPaintMask(bytes: Uint8Array): string {
   const paintedPixels = countBotAvatarDetailsPaintedPixels(bytes);
   if (paintedPixels > BOT_AVATAR_DETAILS_MAX_PAINTED_PIXELS) {
     fail(`paint mask may cover at most ${BOT_AVATAR_DETAILS_MAX_PAINTED_PIXELS} pixels.`);
+  }
+  return encodeBase64Unchecked(bytes);
+}
+
+export function botAvatarDetailsPaintColorCode(
+  bytes: Uint8Array,
+  x: number,
+  y: number
+): 0 | 1 | 2 | 3 {
+  if (
+    x < 0 ||
+    y < 0 ||
+    x >= BOT_AVATAR_DETAILS_CANVAS_SIZE ||
+    y >= BOT_AVATAR_DETAILS_CANVAS_SIZE
+  ) {
+    return 0;
+  }
+  const pixelIndex = y * BOT_AVATAR_DETAILS_CANVAS_SIZE + x;
+  const byte = bytes[pixelIndex >>> 2] ?? 0;
+  const shift = 6 - (pixelIndex & 3) * 2;
+  return ((byte >>> shift) & 0x03) as 0 | 1 | 2 | 3;
+}
+
+export function countBotAvatarDetailsColoredPixels(bytes: Uint8Array): number {
+  let count = 0;
+  for (const byte of bytes) {
+    if ((byte & 0xc0) !== 0) count += 1;
+    if ((byte & 0x30) !== 0) count += 1;
+    if ((byte & 0x0c) !== 0) count += 1;
+    if ((byte & 0x03) !== 0) count += 1;
+  }
+  return count;
+}
+
+function assertPaintColorMapInsideWritableScreen(bytes: Uint8Array): void {
+  for (let y = 0; y < BOT_AVATAR_DETAILS_CANVAS_SIZE; y += 1) {
+    for (let x = 0; x < BOT_AVATAR_DETAILS_CANVAS_SIZE; x += 1) {
+      if (
+        botAvatarDetailsPaintColorCode(bytes, x, y) !== 0 &&
+        !isBotAvatarDetailsWritablePixel(x, y)
+      ) {
+        fail(
+          `paintColorMapBase64 contains a pixel outside the writable face screen at ${x},${y}.`
+        );
+      }
+    }
+  }
+}
+
+export function decodeBotAvatarDetailsPaintColorMap(
+  value: unknown
+): Uint8Array {
+  if (
+    typeof value !== "string" ||
+    value.length !== BOT_AVATAR_DETAILS_PAINT_COLOR_MAP_BASE64_LENGTH ||
+    !value.endsWith("==") ||
+    value.slice(0, -2).includes("=")
+  ) {
+    fail(
+      `paintColorMapBase64 must be canonical padded Base64 with exactly ${BOT_AVATAR_DETAILS_PAINT_COLOR_MAP_BASE64_LENGTH} characters.`
+    );
+  }
+  const bytes = decodeBase64Unchecked(
+    value,
+    BOT_AVATAR_DETAILS_PAINT_COLOR_MAP_BYTE_LENGTH,
+    "paintColorMapBase64"
+  );
+  if (encodeBase64Unchecked(bytes) !== value) {
+    fail("paintColorMapBase64 must use canonical standard padded Base64.");
+  }
+  assertPaintColorMapInsideWritableScreen(bytes);
+  const paintedPixels = countBotAvatarDetailsColoredPixels(bytes);
+  if (paintedPixels > BOT_AVATAR_DETAILS_MAX_PAINTED_PIXELS) {
+    fail(
+      `paintColorMapBase64 may cover at most ${BOT_AVATAR_DETAILS_MAX_PAINTED_PIXELS} pixels.`
+    );
+  }
+  return bytes;
+}
+
+export function encodeBotAvatarDetailsPaintColorMap(
+  bytes: Uint8Array
+): string {
+  if (
+    !(bytes instanceof Uint8Array) ||
+    bytes.byteLength !== BOT_AVATAR_DETAILS_PAINT_COLOR_MAP_BYTE_LENGTH
+  ) {
+    fail(
+      `paint color map must contain exactly ${BOT_AVATAR_DETAILS_PAINT_COLOR_MAP_BYTE_LENGTH} bytes.`
+    );
+  }
+  assertPaintColorMapInsideWritableScreen(bytes);
+  const paintedPixels = countBotAvatarDetailsColoredPixels(bytes);
+  if (paintedPixels > BOT_AVATAR_DETAILS_MAX_PAINTED_PIXELS) {
+    fail(
+      `paint color map may cover at most ${BOT_AVATAR_DETAILS_MAX_PAINTED_PIXELS} pixels.`
+    );
   }
   return encodeBase64Unchecked(bytes);
 }
@@ -475,13 +589,17 @@ export function parseBotAvatarDetailsV1(value: unknown): BotAvatarDetailsV1 {
   if (value.version !== BOT_AVATAR_DETAILS_VERSION) {
     fail(`version must be ${BOT_AVATAR_DETAILS_VERSION}.`);
   }
+  if (!isRecord(value.screen)) {
+    fail("screen must be an object.");
+  }
+  const screen = value.screen;
+  const screenKeys = Object.keys(screen);
   if (
-    !isRecord(value.screen) ||
-    (!hasExactKeys(value.screen, SCREEN_KEYS) &&
-      !hasExactKeys(value.screen, SCREEN_KEYS_WITH_BLINK_INK))
+    SCREEN_REQUIRED_KEYS.some((key) => !(key in screen)) ||
+    screenKeys.some((key) => !SCREEN_ALLOWED_KEYS.has(key))
   ) {
     fail(
-      "screen must contain exactly stamps and paintMaskBase64, with optional hideInkDuringBlink."
+      "screen must contain stamps and paintMaskBase64, with only supported semantic ink or legacy visibility fields."
     );
   }
   if (!Array.isArray(value.screen.stamps)) {
@@ -492,6 +610,12 @@ export function parseBotAvatarDetailsV1(value: unknown): BotAvatarDetailsV1 {
     typeof value.screen.hideInkDuringBlink !== "boolean"
   ) {
     fail("screen.hideInkDuringBlink must be a boolean when provided.");
+  }
+  if (
+    "hideInkDuringTalking" in value.screen &&
+    typeof value.screen.hideInkDuringTalking !== "boolean"
+  ) {
+    fail("screen.hideInkDuringTalking must be a boolean when provided.");
   }
   const stamps = value.screen.stamps.map(readStamp);
   const ids = new Set<BotAvatarDetailStampId>();
@@ -528,6 +652,21 @@ export function parseBotAvatarDetailsV1(value: unknown): BotAvatarDetailsV1 {
       paintMaskBase64 = value.screen.paintMaskBase64;
     }
   }
+  let paintColorMapBase64: string | undefined;
+  if (
+    "paintColorMapBase64" in value.screen &&
+    value.screen.paintColorMapBase64 != null
+  ) {
+    if (typeof value.screen.paintColorMapBase64 !== "string") {
+      fail("screen.paintColorMapBase64 must be a string or null.");
+    }
+    const colorMapBytes = decodeBotAvatarDetailsPaintColorMap(
+      value.screen.paintColorMapBase64
+    );
+    if (countBotAvatarDetailsColoredPixels(colorMapBytes) > 0) {
+      paintColorMapBase64 = value.screen.paintColorMapBase64;
+    }
+  }
 
   stamps.sort(
     (left, right) =>
@@ -538,8 +677,12 @@ export function parseBotAvatarDetailsV1(value: unknown): BotAvatarDetailsV1 {
     screen: {
       stamps,
       paintMaskBase64,
+      ...(paintColorMapBase64 ? { paintColorMapBase64 } : {}),
       ...(value.screen.hideInkDuringBlink === true
         ? { hideInkDuringBlink: true as const }
+        : {}),
+      ...(value.screen.hideInkDuringTalking === true
+        ? { hideInkDuringTalking: true as const }
         : {}),
     },
   };

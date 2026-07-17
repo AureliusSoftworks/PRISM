@@ -28,28 +28,28 @@ import {
 import {
   AVATAR_DETAILS_BRUSH_SIZES,
   AVATAR_DETAILS_CANVAS_SIZE,
-  AVATAR_DETAILS_MASK_BYTE_LENGTH,
+  AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH,
+  AVATAR_DETAILS_INK_ROLE_COLORS,
   AVATAR_DETAILS_MAX_PAINT_PIXELS,
   avatarDetailsCirclePoints,
   avatarDetailsGridPointFromClient,
   avatarDetailsEqual,
   avatarDetailsKey,
-  avatarDetailsPhosphorCoreRgba,
+  avatarDetailsPaintColorCoveragePercent,
+  avatarDetailsPaintColorPixelCount,
+  avatarDetailsWithPaintColorMap,
   avatarDetailsWritablePixel,
-  avatarDetailsPaintCoveragePercent,
-  avatarDetailsPaintPixelCount,
   cloneAvatarDetails,
-  decodeAvatarDetailsPaintMask,
-  encodeAvatarDetailsPaintMask,
+  decodeAvatarDetailsPaintColorMap,
   interpolateAvatarDetailsGridLine,
-  moveAvatarDetailsPaintMask,
+  moveAvatarDetailsPaintColorMap,
   normalizeAvatarDetails,
   normalizeAvatarDetailsColor,
-  paintAvatarDetailsMask,
-  rasterizeAvatarDetailsRgba,
-  setAvatarDetailsHideInkDuringBlink,
+  paintAvatarDetailsColorMap,
+  rasterizeAvatarDetailsSemanticRgba,
   type AvatarDetailsBrushSize,
   type AvatarDetailsGridPoint,
+  type AvatarDetailsInkRole,
   type AvatarDetailsPaintMode,
   type AvatarDetailsTool,
   type AvatarDetailsV1,
@@ -71,6 +71,29 @@ import styles from "./avatar-details-editor.module.css";
 import pageStyles from "./page.module.css";
 
 const AVATAR_DETAILS_NEUTRAL_FACE = zenLiveActionPlateFace("neutral", "closed");
+const AVATAR_DETAILS_EDITOR_ZOOM = 1.36;
+const AVATAR_DETAILS_EDITOR_ZOOM_ORIGIN_Y_PCT = 45;
+const AVATAR_DETAILS_INK_OPTIONS: ReadonlyArray<{
+  role: AvatarDetailsInkRole;
+  label: string;
+  description: string;
+}> = [
+  {
+    role: "blink",
+    label: "Blink ink",
+    description: "Hides while the bot blinks.",
+  },
+  {
+    role: "talking",
+    label: "Speech ink",
+    description: "Hides while talking or sipping.",
+  },
+  {
+    role: "effect",
+    label: "Effect ink",
+    description: "Hides only for full-screen face effects.",
+  },
+];
 
 export interface AvatarDetailsEditorHandle {
   apply(): Promise<boolean>;
@@ -82,6 +105,7 @@ export interface AvatarDetailsEditorProps {
   value: AvatarDetailsV1 | null | undefined;
   accentColor: string;
   faceStyle: BotFaceStyle;
+  theme: "light" | "dark";
   onApply: (details: AvatarDetailsV1) => void | Promise<void>;
   onCancel?: () => void;
   onDirtyChange?: (dirty: boolean) => void;
@@ -94,7 +118,7 @@ interface AvatarDetailsPointerStroke {
   startPoint: AvatarDetailsGridPoint;
   lastPoint: AvatarDetailsGridPoint;
   before: AvatarDetailsV1;
-  beforeMask: Uint8Array;
+  beforeColorMap: Uint8Array;
   changed: boolean;
 }
 
@@ -111,19 +135,6 @@ function pointerGridPoint(
   );
 }
 
-function avatarDetailsWithPaintMask(
-  details: AvatarDetailsV1,
-  mask: Uint8Array,
-): AvatarDetailsV1 {
-  return normalizeAvatarDetails({
-    ...details,
-    screen: {
-      ...details.screen,
-      paintMaskBase64: encodeAvatarDetailsPaintMask(mask),
-    },
-  });
-}
-
 const AvatarDetailsEditorSession = forwardRef<
   AvatarDetailsEditorHandle,
   AvatarDetailsEditorProps
@@ -132,6 +143,7 @@ const AvatarDetailsEditorSession = forwardRef<
     value,
     accentColor,
     faceStyle,
+    theme,
     onApply,
     onCancel,
     onDirtyChange,
@@ -152,6 +164,7 @@ const AvatarDetailsEditorSession = forwardRef<
   const undoHistoryRef = useRef<readonly AvatarDetailsV1[]>(undoHistory);
   const redoHistoryRef = useRef<readonly AvatarDetailsV1[]>(redoHistory);
   const [paintMode, setPaintMode] = useState<AvatarDetailsTool>("brush");
+  const [inkRole, setInkRole] = useState<AvatarDetailsInkRole>("effect");
   const [brushSize, setBrushSize] = useState<AvatarDetailsBrushSize>(3);
   const [pointerActive, setPointerActive] = useState(false);
   const [faceGuideVisible, setFaceGuideVisible] = useState(true);
@@ -159,8 +172,6 @@ const AvatarDetailsEditorSession = forwardRef<
   const [applying, setApplying] = useState(false);
   const [applyError, setApplyError] = useState<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const paintHaloCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const paintBloomCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const screenGuideRef = useRef<HTMLCanvasElement | null>(null);
   const pointerStrokeRef = useRef<AvatarDetailsPointerStroke | null>(null);
   const previewFrameRef = useRef<number | null>(null);
@@ -171,21 +182,34 @@ const AvatarDetailsEditorSession = forwardRef<
   const normalizedAccentColor = normalizeAvatarDetailsColor(accentColor);
   const workingKey = avatarDetailsKey(working);
   const dirty = !avatarDetailsEqual(working, normalizedSource);
-  const paintMask =
-    decodeAvatarDetailsPaintMask(working.screen.paintMaskBase64) ??
-    new Uint8Array(AVATAR_DETAILS_MASK_BYTE_LENGTH);
-  const paintedPixels = avatarDetailsPaintPixelCount(paintMask);
-  const coveragePercent = avatarDetailsPaintCoveragePercent(paintMask);
+  const paintColorMap =
+    decodeAvatarDetailsPaintColorMap(working.screen.paintColorMapBase64) ??
+    new Uint8Array(AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH);
+  const paintedPixels = avatarDetailsPaintColorPixelCount(paintColorMap);
+  const coveragePercent =
+    avatarDetailsPaintColorCoveragePercent(paintColorMap);
+  const guideInk = theme === "light" ? "#050608" : "#ffffff";
+  const zoomedFaceYPct =
+    AVATAR_DETAILS_EDITOR_ZOOM_ORIGIN_Y_PCT +
+    (BOT_AVATAR_SCREEN_EDITOR_FACE_PLACEMENT.yPct -
+      AVATAR_DETAILS_EDITOR_ZOOM_ORIGIN_Y_PCT) *
+      AVATAR_DETAILS_EDITOR_ZOOM;
   const faceGuideStyle = {
     "--zen-live-bot-face-x": `${BOT_AVATAR_SCREEN_EDITOR_FACE_PLACEMENT.xPct}%`,
-    "--zen-live-bot-face-y": `${BOT_AVATAR_SCREEN_EDITOR_FACE_PLACEMENT.yPct}%`,
+    "--zen-live-bot-face-y": `${zoomedFaceYPct}%`,
     "--zen-live-bot-face-scale": BOT_AVATAR_SCREEN_EDITOR_FACE_PLACEMENT.scale,
-    "--zen-live-bot-avatar-face-glyph-size": `${BOT_AVATAR_SCREEN_EDITOR_FACE_GLYPH_FRAME_RATIO * 100}cqw`,
+    "--zen-live-bot-avatar-face-glyph-size": `${BOT_AVATAR_SCREEN_EDITOR_FACE_GLYPH_FRAME_RATIO * AVATAR_DETAILS_EDITOR_ZOOM * 100}cqw`,
     "--coffee-plate-emoji-face-scale-y": BOT_AVATAR_CANONICAL_FACE_SCALE_Y,
     "--avatar-details-facing-scale-x": "1",
+    "--zen-live-bot-face-ink": guideInk,
+    "--zen-live-bot-face-crt-border-color": guideInk,
+    "--coffee-bot-color": guideInk,
+    "--coffee-seat-emotion-color": guideInk,
     zIndex: 1,
   } as CSSProperties;
-  const phosphorGlowStyle = { color: normalizedAccentColor } as CSSProperties;
+  const runtimeColorPreviewStyle = {
+    backgroundColor: normalizedAccentColor,
+  } as CSSProperties;
 
   const updateWorking = useCallback((next: AvatarDetailsV1): void => {
     const normalized = normalizeAvatarDetails(next);
@@ -270,10 +294,7 @@ const AvatarDetailsEditorSession = forwardRef<
     const canvas = screenGuideRef.current;
     const context = canvas?.getContext("2d", { alpha: true });
     if (!canvas || !context) return;
-    const colorValue = Number.parseInt(normalizedAccentColor.slice(1), 16);
-    const red = (colorValue >>> 16) & 255;
-    const green = (colorValue >>> 8) & 255;
-    const blue = colorValue & 255;
+    const guideValue = theme === "light" ? 0 : 255;
     const imageData = context.createImageData(
       AVATAR_DETAILS_CANVAS_SIZE,
       AVATAR_DETAILS_CANVAS_SIZE,
@@ -288,45 +309,31 @@ const AvatarDetailsEditorSession = forwardRef<
             !avatarDetailsWritablePixel(x, y - 1) ||
             !avatarDetailsWritablePixel(x, y + 1));
         const index = (y * AVATAR_DETAILS_CANVAS_SIZE + x) * 4;
-        imageData.data[index] = boundary ? red : writable ? 255 : 0;
-        imageData.data[index + 1] = boundary ? green : writable ? 255 : 0;
-        imageData.data[index + 2] = boundary ? blue : writable ? 255 : 0;
-        imageData.data[index + 3] = boundary ? 86 : writable ? 7 : 92;
+        imageData.data[index] = guideValue;
+        imageData.data[index + 1] = guideValue;
+        imageData.data[index + 2] = guideValue;
+        imageData.data[index + 3] = boundary ? 58 : 0;
       }
     }
     context.putImageData(imageData, 0, 0);
-  }, [normalizedAccentColor]);
+  }, [theme]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    const haloCanvas = paintHaloCanvasRef.current;
-    const bloomCanvas = paintBloomCanvasRef.current;
     const context = canvas?.getContext("2d", { alpha: true });
-    const haloContext = haloCanvas?.getContext("2d", { alpha: true });
-    const bloomContext = bloomCanvas?.getContext("2d", { alpha: true });
-    if (!canvas || !context || !haloContext || !bloomContext) return;
-    const pixels = rasterizeAvatarDetailsRgba(
+    if (!canvas || !context) return;
+    const pixels = rasterizeAvatarDetailsSemanticRgba(
       workingRef.current,
-      normalizedAccentColor,
       faceStyle,
     );
-    const glowImageData = context.createImageData(
+    const imageData = context.createImageData(
       AVATAR_DETAILS_CANVAS_SIZE,
       AVATAR_DETAILS_CANVAS_SIZE,
     );
-    glowImageData.data.set(pixels);
-    const coreImageData = context.createImageData(
-      AVATAR_DETAILS_CANVAS_SIZE,
-      AVATAR_DETAILS_CANVAS_SIZE,
-    );
-    coreImageData.data.set(avatarDetailsPhosphorCoreRgba(pixels));
-    for (const emissionContext of [haloContext, bloomContext]) {
-      emissionContext.imageSmoothingEnabled = false;
-      emissionContext.putImageData(glowImageData, 0, 0);
-    }
+    imageData.data.set(pixels);
     context.imageSmoothingEnabled = false;
-    context.putImageData(coreImageData, 0, 0);
-  }, [faceStyle, normalizedAccentColor, workingKey]);
+    context.putImageData(imageData, 0, 0);
+  }, [faceStyle, workingKey]);
 
   const commitMutation = useCallback(
     (next: AvatarDetailsV1): void => {
@@ -427,22 +434,26 @@ const AvatarDetailsEditorSession = forwardRef<
     (points: readonly AvatarDetailsGridPoint[]): boolean => {
       if (paintMode !== "brush" && paintMode !== "eraser") return false;
       const current = workingRef.current;
-      const currentMask =
-        decodeAvatarDetailsPaintMask(current.screen.paintMaskBase64) ??
-        new Uint8Array(AVATAR_DETAILS_MASK_BYTE_LENGTH);
+      const currentColorMap =
+        decodeAvatarDetailsPaintColorMap(
+          current.screen.paintColorMapBase64,
+        ) ?? new Uint8Array(AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH);
       const mode: AvatarDetailsPaintMode = paintMode;
-      const result = paintAvatarDetailsMask(
-        currentMask,
+      const result = paintAvatarDetailsColorMap(
+        currentColorMap,
         points,
         brushSize,
         mode,
+        inkRole,
       );
       setLimitReached(result.limitReached);
       if (!result.changed) return false;
-      updateWorking(avatarDetailsWithPaintMask(current, result.mask));
+      updateWorking(
+        avatarDetailsWithPaintColorMap(current, result.colorMap),
+      );
       return true;
     },
-    [brushSize, paintMode, updateWorking],
+    [brushSize, inkRole, paintMode, updateWorking],
   );
 
   const previewCircleStroke = useCallback(
@@ -450,17 +461,20 @@ const AvatarDetailsEditorSession = forwardRef<
       stroke: AvatarDetailsPointerStroke,
       edge: AvatarDetailsGridPoint,
     ): boolean => {
-      const result = paintAvatarDetailsMask(
-        stroke.beforeMask,
+      const result = paintAvatarDetailsColorMap(
+        stroke.beforeColorMap,
         avatarDetailsCirclePoints(stroke.startPoint, edge),
         brushSize,
         "brush",
+        inkRole,
       );
       setLimitReached(result.limitReached);
-      updateWorking(avatarDetailsWithPaintMask(stroke.before, result.mask));
+      updateWorking(
+        avatarDetailsWithPaintColorMap(stroke.before, result.colorMap),
+      );
       return result.changed;
     },
-    [brushSize, updateWorking],
+    [brushSize, inkRole, updateWorking],
   );
 
   const previewLineStroke = useCallback(
@@ -468,17 +482,20 @@ const AvatarDetailsEditorSession = forwardRef<
       stroke: AvatarDetailsPointerStroke,
       edge: AvatarDetailsGridPoint,
     ): boolean => {
-      const result = paintAvatarDetailsMask(
-        stroke.beforeMask,
+      const result = paintAvatarDetailsColorMap(
+        stroke.beforeColorMap,
         interpolateAvatarDetailsGridLine(stroke.startPoint, edge),
         brushSize,
         "brush",
+        inkRole,
       );
       setLimitReached(result.limitReached);
-      updateWorking(avatarDetailsWithPaintMask(stroke.before, result.mask));
+      updateWorking(
+        avatarDetailsWithPaintColorMap(stroke.before, result.colorMap),
+      );
       return result.changed;
     },
-    [brushSize, updateWorking],
+    [brushSize, inkRole, updateWorking],
   );
 
   const previewMoveStroke = useCallback(
@@ -486,12 +503,14 @@ const AvatarDetailsEditorSession = forwardRef<
       stroke: AvatarDetailsPointerStroke,
       point: AvatarDetailsGridPoint,
     ): boolean => {
-      const result = moveAvatarDetailsPaintMask(stroke.beforeMask, {
+      const result = moveAvatarDetailsPaintColorMap(stroke.beforeColorMap, {
         x: point.x - stroke.startPoint.x,
         y: point.y - stroke.startPoint.y,
       });
       setLimitReached(false);
-      updateWorking(avatarDetailsWithPaintMask(stroke.before, result.mask));
+      updateWorking(
+        avatarDetailsWithPaintColorMap(stroke.before, result.colorMap),
+      );
       return result.changed;
     },
     [updateWorking],
@@ -512,16 +531,16 @@ const AvatarDetailsEditorSession = forwardRef<
       // pointer remains active. Painting must still begin in that case.
     }
     const before = cloneAvatarDetails(workingRef.current);
-    const beforeMask =
-      decodeAvatarDetailsPaintMask(before.screen.paintMaskBase64) ??
-      new Uint8Array(AVATAR_DETAILS_MASK_BYTE_LENGTH);
+    const beforeColorMap =
+      decodeAvatarDetailsPaintColorMap(before.screen.paintColorMapBase64) ??
+      new Uint8Array(AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH);
     const stroke: AvatarDetailsPointerStroke = {
       pointerId: event.pointerId,
       tool: paintMode,
       startPoint: point,
       lastPoint: point,
       before,
-      beforeMask,
+      beforeColorMap,
       changed: false,
     };
     pointerStrokeRef.current = stroke;
@@ -598,11 +617,13 @@ const AvatarDetailsEditorSession = forwardRef<
   };
 
   const clearPaint = (): void => {
-    if (workingRef.current.screen.paintMaskBase64 === null) return;
-    commitMutation({
-      ...workingRef.current,
-      screen: { ...workingRef.current.screen, paintMaskBase64: null },
-    });
+    if (!workingRef.current.screen.paintColorMapBase64) return;
+    commitMutation(
+      avatarDetailsWithPaintColorMap(
+        workingRef.current,
+        new Uint8Array(AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH),
+      ),
+    );
   };
 
   const canvasInstruction =
@@ -615,12 +636,16 @@ const AvatarDetailsEditorSession = forwardRef<
           : "Drag to paint on the screen.";
 
   return (
-    <section className={styles.editor} aria-label="Avatar details editor">
-      <section className={styles.paintSection} aria-label="Pixel paint mask">
+    <section
+      className={styles.editor}
+      data-editor-theme={theme}
+      aria-label="Avatar details editor"
+    >
+      <section className={styles.paintSection} aria-label="Semantic screen ink">
         <header className={styles.paintHeader}>
           <div>
             <strong>Screen editor</strong>
-            <small>Front-facing · 128 × 128</small>
+            <small>128 × 128 · 5× preview</small>
           </div>
           <div className={styles.paintHeaderActions}>
             <button
@@ -656,7 +681,7 @@ const AvatarDetailsEditorSession = forwardRef<
               <button
                 type="button"
                 onClick={clearPaint}
-                disabled={working.screen.paintMaskBase64 === null}
+                disabled={!working.screen.paintColorMapBase64}
                 aria-label="Clear pixel ink"
               >
                 <Trash2 size={14} aria-hidden="true" />
@@ -738,37 +763,49 @@ const AvatarDetailsEditorSession = forwardRef<
           </div>
         </div>
 
-        <label className={styles.blinkInkControl}>
-          <input
-            type="checkbox"
-            checked={working.screen.hideInkDuringBlink === true}
-            onChange={(event) => {
-              commitMutation(
-                setAvatarDetailsHideInkDuringBlink(
-                  workingRef.current,
-                  event.currentTarget.checked,
-                ),
-              );
-            }}
-          />
-          <span>
-            <strong>Hide ink while blinking</strong>
+        <div className={styles.inkPalette}>
+          <div className={styles.inkPaletteHeader}>
+            <span>Ink behavior</span>
+            <small>Colors are editing labels—not final colors.</small>
+          </div>
+          <div
+            className={styles.inkRoleOptions}
+            role="radiogroup"
+            aria-label="Semantic ink color"
+          >
+            {AVATAR_DETAILS_INK_OPTIONS.map((option) => (
+              <button
+                key={option.role}
+                type="button"
+                role="radio"
+                aria-checked={inkRole === option.role}
+                data-selected={inkRole === option.role ? "true" : undefined}
+                data-ink-role={option.role}
+                onClick={() => setInkRole(option.role)}
+              >
+                <span
+                  className={styles.inkRoleSwatch}
+                  style={{
+                    backgroundColor: AVATAR_DETAILS_INK_ROLE_COLORS[option.role],
+                  }}
+                  aria-hidden="true"
+                />
+                <span>
+                  <strong>{option.label}</strong>
+                  <small>{option.description}</small>
+                </span>
+              </button>
+            ))}
+          </div>
+          <div className={styles.runtimeColorNote}>
+            <span style={runtimeColorPreviewStyle} aria-hidden="true" />
             <small>
-              Temporarily hides drawn pupils, eyelashes, and other screen ink
-              during the closed blink frame.
+              On the bot, every ink color becomes its normalized bot color.
             </small>
-          </span>
-        </label>
+          </div>
+        </div>
 
         <div className={styles.canvasFrame}>
-          <canvas
-            ref={screenGuideRef}
-            className={styles.screenBoundary}
-            width={AVATAR_DETAILS_CANVAS_SIZE}
-            height={AVATAR_DETAILS_CANVAS_SIZE}
-            data-avatar-details-writable-guide="true"
-            aria-hidden="true"
-          />
           <span
             className={`${pageStyles.zenLiveBotPresenceFaceRig} ${styles.faceGuide}`}
             style={faceGuideStyle}
@@ -806,43 +843,35 @@ const AvatarDetailsEditorSession = forwardRef<
               className={`${pageStyles.coffeeSeatPlateEmoji} ${pageStyles.zenLiveBotPresenceFaceGlyph} ${styles.faceGuideGlyph}`}
             />
           </span>
-          <canvas
-            ref={paintHaloCanvasRef}
-            className={`${styles.paintEmission} ${styles.paintHalo}`}
-            width={AVATAR_DETAILS_CANVAS_SIZE}
-            height={AVATAR_DETAILS_CANVAS_SIZE}
-            style={phosphorGlowStyle}
-            data-avatar-details-editor-emission="halo"
-            aria-hidden="true"
-          />
-          <canvas
-            ref={paintBloomCanvasRef}
-            className={`${styles.paintEmission} ${styles.paintBloom}`}
-            width={AVATAR_DETAILS_CANVAS_SIZE}
-            height={AVATAR_DETAILS_CANVAS_SIZE}
-            style={phosphorGlowStyle}
-            data-avatar-details-editor-emission="bloom"
-            aria-hidden="true"
-          />
-          <canvas
-            ref={canvasRef}
-            className={`${styles.canvas} ${styles.paintCore}`}
-            width={AVATAR_DETAILS_CANVAS_SIZE}
-            height={AVATAR_DETAILS_CANVAS_SIZE}
-            data-avatar-details-editor-core="true"
-            aria-hidden="true"
-          />
-          <div
-            className={styles.inputSurface}
-            data-tool={paintMode}
-            data-dragging={pointerActive ? "true" : undefined}
-            role="application"
-            aria-label={`Avatar pixel canvas. ${paintMode}, ${brushSize} pixel size. ${canvasInstruction}`}
-            onPointerDown={handlePointerDown}
-            onPointerMove={handlePointerMove}
-            onPointerUp={finishPointerStroke}
-            onPointerCancel={finishPointerStroke}
-          />
+          <div className={styles.canvasViewport}>
+            <canvas
+              ref={screenGuideRef}
+              className={styles.screenBoundary}
+              width={AVATAR_DETAILS_CANVAS_SIZE}
+              height={AVATAR_DETAILS_CANVAS_SIZE}
+              data-avatar-details-writable-guide="true"
+              aria-hidden="true"
+            />
+            <canvas
+              ref={canvasRef}
+              className={styles.canvas}
+              width={AVATAR_DETAILS_CANVAS_SIZE}
+              height={AVATAR_DETAILS_CANVAS_SIZE}
+              data-avatar-details-editor-core="true"
+              aria-hidden="true"
+            />
+            <div
+              className={styles.inputSurface}
+              data-tool={paintMode}
+              data-dragging={pointerActive ? "true" : undefined}
+              role="application"
+              aria-label={`Avatar pixel canvas. ${inkRole} ink, ${paintMode}, ${brushSize} pixel size. ${canvasInstruction}`}
+              onPointerDown={handlePointerDown}
+              onPointerMove={handlePointerMove}
+              onPointerUp={finishPointerStroke}
+              onPointerCancel={finishPointerStroke}
+            />
+          </div>
         </div>
 
         <div className={styles.coverage} aria-live="polite">
