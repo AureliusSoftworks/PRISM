@@ -119,6 +119,7 @@ export async function runAutoFallbackChain<T = string>(args: {
 
     const controller = new AbortController();
     const attemptBudgetMs = Math.min(perAttemptTimeoutMs, remainingMs);
+    const exhaustsTotalBudget = attemptBudgetMs >= remainingMs;
     let timedOut = false;
     const timeout = setTimeout(() => {
       timedOut = true;
@@ -177,6 +178,7 @@ export async function runAutoFallbackChain<T = string>(args: {
         outcome: "failed",
         reason: timedOut ? "timeout" : "provider_error",
       });
+      if (timedOut && exhaustsTotalBudget) break;
       if (now() >= deadline) break;
       void error;
     } finally {

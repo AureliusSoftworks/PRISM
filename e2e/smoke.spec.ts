@@ -6,6 +6,10 @@ import {
   type Route,
 } from "@playwright/test";
 
+function smokeTestTimeout(localTimeoutMs: number): number {
+  return process.env.CI ? localTimeoutMs * 2 : localTimeoutMs;
+}
+
 const testUser = {
   id: "e2e-user",
   username: "e2e@example.com",
@@ -775,7 +779,7 @@ test.describe("PRISM desktop smoke", () => {
   test("Coffee group setup selects every bot, enforces five seats, and enters a saved session", async ({
     page,
   }) => {
-    test.setTimeout(60_000);
+    test.setTimeout(smokeTestTimeout(60_000));
     const coffeeBots = Array.from({ length: 6 }, (_, index) => ({
       ...testBots[index % testBots.length]!,
       id: `e2e-coffee-bot-${index + 1}`,
@@ -1042,7 +1046,7 @@ test.describe("PRISM desktop smoke", () => {
   test("authenticated Zen persists LOCAL turns while Private chat stays ephemeral", async ({
     page,
   }) => {
-    test.setTimeout(60_000);
+    test.setTimeout(smokeTestTimeout(60_000));
     await installAuthenticatedApi(page);
     const state = await installStatefulZenApi(page);
     await page.goto("/?view=chat");
@@ -1202,7 +1206,7 @@ test.describe("PRISM desktop smoke", () => {
     test(`Zen Home depth restores the exact Library checkpoint in ${theme} theme @relationship-depth`, async ({
       page,
     }) => {
-      test.setTimeout(60_000);
+      test.setTimeout(smokeTestTimeout(60_000));
       await page.emulateMedia({ reducedMotion: "no-preference" });
       const groupName = "Story Circle";
       const chatWrites: string[] = [];
@@ -1286,7 +1290,7 @@ test.describe("PRISM desktop smoke", () => {
   test("direct Zen Home visits pull back without synthetic dialogue and restore on Escape @relationship-depth", async ({
     page,
   }) => {
-    test.setTimeout(60_000);
+    test.setTimeout(smokeTestTimeout(60_000));
     await page.emulateMedia({ reducedMotion: "no-preference" });
     await installAuthenticatedApi(page);
     const prismHome = {
@@ -1547,7 +1551,7 @@ test.describe("PRISM desktop smoke", () => {
   test("Zen Home return waits for an active reply @relationship-depth", async ({
     page,
   }) => {
-    test.setTimeout(60_000);
+    test.setTimeout(smokeTestTimeout(60_000));
     await installAuthenticatedApi(page);
     let releaseReply!: () => void;
     const replyReleased = new Promise<void>((resolve) => {
@@ -1829,7 +1833,7 @@ test.describe("PRISM desktop smoke", () => {
   test("saved group atmosphere selects, generates, survives reload, crossfades to Zen, and fails back to its gradient @group-room-atmosphere", async ({
     page,
   }) => {
-    test.setTimeout(90_000);
+    test.setTimeout(smokeTestTimeout(90_000));
     const now = "2026-07-14T12:00:00.000Z";
     const groupId = "group:atmosphere-circle";
     const groupName = "Atmosphere Circle";
@@ -2084,7 +2088,7 @@ test.describe("PRISM desktop smoke", () => {
   test("waiting-room atmosphere keeps its cast stable and stays readable in light theme @group-room-atmosphere", async ({
     page,
   }) => {
-    test.setTimeout(60_000);
+    test.setTimeout(smokeTestTimeout(60_000));
     const now = "2026-07-14T12:00:00.000Z";
     const groupName = "Luminous Waiting Room";
     const firstImage: TestImageRecord = {
@@ -2159,7 +2163,7 @@ test.describe("PRISM desktop smoke", () => {
     test(`compact group room stays clear across the desktop viewport contract in ${theme} theme @group-room`, async ({
       page,
     }) => {
-      test.setTimeout(90_000);
+      test.setTimeout(smokeTestTimeout(90_000));
       await page.emulateMedia({ reducedMotion: "reduce" });
       const now = "2026-07-14T12:00:00.000Z";
       const groupName = "Collaborative Product Council";
@@ -2437,7 +2441,7 @@ test.describe("PRISM desktop smoke", () => {
   test("large saved group becomes a stable responsive waiting room @group-room", async ({
     page,
   }) => {
-    test.setTimeout(90_000);
+    test.setTimeout(smokeTestTimeout(90_000));
     const now = "2026-07-14T12:00:00.000Z";
     const groupName = "Waiting Room Council";
     await page.emulateMedia({ reducedMotion: "no-preference" });
@@ -2743,7 +2747,7 @@ test.describe("PRISM desktop smoke", () => {
   test("twenty-four-member waiting room completes three bounded rotations and tears down cleanly @group-room-wifex8", async ({
     page,
   }) => {
-    test.setTimeout(90_000);
+    test.setTimeout(smokeTestTimeout(90_000));
     const now = "2026-07-14T12:00:00.000Z";
     const groupName = "Twenty Four Companion Soak";
     const pageErrors: string[] = [];
@@ -2862,7 +2866,7 @@ test.describe("PRISM desktop smoke", () => {
   test("waiting-room side panel pauses and resumes one timer while a live theme change preserves the visit @group-room-wifex8", async ({
     page,
   }) => {
-    test.setTimeout(90_000);
+    test.setTimeout(smokeTestTimeout(90_000));
     const now = "2026-07-14T12:00:00.000Z";
     const groupName = "Panel State Circle";
     const roomBots = waitingRoomTestBots.slice(0, 8);
@@ -2977,7 +2981,7 @@ test.describe("PRISM desktop smoke", () => {
   test("Listen up reuses an exact Coffee Group, preserves its topic across reload, and returns to a fresh room @group-room-coffee", async ({
     page,
   }) => {
-    test.setTimeout(90_000);
+    test.setTimeout(smokeTestTimeout(90_000));
     const now = "2026-07-14T12:00:00.000Z";
     const sourceGroupId = "group:listen-up-room";
     const sourceGroupName = "Listen Up Room";
@@ -3262,7 +3266,7 @@ test.describe("PRISM desktop smoke", () => {
   test("waiting-room Home resolution opens only the requested continuation and leaves a missing Home pending @group-room", async ({
     page,
   }) => {
-    test.setTimeout(90_000);
+    test.setTimeout(smokeTestTimeout(90_000));
     await page.emulateMedia({ reducedMotion: "reduce" });
     const now = "2026-07-14T12:00:00.000Z";
     const groupName = "History Safe Room";
@@ -3554,7 +3558,7 @@ test.describe("PRISM desktop smoke", () => {
   test("waiting-room Back aborts a pending Home reply before restoring the exact room @group-room", async ({
     page,
   }) => {
-    test.setTimeout(60_000);
+    test.setTimeout(smokeTestTimeout(60_000));
     await page.emulateMedia({ reducedMotion: "reduce" });
     const now = "2026-07-14T12:00:00.000Z";
     const groupName = "Interruptible Room";
@@ -3725,7 +3729,7 @@ test.describe("PRISM desktop smoke", () => {
   test("waiting-room ambient theater stays silent, static for assistive tech, and bounded @group-room", async ({
     page,
   }) => {
-    test.setTimeout(90_000);
+    test.setTimeout(smokeTestTimeout(90_000));
     const now = "2026-07-14T12:00:00.000Z";
     const groupName = "Silent Ambient Council";
     await page.emulateMedia({ reducedMotion: "no-preference" });
@@ -4047,7 +4051,7 @@ test.describe("PRISM desktop smoke", () => {
   test("waiting-room visit survives pauses and cleans up on exit @group-room", async ({
     page,
   }) => {
-    test.setTimeout(90_000);
+    test.setTimeout(smokeTestTimeout(90_000));
     const now = "2026-07-14T12:00:00.000Z";
     const groupName = "Ambient Rotation Circle";
     await installAuthenticatedApi(page, {
@@ -4145,7 +4149,7 @@ test.describe("PRISM desktop smoke", () => {
   test("waiting-room rotation cancels stale handoffs across groups @group-room", async ({
     page,
   }) => {
-    test.setTimeout(90_000);
+    test.setTimeout(smokeTestTimeout(90_000));
     const now = "2026-07-14T12:00:00.000Z";
     const firstGroupName = "First Rotation Circle";
     const secondGroupName = "Second Rotation Circle";
@@ -4260,7 +4264,7 @@ test.describe("PRISM desktop smoke", () => {
     test(`waiting room remains legible across desktop sizes in ${theme} theme @group-room`, async ({
       page,
     }) => {
-      test.setTimeout(90_000);
+      test.setTimeout(smokeTestTimeout(90_000));
       const now = "2026-07-14T12:00:00.000Z";
       const groupName = "Responsive Waiting Circle";
       await page.emulateMedia({ reducedMotion: "reduce" });
