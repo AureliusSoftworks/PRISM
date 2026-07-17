@@ -41,7 +41,7 @@ describe("PRISM GPU scene foundation integration", () => {
         6,
     );
     assert.match(pageSource, /botFaceCrtNoiseLayer[\s\S]*data-prism-decorative-motion/);
-    assert.match(pageSource, /coffeeSeatUnderglow[\s\S]*data-prism-decorative-motion/);
+    assert.match(pageSource, /botAmbientUnderglow[\s\S]*data-prism-decorative-motion/);
     assert.match(pageSource, /coffeeCupSteam[\s\S]*data-prism-decorative-motion/);
     assert.match(
       pageSource,

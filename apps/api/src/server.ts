@@ -167,6 +167,7 @@ import {
   listBotcastShows,
   readBotcastShowIntroAudio,
   setBotcastEpisodeCameraMode,
+  setBotcastModelWarmupHold,
   storeBotcastShowIntroAudio,
   updateBotcastShow,
 } from "./botcast.ts";
@@ -368,10 +369,12 @@ import {
   checkDualOllamaWorkloadStatus,
   checkLocalModelHostStatus,
   checkOpenAiApiKeyStatus,
+  defaultModelIdForProvider,
   getAuxiliaryProvider,
   selectProvider,
 } from "./providers.ts";
 import type { GenerateOptions, ProviderMessage, ProviderName } from "./providers.ts";
+import { prepareLocalModel } from "./model-readiness.ts";
 import { cleanupResolvedPromptWithModel } from "./composer-cleanup.ts";
 import {
   inferVoicePreviewLine,
@@ -6808,6 +6811,20 @@ function buildRoutes(): RouteDefinition[] {
         episode: forceEndBotcastEpisode(db, userId, ctx.params.id),
       });
     }),
+    route("POST", "/api/botcast/episodes/:id/model-warmup-hold", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      if (typeof body.active !== "boolean") {
+        throw new HttpError(400, "active (boolean) is required.");
+      }
+      const episode = setBotcastModelWarmupHold(
+        db,
+        userId,
+        ctx.params.id,
+        body.active,
+      );
+      json(ctx.res, 200, { ok: true, episode });
+    }),
     route("POST", "/api/botcast/episodes/:id/camera", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
@@ -9230,6 +9247,54 @@ function buildRoutes(): RouteDefinition[] {
           devMemoriesText: user.dev_memories_text ?? "",
         },
       });
+    }),
+    route("POST", "/api/models/prepare", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const body = ctx.body as Record<string, unknown>;
+      const provider =
+        body.provider === "local" ||
+        body.provider === "openai" ||
+        body.provider === "anthropic"
+          ? body.provider
+          : null;
+      const experience =
+        body.experience === "coffee" || body.experience === "signal"
+          ? body.experience
+          : null;
+      if (!provider || !experience) {
+        throw new HttpError(400, "A valid provider and experience are required.");
+      }
+      if (provider !== "local") {
+        json(ctx.res, 200, {
+          ok: true,
+          state: "not_applicable",
+          model: typeof body.model === "string" ? body.model.trim() || null : null,
+          startedAt: null,
+          expiresAt: null,
+          retryAfterMs: null,
+          failure: null,
+        });
+        return;
+      }
+      const requestedModel =
+        (typeof body.model === "string" ? body.model.trim() : "") ||
+        user.preferred_local_model?.trim() ||
+        defaultModelIdForProvider("local");
+      const readiness = await prepareLocalModel({
+        model: requestedModel,
+        options: {
+          secondaryOllamaHost: user.secondary_ollama_host,
+          // Signal generation currently honors explicit paired-model routing,
+          // while Coffee also enables dual-host workload balancing. Keep the
+          // preparation target identical to the owning experience.
+          experimentalDualOllama:
+            experience === "coffee" &&
+            user.experimental_dual_ollama_enabled === 1,
+        },
+        retry: body.retry === true,
+      });
+      json(ctx.res, 200, { ...readiness });
     }),
     route("GET", "/api/models", async (ctx) => {
       const userId = requireAuth(ctx);

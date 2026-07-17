@@ -105,7 +105,11 @@ describe("Coffee player response UI wiring", () => {
     );
     assert.match(
       pageSource,
-      /nameplateTimer: setTimeout\(\(\) => \{[\s\S]*?coffeeCupConsumptionStartedAtMsBySeatKeyRef\.current\.set\([\s\S]*?Date\.now\(\)[\s\S]*?assignCoffeeNameplatePendingBotIds/,
+      /const nameplateCallback = \(\) => \{[\s\S]*?coffeeCupConsumptionStartedAtMsBySeatKeyRef\.current\.set\([\s\S]*?Date\.now\(\)[\s\S]*?assignCoffeeNameplatePendingBotIds/,
+    );
+    assert.match(
+      pageSource,
+      /nameplateTimer: setTimeout\(nameplateCallback, nameplateDelayMs\)/,
     );
     assert.match(
       pageSource,

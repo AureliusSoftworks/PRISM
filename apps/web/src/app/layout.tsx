@@ -13,6 +13,7 @@ import { BlockBrowserInspection } from "./BlockBrowserInspection";
 import { ClientInstallCoach } from "./ClientInstallCoach";
 import { DisableNativeTooltips } from "./DisableNativeTooltips";
 import { PRISM_BRAND_COPY } from "./prismBrand";
+import { PrismMenuProvider } from "./PrismMenu";
 import { RenderPlatformAttribute } from "./RenderPlatformAttribute";
 import { TextFieldContextMenu } from "./TextFieldContextMenu";
 import "./globals.css";
@@ -101,12 +102,14 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body>
-        <RenderPlatformAttribute />
-        <TextFieldContextMenu />
-        <BlockBrowserInspection />
-        <DisableNativeTooltips />
-        {children}
-        <ClientInstallCoach />
+        <PrismMenuProvider>
+          <RenderPlatformAttribute />
+          <TextFieldContextMenu />
+          <BlockBrowserInspection />
+          <DisableNativeTooltips />
+          {children}
+          <ClientInstallCoach />
+        </PrismMenuProvider>
       </body>
     </html>
   );

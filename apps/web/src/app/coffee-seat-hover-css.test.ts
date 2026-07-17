@@ -9,10 +9,10 @@ const css = readFileSync(join(appDir, "page.module.css"), "utf8");
 const pageSource = readFileSync(join(appDir, "page.tsx"), "utf8");
 
 describe("Coffee seat hover treatment", () => {
-  it("keeps the moving mannequin separate from grounded seat furniture", () => {
+  it("uses the shared rig while keeping the moving mannequin grounded above the light", () => {
     assert.match(
       pageSource,
-      /coffeeSeatUnderglow[\s\S]*coffeeSeatHoverBody[\s\S]*<ZenLiveBotMannequin[\s\S]*coffeeSeatTeamBadge[\s\S]*coffeeCup[\s\S]*coffeeSeatGlowPill/
+      /<BotAmbientPresenceRig[\s\S]*motionActive=\{coffeeSeatHoverActive\}[\s\S]*phaseOffsetSeconds=\{layoutIndex \* 1\.8\}[\s\S]*<ZenLiveBotMannequin[\s\S]*<\/BotAmbientPresenceRig>[\s\S]*coffeeSeatTeamBadge[\s\S]*coffeeCup[\s\S]*coffeeSeatGlowPill/
     );
     assert.match(pageSource, /data-hover-active=\{coffeeSeatHoverActive \? "true" : undefined\}/);
   });
@@ -28,29 +28,28 @@ describe("Coffee seat hover treatment", () => {
   });
 
   it("uses a subtle staggered nine-second drift with compact restraint", () => {
-    assert.match(css, /--coffee-hover-amplitude:\s*2px\s*;/);
-    assert.match(css, /--coffee-hover-duration:\s*9s\s*;/);
-    assert.match(css, /data-layout-seat="1"[\s\S]*--coffee-hover-delay:\s*-1\.8s\s*;/);
-    assert.match(css, /data-layout-seat="4"[\s\S]*--coffee-hover-delay:\s*-7\.2s\s*;/);
-    assert.match(css, /data-compact="true"[\s\S]*\.coffeeSeat[\s\S]*--coffee-hover-amplitude:\s*1px\s*;/);
-    assert.match(css, /@keyframes coffeeSeatHoverDrift[\s\S]*translateY\(calc\(-1 \* var\(--coffee-hover-amplitude\)\)\)/);
+    assert.match(css, /\.coffeeSeat\s*\{[\s\S]*--bot-ambient-hover-amplitude:\s*2px\s*;/);
+    assert.match(css, /\.botAmbientPresenceRig\s*\{[\s\S]*--bot-ambient-hover-duration:\s*9s\s*;/);
+    assert.match(pageSource, /phaseOffsetSeconds=\{layoutIndex \* 1\.8\}/);
+    assert.match(css, /data-compact="true"[\s\S]*\.coffeeSeat[\s\S]*--bot-ambient-hover-amplitude:\s*1px\s*;/);
+    assert.match(css, /@keyframes botAmbientHoverDrift[\s\S]*translateY\(calc\(-1 \* var\(--bot-ambient-hover-amplitude\)\)\)/);
   });
 
   it("provides restrained light-mode and reduced-motion fallbacks", () => {
     assert.match(
       css,
-      /\.themeLight\.coffeeShell \.coffeeSeat[\s\S]*--coffee-underglow-contact-opacity:\s*0\.28\s*;/
+      /\.botAmbientPresenceRig\[data-theme="light"\][\s\S]*--bot-ambient-underglow-contact-opacity:\s*0\.19\s*;/
     );
     assert.match(
       css,
-      /@media \(prefers-reduced-motion:\s*reduce\)[\s\S]*\.coffeeSeatHoverBody[\s\S]*animation:\s*none\s*;[\s\S]*transform:\s*translateY\(0\)\s*;/
+      /@media \(prefers-reduced-motion:\s*reduce\)[\s\S]*\.botAmbientPresenceBody[\s\S]*animation:\s*none\s*;[\s\S]*transform:\s*translateY\(0\)\s*;/
     );
   });
 
   it("uses browser-safe non-zero underglow geometry", () => {
-    assert.match(css, /--coffee-underglow-width:\s*88%\s*;/);
-    assert.match(css, /--coffee-underglow-height:\s*24%\s*;/);
-    assert.match(css, /\.coffeeSeatUnderglow\s*\{[\s\S]*width:\s*var\(--coffee-underglow-width\)\s*;/);
-    assert.doesNotMatch(css, /calc\([^)]*\*\s*var\(--coffee-underglow/);
+    assert.match(css, /--bot-ambient-underglow-width:\s*88%\s*;/);
+    assert.match(css, /--bot-ambient-underglow-height:\s*24%\s*;/);
+    assert.match(css, /\.botAmbientUnderglow\s*\{[\s\S]*width:\s*var\(--bot-ambient-underglow-width\)\s*;/);
+    assert.doesNotMatch(css, /calc\([^)]*\*\s*var\(--bot-ambient-underglow/);
   });
 });

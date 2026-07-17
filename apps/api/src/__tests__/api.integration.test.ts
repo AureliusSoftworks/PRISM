@@ -139,6 +139,38 @@ after(() => {
 });
 
 describe("API request integration", () => {
+  it("authenticates model preparation and never warms an online route", async () => {
+    const anonymous = createClient();
+    const denied = await anonymous.request(
+      "/api/models/prepare",
+      jsonInit({ provider: "openai", experience: "coffee" }),
+    );
+    assert.equal(denied.status, 400);
+
+    const client = createClient();
+    const registered = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "model-preparation@example.com",
+        password: "model-preparation-password",
+      }),
+    );
+    assert.equal(registered.status, 201);
+    const response = await client.request(
+      "/api/models/prepare",
+      jsonInit({
+        provider: "openai",
+        model: "gpt-test",
+        experience: "signal",
+      }),
+    );
+    const payload = await json(response);
+    assert.equal(response.status, 200);
+    assert.equal(payload.state, "not_applicable");
+    assert.equal(payload.model, "gpt-test");
+    assert.equal(JSON.stringify(payload).includes(config.ollamaHost), false);
+  });
+
   it("preserves normal exports and produces a redacted developer transcript on request", async () => {
     const client = createClient();
     const email = "developer-export@example.com";

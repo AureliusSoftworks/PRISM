@@ -26,6 +26,7 @@ import {
   nextBotcastFallbackStudioAccentVariant,
   readBotcastShowIntroAudio,
   setBotcastEpisodeCameraMode,
+  setBotcastModelWarmupHold,
   storeBotcastShowIntroAudio,
   updateBotcastShow,
 } from "../botcast.ts";
@@ -104,6 +105,42 @@ function generation(provider: LlmProvider) {
 }
 
 describe("Botcast persistence and isolation", () => {
+  it("persists idempotent Signal model-warmup holds and closes them on cut", () => {
+    const db = fixture();
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Warmup timing",
+      });
+      const started = setBotcastModelWarmupHold(
+        db,
+        "user-1",
+        episode.id,
+        true,
+      );
+      assert.ok(started.modelWarmupHoldStartedAt);
+      const duplicate = setBotcastModelWarmupHold(
+        db,
+        "user-1",
+        episode.id,
+        true,
+      );
+      assert.equal(
+        duplicate.modelWarmupHoldStartedAt,
+        started.modelWarmupHoldStartedAt,
+      );
+      db.prepare(
+        "UPDATE botcast_episodes SET model_warmup_hold_started_at = ? WHERE id = ?",
+      ).run(new Date(Date.now() - 5_000).toISOString(), episode.id);
+      const ended = forceEndBotcastEpisode(db, "user-1", episode.id);
+      assert.equal(ended.modelWarmupHoldStartedAt, null);
+      assert.ok(ended.modelWarmupHoldDurationMs >= 4_500);
+    } finally {
+      db.close();
+    }
+  });
+
   it("uses the local ident by default and revisions cached ElevenLabs show audio", () => {
     const db = fixture();
     try {

@@ -567,6 +567,41 @@ export function normalizeOptionalBotAudioVoiceProfileV1(value: unknown): BotAudi
   return normalizeBotAudioVoiceProfileV1(candidate);
 }
 
+/** Resolve a saved bot's effective profile without letting an older local
+ * customization hide a newly authored ElevenLabs identity. A user's chosen
+ * ElevenLabs voice remains authoritative; otherwise the authored provider
+ * identity and performance direction fill the legacy override's gap. */
+export function resolveBotAudioVoiceProfileV1(
+  authoredValue: unknown,
+  overrideValue: unknown,
+): BotAudioVoiceProfileV2 {
+  const authored = normalizeBotAudioVoiceProfileV1(authoredValue);
+  const override = normalizeOptionalBotAudioVoiceProfileV1(overrideValue);
+  if (!override) return authored;
+
+  const authoredElevenLabsVoiceId =
+    authored.elevenLabsVoiceIdOverride ?? authored.elevenLabsVoiceId ?? null;
+  if (!authoredElevenLabsVoiceId) return override;
+
+  const overrideElevenLabsVoiceId =
+    override.elevenLabsVoiceIdOverride ?? override.elevenLabsVoiceId ?? null;
+  if (overrideElevenLabsVoiceId) {
+    return normalizeBotAudioVoiceProfileV1({
+      ...override,
+      elevenLabsDirection:
+        override.elevenLabsDirection ?? authored.elevenLabsDirection,
+    });
+  }
+
+  return normalizeBotAudioVoiceProfileV1({
+    ...override,
+    elevenLabsVoiceId: authored.elevenLabsVoiceId,
+    elevenLabsVoiceIdOverride: authored.elevenLabsVoiceIdOverride,
+    elevenLabsEffect: authored.elevenLabsEffect,
+    elevenLabsDirection: authored.elevenLabsDirection,
+  });
+}
+
 export function parseStoredBotAudioVoiceProfileV1(value: unknown): BotAudioVoiceProfileV2 | null {
   if (typeof value !== "string" || value.trim().length === 0) return null;
   try { return normalizeOptionalBotAudioVoiceProfileV1(JSON.parse(value)); } catch { return null; }

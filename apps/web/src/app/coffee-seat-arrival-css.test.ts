@@ -9,6 +9,10 @@ const coffeeSeatPlateEmojiPath = join(
   dirname(fileURLToPath(import.meta.url)),
   "CoffeeSeatPlateEmoji.tsx"
 );
+const crtPixelGlyphPath = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "CrtPixelGlyph.tsx"
+);
 const pagePath = join(dirname(fileURLToPath(import.meta.url)), "page.tsx");
 const settingsPanelPath = join(dirname(fileURLToPath(import.meta.url)), "SettingsPanel.tsx");
 const css = readFileSync(cssPath, "utf8")
@@ -16,6 +20,7 @@ const css = readFileSync(cssPath, "utf8")
   .replace(/\(\s+/gu, "(")
   .replace(/\s+\)/gu, ")");
 const coffeeSeatPlateEmojiSource = readFileSync(coffeeSeatPlateEmojiPath, "utf8");
+const crtPixelGlyphSource = readFileSync(crtPixelGlyphPath, "utf8");
 const pageSource = readFileSync(pagePath, "utf8").replace(/\s+/gu, " ");
 const settingsPanelSource = readFileSync(settingsPanelPath, "utf8");
 
@@ -315,7 +320,7 @@ describe("Coffee seat arrival CSS", () => {
     );
     assert.match(
       pageSource,
-      /isTalking=\{isTableTypingThisSeat\} blinkWhileTalking mouthShape=\{mouthShapeWhileTyping\}/
+      /isTalking=\{isTableTypingThisSeat\}[\s\S]*?blinkWhileTalking[\s\S]*?mouthShape=\{mouthShapeWhileTyping\}/
     );
   });
 
@@ -560,14 +565,14 @@ describe("Coffee seat arrival CSS", () => {
     assert.match(coffeeSeatPlateEmojiSource, /"--bot-face-weight-glow-radius-scale"/);
     assert.match(coffeeSeatPlateEmojiSource, /"--bot-face-weight-glow-strength-scale"/);
     assert.match(coffeeSeatPlateEmojiSource, /"--bot-face-weight-glow-stroke"/);
-    assert.match(coffeeSeatPlateEmojiSource, /data-crt-glyph-layer="true"/);
+    assert.match(crtPixelGlyphSource, /data-crt-glyph-layer="true"/);
     assert.match(
       coffeeSeatPlateEmojiSource,
-      /data-coffee-plate-emoji-part=\{part\}[\s\S]*data-crt-glyph-layer="true"[\s\S]*data-crt-glyph-content=\{renderedGlyph\}/
+      /data-coffee-plate-emoji-part=\{part\}[\s\S]*?<CrtPixelGlyph[\s\S]*?glyph=\{renderedGlyph\}/
     );
-    assert.match(coffeeSeatPlateEmojiSource, /data-crt-glyph-content=\{thinkingSpinnerGlyph\}/);
-    assert.match(coffeeSeatPlateEmojiSource, /data-crt-glyph-content="\?"/);
-    assert.match(coffeeSeatPlateEmojiSource, /data-crt-glyph-content=\{renderedGlyph\}/);
+    assert.match(coffeeSeatPlateEmojiSource, /glyph=\{thinkingSpinnerGlyph\}/);
+    assert.match(coffeeSeatPlateEmojiSource, /glyph="\?"/);
+    assert.match(coffeeSeatPlateEmojiSource, /glyph=\{renderedGlyph\}/);
     assert.doesNotMatch(coffeeSeatPlateEmojiSource, /function faceGlowRadiiForWeight/);
     assert.doesNotMatch(coffeeSeatPlateEmojiSource, /function faceGlowAlphaForWeight/);
     assert.doesNotMatch(coffeeSeatPlateEmojiSource, /--bot-face-glow-tight-radius/);

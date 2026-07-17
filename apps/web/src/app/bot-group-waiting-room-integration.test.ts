@@ -193,6 +193,10 @@ describe("bot group waiting-room integration", () => {
     assert.match(cssSource, /@keyframes botGroupWaitingRoomArrival/);
     assert.match(cssSource, /@keyframes botGroupWaitingRoomDeparture/);
     assert.match(
+      pageSource,
+      /data-room-transition-anchor=\{bot\.id\}[\s\S]*?<BotAmbientPresenceRig[\s\S]*?phaseOffsetSeconds=\{placementIndex \* 1\.8\}/,
+    );
+    assert.match(
       cssSource,
       /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.botGroupWaitingRoomPresence/,
     );

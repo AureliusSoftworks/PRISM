@@ -30,6 +30,9 @@ export {
 
 export {
   AUTO_FALLBACK_CHAIN_FALLBACK_COUNT,
+  AUTO_FALLBACK_CHAIN_MAX_ATTEMPT_COUNT,
+  AUTO_FALLBACK_CHAIN_MAX_FALLBACK_COUNT,
+  AUTO_FALLBACK_CHAIN_MIN_FALLBACK_COUNT,
   AUTO_FALLBACK_CHAIN_VERSION,
   AUTO_FALLBACK_MODEL_ID_MAX_LENGTH,
   autoFallbackModelKey,
@@ -205,6 +208,7 @@ export {
   normalizeElevenLabsVoiceDirection,
   normalizeElevenLabsVoiceEffect,
   normalizeOptionalBotAudioVoiceProfileV1,
+  resolveBotAudioVoiceProfileV1,
   normalizeVoiceMode,
   normalizeVoiceDeliveryMood,
   resolveElevenLabsVoicePerformance,
@@ -2370,3 +2374,4 @@ export interface CoffeePollPlayerVoteResponse {
 }
 export * from "./botcast.js";
 export * from "./continuityVersion.js";
+export * from "./modelReadiness.js";

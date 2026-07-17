@@ -1184,6 +1184,8 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       started_at TEXT NOT NULL,
       completed_at TEXT,
       runtime_ms INTEGER,
+      model_warmup_hold_duration_ms INTEGER NOT NULL DEFAULT 0,
+      model_warmup_hold_started_at TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -2497,6 +2499,24 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   if (!botcastEpisodeColumns.some((column) => column.name === "duration_minutes")) {
     db.exec(
       "ALTER TABLE botcast_episodes ADD COLUMN duration_minutes INTEGER CHECK (duration_minutes IS NULL OR (duration_minutes >= 3 AND duration_minutes <= 30));"
+    );
+  }
+  if (
+    !botcastEpisodeColumns.some(
+      (column) => column.name === "model_warmup_hold_duration_ms",
+    )
+  ) {
+    db.exec(
+      "ALTER TABLE botcast_episodes ADD COLUMN model_warmup_hold_duration_ms INTEGER NOT NULL DEFAULT 0;",
+    );
+  }
+  if (
+    !botcastEpisodeColumns.some(
+      (column) => column.name === "model_warmup_hold_started_at",
+    )
+  ) {
+    db.exec(
+      "ALTER TABLE botcast_episodes ADD COLUMN model_warmup_hold_started_at TEXT;",
     );
   }
   const hasBotTopPColumn = botColumns.some(

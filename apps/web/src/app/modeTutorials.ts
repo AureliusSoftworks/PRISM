@@ -36,7 +36,7 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Choose how replies recover",
-        body: "AUTO keeps the current response model as Primary, then quietly tries your two saved fallbacks if a reply fails validation. Image generation keeps its own LOCAL/ONLINE choice in Images. Voices default to System TTS. In bot customization, choose an ElevenLabs voice from the list or paste a Voice ID override; Prism uses it only for eligible ONLINE speech. Voice Settings can narrow those bot menus to one ElevenLabs voice collection.",
+        body: "AUTO keeps the current response model as Primary, then quietly tries your ordered chain of one to five saved local or online fallbacks if a reply fails validation. Image generation keeps its own LOCAL/ONLINE choice in Images. Voices default to System TTS. In bot customization, choose an ElevenLabs voice from the list or open “Use an exact Voice ID” for a portable override; Prism uses it only for eligible ONLINE speech. Voice Settings can narrow those bot menus to one ElevenLabs voice collection.",
         clickLabel: "the LOCAL, AUTO, ONLINE control",
         targetSelector: '[data-tutorial-target="auto-response-mode"]',
       },
@@ -88,7 +88,7 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Set the table",
-        body: "Duration, presets, and group settings steer the whole session together. Auto duration is open-ended with no countdown; switch to Timed when you want a 3-30 minute table. Account default uses the model saved in Settings; AUTO is the separate response-routing control and can recover through your saved fallbacks.",
+        body: "Duration, presets, and group settings steer the whole session together. Auto duration is open-ended with no countdown; switch to Timed when you want a 3-30 minute table. Account default uses the model saved in Settings; AUTO is the separate response-routing control and can recover through your ordered chain of one to five local or online fallbacks. When a selected local model needs a first load, PRISM may briefly hold the table and pause its clock; the conversation resumes automatically once the room is ready.",
         clickLabel: "New session setup or Configure settings",
         targetSelector: '[data-tutorial-target="coffee-session-setup"]',
       },
@@ -128,6 +128,12 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
         targetSelector: '[data-tutorial-target="botcast-brand-controls"]',
       },
       {
+        heading: "Build an audience",
+        body: "Every show begins with no audience. Completed episodes build a simulated viewer base, overall rating, and listener reviews here. Guest and topic choices can shift the pulse, so the archive becomes the foundation of the show’s emerging economy.",
+        clickLabel: "the audience pulse",
+        targetSelector: '[data-tutorial-target="botcast-audience-pulse"]',
+      },
+      {
         heading: "Give it an opening sound",
         body: "Every show has a deterministic, host-persona-led Signal Synth ident made and played locally—no key or network required. Playback stays here in the strip: use Play intro to audition exactly what the next episode will use. Once the show has custom art, open its gear to create or refresh a cached six-second ElevenLabs intro, or switch back to Signal Synth. Until then, those tuning actions stay in this strip. Signal never generates music when an episode begins.",
         clickLabel: "the opening ident controls",
@@ -141,7 +147,7 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Book tonight’s episode",
-        body: "Choose one guest, set the topic, and write an optional private angle—or use Randomize booking to fill all three locally from PRISM conversation starters, then edit anything you like. Host and guest bring their ready Powers on mic, including cup pace when a Power affects it. Episode length defaults to Auto: no countdown, at least a few real exchanges, then a natural close when the conversation settles; choose a timed target when you want one. Beginning the episode opens a short, skippable show-branded pre-roll while Signal prepares the host’s opening line and paces the next safe handoff ahead. The default stage places both bots in the authored chairs and both cups on the table. If generated studio furniture lands differently, open Align stage and drag them into place; Signal saves that alignment for every episode of the show, and close-up pans center on those saved bot positions. Pick LOCAL, AUTO, or ONLINE. AUTO keeps the account primary and recovers through your configured fallback chain; the other lanes can use the account model or a recording-only override. Signal locks that routing when the episode begins. The brief shapes the host but never goes on mic. Signal Settings can also opt ElevenLabs voices into sparse, saved vocal reactions.",
+        body: "Choose one guest, set the topic, and write an optional private angle—or use Randomize booking to fill all three locally from PRISM conversation starters, then edit anything you like. Host and guest bring their ready Powers on mic, including cup pace when a Power affects it. Episode length defaults to Auto: no countdown, at least a few real exchanges, then a natural close when the conversation settles; choose a timed target when you want one. Beginning the episode opens a short, skippable show-branded pre-roll while Signal prepares the host’s opening line and paces the next safe handoff ahead. If a selected local model is still loading when that pre-roll ends, PRISM holds the studio and pauses the episode clock until the opening is ready. The default stage places both bots in the authored chairs and both cups on the table. If generated studio furniture lands differently, open Align stage and drag them into place; Signal saves that alignment for every episode of the show, and close-up pans center on those saved bot positions. Pick LOCAL, AUTO, or ONLINE. AUTO keeps the account primary and recovers through your configured fallback chain; the other lanes can use the account model or a recording-only override. Signal locks that routing when the episode begins. The brief shapes the host but never goes on mic. Signal Settings can also opt ElevenLabs voices into sparse, saved vocal reactions.",
         clickLabel: "the episode setup desk",
         targetSelector: '[data-tutorial-target="botcast-setup"]',
       },

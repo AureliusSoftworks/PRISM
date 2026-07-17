@@ -143,6 +143,8 @@ type BotcastEpisodeRow = {
   started_at: string;
   completed_at: string | null;
   runtime_ms: number | null;
+  model_warmup_hold_duration_ms: number;
+  model_warmup_hold_started_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -609,6 +611,11 @@ function mapEpisodeSummary(row: BotcastEpisodeRow): BotcastEpisodeSummary {
     startedAt: row.started_at,
     completedAt: row.completed_at,
     runtimeMs: row.runtime_ms,
+    modelWarmupHoldDurationMs: Math.max(
+      0,
+      row.model_warmup_hold_duration_ms ?? 0,
+    ),
+    modelWarmupHoldStartedAt: row.model_warmup_hold_started_at ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -1775,6 +1782,7 @@ function completeEpisode(
   outcome: BotcastEpisodeOutcome,
   now: string,
 ): void {
+  closeActiveBotcastModelWarmupHold(db, userId, episode.id, now);
   const runtimeMs = botcastReplayTimeline(episode.messages, episode.events).durationMs;
   db.prepare(
     `UPDATE botcast_episodes
@@ -1786,6 +1794,59 @@ function completeEpisode(
       WHERE user_id = ? AND episode_id = ? AND ended_at IS NULL`,
   ).run(now, userId, episode.id);
   recordEvent(db, userId, episode.id, "episode_completed", { outcome, runtimeMs }, now);
+}
+
+function closeActiveBotcastModelWarmupHold(
+  db: DatabaseSync,
+  userId: string,
+  episodeId: string,
+  now: string,
+): void {
+  const row = db
+    .prepare(
+      `SELECT model_warmup_hold_started_at
+         FROM botcast_episodes
+        WHERE id = ? AND user_id = ?`,
+    )
+    .get(episodeId, userId) as
+    | { model_warmup_hold_started_at: string | null }
+    | undefined;
+  if (!row?.model_warmup_hold_started_at) return;
+  const startedAtMs = Date.parse(row.model_warmup_hold_started_at);
+  const nowMs = Date.parse(now);
+  const elapsedMs =
+    Number.isFinite(startedAtMs) && Number.isFinite(nowMs)
+      ? Math.max(0, nowMs - startedAtMs)
+      : 0;
+  db.prepare(
+    `UPDATE botcast_episodes
+        SET model_warmup_hold_duration_ms = model_warmup_hold_duration_ms + ?,
+            model_warmup_hold_started_at = NULL,
+            updated_at = ?
+      WHERE id = ? AND user_id = ?`,
+  ).run(elapsedMs, now, episodeId, userId);
+}
+
+export function setBotcastModelWarmupHold(
+  db: DatabaseSync,
+  userId: string,
+  episodeId: string,
+  active: boolean,
+): BotcastEpisode {
+  const episode = getBotcastEpisode(db, userId, episodeId);
+  if (episode.status === "completed") return episode;
+  const now = new Date().toISOString();
+  if (active) {
+    db.prepare(
+      `UPDATE botcast_episodes
+          SET model_warmup_hold_started_at = COALESCE(model_warmup_hold_started_at, ?),
+              updated_at = ?
+        WHERE id = ? AND user_id = ?`,
+    ).run(now, now, episodeId, userId);
+  } else {
+    closeActiveBotcastModelWarmupHold(db, userId, episodeId, now);
+  }
+  return getBotcastEpisode(db, userId, episodeId);
 }
 
 export function forceEndBotcastEpisode(
@@ -1864,6 +1925,10 @@ export async function advanceBotcastEpisode(
       durationMinutes: episode.durationMinutes,
       startedAtMs: Date.parse(episode.startedAt),
       nowMs: Date.parse(now),
+      modelWarmupHoldDurationMs: episode.modelWarmupHoldDurationMs,
+      modelWarmupHoldStartedAtMs: episode.modelWarmupHoldStartedAt
+        ? Date.parse(episode.modelWarmupHoldStartedAt)
+        : null,
     });
   const nextSegment = departurePending
     ? episode.segment
@@ -1946,7 +2011,7 @@ export async function advanceBotcastEpisode(
     );
     if (!resolvedChain) {
       throw new Error(
-        "Signal AUTO needs one primary model and two distinct fallbacks in Settings.",
+        "Signal AUTO needs one primary model and one to five distinct fallbacks in Settings.",
       );
     }
     const providerFactory = generation.providerFactory ?? selectProvider;
@@ -1984,7 +2049,7 @@ export async function advanceBotcastEpisode(
         },
       })),
       perAttemptTimeoutMs: 60_000,
-      totalTimeoutMs: 150_000,
+      totalTimeoutMs: resolvedChain.length * 60_000,
     });
     raw = result.value;
     providerUsed = result.provider;

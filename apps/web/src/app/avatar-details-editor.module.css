@@ -304,14 +304,14 @@
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--fg) 32%, var(--line));
   border-radius: 9px;
-  background: #050608;
+  background-color: #050608;
   box-shadow: 0 0 18px
     color-mix(in srgb, var(--editor-bot-color, var(--accent)) 8%, transparent);
 }
 
 .editor[data-editor-theme="light"] .canvasFrame {
   border-color: color-mix(in srgb, #050608 54%, var(--line));
-  background: #ffffff;
+  background-color: #050608;
   box-shadow: 0 0 18px rgba(12, 18, 28, 0.08);
 }
 

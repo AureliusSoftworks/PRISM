@@ -44,6 +44,8 @@ import {
   type ZenLiveBotMouthShape,
 } from "./zenLiveMouth.ts";
 import { coffeeSeatGlyphOpticalOffset } from "./coffee-seat-glyph-optical-offset.ts";
+import { CrtPixelGlyph } from "./CrtPixelGlyph";
+export { CRT_FACE_PIXEL_GRID_SIZE } from "./crt-pixel-glyph";
 
 function randomBetween(lo: number, hi: number): number {
   return lo + Math.random() * (hi - lo);
@@ -218,6 +220,8 @@ export type CoffeeSeatPlateEmojiProps = {
   showThinkingSpinner?: boolean;
   /** Replaces the two-part face with a single question-mark glyph. */
   showQuestionMark?: boolean;
+  /** Rasterizes glyph alpha against this fixed screen grid before phosphor. */
+  pixelGridSize?: number | null;
   baseText: string;
   rotateDeg: number;
   voicePreset: BotVoicePreset;
@@ -297,6 +301,7 @@ export function CoffeeSeatPlateEmoji({
   scheduleKey,
   showThinkingSpinner = false,
   showQuestionMark = false,
+  pixelGridSize,
   baseText,
   rotateDeg,
   voicePreset,
@@ -715,12 +720,10 @@ export function CoffeeSeatPlateEmoji({
           data-coffee-plate-thinking-glyph={thinkingSpinnerGlyph}
           data-face-font={faceMouthFont ?? undefined}
         >
-          <span
-            data-crt-glyph-layer="true"
-            data-crt-glyph-content={thinkingSpinnerGlyph}
-          >
-            {thinkingSpinnerGlyph}
-          </span>
+          <CrtPixelGlyph
+            glyph={thinkingSpinnerGlyph}
+            pixelGridSize={pixelGridSize}
+          />
         </span>
       ) : questionGlyphActive ? (
         <span
@@ -728,9 +731,7 @@ export function CoffeeSeatPlateEmoji({
           data-coffee-plate-question-glyph="?"
           data-face-font={faceMouthFont ?? faceEyesFont ?? undefined}
         >
-          <span data-crt-glyph-layer="true" data-crt-glyph-content="?">
-            ?
-          </span>
+          <CrtPixelGlyph glyph="?" pixelGridSize={pixelGridSize} />
         </span>
       ) : (
         (() => {
@@ -777,17 +778,15 @@ export function CoffeeSeatPlateEmoji({
                     : undefined
                 }
               >
-                <span
+                <CrtPixelGlyph
                   ref={
                     part === "mouth" && renderedFaceMouthCharacter
                       ? customMouthGlyphRef
                       : undefined
                   }
-                  data-crt-glyph-layer="true"
-                  data-crt-glyph-content={renderedGlyph}
-                >
-                  {renderedGlyph}
-                </span>
+                  glyph={renderedGlyph}
+                  pixelGridSize={pixelGridSize}
+                />
               </span>
             );
           });

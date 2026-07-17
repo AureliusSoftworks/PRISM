@@ -25,7 +25,7 @@ describe("bot group canvas filtering", () => {
     );
     assert.match(
       pageSource,
-      /if \(activeBotLibraryGroupFilter && selectedBotIds\.length === 0\)[\s\S]*?openBotLibraryGroupBotContextMenu/,
+      /if \(activeBotLibraryGroupFilter\) \{[\s\S]*?openBotLibraryGroupBotContextMenu/,
     );
     assert.equal(pageSource.match(/openCanvasBotContextMenu\(/g)?.length, 2);
   });
@@ -41,14 +41,15 @@ describe("bot group canvas filtering", () => {
     assert.match(heroSource, /focusedBotLibraryGroup\.description\.trim\(\)/);
     assert.match(heroSource, /Explore \{focusedBotLibraryGroup\.name\}/);
     assert.match(heroSource, /"Protect group"/);
-    assert.match(heroSource, />Export group</);
+    assert.match(heroSource, /label: "Export group"/);
     assert.match(
       heroSource,
       /openAddBotFromLibraryGroupDialog\(\s*focusedBotLibraryGroup\.id,?\s*\)/,
     );
     assert.match(heroSource, />Add bots</);
-    assert.match(heroSource, />\s*Edit\s*</);
-    assert.match(heroSource, />Delete</);
+    assert.match(heroSource, />Group actions</);
+    assert.match(heroSource, /label: "Edit details"/);
+    assert.match(heroSource, /label: "Delete group"/);
     assert.match(
       cssSource,
       /\.botGroupHero\s*\{[\s\S]*?width:\s*min\([\s\S]*?--empty-state-browser-width[\s\S]*?var\(--bot-library-group-gradient\)/,
@@ -76,7 +77,7 @@ describe("bot group canvas filtering", () => {
     );
     assert.match(
       heroSource,
-      /!focusedBotLibraryGroup\.builtIn \? \([\s\S]*?>Add bots<[\s\S]*?>\s*Edit\s*<[\s\S]*?>Delete</,
+      /if \(!focusedBotLibraryGroup\.builtIn\) \{[\s\S]*?label: "Edit details"[\s\S]*?label: "Delete group"/,
     );
   });
 

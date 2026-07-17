@@ -1,5 +1,10 @@
 export const AUTO_FALLBACK_CHAIN_VERSION = 1 as const;
-export const AUTO_FALLBACK_CHAIN_FALLBACK_COUNT = 2 as const;
+export const AUTO_FALLBACK_CHAIN_MIN_FALLBACK_COUNT = 1 as const;
+export const AUTO_FALLBACK_CHAIN_MAX_FALLBACK_COUNT = 5 as const;
+export const AUTO_FALLBACK_CHAIN_MAX_ATTEMPT_COUNT = 6 as const;
+/** @deprecated Use AUTO_FALLBACK_CHAIN_MAX_FALLBACK_COUNT. */
+export const AUTO_FALLBACK_CHAIN_FALLBACK_COUNT =
+  AUTO_FALLBACK_CHAIN_MAX_FALLBACK_COUNT;
 export const AUTO_FALLBACK_MODEL_ID_MAX_LENGTH = 240;
 
 export type AutoFallbackProvider = "local" | "openai" | "anthropic";
@@ -20,7 +25,7 @@ export interface AutoFallbackModelRef {
 
 export interface AutoFallbackChainV1 {
   v: typeof AUTO_FALLBACK_CHAIN_VERSION;
-  fallbacks: [AutoFallbackModelRef, AutoFallbackModelRef];
+  fallbacks: AutoFallbackModelRef[];
 }
 
 export interface AutoFallbackAttemptTraceV1 extends AutoFallbackModelRef {
@@ -73,13 +78,20 @@ export function normalizeAutoFallbackChain(
   value: unknown
 ): AutoFallbackChainV1 | null {
   if (!isRecord(value) || value.v !== AUTO_FALLBACK_CHAIN_VERSION) return null;
-  if (!Array.isArray(value.fallbacks) || value.fallbacks.length !== 2) return null;
-  const first = normalizeAutoFallbackModelRef(value.fallbacks[0]);
-  const second = normalizeAutoFallbackModelRef(value.fallbacks[1]);
-  if (!first || !second || autoFallbackModelKey(first) === autoFallbackModelKey(second)) {
+  if (
+    !Array.isArray(value.fallbacks) ||
+    value.fallbacks.length < AUTO_FALLBACK_CHAIN_MIN_FALLBACK_COUNT ||
+    value.fallbacks.length > AUTO_FALLBACK_CHAIN_MAX_FALLBACK_COUNT
+  ) {
     return null;
   }
-  return { v: AUTO_FALLBACK_CHAIN_VERSION, fallbacks: [first, second] };
+  const fallbacks = value.fallbacks.map(normalizeAutoFallbackModelRef);
+  if (fallbacks.some((fallback) => fallback === null)) return null;
+  const normalized = fallbacks as AutoFallbackModelRef[];
+  if (new Set(normalized.map(autoFallbackModelKey)).size !== normalized.length) {
+    return null;
+  }
+  return { v: AUTO_FALLBACK_CHAIN_VERSION, fallbacks: normalized };
 }
 
 export function parseStoredAutoFallbackChain(
@@ -103,13 +115,17 @@ export function serializeAutoFallbackChain(
 export function autoFallbackResolvedChain(
   primary: AutoFallbackModelRef,
   chain: AutoFallbackChainV1 | null | undefined
-): [AutoFallbackModelRef, AutoFallbackModelRef, AutoFallbackModelRef] | null {
+): AutoFallbackModelRef[] | null {
   const normalizedPrimary = normalizeAutoFallbackModelRef(primary);
   const normalizedChain = normalizeAutoFallbackChain(chain);
   if (!normalizedPrimary || !normalizedChain) return null;
-  const resolved = [normalizedPrimary, ...normalizedChain.fallbacks] as const;
-  if (new Set(resolved.map(autoFallbackModelKey)).size !== resolved.length) return null;
-  return [resolved[0], resolved[1], resolved[2]];
+  const primaryKey = autoFallbackModelKey(normalizedPrimary);
+  const remainingFallbacks = normalizedChain.fallbacks.filter(
+    (fallback) => autoFallbackModelKey(fallback) !== primaryKey,
+  );
+  return remainingFallbacks.length > 0
+    ? [normalizedPrimary, ...remainingFallbacks]
+    : null;
 }
 
 export function normalizeAutoRecoveryTrace(
@@ -122,7 +138,7 @@ export function normalizeAutoRecoveryTrace(
     : "";
   if (!finalModel || !Array.isArray(value.attempts)) return undefined;
   const attempts = value.attempts
-    .slice(0, 3)
+    .slice(0, AUTO_FALLBACK_CHAIN_MAX_ATTEMPT_COUNT)
     .map((attempt): AutoFallbackAttemptTraceV1 | null => {
       const ref = normalizeAutoFallbackModelRef(attempt);
       if (!ref || !isRecord(attempt)) return null;

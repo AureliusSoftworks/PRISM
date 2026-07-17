@@ -11821,7 +11821,7 @@ async function generateCoffeePollStructuredBallot(args: {
           },
         })),
         perAttemptTimeoutMs: 30_000,
-        totalTimeoutMs: 75_000,
+        totalTimeoutMs: resolvedAutoChain.length * 30_000,
         signal: args.settings.signal,
         validate: (raw) => {
           const ballot = parseCoffeePollStructuredBallot(raw, args.poll.options);
@@ -13970,7 +13970,7 @@ async function generateCoffeeBotReply(args: {
           },
         })),
         perAttemptTimeoutMs: 30_000,
-        totalTimeoutMs: 75_000,
+        totalTimeoutMs: resolvedAutoChain.length * 30_000,
         signal: settings.signal,
         isTerminalError: (error) => error instanceof CoffeeAutoStaleTurnError,
         validate: (raw) => {

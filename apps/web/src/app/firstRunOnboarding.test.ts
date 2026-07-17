@@ -47,6 +47,12 @@ describe("first-run onboarding", () => {
     }
   });
 
+  it("introduces the customizable mixed-provider Auto chain", () => {
+    assert.match(pageSource, /ordered chain of one to five/u);
+    assert.match(pageSource, /local or online fallback models/u);
+    assert.match(pageSource, /at least one fallback in Settings/u);
+  });
+
   it("names chat routing separately from image and voice routing", () => {
     const providerStep = FIRST_RUN_SETUP_STEPS.find(
       (step) => step.id === "provider",
@@ -55,7 +61,7 @@ describe("first-run onboarding", () => {
     assert.match(pageSource, /Image generation has its own LOCAL\/ONLINE choice/u);
     assert.match(
       pageSource,
-      /choose an ElevenLabs voice from the list or paste a Voice ID\s*override in bot customization from any chat mode; Prism uses\s*it only for eligible ONLINE speech/u,
+      /choose an ElevenLabs voice from the list or open “Use an exact\s*Voice ID” for a portable override in bot customization from\s*any chat mode; Prism uses it only for eligible ONLINE speech/u,
     );
     assert.match(pageSource, /Chat home base/u);
   });

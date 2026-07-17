@@ -198,6 +198,27 @@ describe("Botcast episode state", () => {
     }), true);
   });
 
+  it("subtracts completed and active model warmup holds from Signal time", () => {
+    const threeExchanges = Array.from({ length: 6 }, (_, index) => ({
+      speakerRole: index % 2 === 0 ? "host" as const : "guest" as const,
+      content: "A line.",
+    }));
+    assert.equal(botcastSessionShouldClose({
+      messages: threeExchanges,
+      durationMinutes: 3,
+      startedAtMs: 0,
+      nowMs: 4 * 60_000,
+      modelWarmupHoldDurationMs: 2 * 60_000,
+    }), false);
+    assert.equal(botcastSessionShouldClose({
+      messages: threeExchanges,
+      durationMinutes: 3,
+      startedAtMs: 0,
+      nowMs: 4 * 60_000,
+      modelWarmupHoldStartedAtMs: 2 * 60_000,
+    }), false);
+  });
+
   it("requires resistance and a warning before departure", () => {
     const calm = { level: 0 as const, warningCount: 0, stage: "calm" as const };
     const resistance = applyBotcastProducerCueToTension(calm, { kind: "press_harder" });

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  coffeeSessionClockHoldReasons,
   coffeeSessionClockShouldTick,
   coffeeSessionEndsAtAfterPausedClockTick,
   reconcileCoffeeSessionClock,
@@ -29,6 +30,25 @@ describe("coffee session clock", () => {
     assert.equal(coffeeSessionEndsAtAfterPausedClockTick(10_000, -250), 10_000);
     assert.equal(coffeeSessionEndsAtAfterPausedClockTick(null), null);
     assert.equal(coffeeSessionEndsAtAfterPausedClockTick(Number.NaN), null);
+  });
+
+  it("tracks model warmup separately from manual autoplay pause", () => {
+    assert.deepEqual(
+      coffeeSessionClockHoldReasons({
+        playerComposing: false,
+        autoplayPaused: false,
+        modelWarmup: true,
+      }),
+      ["model_warmup"],
+    );
+    assert.deepEqual(
+      coffeeSessionClockHoldReasons({
+        playerComposing: false,
+        autoplayPaused: true,
+        modelWarmup: true,
+      }),
+      ["manual_autoplay_pause", "model_warmup"],
+    );
   });
 
   it("uses actual elapsed time so delayed ticks preserve manual pauses", () => {

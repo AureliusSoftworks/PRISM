@@ -4641,24 +4641,38 @@ test.describe("PRISM desktop smoke", () => {
     await expect(studio).toBeVisible();
     await studio.getByRole("tab", { name: "Voice" }).click({ force: true });
 
-    const catalogVoice = studio.getByLabel("ElevenLabs voice identity");
-    const voiceIdOverride = studio.getByLabel("ElevenLabs voice ID override");
     const onlineVoice = studio.getByRole("region", { name: "Online voice" });
     const fallbackVoice = studio.getByRole("region", {
       name: "Offline and fallback voice",
     });
+    const catalogVoice = studio.getByLabel("ElevenLabs voice identity");
     await expect(onlineVoice).toBeVisible();
     await expect(fallbackVoice).toBeVisible();
-    await expect(onlineVoice).toContainText("List voice");
+    await expect(onlineVoice).toContainText("Active");
     await expect(fallbackVoice).toContainText("Fallback");
     await expect(catalogVoice).toHaveValue("catalog-voice-id");
+    await page.addStyleTag({
+      content: `[class*="botAvatarCustomizerBackdrop"] {
+        backdrop-filter: none !important;
+        -webkit-backdrop-filter: none !important;
+      }`,
+    });
+    const voiceViewport = studio.locator(
+      '[data-avatar-control-stack="true"]',
+    );
+    await voiceViewport.screenshot({
+      path: ".codex/output/bot-voice-panel-dark-default.png",
+      animations: "disabled",
+    });
+    await onlineVoice.getByText("Use an exact Voice ID").click();
+    const voiceIdOverride = studio.getByLabel("ElevenLabs voice ID override");
     await voiceIdOverride.fill("portable-voice-id");
     await voiceIdOverride.blur();
     await expect
       .poll(() => savedProfile?.elevenLabsVoiceIdOverride ?? null)
       .toBe("portable-voice-id");
     await expect(catalogVoice).toHaveValue("catalog-voice-id");
-    await expect(onlineVoice).toContainText("Override active");
+    await expect(onlineVoice).toContainText("ID override");
     await expect(studio.getByText("Voice ID", { exact: true })).toBeVisible();
     await expect(
       studio.locator('[data-voice-id-resolution="true"]'),
@@ -4690,21 +4704,14 @@ test.describe("PRISM desktop smoke", () => {
       .poll(() => savedProfile?.elevenLabsDirection ?? null)
       .toBe("warmly, hushed");
 
-    await page.addStyleTag({
-      content: `[class*="botAvatarCustomizerBackdrop"] {
-        backdrop-filter: none !important;
-        -webkit-backdrop-filter: none !important;
-      }`,
-    });
-    const voiceEditor = studio.locator('[data-bot-voice-editor="true"]');
-    await voiceEditor.screenshot({
+    await voiceViewport.screenshot({
       path: ".codex/output/bot-voice-panel-dark.png",
       animations: "disabled",
     });
-    await voiceEditor.evaluate((element) => {
+    await voiceViewport.evaluate((element) => {
       element.scrollTop = element.scrollHeight;
     });
-    await voiceEditor.screenshot({
+    await voiceViewport.screenshot({
       path: ".codex/output/bot-voice-panel-dark-bottom.png",
       animations: "disabled",
     });
@@ -4717,11 +4724,13 @@ test.describe("PRISM desktop smoke", () => {
       page.locator('[data-avatar-studio-theme="light"]'),
     ).toBeVisible();
     await studio.getByRole("tab", { name: "Voice" }).click({ force: true });
-    const lightVoiceEditor = studio.locator('[data-bot-voice-editor="true"]');
-    await lightVoiceEditor.evaluate((element) => {
+    const lightVoiceViewport = studio.locator(
+      '[data-avatar-control-stack="true"]',
+    );
+    await lightVoiceViewport.evaluate((element) => {
       element.scrollTop = 0;
     });
-    await lightVoiceEditor.screenshot({
+    await lightVoiceViewport.screenshot({
       path: ".codex/output/bot-voice-panel-light.png",
       animations: "disabled",
     });

@@ -1,0 +1,62 @@
+.overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  padding: clamp(22px, 5vw, 64px);
+  color: #f7f7fb;
+  background: rgba(5, 6, 11, 0.38);
+  opacity: 1;
+  transition: opacity 260ms ease, background 600ms ease;
+}
+
+.overlay[data-phase="entering"] { animation: modelWarmupOverlayIn 600ms ease both; }
+.overlay[data-phase="releasing"] { opacity: 0; pointer-events: none; }
+
+.card {
+  width: min(680px, 100%);
+  display: grid;
+  justify-items: center;
+  gap: 13px;
+  padding: clamp(28px, 5vw, 54px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 28px;
+  text-align: center;
+  background: rgba(10, 11, 18, 0.78);
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.48), inset 0 1px rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(24px);
+}
+
+.eyebrow {
+  color: rgba(255, 255, 255, 0.58);
+  font: 760 0.68rem/1 system-ui;
+  letter-spacing: 0.28em;
+}
+
+.prismLine {
+  width: 82px;
+  height: 3px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #ff4d6d, #ff9f1c, #b7e63a, #2fd3e3, #7b5cff);
+  box-shadow: 0 0 24px rgba(123, 92, 255, 0.38);
+}
+
+.card h2 { margin: 4px 0 0; font: 820 clamp(1.65rem, 4vw, 3.4rem)/1.02 system-ui; letter-spacing: -0.045em; text-wrap: balance; }
+.card p { max-width: 570px; margin: 0; color: rgba(255, 255, 255, 0.7); font: 560 clamp(0.88rem, 1.5vw, 1.05rem)/1.5 system-ui; text-wrap: balance; }
+.model { margin-top: 4px; color: rgba(255, 255, 255, 0.9); font: 700 0.78rem/1.2 ui-monospace, monospace; }
+.elapsed { color: rgba(255, 255, 255, 0.44); font: 650 0.67rem/1 system-ui; font-variant-numeric: tabular-nums; }
+.actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 9px; margin-top: 10px; }
+.actions button { border: 1px solid rgba(255,255,255,.2); border-radius: 999px; padding: 9px 14px; color: #15131d; background: #f7f7fb; font: 760 .72rem/1 system-ui; cursor: pointer; }
+.actions button[data-kind="quiet"] { color: rgba(255,255,255,.78); background: rgba(255,255,255,.06); }
+.actions button:hover { transform: translateY(-1px); }
+
+@keyframes modelWarmupOverlayIn {
+  from { opacity: 0; background: rgba(5, 6, 11, 0); }
+  to { opacity: 1; background: rgba(5, 6, 11, 0.38); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .overlay, .overlay[data-phase="entering"] { animation: none; transition-duration: 120ms; }
+  .actions button:hover { transform: none; }
+}
