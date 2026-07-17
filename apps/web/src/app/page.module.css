@@ -26145,7 +26145,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .zenLiveBotPresenceFaceGlyph[data-coffee-plate-emoji-eyes-open="false"]
   [data-coffee-plate-emoji-part="eyes"] {
-  opacity: 0.82;
+  opacity: 1;
 }
 
 .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part="mouth"] {
@@ -26172,7 +26172,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   );
   --crt-face-edge-color: #ffffff;
   --crt-face-glow-blend-mode: screen;
-  --bot-face-glow-font-weight: var(--bot-face-font-weight, 560);
   --bot-face-glow-stroke: calc(
     var(--bot-face-weight-glow-stroke, 0.006em) * 0.72
   );
@@ -26299,7 +26298,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
           transparent
         )
     );
-  color: var(--zen-live-bot-face-ink, var(--zen-presence-face-ink));
+  color: var(--zen-live-bot-face-phosphor-ink, #ffffff);
   font-size: var(
     --zen-live-bot-avatar-thinking-glyph-size,
     clamp(
@@ -26315,7 +26314,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   .zenLiveBotPresenceThinkingGlyph[data-coffee-plate-thinking-spinner="true"],
 .zenLiveBotPresencePlate[data-theme="light"]
   .zenLiveBotPresenceThinkingGlyph[data-coffee-plate-thinking-spinner="true"] {
-  color: var(--zen-live-bot-face-ink, var(--zen-presence-face-ink));
+  color: var(--zen-live-bot-face-phosphor-ink, #ffffff);
   --crt-face-glow-strength-scale: 0.72;
 }
 
@@ -63360,6 +63359,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   --crt-chromatic-opacity: 0.04;
   --crt-face-glow-radius-scale: var(--bot-face-weight-glow-radius-scale, 1);
   --crt-face-glow-strength-scale: 1;
+  --coffee-face-feature-paint-pad-block: 0.18em;
   --coffee-face-feature-paint-pad-inline: 0.18em;
   --crt-face-glow-filter: drop-shadow(
       0 0 calc(0.045em * var(--crt-face-glow-radius-scale))
@@ -63476,8 +63476,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   overflow: visible;
   text-align: center;
   text-shadow:
-    0 0 0.12em color-mix(in srgb, currentColor 76%, transparent),
-    0 0 0.36em color-mix(in srgb, currentColor 44%, transparent);
+    0 0 0.12em
+      color-mix(in srgb, var(--crt-face-edge-color, currentColor) 76%, transparent),
+    0 0 0.36em
+      color-mix(in srgb, var(--crt-face-edge-color, currentColor) 44%, transparent);
   transform: none;
 }
 
@@ -63496,8 +63498,16 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
       var(--coffee-face-feature-paint-pad-inline, 0em)
   );
   max-inline-size: none;
-  block-size: 1em;
+  block-size: calc(
+    1em + var(--coffee-face-feature-paint-pad-block, 0em) +
+      var(--coffee-face-feature-paint-pad-block, 0em)
+  );
+  min-block-size: calc(
+    1em + var(--coffee-face-feature-paint-pad-block, 0em) +
+      var(--coffee-face-feature-paint-pad-block, 0em)
+  );
   margin-inline: calc(var(--coffee-face-feature-paint-pad-inline, 0em) * -1);
+  margin-block: calc(var(--coffee-face-feature-paint-pad-block, 0em) * -1);
   line-height: 1;
   position: relative;
   color: inherit;
@@ -63567,10 +63577,14 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   place-items: center;
   inline-size: max-content;
   min-inline-size: 100%;
-  block-size: 1em;
+  block-size: calc(
+    1em + var(--crt-glyph-paint-bleed) + var(--crt-glyph-paint-bleed)
+  );
   max-inline-size: none;
   padding-inline: var(--crt-glyph-paint-bleed);
+  padding-block: var(--crt-glyph-paint-bleed);
   margin-inline: calc(var(--crt-glyph-paint-bleed) * -1);
+  margin-block: calc(var(--crt-glyph-paint-bleed) * -1);
   justify-self: center;
   align-self: center;
   position: relative;
@@ -63583,8 +63597,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   white-space: pre;
   transform-box: border-box;
   transform-origin: center center;
-  -webkit-text-stroke: inherit;
-  paint-order: inherit;
+  /* Keep the saturated edge confined to the bloom clone. Painting it on the
+     source glyph exposes internal contour seams before the white core layer. */
+  -webkit-text-stroke: 0;
+  paint-order: fill;
   background:
     linear-gradient(
       180deg,
@@ -63685,8 +63701,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .coffeeSeatPlateEmoji [data-crt-glyph-layer="true"]::before,
 .messageMoodCoffeeFace [data-crt-glyph-layer="true"]::before,
 .zenLiveBotPresenceFaceGlyph [data-crt-glyph-layer="true"]::before {
-  font-weight: var(--bot-face-glow-font-weight, 560);
-  font-variation-settings: "wght" var(--bot-face-glow-font-weight, 560);
+  /* Keep the bloom silhouette identical to the core. A synthetic heavier
+     clone creates bright double-paint seams where a glyph joins itself. */
+  font-weight: inherit;
+  font-variation-settings: inherit;
   -webkit-text-stroke: var(--bot-face-glow-stroke, 0)
     var(--crt-face-edge-color, currentColor);
   paint-order: stroke fill;
@@ -63735,8 +63753,60 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .coffeeSeatPlateEmoji [data-crt-glyph-layer="true"]::after,
 .messageMoodCoffeeFace [data-crt-glyph-layer="true"]::after,
 .zenLiveBotPresenceFaceGlyph [data-crt-glyph-layer="true"]::after {
+  /* Repaint the neutral core last. The colored bloom/stroke clone otherwise
+     sits above the clipped background and exposes its contour anywhere a
+     glyph overlaps itself (corners, joins, and vertices). */
   color: transparent;
+  background:
+    linear-gradient(
+      180deg,
+      rgb(255 255 255 / var(--crt-glyph-core-opacity)),
+      color-mix(in srgb, #ffffff 84%, currentColor 16%)
+    ),
+    repeating-linear-gradient(
+      90deg,
+      rgb(
+          var(--crt-glyph-core-red-rgb) /
+            var(--crt-glyph-phosphor-midtone-strength)
+        )
+        0 calc(var(--crt-glyph-phosphor-scale) * 0.22),
+      rgb(255 255 255 / var(--crt-glyph-phosphor-bright-strength))
+        calc(var(--crt-glyph-phosphor-scale) * 0.22)
+        calc(var(--crt-glyph-phosphor-scale) * 0.34),
+      rgb(
+          var(--crt-glyph-core-green-rgb) /
+            var(--crt-glyph-phosphor-midtone-strength)
+        )
+        calc(var(--crt-glyph-phosphor-scale) * 0.34)
+        calc(var(--crt-glyph-phosphor-scale) * 0.56),
+      rgb(255 255 255 / var(--crt-glyph-phosphor-bright-strength))
+        calc(var(--crt-glyph-phosphor-scale) * 0.56)
+        calc(var(--crt-glyph-phosphor-scale) * 0.68),
+      rgb(
+          var(--crt-glyph-core-blue-rgb) /
+            var(--crt-glyph-phosphor-midtone-strength)
+        )
+        calc(var(--crt-glyph-phosphor-scale) * 0.68)
+        calc(var(--crt-glyph-phosphor-scale) * 0.9),
+      rgb(255 255 255 / var(--crt-glyph-phosphor-bright-strength))
+        calc(var(--crt-glyph-phosphor-scale) * 0.9)
+        var(--crt-glyph-phosphor-scale)
+    );
+  background-size:
+    100% 100%,
+    var(--crt-glyph-phosphor-scale) 100%;
+  background-blend-mode: screen;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  -webkit-text-stroke: calc(
+      var(--bot-face-weight-stroke, 0em) + 0.012em
+    )
+    var(--zen-live-bot-face-phosphor-ink, #ffffff);
+  paint-order: stroke fill;
   text-shadow:
+    0 0 var(--crt-glyph-beam-softness)
+      color-mix(in srgb, var(--crt-face-edge-color) 46%, transparent),
     calc(0px - var(--crt-glyph-convergence-offset)) 0 0.2px
       rgb(255 54 78 / var(--crt-glyph-convergence-opacity)),
     var(--crt-glyph-convergence-offset) 0 0.2px
@@ -63776,7 +63846,6 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   > [data-crt-glyph-layer="true"] {
   inline-size: max-content;
   min-inline-size: 100%;
-  block-size: 1em;
   --bot-face-custom-glyph-base-rotation: var(--bot-face-mouth-rotation, 0deg);
   transform: rotate(var(--bot-face-mouth-rotation, 0deg));
   transform-box: border-box;
@@ -63967,7 +64036,9 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   display: inline-block;
   inline-size: max-content;
   min-inline-size: 0;
-  block-size: 1em;
+  block-size: calc(
+    1em + var(--crt-glyph-paint-bleed) + var(--crt-glyph-paint-bleed)
+  );
   padding-inline: 0;
   margin-inline: 0;
   justify-self: center;
@@ -64003,6 +64074,11 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 :is(.coffeeSeatPlateEmoji, .messageMoodCoffeeFace, .zenLiveBotPresenceFaceGlyph)
   [data-coffee-plate-emoji-part="eyes"][data-coffee-plate-emoji-blink-glyph="true"]
   > [data-crt-glyph-layer="true"] {
+  --crt-glyph-core-red-rgb: 255 255 255;
+  --crt-glyph-core-green-rgb: 255 255 255;
+  --crt-glyph-core-blue-rgb: 255 255 255;
+  --crt-glyph-phosphor-midtone-strength: 0.24;
+  --crt-glyph-phosphor-bright-strength: 0.09;
   --bot-face-custom-glyph-base-rotation: 0deg;
   animation: none;
   transform: rotate(0deg);
