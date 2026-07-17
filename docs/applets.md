@@ -26,8 +26,8 @@ ship as `0.5.2` while Coffee is `v0.7` and Story is `v0.1`.
 | --- | --- | --- | --- |
 | Chat | v1.4 | Active | Full playground for bots, providers, models, images, exports, memory-aware conversations, and per-bot online voice identity. |
 | Zen | v1.3 | Active | Calm one-to-one continuity surface with shared bot voice identity; the standalone Zen lane is deprecating as this becomes Prism's default state. |
-| Coffee | v1.5 | Active | Multi-bot group table with Coffee Groups, model-aware session holds, pacing, cups, transcripts, replay, table controls, and synchronized online speech. |
-| Signal | v0.5 | Active | Bot-owned interview shows with audience pulse, model-aware studio holds, animated pre-roll, private direction, archives, and directed replay. |
+| Coffee | v1.6 | Active | Multi-bot group table with Coffee Groups, model-aware session holds, pacing, cups, transcripts, replay, synchronized online speech, and subtle shared session foley. |
+| Signal | v0.6 | Active | Bot-owned interview shows with audience pulse, model-aware studio holds, paired ident-and-ambience audio packages, quiet session foley, private direction, archives, and directed replay. |
 | Story | v0.2 | Preview | Generated visual-novel episodes with bots, choices, maps, inventory, transcripts, and shared PRISM menu behavior. |
 | Arena | v0.0 | Planned | Moderated bot debate surface. |
 | Polling | v0.0 | Planned | AI-powered polling across bot groups. |
@@ -71,6 +71,10 @@ stages do not block the standalone preview.
 
 ### 2026-07-17
 
+- Bumped `Signal` to `v0.6` and `Coffee` to `v1.6` for the shared quiet foley
+  layer, cup-synchronized Coffee sounds, bundled Signal studio room tone, and
+  one-click ElevenLabs ident plus custom ambience generation. Coffee also
+  exposes the intentionally inactive Jazz atmosphere control for its next pass.
 - Bumped `Chat` to `v1.4`, `Zen` to `v1.3`, and `Story` to `v0.2` for the
   unified PRISM menu system, refined CRT face glyphs, and shared voice and
   avatar behavior.

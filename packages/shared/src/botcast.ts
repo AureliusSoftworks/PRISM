@@ -1,4 +1,5 @@
 import type { VoiceDeliveryMood } from "./audioVoice.js";
+import type { ListenerReactionPlanV1 } from "./listenerReaction.js";
 
 export type BotcastEpisodeSegment = "opening" | "interview" | "closing";
 export type BotcastEpisodeStatus = "live" | "completed";
@@ -15,6 +16,10 @@ export const BOTCAST_AUTO_MAX_EXCHANGES = 60;
 export const BOTCAST_TIMED_MAX_UTTERANCES = 120;
 export const BOTCAST_LOCAL_INTRO_DURATION_MS = 5_600;
 export const BOTCAST_ELEVENLABS_INTRO_DURATION_MS = 6_000;
+export const BOTCAST_DASHBOARD_BLURB_FALLBACKS = [
+  "Episode 4: Now with 12% more dramatic pause.",
+  "Guest chair's open. Bring me someone interesting",
+] as const;
 export const BOTCAST_IMMERSIVE_VOICE_TAGS = [
   "sighs",
   "exhales",
@@ -58,12 +63,9 @@ export function botcastFallbackStudioAccentVariantForSeed(
 }
 
 export type BotcastProducerCueKind =
-  | "ask_about"
-  | "press_harder"
-  | "move_on"
-  | "lighten_up"
-  | "wrap_up";
-export type BotcastTensionStage = "calm" | "resistance" | "warning" | "departed";
+  "ask_about" | "press_harder" | "move_on" | "lighten_up" | "wrap_up";
+export type BotcastTensionStage =
+  "calm" | "resistance" | "warning" | "departed";
 export type BotcastCameraShot = "auto" | "left" | "right" | "wide";
 export type BotcastDirectedCameraShot = Exclude<BotcastCameraShot, "auto">;
 
@@ -82,10 +84,7 @@ export interface BotcastStudioPoint {
 }
 
 export type BotcastStudioLayoutItem =
-  | "hostBot"
-  | "guestBot"
-  | "hostCup"
-  | "guestCup";
+  "hostBot" | "guestBot" | "hostCup" | "guestCup";
 
 export type BotcastStudioLayout = Record<
   BotcastStudioLayoutItem,
@@ -114,8 +113,7 @@ function botcastCameraOffsetPercent(args: {
   transformOriginPercent: number;
 }): number {
   const desiredOffset =
-    (args.focalLinePercent - args.focusPercent) *
-    BOTCAST_CLOSEUP_CAMERA_SCALE;
+    (args.focalLinePercent - args.focusPercent) * BOTCAST_CLOSEUP_CAMERA_SCALE;
   const zoomOverflow = BOTCAST_CLOSEUP_CAMERA_SCALE - 1;
   const minimumOffset = -(100 - args.transformOriginPercent) * zoomOverflow;
   const maximumOffset = args.transformOriginPercent * zoomOverflow;
@@ -170,9 +168,8 @@ function botcastStudioCoordinate(
   min: number,
   max: number,
 ): number {
-  const numeric = typeof value === "number" && Number.isFinite(value)
-    ? value
-    : fallback;
+  const numeric =
+    typeof value === "number" && Number.isFinite(value) ? value : fallback;
   return Math.round(Math.max(min, Math.min(max, numeric)) * 100) / 100;
 }
 
@@ -180,12 +177,15 @@ export function normalizeBotcastStudioLayout(
   value: unknown,
   fallback: BotcastStudioLayout = BOTCAST_DEFAULT_STUDIO_LAYOUT,
 ): BotcastStudioLayout {
-  const rawContainer = value && typeof value === "object" && !Array.isArray(value)
-    ? value as Partial<Record<BotcastStudioLayoutItem, unknown>>
+  const rawContainer =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Partial<Record<BotcastStudioLayoutItem, unknown>>)
     : {};
-  const isLegacyDefault =
-    (Object.keys(BOTCAST_LEGACY_DEFAULT_STUDIO_LAYOUT) as BotcastStudioLayoutItem[])
-      .every((item) => {
+  const isLegacyDefault = (
+    Object.keys(
+      BOTCAST_LEGACY_DEFAULT_STUDIO_LAYOUT,
+    ) as BotcastStudioLayoutItem[]
+  ).every((item) => {
         const point = rawContainer[item];
         return Boolean(
           point &&
@@ -198,11 +198,13 @@ export function normalizeBotcastStudioLayout(
         );
       });
   const container = isLegacyDefault ? {} : rawContainer;
-  return (Object.keys(BOTCAST_DEFAULT_STUDIO_LAYOUT) as BotcastStudioLayoutItem[])
-    .reduce<BotcastStudioLayout>((layout, item) => {
+  return (
+    Object.keys(BOTCAST_DEFAULT_STUDIO_LAYOUT) as BotcastStudioLayoutItem[]
+  ).reduce<BotcastStudioLayout>((layout, item) => {
       const rawPoint = container[item];
-      const point = rawPoint && typeof rawPoint === "object" && !Array.isArray(rawPoint)
-        ? rawPoint as Partial<BotcastStudioPoint>
+    const point =
+      rawPoint && typeof rawPoint === "object" && !Array.isArray(rawPoint)
+        ? (rawPoint as Partial<BotcastStudioPoint>)
         : {};
       const bounds = BOTCAST_STUDIO_LAYOUT_BOUNDS[item];
       layout[item] = {
@@ -223,6 +225,19 @@ export function normalizeBotcastStudioLayout(
     }, {} as BotcastStudioLayout);
 }
 
+/** Exchanges the host and guest seats while keeping each bot with its cup. */
+export function swapBotcastStudioLayoutSeats(
+  value: unknown,
+): BotcastStudioLayout {
+  const layout = normalizeBotcastStudioLayout(value);
+  return {
+    hostBot: { ...layout.guestBot },
+    guestBot: { ...layout.hostBot },
+    hostCup: { ...layout.guestCup },
+    guestCup: { ...layout.hostCup },
+  };
+}
+
 /**
  * Source-edit instruction for the online Signal daylight render. The canonical
  * night image already carries the persona and set design, so this deliberately
@@ -239,11 +254,7 @@ export const BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT = [
 ].join(" ");
 
 export type BotcastLogoGlyph =
-  | "frequency"
-  | "orbit"
-  | "aperture"
-  | "spark"
-  | "monogram";
+  "frequency" | "orbit" | "aperture" | "spark" | "monogram";
 
 export interface BotcastLogoState {
   seed: string;
@@ -263,6 +274,14 @@ export interface BotcastIntroAudioState {
   model: string | null;
 }
 
+export interface BotcastAtmosphereAudioState {
+  source: "bundled" | "elevenlabs";
+  audioUrl: string;
+  durationMs: number;
+  revision: number;
+  model: string | null;
+}
+
 export interface BotcastShow {
   id: string;
   hostBotId: string;
@@ -274,11 +293,13 @@ export interface BotcastShow {
   /** Compatibility alias for the original single-studio contract. Mirrors nightAtmosphere. */
   atmosphere: BotcastAtmosphereState;
   studioIdentity: string;
+  dashboardBlurbs: string[];
   dayAtmosphere: BotcastAtmosphereState;
   nightAtmosphere: BotcastAtmosphereState;
   studioLayout: BotcastStudioLayout;
   logo: BotcastLogoState;
   introAudio: BotcastIntroAudioState;
+  atmosphereAudio: BotcastAtmosphereAudioState;
   createdAt: string;
   updatedAt: string;
   episodeCount: number;
@@ -321,6 +342,7 @@ export type BotcastReplayEventKind =
   | "cut_away"
   | "camera_mode"
   | "camera_suggestion"
+  | "listener_reaction"
   | "episode_completed";
 
 export interface BotcastReplayEvent {
@@ -345,6 +367,67 @@ export interface BotcastCameraSuggestion {
     | "closing";
   atMs: number;
   minimumHoldMs: number;
+}
+
+function normalizeSavedBotcastListenerReactionPlan(
+  value: unknown,
+): ListenerReactionPlanV1 | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  const id = (candidate: unknown): string | null =>
+    typeof candidate === "string" && candidate.trim() && candidate.trim().length <= 160
+      ? candidate.trim()
+      : null;
+  const speakerBotId = id(row.speakerBotId);
+  const listenerBotId = id(row.listenerBotId);
+  const messageId = id(row.messageId);
+  const seed = id(row.seed);
+  const targetSource = row.targetSource === "role" ||
+      row.targetSource === "direct" || row.targetSource === "inferred"
+    ? row.targetSource
+    : null;
+  const visualAction = row.visualAction === "nod" ||
+      row.visualAction === "lean_in" || row.visualAction === "head_tilt" ||
+      row.visualAction === "soft_smile" || row.visualAction === "thoughtful_hmm"
+    ? row.visualAction
+    : null;
+  const spokenCue = row.spokenCue === "mm-hm" || row.spokenCue === "I see" ||
+      row.spokenCue === "hmm"
+    ? row.spokenCue
+    : undefined;
+  if (
+    row.v !== 1 || row.name !== "listenerReaction" || !speakerBotId ||
+    !listenerBotId || speakerBotId === listenerBotId || !messageId || !seed ||
+    !targetSource || !visualAction || typeof row.targetProgress !== "number" ||
+    !Number.isFinite(row.targetProgress) || row.targetProgress < 0.3 ||
+    row.targetProgress > 0.75 || typeof row.cameraCutEligible !== "boolean"
+  ) return null;
+  return {
+    v: 1,
+    name: "listenerReaction",
+    speakerBotId,
+    listenerBotId,
+    messageId,
+    targetSource,
+    visualAction,
+    ...(spokenCue ? { spokenCue } : {}),
+    targetProgress: row.targetProgress,
+    seed,
+    cameraCutEligible: row.cameraCutEligible,
+  };
+}
+
+export function botcastListenerReactionForMessage(
+  events: readonly BotcastReplayEvent[],
+  messageId: string,
+): ListenerReactionPlanV1 | null {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event?.kind !== "listener_reaction") continue;
+    const plan = normalizeSavedBotcastListenerReactionPlan(event.payload.plan);
+    if (plan?.messageId === messageId) return plan;
+  }
+  return null;
 }
 
 function botcastTimedCameraEvents(
@@ -410,8 +493,18 @@ export interface BotcastEpisodeSummary {
   modelWarmupHoldDurationMs: number;
   /** Active hold start, persisted so a live episode can resume honestly after reload. */
   modelWarmupHoldStartedAt: string | null;
+  /** One candid Library-persona response generated after the episode completes. */
+  personaReview: BotcastPersonaReview | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface BotcastPersonaReview {
+  reviewerBotId: string;
+  reviewerName: string;
+  rating: number;
+  comment: string;
+  createdAt: string;
 }
 
 export interface BotcastEpisode extends BotcastEpisodeSummary {
@@ -433,6 +526,7 @@ export interface BotcastShowPatchRequest {
   premise?: string;
   hostingStyle?: string;
   studioIdentity?: string;
+  dashboardBlurbs?: string[];
   atmosphereImageUrl?: string | null;
   atmosphereImageId?: string | null;
   dayAtmosphereImageUrl?: string | null;
@@ -489,7 +583,9 @@ export function botcastVoiceMoodForTension(
 export const BOTCAST_DIRECTOR_MIN_SHOT_MS = 3_200;
 export const BOTCAST_DIRECTOR_HYSTERESIS_MS = 1_100;
 
-export function botcastTensionStageForLevel(level: number): BotcastTensionStage {
+export function botcastTensionStageForLevel(
+  level: number,
+): BotcastTensionStage {
   if (level >= 3) return "departed";
   if (level >= 2) return "warning";
   if (level >= 1) return "resistance";
@@ -511,7 +607,8 @@ export function applyBotcastProducerCueToTension(
       : cue.kind === "move_on" || cue.kind === "lighten_up"
         ? -1
         : 0;
-  const level = Math.max(0, Math.min(3, current.level + delta)) as 0 | 1 | 2 | 3;
+  const level = Math.max(0, Math.min(3, current.level + delta)) as
+    0 | 1 | 2 | 3;
   const enteredWarning = current.level < 2 && level >= 2;
   return {
     level,
@@ -520,7 +617,9 @@ export function applyBotcastProducerCueToTension(
   };
 }
 
-export function botcastGuestDepartureEligible(state: BotcastTensionState): boolean {
+export function botcastGuestDepartureEligible(
+  state: BotcastTensionState,
+): boolean {
   return state.level >= 3 && state.warningCount >= 1;
 }
 
@@ -530,7 +629,8 @@ export function botcastSegmentForTurn(args: {
   guestDeparted: boolean;
 }): BotcastEpisodeSegment {
   if (args.guestDeparted) return "closing";
-  if (args.current === "opening" && args.utteranceCount >= 2) return "interview";
+  if (args.current === "opening" && args.utteranceCount >= 2)
+    return "interview";
   return args.current;
 }
 
@@ -542,8 +642,12 @@ function botcastAverageWordCount(
   messages: readonly Pick<BotcastMessage, "content">[],
 ): number {
   if (messages.length === 0) return 0;
-  return messages.reduce((total, message) => total + botcastSpokenWordCount(message.content), 0)
-    / messages.length;
+  return (
+    messages.reduce(
+      (total, message) => total + botcastSpokenWordCount(message.content),
+      0,
+    ) / messages.length
+  );
 }
 
 const BOTCAST_NATURAL_REST_PATTERN =
@@ -616,7 +720,10 @@ export function botcastNextSpeakerRole(args: {
     return args.messages.at(-1)?.speakerRole === "host" ? null : "host";
   }
   if (args.messages.length === 0) return "host";
-  if (args.segment === "closing" && args.messages.at(-1)?.speakerRole === "host") {
+  if (
+    args.segment === "closing" &&
+    args.messages.at(-1)?.speakerRole === "host"
+  ) {
     return null;
   }
   return args.messages.at(-1)?.speakerRole === "host" ? "guest" : "host";
@@ -657,8 +764,11 @@ export function botcastDirectorSuggestion(args: {
   }
 
   const previous = args.previous;
-  const heldMs = previous ? args.atMs - previous.atMs : Number.POSITIVE_INFINITY;
-  const shortUtterance = (args.utteranceDurationMs ?? 0) < BOTCAST_DIRECTOR_HYSTERESIS_MS;
+  const heldMs = previous
+    ? args.atMs - previous.atMs
+    : Number.POSITIVE_INFINITY;
+  const shortUtterance =
+    (args.utteranceDurationMs ?? 0) < BOTCAST_DIRECTOR_HYSTERESIS_MS;
   if (
     previous &&
     shot !== previous.shot &&
@@ -708,7 +818,11 @@ export function botcastCameraShotAt(args: {
     }
     if (event.kind === "camera_suggestion") {
       const candidate = event.payload.shot;
-      if (candidate === "left" || candidate === "right" || candidate === "wide") {
+      if (
+        candidate === "left" ||
+        candidate === "right" ||
+        candidate === "wide"
+      ) {
         automaticShot = candidate;
         if (mode === "auto") shot = automaticShot;
       }
@@ -724,7 +838,8 @@ export function botcastGuestHasDepartedAt(
   if (!events.some((event) => event.kind === "departure")) return false;
   const departureShot = events.find(
     (event) =>
-      event.kind === "camera_suggestion" && event.payload.reason === "departure",
+      event.kind === "camera_suggestion" &&
+      event.payload.reason === "departure",
   );
   const departureAtMs = Number(departureShot?.payload.atMs);
   return Number.isFinite(departureAtMs) && elapsedMs >= departureAtMs;
@@ -748,7 +863,10 @@ export function botcastReplayTimeline(
     if (!Number.isFinite(atMs)) return latest;
     return Math.max(
       latest,
-      atMs + (Number.isFinite(minimumHoldMs) ? minimumHoldMs : BOTCAST_DIRECTOR_MIN_SHOT_MS),
+      atMs +
+        (Number.isFinite(minimumHoldMs)
+          ? minimumHoldMs
+          : BOTCAST_DIRECTOR_MIN_SHOT_MS),
     );
   }, 0);
   return {

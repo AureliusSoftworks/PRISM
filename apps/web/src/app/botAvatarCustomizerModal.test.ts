@@ -15,6 +15,10 @@ const apiServerSource = readFileSync(
   resolve(appDir, "../../../api/src/server.ts"),
   "utf8",
 );
+const coffeeFaceSource = readFileSync(
+  resolve(appDir, "CoffeeSeatPlateEmoji.tsx"),
+  "utf8",
+).replace(/\s+/gu, " ");
 const tauriConfig = JSON.parse(
   readFileSync(
     resolve(appDir, "../../../desktop/src-tauri/tauri.conf.json"),
@@ -98,6 +102,7 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.match(pageSource, /faceEyeOffsetX: number/);
   assert.match(pageSource, /faceEyeOffsetY: number/);
   assert.match(pageSource, /faceEyeRotationDeg: number/);
+  assert.match(pageSource, /faceEyeCount: BotFaceEyeCount/);
   assert.match(pageSource, /faceMouthScale: number/);
   assert.match(pageSource, /faceMouthOffsetX: number/);
   assert.match(pageSource, /faceMouthOffsetY: number/);
@@ -124,6 +129,7 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.match(pageSource, /faceEyeOffsetX=\{newBotFaceEyeOffsetX\}/);
   assert.match(pageSource, /faceEyeOffsetY=\{newBotFaceEyeOffsetY\}/);
   assert.match(pageSource, /faceEyeRotationDeg=\{newBotFaceEyeRotationDeg\}/);
+  assert.match(pageSource, /faceEyeCount=\{newBotFaceEyeCount\}/);
   assert.match(pageSource, /faceMouthScale=\{newBotFaceMouthScale\}/);
   assert.match(pageSource, /faceMouthOffsetX=\{newBotFaceMouthOffsetX\}/);
   assert.match(pageSource, /faceMouthOffsetY=\{newBotFaceMouthOffsetY\}/);
@@ -374,6 +380,10 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   );
   assert.match(eyesTabSource, /botAvatarCustomMotionRowSingle/);
   assert.match(eyesTabSource, /part="eyes"/);
+  assert.match(eyesTabSource, /aria-label="Custom eye count"/);
+  assert.match(eyesTabSource, /customEyeActive \? \(/);
+  assert.match(eyesTabSource, /One eye/);
+  assert.match(eyesTabSource, /Two eyes/);
   assert.match(eyesTabSource, /label="Eye size"/);
   assert.match(eyesTabSource, /label="Eye position"/);
   assert.match(eyesTabSource, /lockX=\{!customEyeActive\}/);
@@ -395,6 +405,7 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.doesNotMatch(mouthTabSource, /botAvatarSingleGlyphInput/);
   assert.match(cssSource, /\.botAvatarCustomGlyphCapture/);
   assert.match(pageSource, /faceEyeRotationDeg: bot\?\.face_eye_rotation_deg/);
+  assert.match(pageSource, /faceEyeCount: bot\?\.face_eye_count/);
   assert.match(
     mouthTabSource,
     /data-custom-active=\{customMouthActive \? "true" : undefined\}/,
@@ -499,6 +510,35 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   );
   assert.doesNotMatch(pageSource, />\s*Inflation\s*</);
   assert.doesNotMatch(pageSource, />\s*Eye height\s*</);
+});
+
+test("two custom eyes duplicate only the open-eye glyph and leave blink behavior unchanged", () => {
+  assert.match(coffeeFaceSource, /normalizedFaceEyeCount === 2/);
+  assert.match(coffeeFaceSource, /displayBlinkPhase !== "closed"/);
+  assert.match(coffeeFaceSource, /data-custom-eye-pair="true"/);
+  assert.match(coffeeFaceSource, /data-custom-eye-pair-side="left"/);
+  assert.match(coffeeFaceSource, /data-custom-eye-pair-side="right"/);
+  assert.match(coffeeFaceSource, /pairedEye: renderCustomEyePair/);
+  assert.match(
+    coffeeFaceSource,
+    /const blinkKey = `\$\{enabled[\s\S]*?:\$\{faceText\}:\$\{scheduleKey\}`/,
+  );
+  assert.doesNotMatch(coffeeFaceSource, /const blinkKey = [^;]*faceEyeCount/);
+  assert.match(cssSource, /\[data-custom-eye-pair-side="left"\]/);
+  assert.match(cssSource, /\[data-custom-eye-pair-side="right"\]/);
+  assert.match(
+    cssSource,
+    /\[data-custom-eye-pair="true"\][\s\S]*transform:\s*rotate\(var\(--bot-face-eye-rotation/,
+  );
+  assert.match(cssSource, /--bot-face-custom-eye-pair-scale:\s*0\.42\s*;/);
+  assert.match(
+    cssSource,
+    /translateX\(-0\.18em\) scale\(var\(--bot-face-custom-eye-pair-scale\)\)/,
+  );
+  assert.match(
+    cssSource,
+    /translateX\(0\.18em\) scale\(var\(--bot-face-custom-eye-pair-scale\)\)/,
+  );
 });
 
 test("avatar edits stay local until Save and support multi-step undo", () => {
@@ -1692,4 +1732,18 @@ test("Powers read as an app-wide bot trait across active surfaces", () => {
   assert.match(pageSource, /<BotPowerBadge powers=\{bot\.powers\} passive \/>/u);
   assert.match(pageSource, /<BotPowerBadge powers=\{npcActor\?\.bot\.powers\} \/>/u);
   assert.match(pageSource, /botPowerCupRateMultiplierForBotV1/u);
+  assert.match(pageSource, /effect\.rate === "none"[\s\S]*?"Refuses coffee"/u);
+  assert.match(
+    pageSource,
+    /const coffeeCupRefused = coffeeCupPowerRateMultiplier === 0/u,
+  );
+  assert.match(
+    pageSource,
+    /coffeeCupRefused \|\| refillSipLocked \|\| seatIsThinking/u,
+  );
+  assert.match(pageSource, /speaker pull/u);
+  assert.match(pageSource, /response pull/u);
+  assert.match(pageSource, /topic pull/u);
+  assert.match(pageSource, /memory for/u);
+  assert.match(pageSource, /private insight into/u);
 });

@@ -7,6 +7,7 @@ import {
   coffeeCupPacedProgress,
   coffeeCupShouldFinishAfterSip,
   coffeeCupSipLikelihoodForProgress,
+  coffeeCupStatusForFillAndTemperatureProgress,
   coffeeCupStatusForProgress,
   hexToHsl,
   type CoffeeCupStatus,
@@ -595,6 +596,51 @@ export function buildCoffeeCupVisualState(args: {
   finishSeed?: string | null;
 }): CoffeeCupVisualState {
   const color = coffeeCupColorForBotColor(args.botColor);
+  if (args.powerRateMultiplier === 0) {
+    const temperatureProgress =
+      typeof args.progressOverride === "number" &&
+      Number.isFinite(args.progressOverride)
+        ? clampUnit(args.progressOverride)
+        : (coffeeCupTimedProgressAtMs({
+            nowMs: args.nowMs,
+            sessionStartedAtMs: args.sessionStartedAtMs,
+            sessionEndsAtMs: args.sessionEndsAtMs,
+            durationMinutes: args.durationMinutes,
+          }) ?? 0);
+    const status = coffeeCupStatusForFillAndTemperatureProgress(
+      0,
+      temperatureProgress,
+      args.seed,
+    );
+    const position = coffeeCupFramePosition(status.frameIndex);
+    const sipTiming = coffeeCupSipAnimationTiming({ seed: args.seed });
+    const steam = coffeeCupSteamVisualState({
+      nowMs: args.nowMs,
+      frameIndex: status.frameIndex,
+      progress: temperatureProgress,
+      sessionStartedAtMs: args.sessionStartedAtMs,
+      sessionEndsAtMs: args.sessionEndsAtMs,
+      durationMinutes: args.durationMinutes,
+    });
+    return {
+      ...status,
+      ...position,
+      color,
+      restImageUrl: coffeeCupSpritePath({ color, theme: args.theme }),
+      sipImageUrl: coffeeCupSpritePath({
+        color,
+        theme: args.theme,
+        sip: true,
+      }),
+      sipping: false,
+      sipAnimationMs: sipTiming.durationMs,
+      sipHoldMs: sipTiming.holdMs,
+      steamAlpha: steam.steamAlpha,
+      steamRateMs: steam.steamRateMs,
+      finished: false,
+      label: `${color} coffee cup, ${status.amountLabel}, ${status.temperatureLabel}`,
+    };
+  }
   const finishSeed = args.finishSeed?.trim() || args.seed;
   const sipLocked =
     typeof args.sipLockedUntilMs === "number" &&

@@ -29,6 +29,10 @@ export const BOT_FACE_GLYPH_ANIMATIONS = [
 export type BotFaceGlyphAnimation = (typeof BOT_FACE_GLYPH_ANIMATIONS)[number];
 export const DEFAULT_BOT_FACE_GLYPH_ANIMATION: BotFaceGlyphAnimation = "none";
 export const DEFAULT_BOT_FACE_EYE_CHARACTER: string | null = null;
+export const BOT_FACE_EYE_COUNTS = [1, 2] as const;
+export type BotFaceEyeCount = (typeof BOT_FACE_EYE_COUNTS)[number];
+/** A custom glyph is one authored eye unit unless the user opts into a pair. */
+export const DEFAULT_BOT_FACE_EYE_COUNT: BotFaceEyeCount = 1;
 export const DEFAULT_BOT_FACE_MOUTH_CHARACTER: string | null = null;
 /** Existing custom mouths stay visible during Coffee sips until explicitly opted in. */
 export const DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER = false;
@@ -96,6 +100,7 @@ export const DEFAULT_BOT_FACE_THINKING_FRAMES: BotFaceThinkingFrames = [
 export interface BotFaceStyle {
   eyesFont: BotFaceFontId;
   eyeCharacter: string | null;
+  eyeCount: BotFaceEyeCount;
   /** Legacy compatibility field. Custom eye glyphs do not animate. */
   eyeAnimation: BotFaceGlyphAnimation;
   mouthFont: BotFaceFontId;
@@ -121,6 +126,7 @@ export interface BotFaceStyle {
 export interface BotFaceStyleInput {
   faceEyesFont?: unknown;
   faceEyeCharacter?: unknown;
+  faceEyeCount?: unknown;
   faceEyeAnimation?: unknown;
   faceMouthFont?: unknown;
   faceMouthCharacter?: unknown;
@@ -176,6 +182,12 @@ export function normalizeBotFaceEyeCharacter(value: unknown): string | null {
   const [glyph] = splitBotFaceVisibleGraphemes(value);
   if (!glyph || botFaceGraphemeHasEmoji(glyph)) return null;
   return glyph;
+}
+
+export function normalizeBotFaceEyeCount(
+  value: unknown
+): BotFaceEyeCount | null {
+  return value === 1 || value === 2 ? value : null;
 }
 
 export function normalizeBotFaceMouthCharacter(value: unknown): string | null {
@@ -421,6 +433,11 @@ export function resolveBotFaceStyle(
   return {
     eyesFont: normalizeBotFaceFontId(input.faceEyesFont) ?? fallbackFont,
     eyeCharacter,
+    eyeCount:
+      eyeCharacter !== null
+        ? normalizeBotFaceEyeCount(input.faceEyeCount) ??
+          DEFAULT_BOT_FACE_EYE_COUNT
+        : DEFAULT_BOT_FACE_EYE_COUNT,
     eyeAnimation: DEFAULT_BOT_FACE_GLYPH_ANIMATION,
     mouthFont: normalizeBotFaceFontId(input.faceMouthFont) ?? fallbackFont,
     mouthCharacter,
@@ -504,6 +521,7 @@ export function randomBotFaceStyle(random = Math.random): BotFaceStyle {
   return {
     eyesFont: pickFont(),
     eyeCharacter: DEFAULT_BOT_FACE_EYE_CHARACTER,
+    eyeCount: DEFAULT_BOT_FACE_EYE_COUNT,
     eyeAnimation: DEFAULT_BOT_FACE_GLYPH_ANIMATION,
     mouthFont: pickFont(),
     mouthCharacter: DEFAULT_BOT_FACE_MOUTH_CHARACTER,

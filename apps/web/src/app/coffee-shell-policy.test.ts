@@ -31,8 +31,9 @@ describe("Coffee shell policy", () => {
     }
   });
 
-  it("gives Signal the same live chrome boundary", () => {
+  it("keeps Signal voice direction live while locking session-changing chrome", () => {
     const policy = liveSessionChromePolicy("Signal");
+    assert.equal(policy.disabledNavbarActions.voice, undefined);
     assert.equal(policy.disabledNavbarActions.memories, undefined);
     assert.equal(policy.disabledNavbarActions.usage, undefined);
     assert.equal(policy.disabledNavbarActions.theme, undefined);
@@ -40,14 +41,10 @@ describe("Coffee shell policy", () => {
       promptCenter: true,
       refresh: true,
       settings: true,
-      voice: true,
       images: true,
       bots: true,
     });
-    assert.equal(
-      policy.disabledNavbarActionTooltips.voice,
-      "Cut or finish the Signal session before changing Voice mode.",
-    );
+    assert.equal(policy.disabledNavbarActionTooltips.voice, undefined);
   });
 
   it("treats a loaded finished conversation as review before replay starts", () => {

@@ -24229,6 +24229,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --bot-ambient-delay: 0s;
   --bot-ambient-underglow-width: 88%;
   --bot-ambient-underglow-height: 24%;
+  --bot-ambient-underglow-contact-y: 43%;
   --bot-ambient-underglow-rest-opacity: 0.34;
   --bot-ambient-underglow-rise-opacity: 0.42;
   --bot-ambient-underglow-contact-opacity: 0.54;
@@ -24256,8 +24257,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .botAmbientUnderglow {
   position: absolute;
-  left: 50%;
-  top: 78%;
+  left: var(--zen-live-bot-body-x, 50%);
+  top: calc(
+    var(--zen-live-bot-body-y, 50%) +
+      var(--bot-ambient-underglow-contact-y)
+  );
   z-index: 0;
   width: var(--bot-ambient-underglow-width);
   height: var(--bot-ambient-underglow-height);
@@ -34462,8 +34466,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .panelBots[data-bot-panel-view="marketplace"] {
   --panel-width: min(
-    1240px,
-    max(760px, calc(max(100vw, 1280px) - 160px)),
+    1120px,
+    max(760px, calc(100vw - 440px)),
     calc(max(100vw, 1280px) - 32px)
   );
 }
@@ -37115,6 +37119,14 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     );
   }
 
+  .botPanelHubShowcase[data-panel="bots"][data-bot-view="marketplace"] {
+    right: min(
+      1120px,
+      max(760px, calc(100vw - 440px)),
+      calc(max(100vw, 1280px) - 32px)
+    );
+  }
+
   .botPanelHubShowcase[data-panel="images"] {
     right: min(
       880px,
@@ -37127,7 +37139,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 @media (min-width: 821px) and (max-width: 1119px) {
   .botPanelHubShowcase[data-panel="bots"]:is(
       [data-bot-view="home"],
-      [data-bot-view="library"]
+      [data-bot-view="library"],
+      [data-bot-view="marketplace"]
     ) {
     display: none;
   }
@@ -37837,6 +37850,72 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     color-mix(in srgb, var(--bot-card-color) 7%, var(--bg));
 }
 
+.botMarketplaceCard[data-preview-selected="true"] {
+  border-color: color-mix(
+    in srgb,
+    var(--bot-card-color) 62%,
+    var(--line-strong)
+  );
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--bot-card-color) 18%, transparent),
+    0 0 22px color-mix(in srgb, var(--bot-card-color) 10%, transparent);
+}
+
+.botMarketplaceCard[data-marketplace-bot-card="true"] {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.botMarketplaceCardSelectButton {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  min-width: 0;
+  min-height: inherit;
+  border: 0;
+  border-radius: 7px;
+  padding: 13px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.botMarketplaceCardSelectButton:hover,
+.botMarketplaceCardSelectButton:focus-visible {
+  background: color-mix(
+    in srgb,
+    var(--bot-card-color) 9%,
+    transparent
+  );
+  outline: none;
+}
+
+.botMarketplaceCardSelectButton:focus-visible {
+  box-shadow: inset 0 0 0 2px
+    color-mix(in srgb, var(--bot-card-color) 58%, var(--line-strong));
+}
+
+.botMarketplaceCard[data-preview-selected="true"]
+  .botMarketplaceCardSelectButton {
+  border-radius: 7px 7px 0 0;
+  background: color-mix(
+    in srgb,
+    var(--bot-card-color) 7%,
+    transparent
+  );
+}
+
 .botMarketplaceLensCard {
   --bot-card-color: var(--marketplace-lens-color, #2fd3e3);
   border-color: color-mix(
@@ -37927,7 +38006,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   gap: 8px;
 }
 
-.botMarketplaceCardTitleRow > div {
+.botMarketplaceCardTitleRow > div,
+.botMarketplaceCardTitleRow > span:first-child {
   min-width: 0;
   display: grid;
   gap: 3px;
@@ -37965,6 +38045,12 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .botMarketplaceCardBody p {
   margin: 0;
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.botMarketplaceCardDescription {
   color: var(--fg-muted);
   font-size: 12px;
   line-height: 1.4;
@@ -38011,6 +38097,14 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   gap: 7px;
 }
 
+.botMarketplaceCard[data-marketplace-bot-card="true"]
+  .botMarketplaceCardActions {
+  width: 100%;
+  border-top: 1px solid
+    color-mix(in srgb, var(--bot-card-color) 18%, var(--line));
+  padding: 11px 13px 13px;
+}
+
 .botMarketplaceSecondaryButton {
   -webkit-appearance: none;
   appearance: none;
@@ -38028,10 +38122,50 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .botMarketplaceSecondaryButton:hover,
-.botMarketplaceSecondaryButton:focus-visible {
+.botMarketplaceSecondaryButton:focus-visible,
+.botMarketplaceSecondaryButton[data-selected="true"] {
   border-color: color-mix(in srgb, #ff6f91 34%, var(--line-strong));
   color: var(--fg);
   outline: none;
+}
+
+.botMarketplaceSecondaryButton[data-selected="true"] {
+  background: color-mix(
+    in srgb,
+    var(--bot-card-color) 12%,
+    var(--bg-surface)
+  );
+}
+
+.botMarketplaceSecondaryButton[data-danger="true"] {
+  border-color: color-mix(in srgb, var(--danger) 32%, var(--line));
+  color: color-mix(in srgb, var(--danger) 78%, var(--fg) 22%);
+}
+
+.botMarketplaceSecondaryButton[data-danger="true"]:hover:not(:disabled),
+.botMarketplaceSecondaryButton[data-danger="true"]:focus-visible:not(:disabled) {
+  border-color: color-mix(in srgb, var(--danger) 62%, var(--line-strong));
+  background: color-mix(in srgb, var(--danger) 10%, var(--bg-surface));
+  color: var(--danger);
+}
+
+.botMarketplaceSecondaryButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.botMarketplacePreviewStatus {
+  flex: 1 0 100%;
+  color: var(--fg-subtle);
+  font-size: 10.5px;
+  line-height: 1.35;
+}
+
+.botMarketplacePreviewError {
+  flex: 1 0 100%;
+  color: var(--danger);
+  font-size: 10.5px;
+  line-height: 1.35;
 }
 
 @media (max-width: 520px) {
@@ -45532,6 +45666,18 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
       var(--editor-bot-color, var(--accent)) 13%,
       rgba(255, 255, 255, 0.035)
     );
+}
+
+.botAvatarEyeCountControl {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.botAvatarEyeCountControl > span {
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 720;
 }
 
 .botAvatarGlyphInputField {
@@ -63585,6 +63731,37 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   transform: rotate(var(--bot-face-eye-rotation, 0deg));
 }
 
+:is(.coffeeSeatPlateEmoji, .messageMoodCoffeeFace, .zenLiveBotPresenceFaceGlyph)
+  [data-custom-eye-pair="true"] {
+  display: grid;
+  inline-size: 0.66em;
+  block-size: 1em;
+  place-items: center;
+  justify-self: center;
+  overflow: visible;
+  --bot-face-custom-eye-pair-scale: 0.42;
+  --bot-face-custom-glyph-base-rotation: var(--bot-face-eye-rotation, 0deg);
+  transform: rotate(var(--bot-face-eye-rotation, 0deg));
+  transform-origin: center;
+}
+
+:is(.coffeeSeatPlateEmoji, .messageMoodCoffeeFace, .zenLiveBotPresenceFaceGlyph)
+  [data-custom-eye-pair="true"]
+  > [data-crt-glyph-layer="true"] {
+  grid-area: 1 / 1;
+  transform-origin: center;
+}
+
+:is(.coffeeSeatPlateEmoji, .messageMoodCoffeeFace, .zenLiveBotPresenceFaceGlyph)
+  [data-custom-eye-pair-side="left"] {
+  transform: translateX(-0.18em) scale(var(--bot-face-custom-eye-pair-scale));
+}
+
+:is(.coffeeSeatPlateEmoji, .messageMoodCoffeeFace, .zenLiveBotPresenceFaceGlyph)
+  [data-custom-eye-pair-side="right"] {
+  transform: translateX(0.18em) scale(var(--bot-face-custom-eye-pair-scale));
+}
+
 :is(
   .coffeeSeatPlateEmoji,
   .messageMoodCoffeeFace,
@@ -64994,6 +65171,72 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .coffeeSeatActionBadge[data-action-verbose="true"] {
   padding-block: 1px 4px;
+}
+
+.coffeeSeatActionBadge[data-listener-reaction="true"] {
+  opacity: 0.72;
+  font-size: 0.92em;
+  font-style: italic;
+  border-left-width: 2px;
+  filter: saturate(0.82);
+}
+
+.coffeeSeat[data-coffee-listener-reaction="true"] .coffeeSeatCluster {
+  transform-origin: 50% 68%;
+}
+
+.coffeeSeat[data-coffee-listener-reaction-action="nod"] .coffeeSeatCluster {
+  animation: coffeeListenerNod 720ms ease-in-out both;
+}
+
+.coffeeSeat[data-coffee-listener-reaction-action="lean_in"]
+  .coffeeSeatCluster {
+  animation: coffeeListenerLeanIn 920ms cubic-bezier(0.2, 0.75, 0.2, 1) both;
+}
+
+.coffeeSeat[data-coffee-listener-reaction-action="head_tilt"]
+  .coffeeSeatCluster,
+.coffeeSeat[data-coffee-listener-reaction-action="thoughtful_hmm"]
+  .coffeeSeatCluster {
+  animation: coffeeListenerHeadTilt 880ms ease-in-out both;
+}
+
+.coffeeSeat[data-coffee-listener-reaction-action="soft_smile"]
+  .coffeeSeatPlateEmoji {
+  animation: coffeeListenerWarmth 980ms ease-in-out both;
+}
+
+@keyframes coffeeListenerNod {
+  0%, 100% { transform: translateY(0); }
+  42% { transform: translateY(4px) scaleY(0.985); }
+  68% { transform: translateY(-1px); }
+}
+
+@keyframes coffeeListenerLeanIn {
+  0%, 100% { transform: translateY(0) scale(1); }
+  48%, 72% { transform: translateY(-3px) scale(1.018); }
+}
+
+@keyframes coffeeListenerHeadTilt {
+  0%, 100% { transform: rotate(0deg); }
+  45%, 72% { transform: rotate(-1.8deg); }
+}
+
+@keyframes coffeeListenerWarmth {
+  0%, 100% { filter: none; }
+  45%, 72% { filter: brightness(1.12) saturate(1.08); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .coffeeSeat[data-coffee-listener-reaction="true"] .coffeeSeatCluster,
+  .coffeeSeat[data-coffee-listener-reaction="true"] .coffeeSeatPlateEmoji {
+    animation: none;
+    transform: none;
+  }
+
+  .coffeeSeat[data-coffee-listener-reaction="true"] .coffeeSeatPlateEmoji {
+    filter: brightness(1.08);
+  }
 }
 
 .coffeeSeatActionBadgeStack[data-badge-side="left"],
@@ -66506,6 +66749,64 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   font-weight: 800;
   letter-spacing: 0.1em;
   text-transform: uppercase;
+}
+
+.coffeeRestoredSetupNotice {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid rgba(120, 200, 255, 0.3);
+  border-radius: 10px;
+  background: rgba(120, 200, 255, 0.09);
+}
+
+.coffeeRestoredSetupNotice > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.coffeeRestoredSetupNotice span {
+  color: rgba(198, 231, 255, 0.82);
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.coffeeRestoredSetupNotice strong,
+.coffeeRestoredSetupNotice small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.coffeeRestoredSetupNotice strong {
+  color: rgba(255, 255, 255, 0.95);
+  font-size: 0.76rem;
+}
+
+.coffeeRestoredSetupNotice small {
+  color: rgba(255, 255, 255, 0.64);
+  font-size: 0.63rem;
+}
+
+.coffeeRestoredSetupNotice button {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.22);
+  color: rgba(255, 255, 255, 0.86);
+  font: inherit;
+  font-size: 0.66rem;
+  font-weight: 750;
+  cursor: pointer;
 }
 
 .coffeeGroupPresetField {
@@ -68543,6 +68844,20 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   padding: 0;
 }
 
+.coffeeGroupRecentSessionsHint {
+  margin: 0;
+  color: var(--coffee-muted);
+  font-size: 0.64rem;
+  line-height: 1.25;
+}
+
+.coffeeGroupRecentSessionRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px;
+  min-width: 0;
+}
+
 .coffeeGroupBotList li {
   min-width: 0;
   color: rgba(255, 255, 255, 0.88);
@@ -68854,6 +69169,23 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   background: rgba(255, 255, 255, 0.08);
 }
 
+.coffeeGroupRecentSessions .coffeeGroupRecentSessionReuse {
+  width: auto;
+  place-content: center;
+  padding-inline: 8px;
+  color: rgba(198, 231, 255, 0.92);
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+.coffeeGroupRecentSessions button:disabled,
+.coffeeRestoredSetupNotice button:disabled {
+  cursor: default;
+  opacity: 0.58;
+}
+
 .coffeeGroupEmptyNote {
   margin: 0;
   line-height: 1.35;
@@ -69098,6 +69430,23 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .coffeeSettingsSelect:focus-visible {
   outline: 2px solid rgba(120, 200, 255, 0.55);
   outline-offset: 2px;
+}
+
+.coffeeJazzButton {
+  width: fit-content;
+  min-width: 92px;
+  padding: 8px 16px;
+  border: 1px solid rgba(201, 166, 108, 0.3);
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(114, 79, 42, 0.34), rgba(55, 39, 25, 0.4));
+  color: rgba(255, 240, 214, 0.88);
+  font: 700 0.78rem/1 system-ui;
+  letter-spacing: 0.04em;
+}
+
+.coffeeJazzButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
 }
 
 .coffeeSettingsRange {
@@ -70180,7 +70529,9 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     .coffeePollModalOptionHint,
     .coffeeGroupToolButtonSubtitle,
     .coffeeGroupEmptyNote,
+    .coffeeGroupRecentSessionsHint,
     .coffeeGroupRecentSessions small,
+    .coffeeRestoredSetupNotice small,
     .coffeeMessageUserLabel
   ) {
   color: var(--coffee-muted);
@@ -70227,6 +70578,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     .coffeeGroupToolButton,
     .coffeeGroupToolButtonIcon,
     .coffeeGroupRecentSessions button,
+    .coffeeRestoredSetupNotice,
+    .coffeeRestoredSetupNotice button,
     .coffeeTranscriptPanel .headerIconButton,
     .coffeeSettingsSelect,
     .coffeeSettingsModal,
@@ -70247,6 +70600,14 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.78),
     0 10px 28px rgba(38, 30, 21, 0.08);
+}
+
+.themeLight.coffeeShell .coffeeRestoredSetupNotice span {
+  color: color-mix(in srgb, var(--accent) 74%, var(--fg));
+}
+
+.themeLight.coffeeShell .coffeeRestoredSetupNotice strong {
+  color: var(--fg);
 }
 
 .themeLight.coffeeShell
@@ -71097,6 +71458,12 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .themeLight.coffeeShell .coffeeSettingsSelect option:checked {
   background: color-mix(in srgb, var(--accent-soft) 72%, #ffffff 28%);
   color: var(--fg);
+}
+
+.themeLight.coffeeShell .coffeeJazzButton {
+  border-color: rgba(115, 77, 32, 0.2);
+  background: linear-gradient(135deg, rgba(225, 199, 156, 0.44), rgba(247, 238, 219, 0.76));
+  color: rgba(75, 48, 21, 0.82);
 }
 
 .themeLight.coffeeShell .coffeeSettingsDivider {

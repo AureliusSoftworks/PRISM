@@ -1852,10 +1852,13 @@ describe("Coffee seat arrival CSS", () => {
     assert.match(pageSource, /coffeeConversationRef\.current = args\.conversation;\s+setCoffeeConversation\(args\.conversation\);/);
   });
 
-  it("blocks sip visuals while the Coffee pot is filling or the bot is thinking", () => {
+  it("blocks sip visuals for coffee refusal, pot filling, or bot thinking", () => {
     assert.match(pageSource, /const COFFEE_CUP_REFILL_SIP_LOCK_MS = 3_200;/);
     assert.match(pageSource, /const refillSipLocked = refillSipLockUntilMs > coffeeCupClockMs;/);
-    assert.match(pageSource, /const visualSeatSipInProgress = refillSipLocked \|\| seatIsThinking \? false : seatSipInProgress;/);
+    assert.match(
+      pageSource,
+      /const visualSeatSipInProgress =\s+coffeeCupRefused \|\| refillSipLocked \|\| seatIsThinking\s+\? false\s+: seatSipInProgress;/,
+    );
     assert.match(pageSource, /sipLockedUntilMs: refillSipLockUntilMs \|\| null,/);
     assert.match(pageSource, /refillSipLocked \|\| !seatIsFirmlySeated/);
     assert.match(pageSource, /cupSipping: refillSipLocked \|\| seatIsThinking \? false : coffeeCupVisual\.sipping,/);

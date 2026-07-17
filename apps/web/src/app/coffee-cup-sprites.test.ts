@@ -952,6 +952,32 @@ describe("coffee cup sprites", () => {
     assert.ok(powered.progress > normal.progress);
   });
 
+  it("keeps refused coffee full and unsipped while it goes cold", () => {
+    const durationMinutes = 10;
+    const sessionEndsAtMs = durationMinutes * 60 * 1000;
+    const refused = buildCoffeeCupVisualState({
+      seed: "session:theodore",
+      nowMs: sessionEndsAtMs,
+      sessionStartedAtMs: 0,
+      sessionEndsAtMs,
+      durationMinutes,
+      powerRateMultiplier: 0,
+      sipCount: 4,
+      sippingOverride: true,
+      forceEmpty: true,
+      finished: true,
+    });
+
+    assert.equal(coffeeCupPacedProgress(0.6, "session:theodore", 10, 0), 0);
+    assert.equal(refused.progress, 0);
+    assert.equal(refused.frameIndex, 0);
+    assert.equal(refused.amount, "full");
+    assert.equal(refused.temperatureLabel, "cold");
+    assert.equal(refused.steamAlpha, 0);
+    assert.equal(refused.sipping, false);
+    assert.equal(refused.finished, false);
+  });
+
   it("varies sip hold timing by sip count", () => {
     const first = coffeeCupSipAnimationTiming({
       seed: "session:bot-alice",

@@ -80,6 +80,7 @@ describe("restoreFactoryDefaultsInDatabase", () => {
             prism_default_bot_face_eye_scale,
             prism_default_bot_face_eye_offset_x, prism_default_bot_face_eye_offset_y,
             prism_default_bot_face_eye_rotation_deg,
+            prism_default_bot_face_eye_count,
             prism_default_bot_face_mouth_scale,
             prism_default_bot_face_mouth_offset_x, prism_default_bot_face_mouth_offset_y,
             prism_default_bot_face_mouth_rotation_deg,
@@ -169,6 +170,7 @@ describe("restoreFactoryDefaultsInDatabase", () => {
       assert.equal(user.prism_default_bot_face_eye_offset_x, null);
       assert.equal(user.prism_default_bot_face_eye_offset_y, null);
       assert.equal(user.prism_default_bot_face_eye_rotation_deg, null);
+      assert.equal(user.prism_default_bot_face_eye_count, 1);
       assert.equal(user.prism_default_bot_face_mouth_scale, null);
       assert.equal(user.prism_default_bot_face_mouth_offset_x, null);
       assert.equal(user.prism_default_bot_face_mouth_offset_y, null);
@@ -278,6 +280,7 @@ function seedResetFixture(db: DatabaseSync): void {
       prism_default_bot_face_eye_offset_x = 0.06,
       prism_default_bot_face_eye_offset_y = -0.08,
       prism_default_bot_face_eye_rotation_deg = -25,
+      prism_default_bot_face_eye_count = 2,
       prism_default_bot_face_mouth_scale = 1.25,
       prism_default_bot_face_mouth_offset_x = -0.04,
       prism_default_bot_face_mouth_offset_y = 0.06,

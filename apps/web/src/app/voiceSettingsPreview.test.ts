@@ -48,6 +48,10 @@ describe("voice settings preview", () => {
       /explicitOnlineContext: true,[\s\S]*?includeAlignment: true,[\s\S]*?profile: previewProfile/,
     );
     assert.match(pageSource, /await enqueueEnglishVoice\(/);
+    assert.match(
+      pageSource,
+      /onStart: \(\) => options\.onPlaybackStart\?\.\(\)/,
+    );
   });
 
   it("previews the unsaved Avatar Studio voice directly in every audible mode", () => {

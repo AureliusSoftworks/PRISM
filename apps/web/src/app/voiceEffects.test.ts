@@ -91,10 +91,30 @@ describe("ElevenLabs-only effects", () => {
       "if (args.isCurrent && !args.isCurrent()) return true;",
       decodeAt,
     );
-    const stopAt = source.indexOf("stopRealtimeVoiceAudio();", decodeAt);
+    const stopAt = source.indexOf("stopRealtimeVoiceAudio(channel);", decodeAt);
     assert.ok(decodeAt >= 0);
     assert.ok(currentGuardAt > decodeAt);
     assert.ok(stopAt > currentGuardAt);
+  });
+
+  it("keeps listener reactions on an independent, quieter, time-bounded channel", () => {
+    const source = readFileSync(new URL("./voiceEffects.ts", import.meta.url), "utf8");
+    const reactionSource = readFileSync(
+      new URL("./listenerReactionVoice.ts", import.meta.url),
+      "utf8",
+    );
+    const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+    assert.match(source, /VoicePlaybackChannel = "primary" \| "reaction"/);
+    assert.match(source, /stopRealtimeVoiceAudio\(channel\)/);
+    assert.match(source, /channel === "reaction" \? 0\.62 : 1/);
+    assert.match(source, /maxDurationMs/);
+    assert.match(reactionSource, /args\.mode === "english"/u);
+    assert.match(reactionSource, /buildBottishPlan/u);
+    assert.match(reactionSource, /args\.mode === "babble"/u);
+    assert.match(reactionSource, /channel: "reaction"/u);
+    assert.match(reactionSource, /maxDurationMs: 900/u);
+    assert.match(pageSource, /settings\.voiceMode !== "english"[\s\S]{0,120}!plan\.spokenCue/u);
+    assert.match(pageSource, /if \(!preparedInTime\) return false/u);
   });
 });
 

@@ -2,6 +2,8 @@ import type { PromptWildcardRunMetadata } from "./promptShortcut.js";
 import type { ContinuityProducerVersions } from "./continuityVersion.js";
 
 export type SlateProjectPhase = "shape" | "draft" | "refine";
+export type SlateProseMode = "auto" | "online" | "offline";
+export type SlateAiProvider = "local" | "openai" | "anthropic";
 
 export type SlateStructureKind = "act" | "chapter" | "scene";
 export type SlateStructureStatus = "planned" | "drafted";
@@ -200,8 +202,21 @@ export interface SlateProjectDetail extends SlateProjectSummary {
   lockedRanges: SlateLockedRange[];
   lastProvider: "local" | "openai" | "anthropic" | null;
   lastModel: string | null;
+  proseMode: SlateProseMode;
+  proseModel: string | null;
+  proseProvider: SlateAiProvider | null;
+  titleSuggestion: SlateTitleSuggestion | null;
   revisions: SlateRevision[];
   versions: SlateVersionSummary[];
+}
+
+export interface SlateTitleSuggestion {
+  id: string;
+  title: string;
+  reason: string;
+  provider: SlateAiProvider;
+  model: string;
+  createdAt: string;
 }
 
 export interface SlateProjectListResponse {
@@ -251,8 +266,44 @@ export type SlateProjectPatchRequest = Partial<
     | "manuscript"
     | "direction"
     | "lockedRanges"
+    | "proseMode"
+    | "proseModel"
+    | "proseProvider"
   >
 >;
+
+export interface SlateLivingSummary {
+  projectId: string;
+  text: string;
+  tail: string;
+  sourceFingerprint: string;
+  updatedAt: string;
+}
+
+export interface SlateLivingSummaryResponse {
+  ok: true;
+  summary: SlateLivingSummary;
+}
+
+export interface SlateProjectChatMessage {
+  id: string;
+  projectId: string;
+  role: "user" | "assistant";
+  content: string;
+  provider: SlateAiProvider | null;
+  model: string | null;
+  createdAt: string;
+}
+
+export interface SlateProjectChatResponse {
+  ok: true;
+  messages: SlateProjectChatMessage[];
+}
+
+export interface SlateTitleSuggestionResponse {
+  ok: true;
+  project: SlateProjectDetail;
+}
 
 export interface SlateDraftRequest {
   structureItemId: string;

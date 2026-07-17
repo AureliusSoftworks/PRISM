@@ -1081,6 +1081,69 @@ describe("API request integration", () => {
     assert.equal(autoPayload.episode.responseMode, "auto");
   });
 
+  it("keeps Signal booking suggestions on LOCAL when the account is local", async () => {
+    const client = createClient();
+    const registration = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "signal-booking-suggestion@example.com",
+        password: "signal-booking-suggestion",
+      }),
+    );
+    assert.equal(registration.status, 201);
+    const userId = String((await json(registration)).user.id);
+    const createdAt = "2026-07-17T00:00:00.000Z";
+    const insertBot = db.prepare(
+      `INSERT INTO bots
+         (id, user_id, name, system_prompt, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    );
+    insertBot.run(
+      "signal-suggestion-host",
+      userId,
+      "Suggestion Host",
+      "A careful host who finds useful tensions.",
+      createdAt,
+      createdAt,
+    );
+    insertBot.run(
+      "signal-suggestion-guest",
+      userId,
+      "Suggestion Guest",
+      "A guarded guest with practical experience.",
+      createdAt,
+      createdAt,
+    );
+    const showResponse = await client.request(
+      "/api/botcast/shows",
+      jsonInit({ hostBotId: "signal-suggestion-host" }),
+    );
+    assert.equal(showResponse.status, 201);
+    const showId = String((await json(showResponse)).show.id);
+    db.prepare(
+      `UPDATE users
+          SET preferred_provider = 'local', preferred_local_model = 'gemma-suggestion'
+        WHERE id = ?`,
+    ).run(userId);
+    const providerCallsBefore = providerFactoryCalls.length;
+    const response = await client.request(
+      `/api/botcast/shows/${encodeURIComponent(showId)}/booking-suggestion`,
+      jsonInit({
+        guestBotId: "signal-suggestion-guest",
+        field: "topic",
+        currentTopic: "A first idea",
+        preferredProvider: "anthropic",
+        modelOverride: "claude-must-not-run",
+      }),
+    );
+    const payload = await json(response);
+    assert.equal(response.status, 200, JSON.stringify(payload));
+    assert.equal(payload.ok, true);
+    assert.equal(payload.generated, true);
+    assert.equal(typeof payload.value, "string");
+    assert.deepEqual(providerFactoryCalls.slice(providerCallsBefore), ["local"]);
+  });
+
   it("uploads Signal assets and deletes episodes and shows through tenant-safe HTTP routes", async () => {
     const owner = createClient();
     const stranger = createClient();
@@ -1305,6 +1368,7 @@ describe("API request integration", () => {
         faceEyeCharacter: "8",
         faceEyeAnimation: "spin",
         faceEyeRotationDeg: -25,
+        faceEyeCount: 2,
         faceMouthCharacter: "△",
         faceMouthAnimation: "wobble",
         faceMouthCoffeePucker: true,
@@ -1318,6 +1382,7 @@ describe("API request integration", () => {
     const botId = String(createdPayload.bot.id);
     assert.equal(createdPayload.bot.face_eye_animation, undefined);
     assert.equal(createdPayload.bot.face_eye_rotation_deg, -25);
+    assert.equal(createdPayload.bot.face_eye_count, 2);
     assert.equal(createdPayload.bot.face_mouth_animation, "wobble");
     assert.equal(createdPayload.bot.face_mouth_coffee_pucker, 1);
     assert.equal(createdPayload.bot.face_blink_scale, 1.2);
@@ -1331,6 +1396,7 @@ describe("API request integration", () => {
         faceBlinkBar: " ",
         faceEyeAnimation: "flicker",
         faceEyeRotationDeg: 35,
+        faceEyeCount: 1,
         faceMouthAnimation: "pulsate",
         faceMouthCoffeePucker: false,
         faceBlinkScale: 0.85,
@@ -1343,11 +1409,23 @@ describe("API request integration", () => {
     assert.equal(updatedPayload.bot.face_blink_bar, " ");
     assert.equal(updatedPayload.bot.face_eye_animation, "none");
     assert.equal(updatedPayload.bot.face_eye_rotation_deg, 35);
+    assert.equal(updatedPayload.bot.face_eye_count, 1);
     assert.equal(updatedPayload.bot.face_mouth_animation, "pulsate");
     assert.equal(updatedPayload.bot.face_mouth_coffee_pucker, 0);
     assert.equal(updatedPayload.bot.face_blink_scale, 0.85);
     assert.equal(updatedPayload.bot.face_blink_offset_x, 0.1);
     assert.equal(updatedPayload.bot.face_blink_offset_y, -0.12);
+
+    const invalidEyeCount = await client.request(
+      `/api/bots/${encodeURIComponent(botId)}`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ faceEyeCount: 3 }),
+      },
+    );
+    assert.equal(invalidEyeCount.status, 400);
+    assert.match((await json(invalidEyeCount)).error, /eye count/i);
 
     const updatedDefault = await client.request("/api/default-bot", {
       method: "PATCH",
@@ -1356,6 +1434,7 @@ describe("API request integration", () => {
         faceEyeCharacter: "8",
         faceEyeAnimation: "spin",
         faceEyeRotationDeg: -45,
+        faceEyeCount: 2,
         faceMouthCharacter: "△",
         faceMouthAnimation: "wobble",
         faceMouthCoffeePucker: true,
@@ -1368,6 +1447,7 @@ describe("API request integration", () => {
     const defaultPayload = await json(updatedDefault);
     assert.equal(defaultPayload.defaultBot.prismDefaultBotFaceEyeAnimation, undefined);
     assert.equal(defaultPayload.defaultBot.prismDefaultBotFaceEyeRotationDeg, -45);
+    assert.equal(defaultPayload.defaultBot.prismDefaultBotFaceEyeCount, 2);
     assert.equal(defaultPayload.defaultBot.prismDefaultBotFaceMouthAnimation, "wobble");
     assert.equal(
       defaultPayload.defaultBot.prismDefaultBotFaceMouthCoffeePucker,
@@ -1603,6 +1683,218 @@ describe("API request integration", () => {
     assert.equal(alignedPayload.alignment, null);
     assert.equal(Buffer.from(alignedPayload.audioBase64, "base64").subarray(0, 4).toString(), "RIFF");
     assert.deepEqual(fetchRecorder.calls.slice(beforeCalls), []);
+  });
+
+  it("authorizes Signal ElevenLabs tags from the saved episode mode", async () => {
+    const client = createClient();
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "signal-voice-context@example.com",
+        password: "voice-password",
+      }),
+    );
+    assert.equal(register.status, 201);
+    const userId = String((await json(register)).user.id);
+    const now = "2026-07-17T18:00:00.000Z";
+    const insertBot = db.prepare(
+      `INSERT INTO bots
+         (id, user_id, name, system_prompt, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    );
+    insertBot.run(
+      "signal-voice-host",
+      userId,
+      "Signal Voice Host",
+      "An expressive interviewer.",
+      now,
+      now,
+    );
+    insertBot.run(
+      "signal-voice-guest",
+      userId,
+      "Signal Voice Guest",
+      "An expressive guest.",
+      now,
+      now,
+    );
+    const showResponse = await client.request(
+      "/api/botcast/shows",
+      jsonInit({ hostBotId: "signal-voice-host" }),
+    );
+    assert.equal(showResponse.status, 201);
+    const showId = String((await json(showResponse)).show.id);
+
+    db.prepare(
+      "UPDATE users SET preferred_provider = 'openai', english_voice_engine = 'elevenlabs' WHERE id = ?",
+    ).run(userId);
+    const onlineEpisodeResponse = await client.request(
+      `/api/botcast/shows/${encodeURIComponent(showId)}/episodes`,
+      jsonInit({
+        guestBotId: "signal-voice-guest",
+        topic: "An online voice performance",
+        preferredProvider: "openai",
+      }),
+    );
+    assert.equal(onlineEpisodeResponse.status, 201);
+    const onlineEpisodeId = String(
+      (await json(onlineEpisodeResponse)).episode.id,
+    );
+    db.prepare(
+      `INSERT INTO botcast_messages
+         (id, user_id, episode_id, speaker_role, bot_id, content, voice_performance_text, created_at)
+       VALUES (?, ?, ?, 'host', ?, ?, ?, ?)`,
+    ).run(
+      "signal-online-voice-message",
+      userId,
+      onlineEpisodeId,
+      "signal-voice-host",
+      "Welcome to the difficult part.",
+      "[sighs] Welcome to the difficult part.",
+      now,
+    );
+
+    // Replaying an ONLINE episode must stay authorized by the saved episode,
+    // even after the account's current provider has returned to LOCAL.
+    db.prepare("UPDATE users SET preferred_provider = 'local' WHERE id = ?").run(
+      userId,
+    );
+    const beforeOnlineCalls = fetchRecorder.calls.length;
+    config.elevenLabsApiKey = "integration-elevenlabs-key";
+    try {
+      const onlineVoice = await client.request(
+        "/api/voices/synthesize",
+        jsonInit({
+          text: "Welcome to the difficult part.",
+          signalMessageId: "signal-online-voice-message",
+          elevenLabsText: "[growls] A client must not replace saved text.",
+          mode: "english",
+          engine: "elevenlabs",
+          profile: {
+            ...normalizeBotAudioVoiceProfileV1(undefined),
+            elevenLabsVoiceId: "signal-provider-voice",
+          },
+        }),
+      );
+      assert.equal(onlineVoice.status, 200);
+      assert.equal(
+        onlineVoice.headers.get("x-prism-voice-engine"),
+        "elevenlabs",
+      );
+      const onlineCalls = fetchRecorder.calls.slice(beforeOnlineCalls);
+      assert.equal(onlineCalls.length, 1);
+      const providerBody = JSON.parse(String(onlineCalls[0]?.init?.body));
+      assert.equal(providerBody.model_id, "eleven_v3");
+      assert.equal(
+        providerBody.text,
+        "[sighs] Welcome to the difficult part.",
+      );
+      const beforeOnlineReactionCalls = fetchRecorder.calls.length;
+      const onlineReactionVoice = await client.request(
+        "/api/voices/synthesize",
+        jsonInit({
+          signalMessageId: "signal-online-voice-message",
+          listenerReactionText: "mm-hm",
+          mode: "english",
+          engine: "elevenlabs",
+          profile: {
+            ...normalizeBotAudioVoiceProfileV1(undefined),
+            elevenLabsVoiceId: "signal-provider-voice",
+          },
+        }),
+      );
+      assert.equal(onlineReactionVoice.status, 200);
+      assert.equal(
+        onlineReactionVoice.headers.get("x-prism-voice-engine"),
+        "elevenlabs",
+      );
+      const reactionCalls = fetchRecorder.calls.slice(
+        beforeOnlineReactionCalls,
+      );
+      assert.equal(reactionCalls.length, 1);
+      assert.equal(
+        JSON.parse(String(reactionCalls[0]?.init?.body)).text,
+        "mm-hm",
+      );
+      const invalidReaction = await client.request(
+        "/api/voices/synthesize",
+        jsonInit({
+          signalMessageId: "signal-online-voice-message",
+          listenerReactionText: "Absolutely",
+          mode: "english",
+          engine: "elevenlabs",
+        }),
+      );
+      assert.equal(invalidReaction.status, 400);
+
+      const localEpisodeResponse = await client.request(
+        `/api/botcast/shows/${encodeURIComponent(showId)}/episodes`,
+        jsonInit({
+          guestBotId: "signal-voice-guest",
+          topic: "A private local voice performance",
+          preferredProvider: "local",
+        }),
+      );
+      assert.equal(localEpisodeResponse.status, 201);
+      const localEpisodeId = String(
+        (await json(localEpisodeResponse)).episode.id,
+      );
+      db.prepare(
+        `INSERT INTO botcast_messages
+           (id, user_id, episode_id, speaker_role, bot_id, content, voice_performance_text, created_at)
+         VALUES (?, ?, ?, 'host', ?, ?, ?, ?)`,
+      ).run(
+        "signal-local-voice-message",
+        userId,
+        localEpisodeId,
+        "signal-voice-host",
+        "Keep this reaction on the device.",
+        "[exhales] Keep this reaction on the device.",
+        now,
+      );
+      const beforeLocalCalls = fetchRecorder.calls.length;
+      const localVoice = await client.request(
+        "/api/voices/synthesize",
+        jsonInit({
+          text: "Keep this reaction on the device.",
+          signalMessageId: "signal-local-voice-message",
+          elevenLabsText: "[exhales] Keep this reaction on the device.",
+          mode: "english",
+          engine: "elevenlabs",
+          profile: {
+            ...normalizeBotAudioVoiceProfileV1(undefined),
+            elevenLabsVoiceId: "signal-provider-voice",
+          },
+        }),
+      );
+      assert.equal(localVoice.status, 200);
+      assert.equal(
+        localVoice.headers.get("x-prism-voice-engine"),
+        "builtin-local-fallback",
+      );
+      assert.equal(fetchRecorder.calls.length, beforeLocalCalls);
+      const localReactionVoice = await client.request(
+        "/api/voices/synthesize",
+        jsonInit({
+          signalMessageId: "signal-local-voice-message",
+          listenerReactionText: "hmm",
+          mode: "english",
+          engine: "elevenlabs",
+          profile: {
+            ...normalizeBotAudioVoiceProfileV1(undefined),
+            elevenLabsVoiceId: "signal-provider-voice",
+          },
+        }),
+      );
+      assert.equal(localReactionVoice.status, 200);
+      assert.equal(
+        localReactionVoice.headers.get("x-prism-voice-engine"),
+        "builtin-local-fallback",
+      );
+      assert.equal(fetchRecorder.calls.length, beforeLocalCalls);
+    } finally {
+      config.elevenLabsApiKey = "";
+    }
   });
 
   it("uses System TTS until the profile selects an ElevenLabs voice", async () => {

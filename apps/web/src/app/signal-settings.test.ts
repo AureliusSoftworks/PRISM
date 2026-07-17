@@ -21,6 +21,8 @@ test("Signal has a default-off immersive voice settings surface", () => {
   assert.match(pageSource, /activeSettingsScope === "botcast"/u);
   assert.match(pageSource, /data-settings-section="botcast"/u);
   assert.match(pageSource, /settings\.signalImmersiveVoiceEffectsEnabled/u);
+  assert.match(pageSource, /action floats above/u);
+  assert.match(pageSource, /appears between/u);
   assert.match(pageSource, /activeSettingsScope !== "botcast"/u);
 });
 
@@ -40,5 +42,14 @@ test("Signal sends saved performance text only through the ElevenLabs request la
   assert.match(
     pageSource,
     /settings\.signalImmersiveVoiceEffectsEnabled[\s\S]{0,140}elevenLabsText: message\.voicePerformanceText/u,
+  );
+  assert.match(pageSource, /signalMessageId: message\.id/u);
+  assert.match(
+    pageSource,
+    /signalOnlineVoiceEnabled[\s\S]{0,180}settings\.englishVoiceEngine/u,
+  );
+  assert.doesNotMatch(
+    pageSource,
+    /effectiveProvider === "local"[\s\S]{0,100}settings\.englishVoiceEngine/u,
   );
 });

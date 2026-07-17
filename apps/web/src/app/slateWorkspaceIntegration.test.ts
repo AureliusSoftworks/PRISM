@@ -262,6 +262,10 @@ describe("Slate workspace integration", () => {
       slateBranch,
       /navigationHeader=\{renderSharedAppletNavbar\("Slate tools"\)\}/,
     );
+    assert.match(
+      slateBranch,
+      /<div className=\{themeClass\} data-slate-shell="true">[\s\S]*?<SlateWorkspace[\s\S]*?renderSharedPanels\(\)[\s\S]*?<\/div>/,
+    );
     assert.match(slateBranch, /renderSharedPanels\(\)/);
     assert.match(slateBranch, /renderModeTutorialOverlay\(\)/);
     assert.match(source, /sidebarHeader:\s*ReactNode/);

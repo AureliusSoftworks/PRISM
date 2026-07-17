@@ -830,6 +830,7 @@ const AvatarDetailsEditorSession = forwardRef<
               faceEyeOffsetX={faceStyle.eyeOffsetX}
               faceEyeOffsetY={faceStyle.eyeOffsetY}
               faceEyeRotationDeg={faceStyle.eyeRotationDeg}
+              faceEyeCount={faceStyle.eyeCount}
               faceMouthScale={faceStyle.mouthScale}
               faceMouthOffsetX={faceStyle.mouthOffsetX}
               faceMouthOffsetY={faceStyle.mouthOffsetY}

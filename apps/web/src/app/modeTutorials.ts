@@ -82,13 +82,13 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
     steps: [
       {
         heading: "Pick or stage your table",
-        body: "Choose a Coffee Group here, or arrive from a group waiting room with its Listen up topic and locally ranked table already staged. Each bot brings its ready Powers to the table.",
+        body: "Choose a Coffee Group here, or arrive from a group waiting room with its Listen up topic and locally ranked table already staged. Each bot brings its ready Powers to the table; Powers can change who they notice, answer, remember, privately read, how strongly they pull the room's attention, or whether they touch their coffee at all.",
         clickLabel: "a Coffee Group in the left sidebar",
         targetSelector: '[data-tutorial-target="coffee-groups"]',
       },
       {
         heading: "Set the table",
-        body: "Duration, presets, and group settings steer the whole session together. Auto duration is open-ended with no countdown; switch to Timed when you want a 3-30 minute table. Account default uses the model saved in Settings; AUTO is the separate response-routing control and can recover through your ordered chain of one to five local or online fallbacks. When a selected local model needs a first load, PRISM may briefly hold the table and pause its clock; the conversation resumes automatically once the room is ready.",
+        body: "Duration, presets, and group settings steer the whole session together. Auto duration is open-ended with no countdown; switch to Timed when you want a 3-30 minute table. Under Recent sessions, Open returns to the replay while Use setup restores that table's attendance, duration, pacing settings, and topic for an editable retry; the current model and response routing stay selected. Account default uses the model saved in Settings; AUTO is the separate response-routing control and can recover through your ordered chain of one to five local or online fallbacks. When a selected local model needs a first load, PRISM may briefly hold the table and pause its clock; the conversation resumes automatically once the room is ready.",
         clickLabel: "New session setup or Configure settings",
         targetSelector: '[data-tutorial-target="coffee-session-setup"]',
       },
@@ -106,7 +106,7 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Join the conversation",
-        body: "Once the table starts, type into the message box or let the bots carry the room. Poll votes and team choices share the Table Talk rail; drag its left edge or the topic divider when you want more room.",
+        body: "Once the table starts, type into the message box or let the bots carry the room. Watch a directly addressed bot: while listening, it may give a small nod, lean, expression, or rare quiet acknowledgement without taking a turn or entering the transcript. Inferred listeners react more subtly and visually only. Poll votes and team choices share the Table Talk rail; drag its left edge or the topic divider when you want more room.",
         clickLabel: "the Coffee message box",
         targetSelector: '[data-tutorial-target="composer"]',
       },
@@ -123,49 +123,49 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Shape the show’s identity",
-        body: "A custom identity is optional. Create this show’s look once to let Signal find a clever name, then keep using PRISM while the activity card tracks its persona-shaped logo and matching Dark-to-Light studio pair in the background. Afterward, open the gear at the bottom-right of the show card to tune the name, logo, linked studio pair, and opening ident, or replace either studio visual with your own image.",
+        body: "A custom identity is optional. Create this show’s look once to let Signal find a clever name and a large rotation of funny, host-shaped dashboard blurbs, then keep using PRISM while the activity card tracks its persona-shaped logo and matching Dark-to-Light studio pair in the background. Afterward, open the gear at the bottom-right of the show card to tune the name, regenerate just those blurbs, adjust the logo, linked studio pair, and atmosphere audio, or replace either studio visual with your own image.",
         clickLabel: "Create this show’s look or the show-card gear",
         targetSelector: '[data-tutorial-target="botcast-brand-controls"]',
       },
       {
         heading: "Build an audience",
-        body: "Every show begins with no audience. Completed episodes build a simulated viewer base, overall rating, and listener reviews here. Guest and topic choices can shift the pulse, so the archive becomes the foundation of the show’s emerging economy.",
+        body: "Every show begins with no audience. Completed episodes build a simulated viewer base, while one randomly chosen persona from your Library listens back and leaves a candid rating and short named review. Ratings stay marked as early until enough reactions accumulate, so the archive becomes the honest foundation of the show’s emerging economy.",
         clickLabel: "the audience pulse",
         targetSelector: '[data-tutorial-target="botcast-audience-pulse"]',
       },
       {
-        heading: "Give it an opening sound",
-        body: "Every show has a deterministic, host-persona-led Signal Synth ident made and played locally—no key or network required. Playback stays here in the strip: use Play intro to audition exactly what the next episode will use. Once the show has custom art, open its gear to create or refresh a cached six-second ElevenLabs intro, or switch back to Signal Synth. Until then, those tuning actions stay in this strip. Signal never generates music when an episode begins.",
-        clickLabel: "the opening ident controls",
+        heading: "Give the studio an atmosphere",
+        body: "Every show starts with a deterministic, host-persona-led Signal Synth ident and a bundled quiet studio room tone, both available locally with no key or network. Use Play ident to audition the opening. Once the show has custom art, its gear can create or refresh one cached ElevenLabs audio package: a six-second ident plus a looping, non-musical ambience shaped for that studio. Signal never synthesizes audio when an episode begins.",
+        clickLabel: "the atmosphere audio controls",
         targetSelector: '[data-tutorial-target="botcast-intro-audio"]',
       },
       {
         heading: "Choose how the bots speak",
-        body: "The Voice picker in Signal’s top navbar matches Zen: Mute stays silent, English speaks normally, Babble keeps the selected voice without intelligible words, and Bottish uses Prism’s procedural robot language. The saved choice applies to both host and guest. Choose it before beginning an episode; the picker locks while Signal is on air.",
+        body: "The Voice picker in Signal’s top navbar matches Zen: Mute stays silent, English speaks normally, Babble keeps the selected voice without intelligible words, and Bottish uses Prism’s procedural robot language. The saved choice applies to both host and guest, and you can change it before or during an episode. An on-air switch starts with the next line instead of cutting off the bot already on mic.",
         clickLabel: "the Voice picker in the top navbar",
         targetSelector: '[data-tutorial-target="botcast-voice-mode"]',
       },
       {
         heading: "Book tonight’s episode",
-        body: "Choose one guest, set the topic, and write an optional private angle—or use Randomize booking to fill all three locally from PRISM conversation starters, then edit anything you like. Host and guest bring their ready Powers on mic, including cup pace when a Power affects it. Episode length defaults to Auto: no countdown, at least a few real exchanges, then a natural close when the conversation settles; choose a timed target when you want one. Beginning the episode opens a short, skippable show-branded pre-roll while Signal prepares the host’s opening line and paces the next safe handoff ahead. If a selected local model is still loading when that pre-roll ends, PRISM holds the studio and pauses the episode clock until the opening is ready. The default stage places both bots in the authored chairs and both cups on the table. If generated studio furniture lands differently, open Align stage and drag them into place; Signal saves that alignment for every episode of the show, and close-up pans center on those saved bot positions. Pick LOCAL, AUTO, or ONLINE. AUTO keeps the account primary and recovers through your configured fallback chain; the other lanes can use the account model or a recording-only override. Signal locks that routing when the episode begins. The brief shapes the host but never goes on mic. Signal Settings can also opt ElevenLabs voices into sparse, saved vocal reactions.",
+        body: "Choose one guest, set the topic, and write an optional private angle—or use Randomize booking to fill all three locally from PRISM conversation starters, then edit anything you like. The small dice beside Topic and Private brief can instead ask the selected episode model for a guest-aware suggestion; the result always stays editable. Latest episodes can restore the guest, topic, private brief, available model override, and duration from a finished episode without starting it; your current episode mode stays in place. Host and guest bring their ready Powers on mic, including whether they have coffee at all or how quickly they drink it. Episode length defaults to Auto: no countdown, at least a few real exchanges, then a natural close when the conversation settles; choose a timed target when you want one. Beginning the episode opens a short, skippable show-branded pre-roll while Signal prepares the host’s opening line and paces the next safe handoff ahead. If a selected local model is still loading when that pre-roll ends, PRISM holds the studio and pauses the episode clock until the opening is ready. The default stage places both bots in the authored chairs and cups only for bots who drink coffee. If generated studio furniture lands differently, open Align stage to drag the visible pieces into place or swap the host and guest seats together with any cups; bots and cups turn inward from their new sides. Signal saves that alignment for every episode of the show, and close-up pans center on those saved bot positions. Pick LOCAL, AUTO, or ONLINE. AUTO keeps the account primary and recovers through your configured fallback chain; the other lanes can use the account model or a recording-only override. Signal locks that routing when the episode begins. The brief shapes the host but never goes on mic. Signal Settings can also opt ElevenLabs voices into sparse, saved vocal reactions.",
         clickLabel: "the episode setup desk",
         targetSelector: '[data-tutorial-target="botcast-setup"]',
       },
       {
         heading: "Direct the live cut",
-        body: "Left, Right, and Wide hold a fixed studio shot. Auto opens on the full studio, moves to the host for the introduction, returns Wide throughout the conversation, and closes on the full set. Choosing any fixed shot breaks out of Auto; choosing Auto again hands direction back at any point. Signal records every choice into the episode’s finished camera cut.",
+        body: "Left, Right, and Wide hold a fixed studio shot. Auto opens on the full studio, moves to the host for the introduction, and keeps Wide as the underlying conversation shot, with an occasional brief listener cut when a saved backchannel lands, before closing on the full set. Choosing any fixed shot breaks out of Auto and never receives reaction cuts; choosing Auto again hands direction back at any point. Signal records every choice and listener reaction into the finished episode.",
         clickLabel: "a live camera",
         targetSelector: '[data-tutorial-target="botcast-live-camera"]',
       },
       {
         heading: "Produce from the control room",
-        body: "Signal keeps one speaker on mic at a time: their face comes alive and the transcript follows only the words they have finished saying. Ask about a detail, press harder, move on, or lighten up at any time; Signal queues the private cue for the host’s next turn. Wrap it up is shared episode direction: both bots carry the closing exchange through to a real ending. While Signal is on air, app switching, voice, and session-changing navbar tools stay locked; read-only Usage and Memories plus Theme remain available. Cut show immediately cuts away and archives the recording, then restores the full chrome; it does not discard the transcript. Choosing any show in the left rail while on air makes the same producer cut before Signal changes shows. Natural endings and hard cuts both land on a short, locally synthesized outro. Repeated pressure can earn a warning and, rarely, a walkout.",
+        body: "Signal keeps one primary speaker on mic at a time: their face comes alive and the transcript follows only the words they have finished saying. The listening host or guest may add a low-key nod, expression, or short acknowledgement during the line; these saved backchannels never create a turn or enter the transcript. Signal’s separate immersive reactions still belong to the performing bot, float above that bot, and appear between asterisks in the transcript without becoming fallback dialogue. Ask about a detail, press harder, move on, or lighten up at any time; Signal queues the private cue for the host’s next turn. Wrap it up is shared episode direction: both bots carry the closing exchange through to a real ending. While Signal is on air, app switching and session-changing navbar tools stay locked; Voice remains available for the next line, while read-only Usage and Memories plus Theme remain available. Cut show immediately cuts away and archives the recording, then restores the full chrome; it does not discard the transcript. Choosing any show in the left rail while on air makes the same producer cut before Signal changes shows. Natural endings and hard cuts both land on a short, locally synthesized outro whose end card waits for you to return to the show. Repeated pressure can earn a warning and, rarely, a walkout.",
         clickLabel: "a producer cue card",
         targetSelector: '[data-tutorial-target="botcast-cues"]',
       },
       {
         heading: "Watch the saved cut",
-        body: "Replay follows the camera cut recorded while the show was on air. There are no post-episode camera controls: just play, pause, scrub, or choose a transcript line to seek.",
+        body: "Replay follows the camera cut recorded while the show was on air. There are no post-episode camera controls: just play, pause, scrub, or choose a transcript line to seek. At the end card or in replay, Copy for Signal Review puts the complete conversation plus its private cues, per-turn model routing, delivery notes, segment changes, camera decisions, and outcome on your clipboard for a focused review.",
         clickLabel: "an archived episode",
         targetSelector: '[data-tutorial-target="botcast-replay"]',
       },
@@ -187,6 +187,12 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
         targetSelector: '[data-tutorial-target="slate-shape"]',
       },
       {
+        heading: "Choose the prose engine",
+        body: "Set Slate to OFFLINE, AUTO, or ONLINE, then choose the model that will shape prose quality. The project remembers this choice, and every generated draft or revision keeps a private provider-and-model receipt in the backend.",
+        clickLabel: "the prose engine controls",
+        targetSelector: '[data-tutorial-target="slate-ai-controls"]',
+      },
+      {
         heading: "Direct the structure",
         body: "Select, edit, rearrange, remove, add, or lock structural cards. A lock tells Slate not to rewrite that approved material.",
         clickLabel: "a structure card",
@@ -200,9 +206,15 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Keep your hands on the prose",
-        body: "Edit the manuscript directly. Human edits autosave and remain authoritative over older AI proposals.",
+        body: "Edit the manuscript directly. Human edits autosave and remain authoritative over older AI proposals. The living Story so far stays at the top of the canvas and follows accepted prose as the project grows.",
         clickLabel: "the manuscript canvas",
         targetSelector: '[data-tutorial-target="slate-manuscript"]',
+      },
+      {
+        heading: "Talk beside the document",
+        body: "Click the movable Prism avatar for a freeform side chat that carries this project in context. Drag the avatar wherever it feels out of the way. This conversation can advise and brainstorm, but it never edits prose, changes Continuity, or renames the project for you.",
+        clickLabel: "the Prism project companion",
+        targetSelector: '[data-tutorial-target="slate-project-chat"]',
       },
       {
         heading: "Approve revisions deliberately",
@@ -221,7 +233,10 @@ export function modeTutorialStep(
   const tutorial = MODE_TUTORIALS[mode];
   const safeIndex = Math.max(
     0,
-    Math.min(tutorial.steps.length - 1, Math.floor(Number.isFinite(index) ? index : 0)),
+    Math.min(
+      tutorial.steps.length - 1,
+      Math.floor(Number.isFinite(index) ? index : 0),
+    ),
   );
   return tutorial.steps[safeIndex]!;
 }

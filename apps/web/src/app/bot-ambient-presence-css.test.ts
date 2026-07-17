@@ -17,6 +17,11 @@ describe("shared bot ambient presence rig", () => {
     );
     assert.match(css, /\.botAmbientPresenceRig\s*\{[\s\S]*position:\s*relative;[\s\S]*isolation:\s*isolate;/);
     assert.match(css, /\.botAmbientUnderglow\s*\{[\s\S]*z-index:\s*0\s*;/);
+    assert.match(
+      css,
+      /\.botAmbientUnderglow\s*\{[\s\S]*left:\s*var\(--zen-live-bot-body-x,\s*50%\)\s*;[\s\S]*top:\s*calc\([\s\S]*var\(--zen-live-bot-body-y,\s*50%\)[\s\S]*var\(--bot-ambient-underglow-contact-y\)[\s\S]*\)\s*;/,
+    );
+    assert.match(css, /--bot-ambient-underglow-contact-y:\s*43%\s*;/);
     assert.match(css, /\.botAmbientPresenceBody\s*\{[\s\S]*z-index:\s*2\s*;/);
   });
 

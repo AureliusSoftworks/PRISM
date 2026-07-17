@@ -15,6 +15,7 @@ import {
   botcastDirectorSuggestion,
   botcastGuestDepartureEligible,
   botcastGuestHasDepartedAt,
+  botcastListenerReactionForMessage,
   botcastReplayMessageIndexAt,
   botcastReplayTimeline,
   botcastNextSpeakerRole,
@@ -23,10 +24,41 @@ import {
   botcastVoiceMoodForTension,
   isBotcastFallbackStudioAccentVariant,
   normalizeBotcastStudioLayout,
+  swapBotcastStudioLayoutSeats,
   type BotcastReplayEvent,
 } from "./botcast.ts";
 
 describe("Signal fallback studio accents", () => {
+  it("reads only valid saved listener reactions for the requested message", () => {
+    const events: BotcastReplayEvent[] = [{
+      id: "event-1",
+      episodeId: "episode-1",
+      sequence: 1,
+      kind: "listener_reaction",
+      occurredAt: "2026-07-17T12:00:00.000Z",
+      payload: {
+        plan: {
+          v: 1,
+          name: "listenerReaction",
+          speakerBotId: "guest",
+          listenerBotId: "host",
+          messageId: "message-1",
+          targetSource: "role",
+          visualAction: "nod",
+          spokenCue: "mm-hm",
+          targetProgress: 0.48,
+          seed: "signal-listener-v1:test",
+          cameraCutEligible: true,
+        },
+      },
+    }];
+    assert.equal(
+      botcastListenerReactionForMessage(events, "message-1")?.listenerBotId,
+      "host",
+    );
+    assert.equal(botcastListenerReactionForMessage(events, "other"), null);
+  });
+
   it("recognizes the three variants and deterministically assigns legacy shows", () => {
     assert.deepEqual(BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS, [0, 1, 2]);
     for (const variant of BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS) {
@@ -96,6 +128,24 @@ describe("Signal studio layout", () => {
     assert.equal(botcastCameraOffsetYPercent("left", layout), 18.46);
     assert.equal(botcastCameraOffsetYPercent("right", layout), -18.9);
     assert.equal(botcastCameraOffsetYPercent("wide", layout), 0);
+  });
+
+  it("swaps the two seats while keeping each bot paired with its cup", () => {
+    const layout = normalizeBotcastStudioLayout({
+      hostBot: { x: 18, y: 62 },
+      guestBot: { x: 74, y: 68 },
+      hostCup: { x: 32, y: 86 },
+      guestCup: { x: 67, y: 91 },
+    });
+    const swapped = swapBotcastStudioLayoutSeats(layout);
+
+    assert.deepEqual(swapped, {
+      hostBot: layout.guestBot,
+      guestBot: layout.hostBot,
+      hostCup: layout.guestCup,
+      guestCup: layout.hostCup,
+    });
+    assert.deepEqual(swapBotcastStudioLayoutSeats(swapped), layout);
   });
 });
 

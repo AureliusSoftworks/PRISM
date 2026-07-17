@@ -8,6 +8,7 @@ export type SignalAudienceEpisode = Pick<
   | "status"
   | "completedAt"
   | "createdAt"
+  | "personaReview"
 >;
 
 export type SignalFeaturedReview = {
@@ -15,30 +16,23 @@ export type SignalFeaturedReview = {
   listener: string;
 };
 
+export type SignalAudienceReview = {
+  episodeId: string;
+  episodeNumber: number;
+  topic: string;
+  reviewerName: string;
+  rating: number;
+  comment: string;
+  createdAt: string;
+};
+
 export type SignalAudienceSnapshot = {
   totalViews: number;
   rating: number | null;
+  ratingConfidence: "none" | "early" | "established";
   reviewCount: number;
   featuredReview: SignalFeaturedReview | null;
 };
-
-const SIGNAL_FEATURED_REVIEW_QUOTES = [
-  "I came for the guest and stayed for the host.",
-  "Sharp questions, and the guest actually had room to answer.",
-  "The last exchange alone was worth the episode.",
-  "A little chaotic, but I could not stop listening.",
-  "This show keeps finding the question behind the question.",
-  "The chemistry surprised me. I am in for the next one.",
-] as const;
-
-const SIGNAL_LISTENER_NAMES = [
-  "After Hours Listener",
-  "First Train Listener",
-  "Night Shift Listener",
-  "Signal Regular",
-  "Studio Headphones",
-  "Window Seat Listener",
-] as const;
 
 const compactAudienceNumber = new Intl.NumberFormat("en-US", {
   notation: "compact",
@@ -66,8 +60,38 @@ function completedSignalAudienceEpisodes(
     .sort((left, right) => {
       const leftTime = left.completedAt ?? left.createdAt;
       const rightTime = right.completedAt ?? right.createdAt;
-      return leftTime.localeCompare(rightTime) || left.id.localeCompare(right.id);
+      return (
+        leftTime.localeCompare(rightTime) || left.id.localeCompare(right.id)
+      );
     });
+}
+
+function reviewsFromCompletedEpisodes(
+  episodes: readonly SignalAudienceEpisode[],
+): SignalAudienceReview[] {
+  return episodes
+    .flatMap((episode, index) => {
+      const review = episode.personaReview;
+      if (!review) return [];
+      return [
+        {
+          episodeId: episode.id,
+          episodeNumber: index + 1,
+          topic: episode.topic,
+          reviewerName: review.reviewerName,
+          rating: review.rating,
+          comment: review.comment,
+          createdAt: review.createdAt,
+        },
+      ];
+    })
+    .reverse();
+}
+
+export function signalAudienceReviews(
+  episodes: readonly SignalAudienceEpisode[],
+): SignalAudienceReview[] {
+  return reviewsFromCompletedEpisodes(completedSignalAudienceEpisodes(episodes));
 }
 
 export function formatSignalAudienceViews(totalViews: number): string {
@@ -83,6 +107,7 @@ export function signalAudienceSnapshot(args: {
     return {
       totalViews: 0,
       rating: null,
+      ratingConfidence: "none",
       reviewCount: 0,
       featuredReview: null,
     };
@@ -90,29 +115,32 @@ export function signalAudienceSnapshot(args: {
 
   const totalViews = completedEpisodes.reduce((total, episode, index) => {
     const episodeSeed = `${args.showId}:${episode.id}:${episode.guestBotId}:${episode.topic}`;
-    const baseViews = 180 + Math.round(stableUnitValue(`${episodeSeed}:views`) * 720);
+    const baseViews =
+      180 + Math.round(stableUnitValue(`${episodeSeed}:views`) * 720);
     const growthMultiplier = 1 + Math.min(index, 10) * 0.1;
     return total + Math.round(baseViews * growthMultiplier);
   }, 0);
-  const reviewRate = 0.01 + stableUnitValue(`${args.showId}:review-rate`) * 0.02;
-  const reviewCount = Math.max(1, Math.round(totalViews * reviewRate));
-  const ratingAverage = completedEpisodes.reduce((total, episode) => {
-    const episodeSeed = `${args.showId}:${episode.id}:${episode.guestBotId}:${episode.topic}`;
-    return total + stableUnitValue(`${episodeSeed}:rating`);
-  }, 0) / completedEpisodes.length;
-  const rating = Math.min(4.9, Number((3.8 + ratingAverage * 1.1).toFixed(1)));
-  const latestEpisode = completedEpisodes.at(-1)!;
-  const reviewSeed = `${args.showId}:${latestEpisode.id}:${latestEpisode.guestBotId}:${latestEpisode.topic}:review`;
-  const quoteIndex = stableHash(`${reviewSeed}:quote`) % SIGNAL_FEATURED_REVIEW_QUOTES.length;
-  const listenerIndex = stableHash(`${reviewSeed}:listener`) % SIGNAL_LISTENER_NAMES.length;
+  const reviews = reviewsFromCompletedEpisodes(completedEpisodes);
+  const reviewCount = reviews.length;
+  const rating =
+    reviewCount === 0
+      ? null
+      : Number(
+          (
+            reviews.reduce((total, review) => total + review.rating, 0) /
+            reviewCount
+          ).toFixed(1),
+        );
+  const latestReview = reviews[0] ?? null;
 
   return {
     totalViews,
     rating,
+    ratingConfidence:
+      reviewCount === 0 ? "none" : reviewCount < 5 ? "early" : "established",
     reviewCount,
-    featuredReview: {
-      quote: SIGNAL_FEATURED_REVIEW_QUOTES[quoteIndex]!,
-      listener: SIGNAL_LISTENER_NAMES[listenerIndex]!,
-    },
+    featuredReview: latestReview
+      ? { quote: latestReview.comment, listener: latestReview.reviewerName }
+      : null,
   };
 }

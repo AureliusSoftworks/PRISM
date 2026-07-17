@@ -1,6 +1,7 @@
 import { extractStageDirections, tokenizeBotMentionSource } from "./botMention.ts";
 import {
   coffeeCupSipMessageGapForDuration,
+  normalizeListenerReactionPlanV1,
   type CoffeeAmbientActionPayload,
   type CoffeeCupTopOffSnapshot,
   type CoffeeReplayBotDepartureEventPayload,
@@ -9,6 +10,7 @@ import {
   type CoffeeReplaySocialSnapshotPayload,
   type CoffeeReplayTopOffEventPayload,
   type CoffeeSessionSettings,
+  type ListenerReactionPlanV1,
 } from "@localai/shared";
 
 const COFFEE_SESSION_SYNOPSIS_PREFIX = "Session synopsis:";
@@ -38,6 +40,17 @@ export interface CoffeeReplayMessageLike {
   model?: string | null;
   coffeeAmbientAction?: CoffeeAmbientActionPayload;
   coffeeReplayEvents?: CoffeeReplayEventPayload[];
+}
+
+export function coffeeListenerReactionForMessage(
+  message: Pick<CoffeeReplayMessageLike, "coffeeReplayEvents">,
+): ListenerReactionPlanV1 | null {
+  for (const event of message.coffeeReplayEvents ?? []) {
+    if (event.kind !== "listenerReaction") continue;
+    const plan = normalizeListenerReactionPlanV1(event.plan);
+    if (plan) return plan;
+  }
+  return null;
 }
 
 export interface CoffeeReplayPlayhead {
@@ -590,6 +603,17 @@ function coffeeReviewReplayEventLine(
   }
   if (event.kind === "botDeparture") {
     return `- ${event.occurredAt} botDeparture: ${bot} left seat ${event.seatIndex + 1}`;
+  }
+  if (event.kind === "listenerReaction") {
+    const speaker = coffeeReviewBotLabel(
+      event.plan.speakerBotId,
+      botNameById,
+    );
+    return `- ${event.occurredAt} listenerReaction: ${bot} ${event.plan.visualAction}${
+      event.plan.spokenCue ? ` + ${event.plan.spokenCue}` : ""
+    } while ${speaker} spoke (${event.plan.targetSource}, ${Math.round(
+      event.plan.targetProgress * 100,
+    )}%)`;
   }
   return `- ${event.occurredAt} mood: ${bot} disposition=${coffeeReviewUnitValue(
     event.social.disposition

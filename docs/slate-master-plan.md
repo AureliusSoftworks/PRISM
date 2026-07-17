@@ -113,6 +113,15 @@ reject newer unsupported archives before mutation with a clear explanation.
   begins a project session with `Story so far`, `Where it is going`, progress,
   and one recommended action. Recaps are fingerprinted against manuscript,
   structure, lore, and Continuity versions.
+- `Story so far` is also persisted as a living project summary. Its latest tail
+  stays at the top of the manuscript canvas after the return card closes and
+  refreshes from authoritative accepted prose.
+- Each project chooses OFFLINE, AUTO, or ONLINE prose routing plus a model.
+  Drafts and revision proposals retain backend content-hash receipts with the
+  effective provider and model.
+- A movable Prism avatar opens a separate project-context side chat. It may
+  brainstorm and advise but never mutates prose or canon. Better-title ideas are
+  similarly advisory and rename only after explicit acceptance.
 - Tutorials are action-led, one step at a time, skippable, resettable, and tied
   to stable selectors.
 
@@ -202,7 +211,7 @@ promises, false-positive budgets, storage growth, incremental latency, and
 llama3.2 usability.
 
 Deliberate exclusions are a public/editable Continuity wiki, arbitrary version
-selection, per-project model controls, automatic Review Circle sessions,
+selection, per-project sampling/reasoning controls, automatic Review Circle sessions,
 reviewer voting or prose mutation, silent AI/image/cross-applet writes, direct
 cloud backup integration, V1 screenplays, Story removal, and inline editable-
 prose illustrations.

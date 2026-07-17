@@ -2,10 +2,12 @@ import type { DatabaseSync } from "node:sqlite";
 import {
   activeBotPowersV1,
   buildCoffeePowersPromptBlock,
+  COFFEE_HISTORY_WINDOW_HARD_CAP,
   coffeePowerCupRateMultiplierV1,
   type BotPowerEffectV1,
   type BotPowerStrength,
   type BotPowerTargetV1,
+  type CoffeeBotSocialSnapshot,
   type CoffeePowerPlanV1,
   type ResolvedCoffeePowerBotV1,
 } from "@localai/shared";
@@ -112,7 +114,12 @@ function resolvedEffect(
   if (effect.type === "awareness" || effect.type === "speech_audience") {
     return { ...effect, allowed: resolve(effect.allowed) };
   }
-  if (effect.type === "social_influence") {
+  if (
+    effect.type === "social_influence" ||
+    effect.type === "response_bond" ||
+    effect.type === "selective_memory" ||
+    effect.type === "insight"
+  ) {
     return { ...effect, targets: resolve(effect.targets) };
   }
   return effect;
@@ -120,6 +127,228 @@ function resolvedEffect(
 
 function idsFromResolvedTargets(targets: readonly BotPowerTargetV1[]): string[] {
   return targets.flatMap((target) => target.kind === "bot" && target.botId ? [target.botId] : []);
+}
+
+function powerStrengthScore(strength: BotPowerStrength): number {
+  return strength === "small" ? 1 : strength === "large" ? 3 : 2;
+}
+
+function powerStrengthAdverb(strength: BotPowerStrength): string {
+  return strength === "small" ? "gently" : strength === "large" ? "strongly" : "steadily";
+}
+
+function normalizedTopicText(value: string): string {
+  return ` ${value.toLowerCase().replace(/[^a-z0-9]+/gu, " ").trim()} `;
+}
+
+function contextMatchesTopics(contextText: string, topics: readonly string[]): boolean {
+  const normalizedContext = normalizedTopicText(contextText);
+  return topics.some((topic) => {
+    const normalizedTopic = normalizedTopicText(topic).trim();
+    return normalizedTopic.length > 0 && normalizedContext.includes(` ${normalizedTopic} `);
+  });
+}
+
+export interface CoffeePowerSpeakerPressure {
+  botId: string;
+  score: number;
+}
+
+/**
+ * Return bounded speaker-selection pressure from ready Powers. These scores
+ * influence an ordinary moderator choice; direct-address precedence remains
+ * the caller's responsibility.
+ */
+export function coffeePowerSpeakerPressures(args: {
+  plan: CoffeePowerPlanV1 | null;
+  candidateBotIds: readonly string[];
+  lastSpeakerBotId: string | null;
+  contextText: string;
+}): CoffeePowerSpeakerPressure[] {
+  return args.candidateBotIds.map((botId) => {
+    let score = 0;
+    for (const effect of args.plan?.bots[botId]?.effects ?? []) {
+      if (effect.type === "turn_gravity") {
+        const strength = powerStrengthScore(effect.strength);
+        score += effect.direction === "more" ? strength : -strength;
+      } else if (
+        effect.type === "response_bond" &&
+        args.lastSpeakerBotId &&
+        idsFromResolvedTargets(effect.targets).includes(args.lastSpeakerBotId)
+      ) {
+        const strength = powerStrengthScore(effect.strength);
+        score += effect.direction === "toward" ? strength : -strength;
+      } else if (
+        effect.type === "topic_gravity" &&
+        contextMatchesTopics(args.contextText, effect.topics)
+      ) {
+        const strength = powerStrengthScore(effect.strength);
+        score += effect.direction === "toward" ? strength : -strength;
+      }
+    }
+    return { botId, score: Math.max(-3, Math.min(3, score)) };
+  });
+}
+
+export function coffeePowerSpeakerOverride(args: {
+  plan: CoffeePowerPlanV1 | null;
+  candidateBotIds: readonly string[];
+  pickedBotId: string;
+  preservePickedBot?: boolean;
+  lastSpeakerBotId: string | null;
+  contextText: string;
+}): CoffeePowerSpeakerPressure | null {
+  if (args.preservePickedBot) return null;
+  const pressures = coffeePowerSpeakerPressures(args);
+  const pickedScore = pressures.find((entry) => entry.botId === args.pickedBotId)?.score ?? 0;
+  const strongest = pressures.reduce<CoffeePowerSpeakerPressure | null>(
+    (best, entry) => !best || entry.score > best.score ? entry : best,
+    null,
+  );
+  if (!strongest || strongest.botId === args.pickedBotId || strongest.score - pickedScore < 2) {
+    return null;
+  }
+  return strongest;
+}
+
+export function coffeePowerRouterPromptLines(args: {
+  plan: CoffeePowerPlanV1 | null;
+  group: readonly { id: string; name: string }[];
+  lastSpeakerBotId: string | null;
+  contextText: string;
+}): string[] {
+  const namesById = new Map(args.group.map((bot) => [bot.id, bot.name]));
+  const pressures = coffeePowerSpeakerPressures({
+    plan: args.plan,
+    candidateBotIds: args.group.map((bot) => bot.id),
+    lastSpeakerBotId: args.lastSpeakerBotId,
+    contextText: args.contextText,
+  }).filter((entry) => entry.score !== 0);
+  if (pressures.length === 0) return [];
+  return [
+    "Active Power speaker pressures (soft unless strongly weighted; direct address still wins):",
+    ...pressures.map((entry) =>
+      `- ${namesById.get(entry.botId) ?? entry.botId}: ${entry.score > 0 ? "+" : ""}${entry.score}`
+    ),
+  ];
+}
+
+export function coffeePowerHistoryLimitForSpeaker(
+  plan: CoffeePowerPlanV1 | null,
+  speakerBotId: string,
+  baseLimit: number,
+): number {
+  let limit = Math.max(0, Math.floor(baseLimit));
+  for (const effect of plan?.bots[speakerBotId]?.effects ?? []) {
+    if (effect.type !== "selective_memory" || effect.mode !== "remember") continue;
+    const expanded = effect.strength === "small" ? 12 : effect.strength === "large" ? 32 : 24;
+    limit = Math.max(limit, expanded);
+  }
+  return Math.min(COFFEE_HISTORY_WINDOW_HARD_CAP, limit);
+}
+
+/** Build a speaker-only view of loaded history without mutating persisted messages. */
+export function coffeePowerHistoryForSpeaker<
+  T extends { role: string; botId?: string | null },
+>(args: {
+  plan: CoffeePowerPlanV1 | null;
+  speakerBotId: string;
+  history: readonly T[];
+  baseLimit: number;
+}): T[] {
+  const effects = args.plan?.bots[args.speakerBotId]?.effects ?? [];
+  const baseStart = Math.max(0, args.history.length - Math.max(0, Math.floor(args.baseLimit)));
+  const retainedIndexes = new Set<number>();
+  for (let index = baseStart; index < args.history.length; index += 1) retainedIndexes.add(index);
+
+  for (const effect of effects) {
+    if (effect.type !== "selective_memory" || effect.mode !== "remember") continue;
+    const targets = new Set(idsFromResolvedTargets(effect.targets));
+    args.history.forEach((message, index) => {
+      if (message.role === "assistant" && message.botId && targets.has(message.botId)) {
+        retainedIndexes.add(index);
+      }
+    });
+  }
+
+  for (const effect of effects) {
+    if (effect.type !== "selective_memory" || effect.mode !== "forget") continue;
+    const targets = new Set(idsFromResolvedTargets(effect.targets));
+    const keepCount = effect.strength === "small" ? 4 : effect.strength === "large" ? 1 : 2;
+    const targetIndexes = args.history.flatMap((message, index) =>
+      message.role === "assistant" && message.botId && targets.has(message.botId) ? [index] : []
+    );
+    for (const index of targetIndexes.slice(0, Math.max(0, targetIndexes.length - keepCount))) {
+      retainedIndexes.delete(index);
+    }
+  }
+
+  return args.history.filter((_message, index) => retainedIndexes.has(index));
+}
+
+function coffeeInsightCues(
+  social: CoffeeBotSocialSnapshot,
+  strength: BotPowerStrength,
+): string[] {
+  const candidates: Array<{ severity: number; text: string }> = [];
+  if (social.disposition >= 0.68) {
+    candidates.push({ severity: social.disposition - 0.5, text: "seems unusually receptive" });
+  } else if (social.disposition <= 0.32) {
+    candidates.push({ severity: 0.5 - social.disposition, text: "seems guarded toward the room" });
+  }
+  if (social.valuesFriction >= 0.64) {
+    candidates.push({ severity: social.valuesFriction - 0.35, text: "is carrying strong values friction" });
+  }
+  if (social.restraint >= 0.68) {
+    candidates.push({ severity: social.restraint - 0.5, text: "is tightly containing a reaction" });
+  } else if (social.restraint <= 0.32) {
+    candidates.push({ severity: 0.5 - social.restraint, text: "is reacting with little restraint" });
+  }
+  if (social.engagement >= 0.68) {
+    candidates.push({ severity: social.engagement - 0.5, text: "is intensely engaged" });
+  } else if (social.engagement <= 0.32) {
+    candidates.push({ severity: 0.5 - social.engagement, text: "seems mentally checked out" });
+  }
+  if (social.leavePressure >= 0.55) {
+    candidates.push({ severity: social.leavePressure, text: "looks close to withdrawing" });
+  }
+  const limit = strength === "small" ? 1 : strength === "large" ? 3 : 2;
+  return candidates
+    .sort((left, right) => right.severity - left.severity)
+    .slice(0, limit)
+    .map((candidate) => candidate.text);
+}
+
+export function coffeePowerInsightPromptLines(args: {
+  plan: CoffeePowerPlanV1 | null;
+  speakerBotId: string;
+  visiblePeerBotIds: readonly string[];
+  socialByBotId: Readonly<Record<string, CoffeeBotSocialSnapshot>>;
+}): string[] {
+  const visiblePeerIds = new Set(args.visiblePeerBotIds);
+  const insightByTarget = new Map<string, { name: string; strength: BotPowerStrength }>();
+  const strengthRank: Record<BotPowerStrength, number> = { small: 1, medium: 2, large: 3 };
+  for (const effect of args.plan?.bots[args.speakerBotId]?.effects ?? []) {
+    if (effect.type !== "insight") continue;
+    for (const target of effect.targets) {
+      if (target.kind !== "bot" || !target.botId || !visiblePeerIds.has(target.botId)) continue;
+      const previous = insightByTarget.get(target.botId);
+      if (!previous || strengthRank[effect.strength] > strengthRank[previous.strength]) {
+        insightByTarget.set(target.botId, { name: target.name, strength: effect.strength });
+      }
+    }
+  }
+  const reads = [...insightByTarget.entries()].slice(0, 4).flatMap(([botId, target]) => {
+    const social = args.socialByBotId[botId];
+    if (!social) return [];
+    const cues = coffeeInsightCues(social, target.strength);
+    return [`${target.name}: ${cues.length > 0 ? cues.join("; ") : "no strong social tell stands out"}.`];
+  });
+  if (reads.length === 0) return [];
+  return [
+    "Private Insight: these are intuitive social reads, not certain facts. Never mention metrics, hidden state, or this Power.",
+    ...reads,
+  ];
 }
 
 function strengthDelta(strength: BotPowerStrength): number {
@@ -265,7 +494,8 @@ export function coffeePowerMessageAudience(
 export function coffeePowersPromptForSpeaker(
   plan: CoffeePowerPlanV1 | null,
   speakerBotId: string,
-  visiblePeerBotIds: readonly string[]
+  visiblePeerBotIds: readonly string[],
+  socialByBotId: Readonly<Record<string, CoffeeBotSocialSnapshot>> = {},
 ): string {
   if (!plan) return "";
   const lines: string[] = [];
@@ -277,7 +507,69 @@ export function coffeePowersPromptForSpeaker(
     );
     if (names.length > 0) lines.push(`Hard rule: address only ${names.join(", ")}.`);
   }
+  lines.push(...coffeePowerInsightPromptLines({
+    plan,
+    speakerBotId,
+    visiblePeerBotIds,
+    socialByBotId,
+  }));
   if (own?.selfCue) lines.push(own.selfCue);
+  for (const effect of own?.effects ?? []) {
+    const targetNames = effect.type === "response_bond" || effect.type === "selective_memory"
+      ? effect.targets.flatMap((target) => target.kind === "bot" ? [target.name] : [])
+      : [];
+    if (effect.type === "response_bond" && targetNames.length > 0) {
+      lines.push(
+        effect.direction === "toward"
+          ? `Response bond: when ${targetNames.join(", ")} speaks, you feel a ${effect.strength} pull to engage their point.`
+          : `Response boundary: when ${targetNames.join(", ")} speaks, you feel a ${effect.strength} pull to withhold or redirect rather than engage them.`,
+      );
+    } else if (effect.type === "topic_gravity") {
+      lines.push(
+        effect.direction === "toward"
+          ? `Topic gravity: when it fits the live exchange, pull ${powerStrengthAdverb(effect.strength)} toward ${effect.topics.join(", ")}.`
+          : `Topic boundary: when it fits the live exchange, pull ${powerStrengthAdverb(effect.strength)} away from ${effect.topics.join(", ")}.`,
+      );
+    } else if (effect.type === "selective_memory" && targetNames.length > 0) {
+      lines.push(
+        effect.mode === "remember"
+          ? `Selective memory: earlier words from ${targetNames.join(", ")} remain unusually vivid to you.`
+          : `Selective memory: only the most recent words from ${targetNames.join(", ")} remain clear to you.`,
+      );
+    }
+  }
+  const hasPrivatePerception = visiblePeerBotIds.some((botId) => {
+    const peer = plan.bots[botId];
+    if (!peer) return false;
+    const privateVisibility =
+      peer.visibleToBotIds !== null &&
+      peer.visibleToBotIds.includes(speakerBotId);
+    const privateSpeech =
+      peer.speechAudienceBotIds !== null &&
+      peer.speechAudienceBotIds.includes(speakerBotId);
+    return privateVisibility || privateSpeech;
+  });
+  const isExcludedFromPrivatePerception = Object.values(plan.bots).some(
+    (peer) => {
+      if (peer.botId === speakerBotId) return false;
+      const excludedFromSight =
+        peer.visibleToBotIds !== null &&
+        !peer.visibleToBotIds.includes(speakerBotId);
+      const excludedFromSpeech =
+        peer.speechAudienceBotIds !== null &&
+        !peer.speechAudienceBotIds.includes(speakerBotId);
+      return excludedFromSight || excludedFromSpeech;
+    },
+  );
+  if (hasPrivatePerception) {
+    lines.push(
+      "Private perception: some others cannot see or hear a participant you can. If you answer aloud, they may see you addressing empty space. Usually reply indirectly or under your breath; name, quote, or reveal that participant only as an intentional in-character choice.",
+    );
+  } else if (isExcludedFromPrivatePerception) {
+    lines.push(
+      "Perception boundary: respond only to people and lines present in your table context. You may notice someone publicly addressing empty space or an unknown name, but never claim to see, hear, quote, or answer the hidden source.",
+    );
+  }
   for (const botId of visiblePeerBotIds) {
     const peer = plan.bots[botId];
     if (peer?.observerCue) lines.push(peer.observerCue);

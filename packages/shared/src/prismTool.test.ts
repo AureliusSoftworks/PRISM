@@ -669,6 +669,26 @@ describe("hydrateAssistantMessageParts", () => {
         seatIndex: 2,
         occurredAt: "2026-07-02T15:03:00.000Z",
       },
+      {
+        v: 1,
+        name: "coffeeReplayEvent",
+        kind: "listenerReaction",
+        botId: "bot-2",
+        occurredAt: "2026-07-02T15:03:10.000Z",
+        plan: {
+          v: 1,
+          name: "listenerReaction",
+          speakerBotId: "bot-1",
+          listenerBotId: "bot-2",
+          messageId: "message-1",
+          targetSource: "direct",
+          visualAction: "nod",
+          spokenCue: "mm-hm",
+          targetProgress: 0.52,
+          seed: "coffee-listener-v1:test",
+          cameraCutEligible: false,
+        },
+      },
     ];
     const stored = serializeAssistantToolPayload({ coffeeReplayEvents });
 
@@ -682,6 +702,18 @@ describe("hydrateAssistantMessageParts", () => {
         toolPayload: stored,
       }).coffeeReplayEvents,
       coffeeReplayEvents
+    );
+
+    const malformed = JSON.stringify({
+      v: 1,
+      coffeeReplayEvents: [{
+        ...coffeeReplayEvents.at(-1),
+        botId: "wrong-listener",
+      }],
+    });
+    assert.equal(
+      parseStoredAssistantToolPayload(malformed).coffeeReplayEvents,
+      undefined,
     );
   });
 

@@ -1,26 +1,32 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { fallbackSignalShowCardQuips } from "./signalShowCardQuips.ts";
+import {
+  fallbackSignalShowCardBlurbs,
+  signalShowCardBlurbs,
+} from "./signalShowCardQuips.ts";
 
 describe("Signal show-card fallback quips", () => {
-  it("provides four show-aware lines for a new show", () => {
-    const quips = fallbackSignalShowCardQuips({
-      name: "Midnight Frequency",
-      episodeCount: 0,
-    });
+  it("uses only the two approved canned lines until personalization exists", () => {
+    const blurbs = fallbackSignalShowCardBlurbs();
 
-    assert.equal(quips.length, 4);
-    assert.match(quips[2], /Midnight Frequency/u);
-    assert.match(quips[3], /pilot/u);
+    assert.deepEqual(blurbs, [
+      "Episode 4: Now with 12% more dramatic pause.",
+      "Guest chair's open. Bring me someone interesting",
+    ]);
   });
 
-  it("tees up the next episode for an established show", () => {
-    const quips = fallbackSignalShowCardQuips({
-      name: "Midnight Frequency",
-      episodeCount: 6,
+  it("cycles the persisted personalized batch instead of mixing in fallbacks", () => {
+    const blurbs = signalShowCardBlurbs({
+      dashboardBlurbs: [
+        "I brought the questions. The easy answers declined the invitation.",
+        "The mic is on. Plausible deniability is not.",
+      ],
     });
 
-    assert.match(quips[3], /Episode 7/u);
+    assert.deepEqual(blurbs, [
+      "I brought the questions. The easy answers declined the invitation.",
+      "The mic is on. Plausible deniability is not.",
+    ]);
   });
 });

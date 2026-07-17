@@ -65,6 +65,71 @@ test("compiler effect inputs can only produce bounded strength tiers", () => {
   assert.equal(effect?.type === "social_influence" ? effect.strength : null, "medium");
 });
 
+test("relationship-agnostic Coffee effects normalize to bounded schemas", () => {
+  assert.deepEqual(normalizeBotPowerEffectV1({
+    type: "cup_rate",
+    rate: "none",
+  }), {
+    type: "cup_rate",
+    rate: "none",
+  });
+  assert.deepEqual(normalizeBotPowerEffectV1({
+    type: "turn_gravity",
+    direction: "more",
+    strength: "large",
+  }), {
+    type: "turn_gravity",
+    direction: "more",
+    strength: "large",
+  });
+  assert.deepEqual(normalizeBotPowerEffectV1({
+    type: "response_bond",
+    direction: "away",
+    strength: 99,
+    targets: [{ kind: "bot", name: "Ryuk" }],
+  }), {
+    type: "response_bond",
+    direction: "away",
+    strength: "medium",
+    targets: [{ kind: "bot", name: "Ryuk" }],
+  });
+  assert.deepEqual(normalizeBotPowerEffectV1({
+    type: "topic_gravity",
+    direction: "toward",
+    strength: "small",
+    topics: ["Justice", "justice", "Moral responsibility"],
+  }), {
+    type: "topic_gravity",
+    direction: "toward",
+    strength: "small",
+    topics: ["justice", "moral responsibility"],
+  });
+  assert.deepEqual(normalizeBotPowerEffectV1({
+    type: "selective_memory",
+    mode: "forget",
+    strength: "large",
+    targets: [{ kind: "all" }],
+  }), {
+    type: "selective_memory",
+    mode: "forget",
+    strength: "large",
+    targets: [{ kind: "all" }],
+  });
+  assert.deepEqual(normalizeBotPowerEffectV1({
+    type: "insight",
+    strength: "large",
+    targets: [{ kind: "trait", trait: "guarded" }],
+  }), {
+    type: "insight",
+    strength: "large",
+    targets: [{ kind: "trait", trait: "guarded" }],
+  });
+  assert.equal(normalizeBotPowerEffectV1({
+    type: "topic_gravity",
+    topics: [],
+  }), null);
+});
+
 test("Coffee power prompt is deduplicated and bounded", () => {
   const prompt = buildCoffeePowersPromptBlock([
     "Breathe mechanically during frequent physical beats.",
@@ -94,9 +159,33 @@ test("resolved cup-rate powers return shared multipliers", () => {
         ruleLabels: [],
         warnings: [],
       },
+      theodore: {
+        botId: "theodore",
+        powerIds: ["dislikes-coffee"],
+        selfCue: "",
+        observerCue: "",
+        visibleToBotIds: null,
+        speechAudienceBotIds: null,
+        effects: [{ type: "cup_rate", rate: "none" }],
+        ruleLabels: [],
+        warnings: [],
+      },
+      slowpoke: {
+        botId: "slowpoke",
+        powerIds: ["slow-sipper"],
+        selfCue: "",
+        observerCue: "",
+        visibleToBotIds: null,
+        speechAudienceBotIds: null,
+        effects: [{ type: "cup_rate", rate: "slow" }],
+        ruleLabels: [],
+        warnings: [],
+      },
     },
   };
   assert.equal(coffeePowerCupRateMultiplierV1(plan, "voltaire"), 2.5);
+  assert.equal(coffeePowerCupRateMultiplierV1(plan, "theodore"), 0);
+  assert.equal(coffeePowerCupRateMultiplierV1(plan, "slowpoke"), 0.55);
   assert.equal(coffeePowerCupRateMultiplierV1(plan, "other"), 1);
 });
 
@@ -126,4 +215,27 @@ test("ready Powers produce bounded app-wide self and observer cues", () => {
     "Vader — Respirator: Others hear a mechanical breath before movement.",
   ]);
   assert.equal(botPowerCupRateMultiplierForBotV1(powers), 2.5);
+});
+
+test("ready coffee-refusal Powers return a zero cup multiplier", () => {
+  const name = "Dislikes Coffee";
+  const intent = "This bot dislikes coffee.";
+  const powers = [{
+    version: 1,
+    id: "dislikes-coffee",
+    name,
+    intent,
+    enabled: true,
+    compileStatus: "ready",
+    compiled: {
+      version: 1,
+      sourceHash: botPowerSourceHashV1(name, intent),
+      selfCue: "You dislike coffee and do not drink it.",
+      observerCue: "This bot refuses to drink coffee.",
+      effects: [{ type: "cup_rate", rate: "none" }],
+      ruleLabels: ["Refuses coffee"],
+    },
+  }];
+
+  assert.equal(botPowerCupRateMultiplierForBotV1(powers), 0);
 });

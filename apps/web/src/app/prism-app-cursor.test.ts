@@ -199,7 +199,7 @@ describe("Prism app cursor", () => {
     assert.match(pageSource, /PRISM_APP_CURSOR_EXCLUDED_SELECTOR[\s\S]*cursor: auto !important/);
     assert.match(
       pageSource,
-      /className=\{styles\.botPanelHubAvatarPreview\}[\s\S]*data-app-cursor="pointer"/
+      /className=\{styles\.botPanelHubAvatarPreview\}[\s\S]*data-app-cursor=\{isMarketplacePreview \? undefined : "pointer"\}/,
     );
   });
 

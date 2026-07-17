@@ -7,18 +7,26 @@ export interface SignalCupSipRect {
   height: number;
 }
 
-const SIGNAL_CUP_SIP_X_MIN_PX = 24;
-const SIGNAL_CUP_SIP_X_MAX_PX = 36;
-const SIGNAL_CUP_SIP_X_VIEWPORT_RATIO = 0.027;
+const SIGNAL_CUP_SIP_X_MIN_PX = 28;
+const SIGNAL_CUP_SIP_X_MAX_PX = 40;
+const SIGNAL_CUP_SIP_X_VIEWPORT_RATIO = 0.031;
 const SIGNAL_CUP_SIP_Y_MIN_PX = 6;
 const SIGNAL_CUP_SIP_Y_MAX_PX = 10;
 const SIGNAL_CUP_SIP_Y_VIEWPORT_RATIO = 0.0075;
+// Signal relaxes before the cup's 76% return beat so the expression reads
+// as a quick sip instead of lingering after the rim has left the mouth.
+export const SIGNAL_CUP_SIP_FACE_ACTIVE_PROGRESS = 0.6;
 // The authored sip sheet's rim center sits at roughly 25.5% of each frame.
 // After the active 0.98 scale, it is about 24% of the mug height above center.
 const SIGNAL_CUP_SIP_RIM_OFFSET_HEIGHT_RATIO = 0.24;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+export function signalCupSipFaceReleaseMs(durationMs: number): number {
+  if (!Number.isFinite(durationMs) || durationMs <= 0) return 0;
+  return Math.round(durationMs * SIGNAL_CUP_SIP_FACE_ACTIVE_PROGRESS);
 }
 
 export function signalStageLocalPointFromViewport(args: {
