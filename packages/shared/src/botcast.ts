@@ -108,24 +108,50 @@ const BOTCAST_LEGACY_DEFAULT_STUDIO_LAYOUT: BotcastStudioLayout = {
 
 export const BOTCAST_CLOSEUP_CAMERA_SCALE = 1.42;
 
-/** Keeps a close-up horizontally centered on the saved bot placement. */
+function botcastCameraOffsetPercent(args: {
+  focusPercent: number;
+  focalLinePercent: number;
+  transformOriginPercent: number;
+}): number {
+  const desiredOffset =
+    (args.focalLinePercent - args.focusPercent) *
+    BOTCAST_CLOSEUP_CAMERA_SCALE;
+  const zoomOverflow = BOTCAST_CLOSEUP_CAMERA_SCALE - 1;
+  const minimumOffset = -(100 - args.transformOriginPercent) * zoomOverflow;
+  const maximumOffset = args.transformOriginPercent * zoomOverflow;
+  const safeOffset = Math.max(
+    minimumOffset,
+    Math.min(maximumOffset, desiredOffset),
+  );
+  return Math.round(safeOffset * 100) / 100;
+}
+
+/** Centers the saved bot when possible without panning beyond the TV frame. */
 export function botcastCameraOffsetXPercent(
   shot: BotcastDirectedCameraShot,
   layout: BotcastStudioLayout,
 ): number {
   if (shot === "wide") return 0;
   const focusX = shot === "left" ? layout.hostBot.x : layout.guestBot.x;
-  return Math.round((50 - focusX) * BOTCAST_CLOSEUP_CAMERA_SCALE * 100) / 100;
+  return botcastCameraOffsetPercent({
+    focusPercent: focusX,
+    focalLinePercent: 50,
+    transformOriginPercent: 50,
+  });
 }
 
-/** Uses the scene's authored 55% focal line while following saved vertical placement. */
+/** Follows the saved height while keeping the zoomed scene inside the TV frame. */
 export function botcastCameraOffsetYPercent(
   shot: BotcastDirectedCameraShot,
   layout: BotcastStudioLayout,
 ): number {
   if (shot === "wide") return 0;
   const focusY = shot === "left" ? layout.hostBot.y : layout.guestBot.y;
-  return Math.round((55 - focusY) * BOTCAST_CLOSEUP_CAMERA_SCALE * 100) / 100;
+  return botcastCameraOffsetPercent({
+    focusPercent: focusY,
+    focalLinePercent: 55,
+    transformOriginPercent: 55,
+  });
 }
 
 const BOTCAST_STUDIO_LAYOUT_BOUNDS: Record<
@@ -293,6 +319,7 @@ export type BotcastReplayEventKind =
   | "warning"
   | "departure"
   | "cut_away"
+  | "camera_mode"
   | "camera_suggestion"
   | "episode_completed";
 
@@ -318,6 +345,44 @@ export interface BotcastCameraSuggestion {
     | "closing";
   atMs: number;
   minimumHoldMs: number;
+}
+
+function botcastTimedCameraEvents(
+  events: readonly BotcastReplayEvent[],
+  elapsedMs: number,
+): BotcastReplayEvent[] {
+  return events
+    .filter(
+      (event) =>
+        (event.kind === "camera_mode" || event.kind === "camera_suggestion") &&
+        Number.isFinite(Number(event.payload.atMs)) &&
+        Number(event.payload.atMs) <= elapsedMs,
+    )
+    .sort((left, right) => {
+      const byTime = Number(left.payload.atMs) - Number(right.payload.atMs);
+      return byTime === 0 ? left.sequence - right.sequence : byTime;
+    });
+}
+
+/** Resolves the saved live camera mode, defaulting legacy episodes to Auto. */
+export function botcastCameraModeAt(args: {
+  events: readonly BotcastReplayEvent[];
+  elapsedMs: number;
+}): BotcastCameraShot {
+  let mode: BotcastCameraShot = "auto";
+  for (const event of botcastTimedCameraEvents(args.events, args.elapsedMs)) {
+    if (event.kind !== "camera_mode") continue;
+    const candidate = event.payload.mode;
+    if (
+      candidate === "auto" ||
+      candidate === "left" ||
+      candidate === "right" ||
+      candidate === "wide"
+    ) {
+      mode = candidate;
+    }
+  }
+  return mode;
 }
 
 export interface BotcastEpisodeSummary {
@@ -594,17 +659,38 @@ export function botcastDirectorSuggestion(args: {
 export function botcastCameraShotAt(args: {
   events: readonly BotcastReplayEvent[];
   elapsedMs: number;
-  manualShot: BotcastCameraShot;
 }): BotcastDirectedCameraShot {
-  if (args.manualShot !== "auto") return args.manualShot;
+  let mode: BotcastCameraShot = "auto";
+  let automaticShot: BotcastDirectedCameraShot = "wide";
   let shot: BotcastDirectedCameraShot = "wide";
-  for (const event of args.events) {
-    if (event.kind !== "camera_suggestion") continue;
-    const atMs = Number(event.payload.atMs);
-    const candidate = event.payload.shot;
-    if (Number.isFinite(atMs) && atMs <= args.elapsedMs) {
+  for (const event of botcastTimedCameraEvents(args.events, args.elapsedMs)) {
+    if (event.kind === "camera_mode") {
+      const candidate = event.payload.mode;
+      if (
+        candidate === "auto" ||
+        candidate === "left" ||
+        candidate === "right" ||
+        candidate === "wide"
+      ) {
+        mode = candidate;
+        const recordedShot = event.payload.shot;
+        if (
+          mode === "auto" &&
+          (recordedShot === "left" ||
+            recordedShot === "right" ||
+            recordedShot === "wide")
+        ) {
+          automaticShot = recordedShot;
+        }
+        shot = mode === "auto" ? automaticShot : mode;
+      }
+      continue;
+    }
+    if (event.kind === "camera_suggestion") {
+      const candidate = event.payload.shot;
       if (candidate === "left" || candidate === "right" || candidate === "wide") {
-        shot = candidate;
+        automaticShot = candidate;
+        if (mode === "auto") shot = automaticShot;
       }
     }
   }

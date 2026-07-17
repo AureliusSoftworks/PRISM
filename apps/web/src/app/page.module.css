@@ -5481,8 +5481,8 @@
     transform 100ms ease;
 }
 
-.appSwitcherButton:hover,
-.appSwitcherButton:focus-visible,
+.appSwitcherButton:hover:not(:disabled),
+.appSwitcherButton:focus-visible:not(:disabled),
 .appSwitcher[data-open="true"] .appSwitcherButton {
   border-color: var(--line-strong);
   background: color-mix(in srgb, var(--bg-hover) 82%, var(--bg-elevated) 18%);
@@ -5493,8 +5493,13 @@
   box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
-.appSwitcherButton:active {
+.appSwitcherButton:active:not(:disabled) {
   transform: translateY(1px);
+}
+
+.appSwitcherButton:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
 }
 
 .appSwitcherGlyph,
@@ -5839,6 +5844,11 @@
 
 .voiceModeSelectorOption[data-selected="true"] {
   background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.voiceModeSelectorOption:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
 }
 
 .voiceModeSelectorCheck {
@@ -24358,24 +24368,106 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   pointer-events: none;
 }
 
+@property --signal-bot-metal-light-rotation {
+  syntax: "<angle>";
+  inherits: true;
+  initial-value: 0deg;
+}
+
+@property --signal-bot-screen-glare-x {
+  syntax: "<percentage>";
+  inherits: true;
+  initial-value: 34%;
+}
+
+@property --signal-bot-screen-glare-y {
+  syntax: "<percentage>";
+  inherits: true;
+  initial-value: 30%;
+}
+
+@property --signal-bot-screen-glare-angle {
+  syntax: "<angle>";
+  inherits: true;
+  initial-value: -28deg;
+}
+
+@property --signal-bot-screen-glare-opacity {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0.4;
+}
+
 .signalBotPresencePlate {
-  --zen-live-bot-avatar-size: clamp(116px, 11.5vw, 170px);
-  --zen-live-bot-avatar-body-size: clamp(104px, 10.5vw, 154px);
+  --zen-live-bot-avatar-size: clamp(154px, 16vw, 240px);
+  --zen-live-bot-avatar-body-size: clamp(140px, 14.5vw, 218px);
   --zen-live-bot-body-x: 50%;
   --zen-live-bot-body-y: 50%;
   --zen-live-bot-face-x: 50%;
   --zen-live-bot-face-y: 43.8%;
   --zen-live-bot-face-scale: 1.68;
   --zen-live-bot-glyph-x-anchor: 0px;
-  --zen-live-bot-glyph-y-anchor: clamp(38px, 4vw, 57px);
+  --zen-live-bot-glyph-y-anchor: calc(
+    var(--zen-live-bot-avatar-body-size) * 0.37
+  );
   --zen-live-bot-frame-tint-color: var(--coffee-bot-color);
   --coffee-seat-emotion-color: var(--coffee-bot-color);
   --bot-face-crt-screen-texture-blend-mode: luminosity;
+  --signal-bot-metal-light-rotation: 0deg;
+  --signal-bot-screen-glare-y: 31%;
+  --signal-bot-screen-glare-angle: -28deg;
+  --signal-bot-screen-glare-opacity: 0.4;
+  --bot-face-metal-light-rotation: var(--signal-bot-metal-light-rotation);
+  --bot-face-screen-glare-x: var(--signal-bot-screen-glare-x);
+  --bot-face-screen-glare-y: var(--signal-bot-screen-glare-y);
+  --bot-face-screen-glare-angle: var(--signal-bot-screen-glare-angle);
+  --bot-face-screen-glare-opacity: var(--signal-bot-screen-glare-opacity);
   min-height: 0;
   margin: 0;
   align-items: center;
   pointer-events: none;
-  animation: none;
+  animation: signalBotZenSpotlightRefraction 7.2s
+    cubic-bezier(0.42, 0, 0.58, 1) infinite alternate;
+}
+
+.signalBotPresencePlate[data-signal-role="host"] {
+  --signal-bot-screen-glare-x: 42%;
+  --signal-bot-screen-glare-x-start: 38%;
+  --signal-bot-screen-glare-x-end: 46%;
+}
+
+.signalBotPresencePlate[data-signal-role="guest"] {
+  --signal-bot-screen-glare-x: 33%;
+  --signal-bot-screen-glare-x-start: 29%;
+  --signal-bot-screen-glare-x-end: 37%;
+}
+
+[data-signal-layout-stage="true"]
+  .signalBotPresencePlate {
+  animation-play-state: paused;
+}
+
+@keyframes signalBotZenSpotlightRefraction {
+  0% {
+    --signal-bot-metal-light-rotation: -6deg;
+    --signal-bot-screen-glare-x: var(--signal-bot-screen-glare-x-start);
+    --signal-bot-screen-glare-y: 30%;
+    --signal-bot-screen-glare-angle: -30deg;
+    --signal-bot-screen-glare-opacity: 0.4;
+  }
+  100% {
+    --signal-bot-metal-light-rotation: 6deg;
+    --signal-bot-screen-glare-x: var(--signal-bot-screen-glare-x-end);
+    --signal-bot-screen-glare-y: 32%;
+    --signal-bot-screen-glare-angle: -26deg;
+    --signal-bot-screen-glare-opacity: 0.43;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .signalBotPresencePlate {
+    animation: none !important;
+  }
 }
 
 .signalBotPresencePlate > .botPowerSurfaceBadgeWrap {

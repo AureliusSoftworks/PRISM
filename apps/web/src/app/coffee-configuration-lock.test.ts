@@ -32,17 +32,25 @@ test("active Coffee centrally locks configuration while preserving End Session",
   assert.doesNotMatch(pageSource, /Favorites unavailable in Coffee/u);
   assert.match(
     pageSource,
-    /const coffeeHeaderModelControlsLocked = \(\): boolean =>\s*coffeeBusy \|\| coffeeAutoBusy/u,
+    /const coffeeHeaderModelControlsLockReason = \(\): string \| null =>\s*coffeeConfigurationLocked/u,
+  );
+  assert.match(
+    pageSource,
+    /const coffeeHeaderModelControlsLocked = \(\): boolean =>\s*coffeeHeaderModelControlsLockReason\(\) !== null/u,
   );
   assert.match(pageSource, /disabled=\{coffeeHeaderModelControlsLocked\(\)\}/u);
   assert.match(pageSource, /disabled:\s*coffeeHeaderModelControlsLocked\(\)/u);
   assert.match(
     pageSource,
-    /renderCoffeeHeaderModelPicker\(\)[\s\S]*renderVoiceModeSelector\(\)/u,
+    /renderCoffeeHeaderModelPicker\(\)[\s\S]*renderVoiceModeSelector\(\{[\s\S]*disabled:\s*coffeeConfigurationLocked/u,
   );
   assert.match(
     pageSource,
     /shellPolicy\.showEndSessionInSwitcher[\s\S]*End session[\s\S]*renderAppSwitcher\(\)/u,
   );
   assert.match(pageSource, />\s*End session\s*</iu);
+  assert.match(
+    pageSource,
+    /data-live-session-locked=\{[\s\S]*shellPolicy\.liveSessionActive/u,
+  );
 });

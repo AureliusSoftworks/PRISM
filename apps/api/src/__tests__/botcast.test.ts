@@ -25,6 +25,7 @@ import {
   listBotcastEpisodes,
   nextBotcastFallbackStudioAccentVariant,
   readBotcastShowIntroAudio,
+  setBotcastEpisodeCameraMode,
   storeBotcastShowIntroAudio,
   updateBotcastShow,
 } from "../botcast.ts";
@@ -368,6 +369,10 @@ describe("Botcast persistence and isolation", () => {
     assert.match(
       serverSource,
       /route\("POST", "\/api\/botcast\/episodes\/:id\/end"/u,
+    );
+    assert.match(
+      serverSource,
+      /route\("POST", "\/api\/botcast\/episodes\/:id\/camera"/u,
     );
     assert.match(
       serverSource,
@@ -1095,6 +1100,56 @@ describe("Botcast persistence and isolation", () => {
         (utterance?.payload.autoRecovery as { finalProvider?: unknown })
           ?.finalProvider,
         "openai",
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("records live camera overrides and locks direction when the episode ends", () => {
+    const db = fixture();
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const created = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "A directed camera test",
+      });
+      let episode = setBotcastEpisodeCameraMode(db, "user-1", created.id, {
+        mode: "right",
+        atMs: 1_250,
+      });
+      assert.deepEqual(
+        episode.events
+          .filter((event) => event.kind === "camera_mode")
+          .map((event) => event.payload),
+        [{ mode: "right", shot: "right", atMs: 1_250, source: "producer" }],
+      );
+      episode = setBotcastEpisodeCameraMode(db, "user-1", created.id, {
+        mode: "right",
+        atMs: 1_500,
+      });
+      assert.equal(
+        episode.events.filter((event) => event.kind === "camera_mode").length,
+        1,
+      );
+      episode = setBotcastEpisodeCameraMode(db, "user-1", created.id, {
+        mode: "auto",
+        atMs: 2_000,
+      });
+      assert.deepEqual(
+        episode.events
+          .filter((event) => event.kind === "camera_mode")
+          .map((event) => event.payload.mode),
+        ["right", "auto"],
+      );
+      forceEndBotcastEpisode(db, "user-1", created.id);
+      assert.throws(
+        () =>
+          setBotcastEpisodeCameraMode(db, "user-1", created.id, {
+            mode: "wide",
+            atMs: 2_500,
+          }),
+        /locked after the episode ends/iu,
       );
     } finally {
       db.close();
