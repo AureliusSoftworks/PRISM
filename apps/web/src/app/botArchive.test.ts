@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { strToU8, unzipSync, zipSync } from "fflate";
-import { botPowerSourceHashV1 } from "@localai/shared";
+import {
+  DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+  botPowerSourceHashV1,
+} from "@localai/shared";
 
 import {
   BOT_ARCHIVE_BOT_ENTRY_NAME,
@@ -9,6 +12,7 @@ import {
   PRISM_BOT_ARCHIVE_SCHEMA,
   createPrismBotArchive,
   parsePrismBotArchive,
+  resolvePrismBotArchiveFaceGlyphAnimation,
   type PrismBotArchiveJson,
 } from "./botArchive.ts";
 
@@ -23,6 +27,11 @@ function baseBotJson(overrides: Partial<PrismBotArchiveJson> = {}): PrismBotArch
       color: "#4F46A5",
       glyph: "lucideDrama",
       voicePreviewLine: "The examined voice is worth hearing.",
+      authoredAudioVoiceProfile: {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+        elevenLabsVoiceId: "catalog-voice",
+        elevenLabsVoiceIdOverride: "portable-voice",
+      },
       avatarDetails: {
         version: 1,
         screen: {
@@ -62,6 +71,12 @@ function baseBotJson(overrides: Partial<PrismBotArchiveJson> = {}): PrismBotArch
 }
 
 describe("botArchive", () => {
+  it("defaults omitted legacy face animations for marketplace update patches", () => {
+    assert.equal(resolvePrismBotArchiveFaceGlyphAnimation(undefined), "none");
+    assert.equal(resolvePrismBotArchiveFaceGlyphAnimation(null), "none");
+    assert.equal(resolvePrismBotArchiveFaceGlyphAnimation("wobble"), "wobble");
+  });
+
   it("round-trips a v2 zipped .bot archive", () => {
     const archive = createPrismBotArchive({
       botJson: baseBotJson(),
@@ -74,6 +89,13 @@ describe("botArchive", () => {
     assert.equal(parsed.botJson.bot.name, "Plato");
     assert.equal(parsed.botJson.bot.namePronunciation, "Play-toe");
     assert.equal(parsed.botJson.bot.voicePreviewLine, "The examined voice is worth hearing.");
+    assert.equal(
+      parsed.botJson.bot.authoredAudioVoiceProfile?.v === 2
+        ? parsed.botJson.bot.authoredAudioVoiceProfile
+            .elevenLabsVoiceIdOverride
+        : null,
+      "portable-voice",
+    );
     assert.deepEqual(parsed.botJson.bot.avatarDetails, {
       version: 1,
       screen: {
