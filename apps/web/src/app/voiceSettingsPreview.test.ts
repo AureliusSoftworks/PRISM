@@ -99,15 +99,16 @@ describe("voice settings preview", () => {
     assert.match(pageSource, /DEFAULT_PRISM_VOICE_PREVIEW_LINES/);
   });
 
-  it("keeps Mute silent and LOCAL English previews offline", () => {
+  it("keeps Mute silent while explicit previews honor the active provider voice", () => {
     assert.match(
       pageSource,
       /Mute is silent\. Choose English, Babble, or Bottish to hear a preview\./,
     );
     assert.match(
       pageSource,
-      /settings\.preferredProvider === "local"\s*\? "builtin"\s*:\s*settings\.englishVoiceEngine/,
+      /const previewEngine = resolveVoicePreviewEngine\(previewProfile\)/,
     );
+    assert.match(pageSource, /explicitVoicePreview: true/);
   });
 
   it("routes Story NPC dialogue through the shared per-bot voice path", () => {

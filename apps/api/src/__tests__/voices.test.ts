@@ -13,6 +13,7 @@ import {
   requestElevenLabsVoiceCollections,
   requestElevenLabsVoiceIdentity,
   resolveElevenLabsVoiceId,
+  resolveVoiceSynthesisExplicitOnlineContext,
   resolveVoiceSynthesisBoundary,
   validateVoiceSynthesisRequest,
 } from "../voices.ts";
@@ -116,6 +117,46 @@ describe("voice Phase 1 boundary", () => {
       explicitOnlineContext: true,
     });
     assert.equal(resolveVoiceSynthesisBoundary(request).ok, true);
+  });
+
+  it("allows an explicit editor preview online without opening LOCAL message audio", () => {
+    assert.equal(
+      resolveVoiceSynthesisExplicitOnlineContext({
+        preferredProvider: "local",
+        explicitOnlineContext: true,
+        explicitVoicePreview: true,
+        hasMessageId: false,
+      }),
+      true,
+    );
+    assert.equal(
+      resolveVoiceSynthesisExplicitOnlineContext({
+        preferredProvider: "local",
+        explicitOnlineContext: true,
+        explicitVoicePreview: false,
+        hasMessageId: false,
+      }),
+      false,
+    );
+    assert.equal(
+      resolveVoiceSynthesisExplicitOnlineContext({
+        preferredProvider: "local",
+        explicitOnlineContext: true,
+        explicitVoicePreview: true,
+        hasMessageId: true,
+      }),
+      false,
+    );
+    assert.equal(
+      resolveVoiceSynthesisExplicitOnlineContext({
+        persistedMessageProvider: "local",
+        preferredProvider: "openai",
+        explicitOnlineContext: true,
+        explicitVoicePreview: true,
+        hasMessageId: true,
+      }),
+      false,
+    );
   });
 
   it("keeps Signal reaction tags in the ElevenLabs lane only", () => {
@@ -612,9 +653,6 @@ describe("voice Phase 1 boundary", () => {
       /collectionId: user\.elevenlabs_voice_collection_id/u,
     );
     assert.doesNotMatch(catalogRoute, /preferred_provider|Switch to Online/u);
-    assert.match(
-      serverSource,
-      /raw\.explicitOnlineContext === true && user\.preferred_provider !== "local"/u,
-    );
+    assert.match(serverSource, /resolveVoiceSynthesisExplicitOnlineContext\(\{/u);
   });
 });

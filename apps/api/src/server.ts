@@ -578,6 +578,7 @@ import {
   requestElevenLabsVoiceCatalog,
   requestElevenLabsVoiceCollections,
   requestElevenLabsVoiceIdentity,
+  resolveVoiceSynthesisExplicitOnlineContext,
   resolveVoiceSynthesisBoundary,
   validateVoiceSynthesisRequest,
 } from "./voices.ts";
@@ -8852,9 +8853,14 @@ function buildRoutes(): RouteDefinition[] {
               )
               .join("")
           : raw.elevenLabsText;
-      const explicitOnlineContext = persistedMessageProvider
-        ? persistedMessageProvider !== "local"
-        : raw.explicitOnlineContext === true && user.preferred_provider !== "local";
+      const explicitOnlineContext = resolveVoiceSynthesisExplicitOnlineContext({
+        persistedMessageProvider,
+        preferredProvider: user.preferred_provider,
+        explicitOnlineContext: raw.explicitOnlineContext === true,
+        explicitVoicePreview: raw.explicitVoicePreview === true,
+        hasMessageId:
+          typeof raw.messageId === "string" && raw.messageId.trim().length > 0,
+      });
       const profile = normalizeBotAudioVoiceProfileV1(raw.profile);
       // An online engine is available account-wide, but a profile opts into
       // it through a selected provider voice or explicit voice ID override.
