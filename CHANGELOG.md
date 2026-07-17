@@ -12,6 +12,44 @@ Active development happens on the `dev` branch; every release is a merge into
 
 _Staging area - nothing queued for release yet._
 
+## [0.10.1] - 2026-07-17
+
+### Added
+
+- **Local models can warm up without consuming timed sessions.** Coffee and
+  Signal pause their effective clocks during confirmed Ollama preparation,
+  freeze the scene, buffer the generated line, and recover through explicit
+  retry or exit actions instead of presenting indefinite thinking.
+- **Signal shows now develop an audience pulse.** Completed episodes produce
+  stable simulated views, ratings, review counts, and a featured listener
+  response while unreleased shows begin honestly at zero.
+
+### Changed
+
+- **Custom web menus now share one PRISM interaction system.** Context and
+  click-open menus use consistent glass styling, measured positioning,
+  keyboard navigation, focus behavior, action language, and accessible states.
+- **Auto response recovery supports one to five ordered backup models.** The
+  expanded chain preserves LOCAL privacy and records concise fallback
+  provenance.
+- **Avatar screens and voice authoring are more coherent.** Face and loading
+  glyphs use a restrained screen-relative pixel source, authored ElevenLabs
+  identities remain authoritative, ink can hide while talking or sipping, and
+  Avatar Studio's voice hierarchy is easier to scan.
+- **Local development reloads shared workspace dependencies reliably.** The
+  launcher builds and watches shared packages before restarting dependent
+  services.
+
+### Fixed
+
+- **Menu keyboard and light-theme behavior is predictable.** Right Arrow no
+  longer activates ordinary actions, Tab follows the document, first-item
+  focus survives pointer invocation, and destructive actions remain readable.
+- **Warmup polling releases completed request listeners.** Repeated model
+  readiness checks no longer accumulate abort handlers.
+- **Avatar Details keeps its CRT canvas dark in Light Mode.** The editor no
+  longer presents a white screen behind phosphor artwork.
+
 ## [0.10.0] - 2026-07-16
 
 ### Added

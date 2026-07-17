@@ -24,17 +24,17 @@ ship as `0.5.2` while Coffee is `v0.7` and Story is `v0.1`.
 
 | Applet | Version | Status | Notes |
 | --- | --- | --- | --- |
-| Chat | v1.3 | Active | Full playground for bots, providers, models, images, exports, memory-aware conversations, and per-bot online voice identity. |
-| Zen | v1.2 | Active | Calm one-to-one continuity surface with shared bot voice identity; the standalone Zen lane is deprecating as this becomes Prism's default state. |
-| Coffee | v1.4 | Active | Multi-bot group table with Coffee Groups, session pacing, cups, transcripts, replay, table controls, and synchronized online speech. |
-| Signal | v0.4 | Active | Bot-owned interview shows with animated audio pre-roll, background opening preparation, local synthesized idents, optional cached ElevenLabs music, private direction, archives, and directed replay. |
-| Story | v0.1 | Preview | Generated visual-novel episodes with bots, choices, maps, inventory, and transcripts. |
+| Chat | v1.4 | Active | Full playground for bots, providers, models, images, exports, memory-aware conversations, and per-bot online voice identity. |
+| Zen | v1.3 | Active | Calm one-to-one continuity surface with shared bot voice identity; the standalone Zen lane is deprecating as this becomes Prism's default state. |
+| Coffee | v1.5 | Active | Multi-bot group table with Coffee Groups, model-aware session holds, pacing, cups, transcripts, replay, table controls, and synchronized online speech. |
+| Signal | v0.5 | Active | Bot-owned interview shows with audience pulse, model-aware studio holds, animated pre-roll, private direction, archives, and directed replay. |
+| Story | v0.2 | Preview | Generated visual-novel episodes with bots, choices, maps, inventory, transcripts, and shared PRISM menu behavior. |
 | Arena | v0.0 | Planned | Moderated bot debate surface. |
 | Polling | v0.0 | Planned | AI-powered polling across bot groups. |
 | Feed | v0.0 | Planned | BotBook-style social feed. |
 | Games | v0.0 | Planned | Boardgame-like bot matches. |
 | Gym | v0.0 | Planned | Bot training and memory-development surface. |
-| Slate | v0.5 | Preview | Prose-fiction production desk with long-form section storage, private Continuity guidance, return sessions, recovery archives, and clean manuscript exports. |
+| Slate | v0.6 | Preview | Prose-fiction production desk with long-form section storage, private Continuity guidance, return sessions, recovery archives, clean manuscript exports, and unified project actions. |
 | Pseudo | v0.0 | Planned | Sketch/system space for almost-code. |
 | Surf | v0.0 | Planned | Simple browsing plus optional bot screen viewing. |
 
@@ -64,10 +64,22 @@ The phased Continuity, Review Circle, Atmosphere, safety, export, and publishing
 contracts are indexed in [Slate Master Plan](./slate-master-plan.md).
 
 Slate stayed planned `v0.0` until its first functional vertical slice became
-usable end to end. It entered preview at `v0.1` and is now `v0.5`; later snapshot
+usable end to end. It entered preview at `v0.1` and is now `v0.6`; later snapshot
 stages do not block the standalone preview.
 
 ## Changelog
+
+### 2026-07-17
+
+- Bumped `Chat` to `v1.4`, `Zen` to `v1.3`, and `Story` to `v0.2` for the
+  unified PRISM menu system, refined CRT face glyphs, and shared voice and
+  avatar behavior.
+- Bumped `Coffee` to `v1.5` for local-model warmup intermissions that pause the
+  real table clock, hold visual activity, and reveal buffered lines only after
+  the room resumes.
+- Bumped `Signal` to `v0.5` for persisted local-model studio holds and the
+  episode-aware Audience Pulse with deterministic views, ratings, and reviews.
+- Bumped `Slate` to preview `v0.6` for unified, accessible project actions.
 
 ### 2026-07-16
 
