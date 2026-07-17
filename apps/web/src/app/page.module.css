@@ -63327,7 +63327,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
      source glyph exposes internal contour seams before the white core layer. */
   -webkit-text-stroke: 0;
   paint-order: fill;
-  --crt-glyph-core-fill:
+  background:
     linear-gradient(
       180deg,
       rgb(255 255 255 / var(--crt-glyph-core-opacity)),
@@ -63362,11 +63362,9 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
         calc(var(--crt-glyph-phosphor-scale) * 0.9)
         var(--crt-glyph-phosphor-scale)
     );
-  --crt-glyph-core-fill-size:
+  background-size:
     100% 100%,
     var(--crt-glyph-phosphor-scale) 100%;
-  background: var(--crt-glyph-core-fill);
-  background-size: var(--crt-glyph-core-fill-size);
   background-blend-mode: screen;
   -webkit-background-clip: text;
   background-clip: text;
@@ -63542,184 +63540,6 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   opacity: 1;
   mix-blend-mode: screen;
   filter: brightness(1.04) contrast(1.02);
-}
-
-/* The font is sampled into a binary 128x128 screen-relative alpha field first.
-   These explicit layers then rebuild the existing high-resolution phosphor
-   stack from that blocky source without filtering or flattening the screen. */
-.coffeeSeatPlateEmoji [data-crt-pixel-emission],
-.messageMoodCoffeeFace [data-crt-pixel-emission],
-.zenLiveBotPresenceFaceGlyph [data-crt-pixel-emission] {
-  display: none;
-}
-
-.coffeeSeatPlateEmoji [data-crt-glyph-pixel-ready="true"],
-.messageMoodCoffeeFace [data-crt-glyph-pixel-ready="true"],
-.zenLiveBotPresenceFaceGlyph [data-crt-glyph-pixel-ready="true"] {
-  color: transparent;
-  background: none;
-  background-clip: border-box;
-  -webkit-background-clip: border-box;
-  -webkit-text-fill-color: transparent;
-  text-shadow: none;
-  filter: none;
-}
-
-.coffeeSeatPlateEmoji [data-crt-glyph-pixel-ready="true"]::before,
-.coffeeSeatPlateEmoji [data-crt-glyph-pixel-ready="true"]::after,
-.messageMoodCoffeeFace [data-crt-glyph-pixel-ready="true"]::before,
-.messageMoodCoffeeFace [data-crt-glyph-pixel-ready="true"]::after,
-.zenLiveBotPresenceFaceGlyph [data-crt-glyph-pixel-ready="true"]::before,
-.zenLiveBotPresenceFaceGlyph [data-crt-glyph-pixel-ready="true"]::after {
-  display: none;
-}
-
-.coffeeSeatPlateEmoji
-  [data-crt-glyph-pixel-ready="true"]
-  > [data-crt-pixel-emission],
-.messageMoodCoffeeFace
-  [data-crt-glyph-pixel-ready="true"]
-  > [data-crt-pixel-emission],
-.zenLiveBotPresenceFaceGlyph
-  [data-crt-glyph-pixel-ready="true"]
-  > [data-crt-pixel-emission] {
-  position: absolute;
-  inset: 0;
-  display: block;
-  pointer-events: none;
-}
-
-:is(.coffeeSeatPlateEmoji, .messageMoodCoffeeFace, .zenLiveBotPresenceFaceGlyph)
-  [data-crt-glyph-pixel-ready="true"]
-  [data-crt-pixel-shape="true"] {
-  position: absolute;
-  inset: 0;
-  display: block;
-  image-rendering: pixelated;
-  image-rendering: crisp-edges;
-  -webkit-mask-image: var(--crt-glyph-pixel-mask-image);
-  -webkit-mask-position: center;
-  -webkit-mask-size: 100% 100%;
-  -webkit-mask-repeat: no-repeat;
-  mask-image: var(--crt-glyph-pixel-mask-image);
-  mask-position: center;
-  mask-size: 100% 100%;
-  mask-repeat: no-repeat;
-}
-
-:is(.coffeeSeatPlateEmoji, .messageMoodCoffeeFace, .zenLiveBotPresenceFaceGlyph)
-  [data-crt-glyph-pixel-ready="true"]
-  > [data-crt-pixel-emission="halo"] {
-  z-index: 0;
-  mix-blend-mode: var(--crt-face-glow-blend-mode, screen);
-  filter: blur(var(--crt-glyph-beam-softness))
-    drop-shadow(
-      0 0 var(--crt-glyph-bloom-narrow-radius)
-        color-mix(
-          in srgb,
-          var(--crt-face-edge-color)
-            calc(76% * var(--crt-glyph-bloom-strength-scale, 1)),
-          transparent
-        )
-    )
-    drop-shadow(
-      0 0 calc(var(--crt-glyph-bloom-narrow-radius) * 2.2)
-        color-mix(
-          in srgb,
-          var(--crt-face-edge-color)
-            calc(42% * var(--crt-glyph-bloom-strength-scale, 1)),
-          transparent
-        )
-    )
-    drop-shadow(
-      0 0 var(--crt-glyph-bloom-wide-radius)
-        color-mix(
-          in srgb,
-          var(--crt-face-edge-color)
-            calc(
-              var(--crt-glyph-bloom-wide-inner-opacity, 30%) *
-                var(--crt-glyph-bloom-strength-scale, 1)
-            ),
-          transparent
-        )
-    )
-    drop-shadow(
-      0 0 calc(var(--crt-glyph-bloom-wide-radius) * 1.45)
-        color-mix(
-          in srgb,
-          var(--crt-face-edge-color)
-            calc(
-              var(--crt-glyph-bloom-wide-outer-opacity, 18%) *
-                var(--crt-glyph-bloom-strength-scale, 1)
-            ),
-          transparent
-        )
-    )
-    var(--crt-face-glow-filter);
-}
-
-:is(.coffeeSeatPlateEmoji, .messageMoodCoffeeFace, .zenLiveBotPresenceFaceGlyph)
-  [data-crt-glyph-pixel-ready="true"]
-  > [data-crt-pixel-emission="halo"]
-  > [data-crt-pixel-shape="true"] {
-  background: var(--crt-face-edge-color, currentColor);
-}
-
-:is(.coffeeSeatPlateEmoji, .messageMoodCoffeeFace, .zenLiveBotPresenceFaceGlyph)
-  [data-crt-glyph-pixel-ready="true"]
-  > [data-crt-pixel-emission="red-convergence"],
-:is(.coffeeSeatPlateEmoji, .messageMoodCoffeeFace, .zenLiveBotPresenceFaceGlyph)
-  [data-crt-glyph-pixel-ready="true"]
-  > [data-crt-pixel-emission="blue-convergence"] {
-  z-index: 1;
-  opacity: var(--crt-glyph-convergence-opacity);
-  mix-blend-mode: screen;
-  filter: blur(0.2px);
-}
-
-:is(.coffeeSeatPlateEmoji, .messageMoodCoffeeFace, .zenLiveBotPresenceFaceGlyph)
-  [data-crt-glyph-pixel-ready="true"]
-  > [data-crt-pixel-emission="red-convergence"] {
-  transform: translateX(calc(0px - var(--crt-glyph-convergence-offset)));
-}
-
-:is(.coffeeSeatPlateEmoji, .messageMoodCoffeeFace, .zenLiveBotPresenceFaceGlyph)
-  [data-crt-glyph-pixel-ready="true"]
-  > [data-crt-pixel-emission="blue-convergence"] {
-  transform: translateX(var(--crt-glyph-convergence-offset));
-}
-
-:is(.coffeeSeatPlateEmoji, .messageMoodCoffeeFace, .zenLiveBotPresenceFaceGlyph)
-  [data-crt-glyph-pixel-ready="true"]
-  > [data-crt-pixel-emission="red-convergence"]
-  > [data-crt-pixel-shape="true"] {
-  background: rgb(255 54 78);
-}
-
-:is(.coffeeSeatPlateEmoji, .messageMoodCoffeeFace, .zenLiveBotPresenceFaceGlyph)
-  [data-crt-glyph-pixel-ready="true"]
-  > [data-crt-pixel-emission="blue-convergence"]
-  > [data-crt-pixel-shape="true"] {
-  background: rgb(70 218 255);
-}
-
-:is(.coffeeSeatPlateEmoji, .messageMoodCoffeeFace, .zenLiveBotPresenceFaceGlyph)
-  [data-crt-glyph-pixel-ready="true"]
-  > [data-crt-pixel-emission="core"] {
-  z-index: 2;
-  mix-blend-mode: screen;
-  filter: brightness(1.07) contrast(1.02)
-    drop-shadow(0 0 var(--crt-glyph-beam-softness) rgb(255 255 255 / 0.82));
-}
-
-:is(.coffeeSeatPlateEmoji, .messageMoodCoffeeFace, .zenLiveBotPresenceFaceGlyph)
-  [data-crt-glyph-pixel-ready="true"]
-  > [data-crt-pixel-emission="core"]
-  > [data-crt-pixel-shape="true"] {
-  color: var(--zen-live-bot-face-phosphor-ink, #ffffff);
-  background: var(--crt-glyph-core-fill);
-  background-size: var(--crt-glyph-core-fill-size);
-  background-blend-mode: screen;
 }
 
 .coffeeSeatPlateEmoji [data-coffee-plate-emoji-part="mouth"],
