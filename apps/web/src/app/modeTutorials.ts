@@ -153,13 +153,13 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Direct the live cut",
-        body: "Left, Right, and Wide hold a fixed studio shot. Auto runs Signal’s contextual director instead. Choosing any fixed shot breaks out of Auto; choosing Auto again hands direction back at any point. Signal records every choice into the episode’s finished camera cut.",
+        body: "Left, Right, and Wide hold a fixed studio shot. Auto opens on the full studio, moves to the host for the introduction, returns Wide throughout the conversation, and closes on the full set. Choosing any fixed shot breaks out of Auto; choosing Auto again hands direction back at any point. Signal records every choice into the episode’s finished camera cut.",
         clickLabel: "a live camera",
         targetSelector: '[data-tutorial-target="botcast-live-camera"]',
       },
       {
         heading: "Produce from the control room",
-        body: "Signal keeps one speaker on mic at a time: their face comes alive and the transcript follows only the words they have finished saying. Ask about a detail, press harder, move on, or lighten up with a private host cue. Wrap it up is shared episode direction: both bots carry the closing exchange through to a real ending. While Signal is on air, app switching, voice, and session-changing navbar tools stay locked; read-only Usage and Memories plus Theme remain available. Cut show immediately cuts away and archives the recording, then restores the full chrome; it does not discard the transcript. Choosing any show in the left rail while on air makes the same producer cut before Signal changes shows. Natural endings and hard cuts both land on a short, locally synthesized outro. Repeated pressure can earn a warning and, rarely, a walkout.",
+        body: "Signal keeps one speaker on mic at a time: their face comes alive and the transcript follows only the words they have finished saying. Ask about a detail, press harder, move on, or lighten up at any time; Signal queues the private cue for the host’s next turn. Wrap it up is shared episode direction: both bots carry the closing exchange through to a real ending. While Signal is on air, app switching, voice, and session-changing navbar tools stay locked; read-only Usage and Memories plus Theme remain available. Cut show immediately cuts away and archives the recording, then restores the full chrome; it does not discard the transcript. Choosing any show in the left rail while on air makes the same producer cut before Signal changes shows. Natural endings and hard cuts both land on a short, locally synthesized outro. Repeated pressure can earn a warning and, rarely, a walkout.",
         clickLabel: "a producer cue card",
         targetSelector: '[data-tutorial-target="botcast-cues"]',
       },

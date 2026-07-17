@@ -1417,10 +1417,10 @@ export function createBotcastEpisode(
     ).run(randomId(12), userId, id, now);
     recordEvent(db, userId, id, "segment", { segment: "opening", ordinal: 0 }, now);
     recordEvent(db, userId, id, "camera_suggestion", {
-      shot: "left",
+      shot: "wide",
       reason: "opening",
       atMs: 0,
-      minimumHoldMs: 3_200,
+      minimumHoldMs: 1_400,
     }, now);
     db.prepare("UPDATE botcast_shows SET updated_at = ? WHERE id = ? AND user_id = ?")
       .run(now, show.id, userId);
@@ -2170,16 +2170,25 @@ export async function advanceBotcastEpisode(
   const previousCamera = lastCameraSuggestion(episode.events);
   const wordCount = content.split(/\s+/u).filter(Boolean).length;
   const utteranceDurationMs = Math.max(1_400, wordCount * 310);
-  const atMs = previousCamera
-    ? previousCamera.atMs + Math.max(previousCamera.minimumHoldMs, utteranceDurationMs)
-    : 0;
+  const firstOpeningHost =
+    episode.messages.length === 1 &&
+    episode.segment === "opening" &&
+    speakerRole === "host";
+  const messageStartMs =
+    botcastReplayTimeline(episode.messages, episode.events).messageStartMs.at(-1) ?? 0;
+  const atMs = firstOpeningHost ? 1_400 : messageStartMs;
+  const cameraEvent = departureRequired
+    ? "departure"
+    : episode.segment === "interview" && episode.messages.length % 4 === 0
+      ? "transition"
+      : "utterance";
   const suggestion = botcastDirectorSuggestion({
-    previous: previousCamera,
+    previous: firstOpeningHost ? null : previousCamera,
     atMs,
     speakerRole,
     utteranceDurationMs,
     segment: episode.segment,
-    event: departureRequired ? "departure" : "utterance",
+    event: cameraEvent,
   });
   recordEvent(db, userId, episode.id, "camera_suggestion", { ...suggestion }, now);
   if (departureRequired) {
@@ -2199,5 +2208,17 @@ export async function advanceBotcastEpisode(
     voice_performance_text: voicePerformanceText,
     created_at: now,
   }, messageMoodKey);
-  return { episode: getBotcastEpisode(db, userId, episode.id), message };
+  episode = getBotcastEpisode(db, userId, episode.id);
+  if (speakerRole === "host" && episode.segment === "closing") {
+    const guestDeparted = episode.events.some((event) => event.kind === "departure");
+    completeEpisode(
+      db,
+      userId,
+      episode,
+      guestDeparted ? "guest_departed" : "completed",
+      now,
+    );
+    episode = getBotcastEpisode(db, userId, episode.id);
+  }
+  return { episode, message };
 }

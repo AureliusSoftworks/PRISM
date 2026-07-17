@@ -112,7 +112,11 @@ export interface BotcastApiRequest {
 }
 
 const SIGNAL_NATURAL_HANDOFF_MS = 240;
-const SIGNAL_VOICE_START_TIMEOUT_MS = 4_000;
+// ElevenLabs alignment responses are buffered before playback begins and can
+// legitimately take several seconds for a full Signal line. Keep a bounded
+// escape hatch for a genuinely stuck voice request without aborting healthy
+// provider speech before it reaches the studio.
+const SIGNAL_VOICE_START_TIMEOUT_MS = 30_000;
 const SIGNAL_OPENING_ADVANCE_ATTEMPTS = 2;
 const SIGNAL_SHOW_CARD_QUIP_INITIAL_DELAY_MS = 4_800;
 const SIGNAL_SHOW_CARD_QUIP_VISIBLE_MS = 5_600;
@@ -388,12 +392,19 @@ function episodeOutcomeLabel(episode: Pick<BotcastEpisodeSummary, "outcome">): s
   return episode.outcome === "guest_departed" ? "Guest walked out" : "Completed";
 }
 
-function latestDirectedShot(episode: BotcastEpisode): "left" | "right" | "wide" {
-  const latest = [...episode.events]
-    .reverse()
-    .find((event) => event.kind === "camera_suggestion");
-  const shot = latest?.payload.shot;
-  return shot === "left" || shot === "right" || shot === "wide" ? shot : "wide";
+function signalProducerCueLabel(cue: BotcastProducerCue): string {
+  switch (cue.kind) {
+    case "ask_about":
+      return `Ask about ${cue.detail ?? "that detail"}`;
+    case "press_harder":
+      return "Press harder";
+    case "move_on":
+      return "Move on";
+    case "lighten_up":
+      return "Lighten up";
+    case "wrap_up":
+      return "Wrap it up";
+  }
 }
 
 function guestHasDeparted(episode: BotcastEpisode): boolean {
@@ -560,6 +571,8 @@ export function BotcastExperience({
   const [episodeDurationDraft, setEpisodeDurationDraft] =
     useState<BotcastSessionDurationMinutes | null>(null);
   const [askAboutDraft, setAskAboutDraft] = useState("");
+  const [queuedProducerCue, setQueuedProducerCue] =
+    useState<BotcastProducerCue | null>(null);
   const [showNameDraft, setShowNameDraft] = useState("");
   const [showIdentityControlsShowId, setShowIdentityControlsShowId] =
     useState<string | null>(null);
@@ -596,6 +609,7 @@ export function BotcastExperience({
   const blockingAbortRef = useRef<AbortController | null>(null);
   const handledArtworkJobIdsRef = useRef(new Set<string>());
   const advanceInFlightRef = useRef(false);
+  const queuedProducerCueRef = useRef<BotcastProducerCue | null>(null);
   const preparedAdvanceRef = useRef<PreparedBotcastAdvance | null>(null);
   const activeSpeechMessageIdRef = useRef<string | null>(null);
   const episodeOperationAbortRef = useRef<AbortController | null>(null);
@@ -627,6 +641,14 @@ export function BotcastExperience({
   useEffect(() => {
     onStopUtteranceRef.current = onStopUtterance;
   }, [onStopUtterance]);
+
+  const assignQueuedProducerCue = useCallback(
+    (cue: BotcastProducerCue | null): void => {
+      queuedProducerCueRef.current = cue;
+      setQueuedProducerCue(cue);
+    },
+    [],
+  );
 
   const assignSignalModelWarmup = useCallback(
     (value: SignalModelWarmup | null): void => {
@@ -752,6 +774,28 @@ export function BotcastExperience({
     [],
   );
 
+  // Animation events can be lost when a live stage is resized, hot-reloaded,
+  // or swapped between shots. Never let a mug remain stranded in its return
+  // state and miss every later sip.
+  useEffect(() => {
+    if (
+      signalCupTravelByRole.host.mode !== "returning" &&
+      signalCupTravelByRole.guest.mode !== "returning"
+    ) return;
+    const timer = window.setTimeout(() => {
+      setSignalCupTravelByRole((current) => {
+        let next = current;
+        for (const role of ["host", "guest"] as const) {
+          if (current[role].mode !== "returning") continue;
+          if (next === current) next = { ...current };
+          next[role] = { mode: "idle", returnX: null, returnY: null };
+        }
+        return next;
+      });
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [signalCupTravelByRole.guest.mode, signalCupTravelByRole.host.mode]);
+
   useLayoutEffect(() => {
     syncSignalSipMouthTargets();
     syncSignalCupTravel();
@@ -771,7 +815,8 @@ export function BotcastExperience({
 
   useEffect(() => {
     setSignalCupTravelByRole(initialSignalCupTravelByRole());
-  }, [activeEpisodeId, replayEpisode?.id]);
+    assignQueuedProducerCue(null);
+  }, [activeEpisodeId, assignQueuedProducerCue, replayEpisode?.id]);
 
   // Signal cleanup depends on this callback, so voice-setting changes must not
   // make React tear down the active episode as though the studio unmounted.
@@ -2295,13 +2340,23 @@ export function BotcastExperience({
   const advanceEpisode = useCallback(
     async (cue?: BotcastProducerCue): Promise<void> => {
       if (!episode || episode.status === "completed" || advanceInFlightRef.current) return;
+      const queuedCue =
+        !cue &&
+        botcastNextSpeakerRole({
+          messages: episode.messages,
+          segment: episode.segment,
+          guestDeparted: guestHasDeparted(episode),
+        }) === "host"
+          ? queuedProducerCueRef.current
+          : null;
+      const requestedCue = cue ?? queuedCue ?? undefined;
       advanceInFlightRef.current = true;
       const { controller, runId } = beginEpisodeOperation();
       setBusy(true);
       setError(null);
       try {
         const lastVisibleMessageId = episode.messages.at(-1)?.id ?? null;
-        const prepared = !cue && preparedAdvanceRef.current?.episodeId === episode.id &&
+        const prepared = !requestedCue && preparedAdvanceRef.current?.episodeId === episode.id &&
             preparedAdvanceRef.current.afterMessageId === lastVisibleMessageId
           ? preparedAdvanceRef.current
           : null;
@@ -2387,11 +2442,17 @@ export function BotcastExperience({
               method: "POST",
               signal: controller.signal,
               body: JSON.stringify({
-                ...(cue ? { cue } : {}),
+                ...(requestedCue ? { cue: requestedCue } : {}),
               }),
             },
           );
         if (!episodeOperationIsCurrent(controller, runId)) return;
+        if (
+          requestedCue &&
+          queuedProducerCueRef.current === requestedCue
+        ) {
+          assignQueuedProducerCue(null);
+        }
         if (response.message) {
           const message = response.message;
           setEpisode(response.episode);
@@ -2408,6 +2469,7 @@ export function BotcastExperience({
           }
         }
         if (response.episode.status === "completed") {
+          assignQueuedProducerCue(null);
           setAutoRun(false);
           if (selectedShow) {
             void playEpisodeOutro({
@@ -2438,6 +2500,7 @@ export function BotcastExperience({
     [
       beginEpisodeOperation,
       episode,
+      assignQueuedProducerCue,
       assignSignalModelWarmup,
       episodeOperationIsCurrent,
       loadEpisodes,
@@ -2538,9 +2601,18 @@ export function BotcastExperience({
   }, [advanceEpisode, autoRun, busy, episode, speakingMessageId]);
 
   const sendCue = (cue: BotcastProducerCue): void => {
-    onPrepareUtterance?.();
+    if (!episode || episode.status !== "live" || episode.segment === "closing") return;
+    assignQueuedProducerCue(cue);
     setAutoRun(true);
-    void advanceEpisode(cue);
+    const nextRole = botcastNextSpeakerRole({
+      messages: episode.messages,
+      segment: episode.segment,
+      guestDeparted: guestHasDeparted(episode),
+    });
+    if (!busy && speakingMessageId === null && nextRole === "host") {
+      onPrepareUtterance?.();
+      void advanceEpisode(cue);
+    }
   };
 
   const openReplay = async (summary: BotcastEpisodeSummary): Promise<void> => {
@@ -2780,7 +2852,7 @@ export function BotcastExperience({
       role: "host" | "guest",
     ): CoffeeCupVisualState => {
       return buildCoffeeCupVisualState({
-        seed: `signal:${bot.id}:${role}`,
+        seed: `signal:${args.currentEpisode.id}:${bot.id}:${role}`,
         botColor: bot.color,
         theme,
         nowMs: cupNowMs,
@@ -3428,17 +3500,6 @@ export function BotcastExperience({
 
   const liveActiveMessage =
     episode?.messages.find((message) => message.id === speakingMessageId) ?? null;
-  const liveCameraMode = episode
-    ? botcastCameraModeAt({
-        events: episode.events,
-        elapsedMs: Number.POSITIVE_INFINITY,
-      })
-    : "auto";
-  const liveShot = episode
-    ? liveCameraMode === "auto"
-      ? latestDirectedShot(episode)
-      : liveCameraMode
-    : "wide";
   const liveCameraElapsedMs = (() => {
     if (!episode || episode.messages.length === 0) return 0;
     const timeline = botcastReplayTimeline(episode.messages, episode.events);
@@ -3464,6 +3525,20 @@ export function BotcastExperience({
       ),
     );
   })();
+  const liveCameraMode = episode
+    ? botcastCameraModeAt({
+        events: episode.events,
+        elapsedMs: Number.POSITIVE_INFINITY,
+      })
+    : "auto";
+  const liveShot = episode
+    ? liveCameraMode === "auto"
+      ? botcastCameraShotAt({
+          events: episode.events,
+          elapsedMs: liveCameraElapsedMs,
+        })
+      : liveCameraMode
+    : "wide";
   const selectLiveCameraMode = async (mode: BotcastCameraShot): Promise<void> => {
     if (
       !episode ||
@@ -3490,11 +3565,8 @@ export function BotcastExperience({
       setCameraSaving(false);
     }
   };
-  const producerCueReady =
-    Boolean(episode) &&
-    episode?.segment !== "closing" &&
-    (episode!.messages.length === 0 ||
-      episode!.messages.at(-1)?.speakerRole === "guest");
+  const producerCueAvailable =
+    episode?.status === "live" && episode.segment !== "closing";
   const liveSessionActive = episode?.status === "live";
   const resolvedNavigationHeader =
     typeof navigationHeader === "function"
@@ -3727,7 +3799,7 @@ export function BotcastExperience({
                     <input value={askAboutDraft} onChange={(event) => setAskAboutDraft(event.target.value)} placeholder="a specific detail" />
                     <button
                       type="button"
-                      disabled={busy || !producerCueReady || !askAboutDraft.trim()}
+                      disabled={!producerCueAvailable || !askAboutDraft.trim()}
                       onClick={() => {
                         sendCue({ kind: "ask_about", detail: askAboutDraft.trim() });
                         setAskAboutDraft("");
@@ -3736,12 +3808,17 @@ export function BotcastExperience({
                   </div>
                 </label>
                 <div className={styles.cueGrid}>
-                  <button type="button" disabled={busy || !producerCueReady} onClick={() => sendCue({ kind: "press_harder" })}>Press harder</button>
-                  <button type="button" disabled={busy || !producerCueReady} onClick={() => sendCue({ kind: "move_on" })}>Move on</button>
-                  <button type="button" disabled={busy || !producerCueReady} onClick={() => sendCue({ kind: "lighten_up" })}>Lighten up</button>
-                  <button type="button" disabled={busy || !producerCueReady} onClick={() => sendCue({ kind: "wrap_up" })}>Wrap it up</button>
+                  <button type="button" data-queued={queuedProducerCue?.kind === "press_harder" ? "true" : undefined} disabled={!producerCueAvailable} onClick={() => sendCue({ kind: "press_harder" })}>Press harder</button>
+                  <button type="button" data-queued={queuedProducerCue?.kind === "move_on" ? "true" : undefined} disabled={!producerCueAvailable} onClick={() => sendCue({ kind: "move_on" })}>Move on</button>
+                  <button type="button" data-queued={queuedProducerCue?.kind === "lighten_up" ? "true" : undefined} disabled={!producerCueAvailable} onClick={() => sendCue({ kind: "lighten_up" })}>Lighten up</button>
+                  <button type="button" data-queued={queuedProducerCue?.kind === "wrap_up" ? "true" : undefined} disabled={!producerCueAvailable} onClick={() => sendCue({ kind: "wrap_up" })}>Wrap it up</button>
                 </div>
-                <small>Host-only cues stay private. Episode cues such as Wrap it up guide both bots, but are never spoken or attributed to you.</small>
+                {queuedProducerCue ? (
+                  <p className={styles.queuedCueStatus} role="status">
+                    Queued: {signalProducerCueLabel(queuedProducerCue)}. The host will use it on their next turn.
+                  </p>
+                ) : null}
+                <small>Host-only cues queue for the host’s next turn and stay private. Episode cues such as Wrap it up guide both bots, but are never spoken or attributed to you.</small>
               </aside>
             </div>
             {episode.status === "completed" ? (
