@@ -680,6 +680,21 @@ export function validateVoiceSynthesisRequest(body: Record<string, unknown>): Vo
   };
 }
 
+export function resolveVoiceSynthesisExplicitOnlineContext(args: {
+  persistedMessageProvider?: string | null;
+  preferredProvider?: string | null;
+  explicitOnlineContext: boolean;
+  explicitVoicePreview: boolean;
+  hasMessageId: boolean;
+}): boolean {
+  if (args.persistedMessageProvider) {
+    return args.persistedMessageProvider !== "local";
+  }
+  if (!args.explicitOnlineContext) return false;
+  if (args.preferredProvider !== "local") return true;
+  return args.explicitVoicePreview && !args.hasMessageId;
+}
+
 export function resolveVoiceSynthesisBoundary(args: VoiceSynthesisRequest & {
   persistedMessageProvider?: string | null;
 }):

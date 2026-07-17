@@ -1617,6 +1617,51 @@ describe("API request integration", () => {
     }
   });
 
+  it("uses the selected ElevenLabs voice for an explicit Avatar Studio preview", async () => {
+    const client = createClient();
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "voice-avatar-preview@example.com",
+        password: "voice-password",
+      }),
+    );
+    assert.equal(register.status, 201);
+
+    const beforeCalls = fetchRecorder.calls.length;
+    config.elevenLabsApiKey = "integration-elevenlabs-key";
+    try {
+      const response = await client.request(
+        "/api/voices/synthesize",
+        jsonInit({
+          text: "Use the active Avatar Studio provider voice.",
+          mode: "english",
+          engine: "elevenlabs",
+          explicitOnlineContext: true,
+          explicitVoicePreview: true,
+          profile: {
+            ...normalizeBotAudioVoiceProfileV1(undefined),
+            elevenLabsVoiceId: "avatar-preview-provider-voice",
+          },
+        }),
+      );
+
+      assert.equal(response.status, 200);
+      assert.equal(
+        response.headers.get("x-prism-voice-engine"),
+        "elevenlabs",
+      );
+      const providerCalls = fetchRecorder.calls.slice(beforeCalls);
+      assert.equal(providerCalls.length, 1);
+      assert.match(
+        providerCalls[0]?.input ?? "",
+        /text-to-speech\/avatar-preview-provider-voice\/stream/,
+      );
+    } finally {
+      config.elevenLabsApiKey = "";
+    }
+  });
+
   it("persists a bot name pronunciation and uses it only for synthesized speech", async () => {
     const client = createClient();
     const register = await client.request(
