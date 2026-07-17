@@ -17,14 +17,14 @@ describe("mode tutorials", () => {
   it("clamps restored progress to a valid step", () => {
     assert.equal(modeTutorialStep("zen", -1).heading, "Choose a relationship");
     assert.equal(modeTutorialStep("coffee", 99).heading, "Join the conversation");
-    assert.equal(modeTutorialStep("botcast", 99).heading, "Direct the replay");
+    assert.equal(modeTutorialStep("botcast", 99).heading, "Watch the saved cut");
     assert.equal(modeTutorialStep("slate", 99).heading, "Approve revisions deliberately");
   });
 
   it("presents the production applet as Signal", () => {
     assert.equal(MODE_TUTORIALS.botcast.title, "Signal producer walkthrough");
     const signalCopy = MODE_TUTORIALS.botcast.steps.map((step) => step.body).join(" ");
-    assert.match(signalCopy, /Cut show immediately cuts away and archives the recording/u);
+    assert.match(signalCopy, /Cut show immediately cuts away[^.]*archives the recording/u);
     assert.match(signalCopy, /short, locally synthesized outro/u);
     assert.equal(MODE_TUTORIALS.botcast.steps[1]?.heading, "Shape the show’s identity");
     assert.equal(
@@ -58,6 +58,7 @@ describe("mode tutorials", () => {
     );
     assert.match(MODE_TUTORIALS.botcast.steps[3]?.body ?? "", /matches Zen/u);
     assert.match(MODE_TUTORIALS.botcast.steps[3]?.body ?? "", /both host and guest/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[3]?.body ?? "", /locks while Signal is on air/u);
     assert.match(MODE_TUTORIALS.botcast.steps[4]?.body ?? "", /Pick LOCAL, AUTO, or ONLINE/u);
     assert.match(MODE_TUTORIALS.botcast.steps[4]?.body ?? "", /configured fallback chain/u);
     assert.match(MODE_TUTORIALS.botcast.steps[4]?.body ?? "", /locks that routing/u);
@@ -66,10 +67,23 @@ describe("mode tutorials", () => {
     assert.match(MODE_TUTORIALS.botcast.steps[4]?.body ?? "", /fill all three locally/u);
     assert.match(MODE_TUTORIALS.botcast.steps[4]?.body ?? "", /Episode length defaults to Auto/u);
     assert.match(MODE_TUTORIALS.botcast.steps[4]?.body ?? "", /close-up pans center/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /one speaker on mic at a time/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /words they have finished saying/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /Wrap it up is shared episode direction/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /both bots/u);
+    assert.equal(MODE_TUTORIALS.botcast.steps[5]?.heading, "Direct the live cut");
+    assert.equal(
+      MODE_TUTORIALS.botcast.steps[5]?.targetSelector,
+      '[data-tutorial-target="botcast-live-camera"]',
+    );
+    assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /Left, Right, and Wide hold a fixed studio shot/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /choosing Auto again hands direction back/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /records every choice/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[6]?.body ?? "", /one speaker on mic at a time/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[6]?.body ?? "", /words they have finished saying/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[6]?.body ?? "", /Wrap it up is shared episode direction/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[6]?.body ?? "", /both bots/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[6]?.body ?? "", /session-changing navbar tools stay locked/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[6]?.body ?? "", /restores the full chrome/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[6]?.body ?? "", /left rail while on air makes the same producer cut/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[7]?.body ?? "", /no post-episode camera controls/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[7]?.body ?? "", /play, pause, scrub/u);
   });
 
   it("teaches Slate as a directed document workflow with stable targets", () => {
@@ -168,6 +182,11 @@ describe("mode tutorials", () => {
     );
     assert.match(routing?.body ?? "", /separate Images provider/);
     assert.match(routing?.body ?? "", /English voice preference/);
+    assert.match(routing?.body ?? "", /locked until you choose End session/);
+    assert.match(
+      routing?.body ?? "",
+      /Usage and Memories plus the Theme control remain available/,
+    );
   });
 
   it("teaches that Zen response, image, and voice routing are separate", () => {

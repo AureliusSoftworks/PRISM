@@ -8,6 +8,7 @@ import {
   BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS,
   applyBotcastProducerCueToTension,
   botcastFallbackStudioAccentVariantForSeed,
+  botcastCameraModeAt,
   botcastCameraShotAt,
   botcastCameraOffsetXPercent,
   botcastCameraOffsetYPercent,
@@ -84,16 +85,16 @@ describe("Signal studio layout", () => {
     );
   });
 
-  it("centers close-ups on each saved bot position", () => {
+  it("centers close-ups when possible and keeps every pan inside the TV frame", () => {
     const layout = normalizeBotcastStudioLayout({
       hostBot: { x: 14, y: 42 },
       guestBot: { x: 68, y: 75 },
     });
-    assert.equal(botcastCameraOffsetXPercent("left", layout), 51.12);
-    assert.equal(botcastCameraOffsetXPercent("right", layout), -25.56);
+    assert.equal(botcastCameraOffsetXPercent("left", layout), 21);
+    assert.equal(botcastCameraOffsetXPercent("right", layout), -21);
     assert.equal(botcastCameraOffsetXPercent("wide", layout), 0);
     assert.equal(botcastCameraOffsetYPercent("left", layout), 18.46);
-    assert.equal(botcastCameraOffsetYPercent("right", layout), -28.4);
+    assert.equal(botcastCameraOffsetYPercent("right", layout), -18.9);
     assert.equal(botcastCameraOffsetYPercent("wide", layout), 0);
   });
 });
@@ -258,7 +259,7 @@ describe("Botcast replay director", () => {
     assert.equal(sustainedGuest.shot, "right");
   });
 
-  it("uses wide for a departure and viewer-local manual locks", () => {
+  it("uses wide for a departure and replays the recorded live camera modes", () => {
     const departure = botcastDirectorSuggestion({
       atMs: 12_000,
       speakerRole: "guest",
@@ -275,15 +276,42 @@ describe("Botcast replay director", () => {
         payload: { shot: "right", atMs: 5_000 },
         occurredAt: "2026-01-01T00:00:00.000Z",
       },
+      {
+        id: "event-2",
+        episodeId: "episode-1",
+        sequence: 2,
+        kind: "camera_suggestion",
+        payload: { shot: "left", atMs: 7_000 },
+        occurredAt: "2026-01-01T00:00:01.000Z",
+      },
+      {
+        id: "event-3",
+        episodeId: "episode-1",
+        sequence: 3,
+        kind: "camera_mode",
+        payload: { mode: "wide", shot: "wide", atMs: 6_000 },
+        occurredAt: "2026-01-01T00:00:02.000Z",
+      },
+      {
+        id: "event-4",
+        episodeId: "episode-1",
+        sequence: 4,
+        kind: "camera_mode",
+        payload: { mode: "auto", shot: "right", atMs: 8_000 },
+        occurredAt: "2026-01-01T00:00:03.000Z",
+      },
     ];
     assert.equal(
-      botcastCameraShotAt({ events, elapsedMs: 7_000, manualShot: "auto" }),
+      botcastCameraShotAt({ events, elapsedMs: 5_500 }),
       "right",
     );
     assert.equal(
-      botcastCameraShotAt({ events, elapsedMs: 7_000, manualShot: "wide" }),
+      botcastCameraShotAt({ events, elapsedMs: 7_500 }),
       "wide",
     );
+    assert.equal(botcastCameraModeAt({ events, elapsedMs: 7_500 }), "wide");
+    assert.equal(botcastCameraShotAt({ events, elapsedMs: 8_000 }), "right");
+    assert.equal(botcastCameraModeAt({ events, elapsedMs: 8_000 }), "auto");
   });
 
   it("keeps the guest on stage until the saved departure beat", () => {

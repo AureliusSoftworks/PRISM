@@ -38,7 +38,7 @@ test("independently themed Light surfaces inherit the same cool material family"
   const signal = sourceFor("./botcast.module.css");
   assert.match(
     signal,
-    /\.shell\[data-theme="light"\] \.signalFallbackStudio\s*\{[\s\S]*background-color:\s*#eaf3fb;[\s\S]*background-blend-mode:\s*color;/,
+    /\.shell\[data-theme="light"\] \.signalFallbackStudio\s*\{[^}]*background-color:\s*#eaf3fb;[^}]*background-image:\s*url\("\/signal-studio\/studio_light\.webp"\);[^}]*background-blend-mode:\s*normal;/,
   );
   assert.match(signal, /#fbfdff 0%, #e5f1fa 66%, #ccdeec 100%/);
 

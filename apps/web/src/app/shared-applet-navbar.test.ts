@@ -39,14 +39,22 @@ test("Slate and Signal consume one shared PRISM navbar contract", () => {
   assert.match(sidebarHelper, /data-shared-app-sidebar-brand=\{appletId\}/);
   assert.match(navbarHelper, /styles\.chatHeader/);
   assert.match(navbarHelper, /styles\.sharedAppletHeader/);
-  assert.match(navbarHelper, /renderAppSwitcher\(\)/);
+  assert.match(navbarHelper, /liveSessionChromePolicy\("Signal"\)/);
   assert.match(
     navbarHelper,
-    /options\.showVoiceSelector[\s\S]*renderVoiceModeSelector\(\{ tutorialTarget: "botcast-voice-mode" \}\)/,
+    /renderAppSwitcher\(\{[\s\S]*disabled:\s*options\.liveSessionActive/u,
+  );
+  assert.match(
+    navbarHelper,
+    /options\.showVoiceSelector[\s\S]*renderVoiceModeSelector\(\{[\s\S]*disabled:[\s\S]*disabledNavbarActions\.voice[\s\S]*tutorialTarget: "botcast-voice-mode"/,
   );
   assert.match(pageSource, /data-tutorial-target=\{options\.tutorialTarget\}/);
-  assert.match(navbarHelper, /renderUniversalNavbarButtons/);
+  assert.match(
+    navbarHelper,
+    /renderUniversalNavbarButtons\(\{[\s\S]*disabledActions:[\s\S]*disabledActionTooltips:/,
+  );
   assert.match(navbarHelper, /data-shared-app-navbar="true"/);
+  assert.match(navbarHelper, /data-live-session-locked=/);
 
   for (const appletId of ["botcast", "slate"]) {
     assert.match(
@@ -58,7 +66,7 @@ test("Slate and Signal consume one shared PRISM navbar contract", () => {
   }
   assert.match(
     pageSource,
-    /navigationHeader=\{renderSharedAppletNavbar\("Signal tools", \{[\s\S]{0,100}showVoiceSelector: true,[\s\S]{0,40}\}\)\}/,
+    /navigationHeader=\{\(\{ liveSessionActive \}\) =>[\s\S]*renderSharedAppletNavbar\("Signal tools", \{[\s\S]*showVoiceSelector: true,[\s\S]*liveSessionActive,/,
   );
   assert.match(
     pageSource,
@@ -68,7 +76,14 @@ test("Slate and Signal consume one shared PRISM navbar contract", () => {
 
 test("Signal gives shared navigation its own aligned shell row", () => {
   assert.match(signalSource, /sidebarHeader:\s*ReactNode/);
-  assert.match(signalSource, /navigationHeader:\s*ReactNode/);
+  assert.match(
+    signalSource,
+    /navigationHeader:[\s\S]*ReactNode[\s\S]*liveSessionActive: boolean/u,
+  );
+  assert.match(
+    signalSource,
+    /typeof navigationHeader === "function"[\s\S]*navigationHeader\(\{ liveSessionActive \}\)/u,
+  );
   assert.match(
     signalSource,
     /styles\.sidebarNavigation\}[\s\S]*styles\.mainNavigation\}/,

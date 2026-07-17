@@ -100,7 +100,7 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Keep the table moving",
-        body: "Choose AUTO in the LOCAL, AUTO, ONLINE control to retry failed or malformed table turns. It changes response routing, not the Account default model choice, separate Images provider, or English voice preference.",
+        body: "Choose AUTO in the LOCAL, AUTO, ONLINE control to retry failed or malformed table turns. It changes response routing, not the Account default model choice, separate Images provider, or English voice preference. Choose routing and voice before the table starts: once the session is live, those controls and session-changing navbar tools stay locked until you choose End session. Read-only Usage and Memories plus the Theme control remain available.",
         clickLabel: "the LOCAL, AUTO, ONLINE control",
         targetSelector: '[data-tutorial-target="auto-response-mode"]',
       },
@@ -135,7 +135,7 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Choose how the bots speak",
-        body: "The Voice picker in Signal’s top navbar matches Zen: Mute stays silent, English speaks normally, Babble keeps the selected voice without intelligible words, and Bottish uses Prism’s procedural robot language. The saved choice applies to both host and guest.",
+        body: "The Voice picker in Signal’s top navbar matches Zen: Mute stays silent, English speaks normally, Babble keeps the selected voice without intelligible words, and Bottish uses Prism’s procedural robot language. The saved choice applies to both host and guest. Choose it before beginning an episode; the picker locks while Signal is on air.",
         clickLabel: "the Voice picker in the top navbar",
         targetSelector: '[data-tutorial-target="botcast-voice-mode"]',
       },
@@ -146,14 +146,20 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
         targetSelector: '[data-tutorial-target="botcast-setup"]',
       },
       {
+        heading: "Direct the live cut",
+        body: "Left, Right, and Wide hold a fixed studio shot. Auto runs Signal’s contextual director instead. Choosing any fixed shot breaks out of Auto; choosing Auto again hands direction back at any point. Signal records every choice into the episode’s finished camera cut.",
+        clickLabel: "a live camera",
+        targetSelector: '[data-tutorial-target="botcast-live-camera"]',
+      },
+      {
         heading: "Produce from the control room",
-        body: "Signal keeps one speaker on mic at a time: their face comes alive and the transcript follows only the words they have finished saying. Ask about a detail, press harder, move on, or lighten up with a private host cue. Wrap it up is shared episode direction: both bots carry the closing exchange through to a real ending. Cut show immediately cuts away and archives the recording instead; it does not discard the transcript. Natural endings and hard cuts both land on a short, locally synthesized outro. Repeated pressure can earn a warning and, rarely, a walkout.",
+        body: "Signal keeps one speaker on mic at a time: their face comes alive and the transcript follows only the words they have finished saying. Ask about a detail, press harder, move on, or lighten up with a private host cue. Wrap it up is shared episode direction: both bots carry the closing exchange through to a real ending. While Signal is on air, app switching, voice, and session-changing navbar tools stay locked; read-only Usage and Memories plus Theme remain available. Cut show immediately cuts away and archives the recording, then restores the full chrome; it does not discard the transcript. Choosing any show in the left rail while on air makes the same producer cut before Signal changes shows. Natural endings and hard cuts both land on a short, locally synthesized outro. Repeated pressure can earn a warning and, rarely, a walkout.",
         clickLabel: "a producer cue card",
         targetSelector: '[data-tutorial-target="botcast-cues"]',
       },
       {
-        heading: "Direct the replay",
-        body: "Replay defaults to Auto. Left, Right, and Wide lock the viewer’s camera without rewriting the saved director track.",
+        heading: "Watch the saved cut",
+        body: "Replay follows the camera cut recorded while the show was on air. There are no post-episode camera controls: just play, pause, scrub, or choose a transcript line to seek.",
         clickLabel: "an archived episode",
         targetSelector: '[data-tutorial-target="botcast-replay"]',
       },

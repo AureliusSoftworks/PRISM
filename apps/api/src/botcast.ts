@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import type {
   BotcastAtmosphereState,
+  BotcastCameraShot,
   BotcastCameraSuggestion,
   BotcastEpisode,
   BotcastEpisodeAdvanceRequest,
@@ -1260,6 +1261,57 @@ export function getBotcastEpisode(db: DatabaseSync, userId: string, episodeId: s
     segments: segments.map(mapSegment),
     events: mappedEvents,
   };
+}
+
+export function setBotcastEpisodeCameraMode(
+  db: DatabaseSync,
+  userId: string,
+  episodeId: string,
+  input: { mode: BotcastCameraShot; atMs: number },
+): BotcastEpisode {
+  const episode = getBotcastEpisode(db, userId, episodeId);
+  if (episode.status === "completed") {
+    throw new Error("Signal camera direction is locked after the episode ends.");
+  }
+  if (
+    input.mode !== "auto" &&
+    input.mode !== "left" &&
+    input.mode !== "right" &&
+    input.mode !== "wide"
+  ) {
+    throw new Error("Choose Auto, Left, Right, or Wide for the Signal camera.");
+  }
+  if (!Number.isFinite(input.atMs) || input.atMs < 0) {
+    throw new Error("Signal camera time must be a non-negative number.");
+  }
+  const latestModeEvent = [...episode.events]
+    .reverse()
+    .find((event) => event.kind === "camera_mode");
+  const latestMode = latestModeEvent?.payload.mode;
+  if (latestMode === input.mode || (!latestModeEvent && input.mode === "auto")) {
+    return episode;
+  }
+  const previousAtMs = Number(latestModeEvent?.payload.atMs);
+  const atMs = Math.max(
+    Number.isFinite(previousAtMs) ? previousAtMs : 0,
+    Math.round(input.atMs),
+  );
+  const shot = input.mode === "auto"
+    ? lastCameraSuggestion(episode.events)?.shot ?? "wide"
+    : input.mode;
+  const now = new Date().toISOString();
+  recordEvent(
+    db,
+    userId,
+    episode.id,
+    "camera_mode",
+    { mode: input.mode, shot, atMs, source: "producer" },
+    now,
+  );
+  db.prepare(
+    "UPDATE botcast_episodes SET updated_at = ? WHERE id = ? AND user_id = ?",
+  ).run(now, episode.id, userId);
+  return getBotcastEpisode(db, userId, episode.id);
 }
 
 function recordEvent(

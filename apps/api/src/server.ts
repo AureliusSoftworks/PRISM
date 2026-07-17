@@ -166,6 +166,7 @@ import {
   listBotcastEpisodes,
   listBotcastShows,
   readBotcastShowIntroAudio,
+  setBotcastEpisodeCameraMode,
   storeBotcastShowIntroAudio,
   updateBotcastShow,
 } from "./botcast.ts";
@@ -6806,6 +6807,34 @@ function buildRoutes(): RouteDefinition[] {
       });
     }),
     route("POST", "/api/botcast/episodes/:id/advance", async (ctx) => {
+    route("POST", "/api/botcast/episodes/:id/camera", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const mode = body.mode;
+      if (
+        mode !== "auto" &&
+        mode !== "left" &&
+        mode !== "right" &&
+        mode !== "wide"
+      ) {
+        throw new HttpError(400, "Choose Auto, Left, Right, or Wide for the Signal camera.");
+      }
+      const atMs = Number(body.atMs);
+      if (!Number.isFinite(atMs) || atMs < 0) {
+        throw new HttpError(400, "Signal camera time must be a non-negative number.");
+      }
+      const current = getBotcastEpisode(db, userId, ctx.params.id);
+      if (current.status === "completed") {
+        throw new HttpError(409, "Signal camera direction is locked after the episode ends.");
+      }
+      json(ctx.res, 200, {
+        ok: true,
+        episode: setBotcastEpisodeCameraMode(db, userId, ctx.params.id, {
+          mode,
+          atMs,
+        }),
+      });
+    }),
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);

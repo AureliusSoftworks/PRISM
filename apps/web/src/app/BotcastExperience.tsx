@@ -15,11 +15,13 @@ import {
 } from "react";
 import {
   BOTCAST_DEFAULT_STUDIO_LAYOUT,
+  BOTCAST_DIRECTOR_MIN_SHOT_MS,
   BOTCAST_SESSION_DURATION_MINUTES_MAX,
   BOTCAST_SESSION_DURATION_MINUTES_MIN,
   DEFAULT_COFFEE_SESSION_DURATION_MINUTES,
   botcastCameraOffsetXPercent,
   botcastCameraOffsetYPercent,
+  botcastCameraModeAt,
   botcastCameraShotAt,
   botcastGuestHasDepartedAt,
   botcastNextSpeakerRole,
@@ -73,6 +75,7 @@ import {
   signalCupSipTargetFromMouth,
   signalStageLocalPointFromViewport,
 } from "./signalCupSipGeometry";
+import { fallbackSignalShowCardQuips } from "./signalShowCardQuips";
 import type { VoicePlaybackLifecycle } from "./voiceEffects";
 import {
   crtSpeechMouthShapeAtElapsedMs,
@@ -102,6 +105,9 @@ export interface BotcastApiRequest {
 const SIGNAL_NATURAL_HANDOFF_MS = 240;
 const SIGNAL_VOICE_START_TIMEOUT_MS = 4_000;
 const SIGNAL_OPENING_ADVANCE_ATTEMPTS = 2;
+const SIGNAL_SHOW_CARD_QUIP_INITIAL_DELAY_MS = 4_800;
+const SIGNAL_SHOW_CARD_QUIP_VISIBLE_MS = 5_600;
+const SIGNAL_SHOW_CARD_QUIP_GAP_MS = 14_000;
 
 type PreparedBotcastAdvanceResult =
   | { ok: true; response: BotcastEpisodeAdvanceResponse }
@@ -152,7 +158,9 @@ export interface BotcastExperienceProps {
   introAudioEnabled?: boolean;
   introAudioVolume?: number;
   sidebarHeader: ReactNode;
-  navigationHeader: ReactNode;
+  navigationHeader:
+    | ReactNode
+    | ((state: { liveSessionActive: boolean }) => ReactNode);
 }
 
 type BotcastLiveSpeech = {
@@ -463,6 +471,19 @@ function SignalFallbackStudio({
   );
 }
 
+function SignalStudioSpotlight(): React.JSX.Element {
+  return (
+    <span
+      className={styles.studioSpotlight}
+      data-prism-decorative-motion="true"
+      aria-hidden="true"
+    >
+      <span className={styles.studioSpotlightBeam} />
+      <span className={styles.studioSpotlightPool} />
+    </span>
+  );
+}
+
 export function BotcastExperience({
   bots,
   request,
@@ -519,6 +540,7 @@ export function BotcastExperience({
   const [showNameDraft, setShowNameDraft] = useState("");
   const [showIdentityControlsShowId, setShowIdentityControlsShowId] =
     useState<string | null>(null);
+  const [showCardQuipIndex, setShowCardQuipIndex] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [autoRun, setAutoRun] = useState(false);
@@ -531,7 +553,7 @@ export function BotcastExperience({
   const [episodeOutro, setEpisodeOutro] = useState<SignalEpisodeOutro | null>(null);
   const [introPreviewShowId, setIntroPreviewShowId] = useState<string | null>(null);
   const [cuttingShow, setCuttingShow] = useState(false);
-  const [replayCamera, setReplayCamera] = useState<BotcastCameraShot>("auto");
+  const [cameraSaving, setCameraSaving] = useState(false);
   const [replayElapsedMs, setReplayElapsedMs] = useState(0);
   const [replayPlaying, setReplayPlaying] = useState(false);
   const [replayVoicePending, setReplayVoicePending] = useState(false);
@@ -557,6 +579,7 @@ export function BotcastExperience({
   const preRollGateResolveRef = useRef<(() => void) | null>(null);
   const introPreviewRunIdRef = useRef(0);
   const outroRunIdRef = useRef(0);
+  const cuttingShowRef = useRef(false);
   const replayVoiceMessageIdRef = useRef<string | null>(null);
   const replayVoiceRunIdRef = useRef(0);
   const deleteCancelButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -572,6 +595,11 @@ export function BotcastExperience({
   const studioLayoutSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const studioLayoutSavePendingRef = useRef(0);
   const signalStageRef = useRef<HTMLElement | null>(null);
+  const onStopUtteranceRef = useRef(onStopUtterance);
+
+  useEffect(() => {
+    onStopUtteranceRef.current = onStopUtterance;
+  }, [onStopUtterance]);
 
   useEffect(() => () => blockingAbortRef.current?.abort(), []);
 
@@ -709,12 +737,14 @@ export function BotcastExperience({
     setSignalCupTravelByRole(initialSignalCupTravelByRole());
   }, [activeEpisodeId, replayEpisode?.id]);
 
+  // Signal cleanup depends on this callback, so voice-setting changes must not
+  // make React tear down the active episode as though the studio unmounted.
   const stopUtterance = useCallback((): void => {
     activeSpeechMessageIdRef.current = null;
     setSpeakingMessageId(null);
     setLiveSpeech(null);
-    onStopUtterance?.();
-  }, [onStopUtterance]);
+    onStopUtteranceRef.current?.();
+  }, []);
 
   const stopIntroPreview = useCallback((): void => {
     introPreviewRunIdRef.current += 1;
@@ -852,6 +882,12 @@ export function BotcastExperience({
     ? activeShowAtmosphere(selectedShow, theme)
     : null;
   const hostBot = selectedShow ? botsById.get(selectedShow.hostBotId) ?? null : null;
+  const hostShowAccent = selectedShow
+    ? normalizeAccentForTheme(
+        hostBot?.color ?? selectedShow.accentColor,
+        theme,
+      )
+    : null;
   const liveGuestBot = episode ? botsById.get(episode.guestBotId) ?? null : null;
   const replayHostBot = replayEpisode
     ? botsById.get(replayEpisode.hostBotId) ?? null
@@ -859,6 +895,32 @@ export function BotcastExperience({
   const replayGuestBot = replayEpisode
     ? botsById.get(replayEpisode.guestBotId) ?? null
     : null;
+  const showCardQuips = selectedShow
+    ? fallbackSignalShowCardQuips(selectedShow)
+    : null;
+
+  useEffect(() => {
+    setShowCardQuipIndex(null);
+    if (!selectedShowId || episode || replayEpisode) return;
+
+    let nextIndex = 0;
+    let timer: number | null = null;
+    const queueQuip = (delayMs: number): void => {
+      timer = window.setTimeout(() => {
+        setShowCardQuipIndex(nextIndex);
+        nextIndex = (nextIndex + 1) % 4;
+        timer = window.setTimeout(() => {
+          setShowCardQuipIndex(null);
+          queueQuip(SIGNAL_SHOW_CARD_QUIP_GAP_MS);
+        }, SIGNAL_SHOW_CARD_QUIP_VISIBLE_MS);
+      }, delayMs);
+    };
+
+    queueQuip(SIGNAL_SHOW_CARD_QUIP_INITIAL_DELAY_MS);
+    return () => {
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [episode, replayEpisode, selectedShowId]);
 
   const loadShows = useCallback(async (): Promise<BotcastShow[]> => {
     const response = await request<{ shows: BotcastShow[] }>("/api/botcast/shows");
@@ -948,6 +1010,60 @@ export function BotcastExperience({
     [request],
   );
 
+  const cutShow = useCallback(
+    async (
+      options: { waitForOutro?: boolean } = {},
+    ): Promise<boolean> => {
+      if (
+        !episode ||
+        episode.status === "completed" ||
+        !selectedShow ||
+        cuttingShowRef.current
+      ) return false;
+      const episodeId = episode.id;
+      cuttingShowRef.current = true;
+      invalidateEpisodeOperation();
+      setCuttingShow(true);
+      setBusy(true);
+      setError(null);
+      try {
+        const response = await request<{ episode: BotcastEpisode }>(
+          `/api/botcast/episodes/${encodeURIComponent(episodeId)}/end`,
+          { method: "POST", body: JSON.stringify({}) },
+        );
+        setEpisode(response.episode);
+        setAutoRun(false);
+        const outro = playEpisodeOutro({
+          episode: response.episode,
+          show: selectedShow,
+          forced: true,
+        });
+        if (selectedShowId) {
+          void loadEpisodes(selectedShowId).catch(() => undefined);
+        }
+        if (options.waitForOutro) await outro;
+        else void outro;
+        return true;
+      } catch (cutError) {
+        setError(errorMessage(cutError));
+        return false;
+      } finally {
+        cuttingShowRef.current = false;
+        setCuttingShow(false);
+        setBusy(false);
+      }
+    },
+    [
+      episode,
+      invalidateEpisodeOperation,
+      loadEpisodes,
+      playEpisodeOutro,
+      request,
+      selectedShow,
+      selectedShowId,
+    ],
+  );
+
   useEffect(() => {
     let active = true;
     void (async () => {
@@ -973,6 +1089,10 @@ export function BotcastExperience({
 
   const selectShow = useCallback(
     async (show: BotcastShow): Promise<void> => {
+      if (episode?.status === "live") {
+        const cutCompleted = await cutShow({ waitForOutro: true });
+        if (!cutCompleted) return;
+      }
       invalidateEpisodeOperation();
       replayVoiceRunIdRef.current += 1;
       replayVoiceMessageIdRef.current = null;
@@ -997,7 +1117,7 @@ export function BotcastExperience({
         setLoading(false);
       }
     },
-    [invalidateEpisodeOperation, loadEpisodes],
+    [cutShow, episode?.status, invalidateEpisodeOperation, loadEpisodes],
   );
 
   const replaceShow = (nextShow: BotcastShow): void => {
@@ -1161,7 +1281,6 @@ export function BotcastExperience({
     setReplayVoicePending(false);
     setReplaySpeechActive(false);
     setReplayElapsedMs(0);
-    setReplayCamera("auto");
     replayVoiceMessageIdRef.current = null;
   };
 
@@ -2080,39 +2199,6 @@ export function BotcastExperience({
     void advanceEpisode(cue);
   };
 
-  const cutShow = async (): Promise<void> => {
-    if (
-      !episode ||
-      episode.status === "completed" ||
-      !selectedShow ||
-      cuttingShow
-    ) return;
-    const episodeId = episode.id;
-    invalidateEpisodeOperation();
-    setCuttingShow(true);
-    setBusy(true);
-    setError(null);
-    try {
-      const response = await request<{ episode: BotcastEpisode }>(
-        `/api/botcast/episodes/${encodeURIComponent(episodeId)}/end`,
-        { method: "POST", body: JSON.stringify({}) },
-      );
-      setEpisode(response.episode);
-      setAutoRun(false);
-      void playEpisodeOutro({
-        episode: response.episode,
-        show: selectedShow,
-        forced: true,
-      });
-      if (selectedShowId) void loadEpisodes(selectedShowId).catch(() => undefined);
-    } catch (cutError) {
-      setError(errorMessage(cutError));
-    } finally {
-      setCuttingShow(false);
-      setBusy(false);
-    }
-  };
-
   const openReplay = async (summary: BotcastEpisodeSummary): Promise<void> => {
     invalidateEpisodeOperation();
     const replayRunId = replayVoiceRunIdRef.current + 1;
@@ -2133,7 +2219,6 @@ export function BotcastExperience({
       }
       setReplayEpisode(detail);
       setEpisode(null);
-      setReplayCamera("auto");
       setReplayElapsedMs(0);
       setReplayPlaying(false);
     } catch (replayError) {
@@ -2169,7 +2254,6 @@ export function BotcastExperience({
     ? botcastCameraShotAt({
         events: replayEpisode.events,
         elapsedMs: replayElapsedMs,
-        manualShot: replayCamera,
       })
     : "wide";
   const replayGuestDeparted = replayEpisode
@@ -2393,6 +2477,7 @@ export function BotcastExperience({
             <strong>{args.show.name}</strong>
           </div>
           <div className={styles.studioGlow} aria-hidden="true" />
+          <SignalStudioSpotlight />
           {args.host ? (
             <div
               className={styles.stagePlacement}
@@ -2566,7 +2651,19 @@ export function BotcastExperience({
               className={styles.showRow}
               data-selected={show.id === selectedShowId ? "true" : undefined}
               onClick={() => void selectShow(show)}
-              style={{ ["--show-accent" as string]: show.accentColor } as CSSProperties}
+              aria-label={
+                episode?.status === "live"
+                  ? `Cut the live show and open ${show.name}`
+                  : `Open ${show.name}`
+              }
+              style={
+                {
+                  ["--show-accent" as string]: normalizeAccentForTheme(
+                    host?.color ?? show.accentColor,
+                    theme,
+                  ),
+                } as CSSProperties
+              }
               data-botcast-show-id={show.id}
             >
               <SignalShowLogo show={show} compact />
@@ -2711,6 +2808,7 @@ export function BotcastExperience({
               <strong>{show.name}</strong>
             </div>
             <div className={styles.studioGlow} aria-hidden="true" />
+            <SignalStudioSpotlight />
             {layoutHandle("hostBot", avatarPreview(host, "host"))}
             {layoutHandle("hostCup", cupPreview(host, "host"))}
             {guest ? layoutHandle("guestBot", avatarPreview(guest, "guest")) : null}
@@ -2916,18 +3014,89 @@ export function BotcastExperience({
 
   const liveActiveMessage =
     episode?.messages.find((message) => message.id === speakingMessageId) ?? null;
-  const liveShot = episode ? latestDirectedShot(episode) : "wide";
+  const liveCameraMode = episode
+    ? botcastCameraModeAt({
+        events: episode.events,
+        elapsedMs: Number.POSITIVE_INFINITY,
+      })
+    : "auto";
+  const liveShot = episode
+    ? liveCameraMode === "auto"
+      ? latestDirectedShot(episode)
+      : liveCameraMode
+    : "wide";
+  const liveCameraElapsedMs = (() => {
+    if (!episode || episode.messages.length === 0) return 0;
+    const timeline = botcastReplayTimeline(episode.messages, episode.events);
+    const activeIndex = liveSpeech
+      ? episode.messages.findIndex((message) => message.id === liveSpeech.messageId)
+      : -1;
+    if (activeIndex >= 0 && liveSpeech) {
+      return Math.max(
+        0,
+        Math.round(
+          (timeline.messageStartMs[activeIndex] ?? 0) + liveSpeech.reveal.elapsedMs,
+        ),
+      );
+    }
+    const lastIndex = episode.messages.length - 1;
+    const lastMessage = episode.messages[lastIndex]!;
+    const wordCount = lastMessage.content.split(/\s+/u).filter(Boolean).length;
+    return Math.max(
+      0,
+      Math.round(
+        (timeline.messageStartMs[lastIndex] ?? 0) +
+          Math.max(BOTCAST_DIRECTOR_MIN_SHOT_MS, wordCount * 310),
+      ),
+    );
+  })();
+  const selectLiveCameraMode = async (mode: BotcastCameraShot): Promise<void> => {
+    if (
+      !episode ||
+      episode.status !== "live" ||
+      cameraSaving ||
+      mode === liveCameraMode
+    ) return;
+    setCameraSaving(true);
+    setError(null);
+    try {
+      const response = await request<{ episode: BotcastEpisode }>(
+        `/api/botcast/episodes/${encodeURIComponent(episode.id)}/camera`,
+        {
+          method: "POST",
+          body: JSON.stringify({ mode, atMs: liveCameraElapsedMs }),
+        },
+      );
+      setEpisode((current) =>
+        current?.id === response.episode.id ? response.episode : current,
+      );
+    } catch (cameraError) {
+      setError(errorMessage(cameraError));
+    } finally {
+      setCameraSaving(false);
+    }
+  };
   const producerCueReady =
     Boolean(episode) &&
     episode?.segment !== "closing" &&
     (episode!.messages.length === 0 ||
       episode!.messages.at(-1)?.speakerRole === "guest");
+  const liveSessionActive = episode?.status === "live";
+  const resolvedNavigationHeader =
+    typeof navigationHeader === "function"
+      ? navigationHeader({ liveSessionActive })
+      : navigationHeader;
 
   return (
     <>
-    <main className={styles.shell} data-botcast-mode="true" data-theme={theme}>
+    <main
+      className={styles.shell}
+      data-botcast-mode="true"
+      data-theme={theme}
+      data-live-episode={liveSessionActive ? "true" : undefined}
+    >
       <div className={styles.sidebarNavigation}>{sidebarHeader}</div>
-      <div className={styles.mainNavigation}>{navigationHeader}</div>
+      <div className={styles.mainNavigation}>{resolvedNavigationHeader}</div>
       {episodePreRoll && selectedShow ? (
         <section
           className={styles.episodePreRoll}
@@ -2990,7 +3159,15 @@ export function BotcastExperience({
         </section>
       ) : null}
       {renderLibrary()}
-      <section className={styles.main}>
+      <section
+        className={styles.main}
+        style={hostShowAccent
+          ? {
+              "--botcast-accent": hostShowAccent,
+              "--botcast-host-accent": hostShowAccent,
+            } as CSSProperties
+          : undefined}
+      >
         {!episode ? (
           <header className={styles.header}>
             <div>
@@ -3081,6 +3258,27 @@ export function BotcastExperience({
               activeMessage: liveActiveMessage,
               replay: false,
             })}
+            {episode.status === "live" ? (
+              <div
+                className={styles.liveCameraControls}
+                aria-label="Signal live cameras"
+                data-tutorial-target="botcast-live-camera"
+              >
+                <span>Camera</span>
+                {(["left", "right", "wide", "auto"] as const).map((camera) => (
+                  <button
+                    key={camera}
+                    type="button"
+                    data-selected={liveCameraMode === camera ? "true" : undefined}
+                    onClick={() => void selectLiveCameraMode(camera)}
+                    disabled={cameraSaving}
+                    aria-pressed={liveCameraMode === camera}
+                  >
+                    {camera[0]!.toUpperCase() + camera.slice(1)}
+                  </button>
+                ))}
+              </div>
+            ) : null}
             <div className={styles.controlRoom}>
               <div className={styles.transcript} aria-live="polite">
                 {episode.messages.map((message) => (
@@ -3181,7 +3379,7 @@ export function BotcastExperience({
               replay: true,
               guestDeparted: replayGuestDeparted,
             })}
-            <div className={styles.replayControls} aria-label="Signal replay cameras">
+            <div className={styles.replayControls} aria-label="Signal replay playback">
               <button
                 type="button"
                 onClick={() => {
@@ -3211,16 +3409,6 @@ export function BotcastExperience({
                 }}
                 aria-label="Replay position"
               />
-              <div className={styles.cameraButtons}>
-                {(["auto", "left", "right", "wide"] as const).map((camera) => (
-                  <button
-                    key={camera}
-                    type="button"
-                    data-selected={replayCamera === camera ? "true" : undefined}
-                    onClick={() => setReplayCamera(camera)}
-                  >{camera[0]!.toUpperCase() + camera.slice(1)}</button>
-                ))}
-              </div>
             </div>
             <div className={styles.replayTranscript}>
               {replayEpisode.messages.map((message, index) => (
@@ -3249,11 +3437,10 @@ export function BotcastExperience({
               data-tutorial-target="botcast-brand-controls"
               style={
                 {
-                  "--botcast-accent": selectedShow.accentColor,
-                  "--botcast-studio-accent": normalizeAccentForTheme(
-                    hostBot?.color ?? selectedShow.accentColor,
-                    theme,
-                  ),
+                  "--botcast-accent": hostShowAccent ?? selectedShow.accentColor,
+                  "--botcast-host-accent": hostShowAccent ?? selectedShow.accentColor,
+                  "--botcast-show-accent": selectedShow.accentColor,
+                  "--botcast-studio-accent": hostShowAccent ?? selectedShow.accentColor,
                   ...(dashboardAtmosphere.imageUrl
                     ? {
                         "--botcast-dashboard-atmosphere": `url("${dashboardAtmosphere.imageUrl}")`,
@@ -3465,6 +3652,36 @@ export function BotcastExperience({
                   </div>
                 )}
               </div>
+              {hostBot ? (
+                <div
+                  className={styles.showCardHostPresence}
+                  aria-label={`${hostBot.name}, show host`}
+                  data-identity-settings-open={
+                    showIdentityControlsExpanded ? "true" : undefined
+                  }
+                >
+                  <div className={styles.showCardHostFloat} aria-hidden="true">
+                    {renderAvatar?.(hostBot, {
+                      talking: false,
+                      thinking: false,
+                      sipping: false,
+                      role: "host",
+                      mouthShape: "closed",
+                    }) ?? avatarFallback(hostBot)}
+                  </div>
+                </div>
+              ) : null}
+              {showCardQuipIndex !== null &&
+              showCardQuips &&
+              !showIdentityControlsExpanded ? (
+                <p
+                  key={`${selectedShow.id}:${showCardQuipIndex}`}
+                  className={styles.showCardQuipBubble}
+                  aria-live="polite"
+                >
+                  “{showCardQuips[showCardQuipIndex]}”
+                </p>
+              ) : null}
               {showHasCustomArtwork(selectedShow) ? (
                 <button
                   type="button"
