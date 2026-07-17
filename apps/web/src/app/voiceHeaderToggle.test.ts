@@ -63,8 +63,9 @@ describe("universal voice selector", () => {
   });
 
   it("moves the same four choices into the constrained tools menu", () => {
-    assert.match(pageSource, /className=\{styles\.chatOverflowVoiceGroup\}/);
-    assert.match(pageSource, /VOICE_MODE_OPTIONS\.map\(\(mode\) => \{/);
+    assert.match(pageSource, /VOICE_MODE_OPTIONS\.map\(\(mode\): PrismMenuEntry => \(\{/);
+    assert.match(pageSource, /kind: "radio"/);
+    assert.match(pageSource, /group: "voice-mode"/);
     assert.match(
       styleSource,
       /@media \(max-width: 560px\)[\s\S]*?\.voiceModeSelector\s*\{\s*display:\s*none/,

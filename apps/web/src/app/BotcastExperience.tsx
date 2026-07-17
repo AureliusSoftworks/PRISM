@@ -72,6 +72,15 @@ import {
 } from "./signalIntroAudio";
 import { randomSignalEpisodeBooking } from "./signalBookingRandomizer";
 import {
+  ModelWarmupIntermission,
+  type ModelWarmupIntermissionPhase,
+} from "./ModelWarmupIntermission";
+import { waitForModelPreparation } from "./modelPreparation";
+import {
+  formatSignalAudienceViews,
+  signalAudienceSnapshot,
+} from "./signalAudiencePulse";
+import {
   signalCupSipTargetFromMouth,
   signalStageLocalPointFromViewport,
 } from "./signalCupSipGeometry";
@@ -118,6 +127,20 @@ type PreparedBotcastAdvance = {
   afterMessageId: string;
   controller: AbortController;
   result: Promise<PreparedBotcastAdvanceResult>;
+  settled: boolean;
+  warming: boolean;
+  warmupModel: string | null;
+  warmupStartedAt: string | null;
+  warmupFailure: import("@localai/shared").ModelPreparationFailure | null;
+};
+
+type SignalModelWarmup = {
+  phase: ModelWarmupIntermissionPhase;
+  model: string | null;
+  startedAt: string | null;
+  failure: import("@localai/shared").ModelPreparationFailure | null;
+  initial: boolean;
+  episodeId: string | null;
 };
 
 export interface BotcastExperienceProps {
@@ -550,6 +573,8 @@ export function BotcastExperience({
   const [liveSpeech, setLiveSpeech] = useState<BotcastLiveSpeech | null>(null);
   const [signalStageNowMs, setSignalStageNowMs] = useState(() => Date.now());
   const [episodePreRoll, setEpisodePreRoll] = useState<SignalEpisodePreRoll | null>(null);
+  const [signalModelWarmup, setSignalModelWarmup] =
+    useState<SignalModelWarmup | null>(null);
   const [episodeOutro, setEpisodeOutro] = useState<SignalEpisodeOutro | null>(null);
   const [introPreviewShowId, setIntroPreviewShowId] = useState<string | null>(null);
   const [cuttingShow, setCuttingShow] = useState(false);
@@ -577,6 +602,8 @@ export function BotcastExperience({
   const episodeRunIdRef = useRef(0);
   const preRollSkipRequestedRef = useRef(false);
   const preRollGateResolveRef = useRef<(() => void) | null>(null);
+  const signalModelWarmupRef = useRef<SignalModelWarmup | null>(null);
+  const signalModelWarmupVisibleRef = useRef(false);
   const introPreviewRunIdRef = useRef(0);
   const outroRunIdRef = useRef(0);
   const cuttingShowRef = useRef(false);
@@ -601,16 +628,25 @@ export function BotcastExperience({
     onStopUtteranceRef.current = onStopUtterance;
   }, [onStopUtterance]);
 
+  const assignSignalModelWarmup = useCallback(
+    (value: SignalModelWarmup | null): void => {
+      signalModelWarmupRef.current = value;
+      setSignalModelWarmup(value);
+    },
+    [],
+  );
+
   useEffect(() => () => blockingAbortRef.current?.abort(), []);
 
   const activeEpisodeId = episode?.id ?? null;
   useEffect(() => {
     if (!activeEpisodeId) return;
+    if (signalModelWarmup) return;
     const updateStageClock = (): void => setSignalStageNowMs(Date.now());
     updateStageClock();
     const timer = window.setInterval(updateStageClock, 1_000);
     return () => window.clearInterval(timer);
-  }, [activeEpisodeId]);
+  }, [activeEpisodeId, signalModelWarmup]);
 
   const syncSignalSipMouthTargets = useCallback((): void => {
     const stage = signalStageRef.current;
@@ -813,13 +849,57 @@ export function BotcastExperience({
     setAutoRun(false);
     setBusy(false);
     setEpisodePreRoll(null);
+    assignSignalModelWarmup(null);
+    signalModelWarmupVisibleRef.current = false;
     stopEpisodeOutro();
     preRollSkipRequestedRef.current = false;
     preRollGateResolveRef.current?.();
     preRollGateResolveRef.current = null;
     stopIntroPreview();
     stopUtterance();
-  }, [stopEpisodeOutro, stopIntroPreview, stopUtterance]);
+  }, [assignSignalModelWarmup, stopEpisodeOutro, stopIntroPreview, stopUtterance]);
+
+  const setPersistedSignalModelWarmupHold = useCallback(
+    async (episodeId: string, active: boolean): Promise<BotcastEpisode> => {
+      const response = await request<{ episode: BotcastEpisode }>(
+        `/api/botcast/episodes/${encodeURIComponent(episodeId)}/model-warmup-hold`,
+        {
+          method: "POST",
+          body: JSON.stringify({ active }),
+        },
+      );
+      setEpisode((current) =>
+        current?.id === response.episode.id ? response.episode : current,
+      );
+      return response.episode;
+    },
+    [request],
+  );
+
+  const releaseSignalModelWarmup = useCallback(
+    async (episodeId: string | null): Promise<void> => {
+      if (episodeId) {
+        await setPersistedSignalModelWarmupHold(episodeId, false).catch(
+          () => undefined,
+        );
+      }
+      const current = signalModelWarmupRef.current;
+      if (!current) return;
+      if (!signalModelWarmupVisibleRef.current) {
+        assignSignalModelWarmup(null);
+        return;
+      }
+      assignSignalModelWarmup({ ...current, phase: "releasing" });
+      const reducedMotion =
+        window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+      await new Promise<void>((resolve) =>
+        window.setTimeout(resolve, reducedMotion ? 120 : 900),
+      );
+      signalModelWarmupVisibleRef.current = false;
+      assignSignalModelWarmup(null);
+    },
+    [assignSignalModelWarmup, setPersistedSignalModelWarmupHold],
+  );
 
   const beginEpisodeOperation = useCallback((): {
     controller: AbortController;
@@ -897,6 +977,9 @@ export function BotcastExperience({
     : null;
   const showCardQuips = selectedShow
     ? fallbackSignalShowCardQuips(selectedShow)
+    : null;
+  const showAudience = selectedShow
+    ? signalAudienceSnapshot({ showId: selectedShow.id, episodes })
     : null;
 
   useEffect(() => {
@@ -1775,6 +1858,45 @@ export function BotcastExperience({
     stopIntroPreview();
     onPrepareUtterance?.();
     const { controller, runId } = beginEpisodeOperation();
+    const selectedModelOption = responseMode !== "auto" && episodeModelDraft
+      ? modelOptions.find((option) => option.id === episodeModelDraft) ?? null
+      : null;
+    const episodeProvider =
+      selectedModelOption?.provider ??
+      accountDefaultModelOption?.provider ??
+      preferredProvider;
+    let warmupWasNeeded = false;
+    let preparationPending = true;
+    const preparation = waitForModelPreparation({
+      request,
+      provider: episodeProvider,
+      model: selectedModelOption?.id ?? accountDefaultModel,
+      experience: "signal",
+      signal: controller.signal,
+      onStatus: (status) => {
+        if (status.state === "warming") {
+          warmupWasNeeded = true;
+          const current = signalModelWarmupRef.current;
+          assignSignalModelWarmup({
+            phase: current?.phase === "held" ? "held" : "entering",
+            model: status.model,
+            startedAt: status.startedAt,
+            failure: null,
+            initial: true,
+            episodeId: current?.episodeId ?? null,
+          });
+        } else if (status.state === "unavailable") {
+          assignSignalModelWarmup({
+            phase: "failed",
+            model: status.model,
+            startedAt: status.startedAt,
+            failure: status.failure,
+            initial: true,
+            episodeId: signalModelWarmupRef.current?.episodeId ?? null,
+          });
+        }
+      },
+    });
     const preRoll: SignalEpisodePreRoll = {
       showId: selectedShow.id,
       showName: selectedShow.name,
@@ -1807,13 +1929,16 @@ export function BotcastExperience({
       }
       preRollGateResolveRef.current = finish;
     });
-    const selectedModelOption = responseMode !== "auto" && episodeModelDraft
-      ? modelOptions.find((option) => option.id === episodeModelDraft) ?? null
-      : null;
-    const episodeProvider =
-      selectedModelOption?.provider ??
-      accountDefaultModelOption?.provider ??
-      preferredProvider;
+    void visualMinimum.then(() => {
+      if (!episodeOperationIsCurrent(controller, runId)) return;
+      if (!preparationPending) return;
+      const current = signalModelWarmupRef.current;
+      if (!current || current.phase === "releasing") return;
+      signalModelWarmupVisibleRef.current = true;
+      assignSignalModelWarmup({ ...current, phase: current.phase === "failed" ? "failed" : "held" });
+      setEpisodePreRoll(null);
+      stopSignalIntroAudio();
+    });
     setBusy(true);
     setError(null);
     let unstartedEpisodeId: string | null = null;
@@ -1839,6 +1964,35 @@ export function BotcastExperience({
       unstartedEpisodeId = response.episode.id;
       setEpisode(response.episode);
       setReplayEpisode(null);
+      if (warmupWasNeeded || signalModelWarmupRef.current) {
+        const current = signalModelWarmupRef.current;
+        assignSignalModelWarmup(
+          current
+            ? { ...current, episodeId: response.episode.id }
+            : current,
+        );
+        await setPersistedSignalModelWarmupHold(response.episode.id, true);
+      }
+      const preparationStatus = await preparation;
+      preparationPending = false;
+      if (!episodeOperationIsCurrent(controller, runId)) return;
+      if (preparationStatus.state === "unavailable") {
+        signalModelWarmupVisibleRef.current = true;
+        assignSignalModelWarmup({
+          phase: "failed",
+          model: preparationStatus.model,
+          startedAt: preparationStatus.startedAt,
+          failure: preparationStatus.failure,
+          initial: true,
+          episodeId: response.episode.id,
+        });
+        setEpisodePreRoll(null);
+        stopSignalIntroAudio();
+        return;
+      }
+      if (!signalModelWarmupVisibleRef.current) {
+        assignSignalModelWarmup(null);
+      }
       let opening: BotcastEpisodeAdvanceResponse | null = null;
       for (
         let attempt = 0;
@@ -1870,9 +2024,10 @@ export function BotcastExperience({
       setEpisode(opening.episode);
       setAutoRun(true);
       prepareGuestResponse(opening.episode, opening.message);
+      prepareEpisodeMessage(opening.message);
+      await releaseSignalModelWarmup(opening.episode.id);
       await Promise.all([introPlayback.finished, visualMinimum]);
       if (!episodeOperationIsCurrent(controller, runId)) return;
-      prepareEpisodeMessage(opening.message);
       setEpisodePreRoll((current) => current?.showId === selectedShow.id
         ? { ...current, phase: "landing" }
         : current);
@@ -1891,6 +2046,9 @@ export function BotcastExperience({
         stopSignalIntroAudio();
         setEpisodePreRoll(null);
         setAutoRun(false);
+        if (unstartedEpisodeId && signalModelWarmupRef.current) {
+          await releaseSignalModelWarmup(unstartedEpisodeId);
+        }
         if (unstartedEpisodeId && !openingMessageReceived) {
           try {
             await request(
@@ -2077,22 +2235,59 @@ export function BotcastExperience({
         hostMessage.speakerRole !== "host"
       ) return;
       const controller = new AbortController();
-      preparedAdvanceRef.current = {
+      const prepared: PreparedBotcastAdvance = {
         episodeId: currentEpisode.id,
         afterMessageId: hostMessage.id,
         controller,
-        result: request<BotcastEpisodeAdvanceResponse>(
+        settled: false,
+        warming: false,
+        warmupModel: currentEpisode.model,
+        warmupStartedAt: null,
+        warmupFailure: null,
+        result: Promise.resolve({
+          ok: false as const,
+          error: new Error("Not started"),
+        }),
+      };
+      prepared.result = waitForModelPreparation({
+        request,
+        provider: currentEpisode.provider,
+        model: currentEpisode.model,
+        experience: "signal",
+        signal: controller.signal,
+        onStatus: (status) => {
+          prepared.warming ||= status.state === "warming";
+          prepared.warmupModel = status.model;
+          prepared.warmupStartedAt = status.startedAt;
+          prepared.warmupFailure = status.failure;
+        },
+      }).then((status) => {
+        if (status.state === "unavailable") {
+          throw new Error("The local model could not get ready.");
+        }
+        return request<BotcastEpisodeAdvanceResponse>(
           `/api/botcast/episodes/${encodeURIComponent(currentEpisode.id)}/advance`,
           {
             method: "POST",
             signal: controller.signal,
             body: JSON.stringify({}),
           },
-        ).then(
+        );
+      }).catch((error: unknown) => {
+        if (
+          !(error instanceof DOMException && error.name === "AbortError") &&
+          !prepared.warmupFailure
+        ) {
+          prepared.warmupFailure = "request_failed";
+        }
+        throw error;
+      }).then(
           (response) => ({ ok: true as const, response }),
           (error: unknown) => ({ ok: false as const, error }),
-        ),
-      };
+        ).finally(() => {
+          prepared.settled = true;
+        });
+      preparedAdvanceRef.current = prepared;
     },
     [request],
   );
@@ -2110,11 +2305,81 @@ export function BotcastExperience({
             preparedAdvanceRef.current.afterMessageId === lastVisibleMessageId
           ? preparedAdvanceRef.current
           : null;
+        let warmupHoldActive = false;
+        if (prepared?.warming && !prepared.settled) {
+          warmupHoldActive = true;
+          signalModelWarmupVisibleRef.current = true;
+          assignSignalModelWarmup({
+            phase: "held",
+            model: prepared.warmupModel,
+            startedAt: prepared.warmupStartedAt,
+            failure: prepared.warmupFailure,
+            initial: false,
+            episodeId: episode.id,
+          });
+          await setPersistedSignalModelWarmupHold(episode.id, true);
+        }
         const preparedResult = prepared ? await prepared.result : null;
         if (preparedAdvanceRef.current === prepared) {
           preparedAdvanceRef.current = null;
         }
+        if (preparedResult && !preparedResult.ok && prepared?.warmupFailure) {
+          signalModelWarmupVisibleRef.current = true;
+          assignSignalModelWarmup({
+            phase: "failed",
+            model: prepared.warmupModel,
+            startedAt: prepared.warmupStartedAt,
+            failure: prepared.warmupFailure,
+            initial: false,
+            episodeId: episode.id,
+          });
+          setAutoRun(false);
+          return;
+        }
         if (preparedResult && !preparedResult.ok) throw preparedResult.error;
+        let directHoldStart: Promise<BotcastEpisode> | null = null;
+        if (!preparedResult) {
+          const preparationStatus = await waitForModelPreparation({
+            request,
+            provider: episode.provider,
+            model: episode.model,
+            experience: "signal",
+            signal: controller.signal,
+            onStatus: (status) => {
+              if (status.state === "warming") {
+                warmupHoldActive = true;
+                signalModelWarmupVisibleRef.current = true;
+                assignSignalModelWarmup({
+                  phase: "held",
+                  model: status.model,
+                  startedAt: status.startedAt,
+                  failure: null,
+                  initial: false,
+                  episodeId: episode.id,
+                });
+                directHoldStart ??= setPersistedSignalModelWarmupHold(
+                  episode.id,
+                  true,
+                );
+              } else if (status.state === "unavailable") {
+                assignSignalModelWarmup({
+                  phase: "failed",
+                  model: status.model,
+                  startedAt: status.startedAt,
+                  failure: status.failure,
+                  initial: false,
+                  episodeId: episode.id,
+                });
+              }
+            },
+          });
+          if (directHoldStart) await directHoldStart;
+          if (preparationStatus.state === "unavailable") {
+            signalModelWarmupVisibleRef.current = true;
+            setAutoRun(false);
+            return;
+          }
+        }
         const response = preparedResult?.response ??
           await request<BotcastEpisodeAdvanceResponse>(
             `/api/botcast/episodes/${encodeURIComponent(episode.id)}/advance`,
@@ -2132,9 +2397,15 @@ export function BotcastExperience({
           setEpisode(response.episode);
           prepareGuestResponse(response.episode, message);
           prepareEpisodeMessage(message);
+          if (warmupHoldActive || signalModelWarmupRef.current) {
+            await releaseSignalModelWarmup(response.episode.id);
+          }
           await playPreparedEpisodeMessage(message, controller, runId);
         } else {
           setEpisode(response.episode);
+          if (warmupHoldActive || signalModelWarmupRef.current) {
+            await releaseSignalModelWarmup(response.episode.id);
+          }
         }
         if (response.episode.status === "completed") {
           setAutoRun(false);
@@ -2149,6 +2420,9 @@ export function BotcastExperience({
         }
       } catch (advanceError) {
         if (episodeOperationIsCurrent(controller, runId)) {
+          if (signalModelWarmupRef.current) {
+            await releaseSignalModelWarmup(episode.id);
+          }
           if (activeSpeechMessageIdRef.current !== null) stopUtterance();
           setAutoRun(false);
           setError(errorMessage(advanceError));
@@ -2164,18 +2438,88 @@ export function BotcastExperience({
     [
       beginEpisodeOperation,
       episode,
+      assignSignalModelWarmup,
       episodeOperationIsCurrent,
       loadEpisodes,
       playEpisodeOutro,
       playPreparedEpisodeMessage,
       prepareEpisodeMessage,
       prepareGuestResponse,
+      releaseSignalModelWarmup,
       request,
       selectedShow,
       selectedShowId,
       stopUtterance,
+      setPersistedSignalModelWarmupHold,
     ],
   );
+
+  const leaveInitialSignalWarmup = async (): Promise<void> => {
+    const episodeId = signalModelWarmupRef.current?.episodeId ?? episode?.id ?? null;
+    invalidateEpisodeOperation();
+    if (episodeId) {
+      await request(`/api/botcast/episodes/${encodeURIComponent(episodeId)}`, {
+        method: "DELETE",
+      }).catch(() => undefined);
+    }
+    setEpisode(null);
+    setAutoRun(false);
+    setBusy(false);
+    if (selectedShowId) void loadEpisodes(selectedShowId).catch(() => undefined);
+  };
+
+  const retrySignalModelWarmup = async (): Promise<void> => {
+    const current = signalModelWarmupRef.current;
+    if (!current) return;
+    if (current.initial) {
+      await leaveInitialSignalWarmup();
+      await startEpisode();
+      return;
+    }
+    const episodeId = current.episodeId ?? episode?.id ?? null;
+    if (!episodeId || !episode) return;
+    const controller = new AbortController();
+    assignSignalModelWarmup({ ...current, phase: "held", failure: null });
+    try {
+      const status = await waitForModelPreparation({
+        request,
+        provider: episode.provider,
+        model: episode.model,
+        experience: "signal",
+        retry: true,
+        signal: controller.signal,
+        onStatus: (next) => {
+          if (next.state !== "warming") return;
+          assignSignalModelWarmup({
+            ...current,
+            phase: "held",
+            model: next.model,
+            startedAt: next.startedAt,
+            failure: null,
+          });
+        },
+      });
+      if (status.state === "unavailable") {
+        assignSignalModelWarmup({
+          ...current,
+          phase: "failed",
+          model: status.model,
+          startedAt: status.startedAt,
+          failure: status.failure,
+        });
+        return;
+      }
+      setAutoRun(true);
+      window.setTimeout(() => void advanceEpisode(), 0);
+    } catch (retryError) {
+      if (retryError instanceof DOMException && retryError.name === "AbortError") return;
+      assignSignalModelWarmup({
+        ...current,
+        phase: "failed",
+        failure: "request_failed",
+      });
+    }
+  };
 
   useEffect(() => {
     if (
@@ -2214,7 +2558,39 @@ export function BotcastExperience({
       if (detail.status === "live") {
         setEpisode(detail);
         setReplayEpisode(null);
-        setAutoRun(false);
+        if (detail.modelWarmupHoldStartedAt) {
+          signalModelWarmupVisibleRef.current = true;
+          assignSignalModelWarmup({
+            phase: "held",
+            model: detail.model,
+            startedAt: detail.modelWarmupHoldStartedAt,
+            failure: null,
+            initial: detail.messages.length === 0,
+            episodeId: detail.id,
+          });
+          void waitForModelPreparation({
+            request,
+            provider: detail.provider,
+            model: detail.model,
+            experience: "signal",
+          }).then(async (status) => {
+            if (status.state === "unavailable") {
+              assignSignalModelWarmup({
+                phase: "failed",
+                model: status.model,
+                startedAt: status.startedAt ?? detail.modelWarmupHoldStartedAt,
+                failure: status.failure,
+                initial: detail.messages.length === 0,
+                episodeId: detail.id,
+              });
+              return;
+            }
+            await releaseSignalModelWarmup(detail.id);
+            setAutoRun(true);
+          }).catch(() => undefined);
+        } else {
+          setAutoRun(false);
+        }
         return;
       }
       setReplayEpisode(detail);
@@ -2384,9 +2760,21 @@ export function BotcastExperience({
     const episodeStartedAtMs = Number.isFinite(episodeStartedAtCandidate)
       ? episodeStartedAtCandidate
       : null;
+    const activeWarmupStartedAtMs = args.currentEpisode.modelWarmupHoldStartedAt
+      ? Date.parse(args.currentEpisode.modelWarmupHoldStartedAt)
+      : Number.NaN;
+    const liveWarmupElapsedMs = Number.isFinite(activeWarmupStartedAtMs)
+      ? Math.max(0, signalStageNowMs - activeWarmupStartedAtMs)
+      : 0;
+    const liveEffectiveNowMs = Math.max(
+      episodeStartedAtMs ?? 0,
+      signalStageNowMs -
+        (args.currentEpisode.modelWarmupHoldDurationMs ?? 0) -
+        liveWarmupElapsedMs,
+    );
     const cupNowMs = args.replay && episodeStartedAtMs !== null
       ? episodeStartedAtMs + replayElapsedMs
-      : signalStageNowMs;
+      : liveEffectiveNowMs;
     const cupVisual = (
       bot: BotcastBotSummary,
       role: "host" | "guest",
@@ -2459,6 +2847,11 @@ export function BotcastExperience({
         className={styles.stageViewport}
         data-shot={args.shot}
         data-replay={args.replay ? "true" : undefined}
+        data-model-warmup={
+          !args.replay && signalModelWarmup
+            ? signalModelWarmup.phase
+            : undefined
+        }
         data-studio-source={stageAtmosphere.imageUrl ? "image" : "fallback"}
         style={atmosphereStyle}
         aria-label={`Signal studio, ${args.shot} camera`}
@@ -2631,6 +3024,27 @@ export function BotcastExperience({
             </strong>
           </div>
         </div>
+        {!args.replay && signalModelWarmup ? (
+          <ModelWarmupIntermission
+            phase={signalModelWarmup.phase}
+            experience="signal"
+            model={signalModelWarmup.model}
+            startedAt={signalModelWarmup.startedAt}
+            failure={signalModelWarmup.failure}
+            initial={signalModelWarmup.initial}
+            onRetry={
+              signalModelWarmup.phase === "failed"
+                ? () => void retrySignalModelWarmup()
+                : undefined
+            }
+            onExit={
+              signalModelWarmup.initial
+                ? () => void leaveInitialSignalWarmup()
+                : () => void cutShow()
+            }
+            exitLabel={signalModelWarmup.initial ? "Back to setup" : "Cut show"}
+          />
+        ) : null}
       </section>
     );
   };
@@ -3460,10 +3874,56 @@ export function BotcastExperience({
               )}
               <div className={styles.showBrandContent}>
                 <SignalShowLogo show={selectedShow} />
-                <div>
+                <div className={styles.showBrandIdentity}>
                   <span className={styles.eyebrow}>Show identity</span>
                   <h2>{selectedShow.name}</h2>
                   <p>{hostBot?.name ?? "Host"}</p>
+                  {showAudience ? (
+                    <section
+                      className={styles.showAudiencePulse}
+                      data-tutorial-target="botcast-audience-pulse"
+                      aria-label="Signal audience pulse"
+                    >
+                      <span className={styles.showAudienceTitle}>Audience pulse</span>
+                      <div className={styles.showAudienceMetrics} role="list">
+                        <span className={styles.showAudienceMetric} role="listitem">
+                          <small>Views</small>
+                          <strong>{formatSignalAudienceViews(showAudience.totalViews)}</strong>
+                        </span>
+                        <span className={styles.showAudienceMetric} role="listitem">
+                          <small>Rating</small>
+                          <strong
+                            aria-label={showAudience.rating === null
+                              ? "No audience rating yet"
+                              : `${showAudience.rating.toFixed(1)} out of 5`}
+                          >
+                            {showAudience.rating === null ? (
+                              "—"
+                            ) : (
+                              <>
+                                {showAudience.rating.toFixed(1)}
+                                <span className={styles.showAudienceRatingStar} aria-hidden="true">★</span>
+                              </>
+                            )}
+                          </strong>
+                        </span>
+                        <span className={styles.showAudienceMetric} role="listitem">
+                          <small>Reviews</small>
+                          <strong>{showAudience.reviewCount.toLocaleString("en-US")}</strong>
+                        </span>
+                      </div>
+                      {showAudience.featuredReview ? (
+                        <blockquote className={styles.showAudienceQuote}>
+                          <p>“{showAudience.featuredReview.quote}”</p>
+                          <cite>{showAudience.featuredReview.listener}</cite>
+                        </blockquote>
+                      ) : (
+                        <p className={styles.showAudienceEmpty}>
+                          Release an episode to start building an audience.
+                        </p>
+                      )}
+                    </section>
+                  ) : null}
                 </div>
                 {!showHasCustomArtwork(selectedShow) ? (
                   <div

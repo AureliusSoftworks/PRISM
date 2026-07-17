@@ -6,6 +6,23 @@ export type CoffeeSessionClockPhase =
   | "live"
   | "finished";
 
+export type CoffeeSessionClockHoldReason =
+  | "player_composing"
+  | "manual_autoplay_pause"
+  | "model_warmup";
+
+export function coffeeSessionClockHoldReasons(args: {
+  playerComposing: boolean;
+  autoplayPaused: boolean;
+  modelWarmup: boolean;
+}): CoffeeSessionClockHoldReason[] {
+  const reasons: CoffeeSessionClockHoldReason[] = [];
+  if (args.playerComposing) reasons.push("player_composing");
+  if (args.autoplayPaused) reasons.push("manual_autoplay_pause");
+  if (args.modelWarmup) reasons.push("model_warmup");
+  return reasons;
+}
+
 export function coffeeSessionClockShouldTick(
   conversationId: string | null | undefined,
   phase: CoffeeSessionClockPhase

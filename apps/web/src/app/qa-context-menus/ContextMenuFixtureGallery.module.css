@@ -1,0 +1,113 @@
+.gallery {
+  --fixture-bg: #0d121b;
+  --fixture-fg: #edf3fa;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+  background:
+    radial-gradient(circle at 22% 18%, color-mix(in srgb, var(--fixture-accent) 16%, transparent), transparent 34%),
+    var(--fixture-bg);
+  color: var(--fixture-fg);
+  font-family: var(--font-ui-sans, system-ui, sans-serif);
+}
+
+.gallery[data-theme="light"] {
+  --fixture-bg: #edf3f8;
+  --fixture-fg: #172638;
+}
+
+.controls {
+  width: min(620px, 100%);
+  display: grid;
+  grid-template-columns: 1fr 150px 150px;
+  gap: 12px;
+  align-items: end;
+  padding: 22px;
+  border: 1px solid color-mix(in srgb, var(--fixture-fg) 16%, transparent);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--fixture-bg) 86%, transparent);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.2);
+}
+
+.controls label {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.controls select,
+.trigger {
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, var(--fixture-fg) 20%, transparent);
+  border-radius: 10px;
+  background: var(--fixture-bg);
+  color: var(--fixture-fg);
+  font: inherit;
+}
+
+.trigger {
+  grid-column: 1 / -1;
+  border-color: color-mix(in srgb, var(--fixture-accent) 55%, transparent);
+  cursor: pointer;
+}
+
+.legacyMenu {
+  position: fixed;
+  z-index: 100;
+  display: grid;
+  gap: 4px;
+  min-width: 210px;
+  max-width: 300px;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--fixture-accent) 34%, rgba(255,255,255,.16));
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 24% 18%, color-mix(in srgb, var(--fixture-accent) 14%, transparent), transparent 52%),
+    color-mix(in srgb, var(--fixture-bg) 94%, transparent);
+  color: var(--fixture-fg);
+  box-shadow: 0 0 0 1px rgba(255,255,255,.1), 0 18px 48px rgba(0,0,0,.35);
+  backdrop-filter: blur(12px) saturate(1.08);
+}
+
+.legacyMenu::after {
+  content: "";
+  position: absolute;
+  inset: 7px;
+  z-index: -1;
+  border: 1px dashed color-mix(in srgb, var(--fixture-accent) 30%, transparent);
+  border-radius: 14px;
+  opacity: .58;
+}
+
+.gallery[data-theme="light"] .legacyMenu {
+  background: #f8fbff;
+  color: #172638;
+  backdrop-filter: none;
+}
+
+.legacyMenu button,
+.legacyLabel {
+  min-height: 36px;
+  padding: 8px 12px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--fixture-bg) 34%, transparent);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  text-align: left;
+}
+
+.legacyMenu button:disabled { opacity: .45; }
+.legacyLabel { display: grid; gap: 2px; opacity: .68; }
+.legacyLabel small { font-weight: 500; }
+.legacySeparator { height: 1px; margin: 4px 8px; background: color-mix(in srgb, var(--fixture-fg) 16%, transparent); }
+
+@media (max-width: 620px) {
+  .controls { grid-template-columns: 1fr; }
+  .trigger { grid-column: auto; }
+}

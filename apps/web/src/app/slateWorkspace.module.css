@@ -859,35 +859,6 @@
   background: var(--bg-hover, #211e1b);
 }
 
-.projectActionsMenu {
-  position: absolute;
-  z-index: 5;
-  top: 46px;
-  right: 9px;
-  min-width: 150px;
-  padding: 5px;
-  border: 1px solid var(--line-strong, #342f2a);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--bg-surface, #151311) 97%, transparent);
-  box-shadow: var(--shadow-md, 0 8px 28px #0008);
-}
-
-.projectActionsMenu button {
-  width: 100%;
-  padding: 8px 9px;
-  border: 0;
-  border-radius: 7px;
-  color: var(--danger, #f57a8b) !important;
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-}
-
-.projectActionsMenu button:hover,
-.projectActionsMenu button:focus-visible {
-  background: var(--danger-soft, #3a1821);
-}
-
 .wildcardOrigin {
   margin: 0 0 14px;
   padding: 10px 12px;

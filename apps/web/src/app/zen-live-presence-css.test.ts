@@ -341,9 +341,10 @@ describe("Zen live presence CSS", () => {
     assert.match(pageSource, /const \[zenLiveBotContextMenu, setZenLiveBotContextMenu\]/);
     assert.match(pageSource, /const openZenLiveBotContextMenu = useCallback/);
     assert.match(pageSource, /function renderZenLiveBotContextMenu\(\): React\.JSX\.Element \| null/);
-    assert.match(pageSource, />Grow</);
-    assert.match(pageSource, />Shrink</);
-    assert.match(pageSource, />Edit avatar</);
+    assert.match(pageSource, /label: "Grow"/);
+    assert.match(pageSource, /label: "Shrink"/);
+    assert.match(pageSource, /label: "Reset size"/);
+    assert.match(pageSource, /label: "Edit avatar"/);
     assert.match(pageSource, /openBotCustomizer\(bot\);\s+setBotAvatarCustomizerOpen\(true\);/);
     assert.match(pageSource, /openDefaultBotCustomizer\(\);/);
     assert.match(
@@ -748,6 +749,10 @@ describe("Zen live presence CSS", () => {
 
     const bodyStart = pageSource.indexOf("className={styles.zenLiveBotPresenceBody}");
     assert.notEqual(bodyStart, -1);
+    assert.match(
+      pageSource,
+      /data-zen-live-bot-presence-plate="true"[\s\S]*<BotAmbientPresenceRig[\s\S]*scheduleKey=\{`zen-live-/,
+    );
     const emissionMaskStart = pageSource.indexOf("className={styles.zenLiveBotPresenceFaceEmissionMask}", bodyStart);
     assert.notEqual(emissionMaskStart, -1);
     const faceRigStart = pageSource.indexOf("className={styles.zenLiveBotPresenceFaceRig}", bodyStart);

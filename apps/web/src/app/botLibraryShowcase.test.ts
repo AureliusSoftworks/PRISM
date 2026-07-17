@@ -36,14 +36,14 @@ describe("selected bot library showcase", () => {
       /onContextMenuCapture=\{\(event\) => \{[\s\S]*?openBotShowcaseContextMenu\(bot, event\.clientX, event\.clientY\)/
     );
     assert.match(pageSource, /source: "showcase"/);
-    assert.match(pageSource, /aria-label=\{`\$\{bot\.name\} preview actions`\}/);
+    assert.match(pageSource, /label:\s*\n?\s*botContextMenu\.source === "showcase"[\s\S]*?`\$\{bot\.name\} preview actions`/);
     for (const label of [
       "Avatar Studio",
       "Memories",
       "Images",
       "Settings",
     ]) {
-      assert.match(pageSource, new RegExp(`<span>${label}<\\/span>`));
+      assert.match(pageSource, new RegExp(`label: "${label}"`));
     }
     const showcaseMenuSource = pageSource.slice(
       pageSource.indexOf('if (botContextMenu.source === "showcase")'),
@@ -271,11 +271,19 @@ describe("selected bot library showcase", () => {
     assert.match(pageSource, /voicePreviewAudioCacheRef/);
     assert.match(
       pageSource,
+      /cachedPreviewClip &&[\s\S]*?previewEngine !== "elevenlabs" \|\|[\s\S]*?cachedPreviewClip\.engineUsed === "elevenlabs"/,
+    );
+    assert.match(
+      pageSource,
       /voicePreviewAudioCacheRef\.current\.set\(\s*effectiveCacheKey,\s*\{[\s\S]*?bytes: previewClip\.bytes\.slice\(0\),[\s\S]*?engineUsed: previewClip\.engineUsed,[\s\S]*?\},\s*\)/
     );
     assert.match(
       pageSource,
-      /normalizeOptionalBotAudioVoiceProfileV1\(\s*bot\.audio_voice_profile_override,?\s*\)/
+      /effectiveCacheKey &&[\s\S]*?previewEngine !== "elevenlabs" \|\|[\s\S]*?previewClip\.engineUsed === "elevenlabs"[\s\S]*?voicePreviewAudioCacheRef\.current\.set/,
+    );
+    assert.match(
+      pageSource,
+      /resolveBotAudioVoiceProfileV1\(\s*bot\.authored_audio_voice_profile,\s*bot\.audio_voice_profile_override,?\s*\)/
     );
     assert.match(pageSource, /resolveBotHubVoicePreviewText\(bot\)/);
     assert.doesNotMatch(pageSource, /generateOnly/);

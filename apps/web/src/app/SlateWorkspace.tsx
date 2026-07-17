@@ -31,6 +31,11 @@ import type {
   SlateStructureItem,
 } from "@localai/shared";
 import { transformSlateLockedRangesForTextEdit } from "@localai/shared";
+import { FolderOpen, Trash2 } from "lucide-react";
+import {
+  usePrismMenu,
+  type PrismMenuAnchor,
+} from "./PrismMenu";
 import {
   latestPendingSlateRevision,
   mergeSavedSlateSection,
@@ -234,6 +239,7 @@ export default function SlateWorkspace({
   navigationHeader,
   theme,
 }: SlateWorkspaceProps): React.JSX.Element {
+  const { activeMenu, openMenu, closeMenu } = usePrismMenu();
   const [projects, setProjects] = useState<SlateProjectSummary[]>([]);
   const [project, setProject] = useState<SlateProjectDetail | null>(null);
   const projectRef = useRef<SlateProjectDetail | null>(null);
@@ -278,7 +284,6 @@ export default function SlateWorkspace({
   const [archiveFile, setArchiveFile] = useState<File | null>(null);
   const [archivePreview, setArchivePreview] =
     useState<SlateArchiveImportPreview | null>(null);
-  const [projectMenuId, setProjectMenuId] = useState<string | null>(null);
   const [projectPendingDeletion, setProjectPendingDeletion] =
     useState<SlateProjectSummary | null>(null);
   const [deletingProject, setDeletingProject] = useState(false);
@@ -556,6 +561,38 @@ export default function SlateWorkspace({
       loadProjectSections,
       openReturnSession,
     ],
+  );
+
+  const openProjectActionsMenu = useCallback(
+    (item: SlateProjectSummary, anchor: PrismMenuAnchor): void => {
+      const menuId = `slate-project-actions-${item.id}`;
+      openMenu({
+        id: menuId,
+        label: `Actions for ${item.title}`,
+        anchor,
+        accent: "#9eb8ff",
+        theme,
+        focusRestoreTarget:
+          anchor.kind === "element" ? anchor.element : null,
+        entries: [
+          {
+            id: "open-project",
+            icon: <FolderOpen />,
+            label: "Open project",
+            onSelect: () => openProject(item.id),
+          },
+          { id: "delete-project-separator", kind: "separator" },
+          {
+            id: "delete-project",
+            icon: <Trash2 />,
+            label: "Delete project",
+            tone: "danger",
+            onSelect: () => setProjectPendingDeletion(item),
+          },
+        ],
+      });
+    },
+    [openMenu, openProject, theme],
   );
 
   useEffect(() => {
@@ -1153,7 +1190,6 @@ export default function SlateWorkspace({
           { method: "DELETE" },
         );
         setProjects((current) => current.filter((item) => item.id !== candidate.id));
-        setProjectMenuId(null);
         setProjectPendingDeletion(null);
         await refreshProjects().catch(() => undefined);
       } catch (cause) {
@@ -1758,23 +1794,19 @@ export default function SlateWorkspace({
             <div className={styles.projectShelf}>
               <h2>Projects</h2>
               {projects.map((item) => {
-                const menuOpen = projectMenuId === item.id;
                 const menuId = `slate-project-actions-${item.id}`;
+                const menuOpen = activeMenu?.id === menuId;
                 return (
                   <div
                     key={item.id}
                     className={styles.projectCard}
-                    onBlur={(event) => {
-                      if (!event.currentTarget.contains(event.relatedTarget)) {
-                        setProjectMenuId((current) =>
-                          current === item.id ? null : current,
-                        );
-                      }
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === "Escape" && menuOpen) {
-                        setProjectMenuId(null);
-                      }
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      openProjectActionsMenu(item, {
+                        kind: "pointer",
+                        x: event.clientX,
+                        y: event.clientY,
+                      });
                     }}
                   >
                     <button
@@ -1792,33 +1824,20 @@ export default function SlateWorkspace({
                       aria-haspopup="menu"
                       aria-expanded={menuOpen}
                       aria-controls={menuOpen ? menuId : undefined}
-                      onClick={() => {
-                        setProjectMenuId((current) =>
-                          current === item.id ? null : item.id,
-                        );
+                      onClick={(event) => {
+                        if (menuOpen) {
+                          closeMenu();
+                          return;
+                        }
+                        openProjectActionsMenu(item, {
+                          kind: "element",
+                          element: event.currentTarget,
+                          preferredPlacement: "bottom-end",
+                        });
                       }}
                     >
                       ⋯
                     </button>
-                    {menuOpen ? (
-                      <div
-                        id={menuId}
-                        className={styles.projectActionsMenu}
-                        role="menu"
-                        aria-label={`Actions for ${item.title}`}
-                      >
-                        <button
-                          type="button"
-                          role="menuitem"
-                          onClick={() => {
-                            setProjectMenuId(null);
-                            setProjectPendingDeletion(item);
-                          }}
-                        >
-                          Delete project
-                        </button>
-                      </div>
-                    ) : null}
                   </div>
                 );
               })}

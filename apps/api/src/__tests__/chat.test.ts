@@ -2857,6 +2857,55 @@ describe("processChatMessage Auto response mode", () => {
     assert.equal(result.autoRecovery?.crossedOnline, true);
   });
 
+  it("walks all five ordered mixed-provider fallbacks when earlier Zen attempts fail", async () => {
+    const db = createChatTestDb();
+    const calls: string[] = [];
+    const providerFactory = ((provider: "local" | "openai" | "anthropic") => ({
+      name: provider,
+      async generateResponse(_messages: unknown, options?: { model?: string }) {
+        const model = options?.model ?? "";
+        calls.push(`${provider}:${model}`);
+        return model === "fallback-five" ? "Recovered at the end of the chain." : "";
+      },
+    })) as typeof selectProvider;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "hello",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        providerFactory,
+        autoMemory: false,
+        botOverrides: { model: "primary-model" },
+        responseMode: "auto",
+        autoFallbackChain: {
+          v: 1,
+          fallbacks: [
+            { provider: "openai", model: "fallback-one" },
+            { provider: "local", model: "fallback-two" },
+            { provider: "anthropic", model: "fallback-three" },
+            { provider: "openai", model: "fallback-four" },
+            { provider: "local", model: "fallback-five" },
+          ],
+        },
+        mode: "zen",
+      },
+    );
+
+    assert.deepEqual(calls, [
+      "local:primary-model",
+      "openai:fallback-one",
+      "local:fallback-two",
+      "anthropic:fallback-three",
+      "openai:fallback-four",
+      "local:fallback-five",
+    ]);
+    assert.equal(result.autoRecovery?.attempts.length, 6);
+    assert.equal(result.autoRecovery?.finalModel, "fallback-five");
+  });
+
   it("advances past malformed Zen tool-shaped output", async () => {
     const db = createChatTestDb();
     const providerFactory = ((provider: "local" | "openai" | "anthropic") => ({
@@ -2897,7 +2946,7 @@ describe("processChatMessage Auto response mode", () => {
     );
   });
 
-  it("persists no Zen turn when all three Auto attempts fail", async () => {
+  it("persists no Zen turn when every configured Auto attempt fails", async () => {
     const db = createChatTestDb();
     const providerFactory = ((provider: "local" | "openai" | "anthropic") => ({
       name: provider,
@@ -4407,7 +4456,12 @@ describe("processChatMessage AskQuestion tool", () => {
         "mood-extreme"
       );
 
-      const promptText = (chatPayloads[0]?.messages ?? [])
+      const generationPayload = chatPayloads.find((payload) =>
+        payload.messages?.some((message) =>
+          message.content.includes("Current self-report anchor:"),
+        ),
+      );
+      const promptText = (generationPayload?.messages ?? [])
         .map((message) => `${message.role}: ${message.content}`)
         .join("\n");
       assert.match(promptText, args.expectedAnchor);

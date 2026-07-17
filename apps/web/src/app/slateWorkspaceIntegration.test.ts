@@ -196,7 +196,9 @@ describe("Slate workspace integration", () => {
       source.indexOf("const previewSlateArchive"),
     );
     assert.match(source, /aria-haspopup="menu"/);
-    assert.match(source, /role="menuitem"/);
+    assert.match(source, /usePrismMenu/);
+    assert.match(source, /label: "Open project"/);
+    assert.match(source, /label: "Delete project"/);
     assert.match(source, /setProjectPendingDeletion\(item\)/);
     assert.match(source, /Delete “\{projectPendingDeletion\.title\}”\?/);
     assert.match(source, /This cannot be undone\./);
@@ -212,7 +214,6 @@ describe("Slate workspace integration", () => {
     );
     assert.match(deletionSource, /await refreshProjects\(\)\.catch/);
     assert.match(source, /aria-modal="true"/);
-    assert.match(workspaceCss, /\.projectActionsMenu[\s\S]*?var\(--danger/);
     assert.match(
       workspaceCss,
       /\.deleteProjectDialog::before[\s\S]*?var\(--slate-p\)[\s\S]*?var\(--slate-m\)/,

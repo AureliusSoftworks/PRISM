@@ -196,9 +196,24 @@
 .showBrandContent { position: relative; z-index: 2; display: flex; align-items: center; gap: 24px; min-height: 360px; padding: 36px min(420px, 43%) 36px 36px; color: #fff; }
 .showBrandPreview[data-identity-settings-open="true"] .showBrandContent { padding-right: 36px; padding-bottom: 84px; }
 .showBrandContent .showLogo { width: 112px; height: 112px; flex: 0 0 auto; border: 1px solid rgba(255,255,255,.36); border-radius: 28px; box-shadow: 0 22px 54px rgba(0,0,0,.32), 0 0 42px color-mix(in srgb, var(--botcast-accent) 42%, transparent), inset 0 1px 0 rgba(255,255,255,.32); }
+.showBrandIdentity { min-width: 0; display: grid; align-content: center; }
 .showBrandContent h2 { max-width: 760px; margin: 8px 0 4px; color: #fff; font-size: clamp(1.75rem, 3vw, 2.8rem); line-height: 1.04; text-wrap: balance; }
 .showBrandContent p { margin: 0; color: rgba(255,255,255,.76); font-size: 1rem; }
 .showBrandContent .eyebrow { color: rgba(255,255,255,.7); }
+.showAudiencePulse { width: min(460px, 100%); margin-top: 16px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 34%, rgba(255,255,255,.2)); border-radius: 16px; padding: 11px 13px 12px; background: linear-gradient(135deg, color-mix(in srgb, var(--botcast-host-accent) 11%, rgba(8,10,18,.72)), rgba(8,10,18,.58)); box-shadow: 0 14px 34px rgba(0,0,0,.24), inset 0 1px rgba(255,255,255,.1); backdrop-filter: blur(16px) saturate(1.16); }
+.showBrandPreview[data-identity-settings-open="true"] .showAudiencePulse { display: none; }
+.showAudienceTitle { display: block; margin-bottom: 9px; color: color-mix(in srgb, var(--botcast-host-accent) 58%, #fff); font: 820 .58rem/1 system-ui; letter-spacing: .12em; text-transform: uppercase; }
+.showAudienceMetrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.showAudienceMetric { min-width: 0; display: grid; gap: 4px; padding: 0 12px; border-left: 1px solid rgba(255,255,255,.13); }
+.showAudienceMetric:first-child { padding-left: 0; border-left: 0; }
+.showAudienceMetric:last-child { padding-right: 0; }
+.showAudienceMetric small { overflow: hidden; color: rgba(255,255,255,.58); font: 720 .55rem/1 system-ui; letter-spacing: .09em; text-overflow: ellipsis; text-transform: uppercase; }
+.showAudienceMetric strong { color: #fff; font: 850 1.08rem/1.05 system-ui; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.showAudienceRatingStar { margin-left: 4px; color: color-mix(in srgb, var(--botcast-host-accent) 70%, #fff); font-size: .7em; vertical-align: .08em; }
+.showAudienceQuote { margin: 10px 0 0; display: flex; align-items: baseline; justify-content: space-between; gap: 12px; border-top: 1px solid rgba(255,255,255,.11); padding-top: 9px; }
+.showAudienceQuote p { min-width: 0; overflow: hidden; color: rgba(255,255,255,.8); font: 650 .66rem/1.35 system-ui; text-overflow: ellipsis; white-space: nowrap; }
+.showAudienceQuote cite { flex: 0 0 auto; color: rgba(255,255,255,.5); font: 650 .54rem/1 system-ui; white-space: nowrap; }
+.showAudienceEmpty { margin-top: 10px !important; border-top: 1px solid rgba(255,255,255,.11); padding-top: 9px; color: rgba(255,255,255,.62) !important; font: 650 .63rem/1.35 system-ui !important; }
 .showLookInvitation { position: relative; z-index: 5; width: min(320px, 38%); margin-left: auto; display: grid; gap: 7px; padding: 16px; border: 1px solid rgba(255,255,255,.2); border-radius: 18px; background: rgba(10,11,22,.52); box-shadow: 0 16px 42px rgba(0,0,0,.2), inset 0 1px rgba(255,255,255,.12); backdrop-filter: blur(18px) saturate(1.2); }
 .showLookInvitation strong { color: #fff; font-size: .92rem; line-height: 1.2; }
 .showLookInvitation small { color: rgba(255,255,255,.68); font-size: .68rem; line-height: 1.4; }
@@ -226,7 +241,7 @@
 .showCardHostPresence { position: absolute; right: clamp(-18px, .4vw, 6px); bottom: 0; z-index: 3; width: clamp(300px, 32vw, 380px); aspect-ratio: 1; display: grid; place-items: center; pointer-events: none; transition: opacity 180ms ease, filter 180ms ease; }
 .showCardHostPresence[data-identity-settings-open="true"] { opacity: .2; filter: blur(1px); }
 .showCardHostFloat { width: 100%; height: 100%; display: grid; place-items: center; filter: drop-shadow(0 20px 28px rgba(0,0,0,.5)) drop-shadow(0 0 24px color-mix(in srgb, var(--botcast-host-accent) 18%, transparent)); transform-origin: 50% 82%; animation: signalShowCardHostFloat 5.4s ease-in-out infinite; will-change: transform; }
-.showCardHostFloat > * { max-width: 100%; max-height: 100%; transform: scale(1.8); }
+.showCardHostFloat > * { max-width: 100%; max-height: 100%; transform: scale(1.5); }
 .showCardQuipBubble { --signal-quip-surface: color-mix(in srgb, var(--botcast-host-accent) 18%, rgba(8,10,18,.92)); position: absolute; top: clamp(24px, 8%, 42px); right: clamp(244px, 25vw, 292px); z-index: 4; isolation: isolate; width: max-content; max-width: min(290px, 32%); margin: 0; border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 52%, rgba(255,255,255,.28)); border-radius: 20px 20px 6px 20px; padding: 14px 17px; color: rgba(255,255,255,.96); background: radial-gradient(circle at 8% 0%, color-mix(in srgb, var(--prism-p) 18%, transparent), transparent 42%), radial-gradient(circle at 92% 100%, color-mix(in srgb, var(--prism-s) 15%, transparent), transparent 46%), var(--signal-quip-surface); box-shadow: 0 18px 44px rgba(0,0,0,.38), 0 0 28px color-mix(in srgb, var(--botcast-host-accent) 22%, transparent), -8px 8px 24px color-mix(in srgb, var(--prism-m) 9%, transparent), inset 0 1px rgba(255,255,255,.16); backdrop-filter: blur(18px) saturate(1.28); font: 740 .78rem/1.45 system-ui; text-shadow: 0 1px 12px rgba(0,0,0,.42); text-wrap: balance; animation: signalShowCardQuipIn 260ms cubic-bezier(.2,.72,.18,1) both; }
 .showCardQuipBubble::before { position: absolute; top: -1px; right: 18px; left: 18px; z-index: 1; height: 2px; border-radius: 999px; content: ""; background: linear-gradient(90deg, var(--prism-p), var(--prism-r), var(--prism-i), var(--prism-s), var(--botcast-host-accent), var(--prism-m)); box-shadow: 0 0 12px color-mix(in srgb, var(--botcast-host-accent) 34%, transparent); opacity: .92; }
 .showCardQuipBubble::after { position: absolute; right: -9px; bottom: 13px; z-index: -1; width: 18px; height: 18px; content: ""; border-right: 1px solid color-mix(in srgb, var(--botcast-host-accent) 52%, rgba(255,255,255,.28)); border-bottom: 1px solid color-mix(in srgb, var(--botcast-host-accent) 52%, rgba(255,255,255,.28)); background: var(--signal-quip-surface); transform: rotate(-45deg); }
@@ -302,7 +317,13 @@
 .dangerButton:hover { border-color: color-mix(in srgb, var(--prism-p) 52%, var(--botcast-line)) !important; background: color-mix(in srgb, var(--prism-p) 12%, transparent) !important; }
 .stageViewport { --botcast-accent: var(--prism-m); --botcast-studio-accent: var(--botcast-accent); --botcast-atmosphere: none; position: relative; max-width: 1180px; aspect-ratio: 16 / 9; margin: 0 auto; overflow: hidden; border: 1px solid rgba(255,255,255,.14); border-radius: 20px; background: #11121a; box-shadow: 0 28px 90px rgba(21,15,48,.35), inset 0 0 80px rgba(0,0,0,.5); }
 .liveLayout .stageViewport { max-width: 1320px; }
-.stageScene { position: absolute; inset: 0; transform-origin: center 55%; transition: transform 900ms cubic-bezier(.22,.72,.2,1); }
+.stageScene { position: absolute; inset: 0; transform-origin: center 55%; transition: transform 900ms cubic-bezier(.22,.72,.2,1), filter 900ms ease; }
+.stageViewport[data-model-warmup="entering"] .stageScene,
+.stageViewport[data-model-warmup="held"] .stageScene,
+.stageViewport[data-model-warmup="failed"] .stageScene { filter: grayscale(1) saturate(0) brightness(.76); transition-duration: 600ms; }
+.stageViewport[data-model-warmup] .stageScene *,
+.stageViewport[data-model-warmup] .stageScene *::before,
+.stageViewport[data-model-warmup] .stageScene *::after { animation-play-state: paused !important; }
 .stageViewport[data-shot="left"] .stageScene,
 .stageViewport[data-shot="right"] .stageScene { transform: translate(var(--botcast-camera-offset-x, 0%), var(--botcast-camera-offset-y, 0%)) scale(1.42); }
 .atmosphere { position: absolute; inset: -5%; overflow: hidden; background-color: #11121a; background-size: cover; background-position: center; filter: saturate(1.08) contrast(1.04); }
@@ -457,6 +478,15 @@
 .shell[data-theme="light"] .showBrandContent h2 { color: var(--botcast-ink); }
 .shell[data-theme="light"] .showBrandContent p { color: color-mix(in srgb, var(--botcast-ink) 62%, transparent); }
 .shell[data-theme="light"] .showBrandContent .eyebrow { color: color-mix(in srgb, var(--botcast-ink) 56%, var(--botcast-accent)); }
+.shell[data-theme="light"] .showAudiencePulse { border-color: color-mix(in srgb, var(--botcast-host-accent) 24%, rgba(255,255,255,.9)); background: linear-gradient(135deg, color-mix(in srgb, var(--botcast-host-accent) 8%, rgba(255,255,255,.82)), rgba(255,255,255,.7)); box-shadow: 0 14px 34px rgba(53,55,89,.13), inset 0 1px rgba(255,255,255,.86); }
+.shell[data-theme="light"] .showAudienceTitle { color: color-mix(in srgb, var(--botcast-host-accent) 62%, var(--botcast-ink)); }
+.shell[data-theme="light"] .showAudienceMetric { border-color: color-mix(in srgb, var(--botcast-ink) 12%, transparent); }
+.shell[data-theme="light"] .showAudienceMetric small { color: color-mix(in srgb, var(--botcast-ink) 52%, transparent); }
+.shell[data-theme="light"] .showAudienceMetric strong { color: var(--botcast-ink); }
+.shell[data-theme="light"] .showAudienceRatingStar { color: color-mix(in srgb, var(--botcast-host-accent) 72%, var(--botcast-ink)); }
+.shell[data-theme="light"] .showAudienceQuote, .shell[data-theme="light"] .showAudienceEmpty { border-color: color-mix(in srgb, var(--botcast-ink) 11%, transparent); }
+.shell[data-theme="light"] .showAudienceQuote p { color: color-mix(in srgb, var(--botcast-ink) 78%, transparent); }
+.shell[data-theme="light"] .showAudienceQuote cite, .shell[data-theme="light"] .showAudienceEmpty { color: color-mix(in srgb, var(--botcast-ink) 54%, transparent) !important; }
 .shell[data-theme="light"] .showLookInvitation { border-color: rgba(255,255,255,.82); background: rgba(255,255,255,.66); box-shadow: 0 16px 42px rgba(53,55,89,.13), inset 0 1px rgba(255,255,255,.88); }
 .shell[data-theme="light"] .showLookInvitation strong { color: var(--botcast-ink); }
 .shell[data-theme="light"] .showLookInvitation small { color: color-mix(in srgb, var(--botcast-ink) 62%, transparent); }
@@ -534,6 +564,12 @@
   .showBrandContent { align-content: flex-start; flex-wrap: wrap; gap: 18px; padding: 26px 196px 26px 26px; }
   .showBrandPreview[data-identity-settings-open="true"] .showBrandContent { padding-right: 26px; padding-bottom: 78px; }
   .showBrandContent .showLogo { width: 82px; height: 82px; border-radius: 22px; }
+  .showBrandIdentity { flex: 1 1 300px; }
+  .showAudiencePulse { margin-top: 12px; padding: 10px 11px 11px; }
+  .showAudienceMetric { padding-inline: 8px; }
+  .showAudienceMetric strong { font-size: .96rem; }
+  .showAudienceQuote { align-items: flex-start; flex-direction: column; gap: 4px; }
+  .showAudienceQuote p { max-width: 100%; white-space: normal; }
   .showLookInvitation, .showLookControls { width: 100%; margin-left: 0; }
   .showCardHostPresence { right: -24px; bottom: 0; width: 226px; }
   .showCardHostFloat > * { transform: scale(1.32); }
@@ -557,6 +593,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .stageScene { transition-duration: 120ms; }
   .stageScene, .episodeOpenButton, .episodeDeleteButton, .episodePreRoll, .preRollLockup, .showIdentityGearButton, .showIdentityGearButton span { transition: none !important; }
   .avatarRig { animation: none !important; transform: rotate(var(--signal-avatar-lean)); }
   .showCardHostPresence { transition: none !important; }

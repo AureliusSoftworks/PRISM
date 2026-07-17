@@ -309,6 +309,8 @@ export interface BackupSnapshot {
       startedAt: string;
       completedAt: string | null;
       runtimeMs: number | null;
+      modelWarmupHoldDurationMs?: number;
+      modelWarmupHoldStartedAt?: string | null;
       createdAt: string;
       updatedAt: string;
     }>;
@@ -1393,6 +1395,14 @@ export function exportUserSnapshot(
         startedAt: String(row.started_at),
         completedAt: typeof row.completed_at === "string" ? row.completed_at : null,
         runtimeMs: typeof row.runtime_ms === "number" ? row.runtime_ms : null,
+        modelWarmupHoldDurationMs: Math.max(
+          0,
+          Number(row.model_warmup_hold_duration_ms ?? 0),
+        ),
+        modelWarmupHoldStartedAt:
+          typeof row.model_warmup_hold_started_at === "string"
+            ? row.model_warmup_hold_started_at
+            : null,
         createdAt: String(row.created_at),
         updatedAt: String(row.updated_at),
       })),
@@ -2020,8 +2030,9 @@ function importUserSnapshotWithinTransaction(
           (id, user_id, show_id, host_bot_id, guest_bot_id, title, topic,
            producer_brief, provider, model, response_mode, duration_minutes, status, segment, outcome,
            tension_level, warning_count, started_at, completed_at, runtime_ms,
+           model_warmup_hold_duration_ms, model_warmup_hold_started_at,
            created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         episode.id, userId, episode.showId, episode.hostBotId, episode.guestBotId,
         episode.title, episode.topic, episode.producerBrief,
@@ -2042,7 +2053,12 @@ function importUserSnapshotWithinTransaction(
           : null,
         episode.status, episode.segment, episode.outcome, episode.tensionLevel,
         episode.warningCount, episode.startedAt, episode.completedAt,
-        episode.runtimeMs, episode.createdAt, episode.updatedAt,
+        episode.runtimeMs,
+        Math.max(0, Number(episode.modelWarmupHoldDurationMs ?? 0)),
+        typeof episode.modelWarmupHoldStartedAt === "string"
+          ? episode.modelWarmupHoldStartedAt
+          : null,
+        episode.createdAt, episode.updatedAt,
       );
     }
     for (const segment of botcast.segments) {

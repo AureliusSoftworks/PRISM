@@ -1645,7 +1645,7 @@ async function generateChatResponse(args: {
         },
       })),
       perAttemptTimeoutMs: 60_000,
-      totalTimeoutMs: 150_000,
+      totalTimeoutMs: resolvedChain.length * 60_000,
       signal: args.signal,
       validate: (raw) => {
         const base = validateAutoFallbackText(raw);

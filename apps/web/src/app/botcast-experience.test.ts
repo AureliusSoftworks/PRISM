@@ -156,6 +156,10 @@ describe("Signal experience shell", () => {
     assert.match(css, /\.shell\[data-theme="light"\] \.studioSpotlightBeam\s*\{[^}]*mix-blend-mode:\s*soft-light/iu);
     assert.match(css, /prefers-reduced-motion[\s\S]*?\.studioSpotlight\s*\{[^}]*animation:\s*none/iu);
     assert.match(pageSource, /data-signal-role=\{avatarState\.role\}/u);
+    assert.match(
+      pageSource,
+      /data-signal-bot-presence="true"[\s\S]*?<BotAmbientPresenceRig[\s\S]*?isTalking=\{avatarState\.talking\}/u,
+    );
     assert.match(pageCss, /\.signalBotPresencePlate\s*\{[^}]*--bot-face-metal-light-rotation:\s*var\(--signal-bot-metal-light-rotation\)/iu);
     assert.match(pageCss, /\.signalBotPresencePlate\s*\{[^}]*--bot-face-screen-glare-x:\s*var\(--signal-bot-screen-glare-x\)/iu);
     assert.match(pageCss, /\.signalBotPresencePlate\s*\{[^}]*signalBotZenSpotlightRefraction 7\.2s/iu);
@@ -362,7 +366,7 @@ describe("Signal experience shell", () => {
     assert.match(pageSource, /botAvatarDetailsFacingScaleX\(faceScaleY\)/u);
     assert.match(
       pageSource,
-      /<ZenLiveBotMannequin[\s\S]{0,320}isTalking=\{avatarState\.talking\}\s+blinkWhileTalking\s+mouthShape=\{avatarState\.mouthShape\}/u,
+      /<ZenLiveBotMannequin[\s\S]{0,420}isTalking=\{avatarState\.talking\}[\s\S]{0,180}blinkWhileTalking\s+mouthShape=\{avatarState\.mouthShape\}/u,
     );
     assert.match(
       css,
@@ -537,6 +541,28 @@ describe("Signal experience shell", () => {
     );
   });
 
+  it("brings the show card to life with an episode-aware audience pulse", () => {
+    assert.match(
+      source,
+      /signalAudienceSnapshot\(\{\s*showId:\s*selectedShow\.id,\s*episodes\s*\}\)/u,
+    );
+    assert.match(source, /data-tutorial-target="botcast-audience-pulse"/u);
+    assert.match(source, />Audience pulse</u);
+    assert.match(source, /<small>Views<\/small>/u);
+    assert.match(source, /<small>Rating<\/small>/u);
+    assert.match(source, /<small>Reviews<\/small>/u);
+    assert.match(source, /out of 5/u);
+    assert.match(source, /Release an episode to start building an audience\./u);
+    assert.match(source, /<blockquote className=\{styles\.showAudienceQuote\}>/u);
+    assert.match(css, /\.showAudienceMetrics\s*\{[^}]*repeat\(3, minmax\(0, 1fr\)\)/iu);
+    assert.match(
+      css,
+      /\.showBrandPreview\[data-identity-settings-open="true"\] \.showAudiencePulse\s*\{[^}]*display:\s*none/iu,
+    );
+    assert.match(css, /\.shell\[data-theme="light"\] \.showAudiencePulse\s*\{/u);
+    assert.match(css, /@media \(max-width:\s*900px\)[\s\S]*?\.showAudienceQuote\s*\{[^}]*flex-direction:\s*column/iu);
+  });
+
   it("floats the host on the show card and periodically reveals fallback quips", () => {
     assert.match(source, /fallbackSignalShowCardQuips\(selectedShow\)/u);
     assert.match(source, /className=\{styles\.showCardHostPresence\}/u);
@@ -557,7 +583,7 @@ describe("Signal experience shell", () => {
     assert.match(css, /\.showRow::before\s*\{[^}]*background:\s*var\(--show-accent\)/iu);
     assert.match(css, /\.showCardHostPresence\s*\{[^}]*bottom:\s*0;/iu);
     assert.match(css, /\.showCardHostFloat\s*\{[^}]*signalShowCardHostFloat/iu);
-    assert.match(css, /\.showCardHostFloat > \*\s*\{[^}]*transform:\s*scale\(1\.8\)/iu);
+    assert.match(css, /\.showCardHostFloat > \*\s*\{[^}]*transform:\s*scale\(1\.5\)/iu);
     assert.match(css, /\.showCardQuipBubble\s*\{/u);
     assert.match(
       css,

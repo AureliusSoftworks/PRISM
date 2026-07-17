@@ -3,23 +3,23 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
-const pageCss = readFileSync(new URL("./page.module.css", import.meta.url), "utf8");
+const menuCss = readFileSync(new URL("./PrismMenu.module.css", import.meta.url), "utf8");
+const menuSource = readFileSync(new URL("./PrismMenu.tsx", import.meta.url), "utf8");
 const textFieldSource = readFileSync(new URL("./TextFieldContextMenu.tsx", import.meta.url), "utf8");
-const textFieldCss = readFileSync(new URL("./TextFieldContextMenu.module.css", import.meta.url), "utf8");
 
-test("ported message, bot, and canvas menus retain a light theme scope", () => {
-  assert.match(pageSource, /contextMenuThemeScope\} \$\{themeClass\}/);
-  assert.match(pageCss, /\.themeLight \.messageContextMenu\s*\{[\s\S]*background:\s*#f8fbff/);
-  assert.match(pageCss, /\.themeLight \.messageContextMenu\s*\{[\s\S]*backdrop-filter:\s*none/);
-  assert.match(pageCss, /\.themeLight \.messageContextMenu button:disabled\s*\{[\s\S]*color:\s*#718496/);
-  assert.match(pageCss, /\.canvasToolsContextMenu\s*\{/);
+test("message, bot, canvas, and click-open menus share an opaque light shell", () => {
+  assert.match(pageSource, /theme: resolvedTheme/);
+  assert.match(menuSource, /data-theme=\{request\.theme \?\? "dark"\}/);
+  assert.match(menuCss, /\.menu\[data-theme="light"\][\s\S]*--prism-menu-bg: #f8fbfe/);
+  assert.match(menuCss, /\.menu\[data-theme="light"\][\s\S]*backdrop-filter: none/);
+  assert.match(menuCss, /--prism-menu-muted: #637386/);
 });
 
 test("text-field menus disable blur in light mode while preserving dark blur", () => {
   assert.match(textFieldSource, /style\.colorScheme\.split\(" "\)\.includes\("light"\) \|\| cssColorIsLight\(bg\)/);
-  assert.match(textFieldSource, /lightTheme\s*\?\s*"none"\s*:\s*"blur\(16px\) saturate\(1\.2\)"/);
-  assert.match(textFieldCss, /--text-field-menu-backdrop-filter/);
-  assert.match(textFieldCss, /blur\(16px\) saturate\(1\.2\)/);
+  assert.match(textFieldSource, /usePrismMenu\(\)/);
+  assert.match(textFieldSource, /theme: themeForTarget\(target\)/);
+  assert.match(menuCss, /backdrop-filter: blur\(18px\) saturate\(1\.16\)/);
 });
 
 test("global canvas-tools menu follows dismiss patterns", () => {

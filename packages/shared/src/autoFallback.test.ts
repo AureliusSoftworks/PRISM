@@ -26,14 +26,28 @@ describe("Auto fallback contracts", () => {
     assert.equal(normalizeResponseMode("bogus", "online"), "online");
   });
 
-  it("round-trips a distinct two-model fallback chain", () => {
+  it("round-trips an existing distinct two-model fallback chain", () => {
     const normalized = normalizeAutoFallbackChain(chain);
     assert.deepEqual(normalized, chain);
     assert.deepEqual(parseStoredAutoFallbackChain(serializeAutoFallbackChain(chain)), chain);
   });
 
-  it("rejects incomplete and duplicate fallback chains", () => {
-    assert.equal(normalizeAutoFallbackChain({ v: 1, fallbacks: [chain.fallbacks[0]] }), null);
+  it("accepts one to five fallbacks and rejects empty, oversized, or duplicate chains", () => {
+    assert.deepEqual(
+      normalizeAutoFallbackChain({ v: 1, fallbacks: [chain.fallbacks[0]] }),
+      { v: 1, fallbacks: [chain.fallbacks[0]] },
+    );
+    assert.equal(normalizeAutoFallbackChain({ v: 1, fallbacks: [] }), null);
+    assert.equal(
+      normalizeAutoFallbackChain({
+        v: 1,
+        fallbacks: Array.from({ length: 6 }, (_, index) => ({
+          provider: "openai",
+          model: `gpt-${index}`,
+        })),
+      }),
+      null,
+    );
     assert.equal(
       normalizeAutoFallbackChain({
         v: 1,
@@ -43,7 +57,7 @@ describe("Auto fallback contracts", () => {
     );
   });
 
-  it("requires the contextual primary to be distinct from both fallbacks", () => {
+  it("skips a redundant fallback matching the contextual primary", () => {
     assert.deepEqual(
       autoFallbackResolvedChain({ provider: "local", model: "qwen3:14b" }, chain),
       [
@@ -51,9 +65,19 @@ describe("Auto fallback contracts", () => {
         ...chain.fallbacks,
       ]
     );
-    assert.equal(
+    assert.deepEqual(
       autoFallbackResolvedChain({ provider: "openai", model: "gpt-5-mini" }, chain),
-      null
+      [
+        { provider: "openai", model: "gpt-5-mini" },
+        { provider: "anthropic", model: "claude-sonnet" },
+      ],
+    );
+    assert.equal(
+      autoFallbackResolvedChain(
+        { provider: "openai", model: "gpt-5-mini" },
+        { v: 1, fallbacks: [{ provider: "openai", model: "gpt-5-mini" }] },
+      ),
+      null,
     );
   });
 

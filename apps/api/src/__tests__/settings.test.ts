@@ -511,6 +511,29 @@ describe("resolveNextSettings — Auto model chain", () => {
     });
   });
 
+  it("persists a maximum five-model mixed-provider fallback chain", () => {
+    const fallbacks = [
+      { provider: "local", model: "qwen3:8b" },
+      { provider: "openai", model: "gpt-5-mini" },
+      { provider: "anthropic", model: "claude-haiku-4-5" },
+      { provider: "local", model: "gemma3:12b" },
+      { provider: "openai", model: "gpt-5-nano" },
+    ];
+    const next = resolveNextSettings(
+      {
+        autoModeEnabled: true,
+        autoFallbackChain: { v: 1, fallbacks },
+      },
+      baseline(),
+    );
+
+    assert.equal(next.autoSwitchModel, 1);
+    assert.deepEqual(JSON.parse(next.autoFallbackChain ?? "null"), {
+      v: 1,
+      fallbacks,
+    });
+  });
+
   it("rejects duplicate entries and preserves the last valid chain", () => {
     const stored = JSON.stringify({
       v: 1,

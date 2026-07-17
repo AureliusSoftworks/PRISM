@@ -406,6 +406,10 @@ export interface BotcastEpisodeSummary {
   startedAt: string;
   completedAt: string | null;
   runtimeMs: number | null;
+  /** Completed local-model warmup holds excluded from the live session clock. */
+  modelWarmupHoldDurationMs: number;
+  /** Active hold start, persisted so a live episode can resume honestly after reload. */
+  modelWarmupHoldStartedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -462,6 +466,10 @@ export interface BotcastEpisodeAdvanceRequest {
 export interface BotcastEpisodeAdvanceResponse {
   episode: BotcastEpisode;
   message: BotcastMessage | null;
+}
+
+export interface BotcastModelWarmupHoldRequest {
+  active: boolean;
 }
 
 export interface BotcastTensionState {
@@ -550,6 +558,8 @@ export function botcastSessionShouldClose(args: {
   durationMinutes: BotcastSessionDurationMinutes | null;
   startedAtMs: number;
   nowMs: number;
+  modelWarmupHoldDurationMs?: number;
+  modelWarmupHoldStartedAtMs?: number | null;
 }): boolean {
   const utteranceCount = args.messages.length;
   if (
@@ -559,9 +569,18 @@ export function botcastSessionShouldClose(args: {
     return false;
   }
   if (args.durationMinutes !== null) {
+    const completedHoldMs = Number.isFinite(args.modelWarmupHoldDurationMs)
+      ? Math.max(0, args.modelWarmupHoldDurationMs ?? 0)
+      : 0;
+    const activeHoldMs =
+      typeof args.modelWarmupHoldStartedAtMs === "number" &&
+      Number.isFinite(args.modelWarmupHoldStartedAtMs)
+        ? Math.max(0, args.nowMs - args.modelWarmupHoldStartedAtMs)
+        : 0;
     return (
       utteranceCount >= BOTCAST_TIMED_MAX_UTTERANCES ||
-      args.nowMs - args.startedAtMs >= args.durationMinutes * 60_000
+      args.nowMs - args.startedAtMs - completedHoldMs - activeHoldMs >=
+        args.durationMinutes * 60_000
     );
   }
   if (

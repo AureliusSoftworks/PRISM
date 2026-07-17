@@ -31,9 +31,14 @@ describe("mode tutorials", () => {
       MODE_TUTORIALS.botcast.steps[1]?.targetSelector,
       '[data-tutorial-target="botcast-brand-controls"]',
     );
-    assert.equal(MODE_TUTORIALS.botcast.steps[2]?.heading, "Give it an opening sound");
+    assert.equal(MODE_TUTORIALS.botcast.steps[2]?.heading, "Build an audience");
     assert.equal(
       MODE_TUTORIALS.botcast.steps[2]?.targetSelector,
+      '[data-tutorial-target="botcast-audience-pulse"]',
+    );
+    assert.equal(MODE_TUTORIALS.botcast.steps[3]?.heading, "Give it an opening sound");
+    assert.equal(
+      MODE_TUTORIALS.botcast.steps[3]?.targetSelector,
       '[data-tutorial-target="botcast-intro-audio"]',
     );
     assert.match(MODE_TUTORIALS.botcast.steps[0]?.body ?? "", /never waits on synthesis/u);
@@ -45,45 +50,50 @@ describe("mode tutorials", () => {
     assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /gear at the bottom-right/u);
     assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /opening ident/u);
     assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /replace either studio visual/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[2]?.body ?? "", /host-persona-led Signal Synth ident/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[2]?.body ?? "", /Play intro/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[2]?.body ?? "", /Playback stays here in the strip/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[2]?.body ?? "", /open its gear/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[2]?.body ?? "", /no key or network/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[4]?.body ?? "", /default stage places both bots/u);
-    assert.equal(MODE_TUTORIALS.botcast.steps[3]?.heading, "Choose how the bots speak");
+    assert.match(MODE_TUTORIALS.botcast.steps[2]?.body ?? "", /begins with no audience/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[2]?.body ?? "", /simulated viewer base/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[2]?.body ?? "", /overall rating/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[2]?.body ?? "", /listener reviews/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[2]?.body ?? "", /Guest and topic choices/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[3]?.body ?? "", /host-persona-led Signal Synth ident/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[3]?.body ?? "", /Play intro/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[3]?.body ?? "", /Playback stays here in the strip/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[3]?.body ?? "", /open its gear/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[3]?.body ?? "", /no key or network/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /default stage places both bots/u);
+    assert.equal(MODE_TUTORIALS.botcast.steps[4]?.heading, "Choose how the bots speak");
     assert.equal(
-      MODE_TUTORIALS.botcast.steps[3]?.targetSelector,
+      MODE_TUTORIALS.botcast.steps[4]?.targetSelector,
       '[data-tutorial-target="botcast-voice-mode"]',
     );
-    assert.match(MODE_TUTORIALS.botcast.steps[3]?.body ?? "", /matches Zen/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[3]?.body ?? "", /both host and guest/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[3]?.body ?? "", /locks while Signal is on air/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[4]?.body ?? "", /Pick LOCAL, AUTO, or ONLINE/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[4]?.body ?? "", /configured fallback chain/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[4]?.body ?? "", /locks that routing/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[4]?.body ?? "", /skippable show-branded pre-roll/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[4]?.body ?? "", /Randomize booking/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[4]?.body ?? "", /fill all three locally/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[4]?.body ?? "", /Episode length defaults to Auto/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[4]?.body ?? "", /close-up pans center/u);
-    assert.equal(MODE_TUTORIALS.botcast.steps[5]?.heading, "Direct the live cut");
+    assert.match(MODE_TUTORIALS.botcast.steps[4]?.body ?? "", /matches Zen/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[4]?.body ?? "", /both host and guest/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[4]?.body ?? "", /locks while Signal is on air/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /Pick LOCAL, AUTO, or ONLINE/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /configured fallback chain/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /locks that routing/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /skippable show-branded pre-roll/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /Randomize booking/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /fill all three locally/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /Episode length defaults to Auto/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /close-up pans center/u);
+    assert.equal(MODE_TUTORIALS.botcast.steps[6]?.heading, "Direct the live cut");
     assert.equal(
-      MODE_TUTORIALS.botcast.steps[5]?.targetSelector,
+      MODE_TUTORIALS.botcast.steps[6]?.targetSelector,
       '[data-tutorial-target="botcast-live-camera"]',
     );
-    assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /Left, Right, and Wide hold a fixed studio shot/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /choosing Auto again hands direction back/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /records every choice/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[6]?.body ?? "", /one speaker on mic at a time/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[6]?.body ?? "", /words they have finished saying/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[6]?.body ?? "", /Wrap it up is shared episode direction/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[6]?.body ?? "", /both bots/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[6]?.body ?? "", /session-changing navbar tools stay locked/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[6]?.body ?? "", /restores the full chrome/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[6]?.body ?? "", /left rail while on air makes the same producer cut/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[7]?.body ?? "", /no post-episode camera controls/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[7]?.body ?? "", /play, pause, scrub/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[6]?.body ?? "", /Left, Right, and Wide hold a fixed studio shot/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[6]?.body ?? "", /choosing Auto again hands direction back/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[6]?.body ?? "", /records every choice/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[7]?.body ?? "", /one speaker on mic at a time/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[7]?.body ?? "", /words they have finished saying/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[7]?.body ?? "", /Wrap it up is shared episode direction/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[7]?.body ?? "", /both bots/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[7]?.body ?? "", /session-changing navbar tools stay locked/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[7]?.body ?? "", /restores the full chrome/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[7]?.body ?? "", /left rail while on air makes the same producer cut/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[8]?.body ?? "", /no post-episode camera controls/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[8]?.body ?? "", /play, pause, scrub/u);
   });
 
   it("teaches Slate as a directed document workflow with stable targets", () => {
@@ -175,6 +185,7 @@ describe("mode tutorials", () => {
       setup?.body ?? "",
       /AUTO is the separate response-routing control/,
     );
+    assert.match(setup?.body ?? "", /one to five local or online fallbacks/);
     assert.match(setup?.body ?? "", /Auto duration is open-ended with no countdown/);
     assert.match(
       routing?.body ?? "",
@@ -193,10 +204,11 @@ describe("mode tutorials", () => {
     const routing = MODE_TUTORIALS.zen.steps.find(
       (step) => step.heading === "Choose how replies recover",
     );
+    assert.match(routing?.body ?? "", /one to five saved local or online fallbacks/);
     assert.match(routing?.body ?? "", /Image generation keeps its own LOCAL\/ONLINE choice/);
     assert.match(
       routing?.body ?? "",
-      /choose an ElevenLabs voice from the list or paste a Voice ID override/,
+      /choose an ElevenLabs voice from the list or open “Use an exact Voice ID” for a portable override/,
     );
     assert.match(routing?.body ?? "", /only for eligible ONLINE speech/);
     assert.match(routing?.body ?? "", /Voice Settings can narrow/);
