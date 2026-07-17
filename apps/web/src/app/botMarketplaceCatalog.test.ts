@@ -16,7 +16,6 @@ import {
   normalizeBotFaceMouthScale,
   normalizeBotFaceThinkingFrames,
   normalizeOptionalBotAudioVoiceProfileV1,
-  BOT_AUDIO_VOICE_IDS,
 } from "@localai/shared";
 import {
   marketplaceBotEyeCharacterIsSideways,
@@ -45,41 +44,60 @@ function readBotBundle(filePath: string) {
 }
 
 describe("bot marketplace static catalog", () => {
-  it("ships a portable authored voice for every bot and neutral defaults for the originals", () => {
+  it("ships a portable, persona-crafted ElevenLabs voice for every bot", () => {
     const manifest = normalizeBotMarketplaceManifest(
       readJsonFile(path.join(publicRoot, "bot-marketplace/manifest.json"))
     );
-    const originals = ["pia", "rowan", "iris", "sol", "mira"];
     for (const entry of manifest.bots) {
       const bundle = readBotBundle(path.join(publicRoot, entry.bundlePath));
       const profile = normalizeOptionalBotAudioVoiceProfileV1(
         bundle.botJson.bot.authoredAudioVoiceProfile
       );
       assert.notEqual(profile, null, `${entry.name} must include an authored voice`);
-      if (originals.includes(entry.id)) {
-        const index = originals.indexOf(entry.id);
-        assert.deepEqual(profile, {
-          v: 2,
-          enabled: true,
-          baseVoiceId: BOT_AUDIO_VOICE_IDS[index],
-          elevenLabsEffect: "clean",
-          pitch: 0,
-          warmth: 0,
-          pace: 0,
-          lilt: 0,
-          bottishTone: 0.45,
-          volume: 1,
-          texture: {
-            preset: "clean",
-            amount: 0,
-            bandwidth: 1,
-            noise: 0,
-            instability: 0,
-            distortion: 0,
-            damage: 0,
-          },
-        });
-      }
+      assert.equal(profile?.enabled, true, entry.name);
+      assert.equal(typeof profile?.elevenLabsVoiceIdOverride, "string", entry.name);
+      assert.equal(
+        (profile?.elevenLabsVoiceIdOverride?.length ?? 0) > 0,
+        true,
+        entry.name
+      );
+      const directions =
+        profile?.elevenLabsDirection?.split(",").map((value) => value.trim()) ?? [];
+      assert.equal(directions.length >= 2 && directions.length <= 3, true, entry.name);
+      assert.equal(
+        directions.every((value) => value.length > 0 && value.length <= 48),
+        true,
+        entry.name
+      );
+      assert.equal(
+        Math.abs((profile?.pitch ?? 0) * 20 - Math.round((profile?.pitch ?? 0) * 20)) <
+          1e-9,
+        true,
+        `${entry.name} pitch`
+      );
+      assert.equal(
+        Math.abs((profile?.lilt ?? 0) * 20 - Math.round((profile?.lilt ?? 0) * 20)) <
+          1e-9,
+        true,
+        `${entry.name} lilt`
+      );
+      assert.deepEqual(
+        profile?.texture,
+        {
+          preset: "clean",
+          amount: 0,
+          bandwidth: 1,
+          noise: 0,
+          instability: 0,
+          distortion: 0,
+          damage: 0,
+        },
+        entry.name
+      );
+      const previewLine = bundle.botJson.bot.voicePreviewLine;
+      assert.equal(typeof previewLine, "string", entry.name);
+      assert.equal((previewLine?.trim().length ?? 0) > 0, true, entry.name);
+      assert.equal((previewLine?.length ?? 0) <= 160, true, entry.name);
     }
   });
 
@@ -88,6 +106,7 @@ describe("bot marketplace static catalog", () => {
       readJsonFile(path.join(publicRoot, "bot-marketplace/manifest.json"))
     );
     const seenFaceSignatures = new Set<string>();
+    const seenThinkingSpinners = new Set<string>();
 
     assert.equal(manifest.bots.length > 0, true);
     for (const entry of manifest.bots) {
@@ -122,6 +141,9 @@ describe("bot marketplace static catalog", () => {
       assert.equal(normalizeBotFaceBlinkBar(bot.faceBlinkBar), DEFAULT_BOT_FACE_BLINK_BAR, entry.name);
       const thinkingFrames = normalizeBotFaceThinkingFrames(bot.faceThinkingFrames);
       assert.notEqual(thinkingFrames, null, entry.name);
+      const thinkingSpinner = JSON.stringify(thinkingFrames);
+      assert.equal(seenThinkingSpinners.has(thinkingSpinner), false, `${entry.name} spinner`);
+      seenThinkingSpinners.add(thinkingSpinner);
       const faceSignature = JSON.stringify({
         eyesFont: bot.faceEyesFont,
         eyeCharacter: bot.faceEyeCharacter,
@@ -426,7 +448,15 @@ describe("bot marketplace static catalog", () => {
     const expectedPresets = new Map([
       [
         "pia",
-        { preset: "Default", eyesFont: "neutral", mouthFont: "neutral", weight: 600, eyeScale: 1, eyeOffsetY: 0 },
+        {
+          preset: "Default",
+          eyesFont: "neutral",
+          mouthFont: "neutral",
+          weight: 600,
+          eyeScale: 1,
+          eyeOffsetY: 0,
+          thinkingFrames: ["·", "p", "P", "p"],
+        },
       ],
       [
         "rowan",
@@ -437,19 +467,44 @@ describe("bot marketplace static catalog", () => {
           weight: 625,
           eyeScale: 1.05,
           eyeOffsetY: -0.02,
+          thinkingFrames: ["<", "^", ">", "v"],
         },
       ],
       [
         "iris",
-        { preset: "Soft", eyesFont: "warm", mouthFont: "warm", weight: 575, eyeScale: 1.05, eyeOffsetY: 0 },
+        {
+          preset: "Soft",
+          eyesFont: "warm",
+          mouthFont: "warm",
+          weight: 575,
+          eyeScale: 1.05,
+          eyeOffsetY: 0,
+          thinkingFrames: [".", "i", "I", "i"],
+        },
       ],
       [
         "sol",
-        { preset: "Classic", eyesFont: "neutral", mouthFont: "neutral", weight: 600, eyeScale: 1, eyeOffsetY: 0 },
+        {
+          preset: "Classic",
+          eyesFont: "neutral",
+          mouthFont: "neutral",
+          weight: 600,
+          eyeScale: 1,
+          eyeOffsetY: 0,
+          thinkingFrames: [".", "*", "+", "*"],
+        },
       ],
       [
         "mira",
-        { preset: "Serif", eyesFont: "formal", mouthFont: "formal", weight: 575, eyeScale: 0.95, eyeOffsetY: 0 },
+        {
+          preset: "Serif",
+          eyesFont: "formal",
+          mouthFont: "formal",
+          weight: 575,
+          eyeScale: 0.95,
+          eyeOffsetY: 0,
+          thinkingFrames: ["?", "!", "?", "…"],
+        },
       ],
     ]);
 
@@ -472,13 +527,11 @@ describe("bot marketplace static catalog", () => {
       assert.equal(bot.faceMouthOffsetY, 0, `${botId} ${preset.preset} mouth y`);
       assert.equal(bot.faceMouthRotationDeg, 0, `${botId} ${preset.preset} mouth rotation`);
       assert.equal(bot.faceBlinkBar, " ", `${botId} ${preset.preset} blink bar`);
-      if (botId === "pia" || botId === "iris") {
-        assert.deepEqual(
-          bot.faceThinkingFrames,
-          ["|", "/", "-", "\\"],
-          `${botId} ${preset.preset} thinking frames`
-        );
-      }
+      assert.deepEqual(
+        bot.faceThinkingFrames,
+        preset.thinkingFrames,
+        `${botId} ${preset.preset} thinking frames`
+      );
     }
   });
 });
