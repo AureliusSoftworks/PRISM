@@ -4552,6 +4552,191 @@ test.describe("PRISM desktop smoke", () => {
       .toBeGreaterThan(0);
   });
 
+  test("bot Voice ID override wins without replacing the catalog selection", async ({
+    page,
+  }) => {
+    test.slow();
+    const voiceBot = {
+      ...testBots[0]!,
+      authored_audio_voice_profile: {
+        v: 2,
+        enabled: true,
+        baseVoiceId: "voice-1",
+        elevenLabsVoiceId: "catalog-voice-id",
+        elevenLabsEffect: "clean",
+        pitch: 0,
+        warmth: 0,
+        pace: 0,
+        lilt: 0,
+        bottishTone: 0.45,
+        volume: 1,
+        texture: {
+          preset: "clean",
+          amount: 0,
+          bandwidth: 1,
+          noise: 0,
+          instability: 0,
+          distortion: 0,
+          damage: 0,
+        },
+      },
+      audio_voice_profile_override: null as Record<string, unknown> | null,
+    };
+    let savedProfile: Record<string, unknown> | null = null;
+    await installAuthenticatedApi(page, { bots: [voiceBot] });
+    await page.route(
+      "**/api/voices/elevenlabs/portable-voice-id",
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            ok: true,
+            voice: {
+              voiceId: "portable-voice-id",
+              name: "Portable Muse",
+            },
+          }),
+        });
+      },
+    );
+    await page.route(`**/api/bots/${voiceBot.id}`, async (route) => {
+      const body = route.request().postDataJSON() as {
+        audioVoiceProfileOverride?: Record<string, unknown>;
+      };
+      savedProfile = body.audioVoiceProfileOverride ?? null;
+      voiceBot.audio_voice_profile_override = savedProfile;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ok: true, bot: voiceBot }),
+      });
+    });
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto("/");
+
+    await activateNavigationControl(
+      page.getByRole("button", { name: "Open bot customizer" }),
+    );
+    await activateNavigationControl(
+      page.getByRole("button", { name: /Browse bots/ }),
+    );
+    await activateBotManagementControl(
+      page.getByRole("button", {
+        name: /Preview Test Bot 1; double-click to manage/,
+      }),
+    );
+    await activateNavigationControl(
+      page.getByRole("button", { name: /^Avatar Studio/ }),
+    );
+
+    const studio = page.getByRole("dialog", { name: "Test Bot 1" });
+    await expect(studio).toBeVisible();
+    await studio.getByRole("tab", { name: "Voice" }).click({ force: true });
+
+    const catalogVoice = studio.getByLabel("ElevenLabs voice identity");
+    const voiceIdOverride = studio.getByLabel("ElevenLabs voice ID override");
+    const onlineVoice = studio.getByRole("region", { name: "Online voice" });
+    const fallbackVoice = studio.getByRole("region", {
+      name: "Offline and fallback voice",
+    });
+    await expect(onlineVoice).toBeVisible();
+    await expect(fallbackVoice).toBeVisible();
+    await expect(onlineVoice).toContainText("List voice");
+    await expect(fallbackVoice).toContainText("Fallback");
+    await expect(catalogVoice).toHaveValue("catalog-voice-id");
+    await voiceIdOverride.fill("portable-voice-id");
+    await voiceIdOverride.blur();
+    await expect
+      .poll(() => savedProfile?.elevenLabsVoiceIdOverride ?? null)
+      .toBe("portable-voice-id");
+    await expect(catalogVoice).toHaveValue("catalog-voice-id");
+    await expect(onlineVoice).toContainText("Override active");
+    await expect(studio.getByText("Voice ID", { exact: true })).toBeVisible();
+    await expect(
+      studio.locator('[data-voice-id-resolution="true"]'),
+    ).toContainText("Portable Muse");
+
+    const voiceDirectionInput = studio.getByLabel(
+      "Add ElevenLabs voice direction cue",
+    );
+    for (const cue of ["warmly", "hushed", "mischievously"]) {
+      await voiceDirectionInput.fill(cue);
+      await voiceDirectionInput.press("Enter");
+      await expect(
+        studio.getByRole("button", {
+          name: `Remove voice direction ${cue}`,
+        }),
+      ).toBeVisible();
+    }
+    await expect(voiceDirectionInput).toBeDisabled();
+    await expect
+      .poll(() => savedProfile?.elevenLabsDirection ?? null)
+      .toBe("warmly, hushed, mischievously");
+    await studio
+      .getByRole("button", {
+        name: "Remove voice direction mischievously",
+      })
+      .click();
+    await expect(voiceDirectionInput).toBeEnabled();
+    await expect
+      .poll(() => savedProfile?.elevenLabsDirection ?? null)
+      .toBe("warmly, hushed");
+
+    await page.addStyleTag({
+      content: `[class*="botAvatarCustomizerBackdrop"] {
+        backdrop-filter: none !important;
+        -webkit-backdrop-filter: none !important;
+      }`,
+    });
+    const voiceEditor = studio.locator('[data-bot-voice-editor="true"]');
+    await voiceEditor.screenshot({
+      path: ".codex/output/bot-voice-panel-dark.png",
+      animations: "disabled",
+    });
+    await voiceEditor.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    await voiceEditor.screenshot({
+      path: ".codex/output/bot-voice-panel-dark-bottom.png",
+      animations: "disabled",
+    });
+    const themeToggle = studio.locator(
+      '[data-avatar-customizer-theme-toggle="true"]',
+    );
+    await themeToggle.click();
+    await themeToggle.click();
+    await expect(
+      page.locator('[data-avatar-studio-theme="light"]'),
+    ).toBeVisible();
+    await studio.getByRole("tab", { name: "Voice" }).click({ force: true });
+    const lightVoiceEditor = studio.locator('[data-bot-voice-editor="true"]');
+    await lightVoiceEditor.evaluate((element) => {
+      element.scrollTop = 0;
+    });
+    await lightVoiceEditor.screenshot({
+      path: ".codex/output/bot-voice-panel-light.png",
+      animations: "disabled",
+    });
+
+    await voiceIdOverride.fill("unavailable-voice-id");
+    await voiceIdOverride.blur();
+    await expect(
+      studio.locator('[data-voice-id-resolution="true"]'),
+    ).toContainText("Voice unavailable");
+
+    await voiceIdOverride.fill("");
+    await voiceIdOverride.blur();
+    await expect
+      .poll(() => savedProfile?.elevenLabsVoiceIdOverride ?? null)
+      .toBeNull();
+    await expect(catalogVoice).toHaveValue("catalog-voice-id");
+    await expect(
+      studio.locator('[data-voice-id-resolution="true"]'),
+    ).toHaveCount(0);
+  });
+
   test("custom mouth Coffee pucker stays in the Mouth header and persists @visual", async ({
     page,
   }) => {

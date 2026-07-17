@@ -153,10 +153,12 @@ describe("audio voice normalization", () => {
       ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
       systemVoiceName: "  Alex  ",
       elevenLabsVoiceId: " eleven-voice-id ",
+      elevenLabsVoiceIdOverride: " portable-voice-id ",
       elevenLabsEffect: "radio",
     });
     assert.equal(profile.systemVoiceName, "Alex");
     assert.equal(profile.elevenLabsVoiceId, "eleven-voice-id");
+    assert.equal(profile.elevenLabsVoiceIdOverride, "portable-voice-id");
     assert.equal(profile.elevenLabsEffect, "radio");
     assert.deepEqual(
       parseStoredBotAudioVoiceProfileV1(serializeBotAudioVoiceProfileV1(profile)),
@@ -182,7 +184,7 @@ describe("audio voice normalization", () => {
       normalizeElevenLabsVoiceDirection(
         " warm , [hushed]; warm\nwith measured pauses, mischievously ",
       ),
-      "warm, hushed, with measured pauses, mischievously",
+      "warm, hushed, with measured pauses",
     );
     const profile = normalizeBotAudioVoiceProfileV1({
       ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,

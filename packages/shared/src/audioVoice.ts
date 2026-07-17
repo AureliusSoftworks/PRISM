@@ -78,6 +78,8 @@ export interface BotAudioVoiceProfileV2 {
   baseVoiceId: BotAudioVoiceId;
   systemVoiceName?: string | null;
   elevenLabsVoiceId?: string | null;
+  /** Exact provider identity that wins over the catalog selection when set. */
+  elevenLabsVoiceIdOverride?: string | null;
   elevenLabsEffect: ElevenLabsVoiceEffect;
   /** Comma-separated Eleven v3 audio directions such as "warm, hushed". */
   elevenLabsDirection?: string | null;
@@ -399,7 +401,7 @@ export function normalizeElevenLabsVoiceDirection(
     if (seen.has(key)) continue;
     seen.add(key);
     directions.push(direction);
-    if (directions.length >= 8) break;
+    if (directions.length >= 3) break;
   }
   return directions.length > 0 ? directions.join(", ").slice(0, 240) : null;
 }
@@ -466,6 +468,10 @@ export function normalizeBotAudioVoiceProfileV1(
     record.elevenLabsVoiceId,
     fallbackProfile.elevenLabsVoiceId ?? null
   );
+  const elevenLabsVoiceIdOverride = normalizeOptionalVoiceSelection(
+    record.elevenLabsVoiceIdOverride,
+    fallbackProfile.elevenLabsVoiceIdOverride ?? null
+  );
   const elevenLabsDirection = normalizeElevenLabsVoiceDirection(
     record.elevenLabsDirection,
     fallbackProfile.elevenLabsDirection ?? null
@@ -478,6 +484,7 @@ export function normalizeBotAudioVoiceProfileV1(
       : fallbackProfile.baseVoiceId,
     ...(systemVoiceName ? { systemVoiceName } : {}),
     ...(elevenLabsVoiceId ? { elevenLabsVoiceId } : {}),
+    ...(elevenLabsVoiceIdOverride ? { elevenLabsVoiceIdOverride } : {}),
     elevenLabsEffect: normalizeElevenLabsVoiceEffect(record.elevenLabsEffect),
     ...(elevenLabsDirection ? { elevenLabsDirection } : {}),
     pitch: normalizeBotAudioVoiceControl(record.pitch, fallbackProfile.pitch),
@@ -553,7 +560,8 @@ export function normalizeOptionalBotAudioVoiceProfileV1(value: unknown): BotAudi
   const recognizableUnversionedProfile = version === undefined && (
     isBotAudioVoiceId(record.baseVoiceId) ||
     typeof record.systemVoiceName === "string" ||
-    typeof record.elevenLabsVoiceId === "string"
+    typeof record.elevenLabsVoiceId === "string" ||
+    typeof record.elevenLabsVoiceIdOverride === "string"
   );
   if (version !== 1 && version !== 2 && !recognizableUnversionedProfile) return null;
   return normalizeBotAudioVoiceProfileV1(candidate);

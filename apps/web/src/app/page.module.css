@@ -72030,38 +72030,90 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 .botVoiceEditor {
   display: grid;
-  gap: 14px;
-  padding: 14px;
-  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
-  border-radius: 16px;
-  background: color-mix(in srgb, var(--panel) 86%, var(--editor-bot-color) 14%);
+  align-content: start;
+  gap: 16px;
+  min-width: 0;
+  padding: 2px;
   overflow: auto;
 }
 
 .botVoiceEditorHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.botVoiceEditorHeader > div {
   display: grid;
-  gap: 3px;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  padding: 13px;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color) 35%, var(--line));
+  border-radius: 15px;
+  background:
+    radial-gradient(
+      circle at 8% 12%,
+      color-mix(in srgb, var(--editor-bot-color) 20%, transparent),
+      transparent 42%
+    ),
+    color-mix(in srgb, var(--panel) 94%, var(--editor-bot-color) 6%);
+  box-shadow: 0 12px 28px color-mix(in srgb, var(--bg) 62%, transparent);
 }
 
-.botVoiceEditorHeader small,
-.botVoiceIdentityField small {
+.botVoiceEditorMark {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color) 44%, var(--line));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--editor-bot-color) 16%, var(--bg));
+  color: var(--editor-bot-color);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 12%, transparent);
+}
+
+.botVoiceEditorIntro {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.botVoiceEditorIntro > span {
+  color: color-mix(in srgb, var(--editor-bot-color) 78%, var(--fg));
+  font-size: 9px;
+  font-weight: 850;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.botVoiceEditorIntro strong {
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.botVoiceEditorIntro small,
+.botVoiceIdentityField small,
+.botVoiceSectionHeading small {
   color: var(--muted);
 }
 
 .botVoiceEditorHeader button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 68px;
   border: 1px solid var(--border);
   border-radius: 999px;
-  padding: 7px 12px;
+  padding: 7px 10px;
   background: var(--bg);
   color: var(--fg);
+  font-size: 11px;
+  font-weight: 760;
   cursor: pointer;
+}
+
+.botVoiceEditorHeader button::before {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 72%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--muted) 10%, transparent);
+  content: "";
 }
 
 .botVoiceEditorHeader button[data-active="true"] {
@@ -72069,86 +72121,458 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   background: color-mix(in srgb, var(--editor-bot-color) 18%, var(--bg));
 }
 
-.botVoiceSectionLabel {
-  color: var(--muted);
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.1em;
+.botVoiceEditorHeader button[data-active="true"]::before {
+  background: var(--editor-bot-color);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--editor-bot-color) 16%, transparent),
+    0 0 9px color-mix(in srgb, var(--editor-bot-color) 70%, transparent);
+}
+
+.botVoiceSection {
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+}
+
+.botVoiceSectionHeading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 2px;
+}
+
+.botVoiceSectionHeading > div {
+  display: grid;
+  gap: 2px;
+}
+
+.botVoiceSectionHeading > div > span {
+  color: var(--fg);
+  font-size: 11px;
+  font-weight: 820;
+  letter-spacing: 0.075em;
   text-transform: uppercase;
+}
+
+.botVoiceSectionHeading small {
+  font-size: 10.5px;
+  line-height: 1.35;
+}
+
+.botVoiceSourceStatus {
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 820;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+}
+
+.botVoiceSourceStatus[data-source="elevenlabs"],
+.botVoiceSourceStatus[data-source="override"] {
+  border-color: color-mix(in srgb, var(--editor-bot-color) 48%, var(--line));
+  background: color-mix(in srgb, var(--editor-bot-color) 12%, var(--panel));
+  color: color-mix(in srgb, var(--editor-bot-color) 82%, var(--fg));
+}
+
+.botVoiceSourceStack {
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+}
+
+.botVoiceSourceCard {
+  display: grid;
+  gap: 11px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--line) 92%, transparent);
+  border-radius: 15px;
+  background: color-mix(in srgb, var(--panel) 91%, var(--bg) 9%);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 5%, transparent);
+}
+
+.botVoiceSourceCard[data-kind="online"] {
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--editor-bot-color) 8%, var(--panel)),
+    color-mix(in srgb, var(--panel) 94%, var(--bg)) 48%
+  );
+}
+
+.botVoiceSourceCard[data-active="true"] {
+  border-color: color-mix(in srgb, var(--editor-bot-color) 48%, var(--line));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 7%, transparent),
+    0 8px 22px color-mix(in srgb, var(--editor-bot-color) 8%, transparent);
+}
+
+.botVoiceSourceCardHeader {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+}
+
+.botVoiceSourceCardHeader > span {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--line) 90%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  color: color-mix(in srgb, var(--editor-bot-color) 72%, var(--fg));
+}
+
+.botVoiceSourceCardHeader > div {
+  display: grid;
+  gap: 1px;
+}
+
+.botVoiceSourceCardHeader small {
+  color: var(--muted);
+  font-size: 8.5px;
+  font-weight: 830;
+  letter-spacing: 0.085em;
+}
+
+.botVoiceSourceCardHeader strong {
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.botVoiceSourceCardHeader em {
+  border-radius: 999px;
+  padding: 4px 7px;
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  color: var(--muted);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 760;
+}
+
+.botVoiceSourceCard[data-active="true"] .botVoiceSourceCardHeader em {
+  background: color-mix(in srgb, var(--editor-bot-color) 13%, var(--bg));
+  color: color-mix(in srgb, var(--editor-bot-color) 78%, var(--fg));
 }
 
 .botVoiceIdentityField {
   display: grid;
-  gap: 7px;
+  gap: 6px;
+  min-width: 0;
 }
 
 .botVoiceIdentityField label {
   color: var(--fg);
-  font-size: 12px;
-  font-weight: 720;
+  font-size: 10.5px;
+  font-weight: 740;
 }
 
 .botVoiceIdentityField select,
 .botVoiceIdentityField input {
   width: 100%;
+  height: 40px;
   min-width: 0;
-  padding: 10px 34px 10px 11px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--bg);
+  padding: 9px 34px 9px 11px;
+  border: 1px solid color-mix(in srgb, var(--border) 92%, transparent);
+  border-radius: 11px;
+  outline: none;
+  background: color-mix(in srgb, var(--bg) 90%, var(--panel));
   color: var(--fg);
   font: inherit;
   font-size: 12px;
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    background-color 140ms ease;
 }
 
 .botVoiceIdentityField input {
   padding-right: 11px;
 }
 
-.botVoiceControls {
-  display: grid;
-  gap: 9px;
+.botVoiceIdentityField select:focus-visible,
+.botVoiceIdentityField input:focus-visible {
+  border-color: color-mix(in srgb, var(--editor-bot-color) 72%, var(--border));
+  box-shadow: 0 0 0 3px
+    color-mix(in srgb, var(--editor-bot-color) 14%, transparent);
 }
 
-.botVoiceControls label {
-  display: grid;
-  grid-template-columns: 64px minmax(0, 1fr) 42px;
+.botVoiceIdentityField > small {
+  font-size: 9.5px;
+  line-height: 1.4;
+}
+
+.botVoiceDirectionField {
+  gap: 7px;
+}
+
+.botVoiceDirectionChipBox {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 9px;
-  font-size: 12px;
+  gap: 6px;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px;
+  border: 1px solid color-mix(in srgb, var(--border) 92%, transparent);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--bg) 90%, var(--panel));
+  cursor: text;
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    background-color 140ms ease;
 }
 
-.botVoiceControls output {
-  text-align: right;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
+.botVoiceDirectionChipBox:focus-within {
+  border-color: color-mix(in srgb, var(--editor-bot-color) 72%, var(--border));
+  box-shadow: 0 0 0 3px
+    color-mix(in srgb, var(--editor-bot-color) 14%, transparent);
 }
 
-.botVoiceControlHint {
-  margin-top: -4px;
-  color: var(--muted);
-  font-size: 10.5px;
-}
-
-.botVoiceActions button {
-  min-width: 0;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 8px 9px;
-  background: var(--bg);
+.botVoiceDirectionChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 1px solid
+    color-mix(in srgb, var(--editor-bot-color) 42%, var(--line));
+  border-radius: 8px;
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--editor-bot-color) 14%, transparent),
+      color-mix(in srgb, var(--panel) 82%, var(--bg))
+    );
   color: var(--fg);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 10.5px;
+  font-weight: 760;
   cursor: pointer;
 }
 
-.botVoiceActions {
+.botVoiceDirectionChip span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.botVoiceDirectionChip span:last-child {
+  flex: 0 0 auto;
+  color: color-mix(in srgb, var(--editor-bot-color) 72%, var(--muted));
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.botVoiceDirectionChip:hover,
+.botVoiceDirectionChip:focus-visible {
+  outline: none;
+  border-color: color-mix(
+    in srgb,
+    var(--editor-bot-color) 68%,
+    var(--line)
+  );
+  background: color-mix(in srgb, var(--editor-bot-color) 18%, var(--panel));
+}
+
+.botVoiceDirectionChipBox .botVoiceDirectionInput {
+  flex: 1 1 120px;
+  width: auto;
+  min-width: 96px;
+  height: 28px;
+  padding: 3px 5px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 10.5px;
+}
+
+.botVoiceDirectionChipBox .botVoiceDirectionInput:focus-visible {
+  border: 0;
+  box-shadow: none;
+}
+
+.botVoiceDirectionChipBox .botVoiceDirectionInput:disabled {
+  display: none;
+}
+
+.botVoiceOverrideField {
+  padding: 10px;
+  border: 1px dashed color-mix(in srgb, var(--line) 88%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg) 48%, transparent);
+}
+
+.botVoiceOverrideField[data-active="true"] {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--editor-bot-color) 46%, var(--line));
+  background: color-mix(in srgb, var(--editor-bot-color) 8%, var(--bg));
+}
+
+.botVoiceOverrideField input {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11px;
+  letter-spacing: 0.01em;
+}
+
+.botVoiceOverrideLabelRow {
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
   justify-content: space-between;
   gap: 8px;
 }
 
-.botVoiceActions button:first-child {
-  margin-right: auto;
+.botVoiceOverrideLabelRow > span {
+  border-radius: 999px;
+  padding: 3px 6px;
+  background: color-mix(in srgb, var(--editor-bot-color) 10%, var(--panel));
+  color: color-mix(in srgb, var(--editor-bot-color) 75%, var(--fg));
+  font-size: 8px;
+  font-weight: 820;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.botVoiceIdResolution {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 7px 9px;
+  border: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--panel) 72%, transparent);
+  color: var(--muted);
+}
+
+.botVoiceIdResolution[data-state="resolved"] {
+  border-color: color-mix(in srgb, var(--editor-bot-color) 44%, var(--line));
+  background: color-mix(in srgb, var(--editor-bot-color) 10%, var(--panel));
+  color: color-mix(in srgb, var(--editor-bot-color) 80%, var(--fg));
+}
+
+.botVoiceIdResolution[data-state="unavailable"] {
+  border-color: color-mix(in srgb, #d87a72 38%, var(--line));
+  background: color-mix(in srgb, #d87a72 7%, var(--panel));
+  color: color-mix(in srgb, #d87a72 74%, var(--fg));
+}
+
+.botVoiceIdResolutionIcon {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 11%, transparent);
+}
+
+.botVoiceIdResolutionSpinner {
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid color-mix(in srgb, currentColor 32%, transparent);
+  border-top-color: currentColor;
+  border-radius: 999px;
+  animation: bot-voice-id-resolution-spin 720ms linear infinite;
+}
+
+.botVoiceIdResolutionCopy {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.botVoiceIdResolutionCopy small {
+  color: currentColor;
+  font-size: 9.5px;
+  line-height: 1.3;
+}
+
+.botVoiceIdResolutionCopy strong {
+  overflow: hidden;
+  color: var(--fg);
+  font-size: 11.5px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes bot-voice-id-resolution-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .botVoiceIdResolutionSpinner {
+    animation: none;
+  }
+}
+
+.botVoiceOnlineOptions {
+  display: grid;
+  gap: 11px;
+  padding-top: 11px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
+}
+
+.botVoicePerformanceCard {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--line) 92%, transparent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--panel) 91%, var(--bg) 9%);
+}
+
+.botVoiceControls {
+  display: grid;
+  gap: 11px;
+}
+
+.botVoiceControls label {
+  display: grid;
+  grid-template-columns: 45px minmax(0, 1fr) 38px;
+  align-items: center;
+  gap: 9px;
+  font-size: 11px;
+  font-weight: 680;
+}
+
+.botVoiceControls output {
+  text-align: right;
+  color: color-mix(in srgb, var(--editor-bot-color) 68%, var(--fg));
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.botVoiceControlHint {
+  color: var(--muted);
+  font-size: 9.5px;
+  line-height: 1.35;
+}
+
+.botVoiceActions {
+  display: grid;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.botVoicePreviewActions {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 0.8fr) minmax(0, 0.8fr);
+  gap: 7px;
 }
 
 .botVoiceActions button {
@@ -72156,10 +72580,77 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   align-items: center;
   justify-content: center;
   gap: 6px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 9px 10px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 10.5px;
+  font-weight: 720;
+  line-height: 1.15;
+  cursor: pointer;
 }
 
-.botVoiceActions button:last-child {
-  border-color: color-mix(in srgb, var(--editor-bot-color) 60%, var(--border));
+.botVoicePreviewActions button[data-primary="true"] {
+  border-color: color-mix(in srgb, var(--editor-bot-color) 68%, var(--border));
+  background: color-mix(in srgb, var(--editor-bot-color) 82%, var(--bg));
+  color: var(--editor-bot-contrast);
+  box-shadow: 0 8px 20px
+    color-mix(in srgb, var(--editor-bot-color) 16%, transparent);
+}
+
+.botVoiceUtilityActions {
+  display: flex;
+  justify-content: space-between;
+  gap: 7px;
+}
+
+.botVoiceUtilityActions button {
+  border-color: transparent;
+  padding: 6px 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 9.5px;
+}
+
+.botVoiceActions button:hover:not(:disabled),
+.botVoiceActions button:focus-visible {
+  border-color: color-mix(in srgb, var(--editor-bot-color) 56%, var(--border));
+  color: var(--fg);
+}
+
+.botVoicePreviewActions button[data-primary="true"]:hover:not(:disabled),
+.botVoicePreviewActions button[data-primary="true"]:focus-visible {
+  border-color: var(--editor-bot-color);
+  color: var(--editor-bot-contrast);
+  filter: brightness(1.06);
+}
+
+.botVoiceActions button:disabled,
+.botVoiceEditorHeader button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+@media (max-width: 720px) {
+  .botVoiceEditorHeader {
+    grid-template-columns: 34px minmax(0, 1fr) auto;
+    padding: 11px;
+  }
+
+  .botVoiceEditorMark {
+    width: 34px;
+    height: 34px;
+  }
+
+  .botVoicePreviewActions {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .botVoicePreviewActions button[data-primary="true"] {
+    grid-column: 1 / -1;
+  }
 }
 
 /* Relationship depth navigation snapshots only the identity artwork under the

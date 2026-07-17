@@ -29,6 +29,13 @@ reply always uses System TTS regardless of the saved online identity.
 Legacy five-slot `elevenLabsVoiceBank` backup data remains importable but is no
 longer shown in settings or consulted during synthesis.
 
+Bot customization keeps the authenticated ElevenLabs voice list and also
+accepts an exact Voice ID override. When present, the override wins over the
+selected list voice. Both values are stored in the portable bot voice profile,
+so `.bot` exports retain the intended identity; an importing account still
+needs permission to use that ElevenLabs voice. Clearing the override restores
+the selected list voice without losing it.
+
 Each profile can also choose an ElevenLabs-only playback effect: **Clean**,
 **Radio**, **Robot**, **Echo**, **Chorus**, or **Deep Space**. Radio adds a
 narrow broadcast band and light static; Robot uses level-controlled mechanical
@@ -41,12 +48,13 @@ selector appears only after that profile has an ElevenLabs voice. These effects
 use Web Audio; the browser's basic media fallback plays the clip clean. The old
 Distortion value migrates to Chorus when an earlier profile is loaded.
 
-Profiles with an ElevenLabs voice can also save up to eight comma-separated
-performance directions, such as `warm`, `hushed`, `with measured pauses`, or
-`mischievously`. Prism normalizes the list, turns each direction into an Eleven
-v3 audio tag, and selects Eleven v3 for that profile's directed generations.
-Directions affect ElevenLabs synthesis only; they are never added to System TTS,
-Babble, or Bottish input.
+Profiles with an ElevenLabs voice can also save up to three performance
+directions as removable word chips, such as `warmly`, `hushed`, or
+`mischievously`. Two compatible cues usually produce the most reliable result.
+Prism normalizes the chips, turns each direction into an Eleven v3 audio tag,
+and selects Eleven v3 for that profile's directed generations. Directions
+affect ElevenLabs synthesis only; they are never added to System TTS, Babble,
+or Bottish input.
 
 ## Voice modes
 

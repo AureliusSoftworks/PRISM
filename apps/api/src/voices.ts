@@ -18,7 +18,9 @@ export function resolveElevenLabsVoiceId(
   profile: BotAudioVoiceProfileV1
 ): string | null {
   const normalized = normalizeBotAudioVoiceProfileV1(profile);
-  return normalized.elevenLabsVoiceId || null;
+  return (
+    normalized.elevenLabsVoiceIdOverride || normalized.elevenLabsVoiceId || null
+  );
 }
 
 export interface VoiceCapabilities {
@@ -372,11 +374,73 @@ export interface ElevenLabsVoiceCatalogEntry {
   labels: Record<string, string>;
 }
 
+export interface ElevenLabsVoiceIdentity {
+  voiceId: string;
+  name: string;
+}
+
 export interface ElevenLabsVoiceCollectionCatalogEntry {
   collectionId: string;
   name: string;
   voiceCount: number;
   sampleVoiceNames: string[];
+}
+
+export async function requestElevenLabsVoiceIdentity(args: {
+  apiKey: string;
+  voiceId: string;
+  signal?: AbortSignal;
+  fetchImpl?: typeof fetch;
+}): Promise<ElevenLabsVoiceIdentity> {
+  const voiceId = args.voiceId.trim();
+  if (!voiceId || voiceId.length > 240) {
+    throw new ElevenLabsVoiceError(400, "Enter a valid ElevenLabs voice ID.");
+  }
+  const fetchImpl = args.fetchImpl ?? fetch;
+  const response = await fetchImpl(
+    `https://api.elevenlabs.io/v1/voices/${encodeURIComponent(voiceId)}`,
+    {
+      headers: { "xi-api-key": args.apiKey },
+      signal: args.signal,
+    },
+  );
+  if (!response.ok) {
+    const detail = (await response.text()).trim();
+    throw new ElevenLabsVoiceError(
+      response.status,
+      detail || `ElevenLabs voice lookup failed (${response.status}).`,
+    );
+  }
+  let rawPayload: unknown;
+  try {
+    rawPayload = await response.json();
+  } catch {
+    throw new ElevenLabsVoiceError(
+      502,
+      "ElevenLabs returned invalid voice metadata.",
+    );
+  }
+  if (
+    !rawPayload ||
+    typeof rawPayload !== "object" ||
+    Array.isArray(rawPayload)
+  ) {
+    throw new ElevenLabsVoiceError(
+      502,
+      "ElevenLabs returned invalid voice metadata.",
+    );
+  }
+  const payload = rawPayload as Record<string, unknown>;
+  const name = typeof payload.name === "string" ? payload.name.trim() : "";
+  const resolvedVoiceId =
+    typeof payload.voice_id === "string" ? payload.voice_id.trim() : voiceId;
+  if (!name || !resolvedVoiceId) {
+    throw new ElevenLabsVoiceError(
+      502,
+      "ElevenLabs returned incomplete voice metadata.",
+    );
+  }
+  return { voiceId: resolvedVoiceId, name };
 }
 
 export async function requestElevenLabsVoiceCatalog(args: {
