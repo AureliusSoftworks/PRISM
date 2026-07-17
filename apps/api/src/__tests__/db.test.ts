@@ -182,6 +182,12 @@ describe("createDatabase bot export hash migration", () => {
       assert.ok(
         userColumns.some((column) => column.name === "prism_default_bot_face_eye_rotation_deg")
       );
+      assert.equal(
+        userColumns.find(
+          (column) => column.name === "prism_default_bot_face_eye_count",
+        )?.dflt_value,
+        "1",
+      );
       const allModelEffortColumn = userColumns.find(
         (column) => column.name === "experimental_all_model_effort_enabled"
       );
@@ -272,6 +278,10 @@ describe("createDatabase bot export hash migration", () => {
       assert.ok(columns.some((column) => column.name === "face_eye_offset_x"));
       assert.ok(columns.some((column) => column.name === "face_eye_offset_y"));
       assert.ok(columns.some((column) => column.name === "face_eye_rotation_deg"));
+      assert.equal(
+        columns.find((column) => column.name === "face_eye_count")?.dflt_value,
+        "1",
+      );
       assert.ok(columns.some((column) => column.name === "face_mouth_scale"));
       assert.ok(columns.some((column) => column.name === "face_mouth_offset_x"));
       assert.ok(columns.some((column) => column.name === "face_mouth_offset_y"));

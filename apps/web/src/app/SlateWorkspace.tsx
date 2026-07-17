@@ -7,18 +7,25 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type PointerEvent as ReactPointerEvent,
 } from "react";
 import type {
   PromptWildcardRunMetadata,
+  SlateAiProvider,
   SlateContinuityConcernCard,
   SlateContinuityConcernNextResponse,
   SlateContinuityConcernResolveResponse,
   SlateLockedRange,
+  SlateLivingSummary,
+  SlateLivingSummaryResponse,
+  SlateProjectChatMessage,
+  SlateProjectChatResponse,
   SlateProjectDetail,
   SlateProjectListResponse,
   SlateProjectPatchRequest,
   SlateProjectResponse,
   SlateProjectSummary,
+  SlateProseMode,
   SlateRevisionAction,
   SlateResolveSparkWildcardsResponse,
   SlateReturnSession,
@@ -29,6 +36,7 @@ import type {
   SlateSectionResponse,
   SlateSectionSummary,
   SlateStructureItem,
+  SlateTitleSuggestionResponse,
 } from "@localai/shared";
 import { transformSlateLockedRangesForTextEdit } from "@localai/shared";
 import { FolderOpen, Trash2 } from "lucide-react";
@@ -135,6 +143,30 @@ interface SlateRecoveryStatusResponse {
   };
 }
 
+interface SlateModelCatalogEntry {
+  id: string;
+  label: string;
+  provider: SlateAiProvider;
+  disabledReason?: string;
+  imageSource?: string;
+}
+
+interface SlateModelCatalog {
+  local: SlateModelCatalogEntry[];
+  online: SlateModelCatalogEntry[];
+  defaults: { local: string; online: string };
+}
+
+interface SlateModelCatalogResponse {
+  ok: true;
+  catalog: SlateModelCatalog;
+}
+
+interface SlateCompanionPosition {
+  x: number;
+  y: number;
+}
+
 class SlateApiError extends Error {
   readonly status: number;
   readonly code: string | null;
@@ -166,6 +198,9 @@ const SLATE_SUPPORTED_WILDCARD_RE = /\{[A-Z][A-Z0-9_ ]{1,63}\}/u;
 const SLATE_KEEPALIVE_BODY_MAX_BYTES = 60_000;
 const SLATE_ARCHIVE_MEDIA_TYPE = "application/vnd.prism.slate+zip";
 const SLATE_ARCHIVE_MAX_BYTES = 256 * 1024 * 1024;
+const SLATE_COMPANION_POSITION_KEY = "prism_slate_companion_position_v1";
+const SLATE_AUTO_MODEL_VALUE = "auto";
+const SLATE_TITLE_REVIEW_INTERVAL_CHARS = 12_000;
 
 function slateContinuityArchiveRowCount(counts: SlateArchiveImportCounts): number {
   return counts.continuitySources +
@@ -233,6 +268,32 @@ function revisionLabel(action: SlateRevisionAction): string {
   return `${action[0]?.toUpperCase() ?? ""}${action.slice(1)}`;
 }
 
+function slateModelChoiceValue(model: SlateModelCatalogEntry): string {
+  return `${model.provider}:${model.id}`;
+}
+
+function readSlateCompanionPosition(): SlateCompanionPosition {
+  if (typeof window === "undefined") return { x: 0.9, y: 0.82 };
+  try {
+    const parsed = JSON.parse(
+      window.localStorage.getItem(SLATE_COMPANION_POSITION_KEY) ?? "null",
+    ) as Partial<SlateCompanionPosition> | null;
+    if (
+      parsed &&
+      typeof parsed.x === "number" &&
+      typeof parsed.y === "number"
+    ) {
+      return {
+        x: Math.max(0.08, Math.min(0.94, parsed.x)),
+        y: Math.max(0.12, Math.min(0.9, parsed.y)),
+      };
+    }
+  } catch {
+    // A malformed device-local position falls back to the quiet lower corner.
+  }
+  return { x: 0.9, y: 0.82 };
+}
+
 export default function SlateWorkspace({
   className = "",
   sidebarHeader,
@@ -288,11 +349,33 @@ export default function SlateWorkspace({
     useState<SlateProjectSummary | null>(null);
   const [deletingProject, setDeletingProject] = useState(false);
   const [protectedAt, setProtectedAt] = useState<string | null>(null);
+  const [modelCatalog, setModelCatalog] = useState<SlateModelCatalog | null>(null);
+  const [livingSummary, setLivingSummary] = useState<SlateLivingSummary | null>(null);
+  const [companionOpen, setCompanionOpen] = useState(false);
+  const [companionMessages, setCompanionMessages] = useState<
+    SlateProjectChatMessage[]
+  >([]);
+  const [companionDraft, setCompanionDraft] = useState("");
+  const [companionBusy, setCompanionBusy] = useState(false);
+  const [companionPosition, setCompanionPosition] =
+    useState<SlateCompanionPosition>(readSlateCompanionPosition);
+  const [titleSuggestionBusy, setTitleSuggestionBusy] = useState(false);
+  const [titleSuggestionNotice, setTitleSuggestionNotice] = useState<
+    string | null
+  >(null);
   const autosaveTimerRef = useRef<number | null>(null);
   const sectionSaveInFlightRef = useRef<Promise<void> | null>(null);
   const recoveryRefreshTimerRef = useRef<number | null>(null);
   const sparkTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const archiveInputRef = useRef<HTMLInputElement | null>(null);
+  const companionMessagesRef = useRef<HTMLDivElement | null>(null);
+  const companionDragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    origin: SlateCompanionPosition;
+    moved: boolean;
+  } | null>(null);
 
   const adoptProject = useCallback((next: SlateProjectDetail): void => {
     projectRef.current = next;
@@ -328,6 +411,42 @@ export default function SlateWorkspace({
     setProjects(response.projects);
     return response.projects;
   }, []);
+
+  const loadModelCatalog = useCallback(async (): Promise<void> => {
+    try {
+      const response = await slateApi<SlateModelCatalogResponse>("/api/models");
+      setModelCatalog({
+        ...response.catalog,
+        local: response.catalog.local.filter((model) => !model.imageSource),
+        online: response.catalog.online.filter((model) => !model.imageSource),
+      });
+    } catch {
+      setModelCatalog(null);
+    }
+  }, []);
+
+  const loadLivingSummary = useCallback(async (projectId: string): Promise<void> => {
+    const response = await slateApi<SlateLivingSummaryResponse>(
+      `/api/slate/projects/${encodeURIComponent(projectId)}/summary`,
+    );
+    if (projectRef.current?.id === projectId) setLivingSummary(response.summary);
+  }, []);
+
+  const loadCompanionMessages = useCallback(
+    async (projectId: string): Promise<void> => {
+      const response = await slateApi<SlateProjectChatResponse>(
+        `/api/slate/projects/${encodeURIComponent(projectId)}/chat`,
+      );
+      if (projectRef.current?.id === projectId) {
+        setCompanionMessages(response.messages);
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    void loadModelCatalog();
+  }, [loadModelCatalog]);
 
   const loadRecoveryStatus = useCallback(async (projectId: string): Promise<void> => {
     try {
@@ -433,6 +552,7 @@ export default function SlateWorkspace({
         }
         setSectionConflict(null);
         void refreshProjects();
+        void loadLivingSummary(projectId).catch(() => undefined);
         queueRecoveryStatusRefresh(projectId);
       })
       .catch(async (cause) => {
@@ -467,7 +587,7 @@ export default function SlateWorkspace({
       });
     sectionSaveInFlightRef.current = save;
     await save;
-  }, [queueRecoveryStatusRefresh, refreshProjects]);
+  }, [loadLivingSummary, queueRecoveryStatusRefresh, refreshProjects]);
 
   const loadProjectSections = useCallback(
     async (
@@ -539,10 +659,15 @@ export default function SlateWorkspace({
         snoozedConcernIdRef.current = null;
         setContinuityDirection("");
         setReturnSession(null);
+        setLivingSummary(null);
+        setCompanionMessages([]);
+        setCompanionDraft("");
         setDismissedReturnSessionId(null);
         setContinuityConcern(null);
         await Promise.allSettled([
           openReturnSession(projectId),
+          loadLivingSummary(projectId),
+          loadCompanionMessages(projectId),
           loadContinuityConcern(projectId),
           loadRecoveryStatus(projectId),
         ]);
@@ -557,6 +682,8 @@ export default function SlateWorkspace({
       adoptProject,
       flushPendingManuscriptSave,
       loadContinuityConcern,
+      loadCompanionMessages,
+      loadLivingSummary,
       loadRecoveryStatus,
       loadProjectSections,
       openReturnSession,
@@ -714,6 +841,7 @@ export default function SlateWorkspace({
         adoptProject(response.project);
         await loadProjectSections(current.id, focusedSectionId, focusedStructureId);
         void loadContinuityConcern(current.id).catch(() => undefined);
+        void loadLivingSummary(current.id).catch(() => undefined);
         setSaveState("saved");
         void refreshProjects();
         queueRecoveryStatusRefresh(current.id);
@@ -778,11 +906,171 @@ export default function SlateWorkspace({
       flushPendingManuscriptSave,
       loadProjectSections,
       loadContinuityConcern,
+      loadLivingSummary,
       queueRecoveryStatusRefresh,
       refreshProjects,
       selectedStructureId,
     ],
   );
+
+  const saveProseMode = async (mode: SlateProseMode): Promise<void> => {
+    setBusy(true);
+    setError(null);
+    try {
+      await patchProject({
+        proseMode: mode,
+        proseModel: null,
+        proseProvider: null,
+      });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Slate could not save prose routing.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveProseModel = async (choice: string): Promise<void> => {
+    setBusy(true);
+    setError(null);
+    try {
+      if (choice === SLATE_AUTO_MODEL_VALUE) {
+        await patchProject({ proseModel: null, proseProvider: null });
+      } else {
+        const separator = choice.indexOf(":");
+        const provider = choice.slice(0, separator) as SlateAiProvider;
+        const model = choice.slice(separator + 1);
+        await patchProject({ proseModel: model, proseProvider: provider });
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Slate could not save that model.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const sendCompanionMessage = async (): Promise<void> => {
+    const current = projectRef.current;
+    const content = companionDraft.trim();
+    if (!current || !content || companionBusy) return;
+    setCompanionBusy(true);
+    setCompanionDraft("");
+    setError(null);
+    try {
+      await flushPendingManuscriptSave();
+      const response = await slateApi<SlateProjectChatResponse>(
+        `/api/slate/projects/${encodeURIComponent(current.id)}/chat`,
+        { method: "POST", body: JSON.stringify({ content }) },
+      );
+      if (projectRef.current?.id === current.id) {
+        setCompanionMessages(response.messages);
+      }
+    } catch (cause) {
+      setCompanionDraft(content);
+      setError(cause instanceof Error ? cause.message : "Prism could not answer here.");
+    } finally {
+      setCompanionBusy(false);
+    }
+  };
+
+  const requestTitleSuggestion = useCallback(async (
+    options: { quiet?: boolean } = {},
+  ): Promise<void> => {
+    const current = projectRef.current;
+    if (!current || titleSuggestionBusy) return;
+    setTitleSuggestionBusy(true);
+    setTitleSuggestionNotice(null);
+    setError(null);
+    try {
+      await flushPendingManuscriptSave();
+      const response = await slateApi<SlateTitleSuggestionResponse>(
+        `/api/slate/projects/${encodeURIComponent(current.id)}/title-suggestions`,
+        { method: "POST", body: JSON.stringify({}) },
+      );
+      adoptProject(response.project);
+      if (!options.quiet) {
+        setTitleSuggestionNotice(
+          response.project.titleSuggestion
+            ? null
+            : "Prism thinks the current title still fits.",
+        );
+      }
+    } catch (cause) {
+      if (!options.quiet) {
+        setError(cause instanceof Error ? cause.message : "Prism could not reconsider the title.");
+      }
+    } finally {
+      setTitleSuggestionBusy(false);
+    }
+  }, [adoptProject, flushPendingManuscriptSave, titleSuggestionBusy]);
+
+  const resolveTitleSuggestion = async (
+    resolution: "accepted" | "dismissed",
+  ): Promise<void> => {
+    const current = projectRef.current;
+    const suggestion = current?.titleSuggestion;
+    if (!current || !suggestion || titleSuggestionBusy) return;
+    setTitleSuggestionBusy(true);
+    setError(null);
+    try {
+      const response = await slateApi<SlateTitleSuggestionResponse>(
+        `/api/slate/projects/${encodeURIComponent(current.id)}/title-suggestions/${encodeURIComponent(suggestion.id)}/${resolution}`,
+        { method: "POST", body: JSON.stringify({}) },
+      );
+      adoptProject(response.project);
+      setTitleSuggestionNotice(
+        resolution === "accepted" ? "Title updated." : "Suggestion set aside.",
+      );
+      void refreshProjects();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Slate could not resolve that title idea.");
+    } finally {
+      setTitleSuggestionBusy(false);
+    }
+  };
+
+  const beginCompanionDrag = (
+    event: ReactPointerEvent<HTMLButtonElement>,
+  ): void => {
+    event.currentTarget.setPointerCapture(event.pointerId);
+    companionDragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      origin: companionPosition,
+      moved: false,
+    };
+  };
+
+  const moveCompanion = (event: ReactPointerEvent<HTMLButtonElement>): void => {
+    const drag = companionDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const dx = event.clientX - drag.startX;
+    const dy = event.clientY - drag.startY;
+    if (Math.hypot(dx, dy) > 5) drag.moved = true;
+    setCompanionPosition({
+      x: Math.max(0.04, Math.min(0.96, drag.origin.x + dx / window.innerWidth)),
+      y: Math.max(0.12, Math.min(0.92, drag.origin.y + dy / window.innerHeight)),
+    });
+  };
+
+  const endCompanionDrag = (
+    event: ReactPointerEvent<HTMLButtonElement>,
+  ): void => {
+    const drag = companionDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    companionDragRef.current = null;
+    event.currentTarget.releasePointerCapture(event.pointerId);
+    window.localStorage.setItem(
+      SLATE_COMPANION_POSITION_KEY,
+      JSON.stringify(companionPosition),
+    );
+    if (!drag.moved) setCompanionOpen((current) => !current);
+  };
+
+  useEffect(() => {
+    const node = companionMessagesRef.current;
+    if (companionOpen && node) node.scrollTop = node.scrollHeight;
+  }, [companionMessages, companionOpen]);
 
   const resolveSparkWildcards = async (force = false): Promise<SlateWildcardPreview> => {
     const template = spark.trim();
@@ -909,6 +1197,8 @@ export default function SlateWorkspace({
         null,
         response.project.structure[0]?.id ?? null,
       );
+      await loadLivingSummary(response.project.id);
+      setCompanionMessages([]);
       setTitle("");
       setSpark("");
       setProjectStartStep("source");
@@ -1360,6 +1650,32 @@ export default function SlateWorkspace({
     (total, section) => total + section.proseLength,
     0,
   );
+  useEffect(() => {
+    if (!project || project.titleSuggestion || titleSuggestionBusy) return;
+    const milestone = Math.floor(
+      totalManuscriptLength / SLATE_TITLE_REVIEW_INTERVAL_CHARS,
+    );
+    if (milestone < 1) return;
+    const key = `prism_slate_title_review_v1:${project.id}:${milestone}`;
+    if (window.localStorage.getItem(key) === "checked") return;
+    window.localStorage.setItem(key, "checked");
+    void requestTitleSuggestion({ quiet: true });
+  }, [
+    project,
+    requestTitleSuggestion,
+    titleSuggestionBusy,
+    totalManuscriptLength,
+  ]);
+  const proseModelOptions = useMemo(() => {
+    if (!project || !modelCatalog) return [];
+    if (project.proseMode === "offline") return modelCatalog.local;
+    if (project.proseMode === "online") return modelCatalog.online;
+    return [...modelCatalog.local, ...modelCatalog.online];
+  }, [modelCatalog, project]);
+  const proseModelValue =
+    project?.proseModel && project.proseProvider
+      ? `${project.proseProvider}:${project.proseModel}`
+      : SLATE_AUTO_MODEL_VALUE;
 
   if (loading) {
     return (
@@ -2001,6 +2317,17 @@ export default function SlateWorkspace({
               <div>
                 <p className={styles.eyebrow}>{project.title} · {project.phase}</p>
                 <h1>{activeSection?.title ?? project.title}</h1>
+                <button
+                  type="button"
+                  className={styles.titleSuggestionTrigger}
+                  disabled={titleSuggestionBusy || busy}
+                  onClick={() => void requestTitleSuggestion()}
+                >
+                  {titleSuggestionBusy ? "Prism is listening…" : "Could this title be stronger?"}
+                </button>
+                {titleSuggestionNotice ? (
+                  <span className={styles.titleSuggestionNotice}>{titleSuggestionNotice}</span>
+                ) : null}
               </div>
               <div className={styles.manuscriptHeaderActions}>
                 <div className={styles.statusStack} role="status" aria-live="polite">
@@ -2160,6 +2487,52 @@ export default function SlateWorkspace({
                 </footer>
               </section>
             ) : null}
+            {livingSummary ? (
+              <section
+                className={styles.livingSummary}
+                data-tutorial-target="slate-summary"
+                aria-label="Story so far"
+              >
+                <div>
+                  <span>Story so far</span>
+                  <small>Living summary · follows accepted prose</small>
+                </div>
+                <p>{livingSummary.tail || livingSummary.text}</p>
+                {livingSummary.text !== livingSummary.tail ? (
+                  <details>
+                    <summary>Read the full summary</summary>
+                    <p>{livingSummary.text}</p>
+                  </details>
+                ) : null}
+              </section>
+            ) : null}
+            {project.titleSuggestion ? (
+              <section className={styles.titleSuggestionCard} aria-label="Suggested project title">
+                <div>
+                  <span>Prism found a title worth considering</span>
+                  <h2>{project.titleSuggestion.title}</h2>
+                  <p>{project.titleSuggestion.reason}</p>
+                </div>
+                <footer>
+                  <button
+                    type="button"
+                    className={styles.quietButton}
+                    disabled={titleSuggestionBusy}
+                    onClick={() => void resolveTitleSuggestion("dismissed")}
+                  >
+                    Keep {project.title}
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.primaryButton}
+                    disabled={titleSuggestionBusy}
+                    onClick={() => void resolveTitleSuggestion("accepted")}
+                  >
+                    Use this title
+                  </button>
+                </footer>
+              </section>
+            ) : null}
             {project.premise ? <p className={styles.premise}>{project.premise}</p> : null}
             {project.sparkWildcards ? (
               <details className={styles.wildcardOrigin}>
@@ -2234,6 +2607,59 @@ export default function SlateWorkspace({
           </section>
 
           <aside className={styles.directionPanel} data-tutorial-target="slate-direction">
+            <section
+              className={styles.proseControls}
+              data-tutorial-target="slate-ai-controls"
+              aria-label="Slate prose model"
+            >
+              <div className={styles.proseControlsHeader}>
+                <div>
+                  <p className={styles.eyebrow}>Prose engine</p>
+                  <strong>Choose the hand behind the draft</strong>
+                </div>
+                {project.lastModel ? (
+                  <span title={project.lastModel}>Last · {project.lastModel}</span>
+                ) : null}
+              </div>
+              <div className={styles.proseModePicker} role="group" aria-label="Prose routing">
+                {(["offline", "auto", "online"] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    data-active={project.proseMode === mode ? "true" : undefined}
+                    disabled={busy}
+                    onClick={() => void saveProseMode(mode)}
+                  >
+                    {mode === "offline" ? "Offline" : mode === "online" ? "Online" : "Auto"}
+                  </button>
+                ))}
+              </div>
+              <label className={styles.proseModelPicker}>
+                <span>Model</span>
+                <select
+                  value={proseModelValue}
+                  disabled={busy || !modelCatalog}
+                  onChange={(event) => void saveProseModel(event.target.value)}
+                >
+                  <option value={SLATE_AUTO_MODEL_VALUE}>
+                    {project.proseMode === "auto"
+                      ? "Auto-select from account defaults"
+                      : project.proseMode === "offline"
+                        ? "Account offline default"
+                        : "Account online default"}
+                  </option>
+                  {proseModelOptions.map((model) => (
+                    <option
+                      key={slateModelChoiceValue(model)}
+                      value={slateModelChoiceValue(model)}
+                      disabled={Boolean(model.disabledReason)}
+                    >
+                      {model.label} · {model.provider === "local" ? "offline" : model.provider}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </section>
             {continuityConcern && !pendingRevision ? (
               <section
                 className={styles.continuityCard}
@@ -2365,12 +2791,111 @@ export default function SlateWorkspace({
             )}
 
             <p className={styles.providerNote}>
-              Slate uses your current account provider and model defaults. Locked
-              material and newer human edits remain authoritative.
+              Routing applies to prose, title counsel, and this project’s Prism
+              companion. Every generated prose artifact keeps its provider and
+              model receipt in the project backend. Locked material and newer
+              human edits remain authoritative.
             </p>
           </aside>
         </div>
       )}
+      {project ? (
+        <div
+          className={styles.companionAnchor}
+          data-dock={companionPosition.x < 0.5 ? "left" : "right"}
+          style={{
+            left: `${companionPosition.x * 100}%`,
+            top: `${companionPosition.y * 100}%`,
+          }}
+        >
+          {companionOpen ? (
+            <section
+              id="slate-project-companion"
+              className={styles.companionPanel}
+              aria-label="Chat with this Slate project"
+            >
+              <header>
+                <div>
+                  <span>Prism · project side chat</span>
+                  <strong>{project.title}</strong>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Collapse project chat"
+                  onClick={() => setCompanionOpen(false)}
+                >
+                  −
+                </button>
+              </header>
+              <div ref={companionMessagesRef} className={styles.companionMessages}>
+                {companionMessages.length === 0 ? (
+                  <p className={styles.companionEmpty}>
+                    Ask about the draft, test an idea, compare directions, or talk
+                    through what the project needs. Nothing here edits the manuscript.
+                  </p>
+                ) : (
+                  companionMessages.map((message) => (
+                    <article key={message.id} data-role={message.role}>
+                      <span>{message.role === "assistant" ? "Prism" : "You"}</span>
+                      <p>{message.content}</p>
+                      {message.role === "assistant" && message.model ? (
+                        <small>{message.model}</small>
+                      ) : null}
+                    </article>
+                  ))
+                )}
+                {companionBusy ? (
+                  <article data-role="assistant" data-thinking="true">
+                    <span>Prism</span>
+                    <p>Reading the project…</p>
+                  </article>
+                ) : null}
+              </div>
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void sendCompanionMessage();
+                }}
+              >
+                <textarea
+                  value={companionDraft}
+                  onChange={(event) => setCompanionDraft(event.target.value)}
+                  placeholder="Talk with the project…"
+                  rows={3}
+                />
+                <button
+                  type="submit"
+                  disabled={companionBusy || !companionDraft.trim()}
+                >
+                  Send
+                </button>
+              </form>
+            </section>
+          ) : null}
+          <button
+            type="button"
+            className={styles.companionAvatar}
+            data-tutorial-target="slate-project-chat"
+            aria-label={companionOpen ? "Move or collapse Prism project chat" : "Move or open Prism project chat"}
+            aria-expanded={companionOpen}
+            aria-controls="slate-project-companion"
+            onPointerDown={beginCompanionDrag}
+            onPointerMove={moveCompanion}
+            onPointerUp={endCompanionDrag}
+            onPointerCancel={() => {
+              companionDragRef.current = null;
+            }}
+            onClick={(event) => {
+              if (event.detail === 0) setCompanionOpen((current) => !current);
+            }}
+          >
+            <span className={styles.companionAvatarScreen} aria-hidden="true">
+              <span>◇</span>
+            </span>
+            <small>PRISM</small>
+          </button>
+        </div>
+      ) : null}
     </main>
   );
 }

@@ -193,6 +193,10 @@ describe("portable project-owned account backup assets", () => {
       0x49, 0x44, 0x33, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06,
       0x54, 0x45, 0x53, 0x54, 0x21, 0x21,
     ]);
+    const atmosphereBytes = Buffer.from([
+      0x49, 0x44, 0x33, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x07,
+      0x52, 0x4f, 0x4f, 0x4d, 0x54, 0x4f, 0x4e, 0x45,
+    ]);
 
     const sourceDb = createTestDatabase();
     const sourceServer = await startTestServer(sourceDb, "prism_backup_source");
@@ -308,13 +312,20 @@ describe("portable project-owned account backup assets", () => {
          VALUES ('signal-show', ?, 'elevenlabs', 'music_v2', 'Portable ident',
                  'audio/mpeg', ?, 6000, 3, ?, ?)`,
       ).run(sourceUserId, introBytes, now, now);
+      sourceDb.prepare(
+        `INSERT INTO botcast_show_atmosphere_audio
+          (show_id, user_id, provider, model, prompt, content_type, audio_bytes,
+           duration_ms, revision, created_at, updated_at)
+         VALUES ('signal-show', ?, 'elevenlabs', 'eleven_text_to_sound_v2',
+                 'Portable room tone', 'audio/mpeg', ?, 30000, 2, ?, ?)`,
+      ).run(sourceUserId, atmosphereBytes, now, now);
 
       const exportedResponse = await sourceClient.request("/api/backup/export");
       const exported = await json(exportedResponse);
       assert.equal(exportedResponse.status, 200, JSON.stringify(exported));
       const projectAssets = exported.projectOwnedAssets as ProjectOwnedAssetExportPayloadV1;
-      assert.equal(projectAssets.manifest.entries.length, 4);
-      assert.equal(Object.keys(projectAssets.files).length, 3, "identical studio bytes deduplicate");
+      assert.equal(projectAssets.manifest.entries.length, 5);
+      assert.equal(Object.keys(projectAssets.files).length, 4, "identical studio bytes deduplicate");
       assert.deepEqual(
         projectAssets.manifest.entries
           .filter((entry) => entry.mediaType === "image")
@@ -326,6 +337,10 @@ describe("portable project-owned account backup assets", () => {
       );
       assert.equal(
         "audioBase64" in exported.snapshot.botcast.shows[0].introAudio,
+        false,
+      );
+      assert.equal(
+        "audioBase64" in exported.snapshot.botcast.shows[0].atmosphereAudio,
         false,
       );
       const archive = archiveFromExport(exported);
@@ -395,6 +410,15 @@ describe("portable project-owned account backup assets", () => {
       assert.equal(introResponse.status, 200);
       assert.equal(introResponse.headers.get("content-type"), "audio/mpeg");
       assert.deepEqual(Buffer.from(await introResponse.arrayBuffer()), introBytes);
+      const atmosphereResponse = await targetClient.request(
+        "/api/botcast/shows/signal-show/atmosphere-audio",
+      );
+      assert.equal(atmosphereResponse.status, 200);
+      assert.equal(atmosphereResponse.headers.get("content-type"), "audio/mpeg");
+      assert.deepEqual(
+        Buffer.from(await atmosphereResponse.arrayBuffer()),
+        atmosphereBytes,
+      );
     } finally {
       if (!sourceClosed) {
         await new Promise<void>((resolve) => sourceServer.server.close(() => resolve()));
@@ -407,4 +431,3 @@ describe("portable project-owned account backup assets", () => {
     }
   });
 });
-

@@ -100,6 +100,9 @@ describe("Slate API", () => {
         {
           premise: "An architect returns to the city that learned her name.",
           manuscript: "The city called at midnight.",
+          proseMode: "offline",
+          proseModel: "qwen3:8b",
+          proseProvider: "local",
           structure: [
             {
               id: "scene-1",
@@ -121,10 +124,30 @@ describe("Slate API", () => {
     assert.equal(reopenedResponse.status, 200);
     const reopened = (await body(reopenedResponse)).project as {
       manuscript: string;
+      proseMode: string;
+      proseModel: string;
+      proseProvider: string;
       structure: Array<{ locked: boolean }>;
     };
     assert.equal(reopened.manuscript, "The city called at midnight.");
+    assert.equal(reopened.proseMode, "offline");
+    assert.equal(reopened.proseModel, "qwen3:8b");
+    assert.equal(reopened.proseProvider, "local");
     assert.equal(reopened.structure[0]?.locked, true);
+
+    const summaryResponse = await owner.request(
+      `/api/slate/projects/${created.id}/summary`,
+    );
+    assert.equal(summaryResponse.status, 200);
+    assert.match(
+      ((await body(summaryResponse)).summary as { text: string }).text,
+      /architect returns|city reaches/i,
+    );
+    const chatResponse = await owner.request(
+      `/api/slate/projects/${created.id}/chat`,
+    );
+    assert.equal(chatResponse.status, 200);
+    assert.deepEqual((await body(chatResponse)).messages, []);
 
     const lockedShape = await owner.request(
       `/api/slate/projects/${created.id}/shape`,

@@ -11,7 +11,8 @@ export type SignalProjectOwnedAssetSlotV1 =
   | "light-studio"
   | "dark-studio"
   | "logo"
-  | "intro-audio";
+  | "intro-audio"
+  | "atmosphere-audio";
 
 export interface SignalProjectImageRestoreMetadataV1 {
   schema: "prism-signal-image-restore-v1";
@@ -87,4 +88,3 @@ export function projectOwnedAssetBlobArchivePathForChecksum(
 export function isProjectOwnedAssetBlobArchivePath(path: string): boolean {
   return /^project-assets\/blobs\/sha256\/[a-f0-9]{64}$/u.test(path);
 }
-

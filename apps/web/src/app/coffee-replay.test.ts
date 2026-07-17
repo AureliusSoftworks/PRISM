@@ -10,6 +10,7 @@ import {
   coffeeActionPassesSipCadence,
   coffeeActionSipMessageGapForDuration,
   coffeeConversationHasMeaningfulTableDialogue,
+  coffeeListenerReactionForMessage,
   coffeeReplayMessageHasStateEvent,
   coffeeReplayMessageRevealInProgress,
   coffeeReplayPlayhead,
@@ -27,6 +28,47 @@ import {
 } from "./coffee-replay.ts";
 
 describe("coffee replay helpers", () => {
+  it("keeps saved listener reactions out of transcript rows while exposing replay diagnostics", () => {
+    const message = {
+      id: "message-1",
+      role: "assistant",
+      content: "Keep going.",
+      botId: "speaker",
+      botName: "Speaker",
+      coffeeReplayEvents: [{
+        v: 1 as const,
+        name: "coffeeReplayEvent" as const,
+        kind: "listenerReaction" as const,
+        botId: "listener",
+        occurredAt: "2026-07-17T12:00:00.000Z",
+        plan: {
+          v: 1 as const,
+          name: "listenerReaction" as const,
+          speakerBotId: "speaker",
+          listenerBotId: "listener",
+          messageId: "message-1",
+          targetSource: "direct" as const,
+          visualAction: "nod" as const,
+          spokenCue: "mm-hm" as const,
+          targetProgress: 0.52,
+          seed: "coffee-listener-v1:test",
+          cameraCutEligible: false,
+        },
+      }],
+    };
+    assert.equal(coffeeListenerReactionForMessage(message)?.listenerBotId, "listener");
+    assert.deepEqual(coffeeTranscriptVisibleMessages([message]), [message]);
+    const review = formatCoffeeReviewClipboardText({
+      messages: [message],
+      context: { bots: [
+        { id: "speaker", name: "Speaker" },
+        { id: "listener", name: "Listener" },
+      ] },
+    });
+    assert.match(review, /listenerReaction: Listener \(listener\) nod \+ mm-hm/u);
+    assert.doesNotMatch(review, /Listener: mm-hm/u);
+  });
+
   it("clamps replay indexes to the saved transcript", () => {
     assert.equal(clampCoffeeReplayMessageIndex(4, -10), 0);
     assert.equal(clampCoffeeReplayMessageIndex(4, 2), 2);

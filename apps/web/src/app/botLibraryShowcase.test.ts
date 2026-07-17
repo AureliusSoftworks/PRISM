@@ -18,9 +18,9 @@ describe("selected bot library showcase", () => {
     );
     assert.match(pageSource, /node\.dataset\.prismPanelLayer !== "true"/);
     assert.match(pageSource, /className=\{`\$\{styles\.zenLiveBotPresencePlate\} \$\{styles\.botPanelHubAvatarPlate\}`\}/);
-    assert.match(pageSource, /void regenerateBotHubAudioSample\(bot\)/);
+    assert.match(pageSource, /regenerateBotHubAudioSample\(bot\)/);
     assert.match(pageSource, /void playBotHubVoicePreview\(bot, "bottish"\)/);
-    assert.match(pageSource, /"--zen-live-bot-avatar-size": "min\(520px, 72vmin\)"/);
+    assert.match(pageSource, /"--zen-live-bot-avatar-size":[\s\S]*?"min\(520px, 72vmin\)"/);
     assert.match(pageSource, /\{renderBotHubShowcase\(\)\}[\s\S]*?\{renderUsagePanel\(\)\}/);
     assert.match(cssSource, /\.botPanelHubShowcase\s*\{[\s\S]*?position:\s*fixed;[\s\S]*?inset:\s*0 min\(479px, calc\(100vw - 32px\)\) 0 0;/);
     assert.match(cssSource, /@keyframes botPanelHubAvatarIdle/);
@@ -80,7 +80,7 @@ describe("selected bot library showcase", () => {
     assert.doesNotMatch(previewSource, /playBotHubVoicePreview/);
     assert.match(
       pageSource,
-      /aria-label="Voice preview language"[\s\S]*?onClick=\{\(\) => void regenerateBotHubAudioSample\(bot\)\}[\s\S]*?onClick=\{\(\) => void playBotHubVoicePreview\(bot, "bottish"\)\}/
+      /aria-label="Voice preview language"[\s\S]*?isMarketplacePreview[\s\S]*?playBotHubVoicePreview\(bot, "english"\)[\s\S]*?regenerateBotHubAudioSample\(bot\)[\s\S]*?onClick=\{\(\) => void playBotHubVoicePreview\(bot, "bottish"\)\}/
     );
   });
 
@@ -142,6 +142,26 @@ describe("selected bot library showcase", () => {
     assert.match(previewHandlerSource, /onPlaybackStart:/);
   });
 
+  it("does not cancel a voice preview when its generated line updates the bot", () => {
+    const resetEffectStart = pageSource.indexOf(
+      "useEffect(() => {\n    voicePreviewPlaybackRunRef.current += 1;",
+    );
+    const resetEffectEnd = pageSource.indexOf(
+      "  useEffect(() => {\n    signalVoiceClipCacheRef.current.clear();",
+      resetEffectStart,
+    );
+    const resetEffectSource = pageSource.slice(
+      resetEffectStart,
+      resetEffectEnd,
+    );
+    assert.ok(resetEffectStart >= 0 && resetEffectEnd > resetEffectStart);
+    assert.doesNotMatch(resetEffectSource, /\bbots\b/);
+    assert.match(
+      resetEffectSource,
+      /settings\?\.englishVoiceEngine,[\s\S]*?settings\?\.preferredProvider/,
+    );
+  });
+
   it("guarantees visible click feedback even when playback settles immediately", () => {
     assert.match(pageSource, /"playing" \| "complete" \| "error"/);
     assert.match(pageSource, /BOT_HUB_VOICE_CLICK_FEEDBACK_MS = 1400/);
@@ -186,6 +206,10 @@ describe("selected bot library showcase", () => {
       /buildSpeechActivityWindows\(\s*alignment,\s*durationMs/,
     );
     assert.match(previewHandlerSource, /speechActivityAtMs\(/);
+    assert.match(
+      previewHandlerSource,
+      /crtSpeechMouthShapeAtAlignedElapsedMs\(\{[\s\S]*?alignment,/,
+    );
     assert.match(
       pageSource,
       /const previewTalking =\s*previewStatus === "playing" && botHubPreviewVoicing/,

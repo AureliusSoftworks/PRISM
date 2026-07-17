@@ -42,8 +42,9 @@ collaboration, persona editor panels, and branching-fiction authoring are later
 roadmap items. Clean manuscript export to DOCX, Markdown, and text is part of
 the author-safety foundation.
 
-Slate inherits the account's effective provider and model defaults. V1 does not
-add per-project provider, model, sampling, or reasoning controls.
+Slate starts from the account's effective provider and model defaults. Each
+project may then choose **OFFLINE**, **AUTO**, or **ONLINE** prose routing and a
+concrete model. Sampling and reasoning controls remain under the hood.
 
 ## Continuity versioning
 
@@ -74,6 +75,10 @@ The primary workspace has three conceptual regions:
    Human edits autosave and are authoritative.
 3. **Direction panel** — concise project-, chapter-, scene-, or selection-level
    notes and actions. It is not a chat transcript.
+
+A movable Prism companion may open a separate project-context side chat above
+the desk. It is advisory chrome, not a fourth document region: it cannot mutate
+prose, Continuity, structure, or titles.
 
 The workspace moves through three phases without forcing a rigid wizard:
 
@@ -114,8 +119,16 @@ The workspace moves through three phases without forcing a rigid wizard:
 5. Substantial accepted AI rewrites create a recoverable version checkpoint.
 6. Generation acts on an explicit structure item or scope; it does not silently
    continue elsewhere.
-7. Provider/model selection comes from account defaults. A LOCAL Slate operation
-   must use only the local provider path and must never escalate externally.
+7. Project prose routing starts from account defaults and may be overridden by
+   OFFLINE/AUTO/ONLINE plus a model choice. OFFLINE must use only the local
+   provider path and must never escalate externally.
+8. Every AI draft and revision stores a backend receipt containing the exact
+   provider, model, target artifact, and content hash even when the prose is
+   later edited or the proposal is rejected.
+9. Living summaries, project chat, and title suggestions remain advisory.
+   Slate may quietly reconsider the title at manuscript milestones, but only
+   surfaces a materially better option. Accepting it is an explicit writer
+   action.
 
 ## Persistent project contract
 
@@ -130,6 +143,11 @@ Each tenant-scoped project stores at minimum:
 - current AI revision proposal and its accepted/rejected state
 - version checkpoints created before substantial accepted rewrites
 - timestamps and the provider/model provenance of AI operations
+- project prose-routing and model preferences
+- backend generation receipts for drafted and proposed prose
+- a fingerprinted living `Story so far` summary
+- project-scoped Prism side-chat history
+- pending and resolved title suggestions
 
 All project list, detail, update, generation, and revision queries include the
 authenticated `user_id`. Knowing another tenant's project or revision ID must not
@@ -203,19 +221,21 @@ The long-term loop is:
 
 - Player-accessible Slate ships with an action-led tutorial whose selectors are
   stable and tested.
-- The walkthrough teaches project creation, structure selection/rearrangement,
-  manuscript editing, direction, and revision approval.
+- The walkthrough teaches project creation, prose routing/model choice,
+  structure selection/rearrangement, manuscript editing, the living summary,
+  advisory project chat, direction, and revision approval.
 - The tutorial remains skippable and resettable.
-- `firstRunOnboarding.ts` needs no Slate-specific provider/model step: Slate
-  intentionally inherits the account choices already collected there.
+- `firstRunOnboarding.ts` needs no additional Slate-specific provider step:
+  account setup remains the default, while the project control is taught inside
+  Slate and can be changed later.
 
 ## Deliberate V1 exclusions
 
 - `Develop in Slate`, `Rehearse in Story`, and round-trip incorporation runtime
   UI (the contracts are documented now; implementation is staged later)
 - live cross-applet synchronization
-- per-project provider/model configuration
-- a conversational writing buddy or chat transcript
+- advanced sampling/reasoning controls
+- chat that can silently mutate manuscript, structure, Continuity, or title
 - persona-guided editor panels and multi-editor panels
 - screenplay-specific structure and formatting
 - collaborative editing, comments by other people, publishing-grade EPUB/PDF

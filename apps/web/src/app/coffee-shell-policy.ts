@@ -33,6 +33,7 @@ export interface LiveSessionChromePolicy {
 export function liveSessionChromePolicy(
   sessionName: LiveSessionChromeName,
 ): LiveSessionChromePolicy {
+  const voiceChangeLocked = sessionName === "Coffee";
   const exitInstruction =
     sessionName === "Coffee"
       ? "End the Coffee session"
@@ -43,7 +44,7 @@ export function liveSessionChromePolicy(
       promptCenter: true,
       refresh: true,
       settings: true,
-      voice: true,
+      ...(voiceChangeLocked ? { voice: true } : {}),
       images: true,
       bots: true,
     },
@@ -51,7 +52,9 @@ export function liveSessionChromePolicy(
       promptCenter: `${exitInstruction} before opening Prompt Center.`,
       refresh: `${exitInstruction} before refreshing Prism.`,
       settings: `${exitInstruction} before opening Settings.`,
-      voice: `${exitInstruction} before changing Voice mode.`,
+      ...(voiceChangeLocked
+        ? { voice: `${exitInstruction} before changing Voice mode.` }
+        : {}),
       images: `${exitInstruction} before opening Images.`,
       bots: `${exitInstruction} before changing bots.`,
     },

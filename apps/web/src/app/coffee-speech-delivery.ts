@@ -23,6 +23,7 @@ export interface CoffeeDeliveryCharacterAlignment {
 
 export const COFFEE_DELIVERY_MIN_DURATION_MS = 280;
 export const COFFEE_DELIVERY_MAX_DURATION_MS = 18_000;
+export const COFFEE_VOICE_REVEAL_TAIL_GRACE_MS = 240;
 
 export const COFFEE_DELIVERY_MOOD_CHARACTERS_PER_SECOND: Record<CoffeeDeliveryMood, number> = {
   joyful: 14,
@@ -31,6 +32,19 @@ export const COFFEE_DELIVERY_MOOD_CHARACTERS_PER_SECOND: Record<CoffeeDeliveryMo
   guarded: 8,
   strained: 6,
 };
+
+/**
+ * Keep the reveal's safety timer just behind voiced playback. Normal completion
+ * is owned by Web Audio's `ended` event; this grace only protects engines that
+ * fail to deliver that callback without cutting off the final phoneme.
+ */
+export function coffeeVoiceRevealFallbackDelayMs(
+  durationMs: number,
+  voiced: boolean,
+): number {
+  const safeDurationMs = Math.max(0, Number.isFinite(durationMs) ? durationMs : 0);
+  return safeDurationMs + (voiced ? COFFEE_VOICE_REVEAL_TAIL_GRACE_MS : 0);
+}
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Signal Review"
+  short_description: "Review Signal episodes and improve PRISM"
+  default_prompt: "Use $signal-review to analyze this Signal episode transcript and make focused PRISM-level UX fixes."

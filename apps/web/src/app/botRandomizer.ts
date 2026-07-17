@@ -6,6 +6,7 @@ import {
   DEFAULT_BOT_FACE_GLYPH_ANIMATION,
   DEFAULT_BOT_FACE_EYE_OFFSET_X,
   DEFAULT_BOT_FACE_EYE_OFFSET_Y,
+  DEFAULT_BOT_FACE_EYE_COUNT,
   DEFAULT_BOT_FACE_EYE_SCALE,
   DEFAULT_BOT_FACE_EYE_ROTATION_DEG,
   DEFAULT_BOT_FACE_MOUTH_OFFSET_X,
@@ -391,6 +392,7 @@ function buildPirateDraft(
     faceStyle: {
       eyesFont: "playful",
       eyeCharacter: null,
+      eyeCount: DEFAULT_BOT_FACE_EYE_COUNT,
       eyeAnimation: DEFAULT_BOT_FACE_GLYPH_ANIMATION,
       mouthFont: "formal",
       mouthCharacter: null,

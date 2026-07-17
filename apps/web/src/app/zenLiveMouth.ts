@@ -613,6 +613,95 @@ export function crtSpeechMouthShapeAtElapsedMs({
   return englishCrtVisemeShapeAtUnit(beats, safeElapsedMs / safePhaseMs);
 }
 
+/**
+ * Uses provider character timings when available so each viseme changes on the
+ * audio clock instead of spreading the written phrase evenly across the clip.
+ */
+export function crtSpeechMouthShapeAtAlignedElapsedMs({
+  text,
+  elapsedMs,
+  durationMs,
+  alignment,
+}: {
+  text: string;
+  elapsedMs: number;
+  durationMs: number;
+  alignment?: {
+    characters: readonly string[];
+    characterStartTimesSeconds: readonly number[];
+    characterEndTimesSeconds: readonly number[];
+  } | null;
+}): ZenLiveBotMouthShape {
+  const fallback = () =>
+    crtSpeechMouthShapeAtElapsedMs({ text, elapsedMs, durationMs });
+  if (!alignment) return fallback();
+
+  const count = alignment.characters.length;
+  if (
+    count === 0 ||
+    count !== alignment.characterStartTimesSeconds.length ||
+    count !== alignment.characterEndTimesSeconds.length
+  ) {
+    return fallback();
+  }
+
+  let previousStart = 0;
+  let previousEnd = 0;
+  for (let index = 0; index < count; index += 1) {
+    const start = alignment.characterStartTimesSeconds[index];
+    const end = alignment.characterEndTimesSeconds[index];
+    if (
+      typeof start !== "number" ||
+      typeof end !== "number" ||
+      !Number.isFinite(start) ||
+      !Number.isFinite(end) ||
+      start < 0 ||
+      end < start ||
+      start < previousStart ||
+      end < previousEnd
+    ) {
+      return fallback();
+    }
+    previousStart = start;
+    previousEnd = end;
+  }
+  if (previousEnd <= 0 || !Number.isFinite(durationMs) || durationMs <= 0) {
+    return fallback();
+  }
+
+  const safeElapsedMs = Math.max(
+    0,
+    Number.isFinite(elapsedMs) ? elapsedMs : 0,
+  );
+  const providerElapsedSeconds =
+    (Math.min(durationMs, safeElapsedMs) / durationMs) * previousEnd;
+  let low = 0;
+  let high = count;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (
+      (alignment.characterStartTimesSeconds[middle] ??
+        Number.POSITIVE_INFINITY) <= providerElapsedSeconds
+    ) {
+      low = middle + 1;
+    } else {
+      high = middle;
+    }
+  }
+  const cursorIndex = Math.max(0, low - 1);
+  if (
+    safeElapsedMs >= durationMs ||
+    providerElapsedSeconds >
+      (alignment.characterEndTimesSeconds[cursorIndex] ?? previousEnd)
+  ) {
+    return "closed";
+  }
+  return crtSpeechMouthShapeAtTextCursor({
+    text: alignment.characters.join(""),
+    cursorIndex,
+  });
+}
+
 /** Removes content that is visible as formatting or a card rather than speech. */
 export function normalizeCrtSpeechText(text: string): string {
   return text

@@ -1460,6 +1460,21 @@ export function replaceSlateSectionWithAiProse(
       contentHash,
       now,
     });
+    db.prepare(
+      `INSERT INTO slate_generation_receipts
+        (id, user_id, project_id, section_id, operation, artifact_hash,
+         provider, model, status, created_at)
+       VALUES (?, ?, ?, ?, 'draft', ?, ?, ?, 'accepted', ?)`,
+    ).run(
+      randomId(),
+      userId,
+      projectId,
+      current.id,
+      contentHash,
+      input.provider,
+      input.model,
+      now,
+    );
     const projection = legacyProjection(db, userId, projectId);
     const nextStructure = structure.map((item) =>
       item.id === structureItemId

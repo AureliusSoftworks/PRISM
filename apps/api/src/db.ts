@@ -226,6 +226,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       prism_default_bot_face_eye_offset_x REAL,
       prism_default_bot_face_eye_offset_y REAL,
       prism_default_bot_face_eye_rotation_deg REAL,
+      prism_default_bot_face_eye_count INTEGER NOT NULL DEFAULT 1,
       prism_default_bot_face_mouth_scale REAL,
       prism_default_bot_face_mouth_offset_x REAL,
       prism_default_bot_face_mouth_offset_y REAL,
@@ -488,6 +489,9 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       locked_ranges_json TEXT NOT NULL DEFAULT '[]',
       last_provider TEXT,
       last_model TEXT,
+      prose_mode TEXT NOT NULL DEFAULT 'auto',
+      prose_model TEXT,
+      prose_provider TEXT,
       continuity_active_version TEXT NOT NULL DEFAULT '0.0',
       continuity_target_version TEXT NOT NULL DEFAULT '0.0',
       continuity_active_generation INTEGER NOT NULL DEFAULT 0,
@@ -607,6 +611,60 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       source_fingerprint TEXT NOT NULL,
       synopsis_json TEXT NOT NULL,
       created_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(project_id) REFERENCES slate_projects(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS slate_generation_receipts (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      section_id TEXT,
+      revision_id TEXT,
+      operation TEXT NOT NULL,
+      artifact_hash TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      model TEXT NOT NULL,
+      status TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      resolved_at TEXT,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(project_id) REFERENCES slate_projects(id) ON DELETE CASCADE,
+      FOREIGN KEY(section_id) REFERENCES slate_sections(id) ON DELETE SET NULL,
+      FOREIGN KEY(revision_id) REFERENCES slate_revisions(id) ON DELETE SET NULL
+    );
+    CREATE TABLE IF NOT EXISTS slate_project_chat_messages (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+      content TEXT NOT NULL,
+      provider TEXT,
+      model TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(project_id) REFERENCES slate_projects(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS slate_living_summaries (
+      project_id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      source_fingerprint TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      summary_tail TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(project_id) REFERENCES slate_projects(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS slate_title_suggestions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      suggested_title TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      model TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at TEXT NOT NULL,
+      resolved_at TEXT,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(project_id) REFERENCES slate_projects(id) ON DELETE CASCADE
     );
@@ -918,6 +976,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       face_eye_offset_x REAL,
       face_eye_offset_y REAL,
       face_eye_rotation_deg REAL,
+      face_eye_count INTEGER NOT NULL DEFAULT 1,
       face_mouth_scale REAL,
       face_mouth_offset_x REAL,
       face_mouth_offset_y REAL,
@@ -1161,6 +1220,21 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(show_id) REFERENCES botcast_shows(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS botcast_show_atmosphere_audio (
+      show_id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      provider TEXT NOT NULL CHECK (provider IN ('elevenlabs')),
+      model TEXT NOT NULL,
+      prompt TEXT NOT NULL,
+      content_type TEXT NOT NULL,
+      audio_bytes BLOB NOT NULL,
+      duration_ms INTEGER NOT NULL,
+      revision INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(show_id) REFERENCES botcast_shows(id) ON DELETE CASCADE
+    );
     CREATE TABLE IF NOT EXISTS botcast_episodes (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -1186,6 +1260,11 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       runtime_ms INTEGER,
       model_warmup_hold_duration_ms INTEGER NOT NULL DEFAULT 0,
       model_warmup_hold_started_at TEXT,
+      persona_reviewer_bot_id TEXT,
+      persona_reviewer_name TEXT,
+      persona_rating REAL CHECK (persona_rating IS NULL OR (persona_rating >= 1 AND persona_rating <= 5)),
+      persona_comment TEXT,
+      persona_reviewed_at TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -1264,10 +1343,12 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     .prepare("PRAGMA table_info(slate_projects)")
     .all() as Array<{ name: string }>;
   const hasSlateSparkWildcards = slateProjectColumns.some(
-    (column) => column.name === "spark_wildcards_json"
+    (column) => column.name === "spark_wildcards_json",
   );
   if (!hasSlateSparkWildcards) {
-    db.exec("ALTER TABLE slate_projects ADD COLUMN spark_wildcards_json TEXT NOT NULL DEFAULT '';");
+    db.exec(
+      "ALTER TABLE slate_projects ADD COLUMN spark_wildcards_json TEXT NOT NULL DEFAULT '';",
+    );
   }
   const slateProjectColumnNames = new Set(
     slateProjectColumns.map((column) => column.name),
@@ -1280,6 +1361,9 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   };
   addSlateProjectColumn("series_id", "TEXT");
   addSlateProjectColumn("book_ordinal", "INTEGER NOT NULL DEFAULT 0");
+  addSlateProjectColumn("prose_mode", "TEXT NOT NULL DEFAULT 'auto'");
+  addSlateProjectColumn("prose_model", "TEXT");
+  addSlateProjectColumn("prose_provider", "TEXT");
   addSlateProjectColumn(
     "continuity_active_version",
     "TEXT NOT NULL DEFAULT '0.0'",
@@ -1316,169 +1400,233 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       "ALTER TABLE slate_continuity_entities ADD COLUMN anchors_json TEXT NOT NULL DEFAULT '[]';",
     );
   }
-  const userColumns = db
-    .prepare("PRAGMA table_info(users)")
-    .all() as Array<{ name: string }>;
+  const userColumns = db.prepare("PRAGMA table_info(users)").all() as Array<{
+    name: string;
+  }>;
   const zenSessionMemoryColumns = db
     .prepare("PRAGMA table_info(zen_session_memories)")
     .all() as Array<{ name: string }>;
   const hasZenSessionMemoryBotId = zenSessionMemoryColumns.some(
-    (column) => column.name === "bot_id"
+    (column) => column.name === "bot_id",
   );
   if (!hasZenSessionMemoryBotId) {
     db.exec("ALTER TABLE zen_session_memories ADD COLUMN bot_id TEXT;");
   }
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_zen_session_memories_user_bot_created ON zen_session_memories(user_id, bot_id, created_at DESC);"
+    "CREATE INDEX IF NOT EXISTS idx_zen_session_memories_user_bot_created ON zen_session_memories(user_id, bot_id, created_at DESC);",
   );
-  const hasLastActiveAt = userColumns.some((column) => column.name === "last_active_at");
+  const hasLastActiveAt = userColumns.some(
+    (column) => column.name === "last_active_at",
+  );
   if (!hasLastActiveAt) {
     db.exec("ALTER TABLE users ADD COLUMN last_active_at TEXT;");
   }
-  const hasVoiceMode = userColumns.some((column) => column.name === "voice_mode");
-  if (!hasVoiceMode) db.exec("ALTER TABLE users ADD COLUMN voice_mode TEXT NOT NULL DEFAULT 'mute';");
+  const hasVoiceMode = userColumns.some(
+    (column) => column.name === "voice_mode",
+  );
+  if (!hasVoiceMode)
+    db.exec(
+      "ALTER TABLE users ADD COLUMN voice_mode TEXT NOT NULL DEFAULT 'mute';",
+    );
   const hasSignalImmersiveVoiceEffectsEnabled = userColumns.some(
-    (column) => column.name === "signal_immersive_voice_effects_enabled"
+    (column) => column.name === "signal_immersive_voice_effects_enabled",
   );
   if (!hasSignalImmersiveVoiceEffectsEnabled) {
     db.exec(
-      "ALTER TABLE users ADD COLUMN signal_immersive_voice_effects_enabled INTEGER NOT NULL DEFAULT 0;"
+      "ALTER TABLE users ADD COLUMN signal_immersive_voice_effects_enabled INTEGER NOT NULL DEFAULT 0;",
     );
   }
-  const hasVoiceEffectsEnabled = userColumns.some((column) => column.name === "voice_effects_enabled");
-  if (!hasVoiceEffectsEnabled) db.exec("ALTER TABLE users ADD COLUMN voice_effects_enabled INTEGER NOT NULL DEFAULT 1;");
-  const hasVoiceVolume = userColumns.some((column) => column.name === "voice_volume");
-  if (!hasVoiceVolume) db.exec("ALTER TABLE users ADD COLUMN voice_volume REAL NOT NULL DEFAULT 1;");
-  const hasEnglishVoiceEngine = userColumns.some((column) => column.name === "english_voice_engine");
-  if (!hasEnglishVoiceEngine) db.exec("ALTER TABLE users ADD COLUMN english_voice_engine TEXT NOT NULL DEFAULT 'elevenlabs';");
-  db.exec("UPDATE users SET english_voice_engine = 'elevenlabs' WHERE english_voice_engine IS NULL OR english_voice_engine = 'builtin';");
-  const hasDefaultSystemVoiceName = userColumns.some((column) => column.name === "default_system_voice_name");
-  if (!hasDefaultSystemVoiceName) db.exec("ALTER TABLE users ADD COLUMN default_system_voice_name TEXT;");
-  const hasDefaultElevenLabsVoiceId = userColumns.some((column) => column.name === "default_elevenlabs_voice_id");
-  if (!hasDefaultElevenLabsVoiceId) db.exec("ALTER TABLE users ADD COLUMN default_elevenlabs_voice_id TEXT;");
-  const hasElevenLabsVoiceBank = userColumns.some((column) => column.name === "elevenlabs_voice_bank");
-  if (!hasElevenLabsVoiceBank) db.exec("ALTER TABLE users ADD COLUMN elevenlabs_voice_bank TEXT NOT NULL DEFAULT '{}';");
-  const hasElevenLabsVoiceModel = userColumns.some((column) => column.name === "elevenlabs_voice_model");
-  if (!hasElevenLabsVoiceModel) db.exec("ALTER TABLE users ADD COLUMN elevenlabs_voice_model TEXT;");
+  const hasVoiceEffectsEnabled = userColumns.some(
+    (column) => column.name === "voice_effects_enabled",
+  );
+  if (!hasVoiceEffectsEnabled)
+    db.exec(
+      "ALTER TABLE users ADD COLUMN voice_effects_enabled INTEGER NOT NULL DEFAULT 1;",
+    );
+  const hasVoiceVolume = userColumns.some(
+    (column) => column.name === "voice_volume",
+  );
+  if (!hasVoiceVolume)
+    db.exec(
+      "ALTER TABLE users ADD COLUMN voice_volume REAL NOT NULL DEFAULT 1;",
+    );
+  const hasEnglishVoiceEngine = userColumns.some(
+    (column) => column.name === "english_voice_engine",
+  );
+  if (!hasEnglishVoiceEngine)
+    db.exec(
+      "ALTER TABLE users ADD COLUMN english_voice_engine TEXT NOT NULL DEFAULT 'elevenlabs';",
+    );
+  db.exec(
+    "UPDATE users SET english_voice_engine = 'elevenlabs' WHERE english_voice_engine IS NULL OR english_voice_engine = 'builtin';",
+  );
+  const hasDefaultSystemVoiceName = userColumns.some(
+    (column) => column.name === "default_system_voice_name",
+  );
+  if (!hasDefaultSystemVoiceName)
+    db.exec("ALTER TABLE users ADD COLUMN default_system_voice_name TEXT;");
+  const hasDefaultElevenLabsVoiceId = userColumns.some(
+    (column) => column.name === "default_elevenlabs_voice_id",
+  );
+  if (!hasDefaultElevenLabsVoiceId)
+    db.exec("ALTER TABLE users ADD COLUMN default_elevenlabs_voice_id TEXT;");
+  const hasElevenLabsVoiceBank = userColumns.some(
+    (column) => column.name === "elevenlabs_voice_bank",
+  );
+  if (!hasElevenLabsVoiceBank)
+    db.exec(
+      "ALTER TABLE users ADD COLUMN elevenlabs_voice_bank TEXT NOT NULL DEFAULT '{}';",
+    );
+  const hasElevenLabsVoiceModel = userColumns.some(
+    (column) => column.name === "elevenlabs_voice_model",
+  );
+  if (!hasElevenLabsVoiceModel)
+    db.exec("ALTER TABLE users ADD COLUMN elevenlabs_voice_model TEXT;");
   const hasElevenLabsVoiceCollectionId = userColumns.some(
-    (column) => column.name === "elevenlabs_voice_collection_id"
+    (column) => column.name === "elevenlabs_voice_collection_id",
   );
   if (!hasElevenLabsVoiceCollectionId) {
-    db.exec("ALTER TABLE users ADD COLUMN elevenlabs_voice_collection_id TEXT;");
+    db.exec(
+      "ALTER TABLE users ADD COLUMN elevenlabs_voice_collection_id TEXT;",
+    );
   }
   const hasPlayerAudioVoiceProfile = userColumns.some(
-    (column) => column.name === "player_audio_voice_profile"
+    (column) => column.name === "player_audio_voice_profile",
   );
   if (!hasPlayerAudioVoiceProfile) {
     db.exec("ALTER TABLE users ADD COLUMN player_audio_voice_profile TEXT;");
   }
   const hasPlayerNamePronunciation = userColumns.some(
-    (column) => column.name === "player_name_pronunciation"
+    (column) => column.name === "player_name_pronunciation",
   );
   if (!hasPlayerNamePronunciation) {
-    db.exec("ALTER TABLE users ADD COLUMN player_name_pronunciation TEXT NOT NULL DEFAULT '';");
+    db.exec(
+      "ALTER TABLE users ADD COLUMN player_name_pronunciation TEXT NOT NULL DEFAULT '';",
+    );
   }
   const hasPrismDefaultBotAudioVoiceProfile = userColumns.some(
-    (column) => column.name === "prism_default_bot_audio_voice_profile"
+    (column) => column.name === "prism_default_bot_audio_voice_profile",
   );
   if (!hasPrismDefaultBotAudioVoiceProfile) {
-    db.exec("ALTER TABLE users ADD COLUMN prism_default_bot_audio_voice_profile TEXT;");
+    db.exec(
+      "ALTER TABLE users ADD COLUMN prism_default_bot_audio_voice_profile TEXT;",
+    );
   }
   const botcastMessageColumns = db
     .prepare("PRAGMA table_info(botcast_messages)")
     .all() as Array<{ name: string }>;
   const hasBotcastVoicePerformanceText = botcastMessageColumns.some(
-    (column) => column.name === "voice_performance_text"
+    (column) => column.name === "voice_performance_text",
   );
   if (!hasBotcastVoicePerformanceText) {
-    db.exec("ALTER TABLE botcast_messages ADD COLUMN voice_performance_text TEXT;");
+    db.exec(
+      "ALTER TABLE botcast_messages ADD COLUMN voice_performance_text TEXT;",
+    );
   }
-  const hasProviderLocked = userColumns.some((column) => column.name === "provider_locked");
+  const hasProviderLocked = userColumns.some(
+    (column) => column.name === "provider_locked",
+  );
   if (!hasProviderLocked) {
-    db.exec("ALTER TABLE users ADD COLUMN provider_locked INTEGER NOT NULL DEFAULT 0;");
+    db.exec(
+      "ALTER TABLE users ADD COLUMN provider_locked INTEGER NOT NULL DEFAULT 0;",
+    );
   }
-  const hasHiddenBotModelIds = userColumns.some((column) => column.name === "hidden_bot_model_ids");
+  const hasHiddenBotModelIds = userColumns.some(
+    (column) => column.name === "hidden_bot_model_ids",
+  );
   if (!hasHiddenBotModelIds) {
-    db.exec("ALTER TABLE users ADD COLUMN hidden_bot_model_ids TEXT NOT NULL DEFAULT '[]';");
+    db.exec(
+      "ALTER TABLE users ADD COLUMN hidden_bot_model_ids TEXT NOT NULL DEFAULT '[]';",
+    );
   }
   const hasHiddenComfyUiWorkflowIds = userColumns.some(
-    (column) => column.name === "hidden_comfyui_workflow_ids"
+    (column) => column.name === "hidden_comfyui_workflow_ids",
   );
   if (!hasHiddenComfyUiWorkflowIds) {
-    db.exec("ALTER TABLE users ADD COLUMN hidden_comfyui_workflow_ids TEXT NOT NULL DEFAULT '[]';");
+    db.exec(
+      "ALTER TABLE users ADD COLUMN hidden_comfyui_workflow_ids TEXT NOT NULL DEFAULT '[]';",
+    );
   }
   const hasModelVisibilityDefaultsVersion = userColumns.some(
-    (column) => column.name === "model_visibility_defaults_version"
+    (column) => column.name === "model_visibility_defaults_version",
   );
   if (!hasModelVisibilityDefaultsVersion) {
     db.exec(
-      "ALTER TABLE users ADD COLUMN model_visibility_defaults_version INTEGER NOT NULL DEFAULT 0;"
+      "ALTER TABLE users ADD COLUMN model_visibility_defaults_version INTEGER NOT NULL DEFAULT 0;",
     );
   }
-  const hasSecondaryOllamaHost = userColumns.some((column) => column.name === "secondary_ollama_host");
+  const hasSecondaryOllamaHost = userColumns.some(
+    (column) => column.name === "secondary_ollama_host",
+  );
   if (!hasSecondaryOllamaHost) {
     db.exec("ALTER TABLE users ADD COLUMN secondary_ollama_host TEXT;");
   }
   const hasExperimentalDualOllamaEnabled = userColumns.some(
-    (column) => column.name === "experimental_dual_ollama_enabled"
+    (column) => column.name === "experimental_dual_ollama_enabled",
   );
   if (!hasExperimentalDualOllamaEnabled) {
     db.exec(
-      "ALTER TABLE users ADD COLUMN experimental_dual_ollama_enabled INTEGER NOT NULL DEFAULT 0;"
+      "ALTER TABLE users ADD COLUMN experimental_dual_ollama_enabled INTEGER NOT NULL DEFAULT 0;",
     );
   }
   const hasExperimentalAllModelEffortEnabled = userColumns.some(
-    (column) => column.name === "experimental_all_model_effort_enabled"
+    (column) => column.name === "experimental_all_model_effort_enabled",
   );
   if (!hasExperimentalAllModelEffortEnabled) {
     db.exec(
-      "ALTER TABLE users ADD COLUMN experimental_all_model_effort_enabled INTEGER NOT NULL DEFAULT 0;"
+      "ALTER TABLE users ADD COLUMN experimental_all_model_effort_enabled INTEGER NOT NULL DEFAULT 0;",
     );
   }
   const hasCoffeeExperimentalTableAngleEnabled = userColumns.some(
-    (column) => column.name === "coffee_experimental_table_angle_enabled"
+    (column) => column.name === "coffee_experimental_table_angle_enabled",
   );
   if (!hasCoffeeExperimentalTableAngleEnabled) {
     db.exec(
-      "ALTER TABLE users ADD COLUMN coffee_experimental_table_angle_enabled INTEGER NOT NULL DEFAULT 0;"
+      "ALTER TABLE users ADD COLUMN coffee_experimental_table_angle_enabled INTEGER NOT NULL DEFAULT 0;",
     );
   }
   const hasPsychicModeEnabled = userColumns.some(
-    (column) => column.name === "psychic_mode_enabled"
+    (column) => column.name === "psychic_mode_enabled",
   );
   if (!hasPsychicModeEnabled) {
-    db.exec("ALTER TABLE users ADD COLUMN psychic_mode_enabled INTEGER NOT NULL DEFAULT 0;");
+    db.exec(
+      "ALTER TABLE users ADD COLUMN psychic_mode_enabled INTEGER NOT NULL DEFAULT 0;",
+    );
   }
   const hasDevMemoriesEnabled = userColumns.some(
-    (column) => column.name === "dev_memories_enabled"
+    (column) => column.name === "dev_memories_enabled",
   );
   if (!hasDevMemoriesEnabled) {
-    db.exec("ALTER TABLE users ADD COLUMN dev_memories_enabled INTEGER NOT NULL DEFAULT 0;");
+    db.exec(
+      "ALTER TABLE users ADD COLUMN dev_memories_enabled INTEGER NOT NULL DEFAULT 0;",
+    );
   }
   const hasDevMemoriesText = userColumns.some(
-    (column) => column.name === "dev_memories_text"
+    (column) => column.name === "dev_memories_text",
   );
   if (!hasDevMemoriesText) {
-    db.exec("ALTER TABLE users ADD COLUMN dev_memories_text TEXT NOT NULL DEFAULT '';");
+    db.exec(
+      "ALTER TABLE users ADD COLUMN dev_memories_text TEXT NOT NULL DEFAULT '';",
+    );
   }
   const hasPreferredLocalModel = userColumns.some(
-    (column) => column.name === "preferred_local_model"
+    (column) => column.name === "preferred_local_model",
   );
   if (!hasPreferredLocalModel) {
     db.exec("ALTER TABLE users ADD COLUMN preferred_local_model TEXT;");
   }
   const hasPreferredOnlineModel = userColumns.some(
-    (column) => column.name === "preferred_online_model"
+    (column) => column.name === "preferred_online_model",
   );
   if (!hasPreferredOnlineModel) {
     db.exec("ALTER TABLE users ADD COLUMN preferred_online_model TEXT;");
   }
   const hasPreferredImageProvider = userColumns.some(
-    (column) => column.name === "preferred_image_provider"
+    (column) => column.name === "preferred_image_provider",
   );
   if (!hasPreferredImageProvider) {
     db.exec(
-      "ALTER TABLE users ADD COLUMN preferred_image_provider TEXT NOT NULL DEFAULT 'local';"
+      "ALTER TABLE users ADD COLUMN preferred_image_provider TEXT NOT NULL DEFAULT 'local';",
     );
     // Preserve the previously coupled behavior for existing accounts while
     // letting new accounts start with the privacy-safe local image default.
@@ -1487,156 +1635,198 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
           SET preferred_image_provider = CASE
             WHEN preferred_provider = 'local' THEN 'local'
             ELSE 'openai'
-          END;`
+          END;`,
     );
   }
   const hasLenientLocalFallbackModel = userColumns.some(
-    (column) => column.name === "lenient_local_fallback_model"
+    (column) => column.name === "lenient_local_fallback_model",
   );
   if (!hasLenientLocalFallbackModel) {
     db.exec("ALTER TABLE users ADD COLUMN lenient_local_fallback_model TEXT;");
   }
   const hasAutoFallbackChain = userColumns.some(
-    (column) => column.name === "auto_fallback_chain"
+    (column) => column.name === "auto_fallback_chain",
   );
   if (!hasAutoFallbackChain) {
     db.exec("ALTER TABLE users ADD COLUMN auto_fallback_chain TEXT;");
   }
   const hasComposerWritingAssist = userColumns.some(
-    (column) => column.name === "composer_writing_assist"
+    (column) => column.name === "composer_writing_assist",
   );
   if (!hasComposerWritingAssist) {
-    db.exec("ALTER TABLE users ADD COLUMN composer_writing_assist INTEGER NOT NULL DEFAULT 1;");
+    db.exec(
+      "ALTER TABLE users ADD COLUMN composer_writing_assist INTEGER NOT NULL DEFAULT 1;",
+    );
   }
-  const hasComfyuiHost = userColumns.some((column) => column.name === "comfyui_host");
+  const hasComfyuiHost = userColumns.some(
+    (column) => column.name === "comfyui_host",
+  );
   if (!hasComfyuiHost) {
     db.exec("ALTER TABLE users ADD COLUMN comfyui_host TEXT;");
   }
   const hasPreferredLocalImageModel = userColumns.some(
-    (column) => column.name === "preferred_local_image_model"
+    (column) => column.name === "preferred_local_image_model",
   );
   if (!hasPreferredLocalImageModel) {
     db.exec("ALTER TABLE users ADD COLUMN preferred_local_image_model TEXT;");
   }
   const hasPreferredOpenAiImageModel = userColumns.some(
-    (column) => column.name === "preferred_openai_image_model"
+    (column) => column.name === "preferred_openai_image_model",
   );
   if (!hasPreferredOpenAiImageModel) {
     db.exec("ALTER TABLE users ADD COLUMN preferred_openai_image_model TEXT;");
   }
   const hasPreferredZenWallpaperLocalImageModel = userColumns.some(
-    (column) => column.name === "preferred_zen_wallpaper_local_image_model"
+    (column) => column.name === "preferred_zen_wallpaper_local_image_model",
   );
   if (!hasPreferredZenWallpaperLocalImageModel) {
-    db.exec("ALTER TABLE users ADD COLUMN preferred_zen_wallpaper_local_image_model TEXT;");
+    db.exec(
+      "ALTER TABLE users ADD COLUMN preferred_zen_wallpaper_local_image_model TEXT;",
+    );
   }
   const hasPreferredZenWallpaperOpenAiImageModel = userColumns.some(
-    (column) => column.name === "preferred_zen_wallpaper_openai_image_model"
+    (column) => column.name === "preferred_zen_wallpaper_openai_image_model",
   );
   if (!hasPreferredZenWallpaperOpenAiImageModel) {
-    db.exec("ALTER TABLE users ADD COLUMN preferred_zen_wallpaper_openai_image_model TEXT;");
+    db.exec(
+      "ALTER TABLE users ADD COLUMN preferred_zen_wallpaper_openai_image_model TEXT;",
+    );
   }
   const hasZenWallpaperOpacity = userColumns.some(
-    (column) => column.name === "zen_wallpaper_opacity"
+    (column) => column.name === "zen_wallpaper_opacity",
   );
   if (!hasZenWallpaperOpacity) {
-    db.exec("ALTER TABLE users ADD COLUMN zen_wallpaper_opacity REAL NOT NULL DEFAULT 0.28;");
+    db.exec(
+      "ALTER TABLE users ADD COLUMN zen_wallpaper_opacity REAL NOT NULL DEFAULT 0.28;",
+    );
   }
   const hasZenWallpaperTextMaskEnabled = userColumns.some(
-    (column) => column.name === "zen_wallpaper_text_mask_enabled"
+    (column) => column.name === "zen_wallpaper_text_mask_enabled",
   );
   if (!hasZenWallpaperTextMaskEnabled) {
-    db.exec("ALTER TABLE users ADD COLUMN zen_wallpaper_text_mask_enabled INTEGER NOT NULL DEFAULT 1;");
+    db.exec(
+      "ALTER TABLE users ADD COLUMN zen_wallpaper_text_mask_enabled INTEGER NOT NULL DEFAULT 1;",
+    );
   }
   const hasZenWallpaperGrayscaleEnabled = userColumns.some(
-    (column) => column.name === "zen_wallpaper_grayscale_enabled"
+    (column) => column.name === "zen_wallpaper_grayscale_enabled",
   );
   if (!hasZenWallpaperGrayscaleEnabled) {
-    db.exec("ALTER TABLE users ADD COLUMN zen_wallpaper_grayscale_enabled INTEGER NOT NULL DEFAULT 1;");
+    db.exec(
+      "ALTER TABLE users ADD COLUMN zen_wallpaper_grayscale_enabled INTEGER NOT NULL DEFAULT 1;",
+    );
   }
   const hasZenWallpaperBlurredEdgesEnabled = userColumns.some(
-    (column) => column.name === "zen_wallpaper_blurred_edges_enabled"
+    (column) => column.name === "zen_wallpaper_blurred_edges_enabled",
   );
   if (!hasZenWallpaperBlurredEdgesEnabled) {
-    db.exec("ALTER TABLE users ADD COLUMN zen_wallpaper_blurred_edges_enabled INTEGER NOT NULL DEFAULT 1;");
+    db.exec(
+      "ALTER TABLE users ADD COLUMN zen_wallpaper_blurred_edges_enabled INTEGER NOT NULL DEFAULT 1;",
+    );
   }
   const hasZenWallpaperStyleNotes = userColumns.some(
-    (column) => column.name === "zen_wallpaper_style_notes"
+    (column) => column.name === "zen_wallpaper_style_notes",
   );
   if (!hasZenWallpaperStyleNotes) {
-    db.exec("ALTER TABLE users ADD COLUMN zen_wallpaper_style_notes TEXT NOT NULL DEFAULT '';");
+    db.exec(
+      "ALTER TABLE users ADD COLUMN zen_wallpaper_style_notes TEXT NOT NULL DEFAULT '';",
+    );
   }
   const hasZenSessionIdleGapMs = userColumns.some(
-    (column) => column.name === "zen_session_idle_gap_ms"
+    (column) => column.name === "zen_session_idle_gap_ms",
   );
   if (!hasZenSessionIdleGapMs) {
-    db.exec("ALTER TABLE users ADD COLUMN zen_session_idle_gap_ms INTEGER NOT NULL DEFAULT 43200000;");
+    db.exec(
+      "ALTER TABLE users ADD COLUMN zen_session_idle_gap_ms INTEGER NOT NULL DEFAULT 43200000;",
+    );
   }
   const hasZenFreshStartGapMs = userColumns.some(
-    (column) => column.name === "zen_fresh_start_gap_ms"
+    (column) => column.name === "zen_fresh_start_gap_ms",
   );
   if (!hasZenFreshStartGapMs) {
-    db.exec("ALTER TABLE users ADD COLUMN zen_fresh_start_gap_ms INTEGER NOT NULL DEFAULT 604800000;");
+    db.exec(
+      "ALTER TABLE users ADD COLUMN zen_fresh_start_gap_ms INTEGER NOT NULL DEFAULT 604800000;",
+    );
   }
   const hasZenRecentContextMessages = userColumns.some(
-    (column) => column.name === "zen_recent_context_messages"
+    (column) => column.name === "zen_recent_context_messages",
   );
   if (!hasZenRecentContextMessages) {
-    db.exec("ALTER TABLE users ADD COLUMN zen_recent_context_messages INTEGER NOT NULL DEFAULT 30;");
+    db.exec(
+      "ALTER TABLE users ADD COLUMN zen_recent_context_messages INTEGER NOT NULL DEFAULT 30;",
+    );
   }
   const hasZenWallpaperRegenMessageInterval = userColumns.some(
-    (column) => column.name === "zen_wallpaper_regen_message_interval"
+    (column) => column.name === "zen_wallpaper_regen_message_interval",
   );
   if (!hasZenWallpaperRegenMessageInterval) {
-    db.exec("ALTER TABLE users ADD COLUMN zen_wallpaper_regen_message_interval INTEGER NOT NULL DEFAULT 30;");
+    db.exec(
+      "ALTER TABLE users ADD COLUMN zen_wallpaper_regen_message_interval INTEGER NOT NULL DEFAULT 30;",
+    );
   }
   const hasZenMoodSensitivity = userColumns.some(
-    (column) => column.name === "zen_mood_sensitivity"
+    (column) => column.name === "zen_mood_sensitivity",
   );
   if (!hasZenMoodSensitivity) {
-    db.exec("ALTER TABLE users ADD COLUMN zen_mood_sensitivity REAL NOT NULL DEFAULT 0.5;");
+    db.exec(
+      "ALTER TABLE users ADD COLUMN zen_mood_sensitivity REAL NOT NULL DEFAULT 0.5;",
+    );
   }
   const hasZenCanvasTypingSpeed = userColumns.some(
-    (column) => column.name === "zen_canvas_typing_speed"
+    (column) => column.name === "zen_canvas_typing_speed",
   );
   if (!hasZenCanvasTypingSpeed) {
-    db.exec("ALTER TABLE users ADD COLUMN zen_canvas_typing_speed REAL NOT NULL DEFAULT 1;");
+    db.exec(
+      "ALTER TABLE users ADD COLUMN zen_canvas_typing_speed REAL NOT NULL DEFAULT 1;",
+    );
   }
   const hasZenMessageFontMinPx = userColumns.some(
-    (column) => column.name === "zen_message_font_min_px"
+    (column) => column.name === "zen_message_font_min_px",
   );
   if (!hasZenMessageFontMinPx) {
-    db.exec("ALTER TABLE users ADD COLUMN zen_message_font_min_px REAL NOT NULL DEFAULT 15.8;");
+    db.exec(
+      "ALTER TABLE users ADD COLUMN zen_message_font_min_px REAL NOT NULL DEFAULT 15.8;",
+    );
   }
   const hasZenMessageFontMaxPx = userColumns.some(
-    (column) => column.name === "zen_message_font_max_px"
+    (column) => column.name === "zen_message_font_max_px",
   );
   if (!hasZenMessageFontMaxPx) {
-    db.exec("ALTER TABLE users ADD COLUMN zen_message_font_max_px REAL NOT NULL DEFAULT 32.8;");
+    db.exec(
+      "ALTER TABLE users ADD COLUMN zen_message_font_max_px REAL NOT NULL DEFAULT 32.8;",
+    );
   }
   const hasZenAskQuestionPatienceEnabled = userColumns.some(
-    (column) => column.name === "zen_ask_question_patience_enabled"
+    (column) => column.name === "zen_ask_question_patience_enabled",
   );
   if (!hasZenAskQuestionPatienceEnabled) {
-    db.exec("ALTER TABLE users ADD COLUMN zen_ask_question_patience_enabled INTEGER NOT NULL DEFAULT 0;");
+    db.exec(
+      "ALTER TABLE users ADD COLUMN zen_ask_question_patience_enabled INTEGER NOT NULL DEFAULT 0;",
+    );
   }
   const hasZenAskQuestionPatienceMs = userColumns.some(
-    (column) => column.name === "zen_ask_question_patience_ms"
+    (column) => column.name === "zen_ask_question_patience_ms",
   );
   if (!hasZenAskQuestionPatienceMs) {
-    db.exec("ALTER TABLE users ADD COLUMN zen_ask_question_patience_ms INTEGER NOT NULL DEFAULT 60000;");
+    db.exec(
+      "ALTER TABLE users ADD COLUMN zen_ask_question_patience_ms INTEGER NOT NULL DEFAULT 60000;",
+    );
   }
   const hasZenAutonomyEnabled = userColumns.some(
-    (column) => column.name === "zen_autonomy_enabled"
+    (column) => column.name === "zen_autonomy_enabled",
   );
   if (!hasZenAutonomyEnabled) {
-    db.exec("ALTER TABLE users ADD COLUMN zen_autonomy_enabled INTEGER NOT NULL DEFAULT 0;");
+    db.exec(
+      "ALTER TABLE users ADD COLUMN zen_autonomy_enabled INTEGER NOT NULL DEFAULT 0;",
+    );
   }
   const hasZenPersonaTransitionChoice = userColumns.some(
-    (column) => column.name === "zen_persona_transition_choice"
+    (column) => column.name === "zen_persona_transition_choice",
   );
   if (!hasZenPersonaTransitionChoice) {
-    db.exec("ALTER TABLE users ADD COLUMN zen_persona_transition_choice TEXT NOT NULL DEFAULT 'random';");
+    db.exec(
+      "ALTER TABLE users ADD COLUMN zen_persona_transition_choice TEXT NOT NULL DEFAULT 'random';",
+    );
   }
   const defaultBotColumns: Array<[string, string]> = [
     ["prism_default_bot_name", "TEXT"],
@@ -1649,12 +1839,16 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     ["prism_default_bot_face_mouth_font", "TEXT"],
     ["prism_default_bot_face_mouth_character", "TEXT"],
     ["prism_default_bot_face_mouth_animation", "TEXT"],
-    ["prism_default_bot_face_mouth_coffee_pucker", "INTEGER NOT NULL DEFAULT 0"],
+    [
+      "prism_default_bot_face_mouth_coffee_pucker",
+      "INTEGER NOT NULL DEFAULT 0",
+    ],
     ["prism_default_bot_face_font_weight", "INTEGER"],
     ["prism_default_bot_face_eye_scale", "REAL"],
     ["prism_default_bot_face_eye_offset_x", "REAL"],
     ["prism_default_bot_face_eye_offset_y", "REAL"],
     ["prism_default_bot_face_eye_rotation_deg", "REAL"],
+    ["prism_default_bot_face_eye_count", "INTEGER NOT NULL DEFAULT 1"],
     ["prism_default_bot_face_mouth_scale", "REAL"],
     ["prism_default_bot_face_mouth_offset_x", "REAL"],
     ["prism_default_bot_face_mouth_offset_y", "REAL"],
@@ -1677,68 +1871,74 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     }
   }
   const hasLenientLocalImageFallbackModel = userColumns.some(
-    (column) => column.name === "lenient_local_image_fallback_model"
+    (column) => column.name === "lenient_local_image_fallback_model",
   );
   if (!hasLenientLocalImageFallbackModel) {
-    db.exec("ALTER TABLE users ADD COLUMN lenient_local_image_fallback_model TEXT;");
+    db.exec(
+      "ALTER TABLE users ADD COLUMN lenient_local_image_fallback_model TEXT;",
+    );
   }
-  const hasComfyuiWorkflows = userColumns.some((column) => column.name === "comfyui_workflows");
+  const hasComfyuiWorkflows = userColumns.some(
+    (column) => column.name === "comfyui_workflows",
+  );
   if (!hasComfyuiWorkflows) {
     db.exec("ALTER TABLE users ADD COLUMN comfyui_workflows TEXT;");
-    db.exec(`UPDATE users SET comfyui_workflows = '[]' WHERE comfyui_workflows IS NULL;`);
+    db.exec(
+      `UPDATE users SET comfyui_workflows = '[]' WHERE comfyui_workflows IS NULL;`,
+    );
   }
   const hasPrismDefaultLlmModel = userColumns.some(
-    (column) => column.name === "prism_default_llm_model"
+    (column) => column.name === "prism_default_llm_model",
   );
   if (!hasPrismDefaultLlmModel) {
     db.exec("ALTER TABLE users ADD COLUMN prism_default_llm_model TEXT;");
   }
   const hasPrismImageToolLlmModel = userColumns.some(
-    (column) => column.name === "prism_image_tool_llm_model"
+    (column) => column.name === "prism_image_tool_llm_model",
   );
   if (!hasPrismImageToolLlmModel) {
     db.exec("ALTER TABLE users ADD COLUMN prism_image_tool_llm_model TEXT;");
   }
   const hasFallbackModelMessageStripe = userColumns.some(
-    (column) => column.name === "fallback_model_message_stripe"
+    (column) => column.name === "fallback_model_message_stripe",
   );
   if (!hasFallbackModelMessageStripe) {
     db.exec(
-      "ALTER TABLE users ADD COLUMN fallback_model_message_stripe INTEGER NOT NULL DEFAULT 1;"
+      "ALTER TABLE users ADD COLUMN fallback_model_message_stripe INTEGER NOT NULL DEFAULT 1;",
     );
   }
   const hasAnthropicKeyCiphertext = userColumns.some(
-    (column) => column.name === "anthropic_key_ciphertext"
+    (column) => column.name === "anthropic_key_ciphertext",
   );
   if (!hasAnthropicKeyCiphertext) {
     db.exec("ALTER TABLE users ADD COLUMN anthropic_key_ciphertext TEXT;");
   }
   const hasAnthropicKeyIv = userColumns.some(
-    (column) => column.name === "anthropic_key_iv"
+    (column) => column.name === "anthropic_key_iv",
   );
   if (!hasAnthropicKeyIv) {
     db.exec("ALTER TABLE users ADD COLUMN anthropic_key_iv TEXT;");
   }
   const hasAnthropicKeyTag = userColumns.some(
-    (column) => column.name === "anthropic_key_tag"
+    (column) => column.name === "anthropic_key_tag",
   );
   if (!hasAnthropicKeyTag) {
     db.exec("ALTER TABLE users ADD COLUMN anthropic_key_tag TEXT;");
   }
   const hasElevenLabsKeyCiphertext = userColumns.some(
-    (column) => column.name === "elevenlabs_key_ciphertext"
+    (column) => column.name === "elevenlabs_key_ciphertext",
   );
   if (!hasElevenLabsKeyCiphertext) {
     db.exec("ALTER TABLE users ADD COLUMN elevenlabs_key_ciphertext TEXT;");
   }
   const hasElevenLabsKeyIv = userColumns.some(
-    (column) => column.name === "elevenlabs_key_iv"
+    (column) => column.name === "elevenlabs_key_iv",
   );
   if (!hasElevenLabsKeyIv) {
     db.exec("ALTER TABLE users ADD COLUMN elevenlabs_key_iv TEXT;");
   }
   const hasElevenLabsKeyTag = userColumns.some(
-    (column) => column.name === "elevenlabs_key_tag"
+    (column) => column.name === "elevenlabs_key_tag",
   );
   if (!hasElevenLabsKeyTag) {
     db.exec("ALTER TABLE users ADD COLUMN elevenlabs_key_tag TEXT;");
@@ -1764,31 +1964,31 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     .prepare("PRAGMA table_info(messages)")
     .all() as Array<{ name: string }>;
   const hasProviderColumn = messageColumns.some(
-    (column) => column.name === "provider"
+    (column) => column.name === "provider",
   );
   if (!hasProviderColumn) {
     db.exec("ALTER TABLE messages ADD COLUMN provider TEXT;");
   }
   const hasMessageModelColumn = messageColumns.some(
-    (column) => column.name === "model"
+    (column) => column.name === "model",
   );
   if (!hasMessageModelColumn) {
     db.exec("ALTER TABLE messages ADD COLUMN model TEXT;");
   }
   const hasBotIdColumn = messageColumns.some(
-    (column) => column.name === "bot_id"
+    (column) => column.name === "bot_id",
   );
   if (!hasBotIdColumn) {
     db.exec("ALTER TABLE messages ADD COLUMN bot_id TEXT;");
   }
   const hasToolPayloadColumn = messageColumns.some(
-    (column) => column.name === "tool_payload"
+    (column) => column.name === "tool_payload",
   );
   if (!hasToolPayloadColumn) {
     db.exec("ALTER TABLE messages ADD COLUMN tool_payload TEXT;");
   }
   const hasCoffeeAudienceBotIdsColumn = messageColumns.some(
-    (column) => column.name === "coffee_audience_bot_ids"
+    (column) => column.name === "coffee_audience_bot_ids",
   );
   if (!hasCoffeeAudienceBotIdsColumn) {
     db.exec("ALTER TABLE messages ADD COLUMN coffee_audience_bot_ids TEXT;");
@@ -1810,178 +2010,208 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       ON conversation_hubs(conversation_id);
   `);
   const hasConversationModeColumn = conversationColumns.some(
-    (column) => column.name === "conversation_mode"
+    (column) => column.name === "conversation_mode",
   );
   if (!hasConversationModeColumn) {
-    db.exec("ALTER TABLE conversations ADD COLUMN conversation_mode TEXT NOT NULL DEFAULT 'sandbox';");
+    db.exec(
+      "ALTER TABLE conversations ADD COLUMN conversation_mode TEXT NOT NULL DEFAULT 'sandbox';",
+    );
   }
   const hasConversationArchivedAtColumn = conversationColumns.some(
-    (column) => column.name === "archived_at"
+    (column) => column.name === "archived_at",
   );
   if (!hasConversationArchivedAtColumn) {
     db.exec("ALTER TABLE conversations ADD COLUMN archived_at TEXT;");
   }
   const hasConversationArchiveBatchIdColumn = conversationColumns.some(
-    (column) => column.name === "archive_batch_id"
+    (column) => column.name === "archive_batch_id",
   );
   if (!hasConversationArchiveBatchIdColumn) {
     db.exec("ALTER TABLE conversations ADD COLUMN archive_batch_id TEXT;");
   }
   const hasConversationBotGroupIdsColumn = conversationColumns.some(
-    (column) => column.name === "bot_group_ids"
+    (column) => column.name === "bot_group_ids",
   );
   if (!hasConversationBotGroupIdsColumn) {
     db.exec("ALTER TABLE conversations ADD COLUMN bot_group_ids TEXT;");
   }
   const hasConversationParentIdColumn = conversationColumns.some(
-    (column) => column.name === "parent_id"
+    (column) => column.name === "parent_id",
   );
   if (!hasConversationParentIdColumn) {
     db.exec("ALTER TABLE conversations ADD COLUMN parent_id TEXT;");
   }
   const hasConversationForkMessageIdColumn = conversationColumns.some(
-    (column) => column.name === "fork_message_id"
+    (column) => column.name === "fork_message_id",
   );
   if (!hasConversationForkMessageIdColumn) {
     db.exec("ALTER TABLE conversations ADD COLUMN fork_message_id TEXT;");
   }
   const hasConversationCoffeeSettingsColumn = conversationColumns.some(
-    (column) => column.name === "coffee_settings"
+    (column) => column.name === "coffee_settings",
   );
   if (!hasConversationCoffeeSettingsColumn) {
     db.exec("ALTER TABLE conversations ADD COLUMN coffee_settings TEXT;");
   }
   const hasConversationCoffeeGroupIdColumn = conversationColumns.some(
-    (column) => column.name === "coffee_group_id"
+    (column) => column.name === "coffee_group_id",
   );
   if (!hasConversationCoffeeGroupIdColumn) {
     db.exec("ALTER TABLE conversations ADD COLUMN coffee_group_id TEXT;");
   }
   const hasConversationCoffeeDurationColumn = conversationColumns.some(
-    (column) => column.name === "coffee_duration_minutes"
+    (column) => column.name === "coffee_duration_minutes",
   );
   if (!hasConversationCoffeeDurationColumn) {
-    db.exec("ALTER TABLE conversations ADD COLUMN coffee_duration_minutes INTEGER;");
+    db.exec(
+      "ALTER TABLE conversations ADD COLUMN coffee_duration_minutes INTEGER;",
+    );
   }
   const hasConversationCoffeePresetColumn = conversationColumns.some(
-    (column) => column.name === "coffee_preset_id"
+    (column) => column.name === "coffee_preset_id",
   );
   if (!hasConversationCoffeePresetColumn) {
     db.exec("ALTER TABLE conversations ADD COLUMN coffee_preset_id TEXT;");
   }
   const hasConversationCoffeeTopicColumn = conversationColumns.some(
-    (column) => column.name === "coffee_topic"
+    (column) => column.name === "coffee_topic",
   );
   if (!hasConversationCoffeeTopicColumn) {
     db.exec("ALTER TABLE conversations ADD COLUMN coffee_topic TEXT;");
   }
   const hasConversationCoffeeAbsentBotIdsColumn = conversationColumns.some(
-    (column) => column.name === "coffee_absent_bot_ids"
+    (column) => column.name === "coffee_absent_bot_ids",
   );
   if (!hasConversationCoffeeAbsentBotIdsColumn) {
-    db.exec("ALTER TABLE conversations ADD COLUMN coffee_absent_bot_ids TEXT NOT NULL DEFAULT '[]';");
+    db.exec(
+      "ALTER TABLE conversations ADD COLUMN coffee_absent_bot_ids TEXT NOT NULL DEFAULT '[]';",
+    );
   }
   const hasConversationCoffeeTeamModeColumn = conversationColumns.some(
-    (column) => column.name === "coffee_team_mode_json"
+    (column) => column.name === "coffee_team_mode_json",
   );
   if (!hasConversationCoffeeTeamModeColumn) {
     db.exec("ALTER TABLE conversations ADD COLUMN coffee_team_mode_json TEXT;");
   }
   const hasConversationCoffeeMeetingSummaryColumn = conversationColumns.some(
-    (column) => column.name === "coffee_meeting_summary"
+    (column) => column.name === "coffee_meeting_summary",
   );
   if (!hasConversationCoffeeMeetingSummaryColumn) {
-    db.exec("ALTER TABLE conversations ADD COLUMN coffee_meeting_summary TEXT;");
+    db.exec(
+      "ALTER TABLE conversations ADD COLUMN coffee_meeting_summary TEXT;",
+    );
   }
-  const hasConversationCoffeeMeetingSummaryCountColumn = conversationColumns.some(
-    (column) => column.name === "coffee_meeting_summary_message_count"
+  const hasConversationCoffeeMeetingSummaryCountColumn =
+    conversationColumns.some(
+      (column) => column.name === "coffee_meeting_summary_message_count",
   );
   if (!hasConversationCoffeeMeetingSummaryCountColumn) {
-    db.exec("ALTER TABLE conversations ADD COLUMN coffee_meeting_summary_message_count INTEGER;");
+    db.exec(
+      "ALTER TABLE conversations ADD COLUMN coffee_meeting_summary_message_count INTEGER;",
+    );
   }
-  const hasConversationCoffeeMeetingSummaryUpdatedAtColumn = conversationColumns.some(
-    (column) => column.name === "coffee_meeting_summary_updated_at"
+  const hasConversationCoffeeMeetingSummaryUpdatedAtColumn =
+    conversationColumns.some(
+      (column) => column.name === "coffee_meeting_summary_updated_at",
   );
   if (!hasConversationCoffeeMeetingSummaryUpdatedAtColumn) {
-    db.exec("ALTER TABLE conversations ADD COLUMN coffee_meeting_summary_updated_at TEXT;");
+    db.exec(
+      "ALTER TABLE conversations ADD COLUMN coffee_meeting_summary_updated_at TEXT;",
+    );
   }
   const hasConversationCoffeePowerPlanColumn = conversationColumns.some(
-    (column) => column.name === "coffee_power_plan_json"
+    (column) => column.name === "coffee_power_plan_json",
   );
   if (!hasConversationCoffeePowerPlanColumn) {
-    db.exec("ALTER TABLE conversations ADD COLUMN coffee_power_plan_json TEXT;");
+    db.exec(
+      "ALTER TABLE conversations ADD COLUMN coffee_power_plan_json TEXT;",
+    );
   }
   const hasZenWallpaperEnabledColumn = conversationColumns.some(
-    (column) => column.name === "zen_wallpaper_enabled"
+    (column) => column.name === "zen_wallpaper_enabled",
   );
   if (!hasZenWallpaperEnabledColumn) {
-    db.exec("ALTER TABLE conversations ADD COLUMN zen_wallpaper_enabled INTEGER NOT NULL DEFAULT 0;");
+    db.exec(
+      "ALTER TABLE conversations ADD COLUMN zen_wallpaper_enabled INTEGER NOT NULL DEFAULT 0;",
+    );
   }
   const hasZenWallpaperImageIdColumn = conversationColumns.some(
-    (column) => column.name === "zen_wallpaper_image_id"
+    (column) => column.name === "zen_wallpaper_image_id",
   );
   if (!hasZenWallpaperImageIdColumn) {
-    db.exec("ALTER TABLE conversations ADD COLUMN zen_wallpaper_image_id TEXT;");
+    db.exec(
+      "ALTER TABLE conversations ADD COLUMN zen_wallpaper_image_id TEXT;",
+    );
   }
   const hasZenWallpaperPromptSeedColumn = conversationColumns.some(
-    (column) => column.name === "zen_wallpaper_prompt_seed"
+    (column) => column.name === "zen_wallpaper_prompt_seed",
   );
   if (!hasZenWallpaperPromptSeedColumn) {
-    db.exec("ALTER TABLE conversations ADD COLUMN zen_wallpaper_prompt_seed TEXT;");
+    db.exec(
+      "ALTER TABLE conversations ADD COLUMN zen_wallpaper_prompt_seed TEXT;",
+    );
   }
   const hasZenWallpaperMessageCountColumn = conversationColumns.some(
-    (column) => column.name === "zen_wallpaper_message_count"
+    (column) => column.name === "zen_wallpaper_message_count",
   );
   if (!hasZenWallpaperMessageCountColumn) {
-    db.exec("ALTER TABLE conversations ADD COLUMN zen_wallpaper_message_count INTEGER;");
+    db.exec(
+      "ALTER TABLE conversations ADD COLUMN zen_wallpaper_message_count INTEGER;",
+    );
   }
   const hasZenWallpaperStatusColumn = conversationColumns.some(
-    (column) => column.name === "zen_wallpaper_status"
+    (column) => column.name === "zen_wallpaper_status",
   );
   if (!hasZenWallpaperStatusColumn) {
-    db.exec("ALTER TABLE conversations ADD COLUMN zen_wallpaper_status TEXT NOT NULL DEFAULT 'idle';");
+    db.exec(
+      "ALTER TABLE conversations ADD COLUMN zen_wallpaper_status TEXT NOT NULL DEFAULT 'idle';",
+    );
   }
   const hasZenWallpaperHistoryColumn = conversationColumns.some(
-    (column) => column.name === "zen_wallpaper_history"
+    (column) => column.name === "zen_wallpaper_history",
   );
   if (!hasZenWallpaperHistoryColumn) {
-    db.exec("ALTER TABLE conversations ADD COLUMN zen_wallpaper_history TEXT NOT NULL DEFAULT '[]';");
+    db.exec(
+      "ALTER TABLE conversations ADD COLUMN zen_wallpaper_history TEXT NOT NULL DEFAULT '[]';",
+    );
   }
   const coffeeGroupColumns = db
     .prepare("PRAGMA table_info(coffee_groups)")
     .all() as Array<{ name: string }>;
   const hasCoffeeGroupTopicModeColumn = coffeeGroupColumns.some(
-    (column) => column.name === "coffee_topic_mode"
+    (column) => column.name === "coffee_topic_mode",
   );
   if (!hasCoffeeGroupTopicModeColumn) {
     db.exec(
-      "ALTER TABLE coffee_groups ADD COLUMN coffee_topic_mode TEXT NOT NULL DEFAULT 'manual';"
+      "ALTER TABLE coffee_groups ADD COLUMN coffee_topic_mode TEXT NOT NULL DEFAULT 'manual';",
     );
   }
   const hasCoffeeGroupModelChoiceColumn = coffeeGroupColumns.some(
-    (column) => column.name === "model_choice"
+    (column) => column.name === "model_choice",
   );
   if (!hasCoffeeGroupModelChoiceColumn) {
     db.exec(
-      "ALTER TABLE coffee_groups ADD COLUMN model_choice TEXT NOT NULL DEFAULT '{}';"
+      "ALTER TABLE coffee_groups ADD COLUMN model_choice TEXT NOT NULL DEFAULT '{}';",
     );
   }
   const hasCoffeeGroupStarterTopicsColumn = coffeeGroupColumns.some(
-    (column) => column.name === "starter_topics"
+    (column) => column.name === "starter_topics",
   );
   if (!hasCoffeeGroupStarterTopicsColumn) {
     db.exec(
-      "ALTER TABLE coffee_groups ADD COLUMN starter_topics TEXT NOT NULL DEFAULT '{}';"
+      "ALTER TABLE coffee_groups ADD COLUMN starter_topics TEXT NOT NULL DEFAULT '{}';",
     );
   }
   const sweepBatchColumns = db
     .prepare("PRAGMA table_info(conversation_sweep_batches)")
     .all() as Array<{ name: string }>;
   const hasSweepUndoExpiresAt = sweepBatchColumns.some(
-    (column) => column.name === "undo_expires_at"
+    (column) => column.name === "undo_expires_at",
   );
   if (!hasSweepUndoExpiresAt) {
-    db.exec("ALTER TABLE conversation_sweep_batches ADD COLUMN undo_expires_at TEXT;");
+    db.exec(
+      "ALTER TABLE conversation_sweep_batches ADD COLUMN undo_expires_at TEXT;",
+    );
   }
   db.exec(`
     UPDATE conversation_sweep_batches
@@ -2004,52 +2234,62 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     .prepare("PRAGMA table_info(memories)")
     .all() as Array<{ name: string }>;
   const hasMemoryConversationIdColumn = memoryColumns.some(
-    (column) => column.name === "conversation_id"
+    (column) => column.name === "conversation_id",
   );
   if (!hasMemoryConversationIdColumn) {
     db.exec("ALTER TABLE memories ADD COLUMN conversation_id TEXT;");
   }
   const hasMemoryBotIdColumn = memoryColumns.some(
-    (column) => column.name === "bot_id"
+    (column) => column.name === "bot_id",
   );
   if (!hasMemoryBotIdColumn) {
     db.exec("ALTER TABLE memories ADD COLUMN bot_id TEXT;");
   }
   const hasMemorySourceColumn = memoryColumns.some(
-    (column) => column.name === "source"
+    (column) => column.name === "source",
   );
   if (!hasMemorySourceColumn) {
-    db.exec("ALTER TABLE memories ADD COLUMN source TEXT NOT NULL DEFAULT 'direct';");
+    db.exec(
+      "ALTER TABLE memories ADD COLUMN source TEXT NOT NULL DEFAULT 'direct';",
+    );
   }
   const hasMemoryCertaintyColumn = memoryColumns.some(
-    (column) => column.name === "certainty"
+    (column) => column.name === "certainty",
   );
   if (!hasMemoryCertaintyColumn) {
     db.exec("ALTER TABLE memories ADD COLUMN certainty REAL;");
   }
   const hasMemorySourceMessageIdsColumn = memoryColumns.some(
-    (column) => column.name === "source_message_ids"
+    (column) => column.name === "source_message_ids",
   );
   if (!hasMemorySourceMessageIdsColumn) {
-    db.exec("ALTER TABLE memories ADD COLUMN source_message_ids TEXT NOT NULL DEFAULT '[]';");
+    db.exec(
+      "ALTER TABLE memories ADD COLUMN source_message_ids TEXT NOT NULL DEFAULT '[]';",
+    );
   }
   const hasMemoryCategoryColumn = memoryColumns.some(
-    (column) => column.name === "category"
+    (column) => column.name === "category",
   );
   if (!hasMemoryCategoryColumn) {
-    db.exec("ALTER TABLE memories ADD COLUMN category TEXT NOT NULL DEFAULT 'general';");
+    db.exec(
+      "ALTER TABLE memories ADD COLUMN category TEXT NOT NULL DEFAULT 'general';",
+    );
   }
   const hasMemoryTierColumn = memoryColumns.some(
-    (column) => column.name === "tier"
+    (column) => column.name === "tier",
   );
   if (!hasMemoryTierColumn) {
-    db.exec("ALTER TABLE memories ADD COLUMN tier TEXT NOT NULL DEFAULT 'short_term';");
+    db.exec(
+      "ALTER TABLE memories ADD COLUMN tier TEXT NOT NULL DEFAULT 'short_term';",
+    );
   }
   const hasMemoryDurabilityColumn = memoryColumns.some(
-    (column) => column.name === "durability"
+    (column) => column.name === "durability",
   );
   if (!hasMemoryDurabilityColumn) {
-    db.exec("ALTER TABLE memories ADD COLUMN durability REAL NOT NULL DEFAULT 0.5;");
+    db.exec(
+      "ALTER TABLE memories ADD COLUMN durability REAL NOT NULL DEFAULT 0.5;",
+    );
   }
   db.exec(`
     UPDATE memories
@@ -2124,28 +2364,32 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     `);
   }
 
-  const imageColumns = db
-    .prepare("PRAGMA table_info(images)")
-    .all() as Array<{ name: string }>;
+  const imageColumns = db.prepare("PRAGMA table_info(images)").all() as Array<{
+    name: string;
+  }>;
   const hasImageBotIdColumn = imageColumns.some(
-    (column) => column.name === "bot_id"
+    (column) => column.name === "bot_id",
   );
   if (!hasImageBotIdColumn) {
     db.exec("ALTER TABLE images ADD COLUMN bot_id TEXT;");
   }
 
   const hasImageRelatedBotIdsColumn = imageColumns.some(
-    (column) => column.name === "related_bot_ids"
+    (column) => column.name === "related_bot_ids",
   );
   if (!hasImageRelatedBotIdsColumn) {
-    db.exec("ALTER TABLE images ADD COLUMN related_bot_ids TEXT NOT NULL DEFAULT '[]';");
+    db.exec(
+      "ALTER TABLE images ADD COLUMN related_bot_ids TEXT NOT NULL DEFAULT '[]';",
+    );
   }
 
   const hasImageOriginColumn = imageColumns.some(
-    (column) => column.name === "origin"
+    (column) => column.name === "origin",
   );
   if (!hasImageOriginColumn) {
-    db.exec("ALTER TABLE images ADD COLUMN origin TEXT NOT NULL DEFAULT 'images_panel';");
+    db.exec(
+      "ALTER TABLE images ADD COLUMN origin TEXT NOT NULL DEFAULT 'images_panel';",
+    );
   }
 
   // Recover ownership for Signal artwork created before image provenance was
@@ -2208,297 +2452,321 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   `);
 
   const hasImageLocalRelPathColumn = imageColumns.some(
-    (column) => column.name === "local_rel_path"
+    (column) => column.name === "local_rel_path",
   );
   if (!hasImageLocalRelPathColumn) {
     db.exec("ALTER TABLE images ADD COLUMN local_rel_path TEXT;");
   }
 
   const hasImageModelColumn = imageColumns.some(
-    (column) => column.name === "model"
+    (column) => column.name === "model",
   );
   if (!hasImageModelColumn) {
     db.exec(
-      "ALTER TABLE images ADD COLUMN model TEXT NOT NULL DEFAULT 'gpt-image-2';"
+      "ALTER TABLE images ADD COLUMN model TEXT NOT NULL DEFAULT 'gpt-image-2';",
     );
   }
   const hasImagePurposeColumn = imageColumns.some(
-    (column) => column.name === "purpose"
+    (column) => column.name === "purpose",
   );
   if (!hasImagePurposeColumn) {
-    db.exec("ALTER TABLE images ADD COLUMN purpose TEXT NOT NULL DEFAULT 'gallery';");
+    db.exec(
+      "ALTER TABLE images ADD COLUMN purpose TEXT NOT NULL DEFAULT 'gallery';",
+    );
   }
 
   // Migrate existing DBs to the bots.color and bots.glyph columns used
   // for the visual identifier that appears on the bot card and messages.
-  const botColumns = db
-    .prepare("PRAGMA table_info(bots)")
-    .all() as Array<{ name: string }>;
+  const botColumns = db.prepare("PRAGMA table_info(bots)").all() as Array<{
+    name: string;
+  }>;
   const hasBotColorColumn = botColumns.some(
-    (column) => column.name === "color"
+    (column) => column.name === "color",
   );
   if (!hasBotColorColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN color TEXT;");
   }
   const hasBotGlyphColumn = botColumns.some(
-    (column) => column.name === "glyph"
+    (column) => column.name === "glyph",
   );
   if (!hasBotGlyphColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN glyph TEXT;");
   }
   const hasBotAvatarDetailsJsonColumn = botColumns.some(
-    (column) => column.name === "avatar_details_json"
+    (column) => column.name === "avatar_details_json",
   );
   if (!hasBotAvatarDetailsJsonColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN avatar_details_json TEXT;");
   }
   const hasBotFaceEyesFontColumn = botColumns.some(
-    (column) => column.name === "face_eyes_font"
+    (column) => column.name === "face_eyes_font",
   );
   if (!hasBotFaceEyesFontColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN face_eyes_font TEXT;");
   }
   const hasBotFaceEyeCharacterColumn = botColumns.some(
-    (column) => column.name === "face_eye_character"
+    (column) => column.name === "face_eye_character",
   );
   if (!hasBotFaceEyeCharacterColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN face_eye_character TEXT;");
   }
   const hasBotFaceEyeAnimationColumn = botColumns.some(
-    (column) => column.name === "face_eye_animation"
+    (column) => column.name === "face_eye_animation",
   );
   if (!hasBotFaceEyeAnimationColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN face_eye_animation TEXT;");
   }
   const hasBotFaceMouthFontColumn = botColumns.some(
-    (column) => column.name === "face_mouth_font"
+    (column) => column.name === "face_mouth_font",
   );
   if (!hasBotFaceMouthFontColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN face_mouth_font TEXT;");
   }
   const hasBotFaceMouthCharacterColumn = botColumns.some(
-    (column) => column.name === "face_mouth_character"
+    (column) => column.name === "face_mouth_character",
   );
   if (!hasBotFaceMouthCharacterColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN face_mouth_character TEXT;");
   }
   const hasBotFaceMouthAnimationColumn = botColumns.some(
-    (column) => column.name === "face_mouth_animation"
+    (column) => column.name === "face_mouth_animation",
   );
   if (!hasBotFaceMouthAnimationColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN face_mouth_animation TEXT;");
   }
   const hasBotFaceMouthCoffeePuckerColumn = botColumns.some(
-    (column) => column.name === "face_mouth_coffee_pucker"
+    (column) => column.name === "face_mouth_coffee_pucker",
   );
   if (!hasBotFaceMouthCoffeePuckerColumn) {
     db.exec(
-      "ALTER TABLE bots ADD COLUMN face_mouth_coffee_pucker INTEGER NOT NULL DEFAULT 0;"
+      "ALTER TABLE bots ADD COLUMN face_mouth_coffee_pucker INTEGER NOT NULL DEFAULT 0;",
     );
   }
   const hasBotFaceFontWeightColumn = botColumns.some(
-    (column) => column.name === "face_font_weight"
+    (column) => column.name === "face_font_weight",
   );
   if (!hasBotFaceFontWeightColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN face_font_weight INTEGER;");
   }
   const hasBotFaceEyeScaleColumn = botColumns.some(
-    (column) => column.name === "face_eye_scale"
+    (column) => column.name === "face_eye_scale",
   );
   if (!hasBotFaceEyeScaleColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN face_eye_scale REAL;");
   }
   const hasBotFaceEyeOffsetXColumn = botColumns.some(
-    (column) => column.name === "face_eye_offset_x"
+    (column) => column.name === "face_eye_offset_x",
   );
   if (!hasBotFaceEyeOffsetXColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN face_eye_offset_x REAL;");
   }
   const hasBotFaceEyeOffsetYColumn = botColumns.some(
-    (column) => column.name === "face_eye_offset_y"
+    (column) => column.name === "face_eye_offset_y",
   );
   if (!hasBotFaceEyeOffsetYColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN face_eye_offset_y REAL;");
   }
   const hasBotFaceEyeRotationDegColumn = botColumns.some(
-    (column) => column.name === "face_eye_rotation_deg"
+    (column) => column.name === "face_eye_rotation_deg",
   );
   if (!hasBotFaceEyeRotationDegColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN face_eye_rotation_deg REAL;");
   }
+  const hasBotFaceEyeCountColumn = botColumns.some(
+    (column) => column.name === "face_eye_count",
+  );
+  if (!hasBotFaceEyeCountColumn) {
+    db.exec(
+      "ALTER TABLE bots ADD COLUMN face_eye_count INTEGER NOT NULL DEFAULT 1;",
+    );
+  }
   const hasBotFaceMouthScaleColumn = botColumns.some(
-    (column) => column.name === "face_mouth_scale"
+    (column) => column.name === "face_mouth_scale",
   );
   if (!hasBotFaceMouthScaleColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN face_mouth_scale REAL;");
   }
   const hasBotFaceMouthOffsetXColumn = botColumns.some(
-    (column) => column.name === "face_mouth_offset_x"
+    (column) => column.name === "face_mouth_offset_x",
   );
   if (!hasBotFaceMouthOffsetXColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN face_mouth_offset_x REAL;");
   }
   const hasBotFaceMouthOffsetYColumn = botColumns.some(
-    (column) => column.name === "face_mouth_offset_y"
+    (column) => column.name === "face_mouth_offset_y",
   );
   if (!hasBotFaceMouthOffsetYColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN face_mouth_offset_y REAL;");
   }
   const hasBotFaceMouthRotationDegColumn = botColumns.some(
-    (column) => column.name === "face_mouth_rotation_deg"
+    (column) => column.name === "face_mouth_rotation_deg",
   );
   if (!hasBotFaceMouthRotationDegColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN face_mouth_rotation_deg REAL;");
   }
   const hasBotFaceBlinkBarColumn = botColumns.some(
-    (column) => column.name === "face_blink_bar"
+    (column) => column.name === "face_blink_bar",
   );
   if (!hasBotFaceBlinkBarColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN face_blink_bar TEXT;");
   }
   const hasBotFaceBlinkScaleColumn = botColumns.some(
-    (column) => column.name === "face_blink_scale"
+    (column) => column.name === "face_blink_scale",
   );
   if (!hasBotFaceBlinkScaleColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN face_blink_scale REAL;");
   }
   const hasBotFaceBlinkOffsetXColumn = botColumns.some(
-    (column) => column.name === "face_blink_offset_x"
+    (column) => column.name === "face_blink_offset_x",
   );
   if (!hasBotFaceBlinkOffsetXColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN face_blink_offset_x REAL;");
   }
   const hasBotFaceBlinkOffsetYColumn = botColumns.some(
-    (column) => column.name === "face_blink_offset_y"
+    (column) => column.name === "face_blink_offset_y",
   );
   if (!hasBotFaceBlinkOffsetYColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN face_blink_offset_y REAL;");
   }
   const hasBotFaceThinkingFramesColumn = botColumns.some(
-    (column) => column.name === "face_thinking_frames"
+    (column) => column.name === "face_thinking_frames",
   );
   if (!hasBotFaceThinkingFramesColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN face_thinking_frames TEXT;");
   }
   const hasBotProfilePictureImageIdColumn = botColumns.some(
-    (column) => column.name === "profile_picture_image_id"
+    (column) => column.name === "profile_picture_image_id",
   );
   if (!hasBotProfilePictureImageIdColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN profile_picture_image_id TEXT;");
   }
   const hasBotChatEnabledColumn = botColumns.some(
-    (column) => column.name === "chat_enabled"
+    (column) => column.name === "chat_enabled",
   );
   if (!hasBotChatEnabledColumn) {
-    db.exec("ALTER TABLE bots ADD COLUMN chat_enabled INTEGER NOT NULL DEFAULT 1;");
+    db.exec(
+      "ALTER TABLE bots ADD COLUMN chat_enabled INTEGER NOT NULL DEFAULT 1;",
+    );
   }
   db.exec("UPDATE bots SET chat_enabled = 1 WHERE chat_enabled != 1;");
   const hasBotOnlineEnabledColumn = botColumns.some(
-    (column) => column.name === "online_enabled"
+    (column) => column.name === "online_enabled",
   );
   if (!hasBotOnlineEnabledColumn) {
-    db.exec("ALTER TABLE bots ADD COLUMN online_enabled INTEGER NOT NULL DEFAULT 1;");
+    db.exec(
+      "ALTER TABLE bots ADD COLUMN online_enabled INTEGER NOT NULL DEFAULT 1;",
+    );
   }
   const hasBotDeleteProtectedColumn = botColumns.some(
-    (column) => column.name === "delete_protected"
+    (column) => column.name === "delete_protected",
   );
   if (!hasBotDeleteProtectedColumn) {
-    db.exec("ALTER TABLE bots ADD COLUMN delete_protected INTEGER NOT NULL DEFAULT 0;");
+    db.exec(
+      "ALTER TABLE bots ADD COLUMN delete_protected INTEGER NOT NULL DEFAULT 0;",
+    );
   }
   const hasBotFlirtEnabledColumn = botColumns.some(
-    (column) => column.name === "flirt_enabled"
+    (column) => column.name === "flirt_enabled",
   );
   if (!hasBotFlirtEnabledColumn) {
-    db.exec("ALTER TABLE bots ADD COLUMN flirt_enabled INTEGER NOT NULL DEFAULT 0;");
+    db.exec(
+      "ALTER TABLE bots ADD COLUMN flirt_enabled INTEGER NOT NULL DEFAULT 0;",
+    );
   }
   const hasBotVoicePreviewLineColumn = botColumns.some(
-    (column) => column.name === "voice_preview_line"
+    (column) => column.name === "voice_preview_line",
   );
   if (!hasBotVoicePreviewLineColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN voice_preview_line TEXT;");
   }
   const hasBotNamePronunciationColumn = botColumns.some(
-    (column) => column.name === "name_pronunciation"
+    (column) => column.name === "name_pronunciation",
   );
   if (!hasBotNamePronunciationColumn) {
-    db.exec("ALTER TABLE bots ADD COLUMN name_pronunciation TEXT NOT NULL DEFAULT '';");
+    db.exec(
+      "ALTER TABLE bots ADD COLUMN name_pronunciation TEXT NOT NULL DEFAULT '';",
+    );
   }
   const hasAuthoredAudioVoiceProfileColumn = botColumns.some(
-    (column) => column.name === "authored_audio_voice_profile"
+    (column) => column.name === "authored_audio_voice_profile",
   );
   if (!hasAuthoredAudioVoiceProfileColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN authored_audio_voice_profile TEXT;");
   }
   const hasAudioVoiceProfileOverrideColumn = botColumns.some(
-    (column) => column.name === "audio_voice_profile_override"
+    (column) => column.name === "audio_voice_profile_override",
   );
   if (!hasAudioVoiceProfileOverrideColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN audio_voice_profile_override TEXT;");
   }
   const hasBotLocalModelColumn = botColumns.some(
-    (column) => column.name === "local_model"
+    (column) => column.name === "local_model",
   );
   if (!hasBotLocalModelColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN local_model TEXT;");
   }
   const hasBotOnlineModelColumn = botColumns.some(
-    (column) => column.name === "online_model"
+    (column) => column.name === "online_model",
   );
   if (!hasBotOnlineModelColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN online_model TEXT;");
   }
   const hasBotLocalImageModelColumn = botColumns.some(
-    (column) => column.name === "local_image_model"
+    (column) => column.name === "local_image_model",
   );
   if (!hasBotLocalImageModelColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN local_image_model TEXT;");
   }
   const hasBotOpenaiImageModelColumn = botColumns.some(
-    (column) => column.name === "openai_image_model"
+    (column) => column.name === "openai_image_model",
   );
   if (!hasBotOpenaiImageModelColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN openai_image_model TEXT;");
   }
-  const botcastShowColumns = db.prepare(
-    "PRAGMA table_info(botcast_shows)"
-  ).all() as Array<{ name: string }>;
+  const botcastShowColumns = db
+    .prepare("PRAGMA table_info(botcast_shows)")
+    .all() as Array<{ name: string }>;
   const hasBotcastFallbackStudioAccentVariantColumn = botcastShowColumns.some(
-    (column) => column.name === "fallback_studio_accent_variant"
+    (column) => column.name === "fallback_studio_accent_variant",
   );
   if (!hasBotcastFallbackStudioAccentVariantColumn) {
     db.exec(
-      "ALTER TABLE botcast_shows ADD COLUMN fallback_studio_accent_variant INTEGER NOT NULL DEFAULT 0 CHECK (fallback_studio_accent_variant IN (0, 1, 2));"
+      "ALTER TABLE botcast_shows ADD COLUMN fallback_studio_accent_variant INTEGER NOT NULL DEFAULT 0 CHECK (fallback_studio_accent_variant IN (0, 1, 2));",
     );
     db.exec(
-      "UPDATE botcast_shows SET fallback_studio_accent_variant = (rowid - 1) % 3;"
+      "UPDATE botcast_shows SET fallback_studio_accent_variant = (rowid - 1) % 3;",
     );
   }
-  const botcastEpisodeColumns = db.prepare(
-    "PRAGMA table_info(botcast_episodes)"
-  ).all() as Array<{ name: string }>;
+  const botcastEpisodeColumns = db
+    .prepare("PRAGMA table_info(botcast_episodes)")
+    .all() as Array<{ name: string }>;
   if (!botcastEpisodeColumns.some((column) => column.name === "provider")) {
     db.exec(
-      "ALTER TABLE botcast_episodes ADD COLUMN provider TEXT NOT NULL DEFAULT 'local';"
+      "ALTER TABLE botcast_episodes ADD COLUMN provider TEXT NOT NULL DEFAULT 'local';",
     );
   }
   if (!botcastEpisodeColumns.some((column) => column.name === "model")) {
     db.exec("ALTER TABLE botcast_episodes ADD COLUMN model TEXT;");
   }
-  if (!botcastEpisodeColumns.some((column) => column.name === "response_mode")) {
+  if (
+    !botcastEpisodeColumns.some((column) => column.name === "response_mode")
+  ) {
     db.exec(
-      "ALTER TABLE botcast_episodes ADD COLUMN response_mode TEXT NOT NULL DEFAULT 'local' CHECK (response_mode IN ('local', 'auto', 'online'));"
+      "ALTER TABLE botcast_episodes ADD COLUMN response_mode TEXT NOT NULL DEFAULT 'local' CHECK (response_mode IN ('local', 'auto', 'online'));",
     );
     db.exec(
       `UPDATE botcast_episodes
           SET response_mode = CASE
             WHEN provider = 'local' THEN 'local'
             ELSE 'online'
-          END;`
+          END;`,
     );
   }
-  if (!botcastEpisodeColumns.some((column) => column.name === "duration_minutes")) {
+  if (
+    !botcastEpisodeColumns.some((column) => column.name === "duration_minutes")
+  ) {
     db.exec(
-      "ALTER TABLE botcast_episodes ADD COLUMN duration_minutes INTEGER CHECK (duration_minutes IS NULL OR (duration_minutes >= 3 AND duration_minutes <= 30));"
+      "ALTER TABLE botcast_episodes ADD COLUMN duration_minutes INTEGER CHECK (duration_minutes IS NULL OR (duration_minutes >= 3 AND duration_minutes <= 30));",
     );
   }
   if (
@@ -2519,80 +2787,98 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       "ALTER TABLE botcast_episodes ADD COLUMN model_warmup_hold_started_at TEXT;",
     );
   }
-  const hasBotTopPColumn = botColumns.some(
-    (column) => column.name === "top_p"
+  const personaReviewColumns = [
+    ["persona_reviewer_bot_id", "TEXT"],
+    ["persona_reviewer_name", "TEXT"],
+    ["persona_rating", "REAL"],
+    ["persona_comment", "TEXT"],
+    ["persona_reviewed_at", "TEXT"],
+  ] as const;
+  for (const [column, declaration] of personaReviewColumns) {
+    if (!botcastEpisodeColumns.some((candidate) => candidate.name === column)) {
+      db.exec(
+        `ALTER TABLE botcast_episodes ADD COLUMN ${column} ${declaration};`,
   );
+    }
+  }
+  const hasBotTopPColumn = botColumns.some((column) => column.name === "top_p");
   if (!hasBotTopPColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN top_p REAL DEFAULT 1;");
   }
-  const hasBotTopKColumn = botColumns.some(
-    (column) => column.name === "top_k"
-  );
+  const hasBotTopKColumn = botColumns.some((column) => column.name === "top_k");
   if (!hasBotTopKColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN top_k INTEGER DEFAULT 40;");
   }
   const hasBotRepetitionPenaltyColumn = botColumns.some(
-    (column) => column.name === "repetition_penalty"
+    (column) => column.name === "repetition_penalty",
   );
   if (!hasBotRepetitionPenaltyColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN repetition_penalty REAL DEFAULT 1.1;");
   }
   const hasBotExportHashColumn = botColumns.some(
-    (column) => column.name === "export_hash"
+    (column) => column.name === "export_hash",
   );
   if (!hasBotExportHashColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN export_hash TEXT;");
   }
   const hasBotSemanticFacetsColumn = botColumns.some(
-    (column) => column.name === "semantic_facets"
+    (column) => column.name === "semantic_facets",
   );
   if (!hasBotSemanticFacetsColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN semantic_facets TEXT;");
   }
   const hasBotSemanticFacetsSourceHashColumn = botColumns.some(
-    (column) => column.name === "semantic_facets_source_hash"
+    (column) => column.name === "semantic_facets_source_hash",
   );
   if (!hasBotSemanticFacetsSourceHashColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN semantic_facets_source_hash TEXT;");
   }
   const hasBotSemanticFacetsUpdatedAtColumn = botColumns.some(
-    (column) => column.name === "semantic_facets_updated_at"
+    (column) => column.name === "semantic_facets_updated_at",
   );
   if (!hasBotSemanticFacetsUpdatedAtColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN semantic_facets_updated_at TEXT;");
   }
   const hasBotPowersJsonColumn = botColumns.some(
-    (column) => column.name === "powers_json"
+    (column) => column.name === "powers_json",
   );
   if (!hasBotPowersJsonColumn) {
-    db.exec("ALTER TABLE bots ADD COLUMN powers_json TEXT NOT NULL DEFAULT '[]';");
+    db.exec(
+      "ALTER TABLE bots ADD COLUMN powers_json TEXT NOT NULL DEFAULT '[]';",
+    );
   }
   const prismMoodColumns = db
     .prepare("PRAGMA table_info(prism_mood_state)")
     .all() as Array<{ name: string }>;
   const hasPrismMoodIgnoreUntilColumn = prismMoodColumns.some(
-    (column) => column.name === "ignore_until"
+    (column) => column.name === "ignore_until",
   );
   if (!hasPrismMoodIgnoreUntilColumn) {
     db.exec("ALTER TABLE prism_mood_state ADD COLUMN ignore_until TEXT;");
   }
   const hasPrismMoodIgnoreCooldownMsColumn = prismMoodColumns.some(
-    (column) => column.name === "ignore_cooldown_ms"
+    (column) => column.name === "ignore_cooldown_ms",
   );
   if (!hasPrismMoodIgnoreCooldownMsColumn) {
-    db.exec("ALTER TABLE prism_mood_state ADD COLUMN ignore_cooldown_ms INTEGER;");
+    db.exec(
+      "ALTER TABLE prism_mood_state ADD COLUMN ignore_cooldown_ms INTEGER;",
+    );
   }
   const hasPrismMoodIgnoreForgivenessChanceColumn = prismMoodColumns.some(
-    (column) => column.name === "ignore_forgiveness_chance"
+    (column) => column.name === "ignore_forgiveness_chance",
   );
   if (!hasPrismMoodIgnoreForgivenessChanceColumn) {
-    db.exec("ALTER TABLE prism_mood_state ADD COLUMN ignore_forgiveness_chance REAL;");
+    db.exec(
+      "ALTER TABLE prism_mood_state ADD COLUMN ignore_forgiveness_chance REAL;",
+    );
   }
   const hasPrismMoodIgnorePenaltyLevelColumn = prismMoodColumns.some(
-    (column) => column.name === "ignore_penalty_level"
+    (column) => column.name === "ignore_penalty_level",
   );
   if (!hasPrismMoodIgnorePenaltyLevelColumn) {
-    db.exec("ALTER TABLE prism_mood_state ADD COLUMN ignore_penalty_level INTEGER;");
+    db.exec(
+      "ALTER TABLE prism_mood_state ADD COLUMN ignore_penalty_level INTEGER;",
+    );
   }
   db.exec(`
     UPDATE bots
@@ -2600,169 +2886,172 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     WHERE export_hash IS NULL OR trim(export_hash) = '';
   `);
   db.exec(
-    "CREATE UNIQUE INDEX IF NOT EXISTS idx_bots_user_export_hash ON bots (user_id, export_hash) WHERE export_hash IS NOT NULL;"
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_bots_user_export_hash ON bots (user_id, export_hash) WHERE export_hash IS NOT NULL;",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_session_opinions_user_conversation ON session_opinions (user_id, conversation_id);"
+    "CREATE INDEX IF NOT EXISTS idx_session_opinions_user_conversation ON session_opinions (user_id, conversation_id);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_session_opinions_user_bot ON session_opinions (user_id, bot_id);"
+    "CREATE INDEX IF NOT EXISTS idx_session_opinions_user_bot ON session_opinions (user_id, bot_id);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_bot_opinions_user_bot ON bot_opinions (user_id, bot_id);"
+    "CREATE INDEX IF NOT EXISTS idx_bot_opinions_user_bot ON bot_opinions (user_id, bot_id);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_bot_relationships_user_source ON bot_relationships (user_id, source_bot_id);"
+    "CREATE INDEX IF NOT EXISTS idx_bot_relationships_user_source ON bot_relationships (user_id, source_bot_id);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_bot_relationships_user_target ON bot_relationships (user_id, target_bot_id);"
+    "CREATE INDEX IF NOT EXISTS idx_bot_relationships_user_target ON bot_relationships (user_id, target_bot_id);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_coffee_social_user_conversation ON coffee_bot_social_state (user_id, conversation_id);"
+    "CREATE INDEX IF NOT EXISTS idx_coffee_social_user_conversation ON coffee_bot_social_state (user_id, conversation_id);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_coffee_cup_top_offs_user_conversation ON coffee_cup_top_offs (user_id, conversation_id);"
+    "CREATE INDEX IF NOT EXISTS idx_coffee_cup_top_offs_user_conversation ON coffee_cup_top_offs (user_id, conversation_id);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_prism_mood_user_conversation ON prism_mood_state (user_id, conversation_id);"
+    "CREATE INDEX IF NOT EXISTS idx_prism_mood_user_conversation ON prism_mood_state (user_id, conversation_id);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_prism_mood_events_user_conversation ON prism_mood_events (user_id, conversation_id, created_at DESC);"
+    "CREATE INDEX IF NOT EXISTS idx_prism_mood_events_user_conversation ON prism_mood_events (user_id, conversation_id, created_at DESC);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_usage_events_user_created ON usage_events (user_id, created_at DESC);"
+    "CREATE INDEX IF NOT EXISTS idx_usage_events_user_created ON usage_events (user_id, created_at DESC);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_usage_events_user_conversation_created ON usage_events (user_id, conversation_id, created_at DESC);"
+    "CREATE INDEX IF NOT EXISTS idx_usage_events_user_conversation_created ON usage_events (user_id, conversation_id, created_at DESC);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_usage_events_user_provider_created ON usage_events (user_id, provider, created_at DESC);"
+    "CREATE INDEX IF NOT EXISTS idx_usage_events_user_provider_created ON usage_events (user_id, provider, created_at DESC);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_usage_events_user_purpose_created ON usage_events (user_id, purpose, created_at DESC);"
+    "CREATE INDEX IF NOT EXISTS idx_usage_events_user_purpose_created ON usage_events (user_id, purpose, created_at DESC);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_developer_transcript_events_conversation_created ON developer_transcript_events (user_id, conversation_id, created_at);"
+    "CREATE INDEX IF NOT EXISTS idx_developer_transcript_events_conversation_created ON developer_transcript_events (user_id, conversation_id, created_at);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_coffee_groups_user_updated ON coffee_groups (user_id, updated_at DESC);"
+    "CREATE INDEX IF NOT EXISTS idx_coffee_groups_user_updated ON coffee_groups (user_id, updated_at DESC);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_coffee_group_seats_group ON coffee_group_seats (user_id, group_id, seat_index);"
+    "CREATE INDEX IF NOT EXISTS idx_coffee_group_seats_group ON coffee_group_seats (user_id, group_id, seat_index);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_coffee_group_events_group ON coffee_group_events (user_id, group_id, created_at DESC);"
+    "CREATE INDEX IF NOT EXISTS idx_coffee_group_events_group ON coffee_group_events (user_id, group_id, created_at DESC);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_botcast_shows_user_updated ON botcast_shows (user_id, updated_at DESC);"
+    "CREATE INDEX IF NOT EXISTS idx_botcast_shows_user_updated ON botcast_shows (user_id, updated_at DESC);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_botcast_shows_user_created ON botcast_shows (user_id, created_at DESC);"
+    "CREATE INDEX IF NOT EXISTS idx_botcast_shows_user_created ON botcast_shows (user_id, created_at DESC);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_botcast_show_intro_audio_user_updated ON botcast_show_intro_audio (user_id, updated_at DESC);"
+    "CREATE INDEX IF NOT EXISTS idx_botcast_show_intro_audio_user_updated ON botcast_show_intro_audio (user_id, updated_at DESC);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_botcast_episodes_show_updated ON botcast_episodes (user_id, show_id, updated_at DESC);"
+    "CREATE INDEX IF NOT EXISTS idx_botcast_show_atmosphere_audio_user_updated ON botcast_show_atmosphere_audio (user_id, updated_at DESC);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_botcast_messages_episode_created ON botcast_messages (user_id, episode_id, created_at);"
+    "CREATE INDEX IF NOT EXISTS idx_botcast_episodes_show_updated ON botcast_episodes (user_id, show_id, updated_at DESC);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_botcast_events_episode_sequence ON botcast_events (user_id, episode_id, sequence);"
+    "CREATE INDEX IF NOT EXISTS idx_botcast_messages_episode_created ON botcast_messages (user_id, episode_id, created_at);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_conversations_coffee_group ON conversations (user_id, coffee_group_id, updated_at DESC);"
+    "CREATE INDEX IF NOT EXISTS idx_botcast_events_episode_sequence ON botcast_events (user_id, episode_id, sequence);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_story_sessions_user_updated ON story_sessions (user_id, updated_at DESC);"
+    "CREATE INDEX IF NOT EXISTS idx_conversations_coffee_group ON conversations (user_id, coffee_group_id, updated_at DESC);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_story_sessions_user_status ON story_sessions (user_id, status, updated_at DESC);"
+    "CREATE INDEX IF NOT EXISTS idx_story_sessions_user_updated ON story_sessions (user_id, updated_at DESC);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_slate_projects_user_updated ON slate_projects (user_id, updated_at DESC);"
+    "CREATE INDEX IF NOT EXISTS idx_story_sessions_user_status ON story_sessions (user_id, status, updated_at DESC);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_slate_series_user_updated ON slate_series (user_id, updated_at DESC);"
+    "CREATE INDEX IF NOT EXISTS idx_slate_projects_user_updated ON slate_projects (user_id, updated_at DESC);",
   );
   db.exec(
-    "CREATE UNIQUE INDEX IF NOT EXISTS idx_slate_projects_user_id ON slate_projects (user_id, id);"
+    "CREATE INDEX IF NOT EXISTS idx_slate_series_user_updated ON slate_series (user_id, updated_at DESC);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_slate_projects_series_order ON slate_projects (user_id, series_id, book_ordinal, created_at);"
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_slate_projects_user_id ON slate_projects (user_id, id);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_slate_revisions_project_created ON slate_revisions (user_id, project_id, created_at DESC);"
+    "CREATE INDEX IF NOT EXISTS idx_slate_projects_series_order ON slate_projects (user_id, series_id, book_ordinal, created_at);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_slate_versions_project_created ON slate_versions (user_id, project_id, created_at DESC);"
+    "CREATE INDEX IF NOT EXISTS idx_slate_revisions_project_created ON slate_revisions (user_id, project_id, created_at DESC);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_slate_sections_project_order ON slate_sections (user_id, project_id, ordinal);"
+    "CREATE INDEX IF NOT EXISTS idx_slate_versions_project_created ON slate_versions (user_id, project_id, created_at DESC);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_slate_sections_parent_order ON slate_sections (user_id, project_id, parent_section_id, ordinal);"
+    "CREATE INDEX IF NOT EXISTS idx_slate_sections_project_order ON slate_sections (user_id, project_id, ordinal);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_slate_section_versions_revision ON slate_section_versions (user_id, project_id, section_id, revision DESC);"
+    "CREATE INDEX IF NOT EXISTS idx_slate_sections_parent_order ON slate_sections (user_id, project_id, parent_section_id, ordinal);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_slate_exports_project_created ON slate_manuscript_exports (user_id, project_id, created_at DESC);"
+    "CREATE INDEX IF NOT EXISTS idx_slate_section_versions_revision ON slate_section_versions (user_id, project_id, section_id, revision DESC);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_slate_return_sessions_project_created ON slate_return_sessions (user_id, project_id, created_at DESC);"
+    "CREATE INDEX IF NOT EXISTS idx_slate_exports_project_created ON slate_manuscript_exports (user_id, project_id, created_at DESC);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_slate_sources_section_revision ON slate_continuity_sources (user_id, project_id, section_id, source_revision DESC);"
+    "CREATE INDEX IF NOT EXISTS idx_slate_return_sessions_project_created ON slate_return_sessions (user_id, project_id, created_at DESC);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_slate_entities_series_name ON slate_continuity_entities (user_id, series_id, kind, canonical_name);"
+    "CREATE INDEX IF NOT EXISTS idx_slate_sources_section_revision ON slate_continuity_sources (user_id, project_id, section_id, source_revision DESC);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_slate_aliases_lookup ON slate_continuity_aliases (user_id, series_id, normalized_alias);"
+    "CREATE INDEX IF NOT EXISTS idx_slate_entities_series_name ON slate_continuity_entities (user_id, series_id, kind, canonical_name);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_slate_claims_subject ON slate_continuity_claims (user_id, series_id, subject_entity_id, predicate, created_at DESC);"
+    "CREATE INDEX IF NOT EXISTS idx_slate_aliases_lookup ON slate_continuity_aliases (user_id, series_id, normalized_alias);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_slate_events_chronology ON slate_continuity_events (user_id, series_id, chronology_key, created_at);"
+    "CREATE INDEX IF NOT EXISTS idx_slate_claims_subject ON slate_continuity_claims (user_id, series_id, subject_entity_id, predicate, created_at DESC);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_slate_knowledge_character ON slate_continuity_knowledge (user_id, series_id, character_entity_id, created_at DESC);"
+    "CREATE INDEX IF NOT EXISTS idx_slate_events_chronology ON slate_continuity_events (user_id, series_id, chronology_key, created_at);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_slate_threads_status ON slate_continuity_threads (user_id, series_id, project_id, status, updated_at DESC);"
+    "CREATE INDEX IF NOT EXISTS idx_slate_knowledge_character ON slate_continuity_knowledge (user_id, series_id, character_entity_id, created_at DESC);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_slate_concerns_open ON slate_continuity_concerns (user_id, project_id, status, severity, created_at DESC);"
+    "CREATE INDEX IF NOT EXISTS idx_slate_threads_status ON slate_continuity_threads (user_id, series_id, project_id, status, updated_at DESC);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_slate_jobs_available ON slate_continuity_jobs (user_id, status, available_at, created_at);"
+    "CREATE INDEX IF NOT EXISTS idx_slate_concerns_open ON slate_continuity_concerns (user_id, project_id, status, severity, created_at DESC);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_slate_source_indexes_section_revision ON slate_continuity_source_indexes (user_id, project_id, section_id, source_revision DESC);"
+    "CREATE INDEX IF NOT EXISTS idx_slate_jobs_available ON slate_continuity_jobs (user_id, status, available_at, created_at);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_slate_context_briefs_section_created ON slate_continuity_context_briefs (user_id, project_id, section_id, created_at DESC);"
+    "CREATE INDEX IF NOT EXISTS idx_slate_source_indexes_section_revision ON slate_continuity_source_indexes (user_id, project_id, section_id, source_revision DESC);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_coffee_polls_session_updated ON coffee_polls (user_id, conversation_id, updated_at DESC);"
+    "CREATE INDEX IF NOT EXISTS idx_slate_context_briefs_section_created ON slate_continuity_context_briefs (user_id, project_id, section_id, created_at DESC);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_coffee_polls_status ON coffee_polls (user_id, conversation_id, status, updated_at DESC);"
+    "CREATE INDEX IF NOT EXISTS idx_coffee_polls_session_updated ON coffee_polls (user_id, conversation_id, updated_at DESC);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_coffee_poll_votes_poll ON coffee_poll_votes (user_id, poll_id, updated_at DESC);"
+    "CREATE INDEX IF NOT EXISTS idx_coffee_polls_status ON coffee_polls (user_id, conversation_id, status, updated_at DESC);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_conversations_user_updated ON conversations (user_id, updated_at DESC);"
+    "CREATE INDEX IF NOT EXISTS idx_coffee_poll_votes_poll ON coffee_poll_votes (user_id, poll_id, updated_at DESC);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_messages_user_created ON messages (user_id, created_at DESC);"
+    "CREATE INDEX IF NOT EXISTS idx_conversations_user_updated ON conversations (user_id, updated_at DESC);",
   );
   db.exec(
-    "CREATE INDEX IF NOT EXISTS idx_memories_user_created ON memories (user_id, created_at DESC);"
+    "CREATE INDEX IF NOT EXISTS idx_messages_user_created ON messages (user_id, created_at DESC);",
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_memories_user_created ON memories (user_id, created_at DESC);",
   );
 
   return db;
@@ -2782,7 +3071,7 @@ export function mapUserProfile(row: DbUserRecord): UserProfile {
     role: "user",
     createdAt: row.createdAt,
     theme: row.theme,
-    preferredProvider: row.preferredProvider
+    preferredProvider: row.preferredProvider,
   };
 }
 
@@ -2804,7 +3093,7 @@ export function mapConversation(
     created_at: string;
     updated_at: string;
   },
-  messages: ChatMessage[]
+  messages: ChatMessage[],
 ): Conversation {
   const conversationMode =
     row.conversation_mode === "zen"
@@ -2821,13 +3110,16 @@ export function mapConversation(
     userId: row.user_id,
     title: row.title,
     mode: conversationMode,
-    botId: conversationMode === "zen" ? null : row.bot_id ?? null,
+    botId: conversationMode === "zen" ? null : (row.bot_id ?? null),
     ...(botGroupIds.length > 0 ? { botGroupIds } : {}),
-    ...(conversationMode === "coffee" ? { coffeeGroupId: row.coffee_group_id ?? null } : {}),
+    ...(conversationMode === "coffee"
+      ? { coffeeGroupId: row.coffee_group_id ?? null }
+      : {}),
     ...(conversationMode === "coffee" && coffeeAbsentBotIds.length > 0
       ? { coffeeAbsentBotIds }
       : {}),
-    ...(conversationMode === "coffee" && isCoffeeSessionDurationMinutes(row.coffee_duration_minutes)
+    ...(conversationMode === "coffee" &&
+    isCoffeeSessionDurationMinutes(row.coffee_duration_minutes)
       ? { coffeeSessionDurationMinutes: row.coffee_duration_minutes }
       : {}),
     incognito: conversationMode === "zen" ? false : row.incognito === 1,
@@ -2836,11 +3128,13 @@ export function mapConversation(
     hasAssistantReply: row.has_assistant_reply === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    messages
+    messages,
   };
 }
 
-function isCoffeeSessionDurationMinutes(value: unknown): value is CoffeeSessionDurationMinutes {
+function isCoffeeSessionDurationMinutes(
+  value: unknown,
+): value is CoffeeSessionDurationMinutes {
   return (
     typeof value === "number" &&
     Number.isInteger(value) &&
@@ -2855,7 +3149,7 @@ function parseBotGroupIds(raw: string | null | undefined): string[] {
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
     return parsed.filter(
-      (value): value is string => typeof value === "string" && value.length > 0
+      (value): value is string => typeof value === "string" && value.length > 0,
     );
   } catch {
     return [];
@@ -2874,7 +3168,7 @@ export function mapMemoryRow(row: DbMemoryRecord, text: string): UserMemory {
     source: row.source,
     certainty: row.certainty ?? row.confidence,
     sourceMessageIds: parseMemorySourceMessageIds(row.sourceMessageIds),
-    text
+    text,
   };
 }
 
@@ -2911,12 +3205,19 @@ function botRelationshipMoodKeyFromScore(score: number): PrismMoodKey {
   return "neutral";
 }
 
-function normalizeBotRelationshipBand(value: string, score: number): BotRelationshipBand {
-  if (value === "tense" || value === "neutral" || value === "warm") return value;
+function normalizeBotRelationshipBand(
+  value: string,
+  score: number,
+): BotRelationshipBand {
+  if (value === "tense" || value === "neutral" || value === "warm")
+    return value;
   return botRelationshipBandFromScore(score);
 }
 
-function normalizeBotRelationshipMoodKey(value: string, score: number): PrismMoodKey {
+function normalizeBotRelationshipMoodKey(
+  value: string,
+  score: number,
+): PrismMoodKey {
   if (
     value === "joyful" ||
     value === "warm" ||
@@ -2948,7 +3249,9 @@ function parseBotRelationshipReasons(raw: string): string[] {
   }
 }
 
-function botRelationshipFromRow(row: DbBotRelationshipRow): BotRelationshipSnapshot {
+function botRelationshipFromRow(
+  row: DbBotRelationshipRow,
+): BotRelationshipSnapshot {
   const score = Math.round(clampBotRelationshipScore(row.score));
   return {
     sourceBotId: row.source_bot_id,
@@ -2957,7 +3260,8 @@ function botRelationshipFromRow(row: DbBotRelationshipRow): BotRelationshipSnaps
     band: normalizeBotRelationshipBand(row.band, score),
     moodKey: normalizeBotRelationshipMoodKey(row.mood_key, score),
     trend: normalizeBotRelationshipTrend(row.trend),
-    lastReason: row.last_reason || "No durable bot-to-bot relationship shift yet.",
+    lastReason:
+      row.last_reason || "No durable bot-to-bot relationship shift yet.",
     recentReasons: parseBotRelationshipReasons(row.recent_reasons),
     updatedAt: row.updated_at,
   };
@@ -2970,9 +3274,11 @@ function botRelationshipFromRow(row: DbBotRelationshipRow): BotRelationshipSnaps
 export function loadBotRelationshipsForBots(
   db: DatabaseSync,
   userId: string,
-  botIds: readonly string[]
+  botIds: readonly string[],
 ): Record<string, Record<string, BotRelationshipSnapshot>> {
-  const uniqueBotIds = [...new Set(botIds.map((id) => id.trim()).filter(Boolean))];
+  const uniqueBotIds = [
+    ...new Set(botIds.map((id) => id.trim()).filter(Boolean)),
+  ];
   if (uniqueBotIds.length < 2) return {};
   const placeholders = uniqueBotIds.map(() => "?").join(", ");
   const rows = db
@@ -2982,14 +3288,19 @@ export function loadBotRelationshipsForBots(
          FROM bot_relationships
         WHERE user_id = ?
           AND source_bot_id IN (${placeholders})
-          AND target_bot_id IN (${placeholders})`
+          AND target_bot_id IN (${placeholders})`,
     )
-    .all(userId, ...uniqueBotIds, ...uniqueBotIds) as unknown as DbBotRelationshipRow[];
+    .all(
+      userId,
+      ...uniqueBotIds,
+      ...uniqueBotIds,
+    ) as unknown as DbBotRelationshipRow[];
   const bySource: Record<string, Record<string, BotRelationshipSnapshot>> = {};
   for (const row of rows) {
     if (row.source_bot_id === row.target_bot_id) continue;
     bySource[row.source_bot_id] ??= {};
-    bySource[row.source_bot_id]![row.target_bot_id] = botRelationshipFromRow(row);
+    bySource[row.source_bot_id]![row.target_bot_id] =
+      botRelationshipFromRow(row);
   }
   return bySource;
 }
@@ -2998,9 +3309,13 @@ export function readBotRelationship(
   db: DatabaseSync,
   userId: string,
   sourceBotId: string,
-  targetBotId: string
+  targetBotId: string,
 ): BotRelationshipSnapshot | null {
-  if (!sourceBotId.trim() || !targetBotId.trim() || sourceBotId === targetBotId) {
+  if (
+    !sourceBotId.trim() ||
+    !targetBotId.trim() ||
+    sourceBotId === targetBotId
+  ) {
     return null;
   }
   const row = db
@@ -3008,7 +3323,7 @@ export function readBotRelationship(
       `SELECT source_bot_id, target_bot_id, score, band, mood_key, trend,
               last_reason, recent_reasons, updated_at
          FROM bot_relationships
-        WHERE user_id = ? AND source_bot_id = ? AND target_bot_id = ?`
+        WHERE user_id = ? AND source_bot_id = ? AND target_bot_id = ?`,
     )
     .get(userId, sourceBotId, targetBotId) as DbBotRelationshipRow | undefined;
   return row ? botRelationshipFromRow(row) : null;
@@ -3036,7 +3351,8 @@ export function upsertBotRelationship(args: {
     band: botRelationshipBandFromScore(score),
     moodKey: botRelationshipMoodKeyFromScore(score),
     trend: args.trend,
-    lastReason: args.lastReason.replace(/\s+/g, " ").trim() ||
+    lastReason:
+      args.lastReason.replace(/\s+/g, " ").trim() ||
       "No durable bot-to-bot relationship shift yet.",
     recentReasons: args.recentReasons
       .map((reason) => reason.replace(/\s+/g, " ").trim())
@@ -3057,7 +3373,7 @@ export function upsertBotRelationship(args: {
         trend = excluded.trend,
         last_reason = excluded.last_reason,
         recent_reasons = excluded.recent_reasons,
-        updated_at = excluded.updated_at`
+        updated_at = excluded.updated_at`,
     )
     .run(
       args.userId,
@@ -3069,7 +3385,7 @@ export function upsertBotRelationship(args: {
       relationship.trend,
       relationship.lastReason,
       JSON.stringify(relationship.recentReasons),
-      relationship.updatedAt
+      relationship.updatedAt,
     );
   return relationship;
 }
@@ -3081,7 +3397,7 @@ export function loadCoffeeBotSocialState(
   db: DatabaseSync,
   userId: string,
   conversationId: string,
-  botIds: readonly string[]
+  botIds: readonly string[],
 ): Record<string, CoffeeBotSocialSnapshot> {
   if (botIds.length === 0) return {};
   const placeholders = botIds.map(() => "?").join(", ");
@@ -3089,9 +3405,13 @@ export function loadCoffeeBotSocialState(
     .prepare(
       `SELECT bot_id, disposition, values_friction, restraint, engagement, leave_pressure
          FROM coffee_bot_social_state
-        WHERE user_id = ? AND conversation_id = ? AND bot_id IN (${placeholders})`
+        WHERE user_id = ? AND conversation_id = ? AND bot_id IN (${placeholders})`,
     )
-    .all(userId, conversationId, ...botIds) as unknown as DbCoffeeBotSocialRow[];
+    .all(
+      userId,
+      conversationId,
+      ...botIds,
+    ) as unknown as DbCoffeeBotSocialRow[];
   const byId: Record<string, CoffeeBotSocialSnapshot> = {};
   for (const row of rows) {
     byId[row.bot_id] = {
@@ -3113,7 +3433,7 @@ export function upsertCoffeeBotSocialState(
   userId: string,
   conversationId: string,
   stateByBotId: Record<string, CoffeeBotSocialSnapshot>,
-  updatedAt: string
+  updatedAt: string,
 ): void {
   const entries = Object.entries(stateByBotId);
   if (entries.length === 0) return;
@@ -3127,7 +3447,7 @@ export function upsertCoffeeBotSocialState(
       restraint = excluded.restraint,
       engagement = excluded.engagement,
       leave_pressure = excluded.leave_pressure,
-      updated_at = excluded.updated_at`
+      updated_at = excluded.updated_at`,
   );
   for (const [botId, snapshot] of entries) {
     statement.run(
@@ -3139,7 +3459,7 @@ export function upsertCoffeeBotSocialState(
       snapshot.restraint,
       snapshot.engagement,
       snapshot.leavePressure,
-      updatedAt
+      updatedAt,
     );
   }
 }
@@ -3151,7 +3471,7 @@ export function loadCoffeeCupTopOffState(
   db: DatabaseSync,
   userId: string,
   conversationId: string,
-  botIds: readonly string[]
+  botIds: readonly string[],
 ): Record<string, CoffeeCupTopOffSnapshot> {
   if (botIds.length === 0) return {};
   const placeholders = botIds.map(() => "?").join(", ");
@@ -3159,9 +3479,13 @@ export function loadCoffeeCupTopOffState(
     .prepare(
       `SELECT bot_id, progress_before, progress_after, topped_off_at
          FROM coffee_cup_top_offs
-        WHERE user_id = ? AND conversation_id = ? AND bot_id IN (${placeholders})`
+        WHERE user_id = ? AND conversation_id = ? AND bot_id IN (${placeholders})`,
     )
-    .all(userId, conversationId, ...botIds) as unknown as DbCoffeeCupTopOffRow[];
+    .all(
+      userId,
+      conversationId,
+      ...botIds,
+    ) as unknown as DbCoffeeCupTopOffRow[];
   const byId: Record<string, CoffeeCupTopOffSnapshot> = {};
   for (const row of rows) {
     byId[row.bot_id] = {
@@ -3181,7 +3505,7 @@ export function upsertCoffeeCupTopOffState(
   userId: string,
   conversationId: string,
   stateByBotId: Record<string, CoffeeCupTopOffSnapshot>,
-  updatedAt: string
+  updatedAt: string,
 ): void {
   const entries = Object.entries(stateByBotId);
   if (entries.length === 0) return;
@@ -3193,7 +3517,7 @@ export function upsertCoffeeCupTopOffState(
       progress_before = excluded.progress_before,
       progress_after = excluded.progress_after,
       topped_off_at = excluded.topped_off_at,
-      updated_at = excluded.updated_at`
+      updated_at = excluded.updated_at`,
   );
   for (const [botId, snapshot] of entries) {
     statement.run(
@@ -3203,7 +3527,7 @@ export function upsertCoffeeCupTopOffState(
       snapshot.progressBefore,
       snapshot.progressAfter,
       snapshot.toppedOffAt,
-      updatedAt
+      updatedAt,
     );
   }
 }
@@ -3222,7 +3546,7 @@ export function loadPrismMoodState(
   db: DatabaseSync,
   userId: string,
   conversationId: string,
-  mode: PrismMoodMode
+  mode: PrismMoodMode,
 ): PrismMoodSnapshot | null {
   const row = db
     .prepare(
@@ -3231,7 +3555,7 @@ export function loadPrismMoodState(
               ignore_forgiveness_chance, ignore_penalty_level, frozen, updated_at
          FROM prism_mood_state
         WHERE user_id = ? AND conversation_id = ? AND mode = ?
-        LIMIT 1`
+        LIMIT 1`,
     )
     .get(userId, conversationId, mode) as DbPrismMoodRow | undefined;
   if (!row) return null;
@@ -3259,7 +3583,7 @@ export function loadPrismMoodState(
       frozen: row.frozen === 1,
     },
     mode,
-    row.updated_at
+    row.updated_at,
   );
 }
 
@@ -3267,7 +3591,7 @@ export function upsertPrismMoodState(
   db: DatabaseSync,
   userId: string,
   conversationId: string,
-  state: PrismMoodSnapshot
+  state: PrismMoodSnapshot,
 ): PrismMoodSnapshot {
   const mood = sanitizePrismMoodState(state, state.mode, state.lastUpdatedAt);
   db.prepare(
@@ -3289,7 +3613,7 @@ export function upsertPrismMoodState(
       ignore_forgiveness_chance = excluded.ignore_forgiveness_chance,
       ignore_penalty_level = excluded.ignore_penalty_level,
       frozen = excluded.frozen,
-      updated_at = excluded.updated_at`
+      updated_at = excluded.updated_at`,
   ).run(
     userId,
     conversationId,
@@ -3306,7 +3630,7 @@ export function upsertPrismMoodState(
     mood.ignoreForgivenessChance ?? null,
     mood.ignorePenaltyLevel ?? null,
     mood.frozen === true ? 1 : 0,
-    mood.lastUpdatedAt
+    mood.lastUpdatedAt,
   );
   return mood;
 }
@@ -3320,13 +3644,13 @@ export function recordPrismMoodEventOnce(
     eventType: string;
     createdAt: string;
     payload?: Record<string, unknown>;
-  }
+  },
 ): boolean {
   const result = db
     .prepare(
       `INSERT OR IGNORE INTO prism_mood_events (
         user_id, conversation_id, message_id, event_type, created_at, payload_json
-      ) VALUES (?, ?, ?, ?, ?, ?)`
+      ) VALUES (?, ?, ?, ?, ?, ?)`,
     )
     .run(
       args.userId,
@@ -3334,7 +3658,7 @@ export function recordPrismMoodEventOnce(
       args.messageId,
       args.eventType,
       args.createdAt,
-      JSON.stringify(args.payload ?? {})
+      JSON.stringify(args.payload ?? {}),
   ) as { changes?: number | bigint };
   return Number(result.changes ?? 0) > 0;
 }
@@ -3343,7 +3667,7 @@ export function loadPrismMoodEventMessageIds(
   db: DatabaseSync,
   userId: string,
   conversationId: string,
-  eventType: string
+  eventType: string,
 ): Set<string> {
   const rows = db
     .prepare(
@@ -3351,7 +3675,7 @@ export function loadPrismMoodEventMessageIds(
          FROM prism_mood_events
         WHERE user_id = ?
           AND conversation_id = ?
-          AND event_type = ?`
+          AND event_type = ?`,
     )
     .all(userId, conversationId, eventType) as Array<{ message_id: string }>;
   return new Set(rows.map((row) => row.message_id));
