@@ -43,7 +43,7 @@ describe("Signal experience shell", () => {
   it("records four live camera modes and keeps the saved replay cut fixed", () => {
     assert.match(source, /\["left", "right", "wide", "auto"\] as const/u);
     assert.match(source, /botcastCameraModeAt\(\{/u);
-    assert.match(source, /liveCameraMode === "auto"[\s\S]{0,80}latestDirectedShot/u);
+    assert.match(source, /liveCameraMode === "auto"[\s\S]{0,120}botcastCameraShotAt/u);
     assert.match(
       source,
       /`\/api\/botcast\/episodes\/\$\{encodeURIComponent\(episode\.id\)\}\/camera`/u,
@@ -108,6 +108,9 @@ describe("Signal experience shell", () => {
     assert.match(source, /data-sip-requested=\{guestSipping/u);
     assert.match(source, /hostCupTravel\.mode === "returning"/u);
     assert.match(source, /guestCupTravel\.mode === "returning"/u);
+    assert.match(source, /signalCupTravelByRole\.host\.mode !== "returning"/u);
+    assert.match(source, /\}, 500\);/u);
+    assert.match(source, /seed: `signal:\$\{args\.currentEpisode\.id\}:\$\{bot\.id\}:\$\{role\}`/u);
     assert.match(source, /signalStageLocalPointFromViewport\(\{/u);
     assert.match(source, /finishSignalCupReturn\("host", event\)/u);
     assert.match(source, /--signal-cup-rest-x/u);
@@ -239,7 +242,7 @@ describe("Signal experience shell", () => {
     assert.match(source, /if \(unstartedEpisodeId && !openingMessageReceived\)/u);
     assert.match(source, /method: "DELETE"/u);
     assert.match(source, /openingMessageReceived = true;[\s\S]{0,120}setTopicDraft\(""\)/u);
-    assert.match(source, /SIGNAL_VOICE_START_TIMEOUT_MS/u);
+    assert.match(source, /SIGNAL_VOICE_START_TIMEOUT_MS = 30_000/u);
     assert.match(source, /voicePreparationTimer = window\.setTimeout/u);
     assert.match(source, /onStopUtterance\?\.\(\);[\s\S]{0,80}settle\(false\)/u);
     assert.match(source, /await Promise\.all\(\[introPlayback\.finished, visualMinimum\]\)/u);
@@ -323,6 +326,11 @@ describe("Signal experience shell", () => {
     assert.match(source, /Wrap it up/u);
     assert.match(source, /Episode cues such as Wrap it up guide both bots/u);
     assert.match(source, /never spoken or attributed to you/u);
+    assert.match(source, /queuedProducerCueRef/u);
+    assert.match(source, /Queued: \{signalProducerCueLabel\(queuedProducerCue\)\}/u);
+    assert.match(source, /The host will use it on their next turn/u);
+    assert.doesNotMatch(source, /disabled=\{busy \|\| !producerCueReady/u);
+    assert.match(css, /\.producerControls button\[data-queued="true"\]/u);
   });
 
   it("keeps live turns, transcript reveal, and stage presence on the real voice clock", () => {
@@ -339,7 +347,10 @@ describe("Signal experience shell", () => {
     assert.match(source, /episodeOperationAbortRef\.current\?\.abort\(\)/u);
     assert.match(source, /signal: controller\.signal/u);
     assert.match(source, /episodeOperationIsCurrent\(controller, runId\)/u);
-    assert.match(source, /onPrepareUtterance\?\.\(\);[\s\S]{0,80}setAutoRun\(true\)/u);
+    assert.match(
+      source,
+      /if \(!busy && speakingMessageId === null && nextRole === "host"\) \{[\s\S]{0,100}onPrepareUtterance\?\.\(\);[\s\S]{0,80}advanceEpisode\(cue\)/u,
+    );
     assert.match(source, /const played = await onUtterance\(replayActiveMessage, bot,/u);
     assert.match(source, /replayVoicePending/u);
     assert.match(source, /replayVoiceRunIdRef\.current !== runId/u);

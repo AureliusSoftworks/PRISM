@@ -280,6 +280,27 @@ describe("Botcast replay director", () => {
     assert.equal(sustainedGuest.shot, "right");
   });
 
+  it("always takes the final host signoff wide", () => {
+    const closing = botcastDirectorSuggestion({
+      previous: {
+        shot: "right",
+        reason: "speaker",
+        atMs: 12_000,
+        minimumHoldMs: 3_200,
+      },
+      atMs: 12_400,
+      speakerRole: "host",
+      utteranceDurationMs: 1_400,
+      segment: "closing",
+    });
+    assert.deepEqual(closing, {
+      shot: "wide",
+      reason: "closing",
+      atMs: 12_400,
+      minimumHoldMs: 3_200,
+    });
+  });
+
   it("uses wide for a departure and replays the recorded live camera modes", () => {
     const departure = botcastDirectorSuggestion({
       atMs: 12_000,

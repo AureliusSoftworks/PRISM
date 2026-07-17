@@ -83,10 +83,15 @@ describe("mode tutorials", () => {
       '[data-tutorial-target="botcast-live-camera"]',
     );
     assert.match(MODE_TUTORIALS.botcast.steps[6]?.body ?? "", /Left, Right, and Wide hold a fixed studio shot/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[6]?.body ?? "", /opens on the full studio/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[6]?.body ?? "", /moves to the host/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[6]?.body ?? "", /returns Wide/u);
     assert.match(MODE_TUTORIALS.botcast.steps[6]?.body ?? "", /choosing Auto again hands direction back/u);
     assert.match(MODE_TUTORIALS.botcast.steps[6]?.body ?? "", /records every choice/u);
     assert.match(MODE_TUTORIALS.botcast.steps[7]?.body ?? "", /one speaker on mic at a time/u);
     assert.match(MODE_TUTORIALS.botcast.steps[7]?.body ?? "", /words they have finished saying/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[7]?.body ?? "", /queues the private cue/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[7]?.body ?? "", /host’s next turn/u);
     assert.match(MODE_TUTORIALS.botcast.steps[7]?.body ?? "", /Wrap it up is shared episode direction/u);
     assert.match(MODE_TUTORIALS.botcast.steps[7]?.body ?? "", /both bots/u);
     assert.match(MODE_TUTORIALS.botcast.steps[7]?.body ?? "", /session-changing navbar tools stay locked/u);

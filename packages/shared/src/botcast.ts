@@ -649,7 +649,7 @@ export function botcastDirectorSuggestion(args: {
     shot = args.speakerRole === "guest" ? "right" : "left";
     reason = "opening";
   } else if (args.segment === "closing" && args.speakerRole === "host") {
-    shot = "left";
+    shot = "wide";
     reason = "closing";
   } else {
     shot = args.speakerRole === "guest" ? "right" : "left";
@@ -663,6 +663,7 @@ export function botcastDirectorSuggestion(args: {
     previous &&
     shot !== previous.shot &&
     event === "utterance" &&
+    !(args.segment === "closing" && args.speakerRole === "host") &&
     (heldMs < previous.minimumHoldMs || shortUtterance)
   ) {
     return previous;

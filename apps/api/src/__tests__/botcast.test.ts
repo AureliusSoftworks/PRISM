@@ -1060,10 +1060,10 @@ describe("Botcast persistence and isolation", () => {
       assert.deepEqual(
         episode.events.find((event) => event.kind === "camera_suggestion")?.payload,
         {
-          shot: "left",
+          shot: "wide",
           reason: "opening",
           atMs: 0,
-          minimumHoldMs: 3_200,
+          minimumHoldMs: 1_400,
         },
       );
 
@@ -1438,16 +1438,22 @@ describe("Botcast persistence and isolation", () => {
       );
       assert.doesNotMatch(hostClose.message?.content ?? "", /final question/iu);
       assert.match(hostClose.message?.content ?? "", /thank you for joining me/iu);
-
-      const completed = await advanceBotcastEpisode(
-        db,
-        "user-1",
-        created.id,
-        {},
-        generation(provider),
+      assert.equal(hostClose.episode.status, "completed");
+      assert.equal(hostClose.episode.outcome, "completed");
+      assert.deepEqual(
+        hostClose.episode.events
+          .filter((event) => event.kind === "camera_suggestion")
+          .at(-1)?.payload,
+        {
+          shot: "wide",
+          reason: "closing",
+          atMs: botcastReplayTimeline(
+            hostClose.episode.messages,
+            hostClose.episode.events,
+          ).messageStartMs.at(-1),
+          minimumHoldMs: 3_200,
+        },
       );
-      assert.equal(completed.episode.status, "completed");
-      assert.equal(completed.episode.outcome, "completed");
     } finally {
       db.close();
     }
@@ -1539,10 +1545,19 @@ describe("Botcast persistence and isolation", () => {
         guestBotId: "guest-1",
         topic: "A complete interview",
       });
-      for (let turn = 0; turn < 20; turn += 1) {
-        await advanceBotcastEpisode(db, "user-1", created.id, {}, generation(provider));
+      let finalAdvance = null;
+      for (let turn = 0; turn < 19; turn += 1) {
+        finalAdvance = await advanceBotcastEpisode(
+          db,
+          "user-1",
+          created.id,
+          {},
+          generation(provider),
+        );
       }
       const episode = getBotcastEpisode(db, "user-1", created.id);
+      assert.equal(finalAdvance?.message?.speakerRole, "host");
+      assert.equal(finalAdvance?.episode.status, "completed");
       assert.equal(episode.status, "completed");
       assert.equal(episode.outcome, "completed");
       assert.equal(episode.messages.length, 19);
@@ -1553,6 +1568,12 @@ describe("Botcast persistence and isolation", () => {
         botcastReplayTimeline(episode.messages, episode.events).durationMs,
       );
       assert.ok(episode.events.some((event) => event.kind === "episode_completed"));
+      const shots = episode.events
+        .filter((event) => event.kind === "camera_suggestion")
+        .map((event) => `${event.payload.shot}:${event.payload.reason}`);
+      assert.equal(shots[0], "wide:opening");
+      assert.ok(shots.includes("wide:transition"));
+      assert.equal(shots.at(-1), "wide:closing");
     } finally {
       db.close();
     }
