@@ -182,6 +182,8 @@ describe("Auto fallback runner", () => {
 
   it("does not start another attempt after the total budget is exhausted", async () => {
     const calls: string[] = [];
+    const timeline = [1_000, 1_000, 1_009];
+    const now = () => timeline.shift() ?? 1_009;
     await assert.rejects(
       runAutoFallbackChain({
         attempts: [
@@ -197,6 +199,7 @@ describe("Auto fallback runner", () => {
         ],
         perAttemptTimeoutMs: 100,
         totalTimeoutMs: 10,
+        now,
       }),
       (error: unknown) => {
         assert.ok(error instanceof AutoFallbackExhaustedError);
