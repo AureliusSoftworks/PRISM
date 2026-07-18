@@ -89,9 +89,27 @@ const episode: BotcastEpisode = {
       occurredAt: "2026-07-17T17:00:00.000Z",
     },
     {
-      id: "event-2",
+      id: "event-power",
       episodeId: "episode-1",
       sequence: 2,
+      kind: "power_effect",
+      payload: {
+        version: 1,
+        sourceBotId: "guest-1",
+        targetBotId: "host-1",
+        powerId: "power-intimidation",
+        powerName: "Intimidation",
+        trigger: "session_start",
+        polarity: "negative",
+        strength: "large",
+        occurredAtMs: 0,
+      },
+      occurredAt: "2026-07-17T17:00:00.000Z",
+    },
+    {
+      id: "event-2",
+      episodeId: "episode-1",
+      sequence: 3,
       kind: "utterance",
       payload: {
         messageId: "message-1",
@@ -110,7 +128,7 @@ const episode: BotcastEpisode = {
     {
       id: "event-3",
       episodeId: "episode-1",
-      sequence: 3,
+      sequence: 4,
       kind: "producer_cue",
       payload: { kind: "press_harder", audience: "host" },
       occurredAt: "2026-07-17T17:00:10.000Z",
@@ -118,7 +136,7 @@ const episode: BotcastEpisode = {
     {
       id: "event-4",
       episodeId: "episode-1",
-      sequence: 4,
+      sequence: 5,
       kind: "utterance",
       payload: {
         messageId: "message-2",
@@ -136,7 +154,7 @@ const episode: BotcastEpisode = {
     {
       id: "event-5",
       episodeId: "episode-1",
-      sequence: 5,
+      sequence: 6,
       kind: "camera_suggestion",
       payload: {
         shot: "wide",
@@ -149,7 +167,7 @@ const episode: BotcastEpisode = {
     {
       id: "event-6",
       episodeId: "episode-1",
-      sequence: 6,
+      sequence: 7,
       kind: "episode_completed",
       payload: { outcome: "completed", runtimeMs: 38_300 },
       occurredAt: "2026-07-17T17:01:00.000Z",
@@ -203,6 +221,10 @@ describe("Signal review transcript", () => {
     assert.match(
       transcript,
       /\| producer_cue \| event event-3 \| \{"audience":"host","kind":"press_harder"\}/u,
+    );
+    assert.match(
+      transcript,
+      /\| power_effect \| event event-power \| \{"occurredAtMs":0,"polarity":"negative","powerId":"power-intimidation","powerName":"Intimidation","sourceBotId":"guest-1","strength":"large","targetBotId":"host-1","trigger":"session_start","version":1\}/u,
     );
     assert.match(transcript, /\| camera_suggestion \| event event-5/u);
     assert.match(transcript, /\| episode_completed \| event event-6/u);

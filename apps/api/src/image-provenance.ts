@@ -3,6 +3,7 @@ export type ImageOrigin =
   | "zen_chat"
   | "sandbox_chat"
   | "botcast"
+  | "slate_cover"
   | "bot_group_room"
   | "bot_group_room_import"
   | "zen_wallpaper"

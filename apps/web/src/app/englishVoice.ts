@@ -10,12 +10,15 @@ import {
 } from "@localai/shared";
 import {
   beginVoicePlaybackProgress,
+  playPreSpeechBreath,
   playRealtimeVoiceBytes,
   prepareRealtimeVoiceAudio,
   stopRealtimeVoiceAudio,
   voiceLiltDetuneCents,
   type VoicePlaybackLifecycle,
 } from "./voiceEffects.ts";
+import type { PreSpeechBreathPlan } from "./preSpeechBreath.ts";
+import type { RoomAcousticsSend } from "./roomAcoustics.ts";
 
 export interface EnglishVoicePostProcessing {
   detuneCents: number;
@@ -352,8 +355,17 @@ async function playAudio(
   seed: string,
   effectsEnabled: boolean,
   engineUsed: string | null,
-  lifecycle?: VoicePlaybackLifecycle
+  lifecycle?: VoicePlaybackLifecycle,
+  roomAcoustics?: RoomAcousticsSend,
+  preSpeechBreath?: PreSpeechBreathPlan | null,
 ): Promise<void> {
+  if (expectedGeneration !== generation) return;
+  await playPreSpeechBreath({
+    plan: preSpeechBreath,
+    profile,
+    roomAcoustics,
+    isCurrent: () => expectedGeneration === generation,
+  });
   if (expectedGeneration !== generation) return;
   const processing = resolveEnglishVoicePostProcessing(profile);
   const detuneCents = resolveEnglishVoicePlaybackDetuneCents(
@@ -370,6 +382,7 @@ async function playAudio(
       detuneCents,
       baseLowpassHz: processing.lowpassHz,
       elevenLabsEffect: elevenLabsEffectForEngine(profile, engineUsed),
+      roomAcoustics,
       lifecycle,
       isCurrent: () => expectedGeneration === generation,
     });
@@ -377,7 +390,8 @@ async function playAudio(
     // Some Safari/WebKit versions reject otherwise valid provider MP3 bytes
     // in decodeAudioData. The gesture-authorized media element below can
     // still play the same clip, so keep the soundcheck and ordinary speech
-    // working through that compatibility path.
+    // working through that compatibility path. It stays dry rather than
+    // risking voice playback for a cosmetic room treatment.
     if (expectedGeneration !== generation) return;
   }
   if (!played) {
@@ -401,6 +415,8 @@ export function enqueueEnglishVoice(
   lifecycle?: VoicePlaybackLifecycle,
   engineUsed: string | null = null,
   deliveryMood?: VoiceDeliveryMood | null,
+  roomAcoustics?: RoomAcousticsSend,
+  preSpeechBreath?: PreSpeechBreathPlan | null,
 ): Promise<void> {
   const expectedGeneration = generation;
   const playbackProfile = {
@@ -409,14 +425,18 @@ export function enqueueEnglishVoice(
   };
   queue = queue
     .catch(() => undefined)
-    .then(() => playAudio(
-      bytes,
-      playbackProfile,
-      expectedGeneration,
-      seed,
-      effectsEnabled,
-      engineUsed,
-      lifecycle
-    ));
+    .then(() =>
+      playAudio(
+        bytes,
+        playbackProfile,
+        expectedGeneration,
+        seed,
+        effectsEnabled,
+        engineUsed,
+        lifecycle,
+        roomAcoustics,
+        preSpeechBreath,
+      ),
+    );
   return queue;
 }

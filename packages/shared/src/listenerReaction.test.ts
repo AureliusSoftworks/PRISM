@@ -42,7 +42,7 @@ describe("listener reaction planning", () => {
       if (plan?.spokenCue) audible += 1;
     }
     assert.ok(visual / 8_000 > 0.52 && visual / 8_000 < 0.58);
-    assert.ok(audible / visual > 0.27 && audible / visual < 0.33);
+    assert.ok(audible / visual > 0.37 && audible / visual < 0.43);
   });
 
   it("makes inferred Coffee targets visual-only and enforces audible cooldowns", () => {
@@ -54,6 +54,7 @@ describe("listener reaction planning", () => {
         listenerBotId: "b",
         targetSource: "inferred",
         tableEnergy: "theatre",
+        crossTalk: "chatty",
         eligible: true,
         allowAudio: true,
       });
@@ -65,6 +66,7 @@ describe("listener reaction planning", () => {
         listenerBotId: "b",
         targetSource: "direct",
         tableEnergy: "afterparty",
+        crossTalk: "pileup",
         eligible: true,
         allowAudio: true,
         previousAudibleListenerBotId: "b",
@@ -85,6 +87,7 @@ describe("listener reaction planning", () => {
           listenerBotId: "b",
           targetSource,
           tableEnergy,
+          crossTalk: "chatty",
           eligible: true,
           allowAudio: true,
         });
@@ -98,10 +101,38 @@ describe("listener reaction planning", () => {
     const inferredAfterparty = count("inferred", "afterparty");
     assert.ok(directStill.visual / 8_000 > 0.38 && directStill.visual / 8_000 < 0.45);
     assert.ok(directAfterparty.visual / 8_000 > 0.65 && directAfterparty.visual / 8_000 < 0.72);
-    assert.ok(directAfterparty.audible / directAfterparty.visual > 0.12);
-    assert.ok(directAfterparty.audible / directAfterparty.visual < 0.18);
+    assert.ok(directAfterparty.audible / directAfterparty.visual > 0.16);
+    assert.ok(directAfterparty.audible / directAfterparty.visual < 0.21);
     assert.ok(inferredAfterparty.visual / 8_000 > 0.22 && inferredAfterparty.visual / 8_000 < 0.28);
     assert.equal(inferredAfterparty.audible, 0);
+  });
+
+  it("lets Coffee cross-talk tune audible overlap without changing transcript ownership", () => {
+    const audibleCount = (crossTalk: "rare" | "normal" | "chatty" | "pileup") => {
+      let audible = 0;
+      for (let index = 0; index < 8_000; index += 1) {
+        const plan = buildCoffeeListenerReactionPlanV1({
+          conversationId: `cross-talk:${crossTalk}`,
+          messageId: `message-${index}`,
+          speakerBotId: "a",
+          listenerBotId: "b",
+          targetSource: "direct",
+          tableEnergy: "buzzy",
+          crossTalk,
+          eligible: true,
+          allowAudio: true,
+        });
+        if (plan?.spokenCue) audible += 1;
+      }
+      return audible;
+    };
+    const rare = audibleCount("rare");
+    const normal = audibleCount("normal");
+    const chatty = audibleCount("chatty");
+    const pileup = audibleCount("pileup");
+    assert.ok(rare < normal);
+    assert.ok(normal < chatty);
+    assert.ok(chatty < pileup);
   });
 
   it("colors cautious social states without turning them into explicit disagreement", () => {
@@ -113,6 +144,7 @@ describe("listener reaction planning", () => {
         listenerBotId: "b",
         targetSource: "direct",
         tableEnergy: "afterparty",
+        crossTalk: "pileup",
         eligible: true,
         allowAudio: true,
         listenerSocial: {
@@ -146,6 +178,22 @@ describe("listener reaction validation and timing", () => {
       seed: "seed",
       cameraCutEligible: false,
     }), null);
+    assert.equal(
+      normalizeListenerReactionPlanV1({
+        v: 1,
+        name: "listenerReaction",
+        speakerBotId: "speaker",
+        listenerBotId: "listener",
+        messageId: "message",
+        targetSource: "role",
+        visualAction: "nod",
+        spokenCue: "go on",
+        targetProgress: 0.5,
+        seed: "seed",
+        cameraCutEligible: false,
+      })?.spokenCue,
+      "go on",
+    );
   });
 
   it("prefers an aligned pause and otherwise uses nearby punctuation", () => {

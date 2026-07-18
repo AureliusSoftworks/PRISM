@@ -26,7 +26,6 @@ import {
   slateProjectSourceIsReady,
   slateProjectSparkForCreation,
   slateProjectTitleForCreation,
-  slateSuggestedProjectTitle,
 } from "./slateWorkspaceState.ts";
 
 const structure: SlateStructureItem[] = ["one", "two", "three"].map((id) => ({
@@ -40,56 +39,49 @@ const structure: SlateStructureItem[] = ["one", "two", "three"].map((id) => ({
 }));
 
 describe("Slate workspace state", () => {
-  it("advances the gentle start flow from either a spark or imported prose", () => {
+  it("requires content from the active source lane", () => {
     assert.equal(
-      slateProjectSourceIsReady({ spark: "A lighthouse goes dark.", existingMaterial: "" }),
+      slateProjectSourceIsReady({
+        sourceMode: "spark",
+        spark: "A lighthouse goes dark.",
+        existingMaterial: "",
+      }),
       true,
     );
     assert.equal(
-      slateProjectSourceIsReady({ spark: "", existingMaterial: "Chapter One\nThe sea rose." }),
-      true,
-    );
-    assert.equal(
-      slateProjectSourceIsReady({ spark: "  ", existingMaterial: "\n" }),
-      false,
-    );
-  });
-
-  it("keeps a supplied title or suggests a quiet working title from the source", () => {
-    assert.equal(
-      slateSuggestedProjectTitle({
-        title: "The Author's Title",
-        spark: "A different suggestion.",
-        existingMaterial: "",
-      }),
-      "The Author's Title",
-    );
-    assert.equal(
-      slateSuggestedProjectTitle({
-        title: "",
-        spark: "A winter orchard grows memories instead of fruit.",
-        existingMaterial: "",
-      }),
-      "A Winter Orchard Grows Memories Instead",
-    );
-    assert.equal(
-      slateSuggestedProjectTitle({
-        title: "",
+      slateProjectSourceIsReady({
+        sourceMode: "material",
         spark: "",
-        existingMaterial: "# The Glass Orchard\n\nChapter One",
+        existingMaterial: "Chapter One\nThe sea rose.",
       }),
-      "The Glass Orchard",
+      true,
+    );
+    assert.equal(
+      slateProjectSourceIsReady({
+        sourceMode: "material",
+        spark: "A spark that must be ignored.",
+        existingMaterial: "\n",
+      }),
+      false,
     );
   });
 
   it("preserves imported prose as the creation spark when no separate spark exists", () => {
     const pasted = `Chapter One\n\n${"The snow remembered. ".repeat(500)}`;
     assert.equal(
-      slateProjectSparkForCreation({ spark: "A shorter spark", existingMaterial: pasted }),
+      slateProjectSparkForCreation({
+        sourceMode: "spark",
+        spark: "A shorter spark",
+        existingMaterial: pasted,
+      }),
       "A shorter spark",
     );
     assert.equal(
-      slateProjectSparkForCreation({ spark: "", existingMaterial: pasted }),
+      slateProjectSparkForCreation({
+        sourceMode: "material",
+        spark: "A spark that must be ignored",
+        existingMaterial: pasted,
+      }),
       pasted.trim().slice(0, 8_000),
     );
     assert.equal(slateProjectTitleForCreation(""), "Untitled Story");

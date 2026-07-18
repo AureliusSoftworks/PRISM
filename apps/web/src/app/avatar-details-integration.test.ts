@@ -128,6 +128,21 @@ describe("Avatar Details Studio integration", () => {
     assert.ok(zoomedCanvasIndex > faceGuideIndex);
   });
 
+  it("keeps the editable face guide crisp instead of compositing the live CRT glow", () => {
+    assert.match(
+      editorCss,
+      /\.canvasFrame\s*\{[\s\S]*contain:\s*layout paint;[\s\S]*isolation:\s*isolate;[\s\S]*box-shadow:\s*none;/,
+    );
+    assert.match(
+      editorCss,
+      /\.faceGuideGlyph \[data-crt-glyph-layer="true"\]\s*\{[\s\S]*filter:\s*none !important;[\s\S]*mix-blend-mode:\s*normal !important;[\s\S]*text-shadow:\s*none !important;/,
+    );
+    assert.match(
+      editorCss,
+      /\.faceGuideGlyph \[data-crt-glyph-layer="true"\]::before,[\s\S]*::after\s*\{[\s\S]*content:\s*none !important;[\s\S]*display:\s*none !important;/,
+    );
+  });
+
   it("gives Details a larger canvas and a dedicated wide Studio layout", () => {
     assert.match(editorCss, /--avatar-details-editor-canvas-size:\s*640px/);
     assert.match(
@@ -163,7 +178,7 @@ describe("Avatar Details Studio integration", () => {
     );
   });
 
-  it("coalesces live preview updates and flushes the completed stroke", () => {
+  it("keeps the editor live while deferring the large avatar preview until stroke end", () => {
     assert.match(editorSource, /data-avatar-details-editor-core="true"/);
     assert.match(editorSource, /className=\{styles\.inputSurface\}/);
     assert.match(editorCss, /\.canvas\s*\{[\s\S]*pointer-events:\s*none/);
@@ -178,9 +193,44 @@ describe("Avatar Details Studio integration", () => {
     );
     assert.match(
       editorSource,
+      /const updateWorking = useCallback\([\s\S]*publishPreview = true, deferRender = false[\s\S]*if \(deferRender\)[\s\S]*drawWorkingCanvas\(normalized\)[\s\S]*if \(publishPreview\) queuePreviewRef\.current\(normalized\)/,
+    );
+    assert.match(
+      editorSource,
+      /avatarDetailsWithPaintColorMap\(current, result\.colorMap\),\s*\{ publishPreview: false, deferRender: true \}/,
+    );
+    assert.match(
+      editorSource,
+      /const sampledPoints = samples\.map[\s\S]*const paintPath: AvatarDetailsGridPoint\[\] = \[\][\s\S]*paintPoints\(paintPath\)/,
+    );
+    assert.match(
+      editorSource,
       /window\.cancelAnimationFrame\(previewFrameRef\.current\)/,
     );
+    assert.match(
+      editorSource,
+      /commitAvatarDetailsHistory\([\s\S]*workingRef\.current,[\s\S]*\),\s*false,[\s\S]*flushPreview\(workingRef\.current\)/,
+    );
     assert.match(editorSource, /flushPreview\(workingRef\.current\)/);
+  });
+
+  it("unmounts the large avatar throughout Details editing until explicitly rendered", () => {
+    assert.match(
+      pageSource,
+      /const \[detailsAvatarPreviewVisible, setDetailsAvatarPreviewVisible\] =\s*useState\(false\)/,
+    );
+    assert.match(
+      pageSource,
+      /activeControlTab === "details" &&\s*!detailsAvatarPreviewVisible[\s\S]*<BotAvatarDeferredPreviewPanel/,
+    );
+    assert.match(pageSource, />\s*Render current avatar\s*<\/button>/);
+    assert.match(pageSource, /data-avatar-preview-deferred="true"/);
+    assert.match(
+      pageSource,
+      /onEditStart=\{\(\) => setDetailsAvatarPreviewVisible\(false\)\}/,
+    );
+    assert.match(editorSource, /onEditStart\?\.\(\);[\s\S]*pointerGridPoint/);
+    assert.match(pageCss, /\.botAvatarDeferredPreviewPrompt/);
   });
 
   it("offers straight lines, circles, and whole-illustration dragging without hotkeys", () => {
@@ -247,19 +297,32 @@ describe("Avatar Details Studio integration", () => {
 });
 
 describe("Avatar Details shared mannequin rendering", () => {
-  it("composites ink with the face phosphor and beneath glass", () => {
-    const maskIndex = pageSource.indexOf("<AvatarDetailsMask");
+  it("composites beard ink below the face and upper detail above it beneath glass", () => {
+    const behindMaskIndex = pageSource.indexOf("<AvatarDetailsMask");
     const faceRigIndex = pageSource.indexOf(
       "className={styles.zenLiveBotPresenceFaceRig}",
-      maskIndex,
+      behindMaskIndex,
+    );
+    const aboveMaskIndex = pageSource.indexOf(
+      "<AvatarDetailsMask",
+      faceRigIndex,
     );
     const glassIndex = pageSource.indexOf(
       "className={styles.zenLiveBotPresenceScreenGlassOverlay}",
-      faceRigIndex,
+      aboveMaskIndex,
     );
-    assert.ok(maskIndex > 0);
-    assert.ok(faceRigIndex > maskIndex);
-    assert.ok(glassIndex > faceRigIndex);
+    assert.ok(behindMaskIndex > 0);
+    assert.ok(faceRigIndex > behindMaskIndex);
+    assert.ok(aboveMaskIndex > faceRigIndex);
+    assert.ok(glassIndex > aboveMaskIndex);
+    assert.match(
+      pageSource.slice(behindMaskIndex, faceRigIndex),
+      /depth="behind-face"/,
+    );
+    assert.match(
+      pageSource.slice(aboveMaskIndex, glassIndex),
+      /depth="above-face"/,
+    );
     assert.match(maskSource, /<canvas/);
     assert.match(maskSource, /useLayoutEffect/);
     assert.match(maskSource, /context\.putImageData\(glowImageData, 0, 0\)/);
@@ -273,7 +336,9 @@ describe("Avatar Details shared mannequin rendering", () => {
       /data-avatar-details-rendering="nearest-neighbor"/,
     );
     assert.match(maskCss, /image-rendering: pixelated/);
-    assert.match(maskCss, /\.layer[\s\S]*z-index: 7/);
+    assert.match(maskCss, /\.behindFace\s*\{[\s\S]*z-index:\s*5/);
+    assert.match(maskCss, /\.aboveFace\s*\{[\s\S]*z-index:\s*7/);
+    assert.match(maskSource, /data-avatar-details-depth=\{depth\}/);
     assert.doesNotMatch(maskSource, /className=\{styles\.group\}/);
     assert.match(
       pageCss,
@@ -352,7 +417,7 @@ describe("Avatar Details shared mannequin rendering", () => {
       maskSource,
       /blinking: blinkPhase === "closed"/,
     );
-    assert.match(maskSource, /talking,\s*\},\s*\),/);
+    assert.match(maskSource, /talking,\s*\},\s*depth,\s*\),/);
     assert.doesNotMatch(maskSource, /AvatarDetailsRoleLayer/);
     assert.doesNotMatch(maskSource, /data-avatar-details-ink-role/);
     assert.match(

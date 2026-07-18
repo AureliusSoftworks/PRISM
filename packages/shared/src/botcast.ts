@@ -94,6 +94,70 @@ export type BotcastStudioLayout = Record<
 
 export type BotcastVoiceLevelsByBotId = Record<string, number>;
 
+export interface BotcastStudioAtmosphereMix {
+  background: number;
+  grain: number;
+  foley: number;
+}
+
+export const BOTCAST_DEFAULT_STUDIO_ATMOSPHERE_MIX: Readonly<BotcastStudioAtmosphereMix> = {
+  background: 0.16,
+  grain: 0.005,
+  foley: 1,
+};
+export const BOTCAST_STUDIO_ATMOSPHERE_MIX_RELATIVE_MAX = 2;
+
+function normalizeBotcastStudioAtmosphereMixLevel(
+  value: unknown,
+  fallback: number,
+  maximum: number,
+): number {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value)
+        : Number.NaN;
+  const safe = Number.isFinite(parsed) ? parsed : fallback;
+  return Number(
+    Math.max(
+      0,
+      Math.min(maximum, safe),
+    ).toFixed(6),
+  );
+}
+
+export function normalizeBotcastStudioAtmosphereMix(
+  value: unknown,
+  fallback: Readonly<BotcastStudioAtmosphereMix> =
+    BOTCAST_DEFAULT_STUDIO_ATMOSPHERE_MIX,
+): BotcastStudioAtmosphereMix {
+  const container =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Partial<BotcastStudioAtmosphereMix>)
+      : {};
+  return {
+    background: normalizeBotcastStudioAtmosphereMixLevel(
+      container.background,
+      fallback.background,
+      BOTCAST_DEFAULT_STUDIO_ATMOSPHERE_MIX.background *
+        BOTCAST_STUDIO_ATMOSPHERE_MIX_RELATIVE_MAX,
+    ),
+    grain: normalizeBotcastStudioAtmosphereMixLevel(
+      container.grain,
+      fallback.grain,
+      BOTCAST_DEFAULT_STUDIO_ATMOSPHERE_MIX.grain *
+        BOTCAST_STUDIO_ATMOSPHERE_MIX_RELATIVE_MAX,
+    ),
+    foley: normalizeBotcastStudioAtmosphereMixLevel(
+      container.foley,
+      fallback.foley,
+      BOTCAST_DEFAULT_STUDIO_ATMOSPHERE_MIX.foley *
+        BOTCAST_STUDIO_ATMOSPHERE_MIX_RELATIVE_MAX,
+    ),
+  };
+}
+
 export const BOTCAST_VOICE_LEVEL_DEFAULT = 1;
 export const BOTCAST_VOICE_LEVEL_MAX = 1.25;
 export const BOTCAST_VOICE_LEVEL_STEP = 0.05;
@@ -354,6 +418,7 @@ export interface BotcastShow {
   nightAtmosphere: BotcastAtmosphereState;
   studioLayout: BotcastStudioLayout;
   voiceLevelsByBotId: BotcastVoiceLevelsByBotId;
+  atmosphereMix: BotcastStudioAtmosphereMix;
   logo: BotcastLogoState;
   introAudio: BotcastIntroAudioState;
   atmosphereAudio: BotcastAtmosphereAudioState;
@@ -392,6 +457,7 @@ export interface BotcastProducerCue {
 export type BotcastReplayEventKind =
   | "segment"
   | "guest_presence"
+  | "power_effect"
   | "producer_cue"
   | "utterance"
   | "tension"
@@ -412,11 +478,28 @@ export interface BotcastReplayEvent {
   occurredAt: string;
 }
 
+export interface BotcastSocialInfluenceEventV1 {
+  v: 1;
+  effect: "social_influence";
+  powerId: string;
+  powerName: string;
+  sourceBotId: string;
+  targetBotId: string;
+  sourceRole: BotcastSpeakerRole;
+  targetRole: BotcastSpeakerRole;
+  trigger: "session_start" | "after_speech";
+  polarity: "positive" | "negative";
+  strength: "small" | "medium" | "large";
+  atMs: number;
+  sourceMessageId?: string;
+}
+
 export interface BotcastCameraSuggestion {
   shot: BotcastDirectedCameraShot;
   reason:
     | "opening"
     | "speaker"
+    | "power_effect"
     | "listener_reaction"
     | "transition"
     | "tension"
@@ -459,7 +542,10 @@ function normalizeSavedBotcastListenerReactionPlan(
   const spokenCue =
     row.spokenCue === "mm-hm" ||
     row.spokenCue === "I see" ||
-      row.spokenCue === "hmm"
+    row.spokenCue === "hmm" ||
+    row.spokenCue === "right" ||
+    row.spokenCue === "oh" ||
+    row.spokenCue === "go on"
     ? row.spokenCue
     : undefined;
   if (
@@ -505,6 +591,91 @@ export function botcastListenerReactionForMessage(
     if (plan?.messageId === messageId) return plan;
   }
   return null;
+}
+
+function normalizeBotcastSocialInfluenceEvent(
+  value: unknown,
+): BotcastSocialInfluenceEventV1 | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  const boundedId = (candidate: unknown, limit = 160): string | null =>
+    typeof candidate === "string" && candidate.trim()
+      ? candidate.trim().slice(0, limit)
+      : null;
+  const powerId = boundedId(row.powerId);
+  const powerName = boundedId(row.powerName, 80);
+  const sourceBotId = boundedId(row.sourceBotId);
+  const targetBotId = boundedId(row.targetBotId);
+  const sourceMessageId = boundedId(row.sourceMessageId);
+  const atMs = Number(row.atMs);
+  if (
+    row.v !== 1 ||
+    row.effect !== "social_influence" ||
+    !powerId ||
+    !powerName ||
+    !sourceBotId ||
+    !targetBotId ||
+    sourceBotId === targetBotId ||
+    (row.sourceRole !== "host" && row.sourceRole !== "guest") ||
+    (row.targetRole !== "host" && row.targetRole !== "guest") ||
+    row.sourceRole === row.targetRole ||
+    (row.trigger !== "session_start" && row.trigger !== "after_speech") ||
+    (row.polarity !== "positive" && row.polarity !== "negative") ||
+    (row.strength !== "small" &&
+      row.strength !== "medium" &&
+      row.strength !== "large") ||
+    !Number.isFinite(atMs) ||
+    atMs < 0
+  ) {
+    return null;
+  }
+  return {
+    v: 1,
+    effect: "social_influence",
+    powerId,
+    powerName,
+    sourceBotId,
+    targetBotId,
+    sourceRole: row.sourceRole,
+    targetRole: row.targetRole,
+    trigger: row.trigger,
+    polarity: row.polarity,
+    strength: row.strength,
+    atMs: Math.round(atMs),
+    ...(sourceMessageId ? { sourceMessageId } : {}),
+  };
+}
+
+export function botcastSocialInfluenceEventsAt(args: {
+  events: readonly BotcastReplayEvent[];
+  elapsedMs: number;
+  targetBotId?: string;
+}): BotcastSocialInfluenceEventV1[] {
+  return args.events.flatMap((event) => {
+    if (event.kind !== "power_effect") return [];
+    const influence = normalizeBotcastSocialInfluenceEvent(event.payload);
+    if (!influence || influence.atMs > args.elapsedMs) return [];
+    if (args.targetBotId && influence.targetBotId !== args.targetBotId) {
+      return [];
+    }
+    return [influence];
+  });
+}
+
+export function botcastStrongestNegativeSocialInfluenceAt(args: {
+  events: readonly BotcastReplayEvent[];
+  elapsedMs: number;
+  targetBotId?: string;
+}): BotcastSocialInfluenceEventV1 | null {
+  const rank = { small: 1, medium: 2, large: 3 } as const;
+  let strongest: BotcastSocialInfluenceEventV1 | null = null;
+  for (const influence of botcastSocialInfluenceEventsAt(args)) {
+    if (influence.polarity !== "negative") continue;
+    if (!strongest || rank[influence.strength] > rank[strongest.strength]) {
+      strongest = influence;
+    }
+  }
+  return strongest;
 }
 
 function botcastTimedCameraEvents(
@@ -614,6 +785,7 @@ export interface BotcastShowPatchRequest {
   nightAtmosphereImageId?: string | null;
   studioLayout?: BotcastStudioLayout;
   voiceLevelsByBotId?: BotcastVoiceLevelsByBotId;
+  atmosphereMix?: BotcastStudioAtmosphereMix;
   regenerateAtmosphere?: boolean;
   regenerateDayAtmosphere?: boolean;
   regenerateNightAtmosphere?: boolean;

@@ -200,7 +200,7 @@ export function buildSignalReviewTranscript(
     "",
     "## Review Notes",
     "",
-    "Use the spoken transcript for user-visible quality. Use the segment, cue, tension, routing, listener reaction, camera, departure, and completion events to diagnose PRISM orchestration and replay fidelity.",
+    "Use the spoken transcript for user-visible quality. Use the segment, cue, tension, routing, Power, listener reaction, camera, departure, and completion events to diagnose PRISM orchestration and replay fidelity.",
   );
   return `${lines.join("\n").trimEnd()}\n`;
 }

@@ -101,7 +101,6 @@ export interface BackupUserSettings {
   experimentalDualOllamaEnabled: boolean;
   experimentalAllModelEffortEnabled?: boolean;
   coffeeExperimentalTableAngleEnabled?: boolean;
-  signalImmersiveVoiceEffectsEnabled?: boolean;
   psychicModeEnabled?: boolean;
   autoModeEnabled?: boolean;
   autoFallbackChain?: AutoFallbackChainV1 | null;
@@ -398,6 +397,7 @@ interface SlateBackupTableSpec {
   primaryKey: "id" | "project_id";
   columns: readonly string[];
   deferredFields?: readonly string[];
+  optionalFields?: Readonly<Record<string, string | number | null>>;
 }
 
 const SLATE_BACKUP_TABLES: readonly SlateBackupTableSpec[] = [
@@ -416,6 +416,7 @@ const SLATE_BACKUP_TABLES: readonly SlateBackupTableSpec[] = [
       "series_id",
       "book_ordinal",
       "title",
+      "title_origin",
       "spark",
       "spark_wildcards_json",
       "premise",
@@ -439,6 +440,7 @@ const SLATE_BACKUP_TABLES: readonly SlateBackupTableSpec[] = [
       "created_at",
       "updated_at",
     ],
+    optionalFields: { title_origin: "writer" },
   },
   {
     key: "revisions",
@@ -1196,13 +1198,18 @@ function importSlateSnapshot(
        ON CONFLICT(${spec.primaryKey}) DO UPDATE SET ${updates.join(", ")}`,
     );
     const deferredFields = new Set(spec.deferredFields ?? []);
+    const optionalFields = spec.optionalFields ?? {};
     for (const row of rows) {
       statement.run(
         userId,
         ...spec.columns.map((column) =>
           deferredFields.has(column)
             ? null
-            : readSlateBackupScalar(row, column, spec.table),
+            : Object.prototype.hasOwnProperty.call(row, column)
+              ? readSlateBackupScalar(row, column, spec.table)
+              : Object.prototype.hasOwnProperty.call(optionalFields, column)
+                ? optionalFields[column]!
+                : readSlateBackupScalar(row, column, spec.table),
         ),
       );
     }
@@ -1243,7 +1250,6 @@ export function exportUserSnapshot(
          experimental_dual_ollama_enabled,
          experimental_all_model_effort_enabled,
          coffee_experimental_table_angle_enabled,
-         signal_immersive_voice_effects_enabled,
          psychic_mode_enabled,
          auto_switch_model,
          auto_fallback_chain,
@@ -1303,7 +1309,6 @@ export function exportUserSnapshot(
         experimental_dual_ollama_enabled: number;
         experimental_all_model_effort_enabled: number;
         coffee_experimental_table_angle_enabled: number;
-        signal_immersive_voice_effects_enabled: number;
         psychic_mode_enabled: number;
         auto_switch_model: number;
         auto_fallback_chain: string | null;
@@ -1371,8 +1376,6 @@ export function exportUserSnapshot(
           user.experimental_all_model_effort_enabled === 1,
         coffeeExperimentalTableAngleEnabled:
           user.coffee_experimental_table_angle_enabled === 1,
-        signalImmersiveVoiceEffectsEnabled:
-          user.signal_immersive_voice_effects_enabled === 1,
         psychicModeEnabled: user.psychic_mode_enabled === 1,
         autoModeEnabled: user.auto_switch_model === 1,
         autoFallbackChain: parseStoredAutoFallbackChain(
@@ -2483,9 +2486,6 @@ function importUserSnapshotWithinTransaction(
       ),
       userId,
     );
-    db.prepare(
-      "UPDATE users SET signal_immersive_voice_effects_enabled = ? WHERE id = ?",
-    ).run(settings.signalImmersiveVoiceEffectsEnabled === true ? 1 : 0, userId);
   }
 
   if (Array.isArray(snapshot.bots)) {

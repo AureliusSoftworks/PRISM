@@ -708,7 +708,8 @@ function normalizeStoredListenerReactionPlan(
     ? row.visualAction
     : undefined;
   const spokenCue = row.spokenCue === "mm-hm" || row.spokenCue === "I see" ||
-      row.spokenCue === "hmm"
+      row.spokenCue === "hmm" || row.spokenCue === "right" ||
+      row.spokenCue === "oh" || row.spokenCue === "go on"
     ? row.spokenCue
     : undefined;
   if (

@@ -31,6 +31,7 @@ interface RowSpec {
   columns: readonly string[];
   numeric?: readonly string[];
   nullable?: readonly string[];
+  optionalDefaults?: Readonly<Record<string, string | number | null>>;
 }
 
 const SERIES_SPEC: RowSpec = {
@@ -39,7 +40,7 @@ const SERIES_SPEC: RowSpec = {
 
 const PROJECT_SPEC: RowSpec = {
   columns: [
-    "id", "series_id", "book_ordinal", "title", "spark",
+    "id", "series_id", "book_ordinal", "title", "title_origin", "spark",
     "spark_wildcards_json", "premise", "voice", "non_negotiables_json",
     "phase", "structure_json", "characters_json", "unresolved_threads_json",
     "direction", "locked_ranges_json", "last_provider", "last_model",
@@ -56,6 +57,7 @@ const PROJECT_SPEC: RowSpec = {
     "last_provider", "last_model", "continuity_previous_generation",
     "continuity_last_success_at",
   ],
+  optionalDefaults: { title_origin: "writer" },
 };
 
 const REVISION_SPEC: RowSpec = {
@@ -297,7 +299,10 @@ function exactKeys(
 }
 
 function safeRow(value: unknown, spec: RowSpec, label: string): SlateSafetyRow {
-  const candidate = record(value, label);
+  const candidate = {
+    ...(spec.optionalDefaults ?? {}),
+    ...record(value, label),
+  };
   exactKeys(candidate, spec.columns, label);
   const numeric = new Set(spec.numeric ?? []);
   const nullable = new Set(spec.nullable ?? []);
@@ -625,6 +630,12 @@ function validateContentReferences(
     (typeof content.project.title !== "string" || content.project.title.trim().length === 0)
   ) {
     throw new SlateArchiveImportError("Slate archive project title is empty.");
+  }
+  if (
+    content.project.title_origin !== undefined &&
+    !new Set(["writer", "spark", "material"]).has(String(content.project.title_origin))
+  ) {
+    throw new SlateArchiveImportError("Slate archive has invalid title provenance.");
   }
   stringField(content.project, "continuity_active_version", "project");
   stringField(content.project, "continuity_target_version", "project");
@@ -1082,6 +1093,11 @@ function restoreArchive(
   const { content } = parsed;
   const sourceProjectId = String(content.project.id);
   const title = boundedCopyTitle(String(content.project.title), COPY_SUFFIX);
+  const titleOrigin = new Set(["spark", "material"]).has(
+    String(content.project.title_origin),
+  )
+    ? String(content.project.title_origin)
+    : "writer";
   const seriesTitle = boundedCopyTitle(String(content.series.title), IMPORTED_SERIES_SUFFIX);
   const preserveGenerationPointers = parsed.generationMetadataIncluded;
   const hasInterruptedGeneration = content.continuity.generations.some(
@@ -1113,7 +1129,7 @@ function restoreArchive(
     db,
     "slate_projects",
     [
-      "id", "user_id", "series_id", "book_ordinal", "title", "spark",
+      "id", "user_id", "series_id", "book_ordinal", "title", "title_origin", "spark",
       "spark_wildcards_json", "premise", "voice", "non_negotiables_json", "phase",
       "structure_json", "characters_json", "unresolved_threads_json", "manuscript",
       "direction", "locked_ranges_json", "last_provider", "last_model",
@@ -1123,6 +1139,7 @@ function restoreArchive(
     ],
     [
       maps.projectId, userId, maps.seriesId, Number(content.project.book_ordinal), title,
+      titleOrigin,
       String(content.project.spark), String(content.project.spark_wildcards_json),
       String(content.project.premise), String(content.project.voice),
       String(content.project.non_negotiables_json), String(content.project.phase),

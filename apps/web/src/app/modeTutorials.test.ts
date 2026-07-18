@@ -30,6 +30,24 @@ describe("mode tutorials", () => {
     );
   });
 
+  it("explains that Coffee cross-talk controls audible backchannels", () => {
+    const joinCopy = MODE_TUTORIALS.coffee.steps[4]?.body ?? "";
+    assert.match(joinCopy, /brief spoken acknowledgement/u);
+    assert.match(joinCopy, /Cross-talk setting/u);
+    assert.match(joinCopy, /audible overlaps/u);
+    assert.match(joinCopy, /inferred listeners remain visual only/u);
+    assert.match(joinCopy, /sparse mic-ready breath/u);
+  });
+
+  it("explains shared mic-ready breaths without adding a setup gate", () => {
+    assert.match(MODE_TUTORIALS.zen.steps[3]?.body ?? "", /Voice Effects on/u);
+    assert.match(MODE_TUTORIALS.zen.steps[3]?.body ?? "", /mic-ready breath/u);
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[4]?.body ?? "",
+      /saved episodes choose them deterministically on replay/u,
+    );
+  });
+
   it("presents the production applet as Signal", () => {
     assert.equal(MODE_TUTORIALS.botcast.title, "Signal producer walkthrough");
     const signalCopy = MODE_TUTORIALS.botcast.steps
@@ -47,6 +65,10 @@ describe("mode tutorials", () => {
     assert.equal(
       MODE_TUTORIALS.botcast.steps[1]?.targetSelector,
       '[data-tutorial-target="botcast-brand-controls"]',
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
+      /transparent, theme-ready logo/u,
     );
     assert.equal(MODE_TUTORIALS.botcast.steps[2]?.heading, "Build an audience");
     assert.equal(
@@ -141,6 +163,15 @@ describe("mode tutorials", () => {
       /no key or network/u,
     );
     assert.match(
+      MODE_TUTORIALS.botcast.steps[3]?.body ?? "",
+      /static backdrop/u,
+    );
+    assert.match(MODE_TUTORIALS.botcast.steps[3]?.body ?? "", /Foley/u);
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[3]?.body ?? "",
+      /saves the mix for that show/u,
+    );
+    assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
       /default stage places both bots/u,
     );
@@ -187,16 +218,16 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
-      /fill all three locally/u,
+      /selected episode model/u,
     );
     assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /small dice/u);
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
-      /guest-aware suggestion/u,
+      /show’s listeners would genuinely want to ask/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
-      /stays editable/u,
+      /stay editable/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
@@ -220,7 +251,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
-      /only development mix sliders stay live there/u,
+      /show-scoped room mix stay live there/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
@@ -284,6 +315,14 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      /brief conversational acknowledgement/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      /can overlap naturally but never create a turn/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
       /queues the private cue/u,
     );
     assert.match(
@@ -343,7 +382,7 @@ describe("mode tutorials", () => {
       (step) => step.targetSelector,
     );
     assert.deepEqual(headings, [
-      "Start from a spark",
+      "Begin with pages or a spark",
       "Shape before drafting",
       "Choose the prose engine",
       "Direct the structure",
@@ -365,12 +404,19 @@ describe("mode tutorials", () => {
     assert.match(MODE_TUTORIALS.slate.steps[0]?.body ?? "", /\{wildcards\}/i);
     assert.match(
       MODE_TUTORIALS.slate.steps[0]?.body ?? "",
-      /one creative spark or pages/i,
+      /creative spark or pages/i,
     );
+    assert.match(MODE_TUTORIALS.slate.steps[0]?.body ?? "", /replaces the spark controls/i);
+    assert.match(MODE_TUTORIALS.slate.steps[0]?.body ?? "", /prose model to generate/i);
+    assert.match(MODE_TUTORIALS.slate.steps[0]?.body ?? "", /visible title checkpoint/i);
+    assert.match(MODE_TUTORIALS.slate.steps[0]?.body ?? "", /never renames/i);
     assert.match(
       MODE_TUTORIALS.slate.steps[0]?.body ?? "",
-      /waits for your confirmation/i,
+      /waits for your confirmation or another try/i,
     );
+    assert.match(MODE_TUTORIALS.slate.steps[0]?.body ?? "", /privacy-matched book cover/i);
+    assert.match(MODE_TUTORIALS.slate.steps[0]?.body ?? "", /regenerate either title or cover/i);
+    assert.match(MODE_TUTORIALS.slate.steps[0]?.body ?? "", /project shelf becomes home/i);
     assert.match(MODE_TUTORIALS.slate.steps[0]?.body ?? "", /story-so-far/i);
     assert.match(
       MODE_TUTORIALS.slate.steps[2]?.body ?? "",
@@ -380,6 +426,18 @@ describe("mode tutorials", () => {
     assert.match(
       MODE_TUTORIALS.slate.steps.at(-2)?.body ?? "",
       /never edits prose/i,
+    );
+    assert.match(
+      MODE_TUTORIALS.slate.steps.at(-2)?.body ?? "",
+      /last three/i,
+    );
+    assert.match(
+      MODE_TUTORIALS.slate.steps.at(-2)?.body ?? "",
+      /fade/i,
+    );
+    assert.match(
+      MODE_TUTORIALS.slate.steps.at(-2)?.body ?? "",
+      /not remembered history/i,
     );
     assert.match(
       MODE_TUTORIALS.slate.steps.at(-1)?.body ?? "",

@@ -19,11 +19,13 @@ import type {
   BotcastProducerCue,
   BotcastReplayEvent,
   BotcastReplayEventKind,
+  BotcastSocialInfluenceEventV1,
   BotcastSegmentRecord,
   BotcastShow,
   BotcastShowCreateRequest,
   BotcastShowPatchRequest,
   BotcastStudioLayout,
+  BotcastStudioAtmosphereMix,
   BotcastVoiceLevelsByBotId,
   BotcastLogoGlyph,
   BotcastLogoState,
@@ -40,6 +42,7 @@ import {
   BOTCAST_SESSION_DURATION_MINUTES_MAX,
   BOTCAST_SESSION_DURATION_MINUTES_MIN,
   BOTCAST_DEFAULT_STUDIO_LAYOUT,
+  BOTCAST_DEFAULT_STUDIO_ATMOSPHERE_MIX,
   BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS,
   applyBotcastProducerCueToTension,
   activeBotPowersV1,
@@ -51,6 +54,7 @@ import {
   botcastNextSpeakerRole,
   buildSignalListenerReactionPlanV1,
   botcastReplayTimeline,
+  botcastSocialInfluenceEventsAt,
   botcastSegmentForTurn,
   botcastSessionShouldClose,
   botcastTensionStageForLevel,
@@ -59,6 +63,7 @@ import {
   isBotcastFallbackStudioAccentVariant,
   normalizeVoiceDeliveryMood,
   normalizeBotcastStudioLayout,
+  normalizeBotcastStudioAtmosphereMix,
   normalizeBotcastVoiceLevelsByBotId,
   parseStoredBotPowersV1,
   rankSignalPersonaTemperaments,
@@ -218,11 +223,13 @@ export interface BotcastGenerationOptions {
   preferredLocalModel?: string | null;
   preferredOnlineModel?: string | null;
   autoFallbackChain?: AutoFallbackChainV1 | null;
-  immersiveVoiceEffectsEnabled?: boolean;
   providerFactory?: typeof selectProvider;
 }
 
-export type BotcastBookingSuggestionField = "topic" | "producerBrief";
+export type BotcastBookingSuggestionField =
+  | "topic"
+  | "producerBrief"
+  | "booking";
 
 export interface BotcastBookingSuggestionInput {
   guestBotId: string;
@@ -428,6 +435,8 @@ function logoForHost(host: BotcastBotProfile, revision = 1): BotcastLogoState {
       `Anchor the restrained palette in ${normalizeAccentColor(host.color)} with only one or two complementary tones.`,
       "Keep the identity visually independent from existing entertainment properties, character designs, signature objects, insignia, and existing logos.",
       "One centered simple mark, bold silhouette, generous negative space, no scene, no figure, no lettering, and no readable text. It must remain distinctive at 64 pixels.",
+      "Output only the isolated emblem on a true transparent alpha background. Do not draw a white, cream, black, or colored background; no app-icon tile, square, circle container, card, badge field, border, backdrop, floor, shadow plate, or glow panel.",
+      "The exact same mark and colors must remain legible on both near-black and near-white interface surfaces without inversion or hue rotation; use clean dual-surface edge contrast where needed.",
     ].join(" "),
     imageUrl: null,
     imageId: null,
@@ -445,7 +454,7 @@ function logoFallbackForRow(row: BotcastShowRow): BotcastLogoState {
   ]!;
   return {
     seed,
-    prompt: `Create a wholly original, non-figurative editorial emblem for an interview podcast, subtly incorporating ${audioForm}; use ${normalizeAccentColor(row.accent_color)} with one or two complementary tones; keep it visually independent from existing entertainment properties, character designs, signature objects, insignia, and existing logos; one centered simple mark with a bold silhouette and generous negative space; no scene, figure, lettering, or readable text; distinctive at 64 pixels.`,
+    prompt: `Create a wholly original, non-figurative editorial emblem for an interview podcast, subtly incorporating ${audioForm}; use ${normalizeAccentColor(row.accent_color)} with one or two complementary tones; keep it visually independent from existing entertainment properties, character designs, signature objects, insignia, and existing logos; one centered simple mark with a bold silhouette and generous negative space; no scene, figure, lettering, or readable text; distinctive at 64 pixels; output only the isolated emblem on a true transparent alpha background; no white, cream, black, or colored background, app-icon tile, container, card, badge field, border, backdrop, shadow plate, or glow panel; keep the exact same mark and colors legible on both near-black and near-white interface surfaces without inversion or hue rotation.`,
     imageUrl: null,
     imageId: null,
     revision: 1,
@@ -501,6 +510,7 @@ function parseAtmospheres(raw: string): {
   nightAtmosphere: BotcastAtmosphereState;
   studioLayout: BotcastStudioLayout;
   voiceLevelsByBotId: BotcastVoiceLevelsByBotId;
+  atmosphereMix: BotcastStudioAtmosphereMix;
 } {
   try {
     const container = JSON.parse(raw) as Partial<BotcastAtmosphereState> & {
@@ -510,6 +520,7 @@ function parseAtmospheres(raw: string): {
       nightAtmosphere?: Partial<BotcastAtmosphereState>;
       studioLayout?: unknown;
       voiceLevelsByBotId?: unknown;
+      atmosphereMix?: unknown;
     };
     const legacy = normalizeAtmosphere(container, fallbackAtmosphere("night"));
     return {
@@ -526,6 +537,9 @@ function parseAtmospheres(raw: string): {
       voiceLevelsByBotId: normalizeBotcastVoiceLevelsByBotId(
         container.voiceLevelsByBotId,
       ),
+      atmosphereMix: normalizeBotcastStudioAtmosphereMix(
+        container.atmosphereMix,
+      ),
     };
   } catch {
     return {
@@ -535,6 +549,7 @@ function parseAtmospheres(raw: string): {
       nightAtmosphere: fallbackAtmosphere("night"),
       studioLayout: normalizeBotcastStudioLayout(undefined),
       voiceLevelsByBotId: {},
+      atmosphereMix: normalizeBotcastStudioAtmosphereMix(undefined),
     };
   }
 }
@@ -580,6 +595,7 @@ function serializeShowVisuals(
   dashboardBlurbs: readonly string[],
   studioLayout: BotcastStudioLayout,
   voiceLevelsByBotId: Readonly<BotcastVoiceLevelsByBotId>,
+  atmosphereMix: Readonly<BotcastStudioAtmosphereMix>,
 ): string {
   // Preserve the original root atmosphere shape for older clients and backup
   // readers while storing explicit variants for current Signal builds.
@@ -593,6 +609,7 @@ function serializeShowVisuals(
     voiceLevelsByBotId: normalizeBotcastVoiceLevelsByBotId(
       voiceLevelsByBotId,
     ),
+    atmosphereMix: normalizeBotcastStudioAtmosphereMix(atmosphereMix),
     logo,
   });
 }
@@ -854,6 +871,71 @@ function botcastPowerRestriction(
   return null;
 }
 
+function botcastSocialInfluenceEventsForPair(args: {
+  source: BotcastBotProfile;
+  target: BotcastBotProfile;
+  sourceRole: BotcastSpeakerRole;
+  targetRole: BotcastSpeakerRole;
+  trigger: BotcastSocialInfluenceEventV1["trigger"];
+  atMs: number;
+  sourceMessageId?: string;
+}): BotcastSocialInfluenceEventV1[] {
+  const sourceIsImperceptible = Boolean(
+    botcastPowerRestriction(args.source, args.target, "awareness"),
+  );
+  const sourceIsInaudible = Boolean(
+    botcastPowerRestriction(args.source, args.target, "speech_audience"),
+  );
+  if (sourceIsImperceptible && sourceIsInaudible) return [];
+  return activeBotPowersV1(args.source.powers).flatMap((power) =>
+    (power.compiled?.effects ?? []).flatMap((effect) => {
+      if (
+        effect.type !== "social_influence" ||
+        effect.trigger !== args.trigger ||
+        !effect.targets.some((target) =>
+          botcastPowerTargetMatches(target, args.target),
+        )
+      ) {
+        return [];
+      }
+      return [
+        {
+          v: 1 as const,
+          effect: "social_influence" as const,
+          powerId: power.id,
+          powerName: power.name || "Power",
+          sourceBotId: args.source.id,
+          targetBotId: args.target.id,
+          sourceRole: args.sourceRole,
+          targetRole: args.targetRole,
+          trigger: effect.trigger,
+          polarity: effect.polarity,
+          strength: effect.strength,
+          atMs: Math.max(0, Math.round(args.atMs)),
+          ...(args.sourceMessageId
+            ? { sourceMessageId: args.sourceMessageId }
+            : {}),
+        },
+      ];
+    }),
+  );
+}
+
+function strongestNegativeBotcastInfluence(
+  influences: readonly BotcastSocialInfluenceEventV1[],
+): BotcastSocialInfluenceEventV1 | null {
+  const strengthRank = { small: 1, medium: 2, large: 3 } as const;
+  return influences.reduce<BotcastSocialInfluenceEventV1 | null>(
+    (strongest, influence) =>
+      influence.polarity === "negative" &&
+      (!strongest ||
+        strengthRank[influence.strength] > strengthRank[strongest.strength])
+        ? influence
+        : strongest,
+    null,
+  );
+}
+
 function botcastGuestPresenceMode(
   host: BotcastBotProfile,
   guest: BotcastBotProfile,
@@ -970,6 +1052,7 @@ export function createBotcastShow(
       [],
       BOTCAST_DEFAULT_STUDIO_LAYOUT,
       {},
+      BOTCAST_DEFAULT_STUDIO_ATMOSPHERE_MIX,
     ),
     now,
     now,
@@ -1230,6 +1313,10 @@ export function updateBotcastShow(
     patch.voiceLevelsByBotId,
     current.voiceLevelsByBotId,
   );
+  const atmosphereMix = normalizeBotcastStudioAtmosphereMix(
+    patch.atmosphereMix,
+    current.atmosphereMix,
+  );
   const studioIdentity = cleanText(
     patch.studioIdentity,
     current.studioIdentity || defaultStudioIdentity(host),
@@ -1361,6 +1448,7 @@ export function updateBotcastShow(
       dashboardBlurbs,
       studioLayout,
       voiceLevelsByBotId,
+      atmosphereMix,
     ),
     now,
     showId,
@@ -1463,33 +1551,124 @@ function cleanGeneratedBookingSuggestion(
   return cleaned.slice(0, field === "topic" ? BOTCAST_TOPIC_MAX : 900);
 }
 
+function cleanGeneratedBooking(
+  raw: string,
+): { topic: string; producerBrief: string } | null {
+  const candidate = raw.match(/\{[\s\S]*\}/u)?.[0] ?? raw;
+  try {
+    const parsed = JSON.parse(candidate) as Record<string, unknown>;
+    const topic = cleanText(parsed.topic, "", BOTCAST_TOPIC_MAX);
+    const producerBrief = cleanText(parsed.producerBrief, "", 900);
+    return topic && producerBrief ? { topic, producerBrief } : null;
+  } catch {
+    return null;
+  }
+}
+
+function botcastAudienceOnlyProducerBriefFallback(topic: string): string {
+  const subject =
+    topic.replace(/[.!?]+$/u, "").trim() || "the episode's central question";
+  return `Treat this as an audience-only dramatic layer: have the host build a self-contained argument around “${subject}” without asking the guest for a response, while the unseen guest offers private counterpoints to listeners.`;
+}
+
+function botcastAudienceOnlyBriefRequiresGuestInteraction(
+  producerBrief: string,
+  guestName: string,
+): boolean {
+  const normalized = normalizeBotcastSpokenIdentity(producerBrief);
+  const guestTargets = [
+    normalizeBotcastSpokenIdentity(guestName),
+    "the guest",
+    "guest",
+    "him",
+    "her",
+    "them",
+  ].filter(Boolean);
+  const interactionPattern =
+    /\b(?:ask|press|question|probe|challenge|interview|invite|thank|wait for|draw out|follow up with)\b/gu;
+  return [...normalized.matchAll(interactionPattern)].some((match) => {
+    const nearbyDirection = normalized.slice(match.index, match.index + 120);
+    return guestTargets.some((target) =>
+      new RegExp(`(?:^| )${target}(?: |$)`, "u").test(nearbyDirection),
+    );
+  });
+}
+
+function repairBotcastAudienceOnlyProducerBrief(input: {
+  producerBrief: string;
+  topic: string;
+  guestName: string;
+}): string {
+  return botcastAudienceOnlyBriefRequiresGuestInteraction(
+    input.producerBrief,
+    input.guestName,
+  )
+    ? botcastAudienceOnlyProducerBriefFallback(input.topic)
+    : input.producerBrief;
+}
+
+export type BotcastBookingSuggestionResult =
+  | { value: string; generated: boolean }
+  | { topic: string; producerBrief: string; generated: boolean };
+
 export async function generateBotcastBookingSuggestion(
   db: DatabaseSync,
   userId: string,
   showId: string,
   input: BotcastBookingSuggestionInput,
   generation: BotcastGenerationOptions,
-): Promise<{ value: string; generated: boolean }> {
+): Promise<BotcastBookingSuggestionResult> {
   const show = getBotcastShow(db, userId, showId);
   const host = loadBotProfile(db, userId, show.hostBotId);
   const guest = loadBotProfile(db, userId, input.guestBotId);
   if (guest.id === host.id) {
     throw new Error("Choose a guest other than the Signal host.");
   }
+  const audienceOnlyGuest =
+    botcastGuestPresenceMode(host, guest) === "audience_only";
   const currentTopic = cleanText(input.currentTopic, "", BOTCAST_TOPIC_MAX);
   const currentProducerBrief = cleanText(input.currentProducerBrief, "", 900);
+  const recentEpisodeTopics = listBotcastEpisodes(db, userId, showId)
+    .slice(0, 6)
+    .map((episode) => episode.topic)
+    .filter(Boolean);
   const fieldDirections =
-    input.field === "topic"
+    input.field === "booking"
       ? [
-          "Return only one compelling interview topic, phrased as a specific question the host can genuinely investigate with this guest.",
+          "Return one JSON object with exactly two string fields: topic and producerBrief.",
+          audienceOnlyGuest
+            ? "The topic must be one compelling 8-to-22-word question this host can investigate through a solo argument and this unseen guest's private counterpoint."
+            : "The topic must be one compelling 8-to-22-word question this particular host would genuinely want to investigate with this particular guest.",
+          "Prioritize the question listeners drawn to this show's premise would regret the host not asking. Infer interests from the show, never demographic traits.",
+          "Make the guest essential: ground the question in a distinctive conviction, expertise, contradiction, or lived perspective present in their persona, so swapping in another guest would weaken it.",
+          "Avoid generic philosophy prompts, broad evergreen themes, biography recaps, praise, and questions whose only personalization is the guest's name.",
+          audienceOnlyGuest
+            ? "The producerBrief must give the host a self-contained editorial path and the unseen guest a distinct private counterpoint without requiring interaction between them."
+            : "The producerBrief must be one or two concise off-mic sentences giving the host a guest-specific editorial angle, a promising follow-up, and any useful boundary implied by the persona.",
+        ]
+      : input.field === "topic"
+      ? [
+          audienceOnlyGuest
+            ? "Return only one compelling topic, phrased as a specific question the host can investigate through a solo argument and this unseen guest's private counterpoint."
+            : "Return only one compelling interview topic, phrased as a specific question the host can genuinely investigate with this guest.",
           "Make it 8 to 22 words, concrete enough to guide an episode, and rooted in a productive tension between these two personas.",
+          "Prioritize what this host would genuinely ask or listeners drawn to this show's premise would regret not hearing. Infer interests from the show, never demographic traits.",
+          "Make the guest essential rather than personalizing a generic prompt with their name.",
           "Do not add a label, quotation marks, explanation, or markdown.",
         ]
       : [
           "Return only a private off-mic producer brief for this episode in one or two concise sentences.",
-          "Give the host a specific editorial angle, one promising line of inquiry, and any useful boundary implied by the guest's persona.",
+          audienceOnlyGuest
+            ? "Give the host a self-contained editorial path and the unseen guest a distinct private counterpoint without requiring interaction between them."
+            : "Give the host a specific editorial angle, one promising line of inquiry, and any useful boundary implied by the guest's persona.",
           "Do not write dialogue, address the audience, add a label, or use markdown.",
         ];
+  const presenceDirections = audienceOnlyGuest
+    ? [
+        "This pairing uses an audience-only dramatic format: the host cannot perceive or hear the booked guest, while listeners can hear the guest's private asides.",
+        "Shape the episode as a self-contained host argument with an unseen guest counterpoint. Never instruct the host to ask, press, question, follow up with, wait for, or thank the guest.",
+      ]
+    : [];
   try {
     const selected = generationProvider(
       generation,
@@ -1504,6 +1683,7 @@ export async function generateBotcastBookingSuggestion(
             "You are a sharp podcast producer preparing one fictional, non-canonical Signal episode.",
             "Use the supplied personas only as creative context. Do not claim real-world consent, endorsement, memory, or prior appearances.",
             ...fieldDirections,
+            ...presenceDirections,
           ].join(" "),
         },
         {
@@ -1512,11 +1692,14 @@ export async function generateBotcastBookingSuggestion(
             `Show: ${show.name}`,
             `Show premise: ${show.premise}`,
             `Hosting style: ${show.hostingStyle}`,
+            `Show identity: ${show.studioIdentity}`,
             `Host: ${host.name}`,
             `Host persona: ${host.systemPrompt.slice(0, 1_800)}`,
             `Guest: ${guest.name}`,
             `Guest persona: ${guest.systemPrompt.slice(0, 1_800)}`,
+            `Episode format: ${audienceOnlyGuest ? "Audience-only guest; the host cannot perceive or hear the guest." : "Two-way host and guest interview."}`,
             `Current topic to avoid repeating: ${currentTopic || "None"}`,
+            `Recent episode topics to avoid repeating: ${recentEpisodeTopics.join(" | ") || "None"}`,
             `Current producer brief: ${currentProducerBrief || "None"}`,
           ].join("\n"),
         },
@@ -1524,14 +1707,42 @@ export async function generateBotcastBookingSuggestion(
       {
         ...(selected.model ? { model: selected.model } : {}),
         temperature: 0.94,
-        maxTokens: input.field === "topic" ? 90 : 180,
+        maxTokens:
+          input.field === "topic" ? 90 : input.field === "booking" ? 260 : 180,
         usagePurpose: "botcast_brand",
+        ...(input.field === "booking" ? { jsonMode: true } : {}),
       },
     );
-    const value = cleanGeneratedBookingSuggestion(raw, input.field);
+    if (input.field === "booking") {
+      const booking = cleanGeneratedBooking(raw);
+      return booking
+        ? {
+            ...booking,
+            producerBrief: audienceOnlyGuest
+              ? repairBotcastAudienceOnlyProducerBrief({
+                  producerBrief: booking.producerBrief,
+                  topic: booking.topic,
+                  guestName: guest.name,
+                })
+              : booking.producerBrief,
+            generated: true,
+          }
+        : { topic: "", producerBrief: "", generated: false };
+    }
+    const cleanedValue = cleanGeneratedBookingSuggestion(raw, input.field);
+    const value =
+      audienceOnlyGuest && input.field === "producerBrief" && cleanedValue
+        ? repairBotcastAudienceOnlyProducerBrief({
+            producerBrief: cleanedValue,
+            topic: currentTopic,
+            guestName: guest.name,
+          })
+        : cleanedValue;
     return { value, generated: Boolean(value) };
   } catch {
-    return { value: "", generated: false };
+    return input.field === "booking"
+      ? { topic: "", producerBrief: "", generated: false }
+      : { value: "", generated: false };
   }
 }
 
@@ -1932,8 +2143,26 @@ export function createBotcastEpisode(
   const guestPresenceMode = botcastGuestPresenceMode(host, guest);
   assertBotcastPowerSpeechCompatibility(host, guest);
   if (guestPresenceMode === "present") {
-  assertBotcastPowerSpeechCompatibility(guest, host);
+    assertBotcastPowerSpeechCompatibility(guest, host);
   }
+  const sessionStartPowerEffects = [
+    ...botcastSocialInfluenceEventsForPair({
+      source: host,
+      target: guest,
+      sourceRole: "host",
+      targetRole: "guest",
+      trigger: "session_start",
+      atMs: 0,
+    }),
+    ...botcastSocialInfluenceEventsForPair({
+      source: guest,
+      target: host,
+      sourceRole: "guest",
+      targetRole: "host",
+      trigger: "session_start",
+      atMs: 0,
+    }),
+  ];
   const topic = cleanText(input.topic, "", BOTCAST_TOPIC_MAX);
   if (!topic) throw new Error("Episode topic is required.");
   const id = randomId(12);
@@ -2023,6 +2252,30 @@ export function createBotcastEpisode(
       },
       now,
     );
+    for (const influence of sessionStartPowerEffects) {
+      recordEvent(db, userId, id, "power_effect", { ...influence }, now);
+    }
+    const strongestNegativeInfluence = strongestNegativeBotcastInfluence(
+      sessionStartPowerEffects,
+    );
+    if (strongestNegativeInfluence) {
+      recordEvent(
+        db,
+        userId,
+        id,
+        "camera_suggestion",
+        {
+          shot:
+            strongestNegativeInfluence.sourceRole === "host"
+              ? "left"
+              : "right",
+          reason: "power_effect",
+          atMs: 0,
+          minimumHoldMs: 1_400,
+        },
+        now,
+      );
+    }
     db.prepare(
       "UPDATE botcast_shows SET updated_at = ? WHERE id = ? AND user_id = ?",
     ).run(now, show.id, userId);
@@ -2193,26 +2446,62 @@ export interface BotcastPromptBuildArgs {
     | "producerBrief"
     | "segment"
     | "messages"
+    | "events"
     | "tensionStage"
     | "guestPresenceMode"
   >;
-  host: Pick<BotcastBotProfile, "name" | "systemPrompt" | "powers">;
-  guest: Pick<BotcastBotProfile, "name" | "systemPrompt" | "powers">;
+  host: Pick<BotcastBotProfile, "id" | "name" | "systemPrompt" | "powers">;
+  guest: Pick<BotcastBotProfile, "id" | "name" | "systemPrompt" | "powers">;
   speakerRole: BotcastSpeakerRole;
   cue?: BotcastProducerCue;
   departureRequired?: boolean;
-  immersiveVoiceEffectsEnabled?: boolean;
 }
 
 const BOTCAST_IMMERSIVE_VOICE_INTERVAL = 3;
 
+function botcastNegativeInfluenceForTurn(
+  episode: Pick<BotcastEpisode, "events" | "messages">,
+  speaker: Pick<BotcastBotProfile, "id">,
+): BotcastSocialInfluenceEventV1 | null {
+  const hasPriorSpeakerTurn = episode.messages.some(
+    (message) => message.botId === speaker.id,
+  );
+  const latestMessageId = episode.messages.at(-1)?.id;
+  return strongestNegativeBotcastInfluence(
+    botcastSocialInfluenceEventsAt({
+      events: episode.events,
+      elapsedMs: Number.POSITIVE_INFINITY,
+      targetBotId: speaker.id,
+    }).filter((influence) =>
+      influence.trigger === "session_start"
+        ? !hasPriorSpeakerTurn
+        : Boolean(
+            influence.sourceMessageId &&
+              influence.sourceMessageId === latestMessageId,
+          ),
+    ),
+  );
+}
+
+function botcastPowerPressureRule(args: {
+  influence: BotcastSocialInfluenceEventV1 | null;
+  sourceName: string;
+  speakerRole: BotcastSpeakerRole;
+}): string | null {
+  if (!args.influence) return null;
+  const intensity =
+    args.influence.strength === "large"
+      ? "strong"
+      : args.influence.strength === "medium"
+        ? "noticeable"
+        : "subtle";
+  return `Signal Power pressure: ${args.sourceName}'s ${args.influence.powerName} creates ${intensity} pressure. Let it register once as a brief involuntary pause, tightened phrasing, or extra care, filtered through your own personality. Keep your ${args.speakerRole} role and agency. Do not announce fear, become submissive, flatter the source, or repeat the reaction after this turn.`;
+}
+
 function botcastImmersiveVoiceEffectRequired(
   episode: Pick<BotcastEpisode, "messages">,
-  enabled: boolean,
 ): boolean {
-  return (
-    enabled && episode.messages.length % BOTCAST_IMMERSIVE_VOICE_INTERVAL === 0
-  );
+  return episode.messages.length % BOTCAST_IMMERSIVE_VOICE_INTERVAL === 0;
 }
 
 /**
@@ -2231,7 +2520,19 @@ export function buildBotcastSpeakerPrompt(
       ? []
       : botPowerObserverCueLinesV1(peer.name, peer.powers)),
   ]);
+  const powerPressureRule = botcastPowerPressureRule({
+    influence: botcastNegativeInfluenceForTurn(args.episode, speaker),
+    sourceName: peer.name,
+    speakerRole: args.speakerRole,
+  });
   const wrappingUp = args.cue?.kind === "wrap_up";
+  const firstHostOpening =
+    args.speakerRole === "host" &&
+    args.episode.segment === "opening" &&
+    args.episode.messages.length === 0;
+  const openingIntroductionRule = firstHostOpening
+    ? `This is the episode's opening host turn. Deliver one cohesive, natural on-air introduction that says the exact show name "${args.show.name}", identifies you by name as "${args.host.name}", introduces the booked guest by exact name as "${args.guest.name}", and bridges into the subject. Complete all three introductions before asking the first question. Sound like this specific host on this specific show—not generic podcast copy—and never present the details as a checklist, labels, or setup metadata.`
+    : null;
   const transcriptMessages =
     audienceOnlyGuest && args.speakerRole === "host"
       ? args.episode.messages.filter(
@@ -2247,17 +2548,19 @@ export function buildBotcastSpeakerPrompt(
   const roleRules = audienceOnlyGuest
     ? args.speakerRole === "host"
       ? [
-          `You are the host. ${args.guest.name} was booked, but the guest chair appears empty and you receive only silence from it.`,
+          firstHostOpening
+            ? `You are the host. ${args.guest.name} was booked, but the guest chair appears empty and you receive only silence from it.`
+            : `You are the host. The opening already established that ${args.guest.name} is unavailable to you; do not return to that absence beat.`,
           `You cannot see, hear, sense, or receive any words from ${args.guest.name}. Never react to, quote, or correctly infer anything the unseen guest says to the audience.`,
-          "Stay on the air. Let your confusion develop naturally rather than repeating the same observation: check the empty chair, fill time, question the booking, and gradually accept that no guest seems to have arrived.",
+          "Acknowledge the missing guest once in the opening, then stop mentioning the chair, absence, booking, silence, or lack of answers. Advance a self-contained editorial argument through concrete examples, costs, decisions, and contradictions.",
           "Private producer direction is silent control-room guidance. Incorporate it naturally; never quote it, mention a producer, or address the user.",
           wrappingUp
-            ? "Close the strange, guestless broadcast now with one concise reflection. Do not invite a response or introduce a new topic."
+            ? "Close the broadcast now with one concise earned reflection on the subject. Do not repeat the guest's absence, invite a response, or introduce a new topic."
             : args.episode.segment === "opening"
-              ? `Open the show and acknowledge that ${args.guest.name} was expected, but no one appears to be in the guest chair.`
+              ? `After the full on-air introduction, acknowledge naturally that ${args.guest.name} was expected, but no one appears to be in the guest chair.`
               : args.episode.segment === "closing"
-                ? "Close the broadcast with the guest chair still empty. Do not thank an apparently absent guest."
-                : "Keep the live broadcast moving while genuinely wondering why the booked guest has not appeared. You may call into the silence, but do not behave as though you received an answer.",
+                ? "Close on the earned subject takeaway without mentioning the guest's absence or thanking the apparently absent guest."
+                : "Keep the live broadcast moving as a solo editorial. Do not call into the silence or behave as though you received an answer.",
         ]
       : [
           `You are the booked guest, but ${args.host.name} cannot perceive or hear you. The listening audience can hear you as a private dramatic layer.`,
@@ -2278,7 +2581,7 @@ export function buildBotcastSpeakerPrompt(
           wrappingUp
             ? `Begin the closing exchange now. Briefly frame the takeaway and invite exactly one final response from ${args.guest.name}. Do not introduce a new topic, promise another question, or say \"one final question.\"`
             : args.episode.segment === "opening"
-            ? `Open the show, welcome ${args.guest.name}, and frame the subject.`
+            ? `Open in the voice and rhythm of ${args.show.name}, then move naturally from the introductions into the subject and your first question for ${args.guest.name}.`
             : args.episode.segment === "closing"
               ? args.episode.tensionStage === "departed"
                 ? "The guest has walked out. React in character, briefly reflect without grandstanding, and close the episode."
@@ -2299,7 +2602,6 @@ export function buildBotcastSpeakerPrompt(
         ];
   const immersiveVoiceEffectRequired = botcastImmersiveVoiceEffectRequired(
     args.episode,
-    args.immersiveVoiceEffectsEnabled === true,
   );
   const immersiveVoiceRule = immersiveVoiceEffectRequired
     ? [
@@ -2315,10 +2617,14 @@ export function buildBotcastSpeakerPrompt(
         `You are ${speaker.name} in a fictional, non-canonical Signal episode.`,
         "This is an anthology. Treat the host and guest as meeting for the first time. Never mention prior appearances, episode numbers, archives, memories, relationship history, or earlier Signal events.",
         "Return only the next spoken line. No speaker label, no analysis, no camera directions, and no markdown.",
-        "Keep this turn conversational and brisk: one to three concise sentences, usually 20 to 65 spoken words.",
+        firstHostOpening
+          ? "Keep this opening conversational and brisk: two to four concise sentences, usually 35 to 90 spoken words."
+          : "Keep this turn conversational and brisk: one to three concise sentences, usually 20 to 65 spoken words.",
         immersiveVoiceRule,
         `Persona:\n${speaker.systemPrompt}`,
         ...(powersPrompt ? [powersPrompt] : []),
+        ...(powerPressureRule ? [powerPressureRule] : []),
+        ...(openingIntroductionRule ? [openingIntroductionRule] : []),
         ...roleRules,
       ].join("\n\n"),
     },
@@ -2411,6 +2717,62 @@ function sanitizeUtterance(
     .trim()
     .slice(0, 2_400);
   return cleaned || fallback;
+}
+
+const BOTCAST_AUDIENCE_ONLY_ABSENCE_PATTERN =
+  /\b(?:empty|silent)\s+(?:guest\s+)?(?:chair|seat)\b|\b(?:chair|seat)\b[^.!?]{0,48}\b(?:empty|silent|said (?:absolutely )?nothing)\b|\b(?:no|without (?:an?|any))\s+(?:answer|reply|arrival|guest)\b|\bif you(?:'re| are) there\b|\b(?:give|wait) it a moment\b|\bcall(?:ing)? into (?:the )?silence\b|\b(?:booking|guest)\b[^.!?]{0,48}\b(?:vanished|missing|absent)\b/iu;
+
+function botcastAudienceOnlyHostRepeatsAbsence(input: {
+  episode: Pick<BotcastEpisode, "messages">;
+  content: string;
+}): boolean {
+  return (
+    BOTCAST_AUDIENCE_ONLY_ABSENCE_PATTERN.test(input.content) &&
+    input.episode.messages.some(
+      (message) =>
+        message.speakerRole === "host" &&
+        BOTCAST_AUDIENCE_ONLY_ABSENCE_PATTERN.test(message.content),
+    )
+  );
+}
+
+function normalizeBotcastSpokenIdentity(value: string): string {
+  return value
+    .normalize("NFKD")
+    .toLocaleLowerCase("en-US")
+    .replace(/\p{M}+/gu, "")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+function botcastOpeningIntroducesCast(input: {
+  content: string;
+  showName: string;
+  hostName: string;
+  guestName: string;
+}): boolean {
+  const content = normalizeBotcastSpokenIdentity(input.content);
+  const showName = normalizeBotcastSpokenIdentity(input.showName);
+  const hostName = normalizeBotcastSpokenIdentity(input.hostName);
+  const guestName = normalizeBotcastSpokenIdentity(input.guestName);
+  const identifiesHost = [
+    `i m ${hostName}`,
+    `i am ${hostName}`,
+    `my name is ${hostName}`,
+    `your host ${hostName}`,
+    `your host is ${hostName}`,
+  ].some((phrase) => content.includes(phrase));
+  const introducesGuest = [
+    `joined by ${guestName}`,
+    `welcome ${guestName}`,
+    `guest is ${guestName}`,
+    `guest ${guestName}`,
+    `with me ${guestName}`,
+    `${guestName} joins me`,
+    `${guestName} was meant to join`,
+  ].some((phrase) => content.includes(phrase));
+  return content.includes(showName) && identifiesHost && introducesGuest;
 }
 
 function generationProvider(
@@ -2924,9 +3286,11 @@ export async function advanceBotcastEpisode(
   const speaker = speakerRole === "host" ? host : guest;
   const departureRequired =
     speakerRole === "guest" && botcastGuestDepartureEligible(tension);
-  const immersiveVoiceEffectRequired = botcastImmersiveVoiceEffectRequired(
+  const immersiveVoiceEffectRequired =
+    botcastImmersiveVoiceEffectRequired(episode);
+  const turnNegativeInfluence = botcastNegativeInfluenceForTurn(
     episode,
-    generation.immersiveVoiceEffectsEnabled === true,
+    speaker,
   );
   const prompt = buildBotcastSpeakerPrompt({
     show,
@@ -2940,8 +3304,6 @@ export async function advanceBotcastEpisode(
         ? { cue: requestedCue }
         : {}),
     departureRequired,
-    immersiveVoiceEffectsEnabled:
-      generation.immersiveVoiceEffectsEnabled === true,
   });
   const selected = generationProvider(
     generation,
@@ -3041,12 +3403,25 @@ export async function advanceBotcastEpisode(
   if (latestEpisode.status === "completed") {
     return { episode: latestEpisode, message: null };
   }
+  const firstHostOpening =
+    speakerRole === "host" &&
+    episode.segment === "opening" &&
+    episode.messages.length === 0;
+  const openingSubject =
+    episode.topic.replace(/[.!?]+$/u, "").trim() || episode.topic;
+  const topicWithPunctuation = /[.!?]$/u.test(episode.topic.trim())
+    ? episode.topic.trim()
+    : `${episode.topic.trim()}.`;
   const fallback =
     speakerRole === "host"
-      ? episode.guestPresenceMode === "audience_only"
+      ? firstHostOpening
+        ? episode.guestPresenceMode === "audience_only"
+          ? `Welcome to ${show.name}. I'm ${host.name}, and ${guest.name} was meant to join me to explore ${openingSubject}. The guest chair is empty, though, so something has clearly gone wrong.`
+          : `Welcome to ${show.name}. I'm ${host.name}, and today I'm joined by ${guest.name} to explore ${openingSubject}. ${guest.name}, where should we begin?`
+        : episode.guestPresenceMode === "audience_only"
         ? episode.segment === "closing" || wrapUpCue
-          ? `The guest chair stayed empty, so that is where we will leave this unusually quiet broadcast.`
-          : `${guest.name} was supposed to be here, but the chair is still empty. I am honestly not sure what happened.`
+          ? `We will close on the central question: ${topicWithPunctuation} The strongest answer is the one that survives consequence, contradiction, and scrutiny.`
+          : `Let us stay with the central question: ${topicWithPunctuation} The useful test is which concrete choice, cost, or contradiction would change the answer.`
         : episode.segment === "closing"
         ? guestAlreadyDeparted
           ? `${guest.name} has left the studio. That is where we will leave it; thank you for listening.`
@@ -3067,15 +3442,32 @@ export async function advanceBotcastEpisode(
     immersiveVoiceEffectRequired,
   );
   const cleanGeneratedContent = performance.content || fallback;
-  const content =
-    speakerRole === "host" &&
-    episode.segment === "closing" &&
-    (/\?\s*$/u.test(cleanGeneratedContent) ||
-      /\b(?:one|a)\s+(?:last|final|more)\s+question\b|\blet me ask\b/iu.test(
-        cleanGeneratedContent,
-      ))
+  const introductionSafeContent =
+    firstHostOpening &&
+    !botcastOpeningIntroducesCast({
+      content: cleanGeneratedContent,
+      showName: show.name,
+      hostName: host.name,
+      guestName: guest.name,
+    })
       ? fallback
       : cleanGeneratedContent;
+  const content =
+    speakerRole === "host" &&
+    episode.guestPresenceMode === "audience_only" &&
+    botcastAudienceOnlyHostRepeatsAbsence({
+      episode,
+      content: introductionSafeContent,
+    })
+      ? fallback
+      : speakerRole === "host" &&
+    episode.segment === "closing" &&
+    (/\?\s*$/u.test(introductionSafeContent) ||
+      /\b(?:one|a)\s+(?:last|final|more)\s+question\b|\blet me ask\b/iu.test(
+        introductionSafeContent,
+      ))
+      ? fallback
+      : introductionSafeContent;
   const voicePerformanceText =
     content === cleanGeneratedContent
       ? (performance.voicePerformanceText ??
@@ -3084,7 +3476,13 @@ export async function advanceBotcastEpisode(
           : null))
     : null;
   const messageId = randomId(12);
-  const messageMoodKey = botcastVoiceMoodForTension(tension);
+  const tensionMoodKey = botcastVoiceMoodForTension(tension);
+  const messageMoodKey =
+    turnNegativeInfluence &&
+    turnNegativeInfluence.strength !== "small" &&
+    tensionMoodKey === "neutral"
+      ? "guarded"
+      : tensionMoodKey;
   db.prepare(
     `INSERT INTO botcast_messages
       (id, user_id, episode_id, speaker_role, bot_id, content, voice_performance_text, created_at)
@@ -3187,6 +3585,28 @@ export async function advanceBotcastEpisode(
     botcastReplayTimeline(episode.messages, episode.events).messageStartMs.at(
       -1,
     ) ?? 0;
+  const afterSpeechPowerEffects =
+    listenerRole === "guest" && guestAlreadyDeparted
+      ? []
+      : botcastSocialInfluenceEventsForPair({
+          source: speaker,
+          target: listener,
+          sourceRole: speakerRole,
+          targetRole: listenerRole,
+          trigger: "after_speech",
+          atMs: messageStartMs + utteranceDurationMs,
+          sourceMessageId: messageId,
+        });
+  for (const influence of afterSpeechPowerEffects) {
+    recordEvent(
+      db,
+      userId,
+      episode.id,
+      "power_effect",
+      { ...influence },
+      now,
+    );
+  }
   const atMs = firstOpeningHost ? 1_400 : messageStartMs;
   const cameraEvent = departureRequired
     ? "departure"

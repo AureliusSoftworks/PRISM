@@ -17,29 +17,62 @@ export function buildSignalAtmospherePrompt(args: {
   showName: string;
   studioIdentity: string;
 }): string {
+  const silentRoomQuestion =
+    "What would it sound like in this room if one were completely silent?";
+  const directions =
+    "Seamless non-musical loop from sounds implied by this exact studio. Favor warm low room resonance, soft bass weight, and damped low-mid texture. Keep upper-frequency detail faint and diffuse, with occasional distinct set sounds and a smooth loop boundary.";
+  const studioPrefix = "Studio: ";
+  const promptEnvelopeLength =
+    silentRoomQuestion.length + 1 + studioPrefix.length + 2 + directions.length;
+  const studioIdentity = boundSignalAtmosphereText(
+    cleanSignalAtmosphereStudioIdentity(
+      args.studioIdentity.trim() ||
+        args.showName.trim() ||
+        "the finished studio",
+    ),
+    SIGNAL_ELEVENLABS_SOUND_PROMPT_MAX_CHARACTERS - promptEnvelopeLength,
+  );
   return boundSignalAtmospherePrompt(
-    [
-      "Seamless environmental room-tone loop for an intimate two-person interview studio.",
-      "Clearly audible at low playback level, broadcast-ready, and steady in loudness.",
-      "Continuous throughout with a smooth loop boundary; the ending carries directly into the opening at full detail.",
-      `Acoustic identity: ${args.studioIdentity.trim() || args.showName}.`,
-      "Stable ventilation air, gentle room resonance, distant exterior texture filtered through the building, and present microphone-room detail.",
-      "Translate the studio architecture, materials, scale, and exterior setting into subtle acoustic color.",
-      "Gently spatial with audible detail throughout.",
-    ].join(" "),
+    `${silentRoomQuestion} ${studioPrefix}${studioIdentity}. ${directions}`,
   );
 }
 
-function boundSignalAtmospherePrompt(value: string): string {
+function cleanSignalAtmosphereStudioIdentity(value: string): string {
+  return (
+    value
+      .replace(
+        /\b(?:(?:radio|broadcast|analog|electronic|electrical|microphone|speaker|tape|vinyl)[ -]*)?(?:static|hiss|crackle)\b/giu,
+        " ",
+      )
+      .replace(/\b(?:white|pink|brown)[ -]+noise\b/giu, " ")
+      .replace(/\s+([,.;:!?])/gu, "$1")
+      .replace(/([,;:])(?:\s*[,;:])+/gu, "$1")
+      .replace(/\s+/gu, " ")
+      .replace(/^[,.;:\s]+|[,.;:\s]+$/gu, "")
+      .trim() || "the finished studio"
+  );
+}
+
+function boundSignalAtmosphereText(
+  value: string,
+  maxCharacters: number,
+): string {
   const normalized = value.replace(/\s+/gu, " ").trim();
-  if (normalized.length <= SIGNAL_ELEVENLABS_SOUND_PROMPT_MAX_CHARACTERS) {
+  if (normalized.length <= maxCharacters) {
     return normalized;
   }
   const candidate = normalized
-    .slice(0, SIGNAL_ELEVENLABS_SOUND_PROMPT_MAX_CHARACTERS - 1)
+    .slice(0, maxCharacters)
     .replace(/\s+\S*$/u, "")
     .trimEnd();
-  return `${candidate || normalized.slice(0, SIGNAL_ELEVENLABS_SOUND_PROMPT_MAX_CHARACTERS - 1)}…`;
+  return candidate || normalized.slice(0, maxCharacters);
+}
+
+function boundSignalAtmospherePrompt(value: string): string {
+  return boundSignalAtmosphereText(
+    value,
+    SIGNAL_ELEVENLABS_SOUND_PROMPT_MAX_CHARACTERS,
+  );
 }
 
 async function soundError(response: Response): Promise<ElevenLabsSoundError> {

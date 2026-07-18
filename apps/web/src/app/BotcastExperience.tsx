@@ -30,8 +30,10 @@ import {
   botcastNextSpeakerRole,
   botcastReplayMessageIndexAt,
   botcastReplayTimeline,
+  botcastStrongestNegativeSocialInfluenceAt,
   botcastVoiceLevelForBot,
   normalizeAccentForTheme,
+  normalizeBotcastStudioAtmosphereMix,
   normalizeBotcastStudioLayout,
   normalizeBotcastVoiceLevel,
   normalizeBotcastVoiceLevelsByBotId,
@@ -47,6 +49,7 @@ import {
   type BotcastProducerCue,
   type BotcastShow,
   type BotcastSessionDurationMinutes,
+  type BotcastStudioAtmosphereMix,
   type BotcastStudioLayout,
   type BotcastStudioLayoutItem,
   type BotcastVoiceLevelsByBotId,
@@ -70,10 +73,15 @@ import {
 } from "./botcastSpeechReveal";
 import { PrismBlockingLoader } from "./PrismBlockingLoader";
 import { SessionAtmosphereLayer } from "./SessionAtmosphereLayer";
+import { SIGNAL_STUDIO_FOLEY_ROOM_SEND } from "./roomAcoustics";
 import {
   DEFAULT_SIGNAL_ATMOSPHERE_MIX,
+  SIGNAL_AMBIENT_FOLEY_PROFILE,
+  SIGNAL_ATMOSPHERE_RELATIVE_MIX_MAX,
+  SIGNAL_ATMOSPHERE_RELATIVE_MIX_STEP,
   SIGNAL_STUDIO_GRAIN_URL,
-  type SessionAtmosphereMix,
+  signalAtmosphereMixLevelFromRelative,
+  signalAtmosphereRelativeMixLevel,
 } from "./session-atmosphere-audio";
 import {
   SIGNAL_ARTWORK_JOB_EVENT,
@@ -88,7 +96,7 @@ import {
   playSignalOutroAudio,
   stopSignalIntroAudio,
 } from "./signalIntroAudio";
-import { randomSignalEpisodeBooking } from "./signalBookingRandomizer";
+import { randomSignalEpisodeGuestId } from "./signalBookingRandomizer";
 import { signalEpisodeRetryDraft } from "./signalEpisodeRetry";
 import {
   ModelWarmupIntermission,
@@ -143,22 +151,16 @@ export interface BotcastApiRequest {
 }
 
 const SIGNAL_NATURAL_HANDOFF_MS = 120;
-const SIGNAL_ATMOSPHERE_DEV_MIXER_ENABLED =
-  process.env.NODE_ENV !== "production";
-const SIGNAL_ATMOSPHERE_DEV_BUSES = [
+const SIGNAL_ATMOSPHERE_BUSES = [
   {
     key: "background",
     label: "Studio ambience",
-    max: 0.3,
-    step: 0.01,
   },
-  { key: "grain", label: "Mix grain", max: 0.2, step: 0.005 },
-  { key: "foley", label: "Foley", max: 1, step: 0.01 },
+  { key: "grain", label: "Static backdrop" },
+  { key: "foley", label: "Foley" },
 ] as const satisfies ReadonlyArray<{
-  key: keyof SessionAtmosphereMix;
+  key: keyof BotcastStudioAtmosphereMix;
   label: string;
-  max: number;
-  step: number;
 }>;
 // ElevenLabs alignment responses are buffered before playback begins and can
 // legitimately take several seconds for a full Signal line. Keep a bounded
@@ -279,6 +281,9 @@ type SignalReviewCopyState = {
 };
 
 type SignalBookingSuggestionField = "topic" | "producerBrief";
+type SignalBookingSuggestionOperation =
+  | SignalBookingSuggestionField
+  | "booking";
 
 type SignalAssetSlot = "day-studio" | "night-studio" | "logo";
 type SignalArtworkKind = SignalAssetSlot;
@@ -731,16 +736,12 @@ export function BotcastExperience({
   const [replayEpisode, setReplayEpisode] = useState<BotcastEpisode | null>(
     null,
   );
-  const [atmosphereDevMix, setAtmosphereDevMix] =
-    useState<SessionAtmosphereMix>(() => ({
-      ...DEFAULT_SIGNAL_ATMOSPHERE_MIX,
-    }));
   const [hostDraftId, setHostDraftId] = useState("");
   const [guestDraftId, setGuestDraftId] = useState("");
   const [topicDraft, setTopicDraft] = useState("");
   const [producerBriefDraft, setProducerBriefDraft] = useState("");
   const [bookingSuggestionBusy, setBookingSuggestionBusy] =
-    useState<SignalBookingSuggestionField | null>(null);
+    useState<SignalBookingSuggestionOperation | null>(null);
   const [episodeModelDraft, setEpisodeModelDraft] = useState("");
   const [episodeDurationDraft, setEpisodeDurationDraft] =
     useState<BotcastSessionDurationMinutes | null>(null);
@@ -800,6 +801,8 @@ export function BotcastExperience({
   const [studioLayoutEditorOpen, setStudioLayoutEditorOpen] = useState(false);
   const [studioLayoutSaving, setStudioLayoutSaving] = useState(false);
   const [studioVoiceLevelsSaving, setStudioVoiceLevelsSaving] =
+    useState(false);
+  const [studioAtmosphereMixSaving, setStudioAtmosphereMixSaving] =
     useState(false);
   const [studioLayoutDraggingItem, setStudioLayoutDraggingItem] =
     useState<BotcastStudioLayoutItem | null>(null);
@@ -864,6 +867,12 @@ export function BotcastExperience({
     revision: number;
   } | null>(null);
   const studioVoiceLevelsSaveInFlightRef = useRef(false);
+  const studioAtmosphereMixDraftRef = useRef<{
+    showId: string;
+    mix: BotcastStudioAtmosphereMix;
+    revision: number;
+  } | null>(null);
+  const studioAtmosphereMixSaveInFlightRef = useRef(false);
   const studioSoundcheckRunIdRef = useRef(0);
   const signalStageRef = useRef<HTMLElement | null>(null);
   const onStopUtteranceRef = useRef(onStopUtterance);
@@ -1848,6 +1857,74 @@ export function BotcastExperience({
       ),
     );
     void flushStudioVoiceLevelsSave();
+  };
+
+  const flushStudioAtmosphereMixSave = async (): Promise<void> => {
+    if (studioAtmosphereMixSaveInFlightRef.current) return;
+    studioAtmosphereMixSaveInFlightRef.current = true;
+    setStudioAtmosphereMixSaving(true);
+    try {
+      while (studioAtmosphereMixDraftRef.current) {
+        const draft = studioAtmosphereMixDraftRef.current;
+        const response = await request<{ show: BotcastShow }>(
+          `/api/botcast/shows/${encodeURIComponent(draft.showId)}`,
+          {
+            method: "PATCH",
+            body: JSON.stringify({ atmosphereMix: draft.mix }),
+          },
+        );
+        const latestDraft = studioAtmosphereMixDraftRef.current;
+        setShows((current) =>
+          current.map((show) => {
+            if (show.id !== draft.showId) return show;
+            return latestDraft?.showId === draft.showId
+              ? { ...response.show, atmosphereMix: latestDraft.mix }
+              : response.show;
+          }),
+        );
+        if (!latestDraft) break;
+        if (
+          latestDraft.showId === draft.showId &&
+          latestDraft.revision === draft.revision
+        ) {
+          studioAtmosphereMixDraftRef.current = null;
+          break;
+        }
+      }
+    } catch (saveError) {
+      studioAtmosphereMixDraftRef.current = null;
+      setError(errorMessage(saveError));
+    } finally {
+      studioAtmosphereMixSaveInFlightRef.current = false;
+      setStudioAtmosphereMixSaving(false);
+      if (studioAtmosphereMixDraftRef.current) {
+        void flushStudioAtmosphereMixSave();
+      }
+    }
+  };
+
+  const updateStudioAtmosphereMix = (
+    show: BotcastShow,
+    nextMix: BotcastStudioAtmosphereMix,
+  ): void => {
+    const previousDraft = studioAtmosphereMixDraftRef.current;
+    const fallbackMix =
+      previousDraft?.showId === show.id
+        ? previousDraft.mix
+        : show.atmosphereMix;
+    const mix = normalizeBotcastStudioAtmosphereMix(nextMix, fallbackMix);
+    studioAtmosphereMixDraftRef.current = {
+      showId: show.id,
+      mix,
+      revision:
+        previousDraft?.showId === show.id ? previousDraft.revision + 1 : 1,
+    };
+    setShows((current) =>
+      current.map((candidate) =>
+        candidate.id === show.id ? { ...candidate, atmosphereMix: mix } : candidate,
+      ),
+    );
+    void flushStudioAtmosphereMixSave();
   };
 
   const beginStudioLayoutDrag = (
@@ -3688,63 +3765,70 @@ export function BotcastExperience({
     onStopUtterance?.();
   };
 
-  const renderAtmosphereDevMixer = (): React.JSX.Element | null => {
-    if (!SIGNAL_ATMOSPHERE_DEV_MIXER_ENABLED) return null;
+  const renderAtmosphereMixer = (show: BotcastShow): React.JSX.Element => {
     const defaultMix = DEFAULT_SIGNAL_ATMOSPHERE_MIX;
-    const isDefaultMix = SIGNAL_ATMOSPHERE_DEV_BUSES.every(
-      ({ key }) => atmosphereDevMix[key] === defaultMix[key],
+    const mix = normalizeBotcastStudioAtmosphereMix(show.atmosphereMix);
+    const isDefaultMix = SIGNAL_ATMOSPHERE_BUSES.every(
+      ({ key }) => mix[key] === defaultMix[key],
     );
     return (
       <aside
-        className={styles.atmosphereDevMixer}
-        data-signal-atmosphere-dev-mixer="true"
-        aria-label="Signal atmosphere development mixer"
+        className={styles.atmosphereMixer}
+        data-signal-atmosphere-mixer="true"
+        aria-label={`Signal atmosphere mixer for ${show.name}`}
       >
-        <div className={styles.atmosphereDevMixerHeader}>
+        <div className={styles.atmosphereMixerHeader}>
           <div>
-            <span className={styles.eyebrow}>Development mix</span>
+            <span className={styles.eyebrow}>Show mix</span>
             <strong>Studio atmosphere layers</strong>
           </div>
           <small>
-            Master {Math.round(introAudioVolume * 100)}% · live changes stay
-            local
+            Master {Math.round(introAudioVolume * 100)}% ·{" "}
+            {studioAtmosphereMixSaving ? "saving…" : "saved for this show"}
           </small>
           <button
             type="button"
             onClick={() =>
-              setAtmosphereDevMix({ ...DEFAULT_SIGNAL_ATMOSPHERE_MIX })
+              updateStudioAtmosphereMix(show, {
+                ...DEFAULT_SIGNAL_ATMOSPHERE_MIX,
+              })
             }
             disabled={isDefaultMix}
           >
             Reset
           </button>
         </div>
-        <div className={styles.atmosphereDevMixerSliders}>
-          {SIGNAL_ATMOSPHERE_DEV_BUSES.map(({ key, label, max, step }) => (
-            <label key={key}>
-              <span>
-                {label}
-                <output>
-                  {Math.round(atmosphereDevMix[key] * 1_000) / 10}%
-                </output>
-              </span>
-              <input
-                type="range"
-                min={0}
-                max={max}
-                step={step}
-                value={atmosphereDevMix[key]}
-                onChange={(event) => {
-                  const value = Number(event.currentTarget.value);
-                  setAtmosphereDevMix((current) => ({
-                    ...current,
-                    [key]: Number.isFinite(value) ? value : current[key],
-                  }));
-                }}
-                aria-label={`${label} level`}
-              />
-            </label>
-          ))}
+        <div className={styles.atmosphereMixerSliders}>
+          {SIGNAL_ATMOSPHERE_BUSES.map(({ key, label }) => {
+            const relativeLevel = signalAtmosphereRelativeMixLevel(
+              key,
+              mix,
+            );
+            return (
+              <label key={key}>
+                <span>
+                  {label}
+                  <output>{Math.round(relativeLevel * 100)}%</output>
+                </span>
+                <input
+                  type="range"
+                  min={0}
+                  max={SIGNAL_ATMOSPHERE_RELATIVE_MIX_MAX}
+                  step={SIGNAL_ATMOSPHERE_RELATIVE_MIX_STEP}
+                  value={relativeLevel}
+                  onChange={(event) => {
+                    const value = Number(event.currentTarget.value);
+                    if (!Number.isFinite(value)) return;
+                    updateStudioAtmosphereMix(show, {
+                      ...mix,
+                      [key]: signalAtmosphereMixLevelFromRelative(key, value),
+                    });
+                  }}
+                  aria-label={`${label} level`}
+                />
+              </label>
+            );
+          })}
         </div>
         {!introAudioEnabled ? (
           <small>Turn voice audio on to audition this mix.</small>
@@ -3847,6 +3931,15 @@ export function BotcastExperience({
       args.guestDeparted ?? guestHasDeparted(args.currentEpisode);
     const audienceOnlyGuest =
       args.currentEpisode.guestPresenceMode === "audience_only";
+    const socialPressure = botcastStrongestNegativeSocialInfluenceAt({
+      events: args.currentEpisode.events,
+      elapsedMs: args.replay ? replayElapsedMs : Number.POSITIVE_INFINITY,
+    });
+    const socialPressureSource = socialPressure
+      ? socialPressure.sourceRole === "host"
+        ? args.host
+        : args.guest
+      : null;
     const guestVisibleToAudience = !departed;
     const guestPresentOnStage = guestVisibleToAudience && !audienceOnlyGuest;
     const thinkingRole = botcastNextSpeakerRole({
@@ -3987,6 +4080,14 @@ export function BotcastExperience({
         args.host?.color ?? args.show.accentColor,
         theme,
       ),
+      ...(socialPressureSource
+        ? {
+            ["--signal-power-accent" as string]: normalizeAccentForTheme(
+              socialPressureSource.color ?? args.show.accentColor,
+              theme,
+            ),
+          }
+        : {}),
       ["--botcast-camera-offset-x" as string]: `${botcastCameraOffsetXPercent(
         args.shot,
         studioLayout,
@@ -4034,6 +4135,8 @@ export function BotcastExperience({
         data-shot={args.shot}
         data-replay={args.replay ? "true" : undefined}
         data-guest-presence={args.currentEpisode.guestPresenceMode}
+        data-signal-power-pressure={socialPressure?.strength}
+        data-signal-power-source={socialPressure?.sourceRole}
         data-model-warmup={
           !args.replay && signalModelWarmup
             ? signalModelWarmup.phase
@@ -4057,6 +4160,14 @@ export function BotcastExperience({
             <strong>{args.show.name}</strong>
           </div>
           <div className={styles.studioGlow} aria-hidden="true" />
+          {socialPressure ? (
+            <div
+              className={styles.powerPressure}
+              data-strength={socialPressure.strength}
+              data-source={socialPressure.sourceRole}
+              aria-hidden="true"
+            />
+          ) : null}
           <SignalStudioSpotlight />
           {args.host ? (
             <div
@@ -4277,10 +4388,6 @@ export function BotcastExperience({
             {departed ? (
               <span className={styles.emptyChairLabel}>
                 Guest has left the studio
-              </span>
-            ) : audienceOnlyGuest ? (
-              <span className={styles.emptyChairLabel}>
-                Guest chair is empty
               </span>
             ) : null}
             <strong className={styles.nameplate}>
@@ -4557,7 +4664,9 @@ export function BotcastExperience({
                 </p>
                 <div>
                   <span aria-live="polite">
-                    {studioLayoutSaving || studioVoiceLevelsSaving
+                    {studioLayoutSaving ||
+                    studioVoiceLevelsSaving ||
+                    studioAtmosphereMixSaving
                       ? "Saving studio…"
                       : "Studio settings saved"}
                   </span>
@@ -4667,7 +4776,7 @@ export function BotcastExperience({
                     : null}
                 </div>
               </section>
-              {renderAtmosphereDevMixer()}
+              {renderAtmosphereMixer(show)}
             </div>
           </div>
         </section>
@@ -4789,22 +4898,60 @@ export function BotcastExperience({
         );
       }
     };
-    const randomizeBooking = (): void => {
-      const booking = randomSignalEpisodeBooking({
+    const randomizeBooking = async (): Promise<void> => {
+      if (bookingSuggestionBusy) return;
+      const guestId = randomSignalEpisodeGuestId({
         candidateGuestIds: guestOptions.map((bot) => bot.id),
         hostBotId: hostBot.id,
         currentGuestId: guestDraftId,
-        currentTopic: topicDraft,
-        currentProducerBrief: producerBriefDraft,
       });
-      if (!booking) return;
-      setGuestDraftId(booking.guestId);
-      setTopicDraft(booking.topic);
-      setProducerBriefDraft(booking.producerBrief);
+      if (!guestId) return;
+      const bookingGuest = botsById.get(guestId);
+      if (!bookingGuest) return;
+      setBookingSuggestionBusy("booking");
       setError(null);
-      setNotice(
-        "Guest, topic, and private angle randomized. Everything remains editable.",
-      );
+      setNotice(null);
+      try {
+        const response = await request<{
+          topic: string;
+          producerBrief: string;
+          generated: boolean;
+        }>(
+          `/api/botcast/shows/${encodeURIComponent(selectedShow.id)}/booking-suggestion`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              guestBotId: guestId,
+              field: "booking",
+              currentTopic: topicDraft,
+              currentProducerBrief: producerBriefDraft,
+              preferredProvider: episodeModelProvider,
+              responseMode,
+              modelOverride:
+                selectedEpisodeModelOption?.id ?? accountDefaultModel,
+            }),
+          },
+        );
+        const topic = response.topic.trim();
+        const producerBrief = response.producerBrief.trim();
+        if (!response.generated || !topic || !producerBrief) {
+          throw new Error("Signal could not produce this booking.");
+        }
+        setGuestDraftId(guestId);
+        setTopicDraft(topic);
+        setProducerBriefDraft(producerBrief);
+        setNotice(
+          `${bookingGuest.name} is booked around a guest-specific angle. Everything remains editable.`,
+        );
+      } catch (bookingError) {
+        setError(
+          bookingError instanceof Error
+            ? bookingError.message
+            : "Signal could not produce this booking.",
+        );
+      } finally {
+        setBookingSuggestionBusy(null);
+      }
     };
     return (
       <div
@@ -4820,10 +4967,22 @@ export function BotcastExperience({
             <button
               type="button"
               className={styles.randomizeBookingButton}
-              onClick={randomizeBooking}
-              disabled={busy || guestOptions.length === 0}
+              onClick={() => void randomizeBooking()}
+              disabled={
+                busy ||
+                Boolean(bookingSuggestionBusy) ||
+                guestOptions.length === 0
+              }
+              aria-busy={bookingSuggestionBusy === "booking"}
             >
-              ↻ Randomize booking
+              {bookingSuggestionBusy === "booking" ? (
+                <>
+                  <LoaderCircle data-loading="true" aria-hidden="true" />
+                  Booking…
+                </>
+              ) : (
+                "↻ Randomize booking"
+              )}
             </button>
             <button
               type="button"
@@ -4894,6 +5053,7 @@ export function BotcastExperience({
             <select
               value={guestDraftId}
               onChange={(event) => setGuestDraftId(event.target.value)}
+              disabled={busy || Boolean(bookingSuggestionBusy)}
             >
               <option value="">Choose one guest…</option>
               {guestOptions.map((bot) => (
@@ -5228,7 +5388,13 @@ export function BotcastExperience({
         volume={introAudioVolume}
         backgroundUrl={selectedShow?.atmosphereAudio.audioUrl}
         grainUrl={SIGNAL_STUDIO_GRAIN_URL}
-        mix={atmosphereDevMix}
+        mix={
+          selectedShow?.atmosphereMix ?? DEFAULT_SIGNAL_ATMOSPHERE_MIX
+        }
+        backgroundTone="warm-low"
+        foleyRoomAcoustics={SIGNAL_STUDIO_FOLEY_ROOM_SEND}
+        allowMixBoost
+        ambientFoleyProfile={SIGNAL_AMBIENT_FOLEY_PROFILE}
         deferFoley={
           speakingMessageId !== null ||
           replaySpeechActive ||

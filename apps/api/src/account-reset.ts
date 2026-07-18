@@ -105,7 +105,6 @@ export function restoreFactoryDefaultsInDatabase(
           experimental_dual_ollama_enabled = 0,
           experimental_all_model_effort_enabled = 0,
           coffee_experimental_table_angle_enabled = 0,
-          signal_immersive_voice_effects_enabled = 0,
           psychic_mode_enabled = 0,
           comfyui_host = NULL,
           comfyui_workflows = '[]',

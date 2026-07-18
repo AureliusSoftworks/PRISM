@@ -4,9 +4,12 @@ import { useEffect, useRef, type RefObject } from "react";
 import {
   attachCoffeeCupFoley,
   startSessionAtmosphere,
+  type SessionAmbientFoleyProfile,
+  type SessionAtmosphereBackgroundTone,
   type SessionAtmosphereController,
   type SessionAtmosphereMix,
 } from "./session-atmosphere-audio";
+import type { RoomAcousticsSend } from "./roomAcoustics";
 
 export interface SessionAtmosphereLayerProps {
   active: boolean;
@@ -15,7 +18,11 @@ export interface SessionAtmosphereLayerProps {
   backgroundUrl?: string | null;
   grainUrl?: string | null;
   mix?: SessionAtmosphereMix;
+  backgroundTone?: SessionAtmosphereBackgroundTone;
+  foleyRoomAcoustics?: RoomAcousticsSend;
+  allowMixBoost?: boolean;
   deferFoley?: boolean;
+  ambientFoleyProfile?: SessionAmbientFoleyProfile;
   coffeeCupRootRef?: RefObject<HTMLElement | null>;
 }
 
@@ -26,7 +33,11 @@ export function SessionAtmosphereLayer({
   backgroundUrl,
   grainUrl,
   mix,
+  backgroundTone = "neutral",
+  foleyRoomAcoustics,
+  allowMixBoost = false,
   deferFoley = false,
+  ambientFoleyProfile,
   coffeeCupRootRef,
 }: SessionAtmosphereLayerProps): null {
   const deferFoleyRef = useRef(deferFoley);
@@ -50,7 +61,11 @@ export function SessionAtmosphereLayer({
       backgroundUrl,
       grainUrl,
       mix: mixRef.current,
+      backgroundTone,
+      foleyRoomAcoustics,
+      allowMixBoost,
       shouldDeferFoley: () => deferFoleyRef.current,
+      ambientFoleyProfile,
     });
     controllerRef.current = controller;
     const detachCupFoley = coffeeCupRootRef?.current
@@ -61,7 +76,17 @@ export function SessionAtmosphereLayer({
       controller.stop();
       if (controllerRef.current === controller) controllerRef.current = null;
     };
-  }, [active, backgroundUrl, coffeeCupRootRef, grainUrl, sessionKey]);
+  }, [
+    active,
+    allowMixBoost,
+    ambientFoleyProfile,
+    backgroundTone,
+    backgroundUrl,
+    coffeeCupRootRef,
+    foleyRoomAcoustics,
+    grainUrl,
+    sessionKey,
+  ]);
 
   return null;
 }

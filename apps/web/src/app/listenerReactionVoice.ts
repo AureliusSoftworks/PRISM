@@ -22,6 +22,7 @@ import {
   playRealtimeVoiceBytes,
   stopReactionVoiceAudio,
 } from "./voiceEffects.ts";
+import type { RoomAcousticsSend } from "./roomAcoustics.ts";
 
 export type ListenerReactionVoiceMode = "english" | "bottish" | "babble";
 
@@ -48,10 +49,12 @@ export async function playListenerReactionVoice(args: {
   effectsEnabled: boolean;
   mood?: VoiceDeliveryMood | null;
   englishClip?: EnglishVoiceSynthesisClip | null;
+  roomAcoustics?: RoomAcousticsSend;
 }): Promise<boolean> {
   const cue = args.plan.spokenCue;
   const normalizedInputProfile = normalizeBotAudioVoiceProfileV1(args.profile);
-  if (!cue || args.globalVolume <= 0 || !normalizedInputProfile.enabled) return false;
+  if (!cue || args.globalVolume <= 0 || !normalizedInputProfile.enabled)
+    return false;
   const profile = normalizeBotAudioVoiceProfileV1({
     ...applyVoiceDeliveryMoodToProfile(normalizedInputProfile, args.mood),
     volume: normalizeBotVoiceVolume(args.globalVolume),
@@ -76,6 +79,7 @@ export async function playListenerReactionVoice(args: {
       alignment: args.englishClip.alignment,
       channel: "reaction",
       maxDurationMs: 900,
+      roomAcoustics: args.roomAcoustics,
     });
   }
 
@@ -96,6 +100,7 @@ export async function playListenerReactionVoice(args: {
       : {}),
     channel: "reaction",
     maxDurationMs: 900,
+    roomAcoustics: args.roomAcoustics,
   });
 }
 

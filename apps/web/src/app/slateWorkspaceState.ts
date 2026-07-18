@@ -12,68 +12,36 @@ import type {
 } from "@localai/shared";
 
 export type SlateProjectStartStep = "source" | "title";
+export type SlateProjectSourceMode = "spark" | "material";
 
 const SLATE_PROJECT_SPARK_MAX = 8_000;
 
 export function slateProjectSourceIsReady({
+  sourceMode,
   spark,
   existingMaterial,
 }: {
+  sourceMode: SlateProjectSourceMode;
   spark: string;
   existingMaterial: string;
 }): boolean {
-  return spark.trim().length > 0 || existingMaterial.trim().length > 0;
-}
-
-function titleCaseSlateWords(value: string): string {
-  const minorWords = new Set(["a", "an", "and", "as", "at", "but", "by", "for", "in", "of", "on", "or", "the", "to"]);
-  return value
-    .split(/\s+/u)
-    .filter(Boolean)
-    .map((word, index) => {
-      if (index > 0 && minorWords.has(word.toLowerCase())) return word.toLowerCase();
-      return `${word[0]?.toUpperCase() ?? ""}${word.slice(1)}`;
-    })
-    .join(" ");
-}
-
-export function slateSuggestedProjectTitle({
-  title,
-  spark,
-  existingMaterial,
-}: {
-  title: string;
-  spark: string;
-  existingMaterial: string;
-}): string {
-  const supplied = title.trim();
-  if (supplied) return supplied.slice(0, 180);
-
-  const firstLine = (spark.trim() || existingMaterial.trim())
-    .split(/\r?\n/u)
-    .find((line) => line.trim())
-    ?.trim()
-    .replace(/^#{1,6}\s*/u, "")
-    .replace(/^(?:write|tell)\s+(?:me\s+)?(?:a\s+)?story\s+(?:about|where)\s+/iu, "")
-    .split(/[.!?]/u, 1)[0]
-    ?.trim();
-  if (!firstLine) return "Untitled Story";
-
-  const words = firstLine.split(/\s+/u).filter(Boolean).slice(0, 7);
-  const candidate = titleCaseSlateWords(words.join(" "))
-    .replace(/[,;:\-]+$/u, "")
-    .replace(/\s+(?:a|an|and|as|at|but|by|for|in|of|on|or|the|to)$/iu, "");
-  return (candidate || "Untitled Story").slice(0, 180);
+  return sourceMode === "material"
+    ? existingMaterial.trim().length > 0
+    : spark.trim().length > 0;
 }
 
 export function slateProjectSparkForCreation({
+  sourceMode,
   spark,
   existingMaterial,
 }: {
+  sourceMode: SlateProjectSourceMode;
   spark: string;
   existingMaterial: string;
 }): string {
-  return (spark.trim() || existingMaterial.trim()).slice(0, SLATE_PROJECT_SPARK_MAX);
+  return (sourceMode === "material" ? existingMaterial : spark)
+    .trim()
+    .slice(0, SLATE_PROJECT_SPARK_MAX);
 }
 
 export function slateProjectTitleForCreation(

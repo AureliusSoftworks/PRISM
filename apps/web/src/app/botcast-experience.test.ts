@@ -71,16 +71,16 @@ describe("Signal experience shell", () => {
       "className={styles.liveCameraControls}",
       liveStageIndex,
     );
-    const developmentMixerIndex = source.indexOf(
-      "{renderAtmosphereDevMixer()}",
+    const atmosphereMixerIndex = source.indexOf(
+      "{renderAtmosphereMixer(show)}",
       liveStageIndex,
     );
     assert.ok(liveStageIndex >= 0);
     assert.ok(liveCameraIndex > liveStageIndex);
     assert.equal(
-      developmentMixerIndex,
+      atmosphereMixerIndex,
       -1,
-      "the development mixer belongs only in the placement workspace",
+      "the show mixer belongs only in the placement workspace",
     );
     assert.doesNotMatch(source, /replayCamera|setReplayCamera|manualShot/u);
     assert.doesNotMatch(source, /className=\{styles\.cameraButtons\}/u);
@@ -343,11 +343,11 @@ describe("Signal experience shell", () => {
     assert.match(source, /onProgress: \(elapsedMs, durationMs\) =>/u);
     assert.match(source, /setStudioSoundcheckSpeech\(\(current\) =>/u);
     assert.match(source, /crtSpeechMouthShapeAtAlignedElapsedMs\(\{/u);
-    assert.match(source, /\{renderAtmosphereDevMixer\(\)\}/u);
+    assert.match(source, /\{renderAtmosphereMixer\(show\)\}/u);
     assert.equal(
-      source.match(/\{renderAtmosphereDevMixer\(\)\}/gu)?.length,
+      source.match(/\{renderAtmosphereMixer\(show\)\}/gu)?.length,
       1,
-      "the development mixer must render only inside stage placement",
+      "the show mixer must render only inside stage placement",
     );
     assert.match(
       css,
@@ -499,14 +499,34 @@ describe("Signal experience shell", () => {
       /backgroundUrl=\{selectedShow\?\.atmosphereAudio\.audioUrl\}/u,
     );
     assert.match(source, /grainUrl=\{SIGNAL_STUDIO_GRAIN_URL\}/u);
-    assert.match(source, /mix=\{atmosphereDevMix\}/u);
-    assert.match(source, /process\.env\.NODE_ENV !== "production"/u);
-    assert.match(source, /data-signal-atmosphere-dev-mixer="true"/u);
+    assert.match(
+      source,
+      /selectedShow\?\.atmosphereMix \?\? DEFAULT_SIGNAL_ATMOSPHERE_MIX/u,
+    );
+    assert.match(source, /backgroundTone="warm-low"/u);
+    assert.match(
+      source,
+      /foleyRoomAcoustics=\{SIGNAL_STUDIO_FOLEY_ROOM_SEND\}/u,
+    );
+    assert.match(source, /allowMixBoost/u);
+    assert.match(
+      source,
+      /ambientFoleyProfile=\{SIGNAL_AMBIENT_FOLEY_PROFILE\}/u,
+    );
+    assert.doesNotMatch(source, /SIGNAL_ATMOSPHERE_DEV_MIXER_ENABLED/u);
+    assert.match(source, /data-signal-atmosphere-mixer="true"/u);
+    assert.match(source, /Show mix/u);
+    assert.match(source, /saved for this show/u);
     assert.match(source, /label: "Studio ambience"/u);
-    assert.match(source, /label: "Mix grain"/u);
-    assert.match(source, /label: "Foley", max: 1/u);
+    assert.match(source, /label: "Static backdrop"/u);
+    assert.match(source, /label: "Foley"/u);
+    assert.match(source, /JSON\.stringify\(\{ atmosphereMix: draft\.mix \}\)/u);
     assert.match(source, /\.\.\.DEFAULT_SIGNAL_ATMOSPHERE_MIX/u);
-    assert.match(css, /\.atmosphereDevMixerSliders/u);
+    assert.match(source, /signalAtmosphereRelativeMixLevel/u);
+    assert.match(source, /signalAtmosphereMixLevelFromRelative/u);
+    assert.match(source, /max=\{SIGNAL_ATMOSPHERE_RELATIVE_MIX_MAX\}/u);
+    assert.match(source, /Math\.round\(relativeLevel \* 100\)/u);
+    assert.match(css, /\.atmosphereMixerSliders/u);
     assert.match(source, /!showHasCustomArtwork\(selectedShow\) \? \(/u);
     assert.match(
       pageSource,
@@ -600,16 +620,18 @@ describe("Signal experience shell", () => {
     );
   });
 
-  it("randomizes only the editable Signal booking fields locally", () => {
-    assert.match(source, /randomSignalEpisodeBooking\(\{/u);
+  it("builds a coherent random booking around the selected guest", () => {
+    assert.match(source, /randomSignalEpisodeGuestId\(\{/u);
     assert.match(
       source,
       /candidateGuestIds: guestOptions\.map\(\(bot\) => bot\.id\)/u,
     );
-    assert.match(source, /setGuestDraftId\(booking\.guestId\)/u);
-    assert.match(source, /setTopicDraft\(booking\.topic\)/u);
-    assert.match(source, /setProducerBriefDraft\(booking\.producerBrief\)/u);
+    assert.match(source, /setGuestDraftId\(guestId\)/u);
+    assert.match(source, /field: "booking"/u);
+    assert.match(source, /setTopicDraft\(topic\)/u);
+    assert.match(source, /setProducerBriefDraft\(producerBrief\)/u);
     assert.match(source, /↻ Randomize booking/u);
+    assert.match(source, /guest-specific angle/u);
     assert.match(source, /Everything remains editable/u);
     const randomizerSource = source.slice(
       source.indexOf("const randomizeBooking"),
@@ -617,8 +639,11 @@ describe("Signal experience shell", () => {
     );
     assert.doesNotMatch(
       randomizerSource,
-      /setEpisodeModelDraft|setEpisodeDurationDraft|request</u,
+      /setEpisodeModelDraft|setEpisodeDurationDraft/u,
     );
+    assert.match(randomizerSource, /request<\{/u);
+    assert.match(randomizerSource, /preferredProvider: episodeModelProvider/u);
+    assert.match(source, /aria-busy=\{bookingSuggestionBusy === "booking"\}/u);
     assert.match(css, /\.randomizeBookingButton/u);
   });
 
@@ -814,7 +839,7 @@ describe("Signal experience shell", () => {
       source,
       /data-guest-presence=\{args\.currentEpisode\.guestPresenceMode\}/u,
     );
-    assert.match(source, /Guest chair is empty/u);
+    assert.doesNotMatch(source, /Guest chair is empty/u);
     assert.match(source, /"Booked guest" : "Guest"/u);
     assert.match(source, /data-audience-only=\{audienceOnlyGuest/u);
     assert.match(
@@ -828,6 +853,31 @@ describe("Signal experience shell", () => {
     assert.match(
       css,
       /\.avatarRig\[data-audience-only="true"\]\s*\{[^}]*opacity:\s*\.5/iu,
+    );
+  });
+
+  it("replays negative Power pressure as a restrained studio treatment", () => {
+    assert.match(source, /botcastStrongestNegativeSocialInfluenceAt/u);
+    assert.match(
+      source,
+      /elapsedMs: args\.replay \? replayElapsedMs : Number\.POSITIVE_INFINITY/u,
+    );
+    assert.match(
+      source,
+      /data-signal-power-pressure=\{socialPressure\?\.strength\}/u,
+    );
+    assert.match(
+      source,
+      /data-signal-power-source=\{socialPressure\?\.sourceRole\}/u,
+    );
+    assert.match(source, /className=\{styles\.powerPressure\}/u);
+    assert.match(
+      css,
+      /\.powerPressure\s*\{[^}]*--signal-power-origin-x:[^}]*z-index:\s*6/iu,
+    );
+    assert.match(
+      css,
+      /\.powerPressure\[data-strength="large"\]\s*\{[^}]*opacity:\s*\.54/iu,
     );
   });
 
@@ -886,6 +936,22 @@ describe("Signal experience shell", () => {
       css,
       /\.showIdentityGearButton\s*\{[^}]*right:\s*18px;[^}]*bottom:\s*18px/iu,
     );
+    assert.match(
+      css,
+      /\.showBrandPreview\[data-identity-settings-open="true"\]\s*\{[^}]*height:\s*360px/iu,
+    );
+    assert.match(
+      css,
+      /\.showLookControls\s*\{[^}]*width:\s*min\(700px,\s*68%\)/iu,
+    );
+    assert.match(
+      css,
+      /\.showLookControlGrid\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/iu,
+    );
+    assert.match(
+      css,
+      /@media \(max-width:\s*900px\)[\s\S]*?\.showBrandPreview\[data-identity-settings-open="true"\]\s*\{[^}]*height:\s*auto/iu,
+    );
     assert.match(source, /regenerateLogo: true/u);
     assert.match(source, /aria-label="Edit show name"/u);
     assert.match(source, />\s*Save name\s*</u);
@@ -912,6 +978,12 @@ describe("Signal experience shell", () => {
     assert.match(css, /--prism-p:\s*#ff4d6d/iu);
     assert.match(css, /--prism-s:\s*#2fd3e3/iu);
     assert.match(css, /\.shell\[data-theme="light"\]/u);
+    assert.match(css, /--botcast-logo-surface:/u);
+    assert.match(
+      css,
+      /\.shell\[data-theme="light"\][\s\S]{0,700}--botcast-logo-surface:/u,
+    );
+    assert.match(css, /\.showLogo img\s*\{[^}]*object-fit:\s*contain/iu);
     assert.match(source, /function SignalFallbackStudio/u);
   });
 
@@ -1049,7 +1121,15 @@ describe("Signal experience shell", () => {
     assert.match(css, /\.showBrandAtmosphere\s*\{/u);
     assert.match(
       css,
-      /\.shell\[data-theme="light"\] \.showBrandAtmosphere\s*\{[^}]*mix-blend-mode:\s*normal/iu,
+      /\.showBrandAtmosphere\s*\{[^}]*filter:\s*blur\(3px\)/iu,
+    );
+    assert.match(
+      css,
+      /\.showBrandAtmosphere\s*\{[^}]*transform:\s*scale\(1\.035\)/iu,
+    );
+    assert.match(
+      css,
+      /\.shell\[data-theme="light"\] \.showBrandAtmosphere\s*\{[^}]*filter:\s*blur\(3px\)[^}]*mix-blend-mode:\s*normal/iu,
     );
     assert.doesNotMatch(
       css,

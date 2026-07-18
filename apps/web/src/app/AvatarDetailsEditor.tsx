@@ -110,6 +110,7 @@ export interface AvatarDetailsEditorProps {
   onCancel?: () => void;
   onDirtyChange?: (dirty: boolean) => void;
   onPreviewChange?: (details: AvatarDetailsV1) => void;
+  onEditStart?: () => void;
 }
 
 interface AvatarDetailsPointerStroke {
@@ -148,6 +149,7 @@ const AvatarDetailsEditorSession = forwardRef<
     onCancel,
     onDirtyChange,
     onPreviewChange,
+    onEditStart,
   },
   ref,
 ): React.JSX.Element {
@@ -211,12 +213,43 @@ const AvatarDetailsEditorSession = forwardRef<
     backgroundColor: normalizedAccentColor,
   } as CSSProperties;
 
-  const updateWorking = useCallback((next: AvatarDetailsV1): void => {
-    const normalized = normalizeAvatarDetails(next);
-    workingRef.current = normalized;
-    setWorking(normalized);
-    queuePreviewRef.current(normalized);
-  }, []);
+  const drawWorkingCanvas = useCallback(
+    (details: AvatarDetailsV1): void => {
+      const canvas = canvasRef.current;
+      const context = canvas?.getContext("2d", { alpha: true });
+      if (!canvas || !context) return;
+      const pixels = rasterizeAvatarDetailsSemanticRgba(details, faceStyle);
+      const imageData = context.createImageData(
+        AVATAR_DETAILS_CANVAS_SIZE,
+        AVATAR_DETAILS_CANVAS_SIZE,
+      );
+      imageData.data.set(pixels);
+      context.imageSmoothingEnabled = false;
+      context.putImageData(imageData, 0, 0);
+    },
+    [faceStyle],
+  );
+
+  const updateWorking = useCallback(
+    (
+      next: AvatarDetailsV1,
+      options: {
+        publishPreview?: boolean;
+        deferRender?: boolean;
+      } = {},
+    ): void => {
+      const { publishPreview = true, deferRender = false } = options;
+      const normalized = normalizeAvatarDetails(next);
+      workingRef.current = normalized;
+      if (deferRender) {
+        drawWorkingCanvas(normalized);
+      } else {
+        setWorking(normalized);
+      }
+      if (publishPreview) queuePreviewRef.current(normalized);
+    },
+    [drawWorkingCanvas],
+  );
 
   const resetHistory = useCallback((): void => {
     undoHistoryRef.current = [];
@@ -226,12 +259,12 @@ const AvatarDetailsEditorSession = forwardRef<
   }, []);
 
   const applyHistoryTransition = useCallback(
-    (next: AvatarDetailsHistoryState): void => {
+    (next: AvatarDetailsHistoryState, publishPreview = true): void => {
       undoHistoryRef.current = next.undo;
       redoHistoryRef.current = next.redo;
       setUndoHistory([...next.undo]);
       setRedoHistory([...next.redo]);
-      updateWorking(next.working);
+      updateWorking(next.working, { publishPreview });
     },
     [updateWorking],
   );
@@ -319,21 +352,8 @@ const AvatarDetailsEditorSession = forwardRef<
   }, [theme]);
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    const context = canvas?.getContext("2d", { alpha: true });
-    if (!canvas || !context) return;
-    const pixels = rasterizeAvatarDetailsSemanticRgba(
-      workingRef.current,
-      faceStyle,
-    );
-    const imageData = context.createImageData(
-      AVATAR_DETAILS_CANVAS_SIZE,
-      AVATAR_DETAILS_CANVAS_SIZE,
-    );
-    imageData.data.set(pixels);
-    context.imageSmoothingEnabled = false;
-    context.putImageData(imageData, 0, 0);
-  }, [faceStyle, workingKey]);
+    drawWorkingCanvas(workingRef.current);
+  }, [drawWorkingCanvas, workingKey]);
 
   const commitMutation = useCallback(
     (next: AvatarDetailsV1): void => {
@@ -362,9 +382,10 @@ const AvatarDetailsEditorSession = forwardRef<
     };
     const next = undoAvatarDetailsHistory(current);
     if (next === current) return;
+    onEditStart?.();
     applyHistoryTransition(next);
     setLimitReached(false);
-  }, [applyHistoryTransition]);
+  }, [applyHistoryTransition, onEditStart]);
 
   const redo = useCallback((): void => {
     const current = {
@@ -374,9 +395,10 @@ const AvatarDetailsEditorSession = forwardRef<
     };
     const next = redoAvatarDetailsHistory(current);
     if (next === current) return;
+    onEditStart?.();
     applyHistoryTransition(next);
     setLimitReached(false);
-  }, [applyHistoryTransition]);
+  }, [applyHistoryTransition, onEditStart]);
 
   const applyWorkingCopy = useCallback(async (): Promise<boolean> => {
     if (!dirty) return true;
@@ -403,7 +425,7 @@ const AvatarDetailsEditorSession = forwardRef<
 
   const cancelWorkingCopy = useCallback((): void => {
     const next = cloneAvatarDetails(normalizedSource);
-    updateWorking(next);
+    updateWorking(next, { publishPreview: false });
     flushPreview(next);
     resetHistory();
     setLimitReached(false);
@@ -450,6 +472,7 @@ const AvatarDetailsEditorSession = forwardRef<
       if (!result.changed) return false;
       updateWorking(
         avatarDetailsWithPaintColorMap(current, result.colorMap),
+        { publishPreview: false, deferRender: true },
       );
       return true;
     },
@@ -471,6 +494,7 @@ const AvatarDetailsEditorSession = forwardRef<
       setLimitReached(result.limitReached);
       updateWorking(
         avatarDetailsWithPaintColorMap(stroke.before, result.colorMap),
+        { publishPreview: false, deferRender: true },
       );
       return result.changed;
     },
@@ -492,6 +516,7 @@ const AvatarDetailsEditorSession = forwardRef<
       setLimitReached(result.limitReached);
       updateWorking(
         avatarDetailsWithPaintColorMap(stroke.before, result.colorMap),
+        { publishPreview: false, deferRender: true },
       );
       return result.changed;
     },
@@ -510,6 +535,7 @@ const AvatarDetailsEditorSession = forwardRef<
       setLimitReached(false);
       updateWorking(
         avatarDetailsWithPaintColorMap(stroke.before, result.colorMap),
+        { publishPreview: false, deferRender: true },
       );
       return result.changed;
     },
@@ -522,6 +548,7 @@ const AvatarDetailsEditorSession = forwardRef<
       event.isPrimary === false
     )
       return;
+    onEditStart?.();
     const point = pointerGridPoint(event);
     event.currentTarget.focus();
     try {
@@ -563,27 +590,31 @@ const AvatarDetailsEditorSession = forwardRef<
         ? event.nativeEvent.getCoalescedEvents()
         : [event.nativeEvent];
     const bounds = event.currentTarget.getBoundingClientRect();
-    let previous = stroke.lastPoint;
-    for (const sample of samples) {
-      const point = avatarDetailsGridPointFromClient(
+    const sampledPoints = samples.map((sample) =>
+      avatarDetailsGridPointFromClient(
         sample.clientX,
         sample.clientY,
         bounds,
-      );
-      if (stroke.tool === "brush" || stroke.tool === "eraser") {
-        stroke.changed =
-          paintPoints(interpolateAvatarDetailsGridLine(previous, point)) ||
-          stroke.changed;
-      } else if (stroke.tool === "line") {
-        stroke.changed = previewLineStroke(stroke, point);
-      } else if (stroke.tool === "circle") {
-        stroke.changed = previewCircleStroke(stroke, point);
-      } else {
-        stroke.changed = previewMoveStroke(stroke, point);
+      ),
+    );
+    const finalPoint = sampledPoints.at(-1);
+    if (!finalPoint) return;
+    if (stroke.tool === "brush" || stroke.tool === "eraser") {
+      const paintPath: AvatarDetailsGridPoint[] = [];
+      let previous = stroke.lastPoint;
+      for (const point of sampledPoints) {
+        paintPath.push(...interpolateAvatarDetailsGridLine(previous, point));
+        previous = point;
       }
-      previous = point;
+      stroke.changed = paintPoints(paintPath) || stroke.changed;
+    } else if (stroke.tool === "line") {
+      stroke.changed = previewLineStroke(stroke, finalPoint);
+    } else if (stroke.tool === "circle") {
+      stroke.changed = previewCircleStroke(stroke, finalPoint);
+    } else {
+      stroke.changed = previewMoveStroke(stroke, finalPoint);
     }
-    stroke.lastPoint = previous;
+    stroke.lastPoint = finalPoint;
     event.preventDefault();
   };
 
@@ -610,6 +641,7 @@ const AvatarDetailsEditorSession = forwardRef<
           },
           workingRef.current,
         ),
+        false,
       );
     }
     flushPreview(workingRef.current);
@@ -618,6 +650,7 @@ const AvatarDetailsEditorSession = forwardRef<
 
   const clearPaint = (): void => {
     if (!workingRef.current.screen.paintColorMapBase64) return;
+    onEditStart?.();
     commitMutation(
       avatarDetailsWithPaintColorMap(
         workingRef.current,

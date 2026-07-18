@@ -8,7 +8,6 @@
   /* Keep every ink emission canvas in the CRT root stacking context. A
      positioned wrapper would flatten them before screen-blending with the
      face, making connected ink look pasted on as a separate layer. */
-  z-index: 7;
   display: block;
   width: 100%;
   height: 100%;
@@ -19,6 +18,14 @@
     scaleX(var(--avatar-details-scale-x, 1))
     scaleX(var(--avatar-details-facing-scale-x, 1));
   transform-origin: center;
+}
+
+.behindFace {
+  z-index: 5;
+}
+
+.aboveFace {
+  z-index: 7;
 }
 
 .halo {

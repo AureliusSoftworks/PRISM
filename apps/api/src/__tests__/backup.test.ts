@@ -612,10 +612,10 @@ describe("backup bot avatar face style", () => {
 });
 
 describe("backup audio voice settings", () => {
-  it("round-trips account and bot profiles without touching retired Coffee player columns", () => {
+  it("round-trips account and bot profiles without retired mode-specific voice settings", () => {
     withBackupDatabase((db, userKey) => {
       db.prepare(
-        "UPDATE users SET voice_mode = ?, voice_effects_enabled = 0, signal_immersive_voice_effects_enabled = 1, voice_volume = ?, english_voice_engine = ?, default_system_voice_name = ?, default_elevenlabs_voice_id = ?, elevenlabs_voice_bank = ?, elevenlabs_voice_model = ?, elevenlabs_voice_collection_id = ?, player_audio_voice_profile = ?, player_name_pronunciation = ?, prism_default_bot_audio_voice_profile = ? WHERE id = ?"
+        "UPDATE users SET voice_mode = ?, voice_effects_enabled = 0, voice_volume = ?, english_voice_engine = ?, default_system_voice_name = ?, default_elevenlabs_voice_id = ?, elevenlabs_voice_bank = ?, elevenlabs_voice_model = ?, elevenlabs_voice_collection_id = ?, player_audio_voice_profile = ?, player_name_pronunciation = ?, prism_default_bot_audio_voice_profile = ? WHERE id = ?"
       ).run(
         "babble",
         0.65,
@@ -650,7 +650,10 @@ describe("backup audio voice settings", () => {
       const snapshot = exportUserSnapshot(db, "user-1", userKey);
       assert.equal(snapshot.settings?.voiceMode, "babble");
       assert.equal(snapshot.settings?.voiceEffectsEnabled, false);
-      assert.equal(snapshot.settings?.signalImmersiveVoiceEffectsEnabled, true);
+      assert.equal(
+        "signalImmersiveVoiceEffectsEnabled" in (snapshot.settings ?? {}),
+        false,
+      );
       assert.equal(snapshot.settings?.voiceVolume, 0.65);
       assert.equal(snapshot.settings?.prismDefaultBotAudioVoiceProfile?.baseVoiceId, "voice-5");
       assert.equal(snapshot.settings?.prismDefaultBotAudioVoiceProfile?.elevenLabsEffect, "radio");
@@ -664,7 +667,7 @@ describe("backup audio voice settings", () => {
       assert.equal("playerNamePronunciation" in (snapshot.settings ?? {}), false);
 
       db.prepare(
-        "UPDATE users SET voice_mode = 'mute', voice_effects_enabled = 1, signal_immersive_voice_effects_enabled = 0, voice_volume = 1, english_voice_engine = 'builtin', default_system_voice_name = NULL, default_elevenlabs_voice_id = NULL, elevenlabs_voice_bank = '{}', elevenlabs_voice_model = NULL, elevenlabs_voice_collection_id = NULL, player_audio_voice_profile = ?, player_name_pronunciation = ?, prism_default_bot_audio_voice_profile = NULL WHERE id = ?"
+        "UPDATE users SET voice_mode = 'mute', voice_effects_enabled = 1, voice_volume = 1, english_voice_engine = 'builtin', default_system_voice_name = NULL, default_elevenlabs_voice_id = NULL, elevenlabs_voice_bank = '{}', elevenlabs_voice_model = NULL, elevenlabs_voice_collection_id = NULL, player_audio_voice_profile = ?, player_name_pronunciation = ?, prism_default_bot_audio_voice_profile = NULL WHERE id = ?"
       ).run(
         JSON.stringify({ v: 1, baseVoiceId: "voice-2", pitch: 0, warmth: 0, pace: 0, lilt: 0 }),
         "Keep me",
@@ -673,11 +676,10 @@ describe("backup audio voice settings", () => {
       importUserSnapshot(db, "user-1", snapshot, userKey);
 
       const restoredUser = db.prepare(
-        "SELECT voice_mode, voice_effects_enabled, signal_immersive_voice_effects_enabled, voice_volume, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, elevenlabs_voice_collection_id, player_audio_voice_profile, player_name_pronunciation, prism_default_bot_audio_voice_profile FROM users WHERE id = ?"
+        "SELECT voice_mode, voice_effects_enabled, voice_volume, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, elevenlabs_voice_collection_id, player_audio_voice_profile, player_name_pronunciation, prism_default_bot_audio_voice_profile FROM users WHERE id = ?"
       ).get("user-1") as Record<string, string | null>;
       assert.equal(restoredUser.voice_mode, "babble");
       assert.equal(restoredUser.voice_effects_enabled, 0);
-      assert.equal(restoredUser.signal_immersive_voice_effects_enabled, 1);
       assert.equal(restoredUser.voice_volume, 0.65);
       assert.equal(JSON.parse(restoredUser.prism_default_bot_audio_voice_profile ?? "{}").baseVoiceId, "voice-5");
       assert.equal(JSON.parse(restoredUser.prism_default_bot_audio_voice_profile ?? "{}").elevenLabsEffect, "radio");
@@ -735,16 +737,18 @@ describe("backup Slate account data", () => {
       }
       const project = db
         .prepare(
-          "SELECT series_id, manuscript, continuity_active_version FROM slate_projects WHERE id = ?",
+          "SELECT series_id, manuscript, title_origin, continuity_active_version FROM slate_projects WHERE id = ?",
         )
         .get("slate-one-project") as {
         series_id: string;
         manuscript: string;
+        title_origin: string;
         continuity_active_version: string;
       };
       assert.deepEqual({ ...project }, {
         series_id: "slate-one-series",
         manuscript: "The restored manuscript.",
+        title_origin: "spark",
         continuity_active_version: "0.0",
       });
       assert.equal(
@@ -838,6 +842,21 @@ describe("backup Slate account data", () => {
       );
     });
   });
+
+  it("defaults title provenance for older Slate account backups", () => {
+    withBackupDatabase((db, userKey) => {
+      seedSlateBackupFixture(db, "user-1", "slate-legacy-title");
+      const legacy = exportUserSnapshot(db, "user-1", userKey);
+      assert.ok(legacy.slate?.projects[0]);
+      delete legacy.slate.projects[0].title_origin;
+
+      importUserSnapshot(db, "user-1", legacy, userKey);
+      const project = db
+        .prepare("SELECT title_origin FROM slate_projects WHERE id = ?")
+        .get("slate-legacy-title-project") as { title_origin: string };
+      assert.equal(project.title_origin, "writer");
+    });
+  });
 });
 
 const SLATE_BACKUP_TEST_TABLES = [
@@ -881,17 +900,18 @@ function seedSlateBackupFixture(
   ).run(seriesId, userId, "The Long Saga", "A restored saga.", now, now);
   db.prepare(
     `INSERT INTO slate_projects (
-      id, user_id, series_id, book_ordinal, title, spark, spark_wildcards_json,
+      id, user_id, series_id, book_ordinal, title, title_origin, spark, spark_wildcards_json,
       premise, phase, structure_json, manuscript, direction,
       continuity_active_version, continuity_target_version,
       continuity_active_generation, continuity_upgrade_status, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     projectId,
     userId,
     seriesId,
     1,
     "Book One",
+    "spark",
     "A vanished crown returns.",
     JSON.stringify({ realm: "Ashfall" }),
     "A succession crisis.",

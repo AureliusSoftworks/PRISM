@@ -8,6 +8,8 @@ import {
   type SlateCharacter,
   type SlateLockedRange,
   type SlateProjectDetail,
+  type SlateProjectCover,
+  type SlateProjectTitleOrigin,
   type SlateProjectPatchRequest,
   type SlateProjectPhase,
   type SlateProjectSummary,
@@ -59,8 +61,10 @@ interface SlateProjectRow {
   series_id: string;
   book_ordinal: number;
   title: string;
+  title_origin: string;
   spark: string;
   spark_wildcards_json: string;
+  cover_json: string;
   premise: string;
   voice: string;
   non_negotiables_json: string;
@@ -507,6 +511,49 @@ function storedSparkWildcards(row: SlateProjectRow): PromptWildcardRunMetadata |
   }
 }
 
+function storedProjectCover(row: SlateProjectRow): SlateProjectCover {
+  const fallback: SlateProjectCover = {
+    seed: row.id,
+    prompt: "",
+    imageUrl: null,
+    imageId: null,
+    revision: 0,
+    status: "fallback",
+  };
+  const parsed = parseJson(row.cover_json, null);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return fallback;
+  }
+  const cover = parsed as Record<string, unknown>;
+  const status =
+    cover.status === "generating" ||
+    cover.status === "ready" ||
+    cover.status === "failed"
+      ? cover.status
+      : "fallback";
+  return {
+    seed:
+      typeof cover.seed === "string" && cover.seed.trim()
+        ? cover.seed.trim().slice(0, 240)
+        : row.id,
+    prompt:
+      typeof cover.prompt === "string" ? cover.prompt.trim().slice(0, 12_000) : "",
+    imageUrl:
+      typeof cover.imageUrl === "string" && cover.imageUrl.trim()
+        ? cover.imageUrl.trim().slice(0, 2_000)
+        : null,
+    imageId:
+      typeof cover.imageId === "string" && cover.imageId.trim()
+        ? cover.imageId.trim().slice(0, 240)
+        : null,
+    revision:
+      typeof cover.revision === "number" && Number.isSafeInteger(cover.revision)
+        ? Math.max(0, cover.revision)
+        : 0,
+    status,
+  };
+}
+
 function revisionAction(value: unknown): SlateRevisionAction {
   if (
     value === "deepen" ||
@@ -606,13 +653,19 @@ function summaryFromRow(row: SlateProjectRow): SlateProjectSummary {
     seriesId: row.series_id,
     bookOrdinal: row.book_ordinal,
     title: row.title,
+    titleOrigin: titleOriginValue(row.title_origin),
     spark: row.spark,
     premise: row.premise,
     phase: phaseValue(row.phase),
+    cover: storedProjectCover(row),
     manuscriptLength: row.manuscript.length,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+function titleOriginValue(value: unknown): SlateProjectTitleOrigin {
+  return value === "spark" || value === "material" ? value : "writer";
 }
 
 function detailFromRow(db: DatabaseSync, row: SlateProjectRow): SlateProjectDetail {
@@ -660,11 +713,25 @@ export function getSlateProject(db: DatabaseSync, userId: string, projectId: str
   return detailFromRow(db, projectRow(db, userId, projectId));
 }
 
+export function setSlateProjectCover(
+  db: DatabaseSync,
+  userId: string,
+  projectId: string,
+  cover: SlateProjectCover,
+): SlateProjectDetail {
+  projectRow(db, userId, projectId);
+  db.prepare(
+    "UPDATE slate_projects SET cover_json = ? WHERE id = ? AND user_id = ?",
+  ).run(JSON.stringify(cover), projectId, userId);
+  return getSlateProject(db, userId, projectId);
+}
+
 export function createSlateProject(
   db: DatabaseSync,
   userId: string,
   input: {
     title: unknown;
+    titleOrigin?: unknown;
     spark: unknown;
     sparkWildcards?: unknown;
     seriesId?: unknown;
@@ -673,6 +740,7 @@ export function createSlateProject(
   const id = randomId();
   const now = new Date().toISOString();
   const title = boundedString(input.title, "Project title", SLATE_TITLE_MAX, { required: true });
+  const titleOrigin = titleOriginValue(input.titleOrigin);
   const spark = boundedString(input.spark, "Creative spark", SLATE_SPARK_MAX, { required: true });
   const sparkWildcards = normalizedSparkWildcards(input.sparkWildcards, spark);
   db.exec("BEGIN IMMEDIATE TRANSACTION");
@@ -685,15 +753,16 @@ export function createSlateProject(
     );
     db.prepare(
       `INSERT INTO slate_projects
-        (id, user_id, series_id, book_ordinal, title, spark,
+        (id, user_id, series_id, book_ordinal, title, title_origin, spark,
          spark_wildcards_json, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       id,
       userId,
       placement.seriesId,
       placement.ordinal,
       title,
+      titleOrigin,
       spark,
       sparkWildcards ? JSON.stringify(sparkWildcards) : "",
       now,
@@ -726,7 +795,10 @@ export function updateSlateProject(
     assignments.push(`${column} = ?`);
     values.push(value);
   };
-  if (Object.hasOwn(patch, "title")) assign("title", boundedString(patch.title, "Project title", SLATE_TITLE_MAX, { required: true }));
+  if (Object.hasOwn(patch, "title")) {
+    assign("title", boundedString(patch.title, "Project title", SLATE_TITLE_MAX, { required: true }));
+    assign("title_origin", "writer");
+  }
   if (Object.hasOwn(patch, "spark")) {
     nextSpark = boundedString(patch.spark, "Creative spark", SLATE_SPARK_MAX, { required: true });
     assign("spark", nextSpark);

@@ -190,6 +190,104 @@ describe("avatar details semantic ink", () => {
       [0, 0, 255],
     );
   });
+
+  it("keeps noses and mustaches above the face while placing beards behind the mouth", () => {
+    let colorMap: Uint8Array = new Uint8Array(
+      AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH,
+    );
+    colorMap = paintAvatarDetailsColorMap(
+      colorMap,
+      [
+        { x: 64, y: 60 },
+        { x: 64, y: 75 },
+        { x: 64, y: 88 },
+      ],
+      1,
+      "brush",
+      "effect",
+    ).colorMap;
+    const paintedDetails = avatarDetailsWithPaintColorMap(
+      emptyDetails(),
+      colorMap,
+    );
+    const paintedAbove = rasterizeAvatarDetailsAlpha(
+      paintedDetails,
+      null,
+      "all",
+      "above-face",
+    );
+    const paintedBehind = rasterizeAvatarDetailsAlpha(
+      paintedDetails,
+      null,
+      "all",
+      "behind-face",
+    );
+    const alphaAt = (alpha: Uint8Array, x: number, y: number): number =>
+      alpha[y * AVATAR_DETAILS_CANVAS_SIZE + x] ?? 0;
+
+    assert.equal(alphaAt(paintedAbove, 64, 60), 255);
+    assert.equal(alphaAt(paintedAbove, 64, 75), 255);
+    assert.equal(alphaAt(paintedAbove, 64, 88), 0);
+    assert.equal(alphaAt(paintedBehind, 64, 60), 0);
+    assert.equal(alphaAt(paintedBehind, 64, 75), 0);
+    assert.equal(alphaAt(paintedBehind, 64, 88), 255);
+
+    const mustacheDetails: AvatarDetailsV1 = {
+      version: 1,
+      screen: {
+        stamps: [
+          {
+            id: "straight-mustache",
+            offsetX: 0,
+            offsetY: 0,
+            scalePct: 100,
+          },
+        ],
+        paintMaskBase64: null,
+      },
+    };
+    const beardDetails: AvatarDetailsV1 = {
+      version: 1,
+      screen: {
+        stamps: [
+          {
+            id: "short-beard",
+            offsetX: 0,
+            offsetY: 0,
+            scalePct: 100,
+          },
+        ],
+        paintMaskBase64: null,
+      },
+    };
+    assert.equal(
+      rasterizeAvatarDetailsAlpha(
+        mustacheDetails,
+        null,
+        "all",
+        "above-face",
+      ).some((alpha) => alpha > 0),
+      true,
+    );
+    assert.equal(
+      rasterizeAvatarDetailsAlpha(
+        mustacheDetails,
+        null,
+        "all",
+        "behind-face",
+      ).some((alpha) => alpha > 0),
+      false,
+    );
+    assert.equal(
+      rasterizeAvatarDetailsAlpha(
+        beardDetails,
+        null,
+        "all",
+        "behind-face",
+      ).some((alpha) => alpha > 0),
+      true,
+    );
+  });
 });
 
 describe("avatar details packed paint mask", () => {

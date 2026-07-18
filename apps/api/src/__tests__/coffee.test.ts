@@ -308,6 +308,7 @@ describe("Coffee listener reaction persistence", () => {
   it("attaches one deterministic listener event to the saved speaker message without routing side effects", () => {
     const source = readFileSync(new URL("../coffee.ts", import.meta.url), "utf8");
     assert.match(source, /buildCoffeeListenerReactionPlanV1\(\{/u);
+    assert.match(source, /crossTalk: sessionSettings\.crossTalk/u);
     assert.match(source, /kind: "listenerReaction"/u);
     assert.match(source, /messageId: assistantMessageId/u);
     assert.match(source, /coffeeReplayEvents,[\s\S]{0,180}autoRecovery/u);

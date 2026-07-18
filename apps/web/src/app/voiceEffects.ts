@@ -4,6 +4,12 @@ import {
   type CoffeeVoiceDeliveryEnvelope,
   type ElevenLabsVoiceEffect,
 } from "@localai/shared";
+import {
+  connectRoomAcoustics,
+  type RoomAcousticsConnection,
+  type RoomAcousticsSend,
+} from "./roomAcoustics.ts";
+import type { PreSpeechBreathPlan } from "./preSpeechBreath.ts";
 
 export interface ElevenLabsVoiceEffectPlan {
   highpassHz: number;
@@ -333,12 +339,18 @@ interface ActiveVoiceChannelState {
   nodes: AudioScheduledSourceNode[];
   resolve: (() => void) | null;
   progress: VoicePlaybackProgressController | null;
+  roomConnection: RoomAcousticsConnection | null;
 }
 
-const activeVoiceChannels: Record<VoicePlaybackChannel, ActiveVoiceChannelState> = {
-  primary: { nodes: [], resolve: null, progress: null },
-  reaction: { nodes: [], resolve: null, progress: null },
+const activeVoiceChannels: Record<
+  VoicePlaybackChannel,
+  ActiveVoiceChannelState
+> = {
+  primary: { nodes: [], resolve: null, progress: null, roomConnection: null },
+  reaction: { nodes: [], resolve: null, progress: null, roomConnection: null },
 };
+
+const preSpeechBreathBufferCache = new Map<string, Promise<AudioBuffer | null>>();
 
 function contextForPlayback(): AudioContext | null {
   if (typeof window === "undefined" || typeof window.AudioContext !== "function") return null;
@@ -366,6 +378,93 @@ export async function prepareRealtimeVoiceAudio(): Promise<boolean> {
   return context.state === "running";
 }
 
+async function loadPreSpeechBreathBuffer(
+  context: AudioContext,
+  url: string,
+): Promise<AudioBuffer | null> {
+  const cached = preSpeechBreathBufferCache.get(url);
+  if (cached) return cached;
+  const pending = fetch(url, { cache: "force-cache" })
+    .then(async (response) => {
+      if (!response.ok) return null;
+      return context.decodeAudioData(await response.arrayBuffer());
+    })
+    .catch(() => null);
+  preSpeechBreathBufferCache.set(url, pending);
+  return pending;
+}
+
+/** Plays a shared microphone-presence cue before speech. A missing decorative
+ * asset fails silently so it can never block the bot's actual voice. */
+export async function playPreSpeechBreath(args: {
+  plan: PreSpeechBreathPlan | null | undefined;
+  profile: BotAudioVoiceProfileV1;
+  roomAcoustics?: RoomAcousticsSend;
+  isCurrent?: () => boolean;
+}): Promise<boolean> {
+  if (!args.plan) return false;
+  const context = contextForPlayback();
+  if (!context || !await prepareRealtimeVoiceAudio()) return false;
+  if (args.isCurrent && !args.isCurrent()) return true;
+  const profile = normalizeBotAudioVoiceProfileV1(args.profile);
+  if (!profile.enabled || profile.volume <= 0) return false;
+  const decoded = await loadPreSpeechBreathBuffer(context, args.plan.url);
+  if (!decoded || (args.isCurrent && !args.isCurrent())) return Boolean(decoded);
+
+  const active = activeVoiceChannels.primary;
+  stopRealtimeVoiceAudio("primary");
+  const source = context.createBufferSource();
+  const highpass = context.createBiquadFilter();
+  const lowpass = context.createBiquadFilter();
+  const gain = context.createGain();
+  source.buffer = decoded;
+  highpass.type = "highpass";
+  highpass.frequency.value = 90;
+  lowpass.type = "lowpass";
+  lowpass.frequency.value = 12_000;
+  gain.gain.value = Math.min(1.25, profile.volume) * args.plan.gain;
+  source.connect(highpass).connect(lowpass).connect(gain);
+  active.roomConnection = connectRoomAcoustics({
+    context,
+    input: gain,
+    destination: context.destination,
+    send: args.roomAcoustics,
+  });
+  const scheduled: AudioScheduledSourceNode[] = [source];
+  active.nodes = scheduled;
+
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    let gapTimer: number | null = null;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      if (gapTimer !== null) window.clearTimeout(gapTimer);
+      if (active.resolve === finish) active.resolve = null;
+      active.roomConnection?.disconnect();
+      active.roomConnection = null;
+      for (const node of scheduled) {
+        try { node.disconnect(); } catch { /* already disconnected */ }
+      }
+      if (active.nodes === scheduled) active.nodes = [];
+      resolve();
+    };
+    active.resolve = finish;
+    source.addEventListener("ended", () => {
+      if (active.nodes === scheduled) active.nodes = [];
+      active.roomConnection?.release();
+      active.roomConnection = null;
+      gapTimer = window.setTimeout(finish, args.plan?.postGapMs ?? 0);
+    }, { once: true });
+    try {
+      source.start(context.currentTime);
+    } catch {
+      finish();
+    }
+  });
+  return true;
+}
+
 export function stopRealtimeVoiceAudio(
   channel: VoicePlaybackChannel = "primary",
 ): void {
@@ -377,6 +476,8 @@ export function stopRealtimeVoiceAudio(
     try { node.disconnect(); } catch { /* already disconnected */ }
   }
   active.nodes = [];
+  active.roomConnection?.disconnect();
+  active.roomConnection = null;
   active.resolve?.();
   active.resolve = null;
 }
@@ -397,6 +498,7 @@ export async function playRealtimeVoiceBytes(args: {
   roboticPlan?: VoiceRoboticPlan | null;
   cleanRoboticCarrier?: boolean;
   elevenLabsEffect?: ElevenLabsVoiceEffect;
+  roomAcoustics?: RoomAcousticsSend;
   /** Independent listener reactions never cancel or complete primary speech. */
   channel?: VoicePlaybackChannel;
   /** Optional hard ceiling for short secondary clips such as backchannels. */
@@ -488,7 +590,13 @@ export async function playRealtimeVoiceBytes(args: {
   } else {
     lowpass.connect(shaper).connect(speechGain);
   }
-  speechGain.connect(outputGain).connect(limiter).connect(context.destination);
+  speechGain.connect(outputGain).connect(limiter);
+  const roomConnection = connectRoomAcoustics({
+    context,
+    input: limiter,
+    destination: context.destination,
+    send: args.roomAcoustics,
+  });
 
   for (const event of buildVoiceDamageSchedule(args.seed, playbackDurationMs, texture.damage)) {
     const at = now + event.atMs / 1000;
@@ -646,21 +754,31 @@ export async function playRealtimeVoiceBytes(args: {
     scheduled.push(oscillator);
   }
   active.nodes = scheduled;
+  active.roomConnection = roomConnection;
   await new Promise<void>((resolve) => {
     let progress: VoicePlaybackProgressController | null = null;
     active.resolve = resolve;
-    completionSource.addEventListener("ended", () => {
-      progress?.finish();
-      if (active.progress === progress) active.progress = null;
-      progress = null;
-      if (active.resolve === resolve) active.resolve = null;
-      for (const node of scheduled) {
-        try { node.disconnect(); } catch { /* no-op */ }
-      }
-      if (active.nodes === scheduled) active.nodes = [];
-      args.lifecycle?.onEnd?.();
-      resolve();
-    }, { once: true });
+    completionSource.addEventListener(
+      "ended",
+      () => {
+        progress?.finish();
+        if (active.progress === progress) active.progress = null;
+        progress = null;
+        if (active.resolve === resolve) active.resolve = null;
+        for (const node of scheduled) {
+          try {
+            node.disconnect();
+          } catch {
+            /* no-op */
+          }
+        }
+        if (active.nodes === scheduled) active.nodes = [];
+        roomConnection.release();
+        args.lifecycle?.onEnd?.();
+        resolve();
+      },
+      { once: true },
+    );
     for (const speechStart of speechStarts) {
       speechStart.source.start(speechStart.startAt);
       speechStart.source.stop(speechStart.stopAt);

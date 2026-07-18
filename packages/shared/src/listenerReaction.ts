@@ -1,5 +1,8 @@
 import type { VoiceDeliveryMood } from "./audioVoice.js";
-import type { CoffeeTableEnergy } from "./coffeeSettings.js";
+import type {
+  CoffeeCrossTalkLevel,
+  CoffeeTableEnergy,
+} from "./coffeeSettings.js";
 
 export const LISTENER_REACTION_PLAN_VERSION = 1 as const;
 
@@ -10,7 +13,13 @@ export type ListenerReactionVisualAction =
   | "head_tilt"
   | "soft_smile"
   | "thoughtful_hmm";
-export type ListenerReactionSpokenCue = "mm-hm" | "I see" | "hmm";
+export type ListenerReactionSpokenCue =
+  | "mm-hm"
+  | "I see"
+  | "hmm"
+  | "right"
+  | "oh"
+  | "go on";
 
 export interface ListenerReactionPlanV1 {
   v: typeof LISTENER_REACTION_PLAN_VERSION;
@@ -45,6 +54,9 @@ const SPOKEN_CUES = new Set<ListenerReactionSpokenCue>([
   "mm-hm",
   "I see",
   "hmm",
+  "right",
+  "oh",
+  "go on",
 ]);
 
 function stableUnit(seed: string): number {
@@ -162,13 +174,18 @@ export function buildSignalListenerReactionPlanV1(args: {
     Math.max(0, Math.round(args.tensionLevel)),
   ].join(":");
   if (stableUnit(`${seed}:visual-roll`) >= 0.55) return null;
-  const audioChance = args.listenerRole === "host" ? 0.3 : 0.2;
+  const audioChance = args.listenerRole === "host" ? 0.4 : 0.3;
   const audible = args.segment === "interview" &&
     stableUnit(`${seed}:audio-roll`) < audioChance;
   const spokenCue = audible
     ? args.tensionLevel >= 2 || args.mood === "strained"
       ? "hmm"
-      : choose(`${seed}:cue`, ["mm-hm", "I see", "hmm"] as const)
+      : args.mood === "warm" || args.mood === "joyful"
+        ? choose(`${seed}:cue:warm`, ["mm-hm", "right", "oh"] as const)
+        : choose(
+            `${seed}:cue`,
+            ["mm-hm", "I see", "hmm", "right", "oh", "go on"] as const,
+          )
     : undefined;
   return {
     v: LISTENER_REACTION_PLAN_VERSION,
@@ -193,6 +210,13 @@ function coffeeEnergyMultiplier(energy: CoffeeTableEnergy): number {
   return 1.15;
 }
 
+function coffeeAudibleChance(crossTalk: CoffeeCrossTalkLevel): number {
+  if (crossTalk === "rare") return 0.025;
+  if (crossTalk === "normal") return 0.08;
+  if (crossTalk === "pileup") return 0.22;
+  return 0.15;
+}
+
 function coffeeVisualAction(args: {
   seed: string;
   disposition: number;
@@ -215,6 +239,7 @@ export function buildCoffeeListenerReactionPlanV1(args: {
   listenerBotId: string;
   targetSource: "direct" | "inferred";
   tableEnergy: CoffeeTableEnergy;
+  crossTalk: CoffeeCrossTalkLevel;
   listenerSocial?: {
     disposition: number;
     valuesFriction: number;
@@ -241,6 +266,7 @@ export function buildCoffeeListenerReactionPlanV1(args: {
     args.listenerBotId,
     args.targetSource,
     args.tableEnergy,
+    args.crossTalk,
   ].join(":");
   const energyMultiplier = coffeeEnergyMultiplier(args.tableEnergy);
   const visualChance = (args.targetSource === "direct" ? 0.55 : 0.2) *
@@ -258,11 +284,17 @@ export function buildCoffeeListenerReactionPlanV1(args: {
   const audible = args.targetSource === "direct" &&
     args.allowAudio &&
     !consecutiveAudible &&
-    stableUnit(`${seed}:audio-roll`) < Math.min(0.18, 0.12 * energyMultiplier);
+    stableUnit(`${seed}:audio-roll`) <
+      Math.min(0.28, coffeeAudibleChance(args.crossTalk) * energyMultiplier);
   const spokenCue = audible
     ? social.valuesFriction >= 0.58 || social.disposition <= 0.34
       ? "hmm"
-      : choose(`${seed}:cue`, ["mm-hm", "I see", "hmm"] as const)
+      : social.disposition >= 0.62 && social.restraint < 0.72
+        ? choose(`${seed}:cue:warm`, ["mm-hm", "right", "oh"] as const)
+        : choose(
+            `${seed}:cue`,
+            ["mm-hm", "I see", "hmm", "right", "oh", "go on"] as const,
+          )
     : undefined;
   return {
     v: LISTENER_REACTION_PLAN_VERSION,

@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT,
+  BOTCAST_DEFAULT_STUDIO_ATMOSPHERE_MIX,
   BOTCAST_DEFAULT_STUDIO_LAYOUT,
   BOTCAST_DIRECTOR_MIN_SHOT_MS,
   BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS,
@@ -23,9 +24,12 @@ import {
   botcastNextSpeakerRole,
   botcastSegmentForTurn,
   botcastSessionShouldClose,
+  botcastSocialInfluenceEventsAt,
+  botcastStrongestNegativeSocialInfluenceAt,
   botcastVoiceMoodForTension,
   isBotcastFallbackStudioAccentVariant,
   normalizeBotcastStudioLayout,
+  normalizeBotcastStudioAtmosphereMix,
   normalizeBotcastVoiceLevel,
   normalizeBotcastVoiceLevelsByBotId,
   swapBotcastStudioLayoutSeats,
@@ -78,6 +82,74 @@ describe("Signal fallback studio accents", () => {
       first,
     );
     assert.equal(isBotcastFallbackStudioAccentVariant(first), true);
+  });
+});
+
+describe("Signal replayed Power influence", () => {
+  it("restores valid active influence and selects the strongest negative pressure", () => {
+    const events: BotcastReplayEvent[] = [
+      {
+        id: "power-small",
+        episodeId: "episode-1",
+        sequence: 1,
+        kind: "power_effect",
+        occurredAt: "2026-07-17T12:00:00.000Z",
+        payload: {
+          v: 1,
+          effect: "social_influence",
+          powerId: "annoying",
+          powerName: "Annoying",
+          sourceBotId: "guest",
+          targetBotId: "host",
+          sourceRole: "guest",
+          targetRole: "host",
+          trigger: "after_speech",
+          polarity: "negative",
+          strength: "small",
+          atMs: 3_200,
+          sourceMessageId: "message-1",
+        },
+      },
+      {
+        id: "power-large",
+        episodeId: "episode-1",
+        sequence: 2,
+        kind: "power_effect",
+        occurredAt: "2026-07-17T12:00:00.000Z",
+        payload: {
+          v: 1,
+          effect: "social_influence",
+          powerId: "intimidation",
+          powerName: "Intimidation",
+          sourceBotId: "guest",
+          targetBotId: "host",
+          sourceRole: "guest",
+          targetRole: "host",
+          trigger: "session_start",
+          polarity: "negative",
+          strength: "large",
+          atMs: 0,
+        },
+      },
+    ];
+
+    assert.equal(botcastSocialInfluenceEventsAt({ events, elapsedMs: 0 }).length, 1);
+    assert.equal(
+      botcastStrongestNegativeSocialInfluenceAt({
+        events,
+        elapsedMs: 4_000,
+        targetBotId: "host",
+      })?.powerName,
+      "Intimidation",
+    );
+    assert.equal(
+      botcastStrongestNegativeSocialInfluenceAt({
+        events,
+        elapsedMs: 4_000,
+        targetBotId: "other",
+      }),
+      null,
+    );
   });
 });
 
@@ -164,6 +236,30 @@ describe("Signal voice levels", () => {
         { host: 1.1, "guest-a": 0.8 },
       ),
       { host: 1.1, "guest-a": 0.8, "guest-b": 0.65, "guest-c": 1.25 },
+    );
+  });
+});
+
+describe("Signal studio atmosphere mix", () => {
+  it("gives legacy shows the full fallback mix and bounds saved levels", () => {
+    assert.deepEqual(
+      normalizeBotcastStudioAtmosphereMix(undefined),
+      BOTCAST_DEFAULT_STUDIO_ATMOSPHERE_MIX,
+    );
+    assert.deepEqual(
+      normalizeBotcastStudioAtmosphereMix({
+        background: 99,
+        grain: -1,
+        foley: "1.4",
+      }),
+      { background: 0.32, grain: 0, foley: 1.4 },
+    );
+    assert.deepEqual(
+      normalizeBotcastStudioAtmosphereMix(
+        { background: 0.2, grain: 0.006, foley: 1.1 },
+        { background: 0, grain: 0, foley: 0 },
+      ),
+      { background: 0.2, grain: 0.006, foley: 1.1 },
     );
   });
 });

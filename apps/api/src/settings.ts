@@ -145,7 +145,6 @@ export interface CurrentSettings {
   experimentalDualOllamaEnabled: number;
   experimentalAllModelEffortEnabled: number;
   coffeeExperimentalTableAngleEnabled: number;
-  signalImmersiveVoiceEffectsEnabled: number;
   psychicModeEnabled: number;
   /** Saved preference only. Auto is still gated per Zen/Coffee context. */
   autoSwitchModel: number;
@@ -210,7 +209,6 @@ export interface NextSettings {
   experimentalDualOllamaEnabled: number;
   experimentalAllModelEffortEnabled: number;
   coffeeExperimentalTableAngleEnabled: number;
-  signalImmersiveVoiceEffectsEnabled: boolean;
   psychicModeEnabled: number;
   autoSwitchModel: number;
   autoFallbackChain: string | null;
@@ -859,10 +857,6 @@ export function resolveNextSettings(
     typeof body.coffeeExperimentalTableAngleEnabled === "boolean"
       ? Number(body.coffeeExperimentalTableAngleEnabled)
       : current.coffeeExperimentalTableAngleEnabled;
-  const signalImmersiveVoiceEffectsEnabled =
-    typeof body.signalImmersiveVoiceEffectsEnabled === "boolean"
-      ? body.signalImmersiveVoiceEffectsEnabled
-      : current.signalImmersiveVoiceEffectsEnabled === 1;
   const psychicModeEnabled =
     typeof body.psychicModeEnabled === "boolean"
       ? Number(body.psychicModeEnabled)
@@ -1209,7 +1203,6 @@ export function resolveNextSettings(
     experimentalDualOllamaEnabled,
     experimentalAllModelEffortEnabled,
     coffeeExperimentalTableAngleEnabled,
-    signalImmersiveVoiceEffectsEnabled,
     psychicModeEnabled,
     autoSwitchModel,
     autoFallbackChain,

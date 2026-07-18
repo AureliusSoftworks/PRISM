@@ -69,6 +69,15 @@ export type AvatarDetailsPaintMode = "brush" | "eraser";
 export type AvatarDetailsTool =
   AvatarDetailsPaintMode | "line" | "circle" | "move";
 export type AvatarDetailsInkRole = (typeof AVATAR_DETAILS_INK_ROLES)[number];
+export type AvatarDetailsFaceDepth = "all" | "behind-face" | "above-face";
+
+/**
+ * The live mouth sits across the lower-face seam on the authored 128 grid.
+ * Pixels below this seam are beard territory and render behind the animated
+ * mouth; pixels above it remain available for noses, mustaches, hair, and
+ * other details that belong over the face glyphs.
+ */
+export const AVATAR_DETAILS_LOWER_FACE_DEPTH_Y = 81;
 
 export type AvatarDetailStampV1 = BotAvatarDetailStampV1;
 export type AvatarDetailsV1 = BotAvatarDetailsV1;
@@ -1266,10 +1275,27 @@ export function avatarDetailsMaskCacheKey(
   details: AvatarDetailsV1 | null | undefined,
   faceGeometry?: Partial<AvatarDetailsFaceGeometry> | null,
   role: AvatarDetailsInkRole | "all" = "all",
+  depth: AvatarDetailsFaceDepth = "all",
 ): string {
-  return `${AVATAR_DETAILS_CATALOG_VERSION}:${role}:${avatarDetailsKey(details)}:${JSON.stringify(
+  return `${AVATAR_DETAILS_CATALOG_VERSION}:${role}:${depth}:${avatarDetailsKey(details)}:${JSON.stringify(
     normalizeAvatarDetailsFaceGeometry(faceGeometry),
   )}`;
+}
+
+function avatarDetailStampFaceDepth(
+  stamp: AvatarDetailStampV1,
+): Exclude<AvatarDetailsFaceDepth, "all"> {
+  return stamp.id === "short-beard" || stamp.id === "goatee"
+    ? "behind-face"
+    : "above-face";
+}
+
+function avatarDetailPaintFaceDepth(
+  y: number,
+): Exclude<AvatarDetailsFaceDepth, "all"> {
+  return y >= AVATAR_DETAILS_LOWER_FACE_DEPTH_Y
+    ? "behind-face"
+    : "above-face";
 }
 
 export interface AvatarDetailsResolvedStampAnchor {
@@ -1357,10 +1383,11 @@ export function rasterizeAvatarDetailsAlpha(
   details: AvatarDetailsV1 | null | undefined,
   faceGeometry?: Partial<AvatarDetailsFaceGeometry> | null,
   role: AvatarDetailsInkRole | "all" = "all",
+  depth: AvatarDetailsFaceDepth = "all",
 ): Uint8Array {
   const normalized = normalizeAvatarDetails(details);
   const geometry = normalizeAvatarDetailsFaceGeometry(faceGeometry);
-  const key = avatarDetailsMaskCacheKey(normalized, geometry, role);
+  const key = avatarDetailsMaskCacheKey(normalized, geometry, role, depth);
   const cached = avatarDetailsAlphaCache.get(key);
   if (cached) return cached;
 
@@ -1374,7 +1401,11 @@ export function rasterizeAvatarDetailsAlpha(
     for (let y = 0; y < AVATAR_DETAILS_CANVAS_SIZE; y += 1) {
       for (let x = 0; x < AVATAR_DETAILS_CANVAS_SIZE; x += 1) {
         const pixelRole = avatarDetailsInkRoleAt(colorMap, x, y);
-        if (pixelRole && (role === "all" || pixelRole === role)) {
+        if (
+          pixelRole &&
+          (role === "all" || pixelRole === role) &&
+          (depth === "all" || avatarDetailPaintFaceDepth(y) === depth)
+        ) {
           alpha[alphaIndex(x, y)] = 255;
         }
       }
@@ -1382,6 +1413,9 @@ export function rasterizeAvatarDetailsAlpha(
   }
   if (role === "all" || role === "effect") {
     for (const stamp of normalized.screen.stamps) {
+      if (depth !== "all" && avatarDetailStampFaceDepth(stamp) !== depth) {
+        continue;
+      }
       compositeResolvedAvatarDetailStamp(alpha, stamp, geometry);
     }
   }
@@ -1416,13 +1450,19 @@ export function rasterizeAvatarDetailsRgba(
   color: string | null | undefined,
   faceGeometry?: Partial<AvatarDetailsFaceGeometry> | null,
   role: AvatarDetailsInkRole | "all" = "all",
+  depth: AvatarDetailsFaceDepth = "all",
 ): Uint8ClampedArray {
   const normalizedColor = normalizeAvatarDetailsColor(color);
   const colorValue = Number.parseInt(normalizedColor.slice(1), 16);
   const red = (colorValue >>> 16) & 255;
   const green = (colorValue >>> 8) & 255;
   const blue = colorValue & 255;
-  const alpha = rasterizeAvatarDetailsAlpha(details, faceGeometry, role);
+  const alpha = rasterizeAvatarDetailsAlpha(
+    details,
+    faceGeometry,
+    role,
+    depth,
+  );
   const rgba = new Uint8ClampedArray(alpha.length * 4);
   for (let index = 0; index < alpha.length; index += 1) {
     const rgbaIndex = index * 4;
@@ -1444,6 +1484,7 @@ export function rasterizeVisibleAvatarDetailsRgba(
   color: string | null | undefined,
   faceGeometry: Partial<AvatarDetailsFaceGeometry> | null | undefined,
   state: Readonly<{ blinking: boolean; talking: boolean }>,
+  depth: AvatarDetailsFaceDepth = "all",
 ): Uint8ClampedArray {
   const visibleAlpha = new Uint8Array(
     AVATAR_DETAILS_CANVAS_SIZE * AVATAR_DETAILS_CANVAS_SIZE,
@@ -1453,7 +1494,12 @@ export function rasterizeVisibleAvatarDetailsRgba(
   if (!state.talking) visibleRoles.push("talking");
 
   for (const role of visibleRoles) {
-    const roleAlpha = rasterizeAvatarDetailsAlpha(details, faceGeometry, role);
+    const roleAlpha = rasterizeAvatarDetailsAlpha(
+      details,
+      faceGeometry,
+      role,
+      depth,
+    );
     for (let index = 0; index < roleAlpha.length; index += 1) {
       visibleAlpha[index] = Math.max(
         visibleAlpha[index] ?? 0,

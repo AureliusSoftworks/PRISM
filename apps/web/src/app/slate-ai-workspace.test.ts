@@ -24,15 +24,25 @@ describe("Slate AI workspace controls", () => {
     assert.match(workspace, /livingSummary\.tail/u);
     assert.match(workspace, /Could this title be stronger\?/u);
     assert.match(workspace, /SLATE_TITLE_REVIEW_INTERVAL_CHARS = 12_000/u);
-    assert.match(workspace, /requestTitleSuggestion\(\{ quiet: true \}\)/u);
+    assert.match(workspace, /project\.titleOrigin !== "spark"/u);
+    assert.match(workspace, /Working title checkpoint/u);
+    assert.match(workspace, /Review working title/u);
+    assert.doesNotMatch(workspace, /requestTitleSuggestion\(\{ quiet: true \}\)/u);
     assert.match(workspace, /resolveTitleSuggestion\("accepted"\)/u);
   });
 
-  it("renders a movable collapsible Prism project companion", () => {
+  it("renders a movable ephemeral Markdown Prism project companion", () => {
     assert.match(workspace, /data-tutorial-target="slate-project-chat"/u);
     assert.match(workspace, /onPointerDown=\{beginCompanionDrag\}/u);
-    assert.match(workspace, /Nothing here edits the manuscript/u);
+    assert.match(workspace, /<ReactMarkdown remarkPlugins=\{\[remarkGfm\]\}>/u);
+    assert.match(workspace, /Ideas fade · the last 3 can recover after a close/u);
+    assert.match(workspace, /className=\{styles\.companionBubble\}/u);
+    assert.match(workspace, /<path d="M16 5\.2 27 25H5Z"/u);
     assert.match(styles, /\.companionAvatar\s*\{/u);
-    assert.match(styles, /\.companionPanel\s*\{/u);
+    assert.match(styles, /\.companionAvatar::before\s*\{/u);
+    assert.match(styles, /\.companionBubble\s*\{/u);
+    assert.match(styles, /@keyframes slateCompanionBubbleLife/u);
+    assert.match(styles, /@keyframes slateCompanionBubbleReducedLife/u);
+    assert.doesNotMatch(styles, /\.companionPanel\s*\{/u);
   });
 });

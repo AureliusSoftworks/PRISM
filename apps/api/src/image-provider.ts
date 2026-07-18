@@ -71,6 +71,7 @@ export async function generateImage(
     model?: string;
     size?: string;
     quality?: string;
+    background?: "transparent" | "opaque" | "auto";
     signal?: AbortSignal;
   } = {}
 ): Promise<ImageGenerationResult> {
@@ -94,6 +95,7 @@ export async function generateImage(
   body.size = normalized.size;
   body.quality = normalized.quality;
   body.output_format = "png";
+  if (request.background) body.background = request.background;
 
   const response = await fetch("https://api.openai.com/v1/images/generations", {
     method: "POST",

@@ -7,15 +7,27 @@ import {
   SIGNAL_ELEVENLABS_SOUND_PROMPT_MAX_CHARACTERS,
 } from "../elevenlabs-sound.ts";
 
-test("Signal atmosphere prompt stays environmental and studio-specific", () => {
+test("Signal atmosphere prompt asks what the finished studio sounds like in silence", () => {
   const prompt = buildSignalAtmospherePrompt({
-    showName: "The Long View",
-    studioIdentity: "A timber observatory above a rain-dark valley.",
+    showName: "Under the Surface",
+    studioIdentity:
+      "An underwater glass studio with slow water channels, occasional bubbles, and a radio static panel.",
   });
-  assert.match(prompt, /environmental room-tone loop/iu);
-  assert.match(prompt, /timber observatory/iu);
-  assert.match(prompt, /clearly audible at low playback level/iu);
-  assert.match(prompt, /broadcast-ready/iu);
+  assert.match(
+    prompt,
+    /What would it sound like in this room if one were completely silent\?/u,
+  );
+  assert.match(prompt, /underwater glass studio/iu);
+  assert.match(prompt, /water channels/iu);
+  assert.match(prompt, /occasional bubbles/iu);
+  assert.match(prompt, /warm low room resonance/iu);
+  assert.match(prompt, /soft bass weight/iu);
+  assert.match(prompt, /damped low-mid texture/iu);
+  assert.match(prompt, /upper-frequency detail faint and diffuse/iu);
+  assert.match(prompt, /occasional distinct set sounds/iu);
+  assert.match(prompt, /smooth loop boundary/iu);
+  assert.doesNotMatch(prompt, /\bstatic\b|\bhiss\b|\bcrackle\b/iu);
+  assert.doesNotMatch(prompt, /ventilation|microphone-room/iu);
   assert.doesNotMatch(prompt, /\bquiet\b|\bhush\b|\brestrained\b/iu);
   assert.doesNotMatch(prompt, /\bno\b|\bavoid\b|\bwithout\b/iu);
 });
@@ -26,12 +38,13 @@ test("Signal atmosphere prompt stays within ElevenLabs' 450-character limit", ()
     studioIdentity: `A timber observatory ${"with layered acoustic artifacts ".repeat(120)}`,
   });
   assert.ok(prompt.length <= SIGNAL_ELEVENLABS_SOUND_PROMPT_MAX_CHARACTERS);
-  assert.match(prompt, /Acoustic identity: A timber observatory/iu);
-  assert.match(prompt, /ending carries directly into the opening/iu);
-  assert.ok(
-    prompt.indexOf("ending carries") < prompt.indexOf("Acoustic identity"),
-    "loop-boundary direction should survive a long studio identity",
+  assert.match(
+    prompt,
+    /What would it sound like in this room if one were completely silent\?/u,
   );
+  assert.match(prompt, /Studio: A timber observatory/iu);
+  assert.match(prompt, /sounds implied by this exact studio/iu);
+  assert.match(prompt, /smooth loop boundary/iu);
 });
 
 test("Signal atmosphere request asks ElevenLabs for a 30-second loop", async () => {
