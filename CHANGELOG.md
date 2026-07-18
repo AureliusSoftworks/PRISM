@@ -12,6 +12,55 @@ Active development happens on the `dev` branch; every release is a merge into
 
 _Staging area - nothing queued for release yet._
 
+## [0.11.0] - 2026-07-18
+
+### Added
+
+- **Coffee has a living table atmosphere.** An adaptive GPU scene runtime adds
+  restrained environmental motion with automatic capability tuning and
+  reduced-motion safety.
+- **Signal has a complete studio production workspace.** Hosts can soundcheck
+  and place the cast, balance persistent voice and ambience levels, use
+  audience-only Powers, and review full listener history.
+- **Slate opens more paths into a story.** Projects can begin from a spark or
+  existing pages, create optional titles and covers, and use a movable
+  ephemeral Markdown companion with a three-message recovery buffer.
+- **Marketplace personas carry more of their authored identity.** Curated
+  portable packages preserve voice profiles, Powers, avatars, and face details
+  across accounts.
+
+### Changed
+
+- **Custom web menus now share one PRISM interaction system.** Context and
+  click-open menus use consistent glass styling, measured positioning,
+  keyboard navigation, focus behavior, action language, and accessible states.
+- **Response recovery and local-model preparation are more resilient.** Auto
+  mode supports one to five ordered backup models, while Coffee and Signal
+  pause timed sessions during confirmed Ollama warmup and recover explicitly.
+- **Avatar, voice, and presence details feel more coherent.** Portable
+  ElevenLabs identities remain authoritative, CRT face ink and scaling are
+  more consistent, and voiced scenes share restrained breath and room detail.
+- **Signal and Coffee production stays synchronized.** Cameras, producer cues,
+  cups, foley, replay, and endings now follow canonical session state.
+- **Local development reloads shared workspace dependencies reliably.** The
+  launcher builds and watches shared packages before restarting dependent
+  services.
+
+### Fixed
+
+- **Coffee keeps keyboard focus through room staging and return.** The primary
+  staging action and restored room target remain focused after late UI mounts.
+- **Menu keyboard and light-theme behavior is predictable.** Right Arrow no
+  longer activates ordinary actions, Tab follows the document, first-item
+  focus survives pointer invocation, and destructive actions remain readable.
+- **Warmup polling releases completed request listeners.** Repeated model
+  readiness checks no longer accumulate abort handlers.
+- **Avatar Details keeps its CRT canvas dark in Light Mode.** The editor no
+  longer presents a white screen behind phosphor artwork.
+- **Signal live production is more reliable.** Speech playback, producer cues,
+  camera cadence, cup state, natural outros, and the final end card remain
+  coordinated through completion and replay.
+
 ## [0.10.0] - 2026-07-16
 
 ### Added

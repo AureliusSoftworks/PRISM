@@ -12,6 +12,7 @@ import type {
   AutoFallbackProvider,
   AutoRecoveryTraceV1,
 } from "./autoFallback.js";
+import type { ListenerReactionPlanV1 } from "./listenerReaction.js";
 
 function normalizeStoredAutoRecoveryTrace(
   value: unknown
@@ -211,12 +212,22 @@ export interface CoffeeReplayBotDepartureEventPayload {
   occurredAt: string;
 }
 
+export interface CoffeeReplayListenerReactionEventPayload {
+  v: 1;
+  name: "coffeeReplayEvent";
+  kind: "listenerReaction";
+  botId: string;
+  occurredAt: string;
+  plan: ListenerReactionPlanV1;
+}
+
 export type CoffeeReplayEventPayload =
   | CoffeeReplayArrivalEventPayload
   | CoffeeReplayMoodEventPayload
   | CoffeeReplayTopOffEventPayload
   | CoffeeReplayPlayerDepartureEventPayload
-  | CoffeeReplayBotDepartureEventPayload;
+  | CoffeeReplayBotDepartureEventPayload
+  | CoffeeReplayListenerReactionEventPayload;
 
 export type ZenDisplayAlign = "start" | "center" | "end";
 
@@ -674,6 +685,55 @@ function normalizeCoffeeReplaySocialSnapshot(
   };
 }
 
+function normalizeStoredListenerReactionPlan(
+  value: unknown,
+): ListenerReactionPlanV1 | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const row = value as Record<string, unknown>;
+  const id = (candidate: unknown): string | undefined =>
+    typeof candidate === "string" && candidate.trim() && candidate.trim().length <= 160
+      ? candidate.trim()
+      : undefined;
+  const speakerBotId = id(row.speakerBotId);
+  const listenerBotId = id(row.listenerBotId);
+  const messageId = id(row.messageId);
+  const seed = id(row.seed);
+  const targetSource = row.targetSource === "role" ||
+      row.targetSource === "direct" || row.targetSource === "inferred"
+    ? row.targetSource
+    : undefined;
+  const visualAction = row.visualAction === "nod" ||
+      row.visualAction === "lean_in" || row.visualAction === "head_tilt" ||
+      row.visualAction === "soft_smile" || row.visualAction === "thoughtful_hmm"
+    ? row.visualAction
+    : undefined;
+  const spokenCue = row.spokenCue === "mm-hm" || row.spokenCue === "I see" ||
+      row.spokenCue === "hmm" || row.spokenCue === "right" ||
+      row.spokenCue === "oh" || row.spokenCue === "go on"
+    ? row.spokenCue
+    : undefined;
+  if (
+    row.v !== 1 || row.name !== "listenerReaction" || !speakerBotId ||
+    !listenerBotId || speakerBotId === listenerBotId || !messageId || !seed ||
+    !targetSource || !visualAction || typeof row.targetProgress !== "number" ||
+    !Number.isFinite(row.targetProgress) || row.targetProgress < 0.3 ||
+    row.targetProgress > 0.75 || typeof row.cameraCutEligible !== "boolean"
+  ) return undefined;
+  return {
+    v: 1,
+    name: "listenerReaction",
+    speakerBotId,
+    listenerBotId,
+    messageId,
+    targetSource,
+    visualAction,
+    ...(spokenCue ? { spokenCue } : {}),
+    targetProgress: row.targetProgress,
+    seed,
+    cameraCutEligible: row.cameraCutEligible,
+  };
+}
+
 export function normalizeCoffeeReplayEventPayload(
   value: unknown
 ): CoffeeReplayEventPayload | undefined {
@@ -692,6 +752,18 @@ export function normalizeCoffeeReplayEventPayload(
   }
   const botId = normalizeCoffeeReplayBotId(row.botId);
   if (!botId) return undefined;
+  if (row.kind === "listenerReaction") {
+    const plan = normalizeStoredListenerReactionPlan(row.plan);
+    if (!plan || plan.listenerBotId !== botId) return undefined;
+    return {
+      v: 1,
+      name: "coffeeReplayEvent",
+      kind: "listenerReaction",
+      botId,
+      occurredAt,
+      plan,
+    };
+  }
   if (row.kind === "botDeparture") {
     const seatIndex =
       typeof row.seatIndex === "number" &&

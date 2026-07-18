@@ -18,6 +18,7 @@ import {
   normalizeBotFaceBlinkOffsetY,
   normalizeBotFaceBlinkScale,
   normalizeBotFaceEyeCharacter,
+  normalizeBotFaceEyeCount,
   normalizeBotFaceEyeOffsetX,
   normalizeBotFaceEyeOffsetY,
   normalizeBotFaceEyeRotationDeg,
@@ -30,6 +31,7 @@ import {
   normalizeBotFaceMouthScale,
   normalizeBotFaceThinkingFrames,
   type BotFaceBlinkBar,
+  type BotFaceEyeCount,
   type BotFaceFontId,
   type BotFaceGlyphAnimation,
   type BotFaceThinkingFrames,
@@ -231,6 +233,7 @@ export type CoffeeSeatPlateEmojiProps = {
   faceEyeOffsetX?: number | null;
   faceEyeOffsetY?: number | null;
   faceEyeRotationDeg?: number | null;
+  faceEyeCount?: BotFaceEyeCount | number | null;
   faceMouthScale?: number | null;
   faceMouthOffsetX?: number | null;
   faceMouthOffsetY?: number | null;
@@ -310,6 +313,7 @@ export function CoffeeSeatPlateEmoji({
   faceEyeOffsetX,
   faceEyeOffsetY,
   faceEyeRotationDeg,
+  faceEyeCount,
   faceMouthScale,
   faceMouthOffsetX,
   faceMouthOffsetY,
@@ -332,6 +336,9 @@ export function CoffeeSeatPlateEmoji({
       : "face";
   const normalizedFaceEyeCharacter =
     normalizeBotFaceEyeCharacter(faceEyeCharacter);
+  const normalizedFaceEyeCount = normalizedFaceEyeCharacter
+    ? (normalizeBotFaceEyeCount(faceEyeCount) ?? 1)
+    : 1;
   const normalizedFaceMouthCharacter =
     normalizeBotFaceMouthCharacter(faceMouthCharacter);
   const normalizedFaceMouthAnimation =
@@ -660,6 +667,9 @@ export function CoffeeSeatPlateEmoji({
           : undefined
       }
       data-face-eye-character={normalizedFaceEyeCharacter ?? undefined}
+      data-face-eye-count={
+        normalizedFaceEyeCharacter ? normalizedFaceEyeCount : undefined
+      }
       data-face-mouth-character={renderedFaceMouthCharacter ?? undefined}
       data-face-mouth-animation={
         renderedFaceMouthCharacter ? normalizedFaceMouthAnimation : undefined
@@ -749,12 +759,18 @@ export function CoffeeSeatPlateEmoji({
               part === "mouth" && renderedFaceMouthCharacter
                 ? renderedFaceMouthCharacter
                 : glyph;
+            const renderCustomEyePair =
+              part === "eyes" &&
+              normalizedFaceEyeCharacter !== null &&
+              normalizedFaceEyeCount === 2 &&
+              displayBlinkPhase !== "closed";
             const partFaceFont = part === "eyes" ? faceEyesFont : faceMouthFont;
             const opticalOffset = coffeeSeatGlyphOpticalOffset({
               part,
               glyph: renderedGlyph,
               voicePreset,
               rotateDeg,
+              pairedEye: renderCustomEyePair,
             });
             return (
               <span
@@ -777,17 +793,36 @@ export function CoffeeSeatPlateEmoji({
                     : undefined
                 }
               >
-                <span
-                  ref={
-                    part === "mouth" && renderedFaceMouthCharacter
-                      ? customMouthGlyphRef
-                      : undefined
-                  }
-                  data-crt-glyph-layer="true"
-                  data-crt-glyph-content={renderedGlyph}
-                >
-                  {renderedGlyph}
-                </span>
+                {renderCustomEyePair ? (
+                  <span data-custom-eye-pair="true">
+                    <span
+                      data-custom-eye-pair-side="left"
+                      data-crt-glyph-layer="true"
+                      data-crt-glyph-content={renderedGlyph}
+                    >
+                      {renderedGlyph}
+                    </span>
+                    <span
+                      data-custom-eye-pair-side="right"
+                      data-crt-glyph-layer="true"
+                      data-crt-glyph-content={renderedGlyph}
+                    >
+                      {renderedGlyph}
+                    </span>
+                  </span>
+                ) : (
+                  <span
+                    ref={
+                      part === "mouth" && renderedFaceMouthCharacter
+                        ? customMouthGlyphRef
+                        : undefined
+                    }
+                    data-crt-glyph-layer="true"
+                    data-crt-glyph-content={renderedGlyph}
+                  >
+                    {renderedGlyph}
+                  </span>
+                )}
               </span>
             );
           });

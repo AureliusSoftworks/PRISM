@@ -12,7 +12,7 @@ const tutorialsSource = readFileSync(
   "utf8",
 );
 
-test("Signal has a default-off immersive voice settings surface", () => {
+test("Signal presents immersive voice performance as automatic", () => {
   assert.match(settingsPanelSource, /\| "botcast"/u);
   assert.match(
     settingsPanelSource,
@@ -20,7 +20,13 @@ test("Signal has a default-off immersive voice settings surface", () => {
   );
   assert.match(pageSource, /activeSettingsScope === "botcast"/u);
   assert.match(pageSource, /data-settings-section="botcast"/u);
-  assert.match(pageSource, /settings\.signalImmersiveVoiceEffectsEnabled/u);
+  assert.match(pageSource, /Automatic ElevenLabs immersion/u);
+  assert.match(pageSource, /Always on with ElevenLabs v3/u);
+  assert.match(pageSource, /automatically adds sparse/u);
+  assert.match(pageSource, /action floats above/u);
+  assert.match(pageSource, /appears between/u);
+  assert.doesNotMatch(pageSource, /settings\.signalImmersiveVoiceEffectsEnabled/u);
+  assert.doesNotMatch(pageSource, /Save Signal settings/u);
   assert.match(pageSource, /activeSettingsScope !== "botcast"/u);
 });
 
@@ -32,13 +38,22 @@ test("Signal navbar opens its contextual settings and preserves the tutorial", (
   assert.match(pageSource, /resetSingleModeTutorial\("botcast"\)/u);
   assert.match(
     tutorialsSource,
-    /Signal Settings can also opt ElevenLabs voices into sparse, saved vocal reactions/u,
+    /Eligible ElevenLabs voices automatically receive sparse, saved vocal reactions/u,
   );
 });
 
 test("Signal sends saved performance text only through the ElevenLabs request lane", () => {
   assert.match(
     pageSource,
-    /settings\.signalImmersiveVoiceEffectsEnabled[\s\S]{0,140}elevenLabsText: message\.voicePerformanceText/u,
+    /signalOnlineVoiceEnabled && message\.voicePerformanceText[\s\S]{0,100}elevenLabsText: message\.voicePerformanceText/u,
+  );
+  assert.match(pageSource, /signalMessageId: message\.id/u);
+  assert.match(
+    pageSource,
+    /signalOnlineVoiceEnabled[\s\S]{0,180}settings\.englishVoiceEngine/u,
+  );
+  assert.doesNotMatch(
+    pageSource,
+    /effectiveProvider === "local"[\s\S]{0,100}settings\.englishVoiceEngine/u,
   );
 });

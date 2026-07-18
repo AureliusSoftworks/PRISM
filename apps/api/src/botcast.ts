@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import type {
   BotcastAtmosphereState,
+  BotcastCameraShot,
   BotcastCameraSuggestion,
   BotcastEpisode,
   BotcastEpisodeAdvanceRequest,
@@ -8,19 +9,24 @@ import type {
   BotcastEpisodeCreateRequest,
   BotcastEpisodeOutcome,
   BotcastEpisodeProvider,
+  BotcastPersonaReview,
   BotcastEpisodeResponseMode,
   BotcastEpisodeSegment,
   BotcastEpisodeSummary,
   BotcastFallbackStudioAccentVariant,
+  BotcastGuestPresenceMode,
   BotcastMessage,
   BotcastProducerCue,
   BotcastReplayEvent,
   BotcastReplayEventKind,
+  BotcastSocialInfluenceEventV1,
   BotcastSegmentRecord,
   BotcastShow,
   BotcastShowCreateRequest,
   BotcastShowPatchRequest,
   BotcastStudioLayout,
+  BotcastStudioAtmosphereMix,
+  BotcastVoiceLevelsByBotId,
   BotcastLogoGlyph,
   BotcastLogoState,
   BotcastSpeakerRole,
@@ -30,11 +36,13 @@ import type {
   BotPowerTargetV1,
 } from "@localai/shared";
 import {
+  BOTCAST_DASHBOARD_BLURB_FALLBACKS,
   BOTCAST_LOCAL_INTRO_DURATION_MS,
   BOTCAST_IMMERSIVE_VOICE_TAGS,
   BOTCAST_SESSION_DURATION_MINUTES_MAX,
   BOTCAST_SESSION_DURATION_MINUTES_MIN,
   BOTCAST_DEFAULT_STUDIO_LAYOUT,
+  BOTCAST_DEFAULT_STUDIO_ATMOSPHERE_MIX,
   BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS,
   applyBotcastProducerCueToTension,
   activeBotPowersV1,
@@ -44,7 +52,9 @@ import {
   botcastDirectorSuggestion,
   botcastGuestDepartureEligible,
   botcastNextSpeakerRole,
+  buildSignalListenerReactionPlanV1,
   botcastReplayTimeline,
+  botcastSocialInfluenceEventsAt,
   botcastSegmentForTurn,
   botcastSessionShouldClose,
   botcastTensionStageForLevel,
@@ -53,6 +63,8 @@ import {
   isBotcastFallbackStudioAccentVariant,
   normalizeVoiceDeliveryMood,
   normalizeBotcastStudioLayout,
+  normalizeBotcastStudioAtmosphereMix,
+  normalizeBotcastVoiceLevelsByBotId,
   parseStoredBotPowersV1,
   rankSignalPersonaTemperaments,
   autoFallbackResolvedChain,
@@ -72,6 +84,9 @@ const BOTCAST_SHOW_NAME_MAX = 80;
 const BOTCAST_TEXT_MAX = 2_000;
 const BOTCAST_TOPIC_MAX = 280;
 const BOTCAST_STUDIO_IDENTITY_MAX = 2_400;
+const BOTCAST_DASHBOARD_BLURB_TARGET = 24;
+const BOTCAST_DASHBOARD_BLURB_MIN = 12;
+const BOTCAST_DASHBOARD_BLURB_MAX_LENGTH = 140;
 const BOTCAST_SPEAKER_MAX_TOKENS = 160;
 const BOTCAST_OPENAI_REASONING_MIN_COMPLETION_TOKENS = 384;
 
@@ -107,6 +122,10 @@ type BotcastShowRow = {
   intro_audio_model?: string | null;
   intro_audio_duration_ms?: number | null;
   intro_audio_revision?: number | null;
+  atmosphere_audio_provider?: string | null;
+  atmosphere_audio_model?: string | null;
+  atmosphere_audio_duration_ms?: number | null;
+  atmosphere_audio_revision?: number | null;
 };
 
 export type StoredBotcastShowIntroAudio = {
@@ -120,6 +139,8 @@ export type StoredBotcastShowIntroAudio = {
   createdAt: string;
   updatedAt: string;
 };
+
+export type StoredBotcastShowAtmosphereAudio = StoredBotcastShowIntroAudio;
 
 type BotcastEpisodeRow = {
   id: string;
@@ -142,6 +163,13 @@ type BotcastEpisodeRow = {
   started_at: string;
   completed_at: string | null;
   runtime_ms: number | null;
+  model_warmup_hold_duration_ms: number;
+  model_warmup_hold_started_at: string | null;
+  persona_reviewer_bot_id: string | null;
+  persona_reviewer_name: string | null;
+  persona_rating: number | null;
+  persona_comment: string | null;
+  persona_reviewed_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -195,14 +223,45 @@ export interface BotcastGenerationOptions {
   preferredLocalModel?: string | null;
   preferredOnlineModel?: string | null;
   autoFallbackChain?: AutoFallbackChainV1 | null;
-  immersiveVoiceEffectsEnabled?: boolean;
   providerFactory?: typeof selectProvider;
 }
 
-function cleanText(raw: unknown, fallback: string, max = BOTCAST_TEXT_MAX): string {
+export type BotcastBookingSuggestionField =
+  | "topic"
+  | "producerBrief"
+  | "booking";
+
+export interface BotcastBookingSuggestionInput {
+  guestBotId: string;
+  field: BotcastBookingSuggestionField;
+  currentTopic?: string | null;
+  currentProducerBrief?: string | null;
+  modelOverride?: string | null;
+}
+
+function cleanText(
+  raw: unknown,
+  fallback: string,
+  max = BOTCAST_TEXT_MAX,
+): string {
   if (typeof raw !== "string") return fallback;
   const cleaned = raw.replace(/\s+/gu, " ").trim();
   return cleaned ? cleaned.slice(0, max) : fallback;
+}
+
+function normalizeDashboardBlurbs(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const blurbs: string[] = [];
+  for (const value of raw) {
+    const blurb = cleanText(value, "", BOTCAST_DASHBOARD_BLURB_MAX_LENGTH);
+    const key = blurb.toLocaleLowerCase();
+    if (!blurb || seen.has(key)) continue;
+    seen.add(key);
+    blurbs.push(blurb);
+    if (blurbs.length >= BOTCAST_DASHBOARD_BLURB_TARGET) break;
+  }
+  return blurbs;
 }
 
 function normalizeAccentColor(raw: unknown): string {
@@ -220,7 +279,9 @@ function stableHash(raw: string): number {
   return value >>> 0;
 }
 
-export function synthesizeBotcastShowName(host: Pick<BotcastBotProfile, "id" | "name" | "systemPrompt">): string {
+export function synthesizeBotcastShowName(
+  host: Pick<BotcastBotProfile, "id" | "name" | "systemPrompt">,
+): string {
   const name = cleanText(host.name, "The Host", 48);
   const formats = [
     `The ${name} Frequency`,
@@ -229,13 +290,26 @@ export function synthesizeBotcastShowName(host: Pick<BotcastBotProfile, "id" | "
     `The Curious Mind of ${name}`,
     `${name} in the Margins`,
   ];
-  return formats[stableHash(`${host.id}:${host.systemPrompt}`) % formats.length]!;
+  return formats[
+    stableHash(`${host.id}:${host.systemPrompt}`) % formats.length
+  ]!;
 }
 
 const BOTCAST_SHOW_NAME_DIRECTIONS = [
   "Find a title that can stand on its own without the host's name: a surprising phrase, vivid metaphor, double meaning, or conceptual tension drawn from the host's worldview.",
   "Silently draft several candidates, reject generic patterns such as 'Inside [Name]', 'The [Name] Show', 'Conversations with [Name]', and 'The Curious Mind of [Name]', then return only the strongest.",
   "Keep the title memorable, natural to say aloud, and 1-5 words. Use the host's name only when indispensable to genuinely excellent wordplay.",
+] as const;
+
+const BOTCAST_DASHBOARD_BLURB_DIRECTIONS = [
+  `Write exactly ${BOTCAST_DASHBOARD_BLURB_TARGET} short dashboard blurbs in the host's first-person voice, each no more than ${BOTCAST_DASHBOARD_BLURB_MAX_LENGTH} characters.`,
+  "Make every line feel native to this specific host and show: draw on the host's worldview, verbal rhythm, comic pressure points, premise, and hosting style instead of generic podcast jokes.",
+  "Let the humor fit the persona—dry, warm, cerebral, chaotic, earnest, or severe as appropriate—rather than making every host sound snarky.",
+  "Keep the batch genuinely varied: mix dry backstage asides, provocative teasers, guest-chair invitations, self-aware production jokes, tiny challenges, and confident on-mic observations.",
+  "Vary the openings and sentence shapes. Use the host or show name no more than twice, and keep microphone or production references to at most four lines.",
+  "Each line must stand alone between episodes. Do not invent guests, episode topics, episode numbers, quotes, endorsements, audience facts, or events that have not happened.",
+  "Do not use markdown, hashtags, emojis, stage directions, labels, repeated templates, or 'As an AI'. Do not copy the supplied fallback or rejected lines.",
+  `Never return either fallback line: ${BOTCAST_DASHBOARD_BLURB_FALLBACKS.map((line) => JSON.stringify(line)).join(" or ")}.`,
 ] as const;
 
 function defaultShowPremise(host: BotcastBotProfile): string {
@@ -276,7 +350,8 @@ function atmosphereForHost(
     defaultStudioIdentity(host),
     BOTCAST_STUDIO_IDENTITY_MAX,
   );
-  const prompt = lighting === "day"
+  const prompt =
+    lighting === "day"
     ? [
         `Wide cinematic two-person podcast studio backdrop designed unmistakably for ${host.name}; no people and no readable text.`,
         `Canonical persona-first set bible: ${studioIdentity}`,
@@ -342,15 +417,14 @@ function copyrightSafeLogoTemperament(host: BotcastBotProfile): string {
     : defaultHostingStyle(host);
 }
 
-function logoForHost(
-  host: BotcastBotProfile,
-  revision = 1,
-): BotcastLogoState {
+function logoForHost(host: BotcastBotProfile, revision = 1): BotcastLogoState {
   const seed = `botcast:${host.id}:logo:${revision}`;
-  const audioForm = BOTCAST_LOGO_AUDIO_FORMS[
+  const audioForm =
+    BOTCAST_LOGO_AUDIO_FORMS[
     stableHash(`${seed}:audio-form`) % BOTCAST_LOGO_AUDIO_FORMS.length
   ]!;
-  const composition = BOTCAST_LOGO_COMPOSITIONS[
+  const composition =
+    BOTCAST_LOGO_COMPOSITIONS[
     stableHash(`${seed}:composition`) % BOTCAST_LOGO_COMPOSITIONS.length
   ]!;
   return {
@@ -361,6 +435,8 @@ function logoForHost(
       `Anchor the restrained palette in ${normalizeAccentColor(host.color)} with only one or two complementary tones.`,
       "Keep the identity visually independent from existing entertainment properties, character designs, signature objects, insignia, and existing logos.",
       "One centered simple mark, bold silhouette, generous negative space, no scene, no figure, no lettering, and no readable text. It must remain distinctive at 64 pixels.",
+      "Output only the isolated emblem on a true transparent alpha background. Do not draw a white, cream, black, or colored background; no app-icon tile, square, circle container, card, badge field, border, backdrop, floor, shadow plate, or glow panel.",
+      "The exact same mark and colors must remain legible on both near-black and near-white interface surfaces without inversion or hue rotation; use clean dual-surface edge contrast where needed.",
     ].join(" "),
     imageUrl: null,
     imageId: null,
@@ -372,12 +448,13 @@ function logoForHost(
 
 function logoFallbackForRow(row: BotcastShowRow): BotcastLogoState {
   const seed = `botcast:${row.host_bot_id}:logo:1`;
-  const audioForm = BOTCAST_LOGO_AUDIO_FORMS[
+  const audioForm =
+    BOTCAST_LOGO_AUDIO_FORMS[
     stableHash(`${seed}:audio-form`) % BOTCAST_LOGO_AUDIO_FORMS.length
   ]!;
   return {
     seed,
-    prompt: `Create a wholly original, non-figurative editorial emblem for an interview podcast, subtly incorporating ${audioForm}; use ${normalizeAccentColor(row.accent_color)} with one or two complementary tones; keep it visually independent from existing entertainment properties, character designs, signature objects, insignia, and existing logos; one centered simple mark with a bold silhouette and generous negative space; no scene, figure, lettering, or readable text; distinctive at 64 pixels.`,
+    prompt: `Create a wholly original, non-figurative editorial emblem for an interview podcast, subtly incorporating ${audioForm}; use ${normalizeAccentColor(row.accent_color)} with one or two complementary tones; keep it visually independent from existing entertainment properties, character designs, signature objects, insignia, and existing logos; one centered simple mark with a bold silhouette and generous negative space; no scene, figure, lettering, or readable text; distinctive at 64 pixels; output only the isolated emblem on a true transparent alpha background; no white, cream, black, or colored background, app-icon tile, container, card, badge field, border, backdrop, shadow plate, or glow panel; keep the exact same mark and colors legible on both near-black and near-white interface surfaces without inversion or hue rotation.`,
     imageUrl: null,
     imageId: null,
     revision: 1,
@@ -386,10 +463,13 @@ function logoFallbackForRow(row: BotcastShowRow): BotcastLogoState {
   };
 }
 
-function fallbackAtmosphere(lighting: BotcastStudioLighting): BotcastAtmosphereState {
+function fallbackAtmosphere(
+  lighting: BotcastStudioLighting,
+): BotcastAtmosphereState {
   return {
     seed: `botcast:fallback:${lighting}`,
-    prompt: lighting === "day"
+    prompt:
+      lighting === "day"
       ? "Neutral two-person podcast studio in soft natural daylight."
       : "Neutral two-person podcast studio with warm nighttime practical lighting.",
     imageUrl: null,
@@ -403,7 +483,11 @@ function normalizeAtmosphere(
   parsed: Partial<BotcastAtmosphereState> | undefined,
   fallback: BotcastAtmosphereState,
 ): BotcastAtmosphereState {
-  if (!parsed || typeof parsed.seed !== "string" || typeof parsed.prompt !== "string") {
+  if (
+    !parsed ||
+    typeof parsed.seed !== "string" ||
+    typeof parsed.prompt !== "string"
+  ) {
     return fallback;
   }
   return {
@@ -421,16 +505,22 @@ function normalizeAtmosphere(
 
 function parseAtmospheres(raw: string): {
   studioIdentity: string;
+  dashboardBlurbs: string[];
   dayAtmosphere: BotcastAtmosphereState;
   nightAtmosphere: BotcastAtmosphereState;
   studioLayout: BotcastStudioLayout;
+  voiceLevelsByBotId: BotcastVoiceLevelsByBotId;
+  atmosphereMix: BotcastStudioAtmosphereMix;
 } {
   try {
     const container = JSON.parse(raw) as Partial<BotcastAtmosphereState> & {
       studioIdentity?: unknown;
+      dashboardBlurbs?: unknown;
       dayAtmosphere?: Partial<BotcastAtmosphereState>;
       nightAtmosphere?: Partial<BotcastAtmosphereState>;
       studioLayout?: unknown;
+      voiceLevelsByBotId?: unknown;
+      atmosphereMix?: unknown;
     };
     const legacy = normalizeAtmosphere(container, fallbackAtmosphere("night"));
     return {
@@ -438,18 +528,28 @@ function parseAtmospheres(raw: string): {
         typeof container.studioIdentity === "string"
           ? cleanText(container.studioIdentity, "", BOTCAST_STUDIO_IDENTITY_MAX)
           : "",
+      dashboardBlurbs: normalizeDashboardBlurbs(container.dashboardBlurbs),
       // Existing single-studio shows remain visible in both themes until the
       // owner refreshes them into a purpose-built matched pair.
       dayAtmosphere: normalizeAtmosphere(container.dayAtmosphere, legacy),
       nightAtmosphere: normalizeAtmosphere(container.nightAtmosphere, legacy),
       studioLayout: normalizeBotcastStudioLayout(container.studioLayout),
+      voiceLevelsByBotId: normalizeBotcastVoiceLevelsByBotId(
+        container.voiceLevelsByBotId,
+      ),
+      atmosphereMix: normalizeBotcastStudioAtmosphereMix(
+        container.atmosphereMix,
+      ),
     };
   } catch {
     return {
       studioIdentity: "",
+      dashboardBlurbs: [],
       dayAtmosphere: fallbackAtmosphere("day"),
       nightAtmosphere: fallbackAtmosphere("night"),
       studioLayout: normalizeBotcastStudioLayout(undefined),
+      voiceLevelsByBotId: {},
+      atmosphereMix: normalizeBotcastStudioAtmosphereMix(undefined),
     };
   }
 }
@@ -459,7 +559,11 @@ function parseLogo(raw: string, row: BotcastShowRow): BotcastLogoState {
   try {
     const container = JSON.parse(raw) as { logo?: Partial<BotcastLogoState> };
     const parsed = container.logo;
-    if (!parsed || typeof parsed.seed !== "string" || typeof parsed.prompt !== "string") {
+    if (
+      !parsed ||
+      typeof parsed.seed !== "string" ||
+      typeof parsed.prompt !== "string"
+    ) {
       return fallback;
     }
     return {
@@ -472,7 +576,9 @@ function parseLogo(raw: string, row: BotcastShowRow): BotcastLogoState {
         parsed.status === "ready" || parsed.status === "failed"
           ? parsed.status
           : "fallback",
-      fallbackGlyph: BOTCAST_LOGO_GLYPHS.includes(parsed.fallbackGlyph as BotcastLogoGlyph)
+      fallbackGlyph: BOTCAST_LOGO_GLYPHS.includes(
+        parsed.fallbackGlyph as BotcastLogoGlyph,
+      )
         ? (parsed.fallbackGlyph as BotcastLogoGlyph)
         : fallback.fallbackGlyph,
     };
@@ -486,16 +592,24 @@ function serializeShowVisuals(
   nightAtmosphere: BotcastAtmosphereState,
   logo: BotcastLogoState,
   studioIdentity: string,
+  dashboardBlurbs: readonly string[],
   studioLayout: BotcastStudioLayout,
+  voiceLevelsByBotId: Readonly<BotcastVoiceLevelsByBotId>,
+  atmosphereMix: Readonly<BotcastStudioAtmosphereMix>,
 ): string {
   // Preserve the original root atmosphere shape for older clients and backup
   // readers while storing explicit variants for current Signal builds.
   return JSON.stringify({
     ...nightAtmosphere,
     studioIdentity,
+    dashboardBlurbs: normalizeDashboardBlurbs(dashboardBlurbs),
     dayAtmosphere,
     nightAtmosphere,
     studioLayout,
+    voiceLevelsByBotId: normalizeBotcastVoiceLevelsByBotId(
+      voiceLevelsByBotId,
+    ),
+    atmosphereMix: normalizeBotcastStudioAtmosphereMix(atmosphereMix),
     logo,
   });
 }
@@ -517,11 +631,15 @@ function mapShow(row: BotcastShowRow): BotcastShow {
     atmosphere: atmospheres.nightAtmosphere,
     ...atmospheres,
     logo: parseLogo(row.atmosphere_json, row),
-    introAudio: row.intro_audio_provider === "elevenlabs"
+    introAudio:
+      row.intro_audio_provider === "elevenlabs"
       ? {
           source: "elevenlabs",
           audioUrl: `/api/botcast/shows/${encodeURIComponent(row.id)}/intro-audio`,
-          durationMs: Math.max(3_000, Number(row.intro_audio_duration_ms ?? 6_000)),
+            durationMs: Math.max(
+              3_000,
+              Number(row.intro_audio_duration_ms ?? 6_000),
+            ),
           revision: Math.max(1, Number(row.intro_audio_revision ?? 1)),
           model: row.intro_audio_model ?? "music_v2",
         }
@@ -532,6 +650,25 @@ function mapShow(row: BotcastShowRow): BotcastShow {
           revision: 1,
           model: null,
         },
+    atmosphereAudio:
+      row.atmosphere_audio_provider === "elevenlabs"
+        ? {
+            source: "elevenlabs",
+            audioUrl: `/api/botcast/shows/${encodeURIComponent(row.id)}/atmosphere-audio`,
+            durationMs: Math.max(
+              3_000,
+              Number(row.atmosphere_audio_duration_ms ?? 30_000),
+            ),
+            revision: Math.max(1, Number(row.atmosphere_audio_revision ?? 1)),
+            model: row.atmosphere_audio_model ?? "eleven_text_to_sound_v2",
+          }
+        : {
+            source: "bundled",
+            audioUrl: "/audio/session-atmosphere/default-studio-room-loop.mp3",
+            durationMs: 30_000,
+            revision: 1,
+            model: null,
+          },
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     episodeCount: Number(row.episode_count ?? 0),
@@ -608,17 +745,42 @@ function mapEpisodeSummary(row: BotcastEpisodeRow): BotcastEpisodeSummary {
     startedAt: row.started_at,
     completedAt: row.completed_at,
     runtimeMs: row.runtime_ms,
+    modelWarmupHoldDurationMs: Math.max(
+      0,
+      row.model_warmup_hold_duration_ms ?? 0,
+    ),
+    modelWarmupHoldStartedAt: row.model_warmup_hold_started_at ?? null,
+    personaReview:
+      row.persona_reviewer_bot_id &&
+      row.persona_reviewer_name &&
+      typeof row.persona_rating === "number" &&
+      row.persona_comment &&
+      row.persona_reviewed_at
+        ? {
+            reviewerBotId: row.persona_reviewer_bot_id,
+            reviewerName: row.persona_reviewer_name,
+            rating: row.persona_rating,
+            comment: row.persona_comment,
+            createdAt: row.persona_reviewed_at,
+          }
+        : null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
 }
 
-function loadBotProfile(db: DatabaseSync, userId: string, botId: string): BotcastBotProfile {
-  const row = db.prepare(
+function loadBotProfile(
+  db: DatabaseSync,
+  userId: string,
+  botId: string,
+): BotcastBotProfile {
+  const row = db
+    .prepare(
     `SELECT id, name, system_prompt, powers_json, color, temperature, max_tokens, top_p,
             top_k, repetition_penalty
        FROM bots WHERE id = ? AND user_id = ? AND chat_enabled = 1`,
-  ).get(botId, userId) as
+    )
+    .get(botId, userId) as
     | {
         id: string;
         name: string;
@@ -653,9 +815,11 @@ function normalizedBotcastPowerTokens(value: string): string[] {
     .replace(/[^a-z0-9]+/gu, " ")
     .split(/\s+/u)
     .filter(Boolean)
-    .flatMap((token) => token.endsWith("s") && token.length > 4
+    .flatMap((token) =>
+      token.endsWith("s") && token.length > 4
       ? [token, token.slice(0, -1)]
-      : [token]);
+        : [token],
+    );
 }
 
 function botcastPowerTargetMatches(
@@ -669,28 +833,130 @@ function botcastPowerTargetMatches(
       target.name.trim().toLowerCase() === bot.name.trim().toLowerCase(),
     );
   }
-  const haystack = normalizedBotcastPowerTokens(`${bot.name} ${bot.systemPrompt}`);
+  const haystack = normalizedBotcastPowerTokens(
+    `${bot.name} ${bot.systemPrompt}`,
+  );
   const needles = normalizedBotcastPowerTokens(target.trait);
-  return needles.length > 0 && needles.every((needle) => haystack.includes(needle));
+  return (
+    needles.length > 0 && needles.every((needle) => haystack.includes(needle))
+  );
 }
 
 function assertBotcastPowerSpeechCompatibility(
   speaker: BotcastBotProfile,
   peer: BotcastBotProfile,
 ): void {
-  for (const power of activeBotPowersV1(speaker.powers)) {
-    for (const effect of power.compiled?.effects ?? []) {
-      if (effect.type !== "speech_audience") continue;
-      if (effect.allowed.some((target) => botcastPowerTargetMatches(target, peer))) continue;
-      throw new Error(
-        `${speaker.name}'s Power “${power.name || "Unnamed Power"}” does not allow them to address ${peer.name} in Signal.`,
-      );
-    }
-  }
+  const restriction = botcastPowerRestriction(speaker, peer, "speech_audience");
+  if (!restriction) return;
+  throw new Error(
+    `${speaker.name}'s Power “${restriction.name || "Unnamed Power"}” does not allow them to address ${peer.name} in Signal.`,
+  );
 }
 
-export function listBotcastShows(db: DatabaseSync, userId: string): BotcastShow[] {
-  const rows = db.prepare(
+function botcastPowerRestriction(
+  poweredBot: BotcastBotProfile,
+  peer: BotcastBotProfile,
+  effectType: "awareness" | "speech_audience",
+): BotPowerV1 | null {
+  for (const power of activeBotPowersV1(poweredBot.powers)) {
+    for (const effect of power.compiled?.effects ?? []) {
+      if (effect.type !== effectType) continue;
+      if (
+        effect.allowed.some((target) => botcastPowerTargetMatches(target, peer))
+      )
+        continue;
+      return power;
+    }
+  }
+  return null;
+}
+
+function botcastSocialInfluenceEventsForPair(args: {
+  source: BotcastBotProfile;
+  target: BotcastBotProfile;
+  sourceRole: BotcastSpeakerRole;
+  targetRole: BotcastSpeakerRole;
+  trigger: BotcastSocialInfluenceEventV1["trigger"];
+  atMs: number;
+  sourceMessageId?: string;
+}): BotcastSocialInfluenceEventV1[] {
+  const sourceIsImperceptible = Boolean(
+    botcastPowerRestriction(args.source, args.target, "awareness"),
+  );
+  const sourceIsInaudible = Boolean(
+    botcastPowerRestriction(args.source, args.target, "speech_audience"),
+  );
+  if (sourceIsImperceptible && sourceIsInaudible) return [];
+  return activeBotPowersV1(args.source.powers).flatMap((power) =>
+    (power.compiled?.effects ?? []).flatMap((effect) => {
+      if (
+        effect.type !== "social_influence" ||
+        effect.trigger !== args.trigger ||
+        !effect.targets.some((target) =>
+          botcastPowerTargetMatches(target, args.target),
+        )
+      ) {
+        return [];
+      }
+      return [
+        {
+          v: 1 as const,
+          effect: "social_influence" as const,
+          powerId: power.id,
+          powerName: power.name || "Power",
+          sourceBotId: args.source.id,
+          targetBotId: args.target.id,
+          sourceRole: args.sourceRole,
+          targetRole: args.targetRole,
+          trigger: effect.trigger,
+          polarity: effect.polarity,
+          strength: effect.strength,
+          atMs: Math.max(0, Math.round(args.atMs)),
+          ...(args.sourceMessageId
+            ? { sourceMessageId: args.sourceMessageId }
+            : {}),
+        },
+      ];
+    }),
+  );
+}
+
+function strongestNegativeBotcastInfluence(
+  influences: readonly BotcastSocialInfluenceEventV1[],
+): BotcastSocialInfluenceEventV1 | null {
+  const strengthRank = { small: 1, medium: 2, large: 3 } as const;
+  return influences.reduce<BotcastSocialInfluenceEventV1 | null>(
+    (strongest, influence) =>
+      influence.polarity === "negative" &&
+      (!strongest ||
+        strengthRank[influence.strength] > strengthRank[strongest.strength])
+        ? influence
+        : strongest,
+    null,
+  );
+}
+
+function botcastGuestPresenceMode(
+  host: BotcastBotProfile,
+  guest: BotcastBotProfile,
+): BotcastGuestPresenceMode {
+  const hostCannotPerceiveGuest = Boolean(
+    botcastPowerRestriction(guest, host, "awareness"),
+  );
+  const guestCannotAddressHost = Boolean(
+    botcastPowerRestriction(guest, host, "speech_audience"),
+  );
+  return hostCannotPerceiveGuest && guestCannotAddressHost
+    ? "audience_only"
+    : "present";
+}
+
+export function listBotcastShows(
+  db: DatabaseSync,
+  userId: string,
+): BotcastShow[] {
+  const rows = db
+    .prepare(
     `SELECT s.*,
             (SELECT COUNT(*) FROM botcast_episodes e
               WHERE e.user_id = s.user_id AND e.show_id = s.id) AS episode_count,
@@ -701,11 +967,20 @@ export function listBotcastShows(db: DatabaseSync, userId: string): BotcastShow[
             (SELECT i.duration_ms FROM botcast_show_intro_audio i
               WHERE i.user_id = s.user_id AND i.show_id = s.id) AS intro_audio_duration_ms,
             (SELECT i.revision FROM botcast_show_intro_audio i
-              WHERE i.user_id = s.user_id AND i.show_id = s.id) AS intro_audio_revision
+              WHERE i.user_id = s.user_id AND i.show_id = s.id) AS intro_audio_revision,
+            (SELECT a.provider FROM botcast_show_atmosphere_audio a
+              WHERE a.user_id = s.user_id AND a.show_id = s.id) AS atmosphere_audio_provider,
+            (SELECT a.model FROM botcast_show_atmosphere_audio a
+              WHERE a.user_id = s.user_id AND a.show_id = s.id) AS atmosphere_audio_model,
+            (SELECT a.duration_ms FROM botcast_show_atmosphere_audio a
+              WHERE a.user_id = s.user_id AND a.show_id = s.id) AS atmosphere_audio_duration_ms,
+            (SELECT a.revision FROM botcast_show_atmosphere_audio a
+              WHERE a.user_id = s.user_id AND a.show_id = s.id) AS atmosphere_audio_revision
        FROM botcast_shows s
       WHERE s.user_id = ?
       ORDER BY s.updated_at DESC`,
-  ).all(userId) as unknown as BotcastShowRow[];
+    )
+    .all(userId) as unknown as BotcastShowRow[];
   return rows.map(mapShow);
 }
 
@@ -726,17 +1001,21 @@ export function createBotcastShow(
   input: BotcastShowCreateRequest,
 ): BotcastShow {
   const host = loadBotProfile(db, userId, cleanText(input.hostBotId, "", 128));
-  const existing = db.prepare(
+  const existing = db
+    .prepare(
     "SELECT id FROM botcast_shows WHERE user_id = ? AND host_bot_id = ?",
-  ).get(userId, host.id) as { id: string } | undefined;
+    )
+    .get(userId, host.id) as { id: string } | undefined;
   if (existing) return getBotcastShow(db, userId, existing.id);
-  const previousShow = db.prepare(
+  const previousShow = db
+    .prepare(
     `SELECT fallback_studio_accent_variant
        FROM botcast_shows
       WHERE user_id = ?
       ORDER BY created_at DESC, rowid DESC
       LIMIT 1`,
-  ).get(userId) as { fallback_studio_accent_variant: number } | undefined;
+    )
+    .get(userId) as { fallback_studio_accent_variant: number } | undefined;
   const fallbackStudioAccentVariant = nextBotcastFallbackStudioAccentVariant(
     previousShow?.fallback_studio_accent_variant,
   );
@@ -770,7 +1049,10 @@ export function createBotcastShow(
       nightAtmosphere,
       logo,
       studioIdentity,
+      [],
       BOTCAST_DEFAULT_STUDIO_LAYOUT,
+      {},
+      BOTCAST_DEFAULT_STUDIO_ATMOSPHERE_MIX,
     ),
     now,
     now,
@@ -778,8 +1060,13 @@ export function createBotcastShow(
   return getBotcastShow(db, userId, id);
 }
 
-export function getBotcastShow(db: DatabaseSync, userId: string, showId: string): BotcastShow {
-  const row = db.prepare(
+export function getBotcastShow(
+  db: DatabaseSync,
+  userId: string,
+  showId: string,
+): BotcastShow {
+  const row = db
+    .prepare(
     `SELECT s.*,
             (SELECT COUNT(*) FROM botcast_episodes e
               WHERE e.user_id = s.user_id AND e.show_id = s.id) AS episode_count,
@@ -790,9 +1077,18 @@ export function getBotcastShow(db: DatabaseSync, userId: string, showId: string)
             (SELECT i.duration_ms FROM botcast_show_intro_audio i
               WHERE i.user_id = s.user_id AND i.show_id = s.id) AS intro_audio_duration_ms,
             (SELECT i.revision FROM botcast_show_intro_audio i
-              WHERE i.user_id = s.user_id AND i.show_id = s.id) AS intro_audio_revision
+              WHERE i.user_id = s.user_id AND i.show_id = s.id) AS intro_audio_revision,
+            (SELECT a.provider FROM botcast_show_atmosphere_audio a
+              WHERE a.user_id = s.user_id AND a.show_id = s.id) AS atmosphere_audio_provider,
+            (SELECT a.model FROM botcast_show_atmosphere_audio a
+              WHERE a.user_id = s.user_id AND a.show_id = s.id) AS atmosphere_audio_model,
+            (SELECT a.duration_ms FROM botcast_show_atmosphere_audio a
+              WHERE a.user_id = s.user_id AND a.show_id = s.id) AS atmosphere_audio_duration_ms,
+            (SELECT a.revision FROM botcast_show_atmosphere_audio a
+              WHERE a.user_id = s.user_id AND a.show_id = s.id) AS atmosphere_audio_revision
        FROM botcast_shows s WHERE s.id = ? AND s.user_id = ?`,
-  ).get(showId, userId) as BotcastShowRow | undefined;
+    )
+    .get(showId, userId) as BotcastShowRow | undefined;
   if (!row) throw new Error("Signal show not found.");
   return mapShow(row);
 }
@@ -810,9 +1106,11 @@ export function storeBotcastShowIntroAudio(
   },
 ): BotcastShow {
   getBotcastShow(db, userId, showId);
-  const previous = db.prepare(
+  const previous = db
+    .prepare(
     "SELECT revision FROM botcast_show_intro_audio WHERE show_id = ? AND user_id = ?",
-  ).get(showId, userId) as { revision?: number } | undefined;
+    )
+    .get(showId, userId) as { revision?: number } | undefined;
   const now = new Date().toISOString();
   const revision = Math.max(1, Number(previous?.revision ?? 0) + 1);
   db.prepare(
@@ -841,8 +1139,9 @@ export function storeBotcastShowIntroAudio(
     now,
     now,
   );
-  db.prepare("UPDATE botcast_shows SET updated_at = ? WHERE id = ? AND user_id = ?")
-    .run(now, showId, userId);
+  db.prepare(
+    "UPDATE botcast_shows SET updated_at = ? WHERE id = ? AND user_id = ?",
+  ).run(now, showId, userId);
   return getBotcastShow(db, userId, showId);
 }
 
@@ -851,12 +1150,105 @@ export function readBotcastShowIntroAudio(
   userId: string,
   showId: string,
 ): StoredBotcastShowIntroAudio | null {
-  const row = db.prepare(
+  const row = db
+    .prepare(
     `SELECT provider, model, prompt, content_type, audio_bytes, duration_ms,
             revision, created_at, updated_at
        FROM botcast_show_intro_audio
       WHERE show_id = ? AND user_id = ?`,
-  ).get(showId, userId) as
+    )
+    .get(showId, userId) as
+    | {
+        provider: "elevenlabs";
+        model: string;
+        prompt: string;
+        content_type: string;
+        audio_bytes: Uint8Array;
+        duration_ms: number;
+        revision: number;
+        created_at: string;
+        updated_at: string;
+      }
+    | undefined;
+  if (!row) return null;
+  return {
+    provider: "elevenlabs",
+    model: row.model,
+    prompt: row.prompt,
+    contentType: row.content_type,
+    audioBytes: Buffer.from(row.audio_bytes),
+    durationMs: row.duration_ms,
+    revision: row.revision,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function storeBotcastShowAtmosphereAudio(
+  db: DatabaseSync,
+  userId: string,
+  showId: string,
+  input: {
+    model: string;
+    prompt: string;
+    contentType: string;
+    audioBytes: Buffer;
+    durationMs: number;
+  },
+): BotcastShow {
+  getBotcastShow(db, userId, showId);
+  const previous = db
+    .prepare(
+      "SELECT revision FROM botcast_show_atmosphere_audio WHERE show_id = ? AND user_id = ?",
+    )
+    .get(showId, userId) as { revision?: number } | undefined;
+  const now = new Date().toISOString();
+  const revision = Math.max(1, Number(previous?.revision ?? 0) + 1);
+  db.prepare(
+    `INSERT INTO botcast_show_atmosphere_audio
+      (show_id, user_id, provider, model, prompt, content_type, audio_bytes,
+       duration_ms, revision, created_at, updated_at)
+     VALUES (?, ?, 'elevenlabs', ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(show_id) DO UPDATE SET
+       provider = excluded.provider,
+       model = excluded.model,
+       prompt = excluded.prompt,
+       content_type = excluded.content_type,
+       audio_bytes = excluded.audio_bytes,
+       duration_ms = excluded.duration_ms,
+       revision = excluded.revision,
+       updated_at = excluded.updated_at`,
+  ).run(
+    showId,
+    userId,
+    cleanText(input.model, "eleven_text_to_sound_v2", 80),
+    cleanText(input.prompt, "Signal studio atmosphere", 4_100),
+    cleanText(input.contentType, "audio/mpeg", 120),
+    input.audioBytes,
+    Math.max(3_000, Math.round(input.durationMs)),
+    revision,
+    now,
+    now,
+  );
+  db.prepare(
+    "UPDATE botcast_shows SET updated_at = ? WHERE id = ? AND user_id = ?",
+  ).run(now, showId, userId);
+  return getBotcastShow(db, userId, showId);
+}
+
+export function readBotcastShowAtmosphereAudio(
+  db: DatabaseSync,
+  userId: string,
+  showId: string,
+): StoredBotcastShowAtmosphereAudio | null {
+  const row = db
+    .prepare(
+      `SELECT provider, model, prompt, content_type, audio_bytes, duration_ms,
+            revision, created_at, updated_at
+       FROM botcast_show_atmosphere_audio
+      WHERE show_id = ? AND user_id = ?`,
+    )
+    .get(showId, userId) as
     | {
         provider: "elevenlabs";
         model: string;
@@ -889,11 +1281,16 @@ export function deleteBotcastShowIntroAudio(
   showId: string,
 ): BotcastShow {
   getBotcastShow(db, userId, showId);
-  db.prepare("DELETE FROM botcast_show_intro_audio WHERE show_id = ? AND user_id = ?")
-    .run(showId, userId);
+  db.prepare(
+    "DELETE FROM botcast_show_intro_audio WHERE show_id = ? AND user_id = ?",
+  ).run(showId, userId);
+  db.prepare(
+    "DELETE FROM botcast_show_atmosphere_audio WHERE show_id = ? AND user_id = ?",
+  ).run(showId, userId);
   const now = new Date().toISOString();
-  db.prepare("UPDATE botcast_shows SET updated_at = ? WHERE id = ? AND user_id = ?")
-    .run(now, showId, userId);
+  db.prepare(
+    "UPDATE botcast_shows SET updated_at = ? WHERE id = ? AND user_id = ?",
+  ).run(now, showId, userId);
   return getBotcastShow(db, userId, showId);
 }
 
@@ -912,11 +1309,23 @@ export function updateBotcastShow(
     patch.studioLayout,
     current.studioLayout,
   );
+  const voiceLevelsByBotId = normalizeBotcastVoiceLevelsByBotId(
+    patch.voiceLevelsByBotId,
+    current.voiceLevelsByBotId,
+  );
+  const atmosphereMix = normalizeBotcastStudioAtmosphereMix(
+    patch.atmosphereMix,
+    current.atmosphereMix,
+  );
   const studioIdentity = cleanText(
     patch.studioIdentity,
     current.studioIdentity || defaultStudioIdentity(host),
     BOTCAST_STUDIO_IDENTITY_MAX,
   );
+  const dashboardBlurbs =
+    patch.dashboardBlurbs === undefined
+      ? current.dashboardBlurbs
+      : normalizeDashboardBlurbs(patch.dashboardBlurbs);
   const regenerateBothAtmospheres = patch.regenerateAtmosphere === true;
   const regenerateDayAtmosphere =
     regenerateBothAtmospheres || patch.regenerateDayAtmosphere === true;
@@ -958,10 +1367,12 @@ export function updateBotcastShow(
             : "fallback",
     };
   }
-  const nightImageUrl = patch.nightAtmosphereImageUrl !== undefined
+  const nightImageUrl =
+    patch.nightAtmosphereImageUrl !== undefined
     ? patch.nightAtmosphereImageUrl
     : patch.atmosphereImageUrl;
-  const nightImageId = patch.nightAtmosphereImageId !== undefined
+  const nightImageId =
+    patch.nightAtmosphereImageId !== undefined
     ? patch.nightAtmosphereImageId
     : patch.atmosphereImageId;
   if (regenerateNightAtmosphere) {
@@ -998,15 +1409,15 @@ export function updateBotcastShow(
   }
   if (patch.regenerateLogo) {
     logo = {
-      ...logoForHost(
-        host,
-        current.logo.revision + 1,
-      ),
+      ...logoForHost(host, current.logo.revision + 1),
       imageUrl: current.logo.imageUrl,
       imageId: current.logo.imageId,
       status: current.logo.status,
     };
-  } else if (patch.logoImageUrl !== undefined || patch.logoImageId !== undefined) {
+  } else if (
+    patch.logoImageUrl !== undefined ||
+    patch.logoImageId !== undefined
+  ) {
     logo = {
       ...logo,
       imageUrl:
@@ -1034,7 +1445,10 @@ export function updateBotcastShow(
       nightAtmosphere,
       logo,
       studioIdentity,
+      dashboardBlurbs,
       studioLayout,
+      voiceLevelsByBotId,
+      atmosphereMix,
     ),
     now,
     showId,
@@ -1043,10 +1457,30 @@ export function updateBotcastShow(
   return getBotcastShow(db, userId, showId);
 }
 
+function validGeneratedDashboardBlurbs(
+  raw: unknown,
+  excluded: readonly string[] = [],
+): string[] | null {
+  const excludedKeys = new Set(
+    excluded.map((blurb) =>
+      cleanText(
+        blurb,
+        "",
+        BOTCAST_DASHBOARD_BLURB_MAX_LENGTH,
+      ).toLocaleLowerCase(),
+    ),
+  );
+  const blurbs = normalizeDashboardBlurbs(raw).filter(
+    (blurb) => !excludedKeys.has(blurb.toLocaleLowerCase()),
+  );
+  return blurbs.length >= BOTCAST_DASHBOARD_BLURB_MIN ? blurbs : null;
+}
+
 function parseGeneratedShowIdentity(raw: string): {
   name: string;
   premise: string;
   studioIdentity?: string;
+  dashboardBlurbs?: string[];
 } | null {
   const candidate = raw.match(/\{[\s\S]*\}/u)?.[0] ?? raw;
   try {
@@ -1058,9 +1492,34 @@ function parseGeneratedShowIdentity(raw: string): {
       "",
       BOTCAST_STUDIO_IDENTITY_MAX,
     );
+    const dashboardBlurbs = validGeneratedDashboardBlurbs(
+      parsed.dashboardBlurbs,
+      BOTCAST_DASHBOARD_BLURB_FALLBACKS,
+    );
     return name && premise
-      ? { name, premise, ...(studioIdentity ? { studioIdentity } : {}) }
+      ? {
+          name,
+          premise,
+          ...(studioIdentity ? { studioIdentity } : {}),
+          ...(dashboardBlurbs ? { dashboardBlurbs } : {}),
+        }
       : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseGeneratedDashboardBlurbs(
+  raw: string,
+  excluded: readonly string[],
+): string[] | null {
+  const candidate = raw.match(/\{[\s\S]*\}/u)?.[0] ?? raw;
+  try {
+    const parsed = JSON.parse(candidate) as Record<string, unknown>;
+    return validGeneratedDashboardBlurbs(
+      parsed.dashboardBlurbs ?? parsed.blurbs,
+      excluded,
+    );
   } catch {
     return null;
   }
@@ -1073,6 +1532,217 @@ function parseGeneratedShowName(raw: string): string | null {
     return cleanText(parsed.name, "", BOTCAST_SHOW_NAME_MAX) || null;
   } catch {
     return null;
+  }
+}
+
+function cleanGeneratedBookingSuggestion(
+  raw: string,
+  field: BotcastBookingSuggestionField,
+): string {
+  const fieldLabel =
+    field === "topic" ? "topic" : "(?:private )?producer brief";
+  const cleaned = raw
+    .replace(/^\s*```(?:text)?\s*/iu, "")
+    .replace(/\s*```\s*$/u, "")
+    .replace(new RegExp(`^\\s*(?:${fieldLabel})\\s*:\\s*`, "iu"), "")
+    .replace(/^["“]|["”]$/gu, "")
+    .replace(/\s+/gu, " ")
+    .trim();
+  return cleaned.slice(0, field === "topic" ? BOTCAST_TOPIC_MAX : 900);
+}
+
+function cleanGeneratedBooking(
+  raw: string,
+): { topic: string; producerBrief: string } | null {
+  const candidate = raw.match(/\{[\s\S]*\}/u)?.[0] ?? raw;
+  try {
+    const parsed = JSON.parse(candidate) as Record<string, unknown>;
+    const topic = cleanText(parsed.topic, "", BOTCAST_TOPIC_MAX);
+    const producerBrief = cleanText(parsed.producerBrief, "", 900);
+    return topic && producerBrief ? { topic, producerBrief } : null;
+  } catch {
+    return null;
+  }
+}
+
+function botcastAudienceOnlyProducerBriefFallback(topic: string): string {
+  const subject =
+    topic.replace(/[.!?]+$/u, "").trim() || "the episode's central question";
+  return `Treat this as an audience-only dramatic layer: have the host build a self-contained argument around “${subject}” without asking the guest for a response, while the unseen guest offers private counterpoints to listeners.`;
+}
+
+function botcastAudienceOnlyBriefRequiresGuestInteraction(
+  producerBrief: string,
+  guestName: string,
+): boolean {
+  const normalized = normalizeBotcastSpokenIdentity(producerBrief);
+  const guestTargets = [
+    normalizeBotcastSpokenIdentity(guestName),
+    "the guest",
+    "guest",
+    "him",
+    "her",
+    "them",
+  ].filter(Boolean);
+  const interactionPattern =
+    /\b(?:ask|press|question|probe|challenge|interview|invite|thank|wait for|draw out|follow up with)\b/gu;
+  return [...normalized.matchAll(interactionPattern)].some((match) => {
+    const nearbyDirection = normalized.slice(match.index, match.index + 120);
+    return guestTargets.some((target) =>
+      new RegExp(`(?:^| )${target}(?: |$)`, "u").test(nearbyDirection),
+    );
+  });
+}
+
+function repairBotcastAudienceOnlyProducerBrief(input: {
+  producerBrief: string;
+  topic: string;
+  guestName: string;
+}): string {
+  return botcastAudienceOnlyBriefRequiresGuestInteraction(
+    input.producerBrief,
+    input.guestName,
+  )
+    ? botcastAudienceOnlyProducerBriefFallback(input.topic)
+    : input.producerBrief;
+}
+
+export type BotcastBookingSuggestionResult =
+  | { value: string; generated: boolean }
+  | { topic: string; producerBrief: string; generated: boolean };
+
+export async function generateBotcastBookingSuggestion(
+  db: DatabaseSync,
+  userId: string,
+  showId: string,
+  input: BotcastBookingSuggestionInput,
+  generation: BotcastGenerationOptions,
+): Promise<BotcastBookingSuggestionResult> {
+  const show = getBotcastShow(db, userId, showId);
+  const host = loadBotProfile(db, userId, show.hostBotId);
+  const guest = loadBotProfile(db, userId, input.guestBotId);
+  if (guest.id === host.id) {
+    throw new Error("Choose a guest other than the Signal host.");
+  }
+  const audienceOnlyGuest =
+    botcastGuestPresenceMode(host, guest) === "audience_only";
+  const currentTopic = cleanText(input.currentTopic, "", BOTCAST_TOPIC_MAX);
+  const currentProducerBrief = cleanText(input.currentProducerBrief, "", 900);
+  const recentEpisodeTopics = listBotcastEpisodes(db, userId, showId)
+    .slice(0, 6)
+    .map((episode) => episode.topic)
+    .filter(Boolean);
+  const fieldDirections =
+    input.field === "booking"
+      ? [
+          "Return one JSON object with exactly two string fields: topic and producerBrief.",
+          audienceOnlyGuest
+            ? "The topic must be one compelling 8-to-22-word question this host can investigate through a solo argument and this unseen guest's private counterpoint."
+            : "The topic must be one compelling 8-to-22-word question this particular host would genuinely want to investigate with this particular guest.",
+          "Prioritize the question listeners drawn to this show's premise would regret the host not asking. Infer interests from the show, never demographic traits.",
+          "Make the guest essential: ground the question in a distinctive conviction, expertise, contradiction, or lived perspective present in their persona, so swapping in another guest would weaken it.",
+          "Avoid generic philosophy prompts, broad evergreen themes, biography recaps, praise, and questions whose only personalization is the guest's name.",
+          audienceOnlyGuest
+            ? "The producerBrief must give the host a self-contained editorial path and the unseen guest a distinct private counterpoint without requiring interaction between them."
+            : "The producerBrief must be one or two concise off-mic sentences giving the host a guest-specific editorial angle, a promising follow-up, and any useful boundary implied by the persona.",
+        ]
+      : input.field === "topic"
+      ? [
+          audienceOnlyGuest
+            ? "Return only one compelling topic, phrased as a specific question the host can investigate through a solo argument and this unseen guest's private counterpoint."
+            : "Return only one compelling interview topic, phrased as a specific question the host can genuinely investigate with this guest.",
+          "Make it 8 to 22 words, concrete enough to guide an episode, and rooted in a productive tension between these two personas.",
+          "Prioritize what this host would genuinely ask or listeners drawn to this show's premise would regret not hearing. Infer interests from the show, never demographic traits.",
+          "Make the guest essential rather than personalizing a generic prompt with their name.",
+          "Do not add a label, quotation marks, explanation, or markdown.",
+        ]
+      : [
+          "Return only a private off-mic producer brief for this episode in one or two concise sentences.",
+          audienceOnlyGuest
+            ? "Give the host a self-contained editorial path and the unseen guest a distinct private counterpoint without requiring interaction between them."
+            : "Give the host a specific editorial angle, one promising line of inquiry, and any useful boundary implied by the guest's persona.",
+          "Do not write dialogue, address the audience, add a label, or use markdown.",
+        ];
+  const presenceDirections = audienceOnlyGuest
+    ? [
+        "This pairing uses an audience-only dramatic format: the host cannot perceive or hear the booked guest, while listeners can hear the guest's private asides.",
+        "Shape the episode as a self-contained host argument with an unseen guest counterpoint. Never instruct the host to ask, press, question, follow up with, wait for, or thank the guest.",
+      ]
+    : [];
+  try {
+    const selected = generationProvider(
+      generation,
+      generation.preferredProvider,
+      input.modelOverride,
+    );
+    const raw = await selected.provider.generateResponse(
+      [
+        {
+          role: "system",
+          content: [
+            "You are a sharp podcast producer preparing one fictional, non-canonical Signal episode.",
+            "Use the supplied personas only as creative context. Do not claim real-world consent, endorsement, memory, or prior appearances.",
+            ...fieldDirections,
+            ...presenceDirections,
+          ].join(" "),
+        },
+        {
+          role: "user",
+          content: [
+            `Show: ${show.name}`,
+            `Show premise: ${show.premise}`,
+            `Hosting style: ${show.hostingStyle}`,
+            `Show identity: ${show.studioIdentity}`,
+            `Host: ${host.name}`,
+            `Host persona: ${host.systemPrompt.slice(0, 1_800)}`,
+            `Guest: ${guest.name}`,
+            `Guest persona: ${guest.systemPrompt.slice(0, 1_800)}`,
+            `Episode format: ${audienceOnlyGuest ? "Audience-only guest; the host cannot perceive or hear the guest." : "Two-way host and guest interview."}`,
+            `Current topic to avoid repeating: ${currentTopic || "None"}`,
+            `Recent episode topics to avoid repeating: ${recentEpisodeTopics.join(" | ") || "None"}`,
+            `Current producer brief: ${currentProducerBrief || "None"}`,
+          ].join("\n"),
+        },
+      ],
+      {
+        ...(selected.model ? { model: selected.model } : {}),
+        temperature: 0.94,
+        maxTokens:
+          input.field === "topic" ? 90 : input.field === "booking" ? 260 : 180,
+        usagePurpose: "botcast_brand",
+        ...(input.field === "booking" ? { jsonMode: true } : {}),
+      },
+    );
+    if (input.field === "booking") {
+      const booking = cleanGeneratedBooking(raw);
+      return booking
+        ? {
+            ...booking,
+            producerBrief: audienceOnlyGuest
+              ? repairBotcastAudienceOnlyProducerBrief({
+                  producerBrief: booking.producerBrief,
+                  topic: booking.topic,
+                  guestName: guest.name,
+                })
+              : booking.producerBrief,
+            generated: true,
+          }
+        : { topic: "", producerBrief: "", generated: false };
+    }
+    const cleanedValue = cleanGeneratedBookingSuggestion(raw, input.field);
+    const value =
+      audienceOnlyGuest && input.field === "producerBrief" && cleanedValue
+        ? repairBotcastAudienceOnlyProducerBrief({
+            producerBrief: cleanedValue,
+            topic: currentTopic,
+            guestName: guest.name,
+          })
+        : cleanedValue;
+    return { value, generated: Boolean(value) };
+  } catch {
+    return input.field === "booking"
+      ? { topic: "", producerBrief: "", generated: false }
+      : { value: "", generated: false };
   }
 }
 
@@ -1092,12 +1762,13 @@ export async function generateBotcastShowIdentity(
           role: "system",
           content: [
             "You are naming a premium podcast show around its host's singular voice.",
-            "Return one JSON object with exactly three strings: name, premise, and studioIdentity.",
+            "Return one JSON object with exactly four fields: string fields name, premise, and studioIdentity, plus a string array named dashboardBlurbs.",
             ...BOTCAST_SHOW_NAME_DIRECTIONS,
             "The premise must be one crisp sentence describing the conversational promise. Do not use markdown.",
             "studioIdentity is a compact persona-first set bible, not a mood board: define distinctive architecture or landscape, materials, spatial motifs, and at least six concrete artifacts whose subjects and arrangement reveal this host.",
             "The room should be recognizable as the host's world without their name, portrait, logo, or readable text. Generic books, plants, luxury chairs, acoustic panels, and podcast gear do not count as identity details unless made meaningfully specific.",
             "Do not specify lighting or time of day in studioIdentity; the same physical set will be rendered in both daylight and nighttime variants.",
+            ...BOTCAST_DASHBOARD_BLURB_DIRECTIONS,
           ].join(" "),
         },
         {
@@ -1108,7 +1779,7 @@ export async function generateBotcastShowIdentity(
       {
         ...(selected.model ? { model: selected.model } : {}),
         temperature: 0.82,
-        maxTokens: 520,
+        maxTokens: 1_200,
         jsonMode: true,
         usagePurpose: "botcast_brand",
       },
@@ -1123,6 +1794,70 @@ export async function generateBotcastShowIdentity(
       }),
       generated: true,
     };
+  } catch {
+    return { show: current, generated: false };
+  }
+}
+
+export async function generateBotcastShowDashboardBlurbs(
+  db: DatabaseSync,
+  userId: string,
+  showId: string,
+  generation: BotcastGenerationOptions,
+): Promise<{ show: BotcastShow; generated: boolean }> {
+  const current = getBotcastShow(db, userId, showId);
+  const host = loadBotProfile(db, userId, current.hostBotId);
+  try {
+    const selected = generationProvider(generation);
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const raw = await selected.provider.generateResponse(
+        [
+          {
+            role: "system",
+            content: [
+              "You write the tiny rotating dashboard remarks spoken by the host of a premium interview show.",
+              "Return one JSON object with exactly one field named dashboardBlurbs containing an array of strings.",
+              ...BOTCAST_DASHBOARD_BLURB_DIRECTIONS,
+              "The rejected lines in the user message already exist. Replace them with a fresh batch rather than paraphrasing them.",
+            ].join(" "),
+          },
+          {
+            role: "user",
+            content: [
+              `Show: ${current.name}`,
+              `Premise: ${current.premise}`,
+              `Hosting style: ${current.hostingStyle}`,
+              `Completed episodes: ${current.episodeCount}`,
+              `Host: ${host.name}`,
+              `Host persona:\n${host.systemPrompt.slice(0, 2_400)}`,
+              `Rejected lines:\n${[
+                ...BOTCAST_DASHBOARD_BLURB_FALLBACKS,
+                ...current.dashboardBlurbs,
+              ]
+                .map((blurb) => `- ${blurb}`)
+                .join("\n")}`,
+            ].join("\n"),
+          },
+        ],
+        {
+          ...(selected.model ? { model: selected.model } : {}),
+          temperature: Math.min(1, 0.92 + attempt * 0.04),
+          maxTokens: 1_100,
+          jsonMode: true,
+          usagePurpose: "botcast_brand",
+        },
+      );
+      const dashboardBlurbs = parseGeneratedDashboardBlurbs(raw, [
+        ...BOTCAST_DASHBOARD_BLURB_FALLBACKS,
+        ...current.dashboardBlurbs,
+      ]);
+      if (!dashboardBlurbs) continue;
+      return {
+        show: updateBotcastShow(db, userId, showId, { dashboardBlurbs }),
+        generated: true,
+      };
+    }
+    return { show: current, generated: false };
   } catch {
     return { show: current, generated: false };
   }
@@ -1172,7 +1907,8 @@ export async function generateBotcastShowName(
       if (!name) continue;
       if (
         rejectedNames.some(
-          (rejected) => rejected.toLocaleLowerCase() === name.toLocaleLowerCase(),
+          (rejected) =>
+            rejected.toLocaleLowerCase() === name.toLocaleLowerCase(),
         )
       ) {
         continue;
@@ -1194,16 +1930,20 @@ export function listBotcastEpisodes(
   showId?: string,
 ): BotcastEpisodeSummary[] {
   const rows = (showId
-    ? db.prepare(
+    ? db
+        .prepare(
         `SELECT e.*, s.name AS show_name FROM botcast_episodes e
           JOIN botcast_shows s ON s.id = e.show_id AND s.user_id = e.user_id
          WHERE e.user_id = ? AND e.show_id = ? ORDER BY e.created_at DESC`,
-      ).all(userId, showId)
-    : db.prepare(
+        )
+        .all(userId, showId)
+    : db
+        .prepare(
         `SELECT e.*, s.name AS show_name FROM botcast_episodes e
           JOIN botcast_shows s ON s.id = e.show_id AND s.user_id = e.user_id
          WHERE e.user_id = ? ORDER BY e.created_at DESC`,
-      ).all(userId)) as unknown as BotcastEpisodeRow[];
+        )
+        .all(userId)) as unknown as BotcastEpisodeRow[];
   return rows.map(mapEpisodeSummary);
 }
 
@@ -1218,48 +1958,134 @@ export function deleteBotcastEpisode(
   return Number(result.changes ?? 0) > 0;
 }
 
-function loadEpisodeRow(db: DatabaseSync, userId: string, episodeId: string): BotcastEpisodeRow {
-  const row = db.prepare(
+function loadEpisodeRow(
+  db: DatabaseSync,
+  userId: string,
+  episodeId: string,
+): BotcastEpisodeRow {
+  const row = db
+    .prepare(
     `SELECT e.*, s.name AS show_name FROM botcast_episodes e
       JOIN botcast_shows s ON s.id = e.show_id AND s.user_id = e.user_id
      WHERE e.id = ? AND e.user_id = ?`,
-  ).get(episodeId, userId) as BotcastEpisodeRow | undefined;
+    )
+    .get(episodeId, userId) as BotcastEpisodeRow | undefined;
   if (!row) throw new Error("Signal episode not found.");
   return row;
 }
 
-export function getBotcastEpisode(db: DatabaseSync, userId: string, episodeId: string): BotcastEpisode {
+export function getBotcastEpisode(
+  db: DatabaseSync,
+  userId: string,
+  episodeId: string,
+): BotcastEpisode {
   const row = loadEpisodeRow(db, userId, episodeId);
-  const messages = db.prepare(
+  const messages = db
+    .prepare(
     "SELECT * FROM botcast_messages WHERE user_id = ? AND episode_id = ? ORDER BY created_at, rowid",
-  ).all(userId, episodeId) as unknown as BotcastMessageRow[];
-  const segments = db.prepare(
+    )
+    .all(userId, episodeId) as unknown as BotcastMessageRow[];
+  const segments = db
+    .prepare(
     "SELECT * FROM botcast_episode_segments WHERE user_id = ? AND episode_id = ? ORDER BY ordinal",
-  ).all(userId, episodeId) as unknown as BotcastSegmentRow[];
-  const events = db.prepare(
+    )
+    .all(userId, episodeId) as unknown as BotcastSegmentRow[];
+  const events = db
+    .prepare(
     "SELECT * FROM botcast_events WHERE user_id = ? AND episode_id = ? ORDER BY sequence",
-  ).all(userId, episodeId) as unknown as BotcastEventRow[];
+    )
+    .all(userId, episodeId) as unknown as BotcastEventRow[];
   const mappedEvents = events.map(mapEvent);
+  const guestPresenceMode: BotcastGuestPresenceMode = mappedEvents.some(
+    (event) =>
+      event.kind === "guest_presence" && event.payload.mode === "audience_only",
+  )
+    ? "audience_only"
+    : "present";
   const moodByMessageId = new Map(
     mappedEvents.flatMap((event) => {
       if (event.kind !== "utterance") return [];
-      const messageId = typeof event.payload.messageId === "string"
+      const messageId =
+        typeof event.payload.messageId === "string"
         ? event.payload.messageId
         : "";
       return messageId
-        ? [[messageId, normalizeVoiceDeliveryMood(event.payload.moodKey)] as const]
+        ? [
+            [
+              messageId,
+              normalizeVoiceDeliveryMood(event.payload.moodKey),
+            ] as const,
+          ]
         : [];
     }),
   );
   return {
     ...mapEpisodeSummary(row),
     producerBrief: row.producer_brief,
+    guestPresenceMode,
     messages: messages.map((message) =>
       mapMessage(message, moodByMessageId.get(message.id)),
     ),
     segments: segments.map(mapSegment),
     events: mappedEvents,
   };
+}
+
+export function setBotcastEpisodeCameraMode(
+  db: DatabaseSync,
+  userId: string,
+  episodeId: string,
+  input: { mode: BotcastCameraShot; atMs: number },
+): BotcastEpisode {
+  const episode = getBotcastEpisode(db, userId, episodeId);
+  if (episode.status === "completed") {
+    throw new Error(
+      "Signal camera direction is locked after the episode ends.",
+    );
+  }
+  if (
+    input.mode !== "auto" &&
+    input.mode !== "left" &&
+    input.mode !== "right" &&
+    input.mode !== "wide"
+  ) {
+    throw new Error("Choose Auto, Left, Right, or Wide for the Signal camera.");
+  }
+  if (!Number.isFinite(input.atMs) || input.atMs < 0) {
+    throw new Error("Signal camera time must be a non-negative number.");
+  }
+  const latestModeEvent = [...episode.events]
+    .reverse()
+    .find((event) => event.kind === "camera_mode");
+  const latestMode = latestModeEvent?.payload.mode;
+  if (
+    latestMode === input.mode ||
+    (!latestModeEvent && input.mode === "auto")
+  ) {
+    return episode;
+  }
+  const previousAtMs = Number(latestModeEvent?.payload.atMs);
+  const atMs = Math.max(
+    Number.isFinite(previousAtMs) ? previousAtMs : 0,
+    Math.round(input.atMs),
+  );
+  const shot =
+    input.mode === "auto"
+      ? (lastCameraSuggestion(episode.events)?.shot ?? "wide")
+    : input.mode;
+  const now = new Date().toISOString();
+  recordEvent(
+    db,
+    userId,
+    episode.id,
+    "camera_mode",
+    { mode: input.mode, shot, atMs, source: "producer" },
+    now,
+  );
+  db.prepare(
+    "UPDATE botcast_episodes SET updated_at = ? WHERE id = ? AND user_id = ?",
+  ).run(now, episode.id, userId);
+  return getBotcastEpisode(db, userId, episode.id);
 }
 
 function recordEvent(
@@ -1270,15 +2096,25 @@ function recordEvent(
   payload: Record<string, unknown>,
   occurredAt = new Date().toISOString(),
 ): BotcastReplayEvent {
-  const sequenceRow = db.prepare(
+  const sequenceRow = db
+    .prepare(
     "SELECT COALESCE(MAX(sequence), 0) + 1 AS next FROM botcast_events WHERE user_id = ? AND episode_id = ?",
-  ).get(userId, episodeId) as { next: number };
+    )
+    .get(userId, episodeId) as { next: number };
   const id = randomId(12);
   db.prepare(
     `INSERT INTO botcast_events
       (id, user_id, episode_id, sequence, kind, payload_json, occurred_at)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
-  ).run(id, userId, episodeId, sequenceRow.next, kind, JSON.stringify(payload), occurredAt);
+  ).run(
+    id,
+    userId,
+    episodeId,
+    sequenceRow.next,
+    kind,
+    JSON.stringify(payload),
+    occurredAt,
+  );
   return {
     id,
     episodeId,
@@ -1297,10 +2133,36 @@ export function createBotcastEpisode(
 ): BotcastEpisode {
   const show = getBotcastShow(db, userId, showId);
   const host = loadBotProfile(db, userId, show.hostBotId);
-  const guest = loadBotProfile(db, userId, cleanText(input.guestBotId, "", 128));
-  if (host.id === guest.id) throw new Error("Choose a different bot as the guest.");
+  const guest = loadBotProfile(
+    db,
+    userId,
+    cleanText(input.guestBotId, "", 128),
+  );
+  if (host.id === guest.id)
+    throw new Error("Choose a different bot as the guest.");
+  const guestPresenceMode = botcastGuestPresenceMode(host, guest);
   assertBotcastPowerSpeechCompatibility(host, guest);
-  assertBotcastPowerSpeechCompatibility(guest, host);
+  if (guestPresenceMode === "present") {
+    assertBotcastPowerSpeechCompatibility(guest, host);
+  }
+  const sessionStartPowerEffects = [
+    ...botcastSocialInfluenceEventsForPair({
+      source: host,
+      target: guest,
+      sourceRole: "host",
+      targetRole: "guest",
+      trigger: "session_start",
+      atMs: 0,
+    }),
+    ...botcastSocialInfluenceEventsForPair({
+      source: guest,
+      target: host,
+      sourceRole: "guest",
+      targetRole: "host",
+      trigger: "session_start",
+      atMs: 0,
+    }),
+  ];
   const topic = cleanText(input.topic, "", BOTCAST_TOPIC_MAX);
   if (!topic) throw new Error("Episode topic is required.");
   const id = randomId(12);
@@ -1313,9 +2175,8 @@ export function createBotcastEpisode(
       : provider === "local"
         ? "local"
         : "online";
-  const durationMinutes = input.durationMinutes == null
-    ? null
-    : Number(input.durationMinutes);
+  const durationMinutes =
+    input.durationMinutes == null ? null : Number(input.durationMinutes);
   if (
     durationMinutes !== null &&
     (!Number.isInteger(durationMinutes) ||
@@ -1356,15 +2217,68 @@ export function createBotcastEpisode(
         (id, user_id, episode_id, segment, ordinal, started_at)
        VALUES (?, ?, ?, 'opening', 0, ?)`,
     ).run(randomId(12), userId, id, now);
-    recordEvent(db, userId, id, "segment", { segment: "opening", ordinal: 0 }, now);
-    recordEvent(db, userId, id, "camera_suggestion", {
-      shot: "left",
+    recordEvent(
+      db,
+      userId,
+      id,
+      "segment",
+      { segment: "opening", ordinal: 0 },
+      now,
+    );
+    if (guestPresenceMode === "audience_only") {
+      recordEvent(
+        db,
+        userId,
+        id,
+        "guest_presence",
+        {
+          mode: guestPresenceMode,
+          hostBotId: host.id,
+          guestBotId: guest.id,
+        },
+        now,
+      );
+    }
+    recordEvent(
+      db,
+      userId,
+      id,
+      "camera_suggestion",
+      {
+      shot: "wide",
       reason: "opening",
       atMs: 0,
-      minimumHoldMs: 3_200,
-    }, now);
-    db.prepare("UPDATE botcast_shows SET updated_at = ? WHERE id = ? AND user_id = ?")
-      .run(now, show.id, userId);
+      minimumHoldMs: 1_400,
+      },
+      now,
+    );
+    for (const influence of sessionStartPowerEffects) {
+      recordEvent(db, userId, id, "power_effect", { ...influence }, now);
+    }
+    const strongestNegativeInfluence = strongestNegativeBotcastInfluence(
+      sessionStartPowerEffects,
+    );
+    if (strongestNegativeInfluence) {
+      recordEvent(
+        db,
+        userId,
+        id,
+        "camera_suggestion",
+        {
+          shot:
+            strongestNegativeInfluence.sourceRole === "host"
+              ? "left"
+              : "right",
+          reason: "power_effect",
+          atMs: 0,
+          minimumHoldMs: 1_400,
+        },
+        now,
+      );
+    }
+    db.prepare(
+      "UPDATE botcast_shows SET updated_at = ? WHERE id = ? AND user_id = ?",
+    ).run(now, show.id, userId);
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
@@ -1394,7 +2308,14 @@ function transitionEpisodeSegment(
   db.prepare(
     "UPDATE botcast_episodes SET segment = ?, updated_at = ? WHERE id = ? AND user_id = ?",
   ).run(next, now, episode.id, userId);
-  recordEvent(db, userId, episode.id, "segment", { segment: next, ordinal }, now);
+  recordEvent(
+    db,
+    userId,
+    episode.id,
+    "segment",
+    { segment: next, ordinal },
+    now,
+  );
 }
 
 function currentTension(episode: BotcastEpisode): BotcastTensionState {
@@ -1406,7 +2327,11 @@ function currentTension(episode: BotcastEpisode): BotcastTensionState {
         : episode.tensionStage === "resistance"
           ? 1
           : 0;
-  return { level, warningCount: episode.warningCount, stage: episode.tensionStage };
+  return {
+    level,
+    warningCount: episode.warningCount,
+    stage: episode.tensionStage,
+  };
 }
 
 function botcastCueRequestsWrapUp(detail: string): boolean {
@@ -1415,7 +2340,9 @@ function botcastCueRequestsWrapUp(detail: string): boolean {
   );
 }
 
-function normalizeBotcastProducerCue(cue: BotcastProducerCue): BotcastProducerCue {
+function normalizeBotcastProducerCue(
+  cue: BotcastProducerCue,
+): BotcastProducerCue {
   const detail = cue.detail ? cleanText(cue.detail, "", 280) : "";
   if (cue.kind === "ask_about" && botcastCueRequestsWrapUp(detail)) {
     return { kind: "wrap_up" };
@@ -1446,7 +2373,8 @@ function activeBotcastWrapUpCue(
   return {
     cue: { kind: "wrap_up" },
     utterancesSinceCue: episode.events.filter(
-      (event) => event.sequence > cueEvent.sequence && event.kind === "utterance",
+      (event) =>
+        event.sequence > cueEvent.sequence && event.kind === "utterance",
     ).length,
   };
 }
@@ -1459,28 +2387,52 @@ function persistProducerCue(
   now: string,
 ): BotcastTensionState {
   const normalizedCue = normalizeBotcastProducerCue(cue);
-  recordEvent(db, userId, episode.id, "producer_cue", {
+  recordEvent(
+    db,
+    userId,
+    episode.id,
+    "producer_cue",
+    {
     ...normalizedCue,
     audience: normalizedCue.kind === "wrap_up" ? "both" : "host",
-  }, now);
+    },
+    now,
+  );
   const before = currentTension(episode);
   const after = applyBotcastProducerCueToTension(before, normalizedCue);
-  if (after.level !== before.level || after.warningCount !== before.warningCount) {
+  if (
+    after.level !== before.level ||
+    after.warningCount !== before.warningCount
+  ) {
     db.prepare(
       `UPDATE botcast_episodes
           SET tension_level = ?, warning_count = ?, updated_at = ?
         WHERE id = ? AND user_id = ?`,
     ).run(after.level, after.warningCount, now, episode.id, userId);
-    recordEvent(db, userId, episode.id, "tension", {
+    recordEvent(
+      db,
+      userId,
+      episode.id,
+      "tension",
+      {
       from: before.stage,
       to: after.stage,
       cue: normalizedCue.kind,
-    }, now);
+      },
+      now,
+    );
     if (after.warningCount > before.warningCount) {
-      recordEvent(db, userId, episode.id, "warning", {
+      recordEvent(
+        db,
+        userId,
+        episode.id,
+        "warning",
+        {
         warningCount: after.warningCount,
         cause: normalizedCue.kind,
-      }, now);
+        },
+        now,
+      );
     }
   }
   return after;
@@ -1488,51 +2440,148 @@ function persistProducerCue(
 
 export interface BotcastPromptBuildArgs {
   show: BotcastShow;
-  episode: Pick<BotcastEpisode, "topic" | "producerBrief" | "segment" | "messages" | "tensionStage">;
-  host: Pick<BotcastBotProfile, "name" | "systemPrompt" | "powers">;
-  guest: Pick<BotcastBotProfile, "name" | "systemPrompt" | "powers">;
+  episode: Pick<
+    BotcastEpisode,
+    | "topic"
+    | "producerBrief"
+    | "segment"
+    | "messages"
+    | "events"
+    | "tensionStage"
+    | "guestPresenceMode"
+  >;
+  host: Pick<BotcastBotProfile, "id" | "name" | "systemPrompt" | "powers">;
+  guest: Pick<BotcastBotProfile, "id" | "name" | "systemPrompt" | "powers">;
   speakerRole: BotcastSpeakerRole;
   cue?: BotcastProducerCue;
   departureRequired?: boolean;
-  immersiveVoiceEffectsEnabled?: boolean;
 }
 
 const BOTCAST_IMMERSIVE_VOICE_INTERVAL = 3;
 
+function botcastNegativeInfluenceForTurn(
+  episode: Pick<BotcastEpisode, "events" | "messages">,
+  speaker: Pick<BotcastBotProfile, "id">,
+): BotcastSocialInfluenceEventV1 | null {
+  const hasPriorSpeakerTurn = episode.messages.some(
+    (message) => message.botId === speaker.id,
+  );
+  const latestMessageId = episode.messages.at(-1)?.id;
+  return strongestNegativeBotcastInfluence(
+    botcastSocialInfluenceEventsAt({
+      events: episode.events,
+      elapsedMs: Number.POSITIVE_INFINITY,
+      targetBotId: speaker.id,
+    }).filter((influence) =>
+      influence.trigger === "session_start"
+        ? !hasPriorSpeakerTurn
+        : Boolean(
+            influence.sourceMessageId &&
+              influence.sourceMessageId === latestMessageId,
+          ),
+    ),
+  );
+}
+
+function botcastPowerPressureRule(args: {
+  influence: BotcastSocialInfluenceEventV1 | null;
+  sourceName: string;
+  speakerRole: BotcastSpeakerRole;
+}): string | null {
+  if (!args.influence) return null;
+  const intensity =
+    args.influence.strength === "large"
+      ? "strong"
+      : args.influence.strength === "medium"
+        ? "noticeable"
+        : "subtle";
+  return `Signal Power pressure: ${args.sourceName}'s ${args.influence.powerName} creates ${intensity} pressure. Let it register once as a brief involuntary pause, tightened phrasing, or extra care, filtered through your own personality. Keep your ${args.speakerRole} role and agency. Do not announce fear, become submissive, flatter the source, or repeat the reaction after this turn.`;
+}
+
 function botcastImmersiveVoiceEffectRequired(
   episode: Pick<BotcastEpisode, "messages">,
-  enabled: boolean,
 ): boolean {
-  return enabled &&
-    episode.messages.length % BOTCAST_IMMERSIVE_VOICE_INTERVAL === 0;
+  return episode.messages.length % BOTCAST_IMMERSIVE_VOICE_INTERVAL === 0;
 }
 
 /**
  * Builds a prompt from persistent show configuration plus the current episode only.
  * Deliberately accepts no archive, relationship, memory, synopsis, or prior-episode input.
  */
-export function buildBotcastSpeakerPrompt(args: BotcastPromptBuildArgs): ProviderMessage[] {
+export function buildBotcastSpeakerPrompt(
+  args: BotcastPromptBuildArgs,
+): ProviderMessage[] {
   const speaker = args.speakerRole === "host" ? args.host : args.guest;
   const peer = args.speakerRole === "host" ? args.guest : args.host;
+  const audienceOnlyGuest = args.episode.guestPresenceMode === "audience_only";
   const powersPrompt = buildBotPowersPromptBlock([
     ...botPowerSelfCueLinesV1(speaker.powers),
-    ...botPowerObserverCueLinesV1(peer.name, peer.powers),
+    ...(audienceOnlyGuest && args.speakerRole === "host"
+      ? []
+      : botPowerObserverCueLinesV1(peer.name, peer.powers)),
   ]);
+  const powerPressureRule = botcastPowerPressureRule({
+    influence: botcastNegativeInfluenceForTurn(args.episode, speaker),
+    sourceName: peer.name,
+    speakerRole: args.speakerRole,
+  });
   const wrappingUp = args.cue?.kind === "wrap_up";
-  const transcript = args.episode.messages
-    .map((message) =>
+  const firstHostOpening =
+    args.speakerRole === "host" &&
+    args.episode.segment === "opening" &&
+    args.episode.messages.length === 0;
+  const openingIntroductionRule = firstHostOpening
+    ? `This is the episode's opening host turn. Deliver one cohesive, natural on-air introduction that says the exact show name "${args.show.name}", identifies you by name as "${args.host.name}", introduces the booked guest by exact name as "${args.guest.name}", and bridges into the subject. Complete all three introductions before asking the first question. Sound like this specific host on this specific show—not generic podcast copy—and never present the details as a checklist, labels, or setup metadata.`
+    : null;
+  const transcriptMessages =
+    audienceOnlyGuest && args.speakerRole === "host"
+      ? args.episode.messages.filter(
+          (message) => message.speakerRole === "host",
+        )
+      : args.episode.messages;
+  const transcript = transcriptMessages
+    .map(
+      (message) =>
       `${message.speakerRole === "host" ? args.host.name : args.guest.name}: ${message.content}`,
     )
     .join("\n");
-  const roleRules =
-    args.speakerRole === "host"
+  const roleRules = audienceOnlyGuest
+    ? args.speakerRole === "host"
+      ? [
+          firstHostOpening
+            ? `You are the host. ${args.guest.name} was booked, but the guest chair appears empty and you receive only silence from it.`
+            : `You are the host. The opening already established that ${args.guest.name} is unavailable to you; do not return to that absence beat.`,
+          `You cannot see, hear, sense, or receive any words from ${args.guest.name}. Never react to, quote, or correctly infer anything the unseen guest says to the audience.`,
+          "Acknowledge the missing guest once in the opening, then stop mentioning the chair, absence, booking, silence, or lack of answers. Advance a self-contained editorial argument through concrete examples, costs, decisions, and contradictions.",
+          "Private producer direction is silent control-room guidance. Incorporate it naturally; never quote it, mention a producer, or address the user.",
+          wrappingUp
+            ? "Close the broadcast now with one concise earned reflection on the subject. Do not repeat the guest's absence, invite a response, or introduce a new topic."
+            : args.episode.segment === "opening"
+              ? `After the full on-air introduction, acknowledge naturally that ${args.guest.name} was expected, but no one appears to be in the guest chair.`
+              : args.episode.segment === "closing"
+                ? "Close on the earned subject takeaway without mentioning the guest's absence or thanking the apparently absent guest."
+                : "Keep the live broadcast moving as a solo editorial. Do not call into the silence or behave as though you received an answer.",
+        ]
+      : [
+          `You are the booked guest, but ${args.host.name} cannot perceive or hear you. The listening audience can hear you as a private dramatic layer.`,
+          `Never address, answer, interrupt, or ask anything of ${args.host.name}. Speak only to the listeners in concise first-person asides or observations; never explain Powers, prompts, or system mechanics.`,
+          "You may notice the host's visible behavior and confusion, but treat it as dramatic irony rather than a two-way conversation.",
+          wrappingUp
+            ? "Give the listeners one final audience-only aside. Do not extend the interview or ask a question."
+            : args.departureRequired
+              ? "Leave with one audience-only final line. The host must remain unaware that you were ever present."
+              : args.episode.segment === "closing"
+                ? "Offer the listeners one final private observation while the host closes an apparently guestless show."
+                : "Let the listeners in on what the host is missing, in character and without speaking to the host.",
+        ]
+    : args.speakerRole === "host"
       ? [
           "You are the host. Introduce, question, listen, follow up, transition, and close with editorial control.",
           "Private producer direction is silent control-room guidance. Incorporate it naturally; never quote it, mention a producer, or address the user.",
           wrappingUp
             ? `Begin the closing exchange now. Briefly frame the takeaway and invite exactly one final response from ${args.guest.name}. Do not introduce a new topic, promise another question, or say \"one final question.\"`
             : args.episode.segment === "opening"
-            ? `Open the show, welcome ${args.guest.name}, and frame the subject.`
+            ? `Open in the voice and rhythm of ${args.show.name}, then move naturally from the introductions into the subject and your first question for ${args.guest.name}.`
             : args.episode.segment === "closing"
               ? args.episode.tensionStage === "departed"
                 ? "The guest has walked out. React in character, briefly reflect without grandstanding, and close the episode."
@@ -1553,7 +2602,6 @@ export function buildBotcastSpeakerPrompt(args: BotcastPromptBuildArgs): Provide
         ];
   const immersiveVoiceEffectRequired = botcastImmersiveVoiceEffectRequired(
     args.episode,
-    args.immersiveVoiceEffectsEnabled === true,
   );
   const immersiveVoiceRule = immersiveVoiceEffectRequired
     ? [
@@ -1569,10 +2617,14 @@ export function buildBotcastSpeakerPrompt(args: BotcastPromptBuildArgs): Provide
         `You are ${speaker.name} in a fictional, non-canonical Signal episode.`,
         "This is an anthology. Treat the host and guest as meeting for the first time. Never mention prior appearances, episode numbers, archives, memories, relationship history, or earlier Signal events.",
         "Return only the next spoken line. No speaker label, no analysis, no camera directions, and no markdown.",
-        "Keep this turn conversational and brisk: one to three concise sentences, usually 20 to 65 spoken words.",
+        firstHostOpening
+          ? "Keep this opening conversational and brisk: two to four concise sentences, usually 35 to 90 spoken words."
+          : "Keep this turn conversational and brisk: one to three concise sentences, usually 20 to 65 spoken words.",
         immersiveVoiceRule,
         `Persona:\n${speaker.systemPrompt}`,
         ...(powersPrompt ? [powersPrompt] : []),
+        ...(powerPressureRule ? [powerPressureRule] : []),
+        ...(openingIntroductionRule ? [openingIntroductionRule] : []),
         ...roleRules,
       ].join("\n\n"),
     },
@@ -1590,7 +2642,13 @@ export function buildBotcastSpeakerPrompt(args: BotcastPromptBuildArgs): Provide
         args.cue
           ? `${wrappingUp ? "Shared episode direction" : "Private live producer cue"}: ${args.cue.kind}${args.cue.detail ? ` — ${args.cue.detail}` : ""}`
           : "Private live producer cue: none",
-        transcript ? `Current episode transcript only:\n${transcript}` : "Current episode transcript: empty",
+        transcript
+          ? audienceOnlyGuest && args.speakerRole === "host"
+            ? `Your on-air words so far (the guest chair has remained silent):\n${transcript}`
+            : `Current episode transcript only:\n${transcript}`
+          : audienceOnlyGuest && args.speakerRole === "host"
+            ? "Your on-air transcript is empty. The guest chair is silent."
+          : "Current episode transcript: empty",
         `Continue as ${speaker.name}.`,
       ].join("\n\n"),
     },
@@ -1629,16 +2687,21 @@ function extractBotcastVoicePerformance(
     if (!before) leading.push(tag);
     else trailing.push(tag);
   }
-  const voicePerformanceText = [
-    leading.join(" "),
-    content,
-    trailing.join(" "),
-  ].filter(Boolean).join(" ");
+  const voicePerformanceText = [leading.join(" "), content, trailing.join(" ")]
+    .filter(Boolean)
+    .join(" ");
   return { content, voicePerformanceText };
 }
 
-function sanitizeUtterance(raw: string, fallback: string, speakerName: string): string {
-  const escapedSpeakerName = speakerName.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+function sanitizeUtterance(
+  raw: string,
+  fallback: string,
+  speakerName: string,
+): string {
+  const escapedSpeakerName = speakerName.replace(
+    /[.*+?^${}()|[\]\\]/gu,
+    "\\$&",
+  );
   const labelPattern = new RegExp(
     `^\\s*[\"“]?\\s*(?:host|guest|assistant|speaker|${escapedSpeakerName})\\s*:\\s*`,
     "iu",
@@ -1646,11 +2709,70 @@ function sanitizeUtterance(raw: string, fallback: string, speakerName: string): 
   const withoutLabel = raw.replace(labelPattern, "");
   const cleaned = withoutLabel
     .replace(withoutLabel === raw ? /$^/u : /["”]\s*$/u, "")
-    .replace(/\b(?:the )?producer (?:asked|said|wants|told me|is telling me)[^.!?]*[.!?]?/giu, "")
+    .replace(
+      /\b(?:the )?producer (?:asked|said|wants|told me|is telling me)[^.!?]*[.!?]?/giu,
+      "",
+    )
     .replace(/\s+/gu, " ")
     .trim()
     .slice(0, 2_400);
   return cleaned || fallback;
+}
+
+const BOTCAST_AUDIENCE_ONLY_ABSENCE_PATTERN =
+  /\b(?:empty|silent)\s+(?:guest\s+)?(?:chair|seat)\b|\b(?:chair|seat)\b[^.!?]{0,48}\b(?:empty|silent|said (?:absolutely )?nothing)\b|\b(?:no|without (?:an?|any))\s+(?:answer|reply|arrival|guest)\b|\bif you(?:'re| are) there\b|\b(?:give|wait) it a moment\b|\bcall(?:ing)? into (?:the )?silence\b|\b(?:booking|guest)\b[^.!?]{0,48}\b(?:vanished|missing|absent)\b/iu;
+
+function botcastAudienceOnlyHostRepeatsAbsence(input: {
+  episode: Pick<BotcastEpisode, "messages">;
+  content: string;
+}): boolean {
+  return (
+    BOTCAST_AUDIENCE_ONLY_ABSENCE_PATTERN.test(input.content) &&
+    input.episode.messages.some(
+      (message) =>
+        message.speakerRole === "host" &&
+        BOTCAST_AUDIENCE_ONLY_ABSENCE_PATTERN.test(message.content),
+    )
+  );
+}
+
+function normalizeBotcastSpokenIdentity(value: string): string {
+  return value
+    .normalize("NFKD")
+    .toLocaleLowerCase("en-US")
+    .replace(/\p{M}+/gu, "")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+function botcastOpeningIntroducesCast(input: {
+  content: string;
+  showName: string;
+  hostName: string;
+  guestName: string;
+}): boolean {
+  const content = normalizeBotcastSpokenIdentity(input.content);
+  const showName = normalizeBotcastSpokenIdentity(input.showName);
+  const hostName = normalizeBotcastSpokenIdentity(input.hostName);
+  const guestName = normalizeBotcastSpokenIdentity(input.guestName);
+  const identifiesHost = [
+    `i m ${hostName}`,
+    `i am ${hostName}`,
+    `my name is ${hostName}`,
+    `your host ${hostName}`,
+    `your host is ${hostName}`,
+  ].some((phrase) => content.includes(phrase));
+  const introducesGuest = [
+    `joined by ${guestName}`,
+    `welcome ${guestName}`,
+    `guest is ${guestName}`,
+    `guest ${guestName}`,
+    `with me ${guestName}`,
+    `${guestName} joins me`,
+    `${guestName} was meant to join`,
+  ].some((phrase) => content.includes(phrase));
+  return content.includes(showName) && identifiesHost && introducesGuest;
 }
 
 function generationProvider(
@@ -1666,11 +2788,230 @@ function generationProvider(
   );
   const model =
     modelOverride !== undefined
-      ? modelOverride ?? undefined
-      : (providerName === "local"
+      ? (modelOverride ?? undefined)
+      : ((providerName === "local"
           ? options.preferredLocalModel
-          : options.preferredOnlineModel) ?? undefined;
+          : options.preferredOnlineModel) ?? undefined);
   return { provider, providerName, ...(model ? { model } : {}) };
+}
+
+type BotcastReviewPersona = {
+  id: string;
+  name: string;
+  systemPrompt: string;
+};
+
+type BotcastParsedPersonaReview = Pick<
+  BotcastPersonaReview,
+  "rating" | "comment"
+>;
+
+const BOTCAST_PERSONA_REVIEW_TRANSCRIPT_MAX_CHARACTERS = 24_000;
+const BOTCAST_PERSONA_REVIEW_COMMENT_MAX_CHARACTERS = 180;
+
+function boundedBotcastReviewTranscript(value: string): string {
+  if (value.length <= BOTCAST_PERSONA_REVIEW_TRANSCRIPT_MAX_CHARACTERS) {
+    return value;
+  }
+  const sideLength = Math.floor(
+    (BOTCAST_PERSONA_REVIEW_TRANSCRIPT_MAX_CHARACTERS - 80) / 2,
+  );
+  return `${value.slice(0, sideLength)}\n\n[Middle of transcript omitted]\n\n${value.slice(-sideLength)}`;
+}
+
+function normalizeBotcastPersonaReviewComment(value: string): string {
+  const normalized = value
+    .replace(/^\s*["“]|["”]\s*$/gu, "")
+    .replace(/\s+/gu, " ")
+    .trim();
+  if (normalized.length <= BOTCAST_PERSONA_REVIEW_COMMENT_MAX_CHARACTERS) {
+    return normalized;
+  }
+  const clipped = normalized.slice(
+    0,
+    BOTCAST_PERSONA_REVIEW_COMMENT_MAX_CHARACTERS - 1,
+  );
+  const wordBoundary = clipped.replace(/\s+\S*$/u, "").trimEnd();
+  return `${wordBoundary || clipped.trimEnd()}…`;
+}
+
+export function parseBotcastPersonaReviewResponse(
+  raw: string,
+): BotcastParsedPersonaReview | null {
+  const objectMatch = raw.match(/\{[\s\S]*\}/u)?.[0];
+  if (!objectMatch) return null;
+  try {
+    const parsed = JSON.parse(objectMatch) as Record<string, unknown>;
+    const rating = Number(parsed.rating);
+    const comment =
+      typeof parsed.comment === "string"
+        ? normalizeBotcastPersonaReviewComment(parsed.comment)
+        : "";
+    if (!Number.isFinite(rating) || rating < 1 || rating > 5 || !comment) {
+      return null;
+    }
+    return {
+      rating: Math.round(rating * 10) / 10,
+      comment,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function selectBotcastReviewPersona(
+  personas: readonly BotcastReviewPersona[],
+  participantBotIds: ReadonlySet<string>,
+  random: () => number = Math.random,
+): BotcastReviewPersona | null {
+  if (personas.length === 0) return null;
+  const observers = personas.filter(
+    (persona) => !participantBotIds.has(persona.id),
+  );
+  const pool = observers.length > 0 ? observers : personas;
+  const randomValue = random();
+  const unit = Number.isFinite(randomValue)
+    ? Math.max(0, Math.min(0.999999999999, randomValue))
+    : 0;
+  return pool[Math.floor(unit * pool.length)] ?? null;
+}
+
+function botcastPersonaReviewPrompt(args: {
+  episode: BotcastEpisode;
+  reviewer: BotcastReviewPersona;
+  hostName: string;
+  guestName: string;
+}): ProviderMessage[] {
+  const transcript = boundedBotcastReviewTranscript(
+    args.episode.messages
+      .map((message) => {
+        const speaker =
+          message.botId === args.episode.hostBotId
+            ? args.hostName
+            : message.botId === args.episode.guestBotId
+              ? args.guestName
+              : message.speakerRole;
+        return `${speaker}: ${message.content}`;
+      })
+      .join("\n\n"),
+  );
+  return [
+    {
+      role: "system",
+      content: [
+        `You are ${args.reviewer.name}.`,
+        `Your persona: ${args.reviewer.systemPrompt.slice(0, 6_000)}`,
+        "Privately judge this podcast episode as yourself, not as a generic critic.",
+        "Use the full 1-5 scale. Do not default to praise; base the score on what actually happened.",
+        "Return only JSON with a numeric rating and one short, natural comment under 140 characters.",
+        'Exact shape: {"rating": 3.5, "comment": "Specific reaction."}',
+      ].join("\n"),
+    },
+    {
+      role: "user",
+      content: [
+        `Episode: ${args.episode.title}`,
+        `Topic: ${args.episode.topic}`,
+        `Host: ${args.hostName}`,
+        `Guest: ${args.guestName}`,
+        `Outcome: ${args.episode.outcome ?? "completed"}`,
+        "",
+        "Transcript:",
+        transcript || "No spoken transcript was captured.",
+      ].join("\n"),
+    },
+  ];
+}
+
+export async function ensureBotcastEpisodePersonaReview(
+  db: DatabaseSync,
+  userId: string,
+  episodeId: string,
+  generation: BotcastGenerationOptions,
+  random: () => number = Math.random,
+): Promise<BotcastPersonaReview | null> {
+  let episode = getBotcastEpisode(db, userId, episodeId);
+  if (episode.status !== "completed") return null;
+  if (episode.personaReview) return episode.personaReview;
+
+  const personaRows = db
+    .prepare(
+      `SELECT id, name, system_prompt
+         FROM bots
+        WHERE user_id = ? AND chat_enabled = 1
+          AND (? = 'local' OR online_enabled = 1)
+        ORDER BY created_at, id`,
+    )
+    .all(userId, episode.provider) as unknown as Array<{
+    id: string;
+    name: string;
+    system_prompt: string;
+  }>;
+  const reviewer = selectBotcastReviewPersona(
+    personaRows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      systemPrompt: row.system_prompt,
+    })),
+    new Set([episode.hostBotId, episode.guestBotId]),
+    random,
+  );
+  if (!reviewer) return null;
+
+  const host = loadBotProfile(db, userId, episode.hostBotId);
+  const guest = loadBotProfile(db, userId, episode.guestBotId);
+  const selected = generationProvider(
+    generation,
+    episode.provider,
+    episode.model,
+  );
+  try {
+    const raw = await selected.provider.generateResponse(
+      botcastPersonaReviewPrompt({
+        episode,
+        reviewer,
+        hostName: host.name,
+        guestName: guest.name,
+      }),
+      {
+        ...(selected.model ? { model: selected.model } : {}),
+        temperature: 0.65,
+        maxTokens:
+          selected.providerName === "openai" &&
+          openAiModelUsesMaxCompletionTokens(
+            selected.model ?? defaultModelIdForProvider(selected.providerName),
+          )
+            ? BOTCAST_OPENAI_REASONING_MIN_COMPLETION_TOKENS
+            : 160,
+        reasoningEffort: "minimal",
+        jsonMode: true,
+        usagePurpose: "botcast_review",
+      },
+    );
+    const review = parseBotcastPersonaReviewResponse(raw);
+    if (!review) return null;
+    const reviewedAt = new Date().toISOString();
+    db.prepare(
+      `UPDATE botcast_episodes
+          SET persona_reviewer_bot_id = ?, persona_reviewer_name = ?,
+              persona_rating = ?, persona_comment = ?, persona_reviewed_at = ?
+        WHERE id = ? AND user_id = ? AND persona_reviewed_at IS NULL`,
+    ).run(
+      reviewer.id,
+      reviewer.name,
+      review.rating,
+      review.comment,
+      reviewedAt,
+      episode.id,
+      userId,
+    );
+    episode = getBotcastEpisode(db, userId, episode.id);
+    return episode.personaReview;
+  } catch {
+    // A listener reaction should never turn a successfully completed episode
+    // into an error. The next idempotent completion read may try again.
+    return null;
+  }
 }
 
 function botcastSpeakerMaxTokensForModel(
@@ -1701,8 +3042,12 @@ function botcastProviderReturnedEmptyResponse(
   );
 }
 
-function lastCameraSuggestion(events: readonly BotcastReplayEvent[]): BotcastCameraSuggestion | null {
-  const event = [...events].reverse().find((candidate) => candidate.kind === "camera_suggestion");
+function lastCameraSuggestion(
+  events: readonly BotcastReplayEvent[],
+): BotcastCameraSuggestion | null {
+  const event = [...events]
+    .reverse()
+    .find((candidate) => candidate.kind === "camera_suggestion");
   if (!event) return null;
   const shot = event.payload.shot;
   const reason = event.payload.reason;
@@ -1723,7 +3068,11 @@ function completeEpisode(
   outcome: BotcastEpisodeOutcome,
   now: string,
 ): void {
-  const runtimeMs = botcastReplayTimeline(episode.messages, episode.events).durationMs;
+  closeActiveBotcastModelWarmupHold(db, userId, episode.id, now);
+  const runtimeMs = botcastReplayTimeline(
+    episode.messages,
+    episode.events,
+  ).durationMs;
   db.prepare(
     `UPDATE botcast_episodes
         SET status = 'completed', outcome = ?, completed_at = ?, runtime_ms = ?, updated_at = ?
@@ -1733,7 +3082,66 @@ function completeEpisode(
     `UPDATE botcast_episode_segments SET ended_at = ?
       WHERE user_id = ? AND episode_id = ? AND ended_at IS NULL`,
   ).run(now, userId, episode.id);
-  recordEvent(db, userId, episode.id, "episode_completed", { outcome, runtimeMs }, now);
+  recordEvent(
+    db,
+    userId,
+    episode.id,
+    "episode_completed",
+    { outcome, runtimeMs },
+    now,
+  );
+}
+
+function closeActiveBotcastModelWarmupHold(
+  db: DatabaseSync,
+  userId: string,
+  episodeId: string,
+  now: string,
+): void {
+  const row = db
+    .prepare(
+      `SELECT model_warmup_hold_started_at
+         FROM botcast_episodes
+        WHERE id = ? AND user_id = ?`,
+    )
+    .get(episodeId, userId) as
+    { model_warmup_hold_started_at: string | null } | undefined;
+  if (!row?.model_warmup_hold_started_at) return;
+  const startedAtMs = Date.parse(row.model_warmup_hold_started_at);
+  const nowMs = Date.parse(now);
+  const elapsedMs =
+    Number.isFinite(startedAtMs) && Number.isFinite(nowMs)
+      ? Math.max(0, nowMs - startedAtMs)
+      : 0;
+  db.prepare(
+    `UPDATE botcast_episodes
+        SET model_warmup_hold_duration_ms = model_warmup_hold_duration_ms + ?,
+            model_warmup_hold_started_at = NULL,
+            updated_at = ?
+      WHERE id = ? AND user_id = ?`,
+  ).run(elapsedMs, now, episodeId, userId);
+}
+
+export function setBotcastModelWarmupHold(
+  db: DatabaseSync,
+  userId: string,
+  episodeId: string,
+  active: boolean,
+): BotcastEpisode {
+  const episode = getBotcastEpisode(db, userId, episodeId);
+  if (episode.status === "completed") return episode;
+  const now = new Date().toISOString();
+  if (active) {
+    db.prepare(
+      `UPDATE botcast_episodes
+          SET model_warmup_hold_started_at = COALESCE(model_warmup_hold_started_at, ?),
+              updated_at = ?
+        WHERE id = ? AND user_id = ?`,
+    ).run(now, now, episodeId, userId);
+  } else {
+    closeActiveBotcastModelWarmupHold(db, userId, episodeId, now);
+  }
+  return getBotcastEpisode(db, userId, episodeId);
 }
 
 export function forceEndBotcastEpisode(
@@ -1748,16 +3156,30 @@ export function forceEndBotcastEpisode(
   const atMs = previousCamera
     ? previousCamera.atMs + previousCamera.minimumHoldMs
     : 0;
-  recordEvent(db, userId, episode.id, "cut_away", {
+  recordEvent(
+    db,
+    userId,
+    episode.id,
+    "cut_away",
+    {
     reason: "producer_cut",
     atMs,
-  }, now);
-  recordEvent(db, userId, episode.id, "camera_suggestion", {
+    },
+    now,
+  );
+  recordEvent(
+    db,
+    userId,
+    episode.id,
+    "camera_suggestion",
+    {
     shot: "wide",
     reason: "closing",
     atMs,
     minimumHoldMs: 1_800,
-  }, now);
+    },
+    now,
+  );
   transitionEpisodeSegment(db, userId, episode, "closing", now);
   episode = getBotcastEpisode(db, userId, episode.id);
   completeEpisode(db, userId, episode, "completed", now);
@@ -1772,7 +3194,13 @@ export async function advanceBotcastEpisode(
   generation: BotcastGenerationOptions,
 ): Promise<BotcastEpisodeAdvanceResponse> {
   let episode = getBotcastEpisode(db, userId, episodeId);
-  if (episode.status === "completed") return { episode, message: null };
+  if (episode.status === "completed") {
+    await ensureBotcastEpisodePersonaReview(db, userId, episode.id, generation);
+    return {
+      episode: getBotcastEpisode(db, userId, episode.id),
+      message: null,
+    };
+  }
   const requestedCue = input.cue
     ? normalizeBotcastProducerCue(input.cue)
     : undefined;
@@ -1799,7 +3227,9 @@ export async function advanceBotcastEpisode(
     episode = getBotcastEpisode(db, userId, episodeId);
   }
   const wrapUpCue = activeBotcastWrapUpCue(episode);
-  const guestAlreadyDeparted = episode.events.some((event) => event.kind === "departure");
+  const guestAlreadyDeparted = episode.events.some(
+    (event) => event.kind === "departure",
+  );
   // A third pressure cue is resolved by the guest before the ordinary turn-count
   // closing can begin. Otherwise a cue landing exactly at the closing threshold
   // could complete the episode without giving the guest their earned exit turn.
@@ -1812,6 +3242,10 @@ export async function advanceBotcastEpisode(
       durationMinutes: episode.durationMinutes,
       startedAtMs: Date.parse(episode.startedAt),
       nowMs: Date.parse(now),
+      modelWarmupHoldDurationMs: episode.modelWarmupHoldDurationMs,
+      modelWarmupHoldStartedAtMs: episode.modelWarmupHoldStartedAt
+        ? Date.parse(episode.modelWarmupHoldStartedAt)
+        : null,
     });
   const nextSegment = departurePending
     ? episode.segment
@@ -1843,6 +3277,7 @@ export async function advanceBotcastEpisode(
       guestAlreadyDeparted ? "guest_departed" : "completed",
       now,
     );
+    await ensureBotcastEpisodePersonaReview(db, userId, episodeId, generation);
     return { episode: getBotcastEpisode(db, userId, episodeId), message: null };
   }
   const show = getBotcastShow(db, userId, episode.showId);
@@ -1851,9 +3286,11 @@ export async function advanceBotcastEpisode(
   const speaker = speakerRole === "host" ? host : guest;
   const departureRequired =
     speakerRole === "guest" && botcastGuestDepartureEligible(tension);
-  const immersiveVoiceEffectRequired = botcastImmersiveVoiceEffectRequired(
+  const immersiveVoiceEffectRequired =
+    botcastImmersiveVoiceEffectRequired(episode);
+  const turnNegativeInfluence = botcastNegativeInfluenceForTurn(
     episode,
-    generation.immersiveVoiceEffectsEnabled === true,
+    speaker,
   );
   const prompt = buildBotcastSpeakerPrompt({
     show,
@@ -1867,9 +3304,12 @@ export async function advanceBotcastEpisode(
         ? { cue: requestedCue }
         : {}),
     departureRequired,
-    immersiveVoiceEffectsEnabled: generation.immersiveVoiceEffectsEnabled === true,
   });
-  const selected = generationProvider(generation, episode.provider, episode.model);
+  const selected = generationProvider(
+    generation,
+    episode.provider,
+    episode.model,
+  );
   const generationOptions = {
     temperature: Math.min(1.15, Math.max(0.2, speaker.temperature)),
     reasoningEffort: "minimal" as const,
@@ -1894,7 +3334,7 @@ export async function advanceBotcastEpisode(
     );
     if (!resolvedChain) {
       throw new Error(
-        "Signal AUTO needs one primary model and two distinct fallbacks in Settings.",
+        "Signal AUTO needs one primary model and one to five distinct fallbacks in Settings.",
       );
     }
     const providerFactory = generation.providerFactory ?? selectProvider;
@@ -1932,7 +3372,7 @@ export async function advanceBotcastEpisode(
         },
       })),
       perAttemptTimeoutMs: 60_000,
-      totalTimeoutMs: 150_000,
+      totalTimeoutMs: resolvedChain.length * 60_000,
     });
     raw = result.value;
     providerUsed = result.provider;
@@ -1963,9 +3403,26 @@ export async function advanceBotcastEpisode(
   if (latestEpisode.status === "completed") {
     return { episode: latestEpisode, message: null };
   }
+  const firstHostOpening =
+    speakerRole === "host" &&
+    episode.segment === "opening" &&
+    episode.messages.length === 0;
+  const openingSubject =
+    episode.topic.replace(/[.!?]+$/u, "").trim() || episode.topic;
+  const topicWithPunctuation = /[.!?]$/u.test(episode.topic.trim())
+    ? episode.topic.trim()
+    : `${episode.topic.trim()}.`;
   const fallback =
     speakerRole === "host"
-      ? episode.segment === "closing"
+      ? firstHostOpening
+        ? episode.guestPresenceMode === "audience_only"
+          ? `Welcome to ${show.name}. I'm ${host.name}, and ${guest.name} was meant to join me to explore ${openingSubject}. The guest chair is empty, though, so something has clearly gone wrong.`
+          : `Welcome to ${show.name}. I'm ${host.name}, and today I'm joined by ${guest.name} to explore ${openingSubject}. ${guest.name}, where should we begin?`
+        : episode.guestPresenceMode === "audience_only"
+        ? episode.segment === "closing" || wrapUpCue
+          ? `We will close on the central question: ${topicWithPunctuation} The strongest answer is the one that survives consequence, contradiction, and scrutiny.`
+          : `Let us stay with the central question: ${topicWithPunctuation} The useful test is which concrete choice, cost, or contradiction would change the answer.`
+        : episode.segment === "closing"
         ? guestAlreadyDeparted
           ? `${guest.name} has left the studio. That is where we will leave it; thank you for listening.`
           : `That is where we will leave it. ${guest.name}, thank you for joining me.`
@@ -1974,6 +3431,8 @@ export async function advanceBotcastEpisode(
           : `${guest.name}, what is the part of ${episode.topic} that people most often misunderstand?`
       : departureRequired
         ? "I warned you. We are done here."
+        : episode.guestPresenceMode === "audience_only"
+          ? "They still have no idea I am here. This is already more entertaining than the interview would have been."
         : wrapUpCue
           ? "The final point I would leave with your listeners is that the premise deserves more scrutiny than certainty."
           : "I do not accept the premise as stated, but I will answer the part that matters.";
@@ -1983,23 +3442,47 @@ export async function advanceBotcastEpisode(
     immersiveVoiceEffectRequired,
   );
   const cleanGeneratedContent = performance.content || fallback;
-  const content =
-    speakerRole === "host" &&
-    episode.segment === "closing" &&
-    (/\?\s*$/u.test(cleanGeneratedContent) ||
-      /\b(?:one|a)\s+(?:last|final|more)\s+question\b|\blet me ask\b/iu.test(
-        cleanGeneratedContent,
-      ))
+  const introductionSafeContent =
+    firstHostOpening &&
+    !botcastOpeningIntroducesCast({
+      content: cleanGeneratedContent,
+      showName: show.name,
+      hostName: host.name,
+      guestName: guest.name,
+    })
       ? fallback
       : cleanGeneratedContent;
-  const voicePerformanceText = content === cleanGeneratedContent
-    ? performance.voicePerformanceText ??
+  const content =
+    speakerRole === "host" &&
+    episode.guestPresenceMode === "audience_only" &&
+    botcastAudienceOnlyHostRepeatsAbsence({
+      episode,
+      content: introductionSafeContent,
+    })
+      ? fallback
+      : speakerRole === "host" &&
+    episode.segment === "closing" &&
+    (/\?\s*$/u.test(introductionSafeContent) ||
+      /\b(?:one|a)\s+(?:last|final|more)\s+question\b|\blet me ask\b/iu.test(
+        introductionSafeContent,
+      ))
+      ? fallback
+      : introductionSafeContent;
+  const voicePerformanceText =
+    content === cleanGeneratedContent
+      ? (performance.voicePerformanceText ??
       (immersiveVoiceEffectRequired
         ? `${speakerRole === "host" ? "[breathes deeply]" : "[exhales]"} ${content}`
-        : null)
+          : null))
     : null;
   const messageId = randomId(12);
-  const messageMoodKey = botcastVoiceMoodForTension(tension);
+  const tensionMoodKey = botcastVoiceMoodForTension(tension);
+  const messageMoodKey =
+    turnNegativeInfluence &&
+    turnNegativeInfluence.strength !== "small" &&
+    tensionMoodKey === "neutral"
+      ? "guarded"
+      : tensionMoodKey;
   db.prepare(
     `INSERT INTO botcast_messages
       (id, user_id, episode_id, speaker_role, bot_id, content, voice_performance_text, created_at)
@@ -2014,7 +3497,12 @@ export async function advanceBotcastEpisode(
     voicePerformanceText,
     now,
   );
-  recordEvent(db, userId, episode.id, "utterance", {
+  recordEvent(
+    db,
+    userId,
+    episode.id,
+    "utterance",
+    {
     messageId,
     speakerRole,
     botId: speaker.id,
@@ -2025,7 +3513,36 @@ export async function advanceBotcastEpisode(
     immersiveVoiceEffect: voicePerformanceText !== null,
     moodKey: messageMoodKey,
     ...(autoRecovery ? { autoRecovery } : {}),
-  }, now);
+    },
+    now,
+  );
+  const listenerRole = speakerRole === "host" ? "guest" : "host";
+  const listener = listenerRole === "host" ? host : guest;
+  const listenerReaction = !(
+    (listenerRole === "guest" && guestAlreadyDeparted) ||
+    (episode.guestPresenceMode === "audience_only" && listenerRole === "host")
+  )
+    ? buildSignalListenerReactionPlanV1({
+        episodeId: episode.id,
+        messageId,
+        speakerBotId: speaker.id,
+        listenerBotId: listener.id,
+        listenerRole,
+        segment: episode.segment,
+        mood: messageMoodKey,
+        tensionLevel: tension.level,
+      })
+    : null;
+  if (listenerReaction) {
+    recordEvent(
+      db,
+      userId,
+      episode.id,
+      "listener_reaction",
+      { plan: listenerReaction },
+      now,
+    );
+  }
 
   if (wrapUpCue && speakerRole === "guest") {
     const beforeClosing = getBotcastEpisode(db, userId, episode.id);
@@ -2040,40 +3557,95 @@ export async function advanceBotcastEpisode(
     ).run(now, episode.id, userId);
     const beforeClosing = getBotcastEpisode(db, userId, episode.id);
     transitionEpisodeSegment(db, userId, beforeClosing, "closing", now);
-    recordEvent(db, userId, episode.id, "departure", {
+    recordEvent(
+      db,
+      userId,
+      episode.id,
+      "departure",
+      {
       botId: guest.id,
       cause: requestedCue?.kind ?? "continued_boundary_pressure",
       emptyChair: true,
       microphoneRemains: true,
       mugRemains: true,
-    }, now);
+      },
+      now,
+    );
   }
 
   episode = getBotcastEpisode(db, userId, episode.id);
   const previousCamera = lastCameraSuggestion(episode.events);
   const wordCount = content.split(/\s+/u).filter(Boolean).length;
   const utteranceDurationMs = Math.max(1_400, wordCount * 310);
-  const atMs = previousCamera
-    ? previousCamera.atMs + Math.max(previousCamera.minimumHoldMs, utteranceDurationMs)
-    : 0;
+  const firstOpeningHost =
+    episode.messages.length === 1 &&
+    episode.segment === "opening" &&
+    speakerRole === "host";
+  const messageStartMs =
+    botcastReplayTimeline(episode.messages, episode.events).messageStartMs.at(
+      -1,
+    ) ?? 0;
+  const afterSpeechPowerEffects =
+    listenerRole === "guest" && guestAlreadyDeparted
+      ? []
+      : botcastSocialInfluenceEventsForPair({
+          source: speaker,
+          target: listener,
+          sourceRole: speakerRole,
+          targetRole: listenerRole,
+          trigger: "after_speech",
+          atMs: messageStartMs + utteranceDurationMs,
+          sourceMessageId: messageId,
+        });
+  for (const influence of afterSpeechPowerEffects) {
+    recordEvent(
+      db,
+      userId,
+      episode.id,
+      "power_effect",
+      { ...influence },
+      now,
+    );
+  }
+  const atMs = firstOpeningHost ? 1_400 : messageStartMs;
+  const cameraEvent = departureRequired
+    ? "departure"
+    : episode.segment === "interview" && episode.messages.length % 4 === 0
+      ? "transition"
+      : "utterance";
   const suggestion = botcastDirectorSuggestion({
-    previous: previousCamera,
+    previous: firstOpeningHost ? null : previousCamera,
     atMs,
     speakerRole,
     utteranceDurationMs,
     segment: episode.segment,
-    event: departureRequired ? "departure" : "utterance",
+    event: cameraEvent,
   });
-  recordEvent(db, userId, episode.id, "camera_suggestion", { ...suggestion }, now);
+  recordEvent(
+    db,
+    userId,
+    episode.id,
+    "camera_suggestion",
+    { ...suggestion },
+    now,
+  );
   if (departureRequired) {
-    recordEvent(db, userId, episode.id, "camera_suggestion", {
+    recordEvent(
+      db,
+      userId,
+      episode.id,
+      "camera_suggestion",
+      {
       shot: "wide",
       reason: "empty_chair",
       atMs: suggestion.atMs + suggestion.minimumHoldMs,
       minimumHoldMs: 3_200,
-    }, now);
+      },
+      now,
+    );
   }
-  const message = mapMessage({
+  const message = mapMessage(
+    {
     id: messageId,
     episode_id: episode.id,
     speaker_role: speakerRole,
@@ -2081,6 +3653,23 @@ export async function advanceBotcastEpisode(
     content,
     voice_performance_text: voicePerformanceText,
     created_at: now,
-  }, messageMoodKey);
-  return { episode: getBotcastEpisode(db, userId, episode.id), message };
+    },
+    messageMoodKey,
+  );
+  episode = getBotcastEpisode(db, userId, episode.id);
+  if (speakerRole === "host" && episode.segment === "closing") {
+    const guestDeparted = episode.events.some(
+      (event) => event.kind === "departure",
+    );
+    completeEpisode(
+      db,
+      userId,
+      episode,
+      guestDeparted ? "guest_departed" : "completed",
+      now,
+    );
+    await ensureBotcastEpisodePersonaReview(db, userId, episode.id, generation);
+    episode = getBotcastEpisode(db, userId, episode.id);
+  }
+  return { episode, message };
 }

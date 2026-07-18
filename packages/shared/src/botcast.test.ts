@@ -3,29 +3,70 @@ import { describe, it } from "node:test";
 
 import {
   BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT,
+  BOTCAST_DEFAULT_STUDIO_ATMOSPHERE_MIX,
   BOTCAST_DEFAULT_STUDIO_LAYOUT,
   BOTCAST_DIRECTOR_MIN_SHOT_MS,
   BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS,
+  BOTCAST_VOICE_LEVEL_DEFAULT,
+  BOTCAST_VOICE_LEVEL_MAX,
   applyBotcastProducerCueToTension,
   botcastFallbackStudioAccentVariantForSeed,
+  botcastCameraModeAt,
   botcastCameraShotAt,
   botcastCameraOffsetXPercent,
   botcastCameraOffsetYPercent,
   botcastDirectorSuggestion,
   botcastGuestDepartureEligible,
   botcastGuestHasDepartedAt,
+  botcastListenerReactionForMessage,
   botcastReplayMessageIndexAt,
   botcastReplayTimeline,
   botcastNextSpeakerRole,
   botcastSegmentForTurn,
   botcastSessionShouldClose,
+  botcastSocialInfluenceEventsAt,
+  botcastStrongestNegativeSocialInfluenceAt,
   botcastVoiceMoodForTension,
   isBotcastFallbackStudioAccentVariant,
   normalizeBotcastStudioLayout,
+  normalizeBotcastStudioAtmosphereMix,
+  normalizeBotcastVoiceLevel,
+  normalizeBotcastVoiceLevelsByBotId,
+  swapBotcastStudioLayoutSeats,
   type BotcastReplayEvent,
 } from "./botcast.ts";
 
 describe("Signal fallback studio accents", () => {
+  it("reads only valid saved listener reactions for the requested message", () => {
+    const events: BotcastReplayEvent[] = [{
+      id: "event-1",
+      episodeId: "episode-1",
+      sequence: 1,
+      kind: "listener_reaction",
+      occurredAt: "2026-07-17T12:00:00.000Z",
+      payload: {
+        plan: {
+          v: 1,
+          name: "listenerReaction",
+          speakerBotId: "guest",
+          listenerBotId: "host",
+          messageId: "message-1",
+          targetSource: "role",
+          visualAction: "nod",
+          spokenCue: "mm-hm",
+          targetProgress: 0.48,
+          seed: "signal-listener-v1:test",
+          cameraCutEligible: true,
+        },
+      },
+    }];
+    assert.equal(
+      botcastListenerReactionForMessage(events, "message-1")?.listenerBotId,
+      "host",
+    );
+    assert.equal(botcastListenerReactionForMessage(events, "other"), null);
+  });
+
   it("recognizes the three variants and deterministically assigns legacy shows", () => {
     assert.deepEqual(BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS, [0, 1, 2]);
     for (const variant of BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS) {
@@ -41,6 +82,74 @@ describe("Signal fallback studio accents", () => {
       first,
     );
     assert.equal(isBotcastFallbackStudioAccentVariant(first), true);
+  });
+});
+
+describe("Signal replayed Power influence", () => {
+  it("restores valid active influence and selects the strongest negative pressure", () => {
+    const events: BotcastReplayEvent[] = [
+      {
+        id: "power-small",
+        episodeId: "episode-1",
+        sequence: 1,
+        kind: "power_effect",
+        occurredAt: "2026-07-17T12:00:00.000Z",
+        payload: {
+          v: 1,
+          effect: "social_influence",
+          powerId: "annoying",
+          powerName: "Annoying",
+          sourceBotId: "guest",
+          targetBotId: "host",
+          sourceRole: "guest",
+          targetRole: "host",
+          trigger: "after_speech",
+          polarity: "negative",
+          strength: "small",
+          atMs: 3_200,
+          sourceMessageId: "message-1",
+        },
+      },
+      {
+        id: "power-large",
+        episodeId: "episode-1",
+        sequence: 2,
+        kind: "power_effect",
+        occurredAt: "2026-07-17T12:00:00.000Z",
+        payload: {
+          v: 1,
+          effect: "social_influence",
+          powerId: "intimidation",
+          powerName: "Intimidation",
+          sourceBotId: "guest",
+          targetBotId: "host",
+          sourceRole: "guest",
+          targetRole: "host",
+          trigger: "session_start",
+          polarity: "negative",
+          strength: "large",
+          atMs: 0,
+        },
+      },
+    ];
+
+    assert.equal(botcastSocialInfluenceEventsAt({ events, elapsedMs: 0 }).length, 1);
+    assert.equal(
+      botcastStrongestNegativeSocialInfluenceAt({
+        events,
+        elapsedMs: 4_000,
+        targetBotId: "host",
+      })?.powerName,
+      "Intimidation",
+    );
+    assert.equal(
+      botcastStrongestNegativeSocialInfluenceAt({
+        events,
+        elapsedMs: 4_000,
+        targetBotId: "other",
+      }),
+      null,
+    );
   });
 });
 
@@ -84,17 +193,74 @@ describe("Signal studio layout", () => {
     );
   });
 
-  it("centers close-ups on each saved bot position", () => {
+  it("centers close-ups when possible and keeps every pan inside the TV frame", () => {
     const layout = normalizeBotcastStudioLayout({
       hostBot: { x: 14, y: 42 },
       guestBot: { x: 68, y: 75 },
     });
-    assert.equal(botcastCameraOffsetXPercent("left", layout), 51.12);
-    assert.equal(botcastCameraOffsetXPercent("right", layout), -25.56);
+    assert.equal(botcastCameraOffsetXPercent("left", layout), 21);
+    assert.equal(botcastCameraOffsetXPercent("right", layout), -21);
     assert.equal(botcastCameraOffsetXPercent("wide", layout), 0);
     assert.equal(botcastCameraOffsetYPercent("left", layout), 18.46);
-    assert.equal(botcastCameraOffsetYPercent("right", layout), -28.4);
+    assert.equal(botcastCameraOffsetYPercent("right", layout), -18.9);
     assert.equal(botcastCameraOffsetYPercent("wide", layout), 0);
+  });
+
+  it("swaps the two seats while keeping each bot paired with its cup", () => {
+    const layout = normalizeBotcastStudioLayout({
+      hostBot: { x: 18, y: 62 },
+      guestBot: { x: 74, y: 68 },
+      hostCup: { x: 32, y: 86 },
+      guestCup: { x: 67, y: 91 },
+    });
+    const swapped = swapBotcastStudioLayoutSeats(layout);
+
+    assert.deepEqual(swapped, {
+      hostBot: layout.guestBot,
+      guestBot: layout.hostBot,
+      hostCup: layout.guestCup,
+      guestCup: layout.hostCup,
+    });
+    assert.deepEqual(swapBotcastStudioLayoutSeats(swapped), layout);
+  });
+});
+
+describe("Signal voice levels", () => {
+  it("normalizes show-scoped levels and preserves separate guests", () => {
+    assert.equal(normalizeBotcastVoiceLevel(undefined), BOTCAST_VOICE_LEVEL_DEFAULT);
+    assert.equal(normalizeBotcastVoiceLevel(9), BOTCAST_VOICE_LEVEL_MAX);
+    assert.equal(normalizeBotcastVoiceLevel(-1), 0);
+    assert.deepEqual(
+      normalizeBotcastVoiceLevelsByBotId(
+        { "guest-b": "0.65", "guest-c": 4, malformed: null },
+        { host: 1.1, "guest-a": 0.8 },
+      ),
+      { host: 1.1, "guest-a": 0.8, "guest-b": 0.65, "guest-c": 1.25 },
+    );
+  });
+});
+
+describe("Signal studio atmosphere mix", () => {
+  it("gives legacy shows the full fallback mix and bounds saved levels", () => {
+    assert.deepEqual(
+      normalizeBotcastStudioAtmosphereMix(undefined),
+      BOTCAST_DEFAULT_STUDIO_ATMOSPHERE_MIX,
+    );
+    assert.deepEqual(
+      normalizeBotcastStudioAtmosphereMix({
+        background: 99,
+        grain: -1,
+        foley: "1.4",
+      }),
+      { background: 0.32, grain: 0, foley: 1.4 },
+    );
+    assert.deepEqual(
+      normalizeBotcastStudioAtmosphereMix(
+        { background: 0.2, grain: 0.006, foley: 1.1 },
+        { background: 0, grain: 0, foley: 0 },
+      ),
+      { background: 0.2, grain: 0.006, foley: 1.1 },
+    );
   });
 });
 
@@ -197,6 +363,27 @@ describe("Botcast episode state", () => {
     }), true);
   });
 
+  it("subtracts completed and active model warmup holds from Signal time", () => {
+    const threeExchanges = Array.from({ length: 6 }, (_, index) => ({
+      speakerRole: index % 2 === 0 ? "host" as const : "guest" as const,
+      content: "A line.",
+    }));
+    assert.equal(botcastSessionShouldClose({
+      messages: threeExchanges,
+      durationMinutes: 3,
+      startedAtMs: 0,
+      nowMs: 4 * 60_000,
+      modelWarmupHoldDurationMs: 2 * 60_000,
+    }), false);
+    assert.equal(botcastSessionShouldClose({
+      messages: threeExchanges,
+      durationMinutes: 3,
+      startedAtMs: 0,
+      nowMs: 4 * 60_000,
+      modelWarmupHoldStartedAtMs: 2 * 60_000,
+    }), false);
+  });
+
   it("requires resistance and a warning before departure", () => {
     const calm = { level: 0 as const, warningCount: 0, stage: "calm" as const };
     const resistance = applyBotcastProducerCueToTension(calm, { kind: "press_harder" });
@@ -258,7 +445,28 @@ describe("Botcast replay director", () => {
     assert.equal(sustainedGuest.shot, "right");
   });
 
-  it("uses wide for a departure and viewer-local manual locks", () => {
+  it("always takes the final host signoff wide", () => {
+    const closing = botcastDirectorSuggestion({
+      previous: {
+        shot: "right",
+        reason: "speaker",
+        atMs: 12_000,
+        minimumHoldMs: 3_200,
+      },
+      atMs: 12_400,
+      speakerRole: "host",
+      utteranceDurationMs: 1_400,
+      segment: "closing",
+    });
+    assert.deepEqual(closing, {
+      shot: "wide",
+      reason: "closing",
+      atMs: 12_400,
+      minimumHoldMs: 3_200,
+    });
+  });
+
+  it("uses wide for a departure and replays the recorded live camera modes", () => {
     const departure = botcastDirectorSuggestion({
       atMs: 12_000,
       speakerRole: "guest",
@@ -275,15 +483,42 @@ describe("Botcast replay director", () => {
         payload: { shot: "right", atMs: 5_000 },
         occurredAt: "2026-01-01T00:00:00.000Z",
       },
+      {
+        id: "event-2",
+        episodeId: "episode-1",
+        sequence: 2,
+        kind: "camera_suggestion",
+        payload: { shot: "left", atMs: 7_000 },
+        occurredAt: "2026-01-01T00:00:01.000Z",
+      },
+      {
+        id: "event-3",
+        episodeId: "episode-1",
+        sequence: 3,
+        kind: "camera_mode",
+        payload: { mode: "wide", shot: "wide", atMs: 6_000 },
+        occurredAt: "2026-01-01T00:00:02.000Z",
+      },
+      {
+        id: "event-4",
+        episodeId: "episode-1",
+        sequence: 4,
+        kind: "camera_mode",
+        payload: { mode: "auto", shot: "right", atMs: 8_000 },
+        occurredAt: "2026-01-01T00:00:03.000Z",
+      },
     ];
     assert.equal(
-      botcastCameraShotAt({ events, elapsedMs: 7_000, manualShot: "auto" }),
+      botcastCameraShotAt({ events, elapsedMs: 5_500 }),
       "right",
     );
     assert.equal(
-      botcastCameraShotAt({ events, elapsedMs: 7_000, manualShot: "wide" }),
+      botcastCameraShotAt({ events, elapsedMs: 7_500 }),
       "wide",
     );
+    assert.equal(botcastCameraModeAt({ events, elapsedMs: 7_500 }), "wide");
+    assert.equal(botcastCameraShotAt({ events, elapsedMs: 8_000 }), "right");
+    assert.equal(botcastCameraModeAt({ events, elapsedMs: 8_000 }), "auto");
   });
 
   it("keeps the guest on stage until the saved departure beat", () => {

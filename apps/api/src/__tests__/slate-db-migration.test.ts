@@ -84,19 +84,23 @@ describe("Slate schema migration", () => {
 
       const project = db
         .prepare(
-          `SELECT series_id, manuscript, continuity_active_version,
+          `SELECT series_id, manuscript, title_origin, cover_json, continuity_active_version,
                   continuity_upgrade_status
              FROM slate_projects WHERE id = 'legacy-book'`,
         )
         .get() as {
         series_id: string;
         manuscript: string;
+        title_origin: string;
+        cover_json: string;
         continuity_active_version: string;
         continuity_upgrade_status: string;
       };
       assert.deepEqual({ ...project }, {
         series_id: "legacy-series-legacy-book",
         manuscript: prose,
+        title_origin: "writer",
+        cover_json: "{}",
         continuity_active_version: "0.0",
         continuity_upgrade_status: "current",
       });

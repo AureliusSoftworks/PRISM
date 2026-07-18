@@ -42,8 +42,9 @@ collaboration, persona editor panels, and branching-fiction authoring are later
 roadmap items. Clean manuscript export to DOCX, Markdown, and text is part of
 the author-safety foundation.
 
-Slate inherits the account's effective provider and model defaults. V1 does not
-add per-project provider, model, sampling, or reasoning controls.
+Slate starts from the account's effective provider and model defaults. Each
+project may then choose **OFFLINE**, **AUTO**, or **ONLINE** prose routing and a
+concrete model. Sampling and reasoning controls remain under the hood.
 
 ## Continuity versioning
 
@@ -75,11 +76,26 @@ The primary workspace has three conceptual regions:
 3. **Direction panel** — concise project-, chapter-, scene-, or selection-level
    notes and actions. It is not a chat transcript.
 
+A movable rainbow Prism bubble opens an ephemeral project-context exchange in
+place. The composer and Markdown messages float independently above the desk,
+then each message fades like action text. Only the latest three messages are
+kept as a crash-recovery buffer; they are not continuity, and Prism does not
+bring up an earlier exchange unless the writer explicitly asks about one still
+in that buffer. The companion is advisory chrome, not a fourth document region:
+it cannot mutate prose, Continuity, structure, or titles.
+
 The workspace moves through three phases without forcing a rigid wizard:
 
 ### Shape
 
-- Start from a title and creative spark, or bring existing material.
+- Start from exactly one source: a creative spark or existing material. Bringing
+  material replaces the spark controls so the sources are never blended accidentally.
+- Preserve a supplied title; otherwise use the active privacy-matched prose model
+  to generate a story-aware working title from the source, then confirm it before
+  creation. The writer may request another title or edit it directly.
+- Offer privacy-matched book-cover generation as an explicit creation choice and
+  as a repeatable project action. Title and cover generation remain independent;
+  neither silently replaces the writer's accepted choice.
 - Wildcard-assisted starts are optional: a writer may place supported uppercase
   `{WILDCARDS}` in the spark, preview or reroll the concrete result, and create
   from that roll. Slate preserves both the resolved spark and its source template.
@@ -114,8 +130,16 @@ The workspace moves through three phases without forcing a rigid wizard:
 5. Substantial accepted AI rewrites create a recoverable version checkpoint.
 6. Generation acts on an explicit structure item or scope; it does not silently
    continue elsewhere.
-7. Provider/model selection comes from account defaults. A LOCAL Slate operation
-   must use only the local provider path and must never escalate externally.
+7. Project prose routing starts from account defaults and may be overridden by
+   OFFLINE/AUTO/ONLINE plus a model choice. OFFLINE must use only the local
+   provider path and must never escalate externally.
+8. Every AI draft and revision stores a backend receipt containing the exact
+   provider, model, target artifact, and content hash even when the prose is
+   later edited or the proposal is rejected.
+9. Living summaries, project chat, and title suggestions remain advisory.
+   Once a spark-led manuscript has enough prose, Slate surfaces a visible title
+   checkpoint. It recommends a replacement only when materially stronger, and
+   accepting it remains an explicit writer action.
 
 ## Persistent project contract
 
@@ -130,6 +154,11 @@ Each tenant-scoped project stores at minimum:
 - current AI revision proposal and its accepted/rejected state
 - version checkpoints created before substantial accepted rewrites
 - timestamps and the provider/model provenance of AI operations
+- project prose-routing and model preferences
+- backend generation receipts for drafted and proposed prose
+- a fingerprinted living `Story so far` summary
+- project-scoped Prism side-chat history
+- pending and resolved title suggestions
 
 All project list, detail, update, generation, and revision queries include the
 authenticated `user_id`. Knowing another tenant's project or revision ID must not
@@ -140,8 +169,9 @@ permit reading or mutation.
 Slate becomes preview `v0.1` only when a player can:
 
 1. Enter Slate from PRISM's applet surface.
-2. Create a persistent prose project from a title and creative spark, optionally
-   resolving `{WILDCARDS}` before creation.
+2. Create a persistent prose project from either a creative spark or existing
+   material, deriving a working title when the writer did not provide one and
+   optionally resolving spark `{WILDCARDS}` before creation.
 3. Shape a generated premise and scene plan.
 4. Open the three-region manuscript workspace.
 5. Draft at least one planned scene.
@@ -203,19 +233,21 @@ The long-term loop is:
 
 - Player-accessible Slate ships with an action-led tutorial whose selectors are
   stable and tested.
-- The walkthrough teaches project creation, structure selection/rearrangement,
-  manuscript editing, direction, and revision approval.
+- The walkthrough teaches project creation, prose routing/model choice,
+  structure selection/rearrangement, manuscript editing, the living summary,
+  advisory project chat, direction, and revision approval.
 - The tutorial remains skippable and resettable.
-- `firstRunOnboarding.ts` needs no Slate-specific provider/model step: Slate
-  intentionally inherits the account choices already collected there.
+- `firstRunOnboarding.ts` needs no additional Slate-specific provider step:
+  account setup remains the default, while the project control is taught inside
+  Slate and can be changed later.
 
 ## Deliberate V1 exclusions
 
 - `Develop in Slate`, `Rehearse in Story`, and round-trip incorporation runtime
   UI (the contracts are documented now; implementation is staged later)
 - live cross-applet synchronization
-- per-project provider/model configuration
-- a conversational writing buddy or chat transcript
+- advanced sampling/reasoning controls
+- chat that can silently mutate manuscript, structure, Continuity, or title
 - persona-guided editor panels and multi-editor panels
 - screenplay-specific structure and formatting
 - collaborative editing, comments by other people, publishing-grade EPUB/PDF

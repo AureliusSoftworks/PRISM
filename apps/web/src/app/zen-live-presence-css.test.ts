@@ -341,9 +341,10 @@ describe("Zen live presence CSS", () => {
     assert.match(pageSource, /const \[zenLiveBotContextMenu, setZenLiveBotContextMenu\]/);
     assert.match(pageSource, /const openZenLiveBotContextMenu = useCallback/);
     assert.match(pageSource, /function renderZenLiveBotContextMenu\(\): React\.JSX\.Element \| null/);
-    assert.match(pageSource, />Grow</);
-    assert.match(pageSource, />Shrink</);
-    assert.match(pageSource, />Edit avatar</);
+    assert.match(pageSource, /label: "Grow"/);
+    assert.match(pageSource, /label: "Shrink"/);
+    assert.match(pageSource, /label: "Reset size"/);
+    assert.match(pageSource, /label: "Edit avatar"/);
     assert.match(pageSource, /openBotCustomizer\(bot\);\s+setBotAvatarCustomizerOpen\(true\);/);
     assert.match(pageSource, /openDefaultBotCustomizer\(\);/);
     assert.match(
@@ -560,9 +561,17 @@ describe("Zen live presence CSS", () => {
     assert.match(glyphEmissionRule, /display:\s*inline-grid\s*;/);
     assert.match(glyphEmissionRule, /inline-size:\s*max-content\s*;/);
     assert.match(glyphEmissionRule, /min-inline-size:\s*100%\s*;/);
+    assert.match(
+      glyphEmissionRule,
+      /block-size:\s*calc\(\s*1em\s*\+\s*var\(--crt-glyph-paint-bleed\)\s*\+\s*var\(--crt-glyph-paint-bleed\)\s*\)\s*;/
+    );
     assert.match(glyphEmissionRule, /padding-inline:\s*var\(--crt-glyph-paint-bleed\)\s*;/);
+    assert.match(glyphEmissionRule, /padding-block:\s*var\(--crt-glyph-paint-bleed\)\s*;/);
     assert.match(glyphEmissionRule, /margin-inline:\s*calc\(var\(--crt-glyph-paint-bleed\) \* -1\)\s*;/);
+    assert.match(glyphEmissionRule, /margin-block:\s*calc\(var\(--crt-glyph-paint-bleed\) \* -1\)\s*;/);
     assert.match(glyphEmissionRule, /overflow:\s*visible\s*;/);
+    assert.match(glyphEmissionRule, /-webkit-text-stroke:\s*0\s*;/);
+    assert.match(glyphEmissionRule, /paint-order:\s*fill\s*;/);
     assert.match(glyphEmissionRule, /repeating-linear-gradient\(\s*90deg/);
     assert.match(glyphEmissionRule, /rgb\(var\(--crt-glyph-core-red-rgb\) \/ var\(--crt-glyph-phosphor-midtone-strength\)\)/);
     assert.match(glyphEmissionRule, /rgb\(var\(--crt-glyph-core-green-rgb\) \/ var\(--crt-glyph-phosphor-midtone-strength\)\)/);
@@ -599,6 +608,7 @@ describe("Zen live presence CSS", () => {
       [".coffeeSeatPlateEmoji [data-coffee-plate-emoji-part]"],
       "text-align: center"
     );
+    assert.match(featurePartRule, /--coffee-face-feature-paint-pad-block/);
     assert.match(featurePartRule, /--coffee-face-feature-paint-pad-inline/);
     assert.match(
       featurePartRule,
@@ -607,6 +617,10 @@ describe("Zen live presence CSS", () => {
     assert.match(
       featurePartRule,
       /margin-inline:\s*calc\(var\(--coffee-face-feature-paint-pad-inline,\s*0em\) \* -1\)\s*;/
+    );
+    assert.match(
+      featurePartRule,
+      /margin-block:\s*calc\(var\(--coffee-face-feature-paint-pad-block,\s*0em\) \* -1\)\s*;/
     );
     assert.match(featurePartRule, /overflow:\s*visible\s*;/);
     assert.match(featurePartRule, /text-align:\s*center\s*;/);
@@ -639,6 +653,16 @@ describe("Zen live presence CSS", () => {
       ['.coffeeSeatPlateEmoji [data-crt-glyph-layer="true"]::after'],
       "rgb(70 218 255"
     );
+    assert.match(glyphConvergenceRule, /background:\s*[\s\S]*linear-gradient/);
+    assert.match(glyphConvergenceRule, /repeating-linear-gradient\(\s*90deg/);
+    assert.match(glyphConvergenceRule, /-webkit-background-clip:\s*text\s*;/);
+    assert.match(glyphConvergenceRule, /background-clip:\s*text\s*;/);
+    assert.match(glyphConvergenceRule, /-webkit-text-fill-color:\s*transparent\s*;/);
+    assert.match(
+      glyphConvergenceRule,
+      /-webkit-text-stroke:\s*calc\(\s*var\(--bot-face-weight-stroke,\s*0em\) \+ 0\.012em\s*\)\s*var\(--zen-live-bot-face-phosphor-ink,\s*#ffffff\)\s*;/,
+    );
+    assert.match(glyphConvergenceRule, /paint-order:\s*stroke fill\s*;/);
     assert.match(glyphConvergenceRule, /rgb\(255 54 78 \/ var\(--crt-glyph-convergence-opacity\)\)/);
     assert.match(glyphConvergenceRule, /rgb\(70 218 255 \/ var\(--crt-glyph-convergence-opacity\)\)/);
     assert.match(glyphConvergenceRule, /mix-blend-mode:\s*screen\s*;/);
@@ -725,6 +749,10 @@ describe("Zen live presence CSS", () => {
 
     const bodyStart = pageSource.indexOf("className={styles.zenLiveBotPresenceBody}");
     assert.notEqual(bodyStart, -1);
+    assert.match(
+      pageSource,
+      /data-zen-live-bot-presence-plate="true"[\s\S]*<BotAmbientPresenceRig[\s\S]*scheduleKey=\{`zen-live-/,
+    );
     const emissionMaskStart = pageSource.indexOf("className={styles.zenLiveBotPresenceFaceEmissionMask}", bodyStart);
     assert.notEqual(emissionMaskStart, -1);
     const faceRigStart = pageSource.indexOf("className={styles.zenLiveBotPresenceFaceRig}", bodyStart);
@@ -1495,7 +1523,10 @@ describe("Zen live presence CSS", () => {
     assert.match(spinGeometryRule, /display:\s*inline-block\s*;/);
     assert.match(spinGeometryRule, /inline-size:\s*max-content\s*;/);
     assert.match(spinGeometryRule, /min-inline-size:\s*0\s*;/);
-    assert.match(spinGeometryRule, /block-size:\s*1em\s*;/);
+    assert.match(
+      spinGeometryRule,
+      /block-size:\s*calc\(\s*1em\s*\+\s*var\(--crt-glyph-paint-bleed\)\s*\+\s*var\(--crt-glyph-paint-bleed\)\s*\)\s*;/,
+    );
     assert.match(spinGeometryRule, /padding-inline:\s*0\s*;/);
     assert.match(spinGeometryRule, /margin-inline:\s*0\s*;/);
     assert.match(
@@ -1541,9 +1572,23 @@ describe("Zen live presence CSS", () => {
       ],
       "animation: none"
     );
+    assert.match(blinkRule, /--crt-glyph-core-red-rgb:\s*255 255 255\s*;/);
+    assert.match(blinkRule, /--crt-glyph-core-green-rgb:\s*255 255 255\s*;/);
+    assert.match(blinkRule, /--crt-glyph-core-blue-rgb:\s*255 255 255\s*;/);
+    assert.match(blinkRule, /--crt-glyph-phosphor-midtone-strength:\s*0\.24\s*;/);
+    assert.match(blinkRule, /--crt-glyph-phosphor-bright-strength:\s*0\.09\s*;/);
     assert.match(blinkRule, /--bot-face-custom-glyph-base-rotation:\s*0deg\s*;/);
     assert.match(blinkRule, /animation:\s*none\s*;/);
     assert.match(blinkRule, /transform:\s*rotate\(0deg\)\s*;/);
+
+    const closedEyeRule = ruleForSelectorNeedlesWithBody(
+      [
+        '.zenLiveBotPresenceFaceGlyph[data-coffee-plate-emoji-eyes-open="false"]',
+        '[data-coffee-plate-emoji-part="eyes"]',
+      ],
+      "opacity: 1"
+    );
+    assert.match(closedEyeRule, /opacity:\s*1\s*;/);
   });
 
   it("removes the Prism ambient aura from Zen mode", () => {
@@ -1650,10 +1695,7 @@ describe("Zen live presence CSS", () => {
       /--crt-prism-face-halo-strength-scale:\s*calc\(\s*var\(--crt-prism-face-glow-strength-scale,\s*1\) \* 0\.34\s*\)\s*;/
     );
     assert.match(prismFacePartRule, /--crt-face-edge-color:\s*#ffffff\s*;/);
-    assert.match(
-      prismFacePartRule,
-      /--bot-face-glow-font-weight:\s*var\(--bot-face-font-weight,\s*560\)\s*;/
-    );
+    assert.doesNotMatch(prismFacePartRule, /--bot-face-glow-font-weight/);
     assert.match(
       prismFacePartRule,
       /--bot-face-glow-stroke:\s*calc\(var\(--bot-face-weight-glow-stroke,\s*0\.006em\) \* 0\.72\)\s*;/
@@ -2154,6 +2196,14 @@ describe("Zen live presence CSS", () => {
     assert.match(spinnerFrameRule, /margin-inline:\s*calc\(var\(--coffee-face-single-glyph-paint-pad-inline,\s*0em\) \* -1\)\s*;/);
     assert.match(spinnerFrameRule, /margin-block:\s*calc\(var\(--coffee-face-single-glyph-paint-pad-block,\s*0em\) \* -1\)\s*;/);
     assert.match(spinnerFrameRule, /overflow:\s*visible\s*;/);
+    assert.match(
+      spinnerFrameRule,
+      /color-mix\(in srgb,\s*var\(--crt-face-edge-color,\s*currentColor\) 76%,\s*transparent\)/,
+    );
+    assert.doesNotMatch(
+      spinnerFrameRule,
+      /color-mix\(in srgb,\s*currentColor 76%,\s*transparent\)/,
+    );
 
     const zenSpinnerAnchorRule = ruleForExactSelector(
       ".zenLiveBotPresenceThinkingGlyphAnchor"
@@ -2167,7 +2217,7 @@ describe("Zen live presence CSS", () => {
     );
     assert.match(
       zenSpinnerGlyphRule,
-      /color:\s*var\(--zen-live-bot-face-ink,\s*var\(--zen-presence-face-ink\)\)\s*;/
+      /color:\s*var\(--zen-live-bot-face-phosphor-ink,\s*#ffffff\)\s*;/
     );
     assert.match(zenSpinnerGlyphRule, /var\(--coffee-bot-color\)/);
     assert.match(

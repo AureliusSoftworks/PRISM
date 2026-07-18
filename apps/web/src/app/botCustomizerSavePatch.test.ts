@@ -39,6 +39,7 @@ const pristine: BotCustomizerSavePristine = {
   faceEyeOffsetX: 0,
   faceEyeOffsetY: 0,
   faceEyeRotationDeg: 0,
+  faceEyeCount: 1,
   faceMouthScale: 1,
   faceMouthOffsetX: 0,
   faceMouthOffsetY: 0,
@@ -91,6 +92,7 @@ const currentFromPristine = (
   faceEyeOffsetX: pristine.faceEyeOffsetX,
   faceEyeOffsetY: pristine.faceEyeOffsetY,
   faceEyeRotationDeg: pristine.faceEyeRotationDeg,
+  faceEyeCount: pristine.faceEyeCount,
   faceMouthScale: pristine.faceMouthScale,
   faceMouthOffsetX: pristine.faceMouthOffsetX,
   faceMouthOffsetY: pristine.faceMouthOffsetY,
@@ -249,6 +251,16 @@ describe("bot customizer save patch", () => {
     );
   });
 
+  it("patches the custom eye count independently", () => {
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(
+        currentFromPristine({ faceEyeCount: 2 }),
+        pristine,
+      ),
+      { faceEyeCount: 2 },
+    );
+  });
+
   it("patches eye scale and coordinate placement edits", () => {
     assert.deepEqual(
       buildBotCustomizerSavePatch(
@@ -357,6 +369,7 @@ describe("bot customizer save patch", () => {
       ...pristine.audioVoiceProfile,
       baseVoiceId: "voice-4" as const,
       elevenLabsVoiceId: "voice-id",
+      elevenLabsVoiceIdOverride: "portable-voice-id",
       elevenLabsEffect: "deep-space" as const,
       elevenLabsDirection: "warm, conspiratorial",
       pitch: 0.35,

@@ -15,6 +15,7 @@ import {
   DEFAULT_BOT_FACE_BLINK_SCALE,
   DEFAULT_BOT_FACE_EYE_OFFSET_X,
   DEFAULT_BOT_FACE_EYE_OFFSET_Y,
+  DEFAULT_BOT_FACE_EYE_COUNT,
   DEFAULT_BOT_FACE_EYE_ROTATION_DEG,
   DEFAULT_BOT_FACE_EYE_SCALE,
   DEFAULT_BOT_FACE_FONT_ID,
@@ -32,6 +33,7 @@ import {
   normalizeBotFaceBlinkOffsetY,
   normalizeBotFaceBlinkScale,
   normalizeBotFaceEyeCharacter,
+  normalizeBotFaceEyeCount,
   normalizeBotFaceEyeOffsetX,
   normalizeBotFaceEyeOffsetY,
   normalizeBotFaceEyeScale,
@@ -97,6 +99,22 @@ describe("bot avatar face style", () => {
     assert.equal(normalizeBotFaceEyeCharacter(null), null);
   });
 
+  it("accepts one or two custom eyes and defaults legacy styles to one", () => {
+    assert.equal(DEFAULT_BOT_FACE_EYE_COUNT, 1);
+    assert.equal(normalizeBotFaceEyeCount(1), 1);
+    assert.equal(normalizeBotFaceEyeCount(2), 2);
+    assert.equal(normalizeBotFaceEyeCount(0), null);
+    assert.equal(normalizeBotFaceEyeCount(3), null);
+    assert.equal(normalizeBotFaceEyeCount("2"), null);
+    assert.equal(resolveBotFaceStyle({ faceEyeCharacter: "⦿" }).eyeCount, 1);
+    assert.equal(
+      resolveBotFaceStyle({ faceEyeCharacter: "⦿", faceEyeCount: 2 })
+        .eyeCount,
+      2,
+    );
+    assert.equal(resolveBotFaceStyle({ faceEyeCount: 2 }).eyeCount, 1);
+  });
+
   it("accepts broad single mouth glyphs while rejecting emoji presentation", () => {
     assert.equal(normalizeBotFaceMouthCharacter("  △  "), "△");
     assert.equal(normalizeBotFaceMouthCharacter("Vv"), "V");
@@ -119,6 +137,7 @@ describe("bot avatar face style", () => {
     assert.deepEqual(resolveBotFaceStyle({}, "formal"), {
       eyesFont: "formal",
       eyeCharacter: null,
+      eyeCount: DEFAULT_BOT_FACE_EYE_COUNT,
       eyeAnimation: DEFAULT_BOT_FACE_GLYPH_ANIMATION,
       mouthFont: "formal",
       mouthCharacter: DEFAULT_BOT_FACE_MOUTH_CHARACTER,
@@ -142,6 +161,7 @@ describe("bot avatar face style", () => {
     assert.deepEqual(resolveBotFaceStyle({}, null), {
       eyesFont: DEFAULT_BOT_FACE_FONT_ID,
       eyeCharacter: null,
+      eyeCount: DEFAULT_BOT_FACE_EYE_COUNT,
       eyeAnimation: DEFAULT_BOT_FACE_GLYPH_ANIMATION,
       mouthFont: DEFAULT_BOT_FACE_FONT_ID,
       mouthCharacter: DEFAULT_BOT_FACE_MOUTH_CHARACTER,
@@ -170,6 +190,7 @@ describe("bot avatar face style", () => {
         {
           faceEyesFont: "concise",
           faceEyeCharacter: "B)",
+          faceEyeCount: 2,
           faceEyeAnimation: "wobble",
           faceMouthFont: "playful",
           faceMouthCharacter: "△▽",
@@ -195,6 +216,7 @@ describe("bot avatar face style", () => {
       {
         eyesFont: "concise",
         eyeCharacter: "B",
+        eyeCount: 2,
         eyeAnimation: DEFAULT_BOT_FACE_GLYPH_ANIMATION,
         mouthFont: "playful",
         mouthCharacter: "△",
@@ -242,6 +264,7 @@ describe("bot avatar face style", () => {
     );
 
     assert.equal(style.eyeCharacter, null);
+    assert.equal(style.eyeCount, DEFAULT_BOT_FACE_EYE_COUNT);
     assert.equal(style.eyeAnimation, DEFAULT_BOT_FACE_GLYPH_ANIMATION);
     assert.equal(style.eyeOffsetX, DEFAULT_BOT_FACE_EYE_OFFSET_X);
     assert.equal(style.eyeOffsetY, -0.08);
@@ -378,6 +401,7 @@ describe("bot avatar face style", () => {
     const style = randomBotFaceStyle(() => values.shift() ?? 0);
     assert.equal(style.eyesFont, "neutral");
     assert.equal(style.eyeCharacter, null);
+    assert.equal(style.eyeCount, DEFAULT_BOT_FACE_EYE_COUNT);
     assert.equal(style.mouthFont, "formal");
     assert.equal(style.mouthCharacter, DEFAULT_BOT_FACE_MOUTH_CHARACTER);
     assert.equal(style.weight >= BOT_FACE_FONT_WEIGHT_MIN, true);

@@ -57,21 +57,28 @@ describe("Avatar Details Studio integration", () => {
     assert.doesNotMatch(editorSource, /AvatarStampAdjustments/);
     assert.doesNotMatch(editorSource, /Round glasses|Facial hair|Marking/);
     assert.doesNotMatch(editorSource, /Reset details/);
-    assert.match(
-      editorSource,
-      /screen: \{ \.\.\.workingRef\.current\.screen, paintMaskBase64: null \}/,
-    );
+    assert.match(editorSource, /avatarDetailsWithPaintColorMap\(/);
   });
 
-  it("offers an opt-in blink ink control and keeps it in the Details working copy", () => {
-    assert.match(editorSource, /type="checkbox"/);
-    assert.match(editorSource, /Hide ink while blinking/);
+  it("uses red, blue, and green ink roles instead of visibility toggles", () => {
+    assert.doesNotMatch(editorSource, /type="checkbox"/);
+    assert.doesNotMatch(editorSource, /Hide ink while/);
+    assert.match(editorSource, /label: "Blink ink"/);
+    assert.match(editorSource, /label: "Speech ink"/);
+    assert.match(editorSource, /label: "Effect ink"/);
+    assert.match(editorSource, /Hides while talking or sipping\./);
+    assert.match(editorSource, /role="radiogroup"/);
+    assert.match(editorSource, /role="radio"/);
     assert.match(
       editorSource,
-      /checked=\{working\.screen\.hideInkDuringBlink === true\}/,
+      /AVATAR_DETAILS_INK_ROLE_COLORS\[option\.role\]/,
     );
-    assert.match(editorSource, /setAvatarDetailsHideInkDuringBlink\(/);
-    assert.match(editorCss, /\.blinkInkControl/);
+    assert.match(
+      editorSource,
+      /every ink color becomes its normalized bot color/,
+    );
+    assert.match(editorCss, /\.inkRoleOptions/);
+    assert.match(editorCss, /\.runtimeColorNote/);
   });
 
   it("renders a frozen, toggleable face guide beneath the canonical editor canvas", () => {
@@ -85,13 +92,17 @@ describe("Avatar Details Studio integration", () => {
     assert.match(editorSource, /faceStyle:\s*BotFaceStyle/);
     assert.match(
       editorCss,
-      /\.faceGuide\[data-visible="true"\][\s\S]*opacity:\s*0\.34/,
+      /\.faceGuide\[data-visible="true"\][\s\S]*opacity:\s*0\.82/,
     );
-    assert.match(editorSource, /BOT_AVATAR_SCREEN_EDITOR_FACE_PLACEMENT\.yPct/);
     assert.match(
       editorSource,
-      /BOT_AVATAR_SCREEN_EDITOR_FACE_GLYPH_FRAME_RATIO \* 100/,
+      /const guideInk = theme === "light" \? "#050608" : "#ffffff"/,
     );
+    assert.match(
+      editorCss,
+      /\.editor\[data-editor-theme="light"\] \.canvasFrame/,
+    );
+    assert.match(editorSource, /BOT_AVATAR_SCREEN_EDITOR_FACE_PLACEMENT\.yPct/);
     assert.match(
       pageSource,
       /"--coffee-plate-emoji-face-scale-y": BOT_AVATAR_CANONICAL_FACE_SCALE_Y/,
@@ -99,26 +110,54 @@ describe("Avatar Details Studio integration", () => {
     assert.match(pageSource, /"--avatar-details-scale-x": "1"/);
     assert.match(editorSource, /data-avatar-details-writable-guide="true"/);
     assert.match(editorSource, /avatarDetailsWritablePixel\(x, y\)/);
-    assert.match(editorSource, /data-avatar-details-editor-emission="halo"/);
-    assert.match(editorSource, /data-avatar-details-editor-emission="bloom"/);
-    assert.match(editorCss, /\.paintCore[\s\S]*mix-blend-mode: screen/);
+    assert.match(editorSource, /rasterizeAvatarDetailsSemanticRgba\(/);
+    assert.match(editorSource, /className=\{styles\.canvasViewport\}/);
+    assert.match(editorCss, /\.canvasViewport[\s\S]*transform:\s*scale\(1\.36\)/);
+    assert.match(editorSource, /const AVATAR_DETAILS_EDITOR_ZOOM = 1\.36/);
+    assert.match(
+      editorSource,
+      /BOT_AVATAR_SCREEN_EDITOR_FACE_GLYPH_FRAME_RATIO \* AVATAR_DETAILS_EDITOR_ZOOM \* 100/,
+    );
+    const faceGuideIndex = editorSource.indexOf(
+      "data-avatar-details-face-guide=\"true\"",
+    );
+    const zoomedCanvasIndex = editorSource.indexOf(
+      "<div className={styles.canvasViewport}>",
+    );
+    assert.ok(faceGuideIndex > 0);
+    assert.ok(zoomedCanvasIndex > faceGuideIndex);
   });
 
-  it("keeps a 3x3 tab grid and scrollable drawing controls", () => {
-    assert.match(editorCss, /--avatar-details-editor-canvas-size:\s*512px/);
+  it("keeps the editable face guide crisp instead of compositing the live CRT glow", () => {
     assert.match(
       editorCss,
-      /@media \(min-width: 900px\) and \(min-height: 850px\)[\s\S]*grid-template-areas:[\s\S]*"tools tools"[\s\S]*"canvas canvas"[\s\S]*"blink coverage"/,
+      /\.canvasFrame\s*\{[\s\S]*contain:\s*layout paint;[\s\S]*isolation:\s*isolate;[\s\S]*box-shadow:\s*none;/,
     );
     assert.match(
       editorCss,
-      /clamp\(\s*220px,\s*calc\(100dvh - 490px\),\s*var\(--avatar-details-editor-canvas-size\)/,
+      /\.faceGuideGlyph \[data-crt-glyph-layer="true"\]\s*\{[\s\S]*filter:\s*none !important;[\s\S]*mix-blend-mode:\s*normal !important;[\s\S]*text-shadow:\s*none !important;/,
+    );
+    assert.match(
+      editorCss,
+      /\.faceGuideGlyph \[data-crt-glyph-layer="true"\]::before,[\s\S]*::after\s*\{[\s\S]*content:\s*none !important;[\s\S]*display:\s*none !important;/,
+    );
+  });
+
+  it("gives Details a larger canvas and a dedicated wide Studio layout", () => {
+    assert.match(editorCss, /--avatar-details-editor-canvas-size:\s*640px/);
+    assert.match(
+      editorCss,
+      /@container \(min-width: 720px\)[\s\S]*grid-template-columns:\s*minmax\(440px, 1fr\) minmax\(220px, 250px\)[\s\S]*"canvas tools"[\s\S]*"canvas palette"[\s\S]*"canvas coverage"/,
     );
     assert.match(pageSource, /data-active-control-tab=\{activeControlTab\}/);
     assert.match(pageSource, /data-avatar-control-stack="true"/);
     assert.match(
       pageCss,
       /\.botAvatarCustomizerBody\s*\{[\s\S]*grid-template-columns:\s*minmax\(560px, 1fr\) minmax\(390px, 460px\)/,
+    );
+    assert.match(
+      pageCss,
+      /\.botAvatarCustomizerBody\[data-active-control-tab="details"\][\s\S]*grid-template-columns:\s*minmax\(320px, 0\.55fr\) minmax\(680px, 1\.45fr\)/,
     );
     assert.match(
       pageCss,
@@ -139,7 +178,7 @@ describe("Avatar Details Studio integration", () => {
     );
   });
 
-  it("coalesces live preview updates and flushes the completed stroke", () => {
+  it("keeps the editor live while deferring the large avatar preview until stroke end", () => {
     assert.match(editorSource, /data-avatar-details-editor-core="true"/);
     assert.match(editorSource, /className=\{styles\.inputSurface\}/);
     assert.match(editorCss, /\.canvas\s*\{[\s\S]*pointer-events:\s*none/);
@@ -154,9 +193,44 @@ describe("Avatar Details Studio integration", () => {
     );
     assert.match(
       editorSource,
+      /const updateWorking = useCallback\([\s\S]*publishPreview = true, deferRender = false[\s\S]*if \(deferRender\)[\s\S]*drawWorkingCanvas\(normalized\)[\s\S]*if \(publishPreview\) queuePreviewRef\.current\(normalized\)/,
+    );
+    assert.match(
+      editorSource,
+      /avatarDetailsWithPaintColorMap\(current, result\.colorMap\),\s*\{ publishPreview: false, deferRender: true \}/,
+    );
+    assert.match(
+      editorSource,
+      /const sampledPoints = samples\.map[\s\S]*const paintPath: AvatarDetailsGridPoint\[\] = \[\][\s\S]*paintPoints\(paintPath\)/,
+    );
+    assert.match(
+      editorSource,
       /window\.cancelAnimationFrame\(previewFrameRef\.current\)/,
     );
+    assert.match(
+      editorSource,
+      /commitAvatarDetailsHistory\([\s\S]*workingRef\.current,[\s\S]*\),\s*false,[\s\S]*flushPreview\(workingRef\.current\)/,
+    );
     assert.match(editorSource, /flushPreview\(workingRef\.current\)/);
+  });
+
+  it("unmounts the large avatar throughout Details editing until explicitly rendered", () => {
+    assert.match(
+      pageSource,
+      /const \[detailsAvatarPreviewVisible, setDetailsAvatarPreviewVisible\] =\s*useState\(false\)/,
+    );
+    assert.match(
+      pageSource,
+      /activeControlTab === "details" &&\s*!detailsAvatarPreviewVisible[\s\S]*<BotAvatarDeferredPreviewPanel/,
+    );
+    assert.match(pageSource, />\s*Render current avatar\s*<\/button>/);
+    assert.match(pageSource, /data-avatar-preview-deferred="true"/);
+    assert.match(
+      pageSource,
+      /onEditStart=\{\(\) => setDetailsAvatarPreviewVisible\(false\)\}/,
+    );
+    assert.match(editorSource, /onEditStart\?\.\(\);[\s\S]*pointerGridPoint/);
+    assert.match(pageCss, /\.botAvatarDeferredPreviewPrompt/);
   });
 
   it("offers straight lines, circles, and whole-illustration dragging without hotkeys", () => {
@@ -168,7 +242,7 @@ describe("Avatar Details Studio integration", () => {
       /interpolateAvatarDetailsGridLine\(stroke\.startPoint, edge\)/,
     );
     assert.match(editorSource, /avatarDetailsCirclePoints\(/);
-    assert.match(editorSource, /moveAvatarDetailsPaintMask\(/);
+    assert.match(editorSource, /moveAvatarDetailsPaintColorMap\(/);
     assert.match(editorSource, /setPaintMode\("circle"\)/);
     assert.match(editorSource, /setPaintMode\("move"\)/);
     assert.match(editorSource, /data-tool=\{paintMode\}/);
@@ -223,19 +297,32 @@ describe("Avatar Details Studio integration", () => {
 });
 
 describe("Avatar Details shared mannequin rendering", () => {
-  it("places persistent phosphor canvases under glyphs and glass", () => {
-    const maskIndex = pageSource.indexOf("<AvatarDetailsMask");
+  it("composites beard ink below the face and upper detail above it beneath glass", () => {
+    const behindMaskIndex = pageSource.indexOf("<AvatarDetailsMask");
     const faceRigIndex = pageSource.indexOf(
       "className={styles.zenLiveBotPresenceFaceRig}",
-      maskIndex,
+      behindMaskIndex,
+    );
+    const aboveMaskIndex = pageSource.indexOf(
+      "<AvatarDetailsMask",
+      faceRigIndex,
     );
     const glassIndex = pageSource.indexOf(
       "className={styles.zenLiveBotPresenceScreenGlassOverlay}",
-      faceRigIndex,
+      aboveMaskIndex,
     );
-    assert.ok(maskIndex > 0);
-    assert.ok(faceRigIndex > maskIndex);
-    assert.ok(glassIndex > faceRigIndex);
+    assert.ok(behindMaskIndex > 0);
+    assert.ok(faceRigIndex > behindMaskIndex);
+    assert.ok(aboveMaskIndex > faceRigIndex);
+    assert.ok(glassIndex > aboveMaskIndex);
+    assert.match(
+      pageSource.slice(behindMaskIndex, faceRigIndex),
+      /depth="behind-face"/,
+    );
+    assert.match(
+      pageSource.slice(aboveMaskIndex, glassIndex),
+      /depth="above-face"/,
+    );
     assert.match(maskSource, /<canvas/);
     assert.match(maskSource, /useLayoutEffect/);
     assert.match(maskSource, /context\.putImageData\(glowImageData, 0, 0\)/);
@@ -249,17 +336,42 @@ describe("Avatar Details shared mannequin rendering", () => {
       /data-avatar-details-rendering="nearest-neighbor"/,
     );
     assert.match(maskCss, /image-rendering: pixelated/);
-    assert.match(maskCss, /z-index: 4/);
+    assert.match(maskCss, /\.behindFace\s*\{[\s\S]*z-index:\s*5/);
+    assert.match(maskCss, /\.aboveFace\s*\{[\s\S]*z-index:\s*7/);
+    assert.match(maskSource, /data-avatar-details-depth=\{depth\}/);
+    assert.doesNotMatch(maskSource, /className=\{styles\.group\}/);
+    assert.match(
+      pageCss,
+      /\.zenLiveBotPresenceFaceRig[\s\S]*z-index: 6/,
+    );
+    assert.match(pageCss, /\.botFaceCrtGrimeLayer[\s\S]*z-index: 8/);
     assert.match(maskSource, /data-avatar-details-emission="halo"/);
     assert.match(maskSource, /data-avatar-details-emission="bloom"/);
     assert.match(maskSource, /data-avatar-details-emission="core"/);
-    assert.match(maskCss, /\.halo[\s\S]*mix-blend-mode: plus-lighter/);
-    assert.match(maskCss, /\.bloom[\s\S]*drop-shadow/);
+    assert.match(
+      maskCss,
+      /--avatar-details-phosphor-glow-color:\s*var\(\s*--crt-face-edge-color,\s*currentColor\s*\)/,
+    );
+    assert.match(
+      maskSource,
+      /\["--avatar-details-phosphor-glow-color" as string\]: normalizedColor/,
+    );
+    assert.match(maskCss, /\.halo[\s\S]*mix-blend-mode: screen/);
+    assert.match(maskCss, /\.halo[\s\S]*opacity:\s*1/);
+    assert.match(
+      maskCss,
+      /\.halo[\s\S]*0 0 6px[\s\S]*0 0 12px[\s\S]*0 0 21px/,
+    );
+    assert.match(maskCss, /\.bloom[\s\S]*opacity:\s*1/);
+    assert.match(
+      maskCss,
+      /\.bloom[\s\S]*0 0 0\.72px[\s\S]*0 0 1\.5px[\s\S]*0 0 3px[\s\S]*0 0 6px[\s\S]*0 0 12px[\s\S]*0 0 21px/,
+    );
     assert.match(maskSource, /avatarDetailsPhosphorCoreRgba\(pixels\)/);
     assert.match(maskCss, /\.core[\s\S]*opacity:\s*1[\s\S]*drop-shadow/);
   });
 
-  it("mirrors authored screen ink with the face and hides it behind the thinking spinner", () => {
+  it("mirrors authored screen ink and yields to full-screen face effects", () => {
     assert.match(pageSource, /avatarDetails=\{avatarDetailsPreview\}/);
     assert.match(
       pageSource,
@@ -285,25 +397,36 @@ describe("Avatar Details shared mannequin rendering", () => {
     assert.match(pageSource, /"--avatar-details-facing-scale-x": "1"/);
     assert.match(
       pageSource,
-      /!showThinkingSpinner \? \([\s\S]*?<AvatarDetailsMask[\s\S]*?\) : null/,
+      /!showThinkingSpinner && !showQuestionMark \? \([\s\S]*?<AvatarDetailsMask[\s\S]*?\) : null/,
     );
     assert.match(pageSource, /avatarDetailsColor=\{normalizeAccentForTheme\(/);
   });
 
-  it("hides opted-in ink only for the shared mannequin's closed blink phase", () => {
-    assert.match(
-      pageSource,
-      /avatarDetailsInkHiddenForBlink\([\s\S]*?avatarDetails,[\s\S]*?avatarDetailsBlinkPhase/,
-    );
-    assert.match(pageSource, /hiddenForBlink=\{hideAvatarDetailsForBlink\}/);
+  it("hides only the matching semantic ink for blink, talking, and sipping", () => {
+    assert.match(pageSource, /blinkPhase=\{avatarDetailsBlinkPhase\}/);
+    assert.match(pageSource, /talking=\{inkTalking \?\? isTalking\}/);
     assert.match(
       pageSource,
       /onBlinkPhaseChange=\{handleAvatarDetailsBlinkPhaseChange\}/,
     );
-    assert.match(maskSource, /data-avatar-details-hidden-for-blink/);
     assert.match(
-      maskCss,
-      /\[data-avatar-details-hidden-for-blink="true"\][\s\S]*visibility:\s*hidden/,
+      maskSource,
+      /rasterizeVisibleAvatarDetailsRgba\(/,
+    );
+    assert.match(
+      maskSource,
+      /blinking: blinkPhase === "closed"/,
+    );
+    assert.match(maskSource, /talking,\s*\},\s*depth,\s*\),/);
+    assert.doesNotMatch(maskSource, /AvatarDetailsRoleLayer/);
+    assert.doesNotMatch(maskSource, /data-avatar-details-ink-role/);
+    assert.match(
+      pageSource,
+      /inkTalking=\{[\s\S]*?isTableTypingThisSeat \|\|[\s\S]*?seatSipPresentation\.active[\s\S]*?\}/,
+    );
+    assert.match(
+      pageSource,
+      /inkTalking=\{avatarState\.talking \|\| sipPresentation\.active\}/,
     );
   });
 });

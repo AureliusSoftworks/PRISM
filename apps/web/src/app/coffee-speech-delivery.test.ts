@@ -3,11 +3,22 @@ import assert from "node:assert/strict";
 import {
   buildCoffeeDeliveryPlan,
   COFFEE_DELIVERY_MAX_DURATION_MS,
+  COFFEE_VOICE_REVEAL_TAIL_GRACE_MS,
   coffeeDeliveryIsHoldingAtMs,
   coffeeDeliveryVisibleLengthAtMs,
+  coffeeVoiceRevealFallbackDelayMs,
 } from "./coffee-speech-delivery.ts";
 
 describe("Coffee speech delivery", () => {
+  it("leaves a short safety tail behind voiced playback only", () => {
+    assert.equal(
+      coffeeVoiceRevealFallbackDelayMs(1_000, true),
+      1_000 + COFFEE_VOICE_REVEAL_TAIL_GRACE_MS,
+    );
+    assert.equal(coffeeVoiceRevealFallbackDelayMs(1_000, false), 1_000);
+    assert.equal(coffeeVoiceRevealFallbackDelayMs(Number.NaN, true), 240);
+  });
+
   it("uses a calmer table reveal pace and gives long replies more room", () => {
     const neutral = buildCoffeeDeliveryPlan({
       text: "A steady conversational line.",

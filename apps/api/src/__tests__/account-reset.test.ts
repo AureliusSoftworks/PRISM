@@ -58,7 +58,7 @@ describe("restoreFactoryDefaultsInDatabase", () => {
             secondary_ollama_host, experimental_dual_ollama_enabled,
             experimental_all_model_effort_enabled,
             coffee_experimental_table_angle_enabled,
-            signal_immersive_voice_effects_enabled, psychic_mode_enabled,
+            psychic_mode_enabled,
             comfyui_host, comfyui_workflows, preferred_local_image_model,
             preferred_openai_image_model, preferred_zen_wallpaper_local_image_model,
             preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity,
@@ -80,6 +80,7 @@ describe("restoreFactoryDefaultsInDatabase", () => {
             prism_default_bot_face_eye_scale,
             prism_default_bot_face_eye_offset_x, prism_default_bot_face_eye_offset_y,
             prism_default_bot_face_eye_rotation_deg,
+            prism_default_bot_face_eye_count,
             prism_default_bot_face_mouth_scale,
             prism_default_bot_face_mouth_offset_x, prism_default_bot_face_mouth_offset_y,
             prism_default_bot_face_mouth_rotation_deg,
@@ -119,7 +120,6 @@ describe("restoreFactoryDefaultsInDatabase", () => {
       assert.equal(user.experimental_dual_ollama_enabled, 0);
       assert.equal(user.experimental_all_model_effort_enabled, 0);
       assert.equal(user.coffee_experimental_table_angle_enabled, 0);
-      assert.equal(user.signal_immersive_voice_effects_enabled, 0);
       assert.equal(user.psychic_mode_enabled, 0);
       assert.equal(user.comfyui_host, null);
       assert.equal(user.comfyui_workflows, "[]");
@@ -169,6 +169,7 @@ describe("restoreFactoryDefaultsInDatabase", () => {
       assert.equal(user.prism_default_bot_face_eye_offset_x, null);
       assert.equal(user.prism_default_bot_face_eye_offset_y, null);
       assert.equal(user.prism_default_bot_face_eye_rotation_deg, null);
+      assert.equal(user.prism_default_bot_face_eye_count, 1);
       assert.equal(user.prism_default_bot_face_mouth_scale, null);
       assert.equal(user.prism_default_bot_face_mouth_offset_x, null);
       assert.equal(user.prism_default_bot_face_mouth_offset_y, null);
@@ -243,7 +244,6 @@ function seedResetFixture(db: DatabaseSync): void {
       experimental_dual_ollama_enabled = 1,
       experimental_all_model_effort_enabled = 1,
       coffee_experimental_table_angle_enabled = 1,
-      signal_immersive_voice_effects_enabled = 1,
       psychic_mode_enabled = 1,
       comfyui_host = 'http://192.168.1.8:8188',
       comfyui_workflows = '[{"id":"workflow-a"}]',
@@ -278,6 +278,7 @@ function seedResetFixture(db: DatabaseSync): void {
       prism_default_bot_face_eye_offset_x = 0.06,
       prism_default_bot_face_eye_offset_y = -0.08,
       prism_default_bot_face_eye_rotation_deg = -25,
+      prism_default_bot_face_eye_count = 2,
       prism_default_bot_face_mouth_scale = 1.25,
       prism_default_bot_face_mouth_offset_x = -0.04,
       prism_default_bot_face_mouth_offset_y = 0.06,

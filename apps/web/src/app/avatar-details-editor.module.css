@@ -3,6 +3,7 @@
   gap: 6px;
   min-width: 0;
   color: var(--fg);
+  container-type: inline-size;
 }
 
 .applyError {
@@ -41,6 +42,7 @@
 .guideToggleButton,
 .segmentedControl button,
 .brushSizes button,
+.inkRoleOptions button,
 .cancelButton,
 .applyButton {
   border: 1px solid color-mix(in srgb, var(--line) 84%, transparent);
@@ -79,7 +81,8 @@
 }
 
 .segmentedControl button[data-selected="true"],
-.brushSizes button[data-selected="true"] {
+.brushSizes button[data-selected="true"],
+.inkRoleOptions button[data-selected="true"] {
   border-color: color-mix(
     in srgb,
     var(--editor-bot-color, var(--accent)) 70%,
@@ -99,9 +102,9 @@
   display: grid;
   grid-template-areas:
     "header"
-    "tools"
     "canvas"
-    "blink"
+    "tools"
+    "palette"
     "coverage";
   gap: 9px;
   padding: 10px;
@@ -118,8 +121,15 @@
   grid-area: tools;
 }
 
-.blinkInkControl {
-  grid-area: blink;
+.inkPalette {
+  grid-area: palette;
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-surface) 68%, transparent);
 }
 
 .canvasFrame {
@@ -177,49 +187,93 @@
 }
 
 .paintTools {
-  justify-content: space-between;
+  align-items: stretch;
+  flex-direction: column;
+  gap: 7px;
 }
 
 .segmentedControl {
-  flex-wrap: wrap;
-}
-
-.blinkInkControl {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: start;
-  gap: 9px;
-  padding: 9px 10px;
-  border: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--bg-surface) 68%, transparent);
-  cursor: pointer;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.blinkInkControl input {
-  width: 15px;
-  height: 15px;
-  margin: 1px 0 0;
-  accent-color: var(--editor-bot-color, var(--accent));
-  cursor: pointer;
+.inkPaletteHeader {
+  display: grid;
+  gap: 2px;
 }
 
-.blinkInkControl > span {
+.inkPaletteHeader > span {
+  color: var(--fg);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.inkPaletteHeader small,
+.runtimeColorNote small {
+  color: var(--fg-muted);
+  font-size: 9px;
+  line-height: 1.35;
+}
+
+.inkRoleOptions {
+  display: grid;
+  gap: 5px;
+}
+
+.inkRoleOptions button {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 15px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  text-align: left;
+}
+
+.inkRoleOptions button > span:last-child {
   display: grid;
   gap: 2px;
   min-width: 0;
 }
 
-.blinkInkControl strong {
+.inkRoleOptions strong {
   color: var(--fg);
   font-size: 10px;
   line-height: 1.25;
 }
 
-.blinkInkControl small {
+.inkRoleOptions small {
   color: var(--fg-muted);
   font-size: 9px;
   line-height: 1.35;
+}
+
+.inkRoleSwatch {
+  width: 15px;
+  height: 15px;
+  border: 2px solid color-mix(in srgb, #ffffff 72%, transparent);
+  border-radius: 999px;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.35),
+    0 0 12px -5px currentColor;
+}
+
+.runtimeColorNote {
+  display: grid;
+  grid-template-columns: 15px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  padding-top: 6px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+}
+
+.runtimeColorNote > span {
+  width: 15px;
+  height: 15px;
+  border: 2px solid color-mix(in srgb, #ffffff 70%, transparent);
+  border-radius: 5px;
+  box-shadow: 0 0 12px -5px currentColor;
 }
 
 .segmentedControl button {
@@ -240,33 +294,34 @@
 
 .canvasFrame {
   --avatar-details-cell-size: calc(100% / 128);
-  /* Four display pixels per authored pixel at full desktop size. */
-  --avatar-details-editor-canvas-size: 512px;
+  /* Five display pixels per authored pixel on a typical MacBook viewport. */
+  --avatar-details-editor-canvas-size: 640px;
   container-type: inline-size;
   position: relative;
   width: min(100%, var(--avatar-details-editor-canvas-size));
   aspect-ratio: 1;
   margin: 0 auto;
   overflow: hidden;
-  border: 1px solid
-    color-mix(in srgb, var(--editor-bot-color, var(--accent)) 36%, var(--line));
+  contain: layout paint;
+  isolation: isolate;
+  border: 1px solid color-mix(in srgb, var(--fg) 32%, var(--line));
   border-radius: 9px;
   background-color: #050608;
-  background-image:
-    linear-gradient(45deg, rgba(255, 255, 255, 0.035) 25%, transparent 25%),
-    linear-gradient(-45deg, rgba(255, 255, 255, 0.035) 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, rgba(255, 255, 255, 0.035) 75%),
-    linear-gradient(-45deg, transparent 75%, rgba(255, 255, 255, 0.035) 75%);
-  background-size: 16px 16px;
-  background-position:
-    0 0,
-    0 8px,
-    8px -8px,
-    -8px 0;
-  box-shadow:
-    inset 0 0 28px rgba(0, 0, 0, 0.62),
-    0 0 18px
-      color-mix(in srgb, var(--editor-bot-color, var(--accent)) 8%, transparent);
+  box-shadow: none;
+}
+
+.editor[data-editor-theme="light"] .canvasFrame {
+  border-color: color-mix(in srgb, #050608 54%, var(--line));
+  background-color: #050608;
+  box-shadow: none;
+}
+
+.canvasViewport {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  transform: scale(1.36);
+  transform-origin: 50% 45%;
 }
 
 .screenBoundary {
@@ -282,22 +337,40 @@
 }
 
 .faceGuide {
-  --zen-live-bot-face-ink: var(--editor-bot-color, var(--accent));
-  --zen-live-bot-face-crt-border-color: var(--editor-bot-color, var(--accent));
-  --coffee-bot-color: var(--editor-bot-color, var(--accent));
-  --coffee-seat-emotion-color: var(--editor-bot-color, var(--accent));
   --coffee-plate-emoji-nudge-y: -2px;
   opacity: 0;
-  filter: saturate(0.72) brightness(0.82);
+  filter: none;
   transition: opacity 120ms ease;
 }
 
 .faceGuide[data-visible="true"] {
-  opacity: 0.34;
+  opacity: 0.82;
 }
 
 .faceGuideGlyph {
   pointer-events: none;
+}
+
+/* The guide is an editing template, not the rendered CRT. Keep it as one
+   crisp glyph layer so canvas updates do not repeatedly composite the live
+   face's bloom, convergence, filters, and blend-mode clones. */
+.faceGuideGlyph [data-coffee-plate-emoji-part],
+.faceGuideGlyph [data-crt-glyph-layer="true"] {
+  background: none !important;
+  color: currentColor !important;
+  filter: none !important;
+  mix-blend-mode: normal !important;
+  text-shadow: none !important;
+  -webkit-background-clip: border-box !important;
+  background-clip: border-box !important;
+  -webkit-text-fill-color: currentColor !important;
+  -webkit-text-stroke: 0 !important;
+}
+
+.faceGuideGlyph [data-crt-glyph-layer="true"]::before,
+.faceGuideGlyph [data-crt-glyph-layer="true"]::after {
+  content: none !important;
+  display: none !important;
 }
 
 .canvas {
@@ -330,6 +403,10 @@
 }
 
 .paintEmission {
+  --avatar-details-phosphor-glow-color: var(
+    --crt-face-edge-color,
+    currentColor
+  );
   position: absolute;
   inset: 0;
   z-index: 3;
@@ -342,18 +419,73 @@
 }
 
 .paintHalo {
-  opacity: 0.16;
-  mix-blend-mode: plus-lighter;
-  filter: blur(1.4px) saturate(1.35)
-    drop-shadow(0 0 3px color-mix(in srgb, currentColor 54%, transparent))
-    drop-shadow(0 0 5px color-mix(in srgb, currentColor 26%, transparent));
+  opacity: 1;
+  mix-blend-mode: screen;
+  filter: blur(1.05px) saturate(1.28)
+    drop-shadow(
+      0 0 4.8px
+        color-mix(
+          in srgb,
+          var(--avatar-details-phosphor-glow-color) 58%,
+          transparent
+        )
+    )
+    drop-shadow(
+      0 0 9.6px
+        color-mix(
+          in srgb,
+          var(--avatar-details-phosphor-glow-color) 36%,
+          transparent
+        )
+    )
+    drop-shadow(
+      0 0 16.8px
+        color-mix(
+          in srgb,
+          var(--avatar-details-phosphor-glow-color) 22%,
+          transparent
+        )
+    );
 }
 
 .paintBloom {
-  opacity: 0.58;
+  opacity: 1;
   mix-blend-mode: screen;
-  filter: blur(0.22px) saturate(1.18) drop-shadow(0 0 1px currentColor)
-    drop-shadow(0 0 2px color-mix(in srgb, currentColor 56%, transparent));
+  filter: blur(0.28px) saturate(1.18)
+    drop-shadow(0 0 0.6px var(--avatar-details-phosphor-glow-color))
+    drop-shadow(0 0 1.2px var(--avatar-details-phosphor-glow-color))
+    drop-shadow(
+      0 0 2.4px
+        color-mix(
+          in srgb,
+          var(--avatar-details-phosphor-glow-color) 82%,
+          transparent
+        )
+    )
+    drop-shadow(
+      0 0 4.8px
+        color-mix(
+          in srgb,
+          var(--avatar-details-phosphor-glow-color) 58%,
+          transparent
+        )
+    )
+    drop-shadow(
+      0 0 9.6px
+        color-mix(
+          in srgb,
+          var(--avatar-details-phosphor-glow-color) 36%,
+          transparent
+        )
+    )
+    drop-shadow(
+      0 0 16.8px
+        color-mix(
+          in srgb,
+          var(--avatar-details-phosphor-glow-color) 22%,
+          transparent
+        )
+    );
 }
 
 .paintCore {
@@ -373,6 +505,7 @@
 
 .coverage strong {
   font-variant-numeric: tabular-nums;
+  color: var(--fg);
 }
 
 .coverage meter {
@@ -417,11 +550,6 @@
 }
 
 @media (max-width: 760px) {
-  .paintTools {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
   .paintHeader {
     align-items: flex-start;
   }
@@ -432,32 +560,23 @@
   }
 }
 
-@media (min-width: 900px) {
+@container (min-width: 720px) {
   .paintSection {
-    grid-template-columns: minmax(0, 1fr) minmax(118px, 128px);
+    grid-template-columns: minmax(440px, 1fr) minmax(220px, 250px);
+    grid-template-rows: auto max-content max-content minmax(0, 1fr);
     grid-template-areas:
       "header header"
       "canvas tools"
-      "canvas blink"
+      "canvas palette"
       "canvas coverage";
     column-gap: 10px;
-    row-gap: 5px;
+    row-gap: 7px;
     align-items: start;
-  }
-
-  .paintTools {
-    display: grid;
-    justify-items: stretch;
-  }
-
-  .segmentedControl {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .segmentedControl button {
     justify-content: center;
-    padding-inline: 5px;
+    padding-inline: 6px;
   }
 
   .brushSizes {
@@ -468,66 +587,16 @@
     flex: 1 1 0;
   }
 
-  .blinkInkControl {
-    gap: 7px;
-    padding: 8px;
-  }
-
-  .blinkInkControl small {
-    display: none;
-    line-height: 1.25;
-  }
-
   .canvasFrame {
-    width: min(
-      100%,
-      clamp(
-        220px,
-        calc(100dvh - 490px),
-        var(--avatar-details-editor-canvas-size)
-      )
-    );
+    width: min(100%, var(--avatar-details-editor-canvas-size));
   }
 }
 
-@media (min-width: 900px) and (min-height: 850px) {
-  .paintSection {
-    grid-template-columns: minmax(0, 1fr) minmax(124px, 148px);
-    grid-template-areas:
-      "header header"
-      "tools tools"
-      "canvas canvas"
-      "blink coverage";
-    row-gap: 7px;
-  }
-
-  .paintTools {
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center;
-  }
-
+@container (min-width: 980px) {
   .segmentedControl {
     grid-template-columns: repeat(5, minmax(0, 1fr));
   }
 
-  .canvasFrame {
-    width: min(
-      100%,
-      clamp(
-        300px,
-        calc(100dvh - 580px),
-        min(360px, var(--avatar-details-editor-canvas-size))
-      )
-    );
-  }
-
-  .blinkInkControl {
-    align-self: stretch;
-  }
-
-  .coverage {
-    align-self: center;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {

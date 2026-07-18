@@ -424,7 +424,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Prism Server";
 				INFOPLIST_KEY_LSUIElement = NO;
-				MARKETING_VERSION = 0.10.0;
+				MARKETING_VERSION = 0.11.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.localai.prism-server;
 				PRODUCT_MODULE_NAME = PrismServer;
 				PRODUCT_NAME = "Prism Server";
@@ -443,7 +443,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Prism Server";
 				INFOPLIST_KEY_LSUIElement = NO;
-				MARKETING_VERSION = 0.10.0;
+				MARKETING_VERSION = 0.11.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.localai.prism-server;
 				PRODUCT_MODULE_NAME = PrismServer;
 				PRODUCT_NAME = "Prism Server";
@@ -458,7 +458,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
 				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 0.10.0;
+				MARKETING_VERSION = 0.11.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.localai.prism-server.tests;
 				PRODUCT_MODULE_NAME = PrismServerTests;
 				PRODUCT_NAME = PrismServerTests;
@@ -474,7 +474,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
 				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 0.10.0;
+				MARKETING_VERSION = 0.11.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.localai.prism-server.tests;
 				PRODUCT_MODULE_NAME = PrismServerTests;
 				PRODUCT_NAME = PrismServerTests;

@@ -24,17 +24,17 @@ ship as `0.5.2` while Coffee is `v0.7` and Story is `v0.1`.
 
 | Applet | Version | Status | Notes |
 | --- | --- | --- | --- |
-| Chat | v1.3 | Active | Full playground for bots, providers, models, images, exports, memory-aware conversations, and per-bot online voice identity. |
-| Zen | v1.2 | Active | Calm one-to-one continuity surface with shared bot voice identity; the standalone Zen lane is deprecating as this becomes Prism's default state. |
-| Coffee | v1.4 | Active | Multi-bot group table with Coffee Groups, session pacing, cups, transcripts, replay, table controls, and synchronized online speech. |
-| Signal | v0.4 | Active | Bot-owned interview shows with animated audio pre-roll, background opening preparation, local synthesized idents, optional cached ElevenLabs music, private direction, archives, and directed replay. |
-| Story | v0.1 | Preview | Generated visual-novel episodes with bots, choices, maps, inventory, and transcripts. |
+| Chat | v1.5 | Active | Full playground for bots, providers, models, images, exports, memory-aware conversations, per-bot online voice identity, and sparse shared mic presence. |
+| Zen | v1.4 | Active | Calm one-to-one continuity surface with shared bot voice identity and mic presence; the standalone Zen lane is deprecating as this becomes Prism's default state. |
+| Coffee | v1.8 | Active | Multi-bot group table with Coffee Groups, model-aware session holds, pacing, cups, transcripts, replay, synchronized online speech, subtle shared session foley, and adaptive living table atmosphere. |
+| Signal | v0.8 | Active | Bot-owned interview shows with audience pulse, a full studio soundcheck and placement workspace, persistent cast and ambience controls, audience-only Powers, private direction, archives, and directed replay. |
+| Story | v0.3 | Preview | Generated visual-novel episodes with bots, choices, maps, inventory, transcripts, shared PRISM menu behavior, and sparse spoken-scene mic presence. |
 | Arena | v0.0 | Planned | Moderated bot debate surface. |
 | Polling | v0.0 | Planned | AI-powered polling across bot groups. |
 | Feed | v0.0 | Planned | BotBook-style social feed. |
 | Games | v0.0 | Planned | Boardgame-like bot matches. |
 | Gym | v0.0 | Planned | Bot training and memory-development surface. |
-| Slate | v0.5 | Preview | Prose-fiction production desk with long-form section storage, private Continuity guidance, return sessions, recovery archives, and clean manuscript exports. |
+| Slate | v0.7 | Preview | Prose-fiction production desk with source-specific starts, generated title and cover options, long-form section storage, private Continuity guidance, clean exports, and a movable ephemeral Markdown companion. |
 | Pseudo | v0.0 | Planned | Sketch/system space for almost-code. |
 | Surf | v0.0 | Planned | Simple browsing plus optional bot screen viewing. |
 
@@ -64,10 +64,40 @@ The phased Continuity, Review Circle, Atmosphere, safety, export, and publishing
 contracts are indexed in [Slate Master Plan](./slate-master-plan.md).
 
 Slate stayed planned `v0.0` until its first functional vertical slice became
-usable end to end. It entered preview at `v0.1` and is now `v0.5`; later snapshot
+usable end to end. It entered preview at `v0.1` and is now `v0.7`; later snapshot
 stages do not block the standalone preview.
 
 ## Changelog
+
+### 2026-07-18
+
+- Bumped `Coffee` to `v1.8` for its adaptive GPU-backed living table
+  atmosphere with automatic capability tuning and reduced-motion safety.
+- Bumped `Signal` to `v0.8` for the full studio soundcheck and placement
+  workspace, persistent cast and ambience controls, audience-only Powers, and
+  listener review history.
+- Bumped `Slate` to preview `v0.7` for source-specific project starts,
+  generated title and cover choices, and the movable ephemeral Markdown
+  companion with a three-message recovery buffer.
+
+### 2026-07-17
+
+- Bumped `Chat` to `v1.5`, `Zen` to `v1.4`, `Coffee` to `v1.7`, `Signal` to
+  `v0.7`, and `Story` to `v0.3` for the shared deterministic pre-speech breath
+  layer across substantial voiced bot lines and replay.
+- Bumped `Signal` to `v0.6` and `Coffee` to `v1.6` for the shared quiet foley
+  layer, cup-synchronized Coffee sounds, bundled Signal studio room tone, and
+  one-click ElevenLabs ident plus custom ambience generation. Coffee also
+  exposes the intentionally inactive Jazz atmosphere control for its next pass.
+- Bumped `Chat` to `v1.4`, `Zen` to `v1.3`, and `Story` to `v0.2` for the
+  unified PRISM menu system, refined CRT face glyphs, and shared voice and
+  avatar behavior.
+- Bumped `Coffee` to `v1.5` for local-model warmup intermissions that pause the
+  real table clock, hold visual activity, and reveal buffered lines only after
+  the room resumes.
+- Bumped `Signal` to `v0.5` for persisted local-model studio holds and the
+  episode-aware Audience Pulse with deterministic views, ratings, and reviews.
+- Bumped `Slate` to preview `v0.6` for unified, accessible project actions.
 
 ### 2026-07-16
 

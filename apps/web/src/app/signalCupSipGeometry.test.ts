@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { signalCupSipTargetFromMouth } from "./signalCupSipGeometry.ts";
+import {
+  SIGNAL_CUP_SIP_FACE_ACTIVE_PROGRESS,
+  signalCupSipFaceReleaseMs,
+  signalCupSipTargetFromMouth,
+} from "./signalCupSipGeometry.ts";
 
 describe("Signal cup sip geometry", () => {
   const sceneBounds = { left: 100, top: 50, width: 1_340, height: 737 };
@@ -28,8 +32,8 @@ describe("Signal cup sip geometry", () => {
 
     assert.ok(host);
     assert.ok(guest);
-    assert.ok(Math.abs(host.x - 527) < 0.000_001);
-    assert.ok(Math.abs(guest.x - 473) < 0.000_001);
+    assert.ok(Math.abs(host.x - 531) < 0.000_001);
+    assert.ok(Math.abs(guest.x - 469) < 0.000_001);
     assert.equal(host.y, 224.78);
     assert.equal(guest.y, 224.78);
   });
@@ -62,5 +66,11 @@ describe("Signal cup sip geometry", () => {
     assert.ok(shifted);
     assert.equal(shifted.x - base.x, 10);
     assert.equal(shifted.y - base.y, 20);
+  });
+
+  it("relaxes the Signal sip face before the cup starts returning", () => {
+    assert.equal(SIGNAL_CUP_SIP_FACE_ACTIVE_PROGRESS, 0.6);
+    assert.equal(signalCupSipFaceReleaseMs(2_000), 1_200);
+    assert.equal(signalCupSipFaceReleaseMs(Number.NaN), 0);
   });
 });

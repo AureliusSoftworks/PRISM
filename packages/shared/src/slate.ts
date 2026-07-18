@@ -2,6 +2,8 @@ import type { PromptWildcardRunMetadata } from "./promptShortcut.js";
 import type { ContinuityProducerVersions } from "./continuityVersion.js";
 
 export type SlateProjectPhase = "shape" | "draft" | "refine";
+export type SlateProseMode = "auto" | "online" | "offline";
+export type SlateAiProvider = "local" | "openai" | "anthropic";
 
 export type SlateStructureKind = "act" | "chapter" | "scene";
 export type SlateStructureStatus = "planned" | "drafted";
@@ -175,14 +177,27 @@ export interface SlateVersionSummary {
   createdAt: string;
 }
 
+export interface SlateProjectCover {
+  seed: string;
+  prompt: string;
+  imageUrl: string | null;
+  imageId: string | null;
+  revision: number;
+  status: "fallback" | "generating" | "ready" | "failed";
+}
+
+export type SlateProjectTitleOrigin = "writer" | "spark" | "material";
+
 export interface SlateProjectSummary {
   id: string;
   seriesId: string;
   bookOrdinal: number;
   title: string;
+  titleOrigin: SlateProjectTitleOrigin;
   spark: string;
   premise: string;
   phase: SlateProjectPhase;
+  cover: SlateProjectCover;
   manuscriptLength: number;
   createdAt: string;
   updatedAt: string;
@@ -200,8 +215,21 @@ export interface SlateProjectDetail extends SlateProjectSummary {
   lockedRanges: SlateLockedRange[];
   lastProvider: "local" | "openai" | "anthropic" | null;
   lastModel: string | null;
+  proseMode: SlateProseMode;
+  proseModel: string | null;
+  proseProvider: SlateAiProvider | null;
+  titleSuggestion: SlateTitleSuggestion | null;
   revisions: SlateRevision[];
   versions: SlateVersionSummary[];
+}
+
+export interface SlateTitleSuggestion {
+  id: string;
+  title: string;
+  reason: string;
+  provider: SlateAiProvider;
+  model: string;
+  createdAt: string;
 }
 
 export interface SlateProjectListResponse {
@@ -220,6 +248,7 @@ export interface SlateProjectDeleteResponse {
 
 export interface SlateCreateProjectRequest {
   title: string;
+  titleOrigin?: SlateProjectTitleOrigin;
   spark: string;
   seriesId?: string;
   sparkWildcards?: PromptWildcardRunMetadata;
@@ -251,8 +280,63 @@ export type SlateProjectPatchRequest = Partial<
     | "manuscript"
     | "direction"
     | "lockedRanges"
+    | "proseMode"
+    | "proseModel"
+    | "proseProvider"
   >
 >;
+
+export interface SlateLivingSummary {
+  projectId: string;
+  text: string;
+  tail: string;
+  sourceFingerprint: string;
+  updatedAt: string;
+}
+
+export interface SlateLivingSummaryResponse {
+  ok: true;
+  summary: SlateLivingSummary;
+}
+
+export interface SlateProjectChatMessage {
+  id: string;
+  projectId: string;
+  role: "user" | "assistant";
+  content: string;
+  provider: SlateAiProvider | null;
+  model: string | null;
+  createdAt: string;
+}
+
+export interface SlateProjectChatResponse {
+  ok: true;
+  /** Chronological crash-recovery buffer; never more than three messages. */
+  messages: SlateProjectChatMessage[];
+}
+
+export interface SlateTitleSuggestionResponse {
+  ok: true;
+  project: SlateProjectDetail;
+}
+
+export interface SlateGenerateTitleRequest {
+  source: string;
+  sourceKind: "spark" | "material";
+  currentTitle?: string;
+}
+
+export interface SlateGenerateTitleResponse {
+  ok: true;
+  title: string;
+  reason: string;
+  provider: SlateAiProvider;
+  model: string;
+}
+
+export interface SlateTitleSuggestionRequest {
+  force?: boolean;
+}
 
 export interface SlateDraftRequest {
   structureItemId: string;

@@ -14,6 +14,7 @@ import {
   normalizeElevenLabsVoiceDirection,
   normalizeElevenLabsVoiceEffect,
   normalizeOptionalBotAudioVoiceProfileV1,
+  resolveBotAudioVoiceProfileV1,
   normalizeVoiceMode,
   resolveElevenLabsVoicePerformance,
   parseStoredBotAudioVoiceProfileV1,
@@ -130,6 +131,52 @@ describe("audio voice normalization", () => {
     );
   });
 
+  it("keeps crafted ElevenLabs voices visible through legacy local overrides", () => {
+    const authored = normalizeBotAudioVoiceProfileV1({
+      ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+      elevenLabsVoiceIdOverride: "crafted-voice",
+      elevenLabsEffect: "deep-space",
+      elevenLabsDirection: "measured, quietly menacing",
+      pitch: -0.4,
+    });
+    const legacyOverride = normalizeBotAudioVoiceProfileV1({
+      ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+      systemVoiceName: "Alex",
+      pitch: 0.25,
+      lilt: 0.5,
+    });
+
+    const resolved = resolveBotAudioVoiceProfileV1(authored, legacyOverride);
+
+    assert.equal(resolved.elevenLabsVoiceIdOverride, "crafted-voice");
+    assert.equal(resolved.elevenLabsEffect, "deep-space");
+    assert.equal(resolved.elevenLabsDirection, "measured, quietly menacing");
+    assert.equal(resolved.systemVoiceName, "Alex");
+    assert.equal(resolved.pitch, 0.25);
+    assert.equal(resolved.lilt, 0.5);
+  });
+
+  it("preserves a user's chosen ElevenLabs voice while filling a missing direction", () => {
+    const authored = normalizeBotAudioVoiceProfileV1({
+      ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+      elevenLabsVoiceIdOverride: "crafted-voice",
+      elevenLabsEffect: "deep-space",
+      elevenLabsDirection: "patient, warm",
+    });
+    const customized = normalizeBotAudioVoiceProfileV1({
+      ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+      elevenLabsVoiceId: "my-voice",
+      elevenLabsEffect: "radio",
+    });
+
+    const resolved = resolveBotAudioVoiceProfileV1(authored, customized);
+
+    assert.equal(resolved.elevenLabsVoiceId, "my-voice");
+    assert.equal(resolved.elevenLabsVoiceIdOverride, undefined);
+    assert.equal(resolved.elevenLabsEffect, "radio");
+    assert.equal(resolved.elevenLabsDirection, "patient, warm");
+  });
+
   it("normalizes v2 volume and retires legacy texture controls to clean audio", () => {
     const profile = normalizeBotAudioVoiceProfileV1({
       ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
@@ -153,10 +200,12 @@ describe("audio voice normalization", () => {
       ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
       systemVoiceName: "  Alex  ",
       elevenLabsVoiceId: " eleven-voice-id ",
+      elevenLabsVoiceIdOverride: " portable-voice-id ",
       elevenLabsEffect: "radio",
     });
     assert.equal(profile.systemVoiceName, "Alex");
     assert.equal(profile.elevenLabsVoiceId, "eleven-voice-id");
+    assert.equal(profile.elevenLabsVoiceIdOverride, "portable-voice-id");
     assert.equal(profile.elevenLabsEffect, "radio");
     assert.deepEqual(
       parseStoredBotAudioVoiceProfileV1(serializeBotAudioVoiceProfileV1(profile)),
@@ -182,7 +231,7 @@ describe("audio voice normalization", () => {
       normalizeElevenLabsVoiceDirection(
         " warm , [hushed]; warm\nwith measured pauses, mischievously ",
       ),
-      "warm, hushed, with measured pauses, mischievously",
+      "warm, hushed, with measured pauses",
     );
     const profile = normalizeBotAudioVoiceProfileV1({
       ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,

@@ -148,6 +148,7 @@ const PROJECT_COLUMNS = [
   "series_id",
   "book_ordinal",
   "title",
+  "title_origin",
   "spark",
   "spark_wildcards_json",
   "premise",

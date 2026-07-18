@@ -6,6 +6,10 @@ import {
   type Route,
 } from "@playwright/test";
 
+function smokeTestTimeout(localTimeoutMs: number): number {
+  return process.env.CI ? localTimeoutMs * 2 : localTimeoutMs;
+}
+
 const testUser = {
   id: "e2e-user",
   username: "e2e@example.com",
@@ -683,10 +687,99 @@ test.describe("PRISM desktop smoke", () => {
     await expect(page.getByText("Select bots to begin")).toBeVisible();
   });
 
+  test("Coffee GPU atmosphere becomes ready, preserves controls, and cleans up across mode switches", async ({
+    page,
+  }) => {
+    const runtimeErrors: Error[] = [];
+    page.on("pageerror", (error) => runtimeErrors.push(error));
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+    await installAuthenticatedApi(page);
+    await page.goto("/?view=coffee");
+
+    const atmosphere = page.locator('[data-coffee-atmosphere="true"]');
+    await expect(atmosphere).toHaveAttribute("data-renderer-status", "webgl", {
+      timeout: 20_000,
+    });
+    await expect(atmosphere.locator("canvas")).toHaveCount(1);
+    await expect(atmosphere).toHaveCSS("pointer-events", "none");
+    await expect(page.locator('[class*="coffeeTableGlow"]')).toBeHidden();
+    await expect(page.getByText("Select bots to begin")).toBeVisible();
+    await expect(
+      page.getByRole("option", { name: testBots[0]!.name }),
+    ).toBeVisible();
+
+    await activateNavigationControl(
+      page.locator('[data-app-switcher-trigger="true"]'),
+    );
+    await activateNavigationControl(
+      page.getByRole("menuitemradio", { name: /Chat/ }),
+    );
+    await expect(atmosphere).toHaveCount(0);
+
+    await activateNavigationControl(
+      page.locator('[data-app-switcher-trigger="true"]'),
+    );
+    await activateNavigationControl(
+      page.getByRole("menuitemradio", { name: /Coffee/ }),
+    );
+    const restoredAtmosphere = page.locator(
+      '[data-coffee-atmosphere="true"]',
+    );
+    await expect(restoredAtmosphere).toHaveAttribute(
+      "data-renderer-status",
+      "webgl",
+      { timeout: 20_000 },
+    );
+    expect(runtimeErrors).toEqual([]);
+  });
+
+  test("Coffee GPU initialization failure retains the unchanged CSS fallback", async ({
+    page,
+  }) => {
+    await page.addInitScript(() => {
+      window.__PRISM_FORCE_WEBGL_FAILURE__ = true;
+    });
+    await installAuthenticatedApi(page);
+    await page.goto("/?view=coffee");
+
+    const atmosphere = page.locator('[data-coffee-atmosphere="true"]');
+    await expect(atmosphere).toHaveAttribute(
+      "data-renderer-status",
+      "fallback",
+      { timeout: 10_000 },
+    );
+    await expect(atmosphere.locator("canvas")).toHaveCount(0);
+    await expect(page.locator('[class*="coffeeTableGlow"]')).toBeVisible();
+    await expect(page.getByText("Select bots to begin")).toBeVisible();
+  });
+
+  test("Coffee Light atmosphere is static and cool under reduced motion @visual", async ({
+    page,
+  }) => {
+    await installAuthenticatedApi(page, { theme: "light" });
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/?view=coffee");
+
+    const atmosphere = page.locator('[data-coffee-atmosphere="true"]');
+    await expect(atmosphere).toHaveAttribute("data-theme", "light");
+    await expect(atmosphere).toHaveAttribute("data-renderer-status", "webgl", {
+      timeout: 20_000,
+    });
+    await expect(page).toHaveScreenshot(
+      "coffee-atmosphere-light-reduced-motion.png",
+      {
+        animations: "disabled",
+        caret: "hide",
+        scale: "css",
+      },
+    );
+  });
+
   test("Coffee group setup selects every bot, enforces five seats, and enters a saved session", async ({
     page,
   }) => {
-    test.setTimeout(60_000);
+    test.setTimeout(smokeTestTimeout(60_000));
     const coffeeBots = Array.from({ length: 6 }, (_, index) => ({
       ...testBots[index % testBots.length]!,
       id: `e2e-coffee-bot-${index + 1}`,
@@ -811,7 +904,6 @@ test.describe("PRISM desktop smoke", () => {
         );
       },
     );
-
     await page.goto("/?view=coffee");
     const picker = page.getByRole("listbox", {
       name: "Bots available for Coffee",
@@ -954,7 +1046,7 @@ test.describe("PRISM desktop smoke", () => {
   test("authenticated Zen persists LOCAL turns while Private chat stays ephemeral", async ({
     page,
   }) => {
-    test.setTimeout(60_000);
+    test.setTimeout(smokeTestTimeout(60_000));
     await installAuthenticatedApi(page);
     const state = await installStatefulZenApi(page);
     await page.goto("/?view=chat");
@@ -1114,7 +1206,7 @@ test.describe("PRISM desktop smoke", () => {
     test(`Zen Home depth restores the exact Library checkpoint in ${theme} theme @relationship-depth`, async ({
       page,
     }) => {
-      test.setTimeout(60_000);
+      test.setTimeout(smokeTestTimeout(60_000));
       await page.emulateMedia({ reducedMotion: "no-preference" });
       const groupName = "Story Circle";
       const chatWrites: string[] = [];
@@ -1198,7 +1290,7 @@ test.describe("PRISM desktop smoke", () => {
   test("direct Zen Home visits pull back without synthetic dialogue and restore on Escape @relationship-depth", async ({
     page,
   }) => {
-    test.setTimeout(60_000);
+    test.setTimeout(smokeTestTimeout(60_000));
     await page.emulateMedia({ reducedMotion: "no-preference" });
     await installAuthenticatedApi(page);
     const prismHome = {
@@ -1433,7 +1525,7 @@ test.describe("PRISM desktop smoke", () => {
     });
     await expect(zenMessageActions).toBeVisible();
     await expect(
-      zenMessageActions.getByRole("menuitem", { name: "Copy", exact: true }),
+      zenMessageActions.getByRole("menuitem", { name: /^Copy\b/ }),
     ).toBeVisible();
     for (const removedAction of [
       "Edit",
@@ -1459,7 +1551,7 @@ test.describe("PRISM desktop smoke", () => {
   test("Zen Home return waits for an active reply @relationship-depth", async ({
     page,
   }) => {
-    test.setTimeout(60_000);
+    test.setTimeout(smokeTestTimeout(60_000));
     await installAuthenticatedApi(page);
     let releaseReply!: () => void;
     const replyReleased = new Promise<void>((resolve) => {
@@ -1741,7 +1833,7 @@ test.describe("PRISM desktop smoke", () => {
   test("saved group atmosphere selects, generates, survives reload, crossfades to Zen, and fails back to its gradient @group-room-atmosphere", async ({
     page,
   }) => {
-    test.setTimeout(90_000);
+    test.setTimeout(smokeTestTimeout(90_000));
     const now = "2026-07-14T12:00:00.000Z";
     const groupId = "group:atmosphere-circle";
     const groupName = "Atmosphere Circle";
@@ -1996,7 +2088,7 @@ test.describe("PRISM desktop smoke", () => {
   test("waiting-room atmosphere keeps its cast stable and stays readable in light theme @group-room-atmosphere", async ({
     page,
   }) => {
-    test.setTimeout(60_000);
+    test.setTimeout(smokeTestTimeout(60_000));
     const now = "2026-07-14T12:00:00.000Z";
     const groupName = "Luminous Waiting Room";
     const firstImage: TestImageRecord = {
@@ -2071,7 +2163,7 @@ test.describe("PRISM desktop smoke", () => {
     test(`compact group room stays clear across the desktop viewport contract in ${theme} theme @group-room`, async ({
       page,
     }) => {
-      test.setTimeout(90_000);
+      test.setTimeout(smokeTestTimeout(90_000));
       await page.emulateMedia({ reducedMotion: "reduce" });
       const now = "2026-07-14T12:00:00.000Z";
       const groupName = "Collaborative Product Council";
@@ -2349,7 +2441,7 @@ test.describe("PRISM desktop smoke", () => {
   test("large saved group becomes a stable responsive waiting room @group-room", async ({
     page,
   }) => {
-    test.setTimeout(90_000);
+    test.setTimeout(smokeTestTimeout(90_000));
     const now = "2026-07-14T12:00:00.000Z";
     const groupName = "Waiting Room Council";
     await page.emulateMedia({ reducedMotion: "no-preference" });
@@ -2655,7 +2747,7 @@ test.describe("PRISM desktop smoke", () => {
   test("twenty-four-member waiting room completes three bounded rotations and tears down cleanly @group-room-wifex8", async ({
     page,
   }) => {
-    test.setTimeout(90_000);
+    test.setTimeout(smokeTestTimeout(90_000));
     const now = "2026-07-14T12:00:00.000Z";
     const groupName = "Twenty Four Companion Soak";
     const pageErrors: string[] = [];
@@ -2774,7 +2866,7 @@ test.describe("PRISM desktop smoke", () => {
   test("waiting-room side panel pauses and resumes one timer while a live theme change preserves the visit @group-room-wifex8", async ({
     page,
   }) => {
-    test.setTimeout(90_000);
+    test.setTimeout(smokeTestTimeout(90_000));
     const now = "2026-07-14T12:00:00.000Z";
     const groupName = "Panel State Circle";
     const roomBots = waitingRoomTestBots.slice(0, 8);
@@ -2889,7 +2981,7 @@ test.describe("PRISM desktop smoke", () => {
   test("Listen up reuses an exact Coffee Group, preserves its topic across reload, and returns to a fresh room @group-room-coffee", async ({
     page,
   }) => {
-    test.setTimeout(90_000);
+    test.setTimeout(smokeTestTimeout(90_000));
     const now = "2026-07-14T12:00:00.000Z";
     const sourceGroupId = "group:listen-up-room";
     const sourceGroupName = "Listen Up Room";
@@ -3174,7 +3266,7 @@ test.describe("PRISM desktop smoke", () => {
   test("waiting-room Home resolution opens only the requested continuation and leaves a missing Home pending @group-room", async ({
     page,
   }) => {
-    test.setTimeout(90_000);
+    test.setTimeout(smokeTestTimeout(90_000));
     await page.emulateMedia({ reducedMotion: "reduce" });
     const now = "2026-07-14T12:00:00.000Z";
     const groupName = "History Safe Room";
@@ -3466,7 +3558,7 @@ test.describe("PRISM desktop smoke", () => {
   test("waiting-room Back aborts a pending Home reply before restoring the exact room @group-room", async ({
     page,
   }) => {
-    test.setTimeout(60_000);
+    test.setTimeout(smokeTestTimeout(60_000));
     await page.emulateMedia({ reducedMotion: "reduce" });
     const now = "2026-07-14T12:00:00.000Z";
     const groupName = "Interruptible Room";
@@ -3637,7 +3729,7 @@ test.describe("PRISM desktop smoke", () => {
   test("waiting-room ambient theater stays silent, static for assistive tech, and bounded @group-room", async ({
     page,
   }) => {
-    test.setTimeout(90_000);
+    test.setTimeout(smokeTestTimeout(90_000));
     const now = "2026-07-14T12:00:00.000Z";
     const groupName = "Silent Ambient Council";
     await page.emulateMedia({ reducedMotion: "no-preference" });
@@ -3959,7 +4051,7 @@ test.describe("PRISM desktop smoke", () => {
   test("waiting-room visit survives pauses and cleans up on exit @group-room", async ({
     page,
   }) => {
-    test.setTimeout(90_000);
+    test.setTimeout(smokeTestTimeout(90_000));
     const now = "2026-07-14T12:00:00.000Z";
     const groupName = "Ambient Rotation Circle";
     await installAuthenticatedApi(page, {
@@ -4002,18 +4094,18 @@ test.describe("PRISM desktop smoke", () => {
     expect(await visibleBotIds()).toEqual(reducedMotionRoster);
 
     await activateNavigationControl(
-      page.locator('button[aria-controls="prism-app-switcher-menu"]'),
+      page.locator('[data-app-switcher-trigger="true"]'),
     );
     await activateNavigationControl(
-      page.getByRole("menuitem", { name: /Coffee/ }),
+      page.getByRole("menuitemradio", { name: /Coffee/ }),
     );
     await expect(page.locator('[data-mode="picker"]')).toBeVisible();
     await page.clock.fastForward(10 * 60 * 1_000);
     await activateNavigationControl(
-      page.locator('button[aria-controls="prism-app-switcher-menu"]'),
+      page.locator('[data-app-switcher-trigger="true"]'),
     );
     await activateNavigationControl(
-      page.getByRole("menuitem", { name: /Chat/ }),
+      page.getByRole("menuitemradio", { name: /Chat/ }),
     );
     await page.clock.runFor(1_000);
     await expect(room).toBeVisible();
@@ -4057,7 +4149,7 @@ test.describe("PRISM desktop smoke", () => {
   test("waiting-room rotation cancels stale handoffs across groups @group-room", async ({
     page,
   }) => {
-    test.setTimeout(90_000);
+    test.setTimeout(smokeTestTimeout(90_000));
     const now = "2026-07-14T12:00:00.000Z";
     const firstGroupName = "First Rotation Circle";
     const secondGroupName = "Second Rotation Circle";
@@ -4172,7 +4264,7 @@ test.describe("PRISM desktop smoke", () => {
     test(`waiting room remains legible across desktop sizes in ${theme} theme @group-room`, async ({
       page,
     }) => {
-      test.setTimeout(90_000);
+      test.setTimeout(smokeTestTimeout(90_000));
       const now = "2026-07-14T12:00:00.000Z";
       const groupName = "Responsive Waiting Circle";
       await page.emulateMedia({ reducedMotion: "reduce" });
@@ -4346,6 +4438,12 @@ test.describe("PRISM desktop smoke", () => {
     await expect(
       detailsEditor.locator('[data-avatar-details-face-guide="true"]'),
     ).toHaveAttribute("data-visible", "true");
+    const speechInk = detailsEditor.getByRole("radio", {
+      name: /Speech ink/,
+    });
+    await expect(speechInk).toBeVisible();
+    await speechInk.click({ force: true });
+    await expect(speechInk).toHaveAttribute("aria-checked", "true");
 
     const paintCanvas = detailsEditor.getByRole("application", {
       name: /Avatar pixel canvas/,
@@ -4355,26 +4453,19 @@ test.describe("PRISM desktop smoke", () => {
       .poll(async () => (await paintCanvas.boundingBox())?.width ?? 0)
       .toBeGreaterThanOrEqual(315);
 
-    const editorCoreCanvas = detailsEditor.locator(
-      '[data-avatar-details-editor-core="true"]',
-    );
     await paintCanvas.click({ force: true });
     await expect
       .poll(() =>
-        editorCoreCanvas.evaluate((element) => {
-          const context = (element as HTMLCanvasElement).getContext("2d");
-          if (!context) return 0;
-          return context
-            .getImageData(58, 58, 13, 13)
-            .data.reduce(
-              (alpha, channel, index) =>
-                index % 4 === 3 ? alpha + channel : alpha,
-              0,
-            );
-        }),
+        detailsEditor
+          .getByRole("meter", { name: /Paint coverage/ })
+          .getAttribute("value")
+          .then((value) => Number(value ?? 0)),
       )
       .toBeGreaterThan(0);
 
+    await studio
+      .getByRole("button", { name: "Render current avatar" })
+      .click();
     await expect(
       studio.locator('[data-avatar-details-mask="true"]'),
     ).toBeVisible();
@@ -4447,21 +4538,205 @@ test.describe("PRISM desktop smoke", () => {
     await expect
       .poll(() =>
         detailsEditor
-          .locator('[data-avatar-details-editor-core="true"]')
-          .evaluate((element) => {
-            const canvas = element as HTMLCanvasElement;
-            const context = canvas.getContext("2d");
-            if (!context) return 0;
-            return context
-              .getImageData(58, 58, 13, 13)
-              .data.reduce(
-                (alpha, channel, index) =>
-                  index % 4 === 3 ? alpha + channel : alpha,
-                0,
-              );
-          }),
+          .getByRole("meter", { name: /Paint coverage/ })
+          .getAttribute("value")
+          .then((value) => Number(value ?? 0)),
       )
       .toBeGreaterThan(0);
+  });
+
+  test("bot Voice ID override wins without replacing the catalog selection", async ({
+    page,
+  }) => {
+    test.slow();
+    const voiceBot = {
+      ...testBots[0]!,
+      authored_audio_voice_profile: {
+        v: 2,
+        enabled: true,
+        baseVoiceId: "voice-1",
+        elevenLabsVoiceId: "catalog-voice-id",
+        elevenLabsEffect: "clean",
+        pitch: 0,
+        warmth: 0,
+        pace: 0,
+        lilt: 0,
+        bottishTone: 0.45,
+        volume: 1,
+        texture: {
+          preset: "clean",
+          amount: 0,
+          bandwidth: 1,
+          noise: 0,
+          instability: 0,
+          distortion: 0,
+          damage: 0,
+        },
+      },
+      audio_voice_profile_override: null as Record<string, unknown> | null,
+    };
+    let savedProfile: Record<string, unknown> | null = null;
+    await installAuthenticatedApi(page, { bots: [voiceBot] });
+    await page.route(
+      "**/api/voices/elevenlabs/portable-voice-id",
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            ok: true,
+            voice: {
+              voiceId: "portable-voice-id",
+              name: "Portable Muse",
+            },
+          }),
+        });
+      },
+    );
+    await page.route(`**/api/bots/${voiceBot.id}`, async (route) => {
+      const body = route.request().postDataJSON() as {
+        audioVoiceProfileOverride?: Record<string, unknown>;
+      };
+      savedProfile = body.audioVoiceProfileOverride ?? null;
+      voiceBot.audio_voice_profile_override = savedProfile;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ok: true, bot: voiceBot }),
+      });
+    });
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto("/");
+
+    await activateNavigationControl(
+      page.getByRole("button", { name: "Open bot customizer" }),
+    );
+    await activateNavigationControl(
+      page.getByRole("button", { name: /Browse bots/ }),
+    );
+    await activateBotManagementControl(
+      page.getByRole("button", {
+        name: /Preview Test Bot 1; double-click to manage/,
+      }),
+    );
+    await activateNavigationControl(
+      page.getByRole("button", { name: /^Avatar Studio/ }),
+    );
+
+    const studio = page.getByRole("dialog", { name: "Test Bot 1" });
+    await expect(studio).toBeVisible();
+    await studio.getByRole("tab", { name: "Voice" }).click({ force: true });
+
+    const onlineVoice = studio.getByRole("region", { name: "Online voice" });
+    const fallbackVoice = studio.getByRole("region", {
+      name: "Offline and fallback voice",
+    });
+    const catalogVoice = studio.getByLabel("ElevenLabs voice identity");
+    await expect(onlineVoice).toBeVisible();
+    await expect(fallbackVoice).toBeVisible();
+    await expect(onlineVoice).toContainText("Active");
+    await expect(fallbackVoice).toContainText("Fallback");
+    await expect(catalogVoice).toHaveValue("catalog-voice-id");
+    await page.addStyleTag({
+      content: `[class*="botAvatarCustomizerBackdrop"] {
+        backdrop-filter: none !important;
+        -webkit-backdrop-filter: none !important;
+      }`,
+    });
+    const voiceViewport = studio.locator(
+      '[data-avatar-control-stack="true"]',
+    );
+    await voiceViewport.screenshot({
+      path: ".codex/output/bot-voice-panel-dark-default.png",
+      animations: "disabled",
+    });
+    await onlineVoice.getByText("Use an exact Voice ID").click();
+    const voiceIdOverride = studio.getByLabel("ElevenLabs voice ID override");
+    await voiceIdOverride.fill("portable-voice-id");
+    await voiceIdOverride.blur();
+    await expect
+      .poll(() => savedProfile?.elevenLabsVoiceIdOverride ?? null)
+      .toBe("portable-voice-id");
+    await expect(catalogVoice).toHaveValue("catalog-voice-id");
+    await expect(onlineVoice).toContainText("ID override");
+    await expect(studio.getByText("Voice ID", { exact: true })).toBeVisible();
+    await expect(
+      studio.locator('[data-voice-id-resolution="true"]'),
+    ).toContainText("Portable Muse");
+
+    const voiceDirectionInput = studio.getByLabel(
+      "Add ElevenLabs voice direction cue",
+    );
+    for (const cue of ["warmly", "hushed", "mischievously"]) {
+      await voiceDirectionInput.fill(cue);
+      await voiceDirectionInput.press("Enter");
+      await expect(
+        studio.getByRole("button", {
+          name: `Remove voice direction ${cue}`,
+        }),
+      ).toBeVisible();
+    }
+    await expect(voiceDirectionInput).toBeDisabled();
+    await expect
+      .poll(() => savedProfile?.elevenLabsDirection ?? null)
+      .toBe("warmly, hushed, mischievously");
+    await studio
+      .getByRole("button", {
+        name: "Remove voice direction mischievously",
+      })
+      .click();
+    await expect(voiceDirectionInput).toBeEnabled();
+    await expect
+      .poll(() => savedProfile?.elevenLabsDirection ?? null)
+      .toBe("warmly, hushed");
+
+    await voiceViewport.screenshot({
+      path: ".codex/output/bot-voice-panel-dark.png",
+      animations: "disabled",
+    });
+    await voiceViewport.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    await voiceViewport.screenshot({
+      path: ".codex/output/bot-voice-panel-dark-bottom.png",
+      animations: "disabled",
+    });
+    const themeToggle = studio.locator(
+      '[data-avatar-customizer-theme-toggle="true"]',
+    );
+    await themeToggle.click();
+    await themeToggle.click();
+    await expect(
+      page.locator('[data-avatar-studio-theme="light"]'),
+    ).toBeVisible();
+    await studio.getByRole("tab", { name: "Voice" }).click({ force: true });
+    const lightVoiceViewport = studio.locator(
+      '[data-avatar-control-stack="true"]',
+    );
+    await lightVoiceViewport.evaluate((element) => {
+      element.scrollTop = 0;
+    });
+    await lightVoiceViewport.screenshot({
+      path: ".codex/output/bot-voice-panel-light.png",
+      animations: "disabled",
+    });
+
+    await voiceIdOverride.fill("unavailable-voice-id");
+    await voiceIdOverride.blur();
+    await expect(
+      studio.locator('[data-voice-id-resolution="true"]'),
+    ).toContainText("Voice unavailable");
+
+    await voiceIdOverride.fill("");
+    await voiceIdOverride.blur();
+    await expect
+      .poll(() => savedProfile?.elevenLabsVoiceIdOverride ?? null)
+      .toBeNull();
+    await expect(catalogVoice).toHaveValue("catalog-voice-id");
+    await expect(
+      studio.locator('[data-voice-id-resolution="true"]'),
+    ).toHaveCount(0);
   });
 
   test("custom mouth Coffee pucker stays in the Mouth header and persists @visual", async ({

@@ -1,10 +1,13 @@
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import {
+  DEFAULT_BOT_FACE_GLYPH_ANIMATION,
+  normalizeBotFaceGlyphAnimation,
   parseBotAvatarDetailsV1,
   normalizeBotNamePronunciation,
   normalizeBotPowersV1,
   type BotAvatarDetailsV1,
   type BotFaceBlinkBar,
+  type BotFaceEyeCount,
   type BotFaceFontId,
   type BotFaceGlyphAnimation,
   type BotFaceThinkingFrames,
@@ -54,6 +57,7 @@ export interface PrismBotArchiveJson {
     faceEyeOffsetX?: number | null;
     faceEyeOffsetY?: number | null;
     faceEyeRotationDeg?: number | null;
+    faceEyeCount?: BotFaceEyeCount | number | null;
     faceMouthScale?: number | null;
     faceMouthOffsetX?: number | null;
     faceMouthOffsetY?: number | null;
@@ -80,6 +84,14 @@ export interface PrismBotArchiveJson {
 export interface ParsedPrismBotArchive {
   botJson: PrismBotArchiveJson;
   memories: string[];
+}
+
+export function resolvePrismBotArchiveFaceGlyphAnimation(
+  value: unknown,
+): BotFaceGlyphAnimation {
+  return (
+    normalizeBotFaceGlyphAnimation(value) ?? DEFAULT_BOT_FACE_GLYPH_ANIMATION
+  );
 }
 
 export function createPrismBotArchive(args: {

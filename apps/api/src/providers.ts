@@ -176,9 +176,27 @@ interface AnthropicConfig {
   apiKey: string;
 }
 
-interface DualOllamaWorkloadOptions {
+export interface DualOllamaWorkloadOptions {
   secondaryOllamaHost?: string | null;
   experimentalDualOllama?: boolean;
+}
+
+export interface ResolvedLocalOllamaTarget {
+  host: string;
+  model: string;
+  hostKind: "primary" | "secondary";
+}
+
+type LocalOllamaResponseObserver = (
+  target: ResolvedLocalOllamaTarget,
+) => void;
+
+let localOllamaResponseObserver: LocalOllamaResponseObserver | null = null;
+
+export function setLocalOllamaResponseObserver(
+  observer: LocalOllamaResponseObserver | null,
+): void {
+  localOllamaResponseObserver = observer;
 }
 
 const config = getAppConfig();
@@ -948,6 +966,42 @@ async function resolveDualOllamaWorkloadModelId(
   return requestedModel;
 }
 
+/**
+ * Resolves the exact Ollama host/model pair used for a local request. Model
+ * preparation and text generation must share this path or one host can be
+ * warmed while the other receives the real turn.
+ */
+export async function resolveLocalOllamaTarget(
+  requestedModel: string,
+  options: DualOllamaWorkloadOptions = {},
+): Promise<ResolvedLocalOllamaTarget> {
+  const modelId = requestedModel.trim() || config.ollamaModel;
+  const configuredSecondaryHost = options.secondaryOllamaHost?.trim() || null;
+  const secondaryHost = privateSecondaryOllamaHost(configuredSecondaryHost);
+  const secondaryModel = parseSecondaryOllamaModelId(modelId);
+  if (secondaryModel && !secondaryHost) {
+    throw new LocalModelRequestError(
+      "authentication_or_configuration",
+      undefined,
+      configuredSecondaryHost
+        ? { pairedHostUnsafe: true }
+        : { pairedHostMissing: true },
+    );
+  }
+  const dualWorkloadModel = secondaryModel
+    ? null
+    : await resolveDualOllamaWorkloadModelId(modelId, {
+        secondaryOllamaHost: secondaryHost,
+        experimentalDualOllama: options.experimentalDualOllama === true,
+      });
+  const useSecondary = Boolean(secondaryModel || dualWorkloadModel);
+  return {
+    host: useSecondary ? secondaryHost! : config.ollamaHost,
+    model: secondaryModel ?? dualWorkloadModel ?? modelId,
+    hostKind: useSecondary ? "secondary" : "primary",
+  };
+}
+
 async function discoverOpenAiModelIds(openAiApiKey?: string): Promise<string[]> {
   if (!openAiApiKey) return [];
   try {
@@ -1253,26 +1307,25 @@ export class LocalOllamaProvider implements LlmProvider {
     messages: ProviderMessage[],
     options?: GenerateOptions
   ): Promise<string> {
-    const requestedModel = options?.model?.trim() || config.ollamaModel;
-    const secondaryModel = parseSecondaryOllamaModelId(requestedModel);
-    if (secondaryModel && !this.secondaryOllamaHost) {
+    if (
+      this.secondaryOllamaHostRejected &&
+      parseSecondaryOllamaModelId(options?.model?.trim() || config.ollamaModel)
+    ) {
       throw new LocalModelRequestError(
         "authentication_or_configuration",
         undefined,
-        this.secondaryOllamaHostRejected
-          ? { pairedHostUnsafe: true }
-          : { pairedHostMissing: true }
+        { pairedHostUnsafe: true },
       );
     }
-    const dualWorkloadModel = secondaryModel
-      ? null
-      : await resolveDualOllamaWorkloadModelId(requestedModel, {
-          secondaryOllamaHost: this.secondaryOllamaHost,
-          experimentalDualOllama: this.experimentalDualOllama,
-        });
-    const ollamaHost =
-      secondaryModel || dualWorkloadModel ? this.secondaryOllamaHost! : config.ollamaHost;
-    const model = secondaryModel ?? dualWorkloadModel ?? requestedModel;
+    const target = await resolveLocalOllamaTarget(
+      options?.model?.trim() || config.ollamaModel,
+      {
+        secondaryOllamaHost: this.secondaryOllamaHost,
+        experimentalDualOllama: this.experimentalDualOllama,
+      },
+    );
+    const ollamaHost = target.host;
+    const model = target.model;
     const ollamaOptions: Record<string, unknown> = {};
     if (typeof options?.temperature === "number") {
       ollamaOptions.temperature = options.temperature;
@@ -1294,6 +1347,7 @@ export class LocalOllamaProvider implements LlmProvider {
       model,
       stream: false,
       messages,
+      keep_alive: "10m",
       // Thinking-capable models (Qwen3, DeepSeek-R1, etc.) otherwise default to
       // routing the visible reply into `message.thinking` and leave `content` empty,
       // which breaks Prism chat (and any follow-up like sendGeneratedImage / Comfy).
@@ -1449,6 +1503,7 @@ export class LocalOllamaProvider implements LlmProvider {
         durationMs,
       },
     });
+    localOllamaResponseObserver?.(target);
     return text;
   }
 

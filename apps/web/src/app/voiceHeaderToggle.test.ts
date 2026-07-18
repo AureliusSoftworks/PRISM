@@ -30,7 +30,7 @@ describe("universal voice selector", () => {
   it("persists an explicit selection immediately with optimistic rollback", () => {
     assert.match(
       pageSource,
-      /async function selectGlobalVoiceMode\(nextMode: VoiceMode\)/,
+      /async function selectGlobalVoiceMode\( nextMode: VoiceMode, options: \{ preserveActivePlayback\?: boolean \} = \{\}, \)/,
     );
     assert.match(
       pageSource,
@@ -56,15 +56,25 @@ describe("universal voice selector", () => {
       primeIndex < saveIndex,
       "browser audio must be primed before the first async settings request",
     );
+    assert.match(selector, /if \(!options\.preserveActivePlayback\)/);
+    assert.match(selector, /primeVoiceModePlaybackFromUserGesture\(nextMode\)/);
+  });
+
+  it("lets Signal change the next line without cutting off the live mic", () => {
     assert.match(
-      selector,
-      /coffeeVoicePlaybackBusyRef\.current = false; primeVoiceModePlaybackFromUserGesture\(nextMode\)/,
+      pageSource,
+      /tutorialTarget: "botcast-voice-mode", preserveActivePlayback: options\.liveSessionActive/,
+    );
+    assert.match(
+      pageSource,
+      /Signal voice · \$\{voiceModeDisplayName\(nextMode\)\}.*?Applies to the next line without cutting off anything already on mic\./,
     );
   });
 
   it("moves the same four choices into the constrained tools menu", () => {
-    assert.match(pageSource, /className=\{styles\.chatOverflowVoiceGroup\}/);
-    assert.match(pageSource, /VOICE_MODE_OPTIONS\.map\(\(mode\) => \{/);
+    assert.match(pageSource, /VOICE_MODE_OPTIONS\.map\(\(mode\): PrismMenuEntry => \(\{/);
+    assert.match(pageSource, /kind: "radio"/);
+    assert.match(pageSource, /group: "voice-mode"/);
     assert.match(
       styleSource,
       /@media \(max-width: 560px\)[\s\S]*?\.voiceModeSelector\s*\{\s*display:\s*none/,

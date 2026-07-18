@@ -24,8 +24,13 @@ import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { loadDevSecretDefaults } from "./dev-secrets.mjs";
+import {
+  buildDevWorkspaceDependencies,
+  watchDevWorkspaceDependencies,
+} from "./dev-workspace-dependencies.mjs";
 
 const SHUTDOWN_GRACE_MS = 3000;
+const WORKSPACE_RESTART_GRACE_MS = 250;
 const IS_POSIX = process.platform !== "win32";
 loadDevSecretDefaults();
 const apiPort = process.env.API_PORT?.trim() || "18787";
@@ -63,14 +68,20 @@ const webEnv = {
   // Lets the /api proxy stamp x-prism-web-origin so the API can keep the
   // network toggle host-only.
   PRISM_WEB_LAN: LAN_ACCESS_ON ? "1" : "0",
+  // The coordinated launcher builds shared workspace dependencies below.
+  // Keep npm from running apps/web's predev build afterward: rewriting shared
+  // dist once the API is listening would make node --watch restart the API.
+  npm_config_ignore_scripts: "true",
 };
 
-const children = [];
+const children = new Map();
 let shuttingDown = false;
+let workspaceDependencyWatcher = null;
 
 const label = (name) => `\x1b[36m[${name}]\x1b[0m`;
 
 function start(name) {
+  if (shuttingDown) return;
   const args = ["run", "dev", "-w", `apps/${name}`];
   if (name === "web") {
     // Forward an explicit hostname to `next dev` so loopback-only is the default.
@@ -84,8 +95,15 @@ function start(name) {
     shell: !IS_POSIX,
     env: name === "web" ? webEnv : process.env,
   });
-  children.push({ name, child });
+  const record = { name, child, restarting: false };
+  children.set(name, record);
   child.on("exit", (code, signal) => {
+    if (children.get(name) !== record) return;
+    if (record.restarting && !shuttingDown) {
+      children.delete(name);
+      setTimeout(() => start(name), WORKSPACE_RESTART_GRACE_MS);
+      return;
+    }
     console.error(
       `${label(name)} exited (code=${code ?? "null"}, signal=${signal ?? "null"})`,
     );
@@ -108,12 +126,22 @@ function killTree(child, signal) {
   }
 }
 
+function restart(name) {
+  if (shuttingDown) return;
+  const record = children.get(name);
+  if (!record || record.restarting) return;
+  record.restarting = true;
+  killTree(record.child, "SIGTERM");
+}
+
 function shutdown(exitCode = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
-  for (const { child } of children) killTree(child, "SIGTERM");
+  workspaceDependencyWatcher?.close();
+  workspaceDependencyWatcher = null;
+  for (const { child } of children.values()) killTree(child, "SIGTERM");
   setTimeout(() => {
-    for (const { child } of children) killTree(child, "SIGKILL");
+    for (const { child } of children.values()) killTree(child, "SIGKILL");
     process.exit(exitCode);
   }, SHUTDOWN_GRACE_MS).unref();
 }
@@ -121,5 +149,21 @@ function shutdown(exitCode = 0) {
 process.on("SIGINT", () => shutdown(130));
 process.on("SIGTERM", () => shutdown(143));
 
+// The API loads workspace packages from dist once at process startup. Build
+// them before either service launches so the web predev build cannot leave a
+// long-running API process on an older shared runtime contract.
+buildDevWorkspaceDependencies();
 start("api");
 start("web");
+workspaceDependencyWatcher = watchDevWorkspaceDependencies({
+  afterBuild() {
+    // The API's native watch mode intentionally ignores workspace packages in
+    // node_modules. Restart only the API workspace after a successful build so
+    // it reloads the same contract the web app just picked up.
+    restart("api");
+  },
+  onError(error) {
+    console.error(`${label("workspace")} dependency rebuild failed:`, error);
+    shutdown(1);
+  },
+});

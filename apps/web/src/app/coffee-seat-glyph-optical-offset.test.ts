@@ -51,4 +51,36 @@ describe("Coffee face glyph optical offsets", () => {
     });
     assert.deepEqual(offset, { id: "warm-bracket", x: 0, y: -0.055 });
   });
+
+  it("gives every cloned two-eye glyph the same screen-right baseline", () => {
+    for (const [glyph, voicePreset] of [
+      ["✦", "warm"],
+      ["◇", "playful"],
+      ["☀", "neutral"],
+      ["⌖", "concise"],
+      ["⊕", "formal"],
+      ["⌃", "concise"],
+    ] as const) {
+      assert.deepEqual(
+        coffeeSeatGlyphOpticalOffset({
+          part: "eyes",
+          glyph,
+          voicePreset,
+          rotateDeg: 90,
+          pairedEye: true,
+        }),
+        { id: "paired-eye", x: 0, y: 0.13 },
+      );
+    }
+  });
+
+  it("does not move a single eye", () => {
+    const baseArgs = {
+      part: "eyes" as const,
+      glyph: "⌖",
+      voicePreset: "concise" as const,
+      rotateDeg: 90,
+    };
+    assert.equal(coffeeSeatGlyphOpticalOffset(baseArgs), null);
+  });
 });

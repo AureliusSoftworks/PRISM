@@ -51,6 +51,15 @@ describe("Chat shell header layout", () => {
       pageSource,
       /const AUTO_MODEL_SETTINGS_SUBTEXT = "uses the model saved in Settings";/,
     );
+    assert.match(
+      pageSource,
+      /value === autoOptionValue\s*\? \(autoOptionTriggerLabel \?\? autoOptionLabel\)/,
+    );
+    assert.equal(
+      pageSource.match(/autoOptionTriggerLabel=\{primaryTriggerLabel\}/g)
+        ?.length,
+      2,
+    );
   });
 
   it("offsets the collapsed Chat hero while sidebar-open layout stays in flow", () => {

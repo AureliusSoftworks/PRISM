@@ -199,7 +199,7 @@ describe("Prism app cursor", () => {
     assert.match(pageSource, /PRISM_APP_CURSOR_EXCLUDED_SELECTOR[\s\S]*cursor: auto !important/);
     assert.match(
       pageSource,
-      /className=\{styles\.botPanelHubAvatarPreview\}[\s\S]*data-app-cursor="pointer"/
+      /className=\{styles\.botPanelHubAvatarPreview\}[\s\S]*data-app-cursor=\{isMarketplacePreview \? undefined : "pointer"\}/,
     );
   });
 
@@ -257,8 +257,15 @@ describe("Prism app cursor", () => {
     assert.match(cursorSource, /window\.addEventListener\("pointerdown", startGrabCursor, true\);/);
     assert.match(cursorSource, /window\.addEventListener\("pointerup", finishGrabCursor, true\);/);
     assert.match(cursorSource, /window\.addEventListener\("pointercancel", handlePointerCancel, true\);/);
-    assert.match(cursorSource, /renderedX \+ deltaX \* PRISM_APP_CURSOR_FOLLOW_EASING/);
-    assert.match(cursorSource, /renderedY \+ deltaY \* PRISM_APP_CURSOR_FOLLOW_EASING/);
+    assert.match(cursorSource, /const next = prismCursorMotionStep\(/);
+    assert.match(
+      cursorSource,
+      /PRISM_APP_CURSOR_FOLLOW_EASING,[\s\S]*PRISM_APP_CURSOR_SNAP_DISTANCE_PX/,
+    );
+    assert.match(
+      cursorSource,
+      /if \(next\.settled\) \{[\s\S]*animationFrameId = null;[\s\S]*return;/,
+    );
     assert.match(cursorSource, /window\.requestAnimationFrame\(animateCursor\)/);
     assert.match(cursorSource, /window\.cancelAnimationFrame\(animationFrameId\)/);
     assert.match(cursorSource, /targetX = event\.clientX;/);

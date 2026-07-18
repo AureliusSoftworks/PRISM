@@ -136,6 +136,127 @@ function deterministicHardAudiencePower(
   };
 }
 
+function deterministicIntimidationPower(
+  source: BotPowerV1,
+  botName: string,
+): CompiledBotPowerV1 | null {
+  const nameAndIntent = compact(`${source.name} ${source.intent}`, 560)
+    .toLowerCase();
+  const namesIntimidation =
+    /\b(?:intimidat\w*|terrify\w*|terrifying|aura\s+of\s+dread)\b/u.test(
+      nameAndIntent,
+    );
+  const spreadsFear =
+    /\b(?:strike\w*|cause\w*|inspire\w*|instill\w*|provoke\w*|evoke\w*|spread\w*|fill\w*)\b[\s\S]*\bfear\b/u.test(
+      nameAndIntent,
+    ) ||
+    /\b(?:others?|everyone|everybody|surrounding\s+bots?|nearby\s+bots?)\b[\s\S]*\b(?:afraid|fearful|intimidated|terrified)\b/u.test(
+      nameAndIntent,
+    );
+  if (!namesIntimidation && !spreadsFear) return null;
+  if (!/\b(?:fear|afraid|intimidat\w*|terrify\w*|dread)\b/u.test(nameAndIntent)) {
+    return null;
+  }
+  const subject = compact(botName, 100) || "This bot";
+  return {
+    version: BOT_POWER_VERSION,
+    sourceHash: botPowerSourceHashV1(source.name, source.intent),
+    selfCue:
+      "Project quiet, disciplined menace without demanding that others describe their fear.",
+    observerCue: `${subject}'s controlled presence creates immediate pressure; let it register without abandoning your personality or role.`,
+    effects: [
+      {
+        type: "social_influence",
+        trigger: "session_start",
+        polarity: "negative",
+        strength: "large",
+        targets: [{ kind: "all" }],
+      },
+    ],
+    ruleLabels: ["Intimidates the room"],
+  };
+}
+
+function deterministicGradualMoodPower(
+  source: BotPowerV1,
+  botName: string,
+): CompiledBotPowerV1 | null {
+  const intent = compact(source.intent, 500).toLowerCase();
+  if (!/\bmood\b/u.test(intent)) return null;
+  if (!/\b(?:over\s*time|overtime|gradually|little\s+by\s+little|each\s+time|whenever)\b/u.test(intent)) {
+    return null;
+  }
+  if (!/\b(?:all|everyone|everybody|others?|surrounding|nearby|table)\b/u.test(intent)) {
+    return null;
+  }
+  const lowersMood =
+    /\b(?:lower|lowers|lowering|worsen|worsens|worsening|drain|drains|draining|sour|sours|souring|reduce|reduces|reducing)\b[\s\S]*\bmood\b/u.test(
+      intent,
+    );
+  const raisesMood =
+    /\b(?:raise|raises|raising|improve|improves|improving|lift|lifts|lifting|boost|boosts|boosting|brighten|brightens|brightening)\b[\s\S]*\bmood\b/u.test(
+      intent,
+    );
+  if (lowersMood === raisesMood) return null;
+  const polarity = lowersMood ? "negative" as const : "positive" as const;
+  const subject = compact(botName, 100) || "This bot";
+  return {
+    version: BOT_POWER_VERSION,
+    sourceHash: botPowerSourceHashV1(source.name, source.intent),
+    selfCue: lowersMood
+      ? "Let a mildly irritating edge accumulate as you speak."
+      : "Let an encouraging edge gently lift the room as you speak.",
+    observerCue: lowersMood
+      ? `${subject}'s presence gradually lowers the table's mood.`
+      : `${subject}'s presence gradually lifts the table's mood.`,
+    effects: [{
+      type: "social_influence",
+      trigger: "after_speech",
+      polarity,
+      strength: "small",
+      targets: [{ kind: "all" }],
+    }],
+    ruleLabels: [lowersMood ? "Gradually lowers table mood" : "Gradually lifts table mood"],
+  };
+}
+
+function deterministicCoffeeDislikePower(
+  source: BotPowerV1,
+  botName: string,
+): CompiledBotPowerV1 | null {
+  const intent = compact(source.intent, 500).toLowerCase().replace(/[’]/gu, "'");
+  const dislikesCoffee = [
+    /\b(?:dislikes?|hates?|detests?|loathes?|abhors?)\s+(?:drinking\s+)?coffee\b/u,
+    /\b(?:does\s+not|doesn't|doesnt|do\s+not|don't|dont)\s+(?:like|enjoy|care\s+for)\s+(?:drinking\s+)?coffee\b/u,
+    /\b(?:is\s+not|isn't|isnt)\s+(?:fond\s+of|a\s+fan\s+of)\s+(?:drinking\s+)?coffee\b/u,
+    /\bcoffee[-\s](?:averse|hater)\b/u,
+  ].some((pattern) => pattern.test(intent));
+  const hasQualifiedDislike =
+    /\bcoffee\s+(?:after|before|if|once|unless|when|which|that|with|without)\b/u.test(intent);
+  if (!dislikesCoffee || hasQualifiedDislike) return null;
+  const subject = compact(botName, 100) || "This bot";
+  return {
+    version: BOT_POWER_VERSION,
+    sourceHash: botPowerSourceHashV1(source.name, source.intent),
+    selfCue: "You dislike coffee and do not drink it.",
+    observerCue: `${subject} refuses to drink coffee.`,
+    effects: [{ type: "cup_rate", rate: "none" }],
+    ruleLabels: ["Refuses coffee"],
+  };
+}
+
+function deterministicPower(
+  source: BotPowerV1,
+  botName: string,
+): CompiledBotPowerV1 | null {
+  return (
+    deterministicHardAudiencePower(source, botName) ??
+    deterministicIntimidationPower(source, botName) ??
+    deterministicGradualMoodPower(source, botName) ??
+    deterministicCoffeeDislikePower(source, botName)
+  );
+}
+
 function normalizeCompiledEntry(
   raw: unknown,
   source: BotPowerV1
@@ -344,7 +465,7 @@ export async function compileBotPowers(args: {
 
   const deterministic = new Map<string, CompiledBotPowerV1>();
   for (const power of drafts) {
-    const compiled = deterministicHardAudiencePower(power, args.botName ?? "");
+    const compiled = deterministicPower(power, args.botName ?? "");
     if (compiled) deterministic.set(power.id, compiled);
   }
   const modelDrafts = drafts.filter((power) => !deterministic.has(power.id));
@@ -377,8 +498,13 @@ export async function compileBotPowers(args: {
         '- {"type":"speech_audience","allowed":[target...]},',
         '- {"type":"social_influence","trigger":"session_start|after_speech","polarity":"positive|negative","strength":"small|medium|large","targets":[target...]},',
         '- {"type":"mood_resistance","polarity":"positive|negative|both","strength":"small|medium|large"},',
-        '- {"type":"cup_rate","rate":"slow|fast|very_fast"},',
-        '- {"type":"action_bias","cue":string,"frequency":"occasional|frequent"}.',
+        '- {"type":"cup_rate","rate":"none|slow|fast|very_fast"},',
+        '- {"type":"action_bias","cue":string,"frequency":"occasional|frequent"},',
+        '- {"type":"turn_gravity","direction":"more|less","strength":"small|medium|large"},',
+        '- {"type":"response_bond","direction":"toward|away","strength":"small|medium|large","targets":[target...]},',
+        '- {"type":"topic_gravity","direction":"toward|away","strength":"small|medium|large","topics":[string...]},',
+        '- {"type":"selective_memory","mode":"remember|forget","strength":"small|medium|large","targets":[target...]},',
+        '- {"type":"insight","strength":"small|medium|large","targets":[target...]}.',
         'Targets are {"kind":"all"}, {"kind":"bot","name":string}, or {"kind":"trait","trait":string}.',
         "Use hard effects only when the intent clearly requires them. Keep each cue to one short sentence and each rule label under eight words.",
       ].join("\n"),
@@ -425,7 +551,7 @@ export async function compileBotPowers(args: {
           `Expected powers: ${JSON.stringify(unresolved.map(({ id, name, intent, enabled }) => ({ id, name, intent, enabled })))}`,
           `Prior output: ${compact(raw, 6000) || "(empty)"}`,
           "Return {\"powers\":[{\"id\":string,\"name\":string,\"selfCue\":string,\"observerCue\":string,\"effects\":[],\"ruleLabels\":string[]}]}",
-          "Allowed effect types: awareness, speech_audience, social_influence, mood_resistance, cup_rate, action_bias.",
+          "Allowed effect types: awareness, speech_audience, social_influence, mood_resistance, cup_rate, action_bias, turn_gravity, response_bond, topic_gravity, selective_memory, insight.",
         ].join("\n"),
       },
     ];

@@ -71,6 +71,61 @@ describe("Auto fallback runner", () => {
     );
   });
 
+  it("runs an ordered five-slot chain across mixed local and online providers", async () => {
+    const calls: string[] = [];
+    const providers = [
+      "local",
+      "openai",
+      "local",
+      "anthropic",
+      "openai",
+      "local",
+    ] as const;
+    const result = await runAutoFallbackChain({
+      attempts: providers.map((provider, index) =>
+        attempt(provider, `model-${index}`, async () => {
+          calls.push(`${provider}:${index}`);
+          if (index < providers.length - 1) throw new Error("next");
+          return "recovered";
+        }),
+      ),
+      perAttemptTimeoutMs: 100,
+      totalTimeoutMs: 700,
+    });
+
+    assert.deepEqual(calls, [
+      "local:0",
+      "openai:1",
+      "local:2",
+      "anthropic:3",
+      "openai:4",
+      "local:5",
+    ]);
+    assert.equal(result.value, "recovered");
+    assert.equal(result.attempts.length, 6);
+  });
+
+  it("rejects chains outside the one-to-five fallback range", async () => {
+    await assert.rejects(
+      runAutoFallbackChain({
+        attempts: [attempt("local", "primary", async () => "unused")],
+        perAttemptTimeoutMs: 100,
+        totalTimeoutMs: 100,
+      }),
+      /one primary model and one to five fallback models/,
+    );
+    await assert.rejects(
+      runAutoFallbackChain({
+        attempts: Array.from({ length: 7 }, (_, index) =>
+          attempt("local", `model-${index}`, async () => "unused"),
+        ),
+        perAttemptTimeoutMs: 100,
+        totalTimeoutMs: 100,
+      }),
+      /one primary model and one to five fallback models/,
+    );
+  });
+
   it("skips unavailable attempts and fails after all three", async () => {
     await assert.rejects(
       runAutoFallbackChain({
@@ -127,6 +182,8 @@ describe("Auto fallback runner", () => {
 
   it("does not start another attempt after the total budget is exhausted", async () => {
     const calls: string[] = [];
+    const timeline = [1_000, 1_000, 1_009];
+    const now = () => timeline.shift() ?? 1_009;
     await assert.rejects(
       runAutoFallbackChain({
         attempts: [
@@ -142,6 +199,7 @@ describe("Auto fallback runner", () => {
         ],
         perAttemptTimeoutMs: 100,
         totalTimeoutMs: 10,
+        now,
       }),
       (error: unknown) => {
         assert.ok(error instanceof AutoFallbackExhaustedError);

@@ -1,11 +1,11 @@
 ---
 name: release
-description: Cut a PRISM release from dev to main. A bare $release or /release commits and pushes the intended work, prepares version notes, merges dev into main through a release PR, tags and pushes the release, triggers the release workflow, and watches it through completion. Draft-only preparation must be requested explicitly.
+description: Cut a PRISM release from dev to main. A bare $release or /release commits and pushes the intended work, prepares version notes, merges dev into main through a release PR, tags and pushes the release, runs the release workflow, verifies its assets, and publishes the completed desktop release. Draft-only preparation must be requested explicitly.
 ---
 
 # Release
 
-Use this skill only in the PRISM repository. Treat a bare `$release` or `/release` as an end-to-end release runbook: prepare and push `dev`, merge it into `main` through a release PR, create and push the release tag, trigger the release workflow, and watch the result. Do not pause for another approval between those normal release stages.
+Use this skill only in the PRISM repository. Treat a bare `$release` or `/release` as an end-to-end release runbook: prepare and push `dev`, merge it into `main` through a release PR, create and push the release tag, trigger the release workflow, watch the result, verify the desktop assets, and publish the completed desktop release. Do not pause for another approval between those normal release stages.
 
 Only stop at the PR when Jared explicitly asks to `prepare`, `draft`, or `open a draft` release.
 
@@ -23,6 +23,7 @@ Only stop at the PR when Jared explicitly asks to `prepare`, `draft`, or `open a
   - mark the release PR ready and merge `dev` into `main`
   - create and push the release tag
   - trigger the release workflow and watch it through completion
+  - publish the completed desktop release after all expected assets are verified
 - Do not ask for separate approval for those normal release actions.
 - An explicitly requested draft-only release authorizes preparation, commits, pushes, and a draft PR, but not the merge, tag, or release workflow.
 - Never bypass required checks, force a push, overwrite or delete an existing tag, discard unrelated work, or resolve a meaningful merge conflict by guessing. Diagnose and repair ordinary release blockers on `dev`; stop only when completion requires a meaningful product decision, destructive action, or check bypass.
@@ -170,7 +171,7 @@ gh workflow run release-main.yml --ref main --field version=X.Y.Z --field deskto
 
 This avoids disturbing unrelated local changes while still tagging the exact merged `main` commit. If GitHub CLI needs credentials, wrap only that command with `/Users/jared/.codex/bin/with-secrets`.
 
-### 9. Watch And Report
+### 9. Watch, Publish, And Report
 
 After triggering the workflow, find the new run id with `gh run list`, verify that its head branch/ref and version match this release, then watch it:
 
@@ -178,11 +179,26 @@ After triggering the workflow, find the new run id with `gh run list`, verify th
 gh run watch <run-id>
 ```
 
+After a successful workflow, inspect the staged desktop release and verify that
+the expected macOS, Windows, and Linux assets are all uploaded. The workflow
+uses `desktop/vX.Y.Z` and intentionally stages it as a draft while packaging.
+For a bare release, publish it and mark it Latest without asking for another
+approval:
+
+```bash
+gh release view desktop/vX.Y.Z
+gh release edit desktop/vX.Y.Z --draft=false --latest
+gh release view desktop/vX.Y.Z
+```
+
+Do not publish when the workflow failed or any expected asset is absent.
+
 Report:
 
 - release version and tag
 - pushed branches/tags
 - workflow result
+- public desktop release URL and attached assets
 - release page: `https://github.com/AureliusSoftworks/PRISM/releases`
 
 If the build workflow fails, do not delete the tag or revert the merge by default. Diagnose the failure, fix on `dev`, merge the repair into `main`, and re-run the workflow when appropriate. Continue until the release completes or a non-bypassable blocker requires Jared's decision.

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
+  ElevenLabsVoiceError,
   VOICE_CAPABILITIES,
   applyPlayerNamePronunciation,
   cleanSpeakableAssistantProse,
@@ -10,7 +11,9 @@ import {
   requestElevenLabsSpeechWithTimestamps,
   requestElevenLabsVoiceCatalog,
   requestElevenLabsVoiceCollections,
+  requestElevenLabsVoiceIdentity,
   resolveElevenLabsVoiceId,
+  resolveVoiceSynthesisExplicitOnlineContext,
   resolveVoiceSynthesisBoundary,
   validateVoiceSynthesisRequest,
 } from "../voices.ts";
@@ -116,6 +119,46 @@ describe("voice Phase 1 boundary", () => {
     assert.equal(resolveVoiceSynthesisBoundary(request).ok, true);
   });
 
+  it("allows an explicit editor preview online without opening LOCAL message audio", () => {
+    assert.equal(
+      resolveVoiceSynthesisExplicitOnlineContext({
+        preferredProvider: "local",
+        explicitOnlineContext: true,
+        explicitVoicePreview: true,
+        hasMessageId: false,
+      }),
+      true,
+    );
+    assert.equal(
+      resolveVoiceSynthesisExplicitOnlineContext({
+        preferredProvider: "local",
+        explicitOnlineContext: true,
+        explicitVoicePreview: false,
+        hasMessageId: false,
+      }),
+      false,
+    );
+    assert.equal(
+      resolveVoiceSynthesisExplicitOnlineContext({
+        preferredProvider: "local",
+        explicitOnlineContext: true,
+        explicitVoicePreview: true,
+        hasMessageId: true,
+      }),
+      false,
+    );
+    assert.equal(
+      resolveVoiceSynthesisExplicitOnlineContext({
+        persistedMessageProvider: "local",
+        preferredProvider: "openai",
+        explicitOnlineContext: true,
+        explicitVoicePreview: true,
+        hasMessageId: true,
+      }),
+      false,
+    );
+  });
+
   it("keeps Signal reaction tags in the ElevenLabs lane only", () => {
     const request = validateVoiceSynthesisRequest({
       text: "Welcome back.",
@@ -147,36 +190,68 @@ describe("voice Phase 1 boundary", () => {
     );
   });
 
-  it("uses only an explicit per-profile ElevenLabs identity", () => {
-    assert.equal(resolveElevenLabsVoiceId({
-      v: 2,
-      enabled: true,
-      baseVoiceId: "voice-1",
-      elevenLabsVoiceId: "bot-voice",
-      pitch: 0,
-      warmth: 0,
-      pace: 0,
-      lilt: 0,
-      bottishTone: 0.45,
-      volume: 1,
-      texture: {
-        preset: "clean",
-        amount: 0,
-        bandwidth: 1,
-        noise: 0,
-        instability: 0,
-        distortion: 0,
-        damage: 0,
-      },
-    }), "bot-voice");
-    assert.equal(resolveElevenLabsVoiceId({
-      v: 1,
-      baseVoiceId: "voice-1",
-      pitch: 0,
-      warmth: 0,
-      pace: 0,
-      lilt: 0,
-    }), null);
+  it("prefers a per-profile voice ID override over the catalog identity", () => {
+    assert.equal(
+      resolveElevenLabsVoiceId({
+        v: 2,
+        enabled: true,
+        baseVoiceId: "voice-1",
+        elevenLabsVoiceId: "bot-voice",
+        elevenLabsVoiceIdOverride: "portable-voice",
+        pitch: 0,
+        warmth: 0,
+        pace: 0,
+        lilt: 0,
+        bottishTone: 0.45,
+        volume: 1,
+        texture: {
+          preset: "clean",
+          amount: 0,
+          bandwidth: 1,
+          noise: 0,
+          instability: 0,
+          distortion: 0,
+          damage: 0,
+        },
+      }),
+      "portable-voice",
+    );
+    assert.equal(
+      resolveElevenLabsVoiceId({
+        v: 2,
+        enabled: true,
+        baseVoiceId: "voice-1",
+        elevenLabsVoiceId: "bot-voice",
+        elevenLabsEffect: "clean",
+        pitch: 0,
+        warmth: 0,
+        pace: 0,
+        lilt: 0,
+        bottishTone: 0.45,
+        volume: 1,
+        texture: {
+          preset: "clean",
+          amount: 0,
+          bandwidth: 1,
+          noise: 0,
+          instability: 0,
+          distortion: 0,
+          damage: 0,
+        },
+      }),
+      "bot-voice",
+    );
+    assert.equal(
+      resolveElevenLabsVoiceId({
+        v: 1,
+        baseVoiceId: "voice-1",
+        pitch: 0,
+        warmth: 0,
+        pace: 0,
+        lilt: 0,
+      }),
+      null,
+    );
   });
 
   it("maps profile performance effects into bounded ElevenLabs settings", () => {
@@ -458,6 +533,47 @@ describe("voice Phase 1 boundary", () => {
     }]);
   });
 
+  it("resolves an authenticated ElevenLabs voice ID to its display name", async () => {
+    let requestedUrl = "";
+    let requestedKey = "";
+    const voice = await requestElevenLabsVoiceIdentity({
+      apiKey: "secret-key",
+      voiceId: " portable/voice ",
+      fetchImpl: (async (input, init) => {
+        requestedUrl = String(input);
+        requestedKey = new Headers(init?.headers).get("xi-api-key") ?? "";
+        return new Response(
+          JSON.stringify({ voice_id: "portable/voice", name: "Portable Muse" }),
+          { status: 200 },
+        );
+      }) as typeof fetch,
+    });
+    assert.equal(
+      requestedUrl,
+      "https://api.elevenlabs.io/v1/voices/portable%2Fvoice",
+    );
+    assert.equal(requestedKey, "secret-key");
+    assert.deepEqual(voice, {
+      voiceId: "portable/voice",
+      name: "Portable Muse",
+    });
+  });
+
+  it("preserves ElevenLabs voice lookup failures for the route to classify", async () => {
+    await assert.rejects(
+      requestElevenLabsVoiceIdentity({
+        apiKey: "secret-key",
+        voiceId: "missing-voice",
+        fetchImpl: (async () =>
+          new Response("Voice not found", { status: 404 })) as typeof fetch,
+      }),
+      (error: unknown) =>
+        error instanceof ElevenLabsVoiceError &&
+        error.status === 404 &&
+        error.message === "Voice not found",
+    );
+  });
+
   it("discovers and names authenticated ElevenLabs voice collections", async () => {
     const requestedUrls: URL[] = [];
     const collections = await requestElevenLabsVoiceCollections({
@@ -531,14 +647,12 @@ describe("voice Phase 1 boundary", () => {
     );
     assert.match(catalogRoute, /requestElevenLabsVoiceCatalog\(\{/u);
     assert.match(catalogRoute, /requestElevenLabsVoiceCollections\(\{/u);
+    assert.match(catalogRoute, /requestElevenLabsVoiceIdentity\(\{/u);
     assert.match(
       catalogRoute,
       /collectionId: user\.elevenlabs_voice_collection_id/u,
     );
     assert.doesNotMatch(catalogRoute, /preferred_provider|Switch to Online/u);
-    assert.match(
-      serverSource,
-      /raw\.explicitOnlineContext === true && user\.preferred_provider !== "local"/u,
-    );
+    assert.match(serverSource, /resolveVoiceSynthesisExplicitOnlineContext\(\{/u);
   });
 });

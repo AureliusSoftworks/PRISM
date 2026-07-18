@@ -1,7 +1,13 @@
 .layer {
+  --avatar-details-phosphor-glow-color: var(
+    --crt-face-edge-color,
+    currentColor
+  );
   position: absolute;
   inset: 0;
-  z-index: 4;
+  /* Keep every ink emission canvas in the CRT root stacking context. A
+     positioned wrapper would flatten them before screen-blending with the
+     face, making connected ink look pasted on as a separate layer. */
   display: block;
   width: 100%;
   height: 100%;
@@ -14,27 +20,87 @@
   transform-origin: center;
 }
 
-.layer[data-avatar-details-hidden-for-blink="true"] {
-  visibility: hidden;
+.behindFace {
+  z-index: 5;
+}
+
+.aboveFace {
+  z-index: 7;
 }
 
 .halo {
-  opacity: 0.16;
-  mix-blend-mode: plus-lighter;
-  filter: blur(1.8px) saturate(1.35)
-    drop-shadow(0 0 4px color-mix(in srgb, currentColor 56%, transparent))
-    drop-shadow(0 0 7px color-mix(in srgb, currentColor 28%, transparent));
+  opacity: 1;
+  mix-blend-mode: screen;
+  filter: blur(1.35px) saturate(1.28)
+    drop-shadow(
+      0 0 6px
+        color-mix(
+          in srgb,
+          var(--avatar-details-phosphor-glow-color) 58%,
+          transparent
+        )
+    )
+    drop-shadow(
+      0 0 12px
+        color-mix(
+          in srgb,
+          var(--avatar-details-phosphor-glow-color) 36%,
+          transparent
+        )
+    )
+    drop-shadow(
+      0 0 21px
+        color-mix(
+          in srgb,
+          var(--avatar-details-phosphor-glow-color) 22%,
+          transparent
+        )
+    );
 }
 
 .bloom {
-  opacity: 0.58;
+  opacity: 1;
   mix-blend-mode: screen;
-  filter: blur(0.28px) saturate(1.18) drop-shadow(0 0 1.15px currentColor)
-    drop-shadow(0 0 2.6px color-mix(in srgb, currentColor 58%, transparent));
+  filter: blur(0.32px) saturate(1.18)
+    drop-shadow(0 0 0.72px var(--avatar-details-phosphor-glow-color))
+    drop-shadow(0 0 1.5px var(--avatar-details-phosphor-glow-color))
+    drop-shadow(
+      0 0 3px
+        color-mix(
+          in srgb,
+          var(--avatar-details-phosphor-glow-color) 82%,
+          transparent
+        )
+    )
+    drop-shadow(
+      0 0 6px
+        color-mix(
+          in srgb,
+          var(--avatar-details-phosphor-glow-color) 58%,
+          transparent
+        )
+    )
+    drop-shadow(
+      0 0 12px
+        color-mix(
+          in srgb,
+          var(--avatar-details-phosphor-glow-color) 36%,
+          transparent
+        )
+    )
+    drop-shadow(
+      0 0 21px
+        color-mix(
+          in srgb,
+          var(--avatar-details-phosphor-glow-color) 22%,
+          transparent
+        )
+    );
 }
 
 .core {
   opacity: 1;
   mix-blend-mode: screen;
-  filter: drop-shadow(0 0 0.45px rgba(255, 255, 255, 0.72));
+  filter: brightness(1.07) contrast(1.02)
+    drop-shadow(0 0 0.45px rgba(255, 255, 255, 0.82));
 }

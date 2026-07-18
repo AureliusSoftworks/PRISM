@@ -58,7 +58,6 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     experimentalDualOllamaEnabled: 0,
     experimentalAllModelEffortEnabled: 0,
     coffeeExperimentalTableAngleEnabled: 0,
-    signalImmersiveVoiceEffectsEnabled: 0,
     psychicModeEnabled: 0,
     autoSwitchModel: 0,
     autoFallbackChain: null,
@@ -109,27 +108,6 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
 }
 
 describe("resolveNextSettings — voice foundation", () => {
-  it("keeps Signal immersive vocal reactions opt-in", () => {
-    assert.equal(
-      resolveNextSettings({}, baseline()).signalImmersiveVoiceEffectsEnabled,
-      false,
-    );
-    assert.equal(
-      resolveNextSettings(
-        { signalImmersiveVoiceEffectsEnabled: true },
-        baseline(),
-      ).signalImmersiveVoiceEffectsEnabled,
-      true,
-    );
-    assert.equal(
-      resolveNextSettings(
-        { signalImmersiveVoiceEffectsEnabled: "yes" },
-        baseline({ signalImmersiveVoiceEffectsEnabled: 1 }),
-      ).signalImmersiveVoiceEffectsEnabled,
-      true,
-    );
-  });
-
   it("keeps ElevenLabs available online while retiring account-level voice identities", () => {
     const next = resolveNextSettings(
       {
@@ -508,6 +486,29 @@ describe("resolveNextSettings — Auto model chain", () => {
         { provider: "local", model: "qwen3:8b" },
         { provider: "openai", model: "gpt-5-mini" },
       ],
+    });
+  });
+
+  it("persists a maximum five-model mixed-provider fallback chain", () => {
+    const fallbacks = [
+      { provider: "local", model: "qwen3:8b" },
+      { provider: "openai", model: "gpt-5-mini" },
+      { provider: "anthropic", model: "claude-haiku-4-5" },
+      { provider: "local", model: "gemma3:12b" },
+      { provider: "openai", model: "gpt-5-nano" },
+    ];
+    const next = resolveNextSettings(
+      {
+        autoModeEnabled: true,
+        autoFallbackChain: { v: 1, fallbacks },
+      },
+      baseline(),
+    );
+
+    assert.equal(next.autoSwitchModel, 1);
+    assert.deepEqual(JSON.parse(next.autoFallbackChain ?? "null"), {
+      v: 1,
+      fallbacks,
     });
   });
 

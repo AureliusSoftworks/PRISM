@@ -1,6 +1,8 @@
 import {
   BOT_AVATAR_DETAILS_CANVAS_SIZE,
   BOT_AVATAR_DETAILS_MAX_PAINTED_PIXELS,
+  BOT_AVATAR_DETAILS_PAINT_COLOR_MAP_BASE64_LENGTH,
+  BOT_AVATAR_DETAILS_PAINT_COLOR_MAP_BYTE_LENGTH,
   BOT_AVATAR_DETAILS_PAINT_MASK_BASE64_LENGTH,
   BOT_AVATAR_DETAILS_PAINT_MASK_BYTE_LENGTH,
   BOT_AVATAR_DETAILS_VERSION,
@@ -11,8 +13,12 @@ import {
   BOT_AVATAR_DETAIL_SCALE_MIN,
   BOT_AVATAR_DETAIL_STAMP_CATALOG,
   BOT_AVATAR_DETAIL_STAMP_IDS,
+  botAvatarDetailsPaintColorCode,
+  countBotAvatarDetailsColoredPixels,
   countBotAvatarDetailsPaintedPixels,
+  decodeBotAvatarDetailsPaintColorMap,
   decodeBotAvatarDetailsPaintMask,
+  encodeBotAvatarDetailsPaintColorMap,
   encodeBotAvatarDetailsPaintMask,
   isBotAvatarDetailsWritablePixel,
   parseBotAvatarDetailsV1,
@@ -28,6 +34,10 @@ export const AVATAR_DETAILS_MASK_BYTE_LENGTH =
   BOT_AVATAR_DETAILS_PAINT_MASK_BYTE_LENGTH;
 export const AVATAR_DETAILS_MASK_BASE64_LENGTH =
   BOT_AVATAR_DETAILS_PAINT_MASK_BASE64_LENGTH;
+export const AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH =
+  BOT_AVATAR_DETAILS_PAINT_COLOR_MAP_BYTE_LENGTH;
+export const AVATAR_DETAILS_COLOR_MAP_BASE64_LENGTH =
+  BOT_AVATAR_DETAILS_PAINT_COLOR_MAP_BASE64_LENGTH;
 export const AVATAR_DETAILS_MAX_PAINT_PIXELS =
   BOT_AVATAR_DETAILS_MAX_PAINTED_PIXELS;
 export const AVATAR_DETAILS_WRITABLE_PIXELS =
@@ -38,6 +48,16 @@ export const AVATAR_DETAIL_OFFSET_MAX = BOT_AVATAR_DETAIL_OFFSET_MAX;
 export const AVATAR_DETAIL_SCALE_MIN = BOT_AVATAR_DETAIL_SCALE_MIN;
 export const AVATAR_DETAIL_SCALE_MAX = BOT_AVATAR_DETAIL_SCALE_MAX;
 export const AVATAR_DETAILS_BRUSH_SIZES = [1, 3, 5] as const;
+export const AVATAR_DETAILS_INK_ROLES = [
+  "blink",
+  "talking",
+  "effect",
+] as const;
+export const AVATAR_DETAILS_INK_ROLE_COLORS = {
+  blink: "#ef3f52",
+  talking: "#2878ef",
+  effect: "#1ba764",
+} as const;
 
 export const AVATAR_DETAIL_STAMP_IDS = BOT_AVATAR_DETAIL_STAMP_IDS;
 
@@ -48,6 +68,16 @@ export type AvatarDetailsBrushSize =
 export type AvatarDetailsPaintMode = "brush" | "eraser";
 export type AvatarDetailsTool =
   AvatarDetailsPaintMode | "line" | "circle" | "move";
+export type AvatarDetailsInkRole = (typeof AVATAR_DETAILS_INK_ROLES)[number];
+export type AvatarDetailsFaceDepth = "all" | "behind-face" | "above-face";
+
+/**
+ * The live mouth sits across the lower-face seam on the authored 128 grid.
+ * Pixels below this seam are beard territory and render behind the animated
+ * mouth; pixels above it remain available for noses, mustaches, hair, and
+ * other details that belong over the face glyphs.
+ */
+export const AVATAR_DETAILS_LOWER_FACE_DEPTH_Y = 81;
 
 export type AvatarDetailStampV1 = BotAvatarDetailStampV1;
 export type AvatarDetailsV1 = BotAvatarDetailsV1;
@@ -105,19 +135,43 @@ export const EMPTY_AVATAR_DETAILS: AvatarDetailsV1 = {
 export function normalizeAvatarDetails(value: unknown): AvatarDetailsV1 {
   try {
     const parsed = parseBotAvatarDetailsV1(value);
-    const decoded = decodeAvatarDetailsPaintMask(parsed.screen.paintMaskBase64);
+    const colorMap =
+      decodeAvatarDetailsPaintColorMap(parsed.screen.paintColorMapBase64) ??
+      new Uint8Array(AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH);
+    const legacyMask = parsed.screen.paintMaskBase64
+      ? decodeAvatarDetailsPaintMask(parsed.screen.paintMaskBase64)
+      : null;
+    if (legacyMask) {
+      const legacyRole: AvatarDetailsInkRole = parsed.screen.hideInkDuringBlink
+        ? "blink"
+        : parsed.screen.hideInkDuringTalking
+          ? "talking"
+          : "effect";
+      for (let y = 0; y < AVATAR_DETAILS_CANVAS_SIZE; y += 1) {
+        for (let x = 0; x < AVATAR_DETAILS_CANVAS_SIZE; x += 1) {
+          if (
+            avatarDetailsMaskPixel(legacyMask, x, y) &&
+            avatarDetailsInkRoleAt(colorMap, x, y) === null
+          ) {
+            setAvatarDetailsInkRole(colorMap, x, y, legacyRole);
+          }
+        }
+      }
+    }
+    const paintColorMapBase64 = encodeAvatarDetailsPaintColorMap(colorMap);
     return {
-      ...parsed,
+      version: AVATAR_DETAILS_VERSION,
       screen: {
-        ...parsed.screen,
-        paintMaskBase64:
-          decoded && countBotAvatarDetailsPaintedPixels(decoded) > 0
-            ? parsed.screen.paintMaskBase64
-            : null,
+        stamps: parsed.screen.stamps,
+        paintMaskBase64: null,
+        ...(paintColorMapBase64 ? { paintColorMapBase64 } : {}),
       },
     };
   } catch {
-    return cloneAvatarDetails(EMPTY_AVATAR_DETAILS);
+    return {
+      version: AVATAR_DETAILS_VERSION,
+      screen: { stamps: [], paintMaskBase64: null },
+    };
   }
 }
 
@@ -126,29 +180,12 @@ export function cloneAvatarDetails(details: AvatarDetailsV1): AvatarDetailsV1 {
     version: AVATAR_DETAILS_VERSION,
     screen: {
       stamps: details.screen.stamps.map((stamp) => ({ ...stamp })),
-      paintMaskBase64: details.screen.paintMaskBase64,
-      ...(details.screen.hideInkDuringBlink
-        ? { hideInkDuringBlink: true as const }
+      paintMaskBase64: null,
+      ...(details.screen.paintColorMapBase64
+        ? { paintColorMapBase64: details.screen.paintColorMapBase64 }
         : {}),
     },
   };
-}
-
-export function setAvatarDetailsHideInkDuringBlink(
-  details: AvatarDetailsV1,
-  enabled: boolean,
-): AvatarDetailsV1 {
-  const screen = { ...details.screen };
-  if (enabled) screen.hideInkDuringBlink = true;
-  else delete screen.hideInkDuringBlink;
-  return normalizeAvatarDetails({ ...details, screen });
-}
-
-export function avatarDetailsInkHiddenForBlink(
-  details: AvatarDetailsV1 | null | undefined,
-  blinkPhase: "open" | "closed",
-): boolean {
-  return details?.screen.hideInkDuringBlink === true && blinkPhase === "closed";
 }
 
 export function avatarDetailsKey(
@@ -171,7 +208,8 @@ export function avatarDetailsHasVisuals(
   const normalized = normalizeAvatarDetails(details);
   return (
     normalized.screen.stamps.length > 0 ||
-    normalized.screen.paintMaskBase64 !== null
+    normalized.screen.paintMaskBase64 !== null ||
+    Boolean(normalized.screen.paintColorMapBase64)
   );
 }
 
@@ -197,6 +235,112 @@ export function decodeAvatarDetailsPaintMask(
   } catch {
     return null;
   }
+}
+
+const AVATAR_DETAILS_INK_ROLE_CODE: Record<AvatarDetailsInkRole, 1 | 2 | 3> = {
+  blink: 1,
+  talking: 2,
+  effect: 3,
+};
+
+const AVATAR_DETAILS_INK_ROLE_BY_CODE: Record<
+  1 | 2 | 3,
+  AvatarDetailsInkRole
+> = {
+  1: "blink",
+  2: "talking",
+  3: "effect",
+};
+
+export function encodeAvatarDetailsPaintColorMap(
+  colorMap: Uint8Array,
+): string | null {
+  if (colorMap.length !== AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH) {
+    throw new RangeError(
+      `Avatar detail color map must contain ${AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH} bytes.`,
+    );
+  }
+  return avatarDetailsPaintColorPixelCount(colorMap) === 0
+    ? null
+    : encodeBotAvatarDetailsPaintColorMap(colorMap);
+}
+
+export function decodeAvatarDetailsPaintColorMap(
+  encoded: string | null | undefined,
+): Uint8Array | null {
+  if (encoded == null || encoded === "") {
+    return new Uint8Array(AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH);
+  }
+  try {
+    return decodeBotAvatarDetailsPaintColorMap(encoded);
+  } catch {
+    return null;
+  }
+}
+
+export function avatarDetailsPaintColorPixelCount(
+  colorMap: Uint8Array,
+): number {
+  return countBotAvatarDetailsColoredPixels(colorMap);
+}
+
+export function avatarDetailsPaintColorCoveragePercent(
+  colorMap: Uint8Array,
+): number {
+  return (
+    (avatarDetailsPaintColorPixelCount(colorMap) /
+      AVATAR_DETAILS_WRITABLE_PIXELS) *
+    100
+  );
+}
+
+export function avatarDetailsInkRoleAt(
+  colorMap: Uint8Array,
+  x: number,
+  y: number,
+): AvatarDetailsInkRole | null {
+  const code = botAvatarDetailsPaintColorCode(colorMap, x, y);
+  return code === 0 ? null : AVATAR_DETAILS_INK_ROLE_BY_CODE[code];
+}
+
+export function setAvatarDetailsInkRole(
+  colorMap: Uint8Array,
+  x: number,
+  y: number,
+  role: AvatarDetailsInkRole | null,
+): boolean {
+  if (
+    x < 0 ||
+    y < 0 ||
+    x >= AVATAR_DETAILS_CANVAS_SIZE ||
+    y >= AVATAR_DETAILS_CANVAS_SIZE
+  ) {
+    return false;
+  }
+  const pixelIndex = y * AVATAR_DETAILS_CANVAS_SIZE + x;
+  const byteIndex = pixelIndex >>> 2;
+  const shift = 6 - (pixelIndex & 3) * 2;
+  const previous = colorMap[byteIndex] ?? 0;
+  const code = role === null ? 0 : AVATAR_DETAILS_INK_ROLE_CODE[role];
+  const next = (previous & ~(0x03 << shift)) | (code << shift);
+  if (next === previous) return false;
+  colorMap[byteIndex] = next;
+  return true;
+}
+
+export function avatarDetailsWithPaintColorMap(
+  details: AvatarDetailsV1,
+  colorMap: Uint8Array,
+): AvatarDetailsV1 {
+  const paintColorMapBase64 = encodeAvatarDetailsPaintColorMap(colorMap);
+  return normalizeAvatarDetails({
+    ...details,
+    screen: {
+      stamps: details.screen.stamps,
+      paintMaskBase64: null,
+      ...(paintColorMapBase64 ? { paintColorMapBase64 } : {}),
+    },
+  });
 }
 
 export function avatarDetailsPaintPixelCount(mask: Uint8Array): number {
@@ -471,6 +615,124 @@ export function paintAvatarDetailsMask(
     }
   }
   return { mask, changed, limitReached };
+}
+
+export interface MoveAvatarDetailsPaintColorMapResult {
+  colorMap: Uint8Array;
+  changed: boolean;
+  offset: AvatarDetailsGridPoint;
+}
+
+function avatarDetailsPaintColorTranslationIsValid(
+  source: Uint8Array,
+  offset: AvatarDetailsGridPoint,
+): boolean {
+  for (let y = 0; y < AVATAR_DETAILS_CANVAS_SIZE; y += 1) {
+    for (let x = 0; x < AVATAR_DETAILS_CANVAS_SIZE; x += 1) {
+      if (
+        avatarDetailsInkRoleAt(source, x, y) !== null &&
+        !avatarDetailsWritablePixel(x + offset.x, y + offset.y)
+      ) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+export function moveAvatarDetailsPaintColorMap(
+  source: Uint8Array,
+  desiredOffset: AvatarDetailsGridPoint,
+): MoveAvatarDetailsPaintColorMapResult {
+  if (source.length !== AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH) {
+    throw new RangeError(
+      `Avatar detail color map must contain ${AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH} bytes.`,
+    );
+  }
+  const requested = {
+    x: Math.round(desiredOffset.x),
+    y: Math.round(desiredOffset.y),
+  };
+  const candidates = interpolateAvatarDetailsGridLine(
+    { x: 0, y: 0 },
+    requested,
+  );
+  const offset = [...candidates]
+    .reverse()
+    .find((candidate) =>
+      avatarDetailsPaintColorTranslationIsValid(source, candidate),
+    ) ?? { x: 0, y: 0 };
+  const changed =
+    (offset.x !== 0 || offset.y !== 0) &&
+    avatarDetailsPaintColorPixelCount(source) > 0;
+  if (!changed) return { colorMap: source.slice(), changed: false, offset };
+
+  const colorMap = new Uint8Array(AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH);
+  for (let y = 0; y < AVATAR_DETAILS_CANVAS_SIZE; y += 1) {
+    for (let x = 0; x < AVATAR_DETAILS_CANVAS_SIZE; x += 1) {
+      const role = avatarDetailsInkRoleAt(source, x, y);
+      if (role) {
+        setAvatarDetailsInkRole(colorMap, x + offset.x, y + offset.y, role);
+      }
+    }
+  }
+  return { colorMap, changed: true, offset };
+}
+
+export interface PaintAvatarDetailsColorMapResult {
+  colorMap: Uint8Array;
+  changed: boolean;
+  limitReached: boolean;
+}
+
+export function paintAvatarDetailsColorMap(
+  source: Uint8Array,
+  points: readonly AvatarDetailsGridPoint[],
+  brushSize: AvatarDetailsBrushSize,
+  mode: AvatarDetailsPaintMode,
+  role: AvatarDetailsInkRole,
+): PaintAvatarDetailsColorMapResult {
+  if (source.length !== AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH) {
+    throw new RangeError(
+      `Avatar detail color map must contain ${AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH} bytes.`,
+    );
+  }
+  const colorMap = source.slice();
+  let pixelCount = avatarDetailsPaintColorPixelCount(colorMap);
+  let changed = false;
+  let limitReached = false;
+  const radius = Math.floor(brushSize / 2);
+
+  for (const point of points) {
+    const centerX = Math.round(point.x);
+    const centerY = Math.round(point.y);
+    for (let y = centerY - radius; y <= centerY + radius; y += 1) {
+      for (let x = centerX - radius; x <= centerX + radius; x += 1) {
+        if (!avatarDetailsWritablePixel(x, y)) continue;
+        const previousRole = avatarDetailsInkRoleAt(colorMap, x, y);
+        if (mode === "eraser") {
+          if (previousRole && setAvatarDetailsInkRole(colorMap, x, y, null)) {
+            pixelCount -= 1;
+            changed = true;
+          }
+          continue;
+        }
+        if (previousRole === role) continue;
+        if (
+          previousRole === null &&
+          pixelCount >= AVATAR_DETAILS_MAX_PAINT_PIXELS
+        ) {
+          limitReached = true;
+          continue;
+        }
+        if (setAvatarDetailsInkRole(colorMap, x, y, role)) {
+          if (previousRole === null) pixelCount += 1;
+          changed = true;
+        }
+      }
+    }
+  }
+  return { colorMap, changed, limitReached };
 }
 
 export function avatarDetailStampDefinition(
@@ -1012,10 +1274,28 @@ export function normalizeAvatarDetailsFaceGeometry(
 export function avatarDetailsMaskCacheKey(
   details: AvatarDetailsV1 | null | undefined,
   faceGeometry?: Partial<AvatarDetailsFaceGeometry> | null,
+  role: AvatarDetailsInkRole | "all" = "all",
+  depth: AvatarDetailsFaceDepth = "all",
 ): string {
-  return `${AVATAR_DETAILS_CATALOG_VERSION}:${avatarDetailsKey(details)}:${JSON.stringify(
+  return `${AVATAR_DETAILS_CATALOG_VERSION}:${role}:${depth}:${avatarDetailsKey(details)}:${JSON.stringify(
     normalizeAvatarDetailsFaceGeometry(faceGeometry),
   )}`;
+}
+
+function avatarDetailStampFaceDepth(
+  stamp: AvatarDetailStampV1,
+): Exclude<AvatarDetailsFaceDepth, "all"> {
+  return stamp.id === "short-beard" || stamp.id === "goatee"
+    ? "behind-face"
+    : "above-face";
+}
+
+function avatarDetailPaintFaceDepth(
+  y: number,
+): Exclude<AvatarDetailsFaceDepth, "all"> {
+  return y >= AVATAR_DETAILS_LOWER_FACE_DEPTH_Y
+    ? "behind-face"
+    : "above-face";
 }
 
 export interface AvatarDetailsResolvedStampAnchor {
@@ -1102,29 +1382,42 @@ function compositeResolvedAvatarDetailStamp(
 export function rasterizeAvatarDetailsAlpha(
   details: AvatarDetailsV1 | null | undefined,
   faceGeometry?: Partial<AvatarDetailsFaceGeometry> | null,
+  role: AvatarDetailsInkRole | "all" = "all",
+  depth: AvatarDetailsFaceDepth = "all",
 ): Uint8Array {
   const normalized = normalizeAvatarDetails(details);
   const geometry = normalizeAvatarDetailsFaceGeometry(faceGeometry);
-  const key = avatarDetailsMaskCacheKey(normalized, geometry);
+  const key = avatarDetailsMaskCacheKey(normalized, geometry, role, depth);
   const cached = avatarDetailsAlphaCache.get(key);
   if (cached) return cached;
 
   const alpha = new Uint8Array(
     AVATAR_DETAILS_CANVAS_SIZE * AVATAR_DETAILS_CANVAS_SIZE,
   );
-  const paintMask = decodeAvatarDetailsPaintMask(
-    normalized.screen.paintMaskBase64,
+  const colorMap = decodeAvatarDetailsPaintColorMap(
+    normalized.screen.paintColorMapBase64,
   );
-  if (paintMask) {
+  if (colorMap) {
     for (let y = 0; y < AVATAR_DETAILS_CANVAS_SIZE; y += 1) {
       for (let x = 0; x < AVATAR_DETAILS_CANVAS_SIZE; x += 1) {
-        if (avatarDetailsMaskPixel(paintMask, x, y))
+        const pixelRole = avatarDetailsInkRoleAt(colorMap, x, y);
+        if (
+          pixelRole &&
+          (role === "all" || pixelRole === role) &&
+          (depth === "all" || avatarDetailPaintFaceDepth(y) === depth)
+        ) {
           alpha[alphaIndex(x, y)] = 255;
+        }
       }
     }
   }
-  for (const stamp of normalized.screen.stamps) {
-    compositeResolvedAvatarDetailStamp(alpha, stamp, geometry);
+  if (role === "all" || role === "effect") {
+    for (const stamp of normalized.screen.stamps) {
+      if (depth !== "all" && avatarDetailStampFaceDepth(stamp) !== depth) {
+        continue;
+      }
+      compositeResolvedAvatarDetailStamp(alpha, stamp, geometry);
+    }
   }
   for (let y = 0; y < AVATAR_DETAILS_CANVAS_SIZE; y += 1) {
     for (let x = 0; x < AVATAR_DETAILS_CANVAS_SIZE; x += 1) {
@@ -1156,13 +1449,20 @@ export function rasterizeAvatarDetailsRgba(
   details: AvatarDetailsV1 | null | undefined,
   color: string | null | undefined,
   faceGeometry?: Partial<AvatarDetailsFaceGeometry> | null,
+  role: AvatarDetailsInkRole | "all" = "all",
+  depth: AvatarDetailsFaceDepth = "all",
 ): Uint8ClampedArray {
   const normalizedColor = normalizeAvatarDetailsColor(color);
   const colorValue = Number.parseInt(normalizedColor.slice(1), 16);
   const red = (colorValue >>> 16) & 255;
   const green = (colorValue >>> 8) & 255;
   const blue = colorValue & 255;
-  const alpha = rasterizeAvatarDetailsAlpha(details, faceGeometry);
+  const alpha = rasterizeAvatarDetailsAlpha(
+    details,
+    faceGeometry,
+    role,
+    depth,
+  );
   const rgba = new Uint8ClampedArray(alpha.length * 4);
   for (let index = 0; index < alpha.length; index += 1) {
     const rgbaIndex = index * 4;
@@ -1170,6 +1470,82 @@ export function rasterizeAvatarDetailsRgba(
     rgba[rgbaIndex + 1] = green;
     rgba[rgbaIndex + 2] = blue;
     rgba[rgbaIndex + 3] = alpha[index] ?? 0;
+  }
+  return rgba;
+}
+
+/**
+ * Flattens the currently visible semantic roles into one phosphor silhouette.
+ * Keeping one emission plane prevents adjacent role colors from producing
+ * separate bloom stacks after they normalize to the same runtime bot color.
+ */
+export function rasterizeVisibleAvatarDetailsRgba(
+  details: AvatarDetailsV1 | null | undefined,
+  color: string | null | undefined,
+  faceGeometry: Partial<AvatarDetailsFaceGeometry> | null | undefined,
+  state: Readonly<{ blinking: boolean; talking: boolean }>,
+  depth: AvatarDetailsFaceDepth = "all",
+): Uint8ClampedArray {
+  const visibleAlpha = new Uint8Array(
+    AVATAR_DETAILS_CANVAS_SIZE * AVATAR_DETAILS_CANVAS_SIZE,
+  );
+  const visibleRoles: AvatarDetailsInkRole[] = ["effect"];
+  if (!state.blinking) visibleRoles.push("blink");
+  if (!state.talking) visibleRoles.push("talking");
+
+  for (const role of visibleRoles) {
+    const roleAlpha = rasterizeAvatarDetailsAlpha(
+      details,
+      faceGeometry,
+      role,
+      depth,
+    );
+    for (let index = 0; index < roleAlpha.length; index += 1) {
+      visibleAlpha[index] = Math.max(
+        visibleAlpha[index] ?? 0,
+        roleAlpha[index] ?? 0,
+      );
+    }
+  }
+
+  const normalizedColor = normalizeAvatarDetailsColor(color);
+  const colorValue = Number.parseInt(normalizedColor.slice(1), 16);
+  const red = (colorValue >>> 16) & 255;
+  const green = (colorValue >>> 8) & 255;
+  const blue = colorValue & 255;
+  const rgba = new Uint8ClampedArray(visibleAlpha.length * 4);
+  for (let index = 0; index < visibleAlpha.length; index += 1) {
+    const rgbaIndex = index * 4;
+    rgba[rgbaIndex] = red;
+    rgba[rgbaIndex + 1] = green;
+    rgba[rgbaIndex + 2] = blue;
+    rgba[rgbaIndex + 3] = visibleAlpha[index] ?? 0;
+  }
+  return rgba;
+}
+
+export function rasterizeAvatarDetailsSemanticRgba(
+  details: AvatarDetailsV1 | null | undefined,
+  faceGeometry?: Partial<AvatarDetailsFaceGeometry> | null,
+): Uint8ClampedArray {
+  const rgba = new Uint8ClampedArray(
+    AVATAR_DETAILS_CANVAS_SIZE * AVATAR_DETAILS_CANVAS_SIZE * 4,
+  );
+  for (const role of AVATAR_DETAILS_INK_ROLES) {
+    const alpha = rasterizeAvatarDetailsAlpha(details, faceGeometry, role);
+    const color = AVATAR_DETAILS_INK_ROLE_COLORS[role];
+    const colorValue = Number.parseInt(color.slice(1), 16);
+    const red = (colorValue >>> 16) & 255;
+    const green = (colorValue >>> 8) & 255;
+    const blue = colorValue & 255;
+    for (let index = 0; index < alpha.length; index += 1) {
+      if ((alpha[index] ?? 0) === 0) continue;
+      const rgbaIndex = index * 4;
+      rgba[rgbaIndex] = red;
+      rgba[rgbaIndex + 1] = green;
+      rgba[rgbaIndex + 2] = blue;
+      rgba[rgbaIndex + 3] = alpha[index] ?? 0;
+    }
   }
   return rgba;
 }

@@ -10,6 +10,10 @@ export const COFFEE_POWER_PROMPT_MAX_TOKENS = 160;
 export type BotPowerCompileStatus = "draft" | "compiling" | "ready" | "error";
 export type BotPowerStrength = "small" | "medium" | "large";
 export type BotPowerFrequency = "occasional" | "frequent";
+export type BotPowerGravityDirection = "more" | "less";
+export type BotPowerBondDirection = "toward" | "away";
+export type BotPowerTopicDirection = "toward" | "away";
+export type BotPowerMemoryMode = "remember" | "forget";
 
 export type BotPowerTargetV1 =
   | { kind: "all" }
@@ -31,8 +35,36 @@ export type BotPowerEffectV1 =
       polarity: "positive" | "negative" | "both";
       strength: BotPowerStrength;
     }
-  | { type: "cup_rate"; rate: "slow" | "fast" | "very_fast" }
-  | { type: "action_bias"; cue: string; frequency: BotPowerFrequency };
+  | { type: "cup_rate"; rate: "none" | "slow" | "fast" | "very_fast" }
+  | { type: "action_bias"; cue: string; frequency: BotPowerFrequency }
+  | {
+      type: "turn_gravity";
+      direction: BotPowerGravityDirection;
+      strength: BotPowerStrength;
+    }
+  | {
+      type: "response_bond";
+      direction: BotPowerBondDirection;
+      strength: BotPowerStrength;
+      targets: BotPowerTargetV1[];
+    }
+  | {
+      type: "topic_gravity";
+      direction: BotPowerTopicDirection;
+      strength: BotPowerStrength;
+      topics: string[];
+    }
+  | {
+      type: "selective_memory";
+      mode: BotPowerMemoryMode;
+      strength: BotPowerStrength;
+      targets: BotPowerTargetV1[];
+    }
+  | {
+      type: "insight";
+      strength: BotPowerStrength;
+      targets: BotPowerTargetV1[];
+    };
 
 export interface CompiledBotPowerV1 {
   version: 1;
@@ -122,6 +154,18 @@ function normalizeStrength(value: unknown): BotPowerStrength {
   return value === "small" || value === "large" ? value : "medium";
 }
 
+function normalizeTopics(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const topics: string[] = [];
+  for (const item of value) {
+    const topic = compactText(item, 60).toLowerCase();
+    if (!topic || topics.includes(topic)) continue;
+    topics.push(topic);
+    if (topics.length >= 6) break;
+  }
+  return topics;
+}
+
 export function normalizeBotPowerEffectV1(value: unknown): BotPowerEffectV1 | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const effect = value as Record<string, unknown>;
@@ -150,7 +194,12 @@ export function normalizeBotPowerEffectV1(value: unknown): BotPowerEffectV1 | nu
   if (effect.type === "cup_rate") {
     return {
       type: "cup_rate",
-      rate: effect.rate === "slow" || effect.rate === "very_fast" ? effect.rate : "fast",
+      rate:
+        effect.rate === "none" ||
+        effect.rate === "slow" ||
+        effect.rate === "very_fast"
+          ? effect.rate
+          : "fast",
     };
   }
   if (effect.type === "action_bias") {
@@ -160,6 +209,46 @@ export function normalizeBotPowerEffectV1(value: unknown): BotPowerEffectV1 | nu
       type: "action_bias",
       cue,
       frequency: effect.frequency === "frequent" ? "frequent" : "occasional",
+    };
+  }
+  if (effect.type === "turn_gravity") {
+    return {
+      type: "turn_gravity",
+      direction: effect.direction === "less" ? "less" : "more",
+      strength: normalizeStrength(effect.strength),
+    };
+  }
+  if (effect.type === "response_bond") {
+    return {
+      type: "response_bond",
+      direction: effect.direction === "away" ? "away" : "toward",
+      strength: normalizeStrength(effect.strength),
+      targets: normalizeTargets(effect.targets),
+    };
+  }
+  if (effect.type === "topic_gravity") {
+    const topics = normalizeTopics(effect.topics);
+    if (topics.length === 0) return null;
+    return {
+      type: "topic_gravity",
+      direction: effect.direction === "away" ? "away" : "toward",
+      strength: normalizeStrength(effect.strength),
+      topics,
+    };
+  }
+  if (effect.type === "selective_memory") {
+    return {
+      type: "selective_memory",
+      mode: effect.mode === "forget" ? "forget" : "remember",
+      strength: normalizeStrength(effect.strength),
+      targets: normalizeTargets(effect.targets),
+    };
+  }
+  if (effect.type === "insight") {
+    return {
+      type: "insight",
+      strength: normalizeStrength(effect.strength),
+      targets: normalizeTargets(effect.targets),
     };
   }
   return null;
@@ -317,7 +406,13 @@ export function botPowerCupRateMultiplierForBotV1(value: unknown): number {
     .flatMap((power) => power.compiled?.effects ?? [])
     .find((candidate) => candidate.type === "cup_rate");
   if (!effect || effect.type !== "cup_rate") return 1;
-  return effect.rate === "slow" ? 0.55 : effect.rate === "very_fast" ? 2.5 : 1.65;
+  return effect.rate === "none"
+    ? 0
+    : effect.rate === "slow"
+      ? 0.55
+      : effect.rate === "very_fast"
+        ? 2.5
+        : 1.65;
 }
 
 export function buildCoffeePowersPromptBlock(
@@ -360,5 +455,11 @@ export function coffeePowerCupRateMultiplierV1(
 ): number {
   const effect = plan?.bots[botId]?.effects.find((candidate) => candidate.type === "cup_rate");
   if (!effect || effect.type !== "cup_rate") return 1;
-  return effect.rate === "slow" ? 0.55 : effect.rate === "very_fast" ? 2.5 : 1.65;
+  return effect.rate === "none"
+    ? 0
+    : effect.rate === "slow"
+      ? 0.55
+      : effect.rate === "very_fast"
+        ? 2.5
+        : 1.65;
 }

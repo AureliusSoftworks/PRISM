@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  crtSpeechMouthShapeAtAlignedElapsedMs,
   crtSpeechMouthShapeAtElapsedMs,
   crtSpeechMouthShapeAtTextCursor,
   crtSpeechMouthShapeFromVisibleTextProgress,
@@ -114,6 +115,47 @@ test("English preview visemes hold vowels longer than consonants", () => {
   assert.equal(at(300), "open-wide");
   assert.equal(at(550), "open-wide");
   assert.equal(at(700), "speech-closed");
+});
+
+test("English preview visemes follow provider character timings", () => {
+  const alignment = {
+    characters: ["m", "a", "p"],
+    characterStartTimesSeconds: [0, 0.08, 0.72],
+    characterEndTimesSeconds: [0.08, 0.72, 1],
+  };
+  const at = (elapsedMs: number) =>
+    crtSpeechMouthShapeAtAlignedElapsedMs({
+      text: "map",
+      elapsedMs,
+      durationMs: 2_000,
+      alignment,
+    });
+
+  assert.equal(at(40), "speech-closed");
+  assert.equal(at(500), "open-wide");
+  assert.equal(at(1_300), "open-wide");
+  assert.equal(at(1_700), "speech-closed");
+  assert.equal(at(2_000), "closed");
+});
+
+test("aligned preview visemes fall back when provider timing is malformed", () => {
+  assert.equal(
+    crtSpeechMouthShapeAtAlignedElapsedMs({
+      text: "map",
+      elapsedMs: 500,
+      durationMs: 1_000,
+      alignment: {
+        characters: ["m", "a", "p"],
+        characterStartTimesSeconds: [0, 0.2],
+        characterEndTimesSeconds: [0.2, 0.8, 1],
+      },
+    }),
+    crtSpeechMouthShapeAtElapsedMs({
+      text: "map",
+      elapsedMs: 500,
+      durationMs: 1_000,
+    }),
+  );
 });
 
 test("English viseme timelines give vowels more time than closures", () => {

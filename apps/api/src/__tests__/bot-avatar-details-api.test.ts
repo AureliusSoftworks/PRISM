@@ -7,6 +7,10 @@ import { join } from "node:path";
 import { Readable } from "node:stream";
 import { getAppConfig } from "@localai/config";
 import {
+  BOT_AVATAR_DETAILS_PAINT_COLOR_MAP_BYTE_LENGTH,
+  encodeBotAvatarDetailsPaintColorMap,
+} from "@localai/shared";
+import {
   createDeterministicProvider,
   createFetchRecorder,
   createTestDatabase,
@@ -124,6 +128,15 @@ describe("bot avatar details API persistence", () => {
     const cookie = registered.headers.get("set-cookie")?.split(";", 1)[0];
     assert.ok(cookie);
 
+    const semanticInk = new Uint8Array(
+      BOT_AVATAR_DETAILS_PAINT_COLOR_MAP_BYTE_LENGTH
+    );
+    const semanticPixelIndex = 60 * 128 + 64;
+    semanticInk[semanticPixelIndex >>> 2] =
+      2 << (6 - (semanticPixelIndex & 3) * 2);
+    const paintColorMapBase64 =
+      encodeBotAvatarDetailsPaintColorMap(semanticInk);
+
     const created = await request("/api/bots", {
       method: "POST",
       cookie,
@@ -137,7 +150,7 @@ describe("bot avatar details API persistence", () => {
               { id: "monocle", offsetX: 0, offsetY: 0, scalePct: 100 },
             ],
             paintMaskBase64: null,
-            hideInkDuringBlink: true,
+            paintColorMapBase64,
           },
         },
       },
@@ -152,8 +165,8 @@ describe("bot avatar details API persistence", () => {
       ["monocle", "circuit-mark"]
     );
     assert.equal(
-      created.payload.bot.avatarDetails.screen.hideInkDuringBlink,
-      true
+      created.payload.bot.avatarDetails.screen.paintColorMapBase64,
+      paintColorMapBase64
     );
     assert.equal("avatar_details_json" in created.payload.bot, false);
     assert.equal(

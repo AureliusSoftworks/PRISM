@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { selectProvider, type GenerateOptions, type LlmProvider } from "../providers.ts";
 import {
@@ -302,6 +303,28 @@ function withStructuredPrompt(
     systemPrompt: serializeStoredBotPrompt(profile, bot.name),
   };
 }
+
+describe("Coffee listener reaction persistence", () => {
+  it("attaches one deterministic listener event to the saved speaker message without routing side effects", () => {
+    const source = readFileSync(new URL("../coffee.ts", import.meta.url), "utf8");
+    assert.match(source, /buildCoffeeListenerReactionPlanV1\(\{/u);
+    assert.match(source, /crossTalk: sessionSettings\.crossTalk/u);
+    assert.match(source, /kind: "listenerReaction"/u);
+    assert.match(source, /messageId: assistantMessageId/u);
+    assert.match(source, /coffeeReplayEvents,[\s\S]{0,180}autoRecovery/u);
+    assert.match(source, /turnKind === "autonomous"/u);
+    assert.match(source, /!sessionKickoff/u);
+    assert.match(source, /activePoll === null/u);
+    assert.match(source, /interruptionEvent === undefined/u);
+    assert.match(source, /departurePersistence === null/u);
+    assert.match(source, /listenerIsInAudience/u);
+    assert.match(source, /coffeePowerBotVisibleTo/u);
+    assert.doesNotMatch(
+      source,
+      /listenerReaction[\s\S]{0,120}coffeeBotSocialById\s*=/u,
+    );
+  });
+});
 
 describe("normalizeCoffeeGroupBotIds", () => {
   it("accepts a 2-bot group and preserves caller order", () => {
@@ -3136,6 +3159,27 @@ describe("Coffee group foundation", () => {
     assert.match(row.title, new RegExp(`^${topic.slice(0, 12).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
   });
 
+  it("can defer an auto group's topic so a restored draft remains editable", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+    const group = createCoffeeGroup(db, userId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+    });
+    updateCoffeeGroup(db, userId, group.id, { topicSelectionMode: "auto" });
+
+    const result = await createCoffeeConversationFromGroup(
+      db,
+      userId,
+      group.id,
+      { deferTopicSelection: true },
+    );
+
+    assert.equal(result.conversation.coffeeTopic ?? null, null);
+    assert.ok((result.coffeeStarterTopics?.length ?? 0) > 0);
+  });
+
   it.skip("re-ranks a saved Coffee Group pool for the exact session participants", async () => {
     const db = createCoffeeTestDb();
     const userId = "user-1";
@@ -4562,6 +4606,24 @@ describe("Coffee presets", () => {
       .prepare("SELECT coffee_preset_id FROM conversations WHERE id = ?")
       .get(auto.conversation.id) as { coffee_preset_id: string | null };
     assert.ok(row.coffee_preset_id, "auto preset should snapshot the chosen preset id");
+
+    const restored = await createCoffeeConversationFromGroup(
+      db,
+      userId,
+      group.id,
+      {
+        coffeeSettings: { responseLength: "detailed" },
+        useProvidedSettings: true,
+      },
+    );
+    assert.equal(
+      restored.conversation.coffeeSettings?.responseLength,
+      "detailed",
+    );
+    const restoredRow = db
+      .prepare("SELECT coffee_preset_id FROM conversations WHERE id = ?")
+      .get(restored.conversation.id) as { coffee_preset_id: string | null };
+    assert.equal(restoredRow.coffee_preset_id, null);
   });
 });
 
@@ -4643,6 +4705,42 @@ describe("buildRouterPrompt", () => {
     assert.match(system, /directly addressed Boris/);
     assert.match(system, /Choose Boris for the next turn/);
     assert.match(system, /answer the direct call-out first/);
+  });
+
+  it("shows active speaker pressure while keeping direct address authoritative", () => {
+    const messages = buildRouterPrompt({
+      group: [ALICE, BORIS],
+      history: [],
+      userMessage: "Boris, answer this one.",
+      userAddressedBotId: BORIS.id,
+      lastSpeakerBotId: null,
+      coffeePowerPlan: {
+        version: 1,
+        resolvedAt: "now",
+        warnings: [],
+        bots: {
+          [ALICE.id]: {
+            botId: ALICE.id,
+            powerIds: ["gravity"],
+            selfCue: "",
+            observerCue: "",
+            visibleToBotIds: null,
+            speechAudienceBotIds: null,
+            effects: [{
+              type: "turn_gravity",
+              direction: "more",
+              strength: "large",
+            }],
+            ruleLabels: [],
+            warnings: [],
+          },
+        },
+      },
+    });
+    const system = messages[0]!.content;
+    assert.match(system, /Alice: \+3/u);
+    assert.match(system, /direct address still wins/u);
+    assert.match(system, /Choose Boris for the next turn/u);
   });
 
   it("threads attendance context without making absent bots selectable", () => {
@@ -6240,6 +6338,7 @@ describe("buildSpeakerPrompt", () => {
     assert.ok(livePeerMessage);
     assert.match(livePeerMessage!.content, /Cara/);
     assert.doesNotMatch(livePeerMessage!.content, /Boris/);
+    assert.doesNotMatch(livePeerMessage!.content, /disposition=|valuesFriction=/u);
   });
 
   it("treats display name as account metadata instead of a preferred-name fact", () => {
@@ -6378,6 +6477,25 @@ describe("buildSpeakerPrompt", () => {
     assert.match(joined, /coffee is/);
     assert.match(joined, /temperature|sipping|amount|taste/i);
     assert.doesNotMatch(joined, /coffee progress|frameIndex|frame index/i);
+  });
+
+  it("keeps refused Coffee cups full while telling the bot they have gone cold", () => {
+    const messages = buildSpeakerPrompt({
+      speaker: ALICE,
+      group: [ALICE, BORIS],
+      history: [],
+      userMessage: "Your turn.",
+      socialByBotId: {},
+      sessionRemainingMs: 0,
+      coffeeSessionDurationMinutes: 10,
+      coffeeCupRateMultiplier: 0,
+    });
+    const joined = messages.map((message) => message.content).join("\n");
+
+    assert.match(joined, /coffee remains full and cold/i);
+    assert.match(joined, /left it untouched/i);
+    assert.match(joined, /do not sip it, drink it, stir it, request a refill/i);
+    assert.doesNotMatch(joined, /tastes /i);
   });
 
   it("threads refilled coffee cup context into the speaker prompt", () => {

@@ -1,19 +1,25 @@
+import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import {
   normalizePromptWildcardRunMetadata,
   transformSlateLockedRangesForTextEdit,
   type PromptWildcardRunMetadata,
+  type SlateAiProvider,
   type SlateCharacter,
   type SlateLockedRange,
   type SlateProjectDetail,
+  type SlateProjectCover,
+  type SlateProjectTitleOrigin,
   type SlateProjectPatchRequest,
   type SlateProjectPhase,
   type SlateProjectSummary,
+  type SlateProseMode,
   type SlateRevision,
   type SlateRevisionAction,
   type SlateRevisionRequest,
   type SlateRevisionScope,
   type SlateStructureItem,
+  type SlateTitleSuggestion,
   type SlateUnresolvedThread,
   type SlateVersionSummary,
 } from "@localai/shared";
@@ -55,8 +61,10 @@ interface SlateProjectRow {
   series_id: string;
   book_ordinal: number;
   title: string;
+  title_origin: string;
   spark: string;
   spark_wildcards_json: string;
+  cover_json: string;
   premise: string;
   voice: string;
   non_negotiables_json: string;
@@ -69,6 +77,9 @@ interface SlateProjectRow {
   locked_ranges_json: string;
   last_provider: string | null;
   last_model: string | null;
+  prose_mode: string;
+  prose_model: string | null;
+  prose_provider: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -211,6 +222,60 @@ function phaseValue(value: unknown): SlateProjectPhase {
 function providerValue(value: unknown): ProviderName | null {
   if (value === "local" || value === "openai" || value === "anthropic") return value;
   return null;
+}
+
+function proseModeValue(value: unknown): SlateProseMode {
+  if (value === "online" || value === "offline") return value;
+  return "auto";
+}
+
+function optionalProviderValue(
+  value: unknown,
+  label = "Slate prose provider",
+): SlateAiProvider | null {
+  if (value === null || value === undefined || value === "") return null;
+  const provider = providerValue(value);
+  if (!provider) throw new Error(`${label} is invalid.`);
+  return provider;
+}
+
+function artifactHash(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+function recordSlateGenerationReceipt(
+  db: DatabaseSync,
+  input: {
+    userId: string;
+    projectId: string;
+    sectionId?: string | null;
+    revisionId?: string | null;
+    operation: "draft" | "revision";
+    artifact: string;
+    provider: ProviderName;
+    model: string;
+    status: "accepted" | "proposed";
+    createdAt: string;
+  },
+): void {
+  db.prepare(
+    `INSERT INTO slate_generation_receipts
+      (id, user_id, project_id, section_id, revision_id, operation,
+       artifact_hash, provider, model, status, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    randomId(),
+    input.userId,
+    input.projectId,
+    input.sectionId ?? null,
+    input.revisionId ?? null,
+    input.operation,
+    artifactHash(input.artifact),
+    input.provider,
+    input.model,
+    input.status,
+    input.createdAt,
+  );
 }
 
 function stringArray(value: unknown, label: string, maxItems: number): string[] {
@@ -446,6 +511,49 @@ function storedSparkWildcards(row: SlateProjectRow): PromptWildcardRunMetadata |
   }
 }
 
+function storedProjectCover(row: SlateProjectRow): SlateProjectCover {
+  const fallback: SlateProjectCover = {
+    seed: row.id,
+    prompt: "",
+    imageUrl: null,
+    imageId: null,
+    revision: 0,
+    status: "fallback",
+  };
+  const parsed = parseJson(row.cover_json, null);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return fallback;
+  }
+  const cover = parsed as Record<string, unknown>;
+  const status =
+    cover.status === "generating" ||
+    cover.status === "ready" ||
+    cover.status === "failed"
+      ? cover.status
+      : "fallback";
+  return {
+    seed:
+      typeof cover.seed === "string" && cover.seed.trim()
+        ? cover.seed.trim().slice(0, 240)
+        : row.id,
+    prompt:
+      typeof cover.prompt === "string" ? cover.prompt.trim().slice(0, 12_000) : "",
+    imageUrl:
+      typeof cover.imageUrl === "string" && cover.imageUrl.trim()
+        ? cover.imageUrl.trim().slice(0, 2_000)
+        : null,
+    imageId:
+      typeof cover.imageId === "string" && cover.imageId.trim()
+        ? cover.imageId.trim().slice(0, 240)
+        : null,
+    revision:
+      typeof cover.revision === "number" && Number.isSafeInteger(cover.revision)
+        ? Math.max(0, cover.revision)
+        : 0,
+    status,
+  };
+}
+
 function revisionAction(value: unknown): SlateRevisionAction {
   if (
     value === "deepen" ||
@@ -507,19 +615,57 @@ function revisionsForProject(db: DatabaseSync, userId: string, projectId: string
   ).all(projectId, userId) as unknown as SlateRevisionRow[]).map(revisionFromRow);
 }
 
+function pendingTitleSuggestionForProject(
+  db: DatabaseSync,
+  userId: string,
+  projectId: string,
+): SlateTitleSuggestion | null {
+  const row = db.prepare(
+    `SELECT id, suggested_title, reason, provider, model, created_at
+       FROM slate_title_suggestions
+      WHERE project_id = ? AND user_id = ? AND status = 'pending'
+      ORDER BY created_at DESC, rowid DESC
+      LIMIT 1`,
+  ).get(projectId, userId) as
+    | {
+        id: string;
+        suggested_title: string;
+        reason: string;
+        provider: string;
+        model: string;
+        created_at: string;
+      }
+    | undefined;
+  if (!row) return null;
+  return {
+    id: row.id,
+    title: row.suggested_title,
+    reason: row.reason,
+    provider: providerValue(row.provider) ?? "local",
+    model: row.model,
+    createdAt: row.created_at,
+  };
+}
+
 function summaryFromRow(row: SlateProjectRow): SlateProjectSummary {
   return {
     id: row.id,
     seriesId: row.series_id,
     bookOrdinal: row.book_ordinal,
     title: row.title,
+    titleOrigin: titleOriginValue(row.title_origin),
     spark: row.spark,
     premise: row.premise,
     phase: phaseValue(row.phase),
+    cover: storedProjectCover(row),
     manuscriptLength: row.manuscript.length,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+function titleOriginValue(value: unknown): SlateProjectTitleOrigin {
+  return value === "spark" || value === "material" ? value : "writer";
 }
 
 function detailFromRow(db: DatabaseSync, row: SlateProjectRow): SlateProjectDetail {
@@ -538,6 +684,10 @@ function detailFromRow(db: DatabaseSync, row: SlateProjectRow): SlateProjectDeta
     lockedRanges: storedLockedRanges(row),
     lastProvider: providerValue(row.last_provider),
     lastModel: row.last_model,
+    proseMode: proseModeValue(row.prose_mode),
+    proseModel: row.prose_model,
+    proseProvider: providerValue(row.prose_provider),
+    titleSuggestion: pendingTitleSuggestionForProject(db, row.user_id, row.id),
     revisions: revisionsForProject(db, row.user_id, row.id),
     versions: versionsForProject(db, row.user_id, row.id),
   };
@@ -563,11 +713,25 @@ export function getSlateProject(db: DatabaseSync, userId: string, projectId: str
   return detailFromRow(db, projectRow(db, userId, projectId));
 }
 
+export function setSlateProjectCover(
+  db: DatabaseSync,
+  userId: string,
+  projectId: string,
+  cover: SlateProjectCover,
+): SlateProjectDetail {
+  projectRow(db, userId, projectId);
+  db.prepare(
+    "UPDATE slate_projects SET cover_json = ? WHERE id = ? AND user_id = ?",
+  ).run(JSON.stringify(cover), projectId, userId);
+  return getSlateProject(db, userId, projectId);
+}
+
 export function createSlateProject(
   db: DatabaseSync,
   userId: string,
   input: {
     title: unknown;
+    titleOrigin?: unknown;
     spark: unknown;
     sparkWildcards?: unknown;
     seriesId?: unknown;
@@ -576,6 +740,7 @@ export function createSlateProject(
   const id = randomId();
   const now = new Date().toISOString();
   const title = boundedString(input.title, "Project title", SLATE_TITLE_MAX, { required: true });
+  const titleOrigin = titleOriginValue(input.titleOrigin);
   const spark = boundedString(input.spark, "Creative spark", SLATE_SPARK_MAX, { required: true });
   const sparkWildcards = normalizedSparkWildcards(input.sparkWildcards, spark);
   db.exec("BEGIN IMMEDIATE TRANSACTION");
@@ -588,15 +753,16 @@ export function createSlateProject(
     );
     db.prepare(
       `INSERT INTO slate_projects
-        (id, user_id, series_id, book_ordinal, title, spark,
+        (id, user_id, series_id, book_ordinal, title, title_origin, spark,
          spark_wildcards_json, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       id,
       userId,
       placement.seriesId,
       placement.ordinal,
       title,
+      titleOrigin,
       spark,
       sparkWildcards ? JSON.stringify(sparkWildcards) : "",
       now,
@@ -625,11 +791,14 @@ export function updateSlateProject(
   let nextSpark = current.spark;
   let nextStructure: SlateStructureItem[] | null = null;
 
-  const assign = (column: string, value: string): void => {
+  const assign = (column: string, value: string | null): void => {
     assignments.push(`${column} = ?`);
     values.push(value);
   };
-  if (Object.hasOwn(patch, "title")) assign("title", boundedString(patch.title, "Project title", SLATE_TITLE_MAX, { required: true }));
+  if (Object.hasOwn(patch, "title")) {
+    assign("title", boundedString(patch.title, "Project title", SLATE_TITLE_MAX, { required: true }));
+    assign("title_origin", "writer");
+  }
   if (Object.hasOwn(patch, "spark")) {
     nextSpark = boundedString(patch.spark, "Creative spark", SLATE_SPARK_MAX, { required: true });
     assign("spark", nextSpark);
@@ -643,6 +812,23 @@ export function updateSlateProject(
   if (Object.hasOwn(patch, "voice")) assign("voice", boundedString(patch.voice, "Voice", 8_000));
   if (Object.hasOwn(patch, "direction")) assign("direction", boundedString(patch.direction, "Direction", SLATE_DIRECTION_MAX));
   if (Object.hasOwn(patch, "phase")) assign("phase", phaseValue(patch.phase));
+  if (Object.hasOwn(patch, "proseMode")) {
+    if (
+      patch.proseMode !== "auto" &&
+      patch.proseMode !== "online" &&
+      patch.proseMode !== "offline"
+    ) {
+      throw new Error("Slate prose mode is invalid.");
+    }
+    assign("prose_mode", patch.proseMode);
+  }
+  if (Object.hasOwn(patch, "proseModel")) {
+    const model = boundedString(patch.proseModel, "Slate prose model", 240);
+    assign("prose_model", model || null);
+  }
+  if (Object.hasOwn(patch, "proseProvider")) {
+    assign("prose_provider", optionalProviderValue(patch.proseProvider));
+  }
   if (Object.hasOwn(patch, "nonNegotiables")) assign("non_negotiables_json", JSON.stringify(stringArray(patch.nonNegotiables, "Non-negotiables", 60)));
   if (Object.hasOwn(patch, "structure")) {
     nextStructure = normalizeStructure(patch.structure);
@@ -1263,6 +1449,17 @@ export async function proposeSlateRevision(
       ai.model,
       now,
     );
+    recordSlateGenerationReceipt(db, {
+      userId,
+      projectId,
+      revisionId: id,
+      operation: "revision",
+      artifact: proposedText,
+      provider: ai.providerName,
+      model: ai.model,
+      status: "proposed",
+      createdAt: now,
+    });
     db.prepare(
       `UPDATE slate_projects SET phase = 'refine', last_provider = ?, last_model = ?, updated_at = ?
         WHERE id = ? AND user_id = ?`,
@@ -1367,6 +1564,11 @@ export function acceptSlateRevision(
       `UPDATE slate_revisions SET status = 'accepted', resolved_at = ?
         WHERE id = ? AND project_id = ? AND user_id = ?`,
     ).run(now, revisionId, projectId, userId);
+    db.prepare(
+      `UPDATE slate_generation_receipts
+          SET status = 'accepted', resolved_at = ?
+        WHERE revision_id = ? AND project_id = ? AND user_id = ?`,
+    ).run(now, revisionId, projectId, userId);
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
@@ -1386,6 +1588,11 @@ export function rejectSlateRevision(
   db.prepare(
     `UPDATE slate_revisions SET status = 'rejected', resolved_at = ?
       WHERE id = ? AND project_id = ? AND user_id = ?`,
+  ).run(now, revisionId, projectId, userId);
+  db.prepare(
+    `UPDATE slate_generation_receipts
+        SET status = 'rejected', resolved_at = ?
+      WHERE revision_id = ? AND project_id = ? AND user_id = ?`,
   ).run(now, revisionId, projectId, userId);
   db.prepare("UPDATE slate_projects SET updated_at = ? WHERE id = ? AND user_id = ?").run(now, projectId, userId);
   return getSlateProject(db, userId, projectId);

@@ -19,6 +19,7 @@ import {
 } from "../slate-continuity.ts";
 import { rollbackSlateContinuityGeneration } from "../slate-continuity-upgrades.ts";
 import { createSlateProject, updateSlateProject } from "../slate.ts";
+import { canonicalSlateJson } from "../slate-author-safety.ts";
 import { closeTestDatabase, createTestDatabase } from "../test-support.ts";
 
 function seedUser(db: DatabaseSync, id: string): void {
@@ -48,6 +49,7 @@ function seedPortableProject(db: DatabaseSync, userId: string) {
   });
   const project = createSlateProject(db, userId, {
     title: "The Snow Gate",
+    titleOrigin: "spark",
     spark: "A courier returns with {the promise no one remembers}.",
     sparkWildcards: {
       v: 1,
@@ -483,6 +485,7 @@ describe("Slate .slate archive import service", () => {
       "SELECT * FROM slate_projects WHERE id = ? AND user_id = ?",
     ).get(imported.projectId, "author-a") as Record<string, unknown>;
     assert.equal(project.title, imported.title);
+    assert.equal(project.title_origin, "spark");
     assert.equal(project.premise, "Mara must decide whether an old promise still binds her city.");
     assert.equal(project.manuscript,
       "The Arrival\n\nSnow moved sideways across the gate when Mara came home.\n\n\n" +
@@ -799,6 +802,43 @@ describe("Slate .slate archive import service", () => {
         .get(seeded.project.id) as { title: string }).title,
       "The Snow Gate",
     );
+  });
+
+  it("defaults title provenance when restoring an older portable archive", () => {
+    const seeded = seedPortableProject(db, "author-a");
+    const archive = createSlateProjectArchive(db, "author-a", seeded.project.id);
+    const bundle = decodeSlateArchiveZip(archive.payload);
+    const path = "data/project.json";
+    const projectData = JSON.parse(bundle.files[path]!) as {
+      project: Record<string, unknown>;
+    };
+    delete projectData.project.title_origin;
+    const content = `${JSON.stringify(projectData)}\n`;
+    bundle.files[path] = content;
+    const manifestFile = bundle.manifest.files.find((file) => file.path === path)!;
+    manifestFile.bytes = Buffer.byteLength(content);
+    manifestFile.sha256 = hash(content);
+    const manuscriptData = JSON.parse(bundle.files["data/manuscript.json"]!) as Record<string, unknown>;
+    const continuityData = JSON.parse(bundle.files["data/continuity.json"]!) as Record<string, unknown>;
+    const { schemaVersion: _projectSchema, ...projectContent } = projectData as Record<string, unknown>;
+    const { schemaVersion: _manuscriptSchema, ...manuscriptContent } = manuscriptData;
+    const { schemaVersion: _continuitySchema, ...continuityContent } = continuityData;
+    bundle.manifest.contentHash = hash(canonicalSlateJson({
+      schemaVersion: 1,
+      ...projectContent,
+      ...manuscriptContent,
+      continuity: continuityContent,
+    }));
+
+    const imported = importSlateProjectArchiveAsCopy(
+      db,
+      "author-a",
+      encodeSlateArchiveZip(bundle),
+    );
+    const project = db
+      .prepare("SELECT title_origin FROM slate_projects WHERE id = ?")
+      .get(imported.projectId) as { title_origin: string };
+    assert.equal(project.title_origin, "writer");
   });
 
   it("rolls back the entire copy if any generated id collides", () => {

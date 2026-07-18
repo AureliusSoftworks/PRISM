@@ -4,6 +4,10 @@ import type {
   AutoFallbackModelRef,
   AutoRecoveryTraceV1,
 } from "@localai/shared";
+import {
+  AUTO_FALLBACK_CHAIN_MAX_ATTEMPT_COUNT,
+  AUTO_FALLBACK_CHAIN_MIN_FALLBACK_COUNT,
+} from "@localai/shared";
 
 export type AutoFallbackValidationResult<T> =
   | { ok: true; value: T }
@@ -82,8 +86,12 @@ export async function runAutoFallbackChain<T = string>(args: {
   isTerminalError?: (error: unknown) => boolean;
   now?: () => number;
 }): Promise<AutoFallbackRunResult<T>> {
-  if (args.attempts.length !== 3) {
-    throw new Error("Auto requires one primary model and two fallback models.");
+  const minimumAttemptCount = 1 + AUTO_FALLBACK_CHAIN_MIN_FALLBACK_COUNT;
+  if (
+    args.attempts.length < minimumAttemptCount ||
+    args.attempts.length > AUTO_FALLBACK_CHAIN_MAX_ATTEMPT_COUNT
+  ) {
+    throw new Error("Auto requires one primary model and one to five fallback models.");
   }
   const now = args.now ?? Date.now;
   const startedAt = now();
@@ -111,6 +119,7 @@ export async function runAutoFallbackChain<T = string>(args: {
 
     const controller = new AbortController();
     const attemptBudgetMs = Math.min(perAttemptTimeoutMs, remainingMs);
+    const exhaustsTotalBudget = attemptBudgetMs >= remainingMs;
     let timedOut = false;
     const timeout = setTimeout(() => {
       timedOut = true;
@@ -169,6 +178,7 @@ export async function runAutoFallbackChain<T = string>(args: {
         outcome: "failed",
         reason: timedOut ? "timeout" : "provider_error",
       });
+      if (timedOut && exhaustsTotalBudget) break;
       if (now() >= deadline) break;
       void error;
     } finally {

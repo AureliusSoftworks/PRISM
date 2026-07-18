@@ -89,7 +89,11 @@ describe("Slate API", () => {
 
     const createdResponse = await owner.request(
       "/api/slate/projects",
-      jsonInit({ title: "The Glass City", spark: "A city calls its architect home." }),
+      jsonInit({
+        title: "The Glass City",
+        titleOrigin: "spark",
+        spark: "A city calls its architect home.",
+      }),
     );
     assert.equal(createdResponse.status, 201);
     const created = (await body(createdResponse)).project as { id: string };
@@ -100,6 +104,9 @@ describe("Slate API", () => {
         {
           premise: "An architect returns to the city that learned her name.",
           manuscript: "The city called at midnight.",
+          proseMode: "offline",
+          proseModel: "qwen3:8b",
+          proseProvider: "local",
           structure: [
             {
               id: "scene-1",
@@ -121,10 +128,60 @@ describe("Slate API", () => {
     assert.equal(reopenedResponse.status, 200);
     const reopened = (await body(reopenedResponse)).project as {
       manuscript: string;
+      proseMode: string;
+      proseModel: string;
+      proseProvider: string;
+      titleOrigin: string;
+      cover: {
+        seed: string;
+        imageId: string | null;
+        status: string;
+      };
       structure: Array<{ locked: boolean }>;
     };
     assert.equal(reopened.manuscript, "The city called at midnight.");
+    assert.equal(reopened.proseMode, "offline");
+    assert.equal(reopened.proseModel, "qwen3:8b");
+    assert.equal(reopened.proseProvider, "local");
+    assert.equal(reopened.titleOrigin, "spark");
+    assert.deepEqual(reopened.cover, {
+      seed: created.id,
+      prompt: "",
+      imageUrl: null,
+      imageId: null,
+      revision: 0,
+      status: "fallback",
+    });
     assert.equal(reopened.structure[0]?.locked, true);
+
+    const unavailableCover = await owner.request(
+      `/api/slate/projects/${created.id}/cover`,
+      jsonInit({ preferredProvider: "local" }),
+    );
+    assert.equal(unavailableCover.status, 400);
+    const afterUnavailableCover = await owner.request(
+      `/api/slate/projects/${created.id}`,
+    );
+    const failedCover = (await body(afterUnavailableCover)).project as {
+      cover: { imageId: string | null; status: string; prompt: string };
+    };
+    assert.equal(failedCover.cover.status, "failed");
+    assert.equal(failedCover.cover.imageId, null);
+    assert.match(failedCover.cover.prompt, /portrait book-cover artwork/u);
+
+    const summaryResponse = await owner.request(
+      `/api/slate/projects/${created.id}/summary`,
+    );
+    assert.equal(summaryResponse.status, 200);
+    assert.match(
+      ((await body(summaryResponse)).summary as { text: string }).text,
+      /architect returns|city reaches/i,
+    );
+    const chatResponse = await owner.request(
+      `/api/slate/projects/${created.id}/chat`,
+    );
+    assert.equal(chatResponse.status, 200);
+    assert.deepEqual((await body(chatResponse)).messages, []);
 
     const lockedShape = await owner.request(
       `/api/slate/projects/${created.id}/shape`,

@@ -46,11 +46,22 @@ describe("Coffee player response UI wiring", () => {
     );
     assert.match(
       pageSource,
-      /const beginSpeakingAndScheduleReveal[\s\S]*?durationMs === null \|\| !revealDeliveryIsCurrent\(\)[\s\S]*?setTimeout\(applyReveal, durationMs\)/,
+      /const beginSpeakingAndScheduleReveal[\s\S]*?durationMs === null \|\| !revealDeliveryIsCurrent\(\)[\s\S]*?coffeeVoiceRevealFallbackDelayMs\(durationMs, voiced\)/,
     );
     assert.match(
       pageSource,
       /const applyReveal = \(\) => \{[\s\S]*?if \(!revealDeliveryIsCurrent\(\)\) return;/,
+    );
+  });
+
+  it("lets natural voice completion own the end of a spoken reveal", () => {
+    assert.match(
+      pageSource,
+      /onEnd: \(\) => \{[\s\S]*?const ownsReveal =[\s\S]*?releaseCoffeeVoicePlayback\(\);[\s\S]*?coffeeRevealCompleteFnRef\.current\?\.\(\);/,
+    );
+    assert.match(
+      pageSource,
+      /coffeeVoiceRevealFallbackDelayMs\(durationMs, voiced\)/,
     );
   });
 
@@ -105,7 +116,11 @@ describe("Coffee player response UI wiring", () => {
     );
     assert.match(
       pageSource,
-      /nameplateTimer: setTimeout\(\(\) => \{[\s\S]*?coffeeCupConsumptionStartedAtMsBySeatKeyRef\.current\.set\([\s\S]*?Date\.now\(\)[\s\S]*?assignCoffeeNameplatePendingBotIds/,
+      /const nameplateCallback = \(\) => \{[\s\S]*?coffeeCupConsumptionStartedAtMsBySeatKeyRef\.current\.set\([\s\S]*?Date\.now\(\)[\s\S]*?assignCoffeeNameplatePendingBotIds/,
+    );
+    assert.match(
+      pageSource,
+      /nameplateTimer: setTimeout\(nameplateCallback, nameplateDelayMs\)/,
     );
     assert.match(
       pageSource,

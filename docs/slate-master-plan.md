@@ -102,8 +102,12 @@ reject newer unsupported archives before mutation with a clear explanation.
 
 ### Gentle direction and return sessions
 
-- Project creation begins with one spark or import surface. Title confirmation
-  and `{WILDCARD}` assistance appear only when useful or explicitly requested.
+- Project creation uses exactly one source lane: a creative spark or imported
+  material. Importing replaces the spark and wildcard path. Without a supplied
+  name, Slate uses the active privacy-matched prose model to generate a
+  story-aware working title before confirmation, with explicit retry and direct
+  editing. Cover generation is an optional privacy-matched creation choice and a
+  repeatable project action.
 - Refinement offers one contextual action plus freeform direction, not a ribbon
   of commands or a conversational transcript.
 - Only one next card appears at a time. Priority is canon risk, narratively due
@@ -113,6 +117,19 @@ reject newer unsupported archives before mutation with a clear explanation.
   begins a project session with `Story so far`, `Where it is going`, progress,
   and one recommended action. Recaps are fingerprinted against manuscript,
   structure, lore, and Continuity versions.
+- `Story so far` is also persisted as a living project summary. Its latest tail
+  stays at the top of the manuscript canvas after the return card closes and
+  refreshes from authoritative accepted prose.
+- Each project chooses OFFLINE, AUTO, or ONLINE prose routing plus a model.
+  Drafts and revision proposals retain backend content-hash receipts with the
+  effective provider and model.
+- A movable rainbow Prism bubble opens an in-place ephemeral project exchange.
+  Markdown messages float briefly and fade like action text; only the latest
+  three survive as a crash-recovery buffer, never as companion continuity. It
+  may brainstorm and advise but never mutates prose or canon. Better-title ideas
+  are similarly advisory and rename only after explicit acceptance. A
+  spark-derived working title receives one visible review checkpoint after
+  enough prose exists to judge the work on more than its opening premise.
 - Tutorials are action-led, one step at a time, skippable, resettable, and tied
   to stable selectors.
 
@@ -183,7 +200,9 @@ Clean manuscript export supports selection, scene, chapter, act, or book in
 DOCX, Markdown, and text. Output is deterministic prose with title, structural
 headings, conventional scene breaks, and a checksum manifest. It excludes
 Continuity internals, AI/provider metadata, reviews, comments, and private
-direction. EPUB/PDF, series-wide editorial packages, custom covers, and animated
+direction. Slate's returning entry is a project shelf with optional
+privacy-matched generated cover art and a deterministic fallback cover. EPUB/PDF,
+series-wide editorial packages, author-directed custom covers, and animated
 library pages remain later publishing work.
 
 ## Verification contract
@@ -202,7 +221,7 @@ promises, false-positive budgets, storage growth, incremental latency, and
 llama3.2 usability.
 
 Deliberate exclusions are a public/editable Continuity wiki, arbitrary version
-selection, per-project model controls, automatic Review Circle sessions,
+selection, per-project sampling/reasoning controls, automatic Review Circle sessions,
 reviewer voting or prose mutation, silent AI/image/cross-applet writes, direct
 cloud backup integration, V1 screenplays, Story removal, and inline editable-
 prose illustrations.
@@ -244,8 +263,9 @@ prose illustrations.
    (`PRISM-huqnu.15`, `PRISM-huqnu.16`).
 14. **Scale proof** — saga-scale cohesion, recovery, performance, and llama3.2
    usability (`PRISM-1ln0p.7`).
-15. **Later publishing/library** — EPUB/PDF and dynamic covers/pages only after
-   the writing foundation is proven (`PRISM-huqnu.17`, `PRISM-huqnu.18`).
+15. **Later publishing/library** — EPUB/PDF, author-directed custom covers, and
+   dynamic library pages only after the writing foundation is proven
+   (`PRISM-huqnu.17`, `PRISM-huqnu.18`).
 
 ## Cross-applet roadmap
 

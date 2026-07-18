@@ -3,12 +3,18 @@ import assert from "node:assert/strict";
 import {
   BOT_AVATAR_DETAILS_MAX_PAINTED_PIXELS,
   BOT_AVATAR_DETAILS_MAX_JSON_BYTES,
+  BOT_AVATAR_DETAILS_PAINT_COLOR_MAP_BASE64_LENGTH,
+  BOT_AVATAR_DETAILS_PAINT_COLOR_MAP_BYTE_LENGTH,
   BOT_AVATAR_DETAILS_PAINT_MASK_BASE64_LENGTH,
   BOT_AVATAR_DETAILS_PAINT_MASK_BYTE_LENGTH,
   BOT_AVATAR_DETAILS_WRITABLE_PIXEL_COUNT,
   BOT_AVATAR_DETAIL_STAMP_CATALOG,
   BOT_AVATAR_DETAIL_STAMP_IDS,
+  botAvatarDetailsPaintColorCode,
+  countBotAvatarDetailsColoredPixels,
+  decodeBotAvatarDetailsPaintColorMap,
   decodeBotAvatarDetailsPaintMask,
+  encodeBotAvatarDetailsPaintColorMap,
   encodeBotAvatarDetailsPaintMask,
   isBotAvatarDetailStampTransformInsideCanvas,
   isBotAvatarDetailsWritablePixel,
@@ -37,6 +43,17 @@ function bytesWithSetBitCount(count: number): Uint8Array {
     }
   }
   return bytes;
+}
+
+function setColorCode(
+  bytes: Uint8Array,
+  x: number,
+  y: number,
+  code: 1 | 2 | 3,
+): void {
+  const pixelIndex = y * 128 + x;
+  const shift = 6 - (pixelIndex & 3) * 2;
+  bytes[pixelIndex >>> 2]! |= code << shift;
 }
 
 describe("BotAvatarDetailsV1", () => {
@@ -72,7 +89,7 @@ describe("BotAvatarDetailsV1", () => {
     );
   });
 
-  it("keeps legacy screens unchanged and persists only an opted-in blink ink setting", () => {
+  it("keeps legacy screens unchanged and persists only opted-in ink visibility settings", () => {
     const legacy = details([stamp("freckles")]);
     assert.deepEqual(parseBotAvatarDetailsV1(legacy), legacy);
 
@@ -91,13 +108,34 @@ describe("BotAvatarDetailsV1", () => {
     assert.deepEqual(
       parseBotAvatarDetailsV1({
         ...legacy,
-        screen: { ...legacy.screen, hideInkDuringBlink: false },
+        screen: {
+          ...legacy.screen,
+          hideInkDuringBlink: false,
+          hideInkDuringTalking: false,
+        },
       }),
       legacy
     );
+
+    assert.deepEqual(
+      parseBotAvatarDetailsV1({
+        ...legacy,
+        screen: {
+          ...legacy.screen,
+          hideInkDuringBlink: true,
+          hideInkDuringTalking: true,
+        },
+      }).screen,
+      {
+        stamps: [stamp("freckles")],
+        paintMaskBase64: null,
+        hideInkDuringBlink: true,
+        hideInkDuringTalking: true,
+      }
+    );
   });
 
-  it("rejects invalid blink ink settings and unknown screen keys", () => {
+  it("rejects invalid ink visibility settings and unknown screen keys", () => {
     assert.throws(
       () =>
         parseBotAvatarDetailsV1({
@@ -110,9 +148,48 @@ describe("BotAvatarDetailsV1", () => {
       () =>
         parseBotAvatarDetailsV1({
           ...details(),
+          screen: { ...details().screen, hideInkDuringTalking: "yes" },
+        }),
+      /hideInkDuringTalking must be a boolean/i
+    );
+    assert.throws(
+      () =>
+        parseBotAvatarDetailsV1({
+          ...details(),
           screen: { ...details().screen, hideInkDuringBlink: true, extra: true },
         }),
-      /contain exactly/i
+      /only supported semantic ink or legacy visibility fields/i
+    );
+  });
+
+  it("round-trips one compact semantic RGB ink map", () => {
+    const colorMap = new Uint8Array(
+      BOT_AVATAR_DETAILS_PAINT_COLOR_MAP_BYTE_LENGTH,
+    );
+    setColorCode(colorMap, 62, 60, 1);
+    setColorCode(colorMap, 64, 60, 2);
+    setColorCode(colorMap, 66, 60, 3);
+    const encoded = encodeBotAvatarDetailsPaintColorMap(colorMap);
+
+    assert.equal(
+      encoded.length,
+      BOT_AVATAR_DETAILS_PAINT_COLOR_MAP_BASE64_LENGTH,
+    );
+    assert.equal(encoded.endsWith("=="), true);
+    const decoded = decodeBotAvatarDetailsPaintColorMap(encoded);
+    assert.equal(countBotAvatarDetailsColoredPixels(decoded), 3);
+    assert.equal(botAvatarDetailsPaintColorCode(decoded, 62, 60), 1);
+    assert.equal(botAvatarDetailsPaintColorCode(decoded, 64, 60), 2);
+    assert.equal(botAvatarDetailsPaintColorCode(decoded, 66, 60), 3);
+    assert.equal(
+      parseBotAvatarDetailsV1({
+        ...details(),
+        screen: {
+          ...details().screen,
+          paintColorMapBase64: encoded,
+        },
+      }).screen.paintColorMapBase64,
+      encoded,
     );
   });
 

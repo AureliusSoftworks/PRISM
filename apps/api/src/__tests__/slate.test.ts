@@ -16,6 +16,14 @@ import {
   updateSlateProject,
 } from "../slate.ts";
 import {
+  chatWithSlateProject,
+  generateSlateProjectTitle,
+  listSlateProjectChatMessages,
+  refreshSlateLivingSummary,
+  resolveSlateProjectTitleSuggestion,
+  suggestSlateProjectTitle,
+} from "../slate-project-companion.ts";
+import {
   closeTestDatabase,
   createDeterministicProvider,
   createTestDatabase,
@@ -99,9 +107,48 @@ describe("Slate persistence and writing operations", () => {
 
   afterEach(() => closeTestDatabase(db));
 
+  it("generates a literary title from the story rather than title-casing its first line", async () => {
+    const provider = createDeterministicProvider([
+      JSON.stringify({
+        title: "He Sat There in the Chair",
+        reason: "It echoes the opening image.",
+      }),
+      JSON.stringify({
+        title: "The Quiet Geometry",
+        reason: "It joins the room's physical precision with the captive's inner calculation.",
+      }),
+    ]);
+    const generated = await generateSlateProjectTitle(
+      {
+        sourceKind: "material",
+        source:
+          "He sat there in the chair. The captive begins mapping the room by sound, waiting for the fluorescent hum to reveal a hidden door.",
+      },
+      { provider, providerName: "local", model: "qwen3:8b" },
+    );
+
+    assert.equal(generated.title, "The Quiet Geometry");
+    assert.equal(provider.calls.length, 2);
+    assert.equal(generated.provider, "local");
+    assert.match(generated.reason, /inner calculation/u);
+    assert.match(
+      provider.calls[0]?.[0]?.content ?? "",
+      /not merely its opening sentence/u,
+    );
+    assert.match(
+      provider.calls[0]?.[0]?.content ?? "",
+      /Do not copy or lightly title-case the first line/u,
+    );
+    assert.match(
+      provider.calls[1]?.[1]?.content ?? "",
+      /Rejected candidate: He Sat There in the Chair/u,
+    );
+  });
+
   it("creates, saves, and reopens complete tenant-scoped project state", () => {
     const created = createSlateProject(db, "user-1", {
       title: "Glass City",
+      titleOrigin: "spark",
       spark: "A city hears a signal from its own buried future.",
     });
     createSlateProject(db, "user-2", {
@@ -137,6 +184,7 @@ describe("Slate persistence and writing operations", () => {
 
     const reopened = getSlateProject(db, "user-1", created.id);
     assert.equal(reopened.title, "Glass City");
+    assert.equal(reopened.titleOrigin, "spark");
     assert.equal(reopened.sparkWildcards, null);
     assert.equal(reopened.phase, "draft");
     assert.equal(reopened.structure[0]?.summary, scene().summary);
@@ -145,6 +193,25 @@ describe("Slate persistence and writing operations", () => {
     assert.equal(reopened.manuscript, "The Signal\n\nAt midnight, the pavement answered Mara.");
     assert.deepEqual(listSlateProjects(db, "user-1").map((project) => project.id), [created.id]);
     assert.throws(() => getSlateProject(db, "user-2", created.id), /not found/i);
+  });
+
+  it("defaults title provenance to the writer and marks direct renames as writer-owned", () => {
+    const project = createSlateProject(db, "user-1", {
+      title: "From Existing Pages",
+      titleOrigin: "material",
+      spark: "Chapter One begins in a snowbound station.",
+    });
+    assert.equal(project.titleOrigin, "material");
+    const renamed = updateSlateProject(db, "user-1", project.id, {
+      title: "The Last Snowbound Train",
+    });
+    assert.equal(renamed.titleOrigin, "writer");
+
+    const legacyDefault = createSlateProject(db, "user-1", {
+      title: "Writer Named",
+      spark: "A quiet signal.",
+    });
+    assert.equal(legacyDefault.titleOrigin, "writer");
   });
 
   it("resolves and persists an optional wildcard spark with its source template", async () => {
@@ -228,6 +295,194 @@ describe("Slate persistence and writing operations", () => {
     assert.match(drafted.manuscript, /condemned plaza spoke/);
     assert.equal(drafted.structure[0]?.status, "drafted");
     assert.equal(provider.calls.length, 2);
+  });
+
+  it("persists project prose routing and model receipts for generated prose", async () => {
+    const project = createSlateProject(db, "user-1", {
+      title: "Glass City",
+      spark: "A buried future calls its architect.",
+    });
+    const configured = updateSlateProject(db, "user-1", project.id, {
+      proseMode: "online",
+      proseProvider: "anthropic",
+      proseModel: "claude-sonnet-test",
+      structure: [scene()],
+    });
+    assert.equal(configured.proseMode, "online");
+    assert.equal(configured.proseProvider, "anthropic");
+    assert.equal(configured.proseModel, "claude-sonnet-test");
+
+    const provider = createDeterministicProvider([
+      "At midnight, the plaza answered Mara in the voice of settling stone.",
+      "At midnight, the condemned plaza whispered Mara's name through its seams.",
+    ]);
+    await draftSlateStructureItem(
+      db,
+      "user-1",
+      project.id,
+      scene().id,
+      "Keep it intimate.",
+      { provider, providerName: "anthropic", model: "claude-sonnet-test" },
+    );
+    const draftedReceipt = db.prepare(
+      `SELECT operation, provider, model, status, artifact_hash
+         FROM slate_generation_receipts WHERE project_id = ?`,
+    ).get(project.id) as {
+      operation: string;
+      provider: string;
+      model: string;
+      status: string;
+      artifact_hash: string;
+    };
+    assert.deepEqual(
+      {
+        operation: draftedReceipt.operation,
+        provider: draftedReceipt.provider,
+        model: draftedReceipt.model,
+        status: draftedReceipt.status,
+      },
+      {
+        operation: "draft",
+        provider: "anthropic",
+        model: "claude-sonnet-test",
+        status: "accepted",
+      },
+    );
+    assert.match(draftedReceipt.artifact_hash, /^[a-f0-9]{64}$/u);
+
+    const proposed = await proposeSlateRevision(
+      db,
+      "user-1",
+      project.id,
+      {
+        action: "rewrite",
+        scope: "scene",
+        structureItemId: scene().id,
+        direction: "Make the city feel awake.",
+      },
+      { provider, providerName: "anthropic", model: "claude-sonnet-test" },
+    );
+    const revision = proposed.revisions.find((candidate) => candidate.status === "pending")!;
+    const proposedReceipt = db.prepare(
+      `SELECT status, revision_id FROM slate_generation_receipts
+        WHERE project_id = ? AND operation = 'revision'`,
+    ).get(project.id) as { status: string; revision_id: string };
+    assert.equal(proposedReceipt.status, "proposed");
+    assert.equal(proposedReceipt.revision_id, revision.id);
+    acceptSlateRevision(db, "user-1", project.id, revision.id);
+    assert.equal(
+      (
+        db.prepare(
+          "SELECT status FROM slate_generation_receipts WHERE revision_id = ?",
+        ).get(revision.id) as { status: string }
+      ).status,
+      "accepted",
+    );
+  });
+
+  it("persists a living summary, advisory project chat, and explicit title acceptance", async () => {
+    const project = createSlateProject(db, "user-1", {
+      title: "Glass City",
+      titleOrigin: "spark",
+      spark: "A buried future calls its architect.",
+    });
+    updateSlateProject(db, "user-1", project.id, { structure: [scene()] });
+    const section = listSlateProjectSections(db, "user-1", project.id)[0]!;
+    saveSlateProjectSection(db, "user-1", project.id, section.id, {
+      expectedRevision: section.revision,
+      mutationId: "writer-opening",
+      prose: "At midnight, the plaza answered Mara and called her home.",
+      lockedRanges: [],
+    });
+
+    const summary = refreshSlateLivingSummary(db, "user-1", project.id);
+    assert.equal(summary.projectId, project.id);
+    assert.match(summary.text, /Mara hears a signal beneath the city/i);
+    assert.equal(
+      (
+        db.prepare(
+          "SELECT summary FROM slate_living_summaries WHERE project_id = ? AND user_id = ?",
+        ).get(project.id, "user-1") as { summary: string }
+      ).summary,
+      summary.text,
+    );
+
+    const provider = createDeterministicProvider([
+      "The opening is strongest when Mara treats the voice as an engineering fault before an invitation.",
+      "Try making the plaza's answer feel almost useful before it becomes intimate.",
+      "Let Mara recognize the engineering pattern one beat before she recognizes the voice.",
+      JSON.stringify({
+        keep: false,
+        title: "The City Beneath Her Name",
+        reason: "It joins the buried city with Mara's personal summons.",
+      }),
+    ]);
+    const ai = { provider, providerName: "local" as const, model: "qwen3:8b" };
+    const messages = await chatWithSlateProject(
+      db,
+      "user-1",
+      project.id,
+      "What is emotionally strongest in this opening?",
+      ai,
+    );
+    assert.deepEqual(messages.map((message) => message.role), ["user", "assistant"]);
+    assert.equal(messages[1]?.model, "qwen3:8b");
+    assert.equal(listSlateProjectChatMessages(db, "user-1", project.id).length, 2);
+    assert.match(provider.calls[0]?.[0]?.content ?? "", /ephemeral creative companion/i);
+    assert.match(provider.calls[0]?.[0]?.content ?? "", /Never imply long-term memory/i);
+
+    await chatWithSlateProject(
+      db,
+      "user-1",
+      project.id,
+      "What is another direction?",
+      ai,
+    );
+    const recovered = await chatWithSlateProject(
+      db,
+      "user-1",
+      project.id,
+      "Give me one last option.",
+      ai,
+    );
+    assert.equal(recovered.length, 3);
+    assert.deepEqual(
+      recovered.map((message) => message.role),
+      ["assistant", "user", "assistant"],
+    );
+    assert.equal(
+      db.prepare(
+        "SELECT COUNT(*) AS count FROM slate_project_chat_messages WHERE project_id = ? AND user_id = ?",
+      ).get(project.id, "user-1")?.count,
+      3,
+    );
+    assert.deepEqual(
+      provider.calls[2]?.slice(2).map((message) => message.role),
+      ["assistant", "user", "assistant", "user"],
+    );
+    assert.throws(
+      () => listSlateProjectChatMessages(db, "user-2", project.id),
+      /not found/i,
+    );
+
+    const suggested = await suggestSlateProjectTitle(
+      db,
+      "user-1",
+      project.id,
+      ai,
+    );
+    assert.equal(suggested.title, "Glass City");
+    assert.equal(suggested.titleSuggestion?.title, "The City Beneath Her Name");
+    const accepted = resolveSlateProjectTitleSuggestion(
+      db,
+      "user-1",
+      project.id,
+      suggested.titleSuggestion!.id,
+      "accepted",
+    );
+    assert.equal(accepted.title, "The City Beneath Her Name");
+    assert.equal(accepted.titleOrigin, "writer");
+    assert.equal(accepted.titleSuggestion, null);
   });
 
   it("refuses to Shape over locked author material before calling the model", async () => {

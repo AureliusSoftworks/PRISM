@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   COFFEE_POT_ASSET_VERSION,
   COFFEE_POT_FILL_FRAME_MS,
@@ -26,7 +27,15 @@ import {
   coffeePotRefillTargetState,
 } from "./coffee-pot-refill.ts";
 
+const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+
 describe("Coffee pot refill timing", () => {
+  it("coalesces global pot movement to one render per animation frame", () => {
+    assert.match(pageSource, /coffeePotMoveAnimationFrameRef/);
+    assert.match(pageSource, /window\.requestAnimationFrame\(flushPendingPotMove\)/);
+    assert.doesNotMatch(pageSource, /onPointerMove=\{moveCoffeePotDrag\}/);
+  });
+
   it("recognizes a held cup quickly and keeps a visible fill cadence", () => {
     assert.equal(COFFEE_POT_HOVER_HOLD_BEFORE_POUR_MS, 90);
     assert.ok(COFFEE_POT_POUR_FRAME_MS <= 50);

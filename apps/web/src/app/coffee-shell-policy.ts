@@ -22,6 +22,45 @@ export type UniversalNavbarTooltipMap = Partial<
   Record<UniversalNavbarAction, string>
 >;
 
+export type LiveSessionChromeName = "Coffee" | "Signal";
+
+export interface LiveSessionChromePolicy {
+  lockMessage: string;
+  disabledNavbarActions: UniversalNavbarDisabledMap;
+  disabledNavbarActionTooltips: UniversalNavbarTooltipMap;
+}
+
+export function liveSessionChromePolicy(
+  sessionName: LiveSessionChromeName,
+): LiveSessionChromePolicy {
+  const voiceChangeLocked = sessionName === "Coffee";
+  const exitInstruction =
+    sessionName === "Coffee"
+      ? "End the Coffee session"
+      : "Cut or finish the Signal session";
+  return {
+    lockMessage: `${exitInstruction} before changing session chrome.`,
+    disabledNavbarActions: {
+      promptCenter: true,
+      refresh: true,
+      settings: true,
+      ...(voiceChangeLocked ? { voice: true } : {}),
+      images: true,
+      bots: true,
+    },
+    disabledNavbarActionTooltips: {
+      promptCenter: `${exitInstruction} before opening Prompt Center.`,
+      refresh: `${exitInstruction} before refreshing Prism.`,
+      settings: `${exitInstruction} before opening Settings.`,
+      ...(voiceChangeLocked
+        ? { voice: `${exitInstruction} before changing Voice mode.` }
+        : {}),
+      images: `${exitInstruction} before opening Images.`,
+      bots: `${exitInstruction} before changing bots.`,
+    },
+  };
+}
+
 export interface CoffeeShellPolicy {
   liveSessionActive: boolean;
   reviewActive: boolean;
@@ -36,21 +75,16 @@ export function coffeeShellPolicy(args: {
 }): CoffeeShellPolicy {
   const liveSessionActive = args.phase === "arriving" || args.phase === "live";
   const reviewActive = args.conversationActive && args.phase === "finished";
+  const liveChromePolicy = liveSessionActive
+    ? liveSessionChromePolicy("Coffee")
+    : null;
 
   return {
     liveSessionActive,
     reviewActive,
     showEndSessionInSwitcher: liveSessionActive,
-    disabledNavbarActions: liveSessionActive
-      ? { refresh: true, settings: true, images: true, bots: true }
-      : {},
-    disabledNavbarActionTooltips: liveSessionActive
-      ? {
-          refresh: "End the Coffee session before refreshing Prism.",
-          settings: "End the Coffee session to open Settings.",
-          images: "End the Coffee session to open Images.",
-          bots: "End the Coffee session to change bots.",
-        }
-      : {},
+    disabledNavbarActions: liveChromePolicy?.disabledNavbarActions ?? {},
+    disabledNavbarActionTooltips:
+      liveChromePolicy?.disabledNavbarActionTooltips ?? {},
   };
 }

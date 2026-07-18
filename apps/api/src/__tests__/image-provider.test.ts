@@ -25,12 +25,14 @@ describe("generateImage", () => {
       model: "gpt-image-2",
       size: "1536x1024",
       quality: "hd",
+      background: "transparent",
     });
 
     assert.equal(requestBody?.model, "gpt-image-2");
     assert.equal(requestBody?.size, "1536x1024");
     assert.equal(requestBody?.quality, "high");
     assert.equal(requestBody?.output_format, "png");
+    assert.equal(requestBody?.background, "transparent");
     assert.equal("response_format" in (requestBody ?? {}), false);
     assert.equal(result.url, "");
     assert.deepEqual(result.imageBytes, Buffer.from("png-bytes"));

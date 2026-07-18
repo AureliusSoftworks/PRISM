@@ -1,4 +1,7 @@
-import type { TellFictionalStoryPayload, WebSearchPayload } from "./prismTool.js";
+import type {
+  TellFictionalStoryPayload,
+  WebSearchPayload,
+} from "./prismTool.js";
 import type { PrismMoodIgnoredQuestionPenaltyLevel } from "./mood.js";
 import type { AutoRecoveryTraceV1 } from "./autoFallback.js";
 
@@ -30,6 +33,9 @@ export {
 
 export {
   AUTO_FALLBACK_CHAIN_FALLBACK_COUNT,
+  AUTO_FALLBACK_CHAIN_MAX_ATTEMPT_COUNT,
+  AUTO_FALLBACK_CHAIN_MAX_FALLBACK_COUNT,
+  AUTO_FALLBACK_CHAIN_MIN_FALLBACK_COUNT,
   AUTO_FALLBACK_CHAIN_VERSION,
   AUTO_FALLBACK_MODEL_ID_MAX_LENGTH,
   autoFallbackModelKey,
@@ -74,11 +80,15 @@ export {
   normalizeCompiledBotPowerV1,
   parseStoredBotPowersV1,
   serializeBotPowersV1,
+  type BotPowerBondDirection,
   type BotPowerCompileStatus,
   type BotPowerEffectV1,
   type BotPowerFrequency,
+  type BotPowerGravityDirection,
+  type BotPowerMemoryMode,
   type BotPowerStrength,
   type BotPowerTargetV1,
+  type BotPowerTopicDirection,
   type BotPowerV1,
   type CoffeePowerPlanV1,
   type CompiledBotPowerV1,
@@ -205,6 +215,7 @@ export {
   normalizeElevenLabsVoiceDirection,
   normalizeElevenLabsVoiceEffect,
   normalizeOptionalBotAudioVoiceProfileV1,
+  resolveBotAudioVoiceProfileV1,
   normalizeVoiceMode,
   normalizeVoiceDeliveryMood,
   resolveElevenLabsVoicePerformance,
@@ -261,6 +272,7 @@ export {
   BOT_FACE_EYE_OFFSET_Y_MAX,
   BOT_FACE_EYE_OFFSET_Y_MIN,
   BOT_FACE_EYE_OFFSET_Y_STEP,
+  BOT_FACE_EYE_COUNTS,
   BOT_FACE_EYE_ROTATION_DEG_MAX,
   BOT_FACE_EYE_ROTATION_DEG_MIN,
   BOT_FACE_EYE_ROTATION_DEG_STEP,
@@ -285,6 +297,7 @@ export {
   DEFAULT_BOT_FACE_BLINK_OFFSET_Y,
   DEFAULT_BOT_FACE_BLINK_SCALE,
   DEFAULT_BOT_FACE_EYE_CHARACTER,
+  DEFAULT_BOT_FACE_EYE_COUNT,
   DEFAULT_BOT_FACE_EYE_OFFSET_X,
   DEFAULT_BOT_FACE_EYE_OFFSET_Y,
   DEFAULT_BOT_FACE_EYE_SCALE,
@@ -307,6 +320,7 @@ export {
   normalizeBotFaceBlinkOffsetY,
   normalizeBotFaceBlinkScale,
   normalizeBotFaceEyeCharacter,
+  normalizeBotFaceEyeCount,
   normalizeBotFaceEyeOffsetX,
   normalizeBotFaceEyeOffsetY,
   normalizeBotFaceEyeScale,
@@ -326,6 +340,7 @@ export {
   resolveBotFaceStyle,
   serializeBotFaceThinkingFrames,
   type BotFaceBlinkBar,
+  type BotFaceEyeCount,
   type BotFaceFontId,
   type BotFaceGlyphAnimation,
   type BotFaceStyle,
@@ -337,6 +352,8 @@ export {
   BOT_AVATAR_DETAILS_CANVAS_SIZE,
   BOT_AVATAR_DETAILS_MAX_JSON_BYTES,
   BOT_AVATAR_DETAILS_MAX_PAINTED_PIXELS,
+  BOT_AVATAR_DETAILS_PAINT_COLOR_MAP_BASE64_LENGTH,
+  BOT_AVATAR_DETAILS_PAINT_COLOR_MAP_BYTE_LENGTH,
   BOT_AVATAR_DETAILS_PAINT_MASK_BASE64_LENGTH,
   BOT_AVATAR_DETAILS_PAINT_MASK_BYTE_LENGTH,
   BOT_AVATAR_DETAILS_VERSION,
@@ -348,8 +365,12 @@ export {
   BOT_AVATAR_DETAIL_STAMP_CATALOG,
   BOT_AVATAR_DETAIL_STAMP_CATEGORIES,
   BOT_AVATAR_DETAIL_STAMP_IDS,
+  botAvatarDetailsPaintColorCode,
+  countBotAvatarDetailsColoredPixels,
   countBotAvatarDetailsPaintedPixels,
+  decodeBotAvatarDetailsPaintColorMap,
   decodeBotAvatarDetailsPaintMask,
+  encodeBotAvatarDetailsPaintColorMap,
   encodeBotAvatarDetailsPaintMask,
   isBotAvatarDetailStampTransformInsideCanvas,
   isBotAvatarDetailsWritablePixel,
@@ -581,6 +602,7 @@ export {
   SLATE_RETURN_SESSION_SCHEMA_VERSION,
   SLATE_SECTION_CONTRACT_VERSION,
   transformSlateLockedRangesForTextEdit,
+  type SlateAiProvider,
   type SlateBookSummary,
   type SlateCharacter,
   type SlateContinuityAuthority,
@@ -614,14 +636,23 @@ export {
   type SlateCreateSeriesRequest,
   type SlateCreateProjectRequest,
   type SlateDraftRequest,
+  type SlateGenerateTitleRequest,
+  type SlateGenerateTitleResponse,
   type SlateLockedRange,
+  type SlateLivingSummary,
+  type SlateLivingSummaryResponse,
   type SlateProjectDeleteResponse,
   type SlateProjectDetail,
+  type SlateProjectChatMessage,
+  type SlateProjectChatResponse,
   type SlateProjectListResponse,
+  type SlateProjectCover,
+  type SlateProjectTitleOrigin,
   type SlateProjectPatchRequest,
   type SlateProjectPhase,
   type SlateProjectResponse,
   type SlateProjectSummary,
+  type SlateProseMode,
   type SlateRevision,
   type SlateRevisionAction,
   type SlateRevisionRequest,
@@ -652,6 +683,9 @@ export {
   type SlateStructureItem,
   type SlateStructureKind,
   type SlateStructureStatus,
+  type SlateTitleSuggestion,
+  type SlateTitleSuggestionRequest,
+  type SlateTitleSuggestionResponse,
   type SlateUnresolvedThread,
   type SlateVersionSummary,
 } from "./slate.js";
@@ -691,17 +725,18 @@ import type {
   PsychicThoughtPayload,
 } from "./promptShortcut.js";
 import type { CoffeeSessionSettings } from "./coffeeSettings.js";
-import type { PrismMoodInterruptionInput, PrismMoodKey, PrismMoodSnapshot } from "./mood.js";
+import type {
+  PrismMoodInterruptionInput,
+  PrismMoodKey,
+  PrismMoodSnapshot,
+} from "./mood.js";
 import type { ReasoningEffort } from "./reasoningEffort.js";
 
 export type UserRole = "user";
 export type LlmProviderName = "local" | "openai" | "anthropic";
 
 export type UsageProviderName =
-  | LlmProviderName
-  | "ollama"
-  | "comfyui"
-  | "unknown";
+  LlmProviderName | "ollama" | "comfyui" | "unknown";
 
 export type UsageRange = "24h" | "7d" | "30d" | "all";
 
@@ -710,9 +745,7 @@ export type UsagePrivacyScope = "normal" | "private";
 export type UsageEventType = "text" | "embedding" | "image";
 
 export type UsageTokenCountSource =
-  | "provider_reported"
-  | "estimated"
-  | "unavailable";
+  "provider_reported" | "estimated" | "unavailable";
 
 export type UsagePurpose =
   | "chat_reply"
@@ -721,6 +754,7 @@ export type UsagePurpose =
   | "chat_web_search_followup"
   | "conversation_title"
   | "botcast_brand"
+  | "botcast_review"
   | "botcast_turn"
   | "coffee_turn"
   | "coffee_router"
@@ -736,8 +770,10 @@ export type UsagePurpose =
   | "prompt_wildcard"
   | "psychic_planning"
   | "slate_draft"
+  | "slate_project_chat"
   | "slate_revision"
   | "slate_shape"
+  | "slate_title_suggestion"
   | "story_generation"
   | "voice_preview"
   | "zen_live_action"
@@ -1011,11 +1047,7 @@ export interface CoffeeTeamPlayerState {
 }
 
 export type CoffeeTeamsStatus =
-  | "active"
-  | "left_won"
-  | "right_won"
-  | "tiebreaker"
-  | "tie_resolved";
+  "active" | "left_won" | "right_won" | "tiebreaker" | "tie_resolved";
 
 export interface CoffeeTeamState {
   left: CoffeeTeamDefinition;
@@ -1041,12 +1073,7 @@ export const COFFEE_SESSION_DURATION_MINUTES_STEP = 1;
 export const DEFAULT_COFFEE_SESSION_DURATION_MINUTES: CoffeeSessionDurationMinutes = 10;
 
 export type CoffeeCupAmountStage =
-  | "full"
-  | "mostly-full"
-  | "half"
-  | "low"
-  | "dregs"
-  | "empty";
+  "full" | "mostly-full" | "half" | "low" | "dregs" | "empty";
 
 export interface CoffeeCupStatus {
   progress: number;
@@ -1146,7 +1173,7 @@ function coffeeCupTempoMultiplierForSeed(seed: string): number {
 
 export function coffeeCupSeedWithTempoRole(
   seed: string,
-  role: CoffeeCupTempoRole
+  role: CoffeeCupTempoRole,
 ): string {
   const baseSeed = coffeeCupSeedWithoutTempoRole(seed);
   switch (role) {
@@ -1178,11 +1205,11 @@ export function coffeeCupTempoRoleForBot(args: {
   const sessionSeed = args.sessionSeed.trim() || "coffee";
   const fasterIndex = coffeeCupStableIndex(
     `${sessionSeed}:cup-tempo:faster`,
-    activeBotIds.length
+    activeBotIds.length,
   );
   const slowerCandidateIndex = coffeeCupStableIndex(
     `${sessionSeed}:cup-tempo:slower`,
-    activeBotIds.length - 1
+    activeBotIds.length - 1,
   );
   const slowerIndex =
     slowerCandidateIndex >= fasterIndex
@@ -1195,11 +1222,13 @@ export function coffeeCupTempoRoleForBot(args: {
 }
 
 export function coffeeCupSipBias(seed: string): number {
-  return coffeeCupStableUnitValue(`${coffeeCupSeedWithoutTempoRole(seed)}:sip-bias`);
+  return coffeeCupStableUnitValue(
+    `${coffeeCupSeedWithoutTempoRole(seed)}:sip-bias`,
+  );
 }
 
 export function coffeeCupSessionDurationPaceMultiplier(
-  durationMinutes?: CoffeeSessionDurationMinutes | null
+  durationMinutes?: CoffeeSessionDurationMinutes | null,
 ): number {
   const minutes =
     typeof durationMinutes === "number" &&
@@ -1207,13 +1236,16 @@ export function coffeeCupSessionDurationPaceMultiplier(
     durationMinutes > 0
       ? durationMinutes
       : DEFAULT_COFFEE_SESSION_DURATION_MINUTES;
-  const extraMinutes = Math.max(0, minutes - COFFEE_SESSION_DURATION_MINUTES_MIN);
+  const extraMinutes = Math.max(
+    0,
+    minutes - COFFEE_SESSION_DURATION_MINUTES_MIN,
+  );
   return 1 + extraMinutes * 0.02;
 }
 
 export function coffeeCupSipMessageGapForDuration(
   durationMinutes?: CoffeeSessionDurationMinutes | null,
-  baseGap = 5
+  baseGap = 5,
 ): number {
   const safeBaseGap =
     typeof baseGap === "number" && Number.isFinite(baseGap)
@@ -1221,24 +1253,26 @@ export function coffeeCupSipMessageGapForDuration(
       : 5;
   return Math.max(
     safeBaseGap,
-    Math.ceil(safeBaseGap * coffeeCupSessionDurationPaceMultiplier(durationMinutes))
+    Math.ceil(
+      safeBaseGap * coffeeCupSessionDurationPaceMultiplier(durationMinutes),
+    ),
   );
 }
 
 export function coffeeCupSipCycleMs(
   seed: string,
-  durationMinutes?: CoffeeSessionDurationMinutes | null
+  durationMinutes?: CoffeeSessionDurationMinutes | null,
 ): number {
   const baseCycleMs = 34_000 - Math.round(coffeeCupSipBias(seed) * 15_000);
   return Math.round(
     (baseCycleMs * coffeeCupSessionDurationPaceMultiplier(durationMinutes)) /
-      coffeeCupTempoMultiplierForSeed(seed)
+      coffeeCupTempoMultiplierForSeed(seed),
   );
 }
 
 export function coffeeCupConsumptionRate(
   seed: string,
-  durationMinutes?: CoffeeSessionDurationMinutes | null
+  durationMinutes?: CoffeeSessionDurationMinutes | null,
 ): number {
   const baseRate = 1.12 + coffeeCupSipBias(seed) * 0.58;
   return (
@@ -1251,14 +1285,14 @@ export function coffeeCupPacedProgress(
   progress: number,
   seed: string,
   durationMinutes?: CoffeeSessionDurationMinutes | null,
-  powerRateMultiplier = 1
+  powerRateMultiplier = 1,
 ): number {
   const multiplier =
-    Number.isFinite(powerRateMultiplier) && powerRateMultiplier > 0
-      ? Math.max(0.25, Math.min(3, powerRateMultiplier))
+    Number.isFinite(powerRateMultiplier) && powerRateMultiplier >= 0
+      ? Math.max(0, Math.min(3, powerRateMultiplier))
       : 1;
   return clampCoffeeCupProgress(
-    progress * coffeeCupConsumptionRate(seed, durationMinutes) * multiplier
+    progress * coffeeCupConsumptionRate(seed, durationMinutes) * multiplier,
   );
 }
 
@@ -1279,9 +1313,7 @@ export function coffeeCupSipLikelihoodForProgress(progress: number): number {
     fillRatio >= 0.18 ? 1 : Math.max(0, Math.min(1, (fillRatio - 0.04) / 0.14));
   const coldness = coffeeCupColdnessForProgress(clamped);
   const temperatureFactor =
-    coldness >= 0.9
-      ? 0.18
-      : Math.max(0.18, 1 - Math.pow(coldness, 1.6) * 0.72);
+    coldness >= 0.9 ? 0.18 : Math.max(0.18, 1 - Math.pow(coldness, 1.6) * 0.72);
   return Math.max(0, Math.min(1, fillFactor * temperatureFactor));
 }
 
@@ -1305,7 +1337,7 @@ export function coffeeCupShouldFinishAfterSip(args: {
       : 1;
   const coldFinishChance = Math.min(
     0.35,
-    0.12 + Math.max(0, nextColdness - 0.9) * 2.3
+    0.12 + Math.max(0, nextColdness - 0.9) * 2.3,
   );
   return (
     coffeeCupStableUnitValue(`${args.seed}:finish-after-sip:${wholeSipCount}`) <
@@ -1324,14 +1356,16 @@ export function coffeeCupFrameIndexForProgress(progress: number): number {
   return 0;
 }
 
-export function coffeeCupTopOffProgressForFrameIndex(frameIndex: number): number {
+export function coffeeCupTopOffProgressForFrameIndex(
+  frameIndex: number,
+): number {
   const frame = Math.max(0, Math.min(6, Math.round(frameIndex)));
   return COFFEE_CUP_TOP_OFF_PROGRESS_BY_FRAME_INDEX[frame]!;
 }
 
 export function coffeeCupStatusForProgress(
   progress: number,
-  seed = "coffee"
+  seed = "coffee",
 ): CoffeeCupStatus {
   const clamped = clampCoffeeCupProgress(progress);
   const frameIndex = coffeeCupFrameIndexForProgress(clamped);
@@ -1359,7 +1393,8 @@ export function coffeeCupStatusForProgress(
           : coldness < 0.9
             ? "lukewarm"
             : "cold";
-  const tasteLabel = COFFEE_CUP_TASTE_LABELS[
+  const tasteLabel =
+    COFFEE_CUP_TASTE_LABELS[
     coffeeCupStableIndex(seed, COFFEE_CUP_TASTE_LABELS.length)
   ]!;
   return {
@@ -1374,12 +1409,30 @@ export function coffeeCupStatusForProgress(
   };
 }
 
+export function coffeeCupStatusForFillAndTemperatureProgress(
+  fillProgress: number,
+  temperatureProgress: number,
+  seed = "coffee",
+): CoffeeCupStatus {
+  const fillStatus = coffeeCupStatusForProgress(fillProgress, seed);
+  const temperatureStatus = coffeeCupStatusForProgress(
+    temperatureProgress,
+    seed,
+  );
+  return {
+    ...fillStatus,
+    coldness: temperatureStatus.coldness,
+    temperatureLabel: temperatureStatus.temperatureLabel,
+  };
+}
+
 export function coffeeCupProgressFromSessionTiming(args: {
   sessionRemainingMs?: number | null;
   durationMinutes?: CoffeeSessionDurationMinutes | null;
 }): number | null {
   const remainingMs = args.sessionRemainingMs;
-  if (typeof remainingMs !== "number" || !Number.isFinite(remainingMs)) return null;
+  if (typeof remainingMs !== "number" || !Number.isFinite(remainingMs))
+    return null;
   const durationMinutes =
     typeof args.durationMinutes === "number" &&
     Number.isFinite(args.durationMinutes) &&
@@ -1392,7 +1445,7 @@ export function coffeeCupProgressFromSessionTiming(args: {
 }
 
 function coffeeCupTopOffConsumptionDurationMs(
-  durationMinutes?: CoffeeSessionDurationMinutes | null
+  durationMinutes?: CoffeeSessionDurationMinutes | null,
 ): number {
   const minutes =
     typeof durationMinutes === "number" &&
@@ -1416,12 +1469,13 @@ export function coffeeCupCanTopOff(progress: number): boolean {
 export function coffeeCupTopOffSnapshotForProgress(
   progress: number,
   toppedOffAt: string,
-  targetProgressAfter?: number | null
+  targetProgressAfter?: number | null,
 ): CoffeeCupTopOffSnapshot | null {
   const progressBefore = clampCoffeeCupProgress(progress);
   if (!coffeeCupCanTopOff(progressBefore)) return null;
   const requestedProgressAfter =
-    typeof targetProgressAfter === "number" && Number.isFinite(targetProgressAfter)
+    typeof targetProgressAfter === "number" &&
+    Number.isFinite(targetProgressAfter)
       ? clampCoffeeCupProgress(targetProgressAfter)
       : COFFEE_CUP_TOP_OFF_TARGET_PROGRESS;
   const progressAfter = Math.min(progressBefore, requestedProgressAfter);
@@ -1446,26 +1500,30 @@ export function coffeeCupProgressAfterTopOff(args: {
   if (!topOff) return progress;
   const toppedOffAtMs = Date.parse(topOff.toppedOffAt);
   if (!Number.isFinite(toppedOffAtMs)) return progress;
-  if (!Number.isFinite(args.nowMs) || args.nowMs < toppedOffAtMs) return progress;
+  if (!Number.isFinite(args.nowMs) || args.nowMs < toppedOffAtMs)
+    return progress;
   const progressBefore = clampCoffeeCupProgress(topOff.progressBefore);
   const progressAfter = clampCoffeeCupProgress(topOff.progressAfter);
-  if (progressBefore <= progressAfter || progress <= progressAfter) return progress;
+  if (progressBefore <= progressAfter || progress <= progressAfter)
+    return progress;
   const elapsedMs = Math.max(0, args.nowMs - toppedOffAtMs);
-  const consumptionDurationMs = coffeeCupTopOffConsumptionDurationMs(args.durationMinutes);
+  const consumptionDurationMs = coffeeCupTopOffConsumptionDurationMs(
+    args.durationMinutes,
+  );
   const tempoRate =
     typeof args.seed === "string" && args.seed.trim().length > 0
       ? coffeeCupConsumptionRate(args.seed, args.durationMinutes)
       : 1;
   const timedConsumedProgress = Math.max(
     0,
-    Math.min(1, (elapsedMs / consumptionDurationMs) * tempoRate)
+    Math.min(1, (elapsedMs / consumptionDurationMs) * tempoRate),
   );
   const explicitConsumedProgress =
     args.lowerProgressMeansConsumption === true
       ? Math.max(0, progress - progressAfter)
       : 0;
   const topOffProgress = clampCoffeeCupProgress(
-    progressAfter + Math.max(timedConsumedProgress, explicitConsumedProgress)
+    progressAfter + Math.max(timedConsumedProgress, explicitConsumedProgress),
   );
   return Math.min(progress, topOffProgress);
 }
@@ -1593,12 +1651,7 @@ export type ConversationHistoryContextKind =
   | "legacy";
 
 export type ConversationHistoryOriginKind =
-  | "relationship"
-  | "fork"
-  | "saved_group"
-  | "coffee"
-  | "sandbox"
-  | "legacy";
+  "relationship" | "fork" | "saved_group" | "coffee" | "sandbox" | "legacy";
 
 /**
  * Stable navigation metadata for one saved conversation episode.
@@ -1993,9 +2046,7 @@ export interface ZenAskQuestionPatienceInput {
 export type ZenLiveActionSource = "draft_action" | "idle";
 
 export type ZenLiveActionReactionKind =
-  | "silent"
-  | "show_action"
-  | "interrupt_candidate";
+  "silent" | "show_action" | "interrupt_candidate";
 
 export type ZenLiveActionMoodHint =
   | "neutral"
@@ -2048,8 +2099,7 @@ export interface ZenLiveActionInterruptInput {
 }
 
 export type ZenAutonomyDecision =
-  | { action: "silent" }
-  | { action: "speak"; botId: string | null };
+  { action: "silent" } | { action: "speak"; botId: string | null };
 
 /**
  * Optional quick-reply labels inferred from the assistant's opening turn when
@@ -2151,9 +2201,7 @@ export interface ConversationSummaryDebug {
 }
 
 export type CoffeeArrivalScenario =
-  | "user-first"
-  | "partial-table-in-progress"
-  | "full-table-present";
+  "user-first" | "partial-table-in-progress" | "full-table-present";
 
 /** Request body for `POST /api/coffee/sessions`. */
 export interface CoffeeSessionCreateRequest {
@@ -2363,4 +2411,6 @@ export interface CoffeePollPlayerVoteResponse {
   poll: CoffeePoll;
 }
 export * from "./botcast.js";
+export * from "./listenerReaction.js";
 export * from "./continuityVersion.js";
+export * from "./modelReadiness.js";

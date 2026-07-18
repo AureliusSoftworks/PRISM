@@ -159,6 +159,41 @@ describe("Slate workspace integration", () => {
     );
   });
 
+  it("keeps the welcome for first use and makes the project shelf the returning home", () => {
+    assert.match(source, /const SLATE_VISITED_KEY = "prism_slate_visited_v1"/);
+    assert.match(
+      source,
+      /const showFirstVisitWelcome =\s*!hadVisitedBeforeThisMount && projects\.length === 0/,
+    );
+    assert.match(
+      source,
+      /const showProjectCreation = showFirstVisitWelcome \|\| entryMode === "create"/,
+    );
+    assert.match(source, /showFirstVisitWelcome \? styles\.welcome : styles\.deskHome/);
+    assert.match(source, /Project shelf/);
+    assert.match(source, /Your Slate library\./);
+    assert.doesNotMatch(source, /items\[0\][\s\S]*?openProject\(items\[0\]\.id\)/);
+    assert.match(source, /New project/);
+    assert.match(source, /Restore backup/);
+    assert.match(source, /item\.manuscriptLength\.toLocaleString\(\)/);
+    assert.match(source, /item\.cover\.imageUrl/);
+    assert.match(
+      source,
+      /if \(shouldGenerateCover\) \{[\s\S]*?synthesizeProjectCover\(response\.project\.id\)/,
+    );
+    assert.match(source, /Create new cover/);
+    assert.match(source, /\/api\/slate\/projects\/\$\{encodeURIComponent\(projectId\)\}\/cover/);
+    assert.match(source, /setEntryMode\("desk"\)[\s\S]*?setReturnSession\(null\)/);
+    assert.match(
+      workspaceCss,
+      /\.deskHome\s*\{[\s\S]*?align-content: start;[\s\S]*?\.deskHeader h1\s*\{[\s\S]*?clamp\(1\.8rem, 3vw, 2\.7rem\)/,
+    );
+    assert.match(
+      workspaceCss,
+      /\.shelfBooks\s*\{[\s\S]*?display: flex;[\s\S]*?overflow-x: auto;[\s\S]*?\.bookCover\s*\{[\s\S]*?aspect-ratio: 2 \/ 3/,
+    );
+  });
+
   it("starts new work progressively and creates only after title confirmation", () => {
     const progressiveSource = source.slice(
       source.indexOf("const advanceProjectStart"),
@@ -168,19 +203,31 @@ describe("Slate workspace integration", () => {
     assert.match(source, /data-slate-start-step="source"/);
     assert.match(source, /What should Slate begin with\?/);
     assert.match(source, /Bring existing material/);
+    assert.match(source, /Use a creative spark instead/);
+    assert.match(source, /!existingMaterialOpen \? \([\s\S]*?Creative spark/);
+    assert.doesNotMatch(source, /disabled while bringing existing material/);
+    assert.doesNotMatch(source, /disabled=\{existingMaterialOpen\}/);
     assert.match(source, /kept exactly as pasted/);
-    assert.match(source, /slateProjectSourceIsReady\(\{ spark, existingMaterial \}\)/);
+    assert.match(source, /sourceMode: projectSourceMode/);
     assert.match(source, /const advanceProjectStart[\s\S]*?setProjectStartStep\("title"\)/);
     assert.doesNotMatch(
       progressiveSource.slice(0, progressiveSource.indexOf("const createProject")),
       /slateApi<SlateProjectResponse>\("\/api\/slate\/projects"/,
     );
     assert.match(source, /data-slate-start-step="title"/);
-    assert.match(source, /Slate suggested a working title/);
-    assert.match(source, /slateSuggestedProjectTitle/);
+    assert.match(source, /Slate generated a working title/);
+    assert.match(source, /\/api\/slate\/title-suggestions/);
+    assert.match(source, /generateCreationTitle\(sourceSpark\)/);
+    assert.match(source, /Generate another title/);
+    assert.match(source, /titleOrigin: titleOverride \? "writer" : titleOrigin/);
+    assert.match(source, /projectSourceMode === "material" && existingMaterial\.trim\(\)/);
     assert.match(source, /Back/);
     assert.match(source, /Skip naming · use Untitled Story/);
     assert.match(source, /createProject\("Untitled Story"\)/);
+    assert.match(source, /Create a book cover/);
+    assert.match(source, /shouldGenerateCover/);
+    assert.match(source, /Generate a new title/);
+    assert.match(source, /Generate a new cover/);
     assert.match(source, /event\.metaKey \|\| event\.ctrlKey/);
     assert.match(progressiveSource, /manuscript: existingMaterial/);
     assert.match(progressiveSource, /catch \(cause\)[\s\S]*?Slate could not create the project/);
@@ -190,13 +237,26 @@ describe("Slate workspace integration", () => {
     assert.match(workspaceCss, /\.sourceRecap[\s\S]*?var\(--bg/);
   });
 
+  it("notifies spark-led projects when their working title is mature enough to review", () => {
+    assert.match(source, /SLATE_TITLE_REVIEW_INTERVAL_CHARS = 12_000/);
+    assert.match(source, /project\.titleOrigin !== "spark"/);
+    assert.match(source, /prism_slate_title_review_v2:\$\{projectId\}/);
+    assert.match(source, /setTitleReviewDue\(!slateTitleReviewWasHandled\(project\.id\)\)/);
+    assert.match(source, /The draft has grown beyond its opening spark\./);
+    assert.match(source, /Review working title/);
+    assert.match(source, /resolveTitleSuggestion\("accepted"\)/);
+    assert.doesNotMatch(source, /void requestTitleSuggestion\(\{ quiet: true \}\)/);
+  });
+
   it("offers a calm, explicit project deletion flow from the shelf", () => {
     const deletionSource = source.slice(
       source.indexOf("const deleteSlateProjectFromShelf"),
       source.indexOf("const previewSlateArchive"),
     );
     assert.match(source, /aria-haspopup="menu"/);
-    assert.match(source, /role="menuitem"/);
+    assert.match(source, /usePrismMenu/);
+    assert.match(source, /label: "Open project"/);
+    assert.match(source, /label: "Delete project"/);
     assert.match(source, /setProjectPendingDeletion\(item\)/);
     assert.match(source, /Delete “\{projectPendingDeletion\.title\}”\?/);
     assert.match(source, /This cannot be undone\./);
@@ -212,7 +272,6 @@ describe("Slate workspace integration", () => {
     );
     assert.match(deletionSource, /await refreshProjects\(\)\.catch/);
     assert.match(source, /aria-modal="true"/);
-    assert.match(workspaceCss, /\.projectActionsMenu[\s\S]*?var\(--danger/);
     assert.match(
       workspaceCss,
       /\.deleteProjectDialog::before[\s\S]*?var\(--slate-p\)[\s\S]*?var\(--slate-m\)/,
@@ -260,6 +319,10 @@ describe("Slate workspace integration", () => {
     assert.match(
       slateBranch,
       /navigationHeader=\{renderSharedAppletNavbar\("Slate tools"\)\}/,
+    );
+    assert.match(
+      slateBranch,
+      /<div className=\{themeClass\} data-slate-shell="true">[\s\S]*?<SlateWorkspace[\s\S]*?renderSharedPanels\(\)[\s\S]*?<\/div>/,
     );
     assert.match(slateBranch, /renderSharedPanels\(\)/);
     assert.match(slateBranch, /renderModeTutorialOverlay\(\)/);

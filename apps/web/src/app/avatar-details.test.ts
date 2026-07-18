@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 
 import {
   AVATAR_DETAILS_CANVAS_SIZE,
+  AVATAR_DETAILS_COLOR_MAP_BASE64_LENGTH,
+  AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH,
   AVATAR_DETAILS_MASK_BASE64_LENGTH,
   AVATAR_DETAILS_MASK_BYTE_LENGTH,
   AVATAR_DETAILS_MAX_PAINT_PIXELS,
@@ -12,21 +14,28 @@ import {
   avatarDetailsPhosphorCoreRgba,
   avatarDetailsGridPointFromClient,
   avatarDetailsEqual,
-  avatarDetailsInkHiddenForBlink,
+  avatarDetailsInkRoleAt,
   avatarDetailsKey,
   avatarDetailsMaskPixel,
   avatarDetailsPaintPixelCount,
+  avatarDetailsPaintColorPixelCount,
+  avatarDetailsWithPaintColorMap,
   avatarDetailsWritablePixel,
   cloneAvatarDetails,
   decodeAvatarDetailsPaintMask,
+  decodeAvatarDetailsPaintColorMap,
   encodeAvatarDetailsPaintMask,
+  encodeAvatarDetailsPaintColorMap,
   interpolateAvatarDetailsGridLine,
   moveAvatarDetailsPaintMask,
+  moveAvatarDetailsPaintColorMap,
+  normalizeAvatarDetails,
   paintAvatarDetailsMask,
+  paintAvatarDetailsColorMap,
   rasterizeAvatarDetailsAlpha,
+  rasterizeVisibleAvatarDetailsRgba,
   resolveAvatarDetailStampAnchor,
   replaceAvatarDetailStampForCategory,
-  setAvatarDetailsHideInkDuringBlink,
   toggleAvatarDetailStamp,
   type AvatarDetailStampV1,
   type AvatarDetailsV1,
@@ -37,22 +46,246 @@ const emptyDetails = (): AvatarDetailsV1 => ({
   screen: { stamps: [], paintMaskBase64: null },
 });
 
-describe("avatar details blink ink preference", () => {
-  it("is opt-in, clone-safe, and participates in dirty-state equality", () => {
-    const original = emptyDetails();
-    const enabled = setAvatarDetailsHideInkDuringBlink(original, true);
+describe("avatar details semantic ink", () => {
+  it("stores mutually exclusive blink, talking, and effect roles", () => {
+    const blank = new Uint8Array(AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH);
+    const blink = paintAvatarDetailsColorMap(
+      blank,
+      [{ x: 60, y: 60 }],
+      1,
+      "brush",
+      "blink",
+    ).colorMap;
+    const talking = paintAvatarDetailsColorMap(
+      blink,
+      [
+        { x: 60, y: 60 },
+        { x: 62, y: 60 },
+      ],
+      1,
+      "brush",
+      "talking",
+    ).colorMap;
+    const effect = paintAvatarDetailsColorMap(
+      talking,
+      [{ x: 64, y: 60 }],
+      1,
+      "brush",
+      "effect",
+    ).colorMap;
 
-    assert.equal(original.screen.hideInkDuringBlink, undefined);
-    assert.equal(enabled.screen.hideInkDuringBlink, true);
-    assert.equal(avatarDetailsInkHiddenForBlink(enabled, "open"), false);
-    assert.equal(avatarDetailsInkHiddenForBlink(enabled, "closed"), true);
-    assert.equal(avatarDetailsInkHiddenForBlink(original, "closed"), false);
-    assert.deepEqual(cloneAvatarDetails(enabled), enabled);
-    assert.notEqual(avatarDetailsKey(original), avatarDetailsKey(enabled));
-    assert.equal(avatarDetailsEqual(original, enabled), false);
+    assert.equal(avatarDetailsInkRoleAt(effect, 60, 60), "talking");
+    assert.equal(avatarDetailsInkRoleAt(effect, 62, 60), "talking");
+    assert.equal(avatarDetailsInkRoleAt(effect, 64, 60), "effect");
+    assert.equal(avatarDetailsPaintColorPixelCount(effect), 3);
+    const encoded = encodeAvatarDetailsPaintColorMap(effect);
+    assert.equal(encoded?.length, AVATAR_DETAILS_COLOR_MAP_BASE64_LENGTH);
+    assert.deepEqual(decodeAvatarDetailsPaintColorMap(encoded), effect);
+
+    const details = avatarDetailsWithPaintColorMap(emptyDetails(), effect);
+    assert.deepEqual(cloneAvatarDetails(details), details);
+    assert.notEqual(avatarDetailsKey(emptyDetails()), avatarDetailsKey(details));
+    assert.equal(avatarDetailsEqual(emptyDetails(), details), false);
+  });
+
+  it("migrates the old blink toggle into red semantic ink", () => {
+    const legacyMask = paintAvatarDetailsMask(
+      new Uint8Array(AVATAR_DETAILS_MASK_BYTE_LENGTH),
+      [{ x: 64, y: 60 }],
+      1,
+      "brush",
+    ).mask;
+    const migrated = normalizeAvatarDetails({
+      version: 1,
+      screen: {
+        stamps: [],
+        paintMaskBase64: encodeAvatarDetailsPaintMask(legacyMask),
+        hideInkDuringBlink: true,
+      },
+    });
+    const colorMap = decodeAvatarDetailsPaintColorMap(
+      migrated.screen.paintColorMapBase64,
+    );
+    assert.ok(colorMap);
+    assert.equal(avatarDetailsInkRoleAt(colorMap, 64, 60), "blink");
+    assert.equal(migrated.screen.paintMaskBase64, null);
+    assert.equal(migrated.screen.hideInkDuringBlink, undefined);
+  });
+
+  it("moves every semantic color together", () => {
+    let colorMap: Uint8Array = new Uint8Array(
+      AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH,
+    );
+    colorMap = paintAvatarDetailsColorMap(
+      colorMap,
+      [{ x: 60, y: 60 }],
+      1,
+      "brush",
+      "blink",
+    ).colorMap;
+    colorMap = paintAvatarDetailsColorMap(
+      colorMap,
+      [{ x: 62, y: 60 }],
+      1,
+      "brush",
+      "talking",
+    ).colorMap;
+    const moved = moveAvatarDetailsPaintColorMap(colorMap, { x: 3, y: 2 });
+    assert.equal(avatarDetailsInkRoleAt(moved.colorMap, 63, 62), "blink");
+    assert.equal(avatarDetailsInkRoleAt(moved.colorMap, 65, 62), "talking");
+  });
+
+  it("merges every visible role into one runtime phosphor emission plane", () => {
+    let colorMap: Uint8Array = new Uint8Array(
+      AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH,
+    );
+    colorMap = paintAvatarDetailsColorMap(
+      colorMap,
+      [{ x: 60, y: 60 }],
+      1,
+      "brush",
+      "blink",
+    ).colorMap;
+    colorMap = paintAvatarDetailsColorMap(
+      colorMap,
+      [{ x: 62, y: 60 }],
+      1,
+      "brush",
+      "talking",
+    ).colorMap;
+    colorMap = paintAvatarDetailsColorMap(
+      colorMap,
+      [{ x: 64, y: 60 }],
+      1,
+      "brush",
+      "effect",
+    ).colorMap;
+    const details = avatarDetailsWithPaintColorMap(emptyDetails(), colorMap);
+    const alphaAt = (rgba: Uint8ClampedArray, x: number): number =>
+      rgba[(60 * AVATAR_DETAILS_CANVAS_SIZE + x) * 4 + 3] ?? 0;
+
+    const idle = rasterizeVisibleAvatarDetailsRgba(
+      details,
+      "#f0c020",
+      null,
+      { blinking: false, talking: false },
+    );
     assert.deepEqual(
-      setAvatarDetailsHideInkDuringBlink(enabled, false),
-      original,
+      [alphaAt(idle, 60), alphaAt(idle, 62), alphaAt(idle, 64)],
+      [255, 255, 255],
+    );
+
+    const blinkingAndTalking = rasterizeVisibleAvatarDetailsRgba(
+      details,
+      "#f0c020",
+      null,
+      { blinking: true, talking: true },
+    );
+    assert.deepEqual(
+      [
+        alphaAt(blinkingAndTalking, 60),
+        alphaAt(blinkingAndTalking, 62),
+        alphaAt(blinkingAndTalking, 64),
+      ],
+      [0, 0, 255],
+    );
+  });
+
+  it("keeps noses and mustaches above the face while placing beards behind the mouth", () => {
+    let colorMap: Uint8Array = new Uint8Array(
+      AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH,
+    );
+    colorMap = paintAvatarDetailsColorMap(
+      colorMap,
+      [
+        { x: 64, y: 60 },
+        { x: 64, y: 75 },
+        { x: 64, y: 88 },
+      ],
+      1,
+      "brush",
+      "effect",
+    ).colorMap;
+    const paintedDetails = avatarDetailsWithPaintColorMap(
+      emptyDetails(),
+      colorMap,
+    );
+    const paintedAbove = rasterizeAvatarDetailsAlpha(
+      paintedDetails,
+      null,
+      "all",
+      "above-face",
+    );
+    const paintedBehind = rasterizeAvatarDetailsAlpha(
+      paintedDetails,
+      null,
+      "all",
+      "behind-face",
+    );
+    const alphaAt = (alpha: Uint8Array, x: number, y: number): number =>
+      alpha[y * AVATAR_DETAILS_CANVAS_SIZE + x] ?? 0;
+
+    assert.equal(alphaAt(paintedAbove, 64, 60), 255);
+    assert.equal(alphaAt(paintedAbove, 64, 75), 255);
+    assert.equal(alphaAt(paintedAbove, 64, 88), 0);
+    assert.equal(alphaAt(paintedBehind, 64, 60), 0);
+    assert.equal(alphaAt(paintedBehind, 64, 75), 0);
+    assert.equal(alphaAt(paintedBehind, 64, 88), 255);
+
+    const mustacheDetails: AvatarDetailsV1 = {
+      version: 1,
+      screen: {
+        stamps: [
+          {
+            id: "straight-mustache",
+            offsetX: 0,
+            offsetY: 0,
+            scalePct: 100,
+          },
+        ],
+        paintMaskBase64: null,
+      },
+    };
+    const beardDetails: AvatarDetailsV1 = {
+      version: 1,
+      screen: {
+        stamps: [
+          {
+            id: "short-beard",
+            offsetX: 0,
+            offsetY: 0,
+            scalePct: 100,
+          },
+        ],
+        paintMaskBase64: null,
+      },
+    };
+    assert.equal(
+      rasterizeAvatarDetailsAlpha(
+        mustacheDetails,
+        null,
+        "all",
+        "above-face",
+      ).some((alpha) => alpha > 0),
+      true,
+    );
+    assert.equal(
+      rasterizeAvatarDetailsAlpha(
+        mustacheDetails,
+        null,
+        "all",
+        "behind-face",
+      ).some((alpha) => alpha > 0),
+      false,
+    );
+    assert.equal(
+      rasterizeAvatarDetailsAlpha(
+        beardDetails,
+        null,
+        "all",
+        "behind-face",
+      ).some((alpha) => alpha > 0),
+      true,
     );
   });
 });

@@ -45,21 +45,6 @@ export interface TextFieldCommandSnapshot {
 
 export type TextFieldCommandState = Record<TextFieldContextMenuAction, boolean>;
 
-export interface TextContextMenuPositionInput {
-  x: number;
-  y: number;
-  menuWidth: number;
-  menuHeight: number;
-  viewportWidth: number;
-  viewportHeight: number;
-  padding?: number;
-}
-
-export interface TextContextMenuPosition {
-  x: number;
-  y: number;
-}
-
 export function isTextEntryInputType(type: string | null | undefined): boolean {
   const normalized = (type ?? "text").trim().toLowerCase();
   return normalized.length === 0 || TEXT_ENTRY_INPUT_TYPES.has(normalized);
@@ -73,23 +58,6 @@ export function resolveTextFieldCommandState(
     copy: snapshot.hasSelection,
     paste: snapshot.mutable,
     selectAll: snapshot.hasText,
-  };
-}
-
-export function clampTextContextMenuPosition({
-  x,
-  y,
-  menuWidth,
-  menuHeight,
-  viewportWidth,
-  viewportHeight,
-  padding = 8,
-}: TextContextMenuPositionInput): TextContextMenuPosition {
-  const maxX = Math.max(padding, viewportWidth - menuWidth - padding);
-  const maxY = Math.max(padding, viewportHeight - menuHeight - padding);
-  return {
-    x: Math.min(Math.max(padding, x), maxX),
-    y: Math.min(Math.max(padding, y), maxY),
   };
 }
 

@@ -88,6 +88,7 @@ interface PreparedProjectImageReference {
 
 interface PreparedProjectAudio {
   showId: string;
+  slot: "intro-audio" | "atmosphere-audio";
   bytes: Buffer;
   contentType: "audio/mpeg";
   restore: SignalProjectAudioRestoreMetadataV1;
@@ -320,25 +321,26 @@ function exportSignalImageEntry(args: {
 function exportSignalAudioEntry(args: {
   showId: string;
   showName: string;
+  slot: "intro-audio" | "atmosphere-audio";
   row: ExportAudioRow;
   files: Record<string, Uint8Array>;
 }): ProjectOwnedAssetManifestEntryV1 {
   const bytes = Buffer.from(args.row.audio_bytes);
   if (bytes.byteLength === 0 || bytes.byteLength > PROJECT_OWNED_AUDIO_MAX_BYTES) {
     throw new Error(
-      `Account backup cannot include Signal intro audio for “${args.showName}” because its size is invalid.`,
+      `Account backup cannot include Signal ${args.slot} for “${args.showName}” because its size is invalid.`,
     );
   }
   if (!/^audio\/(?:mpeg|mp3)$/iu.test(args.row.content_type) || !isMpegAudio(bytes)) {
     throw new Error(
-      `Account backup cannot include Signal intro audio for “${args.showName}” because its format is invalid.`,
+      `Account backup cannot include Signal ${args.slot} for “${args.showName}” because its format is invalid.`,
     );
   }
   const addressed = addDeduplicatedFile(args.files, bytes);
   return {
     ownerType: "signal-show",
     ownerId: args.showId,
-    logicalSlot: "intro-audio",
+    logicalSlot: args.slot,
     mediaType: "audio",
     contentType: "audio/mpeg",
     checksum: addressed.checksum,
@@ -379,6 +381,17 @@ export function exportProjectOwnedAssets(
     )
     .all(userId) as unknown as ExportAudioRow[];
   const audioByShowId = new Map(audioRows.map((row) => [row.show_id, row] as const));
+  const atmosphereAudioRows = db
+    .prepare(
+      `SELECT show_id, provider, model, prompt, content_type, audio_bytes,
+              duration_ms, revision, created_at, updated_at
+         FROM botcast_show_atmosphere_audio
+        WHERE user_id = ?`,
+    )
+    .all(userId) as unknown as ExportAudioRow[];
+  const atmosphereAudioByShowId = new Map(
+    atmosphereAudioRows.map((row) => [row.show_id, row] as const),
+  );
   const files: Record<string, Uint8Array> = {};
   const entries: ProjectOwnedAssetManifestEntryV1[] = [];
 
@@ -406,7 +419,20 @@ export function exportProjectOwnedAssets(
         exportSignalAudioEntry({
           showId: show.id,
           showName: show.name,
+          slot: "intro-audio",
           row: audio,
+          files,
+        }),
+      );
+    }
+    const atmosphereAudio = atmosphereAudioByShowId.get(show.id);
+    if (atmosphereAudio) {
+      entries.push(
+        exportSignalAudioEntry({
+          showId: show.id,
+          showName: show.name,
+          slot: "atmosphere-audio",
+          row: atmosphereAudio,
           files,
         }),
       );
@@ -457,14 +483,22 @@ export function omitInlineProjectOwnedAssetBinaries(
   snapshot: BackupSnapshot,
   manifest: ProjectOwnedAssetManifestV1,
 ): void {
-  const audioShowIds = new Set(
+  const introAudioShowIds = new Set(
     manifest.entries
       .filter((entry) => entry.logicalSlot === "intro-audio")
       .map((entry) => entry.ownerId),
   );
+  const atmosphereAudioShowIds = new Set(
+    manifest.entries
+      .filter((entry) => entry.logicalSlot === "atmosphere-audio")
+      .map((entry) => entry.ownerId),
+  );
   for (const show of snapshot.botcast?.shows ?? []) {
-    if (show.introAudio && audioShowIds.has(show.id)) {
+    if (show.introAudio && introAudioShowIds.has(show.id)) {
       delete show.introAudio.audioBase64;
+    }
+    if (show.atmosphereAudio && atmosphereAudioShowIds.has(show.id)) {
+      delete show.atmosphereAudio.audioBase64;
     }
   }
 }
@@ -561,7 +595,8 @@ export function normalizeProjectOwnedAssetManifest(
       logicalSlot !== "light-studio" &&
       logicalSlot !== "dark-studio" &&
       logicalSlot !== "logo" &&
-      logicalSlot !== "intro-audio"
+      logicalSlot !== "intro-audio" &&
+      logicalSlot !== "atmosphere-audio"
     ) {
       throw new Error("Project asset manifest contains an invalid logical slot.");
     }
@@ -581,7 +616,8 @@ export function normalizeProjectOwnedAssetManifest(
     if (!expectedPath || archivePath !== expectedPath) {
       throw new Error("Project asset manifest contains an unsafe archive path.");
     }
-    const imageSlot = logicalSlot !== "intro-audio";
+    const imageSlot =
+      logicalSlot !== "intro-audio" && logicalSlot !== "atmosphere-audio";
     if (
       (imageSlot && (raw.mediaType !== "image" || raw.contentType !== "image/png")) ||
       (!imageSlot && (raw.mediaType !== "audio" || raw.contentType !== "audio/mpeg"))
@@ -654,6 +690,15 @@ function assertBundleMatchesSnapshot(
       expected.add(key);
       if (!entriesBySlot.has(key)) {
         throw new Error(`Project asset backup is missing Signal intro audio for “${show.name}”.`);
+      }
+    }
+    if (show.atmosphereAudio) {
+      const key = entryKey(show.id, "atmosphere-audio");
+      expected.add(key);
+      if (!entriesBySlot.has(key)) {
+        throw new Error(
+          `Project asset backup is missing Signal atmosphere audio for “${show.name}”.`,
+        );
       }
     }
   }
@@ -769,6 +814,7 @@ export function prepareProjectOwnedAssetImport(
     } else {
       audio.push({
         showId: entry.ownerId,
+        slot: entry.logicalSlot as PreparedProjectAudio["slot"],
         bytes: Buffer.from(fileBytes),
         contentType: "audio/mpeg",
         restore: entry.restore,
@@ -908,13 +954,22 @@ export function applyPreparedProjectOwnedAssetsWithinTransaction(
     ).run(remapped, showId, userId);
   }
 
-  const insertAudio = db.prepare(
+  const insertIntroAudio = db.prepare(
     `INSERT OR REPLACE INTO botcast_show_intro_audio
        (show_id, user_id, provider, model, prompt, content_type, audio_bytes,
         duration_ms, revision, created_at, updated_at)
      VALUES (?, ?, 'elevenlabs', ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
+  const insertAtmosphereAudio = db.prepare(
+    `INSERT OR REPLACE INTO botcast_show_atmosphere_audio
+       (show_id, user_id, provider, model, prompt, content_type, audio_bytes,
+        duration_ms, revision, created_at, updated_at)
+     VALUES (?, ?, 'elevenlabs', ?, ?, ?, ?, ?, ?, ?, ?)`,
+  );
   for (const item of prepared.audio) {
+    const insertAudio = item.slot === "intro-audio"
+      ? insertIntroAudio
+      : insertAtmosphereAudio;
     insertAudio.run(
       item.showId,
       userId,
