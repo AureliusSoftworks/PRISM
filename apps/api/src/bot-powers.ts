@@ -136,6 +136,47 @@ function deterministicHardAudiencePower(
   };
 }
 
+function deterministicIntimidationPower(
+  source: BotPowerV1,
+  botName: string,
+): CompiledBotPowerV1 | null {
+  const nameAndIntent = compact(`${source.name} ${source.intent}`, 560)
+    .toLowerCase();
+  const namesIntimidation =
+    /\b(?:intimidat\w*|terrify\w*|terrifying|aura\s+of\s+dread)\b/u.test(
+      nameAndIntent,
+    );
+  const spreadsFear =
+    /\b(?:strike\w*|cause\w*|inspire\w*|instill\w*|provoke\w*|evoke\w*|spread\w*|fill\w*)\b[\s\S]*\bfear\b/u.test(
+      nameAndIntent,
+    ) ||
+    /\b(?:others?|everyone|everybody|surrounding\s+bots?|nearby\s+bots?)\b[\s\S]*\b(?:afraid|fearful|intimidated|terrified)\b/u.test(
+      nameAndIntent,
+    );
+  if (!namesIntimidation && !spreadsFear) return null;
+  if (!/\b(?:fear|afraid|intimidat\w*|terrify\w*|dread)\b/u.test(nameAndIntent)) {
+    return null;
+  }
+  const subject = compact(botName, 100) || "This bot";
+  return {
+    version: BOT_POWER_VERSION,
+    sourceHash: botPowerSourceHashV1(source.name, source.intent),
+    selfCue:
+      "Project quiet, disciplined menace without demanding that others describe their fear.",
+    observerCue: `${subject}'s controlled presence creates immediate pressure; let it register without abandoning your personality or role.`,
+    effects: [
+      {
+        type: "social_influence",
+        trigger: "session_start",
+        polarity: "negative",
+        strength: "large",
+        targets: [{ kind: "all" }],
+      },
+    ],
+    ruleLabels: ["Intimidates the room"],
+  };
+}
+
 function deterministicGradualMoodPower(
   source: BotPowerV1,
   botName: string,
@@ -210,6 +251,7 @@ function deterministicPower(
 ): CompiledBotPowerV1 | null {
   return (
     deterministicHardAudiencePower(source, botName) ??
+    deterministicIntimidationPower(source, botName) ??
     deterministicGradualMoodPower(source, botName) ??
     deterministicCoffeeDislikePower(source, botName)
   );

@@ -17,6 +17,7 @@ import {
 } from "../slate.ts";
 import {
   chatWithSlateProject,
+  generateSlateProjectTitle,
   listSlateProjectChatMessages,
   refreshSlateLivingSummary,
   resolveSlateProjectTitleSuggestion,
@@ -106,9 +107,48 @@ describe("Slate persistence and writing operations", () => {
 
   afterEach(() => closeTestDatabase(db));
 
+  it("generates a literary title from the story rather than title-casing its first line", async () => {
+    const provider = createDeterministicProvider([
+      JSON.stringify({
+        title: "He Sat There in the Chair",
+        reason: "It echoes the opening image.",
+      }),
+      JSON.stringify({
+        title: "The Quiet Geometry",
+        reason: "It joins the room's physical precision with the captive's inner calculation.",
+      }),
+    ]);
+    const generated = await generateSlateProjectTitle(
+      {
+        sourceKind: "material",
+        source:
+          "He sat there in the chair. The captive begins mapping the room by sound, waiting for the fluorescent hum to reveal a hidden door.",
+      },
+      { provider, providerName: "local", model: "qwen3:8b" },
+    );
+
+    assert.equal(generated.title, "The Quiet Geometry");
+    assert.equal(provider.calls.length, 2);
+    assert.equal(generated.provider, "local");
+    assert.match(generated.reason, /inner calculation/u);
+    assert.match(
+      provider.calls[0]?.[0]?.content ?? "",
+      /not merely its opening sentence/u,
+    );
+    assert.match(
+      provider.calls[0]?.[0]?.content ?? "",
+      /Do not copy or lightly title-case the first line/u,
+    );
+    assert.match(
+      provider.calls[1]?.[1]?.content ?? "",
+      /Rejected candidate: He Sat There in the Chair/u,
+    );
+  });
+
   it("creates, saves, and reopens complete tenant-scoped project state", () => {
     const created = createSlateProject(db, "user-1", {
       title: "Glass City",
+      titleOrigin: "spark",
       spark: "A city hears a signal from its own buried future.",
     });
     createSlateProject(db, "user-2", {
@@ -144,6 +184,7 @@ describe("Slate persistence and writing operations", () => {
 
     const reopened = getSlateProject(db, "user-1", created.id);
     assert.equal(reopened.title, "Glass City");
+    assert.equal(reopened.titleOrigin, "spark");
     assert.equal(reopened.sparkWildcards, null);
     assert.equal(reopened.phase, "draft");
     assert.equal(reopened.structure[0]?.summary, scene().summary);
@@ -152,6 +193,25 @@ describe("Slate persistence and writing operations", () => {
     assert.equal(reopened.manuscript, "The Signal\n\nAt midnight, the pavement answered Mara.");
     assert.deepEqual(listSlateProjects(db, "user-1").map((project) => project.id), [created.id]);
     assert.throws(() => getSlateProject(db, "user-2", created.id), /not found/i);
+  });
+
+  it("defaults title provenance to the writer and marks direct renames as writer-owned", () => {
+    const project = createSlateProject(db, "user-1", {
+      title: "From Existing Pages",
+      titleOrigin: "material",
+      spark: "Chapter One begins in a snowbound station.",
+    });
+    assert.equal(project.titleOrigin, "material");
+    const renamed = updateSlateProject(db, "user-1", project.id, {
+      title: "The Last Snowbound Train",
+    });
+    assert.equal(renamed.titleOrigin, "writer");
+
+    const legacyDefault = createSlateProject(db, "user-1", {
+      title: "Writer Named",
+      spark: "A quiet signal.",
+    });
+    assert.equal(legacyDefault.titleOrigin, "writer");
   });
 
   it("resolves and persists an optional wildcard spark with its source template", async () => {
@@ -323,6 +383,7 @@ describe("Slate persistence and writing operations", () => {
   it("persists a living summary, advisory project chat, and explicit title acceptance", async () => {
     const project = createSlateProject(db, "user-1", {
       title: "Glass City",
+      titleOrigin: "spark",
       spark: "A buried future calls its architect.",
     });
     updateSlateProject(db, "user-1", project.id, { structure: [scene()] });
@@ -348,6 +409,8 @@ describe("Slate persistence and writing operations", () => {
 
     const provider = createDeterministicProvider([
       "The opening is strongest when Mara treats the voice as an engineering fault before an invitation.",
+      "Try making the plaza's answer feel almost useful before it becomes intimate.",
+      "Let Mara recognize the engineering pattern one beat before she recognizes the voice.",
       JSON.stringify({
         keep: false,
         title: "The City Beneath Her Name",
@@ -365,6 +428,38 @@ describe("Slate persistence and writing operations", () => {
     assert.deepEqual(messages.map((message) => message.role), ["user", "assistant"]);
     assert.equal(messages[1]?.model, "qwen3:8b");
     assert.equal(listSlateProjectChatMessages(db, "user-1", project.id).length, 2);
+    assert.match(provider.calls[0]?.[0]?.content ?? "", /ephemeral creative companion/i);
+    assert.match(provider.calls[0]?.[0]?.content ?? "", /Never imply long-term memory/i);
+
+    await chatWithSlateProject(
+      db,
+      "user-1",
+      project.id,
+      "What is another direction?",
+      ai,
+    );
+    const recovered = await chatWithSlateProject(
+      db,
+      "user-1",
+      project.id,
+      "Give me one last option.",
+      ai,
+    );
+    assert.equal(recovered.length, 3);
+    assert.deepEqual(
+      recovered.map((message) => message.role),
+      ["assistant", "user", "assistant"],
+    );
+    assert.equal(
+      db.prepare(
+        "SELECT COUNT(*) AS count FROM slate_project_chat_messages WHERE project_id = ? AND user_id = ?",
+      ).get(project.id, "user-1")?.count,
+      3,
+    );
+    assert.deepEqual(
+      provider.calls[2]?.slice(2).map((message) => message.role),
+      ["assistant", "user", "assistant", "user"],
+    );
     assert.throws(
       () => listSlateProjectChatMessages(db, "user-2", project.id),
       /not found/i,
@@ -386,6 +481,7 @@ describe("Slate persistence and writing operations", () => {
       "accepted",
     );
     assert.equal(accepted.title, "The City Beneath Her Name");
+    assert.equal(accepted.titleOrigin, "writer");
     assert.equal(accepted.titleSuggestion, null);
   });
 

@@ -61,7 +61,8 @@ export type ImageJobSource =
   | "chat_tool"
   | "images_panel"
   | "zen_wallpaper"
-  | "signal_artwork";
+  | "signal_artwork"
+  | "slate_cover";
 
 export type RunningImageJob = {
   id: string;

@@ -302,17 +302,18 @@
   aspect-ratio: 1;
   margin: 0 auto;
   overflow: hidden;
+  contain: layout paint;
+  isolation: isolate;
   border: 1px solid color-mix(in srgb, var(--fg) 32%, var(--line));
   border-radius: 9px;
   background-color: #050608;
-  box-shadow: 0 0 18px
-    color-mix(in srgb, var(--editor-bot-color, var(--accent)) 8%, transparent);
+  box-shadow: none;
 }
 
 .editor[data-editor-theme="light"] .canvasFrame {
   border-color: color-mix(in srgb, #050608 54%, var(--line));
   background-color: #050608;
-  box-shadow: 0 0 18px rgba(12, 18, 28, 0.08);
+  box-shadow: none;
 }
 
 .canvasViewport {
@@ -348,6 +349,28 @@
 
 .faceGuideGlyph {
   pointer-events: none;
+}
+
+/* The guide is an editing template, not the rendered CRT. Keep it as one
+   crisp glyph layer so canvas updates do not repeatedly composite the live
+   face's bloom, convergence, filters, and blend-mode clones. */
+.faceGuideGlyph [data-coffee-plate-emoji-part],
+.faceGuideGlyph [data-crt-glyph-layer="true"] {
+  background: none !important;
+  color: currentColor !important;
+  filter: none !important;
+  mix-blend-mode: normal !important;
+  text-shadow: none !important;
+  -webkit-background-clip: border-box !important;
+  background-clip: border-box !important;
+  -webkit-text-fill-color: currentColor !important;
+  -webkit-text-stroke: 0 !important;
+}
+
+.faceGuideGlyph [data-crt-glyph-layer="true"]::before,
+.faceGuideGlyph [data-crt-glyph-layer="true"]::after {
+  content: none !important;
+  display: none !important;
 }
 
 .canvas {

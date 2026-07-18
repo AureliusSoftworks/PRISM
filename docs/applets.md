@@ -24,11 +24,11 @@ ship as `0.5.2` while Coffee is `v0.7` and Story is `v0.1`.
 
 | Applet | Version | Status | Notes |
 | --- | --- | --- | --- |
-| Chat | v1.4 | Active | Full playground for bots, providers, models, images, exports, memory-aware conversations, and per-bot online voice identity. |
-| Zen | v1.3 | Active | Calm one-to-one continuity surface with shared bot voice identity; the standalone Zen lane is deprecating as this becomes Prism's default state. |
-| Coffee | v1.6 | Active | Multi-bot group table with Coffee Groups, model-aware session holds, pacing, cups, transcripts, replay, synchronized online speech, and subtle shared session foley. |
-| Signal | v0.6 | Active | Bot-owned interview shows with audience pulse, model-aware studio holds, paired ident-and-ambience audio packages, quiet session foley, private direction, archives, and directed replay. |
-| Story | v0.2 | Preview | Generated visual-novel episodes with bots, choices, maps, inventory, transcripts, and shared PRISM menu behavior. |
+| Chat | v1.5 | Active | Full playground for bots, providers, models, images, exports, memory-aware conversations, per-bot online voice identity, and sparse shared mic presence. |
+| Zen | v1.4 | Active | Calm one-to-one continuity surface with shared bot voice identity and mic presence; the standalone Zen lane is deprecating as this becomes Prism's default state. |
+| Coffee | v1.7 | Active | Multi-bot group table with Coffee Groups, model-aware session holds, pacing, cups, transcripts, replay, synchronized online speech, and subtle shared session foley. |
+| Signal | v0.7 | Active | Bot-owned interview shows with audience pulse, model-aware studio holds, paired ident-and-ambience audio packages, deterministic mic presence, quiet session foley, private direction, archives, and directed replay. |
+| Story | v0.3 | Preview | Generated visual-novel episodes with bots, choices, maps, inventory, transcripts, shared PRISM menu behavior, and sparse spoken-scene mic presence. |
 | Arena | v0.0 | Planned | Moderated bot debate surface. |
 | Polling | v0.0 | Planned | AI-powered polling across bot groups. |
 | Feed | v0.0 | Planned | BotBook-style social feed. |
@@ -71,6 +71,9 @@ stages do not block the standalone preview.
 
 ### 2026-07-17
 
+- Bumped `Chat` to `v1.5`, `Zen` to `v1.4`, `Coffee` to `v1.7`, `Signal` to
+  `v0.7`, and `Story` to `v0.3` for the shared deterministic pre-speech breath
+  layer across substantial voiced bot lines and replay.
 - Bumped `Signal` to `v0.6` and `Coffee` to `v1.6` for the shared quiet foley
   layer, cup-synchronized Coffee sounds, bundled Signal studio room tone, and
   one-click ElevenLabs ident plus custom ambience generation. Coffee also

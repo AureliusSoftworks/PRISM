@@ -14452,6 +14452,7 @@ async function generateCoffeeBotReply(args: {
         listenerBotId: listenerBot.id,
         targetSource: listenerTarget.source,
         tableEnergy: sessionSettings.tableEnergy,
+        crossTalk: sessionSettings.crossTalk,
         listenerSocial: nextSocialByBotId[listenerBot.id] ?? null,
         eligible:
           turnKind === "autonomous" &&

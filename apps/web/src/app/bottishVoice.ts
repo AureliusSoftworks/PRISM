@@ -6,6 +6,7 @@ import {
 } from "@localai/shared";
 import {
   beginVoicePlaybackProgress,
+  playPreSpeechBreath,
   playRealtimeVoiceBytes,
   prepareRealtimeVoiceAudio,
   stopRealtimeVoiceAudio,
@@ -14,6 +15,8 @@ import {
   type VoicePlaybackLifecycle,
   type VoiceRoboticPlan,
 } from "./voiceEffects.ts";
+import type { PreSpeechBreathPlan } from "./preSpeechBreath.ts";
+import type { RoomAcousticsSend } from "./roomAcoustics.ts";
 import {
   readEnglishVoiceSynthesisClip,
   type EnglishVoiceSynthesisClip,
@@ -516,15 +519,25 @@ async function playPlan(
   expectedGeneration: number,
   seed: string,
   effectsEnabled: boolean,
-  lifecycle?: VoicePlaybackLifecycle
+  lifecycle?: VoicePlaybackLifecycle,
+  roomAcoustics?: RoomAcousticsSend,
+  preSpeechBreath?: PreSpeechBreathPlan | null,
 ): Promise<void> {
   if (plan.durationMs <= 0 || expectedGeneration !== generation) return;
+  await playPreSpeechBreath({
+    plan: preSpeechBreath,
+    profile,
+    roomAcoustics,
+    isCurrent: () => expectedGeneration === generation,
+  });
+  if (expectedGeneration !== generation) return;
   const bytes = encodeBottishPlanWave(plan);
   const played = await playRealtimeVoiceBytes({
     bytes,
     profile,
     seed,
     effectsEnabled,
+    roomAcoustics,
     lifecycle,
     alignment: plan.alignment,
     isCurrent: () => expectedGeneration === generation,
@@ -786,10 +799,19 @@ async function playBabble(
   expectedGeneration: number,
   seed: string,
   effectsEnabled: boolean,
-  lifecycle?: VoicePlaybackLifecycle
+  lifecycle?: VoicePlaybackLifecycle,
+  roomAcoustics?: RoomAcousticsSend,
+  preSpeechBreath?: PreSpeechBreathPlan | null,
 ): Promise<void> {
   if (expectedGeneration !== generation) return;
   const normalized = normalizeBottishPlaybackProfile(profile);
+  await playPreSpeechBreath({
+    plan: preSpeechBreath,
+    profile: normalized,
+    roomAcoustics,
+    isCurrent: () => expectedGeneration === generation,
+  });
+  if (expectedGeneration !== generation) return;
   const roboticPlan = buildBabbleRoboticPlan(text, normalized, seed);
   const played = await playRealtimeVoiceBytes({
     bytes,
@@ -798,6 +820,7 @@ async function playBabble(
     effectsEnabled,
     detuneCents: Math.round(normalized.pitch * 650),
     baseLowpassHz: 20_000,
+    roomAcoustics,
     lifecycle,
     roboticPlan,
     cleanRoboticCarrier: true,
@@ -820,7 +843,9 @@ export function enqueueBabbleVoice(
   seed: string,
   effectsEnabled = true,
   globalVolume = 1,
-  lifecycle?: VoicePlaybackLifecycle
+  lifecycle?: VoicePlaybackLifecycle,
+  roomAcoustics?: RoomAcousticsSend,
+  preSpeechBreath?: PreSpeechBreathPlan | null,
 ): Promise<void> {
   const expectedGeneration = generation;
   const playbackProfile = {
@@ -829,15 +854,19 @@ export function enqueueBabbleVoice(
   };
   queue = queue
     .catch(() => undefined)
-    .then(() => playBabble(
-      bytes,
-      sourceText,
-      playbackProfile,
-      expectedGeneration,
-      seed,
-      effectsEnabled,
-      lifecycle
-    ));
+    .then(() =>
+      playBabble(
+        bytes,
+        sourceText,
+        playbackProfile,
+        expectedGeneration,
+        seed,
+        effectsEnabled,
+        lifecycle,
+        roomAcoustics,
+        preSpeechBreath,
+      ),
+    );
   return queue;
 }
 
@@ -848,7 +877,9 @@ export function enqueueBottishVoice(
   effectsEnabled = true,
   globalVolume = 1,
   lifecycle?: VoicePlaybackLifecycle,
-  timing?: BottishPlaybackTiming
+  timing?: BottishPlaybackTiming,
+  roomAcoustics?: RoomAcousticsSend,
+  preSpeechBreath?: PreSpeechBreathPlan | null,
 ): Promise<void> {
   const expectedGeneration = generation;
   const playbackProfile = {
@@ -864,7 +895,18 @@ export function enqueueBottishVoice(
   );
   queue = queue
     .catch(() => undefined)
-    .then(() => playPlan(plan, playbackProfile, expectedGeneration, seed, effectsEnabled, lifecycle));
+    .then(() =>
+      playPlan(
+        plan,
+        playbackProfile,
+        expectedGeneration,
+        seed,
+        effectsEnabled,
+        lifecycle,
+        roomAcoustics,
+        preSpeechBreath,
+      ),
+    );
   return queue;
 }
 

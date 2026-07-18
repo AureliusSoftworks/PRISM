@@ -247,6 +247,59 @@ test("compiler creates gradual table mood rules without consulting the local mod
   );
 });
 
+test("compiler makes intimidation a strong session-start social influence", async () => {
+  let calls = 0;
+  const unusedProvider: LlmProvider = {
+    name: "local",
+    async generateResponse() {
+      calls += 1;
+      throw new Error("provider should not be needed");
+    },
+    async embedText() {
+      return [];
+    },
+  };
+  const result = await compileBotPowers({
+    provider: unusedProvider,
+    botName: "Darth Vader",
+    powers: [
+      {
+        version: 1,
+        id: "intimidation",
+        name: "Intimidation",
+        intent: "Strikes fear in other bots.",
+        enabled: true,
+        compileStatus: "draft",
+        compiled: null,
+      },
+    ],
+  });
+
+  assert.equal(calls, 0);
+  assert.equal(result.powers[0]?.compileStatus, "ready");
+  assert.deepEqual(result.powers[0]?.compiled, {
+    version: 1,
+    sourceHash: botPowerSourceHashV1(
+      "Intimidation",
+      "Strikes fear in other bots.",
+    ),
+    selfCue:
+      "Project quiet, disciplined menace without demanding that others describe their fear.",
+    observerCue:
+      "Darth Vader's controlled presence creates immediate pressure; let it register without abandoning your personality or role.",
+    effects: [
+      {
+        type: "social_influence",
+        trigger: "session_start",
+        polarity: "negative",
+        strength: "large",
+        targets: [{ kind: "all" }],
+      },
+    ],
+    ruleLabels: ["Intimidates the room"],
+  });
+});
+
 test("compiler makes bots who dislike coffee refuse it without consulting the local model", async () => {
   let calls = 0;
   const unusedProvider: LlmProvider = {

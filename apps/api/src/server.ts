@@ -200,6 +200,7 @@ import {
 } from "./elevenlabs-sound.ts";
 import {
   normalizeSignalAssetUpload,
+  normalizeSignalLogoImage,
   readSignalAssetSlot,
 } from "./signal-asset-upload.ts";
 import {
@@ -269,11 +270,14 @@ import {
   rejectSlateRevision,
   resolveSlateAccountDefaults,
   resolveSlateProjectSparkWildcards,
+  setSlateProjectCover,
   SlateShapeWriteConflictError,
   updateSlateProject,
 } from "./slate.ts";
+import { composeSlateProjectCoverPrompt } from "./slate-cover.ts";
 import {
   chatWithSlateProject,
+  generateSlateProjectTitle,
   listSlateProjectChatMessages,
   refreshSlateLivingSummary,
   resolveSlateProjectTitleSuggestion,
@@ -1033,7 +1037,6 @@ interface UserDbRow {
   experimental_dual_ollama_enabled: number;
   experimental_all_model_effort_enabled: number;
   coffee_experimental_table_angle_enabled: number;
-  signal_immersive_voice_effects_enabled: number;
   psychic_mode_enabled: number;
   comfyui_host: string | null;
   preferred_local_image_model: string | null;
@@ -1279,14 +1282,6 @@ function getUserRow(userId: string): UserDbRow {
   if (!row) {
     throw new Error("User not found.");
   }
-  const signalSettings = db
-    .prepare(
-      "SELECT signal_immersive_voice_effects_enabled FROM users WHERE id = ?",
-    )
-    .get(userId) as
-    { signal_immersive_voice_effects_enabled: number | null } | undefined;
-  row.signal_immersive_voice_effects_enabled =
-    signalSettings?.signal_immersive_voice_effects_enabled === 1 ? 1 : 0;
   const faceRotation = db
     .prepare(
       "SELECT prism_default_bot_face_eye_rotation_deg, prism_default_bot_face_eye_count FROM users WHERE id = ?",
@@ -2964,6 +2959,9 @@ async function generateAndPersistSignalArtworkAsset(args: {
             model: resolvedOpenAiImageModel,
             size: args.size,
             quality,
+            ...(args.kind === "logo"
+              ? { background: "transparent" as const }
+              : {}),
             signal: args.signal,
           });
       const downloadStartedAt = Date.now();
@@ -3010,6 +3008,9 @@ async function generateAndPersistSignalArtworkAsset(args: {
       "Signal artwork generation cancelled.",
       "AbortError",
     );
+  }
+  if (args.kind === "logo") {
+    imageBytes = (await normalizeSignalLogoImage(imageBytes)).pngBytes;
   }
   const persistenceStartedAt = Date.now();
   try {
@@ -3068,6 +3069,203 @@ async function generateAndPersistSignalArtworkAsset(args: {
     downloadMs,
     localPersistenceMs,
   });
+  return {
+    imageId,
+    imageUrl: displayUrl,
+    timings: { downloadMs, localPersistenceMs },
+  };
+}
+
+async function generateAndPersistSlateCoverAsset(args: {
+  userId: string;
+  prompt: string;
+  preferredProvider: ImageProviderName;
+  signal: AbortSignal;
+}): Promise<SignalArtworkGeneratedAsset> {
+  const user = getUserRow(args.userId);
+  const effectiveProvider = resolveImageProviderName({
+    savedProvider: user.preferred_image_provider,
+    requestedProvider: args.preferredProvider,
+    offlineOnly: false,
+  });
+  const preferredLocalImageModel =
+    user.preferred_local_image_model?.trim() ?? "";
+  const preferredOpenAiImageModel =
+    user.preferred_openai_image_model?.trim() ?? "";
+  const localImageDisabled = isDisabledModelChoice(preferredLocalImageModel);
+  const openAiImageDisabled = isDisabledModelChoice(preferredOpenAiImageModel);
+  const resolvedLocalImageModel = localImageDisabled
+    ? ""
+    : preferredLocalImageModel;
+  const resolvedOpenAiImageModel = openAiImageDisabled
+    ? ""
+    : DEFAULT_OPENAI_IMAGE_MODEL_ID;
+  const shouldRunLocal =
+    effectiveProvider === "local" ||
+    (openAiImageDisabled && Boolean(resolvedLocalImageModel));
+  if (effectiveProvider === "local" && localImageDisabled) {
+    throw new HttpError(
+      400,
+      "Local image generation is disabled. Choose a local image model before creating a Slate cover.",
+    );
+  }
+  if (!shouldRunLocal && openAiImageDisabled) {
+    throw new HttpError(
+      400,
+      "Online image generation is disabled. Choose an online image model before creating a Slate cover.",
+    );
+  }
+  if (shouldRunLocal && !resolvedLocalImageModel) {
+    throw new Error(
+      "Pick a local image model in Images, then try the Slate cover again.",
+    );
+  }
+
+  enterUsageSession({
+    db,
+    userId: args.userId,
+    privacyScope: "normal",
+    mode: "sandbox",
+    surface: "images",
+    conversationId: null,
+    botId: null,
+  });
+
+  const size = "1024x1536";
+  const quality = shouldRunLocal ? "standard" : "high";
+  const imageId = randomId(12);
+  const localRelPath = buildGeneratedImageRelativePath(args.userId, imageId);
+  const displayUrl = `/api/images/${encodeURIComponent(imageId)}/file`;
+  let provider: "openai" | "comfyui" | "ollama";
+  let model: string;
+  let revisedPrompt: string;
+  let storedUrl = displayUrl;
+  let imageBytes: Buffer;
+  let downloadMs = 0;
+
+  if (shouldRunLocal) {
+    const lenientFallbackModel =
+      user.lenient_local_image_fallback_model?.trim() ?? "";
+    const runLocal = (modelId: string) =>
+      generateLocalImageBytesByModelId({
+        modelId,
+        promptForModel: args.prompt,
+        size,
+        signal: args.signal,
+        comfyUiHost: user.comfyui_host,
+        comfyUiWorkflows: parseStoredComfyUiWorkflows(user.comfyui_workflows),
+        secondaryOllamaHost: user.secondary_ollama_host,
+        primaryOllamaHost: config.ollamaHost,
+      });
+    let output: Awaited<ReturnType<typeof generateLocalImageBytesByModelId>>;
+    try {
+      output = await runLocal(resolvedLocalImageModel);
+    } catch (error) {
+      if (
+        lenientFallbackModel &&
+        lenientFallbackModel !== resolvedLocalImageModel &&
+        shouldAttemptLenientLocalImageFallback(error)
+      ) {
+        output = await runLocal(lenientFallbackModel);
+      } else {
+        throw error;
+      }
+    }
+    provider = output.provider;
+    model = output.modelUsed;
+    revisedPrompt = args.prompt;
+    imageBytes = output.imageBytes;
+  } else {
+    const userKey = decryptUserKey(args.userId);
+    const apiKey =
+      getOpenAiApiKeyForUser(args.userId, userKey) ?? config.openAiApiKey;
+    const lenientFallbackModel =
+      user.lenient_local_image_fallback_model?.trim() ?? "";
+    try {
+      const result = await generateImage(args.prompt, apiKey, {
+        model: resolvedOpenAiImageModel,
+        size,
+        quality,
+        signal: args.signal,
+      });
+      const downloadStartedAt = Date.now();
+      imageBytes = await readOpenAiGeneratedImageBytes(result, args.signal);
+      downloadMs = Date.now() - downloadStartedAt;
+      provider = "openai";
+      model = result.model;
+      revisedPrompt = result.revisedPrompt;
+      storedUrl = result.url || displayUrl;
+    } catch (error) {
+      if (
+        !lenientFallbackModel ||
+        !shouldAttemptLenientLocalImageFallback(error)
+      ) {
+        throw error;
+      }
+      const output = await generateLocalImageBytesByModelId({
+        modelId: lenientFallbackModel,
+        promptForModel: args.prompt,
+        size,
+        signal: args.signal,
+        comfyUiHost: user.comfyui_host,
+        comfyUiWorkflows: parseStoredComfyUiWorkflows(user.comfyui_workflows),
+        secondaryOllamaHost: user.secondary_ollama_host,
+        primaryOllamaHost: config.ollamaHost,
+      });
+      provider = output.provider;
+      model = output.modelUsed;
+      revisedPrompt = args.prompt;
+      imageBytes = output.imageBytes;
+    }
+  }
+
+  if (args.signal.aborted) {
+    throw new DOMException("Slate cover generation cancelled.", "AbortError");
+  }
+  const persistenceStartedAt = Date.now();
+  try {
+    writeGeneratedImageBytes(localRelPath, imageBytes);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "write failed";
+    throw new Error(`Could not save generated image (${detail}).`);
+  }
+  await tryGenerateThumbAfterPngWrite(localRelPath);
+  const createdAt = new Date().toISOString();
+  try {
+    db.prepare(
+      `INSERT INTO images
+         (id, user_id, conversation_id, bot_id, related_bot_ids, origin, prompt,
+          revised_prompt, url, size, quality, provider, model, local_rel_path,
+          purpose, created_at)
+       VALUES (?, ?, NULL, NULL, '[]', 'slate_cover', ?, ?, ?, ?, ?, ?, ?, ?,
+               'slate_cover', ?)`,
+    ).run(
+      imageId,
+      args.userId,
+      args.prompt,
+      revisedPrompt,
+      storedUrl,
+      size,
+      quality,
+      provider,
+      model,
+      localRelPath,
+      createdAt,
+    );
+    recordImageUsage({
+      provider,
+      model,
+      purpose: "image_generation",
+      imageCount: 1,
+      imageSize: size,
+      imageQuality: quality,
+      createdAt,
+    });
+  } catch (error) {
+    tryUnlinkGeneratedImageFile(localRelPath);
+    throw error;
+  }
+  const localPersistenceMs = Date.now() - persistenceStartedAt;
   return {
     imageId,
     imageUrl: displayUrl,
@@ -3541,11 +3739,30 @@ function buildRoutes(): RouteDefinition[] {
       );
       json(ctx.res, 200, { ok: true, ...resolution });
     }),
+    route("POST", "/api/slate/title-suggestions", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const ai = slateAiForUser(userId);
+      const suggestion = await runWithUsageSession(
+        { db, userId, privacyScope: "normal", mode: "slate", surface: "slate" },
+        () =>
+          generateSlateProjectTitle(
+            {
+              source: body.source,
+              sourceKind: body.sourceKind,
+              currentTitle: body.currentTitle,
+            },
+            ai,
+          ),
+      );
+      json(ctx.res, 200, { ok: true, ...suggestion });
+    }),
     route("POST", "/api/slate/projects", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
       const project = createSlateProject(db, userId, {
         title: body.title,
+        titleOrigin: body.titleOrigin,
         spark: body.spark,
         seriesId: body.seriesId,
         sparkWildcards: body.sparkWildcards,
@@ -3567,6 +3784,76 @@ function buildRoutes(): RouteDefinition[] {
         ok: true,
         project: getSlateProject(db, userId, ctx.params.id),
       });
+    }),
+    route("POST", "/api/slate/projects/:id/cover", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const project = getSlateProject(db, userId, ctx.params.id);
+      const user = getUserRow(userId);
+      const body = ctx.body as Record<string, unknown>;
+      const preferredProvider: ImageProviderName =
+        body.preferredProvider === "local" ||
+        body.preferredProvider === "openai"
+          ? body.preferredProvider
+          : user.preferred_image_provider;
+      const prompt = composeSlateProjectCoverPrompt(project);
+      const acquired = await tryAcquireImageSlot({
+        userId,
+        conversationId: null,
+        botId: null,
+        mode: "sandbox",
+        incognito: false,
+        captionPrompt: `${project.title} cover`,
+        userMessage: `[Slate] Create ${project.title}'s cover`,
+        source: "slate_cover",
+        requestedSize: "1024x1536",
+      });
+      if (!acquired.ok) {
+        throw new HttpError(
+          503,
+          "Another image is generating right now. Slate kept the current cover.",
+        );
+      }
+
+      const revision = project.cover.revision + 1;
+      setSlateProjectCover(db, userId, project.id, {
+        ...project.cover,
+        seed: project.cover.seed || project.id,
+        prompt,
+        revision,
+        status: "generating",
+      });
+      try {
+        const asset = await generateAndPersistSlateCoverAsset({
+          userId,
+          prompt,
+          preferredProvider,
+          signal: acquired.job.abortController.signal,
+        });
+        const updated = setSlateProjectCover(db, userId, project.id, {
+          seed: project.cover.seed || project.id,
+          prompt,
+          imageUrl: asset.imageUrl,
+          imageId: asset.imageId,
+          revision,
+          status: "ready",
+        });
+        json(ctx.res, 201, { ok: true, project: updated });
+      } catch (error) {
+        try {
+          setSlateProjectCover(db, userId, project.id, {
+            ...project.cover,
+            seed: project.cover.seed || project.id,
+            prompt,
+            revision,
+            status: "failed",
+          });
+        } catch {
+          // The project may have been deleted while its non-blocking cover rendered.
+        }
+        throw error;
+      } finally {
+        await releaseImageSlotIfOwned(userId, acquired.job.id);
+      }
     }),
     route("GET", "/api/slate/projects/:id/summary", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -3611,6 +3898,7 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("POST", "/api/slate/projects/:id/title-suggestions", async (ctx) => {
       const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
       const ai = slateAiForUser(userId, ctx.params.id);
       const project = await runWithUsageSession(
         {
@@ -3620,7 +3908,10 @@ function buildRoutes(): RouteDefinition[] {
           mode: "slate",
           surface: "slate",
         },
-        () => suggestSlateProjectTitle(db, userId, ctx.params.id, ai),
+        () =>
+          suggestSlateProjectTitle(db, userId, ctx.params.id, ai, {
+            force: body.force === true,
+          }),
       );
       json(ctx.res, 200, { ok: true, project });
     }),
@@ -7339,7 +7630,9 @@ function buildRoutes(): RouteDefinition[] {
       const userKey = decryptUserKey(userId);
       const body = ctx.body as Record<string, unknown>;
       const field =
-        body.field === "topic" || body.field === "producerBrief"
+        body.field === "topic" ||
+        body.field === "producerBrief" ||
+        body.field === "booking"
           ? body.field
           : null;
       if (!field) {
@@ -7708,6 +8001,12 @@ function buildRoutes(): RouteDefinition[] {
                 body.voiceLevelsByBotId as BotcastShowPatchRequest["voiceLevelsByBotId"],
             }
           : {}),
+        ...(body.atmosphereMix !== undefined
+          ? {
+              atmosphereMix:
+                body.atmosphereMix as BotcastShowPatchRequest["atmosphereMix"],
+            }
+          : {}),
         ...(body.regenerateAtmosphere === true
           ? { regenerateAtmosphere: true }
           : {}),
@@ -7948,8 +8247,6 @@ function buildRoutes(): RouteDefinition[] {
           autoFallbackChain: parseStoredAutoFallbackChain(
             user.auto_fallback_chain,
           ),
-          immersiveVoiceEffectsEnabled:
-            user.signal_immersive_voice_effects_enabled === 1,
           providerFactory: providerFactoryOverride,
         },
       );
@@ -10178,7 +10475,10 @@ function buildRoutes(): RouteDefinition[] {
         if (
           listenerReactionText !== "mm-hm" &&
           listenerReactionText !== "I see" &&
-          listenerReactionText !== "hmm"
+          listenerReactionText !== "hmm" &&
+          listenerReactionText !== "right" &&
+          listenerReactionText !== "oh" &&
+          listenerReactionText !== "go on"
         ) {
           throw new HttpError(400, "Unsupported listener reaction.");
         }
@@ -10494,8 +10794,6 @@ function buildRoutes(): RouteDefinition[] {
             user.experimental_all_model_effort_enabled === 1,
           coffeeExperimentalTableAngleEnabled:
             user.coffee_experimental_table_angle_enabled === 1,
-          signalImmersiveVoiceEffectsEnabled:
-            user.signal_immersive_voice_effects_enabled === 1,
           psychicModeEnabled: user.psychic_mode_enabled === 1,
           autoModeEnabled: user.auto_switch_model === 1,
           autoFallbackChain: parseStoredAutoFallbackChain(
@@ -11000,8 +11298,6 @@ function buildRoutes(): RouteDefinition[] {
           user.experimental_all_model_effort_enabled,
         coffeeExperimentalTableAngleEnabled:
           user.coffee_experimental_table_angle_enabled,
-        signalImmersiveVoiceEffectsEnabled:
-          user.signal_immersive_voice_effects_enabled,
         psychicModeEnabled: user.psychic_mode_enabled,
         autoSwitchModel: user.auto_switch_model,
         autoFallbackChain: user.auto_fallback_chain,
@@ -11205,9 +11501,6 @@ function buildRoutes(): RouteDefinition[] {
         braveSearchTag,
         userId,
       );
-      db.prepare(
-        "UPDATE users SET signal_immersive_voice_effects_enabled = ? WHERE id = ?",
-      ).run(next.signalImmersiveVoiceEffectsEnabled ? 1 : 0, userId);
       json(ctx.res, 200, {
         ok: true,
         settings: {
@@ -11218,8 +11511,6 @@ function buildRoutes(): RouteDefinition[] {
             next.experimentalAllModelEffortEnabled === 1,
           coffeeExperimentalTableAngleEnabled:
             next.coffeeExperimentalTableAngleEnabled === 1,
-          signalImmersiveVoiceEffectsEnabled:
-            next.signalImmersiveVoiceEffectsEnabled,
           psychicModeEnabled: next.psychicModeEnabled === 1,
           autoModeEnabled: next.autoSwitchModel === 1,
           autoFallbackChain: parseStoredAutoFallbackChain(

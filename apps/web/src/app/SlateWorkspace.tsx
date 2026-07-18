@@ -6,15 +6,20 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type ReactNode,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import Image from "next/image";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import type {
   PromptWildcardRunMetadata,
   SlateAiProvider,
   SlateContinuityConcernCard,
   SlateContinuityConcernNextResponse,
   SlateContinuityConcernResolveResponse,
+  SlateGenerateTitleResponse,
   SlateLockedRange,
   SlateLivingSummary,
   SlateLivingSummaryResponse,
@@ -25,6 +30,7 @@ import type {
   SlateProjectPatchRequest,
   SlateProjectResponse,
   SlateProjectSummary,
+  SlateProjectTitleOrigin,
   SlateProseMode,
   SlateRevisionAction,
   SlateResolveSparkWildcardsResponse,
@@ -39,7 +45,7 @@ import type {
   SlateTitleSuggestionResponse,
 } from "@localai/shared";
 import { transformSlateLockedRangesForTextEdit } from "@localai/shared";
-import { FolderOpen, Trash2 } from "lucide-react";
+import { FolderOpen, ImageIcon, Trash2 } from "lucide-react";
 import {
   usePrismMenu,
   type PrismMenuAnchor,
@@ -62,7 +68,7 @@ import {
   slateReturnSplashShouldShow,
   slateSectionEditableFingerprint,
   slateSectionForStructure,
-  slateSuggestedProjectTitle,
+  type SlateProjectSourceMode,
   type SlateProjectStartStep,
   type SlateWorkspaceExportScopeChoice,
 } from "./slateWorkspaceState";
@@ -76,6 +82,7 @@ interface SlateWorkspaceProps {
 }
 
 type SaveState = "idle" | "saving" | "saved" | "error";
+type SlateEntryMode = "desk" | "create";
 
 interface SlateWildcardPreview {
   template: string;
@@ -88,6 +95,12 @@ interface SlateSectionSaveAttempt {
   expectedRevision: number;
   fingerprint: string;
   mutationId: string;
+}
+
+interface SlateCompanionBubble {
+  key: string;
+  message: SlateProjectChatMessage;
+  lifetimeMs: number;
 }
 
 interface SlateSectionConflict {
@@ -199,8 +212,60 @@ const SLATE_KEEPALIVE_BODY_MAX_BYTES = 60_000;
 const SLATE_ARCHIVE_MEDIA_TYPE = "application/vnd.prism.slate+zip";
 const SLATE_ARCHIVE_MAX_BYTES = 256 * 1024 * 1024;
 const SLATE_COMPANION_POSITION_KEY = "prism_slate_companion_position_v1";
+const SLATE_VISITED_KEY = "prism_slate_visited_v1";
 const SLATE_AUTO_MODEL_VALUE = "auto";
 const SLATE_TITLE_REVIEW_INTERVAL_CHARS = 12_000;
+const SLATE_COMPANION_RECOVERY_LIMIT = 3;
+
+function slateCompanionBubbleLifetimeMs(
+  message: SlateProjectChatMessage,
+): number {
+  if (message.role === "user") return 9_000;
+  return Math.min(42_000, Math.max(14_000, 8_000 + message.content.length * 42));
+}
+
+function readSlateHasVisited(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(SLATE_VISITED_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function slateTitleReviewWasHandled(projectId: string): boolean {
+  try {
+    return window.localStorage.getItem(
+      `prism_slate_title_review_v2:${projectId}`,
+    ) === "reviewed";
+  } catch {
+    return false;
+  }
+}
+
+function markSlateTitleReviewHandled(projectId: string): void {
+  try {
+    window.localStorage.setItem(
+      `prism_slate_title_review_v2:${projectId}`,
+      "reviewed",
+    );
+  } catch {
+    // The checkpoint can repeat if device-local storage is unavailable.
+  }
+}
+
+function slateProjectBookStyle(seed: string): CSSProperties {
+  let hash = 2166136261;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash ^= seed.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return {
+    "--slate-book-hue": `${(hash >>> 0) % 360}`,
+    "--slate-book-tilt": `${(((hash >>> 8) % 7) - 3) * 0.32}deg`,
+    "--slate-book-shift": `${(hash >>> 16) % 9}px`,
+  } as CSSProperties;
+}
 
 function slateContinuityArchiveRowCount(counts: SlateArchiveImportCounts): number {
   return counts.continuitySources +
@@ -314,11 +379,19 @@ export default function SlateWorkspace({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<SaveState>("idle");
+  const [entryMode, setEntryMode] = useState<SlateEntryMode>("desk");
+  const [hadVisitedBeforeThisMount] = useState(readSlateHasVisited);
   const [projectStartStep, setProjectStartStep] =
     useState<SlateProjectStartStep>("source");
-  const [existingMaterialOpen, setExistingMaterialOpen] = useState(false);
+  const [projectSourceMode, setProjectSourceMode] =
+    useState<SlateProjectSourceMode>("spark");
   const [earlyTitleOpen, setEarlyTitleOpen] = useState(false);
   const [title, setTitle] = useState("");
+  const [titleOrigin, setTitleOrigin] =
+    useState<SlateProjectTitleOrigin>("writer");
+  const [titleGenerating, setTitleGenerating] = useState(false);
+  const [creationTitleReason, setCreationTitleReason] = useState<string | null>(null);
+  const [generateCoverAfterCreate, setGenerateCoverAfterCreate] = useState(true);
   const [spark, setSpark] = useState("");
   const [wildcardMode, setWildcardMode] = useState(false);
   const [wildcardResolving, setWildcardResolving] = useState(false);
@@ -345,6 +418,9 @@ export default function SlateWorkspace({
   const [archiveFile, setArchiveFile] = useState<File | null>(null);
   const [archivePreview, setArchivePreview] =
     useState<SlateArchiveImportPreview | null>(null);
+  const [coverGeneratingProjectIds, setCoverGeneratingProjectIds] = useState<
+    Set<string>
+  >(() => new Set());
   const [projectPendingDeletion, setProjectPendingDeletion] =
     useState<SlateProjectSummary | null>(null);
   const [deletingProject, setDeletingProject] = useState(false);
@@ -352,8 +428,8 @@ export default function SlateWorkspace({
   const [modelCatalog, setModelCatalog] = useState<SlateModelCatalog | null>(null);
   const [livingSummary, setLivingSummary] = useState<SlateLivingSummary | null>(null);
   const [companionOpen, setCompanionOpen] = useState(false);
-  const [companionMessages, setCompanionMessages] = useState<
-    SlateProjectChatMessage[]
+  const [companionBubbles, setCompanionBubbles] = useState<
+    SlateCompanionBubble[]
   >([]);
   const [companionDraft, setCompanionDraft] = useState("");
   const [companionBusy, setCompanionBusy] = useState(false);
@@ -363,12 +439,15 @@ export default function SlateWorkspace({
   const [titleSuggestionNotice, setTitleSuggestionNotice] = useState<
     string | null
   >(null);
+  const [titleReviewDue, setTitleReviewDue] = useState(false);
   const autosaveTimerRef = useRef<number | null>(null);
   const sectionSaveInFlightRef = useRef<Promise<void> | null>(null);
   const recoveryRefreshTimerRef = useRef<number | null>(null);
   const sparkTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const archiveInputRef = useRef<HTMLInputElement | null>(null);
-  const companionMessagesRef = useRef<HTMLDivElement | null>(null);
+  const companionMessagesBufferRef = useRef<SlateProjectChatMessage[]>([]);
+  const companionBubbleSequenceRef = useRef(0);
+  const companionBubbleTimersRef = useRef<Map<string, number>>(new Map());
   const companionDragRef = useRef<{
     pointerId: number;
     startX: number;
@@ -376,6 +455,59 @@ export default function SlateWorkspace({
     origin: SlateCompanionPosition;
     moved: boolean;
   } | null>(null);
+
+  const clearCompanionBubbles = useCallback((): void => {
+    for (const timer of companionBubbleTimersRef.current.values()) {
+      window.clearTimeout(timer);
+    }
+    companionBubbleTimersRef.current.clear();
+    setCompanionBubbles([]);
+  }, []);
+
+  const showCompanionBubbles = useCallback(
+    (messages: readonly SlateProjectChatMessage[], replace = false): void => {
+      const nextMessages = messages.slice(-SLATE_COMPANION_RECOVERY_LIMIT);
+      if (replace) {
+        for (const timer of companionBubbleTimersRef.current.values()) {
+          window.clearTimeout(timer);
+        }
+        companionBubbleTimersRef.current.clear();
+      }
+      const bubbles = nextMessages.map((message) => {
+        companionBubbleSequenceRef.current += 1;
+        return {
+          key: `${message.id}:${companionBubbleSequenceRef.current}`,
+          message,
+          lifetimeMs: slateCompanionBubbleLifetimeMs(message),
+        };
+      });
+      setCompanionBubbles((current) =>
+        (replace ? bubbles : [...current, ...bubbles]).slice(
+          -SLATE_COMPANION_RECOVERY_LIMIT,
+        ),
+      );
+      for (const bubble of bubbles) {
+        const timer = window.setTimeout(() => {
+          companionBubbleTimersRef.current.delete(bubble.key);
+          setCompanionBubbles((current) =>
+            current.filter((candidate) => candidate.key !== bubble.key),
+          );
+        }, bubble.lifetimeMs);
+        companionBubbleTimersRef.current.set(bubble.key, timer);
+      }
+    },
+    [],
+  );
+
+  useEffect(
+    () => () => {
+      for (const timer of companionBubbleTimersRef.current.values()) {
+        window.clearTimeout(timer);
+      }
+      companionBubbleTimersRef.current.clear();
+    },
+    [],
+  );
 
   const adoptProject = useCallback((next: SlateProjectDetail): void => {
     projectRef.current = next;
@@ -406,11 +538,59 @@ export default function SlateWorkspace({
     activeSectionRef.current = activeSection;
   }, [activeSection]);
 
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SLATE_VISITED_KEY, "true");
+    } catch {
+      // Slate entry history is a device-local convenience, never project state.
+    }
+  }, []);
+
   const refreshProjects = useCallback(async (): Promise<SlateProjectSummary[]> => {
     const response = await slateApi<SlateProjectListResponse>("/api/slate/projects");
     setProjects(response.projects);
     return response.projects;
   }, []);
+
+  const synthesizeProjectCover = useCallback(
+    async (projectId: string, quiet = false): Promise<void> => {
+      setCoverGeneratingProjectIds((current) => {
+        const next = new Set(current);
+        next.add(projectId);
+        return next;
+      });
+      if (!quiet) setError(null);
+      try {
+        const response = await slateApi<SlateProjectResponse>(
+          `/api/slate/projects/${encodeURIComponent(projectId)}/cover`,
+          { method: "POST", body: JSON.stringify({}) },
+        );
+        setProjects((current) =>
+          current.map((item) =>
+            item.id === projectId ? response.project : item,
+          ),
+        );
+        if (projectRef.current?.id === projectId) {
+          adoptProject(response.project);
+        }
+      } catch (cause) {
+        if (!quiet) {
+          setError(
+            cause instanceof Error
+              ? cause.message
+              : "Slate could not create that cover.",
+          );
+        }
+      } finally {
+        setCoverGeneratingProjectIds((current) => {
+          const next = new Set(current);
+          next.delete(projectId);
+          return next;
+        });
+      }
+    },
+    [adoptProject],
+  );
 
   const loadModelCatalog = useCallback(async (): Promise<void> => {
     try {
@@ -438,7 +618,7 @@ export default function SlateWorkspace({
         `/api/slate/projects/${encodeURIComponent(projectId)}/chat`,
       );
       if (projectRef.current?.id === projectId) {
-        setCompanionMessages(response.messages);
+        companionMessagesBufferRef.current = response.messages;
       }
     },
     [],
@@ -660,7 +840,9 @@ export default function SlateWorkspace({
         setContinuityDirection("");
         setReturnSession(null);
         setLivingSummary(null);
-        setCompanionMessages([]);
+        setCompanionOpen(false);
+        clearCompanionBubbles();
+        companionMessagesBufferRef.current = [];
         setCompanionDraft("");
         setDismissedReturnSessionId(null);
         setContinuityConcern(null);
@@ -680,6 +862,7 @@ export default function SlateWorkspace({
     },
     [
       adoptProject,
+      clearCompanionBubbles,
       flushPendingManuscriptSave,
       loadContinuityConcern,
       loadCompanionMessages,
@@ -708,6 +891,13 @@ export default function SlateWorkspace({
             label: "Open project",
             onSelect: () => openProject(item.id),
           },
+          {
+            id: "create-cover",
+            icon: <ImageIcon />,
+            label: item.cover.imageId ? "Create new cover" : "Create cover",
+            disabled: coverGeneratingProjectIds.has(item.id),
+            onSelect: () => void synthesizeProjectCover(item.id),
+          },
           { id: "delete-project-separator", kind: "separator" },
           {
             id: "delete-project",
@@ -719,15 +909,18 @@ export default function SlateWorkspace({
         ],
       });
     },
-    [openMenu, openProject, theme],
+    [
+      coverGeneratingProjectIds,
+      openMenu,
+      openProject,
+      synthesizeProjectCover,
+      theme,
+    ],
   );
 
   useEffect(() => {
     let cancelled = false;
     void refreshProjects()
-      .then(async (items) => {
-        if (!cancelled && items[0]) await openProject(items[0].id);
-      })
       .catch((cause) => {
         if (!cancelled) {
           setError(cause instanceof Error ? cause.message : "Slate could not load projects.");
@@ -739,7 +932,7 @@ export default function SlateWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [openProject, refreshProjects]);
+  }, [refreshProjects]);
 
   useEffect(() => {
     if (!project?.id) return;
@@ -952,9 +1145,19 @@ export default function SlateWorkspace({
     const current = projectRef.current;
     const content = companionDraft.trim();
     if (!current || !content || companionBusy) return;
+    const optimisticMessage: SlateProjectChatMessage = {
+      id: `local-${Date.now()}`,
+      projectId: current.id,
+      role: "user",
+      content,
+      provider: null,
+      model: null,
+      createdAt: new Date().toISOString(),
+    };
     setCompanionBusy(true);
     setCompanionDraft("");
     setError(null);
+    showCompanionBubbles([optimisticMessage]);
     try {
       await flushPendingManuscriptSave();
       const response = await slateApi<SlateProjectChatResponse>(
@@ -962,7 +1165,11 @@ export default function SlateWorkspace({
         { method: "POST", body: JSON.stringify({ content }) },
       );
       if (projectRef.current?.id === current.id) {
-        setCompanionMessages(response.messages);
+        companionMessagesBufferRef.current = response.messages;
+        const reply = response.messages.findLast(
+          (message) => message.role === "assistant",
+        );
+        if (reply) showCompanionBubbles([reply]);
       }
     } catch (cause) {
       setCompanionDraft(content);
@@ -972,9 +1179,7 @@ export default function SlateWorkspace({
     }
   };
 
-  const requestTitleSuggestion = useCallback(async (
-    options: { quiet?: boolean } = {},
-  ): Promise<void> => {
+  const requestTitleSuggestion = useCallback(async (force = false): Promise<void> => {
     const current = projectRef.current;
     if (!current || titleSuggestionBusy) return;
     setTitleSuggestionBusy(true);
@@ -984,24 +1189,26 @@ export default function SlateWorkspace({
       await flushPendingManuscriptSave();
       const response = await slateApi<SlateTitleSuggestionResponse>(
         `/api/slate/projects/${encodeURIComponent(current.id)}/title-suggestions`,
-        { method: "POST", body: JSON.stringify({}) },
+        { method: "POST", body: JSON.stringify({ force }) },
       );
       adoptProject(response.project);
-      if (!options.quiet) {
-        setTitleSuggestionNotice(
-          response.project.titleSuggestion
-            ? null
+      if (titleReviewDue) {
+        markSlateTitleReviewHandled(current.id);
+        setTitleReviewDue(false);
+      }
+      setTitleSuggestionNotice(
+        response.project.titleSuggestion
+          ? null
+          : force
+            ? "Prism could not find a distinct alternative yet."
             : "Prism thinks the current title still fits.",
-        );
-      }
+      );
     } catch (cause) {
-      if (!options.quiet) {
-        setError(cause instanceof Error ? cause.message : "Prism could not reconsider the title.");
-      }
+      setError(cause instanceof Error ? cause.message : "Prism could not reconsider the title.");
     } finally {
       setTitleSuggestionBusy(false);
     }
-  }, [adoptProject, flushPendingManuscriptSave, titleSuggestionBusy]);
+  }, [adoptProject, flushPendingManuscriptSave, titleReviewDue, titleSuggestionBusy]);
 
   const resolveTitleSuggestion = async (
     resolution: "accepted" | "dismissed",
@@ -1064,13 +1271,18 @@ export default function SlateWorkspace({
       SLATE_COMPANION_POSITION_KEY,
       JSON.stringify(companionPosition),
     );
-    if (!drag.moved) setCompanionOpen((current) => !current);
+    if (!drag.moved) toggleCompanion();
   };
 
-  useEffect(() => {
-    const node = companionMessagesRef.current;
-    if (companionOpen && node) node.scrollTop = node.scrollHeight;
-  }, [companionMessages, companionOpen]);
+  const toggleCompanion = (): void => {
+    if (companionOpen) {
+      setCompanionOpen(false);
+      clearCompanionBubbles();
+      return;
+    }
+    setCompanionOpen(true);
+    showCompanionBubbles(companionMessagesBufferRef.current, true);
+  };
 
   const resolveSparkWildcards = async (force = false): Promise<SlateWildcardPreview> => {
     const template = spark.trim();
@@ -1125,28 +1337,87 @@ export default function SlateWorkspace({
     });
   };
 
+  const selectProjectSourceMode = (nextMode: SlateProjectSourceMode): void => {
+    setProjectSourceMode(nextMode);
+    setError(null);
+    setWildcardPreview(null);
+    if (nextMode === "material") setWildcardMode(false);
+    if (titleOrigin !== "writer") {
+      setTitle("");
+      setTitleOrigin("writer");
+      setCreationTitleReason(null);
+    }
+  };
+
+  const generateCreationTitle = async (
+    preparedSpark?: string,
+  ): Promise<boolean> => {
+    if (titleGenerating) return false;
+    const source =
+      projectSourceMode === "material"
+        ? existingMaterial
+        : (preparedSpark ?? wildcardPreview?.spark ?? spark);
+    setTitleGenerating(true);
+    setError(null);
+    try {
+      const response = await slateApi<SlateGenerateTitleResponse>(
+        "/api/slate/title-suggestions",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            source,
+            sourceKind: projectSourceMode,
+            ...(title.trim() && title.trim() !== "Untitled Story"
+              ? { currentTitle: title.trim() }
+              : {}),
+          }),
+        },
+      );
+      setTitle(response.title);
+      setTitleOrigin(projectSourceMode);
+      setCreationTitleReason(response.reason);
+      return true;
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Slate could not generate a title from that material.",
+      );
+      return false;
+    } finally {
+      setTitleGenerating(false);
+    }
+  };
+
   const advanceProjectStart = async (): Promise<void> => {
-    if (!slateProjectSourceIsReady({ spark, existingMaterial })) {
+    if (!slateProjectSourceIsReady({
+      sourceMode: projectSourceMode,
+      spark,
+      existingMaterial,
+    })) {
       setError("Begin with a creative spark or bring in material you already have.");
       return;
     }
-    const hasWildcards = SLATE_SUPPORTED_WILDCARD_RE.test(spark);
+    const hasWildcards =
+      projectSourceMode === "spark" && SLATE_SUPPORTED_WILDCARD_RE.test(spark);
     setError(null);
     setWildcardResolving(hasWildcards);
     try {
       const wildcardCreation = hasWildcards ? await resolveSparkWildcards() : null;
       const sourceSpark = wildcardCreation?.spark ?? slateProjectSparkForCreation({
+        sourceMode: projectSourceMode,
         spark,
         existingMaterial,
       });
-      setTitle((current) =>
-        slateSuggestedProjectTitle({
-          title: current,
-          spark: sourceSpark,
-          existingMaterial,
-        }),
-      );
       setProjectStartStep("title");
+      if (title.trim()) {
+        setTitleOrigin("writer");
+        setCreationTitleReason(null);
+      } else {
+        setTitle("Untitled Story");
+        setTitleOrigin("writer");
+        await generateCreationTitle(sourceSpark);
+      }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Slate could not prepare that beginning.");
     } finally {
@@ -1155,13 +1426,16 @@ export default function SlateWorkspace({
   };
 
   const createProject = async (titleOverride?: string): Promise<void> => {
+    const shouldGenerateCover = generateCoverAfterCreate;
     setBusy(true);
     setError(null);
     try {
-      const wildcardCreation = SLATE_SUPPORTED_WILDCARD_RE.test(spark)
+      const wildcardCreation =
+        projectSourceMode === "spark" && SLATE_SUPPORTED_WILDCARD_RE.test(spark)
         ? await resolveSparkWildcards()
         : null;
       const creationSpark = wildcardCreation?.spark ?? slateProjectSparkForCreation({
+        sourceMode: projectSourceMode,
         spark,
         existingMaterial,
       });
@@ -1169,13 +1443,14 @@ export default function SlateWorkspace({
         method: "POST",
         body: JSON.stringify({
           title: slateProjectTitleForCreation(titleOverride ?? title),
+          titleOrigin: titleOverride ? "writer" : titleOrigin,
           spark: creationSpark,
           ...(wildcardCreation
             ? { sparkWildcards: wildcardCreation.sparkWildcards }
             : {}),
         }),
       });
-      if (existingMaterial.trim()) {
+      if (projectSourceMode === "material" && existingMaterial.trim()) {
         response = await slateApi<SlateProjectResponse>(
           `/api/slate/projects/${encodeURIComponent(response.project.id)}`,
           {
@@ -1198,17 +1473,26 @@ export default function SlateWorkspace({
         response.project.structure[0]?.id ?? null,
       );
       await loadLivingSummary(response.project.id);
-      setCompanionMessages([]);
+      setCompanionOpen(false);
+      clearCompanionBubbles();
+      companionMessagesBufferRef.current = [];
       setTitle("");
+      setTitleOrigin("writer");
+      setCreationTitleReason(null);
       setSpark("");
+      setEntryMode("desk");
       setProjectStartStep("source");
-      setExistingMaterialOpen(false);
+      setProjectSourceMode("spark");
       setEarlyTitleOpen(false);
       setWildcardMode(false);
       setWildcardPreview(null);
       setExistingMaterial("");
+      setGenerateCoverAfterCreate(true);
       setSaveState("saved");
       await refreshProjects();
+      if (shouldGenerateCover) {
+        void synthesizeProjectCover(response.project.id);
+      }
       queueRecoveryStatusRefresh(response.project.id);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Slate could not create the project.");
@@ -1645,25 +1929,28 @@ export default function SlateWorkspace({
     selectedProjectId: project?.id ?? null,
     dismissedSessionId: dismissedReturnSessionId,
   });
+  const showFirstVisitWelcome =
+    !hadVisitedBeforeThisMount && projects.length === 0;
+  const showProjectCreation = showFirstVisitWelcome || entryMode === "create";
+  const existingMaterialOpen = projectSourceMode === "material";
 
   const totalManuscriptLength = sections.reduce(
     (total, section) => total + section.proseLength,
     0,
   );
   useEffect(() => {
-    if (!project || project.titleSuggestion || titleSuggestionBusy) return;
-    const milestone = Math.floor(
-      totalManuscriptLength / SLATE_TITLE_REVIEW_INTERVAL_CHARS,
-    );
-    if (milestone < 1) return;
-    const key = `prism_slate_title_review_v1:${project.id}:${milestone}`;
-    if (window.localStorage.getItem(key) === "checked") return;
-    window.localStorage.setItem(key, "checked");
-    void requestTitleSuggestion({ quiet: true });
+    if (
+      !project ||
+      project.titleOrigin !== "spark" ||
+      project.titleSuggestion ||
+      totalManuscriptLength < SLATE_TITLE_REVIEW_INTERVAL_CHARS
+    ) {
+      setTitleReviewDue(false);
+      return;
+    }
+    setTitleReviewDue(!slateTitleReviewWasHandled(project.id));
   }, [
     project,
-    requestTitleSuggestion,
-    titleSuggestionBusy,
     totalManuscriptLength,
   ]);
   const proseModelOptions = useMemo(() => {
@@ -1874,16 +2161,53 @@ export default function SlateWorkspace({
       ) : null}
 
       {!project ? (
-        <section className={styles.welcome}>
-          <div className={styles.welcomeCopy}>
-            <p className={styles.eyebrow}>A quiet creative-production desk</p>
-            <h1>Bring the spark. Direct the work.</h1>
-            <p>
-              Shape the story, let Slate carry the drafting labor, then approve only
-              the prose that earns its place.
-            </p>
-          </div>
-          <form
+        <section className={showFirstVisitWelcome ? styles.welcome : styles.deskHome}>
+          {showFirstVisitWelcome ? (
+            <div className={styles.welcomeCopy}>
+              <p className={styles.eyebrow}>A quiet creative-production desk</p>
+              <h1>Bring the spark. Direct the work.</h1>
+              <p>
+                Shape the story, let Slate carry the drafting labor, then approve only
+                the prose that earns its place.
+              </p>
+            </div>
+          ) : (
+            <header className={styles.deskHeader}>
+              <div>
+                <p className={styles.eyebrow}>
+                  {showProjectCreation ? "New project" : "Project shelf"}
+                </p>
+                <h1>{showProjectCreation ? "Begin the next work." : "Your Slate library."}</h1>
+                <p>
+                  {showProjectCreation
+                    ? "Start with a spark or bring pages you already have."
+                    : "Pull a work from the shelf, begin a new volume, or restore a portable backup."}
+                </p>
+              </div>
+              <div className={styles.deskActions}>
+                {showProjectCreation ? (
+                  <button
+                    type="button"
+                    className={styles.quietButton}
+                    onClick={() => setEntryMode("desk")}
+                  >
+                    Back to library
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className={styles.quietButton}
+                    disabled={archiveBusy}
+                    onClick={() => archiveInputRef.current?.click()}
+                  >
+                    {archiveBusy ? "Reading backup…" : "Restore backup"}
+                  </button>
+                )}
+              </div>
+            </header>
+          )}
+          {showProjectCreation ? (
+            <form
             className={styles.createCard}
             data-tutorial-target="slate-create-project"
             onSubmit={(event) => {
@@ -1902,38 +2226,46 @@ export default function SlateWorkspace({
                   <h2>What should Slate begin with?</h2>
                   <p>A premise, a scene, a feeling, or pages you already wrote.</p>
                 </header>
-                <label>
-                  Creative spark <span>one sentence is enough</span>
-                  <textarea
-                    ref={sparkTextareaRef}
-                    value={spark}
-                    onChange={(event) => {
-                      const nextSpark = event.target.value;
-                      setSpark(nextSpark);
-                      if (SLATE_SUPPORTED_WILDCARD_RE.test(nextSpark)) {
-                        setWildcardMode(true);
-                      }
-                      setWildcardPreview(null);
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-                        event.preventDefault();
-                        void advanceProjectStart();
-                      }
-                    }}
-                    placeholder="A promise, an image, a problem, a voice…"
-                    rows={5}
-                  />
-                </label>
+                {!existingMaterialOpen ? (
+                  <label>
+                    Creative spark <span>one sentence is enough</span>
+                    <textarea
+                      ref={sparkTextareaRef}
+                      value={spark}
+                      onChange={(event) => {
+                        const nextSpark = event.target.value;
+                        setSpark(nextSpark);
+                        if (SLATE_SUPPORTED_WILDCARD_RE.test(nextSpark)) {
+                          setWildcardMode(true);
+                        }
+                        setWildcardPreview(null);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                          event.preventDefault();
+                          void advanceProjectStart();
+                        }
+                      }}
+                      placeholder="A promise, an image, a problem, a voice…"
+                      rows={5}
+                    />
+                  </label>
+                ) : null}
 
-                <div className={styles.sourceOptions} aria-label="Optional ways to begin">
+                <div className={styles.sourceOptions} aria-label="Ways to begin">
                   <button
                     type="button"
                     className={styles.quietButton}
-                    aria-expanded={existingMaterialOpen}
-                    onClick={() => setExistingMaterialOpen((current) => !current)}
+                    aria-pressed={existingMaterialOpen}
+                    onClick={() =>
+                      selectProjectSourceMode(
+                        existingMaterialOpen ? "spark" : "material",
+                      )
+                    }
                   >
-                    {existingMaterialOpen ? "Hide existing material" : "Bring existing material"}
+                    {existingMaterialOpen
+                      ? "Use a creative spark instead"
+                      : "Bring existing material"}
                   </button>
                   <button
                     type="button"
@@ -1968,13 +2300,17 @@ export default function SlateWorkspace({
                     Working title <span>we will confirm it next</span>
                     <input
                       value={title}
-                      onChange={(event) => setTitle(event.target.value)}
+                      onChange={(event) => {
+                        setTitle(event.target.value);
+                        setTitleOrigin("writer");
+                      }}
                       maxLength={180}
                     />
                   </label>
                 ) : null}
 
-                <div className={styles.wildcardBuilder} data-enabled={wildcardMode ? "true" : undefined}>
+                {!existingMaterialOpen ? (
+                  <div className={styles.wildcardBuilder} data-enabled={wildcardMode ? "true" : undefined}>
                   <button
                     type="button"
                     className={styles.wildcardToggle}
@@ -2023,7 +2359,8 @@ export default function SlateWorkspace({
                       ) : null}
                     </div>
                   ) : null}
-                </div>
+                  </div>
+                ) : null}
 
                 <button
                   type="submit"
@@ -2031,12 +2368,16 @@ export default function SlateWorkspace({
                   disabled={
                     busy ||
                     wildcardResolving ||
-                    !slateProjectSourceIsReady({ spark, existingMaterial })
+                    !slateProjectSourceIsReady({
+                      sourceMode: projectSourceMode,
+                      spark,
+                      existingMaterial,
+                    })
                   }
                 >
                   {wildcardResolving ? "Preparing…" : "Continue"}
                 </button>
-                <p className={styles.keyboardHint}>⌘ / Ctrl + Enter continues from either writing field.</p>
+                <p className={styles.keyboardHint}>⌘ / Ctrl + Enter continues from the active writing field.</p>
                 <div className={styles.restoreEntry}>
                   <span>Already have a .slate backup?</span>
                   <button
@@ -2054,31 +2395,76 @@ export default function SlateWorkspace({
                 <header className={styles.startStepHeader}>
                   <span>2 of 2</span>
                   <h2>Give the work a name.</h2>
-                  <p>Slate suggested a working title. Keep it, change it, or skip naming for now.</p>
+                  <p>
+                    {titleOrigin === "writer"
+                      ? title.trim() === "Untitled Story"
+                        ? "Name it yourself, ask Slate to generate a title, or keep it untitled for now."
+                        : "Keep the working title you supplied, change it, or skip naming for now."
+                      : `Slate generated a working title from your ${existingMaterialOpen ? "material" : "spark"}. Keep it, change it, or ask for another.`}
+                  </p>
                 </header>
                 <div className={styles.sourceRecap}>
-                  <span>{wildcardPreview ? "Resolved spark" : existingMaterial.trim() && !spark.trim() ? "Material ready" : "Your spark"}</span>
+                  <span>{wildcardPreview ? "Resolved spark" : existingMaterialOpen ? "Material ready" : "Your spark"}</span>
                   <p>
-                    {wildcardPreview?.spark ?? (spark.trim() || "Your imported pages are ready at the desk.")}
+                    {wildcardPreview?.spark ?? (existingMaterialOpen
+                      ? "Your imported pages are ready at the desk."
+                      : spark.trim())}
                   </p>
-                  {existingMaterial.trim() ? (
+                  {existingMaterialOpen && existingMaterial.trim() ? (
                     <small>{existingMaterial.trim().split(/\s+/u).length.toLocaleString()} imported words</small>
                   ) : null}
                 </div>
-                <label>
-                  Working title
+                <div className={styles.titleGenerator}>
+                  <label>
+                    Working title
+                    <input
+                      value={title}
+                      disabled={titleGenerating}
+                      onChange={(event) => {
+                        setTitle(event.target.value);
+                        setTitleOrigin("writer");
+                        setCreationTitleReason(null);
+                      }}
+                      maxLength={180}
+                      autoFocus
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className={styles.quietButton}
+                    disabled={busy || titleGenerating}
+                    onClick={() => void generateCreationTitle()}
+                  >
+                    {titleGenerating
+                      ? "Finding the title…"
+                      : title.trim() === "Untitled Story"
+                        ? "Generate title"
+                        : "Generate another title"}
+                  </button>
+                  {creationTitleReason ? <p>{creationTitleReason}</p> : null}
+                </div>
+                <label className={styles.coverChoice}>
                   <input
-                    value={title}
-                    onChange={(event) => setTitle(event.target.value)}
-                    maxLength={180}
-                    autoFocus
+                    type="checkbox"
+                    checked={generateCoverAfterCreate}
+                    disabled={busy || titleGenerating}
+                    onChange={(event) =>
+                      setGenerateCoverAfterCreate(event.target.checked)
+                    }
                   />
+                  <span>
+                    <strong>Create a book cover</strong>
+                    <small>
+                      Slate opens the manuscript first, then uses your saved image
+                      provider to render the cover.
+                    </small>
+                  </span>
                 </label>
                 <div className={styles.startActions}>
                   <button
                     type="button"
                     className={styles.quietButton}
-                    disabled={busy}
+                    disabled={busy || titleGenerating}
                     onClick={() => {
                       setError(null);
                       setEarlyTitleOpen(Boolean(title.trim()));
@@ -2090,73 +2476,119 @@ export default function SlateWorkspace({
                   <button
                     type="submit"
                     className={styles.primaryButton}
-                    disabled={busy || !title.trim()}
+                    disabled={busy || titleGenerating || !title.trim()}
                   >
-                    {busy ? "Creating…" : "Create project"}
+                    {busy
+                      ? "Creating…"
+                      : titleGenerating
+                        ? "Finding the title…"
+                        : "Create project"}
                   </button>
                 </div>
                 <button
                   type="button"
                   className={styles.skipTitle}
-                  disabled={busy}
+                  disabled={busy || titleGenerating}
                   onClick={() => void createProject("Untitled Story")}
                 >
                   Skip naming · use Untitled Story
                 </button>
               </div>
             )}
-          </form>
-          {projects.length > 0 ? (
+            </form>
+          ) : null}
+          {!showProjectCreation ? (
             <div className={styles.projectShelf}>
-              <h2>Projects</h2>
-              {projects.map((item) => {
-                const menuId = `slate-project-actions-${item.id}`;
-                const menuOpen = activeMenu?.id === menuId;
-                return (
-                  <div
-                    key={item.id}
-                    className={styles.projectCard}
-                    onContextMenu={(event) => {
-                      event.preventDefault();
-                      openProjectActionsMenu(item, {
-                        kind: "pointer",
-                        x: event.clientX,
-                        y: event.clientY,
-                      });
-                    }}
-                  >
-                    <button
-                      type="button"
-                      className={styles.projectCardOpen}
-                      onClick={() => void openProject(item.id)}
-                    >
-                      <strong>{item.title}</strong>
-                      <span>{readableUpdatedAt(item.updatedAt)}</span>
-                    </button>
-                    <button
-                      type="button"
-                      className={styles.projectActionsButton}
-                      aria-label={`Project actions for ${item.title}`}
-                      aria-haspopup="menu"
-                      aria-expanded={menuOpen}
-                      aria-controls={menuOpen ? menuId : undefined}
-                      onClick={(event) => {
-                        if (menuOpen) {
-                          closeMenu();
-                          return;
-                        }
+              <div className={styles.shelfHeading}>
+                <h2>{projects.length > 0 ? "Recently edited" : "First shelf"}</h2>
+                <span>
+                  {projects.length} {projects.length === 1 ? "volume" : "volumes"}
+                </span>
+              </div>
+              <div className={styles.shelfBooks}>
+                {projects.map((item) => {
+                  const menuId = `slate-project-actions-${item.id}`;
+                  const menuOpen = activeMenu?.id === menuId;
+                  const coverGenerating = coverGeneratingProjectIds.has(item.id);
+                  return (
+                    <div
+                      key={item.id}
+                      className={styles.projectBook}
+                      style={slateProjectBookStyle(item.cover.seed || item.id)}
+                      data-cover-ready={item.cover.imageUrl ? "true" : undefined}
+                      onContextMenu={(event) => {
+                        event.preventDefault();
                         openProjectActionsMenu(item, {
-                          kind: "element",
-                          element: event.currentTarget,
-                          preferredPlacement: "bottom-end",
+                          kind: "pointer",
+                          x: event.clientX,
+                          y: event.clientY,
                         });
                       }}
                     >
-                      ⋯
-                    </button>
-                  </div>
-                );
-              })}
+                      <button
+                        type="button"
+                        className={styles.projectBookOpen}
+                        onClick={() => void openProject(item.id)}
+                      >
+                        <span className={styles.bookCover}>
+                          {item.cover.imageUrl ? (
+                            <Image
+                              src={item.cover.imageUrl}
+                              alt=""
+                              fill
+                              sizes="156px"
+                              unoptimized
+                            />
+                          ) : null}
+                          <span className={styles.bookPrismMark} aria-hidden="true" />
+                          <span className={styles.bookCoverCopy}>
+                            <strong>{item.title}</strong>
+                            <small>{item.phase}</small>
+                          </span>
+                          {coverGenerating ? (
+                            <span className={styles.bookRendering}>Rendering cover…</span>
+                          ) : null}
+                        </span>
+                        <span className={styles.bookDetails}>
+                          <span>{item.manuscriptLength.toLocaleString()} characters</span>
+                          <span>Edited {readableUpdatedAt(item.updatedAt)}</span>
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.projectActionsButton}
+                        aria-label={`Project actions for ${item.title}`}
+                        aria-haspopup="menu"
+                        aria-expanded={menuOpen}
+                        aria-controls={menuOpen ? menuId : undefined}
+                        onClick={(event) => {
+                          if (menuOpen) {
+                            closeMenu();
+                            return;
+                          }
+                          openProjectActionsMenu(item, {
+                            kind: "element",
+                            element: event.currentTarget,
+                            preferredPlacement: "bottom-end",
+                          });
+                        }}
+                      >
+                        ⋯
+                      </button>
+                    </div>
+                  );
+                })}
+                <button
+                  type="button"
+                  className={styles.newProjectBook}
+                  data-tutorial-target="slate-create-project"
+                  onClick={() => setEntryMode("create")}
+                >
+                  <span aria-hidden="true">＋</span>
+                  <strong>New project</strong>
+                  <small>Place another work on the shelf</small>
+                </button>
+              </div>
             </div>
           ) : null}
         </section>
@@ -2180,6 +2612,7 @@ export default function SlateWorkspace({
                       setProject(null);
                       setSections([]);
                       setActiveSection(null);
+                      setEntryMode("desk");
                       setReturnSession(null);
                       setDismissedReturnSessionId(null);
                       setContinuityConcern(null);
@@ -2317,14 +2750,28 @@ export default function SlateWorkspace({
               <div>
                 <p className={styles.eyebrow}>{project.title} · {project.phase}</p>
                 <h1>{activeSection?.title ?? project.title}</h1>
-                <button
-                  type="button"
-                  className={styles.titleSuggestionTrigger}
-                  disabled={titleSuggestionBusy || busy}
-                  onClick={() => void requestTitleSuggestion()}
-                >
-                  {titleSuggestionBusy ? "Prism is listening…" : "Could this title be stronger?"}
-                </button>
+                <div className={styles.bookIdentityActions}>
+                  <button
+                    type="button"
+                    className={styles.titleSuggestionTrigger}
+                    disabled={titleSuggestionBusy || busy}
+                    onClick={() => void requestTitleSuggestion(true)}
+                  >
+                    {titleSuggestionBusy ? "Prism is listening…" : "Generate a new title"}
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.titleSuggestionTrigger}
+                    disabled={coverGeneratingProjectIds.has(project.id)}
+                    onClick={() => void synthesizeProjectCover(project.id)}
+                  >
+                    {coverGeneratingProjectIds.has(project.id)
+                      ? "Rendering cover…"
+                      : project.cover.imageId
+                        ? "Generate a new cover"
+                        : "Generate a cover"}
+                  </button>
+                </div>
                 {titleSuggestionNotice ? (
                   <span className={styles.titleSuggestionNotice}>{titleSuggestionNotice}</span>
                 ) : null}
@@ -2504,6 +2951,33 @@ export default function SlateWorkspace({
                     <p>{livingSummary.text}</p>
                   </details>
                 ) : null}
+              </section>
+            ) : null}
+            {titleReviewDue && !project.titleSuggestion ? (
+              <section
+                className={styles.titleSuggestionCard}
+                data-kind="title-checkpoint"
+                aria-label="Working title checkpoint"
+                aria-live="polite"
+              >
+                <div>
+                  <span>Working title checkpoint</span>
+                  <h2>The draft has grown beyond its opening spark.</h2>
+                  <p>
+                    Check whether “{project.title}” still names the work it has become.
+                    Slate will suggest a change only if it finds a stronger fit.
+                  </p>
+                </div>
+                <footer>
+                  <button
+                    type="button"
+                    className={styles.primaryButton}
+                    disabled={titleSuggestionBusy}
+                    onClick={() => void requestTitleSuggestion()}
+                  >
+                    {titleSuggestionBusy ? "Reviewing…" : "Review working title"}
+                  </button>
+                </footer>
               </section>
             ) : null}
             {project.titleSuggestion ? (
@@ -2803,55 +3277,57 @@ export default function SlateWorkspace({
         <div
           className={styles.companionAnchor}
           data-dock={companionPosition.x < 0.5 ? "left" : "right"}
+          data-vertical={companionPosition.y < 0.48 ? "below" : "above"}
           style={{
             left: `${companionPosition.x * 100}%`,
             top: `${companionPosition.y * 100}%`,
           }}
         >
-          {companionOpen ? (
-            <section
-              id="slate-project-companion"
-              className={styles.companionPanel}
-              aria-label="Chat with this Slate project"
-            >
-              <header>
-                <div>
-                  <span>Prism · project side chat</span>
-                  <strong>{project.title}</strong>
-                </div>
-                <button
-                  type="button"
-                  aria-label="Collapse project chat"
-                  onClick={() => setCompanionOpen(false)}
-                >
-                  −
-                </button>
-              </header>
-              <div ref={companionMessagesRef} className={styles.companionMessages}>
-                {companionMessages.length === 0 ? (
-                  <p className={styles.companionEmpty}>
-                    Ask about the draft, test an idea, compare directions, or talk
-                    through what the project needs. Nothing here edits the manuscript.
-                  </p>
-                ) : (
-                  companionMessages.map((message) => (
-                    <article key={message.id} data-role={message.role}>
-                      <span>{message.role === "assistant" ? "Prism" : "You"}</span>
-                      <p>{message.content}</p>
-                      {message.role === "assistant" && message.model ? (
-                        <small>{message.model}</small>
-                      ) : null}
-                    </article>
-                  ))
-                )}
+          <div className={styles.companionConversation}>
+            {companionBubbles.length > 0 || companionBusy ? (
+              <div
+                className={styles.companionBubbleCloud}
+                aria-live="polite"
+                aria-label="Ephemeral project conversation"
+              >
+                {companionBubbles.map((bubble) => (
+                  <article
+                    key={bubble.key}
+                    className={styles.companionBubble}
+                    data-role={bubble.message.role}
+                    style={
+                      {
+                        "--companion-bubble-life": `${bubble.lifetimeMs}ms`,
+                      } as CSSProperties
+                    }
+                  >
+                    <span>
+                      {bubble.message.role === "assistant" ? "Prism" : "You"}
+                    </span>
+                    <div className={styles.companionMarkdown}>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {bubble.message.content}
+                      </ReactMarkdown>
+                    </div>
+                  </article>
+                ))}
                 {companionBusy ? (
-                  <article data-role="assistant" data-thinking="true">
+                  <article
+                    className={styles.companionThinkingBubble}
+                    data-role="assistant"
+                    role="status"
+                  >
                     <span>Prism</span>
-                    <p>Reading the project…</p>
+                    <p>Refracting the idea…</p>
                   </article>
                 ) : null}
               </div>
+            ) : null}
+            {companionOpen ? (
               <form
+                id="slate-project-companion"
+                className={styles.companionComposerBubble}
+                aria-label={`Talk with ${project.title}`}
                 onSubmit={(event) => {
                   event.preventDefault();
                   void sendCompanionMessage();
@@ -2860,23 +3336,43 @@ export default function SlateWorkspace({
                 <textarea
                   value={companionDraft}
                   onChange={(event) => setCompanionDraft(event.target.value)}
-                  placeholder="Talk with the project…"
-                  rows={3}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      toggleCompanion();
+                    } else if (
+                      event.key === "Enter" &&
+                      (event.metaKey || event.ctrlKey)
+                    ) {
+                      event.preventDefault();
+                      event.currentTarget.form?.requestSubmit();
+                    }
+                  }}
+                  placeholder="Catch the next idea…"
+                  aria-label="Message the project companion"
+                  rows={2}
                 />
-                <button
-                  type="submit"
-                  disabled={companionBusy || !companionDraft.trim()}
-                >
-                  Send
-                </button>
+                <footer>
+                  <small>Ideas fade · the last 3 can recover after a close</small>
+                  <button
+                    type="submit"
+                    disabled={companionBusy || !companionDraft.trim()}
+                  >
+                    Send
+                  </button>
+                </footer>
               </form>
-            </section>
-          ) : null}
+            ) : null}
+          </div>
           <button
             type="button"
             className={styles.companionAvatar}
             data-tutorial-target="slate-project-chat"
-            aria-label={companionOpen ? "Move or collapse Prism project chat" : "Move or open Prism project chat"}
+            aria-label={
+              companionOpen
+                ? "Move or close the ephemeral Prism companion"
+                : "Move or open the ephemeral Prism companion"
+            }
             aria-expanded={companionOpen}
             aria-controls="slate-project-companion"
             onPointerDown={beginCompanionDrag}
@@ -2886,13 +3382,14 @@ export default function SlateWorkspace({
               companionDragRef.current = null;
             }}
             onClick={(event) => {
-              if (event.detail === 0) setCompanionOpen((current) => !current);
+              if (event.detail === 0) toggleCompanion();
             }}
           >
-            <span className={styles.companionAvatarScreen} aria-hidden="true">
-              <span>◇</span>
+            <span className={styles.companionAvatarOrb} aria-hidden="true">
+              <svg viewBox="0 0 32 32" focusable="false">
+                <path d="M16 5.2 27 25H5Z" />
+              </svg>
             </span>
-            <small>PRISM</small>
           </button>
         </div>
       ) : null}

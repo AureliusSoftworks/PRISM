@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { describe, it } from "node:test";
 import {
+  BOTCAST_DEFAULT_STUDIO_ATMOSPHERE_MIX,
   BOTCAST_DEFAULT_STUDIO_LAYOUT,
   BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS,
   botPowerSourceHashV1,
@@ -165,6 +166,39 @@ function invisibleGuestPowers(): string {
   return JSON.stringify(powers);
 }
 
+function intimidatingGuestPowers(): string {
+  const name = "Intimidation";
+  const intent = "Strikes fear in other bots.";
+  return JSON.stringify([
+    {
+      version: 1,
+      id: "intimidation",
+      name,
+      intent,
+      enabled: true,
+      compileStatus: "ready",
+      compiled: {
+        version: 1,
+        sourceHash: botPowerSourceHashV1(name, intent),
+        selfCue:
+          "Project quiet, disciplined menace without demanding that others describe their fear.",
+        observerCue:
+          "Darth Vader's controlled presence creates immediate pressure; let it register without abandoning your personality or role.",
+        effects: [
+          {
+            type: "social_influence",
+            trigger: "session_start",
+            polarity: "negative",
+            strength: "large",
+            targets: [{ kind: "all" }],
+          },
+        ],
+        ruleLabels: ["Intimidates the room"],
+      },
+    },
+  ]);
+}
+
 describe("Botcast persistence and isolation", () => {
   it("persists one candid review from a non-participant Library persona", async () => {
     const db = fixture();
@@ -305,6 +339,24 @@ describe("Botcast persistence and isolation", () => {
         show.atmosphereAudio.audioUrl,
         /default-studio-room-loop\.mp3$/u,
       );
+      assert.deepEqual(
+        show.atmosphereMix,
+        BOTCAST_DEFAULT_STUDIO_ATMOSPHERE_MIX,
+      );
+
+      const remixed = updateBotcastShow(db, "user-1", show.id, {
+        atmosphereMix: { background: 0.12, grain: 0.008, foley: 1.4 },
+      });
+      assert.deepEqual(remixed.atmosphereMix, {
+        background: 0.12,
+        grain: 0.008,
+        foley: 1.4,
+      });
+      assert.deepEqual(getBotcastShow(db, "user-1", show.id).atmosphereMix, {
+        background: 0.12,
+        grain: 0.008,
+        foley: 1.4,
+      });
 
       const first = storeBotcastShowIntroAudio(db, "user-1", show.id, {
         model: "music_v2",
@@ -473,7 +525,47 @@ describe("Botcast persistence and isolation", () => {
       assert.equal(options[0]?.maxTokens, 160);
       assert.match(
         captures[0]!.map((message) => message.content).join("\n"),
-        /one to three concise sentences, usually 20 to 65 spoken words/u,
+        /two to four concise sentences, usually 35 to 90 spoken words/u,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("gives the opening host a natural show, self, and guest introduction contract", async () => {
+    const db = fixture();
+    const captures: ProviderMessage[][] = [];
+    const provider = recordingProvider(
+      [
+        "Welcome to the Frequency Room. I'm Mara Vale, and today I'm joined by Ivo Stone to examine what invention owes the people it disrupts.",
+      ],
+      captures,
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "The responsibility behind celebrated breakthroughs",
+      });
+
+      const advanced = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+
+      const prompt = captures[0]!.map((message) => message.content).join("\n");
+      assert.ok(prompt.includes(`exact show name "${show.name}"`));
+      assert.match(prompt, /identifies you by name as "Mara Vale"/u);
+      assert.match(prompt, /booked guest by exact name as "Ivo Stone"/u);
+      assert.match(prompt, /Complete all three introductions before asking/u);
+      assert.match(prompt, /not generic podcast copy/u);
+      assert.match(prompt, /two to four concise sentences/u);
+      assert.equal(
+        advanced.message?.content,
+        `Welcome to ${show.name}. I'm Mara Vale, and today I'm joined by Ivo Stone to explore The responsibility behind celebrated breakthroughs. Ivo Stone, where should we begin?`,
       );
     } finally {
       db.close();
@@ -661,9 +753,18 @@ describe("Botcast persistence and isolation", () => {
       assert.match(openingHostPrompt, /guest chair appears empty/u);
       assert.doesNotMatch(openingHostPrompt, /Only Light Yagami can perceive/u);
       assert.match(guestPrompt, /listening audience can hear you/u);
-      assert.match(guestPrompt, /The chair is empty/u);
-      assert.match(returningHostPrompt, /The chair is empty/u);
+      assert.match(guestPrompt, /The guest chair is empty/u);
+      assert.match(returningHostPrompt, /The guest chair is empty/u);
+      assert.match(
+        returningHostPrompt,
+        /Advance a self-contained editorial argument/u,
+      );
       assert.doesNotMatch(returningHostPrompt, /She really cannot see me/u);
+      assert.match(finalTurn.message?.content ?? "", /central question/u);
+      assert.doesNotMatch(
+        finalTurn.message?.content ?? "",
+        /empty chair|booking vanished/iu,
+      );
       assert.equal(
         episode.events.some(
           (event) =>
@@ -672,6 +773,102 @@ describe("Botcast persistence and isolation", () => {
               ?.messageId === guestTurn.message?.id,
         ),
         false,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("makes session-start intimidation a bounded, replayable Signal pressure", async () => {
+    const db = fixture();
+    const captures: ProviderMessage[][] = [];
+    const provider = recordingProvider(
+      [
+        "Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Darth Vader to explore what remains of authority when fear no longer works. Darth Vader, where should we begin?",
+        "Authority remains when discipline outlives spectacle.",
+        "Then give me one concrete example where discipline survived without fear.",
+      ],
+      captures,
+    );
+    try {
+      db.prepare(
+        "UPDATE bots SET name = 'Darth Vader', powers_json = ? WHERE id = 'guest-1'",
+      ).run(intimidatingGuestPowers());
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      let episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "What remains of authority when fear no longer works?",
+      });
+
+      const influence = episode.events.find(
+        (event) => event.kind === "power_effect",
+      );
+      assert.deepEqual(influence?.payload, {
+        v: 1,
+        effect: "social_influence",
+        powerId: "intimidation",
+        powerName: "Intimidation",
+        sourceBotId: "guest-1",
+        targetBotId: "host-1",
+        sourceRole: "guest",
+        targetRole: "host",
+        trigger: "session_start",
+        polarity: "negative",
+        strength: "large",
+        atMs: 0,
+      });
+      assert.ok(
+        episode.events.some(
+          (event) =>
+            event.kind === "camera_suggestion" &&
+            event.payload.reason === "power_effect" &&
+            event.payload.shot === "right",
+        ),
+      );
+
+      const opening = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+      assert.equal(opening.message?.moodKey, "guarded");
+      const openingPrompt = captures[0]!
+        .map((message) => message.content)
+        .join("\n");
+      assert.match(openingPrompt, /Signal Power pressure:/u);
+      assert.match(openingPrompt, /brief involuntary pause/u);
+      assert.match(openingPrompt, /Keep your host role and agency/u);
+      assert.match(openingPrompt, /Do not announce fear, become submissive/u);
+
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+      const returningHost = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+      episode = returningHost.episode;
+      assert.doesNotMatch(
+        captures[1]!.map((message) => message.content).join("\n"),
+        /Signal Power pressure:/u,
+      );
+      assert.doesNotMatch(
+        captures[2]!.map((message) => message.content).join("\n"),
+        /Signal Power pressure:/u,
+      );
+      assert.equal(returningHost.message?.moodKey, "neutral");
+      assert.equal(
+        episode.events.filter((event) => event.kind === "power_effect").length,
+        1,
       );
     } finally {
       db.close();
@@ -737,9 +934,9 @@ describe("Botcast persistence and isolation", () => {
 
       assert.equal(options[0]?.reasoningEffort, "minimal");
       assert.equal(options[0]?.maxTokens, 384);
-      assert.match(
-        advanced.message?.content ?? "",
-        /what is the part of Reasoning without an empty visible reply that people most often misunderstand\?/u,
+      assert.equal(
+        advanced.message?.content,
+        `Welcome to ${show.name}. I'm Mara Vale, and today I'm joined by Ivo Stone to explore Reasoning without an empty visible reply. Ivo Stone, where should we begin?`,
       );
     } finally {
       db.close();
@@ -816,6 +1013,7 @@ describe("Botcast persistence and isolation", () => {
       serverSource,
       /route\("POST", "\/api\/botcast\/shows\/:id\/booking-suggestion"/u,
     );
+    assert.match(serverSource, /body\.atmosphereMix !== undefined/u);
     assert.match(
       serverSource,
       /route\("POST", "\/api\/botcast\/shows\/:id\/intro-audio\/generate"/u,
@@ -899,6 +1097,14 @@ describe("Botcast persistence and isolation", () => {
     assert.match(
       serverSource,
       /const quality = shouldRunLocal[\s\S]{0,120}args\.kind === "logo"[\s\S]{0,60}"low"[\s\S]{0,60}"high"/u,
+    );
+    assert.match(
+      serverSource,
+      /args\.kind === "logo"[\s\S]{0,100}background: "transparent"/u,
+    );
+    assert.match(
+      serverSource,
+      /args\.kind === "logo"[\s\S]{0,100}normalizeSignalLogoImage\(imageBytes\)/u,
     );
     assert.match(serverSource, /const requestedArtworkKinds = body\.kinds/u);
     assert.match(
@@ -1030,6 +1236,9 @@ describe("Botcast persistence and isolation", () => {
         /visually independent from existing entertainment properties/iu,
       );
       assert.match(show.logo.prompt, /distinctive at 64 pixels/iu);
+      assert.match(show.logo.prompt, /true transparent alpha background/iu);
+      assert.match(show.logo.prompt, /no app-icon tile/iu);
+      assert.match(show.logo.prompt, /both near-black and near-white/iu);
       assert.ok(
         ["frequency", "orbit", "aperture", "spark", "monogram"].includes(
           show.logo.fallbackGlyph,
@@ -1108,12 +1317,13 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
-  it("synthesizes editable booking fields from the show, host, guest, and current angle", async () => {
+  it("synthesizes a coherent booking and editable fields from the show, host, guest, and audience", async () => {
     const db = fixture();
     const captures: ProviderMessage[][] = [];
     const optionCaptures: GenerateOptions[] = [];
     const provider = recordingProvider(
       [
+        '{"topic":"What does invention owe the people disrupted by its success?","producerBrief":"Start with the cost of celebrated breakthroughs, then press for one concrete responsibility Ivo accepts."}',
         "Topic: “What does invention owe the people disrupted by its success?”",
         "Producer brief: Start with the cost of celebrated breakthroughs, then press for one concrete responsibility Ivo accepts. Respect his resistance to personal speculation.",
       ],
@@ -1123,6 +1333,24 @@ describe("Botcast persistence and isolation", () => {
     );
     try {
       const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const booking = await generateBotcastBookingSuggestion(
+        db,
+        "user-1",
+        show.id,
+        {
+          guestBotId: "guest-1",
+          field: "booking",
+          currentTopic: "A generic invention conversation",
+          modelOverride: "signal-suggestion-model",
+        },
+        generation(provider),
+      );
+      assert.deepEqual(booking, {
+        topic: "What does invention owe the people disrupted by its success?",
+        producerBrief:
+          "Start with the cost of celebrated breakthroughs, then press for one concrete responsibility Ivo accepts.",
+        generated: true,
+      });
       const topic = await generateBotcastBookingSuggestion(
         db,
         "user-1",
@@ -1161,16 +1389,78 @@ describe("Botcast persistence and isolation", () => {
         captures[0]?.[1]?.content ?? "",
         /generic invention conversation/u,
       );
-      assert.match(captures[1]?.[1]?.content ?? "", /What does invention owe/u);
       assert.match(
-        captures[1]?.[0]?.content ?? "",
+        captures[0]?.[1]?.content ?? "",
+        /Recent episode topics to avoid repeating/u,
+      );
+      assert.match(
+        captures[0]?.[0]?.content ?? "",
+        /listeners drawn to this show's premise/u,
+      );
+      assert.match(
+        captures[0]?.[0]?.content ?? "",
+        /swapping in another guest would weaken it/u,
+      );
+      assert.match(captures[2]?.[1]?.content ?? "", /What does invention owe/u);
+      assert.match(
+        captures[2]?.[0]?.content ?? "",
         /private off-mic producer brief/u,
       );
       assert.deepEqual(
         optionCaptures.map((options) => options.model),
-        ["signal-suggestion-model", "signal-suggestion-model"],
+        [
+          "signal-suggestion-model",
+          "signal-suggestion-model",
+          "signal-suggestion-model",
+        ],
       );
+      assert.equal(optionCaptures[0]?.jsonMode, true);
       assert.equal(getBotcastShow(db, "user-1", show.id).name, show.name);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("repairs impossible audience-only booking direction before it reaches the host", async () => {
+    const db = fixture();
+    const captures: ProviderMessage[][] = [];
+    const provider = recordingProvider(
+      [
+        '{"topic":"Can spectacle survive when the crowd recognizes the bargain?","producerBrief":"Press Ivo Stone on whether boredom is the real engine, then ask for one concrete example."}',
+      ],
+      captures,
+    );
+    try {
+      db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'guest-1'").run(
+        invisibleGuestPowers(),
+      );
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const booking = await generateBotcastBookingSuggestion(
+        db,
+        "user-1",
+        show.id,
+        {
+          guestBotId: "guest-1",
+          field: "booking",
+          modelOverride: "signal-suggestion-model",
+        },
+        generation(provider),
+      );
+
+      assert.equal("topic" in booking ? booking.generated : false, true);
+      assert.match(
+        "producerBrief" in booking ? booking.producerBrief : "",
+        /audience-only dramatic layer/u,
+      );
+      assert.doesNotMatch(
+        "producerBrief" in booking ? booking.producerBrief : "",
+        /press Ivo Stone|ask for one concrete example/iu,
+      );
+      const prompt = captures[0]!.map((message) => message.content).join("\n");
+      assert.match(prompt, /host cannot perceive or hear the booked guest/u);
+      assert.match(prompt, /Never instruct the host to ask, press, question/u);
+      assert.match(prompt, /Episode format: Audience-only guest/u);
+      assert.doesNotMatch(prompt, /promising follow-up/u);
     } finally {
       db.close();
     }
@@ -1254,6 +1544,11 @@ describe("Botcast persistence and isolation", () => {
         /no scene, no figure, no lettering/iu,
       );
       assert.match(result.show.logo.prompt, /distinctive at 64 pixels/iu);
+      assert.match(
+        result.show.logo.prompt,
+        /true transparent alpha background/iu,
+      );
+      assert.match(result.show.logo.prompt, /without inversion or hue rotation/iu);
       assert.doesNotMatch(
         result.show.logo.prompt,
         /\bPRISM\b|rainbow|refraction|spectrum ray|five colors/iu,
@@ -1622,7 +1917,9 @@ describe("Botcast persistence and isolation", () => {
     const db = fixture();
     const captures: ProviderMessage[][] = [];
     const provider = recordingProvider(
-      ["[sighs] Welcome to the difficult part. [laughs]"],
+      [
+        "[sighs] Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore A performed transcript. [laughs]",
+      ],
       captures,
     );
     try {
@@ -1636,20 +1933,20 @@ describe("Botcast persistence and isolation", () => {
         "user-1",
         episode.id,
         {},
-        {
-          ...generation(provider),
-          immersiveVoiceEffectsEnabled: true,
-        },
+        generation(provider),
       );
-      assert.equal(advanced.message?.content, "Welcome to the difficult part.");
+      assert.equal(
+        advanced.message?.content,
+        "Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore A performed transcript.",
+      );
       assert.equal(
         advanced.message?.voicePerformanceText,
-        "[sighs] Welcome to the difficult part. [laughs]",
+        "[sighs] Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore A performed transcript. [laughs]",
       );
       assert.equal(
         getBotcastEpisode(db, "user-1", episode.id).messages[0]
           ?.voicePerformanceText,
-        "[sighs] Welcome to the difficult part. [laughs]",
+        "[sighs] Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore A performed transcript. [laughs]",
       );
       const prompt = captures[0]!.map((message) => message.content).join("\n");
       assert.match(prompt, /Use only one of these exact square-bracket tags/u);
@@ -1659,11 +1956,11 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
-  it("spaces enabled reactions predictably and supplies an audible fallback", async () => {
+  it("spaces automatic reactions predictably and supplies an audible fallback", async () => {
     const db = fixture();
     const provider = recordingProvider(
       [
-      "Welcome to the first question.",
+      "Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore Reliable performed reactions.",
       "Here is my first answer.",
       "Let us follow that thread.",
       "That is the part I find difficult.",
@@ -1676,10 +1973,7 @@ describe("Botcast persistence and isolation", () => {
         guestBotId: "guest-1",
         topic: "Reliable performed reactions",
       });
-      const options = {
-        ...generation(provider),
-        immersiveVoiceEffectsEnabled: true,
-      };
+      const options = generation(provider);
       const turns = [];
       for (let index = 0; index < 4; index += 1) {
         turns.push(
@@ -1688,7 +1982,7 @@ describe("Botcast persistence and isolation", () => {
       }
       assert.equal(
         turns[0]?.message?.voicePerformanceText,
-        "[breathes deeply] Welcome to the first question.",
+        "[breathes deeply] Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore Reliable performed reactions.",
       );
       assert.equal(turns[1]?.message?.voicePerformanceText, null);
       assert.equal(turns[2]?.message?.voicePerformanceText, null);
@@ -1701,11 +1995,14 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
-  it("strips stray vocal tags when Signal immersion is disabled", async () => {
+  it("strips stray vocal tags outside Signal's scheduled reactions", async () => {
     const db = fixture();
     const captures: ProviderMessage[][] = [];
     const provider = recordingProvider(
-      ["[coughs] A clean system line."],
+      [
+        "Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore Clean fallback speech.",
+        "[coughs] Here is the part that deserves a closer look.",
+      ],
       captures,
     );
     try {
@@ -1714,6 +2011,13 @@ describe("Botcast persistence and isolation", () => {
         guestBotId: "guest-1",
         topic: "Clean fallback speech",
       });
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
       const advanced = await advanceBotcastEpisode(
         db,
         "user-1",
@@ -1721,9 +2025,12 @@ describe("Botcast persistence and isolation", () => {
         {},
         generation(provider),
       );
-      assert.equal(advanced.message?.content, "A clean system line.");
+      assert.equal(
+        advanced.message?.content,
+        "Here is the part that deserves a closer look.",
+      );
       assert.equal(advanced.message?.voicePerformanceText, null);
-      const prompt = captures[0]!.map((message) => message.content).join("\n");
+      const prompt = captures[1]!.map((message) => message.content).join("\n");
       assert.match(prompt, /Do not include bracketed directions/u);
     } finally {
       db.close();
@@ -1921,7 +2228,12 @@ describe("Botcast persistence and isolation", () => {
   it("cuts a live show to a saved wide-shot ending without deleting its transcript", async () => {
     const db = fixture();
     const captures: ProviderMessage[][] = [];
-    const provider = recordingProvider(["A preserved opening line."], captures);
+    const provider = recordingProvider(
+      [
+        "Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore A show that ends on the producer's cut.",
+      ],
+      captures,
+    );
     try {
       const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
       const episode = createBotcastEpisode(db, "user-1", show.id, {
@@ -1941,7 +2253,10 @@ describe("Botcast persistence and isolation", () => {
       assert.equal(ended.outcome, "completed");
       assert.equal(ended.segment, "closing");
       assert.equal(ended.messages.length, 1);
-      assert.equal(ended.messages[0]?.content, "A preserved opening line.");
+      assert.equal(
+        ended.messages[0]?.content,
+        "Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore A show that ends on the producer's cut.",
+      );
       assert.ok(ended.events.some((event) => event.kind === "cut_away"));
       assert.ok(
         ended.events.some(
@@ -2122,7 +2437,9 @@ describe("Botcast persistence and isolation", () => {
     const db = fixture();
     const captures: ProviderMessage[][] = [];
     const provider = recordingProvider(
-      ['"Mara Vale: Welcome to the signal."'],
+      [
+        '"Mara Vale: Welcome to Mara Vale in the Margins. I\'m Mara Vale, and today I\'m joined by Ivo Stone to explore Clean stage dialogue."',
+      ],
       captures,
     );
     try {
@@ -2138,7 +2455,10 @@ describe("Botcast persistence and isolation", () => {
         {},
         generation(provider),
       );
-      assert.equal(advanced.message?.content, "Welcome to the signal.");
+      assert.equal(
+        advanced.message?.content,
+        "Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore Clean stage dialogue.",
+      );
     } finally {
       db.close();
     }
@@ -2409,7 +2729,9 @@ describe("Botcast persistence and isolation", () => {
     const legacyTarget = fixture();
     const captures: ProviderMessage[][] = [];
     const provider = recordingProvider(
-      ["[sighs] Welcome to the archive."],
+      [
+        "[sighs] Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore What survives an edit.",
+      ],
       captures,
     );
     try {
@@ -2453,15 +2775,14 @@ describe("Botcast persistence and isolation", () => {
         episode.id,
         {},
         {
-        ...generation(provider),
-        immersiveVoiceEffectsEnabled: true,
-        autoFallbackChain: {
-          v: 1,
-          fallbacks: [
-            { provider: "local", model: "qwen-signal-fallback" },
-            { provider: "anthropic", model: "claude-signal-fallback" },
-          ],
-        },
+          ...generation(provider),
+          autoFallbackChain: {
+            v: 1,
+            fallbacks: [
+              { provider: "local", model: "qwen-signal-fallback" },
+              { provider: "anthropic", model: "claude-signal-fallback" },
+            ],
+          },
         },
       );
       source
@@ -2494,7 +2815,7 @@ describe("Botcast persistence and isolation", () => {
       );
       assert.equal(
         snapshot.botcast?.messages[0]?.voicePerformanceText,
-        "[sighs] Welcome to the archive.",
+        "[sighs] Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore What survives an edit.",
       );
       importUserSnapshot(target, "user-1", snapshot, key);
       const restoredShow = getBotcastShow(target, "user-1", show.id);
@@ -2535,10 +2856,13 @@ describe("Botcast persistence and isolation", () => {
         comment: "The edit found the tension before the host did.",
         createdAt: "2026-01-03T00:00:00.000Z",
       });
-      assert.equal(restored.messages[0]?.content, "Welcome to the archive.");
+      assert.equal(
+        restored.messages[0]?.content,
+        "Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore What survives an edit.",
+      );
       assert.equal(
         restored.messages[0]?.voicePerformanceText,
-        "[sighs] Welcome to the archive.",
+        "[sighs] Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore What survives an edit.",
       );
       assert.ok(
         restored.events.some((event) => event.kind === "camera_suggestion"),

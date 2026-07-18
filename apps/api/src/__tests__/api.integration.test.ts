@@ -1200,11 +1200,34 @@ describe("API request integration", () => {
     }).png().toBuffer();
     const uploadedAssetDataUrl =
       `data:image/png;base64,${uploadedAssetBytes.toString("base64")}`;
+    const uploadedLogoBytes = await sharp({
+      create: {
+        width: 80,
+        height: 60,
+        channels: 4,
+        background: { r: 250, g: 248, b: 242, alpha: 1 },
+      },
+    })
+      .composite([
+        {
+          input: Buffer.from(
+            '<svg width="32" height="32" xmlns="http://www.w3.org/2000/svg"><circle cx="16" cy="16" r="14" fill="#265fa8"/></svg>',
+          ),
+          gravity: "center",
+        },
+      ])
+      .png()
+      .toBuffer();
+    const uploadedLogoDataUrl =
+      `data:image/png;base64,${uploadedLogoBytes.toString("base64")}`;
     const uploadedImageIds: string[] = [];
     for (const slot of ["day-studio", "night-studio", "logo"] as const) {
       const uploadResponse = await owner.request(
         `/api/botcast/shows/${encodeURIComponent(showId)}/assets/${slot}/upload`,
-        jsonInit({ dataUrl: uploadedAssetDataUrl }),
+        jsonInit({
+          dataUrl:
+            slot === "logo" ? uploadedLogoDataUrl : uploadedAssetDataUrl,
+        }),
       );
       const uploadPayload = await json(uploadResponse);
       assert.equal(uploadResponse.status, 201, JSON.stringify(uploadPayload));
@@ -1816,6 +1839,16 @@ describe("API request integration", () => {
         JSON.parse(String(reactionCalls[0]?.init?.body)).text,
         "mm-hm",
       );
+      const conversationalReaction = await client.request(
+        "/api/voices/synthesize",
+        jsonInit({
+          signalMessageId: "signal-online-voice-message",
+          listenerReactionText: "go on",
+          mode: "english",
+          engine: "builtin",
+        }),
+      );
+      assert.equal(conversationalReaction.status, 200);
       const invalidReaction = await client.request(
         "/api/voices/synthesize",
         jsonInit({

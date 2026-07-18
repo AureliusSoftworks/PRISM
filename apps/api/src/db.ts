@@ -209,7 +209,6 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       zen_ask_question_patience_ms INTEGER NOT NULL DEFAULT 60000,
       zen_autonomy_enabled INTEGER NOT NULL DEFAULT 0,
       zen_persona_transition_choice TEXT NOT NULL DEFAULT 'random',
-      signal_immersive_voice_effects_enabled INTEGER NOT NULL DEFAULT 0,
       prism_default_bot_name TEXT,
       prism_default_bot_system_prompt TEXT,
       prism_default_bot_color TEXT,
@@ -475,8 +474,10 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       series_id TEXT,
       book_ordinal INTEGER NOT NULL DEFAULT 0,
       title TEXT NOT NULL,
+      title_origin TEXT NOT NULL DEFAULT 'writer',
       spark TEXT NOT NULL,
       spark_wildcards_json TEXT NOT NULL DEFAULT '',
+      cover_json TEXT NOT NULL DEFAULT '{}',
       premise TEXT NOT NULL DEFAULT '',
       voice TEXT NOT NULL DEFAULT '',
       non_negotiables_json TEXT NOT NULL DEFAULT '[]',
@@ -1361,6 +1362,8 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   };
   addSlateProjectColumn("series_id", "TEXT");
   addSlateProjectColumn("book_ordinal", "INTEGER NOT NULL DEFAULT 0");
+  addSlateProjectColumn("title_origin", "TEXT NOT NULL DEFAULT 'writer'");
+  addSlateProjectColumn("cover_json", "TEXT NOT NULL DEFAULT '{}'");
   addSlateProjectColumn("prose_mode", "TEXT NOT NULL DEFAULT 'auto'");
   addSlateProjectColumn("prose_model", "TEXT");
   addSlateProjectColumn("prose_provider", "TEXT");
@@ -1428,14 +1431,6 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     db.exec(
       "ALTER TABLE users ADD COLUMN voice_mode TEXT NOT NULL DEFAULT 'mute';",
     );
-  const hasSignalImmersiveVoiceEffectsEnabled = userColumns.some(
-    (column) => column.name === "signal_immersive_voice_effects_enabled",
-  );
-  if (!hasSignalImmersiveVoiceEffectsEnabled) {
-    db.exec(
-      "ALTER TABLE users ADD COLUMN signal_immersive_voice_effects_enabled INTEGER NOT NULL DEFAULT 0;",
-    );
-  }
   const hasVoiceEffectsEnabled = userColumns.some(
     (column) => column.name === "voice_effects_enabled",
   );

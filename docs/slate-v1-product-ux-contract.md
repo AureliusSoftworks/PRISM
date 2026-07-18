@@ -76,15 +76,26 @@ The primary workspace has three conceptual regions:
 3. **Direction panel** — concise project-, chapter-, scene-, or selection-level
    notes and actions. It is not a chat transcript.
 
-A movable Prism companion may open a separate project-context side chat above
-the desk. It is advisory chrome, not a fourth document region: it cannot mutate
-prose, Continuity, structure, or titles.
+A movable rainbow Prism bubble opens an ephemeral project-context exchange in
+place. The composer and Markdown messages float independently above the desk,
+then each message fades like action text. Only the latest three messages are
+kept as a crash-recovery buffer; they are not continuity, and Prism does not
+bring up an earlier exchange unless the writer explicitly asks about one still
+in that buffer. The companion is advisory chrome, not a fourth document region:
+it cannot mutate prose, Continuity, structure, or titles.
 
 The workspace moves through three phases without forcing a rigid wizard:
 
 ### Shape
 
-- Start from a title and creative spark, or bring existing material.
+- Start from exactly one source: a creative spark or existing material. Bringing
+  material replaces the spark controls so the sources are never blended accidentally.
+- Preserve a supplied title; otherwise use the active privacy-matched prose model
+  to generate a story-aware working title from the source, then confirm it before
+  creation. The writer may request another title or edit it directly.
+- Offer privacy-matched book-cover generation as an explicit creation choice and
+  as a repeatable project action. Title and cover generation remain independent;
+  neither silently replaces the writer's accepted choice.
 - Wildcard-assisted starts are optional: a writer may place supported uppercase
   `{WILDCARDS}` in the spark, preview or reroll the concrete result, and create
   from that roll. Slate preserves both the resolved spark and its source template.
@@ -126,9 +137,9 @@ The workspace moves through three phases without forcing a rigid wizard:
    provider, model, target artifact, and content hash even when the prose is
    later edited or the proposal is rejected.
 9. Living summaries, project chat, and title suggestions remain advisory.
-   Slate may quietly reconsider the title at manuscript milestones, but only
-   surfaces a materially better option. Accepting it is an explicit writer
-   action.
+   Once a spark-led manuscript has enough prose, Slate surfaces a visible title
+   checkpoint. It recommends a replacement only when materially stronger, and
+   accepting it remains an explicit writer action.
 
 ## Persistent project contract
 
@@ -158,8 +169,9 @@ permit reading or mutation.
 Slate becomes preview `v0.1` only when a player can:
 
 1. Enter Slate from PRISM's applet surface.
-2. Create a persistent prose project from a title and creative spark, optionally
-   resolving `{WILDCARDS}` before creation.
+2. Create a persistent prose project from either a creative spark or existing
+   material, deriving a working title when the writer did not provide one and
+   optionally resolving spark `{WILDCARDS}` before creation.
 3. Shape a generated premise and scene plan.
 4. Open the three-region manuscript workspace.
 5. Draft at least one planned scene.

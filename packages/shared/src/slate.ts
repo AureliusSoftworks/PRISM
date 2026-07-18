@@ -177,14 +177,27 @@ export interface SlateVersionSummary {
   createdAt: string;
 }
 
+export interface SlateProjectCover {
+  seed: string;
+  prompt: string;
+  imageUrl: string | null;
+  imageId: string | null;
+  revision: number;
+  status: "fallback" | "generating" | "ready" | "failed";
+}
+
+export type SlateProjectTitleOrigin = "writer" | "spark" | "material";
+
 export interface SlateProjectSummary {
   id: string;
   seriesId: string;
   bookOrdinal: number;
   title: string;
+  titleOrigin: SlateProjectTitleOrigin;
   spark: string;
   premise: string;
   phase: SlateProjectPhase;
+  cover: SlateProjectCover;
   manuscriptLength: number;
   createdAt: string;
   updatedAt: string;
@@ -235,6 +248,7 @@ export interface SlateProjectDeleteResponse {
 
 export interface SlateCreateProjectRequest {
   title: string;
+  titleOrigin?: SlateProjectTitleOrigin;
   spark: string;
   seriesId?: string;
   sparkWildcards?: PromptWildcardRunMetadata;
@@ -297,12 +311,31 @@ export interface SlateProjectChatMessage {
 
 export interface SlateProjectChatResponse {
   ok: true;
+  /** Chronological crash-recovery buffer; never more than three messages. */
   messages: SlateProjectChatMessage[];
 }
 
 export interface SlateTitleSuggestionResponse {
   ok: true;
   project: SlateProjectDetail;
+}
+
+export interface SlateGenerateTitleRequest {
+  source: string;
+  sourceKind: "spark" | "material";
+  currentTitle?: string;
+}
+
+export interface SlateGenerateTitleResponse {
+  ok: true;
+  title: string;
+  reason: string;
+  provider: SlateAiProvider;
+  model: string;
+}
+
+export interface SlateTitleSuggestionRequest {
+  force?: boolean;
 }
 
 export interface SlateDraftRequest {

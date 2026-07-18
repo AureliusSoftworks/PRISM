@@ -44523,6 +44523,67 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   grid-template-rows: auto minmax(0, 1fr) auto;
 }
 
+.botAvatarDeferredPreviewPanel {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.botAvatarDeferredPreviewPrompt {
+  width: min(290px, 100%);
+  display: grid;
+  justify-items: center;
+  gap: 9px;
+  color: var(--fg-muted);
+  text-align: center;
+}
+
+.botAvatarDeferredPreviewPrompt > svg {
+  color: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 60%,
+    var(--fg-muted)
+  );
+}
+
+.botAvatarDeferredPreviewPrompt strong {
+  color: var(--fg);
+  font-size: 13px;
+}
+
+.botAvatarDeferredPreviewPrompt small {
+  max-width: 250px;
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.botAvatarDeferredPreviewPrompt button {
+  min-height: 34px;
+  margin-top: 3px;
+  padding: 0 13px;
+  border: 1px solid
+    color-mix(in srgb, var(--editor-bot-color, var(--accent)) 52%, var(--line));
+  border-radius: 8px;
+  background: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 14%,
+    var(--bg-surface)
+  );
+  color: var(--fg);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 780;
+  cursor: pointer;
+}
+
+.botAvatarDeferredPreviewPrompt button:hover,
+.botAvatarDeferredPreviewPrompt button:focus-visible {
+  border-color: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 72%,
+    #ffffff
+  );
+  outline: none;
+}
+
 .botAvatarControlPanel {
   grid-template-rows: auto minmax(0, 1fr) auto;
   overflow: hidden;

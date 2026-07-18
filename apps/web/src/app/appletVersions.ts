@@ -29,13 +29,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   chat: {
     id: "chat",
     name: "Chat",
-    version: "1.4",
+    version: "1.5",
     status: "active",
   },
   zen: {
     id: "zen",
     name: "Zen",
-    version: "1.3",
+    version: "1.4",
     status: "active",
   },
   arena: {
@@ -53,13 +53,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   coffee: {
     id: "coffee",
     name: "Coffee",
-    version: "1.6",
+    version: "1.7",
     status: "active",
   },
   botcast: {
     id: "botcast",
     name: "Signal",
-    version: "0.6",
+    version: "0.7",
     status: "active",
   },
   feed: {
@@ -77,7 +77,7 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   story: {
     id: "story",
     name: "Story",
-    version: "0.2",
+    version: "0.3",
     status: "preview",
   },
   gym: {

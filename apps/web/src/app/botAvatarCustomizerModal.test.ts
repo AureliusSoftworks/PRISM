@@ -1595,6 +1595,14 @@ test("avatar customizer preview has explicit expression states", () => {
   assert.match(pageSource, /const BOT_AVATAR_PREVIEW_MOODS = \[/);
   assert.match(
     pageSource,
+    /mode\.value === "talking"[\s\S]*?voiceModeDisplayName\(voiceMode\)[\s\S]*?: mode\.label/,
+  );
+  assert.match(
+    pageSource,
+    /<BotAvatarPreviewPanel[\s\S]*?voiceMode=\{voiceMode\}/,
+  );
+  assert.match(
+    pageSource,
     /const previewTalking = previewMode === "talking" && !previewSpeechPaused;/,
   );
   assert.match(pageSource, /buildSpeechActivityWindows\(/);
@@ -1621,6 +1629,23 @@ test("avatar customizer preview has explicit expression states", () => {
   );
   assert.match(pageSource, /data-avatar-preview-mode=\{previewMode\}/);
   assert.match(pageSource, /onPreviewModeChange=\{setPreviewMode\}/);
+  assert.match(
+    pageSource,
+    /mode\.value === "talking"\s*\? onPreviewVoice\(\)\s*: onPreviewModeChange\(mode\.value\)/,
+  );
+  assert.match(
+    pageSource,
+    /const previewAvatarGlobalVoice = async \(\): Promise<void> => \{[\s\S]*?resolveVoicePreviewText\(\)[\s\S]*?playAvatarVoicePreview\(audioVoiceProfile, voiceMode, previewText/,
+  );
+  assert.match(
+    pageSource,
+    /const playAvatarVoicePreview = async \([\s\S]*?await onVoicePreview\(profile, forcedMode, previewText,[\s\S]*?setPreviewMode\("talking"\)/,
+  );
+  assert.match(
+    pageSource,
+    /onPreviewVoice=\{\(\) => void previewAvatarGlobalVoice\(\)\}/,
+  );
+  assert.match(pageSource, /onPreview=\{playAvatarVoicePreview\}/);
   assert.match(pageSource, /onPreviewMoodCycle=\{\(\) =>/);
   assert.match(
     pageSource,
