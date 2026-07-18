@@ -53,13 +53,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   coffee: {
     id: "coffee",
     name: "Coffee",
-    version: "1.7",
+    version: "1.8",
     status: "active",
   },
   botcast: {
     id: "botcast",
     name: "Signal",
-    version: "0.7",
+    version: "0.8",
     status: "active",
   },
   feed: {
@@ -89,7 +89,7 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   slate: {
     id: "slate",
     name: "Slate",
-    version: "0.6",
+    version: "0.7",
     status: "preview",
   },
   pseudo: {

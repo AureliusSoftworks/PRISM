@@ -22,7 +22,6 @@ describe("Slate AI workspace controls", () => {
   it("surfaces the living summary and advisory title decision on the canvas", () => {
     assert.match(workspace, /data-tutorial-target="slate-summary"/u);
     assert.match(workspace, /livingSummary\.tail/u);
-    assert.match(workspace, /Could this title be stronger\?/u);
     assert.match(workspace, /SLATE_TITLE_REVIEW_INTERVAL_CHARS = 12_000/u);
     assert.match(workspace, /project\.titleOrigin !== "spark"/u);
     assert.match(workspace, /Working title checkpoint/u);
