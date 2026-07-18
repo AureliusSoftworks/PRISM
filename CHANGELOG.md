@@ -48,6 +48,8 @@ _Staging area - nothing queued for release yet._
 
 ### Fixed
 
+- **Coffee keeps keyboard focus through room staging and return.** The primary
+  staging action and restored room target remain focused after late UI mounts.
 - **Menu keyboard and light-theme behavior is predictable.** Right Arrow no
   longer activates ordinary actions, Tab follows the document, first-item
   focus survives pointer invocation, and destructive actions remain readable.
