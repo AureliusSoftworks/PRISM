@@ -7702,6 +7702,12 @@ function buildRoutes(): RouteDefinition[] {
               studioLayout: body.studioLayout as BotcastShowPatchRequest["studioLayout"],
             }
           : {}),
+        ...(body.voiceLevelsByBotId !== undefined
+          ? {
+              voiceLevelsByBotId:
+                body.voiceLevelsByBotId as BotcastShowPatchRequest["voiceLevelsByBotId"],
+            }
+          : {}),
         ...(body.regenerateAtmosphere === true
           ? { regenerateAtmosphere: true }
           : {}),

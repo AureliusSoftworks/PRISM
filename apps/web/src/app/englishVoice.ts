@@ -360,17 +360,26 @@ async function playAudio(
     profile,
     engineUsed,
   );
-  const played = await playRealtimeVoiceBytes({
-    bytes,
-    profile,
-    seed,
-    effectsEnabled,
-    detuneCents,
-    baseLowpassHz: processing.lowpassHz,
-    elevenLabsEffect: elevenLabsEffectForEngine(profile, engineUsed),
-    lifecycle,
-    isCurrent: () => expectedGeneration === generation,
-  });
+  let played = false;
+  try {
+    played = await playRealtimeVoiceBytes({
+      bytes,
+      profile,
+      seed,
+      effectsEnabled,
+      detuneCents,
+      baseLowpassHz: processing.lowpassHz,
+      elevenLabsEffect: elevenLabsEffectForEngine(profile, engineUsed),
+      lifecycle,
+      isCurrent: () => expectedGeneration === generation,
+    });
+  } catch {
+    // Some Safari/WebKit versions reject otherwise valid provider MP3 bytes
+    // in decodeAudioData. The gesture-authorized media element below can
+    // still play the same clip, so keep the soundcheck and ordinary speech
+    // working through that compatibility path.
+    if (expectedGeneration !== generation) return;
+  }
   if (!played) {
     await playBytesWithMedia(
       bytes,

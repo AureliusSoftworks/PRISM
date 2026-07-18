@@ -19,11 +19,13 @@ export function buildSignalAtmospherePrompt(args: {
 }): string {
   return boundSignalAtmospherePrompt(
     [
-      "Seamless quiet environmental room-tone loop for an intimate two-person interview studio.",
+      "Seamless environmental room-tone loop for an intimate two-person interview studio.",
+      "Clearly audible at low playback level, broadcast-ready, and steady in loudness.",
+      "Continuous throughout with a smooth loop boundary; the ending carries directly into the opening at full detail.",
       `Acoustic identity: ${args.studioIdentity.trim() || args.showName}.`,
-      "Stable ventilation air, restrained room resonance, distant exterior hush filtered through the building envelope, and soft microphone-room presence.",
+      "Stable ventilation air, gentle room resonance, distant exterior texture filtered through the building, and present microphone-room detail.",
       "Translate the studio architecture, materials, scale, and exterior setting into subtle acoustic color.",
-      "Calm, sparse, continuous, even in level, gently spatial, with a smooth loop boundary.",
+      "Gently spatial with audible detail throughout.",
     ].join(" "),
   );
 }

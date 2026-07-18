@@ -14,6 +14,9 @@ test("Signal atmosphere prompt stays environmental and studio-specific", () => {
   });
   assert.match(prompt, /environmental room-tone loop/iu);
   assert.match(prompt, /timber observatory/iu);
+  assert.match(prompt, /clearly audible at low playback level/iu);
+  assert.match(prompt, /broadcast-ready/iu);
+  assert.doesNotMatch(prompt, /\bquiet\b|\bhush\b|\brestrained\b/iu);
   assert.doesNotMatch(prompt, /\bno\b|\bavoid\b|\bwithout\b/iu);
 });
 
@@ -24,6 +27,11 @@ test("Signal atmosphere prompt stays within ElevenLabs' 450-character limit", ()
   });
   assert.ok(prompt.length <= SIGNAL_ELEVENLABS_SOUND_PROMPT_MAX_CHARACTERS);
   assert.match(prompt, /Acoustic identity: A timber observatory/iu);
+  assert.match(prompt, /ending carries directly into the opening/iu);
+  assert.ok(
+    prompt.indexOf("ending carries") < prompt.indexOf("Acoustic identity"),
+    "loop-boundary direction should survive a long studio identity",
+  );
 });
 
 test("Signal atmosphere request asks ElevenLabs for a 30-second loop", async () => {

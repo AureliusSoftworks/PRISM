@@ -14,6 +14,7 @@ import type {
   BotcastEpisodeSegment,
   BotcastEpisodeSummary,
   BotcastFallbackStudioAccentVariant,
+  BotcastGuestPresenceMode,
   BotcastMessage,
   BotcastProducerCue,
   BotcastReplayEvent,
@@ -23,6 +24,7 @@ import type {
   BotcastShowCreateRequest,
   BotcastShowPatchRequest,
   BotcastStudioLayout,
+  BotcastVoiceLevelsByBotId,
   BotcastLogoGlyph,
   BotcastLogoState,
   BotcastSpeakerRole,
@@ -57,6 +59,7 @@ import {
   isBotcastFallbackStudioAccentVariant,
   normalizeVoiceDeliveryMood,
   normalizeBotcastStudioLayout,
+  normalizeBotcastVoiceLevelsByBotId,
   parseStoredBotPowersV1,
   rankSignalPersonaTemperaments,
   autoFallbackResolvedChain,
@@ -497,6 +500,7 @@ function parseAtmospheres(raw: string): {
   dayAtmosphere: BotcastAtmosphereState;
   nightAtmosphere: BotcastAtmosphereState;
   studioLayout: BotcastStudioLayout;
+  voiceLevelsByBotId: BotcastVoiceLevelsByBotId;
 } {
   try {
     const container = JSON.parse(raw) as Partial<BotcastAtmosphereState> & {
@@ -505,6 +509,7 @@ function parseAtmospheres(raw: string): {
       dayAtmosphere?: Partial<BotcastAtmosphereState>;
       nightAtmosphere?: Partial<BotcastAtmosphereState>;
       studioLayout?: unknown;
+      voiceLevelsByBotId?: unknown;
     };
     const legacy = normalizeAtmosphere(container, fallbackAtmosphere("night"));
     return {
@@ -518,6 +523,9 @@ function parseAtmospheres(raw: string): {
       dayAtmosphere: normalizeAtmosphere(container.dayAtmosphere, legacy),
       nightAtmosphere: normalizeAtmosphere(container.nightAtmosphere, legacy),
       studioLayout: normalizeBotcastStudioLayout(container.studioLayout),
+      voiceLevelsByBotId: normalizeBotcastVoiceLevelsByBotId(
+        container.voiceLevelsByBotId,
+      ),
     };
   } catch {
     return {
@@ -526,6 +534,7 @@ function parseAtmospheres(raw: string): {
       dayAtmosphere: fallbackAtmosphere("day"),
       nightAtmosphere: fallbackAtmosphere("night"),
       studioLayout: normalizeBotcastStudioLayout(undefined),
+      voiceLevelsByBotId: {},
     };
   }
 }
@@ -570,6 +579,7 @@ function serializeShowVisuals(
   studioIdentity: string,
   dashboardBlurbs: readonly string[],
   studioLayout: BotcastStudioLayout,
+  voiceLevelsByBotId: Readonly<BotcastVoiceLevelsByBotId>,
 ): string {
   // Preserve the original root atmosphere shape for older clients and backup
   // readers while storing explicit variants for current Signal builds.
@@ -580,6 +590,9 @@ function serializeShowVisuals(
     dayAtmosphere,
     nightAtmosphere,
     studioLayout,
+    voiceLevelsByBotId: normalizeBotcastVoiceLevelsByBotId(
+      voiceLevelsByBotId,
+    ),
     logo,
   });
 }
@@ -816,18 +829,44 @@ function assertBotcastPowerSpeechCompatibility(
   speaker: BotcastBotProfile,
   peer: BotcastBotProfile,
 ): void {
-  for (const power of activeBotPowersV1(speaker.powers)) {
+  const restriction = botcastPowerRestriction(speaker, peer, "speech_audience");
+  if (!restriction) return;
+  throw new Error(
+    `${speaker.name}'s Power “${restriction.name || "Unnamed Power"}” does not allow them to address ${peer.name} in Signal.`,
+  );
+}
+
+function botcastPowerRestriction(
+  poweredBot: BotcastBotProfile,
+  peer: BotcastBotProfile,
+  effectType: "awareness" | "speech_audience",
+): BotPowerV1 | null {
+  for (const power of activeBotPowersV1(poweredBot.powers)) {
     for (const effect of power.compiled?.effects ?? []) {
-      if (effect.type !== "speech_audience") continue;
+      if (effect.type !== effectType) continue;
       if (
         effect.allowed.some((target) => botcastPowerTargetMatches(target, peer))
       )
         continue;
-      throw new Error(
-        `${speaker.name}'s Power “${power.name || "Unnamed Power"}” does not allow them to address ${peer.name} in Signal.`,
-      );
+      return power;
     }
   }
+  return null;
+}
+
+function botcastGuestPresenceMode(
+  host: BotcastBotProfile,
+  guest: BotcastBotProfile,
+): BotcastGuestPresenceMode {
+  const hostCannotPerceiveGuest = Boolean(
+    botcastPowerRestriction(guest, host, "awareness"),
+  );
+  const guestCannotAddressHost = Boolean(
+    botcastPowerRestriction(guest, host, "speech_audience"),
+  );
+  return hostCannotPerceiveGuest && guestCannotAddressHost
+    ? "audience_only"
+    : "present";
 }
 
 export function listBotcastShows(
@@ -930,6 +969,7 @@ export function createBotcastShow(
       studioIdentity,
       [],
       BOTCAST_DEFAULT_STUDIO_LAYOUT,
+      {},
     ),
     now,
     now,
@@ -1186,6 +1226,10 @@ export function updateBotcastShow(
     patch.studioLayout,
     current.studioLayout,
   );
+  const voiceLevelsByBotId = normalizeBotcastVoiceLevelsByBotId(
+    patch.voiceLevelsByBotId,
+    current.voiceLevelsByBotId,
+  );
   const studioIdentity = cleanText(
     patch.studioIdentity,
     current.studioIdentity || defaultStudioIdentity(host),
@@ -1316,6 +1360,7 @@ export function updateBotcastShow(
       studioIdentity,
       dashboardBlurbs,
       studioLayout,
+      voiceLevelsByBotId,
     ),
     now,
     showId,
@@ -1740,6 +1785,12 @@ export function getBotcastEpisode(
     )
     .all(userId, episodeId) as unknown as BotcastEventRow[];
   const mappedEvents = events.map(mapEvent);
+  const guestPresenceMode: BotcastGuestPresenceMode = mappedEvents.some(
+    (event) =>
+      event.kind === "guest_presence" && event.payload.mode === "audience_only",
+  )
+    ? "audience_only"
+    : "present";
   const moodByMessageId = new Map(
     mappedEvents.flatMap((event) => {
       if (event.kind !== "utterance") return [];
@@ -1760,6 +1811,7 @@ export function getBotcastEpisode(
   return {
     ...mapEpisodeSummary(row),
     producerBrief: row.producer_brief,
+    guestPresenceMode,
     messages: messages.map((message) =>
       mapMessage(message, moodByMessageId.get(message.id)),
     ),
@@ -1877,8 +1929,11 @@ export function createBotcastEpisode(
   );
   if (host.id === guest.id)
     throw new Error("Choose a different bot as the guest.");
+  const guestPresenceMode = botcastGuestPresenceMode(host, guest);
   assertBotcastPowerSpeechCompatibility(host, guest);
+  if (guestPresenceMode === "present") {
   assertBotcastPowerSpeechCompatibility(guest, host);
+  }
   const topic = cleanText(input.topic, "", BOTCAST_TOPIC_MAX);
   if (!topic) throw new Error("Episode topic is required.");
   const id = randomId(12);
@@ -1941,6 +1996,20 @@ export function createBotcastEpisode(
       { segment: "opening", ordinal: 0 },
       now,
     );
+    if (guestPresenceMode === "audience_only") {
+      recordEvent(
+        db,
+        userId,
+        id,
+        "guest_presence",
+        {
+          mode: guestPresenceMode,
+          hostBotId: host.id,
+          guestBotId: guest.id,
+        },
+        now,
+      );
+    }
     recordEvent(
       db,
       userId,
@@ -2120,7 +2189,12 @@ export interface BotcastPromptBuildArgs {
   show: BotcastShow;
   episode: Pick<
     BotcastEpisode,
-    "topic" | "producerBrief" | "segment" | "messages" | "tensionStage"
+    | "topic"
+    | "producerBrief"
+    | "segment"
+    | "messages"
+    | "tensionStage"
+    | "guestPresenceMode"
   >;
   host: Pick<BotcastBotProfile, "name" | "systemPrompt" | "powers">;
   guest: Pick<BotcastBotProfile, "name" | "systemPrompt" | "powers">;
@@ -2150,19 +2224,54 @@ export function buildBotcastSpeakerPrompt(
 ): ProviderMessage[] {
   const speaker = args.speakerRole === "host" ? args.host : args.guest;
   const peer = args.speakerRole === "host" ? args.guest : args.host;
+  const audienceOnlyGuest = args.episode.guestPresenceMode === "audience_only";
   const powersPrompt = buildBotPowersPromptBlock([
     ...botPowerSelfCueLinesV1(speaker.powers),
-    ...botPowerObserverCueLinesV1(peer.name, peer.powers),
+    ...(audienceOnlyGuest && args.speakerRole === "host"
+      ? []
+      : botPowerObserverCueLinesV1(peer.name, peer.powers)),
   ]);
   const wrappingUp = args.cue?.kind === "wrap_up";
-  const transcript = args.episode.messages
+  const transcriptMessages =
+    audienceOnlyGuest && args.speakerRole === "host"
+      ? args.episode.messages.filter(
+          (message) => message.speakerRole === "host",
+        )
+      : args.episode.messages;
+  const transcript = transcriptMessages
     .map(
       (message) =>
       `${message.speakerRole === "host" ? args.host.name : args.guest.name}: ${message.content}`,
     )
     .join("\n");
-  const roleRules =
-    args.speakerRole === "host"
+  const roleRules = audienceOnlyGuest
+    ? args.speakerRole === "host"
+      ? [
+          `You are the host. ${args.guest.name} was booked, but the guest chair appears empty and you receive only silence from it.`,
+          `You cannot see, hear, sense, or receive any words from ${args.guest.name}. Never react to, quote, or correctly infer anything the unseen guest says to the audience.`,
+          "Stay on the air. Let your confusion develop naturally rather than repeating the same observation: check the empty chair, fill time, question the booking, and gradually accept that no guest seems to have arrived.",
+          "Private producer direction is silent control-room guidance. Incorporate it naturally; never quote it, mention a producer, or address the user.",
+          wrappingUp
+            ? "Close the strange, guestless broadcast now with one concise reflection. Do not invite a response or introduce a new topic."
+            : args.episode.segment === "opening"
+              ? `Open the show and acknowledge that ${args.guest.name} was expected, but no one appears to be in the guest chair.`
+              : args.episode.segment === "closing"
+                ? "Close the broadcast with the guest chair still empty. Do not thank an apparently absent guest."
+                : "Keep the live broadcast moving while genuinely wondering why the booked guest has not appeared. You may call into the silence, but do not behave as though you received an answer.",
+        ]
+      : [
+          `You are the booked guest, but ${args.host.name} cannot perceive or hear you. The listening audience can hear you as a private dramatic layer.`,
+          `Never address, answer, interrupt, or ask anything of ${args.host.name}. Speak only to the listeners in concise first-person asides or observations; never explain Powers, prompts, or system mechanics.`,
+          "You may notice the host's visible behavior and confusion, but treat it as dramatic irony rather than a two-way conversation.",
+          wrappingUp
+            ? "Give the listeners one final audience-only aside. Do not extend the interview or ask a question."
+            : args.departureRequired
+              ? "Leave with one audience-only final line. The host must remain unaware that you were ever present."
+              : args.episode.segment === "closing"
+                ? "Offer the listeners one final private observation while the host closes an apparently guestless show."
+                : "Let the listeners in on what the host is missing, in character and without speaking to the host.",
+        ]
+    : args.speakerRole === "host"
       ? [
           "You are the host. Introduce, question, listen, follow up, transition, and close with editorial control.",
           "Private producer direction is silent control-room guidance. Incorporate it naturally; never quote it, mention a producer, or address the user.",
@@ -2228,7 +2337,11 @@ export function buildBotcastSpeakerPrompt(
           ? `${wrappingUp ? "Shared episode direction" : "Private live producer cue"}: ${args.cue.kind}${args.cue.detail ? ` — ${args.cue.detail}` : ""}`
           : "Private live producer cue: none",
         transcript
-          ? `Current episode transcript only:\n${transcript}`
+          ? audienceOnlyGuest && args.speakerRole === "host"
+            ? `Your on-air words so far (the guest chair has remained silent):\n${transcript}`
+            : `Current episode transcript only:\n${transcript}`
+          : audienceOnlyGuest && args.speakerRole === "host"
+            ? "Your on-air transcript is empty. The guest chair is silent."
           : "Current episode transcript: empty",
         `Continue as ${speaker.name}.`,
       ].join("\n\n"),
@@ -2930,7 +3043,11 @@ export async function advanceBotcastEpisode(
   }
   const fallback =
     speakerRole === "host"
-      ? episode.segment === "closing"
+      ? episode.guestPresenceMode === "audience_only"
+        ? episode.segment === "closing" || wrapUpCue
+          ? `The guest chair stayed empty, so that is where we will leave this unusually quiet broadcast.`
+          : `${guest.name} was supposed to be here, but the chair is still empty. I am honestly not sure what happened.`
+        : episode.segment === "closing"
         ? guestAlreadyDeparted
           ? `${guest.name} has left the studio. That is where we will leave it; thank you for listening.`
           : `That is where we will leave it. ${guest.name}, thank you for joining me.`
@@ -2939,6 +3056,8 @@ export async function advanceBotcastEpisode(
           : `${guest.name}, what is the part of ${episode.topic} that people most often misunderstand?`
       : departureRequired
         ? "I warned you. We are done here."
+        : episode.guestPresenceMode === "audience_only"
+          ? "They still have no idea I am here. This is already more entertaining than the interview would have been."
         : wrapUpCue
           ? "The final point I would leave with your listeners is that the premise deserves more scrutiny than certainty."
           : "I do not accept the premise as stated, but I will answer the part that matters.";
@@ -3001,7 +3120,10 @@ export async function advanceBotcastEpisode(
   );
   const listenerRole = speakerRole === "host" ? "guest" : "host";
   const listener = listenerRole === "host" ? host : guest;
-  const listenerReaction = !(listenerRole === "guest" && guestAlreadyDeparted)
+  const listenerReaction = !(
+    (listenerRole === "guest" && guestAlreadyDeparted) ||
+    (episode.guestPresenceMode === "audience_only" && listenerRole === "host")
+  )
     ? buildSignalListenerReactionPlanV1({
         episodeId: episode.id,
         messageId,

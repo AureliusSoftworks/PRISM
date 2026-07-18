@@ -202,9 +202,12 @@
 .showBrandContent h2 { max-width: 760px; margin: 8px 0 4px; color: #fff; font-size: clamp(1.75rem, 3vw, 2.8rem); line-height: 1.04; text-wrap: balance; }
 .showBrandContent p { margin: 0; color: rgba(255,255,255,.76); font-size: 1rem; }
 .showBrandContent .eyebrow { color: rgba(255,255,255,.7); }
-.showAudiencePulse { width: min(460px, 100%); margin-top: 16px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 34%, rgba(255,255,255,.2)); border-radius: 16px; padding: 11px 13px 12px; background: linear-gradient(135deg, color-mix(in srgb, var(--botcast-host-accent) 11%, rgba(8,10,18,.72)), rgba(8,10,18,.58)); box-shadow: 0 14px 34px rgba(0,0,0,.24), inset 0 1px rgba(255,255,255,.1); backdrop-filter: blur(16px) saturate(1.16); }
+.showAudiencePulse { appearance: none; width: min(460px, 100%); margin-top: 16px; display: block; overflow: hidden; border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 34%, rgba(255,255,255,.2)); border-radius: 16px; padding: 11px 13px 12px; color: inherit; background: linear-gradient(135deg, color-mix(in srgb, var(--botcast-host-accent) 11%, rgba(8,10,18,.72)), rgba(8,10,18,.58)); box-shadow: 0 14px 34px rgba(0,0,0,.24), inset 0 1px rgba(255,255,255,.1); backdrop-filter: blur(16px) saturate(1.16); font: inherit; text-align: left; cursor: pointer; transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease, background 160ms ease; }
+.showAudiencePulse:hover { transform: translateY(-1px); border-color: color-mix(in srgb, var(--botcast-host-accent) 58%, rgba(255,255,255,.32)); box-shadow: 0 18px 40px rgba(0,0,0,.29), 0 0 24px color-mix(in srgb, var(--botcast-host-accent) 13%, transparent), inset 0 1px rgba(255,255,255,.13); }
+.showAudiencePulse:focus-visible { outline: 2px solid color-mix(in srgb, var(--botcast-host-accent) 72%, #fff); outline-offset: 3px; }
 .showBrandPreview[data-identity-settings-open="true"] .showAudiencePulse { display: none; }
-.showAudienceTitle { display: block; margin-bottom: 9px; color: color-mix(in srgb, var(--botcast-host-accent) 58%, #fff); font: 820 .58rem/1 system-ui; letter-spacing: .12em; text-transform: uppercase; }
+.showAudienceTitle { margin-bottom: 9px; display: flex; align-items: center; justify-content: space-between; gap: 12px; color: color-mix(in srgb, var(--botcast-host-accent) 58%, #fff); font: 820 .58rem/1 system-ui; letter-spacing: .12em; text-transform: uppercase; }
+.showAudienceOpenHint { color: rgba(255,255,255,.5); font-size: .54rem; letter-spacing: .08em; }
 .showAudienceMetrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .showAudienceMetric { min-width: 0; display: grid; gap: 4px; padding: 0 12px; border-left: 1px solid rgba(255,255,255,.13); }
 .showAudienceMetric:first-child { padding-left: 0; border-left: 0; }
@@ -213,9 +216,9 @@
 .showAudienceMetric strong { color: #fff; font: 850 1.08rem/1.05 system-ui; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .showAudienceRatingStar { margin-left: 4px; color: color-mix(in srgb, var(--botcast-host-accent) 70%, #fff); font-size: .7em; vertical-align: .08em; }
 .showAudienceQuote { margin: 10px 0 0; display: flex; align-items: baseline; justify-content: space-between; gap: 12px; border-top: 1px solid rgba(255,255,255,.11); padding-top: 9px; }
-.showAudienceQuote p { min-width: 0; overflow: hidden; color: rgba(255,255,255,.8); font: 650 .66rem/1.35 system-ui; text-overflow: ellipsis; white-space: nowrap; }
+.showAudienceQuote > span:first-child { min-width: 0; overflow: hidden; color: rgba(255,255,255,.8); font: 650 .66rem/1.35 system-ui; text-overflow: ellipsis; white-space: nowrap; }
 .showAudienceQuote cite { flex: 0 0 auto; color: rgba(255,255,255,.5); font: 650 .54rem/1 system-ui; white-space: nowrap; }
-.showAudienceEmpty { margin-top: 10px !important; border-top: 1px solid rgba(255,255,255,.11); padding-top: 9px; color: rgba(255,255,255,.62) !important; font: 650 .63rem/1.35 system-ui !important; }
+.showAudienceEmpty { margin-top: 10px !important; display: block; border-top: 1px solid rgba(255,255,255,.11); padding-top: 9px; color: rgba(255,255,255,.62) !important; font: 650 .63rem/1.35 system-ui !important; }
 .showLookInvitation { position: relative; z-index: 5; width: min(320px, 38%); margin-left: auto; display: grid; gap: 7px; padding: 16px; border: 1px solid rgba(255,255,255,.2); border-radius: 18px; background: rgba(10,11,22,.52); box-shadow: 0 16px 42px rgba(0,0,0,.2), inset 0 1px rgba(255,255,255,.12); backdrop-filter: blur(18px) saturate(1.2); }
 .showLookInvitation strong { color: #fff; font-size: .92rem; line-height: 1.2; }
 .showLookInvitation small { color: rgba(255,255,255,.68); font-size: .68rem; line-height: 1.4; }
@@ -257,8 +260,6 @@
 .showIntroActions button { border: 1px solid color-mix(in srgb, var(--botcast-accent) 34%, var(--botcast-line)); border-radius: 9px; padding: 9px 11px; color: var(--botcast-ink); background: color-mix(in srgb, var(--botcast-accent) 10%, var(--botcast-soft-panel)); font: 720 .67rem/1 system-ui; cursor: pointer; }
 .showIntroActions .showIntroPreviewButton { border-color: color-mix(in srgb, var(--botcast-accent) 58%, var(--botcast-line)); color: color-mix(in srgb, var(--botcast-accent) 42%, var(--botcast-ink)); background: color-mix(in srgb, var(--botcast-accent) 17%, var(--botcast-soft-panel)); }
 .showIntroActions .showIntroPreviewButton[data-active="true"] { color: var(--botcast-ink); box-shadow: 0 0 0 1px color-mix(in srgb, var(--botcast-accent) 18%, transparent), 0 0 22px color-mix(in srgb, var(--botcast-accent) 18%, transparent); }
-.showIntroActions .showIntroDevPreviewButton { border-style: dashed; }
-.showIntroActions .showIntroDevPreviewButton[data-active="true"] { color: var(--botcast-ink); box-shadow: 0 0 0 1px color-mix(in srgb, var(--botcast-host-accent) 18%, transparent); }
 .showIntroActions .showIntroLocalButton { border-style: dashed; background: var(--botcast-soft-panel); }
 .showIntroActions small { flex: 0 0 100%; color: var(--botcast-muted); font-size: .6rem; text-align: right; }
 .showIntroControl .eyebrow, .productionDesk .eyebrow, .archiveHeading .eyebrow { color: var(--botcast-host-accent); }
@@ -286,12 +287,42 @@
 .latestEpisodeList small { min-width: 0; overflow: hidden; color: var(--botcast-muted); font-size: .62rem; text-overflow: ellipsis; white-space: nowrap; }
 .latestEpisodeUse { margin-top: 3px; color: color-mix(in srgb, var(--botcast-host-accent) 72%, var(--botcast-ink)); font: 780 .6rem/1 system-ui; letter-spacing: .05em; }
 .latestEpisodesEmpty { margin: 12px 0 0; color: var(--botcast-muted); font-size: .7rem; }
-.stageLayoutEditor { display: grid; gap: 12px; margin-top: 20px; }
+.stageLayoutModalBackdrop { position: fixed; inset: 0; z-index: 950; display: grid; min-width: 0; min-height: 0; background: rgba(5, 5, 11, .78); backdrop-filter: blur(22px) saturate(1.1); }
+.stageLayoutModal { width: 100%; height: 100dvh; min-width: 0; min-height: 0; overflow: auto; color: var(--botcast-ink); background: radial-gradient(circle at 90% 0%, color-mix(in srgb, var(--botcast-host-accent) 16%, transparent), transparent 35%), radial-gradient(circle at 8% 100%, color-mix(in srgb, var(--prism-s) 8%, transparent), transparent 34%), var(--botcast-bg); }
+.stageLayoutModalHeader { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between; gap: 24px; box-sizing: border-box; border-bottom: 1px solid color-mix(in srgb, var(--botcast-host-accent) 22%, var(--botcast-line)); padding: 18px clamp(20px, 4vw, 64px); background: color-mix(in srgb, var(--botcast-bg) 90%, transparent); box-shadow: 0 12px 36px rgba(0,0,0,.14); backdrop-filter: blur(20px) saturate(1.1); }
+.stageLayoutModalHeader > div { min-width: 0; }
+.stageLayoutModalHeader h2 { margin: 4px 0 2px; font-size: clamp(1.1rem, 2vw, 1.55rem); }
+.stageLayoutModalHeader p { margin: 0; color: var(--botcast-muted); font-size: .72rem; }
+.stageLayoutModalHeader > button { flex: 0 0 auto; border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 44%, var(--botcast-line)); border-radius: 10px; padding: 10px 18px; color: var(--botcast-ink); background: color-mix(in srgb, var(--botcast-host-accent) 14%, var(--botcast-soft-panel)); font: 760 .7rem/1 system-ui; cursor: pointer; }
+.stageLayoutModalBody { width: min(1440px, 100%); margin: 0 auto; box-sizing: border-box; padding: clamp(18px, 3vw, 40px); }
+.stageLayoutEditor { display: grid; gap: 12px; }
+.stageLayoutModal .stageViewport { width: min(1320px, 100%); max-width: 1320px; }
+.stageLayoutModal .atmosphereDevMixer { width: min(1320px, 100%); max-width: 1320px; }
 .stageLayoutEditorHeader { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
 .stageLayoutEditorHeader p { margin: 0; color: var(--botcast-muted); font-size: .72rem; line-height: 1.45; }
 .stageLayoutEditorHeader > div { display: flex; align-items: center; gap: 10px; }
 .stageLayoutEditorHeader span { color: var(--botcast-muted); font-size: .66rem; white-space: nowrap; }
 .stageLayoutEditorHeader button { border: 1px solid var(--botcast-line); border-radius: 8px; padding: 7px 10px; color: inherit; background: var(--botcast-soft-panel); cursor: pointer; white-space: nowrap; }
+.stageLayoutEditorHeader .stageSoundcheckButton { border-color: color-mix(in srgb, var(--botcast-host-accent) 46%, var(--botcast-line)); background: color-mix(in srgb, var(--botcast-host-accent) 11%, var(--botcast-soft-panel)); }
+.stageLayoutEditorHeader .stageSoundcheckButton[data-active="true"] { color: var(--botcast-ink); box-shadow: 0 0 0 1px color-mix(in srgb, var(--botcast-host-accent) 16%, transparent), 0 0 18px color-mix(in srgb, var(--botcast-host-accent) 14%, transparent); }
+.stageLayoutEditorHeader button:disabled { opacity: .44; cursor: default; }
+.stageSoundcheckStatus { min-height: 34px; display: flex; align-items: center; gap: 9px; border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 14%, var(--botcast-line)); border-radius: 10px; padding: 8px 11px; color: var(--botcast-muted); background: color-mix(in srgb, var(--botcast-host-accent) 4%, var(--botcast-soft-panel)); font-size: .66rem; line-height: 1.4; }
+.stageSoundcheckStatus[data-active="true"] { border-color: color-mix(in srgb, var(--botcast-host-accent) 34%, var(--botcast-line)); color: var(--botcast-ink); }
+.stageSoundcheckStatus strong { flex: 0 0 auto; color: color-mix(in srgb, var(--botcast-host-accent) 72%, var(--botcast-ink)); }
+.stageSoundcheckStatus span { min-width: 0; }
+.stageVoiceMixer { display: grid; grid-template-columns: minmax(190px, .45fr) minmax(0, 1fr); align-items: center; gap: 16px; border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 20%, var(--botcast-line)); border-radius: 12px; padding: 11px 13px; background: color-mix(in srgb, var(--botcast-host-accent) 6%, var(--botcast-soft-panel)); box-shadow: inset 3px 0 color-mix(in srgb, var(--botcast-host-accent) 42%, transparent); }
+.stageVoiceMixer > header { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.stageVoiceMixer > header > div { min-width: 0; display: grid; gap: 3px; }
+.stageVoiceMixer > header strong { overflow: hidden; font-size: .74rem; text-overflow: ellipsis; white-space: nowrap; }
+.stageVoiceMixer > header small { color: var(--botcast-muted); font-size: .56rem; line-height: 1.3; text-align: right; }
+.stageVoiceMixerSliders { min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(150px, 1fr)); gap: 14px; }
+.stageVoiceMixerSliders label { min-width: 0; display: grid; gap: 6px; }
+.stageVoiceMixerSliders label > span { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.stageVoiceMixerSliders label > span > span { min-width: 0; display: flex; align-items: baseline; gap: 7px; }
+.stageVoiceMixerSliders strong { color: var(--botcast-ink); font: 760 .62rem/1 system-ui; }
+.stageVoiceMixerSliders small { overflow: hidden; color: var(--botcast-muted); font: 650 .58rem/1 system-ui; text-overflow: ellipsis; white-space: nowrap; }
+.stageVoiceMixerSliders output { flex: 0 0 auto; color: var(--botcast-ink); font: 760 .6rem/1 system-ui; font-variant-numeric: tabular-nums; }
+.stageVoiceMixerSliders input { width: 100%; margin: 0; accent-color: var(--botcast-host-accent); }
 .setupGrid { display: grid; grid-template-columns: .8fr 1.2fr; gap: 16px; margin-top: 22px; }
 .setupGrid label, .setupField { display: grid; gap: 8px; color: var(--botcast-muted); font-size: .75rem; }
 .producerBrief { grid-column: 1 / -1; }
@@ -347,7 +378,6 @@
 .stageViewport { --botcast-accent: var(--prism-m); --botcast-studio-accent: var(--botcast-accent); --botcast-atmosphere: none; position: relative; max-width: 1180px; aspect-ratio: 16 / 9; margin: 0 auto; overflow: hidden; border: 1px solid rgba(255,255,255,.14); border-radius: 20px; background: #11121a; box-shadow: 0 28px 90px rgba(21,15,48,.35), inset 0 0 80px rgba(0,0,0,.5); }
 .liveLayout .stageViewport { max-width: 1320px; }
 .atmosphereDevMixer { max-width: 1180px; margin: 10px auto 14px; display: grid; grid-template-columns: minmax(220px, .55fr) minmax(0, 1fr); align-items: center; gap: 14px; box-sizing: border-box; border: 1px dashed color-mix(in srgb, var(--prism-s) 34%, var(--botcast-line)); border-radius: 12px; padding: 10px 12px; background: color-mix(in srgb, var(--prism-s) 4%, var(--botcast-panel)); box-shadow: inset 3px 0 color-mix(in srgb, var(--prism-s) 42%, transparent); }
-.liveLayout .atmosphereDevMixer { max-width: 1320px; }
 .atmosphereDevMixerHeader { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 3px 9px; }
 .atmosphereDevMixerHeader > div { min-width: 0; display: grid; gap: 3px; }
 .atmosphereDevMixerHeader strong { overflow: hidden; font-size: .74rem; text-overflow: ellipsis; white-space: nowrap; }
@@ -395,6 +425,7 @@
 .avatarRig { --signal-avatar-lean: 0deg; position: relative; width: 100%; height: 100%; display: grid; place-items: center; filter: drop-shadow(0 13px 18px rgba(0,0,0,.48)); animation: signalBotIdle 4.8s ease-in-out infinite; transform-origin: 50% 82%; will-change: transform; }
 .avatarRig[data-signal-presence="host"] { --signal-avatar-lean: 2.4deg; }
 .avatarRig[data-signal-presence="guest"] { --signal-avatar-lean: -2.4deg; animation-delay: -2.1s; }
+.avatarRig[data-audience-only="true"] { opacity: .5; }
 .avatarRig[data-talking="true"] { animation: none; transform: rotate(var(--signal-avatar-lean)); }
 .avatarRig[data-thinking="true"] { animation: signalBotThinking 1.9s ease-in-out infinite; }
 .avatarRig[data-sipping="true"] { animation: none; transform: rotate(var(--signal-avatar-lean)); }
@@ -480,6 +511,34 @@
 .emptyStudio .logoMark { width: 70px; height: 60px; }
 .emptyStudio h1 { color: var(--botcast-ink); margin-bottom: 6px; }
 
+.audiencePulseBackdrop { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 22px; background: rgba(5,5,11,.7); backdrop-filter: blur(18px) saturate(1.12); }
+.audiencePulseBackdropDismiss { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; padding: 0; background: transparent; cursor: default; }
+.audiencePulseDialog { position: relative; z-index: 1; width: min(760px, 100%); max-height: min(820px, calc(100dvh - 44px)); overflow: hidden; display: grid; grid-template-rows: auto auto minmax(0, 1fr); border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 28%, var(--botcast-line)); border-radius: 24px; color: var(--botcast-ink); background: radial-gradient(circle at 92% 5%, color-mix(in srgb, var(--botcast-host-accent) 15%, transparent), transparent 36%), radial-gradient(circle at 5% 100%, color-mix(in srgb, var(--prism-s) 9%, transparent), transparent 35%), var(--botcast-panel); box-shadow: 0 32px 110px rgba(0,0,0,.52), inset 0 1px rgba(255,255,255,.09); }
+.audiencePulseDialog::before { content: ""; position: absolute; inset: 0 0 auto; z-index: 2; height: 2px; background: linear-gradient(90deg, var(--prism-p), var(--prism-r), var(--prism-i), var(--prism-s), var(--botcast-host-accent), var(--prism-m)); }
+.audiencePulseDialogHeader { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 24px; padding: 27px 28px 20px; }
+.audiencePulseDialogHeader h2 { margin: 8px 0 7px; font-size: clamp(1.45rem, 3vw, 2rem); line-height: 1.08; }
+.audiencePulseDialogHeader p { max-width: 620px; margin: 0; color: var(--botcast-muted); font-size: .82rem; line-height: 1.5; }
+.audiencePulseCloseButton { width: 38px; height: 38px; display: grid; place-items: center; border: 1px solid var(--botcast-line); border-radius: 999px; padding: 0 0 2px; color: var(--botcast-ink); background: color-mix(in srgb, var(--botcast-soft-panel) 88%, transparent); font: 400 1.4rem/1 system-ui; cursor: pointer; }
+.audiencePulseCloseButton:hover { border-color: color-mix(in srgb, var(--botcast-host-accent) 48%, var(--botcast-line)); background: color-mix(in srgb, var(--botcast-host-accent) 10%, var(--botcast-soft-panel)); }
+.audiencePulseCloseButton:focus-visible { outline: 2px solid var(--prism-s); outline-offset: 3px; }
+.audiencePulseSummary { margin: 0 28px 18px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 16%, var(--botcast-line)); border-radius: 15px; background: color-mix(in srgb, var(--botcast-host-accent) 6%, var(--botcast-soft-panel)); }
+.audiencePulseSummary > span { min-width: 0; display: grid; gap: 5px; padding: 13px 16px; border-left: 1px solid var(--botcast-line); }
+.audiencePulseSummary > span:first-child { border-left: 0; }
+.audiencePulseSummary small { overflow: hidden; color: var(--botcast-muted); font: 750 .57rem/1 system-ui; letter-spacing: .09em; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
+.audiencePulseSummary strong { color: var(--botcast-ink); font: 850 1.08rem/1.05 system-ui; font-variant-numeric: tabular-nums; }
+.audiencePulseReviewList { min-height: 0; overflow: auto; display: grid; gap: 11px; padding: 0 28px 28px; overscroll-behavior: contain; }
+.audiencePulseReview { border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 14%, var(--botcast-line)); border-radius: 16px; padding: 16px 17px; background: color-mix(in srgb, var(--botcast-host-accent) 4%, var(--botcast-soft-panel)); box-shadow: inset 3px 0 color-mix(in srgb, var(--botcast-host-accent) 48%, transparent); }
+.audiencePulseReview > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.audiencePulseReview > header > div { min-width: 0; }
+.audiencePulseReview > header > div > span { color: color-mix(in srgb, var(--botcast-host-accent) 64%, var(--botcast-ink)); font: 800 .57rem/1 system-ui; letter-spacing: .09em; text-transform: uppercase; }
+.audiencePulseReview h3 { margin: 5px 0 0; font-size: .9rem; line-height: 1.28; text-wrap: balance; }
+.audiencePulseReview > header > strong { flex: 0 0 auto; color: color-mix(in srgb, var(--botcast-host-accent) 72%, var(--botcast-ink)); font: 850 .83rem/1 system-ui; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.audiencePulseReview blockquote { margin: 13px 0 9px; color: var(--botcast-ink); font: 650 .83rem/1.5 system-ui; }
+.audiencePulseReview footer { color: var(--botcast-muted); font: 700 .66rem/1.2 system-ui; }
+.audiencePulseDialogEmpty { margin: 0 28px 28px; border: 1px dashed color-mix(in srgb, var(--botcast-host-accent) 24%, var(--botcast-line)); border-radius: 16px; padding: 24px; text-align: center; background: color-mix(in srgb, var(--botcast-host-accent) 4%, var(--botcast-soft-panel)); }
+.audiencePulseDialogEmpty strong { display: block; margin-bottom: 6px; }
+.audiencePulseDialogEmpty p { margin: 0; color: var(--botcast-muted); font-size: .78rem; line-height: 1.45; }
+
 .deleteBackdrop { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 22px; background: rgba(5, 5, 11, .68); backdrop-filter: blur(18px) saturate(1.12); }
 .deleteBackdropDismiss { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; padding: 0; background: transparent; cursor: default; }
 .deleteDialog { position: relative; z-index: 1; width: min(470px, 100%); overflow: hidden; border: 1px solid color-mix(in srgb, var(--prism-m) 25%, var(--botcast-line)); border-radius: 22px; padding: 26px; color: var(--botcast-ink); background: radial-gradient(circle at 92% 5%, color-mix(in srgb, var(--prism-m) 18%, transparent), transparent 38%), radial-gradient(circle at 5% 100%, color-mix(in srgb, var(--prism-s) 10%, transparent), transparent 35%), var(--botcast-panel); box-shadow: 0 30px 100px rgba(0,0,0,.48), inset 0 1px rgba(255,255,255,.08); }
@@ -531,12 +590,13 @@
 .shell[data-theme="light"] .showBrandContent .eyebrow { color: color-mix(in srgb, var(--botcast-ink) 56%, var(--botcast-accent)); }
 .shell[data-theme="light"] .showAudiencePulse { border-color: color-mix(in srgb, var(--botcast-host-accent) 24%, rgba(255,255,255,.9)); background: linear-gradient(135deg, color-mix(in srgb, var(--botcast-host-accent) 8%, rgba(255,255,255,.82)), rgba(255,255,255,.7)); box-shadow: 0 14px 34px rgba(53,55,89,.13), inset 0 1px rgba(255,255,255,.86); }
 .shell[data-theme="light"] .showAudienceTitle { color: color-mix(in srgb, var(--botcast-host-accent) 62%, var(--botcast-ink)); }
+.shell[data-theme="light"] .showAudienceOpenHint { color: color-mix(in srgb, var(--botcast-ink) 46%, transparent); }
 .shell[data-theme="light"] .showAudienceMetric { border-color: color-mix(in srgb, var(--botcast-ink) 12%, transparent); }
 .shell[data-theme="light"] .showAudienceMetric small { color: color-mix(in srgb, var(--botcast-ink) 52%, transparent); }
 .shell[data-theme="light"] .showAudienceMetric strong { color: var(--botcast-ink); }
 .shell[data-theme="light"] .showAudienceRatingStar { color: color-mix(in srgb, var(--botcast-host-accent) 72%, var(--botcast-ink)); }
 .shell[data-theme="light"] .showAudienceQuote, .shell[data-theme="light"] .showAudienceEmpty { border-color: color-mix(in srgb, var(--botcast-ink) 11%, transparent); }
-.shell[data-theme="light"] .showAudienceQuote p { color: color-mix(in srgb, var(--botcast-ink) 78%, transparent); }
+.shell[data-theme="light"] .showAudienceQuote > span:first-child { color: color-mix(in srgb, var(--botcast-ink) 78%, transparent); }
 .shell[data-theme="light"] .showAudienceQuote cite, .shell[data-theme="light"] .showAudienceEmpty { color: color-mix(in srgb, var(--botcast-ink) 54%, transparent) !important; }
 .shell[data-theme="light"] .showLookInvitation { border-color: rgba(255,255,255,.82); background: rgba(255,255,255,.66); box-shadow: 0 16px 42px rgba(53,55,89,.13), inset 0 1px rgba(255,255,255,.88); }
 .shell[data-theme="light"] .showLookInvitation strong { color: var(--botcast-ink); }
@@ -593,7 +653,6 @@
   .shell[data-live-episode="true"] .main { overflow-y: hidden; }
   .shell[data-live-episode="true"] .liveLayout { height: 100%; box-sizing: border-box; overflow: hidden; }
   .shell[data-live-episode="true"] .liveLayout .stageViewport { width: min(1320px, 100%, calc(177.78dvh - 764.45px)); }
-  .shell[data-live-episode="true"] .liveLayout:has(.atmosphereDevMixer) .stageViewport { width: min(1320px, 100%, calc(177.78dvh - 916px)); }
   .shell[data-live-episode="true"] .controlRoom { width: 100%; height: clamp(210px, 24dvh, 260px); align-items: stretch; }
   .shell[data-live-episode="true"] .transcript,
   .shell[data-live-episode="true"] .producerControls { box-sizing: border-box; min-height: 0; height: 100%; max-height: none; }
@@ -621,7 +680,16 @@
   .showAudienceMetric { padding-inline: 8px; }
   .showAudienceMetric strong { font-size: .96rem; }
   .showAudienceQuote { align-items: flex-start; flex-direction: column; gap: 4px; }
-  .showAudienceQuote p { max-width: 100%; white-space: normal; }
+  .showAudienceQuote > span:first-child { max-width: 100%; white-space: normal; }
+  .audiencePulseBackdrop { padding: 10px; }
+  .audiencePulseDialog { max-height: calc(100dvh - 20px); border-radius: 19px; }
+  .audiencePulseDialogHeader { gap: 14px; padding: 23px 18px 17px; }
+  .audiencePulseSummary { margin: 0 18px 14px; }
+  .audiencePulseSummary > span { padding: 11px 9px; }
+  .audiencePulseSummary small { font-size: .5rem; }
+  .audiencePulseSummary strong { font-size: .96rem; }
+  .audiencePulseReviewList { padding: 0 18px 18px; }
+  .audiencePulseDialogEmpty { margin: 0 18px 18px; }
   .showLookInvitation, .showLookControls { width: 100%; margin-left: 0; }
   .showCardHostPresence { right: -24px; bottom: 0; width: 226px; }
   .showCardHostFloat > * { transform: scale(1.32); }
@@ -633,7 +701,11 @@
   .productionHeadingActions { width: 100%; justify-content: flex-start; }
   .latestEpisodesHeading { align-items: flex-start; flex-direction: column; gap: 6px; }
   .latestEpisodesHeading p { text-align: left; }
+  .stageLayoutModalHeader { align-items: flex-start; padding: 14px; }
+  .stageLayoutModalHeader p { display: none; }
+  .stageLayoutModalBody { padding: 14px; }
   .stageLayoutEditorHeader { align-items: flex-start; flex-direction: column; }
+  .stageLayoutEditorHeader > div { width: 100%; flex-wrap: wrap; }
   .controlRoom { grid-template-columns: 1fr; }
   .setupGrid { grid-template-columns: 1fr; }.producerBrief { grid-column: auto; }
   .episodeLaunchRow { align-items: stretch; flex-direction: column; }
@@ -644,13 +716,16 @@
   .stageViewport { border-radius: 10px; }
   .atmosphereDevMixer { grid-template-columns: 1fr; }
   .atmosphereDevMixerSliders { grid-template-columns: 1fr; }
+  .stageVoiceMixer { grid-template-columns: 1fr; }
+  .stageVoiceMixer > header { align-items: flex-start; }
+  .stageVoiceMixerSliders { grid-template-columns: 1fr; }
   .replayControls { flex-wrap: wrap; }.replayControls > input { order: 3; flex-basis: 100%; }
   .liveCameraControls { justify-content: flex-start; flex-wrap: wrap; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .stageScene { transition-duration: 120ms; }
-  .stageScene, .episodeOpenButton, .episodeDeleteButton, .episodePreRoll, .preRollLockup, .showIdentityGearButton, .showIdentityGearButton span { transition: none !important; }
+  .stageScene, .episodeOpenButton, .episodeDeleteButton, .episodePreRoll, .preRollLockup, .showAudiencePulse, .showIdentityGearButton, .showIdentityGearButton span { transition: none !important; }
   .avatarRig { animation: none !important; transform: rotate(var(--signal-avatar-lean)); }
   .avatarRig[data-listener-reaction] { filter: drop-shadow(0 0 10px color-mix(in srgb, var(--botcast-studio-accent) 24%, transparent)); }
   .showCardHostPresence { transition: none !important; }
