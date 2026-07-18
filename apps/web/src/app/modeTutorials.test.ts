@@ -120,6 +120,10 @@ describe("mode tutorials", () => {
       /marked as early/u,
     );
     assert.match(
+      MODE_TUTORIALS.botcast.steps[2]?.body ?? "",
+      /open the full review history/u,
+    );
+    assert.match(
       MODE_TUTORIALS.botcast.steps[3]?.body ?? "",
       /host-persona-led Signal Synth ident/u,
     );
@@ -209,6 +213,30 @@ describe("mode tutorials", () => {
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
       /close-up pans center/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
+      /dedicated fullscreen placement workspace/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
+      /only development mix sliders stay live there/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
+      /Host and Guest voice sliders to balance the cast/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
+      /remembers each bot’s level for this show/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
+      /Test voices runs a random two-line soundcheck/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
+      /never creates an episode or transcript/u,
     );
     assert.equal(
       MODE_TUTORIALS.botcast.steps[6]?.heading,

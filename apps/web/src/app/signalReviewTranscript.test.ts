@@ -20,6 +20,7 @@ const episode: BotcastEpisode = {
   guestBotId: "guest-1",
   topic: "When helpful gets chaotic",
   producerBrief: "Find the exact moment assistance becomes control.",
+  guestPresenceMode: "present",
   provider: "local",
   model: "primary-model",
   responseMode: "auto",

@@ -7,6 +7,7 @@ export type BotcastEpisodeOutcome = "completed" | "guest_departed";
 export type BotcastEpisodeProvider = "local" | "openai" | "anthropic";
 export type BotcastEpisodeResponseMode = "local" | "auto" | "online";
 export type BotcastSpeakerRole = "host" | "guest";
+export type BotcastGuestPresenceMode = "present" | "audience_only";
 export type BotcastSessionDurationMinutes = number;
 export const BOTCAST_SESSION_DURATION_MINUTES_MIN = 3;
 export const BOTCAST_SESSION_DURATION_MINUTES_MAX = 30;
@@ -90,6 +91,61 @@ export type BotcastStudioLayout = Record<
   BotcastStudioLayoutItem,
   BotcastStudioPoint
 >;
+
+export type BotcastVoiceLevelsByBotId = Record<string, number>;
+
+export const BOTCAST_VOICE_LEVEL_DEFAULT = 1;
+export const BOTCAST_VOICE_LEVEL_MAX = 1.25;
+export const BOTCAST_VOICE_LEVEL_STEP = 0.05;
+
+export function normalizeBotcastVoiceLevel(
+  value: unknown,
+  fallback = BOTCAST_VOICE_LEVEL_DEFAULT,
+): number {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value)
+        : Number.NaN;
+  const safe = Number.isFinite(parsed) ? parsed : fallback;
+  return Number(Math.max(0, Math.min(BOTCAST_VOICE_LEVEL_MAX, safe)).toFixed(2));
+}
+
+export function normalizeBotcastVoiceLevelsByBotId(
+  value: unknown,
+  fallback: Readonly<BotcastVoiceLevelsByBotId> = {},
+): BotcastVoiceLevelsByBotId {
+  const normalized = Object.fromEntries(
+    Object.entries(fallback)
+      .filter(([botId]) => botId.trim().length > 0)
+      .slice(0, 100)
+      .map(([botId, level]) => [botId, normalizeBotcastVoiceLevel(level)]),
+  );
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return normalized;
+  }
+  for (const [rawBotId, rawLevel] of Object.entries(value).slice(0, 100)) {
+    const botId = rawBotId.trim().slice(0, 128);
+    if (!botId) continue;
+    const parsed =
+      typeof rawLevel === "number"
+        ? rawLevel
+        : typeof rawLevel === "string"
+          ? Number(rawLevel)
+          : Number.NaN;
+    if (!Number.isFinite(parsed)) continue;
+    normalized[botId] = normalizeBotcastVoiceLevel(parsed);
+  }
+  return normalized;
+}
+
+export function botcastVoiceLevelForBot(
+  levels: Readonly<BotcastVoiceLevelsByBotId> | null | undefined,
+  botId: string,
+): number {
+  return normalizeBotcastVoiceLevel(levels?.[botId]);
+}
 
 export const BOTCAST_DEFAULT_STUDIO_LAYOUT: BotcastStudioLayout = {
   hostBot: { x: 22.5, y: 71.25 },
@@ -297,6 +353,7 @@ export interface BotcastShow {
   dayAtmosphere: BotcastAtmosphereState;
   nightAtmosphere: BotcastAtmosphereState;
   studioLayout: BotcastStudioLayout;
+  voiceLevelsByBotId: BotcastVoiceLevelsByBotId;
   logo: BotcastLogoState;
   introAudio: BotcastIntroAudioState;
   atmosphereAudio: BotcastAtmosphereAudioState;
@@ -334,6 +391,7 @@ export interface BotcastProducerCue {
 
 export type BotcastReplayEventKind =
   | "segment"
+  | "guest_presence"
   | "producer_cue"
   | "utterance"
   | "tension"
@@ -375,33 +433,52 @@ function normalizeSavedBotcastListenerReactionPlan(
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
   const id = (candidate: unknown): string | null =>
-    typeof candidate === "string" && candidate.trim() && candidate.trim().length <= 160
+    typeof candidate === "string" &&
+    candidate.trim() &&
+    candidate.trim().length <= 160
       ? candidate.trim()
       : null;
   const speakerBotId = id(row.speakerBotId);
   const listenerBotId = id(row.listenerBotId);
   const messageId = id(row.messageId);
   const seed = id(row.seed);
-  const targetSource = row.targetSource === "role" ||
-      row.targetSource === "direct" || row.targetSource === "inferred"
+  const targetSource =
+    row.targetSource === "role" ||
+    row.targetSource === "direct" ||
+    row.targetSource === "inferred"
     ? row.targetSource
     : null;
-  const visualAction = row.visualAction === "nod" ||
-      row.visualAction === "lean_in" || row.visualAction === "head_tilt" ||
-      row.visualAction === "soft_smile" || row.visualAction === "thoughtful_hmm"
+  const visualAction =
+    row.visualAction === "nod" ||
+    row.visualAction === "lean_in" ||
+    row.visualAction === "head_tilt" ||
+    row.visualAction === "soft_smile" ||
+    row.visualAction === "thoughtful_hmm"
     ? row.visualAction
     : null;
-  const spokenCue = row.spokenCue === "mm-hm" || row.spokenCue === "I see" ||
+  const spokenCue =
+    row.spokenCue === "mm-hm" ||
+    row.spokenCue === "I see" ||
       row.spokenCue === "hmm"
     ? row.spokenCue
     : undefined;
   if (
-    row.v !== 1 || row.name !== "listenerReaction" || !speakerBotId ||
-    !listenerBotId || speakerBotId === listenerBotId || !messageId || !seed ||
-    !targetSource || !visualAction || typeof row.targetProgress !== "number" ||
-    !Number.isFinite(row.targetProgress) || row.targetProgress < 0.3 ||
-    row.targetProgress > 0.75 || typeof row.cameraCutEligible !== "boolean"
-  ) return null;
+    row.v !== 1 ||
+    row.name !== "listenerReaction" ||
+    !speakerBotId ||
+    !listenerBotId ||
+    speakerBotId === listenerBotId ||
+    !messageId ||
+    !seed ||
+    !targetSource ||
+    !visualAction ||
+    typeof row.targetProgress !== "number" ||
+    !Number.isFinite(row.targetProgress) ||
+    row.targetProgress < 0.3 ||
+    row.targetProgress > 0.75 ||
+    typeof row.cameraCutEligible !== "boolean"
+  )
+    return null;
   return {
     v: 1,
     name: "listenerReaction",
@@ -509,6 +586,8 @@ export interface BotcastPersonaReview {
 
 export interface BotcastEpisode extends BotcastEpisodeSummary {
   producerBrief: string;
+  /** Audience-only guests are recorded, but remain imperceptible to the host. */
+  guestPresenceMode: BotcastGuestPresenceMode;
   messages: BotcastMessage[];
   segments: BotcastSegmentRecord[];
   events: BotcastReplayEvent[];
@@ -534,6 +613,7 @@ export interface BotcastShowPatchRequest {
   nightAtmosphereImageUrl?: string | null;
   nightAtmosphereImageId?: string | null;
   studioLayout?: BotcastStudioLayout;
+  voiceLevelsByBotId?: BotcastVoiceLevelsByBotId;
   regenerateAtmosphere?: boolean;
   regenerateDayAtmosphere?: boolean;
   regenerateNightAtmosphere?: boolean;

@@ -3,10 +3,12 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1 } from "@localai/shared";
 import {
+  enqueueEnglishVoice,
   elevenLabsEffectForEngine,
   readEnglishVoiceSynthesisClip,
   resolveEnglishVoicePlaybackDetuneCents,
   resolveEnglishVoicePostProcessing,
+  stopEnglishVoice,
 } from "./englishVoice.ts";
 
 describe("English voice post processing", () => {
@@ -63,6 +65,88 @@ describe("English voice post processing", () => {
     };
     assert.equal(resolveEnglishVoicePlaybackDetuneCents(profile, "elevenlabs"), -183);
     assert.equal(resolveEnglishVoicePlaybackDetuneCents(profile, "builtin"), -487);
+  });
+
+  it("falls back to gesture-authorized media when Web Audio rejects provider MP3 bytes", async () => {
+    const originalAudio = Object.getOwnPropertyDescriptor(globalThis, "Audio");
+    const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+    let playCount = 0;
+    class FakeAudioContext {
+      state = "running";
+      decodeAudioData(): Promise<AudioBuffer> {
+        return Promise.reject(new Error("WebKit decode failed"));
+      }
+    }
+    class FakeAudio {
+      duration = Number.NaN;
+      currentTime = 0;
+      preload = "";
+      volume = 1;
+      preservesPitch = true;
+      src = "";
+      private listeners = new Map<string, () => void>();
+
+      addEventListener(name: string, listener: () => void): void {
+        this.listeners.set(name, listener);
+      }
+      pause(): void {}
+      removeAttribute(): void {}
+      load(): void {}
+      play(): Promise<void> {
+        playCount += 1;
+        setTimeout(() => this.listeners.get("ended")?.(), 0);
+        return Promise.resolve();
+      }
+    }
+    Object.defineProperty(globalThis, "Audio", {
+      configurable: true,
+      value: FakeAudio,
+    });
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: {
+        AudioContext: FakeAudioContext,
+        clearInterval,
+        clearTimeout,
+        setInterval,
+        setTimeout,
+      },
+    });
+    let started = false;
+    let ended = false;
+    try {
+      await enqueueEnglishVoice(
+        Uint8Array.from([0x49, 0x44, 0x33]).buffer,
+        DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+        "webkit-fallback",
+        true,
+        1,
+        {
+          onStart: () => {
+            started = true;
+          },
+          onEnd: () => {
+            ended = true;
+          },
+        },
+        "elevenlabs",
+      );
+      assert.equal(playCount, 1);
+      assert.equal(started, true);
+      assert.equal(ended, true);
+    } finally {
+      stopEnglishVoice();
+      if (originalAudio) {
+        Object.defineProperty(globalThis, "Audio", originalAudio);
+      } else {
+        Reflect.deleteProperty(globalThis, "Audio");
+      }
+      if (originalWindow) {
+        Object.defineProperty(globalThis, "window", originalWindow);
+      } else {
+        Reflect.deleteProperty(globalThis, "window");
+      }
+    }
   });
 });
 

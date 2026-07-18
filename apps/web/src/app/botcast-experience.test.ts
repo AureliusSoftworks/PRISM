@@ -77,9 +77,10 @@ describe("Signal experience shell", () => {
     );
     assert.ok(liveStageIndex >= 0);
     assert.ok(liveCameraIndex > liveStageIndex);
-    assert.ok(
-      developmentMixerIndex > liveCameraIndex,
-      "the overlaid camera strip must stay attached to the stage before the development mixer",
+    assert.equal(
+      developmentMixerIndex,
+      -1,
+      "the development mixer belongs only in the placement workspace",
     );
     assert.doesNotMatch(source, /replayCamera|setReplayCamera|manualShot/u);
     assert.doesNotMatch(source, /className=\{styles\.cameraButtons\}/u);
@@ -93,13 +94,22 @@ describe("Signal experience shell", () => {
     assert.match(source, /botcastListenerReactionForMessage/u);
     assert.match(source, /resolveListenerReactionAtMs/u);
     assert.match(source, /onListenerReaction\?\./u);
-    assert.match(source, /cameraCutEligible[\s\S]{0,120}liveCameraMode === "auto"/u);
+    assert.match(
+      source,
+      /cameraCutEligible[\s\S]{0,120}liveCameraMode === "auto"/u,
+    );
     assert.match(source, /listenerReactionAtMs \+ 1_200/u);
     assert.match(source, /data-listener-reaction=/u);
     assert.match(css, /\.listenerReactionText/u);
     assert.match(css, /prefers-reduced-motion[\s\S]*?data-listener-reaction/u);
-    assert.match(pageSource, /onPrefetchListenerReaction=\{prefetchBotcastListenerReaction\}/u);
-    assert.match(pageSource, /onListenerReaction=\{playBotcastListenerReaction\}/u);
+    assert.match(
+      pageSource,
+      /onPrefetchListenerReaction=\{prefetchBotcastListenerReaction\}/u,
+    );
+    assert.match(
+      pageSource,
+      /onListenerReaction=\{playBotcastListenerReaction\}/u,
+    );
   });
 
   it("renders the authored two-seat stage and empty-chair aftermath", () => {
@@ -222,10 +232,7 @@ describe("Signal experience shell", () => {
     assert.match(source, /\*\{activeVoiceAction\}\*/u);
     assert.match(source, /signalVoicePerformanceTranscriptText\(message\)/u);
     assert.match(css, /\.avatarRig > \.voiceActionText/u);
-    assert.match(
-      pageSource,
-      /const cupSide =[\s\S]{0,180}mugState\.facing/u,
-    );
+    assert.match(pageSource, /const cupSide =[\s\S]{0,180}mugState\.facing/u);
     assert.match(pageSource, /data-cup-side=\{cupSide\}/u);
     assert.match(
       pageSource,
@@ -293,7 +300,7 @@ describe("Signal experience shell", () => {
   });
 
   it("lets producers align show-scoped bots and cups against the studio", () => {
-    assert.match(source, /"Align stage"/u);
+    assert.match(source, />\s*Align stage\s*</u);
     assert.match(source, /data-tutorial-target="botcast-stage-layout"/u);
     assert.match(source, /data-signal-layout-stage="true"/u);
     assert.match(source, /SIGNAL_STUDIO_LAYOUT_LABELS/u);
@@ -313,6 +320,51 @@ describe("Signal experience shell", () => {
     );
     assert.match(source, /studioLayout\.hostBot\.x/u);
     assert.match(source, /studioLayout\.guestCup\.y/u);
+    assert.match(source, /replayPlaying \|\|\s*studioLayoutEditorOpen/u);
+    assert.match(source, /data-signal-stage-layout-modal="true"/u);
+    assert.match(source, /role="dialog"/u);
+    assert.match(source, /aria-modal="true"/u);
+    assert.match(source, /Place the \{show\.name\} studio/u);
+    assert.match(
+      source,
+      /studioLayoutEditorOpen && selectedShow && hostBot[\s\S]{0,180}renderStudioLayoutEditor/u,
+    );
+    assert.match(source, /▶ Test voices/u);
+    assert.match(source, /■ Stop check/u);
+    assert.match(source, /signalStageSoundcheckMessages\(\{/u);
+    assert.match(source, /aria-label="Signal voice level mixer"/u);
+    assert.match(source, /aria-label=\{`\$\{role\} \$\{bot\.name\} voice level`\}/u);
+    assert.match(source, /voiceLevelControl\(host, "Host"\)/u);
+    assert.match(source, /voiceLevelControl\(guest, "Guest"\)/u);
+    assert.match(source, /voiceLevelsByBotId: draft\.levels/u);
+    assert.match(source, /botcastVoiceLevelForBot\(show\.voiceLevelsByBotId/u);
+    assert.match(source, /Saved for each bot on this show/u);
+    assert.match(source, /setStudioSoundcheckSpeakerBotId\(bot\.id\)/u);
+    assert.match(source, /onProgress: \(elapsedMs, durationMs\) =>/u);
+    assert.match(source, /setStudioSoundcheckSpeech\(\(current\) =>/u);
+    assert.match(source, /crtSpeechMouthShapeAtAlignedElapsedMs\(\{/u);
+    assert.match(source, /\{renderAtmosphereDevMixer\(\)\}/u);
+    assert.equal(
+      source.match(/\{renderAtmosphereDevMixer\(\)\}/gu)?.length,
+      1,
+      "the development mixer must render only inside stage placement",
+    );
+    assert.match(
+      css,
+      /\.stageLayoutModalBackdrop\s*\{[^}]*position:\s*fixed;[^}]*inset:\s*0/iu,
+    );
+    assert.match(
+      pageSource,
+      /signalStageSoundcheckMessageIsEphemeral\(message\)/u,
+    );
+    assert.match(
+      pageSource,
+      /!ephemeralSoundcheck[\s\S]{0,100}signalMessageId: message\.id/u,
+    );
+    assert.match(
+      pageSource,
+      /ephemeralSoundcheck[\s\S]{0,80}explicitVoicePreview: true/u,
+    );
     assert.match(
       source,
       /\["--signal-seat-x" as string\]:\s*`\$\{studioLayout\.hostBot\.x\}%`/u,
@@ -326,6 +378,8 @@ describe("Signal experience shell", () => {
       /\.seat\s*\{[^}]*left:\s*var\(--signal-seat-x\)[^}]*transform:\s*translateX\(-50%\)/u,
     );
     assert.match(css, /\.stageLayoutHandle\s*\{[^}]*cursor:\s*grab/u);
+    assert.match(css, /\.stageVoiceMixer\s*\{[^}]*display:\s*grid/u);
+    assert.match(css, /\.stageVoiceMixerSliders\s*\{[^}]*repeat\(2/u);
     assert.match(css, /\.stagePlacement\s*\{[^}]*width:\s*25%/u);
     assert.match(css, /\.stageMug\s*\{[^}]*width:\s*max\(6\.2%, 58px\)/u);
     assert.match(
@@ -429,26 +483,13 @@ describe("Signal experience shell", () => {
     );
     assert.match(source, /▶ Play ident/u);
     assert.match(source, /■ Stop preview/u);
-    assert.match(
+    assert.doesNotMatch(
       source,
-      /data-developer-control="signal-atmosphere-loop-preview"/u,
+      /studioLayoutEditorOpen \|\|\s*introPreviewShowId/u,
     );
-    assert.match(source, /▶ Dev: ambience/u);
-    assert.match(source, /■ Stop ambience/u);
-    assert.match(
-      source,
-      /new Audio\(selectedShow\.atmosphereAudio\.audioUrl\)/u,
-    );
-    assert.match(source, /audio\.loop = true/u);
-    assert.match(
-      source,
-      /selectedShow\.atmosphereAudio\.source !== "elevenlabs"/u,
-    );
-    assert.match(css, /\.showIntroDevPreviewButton/u);
-    assert.match(
-      source,
-      /stopIntroPreview\(\);\s*stopAtmospherePreview\(\);\s*onPrepareUtterance/u,
-    );
+    assert.doesNotMatch(source, /signal-atmosphere-loop-preview/u);
+    assert.doesNotMatch(source, /Dev: ambience/u);
+    assert.doesNotMatch(css, /\.showIntroDevPreviewButton/u);
     assert.match(source, /Create atmosphere/u);
     assert.match(source, /Use built-in atmosphere/u);
     assert.match(source, /<span>Atmosphere audio<\/span>/u);
@@ -463,7 +504,8 @@ describe("Signal experience shell", () => {
     assert.match(source, /data-signal-atmosphere-dev-mixer="true"/u);
     assert.match(source, /label: "Studio ambience"/u);
     assert.match(source, /label: "Mix grain"/u);
-    assert.match(source, /label: "Foley"/u);
+    assert.match(source, /label: "Foley", max: 1/u);
+    assert.match(source, /\.\.\.DEFAULT_SIGNAL_ATMOSPHERE_MIX/u);
     assert.match(css, /\.atmosphereDevMixerSliders/u);
     assert.match(source, /!showHasCustomArtwork\(selectedShow\) \? \(/u);
     assert.match(
@@ -654,7 +696,7 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /Promise\.resolve\(onUtterance\(message, bot, lifecycle\)\)/u,
+      /Promise\.resolve\([\s\S]{0,80}onUtterance\([\s\S]{0,160}botcastVoiceLevelForBot/u,
     );
     assert.match(source, /onStart: \(durationMs, alignment\)/u);
     assert.match(source, /onProgress: \(elapsedMs, durationMs\)/u);
@@ -694,7 +736,7 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /const played = await onUtterance\(replayActiveMessage, bot,/u,
+      /const played = await onUtterance\(\s*replayActiveMessage,\s*bot,/u,
     );
     assert.match(source, /replayVoicePending/u);
     assert.match(source, /replayVoiceRunIdRef\.current !== runId/u);
@@ -705,6 +747,11 @@ describe("Signal experience shell", () => {
     assert.match(pageSource, /includeAlignment: true/u);
     assert.match(pageSource, /readEnglishVoiceSynthesisClip\(response\)/u);
     assert.match(pageSource, /lifecycle: trackedLifecycle/u);
+    assert.match(
+      pageSource,
+      /settings\.voiceVolume \* normalizeBotcastVoiceLevel\(voiceLevel\)/u,
+    );
+    assert.match(pageSource, /globalVolume: playbackVolume/u);
     const stopUtteranceSource = source.slice(
       source.indexOf("const stopUtterance = useCallback"),
       source.indexOf("const stopIntroPreview = useCallback"),
@@ -747,6 +794,40 @@ describe("Signal experience shell", () => {
     assert.match(
       css,
       /prefers-reduced-motion[\s\S]*?\.avatarRig\s*\{[^}]*animation:\s*none/iu,
+    );
+  });
+
+  it("shows an audience-only guest as a translucent apparition", () => {
+    assert.match(
+      source,
+      /currentEpisode\.guestPresenceMode === "audience_only"/u,
+    );
+    assert.match(
+      source,
+      /const guestVisibleToAudience = !departed/u,
+    );
+    assert.match(
+      source,
+      /const guestPresentOnStage = guestVisibleToAudience && !audienceOnlyGuest/u,
+    );
+    assert.match(
+      source,
+      /data-guest-presence=\{args\.currentEpisode\.guestPresenceMode\}/u,
+    );
+    assert.match(source, /Guest chair is empty/u);
+    assert.match(source, /"Booked guest" : "Guest"/u);
+    assert.match(source, /data-audience-only=\{audienceOnlyGuest/u);
+    assert.match(
+      source,
+      /guestVisibleToAudience && args\.guest/u,
+    );
+    assert.match(
+      source,
+      /guestPresentOnStage && args\.guest && renderMug && guestCupVisual/u,
+    );
+    assert.match(
+      css,
+      /\.avatarRig\[data-audience-only="true"\]\s*\{[^}]*opacity:\s*\.5/iu,
     );
   });
 
@@ -986,6 +1067,8 @@ describe("Signal experience shell", () => {
       /signalAudienceSnapshot\(\{\s*showId:\s*selectedShow\.id,\s*episodes\s*\}\)/u,
     );
     assert.match(source, /data-tutorial-target="botcast-audience-pulse"/u);
+    assert.match(source, /aria-haspopup="dialog"/u);
+    assert.match(source, /setAudiencePulseShowId\(selectedShow\.id\)/u);
     assert.match(source, />\s*Audience pulse\s*</u);
     assert.match(source, /<small>Views<\/small>/u);
     assert.match(source, /showAudience\.ratingConfidence === "early"/u);
@@ -994,14 +1077,17 @@ describe("Signal experience shell", () => {
     assert.match(source, /out of 5/u);
     assert.match(source, /Release an episode to start building an audience\./u);
     assert.match(source, /Waiting for the first listener review\./u);
-    assert.match(
-      source,
-      /<blockquote className=\{styles\.showAudienceQuote\}>/u,
-    );
+    assert.match(source, /className=\{styles\.showAudienceQuote\}/u);
     assert.match(
       source,
       /<cite>\s*— \{showAudience\.featuredReview\.listener\}\s*<\/cite>/u,
     );
+    assert.match(source, /role="dialog"/u);
+    assert.match(source, />Listener reviews<\/h2>/u);
+    assert.match(source, /showAudienceReviews\.map\(\(review\) =>/u);
+    assert.match(source, /\{review\.rating\.toFixed\(1\)\}/u);
+    assert.match(source, /\{review\.comment\}/u);
+    assert.match(source, /\{review\.reviewerName\}/u);
     assert.match(
       css,
       /\.showAudienceMetrics\s*\{[^}]*repeat\(3, minmax\(0, 1fr\)\)/iu,
@@ -1014,6 +1100,8 @@ describe("Signal experience shell", () => {
       css,
       /\.shell\[data-theme="light"\] \.showAudiencePulse\s*\{/u,
     );
+    assert.match(css, /\.audiencePulseDialog\s*\{/u);
+    assert.match(css, /\.audiencePulseReviewList\s*\{[^}]*overflow:\s*auto/iu);
     assert.match(
       css,
       /@media \(max-width:\s*900px\)[\s\S]*?\.showAudienceQuote\s*\{[^}]*flex-direction:\s*column/iu,

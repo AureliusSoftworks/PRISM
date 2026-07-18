@@ -6,6 +6,8 @@ import {
   BOTCAST_DEFAULT_STUDIO_LAYOUT,
   BOTCAST_DIRECTOR_MIN_SHOT_MS,
   BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS,
+  BOTCAST_VOICE_LEVEL_DEFAULT,
+  BOTCAST_VOICE_LEVEL_MAX,
   applyBotcastProducerCueToTension,
   botcastFallbackStudioAccentVariantForSeed,
   botcastCameraModeAt,
@@ -24,6 +26,8 @@ import {
   botcastVoiceMoodForTension,
   isBotcastFallbackStudioAccentVariant,
   normalizeBotcastStudioLayout,
+  normalizeBotcastVoiceLevel,
+  normalizeBotcastVoiceLevelsByBotId,
   swapBotcastStudioLayoutSeats,
   type BotcastReplayEvent,
 } from "./botcast.ts";
@@ -146,6 +150,21 @@ describe("Signal studio layout", () => {
       guestCup: layout.hostCup,
     });
     assert.deepEqual(swapBotcastStudioLayoutSeats(swapped), layout);
+  });
+});
+
+describe("Signal voice levels", () => {
+  it("normalizes show-scoped levels and preserves separate guests", () => {
+    assert.equal(normalizeBotcastVoiceLevel(undefined), BOTCAST_VOICE_LEVEL_DEFAULT);
+    assert.equal(normalizeBotcastVoiceLevel(9), BOTCAST_VOICE_LEVEL_MAX);
+    assert.equal(normalizeBotcastVoiceLevel(-1), 0);
+    assert.deepEqual(
+      normalizeBotcastVoiceLevelsByBotId(
+        { "guest-b": "0.65", "guest-c": 4, malformed: null },
+        { host: 1.1, "guest-a": 0.8 },
+      ),
+      { host: 1.1, "guest-a": 0.8, "guest-b": 0.65, "guest-c": 1.25 },
+    );
   });
 });
 

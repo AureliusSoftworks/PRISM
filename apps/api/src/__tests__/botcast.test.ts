@@ -111,6 +111,60 @@ function generation(provider: LlmProvider) {
   };
 }
 
+function invisibleGuestPowers(): string {
+  const powers = [
+    {
+      version: 1,
+      id: "invisible",
+      name: "Invisible",
+      intent: "Only Light Yagami can perceive this bot.",
+      enabled: true,
+      compileStatus: "ready",
+      compiled: {
+        version: 1,
+        sourceHash: botPowerSourceHashV1(
+          "Invisible",
+          "Only Light Yagami can perceive this bot.",
+        ),
+        selfCue: "Remain imperceptible to everyone except Light Yagami.",
+        observerCue: "Only Light Yagami can perceive this guest.",
+        effects: [
+          {
+            type: "awareness",
+            allowed: [{ kind: "bot", name: "Light Yagami" }],
+          },
+        ],
+        ruleLabels: ["Perceived only by Light Yagami"],
+      },
+    },
+    {
+      version: 1,
+      id: "introvert",
+      name: "Introvert",
+      intent: "Only Light Yagami can hear this bot.",
+      enabled: true,
+      compileStatus: "ready",
+      compiled: {
+        version: 1,
+        sourceHash: botPowerSourceHashV1(
+          "Introvert",
+          "Only Light Yagami can hear this bot.",
+        ),
+        selfCue: "Speak only where Light Yagami can hear.",
+        observerCue: "Only Light Yagami can hear this guest.",
+        effects: [
+          {
+            type: "speech_audience",
+            allowed: [{ kind: "bot", name: "Light Yagami" }],
+          },
+        ],
+        ruleLabels: ["Heard only by Light Yagami"],
+      },
+    },
+  ];
+  return JSON.stringify(powers);
+}
+
 describe("Botcast persistence and isolation", () => {
   it("persists one candid review from a non-participant Library persona", async () => {
     const db = fixture();
@@ -358,6 +412,39 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
+  it("persists separate Signal voice levels for the host and each guest", () => {
+    const db = fixture();
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      assert.deepEqual(show.voiceLevelsByBotId, {});
+
+      const hostMix = updateBotcastShow(db, "user-1", show.id, {
+        voiceLevelsByBotId: { "host-1": 1.15 },
+      });
+      assert.deepEqual(hostMix.voiceLevelsByBotId, { "host-1": 1.15 });
+
+      const guestMix = updateBotcastShow(db, "user-1", show.id, {
+        voiceLevelsByBotId: { "guest-1": 0.7, "future-guest": 5 },
+      });
+      assert.deepEqual(guestMix.voiceLevelsByBotId, {
+        "host-1": 1.15,
+        "guest-1": 0.7,
+        "future-guest": 1.25,
+      });
+      assert.deepEqual(
+        updateBotcastShow(db, "user-1", show.id, { name: "Balanced Signal" })
+          .voiceLevelsByBotId,
+        guestMix.voiceLevelsByBotId,
+      );
+      assert.deepEqual(
+        getBotcastShow(db, "user-1", show.id).voiceLevelsByBotId,
+        guestMix.voiceLevelsByBotId,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   it("keeps Signal turns short and uses minimal reasoning without a picker", async () => {
     const db = fixture();
     const captures: ProviderMessage[][] = [];
@@ -503,6 +590,113 @@ describe("Botcast persistence and isolation", () => {
           topic: "An incompatible booking",
         }),
         /Private Channel.*does not allow them to address Ivo Stone in Signal/u,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("stages an imperceptible guest for the audience without exposing them to the host", async () => {
+    const db = fixture();
+    const captures: ProviderMessage[][] = [];
+    const provider = recordingProvider(
+      [
+        "The chair is empty, which is not how this was meant to begin.",
+        "She really cannot see me. This may be better than the interview.",
+        "I am beginning to think our booking vanished into thin air.",
+      ],
+      captures,
+    );
+    try {
+      db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'guest-1'").run(
+        invisibleGuestPowers(),
+      );
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      let episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "The guest no one can see",
+      });
+
+      assert.equal(episode.guestPresenceMode, "audience_only");
+      assert.ok(
+        episode.events.some(
+          (event) =>
+            event.kind === "guest_presence" &&
+            event.payload.mode === "audience_only",
+        ),
+      );
+
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+      const guestTurn = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+      const finalTurn = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+      episode = finalTurn.episode;
+
+      const openingHostPrompt = captures[0]!
+        .map((message) => message.content)
+        .join("\n");
+      const guestPrompt = captures[1]!
+        .map((message) => message.content)
+        .join("\n");
+      const returningHostPrompt = captures[2]!
+        .map((message) => message.content)
+        .join("\n");
+      assert.match(openingHostPrompt, /guest chair appears empty/u);
+      assert.doesNotMatch(openingHostPrompt, /Only Light Yagami can perceive/u);
+      assert.match(guestPrompt, /listening audience can hear you/u);
+      assert.match(guestPrompt, /The chair is empty/u);
+      assert.match(returningHostPrompt, /The chair is empty/u);
+      assert.doesNotMatch(returningHostPrompt, /She really cannot see me/u);
+      assert.equal(
+        episode.events.some(
+          (event) =>
+            event.kind === "listener_reaction" &&
+            (event.payload.plan as { messageId?: string } | undefined)
+              ?.messageId === guestTurn.message?.id,
+        ),
+        false,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps an invisible guest fully present when the host is Light Yagami", () => {
+    const db = fixture();
+    try {
+      db.prepare(
+        "UPDATE bots SET name = 'Light Yagami' WHERE id = 'host-1'",
+      ).run();
+      db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'guest-1'").run(
+        invisibleGuestPowers(),
+      );
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "A conversation only Light can have",
+      });
+
+      assert.equal(episode.guestPresenceMode, "present");
+      assert.equal(
+        episode.events.some((event) => event.kind === "guest_presence"),
+        false,
       );
     } finally {
       db.close();
@@ -674,6 +868,10 @@ describe("Botcast persistence and isolation", () => {
     );
     assert.match(
       serverSource,
+      /body\.voiceLevelsByBotId !== undefined[\s\S]{0,180}voiceLevelsByBotId/u,
+    );
+    assert.match(
+      serverSource,
       /route\("GET", "\/api\/botcast\/artwork-jobs\/active"/u,
     );
     assert.match(
@@ -752,13 +950,19 @@ describe("Botcast persistence and isolation", () => {
   });
 
   it("persists deterministic listener reactions beside utterances without changing transcript messages", () => {
-    const source = readFileSync(new URL("../botcast.ts", import.meta.url), "utf8");
+    const source = readFileSync(
+      new URL("../botcast.ts", import.meta.url),
+      "utf8",
+    );
     assert.match(source, /buildSignalListenerReactionPlanV1\(\{/u);
     assert.match(
       source,
       /listenerReaction[\s\S]{0,360}recordEvent\([\s\S]{0,220}"listener_reaction"/u,
     );
-    assert.match(source, /segment,[\s\S]{0,120}mood:[\s\S]{0,120}tensionLevel/u);
+    assert.match(
+      source,
+      /segment,[\s\S]{0,120}mood:[\s\S]{0,120}tensionLevel/u,
+    );
   });
 
   it("creates and renames a stable host-owned show", () => {
