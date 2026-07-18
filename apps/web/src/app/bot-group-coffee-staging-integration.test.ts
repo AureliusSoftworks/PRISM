@@ -41,7 +41,7 @@ describe("waiting-room Coffee staging integration", () => {
     );
     assert.match(
       pageSource,
-      /useEffect\(\(\) => \{[\s\S]{0,260}botGroupCoffeeStaging[\s\S]{0,260}botGroupCoffeeStagingRef\.current[\s\S]{0,560}focus\(\{ preventScroll: true \}\)/u,
+      /useLayoutEffect\(\(\) => \{[\s\S]{0,260}botGroupCoffeeStaging[\s\S]{0,260}botGroupCoffeeStagingRef\.current[\s\S]{0,560}focus\(\{ preventScroll: true \}\)/u,
     );
     assert.match(
       pageSource,

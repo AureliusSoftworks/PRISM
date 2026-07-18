@@ -709,18 +709,18 @@ test.describe("PRISM desktop smoke", () => {
     ).toBeVisible();
 
     await activateNavigationControl(
-      page.locator('button[aria-controls="prism-app-switcher-menu"]'),
+      page.locator('[data-app-switcher-trigger="true"]'),
     );
     await activateNavigationControl(
-      page.getByRole("menuitem", { name: /Chat/ }),
+      page.getByRole("menuitemradio", { name: /Chat/ }),
     );
     await expect(atmosphere).toHaveCount(0);
 
     await activateNavigationControl(
-      page.locator('button[aria-controls="prism-app-switcher-menu"]'),
+      page.locator('[data-app-switcher-trigger="true"]'),
     );
     await activateNavigationControl(
-      page.getByRole("menuitem", { name: /Coffee/ }),
+      page.getByRole("menuitemradio", { name: /Coffee/ }),
     );
     const restoredAtmosphere = page.locator(
       '[data-coffee-atmosphere="true"]',
@@ -1525,7 +1525,7 @@ test.describe("PRISM desktop smoke", () => {
     });
     await expect(zenMessageActions).toBeVisible();
     await expect(
-      zenMessageActions.getByRole("menuitem", { name: "Copy", exact: true }),
+      zenMessageActions.getByRole("menuitem", { name: /^Copy\b/ }),
     ).toBeVisible();
     for (const removedAction of [
       "Edit",
@@ -4094,18 +4094,18 @@ test.describe("PRISM desktop smoke", () => {
     expect(await visibleBotIds()).toEqual(reducedMotionRoster);
 
     await activateNavigationControl(
-      page.locator('button[aria-controls="prism-app-switcher-menu"]'),
+      page.locator('[data-app-switcher-trigger="true"]'),
     );
     await activateNavigationControl(
-      page.getByRole("menuitem", { name: /Coffee/ }),
+      page.getByRole("menuitemradio", { name: /Coffee/ }),
     );
     await expect(page.locator('[data-mode="picker"]')).toBeVisible();
     await page.clock.fastForward(10 * 60 * 1_000);
     await activateNavigationControl(
-      page.locator('button[aria-controls="prism-app-switcher-menu"]'),
+      page.locator('[data-app-switcher-trigger="true"]'),
     );
     await activateNavigationControl(
-      page.getByRole("menuitem", { name: /Chat/ }),
+      page.getByRole("menuitemradio", { name: /Chat/ }),
     );
     await page.clock.runFor(1_000);
     await expect(room).toBeVisible();
@@ -4453,26 +4453,19 @@ test.describe("PRISM desktop smoke", () => {
       .poll(async () => (await paintCanvas.boundingBox())?.width ?? 0)
       .toBeGreaterThanOrEqual(315);
 
-    const editorCoreCanvas = detailsEditor.locator(
-      '[data-avatar-details-editor-core="true"]',
-    );
     await paintCanvas.click({ force: true });
     await expect
       .poll(() =>
-        editorCoreCanvas.evaluate((element) => {
-          const context = (element as HTMLCanvasElement).getContext("2d");
-          if (!context) return 0;
-          return context
-            .getImageData(58, 58, 13, 13)
-            .data.reduce(
-              (alpha, channel, index) =>
-                index % 4 === 3 ? alpha + channel : alpha,
-              0,
-            );
-        }),
+        detailsEditor
+          .getByRole("meter", { name: /Paint coverage/ })
+          .getAttribute("value")
+          .then((value) => Number(value ?? 0)),
       )
       .toBeGreaterThan(0);
 
+    await studio
+      .getByRole("button", { name: "Render current avatar" })
+      .click();
     await expect(
       studio.locator('[data-avatar-details-mask="true"]'),
     ).toBeVisible();
@@ -4545,19 +4538,9 @@ test.describe("PRISM desktop smoke", () => {
     await expect
       .poll(() =>
         detailsEditor
-          .locator('[data-avatar-details-editor-core="true"]')
-          .evaluate((element) => {
-            const canvas = element as HTMLCanvasElement;
-            const context = canvas.getContext("2d");
-            if (!context) return 0;
-            return context
-              .getImageData(58, 58, 13, 13)
-              .data.reduce(
-                (alpha, channel, index) =>
-                  index % 4 === 3 ? alpha + channel : alpha,
-                0,
-              );
-          }),
+          .getByRole("meter", { name: /Paint coverage/ })
+          .getAttribute("value")
+          .then((value) => Number(value ?? 0)),
       )
       .toBeGreaterThan(0);
   });
