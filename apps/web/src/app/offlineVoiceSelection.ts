@@ -19,10 +19,9 @@ export function operatingSystemVoiceSelectionValue(name: string): string {
 
 export function offlineVoiceSelectionValue(
   profile: BotAudioVoiceProfileV1,
-  operatingSystemVoicesEnabled: boolean,
 ): string {
   const normalized = normalizeBotAudioVoiceProfileV1(profile);
-  return operatingSystemVoicesEnabled && normalized.systemVoiceName
+  return normalized.systemVoiceName
     ? operatingSystemVoiceSelectionValue(normalized.systemVoiceName)
     : builtinVoiceSelectionValue(normalized.baseVoiceId);
 }

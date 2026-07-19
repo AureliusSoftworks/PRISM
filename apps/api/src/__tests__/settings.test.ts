@@ -109,7 +109,7 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
 }
 
 describe("resolveNextSettings — voice foundation", () => {
-  it("keeps ElevenLabs available online while retiring account-level voice identities", () => {
+  it("keeps ElevenLabs available online while preserving legacy voice identities", () => {
     const next = resolveNextSettings(
       {
         voiceMode: "babble",
@@ -130,8 +130,8 @@ describe("resolveNextSettings — voice foundation", () => {
     assert.equal(next.voiceVolume, 0.65);
     assert.equal(next.operatingSystemVoicesEnabled, true);
     assert.equal(next.englishVoiceEngine, "elevenlabs");
-    assert.equal(next.defaultSystemVoiceName, null);
-    assert.equal(next.defaultElevenLabsVoiceId, null);
+    assert.equal(next.defaultSystemVoiceName, "Alex");
+    assert.equal(next.defaultElevenLabsVoiceId, "eleven-default");
     assert.deepEqual(next.elevenLabsVoiceBank, {
       "voice-1": "voice_alpha", "voice-2": null, "voice-3": null, "voice-4": null, "voice-5": null,
     });
@@ -156,6 +156,30 @@ describe("resolveNextSettings — voice foundation", () => {
       ).elevenLabsVoiceCollectionId,
       "collection-old",
     );
+    const preserved = resolveNextSettings(
+      { theme: "light" },
+      baseline({
+        defaultSystemVoiceName: "Samantha",
+        defaultElevenLabsVoiceId: "legacy-provider-voice",
+      }),
+    );
+    assert.equal(preserved.defaultSystemVoiceName, "Samantha");
+    assert.equal(
+      preserved.defaultElevenLabsVoiceId,
+      "legacy-provider-voice",
+    );
+    const explicitlyCleared = resolveNextSettings(
+      {
+        defaultSystemVoiceName: null,
+        defaultElevenLabsVoiceId: null,
+      },
+      baseline({
+        defaultSystemVoiceName: "Samantha",
+        defaultElevenLabsVoiceId: "legacy-provider-voice",
+      }),
+    );
+    assert.equal(explicitlyCleared.defaultSystemVoiceName, null);
+    assert.equal(explicitlyCleared.defaultElevenLabsVoiceId, null);
   });
 });
 

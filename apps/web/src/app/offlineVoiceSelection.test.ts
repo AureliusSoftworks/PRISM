@@ -16,16 +16,15 @@ describe("offline voice selection", () => {
     );
     assert.equal(selected.baseVoiceId, "voice-4");
     assert.equal(selected.systemVoiceName, undefined);
-    assert.equal(offlineVoiceSelectionValue(selected, true), "builtin:voice-4");
+    assert.equal(offlineVoiceSelectionValue(selected), "builtin:voice-4");
   });
 
-  it("uses a saved OS voice only while the account setting is enabled", () => {
+  it("keeps a saved OS voice authoritative after the catalog opt-in changes", () => {
     const selected = applyOfflineVoiceSelection(
       DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
       operatingSystemVoiceSelectionValue("Samantha"),
     );
     assert.equal(selected.systemVoiceName, "Samantha");
-    assert.equal(offlineVoiceSelectionValue(selected, true), "os:Samantha");
-    assert.equal(offlineVoiceSelectionValue(selected, false), "builtin:voice-1");
+    assert.equal(offlineVoiceSelectionValue(selected), "os:Samantha");
   });
 });

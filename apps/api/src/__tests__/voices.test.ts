@@ -639,6 +639,40 @@ describe("voice Phase 1 boundary", () => {
     });
   });
 
+  it("preserves ElevenLabs provider codes while surfacing their readable message", async () => {
+    await assert.rejects(
+      requestElevenLabsSpeechWithTimestamps({
+        apiKey: "secret-key",
+        voiceId: "voice-id",
+        model: "eleven_flash_v2_5",
+        text: "Hi",
+        profile: {
+          v: 1,
+          baseVoiceId: "voice-1",
+          pitch: 0,
+          warmth: 0,
+          pace: 0,
+          lilt: 0,
+        },
+        fetchImpl: (async () =>
+          new Response(
+            JSON.stringify({
+              detail: {
+                code: "quota_exceeded",
+                message: "This request exceeds the available voice credits.",
+              },
+            }),
+            { status: 401 },
+          )) as typeof fetch,
+      }),
+      (error: unknown) =>
+        error instanceof ElevenLabsVoiceError &&
+        error.status === 401 &&
+        error.providerCode === "quota_exceeded" &&
+        error.message === "This request exceeds the available voice credits.",
+    );
+  });
+
   it("opts into alignment transport without changing legacy requests", () => {
     assert.equal(validateVoiceSynthesisRequest({ text: "hello" }).includeAlignment, false);
     assert.equal(

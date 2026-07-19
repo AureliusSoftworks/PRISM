@@ -71,6 +71,17 @@ function normalizeElevenLabsVoiceModel(value: unknown, fallback: string | null):
   return normalized || null;
 }
 
+function normalizeLegacyVoiceIdentity(
+  value: unknown,
+  fallback: string | null,
+): string | null {
+  if (value === undefined) return fallback;
+  if (value === null) return null;
+  if (typeof value !== "string") return fallback;
+  const normalized = value.trim().slice(0, 200);
+  return normalized || null;
+}
+
 export function normalizeElevenLabsVoiceCollectionId(
   value: unknown,
   fallback: string | null = null
@@ -1131,10 +1142,17 @@ export function resolveNextSettings(
   // The online selector currently has one installed provider. It is not an
   // opt-in toggle; the per-profile ElevenLabs voice is the explicit override.
   const englishVoiceEngine: EnglishVoiceEngine = "elevenlabs";
-  // Account-level voice identities are retired. A settings save clears any
-  // legacy values so only Prism/bot customization owns voice identity.
-  const defaultSystemVoiceName = null;
-  const defaultElevenLabsVoiceId = null;
+  // Keep legacy account-level identities as compatibility fallbacks. Existing
+  // bots may still rely on them, so an unrelated settings save must not erase
+  // those authored voice choices.
+  const defaultSystemVoiceName = normalizeLegacyVoiceIdentity(
+    body.defaultSystemVoiceName,
+    current.defaultSystemVoiceName,
+  );
+  const defaultElevenLabsVoiceId = normalizeLegacyVoiceIdentity(
+    body.defaultElevenLabsVoiceId,
+    current.defaultElevenLabsVoiceId,
+  );
   const elevenLabsVoiceBank = body.elevenLabsVoiceBank === undefined
     ? parseStoredElevenLabsVoiceBank(current.elevenLabsVoiceBank)
     : normalizeElevenLabsVoiceBank(body.elevenLabsVoiceBank);
