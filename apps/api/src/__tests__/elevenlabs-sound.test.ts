@@ -1,11 +1,48 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  buildCoffeeElevenLabsActionSfxPrompt,
   buildSignalAtmospherePrompt,
+  COFFEE_ELEVENLABS_ACTION_SFX_MODEL,
+  isCoffeeElevenLabsActionSfxKind,
+  requestCoffeeElevenLabsActionSfx,
   requestSignalElevenLabsAtmosphere,
   SIGNAL_ELEVENLABS_ATMOSPHERE_MODEL,
   SIGNAL_ELEVENLABS_SOUND_PROMPT_MAX_CHARACTERS,
 } from "../elevenlabs-sound.ts";
+
+test("Coffee action foley uses a small trusted physical-action allowlist", () => {
+  assert.equal(isCoffeeElevenLabsActionSfxKind("coffee_pour"), true);
+  assert.equal(isCoffeeElevenLabsActionSfxKind("spoken_whisper"), false);
+  assert.match(buildCoffeeElevenLabsActionSfxPrompt("cup_set_down"), /ceramic coffee mug/iu);
+  assert.doesNotMatch(
+    buildCoffeeElevenLabsActionSfxPrompt("cup_set_down"),
+    /\b(?:no|avoid|without)\b/iu,
+  );
+});
+
+test("Coffee action foley requests a brief non-looping ElevenLabs effect", async () => {
+  let body: Record<string, unknown> | null = null;
+  const result = await requestCoffeeElevenLabsActionSfx({
+    apiKey: "test-key",
+    kind: "spoon_stir",
+    fetchImpl: async (_input, init) => {
+      body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return new Response(Uint8Array.from([0x49, 0x44, 0x33]), {
+        status: 200,
+        headers: { "content-type": "audio/mpeg", "request-id": "coffee-sfx-1" },
+      });
+    },
+  });
+  const requestBody = body as Record<string, unknown>;
+  assert.equal(requestBody.duration_seconds, 1);
+  assert.equal(requestBody.prompt_influence, 0.3);
+  assert.equal(requestBody.loop, false);
+  assert.equal(requestBody.model_id, COFFEE_ELEVENLABS_ACTION_SFX_MODEL);
+  assert.equal(requestBody.text, buildCoffeeElevenLabsActionSfxPrompt("spoon_stir"));
+  assert.equal(result.requestId, "coffee-sfx-1");
+  assert.equal(result.audioBytes.length, 3);
+});
 
 test("Signal atmosphere prompt asks what the finished studio sounds like in silence", () => {
   const prompt = buildSignalAtmospherePrompt({

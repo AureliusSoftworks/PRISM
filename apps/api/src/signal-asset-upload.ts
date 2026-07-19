@@ -7,6 +7,9 @@ export const SIGNAL_ASSET_UPLOAD_MAX_BYTES = 16 * 1024 * 1024;
 const SIGNAL_ASSET_UPLOAD_MAX_PIXELS = 40_000_000;
 const SIGNAL_LOGO_SIZE = 1024;
 const SIGNAL_LOGO_BACKGROUND_DISTANCE = 72;
+const SIGNAL_LOGO_COLOR_KEY = [255, 0, 255] as const;
+const SIGNAL_LOGO_COLOR_KEY_DISTANCE = 28;
+const SIGNAL_LOGO_LEGACY_BLACK_MAX = 36;
 const SIGNAL_ASSET_DATA_URL_PATTERN =
   /^data:image\/(?:png|jpe?g|webp);base64,([a-zA-Z0-9+/=\r\n]+)$/iu;
 
@@ -36,6 +39,7 @@ function clearConnectedLogoBackground(
   pixels: Buffer,
   width: number,
   height: number,
+  forcedBackgrounds?: readonly (readonly [number, number, number])[],
 ): void {
   const cornerOffsets = [
     rgbaOffset(width, 0, 0),
@@ -43,10 +47,12 @@ function clearConnectedLogoBackground(
     rgbaOffset(width, 0, height - 1),
     rgbaOffset(width, width - 1, height - 1),
   ];
-  const backgrounds = cornerOffsets.map(
-    (offset) =>
-      [pixels[offset]!, pixels[offset + 1]!, pixels[offset + 2]!] as const,
-  );
+  const backgrounds =
+    forcedBackgrounds ??
+    cornerOffsets.map(
+      (offset) =>
+        [pixels[offset]!, pixels[offset + 1]!, pixels[offset + 2]!] as const,
+    );
   const pixelCount = width * height;
   const visited = new Uint8Array(pixelCount);
   const queue = new Int32Array(pixelCount);
@@ -106,10 +112,82 @@ function clearConnectedLogoBackground(
   }
 }
 
+function replaceConnectedGeneratedLogoKey(
+  pixels: Buffer,
+  width: number,
+  height: number,
+): boolean {
+  const cornerOffsets = [
+    rgbaOffset(width, 0, 0),
+    rgbaOffset(width, width - 1, 0),
+    rgbaOffset(width, 0, height - 1),
+    rgbaOffset(width, width - 1, height - 1),
+  ];
+  const backgrounds = cornerOffsets
+    .map(
+      (offset) =>
+        [pixels[offset]!, pixels[offset + 1]!, pixels[offset + 2]!] as const,
+    )
+    .filter(
+      (background) =>
+        Math.max(...background) <= SIGNAL_LOGO_LEGACY_BLACK_MAX ||
+        Math.max(
+          Math.abs(background[0] - SIGNAL_LOGO_COLOR_KEY[0]),
+          Math.abs(background[1] - SIGNAL_LOGO_COLOR_KEY[1]),
+          Math.abs(background[2] - SIGNAL_LOGO_COLOR_KEY[2]),
+        ) <= SIGNAL_LOGO_COLOR_KEY_DISTANCE,
+    );
+  if (backgrounds.length === 0) return false;
+
+  const pixelCount = width * height;
+  const visited = new Uint8Array(pixelCount);
+  const queue = new Int32Array(pixelCount);
+  let queueStart = 0;
+  let queueEnd = 0;
+  const enqueue = (pixelIndex: number): void => {
+    if (visited[pixelIndex]) return;
+    const offset = pixelIndex * 4;
+    const connected = backgrounds.some(
+      (background) =>
+        rgbDistance(pixels, offset, background) <=
+        SIGNAL_LOGO_BACKGROUND_DISTANCE,
+    );
+    if (!connected) return;
+    visited[pixelIndex] = 1;
+    queue[queueEnd] = pixelIndex;
+    queueEnd += 1;
+  };
+
+  for (let x = 0; x < width; x += 1) {
+    enqueue(x);
+    enqueue((height - 1) * width + x);
+  }
+  for (let y = 1; y < height - 1; y += 1) {
+    enqueue(y * width);
+    enqueue(y * width + width - 1);
+  }
+  while (queueStart < queueEnd) {
+    const pixelIndex = queue[queueStart++]!;
+    const offset = pixelIndex * 4;
+    pixels[offset] = SIGNAL_LOGO_COLOR_KEY[0];
+    pixels[offset + 1] = SIGNAL_LOGO_COLOR_KEY[1];
+    pixels[offset + 2] = SIGNAL_LOGO_COLOR_KEY[2];
+    pixels[offset + 3] = 255;
+    const x = pixelIndex % width;
+    const y = Math.floor(pixelIndex / width);
+    if (x > 0) enqueue(pixelIndex - 1);
+    if (x + 1 < width) enqueue(pixelIndex + 1);
+    if (y > 0) enqueue(pixelIndex - width);
+    if (y + 1 < height) enqueue(pixelIndex + width);
+  }
+  return queueEnd > 0;
+}
+
 export async function normalizeSignalLogoImage(
   sourceBytes: Buffer,
+  options: { generated?: boolean } = {},
 ): Promise<NormalizedSignalAssetUpload> {
-  const prepared = await sharp(sourceBytes, {
+  let pipeline = sharp(sourceBytes, {
     failOn: "error",
     limitInputPixels: SIGNAL_ASSET_UPLOAD_MAX_PIXELS,
   })
@@ -117,7 +195,17 @@ export async function normalizeSignalLogoImage(
     .resize(SIGNAL_LOGO_SIZE, SIGNAL_LOGO_SIZE, {
       fit: "inside",
       withoutEnlargement: false,
-    })
+    });
+  if (options.generated) {
+    pipeline = pipeline.flatten({
+      background: {
+        r: SIGNAL_LOGO_COLOR_KEY[0],
+        g: SIGNAL_LOGO_COLOR_KEY[1],
+        b: SIGNAL_LOGO_COLOR_KEY[2],
+      },
+    });
+  }
+  const prepared = await pipeline
     .ensureAlpha()
     .raw()
     .toBuffer({ resolveWithObject: true });
@@ -130,7 +218,16 @@ export async function normalizeSignalLogoImage(
   for (let offset = 3; offset < pixels.length; offset += 4) {
     if (pixels[offset]! < 250) transparentPixels += 1;
   }
-  if (transparentPixels === 0) {
+  if (options.generated) {
+    if (!replaceConnectedGeneratedLogoKey(pixels, width, height)) {
+      throw new Error(
+        "Generated Signal logo needs the exact magenta color-key background.",
+      );
+    }
+    clearConnectedLogoBackground(pixels, width, height, [
+      SIGNAL_LOGO_COLOR_KEY,
+    ]);
+  } else if (transparentPixels === 0) {
     clearConnectedLogoBackground(pixels, width, height);
   }
 

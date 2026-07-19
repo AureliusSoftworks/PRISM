@@ -10,6 +10,11 @@ This app is the unified desktop shell scaffold for Prism.
 - Waits until web port `18788` is reachable
 - Opens a desktop window pointed at `http://127.0.0.1:18788`
 
+## Window lifecycle
+
+- macOS: closing the main window or choosing Quit shuts down PRISM and its owned local runtime processes.
+- Windows/Linux: closing the main window keeps PRISM available from the tray; Exit Prism performs a full shutdown.
+
 ## Prerequisites (current scaffold)
 
 From repo root:

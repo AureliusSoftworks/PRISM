@@ -60,6 +60,52 @@ describe("createDatabase runtime pragmas", () => {
   });
 });
 
+describe("createDatabase legal acceptance schema", () => {
+  it("creates versioned, account-scoped clickwrap records", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "prism-legal-schema-"));
+    const previousDbPath = process.env.DB_PATH;
+    const previousDataDir = process.env.LOCALAI_DATA_DIR;
+    process.env.DB_PATH = join(tempDir, "legal.db");
+    delete process.env.LOCALAI_DATA_DIR;
+    try {
+      const db = createDatabase();
+      const columns = db
+        .prepare("PRAGMA table_info(legal_acceptances)")
+        .all() as Array<{ name: string }>;
+      assert.deepEqual(
+        columns.map((column) => column.name),
+        [
+          "id",
+          "user_id",
+          "document_id",
+          "document_version",
+          "document_hash",
+          "document_snapshot",
+          "acceptance_method",
+          "minimum_age_confirmed",
+          "accepted_at",
+        ],
+      );
+      const foreignKeys = db
+        .prepare("PRAGMA foreign_key_list(legal_acceptances)")
+        .all() as Array<{ table: string; from: string; on_delete: string }>;
+      assert.ok(
+        foreignKeys.some(
+          (key) =>
+            key.table === "users" &&
+            key.from === "user_id" &&
+            key.on_delete === "CASCADE",
+        ),
+      );
+      db.close();
+    } finally {
+      restoreEnv("DB_PATH", previousDbPath);
+      restoreEnv("LOCALAI_DATA_DIR", previousDataDir);
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("createDatabase bot export hash migration", () => {
   it("ensures bots.export_hash exists and backfills missing values", () => {
     const tempDir = mkdtempSync(join(tmpdir(), "localai-db-test-"));
@@ -155,6 +201,12 @@ describe("createDatabase bot export hash migration", () => {
       assert.equal(
         userColumns.find((column) => column.name === "voice_volume")?.dflt_value,
         "1"
+      );
+      assert.equal(
+        userColumns.find(
+          (column) => column.name === "operating_system_voices_enabled"
+        )?.dflt_value,
+        "0"
       );
       assert.ok(userColumns.some((column) => column.name === "hidden_comfyui_workflow_ids"));
       assert.ok(userColumns.some((column) => column.name === "preferred_image_provider"));

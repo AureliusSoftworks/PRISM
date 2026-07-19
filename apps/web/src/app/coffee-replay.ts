@@ -1,4 +1,5 @@
 import { extractStageDirections, tokenizeBotMentionSource } from "./botMention.ts";
+import { normalizeCoffeeMessageDelivery } from "./coffee-voice-text.ts";
 import {
   coffeeCupSipMessageGapForDuration,
   normalizeListenerReactionPlanV1,
@@ -222,7 +223,7 @@ export function coffeeConversationHasMeaningfulTableDialogue(
 ): boolean {
   return messages.some((message) => {
     if (message.role !== "user" && message.role !== "assistant") return false;
-    return extractStageDirections(message.content).mainText.trim().length > 0;
+    return normalizeCoffeeMessageDelivery(message.content).hasDialogue;
   });
 }
 
@@ -496,7 +497,7 @@ export function coffeeTranscriptVisibleMessages<T extends { role: string; conten
     if (message.role === "system") {
       return message.content.trim().length > 0;
     }
-    return extractStageDirections(message.content).mainText.trim().length > 0;
+    return normalizeCoffeeMessageDelivery(message.content).hasDialogue;
   });
 }
 
@@ -600,6 +601,9 @@ function coffeeReviewReplayEventLine(
     return `- ${event.occurredAt} topOff: ${bot} cup ${coffeeReviewPercent(
       event.progressBefore
     )} -> ${coffeeReviewPercent(event.progressAfter)}`;
+  }
+  if (event.kind === "emptyCupAttempt") {
+    return `- ${event.occurredAt} emptyCupAttempt: ${bot} forgot the ${event.fillId} cup was empty (${event.attemptNumber}/${event.maxAttempts})`;
   }
   if (event.kind === "botDeparture") {
     return `- ${event.occurredAt} botDeparture: ${bot} left seat ${event.seatIndex + 1}`;

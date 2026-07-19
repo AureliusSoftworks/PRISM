@@ -194,7 +194,7 @@
 
 .segmentedControl {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(32px, 1fr));
 }
 
 .inkPaletteHeader {
@@ -277,14 +277,13 @@
 }
 
 .segmentedControl button {
-  min-height: 28px;
-  padding: 0 8px;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0;
   border-radius: 7px;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  font-size: 9px;
-  font-weight: 700;
+  justify-content: center;
 }
 
 .brushSizes button {

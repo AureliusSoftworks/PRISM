@@ -574,7 +574,7 @@
   background: rgba(255, 255, 255, 0.07);
   color: inherit;
   display: grid;
-  grid-template-columns: 42px minmax(0, 1fr) auto;
+  grid-template-columns: 42px minmax(0, 1fr);
   align-items: center;
   gap: 11px;
   padding: 10px;
@@ -608,6 +608,7 @@
 }
 
 .storyBotGlyph {
+  position: relative;
   width: 38px;
   height: 38px;
   border-radius: 999px;
@@ -615,6 +616,13 @@
   background: color-mix(in srgb, var(--bot-color, #7c6cff) 14%, transparent);
   display: grid;
   place-items: center;
+}
+
+.storyBotGlyph > .botPowerSurfaceBadgeWrap {
+  position: absolute;
+  top: -7px;
+  right: -9px;
+  z-index: 3;
 }
 
 .storyPremiseField {
@@ -935,6 +943,35 @@
   .storySpriteWrap[data-speaking="true"] .storySpriteAsciiFace,
   .storySpriteWrap[data-speaking="true"] .storySpriteChestGlyph {
     animation: none;
+  }
+}
+
+/* A ghost Power is a hard live-avatar rule: the holder appears only to speak. */
+.zenLiveBotPresencePlate[data-ghostly-presence="true"] {
+  opacity: 0;
+  transition: opacity 420ms ease;
+}
+
+.zenLiveBotPresencePlate[data-ghostly-presence="true"][data-talking="true"] {
+  opacity: 1;
+}
+
+.coffeeSeat[data-ghostly-presence="true"]:not([data-roster-preview="true"])
+  .coffeeSeatPlate[data-live-body-style="zen"] {
+  opacity: 0;
+  transition: opacity 420ms ease;
+}
+
+.coffeeSeat[data-ghostly-presence="true"][data-table-speaking="true"]
+  .coffeeSeatPlate[data-live-body-style="zen"] {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zenLiveBotPresencePlate[data-ghostly-presence="true"],
+  .coffeeSeat[data-ghostly-presence="true"]
+    .coffeeSeatPlate[data-live-body-style="zen"] {
+    transition: none;
   }
 }
 
@@ -8301,6 +8338,218 @@
   outline: none;
 }
 
+.imageCleanupPreviewPanel {
+  width: min(760px, calc(100vw - 40px));
+  max-width: 760px;
+  gap: 14px;
+}
+
+.imageCleanupPreviewHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.imageCleanupPreviewHeader > div {
+  display: grid;
+  gap: 4px;
+}
+
+.imageCleanupPreviewHeader > div > span {
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.imageCleanupReadOnlyBadge {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--line));
+  border-radius: 999px;
+  color: var(--fg);
+  background: color-mix(in srgb, var(--accent) 11%, var(--bg));
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 1;
+}
+
+.imageCleanupPreviewIntro,
+.imageCleanupPreviewFootnote {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.imageCleanupPreviewSummary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.imageCleanupPreviewSummary > span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--fg-muted);
+  background: color-mix(in srgb, var(--fg) 3%, var(--bg));
+  font-size: 9px;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.imageCleanupPreviewSummary strong {
+  color: var(--fg);
+  font-size: 17px;
+  line-height: 1;
+}
+
+.imageCleanupPreviewState {
+  min-height: 110px;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 10px;
+  color: var(--fg-muted);
+  background: color-mix(in srgb, var(--fg) 2%, var(--bg));
+  font-size: 12px;
+  text-align: center;
+}
+
+.imageCleanupPreviewState[data-error="true"] {
+  border-color: color-mix(in srgb, var(--danger) 50%, var(--line));
+  color: var(--danger);
+}
+
+.imageCleanupCandidateList {
+  max-height: min(430px, 48dvh);
+  margin: 0;
+  padding: 0 4px 0 0;
+  display: grid;
+  gap: 8px;
+  overflow-y: auto;
+  list-style: none;
+  scrollbar-width: thin;
+}
+
+.imageCleanupCandidateList > li {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 11px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--fg) 3%, var(--bg));
+}
+
+.imageCleanupCandidateList img {
+  display: block;
+  width: 88px;
+  height: 72px;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--bg-deep);
+}
+
+.imageCleanupCandidateList > li > div {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 5px;
+}
+
+.imageCleanupCandidateList header,
+.imageCleanupCandidateList footer {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.imageCleanupCandidateList header strong {
+  color: var(--fg);
+  font-size: 12px;
+}
+
+.imageCleanupCandidateList header span,
+.imageCleanupCandidateList footer,
+.imageCleanupCandidateList small {
+  color: var(--fg-muted);
+  font-size: 9px;
+  line-height: 1.35;
+}
+
+.imageCleanupCandidateList header span,
+.imageCleanupCandidateList footer span,
+.imageCleanupCandidateList time {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.imageCleanupCandidateList p {
+  margin: 0;
+  color: var(--fg);
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+.imageCleanupChecks {
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--fg-muted);
+  background: color-mix(in srgb, var(--fg) 2%, var(--bg));
+  font-size: 10px;
+}
+
+.imageCleanupChecks summary {
+  color: var(--fg);
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.imageCleanupChecks ul {
+  margin: 8px 0;
+  padding-left: 18px;
+  columns: 2;
+}
+
+.imageCleanupRefreshButton {
+  border: 1px solid color-mix(in srgb, var(--accent) 44%, var(--line));
+  border-radius: 8px;
+  padding: 9px 18px;
+  color: var(--fg);
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg));
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.imageCleanupRefreshButton:hover:not(:disabled),
+.imageCleanupRefreshButton:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 68%, var(--line-strong));
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-hover));
+  outline: none;
+}
+
+.imageCleanupRefreshButton:disabled {
+  cursor: default;
+  opacity: 0.52;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .deleteAllModalBackdrop,
   .deleteAllModalPanel,
@@ -10789,6 +11038,39 @@
   cursor: not-allowed;
 }
 
+.botLibraryGroupCreate {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 32px;
+  height: calc(100% - 8px);
+  margin-right: 4px;
+  padding: 0;
+  border: 0;
+  border-left: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 0 999px 999px 0;
+  background: rgba(0, 0, 0, 0.18);
+  color: var(--bot-library-group-trigger-text);
+  cursor: pointer;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  text-shadow: var(--bot-library-group-trigger-shadow);
+  transition:
+    background 0.14s ease,
+    color 0.14s ease;
+}
+
+.botLibraryGroupCreate:hover,
+.botLibraryGroupCreate:focus-visible {
+  background: rgba(0, 0, 0, 0.34);
+  color: #fff;
+  outline: none;
+}
+
+.botLibraryGroupCreate:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-glow) 55%, transparent);
+}
+
 .botLibraryGroupTriggerSwatch,
 .botLibraryGroupOptionSwatch {
   flex: 0 0 auto;
@@ -11363,6 +11645,12 @@
     ),
     var(--bot-library-group-gradient), var(--bg-deep);
   isolation: isolate;
+  opacity: 1;
+  transition: opacity 220ms ease;
+}
+
+.botGroupRoomAtmosphereBackdrop[data-receded="true"] {
+  opacity: 0.3;
 }
 
 .botGroupRoomAtmosphereBackdrop img {
@@ -12695,6 +12983,24 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   transition:
     opacity 180ms ease,
     filter 180ms ease;
+}
+
+/* Group vision is owned by the empty canvas rather than the room/hero that
+   happens to be in front of it. Keeping one positioned layer mounted prevents
+   a focus transition from tearing down and recreating every image. */
+.emptyState > .botGroupImageBubbleLayer {
+  inset: auto;
+  top: 8px;
+  left: 50%;
+  width: min(1040px, calc(100% - 20px));
+  height: 260px;
+  transform: translateX(-50%);
+}
+
+.emptyState
+  > .botGroupImageBubbleLayer[data-group-image-bubbles="waiting"] {
+  width: min(1120px, calc(100% - 20px));
+  height: min(520px, max(280px, calc(100vh - 400px)));
 }
 
 .botGroupImageBubbleLayer[data-receded="true"] {
@@ -17835,8 +18141,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --zen-persona-ink-blend-strong: 100%;
   --zen-persona-ink-blend-mid: 68%;
   --zen-persona-ink-blend-soft: 50%;
-  --zen-persona-ink-blend-mode-dark: multiply;
-  --zen-persona-ink-blend-mode-light: screen;
+  --zen-persona-ink-blend-mode-dark: screen;
+  --zen-persona-ink-blend-mode-light: multiply;
   display: none;
   position: absolute;
   left: 50%;
@@ -17896,13 +18202,13 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
       transparent
     );
   filter: blur(56px) saturate(var(--zen-persona-ink-saturation));
-  mix-blend-mode: var(--zen-persona-ink-blend-mode-dark, multiply);
+  mix-blend-mode: var(--zen-persona-ink-blend-mode-dark, screen);
   opacity: var(--zen-persona-ink-opacity);
   animation: zenPersonaInkWashIn 0.72s cubic-bezier(0.18, 0.72, 0.22, 1) both;
 }
 
 .themeLight .zenPersonaInkWash {
-  mix-blend-mode: var(--zen-persona-ink-blend-mode-light, screen);
+  mix-blend-mode: var(--zen-persona-ink-blend-mode-light, multiply);
 }
 
 .zenPersonaContinuityWash {
@@ -17912,8 +18218,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --zen-persona-ink-blend-mid: 68%;
   --zen-persona-ink-blend-soft: 50%;
   --zen-persona-ink-blend-edge: 34%;
-  --zen-persona-ink-blend-mode-dark: multiply;
-  --zen-persona-ink-blend-mode-light: screen;
+  --zen-persona-ink-blend-mode-dark: screen;
+  --zen-persona-ink-blend-mode-light: multiply;
   position: fixed;
   inset: clamp(64px, 10dvh, 124px) -28vw calc(-1 * clamp(132px, 20dvh, 280px));
   z-index: 0;
@@ -17977,7 +18283,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
         100%
     );
   filter: blur(54px) saturate(var(--zen-persona-ink-saturation));
-  mix-blend-mode: var(--zen-persona-ink-blend-mode-dark, multiply);
+  mix-blend-mode: var(--zen-persona-ink-blend-mode-dark, screen);
   opacity: var(--zen-persona-ink-opacity);
   transform: translateZ(0);
   transition:
@@ -17998,8 +18304,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --zen-persona-ink-blend-mid: 68%;
   --zen-persona-ink-blend-soft: 50%;
   --zen-persona-ink-blend-edge: 34%;
-  --zen-persona-ink-blend-mode-dark: multiply;
-  --zen-persona-ink-blend-mode-light: screen;
+  --zen-persona-ink-blend-mode-dark: screen;
+  --zen-persona-ink-blend-mode-light: multiply;
   display: none;
   position: fixed;
   left: -22vw;
@@ -18053,7 +18359,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
         100%
     );
   filter: blur(50px) saturate(var(--zen-persona-ink-saturation));
-  mix-blend-mode: var(--zen-persona-ink-blend-mode-dark, multiply);
+  mix-blend-mode: var(--zen-persona-ink-blend-mode-dark, screen);
   opacity: var(--zen-persona-ink-opacity);
   transform: translateZ(0);
   transition:
@@ -18084,7 +18390,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .themeLight .zenPersonaContinuityWash,
 .themeLight .zenPersonaComposerBrushWash {
-  mix-blend-mode: var(--zen-persona-ink-blend-mode-light, screen);
+  mix-blend-mode: var(--zen-persona-ink-blend-mode-light, multiply);
 }
 
 .appLayout[data-zen-fallback-wallpaper-active="true"] .zenPersonaInkWash {
@@ -37975,6 +38281,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .botMarketplaceCardGlyph {
+  position: relative;
   width: 48px;
   height: 48px;
   border-radius: 8px;
@@ -37983,6 +38290,13 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   display: grid;
   place-items: center;
   box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 20%, transparent);
+}
+
+.botMarketplaceCardGlyph > .botPowerSurfaceBadgeWrap {
+  position: absolute;
+  top: -7px;
+  right: -8px;
+  z-index: 3;
 }
 
 .botMarketplaceCardGlyph .headerIconGlyph {
@@ -44615,6 +44929,17 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     inset 0 -1px 0 rgba(0, 0, 0, 0.24);
 }
 
+.botAvatarControlTabs[data-tab-count="10"] {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.botAvatarControlTabs[data-tab-count="10"] button,
+.form .botAvatarControlTabs[data-tab-count="10"] button {
+  gap: 4px;
+  padding-inline: 5px;
+  font-size: 10.5px;
+}
+
 .botAvatarControlTabs button,
 .form .botAvatarControlTabs button {
   -webkit-appearance: none;
@@ -44701,7 +45026,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .botPowerSurfaceBadgeWrap[data-passive="true"] {
-  pointer-events: none;
+  cursor: inherit;
 }
 
 .botPowerSurfaceBadge {
@@ -44764,6 +45089,16 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .botPowerSurfacePopover em {
   color: #ffd08a;
   font-style: normal;
+}
+
+.storyBotGlyph > .botPowerSurfaceBadgeWrap .botPowerSurfaceBadge,
+.coffeeCanvasBotTile > .botPowerSurfaceBadgeWrap .botPowerSurfaceBadge,
+.botMarketplaceCardGlyph > .botPowerSurfaceBadgeWrap .botPowerSurfaceBadge,
+.coffeeSeatGlowPill > .botPowerSurfaceBadgeWrap .botPowerSurfaceBadge {
+  min-width: 20px;
+  height: 17px;
+  padding: 0 4px;
+  font-size: 8px;
 }
 
 .coffeePowerWarning {
@@ -46729,6 +47064,276 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   pointer-events: none;
 }
 
+.botVoiceCharacterEditor {
+  min-width: 0;
+  display: grid;
+  gap: 13px;
+  padding: 14px;
+  border: 1px solid
+    color-mix(in srgb, var(--editor-bot-color, var(--accent)) 18%, #303846);
+  border-radius: 10px;
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.05),
+      rgba(255, 255, 255, 0.012)
+    ),
+    rgba(255, 255, 255, 0.018);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.045),
+    0 14px 34px rgba(0, 0, 0, 0.12);
+}
+
+.botVoiceCharacterHeading {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.botVoiceCharacterHeading > span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.botVoiceCharacterHeading strong {
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 830;
+  letter-spacing: -0.01em;
+}
+
+.botVoiceCharacterHeading small,
+.botVoiceCharacterHelp {
+  color: var(--fg-muted);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.botVoiceCharacterHeading button,
+.form .botVoiceCharacterHeading button {
+  -webkit-appearance: none;
+  appearance: none;
+  min-width: 0;
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid
+    color-mix(in srgb, var(--editor-bot-color, var(--accent)) 20%, #303846);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.028);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 10.5px;
+  font-weight: 760;
+  cursor: pointer;
+}
+
+.botVoiceCharacterHeading button:hover,
+.botVoiceCharacterHeading button:focus-visible {
+  outline: none;
+  color: var(--fg);
+  border-color: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 52%,
+    #ffffff
+  );
+  background: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 10%,
+    rgba(255, 255, 255, 0.04)
+  );
+}
+
+.botVoiceCharacterPad {
+  min-height: 218px;
+  aspect-ratio: 1.46 / 1;
+  border-radius: 11px;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #ffffff 11%, transparent),
+      transparent 42%,
+      rgba(0, 0, 0, 0.25)
+    ),
+    linear-gradient(
+      90deg,
+      color-mix(
+        in srgb,
+        var(--editor-bot-color, var(--accent)) 18%,
+        rgba(61, 38, 25, 0.48)
+      ),
+      rgba(17, 21, 30, 0.26) 50%,
+      color-mix(
+        in srgb,
+        var(--editor-bot-color, var(--accent)) 11%,
+        rgba(88, 125, 165, 0.45)
+      )
+    ),
+    repeating-linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.045) 0 1px,
+      transparent 1px 20px
+    ),
+    repeating-linear-gradient(
+      0deg,
+      rgba(255, 255, 255, 0.04) 0 1px,
+      transparent 1px 20px
+    ),
+    rgba(5, 8, 14, 0.74);
+}
+
+.botVoiceCharacterPad::before {
+  width: 34px;
+  height: 34px;
+  border-color: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 38%,
+    transparent
+  );
+  box-shadow: 0 0 24px
+    color-mix(
+      in srgb,
+      var(--editor-bot-color, var(--accent)) 12%,
+      transparent
+    );
+}
+
+.botVoiceCharacterCorner {
+  position: absolute;
+  z-index: 2;
+  color: rgba(255, 255, 255, 0.52);
+  font-size: 9px;
+  font-weight: 820;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.72);
+  pointer-events: none;
+}
+
+.botVoiceCharacterCornerBold {
+  left: 12px;
+  top: 10px;
+}
+
+.botVoiceCharacterCornerPresent {
+  right: 12px;
+  top: 10px;
+}
+
+.botVoiceCharacterCornerIntimate {
+  left: 12px;
+  bottom: 10px;
+}
+
+.botVoiceCharacterCornerAiry {
+  right: 12px;
+  bottom: 10px;
+}
+
+.botVoiceCharacterThumb {
+  width: 24px;
+  height: 24px;
+  box-shadow:
+    0 0 0 5px rgba(0, 0, 0, 0.32),
+    0 0 var(--voice-character-glow-radius, 20px)
+      color-mix(
+        in srgb,
+        var(--editor-bot-color, var(--accent))
+          var(--voice-character-glow-strength, 42%),
+        transparent
+      );
+}
+
+.botVoiceCharacterReadout {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.botVoiceCharacterReadout > span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  padding: 8px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.065);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.14);
+}
+
+.botVoiceCharacterReadout small {
+  color: var(--fg-subtle);
+  font-size: 9px;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.botVoiceCharacterReadout strong {
+  color: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 58%,
+    var(--fg)
+  );
+  font-size: 11px;
+  font-weight: 790;
+  white-space: nowrap;
+}
+
+.botVoiceCharacterHelp {
+  display: block;
+}
+
+.themeLight.botAvatarStudioThemeScope .botVoiceCharacterEditor {
+  border-color: var(--avatar-studio-border);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, #ffffff 56%, transparent),
+    var(--avatar-studio-control)
+  );
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 84%, transparent);
+}
+
+.themeLight.botAvatarStudioThemeScope .botVoiceCharacterPad {
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.36),
+      transparent 46%,
+      rgba(28, 37, 52, 0.08)
+    ),
+    linear-gradient(
+      90deg,
+      color-mix(
+        in srgb,
+        var(--editor-bot-color, var(--accent)) 11%,
+        #eee5dc
+      ),
+      #e8edf3 50%,
+      color-mix(
+        in srgb,
+        var(--editor-bot-color, var(--accent)) 8%,
+        #dbeaf5
+      )
+    );
+}
+
+.themeLight.botAvatarStudioThemeScope .botVoiceCharacterCorner {
+  color: color-mix(in srgb, var(--fg) 66%, transparent);
+  text-shadow: 0 1px 7px rgba(255, 255, 255, 0.74);
+}
+
+.themeLight.botAvatarStudioThemeScope .botVoiceCharacterReadout > span {
+  border-color: var(--avatar-studio-border);
+  background: color-mix(in srgb, var(--avatar-studio-recessed) 72%, #ffffff);
+}
+
 .botAvatarMouthRotationControl {
   min-width: 0;
   display: grid;
@@ -47931,6 +48536,113 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   font-size: 13px;
   line-height: 1.45;
   padding: 10px 12px;
+}
+
+.botLibraryGroupMemberPicker {
+  min-width: 0;
+  margin: 2px 0 0;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--fg-muted) 24%, var(--line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-deep) 72%, transparent);
+}
+
+.botLibraryGroupMemberPicker legend {
+  padding: 0 5px;
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.botLibraryGroupMemberPickerHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.botLibraryGroupMemberPickerHeader strong {
+  color: var(--fg);
+  font-size: 12px;
+}
+
+.botLibraryGroupMemberPickerHeader span {
+  color: var(--fg-muted);
+  font-size: 11px;
+  text-align: right;
+}
+
+.botLibraryGroupMemberGrid {
+  max-height: min(220px, 35vh);
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.botLibraryGroupMemberOption {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 12px;
+  transition:
+    background 0.14s ease,
+    border-color 0.14s ease,
+    color 0.14s ease;
+}
+
+.botLibraryGroupMemberOption:hover,
+.botLibraryGroupMemberOption:focus-within,
+.botLibraryGroupMemberOption[data-selected="true"] {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg));
+  color: var(--fg);
+}
+
+.botLibraryGroupMemberOption[data-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
+.botLibraryGroupMemberOption input {
+  flex: 0 0 auto;
+  accent-color: var(--accent);
+}
+
+.botLibraryGroupMemberOption > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.botLibraryGroupMemberGlyph {
+  width: 24px;
+  height: 24px;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 7px;
+  background: color-mix(
+    in srgb,
+    var(--bot-library-group-member-accent) 20%,
+    var(--bg)
+  );
+  color: var(--bot-library-group-member-accent);
+}
+
+@media (max-width: 560px) {
+  .botLibraryGroupMemberGrid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .importBotModalChoiceButton {
@@ -62447,6 +63159,20 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     translateY(calc(var(--coffee-seat-name-plate-y) + 6px)) scale(0.96);
 }
 
+.coffeeSeatGlowPill > .botPowerSurfaceBadgeWrap {
+  position: absolute;
+  top: -8px;
+  left: 22px;
+  z-index: 4;
+}
+
+.coffeeSeat[data-cup-side="left"]
+  .coffeeSeatGlowPill
+  > .botPowerSurfaceBadgeWrap {
+  right: 22px;
+  left: auto;
+}
+
 .coffeeSeatGlowGlyph {
   grid-column: 1;
   grid-row: 1;
@@ -64574,6 +65300,9 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   --coffee-cup-sip-y: clamp(-10px, -0.75vw, -6px);
   --coffee-cup-sip-duration-ms: 1400ms;
   --coffee-cup-sip-hold-ms: 500ms;
+  --coffee-cup-empty-attempt-duration-ms: 3200ms;
+  --coffee-cup-empty-attempt-x: clamp(-18px, -1.35vw, -12px);
+  --coffee-cup-empty-attempt-y: clamp(-5px, -0.35vw, -2px);
   --coffee-cup-sip-rest-scale: 0.84;
   --coffee-cup-sip-active-scale: 0.98;
   --coffee-cup-rest-sip-opacity: 0;
@@ -64617,6 +65346,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .coffeeCup[data-cup-side="left"] {
   --coffee-cup-sip-x: clamp(24px, 2.7vw, 36px);
+  --coffee-cup-empty-attempt-x: clamp(12px, 1.35vw, 18px);
   right: auto;
   left: var(--coffee-cup-side-offset);
 }
@@ -64956,6 +65686,21 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   animation: coffeeCupSip var(--coffee-cup-sip-duration-ms) ease-in-out 1 both;
 }
 
+.coffeeCup[data-cup-empty-attempt="true"] .coffeeCupSteam {
+  opacity: 0;
+}
+
+.coffeeCup[data-cup-empty-attempt="true"]::after {
+  animation: coffeeCupRestDuringEmptyAttempt
+    var(--coffee-cup-empty-attempt-duration-ms) ease-in-out 1 both;
+  transition: none;
+}
+
+.coffeeCup[data-cup-empty-attempt="true"]::before {
+  animation: coffeeCupEmptyAttempt var(--coffee-cup-empty-attempt-duration-ms)
+    ease-in-out 1 both;
+}
+
 @keyframes coffeeCupRestDuringSip {
   0% {
     opacity: 1;
@@ -65012,6 +65757,62 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
       scale(var(--coffee-cup-sip-rest-scale));
   }
 
+  100% {
+    opacity: 0;
+    transform: translate(0, 3px) scaleX(var(--coffee-cup-facing-scale-x))
+      scale(var(--coffee-cup-sip-rest-scale));
+  }
+}
+
+@keyframes coffeeCupRestDuringEmptyAttempt {
+  0%,
+  8% {
+    opacity: 1;
+  }
+
+  16%,
+  66% {
+    opacity: 0;
+  }
+
+  74%,
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes coffeeCupEmptyAttempt {
+  0%,
+  8% {
+    opacity: 0;
+    transform: translate(0, 3px) scaleX(var(--coffee-cup-facing-scale-x))
+      scale(var(--coffee-cup-sip-rest-scale));
+  }
+
+  16% {
+    opacity: 1;
+    transform: translate(0, 3px) scaleX(var(--coffee-cup-facing-scale-x))
+      scale(var(--coffee-cup-sip-rest-scale));
+  }
+
+  34%,
+  43% {
+    opacity: 1;
+    transform: translate(
+        var(--coffee-cup-empty-attempt-x),
+        var(--coffee-cup-empty-attempt-y)
+      )
+      scaleX(var(--coffee-cup-facing-scale-x)) scale(0.92);
+  }
+
+  62%,
+  70% {
+    opacity: 1;
+    transform: translate(0, 3px) scaleX(var(--coffee-cup-facing-scale-x))
+      scale(var(--coffee-cup-sip-rest-scale));
+  }
+
+  76%,
   100% {
     opacity: 0;
     transform: translate(0, 3px) scaleX(var(--coffee-cup-facing-scale-x))
@@ -65240,6 +66041,14 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   font-style: italic;
   border-left-width: 2px;
   filter: saturate(0.82);
+}
+
+.coffeeSeatActionBadge[data-dead-air-aside="true"] {
+  max-width: min(240px, 27cqw);
+  padding: 4px 8px 5px;
+  border-left-width: 2px;
+  font-style: italic;
+  line-height: 1.2;
 }
 
 .coffeeSeat[data-coffee-listener-reaction="true"] .coffeeSeatCluster {
@@ -66416,6 +67225,13 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .coffeeCanvasBotTile .chatBotTileFeaturedName {
   font-size: clamp(9px, calc(var(--tile-size) * 0.088), 12px);
   letter-spacing: 0.045em;
+}
+
+.coffeeCanvasBotTile > .botPowerSurfaceBadgeWrap {
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  z-index: 4;
 }
 
 .coffeeCanvasBotTileBadge {

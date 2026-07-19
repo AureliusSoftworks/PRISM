@@ -1,4 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
+import { PRISM_EULA_VERSION } from "@localai/shared";
 import { initializeDatabase } from "./db.ts";
 import type { LlmProvider, ProviderMessage } from "./providers.ts";
 
@@ -9,6 +10,34 @@ export function createTestDatabase(): DatabaseSync {
 
 export function closeTestDatabase(db: DatabaseSync): void {
   db.close();
+}
+
+const TEST_SIGNUP_LEGAL_ACCEPTANCE = {
+  minimumAgeConfirmed: true,
+  eulaAccepted: true,
+  eulaVersion: PRISM_EULA_VERSION,
+} as const;
+
+/** Add the real current clickwrap fields to registration-only test requests. */
+export function withTestRegistrationAcceptance(
+  path: string,
+  init: RequestInit,
+): RequestInit {
+  if (path !== "/api/auth/register") return init;
+  if (typeof init.body !== "string") return init;
+  const body = JSON.parse(init.body) as Record<string, unknown>;
+  return {
+    ...init,
+    body: JSON.stringify({ ...TEST_SIGNUP_LEGAL_ACCEPTANCE, ...body }),
+  };
+}
+
+export function withTestRegistrationBody(
+  path: string,
+  body: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (path !== "/api/auth/register") return body;
+  return { ...TEST_SIGNUP_LEGAL_ACCEPTANCE, ...body };
 }
 
 export function createDeterministicProvider(

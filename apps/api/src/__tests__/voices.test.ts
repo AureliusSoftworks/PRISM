@@ -19,8 +19,8 @@ import {
 } from "../voices.ts";
 
 describe("voice Phase 1 boundary", () => {
-  it("advertises native system speech instead of the retired neural model", () => {
-    assert.equal(VOICE_CAPABILITIES.builtinEnglish.model, "system-native");
+  it("advertises the packaged local neural voice model", () => {
+    assert.equal(VOICE_CAPABILITIES.builtinEnglish.model, "kokoro-82m-q8");
     assert.deepEqual(VOICE_CAPABILITIES.modes, ["mute", "english", "babble", "bottish"]);
     assert.deepEqual(VOICE_CAPABILITIES.builtinBottish, {
       available: true,
@@ -91,6 +91,8 @@ describe("voice Phase 1 boundary", () => {
         pace: 0.333,
         lilt: 0,
         bottishTone: 0.45,
+        eqTilt: 0,
+        gainDb: 0,
         volume: 1,
         texture: {
           preset: "clean",
@@ -254,7 +256,7 @@ describe("voice Phase 1 boundary", () => {
     );
   });
 
-  it("maps profile performance effects into bounded ElevenLabs settings", () => {
+  it("sends one persisted stability control and omits unsupported v3 settings", () => {
     assert.deepEqual(
       elevenLabsVoiceSettings({
         v: 1,
@@ -263,14 +265,26 @@ describe("voice Phase 1 boundary", () => {
         warmth: -1,
         pace: 1,
         lilt: 1,
-      }),
+        elevenLabsStability: 0.3,
+      }, "eleven_flash_v2_5"),
       {
-        stability: 0.28,
+        stability: 0.3,
         similarity_boost: 0.75,
-        style: 0.36,
+        style: 0,
         use_speaker_boost: true,
-        speed: 0.852,
       }
+    );
+    assert.deepEqual(
+      elevenLabsVoiceSettings({
+        v: 1,
+        baseVoiceId: "voice-3",
+        pitch: 1,
+        warmth: -1,
+        pace: 1,
+        lilt: 1,
+        elevenLabsStability: 0.3,
+      }, "eleven_v3"),
+      { stability: 0.3 },
     );
   });
 
@@ -292,7 +306,10 @@ describe("voice Phase 1 boundary", () => {
     });
     assert.equal(request.deliveryMood, "joyful");
     assert.equal(request.profile.pace, 0.75);
-    assert.equal(elevenLabsVoiceSettings(request.profile).speed, 1.18);
+    assert.deepEqual(
+      elevenLabsVoiceSettings(request.profile, "eleven_v3"),
+      { stability: 0.52 },
+    );
   });
 
   it("keeps the ElevenLabs key server-side and sends the expected streaming payload", async () => {
@@ -361,6 +378,112 @@ describe("voice Phase 1 boundary", () => {
     );
   });
 
+  it("turns non-neutral delivery moods into sparse Eleven v3 directions", async () => {
+    const cases = [
+      ["joyful", "delighted"],
+      ["warm", "warmly"],
+      ["guarded", "reserved"],
+      ["strained", "strained"],
+    ] as const;
+    for (const [deliveryMood, direction] of cases) {
+      let requestBody: Record<string, unknown> | null = null;
+      await requestElevenLabsSpeech({
+        apiKey: "secret-key",
+        voiceId: "voice-id",
+        model: "eleven_flash_v2_5",
+        text: "The door is already open.",
+        deliveryMood,
+        profile: { v: 1, baseVoiceId: "voice-1", pitch: 0, warmth: 0, pace: 0, lilt: 0 },
+        fetchImpl: (async (_url, init) => {
+          requestBody = JSON.parse(String(init?.body));
+          return new Response(new Uint8Array([1]), { status: 200 });
+        }) as typeof fetch,
+      });
+      assert.equal(requestBody?.model_id, "eleven_v3");
+      assert.equal(
+        requestBody?.text,
+        `[${direction}] The door is already open.`,
+      );
+    }
+  });
+
+  it("leaves neutral delivery untagged on the selected ElevenLabs model", async () => {
+    let requestBody: Record<string, unknown> | null = null;
+    await requestElevenLabsSpeech({
+      apiKey: "secret-key",
+      voiceId: "voice-id",
+      model: "eleven_multilingual_v2",
+      text: "The door is already open.",
+      deliveryMood: "neutral",
+      profile: { v: 1, baseVoiceId: "voice-1", pitch: 0, warmth: 0, pace: 0, lilt: 0 },
+      fetchImpl: (async (_url, init) => {
+        requestBody = JSON.parse(String(init?.body));
+        return new Response(new Uint8Array([1]), { status: 200 });
+      }) as typeof fetch,
+    });
+    assert.equal(requestBody?.model_id, "eleven_multilingual_v2");
+    assert.equal(requestBody?.text, "The door is already open.");
+  });
+
+  it("reserves one direction slot for mood and deduplicates authored direction", async () => {
+    let requestBody: Record<string, unknown> | null = null;
+    await requestElevenLabsSpeech({
+      apiKey: "secret-key",
+      voiceId: "voice-id",
+      model: "eleven_flash_v2_5",
+      text: "The door is already open.",
+      deliveryMood: "strained",
+      profile: {
+        v: 2,
+        enabled: true,
+        baseVoiceId: "voice-1",
+        elevenLabsEffect: "clean",
+        elevenLabsDirection: "strained, hushed, with measured pauses",
+        pitch: 0,
+        warmth: 0,
+        pace: 0,
+        lilt: 0,
+        bottishTone: 0.45,
+        volume: 1,
+        texture: {
+          preset: "clean",
+          amount: 0,
+          bandwidth: 1,
+          noise: 0,
+          instability: 0,
+          distortion: 0,
+          damage: 0,
+        },
+      },
+      fetchImpl: (async (_url, init) => {
+        requestBody = JSON.parse(String(init?.body));
+        return new Response(new Uint8Array([1]), { status: 200 });
+      }) as typeof fetch,
+    });
+    assert.equal(
+      requestBody?.text,
+      "[strained] [hushed] [with measured pauses] The door is already open.",
+    );
+  });
+
+  it("lets explicit vocal reactions suppress the broader automatic mood tag", async () => {
+    let requestBody: Record<string, unknown> | null = null;
+    await requestElevenLabsSpeech({
+      apiKey: "secret-key",
+      voiceId: "voice-id",
+      model: "eleven_flash_v2_5",
+      text: "[sighs] The door is already open.",
+      deliveryMood: "strained",
+      profile: { v: 1, baseVoiceId: "voice-1", pitch: 0, warmth: 0, pace: 0, lilt: 0 },
+      fetchImpl: (async (_url, init) => {
+        requestBody = JSON.parse(String(init?.body));
+        return new Response(new Uint8Array([1]), { status: 200 });
+      }) as typeof fetch,
+    });
+    assert.equal(requestBody?.model_id, "eleven_v3");
+    assert.equal(requestBody?.text, "[sighs] The door is already open.");
+  });
+
   it("removes non-spoken direction tags from provider timing alignment", async () => {
     const providerText = "[warm] Hi";
     const characters = Array.from(providerText);
@@ -410,6 +533,32 @@ describe("voice Phase 1 boundary", () => {
       Math.abs((speech.alignment?.characterStartTimesSeconds[0] ?? 0) - 0.35) < 0.000_001,
     );
     assert.equal(speech.alignment?.characterStartTimesSeconds[1], 0.4);
+  });
+
+  it("removes ephemeral mood direction from provider timing alignment", async () => {
+    const providerText = "[reserved] Hi";
+    const characters = Array.from(providerText);
+    const speech = await requestElevenLabsSpeechWithTimestamps({
+      apiKey: "secret-key",
+      voiceId: "voice-id",
+      model: "eleven_flash_v2_5",
+      text: "Hi",
+      deliveryMood: "guarded",
+      profile: { v: 1, baseVoiceId: "voice-1", pitch: 0, warmth: 0, pace: 0, lilt: 0 },
+      fetchImpl: (async (_url, init) => {
+        const body = JSON.parse(String(init?.body));
+        assert.equal(body.text, providerText);
+        return new Response(JSON.stringify({
+          audio_base64: "AQID",
+          alignment: {
+            characters,
+            character_start_times_seconds: characters.map((_, index) => index * 0.05),
+            character_end_times_seconds: characters.map((_, index) => (index + 1) * 0.05),
+          },
+        }), { status: 200 });
+      }) as typeof fetch,
+    });
+    assert.equal(speech.alignment?.characters.join(""), "Hi");
   });
 
   it("uses Eleven v3 and removes Signal reaction tags from timing alignment", async () => {

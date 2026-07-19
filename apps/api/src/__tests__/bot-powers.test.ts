@@ -4,11 +4,17 @@ import test from "node:test";
 import { botPowerSourceHashV1, type CoffeePowerPlanV1 } from "@localai/shared";
 import { compileBotPowers } from "../bot-powers.ts";
 import {
+  applyCoffeeHearingRepeatMoodPenalty,
   applyCoffeePowerAfterSpeech,
   coffeePowerBotCanSpeak,
+  coffeePowerBotEchoesAddressedSpeech,
+  coffeePowerBotIsMuted,
+  coffeePowerCandorPromptForTurn,
+  coffeePowerEchoSourceForTurn,
   coffeePowerBotVisibleTo,
   coffeePowerHistoryForSpeaker,
   coffeePowerHistoryLimitForSpeaker,
+  coffeePowerHearingRepeatDirective,
   coffeePowerInsightPromptLines,
   coffeePowerRouterPromptLines,
   coffeePowerSpeakerOverride,
@@ -161,6 +167,74 @@ test("compiler creates exclusive visibility rules without consulting the local m
   }]);
 });
 
+test("compiler deterministically recovers the ghostly speaking-only presence contract", async () => {
+  let calls = 0;
+  const unusedProvider: LlmProvider = {
+    name: "local",
+    async generateResponse() {
+      calls += 1;
+      throw new Error("provider should not be needed");
+    },
+    async embedText() { return []; },
+  };
+  const result = await compileBotPowers({
+    provider: unusedProvider,
+    botName: "Mara",
+    powers: [{
+      version: 1,
+      id: "ghost",
+      name: "Ghost",
+      intent: "Mara is dead: literally invisible while idle, fades into view whenever she speaks, and terrifies all present bots.",
+      enabled: true,
+      compileStatus: "draft",
+      compiled: null,
+    }],
+  });
+  assert.equal(calls, 0);
+  assert.equal(result.powers[0]?.compileStatus, "ready");
+  assert.deepEqual(result.powers[0]?.compiled?.effects, [
+    { type: "avatar_visibility", mode: "speaking_only" },
+    {
+      type: "social_influence",
+      trigger: "after_speech",
+      polarity: "negative",
+      strength: "large",
+      targets: [{ kind: "all" }],
+    },
+  ]);
+  assert.match(result.powers[0]?.compiled?.observerCue ?? "", /agency/u);
+});
+
+test("compiler keeps terror separate when a speaking-only ghost does not request it", async () => {
+  const unusedProvider: LlmProvider = {
+    name: "local",
+    async generateResponse() {
+      throw new Error("provider should not be needed");
+    },
+    async embedText() { return []; },
+  };
+  const result = await compileBotPowers({
+    provider: unusedProvider,
+    botName: "Mara",
+    powers: [{
+      version: 1,
+      id: "quiet-ghost",
+      name: "Ghost",
+      intent: "Mara is invisible while idle and fades into view whenever she speaks.",
+      enabled: true,
+      compileStatus: "draft",
+      compiled: null,
+    }],
+  });
+  assert.deepEqual(result.powers[0]?.compiled?.effects, [
+    { type: "avatar_visibility", mode: "speaking_only" },
+  ]);
+  assert.doesNotMatch(
+    result.powers[0]?.compiled?.observerCue ?? "",
+    /terror|fear|fright/iu,
+  );
+});
+
 test("compiler creates exclusive speech rules without consulting the local model", async () => {
   let calls = 0;
   const unusedProvider: LlmProvider = {
@@ -189,6 +263,360 @@ test("compiler creates exclusive speech rules without consulting the local model
     type: "speech_audience",
     allowed: [{ kind: "bot", name: "Misa Amane" }],
   }]);
+});
+
+test("compiler creates hard mute rules without consulting the local model", async () => {
+  let calls = 0;
+  const unusedProvider: LlmProvider = {
+    name: "local",
+    async generateResponse() {
+      calls += 1;
+      throw new Error("provider should not be needed");
+    },
+    async embedText() { return []; },
+  };
+  const result = await compileBotPowers({
+    provider: unusedProvider,
+    botName: "Silent Bob",
+    powers: [{
+      version: 1,
+      id: "mute",
+      name: "Muted",
+      intent: "No matter what, only respond in ... and this bot's voice will never be heard.",
+      enabled: true,
+      compileStatus: "draft",
+      compiled: null,
+    }],
+  });
+
+  assert.equal(calls, 0);
+  assert.equal(result.powers[0]?.compileStatus, "ready");
+  assert.deepEqual(result.powers[0]?.compiled?.effects, [{ type: "mute" }]);
+  assert.deepEqual(result.powers[0]?.compiled?.ruleLabels, ["Muted"]);
+});
+
+test("compiler creates hard addressed-speech echo rules without consulting the local model", async () => {
+  let calls = 0;
+  const unusedProvider: LlmProvider = {
+    name: "local",
+    async generateResponse() {
+      calls += 1;
+      throw new Error("provider should not be needed");
+    },
+    async embedText() { return []; },
+  };
+  const result = await compileBotPowers({
+    provider: unusedProvider,
+    botName: "Polly",
+    powers: [{
+      version: 1,
+      id: "echo",
+      name: "Echo",
+      intent: "Force this bot to echo whatever was addressed to it. The bot says nothing else.",
+      enabled: true,
+      compileStatus: "draft",
+      compiled: null,
+    }],
+  });
+
+  assert.equal(calls, 0);
+  assert.equal(result.powers[0]?.compileStatus, "ready");
+  assert.deepEqual(result.powers[0]?.compiled?.effects, [{ type: "echo_addressed" }]);
+  assert.deepEqual(result.powers[0]?.compiled?.ruleLabels, ["Echoes addressed speech"]);
+  assert.match(result.powers[0]?.compiled?.observerCue ?? "", /sender may react with confusion/u);
+});
+
+test("compiler creates hard-of-hearing repeat rules without consulting the local model", async () => {
+  let calls = 0;
+  const unusedProvider: LlmProvider = {
+    name: "local",
+    async generateResponse() {
+      calls += 1;
+      throw new Error("provider should not be needed");
+    },
+    async embedText() { return []; },
+  };
+  const result = await compileBotPowers({
+    provider: unusedProvider,
+    botName: "Mira",
+    powers: [{
+      version: 1,
+      id: "hard-of-hearing",
+      name: "Hard of Hearing",
+      intent: "She may ask what another bot said. Each time they repeat it, their mood lowers.",
+      enabled: true,
+      compileStatus: "draft",
+      compiled: null,
+    }],
+  });
+
+  assert.equal(calls, 0);
+  assert.equal(result.powers[0]?.compileStatus, "ready");
+  assert.deepEqual(result.powers[0]?.compiled?.effects, [{
+    type: "hearing_repeat",
+    frequency: "occasional",
+    moodPenalty: "small",
+  }]);
+  assert.deepEqual(result.powers[0]?.compiled?.ruleLabels, [
+    "Occasionally requests repeats",
+    "Repeats lower speaker mood",
+  ]);
+});
+
+test("compiler does not confuse atmospheric echoes with addressed-speech repetition", async () => {
+  let calls = 0;
+  const creativeProvider: LlmProvider = {
+    name: "local",
+    async generateResponse() {
+      calls += 1;
+      return JSON.stringify({ powers: [{
+        id: "echo-step",
+        selfCue: "Make every arrival echo twice.",
+        effects: [{ type: "action_bias", cue: "Let footsteps echo.", frequency: "occasional" }],
+        ruleLabels: ["Echoing arrivals"],
+      }] });
+    },
+    async embedText() { return []; },
+  };
+  const result = await compileBotPowers({
+    provider: creativeProvider,
+    powers: [{
+      version: 1,
+      id: "echo-step",
+      name: "Echo Step",
+      intent: "Every arrival echoes twice.",
+      enabled: true,
+      compileStatus: "draft",
+      compiled: null,
+    }],
+  });
+
+  assert.equal(calls, 1);
+  assert.equal(result.powers[0]?.compiled?.effects[0]?.type, "action_bias");
+});
+
+test("compiler does not confuse a muted color palette with silencing the bot", async () => {
+  let calls = 0;
+  const paletteProvider: LlmProvider = {
+    name: "local",
+    async generateResponse() {
+      calls += 1;
+      return JSON.stringify({ powers: [{
+        id: "palette",
+        selfCue: "Favor a restrained visual atmosphere.",
+        effects: [{
+          type: "action_bias",
+          cue: "Notice muted colors in the environment.",
+          frequency: "occasional",
+        }],
+        ruleLabels: ["Muted palette"],
+      }] });
+    },
+    async embedText() { return []; },
+  };
+  const result = await compileBotPowers({
+    provider: paletteProvider,
+    powers: [{
+      version: 1,
+      id: "palette",
+      name: "Muted Palette",
+      intent: "Creates muted colors around the room.",
+      enabled: true,
+      compileStatus: "draft",
+      compiled: null,
+    }],
+  });
+
+  assert.equal(calls, 1);
+  assert.equal(result.powers[0]?.compiled?.effects[0]?.type, "action_bias");
+});
+
+test("Coffee power plans expose a hard mute independently of turn eligibility", () => {
+  const plan = resolvedPlan({ muted: [{ type: "mute" }] });
+  assert.equal(coffeePowerBotIsMuted(plan, "muted"), true);
+  assert.equal(coffeePowerBotCanSpeak(plan, "muted"), true);
+  assert.equal(coffeePowerBotIsMuted(plan, "other"), false);
+});
+
+test("Coffee power plans resolve exact addressed-speech echo sources", () => {
+  const plan = resolvedPlan({ echo: [{ type: "echo_addressed" }] });
+  assert.equal(coffeePowerBotEchoesAddressedSpeech(plan, "echo"), true);
+  assert.equal(coffeePowerBotCanSpeak(plan, "echo"), true);
+  assert.equal(coffeePowerEchoSourceForTurn({
+    turnKind: "user",
+    speakerBotId: "echo",
+    userActionOnly: false,
+    tableFocus: "  [Echo](prism-bot://echo), really?  ",
+    explicitDirectedSpeakerBotId: "echo",
+  }), "  [Echo](prism-bot://echo), really?  ");
+  assert.equal(coffeePowerEchoSourceForTurn({
+    turnKind: "autonomous",
+    speakerBotId: "echo",
+    userActionOnly: false,
+    tableFocus: "",
+    priorAddressedBotId: "echo",
+    latestAssistantContent: "Echo, are you listening?",
+  }), "Echo, are you listening?");
+  assert.equal(coffeePowerEchoSourceForTurn({
+    turnKind: "autonomous",
+    speakerBotId: "echo",
+    userActionOnly: false,
+    tableFocus: "",
+    priorAddressedBotId: null,
+    latestAssistantContent: "A general table remark.",
+  }), null);
+});
+
+test("compiler recovers trustworthy truth-elicitation as bounded candor without a model", async () => {
+  let calls = 0;
+  const unusedProvider: LlmProvider = {
+    name: "local",
+    async generateResponse() {
+      calls += 1;
+      throw new Error("provider should not be needed");
+    },
+    async embedText() { return []; },
+  };
+  const result = await compileBotPowers({
+    provider: unusedProvider,
+    botName: "Mara Vale",
+    powers: [{
+      version: 1,
+      id: "open-door",
+      name: "Open Door",
+      intent: "This bot is very charismatic and trustworthy. Getting the truth out of almost anyone.",
+      enabled: true,
+      compileStatus: "draft",
+      compiled: null,
+    }],
+  });
+
+  assert.equal(calls, 0);
+  assert.equal(result.powers[0]?.compileStatus, "ready");
+  assert.deepEqual(result.powers[0]?.compiled?.effects, [{
+    type: "candor",
+    strength: "large",
+    targets: [{ kind: "all" }],
+  }]);
+  assert.match(result.powers[0]?.compiled?.selfCue ?? "", /charismatic and trustworthy/u);
+  assert.match(result.powers[0]?.compiled?.observerCue ?? "", /without overriding anyone's agency/u);
+});
+
+test("Coffee applies only the strongest direct one-response candor pressure from a frozen plan", () => {
+  const plan = resolvedPlan({
+    holder: [
+      { type: "candor", strength: "small", targets: [{ kind: "bot", name: "Target", botId: "target" }] },
+      { type: "candor", strength: "large", targets: [{ kind: "bot", name: "Target", botId: "target" }] },
+    ],
+    target: [],
+  });
+  const direct = coffeePowerCandorPromptForTurn({
+    plan,
+    sourceBotId: "holder",
+    sourceBotName: "Mara",
+    targetBotId: "target",
+    sourceText: "Target, what really happened?",
+    directlyAddressed: true,
+  });
+  assert.match(direct ?? "", /Candor \(strong\): Mara asks directly/u);
+  assert.match(direct ?? "", /Soft influence, not control/u);
+  assert.match(direct ?? "", /This response only/u);
+  assert.equal(coffeePowerCandorPromptForTurn({
+    plan,
+    sourceBotId: "holder",
+    targetBotId: "target",
+    sourceText: "A general remark about honesty.",
+    directlyAddressed: true,
+  }), null);
+  assert.equal(coffeePowerCandorPromptForTurn({
+    plan,
+    sourceBotId: "holder",
+    targetBotId: "target",
+    sourceText: "What really happened?",
+    directlyAddressed: false,
+  }), null);
+});
+
+test("Coffee resolves an uninterrupted hearing request into one repeat and mood cost", () => {
+  const plan = resolvedPlan({
+    speaker: [],
+    holder: [{
+      type: "hearing_repeat",
+      frequency: "occasional",
+      moodPenalty: "small",
+    }],
+  });
+  const directive = coffeePowerHearingRepeatDirective({
+    plan,
+    history: [
+      {
+        id: "source",
+        role: "assistant",
+        botId: "speaker",
+        content: "The lighthouse only appears at low tide.",
+      },
+      {
+        id: "request",
+        role: "assistant",
+        botId: "holder",
+        content: "Sorry, what was that?",
+      },
+    ],
+    eligibleBotIds: ["speaker", "holder"],
+  });
+  assert.deepEqual(directive, {
+    requesterBotId: "holder",
+    repeatingBotId: "speaker",
+    requestMessageId: "request",
+    sourceMessageId: "source",
+    repeatedContent: "The lighthouse only appears at low tide.",
+    moodPenalty: "small",
+  });
+
+  const before = {
+    speaker: {
+      disposition: 0.6,
+      valuesFriction: 0.2,
+      restraint: 0.5,
+      engagement: 0.7,
+      leavePressure: 0.1,
+    },
+    holder: {
+      disposition: 0.5,
+      valuesFriction: 0.3,
+      restraint: 0.5,
+      engagement: 0.6,
+      leavePressure: 0.1,
+    },
+  };
+  const after = applyCoffeeHearingRepeatMoodPenalty({
+    socialByBotId: before,
+    repeatingBotId: directive!.repeatingBotId,
+    strength: directive!.moodPenalty,
+  });
+  assert.ok(after.speaker.disposition < before.speaker.disposition);
+  assert.ok(after.speaker.valuesFriction > before.speaker.valuesFriction);
+  assert.equal(after.holder, before.holder);
+});
+
+test("Coffee does not force a repeat after the player interrupts the bot-to-bot chain", () => {
+  const plan = resolvedPlan({
+    speaker: [],
+    holder: [{
+      type: "hearing_repeat",
+      frequency: "occasional",
+      moodPenalty: "small",
+    }],
+  });
+  assert.equal(coffeePowerHearingRepeatDirective({
+    plan,
+    history: [
+      { id: "source", role: "assistant", botId: "speaker", content: "One line." },
+      { id: "request", role: "assistant", botId: "holder", content: "Pardon?" },
+      { id: "player", role: "user", content: "Let me answer that." },
+    ],
+    eligibleBotIds: ["speaker", "holder"],
+  }), null);
 });
 
 test("compiler creates gradual table mood rules without consulting the local model", async () => {

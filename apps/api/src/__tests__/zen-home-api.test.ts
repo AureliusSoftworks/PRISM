@@ -6,6 +6,7 @@ import {
   createDeterministicProvider,
   createFetchRecorder,
   createTestDatabase,
+  withTestRegistrationAcceptance,
 } from "../test-support.ts";
 
 process.env.PRISM_API_DISABLE_AUTOSTART = "1";
@@ -51,6 +52,7 @@ function createClient() {
   let cookie = "";
   return {
     async request(path: string, init: RequestInit = {}) {
+      init = withTestRegistrationAcceptance(path, init);
       const headers = new Headers(init.headers);
       if (cookie) headers.set("cookie", cookie);
       const response = await fetch(`${baseUrl}${path}`, { ...init, headers });

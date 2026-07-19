@@ -112,13 +112,29 @@ describe("ElevenLabs-only effects", () => {
     assert.match(reactionSource, /buildBottishPlan/u);
     assert.match(reactionSource, /args\.mode === "babble"/u);
     assert.match(reactionSource, /channel: "reaction"/u);
-    assert.match(reactionSource, /maxDurationMs: 900/u);
+    assert.match(reactionSource, /maxDurationMs: args\.plan\.interjectionAttempt \? 1_300 : 900/u);
     assert.match(pageSource, /settings\.voiceMode !== "english"[\s\S]{0,120}!plan\.spokenCue/u);
     assert.match(pageSource, /if \(!preparedInTime\) return false/u);
   });
 });
 
 describe("voice performance", () => {
+  it("applies per-bot Voice Character shelves and gain before limiting", () => {
+    const source = readFileSync(new URL("./voiceEffects.ts", import.meta.url), "utf8");
+    assert.match(source, /lowShelf\.type = "lowshelf"/);
+    assert.match(source, /highShelf\.type = "highshelf"/);
+    assert.match(source, /lowShelf\.gain\.value = voiceCharacter\.lowShelfDb/);
+    assert.match(source, /highShelf\.gain\.value = voiceCharacter\.highShelfDb/);
+    assert.match(
+      source,
+      /elevenLabsEffect\.outputTrim \*\s*voiceCharacter\.gainMultiplier/,
+    );
+    assert.match(
+      source,
+      /outputGain\.connect\(lowShelf\)\.connect\(highShelf\)\.connect\(limiter\)/,
+    );
+  });
+
   it("gives Lilt an audible pitch contour while keeping neutral speech still", () => {
     assert.equal(voiceLiltDetuneCents(0, 0.3), 0);
     assert.ok(Math.abs(voiceLiltDetuneCents(1, 0.3)) > 100);

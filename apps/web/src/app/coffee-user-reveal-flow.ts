@@ -104,7 +104,7 @@ export function coffeePersistedUserLineOwnsPendingReveal<
 
 export function coffeeTableMessageContentIsVisible(content: string): boolean {
   const normalized = content.trim();
-  return normalized.length > 0 && !/^[\p{P}\s]+$/u.test(normalized);
+  return /[\p{L}\p{N}]/u.test(normalized);
 }
 
 /** Sentence-case player prose for display without rewriting persisted message source. */

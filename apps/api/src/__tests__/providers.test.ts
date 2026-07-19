@@ -298,6 +298,18 @@ describe("buildModelCatalog", () => {
     );
     assert.ok(catalog.online.some((model) => model.id === "gpt-5.5-pro"));
     assert.ok(catalog.online.some((model) => model.id === "gpt-5.5-pro-2026-04-23"));
+    assert.equal(
+      catalog.online.find((model) => model.id === "gpt-5.6-sol")?.label,
+      "GPT-5.6 Sol",
+    );
+    assert.equal(
+      catalog.online.find((model) => model.id === "gpt-5.6-terra")?.label,
+      "GPT-5.6 Terra",
+    );
+    assert.equal(
+      catalog.online.find((model) => model.id === "gpt-5.6-luna")?.label,
+      "GPT-5.6 Luna",
+    );
     assert.ok(catalog.online.some((model) => model.id === "claude-sonnet-4-6"));
     assert.equal(
       catalog.online.find((model) => model.id === "claude-haiku-4-5")?.label,

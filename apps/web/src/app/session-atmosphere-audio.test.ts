@@ -12,6 +12,7 @@ import {
   SESSION_ATMOSPHERE_LOOP_END_TRIM_SECONDS,
   SESSION_ATMOSPHERE_LOOP_PRE_GAIN,
   SESSION_FOLEY_URLS,
+  coffeeCupFoleyCueForTransition,
   SIGNAL_AMBIENT_FOLEY_PROFILE,
   SIGNAL_ATMOSPHERE_RELATIVE_MIX_MAX,
   SIGNAL_STUDIO_GRAIN_URL,
@@ -22,8 +23,42 @@ import {
   sessionAtmosphereLoopEndTime,
   signalAtmosphereMixLevelFromRelative,
   signalAtmosphereRelativeMixLevel,
+  signalSessionAtmosphereActive,
   startSessionAtmosphere,
 } from "./session-atmosphere-audio.ts";
+
+test("Signal keeps its atmosphere alive through a completed episode's outro", () => {
+  const base = {
+    audioEnabled: true,
+    hasSelectedShow: true,
+    preRollActive: false,
+    episodePresent: false,
+    replayPlaying: false,
+    studioLayoutEditorOpen: false,
+  };
+
+  assert.equal(signalSessionAtmosphereActive(base), false);
+  assert.equal(
+    signalSessionAtmosphereActive({ ...base, episodePresent: true }),
+    true,
+  );
+  assert.equal(
+    signalSessionAtmosphereActive({
+      ...base,
+      episodePresent: true,
+      preRollActive: true,
+    }),
+    false,
+  );
+  assert.equal(
+    signalSessionAtmosphereActive({ ...base, replayPlaying: true }),
+    true,
+  );
+  assert.equal(
+    signalSessionAtmosphereActive({ ...base, studioLayoutEditorOpen: true }),
+    true,
+  );
+});
 
 test("Signal mix keeps the studio bed subtle while favoring room presence over static", () => {
   assert.deepEqual(DEFAULT_SIGNAL_ATMOSPHERE_MIX, {
@@ -173,6 +208,17 @@ test("session atmosphere exposes bundled studio and cup-synced foley assets", ()
     const file = new URL(`../../public${url}`, import.meta.url);
     assert.ok(statSync(file).size > 1_000, `${url} should be bundled`);
   }
+});
+
+test("cup foley emits exactly once for each sip and return transition", () => {
+  assert.equal(coffeeCupFoleyCueForTransition(undefined, false), null);
+  assert.equal(coffeeCupFoleyCueForTransition(false, false), null);
+  assert.equal(coffeeCupFoleyCueForTransition(false, true), "coffeeSip");
+  assert.equal(coffeeCupFoleyCueForTransition(true, true), null);
+  assert.equal(
+    coffeeCupFoleyCueForTransition(true, false),
+    "coffeeCupPlace",
+  );
 });
 
 test("session atmosphere buses keep their own calibrated and clamped gains", () => {

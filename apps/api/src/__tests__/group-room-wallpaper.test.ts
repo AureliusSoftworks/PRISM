@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import sharp from "sharp";
 import {
   composeGroupRoomWallpaperPrompt,
+  groupRoomWallpaperVariationBrief,
   loadOwnedGroupRoomWallpaperMembers,
   normalizeGroupRoomWallpaperBackupPrompt,
   normalizeGroupRoomWallpaperBackupUpload,
@@ -48,6 +49,20 @@ describe("group-room wallpaper request validation", () => {
       memberBotIds: Array.from({ length: 24 }, (_, index) => `bot-${index}`),
     });
     assert.equal(maximum.memberBotIds.length, 24);
+
+    assert.deepEqual(
+      readGroupRoomWallpaperRequestContext({
+        groupName: "Night Shift",
+        memberBotIds: ["bot-a", "bot-b"],
+        variationSeed: "  attempt-2  ",
+      }),
+      {
+        groupName: "Night Shift",
+        groupDescription: "",
+        memberBotIds: ["bot-a", "bot-b"],
+        variationSeed: "attempt-2",
+      },
+    );
   });
 
   it("rejects undersized, duplicate, and overlong group context", () => {
@@ -83,6 +98,15 @@ describe("group-room wallpaper request validation", () => {
           memberBotIds: ["bot-a", "bot-b"],
         }),
       /500 characters or fewer/u
+    );
+    assert.throws(
+      () =>
+        readGroupRoomWallpaperRequestContext({
+          groupName: "Night Shift",
+          memberBotIds: ["bot-a", "bot-b"],
+          variationSeed: "x".repeat(161),
+        }),
+      /Variation seed must be 160 characters or fewer/u,
     );
     assert.throws(
       () =>
@@ -191,13 +215,30 @@ describe("group-room wallpaper trusted prompt context", () => {
         { id: "bot-b", name: "Bram", color: "#123456", personaExcerpt: "Playful urban gardener." },
       ],
       zenWallpaperStyleNotes: "Soft grain and restrained neon.",
+      variationSeed: "night-shift-attempt-1",
     });
     assert.match(prompt, /widescreen 16:9/u);
     assert.match(prompt, /Group: Night Shift/u);
     assert.match(prompt, /#abcdef, #123456/u);
     assert.match(prompt, /Ada; accent #abcdef; atmosphere cues: Patient systems thinker/u);
     assert.match(prompt, /Global Zen atmosphere style preference: Soft grain/u);
+    assert.match(prompt, /Variation brief for this generation \(mandatory\):/u);
     assert.match(prompt, /No readable words/u);
     assert.match(prompt, /exact center/u);
+  });
+
+  it("selects stable but meaningfully different generation briefs", () => {
+    const first = groupRoomWallpaperVariationBrief("attempt-1");
+    const repeated = groupRoomWallpaperVariationBrief("attempt-1");
+    const variants = new Set(
+      Array.from({ length: 12 }, (_, index) =>
+        groupRoomWallpaperVariationBrief(`attempt-${index}`),
+      ),
+    );
+
+    assert.equal(repeated, first);
+    assert.ok(first);
+    assert.ok(variants.size >= 8);
+    assert.equal(groupRoomWallpaperVariationBrief(" "), null);
   });
 });

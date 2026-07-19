@@ -136,6 +136,125 @@ function deterministicHardAudiencePower(
   };
 }
 
+function deterministicMutePower(
+  source: BotPowerV1,
+  botName: string,
+): CompiledBotPowerV1 | null {
+  const name = compact(source.name, 80).toLowerCase();
+  const intent = compact(source.intent, 500)
+    .toLowerCase()
+    .replace(/[’]/gu, "'");
+  const explicitlyMuted = /^(?:mute|muted|silence)$/u.test(name) || [
+    /\b(?:is|becomes?|remains?|render(?:ed)?|make|makes)\s+(?:completely\s+|fully\s+)?muted\b/u,
+    /\bmuted?\s+(?:bot|voice|speech)\b/u,
+    /\bmutes?\s+(?:this|the)\s+bot\b/u,
+    /\b(?:can(?:not|'t)|never|does\s+not|doesn't)\s+(?:speak|talk|say\s+anything|make\s+a\s+sound)\b/u,
+    /\bvoice\s+(?:can(?:not|'t)|will\s+never|is\s+never)\s+be\s+heard\b/u,
+    /\bonly\s+(?:responds?|replies?)\s+(?:with|in)\s+(?:an?\s+)?(?:ellipsis|\.\.\.)(?:\s|$)/u,
+  ].some((pattern) => pattern.test(intent));
+  if (!explicitlyMuted) return null;
+  const subject = compact(botName, 100) || "This bot";
+  return {
+    version: BOT_POWER_VERSION,
+    sourceHash: botPowerSourceHashV1(source.name, source.intent),
+    selfCue: "Never speak. Physical actions are allowed, but every response must end as a silent ellipsis.",
+    observerCue: `${subject} cannot speak; only physical actions and a silent ellipsis can register.`,
+    effects: [{ type: "mute" }],
+    ruleLabels: ["Muted"],
+  };
+}
+
+function deterministicEchoAddressedPower(
+  source: BotPowerV1,
+  botName: string,
+): CompiledBotPowerV1 | null {
+  const name = compact(source.name, 80).toLowerCase();
+  const intent = compact(source.intent, 500)
+    .toLowerCase()
+    .replace(/[’]/gu, "'");
+  const explicitlyEchoesAddressedSpeech =
+    /^(?:echo|echoes|parrot|parroting)$/u.test(name) ||
+    [
+      /\b(?:echo(?:es|ing)?|repeat(?:s|ing)?|parrot(?:s|ing)?)\s+(?:back\s+)?(?:exactly\s+|verbatim\s+)?(?:whatever|everything|anything|what|the\s+words?)\b[\s\S]*\b(?:addressed|said|spoken|asked|told)\b/u,
+      /\b(?:echo(?:es|ing)?|repeat(?:s|ing)?|parrot(?:s|ing)?)\b[\s\S]*\b(?:word[ -]for[ -]word|verbatim|exactly)\b[\s\S]*\b(?:addressed|said|spoken|asked|told)\b/u,
+      /\b(?:can|may)\s+only\s+(?:echo|repeat|parrot)\b[\s\S]*\b(?:addressed|said|spoken|asked|told)\b/u,
+    ].some((pattern) => pattern.test(intent));
+  if (!explicitlyEchoesAddressedSpeech) return null;
+  const subject = compact(botName, 100) || "This bot";
+  return {
+    version: BOT_POWER_VERSION,
+    sourceHash: botPowerSourceHashV1(source.name, source.intent),
+    selfCue: "Repeat the latest speech addressed to you verbatim. Say nothing else.",
+    observerCue: `${subject} can only echo the latest speech addressed to them; the sender may react with confusion.`,
+    effects: [{ type: "echo_addressed" }],
+    ruleLabels: ["Echoes addressed speech"],
+  };
+}
+
+function deterministicCandorPower(
+  source: BotPowerV1,
+  botName: string,
+): CompiledBotPowerV1 | null {
+  const text = compact(`${source.name} ${source.intent}`, 560)
+    .toLowerCase()
+    .replace(/[’]/gu, "'");
+  const truthElicitation = [
+    /\b(?:get|gets|getting|draw|draws|drawing|coax|coaxes|coaxing)\s+(?:the\s+)?truth\s+out\s+of\b/u,
+    /\b(?:make|makes|making|help|helps|helping|cause|causes|causing)\b[\s\S]*\b(?:others?|bots?|people|anyone|everyone)\b[\s\S]*\b(?:honest|truthful|candid|open\s+up|confide)\b/u,
+    /\b(?:others?|bots?|people|anyone|everyone)\b[\s\S]*\b(?:tell|share|reveal|admit)\b[\s\S]*\b(?:truth|secrets?|honestly|candidly)\b/u,
+  ].some((pattern) => pattern.test(text));
+  const trustSignal = /\b(?:charism\w*|trustworth\w*|disarming|safe|confidant|easy\s+to\s+trust)\b/u.test(text);
+  if (!truthElicitation || !trustSignal) return null;
+  const subject = compact(botName, 100) || "This bot";
+  const strength = /\b(?:very|extremely|almost\s+anyone|anyone|everyone|nearly\s+everyone)\b/u.test(text)
+    ? "large" as const
+    : "medium" as const;
+  return {
+    version: BOT_POWER_VERSION,
+    sourceHash: botPowerSourceHashV1(source.name, source.intent),
+    selfCue: "Come across as unusually charismatic and trustworthy, especially when directly asking another bot a relevant question or inviting honesty.",
+    observerCue: `${subject}'s direct questions can feel unusually safe to answer candidly, without overriding anyone's agency or boundaries.`,
+    effects: [{ type: "candor", strength, targets: [{ kind: "all" }] }],
+    ruleLabels: ["Draws out candid answers"],
+  };
+}
+
+function deterministicHearingRepeatPower(
+  source: BotPowerV1,
+  botName: string,
+): CompiledBotPowerV1 | null {
+  const name = compact(source.name, 80)
+    .toLowerCase()
+    .replace(/[’]/gu, "'");
+  const intent = compact(source.intent, 500)
+    .toLowerCase()
+    .replace(/[’]/gu, "'");
+  const explicitlyHardOfHearing =
+    /^(?:hard[- ]of[- ]hearing|hearing[- ]impaired|hearing loss)$/u.test(name) ||
+    [
+      /\b(?:this|the)\s+bot\s+(?:is|becomes?|remains?)\s+hard[- ]of[- ]hearing\b/u,
+      /\b(?:this|the)\s+bot\s+(?:has|lives\s+with)\s+(?:hearing\s+loss|impaired\s+hearing)\b/u,
+      /\b(?:this|the)\s+bot\s+(?:cannot|can't|struggles?\s+to|has\s+(?:trouble|difficulty))\s+hear(?:ing)?\b/u,
+      /\b(?:asks?|request(?:s|ing)?)\b[\s\S]*\b(?:others?|another\s+bot|the\s+speaker)\b[\s\S]*\brepeat\b[\s\S]*\b(?:hear|heard|catch|caught)\b/u,
+    ].some((pattern) => pattern.test(intent));
+  if (!explicitlyHardOfHearing) return null;
+  const subject = compact(botName, 100) || "This bot";
+  return {
+    version: BOT_POWER_VERSION,
+    sourceHash: botPowerSourceHashV1(source.name, source.intent),
+    selfCue:
+      "You are hard of hearing. Occasionally ask the immediately preceding bot for a brief repeat when you miss their line; use natural wording and do not do this every turn.",
+    observerCue:
+      `When ${subject} asks what you just said, repeat your immediately preceding line; each required repeat slightly worsens your mood.`,
+    effects: [{
+      type: "hearing_repeat",
+      frequency: "occasional",
+      moodPenalty: "small",
+    }],
+    ruleLabels: ["Occasionally requests repeats", "Repeats lower speaker mood"],
+  };
+}
+
 function deterministicIntimidationPower(
   source: BotPowerV1,
   botName: string,
@@ -174,6 +293,50 @@ function deterministicIntimidationPower(
       },
     ],
     ruleLabels: ["Intimidates the room"],
+  };
+}
+
+function deterministicGhostPower(
+  source: BotPowerV1,
+  botName: string,
+): CompiledBotPowerV1 | null {
+  const text = compact(`${source.name} ${source.intent}`, 560).toLowerCase();
+  const ghostly = /\b(?:ghost|dead|undead|spect(?:er|re)|haunt(?:ed|ing)?)\b/u.test(text);
+  const terrifiesOnlookers =
+    /\b(?:terr(?:ify|ifies|ified|ifying)|frighten(?:s|ed|ing)?|scare(?:s|d|ing)?|horrif(?:y|ies|ied|ying)|fear|dread)\b/u.test(text) &&
+    /\b(?:onlookers?|observers?|others?|everyone|everybody|bots?|characters?|people|room|present)\b/u.test(text);
+  const invisibleWhileIdle =
+    /\b(?:invisible|unseen|hidden|vanish(?:es|ing)?|fade(?:s|d)?\s+(?:away|out))\b/u.test(text) &&
+    /\b(?:idle|silent|not\s+(?:talking|speaking)|between\s+(?:lines|utterances)|when\s+not\s+(?:talking|speaking))\b/u.test(text);
+  const speakingReveal =
+    /\b(?:talk(?:s|ing)?|speak(?:s|ing)?|utter(?:s|ance|ing)?)\b/u.test(text) &&
+    /\b(?:appear|visible|reveal|fade(?:s|d)?\s+(?:in|into\s+view))\b/u.test(text);
+  if (!ghostly || (!invisibleWhileIdle && !speakingReveal)) return null;
+  const subject = compact(botName, 100) || "This bot";
+  return {
+    version: BOT_POWER_VERSION,
+    sourceHash: botPowerSourceHashV1(source.name, source.intent),
+    selfCue:
+      "You are literally unseen while idle. Fade into view only while delivering an utterance, then fade away again.",
+    observerCue: terrifiesOnlookers
+      ? `${subject}'s voice draws them briefly into view and leaves a sharp, frightening impression. Keep your agency: register the terror without becoming obedient or abandoning your role.`
+      : `${subject}'s voice draws them briefly into view before they fade away again.`,
+    effects: [
+      { type: "avatar_visibility", mode: "speaking_only" },
+      ...(terrifiesOnlookers
+        ? [{
+            type: "social_influence" as const,
+            trigger: "after_speech" as const,
+            polarity: "negative" as const,
+            strength: "large" as const,
+            targets: [{ kind: "all" as const }],
+          }]
+        : []),
+    ],
+    ruleLabels: [
+      "Appears only while speaking",
+      ...(terrifiesOnlookers ? ["Terrifies present bots"] : []),
+    ],
   };
 }
 
@@ -250,7 +413,12 @@ function deterministicPower(
   botName: string,
 ): CompiledBotPowerV1 | null {
   return (
+    deterministicHearingRepeatPower(source, botName) ??
+    deterministicEchoAddressedPower(source, botName) ??
+    deterministicMutePower(source, botName) ??
+    deterministicGhostPower(source, botName) ??
     deterministicHardAudiencePower(source, botName) ??
+    deterministicCandorPower(source, botName) ??
     deterministicIntimidationPower(source, botName) ??
     deterministicGradualMoodPower(source, botName) ??
     deterministicCoffeeDislikePower(source, botName)
@@ -299,6 +467,21 @@ function compiledEntrySatisfiesIntent(
   compiled: CompiledBotPowerV1,
   source: BotPowerV1
 ): boolean {
+  if (deterministicHearingRepeatPower(source, "")) {
+    return compiled.effects.some((effect) => effect.type === "hearing_repeat");
+  }
+  if (deterministicEchoAddressedPower(source, "")) {
+    return compiled.effects.some((effect) => effect.type === "echo_addressed");
+  }
+  if (deterministicMutePower(source, "")) {
+    return compiled.effects.some((effect) => effect.type === "mute");
+  }
+  if (deterministicGhostPower(source, "")) {
+    return compiled.effects.some(
+      (effect) =>
+        effect.type === "avatar_visibility" && effect.mode === "speaking_only",
+    );
+  }
   const required = requiredHardAudienceEffect(source.intent);
   return !required || compiled.effects.some((effect) => effect.type === required);
 }
@@ -439,6 +622,9 @@ function providerFailureMessage(provider: LlmProvider, error: unknown): string {
 }
 
 function compileFailureMessage(power: BotPowerV1, provider: LlmProvider): string {
+  if (deterministicGhostPower(power, "")) {
+    return `Local power compilation failed: invalid compiler output; required speaking-only avatar rule missing. ${compilerDiagnosticContext(provider)}; describe the ghost's idle invisibility and speaking reveal, then retry.`;
+  }
   const required = requiredHardAudienceEffect(power.intent);
   const context = compilerDiagnosticContext(provider);
   if (required === "awareness") {
@@ -494,9 +680,14 @@ export async function compileBotPowers(args: {
         `Powers: ${JSON.stringify(modelDrafts.map(({ id, name, intent, enabled }) => ({ id, name, intent, enabled })))}`,
         "Return {\"powers\":[{\"id\":string,\"selfCue\":string,\"observerCue\":string,\"effects\":[],\"ruleLabels\":string[]}]}",
         "Allowed effects only:",
+        '- {"type":"mute"},',
+        '- {"type":"echo_addressed"},',
+        '- {"type":"hearing_repeat","frequency":"occasional|frequent","moodPenalty":"small|medium|large"},',
         '- {"type":"awareness","allowed":[target...]},',
         '- {"type":"speech_audience","allowed":[target...]},',
+        '- {"type":"avatar_visibility","mode":"speaking_only"},',
         '- {"type":"social_influence","trigger":"session_start|after_speech","polarity":"positive|negative","strength":"small|medium|large","targets":[target...]},',
+        '- {"type":"candor","strength":"small|medium|large","targets":[target...]},',
         '- {"type":"mood_resistance","polarity":"positive|negative|both","strength":"small|medium|large"},',
         '- {"type":"cup_rate","rate":"none|slow|fast|very_fast"},',
         '- {"type":"action_bias","cue":string,"frequency":"occasional|frequent"},',
@@ -542,7 +733,7 @@ export async function compileBotPowers(args: {
         content: [
           "Repair malformed PRISM Power compiler output.",
           "Reply with JSON only and preserve the supplied power IDs exactly.",
-          "Every exclusive visibility or hearing intent must include its matching awareness or speech_audience effect, not only prose cues.",
+          "Every hard echo, hearing-repeat, exclusive visibility, hearing-audience, or ghostly speaking-only avatar intent must include its matching echo_addressed, hearing_repeat, awareness, speech_audience, or avatar_visibility effect, not only prose cues.",
         ].join(" "),
       },
       {
@@ -551,7 +742,7 @@ export async function compileBotPowers(args: {
           `Expected powers: ${JSON.stringify(unresolved.map(({ id, name, intent, enabled }) => ({ id, name, intent, enabled })))}`,
           `Prior output: ${compact(raw, 6000) || "(empty)"}`,
           "Return {\"powers\":[{\"id\":string,\"name\":string,\"selfCue\":string,\"observerCue\":string,\"effects\":[],\"ruleLabels\":string[]}]}",
-          "Allowed effect types: awareness, speech_audience, social_influence, mood_resistance, cup_rate, action_bias, turn_gravity, response_bond, topic_gravity, selective_memory, insight.",
+          "Allowed effect types: mute, echo_addressed, hearing_repeat, awareness, speech_audience, avatar_visibility, social_influence, candor, mood_resistance, cup_rate, action_bias, turn_gravity, response_bond, topic_gravity, selective_memory, insight.",
         ].join("\n"),
       },
     ];

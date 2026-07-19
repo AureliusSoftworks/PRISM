@@ -6,6 +6,7 @@ import {
   GROUP_ROOM_WALLPAPER_MEMBER_BOT_ID_MAX_LENGTH,
   GROUP_ROOM_WALLPAPER_MEMBER_COUNT_MAX,
   GROUP_ROOM_WALLPAPER_MEMBER_COUNT_MIN,
+  GROUP_ROOM_WALLPAPER_VARIATION_SEED_MAX_LENGTH,
   buildImagePersonaContext,
 } from "@localai/shared";
 
@@ -27,6 +28,7 @@ export interface GroupRoomWallpaperRequestContext {
   groupName: string;
   groupDescription: string;
   memberBotIds: string[];
+  variationSeed?: string;
 }
 
 export interface NormalizedGroupRoomWallpaperBackupUpload {
@@ -177,7 +179,79 @@ export function readGroupRoomWallpaperRequestContext(
   if (new Set(memberBotIds).size !== memberBotIds.length) {
     throw new Error("Member bot IDs must be unique.");
   }
-  return { groupName, groupDescription, memberBotIds };
+  const variationSeed = readBoundedText(
+    body.variationSeed,
+    "Variation seed",
+    GROUP_ROOM_WALLPAPER_VARIATION_SEED_MAX_LENGTH,
+    { required: false }
+  );
+  return {
+    groupName,
+    groupDescription,
+    memberBotIds,
+    ...(variationSeed ? { variationSeed } : {}),
+  };
+}
+
+const GROUP_ROOM_ENVIRONMENT_VARIATIONS = [
+  "an inhabited interior with one unmistakable architectural focal point",
+  "a landscape threshold where shelter opens onto a distant horizon",
+  "a tactile studio or workshop shaped by the group's shared curiosity",
+  "a quiet civic or ceremonial space with traces of lived history",
+  "an abstract spatial installation that still feels physically inhabitable",
+  "a nocturnal garden or courtyard with layered depth and weather",
+  "an observatory, archive, or laboratory reimagined through the group identity",
+  "a liminal passage between two contrasting but harmonious environments",
+] as const;
+
+const GROUP_ROOM_COMPOSITION_VARIATIONS = [
+  "Use a low, wide horizon and a strong off-center destination.",
+  "Frame the room with close foreground texture and a long diagonal sightline.",
+  "Build depth through nested thresholds, with the center left calm and open.",
+  "Use an elevated viewpoint, broad negative space, and detail clustered at the edges.",
+  "Let one sculptural form anchor a mostly open composition without becoming a logo.",
+  "Use reflected planes or water to create a second layer of space without symmetry.",
+  "Compose around a curved path that draws the eye away from the text-safe center.",
+  "Use asymmetrical vertical framing and a distant luminous opening.",
+] as const;
+
+const GROUP_ROOM_LIGHTING_VARIATIONS = [
+  "Light it with cool pre-dawn haze and one restrained warm practical source.",
+  "Use late-afternoon shafts, soft dust, and long quiet shadows.",
+  "Use rain-muted window light with small reflected color accents.",
+  "Use moonlit blue-black depth with a subtle mineral glow at the edges.",
+  "Use diffuse overcast light, rich surface texture, and almost no hard shadow.",
+  "Use low amber evening light balanced by a distant cool horizon.",
+  "Use bioluminescent edge light while keeping the space believable and calm.",
+  "Use luminous fog and soft glass reflections with restrained contrast.",
+] as const;
+
+function stableVariationIndex(seed: string, axis: string, length: number): number {
+  let hash = 2166136261;
+  const value = `${seed}:${axis}`;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0) % length;
+}
+
+export function groupRoomWallpaperVariationBrief(
+  variationSeed: string | undefined
+): string | null {
+  const seed = normalizeSingleLine(variationSeed ?? "");
+  if (!seed) return null;
+  return [
+    GROUP_ROOM_ENVIRONMENT_VARIATIONS[
+      stableVariationIndex(seed, "environment", GROUP_ROOM_ENVIRONMENT_VARIATIONS.length)
+    ],
+    GROUP_ROOM_COMPOSITION_VARIATIONS[
+      stableVariationIndex(seed, "composition", GROUP_ROOM_COMPOSITION_VARIATIONS.length)
+    ],
+    GROUP_ROOM_LIGHTING_VARIATIONS[
+      stableVariationIndex(seed, "lighting", GROUP_ROOM_LIGHTING_VARIATIONS.length)
+    ],
+  ].join(" ");
 }
 
 function normalizeStoredBotColor(value: string | null): string | null {
@@ -232,10 +306,12 @@ export function composeGroupRoomWallpaperPrompt(args: {
   groupDescription?: string;
   members: readonly GroupRoomWallpaperMember[];
   zenWallpaperStyleNotes?: string;
+  variationSeed?: string;
 }): string {
   const groupDescription = normalizeSingleLine(args.groupDescription ?? "");
   const styleNotes = normalizeSingleLine(args.zenWallpaperStyleNotes ?? "");
   const userPrompt = args.userPrompt.trim();
+  const variationBrief = groupRoomWallpaperVariationBrief(args.variationSeed);
   const palette = Array.from(
     new Set(
       args.members
@@ -262,6 +338,9 @@ export function composeGroupRoomWallpaperPrompt(args: {
     ...memberLines,
     userPrompt ? `Requested visual direction: ${userPrompt}` : "",
     styleNotes ? `Global Zen atmosphere style preference: ${styleNotes}` : "",
+    variationBrief
+      ? `Variation brief for this generation (mandatory): ${variationBrief}`
+      : "",
     "Translate the group identity into a single believable environment or abstract room atmosphere. Do not create a collage, lineup, portrait wall, or separate vignette for each member.",
     "No readable words, labels, logos, UI chrome, speech bubbles, watermarks, or generated text. Keep important detail away from the exact center so overlaid conversation remains legible.",
   ]

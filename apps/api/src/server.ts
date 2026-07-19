@@ -192,10 +192,13 @@ import {
   requestSignalElevenLabsIntroMusic,
 } from "./elevenlabs-music.ts";
 import {
+  COFFEE_ELEVENLABS_ACTION_SFX_MODEL,
   ElevenLabsSoundError,
   SIGNAL_ELEVENLABS_ATMOSPHERE_DURATION_MS,
   SIGNAL_ELEVENLABS_ATMOSPHERE_MODEL,
   buildSignalAtmospherePrompt,
+  isCoffeeElevenLabsActionSfxKind,
+  requestCoffeeElevenLabsActionSfx,
   requestSignalElevenLabsAtmosphere,
 } from "./elevenlabs-sound.ts";
 import {
@@ -472,6 +475,11 @@ import {
   DEFAULT_BOT_FACE_THINKING_FRAMES,
   DEFAULT_OPENAI_IMAGE_MODEL_ID,
   GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE,
+  PRISM_EULA_ACCEPTANCE_SNAPSHOT,
+  PRISM_EULA_CONTENT_SHA256,
+  PRISM_EULA_DOCUMENT_ID,
+  PRISM_EULA_MINIMUM_AGE,
+  PRISM_EULA_VERSION,
   normalizeBotFaceThinkingFrames,
   normalizeBotFaceBlinkBar,
   normalizeBotFaceBlinkOffsetX,
@@ -502,6 +510,9 @@ import {
   normalizeOptionalBotAudioVoiceProfileV1,
   parseStoredBotAudioVoiceProfileV1,
   parseStoredBotPowersV1,
+  botPowerEchoesAddressedSpeechV1,
+  botPowerIsMutedV1,
+  botPowerResponseIsSilentV1,
   serializeBotAudioVoiceProfileV1,
   serializeBotPowersV1,
   encodeComfyUiRemoteWorkflowModelId,
@@ -571,6 +582,7 @@ import {
   resolveImageGeneratePersistence,
 } from "./image-generate-resolve.ts";
 import { resolveImagePromptForGeneration } from "./image-prompt-routing.ts";
+import { previewUnreferencedImageAssets } from "./image-asset-cleanup.ts";
 import {
   IMAGE_BOT_MEMBERSHIP_SQL,
   imageOriginForGenerate,
@@ -1110,6 +1122,7 @@ interface UserDbRow {
   voice_mode: string | null;
   voice_effects_enabled: number;
   voice_volume: number;
+  operating_system_voices_enabled: number;
   english_voice_engine: string | null;
   default_system_voice_name: string | null;
   default_elevenlabs_voice_id: string | null;
@@ -1276,7 +1289,7 @@ function getOrCreateLocalOwnerUser(): string {
 function getUserRow(userId: string): UserDbRow {
   const row = db
     .prepare(
-      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, preferred_image_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, auto_switch_model, auto_fallback_chain, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, zen_persona_transition_choice, prism_default_bot_name, prism_default_bot_system_prompt, prism_default_bot_color, prism_default_bot_glyph, prism_default_bot_face_eyes_font, prism_default_bot_face_eye_character, prism_default_bot_face_eye_animation, prism_default_bot_face_mouth_font, prism_default_bot_face_mouth_character, prism_default_bot_face_mouth_animation, prism_default_bot_face_mouth_coffee_pucker, prism_default_bot_face_font_weight, prism_default_bot_face_eye_scale, prism_default_bot_face_eye_offset_x, prism_default_bot_face_eye_offset_y, prism_default_bot_face_mouth_scale, prism_default_bot_face_mouth_offset_x, prism_default_bot_face_mouth_offset_y, prism_default_bot_face_mouth_rotation_deg, prism_default_bot_face_blink_bar, prism_default_bot_face_blink_scale, prism_default_bot_face_blink_offset_x, prism_default_bot_face_blink_offset_y, prism_default_bot_face_thinking_frames, prism_default_bot_audio_voice_profile, prism_default_bot_temperature, prism_default_bot_max_tokens, prism_default_bot_top_p, prism_default_bot_top_k, prism_default_bot_repetition_penalty, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, brave_search_key_ciphertext, brave_search_key_iv, brave_search_key_tag, voice_mode, voice_effects_enabled, voice_volume, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, elevenlabs_voice_collection_id, player_audio_voice_profile, player_name_pronunciation, created_at, last_active_at FROM users WHERE id = ?",
+      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, preferred_image_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, auto_switch_model, auto_fallback_chain, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, zen_persona_transition_choice, prism_default_bot_name, prism_default_bot_system_prompt, prism_default_bot_color, prism_default_bot_glyph, prism_default_bot_face_eyes_font, prism_default_bot_face_eye_character, prism_default_bot_face_eye_animation, prism_default_bot_face_mouth_font, prism_default_bot_face_mouth_character, prism_default_bot_face_mouth_animation, prism_default_bot_face_mouth_coffee_pucker, prism_default_bot_face_font_weight, prism_default_bot_face_eye_scale, prism_default_bot_face_eye_offset_x, prism_default_bot_face_eye_offset_y, prism_default_bot_face_mouth_scale, prism_default_bot_face_mouth_offset_x, prism_default_bot_face_mouth_offset_y, prism_default_bot_face_mouth_rotation_deg, prism_default_bot_face_blink_bar, prism_default_bot_face_blink_scale, prism_default_bot_face_blink_offset_x, prism_default_bot_face_blink_offset_y, prism_default_bot_face_thinking_frames, prism_default_bot_audio_voice_profile, prism_default_bot_temperature, prism_default_bot_max_tokens, prism_default_bot_top_p, prism_default_bot_top_k, prism_default_bot_repetition_penalty, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, brave_search_key_ciphertext, brave_search_key_iv, brave_search_key_tag, voice_mode, voice_effects_enabled, voice_volume, operating_system_voices_enabled, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, elevenlabs_voice_collection_id, player_audio_voice_profile, player_name_pronunciation, created_at, last_active_at FROM users WHERE id = ?",
     )
     .get(userId) as UserDbRow | undefined;
   if (!row) {
@@ -2807,7 +2820,7 @@ async function generateAndPersistSignalArtworkAsset(args: {
           bot_id: string | null;
           origin: string | null;
           local_rel_path: string | null;
-        }
+              }
       | undefined;
     if (
       !source ||
@@ -2960,7 +2973,7 @@ async function generateAndPersistSignalArtworkAsset(args: {
             size: args.size,
             quality,
             ...(args.kind === "logo"
-              ? { background: "transparent" as const }
+              ? { background: "opaque" as const }
               : {}),
             signal: args.signal,
           });
@@ -3010,7 +3023,9 @@ async function generateAndPersistSignalArtworkAsset(args: {
     );
   }
   if (args.kind === "logo") {
-    imageBytes = (await normalizeSignalLogoImage(imageBytes)).pngBytes;
+    imageBytes = (
+      await normalizeSignalLogoImage(imageBytes, { generated: true })
+    ).pngBytes;
   }
   const persistenceStartedAt = Date.now();
   try {
@@ -3363,6 +3378,25 @@ function buildRoutes(): RouteDefinition[] {
       const password = readString(body.password, "password");
       const displayName = readOptionalString(body.displayName) ?? username;
 
+      if (body.minimumAgeConfirmed !== true) {
+        throw new HttpError(
+          400,
+          `You must confirm that you are at least ${PRISM_EULA_MINIMUM_AGE} to create an account.`,
+        );
+      }
+      if (body.eulaAccepted !== true) {
+        throw new HttpError(
+          400,
+          "You must read and accept the PRISM End User License Agreement to create an account.",
+        );
+      }
+      if (body.eulaVersion !== PRISM_EULA_VERSION) {
+        throw new HttpError(
+          409,
+          "The PRISM agreement has changed. Review and accept the current version before creating an account.",
+        );
+      }
+
       const existing = db
         .prepare("SELECT id FROM users WHERE email = ?")
         .get(username) as { id?: string } | undefined;
@@ -3387,27 +3421,51 @@ function buildRoutes(): RouteDefinition[] {
       const wrappedUserKey = encryptText(userKey.toString("base64"), masterKey);
       const createdAt = new Date().toISOString();
 
-      db.prepare(
-        `
-        INSERT INTO users (
-          id, email, display_name, password_hash, password_salt,
-          wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag,
-          theme, preferred_provider, auto_memory, auto_switch_model, created_at, last_active_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'local', 1, 0, ?, ?)
-      `,
-      ).run(
-        userId,
-        username,
-        displayName,
-        passwordHash,
-        salt,
-        wrappedUserKey.ciphertext,
-        wrappedUserKey.iv,
-        wrappedUserKey.tag,
-        requestedTheme,
-        createdAt,
-        createdAt,
-      );
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        db.prepare(
+          `
+          INSERT INTO users (
+            id, email, display_name, password_hash, password_salt,
+            wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag,
+            theme, preferred_provider, auto_memory, auto_switch_model, created_at, last_active_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'local', 1, 0, ?, ?)
+        `,
+        ).run(
+          userId,
+          username,
+          displayName,
+          passwordHash,
+          salt,
+          wrappedUserKey.ciphertext,
+          wrappedUserKey.iv,
+          wrappedUserKey.tag,
+          requestedTheme,
+          createdAt,
+          createdAt,
+        );
+        db.prepare(
+          `
+          INSERT INTO legal_acceptances (
+            id, user_id, document_id, document_version, document_hash,
+            document_snapshot, acceptance_method, minimum_age_confirmed,
+            accepted_at
+          ) VALUES (?, ?, ?, ?, ?, ?, 'signup_clickwrap', 1, ?)
+        `,
+        ).run(
+          randomId(12),
+          userId,
+          PRISM_EULA_DOCUMENT_ID,
+          PRISM_EULA_VERSION,
+          PRISM_EULA_CONTENT_SHA256,
+          PRISM_EULA_ACCEPTANCE_SNAPSHOT,
+          createdAt,
+        );
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
 
       const { token } = createSession(userId);
       setCookie(
@@ -6953,6 +7011,8 @@ function buildRoutes(): RouteDefinition[] {
 
       let botSystemPrompt: string | undefined;
       let starterPromptLabel: string | undefined;
+      let runtimeBotMuted = false;
+      let runtimeBotEchoAddressed = false;
       let botForcesLocalProvider = false;
       const generationOverrides: GenerateOptions = {};
       if (runtimeBotId) {
@@ -6975,6 +7035,8 @@ function buildRoutes(): RouteDefinition[] {
 	            }
           | undefined;
         if (bot) {
+          runtimeBotMuted = botPowerIsMutedV1(bot.powers_json);
+          runtimeBotEchoAddressed = botPowerEchoesAddressedSpeechV1(bot.powers_json);
           starterPromptLabel = bot.name;
           // Name is folded into the system prompt by composeBotSystemPrompt so
           // the model actually knows who it's supposed to be, even when the
@@ -7236,6 +7298,8 @@ function buildRoutes(): RouteDefinition[] {
             incognito,
             ephemeralMessages,
             botSystemPrompt,
+            botPowerMuted: runtimeBotMuted,
+            botPowerEchoAddressed: runtimeBotEchoAddressed,
             botOverrides,
             mode,
             sessionEnding,
@@ -7564,6 +7628,7 @@ function buildRoutes(): RouteDefinition[] {
         preferredLocalModel: user.preferred_local_model,
         preferredOnlineModel: user.preferred_online_model,
         providerFactory: providerFactoryOverride,
+        preserveArtwork: body.preserveArtwork === true,
         },
       );
       json(ctx.res, 200, { ok: true, ...result });
@@ -8209,6 +8274,17 @@ function buildRoutes(): RouteDefinition[] {
           ? (body.cue as Record<string, unknown>)
           : null;
       const cueKind = cueRecord?.kind;
+      const cueDelivery = body.cueDelivery;
+      if (
+        cueDelivery !== undefined &&
+        cueDelivery !== "next_host_turn" &&
+        cueDelivery !== "interrupt_guest"
+      ) {
+        throw new HttpError(
+          400,
+          "Signal cue delivery must be next_host_turn or interrupt_guest.",
+        );
+      }
       const cue: BotcastProducerCue | undefined =
         cueKind === "ask_about" ||
         cueKind === "press_harder" ||
@@ -8220,8 +8296,14 @@ function buildRoutes(): RouteDefinition[] {
               ...(typeof cueRecord?.detail === "string"
                 ? { detail: cueRecord.detail }
                 : {}),
-            }
+              }
           : undefined;
+      if (cueDelivery && !cue) {
+        throw new HttpError(
+          400,
+          "Signal cue delivery requires a producer cue.",
+        );
+      }
       const requestedProvider = body.preferredProvider;
       const preferredProvider: ProviderName =
         requestedProvider === "local" ||
@@ -8233,7 +8315,12 @@ function buildRoutes(): RouteDefinition[] {
         db,
         userId,
         ctx.params.id,
-        cue ? { cue } : {},
+        cue
+          ? {
+              cue,
+              ...(cueDelivery ? { cueDelivery } : {}),
+            }
+          : {},
         {
           preferredProvider,
           openAiApiKey:
@@ -10204,6 +10291,8 @@ function buildRoutes(): RouteDefinition[] {
           builtinEnglish: {
             ...VOICE_CAPABILITIES.builtinEnglish,
             available: builtinEnglishAvailable(),
+            operatingSystemVoicesEnabled:
+              user.operating_system_voices_enabled !== 0,
             ...systemVoices,
           },
           elevenLabs: {
@@ -10374,11 +10463,114 @@ function buildRoutes(): RouteDefinition[] {
       }
       json(ctx.res, 200, { ok: true, line });
     }),
+    route("POST", "/api/coffee/action-sfx", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const raw = ctx.body as Record<string, unknown>;
+      const kind = raw.kind;
+      if (!isCoffeeElevenLabsActionSfxKind(kind)) {
+        throw new HttpError(400, "Unsupported Coffee action sound.");
+      }
+      const messageId =
+        typeof raw.messageId === "string" ? raw.messageId.trim() : "";
+      if (!messageId) {
+        throw new HttpError(400, "A saved Coffee message is required.");
+      }
+      const message = db
+        .prepare(
+          `SELECT m.provider, m.role, c.conversation_mode
+             FROM messages AS m
+             JOIN conversations AS c
+               ON c.id = m.conversation_id
+              AND c.user_id = m.user_id
+            WHERE m.id = ?
+              AND m.user_id = ?`,
+        )
+        .get(messageId.slice(0, 160), userId) as
+        | {
+            provider: string | null;
+            role: string;
+            conversation_mode: string | null;
+          }
+        | undefined;
+      if (
+        !message ||
+        message.role !== "assistant" ||
+        message.conversation_mode !== "coffee"
+      ) {
+        throw new HttpError(404, "Coffee assistant message not found.");
+      }
+      if (message.provider !== "openai" && message.provider !== "anthropic") {
+        throw new HttpError(
+          409,
+          "Coffee action sounds are unavailable for LOCAL turns.",
+        );
+      }
+      const user = getUserRow(userId);
+      if (
+        user.voice_mode !== "english" ||
+        user.english_voice_engine !== "elevenlabs" ||
+        user.voice_effects_enabled === 0 ||
+        user.voice_volume <= 0
+      ) {
+        throw new HttpError(
+          409,
+          "Enable ElevenLabs English voice effects to hear Coffee actions.",
+        );
+      }
+      const userKey = decryptUserKey(userId);
+      const apiKey =
+        getElevenLabsApiKeyForUser(userId, userKey) ?? config.elevenLabsApiKey;
+      if (!apiKey) {
+        throw new HttpError(
+          409,
+          "Add an ElevenLabs API key in Settings first.",
+        );
+      }
+      const controller = new AbortController();
+      const onClose = () => controller.abort();
+      ctx.req.once("close", onClose);
+      try {
+        const sound = await requestCoffeeElevenLabsActionSfx({
+          apiKey,
+          kind,
+          signal: controller.signal,
+        });
+        if (controller.signal.aborted) return;
+        ctx.res.statusCode = 200;
+        ctx.res.setHeader("content-type", sound.contentType);
+        ctx.res.setHeader("cache-control", "private, max-age=3600");
+        ctx.res.setHeader(
+          "x-prism-action-sfx-model",
+          COFFEE_ELEVENLABS_ACTION_SFX_MODEL,
+        );
+        ctx.res.setHeader("x-prism-action-sfx-kind", kind);
+        if (sound.requestId) {
+          ctx.res.setHeader("x-prism-provider-request-id", sound.requestId);
+        }
+        ctx.res.end(sound.audioBytes);
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        if (error instanceof ElevenLabsSoundError) {
+          throw new HttpError(
+            error.status === 401 || error.status === 403
+              ? 401
+              : error.status === 429
+                ? 429
+                : 502,
+            error.message,
+          );
+        }
+        throw error;
+      } finally {
+        ctx.req.off("close", onClose);
+      }
+    }),
     route("POST", "/api/voices/synthesize", async (ctx) => {
       const userId = requireAuth(ctx);
       const raw = ctx.body as Record<string, unknown>;
       const user = getUserRow(userId);
       let persistedMessageProvider: string | null = null;
+      let sourceBotMuted = false;
       let sourceText = raw.text;
       let sourceElevenLabsText = raw.elevenLabsText;
       const signalMessageId =
@@ -10395,13 +10587,17 @@ function buildRoutes(): RouteDefinition[] {
       if (typeof raw.messageId === "string" && raw.messageId.trim()) {
         const message = db
           .prepare(
-            "SELECT content, provider, role FROM messages WHERE id = ? AND user_id = ?",
+            `SELECT message.content, message.provider, message.role, bot.powers_json
+               FROM messages AS message
+               LEFT JOIN bots AS bot ON bot.id = message.bot_id
+              WHERE message.id = ? AND message.user_id = ?`,
           )
           .get(raw.messageId.trim(), userId) as
           | {
           content?: string;
           provider?: string | null;
           role?: string;
+          powers_json?: string | null;
             }
           | undefined;
         const ephemeralAssistantMessage =
@@ -10422,18 +10618,21 @@ function buildRoutes(): RouteDefinition[] {
           ? raw.spokenText
           : (message?.content ?? "");
         persistedMessageProvider = message?.provider ?? null;
+        sourceBotMuted = botPowerIsMutedV1(message?.powers_json);
       }
       if (signalMessageId) {
         const signalMessage = db
           .prepare(
             `SELECT message.content,
                   message.voice_performance_text,
+                  bot.powers_json,
                   episode.provider,
                   episode.response_mode
              FROM botcast_messages AS message
              JOIN botcast_episodes AS episode
                ON episode.id = message.episode_id
               AND episode.user_id = message.user_id
+             LEFT JOIN bots AS bot ON bot.id = message.bot_id
             WHERE message.id = ?
               AND message.user_id = ?`,
           )
@@ -10443,6 +10642,7 @@ function buildRoutes(): RouteDefinition[] {
               voice_performance_text: string | null;
               provider: string;
               response_mode: string;
+              powers_json: string | null;
             }
           | undefined;
         if (!signalMessage) {
@@ -10457,8 +10657,19 @@ function buildRoutes(): RouteDefinition[] {
           signalMessage.response_mode === "local"
             ? "local"
             : `signal-${signalMessage.response_mode}`;
+        sourceBotMuted = botPowerIsMutedV1(signalMessage.powers_json);
       }
-      if (Object.prototype.hasOwnProperty.call(raw, "listenerReactionText")) {
+      const listenerReactionRequested = Object.prototype.hasOwnProperty.call(
+        raw,
+        "listenerReactionText",
+      );
+      if (
+        !listenerReactionRequested &&
+        (sourceBotMuted || botPowerResponseIsSilentV1(sourceText))
+      ) {
+        throw new HttpError(409, "This bot is muted by an active Power.");
+      }
+      if (listenerReactionRequested) {
         if (
           !signalMessageId &&
           !(typeof raw.messageId === "string" && raw.messageId.trim())
@@ -10560,6 +10771,8 @@ function buildRoutes(): RouteDefinition[] {
               lilt: 0,
               bottishTone: 0.45,
             },
+            allowOperatingSystemVoices:
+              user.operating_system_voices_enabled !== 0,
             signal: controller.signal,
           });
           sendVoiceWave(
@@ -10593,6 +10806,8 @@ function buildRoutes(): RouteDefinition[] {
           const wave = await builtinVoiceWaveGeneratorOverride({
             text: boundary.text,
             profile: boundary.profile,
+            allowOperatingSystemVoices:
+              user.operating_system_voices_enabled !== 0,
             signal: controller.signal,
           });
           sendVoiceWave(
@@ -10626,7 +10841,7 @@ function buildRoutes(): RouteDefinition[] {
 
       // An explicit profile voice selects ElevenLabs, but the provider is not
       // a playback requirement. If its key or identity is unavailable, keep
-      // speech available through System TTS without making any egress.
+      // speech available through the packaged PRISM voice model without egress.
       if (!voiceId || !apiKey) {
         const controller = new AbortController();
         const onClose = () => controller.abort();
@@ -10635,6 +10850,8 @@ function buildRoutes(): RouteDefinition[] {
           const wave = await builtinVoiceWaveGeneratorOverride({
             text: boundary.text,
             profile: boundary.profile,
+            allowOperatingSystemVoices:
+              user.operating_system_voices_enabled !== 0,
             signal: controller.signal,
           });
           sendVoiceWave(
@@ -10669,6 +10886,7 @@ function buildRoutes(): RouteDefinition[] {
             model: normalizeElevenLabsTtsModel(user.elevenlabs_voice_model),
             text: boundary.elevenLabsText,
             profile: boundary.profile,
+            deliveryMood: request.deliveryMood,
             signal: controller.signal,
           });
           const alignment =
@@ -10712,6 +10930,7 @@ function buildRoutes(): RouteDefinition[] {
           model: normalizeElevenLabsTtsModel(user.elevenlabs_voice_model),
           text: boundary.elevenLabsText,
           profile: boundary.profile,
+          deliveryMood: request.deliveryMood,
           signal: controller.signal,
         });
         ctx.res.statusCode = 200;
@@ -10742,6 +10961,8 @@ function buildRoutes(): RouteDefinition[] {
             const wave = await builtinVoiceWaveGeneratorOverride({
               text: boundary.text,
               profile: boundary.profile,
+              allowOperatingSystemVoices:
+                user.operating_system_voices_enabled !== 0,
               signal: controller.signal,
             });
             sendVoiceWave(
@@ -10827,6 +11048,8 @@ function buildRoutes(): RouteDefinition[] {
             : "mute",
           voiceEffectsEnabled: user.voice_effects_enabled !== 0,
           voiceVolume: normalizeBotVoiceVolume(user.voice_volume),
+          operatingSystemVoicesEnabled:
+            user.operating_system_voices_enabled !== 0,
           englishVoiceEngine: "elevenlabs",
           elevenLabsVoiceBank: parseStoredElevenLabsVoiceBank(
             user.elevenlabs_voice_bank,
@@ -11339,6 +11562,7 @@ function buildRoutes(): RouteDefinition[] {
         voiceMode: user.voice_mode,
         voiceEffectsEnabled: user.voice_effects_enabled,
         voiceVolume: user.voice_volume,
+        operatingSystemVoicesEnabled: user.operating_system_voices_enabled,
         englishVoiceEngine: user.english_voice_engine,
         defaultSystemVoiceName: user.default_system_voice_name,
         defaultElevenLabsVoiceId: user.default_elevenlabs_voice_id,
@@ -11422,7 +11646,7 @@ function buildRoutes(): RouteDefinition[] {
             preferred_local_image_model = ?, preferred_openai_image_model = ?, preferred_zen_wallpaper_local_image_model = ?, preferred_zen_wallpaper_openai_image_model = ?, zen_wallpaper_opacity = ?, zen_wallpaper_text_mask_enabled = ?, zen_wallpaper_grayscale_enabled = ?, zen_wallpaper_blurred_edges_enabled = ?, zen_wallpaper_style_notes = ?,
             zen_session_idle_gap_ms = ?, zen_fresh_start_gap_ms = ?, zen_recent_context_messages = ?, zen_wallpaper_regen_message_interval = ?, zen_mood_sensitivity = ?, zen_canvas_typing_speed = ?, zen_message_font_min_px = ?, zen_message_font_max_px = ?, zen_ask_question_patience_enabled = ?, zen_ask_question_patience_ms = ?, zen_autonomy_enabled = ?, zen_persona_transition_choice = ?,
             comfyui_workflows = ?, prism_default_llm_model = ?, prism_image_tool_llm_model = ?,
-            voice_mode = ?, voice_effects_enabled = ?, voice_volume = ?, english_voice_engine = ?, default_system_voice_name = ?, default_elevenlabs_voice_id = ?, elevenlabs_voice_bank = ?, elevenlabs_voice_model = ?, elevenlabs_voice_collection_id = ?,
+            voice_mode = ?, voice_effects_enabled = ?, voice_volume = ?, operating_system_voices_enabled = ?, english_voice_engine = ?, default_system_voice_name = ?, default_elevenlabs_voice_id = ?, elevenlabs_voice_bank = ?, elevenlabs_voice_model = ?, elevenlabs_voice_collection_id = ?,
             dev_memories_enabled = ?, dev_memories_text = ?,
             openai_key_ciphertext = ?, openai_key_iv = ?, openai_key_tag = ?,
             anthropic_key_ciphertext = ?, anthropic_key_iv = ?, anthropic_key_tag = ?,
@@ -11479,6 +11703,7 @@ function buildRoutes(): RouteDefinition[] {
         next.voiceMode,
         next.voiceEffectsEnabled ? 1 : 0,
         next.voiceVolume,
+        next.operatingSystemVoicesEnabled ? 1 : 0,
         next.englishVoiceEngine,
         next.defaultSystemVoiceName,
         next.defaultElevenLabsVoiceId,
@@ -11520,6 +11745,7 @@ function buildRoutes(): RouteDefinition[] {
           voiceMode: next.voiceMode,
           voiceEffectsEnabled: next.voiceEffectsEnabled,
           voiceVolume: next.voiceVolume,
+          operatingSystemVoicesEnabled: next.operatingSystemVoicesEnabled,
           englishVoiceEngine: next.englishVoiceEngine,
           elevenLabsVoiceBank: next.elevenLabsVoiceBank,
           elevenLabsVoiceModel: next.elevenLabsVoiceModel ?? "",
@@ -11881,6 +12107,7 @@ function buildRoutes(): RouteDefinition[] {
           zenWallpaperStyleNotes: normalizeZenWallpaperStyleNotes(
               user.zen_wallpaper_style_notes,
           ),
+          variationSeed: groupRoomWallpaperContext.variationSeed || randomId(),
         });
         promptForModel = composedPrompt;
         promptForPersistence = composedPrompt;
@@ -12428,6 +12655,11 @@ function buildRoutes(): RouteDefinition[] {
       ).map((row) => mapImageRowToClient(row));
       json(ctx.res, 200, { ok: true, images });
     }),
+    route("GET", "/api/images/cleanup-preview", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const preview = previewUnreferencedImageAssets(db, userId);
+      json(ctx.res, 200, { ok: true, preview });
+    }),
     route("GET", "/api/images/:id/thumb", async (ctx) => {
       const userId = requireAuth(ctx);
       const imageId = ctx.params.id;
@@ -12669,6 +12901,28 @@ function buildRoutes(): RouteDefinition[] {
       const user = getUserRow(userId);
       const body = ctx.body as Record<string, unknown>;
       rejectUnsupportedBotAvatarPayload(body);
+      let cloneFamilyId: string | null = null;
+      if (body.cloneSourceBotId !== undefined) {
+        if (
+          typeof body.cloneSourceBotId !== "string" ||
+          !body.cloneSourceBotId.trim()
+        ) {
+          throw new HttpError(400, "Clone source bot is required.");
+        }
+        const source = db
+          .prepare(
+            "SELECT id, clone_family_id FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')",
+          )
+          .get(body.cloneSourceBotId.trim(), userId) as
+          | { id: string; clone_family_id: string | null }
+          | undefined;
+        if (!source) {
+          throw new HttpError(404, "Clone source bot not found.");
+        }
+        // The original root intentionally needs no rewrite: its own id is the
+        // family marker. Cloning a clone preserves the already-resolved root.
+        cloneFamilyId = source.clone_family_id?.trim() || source.id;
+      }
       const name = readString(body.name, "name");
       const systemPrompt =
         typeof body.systemPrompt === "string" ? body.systemPrompt : "";
@@ -12799,12 +13053,13 @@ function buildRoutes(): RouteDefinition[] {
       const botId = randomId(12);
       const now = new Date().toISOString();
       db.prepare(
-        "INSERT INTO bots (id, user_id, name, system_prompt, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, authored_audio_voice_profile, audio_voice_profile_override, profile_picture_image_id, chat_enabled, voice_preview_line, face_eye_count, visibility, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, 'private', ?, ?)",
+        "INSERT INTO bots (id, user_id, name, system_prompt, clone_family_id, export_hash, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, authored_audio_voice_profile, audio_voice_profile_override, profile_picture_image_id, chat_enabled, voice_preview_line, face_eye_count, visibility, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, 'private', ?, ?)",
       ).run(
         botId,
         userId,
         name,
         systemPrompt,
+        cloneFamilyId,
         exportHash,
         model,
         localModel,

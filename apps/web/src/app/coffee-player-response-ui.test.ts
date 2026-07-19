@@ -72,6 +72,21 @@ describe("Coffee player response UI wiring", () => {
     );
   });
 
+  it("feeds accepted pending turns into Table talk without revealing bot prose early", () => {
+    assert.match(
+      pageSource,
+      /const liveTranscriptMessages =\s*coffeePendingRevealConversation\?\.id === coffeeConversation\.id[\s\S]*?coffeePendingRevealConversation\.messages[\s\S]*?coffeeConversation\.messages/,
+    );
+    assert.match(
+      pageSource,
+      /pendingTranscriptMessageId && !pendingTranscriptRevealStarted[\s\S]*?message\.id !== pendingTranscriptMessageId/,
+    );
+    assert.match(
+      pageSource,
+      /pendingTranscriptLineTyping[\s\S]*?revealPlainTextWithBotMentions\([\s\S]*?coffeeTypewriterLength/,
+    );
+  });
+
   it("hides a pending bot response through cooldown and voice preparation", () => {
     assert.match(
       pageSource,
@@ -129,6 +144,21 @@ describe("Coffee player response UI wiring", () => {
     assert.match(
       pageSource,
       /buildCoffeeCupVisualState\(\{[\s\S]*?\.\.\.coffeeCupConsumptionTiming,[\s\S]*?durationMinutes: coffeeCupDurationMinutes/,
+    );
+  });
+
+  it("leaves Auto's ambient cup clock in charge when no accepted sip exists", () => {
+    assert.match(
+      pageSource,
+      /const hasExplicitCupSipState =\s*cupSipCount > 0 \|\| activeSipAnimationCount !== null;/,
+    );
+    assert.match(
+      pageSource,
+      /sipCount:\s*seatIsFirmlySeated && hasExplicitCupSipState[\s\S]*?\? visualCupSipCount[\s\S]*?: null/,
+    );
+    assert.match(
+      pageSource,
+      /sippingOverride:[\s\S]*?hasExplicitCupSipState[\s\S]*?\? false[\s\S]*?: null/,
     );
   });
 });

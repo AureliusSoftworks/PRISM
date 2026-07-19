@@ -11,7 +11,10 @@ import {
   PROJECT_OWNED_ASSET_MANIFEST_PATH,
   type ProjectOwnedAssetExportPayloadV1,
 } from "@localai/shared";
-import { createTestDatabase } from "../test-support.ts";
+import {
+  createTestDatabase,
+  withTestRegistrationAcceptance,
+} from "../test-support.ts";
 import {
   buildGeneratedImageRelativePath,
   tryUnlinkGeneratedImageFile,
@@ -67,6 +70,7 @@ function createClient(baseUrl: string): Client {
   let cookie = "";
   return {
     async request(path, init = {}) {
+      init = withTestRegistrationAcceptance(path, init);
       const headers = new Headers(init.headers);
       if (cookie) headers.set("cookie", cookie);
       const response = await fetch(`${baseUrl}${path}`, { ...init, headers });

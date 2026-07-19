@@ -8,6 +8,7 @@ import {
   readEnglishVoiceSynthesisClip,
   resolveEnglishVoicePlaybackDetuneCents,
   resolveEnglishVoicePostProcessing,
+  scaleEnglishVoiceAlignmentForPlayback,
   stopEnglishVoice,
 } from "./englishVoice.ts";
 
@@ -54,7 +55,7 @@ describe("English voice post processing", () => {
     assert.equal(processing.lowpassHz, 16000);
   });
 
-  it("softens only the uncompensated low-pitch tail at ElevenLabs' speed ceiling", () => {
+  it("keeps English pitch independent from Pace in every engine", () => {
     const profile = {
       v: 1 as const,
       baseVoiceId: "voice-1" as const,
@@ -63,8 +64,31 @@ describe("English voice post processing", () => {
       pace: 0.333,
       lilt: 0,
     };
-    assert.equal(resolveEnglishVoicePlaybackDetuneCents(profile, "elevenlabs"), -183);
+    assert.equal(resolveEnglishVoicePlaybackDetuneCents(profile, "elevenlabs"), -487);
     assert.equal(resolveEnglishVoicePlaybackDetuneCents(profile, "builtin"), -487);
+  });
+
+  it("scales provider alignment to the local Pace clock without using Pitch", () => {
+    const alignment = {
+      characters: ["H", "i"],
+      characterStartTimesSeconds: [0, 0.5],
+      characterEndTimesSeconds: [0.5, 1],
+    };
+    const profile = {
+      v: 1 as const,
+      baseVoiceId: "voice-1" as const,
+      pitch: -1,
+      warmth: 0,
+      pace: 1,
+      lilt: 1,
+    };
+    const scaled = scaleEnglishVoiceAlignmentForPlayback(
+      alignment,
+      profile,
+      "guarded",
+    );
+    assert.equal(scaled?.characterEndTimesSeconds[1], 1 / 1.24);
+    assert.deepEqual(scaled?.characters, alignment.characters);
   });
 
   it("falls back to gesture-authorized media when Web Audio rejects provider MP3 bytes", async () => {

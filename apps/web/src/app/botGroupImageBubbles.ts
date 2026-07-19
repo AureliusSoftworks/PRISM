@@ -33,6 +33,22 @@ export interface BotGroupImageBubblePlacement {
   floatDurationMs: number;
 }
 
+/**
+ * Buckets live resize noise into the only layout bands the bubble planner
+ * actually uses. This keeps one visit visually stable while the desktop shell
+ * reports dozens of intermediate viewport sizes.
+ */
+export function botGroupImageBubbleLayoutViewport(
+  viewport: BotGroupImageBubbleViewport,
+): BotGroupImageBubbleViewport {
+  const width = Number.isFinite(viewport.width) ? viewport.width : 0;
+  const height = Number.isFinite(viewport.height) ? viewport.height : 0;
+  return {
+    width: width < 900 ? 800 : width < 1440 ? 1280 : 1600,
+    height: height < 760 ? 700 : 900,
+  };
+}
+
 interface BubbleSlot {
   id: string;
   xPercent: number;

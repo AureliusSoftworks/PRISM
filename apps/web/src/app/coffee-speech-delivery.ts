@@ -23,7 +23,7 @@ export interface CoffeeDeliveryCharacterAlignment {
 
 export const COFFEE_DELIVERY_MIN_DURATION_MS = 280;
 export const COFFEE_DELIVERY_MAX_DURATION_MS = 18_000;
-export const COFFEE_VOICE_REVEAL_TAIL_GRACE_MS = 240;
+export const COFFEE_VOICE_REVEAL_TAIL_GRACE_MS = 2_000;
 
 export const COFFEE_DELIVERY_MOOD_CHARACTERS_PER_SECOND: Record<CoffeeDeliveryMood, number> = {
   joyful: 14,
@@ -35,8 +35,9 @@ export const COFFEE_DELIVERY_MOOD_CHARACTERS_PER_SECOND: Record<CoffeeDeliveryMo
 
 /**
  * Keep the reveal's safety timer just behind voiced playback. Normal completion
- * is owned by Web Audio's `ended` event; this grace only protects engines that
- * fail to deliver that callback without cutting off the final phoneme.
+ * is owned by Web Audio's `ended` event; this longer grace is only a watchdog
+ * for engines that fail to deliver that callback. It must not retire the table
+ * line while provider duration metadata is still catching up with playback.
  */
 export function coffeeVoiceRevealFallbackDelayMs(
   durationMs: number,

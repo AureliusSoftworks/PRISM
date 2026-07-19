@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@localai/shared": "file:../../packages/shared",
+    "@soundtouchjs/formant-correction-worklet": "2.1.0",
     "@tiptap/extension-link": "^3.22.4",
     "@tiptap/extension-placeholder": "^3.22.4",
     "@tiptap/markdown": "^3.22.4",

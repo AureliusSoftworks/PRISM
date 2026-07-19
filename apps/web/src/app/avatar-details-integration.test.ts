@@ -51,6 +51,22 @@ describe("Avatar Details Studio integration", () => {
     assert.match(pageSource, /Apply avatar details\?/);
   });
 
+  it("routes Studio undo and redo to Ink before falling back to the avatar draft", () => {
+    assert.match(editorSource, /undo\(\): boolean/);
+    assert.match(editorSource, /redo\(\): boolean/);
+    assert.match(editorSource, /undo,[\s\S]*redo,[\s\S]*hasDirtyChanges/);
+    assert.match(
+      pageSource,
+      /activeControlTab === "details"[\s\S]*detailsEditorRef\.current\?\.redo\(\)[\s\S]*detailsEditorRef\.current\?\.undo\(\)/,
+    );
+    assert.match(pageSource, /const redoRequested = event\.shiftKey/);
+    assert.match(pageSource, /if \(redoRequested\) onRedo\(\);[\s\S]*else onUndo\(\);/);
+    assert.match(
+      pageSource,
+      /target\.closest\([\s\S]*input, textarea, \[contenteditable="true"\]/,
+    );
+  });
+
   it("keeps Details focused on screen ink without accessory preset controls", () => {
     assert.match(editorSource, /<strong>Screen editor<\/strong>/);
     assert.doesNotMatch(editorSource, /AVATAR_DETAIL_STAMP_DEFINITIONS/);
@@ -58,6 +74,30 @@ describe("Avatar Details Studio integration", () => {
     assert.doesNotMatch(editorSource, /Round glasses|Facial hair|Marking/);
     assert.doesNotMatch(editorSource, /Reset details/);
     assert.match(editorSource, /avatarDetailsWithPaintColorMap\(/);
+  });
+
+  it("uses compact icon tools without losing labels or selected state", () => {
+    for (const [label, tooltip] of [
+      ["Brush tool", "Brush"],
+      ["Eraser tool", "Eraser"],
+      ["Line tool", "Line"],
+      ["Circle tool", "Circle"],
+      ["Move ink tool", "Move ink"],
+    ]) {
+      assert.match(
+        editorSource,
+        new RegExp(
+          `aria-label="${label}"[\\s\\S]{0,180}data-glyph-tooltip="${tooltip}"`,
+        ),
+      );
+    }
+    assert.match(editorSource, /aria-pressed=\{paintMode === "brush"\}/u);
+    assert.match(
+      editorCss,
+      /\.segmentedControl\s*\{[\s\S]*grid-template-columns:\s*repeat\(5, minmax\(32px, 1fr\)\)/,
+    );
+    assert.match(editorSource, /<Brush size=\{15\} aria-hidden="true" \/>\s*<\/button>/);
+    assert.doesNotMatch(editorSource, /<Brush[^>]+\/>\s*Brush/u);
   });
 
   it("uses red, blue, and green ink roles instead of visibility toggles", () => {
@@ -234,9 +274,9 @@ describe("Avatar Details Studio integration", () => {
   });
 
   it("offers straight lines, circles, and whole-illustration dragging without hotkeys", () => {
-    assert.match(editorSource, />\s*Line\s*<\/button>/);
-    assert.match(editorSource, />\s*Circle\s*<\/button>/);
-    assert.match(editorSource, />\s*Drag\s*<\/button>/);
+    assert.match(editorSource, /aria-label="Line tool"/u);
+    assert.match(editorSource, /aria-label="Circle tool"/u);
+    assert.match(editorSource, /aria-label="Move ink tool"/u);
     assert.match(
       editorSource,
       /interpolateAvatarDetailsGridLine\(stroke\.startPoint, edge\)/,
@@ -293,6 +333,29 @@ describe("Avatar Details Studio integration", () => {
       pageSource,
       /pushBotAvatarUndoSnapshot\("avatar-details"\);[\s\S]*setNewBotAvatarDetails\(normalized\);/,
     );
+    assert.match(
+      pageSource,
+      /if \(editingBotId\) \{[\s\S]*await persistBotAvatarDetails\([\s\S]*editingBotId,[\s\S]*normalized/,
+    );
+    const persistenceSource = pageSource.slice(
+      pageSource.indexOf("async function persistBotAvatarDetails("),
+      pageSource.indexOf("async function flushBotVoiceAutosaveQueue("),
+    );
+    assert.match(persistenceSource, /method: "PATCH"/);
+    assert.match(persistenceSource, /JSON\.stringify\(\{ avatarDetails: details \}\)/);
+    assert.match(persistenceSource, /avatarDetails: details/);
+    assert.match(persistenceSource, /replaceBotRowById/);
+
+    const cloneSource = pageSource.slice(
+      pageSource.indexOf("async function cloneBot("),
+      pageSource.indexOf("async function duplicateCurrentBotDraft("),
+    );
+    assert.match(cloneSource, /cloneSourceBotId: bot\.id/);
+    const duplicateSource = pageSource.slice(
+      pageSource.indexOf("async function duplicateCurrentBotDraft("),
+      pageSource.indexOf("function createDefaultBotGroupName("),
+    );
+    assert.match(duplicateSource, /cloneSourceBotId: editingBotId/);
   });
 });
 

@@ -378,6 +378,33 @@ class SequenceProvider implements LlmProvider {
 }
 
 describe("Story API helpers", () => {
+  it("gives clone-family Story actors their asymmetric identity invariant", async () => {
+    const db = createTestDb();
+    seedBot(db, "bot-a", "Ada");
+    seedBot(db, "bot-b", "Ada Copy");
+    db.exec("ALTER TABLE bots ADD COLUMN clone_family_id TEXT;");
+    db.prepare("UPDATE bots SET clone_family_id = ? WHERE id = ?").run(
+      "bot-a",
+      "bot-b",
+    );
+    const bots = loadStoryBotProfiles(db, "user-1", ["bot-a", "bot-b"]);
+    const created = createStorySession(db, "user-1", {
+      botIds: ["bot-a", "bot-b"],
+      provider: "local",
+      model: "test-model",
+    });
+    const provider = new SequenceProvider([episodeJson()]);
+    await generateStorySessionEpisode(db, "user-1", created.id, {
+      provider,
+      providerName: "local",
+      model: "test-model",
+      bots,
+    });
+    const prompt = provider.calls[0]?.messages.map((message) => message.content).join("\n") ?? "";
+    assert.match(prompt, /real, original "Ada Copy"/);
+    assert.match(prompt, /"Ada" is your clone/);
+  });
+
   it("creates a generating session and promotes it after episode generation", async () => {
     const db = createTestDb();
     seedBot(db, "bot-a", "Ada");
@@ -447,6 +474,144 @@ describe("Story API helpers", () => {
     assert.match(prompt, /Active Powers:/u);
     assert.match(prompt, /Echo Step: Make every arrival echo twice/u);
     assert.match(prompt, /Ada — Echo Step: Ada's arrivals echo twice/u);
+  });
+
+  it("adapts the strongest targeted candor Power into one response scene", async () => {
+    const db = createTestDb();
+    seedBot(db, "bot-a", "Ada");
+    seedBot(db, "bot-b", "Bert");
+    const name = "Open Door";
+    const intent = "Ada's direct questions make other bots unusually candid.";
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'bot-a'").run(JSON.stringify([{
+      version: 1,
+      id: "open-door",
+      name,
+      intent,
+      enabled: true,
+      compileStatus: "ready",
+      compiled: {
+        version: 1,
+        sourceHash: botPowerSourceHashV1(name, intent),
+        selfCue: "Ask with charismatic, trustworthy warmth.",
+        observerCue: "Ada's direct questions feel safe to answer candidly.",
+        effects: [
+          { type: "candor", strength: "small", targets: [{ kind: "bot", name: "Bert" }] },
+          { type: "candor", strength: "large", targets: [{ kind: "bot", name: "Bert" }] },
+        ],
+        ruleLabels: ["Draws out candid answers"],
+      },
+    }]));
+    const bots = loadStoryBotProfiles(db, "user-1", ["bot-a", "bot-b"]);
+    const created = createStorySession(db, "user-1", {
+      botIds: ["bot-a", "bot-b"],
+      provider: "local",
+      model: "test-model",
+    });
+    const provider = new SequenceProvider([episodeJson()]);
+
+    await generateStorySessionEpisode(db, "user-1", created.id, {
+      provider,
+      providerName: "local",
+      model: "test-model",
+      bots,
+    });
+
+    const prompt = provider.calls[0]?.messages.map((message) => message.content).join("\n") ?? "";
+    assert.match(prompt, /Story adaptation for Ada → Bert/u);
+    assert.match(prompt, /only to Bert's next response scene/u);
+    assert.match(prompt, /Candor \(strong\): Ada asks directly/u);
+    assert.match(prompt, /Never invent certainty/u);
+    assert.doesNotMatch(prompt, /Story adaptation for Bert → Ada/u);
+  });
+
+  it("hard-mutes powered Story speakers while keeping the episode playable", async () => {
+    const db = createTestDb();
+    seedBot(db, "bot-a", "Ada");
+    seedBot(db, "bot-b", "Bert");
+    const name = "Muted";
+    const intent = "Bert can never speak and only responds in ...";
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'bot-b'").run(JSON.stringify([{
+      version: 1,
+      id: "mute",
+      name,
+      intent,
+      enabled: true,
+      compileStatus: "ready",
+      compiled: {
+        version: 1,
+        sourceHash: botPowerSourceHashV1(name, intent),
+        selfCue: "Never speak.",
+        observerCue: "Bert cannot speak.",
+        effects: [{ type: "mute" }],
+        ruleLabels: ["Muted"],
+      },
+    }]));
+    const bots = loadStoryBotProfiles(db, "user-1", ["bot-a", "bot-b"]);
+    const created = createStorySession(db, "user-1", {
+      botIds: ["bot-a", "bot-b"],
+      provider: "local",
+      model: "test-model",
+    });
+
+    const generated = await generateStorySessionEpisode(db, "user-1", created.id, {
+      provider: new SequenceProvider([episodeJson()]),
+      providerName: "local",
+      model: "test-model",
+      bots,
+    });
+    const mutedScene = generated.episode?.scenes.find(
+      (scene) => scene.speakerBotId === "bot-b",
+    );
+
+    assert.equal(generated.status, "playing");
+    assert.equal(mutedScene?.narration, "...");
+    assert.equal(mutedScene?.spritePose, "idle");
+  });
+
+  it("hard-echoes the prior visible Story scene for powered speakers", async () => {
+    const db = createTestDb();
+    seedBot(db, "bot-a", "Ada");
+    seedBot(db, "bot-b", "Bert");
+    const name = "Echo";
+    const intent = "Echo whatever is addressed to this bot and say nothing else.";
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'bot-b'").run(JSON.stringify([{
+      version: 1,
+      id: "echo",
+      name,
+      intent,
+      enabled: true,
+      compileStatus: "ready",
+      compiled: {
+        version: 1,
+        sourceHash: botPowerSourceHashV1(name, intent),
+        selfCue: "Repeat addressed speech exactly.",
+        observerCue: "The sender may react with confusion.",
+        effects: [{ type: "echo_addressed" }],
+        ruleLabels: ["Echoes addressed speech"],
+      },
+    }]));
+    const bots = loadStoryBotProfiles(db, "user-1", ["bot-a", "bot-b"]);
+    const created = createStorySession(db, "user-1", {
+      botIds: ["bot-a", "bot-b"],
+      provider: "local",
+      model: "test-model",
+    });
+
+    const generated = await generateStorySessionEpisode(db, "user-1", created.id, {
+      provider: new SequenceProvider([episodeJson()]),
+      providerName: "local",
+      model: "test-model",
+      bots,
+    });
+    const scenes = generated.episode?.scenes ?? [];
+    const echoSceneIndex = scenes.findIndex((scene) => scene.speakerBotId === "bot-b");
+
+    assert.ok(echoSceneIndex > 0);
+    assert.equal(
+      scenes[echoSceneIndex]?.narration,
+      scenes[echoSceneIndex - 1]?.narration,
+    );
+    assert.equal(scenes[echoSceneIndex]?.spritePose, "speaking");
   });
 
   it("compiles llama3.2 compact Story outlines into playable manifests", async () => {

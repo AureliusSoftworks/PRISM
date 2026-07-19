@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { botPowerSourceHashV1 } from "./botPower.ts";
 
 import {
   BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT,
@@ -26,6 +27,7 @@ import {
   botcastSessionShouldClose,
   botcastSocialInfluenceEventsAt,
   botcastStrongestNegativeSocialInfluenceAt,
+  botcastSnapshotHasSpeakingOnlyAvatarVisibility,
   botcastVoiceMoodForTension,
   isBotcastFallbackStudioAccentVariant,
   normalizeBotcastStudioLayout,
@@ -53,7 +55,8 @@ describe("Signal fallback studio accents", () => {
           messageId: "message-1",
           targetSource: "role",
           visualAction: "nod",
-          spokenCue: "mm-hm",
+          spokenCue: "No, hold on.",
+          interjectionAttempt: true,
           targetProgress: 0.48,
           seed: "signal-listener-v1:test",
           cameraCutEligible: true,
@@ -63,6 +66,11 @@ describe("Signal fallback studio accents", () => {
     assert.equal(
       botcastListenerReactionForMessage(events, "message-1")?.listenerBotId,
       "host",
+    );
+    assert.equal(
+      botcastListenerReactionForMessage(events, "message-1")
+        ?.interjectionAttempt,
+      true,
     );
     assert.equal(botcastListenerReactionForMessage(events, "other"), null);
   });
@@ -149,6 +157,54 @@ describe("Signal replayed Power influence", () => {
         targetBotId: "other",
       }),
       null,
+    );
+  });
+});
+
+describe("Signal replayed ghost avatar presence", () => {
+  it("uses the episode-start Ready Power snapshot instead of mutable bot data", () => {
+    const events: BotcastReplayEvent[] = [{
+      id: "snapshot-1",
+      episodeId: "episode-1",
+      sequence: 1,
+      kind: "segment",
+      occurredAt: "2026-07-19T12:00:00.000Z",
+      payload: {
+        segment: "opening",
+        ordinal: 0,
+        powerSnapshot: {
+          v: 1,
+          hostBotId: "host",
+          guestBotId: "guest",
+          hostPowers: [],
+          guestPowers: [{
+            version: 1,
+            id: "ghost",
+            name: "Ghost",
+            intent: "Invisible while idle and visible only while speaking.",
+            enabled: true,
+            compileStatus: "ready",
+            compiled: {
+              version: 1,
+              sourceHash: botPowerSourceHashV1(
+                "Ghost",
+                "Invisible while idle and visible only while speaking.",
+              ),
+              selfCue: "Fade in to speak.",
+              observerCue: "A chill follows.",
+              effects: [{ type: "avatar_visibility", mode: "speaking_only" }],
+              ruleLabels: [],
+            },
+          }],
+        },
+      },
+    }];
+    assert.equal(
+      botcastSnapshotHasSpeakingOnlyAvatarVisibility(
+        { events, hostBotId: "host", guestBotId: "guest" },
+        "guest",
+      ),
+      true,
     );
   });
 });
@@ -400,6 +456,49 @@ describe("Botcast episode state", () => {
       applyBotcastProducerCueToTension(warning, { kind: "move_on" }).stage,
       "resistance",
     );
+  });
+
+  it("recognizes explicit pressure inside freeform producer direction", () => {
+    const calm = { level: 0 as const, warningCount: 0, stage: "calm" as const };
+    assert.equal(
+      applyBotcastProducerCueToTension(calm, {
+        kind: "ask_about",
+        detail: "Annoy the guest off the show.",
+      }).stage,
+      "resistance",
+    );
+    assert.equal(
+      applyBotcastProducerCueToTension(calm, {
+        kind: "ask_about",
+        detail: "Make a guest leave.",
+      }).stage,
+      "resistance",
+    );
+    const resistance = applyBotcastProducerCueToTension(calm, {
+      kind: "ask_about",
+      detail: "Say something to offend him. Try to get him to leave.",
+    });
+    assert.equal(resistance.stage, "resistance");
+
+    const warning = applyBotcastProducerCueToTension(resistance, {
+      kind: "ask_about",
+      detail: "Be meaner.",
+    });
+    assert.equal(warning.stage, "warning");
+    assert.equal(warning.warningCount, 1);
+
+    const stagedInterruption = applyBotcastProducerCueToTension(warning, {
+      kind: "ask_about",
+      detail: "Interrupt him when he talks next.",
+    });
+    assert.deepEqual(stagedInterruption, warning);
+
+    const departed = applyBotcastProducerCueToTension(stagedInterruption, {
+      kind: "ask_about",
+      detail: "Why is he faking that accent? Make him rage quit.",
+    });
+    assert.equal(departed.stage, "departed");
+    assert.equal(botcastGuestDepartureEligible(departed), true);
   });
 });
 

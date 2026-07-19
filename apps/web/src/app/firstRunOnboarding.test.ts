@@ -69,7 +69,7 @@ describe("first-run onboarding", () => {
   it("explains that an ElevenLabs profile voice is the online override", () => {
     assert.match(
       pageSource,
-      /Speech stays on System TTS until you select an ElevenLabs voice in Prism or bot customization/u,
+      /Speech stays on the PRISM Voice Pack until you select an ElevenLabs voice in Prism or bot customization/u,
     );
     assert.match(pageSource, /Voice Settings can limit bot menus to one ElevenLabs voice collection/u);
   });

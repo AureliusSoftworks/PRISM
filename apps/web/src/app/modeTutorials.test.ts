@@ -68,7 +68,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
-      /transparent, theme-ready logo/u,
+      /transparent logo/u,
     );
     assert.equal(MODE_TUTORIALS.botcast.steps[2]?.heading, "Build an audience");
     assert.equal(
@@ -89,19 +89,19 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
-      /Create this show’s look once/u,
+      /Complete this show is resumable/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
-      /find a clever name/u,
+      /missing text identity/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
-      /host-shaped dashboard blurbs/u,
+      /rerunning it retries only unfinished pieces/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
-      /regenerate just those blurbs/u,
+      /regenerate blurbs/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
@@ -156,7 +156,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[3]?.body ?? "",
-      /custom art, its gear can create or refresh/u,
+      /gear is always available to create or refresh/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[3]?.body ?? "",
@@ -223,7 +223,15 @@ describe("mode tutorials", () => {
     assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /small dice/u);
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
-      /show’s listeners would genuinely want to ask/u,
+      /show’s listeners would genuinely want to explore/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
+      /short public episode title/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
+      /richer provocative question.*private comments/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
@@ -268,6 +276,14 @@ describe("mode tutorials", () => {
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
       /never creates an episode or transcript/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[0]?.body ?? "",
+      /optionally add a premise inspiration/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
+      /sharpen your editable premise inspiration/u,
     );
     assert.equal(
       MODE_TUTORIALS.botcast.steps[6]?.heading,
@@ -319,7 +335,11 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
-      /can overlap naturally but never create a turn/u,
+      /calm backchannels overlap naturally without creating a turn/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      /genuinely annoyed[\s\S]*brief audible interjection/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
@@ -331,9 +351,21 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      /Interrupt guest now gives the host that turn/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      /on-air clock shows elapsed episode time/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
       /Wrap it up is shared episode direction/u,
     );
     assert.match(MODE_TUTORIALS.botcast.steps[7]?.body ?? "", /both bots/u);
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      /Freeform producer pressure or Press harder/u,
+    );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
       /session-changing navbar tools stay locked/u,
@@ -452,7 +484,7 @@ describe("mode tutorials", () => {
 
     assert.deepEqual(chooseRelationship, {
       heading: "Choose a relationship",
-      body: "Choose PRISM or a persona to enter that relationship’s Home. Ready Powers stay active with that persona here and across PRISM. Back or Escape returns you to the wider Library or group room exactly where you left it. Inviting a guest keeps you in the current Home.",
+      body: "Choose PRISM or a persona to enter that relationship’s Home. Ready Powers stay active with that persona here and across PRISM; a muted persona can still act, but only answers with ... and never speaks aloud, while an echo-bound persona repeats the latest message addressed to them exactly. Back or Escape returns you to the wider Library or group room exactly where you left it. Inviting a guest keeps you in the current Home.",
       clickLabel: "a PRISM or persona tile",
       targetSelector: '[data-tutorial-target="chat-bot-picker"]',
     });
@@ -482,6 +514,16 @@ describe("mode tutorials", () => {
     assert.equal(
       correction?.targetSelector,
       '[data-tutorial-target="composer"]',
+    );
+  });
+
+  it("teaches exact echo Powers in every active bot-speaking lane", () => {
+    assert.match(MODE_TUTORIALS.zen.steps[0]?.body ?? "", /echo-bound persona.*exactly/u);
+    assert.match(MODE_TUTORIALS.chat.steps[0]?.body ?? "", /echo-bound bot.*adds nothing/u);
+    assert.match(MODE_TUTORIALS.coffee.steps[0]?.body ?? "", /repeat the exact user or bot line/u);
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
+      /immediately preceding on-air cast line exactly.*never leak/u,
     );
   });
 
@@ -563,6 +605,8 @@ describe("mode tutorials", () => {
       routing?.body ?? "",
       /Image generation keeps its own LOCAL\/ONLINE choice/,
     );
+    assert.match(routing?.body ?? "", /five included PRISM voices/);
+    assert.match(routing?.body ?? "", /operating-system voices are optional/);
     assert.match(
       routing?.body ?? "",
       /choose an ElevenLabs voice from the list or open “Use an exact Voice ID” for a portable override/,
@@ -570,6 +614,40 @@ describe("mode tutorials", () => {
     assert.match(routing?.body ?? "", /only for eligible ONLINE speech/);
     assert.match(routing?.body ?? "", /Voice Settings can narrow/);
     assert.match(routing?.body ?? "", /one ElevenLabs voice collection/);
+    assert.match(routing?.body ?? "", /Tone tab gives each bot a Voice Character pad/);
+    assert.match(routing?.body ?? "", /relative to your account Voice Volume/);
+    assert.match(routing?.body ?? "", /non-neutral mood/);
+    assert.match(routing?.body ?? "", /neutral speech stays untagged/);
+  });
+
+  it("teaches automatic ElevenLabs mood delivery in every mood-aware voice lane", () => {
+    const coffeeVoice = MODE_TUTORIALS.coffee.steps.find(
+      (step) => step.heading === "Join the conversation",
+    );
+    const signalVoice = MODE_TUTORIALS.botcast.steps.find(
+      (step) => step.heading === "Choose how the bots speak",
+    );
+
+    assert.match(coffeeVoice?.body ?? "", /non-neutral mood/);
+    assert.match(coffeeVoice?.body ?? "", /neutral speech stays untagged/);
+    assert.match(signalVoice?.body ?? "", /non-neutral speaker mood/);
+    assert.match(signalVoice?.body ?? "", /saved vocal reaction takes precedence/);
+  });
+
+  it("teaches dead-air asides and synchronized cup foley in Coffee and Signal", () => {
+    const coffee = MODE_TUTORIALS.coffee.steps.find(
+      (step) => step.heading === "Join the conversation",
+    );
+    const signal = MODE_TUTORIALS.botcast.steps.find(
+      (step) => step.heading === "Choose how the bots speak",
+    );
+
+    assert.match(coffee?.body ?? "", /dead air/);
+    assert.match(coffee?.body ?? "", /without stealing the slow bot’s turn/);
+    assert.match(coffee?.body ?? "", /Sip and cup-return sounds/);
+    assert.match(signal?.body ?? "", /awkward dead air/);
+    assert.match(signal?.body ?? "", /original answer keeps generating/);
+    assert.match(signal?.body ?? "", /Sip and cup-return sounds/);
   });
 
   it("teaches canonical Coffee prompts without a regeneration step", () => {
@@ -597,5 +675,23 @@ describe("mode tutorials", () => {
       joinStep?.body ?? "",
       /drag its left edge or the topic divider/,
     );
+  });
+
+  it("teaches one-response candor and Signal's frozen episode Powers", () => {
+    assert.match(MODE_TUTORIALS.coffee.steps[0]?.body ?? "", /trustworthy direct question/u);
+    assert.match(MODE_TUTORIALS.coffee.steps[0]?.body ?? "", /more candid next answer/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /freezes the host and guest’s ready Powers/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /without overriding the other bot’s agency or boundaries/u);
+  });
+
+  it("teaches exact hearing repeats and their stacking mood cost", () => {
+    const coffeePowers = MODE_TUTORIALS.coffee.steps[0]?.body ?? "";
+    const signalPowers = MODE_TUTORIALS.botcast.steps[5]?.body ?? "";
+
+    assert.match(coffeePowers, /hard-of-hearing bot asks what the prior speaker said/u);
+    assert.match(coffeePowers, /repeats its saved line and loses a little mood each time/u);
+    assert.match(signalPowers, /prior speaker repeats its saved on-air line/u);
+    assert.match(signalPowers, /saved delivery mood drops one step each time/u);
+    assert.match(signalPowers, /Direct producer direction and closing safety still take priority/u);
   });
 });

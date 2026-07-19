@@ -19,7 +19,10 @@ export type ListenerReactionSpokenCue =
   | "hmm"
   | "right"
   | "oh"
-  | "go on";
+  | "go on"
+  | "No, hold on."
+  | "Let me answer that."
+  | "That's not fair.";
 
 export interface ListenerReactionPlanV1 {
   v: typeof LISTENER_REACTION_PLAN_VERSION;
@@ -30,6 +33,8 @@ export interface ListenerReactionPlanV1 {
   targetSource: ListenerReactionTargetSource;
   visualAction: ListenerReactionVisualAction;
   spokenCue?: ListenerReactionSpokenCue;
+  /** A tense guest trying to cut across the host without taking transcript ownership. */
+  interjectionAttempt?: true;
   /** Relative position inside the speaker's delivery. Always 0.3..0.75. */
   targetProgress: number;
   seed: string;
@@ -57,7 +62,14 @@ const SPOKEN_CUES = new Set<ListenerReactionSpokenCue>([
   "right",
   "oh",
   "go on",
+  "No, hold on.",
+  "Let me answer that.",
+  "That's not fair.",
 ]);
+
+// Attentive presence should be the norm in Signal; the remaining gaps keep
+// listener reactions from feeling metronomic.
+const SIGNAL_VISUAL_REACTION_CHANCE = 0.82;
 
 function stableUnit(seed: string): number {
   let hash = 2166136261;
@@ -98,6 +110,7 @@ export function normalizeListenerReactionPlanV1(
   const spokenCue = SPOKEN_CUES.has(row.spokenCue as ListenerReactionSpokenCue)
     ? row.spokenCue as ListenerReactionSpokenCue
     : undefined;
+  const interjectionAttempt = row.interjectionAttempt === true;
   const targetProgress = typeof row.targetProgress === "number" &&
       Number.isFinite(row.targetProgress)
     ? Math.max(0.3, Math.min(0.75, row.targetProgress))
@@ -124,6 +137,7 @@ export function normalizeListenerReactionPlanV1(
     targetSource,
     visualAction,
     ...(spokenCue ? { spokenCue } : {}),
+    ...(interjectionAttempt ? { interjectionAttempt: true as const } : {}),
     targetProgress: Number(targetProgress.toFixed(3)),
     seed,
     cameraCutEligible: row.cameraCutEligible,
@@ -173,11 +187,28 @@ export function buildSignalListenerReactionPlanV1(args: {
     args.mood,
     Math.max(0, Math.round(args.tensionLevel)),
   ].join(":");
-  if (stableUnit(`${seed}:visual-roll`) >= 0.55) return null;
+  const tensionLevel = Math.max(0, Math.round(args.tensionLevel));
+  const interjectionAttempt =
+    args.listenerRole === "guest" &&
+    args.segment === "interview" &&
+    tensionLevel >= 1 &&
+    stableUnit(`${seed}:interjection-roll`) <
+      (tensionLevel >= 2 ? 0.68 : 0.3);
+  if (
+    !interjectionAttempt &&
+    stableUnit(`${seed}:visual-roll`) >= SIGNAL_VISUAL_REACTION_CHANCE
+  ) {
+    return null;
+  }
   const audioChance = args.listenerRole === "host" ? 0.4 : 0.3;
   const audible = args.segment === "interview" &&
     stableUnit(`${seed}:audio-roll`) < audioChance;
-  const spokenCue = audible
+  const spokenCue = interjectionAttempt
+    ? choose(
+        `${seed}:cue:interjection`,
+        ["No, hold on.", "Let me answer that.", "That's not fair."] as const,
+      )
+    : audible
     ? args.tensionLevel >= 2 || args.mood === "strained"
       ? "hmm"
       : args.mood === "warm" || args.mood === "joyful"
@@ -194,11 +225,17 @@ export function buildSignalListenerReactionPlanV1(args: {
     listenerBotId: args.listenerBotId,
     messageId: args.messageId,
     targetSource: "role",
-    visualAction: signalVisualAction(seed, args.mood, args.tensionLevel),
+    visualAction: interjectionAttempt
+      ? "lean_in"
+      : signalVisualAction(seed, args.mood, args.tensionLevel),
     ...(spokenCue ? { spokenCue } : {}),
-    targetProgress: targetProgress(seed),
+    ...(interjectionAttempt ? { interjectionAttempt: true as const } : {}),
+    targetProgress: interjectionAttempt
+      ? Number((0.3 + stableUnit(`${seed}:interjection-progress`) * 0.25).toFixed(3))
+      : targetProgress(seed),
     seed,
-    cameraCutEligible: stableUnit(`${seed}:camera-roll`) < 0.22,
+    cameraCutEligible:
+      stableUnit(`${seed}:camera-roll`) < (interjectionAttempt ? 0.55 : 0.22),
   };
 }
 

@@ -1,4 +1,5 @@
 import {
+  BOT_AUDIO_VOICE_PACE_RATE_DEPTH,
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
   normalizeBotAudioVoiceProfileV1,
   normalizeBotVoiceVolume,
@@ -57,8 +58,6 @@ export function normalizeBottishPlaybackProfile(
   return {
     ...normalizeBotAudioVoiceProfileV1(rawProfile),
     warmth: 0,
-    pace: 0,
-    lilt: 0,
     bottishTone: FIXED_BOTTISH_TONE,
   };
 }
@@ -108,7 +107,7 @@ export function buildBottishPlan(
 ): BottishPlan {
   const profile = normalizeBottishPlaybackProfile(rawProfile);
   const voice = VOICE_BASES[profile.baseVoiceId];
-  const pitchMultiplier = 2 ** (profile.pitch * 0.7);
+  const pitchMultiplier = 2 ** ((profile.pitch * 650) / 1200);
   const tone = profile.bottishTone;
   const organicAmount = Math.max(0, -tone);
   const syntheticAmount = Math.max(0, tone);
@@ -149,7 +148,10 @@ export function buildBottishPlan(
 
     const random = stableUnit(`${seed}:${spokenIndex}:${character}`);
     const syllableStep = syllableSteps[Math.floor(random * syllableSteps.length)] ?? 0;
-    const liltWave = Math.sin(spokenIndex * 0.82) * profile.lilt * 4.5;
+    const liltWave = voiceLiltDetuneCents(
+      profile.lilt,
+      characterStartMs / 1000,
+    ) / 100;
     const organicContour = Math.sin(spokenIndex * 0.42) * organicAmount * 2.8;
     const syntheticContour = ([-3, 4, -1, 3][spokenIndex % 4] ?? 0) * syntheticAmount;
     const frequencyHz = Math.max(
@@ -341,7 +343,6 @@ let activeMediaUrl: string | null = null;
 let preparedMedia: HTMLAudioElement | null = null;
 let preparedMediaUrl: string | null = null;
 let activeTimer: number | null = null;
-let activeMediaLiltTimer: number | null = null;
 let activeResolve: (() => void) | null = null;
 let generation = 0;
 let queue: Promise<void> = Promise.resolve();
@@ -414,10 +415,6 @@ function releaseActiveMedia(keepElement = false): void {
     URL.revokeObjectURL(activeMediaUrl);
     activeMediaUrl = null;
   }
-  if (activeMediaLiltTimer !== null && typeof window !== "undefined") {
-    window.clearInterval(activeMediaLiltTimer);
-    activeMediaLiltTimer = null;
-  }
   if (keepElement && media) preparedMedia = media;
 }
 
@@ -460,6 +457,7 @@ async function playPlanWithMedia(
   audio.load();
   audio.preload = "auto";
   audio.volume = Math.min(1, normalizeBotAudioVoiceProfileV1(profile).volume);
+  audio.preservesPitch = true;
   activeMedia = audio;
   activeMediaUrl = url;
 
@@ -495,10 +493,13 @@ async function playPlanWithMedia(
     void audio.play().then(
       () => {
         started = true;
+        const playbackTempo = 1 + normalizeBotAudioVoiceProfileV1(profile).pace *
+          BOT_AUDIO_VOICE_PACE_RATE_DEPTH;
+        audio.playbackRate = playbackTempo;
         progress = beginVoicePlaybackProgress(
           lifecycle,
-          plan.durationMs,
-          () => audio.currentTime * 1000,
+          Math.round(plan.durationMs / playbackTempo),
+          () => audio.currentTime * 1000 / playbackTempo,
           plan.alignment
         );
         if (activeTimer !== null) {
@@ -729,7 +730,7 @@ async function playHybridBytesWithMedia(
   audio.load();
   audio.preload = "auto";
   audio.volume = Math.min(1, normalizeBotAudioVoiceProfileV1(profile).volume);
-  audio.preservesPitch = false;
+  audio.preservesPitch = true;
   activeMedia = audio;
   activeMediaUrl = url;
 
@@ -765,15 +766,11 @@ async function playHybridBytesWithMedia(
     void audio.play().then(
       () => {
         started = true;
-        const normalized = normalizeBotAudioVoiceProfileV1(profile);
-        const updatePlaybackRate = () => {
-          const detuneCents = normalized.pitch * 650 +
-            voiceLiltDetuneCents(0, audio.currentTime);
-          audio.playbackRate = Math.max(0.7, Math.min(1.4, 2 ** (detuneCents / 1200)));
-        };
-        updatePlaybackRate();
+        const playbackTempo = 1 + normalizeBotAudioVoiceProfileV1(profile).pace *
+          BOT_AUDIO_VOICE_PACE_RATE_DEPTH;
+        audio.playbackRate = playbackTempo;
         const durationMs = Number.isFinite(audio.duration) && audio.duration > 0
-          ? Math.round(audio.duration * 1000)
+          ? Math.round(audio.duration * 1000 / playbackTempo)
           : null;
         if (durationMs) {
           progress = beginVoicePlaybackProgress(lifecycle, durationMs, () => audio.currentTime * 1000);
@@ -818,7 +815,6 @@ async function playBabble(
     profile: normalized,
     seed,
     effectsEnabled,
-    detuneCents: Math.round(normalized.pitch * 650),
     baseLowpassHz: 20_000,
     roomAcoustics,
     lifecycle,
@@ -882,17 +878,27 @@ export function enqueueBottishVoice(
   preSpeechBreath?: PreSpeechBreathPlan | null,
 ): Promise<void> {
   const expectedGeneration = generation;
-  const playbackProfile = {
-    ...normalizeBottishPlaybackProfile(profile),
+  const normalizedProfile = normalizeBottishPlaybackProfile(profile);
+  const deliveryRate =
+    (1 + normalizedProfile.pace * BOT_AUDIO_VOICE_PACE_RATE_DEPTH) *
+    (timing?.deliveryRate ?? 1);
+  const planProfile = {
+    ...normalizedProfile,
+    // Bottish owns its duration in the generated plan, so browser playback
+    // cannot apply Pace twice.
+    pace: 0,
     volume: normalizeBotVoiceVolume(globalVolume),
   };
   const plan = fitBottishPlanToDuration(
     scaleBottishPlanForDeliveryRate(
-      buildBottishPlan(text, playbackProfile, seed),
-      timing?.deliveryRate,
+      buildBottishPlan(text, planProfile, seed),
+      deliveryRate,
     ),
     timing?.targetDurationMs
   );
+  // Pitch and lilt are baked into the procedural plan. Keeping the playback
+  // transform neutral prevents a second shift after synthesis.
+  const playbackProfile = { ...planProfile, pitch: 0, lilt: 0 };
   queue = queue
     .catch(() => undefined)
     .then(() =>

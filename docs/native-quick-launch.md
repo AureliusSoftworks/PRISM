@@ -214,6 +214,19 @@ tray app, stages the Node/Qdrant runtime, packages it with Inno Setup, and
 uploads `Prism-Server-Setup-v<version>-win-x64.exe` and the optional portable
 `Prism-Server-v<version>-win-x64-portable.zip` to the server release.
 
+## macOS Desktop App
+
+The default local workflow builds the unified Tauri app with its embedded
+runtime, installs it at `/Applications/PRISM.app`, and launches that installed
+copy:
+
+```bash
+prism
+```
+
+For a non-system install location, set `PRISM_DESKTOP_INSTALL_DIR` to an
+existing writable directory such as `$HOME/Applications`.
+
 ## Web Dev Server
 
 Browser + API iteration in one command. Runs the combined dev launcher and
@@ -225,8 +238,8 @@ Use Ctrl+C to stop the running foreground process, or run `prism down` from
 another terminal to free both ports.
 
 ```bash
-prism
 prism up
+prism web
 ```
 
 Equivalent to `npm run dev` from the repo root.
@@ -234,10 +247,10 @@ Equivalent to `npm run dev` from the repo root.
 Useful overrides:
 
 ```bash
-PRISM_OPEN_WEB=0 prism
-PRISM_OPEN_TARGET=browser prism
-PRISM_WEB_URL="http://localhost:18788/prism" prism
-PRISM_OPEN_URL_COMMAND='open -a "Codex" "$PRISM_OPEN_URL"' prism
+PRISM_OPEN_WEB=0 prism up
+PRISM_OPEN_TARGET=browser prism up
+PRISM_WEB_URL="http://localhost:18788/prism" prism up
+PRISM_OPEN_URL_COMMAND='open -a "Codex" "$PRISM_OPEN_URL"' prism up
 ```
 
 To stop existing local API + web listeners:

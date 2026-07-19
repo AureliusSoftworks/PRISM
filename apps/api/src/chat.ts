@@ -93,6 +93,8 @@ import {
   applyPrismMoodIgnoredTurn,
   applyPrismMoodNegativeTurn,
   applyPrismMoodPositiveTurn,
+  applyBotPowerEchoResponseV1,
+  applyBotPowerMuteResponseV1,
   botPowerObserverCueLinesV1,
   createDefaultPrismMoodState,
   decayPrismMood,
@@ -2388,6 +2390,10 @@ export interface UserChatSettings {
    */
   ephemeralMessages?: ChatMessage[];
   botSystemPrompt?: string;
+  /** Hard runtime enforcement for an active compiled mute Power. */
+  botPowerMuted?: boolean;
+  /** Hard runtime enforcement for an active compiled addressed-speech echo Power. */
+  botPowerEchoAddressed?: boolean;
   /** Optional per-bot generation overrides, forwarded to the provider. */
   botOverrides?: GenerateOptions;
   /** Global developer rule layer applied across all bots when enabled. */
@@ -6279,6 +6285,9 @@ export async function processChatMessage(
     ? composeZenPrismSystemPrompt(settings.botSystemPrompt)
     : settings.botSystemPrompt;
   const isStarterPrompt = settings.starterPrompt === true;
+  const botPowerMutedTurn = settings.botPowerMuted === true;
+  const botPowerEchoTurn = settings.botPowerEchoAddressed === true;
+  const botPowerHardResponseTurn = botPowerMutedTurn || botPowerEchoTurn;
   const commandCenterPromptTurn =
     settings.commandCenterPrompt === true || Boolean(settings.promptShortcut);
   const promptInputOverride =
@@ -6287,11 +6296,11 @@ export async function processChatMessage(
       : "";
   const modelUserMessage = promptInputOverride || message;
   const manualTool = !isStarterPrompt ? settings.manualTool : undefined;
-  const manualWebSearchRequested = manualTool?.name === "webSearch";
+  const manualWebSearchRequested = !botPowerHardResponseTurn && manualTool?.name === "webSearch";
   const manualWebSearchQuery = manualWebSearchRequested
     ? manualToolQueryOrMessage(manualTool, modelUserMessage)
     : undefined;
-  const manualImageGenRequested = manualTool?.name === "imageGen";
+  const manualImageGenRequested = !botPowerHardResponseTurn && manualTool?.name === "imageGen";
   const manualAskQuestionConstraint = readManualAskQuestionAnswerConstraint(manualTool);
   const explicitAskQuestionRequest =
     !isStarterPrompt &&
@@ -6478,7 +6487,9 @@ export async function processChatMessage(
     );
 	    throwIfChatRequestCancelled(settings.signal);
 	    let parsedAssistant = parseAssistantPrismTools(assistantReplyRaw);
-	    let requestedWebSearchForTurn = manualWebSearchRequested
+    let requestedWebSearchForTurn = botPowerHardResponseTurn
+	      ? undefined
+	      : manualWebSearchRequested
 	      ? {
 	          v: 1 as const,
 	          name: "WebSearch" as const,
@@ -6542,8 +6553,9 @@ export async function processChatMessage(
     const shouldBackfillAskQuestion =
         explicitAskQuestionRequest ||
         assistantLikelyIntendedAskQuestion(parsedAssistant.displayContent);
-    const askQuestionRaw =
-      parsedAssistant.askQuestion ??
+    const askQuestionRaw = botPowerHardResponseTurn
+      ? undefined
+      : parsedAssistant.askQuestion ??
       (shouldBackfillAskQuestion
         ? buildAskQuestionFallback(parsedAssistant.displayContent)
         : undefined);
@@ -6561,8 +6573,12 @@ export async function processChatMessage(
 	      assistantDisplayRaw = webSearchUnavailableMessage;
 	    }
     const starterSendGeneratedImageRequested =
-      isStarterPrompt && Boolean(parsedAssistant.sendGeneratedImage?.prompt?.trim());
-    let assistantDisplay = isStarterPrompt && !starterSendGeneratedImageRequested
+      !botPowerHardResponseTurn && isStarterPrompt && Boolean(parsedAssistant.sendGeneratedImage?.prompt?.trim());
+    let assistantDisplay = botPowerMutedTurn
+      ? applyBotPowerMuteResponseV1(assistantDisplayRaw)
+      : botPowerEchoTurn
+        ? applyBotPowerEchoResponseV1(isStarterPrompt ? "" : message)
+      : isStarterPrompt && !starterSendGeneratedImageRequested
       ? enforceStarterOpeningQuestion(assistantDisplayRaw, [])
       : assistantDisplayRaw;
     const turnEvaluation = isStarterPrompt
@@ -6576,7 +6592,9 @@ export async function processChatMessage(
       toneDelta: turnEvaluation?.delta,
       repairSignal,
     });
-    const sendImgPromptIncRaw = manualImageGenRequested
+    const sendImgPromptIncRaw = botPowerHardResponseTurn
+      ? undefined
+      : manualImageGenRequested
       ? manualToolQueryOrMessage(manualTool, modelUserMessage)
       : parsedAssistant.sendGeneratedImage?.prompt?.trim();
     let sendImgPromptInc = autoBackfillSendGeneratedImagePrompt({
@@ -6649,7 +6667,7 @@ export async function processChatMessage(
       );
     }
     let conversationStartersIncognito: string[] | undefined;
-    if (isStarterPrompt && !starterSendGeneratedImageRequested) {
+    if (!botPowerHardResponseTurn && isStarterPrompt && !starterSendGeneratedImageRequested) {
       const startersInferred = await inferConversationStarters(
         auxiliaryProvider,
         assistantDisplay,
@@ -6660,9 +6678,10 @@ export async function processChatMessage(
         conversationStartersIncognito = startersInferred;
       }
     }
-    const assistantAskQuestionForTurn =
-      askQuestionForTurn ?? buildStarterAskQuestion(conversationStartersIncognito);
-    const tellFictionalStoryForTurn = chooseTellFictionalStoryForTurn({
+    const assistantAskQuestionForTurn = botPowerHardResponseTurn
+      ? undefined
+      : askQuestionForTurn ?? buildStarterAskQuestion(conversationStartersIncognito);
+    const tellFictionalStoryForTurn = botPowerHardResponseTurn ? undefined : chooseTellFictionalStoryForTurn({
       displayContent: assistantDisplay,
       parsed: parsedAssistant.tellFictionalStory,
       askQuestion: assistantAskQuestionForTurn,
@@ -6718,7 +6737,9 @@ export async function processChatMessage(
       ...(tellFictionalStoryForTurn
         ? { tellFictionalStory: tellFictionalStoryForTurn }
         : {}),
-      ...(parsedAssistant.zenDisplay ? { zenDisplay: parsedAssistant.zenDisplay } : {}),
+      ...(!botPowerHardResponseTurn && parsedAssistant.zenDisplay
+        ? { zenDisplay: parsedAssistant.zenDisplay }
+        : {}),
       ...(webSearchForTurn ? { webSearch: webSearchForTurn } : {}),
     };
     const assistantTail: ChatMessage[] = [assistantMessageProse];
@@ -7716,7 +7737,7 @@ export async function processChatMessage(
     (explicitAskQuestionRequest ||
       assistantLikelyIntendedAskQuestion(parsedAssistant.displayContent));
   const askQuestionRaw =
-    zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn
+    botPowerHardResponseTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn
       ? undefined
       : parsedAssistant.askQuestion ??
         (shouldBackfillAskQuestion
@@ -7736,8 +7757,16 @@ export async function processChatMessage(
 	    assistantDisplayRaw = webSearchUnavailableMessage;
   }
   const starterSendGeneratedImageRequested =
-    isStarterPrompt && Boolean(parsedAssistant.sendGeneratedImage?.prompt?.trim());
-  let assistantDisplay = isStarterPrompt && !starterSendGeneratedImageRequested
+    !botPowerHardResponseTurn && isStarterPrompt && Boolean(parsedAssistant.sendGeneratedImage?.prompt?.trim());
+  let assistantDisplay = botPowerMutedTurn
+    ? applyBotPowerMuteResponseV1(assistantDisplayRaw)
+    : botPowerEchoTurn
+      ? applyBotPowerEchoResponseV1(
+          personaTransitionTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn || isStarterPrompt
+            ? ""
+            : message,
+        )
+    : isStarterPrompt && !starterSendGeneratedImageRequested
     ? enforceStarterOpeningQuestion(
         assistantDisplayRaw,
         memoryLines,
@@ -7772,7 +7801,7 @@ export async function processChatMessage(
       userId
     );
   }
-	  const sendImgPromptPersistedRaw = zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn
+	  const sendImgPromptPersistedRaw = botPowerHardResponseTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn
 	    ? undefined
 	    : manualImageGenRequested
       ? manualToolQueryOrMessage(manualTool, modelUserMessage)
@@ -7857,7 +7886,7 @@ export async function processChatMessage(
     );
   }
   let conversationStartersPersisted: string[] | undefined;
-  if (isStarterPrompt && !starterSendGeneratedImageRequested) {
+  if (!botPowerHardResponseTurn && isStarterPrompt && !starterSendGeneratedImageRequested) {
     const startersPersisted = await inferConversationStarters(
       auxiliaryProvider,
       assistantDisplay,
@@ -7869,10 +7898,10 @@ export async function processChatMessage(
     }
   }
   throwIfCancelledBeforeAssistantReply();
-  const assistantAskQuestionForTurn = zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn
+  const assistantAskQuestionForTurn = botPowerHardResponseTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn
     ? undefined
     : askQuestionForTurn ?? buildStarterAskQuestion(conversationStartersPersisted);
-  const tellFictionalStoryForTurn = zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn
+  const tellFictionalStoryForTurn = botPowerHardResponseTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn
     ? undefined
     : chooseTellFictionalStoryForTurn({
         displayContent: assistantDisplay,
@@ -7923,7 +7952,7 @@ export async function processChatMessage(
     tellFictionalStory: tellFictionalStoryForTurn,
 	    moodKey: assistantMood.key,
 	    moodConfidence: assistantMood.confidence,
-	    zenDisplay: zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn ? undefined : parsedAssistant.zenDisplay,
+	    zenDisplay: botPowerHardResponseTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn ? undefined : parsedAssistant.zenDisplay,
 	    zenTurn: zenTurnMarker,
 	    webSearch: webSearchForTurn,
 	    autoRecovery,

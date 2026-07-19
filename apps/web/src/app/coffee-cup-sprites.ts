@@ -665,17 +665,17 @@ export function buildCoffeeCupVisualState(args: {
   const finished = args.finished === true || finishedBySip;
   const finishingSipActive =
     finishedBySip && sippingOverride === true && args.finished !== true && args.forceEmpty !== true;
-  const sipProgress =
+  const explicitSipProgress =
     args.forceEmpty === true || (finished && !finishingSipActive)
       ? 1
-      : typeof args.sipCount === "number" && Number.isFinite(args.sipCount)
+      : typeof args.sipCount === "number" &&
+          Number.isFinite(args.sipCount) &&
+          args.sipCount > 0
         ? coffeeCupProgressForSipCount(args.sipCount, sipBaseProgress)
         : null;
   const timedProgress =
-    args.forceEmpty === true || finished
+    args.forceEmpty === true || (finished && !finishingSipActive)
       ? 1
-      : sipProgress != null
-        ? sipProgress
       : typeof args.progressOverride === "number" &&
           Number.isFinite(args.progressOverride)
         ? args.progressOverride
@@ -692,16 +692,14 @@ export function buildCoffeeCupVisualState(args: {
   const rawPacedProgress =
     args.forceEmpty === true || (finished && !finishingSipActive)
       ? 1
-      : sipProgress != null
-        ? sipProgress
-        : coffeeCupPacedProgress(
-            timedProgress ?? 0,
-            args.seed,
-            args.durationMinutes,
-            args.powerRateMultiplier
-          );
+      : coffeeCupPacedProgress(
+          timedProgress ?? 0,
+          args.seed,
+          args.durationMinutes,
+          args.powerRateMultiplier
+        );
   const gatedTimedProgress =
-    sipProgress == null && explicitProgress == null && timedProgress != null
+    explicitProgress == null && timedProgress != null
       ? coffeeCupSipGatedTimedProgress({
           seed: args.seed,
           nowMs: args.nowMs,
@@ -714,7 +712,7 @@ export function buildCoffeeCupVisualState(args: {
         })
       : timedProgress;
   const previousTimedSipGateProgress =
-    sipProgress == null && explicitProgress == null && timedProgress != null
+    explicitProgress == null && timedProgress != null
       ? (() => {
           const gateTimes = coffeeCupSipGateTimes({
             seed: args.seed,
@@ -738,37 +736,44 @@ export function buildCoffeeCupVisualState(args: {
   const pacedProgress =
     args.forceEmpty === true || (finished && !finishingSipActive)
       ? 1
-      : sipProgress != null
-        ? sipProgress
-        : coffeeCupPacedProgress(
-            gatedTimedProgress ?? 0,
-            args.seed,
-            args.durationMinutes,
-            args.powerRateMultiplier
-          );
-  const topOffForVisibleProgress = sipProgress != null ? null : args.topOff;
+      : coffeeCupPacedProgress(
+          gatedTimedProgress ?? 0,
+          args.seed,
+          args.durationMinutes,
+          args.powerRateMultiplier
+        );
   const topOffBaseProgress =
     args.topOff && explicitProgress != null ? explicitProgress : pacedProgress;
-  const visibleProgress = coffeeCupProgressAfterTopOff({
+  const ambientVisibleProgress = coffeeCupProgressAfterTopOff({
     progress: topOffBaseProgress,
-    topOff: topOffForVisibleProgress,
+    topOff: args.topOff,
     nowMs: args.nowMs,
     durationMinutes: args.durationMinutes,
     seed: args.seed,
-    lowerProgressMeansConsumption: sipProgress != null,
+    lowerProgressMeansConsumption: false,
   });
   const rawTopOffBaseProgress =
     args.topOff && explicitProgress != null ? explicitProgress : rawPacedProgress;
-  const sipTriggerProgress = coffeeCupProgressAfterTopOff({
+  const ambientSipTriggerProgress = coffeeCupProgressAfterTopOff({
     progress: rawTopOffBaseProgress,
-    topOff: topOffForVisibleProgress,
+    topOff: args.topOff,
     nowMs: args.nowMs,
     durationMinutes: args.durationMinutes,
     seed: args.seed,
-    lowerProgressMeansConsumption: sipProgress != null,
+    lowerProgressMeansConsumption: false,
   });
+  const visibleProgress =
+    args.forceEmpty === true || (finished && !finishingSipActive)
+      ? 1
+      : explicitSipProgress != null
+        ? Math.max(ambientVisibleProgress, explicitSipProgress)
+        : ambientVisibleProgress;
+  const sipTriggerProgress =
+    explicitSipProgress != null
+      ? Math.max(ambientSipTriggerProgress, explicitSipProgress)
+      : ambientSipTriggerProgress;
   const status = coffeeCupStatusForProgress(visibleProgress, args.seed);
-  const previousSipGateProgress =
+  const previousAmbientSipGateProgress =
     previousTimedSipGateProgress != null
       ? coffeeCupProgressAfterTopOff({
           progress: coffeeCupPacedProgress(
@@ -784,6 +789,19 @@ export function buildCoffeeCupVisualState(args: {
         lowerProgressMeansConsumption: false,
       })
       : null;
+  const previousExplicitSipProgress =
+    typeof args.sipCount === "number" &&
+    Number.isFinite(args.sipCount) &&
+    args.sipCount > 0
+      ? coffeeCupProgressForSipCount(args.sipCount - 1, sipBaseProgress)
+      : null;
+  const previousSipGateProgress =
+    previousExplicitSipProgress != null
+      ? Math.max(
+          previousAmbientSipGateProgress ?? 0,
+          previousExplicitSipProgress,
+        )
+      : previousAmbientSipGateProgress;
   const previousSipGateFrameIndex =
     previousSipGateProgress != null
       ? coffeeCupStatusForProgress(previousSipGateProgress, args.seed).frameIndex
