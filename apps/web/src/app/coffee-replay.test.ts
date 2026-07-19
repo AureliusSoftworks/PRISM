@@ -410,6 +410,19 @@ describe("coffee replay helpers", () => {
     );
   });
 
+  it("hides punctuation-only pause artifacts from Table talk transcript rows", () => {
+    const messages = [
+      { id: "m1", role: "assistant", content: "..." },
+      { id: "m2", role: "assistant", content: " … " },
+      { id: "m3", role: "assistant", content: "Well... I would test it." },
+    ];
+
+    assert.deepEqual(
+      coffeeTranscriptVisibleMessages(messages).map((message) => message.id),
+      ["m3"],
+    );
+  });
+
   it("hides stale account-metadata synopsis rows from Table talk", () => {
     const leakedSynopsis =
       "Session synopsis: The poll leans True (3-2), and the system noted your account display name is admin.";

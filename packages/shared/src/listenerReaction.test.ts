@@ -24,7 +24,7 @@ describe("listener reaction planning", () => {
     assert.equal(first?.spokenCue, undefined);
   });
 
-  it("keeps Signal frequency gates near their intended rates", () => {
+  it("keeps Signal reactions present on most turns without making every beat audible", () => {
     let visual = 0;
     let audible = 0;
     for (let index = 0; index < 8_000; index += 1) {
@@ -41,8 +41,40 @@ describe("listener reaction planning", () => {
       if (plan) visual += 1;
       if (plan?.spokenCue) audible += 1;
     }
-    assert.ok(visual / 8_000 > 0.52 && visual / 8_000 < 0.58);
+    assert.ok(visual / 8_000 > 0.79 && visual / 8_000 < 0.85);
     assert.ok(audible / visual > 0.37 && audible / visual < 0.43);
+  });
+
+  it("lets an annoyed guest attempt to interject over the host", () => {
+    const calmAttempts = Array.from({ length: 2_000 }, (_, index) =>
+      buildSignalListenerReactionPlanV1({
+        episodeId: "calm",
+        messageId: `message-${index}`,
+        speakerBotId: "host",
+        listenerBotId: "guest",
+        listenerRole: "guest",
+        segment: "interview",
+        mood: "neutral",
+        tensionLevel: 0,
+      })
+    ).filter((plan) => plan?.interjectionAttempt);
+    const warningAttempts = Array.from({ length: 2_000 }, (_, index) =>
+      buildSignalListenerReactionPlanV1({
+        episodeId: "warning",
+        messageId: `message-${index}`,
+        speakerBotId: "host",
+        listenerBotId: "guest",
+        listenerRole: "guest",
+        segment: "interview",
+        mood: "strained",
+        tensionLevel: 2,
+      })
+    ).filter((plan) => plan?.interjectionAttempt);
+
+    assert.equal(calmAttempts.length, 0);
+    assert.ok(warningAttempts.length > 1_250 && warningAttempts.length < 1_450);
+    assert.ok(warningAttempts.every((plan) => plan?.spokenCue));
+    assert.ok(warningAttempts.every((plan) => plan?.visualAction === "lean_in"));
   });
 
   it("makes inferred Coffee targets visual-only and enforces audible cooldowns", () => {

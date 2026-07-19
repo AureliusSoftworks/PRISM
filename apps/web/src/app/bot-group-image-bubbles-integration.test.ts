@@ -96,4 +96,39 @@ describe("bot group image bubble integration", () => {
     assert.match(cssSource, /\.botGroupHeroStage[\s\S]*width: min\(1040px/);
     assert.match(cssSource, /\.botGroupWaitingRoom[\s\S]*overflow: hidden/);
   });
+
+  it("keeps group vision mounted through focus and ignores roamer churn", () => {
+    const lifecycleSlice = sourceSlice(
+      "const botGroupImageBubblesEnabled",
+      "useEffect(() => {\n    if (!emptyStateSearchActive)",
+    );
+    assert.doesNotMatch(
+      lifecycleSlice.slice(
+        0,
+        lifecycleSlice.indexOf("const botGroupImageBubbleViewport"),
+      ),
+      /zenPersonaBot === null/,
+    );
+    assert.match(lifecycleSlice, /botGroupImageBubbleLayoutViewport/);
+    assert.match(
+      lifecycleSlice,
+      /occupiedPresences: botGroupWaitingRoomAmbientPlacements\.filter\([\s\S]*?role === "anchor"/,
+    );
+    assert.match(
+      cssSource,
+      /\.botGroupImageBubbleLayer\[data-receded="true"\]/,
+    );
+    assert.equal(
+      pageSource.match(/renderBotGroupImageBubbles\(/g)?.length,
+      2,
+    );
+    assert.match(
+      pageSource,
+      /activeBotLibraryGroupFilter[\s\S]*?renderBotGroupImageBubbles\([\s\S]*?botGroupWaitingRoomEligible/,
+    );
+    assert.match(
+      cssSource,
+      /\.emptyState > \.botGroupImageBubbleLayer\s*\{[\s\S]*?width: min\(1040px/,
+    );
+  });
 });

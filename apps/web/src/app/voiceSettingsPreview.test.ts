@@ -27,7 +27,7 @@ describe("voice settings preview", () => {
       pageSource,
       /voiceMode=\{normalizeVoiceMode\(settings\?\.voiceMode\)\}/,
     );
-    assert.match(pageSource, /onVoicePreview=\{previewSelectedVoice\}/);
+    assert.match(pageSource, /onVoicePreview=\{previewSelectedBotVoice\}/);
     assert.doesNotMatch(pageSource, /aria-label="Bottish tone/);
   });
 
@@ -136,14 +136,15 @@ describe("voice settings preview", () => {
     );
   });
 
-  it("presents offline English as native system speech rather than a bundled neural voice", () => {
+  it("presents offline English as the bundled local neural voice pack", () => {
     assert.match(pageSource, /aria-label="Offline English voice engine"/);
-    assert.match(pageSource, /System TTS · Installed/);
+    assert.match(pageSource, /PRISM Voice Pack · 5 included/);
     assert.match(
       pageSource,
       /Default for every bot and every LOCAL reply/,
     );
-    assert.doesNotMatch(pageSource, /Built-in English is packaged with Prism/);
+    assert.match(pageSource, /Neural speech runs locally and never leaves this/);
+    assert.match(pageSource, /Operating-system voices/);
   });
 
   it("shows only installed offline and available online engine dropdowns", () => {
@@ -160,7 +161,8 @@ describe("voice settings preview", () => {
       /<span>Online engine<\/span>[\s\S]*?aria-label="Online English voice engine"[\s\S]*?<option value="elevenlabs">ElevenLabs<\/option>/,
     );
     assert.doesNotMatch(settingsSource, /Use ElevenLabs online/);
-    assert.doesNotMatch(settingsSource, /type="checkbox"/);
+    assert.match(settingsSource, /type="checkbox"/);
+    assert.match(settingsSource, /operatingSystemVoicesEnabled/);
     assert.doesNotMatch(settingsSource, /ElevenLabs model/);
     assert.doesNotMatch(settingsSource, /Load voices/);
     assert.match(settingsSource, /Selecting an ElevenLabs voice in Prism or bot customization overrides/);
@@ -177,13 +179,13 @@ describe("voice settings preview", () => {
     assert.doesNotMatch(settingsSource, /default voice/);
   });
 
-  it("shows separate per-profile system and ElevenLabs voice identities", () => {
+  it("shows separate per-profile local and ElevenLabs voice identities", () => {
     const editorSource = pageSource.slice(
       pageSource.indexOf("function BotVoiceEditor("),
       pageSource.indexOf("type BotEditOriginalSnapshot"),
     );
     assert.match(editorSource, /<small>OFFLINE \+ FALLBACK<\/small>/);
-    assert.match(editorSource, /aria-label="System voice identity"/);
+    assert.match(editorSource, /aria-label="Local voice identity"/);
     assert.match(
       editorSource,
       /data-kind="online"[\s\S]*?<small>ONLINE<\/small>[\s\S]*?<strong>ElevenLabs<\/strong>/,
@@ -192,6 +194,16 @@ describe("voice settings preview", () => {
     assert.match(editorSource, /Use an exact Voice ID/);
     assert.match(editorSource, /aria-label="ElevenLabs voice ID override"/);
     assert.match(editorSource, /elevenLabsVoiceIdOverride: value/);
+    assert.match(
+      editorSource,
+      /elevenLabsVoiceId: value,[\s\S]*?elevenLabsVoiceIdOverride: null/,
+    );
+    assert.match(
+      editorSource,
+      /value=\{[\s\S]*?elevenLabsVoiceIdOverrideValue[\s\S]*?\? ""[\s\S]*?: selectedElevenLabsVoiceValue/,
+    );
+    assert.match(editorSource, /Choose a library voice here to replace the exact Voice ID/);
+    assert.match(editorSource, /event\.currentTarget\.blur\(\)/);
     assert.match(editorSource, /effectiveElevenLabsVoiceValue/);
     assert.match(editorSource, /data-voice-id-resolution="true"/);
     assert.match(editorSource, /Validating Voice ID…/);
@@ -211,20 +223,41 @@ describe("voice settings preview", () => {
       editorSource,
       /disabled=\{identityCatalog\.elevenLabs\.loading\}/,
     );
-    assert.match(editorSource, /Use System TTS/);
+    assert.match(editorSource, /Use PRISM Voice Pack/);
     assert.match(editorSource, /aria-label="Online voice"/);
     assert.match(editorSource, /aria-label="Offline and fallback voice"/);
     assert.match(editorSource, /data-bot-voice-source-card="online"/);
     assert.match(editorSource, /data-bot-voice-source-card="system"/);
     assert.match(editorSource, /Choose from your connected ElevenLabs library/);
-    assert.match(pageSource, /systemVoiceName: value/);
+    assert.match(pageSource, /applyOfflineVoiceSelection/);
     assert.match(pageSource, /elevenLabsVoiceId: value/);
+    const resetBotFormSource = pageSource.slice(
+      pageSource.indexOf("const resetBotForm = useCallback"),
+      pageSource.indexOf("function resetBotPanelDraftNavigation"),
+    );
+    assert.doesNotMatch(resetBotFormSource, /voiceAutosavePendingRef\.current = null/);
+    assert.doesNotMatch(resetBotFormSource, /clearTimeout\(voiceAutosaveTimerRef\.current\)/);
     assert.doesNotMatch(editorSource, /identityCatalog\.onlineEnabled/);
     assert.doesNotMatch(
       pageSource,
       /\["Fred", "Zarvox", "Trinoids", "Junior", "Ralph"\]/,
     );
     assert.doesNotMatch(pageSource, /className=\{styles\.botVoiceSlots\}/);
+  });
+
+  it("keeps Pace local and exposes only ElevenLabs performance stability", () => {
+    const editorSource = pageSource.slice(
+      pageSource.indexOf("function BotVoiceEditor("),
+      pageSource.indexOf("type BotEditOriginalSnapshot"),
+    );
+    assert.match(editorSource, /\["pace", "Pace"\]/);
+    assert.match(editorSource, /Pace is the only duration control\./);
+    assert.match(editorSource, /aria-label="ElevenLabs performance stability"/);
+    assert.match(editorSource, /elevenLabsStability:/);
+    assert.match(editorSource, /Eleven v3 uses this setting alone\./);
+    assert.doesNotMatch(editorSource, /Speaker Boost/);
+    assert.doesNotMatch(editorSource, /Similarity/);
+    assert.doesNotMatch(editorSource, /\bStyle\b/);
   });
 
   it("keeps advanced identity controls tucked away and preview actions in reach", () => {
@@ -301,7 +334,7 @@ describe("voice settings preview", () => {
     assert.match(editorSource, /aria-label="ElevenLabs voice effect"/);
     assert.match(editorSource, /ELEVENLABS_VOICE_EFFECTS\.map/);
     assert.match(editorSource, /ELEVENLABS_VOICE_EFFECT_DESCRIPTIONS/);
-    assert.match(editorSource, /System TTS stays clean\./);
+    assert.match(editorSource, /PRISM and operating-system voices stay clean\./);
     assert.match(pageSource, /enqueueEnglishVoice\([\s\S]*?clip\.engineUsed/);
     assert.match(
       editorSource,
@@ -350,11 +383,8 @@ describe("voice settings preview", () => {
     assert.match(editorSource, /\["pitch", "Pitch"\]/);
     assert.match(editorSource, /\["lilt", "Lilt"\]/);
     assert.doesNotMatch(editorSource, /<span>Tone<\/span>/);
-    assert.match(
-      editorSource,
-      /Pitch shapes every voice\. Lilt shapes English in both lanes\./,
-    );
-    assert.doesNotMatch(editorSource, /\["pace", "Pace"\]/);
+    assert.match(editorSource, /Pace is the only duration control\./);
+    assert.match(editorSource, /\["pace", "Pace"\]/);
     assert.doesNotMatch(editorSource, /\["warmth", "Warmth"\]/);
     assert.doesNotMatch(editorSource, /<span>Volume<\/span>/);
     assert.doesNotMatch(editorSource, />Texture</);
@@ -372,7 +402,7 @@ describe("voice settings preview", () => {
     );
   });
 
-  it("commits pitch and lilt through the selected bot profile instead of global settings", () => {
+  it("commits pitch, pace, and lilt through the selected bot profile instead of global settings", () => {
     const editorSource = pageSource.slice(
       pageSource.indexOf("function BotVoiceEditor("),
       pageSource.indexOf("type BotEditOriginalSnapshot"),
@@ -384,6 +414,7 @@ describe("voice settings preview", () => {
 
     assert.match(editorSource, /\["pitch", "Pitch"\]/);
     assert.match(editorSource, /\["lilt", "Lilt"\]/);
+    assert.match(editorSource, /\["pace", "Pace"\]/);
     assert.match(
       editorSource,
       /onPointerUp=\{\(event\) =>[\s\S]*?saveImmediately: true/,
@@ -434,11 +465,10 @@ describe("voice settings preview", () => {
     assert.match(effectsSource, /Promise\.race\(/);
     assert.match(englishSource, /beginMediaUnlock\(\);/);
     assert.match(englishSource, /playBytesWithMedia/);
-    assert.match(englishSource, /audio\.preservesPitch = false/);
-    assert.match(
-      englishSource,
-      /activeMediaLiltTimer = window\.setInterval\(updatePlaybackRate, 100\)/,
-    );
+    assert.match(englishSource, /audio\.preservesPitch = true/);
+    assert.match(englishSource, /resolveVoicePlaybackTransform\(profile\)\.tempo/);
+    assert.match(effectsSource, /formantCorrectionNodeConstructor/);
+    assert.match(effectsSource, /\/worklets\/formant-correction-processor\.js/);
   });
 
   it("ties live Bottish to visible speech and hard-stops interruptions", () => {

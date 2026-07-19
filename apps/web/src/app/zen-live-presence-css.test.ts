@@ -97,6 +97,36 @@ function ruleForNormalizedSelector(selector: string): string {
 }
 
 describe("Zen live presence CSS", () => {
+  it("uses visible Ink blend modes on dark and light surfaces", () => {
+    assert.match(
+      pageSource,
+      /DEFAULT_ZEN_PERSONA_BACKDROP_TUNING:[^{]+\{[^}]*darkBlendMode: "screen",[^}]*lightBlendMode: "multiply",/u
+    );
+    assert.equal(
+      css.match(/--zen-persona-ink-blend-mode-dark: screen/g)?.length,
+      3
+    );
+    assert.equal(
+      css.match(/--zen-persona-ink-blend-mode-light: multiply/g)?.length,
+      3
+    );
+    assert.match(
+      ruleForExactSelector(".zenPersonaInkWash"),
+      /mix-blend-mode: var\(--zen-persona-ink-blend-mode-dark, screen\)/u
+    );
+    assert.match(
+      ruleForExactSelector(".themeLight .zenPersonaInkWash"),
+      /mix-blend-mode: var\(--zen-persona-ink-blend-mode-light, multiply\)/u
+    );
+    assert.match(
+      ruleForSelectorNeedles(
+        ".themeLight .zenPersonaContinuityWash",
+        ".themeLight .zenPersonaComposerBrushWash"
+      ),
+      /mix-blend-mode: var\(--zen-persona-ink-blend-mode-light, multiply\)/u
+    );
+  });
+
   it("keeps bot frame assets normalized to the 1000px canvas", () => {
     for (const assetName of [
       "bot-frame-base.png",

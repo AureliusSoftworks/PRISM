@@ -5,6 +5,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
+import { ensureBuiltinTtsModel } from "./fetch-builtin-tts-model.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -12,6 +13,16 @@ const repoRoot = path.resolve(__dirname, "..");
 const workspaceRuntimePackages = new Set([
   "@localai/config",
   "@localai/shared"
+]);
+// Transformers.js selects onnxruntime-node through its Node export. Its browser
+// backend is not used by the bundled API and would add roughly 90 MB.
+const omittedDesktopRuntimePackages = new Set(["onnxruntime-web"]);
+const includedPrismVoiceFiles = new Set([
+  "af_heart.bin",
+  "af_bella.bin",
+  "am_michael.bin",
+  "bf_emma.bin",
+  "bm_george.bin"
 ]);
 
 function parseArgs(argv) {
@@ -128,7 +139,7 @@ async function copyLockedNodePackage(lockPackagePath, destinationRoot, options =
 
 async function copyRuntimeDependencyClosure(lockfile, packageName, destinationRoot, copiedPackages, options = {}) {
   const { optional = false, fromLockPackagePath = "" } = options;
-  if (workspaceRuntimePackages.has(packageName)) {
+  if (workspaceRuntimePackages.has(packageName) || omittedDesktopRuntimePackages.has(packageName)) {
     return;
   }
 
@@ -179,6 +190,47 @@ async function copyRuntimeDependencyClosure(lockfile, packageName, destinationRo
   }
 }
 
+async function pruneOnnxRuntimeNativeBinaries(destinationRoot) {
+  const nativeRoot = path.join(
+    destinationRoot,
+    "node_modules",
+    "onnxruntime-node",
+    "bin",
+    "napi-v3"
+  );
+  if (!(await fileExists(nativeRoot))) return;
+  for (const platform of await fs.readdir(nativeRoot)) {
+    const platformPath = path.join(nativeRoot, platform);
+    if (platform !== process.platform) {
+      await fs.rm(platformPath, { recursive: true, force: true });
+      continue;
+    }
+    for (const architecture of await fs.readdir(platformPath)) {
+      if (architecture !== process.arch) {
+        await fs.rm(path.join(platformPath, architecture), {
+          recursive: true,
+          force: true
+        });
+      }
+    }
+  }
+}
+
+async function pruneUnusedKokoroVoices(destinationRoot) {
+  const voicesRoot = path.join(
+    destinationRoot,
+    "node_modules",
+    "kokoro-js",
+    "voices"
+  );
+  if (!(await fileExists(voicesRoot))) return;
+  for (const filename of await fs.readdir(voicesRoot)) {
+    if (!includedPrismVoiceFiles.has(filename)) {
+      await fs.rm(path.join(voicesRoot, filename), { force: true });
+    }
+  }
+}
+
 async function main() {
   const { outputDir, skipBuild } = parseArgs(process.argv.slice(2));
   if (!outputDir) {
@@ -186,6 +238,10 @@ async function main() {
   }
 
   const resolvedOutputDir = path.resolve(outputDir);
+  const modelCacheRoot = process.env.PRISM_BUILTIN_TTS_MODEL_CACHE
+    ? path.resolve(process.env.PRISM_BUILTIN_TTS_MODEL_CACHE)
+    : path.join(repoRoot, ".cache", "prism-models");
+  const builtinTtsModel = await ensureBuiltinTtsModel(modelCacheRoot);
 
   if (!skipBuild) {
     console.log("Building workspace runtime artifacts...");
@@ -199,6 +255,7 @@ async function main() {
   await ensureDir(path.join(resolvedOutputDir, "node"));
   await ensureDir(path.join(resolvedOutputDir, "node", "bin"));
   await ensureDir(path.join(resolvedOutputDir, "qdrant"));
+  await ensureDir(path.join(resolvedOutputDir, "models"));
 
   const nestedApiEntry = path.join(repoRoot, "apps", "api", "dist", "apps", "api", "src", "server.js");
   const apiDistSource = (await fileExists(nestedApiEntry))
@@ -236,6 +293,14 @@ async function main() {
   for (const packageName of Object.keys(apiPackageJson.dependencies ?? {})) {
     await copyRuntimeDependencyClosure(lockfile, packageName, resolvedOutputDir, copiedPackages);
   }
+  await pruneOnnxRuntimeNativeBinaries(resolvedOutputDir);
+  await pruneUnusedKokoroVoices(resolvedOutputDir);
+
+  console.log("Staging built-in voice model...");
+  await copyDir(
+    builtinTtsModel.modelDir,
+    path.join(resolvedOutputDir, "models", "onnx-community", "Kokoro-82M-v1.0-ONNX")
+  );
 
   console.log("Staging Node runtime...");
   if (process.platform === "win32") {

@@ -3,8 +3,16 @@ import test from "node:test";
 import {
   COFFEE_POWER_PROMPT_MAX_TOKENS,
   BOT_POWER_MAX_COUNT,
+  applyBotPowerEchoResponseV1,
+  applyBotPowerMuteResponseV1,
   botPowerCupRateMultiplierForBotV1,
+  botPowerCandorTriggerV1,
+  botPowerCandorResponseRuleV1,
+  botPowerEchoesAddressedSpeechV1,
+  botPowerHasSpeakingOnlyAvatarVisibilityV1,
+  botPowerIsMutedV1,
   botPowerObserverCueLinesV1,
+  botPowerResponseIsSilentV1,
   botPowerSourceHashV1,
   buildBotPowersSelfPromptV1,
   buildCoffeePowersPromptBlock,
@@ -12,6 +20,9 @@ import {
   estimateCoffeePowerTokensV1,
   normalizeBotPowerEffectV1,
   normalizeBotPowersV1,
+  parseStoredBotPowersV1,
+  serializeBotPowersV1,
+  strongestBotPowerCandorEffectV1,
   type CoffeePowerPlanV1,
 } from "./botPower.ts";
 
@@ -63,6 +74,164 @@ test("compiler effect inputs can only produce bounded strength tiers", () => {
   });
   assert.equal(effect?.type, "social_influence");
   assert.equal(effect?.type === "social_influence" ? effect.strength : null, "medium");
+});
+
+test("candor Powers normalize, trigger narrowly, choose the strongest pressure, and round-trip generically", () => {
+  assert.deepEqual(
+    normalizeBotPowerEffectV1({
+      type: "candor",
+      strength: "extreme",
+      targets: [{ kind: "all" }, { kind: "all" }],
+    }),
+    { type: "candor", strength: "medium", targets: [{ kind: "all" }] },
+  );
+  assert.equal(botPowerCandorTriggerV1("Mara, what do you really believe?"), true);
+  assert.equal(botPowerCandorTriggerV1("Be honest with me."), true);
+  assert.equal(botPowerCandorTriggerV1("Mara shared a careful opinion."), false);
+  assert.ok(botPowerCandorResponseRuleV1("large", "x".repeat(100)).length <= 280);
+
+  const name = "Open Door";
+  const intent = "Direct questions make other bots unusually candid.";
+  const serialized = serializeBotPowersV1([{
+    version: 1,
+    id: "open-door",
+    name,
+    intent,
+    enabled: true,
+    compileStatus: "ready",
+    compiled: {
+      version: 1,
+      sourceHash: botPowerSourceHashV1(name, intent),
+      selfCue: "Ask with trustworthy warmth.",
+      observerCue: "Direct questions feel safe to answer candidly.",
+      effects: [
+        { type: "candor", strength: "small", targets: [{ kind: "all" }] },
+        { type: "candor", strength: "large", targets: [{ kind: "all" }] },
+      ],
+      ruleLabels: ["Draws out candor"],
+    },
+  }]);
+  const restored = parseStoredBotPowersV1(serialized);
+  assert.equal(
+    strongestBotPowerCandorEffectV1(restored, (target) => target.kind === "all")?.strength,
+    "large",
+  );
+});
+
+test("mute Powers normalize and enforce silent action-aware responses", () => {
+  const name = "Mute";
+  const intent = "This bot can never speak.";
+  const powers = [{
+    version: 1,
+    id: "mute",
+    name,
+    intent,
+    enabled: true,
+    compileStatus: "ready",
+    compiled: {
+      version: 1,
+      sourceHash: botPowerSourceHashV1(name, intent),
+      selfCue: "Never speak.",
+      observerCue: "This bot cannot speak.",
+      effects: [{ type: "mute" }],
+      ruleLabels: ["Muted"],
+    },
+  }];
+
+  assert.deepEqual(normalizeBotPowerEffectV1({ type: "mute", ignored: true }), {
+    type: "mute",
+  });
+  assert.equal(botPowerIsMutedV1(powers), true);
+  assert.equal(
+    applyBotPowerMuteResponseV1("*nods once* I can still explain this. *sips coffee*"),
+    "*nods once* *sips coffee* ...",
+  );
+  assert.equal(applyBotPowerMuteResponseV1("**emphasis** Spoken words."), "...");
+  assert.equal(botPowerResponseIsSilentV1("*nods once* ..."), true);
+  assert.equal(botPowerResponseIsSilentV1("*nods once* I agree."), false);
+});
+
+test("echo Powers normalize and preserve addressed speech exactly", () => {
+  const name = "Echo";
+  const intent = "Echo whatever is addressed to this bot and say nothing else.";
+  const powers = [{
+    version: 1,
+    id: "echo",
+    name,
+    intent,
+    enabled: true,
+    compileStatus: "ready",
+    compiled: {
+      version: 1,
+      sourceHash: botPowerSourceHashV1(name, intent),
+      selfCue: "Repeat addressed speech exactly.",
+      observerCue: "This bot only echoes addressed speech.",
+      effects: [{ type: "echo_addressed", ignored: true }],
+      ruleLabels: ["Echoes addressed speech"],
+    },
+  }];
+
+  assert.deepEqual(normalizeBotPowerEffectV1({ type: "echo_addressed", ignored: true }), {
+    type: "echo_addressed",
+  });
+  assert.equal(botPowerEchoesAddressedSpeechV1(powers), true);
+  assert.equal(applyBotPowerEchoResponseV1("  Keep  every\ncharacter?!  "), "  Keep  every\ncharacter?!  ");
+  assert.equal(applyBotPowerEchoResponseV1(""), "...");
+});
+
+test("hard-of-hearing repeat effects normalize bounded frequency and mood cost", () => {
+  assert.deepEqual(
+    normalizeBotPowerEffectV1({
+      type: "hearing_repeat",
+      frequency: "frequent",
+      moodPenalty: "large",
+      ignored: true,
+    }),
+    {
+      type: "hearing_repeat",
+      frequency: "frequent",
+      moodPenalty: "large",
+    },
+  );
+  assert.deepEqual(
+    normalizeBotPowerEffectV1({
+      type: "hearing_repeat",
+      frequency: "always",
+      moodPenalty: 999,
+    }),
+    {
+      type: "hearing_repeat",
+      frequency: "occasional",
+      moodPenalty: "medium",
+    },
+  );
+});
+
+test("ghost avatar visibility is bounded and activates only from a Ready Power", () => {
+  assert.deepEqual(
+    normalizeBotPowerEffectV1({ type: "avatar_visibility", mode: "anything" }),
+    { type: "avatar_visibility", mode: "speaking_only" },
+  );
+  const name = "Ghost";
+  const intent = "Invisible while idle and visible only while speaking.";
+  const powers = [{
+    version: 1,
+    id: "ghost",
+    name,
+    intent,
+    enabled: true,
+    compileStatus: "ready",
+    compiled: {
+      version: 1,
+      sourceHash: botPowerSourceHashV1(name, intent),
+      selfCue: "Fade in to speak.",
+      observerCue: "A chill follows.",
+      effects: [{ type: "avatar_visibility", mode: "speaking_only" }],
+      ruleLabels: ["Appears only while speaking"],
+    },
+  }];
+  assert.equal(botPowerHasSpeakingOnlyAvatarVisibilityV1(powers), true);
+  assert.equal(botPowerHasSpeakingOnlyAvatarVisibilityV1([{ ...powers[0], enabled: false }]), false);
 });
 
 test("relationship-agnostic Coffee effects normalize to bounded schemas", () => {

@@ -7,6 +7,10 @@ const cssSource = readFileSync(
   new URL("./page.module.css", import.meta.url),
   "utf8",
 );
+const tutorialSource = readFileSync(
+  new URL("./modeTutorials.ts", import.meta.url),
+  "utf8",
+);
 
 describe("bot group canvas filtering", () => {
   it("renders saved group identity as a hero without replacing the filtered grid", () => {
@@ -96,6 +100,46 @@ describe("bot group canvas filtering", () => {
     assert.match(
       pageSource,
       /const pickBotMode = dialog\.mode === "pick-bot"[\s\S]*?<select[\s\S]*?value=\{pickBotMode \? selectedBotId : selectedGroupId\}[\s\S]*?autoFocus/,
+    );
+  });
+
+  it("offers direct group creation with an in-dialog member roster", () => {
+    assert.equal(
+      pageSource.match(
+        /onCreateGroup=\{\(\) => openCreateBotLibraryGroupDialog\(\[\]\)\}/g,
+      )?.length,
+      2,
+    );
+    assert.match(
+      pageSource,
+      /data-tutorial-target="chat-new-group"[\s\S]*?<Plus/,
+    );
+    assert.doesNotMatch(
+      pageSource,
+      /function openCreateBotLibraryGroupDialog\([\s\S]{0,260}uniqueSelected\.length < 2\) return/,
+    );
+    assert.match(
+      pageSource,
+      /className=\{styles\.botLibraryGroupMemberGrid\}[\s\S]*?sortedPanelBots\.map\([\s\S]*?toggleBotLibraryGroupDialogMember/,
+    );
+    assert.match(
+      cssSource,
+      /\.botLibraryGroupMemberGrid\s*\{[\s\S]*?grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/,
+    );
+    assert.match(
+      tutorialSource,
+      /targetSelector: '\[data-tutorial-target="chat-new-group"\]'/,
+    );
+  });
+
+  it("explains when removing members deletes an undersized custom group", () => {
+    assert.match(
+      pageSource,
+      /const deletesUndersizedGroup =[\s\S]*?remainingBotIds\.length < BOT_LIBRARY_CUSTOM_GROUP_MIN_BOTS/,
+    );
+    assert.match(
+      pageSource,
+      /deleted \"\$\{target\.name\}\" because custom groups need at least \$\{BOT_LIBRARY_CUSTOM_GROUP_MIN_BOTS\} bots\. The bots were kept\./,
     );
   });
 

@@ -47,6 +47,25 @@ describe("bot voice randomizer", () => {
     assert.equal(filled.texture.preset, customized.texture.preset);
   });
 
+  it("randomizes encoded PRISM and OS identities without leaking UI values into profiles", () => {
+    const builtin = randomizeBotAudioVoiceProfile(
+      { ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1, systemVoiceName: "Alex" },
+      "builtin",
+      ["builtin:voice-4"],
+      () => 0.5,
+    );
+    assert.equal(builtin.baseVoiceId, "voice-4");
+    assert.equal(builtin.systemVoiceName, undefined);
+
+    const operatingSystem = randomizeBotAudioVoiceProfile(
+      DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+      "builtin",
+      ["os:Samantha"],
+      () => 0.5,
+    );
+    assert.equal(operatingSystem.systemVoiceName, "Samantha");
+  });
+
   it("keeps fresh bot drafts deterministic until the explicit randomizer is used", () => {
     const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8").replace(
       /\s+/gu,

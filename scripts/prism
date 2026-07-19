@@ -11,6 +11,10 @@ IOS_DEVICE_APP_PATH="apps/ios-client/DerivedData/Build/Products/Debug-iphoneos/P
 API_PORT="18787"
 WEB_PORT="18788"
 
+DESKTOP_BUNDLE_ID="com.localai.prism-desktop"
+DESKTOP_BUILD_APP_PATH="apps/desktop/src-tauri/target/release/bundle/macos/PRISM.app"
+DESKTOP_APP_NAME="PRISM.app"
+
 MAC_CLIENT_BUNDLE_ID="com.localai.prism-client"
 MAC_CLIENT_APP_PATH="apps/client-mac/DerivedData/Build/Products/Debug/Prism.app"
 
@@ -20,7 +24,7 @@ MAC_SERVER_APP_PATH="apps/server-mac/DerivedData/Build/Products/Debug/Prism Serv
 usage() {
   cat <<'USAGE'
 Usage:
-  prism                 (launches the local web dev server)
+  prism                 (builds, installs, and launches the macOS app)
   prism ios
   prism phone
   prism mac-client
@@ -38,10 +42,11 @@ Aliases:
   prism server
 
 Notes:
-  prism (with no arguments) and prism up both run the combined dev
-  launcher (`npm run dev`) which starts/restarts both API
-  (http://localhost:18787) and web (http://localhost:18788) together
-  in one foreground session, then opens the web page once it is ready.
+  prism (with no arguments) builds the unified desktop app with its embedded
+  runtime, installs it as /Applications/PRISM.app, and launches that copy.
+  prism up and prism web run the combined browser dev launcher (`npm run dev`),
+  which starts/restarts both API (http://localhost:18787) and web
+  (http://localhost:18788) together in one foreground session.
   On macOS the opener first tries the Codex app when available, then falls
   back to the default browser. Set PRISM_OPEN_WEB=0 to skip opening.
   prism down shuts down the local API/web dev processes by freeing
@@ -59,9 +64,10 @@ Notes:
 Environment:
   SIMULATOR_ID="Simulator UDID" prism ios
   PHONE_DEVICE_ID="Device UDID" prism phone
-  PRISM_OPEN_WEB=0 prism         # start dev stack without opening the page
-  PRISM_OPEN_TARGET=browser prism # skip the macOS Codex app attempt
-  PRISM_OPEN_URL_COMMAND='open -a "Codex" "$PRISM_OPEN_URL"' prism
+  PRISM_DESKTOP_INSTALL_DIR="$HOME/Applications" prism
+  PRISM_OPEN_WEB=0 prism up         # start dev stack without opening the page
+  PRISM_OPEN_TARGET=browser prism up # skip the macOS Codex app attempt
+  PRISM_OPEN_URL_COMMAND='open -a "Codex" "$PRISM_OPEN_URL"' prism up
 USAGE
 }
 
@@ -414,6 +420,140 @@ run_down() {
   echo "Prism web stack stopped (ports $API_PORT and $WEB_PORT are now free)."
 }
 
+desktop_bundle_value() {
+  local app_path="$1"
+  local key="$2"
+  /usr/libexec/PlistBuddy -c "Print :$key" "$app_path/Contents/Info.plist" 2>/dev/null
+}
+
+validate_desktop_app() {
+  local app_path="$1"
+  local bundle_id=""
+  local executable=""
+
+  if [[ ! -d "$app_path" || ! -f "$app_path/Contents/Info.plist" ]]; then
+    echo "Desktop build did not produce a valid app bundle: $app_path" >&2
+    return 1
+  fi
+
+  bundle_id="$(desktop_bundle_value "$app_path" CFBundleIdentifier || true)"
+  if [[ "$bundle_id" != "$DESKTOP_BUNDLE_ID" ]]; then
+    echo "Refusing to install app with unexpected bundle identifier '$bundle_id': $app_path" >&2
+    return 1
+  fi
+
+  executable="$(desktop_bundle_value "$app_path" CFBundleExecutable || true)"
+  if [[ -z "$executable" || ! -x "$app_path/Contents/MacOS/$executable" ]]; then
+    echo "Desktop app executable is missing or not executable: $app_path/Contents/MacOS/$executable" >&2
+    return 1
+  fi
+}
+
+quit_desktop_app() {
+  local pids=""
+  local pid=""
+  local command_path=""
+  local app_path=""
+
+  pids="$(pgrep -f '/PRISM\.app/Contents/MacOS/prism_desktop$' || true)"
+  if [[ -z "$pids" ]]; then
+    return 0
+  fi
+
+  while IFS= read -r pid; do
+    [[ -z "$pid" ]] && continue
+    command_path="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+    app_path="${command_path%/Contents/MacOS/prism_desktop}"
+    if [[ "$app_path" == *.app && -d "$app_path" ]]; then
+      osascript -e "tell application \"$app_path\" to quit" >/dev/null 2>&1 || true
+    else
+      osascript -e "quit app id \"$DESKTOP_BUNDLE_ID\"" >/dev/null 2>&1 || true
+    fi
+  done <<< "$pids"
+
+  local attempts=0
+  while pgrep -f '/PRISM\.app/Contents/MacOS/prism_desktop$' >/dev/null 2>&1 && [[ "$attempts" -lt 30 ]]; do
+    sleep 0.2
+    attempts=$((attempts + 1))
+  done
+
+  if pgrep -f '/PRISM\.app/Contents/MacOS/prism_desktop$' >/dev/null 2>&1; then
+    echo "PRISM is still running. Quit it and run prism again." >&2
+    return 1
+  fi
+}
+
+install_desktop_app() {
+  local source_app="$1"
+  local install_dir="${PRISM_DESKTOP_INSTALL_DIR:-/Applications}"
+  local installed_app="$install_dir/$DESKTOP_APP_NAME"
+  local staging_dir=""
+  local staged_app=""
+  local previous_app=""
+
+  if [[ ! -d "$install_dir" || ! -w "$install_dir" ]]; then
+    echo "Desktop install directory is missing or not writable: $install_dir" >&2
+    return 1
+  fi
+
+  staging_dir="$(mktemp -d "$install_dir/.prism-install.XXXXXX")"
+  staged_app="$staging_dir/$DESKTOP_APP_NAME"
+  previous_app="$staging_dir/PRISM.previous.app"
+
+  if ! /usr/bin/ditto "$source_app" "$staged_app"; then
+    rm -rf "$staging_dir"
+    echo "Could not stage the desktop app for installation." >&2
+    return 1
+  fi
+
+  if ! validate_desktop_app "$staged_app"; then
+    rm -rf "$staging_dir"
+    return 1
+  fi
+
+  if [[ -e "$installed_app" ]]; then
+    if ! mv "$installed_app" "$previous_app"; then
+      rm -rf "$staging_dir"
+      echo "Could not move the existing desktop app aside: $installed_app" >&2
+      return 1
+    fi
+  fi
+
+  if ! mv "$staged_app" "$installed_app"; then
+    if [[ -e "$previous_app" ]]; then
+      mv "$previous_app" "$installed_app" || true
+    fi
+    rm -rf "$staging_dir"
+    echo "Could not install the desktop app: $installed_app" >&2
+    return 1
+  fi
+
+  rm -rf "$staging_dir"
+  validate_desktop_app "$installed_app"
+  echo "Installed PRISM: $installed_app"
+}
+
+run_desktop() {
+  if [[ "$(uname -s)" != "Darwin" ]]; then
+    echo "The bare prism command builds and installs the macOS app and is only supported on macOS." >&2
+    exit 1
+  fi
+
+  local built_app="$REPO_ROOT/$DESKTOP_BUILD_APP_PATH"
+  local install_dir="${PRISM_DESKTOP_INSTALL_DIR:-/Applications}"
+  local installed_app="$install_dir/$DESKTOP_APP_NAME"
+
+  echo "Building PRISM for macOS..."
+  npm run desktop:build:mac-app
+  validate_desktop_app "$built_app"
+
+  quit_desktop_app
+  install_desktop_app "$built_app"
+
+  echo "Launching PRISM..."
+  open "$installed_app"
+}
+
 run_standalone() {
   if [[ "$(uname -s)" != "Darwin" ]]; then
     echo "prism standalone currently targets macOS DMG output and is only supported on macOS." >&2
@@ -622,7 +762,10 @@ case "${1:-}" in
   mac-server | server)
     run_mac_server
     ;;
-  "" | up | web)
+  "")
+    run_desktop
+    ;;
+  up | web)
     run_web
     ;;
   down)

@@ -4,8 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "predev": "node ../../scripts/fetch-builtin-tts-model.mjs",
     "dev": "node --env-file-if-exists=../../.env --watch --experimental-strip-types src/server.ts",
     "build": "tsc -p tsconfig.json",
+    "prestart": "node ../../scripts/fetch-builtin-tts-model.mjs",
     "start": "node --env-file-if-exists=../../.env dist/server.js",
     "test": "node --test --experimental-strip-types src/__tests__/*.test.ts",
     "test:coverage": "node --test --experimental-strip-types --experimental-test-coverage --test-coverage-lines=85 --test-coverage-branches=65 --test-coverage-functions=85 --test-coverage-exclude='**/packages/**' --test-coverage-exclude='src/server.ts' src/__tests__/*.test.ts",
@@ -15,11 +17,13 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@huggingface/transformers": "^3.8.1",
     "@localai/config": "file:../../packages/config",
     "@localai/shared": "file:../../packages/shared",
     "dnssd-advertise": "^1.1.4",
     "docx": "^9.7.1",
     "fflate": "^0.8.3",
+    "kokoro-js": "^1.2.1",
     "qrcode": "^1.5.4",
     "sharp": "^0.34.5"
   },

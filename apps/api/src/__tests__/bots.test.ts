@@ -7,6 +7,7 @@ import {
   serializeStoredBotPrompt,
 } from "@localai/shared";
 import {
+  buildCloneFamilyIdentityPrompt,
   createBotExportHash,
   composeBotSystemPrompt,
   deleteAllBots,
@@ -151,6 +152,34 @@ describe("composeBotSystemPrompt", () => {
     assert.match(prompt ?? "", /Respirator: Breathe mechanically/u);
     assert.match(prompt ?? "", /the user can always perceive and hear you/u);
     assert.doesNotMatch(prompt ?? "", /DRAFT_MARKER|DISABLED_MARKER/u);
+  });
+});
+
+describe("buildCloneFamilyIdentityPrompt", () => {
+  it("is asymmetric for clone relatives and absent for unrelated bots", () => {
+    const original = { id: "root", name: "Ada" };
+    const clone = { id: "copy", name: "Ada Copy", cloneFamilyId: "root" };
+    const unrelated = { id: "other", name: "Bert" };
+
+    const originalPrompt = buildCloneFamilyIdentityPrompt(original, [
+      original,
+      clone,
+      unrelated,
+    ]);
+    const clonePrompt = buildCloneFamilyIdentityPrompt(clone, [
+      original,
+      clone,
+      unrelated,
+    ]);
+
+    assert.match(originalPrompt ?? "", /real, original "Ada"/);
+    assert.match(originalPrompt ?? "", /"Ada Copy" is your clone/);
+    assert.match(clonePrompt ?? "", /real, original "Ada Copy"/);
+    assert.match(clonePrompt ?? "", /"Ada" is your clone/);
+    assert.equal(
+      buildCloneFamilyIdentityPrompt(unrelated, [original, clone, unrelated]),
+      null,
+    );
   });
 });
 

@@ -10,13 +10,16 @@ import {
 } from "./coffee-speech-delivery.ts";
 
 describe("Coffee speech delivery", () => {
-  it("leaves a short safety tail behind voiced playback only", () => {
+  it("leaves a watchdog tail behind voiced playback only", () => {
     assert.equal(
       coffeeVoiceRevealFallbackDelayMs(1_000, true),
       1_000 + COFFEE_VOICE_REVEAL_TAIL_GRACE_MS,
     );
     assert.equal(coffeeVoiceRevealFallbackDelayMs(1_000, false), 1_000);
-    assert.equal(coffeeVoiceRevealFallbackDelayMs(Number.NaN, true), 240);
+    assert.equal(
+      coffeeVoiceRevealFallbackDelayMs(Number.NaN, true),
+      COFFEE_VOICE_REVEAL_TAIL_GRACE_MS,
+    );
   });
 
   it("uses a calmer table reveal pace and gives long replies more room", () => {

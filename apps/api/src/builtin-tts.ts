@@ -2,10 +2,12 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import {
   BOT_AUDIO_VOICE_IDS,
+  PRISM_BUILTIN_ENGLISH_VOICES,
   normalizeBotAudioVoiceProfileV1,
+  prismBuiltinEnglishVoice,
   type BotAudioVoiceId,
   type BotAudioVoiceProfileV1,
 } from "@localai/shared";
@@ -16,6 +18,16 @@ export interface SystemVoiceOption {
   name: string;
   locale: string;
 }
+
+export const PRISM_BUILTIN_TTS_MODEL_ID =
+  "onnx-community/Kokoro-82M-v1.0-ONNX";
+
+const PRISM_BUILTIN_TTS_REQUIRED_FILES = [
+  "config.json",
+  "tokenizer.json",
+  "tokenizer_config.json",
+  "onnx/model_quantized.onnx",
+] as const;
 
 const WINDOWS_LIST_VOICES_SCRIPT = `
 Add-Type -AssemblyName System.Speech
@@ -49,10 +61,6 @@ try {
   $synth.Dispose()
 }
 `;
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
 
 function windowsPowerShellPath(): string | null {
   const systemRoot = process.env.SystemRoot ?? process.env.WINDIR;
@@ -160,7 +168,6 @@ export function systemEnglishGenerationSettings(args: {
   installedVoices: readonly string[];
 }): { voiceName: string | null; rate: number; slotIndex: number } {
   const profile = normalizeBotAudioVoiceProfileV1(args.profile);
-  const pitchPlaybackRatio = 2 ** ((profile.pitch * 650) / 1200);
   return {
     voiceName: selectSystemVoice({
       platform: args.platform,
@@ -169,14 +176,75 @@ export function systemEnglishGenerationSettings(args: {
       installedVoices: args.installedVoices,
     }),
     rate: args.platform === "darwin"
-      ? Math.round(clamp((175 + profile.pace * 55) / pitchPlaybackRatio, 90, 250))
-      : Math.round(clamp(profile.pace * 4 - profile.pitch * 3, -6, 6)),
+      // Tempo is applied once, locally in the browser playback transform. This
+      // keeps native synthesis neutral and stops pitch from altering duration.
+      ? 175
+      : 0,
     slotIndex: Number(profile.baseVoiceId.slice(-1)) - 1,
   };
 }
 
 let macVoiceListPromise: Promise<SystemVoiceOption[]> | null = null;
 let windowsVoiceListPromise: Promise<SystemVoiceOption[]> | null = null;
+let kokoroTtsPromise: Promise<import("kokoro-js").KokoroTTS> | null = null;
+let kokoroModelRoot: string | null = null;
+
+function normalizedModelRoot(path: string): string {
+  const normalized = resolve(path);
+  return normalized.endsWith(sep) ? normalized : `${normalized}${sep}`;
+}
+
+export function prismBuiltinTtsModelRoot(
+  cwd = process.cwd(),
+  configuredRoot = process.env.PRISM_BUILTIN_TTS_MODEL_DIR,
+): string | null {
+  const candidates = [
+    configuredRoot,
+    join(cwd, "models"),
+    join(cwd, "runtime", "models"),
+    join(cwd, ".cache", "prism-models"),
+    // Workspace commands run from either the repo root or apps/api.
+    join(cwd, "..", "..", ".cache", "prism-models"),
+  ].filter((value): value is string => Boolean(value?.trim()));
+  return candidates.find((root) =>
+    PRISM_BUILTIN_TTS_REQUIRED_FILES.every((file) =>
+      existsSync(join(root, PRISM_BUILTIN_TTS_MODEL_ID, file)),
+    ),
+  ) ?? null;
+}
+
+async function getKokoroTts(): Promise<import("kokoro-js").KokoroTTS> {
+  const modelRoot = prismBuiltinTtsModelRoot();
+  if (!modelRoot) {
+    throw new Error(
+      "PRISM's built-in voice pack is not installed. Re-run the runtime staging step.",
+    );
+  }
+  if (kokoroTtsPromise && kokoroModelRoot === modelRoot) return kokoroTtsPromise;
+
+  kokoroModelRoot = modelRoot;
+  kokoroTtsPromise = (async () => {
+    const [{ env }, { KokoroTTS }] = await Promise.all([
+      import("@huggingface/transformers"),
+      import("kokoro-js"),
+    ]);
+    // A LOCAL speech request must never turn a missing model into a download.
+    // Installed desktop and Docker builds stage the pinned model ahead of time.
+    env.allowRemoteModels = false;
+    env.allowLocalModels = true;
+    env.localModelPath = normalizedModelRoot(modelRoot);
+    env.useFSCache = false;
+    return KokoroTTS.from_pretrained(PRISM_BUILTIN_TTS_MODEL_ID, {
+      dtype: "q8",
+      device: "cpu",
+    });
+  })().catch((error) => {
+    kokoroTtsPromise = null;
+    kokoroModelRoot = null;
+    throw error;
+  });
+  return kokoroTtsPromise;
+}
 
 async function listInstalledSystemVoiceOptions(
   platform: SupportedSystemTtsPlatform,
@@ -221,12 +289,8 @@ async function listInstalledSystemVoices(
   return (english.length > 0 ? english : options).map((voice) => voice.name);
 }
 
-export function builtinEnglishAvailable(platform = process.platform): boolean {
-  if (platform === "darwin") {
-    return existsSync("/usr/bin/say") && existsSync("/usr/bin/afconvert");
-  }
-  if (platform === "win32") return windowsPowerShellPath() !== null;
-  return false;
+export function builtinEnglishAvailable(_platform = process.platform): boolean {
+  return prismBuiltinTtsModelRoot() !== null;
 }
 
 export async function getSystemVoiceCapabilities(signal?: AbortSignal): Promise<{
@@ -235,31 +299,27 @@ export async function getSystemVoiceCapabilities(signal?: AbortSignal): Promise<
   voices: SystemVoiceOption[];
   slots: Array<{ voiceId: BotAudioVoiceId; name: string | null }>;
   hasFiveDistinctVoices: boolean;
+  pack: typeof PRISM_BUILTIN_ENGLISH_VOICES;
 }> {
-  if (process.platform !== "darwin" && process.platform !== "win32") {
-    return {
-      platform: process.platform,
-      installedVoices: [],
-      voices: [],
-      slots: BOT_AUDIO_VOICE_IDS.map((voiceId) => ({ voiceId, name: null })),
-      hasFiveDistinctVoices: false,
-    };
-  }
-  const platform = process.platform as SupportedSystemTtsPlatform;
-  const allVoices = await listInstalledSystemVoiceOptions(platform, signal).catch(() => []);
+  const platform = process.platform;
+  const allVoices = platform === "darwin" || platform === "win32"
+    ? await listInstalledSystemVoiceOptions(platform, signal).catch(() => [])
+    : [];
   const englishVoices = allVoices.filter((voice) => voice.locale.toLowerCase().startsWith("en"));
   const voices = englishVoices.length > 0 ? englishVoices : allVoices;
   const installedVoices = voices.map((voice) => voice.name);
   const slots = BOT_AUDIO_VOICE_IDS.map((voiceId) => ({
     voiceId,
-    name: null,
+    name: prismBuiltinEnglishVoice(voiceId).name,
   }));
   return {
     platform,
     installedVoices,
     voices,
     slots,
-    hasFiveDistinctVoices: new Set(slots.map((slot) => slot.name).filter(Boolean)).size >= 5,
+    hasFiveDistinctVoices: builtinEnglishAvailable() &&
+      new Set(slots.map((slot) => slot.name).filter(Boolean)).size >= 5,
+    pack: PRISM_BUILTIN_ENGLISH_VOICES,
   };
 }
 
@@ -269,20 +329,26 @@ function isPcmWave(buffer: Buffer): boolean {
     buffer.subarray(8, 12).toString("ascii") === "WAVE";
 }
 
-export async function generateBuiltinEnglishWave(args: {
+async function generateSystemEnglishWave(args: {
   text: string;
   profile: BotAudioVoiceProfileV1;
   signal?: AbortSignal;
 }): Promise<Buffer> {
   if (args.signal?.aborted) throw new DOMException("Aborted", "AbortError");
   if (process.platform !== "darwin" && process.platform !== "win32") {
-    throw new Error("System English voices require the Prism desktop app on macOS or Windows.");
+    throw new Error("Operating-system voices require PRISM Desktop on macOS or Windows.");
   }
-  if (!builtinEnglishAvailable()) {
-    throw new Error("System English voices are unavailable on this device.");
+  const platform = process.platform as SupportedSystemTtsPlatform;
+  if (
+    platform === "darwin" &&
+    (!existsSync("/usr/bin/say") || !existsSync("/usr/bin/afconvert"))
+  ) {
+    throw new Error("macOS speech voices are unavailable on this device.");
+  }
+  if (platform === "win32" && windowsPowerShellPath() === null) {
+    throw new Error("Windows speech voices are unavailable on this device.");
   }
 
-  const platform = process.platform as SupportedSystemTtsPlatform;
   const installedVoices = await listInstalledSystemVoices(platform, args.signal);
   const settings = systemEnglishGenerationSettings({
     profile: args.profile,
@@ -291,6 +357,12 @@ export async function generateBuiltinEnglishWave(args: {
   });
   if (installedVoices.length === 0) {
     throw new Error("No compatible system English voices are installed.");
+  }
+  if (
+    normalizeBotAudioVoiceProfileV1(args.profile).systemVoiceName &&
+    !settings.voiceName
+  ) {
+    throw new Error("The selected operating-system voice is no longer installed.");
   }
 
   const directory = await mkdtemp(join(tmpdir(), "prism-system-tts-"));
@@ -348,5 +420,58 @@ export async function generateBuiltinEnglishWave(args: {
     return wave;
   } finally {
     await rm(directory, { recursive: true, force: true });
+  }
+}
+
+async function generatePrismVoicePackWave(args: {
+  text: string;
+  profile: BotAudioVoiceProfileV1;
+  signal?: AbortSignal;
+}): Promise<Buffer> {
+  if (args.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  const profile = normalizeBotAudioVoiceProfileV1(args.profile);
+  const voice = prismBuiltinEnglishVoice(profile.baseVoiceId);
+  const tts = await getKokoroTts();
+  if (args.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  const audio = await tts.generate(args.text, {
+    voice: voice.engineVoiceId,
+    // Pace is applied once by PRISM's formant-preserving playback worklet.
+    speed: 1,
+  });
+  if (args.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  return Buffer.from(audio.toWav());
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
+export async function generateBuiltinEnglishWave(args: {
+  text: string;
+  profile: BotAudioVoiceProfileV1;
+  allowOperatingSystemVoices?: boolean;
+  signal?: AbortSignal;
+}): Promise<Buffer> {
+  const profile = normalizeBotAudioVoiceProfileV1(args.profile);
+  if (args.allowOperatingSystemVoices && profile.systemVoiceName) {
+    try {
+      return await generateSystemEnglishWave({ ...args, profile });
+    } catch (error) {
+      if (isAbortError(error)) throw error;
+      // A removed or broken host voice must not silence the bot. The portable
+      // built-in identity remains the deterministic local fallback.
+    }
+  }
+
+  try {
+    return await generatePrismVoicePackWave({ ...args, profile });
+  } catch (error) {
+    if (isAbortError(error) || !args.allowOperatingSystemVoices) throw error;
+    // If a packaged model is damaged, people who explicitly enabled OS voices
+    // still retain a clean device-local recovery path.
+    return generateSystemEnglishWave({
+      ...args,
+      profile: { ...profile, systemVoiceName: null },
+    });
   }
 }

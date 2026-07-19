@@ -141,6 +141,7 @@ export interface BackupUserSettings {
   voiceMode?: VoiceMode;
   voiceEffectsEnabled?: boolean;
   voiceVolume?: number;
+  operatingSystemVoicesEnabled?: boolean;
   prismDefaultBotAudioVoiceProfile?: BotAudioVoiceProfileV1;
   englishVoiceEngine?: EnglishVoiceEngine;
   defaultSystemVoiceName?: string | null;
@@ -155,6 +156,8 @@ export interface BackupBotSnapshot {
   name: string;
   namePronunciation?: string;
   systemPrompt: string;
+  /** Account backups preserve server-owned clone lineage as bot ids. */
+  cloneFamilyId?: string | null;
   voicePreviewLine?: string | null;
   exportHash?: string | null;
   model?: string | null;
@@ -1291,7 +1294,7 @@ export function exportUserSnapshot(
          elevenlabs_key_ciphertext,
          elevenlabs_key_iv,
          elevenlabs_key_tag
-         ,voice_mode, voice_effects_enabled, voice_volume, english_voice_engine,
+         ,voice_mode, voice_effects_enabled, voice_volume, operating_system_voices_enabled, english_voice_engine,
          default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank,
          elevenlabs_voice_model, elevenlabs_voice_collection_id,
          prism_default_bot_audio_voice_profile
@@ -1353,6 +1356,7 @@ export function exportUserSnapshot(
         voice_mode: string | null;
         voice_effects_enabled: number | null;
         voice_volume: number | null;
+        operating_system_voices_enabled: number | null;
         english_voice_engine: string | null;
         default_system_voice_name: string | null;
         default_elevenlabs_voice_id: string | null;
@@ -1440,6 +1444,8 @@ export function exportUserSnapshot(
         voiceMode: normalizeVoiceMode(user.voice_mode),
         voiceEffectsEnabled: user.voice_effects_enabled !== 0,
         voiceVolume: normalizeBotVoiceVolume(user.voice_volume),
+        operatingSystemVoicesEnabled:
+          user.operating_system_voices_enabled !== 0,
         prismDefaultBotAudioVoiceProfile:
           parseStoredBotAudioVoiceProfileV1(
             user.prism_default_bot_audio_voice_profile,
@@ -1507,6 +1513,7 @@ export function exportUserSnapshot(
          name,
          name_pronunciation,
          system_prompt,
+         clone_family_id,
          voice_preview_line,
          export_hash,
          model,
@@ -1563,6 +1570,7 @@ export function exportUserSnapshot(
     name: string;
     name_pronunciation: string | null;
     system_prompt: string;
+    clone_family_id: string | null;
     voice_preview_line: string | null;
     export_hash: string | null;
     model: string | null;
@@ -1806,6 +1814,7 @@ export function exportUserSnapshot(
           }
           : {}),
         systemPrompt: bot.system_prompt,
+        ...(bot.clone_family_id ? { cloneFamilyId: bot.clone_family_id } : {}),
         ...(normalizeVoicePreviewLine(bot.voice_preview_line)
         ? {
             voicePreviewLine: normalizeVoicePreviewLine(bot.voice_preview_line),
@@ -2359,6 +2368,7 @@ function importUserSnapshotWithinTransaction(
         voice_mode = ?,
         voice_effects_enabled = ?,
         voice_volume = ?,
+        operating_system_voices_enabled = ?,
         english_voice_engine = ?,
         default_system_voice_name = ?,
         default_elevenlabs_voice_id = ?,
@@ -2465,6 +2475,7 @@ function importUserSnapshotWithinTransaction(
       normalizeVoiceMode(settings.voiceMode),
       settings.voiceEffectsEnabled === false ? 0 : 1,
       normalizeBotVoiceVolume(settings.voiceVolume),
+      settings.operatingSystemVoicesEnabled === true ? 1 : 0,
       normalizeEnglishVoiceEngine(settings.englishVoiceEngine),
       typeof settings.defaultSystemVoiceName === "string"
         ? settings.defaultSystemVoiceName.trim().slice(0, 200) || null
@@ -2489,6 +2500,13 @@ function importUserSnapshotWithinTransaction(
   }
 
   if (Array.isArray(snapshot.bots)) {
+    const backupBotIds = new Set(
+      snapshot.bots.flatMap((bot) =>
+        bot && typeof bot.id === "string" && bot.id.trim()
+          ? [bot.id.trim()]
+          : [],
+      ),
+    );
     const insertBot = db.prepare(`
       INSERT OR REPLACE INTO bots (
         id,
@@ -2496,6 +2514,7 @@ function importUserSnapshotWithinTransaction(
         name,
         name_pronunciation,
         system_prompt,
+        clone_family_id,
         voice_preview_line,
         export_hash,
         model,
@@ -2541,7 +2560,7 @@ function importUserSnapshotWithinTransaction(
         visibility,
         created_at,
         updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const bot of snapshot.bots) {
       if (!bot || typeof bot.id !== "string" || bot.id.trim().length === 0)
@@ -2555,6 +2574,10 @@ function importUserSnapshotWithinTransaction(
           : "Imported Bot",
         normalizeBotNamePronunciation(bot.namePronunciation),
         typeof bot.systemPrompt === "string" ? bot.systemPrompt : "",
+        typeof bot.cloneFamilyId === "string" &&
+          backupBotIds.has(bot.cloneFamilyId.trim())
+          ? bot.cloneFamilyId.trim()
+          : null,
         normalizeVoicePreviewLine(bot.voicePreviewLine) || null,
         typeof bot.exportHash === "string" && bot.exportHash.trim().length > 0
           ? bot.exportHash.trim().toLowerCase()

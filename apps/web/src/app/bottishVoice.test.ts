@@ -177,14 +177,15 @@ describe("Bottish speech plan", () => {
     assert.deepEqual(new Uint8Array(unmixed), originalBytes);
   });
 
-  it("ignores legacy Tone, Lilt, Pace, and Warmth values", () => {
+  it("ignores retired Tone and Warmth while Lilt remains a local pitch contour", () => {
     const base = buildBottishPlan("Testing removed controls.", neutral, "same");
     const legacyValues = buildBottishPlan(
       "Testing removed controls.",
       { ...neutral, pace: 1, warmth: -1, lilt: 1, signal: -1 },
       "same"
     );
-    assert.deepEqual(legacyValues, base);
+    assert.equal(legacyValues.durationMs, base.durationMs);
+    assert.notDeepEqual(legacyValues.notes, base.notes);
   });
 
   it("keeps the neutral mix bright and clearly audible", () => {

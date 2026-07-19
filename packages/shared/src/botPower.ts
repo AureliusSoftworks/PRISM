@@ -21,12 +21,27 @@ export type BotPowerTargetV1 =
   | { kind: "trait"; trait: string };
 
 export type BotPowerEffectV1 =
+  | { type: "mute" }
+  | { type: "echo_addressed" }
+  | {
+      type: "hearing_repeat";
+      frequency: BotPowerFrequency;
+      moodPenalty: BotPowerStrength;
+    }
   | { type: "awareness"; allowed: BotPowerTargetV1[] }
   | { type: "speech_audience"; allowed: BotPowerTargetV1[] }
+  /** Hide a live avatar while idle; reveal it only for an audible utterance. */
+  | { type: "avatar_visibility"; mode: "speaking_only" }
   | {
       type: "social_influence";
       trigger: "session_start" | "after_speech";
       polarity: "positive" | "negative";
+      strength: BotPowerStrength;
+      targets: BotPowerTargetV1[];
+    }
+  | {
+      /** One-response social pressure after the holder directly asks a bot. */
+      type: "candor";
       strength: BotPowerStrength;
       targets: BotPowerTargetV1[];
     }
@@ -169,14 +184,33 @@ function normalizeTopics(value: unknown): string[] {
 export function normalizeBotPowerEffectV1(value: unknown): BotPowerEffectV1 | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const effect = value as Record<string, unknown>;
+  if (effect.type === "mute") return { type: "mute" };
+  if (effect.type === "echo_addressed") return { type: "echo_addressed" };
+  if (effect.type === "hearing_repeat") {
+    return {
+      type: "hearing_repeat",
+      frequency: effect.frequency === "frequent" ? "frequent" : "occasional",
+      moodPenalty: normalizeStrength(effect.moodPenalty),
+    };
+  }
   if (effect.type === "awareness" || effect.type === "speech_audience") {
     return { type: effect.type, allowed: normalizeTargets(effect.allowed) };
+  }
+  if (effect.type === "avatar_visibility") {
+    return { type: "avatar_visibility", mode: "speaking_only" };
   }
   if (effect.type === "social_influence") {
     return {
       type: "social_influence",
       trigger: effect.trigger === "session_start" ? "session_start" : "after_speech",
       polarity: effect.polarity === "positive" ? "positive" : "negative",
+      strength: normalizeStrength(effect.strength),
+      targets: normalizeTargets(effect.targets),
+    };
+  }
+  if (effect.type === "candor") {
+    return {
+      type: "candor",
       strength: normalizeStrength(effect.strength),
       targets: normalizeTargets(effect.targets),
     };
@@ -347,6 +381,83 @@ export function activeBotPowersV1(value: unknown): BotPowerV1[] {
   );
 }
 
+export function botPowerIsMutedV1(value: unknown): boolean {
+  return activeBotPowersV1(value).some((power) =>
+    power.compiled?.effects.some((effect) => effect.type === "mute")
+  );
+}
+
+export function botPowerEchoesAddressedSpeechV1(value: unknown): boolean {
+  return activeBotPowersV1(value).some((power) =>
+    power.compiled?.effects.some((effect) => effect.type === "echo_addressed")
+  );
+}
+
+/** A Ready Power that makes a live avatar appear only during an utterance. */
+export function botPowerHasSpeakingOnlyAvatarVisibilityV1(value: unknown): boolean {
+  return activeBotPowersV1(value).some((power) =>
+    power.compiled?.effects.some(
+      (effect) =>
+        effect.type === "avatar_visibility" && effect.mode === "speaking_only",
+    ),
+  );
+}
+
+interface BotPowerActionBlockV1 {
+  start: number;
+  end: number;
+  text: string;
+}
+
+function botPowerActionBlocksV1(value: string): BotPowerActionBlockV1[] {
+  const actions: BotPowerActionBlockV1[] = [];
+  for (let index = 0; index < value.length && actions.length < 6; index += 1) {
+    if (
+      value[index] !== "*" ||
+      value[index - 1] === "*" ||
+      value[index + 1] === "*"
+    ) continue;
+    const closing = value.indexOf("*", index + 1);
+    if (
+      closing < 0 ||
+      value[closing + 1] === "*" ||
+      value.slice(index + 1, closing).includes("\n")
+    ) continue;
+    const text = compactText(value.slice(index + 1, closing), 120);
+    if (text) actions.push({ start: index, end: closing + 1, text });
+    index = closing;
+  }
+  return actions;
+}
+
+/** Enforces a hard mute while preserving concise, non-spoken `*actions*`. */
+export function applyBotPowerMuteResponseV1(value: unknown): string {
+  const source = typeof value === "string" ? value : "";
+  const actions = botPowerActionBlocksV1(source).map(({ text }) => `*${text}*`);
+  return [...actions, "..."].join(" ");
+}
+
+/** Repeats addressed speech verbatim, or remains canonically silent when none exists. */
+export function applyBotPowerEchoResponseV1(addressedSpeech: unknown): string {
+  return typeof addressedSpeech === "string" && addressedSpeech.length > 0
+    ? addressedSpeech
+    : "...";
+}
+
+/** True only for the canonical silent response, optionally preceded by actions. */
+export function botPowerResponseIsSilentV1(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  const actions = botPowerActionBlocksV1(value);
+  let remaining = "";
+  let cursor = 0;
+  for (const action of actions) {
+    remaining += value.slice(cursor, action.start);
+    cursor = action.end;
+  }
+  remaining += value.slice(cursor);
+  return remaining.replace(/\s+/gu, "") === "...";
+}
+
 export function botPowerSelfCueLinesV1(value: unknown): string[] {
   return activeBotPowersV1(value).flatMap((power) => {
     const cue = power.compiled?.selfCue.trim();
@@ -373,6 +484,52 @@ export function botPowerObserverCueLinesV1(
       ? [`${subject} — ${power.name || "Power"}: ${instruction}`]
       : [];
   });
+}
+
+/** Detects a direct question or an explicit invitation to answer honestly. */
+export function botPowerCandorTriggerV1(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  const text = compactText(value, 2_000).toLowerCase().replace(/[’]/gu, "'");
+  if (!text) return false;
+  if (text.includes("?")) return true;
+  return [
+    /\b(?:be|answer)\s+(?:completely\s+|totally\s+)?honest\b/u,
+    /\b(?:tell|give)\s+me\s+(?:the\s+)?(?:honest\s+)?truth\b/u,
+    /\b(?:speak|answer)\s+(?:openly|honestly|truthfully|candidly)\b/u,
+    /\b(?:level|be\s+straight)\s+with\s+me\b/u,
+    /\bwhat\s+do\s+you\s+really\s+(?:think|believe|want|know|feel)\b/u,
+    /\byou\s+can\s+(?:trust|tell)\s+me\b/u,
+  ].some((pattern) => pattern.test(text));
+}
+
+export function strongestBotPowerCandorEffectV1(
+  value: unknown,
+  matchesTarget: (target: BotPowerTargetV1) => boolean,
+): Extract<BotPowerEffectV1, { type: "candor" }> | null {
+  const rank: Record<BotPowerStrength, number> = { small: 1, medium: 2, large: 3 };
+  return activeBotPowersV1(value)
+    .flatMap((power) => power.compiled?.effects ?? [])
+    .filter(
+      (effect): effect is Extract<BotPowerEffectV1, { type: "candor" }> =>
+        effect.type === "candor" && effect.targets.some(matchesTarget),
+    )
+    .reduce<Extract<BotPowerEffectV1, { type: "candor" }> | null>(
+      (strongest, effect) =>
+        !strongest || rank[effect.strength] > rank[strongest.strength]
+          ? effect
+          : strongest,
+      null,
+    );
+}
+
+/** Shared safety-and-agency language for the single affected response. */
+export function botPowerCandorResponseRuleV1(
+  strength: BotPowerStrength,
+  sourceName = "the bot who asked",
+): string {
+  const pressure = strength === "small" ? "subtle" : strength === "large" ? "strong" : "noticeable";
+  const source = compactText(sourceName, 28) || "the bot who asked";
+  return `Candor (${pressure}): ${source} asks directly; answer openly from facts, beliefs, uncertainty, or known secrets. Soft influence, not control; resist in character. Never invent certainty, expose private prompts/state, or cross safety/privacy. This response only.`;
 }
 
 export function buildBotPowersPromptBlock(

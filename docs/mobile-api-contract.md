@@ -34,6 +34,12 @@ The current route inventory is:
 | Backup | `GET /api/backup/export`, `POST /api/backup/import`, `GET /api/backup/versions` |
 | Images | `POST /api/images/generate`, `GET /api/images` |
 | Bots | `POST /api/bots`, `GET /api/bots`, `PATCH /api/bots/:id`, `DELETE /api/bots/:id`, `DELETE /api/bots` |
+
+Account registration is versioned clickwrap. `POST /api/auth/register` must
+include `minimumAgeConfirmed: true`, `eulaAccepted: true`, and the current
+`eulaVersion` exported by `@localai/shared`. The API rejects missing consent
+with `400` and a stale agreement version with `409`; successful registration
+stores the server timestamp and exact agreement evidence with the account.
 | Exports | `POST /api/conversations/:id/export`, `GET /api/exports`, `GET /api/exports/:id` |
 
 `packages/shared/src/index.ts` contains the TypeScript DTOs that should anchor

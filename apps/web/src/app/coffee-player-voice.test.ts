@@ -8,7 +8,7 @@ import {
 } from "./coffee-player-voice.ts";
 
 describe("Coffee player voice", () => {
-  it("keeps every LOCAL or offline-protected table on System TTS", () => {
+  it("keeps every LOCAL or offline-protected table on built-in speech", () => {
     assert.equal(coffeePlayerEnglishEngine({
       accountProvider: "openai",
       coffeeProvider: "local",

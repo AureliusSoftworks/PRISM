@@ -478,6 +478,51 @@ export interface BotcastReplayEvent {
   occurredAt: string;
 }
 
+/** Reads the episode-start Power snapshot so a Signal replay keeps its reveal. */
+export function botcastSnapshotHasSpeakingOnlyAvatarVisibility(
+  episode: Pick<BotcastEpisode, "events" | "hostBotId" | "guestBotId">,
+  role: BotcastSpeakerRole,
+): boolean {
+  const snapshot = episode.events.find(
+    (event) =>
+      event.kind === "segment" &&
+      event.payload.segment === "opening" &&
+      event.payload.ordinal === 0,
+  )?.payload.powerSnapshot;
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) {
+    return false;
+  }
+  const value = snapshot as Record<string, unknown>;
+  if (
+    value.v !== 1 ||
+    value.hostBotId !== episode.hostBotId ||
+    value.guestBotId !== episode.guestBotId
+  ) {
+    return false;
+  }
+  const powers = role === "host" ? value.hostPowers : value.guestPowers;
+  if (!Array.isArray(powers)) return false;
+  // The API snapshots only normalized Ready Powers at episode creation. Keep
+  // this structural reader local to the replay contract so the shared Signal
+  // model does not need to import the broader bot-Power runtime.
+  return powers.some((power) => {
+    if (!power || typeof power !== "object" || Array.isArray(power)) return false;
+    const record = power as Record<string, unknown>;
+    if (record.enabled === false || record.compileStatus !== "ready") return false;
+    const compiled = record.compiled;
+    if (!compiled || typeof compiled !== "object" || Array.isArray(compiled)) return false;
+    const effects = (compiled as Record<string, unknown>).effects;
+    return Array.isArray(effects) && effects.some(
+      (effect) =>
+        effect !== null &&
+        typeof effect === "object" &&
+        !Array.isArray(effect) &&
+        (effect as Record<string, unknown>).type === "avatar_visibility" &&
+        (effect as Record<string, unknown>).mode === "speaking_only",
+    );
+  });
+}
+
 export interface BotcastSocialInfluenceEventV1 {
   v: 1;
   effect: "social_influence";
@@ -545,9 +590,13 @@ function normalizeSavedBotcastListenerReactionPlan(
     row.spokenCue === "hmm" ||
     row.spokenCue === "right" ||
     row.spokenCue === "oh" ||
-    row.spokenCue === "go on"
-    ? row.spokenCue
-    : undefined;
+    row.spokenCue === "go on" ||
+    row.spokenCue === "No, hold on." ||
+    row.spokenCue === "Let me answer that." ||
+    row.spokenCue === "That's not fair."
+      ? row.spokenCue
+      : undefined;
+  const interjectionAttempt = row.interjectionAttempt === true;
   if (
     row.v !== 1 ||
     row.name !== "listenerReaction" ||
@@ -574,6 +623,7 @@ function normalizeSavedBotcastListenerReactionPlan(
     targetSource,
     visualAction,
     ...(spokenCue ? { spokenCue } : {}),
+    ...(interjectionAttempt ? { interjectionAttempt: true as const } : {}),
     targetProgress: row.targetProgress,
     seed,
     cameraCutEligible: row.cameraCutEligible,
@@ -805,8 +855,18 @@ export interface BotcastEpisodeCreateRequest {
   durationMinutes?: BotcastSessionDurationMinutes | null;
 }
 
+/** How a live producer cue reaches the host. */
+export type BotcastProducerCueDelivery =
+  | "next_host_turn"
+  | "interrupt_guest";
+
 export interface BotcastEpisodeAdvanceRequest {
   cue?: BotcastProducerCue;
+  /**
+   * Omit for the normal, non-disruptive queue: the host receives the cue on
+   * their next turn. `interrupt_guest` gives the host the next turn instead.
+   */
+  cueDelivery?: BotcastProducerCueDelivery;
 }
 
 export interface BotcastEpisodeAdvanceResponse {
@@ -853,8 +913,15 @@ export function applyBotcastProducerCueToTension(
     /\b(trauma|abuse|crime|death|family|secret|scandal|failure|fear|regret)\b/iu.test(
       cue.detail ?? "",
     );
+  const explicitPressureDirection =
+    cue.kind === "ask_about" &&
+    /\b(?:(?:be|get|grow)\s+(?:mean(?:er)?|cruel(?:er)?|harsher|nastier)|(?:annoy|offend|insult|humiliate|antagonize|provoke|enrage|needle|taunt)\s+(?:him|her|them|(?:(?:a|the|your|this|that)\s+)?guest)|(?:try\s+to\s+)?(?:make|force|get)\s+(?:him|her|them|(?:(?:a|the|your|this|that)\s+)?guest)\s+(?:to\s+)?(?:leave|walk\s*out|quit|rage[-\s]?quit)|(?:drive|run)\s+(?:him|her|them|(?:(?:a|the|your|this|that)\s+)?guest)\s+(?:off|out\s+of)\s+(?:the\s+)?(?:show|episode|studio)|rage[-\s]?quit|walkout)\b/iu.test(
+      cue.detail ?? "",
+    );
   const delta =
-    cue.kind === "press_harder" || boundaryLanguage
+    cue.kind === "press_harder" ||
+    boundaryLanguage ||
+    explicitPressureDirection
       ? 1
       : cue.kind === "move_on" || cue.kind === "lighten_up"
         ? -1

@@ -22,4 +22,13 @@ test("Coffee shares tactful foley and cup-synchronized audio with Signal", () =>
     source,
     /coffeeSessionPhase !== "finished" \|\| coffeeReplayActive/u,
   );
+  const atmosphereSource = readFileSync(
+    new URL("./session-atmosphere-audio.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(atmosphereSource, /mutation\.removedNodes/u);
+  assert.match(
+    atmosphereSource,
+    /coffeeCupFoleyCueForTransition\(previous, false\)/u,
+  );
 });

@@ -81,6 +81,7 @@ describe("saved group room atmosphere integration", () => {
       pageSource,
       /purpose: "group-room-wallpaper",[\s\S]*?groupName: target\.name,[\s\S]*?groupDescription: target\.description,[\s\S]*?memberBotIds/u,
     );
+    assert.match(pageSource, /variationSeed:[\s\S]*?crypto\.randomUUID/u);
     assert.match(pageSource, /resolveZenWallpaperImageModels\(\)/u);
     assert.match(
       pageSource,
@@ -154,7 +155,7 @@ describe("saved group room atmosphere integration", () => {
     assert.match(pageSource, /data-room-atmosphere-image-id=/u);
     assert.match(
       pageSource,
-      /onError=\{\(\) =>[\s\S]*?next\.add\(botGroupRoomAtmosphereImageId\)/u,
+      /onError=\{[\s\S]*?botGroupRoomAtmosphereImageId[\s\S]*?next\.add\(botGroupRoomAtmosphereImageId\)/u,
     );
     assert.match(
       pageSource,
@@ -167,6 +168,23 @@ describe("saved group room atmosphere integration", () => {
     assert.match(
       pageSource,
       /deleteAllGalleryImages[\s\S]*?deletedImageIds[\s\S]*?setBotGroupFailedWallpaperImageIds/u,
+    );
+  });
+
+  it("uses stable bundled defaults for marketplace groups without overriding custom rooms", () => {
+    assert.match(pageSource, /resolveBotMarketplaceGroupAtmosphere/u);
+    assert.match(
+      pageSource,
+      /botGroupRoomAtmosphereImageId \|\| !botGroupRoomAtmosphereGroup[\s\S]*?marketplaceThemeId/u,
+    );
+    assert.match(pageSource, /data-room-atmosphere-marketplace-theme=/u);
+    assert.match(
+      pageSource,
+      /selectedAtmosphere \|\| marketplaceAtmosphere/u,
+    );
+    assert.match(
+      cssSource,
+      /\.botGroupRoomAtmosphereBackdrop\[data-receded="true"\][\s\S]*?opacity: 0\.3/u,
     );
   });
 

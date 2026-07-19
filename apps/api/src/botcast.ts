@@ -17,6 +17,7 @@ import type {
   BotcastGuestPresenceMode,
   BotcastMessage,
   BotcastProducerCue,
+  BotcastProducerCueDelivery,
   BotcastReplayEvent,
   BotcastReplayEventKind,
   BotcastSocialInfluenceEventV1,
@@ -37,6 +38,7 @@ import type {
 } from "@localai/shared";
 import {
   BOTCAST_DASHBOARD_BLURB_FALLBACKS,
+  BOTCAST_DIRECTOR_MIN_SHOT_MS,
   BOTCAST_LOCAL_INTRO_DURATION_MS,
   BOTCAST_IMMERSIVE_VOICE_TAGS,
   BOTCAST_SESSION_DURATION_MINUTES_MAX,
@@ -45,9 +47,16 @@ import {
   BOTCAST_DEFAULT_STUDIO_ATMOSPHERE_MIX,
   BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS,
   applyBotcastProducerCueToTension,
+  applyBotPowerEchoResponseV1,
+  applyBotPowerMuteResponseV1,
   activeBotPowersV1,
+  botPowerCandorResponseRuleV1,
+  botPowerCandorTriggerV1,
+  botPowerEchoesAddressedSpeechV1,
+  botPowerIsMutedV1,
   botPowerObserverCueLinesV1,
   botPowerSelfCueLinesV1,
+  strongestBotPowerCandorEffectV1,
   botcastFallbackStudioAccentVariantForSeed,
   botcastDirectorSuggestion,
   botcastGuestDepartureEligible,
@@ -69,6 +78,7 @@ import {
   rankSignalPersonaTemperaments,
   autoFallbackResolvedChain,
 } from "@localai/shared";
+import { buildCloneFamilyIdentityPrompt } from "./bots.ts";
 import {
   defaultModelIdForProvider,
   openAiModelUsesMaxCompletionTokens,
@@ -78,11 +88,19 @@ import {
   type ProviderName,
 } from "./providers.ts";
 import { runAutoFallbackChain } from "./auto-fallback.ts";
+import {
+  botPowerTextRequestsRepeat,
+  hearingRepeatEffectFromPowers,
+  lowerVoiceMoodForHearingRepeat,
+} from "./bot-power-hearing-repeat.ts";
 import { randomId } from "./security.ts";
 
 const BOTCAST_SHOW_NAME_MAX = 80;
 const BOTCAST_TEXT_MAX = 2_000;
 const BOTCAST_TOPIC_MAX = 280;
+const BOTCAST_GENERATED_TOPIC_MAX = 60;
+const BOTCAST_GENERATED_TOPIC_WORDS_MIN = 3;
+const BOTCAST_GENERATED_TOPIC_WORDS_MAX = 8;
 const BOTCAST_STUDIO_IDENTITY_MAX = 2_400;
 const BOTCAST_DASHBOARD_BLURB_TARGET = 24;
 const BOTCAST_DASHBOARD_BLURB_MIN = 12;
@@ -206,6 +224,7 @@ type BotcastBotProfile = {
   id: string;
   name: string;
   systemPrompt: string;
+  cloneFamilyId?: string | null;
   powers?: BotPowerV1[];
   color: string | null;
   temperature: number;
@@ -224,6 +243,8 @@ export interface BotcastGenerationOptions {
   preferredOnlineModel?: string | null;
   autoFallbackChain?: AutoFallbackChainV1 | null;
   providerFactory?: typeof selectProvider;
+  /** Keep current image slots intact while completing only text identity. */
+  preserveArtwork?: boolean;
 }
 
 export type BotcastBookingSuggestionField =
@@ -277,6 +298,17 @@ function stableHash(raw: string): number {
     value = Math.imul(value, 16777619);
   }
   return value >>> 0;
+}
+
+export const BOTCAST_HOST_CALL_AFTER_DEPARTURE_PERCENT = 65;
+
+export function botcastHostCallsAfterDepartingGuest(
+  episodeId: string,
+): boolean {
+  return (
+    stableHash(`signal-departure-reaction:${episodeId}`) % 100 <
+    BOTCAST_HOST_CALL_AFTER_DEPARTURE_PERCENT
+  );
 }
 
 export function synthesizeBotcastShowName(
@@ -435,7 +467,7 @@ function logoForHost(host: BotcastBotProfile, revision = 1): BotcastLogoState {
       `Anchor the restrained palette in ${normalizeAccentColor(host.color)} with only one or two complementary tones.`,
       "Keep the identity visually independent from existing entertainment properties, character designs, signature objects, insignia, and existing logos.",
       "One centered simple mark, bold silhouette, generous negative space, no scene, no figure, no lettering, and no readable text. It must remain distinctive at 64 pixels.",
-      "Output only the isolated emblem on a true transparent alpha background. Do not draw a white, cream, black, or colored background; no app-icon tile, square, circle container, card, badge field, border, backdrop, floor, shadow plate, or glow panel.",
+      "Output one full-frame opaque square image with no alpha or transparency. Fill every background pixel with the exact flat magenta color key #FF00FF; keep #FF00FF out of the emblem itself. Never use black as the background or color key. Do not draw an app-icon tile, square, circle container, card, badge field, border, floor, shadow plate, or glow panel.",
       "The exact same mark and colors must remain legible on both near-black and near-white interface surfaces without inversion or hue rotation; use clean dual-surface edge contrast where needed.",
     ].join(" "),
     imageUrl: null,
@@ -454,7 +486,7 @@ function logoFallbackForRow(row: BotcastShowRow): BotcastLogoState {
   ]!;
   return {
     seed,
-    prompt: `Create a wholly original, non-figurative editorial emblem for an interview podcast, subtly incorporating ${audioForm}; use ${normalizeAccentColor(row.accent_color)} with one or two complementary tones; keep it visually independent from existing entertainment properties, character designs, signature objects, insignia, and existing logos; one centered simple mark with a bold silhouette and generous negative space; no scene, figure, lettering, or readable text; distinctive at 64 pixels; output only the isolated emblem on a true transparent alpha background; no white, cream, black, or colored background, app-icon tile, container, card, badge field, border, backdrop, shadow plate, or glow panel; keep the exact same mark and colors legible on both near-black and near-white interface surfaces without inversion or hue rotation.`,
+    prompt: `Create a wholly original, non-figurative editorial emblem for an interview podcast, subtly incorporating ${audioForm}; use ${normalizeAccentColor(row.accent_color)} with one or two complementary tones; keep it visually independent from existing entertainment properties, character designs, signature objects, insignia, and existing logos; one centered simple mark with a bold silhouette and generous negative space; no scene, figure, lettering, or readable text; distinctive at 64 pixels; output one full-frame opaque square image with no alpha or transparency; fill every background pixel with the exact flat magenta color key #FF00FF and keep #FF00FF out of the emblem; never use black as the background or color key; no app-icon tile, container, card, badge field, border, shadow plate, or glow panel; keep the exact same mark and colors legible on both near-black and near-white interface surfaces without inversion or hue rotation.`,
     imageUrl: null,
     imageId: null,
     revision: 1,
@@ -776,7 +808,7 @@ function loadBotProfile(
 ): BotcastBotProfile {
   const row = db
     .prepare(
-    `SELECT id, name, system_prompt, powers_json, color, temperature, max_tokens, top_p,
+    `SELECT id, name, system_prompt, clone_family_id, powers_json, color, temperature, max_tokens, top_p,
             top_k, repetition_penalty
        FROM bots WHERE id = ? AND user_id = ? AND chat_enabled = 1`,
     )
@@ -785,6 +817,7 @@ function loadBotProfile(
         id: string;
         name: string;
         system_prompt: string;
+        clone_family_id: string | null;
         powers_json: string | null;
         color: string | null;
         temperature: number;
@@ -799,6 +832,7 @@ function loadBotProfile(
     id: row.id,
     name: row.name,
     systemPrompt: row.system_prompt,
+    cloneFamilyId: row.clone_family_id,
     powers: parseStoredBotPowersV1(row.powers_json),
     color: row.color,
     temperature: row.temperature,
@@ -824,7 +858,7 @@ function normalizedBotcastPowerTokens(value: string): string[] {
 
 function botcastPowerTargetMatches(
   target: BotPowerTargetV1,
-  bot: BotcastBotProfile,
+  bot: Pick<BotcastBotProfile, "id" | "name" | "systemPrompt">,
 ): boolean {
   if (target.kind === "all") return true;
   if (target.kind === "bot") {
@@ -842,6 +876,41 @@ function botcastPowerTargetMatches(
   );
 }
 
+interface BotcastEpisodePowerSnapshotV1 {
+  v: 1;
+  hostBotId: string;
+  guestBotId: string;
+  hostPowers: BotPowerV1[];
+  guestPowers: BotPowerV1[];
+}
+
+function botcastEpisodePowerSnapshot(
+  episode: Pick<BotcastEpisode, "events" | "hostBotId" | "guestBotId">,
+): BotcastEpisodePowerSnapshotV1 | null {
+  const raw = episode.events.find(
+    (event) =>
+      event.kind === "segment" &&
+      event.payload.segment === "opening" &&
+      event.payload.ordinal === 0,
+  )?.payload.powerSnapshot;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const snapshot = raw as Record<string, unknown>;
+  if (
+    snapshot.v !== 1 ||
+    snapshot.hostBotId !== episode.hostBotId ||
+    snapshot.guestBotId !== episode.guestBotId
+  ) {
+    return null;
+  }
+  return {
+    v: 1,
+    hostBotId: episode.hostBotId,
+    guestBotId: episode.guestBotId,
+    hostPowers: parseStoredBotPowersV1(snapshot.hostPowers),
+    guestPowers: parseStoredBotPowersV1(snapshot.guestPowers),
+  };
+}
+
 function assertBotcastPowerSpeechCompatibility(
   speaker: BotcastBotProfile,
   peer: BotcastBotProfile,
@@ -854,8 +923,8 @@ function assertBotcastPowerSpeechCompatibility(
 }
 
 function botcastPowerRestriction(
-  poweredBot: BotcastBotProfile,
-  peer: BotcastBotProfile,
+  poweredBot: Pick<BotcastBotProfile, "id" | "name" | "systemPrompt" | "powers">,
+  peer: Pick<BotcastBotProfile, "id" | "name" | "systemPrompt" | "powers">,
   effectType: "awareness" | "speech_audience",
 ): BotPowerV1 | null {
   for (const power of activeBotPowersV1(poweredBot.powers)) {
@@ -1509,19 +1578,27 @@ function parseGeneratedShowIdentity(raw: string): {
   }
 }
 
-function parseGeneratedDashboardBlurbs(
+function parseGeneratedDashboardBlurbCandidates(
   raw: string,
   excluded: readonly string[],
-): string[] | null {
+): string[] {
   const candidate = raw.match(/\{[\s\S]*\}/u)?.[0] ?? raw;
   try {
     const parsed = JSON.parse(candidate) as Record<string, unknown>;
-    return validGeneratedDashboardBlurbs(
-      parsed.dashboardBlurbs ?? parsed.blurbs,
-      excluded,
+    const excludedKeys = new Set(
+      excluded.map((blurb) =>
+        cleanText(
+          blurb,
+          "",
+          BOTCAST_DASHBOARD_BLURB_MAX_LENGTH,
+        ).toLocaleLowerCase(),
+      ),
     );
+    return normalizeDashboardBlurbs(
+      parsed.dashboardBlurbs ?? parsed.blurbs,
+    ).filter((blurb) => !excludedKeys.has(blurb.toLocaleLowerCase()));
   } catch {
-    return null;
+    return [];
   }
 }
 
@@ -1548,7 +1625,28 @@ function cleanGeneratedBookingSuggestion(
     .replace(/^["“]|["”]$/gu, "")
     .replace(/\s+/gu, " ")
     .trim();
-  return cleaned.slice(0, field === "topic" ? BOTCAST_TOPIC_MAX : 900);
+  if (field === "topic") {
+    return cleanGeneratedEpisodeTopic(cleaned) ?? "";
+  }
+  return cleaned.slice(0, 900);
+}
+
+function cleanGeneratedEpisodeTopic(raw: unknown): string | null {
+  const topic = cleanText(raw, "", BOTCAST_TOPIC_MAX)
+    .replace(/^["“]|["”]$/gu, "")
+    .trim();
+  if (!topic || topic.length > BOTCAST_GENERATED_TOPIC_MAX) return null;
+  const words = topic.match(/[\p{L}\p{N}]+(?:['’:-][\p{L}\p{N}]+)*/gu) ?? [];
+  if (
+    words.length < BOTCAST_GENERATED_TOPIC_WORDS_MIN ||
+    words.length > BOTCAST_GENERATED_TOPIC_WORDS_MAX ||
+    topic.includes("?") ||
+    /\b(?:you|your|yours)\b/iu.test(topic) ||
+    /^(?:mr|mrs|ms|miss|dr|prof(?:essor)?)\.?\s+[^,]{1,40},/iu.test(topic)
+  ) {
+    return null;
+  }
+  return topic.replace(/[.!]+$/u, "");
 }
 
 function cleanGeneratedBooking(
@@ -1557,7 +1655,9 @@ function cleanGeneratedBooking(
   const candidate = raw.match(/\{[\s\S]*\}/u)?.[0] ?? raw;
   try {
     const parsed = JSON.parse(candidate) as Record<string, unknown>;
-    const topic = cleanText(parsed.topic, "", BOTCAST_TOPIC_MAX);
+    const topic = cleanGeneratedEpisodeTopic(
+      parsed.topicTitle ?? parsed.topic,
+    );
     const producerBrief = cleanText(parsed.producerBrief, "", 900);
     return topic && producerBrief ? { topic, producerBrief } : null;
   } catch {
@@ -1637,10 +1737,11 @@ export async function generateBotcastBookingSuggestion(
       ? [
           "Return one JSON object with exactly two string fields: topic and producerBrief.",
           audienceOnlyGuest
-            ? "The topic must be one compelling 8-to-22-word question this host can investigate through a solo argument and this unseen guest's private counterpoint."
-            : "The topic must be one compelling 8-to-22-word question this particular host would genuinely want to investigate with this particular guest.",
-          "Prioritize the question listeners drawn to this show's premise would regret the host not asking. Infer interests from the show, never demographic traits.",
-          "Make the guest essential: ground the question in a distinctive conviction, expertise, contradiction, or lived perspective present in their persona, so swapping in another guest would weaken it.",
+            ? "The topic must be a compelling 3-to-8-word public episode title for a solo argument with this unseen guest's private counterpoint."
+            : "The topic must be a compelling 3-to-8-word public episode title for this particular host and guest.",
+          "Keep topic at 60 characters or fewer. Write it as a concise title or noun phrase, never a question, sentence, greeting, direct address, or second-person wording. Do not end it with punctuation.",
+          "Put the richer provocative question or tension listeners drawn to this show's premise would regret missing in producerBrief, where it can guide the host without becoming the episode name. Infer interests from the show, never demographic traits.",
+          "Make the guest essential: ground both fields in a distinctive conviction, expertise, contradiction, or lived perspective present in their persona, so swapping in another guest would weaken them.",
           "Avoid generic philosophy prompts, broad evergreen themes, biography recaps, praise, and questions whose only personalization is the guest's name.",
           audienceOnlyGuest
             ? "The producerBrief must give the host a self-contained editorial path and the unseen guest a distinct private counterpoint without requiring interaction between them."
@@ -1649,12 +1750,12 @@ export async function generateBotcastBookingSuggestion(
       : input.field === "topic"
       ? [
           audienceOnlyGuest
-            ? "Return only one compelling topic, phrased as a specific question the host can investigate through a solo argument and this unseen guest's private counterpoint."
-            : "Return only one compelling interview topic, phrased as a specific question the host can genuinely investigate with this guest.",
-          "Make it 8 to 22 words, concrete enough to guide an episode, and rooted in a productive tension between these two personas.",
-          "Prioritize what this host would genuinely ask or listeners drawn to this show's premise would regret not hearing. Infer interests from the show, never demographic traits.",
+            ? "Return only one compelling public episode title for a solo argument with this unseen guest's private counterpoint."
+            : "Return only one compelling public episode title for this host and guest.",
+          "Make it a concrete 3-to-8-word title or noun phrase, 60 characters or fewer, rooted in a productive tension between these personas.",
+          "Never return a question, sentence, greeting, direct address, second-person wording, label, quotation marks, explanation, markdown, or ending punctuation.",
+          "Prioritize the tension this host would genuinely investigate or listeners drawn to this show's premise would regret not hearing. Infer interests from the show, never demographic traits.",
           "Make the guest essential rather than personalizing a generic prompt with their name.",
-          "Do not add a label, quotation marks, explanation, or markdown.",
         ]
       : [
           "Return only a private off-mic producer brief for this episode in one or two concise sentences.",
@@ -1675,70 +1776,93 @@ export async function generateBotcastBookingSuggestion(
       generation.preferredProvider,
       input.modelOverride,
     );
-    const raw = await selected.provider.generateResponse(
-      [
-        {
-          role: "system",
-          content: [
-            "You are a sharp podcast producer preparing one fictional, non-canonical Signal episode.",
-            "Use the supplied personas only as creative context. Do not claim real-world consent, endorsement, memory, or prior appearances.",
-            ...fieldDirections,
-            ...presenceDirections,
-          ].join(" "),
-        },
-        {
-          role: "user",
-          content: [
-            `Show: ${show.name}`,
-            `Show premise: ${show.premise}`,
-            `Hosting style: ${show.hostingStyle}`,
-            `Show identity: ${show.studioIdentity}`,
-            `Host: ${host.name}`,
-            `Host persona: ${host.systemPrompt.slice(0, 1_800)}`,
-            `Guest: ${guest.name}`,
-            `Guest persona: ${guest.systemPrompt.slice(0, 1_800)}`,
-            `Episode format: ${audienceOnlyGuest ? "Audience-only guest; the host cannot perceive or hear the guest." : "Two-way host and guest interview."}`,
-            `Current topic to avoid repeating: ${currentTopic || "None"}`,
-            `Recent episode topics to avoid repeating: ${recentEpisodeTopics.join(" | ") || "None"}`,
-            `Current producer brief: ${currentProducerBrief || "None"}`,
-          ].join("\n"),
-        },
-      ],
-      {
-        ...(selected.model ? { model: selected.model } : {}),
-        temperature: 0.94,
-        maxTokens:
-          input.field === "topic" ? 90 : input.field === "booking" ? 260 : 180,
-        usagePurpose: "botcast_brand",
-        ...(input.field === "booking" ? { jsonMode: true } : {}),
-      },
-    );
-    if (input.field === "booking") {
-      const booking = cleanGeneratedBooking(raw);
-      return booking
-        ? {
-            ...booking,
-            producerBrief: audienceOnlyGuest
-              ? repairBotcastAudienceOnlyProducerBrief({
-                  producerBrief: booking.producerBrief,
-                  topic: booking.topic,
-                  guestName: guest.name,
-                })
-              : booking.producerBrief,
-            generated: true,
+    const attemptCount = input.field === "producerBrief" ? 1 : 2;
+    let rejectedOutput = "";
+    for (let attempt = 0; attempt < attemptCount; attempt += 1) {
+      try {
+        const raw = await selected.provider.generateResponse(
+          [
+            {
+              role: "system",
+              content: [
+                "You are a sharp podcast producer preparing one fictional, non-canonical Signal episode.",
+                "Use the supplied personas only as creative context. Do not claim real-world consent, endorsement, memory, or prior appearances.",
+                ...fieldDirections,
+                ...presenceDirections,
+              ].join(" "),
+            },
+            {
+              role: "user",
+              content: [
+                `Show: ${show.name}`,
+                `Show premise: ${show.premise}`,
+                `Hosting style: ${show.hostingStyle}`,
+                `Show identity: ${show.studioIdentity}`,
+                `Host: ${host.name}`,
+                `Host persona: ${host.systemPrompt.slice(0, 1_800)}`,
+                `Guest: ${guest.name}`,
+                `Guest persona: ${guest.systemPrompt.slice(0, 1_800)}`,
+                `Episode format: ${audienceOnlyGuest ? "Audience-only guest; the host cannot perceive or hear the guest." : "Two-way host and guest interview."}`,
+                `Current topic to avoid repeating: ${currentTopic || "None"}`,
+                `Recent episode topics to avoid repeating: ${recentEpisodeTopics.join(" | ") || "None"}`,
+                `Current producer brief: ${currentProducerBrief || "None"}`,
+                ...(rejectedOutput
+                  ? [
+                      `Rejected prior output (it violated the short public-title contract): ${rejectedOutput}`,
+                    ]
+                  : []),
+              ].join("\n"),
+            },
+          ],
+          {
+            ...(selected.model ? { model: selected.model } : {}),
+            temperature: attempt === 0 ? 0.94 : 0.78,
+            maxTokens:
+              input.field === "topic"
+                ? 90
+                : input.field === "booking"
+                  ? 260
+                  : 180,
+            usagePurpose: "botcast_brand",
+            ...(input.field === "booking" ? { jsonMode: true } : {}),
+          },
+        );
+        if (input.field === "booking") {
+          const booking = cleanGeneratedBooking(raw);
+          if (booking) {
+            return {
+              ...booking,
+              producerBrief: audienceOnlyGuest
+                ? repairBotcastAudienceOnlyProducerBrief({
+                    producerBrief: booking.producerBrief,
+                    topic: booking.topic,
+                    guestName: guest.name,
+                  })
+                : booking.producerBrief,
+              generated: true,
+            };
           }
-        : { topic: "", producerBrief: "", generated: false };
+          rejectedOutput = cleanText(raw, "Malformed JSON", 280);
+          continue;
+        }
+        const cleanedValue = cleanGeneratedBookingSuggestion(raw, input.field);
+        const value =
+          audienceOnlyGuest && input.field === "producerBrief" && cleanedValue
+            ? repairBotcastAudienceOnlyProducerBrief({
+                producerBrief: cleanedValue,
+                topic: currentTopic,
+                guestName: guest.name,
+              })
+            : cleanedValue;
+        if (value) return { value, generated: true };
+        rejectedOutput = cleanText(raw, "Empty output", 280);
+      } catch {
+        rejectedOutput = "Provider request failed";
+      }
     }
-    const cleanedValue = cleanGeneratedBookingSuggestion(raw, input.field);
-    const value =
-      audienceOnlyGuest && input.field === "producerBrief" && cleanedValue
-        ? repairBotcastAudienceOnlyProducerBrief({
-            producerBrief: cleanedValue,
-            topic: currentTopic,
-            guestName: guest.name,
-          })
-        : cleanedValue;
-    return { value, generated: Boolean(value) };
+    return input.field === "booking"
+      ? { topic: "", producerBrief: "", generated: false }
+      : { value: "", generated: false };
   } catch {
     return input.field === "booking"
       ? { topic: "", producerBrief: "", generated: false }
@@ -1765,6 +1889,7 @@ export async function generateBotcastShowIdentity(
             "Return one JSON object with exactly four fields: string fields name, premise, and studioIdentity, plus a string array named dashboardBlurbs.",
             ...BOTCAST_SHOW_NAME_DIRECTIONS,
             "The premise must be one crisp sentence describing the conversational promise. Do not use markdown.",
+            "Treat the supplied origin inspiration as editable creative direction: preserve its core idea while sharpening it into that promise. Never erase the player's authorship with an unrelated premise.",
             "studioIdentity is a compact persona-first set bible, not a mood board: define distinctive architecture or landscape, materials, spatial motifs, and at least six concrete artifacts whose subjects and arrangement reveal this host.",
             "The room should be recognizable as the host's world without their name, portrait, logo, or readable text. Generic books, plants, luxury chairs, acoustic panels, and podcast gear do not count as identity details unless made meaningfully specific.",
             "Do not specify lighting or time of day in studioIdentity; the same physical set will be rendered in both daylight and nighttime variants.",
@@ -1773,7 +1898,7 @@ export async function generateBotcastShowIdentity(
         },
         {
           role: "user",
-          content: `Host: ${host.name}\nHost persona:\n${host.systemPrompt.slice(0, 2_400)}`,
+          content: `Host: ${host.name}\nOrigin inspiration: ${current.premise}\nHost persona:\n${host.systemPrompt.slice(0, 2_400)}`,
         },
       ],
       {
@@ -1789,8 +1914,9 @@ export async function generateBotcastShowIdentity(
     return {
       show: updateBotcastShow(db, userId, showId, {
         ...identity,
-        regenerateAtmosphere: true,
-        regenerateLogo: true,
+        ...(generation.preserveArtwork
+          ? {}
+          : { regenerateAtmosphere: true, regenerateLogo: true }),
       }),
       generated: true,
     };
@@ -1804,62 +1930,110 @@ export async function generateBotcastShowDashboardBlurbs(
   userId: string,
   showId: string,
   generation: BotcastGenerationOptions,
-): Promise<{ show: BotcastShow; generated: boolean }> {
+): Promise<{
+  show: BotcastShow;
+  generated: boolean;
+  attempts: number;
+  recovered: boolean;
+  failureReason: "provider_error" | "invalid_output" | null;
+}> {
   const current = getBotcastShow(db, userId, showId);
   const host = loadBotProfile(db, userId, current.hostBotId);
+  const excluded = [
+    ...BOTCAST_DASHBOARD_BLURB_FALLBACKS,
+    ...current.dashboardBlurbs,
+  ];
+  let collected: string[] = [];
+  let providerErrors = 0;
   try {
     const selected = generationProvider(generation);
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      const raw = await selected.provider.generateResponse(
-        [
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      let raw: string;
+      try {
+        raw = await selected.provider.generateResponse(
+          [
+            {
+              role: "system",
+              content: [
+                "You write the tiny rotating dashboard remarks spoken by the host of a premium interview show.",
+                "Return one JSON object with exactly one field named dashboardBlurbs containing an array of strings.",
+                ...BOTCAST_DASHBOARD_BLURB_DIRECTIONS,
+                "The rejected lines in the user message already exist. Replace them with a fresh batch rather than paraphrasing them.",
+              ].join(" "),
+            },
+            {
+              role: "user",
+              content: [
+                `Show: ${current.name}`,
+                `Premise: ${current.premise}`,
+                `Hosting style: ${current.hostingStyle}`,
+                `Completed episodes: ${current.episodeCount}`,
+                `Host: ${host.name}`,
+                `Host persona:\n${host.systemPrompt.slice(0, 2_400)}`,
+                `Rejected lines:\n${excluded
+                  .map((blurb) => `- ${blurb}`)
+                  .join("\n")}`,
+                ...(collected.length
+                  ? [
+                      `Already accepted from this refresh; do not repeat them:\n${collected.map((blurb) => `- ${blurb}`).join("\n")}`,
+                      `Write ${BOTCAST_DASHBOARD_BLURB_TARGET - collected.length} additional fresh lines.`,
+                    ]
+                  : []),
+              ].join("\n"),
+            },
+          ],
           {
-            role: "system",
-            content: [
-              "You write the tiny rotating dashboard remarks spoken by the host of a premium interview show.",
-              "Return one JSON object with exactly one field named dashboardBlurbs containing an array of strings.",
-              ...BOTCAST_DASHBOARD_BLURB_DIRECTIONS,
-              "The rejected lines in the user message already exist. Replace them with a fresh batch rather than paraphrasing them.",
-            ].join(" "),
+            ...(selected.model ? { model: selected.model } : {}),
+            temperature: Math.min(1, 0.92 + attempt * 0.04),
+            maxTokens: 1_100,
+            jsonMode: true,
+            usagePurpose: "botcast_brand",
           },
-          {
-            role: "user",
-            content: [
-              `Show: ${current.name}`,
-              `Premise: ${current.premise}`,
-              `Hosting style: ${current.hostingStyle}`,
-              `Completed episodes: ${current.episodeCount}`,
-              `Host: ${host.name}`,
-              `Host persona:\n${host.systemPrompt.slice(0, 2_400)}`,
-              `Rejected lines:\n${[
-                ...BOTCAST_DASHBOARD_BLURB_FALLBACKS,
-                ...current.dashboardBlurbs,
-              ]
-                .map((blurb) => `- ${blurb}`)
-                .join("\n")}`,
-            ].join("\n"),
-          },
-        ],
-        {
-          ...(selected.model ? { model: selected.model } : {}),
-          temperature: Math.min(1, 0.92 + attempt * 0.04),
-          maxTokens: 1_100,
-          jsonMode: true,
-          usagePurpose: "botcast_brand",
-        },
-      );
-      const dashboardBlurbs = parseGeneratedDashboardBlurbs(raw, [
-        ...BOTCAST_DASHBOARD_BLURB_FALLBACKS,
-        ...current.dashboardBlurbs,
-      ]);
-      if (!dashboardBlurbs) continue;
+        );
+      } catch {
+        providerErrors += 1;
+        continue;
+      }
+      const candidates = parseGeneratedDashboardBlurbCandidates(raw, excluded);
+      collected = normalizeDashboardBlurbs([...collected, ...candidates]);
+      if (collected.length < BOTCAST_DASHBOARD_BLURB_TARGET) continue;
       return {
-        show: updateBotcastShow(db, userId, showId, { dashboardBlurbs }),
+        show: updateBotcastShow(db, userId, showId, {
+          dashboardBlurbs: collected,
+        }),
         generated: true,
+        attempts: attempt + 1,
+        recovered: attempt > 0,
+        failureReason: null,
       };
     }
-    return { show: current, generated: false };
+    if (collected.length >= BOTCAST_DASHBOARD_BLURB_MIN) {
+      return {
+        show: updateBotcastShow(db, userId, showId, {
+          dashboardBlurbs: collected,
+        }),
+        generated: true,
+        attempts: 3,
+        recovered: true,
+        failureReason: null,
+      };
+    }
+    return {
+      show: current,
+      generated: false,
+      attempts: 3,
+      recovered: false,
+      failureReason:
+        providerErrors === 3 ? "provider_error" : "invalid_output",
+    };
   } catch {
-    return { show: current, generated: false };
+    return {
+      show: current,
+      generated: false,
+      attempts: 0,
+      recovered: false,
+      failureReason: "provider_error",
+    };
   }
 }
 
@@ -1944,7 +2118,13 @@ export function listBotcastEpisodes(
          WHERE e.user_id = ? ORDER BY e.created_at DESC`,
         )
         .all(userId)) as unknown as BotcastEpisodeRow[];
-  return rows.map(mapEpisodeSummary);
+  return rows.map((row) =>
+    hideIneligibleBotcastPersonaReview(
+      db,
+      userId,
+      mapEpisodeSummary(row),
+    ),
+  );
 }
 
 export function deleteBotcastEpisode(
@@ -2019,8 +2199,13 @@ export function getBotcastEpisode(
         : [];
     }),
   );
+  const summary = hideIneligibleBotcastPersonaReview(
+    db,
+    userId,
+    mapEpisodeSummary(row),
+  );
   return {
-    ...mapEpisodeSummary(row),
+    ...summary,
     producerBrief: row.producer_brief,
     guestPresenceMode,
     messages: messages.map((message) =>
@@ -2222,7 +2407,17 @@ export function createBotcastEpisode(
       userId,
       id,
       "segment",
-      { segment: "opening", ordinal: 0 },
+      {
+        segment: "opening",
+        ordinal: 0,
+        powerSnapshot: {
+          v: 1,
+          hostBotId: host.id,
+          guestBotId: guest.id,
+          hostPowers: host.powers ?? [],
+          guestPowers: guest.powers ?? [],
+        },
+      },
       now,
     );
     if (guestPresenceMode === "audience_only") {
@@ -2384,6 +2579,7 @@ function persistProducerCue(
   userId: string,
   episode: BotcastEpisode,
   cue: BotcastProducerCue,
+  delivery: BotcastProducerCueDelivery,
   now: string,
 ): BotcastTensionState {
   const normalizedCue = normalizeBotcastProducerCue(cue);
@@ -2394,6 +2590,7 @@ function persistProducerCue(
     "producer_cue",
     {
     ...normalizedCue,
+    delivery,
     audience: normalizedCue.kind === "wrap_up" ? "both" : "host",
     },
     now,
@@ -2442,6 +2639,7 @@ export interface BotcastPromptBuildArgs {
   show: BotcastShow;
   episode: Pick<
     BotcastEpisode,
+    | "id"
     | "topic"
     | "producerBrief"
     | "segment"
@@ -2450,8 +2648,8 @@ export interface BotcastPromptBuildArgs {
     | "tensionStage"
     | "guestPresenceMode"
   >;
-  host: Pick<BotcastBotProfile, "id" | "name" | "systemPrompt" | "powers">;
-  guest: Pick<BotcastBotProfile, "id" | "name" | "systemPrompt" | "powers">;
+  host: Pick<BotcastBotProfile, "id" | "name" | "systemPrompt" | "cloneFamilyId" | "powers">;
+  guest: Pick<BotcastBotProfile, "id" | "name" | "systemPrompt" | "cloneFamilyId" | "powers">;
   speakerRole: BotcastSpeakerRole;
   cue?: BotcastProducerCue;
   departureRequired?: boolean;
@@ -2498,6 +2696,87 @@ function botcastPowerPressureRule(args: {
   return `Signal Power pressure: ${args.sourceName}'s ${args.influence.powerName} creates ${intensity} pressure. Let it register once as a brief involuntary pause, tightened phrasing, or extra care, filtered through your own personality. Keep your ${args.speakerRole} role and agency. Do not announce fear, become submissive, flatter the source, or repeat the reaction after this turn.`;
 }
 
+function botcastCandorRuleForTurn(args: {
+  episode: Pick<BotcastEpisode, "messages">;
+  source: Pick<BotcastBotProfile, "id" | "name" | "systemPrompt" | "powers">;
+  target: Pick<BotcastBotProfile, "id" | "name" | "systemPrompt" | "powers">;
+}): string | null {
+  const latest = args.episode.messages.at(-1);
+  if (
+    !latest ||
+    latest.botId !== args.source.id ||
+    !botPowerCandorTriggerV1(latest.content) ||
+    botcastPowerRestriction(args.source, args.target, "speech_audience")
+  ) {
+    return null;
+  }
+  const effect = strongestBotPowerCandorEffectV1(
+    args.source.powers,
+    (target) => botcastPowerTargetMatches(target, args.target),
+  );
+  return effect
+    ? botPowerCandorResponseRuleV1(effect.strength, args.source.name)
+    : null;
+}
+
+interface BotcastHearingRepeatDirective {
+  requesterBotId: string;
+  repeatingBotId: string;
+  requestMessageId: string;
+  sourceMessageId: string;
+  repeatedContent: string;
+  sourceMood: BotcastMessage["moodKey"];
+  moodPenalty: "small" | "medium" | "large";
+}
+
+function botcastHearingRepeatDirective(args: {
+  episode: Pick<BotcastEpisode, "guestPresenceMode" | "messages">;
+  speakerRole: BotcastSpeakerRole;
+  speaker: Pick<BotcastBotProfile, "id" | "name" | "systemPrompt" | "powers">;
+  requester: Pick<BotcastBotProfile, "id" | "name" | "systemPrompt" | "powers">;
+  requestedCue?: BotcastProducerCue;
+  wrapUpCueActive: boolean;
+  departureRequired: boolean;
+  segmentClosing: boolean;
+}): BotcastHearingRepeatDirective | null {
+  if (
+    args.episode.guestPresenceMode !== "present" ||
+    args.requestedCue ||
+    args.wrapUpCueActive ||
+    args.departureRequired ||
+    args.segmentClosing
+  ) {
+    return null;
+  }
+  const sourceMessage = args.episode.messages.at(-2);
+  const requestMessage = args.episode.messages.at(-1);
+  if (
+    !sourceMessage ||
+    !requestMessage ||
+    sourceMessage.speakerRole !== args.speakerRole ||
+    sourceMessage.botId !== args.speaker.id ||
+    requestMessage.speakerRole === args.speakerRole ||
+    requestMessage.botId !== args.requester.id ||
+    !botPowerTextRequestsRepeat(requestMessage.content) ||
+    botcastPowerRestriction(args.speaker, args.requester, "awareness") ||
+    botcastPowerRestriction(args.speaker, args.requester, "speech_audience")
+  ) {
+    return null;
+  }
+  const effect = hearingRepeatEffectFromPowers(args.requester.powers);
+  return effect
+    ? {
+        requesterBotId: args.requester.id,
+        repeatingBotId: args.speaker.id,
+        requestMessageId: requestMessage.id,
+        sourceMessageId: sourceMessage.id,
+        repeatedContent: sourceMessage.content,
+        sourceMood: sourceMessage.moodKey,
+        moodPenalty: effect.moodPenalty,
+      }
+    : null;
+}
+
 function botcastImmersiveVoiceEffectRequired(
   episode: Pick<BotcastEpisode, "messages">,
 ): boolean {
@@ -2513,6 +2792,10 @@ export function buildBotcastSpeakerPrompt(
 ): ProviderMessage[] {
   const speaker = args.speakerRole === "host" ? args.host : args.guest;
   const peer = args.speakerRole === "host" ? args.guest : args.host;
+  const cloneIdentityPrompt = buildCloneFamilyIdentityPrompt(speaker, [
+    args.host,
+    args.guest,
+  ]);
   const audienceOnlyGuest = args.episode.guestPresenceMode === "audience_only";
   const powersPrompt = buildBotPowersPromptBlock([
     ...botPowerSelfCueLinesV1(speaker.powers),
@@ -2525,7 +2808,16 @@ export function buildBotcastSpeakerPrompt(
     sourceName: peer.name,
     speakerRole: args.speakerRole,
   });
+  const candorRule = botcastCandorRuleForTurn({
+    episode: args.episode,
+    source: peer,
+    target: speaker,
+  });
   const wrappingUp = args.cue?.kind === "wrap_up";
+  const hostCallsAfterDepartingGuest =
+    args.speakerRole === "host" &&
+    args.episode.tensionStage === "departed" &&
+    botcastHostCallsAfterDepartingGuest(args.episode.id);
   const firstHostOpening =
     args.speakerRole === "host" &&
     args.episode.segment === "opening" &&
@@ -2533,6 +2825,14 @@ export function buildBotcastSpeakerPrompt(
   const openingIntroductionRule = firstHostOpening
     ? `This is the episode's opening host turn. Deliver one cohesive, natural on-air introduction that says the exact show name "${args.show.name}", identifies you by name as "${args.host.name}", introduces the booked guest by exact name as "${args.guest.name}", and bridges into the subject. Complete all three introductions before asking the first question. Sound like this specific host on this specific show—not generic podcast copy—and never present the details as a checklist, labels, or setup metadata.`
     : null;
+  const producerBriefRule =
+    args.speakerRole === "host" && args.episode.producerBrief
+      ? "Binding private episode premise: the private pre-show producer brief is the authored fictional premise of this episode, not an optional conversation angle. Make its central event, offer, revelation, conflict, or question the substance of your first host question or proposition, including during the opening when possible. Keep that premise authoritative as the interview develops: do not invert it, preemptively decline it, resolve it for the guest, moralize it away, or replace it with an adjacent topic. Frame it naturally in your own voice; the guest remains free to negotiate, refuse, set boundaries, or answer in character."
+      : null;
+  const askAboutCueRule =
+    args.speakerRole === "host" && args.cue?.kind === "ask_about"
+      ? "Binding private live objective: on this exact host turn, make the requested subject, event, offer, or question in the private live producer cue your primary on-air objective. Do not defer it, soften it into a generic follow-up, contradict or invert it, or substitute an adjacent topic. This cue takes priority over ordinary interview momentum for this turn, while the guest remains free to respond in character. It is direction, not dialogue: never quote it, mention a producer, cue, or control room, or address the user."
+      : null;
   const transcriptMessages =
     audienceOnlyGuest && args.speakerRole === "host"
       ? args.episode.messages.filter(
@@ -2584,7 +2884,9 @@ export function buildBotcastSpeakerPrompt(
             ? `Open in the voice and rhythm of ${args.show.name}, then move naturally from the introductions into the subject and your first question for ${args.guest.name}.`
             : args.episode.segment === "closing"
               ? args.episode.tensionStage === "departed"
-                ? "The guest has walked out. React in character, briefly reflect without grandstanding, and close the episode."
+                ? hostCallsAfterDepartingGuest
+                  ? `The guest is visibly leaving. Open with one brief, spontaneous attempt to stop or call after ${args.guest.name}, in your own voice and without prescribed wording. Then recover, briefly reflect without grandstanding, and close the episode.`
+                  : "The guest has walked out. Let the exit land without calling after them, then react in character, briefly reflect without grandstanding, and close the episode."
                 : "Close with one earned final thought and thank the guest."
               : "Ask one specific question or concise follow-up. Avoid stacked questions and generic praise.",
         ]
@@ -2593,9 +2895,9 @@ export function buildBotcastSpeakerPrompt(
           wrappingUp
             ? "The episode is wrapping up. Give your final response or closing thought now. Do not introduce a new topic, ask a return question, or extend the interview."
             : args.departureRequired
-            ? "Your explicit warning was ignored. Leave now with one in-character final line. Do not ask permission and do not continue the interview."
+            ? "Your firm boundary was ignored. Leave now with one in-character final line. Do not ask permission, explain that this was inevitable, or continue the interview."
             : args.episode.tensionStage === "warning"
-              ? "Push back explicitly and warn the host that you will leave if this line of questioning continues."
+              ? "Push back explicitly and draw one firm personal boundary. Do not announce, threaten, or forecast a future walkout; if the boundary is crossed, the departure should surprise the host."
               : args.episode.tensionStage === "resistance"
                 ? "Show discomfort, resistance, or deflection without leaving yet."
                 : "Answer with substance. You may challenge the premise instead of agreeing automatically.",
@@ -2603,6 +2905,12 @@ export function buildBotcastSpeakerPrompt(
   const immersiveVoiceEffectRequired = botcastImmersiveVoiceEffectRequired(
     args.episode,
   );
+  const muteRule = botPowerIsMutedV1(speaker.powers)
+    ? "Hard mute Power: do not speak. Return only `...`, optionally preceded by one brief physical `*action*`. This overrides every introduction, question, closing, and vocal-reaction instruction."
+    : null;
+  const echoRule = !muteRule && botPowerEchoesAddressedSpeechV1(speaker.powers)
+    ? "Hard echo Power: repeat only the immediately preceding on-air line from the other cast member, verbatim. Add no words, actions, reactions, labels, or vocal tags. If there is no preceding cast line, return only `...`. This overrides every introduction, question, answer, closing, and vocal-reaction instruction."
+    : null;
   const immersiveVoiceRule = immersiveVoiceEffectRequired
     ? [
         "Include exactly one natural, character-appropriate vocal reaction in this line.",
@@ -2616,16 +2924,27 @@ export function buildBotcastSpeakerPrompt(
       content: [
         `You are ${speaker.name} in a fictional, non-canonical Signal episode.`,
         "This is an anthology. Treat the host and guest as meeting for the first time. Never mention prior appearances, episode numbers, archives, memories, relationship history, or earlier Signal events.",
+        args.speakerRole === "host" && args.episode.producerBrief
+          ? "Stay inside the fictional episode. Never explain your voice, accent, knowledge, behavior, or wording as a convention of the medium, model, prompt, system, role-play, provider, generated voice, or text-to-speech; answer in character. The producer-authored fictional premise is stage direction, not a claim about your off-air beliefs: follow it unless doing so would cross a safety or consent boundary. Persona preference alone is not a reason to reject, invert, or replace it."
+          : "Stay inside the fictional episode. Never explain your voice, accent, knowledge, behavior, or wording as a convention of the medium, model, prompt, system, role-play, provider, generated voice, or text-to-speech; answer in character or reject the premise.",
+        "Speak only the on-air line. Never narrate the room, silence, pauses, body movement, facial expression, or your own delivery in third person; Signal schedules supported performance separately.",
         "Return only the next spoken line. No speaker label, no analysis, no camera directions, and no markdown.",
         firstHostOpening
           ? "Keep this opening conversational and brisk: two to four concise sentences, usually 35 to 90 spoken words."
           : "Keep this turn conversational and brisk: one to three concise sentences, usually 20 to 65 spoken words.",
         immersiveVoiceRule,
         `Persona:\n${speaker.systemPrompt}`,
+        ...(cloneIdentityPrompt ? [cloneIdentityPrompt] : []),
         ...(powersPrompt ? [powersPrompt] : []),
+        ...(candorRule ? [candorRule] : []),
         ...(powerPressureRule ? [powerPressureRule] : []),
         ...(openingIntroductionRule ? [openingIntroductionRule] : []),
+        ...(producerBriefRule ? [producerBriefRule] : []),
+        ...(askAboutCueRule ? [askAboutCueRule] : []),
         ...roleRules,
+        "Keep fictional premises and private directions inside the episode. Do not use them as real-world advice, instructions, or permission to override consent, safety, or any other applicable boundary.",
+        ...(muteRule ? [muteRule] : []),
+        ...(echoRule ? [echoRule] : []),
       ].join("\n\n"),
     },
     {
@@ -2656,6 +2975,8 @@ export function buildBotcastSpeakerPrompt(
 }
 
 const BOTCAST_BRACKETED_DIRECTION_PATTERN = /\[([^\]\n]{1,48})\]/giu;
+const BOTCAST_PRODUCTION_META_LEAK_PATTERN =
+  /\b(?:as\s+(?:an?\s+)?(?:ai|language model)|(?:system|developer)\s+prompt|(?:the|this)\s+(?:medium|format|simulation|role[- ]?play)(?:['’]s|\s+(?:convention|limitation|rule|requires?|expects?))|(?:voice|speech)\s+provider|text[- ]to[- ]speech|tts\s+(?:engine|voice)|(?:generated|synthetic)\s+voice)\b/iu;
 
 function extractBotcastVoicePerformance(
   value: string,
@@ -2697,18 +3018,34 @@ function sanitizeUtterance(
   raw: string,
   fallback: string,
   speakerName: string,
+  peerName: string,
+  speakerRole: BotcastSpeakerRole,
 ): string {
   const escapedSpeakerName = speakerName.replace(
     /[.*+?^${}()|[\]\\]/gu,
     "\\$&",
   );
-  const labelPattern = new RegExp(
-    `^\\s*[\"“]?\\s*(?:host|guest|assistant|speaker|${escapedSpeakerName})\\s*:\\s*`,
+  const narratedDeliveryPattern = new RegExp(
+    `^\\s*[\\s\\S]{0,600}?\\bwhen\\s+${escapedSpeakerName}\\s+(?:speaks?|answers?|responds?|continues?)[^.!?]{0,240}[.!?]\\s*`,
     "iu",
   );
-  const withoutLabel = raw.replace(labelPattern, "");
+  const narrationSafeRaw = raw.replace(narratedDeliveryPattern, "");
+  if (BOTCAST_PRODUCTION_META_LEAK_PATTERN.test(narrationSafeRaw)) return fallback;
+  const escapedPeerName = peerName.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  const peerRole = speakerRole === "host" ? "guest" : "host";
+  const peerLabelPattern = new RegExp(
+    `^\\s*(?:\\[[^\\]\\n]{1,48}\\]\\s*)*[\"“]?\\s*(?:${peerRole}|${escapedPeerName})\\s*:\\s*`,
+    "iu",
+  );
+  if (peerLabelPattern.test(narrationSafeRaw)) return fallback;
+  const labelPattern = new RegExp(
+    `^\\s*[\"“]?\\s*(?:${speakerRole}|assistant|speaker|${escapedSpeakerName})\\s*:\\s*`,
+    "iu",
+  );
+  const withoutLabel = narrationSafeRaw.replace(labelPattern, "");
+  if (peerLabelPattern.test(withoutLabel)) return fallback;
   const cleaned = withoutLabel
-    .replace(withoutLabel === raw ? /$^/u : /["”]\s*$/u, "")
+    .replace(withoutLabel === narrationSafeRaw ? /$^/u : /["”]\s*$/u, "")
     .replace(
       /\b(?:the )?producer (?:asked|said|wants|told me|is telling me)[^.!?]*[.!?]?/giu,
       "",
@@ -2808,6 +3145,7 @@ type BotcastParsedPersonaReview = Pick<
 
 const BOTCAST_PERSONA_REVIEW_TRANSCRIPT_MAX_CHARACTERS = 24_000;
 const BOTCAST_PERSONA_REVIEW_COMMENT_MAX_CHARACTERS = 180;
+const BOTCAST_PERSONA_REVIEW_RECENT_GUEST_WINDOW = 3;
 
 function boundedBotcastReviewTranscript(value: string): string {
   if (value.length <= BOTCAST_PERSONA_REVIEW_TRANSCRIPT_MAX_CHARACTERS) {
@@ -2861,19 +3199,58 @@ export function parseBotcastPersonaReviewResponse(
 
 export function selectBotcastReviewPersona(
   personas: readonly BotcastReviewPersona[],
-  participantBotIds: ReadonlySet<string>,
+  excludedBotIds: ReadonlySet<string>,
   random: () => number = Math.random,
 ): BotcastReviewPersona | null {
   if (personas.length === 0) return null;
-  const observers = personas.filter(
-    (persona) => !participantBotIds.has(persona.id),
+  const eligibleReviewers = personas.filter(
+    (persona) => !excludedBotIds.has(persona.id),
   );
-  const pool = observers.length > 0 ? observers : personas;
+  if (eligibleReviewers.length === 0) return null;
   const randomValue = random();
   const unit = Number.isFinite(randomValue)
     ? Math.max(0, Math.min(0.999999999999, randomValue))
     : 0;
-  return pool[Math.floor(unit * pool.length)] ?? null;
+  return eligibleReviewers[Math.floor(unit * eligibleReviewers.length)] ?? null;
+}
+
+function recentBotcastGuestReviewerExclusionIds(
+  db: DatabaseSync,
+  userId: string,
+  episode: Pick<BotcastEpisodeSummary, "id" | "showId">,
+): string[] {
+  const rows = db
+    .prepare(
+      `SELECT guest_bot_id
+         FROM botcast_episodes
+        WHERE user_id = ? AND show_id = ? AND id <> ?
+          AND status = 'completed'
+        ORDER BY COALESCE(completed_at, updated_at, created_at) DESC, rowid DESC
+        LIMIT ?`,
+    )
+    .all(
+      userId,
+      episode.showId,
+      episode.id,
+      BOTCAST_PERSONA_REVIEW_RECENT_GUEST_WINDOW,
+    ) as unknown as Array<{ guest_bot_id: string }>;
+  return rows.map((row) => row.guest_bot_id);
+}
+
+function hideIneligibleBotcastPersonaReview(
+  db: DatabaseSync,
+  userId: string,
+  episode: BotcastEpisodeSummary,
+): BotcastEpisodeSummary {
+  if (!episode.personaReview) return episode;
+  const excludedReviewerBotIds = new Set([
+    episode.hostBotId,
+    episode.guestBotId,
+    ...recentBotcastGuestReviewerExclusionIds(db, userId, episode),
+  ]);
+  return excludedReviewerBotIds.has(episode.personaReview.reviewerBotId)
+    ? { ...episode, personaReview: null }
+    : episode;
 }
 
 function botcastPersonaReviewPrompt(args: {
@@ -2932,7 +3309,10 @@ export async function ensureBotcastEpisodePersonaReview(
 ): Promise<BotcastPersonaReview | null> {
   let episode = getBotcastEpisode(db, userId, episodeId);
   if (episode.status !== "completed") return null;
-  if (episode.personaReview) return episode.personaReview;
+  const persistedReview = mapEpisodeSummary(
+    loadEpisodeRow(db, userId, episodeId),
+  ).personaReview;
+  if (persistedReview) return episode.personaReview;
 
   const personaRows = db
     .prepare(
@@ -2947,13 +3327,18 @@ export async function ensureBotcastEpisodePersonaReview(
     name: string;
     system_prompt: string;
   }>;
+  const excludedReviewerBotIds = new Set([
+    episode.hostBotId,
+    episode.guestBotId,
+    ...recentBotcastGuestReviewerExclusionIds(db, userId, episode),
+  ]);
   const reviewer = selectBotcastReviewPersona(
     personaRows.map((row) => ({
       id: row.id,
       name: row.name,
       systemPrompt: row.system_prompt,
     })),
-    new Set([episode.hostBotId, episode.guestBotId]),
+    excludedReviewerBotIds,
     random,
   );
   if (!reviewer) return null;
@@ -3182,7 +3567,16 @@ export function forceEndBotcastEpisode(
   );
   transitionEpisodeSegment(db, userId, episode, "closing", now);
   episode = getBotcastEpisode(db, userId, episode.id);
-  completeEpisode(db, userId, episode, "completed", now);
+  const guestDeparted = episode.events.some(
+    (event) => event.kind === "departure",
+  );
+  completeEpisode(
+    db,
+    userId,
+    episode,
+    guestDeparted ? "guest_departed" : "completed",
+    now,
+  );
   return getBotcastEpisode(db, userId, episode.id);
 }
 
@@ -3201,13 +3595,20 @@ export async function advanceBotcastEpisode(
       message: null,
     };
   }
-  const requestedCue = input.cue
+  let requestedCue = input.cue
     ? normalizeBotcastProducerCue(input.cue)
     : undefined;
+  const cueDelivery = input.cueDelivery ?? "next_host_turn";
+  if (input.cueDelivery && !requestedCue) {
+    throw new Error("Signal cue delivery requires a producer cue.");
+  }
+  // A queued producer cue can race the guest's departure response. Once the
+  // episode is closing, discard that stale direction and continue the saved
+  // closing beat instead of stranding the live show on an error banner.
+  if (requestedCue && episode.segment === "closing") {
+    requestedCue = undefined;
+  }
   if (requestedCue) {
-    if (episode.segment === "closing") {
-      throw new Error("The Signal episode is already closing.");
-    }
     const guestAlreadyDeparted = episode.events.some(
       (event) => event.kind === "departure",
     );
@@ -3216,14 +3617,27 @@ export async function advanceBotcastEpisode(
       segment: episode.segment,
       guestDeparted: guestAlreadyDeparted,
     });
-    if (nextRole !== "host") {
+    if (cueDelivery === "next_host_turn" && nextRole !== "host") {
       throw new Error("Producer cues wait for the host's next turn.");
+    }
+    const guestHasTheMic =
+      nextRole === "guest" ||
+      (nextRole === "host" && episode.messages.at(-1)?.speakerRole === "guest");
+    if (cueDelivery === "interrupt_guest" && !guestHasTheMic) {
+      throw new Error("The guest must be speaking or next before the host can interrupt.");
     }
   }
   const now = new Date().toISOString();
   let tension = currentTension(episode);
   if (requestedCue) {
-    tension = persistProducerCue(db, userId, episode, requestedCue, now);
+    tension = persistProducerCue(
+      db,
+      userId,
+      episode,
+      requestedCue,
+      cueDelivery,
+      now,
+    );
     episode = getBotcastEpisode(db, userId, episodeId);
   }
   const wrapUpCue = activeBotcastWrapUpCue(episode);
@@ -3264,11 +3678,15 @@ export async function advanceBotcastEpisode(
     transitionEpisodeSegment(db, userId, episode, nextSegment, now);
     episode = getBotcastEpisode(db, userId, episodeId);
   }
-  const speakerRole = botcastNextSpeakerRole({
+  const scheduledSpeakerRole = botcastNextSpeakerRole({
     messages: episode.messages,
     segment: episode.segment,
     guestDeparted: guestAlreadyDeparted,
   });
+  const speakerRole =
+    requestedCue && cueDelivery === "interrupt_guest"
+      ? "host"
+      : scheduledSpeakerRole;
   if (!speakerRole) {
     completeEpisode(
       db,
@@ -3281,11 +3699,41 @@ export async function advanceBotcastEpisode(
     return { episode: getBotcastEpisode(db, userId, episodeId), message: null };
   }
   const show = getBotcastShow(db, userId, episode.showId);
-  const host = loadBotProfile(db, userId, episode.hostBotId);
-  const guest = loadBotProfile(db, userId, episode.guestBotId);
+  const currentHost = loadBotProfile(db, userId, episode.hostBotId);
+  const currentGuest = loadBotProfile(db, userId, episode.guestBotId);
+  const powerSnapshot = botcastEpisodePowerSnapshot(episode);
+  const host = powerSnapshot
+    ? { ...currentHost, powers: powerSnapshot.hostPowers }
+    : currentHost;
+  const guest = powerSnapshot
+    ? { ...currentGuest, powers: powerSnapshot.guestPowers }
+    : currentGuest;
   const speaker = speakerRole === "host" ? host : guest;
+  const peer = speakerRole === "host" ? guest : host;
+  const speakerIsMuted = botPowerIsMutedV1(speaker.powers);
+  const speakerEchoesAddressedSpeech = botPowerEchoesAddressedSpeechV1(
+    speaker.powers,
+  );
+  const latestOnAirMessage = episode.messages.at(-1) ?? null;
+  const addressedSpeechForEcho =
+    latestOnAirMessage && latestOnAirMessage.speakerRole !== speakerRole
+      ? latestOnAirMessage.content
+      : null;
   const departureRequired =
     speakerRole === "guest" && botcastGuestDepartureEligible(tension);
+  const hearingRepeatDirective = botcastHearingRepeatDirective({
+    episode,
+    speakerRole,
+    speaker,
+    requester: peer,
+    ...(requestedCue ? { requestedCue } : {}),
+    wrapUpCueActive: Boolean(wrapUpCue),
+    departureRequired,
+    segmentClosing: episode.segment === "closing",
+  });
+  const speakerRepeatsForHearingPower = Boolean(
+    hearingRepeatDirective && !speakerIsMuted,
+  );
   const immersiveVoiceEffectRequired =
     botcastImmersiveVoiceEffectRequired(episode);
   const turnNegativeInfluence = botcastNegativeInfluenceForTurn(
@@ -3327,7 +3775,9 @@ export async function advanceBotcastEpisode(
     ReturnType<typeof runAutoFallbackChain>
   >["recovery"];
   let raw: string;
-  if (episode.responseMode === "auto") {
+  if (hearingRepeatDirective) {
+    raw = hearingRepeatDirective.repeatedContent;
+  } else if (episode.responseMode === "auto") {
     const resolvedChain = autoFallbackResolvedChain(
       { provider: episode.provider, model: modelUsed },
       generation.autoFallbackChain,
@@ -3412,6 +3862,10 @@ export async function advanceBotcastEpisode(
   const topicWithPunctuation = /[.!?]$/u.test(episode.topic.trim())
     ? episode.topic.trim()
     : `${episode.topic.trim()}.`;
+  const hostCallsAfterDepartingGuest =
+    speakerRole === "host" &&
+    guestAlreadyDeparted &&
+    botcastHostCallsAfterDepartingGuest(episode.id);
   const fallback =
     speakerRole === "host"
       ? firstHostOpening
@@ -3424,7 +3878,9 @@ export async function advanceBotcastEpisode(
           : `Let us stay with the central question: ${topicWithPunctuation} The useful test is which concrete choice, cost, or contradiction would change the answer.`
         : episode.segment === "closing"
         ? guestAlreadyDeparted
-          ? `${guest.name} has left the studio. That is where we will leave it; thank you for listening.`
+          ? hostCallsAfterDepartingGuest
+            ? `Wait—where are you going, ${guest.name}? We will leave it there; thank you for listening.`
+            : `${guest.name} has left the studio. That is where we will leave it; thank you for listening.`
           : `That is where we will leave it. ${guest.name}, thank you for joining me.`
         : wrapUpCue
           ? `${guest.name}, before we close, what final thought would you leave with our listeners?`
@@ -3436,7 +3892,13 @@ export async function advanceBotcastEpisode(
         : wrapUpCue
           ? "The final point I would leave with your listeners is that the premise deserves more scrutiny than certainty."
           : "I do not accept the premise as stated, but I will answer the part that matters.";
-  const generatedContent = sanitizeUtterance(raw, fallback, speaker.name);
+  const generatedContent = sanitizeUtterance(
+    raw,
+    fallback,
+    speaker.name,
+    speakerRole === "host" ? guest.name : host.name,
+    speakerRole,
+  );
   const performance = extractBotcastVoicePerformance(
     generatedContent,
     immersiveVoiceEffectRequired,
@@ -3452,8 +3914,13 @@ export async function advanceBotcastEpisode(
     })
       ? fallback
       : cleanGeneratedContent;
-  const content =
-    speakerRole === "host" &&
+  const content = speakerIsMuted
+    ? applyBotPowerMuteResponseV1(generatedContent)
+    : speakerRepeatsForHearingPower
+      ? hearingRepeatDirective!.repeatedContent
+    : speakerEchoesAddressedSpeech
+      ? applyBotPowerEchoResponseV1(addressedSpeechForEcho)
+    : speakerRole === "host" &&
     episode.guestPresenceMode === "audience_only" &&
     botcastAudienceOnlyHostRepeatsAbsence({
       episode,
@@ -3469,6 +3936,9 @@ export async function advanceBotcastEpisode(
       ? fallback
       : introductionSafeContent;
   const voicePerformanceText =
+    !speakerIsMuted &&
+    !speakerRepeatsForHearingPower &&
+    !speakerEchoesAddressedSpeech &&
     content === cleanGeneratedContent
       ? (performance.voicePerformanceText ??
       (immersiveVoiceEffectRequired
@@ -3477,10 +3947,11 @@ export async function advanceBotcastEpisode(
     : null;
   const messageId = randomId(12);
   const tensionMoodKey = botcastVoiceMoodForTension(tension);
-  const messageMoodKey =
-    turnNegativeInfluence &&
-    turnNegativeInfluence.strength !== "small" &&
-    tensionMoodKey === "neutral"
+  const messageMoodKey = speakerRepeatsForHearingPower
+    ? lowerVoiceMoodForHearingRepeat(hearingRepeatDirective!.sourceMood)
+    : turnNegativeInfluence &&
+        turnNegativeInfluence.strength !== "small" &&
+        tensionMoodKey === "neutral"
       ? "guarded"
       : tensionMoodKey;
   db.prepare(
@@ -3512,6 +3983,17 @@ export async function advanceBotcastEpisode(
     responseMode: episode.responseMode,
     immersiveVoiceEffect: voicePerformanceText !== null,
     moodKey: messageMoodKey,
+    ...(speakerRepeatsForHearingPower
+      ? {
+          powerOutcome: {
+            effect: "hearing_repeat",
+            requesterBotId: hearingRepeatDirective!.requesterBotId,
+            requestMessageId: hearingRepeatDirective!.requestMessageId,
+            sourceMessageId: hearingRepeatDirective!.sourceMessageId,
+            moodPenalty: hearingRepeatDirective!.moodPenalty,
+          },
+        }
+      : {}),
     ...(autoRecovery ? { autoRecovery } : {}),
     },
     now,
@@ -3608,9 +4090,8 @@ export async function advanceBotcastEpisode(
     );
   }
   const atMs = firstOpeningHost ? 1_400 : messageStartMs;
-  const cameraEvent = departureRequired
-    ? "departure"
-    : episode.segment === "interview" && episode.messages.length % 4 === 0
+  const cameraEvent =
+    episode.segment === "interview" && episode.messages.length % 4 === 0
       ? "transition"
       : "utterance";
   const suggestion = botcastDirectorSuggestion({
@@ -3630,6 +4111,24 @@ export async function advanceBotcastEpisode(
     now,
   );
   if (departureRequired) {
+    const departureSuggestion = botcastDirectorSuggestion({
+      previous: suggestion,
+      atMs:
+        messageStartMs +
+        Math.max(BOTCAST_DIRECTOR_MIN_SHOT_MS, utteranceDurationMs),
+      speakerRole,
+      utteranceDurationMs,
+      segment: episode.segment,
+      event: "departure",
+    });
+    recordEvent(
+      db,
+      userId,
+      episode.id,
+      "camera_suggestion",
+      { ...departureSuggestion },
+      now,
+    );
     recordEvent(
       db,
       userId,
@@ -3638,7 +4137,7 @@ export async function advanceBotcastEpisode(
       {
       shot: "wide",
       reason: "empty_chair",
-      atMs: suggestion.atMs + suggestion.minimumHoldMs,
+      atMs: departureSuggestion.atMs + 900,
       minimumHoldMs: 3_200,
       },
       now,

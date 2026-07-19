@@ -48,6 +48,24 @@ export const SIGNAL_AMBIENT_FOLEY_PROFILE = {
   trim: 1.6,
 } as const satisfies SessionAmbientFoleyProfile;
 
+export function signalSessionAtmosphereActive(args: {
+  audioEnabled: boolean;
+  hasSelectedShow: boolean;
+  preRollActive: boolean;
+  episodePresent: boolean;
+  replayPlaying: boolean;
+  studioLayoutEditorOpen: boolean;
+}): boolean {
+  return Boolean(
+    args.audioEnabled &&
+      args.hasSelectedShow &&
+      !args.preRollActive &&
+      (args.episodePresent ||
+        args.replayPlaying ||
+        args.studioLayoutEditorOpen),
+  );
+}
+
 /**
  * Provider ambience can be tens of decibels quieter than the bundled loops.
  * A strong preamp feeding a hard compressor brings both into the same safe
@@ -428,7 +446,6 @@ export function startSessionAtmosphere(args: {
   let stopped = false;
   let timer: number | null = null;
   let foleyIndex = 0;
-  let lastCueAt = 0;
   const ambientFoleyProfile =
     args.ambientFoleyProfile ?? DEFAULT_SESSION_AMBIENT_FOLEY_PROFILE;
 
@@ -600,9 +617,6 @@ export function startSessionAtmosphere(args: {
 
   return {
     playCue(cue) {
-      const now = Date.now();
-      if (now - lastCueAt < 650) return;
-      lastCueAt = now;
       play(
         SESSION_FOLEY_URLS[cue],
         "foley",
@@ -656,6 +670,14 @@ export function startSessionAtmosphere(args: {
   };
 }
 
+export function coffeeCupFoleyCueForTransition(
+  previous: boolean | undefined,
+  sipping: boolean,
+): SessionAtmosphereCue | null {
+  if (previous === undefined || previous === sipping) return null;
+  return sipping ? "coffeeSip" : "coffeeCupPlace";
+}
+
 export function attachCoffeeCupFoley(
   root: HTMLElement,
   controller: SessionAtmosphereController,
@@ -667,8 +689,15 @@ export function attachCoffeeCupFoley(
     const sipping = cup.dataset.cupSipping === "true";
     const previous = sippingByCup.get(cup);
     sippingByCup.set(cup, sipping);
-    if (!announce || previous === undefined || previous === sipping) return;
-    controller.playCue(sipping ? "coffeeSip" : "coffeeCupPlace");
+    if (!announce) return;
+    const cue = coffeeCupFoleyCueForTransition(previous, sipping);
+    if (cue) controller.playCue(cue);
+  };
+  const inspectRemovedCup = (cup: HTMLElement): void => {
+    const previous = sippingByCup.get(cup);
+    sippingByCup.set(cup, false);
+    const cue = coffeeCupFoleyCueForTransition(previous, false);
+    if (cue) controller.playCue(cue);
   };
 
   root
@@ -690,6 +719,13 @@ export function attachCoffeeCupFoley(
         node
           .querySelectorAll<HTMLElement>(cupSelector)
           .forEach((cup) => inspectCup(cup, false));
+      }
+      for (const node of mutation.removedNodes) {
+        if (!(node instanceof HTMLElement)) continue;
+        if (node.matches(cupSelector)) inspectRemovedCup(node);
+        node
+          .querySelectorAll<HTMLElement>(cupSelector)
+          .forEach(inspectRemovedCup);
       }
     }
   });

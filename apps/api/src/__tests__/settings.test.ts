@@ -96,6 +96,7 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     voiceMode: "mute",
     voiceEffectsEnabled: 1,
     voiceVolume: 1,
+    operatingSystemVoicesEnabled: 0,
     englishVoiceEngine: "elevenlabs",
     defaultSystemVoiceName: null,
     defaultElevenLabsVoiceId: null,
@@ -114,6 +115,7 @@ describe("resolveNextSettings — voice foundation", () => {
         voiceMode: "babble",
         voiceEffectsEnabled: false,
         voiceVolume: 0.65,
+        operatingSystemVoicesEnabled: true,
         englishVoiceEngine: "builtin",
         defaultSystemVoiceName: "  Alex  ",
         defaultElevenLabsVoiceId: " eleven-default ",
@@ -126,6 +128,7 @@ describe("resolveNextSettings — voice foundation", () => {
     assert.equal(next.voiceMode, "babble");
     assert.equal(next.voiceEffectsEnabled, false);
     assert.equal(next.voiceVolume, 0.65);
+    assert.equal(next.operatingSystemVoicesEnabled, true);
     assert.equal(next.englishVoiceEngine, "elevenlabs");
     assert.equal(next.defaultSystemVoiceName, null);
     assert.equal(next.defaultElevenLabsVoiceId, null);
@@ -134,6 +137,11 @@ describe("resolveNextSettings — voice foundation", () => {
     });
     assert.equal(next.elevenLabsVoiceModel, "eleven_multilingual_v2");
     assert.equal(next.elevenLabsVoiceCollectionId, "collection-main");
+    assert.equal(
+      resolveNextSettings({}, baseline({ operatingSystemVoicesEnabled: 1 }))
+        .operatingSystemVoicesEnabled,
+      true,
+    );
     assert.equal(
       resolveNextSettings(
         { elevenLabsVoiceCollectionId: "" },

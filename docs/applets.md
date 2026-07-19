@@ -24,11 +24,11 @@ ship as `0.5.2` while Coffee is `v0.7` and Story is `v0.1`.
 
 | Applet | Version | Status | Notes |
 | --- | --- | --- | --- |
-| Chat | v1.5 | Active | Full playground for bots, providers, models, images, exports, memory-aware conversations, per-bot online voice identity, and sparse shared mic presence. |
-| Zen | v1.4 | Active | Calm one-to-one continuity surface with shared bot voice identity and mic presence; the standalone Zen lane is deprecating as this becomes Prism's default state. |
-| Coffee | v1.8 | Active | Multi-bot group table with Coffee Groups, model-aware session holds, pacing, cups, transcripts, replay, synchronized online speech, subtle shared session foley, and adaptive living table atmosphere. |
-| Signal | v0.8 | Active | Bot-owned interview shows with audience pulse, a full studio soundcheck and placement workspace, persistent cast and ambience controls, audience-only Powers, private direction, archives, and directed replay. |
-| Story | v0.3 | Preview | Generated visual-novel episodes with bots, choices, maps, inventory, transcripts, shared PRISM menu behavior, and sparse spoken-scene mic presence. |
+| Chat | v1.7 | Active | Full playground for bots, providers, models, images, exports, memory-aware conversations, per-bot online voice identity, sparse shared mic presence, and ready Power persona cues including trustworthy candor and hard-of-hearing behavior. |
+| Zen | v1.6 | Active | Calm one-to-one continuity surface with shared bot voice identity, mic presence, and ready Power persona cues including trustworthy candor and hard-of-hearing behavior; the standalone Zen lane is deprecating as this becomes Prism's default state. |
+| Coffee | v2.0 | Active | Multi-bot group table with Coffee Groups, model-aware session holds, pacing, cups, transcripts, replay, synchronized online speech, living atmosphere, one-response candor, and exact bot-to-bot repeats that lower the repeating bot's mood. |
+| Signal | v1.0 | Active | Bot-owned interview shows with audience pulse, studio placement, frozen episode Powers, private direction, archives, directed replay, one-response candor, and saved exact repeats with descending delivery mood. |
+| Story | v0.5 | Preview | Generated visual-novel episodes with bots, choices, maps, inventory, transcripts, shared PRISM menu behavior, and adapted scene-generation candor with target agency intact. |
 | Arena | v0.0 | Planned | Moderated bot debate surface. |
 | Polling | v0.0 | Planned | AI-powered polling across bot groups. |
 | Feed | v0.0 | Planned | BotBook-style social feed. |
@@ -68,6 +68,37 @@ usable end to end. It entered preview at `v0.1` and is now `v0.7`; later snapsho
 stages do not block the standalone preview.
 
 ## Changelog
+
+- Bumped `Chat` to `v1.8`, `Zen` to `v1.7`, `Coffee` to `v2.1`, and `Signal`
+  to `v1.1` for ghostly Ready Powers: a holder is invisible while idle, fades
+  in only to speak, and gives present non-player bots a strong, agency-preserving
+  terror cue. Story carries the same semantic cue as prose rather than inventing
+  a live-avatar visual.
+
+- Bumped `Chat` to `v1.7`, `Zen` to `v1.6`, `Coffee` to `v2.0`, `Signal` to
+  `v1.0`, and `Story` to `v0.5` for the trust-based candor Power. A holder's
+  relevant direct question or honesty invitation can make the targeted bot's
+  next response more candid without compelling the player, inventing knowledge,
+  exposing private instructions, or overriding character, safety, and privacy
+  boundaries. Signal freezes Powers with the episode; Coffee uses its frozen
+  session plan; Story adapts the rule during scene generation.
+
+- The same applet-version pass adds the hard-of-hearing Power contract. In an
+  uninterrupted bot-to-bot exchange, a recognized request such as “What did you
+  say?” makes the prior speaker repeat its saved line exactly. Coffee applies
+  one stacking social-mood loss to that speaker per repeat and persists it in
+  replay state; Signal saves a one-rung delivery-mood drop with every repeated
+  utterance. Chat, Zen, and Story receive persona cues only because they do not
+  own the same live bot-to-bot mood state. Direct player or producer direction,
+  closing safety, and mute take precedence, and planned conversational applets
+  must choose a compatible mood model before activation.
+
+- Bumped `Chat` to `v1.6`, `Zen` to `v1.5`, `Coffee` to `v1.9`, `Signal` to
+  `v0.9`, and `Story` to `v0.4` for cross-mode hard response Powers. Muted bots
+  may act but only display `...`; echo-bound bots repeat the latest directly
+  addressed speech exactly and add nothing. Signal never leaks private producer
+  direction into an echo, while Story deterministically echoes the prior visible
+  scene. Planned bot modes must enforce both contracts before activation.
 
 ### 2026-07-18
 

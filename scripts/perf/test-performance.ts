@@ -4,6 +4,7 @@ import { performance } from "node:perf_hooks";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getAppConfig } from "@localai/config";
+import { PRISM_EULA_VERSION } from "@localai/shared";
 import { createTestDatabase } from "../../apps/api/src/test-support.ts";
 import type { LlmProvider } from "../../apps/api/src/providers.ts";
 
@@ -83,7 +84,13 @@ try {
   const registration = await fetch(`${baseUrl}/api/auth/register`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ username: "perf@example.com", password: "perf-password" }),
+    body: JSON.stringify({
+      username: "perf@example.com",
+      password: "perf-password",
+      minimumAgeConfirmed: true,
+      eulaAccepted: true,
+      eulaVersion: PRISM_EULA_VERSION,
+    }),
   });
   if (!registration.ok) throw new Error(`Performance registration failed: ${registration.status}`);
   const registered = (await registration.json()) as { user: { id: string } };

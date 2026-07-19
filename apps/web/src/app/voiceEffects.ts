@@ -1,5 +1,10 @@
 import {
+  BOT_VOICE_HIGH_SHELF_HZ,
+  BOT_VOICE_LOW_SHELF_HZ,
   normalizeBotAudioVoiceProfileV1,
+  expectedVoicePlaybackDurationMs,
+  resolveBotVoiceCharacter,
+  resolveVoicePlaybackTransform,
   type BotAudioVoiceProfileV1,
   type CoffeeVoiceDeliveryEnvelope,
   type ElevenLabsVoiceEffect,
@@ -335,8 +340,47 @@ function createNoiseBuffer(context: AudioContext, durationSeconds: number, seed:
 let audioContext: AudioContext | null = null;
 export type VoicePlaybackChannel = "primary" | "reaction";
 
+type FormantCorrectionNodeLike = AudioNode & {
+  pitch: AudioParam;
+  playbackRate: AudioParam;
+  formantStrength: AudioParam;
+};
+
+let formantCorrectionRegistration: Promise<
+  (new (options: { context: AudioContext; outputChannelCount?: 1 | 2 }) => FormantCorrectionNodeLike) | null
+> | null = null;
+let formantCorrectionContext: AudioContext | null = null;
+
+/** The copied MPL processor is deliberately a public asset: AudioWorklet
+ * modules are fetched by the browser rather than bundled into Next's normal
+ * client graph. A failed registration leaves tempo intact and pitch neutral. */
+async function formantCorrectionNodeConstructor(
+  context: AudioContext,
+): Promise<(new (options: { context: AudioContext; outputChannelCount?: 1 | 2 }) => FormantCorrectionNodeLike) | null> {
+  if (!context.audioWorklet || typeof AudioWorkletNode !== "function") return null;
+  if (formantCorrectionContext !== context) {
+    formantCorrectionContext = context;
+    formantCorrectionRegistration = null;
+  }
+  formantCorrectionRegistration ??= import(
+    "@soundtouchjs/formant-correction-worklet"
+  )
+    .then(async ({ FormantCorrectionNode }) => {
+      await FormantCorrectionNode.register(
+        context,
+        "/worklets/formant-correction-processor.js",
+      );
+      return FormantCorrectionNode as unknown as new (options: {
+        context: AudioContext;
+        outputChannelCount?: 1 | 2;
+      }) => FormantCorrectionNodeLike;
+    })
+    .catch(() => null);
+  return formantCorrectionRegistration;
+}
+
 interface ActiveVoiceChannelState {
-  nodes: AudioScheduledSourceNode[];
+  nodes: AudioNode[];
   resolve: (() => void) | null;
   progress: VoicePlaybackProgressController | null;
   roomConnection: RoomAcousticsConnection | null;
@@ -374,6 +418,9 @@ export async function prepareRealtimeVoiceAudio(): Promise<boolean> {
     } finally {
       if (timer !== null) window.clearTimeout(timer);
     }
+  }
+  if (context.state === "running") {
+    await formantCorrectionNodeConstructor(context);
   }
   return context.state === "running";
 }
@@ -472,7 +519,9 @@ export function stopRealtimeVoiceAudio(
   active.progress?.cancel();
   active.progress = null;
   for (const node of active.nodes) {
-    try { node.stop(); } catch { /* already stopped */ }
+    try {
+      if ("stop" in node && typeof node.stop === "function") node.stop();
+    } catch { /* already stopped */ }
     try { node.disconnect(); } catch { /* already disconnected */ }
   }
   active.nodes = [];
@@ -521,32 +570,59 @@ export async function playRealtimeVoiceBytes(args: {
     args.effectsEnabled ? args.elevenLabsEffect ?? "clean" : "clean"
   );
   const now = context.currentTime;
-  const playbackRateRatio = 2 ** ((args.detuneCents ?? 0) / 1200);
+  const transform = resolveVoicePlaybackTransform(profile);
+  const playbackRateRatio = transform.tempo;
   const playbackDurationSeconds = Math.min(
     decoded.duration / playbackRateRatio,
     args.maxDurationMs && args.maxDurationMs > 0
       ? args.maxDurationMs / 1_000
       : Number.POSITIVE_INFINITY,
   );
-  const playbackDurationMs = Math.max(1, Math.round(playbackDurationSeconds * 1000));
+  const playbackDurationMs = Math.min(
+    expectedVoicePlaybackDurationMs(decoded.duration * 1000, profile),
+    args.maxDurationMs && args.maxDurationMs > 0
+      ? args.maxDurationMs
+      : Number.POSITIVE_INFINITY,
+  );
+  const FormantCorrectionNode = await formantCorrectionNodeConstructor(context);
+  const createPitchTransform = (
+    startAt: number,
+    effectDetuneCents = 0,
+  ): FormantCorrectionNodeLike | null => {
+    if (!FormantCorrectionNode) return null;
+    const node = new FormantCorrectionNode({
+      context,
+      outputChannelCount: decoded.numberOfChannels === 1 ? 1 : 2,
+    });
+    node.playbackRate.setValueAtTime(playbackRateRatio, startAt);
+    node.formantStrength.setValueAtTime(1, startAt);
+    const basePitchCents = (args.detuneCents ?? transform.pitchCents) + effectDetuneCents;
+    node.pitch.setValueAtTime(2 ** (basePitchCents / 1200), startAt);
+    if (profile.lilt !== 0) {
+      const contourStep = 0.32;
+      for (let at = contourStep; at < playbackDurationSeconds; at += contourStep) {
+        const cents = basePitchCents + voiceLiltDetuneCents(profile.lilt, at);
+        node.pitch.linearRampToValueAtTime(2 ** (cents / 1200), startAt + at);
+      }
+    }
+    return node;
+  };
   const createSpeechSource = (
     startAt: number,
     effectDetuneCents = 0,
-  ): AudioBufferSourceNode => {
+  ): { source: AudioBufferSourceNode; transform: FormantCorrectionNodeLike | null } => {
     const speechSource = context.createBufferSource();
     speechSource.buffer = decoded;
-    const baseDetuneCents = (args.detuneCents ?? 0) + effectDetuneCents;
-    speechSource.detune.setValueAtTime(baseDetuneCents, startAt);
-    if (profile.lilt !== 0) {
-      const contourStep = 0.32;
-      for (let at = contourStep; at < decoded.duration; at += contourStep) {
-        const cents = baseDetuneCents + voiceLiltDetuneCents(profile.lilt, at);
-        speechSource.detune.linearRampToValueAtTime(cents, startAt + at);
-      }
-    }
-    return speechSource;
+    // Pace is the sole duration control. Without a functioning worklet, leave
+    // pitch neutral instead of falling back to pitch-via-resampling.
+    speechSource.playbackRate.setValueAtTime(playbackRateRatio, startAt);
+    return {
+      source: speechSource,
+      transform: createPitchTransform(startAt, effectDetuneCents),
+    };
   };
-  const source = createSpeechSource(now);
+  const primaryVoice = createSpeechSource(now);
+  const source = primaryVoice.source;
 
   const highpass = context.createBiquadFilter();
   const lowpass = context.createBiquadFilter();
@@ -554,7 +630,10 @@ export async function playRealtimeVoiceBytes(args: {
   const dryGain = context.createGain();
   const speechGain = context.createGain();
   const outputGain = context.createGain();
+  const lowShelf = context.createBiquadFilter();
+  const highShelf = context.createBiquadFilter();
   const limiter = context.createDynamicsCompressor();
+  const voiceCharacter = resolveBotVoiceCharacter(profile);
   highpass.type = "highpass";
   highpass.frequency.value = Math.max(
     elevenLabsEffect.highpassHz,
@@ -578,19 +657,32 @@ export async function playRealtimeVoiceBytes(args: {
     Math.min(1.25, profile.volume) *
     0.88 *
     elevenLabsEffect.outputTrim *
+    voiceCharacter.gainMultiplier *
     (channel === "reaction" ? 0.62 : 1);
+  lowShelf.type = "lowshelf";
+  lowShelf.frequency.value = BOT_VOICE_LOW_SHELF_HZ;
+  lowShelf.gain.value = voiceCharacter.lowShelfDb;
+  highShelf.type = "highshelf";
+  highShelf.frequency.value = BOT_VOICE_HIGH_SHELF_HZ;
+  highShelf.gain.value = voiceCharacter.highShelfDb;
   limiter.threshold.value = args.cleanRoboticCarrier ? -0.5 : -4;
   limiter.knee.value = args.cleanRoboticCarrier ? 0 : 8;
   limiter.ratio.value = args.cleanRoboticCarrier ? 20 : 12;
   limiter.attack.value = args.cleanRoboticCarrier ? 0.001 : 0.003;
   limiter.release.value = args.cleanRoboticCarrier ? 0.04 : 0.12;
-  source.connect(dryGain).connect(highpass).connect(lowpass);
+  if (primaryVoice.transform) {
+    source.connect(primaryVoice.transform).connect(dryGain);
+  } else {
+    source.connect(dryGain);
+  }
+  dryGain.connect(highpass).connect(lowpass);
   if (args.cleanRoboticCarrier) {
     lowpass.connect(speechGain);
   } else {
     lowpass.connect(shaper).connect(speechGain);
   }
-  speechGain.connect(outputGain).connect(limiter);
+  speechGain.connect(outputGain);
+  outputGain.connect(lowShelf).connect(highShelf).connect(limiter);
   const roomConnection = connectRoomAcoustics({
     context,
     input: limiter,
@@ -619,7 +711,8 @@ export async function playRealtimeVoiceBytes(args: {
     speechGain.gain.linearRampToValueAtTime(1, end);
   }
 
-  const scheduled: AudioScheduledSourceNode[] = [source];
+  const scheduled: AudioNode[] = [source];
+  if (primaryVoice.transform) scheduled.push(primaryVoice.transform);
   const speechStarts: Array<{
     source: AudioBufferSourceNode;
     startAt: number;
@@ -643,7 +736,10 @@ export async function playRealtimeVoiceBytes(args: {
       oscillator.frequency.value = delayModulationFrequencyHz;
       modulation.gain.value = delayModulationDepthSeconds;
       oscillator.connect(modulation).connect(delay.delayTime);
-      source.connect(delay).connect(parallelGain).connect(highpass);
+      (primaryVoice.transform ?? source)
+        .connect(delay)
+        .connect(parallelGain)
+        .connect(highpass);
       const endAt = now + playbackDurationSeconds + maximumDelaySeconds;
       oscillator.start(now);
       oscillator.stop(endAt);
@@ -655,16 +751,20 @@ export async function playRealtimeVoiceBytes(args: {
       continue;
     }
     const startAt = now + voice.delaySeconds;
-    const parallelSource = createSpeechSource(startAt, voice.detuneCents);
+    const parallelVoice = createSpeechSource(startAt, voice.detuneCents);
+    const parallelSource = parallelVoice.source;
     const parallelGain = context.createGain();
     parallelGain.gain.value = voice.gain;
-    parallelSource.connect(parallelGain).connect(highpass);
+    if (parallelVoice.transform) {
+      parallelSource.connect(parallelVoice.transform).connect(parallelGain);
+      scheduled.push(parallelVoice.transform);
+    } else {
+      parallelSource.connect(parallelGain);
+    }
+    parallelGain.connect(highpass);
     scheduled.push(parallelSource);
-    const rateRatio = 2 ** (
-      ((args.detuneCents ?? 0) + voice.detuneCents) / 1200
-    );
     const endAt = Math.min(
-      startAt + decoded.duration / rateRatio,
+      startAt + decoded.duration / playbackRateRatio,
       args.maxDurationMs && args.maxDurationMs > 0
         ? now + args.maxDurationMs / 1_000
         : Number.POSITIVE_INFINITY,

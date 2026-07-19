@@ -9,6 +9,7 @@ export const GROUP_ROOM_WALLPAPER_MEMBER_COUNT_MAX = 24;
 export const GROUP_ROOM_WALLPAPER_GROUP_NAME_MAX_LENGTH = 80;
 export const GROUP_ROOM_WALLPAPER_GROUP_DESCRIPTION_MAX_LENGTH = 500;
 export const GROUP_ROOM_WALLPAPER_MEMBER_BOT_ID_MAX_LENGTH = 200;
+export const GROUP_ROOM_WALLPAPER_VARIATION_SEED_MAX_LENGTH = 160;
 
 /**
  * Extra context accepted by `POST /api/images/generate` when the purpose is
@@ -22,6 +23,8 @@ export interface GroupRoomWallpaperImageGenerationRequest {
   groupName: string;
   groupDescription?: string;
   memberBotIds: string[];
+  /** Opaque per-attempt seed used only to select a server-owned composition brief. */
+  variationSeed?: string;
   preferredProvider?: "local" | "openai";
   model?: string;
   quality?: string;

@@ -188,6 +188,7 @@ export interface CurrentSettings {
   voiceMode: VoiceMode | string | null;
   voiceEffectsEnabled: number;
   voiceVolume: number | null;
+  operatingSystemVoicesEnabled: number;
   /** Compatibility column storing the selected ONLINE engine; LOCAL is always builtin. */
   englishVoiceEngine: EnglishVoiceEngine | string | null;
   defaultSystemVoiceName: string | null;
@@ -246,6 +247,7 @@ export interface NextSettings {
   voiceMode: VoiceMode;
   voiceEffectsEnabled: boolean;
   voiceVolume: number;
+  operatingSystemVoicesEnabled: boolean;
   /** Selected ONLINE engine only; LOCAL English always resolves to builtin. */
   englishVoiceEngine: EnglishVoiceEngine;
   defaultSystemVoiceName: string | null;
@@ -1122,6 +1124,10 @@ export function resolveNextSettings(
   const voiceVolume = body.voiceVolume === undefined
     ? normalizeBotVoiceVolume(current.voiceVolume)
     : normalizeBotVoiceVolume(body.voiceVolume, normalizeBotVoiceVolume(current.voiceVolume));
+  const operatingSystemVoicesEnabled =
+    typeof body.operatingSystemVoicesEnabled === "boolean"
+      ? body.operatingSystemVoicesEnabled
+      : current.operatingSystemVoicesEnabled !== 0;
   // The online selector currently has one installed provider. It is not an
   // opt-in toggle; the per-profile ElevenLabs voice is the explicit override.
   const englishVoiceEngine: EnglishVoiceEngine = "elevenlabs";
@@ -1240,6 +1246,7 @@ export function resolveNextSettings(
     voiceMode,
     voiceEffectsEnabled,
     voiceVolume,
+    operatingSystemVoicesEnabled,
     englishVoiceEngine,
     defaultSystemVoiceName,
     defaultElevenLabsVoiceId,
