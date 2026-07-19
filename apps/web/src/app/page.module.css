@@ -73314,6 +73314,55 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   color: color-mix(in srgb, var(--editor-bot-color) 78%, var(--fg));
 }
 
+.botVoiceFallbackDisclosure {
+  overflow: hidden;
+  gap: 0;
+  padding: 0;
+}
+
+.botVoiceFallbackDisclosure > summary {
+  grid-template-columns: 27px minmax(0, 1fr) auto 14px;
+  padding: 10px;
+  list-style: none;
+  cursor: pointer;
+}
+
+.botVoiceFallbackDisclosure > summary::-webkit-details-marker,
+.botVoiceDeliveryDisclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.botVoiceFallbackDisclosure > summary::after,
+.botVoiceDeliveryDisclosure > summary::after {
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+  text-align: center;
+  content: "+";
+}
+
+.botVoiceFallbackDisclosure[open] > summary::after,
+.botVoiceDeliveryDisclosure[open] > summary::after {
+  content: "−";
+}
+
+.botVoiceFallbackDisclosure > summary:hover,
+.botVoiceFallbackDisclosure > summary:focus-visible,
+.botVoiceDeliveryDisclosure > summary:hover,
+.botVoiceDeliveryDisclosure > summary:focus-visible {
+  outline: none;
+  background: color-mix(in srgb, var(--editor-bot-color) 7%, transparent);
+}
+
+.botVoiceFallbackDisclosure[open] > summary {
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
+}
+
+.botVoiceFallbackBody {
+  padding: 10px;
+}
+
 .botVoiceIdentityField {
   display: grid;
   gap: 5px;
@@ -73654,11 +73703,61 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   }
 }
 
+.botVoiceDeliveryDisclosure {
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--bg) 44%, transparent);
+}
+
+.botVoiceDeliveryDisclosure > summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 14px;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 9px;
+  list-style: none;
+  cursor: pointer;
+}
+
+.botVoiceDeliveryDisclosure > summary > span {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.botVoiceDeliveryDisclosure > summary strong {
+  color: var(--fg);
+  font-size: 10px;
+  line-height: 1.25;
+}
+
+.botVoiceDeliveryDisclosure > summary small {
+  color: var(--muted);
+  font-size: 8.5px;
+  line-height: 1.25;
+}
+
+.botVoiceDeliveryDisclosure > summary em {
+  border-radius: 999px;
+  padding: 3px 6px;
+  background: color-mix(in srgb, var(--editor-bot-color) 10%, var(--panel));
+  color: color-mix(in srgb, var(--editor-bot-color) 75%, var(--fg));
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 820;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.botVoiceDeliveryDisclosure[open] > summary {
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
+}
+
 .botVoiceOnlineOptions {
   display: grid;
   gap: 10px;
-  padding-top: 10px;
-  border-top: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
+  padding: 10px;
 }
 
 .botVoicePerformanceCard {
@@ -73720,6 +73819,52 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   background: color-mix(in srgb, var(--panel) 88%, transparent);
   box-shadow: 0 -12px 28px color-mix(in srgb, var(--bg) 62%, transparent);
   backdrop-filter: blur(14px);
+}
+
+.botVoicePreviewStatus {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg) 68%, transparent);
+  color: var(--muted);
+}
+
+.botVoicePreviewStatus > span {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 11%, transparent);
+}
+
+.botVoicePreviewStatus small {
+  overflow-wrap: anywhere;
+  color: currentColor;
+  font-size: 9px;
+  line-height: 1.35;
+}
+
+.botVoicePreviewStatus[data-state="generating"],
+.botVoicePreviewStatus[data-state="playing"] {
+  border-color: color-mix(in srgb, var(--editor-bot-color) 44%, var(--line));
+  color: color-mix(in srgb, var(--editor-bot-color) 82%, var(--fg));
+}
+
+.botVoicePreviewStatus[data-state="success"] {
+  border-color: color-mix(in srgb, #5fbe8b 42%, var(--line));
+  color: color-mix(in srgb, #5fbe8b 78%, var(--fg));
+}
+
+.botVoicePreviewStatus[data-state="error"] {
+  border-color: color-mix(in srgb, #d87a72 52%, var(--line));
+  background: color-mix(in srgb, #d87a72 8%, var(--panel));
+  color: color-mix(in srgb, #d87a72 80%, var(--fg));
 }
 
 .botVoicePreviewActions {

@@ -10730,10 +10730,30 @@ function buildRoutes(): RouteDefinition[] {
         hasMessageId:
           typeof raw.messageId === "string" && raw.messageId.trim().length > 0,
       });
-      const profile = normalizeBotAudioVoiceProfileV1(raw.profile);
-      // An online engine is available account-wide, but a profile opts into
-      // it through a selected provider voice or explicit voice ID override.
-      // Profiles without either stay on the installed system TTS voice.
+      const requestedProfile = normalizeBotAudioVoiceProfileV1(raw.profile);
+      const legacyVoiceBank = parseStoredElevenLabsVoiceBank(
+        user.elevenlabs_voice_bank,
+      );
+      const legacyElevenLabsVoiceId =
+        legacyVoiceBank[requestedProfile.baseVoiceId] ??
+        user.default_elevenlabs_voice_id;
+      // New per-bot selections win. Legacy account mappings remain a
+      // compatibility fallback so installing the PRISM pack cannot silently
+      // replace existing ElevenLabs or operating-system identities.
+      const profile = normalizeBotAudioVoiceProfileV1({
+        ...requestedProfile,
+        elevenLabsVoiceId:
+          resolveElevenLabsVoiceId(requestedProfile)
+            ? requestedProfile.elevenLabsVoiceId
+            : legacyElevenLabsVoiceId,
+        systemVoiceName:
+          requestedProfile.systemVoiceName ?? user.default_system_voice_name,
+      });
+      const allowOperatingSystemVoices =
+        user.operating_system_voices_enabled !== 0 ||
+        Boolean(profile.systemVoiceName);
+      // ElevenLabs remains authoritative whenever the bot has either a current
+      // per-bot identity or a legacy mapped identity. Built-in is last-resort.
       const requestedEngine =
         raw.engine === "elevenlabs" && resolveElevenLabsVoiceId(profile)
           ? "elevenlabs"
@@ -10771,8 +10791,7 @@ function buildRoutes(): RouteDefinition[] {
               lilt: 0,
               bottishTone: 0.45,
             },
-            allowOperatingSystemVoices:
-              user.operating_system_voices_enabled !== 0,
+            allowOperatingSystemVoices,
             signal: controller.signal,
           });
           sendVoiceWave(
@@ -10806,8 +10825,7 @@ function buildRoutes(): RouteDefinition[] {
           const wave = await builtinVoiceWaveGeneratorOverride({
             text: boundary.text,
             profile: boundary.profile,
-            allowOperatingSystemVoices:
-              user.operating_system_voices_enabled !== 0,
+            allowOperatingSystemVoices,
             signal: controller.signal,
           });
           sendVoiceWave(
@@ -10835,14 +10853,24 @@ function buildRoutes(): RouteDefinition[] {
         boundary.profile,
       );
       const voiceId = resolveElevenLabsVoiceId(normalizedProfile);
+      const requiresSelectedProviderVoice =
+        raw.explicitVoicePreview === true && request.engine === "elevenlabs";
       const userKey = decryptUserKey(userId);
       const apiKey =
         getElevenLabsApiKeyForUser(userId, userKey) ?? config.elevenLabsApiKey;
 
-      // An explicit profile voice selects ElevenLabs, but the provider is not
-      // a playback requirement. If its key or identity is unavailable, keep
-      // speech available through the packaged PRISM voice model without egress.
+      // Conversation playback may recover locally, but an explicit Avatar
+      // Studio preview is a truth check for the selected provider identity.
+      // Never make that check sound successful by substituting another voice.
       if (!voiceId || !apiKey) {
+        if (requiresSelectedProviderVoice) {
+          throw new HttpError(
+            503,
+            !apiKey
+              ? "ElevenLabs is not connected. Add or verify the key in Settings → Keys."
+              : "The selected ElevenLabs voice is not available to this account.",
+          );
+        }
         const controller = new AbortController();
         const onClose = () => controller.abort();
         ctx.req.once("close", onClose);
@@ -10850,8 +10878,7 @@ function buildRoutes(): RouteDefinition[] {
           const wave = await builtinVoiceWaveGeneratorOverride({
             text: boundary.text,
             profile: boundary.profile,
-            allowOperatingSystemVoices:
-              user.operating_system_voices_enabled !== 0,
+            allowOperatingSystemVoices,
             signal: controller.signal,
           });
           sendVoiceWave(
@@ -10957,12 +10984,36 @@ function buildRoutes(): RouteDefinition[] {
           return;
         }
         if (!controller.signal.aborted) {
+          if (requiresSelectedProviderVoice) {
+            if (error instanceof ElevenLabsVoiceError) {
+              const quotaExceeded =
+                error.providerCode === "quota_exceeded" ||
+                error.status === 429;
+              const message =
+                quotaExceeded
+                  ? "ElevenLabs does not have enough voice credits for this preview. Add credits or shorten the preview line, then try again."
+                  : error.status === 401 || error.status === 403
+                  ? "ElevenLabs rejected the key or access to this voice. Check Settings → Keys and the selected voice."
+                  : "ElevenLabs could not generate this preview with the selected voice and delivery settings.";
+              throw new HttpError(
+                quotaExceeded
+                  ? 429
+                  : error.status === 401 || error.status === 403
+                  ? 401
+                  : 502,
+                message,
+              );
+            }
+            throw new HttpError(
+              502,
+              "ElevenLabs could not generate this preview. The fallback voice was not used.",
+            );
+          }
           try {
             const wave = await builtinVoiceWaveGeneratorOverride({
               text: boundary.text,
               profile: boundary.profile,
-              allowOperatingSystemVoices:
-                user.operating_system_voices_enabled !== 0,
+              allowOperatingSystemVoices,
               signal: controller.signal,
             });
             sendVoiceWave(

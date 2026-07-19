@@ -63,7 +63,7 @@ describe("voice settings preview", () => {
       pageSource,
       /previewing === "babble" \? "Restart Babble" : "Babble"/,
     );
-    assert.match(pageSource, /Preview English/);
+    assert.match(pageSource, /`Preview \$\{primaryVoiceLabel\}`/);
     assert.match(
       pageSource,
       /onClick=\{\(\) => void previewVoice\("bottish"\)\}/,
@@ -78,7 +78,7 @@ describe("voice settings preview", () => {
     );
     assert.match(
       pageSource,
-      /onPlaybackStart: \(\) => setEnglishPreviewState\("playing"\)/,
+      /onPlaybackStart: \(\) => \{[\s\S]*?setEnglishPreviewState\("playing"\)/,
     );
     assert.doesNotMatch(pageSource, /generateOnly/);
     assert.match(pageSource, /voicePreviewPlaybackRunRef/);
@@ -184,11 +184,11 @@ describe("voice settings preview", () => {
       pageSource.indexOf("function BotVoiceEditor("),
       pageSource.indexOf("type BotEditOriginalSnapshot"),
     );
-    assert.match(editorSource, /<small>OFFLINE \+ FALLBACK<\/small>/);
+    assert.match(editorSource, /<small>LOCAL · \{effectiveElevenLabsVoiceValue/);
     assert.match(editorSource, /aria-label="Local voice identity"/);
     assert.match(
       editorSource,
-      /data-kind="online"[\s\S]*?<small>ONLINE<\/small>[\s\S]*?<strong>ElevenLabs<\/strong>/,
+      /data-kind="online"[\s\S]*?PRIMARY · ELEVENLABS[\s\S]*?ONLINE OPTION · ELEVENLABS[\s\S]*?primaryVoiceLabel/,
     );
     assert.match(editorSource, /aria-label="ElevenLabs voice identity"/);
     assert.match(editorSource, /Use an exact Voice ID/);
@@ -205,6 +205,10 @@ describe("voice settings preview", () => {
     assert.match(editorSource, /Choose a library voice here to replace the exact Voice ID/);
     assert.match(editorSource, /event\.currentTarget\.blur\(\)/);
     assert.match(editorSource, /effectiveElevenLabsVoiceValue/);
+    assert.match(
+      editorSource,
+      /Connection restored\. Preview \$\{primaryVoiceLabel\} again\.[\s\S]*?BACKEND_AVAILABLE_EVENT/,
+    );
     assert.match(editorSource, /data-voice-id-resolution="true"/);
     assert.match(editorSource, /Validating Voice ID…/);
     assert.match(editorSource, /Voice name/);
@@ -278,6 +282,19 @@ describe("voice settings preview", () => {
     assert.match(
       pageStyles,
       /\.botVoiceActions\s*\{[\s\S]*?position:\s*sticky[\s\S]*?backdrop-filter:\s*blur/,
+    );
+    assert.match(
+      editorSource,
+      /className=\{styles\.botVoiceDeliveryDisclosure\}[\s\S]*?<summary>[\s\S]*?Fine-tune delivery/,
+    );
+    assert.match(
+      editorSource,
+      /className=\{`\$\{styles\.botVoiceSourceCard\} \$\{styles\.botVoiceFallbackDisclosure\}`\}[\s\S]*?<summary/,
+    );
+    assert.match(editorSource, /className=\{styles\.botVoicePreviewStatus\}/);
+    assert.match(
+      editorSource,
+      /Preview checks \$\{primaryVoiceLabel\} directly; \$\{fallbackVoiceLabel\} will not be substituted/,
     );
     assert.match(
       pageStyles,
@@ -390,7 +407,6 @@ describe("voice settings preview", () => {
     assert.doesNotMatch(editorSource, />Texture</);
     assert.doesNotMatch(editorSource, /Voice texture/);
     assert.doesNotMatch(editorSource, /Texture amount/);
-    assert.doesNotMatch(editorSource, />Advanced</);
     assert.match(
       editorSource,
       /texture: DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1\.texture/,

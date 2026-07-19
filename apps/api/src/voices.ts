@@ -94,11 +94,28 @@ export function elevenLabsVoiceSettings(
 
 export class ElevenLabsVoiceError extends Error {
   readonly status: number;
+  readonly providerCode: string | null;
 
   constructor(status: number, message: string) {
-    super(message);
+    let providerCode: string | null = null;
+    let providerMessage = message;
+    try {
+      const payload = JSON.parse(message) as {
+        detail?: { code?: unknown; message?: unknown };
+      };
+      if (typeof payload.detail?.code === "string") {
+        providerCode = payload.detail.code;
+      }
+      if (typeof payload.detail?.message === "string") {
+        providerMessage = payload.detail.message;
+      }
+    } catch {
+      // Plain-text provider failures are already safe to surface as-is.
+    }
+    super(providerMessage);
     this.name = "ElevenLabsVoiceError";
     this.status = status;
+    this.providerCode = providerCode;
   }
 }
 
