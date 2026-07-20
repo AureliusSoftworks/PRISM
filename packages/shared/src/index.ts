@@ -79,6 +79,10 @@ export {
   BOT_POWER_CANONICAL_SILENCE_V1,
   BOT_POWER_MAX_COUNT,
   BOT_POWER_NAME_MAX_LENGTH,
+  BOT_POWER_LOUD_TEXT_SCALE_V1,
+  BOT_POWER_LOUD_VOICE_GAIN_MULTIPLIER_V1,
+  BOT_POWER_QUIET_TEXT_SCALE_V1,
+  BOT_POWER_QUIET_VOICE_GAIN_MULTIPLIER_V1,
   BOT_POWER_VERSION,
   COFFEE_POWER_PROMPT_MAX_CHARS,
   COFFEE_POWER_PROMPT_MAX_TOKENS,
@@ -87,6 +91,9 @@ export {
   applyBotPowerEchoResponseV1,
   applyBotPowerMuteResponseV1,
   applyBotPowerResponseBudgetV1,
+  botPowerDeterministicHalfChanceV1,
+  botPowerAvatarScaleModeFromEffectsV1,
+  botPowerAvatarScaleModeV1,
   botPowerCupRateMultiplierForBotV1,
   botPowerCandorResponseRuleV1,
   botPowerCandorTriggerV1,
@@ -94,12 +101,23 @@ export {
   botPowerDefinitionIsExplicitMuteV1,
   botPowerEchoesAddressedSpeechV1,
   botPowerHasSpeakingOnlyAvatarVisibilityV1,
+  botPowerHasSpeakingOnlyAvatarVisibilityFromEffectsV1,
+  botPowerIntermittentMuteEffectFromEffectsV1,
+  botPowerIntermittentMuteEffectV1,
+  botPowerIntermittentMuteTurnIsIgnoredFromEffectsV1,
+  botPowerIntermittentMuteTurnIsIgnoredV1,
   botPowerIsMutedV1,
   botPowerMuteActionTextsV1,
   botPowerObserverCueLinesV1,
   botPowerResponseIsSilentV1,
   botPowerSelfCueLinesV1,
   botPowerSourceHashV1,
+  botPowerTextScaleFromEffectsV1,
+  botPowerTextScaleV1,
+  botPowerVoiceGainMultiplierFromEffectsV1,
+  botPowerVoiceGainMultiplierV1,
+  botPowerVoicePresenceModeFromEffectsV1,
+  botPowerVoicePresenceModeV1,
   buildBotPowersPromptBlock,
   buildBotPowersSelfPromptV1,
   buildCoffeePowersPromptBlock,
@@ -117,6 +135,7 @@ export {
   strongestBotPowerResponseBudgetEffectV1,
   strongestHardBotPowerResponseBudgetEffectV1,
   type BotPowerBondDirection,
+  type BotPowerAvatarScaleMode,
   type BotPowerCompileStatus,
   type BotPowerEffectV1,
   type BotPowerFrequency,
@@ -126,6 +145,7 @@ export {
   type BotPowerEnforcement,
   type BotPowerResponseBudgetEffectV1,
   type BotPowerResponseBudgetMode,
+  type BotPowerVoicePresenceMode,
   type BotPowerStrength,
   type BotPowerTargetV1,
   type BotPowerTopicDirection,
@@ -144,6 +164,7 @@ export {
   applyPrismMoodIgnoredTurn,
   applyPrismMoodNegativeTurn,
   applyPrismMoodPositiveTurn,
+  applyPrismMoodPowerIgnoredTurn,
   clampPrismMoodValue,
   COFFEE_NEAR_DESATURATED_SATURATION,
   coffeeDepartureChanceFromSocial,
@@ -970,6 +991,8 @@ export interface ChatMessage {
   coffeeReplayEvents?: CoffeeReplayEventPayload[];
   /** Privacy-safe provider/model attempt history when Auto recovered this reply. */
   autoRecovery?: AutoRecoveryTraceV1;
+  /** Saved deterministic hard-response branch from a Ready Power. */
+  botPowerExactResponse?: "echo_addressed" | "hearing_repeat" | "intermittent_mute";
   /** User-entered Prompt Center shortcut that resolved into this message content. */
   promptShortcut?: PromptShortcutMetadata;
   /** User-entered wildcard decks/options that resolved into this message content. */

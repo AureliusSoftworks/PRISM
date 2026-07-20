@@ -710,25 +710,26 @@ export function botcastSnapshotHasSpeakingOnlyAvatarVisibility(
 ): boolean {
   const powers = botcastSnapshotPowersForRoleV1(episode, role);
   if (!powers) return false;
-  // The API snapshots only normalized Ready Powers at episode creation. Keep
-  // this structural reader local to the replay contract so the shared Signal
-  // model does not need to import the broader bot-Power runtime.
-  return powers.some((power) => {
-    if (!power || typeof power !== "object" || Array.isArray(power)) return false;
+  let speakingOnly = false;
+  let loud = false;
+  for (const power of powers) {
+    if (!power || typeof power !== "object" || Array.isArray(power)) continue;
     const record = power as Record<string, unknown>;
-    if (record.enabled === false || record.compileStatus !== "ready") return false;
+    if (record.enabled === false || record.compileStatus !== "ready") continue;
     const compiled = record.compiled;
-    if (!compiled || typeof compiled !== "object" || Array.isArray(compiled)) return false;
+    if (!compiled || typeof compiled !== "object" || Array.isArray(compiled)) continue;
     const effects = (compiled as Record<string, unknown>).effects;
-    return Array.isArray(effects) && effects.some(
-      (effect) =>
-        effect !== null &&
-        typeof effect === "object" &&
-        !Array.isArray(effect) &&
-        (effect as Record<string, unknown>).type === "avatar_visibility" &&
-        (effect as Record<string, unknown>).mode === "speaking_only",
-    );
-  });
+    if (!Array.isArray(effects)) continue;
+    for (const effect of effects) {
+      if (!effect || typeof effect !== "object" || Array.isArray(effect)) continue;
+      const row = effect as Record<string, unknown>;
+      if (row.type === "voice_presence" && row.mode === "loud") loud = true;
+      if (row.type === "avatar_visibility" && row.mode === "speaking_only") {
+        speakingOnly = true;
+      }
+    }
+  }
+  return speakingOnly && !loud;
 }
 
 export interface BotcastSocialInfluenceEventV1 {

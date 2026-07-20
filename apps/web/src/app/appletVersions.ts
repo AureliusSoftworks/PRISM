@@ -40,6 +40,10 @@ export type BotPowerGhostModePolicy =
   | "adapted"
   | "irrelevant"
   | "deferred";
+export type BotPowerAvatarScaleModePolicy = BotPowerGhostModePolicy;
+export type BotPowerVoicePresenceModePolicy = BotPowerGhostModePolicy;
+export type BotPowerIntermittentMuteModePolicy =
+  BotPowerHearingRepeatModePolicy;
 export type BotPowerResponseBudgetModePolicy = BotPowerGhostModePolicy;
 export type BotPowerInterruptionModePolicy = BotPowerGhostModePolicy;
 
@@ -54,13 +58,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   chat: {
     id: "chat",
     name: "Chat",
-    version: "1.9",
+    version: "1.11",
     status: "active",
   },
   zen: {
     id: "zen",
     name: "Zen",
-    version: "1.8",
+    version: "1.10",
     status: "active",
   },
   arena: {
@@ -78,13 +82,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   coffee: {
     id: "coffee",
     name: "Coffee",
-    version: "2.2",
+    version: "2.4",
     status: "active",
   },
   botcast: {
     id: "botcast",
     name: "Signal",
-    version: "1.7",
+    version: "1.10",
     status: "active",
   },
   feed: {
@@ -102,7 +106,7 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   story: {
     id: "story",
     name: "Story",
-    version: "0.6",
+    version: "0.8",
     status: "preview",
   },
   gym: {
@@ -217,6 +221,66 @@ export const BOT_POWER_GHOST_MODE_POLICY: Record<PrismAppletId, BotPowerGhostMod
   slate: "irrelevant",
   pseudo: "deferred",
   surf: "deferred",
+};
+
+/** Exhaustive size-Power policy: bot embodiments share one restrained relative scale. */
+export const BOT_POWER_AVATAR_SCALE_MODE_POLICY: Record<
+  PrismAppletId,
+  BotPowerAvatarScaleModePolicy
+> = {
+  chat: "direct",
+  zen: "direct",
+  arena: "deferred",
+  polling: "deferred",
+  coffee: "direct",
+  botcast: "direct",
+  feed: "deferred",
+  games: "deferred",
+  story: "adapted",
+  gym: "deferred",
+  slate: "irrelevant",
+  pseudo: "deferred",
+  surf: "deferred",
+};
+
+/** Exhaustive voice-presence policy: text and fixed gain share one restrained trim. */
+export const BOT_POWER_VOICE_PRESENCE_MODE_POLICY: Record<
+  PrismAppletId,
+  BotPowerVoicePresenceModePolicy
+> = {
+  chat: "direct",
+  zen: "direct",
+  arena: "deferred",
+  polling: "deferred",
+  coffee: "direct",
+  botcast: "direct",
+  feed: "deferred",
+  games: "deferred",
+  story: "adapted",
+  gym: "deferred",
+  slate: "irrelevant",
+  pseudo: "deferred",
+  surf: "deferred",
+};
+
+/** Quiet's stable half-mute needs an explicit mood adaptation in every live bot mode. */
+export const BOT_POWER_INTERMITTENT_MUTE_MODE_POLICY: Record<
+  PrismAppletId,
+  BotPowerIntermittentMuteModePolicy
+> = {
+  chat: "enforced",
+  zen: "enforced",
+  arena: "required_before_activation",
+  polling: "required_before_activation",
+  coffee: "enforced",
+  botcast: "enforced",
+  feed: "required_before_activation",
+  games: "required_before_activation",
+  story: "adapted",
+  gym: "required_before_activation",
+  slate: "not_applicable",
+  pseudo: "required_before_activation",
+  surf: "required_before_activation",
 };
 
 /** Exhaustive response-budget policy: prose constraints adapt to each mode's required beats. */

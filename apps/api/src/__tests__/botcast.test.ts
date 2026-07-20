@@ -10,6 +10,7 @@ import {
   BOTCAST_PRODUCER_GUEST_ID,
   BOTCAST_PRODUCER_GUEST_NAME,
   botPowerSourceHashV1,
+  botPowerIntermittentMuteTurnIsIgnoredV1,
   botcastAutoCameraLeadInMs,
   botcastProducerGuestThinkingDiscountMs,
   botcastFallbackStudioAccentVariantForSeed,
@@ -258,6 +259,30 @@ function mutedPowers(): string {
       },
     },
   ]);
+}
+
+function quietPowers(): string {
+  const name = "Quiet";
+  const intent = "Her voice is very quiet and half of her turns go completely unheard.";
+  return JSON.stringify([{
+    version: 1,
+    id: "quiet",
+    name,
+    intent,
+    enabled: true,
+    compileStatus: "ready",
+    compiled: {
+      version: 1,
+      sourceHash: botPowerSourceHashV1(name, intent),
+      selfCue: "Speak quietly.",
+      observerCue: "May go unheard.",
+      effects: [
+        { type: "voice_presence", mode: "quiet" },
+        { type: "intermittent_mute", chance: "half", moodPenalty: "small" },
+      ],
+      ruleLabels: ["Attenuated voice", "Half of turns unheard"],
+    },
+  }]);
 }
 
 function legacyMutedPowers(): string {
@@ -1603,6 +1628,64 @@ describe("Botcast persistence and isolation", () => {
         assert.equal(hostReaction.spokenCue, undefined);
         assert.equal(hostReaction.interjectionAttempt, undefined);
       }
+    } finally {
+      db.close();
+    }
+  });
+
+  it("persists Quiet's ignored Signal turn, mood hit, and absent listener reaction", async () => {
+    const db = fixture();
+    const powers = quietPowers();
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'host-1'").run(powers);
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      let episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Being heard",
+      });
+      for (let attempt = 0; attempt < 40; attempt += 1) {
+        if (botPowerIntermittentMuteTurnIsIgnoredV1(
+          powers,
+          `${episode.id}:host-1:0`,
+        )) break;
+        deleteBotcastEpisode(db, "user-1", episode.id);
+        episode = createBotcastEpisode(db, "user-1", show.id, {
+          guestBotId: "guest-1",
+          topic: `Being heard ${attempt + 1}`,
+        });
+      }
+      assert.equal(
+        botPowerIntermittentMuteTurnIsIgnoredV1(
+          powers,
+          `${episode.id}:host-1:0`,
+        ),
+        true,
+      );
+      const advanced = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(recordingProvider(["Nobody can miss this."], [])),
+      );
+      assert.equal(advanced.message?.content, "...");
+      assert.equal(advanced.message?.moodKey, "guarded");
+      const utterance = advanced.episode.events.find(
+        (event) => event.kind === "utterance" && event.payload.messageId === advanced.message?.id,
+      );
+      assert.deepEqual(utterance?.payload.powerOutcome, {
+        effect: "intermittent_mute",
+        outcome: "ignored",
+        botId: "host-1",
+        moodPenalty: "small",
+      });
+      assert.equal(
+        advanced.episode.events.some(
+          (event) => event.kind === "listener_reaction" &&
+            (event.payload.plan as { messageId?: string } | undefined)?.messageId === advanced.message?.id,
+        ),
+        false,
+      );
     } finally {
       db.close();
     }

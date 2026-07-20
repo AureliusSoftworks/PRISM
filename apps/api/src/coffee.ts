@@ -176,11 +176,13 @@ import {
 } from "./usage.ts";
 import {
   applyCoffeeHearingRepeatMoodPenalty,
+  applyCoffeeQuietIgnoredMoodPenalty,
   applyCoffeePowerAfterSpeech,
   coffeePowerActionBias,
   coffeePowerBotCanSpeak,
   coffeePowerBotEchoesAddressedSpeech,
   coffeePowerBotIsMuted,
+  coffeePowerQuietTurnIsIgnored,
   coffeePowerBotVisibleTo,
   coffeePowerCupRateMultiplier,
   coffeePowerEchoSourceForTurn,
@@ -3324,7 +3326,7 @@ function serializeCoffeeAssistantToolPayload(args: {
   coffeeDebugTurnSnapshot?: CoffeeDebugTurnSnapshotPayload | null;
   coffeeReplayEvents?: CoffeeReplayEventPayload[] | null;
   autoRecovery?: AutoRecoveryTraceV1;
-  botPowerExactResponse?: "echo_addressed" | "hearing_repeat";
+  botPowerExactResponse?: "echo_addressed" | "hearing_repeat" | "intermittent_mute";
 }): string | null {
   const coffeeAmbientAction = args.coffeeAmbientAction ?? undefined;
   const coffeeDebugTurnSnapshot = args.coffeeDebugTurnSnapshot ?? undefined;
@@ -14089,6 +14091,12 @@ async function generateCoffeeBotReply(args: {
 
   const speaker = routableTurnGroup.find((bot) => bot.id === pickedBotId) ?? routableTurnGroup[0]!;
   const speakerIsMuted = coffeePowerBotIsMuted(coffeePowerPlan, speaker.id);
+  const speakerQuietIgnored = coffeePowerQuietTurnIsIgnored({
+    plan: coffeePowerPlan,
+    botId: speaker.id,
+    stableTurnKey: `${row.id}:${speaker.id}:${history.length}`,
+  });
+  const speakerIsMutedForTurn = speakerIsMuted || speakerQuietIgnored;
   const speakerHardResponseBudget = coffeePowerResponseBudgetForBot(
     coffeePowerPlan,
     speaker.id,
@@ -14097,7 +14105,7 @@ async function generateCoffeeBotReply(args: {
   const speakerRepeatsForHearingPower = Boolean(
     hearingRepeatDirective &&
     hearingRepeatDirective.repeatingBotId === speaker.id &&
-    !speakerIsMuted,
+    !speakerIsMutedForTurn,
   );
   const speakerEchoesAddressedSpeech =
     !speakerRepeatsForHearingPower &&
@@ -14115,7 +14123,7 @@ async function generateCoffeeBotReply(args: {
       })
     : null;
   const speakerUsesHardResponse =
-    speakerIsMuted || speakerRepeatsForHearingPower || speakerEchoesAddressedSpeech;
+    speakerIsMutedForTurn || speakerRepeatsForHearingPower || speakerEchoesAddressedSpeech;
   settings.onPhase?.("thinking", speaker.id);
   throwIfCoffeeTurnCancelled(settings.signal);
   const coffeeCupSeed = coffeeCupSeedForBot({
@@ -14208,7 +14216,7 @@ async function generateCoffeeBotReply(args: {
   const cannedInterruptionReaction = cannedInterruptionReactionRaw && speakerUsesHardResponse
     ? {
         ...cannedInterruptionReactionRaw,
-        text: speakerIsMuted
+        text: speakerIsMutedForTurn
           ? "..."
           : applyBotPowerEchoResponseV1(speakerEchoSource),
       }
@@ -14485,7 +14493,7 @@ async function generateCoffeeBotReply(args: {
         signal: settings.signal,
         isTerminalError: (error) => error instanceof CoffeeAutoStaleTurnError,
         validate: (raw) => {
-          if (speakerIsMuted) {
+          if (speakerIsMutedForTurn) {
             return { ok: true, value: applyBotPowerMuteResponseV1(raw) };
           }
           if (speakerEchoesAddressedSpeech) {
@@ -14600,7 +14608,7 @@ async function generateCoffeeBotReply(args: {
           knownCoffeeSpeakerNames
         )
       : "";
-  if (speakerIsMuted) {
+  if (speakerIsMutedForTurn) {
     replyText = applyBotPowerMuteResponseV1(speakerReplyRepaired);
   } else if (speakerRepeatsForHearingPower) {
     replyText = hearingRepeatDirective?.repeatedContent ?? "";
@@ -14779,7 +14787,7 @@ async function generateCoffeeBotReply(args: {
   // Promote any plain `@Name` / bare-name peer references into prism-bot mention
   // markdown so the client renders the chip + lights the notified glyph on the
   // addressed bot's seat. Safe even when the model already used the markdown.
-  replyText = speakerIsMuted
+  replyText = speakerIsMutedForTurn
     ? applyBotPowerMuteResponseV1(replyText)
     : speakerRepeatsForHearingPower
       ? hearingRepeatDirective?.repeatedContent ?? replyText
@@ -14791,7 +14799,7 @@ async function generateCoffeeBotReply(args: {
         speakerPromptGroup,
         peerAddressByBotId
       );
-  const relationshipSignals = speakerRepeatsForHearingPower || speakerEchoesAddressedSpeech
+  const relationshipSignals = speakerUsesHardResponse
     ? []
     : extractCoffeeRelationshipSignals({
         speaker,
@@ -14810,11 +14818,19 @@ async function generateCoffeeBotReply(args: {
     speakerBotId: speaker.id,
     signals: relationshipSignals,
   });
-  nextSocialByBotId = applyCoffeePowerAfterSpeech({
-    plan: coffeePowerPlan,
-    speakerBotId: speaker.id,
-    socialByBotId: nextSocialByBotId,
-  });
+  if (!speakerIsMutedForTurn) {
+    nextSocialByBotId = applyCoffeePowerAfterSpeech({
+      plan: coffeePowerPlan,
+      speakerBotId: speaker.id,
+      socialByBotId: nextSocialByBotId,
+    });
+  }
+  if (speakerQuietIgnored) {
+    nextSocialByBotId = applyCoffeeQuietIgnoredMoodPenalty({
+      socialByBotId: nextSocialByBotId,
+      botId: speaker.id,
+    });
+  }
   if (speakerRepeatsForHearingPower && hearingRepeatDirective) {
     nextSocialByBotId = applyCoffeeHearingRepeatMoodPenalty({
       socialByBotId: nextSocialByBotId,
@@ -14925,6 +14941,7 @@ async function generateCoffeeBotReply(args: {
         listenerSocial: nextSocialByBotId[listenerBot.id] ?? null,
         eligible:
           turnKind === "autonomous" &&
+          !speakerIsMutedForTurn &&
           !sessionKickoff &&
           turnGroup.length === group.length &&
           activePoll === null &&
@@ -14974,6 +14991,8 @@ async function generateCoffeeBotReply(args: {
     autoRecovery,
     botPowerExactResponse: speakerRepeatsForHearingPower
       ? "hearing_repeat"
+      : speakerQuietIgnored
+        ? "intermittent_mute"
       : speakerEchoesAddressedSpeech
         ? "echo_addressed"
         : undefined,
@@ -15052,8 +15071,7 @@ async function generateCoffeeBotReply(args: {
     }
   }
   if (
-    !speakerRepeatsForHearingPower &&
-    !speakerEchoesAddressedSpeech &&
+    !speakerUsesHardResponse &&
     canPersistDurableCoffeeRelationship &&
     settings.userKey
   ) {
@@ -15095,8 +15113,7 @@ async function generateCoffeeBotReply(args: {
     }
   }
   if (
-    !speakerRepeatsForHearingPower &&
-    !speakerEchoesAddressedSpeech &&
+    !speakerUsesHardResponse &&
     canPersistDurableCoffeeRelationship &&
     settings.userKey &&
     priorAssistantSpeakerBotId &&

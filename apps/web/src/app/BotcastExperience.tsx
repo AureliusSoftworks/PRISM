@@ -25,8 +25,11 @@ import {
   BOTCAST_SESSION_DURATION_MINUTES_MIN,
   BOTCAST_VOICE_LEVEL_MAX,
   BOTCAST_VOICE_LEVEL_STEP,
+  botPowerAvatarScaleModeV1,
   botPowerIsMutedV1,
   botPowerResponseIsSilentV1,
+  botPowerVoiceGainMultiplierV1,
+  botPowerVoicePresenceModeV1,
   DEFAULT_COFFEE_SESSION_DURATION_MINUTES,
   botcastCameraOffsetXPercent,
   botcastCameraOffsetYPercent,
@@ -74,6 +77,8 @@ import {
   type BotcastStudioLayout,
   type BotcastStudioLayoutItem,
   type BotcastVoiceLevelsByBotId,
+  type BotPowerAvatarScaleMode,
+  type BotPowerVoicePresenceMode,
   type ListenerReactionPlanV1,
   type SignalPersonaTemperament,
 } from "@localai/shared";
@@ -186,6 +191,8 @@ export interface BotcastBotSummary {
   glyph: string | null;
   online_enabled?: number | null;
   muted?: boolean;
+  voiceGainMultiplier?: number;
+  voicePresence?: BotPowerVoicePresenceMode | null;
   echoesAddressedSpeech?: boolean;
   personaTemperament: SignalPersonaTemperament;
   producerGuest?: boolean;
@@ -321,6 +328,9 @@ export interface BotcastExperienceProps {
   ) => ReactNode;
   resolveCupRateMultiplier?: (bot: BotcastBotSummary) => number;
   hasSpeakingOnlyAvatarVisibility?: (bot: BotcastBotSummary) => boolean;
+  resolveAvatarScaleMode?: (
+    bot: BotcastBotSummary,
+  ) => BotPowerAvatarScaleMode | null;
   onUtterance?: (
     message: BotcastMessage,
     bot: BotcastBotSummary,
@@ -881,6 +891,7 @@ export function BotcastExperience({
   renderMug,
   resolveCupRateMultiplier,
   hasSpeakingOnlyAvatarVisibility,
+  resolveAvatarScaleMode,
   onUtterance,
   onPrefetchUtterance,
   onPrefetchListenerReaction,
@@ -1674,7 +1685,14 @@ export function BotcastExperience({
     const bot = botsById.get(selectedShow.hostBotId) ?? null;
     if (!bot || !episode || episode.hostBotId !== bot.id) return bot;
     const powers = botcastSnapshotPowersForRoleV1(episode, "host");
-    return powers ? { ...bot, muted: botPowerIsMutedV1(powers) } : bot;
+    return powers
+      ? {
+          ...bot,
+          muted: botPowerIsMutedV1(powers),
+          voiceGainMultiplier: botPowerVoiceGainMultiplierV1(powers),
+          voicePresence: botPowerVoicePresenceModeV1(powers),
+        }
+      : bot;
   }, [botsById, episode, selectedShow]);
   const clearSignalHostChatBubbles = useCallback((): void => {
     for (const timer of hostChatBubbleTimersRef.current.values()) {
@@ -1991,10 +2009,29 @@ export function BotcastExperience({
     const bot = botsById.get(episode.guestBotId) ?? null;
     if (!bot) return null;
     const powers = botcastSnapshotPowersForRoleV1(episode, "guest");
-    return powers ? { ...bot, muted: botPowerIsMutedV1(powers) } : bot;
+    return powers
+      ? {
+          ...bot,
+          muted: botPowerIsMutedV1(powers),
+          voiceGainMultiplier: botPowerVoiceGainMultiplierV1(powers),
+          voicePresence: botPowerVoicePresenceModeV1(powers),
+        }
+      : bot;
   }, [botsById, episode, selectedShow?.accentColor]);
   const replayHostBot = replayEpisode
-    ? (botsById.get(replayEpisode.hostBotId) ?? null)
+    ? (() => {
+        const bot = botsById.get(replayEpisode.hostBotId) ?? null;
+        if (!bot) return null;
+        const powers = botcastSnapshotPowersForRoleV1(replayEpisode, "host");
+        return powers
+          ? {
+              ...bot,
+              muted: botPowerIsMutedV1(powers),
+              voiceGainMultiplier: botPowerVoiceGainMultiplierV1(powers),
+              voicePresence: botPowerVoicePresenceModeV1(powers),
+            }
+          : bot;
+      })()
     : null;
   const replayGuestBot = replayEpisode
     ? replayEpisode.guestKind === "producer"
@@ -2008,7 +2045,19 @@ export function BotcastExperience({
           personaTemperament: "neutral" as const,
           producerGuest: true,
         }
-      : (botsById.get(replayEpisode.guestBotId) ?? null)
+      : (() => {
+          const bot = botsById.get(replayEpisode.guestBotId) ?? null;
+          if (!bot) return null;
+          const powers = botcastSnapshotPowersForRoleV1(replayEpisode, "guest");
+          return powers
+            ? {
+                ...bot,
+                muted: botPowerIsMutedV1(powers),
+                voiceGainMultiplier: botPowerVoiceGainMultiplierV1(powers),
+                voicePresence: botPowerVoicePresenceModeV1(powers),
+              }
+            : bot;
+        })()
     : null;
   const copyEpisodeForReview = async (
     targetEpisode: BotcastEpisode,
@@ -5420,6 +5469,18 @@ export function BotcastExperience({
           args.activeMessage?.speakerRole === role) ||
           roleIsDeadAirAsideSpeaking(role),
       );
+    const roleAvatarScaleMode = (
+      role: "host" | "guest",
+      bot: BotcastBotSummary,
+    ): BotPowerAvatarScaleMode | null => {
+      const snapshot = botcastSnapshotPowersForRoleV1(
+        args.currentEpisode,
+        role,
+      );
+      return snapshot !== null
+        ? botPowerAvatarScaleModeV1(snapshot)
+        : (resolveAvatarScaleMode?.(bot) ?? null);
+    };
     const roleIsThinking = (role: "host" | "guest"): boolean =>
       (role === "guest" &&
         (replayProducerGuestThinking || liveProducerGuestThinking)) ||
@@ -5614,6 +5675,9 @@ export function BotcastExperience({
                     ? "true"
                     : undefined
                 }
+                data-power-avatar-scale={
+                  roleAvatarScaleMode("host", args.host) ?? undefined
+                }
                 data-listener-reaction={
                   roleIsListenerReacting("host")
                     ? listenerReactionPlan?.visualAction
@@ -5733,6 +5797,9 @@ export function BotcastExperience({
                   ) || hasSpeakingOnlyAvatarVisibility?.(args.guest))
                     ? "true"
                     : undefined
+                }
+                data-power-avatar-scale={
+                  roleAvatarScaleMode("guest", args.guest) ?? undefined
                 }
                 data-listener-reaction={
                   roleIsListenerReacting("guest")
@@ -7164,6 +7231,11 @@ export function BotcastExperience({
                     key={bubble.key}
                     className={styles.showHostChatBubble}
                     data-role={bubble.message.role}
+                    data-power-voice-presence={
+                      bubble.message.role === "assistant"
+                        ? (hostBot.voicePresence ?? undefined)
+                        : undefined
+                    }
                     data-botcast-host-chat-message="true"
                     style={
                       {
@@ -7180,6 +7252,9 @@ export function BotcastExperience({
                   <article
                     className={styles.showHostChatBubble}
                     data-role="assistant"
+                    data-power-voice-presence={
+                      hostBot.voicePresence ?? undefined
+                    }
                     data-streaming="true"
                     data-botcast-host-chat-message="true"
                     aria-busy="true"
@@ -7580,8 +7655,17 @@ export function BotcastExperience({
               >
                 {episode.messages
                   .filter(botcastMessageIsAudibleToAudienceV1)
-                  .map((message) => (
-                  <article key={message.id} data-role={message.speakerRole}>
+                  .map((message) => {
+                    const messageBot =
+                      message.speakerRole === "host" ? hostBot : liveGuestBot;
+                    return (
+                  <article
+                    key={message.id}
+                    data-role={message.speakerRole}
+                    data-power-voice-presence={
+                      messageBot?.voicePresence ?? undefined
+                    }
+                  >
                       <strong>
                         {message.speakerRole === "guest" &&
                         episode.guestKind === "producer"
@@ -7601,7 +7685,8 @@ export function BotcastExperience({
                           : signalVoicePerformanceTranscriptText(message)}
                     </p>
                   </article>
-                  ))}
+                    );
+                  })}
                 {liveSpeech?.reveal.phase === "preparing" ? (
                   <p className={styles.thinking}>Warming the mic…</p>
                 ) : busy && speakingMessageId === null ? (
@@ -7938,14 +8023,21 @@ export function BotcastExperience({
               />
             </div>
             <div className={styles.replayTranscript}>
-              {replayEpisode.messages.map((message, index) =>
-                botcastMessageIsAudibleToAudienceV1(message) ? (
+              {replayEpisode.messages.map((message, index) => {
+                const messageBot =
+                  message.speakerRole === "host"
+                    ? replayHostBot
+                    : replayGuestBot;
+                return botcastMessageIsAudibleToAudienceV1(message) ? (
                 <button
                   key={message.id}
                   type="button"
                   data-botcast-replay-row="true"
                     data-active={
                       index === replayMessageIndex ? "true" : undefined
+                    }
+                    data-power-voice-presence={
+                      messageBot?.voicePresence ?? undefined
                     }
                   onClick={() => {
                     stopReplayPlayback();
@@ -7959,8 +8051,8 @@ export function BotcastExperience({
                     </strong>
                     <span>{signalVoicePerformanceTranscriptText(message)}</span>
                 </button>
-                ) : null,
-              )}
+                ) : null;
+              })}
             </div>
           </div>
         ) : selectedShow && dashboardAtmosphere ? (

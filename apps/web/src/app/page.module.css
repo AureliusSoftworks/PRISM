@@ -778,7 +778,17 @@
   aspect-ratio: 2 / 3;
   color: var(--bot-color, #ffffff);
   transform-origin: 50% 86%;
-  transition: transform 180ms ease;
+  transition:
+    transform 180ms ease,
+    scale 180ms ease;
+}
+
+.storySpriteWrap[data-power-avatar-scale="larger"] {
+  scale: 1.12;
+}
+
+.storySpriteWrap[data-power-avatar-scale="smaller"] {
+  scale: 0.86;
 }
 
 .storySpriteWrap[data-pose="idle"] {
@@ -946,6 +956,29 @@
   }
 }
 
+/* Size Powers adjust the rendered bot, not seat or page layout geometry. */
+.zenLiveBotPresencePlate[data-power-avatar-scale="larger"]
+  > .botAmbientPresenceRig {
+  scale: 1.12;
+  transform-origin: 50% 86%;
+}
+
+.zenLiveBotPresencePlate[data-power-avatar-scale="smaller"]
+  > .botAmbientPresenceRig {
+  scale: 0.86;
+  transform-origin: 50% 86%;
+}
+
+.coffeeSeat[data-power-avatar-scale="larger"] .coffeeSeatPlate {
+  scale: 1.12;
+  transform-origin: 50% 70%;
+}
+
+.coffeeSeat[data-power-avatar-scale="smaller"] .coffeeSeatPlate {
+  scale: 0.86;
+  transform-origin: 50% 70%;
+}
+
 /* A ghost Power is a hard live-avatar rule: the holder appears only to speak. */
 .zenLiveBotPresencePlate[data-ghostly-presence="true"] {
   opacity: 0;
@@ -1058,6 +1091,21 @@
   min-height: 64px;
   border-radius: 8px;
   outline: 0;
+}
+
+.storyDialogueTextPanel[data-power-voice-presence="loud"],
+.storyTranscriptList li[data-power-voice-presence="loud"] {
+  --power-message-font-scale: 1.12;
+}
+
+.storyDialogueTextPanel[data-power-voice-presence="quiet"],
+.storyTranscriptList li[data-power-voice-presence="quiet"] {
+  --power-message-font-scale: 0.88;
+}
+
+.storyDialogueTextPanel[data-power-voice-presence] p,
+.storyTranscriptList li[data-power-voice-presence] p {
+  font-size: calc(1em * var(--power-message-font-scale, 1));
 }
 
 .storyDialogueTextPanel[data-advanceable="true"] {
@@ -19200,8 +19248,19 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .chatEphemeralLine {
   display: block;
   white-space: pre-wrap;
-  font-size: var(--chat-line-dynamic-font-size, inherit);
+  font-size: calc(
+    var(--chat-line-dynamic-font-size, 1em) *
+      var(--power-message-font-scale, 1)
+  );
   transition: font-size 0.32s cubic-bezier(0.2, 0.72, 0.18, 1);
+}
+
+.messageAssistant[data-power-voice-presence="loud"] {
+  --power-message-font-scale: 1.12;
+}
+
+.messageAssistant[data-power-voice-presence="quiet"] {
+  --power-message-font-scale: 0.88;
 }
 
 .chatEphemeralMarkdownBody[data-zen-placement-active="true"] {
@@ -20208,7 +20267,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   overflow-x: auto;
   word-break: break-word;
   word-spacing: 0.06em;
-  font-size: var(--message-dynamic-font-size, var(--font-size-message));
+  font-size: calc(
+    var(--message-dynamic-font-size, var(--font-size-message)) *
+      var(--power-message-font-scale, 1)
+  );
   line-height: 1.55;
 }
 
@@ -59848,7 +59910,9 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeStage[data-compact="true"] .coffeeCenterFeedLine {
-  font-size: clamp(0.78rem, 3.2vw, 0.94rem);
+  font-size: calc(
+    clamp(0.78rem, 3.2vw, 0.94rem) * var(--power-message-font-scale, 1)
+  );
 }
 
 .coffeeStage[data-compact="true"] .coffeeCenterIcon {
@@ -61732,7 +61796,9 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .coffeeCenterFeedLine {
   margin: 0;
   color: rgba(255, 255, 255, 0.88);
-  font-size: clamp(0.94rem, 1.65vw, 1.22rem);
+  font-size: calc(
+    clamp(0.94rem, 1.65vw, 1.22rem) * var(--power-message-font-scale, 1)
+  );
   line-height: 1.26;
   white-space: pre-wrap;
   word-break: break-word;
@@ -61740,6 +61806,16 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .coffeeCenterFeedLine[data-role="assistant"] {
   color: var(--coffee-center-line-color, rgba(255, 255, 255, 0.88));
+}
+
+.coffeeCenterFeedLine[data-power-voice-presence="loud"],
+.coffeeMessage[data-power-voice-presence="loud"] {
+  --power-message-font-scale: 1.12;
+}
+
+.coffeeCenterFeedLine[data-power-voice-presence="quiet"],
+.coffeeMessage[data-power-voice-presence="quiet"] {
+  --power-message-font-scale: 0.88;
 }
 
 .coffeeCenterFeedLineTyping {
@@ -70140,7 +70216,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   white-space: pre-wrap;
   word-wrap: break-word;
   color: rgba(255, 255, 255, 0.9);
-  font-size: 0.95rem;
+  font-size: calc(0.95rem * var(--power-message-font-scale, 1));
   line-height: 1.45;
 }
 

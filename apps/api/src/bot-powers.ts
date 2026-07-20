@@ -156,6 +156,68 @@ function deterministicMutePower(
   };
 }
 
+function deterministicVoicePresencePower(
+  source: BotPowerV1,
+  botName: string,
+): CompiledBotPowerV1 | null {
+  const powerName = compact(source.name, 100)
+    .toLowerCase()
+    .replace(/[’]/gu, "'");
+  const intent = compact(source.intent, 500)
+    .toLowerCase()
+    .replace(/[’]/gu, "'");
+  const explicitlyLoud =
+    /^(?:loud|loud simon|booming|deafening)$/u.test(powerName) ||
+    [
+      /\b(?:voice|speech)\s+(?:is|becomes?|sounds?)\s+(?:very\s+|extremely\s+|incredibly\s+)?(?:loud|booming|deafening)\b/u,
+      /\b(?:speaks?|talks?|shouts?|yells?)\s+(?:very\s+|extremely\s+|incredibly\s+)?(?:loudly|at\s+full\s+volume)\b/u,
+    ].some((pattern) => pattern.test(intent));
+  const explicitlyQuiet =
+    !explicitlyLoud &&
+    (
+      /^(?:quiet|quiet karen|soft[- ]spoken|whisper)$/u.test(powerName) ||
+      [
+        /\b(?:voice|speech)\s+(?:is|becomes?|sounds?)\s+(?:very\s+|extremely\s+|incredibly\s+)?(?:quiet|soft|faint)\b/u,
+        /\b(?:speaks?|talks?)\s+(?:very\s+|extremely\s+|incredibly\s+)?(?:quietly|softly|faintly)\b/u,
+        /\b(?:whispers?|murmurs?)\s+(?:everything|constantly|whenever\s+(?:speaking|talking))\b/u,
+      ].some((pattern) => pattern.test(intent))
+    );
+  if (!explicitlyLoud && !explicitlyQuiet) return null;
+  const subject = compact(botName, 100) || "This bot";
+  if (explicitlyLoud) {
+    return {
+      version: BOT_POWER_VERSION,
+      sourceHash: botPowerSourceHashV1(source.name, source.intent),
+      selfCue:
+        "Your voice is inescapably loud. It overrides any small, microscopic, or speaking-only invisible presentation and mildly annoys other bots whenever you speak.",
+      observerCue: `${subject}'s amplified voice is impossible to overlook and mildly grates on other bots after each utterance.`,
+      effects: [
+        { type: "voice_presence", mode: "loud" },
+        {
+          type: "social_influence",
+          trigger: "after_speech",
+          polarity: "negative",
+          strength: "small",
+          targets: [{ kind: "all" }],
+        },
+      ],
+      ruleLabels: ["Amplified voice", "Larger spoken text", "Annoys other bots"],
+    };
+  }
+  return {
+    version: BOT_POWER_VERSION,
+    sourceHash: botPowerSourceHashV1(source.name, source.intent),
+    selfCue:
+      "Your voice is unusually quiet. Half of your attempted turns are ignored as completely as mute, and each ignored turn slightly lowers your mood.",
+    observerCue: `${subject} speaks very quietly and may go completely unheard; being ignored visibly lowers their mood.`,
+    effects: [
+      { type: "voice_presence", mode: "quiet" },
+      { type: "intermittent_mute", chance: "half", moodPenalty: "small" },
+    ],
+    ruleLabels: ["Attenuated voice", "Smaller spoken text", "Half of turns unheard"],
+  };
+}
+
 function deterministicEchoAddressedPower(
   source: BotPowerV1,
   botName: string,
@@ -375,6 +437,74 @@ function deterministicGhostPower(
   };
 }
 
+function deterministicAvatarScalePower(
+  source: BotPowerV1,
+  botName: string,
+): CompiledBotPowerV1 | null {
+  const name = compact(source.name, 120).toLowerCase();
+  const intent = compact(source.intent, 500).toLowerCase();
+  const microscopic =
+    name === "microscopic" ||
+    [
+      /\b(?:is|becomes?|turns?|remains?|looks?|appears?)\s+(?:physically\s+)?microscopic\b/u,
+      /\b(?:physically|visibly|literally)\s+microscopic\b/u,
+      /\bmicroscopic\s+(?:body|form|size|stature|bot|character|person)\b/u,
+    ].some((pattern) => pattern.test(intent));
+  const smaller =
+    microscopic ||
+    /^(?:tiny|small|miniature|minuscule|diminutive|shrunken|undersized)$/u.test(name) ||
+    [
+      /\b(?:is|becomes?|turns?|remains?|looks?|appears?)\s+(?:physically\s+)?(?:small(?:er)?|tiny|miniature|minuscule|diminutive|shrunken|undersized)\b/u,
+      /\b(?:makes?|renders?|keeps?)\s+(?:(?:the\s+)?bot|them|it|him|her)?\s*(?:physically\s+)?(?:small(?:er)?|tiny|miniature|minuscule|diminutive|shrunken|undersized)\b/u,
+      /\b(?:physically|visibly|literally)\s+(?:small(?:er)?|tiny|miniature|minuscule|diminutive|shrunken|undersized)\b/u,
+      /\b(?:small(?:er)?|tiny|miniature|minuscule|diminutive|shrunken|undersized)\s+(?:body|form|size|stature|bot|character|person)\b/u,
+      /\bsmall(?:er)?\s+than\s+(?:the\s+)?(?:other|average|normal)\b/u,
+      /\b(?:shrinks?|shrinking|shrank|shrunk|shrunken|miniaturiz(?:e|es|ed|ing))\b/u,
+    ].some((pattern) => pattern.test(intent));
+  const larger =
+    !smaller &&
+    (
+      /^(?:large|larger|big|bigger|giant|gigantic|huge|massive|colossal|oversized|towering)$/u.test(name) ||
+      [
+        /\b(?:is|becomes?|turns?|remains?|looks?|appears?)\s+(?:physically\s+)?(?:a\s+)?(?:large|larger|big|bigger|huge|massive|giant|gigantic|colossal|oversized|towering)\b/u,
+        /\b(?:makes?|renders?|keeps?)\s+(?:(?:the\s+)?bot|them|it|him|her)?\s*(?:physically\s+)?(?:large|larger|big|bigger|huge|massive|giant|gigantic|colossal|oversized|towering)\b/u,
+        /\b(?:physically|visibly|literally)\s+(?:large|larger|big|bigger|huge|massive|giant|gigantic|colossal|oversized|towering)\b/u,
+        /\b(?:large|larger|big|bigger|huge|massive|giant|gigantic|colossal|oversized|towering)\s+(?:body|form|size|stature|bot|character|person)\b/u,
+        /\b(?:larger|bigger)\s+than\s+(?:the\s+)?(?:other|average|normal)\b/u,
+        /\b(?:grow(?:s|ing)?|enlarge(?:s|d|ment|ing)?)\s+(?:physically|in\s+size|their\s+(?:body|form))\b/u,
+      ].some((pattern) => pattern.test(intent))
+    );
+  if (!smaller && !larger) return null;
+
+  const mode = smaller ? "smaller" as const : "larger" as const;
+  const subject = compact(botName, 100) || "This bot";
+  const speakingOnlyVisibility = microscopic;
+  return {
+    version: BOT_POWER_VERSION,
+    sourceHash: botPowerSourceHashV1(source.name, source.intent),
+    selfCue: microscopic
+      ? "You are microscopic and unseen while idle. Fade into view only while delivering an utterance, then vanish again."
+      : mode === "smaller"
+        ? "Your physical form is noticeably smaller than the other bots."
+        : "Your physical form is noticeably larger than the other bots.",
+    observerCue: microscopic
+      ? `${subject} is microscopic and unseen between utterances, appearing briefly only while speaking.`
+      : mode === "smaller"
+        ? `${subject} is noticeably smaller than the other bots.`
+        : `${subject} is noticeably larger than the other bots.`,
+    effects: [
+      { type: "avatar_scale", mode },
+      ...(speakingOnlyVisibility
+        ? [{ type: "avatar_visibility" as const, mode: "speaking_only" as const }]
+        : []),
+    ],
+    ruleLabels: [
+      mode === "smaller" ? "Smaller avatar" : "Larger avatar",
+      ...(speakingOnlyVisibility ? ["Appears only while speaking"] : []),
+    ],
+  };
+}
+
 function deterministicGradualMoodPower(
   source: BotPowerV1,
   botName: string,
@@ -533,6 +663,7 @@ function deterministicPower(
   botName: string,
 ): CompiledBotPowerV1 | null {
   const primary =
+    deterministicVoicePresencePower(source, botName) ??
     deterministicHearingRepeatPower(source, botName) ??
     deterministicEchoAddressedPower(source, botName) ??
     deterministicMutePower(source, botName) ??
@@ -544,7 +675,10 @@ function deterministicPower(
     deterministicGradualMoodPower(source, botName) ??
     deterministicCoffeeDislikePower(source, botName);
   return mergeDeterministicPowerParts(
-    primary,
+    mergeDeterministicPowerParts(
+      primary,
+      deterministicAvatarScalePower(source, botName),
+    ),
     deterministicResponseBudgetPower(source, botName),
   );
 }
@@ -591,6 +725,21 @@ function compiledEntrySatisfiesIntent(
   compiled: CompiledBotPowerV1,
   source: BotPowerV1
 ): boolean {
+  const requiredAvatarEffects = deterministicAvatarScalePower(source, "")
+    ?.effects.filter(
+      (effect) =>
+        effect.type === "avatar_scale" || effect.type === "avatar_visibility",
+    ) ?? [];
+  if (
+    requiredAvatarEffects.some(
+      (required) =>
+        !compiled.effects.some(
+          (effect) => JSON.stringify(effect) === JSON.stringify(required),
+        ),
+    )
+  ) {
+    return false;
+  }
   if (deterministicHearingRepeatPower(source, "")) {
     return compiled.effects.some((effect) => effect.type === "hearing_repeat");
   }
@@ -762,6 +911,9 @@ function providerFailureMessage(provider: LlmProvider, error: unknown): string {
 }
 
 function compileFailureMessage(power: BotPowerV1, provider: LlmProvider): string {
+  if (deterministicAvatarScalePower(power, "")) {
+    return `Local power compilation failed: invalid compiler output; required avatar-size rule missing. ${compilerDiagnosticContext(provider)}; describe the physical size clearly, then retry.`;
+  }
   if (deterministicGhostPower(power, "")) {
     return `Local power compilation failed: invalid compiler output; required speaking-only avatar rule missing. ${compilerDiagnosticContext(provider)}; describe the ghost's idle invisibility and speaking reveal, then retry.`;
   }
@@ -826,6 +978,9 @@ export async function compileBotPowers(args: {
         '- {"type":"awareness","allowed":[target...]},',
         '- {"type":"speech_audience","allowed":[target...]},',
         '- {"type":"avatar_visibility","mode":"speaking_only"},',
+        '- {"type":"avatar_scale","mode":"larger|smaller"},',
+        '- {"type":"voice_presence","mode":"loud|quiet"},',
+        '- {"type":"intermittent_mute","chance":"half","moodPenalty":"small|medium|large"},',
         '- {"type":"social_influence","trigger":"session_start|after_speech","polarity":"positive|negative","strength":"small|medium|large","targets":[target...]},',
         '- {"type":"candor","strength":"small|medium|large","targets":[target...]},',
         '- {"type":"mood_resistance","polarity":"positive|negative|both","strength":"small|medium|large"},',
@@ -875,7 +1030,7 @@ export async function compileBotPowers(args: {
         content: [
           "Repair malformed PRISM Power compiler output.",
           "Reply with JSON only and preserve the supplied power IDs exactly.",
-          "Every hard echo, hearing-repeat, active live-interruption, exclusive visibility, hearing-audience, ghostly speaking-only avatar, or strict response-length intent must include its matching echo_addressed, hearing_repeat, interruption, awareness, speech_audience, avatar_visibility, or response_budget effect, not only prose cues.",
+          "Every hard echo, hearing-repeat, active live-interruption, exclusive visibility, hearing-audience, ghostly speaking-only avatar, physical avatar-size, loud/quiet voice presence, intermittent mute, or strict response-length intent must include its matching echo_addressed, hearing_repeat, interruption, awareness, speech_audience, avatar_visibility, avatar_scale, voice_presence, intermittent_mute, or response_budget effect, not only prose cues.",
         ].join(" "),
       },
       {
@@ -884,7 +1039,7 @@ export async function compileBotPowers(args: {
           `Expected powers: ${JSON.stringify(unresolved.map(({ id, name, intent, enabled }) => ({ id, name, intent, enabled })))}`,
           `Prior output: ${compact(raw, 6000) || "(empty)"}`,
           "Return {\"powers\":[{\"id\":string,\"name\":string,\"selfCue\":string,\"observerCue\":string,\"effects\":[],\"ruleLabels\":string[]}]}",
-          "Allowed effect types: mute, echo_addressed, hearing_repeat, awareness, speech_audience, avatar_visibility, social_influence, candor, mood_resistance, cup_rate, action_bias, interruption, response_budget, turn_gravity, response_bond, topic_gravity, selective_memory, insight.",
+          "Allowed effect types: mute, echo_addressed, hearing_repeat, awareness, speech_audience, avatar_visibility, avatar_scale, voice_presence, intermittent_mute, social_influence, candor, mood_resistance, cup_rate, action_bias, interruption, response_budget, turn_gravity, response_bond, topic_gravity, selective_memory, insight.",
         ].join("\n"),
       },
     ];

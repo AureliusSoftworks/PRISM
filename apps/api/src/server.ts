@@ -526,6 +526,8 @@ import {
   normalizeOptionalBotAudioVoiceProfileV1,
   parseStoredBotAudioVoiceProfileV1,
   parseStoredBotPowersV1,
+  botPowerIntermittentMuteEffectV1,
+  botPowerIntermittentMuteTurnIsIgnoredV1,
   botPowerEchoesAddressedSpeechV1,
   botPowerIsMutedV1,
   botPowerResponseIsSilentV1,
@@ -7113,6 +7115,7 @@ function buildRoutes(): RouteDefinition[] {
       let botSystemPrompt: string | undefined;
       let starterPromptLabel: string | undefined;
       let runtimeBotMuted = false;
+      let runtimeBotQuietIgnored = false;
       let runtimeBotEchoAddressed = false;
       let runtimeBotResponseBudget: ReturnType<
         typeof strongestHardBotPowerResponseBudgetEffectV1
@@ -7140,6 +7143,21 @@ function buildRoutes(): RouteDefinition[] {
           | undefined;
         if (bot) {
           runtimeBotMuted = botPowerIsMutedV1(bot.powers_json);
+          if (botPowerIntermittentMuteEffectV1(bot.powers_json)) {
+            const stableTurnOrdinal = incognito
+              ? (ephemeralMessages?.length ?? 0)
+              : conversationId
+                ? (
+                    db.prepare(
+                      "SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ? AND user_id = ?",
+                    ).get(conversationId, userId) as { n: number }
+                  ).n
+                : 0;
+            runtimeBotQuietIgnored = botPowerIntermittentMuteTurnIsIgnoredV1(
+              bot.powers_json,
+              `${mode}:${conversationId ?? "new"}:${runtimeBotId}:${stableTurnOrdinal}:${message}`,
+            );
+          }
           runtimeBotEchoAddressed = botPowerEchoesAddressedSpeechV1(bot.powers_json);
           runtimeBotResponseBudget = strongestHardBotPowerResponseBudgetEffectV1(
             bot.powers_json,
@@ -7405,7 +7423,8 @@ function buildRoutes(): RouteDefinition[] {
             incognito,
             ephemeralMessages,
             botSystemPrompt,
-            botPowerMuted: runtimeBotMuted,
+            botPowerMuted: runtimeBotMuted || runtimeBotQuietIgnored,
+            botPowerQuietIgnored: runtimeBotQuietIgnored,
             botPowerEchoAddressed: runtimeBotEchoAddressed,
             botPowerResponseBudget: runtimeBotResponseBudget,
             botOverrides,

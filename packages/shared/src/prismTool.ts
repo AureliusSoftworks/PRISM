@@ -307,7 +307,7 @@ export interface StoredAssistantToolEnvelope {
   /** Privacy-safe record of a successful Auto recovery. */
   autoRecovery?: AutoRecoveryTraceV1;
   /** Internal marker for deterministic Power output that must not be sanitized on reload. */
-  botPowerExactResponse?: "echo_addressed" | "hearing_repeat";
+  botPowerExactResponse?: "echo_addressed" | "hearing_repeat" | "intermittent_mute";
 }
 
 /** Narrow storage shape for SQLite `messages.tool_payload` rows. */
@@ -344,7 +344,7 @@ export interface ParsedStoredAssistantToolPayload {
   coffeeUserAction?: CoffeeUserActionPayload;
   coffeeReplayEvents?: CoffeeReplayEventPayload[];
   autoRecovery?: AutoRecoveryTraceV1;
-  botPowerExactResponse?: "echo_addressed" | "hearing_repeat";
+  botPowerExactResponse?: "echo_addressed" | "hearing_repeat" | "intermittent_mute";
 }
 
 /// Many models wrap the envelope in a markdown fence; raw fences make JSON.parse fail
@@ -1457,7 +1457,8 @@ export function parseStoredAssistantToolPayload(
         : undefined;
       const botPowerExactResponse =
         root?.botPowerExactResponse === "echo_addressed" ||
-        root?.botPowerExactResponse === "hearing_repeat"
+        root?.botPowerExactResponse === "hearing_repeat" ||
+        root?.botPowerExactResponse === "intermittent_mute"
           ? root.botPowerExactResponse
           : undefined;
       return {
@@ -1488,7 +1489,8 @@ export function parseStoredAssistantToolPayload(
     const autoRecovery = normalizeStoredAutoRecoveryTrace(row.autoRecovery);
     const botPowerExactResponse =
       row.botPowerExactResponse === "echo_addressed" ||
-      row.botPowerExactResponse === "hearing_repeat"
+      row.botPowerExactResponse === "hearing_repeat" ||
+      row.botPowerExactResponse === "intermittent_mute"
         ? row.botPowerExactResponse
         : undefined;
     const moodRow = row.mood;
@@ -1547,6 +1549,7 @@ export function hydrateAssistantMessageParts(args: {
   coffeeUserAction?: CoffeeUserActionPayload;
   coffeeReplayEvents?: CoffeeReplayEventPayload[];
   autoRecovery?: AutoRecoveryTraceV1;
+  botPowerExactResponse?: "echo_addressed" | "hearing_repeat" | "intermittent_mute";
 } {
   const stored = parseStoredAssistantToolPayload(args.toolPayload);
   const reparsed = parseAssistantPrismTools(args.content);
@@ -1572,6 +1575,9 @@ export function hydrateAssistantMessageParts(args: {
       ? { coffeeReplayEvents: stored.coffeeReplayEvents }
       : {}),
     ...(stored.autoRecovery ? { autoRecovery: stored.autoRecovery } : {}),
+    ...(stored.botPowerExactResponse
+      ? { botPowerExactResponse: stored.botPowerExactResponse }
+      : {}),
   };
 }
 
@@ -1594,6 +1600,7 @@ export function serializeAssistantToolPayload(args: {
   coffeeUserAction?: CoffeeUserActionPayload;
   coffeeReplayEvents?: CoffeeReplayEventPayload[];
   autoRecovery?: AutoRecoveryTraceV1;
+  botPowerExactResponse?: "echo_addressed" | "hearing_repeat" | "intermittent_mute";
 }): string | null {
   const hasAsk = args.askQuestion !== undefined;
   const hasStory = args.tellFictionalStory !== undefined;
@@ -1613,6 +1620,13 @@ export function serializeAssistantToolPayload(args: {
   const hasCoffeeReplayEvents = coffeeReplayEvents.length > 0;
   const autoRecovery = normalizeStoredAutoRecoveryTrace(args.autoRecovery);
   const hasAutoRecovery = autoRecovery !== undefined;
+  const botPowerExactResponse =
+    args.botPowerExactResponse === "echo_addressed" ||
+    args.botPowerExactResponse === "hearing_repeat" ||
+    args.botPowerExactResponse === "intermittent_mute"
+      ? args.botPowerExactResponse
+      : undefined;
+  const hasBotPowerExactResponse = botPowerExactResponse !== undefined;
   if (
     !hasAsk &&
     !hasStory &&
@@ -1624,7 +1638,8 @@ export function serializeAssistantToolPayload(args: {
     !hasCoffeeAmbientAction &&
     !hasCoffeeUserAction &&
     !hasCoffeeReplayEvents &&
-    !hasAutoRecovery
+    !hasAutoRecovery &&
+    !hasBotPowerExactResponse
   ) {
     return null;
   }
@@ -1640,6 +1655,7 @@ export function serializeAssistantToolPayload(args: {
     !hasCoffeeUserAction &&
     !hasCoffeeReplayEvents &&
     !hasAutoRecovery &&
+    !hasBotPowerExactResponse &&
     hasImage
   ) {
     return JSON.stringify({ v: 1 as const, sentGeneratedImage: args.sentGeneratedImage! });
@@ -1655,7 +1671,8 @@ export function serializeAssistantToolPayload(args: {
     !hasCoffeeAmbientAction &&
     !hasCoffeeUserAction &&
     !hasCoffeeReplayEvents &&
-    !hasAutoRecovery
+    !hasAutoRecovery &&
+    !hasBotPowerExactResponse
   ) {
     return serializeAskQuestionTool(args.askQuestion!);
   }
@@ -1683,6 +1700,7 @@ export function serializeAssistantToolPayload(args: {
     ...(hasCoffeeUserAction ? { coffeeUserAction } : {}),
     ...(hasCoffeeReplayEvents ? { coffeeReplayEvents } : {}),
     ...(hasAutoRecovery ? { autoRecovery } : {}),
+    ...(hasBotPowerExactResponse ? { botPowerExactResponse } : {}),
   };
   return JSON.stringify(payload);
 }

@@ -8,6 +8,9 @@ import {
   applyBotPowerEchoResponseV1,
   applyBotPowerMuteResponseV1,
   applyBotPowerResponseBudgetV1,
+  botPowerAvatarScaleModeFromEffectsV1,
+  botPowerAvatarScaleModeV1,
+  botPowerDeterministicHalfChanceV1,
   botPowerCupRateMultiplierForBotV1,
   botPowerCandorTriggerV1,
   botPowerCandorResponseRuleV1,
@@ -15,10 +18,15 @@ import {
   botPowerDefinitionIsExplicitMuteV1,
   botPowerEchoesAddressedSpeechV1,
   botPowerHasSpeakingOnlyAvatarVisibilityV1,
+  botPowerIntermittentMuteEffectV1,
+  botPowerIntermittentMuteTurnIsIgnoredV1,
   botPowerIsMutedV1,
   botPowerObserverCueLinesV1,
   botPowerResponseIsSilentV1,
   botPowerSourceHashV1,
+  botPowerTextScaleV1,
+  botPowerVoiceGainMultiplierV1,
+  botPowerVoicePresenceModeV1,
   buildBotPowersSelfPromptV1,
   buildCoffeePowersPromptBlock,
   coffeePowerCupRateMultiplierV1,
@@ -82,6 +90,93 @@ test("compiler effect inputs can only produce bounded strength tiers", () => {
   });
   assert.equal(effect?.type, "social_influence");
   assert.equal(effect?.type === "social_influence" ? effect.strength : null, "medium");
+});
+
+test("voice-presence and intermittent-mute effects normalize to bounded contracts", () => {
+  assert.deepEqual(normalizeBotPowerEffectV1({
+    type: "voice_presence",
+    mode: "quiet",
+    gain: 999,
+  }), { type: "voice_presence", mode: "quiet" });
+  assert.deepEqual(normalizeBotPowerEffectV1({
+    type: "intermittent_mute",
+    chance: 0.93,
+    moodPenalty: "catastrophic",
+  }), {
+    type: "intermittent_mute",
+    chance: "half",
+    moodPenalty: "medium",
+  });
+});
+
+test("loud voice presence overrides smaller and speaking-only invisible presentation", () => {
+  const name = "Loud";
+  const intent = "A loud voice that cannot be overlooked.";
+  const powers = [{
+    version: 1,
+    id: "loud",
+    name,
+    intent,
+    enabled: true,
+    compileStatus: "ready",
+    compiled: {
+      version: 1,
+      sourceHash: botPowerSourceHashV1(name, intent),
+      selfCue: "Speak loudly.",
+      observerCue: "Impossible to overlook.",
+      effects: [
+        { type: "voice_presence", mode: "loud" },
+        { type: "avatar_scale", mode: "smaller" },
+        { type: "avatar_visibility", mode: "speaking_only" },
+      ],
+      ruleLabels: [],
+    },
+  }];
+  assert.equal(botPowerVoicePresenceModeV1(powers), "loud");
+  assert.equal(botPowerVoiceGainMultiplierV1(powers), 1.18);
+  assert.equal(botPowerTextScaleV1(powers), 1.12);
+  assert.equal(botPowerAvatarScaleModeV1(powers), null);
+  assert.equal(botPowerHasSpeakingOnlyAvatarVisibilityV1(powers), false);
+});
+
+test("quiet turns use one replay-stable half chance and retain their mood penalty", () => {
+  const name = "Quiet";
+  const intent = "Her voice is very quiet and half of her turns are ignored.";
+  const powers = [{
+    version: 1,
+    id: "quiet",
+    name,
+    intent,
+    enabled: true,
+    compileStatus: "ready",
+    compiled: {
+      version: 1,
+      sourceHash: botPowerSourceHashV1(name, intent),
+      selfCue: "Speak quietly.",
+      observerCue: "May go unheard.",
+      effects: [
+        { type: "voice_presence", mode: "quiet" },
+        { type: "intermittent_mute", chance: "half", moodPenalty: "small" },
+      ],
+      ruleLabels: [],
+    },
+  }];
+  const outcomes = Array.from({ length: 32 }, (_, index) =>
+    botPowerDeterministicHalfChanceV1(`turn-${index}`),
+  );
+  assert.ok(outcomes.some(Boolean));
+  assert.ok(outcomes.some((outcome) => !outcome));
+  assert.equal(botPowerVoiceGainMultiplierV1(powers), 0.72);
+  assert.equal(botPowerTextScaleV1(powers), 0.88);
+  assert.deepEqual(botPowerIntermittentMuteEffectV1(powers), {
+    type: "intermittent_mute",
+    chance: "half",
+    moodPenalty: "small",
+  });
+  assert.equal(
+    botPowerIntermittentMuteTurnIsIgnoredV1(powers, "saved-turn-7"),
+    botPowerIntermittentMuteTurnIsIgnoredV1(powers, "saved-turn-7"),
+  );
 });
 
 test("candor Powers normalize, trigger narrowly, choose the strongest pressure, and round-trip generically", () => {
@@ -352,6 +447,52 @@ test("ghost avatar visibility is bounded and activates only from a Ready Power",
   }];
   assert.equal(botPowerHasSpeakingOnlyAvatarVisibilityV1(powers), true);
   assert.equal(botPowerHasSpeakingOnlyAvatarVisibilityV1([{ ...powers[0], enabled: false }]), false);
+});
+
+test("avatar scale effects normalize safely and smaller wins without stacking", () => {
+  assert.deepEqual(
+    normalizeBotPowerEffectV1({ type: "avatar_scale", mode: "larger" }),
+    { type: "avatar_scale", mode: "larger" },
+  );
+  assert.deepEqual(
+    normalizeBotPowerEffectV1({ type: "avatar_scale", mode: "smaller" }),
+    { type: "avatar_scale", mode: "smaller" },
+  );
+  assert.equal(
+    normalizeBotPowerEffectV1({ type: "avatar_scale", mode: "enormous" }),
+    null,
+  );
+  assert.equal(
+    botPowerAvatarScaleModeFromEffectsV1([
+      { type: "avatar_scale", mode: "larger" },
+      { type: "avatar_scale", mode: "smaller" },
+    ]),
+    "smaller",
+  );
+
+  const name = "Large";
+  const intent = "This bot is physically larger than other bots.";
+  const readyPower = {
+    version: 1 as const,
+    id: "large",
+    name,
+    intent,
+    enabled: true,
+    compileStatus: "ready" as const,
+    compiled: {
+      version: 1 as const,
+      sourceHash: botPowerSourceHashV1(name, intent),
+      selfCue: "You are unusually large.",
+      observerCue: "This bot is unusually large.",
+      effects: [{ type: "avatar_scale" as const, mode: "larger" as const }],
+      ruleLabels: ["Larger avatar"],
+    },
+  };
+  assert.equal(botPowerAvatarScaleModeV1([readyPower]), "larger");
+  assert.equal(
+    botPowerAvatarScaleModeV1([{ ...readyPower, enabled: false }]),
+    null,
+  );
 });
 
 test("relationship-agnostic Coffee effects normalize to bounded schemas", () => {

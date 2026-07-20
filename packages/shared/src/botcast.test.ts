@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { botPowerIsMutedV1, botPowerSourceHashV1 } from "./botPower.ts";
+import {
+  botPowerAvatarScaleModeV1,
+  botPowerIsMutedV1,
+  botPowerSourceHashV1,
+} from "./botPower.ts";
 
 import {
   BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT,
@@ -260,7 +264,10 @@ describe("Signal replayed ghost avatar presence", () => {
               ),
               selfCue: "Fade in to speak.",
               observerCue: "A chill follows.",
-              effects: [{ type: "avatar_visibility", mode: "speaking_only" }],
+              effects: [
+                { type: "avatar_scale", mode: "smaller" },
+                { type: "avatar_visibility", mode: "speaking_only" },
+              ],
               ruleLabels: [],
             },
           }],
@@ -273,6 +280,15 @@ describe("Signal replayed ghost avatar presence", () => {
         "guest",
       ),
       true,
+    );
+    assert.equal(
+      botPowerAvatarScaleModeV1(
+        botcastSnapshotPowersForRoleV1(
+          { events, hostBotId: "host", guestBotId: "guest" },
+          "guest",
+        ),
+      ),
+      "smaller",
     );
   });
 

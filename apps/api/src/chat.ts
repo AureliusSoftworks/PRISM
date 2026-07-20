@@ -94,6 +94,7 @@ import {
   applyPrismMoodIgnoredTurn,
   applyPrismMoodNegativeTurn,
   applyPrismMoodPositiveTurn,
+  applyPrismMoodPowerIgnoredTurn,
   applyBotPowerEchoResponseV1,
   applyBotPowerMuteResponseV1,
   applyBotPowerResponseBudgetV1,
@@ -2394,6 +2395,8 @@ export interface UserChatSettings {
   botSystemPrompt?: string;
   /** Hard runtime enforcement for an active compiled mute Power. */
   botPowerMuted?: boolean;
+  /** This turn hit the replay-stable half-mute branch of a Quiet Power. */
+  botPowerQuietIgnored?: boolean;
   /** Hard runtime enforcement for an active compiled addressed-speech echo Power. */
   botPowerEchoAddressed?: boolean;
   /** Per-response prose envelope from a Ready response-budget Power. */
@@ -4887,6 +4890,9 @@ function hydrateMessages(
         ? { coffeeAmbientAction: assembled.coffeeAmbientAction }
         : {}),
       ...(assembled.autoRecovery ? { autoRecovery: assembled.autoRecovery } : {}),
+      ...(assembled.botPowerExactResponse
+        ? { botPowerExactResponse: assembled.botPowerExactResponse }
+        : {}),
     };
   });
 }
@@ -6298,6 +6304,7 @@ export async function processChatMessage(
     : settings.botSystemPrompt;
   const isStarterPrompt = settings.starterPrompt === true;
   const botPowerMutedTurn = settings.botPowerMuted === true;
+  const botPowerQuietIgnoredTurn = settings.botPowerQuietIgnored === true;
   const botPowerEchoTurn = settings.botPowerEchoAddressed === true;
   const botPowerResponseBudgetTurn = settings.botPowerResponseBudget ?? null;
   const botPowerHardResponseTurn = botPowerMutedTurn || botPowerEchoTurn;
@@ -7291,6 +7298,9 @@ export async function processChatMessage(
       }
     }
   }
+  if (botPowerQuietIgnoredTurn && !commandCenterPromptTurn) {
+    prismMood = applyPrismMoodPowerIgnoredTurn(prismMood, now);
+  }
   if (!commandCenterPromptTurn) {
     prismMood = upsertPrismMoodState(db, userId, activeConversationId, prismMood);
   }
@@ -7800,7 +7810,7 @@ export async function processChatMessage(
       botPowerResponseBudgetTurn?.mode === "minimal" ? 1 : 2,
     );
   }
-	  const assistantMood = prismMoodPauseTurn
+	  const assistantMood = botPowerQuietIgnoredTurn || prismMoodPauseTurn
 	    ? {
 	        key: prismMood.moodKey,
 	        confidence: prismMood.confidence,
@@ -7983,6 +7993,9 @@ export async function processChatMessage(
 	    zenTurn: zenTurnMarker,
 	    webSearch: webSearchForTurn,
 	    autoRecovery,
+	    botPowerExactResponse: botPowerQuietIgnoredTurn
+	      ? "intermittent_mute"
+	      : undefined,
 	  });
   const toolPayloadImageOnly = sentGeneratedImagePersisted
     ? serializeAssistantToolPayload({ sentGeneratedImage: sentGeneratedImagePersisted })

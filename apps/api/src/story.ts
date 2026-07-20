@@ -13,6 +13,8 @@ import {
   applyBotPowerResponseBudgetV1,
   botPowerCandorResponseRuleV1,
   botPowerEchoesAddressedSpeechV1,
+  botPowerIntermittentMuteEffectV1,
+  botPowerIntermittentMuteTurnIsIgnoredV1,
   botPowerIsMutedV1,
   botPowerObserverCueLinesV1,
   botPowerSelfCueLinesV1,
@@ -1188,6 +1190,9 @@ function applyStoryHardResponsePowers(
       .filter((bot) => botPowerEchoesAddressedSpeechV1(bot.powers))
       .map((bot) => bot.id),
   );
+  const quietPowersByBotId = new Map(
+    bots.map((bot) => [bot.id, bot.powers] as const),
+  );
   const responseBudgetByBotId = new Map(
     bots.flatMap((bot) => {
       const effect = strongestHardBotPowerResponseBudgetEffectV1(bot.powers);
@@ -1197,18 +1202,30 @@ function applyStoryHardResponsePowers(
   if (
     mutedBotIds.size === 0 &&
     echoBotIds.size === 0 &&
+    !bots.some((bot) => botPowerIntermittentMuteEffectV1(bot.powers)) &&
     responseBudgetByBotId.size === 0
   ) {
     return episode;
   }
   const scenes: StoryEpisodeManifest["scenes"] = [];
   let priorVisibleNarration: string | null = null;
-  for (const scene of episode.scenes) {
+  for (const [sceneIndex, scene] of episode.scenes.entries()) {
     let nextScene = scene;
-    if (scene.speakerBotId && mutedBotIds.has(scene.speakerBotId)) {
+    const quietIgnored = Boolean(
+      scene.speakerBotId &&
+      botPowerIntermittentMuteTurnIsIgnoredV1(
+        quietPowersByBotId.get(scene.speakerBotId),
+        `${episode.id}:${scene.id}:${sceneIndex}`,
+      ),
+    );
+    if (scene.speakerBotId && (mutedBotIds.has(scene.speakerBotId) || quietIgnored)) {
+      const mutedNarration = applyBotPowerMuteResponseV1(scene.narration);
       nextScene = {
         ...scene,
-        narration: applyBotPowerMuteResponseV1(scene.narration),
+        narration:
+          quietIgnored && mutedNarration === "..."
+            ? `*${scene.speakerName || "The bot"}'s expression falls a little after going unheard.* ...`
+            : mutedNarration,
         spritePose: scene.spritePose === "action" ? "action" : "idle",
       };
     } else if (scene.speakerBotId && echoBotIds.has(scene.speakerBotId)) {
