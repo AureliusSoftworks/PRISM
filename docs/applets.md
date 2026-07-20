@@ -24,11 +24,11 @@ ship as `0.5.2` while Coffee is `v0.7` and Story is `v0.1`.
 
 | Applet | Version | Status | Notes |
 | --- | --- | --- | --- |
-| Chat | v1.12 | Active | Full playground for bots, providers, models, images, exports, memory-aware conversations, five-choice English/Premium voice switching, sparse shared mic presence, and ready Powers including engine-bounded response budgets, relative avatar size, and loud/quiet presence. |
-| Zen | v1.11 | Active | Calm one-to-one continuity surface with five-choice English/Premium voice switching, mic presence, and ready Powers including engine-bounded response budgets, relative avatar size, and loud/quiet presence; the standalone Zen lane is deprecating as this becomes Prism's default state. |
-| Coffee | v2.5 | Active | Multi-bot group table with Coffee Groups, live and replay-safe English/Premium switching, model-aware session holds, pacing, cups, transcripts, living atmosphere, table-adapted response budgets, and frozen size/voice Powers. |
-| Signal | v1.11 | Active | Bot-owned anthology interviews with next-utterance English/Premium switching, audience-projected transcript, voice, replay, and reviews; studio-specific atmosphere; frozen episode Powers for avatar and voice presence; one repeating persona-shaped blurb plus guest-led structure for echo-bound hosts; and bounded, replay-safe interruption Powers. |
-| Story | v0.9 | Preview | Generated visual-novel episodes with bots, choices, maps, inventory, transcripts, shared PRISM menu behavior, English/Premium speaker narration, and Power-shaped relative sprite and voice presence. |
+| Chat | v1.13 | Active | Full playground for bots, providers, models, images, exports, memory-aware conversations, five-choice English/Premium voice switching, sparse shared mic presence, and ready Powers including one-opening echo behavior, engine-bounded response budgets, relative avatar size, and loud/quiet presence. |
+| Zen | v1.12 | Active | Calm one-to-one continuity surface with five-choice English/Premium voice switching, mic presence, and ready Powers including one-opening echo behavior, engine-bounded response budgets, relative avatar size, and loud/quiet presence; the standalone Zen lane is deprecating as this becomes Prism's default state. |
+| Coffee | v2.6 | Active | Multi-bot group table with Coffee Groups, live and replay-safe English/Premium switching, model-aware session holds, pacing, cups, transcripts, living atmosphere, one-opening echo behavior, and Power-driven bot-to-bot cut-ins. |
+| Signal | v1.12 | Active | Bot-owned anthology interviews with next-utterance English/Premium switching, audience-projected transcript, voice, replay, and reviews; one-opening echo behavior; and bidirectional, replay-safe cast interruption Powers. |
+| Story | v0.10 | Preview | Generated visual-novel episodes with bots, choices, maps, inventory, transcripts, shared PRISM menu behavior, one-opening echo behavior, and replay-stable interruption adaptation. |
 | Arena | v0.0 | Planned | Moderated bot debate surface. |
 | Polling | v0.0 | Planned | AI-powered polling across bot groups. |
 | Feed | v0.0 | Planned | BotBook-style social feed. |
@@ -70,6 +70,14 @@ usable end to end. It entered preview at `v0.1` and is now `v0.7`; later snapsho
 stages do not block the standalone preview.
 
 ## Changelog
+
+- Bumped `Chat` to `v1.13`, `Zen` to `v1.12`, `Coffee` to `v2.6`, `Signal`
+  to `v1.12`, and `Story` to `v0.10` so Copycat/Echo bots can originate one
+  opening before exact-copy enforcement begins. Interrupting bots now carry
+  their target-aware cutoff behavior into every bot-to-bot lane: real live
+  cut-ins in Coffee and either Signal cast role, plus replay-stable Story cuts.
+  Typed human Chat/Zen speech and the Signal Producer-guest lane remain
+  protected from synthetic truncation.
 
 - Bumped `Chat` to `v1.12`, `Zen` to `v1.11`, `Coffee` to `v2.5`, `Signal`
   to `v1.11`, and `Story` to `v0.9` for the global five-choice voice control.

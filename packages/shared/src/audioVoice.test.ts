@@ -9,6 +9,8 @@ import {
   applyBotNamePronunciations,
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
   DEFAULT_VOICE_EFFECT,
+  VOICE_EFFECT_DESCRIPTIONS,
+  VOICE_EFFECT_LABELS,
   botVoiceTextureIsModified,
   elevenLabsVoiceDirectionForMood,
   expectedVoicePlaybackDurationMs,
@@ -328,10 +330,13 @@ describe("audio voice normalization", () => {
     );
   });
 
-  it("normalizes engine-agnostic effects to a Chorus default", () => {
+  it("presents the compatible Chorus ID as the Prism default", () => {
     assert.equal(DEFAULT_VOICE_EFFECT, "chorus");
+    assert.equal(VOICE_EFFECT_LABELS.chorus, "Prism");
+    assert.match(VOICE_EFFECT_DESCRIPTIONS.chorus, /PRISM/u);
     assert.equal(normalizeVoiceEffect(undefined), "chorus");
     assert.equal(normalizeVoiceEffect("clean"), "clean");
+    assert.equal(normalizeVoiceEffect("resonance"), "resonance");
     assert.equal(normalizeElevenLabsVoiceEffect("robot"), "robot");
     assert.equal(normalizeElevenLabsVoiceEffect(undefined), "chorus");
     assert.equal(normalizeElevenLabsVoiceEffect("distortion"), "chorus");
@@ -361,6 +366,18 @@ describe("audio voice normalization", () => {
         elevenLabsEffect: "deep-space",
       }).elevenLabsEffect,
       "deep-space"
+    );
+    assert.deepEqual(
+      parseStoredBotAudioVoiceProfileV1(serializeBotAudioVoiceProfileV1({
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+        elevenLabsEffect: "resonance",
+        voiceEffectExplicit: true,
+      })),
+      {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+        elevenLabsEffect: "resonance",
+        voiceEffectExplicit: true,
+      },
     );
   });
 

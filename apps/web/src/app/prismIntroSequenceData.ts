@@ -75,7 +75,7 @@ export const PRISM_INTRO_SCENES: readonly PrismIntroScene[] = [
     body: "Different voices met, challenged, and changed one another.",
     imageSrc: "/prism-intro/06-inhabitants.webp",
     imageAlt:
-      "Five circular PRISM bot frames wake with colored CRT faces amid a much larger pile of identical dark frames; the clean triangle-marked primary frame remains powered off.",
+      "The Prism Originals Pia, Rowan, Iris, Sol, and Mira wake on black-glass CRTs with rose heart, amber winding-path, lime diamond, cyan sunburst, and violet four-point-sparkle phosphor eyes amid a much larger pile of dark frames; a same-sized, triangle-marked primary frame remains powered off within the pile.",
     imagePosition: "center center",
   },
   {
@@ -85,7 +85,7 @@ export const PRISM_INTRO_SCENES: readonly PrismIntroScene[] = [
     body: "You decided what belonged.",
     imageSrc: "/prism-intro/07-interplay.webp",
     imageAlt:
-      "Five awake circular PRISM bot frames weave colored threads through unfinished words, sound, images, and worlds while the clean triangle-marked primary frame waits dark beside them.",
+      "Pia, Rowan, Iris, Sol, and Mira glow from black CRT glass as they weave colored threads through unfinished words, sound, images, and worlds while a same-sized, clean triangle-marked primary PRISM frame waits dark beside them.",
     imagePosition: "center center",
   },
   {
@@ -95,7 +95,7 @@ export const PRISM_INTRO_SCENES: readonly PrismIntroScene[] = [
     body: `${PRISM_BRAND_COPY.coreBelief} ${PRISM_BRAND_COPY.slogan}`,
     imageSrc: "/prism-intro/08-enter.webp",
     imageAlt:
-      "The factory-clean main PRISM bot frame comes online with a white CRT face and glowing triangle medallion as five colored inhabitants gather before a vast heap of dormant frames.",
+      "The same-sized, factory-clean main PRISM bot frame comes online among Pia, Rowan, Iris, Sol, and Mira with a white face on black CRT glass, a glowing triangle medallion, and tiny spectrum lights while the five Originals retain colored phosphor faces on black glass before a vast heap of dormant frames.",
     imagePosition: "center center",
     showBrandMark: true,
   },

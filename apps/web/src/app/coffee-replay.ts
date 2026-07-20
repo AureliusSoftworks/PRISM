@@ -678,16 +678,45 @@ export function formatCoffeeReviewClipboardText(args: {
   }
 
   const visibleMessages = coffeeTranscriptVisibleMessages(messages);
+  const attendedBotIds = new Set<string>();
+  for (const event of replayEvents) {
+    if (event.kind === "arrival") attendedBotIds.add(event.botId);
+  }
+  for (const message of visibleMessages) {
+    if (message.role === "assistant" && message.botId) {
+      attendedBotIds.add(message.botId);
+    }
+  }
+  const storedAbsentBotIds = context?.absentBotIds ?? [];
+  const departedBotIds = storedAbsentBotIds.filter((botId) => attendedBotIds.has(botId));
+  const absentBotIds = storedAbsentBotIds.filter((botId) => !attendedBotIds.has(botId));
+  const absentBotIdSet = new Set(absentBotIds);
+  const rosterBotIds: string[] = [];
+  const addRosterBotId = (botId: string | null | undefined): void => {
+    const normalized = botId?.trim() ?? "";
+    if (!normalized || absentBotIdSet.has(normalized) || rosterBotIds.includes(normalized)) return;
+    rosterBotIds.push(normalized);
+  };
+  for (const bot of context?.bots ?? []) addRosterBotId(bot.id);
+  for (const event of replayEvents) {
+    if (event.kind === "arrival") addRosterBotId(event.botId);
+  }
+  for (const message of visibleMessages) {
+    if (message.role === "assistant") addRosterBotId(message.botId);
+  }
   const transcriptLines = visibleMessages
     .map((message) => {
       const text = coffeeReviewTableText(message);
       return text ? `${coffeeReviewSpeaker(message)}: ${text}` : null;
     })
     .filter((line): line is string => line !== null);
-  const roster = (context?.bots ?? [])
-    .map((bot) => `${bot.name}${bot.id ? ` (${bot.id})` : ""}`)
+  const roster = rosterBotIds
+    .map((botId) => coffeeReviewBotLabel(botId, botNameById))
     .join(", ");
-  const absent = (context?.absentBotIds ?? [])
+  const absent = absentBotIds
+    .map((botId) => coffeeReviewBotLabel(botId, botNameById))
+    .join(", ");
+  const departed = departedBotIds
     .map((botId) => coffeeReviewBotLabel(botId, botNameById))
     .join(", ");
   const observedModels = Array.from(
@@ -719,6 +748,7 @@ export function formatCoffeeReviewClipboardText(args: {
     coffeeReviewValue("Group ID", context?.groupId),
     roster ? `Roster: ${roster}` : null,
     absent ? `Absent bots: ${absent}` : null,
+    departed ? `Departed bots: ${departed}` : null,
     settings ? `Settings: ${settings}` : null,
     observedModels.length ? `Observed models/providers: ${observedModels.join("; ")}` : null,
     `Visible transcript messages: ${transcriptLines.length}`,

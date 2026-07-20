@@ -576,24 +576,24 @@ export interface BotcastPowerInterruptionPlanV1 {
 /** Deterministic, cooldown-aware decision for a Power-driven Signal cutoff. */
 export function botcastPowerInterruptionPlanV1(args: {
   episodeId: string;
-  guestTurnOrdinal: number;
+  targetTurnOrdinal: number;
   powerId: string;
   powerName: string;
   frequency: BotPowerFrequency;
   strength: BotPowerStrength;
-  guestTurnsSinceLastInterruption: number | null;
+  targetTurnsSinceLastInterruption: number | null;
 }): BotcastPowerInterruptionPlanV1 | null {
   const requiredCooldown = args.frequency === "frequent" ? 1 : 2;
   if (
-    args.guestTurnsSinceLastInterruption !== null &&
-    args.guestTurnsSinceLastInterruption < requiredCooldown
+    args.targetTurnsSinceLastInterruption !== null &&
+    args.targetTurnsSinceLastInterruption < requiredCooldown
   ) {
     return null;
   }
   const strengthChance =
     args.strength === "large" ? 12 : args.strength === "small" ? -8 : 0;
   const chance = (args.frequency === "frequent" ? 58 : 28) + strengthChance;
-  const seed = `signal-power-interruption:${args.episodeId}:${args.guestTurnOrdinal}:${args.powerId}`;
+  const seed = `signal-power-interruption:${args.episodeId}:${args.targetTurnOrdinal}:${args.powerId}`;
   if (stableHash(seed) % 100 >= chance) return null;
   const center =
     args.strength === "large" ? 0.38 : args.strength === "small" ? 0.58 : 0.48;
@@ -3987,15 +3987,6 @@ export function createBotcastEpisode(
       "This host's hard speech Power cannot originate the questions required for a Producer-guest episode.",
     );
   }
-  if (
-    guestKind === "bot" &&
-    botPowerEchoesAddressedSpeechV1(host.powers) &&
-    botPowerEchoesAddressedSpeechV1(guest.powers)
-  ) {
-    throw new Error(
-      `${host.name} and ${guest.name} both have hard echo Powers, so neither can originate the opening. Choose at least one cast member who can speak an original line.`,
-    );
-  }
   const guestPresenceMode =
     guestKind === "producer" ? "present" : botcastGuestPresenceMode(host, guest);
   if (guestKind === "bot") assertBotcastPowerSpeechCompatibility(host, guest);
@@ -4266,8 +4257,10 @@ function botcastHasUtteranceInSegment(
   );
 }
 
-function botcastGuestTurnsSinceLastPowerInterruption(
+function botcastSpeakerTurnsSinceLastPowerInterruption(
   episode: Pick<BotcastEpisode, "events">,
+  interruptedRole: BotcastSpeakerRole,
+  interrupterBotId: string,
 ): number | null {
   const lastInterruption = [...episode.events].reverse().find(
     (event) =>
@@ -4276,19 +4269,22 @@ function botcastGuestTurnsSinceLastPowerInterruption(
       typeof event.payload.powerOutcome === "object" &&
       !Array.isArray(event.payload.powerOutcome) &&
       (event.payload.powerOutcome as Record<string, unknown>).effect ===
-        "interruption",
+        "interruption" &&
+      (event.payload.powerOutcome as Record<string, unknown>)
+        .interruptingBotId === interrupterBotId,
   );
   if (!lastInterruption) return null;
   return episode.events.filter(
     (event) =>
       event.sequence > lastInterruption.sequence &&
       event.kind === "utterance" &&
-      event.payload.speakerRole === "guest",
+      event.payload.speakerRole === interruptedRole,
   ).length;
 }
 
 function botcastLatestPowerInterruption(
   episode: Pick<BotcastEpisode, "events" | "messages">,
+  interrupterBotId: string,
 ): Record<string, unknown> | null {
   const latestMessageId = episode.messages.at(-1)?.id;
   if (!latestMessageId) return null;
@@ -4300,7 +4296,9 @@ function botcastLatestPowerInterruption(
       typeof event.payload.powerOutcome === "object" &&
       !Array.isArray(event.payload.powerOutcome) &&
       (event.payload.powerOutcome as Record<string, unknown>).effect ===
-        "interruption",
+        "interruption" &&
+      (event.payload.powerOutcome as Record<string, unknown>)
+        .interruptingBotId === interrupterBotId,
   )?.payload.powerOutcome;
   return outcome && typeof outcome === "object" && !Array.isArray(outcome)
     ? outcome as Record<string, unknown>
@@ -4880,17 +4878,9 @@ export function buildBotcastSpeakerPrompt(
     args.speakerRole === "host" &&
     args.episode.segment === "opening" &&
     args.episode.messages.length === 0;
-  const firstGuestOpeningForEchoHost =
-    args.speakerRole === "guest" &&
-    args.episode.guestKind === "bot" &&
-    args.episode.segment === "opening" &&
-    args.episode.messages.length === 0 &&
-    botPowerEchoesAddressedSpeechV1(args.host.powers);
   const openingIntroductionRule = firstHostOpening
     ? `This is the episode's opening host turn. Deliver one cohesive, natural on-air introduction that says the exact show name "${args.show.name}", identifies you by name as "${args.host.name}", introduces the booked guest by exact name as "${args.guest.name}", and bridges into the subject. Complete all three introductions before asking the first question. Sound like this specific host on this specific show—not generic podcast copy—and never present the details as a checklist, labels, or setup metadata.`
-    : firstGuestOpeningForEchoHost
-      ? `The host can only repeat speech addressed to them, so this is a guest-led opening. In one cohesive on-air turn, say the exact show name "${args.show.name}", identify "${args.host.name}" as the host, introduce yourself by exact name as "${args.guest.name}", bridge into the subject, and offer one substantive opening position addressed directly to ${args.host.name}. Do not ask the host to originate a question or pretend they spoke before you.`
-      : null;
+    : null;
   const producerBriefRule =
     args.speakerRole === "host" && args.episode.producerBrief
       ? args.episode.guestKind === "producer"
@@ -4923,12 +4913,12 @@ export function buildBotcastSpeakerPrompt(
     args.speakerRole === "host" && args.cue?.kind === "refocus"
       ? "Refocus now: return the conversation to the stated episode topic and its strongest unresolved point. Make one specific, substantive connection or ask one focused follow-up. Do not restart the introduction, recap the whole episode, or mention that the conversation drifted."
       : null;
-  const latestPowerInterruption =
-    args.speakerRole === "host"
-      ? botcastLatestPowerInterruption(args.episode)
-      : null;
+  const latestPowerInterruption = botcastLatestPowerInterruption(
+    args.episode,
+    speaker.id,
+  );
   const powerInterruptionFollowUpRule = latestPowerInterruption
-    ? "Your interruption Power just cut the guest at the exact audience-heard prefix saved in the transcript. Take the mic immediately and continue from only those heard words. Do not invent, complete, paraphrase, or react to an unheard ending; do not name the Power or explain the cutoff."
+    ? "Your interruption Power just cut the other speaker at the exact audience-heard prefix saved in the transcript. Take the mic immediately and continue from only those heard words. Do not invent, complete, paraphrase, or react to an unheard ending; do not name the Power or explain the cutoff."
     : null;
   const producerCutRule = producerCut
     ? "The episode has been stopped unexpectedly and you have only one brief on-air beat to end it. Let a small, genuine flash of surprise register, recover immediately, and close with tact and warmth in your own voice. Use one or two very short sentences. Do not ask a question, recap the interview, invite another response, explain why the show is ending, or mention a producer, cue, control room, cut, technical problem, or instruction."
@@ -5027,9 +5017,7 @@ export function buildBotcastSpeakerPrompt(
         ]
       : [
           "You are the guest. Answer from your persona, with your own confidence, evasiveness, boundaries, and willingness to disagree.",
-          firstGuestOpeningForEchoHost
-            ? "The host cannot originate the show structure. Take temporary editorial lead for the opening while remaining the booked guest; the host's next spoken turn will only mirror your saved words."
-          : args.episode.segment === "closing" &&
+          args.episode.segment === "closing" &&
               botPowerEchoesAddressedSpeechV1(args.host.powers)
             ? `The host cannot originate a closing. Close ${args.show.name} yourself now with one concise, earned topic takeaway, thank ${args.host.name}, and clearly end the broadcast. Do not ask a question or invite another turn.`
           : wrappingUp
@@ -5057,7 +5045,9 @@ export function buildBotcastSpeakerPrompt(
     ? "Hard mute Power: do not speak. Return only `...`, optionally preceded by one brief physical `*action*`. This overrides every introduction, question, closing, and vocal-reaction instruction."
     : null;
   const echoRule = !muteRule && botPowerEchoesAddressedSpeechV1(speaker.powers)
-    ? "Hard echo Power: repeat only the immediately preceding on-air line from the other cast member, verbatim. Add no words, actions, reactions, labels, or vocal tags. If there is no preceding cast line, return only `...`. This overrides every introduction, question, answer, closing, and vocal-reaction instruction."
+    ? firstHostOpening
+      ? "Echo opening exception: nobody has addressed speech to you yet, so originate this one required opening in your own voice. After this first phrase, the hard echo rule takes over."
+      : "Hard echo Power: repeat only the immediately preceding on-air line from the other cast member, verbatim. Add no words, actions, reactions, labels, or vocal tags. If there is no preceding cast line after your opening, return only `...`. This overrides every later question, answer, closing, and vocal-reaction instruction."
     : null;
   const responseBudget = strongestBotPowerResponseBudgetEffectV1(speaker.powers);
   const responseBudgetRule = responseBudget
@@ -5095,7 +5085,7 @@ export function buildBotcastSpeakerPrompt(
         "Return only the next spoken line. No speaker label, no analysis, no camera directions, and no markdown.",
         producerCut
           ? "Keep this emergency sign-off extremely brief: one or two short sentences, usually 8 to 28 spoken words."
-          : firstHostOpening || firstGuestOpeningForEchoHost
+          : firstHostOpening
           ? "Keep this opening conversational and brisk: two to four concise sentences, usually 35 to 90 spoken words."
           : "Keep this turn conversational and brisk: one to three concise sentences, usually 20 to 65 spoken words.",
         immersiveVoiceRule,
@@ -6286,20 +6276,19 @@ export async function advanceBotcastEpisode(
     segment: episode.segment,
     guestDeparted: guestAlreadyDeparted,
   });
-  const echoHostNeedsGuestLedStructure = Boolean(
+  const echoHostNeedsGuestLedClosing = Boolean(
     !producerCut &&
     episode.guestKind === "bot" &&
-      episode.guestPresenceMode === "present" &&
-      hostPowerSnapshot &&
-      botPowerEchoesAddressedSpeechV1(hostPowerSnapshot),
+    episode.guestPresenceMode === "present" &&
+    hostPowerSnapshot &&
+    botPowerEchoesAddressedSpeechV1(hostPowerSnapshot) &&
+    guestPowerSnapshot &&
+    !botPowerEchoesAddressedSpeechV1(guestPowerSnapshot),
   );
   if (
-    echoHostNeedsGuestLedStructure &&
-    episode.segment === "opening" &&
-    episode.messages.length === 0
+    echoHostNeedsGuestLedClosing &&
+    episode.segment === "closing"
   ) {
-    scheduledSpeakerRole = "guest";
-  } else if (echoHostNeedsGuestLedStructure && episode.segment === "closing") {
     scheduledSpeakerRole = botcastHasUtteranceInSegment(
       episode,
       "guest",
@@ -6382,6 +6371,12 @@ export async function advanceBotcastEpisode(
     latestOnAirMessage && latestOnAirMessage.speakerRole !== speakerRole
       ? latestOnAirMessage.content
       : null;
+  const speakerHasSpoken = episode.messages.some(
+    (message) => message.botId === speaker.id,
+  );
+  const speakerEchoesForTurn =
+    speakerEchoesAddressedSpeech &&
+    (addressedSpeechForEcho !== null || speakerHasSpoken);
   const departureRequired =
     speakerRole === "guest" && botcastGuestDepartureEligible(tension);
   const hearingRepeatDirective = botcastHearingRepeatDirective({
@@ -6621,11 +6616,6 @@ export async function advanceBotcastEpisode(
     speakerRole === "host" &&
     episode.segment === "opening" &&
     episode.messages.length === 0;
-  const firstGuestOpeningForEchoHost =
-    speakerRole === "guest" &&
-    episode.segment === "opening" &&
-    episode.messages.length === 0 &&
-    botPowerEchoesAddressedSpeechV1(host.powers);
   const openingSubject =
     episode.topic.replace(/[.!?]+$/u, "").trim() || episode.topic;
   const topicWithPunctuation = /[.!?]$/u.test(episode.topic.trim())
@@ -6688,8 +6678,6 @@ export async function advanceBotcastEpisode(
                 : `${guest.name}, what is the part of ${episode.topic} that people most often misunderstand?`)
       : departureRequired
         ? "I warned you. We are done here."
-        : firstGuestOpeningForEchoHost
-          ? `Welcome to ${show.name}. ${host.name} is your host, and I'm ${guest.name}, joining them to explore ${openingSubject}. ${host.name}, my starting point is that the real stakes only appear when this idea meets a concrete consequence.`
         : episode.guestPresenceMode === "audience_only"
           ? "They still have no idea I am here. This is already more entertaining than the interview would have been."
         : echoHostGuestCutFallback ??
@@ -6715,7 +6703,7 @@ export async function advanceBotcastEpisode(
   );
   const cleanGeneratedContent = performance.content || fallback;
   const introductionSafeContent =
-    (firstHostOpening || firstGuestOpeningForEchoHost) &&
+    firstHostOpening &&
     !botcastOpeningIntroducesCast({
       content: cleanGeneratedContent,
       showName: show.name,
@@ -6744,7 +6732,7 @@ export async function advanceBotcastEpisode(
     ? BOT_POWER_CANONICAL_SILENCE_V1
     : speakerRepeatsForHearingPower
       ? hearingRepeatDirective!.repeatedContent
-    : speakerEchoesAddressedSpeech
+    : speakerEchoesForTurn
       ? applyBotPowerEchoResponseV1(addressedSpeechForEcho)
     : speakerRole === "host" &&
     episode.guestPresenceMode === "audience_only" &&
@@ -6769,7 +6757,7 @@ export async function advanceBotcastEpisode(
   const baseContent =
     speakerIsMutedForTurn ||
     speakerRepeatsForHearingPower ||
-    speakerEchoesAddressedSpeech
+    speakerEchoesForTurn
       ? unbudgetedContent
       : applyBotPowerResponseBudgetV1(
           unbudgetedContent,
@@ -6791,7 +6779,6 @@ export async function advanceBotcastEpisode(
     });
   const interruptionMatch =
     !producerCut &&
-    speakerRole === "guest" &&
     episode.guestKind === "bot" &&
     episode.guestPresenceMode === "present" &&
     episode.segment === "interview" &&
@@ -6803,26 +6790,28 @@ export async function advanceBotcastEpisode(
     tension.level < 2 &&
     !speakerIsMutedForTurn &&
     !speakerRepeatsForHearingPower &&
-    !speakerEchoesAddressedSpeech &&
-    !botPowerIsMutedV1(host.powers) &&
-    !botPowerEchoesAddressedSpeechV1(host.powers)
+    !botPowerIsMutedV1(peer.powers)
       ? strongestBotPowerInterruptionEffectV1(
-          host.powers,
-          (target) => botcastPowerTargetMatches(target, guest),
+          peer.powers,
+          (target) => botcastPowerTargetMatches(target, speaker),
         )
       : null;
   const powerInterruptionPlan = interruptionMatch
     ? botcastPowerInterruptionPlanV1({
         episodeId: episode.id,
-        guestTurnOrdinal: episode.messages.filter(
-          (message) => message.speakerRole === "guest",
+        targetTurnOrdinal: episode.messages.filter(
+          (message) => message.speakerRole === speakerRole,
         ).length,
         powerId: interruptionMatch.powerId,
         powerName: interruptionMatch.powerName,
         frequency: interruptionMatch.frequency,
         strength: interruptionMatch.strength,
-        guestTurnsSinceLastInterruption:
-          botcastGuestTurnsSinceLastPowerInterruption(episode),
+        targetTurnsSinceLastInterruption:
+          botcastSpeakerTurnsSinceLastPowerInterruption(
+            episode,
+            speakerRole,
+            peer.id,
+          ),
       })
     : null;
   const powerInterruptedContent = powerInterruptionPlan
@@ -6837,7 +6826,7 @@ export async function advanceBotcastEpisode(
   const voicePerformanceText =
     !speakerIsMutedForTurn &&
     !speakerRepeatsForHearingPower &&
-    !speakerEchoesAddressedSpeech &&
+    !speakerEchoesForTurn &&
     !powerInterruptedContent &&
     content === cleanGeneratedContent
       ? (performance.voicePerformanceText ??
@@ -6924,8 +6913,8 @@ export async function advanceBotcastEpisode(
               effect: "interruption",
               powerId: powerInterruptionPlan.powerId,
               powerName: powerInterruptionPlan.powerName,
-              interruptingBotId: host.id,
-              interruptedBotId: guest.id,
+              interruptingBotId: peer.id,
+              interruptedBotId: speaker.id,
               frequency: powerInterruptionPlan.frequency,
               strength: powerInterruptionPlan.strength,
               targetProgress: powerInterruptionPlan.targetProgress,

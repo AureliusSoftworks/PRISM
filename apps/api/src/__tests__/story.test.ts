@@ -666,7 +666,7 @@ describe("Story API helpers", () => {
     assert.equal(boundedScene?.narration, "Fine.");
   });
 
-  it("hard-echoes the prior visible Story scene for powered speakers", async () => {
+  it("hard-echoes the prior bot-authored Story scene for powered speakers", async () => {
     const db = createTestDb();
     seedBot(db, "bot-a", "Ada");
     seedBot(db, "bot-b", "Bert");
@@ -695,8 +695,19 @@ describe("Story API helpers", () => {
       model: "test-model",
     });
 
+    const episode = JSON.parse(episodeJson()) as {
+      scenes: Array<{
+        speakerBotId?: string;
+        speakerName?: string;
+        spritePose?: string;
+        narration: string;
+      }>;
+    };
+    episode.scenes[0]!.speakerBotId = "bot-a";
+    episode.scenes[0]!.speakerName = "Ada";
+    episode.scenes[0]!.spritePose = "speaking";
     const generated = await generateStorySessionEpisode(db, "user-1", created.id, {
-      provider: new SequenceProvider([episodeJson()]),
+      provider: new SequenceProvider([JSON.stringify(episode)]),
       providerName: "local",
       model: "test-model",
       bots,
@@ -710,6 +721,115 @@ describe("Story API helpers", () => {
       scenes[echoSceneIndex - 1]?.narration,
     );
     assert.equal(scenes[echoSceneIndex]?.spritePose, "speaking");
+  });
+
+  it("lets an echo-bound Story bot originate its first line when nobody spoke before it", async () => {
+    const db = createTestDb();
+    seedBot(db, "bot-a", "Ada");
+    seedBot(db, "bot-b", "Bert");
+    const name = "Echo";
+    const intent = "Echo whatever is addressed to this bot and say nothing else.";
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'bot-b'").run(JSON.stringify([{
+      version: 1,
+      id: "echo-opening",
+      name,
+      intent,
+      enabled: true,
+      compileStatus: "ready",
+      compiled: {
+        version: 1,
+        sourceHash: botPowerSourceHashV1(name, intent),
+        selfCue: "Repeat addressed speech exactly.",
+        observerCue: "The sender may react with confusion.",
+        effects: [{ type: "echo_addressed" }],
+        ruleLabels: ["Echoes addressed speech"],
+      },
+    }]));
+    const bots = loadStoryBotProfiles(db, "user-1", ["bot-a", "bot-b"]);
+    const created = createStorySession(db, "user-1", {
+      botIds: ["bot-a", "bot-b"],
+      provider: "local",
+      model: "test-model",
+    });
+    const source = JSON.parse(episodeJson()) as {
+      scenes: Array<{ speakerBotId?: string; narration: string }>;
+    };
+    const originalOpening = source.scenes.find(
+      (scene) => scene.speakerBotId === "bot-b",
+    )!.narration;
+
+    const generated = await generateStorySessionEpisode(db, "user-1", created.id, {
+      provider: new SequenceProvider([JSON.stringify(source)]),
+      providerName: "local",
+      model: "test-model",
+      bots,
+    });
+    const opening = generated.episode?.scenes.find(
+      (scene) => scene.speakerBotId === "bot-b",
+    );
+
+    assert.equal(opening?.narration, originalOpening);
+    assert.equal(opening?.spritePose, "speaking");
+  });
+
+  it("adapts an interruptive Story bot into a replay-stable cutoff", async () => {
+    const db = createTestDb();
+    seedBot(db, "bot-a", "Ada");
+    seedBot(db, "bot-b", "Bert");
+    const name = "Interrupting Tom";
+    const intent = "Aggressively interrupts anyone he talks to whenever possible.";
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'bot-b'").run(JSON.stringify([{
+      version: 1,
+      id: "interrupting-story",
+      name,
+      intent,
+      enabled: true,
+      compileStatus: "ready",
+      compiled: {
+        version: 1,
+        sourceHash: botPowerSourceHashV1(name, intent),
+        selfCue: "Cut in quickly.",
+        observerCue: "Tom frequently interrupts.",
+        effects: [{
+          type: "interruption",
+          frequency: "frequent",
+          strength: "large",
+          targets: [{ kind: "all" }],
+        }],
+        ruleLabels: ["Interrupts"],
+      },
+    }]));
+    const bots = loadStoryBotProfiles(db, "user-1", ["bot-a", "bot-b"]);
+    const created = createStorySession(db, "user-1", {
+      botIds: ["bot-a", "bot-b"],
+      provider: "local",
+      model: "test-model",
+    });
+    const source = JSON.parse(episodeJson()) as {
+      scenes: Array<{
+        speakerBotId?: string;
+        speakerName?: string;
+        spritePose?: string;
+        narration: string;
+      }>;
+    };
+    source.scenes[0]!.speakerBotId = "bot-a";
+    source.scenes[0]!.speakerName = "Ada";
+    source.scenes[0]!.spritePose = "speaking";
+    source.scenes[0]!.narration =
+      "Ada begins explaining how the projection crossed the atrium, changed the lock, mapped the archive, and exposed the dangerous route beneath the glass floor before anyone could stop her.";
+
+    const generated = await generateStorySessionEpisode(db, "user-1", created.id, {
+      provider: new SequenceProvider([JSON.stringify(source)]),
+      providerName: "local",
+      model: "test-model",
+      bots,
+    });
+    const interrupted = generated.episode?.scenes[0]?.narration ?? "";
+
+    assert.match(interrupted, /—$/u);
+    assert.equal(source.scenes[0]!.narration.startsWith(interrupted.slice(0, -1)), true);
+    assert.doesNotMatch(interrupted, /before anyone could stop her/u);
   });
 
   it("compiles llama3.2 compact Story outlines into playable manifests", async () => {

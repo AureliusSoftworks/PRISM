@@ -3857,6 +3857,68 @@ describe("Coffee group foundation", () => {
     assert.equal(assistant?.content, addressed);
   });
 
+  it("lets an echo-bound Coffee bot originate one opening, then silences source-less repeats", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    const conversationId = "conv-power-echo-opening";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+    const name = "Echo";
+    const intent = "Echo whatever is addressed to this bot and say nothing else.";
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = ?").run(
+      JSON.stringify([{
+        version: 1,
+        id: "echo-opening",
+        name,
+        intent,
+        enabled: true,
+        compileStatus: "ready",
+        compiled: {
+          version: 1,
+          sourceHash: botPowerSourceHashV1(name, intent),
+          selfCue: "Repeat addressed speech exactly.",
+          observerCue: "The sender may react with confusion.",
+          effects: [{ type: "echo_addressed" }],
+          ruleLabels: ["Echoes addressed speech"],
+        },
+      }]),
+      ALICE.id,
+    );
+    await createCoffeeConversationWithId(db, userId, conversationId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+      durationMinutes: 10,
+      initialTopic: "What makes an original?",
+    });
+    const opening = "Originality begins with choosing what deserves an echo.";
+
+    const firstTurn = await withMockedCoffeeFetch(opening, () =>
+      processCoffeeAutonomousTurn(
+        db,
+        userId,
+        conversationId,
+        { preferredProvider: "local", sessionRemainingMs: 120_000 },
+        false,
+        ALICE.id,
+      ),
+    );
+    const secondTurn = await withMockedCoffeeFetch(
+      "This generated second source-less line must not appear.",
+      () => processCoffeeAutonomousTurn(
+        db,
+        userId,
+        conversationId,
+        { preferredProvider: "local", sessionRemainingMs: 120_000 },
+        false,
+        ALICE.id,
+      ),
+    );
+
+    assert.equal(firstTurn.speakerBotId, ALICE.id);
+    assert.equal(firstTurn.conversation.messages.at(-1)?.content, opening);
+    assert.equal(secondTurn.speakerBotId, ALICE.id);
+    assert.equal(secondTurn.conversation.messages.at(-1)?.content, "...");
+  });
+
   it("repeats a saved Coffee line without generation and persists one speaker mood loss", async () => {
     const db = createCoffeeTestDb();
     const userId = "user-1";
@@ -8022,6 +8084,13 @@ describe("coffee prompt leak cleanup", () => {
     );
     assert.equal(
       sanitizeCoffeeTableReply(
+        "antennae droop, claws go still on the table That's the thing though—you built the Krusty Krab.",
+        "Plankton"
+      ),
+      "*antennae droop, claws go still on the table* That's the thing though—you built the Krusty Krab."
+    );
+    assert.equal(
+      sanitizeCoffeeTableReply(
         "Mr. Krabs, drums claws on the table Now hold on just a barnacle-encrusted minute.",
         "Mr. Krabs"
       ),
@@ -8331,6 +8400,17 @@ describe("coffee prompt leak cleanup", () => {
     assert.equal(coffeeReplyLooksUnfinished("The smoothness of this stone is a testament to craft... pa"), true);
     assert.equal(coffeeReplyLooksUnfinished("Tell"), true);
     assert.equal(coffeeReplyLooksUnfinished("This"), true);
+    assert.equal(
+      coffeeReplyLooksUnfinished("Huh. Kid didn't even finish his drink. t"),
+      true
+    );
+    assert.equal(
+      sanitizeCoffeeTableReply(
+        "Huh. Kid didn't even finish his drink. t",
+        "Mr. Krabs"
+      ),
+      ""
+    );
     assert.equal(coffeeReplyLooksUnfinished("The olive gro"), true);
     assert.equal(coffeeReplyLooksUnfinished("Bows his head slightly I concur. Takes"), true);
     assert.equal(
@@ -8377,6 +8457,19 @@ describe("coffee prompt leak cleanup", () => {
       ),
       "Session synopsis: The table circled manipulation and trust while Vader pressed for evidence and Freud overextended the psychological frame."
     );
+  });
+
+  it("bounds long session synopses at a natural sentence boundary", () => {
+    const sentence =
+      "The table kept returning to one concrete rule while each speaker tested its cost in a different relationship.";
+    const synopsis = normalizeCoffeeSessionSynopsis(
+      Array.from({ length: 12 }, () => sentence).join(" ")
+    );
+
+    assert.ok(synopsis);
+    assert.ok(synopsis.length <= 900);
+    assert.match(synopsis, /\.$/u);
+    assert.doesNotMatch(synopsis, /\S\.\.\.$/u);
   });
 
   it("rejects session synopses that mention internal account metadata", () => {
@@ -10417,6 +10510,15 @@ describe("computePlayerInterruptionConsequences", () => {
     );
 
     assert.equal(snippet, "Plankton, The intere—");
+  });
+
+  it("does not stack an interruption dash onto an existing em-dash turn", () => {
+    const snippet = interruptedSnippetFromTokenCount(
+      "A business that bleeds money does that because it started bleeding—somewhere.",
+      11
+    );
+
+    assert.equal(snippet, "A business that bleeds money does that because it started bleeding—");
   });
 
   it("applies stronger deltas to interrupted bot and light third-party friction", () => {

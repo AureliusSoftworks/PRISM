@@ -25966,7 +25966,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   left: var(--zen-live-bot-face-x, 50%);
   top: var(--zen-live-bot-face-y, 50%);
   z-index: 6;
-  transform: translate(-50%, -50%) scale(var(--zen-live-bot-face-scale, 1));
+  transform: translate(-50%, -50%) scale(var(--zen-live-bot-face-scale, 1))
+    scaleX(var(--zen-live-bot-face-layer-scale-x, 1));
   transform-origin: 50% 50%;
   display: grid;
   place-items: center;

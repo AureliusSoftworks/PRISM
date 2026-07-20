@@ -578,6 +578,31 @@ describe("bot-locked Chat lane", () => {
     assert.equal(result.conversation.messages.at(-1)?.zenDisplay, undefined);
   });
 
+  it("lets an echo-bound Chat bot originate its starter opening", async () => {
+    const db = createChatTestDb();
+    const opening = "I am here. What shall we turn over first?";
+    installChatFetchStub(opening);
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Begin the conversation.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botId: "bot-1",
+        incognito: false,
+        mode: "chat",
+        starterPrompt: true,
+        botSystemPrompt: "You are the selected bot.",
+        botPowerEchoAddressed: true,
+      },
+    );
+
+    assert.equal(result.conversation.messages.at(-1)?.content, opening);
+  });
+
   it("engine-bounds hard minimal Chat prose without cutting structured answers", async () => {
     const db = createChatTestDb();
     installChatFetchStub("Fine. I could explain the whole history. It would take hours.");

@@ -49,6 +49,13 @@ describe("mode tutorials", () => {
     );
   });
 
+  it("teaches the Prism house sound and its character alternatives", () => {
+    const voiceCopy = MODE_TUTORIALS.zen.steps[3]?.body ?? "";
+    assert.match(voiceCopy, /subtle Prism effect is the default house sound/u);
+    assert.match(voiceCopy, /Clean for untouched playback/u);
+    assert.match(voiceCopy, /Resonance for a darker, weightier mechanical double/u);
+  });
+
   it("explains relative avatar-size Powers across live bot modes", () => {
     assert.match(MODE_TUTORIALS.zen.steps[0]?.body ?? "", /larger or smaller/u);
     assert.match(MODE_TUTORIALS.chat.steps[0]?.body ?? "", /larger or smaller/u);
@@ -76,7 +83,7 @@ describe("mode tutorials", () => {
       signalCopy,
       /Cut show stops the current line[^.]*quick, tactful sign-off[^.]*archives the recording/u,
     );
-    assert.match(signalCopy, /short, locally synthesized outro/u);
+    assert.match(signalCopy, /short, locally synthesized closing card/u);
     assert.equal(
       MODE_TUTORIALS.botcast.steps[1]?.heading,
       "Shape the show’s identity",
@@ -402,7 +409,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
-      /words they have finished saying/u,
+      /studio performance own the live screen/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
@@ -466,7 +473,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
-      /end card waits for you/u,
+      /fade the stage to black or white[\s\S]*closing card appears and waits for you/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
@@ -474,7 +481,15 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
-      /asterisks in the transcript/u,
+      /asterisks in the saved transcript/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      /full transcript stays out of the initial play and returns with playback/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      /large bottom cue dock/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[8]?.body ?? "",
@@ -503,6 +518,10 @@ describe("mode tutorials", () => {
     assert.match(
       MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
       /no post-episode camera controls/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
+      /restores the full transcript beside the saved camera cut/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
@@ -604,7 +623,7 @@ describe("mode tutorials", () => {
 
     assert.deepEqual(chooseRelationship, {
       heading: "Choose a relationship",
-      body: "Choose PRISM or a persona to enter that relationship’s Home. Ready Powers stay active with that persona here and across PRISM; a muted persona can still act, but only answers with ... and never speaks aloud, while an echo-bound persona repeats the latest message addressed to them exactly. Physical-size Powers render a persona slightly larger or smaller without changing the room layout, and Microscopic combines the smaller form with an unseen idle presence. Loud and Quiet Powers apply a small fixed voice-volume and text-size shift; Quiet can go unheard on half its turns and lose a little mood, while Loud overrides small, Microscopic, and invisible presentation. A hard bare-minimum or brief Power is engine-bounded even if the model tries to elaborate. Back or Escape returns you to the wider Library or saved group grid exactly where you left it. Inviting a guest keeps you in the current Home.",
+      body: "Choose PRISM or a persona to enter that relationship’s Home. Ready Powers stay active with that persona here and across PRISM; a muted persona can still act, but only answers with ... and never speaks aloud, while an echo-bound persona may originate one opening if nobody has addressed them yet, then repeats the latest addressed message exactly. Physical-size Powers render a persona slightly larger or smaller without changing the room layout, and Microscopic combines the smaller form with an unseen idle presence. Loud and Quiet Powers apply a small fixed voice-volume and text-size shift; Quiet can go unheard on half its turns and lose a little mood, while Loud overrides small, Microscopic, and invisible presentation. A hard bare-minimum or brief Power is engine-bounded even if the model tries to elaborate. Back or Escape returns you to the wider Library or saved group grid exactly where you left it. Inviting a guest keeps you in the current Home.",
       clickLabel: "a PRISM or persona tile",
       targetSelector: '[data-tutorial-target="chat-bot-picker"]',
     });
@@ -640,14 +659,18 @@ describe("mode tutorials", () => {
   it("teaches exact echo Powers in every active bot-speaking lane", () => {
     assert.match(MODE_TUTORIALS.zen.steps[0]?.body ?? "", /echo-bound persona.*exactly/u);
     assert.match(MODE_TUTORIALS.chat.steps[0]?.body ?? "", /echo-bound bot.*adds nothing/u);
-    assert.match(MODE_TUTORIALS.coffee.steps[0]?.body ?? "", /repeat the exact user or bot line/u);
+    assert.match(MODE_TUTORIALS.coffee.steps[0]?.body ?? "", /repeats the exact user or bot line/u);
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
-      /immediately preceding on-air cast line exactly.*never leak/u,
+      /originate one required opening.*immediately preceding on-air bot line exactly.*never leak/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
-      /echo-bound bot is the host.*bot guest takes the opening and closing/u,
+      /normal host owns that opening even when echo-bound/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.coffee.steps[0]?.body ?? "",
+      /echo-bound bot originate one opening/u,
     );
   });
 
@@ -850,7 +873,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
-      /two echo-bound bots cannot be booked together because neither can originate that opening/u,
+      /both cast members are echo-bound[\s\S]*host closes by repeating the guest's last line/u,
     );
     assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /observable Power consequences through their own personality/u);
     assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /never exposes a cause they cannot perceive/u);
@@ -871,11 +894,15 @@ describe("mode tutorials", () => {
     const controlRoom = MODE_TUTORIALS.botcast.steps.find(
       (step) => step.heading === "Produce from the control room",
     )?.body ?? "";
-    assert.match(controlRoom, /interruptive host Power/u);
+    assert.match(controlRoom, /interruptive cast member’s Power/u);
     assert.match(controlRoom, /frequency, strength, target, and cooldown/u);
     assert.match(
       controlRoom,
       /human Producer speech, warnings, departures, wraps, closings, and hard speech restrictions stay protected/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.coffee.steps[0]?.body ?? "",
+      /interruption Power.*every resolved target.*short cooldown/u,
     );
   });
 });

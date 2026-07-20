@@ -6306,8 +6306,11 @@ export async function processChatMessage(
   const botPowerMutedTurn = settings.botPowerMuted === true;
   const botPowerQuietIgnoredTurn = settings.botPowerQuietIgnored === true;
   const botPowerEchoTurn = settings.botPowerEchoAddressed === true;
+  const botPowerEchoOpeningTurn =
+    botPowerEchoTurn && (isStarterPrompt || personaTransitionTurn);
+  const botPowerEchoEnforcedTurn = botPowerEchoTurn && !botPowerEchoOpeningTurn;
   const botPowerResponseBudgetTurn = settings.botPowerResponseBudget ?? null;
-  const botPowerHardResponseTurn = botPowerMutedTurn || botPowerEchoTurn;
+  const botPowerHardResponseTurn = botPowerMutedTurn || botPowerEchoEnforcedTurn;
   const commandCenterPromptTurn =
     settings.commandCenterPrompt === true || Boolean(settings.promptShortcut);
   const promptInputOverride =
@@ -6596,7 +6599,7 @@ export async function processChatMessage(
       !botPowerHardResponseTurn && isStarterPrompt && Boolean(parsedAssistant.sendGeneratedImage?.prompt?.trim());
     let assistantDisplay = botPowerMutedTurn
       ? applyBotPowerMuteResponseV1(assistantDisplayRaw)
-      : botPowerEchoTurn
+      : botPowerEchoEnforcedTurn
         ? applyBotPowerEchoResponseV1(isStarterPrompt ? "" : message)
       : isStarterPrompt && !starterSendGeneratedImageRequested
       ? enforceStarterOpeningQuestion(assistantDisplayRaw, [])
@@ -7790,7 +7793,7 @@ export async function processChatMessage(
     !botPowerHardResponseTurn && isStarterPrompt && Boolean(parsedAssistant.sendGeneratedImage?.prompt?.trim());
   let assistantDisplay = botPowerMutedTurn
     ? applyBotPowerMuteResponseV1(assistantDisplayRaw)
-    : botPowerEchoTurn
+    : botPowerEchoEnforcedTurn
       ? applyBotPowerEchoResponseV1(
           personaTransitionTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn || isStarterPrompt
             ? ""
