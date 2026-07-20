@@ -107,7 +107,7 @@ describe("bot marketplace previews", () => {
     );
   });
 
-  it("plays all three authored samples without mutating Marketplace bots", () => {
+  it("plays all four authored samples without mutating Marketplace bots", () => {
     const showcaseSource = pageSource.slice(
       pageSource.indexOf("const renderBotHubShowcase"),
       pageSource.indexOf("const renderSharedPanels"),
@@ -116,6 +116,7 @@ describe("bot marketplace previews", () => {
       showcaseSource,
       /isMarketplacePreview[\s\S]*?playBotHubVoicePreview\(bot, "english"\)[\s\S]*?regenerateBotHubAudioSample\(bot\)/,
     );
+    assert.match(showcaseSource, /playBotHubVoicePreview\(bot, "premium"\)/);
     assert.match(showcaseSource, /playBotHubVoicePreview\(bot, "babble"\)/);
     assert.match(showcaseSource, /playBotHubVoicePreview\(bot, "bottish"\)/);
     assert.match(

@@ -7,6 +7,7 @@ import {
 } from "./botPower.ts";
 
 import {
+  BOTCAST_ECHO_DASHBOARD_BLURB_FALLBACK,
   BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT,
   BOTCAST_DEFAULT_STUDIO_ATMOSPHERE_MIX,
   BOTCAST_DEFAULT_STUDIO_LAYOUT,
@@ -43,6 +44,7 @@ import {
   botcastSnapshotPowersForRoleV1,
   botcastVoiceMoodForTension,
   isBotcastFallbackStudioAccentVariant,
+  isBotcastEchoDashboardBlurb,
   normalizeBotcastStudioLayout,
   normalizeBotcastStudioAtmosphereMix,
   normalizeBotcastVoiceLevel,
@@ -52,6 +54,23 @@ import {
 } from "./botcast.ts";
 
 describe("Signal fallback studio accents", () => {
+  it("recognizes the one Echo dashboard joke across persona wording", () => {
+    assert.equal(
+      BOTCAST_ECHO_DASHBOARD_BLURB_FALLBACK,
+      "I always have an original thing to say.",
+    );
+    assert.equal(
+      isBotcastEchoDashboardBlurb(
+        "Naturally, my originality remains entirely without precedent.",
+      ),
+      true,
+    );
+    assert.equal(
+      isBotcastEchoDashboardBlurb("Here is another unrelated dashboard quip."),
+      false,
+    );
+  });
+
   it("keeps host interruption bridges stable and trims guests to what aired", () => {
     const lines = botcastHostInterruptionLinesForSeed("host-1");
     assert.equal(lines.length, 6);

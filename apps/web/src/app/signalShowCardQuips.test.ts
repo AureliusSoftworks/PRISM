@@ -43,4 +43,32 @@ describe("Signal show-card fallback quips", () => {
 
     assert.deepEqual(blurbs, ["..."]);
   });
+
+  it("repeats one persona-shaped originality claim for an echo host", () => {
+    const blurbs = signalShowCardBlurbs(
+      {
+        dashboardBlurbs: [
+          "I submit this wholly original observation to the record. Again.",
+        ],
+      },
+      false,
+      true,
+    );
+
+    assert.deepEqual(blurbs, [
+      "I submit this wholly original observation to the record. Again.",
+    ]);
+  });
+
+  it("falls back to the one canonical joke for stale echo-host rotations", () => {
+    const blurbs = signalShowCardBlurbs(
+      {
+        dashboardBlurbs: ["Old line one.", "Old line two."],
+      },
+      false,
+      true,
+    );
+
+    assert.deepEqual(blurbs, ["I always have an original thing to say."]);
+  });
 });

@@ -50,6 +50,7 @@ import type {
 } from "@localai/shared";
 import {
   BOTCAST_DASHBOARD_BLURB_FALLBACKS,
+  BOTCAST_ECHO_DASHBOARD_BLURB_FALLBACK,
   BOTCAST_DIRECTOR_MIN_SHOT_MS,
   BOTCAST_LOCAL_INTRO_DURATION_MS,
   BOTCAST_PRODUCER_GUEST_ID,
@@ -97,6 +98,7 @@ import {
   botcastVoiceMoodForTension,
   buildBotPowersPromptBlock,
   isBotcastFallbackStudioAccentVariant,
+  isBotcastEchoDashboardBlurb,
   normalizeVoiceDeliveryMood,
   normalizeBotcastStudioLayout,
   normalizeBotcastStudioAtmosphereMix,
@@ -111,6 +113,7 @@ import {
   defaultModelIdForProvider,
   openAiModelUsesMaxCompletionTokens,
   selectProvider,
+  type GenerateOptions,
   type LlmProvider,
   type ProviderMessage,
   type ProviderName,
@@ -141,6 +144,200 @@ const BOTCAST_SHOW_HOST_CHAT_INPUT_MAX = 6_000;
 const BOTCAST_SHOW_HOST_CHAT_RESPONSE_MAX = 12_000;
 const BOTCAST_SHOW_HOST_CHAT_EPISODE_LIMIT = 12;
 const BOTCAST_SHOW_HOST_CHAT_ARCHIVE_MAX = 48_000;
+const SIGNAL_ONLINE_TURN_ATTEMPT_TIMEOUT_MS = 30_000;
+const SIGNAL_ONLINE_TURN_TOTAL_TIMEOUT_MS = 45_000;
+const SIGNAL_ONLINE_TURN_RETRY_DELAY_MS = 250;
+
+export interface SignalOnlineTurnAttemptV1 {
+  provider: ProviderName;
+  model: string;
+  durationMs: number;
+  outcome: "failed" | "succeeded";
+  reason?: "provider_error" | "timeout";
+  httpStatus?: number;
+}
+
+export interface SignalOnlineTurnResult {
+  value: string;
+  attempts: SignalOnlineTurnAttemptV1[];
+  totalDurationMs: number;
+}
+
+export class SignalOnlineTurnError extends Error {
+  public readonly attempts: SignalOnlineTurnAttemptV1[];
+  public override readonly cause: unknown;
+
+  public constructor(
+    attempts: SignalOnlineTurnAttemptV1[],
+    cause: unknown,
+  ) {
+    super(
+      cause instanceof Error
+        ? cause.message
+        : "The Signal ONLINE turn could not reach its provider.",
+    );
+    this.name = "SignalOnlineTurnError";
+    this.attempts = attempts;
+    this.cause = cause;
+  }
+}
+
+function signalOnlineProviderHttpStatus(error: unknown): number | null {
+  if (!(error instanceof Error)) return null;
+  const match = error.message.match(/(?:\(|HTTP\s+)(\d{3})\)?/iu);
+  const status = Number(match?.[1]);
+  return Number.isInteger(status) && status >= 100 && status <= 599
+    ? status
+    : null;
+}
+
+function signalOnlineProviderFailureIsRetryable(
+  error: unknown,
+  timedOut: boolean,
+): boolean {
+  if (timedOut) return true;
+  const status = signalOnlineProviderHttpStatus(error);
+  if (status !== null) {
+    return (
+      status === 408 ||
+      status === 409 ||
+      status === 425 ||
+      status === 429 ||
+      status >= 500
+    );
+  }
+  if (!(error instanceof Error)) return false;
+  if (/API key|authentication|not configured|does not exist|invalid model/iu.test(error.message)) {
+    return false;
+  }
+  return (
+    error.name === "TypeError" ||
+    error.name === "TimeoutError" ||
+    /network|fetch failed|could not reach|timed? out|temporarily unavailable|overloaded/iu.test(
+      error.message,
+    )
+  );
+}
+
+function signalOnlineTimeoutError(): Error {
+  const error = new Error("Signal ONLINE provider attempt timed out.");
+  error.name = "TimeoutError";
+  return error;
+}
+
+/**
+ * Keeps an explicit ONLINE route on its selected provider/model while giving
+ * one transient upstream failure a bounded retry. This is intentionally not
+ * AUTO fallback: privacy and model identity remain unchanged.
+ */
+export async function runSignalOnlineTurn(args: {
+  provider: LlmProvider;
+  providerName: ProviderName;
+  model: string;
+  messages: ProviderMessage[];
+  options: GenerateOptions;
+  attemptTimeoutMs?: number;
+  totalTimeoutMs?: number;
+  retryDelayMs?: number;
+  maxAttempts?: number;
+  now?: () => number;
+}): Promise<SignalOnlineTurnResult> {
+  const now = args.now ?? Date.now;
+  const startedAt = now();
+  const attemptTimeoutMs = Math.max(
+    1,
+    Math.round(
+      args.attemptTimeoutMs ?? SIGNAL_ONLINE_TURN_ATTEMPT_TIMEOUT_MS,
+    ),
+  );
+  const totalTimeoutMs = Math.max(
+    1,
+    Math.round(args.totalTimeoutMs ?? SIGNAL_ONLINE_TURN_TOTAL_TIMEOUT_MS),
+  );
+  const retryDelayMs = Math.max(
+    0,
+    Math.round(args.retryDelayMs ?? SIGNAL_ONLINE_TURN_RETRY_DELAY_MS),
+  );
+  const maxAttempts = Math.max(1, Math.min(2, args.maxAttempts ?? 2));
+  const deadline = startedAt + totalTimeoutMs;
+  const attempts: SignalOnlineTurnAttemptV1[] = [];
+  let lastError: unknown = new Error("Signal ONLINE turn did not start.");
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    if (args.options.signal?.aborted) throw args.options.signal.reason;
+    const attemptStartedAt = now();
+    const remainingMs = deadline - attemptStartedAt;
+    if (remainingMs <= 0) break;
+    const controller = new AbortController();
+    const timeoutMs = Math.min(attemptTimeoutMs, remainingMs);
+    let timedOut = false;
+    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timeoutHandle = setTimeout(() => {
+        timedOut = true;
+        const error = signalOnlineTimeoutError();
+        controller.abort(error);
+        reject(error);
+      }, timeoutMs);
+    });
+    const signal = args.options.signal
+      ? AbortSignal.any([args.options.signal, controller.signal])
+      : controller.signal;
+    try {
+      const value = await Promise.race([
+        args.provider.generateResponse(args.messages, {
+          ...args.options,
+          signal,
+        }),
+        timeout,
+      ]);
+      const trace: SignalOnlineTurnAttemptV1 = {
+        provider: args.providerName,
+        model: args.model,
+        durationMs: Math.max(0, Math.round(now() - attemptStartedAt)),
+        outcome: "succeeded",
+      };
+      attempts.push(trace);
+      return {
+        value,
+        attempts,
+        totalDurationMs: Math.max(0, Math.round(now() - startedAt)),
+      };
+    } catch (error) {
+      if (args.options.signal?.aborted) throw error;
+      lastError = error;
+      const httpStatus = signalOnlineProviderHttpStatus(error);
+      attempts.push({
+        provider: args.providerName,
+        model: args.model,
+        durationMs: Math.max(0, Math.round(now() - attemptStartedAt)),
+        outcome: "failed",
+        reason: timedOut ? "timeout" : "provider_error",
+        ...(httpStatus !== null ? { httpStatus } : {}),
+      });
+      if (
+        attempt + 1 >= maxAttempts ||
+        !signalOnlineProviderFailureIsRetryable(error, timedOut)
+      ) {
+        break;
+      }
+      const remainingAfterAttemptMs = deadline - now();
+      if (remainingAfterAttemptMs <= 0) break;
+      const delayMs = Math.min(retryDelayMs, remainingAfterAttemptMs);
+      if (delayMs > 0) {
+        await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+      }
+    } finally {
+      if (timeoutHandle !== null) clearTimeout(timeoutHandle);
+    }
+  }
+
+  throw new SignalOnlineTurnError(attempts, lastError);
+}
+
+export function signalOnlineTurnHttpStatus(error: SignalOnlineTurnError): 502 | 504 {
+  return error.attempts.at(-1)?.reason === "timeout" ? 504 : 502;
+}
 
 export function signalVisualOnlyListenerReaction(
   plan: ListenerReactionPlanV1,
@@ -478,14 +675,34 @@ const BOTCAST_MUTED_DASHBOARD_BLURB_DIRECTIONS = [
   "Do not write silent-themed prose, stage directions, jokes, captions, vocalizations, or alternatives for this field.",
 ] as const;
 
+const BOTCAST_ECHO_DASHBOARD_BLURB_DIRECTIONS = [
+  "The host has a hard Copycat/Echo Power.",
+  `dashboardBlurbs must contain exactly one line: a first-person, persona-voiced variation of ${JSON.stringify(BOTCAST_ECHO_DASHBOARD_BLURB_FALLBACK)}.`,
+  "Keep the word 'original' in the line so the contradiction remains unmistakable: the host boasts about originality while this same blurb repeats forever.",
+  "Match the host's own diction, rhythm, temperament, and sense of humor. Do not return several alternatives or add any other dashboard line.",
+] as const;
+
 function botcastCanonicalSilentHostLines(): string[] {
   return [BOT_POWER_CANONICAL_SILENCE_V1];
+}
+
+function botcastEchoHostLines(lines: readonly string[] = []): string[] {
+  const normalized = normalizeDashboardBlurbs(lines);
+  return normalized.length === 1 && isBotcastEchoDashboardBlurb(normalized[0])
+    ? [normalized[0]!]
+    : [BOTCAST_ECHO_DASHBOARD_BLURB_FALLBACK];
 }
 
 function botcastLinesAreCanonicalSilence(lines: readonly string[]): boolean {
   return (
     lines.length === 1 && lines[0] === BOT_POWER_CANONICAL_SILENCE_V1
   );
+}
+
+function botcastLinesAreEchoOriginalityClaim(
+  lines: readonly string[],
+): boolean {
+  return lines.length === 1 && isBotcastEchoDashboardBlurb(lines[0]);
 }
 
 function defaultShowPremise(host: BotcastBotProfile): string {
@@ -508,6 +725,7 @@ const BOTCAST_STUDIO_STAGE_COMPOSITION_PROMPT = [
   "Stage exactly two adult-scale interview chairs centered at 22.5% and 77.5% of the frame width, with their backs contained in the lower third; keep the furniture and surrounding architecture at believable human scale.",
   "Leave the full seated-bot silhouette in each chair zone unobstructed because Signal composites one live bot into each chair.",
   "Build exactly two compact, believable studio microphones into the scene, positioned just inward of the chairs around 38% and 62% of frame width and below the seated bots' face zones. No microphone, stand, boom arm, pop filter, or cable may cross either chair center or cover the seated-bot silhouettes.",
+  "Add one low, broad shared table across the inner gap between the chairs, designed in the same persona-specific material language as the set. Its clear horizontal tabletop must visibly extend beneath both runtime cup bases centered at 36.25% and 63.75% of frame width, meeting those bases around 95% of frame height and showing enough depth and front edge to read as solid furniture; keep the table below both seated-bot silhouettes.",
   "Do not include coffee cups, mugs, tumblers, drinking glasses, or other drinkware; Signal adds any drinks separately at runtime.",
 ].join(" ");
 
@@ -1236,9 +1454,13 @@ function serializeShowVisuals(
 function mapShow(row: BotcastShowRow): BotcastShow {
   const atmospheres = parseAtmospheres(row.atmosphere_json);
   const hostIsMuted = botPowerIsMutedV1(row.host_powers_json);
+  const hostEchoesAddressedSpeech =
+    !hostIsMuted && botPowerEchoesAddressedSpeechV1(row.host_powers_json);
   const dashboardBlurbs = hostIsMuted
     ? botcastCanonicalSilentHostLines()
-    : atmospheres.dashboardBlurbs;
+    : hostEchoesAddressedSpeech
+      ? botcastEchoHostLines(atmospheres.dashboardBlurbs)
+      : atmospheres.dashboardBlurbs;
   const hostInterruptionLines = hostIsMuted
     ? botcastCanonicalSilentHostLines()
     : atmospheres.hostInterruptionLines.length
@@ -1313,12 +1535,23 @@ function repairBotcastShowHostAuthoredLines(
 ): void {
   const stored = parseAtmospheres(row.atmosphere_json);
   const hostIsMuted = botPowerIsMutedV1(row.host_powers_json);
+  const hostEchoesAddressedSpeech =
+    !hostIsMuted && botPowerEchoesAddressedSpeechV1(row.host_powers_json);
   const needsInterruptionBackfill = stored.hostInterruptionLines.length === 0;
   const needsSilentHostRepair =
     hostIsMuted &&
     (!botcastLinesAreCanonicalSilence(stored.dashboardBlurbs) ||
       !botcastLinesAreCanonicalSilence(stored.hostInterruptionLines));
-  if (!needsInterruptionBackfill && !needsSilentHostRepair) return;
+  const needsEchoHostRepair =
+    hostEchoesAddressedSpeech &&
+    !botcastLinesAreEchoOriginalityClaim(stored.dashboardBlurbs);
+  if (
+    !needsInterruptionBackfill &&
+    !needsSilentHostRepair &&
+    !needsEchoHostRepair
+  ) {
+    return;
+  }
   db.prepare(
     "UPDATE botcast_shows SET atmosphere_json = ? WHERE id = ? AND user_id = ?",
   ).run(
@@ -1967,6 +2200,8 @@ export function createBotcastShow(
     reservedDesigns: logoDesignsForUser(db, userId),
   });
   const hostIsMuted = botPowerIsMutedV1(host.powers);
+  const hostEchoesAddressedSpeech =
+    !hostIsMuted && botPowerEchoesAddressedSpeechV1(host.powers);
   db.prepare(
     `INSERT INTO botcast_shows
       (id, user_id, host_bot_id, name, premise, hosting_style, accent_color,
@@ -1986,7 +2221,11 @@ export function createBotcastShow(
       nightAtmosphere,
       logo,
       studioIdentity,
-      hostIsMuted ? botcastCanonicalSilentHostLines() : [],
+      hostIsMuted
+        ? botcastCanonicalSilentHostLines()
+        : hostEchoesAddressedSpeech
+          ? botcastEchoHostLines()
+          : [],
       hostIsMuted
         ? botcastCanonicalSilentHostLines()
         : botcastHostInterruptionLinesForSeed(host.id),
@@ -2247,6 +2486,8 @@ export function updateBotcastShow(
   const current = getBotcastShow(db, userId, showId);
   const host = loadBotProfile(db, userId, current.hostBotId);
   const hostIsMuted = botPowerIsMutedV1(host.powers);
+  const hostEchoesAddressedSpeech =
+    !hostIsMuted && botPowerEchoesAddressedSpeechV1(host.powers);
   const name = cleanText(patch.name, current.name, BOTCAST_SHOW_NAME_MAX);
   const premise = cleanText(patch.premise, current.premise);
   const hostingStyle = cleanText(patch.hostingStyle, current.hostingStyle);
@@ -2272,9 +2513,15 @@ export function updateBotcastShow(
   );
   const dashboardBlurbs = hostIsMuted
     ? botcastCanonicalSilentHostLines()
-    : patch.dashboardBlurbs === undefined
-      ? current.dashboardBlurbs
-      : normalizeDashboardBlurbs(patch.dashboardBlurbs);
+    : hostEchoesAddressedSpeech
+      ? botcastEchoHostLines(
+          patch.dashboardBlurbs === undefined
+            ? current.dashboardBlurbs
+            : patch.dashboardBlurbs,
+        )
+      : patch.dashboardBlurbs === undefined
+        ? current.dashboardBlurbs
+        : normalizeDashboardBlurbs(patch.dashboardBlurbs);
   const hostInterruptionLines = hostIsMuted
     ? botcastCanonicalSilentHostLines()
     : patch.hostInterruptionLines === undefined
@@ -2447,6 +2694,12 @@ function validGeneratedDashboardBlurbs(
   return blurbs.length >= BOTCAST_DASHBOARD_BLURB_MIN ? blurbs : null;
 }
 
+function validGeneratedEchoDashboardBlurbs(raw: unknown): string[] | null {
+  const blurbs = normalizeDashboardBlurbs(raw);
+  const blurb = blurbs.find(isBotcastEchoDashboardBlurb);
+  return blurb ? [blurb] : null;
+}
+
 function safeGeneratedLogoThesis(
   raw: unknown,
   forbiddenNames: readonly string[],
@@ -2476,7 +2729,11 @@ function safeGeneratedLogoThesis(
   return thesis;
 }
 
-function parseGeneratedShowIdentity(raw: string, hostName = ""): {
+function parseGeneratedShowIdentity(
+  raw: string,
+  hostName = "",
+  echoDashboardBlurb = false,
+): {
   name: string;
   premise: string;
   studioIdentity?: string;
@@ -2497,10 +2754,13 @@ function parseGeneratedShowIdentity(raw: string, hostName = ""): {
       hostName,
       name,
     ]);
-    const dashboardBlurbs = validGeneratedDashboardBlurbs(
-      parsed.dashboardBlurbs,
-      BOTCAST_DASHBOARD_BLURB_FALLBACKS,
-    );
+    const dashboardBlurbs = echoDashboardBlurb
+      ? validGeneratedEchoDashboardBlurbs(parsed.dashboardBlurbs)
+      : validGeneratedDashboardBlurbs(
+          parsed.dashboardBlurbs,
+          BOTCAST_DASHBOARD_BLURB_FALLBACKS,
+        );
+    if (echoDashboardBlurb && !dashboardBlurbs) return null;
     return name && premise
       ? {
           name,
@@ -2968,6 +3228,8 @@ export async function generateBotcastShowIdentity(
   const current = getBotcastShow(db, userId, showId);
   const host = loadBotProfile(db, userId, current.hostBotId);
   const hostIsMuted = botPowerIsMutedV1(host.powers);
+  const hostEchoesAddressedSpeech =
+    !hostIsMuted && botPowerEchoesAddressedSpeechV1(host.powers);
   try {
     const selected = generationProvider(generation);
     const raw = await selected.provider.generateResponse(
@@ -2987,7 +3249,9 @@ export async function generateBotcastShowIdentity(
             "logoThesis must use no host or show name, portrait, character likeness, signature prop, lettering, initials, existing insignia, or recognizable entertainment-property imagery. Reject standalone microphones, headphones, waveforms, play buttons, RSS arcs, radio towers, vinyl records, speech bubbles, circular podcast badges, and generic audio clip art.",
             ...(hostIsMuted
               ? BOTCAST_MUTED_DASHBOARD_BLURB_DIRECTIONS
-              : BOTCAST_DASHBOARD_BLURB_DIRECTIONS),
+              : hostEchoesAddressedSpeech
+                ? BOTCAST_ECHO_DASHBOARD_BLURB_DIRECTIONS
+                : BOTCAST_DASHBOARD_BLURB_DIRECTIONS),
           ].join(" "),
         },
         {
@@ -3003,14 +3267,20 @@ export async function generateBotcastShowIdentity(
         usagePurpose: "botcast_brand",
       },
     );
-    const identity = parseGeneratedShowIdentity(raw, host.name);
+    const identity = parseGeneratedShowIdentity(
+      raw,
+      host.name,
+      hostEchoesAddressedSpeech,
+    );
     if (!identity) return { show: current, generated: false };
     return {
       show: updateBotcastShow(db, userId, showId, {
         ...identity,
         ...(hostIsMuted
           ? { dashboardBlurbs: botcastCanonicalSilentHostLines() }
-          : {}),
+          : hostEchoesAddressedSpeech
+            ? { dashboardBlurbs: botcastEchoHostLines(identity.dashboardBlurbs) }
+            : {}),
         ...(generation.preserveArtwork
           ? {}
           : { regenerateAtmosphere: true, regenerateLogo: true }),
@@ -3047,6 +3317,80 @@ export async function generateBotcastShowDashboardBlurbs(
       recovered: false,
       failureReason: null,
     };
+  }
+  if (botPowerEchoesAddressedSpeechV1(host.powers)) {
+    let providerErrors = 0;
+    try {
+      const selected = generationProvider(generation);
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        let raw: string;
+        try {
+          raw = await selected.provider.generateResponse(
+            [
+              {
+                role: "system",
+                content: [
+                  "You write the one dashboard remark repeated forever by the host of a premium interview show.",
+                  "Return one JSON object with exactly one field named dashboardBlurbs containing an array of strings.",
+                  ...BOTCAST_ECHO_DASHBOARD_BLURB_DIRECTIONS,
+                  "The rejected line in the user message is the current version. Replace it with a fresh persona-shaped variation.",
+                ].join(" "),
+              },
+              {
+                role: "user",
+                content: [
+                  `Show: ${current.name}`,
+                  `Premise: ${current.premise}`,
+                  `Hosting style: ${current.hostingStyle}`,
+                  `Host: ${host.name}`,
+                  `Host persona:\n${host.systemPrompt.slice(0, 2_400)}`,
+                  `Rejected line:\n- ${current.dashboardBlurbs[0] ?? BOTCAST_ECHO_DASHBOARD_BLURB_FALLBACK}`,
+                ].join("\n"),
+              },
+            ],
+            {
+              ...(selected.model ? { model: selected.model } : {}),
+              temperature: Math.min(1, 0.88 + attempt * 0.04),
+              maxTokens: 180,
+              jsonMode: true,
+              usagePurpose: "botcast_brand",
+            },
+          );
+        } catch {
+          providerErrors += 1;
+          continue;
+        }
+        const candidate = parseGeneratedDashboardBlurbCandidates(raw, [
+          current.dashboardBlurbs[0] ?? "",
+        ]).find(isBotcastEchoDashboardBlurb);
+        if (!candidate) continue;
+        return {
+          show: updateBotcastShow(db, userId, showId, {
+            dashboardBlurbs: [candidate],
+          }),
+          generated: true,
+          attempts: attempt + 1,
+          recovered: attempt > 0,
+          failureReason: null,
+        };
+      }
+      return {
+        show: current,
+        generated: false,
+        attempts: 3,
+        recovered: false,
+        failureReason:
+          providerErrors === 3 ? "provider_error" : "invalid_output",
+      };
+    } catch {
+      return {
+        show: current,
+        generated: false,
+        attempts: 0,
+        recovered: false,
+        failureReason: "provider_error",
+      };
+    }
   }
   const excluded = [
     ...BOTCAST_DASHBOARD_BLURB_FALLBACKS,
@@ -5823,7 +6167,7 @@ export async function advanceBotcastEpisode(
       );
     }
   }
-  const now = new Date().toISOString();
+  let now = new Date().toISOString();
   let tension = currentTension(episode);
   if (requestedCue) {
     tension = persistProducerCue(
@@ -5960,7 +6304,12 @@ export async function advanceBotcastEpisode(
   }
   const speakerRole =
     producerCut
-      ? "host"
+      ? episode.guestKind === "bot" &&
+        episode.guestPresenceMode === "present" &&
+        hostPowerSnapshot &&
+        botPowerEchoesAddressedSpeechV1(hostPowerSnapshot)
+        ? "guest"
+        : "host"
       : requestedCue &&
     (cueDelivery === "interrupt_guest" || cueDelivery === "redirect_host")
       ? "host"
@@ -6089,6 +6438,7 @@ export async function advanceBotcastEpisode(
   let autoRecovery: Awaited<
     ReturnType<typeof runAutoFallbackChain>
   >["recovery"];
+  let onlineTurn: SignalOnlineTurnResult | undefined;
   let raw: string;
   if (hearingRepeatDirective) {
     raw = hearingRepeatDirective.repeatedContent;
@@ -6143,6 +6493,59 @@ export async function advanceBotcastEpisode(
     providerUsed = result.provider;
     modelUsed = result.model;
     autoRecovery = result.recovery;
+  } else if (episode.responseMode === "online") {
+    try {
+      onlineTurn = await runSignalOnlineTurn({
+        provider: selected.provider,
+        providerName: selected.providerName,
+        model: modelUsed,
+        messages: prompt,
+        options: {
+          ...generationOptions,
+          ...(selected.model ? { model: selected.model } : {}),
+          maxTokens: botcastSpeakerMaxTokensForModel(
+            speaker.maxTokens,
+            selected.providerName,
+            modelUsed,
+          ),
+        },
+      });
+      raw = onlineTurn.value;
+    } catch (error) {
+      if (error instanceof SignalOnlineTurnError) {
+        const latestEpisode = getBotcastEpisode(db, userId, episode.id);
+        const producerCutStartedDuringTurn =
+          !producerCut &&
+          latestEpisode.events.some(
+            (event) =>
+              event.sequence > turnStartEventSequence &&
+              event.kind === "cut_away" &&
+              event.payload.reason === "producer_cut",
+          );
+        if (
+          latestEpisode.status === "completed" ||
+          producerCutStartedDuringTurn
+        ) {
+          return { episode: latestEpisode, message: null };
+        }
+        recordEvent(db, userId, episode.id, "provider_generation", {
+          v: 1,
+          speakerRole,
+          botId: speaker.id,
+          responseMode: episode.responseMode,
+          provider: selected.providerName,
+          model: modelUsed,
+          turnOrdinal: episode.messages.length,
+          outcome: "failed",
+          attempts: error.attempts,
+          totalDurationMs: error.attempts.reduce(
+            (total, attempt) => total + attempt.durationMs,
+            0,
+          ),
+        });
+      }
+      throw error;
+    }
   } else {
     try {
       raw = await selected.provider.generateResponse(prompt, {
@@ -6175,6 +6578,28 @@ export async function advanceBotcastEpisode(
     );
   if (latestEpisode.status === "completed" || producerCutStartedDuringTurn) {
     return { episode: latestEpisode, message: null };
+  }
+  now = new Date().toISOString();
+  if (onlineTurn) {
+    recordEvent(
+      db,
+      userId,
+      episode.id,
+      "provider_generation",
+      {
+        v: 1,
+        speakerRole,
+        botId: speaker.id,
+        responseMode: episode.responseMode,
+        provider: selected.providerName,
+        model: modelUsed,
+        turnOrdinal: episode.messages.length,
+        outcome: "succeeded",
+        attempts: onlineTurn.attempts,
+        totalDurationMs: onlineTurn.totalDurationMs,
+      },
+      now,
+    );
   }
   const firstHostOpening =
     speakerRole === "host" &&
@@ -6486,6 +6911,17 @@ export async function advanceBotcastEpisode(
           }
       : {}),
     ...(autoRecovery ? { autoRecovery } : {}),
+    ...(onlineTurn && onlineTurn.attempts.length > 1
+      ? {
+          providerRecovery: {
+            v: 1,
+            strategy: "same_route_retry",
+            attempts: onlineTurn.attempts,
+            finalProvider: providerUsed,
+            finalModel: modelUsed,
+          },
+        }
+      : {}),
     },
     now,
   );

@@ -53,7 +53,11 @@ export function randomizeBotAudioVoiceProfile(
     texture: DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1.texture,
     ...(engine === "builtin"
       ? { systemVoiceName: selectedSystemVoiceName }
-      : { elevenLabsVoiceId: identity }),
+      : {
+          elevenLabsVoiceId: identity,
+          elevenLabsVoiceIdOverride: null,
+          elevenLabsVoiceInitialized: true,
+        }),
   });
 }
 
@@ -69,8 +73,14 @@ export function fillMissingBotAudioVoiceIdentities(
     ...(!normalized.systemVoiceName && systemVoiceNames.length > 0
       ? { systemVoiceName: choose(systemVoiceNames, random) }
       : {}),
-    ...(!normalized.elevenLabsVoiceId && elevenLabsVoiceIds.length > 0
-      ? { elevenLabsVoiceId: choose(elevenLabsVoiceIds, random) }
+    ...(!normalized.elevenLabsVoiceInitialized &&
+    !normalized.elevenLabsVoiceId &&
+    !normalized.elevenLabsVoiceIdOverride &&
+    elevenLabsVoiceIds.length > 0
+      ? {
+          elevenLabsVoiceId: choose(elevenLabsVoiceIds, random),
+          elevenLabsVoiceInitialized: true,
+        }
       : {}),
   });
 }

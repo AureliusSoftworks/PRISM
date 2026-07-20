@@ -26810,9 +26810,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --crt-bloom-wide-radius: 12px;
   --crt-glyph-bloom-wide-inner-opacity: 30%;
   --crt-glyph-bloom-wide-outer-opacity: 18%;
-  --crt-face-screen-wash-near-opacity: 58%;
-  --crt-face-screen-wash-mid-opacity: 36%;
-  --crt-face-screen-wash-far-opacity: 22%;
+  /* Keep the CRT glass black; color belongs to the phosphor glyph, not a
+     full-aperture wash. */
+  --crt-face-screen-wash-near-opacity: 18%;
+  --crt-face-screen-wash-mid-opacity: 8%;
+  --crt-face-screen-wash-far-opacity: 3%;
   --zen-live-bot-idle-face-glow-filter-high: drop-shadow(
       0 0 calc(0.72px * var(--crt-face-glow-radius-scale, 1))
         var(--crt-face-edge-color)
@@ -37766,9 +37768,11 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .botPanelHubVoiceChoices {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: center;
   gap: 8px;
+  max-width: min(440px, calc(100vw - 48px));
 }
 
 .botPanelHubVoiceChoices button {
@@ -37855,6 +37859,16 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .botPanelHubVoiceChoices button:active {
   transform: scale(0.97);
+}
+
+.botPanelHubVoiceChoices button:disabled {
+  color: color-mix(in srgb, var(--fg-muted) 64%, transparent);
+  border-color: color-mix(in srgb, var(--fg) 12%, transparent);
+  background: color-mix(in srgb, var(--bg-surface) 54%, transparent);
+  box-shadow: none;
+  cursor: not-allowed;
+  opacity: 0.72;
+  transform: none;
 }
 
 @keyframes botPanelHubVoiceFeedbackSpin {
@@ -63102,19 +63116,19 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   --bot-face-screen-default-bg:
     radial-gradient(
       circle at 34% 24%,
-      rgba(255, 255, 255, 0.38),
-      rgba(255, 255, 255, 0.16) 18%,
+      rgba(255, 255, 255, 0.12),
+      rgba(255, 255, 255, 0.04) 18%,
       transparent 38%
     ),
     radial-gradient(
       circle at 50% 58%,
-      color-mix(in srgb, var(--bot-preview-face-color) 24%, transparent),
+      color-mix(in srgb, var(--bot-preview-face-color) 7%, transparent),
       transparent 62%
     ),
     linear-gradient(
       180deg,
-      color-mix(in srgb, #101014 82%, var(--bot-preview-face-color) 18%),
-      color-mix(in srgb, #030304 88%, var(--bot-preview-face-color) 12%)
+      color-mix(in srgb, #08090b 96%, var(--bot-preview-face-color) 4%),
+      color-mix(in srgb, #010203 97%, var(--bot-preview-face-color) 3%)
     );
   --bot-face-screen-default-border: color-mix(
     in srgb,

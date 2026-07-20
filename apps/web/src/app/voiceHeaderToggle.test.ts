@@ -16,13 +16,13 @@ describe("universal voice selector", () => {
     assert.match(pageSource, /className=\{styles\.voiceModeSelector\}/);
     assert.match(
       pageSource,
-      /<span>Voice<\/span> <span aria-hidden="true">·<\/span> <strong>\{voiceModeDisplayName\(currentMode\)\}<\/strong>/,
+      /<span>Voice<\/span> <span aria-hidden="true">·<\/span> <strong>\{voiceModeDisplayName\(currentChoice\)\}<\/strong>/,
     );
-    assert.match(pageSource, /VOICE_MODE_OPTIONS\.map\(\(mode\) =>/);
+    assert.match(pageSource, /VOICE_PLAYBACK_CHOICES\.map\(\(choice\) =>/);
     assert.match(pageSource, /role="radiogroup" aria-label="Voice mode"/);
     assert.match(
       pageSource,
-      /role="radio" aria-checked=\{mode === currentMode\}/,
+      /role="radio" aria-checked=\{choice === currentChoice\}/,
     );
     assert.doesNotMatch(pageSource, /styles\.voiceHeaderButton/);
   });
@@ -30,24 +30,25 @@ describe("universal voice selector", () => {
   it("persists an explicit selection immediately with optimistic rollback", () => {
     assert.match(
       pageSource,
-      /async function selectGlobalVoiceMode\( nextMode: VoiceMode, options: \{ preserveActivePlayback\?: boolean \} = \{\}, \)/,
+      /async function selectGlobalVoiceChoice\( nextChoice: VoicePlaybackChoice, \)/,
     );
     assert.match(
       pageSource,
-      /body: JSON\.stringify\(\{ voiceMode: nextMode \}\)/,
+      /body: JSON\.stringify\(nextSettings\)/,
     );
     assert.match(pageSource, /voiceMode: previousMode/);
-    assert.match(pageSource, /if \(nextMode === previousMode\) return/);
+    assert.match(pageSource, /englishVoiceEngine: previousEnglishVoiceEngine/);
+    assert.match(pageSource, /if \(nextChoice === previousChoice\) return/);
     assert.doesNotMatch(pageSource, /voiceModeAfterQuickToggle/);
   });
 
   it("unlocks the selected voice during the dropdown gesture", () => {
     const selector = pageSource.slice(
-      pageSource.indexOf("async function selectGlobalVoiceMode"),
+      pageSource.indexOf("async function selectGlobalVoiceChoice"),
       pageSource.indexOf("async function saveVoiceSettings"),
     );
     const primeIndex = selector.indexOf(
-      "primeVoiceModePlaybackFromUserGesture(nextMode)",
+      "primeVoiceModePlaybackFromUserGesture(nextSettings.voiceMode)",
     );
     const saveIndex = selector.indexOf('await api("/api/settings"');
     assert.ok(primeIndex >= 0, "voice selection should prime browser audio");
@@ -56,29 +57,33 @@ describe("universal voice selector", () => {
       primeIndex < saveIndex,
       "browser audio must be primed before the first async settings request",
     );
-    assert.match(selector, /if \(!options\.preserveActivePlayback\)/);
-    assert.match(selector, /primeVoiceModePlaybackFromUserGesture\(nextMode\)/);
+    assert.match(
+      selector,
+      /primeVoiceModePlaybackFromUserGesture\(nextSettings\.voiceMode\)/,
+    );
+    assert.doesNotMatch(selector, /stopEnglishVoice|stopBottishVoice|\.abort\(\)/);
   });
 
   it("lets Signal change the next line without cutting off the live mic", () => {
     assert.match(
       pageSource,
-      /tutorialTarget: "botcast-voice-mode", preserveActivePlayback: options\.liveSessionActive/,
+      /tutorialTarget: "botcast-voice-mode"/,
     );
     assert.match(
       pageSource,
-      /Signal voice · \$\{voiceModeDisplayName\(nextMode\)\}.*?Applies to the next line without cutting off anything already on mic\./,
+      /Applies to the next line without cutting off speech already playing\./,
     );
   });
 
-  it("moves the same four choices into the constrained tools menu", () => {
-    assert.match(pageSource, /VOICE_MODE_OPTIONS\.map\(\(mode\): PrismMenuEntry => \(\{/);
+  it("moves the same five choices into the constrained tools menu", () => {
+    assert.match(pageSource, /VOICE_PLAYBACK_CHOICES\.map\(\(choice\): PrismMenuEntry => \(\{/);
     assert.match(pageSource, /kind: "radio"/);
     assert.match(pageSource, /group: "voice-mode"/);
     assert.match(
       styleSource,
       /@media \(max-width: 560px\)[\s\S]*?\.voiceModeSelector\s*\{\s*display:\s*none/,
     );
+    assert.match(pageSource, /Settings → Keys to use Premium/);
   });
 
   it("keeps the selector in the header without repeating it in the Zen hero", () => {
@@ -92,6 +97,37 @@ describe("universal voice selector", () => {
       pageSource.indexOf("{!chatLikeSurface && view !== \"chat\" ?"),
     );
     assert.match(chatHeader, /renderVoiceModeSelector\(\)/);
+  });
+
+  it("snapshots the five-choice selection when each spoken surface starts an utterance", () => {
+    assert.match(
+      pageSource,
+      /const voiceSelection = voicePlaybackSelectionRef\.current; if \(!detail\)/,
+    );
+    assert.match(
+      pageSource,
+      /const voiceSelection = voicePlaybackSelectionRef\.current; if \(!coffeeConversation\)/,
+    );
+    assert.match(
+      pageSource,
+      /const voiceSelection = voicePlaybackSelectionRef\.current; if \( !coffeeReplayActive/,
+    );
+    assert.match(
+      pageSource,
+      /const voiceSelection = voicePlaybackSelectionRef\.current; if \( view !== "story"/,
+    );
+    assert.match(
+      pageSource,
+      /const playBotcastUtterance = useCallback\( async \([\s\S]*?const voiceSelection = voicePlaybackSelectionRef\.current/,
+    );
+    const switchSource = pageSource.slice(
+      pageSource.indexOf("async function selectGlobalVoiceChoice"),
+      pageSource.indexOf("async function saveVoiceSettings"),
+    );
+    assert.doesNotMatch(
+      switchSource,
+      /stopEnglishVoice|stopBottishVoice|stopBotcastUtterance|\.abort\(\)/,
+    );
   });
 });
 
@@ -126,7 +162,7 @@ describe("Coffee voice authorization", () => {
     );
     assert.match(
       replayEffect,
-      /stopVoicePlaybackPreservingPreparedMode\(settings\.voiceMode\)/,
+      /stopVoicePlaybackPreservingPreparedMode\(voiceSelection\.voiceMode\)/,
     );
   });
 

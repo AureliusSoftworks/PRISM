@@ -516,6 +516,7 @@ import {
   serializeBotAvatarDetailsV1,
   serializeBotFaceThinkingFrames,
   normalizeBotAudioVoiceProfileV1,
+  normalizeEnglishVoiceEngine,
   applyBotNamePronunciations,
   normalizeBotNamePronunciation,
   normalizeBotSelfReferral,
@@ -684,6 +685,7 @@ import {
   generateBuiltinEnglishWave,
 } from "./builtin-tts.ts";
 import { buildBabbleSpeechText } from "./babble-text.ts";
+import { initializePremiumVoiceDefaults } from "./premium-voice-defaults.ts";
 import { deleteVector, deleteVectorsForUser } from "./qdrant.ts";
 let config: AppConfig = getAppConfig();
 let db: DatabaseSync = createDatabase();
@@ -832,6 +834,79 @@ function normalizeBotAudioVoiceProfilesForResponse<
       normalizeBotAudioVoiceProfileV1(undefined),
     audio_voice_profile_override: parseStoredBotAudioVoiceProfileV1(
       bot.audio_voice_profile_override,
+    ),
+  };
+}
+
+function persistPremiumVoiceDefaults(
+  userId: string,
+  voices: ReadonlyArray<{ voiceId: string }>,
+): { assignedBotIds: string[]; assignedDefaultPrism: boolean } {
+  const user = getUserRow(userId);
+  const bots = db
+    .prepare(
+      `SELECT id, authored_audio_voice_profile, audio_voice_profile_override
+         FROM bots
+        WHERE user_id = ?`,
+    )
+    .all(userId) as Array<{
+    id: string;
+    authored_audio_voice_profile: string | null;
+    audio_voice_profile_override: string | null;
+  }>;
+  const initialization = initializePremiumVoiceDefaults({
+    userId,
+    voices,
+    bots: bots.map((bot) => ({
+      id: bot.id,
+      authoredAudioVoiceProfile: bot.authored_audio_voice_profile,
+      audioVoiceProfileOverride: bot.audio_voice_profile_override,
+    })),
+    prismDefaultBotAudioVoiceProfile:
+      user.prism_default_bot_audio_voice_profile,
+  });
+  if (
+    initialization.botUpdates.length === 0 &&
+    !initialization.prismDefaultBotAudioVoiceProfile
+  ) {
+    return { assignedBotIds: [], assignedDefaultPrism: false };
+  }
+
+  db.exec("BEGIN IMMEDIATE TRANSACTION");
+  try {
+    const updateBot = db.prepare(
+      `UPDATE bots
+          SET audio_voice_profile_override = ?
+        WHERE id = ? AND user_id = ?`,
+    );
+    for (const update of initialization.botUpdates) {
+      updateBot.run(
+        serializeBotAudioVoiceProfileV1(update.audioVoiceProfileOverride),
+        update.id,
+        userId,
+      );
+    }
+    if (initialization.prismDefaultBotAudioVoiceProfile) {
+      db.prepare(
+        `UPDATE users
+            SET prism_default_bot_audio_voice_profile = ?
+          WHERE id = ?`,
+      ).run(
+        serializeBotAudioVoiceProfileV1(
+          initialization.prismDefaultBotAudioVoiceProfile,
+        ),
+        userId,
+      );
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+  return {
+    assignedBotIds: initialization.botUpdates.map((update) => update.id),
+    assignedDefaultPrism: Boolean(
+      initialization.prismDefaultBotAudioVoiceProfile,
     ),
   };
 }
@@ -1301,8 +1376,9 @@ function getOrCreateLocalOwnerUser(): string {
     INSERT INTO users (
       id, email, display_name, password_hash, password_salt,
       wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag,
-      theme, preferred_provider, auto_memory, auto_switch_model, created_at, last_active_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'system', 'local', 1, 0, ?, ?)
+      theme, preferred_provider, auto_memory, auto_switch_model,
+      english_voice_engine, created_at, last_active_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'system', 'local', 1, 0, 'builtin', ?, ?)
   `,
   ).run(
     userId,
@@ -3494,8 +3570,9 @@ function buildRoutes(): RouteDefinition[] {
           INSERT INTO users (
             id, email, display_name, password_hash, password_salt,
             wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag,
-            theme, preferred_provider, auto_memory, auto_switch_model, created_at, last_active_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'local', 1, 0, ?, ?)
+            theme, preferred_provider, auto_memory, auto_switch_model,
+            english_voice_engine, created_at, last_active_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'local', 1, 0, 'builtin', ?, ?)
         `,
         ).run(
           userId,
@@ -10765,7 +10842,47 @@ function buildRoutes(): RouteDefinition[] {
           collectionId: user.elevenlabs_voice_collection_id,
           signal: controller.signal,
         });
-        json(ctx.res, 200, { ok: true, voices });
+        const initialization = persistPremiumVoiceDefaults(userId, voices);
+        json(ctx.res, 200, { ok: true, voices, initialization });
+      } catch (error) {
+        if (error instanceof ElevenLabsVoiceError) {
+          throw new HttpError(
+            error.status === 401 || error.status === 403 ? 401 : 502,
+            error.message,
+          );
+        }
+        throw error;
+      } finally {
+        ctx.req.off("close", onClose);
+      }
+    }),
+    route("POST", "/api/voices/elevenlabs/defaults", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const userKey = decryptUserKey(userId);
+      const apiKey =
+        getElevenLabsApiKeyForUser(userId, userKey) ?? config.elevenLabsApiKey;
+      if (!apiKey) {
+        throw new HttpError(
+          409,
+          "Add an ElevenLabs API key in Settings first.",
+        );
+      }
+      const controller = new AbortController();
+      const onClose = () => controller.abort();
+      ctx.req.once("close", onClose);
+      try {
+        const voices = await requestElevenLabsVoiceCatalog({
+          apiKey,
+          collectionId: user.elevenlabs_voice_collection_id,
+          signal: controller.signal,
+        });
+        const initialization = persistPremiumVoiceDefaults(userId, voices);
+        json(ctx.res, 200, {
+          ok: true,
+          initialization,
+          catalogSize: voices.length,
+        });
       } catch (error) {
         if (error instanceof ElevenLabsVoiceError) {
           throw new HttpError(
@@ -11307,10 +11424,15 @@ function buildRoutes(): RouteDefinition[] {
       const allowOperatingSystemVoices =
         user.operating_system_voices_enabled !== 0 ||
         Boolean(profile.systemVoiceName);
-      // ElevenLabs remains authoritative whenever the bot has either a current
-      // per-bot identity or a legacy mapped identity. Built-in is last-resort.
+      // Conversation synthesis observes the saved Premium choice. Avatar
+      // Studio previews remain explicit provider truth checks.
+      const elevenLabsConversationEnabled =
+        user.voice_mode === "english" &&
+        normalizeEnglishVoiceEngine(user.english_voice_engine) === "elevenlabs";
       const requestedEngine =
-        raw.engine === "elevenlabs" && resolveElevenLabsVoiceId(profile)
+        raw.engine === "elevenlabs" &&
+        resolveElevenLabsVoiceId(profile) &&
+        (raw.explicitVoicePreview === true || elevenLabsConversationEnabled)
           ? "elevenlabs"
           : "builtin";
       if (
@@ -11464,7 +11586,7 @@ function buildRoutes(): RouteDefinition[] {
             503,
             error instanceof Error
               ? error.message
-              : "System Classic voice is unavailable.",
+              : "The local fallback voice is unavailable.",
           );
         } finally {
           ctx.req.off("close", onClose);
@@ -11692,7 +11814,9 @@ function buildRoutes(): RouteDefinition[] {
           voiceVolume: normalizeBotVoiceVolume(user.voice_volume),
           operatingSystemVoicesEnabled:
             user.operating_system_voices_enabled !== 0,
-          englishVoiceEngine: "elevenlabs",
+          englishVoiceEngine: normalizeEnglishVoiceEngine(
+            user.english_voice_engine,
+          ),
           elevenLabsVoiceBank: parseStoredElevenLabsVoiceBank(
             user.elevenlabs_voice_bank,
           ),

@@ -24,11 +24,11 @@ ship as `0.5.2` while Coffee is `v0.7` and Story is `v0.1`.
 
 | Applet | Version | Status | Notes |
 | --- | --- | --- | --- |
-| Chat | v1.11 | Active | Full playground for bots, providers, models, images, exports, memory-aware conversations, per-bot online voice identity, sparse shared mic presence, and ready Powers including engine-bounded response budgets, relative avatar size, and loud/quiet presence. |
-| Zen | v1.10 | Active | Calm one-to-one continuity surface with shared bot voice identity, mic presence, and ready Powers including engine-bounded response budgets, relative avatar size, and loud/quiet presence; the standalone Zen lane is deprecating as this becomes Prism's default state. |
-| Coffee | v2.4 | Active | Multi-bot group table with Coffee Groups, model-aware session holds, pacing, cups, transcripts, replay, synchronized online speech, living atmosphere, table-adapted response budgets, and frozen size/voice Powers. |
-| Signal | v1.10 | Active | Bot-owned anthology interviews with audience-projected transcript, voice, replay, and reviews; studio-specific atmosphere; frozen episode Powers for avatar and voice presence; guest-led structure for echo-bound hosts; and bounded, replay-safe interruption Powers. |
-| Story | v0.8 | Preview | Generated visual-novel episodes with bots, choices, maps, inventory, transcripts, shared PRISM menu behavior, engine-bounded speaker narration, and Power-shaped relative sprite and voice presence. |
+| Chat | v1.12 | Active | Full playground for bots, providers, models, images, exports, memory-aware conversations, five-choice English/Premium voice switching, sparse shared mic presence, and ready Powers including engine-bounded response budgets, relative avatar size, and loud/quiet presence. |
+| Zen | v1.11 | Active | Calm one-to-one continuity surface with five-choice English/Premium voice switching, mic presence, and ready Powers including engine-bounded response budgets, relative avatar size, and loud/quiet presence; the standalone Zen lane is deprecating as this becomes Prism's default state. |
+| Coffee | v2.5 | Active | Multi-bot group table with Coffee Groups, live and replay-safe English/Premium switching, model-aware session holds, pacing, cups, transcripts, living atmosphere, table-adapted response budgets, and frozen size/voice Powers. |
+| Signal | v1.11 | Active | Bot-owned anthology interviews with next-utterance English/Premium switching, audience-projected transcript, voice, replay, and reviews; studio-specific atmosphere; frozen episode Powers for avatar and voice presence; one repeating persona-shaped blurb plus guest-led structure for echo-bound hosts; and bounded, replay-safe interruption Powers. |
+| Story | v0.9 | Preview | Generated visual-novel episodes with bots, choices, maps, inventory, transcripts, shared PRISM menu behavior, English/Premium speaker narration, and Power-shaped relative sprite and voice presence. |
 | Arena | v0.0 | Planned | Moderated bot debate surface. |
 | Polling | v0.0 | Planned | AI-powered polling across bot groups. |
 | Feed | v0.0 | Planned | BotBook-style social feed. |
@@ -71,6 +71,12 @@ stages do not block the standalone preview.
 
 ## Changelog
 
+- Bumped `Chat` to `v1.12`, `Zen` to `v1.11`, `Coffee` to `v2.5`, `Signal`
+  to `v1.11`, and `Story` to `v0.9` for the global five-choice voice control.
+  English always uses the bot's local identity; Premium uses its stable
+  ElevenLabs identity and falls back locally. Live and replay switches begin
+  with the next utterance without cutting off speech already playing.
+
 - Bumped `Chat` to `v1.11`, `Zen` to `v1.10`, `Coffee` to `v2.4`, `Signal`
   to `v1.10`, and `Story` to `v0.8` for reusable loud/quiet voice presence.
   Loud lines receive a fixed 1.18x playback trim and 1.12x text scale, annoy
@@ -87,6 +93,12 @@ stages do not block the standalone preview.
   render 14% smaller without changing layout. `Microscopic` also carries the
   speaking-only invisibility contract. Coffee freezes the size in its session
   plan, Signal freezes it in the episode snapshot, and replay preserves both.
+
+- Bumped `Signal` to `v1.8` so a Copycat/Echo host owns exactly one
+  persona-shaped dashboard variation of “I always have an original thing to
+  say.” Signal repeats that same line forever instead of rotating a batch, and
+  safely repairs older multi-blurb shows to the canonical joke until the player
+  refreshes the host's wording.
 
 - Bumped `Signal` to `v1.7` so a Producer cut stops the current turn, catches the
   host briefly off guard, and still gives them one short, tactful on-air sign-off

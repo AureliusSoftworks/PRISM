@@ -9,7 +9,7 @@ function completedMessageVoiceEffect(): string {
     "const assistantMessages = detail.messages.filter",
   );
   const end = pageSource.indexOf(
-    'if (settings?.voiceMode !== "mute") return;',
+    "\n  useEffect(\n    () => () => {",
     start,
   );
   assert.notEqual(start, -1);

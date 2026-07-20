@@ -1,4 +1,5 @@
 import {
+  botPowerResponseIsSilentV1,
   botcastReplayTimeline,
   type BotcastEpisode,
   type BotcastReplayEvent,
@@ -94,6 +95,11 @@ export function buildSignalReviewTranscript(
       left.occurredAt.localeCompare(right.occurredAt),
   );
   const utteranceEvents = new Map<string, BotcastReplayEvent>();
+  const silenceOnlyTurnCount = episode.messages.filter((message) =>
+    botPowerResponseIsSilentV1(message.content),
+  ).length;
+  const spokenContentTurnCount =
+    episode.messages.length - silenceOnlyTurnCount;
   for (const event of events) {
     const messageId = payloadString(event, "messageId");
     if (event.kind === "utterance" && messageId)
@@ -132,7 +138,7 @@ export function buildSignalReviewTranscript(
     `- Final segment: ${episode.segment}`,
     `- Final tension: ${episode.tensionStage}`,
     `- Warning count: ${episode.warningCount}`,
-    `- Counts: ${episode.messages.length} spoken turns, ${episode.segments.length} segments, ${episode.events.length} production events`,
+    `- Counts: ${episode.messages.length} transcript turns (${spokenContentTurnCount} with spoken content, ${silenceOnlyTurnCount} silence-only), ${episode.segments.length} segments, ${episode.events.length} production events`,
     "",
     "## Segment Record",
     "",
@@ -150,9 +156,9 @@ export function buildSignalReviewTranscript(
     }
   }
 
-  lines.push("", "## Spoken Transcript", "");
+  lines.push("", "## Transcript", "");
   if (episode.messages.length === 0) {
-    lines.push("No spoken turns were recorded.");
+    lines.push("No transcript turns were recorded.");
   } else {
     episode.messages.forEach((message, index) => {
       const event = utteranceEvents.get(message.id);
@@ -202,7 +208,7 @@ export function buildSignalReviewTranscript(
     "",
     "## Review Notes",
     "",
-    "Use the spoken transcript for user-visible quality. Use the segment, cue, tension, routing, Power, listener reaction, camera, departure, and completion events to diagnose PRISM orchestration and replay fidelity.",
+    "Use the visible transcript for user-visible quality. Use the segment, cue, tension, routing, Power, listener reaction, camera, departure, and completion events to diagnose PRISM orchestration and replay fidelity.",
   );
   return `${lines.join("\n").trimEnd()}\n`;
 }

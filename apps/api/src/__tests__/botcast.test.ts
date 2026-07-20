@@ -6,6 +6,7 @@ import {
   BOTCAST_DEFAULT_STUDIO_ATMOSPHERE_MIX,
   BOTCAST_DEFAULT_STUDIO_LAYOUT,
   BOTCAST_DIRECTOR_MIN_SHOT_MS,
+  BOTCAST_ECHO_DASHBOARD_BLURB_FALLBACK,
   BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS,
   BOTCAST_PRODUCER_GUEST_ID,
   BOTCAST_PRODUCER_GUEST_NAME,
@@ -283,6 +284,29 @@ function quietPowers(): string {
       ruleLabels: ["Attenuated voice", "Half of turns unheard"],
     },
   }]);
+}
+
+function echoPowers(): string {
+  const name = "Echo";
+  const intent = "Echo whatever is addressed to this bot and say nothing else.";
+  return JSON.stringify([
+    {
+      version: 1,
+      id: "echo-host",
+      name,
+      intent,
+      enabled: true,
+      compileStatus: "ready",
+      compiled: {
+        version: 1,
+        sourceHash: botPowerSourceHashV1(name, intent),
+        selfCue: "Repeat addressed speech exactly.",
+        observerCue: "This host only echoes addressed speech.",
+        effects: [{ type: "echo_addressed" }],
+        ruleLabels: ["Echoes addressed speech"],
+      },
+    },
+  ]);
 }
 
 function legacyMutedPowers(): string {
@@ -3417,6 +3441,18 @@ describe("Botcast persistence and isolation", () => {
       );
       assert.match(
         show.dayAtmosphere.prompt,
+        /one low, broad shared table[\s\S]*36\.25% and 63\.75%[\s\S]*around 95% of frame height/iu,
+      );
+      assert.match(
+        show.nightAtmosphere.prompt,
+        /clear horizontal tabletop[\s\S]*enough depth and front edge to read as solid furniture/iu,
+      );
+      assert.match(
+        show.nightAtmosphere.prompt,
+        /keep the table below both seated-bot silhouettes/iu,
+      );
+      assert.match(
+        show.dayAtmosphere.prompt,
         /do not include coffee cups, mugs, tumblers, drinking glasses/iu,
       );
       assert.match(
@@ -4054,6 +4090,60 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
+  it("gives an echo-bound host one persona-shaped originality blurb", async () => {
+    const db = fixture();
+    const captures: ProviderMessage[][] = [];
+    const personaBlurb =
+      "Naturally, my originality has been entered into evidence again.";
+    const provider = recordingProvider(
+      [
+        JSON.stringify({
+          name: "The Vale Index",
+          premise: "Precise conversations that inventory cultural alibis.",
+          studioIdentity:
+            "A forensic archive arranged around redaction plates, specimen drawers, evidence lamps, index cards, balance weights, and one severe violet clock.",
+          logoThesis:
+            "An evidence notch cuts through a carrier interval and becomes the transmission event.",
+          dashboardBlurbs: [personaBlurb],
+        }),
+      ],
+      captures,
+    );
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'host-1'").run(
+      echoPowers(),
+    );
+    try {
+      const original = createBotcastShow(db, "user-1", {
+        hostBotId: "host-1",
+      });
+      assert.deepEqual(original.dashboardBlurbs, [
+        BOTCAST_ECHO_DASHBOARD_BLURB_FALLBACK,
+      ]);
+
+      const result = await generateBotcastShowIdentity(
+        db,
+        "user-1",
+        original.id,
+        generation(provider),
+      );
+
+      assert.equal(result.generated, true);
+      assert.deepEqual(result.show.dashboardBlurbs, [personaBlurb]);
+      assert.match(captures[0]?.[0]?.content ?? "", /exactly one line/iu);
+      assert.match(
+        captures[0]?.[0]?.content ?? "",
+        /same blurb repeats forever/iu,
+      );
+      assert.doesNotMatch(
+        captures[0]?.[0]?.content ?? "",
+        /exactly 24 short dashboard blurbs/iu,
+      );
+      assert.match(captures[0]?.[1]?.content ?? "", /forensic cultural critic/iu);
+    } finally {
+      db.close();
+    }
+  });
+
   it("rejects named or generic logo theses before they reach image generation", async () => {
     const db = fixture();
     const provider = recordingProvider(
@@ -4244,6 +4334,73 @@ describe("Botcast persistence and isolation", () => {
       assert.deepEqual(result.show.dashboardBlurbs, ["..."]);
       assert.deepEqual(result.show.hostInterruptionLines, ["..."]);
       assert.equal(captures.length, 0);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("repairs a legacy echo host to one repeating originality blurb", () => {
+    const db = fixture();
+    try {
+      const created = createBotcastShow(db, "user-1", {
+        hostBotId: "host-1",
+      });
+      updateBotcastShow(db, "user-1", created.id, {
+        dashboardBlurbs: [
+          "The questions are sharp today.",
+          "Bring me another cultural alibi.",
+        ],
+      });
+      db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'host-1'").run(
+        echoPowers(),
+      );
+
+      const listed = listBotcastShows(db, "user-1");
+      assert.deepEqual(listed[0]?.dashboardBlurbs, [
+        BOTCAST_ECHO_DASHBOARD_BLURB_FALLBACK,
+      ]);
+      const repaired = db
+        .prepare("SELECT atmosphere_json FROM botcast_shows WHERE id = ?")
+        .get(created.id) as { atmosphere_json: string };
+      const visuals = JSON.parse(repaired.atmosphere_json) as {
+        dashboardBlurbs?: unknown;
+      };
+      assert.deepEqual(visuals.dashboardBlurbs, [
+        BOTCAST_ECHO_DASHBOARD_BLURB_FALLBACK,
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refreshes an echo host with exactly one new persona-shaped blurb", async () => {
+    const db = fixture();
+    const captures: ProviderMessage[][] = [];
+    const personaBlurb =
+      "I submit this wholly original observation to the record. Again.";
+    const provider = recordingProvider(
+      [JSON.stringify({ dashboardBlurbs: [personaBlurb] })],
+      captures,
+    );
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'host-1'").run(
+      echoPowers(),
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const result = await generateBotcastShowDashboardBlurbs(
+        db,
+        "user-1",
+        show.id,
+        generation(provider),
+      );
+
+      assert.equal(result.generated, true);
+      assert.equal(result.attempts, 1);
+      assert.deepEqual(result.show.dashboardBlurbs, [personaBlurb]);
+      assert.match(captures[0]?.[0]?.content ?? "", /one dashboard remark/iu);
+      assert.match(captures[0]?.[0]?.content ?? "", /Copycat\/Echo Power/iu);
+      assert.match(captures[0]?.[1]?.content ?? "", /Mara Vale/iu);
+      assert.match(captures[0]?.[1]?.content ?? "", /Rejected line/iu);
     } finally {
       db.close();
     }

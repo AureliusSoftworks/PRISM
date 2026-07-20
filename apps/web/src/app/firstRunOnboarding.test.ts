@@ -61,17 +61,17 @@ describe("first-run onboarding", () => {
     assert.match(pageSource, /Image generation has its own LOCAL\/ONLINE choice/u);
     assert.match(
       pageSource,
-      /choose an ElevenLabs voice from the list or open “Use an exact\s*Voice ID” for a portable override in bot customization from\s*any chat mode; Prism uses it only for eligible ONLINE speech/u,
+      /English always uses each bot(?:&apos;|’)s local\s*PRISM or optional operating-system voice without ElevenLabs\s*credits\. Premium uses its ElevenLabs identity for eligible\s*ONLINE speech, then falls back locally/u,
     );
     assert.match(pageSource, /Chat home base/u);
   });
 
-  it("explains that an ElevenLabs profile voice is the online override", () => {
+  it("explains Premium identity initialization without changing English", () => {
     assert.match(
       pageSource,
-      /Speech stays on the PRISM Voice Pack until you select an ElevenLabs voice in Prism or bot customization/u,
+      /English remains local and uses no ElevenLabs credits/u,
     );
-    assert.match(pageSource, /Voice Settings can limit bot menus to one ElevenLabs voice collection/u);
+    assert.match(pageSource, /assigns stable Premium defaults from the collection you choose in Voice Settings/u);
   });
 
   it("clamps restored progress and reaches a full final bar", () => {

@@ -63,7 +63,8 @@ describe("voice settings preview", () => {
       pageSource,
       /previewing === "babble" \? "Restart Babble" : "Babble"/,
     );
-    assert.match(pageSource, /`Preview \$\{primaryVoiceLabel\}`/);
+    assert.match(pageSource, /: "Preview English"/);
+    assert.match(pageSource, /: "Preview Premium"/);
     assert.match(
       pageSource,
       /onClick=\{\(\) => void previewVoice\("bottish"\)\}/,
@@ -78,6 +79,10 @@ describe("voice settings preview", () => {
     );
     assert.match(
       pageSource,
+      /onClick=\{\(\) => void previewVoice\("premium"\)\}/,
+    );
+    assert.match(
+      pageSource,
       /onPlaybackStart: \(\) => \{[\s\S]*?setEnglishPreviewState\("playing"\)/,
     );
     assert.doesNotMatch(pageSource, /generateOnly/);
@@ -89,7 +94,7 @@ describe("voice settings preview", () => {
     );
     assert.match(
       pageSource,
-      /await onVoicePreview\(profile, forcedMode, previewText, \{/,
+      /await onPreview\([\s\S]*?normalizedProfile,[\s\S]*?mode,[\s\S]*?previewText/,
     );
     assert.match(pageSource, /onPlaybackStart: \(\) => \{/);
     assert.doesNotMatch(pageSource, /disabled=\{previewing !== null\}/);
@@ -110,11 +115,11 @@ describe("voice settings preview", () => {
   it("keeps Mute silent while explicit previews honor the active provider voice", () => {
     assert.match(
       pageSource,
-      /Mute is silent\. Choose English, Babble, or Bottish to hear a preview\./,
+      /Mute is silent\. Choose English, Premium, Babble, or Bottish to hear a preview\./,
     );
     assert.match(
       pageSource,
-      /const previewEngine = resolveVoicePreviewEngine\(previewProfile\)/,
+      /options\.englishVoiceEngine \?\?[\s\S]*?resolveVoicePreviewEngine\(previewProfile\)/,
     );
     assert.match(pageSource, /explicitVoicePreview: true/);
   });
@@ -147,7 +152,7 @@ describe("voice settings preview", () => {
     assert.match(pageSource, /Operating-system voices/);
   });
 
-  it("shows only installed offline and available online engine dropdowns", () => {
+  it("presents Premium as a mode instead of a second engine dropdown", () => {
     const settingsSource = pageSource.slice(
       pageSource.indexOf('aria-labelledby="voice-engine-settings-title"'),
       pageSource.indexOf("<div className={styles.settingsSaveDock}"),
@@ -156,16 +161,14 @@ describe("voice settings preview", () => {
       settingsSource,
       /<span>Offline engine<\/span>[\s\S]*?aria-label="Offline English voice engine"/,
     );
-    assert.match(
-      settingsSource,
-      /<span>Online engine<\/span>[\s\S]*?aria-label="Online English voice engine"[\s\S]*?<option value="elevenlabs">ElevenLabs<\/option>/,
-    );
-    assert.doesNotMatch(settingsSource, /Use ElevenLabs online/);
+    assert.match(settingsSource, /Premium English · ElevenLabs/);
+    assert.match(settingsSource, /English never uses ElevenLabs credits/);
+    assert.doesNotMatch(settingsSource, /aria-label="Online English voice engine"/);
     assert.match(settingsSource, /type="checkbox"/);
     assert.match(settingsSource, /operatingSystemVoicesEnabled/);
     assert.doesNotMatch(settingsSource, /ElevenLabs model/);
     assert.doesNotMatch(settingsSource, /Load voices/);
-    assert.match(settingsSource, /Selecting an ElevenLabs voice in Prism or bot customization overrides/);
+    assert.match(settingsSource, /ElevenLabs voice library/);
   });
 
   it("removes the legacy five-slot ElevenLabs mapping from Voice settings", () => {
@@ -184,11 +187,11 @@ describe("voice settings preview", () => {
       pageSource.indexOf("function BotVoiceEditor("),
       pageSource.indexOf("type BotEditOriginalSnapshot"),
     );
-    assert.match(editorSource, /<small>LOCAL · \{effectiveElevenLabsVoiceValue/);
+    assert.match(editorSource, /English and Premium identities share the performance controls/);
     assert.match(editorSource, /aria-label="Local voice identity"/);
     assert.match(
       editorSource,
-      /data-kind="online"[\s\S]*?PRIMARY · ELEVENLABS[\s\S]*?ONLINE OPTION · ELEVENLABS[\s\S]*?primaryVoiceLabel/,
+      /data-kind="online"[\s\S]*?PREMIUM VOICE · ELEVENLABS[\s\S]*?premiumVoiceLabel/,
     );
     assert.match(editorSource, /aria-label="ElevenLabs voice identity"/);
     assert.match(editorSource, /Use an exact Voice ID/);
@@ -207,7 +210,7 @@ describe("voice settings preview", () => {
     assert.match(editorSource, /effectiveElevenLabsVoiceValue/);
     assert.match(
       editorSource,
-      /Connection restored\. Preview \$\{primaryVoiceLabel\} again\.[\s\S]*?BACKEND_AVAILABLE_EVENT/,
+      /Connection restored\. Preview \$\{premiumVoiceLabel\} again\.[\s\S]*?BACKEND_AVAILABLE_EVENT/,
     );
     assert.match(editorSource, /data-voice-id-resolution="true"/);
     assert.match(editorSource, /Validating Voice ID…/);
@@ -227,7 +230,8 @@ describe("voice settings preview", () => {
       editorSource,
       /disabled=\{identityCatalog\.elevenLabs\.loading\}/,
     );
-    assert.match(editorSource, /Use PRISM Voice Pack/);
+    assert.match(editorSource, /No Premium voice · use local fallback/);
+    assert.match(editorSource, /Used for English and whenever Premium cannot play/);
     assert.match(editorSource, /aria-label="Online voice"/);
     assert.match(editorSource, /aria-label="Offline and fallback voice"/);
     assert.match(editorSource, /data-bot-voice-source-card="online"/);
@@ -235,6 +239,7 @@ describe("voice settings preview", () => {
     assert.match(editorSource, /Choose from your connected ElevenLabs library/);
     assert.match(pageSource, /applyOfflineVoiceSelection/);
     assert.match(pageSource, /elevenLabsVoiceId: value/);
+    assert.match(editorSource, /elevenLabsVoiceInitialized: true/);
     const resetBotFormSource = pageSource.slice(
       pageSource.indexOf("const resetBotForm = useCallback"),
       pageSource.indexOf("function resetBotPanelDraftNavigation"),
@@ -294,7 +299,7 @@ describe("voice settings preview", () => {
     assert.match(editorSource, /className=\{styles\.botVoicePreviewStatus\}/);
     assert.match(
       editorSource,
-      /Preview checks \$\{primaryVoiceLabel\} directly; \$\{fallbackVoiceLabel\} will not be substituted/,
+      /English previews \$\{fallbackVoiceLabel\}\. Premium checks ElevenLabs directly and never substitutes fallback audio/,
     );
     assert.match(
       pageStyles,
@@ -499,7 +504,7 @@ describe("voice settings preview", () => {
     assert.match(pageSource, /\{ targetDurationMs \}/);
     assert.match(
       pageSource,
-      /view === "chat" &&[\s\S]*?settings\.voiceMode === "bottish" \|\| settings\.voiceMode === "babble"/,
+      /view === "chat" &&[\s\S]*?voiceSelection\.voiceMode === "bottish" \|\|[\s\S]*?voiceSelection\.voiceMode === "babble"/,
     );
     assert.match(
       pageSource,
