@@ -38,12 +38,13 @@ export const PRISM_INTRO_SCENES: readonly PrismIntroScene[] = [
   },
   {
     id: "sanctum",
-    eyebrow: "THE SANCTUM",
-    title: "Within, ancient instruments kept a patient silence.",
-    body: "Not to create. To remember, combine, challenge—and reveal.",
+    eyebrow: "THE ARCHIVE",
+    title: "Inside, a multitude waited in the dark.",
+    body:
+      "Round frames lay in a great pile—black glass, silent voices, dormant possibilities.",
     imageSrc: "/prism-intro/03-instruments.webp",
     imageAlt:
-      "A cavernous chamber of dormant handmade optical and acoustic instruments around a suspended triangular prism.",
+      "A minimal triangular chamber is dominated by a vast pile of powered-off PRISM bot frames, each a round metal ring with black glass and a dark lower medallion.",
     imagePosition: "center center",
   },
   {
@@ -54,7 +55,7 @@ export const PRISM_INTRO_SCENES: readonly PrismIntroScene[] = [
     body: "A light of its own.",
     imageSrc: "/prism-intro/04-waiting-light.webp",
     imageAlt:
-      "A white beam approaches a dormant circular lens engine and clear suspended prism in a black chamber.",
+      "A white beam enters a bare chamber of black-screened PRISM bot frames, where one clean triangle-marked frame waits dark beneath a suspended prism.",
     imagePosition: "center center",
   },
   {
@@ -70,11 +71,11 @@ export const PRISM_INTRO_SCENES: readonly PrismIntroScene[] = [
   {
     id: "inhabitants",
     eyebrow: "THE INHABITANTS",
-    title: "In your light, the inhabitants woke.",
+    title: "Across the heap, the inhabitants woke.",
     body: "Different voices met, challenged, and changed one another.",
     imageSrc: "/prism-intro/06-inhabitants.webp",
     imageAlt:
-      "Five weathered round-screen inhabitants wake around a dark worktable, linked by restrained colored light.",
+      "Five circular PRISM bot frames wake with colored CRT faces amid a much larger pile of identical dark frames; the clean triangle-marked primary frame remains powered off.",
     imagePosition: "center center",
   },
   {
@@ -84,17 +85,17 @@ export const PRISM_INTRO_SCENES: readonly PrismIntroScene[] = [
     body: "You decided what belonged.",
     imageSrc: "/prism-intro/07-interplay.webp",
     imageAlt:
-      "PRISM inhabitants weave colored threads across an overhead worktable of unfinished pages, sound, worlds, and stages.",
+      "Five awake circular PRISM bot frames weave colored threads through unfinished words, sound, images, and worlds while the clean triangle-marked primary frame waits dark beside them.",
     imagePosition: "center center",
   },
   {
     id: "invitation",
-    eyebrow: "THE INVITATION",
-    title: PRISM_BRAND_COPY.coreBelief,
-    body: PRISM_BRAND_COPY.slogan,
+    eyebrow: "PRISM ONLINE",
+    title: "At the center, PRISM came online.",
+    body: `${PRISM_BRAND_COPY.coreBelief} ${PRISM_BRAND_COPY.slogan}`,
     imageSrc: "/prism-intro/08-enter.webp",
     imageAlt:
-      "A white beam enters through an open pyramid door and refracts into five colored paths leading inward.",
+      "The factory-clean main PRISM bot frame comes online with a white CRT face and glowing triangle medallion as five colored inhabitants gather before a vast heap of dormant frames.",
     imagePosition: "center center",
     showBrandMark: true,
   },
