@@ -5,6 +5,9 @@ import {
   type Page,
   type Route,
 } from "@playwright/test";
+import { BOT_GROUP_WAITING_ROOM_ENABLED } from "../apps/web/src/app/botGroupWaitingRoom";
+
+const waitingRoomTest = BOT_GROUP_WAITING_ROOM_ENABLED ? test : test.skip;
 
 function smokeTestTimeout(localTimeoutMs: number): number {
   return process.env.CI ? localTimeoutMs * 2 : localTimeoutMs;
@@ -1710,7 +1713,7 @@ test.describe("PRISM desktop smoke", () => {
     ).toHaveCount(0);
   });
 
-  test("exact seven-member groups cross the waiting-room boundary with safe live fallbacks @group-room-wifex8", async ({
+  waitingRoomTest("exact seven-member groups cross the waiting-room boundary with safe live fallbacks @group-room-wifex8", async ({
     page,
   }) => {
     const now = "2026-07-14T12:00:00.000Z";
@@ -1830,7 +1833,7 @@ test.describe("PRISM desktop smoke", () => {
     ).toHaveCount(0);
   });
 
-  test("saved group atmosphere selects, generates, survives reload, crossfades to Zen, and fails back to its gradient @group-room-atmosphere", async ({
+  waitingRoomTest("saved group atmosphere selects, generates, survives reload, crossfades to Zen, and fails back to its gradient @group-room-atmosphere", async ({
     page,
   }) => {
     test.setTimeout(smokeTestTimeout(90_000));
@@ -2085,7 +2088,7 @@ test.describe("PRISM desktop smoke", () => {
     );
   });
 
-  test("waiting-room atmosphere keeps its cast stable and stays readable in light theme @group-room-atmosphere", async ({
+  waitingRoomTest("waiting-room atmosphere keeps its cast stable and stays readable in light theme @group-room-atmosphere", async ({
     page,
   }) => {
     test.setTimeout(smokeTestTimeout(60_000));
@@ -2160,7 +2163,7 @@ test.describe("PRISM desktop smoke", () => {
   });
 
   for (const theme of ["dark", "light"] as const) {
-    test(`compact group room stays clear across the desktop viewport contract in ${theme} theme @group-room`, async ({
+    waitingRoomTest(`compact group room stays clear across the desktop viewport contract in ${theme} theme @group-room`, async ({
       page,
     }) => {
       test.setTimeout(smokeTestTimeout(90_000));
@@ -2438,7 +2441,7 @@ test.describe("PRISM desktop smoke", () => {
     expect(externalImageRequests).toEqual([]);
   });
 
-  test("large saved group becomes a stable responsive waiting room @group-room", async ({
+  waitingRoomTest("large saved group becomes a stable responsive waiting room @group-room", async ({
     page,
   }) => {
     test.setTimeout(smokeTestTimeout(90_000));
@@ -2744,7 +2747,7 @@ test.describe("PRISM desktop smoke", () => {
     expect(externalImageRequests).toEqual([]);
   });
 
-  test("twenty-four-member waiting room completes three bounded rotations and tears down cleanly @group-room-wifex8", async ({
+  waitingRoomTest("twenty-four-member waiting room completes three bounded rotations and tears down cleanly @group-room-wifex8", async ({
     page,
   }) => {
     test.setTimeout(smokeTestTimeout(90_000));
@@ -2863,7 +2866,7 @@ test.describe("PRISM desktop smoke", () => {
     expect(pageErrors).toEqual([]);
   });
 
-  test("waiting-room side panel pauses and resumes one timer while a live theme change preserves the visit @group-room-wifex8", async ({
+  waitingRoomTest("waiting-room side panel pauses and resumes one timer while a live theme change preserves the visit @group-room-wifex8", async ({
     page,
   }) => {
     test.setTimeout(smokeTestTimeout(90_000));
@@ -2978,7 +2981,7 @@ test.describe("PRISM desktop smoke", () => {
       .toBe("dark");
   });
 
-  test("Listen up reuses an exact Coffee Group, preserves its topic across reload, and returns to a fresh room @group-room-coffee", async ({
+  waitingRoomTest("Listen up reuses an exact Coffee Group, preserves its topic across reload, and returns to a fresh room @group-room-coffee", async ({
     page,
   }) => {
     test.setTimeout(smokeTestTimeout(90_000));
@@ -3263,7 +3266,7 @@ test.describe("PRISM desktop smoke", () => {
       .toBeNull();
   });
 
-  test("waiting-room Home resolution opens only the requested continuation and leaves a missing Home pending @group-room", async ({
+  waitingRoomTest("waiting-room Home resolution opens only the requested continuation and leaves a missing Home pending @group-room", async ({
     page,
   }) => {
     test.setTimeout(smokeTestTimeout(90_000));
@@ -3555,7 +3558,7 @@ test.describe("PRISM desktop smoke", () => {
     expect(zenOpenBodies).toEqual([]);
   });
 
-  test("waiting-room Back aborts a pending Home reply before restoring the exact room @group-room", async ({
+  waitingRoomTest("waiting-room Back aborts a pending Home reply before restoring the exact room @group-room", async ({
     page,
   }) => {
     test.setTimeout(smokeTestTimeout(60_000));
@@ -3726,7 +3729,7 @@ test.describe("PRISM desktop smoke", () => {
     await expect(composer).toHaveText("Canceled Home prompt");
   });
 
-  test("waiting-room ambient theater stays silent, static for assistive tech, and bounded @group-room", async ({
+  waitingRoomTest("waiting-room ambient theater stays silent, static for assistive tech, and bounded @group-room", async ({
     page,
   }) => {
     test.setTimeout(smokeTestTimeout(90_000));
@@ -4048,7 +4051,7 @@ test.describe("PRISM desktop smoke", () => {
     expect(ambientWebSockets).toEqual([]);
   });
 
-  test("waiting-room visit survives pauses and cleans up on exit @group-room", async ({
+  waitingRoomTest("waiting-room visit survives pauses and cleans up on exit @group-room", async ({
     page,
   }) => {
     test.setTimeout(smokeTestTimeout(90_000));
@@ -4146,7 +4149,7 @@ test.describe("PRISM desktop smoke", () => {
     await page.clock.fastForward(10 * 60 * 1_000);
   });
 
-  test("waiting-room rotation cancels stale handoffs across groups @group-room", async ({
+  waitingRoomTest("waiting-room rotation cancels stale handoffs across groups @group-room", async ({
     page,
   }) => {
     test.setTimeout(smokeTestTimeout(90_000));
@@ -4261,7 +4264,7 @@ test.describe("PRISM desktop smoke", () => {
   });
 
   for (const theme of ["dark", "light"] as const) {
-    test(`waiting room remains legible across desktop sizes in ${theme} theme @group-room`, async ({
+    waitingRoomTest(`waiting room remains legible across desktop sizes in ${theme} theme @group-room`, async ({
       page,
     }) => {
       test.setTimeout(smokeTestTimeout(90_000));
@@ -4629,14 +4632,14 @@ test.describe("PRISM desktop smoke", () => {
     await studio.getByRole("tab", { name: "Voice" }).click({ force: true });
 
     const onlineVoice = studio.getByRole("region", { name: "Online voice" });
-    const fallbackVoice = studio.getByRole("region", {
-      name: "Offline and fallback voice",
-    });
+    const fallbackVoice = studio.locator(
+      'details[aria-label="Offline and fallback voice"]',
+    );
     const catalogVoice = studio.getByLabel("ElevenLabs voice identity");
     await expect(onlineVoice).toBeVisible();
     await expect(fallbackVoice).toBeVisible();
-    await expect(onlineVoice).toContainText("Active");
-    await expect(fallbackVoice).toContainText("Fallback");
+    await expect(onlineVoice).toContainText("PRIMARY");
+    await expect(fallbackVoice).toContainText("FALLBACK");
     await expect(catalogVoice).toHaveValue("catalog-voice-id");
     await page.addStyleTag({
       content: `[class*="botAvatarCustomizerBackdrop"] {
@@ -4658,13 +4661,20 @@ test.describe("PRISM desktop smoke", () => {
     await expect
       .poll(() => savedProfile?.elevenLabsVoiceIdOverride ?? null)
       .toBe("portable-voice-id");
-    await expect(catalogVoice).toHaveValue("catalog-voice-id");
+    await expect
+      .poll(() => savedProfile?.elevenLabsVoiceId ?? null)
+      .toBe("catalog-voice-id");
+    await expect(catalogVoice).toHaveValue("");
+    await expect(
+      catalogVoice.locator('option[value="catalog-voice-id"]'),
+    ).toHaveCount(1);
     await expect(onlineVoice).toContainText("ID override");
     await expect(studio.getByText("Voice ID", { exact: true })).toBeVisible();
     await expect(
       studio.locator('[data-voice-id-resolution="true"]'),
     ).toContainText("Portable Muse");
 
+    await onlineVoice.getByText("Fine-tune delivery").click();
     const voiceDirectionInput = studio.getByLabel(
       "Add ElevenLabs voice direction cue",
     );
