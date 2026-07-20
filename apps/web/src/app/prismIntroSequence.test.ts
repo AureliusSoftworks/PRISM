@@ -40,7 +40,7 @@ function lossyWebpDimensions(image: Buffer): {
 }
 
 describe("PRISM intro sequence", () => {
-  it("preserves the eight-beat threshold poem and returns agency to the person", () => {
+  it("preserves the eight-beat threshold poem and brings PRISM online last", () => {
     assert.deepEqual(
       PRISM_INTRO_SCENES.map((scene) => scene.id),
       [
@@ -56,10 +56,18 @@ describe("PRISM intro sequence", () => {
     );
     assert.match(PRISM_INTRO_SCENES[0]!.title, /border between art and logic/u);
     assert.equal(PRISM_INTRO_SCENES[4]!.title, "You brought it.");
-    assert.equal(
-      PRISM_INTRO_SCENES.at(-1)?.title,
-      "You are the light. Prism reveals the spectrum.",
+    assert.match(
+      PRISM_INTRO_SCENES.at(-1)?.title ?? "",
+      /PRISM came online/u,
     );
+    assert.equal(
+      PRISM_INTRO_SCENES.at(-1)?.body,
+      "You are the light. Prism reveals the spectrum. One light. Many colors.",
+    );
+    assert.match(PRISM_INTRO_SCENES[2]!.title, /multitude waited/u);
+    assert.match(PRISM_INTRO_SCENES[2]!.imageAlt, /powered-off PRISM bot frames/u);
+    assert.match(PRISM_INTRO_SCENES[5]!.imageAlt, /circular PRISM bot frames/u);
+    assert.match(PRISM_INTRO_SCENES[5]!.imageAlt, /primary frame remains powered off/u);
     assert.equal(PRISM_INTRO_SCENES[6]!.body, "You decided what belonged.");
   });
 
