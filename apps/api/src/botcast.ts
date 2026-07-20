@@ -258,7 +258,10 @@ export async function runSignalOnlineTurn(args: {
     0,
     Math.round(args.retryDelayMs ?? SIGNAL_ONLINE_TURN_RETRY_DELAY_MS),
   );
-  const maxAttempts = Math.max(1, Math.min(2, args.maxAttempts ?? 2));
+  const maxAttempts = Math.max(
+    1,
+    Math.min(2, Math.floor(args.maxAttempts ?? 2)),
+  );
   const deadline = startedAt + totalTimeoutMs;
   const attempts: SignalOnlineTurnAttemptV1[] = [];
   let lastError: unknown = new Error("Signal ONLINE turn did not start.");
@@ -335,7 +338,9 @@ export async function runSignalOnlineTurn(args: {
   throw new SignalOnlineTurnError(attempts, lastError);
 }
 
-export function signalOnlineTurnHttpStatus(error: SignalOnlineTurnError): 502 | 504 {
+export function signalOnlineTurnHttpStatus(
+  error: SignalOnlineTurnError,
+): 502 | 504 {
   return error.attempts.at(-1)?.reason === "timeout" ? 504 : 502;
 }
 
@@ -5811,8 +5816,9 @@ export function forceEndBotcastEpisode(
 }
 
 /**
- * Gives the host one emergency closing beat after the Producer stops the show.
- * Provider failures fall back to the prior hard cut so the studio cannot hang.
+ * Gives an eligible cast member one emergency closing beat after the Producer
+ * stops the show. Echo-bound hosts hand that close to the guest. Provider
+ * failures fall back to the prior hard cut so the studio cannot hang.
  */
 export async function endBotcastEpisodeOnProducerCut(
   db: DatabaseSync,
@@ -5841,7 +5847,7 @@ export async function endBotcastEpisodeOnProducerCut(
     );
   } catch (error) {
     console.warn(
-      `[botcast] emergency host sign-off failed; completing producer cut episode=${episodeId}`,
+      `[botcast] emergency Signal sign-off failed; completing producer cut episode=${episodeId}`,
       error,
     );
     const episode = getBotcastEpisode(db, userId, episodeId);
@@ -6512,39 +6518,49 @@ export async function advanceBotcastEpisode(
       });
       raw = onlineTurn.value;
     } catch (error) {
-      if (error instanceof SignalOnlineTurnError) {
-        const latestEpisode = getBotcastEpisode(db, userId, episode.id);
-        const producerCutStartedDuringTurn =
-          !producerCut &&
-          latestEpisode.events.some(
-            (event) =>
-              event.sequence > turnStartEventSequence &&
-              event.kind === "cut_away" &&
-              event.payload.reason === "producer_cut",
-          );
-        if (
-          latestEpisode.status === "completed" ||
-          producerCutStartedDuringTurn
-        ) {
-          return { episode: latestEpisode, message: null };
-        }
-        recordEvent(db, userId, episode.id, "provider_generation", {
-          v: 1,
-          speakerRole,
-          botId: speaker.id,
-          responseMode: episode.responseMode,
-          provider: selected.providerName,
-          model: modelUsed,
-          turnOrdinal: episode.messages.length,
-          outcome: "failed",
-          attempts: error.attempts,
-          totalDurationMs: error.attempts.reduce(
-            (total, attempt) => total + attempt.durationMs,
-            0,
-          ),
-        });
+      if (!(error instanceof SignalOnlineTurnError)) throw error;
+      const latestEpisode = getBotcastEpisode(db, userId, episode.id);
+      const producerCutStartedDuringTurn =
+        !producerCut &&
+        latestEpisode.events.some(
+          (event) =>
+            event.sequence > turnStartEventSequence &&
+            event.kind === "cut_away" &&
+            event.payload.reason === "producer_cut",
+        );
+      if (
+        latestEpisode.status === "completed" ||
+        producerCutStartedDuringTurn
+      ) {
+        return { episode: latestEpisode, message: null };
       }
-      throw error;
+      recordEvent(db, userId, episode.id, "provider_generation", {
+        v: 1,
+        speakerRole,
+        botId: speaker.id,
+        responseMode: episode.responseMode,
+        provider: selected.providerName,
+        model: modelUsed,
+        turnOrdinal: episode.messages.length,
+        outcome: "failed",
+        attempts: error.attempts,
+        totalDurationMs: error.attempts.reduce(
+          (total, attempt) => total + attempt.durationMs,
+          0,
+        ),
+      });
+      if (
+        !botcastProviderReturnedEmptyResponse(
+          error.cause,
+          selected.providerName,
+        )
+      ) {
+        throw error;
+      }
+      console.warn(
+        `[botcast] speaker returned empty ${selected.providerName} response; using safe fallback episode=${episode.id} speaker=${speaker.id}`,
+      );
+      raw = "";
     }
   } else {
     try {
@@ -6640,6 +6656,13 @@ export async function advanceBotcastEpisode(
   const producerCutFallback = producerCut
     ? "Oh—we're ending here. Thank you for joining us, and thank you for listening."
     : null;
+  const echoHostGuestCutFallback =
+    producerCut &&
+    speakerRole === "guest" &&
+    episode.segment === "closing" &&
+    botPowerEchoesAddressedSpeechV1(host.powers)
+      ? `We will leave it there. ${host.name}, thank you, and thank you for listening.`
+      : null;
   const fallback =
     speakerRole === "host"
       ? producerCutFallback ??
@@ -6669,10 +6692,11 @@ export async function advanceBotcastEpisode(
           ? `Welcome to ${show.name}. ${host.name} is your host, and I'm ${guest.name}, joining them to explore ${openingSubject}. ${host.name}, my starting point is that the real stakes only appear when this idea meets a concrete consequence.`
         : episode.guestPresenceMode === "audience_only"
           ? "They still have no idea I am here. This is already more entertaining than the interview would have been."
-        : wrapUpCue
+        : echoHostGuestCutFallback ??
+          (wrapUpCue
           ? "The final point I would leave with your listeners is that the premise deserves more scrutiny than certainty."
           : silentGuestFallback ??
-            "I do not accept the premise as stated, but I will answer the part that matters.";
+            "I do not accept the premise as stated, but I will answer the part that matters.");
   const generatedContent = sanitizeUtterance(
     removeRepeatedBotcastInterruptionBridge(
       raw,

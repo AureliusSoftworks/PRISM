@@ -215,6 +215,7 @@ describe("Signal review transcript", () => {
       transcript,
       /- AUTO recovery: \{"attempts":2,"recoveredFrom":"primary-model"\}/u,
     );
+    assert.match(transcript, /- ONLINE retry: None recorded/u);
     assert.match(transcript, /- Immersive voice effect: yes/u);
     assert.match(
       transcript,
@@ -289,5 +290,55 @@ describe("Signal review transcript", () => {
     assert.doesNotMatch(transcript, /spoken turns/u);
     assert.doesNotMatch(transcript, /Spoken Transcript/u);
     assert.match(transcript, /Use the visible transcript for user-visible quality/u);
+  });
+
+  it("prints same-route ONLINE retry metadata beside the recovered utterance", () => {
+    const providerRecovery = {
+      v: 1,
+      strategy: "same_route_retry",
+      attempts: [
+        {
+          provider: "openai",
+          model: "gpt-signal",
+          durationMs: 410,
+          outcome: "failed",
+          reason: "provider_error",
+          httpStatus: 500,
+        },
+        {
+          provider: "openai",
+          model: "gpt-signal",
+          durationMs: 220,
+          outcome: "succeeded",
+        },
+      ],
+      finalProvider: "openai",
+      finalModel: "gpt-signal",
+    };
+    const transcript = buildSignalReviewTranscript({
+      episode: {
+        ...episode,
+        events: episode.events.map((event) =>
+          event.id === "event-2"
+            ? {
+                ...event,
+                payload: {
+                  ...event.payload,
+                  responseMode: "online",
+                  providerRecovery,
+                },
+              }
+            : event,
+        ),
+      },
+      show,
+      host: { id: "host-1", name: "Ada" },
+      guest: { id: "guest-1", name: "Grace" },
+    });
+
+    assert.match(
+      transcript,
+      /- ONLINE retry: \{"attempts":\[\{"durationMs":410,"httpStatus":500,"model":"gpt-signal","outcome":"failed","provider":"openai","reason":"provider_error"\},\{"durationMs":220,"model":"gpt-signal","outcome":"succeeded","provider":"openai"\}\],"finalModel":"gpt-signal","finalProvider":"openai","strategy":"same_route_retry","v":1\}/u,
+    );
   });
 });

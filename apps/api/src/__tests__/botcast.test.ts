@@ -20,6 +20,7 @@ import {
 
 import {
   BOTCAST_HOST_CALL_AFTER_DEPARTURE_PERCENT,
+  SignalOnlineTurnError,
   advanceBotcastEpisode,
   buildBotcastAudienceReviewArtifactV1,
   buildBotcastSpeakerPrompt,
@@ -51,8 +52,10 @@ import {
   projectBotcastEpisodeForAudienceV1,
   readBotcastShowAtmosphereAudio,
   readBotcastShowIntroAudio,
+  runSignalOnlineTurn,
   setBotcastEpisodeCameraMode,
   setBotcastModelWarmupHold,
+  signalOnlineTurnHttpStatus,
   selectBotcastReviewPersona,
   signalVisualOnlyListenerReaction,
   storeBotcastShowAtmosphereAudio,
@@ -5145,6 +5148,238 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
+  it("retries one transient ONLINE provider failure on the same model and records the recovery", async () => {
+    const db = fixture();
+    let calls = 0;
+    const provider: LlmProvider = {
+      name: "openai",
+      async generateResponse() {
+        calls += 1;
+        if (calls === 1) throw new Error("OpenAI request failed (500)");
+        return "Welcome to the show. I am Mara Vale, joined by Ivo Stone to examine one recovered Signal turn. Ivo, where should we begin?";
+      },
+      async embedText() {
+        return [];
+      },
+    };
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "One recovered Signal turn",
+        preferredProvider: "openai",
+        modelOverride: "gpt-signal",
+        responseMode: "online",
+      });
+      const result = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        {
+          preferredProvider: "openai",
+          providerFactory: (() => provider) as typeof selectProvider,
+        },
+      );
+
+      assert.equal(calls, 2);
+      assert.equal(result.message?.speakerRole, "host");
+      const generationEvent = result.episode.events.find(
+        (event) => event.kind === "provider_generation",
+      );
+      assert.equal(generationEvent?.payload.outcome, "succeeded");
+      const attempts = generationEvent?.payload.attempts as
+        | Array<Record<string, unknown>>
+        | undefined;
+      assert.equal(attempts?.length, 2);
+      assert.deepEqual(
+        attempts?.map((attempt) => ({
+          provider: attempt.provider,
+          model: attempt.model,
+          outcome: attempt.outcome,
+          reason: attempt.reason,
+          httpStatus: attempt.httpStatus,
+        })),
+        [
+          {
+            provider: "openai",
+            model: "gpt-signal",
+            outcome: "failed",
+            reason: "provider_error",
+            httpStatus: 500,
+          },
+          {
+            provider: "openai",
+            model: "gpt-signal",
+            outcome: "succeeded",
+            reason: undefined,
+            httpStatus: undefined,
+          },
+        ],
+      );
+      assert.equal(
+        attempts?.every(
+          (attempt) =>
+            typeof attempt.durationMs === "number" && attempt.durationMs >= 0,
+        ),
+        true,
+      );
+      const utterance = result.episode.events.find(
+        (event) => event.kind === "utterance",
+      );
+      assert.deepEqual(
+        (utterance?.payload.providerRecovery as { strategy?: unknown })
+          ?.strategy,
+        "same_route_retry",
+      );
+      assert.equal(utterance?.payload.provider, "openai");
+      assert.equal(utterance?.payload.model, "gpt-signal");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("bounds exhausted ONLINE attempts and maps timeout versus provider failure status", async () => {
+    const neverReturns: LlmProvider = {
+      name: "openai",
+      async generateResponse() {
+        return new Promise<string>(() => undefined);
+      },
+      async embedText() {
+        return [];
+      },
+    };
+    await assert.rejects(
+      () =>
+        runSignalOnlineTurn({
+          provider: neverReturns,
+          providerName: "openai",
+          model: "gpt-signal",
+          messages: [{ role: "user", content: "Bound this turn." }],
+          options: {},
+          attemptTimeoutMs: 5,
+          totalTimeoutMs: 20,
+          retryDelayMs: 0,
+        }),
+      (error: unknown) => {
+        assert.ok(error instanceof SignalOnlineTurnError);
+        assert.equal(error.attempts.length, 2);
+        assert.deepEqual(
+          error.attempts.map((attempt) => attempt.reason),
+          ["timeout", "timeout"],
+        );
+        assert.equal(signalOnlineTurnHttpStatus(error), 504);
+        return true;
+      },
+    );
+
+    let authCalls = 0;
+    const rejectsAuth: LlmProvider = {
+      name: "openai",
+      async generateResponse() {
+        authCalls += 1;
+        throw new Error("OpenAI request failed (401)");
+      },
+      async embedText() {
+        return [];
+      },
+    };
+    await assert.rejects(
+      () =>
+        runSignalOnlineTurn({
+          provider: rejectsAuth,
+          providerName: "openai",
+          model: "gpt-signal",
+          messages: [{ role: "user", content: "Do not retry auth." }],
+          options: {},
+          retryDelayMs: 0,
+        }),
+      (error: unknown) => {
+        assert.ok(error instanceof SignalOnlineTurnError);
+        assert.equal(error.attempts.length, 1);
+        assert.equal(signalOnlineTurnHttpStatus(error), 502);
+        return true;
+      },
+    );
+    assert.equal(authCalls, 1);
+  });
+
+  it("persists exhausted ONLINE attempts and safely resumes the same unsaved turn", async () => {
+    const db = fixture();
+    let calls = 0;
+    const provider: LlmProvider = {
+      name: "openai",
+      async generateResponse() {
+        calls += 1;
+        if (calls <= 2) throw new Error("OpenAI request failed (500)");
+        return "Welcome to the show. I am Mara Vale, joined by Ivo Stone to examine a resumable turn. Ivo, where should we begin?";
+      },
+      async embedText() {
+        return [];
+      },
+    };
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "A resumable turn",
+        preferredProvider: "openai",
+        modelOverride: "gpt-signal",
+        responseMode: "online",
+      });
+      const generationOptions = {
+        preferredProvider: "openai" as const,
+        providerFactory: (() => provider) as typeof selectProvider,
+      };
+
+      await assert.rejects(
+        () =>
+          advanceBotcastEpisode(
+            db,
+            "user-1",
+            episode.id,
+            {},
+            generationOptions,
+          ),
+        (error: unknown) => {
+          assert.ok(error instanceof SignalOnlineTurnError);
+          assert.equal(error.attempts.length, 2);
+          assert.equal(signalOnlineTurnHttpStatus(error), 502);
+          return true;
+        },
+      );
+      const failed = getBotcastEpisode(db, "user-1", episode.id);
+      assert.equal(failed.messages.length, 0);
+      const failedGeneration = failed.events.find(
+        (event) => event.kind === "provider_generation",
+      );
+      assert.equal(failedGeneration?.payload.outcome, "failed");
+      assert.equal(
+        (failedGeneration?.payload.attempts as unknown[] | undefined)?.length,
+        2,
+      );
+
+      const resumed = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generationOptions,
+      );
+      assert.equal(calls, 3);
+      assert.equal(resumed.message?.speakerRole, "host");
+      assert.equal(resumed.episode.messages.length, 1);
+      assert.deepEqual(
+        resumed.episode.events
+          .filter((event) => event.kind === "provider_generation")
+          .map((event) => event.payload.outcome),
+        ["failed", "succeeded"],
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   it("keeps an AUTO episode primary identity while recovering each turn through its fallback chain", async () => {
     const db = fixture();
     const attempts: Array<{ provider: string; model: string | undefined }> = [];
@@ -5989,6 +6224,64 @@ describe("Botcast persistence and isolation", () => {
       const closingPrompt = captures[2]!.map((message) => message.content).join("\n");
       assert.match(openingPrompt, /guest-led opening/u);
       assert.match(closingPrompt, /host cannot originate a closing/u);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("lets the guest close a producer cut when the host can only echo", async () => {
+    const db = fixture();
+    const captures: ProviderMessage[][] = [];
+    const provider = recordingProvider(
+      [
+        "Welcome to the show. Mara Vale is your host, and I am Ivo Stone, here to examine who owns a copied thought.",
+        "This generated host line is discarded in favor of the exact echo.",
+        "We will leave the copied thought unresolved. Mara, thank you, and thank you for listening.",
+      ],
+      captures,
+    );
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'host-1'").run(
+      echoPowers(),
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Who owns a copied thought",
+      });
+      const opening = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+      const echoed = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+      const cut = await endBotcastEpisodeOnProducerCut(
+        db,
+        "user-1",
+        episode.id,
+        generation(provider),
+      );
+
+      assert.equal(opening.message?.speakerRole, "guest");
+      assert.equal(echoed.message?.speakerRole, "host");
+      assert.equal(cut.message?.speakerRole, "guest");
+      assert.notEqual(cut.message?.content, "...");
+      assert.match(cut.message?.content ?? "", /thank you for listening/iu);
+      assert.equal(cut.episode.status, "completed");
+      assert.equal(cut.episode.segment, "closing");
+      assert.equal(cut.episode.messages.at(-1)?.speakerRole, "guest");
+      assert.match(
+        captures.at(-1)!.map((message) => message.content).join("\n"),
+        /host cannot originate a closing/u,
+      );
     } finally {
       db.close();
     }
