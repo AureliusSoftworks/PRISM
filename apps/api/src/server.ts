@@ -165,6 +165,7 @@ import {
   startCoffeeTurnJob,
 } from "./coffee-turn-jobs.ts";
 import {
+  SignalOnlineTurnError,
   advanceBotcastEpisode,
   botcastEpisodePowerSnapshotForRole,
   chatWithBotcastShowHost,
@@ -190,6 +191,7 @@ import {
   readBotcastShowIntroAudio,
   setBotcastEpisodeCameraMode,
   setBotcastModelWarmupHold,
+  signalOnlineTurnHttpStatus,
   storeBotcastShowAtmosphereAudio,
   storeBotcastShowIntroAudio,
   updateBotcastShow,
@@ -8815,41 +8817,49 @@ function buildRoutes(): RouteDefinition[] {
         requestedProvider === "anthropic"
           ? requestedProvider
           : user.preferred_provider;
-      const result = await advanceBotcastEpisode(
-        db,
-        userId,
-        ctx.params.id,
-        typeof body.guestMessage === "string"
-          ? {
-              guestMessage: body.guestMessage,
-              ...(typeof body.guestThinkingMs === "number"
-                ? { guestThinkingMs: body.guestThinkingMs }
-                : {}),
-            }
-          : cue
-          ? {
-              cue,
-              ...(cueDelivery ? { cueDelivery } : {}),
-              ...(hostRedirect ? { hostRedirect } : {}),
-              ...(guestInterruption ? { guestInterruption } : {}),
-            }
-          : {},
-        {
-          preferredProvider,
-          openAiApiKey:
-            getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey,
-          anthropicApiKey:
-            getAnthropicApiKeyForUser(userId, userKey) ??
-            config.anthropicApiKey,
-          secondaryOllamaHost: user.secondary_ollama_host,
-          preferredLocalModel: user.preferred_local_model,
-          preferredOnlineModel: user.preferred_online_model,
-          autoFallbackChain: parseStoredAutoFallbackChain(
-            user.auto_fallback_chain,
-          ),
-          providerFactory: providerFactoryOverride,
-        },
-      );
+      let result: Awaited<ReturnType<typeof advanceBotcastEpisode>>;
+      try {
+        result = await advanceBotcastEpisode(
+          db,
+          userId,
+          ctx.params.id,
+          typeof body.guestMessage === "string"
+            ? {
+                guestMessage: body.guestMessage,
+                ...(typeof body.guestThinkingMs === "number"
+                  ? { guestThinkingMs: body.guestThinkingMs }
+                  : {}),
+              }
+            : cue
+            ? {
+                cue,
+                ...(cueDelivery ? { cueDelivery } : {}),
+                ...(hostRedirect ? { hostRedirect } : {}),
+                ...(guestInterruption ? { guestInterruption } : {}),
+              }
+            : {},
+          {
+            preferredProvider,
+            openAiApiKey:
+              getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey,
+            anthropicApiKey:
+              getAnthropicApiKeyForUser(userId, userKey) ??
+              config.anthropicApiKey,
+            secondaryOllamaHost: user.secondary_ollama_host,
+            preferredLocalModel: user.preferred_local_model,
+            preferredOnlineModel: user.preferred_online_model,
+            autoFallbackChain: parseStoredAutoFallbackChain(
+              user.auto_fallback_chain,
+            ),
+            providerFactory: providerFactoryOverride,
+          },
+        );
+      } catch (error) {
+        if (error instanceof SignalOnlineTurnError) {
+          throw new HttpError(signalOnlineTurnHttpStatus(error), error.message);
+        }
+        throw error;
+      }
       json(ctx.res, 200, {
         ok: true,
         ...projectBotcastAdvanceResponseForAudienceV1(result),

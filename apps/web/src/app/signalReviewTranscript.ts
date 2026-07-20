@@ -171,6 +171,7 @@ export function buildSignalReviewTranscript(
         payloadString(event, "responseMode") ?? episode.responseMode;
       const recordedAt = event?.occurredAt ?? message.createdAt;
       const autoRecovery = event?.payload.autoRecovery;
+      const providerRecovery = event?.payload.providerRecovery;
       lines.push(
         `### Turn ${String(index + 1).padStart(2, "0")} | ${formatDuration(timeline.messageStartMs[index] ?? 0)} | ${participant.name} (${message.speakerRole})`,
         "",
@@ -181,6 +182,7 @@ export function buildSignalReviewTranscript(
         `- Delivery mood: ${message.moodKey}`,
         `- Turn routing: ${responseMode} -> ${provider} -> ${model}`,
         `- AUTO recovery: ${autoRecovery === undefined ? "None recorded" : stableJson(autoRecovery)}`,
+        `- ONLINE retry: ${providerRecovery === undefined ? "None recorded" : stableJson(providerRecovery)}`,
         `- Immersive voice effect: ${event?.payload.immersiveVoiceEffect === true ? "yes" : "no"}`,
         "- Stage action (avatar only):",
         indentBlock(message.stageActionText),
@@ -208,7 +210,7 @@ export function buildSignalReviewTranscript(
     "",
     "## Review Notes",
     "",
-    "Use the visible transcript for user-visible quality. Use the segment, cue, tension, routing, Power, listener reaction, camera, departure, and completion events to diagnose PRISM orchestration and replay fidelity.",
+    "Use the visible transcript for user-visible quality. Use the segment, cue, tension, routing, provider generation, Power, listener reaction, camera, departure, and completion events to diagnose PRISM orchestration and replay fidelity.",
   );
   return `${lines.join("\n").trimEnd()}\n`;
 }
