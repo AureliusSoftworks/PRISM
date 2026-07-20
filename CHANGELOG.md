@@ -12,6 +12,62 @@ Active development happens on the `dev` branch; every release is a merge into
 
 _Staging area - nothing queued for release yet._
 
+## [0.12.0] - 2026-07-20
+
+### Added
+
+- **Signal now treats every episode as an audience-truth anthology.** Producer
+  guest episodes, ephemeral off-air host chat, audience-perceptible reviews,
+  saved camera transitions, transcript following, and copyable diagnostic
+  reports extend the full production and replay loop.
+- **Slate can think through a creative choice with Lux and Umbra.** The two
+  project-scoped hemispheres alternate for a bounded number of rounds and
+  propose direction without gaining authority to edit the manuscript.
+- **PRISM exposes practical runtime controls and provenance.** Graphics quality,
+  ElevenLabs credit visibility, per-mode ephemeral-chat routing, and reusable
+  immutable review artifacts make expensive or perspective-sensitive work more
+  explicit.
+- **Generated image cleanup has a recoverable quarantine.** Account-scoped
+  audits can identify unreferenced assets, preview the selection, and move files
+  plus recovery metadata out of active storage without crossing tenants.
+
+### Changed
+
+- **Bot Powers have stronger app-wide runtime contracts.** Hard mute, exact
+  addressed-speech echo, hearing repeats, ghost presence, candor, response
+  budgets, and bounded interruptions now adapt to each active applet while
+  preserving privacy, required closings, and player agency.
+- **Signal production follows what actually reached the audience.** Private
+  cues, invisible or inaudible turns, live cutoffs, physical actions, voice,
+  captions, reviews, and replay now share one projected record; echo-bound or
+  muted hosts receive compatible opening, closing, and interruption behavior.
+- **Coffee sessions move with less dead air and end as a physical scene.** Faster
+  autonomous pacing, more reliable drinking, player-first replay departure,
+  private bot wrap-up, and recorded bot walk-outs keep the table coherent from
+  arrival through review.
+- **Voice playback is more consistent across engines.** Local voices share the
+  authored pitch, pace, mood, Voice Character, and default Chorus treatment;
+  Signal uses show-specific musical identity and room-and-Foley atmosphere.
+- **The Marketplace is bot-first.** Retired Generation Lens and broad personality
+  randomizer surfaces no longer compete with curated portable identities, while
+  focused voice variation remains available.
+
+### Fixed
+
+- **Signal episodes no longer stall around mute, interruption, departure, or
+  producer cuts.** Frozen mute wins before mutable bridge validation, unheard
+  speech stays out of the archive, listener audio is removed for muted bots, and
+  closing/outro state remains resumable and replay-safe.
+- **Coffee completion and replay preserve the whole table.** A departing player
+  leaves visibly, every remaining bot receives a final physical departure, and
+  Review stays quiet while the private epilogue finishes.
+- **Background persona facet refreshes retain the request's provider boundary.**
+  API and Coffee work no longer escape an injected or privacy-scoped auxiliary
+  provider during asynchronous refresh.
+- **Image lifecycle operations are safer across cleanup, backup, reset, and
+  deletion.** Referenced project assets remain intact, quarantined files stay
+  recoverable, and tenant ownership is enforced throughout.
+
 ## [0.11.0] - 2026-07-18
 
 ### Added
