@@ -6,6 +6,24 @@ import type { PrismMoodIgnoredQuestionPenaltyLevel } from "./mood.js";
 import type { AutoRecoveryTraceV1 } from "./autoFallback.js";
 
 export {
+  PRISM_EULA_ACCEPTANCE_ACTION,
+  PRISM_EULA_ACCEPTANCE_SNAPSHOT,
+  PRISM_EULA_AGREEMENT_CONFIRMATION,
+  PRISM_EULA_CONTENT_SHA256,
+  PRISM_EULA_DOCUMENT_ID,
+  PRISM_EULA_EFFECTIVE_DATE,
+  PRISM_EULA_KEY_POINTS,
+  PRISM_EULA_LEGAL_CONTACT_URL,
+  PRISM_EULA_MARKDOWN,
+  PRISM_EULA_MINIMUM_AGE,
+  PRISM_EULA_MINIMUM_AGE_CONFIRMATION,
+  PRISM_EULA_TITLE,
+  PRISM_EULA_VERSION,
+  PRISM_MODEL_VARIABILITY_NOTICE,
+  type PrismSignupLegalAcceptance,
+} from "./legal.js";
+
+export {
   SIGNAL_PERSONA_TEMPERAMENTS,
   rankSignalPersonaTemperaments,
   signalPersonaTemperamentFor,
@@ -58,14 +76,28 @@ export {
 
 export {
   BOT_POWER_INTENT_MAX_LENGTH,
+  BOT_POWER_CANONICAL_SILENCE_V1,
   BOT_POWER_MAX_COUNT,
   BOT_POWER_NAME_MAX_LENGTH,
   BOT_POWER_VERSION,
   COFFEE_POWER_PROMPT_MAX_CHARS,
   COFFEE_POWER_PROMPT_MAX_TOKENS,
+  activeBotPowerEffectsV1,
   activeBotPowersV1,
+  applyBotPowerEchoResponseV1,
+  applyBotPowerMuteResponseV1,
+  applyBotPowerResponseBudgetV1,
   botPowerCupRateMultiplierForBotV1,
+  botPowerCandorResponseRuleV1,
+  botPowerCandorTriggerV1,
+  botPowerDefinitionIsExplicitInterruptionV1,
+  botPowerDefinitionIsExplicitMuteV1,
+  botPowerEchoesAddressedSpeechV1,
+  botPowerHasSpeakingOnlyAvatarVisibilityV1,
+  botPowerIsMutedV1,
+  botPowerMuteActionTextsV1,
   botPowerObserverCueLinesV1,
+  botPowerResponseIsSilentV1,
   botPowerSelfCueLinesV1,
   botPowerSourceHashV1,
   buildBotPowersPromptBlock,
@@ -80,12 +112,20 @@ export {
   normalizeCompiledBotPowerV1,
   parseStoredBotPowersV1,
   serializeBotPowersV1,
+  strongestBotPowerCandorEffectV1,
+  strongestBotPowerInterruptionEffectV1,
+  strongestBotPowerResponseBudgetEffectV1,
+  strongestHardBotPowerResponseBudgetEffectV1,
   type BotPowerBondDirection,
   type BotPowerCompileStatus,
   type BotPowerEffectV1,
   type BotPowerFrequency,
   type BotPowerGravityDirection,
+  type BotPowerInterruptionMatchV1,
   type BotPowerMemoryMode,
+  type BotPowerEnforcement,
+  type BotPowerResponseBudgetEffectV1,
+  type BotPowerResponseBudgetMode,
   type BotPowerStrength,
   type BotPowerTargetV1,
   type BotPowerTopicDirection,
@@ -191,21 +231,34 @@ export {
 
 export {
   BOT_AUDIO_VOICE_IDS,
+  PRISM_BUILTIN_ENGLISH_VOICES,
+  prismBuiltinEnglishVoice,
   BOT_VOICE_TEXTURE_PRESETS,
   BOT_VOICE_TEXTURE_PRESET_LABELS,
   BOT_VOICE_TEXTURE_RECIPES,
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
   DEFAULT_ENGLISH_VOICE_ENGINE,
+  DEFAULT_VOICE_EFFECT,
   DEFAULT_VOICE_MODE,
+  VOICE_EFFECTS,
+  VOICE_EFFECT_DESCRIPTIONS,
+  VOICE_EFFECT_LABELS,
   ELEVENLABS_VOICE_EFFECTS,
   ELEVENLABS_VOICE_EFFECT_DESCRIPTIONS,
   ELEVENLABS_VOICE_EFFECT_LABELS,
+  ELEVENLABS_VOICE_STABILITY_DEFAULT,
+  BOT_VOICE_EQ_TILT_DB_MAX,
+  BOT_VOICE_LOW_SHELF_HZ,
+  BOT_VOICE_HIGH_SHELF_HZ,
+  BOT_VOICE_GAIN_DB_MIN,
+  BOT_VOICE_GAIN_DB_MAX,
   botVoiceTextureForPreset,
   botVoiceTextureIsModified,
   isBotAudioVoiceId,
   isBotVoiceTexturePreset,
   normalizeBotAudioVoiceControl,
+  normalizeBotVoiceGainDb,
   applyVoiceDeliveryMoodToProfile,
   normalizeBotAudioVoiceProfileV1,
   normalizeBotVoiceTexture,
@@ -214,25 +267,34 @@ export {
   normalizeEnglishVoiceEngine,
   normalizeElevenLabsVoiceDirection,
   normalizeElevenLabsVoiceEffect,
+  normalizeElevenLabsVoiceStability,
+  normalizeVoiceEffect,
   normalizeOptionalBotAudioVoiceProfileV1,
   resolveBotAudioVoiceProfileV1,
   normalizeVoiceMode,
   normalizeVoiceDeliveryMood,
-  resolveElevenLabsVoicePerformance,
+  elevenLabsVoiceDirectionForMood,
+  expectedVoicePlaybackDurationMs,
+  resolveVoicePlaybackTransform,
+  resolveBotVoiceCharacter,
   voiceDeliveryRateForMood,
   NEUTRAL_COFFEE_VOICE_DELIVERY_ENVELOPE,
   VOICE_DELIVERY_RATE_BY_MOOD,
+  ELEVENLABS_VOICE_DIRECTION_BY_MOOD,
   ELEVENLABS_VOICE_SPEED_MIN,
   ELEVENLABS_VOICE_SPEED_MAX,
   BOT_AUDIO_VOICE_PACE_RATE_DEPTH,
   BOT_AUDIO_VOICE_PITCH_DEPTH_CENTS,
   BOT_NAME_PRONUNCIATION_MAX_LENGTH,
+  BOT_NAME_SELF_REFERRAL_MAX_LENGTH,
   applyBotNamePronunciations,
   applyPlayerNamePronunciation,
   normalizeBotNamePronunciation,
+  normalizeBotSelfReferral,
   parseStoredBotAudioVoiceProfileV1,
   serializeBotAudioVoiceProfileV1,
   type BotAudioVoiceId,
+  type PrismBuiltinEnglishVoice,
   type BotAudioVoiceProfile,
   type BotAudioVoiceProfileV1,
   type BotAudioVoiceProfileV2,
@@ -240,12 +302,14 @@ export {
   type BotVoiceTextureV1,
   type CoffeeVoiceDeliveryEnvelope,
   type VoiceDeliveryMood,
-  type ElevenLabsVoicePerformanceV1,
+  type VoicePlaybackTransformV1,
+  type BotVoiceCharacterV1,
   type LegacyBotAudioVoiceProfileV1,
   type NormalizedBotAudioVoiceProfileV1,
   type BotNamePronunciationEntry,
   type EnglishVoiceEngine,
   type ElevenLabsVoiceEffect,
+  type VoiceEffect,
   type VoiceMode,
 } from "./audioVoice.js";
 
@@ -312,6 +376,8 @@ export {
   DEFAULT_BOT_FACE_MOUTH_ROTATION_DEG,
   DEFAULT_BOT_FACE_MOUTH_SCALE,
   DEFAULT_BOT_FACE_THINKING_FRAMES,
+  DISABLED_BOT_FACE_THINKING_FRAMES,
+  botFaceThinkingSpinnerDisabled,
   botFaceThinkingFramesEqual,
   botFaceFontFromVoicePreset,
   isBotFaceFontId,
@@ -472,6 +538,7 @@ export {
   GROUP_ROOM_WALLPAPER_MEMBER_BOT_ID_MAX_LENGTH,
   GROUP_ROOM_WALLPAPER_MEMBER_COUNT_MAX,
   GROUP_ROOM_WALLPAPER_MEMBER_COUNT_MIN,
+  GROUP_ROOM_WALLPAPER_VARIATION_SEED_MAX_LENGTH,
   type GroupRoomWallpaperImageGenerationRequest,
 } from "./groupRoomWallpaper.js";
 
@@ -635,6 +702,13 @@ export {
   type SlateContinuityThread,
   type SlateCreateSeriesRequest,
   type SlateCreateProjectRequest,
+  type SlateDeliberationConfig,
+  type SlateDeliberationFocus,
+  type SlateDeliberationHemisphereConfig,
+  type SlateDeliberationMessage,
+  type SlateDeliberationSpeaker,
+  type SlateDeliberationTurnRequest,
+  type SlateDeliberationTurnResponse,
   type SlateDraftRequest,
   type SlateGenerateTitleRequest,
   type SlateGenerateTitleResponse,
@@ -754,6 +828,7 @@ export type UsagePurpose =
   | "chat_web_search_followup"
   | "conversation_title"
   | "botcast_brand"
+  | "botcast_show_chat"
   | "botcast_review"
   | "botcast_turn"
   | "coffee_turn"
@@ -769,6 +844,7 @@ export type UsagePurpose =
   | "memory_summary"
   | "prompt_wildcard"
   | "psychic_planning"
+  | "slate_deliberation"
   | "slate_draft"
   | "slate_project_chat"
   | "slate_revision"
@@ -1526,6 +1602,174 @@ export function coffeeCupProgressAfterTopOff(args: {
     progressAfter + Math.max(timedConsumedProgress, explicitConsumedProgress),
   );
   return Math.min(progress, topOffProgress);
+}
+
+export const COFFEE_EMPTY_CUP_PROGRESS = 0.96;
+export const COFFEE_EMPTY_CUP_ATTEMPT_ANIMATION_MS = 3_200;
+export const COFFEE_EMPTY_CUP_ATTEMPT_WINDOW_MS = 5_200;
+
+export interface CoffeeEmptyCupAttemptState {
+  fillId: string;
+  fillStartedAtMs: number;
+  emptyAtMs: number;
+  maxAttempts: 2 | 3;
+  attemptStartedAtMs: number[];
+  attemptRealizedAtMs: number[];
+  startedAttemptCount: number;
+  realizedAttemptCount: number;
+  activeAttemptNumber: number | null;
+  activeAttemptProgress: number;
+  frowning: boolean;
+  gaveUp: boolean;
+}
+
+function coffeeEmptyCupAttemptGapMs(
+  durationMs: number,
+  seed: string,
+  attemptNumber: number,
+): number {
+  const firstAttempt = attemptNumber === 1;
+  const minFraction = firstAttempt ? 0.025 : attemptNumber === 2 ? 0.04 : 0.05;
+  const spreadFraction = firstAttempt ? 0.02 : 0.03;
+  const minimumMs = firstAttempt ? 5_000 : 7_500;
+  return Math.max(
+    minimumMs,
+    Math.round(
+      durationMs *
+        (minFraction +
+          coffeeCupStableUnitValue(`${seed}:empty-attempt-gap:${attemptNumber}`) *
+            spreadFraction),
+    ),
+  );
+}
+
+/**
+ * Deterministic empty-mug behavior shared by Coffee's live renderer and server.
+ * A refill starts a fresh 2-3-attempt arc; pauses remain aligned through the
+ * caller's sessionRemainingMs snapshot.
+ */
+export function coffeeEmptyCupAttemptState(args: {
+  seed: string;
+  nowMs: number;
+  sessionStartedAtMs?: number | null;
+  sessionRemainingMs?: number | null;
+  durationMinutes?: CoffeeSessionDurationMinutes | null;
+  topOff?: CoffeeCupTopOffSnapshot | null;
+  powerRateMultiplier?: number;
+}): CoffeeEmptyCupAttemptState | null {
+  if (!Number.isFinite(args.nowMs)) return null;
+  const durationMinutes =
+    typeof args.durationMinutes === "number" &&
+    Number.isFinite(args.durationMinutes) &&
+    args.durationMinutes > 0
+      ? args.durationMinutes
+      : DEFAULT_COFFEE_SESSION_DURATION_MINUTES;
+  const durationMs = durationMinutes * 60 * 1_000;
+  const rateMultiplier =
+    typeof args.powerRateMultiplier === "number" &&
+    Number.isFinite(args.powerRateMultiplier)
+      ? Math.max(0, Math.min(3, args.powerRateMultiplier))
+      : 1;
+  const consumptionRate =
+    coffeeCupConsumptionRate(args.seed, durationMinutes) * rateMultiplier;
+  if (consumptionRate <= 0) return null;
+
+  const remainingMs =
+    typeof args.sessionRemainingMs === "number" &&
+    Number.isFinite(args.sessionRemainingMs)
+      ? Math.max(0, Math.min(durationMs, args.sessionRemainingMs))
+      : null;
+  const sessionStartedAtMs =
+    remainingMs !== null
+      ? args.nowMs - (durationMs - remainingMs)
+      : typeof args.sessionStartedAtMs === "number" &&
+          Number.isFinite(args.sessionStartedAtMs)
+        ? args.sessionStartedAtMs
+        : null;
+  if (sessionStartedAtMs === null) return null;
+
+  const toppedOffAtMs = args.topOff ? Date.parse(args.topOff.toppedOffAt) : Number.NaN;
+  const usesTopOff =
+    args.topOff != null &&
+    Number.isFinite(toppedOffAtMs) &&
+    toppedOffAtMs >= sessionStartedAtMs &&
+    toppedOffAtMs <= args.nowMs;
+  const fillStartedAtMs = usesTopOff ? toppedOffAtMs : sessionStartedAtMs;
+  const fillStartProgress = usesTopOff
+    ? clampCoffeeCupProgress(args.topOff?.progressAfter ?? 0)
+    : 0;
+  const fillId = usesTopOff ? `topoff:${args.topOff!.toppedOffAt}` : "session";
+  const emptyAtMs =
+    fillStartedAtMs +
+    (Math.max(0, COFFEE_EMPTY_CUP_PROGRESS - fillStartProgress) /
+      consumptionRate) *
+      durationMs;
+  const desiredMaxAttempts: 2 | 3 =
+    coffeeCupStableUnitValue(`${args.seed}:${fillId}:empty-attempt-count`) < 0.5
+      ? 2
+      : 3;
+  const attemptStartedAtMs: number[] = [];
+  let nextAttemptAtMs = emptyAtMs;
+  for (
+    let attemptNumber = 1;
+    attemptNumber <= desiredMaxAttempts;
+    attemptNumber += 1
+  ) {
+    nextAttemptAtMs += coffeeEmptyCupAttemptGapMs(
+      durationMs,
+      `${args.seed}:${fillId}`,
+      attemptNumber,
+    );
+    attemptStartedAtMs.push(nextAttemptAtMs);
+  }
+  const realizationOffsetMs = Math.round(
+    COFFEE_EMPTY_CUP_ATTEMPT_ANIMATION_MS * 0.38,
+  );
+  const attemptRealizedAtMs = attemptStartedAtMs.map(
+    (startedAtMs) => startedAtMs + realizationOffsetMs,
+  );
+  const sessionEndsAtMs = sessionStartedAtMs + durationMs;
+  const maxAttempts: 2 | 3 =
+    desiredMaxAttempts === 3 && attemptRealizedAtMs[2]! <= sessionEndsAtMs
+      ? 3
+      : 2;
+  attemptStartedAtMs.splice(maxAttempts);
+  attemptRealizedAtMs.splice(maxAttempts);
+  const startedAttemptCount = attemptStartedAtMs.filter(
+    (startedAtMs) => startedAtMs <= args.nowMs,
+  ).length;
+  const realizedAttemptCount = attemptRealizedAtMs.filter(
+    (realizedAtMs) => realizedAtMs <= args.nowMs,
+  ).length;
+  let activeAttemptNumber: number | null = null;
+  let activeAttemptProgress = 0;
+  for (let index = attemptStartedAtMs.length - 1; index >= 0; index -= 1) {
+    const startedAtMs = attemptStartedAtMs[index]!;
+    const ageMs = args.nowMs - startedAtMs;
+    if (ageMs < 0 || ageMs > COFFEE_EMPTY_CUP_ATTEMPT_WINDOW_MS) continue;
+    activeAttemptNumber = index + 1;
+    activeAttemptProgress = Math.max(
+      0,
+      Math.min(1, ageMs / COFFEE_EMPTY_CUP_ATTEMPT_ANIMATION_MS),
+    );
+    break;
+  }
+
+  return {
+    fillId,
+    fillStartedAtMs,
+    emptyAtMs,
+    maxAttempts,
+    attemptStartedAtMs,
+    attemptRealizedAtMs,
+    startedAttemptCount,
+    realizedAttemptCount,
+    activeAttemptNumber,
+    activeAttemptProgress,
+    frowning:
+      activeAttemptNumber !== null && activeAttemptProgress >= 0.38,
+    gaveUp: realizedAttemptCount >= maxAttempts,
+  };
 }
 
 export function coffeeCupPromptCueForStatus(status: CoffeeCupStatus): string {
@@ -2342,6 +2586,8 @@ export interface CoffeeTurnResponse {
   routerReason?: string;
   /** True when an obsolete autonomous turn was safely discarded without inserting a reply. */
   stale?: boolean;
+  /** True when the revealed reply intentionally closes a table whose bots have disengaged. */
+  shouldEndSession?: boolean;
   /** Optional interruption event payload for live Coffee table presentation. */
   interruption?: CoffeeInterruptionEvent;
   /** Privacy-safe details when Auto recovered through another model. */
@@ -2411,6 +2657,11 @@ export interface CoffeePollPlayerVoteResponse {
   poll: CoffeePoll;
 }
 export * from "./botcast.js";
+export * from "./signalMusicProfile.js";
+export * from "./voiceSpokenText.js";
 export * from "./listenerReaction.js";
 export * from "./continuityVersion.js";
 export * from "./modelReadiness.js";
+export * from "./graphicsQuality.js";
+export * from "./review.js";
+export * from "./ephemeralChat.js";

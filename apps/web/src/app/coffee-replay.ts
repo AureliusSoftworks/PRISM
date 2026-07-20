@@ -1,4 +1,5 @@
 import { extractStageDirections, tokenizeBotMentionSource } from "./botMention.ts";
+import { normalizeCoffeeMessageDelivery } from "./coffee-voice-text.ts";
 import {
   coffeeCupSipMessageGapForDuration,
   normalizeListenerReactionPlanV1,
@@ -192,6 +193,36 @@ export const COFFEE_REPLAY_PLAYER_THINKING_MIN_MS = 800;
 export const COFFEE_REPLAY_PLAYER_THINKING_MAX_MS = 3_500;
 export const COFFEE_REPLAY_TOP_OFF_CHAIN_MS = 3_000;
 
+const COFFEE_PLAYER_SESSION_END_PATTERNS = [
+  /\b(?:let(?:'s| us)|we should|i think we should)\s+(?:end|stop|wrap(?: this| things)? up|call it)\b/iu,
+  /\b(?:end|stop|wrap up|finish)\s+(?:this|the|our)\s+coffee\s+session\b/iu,
+  /\b(?:call it a night|leave it there|stop here|wrap this up)\b/iu,
+  /\b(?:i (?:should|need|have to|must) (?:to )?(?:get going|go|head out|leave)|i(?:'m| am) (?:heading out|leaving))\b/iu,
+  /\b(?:catch (?:you|y['’]?all|everyone|you all) later|goodbye (?:everyone|everybody|all)|see (?:you|y['’]?all|everyone|you all) later)\b/iu,
+] as const;
+
+export function coffeePlayerMessageSignalsSessionEnd(text: string): boolean {
+  const normalized = text.replace(/\s+/gu, " ").trim();
+  if (!normalized) return false;
+  return COFFEE_PLAYER_SESSION_END_PATTERNS.some((pattern) =>
+    pattern.test(normalized),
+  );
+}
+
+export function coffeeReplayCompletionHoldMs(
+  message: Pick<CoffeeReplayMessageLike, "coffeeReplayEvents">,
+  reducedMotion: boolean,
+): number {
+  const events = message.coffeeReplayEvents ?? [];
+  if (events.some((event) => event.kind === "botDeparture")) {
+    return reducedMotion ? 120 : 2_700;
+  }
+  if (events.some((event) => event.kind === "playerDeparture")) {
+    return reducedMotion ? 120 : 1_280;
+  }
+  return 420;
+}
+
 function coffeeReplayGraphemeCount(text: string): number {
   if (typeof Intl.Segmenter === "function") {
     const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
@@ -222,7 +253,7 @@ export function coffeeConversationHasMeaningfulTableDialogue(
 ): boolean {
   return messages.some((message) => {
     if (message.role !== "user" && message.role !== "assistant") return false;
-    return extractStageDirections(message.content).mainText.trim().length > 0;
+    return normalizeCoffeeMessageDelivery(message.content).hasDialogue;
   });
 }
 
@@ -496,7 +527,7 @@ export function coffeeTranscriptVisibleMessages<T extends { role: string; conten
     if (message.role === "system") {
       return message.content.trim().length > 0;
     }
-    return extractStageDirections(message.content).mainText.trim().length > 0;
+    return normalizeCoffeeMessageDelivery(message.content).hasDialogue;
   });
 }
 
@@ -601,6 +632,9 @@ function coffeeReviewReplayEventLine(
       event.progressBefore
     )} -> ${coffeeReviewPercent(event.progressAfter)}`;
   }
+  if (event.kind === "emptyCupAttempt") {
+    return `- ${event.occurredAt} emptyCupAttempt: ${bot} forgot the ${event.fillId} cup was empty (${event.attemptNumber}/${event.maxAttempts})`;
+  }
   if (event.kind === "botDeparture") {
     return `- ${event.occurredAt} botDeparture: ${bot} left seat ${event.seatIndex + 1}`;
   }
@@ -609,9 +643,12 @@ function coffeeReviewReplayEventLine(
       event.plan.speakerBotId,
       botNameById,
     );
-    return `- ${event.occurredAt} listenerReaction: ${bot} ${event.plan.visualAction}${
-      event.plan.spokenCue ? ` + ${event.plan.spokenCue}` : ""
-    } while ${speaker} spoke (${event.plan.targetSource}, ${Math.round(
+    const audible = event.plan.spokenCue
+      ? ` + ${event.plan.spokenCue}`
+      : event.plan.vocalFoley
+        ? ` + [${event.plan.vocalFoley}]`
+        : "";
+    return `- ${event.occurredAt} listenerReaction: ${bot} ${event.plan.visualAction}${audible} while ${speaker} spoke (${event.plan.targetSource}, ${Math.round(
       event.plan.targetProgress * 100,
     )}%)`;
   }

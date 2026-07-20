@@ -1,16 +1,25 @@
 import type { DatabaseSync } from "node:sqlite";
 import {
+  activeBotPowerEffectsV1,
   activeBotPowersV1,
+  botPowerCandorResponseRuleV1,
+  botPowerCandorTriggerV1,
   buildCoffeePowersPromptBlock,
   COFFEE_HISTORY_WINDOW_HARD_CAP,
   coffeePowerCupRateMultiplierV1,
   type BotPowerEffectV1,
+  type BotPowerResponseBudgetEffectV1,
   type BotPowerStrength,
   type BotPowerTargetV1,
   type CoffeeBotSocialSnapshot,
   type CoffeePowerPlanV1,
   type ResolvedCoffeePowerBotV1,
 } from "@localai/shared";
+import {
+  applyCoffeeHearingRepeatMoodPenalty as applyCoffeeHearingRepeatMoodPenaltyV1,
+  botPowerTextRequestsRepeat,
+  strongestHearingRepeatEffect,
+} from "./bot-power-hearing-repeat.ts";
 
 interface CoffeePowerBotRow {
   id: string;
@@ -116,6 +125,8 @@ function resolvedEffect(
   }
   if (
     effect.type === "social_influence" ||
+    effect.type === "candor" ||
+    effect.type === "interruption" ||
     effect.type === "response_bond" ||
     effect.type === "selective_memory" ||
     effect.type === "insight"
@@ -171,6 +182,12 @@ export function coffeePowerSpeakerPressures(args: {
       if (effect.type === "turn_gravity") {
         const strength = powerStrengthScore(effect.strength);
         score += effect.direction === "more" ? strength : -strength;
+      } else if (
+        effect.type === "interruption" &&
+        args.lastSpeakerBotId &&
+        idsFromResolvedTargets(effect.targets).includes(args.lastSpeakerBotId)
+      ) {
+        score += powerStrengthScore(effect.strength);
       } else if (
         effect.type === "response_bond" &&
         args.lastSpeakerBotId &&
@@ -431,10 +448,8 @@ export function resolveCoffeePowersForSession(
     const powers = activeBotPowersV1(bot.powers_json);
     if (powers.length === 0) continue;
     const warnings: string[] = [];
-    const effects = powers.flatMap((power) =>
-      (power.compiled?.effects ?? []).map((effect) =>
-        resolvedEffect(effect, bot.id, orderedBots, warnings)
-      )
+    const effects = activeBotPowerEffectsV1(powers).map((effect) =>
+      resolvedEffect(effect, bot.id, orderedBots, warnings)
     );
     const awareness = effects.find((effect) => effect.type === "awareness");
     const speechAudience = effects.find((effect) => effect.type === "speech_audience");
@@ -474,6 +489,124 @@ export function coffeePowerBotCanSpeak(plan: CoffeePowerPlanV1 | null, botId: st
   return audience === null || audience === undefined || audience.length > 0;
 }
 
+export function coffeePowerBotIsMuted(plan: CoffeePowerPlanV1 | null, botId: string): boolean {
+  return plan?.bots[botId]?.effects.some((effect) => effect.type === "mute") === true;
+}
+
+/** Uses the frozen Coffee plan, so replay keeps the session's ghostly reveal. */
+export function coffeePowerBotHasSpeakingOnlyAvatarVisibility(
+  plan: CoffeePowerPlanV1 | null,
+  botId: string,
+): boolean {
+  return plan?.bots[botId]?.effects.some(
+    (effect) =>
+      effect.type === "avatar_visibility" && effect.mode === "speaking_only",
+  ) === true;
+}
+
+export function coffeePowerBotEchoesAddressedSpeech(
+  plan: CoffeePowerPlanV1 | null,
+  botId: string,
+): boolean {
+  return plan?.bots[botId]?.effects.some(
+    (effect) => effect.type === "echo_addressed",
+  ) === true;
+}
+
+export function coffeePowerEchoSourceForTurn(args: {
+  turnKind: "user" | "autonomous";
+  speakerBotId: string;
+  userActionOnly: boolean;
+  tableFocus: string;
+  explicitDirectedSpeakerBotId?: string | null;
+  currentUserAddressedBotId?: string | null;
+  priorAddressedBotId?: string | null;
+  latestAssistantContent?: string | null;
+}): string | null {
+  if (
+    args.turnKind === "user" &&
+    !args.userActionOnly &&
+    (args.explicitDirectedSpeakerBotId === args.speakerBotId ||
+      args.currentUserAddressedBotId === args.speakerBotId)
+  ) {
+    return args.tableFocus;
+  }
+  if (
+    args.turnKind === "autonomous" &&
+    args.priorAddressedBotId === args.speakerBotId &&
+    typeof args.latestAssistantContent === "string" &&
+    args.latestAssistantContent.length > 0
+  ) {
+    return args.latestAssistantContent;
+  }
+  return null;
+}
+
+export interface CoffeePowerHearingRepeatDirective {
+  requesterBotId: string;
+  repeatingBotId: string;
+  requestMessageId: string;
+  sourceMessageId: string;
+  repeatedContent: string;
+  moodPenalty: BotPowerStrength;
+}
+
+/**
+ * Resolves only an uninterrupted bot-to-bot request: speaker line, holder
+ * request, then the next autonomous Coffee turn. A player turn or direction
+ * breaks the chain instead of taking control away from them.
+ */
+export function coffeePowerHearingRepeatDirective(args: {
+  plan: CoffeePowerPlanV1 | null;
+  history: readonly {
+    id: string;
+    role: string;
+    content: string;
+    botId?: string | null;
+  }[];
+  eligibleBotIds: readonly string[];
+}): CoffeePowerHearingRepeatDirective | null {
+  const request = args.history.at(-1);
+  const source = args.history.at(-2);
+  if (
+    request?.role !== "assistant" ||
+    source?.role !== "assistant" ||
+    !request.botId ||
+    !source.botId ||
+    request.botId === source.botId ||
+    !botPowerTextRequestsRepeat(request.content)
+  ) {
+    return null;
+  }
+  const eligible = new Set(args.eligibleBotIds);
+  if (!eligible.has(request.botId) || !eligible.has(source.botId)) return null;
+  const effect = strongestHearingRepeatEffect(
+    args.plan?.bots[request.botId]?.effects ?? [],
+  );
+  if (!effect) return null;
+  if (!coffeePowerBotVisibleTo(args.plan, source.botId, request.botId)) return null;
+  const speechAudience = args.plan?.bots[source.botId]?.speechAudienceBotIds;
+  if (speechAudience !== null && speechAudience !== undefined) {
+    if (!speechAudience.includes(request.botId)) return null;
+  }
+  return {
+    requesterBotId: request.botId,
+    repeatingBotId: source.botId,
+    requestMessageId: request.id,
+    sourceMessageId: source.id,
+    repeatedContent: source.content,
+    moodPenalty: effect.moodPenalty,
+  };
+}
+
+export function applyCoffeeHearingRepeatMoodPenalty(args: {
+  socialByBotId: Record<string, CoffeeBotSocialSnapshot>;
+  repeatingBotId: string;
+  strength: BotPowerStrength;
+}): Record<string, CoffeeBotSocialSnapshot> {
+  return applyCoffeeHearingRepeatMoodPenaltyV1(args);
+}
+
 export function coffeePowerBotVisibleTo(
   plan: CoffeePowerPlanV1 | null,
   subjectBotId: string,
@@ -496,6 +629,12 @@ export function coffeePowersPromptForSpeaker(
   speakerBotId: string,
   visiblePeerBotIds: readonly string[],
   socialByBotId: Readonly<Record<string, CoffeeBotSocialSnapshot>> = {},
+  candorTurn?: {
+    sourceBotId: string | null;
+    sourceBotName?: string | null;
+    sourceText: string | null;
+    directlyAddressed: boolean;
+  },
 ): string {
   if (!plan) return "";
   const lines: string[] = [];
@@ -507,6 +646,29 @@ export function coffeePowersPromptForSpeaker(
     );
     if (names.length > 0) lines.push(`Hard rule: address only ${names.join(", ")}.`);
   }
+  if (own?.effects.some((effect) => effect.type === "echo_addressed")) {
+    lines.push("Hard echo rule: repeat only the latest speech addressed directly to you, verbatim, with no added words or actions. If nothing was addressed to you, remain silent.");
+  }
+  const responseBudget = coffeePowerResponseBudgetForBot(plan, speakerBotId);
+  if (responseBudget) {
+    lines.push(
+      responseBudget.mode === "minimal"
+        ? `${responseBudget.enforcement === "hard" ? "Hard" : "Soft"} response budget: use one short table sentence and do not elaborate.`
+        : responseBudget.mode === "brief"
+          ? `${responseBudget.enforcement === "hard" ? "Hard" : "Soft"} response budget: use no more than two concise table sentences.`
+          : "Response tendency: offer a fuller answer only when there is real substance; never pad the turn.",
+    );
+  }
+  const candorRule = coffeePowerCandorPromptForTurn({
+    plan,
+    targetBotId: speakerBotId,
+    ...(candorTurn ?? {
+      sourceBotId: null,
+      sourceText: null,
+      directlyAddressed: false,
+    }),
+  });
+  if (candorRule) lines.push(candorRule);
   lines.push(...coffeePowerInsightPromptLines({
     plan,
     speakerBotId,
@@ -577,6 +739,59 @@ export function coffeePowersPromptForSpeaker(
   return buildCoffeePowersPromptBlock(lines);
 }
 
+export function coffeePowerCandorPromptForTurn(args: {
+  plan: CoffeePowerPlanV1 | null;
+  sourceBotId: string | null;
+  sourceBotName?: string | null;
+  targetBotId: string;
+  sourceText: string | null;
+  directlyAddressed: boolean;
+}): string | null {
+  if (
+    !args.plan ||
+    !args.sourceBotId ||
+    args.sourceBotId === args.targetBotId ||
+    !args.directlyAddressed ||
+    !botPowerCandorTriggerV1(args.sourceText)
+  ) {
+    return null;
+  }
+  const source = args.plan.bots[args.sourceBotId];
+  if (!source || !coffeePowerBotVisibleTo(args.plan, args.sourceBotId, args.targetBotId)) {
+    return null;
+  }
+  if (
+    source.speechAudienceBotIds !== null &&
+    !source.speechAudienceBotIds.includes(args.targetBotId)
+  ) {
+    return null;
+  }
+  const strengthRank: Record<BotPowerStrength, number> = {
+    small: 1,
+    medium: 2,
+    large: 3,
+  };
+  const strongest = source.effects
+    .filter(
+      (effect): effect is Extract<BotPowerEffectV1, { type: "candor" }> =>
+        effect.type === "candor" &&
+        idsFromResolvedTargets(effect.targets).includes(args.targetBotId),
+    )
+    .reduce<Extract<BotPowerEffectV1, { type: "candor" }> | null>(
+      (best, effect) =>
+        !best || strengthRank[effect.strength] > strengthRank[best.strength]
+          ? effect
+          : best,
+      null,
+    );
+  return strongest
+    ? botPowerCandorResponseRuleV1(
+        strongest.strength,
+        args.sourceBotName?.trim() || "the bot who asked",
+      )
+    : null;
+}
+
 export function coffeePowerCupRateMultiplier(
   plan: CoffeePowerPlanV1 | null,
   botId: string
@@ -589,7 +804,44 @@ export function coffeePowerActionBias(
   botId: string
 ): Extract<BotPowerEffectV1, { type: "action_bias" }> | null {
   const effect = plan?.bots[botId]?.effects.find((candidate) => candidate.type === "action_bias");
-  return effect?.type === "action_bias" ? effect : null;
+  if (effect?.type === "action_bias") return effect;
+  const interruption = plan?.bots[botId]?.effects.find(
+    (candidate) => candidate.type === "interruption",
+  );
+  return interruption?.type === "interruption"
+    ? {
+        type: "action_bias",
+        cue: "Cut in quickly when a real conversational opening appears.",
+        frequency: interruption.frequency,
+      }
+    : null;
+}
+
+export function coffeePowerResponseBudgetForBot(
+  plan: CoffeePowerPlanV1 | null,
+  botId: string,
+  hardOnly = false,
+): BotPowerResponseBudgetEffectV1 | null {
+  const rank = { minimal: 0, brief: 1, expansive: 2 } as const;
+  return (plan?.bots[botId]?.effects ?? [])
+    .filter(
+      (effect): effect is BotPowerResponseBudgetEffectV1 =>
+        effect.type === "response_budget" &&
+        (!hardOnly ||
+          (effect.enforcement === "hard" && effect.mode !== "expansive")),
+    )
+    .reduce<BotPowerResponseBudgetEffectV1 | null>((strongest, effect) => {
+      if (!strongest) return effect;
+      if (rank[effect.mode] < rank[strongest.mode]) return effect;
+      if (
+        effect.mode === strongest.mode &&
+        effect.enforcement === "hard" &&
+        strongest.enforcement !== "hard"
+      ) {
+        return effect;
+      }
+      return strongest;
+    }, null);
 }
 
 function resistanceMultiplier(

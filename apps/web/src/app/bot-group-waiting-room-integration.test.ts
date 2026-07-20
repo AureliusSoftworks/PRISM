@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
+import { BOT_GROUP_WAITING_ROOM_ENABLED } from "./botGroupWaitingRoom.ts";
+
 const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
 const cssSource = readFileSync(
   new URL("./page.module.css", import.meta.url),
@@ -31,6 +33,14 @@ function assertNoNetworkCalls(source: string): void {
 }
 
 describe("bot group waiting-room integration", () => {
+  it("temporarily keeps saved groups on the standard grid", () => {
+    assert.equal(BOT_GROUP_WAITING_ROOM_ENABLED, false);
+    assert.match(
+      pageSource,
+      /const botGroupWaitingRoomEligible =\s*BOT_GROUP_WAITING_ROOM_ENABLED &&\s*Boolean\(user\)/,
+    );
+  });
+
   it("keeps the room Chat-only and leaves Sandbox on the compact picker", () => {
     assert.match(
       pageSource,

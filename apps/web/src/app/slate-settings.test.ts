@@ -11,6 +11,10 @@ const settingsPanelSource = readFileSync(
   new URL("./SettingsPanel.tsx", import.meta.url),
   "utf8",
 );
+const slateHemisphereSettingsSource = readFileSync(
+  new URL("./SlateHemisphereSettingsPanel.tsx", import.meta.url),
+  "utf8",
+);
 const firstRunSource = readFileSync(
   new URL("./firstRunOnboarding.ts", import.meta.url),
   "utf8",
@@ -50,4 +54,16 @@ test("Slate settings preserve the existing tutorial contract", () => {
   assert.match(pageSource, /resetSingleModeTutorial\("slate"\)/u);
   assert.match(tutorialsSource, /slate:\s*\{/u);
   assert.doesNotMatch(firstRunSource, /Continuity v0\.0/u);
+});
+
+test("Slate settings configure the active project's Lux and Umbra profiles", () => {
+  assert.match(pageSource, /<SlateHemisphereSettingsPanel/u);
+  assert.match(pageSource, /deliberationConfig: config/u);
+  assert.match(pageSource, /hemisphereSettingsUpdate=/u);
+  assert.match(slateHemisphereSettingsSource, /Lux &amp; Umbra/u);
+  assert.match(slateHemisphereSettingsSource, /Thinking model/u);
+  assert.match(slateHemisphereSettingsSource, /Creative lens/u);
+  assert.match(slateHemisphereSettingsSource, /Inherit project prose route/u);
+  assert.match(slateHemisphereSettingsSource, /Save hemispheres/u);
+  assert.match(slateHemisphereSettingsSource, /snapshot\.proseMode\.toUpperCase/u);
 });

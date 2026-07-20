@@ -4,7 +4,10 @@ import {
   PrismSceneHost,
   type PrismPixiModule,
 } from "./PrismSceneHost.ts";
-import { PrismWebGlRecoveryController } from "./prismSceneRuntime.ts";
+import {
+  PrismAdaptiveQualityController,
+  PrismWebGlRecoveryController,
+} from "./prismSceneRuntime.ts";
 
 class FakeSceneCanvas extends EventTarget {
   readonly dataset: Record<string, string> = {};
@@ -44,7 +47,9 @@ class FakeSceneApplication {
   };
   readonly screen = { width: 1, height: 1 };
   destroyed = false;
+  started = 0;
   stopped = 0;
+  rendered = 0;
 
   constructor() {
     FakeSceneApplication.latest = this;
@@ -60,9 +65,13 @@ class FakeSceneApplication {
     this.renderer.resolution = options.resolution;
   }
 
-  render(): void {}
+  render(): void {
+    this.rendered += 1;
+  }
 
-  start(): void {}
+  start(): void {
+    this.started += 1;
+  }
 
   stop(): void {
     this.stopped += 1;
@@ -222,6 +231,106 @@ describe("PRISM WebGL recovery", () => {
       assert.equal(fallback, 1);
       assert.equal(app.destroyed, true);
       assert.equal(app.canvas.removed, true);
+    } finally {
+      host.destroy();
+      Object.defineProperty(globalThis, "ResizeObserver", {
+        configurable: true,
+        value: previousResizeObserver,
+      });
+    }
+  });
+
+  it("settles fixed Low scenes without preventing adaptive High recovery sampling", async () => {
+    const previousResizeObserver = globalThis.ResizeObserver;
+    Object.defineProperty(globalThis, "ResizeObserver", {
+      configurable: true,
+      value: FakeSceneResizeObserver,
+    });
+    const container = {
+      clientWidth: 640,
+      clientHeight: 360,
+      getBoundingClientRect: () => ({ width: 640, height: 360 }),
+      appendChild: () => undefined,
+    } as unknown as HTMLElement;
+    let nowMs = 0;
+    const host = new PrismSceneHost({
+      sceneId: "unit-low-quality",
+      container,
+      activity: "ambient",
+      qualityCeiling: "full",
+      pixiLoader: fakePixiLoader,
+      now: () => nowMs,
+    });
+
+    try {
+      assert.equal(await host.initialize(), true);
+      const app = FakeSceneApplication.latest;
+      assert.ok(app);
+      (
+        host as unknown as {
+          lifecycle: {
+            lifecycle: "foreground";
+            visible: boolean;
+            focused: boolean;
+            pageHidden: boolean;
+            reducedMotion: boolean;
+            revision: number;
+          };
+        }
+      ).lifecycle = {
+        lifecycle: "foreground",
+        visible: true,
+        focused: true,
+        pageHidden: false,
+        reducedMotion: false,
+        revision: 1,
+      };
+      host.setActivity("interactive");
+      assert.equal(app.started > 0, true);
+      const controller = (
+        host as unknown as { adaptiveQuality: PrismAdaptiveQualityController }
+      ).adaptiveQuality;
+      nowMs = 2_001;
+      const recordBadWindows = (count: number): void => {
+        for (let windowIndex = 0; windowIndex < count; windowIndex += 1) {
+          for (
+            let sampleIndex = 0;
+            sampleIndex < 120;
+            sampleIndex += 1
+          ) {
+            nowMs += 40;
+            controller.recordFrame({
+              nowMs,
+              deltaMs: 40,
+              activity: "interactive",
+              foreground: true,
+            });
+          }
+        }
+      };
+      recordBadWindows(2);
+      assert.equal(controller.quality, "balanced");
+      nowMs += 10_001;
+      controller.noteDiscontinuity(nowMs);
+      nowMs += 2_001;
+      recordBadWindows(2);
+      assert.equal(controller.quality, "minimal");
+
+      const stoppedBeforeAdaptiveReconcile = app.stopped;
+      host.setActivity("ambient");
+      assert.equal(
+        app.stopped,
+        stoppedBeforeAdaptiveReconcile,
+        "an adaptively minimal High scene must keep its ticker alive",
+      );
+
+      host.setQualityCeiling("minimal");
+      assert.equal(
+        app.stopped,
+        stoppedBeforeAdaptiveReconcile + 1,
+        "switching to fixed Low must settle even when effective quality was already minimal",
+      );
+      assert.equal(app.rendered > 0, true, "Low still renders invalidations");
     } finally {
       host.destroy();
       Object.defineProperty(globalThis, "ResizeObserver", {

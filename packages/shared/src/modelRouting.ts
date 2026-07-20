@@ -14,7 +14,7 @@ const REQUIRED_VISIBLE_LOCAL_MODEL_ID_SET = new Set<string>([REQUIRED_PRIMARY_LO
 
 export type AutoModelProvider = "local" | "openai" | "anthropic";
 
-export const MODEL_VISIBILITY_DEFAULTS_VERSION = 4;
+export const MODEL_VISIBILITY_DEFAULTS_VERSION = 5;
 
 /** Minimal catalog shape: only model ids are read. */
 export interface CatalogShapeForAuto {
@@ -46,7 +46,7 @@ export function isDisabledModelChoice(value: unknown): boolean {
 }
 
 const COMMON_OPENAI_CHAT_MODEL_PATTERNS = [
-  /^gpt-5(?:\.\d+)?(?:-(?:mini|chat-latest))?$/,
+  /^gpt-5(?:\.\d+)?(?:-(?:mini|chat-latest|sol|terra|luna))?$/,
   /^gpt-4\.1(?:-mini)?$/,
   /^gpt-4o(?:-mini)?$/,
   /^chatgpt-4o-latest$/,

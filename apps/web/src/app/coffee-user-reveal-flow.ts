@@ -12,10 +12,14 @@ export type CoffeeUserRevealFlowState =
   | "tableTyping";
 
 export function coffeeComposerUsesRichInput(args: {
-  variant: "chat" | "coffee-global" | "coffee-table";
+  variant: "chat" | "coffee-global" | "coffee-table" | "signal";
   markdownEditorEnabled: boolean;
 }): boolean {
-  return args.markdownEditorEnabled || args.variant === "coffee-table";
+  return (
+    args.markdownEditorEnabled ||
+    args.variant === "coffee-table" ||
+    args.variant === "signal"
+  );
 }
 
 export function coffeeShouldQueueAssistantRevealAfterUserTyping(
@@ -104,7 +108,7 @@ export function coffeePersistedUserLineOwnsPendingReveal<
 
 export function coffeeTableMessageContentIsVisible(content: string): boolean {
   const normalized = content.trim();
-  return normalized.length > 0 && !/^[\p{P}\s]+$/u.test(normalized);
+  return /[\p{L}\p{N}]/u.test(normalized);
 }
 
 /** Sentence-case player prose for display without rewriting persisted message source. */

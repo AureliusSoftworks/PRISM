@@ -25,9 +25,7 @@ import {
 import {
   marketplaceBotEyeCharacterIsSideways,
   marketplaceEntriesForTheme,
-  marketplaceLensEntriesForCategory,
   marketplaceVisibleBotEntries,
-  marketplaceVisibleLensEntries,
   normalizeBotMarketplaceManifest
 } from "./botMarketplace.ts";
 import {
@@ -433,53 +431,26 @@ describe("bot marketplace static catalog", () => {
     assert.equal(styleText.includes("255, 111, 145"), false);
   });
 
-  it("ships first-class Lens marketplace entries", () => {
-    const manifest = normalizeBotMarketplaceManifest(
-      readJsonFile(path.join(publicRoot, "bot-marketplace/manifest.json"))
+  it("ships a bot-only catalog after Generation Lenses are removed", () => {
+    const rawManifest = readJsonFile<Record<string, unknown>>(
+      path.join(publicRoot, "bot-marketplace/manifest.json")
     );
-    const visibleLensIds = marketplaceVisibleLensEntries(manifest).map((lens) => lens.id);
 
-    assert.deepEqual(
-      manifest.lensCategories.map((category) => category.id),
-      ["sacred-wisdom", "adventure-roleplay", "creative-styles", "thinking-styles", "civic-perspectives"]
+    assert.equal(Object.hasOwn(rawManifest, "lensCategories"), false);
+    assert.equal(Object.hasOwn(rawManifest, "lenses"), false);
+    assert.equal(
+      Array.isArray(rawManifest.bots) &&
+        rawManifest.bots.some(
+          (bot) =>
+            Boolean(bot) &&
+            typeof bot === "object" &&
+            (bot as Record<string, unknown>).replacementType === "lens"
+        ),
+      false
     );
-    const expectedLensIdsByCategory = {
-      "sacred-wisdom": ["christian_wisdom", "islamic_wisdom", "buddhist_wisdom", "taoist_wisdom", "sikh_wisdom"],
-      "adventure-roleplay": ["pirate", "space_opera", "high_fantasy_quest", "cozy_mystery", "cyberpunk_runner"],
-      "creative-styles": ["surrealist", "cozy_storybook", "mythic_epic", "noir_mood", "minimalist_design"],
-      "thinking-styles": ["stoic", "systems_thinker", "dialectical_skeptic", "scientific_method", "first_principles"],
-      "civic-perspectives": [
-        "republican_civic",
-        "democratic_civic",
-        "libertarian_autonomy",
-        "municipal_builder",
-        "civic_futurist"
-      ]
-    };
-    for (const [categoryId, expectedLensIds] of Object.entries(expectedLensIdsByCategory)) {
-      assert.deepEqual(
-        marketplaceLensEntriesForCategory(manifest, categoryId).map((lens) => lens.id),
-        expectedLensIds,
-        categoryId
-      );
-      assert.equal(expectedLensIds.length, 5, categoryId);
-      for (const lensId of expectedLensIds) {
-        assert.equal(visibleLensIds.includes(lensId), true, lensId);
-      }
-    }
-    assert.equal(visibleLensIds.length, 25);
-
-    const civic = manifest.lenses.find((lens) => lens.id === "republican_civic");
-    assert.equal(civic?.researchUseAllowed, true);
-    assert.match(civic?.researchDisclaimer ?? "", /not represent real Republican voters/i);
-    for (const lensId of ["municipal_builder", "civic_futurist"]) {
-      const lens = manifest.lenses.find((candidate) => candidate.id === lensId);
-      assert.equal(lens?.researchUseAllowed, true, lensId);
-      assert.match(lens?.researchDisclaimer ?? "", /synthetic/i, lensId);
-    }
   });
 
-  it("hides direct sacred teacher bots from public marketplace shelves", () => {
+  it("keeps deprecated sacred teacher bots off public marketplace shelves", () => {
     const manifest = normalizeBotMarketplaceManifest(
       readJsonFile(path.join(publicRoot, "bot-marketplace/manifest.json"))
     );
@@ -494,7 +465,7 @@ describe("bot marketplace static catalog", () => {
       assert.equal(visibleBotIds.has(botId), false, botId);
       assert.equal(byId.get(botId)?.marketplaceVisible, false, botId);
       assert.equal(byId.get(botId)?.deprecated, true, botId);
-      assert.equal(byId.get(botId)?.replacementType, "lens", botId);
+      assert.equal(byId.get(botId)?.replacementType, null, botId);
     }
   });
 

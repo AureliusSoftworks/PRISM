@@ -60,6 +60,52 @@ describe("createDatabase runtime pragmas", () => {
   });
 });
 
+describe("createDatabase legal acceptance schema", () => {
+  it("creates versioned, account-scoped clickwrap records", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "prism-legal-schema-"));
+    const previousDbPath = process.env.DB_PATH;
+    const previousDataDir = process.env.LOCALAI_DATA_DIR;
+    process.env.DB_PATH = join(tempDir, "legal.db");
+    delete process.env.LOCALAI_DATA_DIR;
+    try {
+      const db = createDatabase();
+      const columns = db
+        .prepare("PRAGMA table_info(legal_acceptances)")
+        .all() as Array<{ name: string }>;
+      assert.deepEqual(
+        columns.map((column) => column.name),
+        [
+          "id",
+          "user_id",
+          "document_id",
+          "document_version",
+          "document_hash",
+          "document_snapshot",
+          "acceptance_method",
+          "minimum_age_confirmed",
+          "accepted_at",
+        ],
+      );
+      const foreignKeys = db
+        .prepare("PRAGMA foreign_key_list(legal_acceptances)")
+        .all() as Array<{ table: string; from: string; on_delete: string }>;
+      assert.ok(
+        foreignKeys.some(
+          (key) =>
+            key.table === "users" &&
+            key.from === "user_id" &&
+            key.on_delete === "CASCADE",
+        ),
+      );
+      db.close();
+    } finally {
+      restoreEnv("DB_PATH", previousDbPath);
+      restoreEnv("LOCALAI_DATA_DIR", previousDataDir);
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("createDatabase bot export hash migration", () => {
   it("ensures bots.export_hash exists and backfills missing values", () => {
     const tempDir = mkdtempSync(join(tmpdir(), "localai-db-test-"));
@@ -105,6 +151,7 @@ describe("createDatabase bot export hash migration", () => {
         "user-1"
       );
       db.exec("ALTER TABLE users DROP COLUMN preferred_image_provider;");
+      db.exec("ALTER TABLE users DROP COLUMN graphics_quality;");
       db.exec(
         "ALTER TABLE botcast_shows DROP COLUMN fallback_studio_accent_variant;"
       );
@@ -120,6 +167,14 @@ describe("createDatabase bot export hash migration", () => {
       const botcastShowColumns = reopened
         .prepare("PRAGMA table_info(botcast_shows)")
         .all() as Array<{ name: string }>;
+      assert.equal(
+        (
+          columns.find((column) => column.name === "self_referral") as
+            | { dflt_value?: string | null }
+            | undefined
+        )?.dflt_value,
+        "''",
+      );
       assert.ok(
         botcastShowColumns.some(
           (column) => column.name === "fallback_studio_accent_variant"
@@ -129,6 +184,19 @@ describe("createDatabase bot export hash migration", () => {
         userColumns.some(
           (column) => column.name === "model_visibility_defaults_version"
         )
+      );
+      assert.ok(
+        userColumns.some(
+          (column) =>
+            column.name === "graphics_quality" &&
+            column.dflt_value === "'high'",
+        ),
+      );
+      assert.equal(
+        (reopened
+          .prepare("SELECT graphics_quality FROM users WHERE id = ?")
+          .get("user-1") as { graphics_quality: string }).graphics_quality,
+        "high",
       );
       assert.ok(
         userColumns.some(
@@ -155,6 +223,12 @@ describe("createDatabase bot export hash migration", () => {
       assert.equal(
         userColumns.find((column) => column.name === "voice_volume")?.dflt_value,
         "1"
+      );
+      assert.equal(
+        userColumns.find(
+          (column) => column.name === "operating_system_voices_enabled"
+        )?.dflt_value,
+        "0"
       );
       assert.ok(userColumns.some((column) => column.name === "hidden_comfyui_workflow_ids"));
       assert.ok(userColumns.some((column) => column.name === "preferred_image_provider"));

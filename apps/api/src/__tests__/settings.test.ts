@@ -50,7 +50,9 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
   return {
     displayName: "Alex",
     theme: "dark",
+    graphicsQuality: "high",
     preferredProvider: "local",
+    ephemeralChatProviderPreferences: "{}",
     preferredImageProvider: "local",
     providerLocked: 0,
     autoMemory: 1,
@@ -96,6 +98,7 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     voiceMode: "mute",
     voiceEffectsEnabled: 1,
     voiceVolume: 1,
+    operatingSystemVoicesEnabled: 0,
     englishVoiceEngine: "elevenlabs",
     defaultSystemVoiceName: null,
     defaultElevenLabsVoiceId: null,
@@ -107,13 +110,72 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
   };
 }
 
+describe("resolveNextSettings — ephemeral chat providers", () => {
+  it("inherits the global toggle by default and saves valid per-mode overrides", () => {
+    assert.deepEqual(
+      resolveNextSettings({}, baseline()).ephemeralChatProviderPreferences,
+      {
+        chat: "global",
+        zen: "global",
+        coffee: "global",
+        botcast: "global",
+        slate: "global",
+      },
+    );
+
+    assert.deepEqual(
+      resolveNextSettings(
+        {
+          ephemeralChatProviderPreferences: {
+            chat: "local",
+            zen: "online",
+            coffee: "global",
+            botcast: "online",
+            slate: "unsupported",
+          },
+        },
+        baseline(),
+      ).ephemeralChatProviderPreferences,
+      {
+        chat: "local",
+        zen: "online",
+        coffee: "global",
+        botcast: "online",
+        slate: "global",
+      },
+    );
+  });
+
+  it("preserves existing choices when an unrelated PATCH is resolved", () => {
+    assert.deepEqual(
+      resolveNextSettings(
+        { theme: "light" },
+        baseline({
+          ephemeralChatProviderPreferences: JSON.stringify({
+            coffee: "local",
+            botcast: "online",
+          }),
+        }),
+      ).ephemeralChatProviderPreferences,
+      {
+        chat: "global",
+        zen: "global",
+        coffee: "local",
+        botcast: "online",
+        slate: "global",
+      },
+    );
+  });
+});
+
 describe("resolveNextSettings — voice foundation", () => {
-  it("keeps ElevenLabs available online while retiring account-level voice identities", () => {
+  it("keeps ElevenLabs available online while preserving legacy voice identities", () => {
     const next = resolveNextSettings(
       {
         voiceMode: "babble",
         voiceEffectsEnabled: false,
         voiceVolume: 0.65,
+        operatingSystemVoicesEnabled: true,
         englishVoiceEngine: "builtin",
         defaultSystemVoiceName: "  Alex  ",
         defaultElevenLabsVoiceId: " eleven-default ",
@@ -126,14 +188,20 @@ describe("resolveNextSettings — voice foundation", () => {
     assert.equal(next.voiceMode, "babble");
     assert.equal(next.voiceEffectsEnabled, false);
     assert.equal(next.voiceVolume, 0.65);
+    assert.equal(next.operatingSystemVoicesEnabled, true);
     assert.equal(next.englishVoiceEngine, "elevenlabs");
-    assert.equal(next.defaultSystemVoiceName, null);
-    assert.equal(next.defaultElevenLabsVoiceId, null);
+    assert.equal(next.defaultSystemVoiceName, "Alex");
+    assert.equal(next.defaultElevenLabsVoiceId, "eleven-default");
     assert.deepEqual(next.elevenLabsVoiceBank, {
       "voice-1": "voice_alpha", "voice-2": null, "voice-3": null, "voice-4": null, "voice-5": null,
     });
     assert.equal(next.elevenLabsVoiceModel, "eleven_multilingual_v2");
     assert.equal(next.elevenLabsVoiceCollectionId, "collection-main");
+    assert.equal(
+      resolveNextSettings({}, baseline({ operatingSystemVoicesEnabled: 1 }))
+        .operatingSystemVoicesEnabled,
+      true,
+    );
     assert.equal(
       resolveNextSettings(
         { elevenLabsVoiceCollectionId: "" },
@@ -148,6 +216,30 @@ describe("resolveNextSettings — voice foundation", () => {
       ).elevenLabsVoiceCollectionId,
       "collection-old",
     );
+    const preserved = resolveNextSettings(
+      { theme: "light" },
+      baseline({
+        defaultSystemVoiceName: "Samantha",
+        defaultElevenLabsVoiceId: "legacy-provider-voice",
+      }),
+    );
+    assert.equal(preserved.defaultSystemVoiceName, "Samantha");
+    assert.equal(
+      preserved.defaultElevenLabsVoiceId,
+      "legacy-provider-voice",
+    );
+    const explicitlyCleared = resolveNextSettings(
+      {
+        defaultSystemVoiceName: null,
+        defaultElevenLabsVoiceId: null,
+      },
+      baseline({
+        defaultSystemVoiceName: "Samantha",
+        defaultElevenLabsVoiceId: "legacy-provider-voice",
+      }),
+    );
+    assert.equal(explicitlyCleared.defaultSystemVoiceName, null);
+    assert.equal(explicitlyCleared.defaultElevenLabsVoiceId, null);
   });
 });
 
@@ -175,6 +267,36 @@ describe("resolveNextSettings — theme", () => {
   it("keeps the stored theme when the value is garbage", () => {
     const next = resolveNextSettings({ theme: "purple" }, baseline({ theme: "light" }));
     assert.equal(next.theme, "light");
+  });
+});
+
+describe("resolveNextSettings — graphics quality", () => {
+  it("accepts Low, Medium, and High while preserving a valid stored tier", () => {
+    assert.equal(
+      resolveNextSettings({ graphicsQuality: "low" }, baseline()).graphicsQuality,
+      "low",
+    );
+    assert.equal(
+      resolveNextSettings(
+        { graphicsQuality: "medium" },
+        baseline({ graphicsQuality: "high" }),
+      ).graphicsQuality,
+      "medium",
+    );
+    assert.equal(
+      resolveNextSettings(
+        { graphicsQuality: "high" },
+        baseline({ graphicsQuality: "low" }),
+      ).graphicsQuality,
+      "high",
+    );
+    assert.equal(
+      resolveNextSettings(
+        { graphicsQuality: "ultra" },
+        baseline({ graphicsQuality: "medium" }),
+      ).graphicsQuality,
+      "medium",
+    );
   });
 });
 

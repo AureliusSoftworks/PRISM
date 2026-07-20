@@ -2238,7 +2238,7 @@ dependencies = [
 
 [[package]]
 name = "prism_desktop"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "serde",
  "serde_json",

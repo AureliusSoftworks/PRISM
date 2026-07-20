@@ -2,12 +2,17 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
+  buildBottishPlaybackPlan,
   buildBottishPlan,
   buildBabbleRoboticPlan,
   encodeBottishPlanWave,
+  enqueueBabbleVoice,
   FIXED_BOTTISH_TONE,
   fitBottishPlanToDuration,
+  pcmWaveDurationMs,
+  resolveBabblePlaybackProfile,
   scaleBottishPlanForDeliveryRate,
+  signalRobotVoiceCadenceTiming,
   mixBabbleMediaWave,
   normalizeBottishPlaybackProfile,
   prepareBottishVoice,
@@ -177,14 +182,15 @@ describe("Bottish speech plan", () => {
     assert.deepEqual(new Uint8Array(unmixed), originalBytes);
   });
 
-  it("ignores legacy Tone, Lilt, Pace, and Warmth values", () => {
+  it("ignores retired Tone and Warmth while Lilt remains a local pitch contour", () => {
     const base = buildBottishPlan("Testing removed controls.", neutral, "same");
     const legacyValues = buildBottishPlan(
       "Testing removed controls.",
       { ...neutral, pace: 1, warmth: -1, lilt: 1, signal: -1 },
       "same"
     );
-    assert.deepEqual(legacyValues, base);
+    assert.equal(legacyValues.durationMs, base.durationMs);
+    assert.notDeepEqual(legacyValues.notes, base.notes);
   });
 
   it("keeps the neutral mix bright and clearly audible", () => {
@@ -340,10 +346,74 @@ describe("Bottish speech plan", () => {
     assert.ok((fitted.notes.at(-1)?.startMs ?? 0) < fitted.durationMs);
   });
 
-  it("never speeds Bottish up to fit a short streaming window", () => {
+  it("keeps short-window compression opt-in and hard-bounded", () => {
     const original = buildBottishPlan("A streamed reply with several words.", neutral, "no-turbo");
-    const fitted = fitBottishPlanToDuration(original, 640);
-    assert.equal(fitted, original);
+    assert.equal(fitBottishPlanToDuration(original, 640), original);
+
+    const fitted = fitBottishPlanToDuration(original, 640, 99);
+    assert.equal(fitted.durationMs, Math.ceil(original.durationMs / 1.24));
+    assert.equal(fitted.notes.length, original.notes.length);
+    assert.equal(
+      fitted.alignment.characters.join(""),
+      original.alignment.characters.join(""),
+    );
+    assert.ok(
+      (fitted.alignment.characterEndTimesSeconds.at(-1) ?? 0) <
+        fitted.durationMs / 1_000,
+    );
+  });
+
+  it("targets an English-like Signal window without exceeding the safe rate", () => {
+    const text = "A streamed reply with several words.";
+    const timing = signalRobotVoiceCadenceTiming(text);
+    assert.deepEqual(timing, {
+      targetDurationMs: 2_260,
+      maximumCompressionRate: 1.24,
+    });
+    const natural = buildBottishPlan(text, neutral, "signal-cadence");
+    const fitted = buildBottishPlaybackPlan(
+      text,
+      neutral,
+      "signal-cadence",
+      timing,
+    );
+    assert.equal(fitted.durationMs, Math.ceil(natural.durationMs / 1.24));
+    assert.ok(fitted.durationMs < natural.durationMs);
+    assert.equal(
+      fitted.alignment.characters.join(""),
+      natural.alignment.characters.join(""),
+    );
+
+    const moodTuned = buildBottishPlaybackPlan(
+      text,
+      neutral,
+      "signal-cadence",
+      { ...timing, deliveryRate: 1.08 },
+    );
+    assert.ok(natural.durationMs / moodTuned.durationMs <= 1.241);
+    assert.ok(moodTuned.durationMs < natural.durationMs);
+  });
+
+  it("opts Signal robot speech into cadence fitting without changing other callers", () => {
+    const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+    const signalPlaybackStart = pageSource.indexOf(
+      "const playBotcastUtterance = useCallback",
+    );
+    const signalPlaybackEnd = pageSource.indexOf(
+      "const storyDiscoveredLocationIds",
+      signalPlaybackStart,
+    );
+    assert.notEqual(signalPlaybackStart, -1);
+    assert.notEqual(signalPlaybackEnd, -1);
+    const signalPlayback = pageSource.slice(signalPlaybackStart, signalPlaybackEnd);
+    assert.match(
+      signalPlayback,
+      /proceduralTiming: signalRobotVoiceCadenceTiming\(spokenText\)/u,
+    );
+    assert.match(
+      pageSource,
+      /\(args\.proceduralTiming\?\.deliveryRate \?\? 1\) \*[\s\S]{0,80}voiceDeliveryRateForMood\(args\.moodKey\)/u,
+    );
   });
 
   it("keeps the natural duration when no streaming window is supplied", () => {
@@ -361,5 +431,146 @@ describe("Bottish speech plan", () => {
       ),
       true
     );
+  });
+
+  it("tunes Babble WAV playback toward the same bounded Signal window", () => {
+    const wave = encodeBottishPlanWave({
+      notes: [],
+      durationMs: 2_000,
+      alignment: {
+        characters: [],
+        characterStartTimesSeconds: [],
+        characterEndTimesSeconds: [],
+      },
+    });
+    assert.equal(pcmWaveDurationMs(wave), 2_000);
+    const profile = resolveBabblePlaybackProfile(neutral, wave, {
+      targetDurationMs: 1_000,
+      maximumCompressionRate: 1.24,
+    });
+    assert.equal(profile.pace, 1);
+    assert.equal(resolveBabblePlaybackProfile(neutral, wave).pace, 0);
+  });
+
+  it("keeps sped-up Babble reveal progress on the media playback clock", async () => {
+    const originalAudio = Object.getOwnPropertyDescriptor(globalThis, "Audio");
+    const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+    const originalCreateObjectUrl = Object.getOwnPropertyDescriptor(URL, "createObjectURL");
+    const originalRevokeObjectUrl = Object.getOwnPropertyDescriptor(URL, "revokeObjectURL");
+    let frameCallback: (() => void) | null = null;
+    const mediaInstances: FakeAudio[] = [];
+    class FakeAudio {
+      duration = 2;
+      currentTime = 0;
+      playbackRate = 1;
+      preservesPitch = true;
+      preload = "";
+      src = "";
+      volume = 1;
+      readonly listeners = new Map<string, () => void>();
+
+      constructor() {
+        mediaInstances.push(this);
+      }
+
+      addEventListener(name: string, listener: () => void): void {
+        this.listeners.set(name, listener);
+      }
+      pause(): void {}
+      removeAttribute(name: string): void {
+        if (name === "src") this.src = "";
+      }
+      load(): void {}
+      play(): Promise<void> {
+        return Promise.resolve();
+      }
+    }
+    Object.defineProperty(globalThis, "Audio", {
+      configurable: true,
+      writable: true,
+      value: FakeAudio,
+    });
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      writable: true,
+      value: {
+        AudioContext: undefined,
+        setTimeout: globalThis.setTimeout.bind(globalThis),
+        clearTimeout: globalThis.clearTimeout.bind(globalThis),
+        requestAnimationFrame: (callback: () => void) => {
+          frameCallback = callback;
+          return 1;
+        },
+        cancelAnimationFrame: () => {
+          frameCallback = null;
+        },
+      },
+    });
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      writable: true,
+      value: () => "blob:babble-cadence",
+    });
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      writable: true,
+      value: () => undefined,
+    });
+    stopBottishVoice();
+    const starts: number[] = [];
+    const progress: number[] = [];
+    try {
+      const wave = encodeBottishPlanWave({
+        notes: [],
+        durationMs: 2_000,
+        alignment: {
+          characters: [],
+          characterStartTimesSeconds: [],
+          characterEndTimesSeconds: [],
+        },
+      });
+      const playback = enqueueBabbleVoice(
+        wave,
+        "A concise Signal line.",
+        neutral,
+        "signal-babble-clock",
+        false,
+        1,
+        {
+          onStart: (durationMs) => {
+            if (durationMs !== null) starts.push(durationMs);
+          },
+          onProgress: (elapsedMs) => progress.push(elapsedMs),
+        },
+        undefined,
+        null,
+        {
+          targetDurationMs: 1_000,
+          maximumCompressionRate: 1.24,
+        },
+      );
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      const media = mediaInstances[0];
+      assert.ok(media);
+      assert.equal(media.playbackRate, 1.24);
+      assert.deepEqual(starts, [1_613]);
+      media.currentTime = 0.62;
+      assert.equal(typeof frameCallback, "function");
+      (frameCallback as unknown as () => void)();
+      assert.ok(Math.abs((progress.at(-1) ?? 0) - 500) < 0.001);
+      media.listeners.get("ended")?.();
+      await playback;
+    } finally {
+      stopBottishVoice();
+      for (const [target, key, descriptor] of [
+        [globalThis, "Audio", originalAudio],
+        [globalThis, "window", originalWindow],
+        [URL, "createObjectURL", originalCreateObjectUrl],
+        [URL, "revokeObjectURL", originalRevokeObjectUrl],
+      ] as const) {
+        if (descriptor) Object.defineProperty(target, key, descriptor);
+        else Reflect.deleteProperty(target, key);
+      }
+    }
   });
 });

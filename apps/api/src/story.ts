@@ -8,9 +8,17 @@ import {
   STORY_ITEM_GLYPH_CATEGORIES,
   STORY_LOCATION_COUNT_MAX,
   STORY_LOCATION_COUNT_MIN,
+  applyBotPowerEchoResponseV1,
+  applyBotPowerMuteResponseV1,
+  applyBotPowerResponseBudgetV1,
+  botPowerCandorResponseRuleV1,
+  botPowerEchoesAddressedSpeechV1,
+  botPowerIsMutedV1,
   botPowerObserverCueLinesV1,
   botPowerSelfCueLinesV1,
   buildBotPowersPromptBlock,
+  strongestBotPowerCandorEffectV1,
+  strongestHardBotPowerResponseBudgetEffectV1,
   STORY_SCENE_COUNT_MIN,
   applyStoryChoice,
   applyStoryItemPickup,
@@ -27,14 +35,17 @@ import {
   type StoryTranscriptEntry,
   type ReasoningEffort,
   type BotPowerV1,
+  type BotPowerTargetV1,
 } from "@localai/shared";
 import { randomId } from "./security.ts";
+import { buildCloneFamilyIdentityPrompt } from "./bots.ts";
 import type { GenerateOptions, LlmProvider, ProviderName } from "./providers.ts";
 
 export interface StoryBotProfile {
   id: string;
   name: string;
   systemPrompt: string;
+  cloneFamilyId?: string | null;
   powers?: BotPowerV1[];
   color: string | null;
   glyph: string | null;
@@ -416,9 +427,12 @@ export function loadStoryBotProfiles(
 ): StoryBotProfile[] {
   if (botIds.length === 0) return [];
   const placeholders = botIds.map(() => "?").join(", ");
+  const hasCloneFamilyId = (
+    db.prepare("PRAGMA table_info(bots)").all() as Array<{ name: string }>
+  ).some((column) => column.name === "clone_family_id");
   const rows = db
     .prepare(
-      `SELECT id, name, system_prompt, powers_json, color, glyph, model, local_model, online_model,
+      `SELECT id, name, system_prompt, ${hasCloneFamilyId ? "clone_family_id" : "NULL AS clone_family_id"}, powers_json, color, glyph, model, local_model, online_model,
               temperature, max_tokens, online_enabled, chat_enabled
          FROM bots
         WHERE user_id = ? AND id IN (${placeholders})`
@@ -427,6 +441,7 @@ export function loadStoryBotProfiles(
     id: string;
     name: string;
     system_prompt: string | null;
+    clone_family_id: string | null;
     powers_json: string | null;
     color: string | null;
     glyph: string | null;
@@ -448,6 +463,7 @@ export function loadStoryBotProfiles(
       id: row.id,
       name: row.name,
       systemPrompt: row.system_prompt ?? "",
+      cloneFamilyId: row.clone_family_id,
       powers: parseStoredBotPowersV1(row.powers_json),
       color: row.color,
       glyph: row.glyph,
@@ -1160,6 +1176,76 @@ function normalizeStoryEpisodePresentation(episode: StoryEpisodeManifest): Story
   return { ...episode, locations, scenes };
 }
 
+function applyStoryHardResponsePowers(
+  episode: StoryEpisodeManifest,
+  bots: readonly StoryBotProfile[],
+): StoryEpisodeManifest {
+  const mutedBotIds = new Set(
+    bots.filter((bot) => botPowerIsMutedV1(bot.powers)).map((bot) => bot.id),
+  );
+  const echoBotIds = new Set(
+    bots
+      .filter((bot) => botPowerEchoesAddressedSpeechV1(bot.powers))
+      .map((bot) => bot.id),
+  );
+  const responseBudgetByBotId = new Map(
+    bots.flatMap((bot) => {
+      const effect = strongestHardBotPowerResponseBudgetEffectV1(bot.powers);
+      return effect ? [[bot.id, effect] as const] : [];
+    }),
+  );
+  if (
+    mutedBotIds.size === 0 &&
+    echoBotIds.size === 0 &&
+    responseBudgetByBotId.size === 0
+  ) {
+    return episode;
+  }
+  const scenes: StoryEpisodeManifest["scenes"] = [];
+  let priorVisibleNarration: string | null = null;
+  for (const scene of episode.scenes) {
+    let nextScene = scene;
+    if (scene.speakerBotId && mutedBotIds.has(scene.speakerBotId)) {
+      nextScene = {
+        ...scene,
+        narration: applyBotPowerMuteResponseV1(scene.narration),
+        spritePose: scene.spritePose === "action" ? "action" : "idle",
+      };
+    } else if (scene.speakerBotId && echoBotIds.has(scene.speakerBotId)) {
+      nextScene = priorVisibleNarration === null
+        ? {
+            ...scene,
+            speakerBotId: null,
+            speakerName: "",
+            spritePose: "idle",
+          }
+        : {
+            ...scene,
+            narration: applyBotPowerEchoResponseV1(priorVisibleNarration),
+            spritePose: "speaking",
+          };
+    } else if (scene.speakerBotId) {
+      const responseBudget = responseBudgetByBotId.get(scene.speakerBotId);
+      if (responseBudget) {
+        nextScene = {
+          ...scene,
+          narration: applyBotPowerResponseBudgetV1(
+            scene.narration,
+            responseBudget,
+            responseBudget.mode === "minimal" ? 1 : 2,
+          ),
+        };
+      }
+    }
+    scenes.push(nextScene);
+    priorVisibleNarration = nextScene.narration;
+  }
+  return {
+    ...episode,
+    scenes,
+  };
+}
+
 function truncateStoryRepairRaw(raw: string): string {
   if (raw.length <= STORY_GENERATION_REPAIR_RAW_MAX_CHARS) return raw;
   const headLength = Math.floor(STORY_GENERATION_REPAIR_RAW_MAX_CHARS * 0.72);
@@ -1206,14 +1292,52 @@ function validateEpisodeNarrativeQuality(episode: StoryEpisodeManifest): void {
   }
 }
 
+function storyPowerTargetMatches(
+  target: BotPowerTargetV1,
+  bot: StoryBotProfile,
+): boolean {
+  if (target.kind === "all") return true;
+  if (target.kind === "bot") {
+    return Boolean(
+      (target.botId && target.botId === bot.id) ||
+      target.name.trim().toLowerCase() === bot.name.trim().toLowerCase(),
+    );
+  }
+  const words = (value: string): string[] =>
+    value.toLowerCase().replace(/[^a-z0-9]+/gu, " ").split(/\s+/u).filter(Boolean);
+  const haystack = new Set(words(`${bot.name} ${bot.systemPrompt}`));
+  const needles = words(target.trait);
+  return needles.length > 0 && needles.every((word) => haystack.has(word));
+}
+
+function storyCandorPowerRules(bots: readonly StoryBotProfile[]): string[] {
+  const lines: string[] = [];
+  for (const holder of bots) {
+    for (const target of bots) {
+      if (holder.id === target.id) continue;
+      const effect = strongestBotPowerCandorEffectV1(
+        holder.powers,
+        (candidate) => storyPowerTargetMatches(candidate, target),
+      );
+      if (!effect) continue;
+      lines.push(
+        `Story adaptation for ${holder.name} → ${target.name}: when ${holder.name} directly asks ${target.name} a relevant question or explicitly invites honesty, apply this only to ${target.name}'s next response scene. ${botPowerCandorResponseRuleV1(effect.strength, holder.name)}`,
+      );
+    }
+  }
+  return lines;
+}
+
 function storyGenerationPrompt(args: StoryGenerationInput): string {
+  const candorRules = storyCandorPowerRules(args.bots);
   const botLines = args.bots
     .map((bot) => {
       const powers = buildBotPowersPromptBlock([
         ...botPowerSelfCueLinesV1(bot.powers),
         ...botPowerObserverCueLinesV1(bot.name, bot.powers),
       ]).replace(/\s+/gu, " ").trim();
-      return `- ${bot.id}: ${bot.name}. Persona: ${(bot.systemPrompt || "A distinct PRISM actor.").slice(0, 900)}${powers ? ` ${powers}` : ""}`;
+      const cloneIdentity = buildCloneFamilyIdentityPrompt(bot, args.bots);
+      return `- ${bot.id}: ${bot.name}. Persona: ${(bot.systemPrompt || "A distinct PRISM actor.").slice(0, 900)}${powers ? ` ${powers}` : ""}${cloneIdentity ? ` ${cloneIdentity.replace(/\s+/gu, " ")}` : ""}`;
     })
     .join("\n");
   const premise = args.premise?.trim()
@@ -1227,6 +1351,9 @@ function storyGenerationPrompt(args: StoryGenerationInput): string {
       `Premise: ${premise}`,
       "Selected bots:",
       botLines,
+      ...(candorRules.length > 0
+        ? ["", "Story Power adaptations:", ...candorRules]
+        : []),
       "",
       "Write a real short story arc with concrete events:",
       "1. inciting incident",
@@ -1269,6 +1396,9 @@ function storyGenerationPrompt(args: StoryGenerationInput): string {
     `Premise: ${premise}`,
     "Selected bots:",
     botLines,
+    ...(candorRules.length > 0
+      ? ["", "Story Power adaptations:", ...candorRules]
+      : []),
     "",
     "Rules:",
     "- Use exactly 8-12 scenes, 3-5 locations, and 1-3 ending scenes.",
@@ -1515,6 +1645,7 @@ export async function generateStorySessionEpisode(
         }
       }
     }
+    episode = applyStoryHardResponsePowers(episode, args.bots);
     const now = new Date().toISOString();
     const progress = createInitialStoryProgress(episode, now);
     const transcript = createInitialStoryTranscript(episode, randomId(12), now);

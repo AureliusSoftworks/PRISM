@@ -6,6 +6,7 @@ import {
   resolvePrismSceneActivity,
   type PrismSceneActivity,
   type PrismSceneDiagnosticsSnapshot,
+  type PrismSceneQuality,
   type PrismSceneQualityConfig,
   type PrismSceneTimingWindow,
 } from "./prismSceneRuntime.ts";
@@ -37,6 +38,7 @@ export interface PrismSceneHostOptions {
   sceneId: string;
   container: HTMLElement;
   activity: PrismSceneActivity;
+  qualityCeiling?: PrismSceneQuality;
   onReady?: (context: PrismSceneHostReadyContext) => void | Promise<void>;
   onTick?: (frame: PrismSceneHostFrame) => void;
   onResize?: (width: number, height: number) => void;
@@ -100,7 +102,10 @@ export class PrismSceneHost {
       options.devicePixelRatio ??
       (() => (typeof window === "undefined" ? 1 : window.devicePixelRatio));
     const nowMs = this.now();
-    this.adaptiveQuality = new PrismAdaptiveQualityController(nowMs);
+    this.adaptiveQuality = new PrismAdaptiveQualityController(
+      nowMs,
+      options.qualityCeiling,
+    );
     this.lifecycle = getPrismVisualLifecycleSnapshot();
     this.requestedActivity = options.activity;
     this.qualityConfig = prismSceneQualityConfig(
@@ -109,6 +114,7 @@ export class PrismSceneHost {
       this.devicePixelRatio(),
     );
     this.diagnostics = defaultDiagnostics(nowMs);
+    this.diagnostics.quality = this.adaptiveQuality.quality;
     this.diagnostics.effectiveDpr = this.qualityConfig.effectiveDpr;
     this.diagnostics.particleCount = this.qualityConfig.particleCount;
     this.publishDiagnostics(true);
@@ -184,6 +190,17 @@ export class PrismSceneHost {
     this.requestedActivity = activity;
     this.adaptiveQuality.noteDiscontinuity(this.now());
     this.reconcileActivity(true);
+  }
+
+  setQualityCeiling(qualityCeiling: PrismSceneQuality): void {
+    if (this.adaptiveQuality.ceiling === qualityCeiling) return;
+    const qualityChanged = this.adaptiveQuality.setCeiling(
+      qualityCeiling,
+      this.now(),
+    );
+    if (qualityChanged) this.applyQuality();
+    this.reconcileActivity(true);
+    this.invalidate();
   }
 
   invalidate(): void {
@@ -368,7 +385,7 @@ export class PrismSceneHost {
       requested: this.requestedActivity,
       foreground: this.lifecycle.lifecycle === "foreground",
       reducedMotion: this.lifecycle.reducedMotion,
-      quality: this.adaptiveQuality.quality,
+      qualityCeiling: this.adaptiveQuality.ceiling,
     });
     if (next !== this.effectiveActivity) {
       this.effectiveActivity = next;

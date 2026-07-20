@@ -284,6 +284,9 @@ const OPENAI_FALLBACK_MODELS = [
   "gpt-5.5-2026-04-23",
   "gpt-5.5-pro",
   "gpt-5.5-pro-2026-04-23",
+  "gpt-5.6-sol",
+  "gpt-5.6-terra",
+  "gpt-5.6-luna",
 ] as const;
 const ANTHROPIC_FALLBACK_MODELS = [
   ANTHROPIC_DEFAULT_MODEL,
@@ -539,6 +542,12 @@ function openAiModelLabelFromId(id: string): string | null {
   }
   const chatLatest = normalized.match(/^gpt-(\d+(?:\.\d+)?)-chat-latest$/);
   if (chatLatest) return `GPT-${chatLatest[1]}`;
+  const frontierTier = normalized.match(
+    /^gpt-(\d+(?:\.\d+)?)-(sol|terra|luna)$/,
+  );
+  if (frontierTier) {
+    return `GPT-${frontierTier[1]} ${titleCaseModelToken(frontierTier[2]!)}`;
+  }
   const versioned = normalized.match(
     /^gpt-(\d+(?:\.\d+)?)(?:-(mini|nano|pro))?(?:-(\d{4}-\d{2}-\d{2}))?$/
   );

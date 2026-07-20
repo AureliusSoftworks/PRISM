@@ -1,8 +1,14 @@
 import {
+  BOT_VOICE_HIGH_SHELF_HZ,
+  BOT_VOICE_LOW_SHELF_HZ,
   normalizeBotAudioVoiceProfileV1,
+  normalizeVoiceEffect,
+  expectedVoicePlaybackDurationMs,
+  resolveBotVoiceCharacter,
+  resolveVoicePlaybackTransform,
   type BotAudioVoiceProfileV1,
   type CoffeeVoiceDeliveryEnvelope,
-  type ElevenLabsVoiceEffect,
+  type VoiceEffect,
 } from "@localai/shared";
 import {
   connectRoomAcoustics,
@@ -11,7 +17,7 @@ import {
 } from "./roomAcoustics.ts";
 import type { PreSpeechBreathPlan } from "./preSpeechBreath.ts";
 
-export interface ElevenLabsVoiceEffectPlan {
+export interface VoiceEffectPlan {
   highpassHz: number;
   lowpassHz: number;
   drive: number;
@@ -31,9 +37,9 @@ export interface ElevenLabsVoiceEffectPlan {
   }>;
 }
 
-export function resolveElevenLabsVoiceEffectPlan(
-  effect: ElevenLabsVoiceEffect
-): ElevenLabsVoiceEffectPlan {
+export function resolveVoiceEffectPlan(
+  effect: VoiceEffect
+): VoiceEffectPlan {
   switch (effect) {
     case "radio":
       return {
@@ -145,6 +151,14 @@ export function resolveElevenLabsVoiceEffectPlan(
   }
 }
 
+/** Backwards-compatible names for older tests and integrations. */
+export type ElevenLabsVoiceEffectPlan = VoiceEffectPlan;
+export function resolveElevenLabsVoiceEffectPlan(
+  effect: VoiceEffect,
+): VoiceEffectPlan {
+  return resolveVoiceEffectPlan(effect);
+}
+
 export interface ResolvedVoiceTexture {
   bandwidth: number;
   noise: number;
@@ -208,15 +222,63 @@ export interface VoicePlaybackProgressController {
   cancel: () => void;
 }
 
+export interface VoicePlaybackProgressOptions {
+  /** Delay the visible lifecycle until rendered audio is expected to reach the device. */
+  startDelayMs?: number;
+}
+
+const VOICE_OUTPUT_LATENCY_MAX_MS = 250;
+
+export function estimateVoiceOutputLatencyMs(
+  context: Pick<AudioContext, "baseLatency" | "currentTime"> &
+    Partial<Pick<AudioContext, "getOutputTimestamp" | "outputLatency">>,
+  performanceNowMs =
+    typeof performance === "undefined" ? 0 : performance.now(),
+): number {
+  const fallbackSeconds = Math.max(
+    Number.isFinite(context.baseLatency) ? context.baseLatency : 0,
+    Number.isFinite(context.outputLatency) ? (context.outputLatency ?? 0) : 0,
+  );
+  let measuredSeconds = 0;
+  if (context.getOutputTimestamp && performanceNowMs > 0) {
+    try {
+      const timestamp = context.getOutputTimestamp();
+      const contextTime = timestamp.contextTime;
+      const performanceTime = timestamp.performanceTime;
+      if (Number.isFinite(contextTime) && Number.isFinite(performanceTime)) {
+        const outputContextTimeNow =
+          (contextTime ?? 0) +
+          Math.max(0, performanceNowMs - (performanceTime ?? 0)) / 1_000;
+        measuredSeconds = Math.max(
+          0,
+          context.currentTime - outputContextTimeNow,
+        );
+      }
+    } catch {
+      measuredSeconds = 0;
+    }
+  }
+  return Math.round(
+    Math.min(
+      VOICE_OUTPUT_LATENCY_MAX_MS,
+      Math.max(fallbackSeconds, measuredSeconds) * 1_000,
+    ),
+  );
+}
+
 export function beginVoicePlaybackProgress(
   lifecycle: VoicePlaybackLifecycle | undefined,
   durationMs: number,
   currentElapsedMs: () => number,
-  alignment?: VoicePlaybackCharacterAlignment | null
+  alignment?: VoicePlaybackCharacterAlignment | null,
+  options: VoicePlaybackProgressOptions = {},
 ): VoicePlaybackProgressController {
   const normalizedDurationMs = Math.max(1, Math.round(durationMs));
+  const startDelayMs = Math.max(0, Math.round(options.startDelayMs ?? 0));
   let frame: number | null = null;
+  let startTimer: number | null = null;
   let active = true;
+  let started = false;
   const report = (elapsedMs: number) => {
     lifecycle?.onProgress?.(
       Math.min(normalizedDurationMs, Math.max(0, elapsedMs)),
@@ -224,16 +286,28 @@ export function beginVoicePlaybackProgress(
     );
   };
   const tick = () => {
-    if (!active) return;
-    report(currentElapsedMs());
+    if (!active || !started) return;
+    report(currentElapsedMs() - startDelayMs);
     frame = window.requestAnimationFrame(tick);
   };
-  lifecycle?.onStart?.(normalizedDurationMs, alignment);
-  report(0);
-  if (lifecycle?.onProgress) frame = window.requestAnimationFrame(tick);
+  const start = () => {
+    if (!active || started) return;
+    started = true;
+    startTimer = null;
+    lifecycle?.onStart?.(normalizedDurationMs, alignment);
+    report(0);
+    if (lifecycle?.onProgress) frame = window.requestAnimationFrame(tick);
+  };
+  if (startDelayMs > 0 && lifecycle) {
+    startTimer = window.setTimeout(start, startDelayMs);
+  } else {
+    start();
+  }
   const cancel = () => {
     if (!active) return;
     active = false;
+    if (startTimer !== null) window.clearTimeout(startTimer);
+    startTimer = null;
     if (frame !== null) window.cancelAnimationFrame(frame);
     frame = null;
   };
@@ -241,7 +315,7 @@ export function beginVoicePlaybackProgress(
     cancel,
     finish: () => {
       if (!active) return;
-      report(normalizedDurationMs);
+      if (started) report(normalizedDurationMs);
       cancel();
     },
   };
@@ -335,8 +409,47 @@ function createNoiseBuffer(context: AudioContext, durationSeconds: number, seed:
 let audioContext: AudioContext | null = null;
 export type VoicePlaybackChannel = "primary" | "reaction";
 
+type FormantCorrectionNodeLike = AudioNode & {
+  pitch: AudioParam;
+  playbackRate: AudioParam;
+  formantStrength: AudioParam;
+};
+
+let formantCorrectionRegistration: Promise<
+  (new (options: { context: AudioContext; outputChannelCount?: 1 | 2 }) => FormantCorrectionNodeLike) | null
+> | null = null;
+let formantCorrectionContext: AudioContext | null = null;
+
+/** The copied MPL processor is deliberately a public asset: AudioWorklet
+ * modules are fetched by the browser rather than bundled into Next's normal
+ * client graph. A failed registration leaves tempo intact and pitch neutral. */
+async function formantCorrectionNodeConstructor(
+  context: AudioContext,
+): Promise<(new (options: { context: AudioContext; outputChannelCount?: 1 | 2 }) => FormantCorrectionNodeLike) | null> {
+  if (!context.audioWorklet || typeof AudioWorkletNode !== "function") return null;
+  if (formantCorrectionContext !== context) {
+    formantCorrectionContext = context;
+    formantCorrectionRegistration = null;
+  }
+  formantCorrectionRegistration ??= import(
+    "@soundtouchjs/formant-correction-worklet"
+  )
+    .then(async ({ FormantCorrectionNode }) => {
+      await FormantCorrectionNode.register(
+        context,
+        "/worklets/formant-correction-processor.js",
+      );
+      return FormantCorrectionNode as unknown as new (options: {
+        context: AudioContext;
+        outputChannelCount?: 1 | 2;
+      }) => FormantCorrectionNodeLike;
+    })
+    .catch(() => null);
+  return formantCorrectionRegistration;
+}
+
 interface ActiveVoiceChannelState {
-  nodes: AudioScheduledSourceNode[];
+  nodes: AudioNode[];
   resolve: (() => void) | null;
   progress: VoicePlaybackProgressController | null;
   roomConnection: RoomAcousticsConnection | null;
@@ -375,6 +488,9 @@ export async function prepareRealtimeVoiceAudio(): Promise<boolean> {
       if (timer !== null) window.clearTimeout(timer);
     }
   }
+  if (context.state === "running") {
+    await formantCorrectionNodeConstructor(context);
+  }
   return context.state === "running";
 }
 
@@ -400,6 +516,7 @@ export async function playPreSpeechBreath(args: {
   plan: PreSpeechBreathPlan | null | undefined;
   profile: BotAudioVoiceProfileV1;
   roomAcoustics?: RoomAcousticsSend;
+  stereoPan?: number;
   isCurrent?: () => boolean;
 }): Promise<boolean> {
   if (!args.plan) return false;
@@ -429,6 +546,7 @@ export async function playPreSpeechBreath(args: {
     input: gain,
     destination: context.destination,
     send: args.roomAcoustics,
+    stereoPan: args.stereoPan,
   });
   const scheduled: AudioScheduledSourceNode[] = [source];
   active.nodes = scheduled;
@@ -472,7 +590,9 @@ export function stopRealtimeVoiceAudio(
   active.progress?.cancel();
   active.progress = null;
   for (const node of active.nodes) {
-    try { node.stop(); } catch { /* already stopped */ }
+    try {
+      if ("stop" in node && typeof node.stop === "function") node.stop();
+    } catch { /* already stopped */ }
     try { node.disconnect(); } catch { /* already disconnected */ }
   }
   active.nodes = [];
@@ -497,14 +617,20 @@ export async function playRealtimeVoiceBytes(args: {
   alignment?: VoicePlaybackCharacterAlignment | null;
   roboticPlan?: VoiceRoboticPlan | null;
   cleanRoboticCarrier?: boolean;
-  elevenLabsEffect?: ElevenLabsVoiceEffect;
+  voiceEffect?: VoiceEffect;
+  /** Legacy call-site name retained during the portable profile transition. */
+  elevenLabsEffect?: VoiceEffect;
   roomAcoustics?: RoomAcousticsSend;
+  /** Equal-power placement for the direct voice; room reflections stay shared. */
+  stereoPan?: number;
   /** Independent listener reactions never cancel or complete primary speech. */
   channel?: VoicePlaybackChannel;
   /** Optional hard ceiling for short secondary clips such as backchannels. */
   maxDurationMs?: number;
   /** Prevents an older asynchronous decode from replacing newer playback. */
   isCurrent?: () => boolean;
+  /** Keep visible English speech on the device-output clock instead of the render clock. */
+  compensateLifecycleForOutputLatency?: boolean;
 }): Promise<boolean> {
   const context = contextForPlayback();
   if (!context || !await prepareRealtimeVoiceAudio()) return false;
@@ -517,36 +643,71 @@ export async function playRealtimeVoiceBytes(args: {
   const active = activeVoiceChannels[channel];
   stopRealtimeVoiceAudio(channel);
   const texture = resolveVoiceTexture(profile, args.effectsEnabled);
-  const elevenLabsEffect = resolveElevenLabsVoiceEffectPlan(
-    args.effectsEnabled ? args.elevenLabsEffect ?? "clean" : "clean"
+  const voiceEffect = resolveVoiceEffectPlan(
+    args.effectsEnabled
+      ? normalizeVoiceEffect(
+          args.voiceEffect ?? args.elevenLabsEffect ?? profile.elevenLabsEffect,
+        )
+      : "clean",
   );
   const now = context.currentTime;
-  const playbackRateRatio = 2 ** ((args.detuneCents ?? 0) / 1200);
+  const lifecycleOutputLatencyMs =
+    args.compensateLifecycleForOutputLatency && args.lifecycle
+    ? estimateVoiceOutputLatencyMs(context)
+    : 0;
+  const transform = resolveVoicePlaybackTransform(profile);
+  const playbackRateRatio = transform.tempo;
   const playbackDurationSeconds = Math.min(
     decoded.duration / playbackRateRatio,
     args.maxDurationMs && args.maxDurationMs > 0
       ? args.maxDurationMs / 1_000
       : Number.POSITIVE_INFINITY,
   );
-  const playbackDurationMs = Math.max(1, Math.round(playbackDurationSeconds * 1000));
+  const playbackDurationMs = Math.min(
+    expectedVoicePlaybackDurationMs(decoded.duration * 1000, profile),
+    args.maxDurationMs && args.maxDurationMs > 0
+      ? args.maxDurationMs
+      : Number.POSITIVE_INFINITY,
+  );
+  const FormantCorrectionNode = await formantCorrectionNodeConstructor(context);
+  const createPitchTransform = (
+    startAt: number,
+    effectDetuneCents = 0,
+  ): FormantCorrectionNodeLike | null => {
+    if (!FormantCorrectionNode) return null;
+    const node = new FormantCorrectionNode({
+      context,
+      outputChannelCount: decoded.numberOfChannels === 1 ? 1 : 2,
+    });
+    node.playbackRate.setValueAtTime(playbackRateRatio, startAt);
+    node.formantStrength.setValueAtTime(1, startAt);
+    const basePitchCents = (args.detuneCents ?? transform.pitchCents) + effectDetuneCents;
+    node.pitch.setValueAtTime(2 ** (basePitchCents / 1200), startAt);
+    if (profile.lilt !== 0) {
+      const contourStep = 0.32;
+      for (let at = contourStep; at < playbackDurationSeconds; at += contourStep) {
+        const cents = basePitchCents + voiceLiltDetuneCents(profile.lilt, at);
+        node.pitch.linearRampToValueAtTime(2 ** (cents / 1200), startAt + at);
+      }
+    }
+    return node;
+  };
   const createSpeechSource = (
     startAt: number,
     effectDetuneCents = 0,
-  ): AudioBufferSourceNode => {
+  ): { source: AudioBufferSourceNode; transform: FormantCorrectionNodeLike | null } => {
     const speechSource = context.createBufferSource();
     speechSource.buffer = decoded;
-    const baseDetuneCents = (args.detuneCents ?? 0) + effectDetuneCents;
-    speechSource.detune.setValueAtTime(baseDetuneCents, startAt);
-    if (profile.lilt !== 0) {
-      const contourStep = 0.32;
-      for (let at = contourStep; at < decoded.duration; at += contourStep) {
-        const cents = baseDetuneCents + voiceLiltDetuneCents(profile.lilt, at);
-        speechSource.detune.linearRampToValueAtTime(cents, startAt + at);
-      }
-    }
-    return speechSource;
+    // Pace is the sole duration control. Without a functioning worklet, leave
+    // pitch neutral instead of falling back to pitch-via-resampling.
+    speechSource.playbackRate.setValueAtTime(playbackRateRatio, startAt);
+    return {
+      source: speechSource,
+      transform: createPitchTransform(startAt, effectDetuneCents),
+    };
   };
-  const source = createSpeechSource(now);
+  const primaryVoice = createSpeechSource(now);
+  const source = primaryVoice.source;
 
   const highpass = context.createBiquadFilter();
   const lowpass = context.createBiquadFilter();
@@ -554,48 +715,65 @@ export async function playRealtimeVoiceBytes(args: {
   const dryGain = context.createGain();
   const speechGain = context.createGain();
   const outputGain = context.createGain();
+  const lowShelf = context.createBiquadFilter();
+  const highShelf = context.createBiquadFilter();
   const limiter = context.createDynamicsCompressor();
+  const voiceCharacter = resolveBotVoiceCharacter(profile);
   highpass.type = "highpass";
   highpass.frequency.value = Math.max(
-    elevenLabsEffect.highpassHz,
+    voiceEffect.highpassHz,
     25 + (1 - texture.bandwidth) * 300
   );
   lowpass.type = "lowpass";
   lowpass.frequency.value = Math.min(
     args.baseLowpassHz ?? 20_000,
     args.roboticPlan?.lowpassHz ?? 20_000,
-    elevenLabsEffect.lowpassHz,
+    voiceEffect.lowpassHz,
     20_000 - (1 - texture.bandwidth) * 16_200
   );
   shaper.curve = distortionCurve(
-    Math.max(texture.distortion, args.roboticPlan?.drive ?? 0, elevenLabsEffect.drive),
-    Math.min(args.roboticPlan?.bitDepth ?? 16, elevenLabsEffect.bitDepth),
+    Math.max(texture.distortion, args.roboticPlan?.drive ?? 0, voiceEffect.drive),
+    Math.min(args.roboticPlan?.bitDepth ?? 16, voiceEffect.bitDepth),
   );
   shaper.oversample = "2x";
-  dryGain.gain.value = elevenLabsEffect.dryGain;
-  speechGain.gain.value = elevenLabsEffect.modulationBaseGain;
+  dryGain.gain.value = voiceEffect.dryGain;
+  speechGain.gain.value = voiceEffect.modulationBaseGain;
   outputGain.gain.value =
     Math.min(1.25, profile.volume) *
     0.88 *
-    elevenLabsEffect.outputTrim *
+    voiceEffect.outputTrim *
+    voiceCharacter.gainMultiplier *
     (channel === "reaction" ? 0.62 : 1);
+  lowShelf.type = "lowshelf";
+  lowShelf.frequency.value = BOT_VOICE_LOW_SHELF_HZ;
+  lowShelf.gain.value = voiceCharacter.lowShelfDb;
+  highShelf.type = "highshelf";
+  highShelf.frequency.value = BOT_VOICE_HIGH_SHELF_HZ;
+  highShelf.gain.value = voiceCharacter.highShelfDb;
   limiter.threshold.value = args.cleanRoboticCarrier ? -0.5 : -4;
   limiter.knee.value = args.cleanRoboticCarrier ? 0 : 8;
   limiter.ratio.value = args.cleanRoboticCarrier ? 20 : 12;
   limiter.attack.value = args.cleanRoboticCarrier ? 0.001 : 0.003;
   limiter.release.value = args.cleanRoboticCarrier ? 0.04 : 0.12;
-  source.connect(dryGain).connect(highpass).connect(lowpass);
+  if (primaryVoice.transform) {
+    source.connect(primaryVoice.transform).connect(dryGain);
+  } else {
+    source.connect(dryGain);
+  }
+  dryGain.connect(highpass).connect(lowpass);
   if (args.cleanRoboticCarrier) {
     lowpass.connect(speechGain);
   } else {
     lowpass.connect(shaper).connect(speechGain);
   }
-  speechGain.connect(outputGain).connect(limiter);
+  speechGain.connect(outputGain);
+  outputGain.connect(lowShelf).connect(highShelf).connect(limiter);
   const roomConnection = connectRoomAcoustics({
     context,
     input: limiter,
     destination: context.destination,
     send: args.roomAcoustics,
+    stereoPan: args.stereoPan,
   });
 
   for (const event of buildVoiceDamageSchedule(args.seed, playbackDurationMs, texture.damage)) {
@@ -619,7 +797,8 @@ export async function playRealtimeVoiceBytes(args: {
     speechGain.gain.linearRampToValueAtTime(1, end);
   }
 
-  const scheduled: AudioScheduledSourceNode[] = [source];
+  const scheduled: AudioNode[] = [source];
+  if (primaryVoice.transform) scheduled.push(primaryVoice.transform);
   const speechStarts: Array<{
     source: AudioBufferSourceNode;
     startAt: number;
@@ -627,7 +806,7 @@ export async function playRealtimeVoiceBytes(args: {
   }> = [{ source, startAt: now, stopAt: now + playbackDurationSeconds }];
   let completionSource: AudioScheduledSourceNode = source;
   let completionEndAt = now + playbackDurationSeconds;
-  for (const voice of elevenLabsEffect.parallelVoices) {
+  for (const voice of voiceEffect.parallelVoices) {
     const delayModulationFrequencyHz = voice.delayModulationFrequencyHz ?? 0;
     const delayModulationDepthSeconds = voice.delayModulationDepthSeconds ?? 0;
     if (delayModulationFrequencyHz > 0 && delayModulationDepthSeconds !== 0) {
@@ -643,7 +822,10 @@ export async function playRealtimeVoiceBytes(args: {
       oscillator.frequency.value = delayModulationFrequencyHz;
       modulation.gain.value = delayModulationDepthSeconds;
       oscillator.connect(modulation).connect(delay.delayTime);
-      source.connect(delay).connect(parallelGain).connect(highpass);
+      (primaryVoice.transform ?? source)
+        .connect(delay)
+        .connect(parallelGain)
+        .connect(highpass);
       const endAt = now + playbackDurationSeconds + maximumDelaySeconds;
       oscillator.start(now);
       oscillator.stop(endAt);
@@ -655,16 +837,20 @@ export async function playRealtimeVoiceBytes(args: {
       continue;
     }
     const startAt = now + voice.delaySeconds;
-    const parallelSource = createSpeechSource(startAt, voice.detuneCents);
+    const parallelVoice = createSpeechSource(startAt, voice.detuneCents);
+    const parallelSource = parallelVoice.source;
     const parallelGain = context.createGain();
     parallelGain.gain.value = voice.gain;
-    parallelSource.connect(parallelGain).connect(highpass);
+    if (parallelVoice.transform) {
+      parallelSource.connect(parallelVoice.transform).connect(parallelGain);
+      scheduled.push(parallelVoice.transform);
+    } else {
+      parallelSource.connect(parallelGain);
+    }
+    parallelGain.connect(highpass);
     scheduled.push(parallelSource);
-    const rateRatio = 2 ** (
-      ((args.detuneCents ?? 0) + voice.detuneCents) / 1200
-    );
     const endAt = Math.min(
-      startAt + decoded.duration / rateRatio,
+      startAt + decoded.duration / playbackRateRatio,
       args.maxDurationMs && args.maxDurationMs > 0
         ? now + args.maxDurationMs / 1_000
         : Number.POSITIVE_INFINITY,
@@ -713,18 +899,18 @@ export async function playRealtimeVoiceBytes(args: {
     oscillator.stop(now + playbackDurationSeconds);
     scheduled.push(oscillator);
   }
-  if (args.effectsEnabled && elevenLabsEffect.modulationDepth > 0) {
+  if (args.effectsEnabled && voiceEffect.modulationDepth > 0) {
     const oscillator = context.createOscillator();
     const modulation = context.createGain();
     oscillator.type = "square";
-    oscillator.frequency.value = elevenLabsEffect.modulationFrequencyHz;
-    modulation.gain.value = elevenLabsEffect.modulationDepth;
+    oscillator.frequency.value = voiceEffect.modulationFrequencyHz;
+    modulation.gain.value = voiceEffect.modulationDepth;
     oscillator.connect(modulation).connect(speechGain.gain);
     oscillator.start(now);
     oscillator.stop(completionEndAt);
     scheduled.push(oscillator);
   }
-  if (texture.noise > 0 || elevenLabsEffect.noiseGain > 0) {
+  if (texture.noise > 0 || voiceEffect.noiseGain > 0) {
     const noise = context.createBufferSource();
     const noiseFilter = context.createBiquadFilter();
     const noiseGain = context.createGain();
@@ -736,7 +922,7 @@ export async function playRealtimeVoiceBytes(args: {
     noiseFilter.type = "bandpass";
     noiseFilter.frequency.value = 1800;
     noiseFilter.Q.value = 0.55;
-    noiseGain.gain.value = texture.noise * 0.075 + elevenLabsEffect.noiseGain;
+    noiseGain.gain.value = texture.noise * 0.075 + voiceEffect.noiseGain;
     noise.connect(noiseFilter).connect(noiseGain).connect(outputGain);
     noise.start(now);
     noise.stop(completionEndAt);
@@ -757,25 +943,46 @@ export async function playRealtimeVoiceBytes(args: {
   active.roomConnection = roomConnection;
   await new Promise<void>((resolve) => {
     let progress: VoicePlaybackProgressController | null = null;
-    active.resolve = resolve;
+    let endTimer: number | null = null;
+    let settled = false;
+    const finish = (completed: boolean) => {
+      if (settled) return;
+      settled = true;
+      if (endTimer !== null) window.clearTimeout(endTimer);
+      endTimer = null;
+      if (completed) progress?.finish();
+      else progress?.cancel();
+      if (active.progress === progress) active.progress = null;
+      progress = null;
+      if (active.resolve === cancel) active.resolve = null;
+      for (const node of scheduled) {
+        try {
+          node.disconnect();
+        } catch {
+          /* no-op */
+        }
+      }
+      if (active.nodes === scheduled) active.nodes = [];
+      if (completed) {
+        roomConnection.release();
+        args.lifecycle?.onEnd?.();
+      }
+      resolve();
+    };
+    const cancel = () => finish(false);
+    active.resolve = cancel;
     completionSource.addEventListener(
       "ended",
       () => {
-        progress?.finish();
-        if (active.progress === progress) active.progress = null;
-        progress = null;
-        if (active.resolve === resolve) active.resolve = null;
-        for (const node of scheduled) {
-          try {
-            node.disconnect();
-          } catch {
-            /* no-op */
-          }
+        if (settled) return;
+        if (lifecycleOutputLatencyMs > 0) {
+          endTimer = window.setTimeout(
+            () => finish(true),
+            lifecycleOutputLatencyMs,
+          );
+          return;
         }
-        if (active.nodes === scheduled) active.nodes = [];
-        roomConnection.release();
-        args.lifecycle?.onEnd?.();
-        resolve();
+        finish(true);
       },
       { once: true },
     );
@@ -787,7 +994,8 @@ export async function playRealtimeVoiceBytes(args: {
       args.lifecycle,
       playbackDurationMs,
       () => (context.currentTime - now) * 1000,
-      args.alignment
+      args.alignment,
+      { startDelayMs: lifecycleOutputLatencyMs },
     );
     active.progress = progress;
   });

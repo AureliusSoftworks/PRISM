@@ -126,6 +126,106 @@ describe("backup image provider settings", () => {
   });
 });
 
+describe("backup ephemeral chat provider settings", () => {
+  it("round-trips per-mode choices and keeps old backups on global defaults", () => {
+    withBackupDatabase((db, userKey) => {
+      db.prepare(
+        "UPDATE users SET ephemeral_chat_provider_preferences = ? WHERE id = ?",
+      ).run(
+        JSON.stringify({ coffee: "local", botcast: "online" }),
+        "user-1",
+      );
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.deepEqual(snapshot.settings?.ephemeralChatProviderPreferences, {
+        chat: "global",
+        zen: "global",
+        coffee: "local",
+        botcast: "online",
+        slate: "global",
+      });
+
+      db.prepare(
+        "UPDATE users SET ephemeral_chat_provider_preferences = '{}' WHERE id = ?",
+      ).run("user-1");
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      const restored = db
+        .prepare(
+          "SELECT ephemeral_chat_provider_preferences AS preferences FROM users WHERE id = ?",
+        )
+        .get("user-1") as { preferences: string };
+      assert.deepEqual(JSON.parse(restored.preferences), {
+        chat: "global",
+        zen: "global",
+        coffee: "local",
+        botcast: "online",
+        slate: "global",
+      });
+
+      const legacySettings = { ...snapshot.settings! };
+      delete legacySettings.ephemeralChatProviderPreferences;
+      importUserSnapshot(
+        db,
+        "user-1",
+        { ...snapshot, settings: legacySettings },
+        userKey,
+      );
+      const legacyRestored = db
+        .prepare(
+          "SELECT ephemeral_chat_provider_preferences AS preferences FROM users WHERE id = ?",
+        )
+        .get("user-1") as { preferences: string };
+      assert.deepEqual(JSON.parse(legacyRestored.preferences), {
+        chat: "global",
+        zen: "global",
+        coffee: "global",
+        botcast: "global",
+        slate: "global",
+      });
+    });
+  });
+});
+
+describe("backup graphics quality", () => {
+  it("round-trips the selected tier and defaults legacy snapshots to High", () => {
+    withBackupDatabase((db, userKey) => {
+      db.prepare("UPDATE users SET graphics_quality = 'low' WHERE id = ?").run(
+        "user-1",
+      );
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.equal(snapshot.settings?.graphicsQuality, "low");
+
+      db.prepare("UPDATE users SET graphics_quality = 'high' WHERE id = ?").run(
+        "user-1",
+      );
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      assert.equal(
+        (db.prepare("SELECT graphics_quality FROM users WHERE id = ?").get(
+          "user-1",
+        ) as { graphics_quality: string }).graphics_quality,
+        "low",
+      );
+
+      const legacySettings = { ...snapshot.settings! };
+      delete legacySettings.graphicsQuality;
+      db.prepare("UPDATE users SET graphics_quality = 'medium' WHERE id = ?").run(
+        "user-1",
+      );
+      importUserSnapshot(
+        db,
+        "user-1",
+        { ...snapshot, settings: legacySettings },
+        userKey,
+      );
+      assert.equal(
+        (db.prepare("SELECT graphics_quality FROM users WHERE id = ?").get(
+          "user-1",
+        ) as { graphics_quality: string }).graphics_quality,
+        "high",
+      );
+    });
+  });
+});
+
 describe("backup Zen Atmosphere style notes", () => {
   it("exports and restores normalized style notes", () => {
     withBackupDatabase((db, userKey) => {
@@ -255,7 +355,7 @@ describe("backup bot avatar face style", () => {
     withBackupDatabase((db, userKey) => {
       db.prepare(
         `INSERT INTO bots (
-          id, user_id, name, name_pronunciation, system_prompt, voice_preview_line, avatar_details_json,
+          id, user_id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, avatar_details_json,
           face_eyes_font, face_eye_character, face_eye_animation,
           face_mouth_font, face_mouth_character, face_mouth_animation,
           face_mouth_coffee_pucker, face_font_weight,
@@ -264,12 +364,13 @@ describe("backup bot avatar face style", () => {
           face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y,
           face_thinking_frames,
           created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         "bot-1",
         "user-1",
         "Avatar Bot",
         "Ah-vah-tar Bot",
+        "Avi",
         "You are Avatar Bot.",
         "Testing this carefully calibrated voice.",
         '{"version":1,"screen":{"stamps":[{"id":"round-glasses","offsetX":2,"offsetY":-1,"scalePct":105}],"paintMaskBase64":null}}',
@@ -304,6 +405,7 @@ describe("backup bot avatar face style", () => {
         id: "bot-1",
         name: "Avatar Bot",
         namePronunciation: "Ah-vah-tar Bot",
+        selfReferral: "Avi",
         systemPrompt: "You are Avatar Bot.",
         voicePreviewLine: "Testing this carefully calibrated voice.",
         exportHash: null,
@@ -361,12 +463,14 @@ describe("backup bot avatar face style", () => {
             v: 2,
             enabled: true,
             baseVoiceId: "voice-1",
-            elevenLabsEffect: "clean",
+            elevenLabsEffect: "chorus",
             pitch: 0,
           warmth: 0,
           pace: 0,
           lilt: 0,
           bottishTone: 0.45,
+          eqTilt: 0,
+          gainDb: 0,
           volume: 1,
           texture: {
             preset: "clean",
@@ -386,17 +490,18 @@ describe("backup bot avatar face style", () => {
       });
 
       db.prepare(
-        "UPDATE bots SET name_pronunciation = '', voice_preview_line = NULL, avatar_details_json = NULL, face_eyes_font = NULL, face_eye_character = NULL, face_eye_animation = NULL, face_mouth_font = NULL, face_mouth_character = NULL, face_mouth_animation = NULL, face_mouth_coffee_pucker = 0, face_font_weight = NULL, face_eye_scale = NULL, face_eye_offset_x = NULL, face_eye_offset_y = NULL, face_eye_rotation_deg = NULL, face_eye_count = 1, face_mouth_scale = NULL, face_mouth_offset_x = NULL, face_mouth_offset_y = NULL, face_mouth_rotation_deg = NULL, face_blink_bar = NULL, face_blink_scale = NULL, face_blink_offset_x = NULL, face_blink_offset_y = NULL, face_thinking_frames = NULL WHERE id = ?"
+        "UPDATE bots SET name_pronunciation = '', self_referral = '', voice_preview_line = NULL, avatar_details_json = NULL, face_eyes_font = NULL, face_eye_character = NULL, face_eye_animation = NULL, face_mouth_font = NULL, face_mouth_character = NULL, face_mouth_animation = NULL, face_mouth_coffee_pucker = 0, face_font_weight = NULL, face_eye_scale = NULL, face_eye_offset_x = NULL, face_eye_offset_y = NULL, face_eye_rotation_deg = NULL, face_eye_count = 1, face_mouth_scale = NULL, face_mouth_offset_x = NULL, face_mouth_offset_y = NULL, face_mouth_rotation_deg = NULL, face_blink_bar = NULL, face_blink_scale = NULL, face_blink_offset_x = NULL, face_blink_offset_y = NULL, face_thinking_frames = NULL WHERE id = ?"
       ).run("bot-1");
 
       importUserSnapshot(db, "user-1", snapshot, userKey);
 
       const restored = db
         .prepare(
-          "SELECT name_pronunciation, voice_preview_line, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, profile_picture_image_id FROM bots WHERE id = ?"
+          "SELECT name_pronunciation, self_referral, voice_preview_line, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, profile_picture_image_id FROM bots WHERE id = ?"
         )
         .get("bot-1") as {
         name_pronunciation: string;
+        self_referral: string;
         voice_preview_line: string | null;
         avatar_details_json: string | null;
         face_eyes_font: string | null;
@@ -424,6 +529,7 @@ describe("backup bot avatar face style", () => {
         profile_picture_image_id: string | null;
       };
       assert.equal(restored.name_pronunciation, "Ah-vah-tar Bot");
+      assert.equal(restored.self_referral, "Avi");
       assert.equal(restored.voice_preview_line, "Testing this carefully calibrated voice.");
       assert.equal(
         restored.avatar_details_json,
@@ -615,7 +721,7 @@ describe("backup audio voice settings", () => {
   it("round-trips account and bot profiles without retired mode-specific voice settings", () => {
     withBackupDatabase((db, userKey) => {
       db.prepare(
-        "UPDATE users SET voice_mode = ?, voice_effects_enabled = 0, voice_volume = ?, english_voice_engine = ?, default_system_voice_name = ?, default_elevenlabs_voice_id = ?, elevenlabs_voice_bank = ?, elevenlabs_voice_model = ?, elevenlabs_voice_collection_id = ?, player_audio_voice_profile = ?, player_name_pronunciation = ?, prism_default_bot_audio_voice_profile = ? WHERE id = ?"
+        "UPDATE users SET voice_mode = ?, voice_effects_enabled = 0, voice_volume = ?, operating_system_voices_enabled = 1, english_voice_engine = ?, default_system_voice_name = ?, default_elevenlabs_voice_id = ?, elevenlabs_voice_bank = ?, elevenlabs_voice_model = ?, elevenlabs_voice_collection_id = ?, player_audio_voice_profile = ?, player_name_pronunciation = ?, prism_default_bot_audio_voice_profile = ? WHERE id = ?"
       ).run(
         "babble",
         0.65,
@@ -655,6 +761,7 @@ describe("backup audio voice settings", () => {
         false,
       );
       assert.equal(snapshot.settings?.voiceVolume, 0.65);
+      assert.equal(snapshot.settings?.operatingSystemVoicesEnabled, true);
       assert.equal(snapshot.settings?.prismDefaultBotAudioVoiceProfile?.baseVoiceId, "voice-5");
       assert.equal(snapshot.settings?.prismDefaultBotAudioVoiceProfile?.elevenLabsEffect, "radio");
       assert.equal(snapshot.settings?.englishVoiceEngine, "elevenlabs");
@@ -667,7 +774,7 @@ describe("backup audio voice settings", () => {
       assert.equal("playerNamePronunciation" in (snapshot.settings ?? {}), false);
 
       db.prepare(
-        "UPDATE users SET voice_mode = 'mute', voice_effects_enabled = 1, voice_volume = 1, english_voice_engine = 'builtin', default_system_voice_name = NULL, default_elevenlabs_voice_id = NULL, elevenlabs_voice_bank = '{}', elevenlabs_voice_model = NULL, elevenlabs_voice_collection_id = NULL, player_audio_voice_profile = ?, player_name_pronunciation = ?, prism_default_bot_audio_voice_profile = NULL WHERE id = ?"
+        "UPDATE users SET voice_mode = 'mute', voice_effects_enabled = 1, voice_volume = 1, operating_system_voices_enabled = 0, english_voice_engine = 'builtin', default_system_voice_name = NULL, default_elevenlabs_voice_id = NULL, elevenlabs_voice_bank = '{}', elevenlabs_voice_model = NULL, elevenlabs_voice_collection_id = NULL, player_audio_voice_profile = ?, player_name_pronunciation = ?, prism_default_bot_audio_voice_profile = NULL WHERE id = ?"
       ).run(
         JSON.stringify({ v: 1, baseVoiceId: "voice-2", pitch: 0, warmth: 0, pace: 0, lilt: 0 }),
         "Keep me",
@@ -676,11 +783,12 @@ describe("backup audio voice settings", () => {
       importUserSnapshot(db, "user-1", snapshot, userKey);
 
       const restoredUser = db.prepare(
-        "SELECT voice_mode, voice_effects_enabled, voice_volume, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, elevenlabs_voice_collection_id, player_audio_voice_profile, player_name_pronunciation, prism_default_bot_audio_voice_profile FROM users WHERE id = ?"
+        "SELECT voice_mode, voice_effects_enabled, voice_volume, operating_system_voices_enabled, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, elevenlabs_voice_collection_id, player_audio_voice_profile, player_name_pronunciation, prism_default_bot_audio_voice_profile FROM users WHERE id = ?"
       ).get("user-1") as Record<string, string | null>;
       assert.equal(restoredUser.voice_mode, "babble");
       assert.equal(restoredUser.voice_effects_enabled, 0);
       assert.equal(restoredUser.voice_volume, 0.65);
+      assert.equal(restoredUser.operating_system_voices_enabled, 1);
       assert.equal(JSON.parse(restoredUser.prism_default_bot_audio_voice_profile ?? "{}").baseVoiceId, "voice-5");
       assert.equal(JSON.parse(restoredUser.prism_default_bot_audio_voice_profile ?? "{}").elevenLabsEffect, "radio");
       assert.equal(restoredUser.english_voice_engine, "elevenlabs");
@@ -737,19 +845,43 @@ describe("backup Slate account data", () => {
       }
       const project = db
         .prepare(
-          "SELECT series_id, manuscript, title_origin, continuity_active_version FROM slate_projects WHERE id = ?",
+          `SELECT series_id, manuscript, title_origin, continuity_active_version,
+                  prose_mode, prose_provider, prose_model, deliberation_config_json
+             FROM slate_projects WHERE id = ?`,
         )
         .get("slate-one-project") as {
         series_id: string;
         manuscript: string;
         title_origin: string;
         continuity_active_version: string;
+        prose_mode: string;
+        prose_provider: string;
+        prose_model: string;
+        deliberation_config_json: string;
       };
-      assert.deepEqual({ ...project }, {
+      assert.deepEqual({
+        ...project,
+        deliberation_config_json: JSON.parse(project.deliberation_config_json),
+      }, {
         series_id: "slate-one-series",
         manuscript: "The restored manuscript.",
         title_origin: "spark",
         continuity_active_version: "0.0",
+        prose_mode: "auto",
+        prose_provider: "openai",
+        prose_model: "gpt-5-mini",
+        deliberation_config_json: {
+          lux: {
+            provider: "openai",
+            model: "gpt-5-mini",
+            directive: "Protect the central relationship.",
+          },
+          umbra: {
+            provider: "local",
+            model: "qwen3:8b",
+            directive: "Interrogate convenient reversals.",
+          },
+        },
       });
       assert.equal(
         (
@@ -925,6 +1057,27 @@ function seedSlateBackupFixture(
     "current",
     now,
     now,
+  );
+  db.prepare(
+    `UPDATE slate_projects
+        SET prose_mode = 'auto', prose_provider = 'openai',
+            prose_model = 'gpt-5-mini', deliberation_config_json = ?
+      WHERE id = ? AND user_id = ?`,
+  ).run(
+    JSON.stringify({
+      lux: {
+        provider: "openai",
+        model: "gpt-5-mini",
+        directive: "Protect the central relationship.",
+      },
+      umbra: {
+        provider: "local",
+        model: "qwen3:8b",
+        directive: "Interrogate convenient reversals.",
+      },
+    }),
+    projectId,
+    userId,
   );
   db.prepare(
     `INSERT INTO slate_revisions (
@@ -1218,6 +1371,43 @@ function seedSlateBackupFixture(
     now,
   );
 }
+
+describe("backup clone lineage", () => {
+  it("preserves clone-family markers only in full account backups", () => {
+    withBackupDatabase((db, userKey) => {
+      const now = "2026-01-01T00:00:00.000Z";
+      db.prepare(
+        `INSERT INTO bots
+          (id, user_id, name, system_prompt, created_at, updated_at)
+         VALUES (?, 'user-1', ?, '', ?, ?)`,
+      ).run("root-bot", "Original", now, now);
+      db.prepare(
+        `INSERT INTO bots
+          (id, user_id, name, system_prompt, clone_family_id, created_at, updated_at)
+         VALUES (?, 'user-1', ?, '', ?, ?, ?)`,
+      ).run("clone-bot", "Original Copy", "root-bot", now, now);
+
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.equal(
+        snapshot.bots?.find((bot) => bot.id === "clone-bot")?.cloneFamilyId,
+        "root-bot",
+      );
+
+      db.prepare("UPDATE bots SET clone_family_id = NULL WHERE id = ?").run(
+        "clone-bot",
+      );
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      assert.equal(
+        (
+          db
+            .prepare("SELECT clone_family_id FROM bots WHERE id = ?")
+            .get("clone-bot") as { clone_family_id: string | null }
+        ).clone_family_id,
+        "root-bot",
+      );
+    });
+  });
+});
 
 function withBackupDatabase(
   run: (db: ReturnType<typeof createDatabase>, userKey: Buffer) => void

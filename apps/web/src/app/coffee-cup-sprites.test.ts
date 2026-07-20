@@ -342,19 +342,13 @@ describe("coffee cup sprites", () => {
 
     const untouched = buildCoffeeCupVisualState({
       seed: "session:bot-alice",
-      nowMs: 300_000,
-      sessionStartedAtMs: 1_000,
-      sessionEndsAtMs: 301_000,
-      durationMinutes: 5,
+      nowMs: 0,
       sipCount: 0,
       sippingOverride: false,
     });
     const afterTwoSips = buildCoffeeCupVisualState({
       seed: "session:bot-alice",
-      nowMs: 300_000,
-      sessionStartedAtMs: 1_000,
-      sessionEndsAtMs: 301_000,
-      durationMinutes: 5,
+      nowMs: 0,
       sipCount: 2,
       sippingOverride: false,
     });
@@ -363,6 +357,35 @@ describe("coffee cup sprites", () => {
     assert.equal(untouched.progress, 0);
     assert.ok(afterTwoSips.progress > untouched.progress);
     assert.equal(afterTwoSips.frameIndex, 2);
+  });
+
+  it("keeps Auto depletion moving after an explicit sip or zero-count override", () => {
+    const base = {
+      seed: "auto-session:bot-alice",
+      sessionStartedAtMs: 0,
+      sessionEndsAtMs: 600_000,
+      durationMinutes: 10,
+      sippingOverride: false,
+    } as const;
+    const earlyAfterOneSip = buildCoffeeCupVisualState({
+      ...base,
+      nowMs: 60_000,
+      sipCount: 1,
+    });
+    const laterWithSameSipCount = buildCoffeeCupVisualState({
+      ...base,
+      nowMs: 360_000,
+      sipCount: 1,
+    });
+    const zeroCountAtMidSession = buildCoffeeCupVisualState({
+      ...base,
+      nowMs: 240_000,
+      sipCount: 0,
+    });
+
+    assert.ok(earlyAfterOneSip.progress >= 0.1);
+    assert.ok(laterWithSameSipCount.progress > earlyAfterOneSip.progress);
+    assert.ok(zeroCountAtMidSession.progress > 0.3);
   });
 
   it("counts explicit sips from the latest top-off baseline", () => {
@@ -1306,6 +1329,47 @@ describe("coffee cup sprites", () => {
         speaking: true,
       }).sipping,
       false
+    );
+  });
+
+  it("keeps ambient sips inside listener windows without blocking explicit sips", () => {
+    const seed = "session:bot-listener";
+    let sipWindowMs: number | null = null;
+    for (let nowMs = 0; nowMs <= 180_000; nowMs += 100) {
+      if (coffeeCupSippingActive({ seed, nowMs, progress: 0.5 })) {
+        sipWindowMs = nowMs;
+        break;
+      }
+    }
+
+    assert.notEqual(sipWindowMs, null);
+    assert.equal(
+      coffeeCupSippingActive({
+        seed,
+        nowMs: sipWindowMs!,
+        progress: 0.5,
+        ambientSipAllowed: false,
+      }),
+      false,
+    );
+    assert.equal(
+      buildCoffeeCupVisualState({
+        seed,
+        nowMs: sipWindowMs!,
+        progressOverride: 0.5,
+        ambientSipAllowed: false,
+      }).sipping,
+      false,
+    );
+    assert.equal(
+      buildCoffeeCupVisualState({
+        seed,
+        nowMs: sipWindowMs!,
+        progressOverride: 0.5,
+        ambientSipAllowed: false,
+        sippingOverride: true,
+      }).sipping,
+      true,
     );
   });
 

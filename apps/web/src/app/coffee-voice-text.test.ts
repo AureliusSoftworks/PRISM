@@ -5,6 +5,7 @@ import { describe, it } from "node:test";
 import {
   coffeeBotVoiceSynthesisSource,
   coffeeVoiceSpokenText,
+  normalizeCoffeeMessageDelivery,
 } from "./coffee-voice-text.ts";
 
 const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8").replace(
@@ -36,6 +37,23 @@ describe("Coffee voice text", () => {
       }),
       null
     );
+  });
+
+  it("keeps the canonical mute ellipsis visible without giving it a voice", () => {
+    assert.deepEqual(normalizeCoffeeMessageDelivery(" … "), {
+      displayText: "",
+      spokenText: "",
+      hasDialogue: false,
+    });
+    assert.equal(
+      coffeeBotVoiceSynthesisSource({ id: "pause", content: "..." }),
+      null,
+    );
+    assert.deepEqual(normalizeCoffeeMessageDelivery("*nods* ..."), {
+      displayText: "...",
+      spokenText: "",
+      hasDialogue: false,
+    });
   });
 
   it("keeps the message id for privacy provenance beside clean spoken text", () => {
@@ -71,6 +89,25 @@ describe("Coffee voice text", () => {
     assert.ok(
       pageSource.match(/\.\.\.botSynthesisSource/g)?.length === 1,
       "Expected replay synthesis to use the clean source"
+    );
+  });
+
+  it("keeps muted Coffee mouths closed while preserving sip presentation", () => {
+    assert.match(
+      pageSource,
+      /const tableTypingAssistantIsSilent = botPowerResponseIsSilentV1\( tableTypingAssistantRawText,/u,
+    );
+    assert.match(
+      pageSource,
+      /const isTableTypingThisSeat = !seatPowerMuted && !tableTypingAssistantIsSilent/u,
+    );
+    assert.match(
+      pageSource,
+      /isTalking=\{isTableTypingThisSeat\}[\s\S]{0,420}seatSipPresentation\.active/u,
+    );
+    assert.match(
+      pageSource,
+      /const seatSipInProgress = seatIsFirmlySeated && !isTableTypingThisSeat && seatSipActionInProgress/u,
     );
   });
 });

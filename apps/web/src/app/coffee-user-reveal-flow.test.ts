@@ -49,6 +49,13 @@ describe("coffee user reveal flow", () => {
       }),
       true,
     );
+    assert.equal(
+      coffeeComposerUsesRichInput({
+        variant: "signal",
+        markdownEditorEnabled: false,
+      }),
+      true,
+    );
   });
 
   it("queues assistant reveal while the user line is still typing", () => {

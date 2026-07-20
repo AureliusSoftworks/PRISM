@@ -169,7 +169,9 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       wrapped_user_key_iv TEXT NOT NULL,
       wrapped_user_key_tag TEXT NOT NULL,
       theme TEXT NOT NULL DEFAULT 'system',
+      graphics_quality TEXT NOT NULL DEFAULT 'high',
       preferred_provider TEXT NOT NULL DEFAULT 'local',
+      ephemeral_chat_provider_preferences TEXT NOT NULL DEFAULT '{}',
       preferred_image_provider TEXT NOT NULL DEFAULT 'local',
       provider_locked INTEGER NOT NULL DEFAULT 0,
       auto_memory INTEGER NOT NULL DEFAULT 1,
@@ -258,6 +260,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       voice_mode TEXT NOT NULL DEFAULT 'mute',
       voice_effects_enabled INTEGER NOT NULL DEFAULT 1,
       voice_volume REAL NOT NULL DEFAULT 1,
+      operating_system_voices_enabled INTEGER NOT NULL DEFAULT 0,
       english_voice_engine TEXT NOT NULL DEFAULT 'elevenlabs',
       default_system_voice_name TEXT,
       default_elevenlabs_voice_id TEXT,
@@ -270,6 +273,21 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       created_at TEXT NOT NULL,
       last_active_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS legal_acceptances (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      document_id TEXT NOT NULL,
+      document_version TEXT NOT NULL,
+      document_hash TEXT NOT NULL,
+      document_snapshot TEXT NOT NULL,
+      acceptance_method TEXT NOT NULL,
+      minimum_age_confirmed INTEGER NOT NULL CHECK(minimum_age_confirmed = 1),
+      accepted_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      UNIQUE(user_id, document_id, document_version)
+    );
+    CREATE INDEX IF NOT EXISTS idx_legal_acceptances_user_accepted
+      ON legal_acceptances(user_id, accepted_at DESC);
     CREATE TABLE IF NOT EXISTS sessions (
       token TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -493,6 +511,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       prose_mode TEXT NOT NULL DEFAULT 'auto',
       prose_model TEXT,
       prose_provider TEXT,
+      deliberation_config_json TEXT NOT NULL DEFAULT '{}',
       continuity_active_version TEXT NOT NULL DEFAULT '0.0',
       continuity_target_version TEXT NOT NULL DEFAULT '0.0',
       continuity_active_generation INTEGER NOT NULL DEFAULT 0,
@@ -945,7 +964,9 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       user_id TEXT NOT NULL,
       name TEXT NOT NULL,
       name_pronunciation TEXT NOT NULL DEFAULT '',
+      self_referral TEXT NOT NULL DEFAULT '',
       system_prompt TEXT NOT NULL DEFAULT '',
+      clone_family_id TEXT,
       voice_preview_line TEXT,
       export_hash TEXT,
       semantic_facets TEXT,
@@ -1242,6 +1263,10 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       show_id TEXT NOT NULL,
       host_bot_id TEXT NOT NULL,
       guest_bot_id TEXT NOT NULL,
+      guest_kind TEXT NOT NULL DEFAULT 'bot'
+        CHECK (guest_kind IN ('bot', 'producer')),
+      guest_name TEXT NOT NULL DEFAULT '',
+      guest_context TEXT NOT NULL DEFAULT '',
       title TEXT NOT NULL,
       topic TEXT NOT NULL,
       producer_brief TEXT NOT NULL DEFAULT '',
@@ -1290,6 +1315,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       speaker_role TEXT NOT NULL,
       bot_id TEXT NOT NULL,
       content TEXT NOT NULL,
+      stage_action_text TEXT,
       voice_performance_text TEXT,
       created_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -1340,6 +1366,18 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
     );
   `);
+  const legalAcceptanceColumns = db
+    .prepare("PRAGMA table_info(legal_acceptances)")
+    .all() as Array<{ name: string }>;
+  if (
+    !legalAcceptanceColumns.some(
+      (column) => column.name === "document_snapshot",
+    )
+  ) {
+    db.exec(
+      "ALTER TABLE legal_acceptances ADD COLUMN document_snapshot TEXT NOT NULL DEFAULT '';",
+    );
+  }
   const slateProjectColumns = db
     .prepare("PRAGMA table_info(slate_projects)")
     .all() as Array<{ name: string }>;
@@ -1367,6 +1405,10 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   addSlateProjectColumn("prose_mode", "TEXT NOT NULL DEFAULT 'auto'");
   addSlateProjectColumn("prose_model", "TEXT");
   addSlateProjectColumn("prose_provider", "TEXT");
+  addSlateProjectColumn(
+    "deliberation_config_json",
+    "TEXT NOT NULL DEFAULT '{}'",
+  );
   addSlateProjectColumn(
     "continuity_active_version",
     "TEXT NOT NULL DEFAULT '0.0'",
@@ -1424,6 +1466,14 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   if (!hasLastActiveAt) {
     db.exec("ALTER TABLE users ADD COLUMN last_active_at TEXT;");
   }
+  const hasGraphicsQuality = userColumns.some(
+    (column) => column.name === "graphics_quality",
+  );
+  if (!hasGraphicsQuality) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN graphics_quality TEXT NOT NULL DEFAULT 'high';",
+    );
+  }
   const hasVoiceMode = userColumns.some(
     (column) => column.name === "voice_mode",
   );
@@ -1444,6 +1494,13 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   if (!hasVoiceVolume)
     db.exec(
       "ALTER TABLE users ADD COLUMN voice_volume REAL NOT NULL DEFAULT 1;",
+    );
+  const hasOperatingSystemVoicesEnabled = userColumns.some(
+    (column) => column.name === "operating_system_voices_enabled",
+  );
+  if (!hasOperatingSystemVoicesEnabled)
+    db.exec(
+      "ALTER TABLE users ADD COLUMN operating_system_voices_enabled INTEGER NOT NULL DEFAULT 0;",
     );
   const hasEnglishVoiceEngine = userColumns.some(
     (column) => column.name === "english_voice_engine",
@@ -1516,6 +1573,14 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   if (!hasBotcastVoicePerformanceText) {
     db.exec(
       "ALTER TABLE botcast_messages ADD COLUMN voice_performance_text TEXT;",
+    );
+  }
+  const hasBotcastStageActionText = botcastMessageColumns.some(
+    (column) => column.name === "stage_action_text",
+  );
+  if (!hasBotcastStageActionText) {
+    db.exec(
+      "ALTER TABLE botcast_messages ADD COLUMN stage_action_text TEXT;",
     );
   }
   const hasProviderLocked = userColumns.some(
@@ -1821,6 +1886,14 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   if (!hasZenPersonaTransitionChoice) {
     db.exec(
       "ALTER TABLE users ADD COLUMN zen_persona_transition_choice TEXT NOT NULL DEFAULT 'random';",
+    );
+  }
+  const hasEphemeralChatProviderPreferences = userColumns.some(
+    (column) => column.name === "ephemeral_chat_provider_preferences",
+  );
+  if (!hasEphemeralChatProviderPreferences) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN ephemeral_chat_provider_preferences TEXT NOT NULL DEFAULT '{}';",
     );
   }
   const defaultBotColumns: Array<[string, string]> = [
@@ -2502,6 +2575,12 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   const hasBotFaceEyeCharacterColumn = botColumns.some(
     (column) => column.name === "face_eye_character",
   );
+  const hasBotCloneFamilyIdColumn = botColumns.some(
+    (column) => column.name === "clone_family_id",
+  );
+  if (!hasBotCloneFamilyIdColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN clone_family_id TEXT;");
+  }
   if (!hasBotFaceEyeCharacterColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN face_eye_character TEXT;");
   }
@@ -2682,6 +2761,14 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       "ALTER TABLE bots ADD COLUMN name_pronunciation TEXT NOT NULL DEFAULT '';",
     );
   }
+  const hasBotSelfReferralColumn = botColumns.some(
+    (column) => column.name === "self_referral",
+  );
+  if (!hasBotSelfReferralColumn) {
+    db.exec(
+      "ALTER TABLE bots ADD COLUMN self_referral TEXT NOT NULL DEFAULT '';",
+    );
+  }
   const hasAuthoredAudioVoiceProfileColumn = botColumns.some(
     (column) => column.name === "authored_audio_voice_profile",
   );
@@ -2762,6 +2849,23 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   ) {
     db.exec(
       "ALTER TABLE botcast_episodes ADD COLUMN duration_minutes INTEGER CHECK (duration_minutes IS NULL OR (duration_minutes >= 3 AND duration_minutes <= 30));",
+    );
+  }
+  if (!botcastEpisodeColumns.some((column) => column.name === "guest_kind")) {
+    db.exec(
+      "ALTER TABLE botcast_episodes ADD COLUMN guest_kind TEXT NOT NULL DEFAULT 'bot' CHECK (guest_kind IN ('bot', 'producer'));",
+    );
+  }
+  if (!botcastEpisodeColumns.some((column) => column.name === "guest_name")) {
+    db.exec(
+      "ALTER TABLE botcast_episodes ADD COLUMN guest_name TEXT NOT NULL DEFAULT '';",
+    );
+  }
+  if (
+    !botcastEpisodeColumns.some((column) => column.name === "guest_context")
+  ) {
+    db.exec(
+      "ALTER TABLE botcast_episodes ADD COLUMN guest_context TEXT NOT NULL DEFAULT '';",
     );
   }
   if (

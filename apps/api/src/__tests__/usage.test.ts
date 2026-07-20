@@ -289,6 +289,41 @@ describe("usage accounting", () => {
     });
   });
 
+  it("prices the current GPT-5.6 API family", () => {
+    withUsageTestDb((db) => {
+      runWithUsageSession(
+        {
+          db,
+          userId: "user-1",
+          privacyScope: "normal",
+          mode: "sandbox",
+          surface: "chat",
+        },
+        () => {
+          for (const model of [
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna",
+          ]) {
+            recordTextUsage({
+              provider: "openai",
+              model,
+              purpose: "chat_reply",
+              inputTokens: 1_000,
+              outputTokens: 500,
+              totalTokens: 1_500,
+              tokenCountSource: "provider_reported",
+            });
+          }
+        },
+      );
+
+      const report = getUsageReport({ db, userId: "user-1", range: "all" });
+      assert.equal(report.totals.unpricedOnlineEvents, 0);
+      assert.equal(report.totals.estimatedCostMicroUsd, 34_000);
+    });
+  });
+
   it("keeps incognito usage aggregate-only and out of recent events", () => {
     withUsageTestDb((db) => {
       runWithUsageSession(

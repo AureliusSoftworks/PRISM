@@ -15,12 +15,14 @@ test("group-room wallpaper request contract carries only group identity referenc
     groupName: "Night Shift",
     groupDescription: "Friends who think best after midnight.",
     memberBotIds: ["bot-a", "bot-b"],
+    variationSeed: "attempt-2",
     preferredProvider: "local",
   } satisfies GroupRoomWallpaperImageGenerationRequest;
 
   assert.equal(request.purpose, "group-room-wallpaper");
   assert.equal("prompt" in request, false);
   assert.deepEqual(request.memberBotIds, ["bot-a", "bot-b"]);
+  assert.equal(request.variationSeed, "attempt-2");
   assert.equal("botId" in request, false);
   assert.equal("conversationId" in request, false);
 });

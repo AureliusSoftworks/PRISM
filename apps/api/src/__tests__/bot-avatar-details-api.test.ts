@@ -14,6 +14,7 @@ import {
   createDeterministicProvider,
   createFetchRecorder,
   createTestDatabase,
+  withTestRegistrationBody,
 } from "../test-support.ts";
 
 const tempDir = mkdtempSync(join(tmpdir(), "prism-avatar-details-api-"));
@@ -70,7 +71,8 @@ async function request(
     cookie?: string;
   } = {}
 ): Promise<DirectResponse> {
-  const rawBody = options.body === undefined ? "" : JSON.stringify(options.body);
+  const requestBody = withTestRegistrationBody(path, options.body);
+  const rawBody = requestBody === undefined ? "" : JSON.stringify(requestBody);
   const req = Readable.from(rawBody ? [Buffer.from(rawBody)] : []) as IncomingMessage;
   req.method = options.method ?? "GET";
   req.url = path;

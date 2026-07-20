@@ -1,5 +1,6 @@
 import {
   normalizeBotNamePronunciation,
+  normalizeBotSelfReferral,
   serializeBotAvatarDetailsV1,
   serializeBotPowersV1,
   type BotAudioVoiceProfileV1,
@@ -10,6 +11,7 @@ import {
 export interface BotCustomizerSavePristine {
   name: string;
   namePronunciation: string;
+  selfReferral: string;
   prompt: string;
   rawPrompt?: string;
   localModel: string;
@@ -57,6 +59,7 @@ export interface BotCustomizerSavePristine {
 export interface BotCustomizerSaveCurrent {
   name: string;
   namePronunciation: string;
+  selfReferral: string;
   storedSystemPrompt: string;
   advancedMode: boolean;
   localModel: string;
@@ -108,6 +111,7 @@ export interface BotCustomizerSaveCurrent {
 export interface BotCustomizerSavePatch {
   name?: string;
   namePronunciation?: string;
+  selfReferral?: string;
   systemPrompt?: string;
   onlineEnabled?: boolean;
   deleteProtected?: boolean;
@@ -168,6 +172,7 @@ export function buildBotCustomizerSavePatch(
     return {
       name: current.name,
       namePronunciation: normalizeBotNamePronunciation(current.namePronunciation),
+      selfReferral: normalizeBotSelfReferral(current.selfReferral),
       systemPrompt: current.storedSystemPrompt,
       onlineEnabled: current.onlineEnabled,
       deleteProtected: current.deleteProtected,
@@ -221,6 +226,12 @@ export function buildBotCustomizerSavePatch(
     patch.namePronunciation = normalizeBotNamePronunciation(
       current.namePronunciation,
     );
+  }
+  if (
+    normalizeBotSelfReferral(current.selfReferral) !==
+    normalizeBotSelfReferral(pristine.selfReferral)
+  ) {
+    patch.selfReferral = normalizeBotSelfReferral(current.selfReferral);
   }
   if (current.storedSystemPrompt !== pristineSystemPrompt) {
     patch.systemPrompt = current.storedSystemPrompt;

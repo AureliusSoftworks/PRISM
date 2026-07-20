@@ -67,6 +67,21 @@ function seedPortableProject(db: DatabaseSync, userId: string) {
     premise: "Mara must decide whether an old promise still binds her city.",
     voice: "Lyrical but precise.",
     phase: "refine",
+    proseMode: "auto",
+    proseProvider: "openai",
+    proseModel: "gpt-5-mini",
+    deliberationConfig: {
+      lux: {
+        provider: "openai",
+        model: "gpt-5-mini",
+        directive: "Protect the sincerity of Mara's return.",
+      },
+      umbra: {
+        provider: "local",
+        model: "qwen3:8b",
+        directive: "Make every welcome conceal a concrete cost.",
+      },
+    },
     structure: [
       {
         id: "scene-arrival",
@@ -487,6 +502,21 @@ describe("Slate .slate archive import service", () => {
     assert.equal(project.title, imported.title);
     assert.equal(project.title_origin, "spark");
     assert.equal(project.premise, "Mara must decide whether an old promise still binds her city.");
+    assert.equal(project.prose_mode, "auto");
+    assert.equal(project.prose_provider, "openai");
+    assert.equal(project.prose_model, "gpt-5-mini");
+    assert.deepEqual(JSON.parse(String(project.deliberation_config_json)), {
+      lux: {
+        provider: "openai",
+        model: "gpt-5-mini",
+        directive: "Protect the sincerity of Mara's return.",
+      },
+      umbra: {
+        provider: "local",
+        model: "qwen3:8b",
+        directive: "Make every welcome conceal a concrete cost.",
+      },
+    });
     assert.equal(project.manuscript,
       "The Arrival\n\nSnow moved sideways across the gate when Mara came home.\n\n\n" +
       "The Promise\n\nThe gate spoke her childhood name, and every lock opened.");

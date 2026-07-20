@@ -36,6 +36,14 @@ describe("Slate AI workspace controls", () => {
     assert.match(workspace, /<ReactMarkdown remarkPlugins=\{\[remarkGfm\]\}>/u);
     assert.match(workspace, /Ideas fade · the last 3 can recover after a close/u);
     assert.match(workspace, /className=\{styles\.companionBubble\}/u);
+    assert.match(
+      workspace,
+      /companionComposerBubble[\s\S]{0,3000}shouldSubmitComposerOnEnter/u,
+    );
+    assert.match(
+      workspace,
+      /companionComposerBubble[\s\S]{0,3000}enterKeyHint="send"/u,
+    );
     assert.match(workspace, /<path d="M16 5\.2 27 25H5Z"/u);
     assert.match(styles, /\.companionAvatar\s*\{/u);
     assert.match(styles, /\.companionAvatar::before\s*\{/u);
@@ -43,5 +51,31 @@ describe("Slate AI workspace controls", () => {
     assert.match(styles, /@keyframes slateCompanionBubbleLife/u);
     assert.match(styles, /@keyframes slateCompanionBubbleReducedLife/u);
     assert.doesNotMatch(styles, /\.companionPanel\s*\{/u);
+  });
+
+  it("renders a stoppable two-hemisphere Lux and Umbra deliberation surface", () => {
+    assert.match(workspace, /data-tutorial-target="slate-deliberation"/u);
+    assert.match(workspace, /A mind in two hemispheres\./u);
+    assert.match(workspace, /slateDeliberationNextSpeaker/u);
+    assert.match(workspace, /\/deliberation\/turn/u);
+    assert.match(workspace, /stopSlateDeliberation/u);
+    assert.match(workspace, /Use as \{activeSection\?\.prose\.trim\(\)/u);
+    assert.match(workspace, /aria-modal="true"/u);
+    assert.match(workspace, /data-active-speaker/u);
+    assert.match(styles, /\.deliberationHemisphere\[data-side="lux"\]/u);
+    assert.match(styles, /\.deliberationHemisphere\[data-side="umbra"\]/u);
+    assert.match(styles, /@keyframes slateLuxHemispherePulse/u);
+    assert.match(styles, /@keyframes slateUmbraHemispherePulse/u);
+    assert.match(
+      styles,
+      /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.deliberationHemisphere/u,
+    );
+  });
+
+  it("publishes active-project hemisphere settings to the Settings surface", () => {
+    assert.match(workspace, /onHemisphereSettingsSnapshot/u);
+    assert.match(workspace, /hemisphereSettingsUpdate/u);
+    assert.match(workspace, /config: project\.deliberationConfig/u);
+    assert.match(workspace, /modelOptions: proseModelOptions/u);
   });
 });

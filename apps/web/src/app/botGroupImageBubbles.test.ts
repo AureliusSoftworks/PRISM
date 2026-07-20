@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  botGroupImageBubbleLayoutViewport,
   botGroupImageBubblePlan,
   type BotGroupImageBubbleRecord,
 } from "./botGroupImageBubbles.ts";
@@ -89,6 +90,17 @@ describe("bot group image bubble eligibility", () => {
 });
 
 describe("bot group image bubble determinism", () => {
+  it("stabilizes resize noise inside the planner's responsive bands", () => {
+    assert.deepEqual(
+      botGroupImageBubbleLayoutViewport({ width: 1180, height: 700 }),
+      botGroupImageBubbleLayoutViewport({ width: 1398, height: 759 }),
+    );
+    assert.notDeepEqual(
+      botGroupImageBubbleLayoutViewport({ width: 1398, height: 759 }),
+      botGroupImageBubbleLayoutViewport({ width: 1440, height: 760 }),
+    );
+  });
+
   it("is stable across input ordering and balances the first pass across member bots", () => {
     const input = {
       groupId: "group-1",

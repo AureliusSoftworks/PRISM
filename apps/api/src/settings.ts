@@ -18,8 +18,12 @@ import {
   normalizeAutoFallbackChain,
   serializeAutoFallbackChain,
   type BotAudioVoiceId,
+  type GraphicsQuality,
   type ImageProviderName,
+  type EphemeralChatProviderPreferences,
   isImageProviderName,
+  normalizeEphemeralChatProviderPreferences,
+  normalizeGraphicsQuality,
 } from "@localai/shared";
 import { sanitizeHiddenModelIds } from "./model-routing.ts";
 import { requirePrivateNetworkHttpUrl } from "./local-network-host.ts";
@@ -68,6 +72,17 @@ function normalizeElevenLabsVoiceModel(value: unknown, fallback: string | null):
   if (value === null) return null;
   if (typeof value !== "string") return fallback;
   const normalized = value.trim().slice(0, 160);
+  return normalized || null;
+}
+
+function normalizeLegacyVoiceIdentity(
+  value: unknown,
+  fallback: string | null,
+): string | null {
+  if (value === undefined) return fallback;
+  if (value === null) return null;
+  if (typeof value !== "string") return fallback;
+  const normalized = value.trim().slice(0, 200);
   return normalized || null;
 }
 
@@ -137,7 +152,9 @@ const LOOPBACK_OLLAMA_HOSTNAMES = new Set([
 export interface CurrentSettings {
   displayName: string;
   theme: Theme;
+  graphicsQuality: GraphicsQuality | string | null;
   preferredProvider: Provider;
+  ephemeralChatProviderPreferences: string | null;
   preferredImageProvider: ImageProviderName;
   providerLocked: number;
   autoMemory: number;
@@ -188,6 +205,7 @@ export interface CurrentSettings {
   voiceMode: VoiceMode | string | null;
   voiceEffectsEnabled: number;
   voiceVolume: number | null;
+  operatingSystemVoicesEnabled: number;
   /** Compatibility column storing the selected ONLINE engine; LOCAL is always builtin. */
   englishVoiceEngine: EnglishVoiceEngine | string | null;
   defaultSystemVoiceName: string | null;
@@ -201,7 +219,9 @@ export interface CurrentSettings {
 export interface NextSettings {
   displayName: string;
   theme: Theme;
+  graphicsQuality: GraphicsQuality;
   preferredProvider: Provider;
+  ephemeralChatProviderPreferences: EphemeralChatProviderPreferences;
   preferredImageProvider: ImageProviderName;
   providerLocked: number;
   autoMemory: number;
@@ -246,6 +266,7 @@ export interface NextSettings {
   voiceMode: VoiceMode;
   voiceEffectsEnabled: boolean;
   voiceVolume: number;
+  operatingSystemVoicesEnabled: boolean;
   /** Selected ONLINE engine only; LOCAL English always resolves to builtin. */
   englishVoiceEngine: EnglishVoiceEngine;
   defaultSystemVoiceName: string | null;
@@ -825,9 +846,21 @@ export function resolveNextSettings(
 ): NextSettings {
   const displayName = readDisplayName(body.displayName, current.displayName);
   const theme: Theme = isTheme(body.theme) ? body.theme : current.theme;
+  const graphicsQuality = normalizeGraphicsQuality(
+    body.graphicsQuality,
+    normalizeGraphicsQuality(current.graphicsQuality),
+  );
   const preferredProvider: Provider = isProvider(body.preferredProvider)
     ? body.preferredProvider
     : current.preferredProvider;
+  const ephemeralChatProviderPreferences =
+    body.ephemeralChatProviderPreferences === undefined
+      ? normalizeEphemeralChatProviderPreferences(
+          current.ephemeralChatProviderPreferences,
+        )
+      : normalizeEphemeralChatProviderPreferences(
+          body.ephemeralChatProviderPreferences,
+        );
   const preferredImageProvider: ImageProviderName = isImageProviderName(
     body.preferredImageProvider
   )
@@ -1122,13 +1155,24 @@ export function resolveNextSettings(
   const voiceVolume = body.voiceVolume === undefined
     ? normalizeBotVoiceVolume(current.voiceVolume)
     : normalizeBotVoiceVolume(body.voiceVolume, normalizeBotVoiceVolume(current.voiceVolume));
+  const operatingSystemVoicesEnabled =
+    typeof body.operatingSystemVoicesEnabled === "boolean"
+      ? body.operatingSystemVoicesEnabled
+      : current.operatingSystemVoicesEnabled !== 0;
   // The online selector currently has one installed provider. It is not an
   // opt-in toggle; the per-profile ElevenLabs voice is the explicit override.
   const englishVoiceEngine: EnglishVoiceEngine = "elevenlabs";
-  // Account-level voice identities are retired. A settings save clears any
-  // legacy values so only Prism/bot customization owns voice identity.
-  const defaultSystemVoiceName = null;
-  const defaultElevenLabsVoiceId = null;
+  // Keep legacy account-level identities as compatibility fallbacks. Existing
+  // bots may still rely on them, so an unrelated settings save must not erase
+  // those authored voice choices.
+  const defaultSystemVoiceName = normalizeLegacyVoiceIdentity(
+    body.defaultSystemVoiceName,
+    current.defaultSystemVoiceName,
+  );
+  const defaultElevenLabsVoiceId = normalizeLegacyVoiceIdentity(
+    body.defaultElevenLabsVoiceId,
+    current.defaultElevenLabsVoiceId,
+  );
   const elevenLabsVoiceBank = body.elevenLabsVoiceBank === undefined
     ? parseStoredElevenLabsVoiceBank(current.elevenLabsVoiceBank)
     : normalizeElevenLabsVoiceBank(body.elevenLabsVoiceBank);
@@ -1195,7 +1239,9 @@ export function resolveNextSettings(
   return {
     displayName,
     theme,
+    graphicsQuality,
     preferredProvider,
+    ephemeralChatProviderPreferences,
     preferredImageProvider,
     providerLocked,
     autoMemory,
@@ -1240,6 +1286,7 @@ export function resolveNextSettings(
     voiceMode,
     voiceEffectsEnabled,
     voiceVolume,
+    operatingSystemVoicesEnabled,
     englishVoiceEngine,
     defaultSystemVoiceName,
     defaultElevenLabsVoiceId,

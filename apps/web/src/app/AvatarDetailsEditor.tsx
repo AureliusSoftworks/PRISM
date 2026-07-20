@@ -56,8 +56,8 @@ import {
 } from "./avatar-details";
 import {
   BOT_AVATAR_CANONICAL_FACE_SCALE_Y,
-  BOT_AVATAR_SCREEN_EDITOR_FACE_GLYPH_FRAME_RATIO,
-  BOT_AVATAR_SCREEN_EDITOR_FACE_PLACEMENT,
+  BOT_AVATAR_DETAILS_FACE_GLYPH_FRAME_RATIO,
+  BOT_AVATAR_DETAILS_FACE_PLACEMENT,
 } from "./bot-avatar-render-geometry";
 import { CoffeeSeatPlateEmoji } from "./CoffeeSeatPlateEmoji";
 import {
@@ -99,6 +99,8 @@ export interface AvatarDetailsEditorHandle {
   apply(): Promise<boolean>;
   cancel(): void;
   hasDirtyChanges(): boolean;
+  undo(): boolean;
+  redo(): boolean;
 }
 
 export interface AvatarDetailsEditorProps {
@@ -193,14 +195,14 @@ const AvatarDetailsEditorSession = forwardRef<
   const guideInk = theme === "light" ? "#050608" : "#ffffff";
   const zoomedFaceYPct =
     AVATAR_DETAILS_EDITOR_ZOOM_ORIGIN_Y_PCT +
-    (BOT_AVATAR_SCREEN_EDITOR_FACE_PLACEMENT.yPct -
+    (BOT_AVATAR_DETAILS_FACE_PLACEMENT.yPct -
       AVATAR_DETAILS_EDITOR_ZOOM_ORIGIN_Y_PCT) *
       AVATAR_DETAILS_EDITOR_ZOOM;
   const faceGuideStyle = {
-    "--zen-live-bot-face-x": `${BOT_AVATAR_SCREEN_EDITOR_FACE_PLACEMENT.xPct}%`,
+    "--zen-live-bot-face-x": `${BOT_AVATAR_DETAILS_FACE_PLACEMENT.xPct}%`,
     "--zen-live-bot-face-y": `${zoomedFaceYPct}%`,
-    "--zen-live-bot-face-scale": BOT_AVATAR_SCREEN_EDITOR_FACE_PLACEMENT.scale,
-    "--zen-live-bot-avatar-face-glyph-size": `${BOT_AVATAR_SCREEN_EDITOR_FACE_GLYPH_FRAME_RATIO * AVATAR_DETAILS_EDITOR_ZOOM * 100}cqw`,
+    "--zen-live-bot-face-scale": BOT_AVATAR_DETAILS_FACE_PLACEMENT.scale,
+    "--zen-live-bot-avatar-face-glyph-size": `${BOT_AVATAR_DETAILS_FACE_GLYPH_FRAME_RATIO * AVATAR_DETAILS_EDITOR_ZOOM * 100}cqw`,
     "--coffee-plate-emoji-face-scale-y": BOT_AVATAR_CANONICAL_FACE_SCALE_Y,
     "--avatar-details-facing-scale-x": "1",
     "--zen-live-bot-face-ink": guideInk,
@@ -374,30 +376,32 @@ const AvatarDetailsEditorSession = forwardRef<
     [applyHistoryTransition],
   );
 
-  const undo = useCallback((): void => {
+  const undo = useCallback((): boolean => {
     const current = {
       working: workingRef.current,
       undo: undoHistoryRef.current,
       redo: redoHistoryRef.current,
     };
     const next = undoAvatarDetailsHistory(current);
-    if (next === current) return;
+    if (next === current) return false;
     onEditStart?.();
     applyHistoryTransition(next);
     setLimitReached(false);
+    return true;
   }, [applyHistoryTransition, onEditStart]);
 
-  const redo = useCallback((): void => {
+  const redo = useCallback((): boolean => {
     const current = {
       working: workingRef.current,
       undo: undoHistoryRef.current,
       redo: redoHistoryRef.current,
     };
     const next = redoAvatarDetailsHistory(current);
-    if (next === current) return;
+    if (next === current) return false;
     onEditStart?.();
     applyHistoryTransition(next);
     setLimitReached(false);
+    return true;
   }, [applyHistoryTransition, onEditStart]);
 
   const applyWorkingCopy = useCallback(async (): Promise<boolean> => {
@@ -446,10 +450,12 @@ const AvatarDetailsEditorSession = forwardRef<
     () => ({
       apply: applyWorkingCopy,
       cancel: cancelWorkingCopy,
+      undo,
+      redo,
       hasDirtyChanges: () =>
         !avatarDetailsEqual(workingRef.current, normalizedSource),
     }),
-    [applyWorkingCopy, cancelWorkingCopy, normalizedSource],
+    [applyWorkingCopy, cancelWorkingCopy, normalizedSource, redo, undo],
   );
 
   const paintPoints = useCallback(
@@ -731,48 +737,58 @@ const AvatarDetailsEditorSession = forwardRef<
           >
             <button
               type="button"
+              aria-label="Brush tool"
               aria-pressed={paintMode === "brush"}
               data-selected={paintMode === "brush" ? "true" : undefined}
+              data-glyph-tooltip="Brush"
+              title="Brush"
               onClick={() => setPaintMode("brush")}
             >
-              <Brush size={13} aria-hidden="true" />
-              Brush
+              <Brush size={15} aria-hidden="true" />
             </button>
             <button
               type="button"
+              aria-label="Eraser tool"
               aria-pressed={paintMode === "eraser"}
               data-selected={paintMode === "eraser" ? "true" : undefined}
+              data-glyph-tooltip="Eraser"
+              title="Eraser"
               onClick={() => setPaintMode("eraser")}
             >
-              <Eraser size={13} aria-hidden="true" />
-              Eraser
+              <Eraser size={15} aria-hidden="true" />
             </button>
             <button
               type="button"
+              aria-label="Line tool"
               aria-pressed={paintMode === "line"}
               data-selected={paintMode === "line" ? "true" : undefined}
+              data-glyph-tooltip="Line"
+              title="Line"
               onClick={() => setPaintMode("line")}
             >
-              <Minus size={13} aria-hidden="true" />
-              Line
+              <Minus size={15} aria-hidden="true" />
             </button>
             <button
               type="button"
+              aria-label="Circle tool"
               aria-pressed={paintMode === "circle"}
               data-selected={paintMode === "circle" ? "true" : undefined}
+              data-glyph-tooltip="Circle"
+              title="Circle"
               onClick={() => setPaintMode("circle")}
             >
-              <Circle size={13} aria-hidden="true" />
-              Circle
+              <Circle size={15} aria-hidden="true" />
             </button>
             <button
               type="button"
+              aria-label="Move ink tool"
               aria-pressed={paintMode === "move"}
               data-selected={paintMode === "move" ? "true" : undefined}
+              data-glyph-tooltip="Move ink"
+              title="Move ink"
               onClick={() => setPaintMode("move")}
             >
-              <Move size={13} aria-hidden="true" />
-              Drag
+              <Move size={15} aria-hidden="true" />
             </button>
           </div>
           <div

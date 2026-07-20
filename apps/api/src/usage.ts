@@ -117,6 +117,24 @@ type ImagePrice = {
 };
 
 const TEXT_PRICING: Record<string, TextPrice> = {
+  "gpt-5.6-sol": {
+    inputUsdPerMillion: 5,
+    outputUsdPerMillion: 30,
+    source: "builtin",
+    note: "Estimated OpenAI API text pricing catalog.",
+  },
+  "gpt-5.6-terra": {
+    inputUsdPerMillion: 2.5,
+    outputUsdPerMillion: 15,
+    source: "builtin",
+    note: "Estimated OpenAI API text pricing catalog.",
+  },
+  "gpt-5.6-luna": {
+    inputUsdPerMillion: 1,
+    outputUsdPerMillion: 6,
+    source: "builtin",
+    note: "Estimated OpenAI API text pricing catalog.",
+  },
   "gpt-5.4-mini": {
     inputUsdPerMillion: 0.75,
     outputUsdPerMillion: 4.5,
@@ -428,6 +446,7 @@ function normalizeUsagePurpose(value: string | null | undefined): UsagePurpose {
     case "memory_summary":
     case "prompt_wildcard":
     case "psychic_planning":
+    case "slate_deliberation":
     case "slate_draft":
     case "slate_revision":
     case "slate_shape":

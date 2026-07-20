@@ -247,6 +247,12 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.match(pageSource, /BOT_AVATAR_CUSTOM_EYE_START/);
   assert.match(pageSource, /BOT_AVATAR_CUSTOM_MOUTH_START/);
   assert.match(pageSource, /BOT_AVATAR_CUSTOM_THINKING_FRAMES/);
+  assert.match(pageSource, /label: "Disabled"/);
+  assert.match(pageSource, /frames: DISABLED_BOT_FACE_THINKING_FRAMES/);
+  assert.match(
+    pageSource,
+    /Keep the normal face and animations while thinking/,
+  );
   assert.match(pageSource, /BOT_AVATAR_RANDOM_CUSTOM_BLINK_GLYPHS/);
   assert.match(pageSource, /BOT_AVATAR_RANDOM_CUSTOM_THINKING_FRAME_SETS/);
   assert.match(pageSource, /function botAvatarRandomIndex/);
@@ -560,7 +566,9 @@ test("avatar edits stay local until Save and support multi-step undo", () => {
   );
   assert.match(pageSource, /const pushBotAvatarUndoSnapshot = useCallback/);
   assert.match(pageSource, /const undoBotAvatarDraft = useCallback/);
+  assert.match(pageSource, /const redoBotAvatarDraft = useCallback/);
   assert.match(pageSource, /applyBotAvatarDraftSnapshot\(snapshot\);/);
+  assert.match(pageSource, /botAvatarRedoHistoryRef/);
   assert.match(
     pageSource,
     /pushBotAvatarUndoSnapshot\("color"\);[\s\S]*handleNewBotColorChange\(next\);/,
@@ -581,18 +589,26 @@ test("avatar edits stay local until Save and support multi-step undo", () => {
     /now - activeInteraction\.lastChangedAt < BOT_AVATAR_UNDO_STATIONARY_MS/,
   );
   assert.match(pageSource, /canUndo=\{botAvatarUndoDepth > 0\}/);
+  assert.match(pageSource, /canRedo=\{botAvatarRedoDepth > 0\}/);
   assert.match(pageSource, /onUndo=\{undoBotAvatarDraft\}/);
+  assert.match(pageSource, /onRedo=\{redoBotAvatarDraft\}/);
   assert.match(
     pageSource,
     /className=\{styles\.botAvatarCustomizerUndoButton\}/,
   );
   assert.match(pageSource, /Undo last edit \(Ctrl\/Cmd\+Z\)/);
+  assert.match(pageSource, /Redo last edit \(Shift\+Ctrl\/Cmd\+Z\)/);
   assert.match(
     pageSource,
     /window\.addEventListener\("keydown", handleUndoKeyDown\);/,
   );
   assert.match(pageSource, /event\.metaKey && !event\.ctrlKey/);
   assert.match(pageSource, /event\.preventDefault\(\);/);
+  assert.match(pageSource, /const redoRequested = event\.shiftKey/);
+  assert.match(
+    pageSource,
+    /target\.closest\([\s\S]*input, textarea, \[contenteditable="true"\]/,
+  );
   assert.match(
     pageSource,
     /async function saveBot\(id: string\): Promise<boolean>/,
@@ -1050,6 +1066,9 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   assert.match(pageSource, /<span>Pronunciation<\/span>/);
   assert.match(pageSource, /aria-label="Bot name pronunciation"/);
   assert.match(pageSource, /placeholder="How bots should say this name"/);
+  assert.match(pageSource, /<span>Self-referral<\/span>/);
+  assert.match(pageSource, /aria-label="Bot self-referral"/);
+  assert.match(pageSource, /placeholder="How this bot refers to itself"/);
   assert.match(pageSource, /aria-label="Preview bot name pronunciation"/);
   assert.match(pageSource, /My name is \$\{trimmedName\}\./);
   const invalidChatDetailEffect = pageSource.slice(
@@ -1104,7 +1123,7 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   );
   assert.match(
     pageSource,
-    /const BOT_AVATAR_CUSTOMIZER_TABS = \[\s*\{ value: "face", label: "Identity" \},\s*\{ value: "profile", label: "Profile" \},\s*\{ value: "powers", label: "Powers" \},\s*\{ value: "eyes", label: "Eyes" \},\s*\{ value: "mouth", label: "Mouth" \},\s*\{ value: "voice", label: "Voice" \},\s*\{ value: "settings", label: "Settings" \},\s*\{ value: "details", label: "Details" \},\s*\{ value: "motion", label: "Motion" \}/,
+    /const BOT_AVATAR_CUSTOMIZER_TABS = \[\s*\{ value: "face", label: "Identity" \},\s*\{ value: "profile", label: "Profile" \},\s*\{ value: "powers", label: "Powers" \},\s*\{ value: "eyes", label: "Eyes" \},\s*\{ value: "mouth", label: "Mouth" \},\s*\{ value: "voice", label: "Voice" \},\s*\{ value: "tone", label: "Tone" \},\s*\{ value: "settings", label: "Settings" \},\s*\{ value: "details", label: "Details" \},\s*\{ value: "motion", label: "Motion" \}/,
   );
   assert.match(
     pageSource,
@@ -1126,6 +1145,10 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
     /\.botProfileBuilderBackdrop\[data-avatar-studio-layer="true"\]/,
   );
   assert.match(pageSource, /activeControlTab === "voice"/);
+  assert.match(pageSource, /activeControlTab === "tone"/);
+  assert.match(pageSource, /<BotVoiceCharacterEditor/);
+  assert.match(pageSource, /data-tab-count=\{visibleAvatarTabs\.length\}/);
+  assert.match(cssSource, /\.botAvatarControlTabs\[data-tab-count="10"\]/);
   assert.match(
     pageSource,
     /activeControlTab === "settings" && identityControlsVisible/,
@@ -1144,7 +1167,7 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
     cssSource,
     /grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/,
   );
-  assert.match(pageSource, /aria-label="Generation Lens and bot randomizer"/);
+  assert.doesNotMatch(pageSource, /Generation Lens|Browse Lenses|LensTile/);
   assert.match(
     pageSource,
     /resetLabel=\{\s*isDefaultPrismBot\s*\?\s*"Reset voice"\s*:\s*"Restore original voice"\s*\}/,
@@ -1358,7 +1381,7 @@ test("personality randomization is scoped away from identity and settings", () =
   assert.notEqual(end, -1);
   const helperSource = pageSource.slice(start, end);
   assert.match(helperSource, /setBotProfile\(\(current\) => \(\{/);
-  assert.match(helperSource, /\.\.\.current,\s*core: draft\.profile\.core,/);
+  assert.match(helperSource, /\.\.\.current,\s*core: profile\.core,/);
   assert.doesNotMatch(helperSource, /setNewBotName/);
   assert.doesNotMatch(helperSource, /setNewBotColor/);
   assert.doesNotMatch(helperSource, /setNewBotAudioVoiceProfile/);
@@ -1661,7 +1684,18 @@ test("avatar customizer preview has explicit expression states", () => {
     pageSource,
     /forceBlinkPhase=\{previewBlink \? "closed" : undefined\}/,
   );
-  assert.match(pageSource, /showThinkingSpinner=\{previewThinking\}/);
+  assert.match(
+    pageSource,
+    /const previewThinkingSpinnerActive =\s+previewThinking &&\s+!botFaceThinkingSpinnerDisabled\(faceStyle\.thinkingFrames\);/,
+  );
+  assert.match(
+    pageSource,
+    /motionActive=\{!previewTalking && !previewThinkingSpinnerActive\}/,
+  );
+  assert.match(
+    pageSource,
+    /showThinkingSpinner=\{previewThinkingSpinnerActive\}/,
+  );
   assert.doesNotMatch(
     cssSource,
     /\[data-avatar-preview-mode="blink"\][\s\S]{0,240}--eye-blink-scale-y:/,
@@ -1771,4 +1805,56 @@ test("Powers read as an app-wide bot trait across active surfaces", () => {
   assert.match(pageSource, /topic pull/u);
   assert.match(pageSource, /memory for/u);
   assert.match(pageSource, /private insight into/u);
+  assert.match(
+    pageSource,
+    /effect\.type === "response_budget"[\s\S]{0,160}response budget/u,
+  );
+  assert.match(pageSource, /structured engine effect/u);
+  assert.match(pageSource, /Model-guided cues only\./u);
+  assert.match(pageSource, /Guidance — bot:/u);
+  assert.match(pageSource, /Guidance — others:/u);
+  assert.match(
+    pageSource,
+    /effect\.type === "candor"[\s\S]{0,140}one-response candor pressure/u,
+  );
+  assert.match(pageSource, /effect\.type === "mute"\) return "Never speaks"/u);
+  assert.match(
+    pageSource,
+    /effect\.type === "echo_addressed"\) return "Repeats addressed speech exactly"/u,
+  );
+  assert.match(
+    pageSource,
+    /effect\.type === "hearing_repeat"[\s\S]{0,140}requests exact repeats with a[\s\S]{0,80}mood cost/u,
+  );
+});
+
+test("Power badges sit with bot portraits instead of crowding identity text", () => {
+  assert.match(
+    pageSource,
+    /styles\.botMarketplaceCardGlyph[\s\S]{0,260}<BotPowerBadge[\s\S]{0,180}installedBot\?\.powers \?\? entry\.powers[\s\S]{0,80}passive/u,
+  );
+  assert.match(
+    pageSource,
+    /showFeaturedName \? \([\s\S]{0,100}<BotPowerBadge powers=\{bot\.powers\} passive \/>[\s\S]{0,130}<span className=\{styles\.chatBotTileFeaturedName\}>\{bot\.name\}<\/span>/u,
+  );
+  assert.match(
+    pageSource,
+    /className=\{styles\.storyBotGlyph\}[\s\S]{0,120}<BotPowerBadge powers=\{bot\.powers\} passive \/>/u,
+  );
+  assert.match(
+    pageSource,
+    /className=\{styles\.coffeeSeatGlowPill\}[\s\S]{0,260}<BotPowerBadge[\s\S]{0,160}passive/u,
+  );
+  assert.match(
+    cssSource,
+    /\.botMarketplaceCardGlyph > \.botPowerSurfaceBadgeWrap\s*\{[\s\S]*position:\s*absolute/u,
+  );
+  assert.match(
+    cssSource,
+    /\.coffeeCanvasBotTile > \.botPowerSurfaceBadgeWrap\s*\{[\s\S]*position:\s*absolute/u,
+  );
+  assert.match(
+    cssSource,
+    /\.coffeeSeatGlowPill > \.botPowerSurfaceBadgeWrap\s*\{[\s\S]*position:\s*absolute/u,
+  );
 });

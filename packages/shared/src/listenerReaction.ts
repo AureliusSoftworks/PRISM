@@ -19,7 +19,19 @@ export type ListenerReactionSpokenCue =
   | "hmm"
   | "right"
   | "oh"
-  | "go on";
+  | "go on"
+  | "No, hold on."
+  | "Let me answer that."
+  | "That's not fair.";
+export const LISTENER_REACTION_VOCAL_FOLEYS = [
+  "clears throat",
+  "coughs",
+  "sighs",
+  "exhales",
+  "chuckles",
+] as const;
+export type ListenerReactionVocalFoley =
+  (typeof LISTENER_REACTION_VOCAL_FOLEYS)[number];
 
 export interface ListenerReactionPlanV1 {
   v: typeof LISTENER_REACTION_PLAN_VERSION;
@@ -30,6 +42,10 @@ export interface ListenerReactionPlanV1 {
   targetSource: ListenerReactionTargetSource;
   visualAction: ListenerReactionVisualAction;
   spokenCue?: ListenerReactionSpokenCue;
+  /** Provider-generated nonverbal vocal sound. ElevenLabs-only at playback. */
+  vocalFoley?: ListenerReactionVocalFoley;
+  /** A tense guest trying to cut across the host without taking transcript ownership. */
+  interjectionAttempt?: true;
   /** Relative position inside the speaker's delivery. Always 0.3..0.75. */
   targetProgress: number;
   seed: string;
@@ -57,7 +73,31 @@ const SPOKEN_CUES = new Set<ListenerReactionSpokenCue>([
   "right",
   "oh",
   "go on",
+  "No, hold on.",
+  "Let me answer that.",
+  "That's not fair.",
 ]);
+const VOCAL_FOLEYS = new Set<ListenerReactionVocalFoley>(
+  LISTENER_REACTION_VOCAL_FOLEYS,
+);
+
+export function normalizeListenerReactionVocalFoley(
+  value: unknown,
+): ListenerReactionVocalFoley | null {
+  return VOCAL_FOLEYS.has(value as ListenerReactionVocalFoley)
+    ? value as ListenerReactionVocalFoley
+    : null;
+}
+
+export function listenerReactionHasAudio(
+  plan: Pick<ListenerReactionPlanV1, "spokenCue" | "vocalFoley">,
+): boolean {
+  return Boolean(plan.spokenCue || plan.vocalFoley);
+}
+
+// Attentive presence should be the norm in Signal; the remaining gaps keep
+// listener reactions from feeling metronomic.
+const SIGNAL_VISUAL_REACTION_CHANCE = 0.82;
 
 function stableUnit(seed: string): number {
   let hash = 2166136261;
@@ -98,6 +138,9 @@ export function normalizeListenerReactionPlanV1(
   const spokenCue = SPOKEN_CUES.has(row.spokenCue as ListenerReactionSpokenCue)
     ? row.spokenCue as ListenerReactionSpokenCue
     : undefined;
+  const vocalFoley = normalizeListenerReactionVocalFoley(row.vocalFoley) ??
+    undefined;
+  const interjectionAttempt = row.interjectionAttempt === true;
   const targetProgress = typeof row.targetProgress === "number" &&
       Number.isFinite(row.targetProgress)
     ? Math.max(0.3, Math.min(0.75, row.targetProgress))
@@ -124,6 +167,8 @@ export function normalizeListenerReactionPlanV1(
     targetSource,
     visualAction,
     ...(spokenCue ? { spokenCue } : {}),
+    ...(!spokenCue && vocalFoley ? { vocalFoley } : {}),
+    ...(interjectionAttempt ? { interjectionAttempt: true as const } : {}),
     targetProgress: Number(targetProgress.toFixed(3)),
     seed,
     cameraCutEligible: row.cameraCutEligible,
@@ -152,6 +197,29 @@ function signalVisualAction(
   return choose(`${seed}:visual`, ["nod", "lean_in", "head_tilt"] as const);
 }
 
+function signalVocalFoley(
+  seed: string,
+  mood: VoiceDeliveryMood,
+  tensionLevel: number,
+): ListenerReactionVocalFoley {
+  if (tensionLevel >= 2 || mood === "strained") {
+    return choose(
+      `${seed}:foley:strained`,
+      ["exhales", "clears throat", "coughs"] as const,
+    );
+  }
+  if (mood === "warm" || mood === "joyful") {
+    return choose(
+      `${seed}:foley:warm`,
+      ["chuckles", "sighs", "exhales"] as const,
+    );
+  }
+  return choose(
+    `${seed}:foley`,
+    ["clears throat", "coughs", "sighs", "exhales"] as const,
+  );
+}
+
 export function buildSignalListenerReactionPlanV1(args: {
   episodeId: string;
   messageId: string;
@@ -173,11 +241,33 @@ export function buildSignalListenerReactionPlanV1(args: {
     args.mood,
     Math.max(0, Math.round(args.tensionLevel)),
   ].join(":");
-  if (stableUnit(`${seed}:visual-roll`) >= 0.55) return null;
+  const tensionLevel = Math.max(0, Math.round(args.tensionLevel));
+  const interjectionAttempt =
+    args.listenerRole === "guest" &&
+    args.segment === "interview" &&
+    tensionLevel >= 1 &&
+    stableUnit(`${seed}:interjection-roll`) <
+      (tensionLevel >= 2 ? 0.68 : 0.3);
+  if (
+    !interjectionAttempt &&
+    stableUnit(`${seed}:visual-roll`) >= SIGNAL_VISUAL_REACTION_CHANCE
+  ) {
+    return null;
+  }
   const audioChance = args.listenerRole === "host" ? 0.4 : 0.3;
   const audible = args.segment === "interview" &&
     stableUnit(`${seed}:audio-roll`) < audioChance;
-  const spokenCue = audible
+  const vocalFoley = audible &&
+      !interjectionAttempt &&
+      stableUnit(`${seed}:foley-roll`) < 0.28
+    ? signalVocalFoley(seed, args.mood, tensionLevel)
+    : undefined;
+  const spokenCue = interjectionAttempt
+    ? choose(
+        `${seed}:cue:interjection`,
+        ["No, hold on.", "Let me answer that.", "That's not fair."] as const,
+      )
+    : audible && !vocalFoley
     ? args.tensionLevel >= 2 || args.mood === "strained"
       ? "hmm"
       : args.mood === "warm" || args.mood === "joyful"
@@ -194,11 +284,18 @@ export function buildSignalListenerReactionPlanV1(args: {
     listenerBotId: args.listenerBotId,
     messageId: args.messageId,
     targetSource: "role",
-    visualAction: signalVisualAction(seed, args.mood, args.tensionLevel),
+    visualAction: interjectionAttempt
+      ? "lean_in"
+      : signalVisualAction(seed, args.mood, args.tensionLevel),
     ...(spokenCue ? { spokenCue } : {}),
-    targetProgress: targetProgress(seed),
+    ...(vocalFoley ? { vocalFoley } : {}),
+    ...(interjectionAttempt ? { interjectionAttempt: true as const } : {}),
+    targetProgress: interjectionAttempt
+      ? Number((0.3 + stableUnit(`${seed}:interjection-progress`) * 0.25).toFixed(3))
+      : targetProgress(seed),
     seed,
-    cameraCutEligible: stableUnit(`${seed}:camera-roll`) < 0.22,
+    cameraCutEligible:
+      stableUnit(`${seed}:camera-roll`) < (interjectionAttempt ? 0.55 : 0.22),
   };
 }
 
@@ -230,6 +327,29 @@ function coffeeVisualAction(args: {
     return choose(`${args.seed}:visual:warm`, ["nod", "soft_smile", "lean_in"] as const);
   }
   return choose(`${args.seed}:visual`, ["nod", "head_tilt", "lean_in"] as const);
+}
+
+function coffeeVocalFoley(args: {
+  seed: string;
+  disposition: number;
+  valuesFriction: number;
+}): ListenerReactionVocalFoley {
+  if (args.valuesFriction >= 0.58 || args.disposition <= 0.34) {
+    return choose(
+      `${args.seed}:foley:cautious`,
+      ["exhales", "clears throat", "coughs"] as const,
+    );
+  }
+  if (args.disposition >= 0.62) {
+    return choose(
+      `${args.seed}:foley:warm`,
+      ["chuckles", "sighs", "exhales"] as const,
+    );
+  }
+  return choose(
+    `${args.seed}:foley`,
+    ["clears throat", "coughs", "sighs", "exhales"] as const,
+  );
 }
 
 export function buildCoffeeListenerReactionPlanV1(args: {
@@ -286,7 +406,11 @@ export function buildCoffeeListenerReactionPlanV1(args: {
     !consecutiveAudible &&
     stableUnit(`${seed}:audio-roll`) <
       Math.min(0.28, coffeeAudibleChance(args.crossTalk) * energyMultiplier);
-  const spokenCue = audible
+  const vocalFoley = audible &&
+      stableUnit(`${seed}:foley-roll`) < 0.3
+    ? coffeeVocalFoley({ seed, ...social })
+    : undefined;
+  const spokenCue = audible && !vocalFoley
     ? social.valuesFriction >= 0.58 || social.disposition <= 0.34
       ? "hmm"
       : social.disposition >= 0.62 && social.restraint < 0.72
@@ -305,6 +429,7 @@ export function buildCoffeeListenerReactionPlanV1(args: {
     targetSource: args.targetSource,
     visualAction: coffeeVisualAction({ seed, ...social }),
     ...(spokenCue ? { spokenCue } : {}),
+    ...(vocalFoley ? { vocalFoley } : {}),
     targetProgress: targetProgress(seed),
     seed,
     cameraCutEligible: false,

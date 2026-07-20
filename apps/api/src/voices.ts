@@ -1,12 +1,14 @@
 import {
   BOTCAST_IMMERSIVE_VOICE_TAGS,
   applyVoiceDeliveryMoodToProfile,
+  elevenLabsVoiceDirectionForMood,
   normalizeBotAudioVoiceProfileV1,
   normalizeEnglishVoiceEngine,
   normalizeElevenLabsVoiceDirection,
   normalizeVoiceMode,
   normalizeVoiceDeliveryMood,
-  resolveElevenLabsVoicePerformance,
+  voiceSpokenText,
+  ELEVENLABS_VOICE_STABILITY_DEFAULT,
   applyPlayerNamePronunciation as applySharedPlayerNamePronunciation,
   type BotAudioVoiceProfileV1,
   type EnglishVoiceEngine,
@@ -35,7 +37,7 @@ export interface VoiceCapabilities {
     synthesis: "system-hybrid";
     proceduralFallback: true;
   };
-  builtinEnglish: { available: boolean; model: "system-native" };
+  builtinEnglish: { available: boolean; model: "kokoro-82m-q8" };
   elevenLabs: { available: true; requiresApiKey: true; defaultModel: "eleven_flash_v2_5" };
 }
 
@@ -51,7 +53,7 @@ export const VOICE_CAPABILITIES: VoiceCapabilities = {
     synthesis: "system-hybrid",
     proceduralFallback: true,
   },
-  builtinEnglish: { available: true, model: "system-native" },
+  builtinEnglish: { available: true, model: "kokoro-82m-q8" },
   elevenLabs: {
     available: true,
     requiresApiKey: true,
@@ -72,34 +74,49 @@ export function normalizeElevenLabsTtsModel(value: unknown): ElevenLabsTtsModel 
     : "eleven_flash_v2_5";
 }
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
-
-export function elevenLabsVoiceSettings(profile: BotAudioVoiceProfileV1): {
-  stability: number;
-  similarity_boost: number;
-  style: number;
-  use_speaker_boost: boolean;
-  speed: number;
-} {
+export function elevenLabsVoiceSettings(
+  profile: BotAudioVoiceProfileV1,
+  model: unknown,
+): Record<string, number | boolean> {
   const normalized = normalizeBotAudioVoiceProfileV1(profile);
+  const stability = normalized.elevenLabsStability ?? ELEVENLABS_VOICE_STABILITY_DEFAULT;
+  // Eleven v3 only supports stability from this profile. Its other settings
+  // are model-sensitive, and lilt remains a local melodic control.
+  if (normalizeElevenLabsTtsModel(model) === "eleven_v3") {
+    return { stability };
+  }
   return {
-    stability: Number(clamp(0.52 - normalized.lilt * 0.24, 0.18, 0.86).toFixed(3)),
+    stability,
     similarity_boost: 0.75,
-    style: Number(clamp(0.18 + normalized.lilt * 0.18, 0, 0.45).toFixed(3)),
+    style: 0,
     use_speaker_boost: true,
-    speed: resolveElevenLabsVoicePerformance(normalized).speed,
   };
 }
 
 export class ElevenLabsVoiceError extends Error {
   readonly status: number;
+  readonly providerCode: string | null;
 
   constructor(status: number, message: string) {
-    super(message);
+    let providerCode: string | null = null;
+    let providerMessage = message;
+    try {
+      const payload = JSON.parse(message) as {
+        detail?: { code?: unknown; message?: unknown };
+      };
+      if (typeof payload.detail?.code === "string") {
+        providerCode = payload.detail.code;
+      }
+      if (typeof payload.detail?.message === "string") {
+        providerMessage = payload.detail.message;
+      }
+    } catch {
+      // Plain-text provider failures are already safe to surface as-is.
+    }
+    super(providerMessage);
     this.name = "ElevenLabsVoiceError";
     this.status = status;
+    this.providerCode = providerCode;
   }
 }
 
@@ -123,6 +140,7 @@ type ElevenLabsSpeechArgs = {
   model: unknown;
   text: string;
   profile: BotAudioVoiceProfileV1;
+  deliveryMood?: VoiceDeliveryMood;
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
 };
@@ -164,7 +182,7 @@ function elevenLabsSpeechInput(args: ElevenLabsSpeechArgs): {
   model: ElevenLabsTtsModel;
   directionPrefix: string;
 } {
-  const direction = normalizeElevenLabsVoiceDirection(
+  const authoredDirection = normalizeElevenLabsVoiceDirection(
     normalizeBotAudioVoiceProfileV1(args.profile).elevenLabsDirection
   );
   const hasAudioTags = [...args.text.matchAll(ELEVENLABS_AUDIO_TAG_PATTERN)].some(
@@ -172,6 +190,15 @@ function elevenLabsSpeechInput(args: ElevenLabsSpeechArgs): {
       (BOTCAST_IMMERSIVE_VOICE_TAGS as readonly string[]).includes(
         (match[1] ?? "").trim().toLowerCase(),
       ),
+  );
+  // Explicit vocal reactions are more specific than the broad mood state.
+  // Otherwise mood takes the first of the existing three direction slots and
+  // remains ephemeral: it never mutates the bot's saved voice profile.
+  const moodDirection = hasAudioTags
+    ? null
+    : elevenLabsVoiceDirectionForMood(args.deliveryMood);
+  const direction = normalizeElevenLabsVoiceDirection(
+    [moodDirection, authoredDirection].filter(Boolean).join(", ") || null,
   );
   const model = direction || hasAudioTags
     ? "eleven_v3"
@@ -194,7 +221,7 @@ function elevenLabsSpeechRequestBody(args: ElevenLabsSpeechArgs): string {
   return JSON.stringify({
     text: input.text,
     model_id: input.model,
-    voice_settings: elevenLabsVoiceSettings(args.profile),
+    voice_settings: elevenLabsVoiceSettings(args.profile, input.model),
   });
 }
 
@@ -292,6 +319,7 @@ export async function requestElevenLabsSpeech(args: {
   model: unknown;
   text: string;
   profile: BotAudioVoiceProfileV1;
+  deliveryMood?: VoiceDeliveryMood;
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
 }): Promise<Response> {
@@ -631,7 +659,7 @@ export type VoiceSynthesisRequest = {
 
 export function cleanSpeakableAssistantProse(value: unknown): string {
   if (typeof value !== "string") return "";
-  return value
+  return voiceSpokenText(value)
     .replace(/```[\s\S]*?```/g, " ")
     .replace(/<tool\b[\s\S]*?<\/tool>/gi, " ")
     .replace(/\[\[(?:tool|action|stage)[^\]]*\]\]/gi, " ")
@@ -663,7 +691,10 @@ export function validateVoiceSynthesisRequest(body: Record<string, unknown>): Vo
   const deliveryMood = normalizeVoiceDeliveryMood(body.moodKey);
   return {
     text,
-    elevenLabsText: normalizeElevenLabsTaggedText(body.elevenLabsText, text),
+    elevenLabsText: normalizeElevenLabsTaggedText(
+      voiceSpokenText(body.elevenLabsText),
+      text,
+    ),
     mode: normalizeVoiceMode(body.mode),
     engine: normalizeEnglishVoiceEngine(body.engine),
     profile: applyVoiceDeliveryMoodToProfile(

@@ -96,6 +96,12 @@ export const DEFAULT_BOT_FACE_THINKING_FRAMES: BotFaceThinkingFrames = [
   "-",
   "\\",
 ];
+export const DISABLED_BOT_FACE_THINKING_FRAMES: BotFaceThinkingFrames = [
+  "",
+  "",
+  "",
+  "",
+];
 
 export interface BotFaceStyle {
   eyesFont: BotFaceFontId;
@@ -383,10 +389,24 @@ export function normalizeBotFaceThinkingFrames(
     return botFaceThinkingFramesFromList(splitBotFaceVisibleGraphemes(value));
   }
   if (!Array.isArray(value)) return null;
+  if (
+    value.length === BOT_FACE_THINKING_FRAME_COUNT &&
+    value.every((entry) => typeof entry === "string" && entry.trim() === "")
+  ) {
+    return DISABLED_BOT_FACE_THINKING_FRAMES;
+  }
   const frames = value.flatMap((entry) =>
     typeof entry === "string" ? splitBotFaceVisibleGraphemes(entry) : []
   );
   return botFaceThinkingFramesFromList(frames);
+}
+
+export function botFaceThinkingSpinnerDisabled(value: unknown): boolean {
+  const frames = normalizeBotFaceThinkingFrames(value);
+  return (
+    frames !== null &&
+    botFaceThinkingFramesEqual(frames, DISABLED_BOT_FACE_THINKING_FRAMES)
+  );
 }
 
 export function parseStoredBotFaceThinkingFrames(

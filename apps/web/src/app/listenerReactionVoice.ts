@@ -1,5 +1,6 @@
 import {
   applyVoiceDeliveryMoodToProfile,
+  listenerReactionHasAudio,
   normalizeBotAudioVoiceProfileV1,
   normalizeBotVoiceVolume,
   type BotAudioVoiceProfileV1,
@@ -13,9 +14,9 @@ import {
   normalizeBottishPlaybackProfile,
 } from "./bottishVoice.ts";
 import {
-  elevenLabsEffectForEngine,
   resolveEnglishVoicePlaybackDetuneCents,
   resolveEnglishVoicePostProcessing,
+  voiceEffectForPlayback,
   type EnglishVoiceSynthesisClip,
 } from "./englishVoice.ts";
 import {
@@ -35,6 +36,7 @@ export function listenerReactionVoiceCacheKey(args: {
   return JSON.stringify([
     args.plan.seed,
     args.plan.spokenCue ?? "silent",
+    args.plan.vocalFoley ?? "no-foley",
     args.mode,
     args.engine,
     args.profile,
@@ -50,8 +52,40 @@ export async function playListenerReactionVoice(args: {
   mood?: VoiceDeliveryMood | null;
   englishClip?: EnglishVoiceSynthesisClip | null;
   roomAcoustics?: RoomAcousticsSend;
+  stereoPan?: number;
 }): Promise<boolean> {
-  const cue = args.plan.spokenCue;
+  if (!listenerReactionHasAudio(args.plan)) return false;
+  if (args.plan.vocalFoley && args.mode !== "english") return false;
+  const cue = args.plan.spokenCue ?? "...";
+  return playEphemeralReactionVoice({
+    text: cue,
+    seed: args.plan.seed,
+    mode: args.mode,
+    profile: args.profile,
+    globalVolume: args.globalVolume,
+    effectsEnabled: args.effectsEnabled,
+    mood: args.mood,
+    englishClip: args.englishClip,
+    roomAcoustics: args.roomAcoustics,
+    stereoPan: args.stereoPan,
+    maxDurationMs: args.plan.interjectionAttempt ? 1_300 : 900,
+  });
+}
+
+export async function playEphemeralReactionVoice(args: {
+  text: string;
+  seed: string;
+  mode: ListenerReactionVoiceMode;
+  profile: BotAudioVoiceProfileV1;
+  globalVolume: number;
+  effectsEnabled: boolean;
+  mood?: VoiceDeliveryMood | null;
+  englishClip?: EnglishVoiceSynthesisClip | null;
+  roomAcoustics?: RoomAcousticsSend;
+  stereoPan?: number;
+  maxDurationMs?: number;
+}): Promise<boolean> {
+  const cue = args.text.replace(/\s+/gu, " ").trim();
   const normalizedInputProfile = normalizeBotAudioVoiceProfileV1(args.profile);
   if (!cue || args.globalVolume <= 0 || !normalizedInputProfile.enabled)
     return false;
@@ -65,42 +99,42 @@ export async function playListenerReactionVoice(args: {
     return playRealtimeVoiceBytes({
       bytes: args.englishClip.bytes,
       profile,
-      seed: args.plan.seed,
+      seed: args.seed,
       effectsEnabled: args.effectsEnabled,
       detuneCents: resolveEnglishVoicePlaybackDetuneCents(
         profile,
         args.englishClip.engineUsed,
       ),
       baseLowpassHz: processing.lowpassHz,
-      elevenLabsEffect: elevenLabsEffectForEngine(
-        profile,
-        args.englishClip.engineUsed,
-      ),
+      voiceEffect: voiceEffectForPlayback(profile),
       alignment: args.englishClip.alignment,
       channel: "reaction",
-      maxDurationMs: 900,
+      maxDurationMs: args.maxDurationMs ?? 900,
       roomAcoustics: args.roomAcoustics,
+      stereoPan: args.stereoPan,
     });
   }
 
   const normalized = normalizeBottishPlaybackProfile(profile);
-  const plan = buildBottishPlan(cue, normalized, args.plan.seed);
+  const plan = buildBottishPlan(cue, normalized, args.seed);
   if (plan.durationMs <= 0) return false;
+  const playbackProfile = { ...normalized, pitch: 0, lilt: 0 };
   return playRealtimeVoiceBytes({
     bytes: encodeBottishPlanWave(plan),
-    profile: normalized,
-    seed: args.plan.seed,
+    profile: playbackProfile,
+    seed: args.seed,
     effectsEnabled: args.effectsEnabled,
     alignment: plan.alignment,
     ...(args.mode === "babble"
       ? {
-          roboticPlan: buildBabbleRoboticPlan(cue, normalized, args.plan.seed),
+          roboticPlan: buildBabbleRoboticPlan(cue, normalized, args.seed),
           cleanRoboticCarrier: true,
         }
       : {}),
     channel: "reaction",
-    maxDurationMs: 900,
+    maxDurationMs: args.maxDurationMs ?? 900,
     roomAcoustics: args.roomAcoustics,
+    stereoPan: args.stereoPan,
   });
 }
 

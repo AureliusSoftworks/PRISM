@@ -24,6 +24,7 @@ function baseBotJson(overrides: Partial<PrismBotArchiveJson> = {}): PrismBotArch
     bot: {
       name: "Plato",
       namePronunciation: "  Play-toe  ",
+      selfReferral: "  Plato  ",
       color: "#4F46A5",
       glyph: "lucideDrama",
       voicePreviewLine: "The examined voice is worth hearing.",
@@ -88,6 +89,7 @@ describe("botArchive", () => {
     assert.equal(parsed.botJson.schema, PRISM_BOT_ARCHIVE_SCHEMA);
     assert.equal(parsed.botJson.bot.name, "Plato");
     assert.equal(parsed.botJson.bot.namePronunciation, "Play-toe");
+    assert.equal(parsed.botJson.bot.selfReferral, "Plato");
     assert.equal(parsed.botJson.bot.voicePreviewLine, "The examined voice is worth hearing.");
     assert.equal(
       parsed.botJson.bot.authoredAudioVoiceProfile?.v === 2

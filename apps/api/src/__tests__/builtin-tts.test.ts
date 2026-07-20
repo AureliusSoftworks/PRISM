@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  PRISM_BUILTIN_ENGLISH_VOICES,
+} from "@localai/shared";
+import {
   builtinEnglishAvailable,
   generateBuiltinEnglishWave,
   parseMacSystemVoiceList,
@@ -9,7 +12,18 @@ import {
   systemEnglishGenerationSettings,
 } from "../builtin-tts.ts";
 
-describe("system English audio", () => {
+describe("built-in English audio", () => {
+  it("ships five stable, distinct PRISM voice identities", () => {
+    assert.deepEqual(
+      PRISM_BUILTIN_ENGLISH_VOICES.map((voice) => voice.voiceId),
+      ["voice-1", "voice-2", "voice-3", "voice-4", "voice-5"],
+    );
+    assert.equal(
+      new Set(PRISM_BUILTIN_ENGLISH_VOICES.map((voice) => voice.engineVoiceId)).size,
+      5,
+    );
+  });
+
   it("parses installed macOS voices and exposes English choices", () => {
     const output = [
       "Fred                en_US    # Hello! My name is Fred.",
@@ -44,7 +58,7 @@ describe("system English audio", () => {
     }), null);
   });
 
-  it("maps portable pace into each operating system's safe native range", () => {
+  it("keeps native synthesis neutral so browser Pace owns duration", () => {
     const fastProfile = {
       v: 1 as const,
       baseVoiceId: "voice-1" as const,
@@ -59,7 +73,7 @@ describe("system English audio", () => {
         platform: "darwin",
         installedVoices: ["Fred"],
       }),
-      { voiceName: null, rate: 230, slotIndex: 0 }
+      { voiceName: null, rate: 175, slotIndex: 0 }
     );
     assert.deepEqual(
       systemEnglishGenerationSettings({
@@ -67,15 +81,15 @@ describe("system English audio", () => {
         platform: "win32",
         installedVoices: ["Microsoft Sam"],
       }),
-      { voiceName: null, rate: 4, slotIndex: 0 }
+      { voiceName: null, rate: 0, slotIndex: 0 }
     );
   });
 
-  it("renders a real local PCM wave through the host voice engine", {
-    skip: process.platform !== "darwin" || !builtinEnglishAvailable(),
+  it("renders a real local PCM wave through the packaged model", {
+    skip: !builtinEnglishAvailable(),
   }, async () => {
     const wave = await generateBuiltinEnglishWave({
-      text: "Prism system voice test.",
+      text: "Prism built-in voice test.",
       profile: {
         v: 1,
         baseVoiceId: "voice-1",

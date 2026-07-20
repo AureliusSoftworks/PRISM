@@ -163,24 +163,51 @@ function safeDisconnect(node: AudioNode): void {
   }
 }
 
+function connectDryOutput(args: {
+  context: BaseAudioContext;
+  input: AudioNode;
+  destination: AudioNode;
+  stereoPan?: number;
+}): AudioNode[] {
+  const stereoPan = Math.max(-1, Math.min(1, args.stereoPan ?? 0));
+  if (
+    stereoPan === 0 ||
+    typeof args.context.createStereoPanner !== "function"
+  ) {
+    args.input.connect(args.destination);
+    return [];
+  }
+  const panner = args.context.createStereoPanner();
+  panner.pan.value = stereoPan;
+  args.input.connect(panner);
+  panner.connect(args.destination);
+  return [panner];
+}
+
 export function connectRoomAcoustics(args: {
   context: BaseAudioContext;
   input: AudioNode;
   destination: AudioNode;
   send?: RoomAcousticsSend | null;
+  /** Equal-power dry-path placement. The shared room return stays diffuse. */
+  stereoPan?: number;
 }): RoomAcousticsConnection {
   const wet = Math.max(0, Math.min(0.35, args.send?.wet ?? 0));
   if (!args.send || wet === 0) {
-    args.input.connect(args.destination);
+    const dryNodes = connectDryOutput(args);
     const disconnect = (): void => {
       safeDisconnect(args.input);
+      for (const node of dryNodes) safeDisconnect(node);
     };
     return { disconnect, release: disconnect };
   }
 
   const dryGain = args.context.createGain();
   dryGain.gain.value = 1;
-  args.input.connect(dryGain);
+  const dryNodes = connectDryOutput({
+    ...args,
+    destination: dryGain,
+  });
   dryGain.connect(args.destination);
 
   const { profile } = args.send;
@@ -228,6 +255,7 @@ export function connectRoomAcoustics(args: {
     if (tailTimer !== null) clearTimeout(tailTimer);
     tailTimer = null;
     safeDisconnect(args.input);
+    for (const node of dryNodes) safeDisconnect(node);
     safeDisconnect(dryGain);
     disconnectWet();
   };
@@ -235,6 +263,7 @@ export function connectRoomAcoustics(args: {
     if (closed || released) return;
     released = true;
     safeDisconnect(args.input);
+    for (const node of dryNodes) safeDisconnect(node);
     safeDisconnect(dryGain);
     tailTimer = setTimeout(
       () => {

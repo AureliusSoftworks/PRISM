@@ -88,7 +88,7 @@ async function proxy(request: NextRequest, ctx: RouteContext): Promise<Response>
   // Stamp our own bind mode so the API can keep the network toggle host-only.
   headers.set("x-prism-web-origin", WEB_IS_LAN_EXPOSED ? "lan" : "loopback");
 
-  const init: RequestInit & { duplex?: "half" } = {
+  const init: RequestInit = {
     method: request.method,
     headers,
     redirect: "manual",
@@ -96,8 +96,14 @@ async function proxy(request: NextRequest, ctx: RouteContext): Promise<Response>
   };
 
   if (request.method !== "GET" && request.method !== "HEAD") {
-    init.body = request.body;
-    init.duplex = "half";
+    // Buffer the incoming body before opening the loopback request. Passing
+    // NextRequest's live stream straight into Node fetch can fail after the
+    // client upload closes, even though the API is healthy and later returns
+    // a useful provider error. API request bodies are bounded upstream; this
+    // keeps the proxy response attached to the API response instead of
+    // misreporting the failure as a disconnected local backend.
+    const body = await request.arrayBuffer();
+    if (body.byteLength > 0) init.body = body;
   }
 
   let upstream: Response;

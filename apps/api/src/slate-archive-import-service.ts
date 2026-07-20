@@ -44,6 +44,7 @@ const PROJECT_SPEC: RowSpec = {
     "spark_wildcards_json", "premise", "voice", "non_negotiables_json",
     "phase", "structure_json", "characters_json", "unresolved_threads_json",
     "direction", "locked_ranges_json", "last_provider", "last_model",
+    "prose_mode", "prose_model", "prose_provider", "deliberation_config_json",
     "continuity_active_version", "continuity_target_version",
     "continuity_active_generation", "continuity_previous_generation",
     "continuity_upgrade_status", "continuity_last_success_at", "created_at",
@@ -54,10 +55,17 @@ const PROJECT_SPEC: RowSpec = {
     "continuity_previous_generation",
   ],
   nullable: [
-    "last_provider", "last_model", "continuity_previous_generation",
+    "last_provider", "last_model", "prose_model", "prose_provider",
+    "continuity_previous_generation",
     "continuity_last_success_at",
   ],
-  optionalDefaults: { title_origin: "writer" },
+  optionalDefaults: {
+    title_origin: "writer",
+    prose_mode: "auto",
+    prose_model: null,
+    prose_provider: null,
+    deliberation_config_json: "{}",
+  },
 };
 
 const REVISION_SPEC: RowSpec = {
@@ -637,6 +645,68 @@ function validateContentReferences(
   ) {
     throw new SlateArchiveImportError("Slate archive has invalid title provenance.");
   }
+  if (
+    !new Set(["auto", "offline", "online"]).has(
+      String(content.project.prose_mode),
+    )
+  ) {
+    throw new SlateArchiveImportError("Slate archive has an invalid prose route.");
+  }
+  if (
+    content.project.prose_provider !== null &&
+    !new Set(["local", "openai", "anthropic"]).has(
+      String(content.project.prose_provider),
+    )
+  ) {
+    throw new SlateArchiveImportError("Slate archive has an invalid prose provider.");
+  }
+  const deliberationConfig = JSON.parse(
+    String(content.project.deliberation_config_json),
+  ) as unknown;
+  if (
+    !deliberationConfig ||
+    typeof deliberationConfig !== "object" ||
+    Array.isArray(deliberationConfig)
+  ) {
+    throw new SlateArchiveImportError("Slate archive has invalid hemisphere settings.");
+  }
+  const deliberationRecord = deliberationConfig as Record<string, unknown>;
+  for (const hemisphere of ["lux", "umbra"] as const) {
+    if (!Object.hasOwn(deliberationRecord, hemisphere)) continue;
+    const profile = deliberationRecord[hemisphere];
+    if (!profile || typeof profile !== "object" || Array.isArray(profile)) {
+      throw new SlateArchiveImportError("Slate archive has invalid hemisphere settings.");
+    }
+    const candidate = profile as Record<string, unknown>;
+    const provider = candidate.provider;
+    const model = candidate.model;
+    if (
+      provider !== null &&
+      provider !== "local" &&
+      provider !== "openai" &&
+      provider !== "anthropic"
+    ) {
+      throw new SlateArchiveImportError(
+        "Slate archive has an invalid hemisphere provider.",
+      );
+    }
+    if (model !== null && (typeof model !== "string" || model.length > 240)) {
+      throw new SlateArchiveImportError("Slate archive has an invalid hemisphere model.");
+    }
+    if (Boolean(provider) !== Boolean(model)) {
+      throw new SlateArchiveImportError(
+        "Slate archive hemisphere model and provider must be selected together.",
+      );
+    }
+    if (
+      typeof candidate.directive !== "string" ||
+      candidate.directive.length > 4_000
+    ) {
+      throw new SlateArchiveImportError(
+        "Slate archive has an invalid hemisphere creative lens.",
+      );
+    }
+  }
   stringField(content.project, "continuity_active_version", "project");
   stringField(content.project, "continuity_target_version", "project");
   if (!new Set(["current", "building", "review", "deferred", "failed"]).has(
@@ -1133,6 +1203,7 @@ function restoreArchive(
       "spark_wildcards_json", "premise", "voice", "non_negotiables_json", "phase",
       "structure_json", "characters_json", "unresolved_threads_json", "manuscript",
       "direction", "locked_ranges_json", "last_provider", "last_model",
+      "prose_mode", "prose_model", "prose_provider", "deliberation_config_json",
       "continuity_active_version", "continuity_target_version",
       "continuity_active_generation", "continuity_previous_generation",
       "continuity_upgrade_status", "continuity_last_success_at", "created_at", "updated_at",
@@ -1148,6 +1219,10 @@ function restoreArchive(
       String(content.project.direction), String(content.project.locked_ranges_json),
       nullableStringField(content.project, "last_provider"),
       nullableStringField(content.project, "last_model"),
+      String(content.project.prose_mode),
+      nullableStringField(content.project, "prose_model"),
+      nullableStringField(content.project, "prose_provider"),
+      String(content.project.deliberation_config_json),
       String(content.project.continuity_active_version),
       String(content.project.continuity_target_version),
       activeGeneration,

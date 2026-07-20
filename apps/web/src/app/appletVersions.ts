@@ -17,6 +17,31 @@ export const PRISM_APPLET_ORDER = [
 export type PrismAppletId = (typeof PRISM_APPLET_ORDER)[number];
 
 export type PrismAppletStatus = "active" | "preview" | "planned";
+export type BotPowerMuteModePolicy =
+  | "enforced"
+  | "not_applicable"
+  | "required_before_activation";
+export type BotPowerCandorModePolicy =
+  | "direct"
+  | "cue"
+  | "adapted"
+  | "irrelevant"
+  | "deferred";
+export type BotPowerEchoModePolicy = BotPowerMuteModePolicy;
+export type BotPowerHearingRepeatModePolicy =
+  | "cue"
+  | "enforced"
+  | "adapted"
+  | "not_applicable"
+  | "required_before_activation";
+export type BotPowerGhostModePolicy =
+  | "direct"
+  | "cue"
+  | "adapted"
+  | "irrelevant"
+  | "deferred";
+export type BotPowerResponseBudgetModePolicy = BotPowerGhostModePolicy;
+export type BotPowerInterruptionModePolicy = BotPowerGhostModePolicy;
 
 export interface PrismAppletVersion {
   id: PrismAppletId;
@@ -29,13 +54,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   chat: {
     id: "chat",
     name: "Chat",
-    version: "1.5",
+    version: "1.9",
     status: "active",
   },
   zen: {
     id: "zen",
     name: "Zen",
-    version: "1.4",
+    version: "1.8",
     status: "active",
   },
   arena: {
@@ -53,13 +78,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   coffee: {
     id: "coffee",
     name: "Coffee",
-    version: "1.8",
+    version: "2.2",
     status: "active",
   },
   botcast: {
     id: "botcast",
     name: "Signal",
-    version: "0.8",
+    version: "1.7",
     status: "active",
   },
   feed: {
@@ -77,7 +102,7 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   story: {
     id: "story",
     name: "Story",
-    version: "0.3",
+    version: "0.6",
     status: "preview",
   },
   gym: {
@@ -104,6 +129,134 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
     version: "0.0",
     status: "planned",
   },
+};
+
+/** Every future bot-embodying applet must enforce mute before it can activate. */
+export const BOT_POWER_MUTE_MODE_POLICY: Record<PrismAppletId, BotPowerMuteModePolicy> = {
+  chat: "enforced",
+  zen: "enforced",
+  arena: "required_before_activation",
+  polling: "required_before_activation",
+  coffee: "enforced",
+  botcast: "enforced",
+  feed: "required_before_activation",
+  games: "required_before_activation",
+  story: "enforced",
+  gym: "required_before_activation",
+  slate: "not_applicable",
+  pseudo: "required_before_activation",
+  surf: "required_before_activation",
+};
+
+/** Exhaustive candor policy: future applets cannot inherit social pressure silently. */
+export const BOT_POWER_CANDOR_MODE_POLICY: Record<PrismAppletId, BotPowerCandorModePolicy> = {
+  chat: "cue",
+  zen: "cue",
+  arena: "deferred",
+  polling: "deferred",
+  coffee: "direct",
+  botcast: "direct",
+  feed: "deferred",
+  games: "deferred",
+  story: "adapted",
+  gym: "deferred",
+  slate: "irrelevant",
+  pseudo: "deferred",
+  surf: "deferred",
+};
+
+/** Every future bot-embodying applet must enforce addressed-speech echo before activation. */
+export const BOT_POWER_ECHO_MODE_POLICY: Record<PrismAppletId, BotPowerEchoModePolicy> = {
+  chat: "enforced",
+  zen: "enforced",
+  arena: "required_before_activation",
+  polling: "required_before_activation",
+  coffee: "enforced",
+  botcast: "enforced",
+  feed: "required_before_activation",
+  games: "required_before_activation",
+  story: "enforced",
+  gym: "required_before_activation",
+  slate: "not_applicable",
+  pseudo: "required_before_activation",
+  surf: "required_before_activation",
+};
+
+/** Exhaustive hard-of-hearing policy: planned conversational modes must choose a mood model first. */
+export const BOT_POWER_HEARING_REPEAT_MODE_POLICY: Record<
+  PrismAppletId,
+  BotPowerHearingRepeatModePolicy
+> = {
+  chat: "cue",
+  zen: "cue",
+  arena: "required_before_activation",
+  polling: "required_before_activation",
+  coffee: "enforced",
+  botcast: "adapted",
+  feed: "required_before_activation",
+  games: "required_before_activation",
+  story: "cue",
+  gym: "required_before_activation",
+  slate: "not_applicable",
+  pseudo: "required_before_activation",
+  surf: "required_before_activation",
+};
+
+/** Exhaustive ghost-Power policy: live avatars reveal only for speech. */
+export const BOT_POWER_GHOST_MODE_POLICY: Record<PrismAppletId, BotPowerGhostModePolicy> = {
+  chat: "direct",
+  zen: "direct",
+  arena: "deferred",
+  polling: "deferred",
+  coffee: "direct",
+  botcast: "direct",
+  feed: "deferred",
+  games: "deferred",
+  story: "adapted",
+  gym: "deferred",
+  slate: "irrelevant",
+  pseudo: "deferred",
+  surf: "deferred",
+};
+
+/** Exhaustive response-budget policy: prose constraints adapt to each mode's required beats. */
+export const BOT_POWER_RESPONSE_BUDGET_MODE_POLICY: Record<
+  PrismAppletId,
+  BotPowerResponseBudgetModePolicy
+> = {
+  chat: "direct",
+  zen: "direct",
+  arena: "deferred",
+  polling: "deferred",
+  coffee: "adapted",
+  botcast: "adapted",
+  feed: "deferred",
+  games: "deferred",
+  story: "adapted",
+  gym: "deferred",
+  slate: "irrelevant",
+  pseudo: "deferred",
+  surf: "deferred",
+};
+
+/** Exhaustive interruption policy: each mode owns how live conversational openings work. */
+export const BOT_POWER_INTERRUPTION_MODE_POLICY: Record<
+  PrismAppletId,
+  BotPowerInterruptionModePolicy
+> = {
+  chat: "cue",
+  zen: "cue",
+  arena: "deferred",
+  polling: "deferred",
+  coffee: "direct",
+  botcast: "adapted",
+  feed: "deferred",
+  games: "deferred",
+  story: "adapted",
+  gym: "deferred",
+  slate: "irrelevant",
+  pseudo: "deferred",
+  surf: "deferred",
 };
 
 export const PRISM_TOP_LEVEL_SWITCHER_APPLET_IDS = [

@@ -66,6 +66,7 @@ export function signalStageSoundcheckMessages(args: {
     speakerRole,
     botId,
     content,
+    stageActionText: null,
     voicePerformanceText: null,
     moodKey: "neutral",
     createdAt,

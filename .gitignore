@@ -15,6 +15,7 @@ apps/api/data/
 .qdrant-initialized
 apps/api/.qdrant-initialized
 runtime/
+.cache/
 .codex/output/
 .codex/.DS_Store
 

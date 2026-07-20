@@ -24,7 +24,11 @@ test("normalizes each partial artwork request without adding historical assets",
 });
 
 test("live progress contains only the specifically requested artwork asset", async () => {
-  for (const kind of ["logo", "day-studio", "night-studio"] as const) {
+  for (const kind of [
+    "logo",
+    "day-studio",
+    "night-studio",
+  ] as const) {
     let releaseGeneration!: () => void;
     const generationGate = new Promise<void>((resolve) => {
       releaseGeneration = resolve;
@@ -82,7 +86,7 @@ async function waitForTerminal(
   throw new Error("Signal artwork job did not settle.");
 }
 
-test("runs Dark studio, canonical-source Light relight, and logo sequentially", async () => {
+test("runs the studio chain and independent logo sequentially", async () => {
   const calls: string[] = [];
   let released = 0;
   const manager = new SignalArtworkJobManager(() => new Date(), () => "job-order");
@@ -257,7 +261,7 @@ test("uses the saved Dark studio as the source for a Light-only refresh", async 
   assert.deepEqual(sources, ["saved-night"]);
 });
 
-test("can render the independent online logo while preserving the Dark-to-Light dependency", async () => {
+test("can render an independent online logo while preserving the Dark-to-Light dependency", async () => {
   const started: string[] = [];
   let releaseNight: (() => void) | null = null;
   const nightGate = new Promise<void>((resolve) => {
@@ -279,7 +283,10 @@ test("can render the independent online logo while preserving the Dark-to-Light 
   });
 
   await new Promise<void>((resolve) => setImmediate(resolve));
-  assert.deepEqual(started, ["night-studio:none", "logo:none"]);
+  assert.deepEqual(started, [
+    "night-studio:none",
+    "logo:none",
+  ]);
   releaseNight?.();
   const job = await waitForTerminal(manager, "user-parallel");
   assert.equal(job.status, "completed");

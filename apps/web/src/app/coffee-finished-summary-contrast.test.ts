@@ -25,13 +25,17 @@ function scopedRule(
   return match[2] ?? "";
 }
 
-test("finished Coffee review renders the synopsis and its loading state on one surface", () => {
+test("finished Coffee review renders the synopsis and blocks replay while the table wraps", () => {
   assert.match(
     pageSource,
     /const synopsisMessages = coffeeSessionPhase === "finished" && !coffeeReplayActive \? messages\.filter\([\s\S]*coffeeSystemSynopsisIsDisplayable\(message\.content\)/,
   );
   assert.match(pageSource, /"Preparing session synopsis\.\.\."/);
-  assert.match(pageSource, /"Session ended\. Building the synopsis\.\.\."/);
+  assert.match(
+    pageSource,
+    /"Session ended\. The table is wrapping up before replay\."/,
+  );
+  assert.match(pageSource, /"Wrapping table\.\.\."/);
   assert.match(pageSource, /className=\{styles\.coffeeFinishedRecapCaption\}/);
   assert.match(pageSource, /className=\{styles\.coffeeFinishedRecapControls\}/);
   assert.match(pageSource, /styles\.coffeeReplayComposerControls/);

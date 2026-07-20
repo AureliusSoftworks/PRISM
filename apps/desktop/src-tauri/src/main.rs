@@ -652,6 +652,25 @@ fn main() {
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 if is_app_quitting(&window.app_handle()) { return; }
+                // Hiding a fullscreen window during macOS close can strand its
+                // Space as a black surface. On Mac, Close and Cmd+Q are real
+                // shutdown paths; Windows and Linux retain close-to-tray.
+                if cfg!(target_os = "macos") {
+                    // Keep the window alive until shutdown is requested from a
+                    // worker thread. Calling AppHandle::exit synchronously from
+                    // inside CloseRequested can be swallowed by macOS while the
+                    // native close callback is still on the main thread, leaving
+                    // a headless process and its runtime children behind.
+                    api.prevent_close();
+                    let app_handle = window.app_handle().clone();
+                    mark_app_quitting(&app_handle);
+                    thread::spawn(move || {
+                        let state: State<'_, RuntimeState> = app_handle.state();
+                        stop_runtime(&state);
+                        app_handle.exit(0);
+                    });
+                    return;
+                }
                 api.prevent_close();
                 let _ = window.hide();
             }
@@ -727,16 +746,12 @@ fn main() {
     };
 
     app.run(|app_handle, event| match event {
-        RunEvent::ExitRequested { api, .. } => {
-            if is_app_quitting(&app_handle) {
-                let state: State<'_, RuntimeState> = app_handle.state();
-                stop_runtime(&state);
-                return;
-            }
-            api.prevent_exit();
-            if let Some(window) = app_handle.get_webview_window("main") {
-                let _ = window.hide();
-            }
+        RunEvent::ExitRequested { .. } => {
+            // An OS-level exit request is already distinct from the window
+            // close event above. Always honor it and tear down owned services.
+            mark_app_quitting(&app_handle);
+            let state: State<'_, RuntimeState> = app_handle.state();
+            stop_runtime(&state);
         }
         RunEvent::Exit => {
             let state: State<'_, RuntimeState> = app_handle.state();

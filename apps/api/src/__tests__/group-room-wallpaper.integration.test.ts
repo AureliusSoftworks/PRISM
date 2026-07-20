@@ -7,7 +7,11 @@ import { tmpdir } from "node:os";
 import sharp from "sharp";
 import { getAppConfig } from "@localai/config";
 import { GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE } from "@localai/shared";
-import { createFetchRecorder, createTestDatabase } from "../test-support.ts";
+import {
+  createFetchRecorder,
+  createTestDatabase,
+  withTestRegistrationAcceptance,
+} from "../test-support.ts";
 
 const tempDir = mkdtempSync(join(tmpdir(), "prism-group-room-wallpaper-"));
 process.env.PRISM_API_DISABLE_AUTOSTART = "1";
@@ -65,6 +69,7 @@ function createClient(): Client {
   let cookie = "";
   return {
     async request(path, init = {}) {
+      init = withTestRegistrationAcceptance(path, init);
       const headers = new Headers(init.headers);
       if (cookie) headers.set("cookie", cookie);
       const response = await fetch(`${baseUrl}${path}`, { ...init, headers });

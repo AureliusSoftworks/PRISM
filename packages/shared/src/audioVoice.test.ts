@@ -2,21 +2,28 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   BOT_VOICE_TEXTURE_RECIPES,
+  BOT_VOICE_EQ_TILT_DB_MAX,
+  ELEVENLABS_VOICE_DIRECTION_BY_MOOD,
   VOICE_DELIVERY_RATE_BY_MOOD,
   applyVoiceDeliveryMoodToProfile,
   applyBotNamePronunciations,
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+  DEFAULT_VOICE_EFFECT,
   botVoiceTextureIsModified,
+  elevenLabsVoiceDirectionForMood,
+  expectedVoicePlaybackDurationMs,
   normalizeBotAudioVoiceProfileV1,
   normalizeBotNamePronunciation,
   normalizeBotVoiceTexture,
   normalizeEnglishVoiceEngine,
   normalizeElevenLabsVoiceDirection,
   normalizeElevenLabsVoiceEffect,
+  normalizeVoiceEffect,
   normalizeOptionalBotAudioVoiceProfileV1,
   resolveBotAudioVoiceProfileV1,
   normalizeVoiceMode,
-  resolveElevenLabsVoicePerformance,
+  resolveVoicePlaybackTransform,
+  resolveBotVoiceCharacter,
   parseStoredBotAudioVoiceProfileV1,
   serializeBotAudioVoiceProfileV1,
 } from "./audioVoice.ts";
@@ -33,6 +40,38 @@ describe("audio voice normalization", () => {
         ],
       ),
       "Light Yah-gah-mee asked Lite for help; Yagamilight stays written.",
+    );
+  });
+
+  it("uses self-referral only for the speaking bot and falls back to its written name", () => {
+    const entries = [
+      {
+        id: "icarus",
+        name: "Dr. Icarus",
+        namePronunciation: "Doctor Eye-car-us",
+        selfReferral: "Icarus",
+      },
+      {
+        id: "light",
+        name: "Light Yagami",
+        namePronunciation: "Light Yah-gah-mee",
+      },
+    ];
+    assert.equal(
+      applyBotNamePronunciations(
+        "Dr. Icarus asked Light Yagami for help.",
+        entries,
+        "icarus",
+      ),
+      "Icarus asked Light Yah-gah-mee for help.",
+    );
+    assert.equal(
+      applyBotNamePronunciations(
+        "Dr. Icarus asked Light Yagami for help.",
+        [{ ...entries[0], selfReferral: "   " }, entries[1]],
+        "icarus",
+      ),
+      "Dr. Icarus asked Light Yah-gah-mee for help.",
     );
   });
 
@@ -76,7 +115,23 @@ describe("audio voice normalization", () => {
     );
   });
 
-  it("preserves delivery tempo when low pitch exhausts ElevenLabs speed", () => {
+  it("maps only non-neutral moods into sparse Eleven v3 directions", () => {
+    assert.deepEqual(ELEVENLABS_VOICE_DIRECTION_BY_MOOD, {
+      joyful: "delighted",
+      warm: "warmly",
+      guarded: "reserved",
+      strained: "strained",
+    });
+    assert.equal(elevenLabsVoiceDirectionForMood("joyful"), "delighted");
+    assert.equal(elevenLabsVoiceDirectionForMood("warm"), "warmly");
+    assert.equal(elevenLabsVoiceDirectionForMood("guarded"), "reserved");
+    assert.equal(elevenLabsVoiceDirectionForMood("strained"), "strained");
+    assert.equal(elevenLabsVoiceDirectionForMood("neutral"), null);
+    assert.equal(elevenLabsVoiceDirectionForMood("dramatic"), null);
+    assert.equal(elevenLabsVoiceDirectionForMood(undefined), null);
+  });
+
+  it("keeps pitch independent from the single playback tempo contract", () => {
     const profile = applyVoiceDeliveryMoodToProfile(
       {
         v: 1,
@@ -88,11 +143,18 @@ describe("audio voice normalization", () => {
       },
       "neutral",
     );
-    assert.deepEqual(resolveElevenLabsVoicePerformance(profile), {
-      speed: 1.2,
-      playbackDetuneCents: -183,
-      deliveryRate: 1.08,
+    assert.deepEqual(resolveVoicePlaybackTransform(profile), {
+      tempo: 1.08,
+      pitchCents: -487,
     });
+    assert.equal(
+      resolveVoicePlaybackTransform({ ...profile, pitch: 1 }).tempo,
+      resolveVoicePlaybackTransform({ ...profile, pitch: -1 }).tempo,
+    );
+    assert.equal(
+      expectedVoicePlaybackDurationMs(10_000, { ...profile, pitch: 1 }),
+      expectedVoicePlaybackDurationMs(10_000, { ...profile, pitch: -1 }),
+    );
   });
   it("uses a deterministic portable profile and clamps controls", () => {
     assert.deepEqual(normalizeBotAudioVoiceProfileV1(undefined), DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1);
@@ -100,15 +162,46 @@ describe("audio voice normalization", () => {
       v: 2,
       enabled: true,
       baseVoiceId: "voice-4",
-      elevenLabsEffect: "clean",
+      elevenLabsEffect: "chorus",
       pitch: 1,
       warmth: -1,
       pace: 0.125,
       lilt: 0.2,
       bottishTone: 1,
+      eqTilt: 0,
+      gainDb: 0,
       volume: 1,
       texture: BOT_VOICE_TEXTURE_RECIPES.clean,
     });
+  });
+  it("maps the Voice Character pad to coupled shelves and bounded per-bot gain", () => {
+    const character = resolveBotVoiceCharacter({
+      ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+      eqTilt: 0.5,
+      gainDb: -30,
+    });
+    assert.equal(BOT_VOICE_EQ_TILT_DB_MAX, 6);
+    assert.deepEqual(character, {
+      eqTilt: 0.5,
+      lowShelfDb: -3,
+      highShelfDb: 3,
+      gainDb: -12,
+      gainMultiplier: 0.251189,
+    });
+    assert.deepEqual(
+      resolveBotVoiceCharacter({
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+        eqTilt: -1,
+        gainDb: 20,
+      }),
+      {
+        eqTilt: -1,
+        lowShelfDb: 6,
+        highShelfDb: -6,
+        gainDb: 6,
+        gainMultiplier: 1.995262,
+      },
+    );
   });
   it("does not turn malformed user overrides into an override", () => {
     assert.equal(normalizeOptionalBotAudioVoiceProfileV1(null), null);
@@ -213,10 +306,33 @@ describe("audio voice normalization", () => {
     );
   });
 
-  it("normalizes ElevenLabs-only effects to a clean default", () => {
+  it("normalizes engine-agnostic effects to a Chorus default", () => {
+    assert.equal(DEFAULT_VOICE_EFFECT, "chorus");
+    assert.equal(normalizeVoiceEffect(undefined), "chorus");
+    assert.equal(normalizeVoiceEffect("clean"), "clean");
     assert.equal(normalizeElevenLabsVoiceEffect("robot"), "robot");
+    assert.equal(normalizeElevenLabsVoiceEffect(undefined), "chorus");
     assert.equal(normalizeElevenLabsVoiceEffect("distortion"), "chorus");
     assert.equal(normalizeElevenLabsVoiceEffect("crt-speaker"), "clean");
+    assert.equal(
+      normalizeBotAudioVoiceProfileV1({
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+        elevenLabsEffect: "clean",
+      }).elevenLabsEffect,
+      "chorus",
+    );
+    assert.deepEqual(
+      normalizeBotAudioVoiceProfileV1({
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+        elevenLabsEffect: "clean",
+        voiceEffectExplicit: true,
+      }),
+      {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+        elevenLabsEffect: "clean",
+        voiceEffectExplicit: true,
+      },
+    );
     assert.equal(
       normalizeBotAudioVoiceProfileV1({
         ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,

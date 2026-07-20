@@ -122,7 +122,7 @@ describe("selected bot library showcase", () => {
   it("awaits persona copy and plays the first English sample", () => {
     const previewHandlerSource = pageSource.slice(
       pageSource.indexOf("async function playBotHubVoicePreview"),
-      pageSource.indexOf("async function loadElevenLabsVoiceCatalog")
+      pageSource.indexOf("async function previewSelectedBotVoice")
     );
     assert.match(
       previewHandlerSource,

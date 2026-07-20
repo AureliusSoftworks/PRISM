@@ -65,10 +65,40 @@ describe("Coffee player response UI wiring", () => {
     );
   });
 
+  it("starts the speaking reveal only from real voice playback start", () => {
+    assert.match(
+      pageSource,
+      /onStart:[\s\S]*?settle\(coffeeVoiceStartedDurationMs\(durationMs, fallbackDuration\)\)/,
+    );
+    assert.match(
+      pageSource,
+      /window\.setTimeout\(\(\) => \{[\s\S]*?if \(settled\) return;[\s\S]*?controller\.abort\(\);[\s\S]*?releaseCoffeeVoicePlayback\(\);[\s\S]*?settle\(null\);/,
+    );
+    assert.doesNotMatch(
+      pageSource,
+      /resolve\(durationMs && durationMs > 0 \? durationMs : fallbackDuration\)/,
+    );
+  });
+
   it("hands a refreshed player line to one visible owner", () => {
     assert.match(
       pageSource,
       /persistedUserMessageVisible:[\s\S]*?coffeePersistedUserLineOwnsPendingReveal\(\{[\s\S]*?messages:\s*centerFeedSourceMessages,[\s\S]*?userRevealText:\s*coffeeUserRevealText/,
+    );
+  });
+
+  it("feeds accepted pending turns into Table talk without revealing bot prose early", () => {
+    assert.match(
+      pageSource,
+      /const liveTranscriptMessages =\s*coffeePendingRevealConversation\?\.id === coffeeConversation\.id[\s\S]*?coffeePendingRevealConversation\.messages[\s\S]*?coffeeConversation\.messages/,
+    );
+    assert.match(
+      pageSource,
+      /pendingTranscriptMessageId && !pendingTranscriptRevealStarted[\s\S]*?message\.id !== pendingTranscriptMessageId/,
+    );
+    assert.match(
+      pageSource,
+      /pendingTranscriptLineTyping[\s\S]*?revealPlainTextWithBotMentions\([\s\S]*?coffeeTypewriterLength/,
     );
   });
 
@@ -129,6 +159,25 @@ describe("Coffee player response UI wiring", () => {
     assert.match(
       pageSource,
       /buildCoffeeCupVisualState\(\{[\s\S]*?\.\.\.coffeeCupConsumptionTiming,[\s\S]*?durationMinutes: coffeeCupDurationMinutes/,
+    );
+  });
+
+  it("leaves Auto's ambient cup clock in charge when no accepted sip exists", () => {
+    assert.match(
+      pageSource,
+      /const hasExplicitCupSipState =\s*cupSipCount > 0 \|\| activeSipAnimationCount !== null;/,
+    );
+    assert.match(
+      pageSource,
+      /sipCount:\s*seatIsFirmlySeated && hasExplicitCupSipState[\s\S]*?\? visualCupSipCount[\s\S]*?: null/,
+    );
+    assert.match(
+      pageSource,
+      /sippingOverride:[\s\S]*?hasExplicitCupSipState[\s\S]*?\? false[\s\S]*?: null/,
+    );
+    assert.match(
+      pageSource,
+      /ambientSipAllowed:[\s\S]*?coffeeAmbientSipSpeakerBotId === null \|\|[\s\S]*?coffeeAmbientSipSpeakerBotId !== bot\.id/,
     );
   });
 });

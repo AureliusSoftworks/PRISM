@@ -62,6 +62,9 @@ describe("Signal studio room acoustics", () => {
       buffer: AudioBuffer | null = null;
       normalize = false;
     }
+    class FakeStereoPanner extends FakeNode {
+      pan = { value: 0 };
+    }
     class FakeFilter extends FakeNode {
       type: BiquadFilterType = "lowpass";
       frequency = { value: 0 };
@@ -84,6 +87,7 @@ describe("Signal studio room acoustics", () => {
       readonly gains: FakeGain[] = [];
       readonly filters: FakeFilter[] = [];
       readonly convolvers: FakeConvolver[] = [];
+      readonly stereoPanners: FakeStereoPanner[] = [];
       bufferCreateCount = 0;
       createGain(): FakeGain {
         const node = new FakeGain();
@@ -96,6 +100,11 @@ describe("Signal studio room acoustics", () => {
       createConvolver(): FakeConvolver {
         const node = new FakeConvolver();
         this.convolvers.push(node);
+        return node;
+      }
+      createStereoPanner(): FakeStereoPanner {
+        const node = new FakeStereoPanner();
+        this.stereoPanners.push(node);
         return node;
       }
       createBiquadFilter(): FakeFilter {
@@ -117,9 +126,13 @@ describe("Signal studio room acoustics", () => {
       input: input as unknown as AudioNode,
       destination: destination as unknown as AudioNode,
       send: SIGNAL_STUDIO_VOICE_ROOM_SEND,
+      stereoPan: -0.124,
     });
 
     assert.equal(input.connections.length, 2);
+    assert.equal(context.stereoPanners[0]?.pan.value, -0.124);
+    assert.equal(input.connections[0], context.stereoPanners[0]);
+    assert.ok(input.connections[1] instanceof FakeDelay);
     assert.equal(context.gains[0]?.gain.value, 1);
     assert.equal(
       context.gains[1]?.gain.value,
@@ -139,6 +152,18 @@ describe("Signal studio room acoustics", () => {
     assert.equal(context.bufferCreateCount, 1);
     connection.disconnect();
     assert.equal(input.disconnected, true);
+    assert.equal(context.stereoPanners[0]?.disconnected, true);
     assert.ok(context.filters.every((filter) => filter.disconnected));
+
+    const centeredInput = new FakeNode();
+    const centeredDestination = new FakeNode();
+    const centeredConnection = connectRoomAcoustics({
+      context: context as unknown as BaseAudioContext,
+      input: centeredInput as unknown as AudioNode,
+      destination: centeredDestination as unknown as AudioNode,
+    });
+    assert.equal(context.stereoPanners.length, 1);
+    assert.equal(centeredInput.connections[0], centeredDestination);
+    centeredConnection.disconnect();
   });
 });

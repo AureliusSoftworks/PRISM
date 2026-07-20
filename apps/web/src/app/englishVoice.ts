@@ -1,11 +1,11 @@
 import {
   applyVoiceDeliveryMoodToProfile,
-  normalizeElevenLabsVoiceEffect,
   normalizeBotAudioVoiceProfileV1,
   normalizeBotVoiceVolume,
-  resolveElevenLabsVoicePerformance,
+  normalizeVoiceEffect,
+  resolveVoicePlaybackTransform,
   type BotAudioVoiceProfileV1,
-  type ElevenLabsVoiceEffect,
+  type VoiceEffect,
   type VoiceDeliveryMood,
 } from "@localai/shared";
 import {
@@ -14,7 +14,6 @@ import {
   playRealtimeVoiceBytes,
   prepareRealtimeVoiceAudio,
   stopRealtimeVoiceAudio,
-  voiceLiltDetuneCents,
   type VoicePlaybackLifecycle,
 } from "./voiceEffects.ts";
 import type { PreSpeechBreathPlan } from "./preSpeechBreath.ts";
@@ -105,15 +104,21 @@ export async function readEnglishVoiceSynthesisClip(
   };
 }
 
+export function voiceEffectForPlayback(
+  rawProfile: BotAudioVoiceProfileV1,
+): VoiceEffect {
+  return normalizeVoiceEffect(
+    normalizeBotAudioVoiceProfileV1(rawProfile).elevenLabsEffect,
+  );
+}
+
+/** Backwards-compatible helper; playback effects no longer depend on engine. */
 export function elevenLabsEffectForEngine(
   rawProfile: BotAudioVoiceProfileV1,
-  engineUsed: string | null
-): ElevenLabsVoiceEffect {
-  return engineUsed === "elevenlabs"
-    ? normalizeElevenLabsVoiceEffect(
-        normalizeBotAudioVoiceProfileV1(rawProfile).elevenLabsEffect
-      )
-    : "clean";
+  engineUsed: string | null,
+): VoiceEffect {
+  void engineUsed;
+  return voiceEffectForPlayback(rawProfile);
 }
 
 export function resolveEnglishVoicePostProcessing(
@@ -134,15 +139,37 @@ export function resolveEnglishVoicePlaybackDetuneCents(
   rawProfile: BotAudioVoiceProfileV1,
   engineUsed: string | null,
 ): number {
-  return engineUsed === "elevenlabs"
-    ? resolveElevenLabsVoicePerformance(rawProfile).playbackDetuneCents
-    : resolveEnglishVoicePostProcessing(rawProfile).detuneCents;
+  // Both engines use the same local transform; keeping this parameter retains
+  // the established call-site contract while making that neutrality explicit.
+  void engineUsed;
+  return resolveVoicePlaybackTransform(rawProfile).pitchCents;
+}
+
+/** Provider/native character timings describe the neutral-tempo source clip.
+ * Scale them to the local playback clock before Signal uses them directly. */
+export function scaleEnglishVoiceAlignmentForPlayback(
+  alignment: EnglishVoiceCharacterAlignment | null,
+  rawProfile: BotAudioVoiceProfileV1,
+  deliveryMood?: VoiceDeliveryMood | null,
+): EnglishVoiceCharacterAlignment | null {
+  if (!alignment) return null;
+  const tempo = resolveVoicePlaybackTransform(
+    applyVoiceDeliveryMoodToProfile(rawProfile, deliveryMood),
+  ).tempo;
+  return {
+    characters: [...alignment.characters],
+    characterStartTimesSeconds: alignment.characterStartTimesSeconds.map(
+      (time) => time / tempo,
+    ),
+    characterEndTimesSeconds: alignment.characterEndTimesSeconds.map(
+      (time) => time / tempo,
+    ),
+  };
 }
 
 let activeMedia: HTMLAudioElement | null = null;
 let activeMediaUrl: string | null = null;
 let activeMediaStartTimer: number | null = null;
-let activeMediaLiltTimer: number | null = null;
 let activeMediaResolve: (() => void) | null = null;
 let preparedMedia: HTMLAudioElement | null = null;
 let preparedMediaUrl: string | null = null;
@@ -234,10 +261,6 @@ function releaseActiveMedia(keepElement = false): void {
     window.clearTimeout(activeMediaStartTimer);
     activeMediaStartTimer = null;
   }
-  if (activeMediaLiltTimer !== null) {
-    window.clearInterval(activeMediaLiltTimer);
-    activeMediaLiltTimer = null;
-  }
   if (keepElement && media) preparedMedia = media;
 }
 
@@ -257,7 +280,6 @@ async function playBytesWithMedia(
   bytes: ArrayBuffer,
   profile: BotAudioVoiceProfileV1,
   expectedGeneration: number,
-  detuneCents: number,
   lifecycle?: VoicePlaybackLifecycle
 ): Promise<void> {
   if (expectedGeneration !== generation) return;
@@ -275,7 +297,7 @@ async function playBytesWithMedia(
   audio.load();
   audio.preload = "auto";
   audio.volume = Math.min(1, normalizeBotAudioVoiceProfileV1(profile).volume);
-  audio.preservesPitch = false;
+  audio.preservesPitch = true;
   activeMedia = audio;
   activeMediaUrl = url;
 
@@ -307,25 +329,11 @@ async function playBytesWithMedia(
     void audio.play().then(
       () => {
         started = true;
-        const normalizedProfile = normalizeBotAudioVoiceProfileV1(profile);
         const startedAtMs = performance.now();
-        let playbackRate = 1;
-        const updatePlaybackRate = () => {
-          const liveDetuneCents =
-            detuneCents +
-            voiceLiltDetuneCents(normalizedProfile.lilt, audio.currentTime);
-          playbackRate = Math.max(
-            0.7,
-            Math.min(1.4, 2 ** (liveDetuneCents / 1200)),
-          );
-          audio.playbackRate = playbackRate;
-        };
-        updatePlaybackRate();
-        if (normalizedProfile.lilt !== 0) {
-          activeMediaLiltTimer = window.setInterval(updatePlaybackRate, 100);
-        }
+        const playbackTempo = resolveVoicePlaybackTransform(profile).tempo;
+        audio.playbackRate = playbackTempo;
         const durationMs = Number.isFinite(audio.duration) && audio.duration > 0
-          ? Math.round((audio.duration * 1000) / playbackRate)
+          ? Math.round((audio.duration * 1000) / playbackTempo)
           : null;
         if (durationMs) {
           progress = beginVoicePlaybackProgress(
@@ -358,12 +366,14 @@ async function playAudio(
   lifecycle?: VoicePlaybackLifecycle,
   roomAcoustics?: RoomAcousticsSend,
   preSpeechBreath?: PreSpeechBreathPlan | null,
+  stereoPan?: number,
 ): Promise<void> {
   if (expectedGeneration !== generation) return;
   await playPreSpeechBreath({
     plan: preSpeechBreath,
     profile,
     roomAcoustics,
+    stereoPan,
     isCurrent: () => expectedGeneration === generation,
   });
   if (expectedGeneration !== generation) return;
@@ -381,9 +391,11 @@ async function playAudio(
       effectsEnabled,
       detuneCents,
       baseLowpassHz: processing.lowpassHz,
-      elevenLabsEffect: elevenLabsEffectForEngine(profile, engineUsed),
+      voiceEffect: voiceEffectForPlayback(profile),
       roomAcoustics,
+      stereoPan,
       lifecycle,
+      compensateLifecycleForOutputLatency: true,
       isCurrent: () => expectedGeneration === generation,
     });
   } catch {
@@ -399,7 +411,6 @@ async function playAudio(
       bytes,
       profile,
       expectedGeneration,
-      detuneCents,
       lifecycle,
     );
     return;
@@ -417,6 +428,7 @@ export function enqueueEnglishVoice(
   deliveryMood?: VoiceDeliveryMood | null,
   roomAcoustics?: RoomAcousticsSend,
   preSpeechBreath?: PreSpeechBreathPlan | null,
+  stereoPan = 0,
 ): Promise<void> {
   const expectedGeneration = generation;
   const playbackProfile = {
@@ -436,6 +448,7 @@ export function enqueueEnglishVoice(
         lifecycle,
         roomAcoustics,
         preSpeechBreath,
+        stereoPan,
       ),
     );
   return queue;

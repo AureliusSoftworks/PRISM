@@ -2,7 +2,7 @@
   "name": "localai-chatgov",
   "private": true,
   "type": "module",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "workspaces": [
     "apps/*",
     "packages/*"
@@ -13,6 +13,8 @@
     "test:e2e": "playwright test --grep-invert @visual",
     "test:visual": "playwright test --grep @visual",
     "test:perf": "npm --prefix packages/config run build && npm --prefix packages/shared run build && node --experimental-strip-types scripts/perf/test-performance.ts",
+    "voice:model": "node scripts/fetch-builtin-tts-model.mjs",
+    "test:prism-launcher": "node --test scripts/prism-launcher.test.mjs",
     "dev": "node --env-file-if-exists=.env scripts/dev.mjs",
     "version:set": "node scripts/set-version.mjs",
     "dev:web": "npm run dev -w apps/web",
@@ -21,6 +23,7 @@
     "desktop:stage-runtime": "node scripts/stage-desktop-runtime.mjs --output-dir runtime",
     "desktop:dev": "npm run desktop:stage-runtime && npm run dev -w apps/desktop",
     "desktop:build": "npm run desktop:stage-runtime && npm run build -w apps/desktop",
+    "desktop:build:mac-app": "npm run desktop:stage-runtime && npm run tauri -w apps/desktop -- build --bundles app",
     "desktop:package:mac": "bash scripts/package-desktop-macos.sh",
     "desktop:package:linux": "bash scripts/package-desktop-linux.sh",
     "desktop:package:windows": "pwsh scripts/package-desktop-windows.ps1",

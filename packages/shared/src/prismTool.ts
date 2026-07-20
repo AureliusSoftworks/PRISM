@@ -12,7 +12,10 @@ import type {
   AutoFallbackProvider,
   AutoRecoveryTraceV1,
 } from "./autoFallback.js";
-import type { ListenerReactionPlanV1 } from "./listenerReaction.js";
+import type {
+  ListenerReactionPlanV1,
+  ListenerReactionVocalFoley,
+} from "./listenerReaction.js";
 
 function normalizeStoredAutoRecoveryTrace(
   value: unknown
@@ -196,6 +199,17 @@ export interface CoffeeReplayTopOffEventPayload {
   toppedOffAt: string;
 }
 
+export interface CoffeeReplayEmptyCupAttemptEventPayload {
+  v: 1;
+  name: "coffeeReplayEvent";
+  kind: "emptyCupAttempt";
+  botId: string;
+  occurredAt: string;
+  fillId: string;
+  attemptNumber: 1 | 2 | 3;
+  maxAttempts: 2 | 3;
+}
+
 export interface CoffeeReplayPlayerDepartureEventPayload {
   v: 1;
   name: "coffeeReplayEvent";
@@ -225,6 +239,7 @@ export type CoffeeReplayEventPayload =
   | CoffeeReplayArrivalEventPayload
   | CoffeeReplayMoodEventPayload
   | CoffeeReplayTopOffEventPayload
+  | CoffeeReplayEmptyCupAttemptEventPayload
   | CoffeeReplayPlayerDepartureEventPayload
   | CoffeeReplayBotDepartureEventPayload
   | CoffeeReplayListenerReactionEventPayload;
@@ -291,6 +306,8 @@ export interface StoredAssistantToolEnvelope {
   coffeeReplayEvents?: CoffeeReplayEventPayload[];
   /** Privacy-safe record of a successful Auto recovery. */
   autoRecovery?: AutoRecoveryTraceV1;
+  /** Internal marker for deterministic Power output that must not be sanitized on reload. */
+  botPowerExactResponse?: "echo_addressed" | "hearing_repeat";
 }
 
 /** Narrow storage shape for SQLite `messages.tool_payload` rows. */
@@ -327,6 +344,7 @@ export interface ParsedStoredAssistantToolPayload {
   coffeeUserAction?: CoffeeUserActionPayload;
   coffeeReplayEvents?: CoffeeReplayEventPayload[];
   autoRecovery?: AutoRecoveryTraceV1;
+  botPowerExactResponse?: "echo_addressed" | "hearing_repeat";
 }
 
 /// Many models wrap the envelope in a markdown fence; raw fences make JSON.parse fail
@@ -712,6 +730,11 @@ function normalizeStoredListenerReactionPlan(
       row.spokenCue === "oh" || row.spokenCue === "go on"
     ? row.spokenCue
     : undefined;
+  const vocalFoley = row.vocalFoley === "clears throat" ||
+      row.vocalFoley === "coughs" || row.vocalFoley === "sighs" ||
+      row.vocalFoley === "exhales" || row.vocalFoley === "chuckles"
+    ? row.vocalFoley as ListenerReactionVocalFoley
+    : undefined;
   if (
     row.v !== 1 || row.name !== "listenerReaction" || !speakerBotId ||
     !listenerBotId || speakerBotId === listenerBotId || !messageId || !seed ||
@@ -728,6 +751,7 @@ function normalizeStoredListenerReactionPlan(
     targetSource,
     visualAction,
     ...(spokenCue ? { spokenCue } : {}),
+    ...(!spokenCue && vocalFoley ? { vocalFoley } : {}),
     targetProgress: row.targetProgress,
     seed,
     cameraCutEligible: row.cameraCutEligible,
@@ -829,6 +853,30 @@ export function normalizeCoffeeReplayEventPayload(
       toppedOffAt,
     };
   }
+  if (row.kind === "emptyCupAttempt") {
+    const fillId = typeof row.fillId === "string" ? row.fillId.trim() : "";
+    const attemptNumber =
+      row.attemptNumber === 1 || row.attemptNumber === 2 || row.attemptNumber === 3
+        ? row.attemptNumber
+        : undefined;
+    const maxAttempts =
+      row.maxAttempts === 2 || row.maxAttempts === 3
+        ? row.maxAttempts
+        : undefined;
+    if (!fillId || !attemptNumber || !maxAttempts || attemptNumber > maxAttempts) {
+      return undefined;
+    }
+    return {
+      v: 1,
+      name: "coffeeReplayEvent",
+      kind: "emptyCupAttempt",
+      botId,
+      occurredAt,
+      fillId: fillId.slice(0, 120),
+      attemptNumber,
+      maxAttempts,
+    };
+  }
   return undefined;
 }
 
@@ -837,7 +885,7 @@ function normalizeCoffeeReplayEventPayloads(value: unknown): CoffeeReplayEventPa
   return values
     .map(normalizeCoffeeReplayEventPayload)
     .filter((event): event is CoffeeReplayEventPayload => event !== undefined)
-    .slice(0, 8);
+    .slice(0, 24);
 }
 
 function parseVersion(value: unknown): number {
@@ -1407,6 +1455,11 @@ export function parseStoredAssistantToolPayload(
       const autoRecovery = root
         ? normalizeStoredAutoRecoveryTrace(root.autoRecovery)
         : undefined;
+      const botPowerExactResponse =
+        root?.botPowerExactResponse === "echo_addressed" ||
+        root?.botPowerExactResponse === "hearing_repeat"
+          ? root.botPowerExactResponse
+          : undefined;
       return {
         askQuestion: normalizedAsk,
         ...(sent ? { sentGeneratedImage: sent } : {}),
@@ -1418,6 +1471,7 @@ export function parseStoredAssistantToolPayload(
         ...(coffeeUserAction ? { coffeeUserAction } : {}),
         ...(coffeeReplayEvents.length > 0 ? { coffeeReplayEvents } : {}),
         ...(autoRecovery ? { autoRecovery } : {}),
+        ...(botPowerExactResponse ? { botPowerExactResponse } : {}),
       };
     }
     if (!parsed || typeof parsed !== "object") return {};
@@ -1432,6 +1486,11 @@ export function parseStoredAssistantToolPayload(
     const coffeeUserAction = normalizeCoffeeUserActionPayload(row.coffeeUserAction);
     const coffeeReplayEvents = normalizeCoffeeReplayEventPayloads(row.coffeeReplayEvents);
     const autoRecovery = normalizeStoredAutoRecoveryTrace(row.autoRecovery);
+    const botPowerExactResponse =
+      row.botPowerExactResponse === "echo_addressed" ||
+      row.botPowerExactResponse === "hearing_repeat"
+        ? row.botPowerExactResponse
+        : undefined;
     const moodRow = row.mood;
     let moodKey: StoredMoodKey | undefined;
     let moodConfidence: number | undefined;
@@ -1465,6 +1524,7 @@ export function parseStoredAssistantToolPayload(
       ...(coffeeUserAction ? { coffeeUserAction } : {}),
       ...(coffeeReplayEvents.length > 0 ? { coffeeReplayEvents } : {}),
       ...(autoRecovery ? { autoRecovery } : {}),
+      ...(botPowerExactResponse ? { botPowerExactResponse } : {}),
     };
   } catch {
     return {};

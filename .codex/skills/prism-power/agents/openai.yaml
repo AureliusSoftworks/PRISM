@@ -1,0 +1,4 @@
+interface:
+  display_name: "PRISM Power"
+  short_description: "Integrate Powers across every PRISM mode"
+  default_prompt: "Use $prism-power to integrate this curse or gift across PRISM: describe the desired Power and its intended outcome."

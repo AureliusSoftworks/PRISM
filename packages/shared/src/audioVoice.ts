@@ -3,7 +3,7 @@
 export type VoiceMode = "mute" | "english" | "babble" | "bottish";
 export type EnglishVoiceEngine = "builtin" | "elevenlabs";
 
-export const ELEVENLABS_VOICE_EFFECTS = [
+export const VOICE_EFFECTS = [
   "clean",
   "radio",
   "robot",
@@ -11,9 +11,9 @@ export const ELEVENLABS_VOICE_EFFECTS = [
   "chorus",
   "deep-space",
 ] as const;
-export type ElevenLabsVoiceEffect = (typeof ELEVENLABS_VOICE_EFFECTS)[number];
+export type VoiceEffect = (typeof VOICE_EFFECTS)[number];
 
-export const ELEVENLABS_VOICE_EFFECT_LABELS: Record<ElevenLabsVoiceEffect, string> = {
+export const VOICE_EFFECT_LABELS: Record<VoiceEffect, string> = {
   clean: "Clean",
   radio: "Radio",
   robot: "Robot",
@@ -22,17 +22,27 @@ export const ELEVENLABS_VOICE_EFFECT_LABELS: Record<ElevenLabsVoiceEffect, strin
   "deep-space": "Deep Space",
 };
 
-export const ELEVENLABS_VOICE_EFFECT_DESCRIPTIONS: Record<
-  ElevenLabsVoiceEffect,
+export const VOICE_EFFECT_DESCRIPTIONS: Record<
+  VoiceEffect,
   string
 > = {
-  clean: "Unprocessed ElevenLabs voice.",
+  clean: "Unprocessed voice.",
   radio: "Narrow-band broadcast tone with a trace of radio noise.",
   robot: "Mechanical pulse and a subtly doubled synthetic carrier.",
   echo: "Two level-controlled repeats behind the original voice.",
   chorus: "A wide, gently detuned double without extra loudness.",
   "deep-space": "A lower spectral double with a distant trailing reflection.",
 };
+
+/** Chorus gives PRISM's robot cast a subtle shared synthetic character while
+ * remaining restrained enough for ordinary conversation. */
+export const DEFAULT_VOICE_EFFECT: VoiceEffect = "chorus";
+
+/** Backwards-compatible names for portable profiles and older call sites. */
+export const ELEVENLABS_VOICE_EFFECTS = VOICE_EFFECTS;
+export type ElevenLabsVoiceEffect = VoiceEffect;
+export const ELEVENLABS_VOICE_EFFECT_LABELS = VOICE_EFFECT_LABELS;
+export const ELEVENLABS_VOICE_EFFECT_DESCRIPTIONS = VOICE_EFFECT_DESCRIPTIONS;
 
 export const BOT_AUDIO_VOICE_IDS = [
   "voice-1",
@@ -42,6 +52,64 @@ export const BOT_AUDIO_VOICE_IDS = [
   "voice-5",
 ] as const;
 export type BotAudioVoiceId = (typeof BOT_AUDIO_VOICE_IDS)[number];
+
+/** PRISM's portable, always-local English voice pack. The engine voice IDs are
+ * implementation details; profiles continue to persist only the stable
+ * `voice-1` through `voice-5` identities. */
+export const PRISM_BUILTIN_ENGLISH_VOICES = [
+  {
+    voiceId: "voice-1",
+    engineVoiceId: "af_heart",
+    name: "Heart",
+    locale: "en-US",
+    character: "Warm American",
+  },
+  {
+    voiceId: "voice-2",
+    engineVoiceId: "af_bella",
+    name: "Bella",
+    locale: "en-US",
+    character: "Rich American",
+  },
+  {
+    voiceId: "voice-3",
+    engineVoiceId: "am_michael",
+    name: "Michael",
+    locale: "en-US",
+    character: "Grounded American",
+  },
+  {
+    voiceId: "voice-4",
+    engineVoiceId: "bf_emma",
+    name: "Emma",
+    locale: "en-GB",
+    character: "Clear British",
+  },
+  {
+    voiceId: "voice-5",
+    engineVoiceId: "bm_george",
+    name: "George",
+    locale: "en-GB",
+    character: "Measured British",
+  },
+] as const satisfies ReadonlyArray<{
+  voiceId: BotAudioVoiceId;
+  engineVoiceId: string;
+  name: string;
+  locale: string;
+  character: string;
+}>;
+
+export type PrismBuiltinEnglishVoice =
+  (typeof PRISM_BUILTIN_ENGLISH_VOICES)[number];
+
+export function prismBuiltinEnglishVoice(
+  voiceId: BotAudioVoiceId,
+): PrismBuiltinEnglishVoice {
+  return PRISM_BUILTIN_ENGLISH_VOICES.find(
+    (voice) => voice.voiceId === voiceId,
+  ) ?? PRISM_BUILTIN_ENGLISH_VOICES[0];
+}
 
 export const BOT_VOICE_TEXTURE_PRESETS = [
   "clean",
@@ -70,6 +138,8 @@ export interface LegacyBotAudioVoiceProfileV1 {
   pace: number;
   lilt: number;
   signal?: number;
+  /** Accepted on legacy imports and serialized forward into V2. */
+  elevenLabsStability?: number;
 }
 
 export interface BotAudioVoiceProfileV2 {
@@ -80,14 +150,23 @@ export interface BotAudioVoiceProfileV2 {
   elevenLabsVoiceId?: string | null;
   /** Exact provider identity that wins over the catalog selection when set. */
   elevenLabsVoiceIdOverride?: string | null;
-  elevenLabsEffect: ElevenLabsVoiceEffect;
+  /** Portable playback effect. The key name is retained for export compatibility. */
+  elevenLabsEffect: VoiceEffect;
+  /** Distinguishes an explicit Clean choice from the former local-only default. */
+  voiceEffectExplicit?: boolean;
   /** Comma-separated Eleven v3 audio directions such as "warm, hushed". */
   elevenLabsDirection?: string | null;
+  /** ElevenLabs performance consistency. Optional for older portable profiles. */
+  elevenLabsStability?: number;
   pitch: number;
   warmth: number;
   pace: number;
   lilt: number;
   bottishTone: number;
+  /** Signed low/high shelf tilt. Negative is low-forward; positive is bright. */
+  eqTilt: number;
+  /** Relative per-bot output trim in decibels; account Voice Volume stays master. */
+  gainDb: number;
   volume: number;
   texture: BotVoiceTextureV1;
 }
@@ -120,15 +199,42 @@ export const VOICE_DELIVERY_RATE_BY_MOOD: Readonly<
   strained: 0.94,
 };
 
+/** Provider-only Eleven v3 direction for a spoken mood. Neutral delivery stays
+ * untagged so ordinary speech does not become performative by default. */
+export const ELEVENLABS_VOICE_DIRECTION_BY_MOOD: Readonly<
+  Record<Exclude<VoiceDeliveryMood, "neutral">, string>
+> = {
+  joyful: "delighted",
+  warm: "warmly",
+  guarded: "reserved",
+  strained: "strained",
+};
+
 export const ELEVENLABS_VOICE_SPEED_MIN = 0.7;
 export const ELEVENLABS_VOICE_SPEED_MAX = 1.2;
 export const BOT_AUDIO_VOICE_PACE_RATE_DEPTH = 0.24;
 export const BOT_AUDIO_VOICE_PITCH_DEPTH_CENTS = 650;
+export const BOT_VOICE_EQ_TILT_DB_MAX = 6;
+export const BOT_VOICE_LOW_SHELF_HZ = 180;
+export const BOT_VOICE_HIGH_SHELF_HZ = 4_000;
+export const BOT_VOICE_GAIN_DB_MIN = -12;
+export const BOT_VOICE_GAIN_DB_MAX = 6;
+export const ELEVENLABS_VOICE_STABILITY_DEFAULT = 0.52;
 
-export interface ElevenLabsVoicePerformanceV1 {
-  speed: number;
-  playbackDetuneCents: number;
-  deliveryRate: number;
+/** The browser's one source of truth for independent voice tempo and pitch.
+ * Tempo is the only control that changes duration; pitch and lilt only change
+ * spectral pitch through the playback DSP. */
+export interface VoicePlaybackTransformV1 {
+  tempo: number;
+  pitchCents: number;
+}
+
+export interface BotVoiceCharacterV1 {
+  eqTilt: number;
+  lowShelfDb: number;
+  highShelfDb: number;
+  gainDb: number;
+  gainMultiplier: number;
 }
 
 /** Ephemeral modulation around a bot's persisted voice identity. */
@@ -159,6 +265,11 @@ export function normalizeVoiceDeliveryMood(
     : "neutral";
 }
 
+export function elevenLabsVoiceDirectionForMood(value: unknown): string | null {
+  const mood = normalizeVoiceDeliveryMood(value);
+  return mood === "neutral" ? null : ELEVENLABS_VOICE_DIRECTION_BY_MOOD[mood];
+}
+
 export function voiceDeliveryRateForMood(value: unknown): number {
   return VOICE_DELIVERY_RATE_BY_MOOD[normalizeVoiceDeliveryMood(value)];
 }
@@ -185,40 +296,55 @@ export function applyVoiceDeliveryMoodToProfile(
   };
 }
 
-/** Keep the requested delivery rate authoritative when ElevenLabs reaches its
- * native speed limits. Extreme pitch is softened only as much as necessary so
- * a low-pitched voice does not silently become a slow voice. */
-export function resolveElevenLabsVoicePerformance(
+export function resolveVoicePlaybackTransform(
   rawProfile: BotAudioVoiceProfileV1,
-): ElevenLabsVoicePerformanceV1 {
+): VoicePlaybackTransformV1 {
   const profile = normalizeBotAudioVoiceProfileV1(rawProfile);
-  const deliveryRate = 1 + profile.pace * BOT_AUDIO_VOICE_PACE_RATE_DEPTH;
-  const requestedPitchRatio = 2 ** (
-    (profile.pitch * BOT_AUDIO_VOICE_PITCH_DEPTH_CENTS) / 1200
-  );
-  const speed = Math.min(
-    ELEVENLABS_VOICE_SPEED_MAX,
-    Math.max(
-      ELEVENLABS_VOICE_SPEED_MIN,
-      deliveryRate / requestedPitchRatio,
-    ),
-  );
-  const compensatedPlaybackRatio = deliveryRate / speed;
   return {
-    speed: Number(speed.toFixed(3)),
-    playbackDetuneCents: Math.round(
-      1200 * Math.log2(compensatedPlaybackRatio),
-    ),
-    deliveryRate: Number(deliveryRate.toFixed(3)),
+    tempo: Number((1 + profile.pace * BOT_AUDIO_VOICE_PACE_RATE_DEPTH).toFixed(3)),
+    pitchCents: Math.round(profile.pitch * BOT_AUDIO_VOICE_PITCH_DEPTH_CENTS),
+  };
+}
+
+export function expectedVoicePlaybackDurationMs(
+  sourceDurationMs: number,
+  rawProfile: BotAudioVoiceProfileV1,
+): number {
+  const source = Number.isFinite(sourceDurationMs) ? Math.max(0, sourceDurationMs) : 0;
+  return Math.max(1, Math.round(source / resolveVoicePlaybackTransform(rawProfile).tempo));
+}
+
+/** Resolve the portable two-axis Voice Character pad into the three playback
+ * values presented to the person. The shelves are deliberately coupled so a
+ * two-dimensional pad stays honest: horizontal is tonal tilt and vertical is
+ * relative gain. */
+export function resolveBotVoiceCharacter(
+  rawProfile: BotAudioVoiceProfileV1,
+): BotVoiceCharacterV1 {
+  const profile = normalizeBotAudioVoiceProfileV1(rawProfile);
+  const highShelfDb = Number(
+    (profile.eqTilt * BOT_VOICE_EQ_TILT_DB_MAX).toFixed(3),
+  );
+  const lowShelfDb = Number((-highShelfDb).toFixed(3));
+  return {
+    eqTilt: profile.eqTilt,
+    lowShelfDb,
+    highShelfDb,
+    gainDb: profile.gainDb,
+    gainMultiplier: Number((10 ** (profile.gainDb / 20)).toFixed(6)),
   };
 }
 
 export const BOT_NAME_PRONUNCIATION_MAX_LENGTH = 120;
+export const BOT_NAME_SELF_REFERRAL_MAX_LENGTH = BOT_NAME_PRONUNCIATION_MAX_LENGTH;
 
 export interface BotNamePronunciationEntry {
+  id?: string | null | undefined;
   name: string | null | undefined;
   namePronunciation?: string | null | undefined;
   name_pronunciation?: string | null | undefined;
+  selfReferral?: string | null | undefined;
+  self_referral?: string | null | undefined;
 }
 
 export function normalizeBotNamePronunciation(value: unknown): string {
@@ -229,22 +355,47 @@ export function normalizeBotNamePronunciation(value: unknown): string {
     .slice(0, BOT_NAME_PRONUNCIATION_MAX_LENGTH);
 }
 
+/**
+ * Normalize the private name a bot uses when speaking about itself. It shares
+ * the pronunciation field's compact, speech-safe limits without affecting any
+ * visible labels.
+ */
+export function normalizeBotSelfReferral(value: unknown): string {
+  return normalizeBotNamePronunciation(value).slice(
+    0,
+    BOT_NAME_SELF_REFERRAL_MAX_LENGTH,
+  );
+}
+
 export function applyBotNamePronunciations(
   text: unknown,
   entries: readonly BotNamePronunciationEntry[],
+  speakerBotId?: string | null,
 ): unknown {
   if (typeof text !== "string" || entries.length === 0) return text;
+  const normalizedSpeakerBotId = speakerBotId?.trim() ?? "";
+  const orderedEntries = normalizedSpeakerBotId
+    ? [...entries].sort(
+        (left, right) =>
+          Number(right.id === normalizedSpeakerBotId) -
+          Number(left.id === normalizedSpeakerBotId),
+      )
+    : entries;
   const replacements = new Map<string, { written: string; spoken: string }>();
-  for (const entry of entries) {
+  for (const entry of orderedEntries) {
     const written = entry.name?.replace(/\s+/gu, " ").trim() ?? "";
-    const spoken = normalizeBotNamePronunciation(
-      entry.namePronunciation ?? entry.name_pronunciation,
-    );
+    const isSpeaker =
+      normalizedSpeakerBotId.length > 0 && entry.id === normalizedSpeakerBotId;
+    const spoken = isSpeaker
+      ? normalizeBotSelfReferral(entry.selfReferral ?? entry.self_referral) || written
+      : normalizeBotNamePronunciation(
+          entry.namePronunciation ?? entry.name_pronunciation,
+        );
     const key = written.toLocaleLowerCase();
     if (
       !written ||
       !spoken ||
-      key === spoken.toLocaleLowerCase() ||
+      (!isSpeaker && key === spoken.toLocaleLowerCase()) ||
       replacements.has(key)
     ) {
       continue;
@@ -338,12 +489,14 @@ export const DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2: Readonly<BotAudioVoiceProfileV2
   v: 2,
   enabled: true,
   baseVoiceId: "voice-1",
-  elevenLabsEffect: "clean",
+  elevenLabsEffect: DEFAULT_VOICE_EFFECT,
   pitch: 0,
   warmth: 0,
   pace: 0,
   lilt: 0,
   bottishTone: 0.45,
+  eqTilt: 0,
+  gainDb: 0,
   volume: 1,
   texture: BOT_VOICE_TEXTURE_RECIPES.clean,
 };
@@ -371,13 +524,30 @@ export function normalizeEnglishVoiceEngine(
   return value === "builtin" || value === "elevenlabs" ? value : fallback;
 }
 
-export function normalizeElevenLabsVoiceEffect(value: unknown): ElevenLabsVoiceEffect {
+export function normalizeVoiceEffect(
+  value: unknown,
+  fallback: VoiceEffect = DEFAULT_VOICE_EFFECT,
+): VoiceEffect {
   // Migrate the original harsh bit-crusher preset to the more musical chorus.
   if (value === "distortion") return "chorus";
+  // Retired texture values were historically interpreted as clean playback.
+  if (
+    value === "crt-speaker" ||
+    value === "lofi" ||
+    value === "tape" ||
+    value === "damaged-speaker"
+  ) {
+    return "clean";
+  }
   return typeof value === "string" &&
-    (ELEVENLABS_VOICE_EFFECTS as readonly string[]).includes(value)
-    ? value as ElevenLabsVoiceEffect
-    : "clean";
+    (VOICE_EFFECTS as readonly string[]).includes(value)
+    ? value as VoiceEffect
+    : fallback;
+}
+
+/** Backwards-compatible normalizer for the legacy persisted field name. */
+export function normalizeElevenLabsVoiceEffect(value: unknown): VoiceEffect {
+  return normalizeVoiceEffect(value);
 }
 
 export function normalizeElevenLabsVoiceDirection(
@@ -411,6 +581,25 @@ export function normalizeBotAudioVoiceControl(value: unknown, fallback = 0): num
   const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
   const safe = Number.isFinite(parsed) ? parsed : fallback;
   return Number(Math.min(1, Math.max(-1, safe)).toFixed(3));
+}
+
+export function normalizeBotVoiceGainDb(value: unknown, fallback = 0): number {
+  const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  const safe = Number.isFinite(parsed) ? parsed : fallback;
+  return Number(
+    Math.min(BOT_VOICE_GAIN_DB_MAX, Math.max(BOT_VOICE_GAIN_DB_MIN, safe)).toFixed(3),
+  );
+}
+
+/** ElevenLabs accepts a 0..1 stability value. Older profiles keep the former
+ * neutral behavior rather than inheriting any lilt-dependent provider setting. */
+export function normalizeElevenLabsVoiceStability(
+  value: unknown,
+  fallback = ELEVENLABS_VOICE_STABILITY_DEFAULT,
+): number {
+  const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  const safe = Number.isFinite(parsed) ? parsed : fallback;
+  return Number(Math.min(1, Math.max(0, safe)).toFixed(3));
 }
 
 export function normalizeBotVoiceTextureUnit(value: unknown, fallback = 0): number {
@@ -472,9 +661,23 @@ export function normalizeBotAudioVoiceProfileV1(
     record.elevenLabsVoiceIdOverride,
     fallbackProfile.elevenLabsVoiceIdOverride ?? null
   );
+  const voiceEffectExplicit = record.voiceEffectExplicit === true ||
+    (record.elevenLabsEffect === "clean" && Boolean(
+      elevenLabsVoiceId || elevenLabsVoiceIdOverride,
+    ));
+  const voiceEffect = record.elevenLabsEffect === "clean" && !voiceEffectExplicit
+    ? fallbackProfile.elevenLabsEffect
+    : normalizeVoiceEffect(
+        record.elevenLabsEffect,
+        fallbackProfile.elevenLabsEffect,
+      );
   const elevenLabsDirection = normalizeElevenLabsVoiceDirection(
     record.elevenLabsDirection,
     fallbackProfile.elevenLabsDirection ?? null
+  );
+  const elevenLabsStability = normalizeElevenLabsVoiceStability(
+    record.elevenLabsStability,
+    fallbackProfile.elevenLabsStability ?? ELEVENLABS_VOICE_STABILITY_DEFAULT,
   );
   return {
     v: 2,
@@ -485,8 +688,10 @@ export function normalizeBotAudioVoiceProfileV1(
     ...(systemVoiceName ? { systemVoiceName } : {}),
     ...(elevenLabsVoiceId ? { elevenLabsVoiceId } : {}),
     ...(elevenLabsVoiceIdOverride ? { elevenLabsVoiceIdOverride } : {}),
-    elevenLabsEffect: normalizeElevenLabsVoiceEffect(record.elevenLabsEffect),
+    elevenLabsEffect: voiceEffect,
+    ...(voiceEffectExplicit ? { voiceEffectExplicit: true } : {}),
     ...(elevenLabsDirection ? { elevenLabsDirection } : {}),
+    ...(record.elevenLabsStability !== undefined ? { elevenLabsStability } : {}),
     pitch: normalizeBotAudioVoiceControl(record.pitch, fallbackProfile.pitch),
     warmth: normalizeBotAudioVoiceControl(record.warmth, fallbackProfile.warmth),
     pace: normalizeBotAudioVoiceControl(record.pace, fallbackProfile.pace),
@@ -495,6 +700,8 @@ export function normalizeBotAudioVoiceProfileV1(
       legacy ? record.signal : record.bottishTone,
       fallbackProfile.bottishTone
     ),
+    eqTilt: normalizeBotAudioVoiceControl(record.eqTilt, fallbackProfile.eqTilt),
+    gainDb: normalizeBotVoiceGainDb(record.gainDb, fallbackProfile.gainDb),
     volume: normalizeBotVoiceVolume(record.volume, fallbackProfile.volume),
     // Voice texture presets are retired. Keep the field canonical for export
     // compatibility, but always resolve old and new profiles to clean audio.
@@ -505,13 +712,19 @@ export function normalizeBotAudioVoiceProfileV1(
 function normalizeBotAudioVoiceProfileFallback(value: BotAudioVoiceProfile): BotAudioVoiceProfileV2 {
   if (value.v === 2) {
     const elevenLabsDirection = normalizeElevenLabsVoiceDirection(value.elevenLabsDirection);
+    const elevenLabsStability = value.elevenLabsStability === undefined
+      ? undefined
+      : normalizeElevenLabsVoiceStability(value.elevenLabsStability);
     return {
       ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
       ...value,
-      elevenLabsEffect: normalizeElevenLabsVoiceEffect(value.elevenLabsEffect),
+      elevenLabsEffect: normalizeVoiceEffect(value.elevenLabsEffect),
       ...(elevenLabsDirection
         ? { elevenLabsDirection }
         : { elevenLabsDirection: undefined }),
+      ...(elevenLabsStability === undefined ? {} : { elevenLabsStability }),
+      eqTilt: normalizeBotAudioVoiceControl(value.eqTilt),
+      gainDb: normalizeBotVoiceGainDb(value.gainDb),
       texture: botVoiceTextureForPreset("clean"),
     };
   }
