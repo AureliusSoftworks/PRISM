@@ -1019,6 +1019,14 @@ describe("Signal experience shell", () => {
     );
     assert.match(source, /hostMessage\.speakerRole !== "host"/u);
     assert.match(source, /prepared \? await prepared\.result : null/u);
+    assert.doesNotMatch(
+      source,
+      /prepared\.warmupFailure\s*=\s*"request_failed"/u,
+    );
+    assert.match(
+      source,
+      /if \(preparedResult && !preparedResult\.ok\) throw preparedResult\.error/u,
+    );
     assert.match(source, /episodeOperationAbortRef\.current\?\.abort\(\)/u);
     assert.match(source, /signal: controller\.signal/u);
     assert.match(source, /episodeOperationIsCurrent\(controller, runId\)/u);

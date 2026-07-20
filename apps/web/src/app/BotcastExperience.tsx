@@ -4193,15 +4193,6 @@ export function BotcastExperience({
           },
         );
         })
-        .catch((error: unknown) => {
-        if (
-          !(error instanceof DOMException && error.name === "AbortError") &&
-          !prepared.warmupFailure
-        ) {
-          prepared.warmupFailure = "request_failed";
-        }
-        throw error;
-        })
         .then(
           (response) => {
             if (response.message) {
