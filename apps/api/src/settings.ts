@@ -12,6 +12,7 @@ import {
   normalizePrismMoodSensitivity,
   validateComfyUiWorkflowsPayload,
   normalizeBotVoiceVolume,
+  normalizeEnglishVoiceEngine,
   normalizeVoiceMode,
   BOT_AUDIO_VOICE_IDS,
   parseStoredAutoFallbackChain,
@@ -206,7 +207,7 @@ export interface CurrentSettings {
   voiceEffectsEnabled: number;
   voiceVolume: number | null;
   operatingSystemVoicesEnabled: number;
-  /** Compatibility column storing the selected ONLINE engine; LOCAL is always builtin. */
+  /** Paired with voiceMode to distinguish local English from Premium. */
   englishVoiceEngine: EnglishVoiceEngine | string | null;
   defaultSystemVoiceName: string | null;
   defaultElevenLabsVoiceId: string | null;
@@ -267,7 +268,7 @@ export interface NextSettings {
   voiceEffectsEnabled: boolean;
   voiceVolume: number;
   operatingSystemVoicesEnabled: boolean;
-  /** Selected ONLINE engine only; LOCAL English always resolves to builtin. */
+  /** Paired with voiceMode; LOCAL speech always resolves to builtin. */
   englishVoiceEngine: EnglishVoiceEngine;
   defaultSystemVoiceName: string | null;
   defaultElevenLabsVoiceId: string | null;
@@ -1159,9 +1160,10 @@ export function resolveNextSettings(
     typeof body.operatingSystemVoicesEnabled === "boolean"
       ? body.operatingSystemVoicesEnabled
       : current.operatingSystemVoicesEnabled !== 0;
-  // The online selector currently has one installed provider. It is not an
-  // opt-in toggle; the per-profile ElevenLabs voice is the explicit override.
-  const englishVoiceEngine: EnglishVoiceEngine = "elevenlabs";
+  const englishVoiceEngine = normalizeEnglishVoiceEngine(
+    body.englishVoiceEngine,
+    normalizeEnglishVoiceEngine(current.englishVoiceEngine),
+  );
   // Keep legacy account-level identities as compatibility fallbacks. Existing
   // bots may still rely on them, so an unrelated settings save must not erase
   // those authored voice choices.

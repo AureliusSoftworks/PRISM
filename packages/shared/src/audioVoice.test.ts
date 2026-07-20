@@ -270,6 +270,26 @@ describe("audio voice normalization", () => {
     assert.equal(resolved.elevenLabsDirection, "patient, warm");
   });
 
+  it("lets an initialized local-only override suppress an authored Premium identity", () => {
+    const authored = normalizeBotAudioVoiceProfileV1({
+      ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+      elevenLabsVoiceIdOverride: "marketplace-voice",
+      elevenLabsDirection: "bright, quick",
+    });
+    const localOnly = normalizeBotAudioVoiceProfileV1({
+      ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+      systemVoiceName: "Alex",
+      elevenLabsVoiceInitialized: true,
+    });
+
+    const resolved = resolveBotAudioVoiceProfileV1(authored, localOnly);
+
+    assert.equal(resolved.systemVoiceName, "Alex");
+    assert.equal(resolved.elevenLabsVoiceId, undefined);
+    assert.equal(resolved.elevenLabsVoiceIdOverride, undefined);
+    assert.equal(resolved.elevenLabsVoiceInitialized, true);
+  });
+
   it("normalizes v2 volume and retires legacy texture controls to clean audio", () => {
     const profile = normalizeBotAudioVoiceProfileV1({
       ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
@@ -294,11 +314,13 @@ describe("audio voice normalization", () => {
       systemVoiceName: "  Alex  ",
       elevenLabsVoiceId: " eleven-voice-id ",
       elevenLabsVoiceIdOverride: " portable-voice-id ",
+      elevenLabsVoiceInitialized: true,
       elevenLabsEffect: "radio",
     });
     assert.equal(profile.systemVoiceName, "Alex");
     assert.equal(profile.elevenLabsVoiceId, "eleven-voice-id");
     assert.equal(profile.elevenLabsVoiceIdOverride, "portable-voice-id");
+    assert.equal(profile.elevenLabsVoiceInitialized, true);
     assert.equal(profile.elevenLabsEffect, "radio");
     assert.deepEqual(
       parseStoredBotAudioVoiceProfileV1(serializeBotAudioVoiceProfileV1(profile)),

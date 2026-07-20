@@ -32,6 +32,7 @@ function baseBotJson(overrides: Partial<PrismBotArchiveJson> = {}): PrismBotArch
         ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
         elevenLabsVoiceId: "catalog-voice",
         elevenLabsVoiceIdOverride: "portable-voice",
+        elevenLabsVoiceInitialized: true,
       },
       avatarDetails: {
         version: 1,
@@ -97,6 +98,13 @@ describe("botArchive", () => {
             .elevenLabsVoiceIdOverride
         : null,
       "portable-voice",
+    );
+    assert.equal(
+      parsed.botJson.bot.authoredAudioVoiceProfile?.v === 2
+        ? parsed.botJson.bot.authoredAudioVoiceProfile
+            .elevenLabsVoiceInitialized
+        : null,
+      true,
     );
     assert.deepEqual(parsed.botJson.bot.avatarDetails, {
       version: 1,

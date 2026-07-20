@@ -43,8 +43,24 @@ describe("bot voice randomizer", () => {
     );
     assert.equal(filled.systemVoiceName, "Fred");
     assert.equal(filled.elevenLabsVoiceId, "eleven-b");
+    assert.equal(filled.elevenLabsVoiceInitialized, true);
     assert.equal(filled.pitch, customized.pitch);
     assert.equal(filled.texture.preset, customized.texture.preset);
+  });
+
+  it("does not overwrite an explicit local-only Premium identity", () => {
+    const localOnly = fillMissingBotAudioVoiceIdentities(
+      {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+        systemVoiceName: "Alex",
+        elevenLabsVoiceInitialized: true,
+      },
+      [],
+      ["eleven-a"],
+      () => 0,
+    );
+    assert.equal(localOnly.elevenLabsVoiceId, undefined);
+    assert.equal(localOnly.elevenLabsVoiceInitialized, true);
   });
 
   it("randomizes encoded PRISM and OS identities without leaking UI values into profiles", () => {

@@ -150,6 +150,8 @@ export interface BotAudioVoiceProfileV2 {
   elevenLabsVoiceId?: string | null;
   /** Exact provider identity that wins over the catalog selection when set. */
   elevenLabsVoiceIdOverride?: string | null;
+  /** True once Premium identity has been assigned or explicitly declined. */
+  elevenLabsVoiceInitialized?: boolean;
   /** Portable playback effect. The key name is retained for export compatibility. */
   elevenLabsEffect: VoiceEffect;
   /** Distinguishes an explicit Clean choice from the former local-only default. */
@@ -661,6 +663,7 @@ export function normalizeBotAudioVoiceProfileV1(
     record.elevenLabsVoiceIdOverride,
     fallbackProfile.elevenLabsVoiceIdOverride ?? null
   );
+  const elevenLabsVoiceInitialized = record.elevenLabsVoiceInitialized === true;
   const voiceEffectExplicit = record.voiceEffectExplicit === true ||
     (record.elevenLabsEffect === "clean" && Boolean(
       elevenLabsVoiceId || elevenLabsVoiceIdOverride,
@@ -688,6 +691,7 @@ export function normalizeBotAudioVoiceProfileV1(
     ...(systemVoiceName ? { systemVoiceName } : {}),
     ...(elevenLabsVoiceId ? { elevenLabsVoiceId } : {}),
     ...(elevenLabsVoiceIdOverride ? { elevenLabsVoiceIdOverride } : {}),
+    ...(elevenLabsVoiceInitialized ? { elevenLabsVoiceInitialized: true } : {}),
     elevenLabsEffect: voiceEffect,
     ...(voiceEffectExplicit ? { voiceEffectExplicit: true } : {}),
     ...(elevenLabsDirection ? { elevenLabsDirection } : {}),
@@ -774,7 +778,8 @@ export function normalizeOptionalBotAudioVoiceProfileV1(value: unknown): BotAudi
     isBotAudioVoiceId(record.baseVoiceId) ||
     typeof record.systemVoiceName === "string" ||
     typeof record.elevenLabsVoiceId === "string" ||
-    typeof record.elevenLabsVoiceIdOverride === "string"
+    typeof record.elevenLabsVoiceIdOverride === "string" ||
+    record.elevenLabsVoiceInitialized === true
   );
   if (version !== 1 && version !== 2 && !recognizableUnversionedProfile) return null;
   return normalizeBotAudioVoiceProfileV1(candidate);
@@ -795,6 +800,12 @@ export function resolveBotAudioVoiceProfileV1(
   const authoredElevenLabsVoiceId =
     authored.elevenLabsVoiceIdOverride ?? authored.elevenLabsVoiceId ?? null;
   if (!authoredElevenLabsVoiceId) return override;
+
+  if (override.elevenLabsVoiceInitialized === true &&
+      !override.elevenLabsVoiceIdOverride &&
+      !override.elevenLabsVoiceId) {
+    return override;
+  }
 
   const overrideElevenLabsVoiceId =
     override.elevenLabsVoiceIdOverride ?? override.elevenLabsVoiceId ?? null;

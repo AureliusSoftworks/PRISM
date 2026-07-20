@@ -12,7 +12,7 @@ describe("Zen voice reveal fallback", () => {
     );
     const effectStart = pageSource.indexOf("const assistantMessages = detail.messages.filter");
     const effectEnd = pageSource.indexOf(
-      'if (settings?.voiceMode !== "mute") return;',
+      "\n  useEffect(\n    () => () => {",
       effectStart
     );
     assert.notEqual(effectStart, -1);
@@ -94,7 +94,7 @@ describe("Zen voice reveal fallback", () => {
     const effectSource = pageSource.slice(effectStart, effectEnd);
     assert.match(
       effectSource,
-      /settings\?\.voiceMode === "bottish" \|\| settings\?\.voiceMode === "babble"/,
+      /voiceSelection\.voiceMode === "bottish" \|\|[\s\S]*?voiceSelection\.voiceMode === "babble"/,
     );
     assert.match(
       effectSource,

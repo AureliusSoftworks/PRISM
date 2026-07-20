@@ -19,6 +19,7 @@ describe("selected bot library showcase", () => {
     assert.match(pageSource, /node\.dataset\.prismPanelLayer !== "true"/);
     assert.match(pageSource, /className=\{`\$\{styles\.zenLiveBotPresencePlate\} \$\{styles\.botPanelHubAvatarPlate\}`\}/);
     assert.match(pageSource, /regenerateBotHubAudioSample\(bot\)/);
+    assert.match(pageSource, /void playBotHubVoicePreview\(bot, "premium"\)/);
     assert.match(pageSource, /void playBotHubVoicePreview\(bot, "bottish"\)/);
     assert.match(pageSource, /"--zen-live-bot-avatar-size":[\s\S]*?"min\(520px, 72vmin\)"/);
     assert.match(pageSource, /\{renderBotHubShowcase\(\)\}[\s\S]*?\{renderUsagePanel\(\)\}/);
@@ -80,7 +81,7 @@ describe("selected bot library showcase", () => {
     assert.doesNotMatch(previewSource, /playBotHubVoicePreview/);
     assert.match(
       pageSource,
-      /aria-label="Voice preview language"[\s\S]*?isMarketplacePreview[\s\S]*?playBotHubVoicePreview\(bot, "english"\)[\s\S]*?regenerateBotHubAudioSample\(bot\)[\s\S]*?onClick=\{\(\) => void playBotHubVoicePreview\(bot, "bottish"\)\}/
+      /aria-label="Voice preview mode"[\s\S]*?isMarketplacePreview[\s\S]*?playBotHubVoicePreview\(bot, "english"\)[\s\S]*?regenerateBotHubAudioSample\(bot\)[\s\S]*?playBotHubVoicePreview\(bot, "premium"\)[\s\S]*?playBotHubVoicePreview\(bot, "bottish"\)/
     );
   });
 
@@ -175,11 +176,17 @@ describe("selected bot library showcase", () => {
     );
     assert.match(
       pageSource,
+      /data-feedback=\{\s*previewMode === "premium" \? previewStatus : undefined\s*\}/,
+    );
+    assert.match(
+      pageSource,
       /aria-busy=\{\s*previewMode === "bottish" && previewStatus === "generating"\s*\}/
     );
     assert.match(pageSource, /preview played\./);
     assert.match(cssSource, /button\[data-feedback="generating"\]::before/);
     assert.match(cssSource, /button\[data-feedback="complete"\]::before[\s\S]*?content: "✓"/);
+    assert.match(cssSource, /\.botPanelHubVoiceChoices\s*\{[\s\S]*?flex-wrap:\s*wrap;/);
+    assert.match(cssSource, /\.botPanelHubVoiceChoices button:disabled/);
     assert.match(cssSource, /@keyframes botPanelHubVoiceFeedbackSpin/);
   });
 
@@ -228,13 +235,21 @@ describe("selected bot library showcase", () => {
     assert.match(cssSource, /\.botPanelHubShowcase\[data-panel="images"\]/);
   });
 
-  it("offers English, Babble, and Bottish independently of the global voice mode", () => {
-    assert.match(pageSource, /mode: Exclude<VoiceMode, "mute">/);
-    assert.match(pageSource, /playBotHubVoicePreview\(\s*bot: Bot \| null,\s*mode: Exclude<VoiceMode, "mute">/);
-    assert.match(pageSource, /aria-label="Voice preview language"/);
+  it("offers English, Premium, Babble, and Bottish independently of the global voice mode", () => {
+    assert.match(pageSource, /mode: Exclude<VoicePlaybackChoice, "mute">/);
+    assert.match(pageSource, /playBotHubVoicePreview\(\s*bot: Bot \| null,\s*mode: Exclude<VoicePlaybackChoice, "mute">/);
+    assert.match(pageSource, /aria-label="Voice preview mode"/);
     assert.match(pageSource, /aria-pressed=\{previewMode === "english"\}/);
+    assert.match(pageSource, /aria-pressed=\{previewMode === "premium"\}/);
     assert.match(pageSource, /aria-pressed=\{previewMode === "babble"\}/);
+    assert.match(pageSource, /playBotHubVoicePreview\(bot, "premium"\)/);
     assert.match(pageSource, /playBotHubVoicePreview\(bot, "babble"\)/);
+    assert.match(pageSource, /mode === "premium" \? "english" : mode/);
+    assert.match(pageSource, /mode === "premium" \? "elevenlabs" : "builtin"/);
+    assert.match(
+      pageSource,
+      /Connect an ElevenLabs key in Settings → Keys to preview Premium\./,
+    );
     assert.match(pageSource, /Generating audio sample…/);
     assert.match(pageSource, /Playing Bottish…/);
     assert.doesNotMatch(

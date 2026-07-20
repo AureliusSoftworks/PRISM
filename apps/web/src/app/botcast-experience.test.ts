@@ -1041,7 +1041,7 @@ describe("Signal experience shell", () => {
     assert.match(pageSource, /lifecycle: trackedLifecycle/u);
     assert.match(
       pageSource,
-      /settings\.voiceVolume \* normalizeBotcastVoiceLevel\(voiceLevel\)/u,
+      /settings\.voiceVolume\s*\*\s*normalizeBotcastVoiceLevel\(voiceLevel\)/u,
     );
     assert.match(pageSource, /globalVolume: playbackVolume/u);
     const stopUtteranceSource = source.slice(
@@ -1123,7 +1123,7 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /signalShowCardBlurbs\(selectedShow, Boolean\(hostBot\?\.muted\)\)/u,
+      /signalShowCardBlurbs\([\s\S]{0,120}Boolean\(hostBot\?\.muted\),[\s\S]{0,100}Boolean\(hostBot\?\.echoesAddressedSpeech\)/u,
     );
     assert.match(
       source,
@@ -1272,7 +1272,10 @@ describe("Signal experience shell", () => {
     assert.match(source, /aria-label="Edit show name"/u);
     assert.match(source, />\s*Save name\s*</u);
     assert.match(source, />\s*Regenerate name\s*</u);
-    assert.match(source, />\s*Regenerate blurbs\s*</u);
+    assert.match(
+      source,
+      /Regenerate\{" "\}[\s\S]{0,100}hostBot\?\.echoesAddressedSpeech \? "blurb" : "blurbs"/u,
+    );
     assert.match(source, />\s*Refresh studio\s*</u);
     assert.match(source, />\s*Refresh logo\s*</u);
     assert.match(
@@ -1399,7 +1402,10 @@ describe("Signal experience shell", () => {
       source.indexOf("const startSignalArtworkJob"),
     );
     assert.match(source, /data-signal-identity-action="blurbs"/u);
-    assert.match(source, />\s*Regenerate blurbs\s*</u);
+    assert.match(
+      source,
+      /Regenerate\{" "\}[\s\S]{0,100}hostBot\?\.echoesAddressedSpeech \? "blurb" : "blurbs"/u,
+    );
     assert.match(source, /disabled=\{busy \|\| hostBot\?\.muted\}/u);
     assert.match(source, /This host’s Power allows only \.\.\./u);
     assert.match(
@@ -1411,6 +1417,7 @@ describe("Signal experience shell", () => {
     assert.match(blurbRefreshSource, /failureReason === "provider_error"/u);
     assert.match(blurbRefreshSource, /response\.recovered/u);
     assert.match(blurbRefreshSource, /across \$\{response\.attempts\} passes/u);
+    assert.match(blurbRefreshSource, /one repeating dashboard blurb/u);
     assert.doesNotMatch(
       blurbRefreshSource,
       /artwork-job|\/name|regenerateAtmosphere|regenerateLogo/u,
@@ -1541,7 +1548,7 @@ describe("Signal experience shell", () => {
   it("floats the host on the show card and periodically reveals show blurbs", () => {
     assert.match(
       source,
-      /signalShowCardBlurbs\(selectedShow, Boolean\(hostBot\?\.muted\)\)/u,
+      /signalShowCardBlurbs\([\s\S]{0,120}Boolean\(hostBot\?\.muted\),[\s\S]{0,100}Boolean\(hostBot\?\.echoesAddressedSpeech\)/u,
     );
     assert.match(source, /className=\{styles\.showCardHostPresence\}/u);
     assert.match(
@@ -1562,7 +1569,7 @@ describe("Signal experience shell", () => {
     assert.match(source, /SIGNAL_SHOW_CARD_QUIP_GAP_MS/u);
     assert.match(
       source,
-      /signalShowCardBlurbs\(selectedShow, Boolean\(hostBot\?\.muted\)\)/u,
+      /signalShowCardBlurbs\([\s\S]{0,120}Boolean\(hostBot\?\.muted\),[\s\S]{0,100}Boolean\(hostBot\?\.echoesAddressedSpeech\)/u,
     );
     assert.match(
       source,

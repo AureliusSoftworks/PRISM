@@ -733,7 +733,7 @@ describe("backup audio voice settings", () => {
         "collection-main",
         JSON.stringify({ v: 1, baseVoiceId: "voice-3", pitch: 0, warmth: 0, pace: 0, lilt: 0 }),
         "Jair-id",
-        JSON.stringify({ v: 2, baseVoiceId: "voice-5", elevenLabsEffect: "radio", pitch: 0.4, warmth: 0, pace: 0, lilt: 0 }),
+        JSON.stringify({ v: 2, baseVoiceId: "voice-5", elevenLabsEffect: "radio", elevenLabsVoiceInitialized: true, pitch: 0.4, warmth: 0, pace: 0, lilt: 0 }),
         "user-1"
       );
       db.prepare(
@@ -748,7 +748,7 @@ describe("backup audio voice settings", () => {
         "Voice Bot",
         "You are Voice Bot.",
         JSON.stringify({ v: 2, baseVoiceId: "voice-4", elevenLabsEffect: "echo", pitch: 0.2, warmth: -0.1, pace: 0.3, lilt: 0.4 }),
-        JSON.stringify({ v: 2, baseVoiceId: "voice-2", elevenLabsEffect: "robot", pitch: -0.4, warmth: 0.6, pace: 0, lilt: -0.2 }),
+        JSON.stringify({ v: 2, baseVoiceId: "voice-2", elevenLabsEffect: "robot", elevenLabsVoiceInitialized: true, pitch: -0.4, warmth: 0.6, pace: 0, lilt: -0.2 }),
         "2026-01-01T00:00:00.000Z",
         "2026-01-01T00:00:00.000Z"
       );
@@ -764,6 +764,7 @@ describe("backup audio voice settings", () => {
       assert.equal(snapshot.settings?.operatingSystemVoicesEnabled, true);
       assert.equal(snapshot.settings?.prismDefaultBotAudioVoiceProfile?.baseVoiceId, "voice-5");
       assert.equal(snapshot.settings?.prismDefaultBotAudioVoiceProfile?.elevenLabsEffect, "radio");
+      assert.equal(snapshot.settings?.prismDefaultBotAudioVoiceProfile?.elevenLabsVoiceInitialized, true);
       assert.equal(snapshot.settings?.englishVoiceEngine, "elevenlabs");
       assert.equal(snapshot.settings?.defaultSystemVoiceName, "Alex");
       assert.equal(snapshot.settings?.defaultElevenLabsVoiceId, "eleven-global");
@@ -791,6 +792,7 @@ describe("backup audio voice settings", () => {
       assert.equal(restoredUser.operating_system_voices_enabled, 1);
       assert.equal(JSON.parse(restoredUser.prism_default_bot_audio_voice_profile ?? "{}").baseVoiceId, "voice-5");
       assert.equal(JSON.parse(restoredUser.prism_default_bot_audio_voice_profile ?? "{}").elevenLabsEffect, "radio");
+      assert.equal(JSON.parse(restoredUser.prism_default_bot_audio_voice_profile ?? "{}").elevenLabsVoiceInitialized, true);
       assert.equal(restoredUser.english_voice_engine, "elevenlabs");
       assert.equal(restoredUser.default_system_voice_name, "Alex");
       assert.equal(restoredUser.default_elevenlabs_voice_id, "eleven-global");
@@ -807,6 +809,7 @@ describe("backup audio voice settings", () => {
       assert.equal(JSON.parse(restoredBot.authored_audio_voice_profile).elevenLabsEffect, "echo");
       assert.equal(JSON.parse(restoredBot.audio_voice_profile_override).baseVoiceId, "voice-2");
       assert.equal(JSON.parse(restoredBot.audio_voice_profile_override).elevenLabsEffect, "robot");
+      assert.equal(JSON.parse(restoredBot.audio_voice_profile_override).elevenLabsVoiceInitialized, true);
     });
   });
 });

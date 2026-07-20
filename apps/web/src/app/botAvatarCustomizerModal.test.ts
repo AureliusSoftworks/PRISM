@@ -1618,11 +1618,11 @@ test("avatar customizer preview has explicit expression states", () => {
   assert.match(pageSource, /const BOT_AVATAR_PREVIEW_MOODS = \[/);
   assert.match(
     pageSource,
-    /mode\.value === "talking"[\s\S]*?voiceModeDisplayName\(voiceMode\)[\s\S]*?: mode\.label/,
+    /mode\.value === "talking"[\s\S]*?voiceModeDisplayName\(voiceChoice\)[\s\S]*?: mode\.label/,
   );
   assert.match(
     pageSource,
-    /<BotAvatarPreviewPanel[\s\S]*?voiceMode=\{voiceMode\}/,
+    /<BotAvatarPreviewPanel[\s\S]*?voiceChoice=\{voicePlaybackChoice\([\s\S]*?voiceMode[\s\S]*?englishVoiceEngine/,
   );
   assert.match(
     pageSource,

@@ -2097,7 +2097,11 @@ export function BotcastExperience({
     }, 2_400);
   };
   const showCardQuips = selectedShow
-    ? signalShowCardBlurbs(selectedShow, Boolean(hostBot?.muted))
+    ? signalShowCardBlurbs(
+        selectedShow,
+        Boolean(hostBot?.muted),
+        Boolean(hostBot?.echoesAddressedSpeech),
+      )
     : null;
   const showCardQuipCount = showCardQuips?.length ?? 0;
   const showAudience = selectedShow
@@ -3030,9 +3034,15 @@ export function BotcastExperience({
     setBusy(true);
     setError(null);
     setBlockingOperation({
-      title: "Refreshing the host’s dashboard voice",
-      detail: `Signal is writing a new batch of short, show-specific lines for ${selectedShow.name}.`,
-      stepLabel: "Writing and rejecting the generic lines",
+      title: hostBot?.echoesAddressedSpeech
+        ? "Rephrasing the host’s one original thought"
+        : "Refreshing the host’s dashboard voice",
+      detail: hostBot?.echoesAddressedSpeech
+        ? `Signal is rewriting the one line ${selectedShow.name} will repeat forever.`
+        : `Signal is writing a new batch of short, show-specific lines for ${selectedShow.name}.`,
+      stepLabel: hostBot?.echoesAddressedSpeech
+        ? "Finding the most original way to say it again"
+        : "Writing and rejecting the generic lines",
       progress: null,
       cancellable: false,
     });
@@ -3053,16 +3063,22 @@ export function BotcastExperience({
       if (!response.generated) {
         setNotice(
           response.failureReason === "provider_error"
-            ? "Signal couldn’t reach the selected model for new blurbs. The current lines are unchanged; try again when the model is ready."
-            : "The model answered, but not with enough distinct usable blurbs. The current lines are unchanged; try again for a fresh recovery pass.",
+            ? `Signal couldn’t reach the selected model for a new ${hostBot?.echoesAddressedSpeech ? "blurb" : "set of blurbs"}. The current ${hostBot?.echoesAddressedSpeech ? "line is" : "lines are"} unchanged; try again when the model is ready.`
+            : hostBot?.echoesAddressedSpeech
+              ? "The model answered without one usable persona-shaped originality claim. The current line is unchanged; try again for a fresh pass."
+              : "The model answered, but not with enough distinct usable blurbs. The current lines are unchanged; try again for a fresh recovery pass.",
         );
         return;
       }
       replaceShow(response.show);
       setNotice(
-        response.recovered
-          ? `Signal recovered ${response.show.dashboardBlurbs.length} fresh host blurbs across ${response.attempts} passes.`
-          : `${response.show.dashboardBlurbs.length} fresh host blurbs are now in rotation.`,
+        hostBot?.echoesAddressedSpeech
+          ? response.recovered
+            ? `Signal found the one repeating host blurb after ${response.attempts} passes.`
+            : "The host’s one repeating dashboard blurb has been refreshed."
+          : response.recovered
+            ? `Signal recovered ${response.show.dashboardBlurbs.length} fresh host blurbs across ${response.attempts} passes.`
+            : `${response.show.dashboardBlurbs.length} fresh host blurbs are now in rotation.`,
       );
     } catch (blurbError) {
       setError(signalErrorToast("Refresh show blurbs", blurbError));
@@ -8367,7 +8383,10 @@ export function BotcastExperience({
                         </button>
                       </div>
                         <div className={styles.showLookControlGroup}>
-                          <span>Dashboard blurbs</span>
+                          <span>
+                            Dashboard{" "}
+                            {hostBot?.echoesAddressedSpeech ? "blurb" : "blurbs"}
+                          </span>
                           <button
                             type="button"
                             data-signal-identity-action="blurbs"
@@ -8379,7 +8398,8 @@ export function BotcastExperience({
                                 : undefined
                             }
                           >
-                            Regenerate blurbs
+                            Regenerate{" "}
+                            {hostBot?.echoesAddressedSpeech ? "blurb" : "blurbs"}
                           </button>
                         </div>
                       <div className={styles.showLookControlGroup}>

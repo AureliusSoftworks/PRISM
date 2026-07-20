@@ -109,6 +109,26 @@ describe("signalShowMagicManifest", () => {
     assert.equal(generated.complete, true);
   });
 
+  it("still generates an echo host's identity from its canonical repeating blurb", () => {
+    const initial = signalShowMagicManifest(
+      show({
+        studioIdentity: "Canonical persona-first set bible for Copycat Mara.",
+        dashboardBlurbs: ["I always have an original thing to say."],
+      }),
+    );
+    const generated = signalShowMagicManifest(
+      show({
+        studioIdentity: "A forensic archive organized around evidence lamps.",
+        dashboardBlurbs: ["I always have an original thing to say."],
+      }),
+    );
+
+    assert.equal(initial.needsTextIdentity, true);
+    assert.equal(initial.complete, false);
+    assert.equal(generated.needsTextIdentity, false);
+    assert.equal(generated.complete, true);
+  });
+
   it("is complete only when text, artwork, and the audio package are present", () => {
     assert.deepEqual(signalShowMagicManifest(show()), {
       needsTextIdentity: false,

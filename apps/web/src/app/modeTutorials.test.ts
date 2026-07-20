@@ -124,6 +124,10 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
+      /echo-bound host[\s\S]*same blurb forever/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
       /keep using PRISM/u,
     );
     assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /activity card/u);
@@ -694,7 +698,9 @@ describe("mode tutorials", () => {
       /changes response routing, not the Account default model choice/,
     );
     assert.match(routing?.body ?? "", /separate Images provider/);
-    assert.match(routing?.body ?? "", /English voice preference/);
+    assert.match(routing?.body ?? "", /voice preference/);
+    assert.match(routing?.body ?? "", /Voice remains available/);
+    assert.match(routing?.body ?? "", /next utterance without cutting off/);
     assert.match(routing?.body ?? "", /locked until you choose End session/);
     assert.match(
       routing?.body ?? "",
@@ -733,13 +739,13 @@ describe("mode tutorials", () => {
       routing?.body ?? "",
       /Image generation keeps its own LOCAL\/ONLINE choice/,
     );
-    assert.match(routing?.body ?? "", /five included PRISM voices/);
-    assert.match(routing?.body ?? "", /operating-system voices are optional/);
+    assert.match(routing?.body ?? "", /Mute, English, Premium, Babble, and Bottish/);
+    assert.match(routing?.body ?? "", /optional operating-system identity/);
     assert.match(
       routing?.body ?? "",
-      /choose an ElevenLabs voice from the list or open “Use an exact Voice ID” for a portable override/,
+      /Avatar Studio edits and previews those two identities separately/,
     );
-    assert.match(routing?.body ?? "", /only for eligible ONLINE speech/);
+    assert.match(routing?.body ?? "", /for eligible ONLINE speech/);
     assert.match(routing?.body ?? "", /Voice Settings can narrow/);
     assert.match(routing?.body ?? "", /one ElevenLabs voice collection/);
     assert.match(routing?.body ?? "", /Tone tab gives each bot a Voice Character pad/);

@@ -12,6 +12,7 @@ import localFont from "next/font/local";
 import { BlockBrowserInspection } from "./BlockBrowserInspection";
 import { ClientInstallCoach } from "./ClientInstallCoach";
 import { DisableNativeTooltips } from "./DisableNativeTooltips";
+import { PrismIntroSequenceProvider } from "./PrismIntroSequence";
 import { PRISM_BRAND_COPY } from "./prismBrand";
 import { PrismMenuProvider } from "./PrismMenu";
 import { RenderPlatformAttribute } from "./RenderPlatformAttribute";
@@ -103,12 +104,14 @@ export default function RootLayout({
     >
       <body>
         <PrismMenuProvider>
-          <RenderPlatformAttribute />
-          <TextFieldContextMenu />
-          <BlockBrowserInspection />
-          <DisableNativeTooltips />
-          {children}
-          <ClientInstallCoach />
+          <PrismIntroSequenceProvider>
+            <RenderPlatformAttribute />
+            <TextFieldContextMenu />
+            <BlockBrowserInspection />
+            <DisableNativeTooltips />
+            {children}
+            <ClientInstallCoach />
+          </PrismIntroSequenceProvider>
         </PrismMenuProvider>
       </body>
     </html>

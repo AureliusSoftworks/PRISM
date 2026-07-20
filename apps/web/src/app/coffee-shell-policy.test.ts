@@ -12,7 +12,7 @@ describe("Coffee shell policy", () => {
       assert.equal(policy.liveSessionActive, true);
       assert.equal(policy.showEndSessionInSwitcher, true);
       assert.equal(policy.disabledNavbarActions.settings, true);
-      assert.equal(policy.disabledNavbarActions.voice, true);
+      assert.equal(policy.disabledNavbarActions.voice, undefined);
       assert.equal(policy.disabledNavbarActions.memories, undefined);
       assert.equal(policy.disabledNavbarActions.usage, undefined);
       assert.equal(policy.disabledNavbarActions.theme, undefined);
@@ -20,7 +20,6 @@ describe("Coffee shell policy", () => {
         promptCenter: true,
         refresh: true,
         settings: true,
-        voice: true,
         images: true,
         bots: true,
       });

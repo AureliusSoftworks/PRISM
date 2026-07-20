@@ -5,7 +5,7 @@ import { describe, it } from "node:test";
 const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
 
 describe("Avatar Studio voice preview routing", () => {
-  it("prioritizes the profile-owned ElevenLabs identity for an explicit preview", () => {
+  it("uses the requested English identity for an explicit preview", () => {
     assert.match(
       pageSource,
       /function resolveVoicePreviewEngine\(profile: unknown\): EnglishVoiceEngine[\s\S]*?elevenLabsVoiceIdOverride \|\| normalized\.elevenLabsVoiceId[\s\S]*?\? "elevenlabs"[\s\S]*?: "builtin"/,
@@ -16,7 +16,7 @@ describe("Avatar Studio voice preview routing", () => {
     );
     assert.match(
       previewSource,
-      /const previewEngine = resolveVoicePreviewEngine\(previewProfile\)/,
+      /const previewEngine =[\s\S]*?options\.englishVoiceEngine \?\?[\s\S]*?resolveVoicePreviewEngine\(previewProfile\)/,
     );
     assert.match(
       previewSource,
@@ -37,6 +37,22 @@ describe("Avatar Studio voice preview routing", () => {
     assert.match(
       previewSource,
       /options\.onError\?\.\(message\)[\s\S]*?if \(!options\.onError\) setPanelError\(message\)/,
+    );
+    const botHubSource = pageSource.slice(
+      pageSource.indexOf("async function playBotHubVoicePreview("),
+      pageSource.indexOf("async function previewSelectedBotVoice("),
+    );
+    assert.match(
+      botHubSource,
+      /mode === "premium" \? "english" : mode/,
+    );
+    assert.match(
+      botHubSource,
+      /mode === "premium" \? "elevenlabs" : "builtin"/,
+    );
+    assert.match(
+      botHubSource,
+      /englishVoiceEngine: englishChoice \? previewEngine : undefined/,
     );
   });
 });

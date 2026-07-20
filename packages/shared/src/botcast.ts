@@ -29,6 +29,17 @@ export const BOTCAST_DASHBOARD_BLURB_FALLBACKS = [
   "Episode 4: Now with 12% more dramatic pause.",
   "Guest chair's open. Bring me someone interesting",
 ] as const;
+export const BOTCAST_ECHO_DASHBOARD_BLURB_FALLBACK =
+  "I always have an original thing to say.";
+
+/** Keeps the Copycat/Echo dashboard joke recognizable across persona rewrites. */
+export function isBotcastEchoDashboardBlurb(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.trim().length > 0 &&
+    /\boriginal(?:ity|ly)?\b/iu.test(value)
+  );
+}
 export const BOTCAST_HOST_INTERRUPTION_LINE_TARGET = 6;
 export const BOTCAST_HOST_INTERRUPTION_LINE_MAX_LENGTH = 64;
 export const BOTCAST_HOST_INTERRUPTION_LINE_FALLBACKS = [
@@ -657,6 +668,7 @@ export type BotcastReplayEventKind =
   | "guest_presence"
   | "power_effect"
   | "producer_cue"
+  | "provider_generation"
   | "utterance"
   | "tension"
   | "warning"
