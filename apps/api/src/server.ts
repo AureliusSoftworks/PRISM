@@ -8534,7 +8534,7 @@ function buildRoutes(): RouteDefinition[] {
       ) {
         throw new HttpError(
           503,
-          "Signal could not synthesize this interview from your context. Try again.",
+          "Signal could not prepare this interview. Try again.",
         );
       }
       const episode = createBotcastEpisode(db, userId, ctx.params.id, {

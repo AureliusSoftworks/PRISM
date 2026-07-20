@@ -1040,7 +1040,7 @@ export interface BotcastPersonaReview {
 
 export interface BotcastEpisode extends BotcastEpisodeSummary {
   producerBrief: string;
-  /** User-authored source material used by AI to synthesize this interview. */
+  /** Optional user-authored direction used by AI to synthesize this interview. */
   guestContext?: string;
   /** Legacy internal interaction mode; audience truth lives in audienceExperience. */
   guestPresenceMode: BotcastGuestPresenceMode;

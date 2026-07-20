@@ -906,6 +906,27 @@ describe("Signal experience shell", () => {
     assert.match(source, /BOTCAST_PRODUCER_GUEST_ID/u);
     assert.match(source, /guestKind: "producer"/u);
     assert.match(source, /guestContext: producerGuestContextDraft/u);
+    assert.match(
+      source,
+      /const producerGuestWantsSurprise =\s*producerGuest && !producerGuestContextDraft\.trim\(\)/u,
+    );
+    assert.match(
+      source,
+      /!selectedShow\s*\|\|\s*!guestDraftId\s*\|\|\s*\(!producerGuest && !topicDraft\.trim\(\)\)/u,
+    );
+    assert.match(
+      source,
+      /\(!producerGuestSelected && !topicDraft\.trim\(\)\)/u,
+    );
+    assert.match(source, /Give a direction—or be surprised/u);
+    assert.match(source, /optional · leave blank for host’s choice/u);
+    assert.match(source, /leave this blank and let the host surprise you/u);
+    assert.match(source, /without inventing facts about you/u);
+    assert.match(source, /producerGuestWantsSurprise[\s\S]{0,120}"Host’s choice"/u);
+    assert.match(
+      source,
+      /topic: producerGuestWantsSurprise\s*\? current\.topic\s*: response\.episode\.topic/u,
+    );
     assert.match(source, /hostBot\?\.muted \|\| hostBot\?\.echoesAddressedSpeech/u);
     assert.match(source, /disabled=\{producerGuestUnavailable\}/u);
     assert.match(source, /Me — unavailable for this host/u);

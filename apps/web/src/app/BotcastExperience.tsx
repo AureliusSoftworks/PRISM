@@ -3476,6 +3476,8 @@ export function BotcastExperience({
 
   const startEpisode = async (): Promise<void> => {
     const producerGuest = guestDraftId === BOTCAST_PRODUCER_GUEST_ID;
+    const producerGuestWantsSurprise =
+      producerGuest && !producerGuestContextDraft.trim();
     if (
       producerGuest &&
       (hostBot?.muted || hostBot?.echoesAddressedSpeech)
@@ -3492,9 +3494,7 @@ export function BotcastExperience({
     if (
       !selectedShow ||
       !guestDraftId ||
-      (producerGuest
-        ? !producerGuestContextDraft.trim()
-        : !topicDraft.trim())
+      (!producerGuest && !topicDraft.trim())
     )
       return;
     const guest = eligibleBots.find((bot) => bot.id === guestDraftId);
@@ -3558,7 +3558,11 @@ export function BotcastExperience({
       showId: selectedShow.id,
       showName: selectedShow.name,
       guestName: producerGuest ? BOTCAST_PRODUCER_GUEST_NAME : guest!.name,
-      topic: producerGuest ? "Synthesizing your interview" : topicDraft.trim(),
+      topic: producerGuest
+        ? producerGuestWantsSurprise
+          ? "Host’s choice"
+          : "Synthesizing your interview"
+        : topicDraft.trim(),
       phase: "preparing",
       source: selectedShow.introAudio.source,
     };
@@ -3638,7 +3642,9 @@ export function BotcastExperience({
                 ...current,
                 guestName:
                   response.episode.guestName ?? BOTCAST_PRODUCER_GUEST_NAME,
-                topic: response.episode.topic,
+                topic: producerGuestWantsSurprise
+                  ? current.topic
+                  : response.episode.topic,
               }
             : current,
         );
@@ -6567,7 +6573,7 @@ export function BotcastExperience({
             <span className={styles.eyebrow}>Tonight’s production</span>
             <h2>
               {producerGuestSelected
-                ? "Take the guest chair. Give Signal context."
+                ? "Take the guest chair. Give a direction—or be surprised."
                 : "Book the guest. Set the angle."}
             </h2>
           </div>
@@ -6687,7 +6693,8 @@ export function BotcastExperience({
               className={`${styles.setupField} ${styles.producerGuestContext}`}
             >
               <label htmlFor="signal-producer-guest-context">
-                Context for your interview <span>AI source material</span>
+                Interview direction{" "}
+                <span>optional · leave blank for host’s choice</span>
               </label>
               <textarea
                 id="signal-producer-guest-context"
@@ -6695,14 +6702,16 @@ export function BotcastExperience({
                 onChange={(event) =>
                   setProducerGuestContextDraft(event.currentTarget.value)
                 }
-                placeholder="Tell Signal what you want to talk about, what happened, what you know, or what perspective you bring. The AI will create the topic and every question."
+                placeholder="Share anything you want covered—or leave this blank and let the host surprise you."
                 maxLength={2000}
               />
               <small>
-                The host will introduce you as the Producer. There are no queue
-                cards or live direction. After each question, the clock runs at
-                half speed while you answer through the composer. Begin with a
-                leading *action* to show it above your on-stage presence.
+                With no direction, the host chooses a fresh show-shaped topic
+                without inventing facts about you. You’ll be introduced as the
+                Producer, then answer through the composer with no queue cards
+                or live direction. After each question, the clock runs at half
+                speed. Begin with a leading *action* to show it above your
+                on-stage presence.
               </small>
             </div>
           ) : (
@@ -6844,9 +6853,7 @@ export function BotcastExperience({
             disabled={
               busy ||
               !guestDraftId ||
-              (producerGuestSelected
-                ? !producerGuestContextDraft.trim()
-                : !topicDraft.trim())
+              (!producerGuestSelected && !topicDraft.trim())
             }
           >
             Begin episode
