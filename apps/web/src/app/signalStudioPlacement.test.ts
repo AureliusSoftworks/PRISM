@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { BOTCAST_DEFAULT_STUDIO_LAYOUT } from "@localai/shared";
-import { signalStudioPlacementStyle } from "./signalStudioPlacement.ts";
+import {
+  SIGNAL_STUDIO_VOICE_MAX_PAN,
+  signalStudioPlacementStyle,
+  signalStudioVoicePan,
+} from "./signalStudioPlacement.ts";
 
 describe("Signal studio placement parity", () => {
   it("projects normalized percentage geometry identically for every surface", () => {
@@ -24,6 +28,39 @@ describe("Signal studio placement parity", () => {
     assert.deepEqual(
       signalStudioPlacementStyle(undefined, "hostBot"),
       signalStudioPlacementStyle(BOTCAST_DEFAULT_STUDIO_LAYOUT, "hostBot"),
+    );
+  });
+
+  it("stages voices subtly from their saved seats", () => {
+    assert.equal(
+      signalStudioVoicePan(BOTCAST_DEFAULT_STUDIO_LAYOUT, "host"),
+      -0.124,
+    );
+    assert.equal(
+      signalStudioVoicePan(BOTCAST_DEFAULT_STUDIO_LAYOUT, "guest"),
+      0.124,
+    );
+    assert.equal(
+      signalStudioVoicePan(
+        {
+          ...BOTCAST_DEFAULT_STUDIO_LAYOUT,
+          hostBot: { x: 50, y: 64 },
+          guestBot: { x: 90, y: 64 },
+        },
+        "host",
+      ),
+      0,
+    );
+    assert.equal(
+      signalStudioVoicePan(
+        {
+          ...BOTCAST_DEFAULT_STUDIO_LAYOUT,
+          hostBot: { x: 10, y: 64 },
+          guestBot: { x: 90, y: 64 },
+        },
+        "guest",
+      ),
+      SIGNAL_STUDIO_VOICE_MAX_PAN,
     );
   });
 });

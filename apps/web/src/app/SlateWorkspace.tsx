@@ -19,6 +19,9 @@ import type {
   SlateContinuityConcernCard,
   SlateContinuityConcernNextResponse,
   SlateContinuityConcernResolveResponse,
+  SlateDeliberationMessage,
+  SlateDeliberationSpeaker,
+  SlateDeliberationTurnResponse,
   SlateGenerateTitleResponse,
   SlateLockedRange,
   SlateLivingSummary,
@@ -72,6 +75,11 @@ import {
   type SlateProjectStartStep,
   type SlateWorkspaceExportScopeChoice,
 } from "./slateWorkspaceState";
+import type {
+  SlateHemisphereSettingsSnapshot,
+  SlateHemisphereSettingsUpdate,
+} from "./slateHemisphereSettings";
+import { shouldSubmitComposerOnEnter } from "./composerKeyPolicy";
 import styles from "./slateWorkspace.module.css";
 
 interface SlateWorkspaceProps {
@@ -79,6 +87,10 @@ interface SlateWorkspaceProps {
   sidebarHeader: ReactNode;
   navigationHeader: ReactNode;
   theme: "light" | "dark";
+  onHemisphereSettingsSnapshot?: (
+    snapshot: SlateHemisphereSettingsSnapshot | null,
+  ) => void;
+  hemisphereSettingsUpdate?: SlateHemisphereSettingsUpdate | null;
 }
 
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -178,6 +190,11 @@ interface SlateModelCatalogResponse {
 interface SlateCompanionPosition {
   x: number;
   y: number;
+}
+
+interface SlateDeliberationRun {
+  id: string;
+  controller: AbortController | null;
 }
 
 class SlateApiError extends Error {
@@ -333,6 +350,14 @@ function revisionLabel(action: SlateRevisionAction): string {
   return `${action[0]?.toUpperCase() ?? ""}${action.slice(1)}`;
 }
 
+function slateDeliberationNextSpeaker(
+  messageCount: number,
+  rounds: number,
+): SlateDeliberationSpeaker {
+  if (messageCount >= rounds * 2) return "synthesis";
+  return messageCount % 2 === 0 ? "lux" : "umbra";
+}
+
 function slateModelChoiceValue(model: SlateModelCatalogEntry): string {
   return `${model.provider}:${model.id}`;
 }
@@ -364,6 +389,8 @@ export default function SlateWorkspace({
   sidebarHeader,
   navigationHeader,
   theme,
+  onHemisphereSettingsSnapshot,
+  hemisphereSettingsUpdate,
 }: SlateWorkspaceProps): React.JSX.Element {
   const { activeMenu, openMenu, closeMenu } = usePrismMenu();
   const [projects, setProjects] = useState<SlateProjectSummary[]>([]);
@@ -440,6 +467,16 @@ export default function SlateWorkspace({
     string | null
   >(null);
   const [titleReviewDue, setTitleReviewDue] = useState(false);
+  const [deliberationOpen, setDeliberationOpen] = useState(false);
+  const [deliberationPrompt, setDeliberationPrompt] = useState("");
+  const [deliberationRounds, setDeliberationRounds] = useState(2);
+  const [deliberationMessages, setDeliberationMessages] = useState<
+    SlateDeliberationMessage[]
+  >([]);
+  const [deliberationRunning, setDeliberationRunning] = useState(false);
+  const [deliberationActiveSpeaker, setDeliberationActiveSpeaker] =
+    useState<SlateDeliberationSpeaker | null>(null);
+  const [deliberationError, setDeliberationError] = useState<string | null>(null);
   const autosaveTimerRef = useRef<number | null>(null);
   const sectionSaveInFlightRef = useRef<Promise<void> | null>(null);
   const recoveryRefreshTimerRef = useRef<number | null>(null);
@@ -455,6 +492,7 @@ export default function SlateWorkspace({
     origin: SlateCompanionPosition;
     moved: boolean;
   } | null>(null);
+  const deliberationRunRef = useRef<SlateDeliberationRun | null>(null);
 
   const clearCompanionBubbles = useCallback((): void => {
     for (const timer of companionBubbleTimersRef.current.values()) {
@@ -505,6 +543,21 @@ export default function SlateWorkspace({
         window.clearTimeout(timer);
       }
       companionBubbleTimersRef.current.clear();
+    },
+    [],
+  );
+
+  const stopSlateDeliberation = useCallback((): void => {
+    deliberationRunRef.current?.controller?.abort();
+    deliberationRunRef.current = null;
+    setDeliberationRunning(false);
+    setDeliberationActiveSpeaker(null);
+  }, []);
+
+  useEffect(
+    () => () => {
+      deliberationRunRef.current?.controller?.abort();
+      deliberationRunRef.current = null;
     },
     [],
   );
@@ -1177,6 +1230,120 @@ export default function SlateWorkspace({
     } finally {
       setCompanionBusy(false);
     }
+  };
+
+  const openSlateDeliberation = (): void => {
+    if (!deliberationPrompt.trim()) {
+      setDeliberationPrompt(
+        revisionDirection.trim() ||
+          draftDirection.trim() ||
+          projectRef.current?.direction.trim() ||
+          "What is the strongest creative direction from here?",
+      );
+    }
+    setDeliberationError(null);
+    setDeliberationOpen(true);
+  };
+
+  const startSlateDeliberation = async (): Promise<void> => {
+    const current = projectRef.current;
+    const prompt = deliberationPrompt.trim();
+    if (!current || !prompt || deliberationRunning) return;
+    const run: SlateDeliberationRun = {
+      id: crypto.randomUUID(),
+      controller: null,
+    };
+    deliberationRunRef.current = run;
+    setDeliberationMessages([]);
+    setDeliberationError(null);
+    setDeliberationRunning(true);
+    try {
+      await flushPendingManuscriptSave();
+      if (deliberationRunRef.current?.id !== run.id) return;
+      const focusedSection = activeSectionRef.current;
+      const focus = focusedSection
+        ? {
+            sectionId: focusedSection.id,
+            selectionStart:
+              selection.end > selection.start ? selection.start : null,
+            selectionEnd:
+              selection.end > selection.start ? selection.end : null,
+          }
+        : undefined;
+      let messages: SlateDeliberationMessage[] = [];
+      const turnCount = deliberationRounds * 2 + 1;
+      for (let turn = 0; turn < turnCount; turn += 1) {
+        if (
+          deliberationRunRef.current?.id !== run.id ||
+          projectRef.current?.id !== current.id
+        ) {
+          return;
+        }
+        const speaker = slateDeliberationNextSpeaker(
+          messages.length,
+          deliberationRounds,
+        );
+        setDeliberationActiveSpeaker(speaker);
+        const controller = new AbortController();
+        run.controller = controller;
+        const response = await slateApi<SlateDeliberationTurnResponse>(
+          `/api/slate/projects/${encodeURIComponent(current.id)}/deliberation/turn`,
+          {
+            method: "POST",
+            signal: controller.signal,
+            body: JSON.stringify({
+              prompt,
+              rounds: deliberationRounds,
+              messages: messages.map((message) => ({
+                speaker: message.speaker,
+                round: message.round,
+                content: message.content,
+              })),
+              ...(focus ? { focus } : {}),
+            }),
+          },
+        );
+        if (deliberationRunRef.current?.id !== run.id) return;
+        if (response.message.speaker !== speaker) {
+          throw new Error("Lux and Umbra lost their turn order.");
+        }
+        messages = [...messages, response.message];
+        setDeliberationMessages(messages);
+      }
+    } catch (cause) {
+      if (!(cause instanceof DOMException && cause.name === "AbortError")) {
+        setDeliberationError(
+          cause instanceof Error
+            ? cause.message
+            : "Lux and Umbra could not continue the exchange.",
+        );
+      }
+    } finally {
+      if (deliberationRunRef.current?.id === run.id) {
+        deliberationRunRef.current = null;
+        setDeliberationRunning(false);
+        setDeliberationActiveSpeaker(null);
+      }
+    }
+  };
+
+  const resetSlateDeliberation = (): void => {
+    stopSlateDeliberation();
+    setDeliberationMessages([]);
+    setDeliberationError(null);
+  };
+
+  const useSlateDeliberationDirection = (): void => {
+    const synthesis = deliberationMessages.findLast(
+      (message) => message.speaker === "synthesis",
+    );
+    if (!synthesis) return;
+    if (activeSectionRef.current?.prose.trim()) {
+      setRevisionDirection(synthesis.content);
+    } else {
+      setDraftDirection(synthesis.content);
+    }
+    setDeliberationOpen(false);
   };
 
   const requestTitleSuggestion = useCallback(async (force = false): Promise<void> => {
@@ -1963,6 +2130,45 @@ export default function SlateWorkspace({
     project?.proseModel && project.proseProvider
       ? `${project.proseProvider}:${project.proseModel}`
       : SLATE_AUTO_MODEL_VALUE;
+
+  useEffect(() => {
+    const update = hemisphereSettingsUpdate;
+    const current = projectRef.current;
+    if (!update || !current || update.projectId !== current.id) return;
+    const next = { ...current, deliberationConfig: update.config };
+    projectRef.current = next;
+    setProject(next);
+  }, [hemisphereSettingsUpdate]);
+
+  useEffect(() => {
+    if (!onHemisphereSettingsSnapshot) return;
+    if (!project) {
+      onHemisphereSettingsSnapshot(null);
+      return;
+    }
+    onHemisphereSettingsSnapshot({
+      projectId: project.id,
+      projectTitle: project.title,
+      proseMode: project.proseMode,
+      config: project.deliberationConfig,
+      modelOptions: proseModelOptions,
+    });
+  }, [onHemisphereSettingsSnapshot, project, proseModelOptions]);
+
+  useEffect(
+    () => () => onHemisphereSettingsSnapshot?.(null),
+    [onHemisphereSettingsSnapshot],
+  );
+
+  const luxDeliberationMessages = deliberationMessages.filter(
+    (message) => message.speaker === "lux",
+  );
+  const umbraDeliberationMessages = deliberationMessages.filter(
+    (message) => message.speaker === "umbra",
+  );
+  const deliberationSynthesis = deliberationMessages.findLast(
+    (message) => message.speaker === "synthesis",
+  );
 
   if (loading) {
     return (
@@ -3264,15 +3470,271 @@ export default function SlateWorkspace({
               </>
             )}
 
+            <section
+              className={styles.deliberationLaunch}
+              data-tutorial-target="slate-deliberation"
+            >
+              <div>
+                <span>▲ Lux</span>
+                <i aria-hidden="true">/</i>
+                <span>▽ Umbra</span>
+              </div>
+              <h3>Think in counterpoint</h3>
+              <p>
+                Watch two opposing hemispheres develop and pressure-test one
+                creative direction, then decide whether it belongs in the work.
+              </p>
+              <button
+                type="button"
+                className={styles.secondaryButton}
+                disabled={busy}
+                onClick={openSlateDeliberation}
+              >
+                Open inner dialogue
+              </button>
+            </section>
+
             <p className={styles.providerNote}>
-              Routing applies to prose, title counsel, and this project’s Prism
-              companion. Every generated prose artifact keeps its provider and
-              model receipt in the project backend. Locked material and newer
-              human edits remain authoritative.
+              Routing applies to prose, title counsel, Lux/Umbra, and this
+              project’s Prism companion. Every generated prose artifact keeps its provider and
+              model receipt in the project backend. Locked
+              material and newer human edits remain authoritative.
             </p>
           </aside>
         </div>
       )}
+      {project && deliberationOpen ? (
+        <div className={styles.deliberationBackdrop}>
+          <section
+            className={styles.deliberationDialog}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="slate-deliberation-title"
+          >
+            <header className={styles.deliberationHeader}>
+              <div>
+                <p className={styles.eyebrow}>Slate · inner dialogue</p>
+                <h2 id="slate-deliberation-title">A mind in two hemispheres.</h2>
+                <p>
+                  Lux opens possibility. Umbra tests what survives. The center
+                  returns one direction for you to accept, reshape, or ignore.
+                </p>
+              </div>
+              <button
+                type="button"
+                className={styles.deliberationClose}
+                aria-label="Close inner dialogue"
+                onClick={() => {
+                  stopSlateDeliberation();
+                  setDeliberationOpen(false);
+                }}
+              >
+                ×
+              </button>
+            </header>
+
+            <form
+              className={styles.deliberationPromptDeck}
+              onSubmit={(event) => {
+                event.preventDefault();
+                void startSlateDeliberation();
+              }}
+            >
+              <label>
+                <span>Creative question</span>
+                <textarea
+                  value={deliberationPrompt}
+                  disabled={deliberationRunning}
+                  rows={2}
+                  placeholder="What choice should this story make next?"
+                  onChange={(event) => setDeliberationPrompt(event.target.value)}
+                />
+              </label>
+              <fieldset disabled={deliberationRunning}>
+                <legend>Depth</legend>
+                <div>
+                  {[1, 2, 3].map((rounds) => (
+                    <button
+                      key={rounds}
+                      type="button"
+                      data-active={deliberationRounds === rounds ? "true" : undefined}
+                      onClick={() => setDeliberationRounds(rounds)}
+                    >
+                      {rounds}
+                    </button>
+                  ))}
+                </div>
+                <small>{deliberationRounds * 2} visible turns + synthesis</small>
+              </fieldset>
+              {deliberationRunning ? (
+                <button
+                  type="button"
+                  className={styles.deliberationStop}
+                  onClick={stopSlateDeliberation}
+                >
+                  Stop
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  className={styles.primaryButton}
+                  disabled={!deliberationPrompt.trim()}
+                >
+                  {deliberationMessages.length > 0 ? "Think again" : "Begin the exchange"}
+                </button>
+              )}
+            </form>
+
+            <div
+              className={styles.deliberationMind}
+              data-active-speaker={deliberationActiveSpeaker ?? "none"}
+            >
+              <section className={styles.deliberationHemisphere} data-side="lux">
+                <header>
+                  <span className={styles.deliberationSigil}>▲</span>
+                  <div>
+                    <strong>LIGHT</strong>
+                    <span>Lux · generative hemisphere</span>
+                  </div>
+                </header>
+                <div className={styles.deliberationThoughtStream} aria-live="polite">
+                  {luxDeliberationMessages.length > 0 ? (
+                    luxDeliberationMessages.map((message) => (
+                      <article key={message.id}>
+                        <span>Round {message.round}</span>
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {message.content}
+                        </ReactMarkdown>
+                      </article>
+                    ))
+                  ) : (
+                    <p>Possibility gathers here.</p>
+                  )}
+                  {deliberationActiveSpeaker === "lux" ? (
+                    <div className={styles.deliberationThinking} role="status">
+                      <span />
+                      <span />
+                      <span />
+                      Lux is forming the opening direction…
+                    </div>
+                  ) : null}
+                </div>
+              </section>
+
+              <div className={styles.deliberationSeam} aria-hidden="true">
+                <div className={styles.deliberationCore}>
+                  <span data-side="lux" />
+                  <span data-side="umbra" />
+                  <i />
+                </div>
+                <span>
+                  {deliberationActiveSpeaker === "synthesis"
+                    ? "resolving"
+                    : deliberationSynthesis
+                      ? "resolved"
+                      : deliberationRunning
+                        ? "recursive current"
+                        : "ready"}
+                </span>
+              </div>
+
+              <section className={styles.deliberationHemisphere} data-side="umbra">
+                <header>
+                  <span className={styles.deliberationSigil}>▽</span>
+                  <div>
+                    <strong>DARK</strong>
+                    <span>Umbra · adversarial hemisphere</span>
+                  </div>
+                </header>
+                <div className={styles.deliberationThoughtStream} aria-live="polite">
+                  {umbraDeliberationMessages.length > 0 ? (
+                    umbraDeliberationMessages.map((message) => (
+                      <article key={message.id}>
+                        <span>Round {message.round}</span>
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {message.content}
+                        </ReactMarkdown>
+                      </article>
+                    ))
+                  ) : (
+                    <p>Pressure waits in the dark.</p>
+                  )}
+                  {deliberationActiveSpeaker === "umbra" ? (
+                    <div className={styles.deliberationThinking} role="status">
+                      <span />
+                      <span />
+                      <span />
+                      Umbra is testing the proposition…
+                    </div>
+                  ) : null}
+                </div>
+              </section>
+            </div>
+
+            <section
+              className={styles.deliberationSynthesis}
+              data-active={deliberationActiveSpeaker === "synthesis" ? "true" : undefined}
+              aria-live="polite"
+            >
+              <header>
+                <span>◇</span>
+                <div>
+                  <p className={styles.eyebrow}>Center seam</p>
+                  <h3>Creative direction</h3>
+                </div>
+              </header>
+              {deliberationSynthesis ? (
+                <div className={styles.deliberationSynthesisText}>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {deliberationSynthesis.content}
+                  </ReactMarkdown>
+                </div>
+              ) : deliberationActiveSpeaker === "synthesis" ? (
+                <div className={styles.deliberationThinking} role="status">
+                  <span />
+                  <span />
+                  <span />
+                  The hemispheres are resolving their disagreement…
+                </div>
+              ) : (
+                <p>The surviving direction will cross the seam here.</p>
+              )}
+            </section>
+
+            {deliberationError ? (
+              <p className={styles.deliberationError} role="alert">
+                {deliberationError}
+              </p>
+            ) : null}
+
+            <footer className={styles.deliberationFooter}>
+              <span>
+                Ephemeral · project-aware · uses this project’s {project.proseMode.toUpperCase()} route
+              </span>
+              <div>
+                {deliberationMessages.length > 0 ? (
+                  <button
+                    type="button"
+                    className={styles.quietButton}
+                    onClick={resetSlateDeliberation}
+                  >
+                    Clear
+                  </button>
+                ) : null}
+                {deliberationSynthesis ? (
+                  <button
+                    type="button"
+                    className={styles.primaryButton}
+                    onClick={useSlateDeliberationDirection}
+                  >
+                    Use as {activeSection?.prose.trim() ? "revision" : "draft"} direction
+                  </button>
+                ) : null}
+              </div>
+            </footer>
+          </section>
+        </div>
+      ) : null}
       {project ? (
         <div
           className={styles.companionAnchor}
@@ -3341,16 +3803,22 @@ export default function SlateWorkspace({
                       event.preventDefault();
                       toggleCompanion();
                     } else if (
-                      event.key === "Enter" &&
-                      (event.metaKey || event.ctrlKey)
+                      shouldSubmitComposerOnEnter({
+                        key: event.key,
+                        shiftKey: event.shiftKey,
+                        isComposing: event.nativeEvent.isComposing,
+                      })
                     ) {
                       event.preventDefault();
-                      event.currentTarget.form?.requestSubmit();
+                      if (!companionBusy && companionDraft.trim()) {
+                        event.currentTarget.form?.requestSubmit();
+                      }
                     }
                   }}
                   placeholder="Catch the next idea…"
                   aria-label="Message the project companion"
                   rows={2}
+                  enterKeyHint="send"
                 />
                 <footer>
                   <small>Ideas fade · the last 3 can recover after a close</small>

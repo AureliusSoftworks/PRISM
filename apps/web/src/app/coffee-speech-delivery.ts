@@ -47,6 +47,23 @@ export function coffeeVoiceRevealFallbackDelayMs(
   return safeDurationMs + (voiced ? COFFEE_VOICE_REVEAL_TAIL_GRACE_MS : 0);
 }
 
+/** Resolve the delivery duration only after playback's real start callback. */
+export function coffeeVoiceStartedDurationMs(
+  durationMs: number | null | undefined,
+  fallbackDurationMs: number,
+): number | null {
+  if (
+    typeof durationMs === "number" &&
+    Number.isFinite(durationMs) &&
+    durationMs > 0
+  ) {
+    return durationMs;
+  }
+  return Number.isFinite(fallbackDurationMs) && fallbackDurationMs > 0
+    ? fallbackDurationMs
+    : null;
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }

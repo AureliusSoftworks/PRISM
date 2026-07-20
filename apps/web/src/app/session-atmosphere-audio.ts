@@ -10,8 +10,6 @@ import {
 
 export const DEFAULT_STUDIO_ATMOSPHERE_URL =
   "/audio/session-atmosphere/default-studio-room-loop.mp3";
-export const SIGNAL_STUDIO_GRAIN_URL =
-  "/audio/session-atmosphere/studio-mix-grain-loop.mp3";
 
 export type SessionAtmosphereMix = BotcastStudioAtmosphereMix;
 
@@ -40,12 +38,6 @@ export const DEFAULT_SESSION_AMBIENT_FOLEY_PROFILE = {
   minDelayMs: 18_000,
   maxDelayMs: 42_000,
   trim: 1,
-} as const satisfies SessionAmbientFoleyProfile;
-
-export const SIGNAL_AMBIENT_FOLEY_PROFILE = {
-  minDelayMs: 9_000,
-  maxDelayMs: 20_000,
-  trim: 1.6,
 } as const satisfies SessionAmbientFoleyProfile;
 
 export function signalSessionAtmosphereActive(args: {

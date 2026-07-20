@@ -40,14 +40,23 @@ test("Signal navbar opens its contextual settings and preserves the tutorial", (
     tutorialsSource,
     /Eligible ElevenLabs voices automatically receive sparse, saved vocal reactions/u,
   );
+  assert.match(
+    tutorialsSource,
+    /The direct stereo mix follows the host and guest’s saved stage positions subtly while their room reflections remain shared/u,
+  );
 });
 
 test("Signal sends saved performance text only through the ElevenLabs request lane", () => {
   assert.match(
     pageSource,
-    /signalOnlineVoiceEnabled && message\.voicePerformanceText[\s\S]{0,100}elevenLabsText: message\.voicePerformanceText/u,
+    /signalOnlineVoiceEnabled && message\.voicePerformanceText[\s\S]{0,180}elevenLabsText: voiceSpokenText\([\s\S]{0,40}message\.voicePerformanceText/u,
   );
   assert.match(pageSource, /signalMessageId: message\.id/u);
+  assert.match(pageSource, /text: voiceSpokenText\(message\.content\)/u);
+  assert.match(
+    pageSource,
+    /elevenLabsText: voiceSpokenText\([\s\S]{0,40}message\.voicePerformanceText/u,
+  );
   assert.match(
     pageSource,
     /signalOnlineVoiceEnabled[\s\S]{0,180}settings\.englishVoiceEngine/u,
@@ -55,5 +64,16 @@ test("Signal sends saved performance text only through the ElevenLabs request la
   assert.doesNotMatch(
     pageSource,
     /effectiveProvider === "local"[\s\S]{0,100}settings\.englishVoiceEngine/u,
+  );
+});
+
+test("Signal procedural voices use the same stage-direction-free spoken text", () => {
+  assert.match(
+    pageSource,
+    /const spokenText = voiceSpokenText\(message\.content\);[\s\S]{0,1800}sourceText: spokenText/u,
+  );
+  assert.match(
+    pageSource,
+    /proceduralTiming: signalRobotVoiceCadenceTiming\(spokenText\)/u,
   );
 });

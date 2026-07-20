@@ -13,12 +13,14 @@ import {
   coffeeListenerReactionForMessage,
   coffeeReplayMessageHasStateEvent,
   coffeeReplayMessageRevealInProgress,
+  coffeeReplayCompletionHoldMs,
   coffeeReplayPlayhead,
   coffeeReplayShouldWaitForVoiceClock,
   coffeeReplayPlayerThinkingDurationMs,
   coffeeReplayStateAt,
   coffeeReplayTopOffsChain,
   coffeeReplayVisibleMessages,
+  coffeePlayerMessageSignalsSessionEnd,
   coffeeStageActionTimelineMessages,
   coffeeSystemSynopsisIsDisplayable,
   coffeeTranscriptVisibleMessages,
@@ -67,6 +69,27 @@ describe("coffee replay helpers", () => {
     });
     assert.match(review, /listenerReaction: Listener \(listener\) nod \+ mm-hm/u);
     assert.doesNotMatch(review, /Listener: mm-hm/u);
+    const foleyReview = formatCoffeeReviewClipboardText({
+      messages: [{
+        ...message,
+        id: "message-2",
+        coffeeReplayEvents: [{
+          ...message.coffeeReplayEvents[0]!,
+          plan: {
+            ...message.coffeeReplayEvents[0]!.plan,
+            messageId: "message-2",
+            spokenCue: undefined,
+            vocalFoley: "clears throat" as const,
+          },
+        }],
+      }],
+      context: { bots: [
+        { id: "speaker", name: "Speaker" },
+        { id: "listener", name: "Listener" },
+      ] },
+    });
+    assert.match(foleyReview, /listenerReaction: Listener \(listener\) nod \+ \[clears throat\]/u);
+    assert.doesNotMatch(foleyReview, /Listener: clears throat/u);
   });
 
   it("clamps replay indexes to the saved transcript", () => {
@@ -74,6 +97,56 @@ describe("coffee replay helpers", () => {
     assert.equal(clampCoffeeReplayMessageIndex(4, 2), 2);
     assert.equal(clampCoffeeReplayMessageIndex(4, 99), 3);
     assert.equal(clampCoffeeReplayMessageIndex(0, 99), 0);
+  });
+
+  it("recognizes an explicit player goodbye without treating topic discussion as an exit", () => {
+    assert.equal(
+      coffeePlayerMessageSignalsSessionEnd(
+        "I think we should end this coffee session. Catch y'all later",
+      ),
+      true,
+    );
+    assert.equal(coffeePlayerMessageSignalsSessionEnd("Let's wrap this up."), true);
+    assert.equal(coffeePlayerMessageSignalsSessionEnd("I need to head out."), true);
+    assert.equal(
+      coffeePlayerMessageSignalsSessionEnd(
+        "What do you all think about saying goodbye in fiction?",
+      ),
+      false,
+    );
+    assert.equal(
+      coffeePlayerMessageSignalsSessionEnd(
+        "Ending a story early can be powerful.",
+      ),
+      false,
+    );
+  });
+
+  it("holds replay departure markers long enough to finish their walk-away motion", () => {
+    const eventMessage = (kind: "playerDeparture" | "botDeparture") =>
+      kind === "playerDeparture"
+        ? {
+            coffeeReplayEvents: [{
+              v: 1 as const,
+              name: "coffeeReplayEvent" as const,
+              kind: "playerDeparture" as const,
+              occurredAt: "2026-07-02T15:02:00.000Z",
+            }],
+          }
+        : {
+            coffeeReplayEvents: [{
+              v: 1 as const,
+              name: "coffeeReplayEvent" as const,
+              kind: "botDeparture" as const,
+              botId: "bot-1",
+              seatIndex: 1,
+              occurredAt: "2026-07-02T15:02:00.000Z",
+            }],
+          };
+    assert.equal(coffeeReplayCompletionHoldMs(eventMessage("playerDeparture"), false), 1_280);
+    assert.equal(coffeeReplayCompletionHoldMs(eventMessage("botDeparture"), false), 2_700);
+    assert.equal(coffeeReplayCompletionHoldMs(eventMessage("botDeparture"), true), 120);
+    assert.equal(coffeeReplayCompletionHoldMs({ coffeeReplayEvents: [] }, false), 420);
   });
 
   it("returns the transcript visible at the current replay index", () => {

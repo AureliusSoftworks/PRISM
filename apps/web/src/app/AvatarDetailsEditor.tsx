@@ -56,8 +56,8 @@ import {
 } from "./avatar-details";
 import {
   BOT_AVATAR_CANONICAL_FACE_SCALE_Y,
-  BOT_AVATAR_SCREEN_EDITOR_FACE_GLYPH_FRAME_RATIO,
-  BOT_AVATAR_SCREEN_EDITOR_FACE_PLACEMENT,
+  BOT_AVATAR_DETAILS_FACE_GLYPH_FRAME_RATIO,
+  BOT_AVATAR_DETAILS_FACE_PLACEMENT,
 } from "./bot-avatar-render-geometry";
 import { CoffeeSeatPlateEmoji } from "./CoffeeSeatPlateEmoji";
 import {
@@ -195,14 +195,14 @@ const AvatarDetailsEditorSession = forwardRef<
   const guideInk = theme === "light" ? "#050608" : "#ffffff";
   const zoomedFaceYPct =
     AVATAR_DETAILS_EDITOR_ZOOM_ORIGIN_Y_PCT +
-    (BOT_AVATAR_SCREEN_EDITOR_FACE_PLACEMENT.yPct -
+    (BOT_AVATAR_DETAILS_FACE_PLACEMENT.yPct -
       AVATAR_DETAILS_EDITOR_ZOOM_ORIGIN_Y_PCT) *
       AVATAR_DETAILS_EDITOR_ZOOM;
   const faceGuideStyle = {
-    "--zen-live-bot-face-x": `${BOT_AVATAR_SCREEN_EDITOR_FACE_PLACEMENT.xPct}%`,
+    "--zen-live-bot-face-x": `${BOT_AVATAR_DETAILS_FACE_PLACEMENT.xPct}%`,
     "--zen-live-bot-face-y": `${zoomedFaceYPct}%`,
-    "--zen-live-bot-face-scale": BOT_AVATAR_SCREEN_EDITOR_FACE_PLACEMENT.scale,
-    "--zen-live-bot-avatar-face-glyph-size": `${BOT_AVATAR_SCREEN_EDITOR_FACE_GLYPH_FRAME_RATIO * AVATAR_DETAILS_EDITOR_ZOOM * 100}cqw`,
+    "--zen-live-bot-face-scale": BOT_AVATAR_DETAILS_FACE_PLACEMENT.scale,
+    "--zen-live-bot-avatar-face-glyph-size": `${BOT_AVATAR_DETAILS_FACE_GLYPH_FRAME_RATIO * AVATAR_DETAILS_EDITOR_ZOOM * 100}cqw`,
     "--coffee-plate-emoji-face-scale-y": BOT_AVATAR_CANONICAL_FACE_SCALE_Y,
     "--avatar-details-facing-scale-x": "1",
     "--zen-live-bot-face-ink": guideInk,

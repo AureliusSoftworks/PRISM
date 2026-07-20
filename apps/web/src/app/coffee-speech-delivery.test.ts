@@ -6,6 +6,7 @@ import {
   COFFEE_VOICE_REVEAL_TAIL_GRACE_MS,
   coffeeDeliveryIsHoldingAtMs,
   coffeeDeliveryVisibleLengthAtMs,
+  coffeeVoiceStartedDurationMs,
   coffeeVoiceRevealFallbackDelayMs,
 } from "./coffee-speech-delivery.ts";
 
@@ -20,6 +21,12 @@ describe("Coffee speech delivery", () => {
       coffeeVoiceRevealFallbackDelayMs(Number.NaN, true),
       COFFEE_VOICE_REVEAL_TAIL_GRACE_MS,
     );
+  });
+
+  it("uses fallback duration only after voice playback actually starts", () => {
+    assert.equal(coffeeVoiceStartedDurationMs(1_240, 900), 1_240);
+    assert.equal(coffeeVoiceStartedDurationMs(null, 900), 900);
+    assert.equal(coffeeVoiceStartedDurationMs(null, Number.NaN), null);
   });
 
   it("uses a calmer table reveal pace and gives long replies more room", () => {

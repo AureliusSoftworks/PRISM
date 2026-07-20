@@ -28,6 +28,8 @@ import {
   DEFAULT_BOT_FACE_MOUTH_ROTATION_DEG,
   DEFAULT_BOT_FACE_MOUTH_SCALE,
   DEFAULT_BOT_FACE_THINKING_FRAMES,
+  DISABLED_BOT_FACE_THINKING_FRAMES,
+  botFaceThinkingSpinnerDisabled,
   normalizeBotFaceBlinkBar,
   normalizeBotFaceBlinkOffsetX,
   normalizeBotFaceBlinkOffsetY,
@@ -359,6 +361,18 @@ describe("bot avatar face style", () => {
       "◑",
       "◒",
     ]);
+    assert.deepEqual(
+      normalizeBotFaceThinkingFrames(["", " ", "", ""]),
+      DISABLED_BOT_FACE_THINKING_FRAMES
+    );
+    assert.equal(
+      botFaceThinkingSpinnerDisabled(DISABLED_BOT_FACE_THINKING_FRAMES),
+      true
+    );
+    assert.equal(
+      botFaceThinkingSpinnerDisabled(DEFAULT_BOT_FACE_THINKING_FRAMES),
+      false
+    );
   });
 
   it("rejects emoji graphemes for custom thinking frames", () => {
@@ -392,6 +406,14 @@ describe("bot avatar face style", () => {
       "?",
       "…",
     ]);
+    const disabledSerialized = serializeBotFaceThinkingFrames(
+      DISABLED_BOT_FACE_THINKING_FRAMES
+    );
+    assert.equal(disabledSerialized, '["","","",""]');
+    assert.deepEqual(
+      parseStoredBotFaceThinkingFrames(disabledSerialized),
+      DISABLED_BOT_FACE_THINKING_FRAMES
+    );
     assert.equal(serializeBotFaceThinkingFrames(["?", "!"]), null);
     assert.equal(parseStoredBotFaceThinkingFrames("[broken"), null);
   });

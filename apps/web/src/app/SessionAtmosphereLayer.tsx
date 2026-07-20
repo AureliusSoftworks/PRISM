@@ -21,6 +21,7 @@ export interface SessionAtmosphereLayerProps {
   backgroundTone?: SessionAtmosphereBackgroundTone;
   foleyRoomAcoustics?: RoomAcousticsSend;
   allowMixBoost?: boolean;
+  ambientFoley?: boolean;
   deferFoley?: boolean;
   ambientFoleyProfile?: SessionAmbientFoleyProfile;
   coffeeCupRootRef?: RefObject<HTMLElement | null>;
@@ -36,6 +37,7 @@ export function SessionAtmosphereLayer({
   backgroundTone = "neutral",
   foleyRoomAcoustics,
   allowMixBoost = false,
+  ambientFoley = true,
   deferFoley = false,
   ambientFoleyProfile,
   coffeeCupRootRef,
@@ -64,6 +66,7 @@ export function SessionAtmosphereLayer({
       backgroundTone,
       foleyRoomAcoustics,
       allowMixBoost,
+      ambientFoley,
       shouldDeferFoley: () => deferFoleyRef.current,
       ambientFoleyProfile,
     });
@@ -79,6 +82,7 @@ export function SessionAtmosphereLayer({
   }, [
     active,
     allowMixBoost,
+    ambientFoley,
     ambientFoleyProfile,
     backgroundTone,
     backgroundUrl,

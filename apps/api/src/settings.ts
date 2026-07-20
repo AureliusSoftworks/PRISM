@@ -18,8 +18,12 @@ import {
   normalizeAutoFallbackChain,
   serializeAutoFallbackChain,
   type BotAudioVoiceId,
+  type GraphicsQuality,
   type ImageProviderName,
+  type EphemeralChatProviderPreferences,
   isImageProviderName,
+  normalizeEphemeralChatProviderPreferences,
+  normalizeGraphicsQuality,
 } from "@localai/shared";
 import { sanitizeHiddenModelIds } from "./model-routing.ts";
 import { requirePrivateNetworkHttpUrl } from "./local-network-host.ts";
@@ -148,7 +152,9 @@ const LOOPBACK_OLLAMA_HOSTNAMES = new Set([
 export interface CurrentSettings {
   displayName: string;
   theme: Theme;
+  graphicsQuality: GraphicsQuality | string | null;
   preferredProvider: Provider;
+  ephemeralChatProviderPreferences: string | null;
   preferredImageProvider: ImageProviderName;
   providerLocked: number;
   autoMemory: number;
@@ -213,7 +219,9 @@ export interface CurrentSettings {
 export interface NextSettings {
   displayName: string;
   theme: Theme;
+  graphicsQuality: GraphicsQuality;
   preferredProvider: Provider;
+  ephemeralChatProviderPreferences: EphemeralChatProviderPreferences;
   preferredImageProvider: ImageProviderName;
   providerLocked: number;
   autoMemory: number;
@@ -838,9 +846,21 @@ export function resolveNextSettings(
 ): NextSettings {
   const displayName = readDisplayName(body.displayName, current.displayName);
   const theme: Theme = isTheme(body.theme) ? body.theme : current.theme;
+  const graphicsQuality = normalizeGraphicsQuality(
+    body.graphicsQuality,
+    normalizeGraphicsQuality(current.graphicsQuality),
+  );
   const preferredProvider: Provider = isProvider(body.preferredProvider)
     ? body.preferredProvider
     : current.preferredProvider;
+  const ephemeralChatProviderPreferences =
+    body.ephemeralChatProviderPreferences === undefined
+      ? normalizeEphemeralChatProviderPreferences(
+          current.ephemeralChatProviderPreferences,
+        )
+      : normalizeEphemeralChatProviderPreferences(
+          body.ephemeralChatProviderPreferences,
+        );
   const preferredImageProvider: ImageProviderName = isImageProviderName(
     body.preferredImageProvider
   )
@@ -1219,7 +1239,9 @@ export function resolveNextSettings(
   return {
     displayName,
     theme,
+    graphicsQuality,
     preferredProvider,
+    ephemeralChatProviderPreferences,
     preferredImageProvider,
     providerLocked,
     autoMemory,

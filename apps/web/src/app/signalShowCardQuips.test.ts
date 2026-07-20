@@ -29,4 +29,18 @@ describe("Signal show-card fallback quips", () => {
       "The mic is on. Plausible deniability is not.",
     ]);
   });
+
+  it("reduces every hard-muted host blurb to the one canonical utterance", () => {
+    const blurbs = signalShowCardBlurbs(
+      {
+        dashboardBlurbs: [
+          "Even silence has a punchline.",
+          "Tonight, I let the pause do the talking.",
+        ],
+      },
+      true,
+    );
+
+    assert.deepEqual(blurbs, ["..."]);
+  });
 });

@@ -53,18 +53,19 @@ needs permission to use that ElevenLabs voice. Clearing the override restores
 the selected list voice without losing it; choosing a different library voice
 also clears and replaces the exact-ID override.
 
-Each profile can also choose an ElevenLabs-only playback effect: **Clean**,
-**Radio**, **Robot**, **Echo**, **Chorus**, or **Deep Space**. Radio adds a
+Each profile can also choose a local playback effect: **Clean**, **Radio**,
+**Robot**, **Echo**, **Chorus**, or **Deep Space**. **Chorus is the default** so
+PRISM's robot cast keeps a restrained synthetic character across voice engines. Radio adds a
 narrow broadcast band and light static; Robot uses level-controlled mechanical
 modulation; Echo supplies two repeats; Chorus adds a wide detuned double; and
 Deep Space adds a lower spectral double and trailing reflection. Prism stores
-the choice with the profile and applies it locally only after the synthesis
-response confirms that ElevenLabs actually supplied the audio. The PRISM Voice
-Pack, operating-system voices, LOCAL speech, Babble, Bottish, and any provider
-fallback always stay clean. The
-selector appears only after that profile has an ElevenLabs voice. These effects
-use Web Audio; the browser's basic media fallback plays the clip clean. The old
-Distortion value migrates to Chorus when an earlier profile is loaded.
+the choice with the profile and applies it locally to PRISM Voice Pack,
+operating-system, ElevenLabs, Babble, Bottish, and provider-fallback playback.
+The selector stays available regardless of the active English engine. These
+effects use Web Audio; the browser's basic media fallback plays the clip clean.
+Older local-only profiles that carried the former implicit Clean default adopt
+Chorus; choosing Clean in the current editor records an explicit opt-out. The
+old Distortion value also migrates to Chorus when an earlier profile is loaded.
 
 Profiles with an ElevenLabs voice can also save up to three performance
 directions as removable word chips, such as `warmly`, `hushed`, or
@@ -72,7 +73,9 @@ directions as removable word chips, such as `warmly`, `hushed`, or
 Prism normalizes the chips, turns each direction into an Eleven v3 audio tag,
 and selects Eleven v3 for that profile's directed generations. Directions
 affect ElevenLabs synthesis only; they are never added to the PRISM Voice Pack,
-operating-system voices, Babble, or Bottish input.
+operating-system voices, Babble, or Bottish input. Local voices still receive
+PRISM's Pitch, Pace, Lilt, mood-rate, Voice Character, and playback-effect
+shaping; they do not understand provider direction tags.
 
 The same ElevenLabs card includes one **Performance stability** setting. It is
 stored in the portable V2 profile and sent with every provider request. Lower

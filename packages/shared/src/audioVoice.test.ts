@@ -8,6 +8,7 @@ import {
   applyVoiceDeliveryMoodToProfile,
   applyBotNamePronunciations,
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+  DEFAULT_VOICE_EFFECT,
   botVoiceTextureIsModified,
   elevenLabsVoiceDirectionForMood,
   expectedVoicePlaybackDurationMs,
@@ -17,6 +18,7 @@ import {
   normalizeEnglishVoiceEngine,
   normalizeElevenLabsVoiceDirection,
   normalizeElevenLabsVoiceEffect,
+  normalizeVoiceEffect,
   normalizeOptionalBotAudioVoiceProfileV1,
   resolveBotAudioVoiceProfileV1,
   normalizeVoiceMode,
@@ -38,6 +40,38 @@ describe("audio voice normalization", () => {
         ],
       ),
       "Light Yah-gah-mee asked Lite for help; Yagamilight stays written.",
+    );
+  });
+
+  it("uses self-referral only for the speaking bot and falls back to its written name", () => {
+    const entries = [
+      {
+        id: "icarus",
+        name: "Dr. Icarus",
+        namePronunciation: "Doctor Eye-car-us",
+        selfReferral: "Icarus",
+      },
+      {
+        id: "light",
+        name: "Light Yagami",
+        namePronunciation: "Light Yah-gah-mee",
+      },
+    ];
+    assert.equal(
+      applyBotNamePronunciations(
+        "Dr. Icarus asked Light Yagami for help.",
+        entries,
+        "icarus",
+      ),
+      "Icarus asked Light Yah-gah-mee for help.",
+    );
+    assert.equal(
+      applyBotNamePronunciations(
+        "Dr. Icarus asked Light Yagami for help.",
+        [{ ...entries[0], selfReferral: "   " }, entries[1]],
+        "icarus",
+      ),
+      "Dr. Icarus asked Light Yah-gah-mee for help.",
     );
   });
 
@@ -128,7 +162,7 @@ describe("audio voice normalization", () => {
       v: 2,
       enabled: true,
       baseVoiceId: "voice-4",
-      elevenLabsEffect: "clean",
+      elevenLabsEffect: "chorus",
       pitch: 1,
       warmth: -1,
       pace: 0.125,
@@ -272,10 +306,33 @@ describe("audio voice normalization", () => {
     );
   });
 
-  it("normalizes ElevenLabs-only effects to a clean default", () => {
+  it("normalizes engine-agnostic effects to a Chorus default", () => {
+    assert.equal(DEFAULT_VOICE_EFFECT, "chorus");
+    assert.equal(normalizeVoiceEffect(undefined), "chorus");
+    assert.equal(normalizeVoiceEffect("clean"), "clean");
     assert.equal(normalizeElevenLabsVoiceEffect("robot"), "robot");
+    assert.equal(normalizeElevenLabsVoiceEffect(undefined), "chorus");
     assert.equal(normalizeElevenLabsVoiceEffect("distortion"), "chorus");
     assert.equal(normalizeElevenLabsVoiceEffect("crt-speaker"), "clean");
+    assert.equal(
+      normalizeBotAudioVoiceProfileV1({
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+        elevenLabsEffect: "clean",
+      }).elevenLabsEffect,
+      "chorus",
+    );
+    assert.deepEqual(
+      normalizeBotAudioVoiceProfileV1({
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+        elevenLabsEffect: "clean",
+        voiceEffectExplicit: true,
+      }),
+      {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+        elevenLabsEffect: "clean",
+        voiceEffectExplicit: true,
+      },
+    );
     assert.equal(
       normalizeBotAudioVoiceProfileV1({
         ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,

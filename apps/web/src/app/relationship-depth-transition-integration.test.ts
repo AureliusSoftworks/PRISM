@@ -270,7 +270,7 @@ describe("relationship-depth page integration", () => {
     assert.match(tutorialSource, /heading: "Choose a relationship"/);
     assert.match(
       tutorialSource,
-      /Back or Escape returns you to the wider Library or group room exactly where you left it\./,
+      /Back or Escape returns you to the wider Library or saved group grid exactly where you left it\./,
     );
     assert.match(tutorialSource, /heading: "Continue this Home"/);
     assert.match(tutorialSource, /older continuity for this Home/);

@@ -55,11 +55,11 @@ describe("PRISM adaptive scene runtime", () => {
     });
   });
 
-  it("keeps full-resolution static atmosphere under reduced motion", () => {
+  it("keeps reduced motion static without raising a Low quality ceiling", () => {
     assert.deepEqual(prismSceneQualityConfig("minimal", true, 2), {
       quality: "minimal",
-      dprCap: 1.5,
-      effectiveDpr: 1.5,
+      dprCap: 0.75,
+      effectiveDpr: 0.75,
       particleCount: 0,
       continuousMotion: false,
     });
@@ -68,7 +68,7 @@ describe("PRISM adaptive scene runtime", () => {
         requested: "interactive",
         foreground: true,
         reducedMotion: true,
-        quality: "full",
+        qualityCeiling: "full",
       }),
       "settled",
     );
@@ -80,7 +80,7 @@ describe("PRISM adaptive scene runtime", () => {
         requested: "interactive",
         foreground: false,
         reducedMotion: false,
-        quality: "full",
+        qualityCeiling: "full",
       }),
       "suspended",
     );
@@ -89,9 +89,28 @@ describe("PRISM adaptive scene runtime", () => {
         requested: "settled",
         foreground: true,
         reducedMotion: false,
-        quality: "full",
+        qualityCeiling: "full",
       }),
       "settled",
+    );
+    assert.equal(
+      resolvePrismSceneActivity({
+        requested: "ambient",
+        foreground: true,
+        reducedMotion: false,
+        qualityCeiling: "minimal",
+      }),
+      "settled",
+    );
+    assert.equal(
+      resolvePrismSceneActivity({
+        requested: "ambient",
+        foreground: true,
+        reducedMotion: false,
+        qualityCeiling: "full",
+      }),
+      "ambient",
+      "adaptive degradation to minimal must keep sampling under a High ceiling",
     );
   });
 
@@ -126,6 +145,33 @@ describe("PRISM adaptive scene runtime", () => {
     const up = recordWindow({ controller, nowMs, deltaMs: 16 });
     assert.equal(up.qualityChanged, "full");
     assert.equal(controller.quality, "full");
+  });
+
+  it("treats balanced and minimal as hard player-selected ceilings", () => {
+    const medium = new PrismAdaptiveQualityController(0, "balanced");
+    let nowMs = 2_001;
+    for (let index = 0; index < 4; index += 1) {
+      nowMs = recordWindow({ controller: medium, nowMs, deltaMs: 16 }).nowMs;
+    }
+    assert.equal(medium.quality, "balanced");
+
+    nowMs = recordWindow({ controller: medium, nowMs, deltaMs: 40 }).nowMs;
+    nowMs = recordWindow({ controller: medium, nowMs, deltaMs: 40 }).nowMs;
+    assert.equal(medium.quality, "minimal");
+    nowMs += 10_001;
+    medium.noteDiscontinuity(nowMs);
+    nowMs += 2_001;
+    for (let index = 0; index < 4; index += 1) {
+      nowMs = recordWindow({ controller: medium, nowMs, deltaMs: 16 }).nowMs;
+    }
+    assert.equal(medium.quality, "balanced");
+
+    const low = new PrismAdaptiveQualityController(0, "minimal");
+    nowMs = 2_001;
+    for (let index = 0; index < 6; index += 1) {
+      nowMs = recordWindow({ controller: low, nowMs, deltaMs: 16 }).nowMs;
+    }
+    assert.equal(low.quality, "minimal");
   });
 
   it("ignores initialization, resume, target-change, and sleep-sized samples", () => {

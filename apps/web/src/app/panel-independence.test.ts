@@ -25,6 +25,26 @@ test("right panel open does not close the left sidebar state", () => {
   assert.doesNotMatch(openRightPanelSource, /setSidebarOpen\(false\)/);
 });
 
+test("usage panel rendering stays non-urgent during live Signal speech", () => {
+  const openRightPanelSource = sourceBlockAfter(
+    "const openRightPanel = useCallback",
+    "const openSettingsPanel = useCallback"
+  );
+  const refreshUsageSource = sourceBlockAfter(
+    "const refreshUsageReport = useCallback",
+    "useEffect(() => { if (panel !== \"usage\") return;"
+  );
+
+  assert.match(
+    openRightPanelSource,
+    /if \(nextPanel === "usage"\) \{ \/\/ Signal reveals its transcript[\s\S]*?startTransition\(commitPanelOpen\);/
+  );
+  assert.match(
+    refreshUsageSource,
+    /startTransition\(\(\) => \{ setUsageReport\(report\); setUsageLoading\(false\); \}\);/
+  );
+});
+
 test("left sidebar is treated as right-panel background", () => {
   assert.match(
     pageSource,

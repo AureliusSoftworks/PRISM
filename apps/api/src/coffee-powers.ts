@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import {
+  activeBotPowerEffectsV1,
   activeBotPowersV1,
   botPowerCandorResponseRuleV1,
   botPowerCandorTriggerV1,
@@ -7,6 +8,7 @@ import {
   COFFEE_HISTORY_WINDOW_HARD_CAP,
   coffeePowerCupRateMultiplierV1,
   type BotPowerEffectV1,
+  type BotPowerResponseBudgetEffectV1,
   type BotPowerStrength,
   type BotPowerTargetV1,
   type CoffeeBotSocialSnapshot,
@@ -124,6 +126,7 @@ function resolvedEffect(
   if (
     effect.type === "social_influence" ||
     effect.type === "candor" ||
+    effect.type === "interruption" ||
     effect.type === "response_bond" ||
     effect.type === "selective_memory" ||
     effect.type === "insight"
@@ -179,6 +182,12 @@ export function coffeePowerSpeakerPressures(args: {
       if (effect.type === "turn_gravity") {
         const strength = powerStrengthScore(effect.strength);
         score += effect.direction === "more" ? strength : -strength;
+      } else if (
+        effect.type === "interruption" &&
+        args.lastSpeakerBotId &&
+        idsFromResolvedTargets(effect.targets).includes(args.lastSpeakerBotId)
+      ) {
+        score += powerStrengthScore(effect.strength);
       } else if (
         effect.type === "response_bond" &&
         args.lastSpeakerBotId &&
@@ -439,10 +448,8 @@ export function resolveCoffeePowersForSession(
     const powers = activeBotPowersV1(bot.powers_json);
     if (powers.length === 0) continue;
     const warnings: string[] = [];
-    const effects = powers.flatMap((power) =>
-      (power.compiled?.effects ?? []).map((effect) =>
-        resolvedEffect(effect, bot.id, orderedBots, warnings)
-      )
+    const effects = activeBotPowerEffectsV1(powers).map((effect) =>
+      resolvedEffect(effect, bot.id, orderedBots, warnings)
     );
     const awareness = effects.find((effect) => effect.type === "awareness");
     const speechAudience = effects.find((effect) => effect.type === "speech_audience");
@@ -642,6 +649,16 @@ export function coffeePowersPromptForSpeaker(
   if (own?.effects.some((effect) => effect.type === "echo_addressed")) {
     lines.push("Hard echo rule: repeat only the latest speech addressed directly to you, verbatim, with no added words or actions. If nothing was addressed to you, remain silent.");
   }
+  const responseBudget = coffeePowerResponseBudgetForBot(plan, speakerBotId);
+  if (responseBudget) {
+    lines.push(
+      responseBudget.mode === "minimal"
+        ? `${responseBudget.enforcement === "hard" ? "Hard" : "Soft"} response budget: use one short table sentence and do not elaborate.`
+        : responseBudget.mode === "brief"
+          ? `${responseBudget.enforcement === "hard" ? "Hard" : "Soft"} response budget: use no more than two concise table sentences.`
+          : "Response tendency: offer a fuller answer only when there is real substance; never pad the turn.",
+    );
+  }
   const candorRule = coffeePowerCandorPromptForTurn({
     plan,
     targetBotId: speakerBotId,
@@ -787,7 +804,44 @@ export function coffeePowerActionBias(
   botId: string
 ): Extract<BotPowerEffectV1, { type: "action_bias" }> | null {
   const effect = plan?.bots[botId]?.effects.find((candidate) => candidate.type === "action_bias");
-  return effect?.type === "action_bias" ? effect : null;
+  if (effect?.type === "action_bias") return effect;
+  const interruption = plan?.bots[botId]?.effects.find(
+    (candidate) => candidate.type === "interruption",
+  );
+  return interruption?.type === "interruption"
+    ? {
+        type: "action_bias",
+        cue: "Cut in quickly when a real conversational opening appears.",
+        frequency: interruption.frequency,
+      }
+    : null;
+}
+
+export function coffeePowerResponseBudgetForBot(
+  plan: CoffeePowerPlanV1 | null,
+  botId: string,
+  hardOnly = false,
+): BotPowerResponseBudgetEffectV1 | null {
+  const rank = { minimal: 0, brief: 1, expansive: 2 } as const;
+  return (plan?.bots[botId]?.effects ?? [])
+    .filter(
+      (effect): effect is BotPowerResponseBudgetEffectV1 =>
+        effect.type === "response_budget" &&
+        (!hardOnly ||
+          (effect.enforcement === "hard" && effect.mode !== "expansive")),
+    )
+    .reduce<BotPowerResponseBudgetEffectV1 | null>((strongest, effect) => {
+      if (!strongest) return effect;
+      if (rank[effect.mode] < rank[strongest.mode]) return effect;
+      if (
+        effect.mode === strongest.mode &&
+        effect.enforcement === "hard" &&
+        strongest.enforcement !== "hard"
+      ) {
+        return effect;
+      }
+      return strongest;
+    }, null);
 }
 
 function resistanceMultiplier(

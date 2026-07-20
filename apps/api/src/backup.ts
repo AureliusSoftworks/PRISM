@@ -46,14 +46,19 @@ import {
   type BotFaceThinkingFrames,
   normalizeBotAudioVoiceProfileV1,
   normalizeBotNamePronunciation,
+  normalizeBotSelfReferral,
   normalizeBotVoiceVolume,
   normalizeEnglishVoiceEngine,
+  normalizeGraphicsQuality,
   normalizeOptionalBotAudioVoiceProfileV1,
   normalizeVoiceMode,
   parseStoredBotAudioVoiceProfileV1,
   serializeBotAudioVoiceProfileV1,
   parseStoredBotPowersV1,
   serializeBotPowersV1,
+  BOT_POWER_CANONICAL_SILENCE_V1,
+  botPowerMuteActionTextsV1,
+  botPowerResponseIsSilentV1,
   botcastFallbackStudioAccentVariantForSeed,
   isBotcastFallbackStudioAccentVariant,
   type BotAudioVoiceProfileV1,
@@ -63,8 +68,11 @@ import {
   type EnglishVoiceEngine,
   type VoiceMode,
   type AutoFallbackChainV1,
+  type EphemeralChatProviderPreferences,
   type ImageProviderName,
+  type GraphicsQuality,
   parseStoredAutoFallbackChain,
+  normalizeEphemeralChatProviderPreferences,
   resolveImageProviderName,
   serializeAutoFallbackChain,
 } from "@localai/shared";
@@ -93,7 +101,9 @@ import {
 
 export interface BackupUserSettings {
   theme: "light" | "dark" | "system";
+  graphicsQuality?: GraphicsQuality;
   preferredProvider: ProviderName;
+  ephemeralChatProviderPreferences?: EphemeralChatProviderPreferences;
   preferredImageProvider?: ImageProviderName;
   providerLocked: boolean;
   autoMemory: boolean;
@@ -155,6 +165,7 @@ export interface BackupBotSnapshot {
   id: string;
   name: string;
   namePronunciation?: string;
+  selfReferral?: string;
   systemPrompt: string;
   /** Account backups preserve server-owned clone lineage as bot ids. */
   cloneFamilyId?: string | null;
@@ -317,6 +328,9 @@ export interface BackupSnapshot {
       showId: string;
       hostBotId: string;
       guestBotId: string;
+      guestKind?: "bot" | "producer";
+      guestName?: string;
+      guestContext?: string;
       title: string;
       topic: string;
       producerBrief: string;
@@ -358,6 +372,8 @@ export interface BackupSnapshot {
       speakerRole: string;
       botId: string;
       content: string;
+      /** Optional; older v1 snapshots omit saved Signal stage actions. */
+      stageActionText?: string | null;
       voicePerformanceText?: string | null;
       createdAt: string;
     }>;
@@ -434,6 +450,10 @@ const SLATE_BACKUP_TABLES: readonly SlateBackupTableSpec[] = [
       "locked_ranges_json",
       "last_provider",
       "last_model",
+      "prose_mode",
+      "prose_model",
+      "prose_provider",
+      "deliberation_config_json",
       "continuity_active_version",
       "continuity_target_version",
       "continuity_active_generation",
@@ -443,7 +463,13 @@ const SLATE_BACKUP_TABLES: readonly SlateBackupTableSpec[] = [
       "created_at",
       "updated_at",
     ],
-    optionalFields: { title_origin: "writer" },
+    optionalFields: {
+      title_origin: "writer",
+      prose_mode: "auto",
+      prose_model: null,
+      prose_provider: null,
+      deliberation_config_json: "{}",
+    },
   },
   {
     key: "revisions",
@@ -1245,7 +1271,9 @@ export function exportUserSnapshot(
     .prepare(
       `SELECT
          theme,
+         graphics_quality,
          preferred_provider,
+         ephemeral_chat_provider_preferences,
          preferred_image_provider,
          provider_locked,
          auto_memory,
@@ -1304,7 +1332,9 @@ export function exportUserSnapshot(
     .get(userId) as
     | {
         theme: "light" | "dark" | "system";
+        graphics_quality: string | null;
         preferred_provider: ProviderName;
+        ephemeral_chat_provider_preferences: string | null;
         preferred_image_provider: ImageProviderName;
         provider_locked: number;
         auto_memory: number;
@@ -1369,7 +1399,12 @@ export function exportUserSnapshot(
   const settings: BackupUserSettings | undefined = user
     ? {
         theme: user.theme,
+        graphicsQuality: normalizeGraphicsQuality(user.graphics_quality),
         preferredProvider: user.preferred_provider,
+        ephemeralChatProviderPreferences:
+          normalizeEphemeralChatProviderPreferences(
+            user.ephemeral_chat_provider_preferences,
+          ),
         preferredImageProvider: user.preferred_image_provider,
         providerLocked: user.provider_locked === 1,
         autoMemory: user.auto_memory === 1,
@@ -1512,6 +1547,7 @@ export function exportUserSnapshot(
          id,
          name,
          name_pronunciation,
+         self_referral,
          system_prompt,
          clone_family_id,
          voice_preview_line,
@@ -1569,6 +1605,7 @@ export function exportUserSnapshot(
     id: string;
     name: string;
     name_pronunciation: string | null;
+    self_referral: string | null;
     system_prompt: string;
     clone_family_id: string | null;
     voice_preview_line: string | null;
@@ -1813,6 +1850,9 @@ export function exportUserSnapshot(
             ),
           }
           : {}),
+        ...(normalizeBotSelfReferral(bot.self_referral)
+          ? { selfReferral: normalizeBotSelfReferral(bot.self_referral) }
+          : {}),
         systemPrompt: bot.system_prompt,
         ...(bot.clone_family_id ? { cloneFamilyId: bot.clone_family_id } : {}),
         ...(normalizeVoicePreviewLine(bot.voice_preview_line)
@@ -1958,6 +1998,11 @@ export function exportUserSnapshot(
         showId: String(row.show_id),
         hostBotId: String(row.host_bot_id),
         guestBotId: String(row.guest_bot_id),
+        guestKind: row.guest_kind === "producer" ? "producer" : "bot",
+        guestName:
+          typeof row.guest_name === "string" ? row.guest_name : "",
+        guestContext:
+          typeof row.guest_context === "string" ? row.guest_context : "",
         title: String(row.title),
         topic: String(row.topic),
         producerBrief: String(row.producer_brief ?? ""),
@@ -2016,18 +2061,31 @@ export function exportUserSnapshot(
         startedAt: String(row.started_at),
         endedAt: typeof row.ended_at === "string" ? row.ended_at : null,
       })),
-      messages: botcastMessages.map((row) => ({
-        id: String(row.id),
-        episodeId: String(row.episode_id),
-        speakerRole: String(row.speaker_role),
-        botId: String(row.bot_id),
-        content: String(row.content),
-        voicePerformanceText:
-          typeof row.voice_performance_text === "string"
-            ? row.voice_performance_text
-            : null,
-        createdAt: String(row.created_at),
-      })),
+      messages: botcastMessages.map((row) => {
+        const content = String(row.content);
+        const silentResponse = botPowerResponseIsSilentV1(content);
+        const stageActionText =
+          (typeof row.stage_action_text === "string" &&
+          row.stage_action_text.trim()
+            ? row.stage_action_text.trim()
+            : null) ??
+          (silentResponse
+            ? (botPowerMuteActionTextsV1(content)[0] ?? null)
+            : null);
+        return {
+          id: String(row.id),
+          episodeId: String(row.episode_id),
+          speakerRole: String(row.speaker_role),
+          botId: String(row.bot_id),
+          content: silentResponse ? BOT_POWER_CANONICAL_SILENCE_V1 : content,
+          stageActionText,
+          voicePerformanceText:
+            typeof row.voice_performance_text === "string"
+              ? row.voice_performance_text
+              : null,
+          createdAt: String(row.created_at),
+        };
+      }),
       events: botcastEvents.map((row) => ({
         id: String(row.id),
         episodeId: String(row.episode_id),
@@ -2316,7 +2374,9 @@ function importUserSnapshotWithinTransaction(
       UPDATE users
       SET
         theme = ?,
+        graphics_quality = ?,
         preferred_provider = ?,
+        ephemeral_chat_provider_preferences = ?,
         preferred_image_provider = ?,
         provider_locked = ?,
         auto_memory = ?,
@@ -2382,10 +2442,16 @@ function importUserSnapshotWithinTransaction(
       settings.theme === "light" || settings.theme === "dark"
         ? settings.theme
         : "system",
+      normalizeGraphicsQuality(settings.graphicsQuality),
       settings.preferredProvider === "openai" ||
         settings.preferredProvider === "anthropic"
         ? settings.preferredProvider
         : "local",
+      JSON.stringify(
+        normalizeEphemeralChatProviderPreferences(
+          settings.ephemeralChatProviderPreferences,
+        ),
+      ),
       resolveImageProviderName({
         savedProvider:
           settings.preferredImageProvider ??
@@ -2513,6 +2579,7 @@ function importUserSnapshotWithinTransaction(
         user_id,
         name,
         name_pronunciation,
+        self_referral,
         system_prompt,
         clone_family_id,
         voice_preview_line,
@@ -2560,7 +2627,7 @@ function importUserSnapshotWithinTransaction(
         visibility,
         created_at,
         updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const bot of snapshot.bots) {
       if (!bot || typeof bot.id !== "string" || bot.id.trim().length === 0)
@@ -2573,6 +2640,7 @@ function importUserSnapshotWithinTransaction(
           ? bot.name.trim()
           : "Imported Bot",
         normalizeBotNamePronunciation(bot.namePronunciation),
+        normalizeBotSelfReferral(bot.selfReferral),
         typeof bot.systemPrompt === "string" ? bot.systemPrompt : "",
         typeof bot.cloneFamilyId === "string" &&
           backupBotIds.has(bot.cloneFamilyId.trim())
@@ -2760,19 +2828,23 @@ function importUserSnapshotWithinTransaction(
       if (!showIds.has(episode.showId)) continue;
       db.prepare(
         `INSERT OR REPLACE INTO botcast_episodes
-          (id, user_id, show_id, host_bot_id, guest_bot_id, title, topic,
+          (id, user_id, show_id, host_bot_id, guest_bot_id, guest_kind,
+           guest_name, guest_context, title, topic,
            producer_brief, provider, model, response_mode, duration_minutes, status, segment, outcome,
            tension_level, warning_count, started_at, completed_at, runtime_ms,
            model_warmup_hold_duration_ms, model_warmup_hold_started_at,
            persona_reviewer_bot_id, persona_reviewer_name, persona_rating,
            persona_comment, persona_reviewed_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         episode.id,
         userId,
         episode.showId,
         episode.hostBotId,
         episode.guestBotId,
+        episode.guestKind === "producer" ? "producer" : "bot",
+        episode.guestName ?? "",
+        episode.guestContext ?? "",
         episode.title,
         episode.topic,
         episode.producerBrief,
@@ -2836,8 +2908,8 @@ function importUserSnapshotWithinTransaction(
       if (!episodeIds.has(message.episodeId)) continue;
       db.prepare(
         `INSERT OR REPLACE INTO botcast_messages
-          (id, user_id, episode_id, speaker_role, bot_id, content, voice_performance_text, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          (id, user_id, episode_id, speaker_role, bot_id, content, stage_action_text, voice_performance_text, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         message.id,
         userId,
@@ -2845,6 +2917,7 @@ function importUserSnapshotWithinTransaction(
         message.speakerRole,
         message.botId,
         message.content,
+        message.stageActionText ?? null,
         message.voicePerformanceText ?? null,
         message.createdAt,
       );

@@ -76,6 +76,23 @@ The primary workspace has three conceptual regions:
 3. **Direction panel** — concise project-, chapter-, scene-, or selection-level
    notes and actions. It is not a chat transcript.
 
+The direction panel can open a bounded **Lux / Umbra inner dialogue** when a
+creative decision benefits from visible counterpoint. Lux develops the humane,
+coherent possibility; Umbra pressure-tests its assumptions, cost, and ability
+to survive contact with the story. They alternate for one to three
+writer-selected rounds, then Slate resolves the exchange into one proposed
+direction. The exchange is ephemeral, stoppable, uses the project's prose
+privacy route, and cannot mutate manuscript, structure, title, or Continuity.
+The writer must explicitly place the synthesis into a draft or revision
+direction before it can affect generated prose.
+
+Slate Settings exposes project-scoped profiles for the two hemispheres. Lux and
+Umbra may each inherit the project prose route or select a model allowed by the
+project's OFFLINE, AUTO, or ONLINE boundary, plus carry a writer-authored
+creative lens. These settings can emphasize each side but never replace its
+core role, weaken the privacy route, or grant document authority. The center
+synthesis continues to use the project's ordinary prose route.
+
 A movable rainbow Prism bubble opens an ephemeral project-context exchange in
 place. The composer and Markdown messages float independently above the desk,
 then each message fades like action text. Only the latest three messages are
@@ -248,7 +265,7 @@ The long-term loop is:
 - live cross-applet synchronization
 - advanced sampling/reasoning controls
 - chat that can silently mutate manuscript, structure, Continuity, or title
-- persona-guided editor panels and multi-editor panels
+- custom persona-guided editor panels and multi-editor panels
 - screenplay-specific structure and formatting
 - collaborative editing, comments by other people, publishing-grade EPUB/PDF
   layout, and branching-fiction authoring

@@ -65,6 +65,21 @@ describe("Coffee player response UI wiring", () => {
     );
   });
 
+  it("starts the speaking reveal only from real voice playback start", () => {
+    assert.match(
+      pageSource,
+      /onStart:[\s\S]*?settle\(coffeeVoiceStartedDurationMs\(durationMs, fallbackDuration\)\)/,
+    );
+    assert.match(
+      pageSource,
+      /window\.setTimeout\(\(\) => \{[\s\S]*?if \(settled\) return;[\s\S]*?controller\.abort\(\);[\s\S]*?releaseCoffeeVoicePlayback\(\);[\s\S]*?settle\(null\);/,
+    );
+    assert.doesNotMatch(
+      pageSource,
+      /resolve\(durationMs && durationMs > 0 \? durationMs : fallbackDuration\)/,
+    );
+  });
+
   it("hands a refreshed player line to one visible owner", () => {
     assert.match(
       pageSource,
@@ -159,6 +174,10 @@ describe("Coffee player response UI wiring", () => {
     assert.match(
       pageSource,
       /sippingOverride:[\s\S]*?hasExplicitCupSipState[\s\S]*?\? false[\s\S]*?: null/,
+    );
+    assert.match(
+      pageSource,
+      /ambientSipAllowed:[\s\S]*?coffeeAmbientSipSpeakerBotId === null \|\|[\s\S]*?coffeeAmbientSipSpeakerBotId !== bot\.id/,
     );
   });
 });

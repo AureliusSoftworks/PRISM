@@ -1,5 +1,6 @@
 import {
   applyVoiceDeliveryMoodToProfile,
+  listenerReactionHasAudio,
   normalizeBotAudioVoiceProfileV1,
   normalizeBotVoiceVolume,
   type BotAudioVoiceProfileV1,
@@ -13,9 +14,9 @@ import {
   normalizeBottishPlaybackProfile,
 } from "./bottishVoice.ts";
 import {
-  elevenLabsEffectForEngine,
   resolveEnglishVoicePlaybackDetuneCents,
   resolveEnglishVoicePostProcessing,
+  voiceEffectForPlayback,
   type EnglishVoiceSynthesisClip,
 } from "./englishVoice.ts";
 import {
@@ -35,6 +36,7 @@ export function listenerReactionVoiceCacheKey(args: {
   return JSON.stringify([
     args.plan.seed,
     args.plan.spokenCue ?? "silent",
+    args.plan.vocalFoley ?? "no-foley",
     args.mode,
     args.engine,
     args.profile,
@@ -50,9 +52,11 @@ export async function playListenerReactionVoice(args: {
   mood?: VoiceDeliveryMood | null;
   englishClip?: EnglishVoiceSynthesisClip | null;
   roomAcoustics?: RoomAcousticsSend;
+  stereoPan?: number;
 }): Promise<boolean> {
-  const cue = args.plan.spokenCue;
-  if (!cue) return false;
+  if (!listenerReactionHasAudio(args.plan)) return false;
+  if (args.plan.vocalFoley && args.mode !== "english") return false;
+  const cue = args.plan.spokenCue ?? "...";
   return playEphemeralReactionVoice({
     text: cue,
     seed: args.plan.seed,
@@ -63,6 +67,7 @@ export async function playListenerReactionVoice(args: {
     mood: args.mood,
     englishClip: args.englishClip,
     roomAcoustics: args.roomAcoustics,
+    stereoPan: args.stereoPan,
     maxDurationMs: args.plan.interjectionAttempt ? 1_300 : 900,
   });
 }
@@ -77,6 +82,7 @@ export async function playEphemeralReactionVoice(args: {
   mood?: VoiceDeliveryMood | null;
   englishClip?: EnglishVoiceSynthesisClip | null;
   roomAcoustics?: RoomAcousticsSend;
+  stereoPan?: number;
   maxDurationMs?: number;
 }): Promise<boolean> {
   const cue = args.text.replace(/\s+/gu, " ").trim();
@@ -100,14 +106,12 @@ export async function playEphemeralReactionVoice(args: {
         args.englishClip.engineUsed,
       ),
       baseLowpassHz: processing.lowpassHz,
-      elevenLabsEffect: elevenLabsEffectForEngine(
-        profile,
-        args.englishClip.engineUsed,
-      ),
+      voiceEffect: voiceEffectForPlayback(profile),
       alignment: args.englishClip.alignment,
       channel: "reaction",
       maxDurationMs: args.maxDurationMs ?? 900,
       roomAcoustics: args.roomAcoustics,
+      stereoPan: args.stereoPan,
     });
   }
 
@@ -130,6 +134,7 @@ export async function playEphemeralReactionVoice(args: {
     channel: "reaction",
     maxDurationMs: args.maxDurationMs ?? 900,
     roomAcoustics: args.roomAcoustics,
+    stereoPan: args.stereoPan,
   });
 }
 

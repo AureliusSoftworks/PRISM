@@ -339,19 +339,23 @@ describe("voice settings preview", () => {
     assert.doesNotMatch(catalogEffectSource, /elevenLabsVoiceCatalog\.length > 0/);
   });
 
-  it("shows per-profile effects for the effective ElevenLabs identity", () => {
+  it("shows per-profile effects for every voice engine", () => {
     const editorSource = pageSource.slice(
       pageSource.indexOf("function BotVoiceEditor("),
       pageSource.indexOf("type BotEditOriginalSnapshot"),
     );
-    assert.match(
-      editorSource,
-      /effectiveElevenLabsVoiceValue \? \([\s\S]*?<label htmlFor="bot-elevenlabs-voice-effect">[\s\S]*?Effect/,
+    const performanceSource = editorSource.slice(
+      editorSource.indexOf('id="bot-voice-performance-title"'),
+      editorSource.indexOf("<footer", editorSource.indexOf('id="bot-voice-performance-title"')),
     );
-    assert.match(editorSource, /aria-label="ElevenLabs voice effect"/);
-    assert.match(editorSource, /ELEVENLABS_VOICE_EFFECTS\.map/);
-    assert.match(editorSource, /ELEVENLABS_VOICE_EFFECT_DESCRIPTIONS/);
-    assert.match(editorSource, /PRISM and operating-system voices stay clean\./);
+    assert.match(
+      performanceSource,
+      /<label htmlFor="bot-voice-effect">Voice effect<\/label>/,
+    );
+    assert.match(performanceSource, /aria-label="Voice effect"/);
+    assert.match(performanceSource, /VOICE_EFFECTS\.map/);
+    assert.match(performanceSource, /VOICE_EFFECT_DESCRIPTIONS/);
+    assert.match(performanceSource, /Applied locally to PRISM/);
     assert.match(pageSource, /enqueueEnglishVoice\([\s\S]*?clip\.engineUsed/);
     assert.match(
       editorSource,

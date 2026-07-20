@@ -337,7 +337,11 @@ describe("portable project-owned account backup assets", () => {
             ? entry.restore.sourceImageId
             : "")
           .sort(),
-        ["active-day-upload", "active-logo-upload", "active-night-generated"],
+        [
+          "active-day-upload",
+          "active-logo-upload",
+          "active-night-generated",
+        ],
       );
       assert.equal(
         "audioBase64" in exported.snapshot.botcast.shows[0].introAudio,
@@ -405,7 +409,10 @@ describe("portable project-owned account backup assets", () => {
         );
         assert.equal(response.status, 200, `${slot} endpoint should exist`);
         assert.equal(response.headers.get("content-type"), "image/png");
-        const expected = slot === "logo" ? logoBytes : studioBytes;
+        const expected =
+          slot === "logo"
+            ? logoBytes
+            : studioBytes;
         assert.deepEqual(Buffer.from(await response.arrayBuffer()), expected);
       }
       const introResponse = await targetClient.request(

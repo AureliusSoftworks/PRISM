@@ -568,6 +568,58 @@ describe("Story API helpers", () => {
     assert.equal(mutedScene?.spritePose, "idle");
   });
 
+  it("bounds hard minimal Story speakers without cutting a sentence", async () => {
+    const db = createTestDb();
+    seedBot(db, "bot-a", "Ada");
+    seedBot(db, "bot-b", "Bert");
+    const name = "Lazy";
+    const intent = "Bert never elaborates and says the bare minimum.";
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'bot-b'").run(JSON.stringify([{
+      version: 1,
+      id: "lazy",
+      name,
+      intent,
+      enabled: true,
+      compileStatus: "ready",
+      compiled: {
+        version: 1,
+        sourceHash: botPowerSourceHashV1(name, intent),
+        selfCue: "Use one short sentence.",
+        observerCue: "Bert never elaborates.",
+        effects: [{
+          type: "response_budget",
+          mode: "minimal",
+          enforcement: "hard",
+        }],
+        ruleLabels: ["Bare-minimum replies"],
+      },
+    }]));
+    const bots = loadStoryBotProfiles(db, "user-1", ["bot-a", "bot-b"]);
+    const created = createStorySession(db, "user-1", {
+      botIds: ["bot-a", "bot-b"],
+      provider: "local",
+      model: "test-model",
+    });
+    const episode = JSON.parse(episodeJson()) as {
+      scenes: Array<{ speakerBotId?: string; narration: string }>;
+    };
+    const bertScene = episode.scenes.find((scene) => scene.speakerBotId === "bot-b");
+    assert.ok(bertScene);
+    bertScene.narration = "Fine. The archive key is inside that case. We should retrieve it now.";
+
+    const generated = await generateStorySessionEpisode(db, "user-1", created.id, {
+      provider: new SequenceProvider([JSON.stringify(episode)]),
+      providerName: "local",
+      model: "test-model",
+      bots,
+    });
+    const boundedScene = generated.episode?.scenes.find(
+      (scene) => scene.speakerBotId === "bot-b",
+    );
+
+    assert.equal(boundedScene?.narration, "Fine.");
+  });
+
   it("hard-echoes the prior visible Story scene for powered speakers", async () => {
     const db = createTestDb();
     seedBot(db, "bot-a", "Ada");

@@ -110,8 +110,8 @@ describe("composer send key policy", () => {
       "const handleRichEditorKeyDownCapture = useCallback",
       "const composeFormForTheme"
     );
-    assert.match(richCaptureSource, /if \(event\.key !== "Enter"\) return;/);
-    assert.match(richCaptureSource, /if \(event\.shiftKey\) return;/);
+    assert.match(richCaptureSource, /shouldSubmitComposerOnEnter\(\{/);
+    assert.match(richCaptureSource, /isComposing: event\.nativeEvent\.isComposing/);
     assert.match(
       richCaptureSource,
       /event\.preventDefault\(\);[\s\S]*event\.stopPropagation\(\);[\s\S]*form\?\.requestSubmit\(\);/
@@ -126,6 +126,8 @@ describe("composer send key policy", () => {
       richEditorKeyDownSource,
       /event\.key !== "Enter"[\s\S]*shouldAcceptComposerShortcutCompletionKey/
     );
+    assert.match(richEditorKeyDownSource, /shouldSubmitComposerOnEnter\(\{/);
+    assert.match(richEditorKeyDownSource, /isComposing: event\.isComposing/);
     assert.match(richEditorKeyDownSource, /event\.key === "Tab"[\s\S]*mentionUiRef/);
     assert.doesNotMatch(
       richEditorKeyDownSource,
@@ -146,7 +148,10 @@ describe("composer send key policy", () => {
       /event\.key === "Tab" \|\| event\.key === "Enter"|textareaComposerShortcutExactlyMatchesAnyCommand/
     );
 
-    assert.match(pageSource, /if \(e\.key !== "Enter" \|\| e\.shiftKey\) return;/);
+    assert.match(
+      pageSource,
+      /shouldSubmitComposerOnEnter\(\{[\s\S]*?isComposing: e\.nativeEvent\.isComposing/,
+    );
     assert.match(pageSource, /enterKeyHint="send"/);
   });
 });

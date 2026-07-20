@@ -9,7 +9,7 @@ afterEach(() => {
 });
 
 describe("generateImage", () => {
-  it("uses GPT Image base64 output without response_format=url", async () => {
+  it("uses GPT Image 2 base64 output without unsupported transparency", async () => {
     let requestBody: Record<string, unknown> | null = null;
     globalThis.fetch = (async (_url, init) => {
       requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
@@ -32,10 +32,33 @@ describe("generateImage", () => {
     assert.equal(requestBody?.size, "1536x1024");
     assert.equal(requestBody?.quality, "high");
     assert.equal(requestBody?.output_format, "png");
-    assert.equal(requestBody?.background, "transparent");
+    assert.equal("background" in (requestBody ?? {}), false);
     assert.equal("response_format" in (requestBody ?? {}), false);
     assert.equal(result.url, "");
     assert.deepEqual(result.imageBytes, Buffer.from("png-bytes"));
+  });
+
+  it("preserves transparent background requests for supporting GPT Image models", async () => {
+    let requestBody: Record<string, unknown> | null = null;
+    globalThis.fetch = (async (_url, init) => {
+      requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({
+          data: [{ b64_json: Buffer.from("transparent-png").toString("base64") }],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    await generateImage("draw a prism", "sk-test", {
+      model: "gpt-image-1.5",
+      size: "1536x1024",
+      quality: "high",
+      background: "transparent",
+    });
+
+    assert.equal(requestBody?.model, "gpt-image-1.5");
+    assert.equal(requestBody?.background, "transparent");
   });
 
   it("falls stale DALL-E preferences back to GPT Image requests", async () => {

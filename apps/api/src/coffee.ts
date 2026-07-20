@@ -81,6 +81,7 @@ import type {
   CoffeePollVoterKind,
   CoffeePreset,
   CoffeePresetMode,
+  CoffeeReplayBotDepartureEventPayload,
   CoffeeReplayEventPayload,
   CoffeeSessionDurationMinutes,
   CoffeeSessionCreateResponse,
@@ -107,6 +108,7 @@ import type {
 import {
   applyBotPowerEchoResponseV1,
   applyBotPowerMuteResponseV1,
+  applyBotPowerResponseBudgetV1,
   COFFEE_SESSION_DURATION_MINUTES_MAX,
   COFFEE_SESSION_DURATION_MINUTES_MIN,
   COFFEE_TOPIC_MAX_LENGTH,
@@ -187,6 +189,7 @@ import {
   coffeePowerHearingRepeatDirective,
   coffeePowerMessageAudience,
   coffeePowerRouterPromptLines,
+  coffeePowerResponseBudgetForBot,
   coffeePowerSpeakerOverride,
   coffeePowersPromptForSpeaker,
   resolveCoffeePowersForSession,
@@ -236,7 +239,10 @@ function lastCoffeeAudibleListenerBotId(
     const events = messages[messageIndex]?.coffeeReplayEvents ?? [];
     for (let eventIndex = events.length - 1; eventIndex >= 0; eventIndex -= 1) {
       const event = events[eventIndex];
-      if (event?.kind === "listenerReaction" && event.plan.spokenCue) {
+      if (
+        event?.kind === "listenerReaction" &&
+        (event.plan.spokenCue || event.plan.vocalFoley)
+      ) {
         return event.plan.listenerBotId;
       }
     }
@@ -3541,6 +3547,68 @@ export function recordCoffeePlayerDeparture(
   };
 }
 
+export function recordCoffeeFinalBotDepartureReplayEvents(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+): number {
+  const row = loadConversationRow(db, userId, conversationId);
+  if (!row || row.conversation_mode !== "coffee") {
+    throw new Error("Coffee session not found.");
+  }
+  const messages = loadMessages(db, userId, conversationId, 500);
+  const playerHasDeparted = messages.some((message) =>
+    message.coffeeReplayEvents?.some(
+      (event) => event.kind === "playerDeparture",
+    ),
+  );
+  if (!playerHasDeparted) return 0;
+
+  const alreadyDepartedBotIds = new Set(
+    messages.flatMap((message) =>
+      (message.coffeeReplayEvents ?? [])
+        .filter((event): event is CoffeeReplayBotDepartureEventPayload =>
+          event.kind === "botDeparture",
+        )
+        .map((event) => event.botId),
+    ),
+  );
+  const seatBotIds = coffeeActiveSeatBotIdsFromStored(row.bot_group_ids);
+  const remainingSeats = seatBotIds.flatMap((botId, seatIndex) =>
+    botId && !alreadyDepartedBotIds.has(botId)
+      ? [{ botId, seatIndex }]
+      : [],
+  );
+  if (remainingSeats.length === 0) return 0;
+
+  const latestMessageAtMs = messages.reduce((latest, message) => {
+    const parsed = Date.parse(message.createdAt);
+    return Number.isFinite(parsed) ? Math.max(latest, parsed) : latest;
+  }, 0);
+  const departureBaseMs = Math.max(Date.now(), latestMessageAtMs + 1);
+  let updatedAt = row.updated_at;
+  remainingSeats.forEach(({ botId, seatIndex }, index) => {
+    updatedAt = new Date(departureBaseMs + index).toISOString();
+    appendCoffeeReplayEventMessage({
+      db,
+      userId,
+      conversationId,
+      event: {
+        v: 1,
+        name: "coffeeReplayEvent",
+        kind: "botDeparture",
+        botId,
+        seatIndex,
+        occurredAt: updatedAt,
+      },
+    });
+  });
+  db.prepare(
+    "UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?",
+  ).run(updatedAt, conversationId, userId);
+  return remainingSeats.length;
+}
+
 function coffeeReplayArrivalEventAlreadyRecorded(args: {
   db: DatabaseSync;
   userId: string;
@@ -3575,7 +3643,7 @@ function buildCoffeePromptLeakRepairMessages(args: {
   const speakerSystemPrompt = composeBotSystemPrompt(
     args.speaker.name,
     args.speaker.systemPrompt,
-    args.speaker.flirtEnabled === true
+    args.speaker.flirtEnabled === true,
   );
   const messages: ProviderMessage[] = [];
   if (speakerSystemPrompt) {
@@ -3640,7 +3708,7 @@ function buildCoffeeRepeatRepairMessages(args: {
   const speakerSystemPrompt = composeBotSystemPrompt(
     args.speaker.name,
     args.speaker.systemPrompt,
-    args.speaker.flirtEnabled === true
+    args.speaker.flirtEnabled === true,
   );
   const messages: ProviderMessage[] = [];
   if (speakerSystemPrompt) {
@@ -6257,7 +6325,8 @@ function attachCoffeeBotSemanticFacets(
   db: DatabaseSync,
   userId: string,
   group: CoffeeBotProfile[],
-  prismDefaultLlmModel?: string | null
+  prismDefaultLlmModel?: string | null,
+  provider?: LlmProvider
 ): CoffeeBotProfile[] {
   return group.map((bot) => {
     const resolved = effectiveBotSemanticFacets({
@@ -6272,6 +6341,7 @@ function attachCoffeeBotSemanticFacets(
         userId,
         botId: bot.id,
         prismDefaultLlmModel,
+        provider,
       });
     }
     return {
@@ -6730,15 +6800,16 @@ export async function createCoffeeGroupWithGeneratedName(
   const seatBotIds = normalizeCoffeeSeatBotIds(input.groupBotIds);
   assertUniqueCoffeeGroupRoster(db, userId, seatBotIds);
   const groupIds = seatBotIds.filter((id): id is string => typeof id === "string");
+  const provider = coffeeAuxiliaryProvider(llm);
   const group = attachCoffeeBotSemanticFacets(
     db,
     userId,
     loadCoffeeGroupProfiles(db, userId, groupIds),
-    llm?.prismDefaultLlmModel
+    llm?.prismDefaultLlmModel,
+    provider
   );
   const requestedName = typeof input.name === "string" ? input.name : null;
   const settings = normalizeCoffeeSessionSettings(input.coffeeSettings);
-  const provider = coffeeAuxiliaryProvider(llm);
   const providedStarterTopics = normalizeCanonicalCoffeeGroupStarterTopics(
     input.starterTopics,
     group
@@ -6940,11 +7011,13 @@ export async function updateCoffeeGroupWithGeneratedTopics(
   const nextBotIds = nextSeatBotIds.filter(
     (botId): botId is string => typeof botId === "string"
   );
+  const provider = coffeeAuxiliaryProvider(llm);
   const group = attachCoffeeBotSemanticFacets(
     db,
     userId,
     loadCoffeeGroupProfiles(db, userId, nextBotIds),
-    llm?.prismDefaultLlmModel
+    llm?.prismDefaultLlmModel,
+    provider
   );
   const currentSettings = parseStoredCoffeeSessionSettings(row.coffee_settings);
   const nextSettings = input.coffeeSettings === undefined
@@ -6957,7 +7030,7 @@ export async function updateCoffeeGroupWithGeneratedTopics(
           : input.coffeeSettings
       );
   const starterTopics = await inferCoffeeGroupStarterTopics({
-    provider: coffeeAuxiliaryProvider(llm),
+    provider,
     group,
     sessionSettings: nextSettings,
   });
@@ -7021,7 +7094,7 @@ export function buildCoffeeTableTuningAppendix(settings: CoffeeSessionSettings):
 
   const threadLine = settings.stayOnThread
     ? "Discourage hard topic jumps until the current thread finds a natural pause or landing."
-    : "Topic shifts are allowed when they feel natural rather than chaotic.";
+    : "Topic shifts are allowed only when they visibly bridge from the latest table line; never introduce a premise as though the table already said it.";
 
   return ["Table tuning (follow alongside the base Coffee rules):", energyLine, crossLine, threadLine].join(
     "\n"
@@ -9751,7 +9824,9 @@ export function buildRouterPrompt(args: {
     "The user is one participant at the table, not the center of every turn.",
     "When the latest table moment comes from another bot, it is okay for the next bot to respond, add a small observation, let the topic breathe, challenge from values, reframe, or gently change topics.",
     "Do not force every bot to answer everything that is on the table. Pick the next voice only when a short contribution would feel welcome.",
-    "The bots should never talk over each other. Choose one voice and leave room for natural pauses.",
+    settings.crossTalk === "pileup"
+      ? "Choose one visible next voice. It may land as an immediate interruption or rebuttal, but it must answer something the table can actually see."
+      : "The bots should never talk over each other. Choose one voice and leave room for natural pauses.",
     "Avoid picks that lead to generic echo replies (for example a bland 'I get that' after a strong worldview claim). Prefer speakers who would react in-character with concrete contrast, bridge, or extension.",
     "Output requirements:",
     "  - Reply with a single line of valid JSON only.",
@@ -10097,7 +10172,7 @@ export function buildSpeakerPrompt(args: {
   const speakerSystemPrompt = composeBotSystemPrompt(
     speaker.name,
     speaker.systemPrompt,
-    speaker.flirtEnabled === true
+    speaker.flirtEnabled === true,
   );
   const cloneIdentityPrompt = buildCloneFamilyIdentityPrompt(speaker, group);
   const peers = group.filter((bot) => bot.id !== speaker.id);
@@ -10129,6 +10204,7 @@ export function buildSpeakerPrompt(args: {
         "",
         `Immediate bot-to-bot handoff from ${latestPeerName}: ${latestPeerSpeech}`,
         "Respond to one specific claim, image, disagreement, or question from that line before adding your own angle. Do not restart with a standalone topic monologue as if nobody just spoke.",
+        "Use only what the visible line actually establishes. If you introduce a new premise, label it as your own thought and bridge it explicitly from a word or claim the table can see.",
         "A bare agreement is not enough; make the connection visible through your own worldview.",
       ]
     : [];
@@ -13193,7 +13269,8 @@ export async function createCoffeeConversation(
     db,
     userId,
     loadCoffeeGroupProfiles(db, userId, groupIds),
-    llm?.prismDefaultLlmModel
+    llm?.prismDefaultLlmModel,
+    llm ? coffeeAuxiliaryProvider(llm) : undefined
   );
   const initialTeamsConfig = normalizeCoffeeTeamSessionConfig(input.initialTeams, groupIds);
   if (input.initialPoll && initialTeamsConfig) {
@@ -13408,7 +13485,8 @@ async function ensureCanonicalCoffeeGroupStarterTopics(args: {
       db,
       userId,
       loadCoffeeGroupProfiles(db, userId, currentGroup.botGroupIds),
-      llm?.prismDefaultLlmModel
+      llm?.prismDefaultLlmModel,
+      llm ? coffeeAuxiliaryProvider(llm) : undefined
     );
     const generated = await inferCoffeeGroupStarterTopics({
       provider: coffeeAuxiliaryProvider(llm),
@@ -14011,6 +14089,11 @@ async function generateCoffeeBotReply(args: {
 
   const speaker = routableTurnGroup.find((bot) => bot.id === pickedBotId) ?? routableTurnGroup[0]!;
   const speakerIsMuted = coffeePowerBotIsMuted(coffeePowerPlan, speaker.id);
+  const speakerHardResponseBudget = coffeePowerResponseBudgetForBot(
+    coffeePowerPlan,
+    speaker.id,
+    true,
+  );
   const speakerRepeatsForHearingPower = Boolean(
     hearingRepeatDirective &&
     hearingRepeatDirective.repeatingBotId === speaker.id &&
@@ -14193,9 +14276,14 @@ async function generateCoffeeBotReply(args: {
 	  if (typeof speaker.repetitionPenalty === "number") {
 	    speakerOptions.repetitionPenalty = speaker.repetitionPenalty;
 	  }
+  const powerOutputTokenCap = speakerHardResponseBudget?.mode === "minimal"
+    ? 72
+    : speakerHardResponseBudget?.mode === "brief"
+      ? 128
+      : replyCaps.speakerMaxOutputTokens;
 	  speakerOptions.maxTokens = coffeeSpeakerMaxTokensForTurn(
     speaker.maxTokens,
-    replyCaps.speakerMaxOutputTokens,
+    Math.min(replyCaps.speakerMaxOutputTokens, powerOutputTokenCap),
     {
       effectiveProvider,
       modelId: speakerModel,
@@ -14676,6 +14764,17 @@ async function generateCoffeeBotReply(args: {
           replyCaps.tableReplyMaxChars
         )
       : cannedInterruptionReaction.text;
+  }
+  if (!speakerUsesHardResponse) {
+    const requiredBeat =
+      Boolean(cannedInterruptionReaction) ||
+      coffeeDepartureOpportunityRequiresExit(departureOpportunity) ||
+      emptyCupGroupWrapRequired;
+    replyText = applyBotPowerResponseBudgetV1(
+      replyText,
+      speakerHardResponseBudget,
+      speakerHardResponseBudget?.mode === "minimal" && !requiredBeat ? 1 : 2,
+    );
   }
   // Promote any plain `@Name` / bare-name peer references into prism-bot mention
   // markdown so the client renders the chip + lights the notified glyph on the
@@ -15188,7 +15287,7 @@ export async function generateCoffeeSessionSynopsis(
     );
     row = loadConversationRow(db, userId, conversationId) ?? row;
   }
-  const history = loadMessages(db, userId, row.id, 200);
+  let history = loadMessages(db, userId, row.id, 200);
   const socialByBotId = loadCoffeeBotSocialState(db, userId, row.id, groupIds);
   const lastSpeakerBotId = loadLastSpeakerBotId(db, userId, row.id);
   const attendanceContext = loadCoffeeAttendanceContext({
@@ -15199,6 +15298,9 @@ export async function generateCoffeeSessionSynopsis(
     group,
     absentBotIds: parseStoredBotGroupIds(row.coffee_absent_bot_ids),
   });
+  recordCoffeeFinalBotDepartureReplayEvents(db, userId, row.id);
+  history = loadMessages(db, userId, row.id, 200);
+
   if (coffeeSessionAlreadyHasSynopsis(history)) {
     return buildConversationResponse({
       row,

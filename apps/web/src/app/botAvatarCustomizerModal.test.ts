@@ -247,6 +247,12 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.match(pageSource, /BOT_AVATAR_CUSTOM_EYE_START/);
   assert.match(pageSource, /BOT_AVATAR_CUSTOM_MOUTH_START/);
   assert.match(pageSource, /BOT_AVATAR_CUSTOM_THINKING_FRAMES/);
+  assert.match(pageSource, /label: "Disabled"/);
+  assert.match(pageSource, /frames: DISABLED_BOT_FACE_THINKING_FRAMES/);
+  assert.match(
+    pageSource,
+    /Keep the normal face and animations while thinking/,
+  );
   assert.match(pageSource, /BOT_AVATAR_RANDOM_CUSTOM_BLINK_GLYPHS/);
   assert.match(pageSource, /BOT_AVATAR_RANDOM_CUSTOM_THINKING_FRAME_SETS/);
   assert.match(pageSource, /function botAvatarRandomIndex/);
@@ -1060,6 +1066,9 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   assert.match(pageSource, /<span>Pronunciation<\/span>/);
   assert.match(pageSource, /aria-label="Bot name pronunciation"/);
   assert.match(pageSource, /placeholder="How bots should say this name"/);
+  assert.match(pageSource, /<span>Self-referral<\/span>/);
+  assert.match(pageSource, /aria-label="Bot self-referral"/);
+  assert.match(pageSource, /placeholder="How this bot refers to itself"/);
   assert.match(pageSource, /aria-label="Preview bot name pronunciation"/);
   assert.match(pageSource, /My name is \$\{trimmedName\}\./);
   const invalidChatDetailEffect = pageSource.slice(
@@ -1158,7 +1167,7 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
     cssSource,
     /grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/,
   );
-  assert.match(pageSource, /aria-label="Generation Lens and bot randomizer"/);
+  assert.doesNotMatch(pageSource, /Generation Lens|Browse Lenses|LensTile/);
   assert.match(
     pageSource,
     /resetLabel=\{\s*isDefaultPrismBot\s*\?\s*"Reset voice"\s*:\s*"Restore original voice"\s*\}/,
@@ -1372,7 +1381,7 @@ test("personality randomization is scoped away from identity and settings", () =
   assert.notEqual(end, -1);
   const helperSource = pageSource.slice(start, end);
   assert.match(helperSource, /setBotProfile\(\(current\) => \(\{/);
-  assert.match(helperSource, /\.\.\.current,\s*core: draft\.profile\.core,/);
+  assert.match(helperSource, /\.\.\.current,\s*core: profile\.core,/);
   assert.doesNotMatch(helperSource, /setNewBotName/);
   assert.doesNotMatch(helperSource, /setNewBotColor/);
   assert.doesNotMatch(helperSource, /setNewBotAudioVoiceProfile/);
@@ -1675,7 +1684,18 @@ test("avatar customizer preview has explicit expression states", () => {
     pageSource,
     /forceBlinkPhase=\{previewBlink \? "closed" : undefined\}/,
   );
-  assert.match(pageSource, /showThinkingSpinner=\{previewThinking\}/);
+  assert.match(
+    pageSource,
+    /const previewThinkingSpinnerActive =\s+previewThinking &&\s+!botFaceThinkingSpinnerDisabled\(faceStyle\.thinkingFrames\);/,
+  );
+  assert.match(
+    pageSource,
+    /motionActive=\{!previewTalking && !previewThinkingSpinnerActive\}/,
+  );
+  assert.match(
+    pageSource,
+    /showThinkingSpinner=\{previewThinkingSpinnerActive\}/,
+  );
   assert.doesNotMatch(
     cssSource,
     /\[data-avatar-preview-mode="blink"\][\s\S]{0,240}--eye-blink-scale-y:/,
@@ -1785,6 +1805,14 @@ test("Powers read as an app-wide bot trait across active surfaces", () => {
   assert.match(pageSource, /topic pull/u);
   assert.match(pageSource, /memory for/u);
   assert.match(pageSource, /private insight into/u);
+  assert.match(
+    pageSource,
+    /effect\.type === "response_budget"[\s\S]{0,160}response budget/u,
+  );
+  assert.match(pageSource, /structured engine effect/u);
+  assert.match(pageSource, /Model-guided cues only\./u);
+  assert.match(pageSource, /Guidance — bot:/u);
+  assert.match(pageSource, /Guidance — others:/u);
   assert.match(
     pageSource,
     /effect\.type === "candor"[\s\S]{0,140}one-response candor pressure/u,

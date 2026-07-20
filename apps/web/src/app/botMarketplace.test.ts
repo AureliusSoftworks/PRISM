@@ -4,8 +4,6 @@ import { describe, it } from "node:test";
 import {
   marketplaceBotEyeCharacterIsSideways,
   marketplaceCatalogRevision,
-  marketplaceLensEntriesForCategory,
-  marketplaceLensInstallState,
   marketplaceEntriesForTheme,
   marketplaceEntryInstallState,
   marketplaceEntryNeedsUpdate,
@@ -13,7 +11,6 @@ import {
   marketplaceMissingEntries,
   marketplaceThemeInstallState,
   marketplaceVisibleBotEntries,
-  marketplaceVisibleLensEntries,
   normalizeBotMarketplaceManifest,
   validateMarketplaceSelectionBundles,
 } from "./botMarketplace.ts";
@@ -80,7 +77,7 @@ const baseManifest = {
       id: "jesus-christ",
       name: "Jesus Christ",
       subtitle: "Deprecated direct sacred bot",
-      description: "Hidden after Lens migration.",
+      description: "Hidden deprecated bot.",
       botHash: "d4f10ce6600ad903511f9584818a30d3",
       bundlePath: "/bot-marketplace/bots/bot-jesus-christ.bot",
       memoryCount: 33,
@@ -90,41 +87,6 @@ const baseManifest = {
       tags: ["sacred"],
       marketplaceVisible: false,
       deprecated: true,
-      replacementType: "lens",
-      replacementIds: ["christian_wisdom"],
-    },
-  ],
-  lensCategories: [
-    {
-      id: "sacred-wisdom",
-      name: "Sacred Wisdom",
-      description: "Tradition-inspired fictional influence packs.",
-      disclaimer: "Does not impersonate sacred figures.",
-      lensIds: ["christian_wisdom"],
-    },
-  ],
-  lenses: [
-    {
-      id: "christian_wisdom",
-      displayName: "Christian Wisdom Lens",
-      description: "Mercy, parable, forgiveness, humility, love, and moral reflection.",
-      category: "Sacred Wisdom",
-      tags: ["sacred", "wisdom", "christianity"],
-      themes: ["mercy", "forgiveness"],
-      tone: "gentle",
-      inspiredBy: ["Christian ethics"],
-      constraints: [
-        "Generate or shape fictional bots only.",
-        "Do not impersonate Jesus Christ.",
-      ],
-      prohibitedClaims: ["Do not claim to be Jesus Christ."],
-      systemPromptFragment:
-        "This bot is shaped by the Christian Wisdom Lens. The bot must not claim to be Jesus Christ.",
-      marketplaceVisible: true,
-      installed: false,
-      createdAt: "2026-07-02T00:00:00.000Z",
-      updatedAt: "2026-07-02T00:00:00.000Z",
-      lensKind: "sacred_wisdom",
     },
   ],
 };
@@ -274,19 +236,6 @@ describe("bot marketplace helpers", () => {
       marketplaceMissingEntries(entries, installedHashes).map((entry) => entry.name),
       ["Aristotle"]
     );
-  });
-
-  it("lists lenses by category and tracks install state separately from bots", () => {
-    const manifest = normalizeBotMarketplaceManifest(baseManifest);
-    const lenses = marketplaceLensEntriesForCategory(manifest, "sacred-wisdom");
-    const installedLensIds = new Set(["christian_wisdom"]);
-
-    assert.deepEqual(marketplaceVisibleLensEntries(manifest).map((lens) => lens.id), [
-      "christian_wisdom",
-    ]);
-    assert.deepEqual(lenses.map((lens) => lens.displayName), ["Christian Wisdom Lens"]);
-    assert.equal(marketplaceLensInstallState(lenses[0]!, new Set()), "available");
-    assert.equal(marketplaceLensInstallState(lenses[0]!, installedLensIds), "installed");
   });
 
 });

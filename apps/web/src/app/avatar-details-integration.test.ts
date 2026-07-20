@@ -142,7 +142,7 @@ describe("Avatar Details Studio integration", () => {
       editorCss,
       /\.editor\[data-editor-theme="light"\] \.canvasFrame/,
     );
-    assert.match(editorSource, /BOT_AVATAR_SCREEN_EDITOR_FACE_PLACEMENT\.yPct/);
+    assert.match(editorSource, /BOT_AVATAR_DETAILS_FACE_PLACEMENT\.yPct/);
     assert.match(
       pageSource,
       /"--coffee-plate-emoji-face-scale-y": BOT_AVATAR_CANONICAL_FACE_SCALE_Y/,
@@ -156,7 +156,7 @@ describe("Avatar Details Studio integration", () => {
     assert.match(editorSource, /const AVATAR_DETAILS_EDITOR_ZOOM = 1\.36/);
     assert.match(
       editorSource,
-      /BOT_AVATAR_SCREEN_EDITOR_FACE_GLYPH_FRAME_RATIO \* AVATAR_DETAILS_EDITOR_ZOOM \* 100/,
+      /BOT_AVATAR_DETAILS_FACE_GLYPH_FRAME_RATIO \* AVATAR_DETAILS_EDITOR_ZOOM \* 100/,
     );
     const faceGuideIndex = editorSource.indexOf(
       "data-avatar-details-face-guide=\"true\"",
@@ -460,7 +460,15 @@ describe("Avatar Details shared mannequin rendering", () => {
     assert.match(pageSource, /"--avatar-details-facing-scale-x": "1"/);
     assert.match(
       pageSource,
-      /!showThinkingSpinner && !showQuestionMark \? \([\s\S]*?<AvatarDetailsMask[\s\S]*?\) : null/,
+      /avatarDetailsHasVisuals\(\s*avatarDetails,\s*\)[\s\S]*BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE/,
+    );
+    assert.match(
+      pageSource,
+      /className=\{styles\.zenLiveBotPresenceBody\}[\s\S]{0,220}style=\{avatarDetailsFaceRegistrationStyle\}/,
+    );
+    assert.match(
+      pageSource,
+      /!thinkingSpinnerActive && !showQuestionMark \? \([\s\S]*?<AvatarDetailsMask[\s\S]*?\) : null/,
     );
     assert.match(pageSource, /avatarDetailsColor=\{normalizeAccentForTheme\(/);
   });

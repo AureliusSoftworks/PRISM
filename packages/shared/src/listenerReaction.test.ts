@@ -27,6 +27,7 @@ describe("listener reaction planning", () => {
   it("keeps Signal reactions present on most turns without making every beat audible", () => {
     let visual = 0;
     let audible = 0;
+    let vocalFoley = 0;
     for (let index = 0; index < 8_000; index += 1) {
       const plan = buildSignalListenerReactionPlanV1({
         episodeId: "frequency",
@@ -39,10 +40,13 @@ describe("listener reaction planning", () => {
         tensionLevel: 0,
       });
       if (plan) visual += 1;
-      if (plan?.spokenCue) audible += 1;
+      if (plan?.spokenCue || plan?.vocalFoley) audible += 1;
+      if (plan?.vocalFoley) vocalFoley += 1;
+      assert.ok(!plan?.spokenCue || !plan.vocalFoley);
     }
     assert.ok(visual / 8_000 > 0.79 && visual / 8_000 < 0.85);
     assert.ok(audible / visual > 0.37 && audible / visual < 0.43);
+    assert.ok(vocalFoley / audible > 0.25 && vocalFoley / audible < 0.31);
   });
 
   it("lets an annoyed guest attempt to interject over the host", () => {
@@ -124,7 +128,7 @@ describe("listener reaction planning", () => {
           allowAudio: true,
         });
         if (plan) visual += 1;
-        if (plan?.spokenCue) audible += 1;
+        if (plan?.spokenCue || plan?.vocalFoley) audible += 1;
       }
       return { visual, audible };
     };
@@ -154,7 +158,7 @@ describe("listener reaction planning", () => {
           eligible: true,
           allowAudio: true,
         });
-        if (plan?.spokenCue) audible += 1;
+        if (plan?.spokenCue || plan?.vocalFoley) audible += 1;
       }
       return audible;
     };
@@ -191,7 +195,13 @@ describe("listener reaction planning", () => {
       plan.visualAction === "head_tilt" ||
       plan.visualAction === "thoughtful_hmm"
     ));
-    assert.ok(plans.every((plan) => !plan.spokenCue || plan.spokenCue === "hmm"));
+    assert.ok(plans.every((plan) =>
+      (!plan.spokenCue || plan.spokenCue === "hmm") &&
+      (!plan.vocalFoley ||
+        plan.vocalFoley === "exhales" ||
+        plan.vocalFoley === "clears throat" ||
+        plan.vocalFoley === "coughs")
+    ));
   });
 });
 
@@ -225,6 +235,22 @@ describe("listener reaction validation and timing", () => {
         cameraCutEligible: false,
       })?.spokenCue,
       "go on",
+    );
+    assert.equal(
+      normalizeListenerReactionPlanV1({
+        v: 1,
+        name: "listenerReaction",
+        speakerBotId: "speaker",
+        listenerBotId: "listener",
+        messageId: "message",
+        targetSource: "role",
+        visualAction: "head_tilt",
+        vocalFoley: "clears throat",
+        targetProgress: 0.5,
+        seed: "seed",
+        cameraCutEligible: false,
+      })?.vocalFoley,
+      "clears throat",
     );
   });
 

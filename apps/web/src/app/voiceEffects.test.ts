@@ -4,8 +4,11 @@ import { describe, it } from "node:test";
 import { DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1, botVoiceTextureForPreset } from "@localai/shared";
 import {
   VOICE_LILT_DEPTH_CENTS,
+  beginVoicePlaybackProgress,
   buildVoiceDamageSchedule,
+  estimateVoiceOutputLatencyMs,
   resolveElevenLabsVoiceEffectPlan,
+  resolveVoiceEffectPlan,
   resolveVoiceTexture,
   voiceLiltDetuneCents,
 } from "./voiceEffects.ts";
@@ -44,14 +47,22 @@ describe("voice textures", () => {
   });
 });
 
-describe("ElevenLabs-only effects", () => {
+describe("engine-agnostic voice effects", () => {
+  it("uses the portable profile effect when a playback lane does not override it", () => {
+    const source = readFileSync(new URL("./voiceEffects.ts", import.meta.url), "utf8");
+    assert.match(
+      source,
+      /args\.voiceEffect \?\? args\.elevenLabsEffect \?\? profile\.elevenLabsEffect/u,
+    );
+  });
+
   it("keeps Clean transparent and gives every preset a distinct, level-controlled character", () => {
-    const clean = resolveElevenLabsVoiceEffectPlan("clean");
-    const radio = resolveElevenLabsVoiceEffectPlan("radio");
-    const robot = resolveElevenLabsVoiceEffectPlan("robot");
-    const echo = resolveElevenLabsVoiceEffectPlan("echo");
-    const chorus = resolveElevenLabsVoiceEffectPlan("chorus");
-    const deepSpace = resolveElevenLabsVoiceEffectPlan("deep-space");
+    const clean = resolveVoiceEffectPlan("clean");
+    const radio = resolveVoiceEffectPlan("radio");
+    const robot = resolveVoiceEffectPlan("robot");
+    const echo = resolveVoiceEffectPlan("echo");
+    const chorus = resolveVoiceEffectPlan("chorus");
+    const deepSpace = resolveVoiceEffectPlan("deep-space");
     const processed = [radio, robot, echo, chorus, deepSpace];
 
     assert.equal(clean.drive, 0);
@@ -68,10 +79,11 @@ describe("ElevenLabs-only effects", () => {
     assert.ok(processed.every((plan) => plan.outputTrim < 0.8));
     assert.ok(processed.every((plan) => plan.drive === 0 && plan.bitDepth === 16));
     assert.equal(new Set(processed.map((plan) => JSON.stringify(plan))).size, processed.length);
+    assert.deepEqual(resolveElevenLabsVoiceEffectPlan("chorus"), chorus);
   });
 
   it("keeps Chorus doubling bounded throughout long replies", () => {
-    const chorus = resolveElevenLabsVoiceEffectPlan("chorus");
+    const chorus = resolveVoiceEffectPlan("chorus");
     for (const voice of chorus.parallelVoices) {
       const modulationDepthSeconds = Math.abs(
         voice.delayModulationDepthSeconds ?? 0
@@ -113,12 +125,122 @@ describe("ElevenLabs-only effects", () => {
     assert.match(reactionSource, /args\.mode === "babble"/u);
     assert.match(reactionSource, /channel: "reaction"/u);
     assert.match(reactionSource, /maxDurationMs: args\.plan\.interjectionAttempt \? 1_300 : 900/u);
-    assert.match(pageSource, /settings\.voiceMode !== "english"[\s\S]{0,120}!plan\.spokenCue/u);
+    assert.match(reactionSource, /args\.plan\.vocalFoley && args\.mode !== "english"/u);
+    assert.match(pageSource, /listenerReactionHasAudio\(plan\)/u);
+    assert.match(pageSource, /listenerReactionFoley: args\.plan\.vocalFoley/u);
     assert.match(pageSource, /if \(!preparedInTime\) return false/u);
   });
 });
 
 describe("voice performance", () => {
+  it("holds visible lifecycle start until the compensated audio clock", () => {
+    const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+    let timeoutCallback: (() => void) | null = null;
+    let animationFrameCallback: FrameRequestCallback | null = null;
+    let elapsedMs = 85;
+    const progress: number[] = [];
+    let started = 0;
+
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: {
+        setTimeout: (callback: () => void) => {
+          timeoutCallback = callback;
+          return 1;
+        },
+        clearTimeout: () => {
+          timeoutCallback = null;
+        },
+        requestAnimationFrame: (callback: FrameRequestCallback) => {
+          animationFrameCallback = callback;
+          return 2;
+        },
+        cancelAnimationFrame: () => {
+          animationFrameCallback = null;
+        },
+      },
+    });
+
+    try {
+      const controller = beginVoicePlaybackProgress(
+        {
+          onStart: () => {
+            started += 1;
+          },
+          onProgress: (elapsed) => progress.push(elapsed),
+        },
+        1_000,
+        () => elapsedMs,
+        null,
+        { startDelayMs: 85 },
+      );
+      assert.equal(started, 0);
+      assert.deepEqual(progress, []);
+      const runStart = timeoutCallback as (() => void) | null;
+      assert.ok(runStart);
+      runStart();
+      assert.equal(started, 1);
+      assert.deepEqual(progress, [0]);
+
+      elapsedMs = 135;
+      const runFrame = animationFrameCallback as FrameRequestCallback | null;
+      assert.ok(runFrame);
+      runFrame(0);
+      assert.deepEqual(progress, [0, 50]);
+
+      controller.finish();
+      assert.equal(progress.at(-1), 1_000);
+    } finally {
+      if (originalWindow) {
+        Object.defineProperty(globalThis, "window", originalWindow);
+      } else {
+        Reflect.deleteProperty(globalThis, "window");
+      }
+    }
+  });
+
+  it("uses the audible device clock for English lifecycle timing", () => {
+    assert.equal(
+      estimateVoiceOutputLatencyMs(
+        {
+          baseLatency: 0.006,
+          currentTime: 10,
+          outputLatency: 0.085,
+          getOutputTimestamp: () => ({
+            contextTime: 9.88,
+            performanceTime: 1_000,
+          }),
+        },
+        1_000,
+      ),
+      120,
+    );
+    assert.equal(
+      estimateVoiceOutputLatencyMs({
+        baseLatency: 0.006,
+        currentTime: 10,
+        outputLatency: 0.085,
+      }),
+      85,
+    );
+    assert.equal(
+      estimateVoiceOutputLatencyMs({
+        baseLatency: 0.5,
+        currentTime: 10,
+      }),
+      250,
+    );
+
+    const englishSource = readFileSync(
+      new URL("./englishVoice.ts", import.meta.url),
+      "utf8",
+    );
+    assert.match(
+      englishSource,
+      /compensateLifecycleForOutputLatency: true/,
+    );
+  });
+
   it("applies per-bot Voice Character shelves and gain before limiting", () => {
     const source = readFileSync(new URL("./voiceEffects.ts", import.meta.url), "utf8");
     assert.match(source, /lowShelf\.type = "lowshelf"/);
@@ -127,7 +249,7 @@ describe("voice performance", () => {
     assert.match(source, /highShelf\.gain\.value = voiceCharacter\.highShelfDb/);
     assert.match(
       source,
-      /elevenLabsEffect\.outputTrim \*\s*voiceCharacter\.gainMultiplier/,
+      /voiceEffect\.outputTrim \*\s*voiceCharacter\.gainMultiplier/,
     );
     assert.match(
       source,

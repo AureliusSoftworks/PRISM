@@ -689,6 +689,26 @@ describe("hydrateAssistantMessageParts", () => {
           cameraCutEligible: false,
         },
       },
+      {
+        v: 1,
+        name: "coffeeReplayEvent",
+        kind: "listenerReaction",
+        botId: "bot-1",
+        occurredAt: "2026-07-02T15:03:12.000Z",
+        plan: {
+          v: 1,
+          name: "listenerReaction",
+          speakerBotId: "bot-2",
+          listenerBotId: "bot-1",
+          messageId: "message-2",
+          targetSource: "direct",
+          visualAction: "head_tilt",
+          vocalFoley: "coughs",
+          targetProgress: 0.61,
+          seed: "coffee-listener-v1:foley",
+          cameraCutEligible: false,
+        },
+      },
     ];
     const stored = serializeAssistantToolPayload({ coffeeReplayEvents });
 

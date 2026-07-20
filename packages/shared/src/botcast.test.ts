@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { botPowerSourceHashV1 } from "./botPower.ts";
+import { botPowerIsMutedV1, botPowerSourceHashV1 } from "./botPower.ts";
 
 import {
   BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT,
@@ -11,6 +11,7 @@ import {
   BOTCAST_VOICE_LEVEL_DEFAULT,
   BOTCAST_VOICE_LEVEL_MAX,
   applyBotcastProducerCueToTension,
+  botcastAutoCameraLeadInMs,
   botcastFallbackStudioAccentVariantForSeed,
   botcastCameraModeAt,
   botcastCameraShotAt,
@@ -18,8 +19,15 @@ import {
   botcastCameraOffsetYPercent,
   botcastDirectorSuggestion,
   botcastGuestDepartureEligible,
+  botcastGuestVoluntaryDepartureIntent,
   botcastGuestHasDepartedAt,
+  botcastHostInterruptionLineAt,
+  botcastHostInterruptionLinesForSeed,
+  botcastInterruptedGuestContent,
+  botcastInterruptionBridgeMessageId,
+  botcastMessageIsEphemeralInterruptionBridge,
   botcastListenerReactionForMessage,
+  botcastProducerGuestThinkingDiscountMs,
   botcastReplayMessageIndexAt,
   botcastReplayTimeline,
   botcastNextSpeakerRole,
@@ -28,6 +36,7 @@ import {
   botcastSocialInfluenceEventsAt,
   botcastStrongestNegativeSocialInfluenceAt,
   botcastSnapshotHasSpeakingOnlyAvatarVisibility,
+  botcastSnapshotPowersForRoleV1,
   botcastVoiceMoodForTension,
   isBotcastFallbackStudioAccentVariant,
   normalizeBotcastStudioLayout,
@@ -39,30 +48,77 @@ import {
 } from "./botcast.ts";
 
 describe("Signal fallback studio accents", () => {
+  it("keeps host interruption bridges stable and trims guests to what aired", () => {
+    const lines = botcastHostInterruptionLinesForSeed("host-1");
+    assert.equal(lines.length, 6);
+    assert.deepEqual(lines, botcastHostInterruptionLinesForSeed("host-1"));
+    assert.equal(botcastHostInterruptionLineAt(lines, lines.length), lines[0]);
+    assert.equal(
+      botcastInterruptedGuestContent(
+        "The part you have heard and the hidden remainder.",
+        "The part you have heard",
+      ),
+      "The part you have heard—",
+    );
+    assert.equal(
+      botcastInterruptedGuestContent("Nothing aired.", ""),
+      null,
+    );
+    const id = botcastInterruptionBridgeMessageId("episode-1", 2);
+    assert.equal(
+      botcastMessageIsEphemeralInterruptionBridge({ id }),
+      true,
+    );
+  });
+
   it("reads only valid saved listener reactions for the requested message", () => {
-    const events: BotcastReplayEvent[] = [{
-      id: "event-1",
-      episodeId: "episode-1",
-      sequence: 1,
-      kind: "listener_reaction",
-      occurredAt: "2026-07-17T12:00:00.000Z",
-      payload: {
-        plan: {
-          v: 1,
-          name: "listenerReaction",
-          speakerBotId: "guest",
-          listenerBotId: "host",
-          messageId: "message-1",
-          targetSource: "role",
-          visualAction: "nod",
-          spokenCue: "No, hold on.",
-          interjectionAttempt: true,
-          targetProgress: 0.48,
-          seed: "signal-listener-v1:test",
-          cameraCutEligible: true,
+    const events: BotcastReplayEvent[] = [
+      {
+        id: "event-1",
+        episodeId: "episode-1",
+        sequence: 1,
+        kind: "listener_reaction",
+        occurredAt: "2026-07-17T12:00:00.000Z",
+        payload: {
+          plan: {
+            v: 1,
+            name: "listenerReaction",
+            speakerBotId: "guest",
+            listenerBotId: "host",
+            messageId: "message-1",
+            targetSource: "role",
+            visualAction: "nod",
+            spokenCue: "No, hold on.",
+            interjectionAttempt: true,
+            targetProgress: 0.48,
+            seed: "signal-listener-v1:test",
+            cameraCutEligible: true,
+          },
         },
       },
-    }];
+      {
+        id: "event-2",
+        episodeId: "episode-1",
+        sequence: 2,
+        kind: "listener_reaction",
+        occurredAt: "2026-07-17T12:00:05.000Z",
+        payload: {
+          plan: {
+            v: 1,
+            name: "listenerReaction",
+            speakerBotId: "host",
+            listenerBotId: "guest",
+            messageId: "message-2",
+            targetSource: "role",
+            visualAction: "head_tilt",
+            vocalFoley: "clears throat",
+            targetProgress: 0.55,
+            seed: "signal-listener-v1:foley",
+            cameraCutEligible: false,
+          },
+        },
+      },
+    ];
     assert.equal(
       botcastListenerReactionForMessage(events, "message-1")?.listenerBotId,
       "host",
@@ -73,6 +129,10 @@ describe("Signal fallback studio accents", () => {
       true,
     );
     assert.equal(botcastListenerReactionForMessage(events, "other"), null);
+    assert.equal(
+      botcastListenerReactionForMessage(events, "message-2")?.vocalFoley,
+      "clears throat",
+    );
   });
 
   it("recognizes the three variants and deterministically assigns legacy shows", () => {
@@ -90,6 +150,14 @@ describe("Signal fallback studio accents", () => {
       first,
     );
     assert.equal(isBotcastFallbackStudioAccentVariant(first), true);
+  });
+});
+
+describe("Signal automatic camera lead-in", () => {
+  it("waits briefly for short speech and caps the delay on long turns", () => {
+    assert.equal(botcastAutoCameraLeadInMs(1_400), 240);
+    assert.equal(botcastAutoCameraLeadInMs(2_800), 336);
+    assert.equal(botcastAutoCameraLeadInMs(12_000), 420);
   });
 });
 
@@ -207,6 +275,58 @@ describe("Signal replayed ghost avatar presence", () => {
       true,
     );
   });
+
+  it("exposes legacy mute snapshots to every live Signal side channel", () => {
+    const name = "Mute";
+    const intent = "Never talks. Ever.";
+    const events: BotcastReplayEvent[] = [{
+      id: "snapshot-mute",
+      episodeId: "episode-mute",
+      sequence: 1,
+      kind: "segment",
+      occurredAt: "2026-07-19T12:00:00.000Z",
+      payload: {
+        segment: "opening",
+        ordinal: 0,
+        powerSnapshot: {
+          v: 1,
+          hostBotId: "silent-jack",
+          guestBotId: "guest",
+          hostPowers: [{
+            version: 1,
+            id: "legacy-mute",
+            name,
+            intent,
+            enabled: true,
+            compileStatus: "ready",
+            compiled: {
+              version: 1,
+              sourceHash: botPowerSourceHashV1(name, intent),
+              selfCue: "Silence is golden.",
+              observerCue: "He rarely speaks.",
+              effects: [],
+              ruleLabels: ["Absolute Silence"],
+            },
+          }],
+          guestPowers: [],
+        },
+      },
+    }];
+    const episode = {
+      events,
+      hostBotId: "silent-jack",
+      guestBotId: "guest",
+    };
+
+    assert.equal(
+      botPowerIsMutedV1(botcastSnapshotPowersForRoleV1(episode, "host")),
+      true,
+    );
+    assert.equal(
+      botPowerIsMutedV1(botcastSnapshotPowersForRoleV1(episode, "guest")),
+      false,
+    );
+  });
 });
 
 describe("Signal studio relighting", () => {
@@ -216,6 +336,8 @@ describe("Signal studio relighting", () => {
     assert.match(BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT, /single daytime replacement frame/iu);
     assert.match(BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT, /do not show a nighttime state/iu);
     assert.match(BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT, /diptych|split screen|comparison/iu);
+    assert.match(BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT, /Preserve[\s\S]*microphones/iu);
+    assert.match(BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT, /Do not add coffee cups, mugs/iu);
     assert.doesNotMatch(BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT, /persona|set bible|host/iu);
   });
 });
@@ -315,7 +437,7 @@ describe("Signal studio atmosphere mix", () => {
         { background: 0.2, grain: 0.006, foley: 1.1 },
         { background: 0, grain: 0, foley: 0 },
       ),
-      { background: 0.2, grain: 0.006, foley: 1.1 },
+      { background: 0.2, grain: 0, foley: 1.1 },
     );
   });
 });
@@ -386,6 +508,17 @@ describe("Botcast episode state", () => {
       nowMs: 1,
     }), true);
     assert.equal(botcastSessionShouldClose({
+      messages: Array.from({ length: 12 }, (_, index) => ({
+        speakerRole: index % 2 === 0 ? "host" as const : "guest" as const,
+        content: index === 11
+          ? "Good luck with Karen. I mean that."
+          : "A substantial exchange keeps developing the topic with a concrete example.",
+      })),
+      durationMinutes: null,
+      startedAtMs: 0,
+      nowMs: 1,
+    }), true);
+    assert.equal(botcastSessionShouldClose({
       messages: Array.from({ length: 30 }, (_, index) => ({
         speakerRole: index % 2 === 0 ? "host" as const : "guest" as const,
         content: "The subject remains active and unresolved across this exchange.",
@@ -394,6 +527,49 @@ describe("Botcast episode state", () => {
       startedAtMs: 0,
       nowMs: 1,
     }), true);
+  });
+
+  it("recognizes earned voluntary exits without treating conditional warnings as departures", () => {
+    assert.equal(botcastGuestVoluntaryDepartureIntent({
+      content: "I should probably get going and let you two have this conversation.",
+      segment: "interview",
+      priorUtteranceCount: 7,
+    }), true);
+    assert.equal(botcastGuestVoluntaryDepartureIntent({
+      content: "This is my cue to step outside now. Take care of each other.",
+      segment: "interview",
+      priorUtteranceCount: 11,
+    }), true);
+    assert.equal(botcastGuestVoluntaryDepartureIntent({
+      content: "If you keep pushing, I have to leave.",
+      segment: "interview",
+      priorUtteranceCount: 11,
+    }), false);
+    assert.equal(botcastGuestVoluntaryDepartureIntent({
+      content: "I need to go back to the contradiction in your first question.",
+      segment: "interview",
+      priorUtteranceCount: 11,
+    }), false);
+    assert.equal(botcastGuestVoluntaryDepartureIntent({
+      content: "I should leave that assumption aside and answer the real question.",
+      segment: "interview",
+      priorUtteranceCount: 11,
+    }), false);
+    assert.equal(botcastGuestVoluntaryDepartureIntent({
+      content: "I'm going back to your first question because the premise matters.",
+      segment: "interview",
+      priorUtteranceCount: 11,
+    }), false);
+    assert.equal(botcastGuestVoluntaryDepartureIntent({
+      content: "I'm leaving that interpretation behind, not the interview.",
+      segment: "interview",
+      priorUtteranceCount: 11,
+    }), false);
+    assert.equal(botcastGuestVoluntaryDepartureIntent({
+      content: "I should probably get going.",
+      segment: "opening",
+      priorUtteranceCount: 1,
+    }), false);
   });
 
   it("uses elapsed time for a timed Signal session without ending before three exchanges", () => {
@@ -440,6 +616,23 @@ describe("Botcast episode state", () => {
     }), false);
   });
 
+  it("runs the episode clock at half speed while the Producer guest thinks", () => {
+    const threeExchanges = Array.from({ length: 6 }, (_, index) => ({
+      speakerRole: index % 2 === 0 ? "host" as const : "guest" as const,
+      content: "A line.",
+    }));
+    assert.equal(
+      botcastSessionShouldClose({
+        messages: threeExchanges,
+        durationMinutes: 3,
+        startedAtMs: 0,
+        nowMs: 4 * 60_000,
+        producerGuestThinkingDiscountMs: 2 * 60_000,
+      }),
+      false,
+    );
+  });
+
   it("requires resistance and a warning before departure", () => {
     const calm = { level: 0 as const, warningCount: 0, stage: "calm" as const };
     const resistance = applyBotcastProducerCueToTension(calm, { kind: "press_harder" });
@@ -455,6 +648,10 @@ describe("Botcast episode state", () => {
     assert.equal(
       applyBotcastProducerCueToTension(warning, { kind: "move_on" }).stage,
       "resistance",
+    );
+    assert.deepEqual(
+      applyBotcastProducerCueToTension(calm, { kind: "refocus" }),
+      calm,
     );
   });
 
@@ -650,6 +847,49 @@ describe("Botcast replay director", () => {
     assert.equal(
       botcastReplayMessageIndexAt(timeline.messageStartMs, timeline.messageStartMs[1]!),
       1,
+    );
+  });
+
+  it("replays Producer typing pauses as guest thinking", () => {
+    const events: BotcastReplayEvent[] = [
+      {
+        id: "thinking",
+        episodeId: "episode",
+        sequence: 1,
+        kind: "guest_thinking",
+        payload: {
+          messageId: "guest-answer",
+          wallDurationMs: 12_000,
+          timelineDurationMs: 12_000,
+        },
+        occurredAt: "2026-01-01T00:00:00.000Z",
+      },
+    ];
+    const timeline = botcastReplayTimeline(
+      [
+        { id: "host-question", content: "What changed?" },
+        { id: "guest-answer", content: "My standards changed." },
+      ],
+      events,
+    );
+
+    assert.equal(botcastProducerGuestThinkingDiscountMs(events), 6_000);
+    assert.equal(timeline.thinkingRanges[0]?.startMs, timeline.messageEndMs[0]);
+    assert.equal(
+      timeline.thinkingRanges[0]?.endMs,
+      timeline.messageEndMs[0]! + 12_000,
+    );
+    assert.equal(
+      timeline.messageStartMs[1],
+      timeline.thinkingRanges[0]?.endMs,
+    );
+    assert.equal(
+      botcastReplayMessageIndexAt(
+        timeline.messageStartMs,
+        timeline.messageEndMs[0]! + 1_000,
+        timeline.messageEndMs,
+      ),
+      -1,
     );
   });
 });

@@ -31,7 +31,11 @@ describe("Coffee empty-cup behavior", () => {
   it("finishes the client session after a server-directed group wrap", () => {
     assert.match(
       pageSource,
-      /if \(response\.shouldEndSession\) \{\s*clearCoffeeLoopTimer\(\);\s*assignCoffeeSessionPhase\("finished"\);/u,
+      /if \(response\.shouldEndSession\) \{\s*finishCoffeeSessionRef\.current\(response\.conversation\.id\);\s*return;/u,
+    );
+    assert.match(
+      pageSource,
+      /\/api\/coffee\/sessions\/\$\{encodeURIComponent\(sessionId\)\}\/depart/u,
     );
   });
 });

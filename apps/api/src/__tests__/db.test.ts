@@ -151,6 +151,7 @@ describe("createDatabase bot export hash migration", () => {
         "user-1"
       );
       db.exec("ALTER TABLE users DROP COLUMN preferred_image_provider;");
+      db.exec("ALTER TABLE users DROP COLUMN graphics_quality;");
       db.exec(
         "ALTER TABLE botcast_shows DROP COLUMN fallback_studio_accent_variant;"
       );
@@ -166,6 +167,14 @@ describe("createDatabase bot export hash migration", () => {
       const botcastShowColumns = reopened
         .prepare("PRAGMA table_info(botcast_shows)")
         .all() as Array<{ name: string }>;
+      assert.equal(
+        (
+          columns.find((column) => column.name === "self_referral") as
+            | { dflt_value?: string | null }
+            | undefined
+        )?.dflt_value,
+        "''",
+      );
       assert.ok(
         botcastShowColumns.some(
           (column) => column.name === "fallback_studio_accent_variant"
@@ -175,6 +184,19 @@ describe("createDatabase bot export hash migration", () => {
         userColumns.some(
           (column) => column.name === "model_visibility_defaults_version"
         )
+      );
+      assert.ok(
+        userColumns.some(
+          (column) =>
+            column.name === "graphics_quality" &&
+            column.dflt_value === "'high'",
+        ),
+      );
+      assert.equal(
+        (reopened
+          .prepare("SELECT graphics_quality FROM users WHERE id = ?")
+          .get("user-1") as { graphics_quality: string }).graphics_quality,
+        "high",
       );
       assert.ok(
         userColumns.some(

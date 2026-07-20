@@ -32,7 +32,7 @@ test("completed Coffee sessions enter read-only review before replay starts", ()
 test("replay renders Default Prism in a reserved bottom table seat", () => {
   assert.match(
     pageSource,
-    /\{coffeeReplayActive \? \(\s*<div\s*className=\{styles\.coffeeReplayPlayerSeat\}/,
+    /\{coffeeReplayActive && \(replayState\?\.playerPresent \?\? true\) \? \(\s*<div\s*className=\{styles\.coffeeReplayPlayerSeat\}/,
   );
   assert.match(pageSource, /className=\{styles\.coffeeReplayPlayerSeat\}/);
   assert.match(pageSource, /glyph=\{zenDefaultPrismGlyph\}/);
@@ -51,6 +51,31 @@ test("replay renders Default Prism in a reserved bottom table seat", () => {
   assert.match(
     pageSource,
     /className=\{styles\.coffeeReplayPlayerGlyph\}[\s\S]{0,180}<BotGlyph\s+name=\{zenDefaultPrismGlyph\}/,
+  );
+  assert.match(pageSource, /data-player-departing=/);
+  assert.match(
+    cssSource,
+    /\.coffeeReplayPlayerSeat\[data-player-departing="true"\][\s\S]*?animation: coffeeReplayPlayerWalkAway/,
+  );
+});
+
+test("review stops live audio and cannot start replay while the closing wrap is settling", () => {
+  assert.match(
+    pageSource,
+    /const openCoffeeSession = async \(conversationId: string\) => \{[\s\S]*?stopAudioForStateExit\(\);[\s\S]*?\/api\/conversations\//,
+  );
+  assert.match(
+    pageSource,
+    /const startCoffeeReplay = \(\) => \{[\s\S]*?coffeeReviewPreparingSessionId === coffeeConversation\.id[\s\S]*?return;/,
+  );
+  assert.match(pageSource, /"Wrapping table\.\.\."/);
+  assert.match(
+    pageSource,
+    /coffeeSynopsisRequestIdsRef\.current\.delete\(response\.conversation\.id\);\s*setCoffeeReviewPreparingSessionId\(response\.conversation\.id\);/,
+  );
+  assert.match(
+    pageSource,
+    /const hasSynopsis = coffeeConversationHasSessionSynopsis\(\s*coffeeConversation,\s*\);\s*if \(coffeeSessionModelDisabled && !hasSynopsis\)/,
   );
 });
 

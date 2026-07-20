@@ -32,6 +32,7 @@ function show(overrides: Partial<BotcastShow> = {}): BotcastShow {
     updatedAt: "2026-01-01T00:00:00.000Z",
     episodeCount: 0,
     ...overrides,
+    hostInterruptionLines: overrides.hostInterruptionLines ?? ["Wait—"],
   };
 }
 
@@ -85,6 +86,27 @@ describe("signalShowMagicManifest", () => {
     assert.deepEqual(manifest.missingArtwork, ["day-studio"]);
     assert.equal(manifest.needsAudioPackage, true);
     assert.equal(manifest.complete, false);
+  });
+
+  it("still generates a muted host's identity while preserving canonical silence", () => {
+    const initial = signalShowMagicManifest(
+      show({
+        studioIdentity: "Canonical persona-first set bible for Silent Jack.",
+        dashboardBlurbs: ["..."],
+      }),
+    );
+    const generated = signalShowMagicManifest(
+      show({
+        studioIdentity:
+          "A vacant broadcast chamber organized around sealed meters and unused speaking lights.",
+        dashboardBlurbs: ["..."],
+      }),
+    );
+
+    assert.equal(initial.needsTextIdentity, true);
+    assert.equal(initial.complete, false);
+    assert.equal(generated.needsTextIdentity, false);
+    assert.equal(generated.complete, true);
   });
 
   it("is complete only when text, artwork, and the audio package are present", () => {

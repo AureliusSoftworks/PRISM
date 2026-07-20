@@ -16,7 +16,9 @@ import {
   coffeePowerHistoryLimitForSpeaker,
   coffeePowerHearingRepeatDirective,
   coffeePowerInsightPromptLines,
+  coffeePowerActionBias,
   coffeePowerRouterPromptLines,
+  coffeePowerResponseBudgetForBot,
   coffeePowerSpeakerOverride,
   coffeePowerSpeakerPressures,
   coffeePowersPromptForSpeaker,
@@ -83,6 +85,67 @@ test("local compiler produces ready structured powers", async () => {
   assert.equal(
     result.powers[0]?.compiled?.sourceHash,
     botPowerSourceHashV1("Invisible", "Only visible to the bot named Light Yagami")
+  );
+});
+
+test("compiler makes Lazy Ivan's bare-minimum replies a hard reusable response budget", async () => {
+  let calls = 0;
+  const unusedProvider: LlmProvider = {
+    name: "local",
+    async generateResponse() {
+      calls += 1;
+      throw new Error("provider should not be needed");
+    },
+    async embedText() { return []; },
+  };
+  const result = await compileBotPowers({
+    provider: unusedProvider,
+    botName: "Lazy Ivan",
+    powers: [{
+      version: 1,
+      id: "lazy",
+      name: "Lazy",
+      intent: "He doesn't elaborate and says the bare minimum.",
+      enabled: true,
+      compileStatus: "draft",
+      compiled: null,
+    }],
+  });
+
+  assert.equal(calls, 0);
+  assert.equal(result.powers[0]?.compileStatus, "ready");
+  assert.deepEqual(result.powers[0]?.compiled?.effects, [{
+    type: "response_budget",
+    mode: "minimal",
+    enforcement: "hard",
+  }]);
+  assert.match(result.powers[0]?.compiled?.selfCue ?? "", /one short sentence/u);
+  assert.match(result.powers[0]?.compiled?.observerCue ?? "", /Lazy Ivan/u);
+});
+
+test("response budgets compose with an existing deterministic social effect", async () => {
+  const unusedProvider: LlmProvider = {
+    name: "local",
+    async generateResponse() { throw new Error("provider should not be needed"); },
+    async embedText() { return []; },
+  };
+  const result = await compileBotPowers({
+    provider: unusedProvider,
+    botName: "Lazy Ivan",
+    powers: [{
+      version: 1,
+      id: "lazy-irritant",
+      name: "Lazy Irritant",
+      intent: "He says the bare minimum, and each time he speaks he gradually lowers everyone's mood.",
+      enabled: true,
+      compileStatus: "draft",
+      compiled: null,
+    }],
+  });
+
+  assert.deepEqual(
+    result.powers[0]?.compiled?.effects.map((effect) => effect.type),
+    ["social_influence", "response_budget"],
   );
 });
 
@@ -324,6 +387,46 @@ test("compiler creates hard addressed-speech echo rules without consulting the l
   assert.deepEqual(result.powers[0]?.compiled?.effects, [{ type: "echo_addressed" }]);
   assert.deepEqual(result.powers[0]?.compiled?.ruleLabels, ["Echoes addressed speech"]);
   assert.match(result.powers[0]?.compiled?.observerCue ?? "", /sender may react with confusion/u);
+});
+
+test("compiler creates reusable live-interruption rules without consulting the local model", async () => {
+  let calls = 0;
+  const unusedProvider: LlmProvider = {
+    name: "local",
+    async generateResponse() {
+      calls += 1;
+      throw new Error("provider should not be needed");
+    },
+    async embedText() { return []; },
+  };
+  const result = await compileBotPowers({
+    provider: unusedProvider,
+    botName: "Interrupting Tom",
+    powers: [{
+      version: 1,
+      id: "interrupting-tom",
+      name: "Interrupting Tom",
+      intent: "Aggressively jumps in after whoever just spoke and cuts into real live openings whenever possible.",
+      enabled: true,
+      compileStatus: "draft",
+      compiled: null,
+    }],
+  });
+
+  assert.equal(calls, 0);
+  assert.equal(result.powers[0]?.compileStatus, "ready");
+  assert.deepEqual(result.powers[0]?.compiled?.effects[0], {
+    type: "interruption",
+    frequency: "frequent",
+    strength: "large",
+    targets: [{ kind: "all" }],
+  });
+  assert.ok(
+    result.powers[0]?.compiled?.effects.some(
+      (effect) => effect.type === "turn_gravity",
+    ),
+  );
+  assert.match(result.powers[0]?.compiled?.observerCue ?? "", /eligible bot speaker/u);
 });
 
 test("compiler creates hard-of-hearing repeat rules without consulting the local model", async () => {
@@ -1229,6 +1332,41 @@ test("Coffee resolution freezes named visibility and session-start trait mood", 
   assert.match(noLightPlan.warnings.join(" "), /No matching Coffee participant.*Light Yagami/u);
 });
 
+test("Coffee freezes legacy empty-effect mute Powers as absolute silence", () => {
+  const db = powerDb();
+  const name = "Mute";
+  const intent = "Never talks. Ever.";
+  db.prepare("INSERT INTO conversations VALUES (?, ?, 'coffee', ?, NULL)")
+    .run("silent-session", "user", JSON.stringify(["silent-jack"]));
+  db.prepare("INSERT INTO bots VALUES (?, 'user', ?, ?, ?, ?)").run(
+    "silent-jack",
+    "Silent Jack",
+    "",
+    null,
+    JSON.stringify([{
+      version: 1,
+      id: "legacy-mute",
+      name,
+      intent,
+      enabled: true,
+      compileStatus: "ready",
+      compiled: {
+        version: 1,
+        sourceHash: botPowerSourceHashV1(name, intent),
+        selfCue: "Silence is golden.",
+        observerCue: "He rarely speaks.",
+        effects: [],
+        ruleLabels: ["Absolute Silence"],
+      },
+    }]),
+  );
+
+  const plan = resolveCoffeePowersForSession(db, "user", "silent-session");
+
+  assert.equal(coffeePowerBotIsMuted(plan, "silent-jack"), true);
+  assert.deepEqual(plan.bots["silent-jack"]?.effects, [{ type: "mute" }]);
+});
+
 test("Coffee frames private perception for permitted and unaware speakers", () => {
   const plan = {
     version: 1 as const,
@@ -1334,6 +1472,28 @@ test("Coffee speaker pressures are contextual, deterministic, and capped", () =>
   }).join("\n"), /Gravity: \+3/u);
 });
 
+test("Coffee adapts the shared interruption primitive into turn pressure and action guidance", () => {
+  const plan = resolvedPlan({
+    interrupter: [{
+      type: "interruption",
+      frequency: "frequent",
+      strength: "large",
+      targets: [{ kind: "bot", name: "Light", botId: "light" }],
+    }],
+  });
+  assert.deepEqual(coffeePowerSpeakerPressures({
+    plan,
+    candidateBotIds: ["interrupter"],
+    lastSpeakerBotId: "light",
+    contextText: "A live opening appears.",
+  }), [{ botId: "interrupter", score: 3 }]);
+  assert.deepEqual(coffeePowerActionBias(plan, "interrupter"), {
+    type: "action_bias",
+    cue: "Cut in quickly when a real conversational opening appears.",
+    frequency: "frequent",
+  });
+});
+
 test("Coffee selective memory changes only the speaker's bounded history view", () => {
   const history = Array.from({ length: 12 }, (_, index) => ({
     id: `message-${index}`,
@@ -1391,12 +1551,21 @@ test("Coffee speaker prompts make response, topic, and memory Powers subjective"
         type: "selective_memory", mode: "remember", strength: "large",
         targets: [{ kind: "bot", name: "Ryuk", botId: "ryuk" }],
       },
+      {
+        type: "response_budget", mode: "minimal", enforcement: "hard",
+      },
     ],
   });
   const prompt = coffeePowersPromptForSpeaker(plan, "light", ["ryuk"]);
   assert.match(prompt, /Response bond.*Ryuk/u);
   assert.match(prompt, /Topic boundary.*small talk/u);
   assert.match(prompt, /earlier words from Ryuk remain unusually vivid/u);
+  assert.match(prompt, /Hard response budget: use one short table sentence/u);
+  assert.deepEqual(coffeePowerResponseBudgetForBot(plan, "light", true), {
+    type: "response_budget",
+    mode: "minimal",
+    enforcement: "hard",
+  });
 });
 
 test("Coffee Insight gives only its owner bounded qualitative reads of visible targets", () => {

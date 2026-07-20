@@ -158,9 +158,7 @@ export function prismSceneQualityConfig(
   reducedMotion: boolean,
   devicePixelRatio = 1,
 ): PrismSceneQualityConfig {
-  const configured = reducedMotion
-    ? PRISM_SCENE_QUALITY_CONFIG.full
-    : PRISM_SCENE_QUALITY_CONFIG[quality];
+  const configured = PRISM_SCENE_QUALITY_CONFIG[quality];
   const dpr = Number.isFinite(devicePixelRatio)
     ? Math.max(0.5, devicePixelRatio)
     : 1;
@@ -177,14 +175,15 @@ export function resolvePrismSceneActivity(options: {
   requested: PrismSceneActivity;
   foreground: boolean;
   reducedMotion: boolean;
-  quality: PrismSceneQuality;
+  qualityCeiling: PrismSceneQuality;
   mounted?: boolean;
 }): PrismSceneActivity {
   if (options.mounted === false || !options.foreground) return "suspended";
   if (
     options.requested === "suspended" ||
     options.requested === "settled" ||
-    options.reducedMotion
+    options.reducedMotion ||
+    options.qualityCeiling === "minimal"
   ) {
     return options.requested === "suspended" ? "suspended" : "settled";
   }
@@ -244,7 +243,8 @@ export function prismSceneTimingWindow(
 }
 
 export class PrismAdaptiveQualityController {
-  private qualityValue: PrismSceneQuality = "full";
+  private qualityValue: PrismSceneQuality;
+  private ceilingValue: PrismSceneQuality;
   private ignoredUntilMs: number;
   private activeTargetFps = 0;
   private samples: number[] = [];
@@ -252,7 +252,9 @@ export class PrismAdaptiveQualityController {
   private goodWindowCount = 0;
   private lastTierChangeMs = Number.NEGATIVE_INFINITY;
 
-  constructor(nowMs = 0) {
+  constructor(nowMs = 0, ceiling: PrismSceneQuality = "full") {
+    this.ceilingValue = ceiling;
+    this.qualityValue = ceiling;
     this.ignoredUntilMs = nowMs + PRISM_SCENE_SAMPLE_WARMUP_MS;
   }
 
@@ -262,6 +264,25 @@ export class PrismAdaptiveQualityController {
 
   get pendingSampleCount(): number {
     return this.samples.length;
+  }
+
+  get ceiling(): PrismSceneQuality {
+    return this.ceilingValue;
+  }
+
+  setCeiling(
+    ceiling: PrismSceneQuality,
+    nowMs: number,
+  ): PrismSceneQuality | undefined {
+    if (ceiling === this.ceilingValue) return undefined;
+    this.ceilingValue = ceiling;
+    const qualityChanged = this.qualityValue !== ceiling;
+    this.qualityValue = ceiling;
+    this.badWindowCount = 0;
+    this.goodWindowCount = 0;
+    this.lastTierChangeMs = nowMs;
+    this.noteDiscontinuity(nowMs);
+    return qualityChanged ? ceiling : undefined;
   }
 
   noteDiscontinuity(nowMs: number): void {
@@ -331,8 +352,9 @@ export class PrismAdaptiveQualityController {
       return undefined;
     }
     const currentIndex = PRISM_SCENE_QUALITY_ORDER.indexOf(this.qualityValue);
+    const ceilingIndex = PRISM_SCENE_QUALITY_ORDER.indexOf(this.ceilingValue);
     const nextIndex = Math.max(
-      0,
+      ceilingIndex,
       Math.min(PRISM_SCENE_QUALITY_ORDER.length - 1, currentIndex + direction),
     );
     const next = PRISM_SCENE_QUALITY_ORDER[nextIndex];

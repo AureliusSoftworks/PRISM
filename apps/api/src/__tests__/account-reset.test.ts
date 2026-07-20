@@ -50,7 +50,7 @@ describe("restoreFactoryDefaultsInDatabase", () => {
         .prepare(
           `
           SELECT
-            email, display_name, theme, preferred_provider, preferred_image_provider, provider_locked,
+            email, display_name, theme, graphics_quality, preferred_provider, ephemeral_chat_provider_preferences, preferred_image_provider, provider_locked,
             auto_memory, auto_switch_model, auto_fallback_chain, hidden_bot_model_ids,
             hidden_comfyui_workflow_ids, model_visibility_defaults_version,
             preferred_local_model, preferred_online_model,
@@ -103,7 +103,9 @@ describe("restoreFactoryDefaultsInDatabase", () => {
       assert.equal(user.email, "user-1@example.com");
       assert.equal(user.display_name, "User One");
       assert.equal(user.theme, "system");
+      assert.equal(user.graphics_quality, "high");
       assert.equal(user.preferred_provider, "local");
+      assert.equal(user.ephemeral_chat_provider_preferences, "{}");
       assert.equal(user.preferred_image_provider, "local");
       assert.equal(user.provider_locked, 0);
       assert.equal(user.auto_memory, 1);
@@ -227,7 +229,9 @@ function seedResetFixture(db: DatabaseSync): void {
     UPDATE users
     SET
       theme = 'dark',
+      graphics_quality = 'low',
       preferred_provider = 'openai',
+      ephemeral_chat_provider_preferences = '{"coffee":"local","botcast":"online"}',
       preferred_image_provider = 'openai',
       provider_locked = 1,
       auto_memory = 0,

@@ -10,6 +10,7 @@ const SIGNAL_LOGO_BACKGROUND_DISTANCE = 72;
 const SIGNAL_LOGO_COLOR_KEY = [255, 0, 255] as const;
 const SIGNAL_LOGO_COLOR_KEY_DISTANCE = 28;
 const SIGNAL_LOGO_LEGACY_BLACK_MAX = 36;
+const SIGNAL_GENERATED_BACKGROUND_EDGE_MATCH_RATIO = 0.92;
 const SIGNAL_ASSET_DATA_URL_PATTERN =
   /^data:image\/(?:png|jpe?g|webp);base64,([a-zA-Z0-9+/=\r\n]+)$/iu;
 
@@ -32,6 +33,17 @@ function rgbDistance(
     Math.abs(pixels[offset]! - background[0]),
     Math.abs(pixels[offset + 1]! - background[1]),
     Math.abs(pixels[offset + 2]! - background[2]),
+  );
+}
+
+function rgbTupleDistance(
+  left: readonly [number, number, number],
+  right: readonly [number, number, number],
+): number {
+  return Math.max(
+    Math.abs(left[0] - right[0]),
+    Math.abs(left[1] - right[1]),
+    Math.abs(left[2] - right[2]),
   );
 }
 
@@ -123,21 +135,58 @@ function replaceConnectedGeneratedLogoKey(
     rgbaOffset(width, 0, height - 1),
     rgbaOffset(width, width - 1, height - 1),
   ];
-  const backgrounds = cornerOffsets
-    .map(
-      (offset) =>
-        [pixels[offset]!, pixels[offset + 1]!, pixels[offset + 2]!] as const,
-    )
-    .filter(
-      (background) =>
-        Math.max(...background) <= SIGNAL_LOGO_LEGACY_BLACK_MAX ||
-        Math.max(
-          Math.abs(background[0] - SIGNAL_LOGO_COLOR_KEY[0]),
-          Math.abs(background[1] - SIGNAL_LOGO_COLOR_KEY[1]),
-          Math.abs(background[2] - SIGNAL_LOGO_COLOR_KEY[2]),
-        ) <= SIGNAL_LOGO_COLOR_KEY_DISTANCE,
-    );
-  if (backgrounds.length === 0) return false;
+  const cornerBackgrounds = cornerOffsets.map(
+    (offset) =>
+      [pixels[offset]!, pixels[offset + 1]!, pixels[offset + 2]!] as const,
+  );
+  let backgrounds = cornerBackgrounds.filter(
+    (background) =>
+      Math.max(...background) <= SIGNAL_LOGO_LEGACY_BLACK_MAX ||
+      rgbTupleDistance(background, SIGNAL_LOGO_COLOR_KEY) <=
+        SIGNAL_LOGO_COLOR_KEY_DISTANCE,
+  );
+  if (backgrounds.length === 0) {
+    const anchor = cornerBackgrounds[0]!;
+    if (
+      !cornerBackgrounds.every(
+        (background) =>
+          rgbTupleDistance(background, anchor) <=
+          SIGNAL_LOGO_COLOR_KEY_DISTANCE,
+      )
+    ) {
+      return false;
+    }
+    let edgePixels = 0;
+    let matchingEdgePixels = 0;
+    const measureEdgePixel = (pixelIndex: number): void => {
+      edgePixels += 1;
+      const offset = pixelIndex * 4;
+      if (
+        cornerBackgrounds.some(
+          (background) =>
+            rgbDistance(pixels, offset, background) <=
+            SIGNAL_LOGO_COLOR_KEY_DISTANCE,
+        )
+      ) {
+        matchingEdgePixels += 1;
+      }
+    };
+    for (let x = 0; x < width; x += 1) {
+      measureEdgePixel(x);
+      measureEdgePixel((height - 1) * width + x);
+    }
+    for (let y = 1; y < height - 1; y += 1) {
+      measureEdgePixel(y * width);
+      measureEdgePixel(y * width + width - 1);
+    }
+    if (
+      matchingEdgePixels <
+      edgePixels * SIGNAL_GENERATED_BACKGROUND_EDGE_MATCH_RATIO
+    ) {
+      return false;
+    }
+    backgrounds = cornerBackgrounds;
+  }
 
   const pixelCount = width * height;
   const visited = new Uint8Array(pixelCount);

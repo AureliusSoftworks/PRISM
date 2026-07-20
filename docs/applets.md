@@ -24,11 +24,11 @@ ship as `0.5.2` while Coffee is `v0.7` and Story is `v0.1`.
 
 | Applet | Version | Status | Notes |
 | --- | --- | --- | --- |
-| Chat | v1.7 | Active | Full playground for bots, providers, models, images, exports, memory-aware conversations, per-bot online voice identity, sparse shared mic presence, and ready Power persona cues including trustworthy candor and hard-of-hearing behavior. |
-| Zen | v1.6 | Active | Calm one-to-one continuity surface with shared bot voice identity, mic presence, and ready Power persona cues including trustworthy candor and hard-of-hearing behavior; the standalone Zen lane is deprecating as this becomes Prism's default state. |
-| Coffee | v2.0 | Active | Multi-bot group table with Coffee Groups, model-aware session holds, pacing, cups, transcripts, replay, synchronized online speech, living atmosphere, one-response candor, and exact bot-to-bot repeats that lower the repeating bot's mood. |
-| Signal | v1.0 | Active | Bot-owned interview shows with audience pulse, studio placement, frozen episode Powers, private direction, archives, directed replay, one-response candor, and saved exact repeats with descending delivery mood. |
-| Story | v0.5 | Preview | Generated visual-novel episodes with bots, choices, maps, inventory, transcripts, shared PRISM menu behavior, and adapted scene-generation candor with target agency intact. |
+| Chat | v1.9 | Active | Full playground for bots, providers, models, images, exports, memory-aware conversations, per-bot online voice identity, sparse shared mic presence, and ready Powers including engine-bounded response budgets. |
+| Zen | v1.8 | Active | Calm one-to-one continuity surface with shared bot voice identity, mic presence, and ready Powers including engine-bounded response budgets; the standalone Zen lane is deprecating as this becomes Prism's default state. |
+| Coffee | v2.2 | Active | Multi-bot group table with Coffee Groups, model-aware session holds, pacing, cups, transcripts, replay, synchronized online speech, living atmosphere, and table-adapted response budgets. |
+| Signal | v1.7 | Active | Bot-owned anthology interviews with audience-projected transcript, voice, replay, and reviews; studio-specific atmosphere; frozen episode Powers; guest-led structure for echo-bound hosts; and bounded, replay-safe interruption Powers. |
+| Story | v0.6 | Preview | Generated visual-novel episodes with bots, choices, maps, inventory, transcripts, shared PRISM menu behavior, and engine-bounded speaker narration. |
 | Arena | v0.0 | Planned | Moderated bot debate surface. |
 | Polling | v0.0 | Planned | AI-powered polling across bot groups. |
 | Feed | v0.0 | Planned | BotBook-style social feed. |
@@ -62,12 +62,56 @@ workspace. Cross-applet stages never silently synchronize or rewrite content.
 See [Slate V1 Product and UX Contract](./slate-v1-product-ux-contract.md).
 The phased Continuity, Review Circle, Atmosphere, safety, export, and publishing
 contracts are indexed in [Slate Master Plan](./slate-master-plan.md).
+All current and future persona-review systems should follow the shared
+[Review Artifacts](./review-artifacts.md) boundary.
 
 Slate stayed planned `v0.0` until its first functional vertical slice became
 usable end to end. It entered preview at `v0.1` and is now `v0.7`; later snapshot
 stages do not block the standalone preview.
 
 ## Changelog
+
+- Bumped `Signal` to `v1.7` so a Producer cut stops the current turn, catches the
+  host briefly off guard, and still gives them one short, tactful on-air sign-off
+  before the saved outro. Echo-bound hosts now remain exact mirrors while a bot
+  guest carries the opening and closing. A reusable interruption effect can cut
+  eligible bot guest speech while human Producer answers, boundaries, departures,
+  wraps, closings, and hard speech rules stay protected; transcript, voice, and
+  replay retain only what the audience heard.
+
+- Bumped `Signal` to `v1.6` for one studio-specific generated room-and-Foley
+  backing loop per show, with the colliding static bed and shared random backing
+  Foley removed. Refreshing a studio refreshes its cohesive atmosphere Online,
+  while synchronized tactile Foley remains separate. Off-air host chat now labels
+  archive recency explicitly so “the last guest” means the newest episode and
+  “the guest before that” means the episode immediately before it.
+
+- Bumped `Signal` to `v1.5` for one audience-truth projection across the live
+  stage, captions, voice, replay, and Audience Pulse. Hard visibility and
+  speech-audience Powers now redact imperceptible turns before they leave the
+  server, and persona reviews consume a reusable immutable review artifact
+  instead of raw episode state.
+
+- Bumped `Signal` to `v1.4` to keep persona canon from becoming shared episode
+  history. Signal now tells speakers that lore may shape their beliefs and voice
+  without turning the anthology into an ongoing relationship, and replaces clear
+  claims of prior investigations, confrontations, or secret knowledge before they
+  reach the saved transcript or replay audio.
+
+- Bumped `Chat` to `v1.9`, `Zen` to `v1.8`, `Coffee` to `v2.2`, `Signal` to
+  `v1.3`, and `Story` to `v0.6` for reusable response-budget Powers. Plain-language
+  traits such as "never elaborates" and "says the bare minimum" compile into a
+  structured budget: hard minimal and brief modes are bounded by the engine,
+  while expansive behavior remains model-guided to avoid forced filler. Coffee,
+  Signal, and Story preserve required table, show, and scene beats. Avatar Studio
+  now distinguishes structured runtime effects from model guidance.
+
+- Bumped `Signal` to `v1.2` for personality-shaped Power encounters. Hosts and
+  guests react only to consequences they can actually observe, with curiosity,
+  irritation, caution, empathy, amusement, skepticism, fascination, or no overt
+  response chosen through their own persona. The first clear consequence can
+  land; repeated effects evolve or normalize, while imperceptible causes stay
+  hidden and deterministic Power rules remain unchanged.
 
 - Bumped `Chat` to `v1.8`, `Zen` to `v1.7`, `Coffee` to `v2.1`, and `Signal`
   to `v1.1` for ghostly Ready Powers: a holder is invisible while idle, fades

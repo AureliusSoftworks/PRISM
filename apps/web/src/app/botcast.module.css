@@ -140,6 +140,9 @@
 .preRollMeters i { width: 3px; height: 8px; border-radius: 999px; background: color-mix(in srgb, var(--botcast-accent) 74%, #fff); box-shadow: 0 0 10px color-mix(in srgb, var(--botcast-accent) 45%, transparent); animation: signalPreRollMeter 820ms ease-in-out infinite alternate; }
 .preRollMeters i:nth-child(2n) { animation-delay: -180ms; }.preRollMeters i:nth-child(3n) { animation-delay: -390ms; }.preRollMeters i:nth-child(5n) { animation-delay: -610ms; }
 .episodeOutro .preRollSignalField { opacity: .32; }
+.shell[data-episode-outro="true"] { height: 100dvh; min-height: 100dvh; overflow: hidden; }
+.shell[data-episode-outro="true"] .main { overflow: hidden; }
+.episodeOutro { position: fixed; inset: 66px 0 0 286px; width: auto; height: auto; min-height: 0; contain: layout paint; }
 .episodeOutro .preRollLogo { width: 118px; height: 118px; }
 .episodeOutro .preRollLogo .showLogo { width: 94px; border-radius: 24px; }
 .episodeOutro .preRollLockup h1 { margin-top: 14px; font-size: clamp(1.8rem, 4vw, 3.6rem); }
@@ -177,6 +180,9 @@
 .main { grid-column: 2; grid-row: 2; min-width: 0; min-height: 0; height: 100%; overflow-y: auto; }
 .header { min-height: 130px; display: flex; justify-content: space-between; gap: 24px; padding: 25px 34px 20px; border-bottom: 1px solid color-mix(in srgb, var(--botcast-host-accent) 18%, var(--botcast-line)); background: radial-gradient(circle at 88% 0%, color-mix(in srgb, var(--botcast-host-accent) 12%, transparent), transparent 38%), linear-gradient(90deg, color-mix(in srgb, var(--botcast-host-accent) 3%, transparent), transparent 48%), var(--botcast-chrome); backdrop-filter: blur(24px) saturate(1.18); }
 .header > div:first-child { min-width: 0; }
+.signalGlobalProviderControl { flex: 0 0 auto; align-self: flex-start; display: grid; justify-items: end; gap: 6px; color: var(--botcast-muted); font-size: .7rem; }
+.signalGlobalProviderControl > span { color: var(--botcast-ink); font-size: .64rem; font-weight: 760; letter-spacing: .08em; text-transform: uppercase; }
+.signalGlobalProviderControl small { max-width: 210px; color: color-mix(in srgb, var(--botcast-muted) 78%, transparent); font-size: .58rem; line-height: 1.35; text-align: right; }
 .eyebrow { display: block; font: 750 .67rem/1.2 system-ui; letter-spacing: .16em; text-transform: uppercase; }
 .showTitleRow { display: flex; align-items: center; gap: 14px; margin: 7px 0 8px; }
 .showNameInput { display: block; flex: 1 1 auto; width: min(720px, 100%); min-width: 0; border: 0; border-bottom: 1px solid transparent; padding: 0; color: var(--botcast-ink); background: transparent; font: 750 clamp(1.45rem, 3vw, 2.45rem)/1.1 system-ui; }
@@ -187,7 +193,7 @@
 .header h1 { margin: 8px 0; }
 .header p { max-width: 800px; margin: 0; color: var(--botcast-muted); line-height: 1.45; }
 .signalToastRegion { position: fixed; top: 82px; right: 20px; z-index: 180; width: min(420px, calc(100vw - 40px)); display: grid; gap: 10px; pointer-events: none; }
-.signalToast { --signal-toast-accent: var(--prism-m); position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 11px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--signal-toast-accent) 34%, var(--botcast-line)); border-radius: 16px; padding: 13px 11px 13px 13px; color: var(--botcast-ink); background: linear-gradient(135deg, color-mix(in srgb, var(--signal-toast-accent) 10%, var(--botcast-panel)), color-mix(in srgb, var(--botcast-panel) 94%, transparent)); box-shadow: 0 20px 58px rgba(0,0,0,.36), 0 0 28px color-mix(in srgb, var(--signal-toast-accent) 9%, transparent), inset 0 1px rgba(255,255,255,.1); backdrop-filter: blur(22px) saturate(1.18); pointer-events: auto; animation: signalToastIn 220ms cubic-bezier(.2,.82,.2,1) both; }
+.signalToast { --signal-toast-accent: var(--prism-m); position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 8px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--signal-toast-accent) 34%, var(--botcast-line)); border-radius: 16px; padding: 12px 11px 12px 13px; color: var(--botcast-ink); background: linear-gradient(135deg, color-mix(in srgb, var(--signal-toast-accent) 10%, var(--botcast-panel)), color-mix(in srgb, var(--botcast-panel) 94%, transparent)); box-shadow: 0 20px 58px rgba(0,0,0,.36), 0 0 28px color-mix(in srgb, var(--signal-toast-accent) 9%, transparent), inset 0 1px rgba(255,255,255,.1); backdrop-filter: blur(22px) saturate(1.18); pointer-events: auto; animation: signalToastIn 220ms cubic-bezier(.2,.82,.2,1) both; }
 .signalToast::before { position: absolute; inset: 0 auto 0 0; width: 3px; content: ""; background: var(--signal-toast-accent); box-shadow: 0 0 16px color-mix(in srgb, var(--signal-toast-accent) 62%, transparent); }
 .signalToast[data-signal-toast-kind="notice"] { --signal-toast-accent: var(--prism-s); }
 .signalToast[data-signal-toast-kind="error"] { --signal-toast-accent: var(--prism-p); }
@@ -195,6 +201,12 @@
 .signalToastCopy { min-width: 0; display: grid; gap: 4px; padding-top: 1px; }
 .signalToastCopy strong { font: 800 .74rem/1.1 system-ui; letter-spacing: .04em; }
 .signalToastCopy small { color: color-mix(in srgb, var(--botcast-ink) 78%, var(--botcast-muted)); font: 560 .74rem/1.4 system-ui; text-wrap: pretty; }
+.signalToastBody { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 11px; border: 0; border-radius: 7px; padding: 1px 0; color: inherit; background: transparent; text-align: left; cursor: copy; }
+.signalToastDiagnosticHint { color: color-mix(in srgb, var(--signal-toast-accent) 72%, var(--botcast-ink)) !important; font-size: .67rem !important; }
+.signalToastBody:hover .signalToastDiagnosticHint { text-decoration: underline; text-underline-offset: 2px; }
+.signalToastBody:focus-visible { outline: 2px solid color-mix(in srgb, var(--signal-toast-accent) 76%, transparent); outline-offset: 3px; border-radius: 5px; }
+.signalToast[data-copy-state="copied"] .signalToastDiagnosticHint { color: color-mix(in srgb, var(--prism-s) 76%, var(--botcast-ink)) !important; }
+.signalToast[data-copy-state="failed"] .signalToastDiagnosticHint { color: color-mix(in srgb, var(--prism-p) 80%, var(--botcast-ink)) !important; }
 .signalToastDismiss { width: 26px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 50%; padding: 0; color: var(--botcast-muted); background: transparent; font: 500 1.1rem/1 system-ui; cursor: pointer; transition: color 160ms ease, background 160ms ease; }
 .signalToastDismiss:hover, .signalToastDismiss:focus-visible { color: var(--botcast-ink); background: color-mix(in srgb, var(--signal-toast-accent) 13%, transparent); }
 @keyframes signalToastIn { from { opacity: 0; transform: translate3d(0, -8px, 0) scale(.98); } to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); } }
@@ -266,8 +278,38 @@
 .showIdentityGearButton:focus-visible { outline: 2px solid var(--prism-s); outline-offset: 3px; }
 .showCardHostPresence { position: absolute; right: clamp(-18px, .4vw, 6px); bottom: 0; z-index: 3; width: clamp(300px, 32vw, 380px); aspect-ratio: 1; display: grid; place-items: center; pointer-events: none; transition: opacity 180ms ease, filter 180ms ease; }
 .showCardHostPresence[data-identity-settings-open="true"] { opacity: .2; filter: blur(1px); }
+.showCardHostPresence[data-host-chat-open="true"] { z-index: 7; }
+.showHostChatFocus { position: fixed; inset: 0; z-index: 110; display: grid; place-items: center; padding: 24px; }
+.showHostChatFocusBackdrop { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; padding: 0; background: rgba(5,7,13,.3); backdrop-filter: blur(12px) saturate(.72) brightness(.7); cursor: default; }
+.showHostChatFocusStage { position: relative; z-index: 1; width: min(880px, calc(100vw - 48px)); max-height: calc(100dvh - 48px); display: grid; grid-template-columns: minmax(310px, 430px) minmax(280px, 380px); align-items: center; justify-content: center; gap: clamp(18px, 4vw, 54px); }
+.showHostChatFocusAvatar { appearance: none; width: 100%; aspect-ratio: 1; border: 0; border-radius: 50%; padding: 0; color: inherit; background: transparent; cursor: pointer; }
+.showHostChatFocusAvatar:focus-visible { outline: 2px solid color-mix(in srgb, var(--botcast-host-accent) 78%, #fff); outline-offset: -18px; }
+.showHostChatFocusAvatar .showCardHostFloat > * { transform: scale(1.42); }
+.showCardHostTrigger { appearance: none; position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; border: 0; border-radius: 50%; padding: 0; color: inherit; background: transparent; cursor: pointer; pointer-events: auto; }
+.showCardHostTrigger:focus-visible { outline: 2px solid color-mix(in srgb, var(--botcast-host-accent) 78%, #fff); outline-offset: -18px; }
+.shell button.showCardHostTrigger:disabled { opacity: 1; cursor: not-allowed; }
+.showCardHostTrigger:not(:disabled):hover .showCardHostFloat { filter: drop-shadow(0 22px 32px rgba(0,0,0,.54)) drop-shadow(0 0 30px color-mix(in srgb, var(--botcast-host-accent) 26%, transparent)); }
 .showCardHostFloat { width: 100%; height: 100%; display: grid; place-items: center; filter: drop-shadow(0 20px 28px rgba(0,0,0,.5)) drop-shadow(0 0 24px color-mix(in srgb, var(--botcast-host-accent) 18%, transparent)); transform-origin: 50% 82%; animation: signalShowCardHostFloat 5.4s ease-in-out infinite; will-change: transform; }
 .showCardHostFloat > * { max-width: 100%; max-height: 100%; transform: scale(1.5); }
+.showHostChatConversation { position: relative; z-index: 3; width: min(430px, 100%); min-width: 0; display: flex; flex-direction: column; align-items: stretch; gap: 9px; pointer-events: none; }
+.showHostChatCloud { max-height: min(42dvh, 330px); display: flex; flex-direction: column; align-items: flex-end; justify-content: flex-end; gap: 7px; overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; }
+.showHostChatBubble { --signal-host-chat-surface: color-mix(in srgb, var(--botcast-host-accent) 17%, rgba(8,10,18,.93)); width: fit-content; max-width: min(390px, 94%); margin: 0; border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 44%, rgba(255,255,255,.24)); border-radius: 18px 18px 6px 18px; padding: 11px 14px; color: rgba(255,255,255,.96); background: radial-gradient(circle at 8% 0%, color-mix(in srgb, var(--prism-p) 15%, transparent), transparent 44%), var(--signal-host-chat-surface); box-shadow: 0 16px 38px rgba(0,0,0,.36), 0 0 24px color-mix(in srgb, var(--botcast-host-accent) 15%, transparent), inset 0 1px rgba(255,255,255,.13); backdrop-filter: blur(18px) saturate(1.2); font: 640 .73rem/1.48 system-ui; overflow-wrap: anywhere; animation: signalHostChatBubbleIn 240ms cubic-bezier(.2,.72,.18,1) both, signalHostChatBubbleOut 380ms ease max(0ms, calc(var(--signal-host-bubble-life) - 380ms)) forwards; }
+.showHostChatBubble[data-streaming="true"] { animation: signalHostChatBubbleIn 240ms cubic-bezier(.2,.72,.18,1) both; }
+.showHostChatBubble[data-streaming="true"]::after { display: inline-block; width: .42em; height: 1em; margin-left: .16em; border-radius: 999px; content: ""; background: color-mix(in srgb, var(--botcast-host-accent) 72%, #fff); box-shadow: 0 0 9px color-mix(in srgb, var(--botcast-host-accent) 44%, transparent); vertical-align: -.14em; animation: signalHostChatStreamCaret 720ms steps(1, end) infinite; }
+.showHostChatBubble[data-role="user"] { --signal-host-chat-surface: color-mix(in srgb, var(--prism-s) 26%, rgba(8,10,18,.94)); align-self: flex-start; border-radius: 18px 18px 18px 6px; border-color: color-mix(in srgb, var(--prism-s) 45%, rgba(255,255,255,.22)); }
+.showHostChatBubble p { margin: 0; }
+.showHostChatBubble p + p, .showHostChatBubble ul, .showHostChatBubble ol { margin: 7px 0 0; }
+.showHostChatBubble ul, .showHostChatBubble ol { padding-left: 18px; }
+.showHostChatBubble code { font-size: .68rem; }
+.showHostChatThinking { align-self: flex-end; display: inline-flex; align-items: center; gap: 8px; padding: 7px 11px; border-radius: 999px; color: rgba(255,255,255,.72); background: rgba(8,10,18,.62); box-shadow: 0 10px 28px rgba(0,0,0,.24); backdrop-filter: blur(14px); font: 680 .61rem/1 system-ui; }
+.showHostChatThinking span { color: color-mix(in srgb, var(--botcast-host-accent) 76%, #fff); letter-spacing: .12em; animation: signalHostChatThinking 900ms ease-in-out infinite alternate; }
+.showHostChatComposer { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px; padding: 9px; border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 42%, rgba(255,255,255,.24)); border-radius: 17px; background: radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--botcast-host-accent) 16%, transparent), transparent 48%), rgba(8,10,18,.9); box-shadow: 0 18px 46px rgba(0,0,0,.42), 0 0 30px color-mix(in srgb, var(--botcast-host-accent) 14%, transparent), inset 0 1px rgba(255,255,255,.13); backdrop-filter: blur(20px) saturate(1.22); pointer-events: auto; animation: signalHostChatComposerIn 220ms cubic-bezier(.2,.72,.18,1) both; }
+.showHostChatComposer textarea { min-width: 0; resize: none; border: 1px solid rgba(255,255,255,.14); border-radius: 10px; padding: 9px 10px; color: #fff; background: rgba(255,255,255,.07); font: 620 .7rem/1.4 system-ui; }
+.showHostChatComposer textarea::placeholder { color: rgba(255,255,255,.48); }
+.showHostChatComposer textarea:focus { outline: 1px solid color-mix(in srgb, var(--botcast-host-accent) 68%, transparent); border-color: color-mix(in srgb, var(--botcast-host-accent) 52%, rgba(255,255,255,.14)); }
+.showHostChatComposer button { align-self: stretch; border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 48%, rgba(255,255,255,.22)); border-radius: 10px; padding: 0 13px; color: #fff; background: color-mix(in srgb, var(--botcast-host-accent) 24%, rgba(255,255,255,.08)); font: 760 .66rem/1 system-ui; cursor: pointer; }
+.showHostChatComposer button:disabled { opacity: .42; cursor: default; }
+.showHostChatComposer small { grid-column: 1 / -1; color: rgba(255,255,255,.48); font: 620 .55rem/1.2 system-ui; letter-spacing: .02em; }
 .showCardQuipBubble { --signal-quip-surface: color-mix(in srgb, var(--botcast-host-accent) 18%, rgba(8,10,18,.92)); position: absolute; top: clamp(24px, 8%, 42px); right: clamp(244px, 25vw, 292px); z-index: 4; isolation: isolate; width: max-content; max-width: min(290px, 32%); margin: 0; border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 52%, rgba(255,255,255,.28)); border-radius: 20px 20px 6px 20px; padding: 14px 17px; color: rgba(255,255,255,.96); background: radial-gradient(circle at 8% 0%, color-mix(in srgb, var(--prism-p) 18%, transparent), transparent 42%), radial-gradient(circle at 92% 100%, color-mix(in srgb, var(--prism-s) 15%, transparent), transparent 46%), var(--signal-quip-surface); box-shadow: 0 18px 44px rgba(0,0,0,.38), 0 0 28px color-mix(in srgb, var(--botcast-host-accent) 22%, transparent), -8px 8px 24px color-mix(in srgb, var(--prism-m) 9%, transparent), inset 0 1px rgba(255,255,255,.16); backdrop-filter: blur(18px) saturate(1.28); font: 740 .78rem/1.45 system-ui; text-shadow: 0 1px 12px rgba(0,0,0,.42); text-wrap: balance; animation: signalShowCardQuipIn 260ms cubic-bezier(.2,.72,.18,1) both; }
 .showCardQuipBubble::before { position: absolute; top: -1px; right: 18px; left: 18px; z-index: 1; height: 2px; border-radius: 999px; content: ""; background: linear-gradient(90deg, var(--prism-p), var(--prism-r), var(--prism-i), var(--prism-s), var(--botcast-host-accent), var(--prism-m)); box-shadow: 0 0 12px color-mix(in srgb, var(--botcast-host-accent) 34%, transparent); opacity: .92; }
 .showCardQuipBubble::after { position: absolute; right: -9px; bottom: 13px; z-index: -1; width: 18px; height: 18px; content: ""; border-right: 1px solid color-mix(in srgb, var(--botcast-host-accent) 52%, rgba(255,255,255,.28)); border-bottom: 1px solid color-mix(in srgb, var(--botcast-host-accent) 52%, rgba(255,255,255,.28)); background: var(--signal-quip-surface); transform: rotate(-45deg); }
@@ -358,6 +400,9 @@
 .setupGrid label, .setupField { display: grid; gap: 8px; color: var(--botcast-muted); font-size: .75rem; }
 .producerBrief { grid-column: 1 / -1; }
 .producerBrief span { color: #74767c; }
+.producerGuestContext { grid-column: 1 / -1; }
+.producerGuestContext textarea { min-height: 148px; }
+.producerGuestContext small { color: var(--botcast-muted); line-height: 1.5; }
 .contextualTextField { position: relative; display: grid; min-width: 0; }
 .contextualTextField input, .contextualTextField textarea { padding-right: 48px; }
 .contextualDiceButton { position: absolute; top: 50%; right: 7px; width: 32px; height: 32px; display: grid; place-items: center; transform: translateY(-50%); border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 32%, var(--botcast-line)); border-radius: 8px; padding: 0; color: color-mix(in srgb, var(--botcast-host-accent) 58%, var(--botcast-ink)); background: color-mix(in srgb, var(--botcast-host-accent) 10%, var(--botcast-soft-panel)); box-shadow: 0 5px 14px color-mix(in srgb, var(--botcast-host-accent) 10%, transparent); cursor: pointer; }
@@ -372,8 +417,6 @@
 .setupGrid select:focus, .setupGrid input:focus, .setupGrid textarea:focus, .episodeModelControl select:focus, .episodeLengthControl select:focus { outline: none; border-color: color-mix(in srgb, var(--botcast-host-accent) 62%, var(--botcast-line)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--botcast-host-accent) 12%, transparent); }
 .goLiveButton { margin-top: 18px; padding: 12px 18px; border-radius: 9px; box-shadow: 0 12px 30px color-mix(in srgb, var(--botcast-host-accent) 24%, transparent); }
 .episodeLaunchRow { display: flex; align-items: end; justify-content: space-between; gap: 18px; margin-top: 18px; }
-.episodeProviderControl { display: grid; gap: 6px; color: var(--botcast-muted); font-size: .75rem; }
-.episodeProviderControl small { color: color-mix(in srgb, var(--botcast-muted) 78%, transparent); font-size: .64rem; }
 .episodeModelControl { display: grid; gap: 6px; min-width: min(100%, 320px); color: var(--botcast-muted); font-size: .75rem; }
 .episodeModelControl small { color: color-mix(in srgb, var(--botcast-muted) 78%, transparent); font-size: .64rem; }
 .episodeLengthControl { display: grid; gap: 6px; min-width: min(100%, 220px); color: var(--botcast-muted); font-size: .75rem; }
@@ -424,6 +467,7 @@
 .atmosphereMixerSliders input { width: 100%; margin: 0; accent-color: var(--prism-s); }
 .atmosphereMixer > small { grid-column: 1 / -1; margin-top: -6px; color: var(--botcast-muted); font-size: .58rem; }
 .stageScene { position: absolute; inset: 0; transform-origin: center 55%; transition: transform 900ms cubic-bezier(.22,.72,.2,1), filter 900ms ease; }
+.stageViewport[data-camera-transitions="instant"] .stageScene { transition: none; }
 .stageViewport[data-model-warmup="entering"] .stageScene,
 .stageViewport[data-model-warmup="held"] .stageScene,
 .stageViewport[data-model-warmup="failed"] .stageScene { filter: grayscale(1) saturate(0) brightness(.76); transition-duration: 600ms; }
@@ -463,7 +507,6 @@
 .avatarRig { --signal-avatar-lean: 0deg; position: relative; width: 100%; height: 100%; display: grid; place-items: center; filter: drop-shadow(0 13px 18px rgba(0,0,0,.48)); animation: signalBotIdle 4.8s ease-in-out infinite; transform-origin: 50% 82%; will-change: transform; }
 .avatarRig[data-signal-presence="host"] { --signal-avatar-lean: 2.4deg; }
 .avatarRig[data-signal-presence="guest"] { --signal-avatar-lean: -2.4deg; animation-delay: -2.1s; }
-.avatarRig[data-audience-only="true"] { opacity: .5; }
 .avatarRig[data-ghostly-presence="true"] { opacity: 0; transition: opacity 420ms ease; }
 .avatarRig[data-ghostly-presence="true"][data-talking="true"] { opacity: 1; }
 .avatarRig[data-talking="true"] { animation: none; transform: rotate(var(--signal-avatar-lean)); }
@@ -476,11 +519,17 @@
 .avatarRig[data-listener-reaction="soft_smile"] { animation: signalListenerWarmth 1.1s ease-in-out 1 both; }
 .avatarRig::after { content: ""; position: absolute; left: 50%; bottom: 7%; z-index: -1; width: 72%; height: 16%; border-radius: 50%; background: radial-gradient(ellipse, color-mix(in srgb, var(--botcast-studio-accent) 18%, rgba(0,0,0,.34)), transparent 72%); filter: blur(8px); transform: translateX(-50%); opacity: .72; }
 .avatarRig > * { max-width: 100%; max-height: 100%; }
-.avatarRig > .voiceActionText { position: absolute; left: 50%; top: -4%; z-index: 12; width: max-content; max-width: 138%; max-height: none; transform: translateX(-50%); color: rgba(255,255,255,.92); font: italic 760 clamp(.58rem, 1.15vw, .82rem)/1.25 system-ui; letter-spacing: .015em; text-align: center; text-wrap: balance; text-shadow: 0 2px 7px rgba(0,0,0,.98), 0 0 18px color-mix(in srgb, var(--botcast-studio-accent) 34%, transparent); animation: signalVoiceActionIn 220ms ease-out both; pointer-events: none; }
+.avatarRig > .voiceActionText { position: absolute; left: 50%; top: -4%; z-index: 12; width: max-content; max-width: 138%; max-height: none; transform: translateX(-50%) translateY(0); opacity: var(--signal-voice-action-opacity, 0); color: rgba(255,255,255,.92); font: italic 760 clamp(.58rem, 1.15vw, .82rem)/1.25 system-ui; letter-spacing: .015em; text-align: center; text-wrap: balance; text-shadow: 0 2px 7px rgba(0,0,0,.98), 0 0 18px color-mix(in srgb, var(--botcast-studio-accent) 34%, transparent); transition: opacity 120ms linear, transform 180ms ease; pointer-events: none; }
+.avatarRig > .voiceActionText[data-phase="entering"] { transform: translateX(-50%) translateY(3px); }
+.avatarRig > .voiceActionText[data-phase="exiting"] { transform: translateX(-50%) translateY(-4px); }
 .avatarRig > .listenerReactionText { position: absolute; left: 50%; top: -3%; z-index: 13; width: max-content; max-width: 132%; max-height: none; transform: translateX(-50%); border: 1px solid rgba(255,255,255,.14); border-radius: 999px; padding: 4px 8px; color: rgba(255,255,255,.88); background: rgba(7,9,14,.66); backdrop-filter: blur(7px); font: 720 clamp(.52rem, .95vw, .7rem)/1 system-ui; letter-spacing: .03em; text-shadow: 0 2px 7px rgba(0,0,0,.9); animation: signalVoiceActionIn 160ms ease-out both; pointer-events: none; }
 .avatarRig > .listenerReactionText[data-interjection-attempt="true"] { top: -5%; border-color: color-mix(in srgb, #ff604f 58%, rgba(255,255,255,.2)); padding: 5px 10px; color: #fff4f1; background: rgba(92,21,21,.82); box-shadow: 0 0 18px rgba(255,96,79,.2); font-weight: 820; }
 .avatarRig > .deadAirAsideText { width: min(190px, 158%); max-width: 158%; border-radius: 10px; line-height: 1.22; text-align: center; }
 .avatarFallback { width: 132px; aspect-ratio: 1; display: grid; place-items: center; border: 8px solid #454a53; border-radius: 40% 40% 46% 46%; background: #101216; box-shadow: inset 0 0 30px color-mix(in srgb, var(--botcast-accent) 30%, transparent), 0 0 24px color-mix(in srgb, var(--botcast-accent) 22%, transparent); font-size: 2rem; }
+.producerGuestPresence { width: min(76%, 168px); aspect-ratio: 1; display: grid; place-content: center; justify-items: center; gap: 8px; border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 56%, rgba(255,255,255,.22)); border-radius: 50%; color: #fff; background: radial-gradient(circle at 35% 24%, rgba(255,255,255,.18), transparent 28%), linear-gradient(145deg, color-mix(in srgb, var(--botcast-host-accent) 72%, #1a1826), #10121a); box-shadow: inset 0 0 34px rgba(255,255,255,.06), 0 14px 36px rgba(0,0,0,.34), 0 0 26px color-mix(in srgb, var(--botcast-host-accent) 22%, transparent); text-align: center; }
+.producerGuestPresence > span { font: 850 clamp(.9rem, 2.4vw, 1.6rem)/1 system-ui; letter-spacing: .16em; }
+.producerGuestPresence > strong { max-width: 84%; overflow: hidden; font: 720 clamp(.55rem, 1vw, .72rem)/1.2 system-ui; text-overflow: ellipsis; white-space: nowrap; opacity: .74; }
+.producerGuestPresence[data-talking="true"] { box-shadow: inset 0 0 34px rgba(255,255,255,.1), 0 14px 36px rgba(0,0,0,.34), 0 0 42px color-mix(in srgb, var(--botcast-host-accent) 38%, transparent); }
 .nameplate { position: absolute; z-index: 8; bottom: 1.5%; min-width: 112px; display: grid; gap: 3px; border: 1px solid rgba(255,255,255,.13); border-radius: 999px; padding: 6px 14px 7px; text-align: center; color: rgba(255,255,255,.94); background: rgba(7,8,12,.72); backdrop-filter: blur(10px) saturate(1.08); font-size: clamp(.62rem, 1.1vw, .82rem); line-height: 1.05; box-shadow: 0 7px 20px rgba(0,0,0,.38); }
 .nameplate span { color: rgba(255,255,255,.48); font: 760 .48rem/1 system-ui; letter-spacing: .14em; text-transform: uppercase; }
 .stageMug { position: absolute; z-index: 9; width: max(6.2%, 58px); aspect-ratio: 8 / 9; display: grid; place-items: end center; transform: translate(-50%, -50%); pointer-events: none; will-change: left, top; }
@@ -489,6 +538,7 @@
 .stageLayoutHandle { position: absolute; z-index: 12; display: grid; place-items: center; transform: translate(-50%, -50%); border-radius: 20px; outline: 1px dashed color-mix(in srgb, var(--prism-s) 72%, white); outline-offset: 7px; cursor: grab; touch-action: none; user-select: none; }
 .stageLayoutHandle[data-kind="bot"] { width: 25%; aspect-ratio: 1; }
 .stageLayoutHandle[data-kind="cup"] { width: max(6.2%, 58px); aspect-ratio: 8 / 9; border-radius: 12px; }
+.stageLayoutHandle[data-kind="layer"] { width: 72px; height: 52px; border-radius: 14px; background: rgba(5,7,12,.54); backdrop-filter: blur(8px); }
 .stageLayoutHandle[data-dragging="true"] { z-index: 14; outline-style: solid; cursor: grabbing; }
 .stageLayoutHandle:focus-visible { outline: 3px solid var(--prism-s); outline-offset: 7px; }
 .stageLayoutHandle * { pointer-events: none !important; }
@@ -501,6 +551,7 @@
 .emptyChairLabel { position: absolute; z-index: 4; top: 47%; max-width: 150px; border: 1px solid rgba(255,255,255,.1); border-radius: 999px; padding: 7px 11px; color: rgba(255,255,255,.58); background: rgba(7,8,12,.52); backdrop-filter: blur(8px); text-align: center; font-size: .64rem; animation: signalEmptyChairReveal 260ms ease-out 640ms both; }
 
 .controlRoom { max-width: 1180px; margin: 14px auto 0; display: grid; grid-template-columns: minmax(0,1.5fr) minmax(270px,.7fr); gap: 14px; }
+.controlRoom[data-producer-guest="true"] { grid-template-columns: minmax(0, 1fr); }
 .liveLayout .controlRoom { max-width: 1320px; }
 .transcript, .producerControls, .replayTranscript { border: 1px solid var(--botcast-line); border-radius: 15px; background: var(--botcast-panel); box-shadow: 0 18px 44px var(--botcast-shadow); }
 .transcript { min-height: 260px; max-height: 370px; overflow: auto; padding: 18px; }
@@ -535,11 +586,18 @@
 .producerControls button { border: 1px solid rgba(255,255,255,.13); border-radius: 8px; color: inherit; background: rgba(255,255,255,.055); padding: 9px 10px; cursor: pointer; }
 .producerControls button[data-queued="true"] { border-color: color-mix(in srgb, var(--botcast-accent) 72%, white); background: color-mix(in srgb, var(--botcast-accent) 18%, rgba(255,255,255,.055)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--botcast-accent) 24%, transparent); }
 .cueGrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+.cueGrid .refocusCue { grid-column: 1 / -1; }
 .queuedCueStatus { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; margin: 10px 0 0; color: color-mix(in srgb, var(--botcast-accent) 72%, white); font-size: .7rem; line-height: 1.4; }
 .queuedCueStatus p { margin: 0; }
 .queuedCueStatus button { white-space: nowrap; font-size: .66rem; }
 .producerControls small { display: block; margin-top: 14px; color: #797b81; line-height: 1.45; }
 .returnButton { display: block; margin: 16px auto; }
+.producerGuestComposerDock { position: sticky; bottom: 0; z-index: 18; max-width: 1320px; margin: 0 auto; padding-top: 10px; background: linear-gradient(180deg, transparent, var(--botcast-canvas) 18%); }
+.producerGuestThinkingStatus { display: block; width: fit-content; margin: 0 0 7px auto; padding: 4px 9px; border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 24%, var(--botcast-line)); border-radius: 999px; color: var(--botcast-muted); background: color-mix(in srgb, var(--botcast-canvas) 92%, transparent); font: 700 .67rem/1.2 system-ui; letter-spacing: .04em; }
+.producerGuestComposerDock > form { border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 26%, var(--botcast-line)); border-radius: 15px 15px 0 0; box-shadow: 0 -14px 40px color-mix(in srgb, var(--botcast-host-accent) 10%, transparent); }
+.producerGuestFallbackComposer { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 9px; padding: 14px 18px; background: var(--botcast-panel); }
+.producerGuestFallbackComposer textarea { min-height: 48px; resize: vertical; border: 1px solid var(--botcast-line); border-radius: 10px; padding: 10px 12px; color: var(--botcast-ink); background: var(--botcast-field); }
+.producerGuestFallbackComposer button { align-self: stretch; border: 0; border-radius: 10px; padding: 0 18px; color: #fff; background: linear-gradient(135deg, var(--botcast-host-accent), var(--prism-m)); font-weight: 800; }
 
 .replayHeader { max-width: 1180px; margin: 0 auto 12px; display: flex; justify-content: space-between; align-items: end; gap: 20px; }
 .replayHeader h2 { margin: 6px 0; }.replayHeader p { margin: 0; color: var(--botcast-muted); font-size: .78rem; }
@@ -657,6 +715,13 @@
 .shell[data-theme="light"] .showLookControlGroup .assetUploadButton { color: color-mix(in srgb, var(--prism-s) 68%, var(--botcast-ink)); }
 .shell[data-theme="light"] .showIdentityGearButton { border-color: rgba(255,255,255,.88); color: color-mix(in srgb, var(--botcast-ink) 74%, var(--botcast-accent)); background: rgba(255,255,255,.72); box-shadow: 0 12px 30px rgba(53,55,89,.16), inset 0 1px rgba(255,255,255,.9); }
 .shell[data-theme="light"] .showIdentityGearButton:hover, .shell[data-theme="light"] .showIdentityGearButton[data-expanded="true"] { border-color: color-mix(in srgb, var(--prism-s) 52%, rgba(255,255,255,.88)); color: var(--botcast-ink); background: color-mix(in srgb, var(--prism-s) 12%, rgba(255,255,255,.84)); }
+.shell[data-theme="light"] .showHostChatBubble { --signal-host-chat-surface: color-mix(in srgb, var(--botcast-host-accent) 8%, rgba(255,255,255,.95)); border-color: color-mix(in srgb, var(--botcast-host-accent) 30%, rgba(255,255,255,.9)); color: color-mix(in srgb, var(--botcast-ink) 86%, var(--botcast-host-accent)); box-shadow: 0 14px 34px rgba(53,55,89,.17), 0 0 22px color-mix(in srgb, var(--botcast-host-accent) 10%, transparent), inset 0 1px rgba(255,255,255,.96); }
+.shell[data-theme="light"] .showHostChatBubble[data-role="user"] { --signal-host-chat-surface: color-mix(in srgb, var(--prism-s) 9%, rgba(255,255,255,.95)); border-color: color-mix(in srgb, var(--prism-s) 28%, rgba(255,255,255,.9)); }
+.shell[data-theme="light"] .showHostChatThinking { color: color-mix(in srgb, var(--botcast-ink) 58%, transparent); background: rgba(255,255,255,.82); box-shadow: 0 10px 26px rgba(53,55,89,.14); }
+.shell[data-theme="light"] .showHostChatComposer { border-color: color-mix(in srgb, var(--botcast-host-accent) 28%, rgba(255,255,255,.92)); background: radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--botcast-host-accent) 9%, transparent), transparent 48%), rgba(255,255,255,.91); box-shadow: 0 18px 42px rgba(53,55,89,.2), inset 0 1px rgba(255,255,255,.98); }
+.shell[data-theme="light"] .showHostChatComposer textarea { border-color: var(--botcast-line); color: var(--botcast-ink); background: rgba(255,255,255,.78); }
+.shell[data-theme="light"] .showHostChatComposer textarea::placeholder, .shell[data-theme="light"] .showHostChatComposer small { color: color-mix(in srgb, var(--botcast-ink) 50%, transparent); }
+.shell[data-theme="light"] .showHostChatComposer button { color: color-mix(in srgb, var(--botcast-ink) 84%, var(--botcast-host-accent)); background: color-mix(in srgb, var(--botcast-host-accent) 12%, rgba(255,255,255,.88)); }
 .shell[data-theme="light"] .showCardQuipBubble { --signal-quip-surface: color-mix(in srgb, var(--botcast-host-accent) 9%, rgba(255,255,255,.94)); border-color: color-mix(in srgb, var(--botcast-host-accent) 32%, rgba(255,255,255,.9)); color: color-mix(in srgb, var(--botcast-ink) 84%, var(--botcast-host-accent)); background: radial-gradient(circle at 8% 0%, color-mix(in srgb, var(--prism-p) 10%, transparent), transparent 42%), radial-gradient(circle at 92% 100%, color-mix(in srgb, var(--prism-s) 9%, transparent), transparent 46%), var(--signal-quip-surface); box-shadow: 0 16px 38px rgba(53,55,89,.18), 0 0 26px color-mix(in srgb, var(--botcast-host-accent) 13%, transparent), inset 0 1px rgba(255,255,255,.96); text-shadow: none; }
 .shell[data-theme="light"] .showCardQuipBubble::after { border-color: color-mix(in srgb, var(--botcast-host-accent) 32%, rgba(255,255,255,.9)); background: var(--signal-quip-surface); }
 .shell[data-theme="light"] .showBrandContent .showLogo {
@@ -712,6 +777,9 @@
   .shell[data-live-episode="true"] .transcript,
   .shell[data-live-episode="true"] .producerControls { box-sizing: border-box; min-height: 0; height: 100%; max-height: none; }
   .shell[data-live-episode="true"] .producerControls { overflow: auto; }
+  .shell[data-producer-guest="true"] .main { overflow-y: auto; }
+  .shell[data-producer-guest="true"] .liveLayout { height: auto; min-height: 100%; overflow: visible; padding-bottom: 0; }
+  .shell[data-producer-guest="true"] .controlRoom { height: clamp(190px, 21dvh, 238px); }
 }
 
 @media (max-width: 900px) {
@@ -720,10 +788,13 @@
   .mainNavigation { grid-column: 1; grid-row: 1; min-height: 66px; }
   .signalToastRegion { top: 78px; right: 12px; width: min(420px, calc(100vw - 24px)); }
   .episodePreRoll { grid-column: 1; grid-row: 3; min-height: calc(100dvh - 66px); }
+  .episodeOutro { inset: 66px 0 0; min-height: 0; }
   .library { grid-column: 1; grid-row: 2; position: relative; width: 100%; height: auto; max-height: 330px; }
   .main { grid-column: 1; grid-row: 3; height: auto; min-height: 0; overflow: visible; }
   .createShowCard { margin-top: 10px; }
-  .header { padding-inline: 18px; }
+  .header { flex-wrap: wrap; padding-inline: 18px; }
+  .signalGlobalProviderControl { width: 100%; justify-items: start; }
+  .signalGlobalProviderControl small { max-width: none; text-align: left; }
   .showTitleRow { align-items: flex-start; flex-direction: column; gap: 8px; }
   .showNameActions { width: 100%; }
   .showDashboard, .liveLayout, .replayLayout { padding-inline: 12px; }
@@ -751,6 +822,13 @@
   .showLookControlGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .showCardHostPresence { right: -24px; bottom: 0; width: 226px; }
   .showCardHostFloat > * { transform: scale(1.32); }
+  .showHostChatFocus { padding: 12px; }
+  .showHostChatFocusStage { width: min(430px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); grid-template-columns: minmax(0, 1fr); gap: 2px; overflow-y: auto; }
+  .showHostChatFocusAvatar { order: -1; width: min(210px, 48vw); margin: 0 auto; }
+  .showHostChatConversation { width: 100%; }
+  .showHostChatCloud { max-height: min(32dvh, 220px); }
+  .showHostChatBubble { max-width: 96%; font-size: .68rem; }
+  .showHostChatComposer { grid-template-columns: minmax(0, 1fr) 58px; }
   .showCardQuipBubble { top: auto; right: 155px; bottom: 178px; max-width: min(228px, calc(100% - 174px)); font-size: .69rem; }
   .showIdentityGearButton { right: 14px; bottom: 14px; width: 40px; height: 40px; }
   .showIntroControl { width: calc(100% - 28px); grid-template-columns: 1fr; }
@@ -774,7 +852,6 @@
   .controlRoom { grid-template-columns: 1fr; }
   .setupGrid { grid-template-columns: 1fr; }.producerBrief { grid-column: auto; }
   .episodeLaunchRow { align-items: stretch; flex-direction: column; }
-  .episodeProviderControl { min-width: 0; }
   .episodeModelControl { min-width: 0; }
   .episodeLengthControl { min-width: 0; }
   .episodeLaunchRow .goLiveButton { width: 100%; }
@@ -797,6 +874,7 @@
   .emptyChairLabel { animation: none; }
   .showCardHostPresence { transition: none !important; }
   .showCardHostFloat, .showCardQuipBubble { animation: none !important; }
+  .showHostChatBubble, .showHostChatComposer, .showHostChatThinking span, .showHostChatBubble[data-streaming="true"]::after { animation: none !important; }
   .contextualDiceButton svg[data-loading="true"], .randomizeBookingButton svg { animation: none; }
   .studioSpotlight { animation: none !important; transform: translateX(-50%) rotate(0deg); }
   .preRollSignalField i, .preRollEyebrow, .preRollLogo, .preRollOrbit, .preRollLockup h1, .preRollLockup p, .preRollLockup strong, .preRollMeters i, .showIntroPulse i { animation: none !important; }
@@ -806,6 +884,31 @@
 @keyframes signalStudioSpotlightSweep {
   0% { transform: translateX(-50%) rotate(-1.5deg); }
   100% { transform: translateX(-50%) rotate(1.5deg); }
+}
+
+@keyframes signalHostChatBubbleIn {
+  0% { opacity: 0; transform: translate3d(10px, 8px, 0) scale(.97); }
+  100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+
+@keyframes signalHostChatBubbleOut {
+  0% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+  100% { opacity: 0; transform: translate3d(0, -7px, 0) scale(.985); }
+}
+
+@keyframes signalHostChatComposerIn {
+  0% { opacity: 0; transform: translate3d(8px, 7px, 0) scale(.985); }
+  100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+
+@keyframes signalHostChatThinking {
+  0% { opacity: .38; transform: translateY(1px); }
+  100% { opacity: 1; transform: translateY(-1px); }
+}
+
+@keyframes signalHostChatStreamCaret {
+  0%, 48% { opacity: 1; }
+  49%, 100% { opacity: .18; }
 }
 
 @keyframes signalShowCardHostFloat {

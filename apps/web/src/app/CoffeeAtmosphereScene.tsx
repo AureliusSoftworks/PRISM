@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { GraphicsQuality } from "@localai/shared";
 import styles from "./page.module.css";
 import { CoffeeAtmosphereController } from "./CoffeeAtmosphereController";
 import { PrismSceneHost, type PrismSceneHostReadyContext } from "./PrismSceneHost";
@@ -9,6 +10,7 @@ import {
   type CoffeeAtmospherePhase,
   type CoffeeAtmosphereTheme,
 } from "./coffeeAtmosphere";
+import { prismSceneQualityCeilingForGraphicsQuality } from "./graphicsQuality";
 
 declare global {
   interface Window {
@@ -22,6 +24,7 @@ export interface CoffeeAtmosphereSceneProps {
   seed: string;
   activeSpeakerColor: string | null;
   replayActive: boolean;
+  graphicsQuality: GraphicsQuality;
 }
 
 type CoffeeAtmosphereRendererStatus =
@@ -54,6 +57,7 @@ export function CoffeeAtmosphereScene(
   const controllerRef = useRef<CoffeeAtmosphereController | null>(null);
   const readyContextRef = useRef<PrismSceneHostReadyContext | null>(null);
   const latestPropsRef = useRef(semanticState);
+  const initialGraphicsQualityRef = useRef(props.graphicsQuality);
   const mountedRef = useRef(false);
   const [rendererStatus, setRendererStatus] =
     useState<CoffeeAtmosphereRendererStatus>("initializing");
@@ -92,6 +96,9 @@ export function CoffeeAtmosphereScene(
       sceneId: "coffee-atmosphere",
       container,
       activity: coffeeAtmosphereActivity(current),
+      qualityCeiling: prismSceneQualityCeilingForGraphicsQuality(
+        initialGraphicsQualityRef.current,
+      ),
       ...(forceFailure
         ? {
             pixiLoader: async () => {
@@ -138,6 +145,12 @@ export function CoffeeAtmosphereScene(
   }, []);
 
   useEffect(() => {
+    hostRef.current?.setQualityCeiling(
+      prismSceneQualityCeilingForGraphicsQuality(props.graphicsQuality),
+    );
+  }, [props.graphicsQuality]);
+
+  useEffect(() => {
     latestPropsRef.current = semanticState;
     const host = hostRef.current;
     const controller = controllerRef.current;
@@ -152,6 +165,7 @@ export function CoffeeAtmosphereScene(
       ref={containerRef}
       className={styles.coffeeAtmosphereScene}
       data-coffee-atmosphere="true"
+      data-prism-expensive-effect="true"
       data-renderer-status={rendererStatus}
       data-coffee-phase={props.phase}
       data-theme={props.theme}

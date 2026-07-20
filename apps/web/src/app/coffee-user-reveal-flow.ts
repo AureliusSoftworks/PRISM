@@ -12,10 +12,14 @@ export type CoffeeUserRevealFlowState =
   | "tableTyping";
 
 export function coffeeComposerUsesRichInput(args: {
-  variant: "chat" | "coffee-global" | "coffee-table";
+  variant: "chat" | "coffee-global" | "coffee-table" | "signal";
   markdownEditorEnabled: boolean;
 }): boolean {
-  return args.markdownEditorEnabled || args.variant === "coffee-table";
+  return (
+    args.markdownEditorEnabled ||
+    args.variant === "coffee-table" ||
+    args.variant === "signal"
+  );
 }
 
 export function coffeeShouldQueueAssistantRevealAfterUserTyping(
