@@ -1,3 +1,6 @@
+// Temporarily keep saved bot groups on the standard grid while the immersive
+// full-avatar waiting-room view is being repaired.
+export const BOT_GROUP_WAITING_ROOM_ENABLED: boolean = false;
 export const BOT_GROUP_WAITING_ROOM_MIN_BOTS = 6;
 export const BOT_GROUP_WAITING_ROOM_ANCHOR_COUNT = 5;
 export const BOT_GROUP_WAITING_ROOM_MAX_ROAMERS = 3;

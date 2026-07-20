@@ -2200,12 +2200,16 @@ describe("Zen live presence CSS", () => {
     assert.match(presenceSource, /showThinkingSpinner\?: boolean;/);
     assert.match(
       presenceSource,
-      /const faceSpinnerVisible = showThinkingSpinner \|\| transitioning;/
+      /const faceSpinnerVisible =\s+!botFaceThinkingSpinnerDisabled\(faceStyle\.thinkingFrames\) &&\s+\(showThinkingSpinner \|\| transitioning\);/
+    );
+    assert.match(
+      mannequinSource,
+      /const thinkingSpinnerActive =\s+showThinkingSpinner &&\s+!botFaceThinkingSpinnerDisabled\(faceStyle\.thinkingFrames\);/
     );
     assert.match(mannequinSource, /className=\{styles\.zenLiveBotPresenceThinkingGlyphAnchor\}/);
     assert.match(mannequinSource, /showThinkingSpinner\s+baseText=\{displayPlateFace\.text\}/);
     assert.match(mannequinSource, /className=\{styles\.zenLiveBotPresenceFaceEmissionMask\}/);
-    assert.match(mannequinSource, /\{showThinkingSpinner \? \(/);
+    assert.match(mannequinSource, /\{thinkingSpinnerActive \? \(/);
     assert.match(
       presenceSource,
       /data-thinking-spinner-active=\{faceSpinnerVisible \? "true" : undefined\}/

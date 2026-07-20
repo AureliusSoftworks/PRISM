@@ -65,12 +65,22 @@ export interface FetchCallRecord {
 
 export function createFetchRecorder(
   response: Response = new Response("{}", { status: 200 })
-): typeof fetch & { calls: FetchCallRecord[] } {
+): typeof fetch & {
+  calls: FetchCallRecord[];
+  setResponse(next: Response): void;
+} {
   const calls: FetchCallRecord[] = [];
+  let currentResponse = response;
   const fetchRecorder = (async (input: RequestInfo | URL, init?: RequestInit) => {
     calls.push({ input: String(input), init });
-    return response.clone();
-  }) as typeof fetch & { calls: FetchCallRecord[] };
+    return currentResponse.clone();
+  }) as typeof fetch & {
+    calls: FetchCallRecord[];
+    setResponse(next: Response): void;
+  };
   fetchRecorder.calls = calls;
+  fetchRecorder.setResponse = (next) => {
+    currentResponse = next;
+  };
   return fetchRecorder;
 }

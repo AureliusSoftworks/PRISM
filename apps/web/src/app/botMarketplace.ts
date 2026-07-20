@@ -27,19 +27,8 @@ export function marketplaceBotEyeCharacterIsSideways(value: unknown): boolean {
   return normalized !== null && marketplaceSidewaysEyeCharacterSet.has(normalized);
 }
 
-export type MarketplaceContentType = "bot" | "lens";
 export type BotMarketplaceEntryInstallState = "available" | "installed";
 export type BotMarketplaceThemeInstallState = "available" | "partial" | "installed";
-export type MarketplaceLensInstallState = "available" | "installed";
-export type MarketplaceLensKind =
-  | "sacred_wisdom"
-  | "creative_style"
-  | "roleplay"
-  | "thinking_style"
-  | "civic_perspective"
-  | "research_persona"
-  | "utility"
-  | "other";
 
 export interface BotMarketplaceTheme {
   id: string;
@@ -62,39 +51,9 @@ export interface BotMarketplaceEntry {
   tags: string[];
   marketplaceVisible: boolean;
   deprecated: boolean;
-  replacementType: MarketplaceContentType | null;
+  replacementType: "bot" | null;
   replacementIds: string[];
   powers?: BotPowerV1[];
-}
-
-export interface MarketplaceLensCategory {
-  id: string;
-  name: string;
-  description: string;
-  disclaimer: string | null;
-  lensIds: string[];
-}
-
-export interface MarketplaceLensEntry {
-  id: string;
-  seed: string | null;
-  displayName: string;
-  description: string;
-  category: string;
-  tags: string[];
-  themes: string[];
-  tone: string | null;
-  inspiredBy: string[];
-  constraints: string[];
-  prohibitedClaims: string[];
-  systemPromptFragment: string;
-  marketplaceVisible: boolean;
-  installed: boolean;
-  createdAt: string | null;
-  updatedAt: string | null;
-  lensKind: MarketplaceLensKind;
-  researchUseAllowed: boolean;
-  researchDisclaimer: string | null;
 }
 
 export interface BotMarketplaceManifest {
@@ -103,8 +62,6 @@ export interface BotMarketplaceManifest {
   updatedAt: string | null;
   themes: BotMarketplaceTheme[];
   bots: BotMarketplaceEntry[];
-  lensCategories: MarketplaceLensCategory[];
-  lenses: MarketplaceLensEntry[];
 }
 
 export type BotMarketplaceUpdateRevisions = Readonly<Record<string, string>>;
@@ -132,16 +89,6 @@ export interface BotMarketplacePreparedBundle {
 
 const MARKETPLACE_SCHEMA = "prism-bot-marketplace-v1";
 const HASH_PATTERN = /^[a-f0-9]{32}$/;
-const MARKETPLACE_LENS_KINDS: readonly MarketplaceLensKind[] = [
-  "sacred_wisdom",
-  "creative_style",
-  "roleplay",
-  "thinking_style",
-  "civic_perspective",
-  "research_persona",
-  "utility",
-  "other",
-];
 
 function stringValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
@@ -174,24 +121,6 @@ function nonnegativeInteger(value: unknown): number {
 
 function booleanValue(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
-}
-
-function normalizeMarketplaceContentType(value: unknown): MarketplaceContentType | null {
-  const contentType = normalizeMarketplaceId(value);
-  return contentType === "bot" || contentType === "lens" ? contentType : null;
-}
-
-function normalizeLensKind(value: unknown): MarketplaceLensKind {
-  const lensKind = stringValue(value) as MarketplaceLensKind;
-  return MARKETPLACE_LENS_KINDS.includes(lensKind) ? lensKind : "other";
-}
-
-function normalizeLensCategoryId(value: unknown): string {
-  return stringValue(value)
-    .toLowerCase()
-    .replace(/&/g, "and")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
 }
 
 export function normalizeBotMarketplaceManifest(raw: unknown): BotMarketplaceManifest {
@@ -233,47 +162,14 @@ export function normalizeBotMarketplaceManifest(raw: unknown): BotMarketplaceMan
       tags: stringList(botRecord.tags).map((tag) => tag.toLowerCase()),
       marketplaceVisible: booleanValue(botRecord.marketplaceVisible, true),
       deprecated: booleanValue(botRecord.deprecated, false),
-      replacementType: normalizeMarketplaceContentType(botRecord.replacementType),
+      replacementType:
+        normalizeMarketplaceId(botRecord.replacementType) === "bot"
+          ? "bot"
+          : null,
       replacementIds: stringList(botRecord.replacementIds).map((replacementId) =>
         replacementId.toLowerCase()
       ),
       ...(powers.length > 0 ? { powers } : {}),
-    });
-  }
-
-  const seenLensIds = new Set<string>();
-  const lenses: MarketplaceLensEntry[] = [];
-  for (const candidate of Array.isArray(record.lenses) ? record.lenses : []) {
-    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) continue;
-    const lensRecord = candidate as Record<string, unknown>;
-    const id = normalizeMarketplaceId(lensRecord.id);
-    const displayName = stringValue(lensRecord.displayName);
-    const description = stringValue(lensRecord.description);
-    const category = stringValue(lensRecord.category);
-    const systemPromptFragment = stringValue(lensRecord.systemPromptFragment);
-    if (!id || !displayName || !description || !category || !systemPromptFragment) continue;
-    if (seenLensIds.has(id)) continue;
-    seenLensIds.add(id);
-    lenses.push({
-      id,
-      seed: stringValue(lensRecord.seed) || null,
-      displayName,
-      description,
-      category,
-      tags: stringList(lensRecord.tags).map((tag) => tag.toLowerCase()),
-      themes: stringList(lensRecord.themes),
-      tone: stringValue(lensRecord.tone) || null,
-      inspiredBy: stringList(lensRecord.inspiredBy),
-      constraints: stringList(lensRecord.constraints),
-      prohibitedClaims: stringList(lensRecord.prohibitedClaims),
-      systemPromptFragment,
-      marketplaceVisible: booleanValue(lensRecord.marketplaceVisible, true),
-      installed: booleanValue(lensRecord.installed, false),
-      createdAt: stringValue(lensRecord.createdAt) || null,
-      updatedAt: stringValue(lensRecord.updatedAt) || null,
-      lensKind: normalizeLensKind(lensRecord.lensKind),
-      researchUseAllowed: booleanValue(lensRecord.researchUseAllowed, false),
-      researchDisclaimer: stringValue(lensRecord.researchDisclaimer) || null,
     });
   }
 
@@ -297,35 +193,12 @@ export function normalizeBotMarketplaceManifest(raw: unknown): BotMarketplaceMan
     });
   }
 
-  const seenLensCategoryIds = new Set<string>();
-  const lensCategories: MarketplaceLensCategory[] = [];
-  for (const candidate of Array.isArray(record.lensCategories) ? record.lensCategories : []) {
-    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) continue;
-    const categoryRecord = candidate as Record<string, unknown>;
-    const name = stringValue(categoryRecord.name);
-    const id = normalizeMarketplaceId(categoryRecord.id) || normalizeLensCategoryId(name);
-    if (!id || !name || seenLensCategoryIds.has(id)) continue;
-    const lensIds = stringList(categoryRecord.lensIds)
-      .map((lensId) => lensId.toLowerCase())
-      .filter((lensId) => seenLensIds.has(lensId));
-    seenLensCategoryIds.add(id);
-    lensCategories.push({
-      id,
-      name,
-      description: stringValue(categoryRecord.description),
-      disclaimer: stringValue(categoryRecord.disclaimer) || null,
-      lensIds,
-    });
-  }
-
   return {
     schema: MARKETPLACE_SCHEMA,
     version: nonnegativeInteger(record.version) || 1,
     updatedAt: stringValue(record.updatedAt) || null,
     themes,
     bots,
-    lensCategories,
-    lenses,
   };
 }
 
@@ -351,12 +224,6 @@ export function marketplaceVisibleBotEntries(
   manifest: BotMarketplaceManifest
 ): BotMarketplaceEntry[] {
   return manifest.bots.filter((entry) => entry.marketplaceVisible);
-}
-
-export function marketplaceVisibleLensEntries(
-  manifest: BotMarketplaceManifest
-): MarketplaceLensEntry[] {
-  return manifest.lenses.filter((entry) => entry.marketplaceVisible);
 }
 
 export function marketplaceEntriesForTheme(
@@ -385,27 +252,6 @@ export function marketplaceMissingEntries(
   return entries.filter((entry) => !installedHashes.has(entry.botHash));
 }
 
-export function marketplaceLensEntriesForCategory(
-  manifest: BotMarketplaceManifest,
-  categoryId: string
-): MarketplaceLensEntry[] {
-  const category = manifest.lensCategories.find((candidate) => candidate.id === categoryId);
-  if (!category) return [];
-  const byId = new Map(manifest.lenses.map((entry) => [entry.id, entry]));
-  if (category.lensIds.length > 0) {
-    return category.lensIds
-      .map((lensId) => byId.get(lensId) ?? null)
-      .filter((entry): entry is MarketplaceLensEntry =>
-        Boolean(entry?.marketplaceVisible)
-      );
-  }
-  return manifest.lenses.filter(
-    (entry) =>
-      entry.marketplaceVisible &&
-      normalizeLensCategoryId(entry.category) === category.id
-  );
-}
-
 export function marketplaceThemeInstallState(
   entries: readonly BotMarketplaceEntry[],
   installedHashes: ReadonlySet<string>
@@ -414,13 +260,6 @@ export function marketplaceThemeInstallState(
   const installedCount = entries.filter((entry) => installedHashes.has(entry.botHash)).length;
   if (installedCount === 0) return "available";
   return installedCount === entries.length ? "installed" : "partial";
-}
-
-export function marketplaceLensInstallState(
-  lens: MarketplaceLensEntry,
-  installedLensIds: ReadonlySet<string>
-): MarketplaceLensInstallState {
-  return lens.installed || installedLensIds.has(lens.id) ? "installed" : "available";
 }
 
 export function validateMarketplaceSelectionBundles(

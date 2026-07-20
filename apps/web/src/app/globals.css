@@ -59,6 +59,36 @@ html[data-prism-visual-lifecycle="suspended"]
   animation-play-state: paused !important;
 }
 
+/* Player-selected graphics ceilings. High intentionally adds no overrides and
+   preserves today's adaptive rendering. Medium bounds expensive scene paint;
+   Low also freezes explicitly decorative motion and drops authored GPU filters.
+   Semantic arrivals, speech, clocks, and input feedback are never tagged as
+   decorative, so quality settings cannot hide product state. */
+html[data-prism-graphics-quality="medium"]
+  [data-prism-expensive-effect="true"],
+html[data-prism-graphics-quality="low"]
+  [data-prism-expensive-effect="true"] {
+  contain: paint;
+}
+
+html[data-prism-graphics-quality="low"]
+  [data-prism-decorative-motion="true"],
+html[data-prism-graphics-quality="low"]
+  [data-prism-decorative-motion="true"]::before,
+html[data-prism-graphics-quality="low"]
+  [data-prism-decorative-motion="true"]::after {
+  animation: none !important;
+}
+
+html[data-prism-graphics-quality="low"]
+  [data-prism-expensive-effect="true"]::before,
+html[data-prism-graphics-quality="low"]
+  [data-prism-expensive-effect="true"]::after {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  filter: none !important;
+}
+
 a {
   color: inherit;
   text-decoration: none;

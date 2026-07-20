@@ -1332,6 +1332,47 @@ describe("coffee cup sprites", () => {
     );
   });
 
+  it("keeps ambient sips inside listener windows without blocking explicit sips", () => {
+    const seed = "session:bot-listener";
+    let sipWindowMs: number | null = null;
+    for (let nowMs = 0; nowMs <= 180_000; nowMs += 100) {
+      if (coffeeCupSippingActive({ seed, nowMs, progress: 0.5 })) {
+        sipWindowMs = nowMs;
+        break;
+      }
+    }
+
+    assert.notEqual(sipWindowMs, null);
+    assert.equal(
+      coffeeCupSippingActive({
+        seed,
+        nowMs: sipWindowMs!,
+        progress: 0.5,
+        ambientSipAllowed: false,
+      }),
+      false,
+    );
+    assert.equal(
+      buildCoffeeCupVisualState({
+        seed,
+        nowMs: sipWindowMs!,
+        progressOverride: 0.5,
+        ambientSipAllowed: false,
+      }).sipping,
+      false,
+    );
+    assert.equal(
+      buildCoffeeCupVisualState({
+        seed,
+        nowMs: sipWindowMs!,
+        progressOverride: 0.5,
+        ambientSipAllowed: false,
+        sippingOverride: true,
+      }).sipping,
+      true,
+    );
+  });
+
   it("maps bot colors to the five PRISM cup families", () => {
     assert.equal(coffeeCupPrismFamilyForBotColor("#ff4d6d"), "p");
     assert.equal(coffeeCupColorForBotColor("#ff4d6d"), "red");

@@ -7,6 +7,7 @@ import {
   normalizeElevenLabsVoiceDirection,
   normalizeVoiceMode,
   normalizeVoiceDeliveryMood,
+  voiceSpokenText,
   ELEVENLABS_VOICE_STABILITY_DEFAULT,
   applyPlayerNamePronunciation as applySharedPlayerNamePronunciation,
   type BotAudioVoiceProfileV1,
@@ -658,7 +659,7 @@ export type VoiceSynthesisRequest = {
 
 export function cleanSpeakableAssistantProse(value: unknown): string {
   if (typeof value !== "string") return "";
-  return value
+  return voiceSpokenText(value)
     .replace(/```[\s\S]*?```/g, " ")
     .replace(/<tool\b[\s\S]*?<\/tool>/gi, " ")
     .replace(/\[\[(?:tool|action|stage)[^\]]*\]\]/gi, " ")
@@ -690,7 +691,10 @@ export function validateVoiceSynthesisRequest(body: Record<string, unknown>): Vo
   const deliveryMood = normalizeVoiceDeliveryMood(body.moodKey);
   return {
     text,
-    elevenLabsText: normalizeElevenLabsTaggedText(body.elevenLabsText, text),
+    elevenLabsText: normalizeElevenLabsTaggedText(
+      voiceSpokenText(body.elevenLabsText),
+      text,
+    ),
     mode: normalizeVoiceMode(body.mode),
     engine: normalizeEnglishVoiceEngine(body.engine),
     profile: applyVoiceDeliveryMoodToProfile(

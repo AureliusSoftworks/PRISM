@@ -335,6 +335,10 @@ describe("Coffee seat arrival CSS", () => {
       coffeeSeatPlateEmojiSource,
       /const normalizedThinkingFrames =\s+normalizeBotFaceThinkingFrames\(faceThinkingFrames\) \?\?\s+DEFAULT_BOT_FACE_THINKING_FRAMES;/
     );
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /const thinkingSpinnerActive =\s+enabled &&\s+showThinkingSpinner &&\s+!isTalking &&\s+!botFaceThinkingSpinnerDisabled\(normalizedThinkingFrames\);/,
+    );
     assert.match(coffeeSeatPlateEmojiSource, /const faceBlinkDisabled = normalizedFaceBlinkBar === "none";/);
     assert.match(
       coffeeSeatPlateEmojiSource,

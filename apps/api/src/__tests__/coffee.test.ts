@@ -104,6 +104,7 @@ import {
   coffeePlayerDepartureEpilogueFocus,
   coffeePlayerDepartureEpilogueShouldStop,
   coffeePlayerDepartureEpilogueTurnCount,
+  recordCoffeeFinalBotDepartureReplayEvents,
   recordCoffeePlayerDeparture,
   recordCoffeeUserAction,
   recordCoffeeReplayEvents,
@@ -325,6 +326,10 @@ describe("Coffee listener reaction persistence", () => {
     assert.match(source, /departurePersistence === null/u);
     assert.match(source, /listenerIsInAudience/u);
     assert.match(source, /coffeePowerBotVisibleTo/u);
+    assert.match(
+      source,
+      /event\.plan\.spokenCue \|\| event\.plan\.vocalFoley/u,
+    );
     assert.doesNotMatch(
       source,
       /listenerReaction[\s\S]{0,120}coffeeBotSocialById\s*=/u,
@@ -6618,6 +6623,8 @@ describe("buildSpeakerPrompt", () => {
     assert.match(joined, /Immediate bot-to-bot handoff from Boris/);
     assert.match(joined, /Duty without limits becomes a shield for the powerful/);
     assert.match(joined, /Respond to one specific claim, image, disagreement, or question/);
+    assert.match(joined, /Use only what the visible line actually establishes/);
+    assert.match(joined, /label it as your own thought/);
     assert.match(messages.at(-1)!.content, /Continue that exchange/);
   });
 
@@ -9522,6 +9529,110 @@ describe("coffee social state helpers", () => {
     );
   });
 
+  it("records one final physical departure for every bot still seated after the wrap", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-final-departures";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+    seedCoffeeBot(db, userId, CARA);
+    const created = await createCoffeeConversation(db, userId, {
+      groupBotIds: [ALICE.id, BORIS.id, CARA.id],
+    });
+    db.prepare(
+      `INSERT INTO messages (id, conversation_id, user_id, role, content, created_at)
+       VALUES ('player-goodbye', ?, ?, 'user', 'Catch you all later.', '2026-07-02T15:00:00.000Z')`,
+    ).run(created.conversation.id, userId);
+    recordCoffeePlayerDeparture(db, userId, created.conversation.id);
+    db.prepare(
+      `INSERT INTO messages (id, conversation_id, user_id, role, content, bot_id, created_at)
+       VALUES ('closing-line', ?, ?, 'assistant', 'Good night, everyone.', ?, '2026-07-02T15:00:01.000Z')`,
+    ).run(created.conversation.id, userId, ALICE.id);
+
+    assert.equal(
+      recordCoffeeFinalBotDepartureReplayEvents(
+        db,
+        userId,
+        created.conversation.id,
+      ),
+      3,
+    );
+    assert.equal(
+      recordCoffeeFinalBotDepartureReplayEvents(
+        db,
+        userId,
+        created.conversation.id,
+      ),
+      0,
+    );
+    const departures = getCoffeeConversationTranscript(
+      db,
+      userId,
+      created.conversation.id,
+    ).flatMap((message) =>
+      (message.coffeeReplayEvents ?? []).filter(
+        (event) => event.kind === "botDeparture",
+      ),
+    );
+    assert.deepEqual(
+      departures.map((event) =>
+        event.kind === "botDeparture"
+          ? [event.botId, event.seatIndex]
+          : null,
+      ),
+      [
+        [ALICE.id, 0],
+        [BORIS.id, 1],
+        [CARA.id, 2],
+      ],
+    );
+  });
+
+  it("backfills final bot departures for an already-summarized saved session", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-final-departure-backfill";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+    const created = await createCoffeeConversation(db, userId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+    });
+    db.prepare(
+      `INSERT INTO messages (id, conversation_id, user_id, role, content, created_at)
+       VALUES ('player-goodbye-backfill', ?, ?, 'user', 'Goodbye, everyone.', '2026-07-02T16:00:00.000Z')`,
+    ).run(created.conversation.id, userId);
+    recordCoffeePlayerDeparture(db, userId, created.conversation.id);
+    db.prepare(
+      `INSERT INTO messages (id, conversation_id, user_id, role, content, bot_id, created_at)
+       VALUES ('closing-line-backfill', ?, ?, 'assistant', 'Take care.', ?, '2026-07-02T16:00:01.000Z')`,
+    ).run(created.conversation.id, userId, ALICE.id);
+    db.prepare(
+      `INSERT INTO messages (id, conversation_id, user_id, role, content, created_at)
+       VALUES ('synopsis-backfill', ?, ?, 'system', 'Session synopsis: The table shared a brief farewell before everyone headed home.', '2026-07-02T16:00:02.000Z')`,
+    ).run(created.conversation.id, userId);
+
+    const finalized = await generateCoffeeSessionSynopsis(
+      db,
+      userId,
+      created.conversation.id,
+      { preferredProvider: "local" },
+    );
+    const departures = finalized.messages.flatMap((message) =>
+      (message.coffeeReplayEvents ?? []).filter(
+        (event) => event.kind === "botDeparture",
+      ),
+    );
+    assert.deepEqual(
+      departures.map((event) =>
+        event.kind === "botDeparture"
+          ? [event.botId, event.seatIndex]
+          : null,
+      ),
+      [
+        [ALICE.id, 0],
+        [BORIS.id, 1],
+      ],
+    );
+  });
+
   it("acknowledges departure once, resumes the topic, and closes the epilogue", () => {
     const first = coffeePlayerDepartureEpilogueFocus(0, 4, "Jared");
     const middle = coffeePlayerDepartureEpilogueFocus(1, 4);
@@ -10749,7 +10860,8 @@ describe("buildCoffeeTableTuningAppendix", () => {
       normalizeCoffeeSessionSettings({ crossTalk: "rare", stayOnThread: false })
     );
     assert.match(rare, /one clear voice at a time/i);
-    assert.match(rare, /Topic shifts are allowed/i);
+    assert.match(rare, /Topic shifts are allowed only when they visibly bridge/i);
+    assert.match(rare, /never introduce a premise as though the table already said it/i);
 
     const chatty = buildCoffeeTableTuningAppendix(
       normalizeCoffeeSessionSettings({ crossTalk: "chatty", stayOnThread: true })
@@ -10762,6 +10874,18 @@ describe("buildCoffeeTableTuningAppendix", () => {
     );
     assert.match(pileup, /brief interruptions/i);
     assert.match(pileup, /overcaffeinated/i);
+
+    const pileupRouter = buildRouterPrompt({
+      group: [ALICE, BORIS, CARA],
+      history: [],
+      userMessage: "Start.",
+      lastSpeakerBotId: BORIS.id,
+      sessionSettings: normalizeCoffeeSessionSettings({ crossTalk: "pileup" }),
+    });
+    assert.match(
+      pileupRouter.map((message) => message.content).join("\n"),
+      /immediate interruption or rebuttal/i,
+    );
   });
 });
 

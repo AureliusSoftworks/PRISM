@@ -62,6 +62,10 @@ import {
   type ApiKeyValidationProvider,
 } from "./api-key-validation.ts";
 import {
+  ElevenLabsSubscriptionError,
+  getElevenLabsCreditBalance,
+} from "./elevenlabs-subscription.ts";
+import {
   getOllamaSetupStatus,
   installOllamaCliAndRequiredModel,
   runAutoSetup,
@@ -162,14 +166,17 @@ import {
 } from "./coffee-turn-jobs.ts";
 import {
   advanceBotcastEpisode,
+  botcastEpisodePowerSnapshotForRole,
+  chatWithBotcastShowHost,
   createBotcastEpisode,
   createBotcastShow,
   deleteBotcastEpisode,
   deleteBotcastShow,
   deleteBotcastShowIntroAudio,
+  endBotcastEpisodeOnProducerCut,
   ensureBotcastEpisodePersonaReview,
-  forceEndBotcastEpisode,
   generateBotcastBookingSuggestion,
+  generateBotcastProducerGuestBooking,
   generateBotcastShowDashboardBlurbs,
   generateBotcastShowIdentity,
   generateBotcastShowName,
@@ -177,6 +184,8 @@ import {
   getBotcastShow,
   listBotcastEpisodes,
   listBotcastShows,
+  projectBotcastAdvanceResponseForAudienceV1,
+  projectBotcastEpisodeForAudienceV1,
   readBotcastShowAtmosphereAudio,
   readBotcastShowIntroAudio,
   setBotcastEpisodeCameraMode,
@@ -279,13 +288,16 @@ import {
 } from "./slate.ts";
 import { composeSlateProjectCoverPrompt } from "./slate-cover.ts";
 import {
+  advanceSlateDeliberation,
   chatWithSlateProject,
   generateSlateProjectTitle,
   listSlateProjectChatMessages,
   refreshSlateLivingSummary,
   resolveSlateProjectTitleSuggestion,
+  slateDeliberationSpeakerForRequest,
   suggestSlateProjectTitle,
 } from "./slate-project-companion.ts";
+import { resolveSlateDeliberationModelOverride } from "./slate-deliberation-routing.ts";
 import {
   SlateSectionAiWriteConflictError,
   SlateSectionRevisionConflictError,
@@ -506,13 +518,18 @@ import {
   normalizeBotAudioVoiceProfileV1,
   applyBotNamePronunciations,
   normalizeBotNamePronunciation,
+  normalizeBotSelfReferral,
   normalizeBotVoiceVolume,
+  normalizeEphemeralChatProviderPreferences,
+  normalizeGraphicsQuality,
+  normalizeListenerReactionVocalFoley,
   normalizeOptionalBotAudioVoiceProfileV1,
   parseStoredBotAudioVoiceProfileV1,
   parseStoredBotPowersV1,
   botPowerEchoesAddressedSpeechV1,
   botPowerIsMutedV1,
   botPowerResponseIsSilentV1,
+  strongestHardBotPowerResponseBudgetEffectV1,
   serializeBotAudioVoiceProfileV1,
   serializeBotPowersV1,
   encodeComfyUiRemoteWorkflowModelId,
@@ -553,9 +570,12 @@ import {
   type BotFaceThinkingFrames,
   type BotAudioVoiceProfileV1,
   BOTCAST_ELEVENLABS_INTRO_DURATION_MS,
+  BOTCAST_PRODUCER_GUEST_NAME,
+  buildSignalMusicProfile,
   signalPersonaTemperamentFor,
   type BotcastProducerCue,
   type BotcastShowPatchRequest,
+  type SlateDeliberationSpeaker,
   type OpinionBand,
   type OpinionTrend,
   type PromptShortcutMetadata,
@@ -565,6 +585,7 @@ import {
   type ZenAskQuestionPatienceInput,
   type ZenAutonomyInput,
   type ZenPersonaTransitionInput,
+  type GraphicsQuality,
   type ImageProviderName,
 } from "@localai/shared";
 import { editImage, generateImage } from "./image-provider.ts";
@@ -582,7 +603,15 @@ import {
   resolveImageGeneratePersistence,
 } from "./image-generate-resolve.ts";
 import { resolveImagePromptForGeneration } from "./image-prompt-routing.ts";
-import { previewUnreferencedImageAssets } from "./image-asset-cleanup.ts";
+import {
+  cleanupUnreferencedImageAssets,
+  ImageAssetCleanupError,
+  listImageAssetCleanupRecoveries,
+  permanentlyDeleteImageAssetCleanupRecovery,
+  previewUnreferencedImageAssets,
+  reconcileAssetCleanupRecoveryForUser,
+  restoreImageAssetCleanupRecovery,
+} from "./image-asset-cleanup.ts";
 import {
   IMAGE_BOT_MEMBERSHIP_SQL,
   imageOriginForGenerate,
@@ -606,6 +635,7 @@ import {
   downloadRemoteImage,
   readGeneratedImageBytes,
   removeGeneratedImagesDirectoryForUser,
+  removeAssetCleanupTrashDirectoryForUser,
   tryUnlinkGeneratedImageFile,
   writeGeneratedImageBytes,
 } from "./image-storage.ts";
@@ -1031,7 +1061,9 @@ interface UserDbRow {
   wrapped_user_key_iv: string;
   wrapped_user_key_tag: string;
   theme: "light" | "dark" | "system";
+  graphics_quality: GraphicsQuality | string | null;
   preferred_provider: ProviderName;
+  ephemeral_chat_provider_preferences: string | null;
   preferred_image_provider: ImageProviderName;
   provider_locked: number;
   auto_memory: number;
@@ -1289,12 +1321,18 @@ function getOrCreateLocalOwnerUser(): string {
 function getUserRow(userId: string): UserDbRow {
   const row = db
     .prepare(
-      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, preferred_image_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, auto_switch_model, auto_fallback_chain, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, zen_persona_transition_choice, prism_default_bot_name, prism_default_bot_system_prompt, prism_default_bot_color, prism_default_bot_glyph, prism_default_bot_face_eyes_font, prism_default_bot_face_eye_character, prism_default_bot_face_eye_animation, prism_default_bot_face_mouth_font, prism_default_bot_face_mouth_character, prism_default_bot_face_mouth_animation, prism_default_bot_face_mouth_coffee_pucker, prism_default_bot_face_font_weight, prism_default_bot_face_eye_scale, prism_default_bot_face_eye_offset_x, prism_default_bot_face_eye_offset_y, prism_default_bot_face_mouth_scale, prism_default_bot_face_mouth_offset_x, prism_default_bot_face_mouth_offset_y, prism_default_bot_face_mouth_rotation_deg, prism_default_bot_face_blink_bar, prism_default_bot_face_blink_scale, prism_default_bot_face_blink_offset_x, prism_default_bot_face_blink_offset_y, prism_default_bot_face_thinking_frames, prism_default_bot_audio_voice_profile, prism_default_bot_temperature, prism_default_bot_max_tokens, prism_default_bot_top_p, prism_default_bot_top_k, prism_default_bot_repetition_penalty, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, brave_search_key_ciphertext, brave_search_key_iv, brave_search_key_tag, voice_mode, voice_effects_enabled, voice_volume, operating_system_voices_enabled, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, elevenlabs_voice_collection_id, player_audio_voice_profile, player_name_pronunciation, created_at, last_active_at FROM users WHERE id = ?",
+      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, preferred_provider, ephemeral_chat_provider_preferences, preferred_image_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, auto_switch_model, auto_fallback_chain, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, zen_persona_transition_choice, prism_default_bot_name, prism_default_bot_system_prompt, prism_default_bot_color, prism_default_bot_glyph, prism_default_bot_face_eyes_font, prism_default_bot_face_eye_character, prism_default_bot_face_eye_animation, prism_default_bot_face_mouth_font, prism_default_bot_face_mouth_character, prism_default_bot_face_mouth_animation, prism_default_bot_face_mouth_coffee_pucker, prism_default_bot_face_font_weight, prism_default_bot_face_eye_scale, prism_default_bot_face_eye_offset_x, prism_default_bot_face_eye_offset_y, prism_default_bot_face_mouth_scale, prism_default_bot_face_mouth_offset_x, prism_default_bot_face_mouth_offset_y, prism_default_bot_face_mouth_rotation_deg, prism_default_bot_face_blink_bar, prism_default_bot_face_blink_scale, prism_default_bot_face_blink_offset_x, prism_default_bot_face_blink_offset_y, prism_default_bot_face_thinking_frames, prism_default_bot_audio_voice_profile, prism_default_bot_temperature, prism_default_bot_max_tokens, prism_default_bot_top_p, prism_default_bot_top_k, prism_default_bot_repetition_penalty, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, brave_search_key_ciphertext, brave_search_key_iv, brave_search_key_tag, voice_mode, voice_effects_enabled, voice_volume, operating_system_voices_enabled, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, elevenlabs_voice_collection_id, player_audio_voice_profile, player_name_pronunciation, created_at, last_active_at FROM users WHERE id = ?",
     )
     .get(userId) as UserDbRow | undefined;
   if (!row) {
     throw new Error("User not found.");
   }
+  const graphicsQuality = db
+    .prepare("SELECT graphics_quality FROM users WHERE id = ?")
+    .get(userId) as { graphics_quality: string | null } | undefined;
+  row.graphics_quality = normalizeGraphicsQuality(
+    graphicsQuality?.graphics_quality,
+  );
   const faceRotation = db
     .prepare(
       "SELECT prism_default_bot_face_eye_rotation_deg, prism_default_bot_face_eye_count FROM users WHERE id = ?",
@@ -1514,7 +1552,11 @@ function getAnthropicApiKeyForUser(
   );
 }
 
-function slateAiForUser(userId: string, projectId?: string) {
+function slateAiForUser(
+  userId: string,
+  projectId?: string,
+  deliberationSpeaker?: SlateDeliberationSpeaker,
+) {
   const user = getUserRow(userId);
   const accountDefault = resolveSlateAccountDefaults({
     preferredProvider: user.preferred_provider,
@@ -1523,13 +1565,14 @@ function slateAiForUser(userId: string, projectId?: string) {
   });
   const projectSettings = projectId
     ? (db.prepare(
-        `SELECT prose_mode, prose_model, prose_provider
+        `SELECT prose_mode, prose_model, prose_provider, deliberation_config_json
            FROM slate_projects WHERE id = ? AND user_id = ?`,
       ).get(projectId, userId) as
         | {
             prose_mode: string;
             prose_model: string | null;
             prose_provider: string | null;
+            deliberation_config_json: string;
           }
         | undefined)
     : undefined;
@@ -1539,13 +1582,24 @@ function slateAiForUser(userId: string, projectId?: string) {
     projectSettings?.prose_mode === "online"
       ? projectSettings.prose_mode
       : "auto";
-  const selectedModel = projectSettings?.prose_model?.trim() || null;
-  const selectedProvider =
+  let selectedModel = projectSettings?.prose_model?.trim() || null;
+  let selectedProvider: ProviderName | null =
     projectSettings?.prose_provider === "local" ||
     projectSettings?.prose_provider === "openai" ||
     projectSettings?.prose_provider === "anthropic"
       ? projectSettings.prose_provider
       : null;
+  if (projectSettings && deliberationSpeaker) {
+    const override = resolveSlateDeliberationModelOverride(
+      projectSettings.deliberation_config_json,
+      deliberationSpeaker,
+      mode,
+    );
+    if (override) {
+      selectedProvider = override.provider;
+      selectedModel = override.model;
+    }
+  }
   let providerName: ProviderName;
   let model: string;
   if (mode === "offline") {
@@ -2231,6 +2285,11 @@ async function deleteUserAccount(userId: string): Promise<void> {
   } catch {
     // Best-effort filesystem cleanup after SQLite removes image rows.
   }
+  try {
+    removeAssetCleanupTrashDirectoryForUser(userId);
+  } catch {
+    // Best-effort recovery-trash cleanup after SQLite removes the account.
+  }
 
   try {
     await deleteVectorsForUser(userId);
@@ -2255,6 +2314,11 @@ async function restoreUserFactoryDefaults(userId: string): Promise<void> {
     removeGeneratedImagesDirectoryForUser(userId);
   } catch {
     // Best-effort filesystem cleanup after SQLite removes image rows.
+  }
+  try {
+    removeAssetCleanupTrashDirectoryForUser(userId);
+  } catch {
+    // Best-effort recovery-trash cleanup after SQLite resets the account.
   }
 
   try {
@@ -3953,6 +4017,43 @@ function buildRoutes(): RouteDefinition[] {
           ),
       );
       json(ctx.res, 200, { ok: true, messages });
+    }),
+    route("POST", "/api/slate/projects/:id/deliberation/turn", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const speaker = slateDeliberationSpeakerForRequest(ctx.body);
+      const ai = slateAiForUser(userId, ctx.params.id, speaker);
+      const deliberationAbort = new AbortController();
+      const onDeliberationClientClose = () => {
+        if (!ctx.res.writableEnded) deliberationAbort.abort();
+      };
+      ctx.req.once("close", onDeliberationClientClose);
+      ctx.req.once("aborted", onDeliberationClientClose);
+      ctx.res.once("close", onDeliberationClientClose);
+      try {
+        const message = await runWithUsageSession(
+          {
+            db,
+            userId,
+            privacyScope: "normal",
+            mode: "slate",
+            surface: "slate",
+          },
+          () =>
+            advanceSlateDeliberation(
+              db,
+              userId,
+              ctx.params.id,
+              ctx.body,
+              ai,
+              deliberationAbort.signal,
+            ),
+        );
+        json(ctx.res, 200, { ok: true, message });
+      } finally {
+        ctx.req.off("close", onDeliberationClientClose);
+        ctx.req.off("aborted", onDeliberationClientClose);
+        ctx.res.off("close", onDeliberationClientClose);
+      }
     }),
     route("POST", "/api/slate/projects/:id/title-suggestions", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -7013,6 +7114,9 @@ function buildRoutes(): RouteDefinition[] {
       let starterPromptLabel: string | undefined;
       let runtimeBotMuted = false;
       let runtimeBotEchoAddressed = false;
+      let runtimeBotResponseBudget: ReturnType<
+        typeof strongestHardBotPowerResponseBudgetEffectV1
+      > = null;
       let botForcesLocalProvider = false;
       const generationOverrides: GenerateOptions = {};
       if (runtimeBotId) {
@@ -7037,6 +7141,9 @@ function buildRoutes(): RouteDefinition[] {
         if (bot) {
           runtimeBotMuted = botPowerIsMutedV1(bot.powers_json);
           runtimeBotEchoAddressed = botPowerEchoesAddressedSpeechV1(bot.powers_json);
+          runtimeBotResponseBudget = strongestHardBotPowerResponseBudgetEffectV1(
+            bot.powers_json,
+          );
           starterPromptLabel = bot.name;
           // Name is folded into the system prompt by composeBotSystemPrompt so
           // the model actually knows who it's supposed to be, even when the
@@ -7300,6 +7407,7 @@ function buildRoutes(): RouteDefinition[] {
             botSystemPrompt,
             botPowerMuted: runtimeBotMuted,
             botPowerEchoAddressed: runtimeBotEchoAddressed,
+            botPowerResponseBudget: runtimeBotResponseBudget,
             botOverrides,
             mode,
             sessionEnding,
@@ -7427,6 +7535,48 @@ function buildRoutes(): RouteDefinition[] {
           : {}),
       });
       json(ctx.res, 201, { ok: true, show });
+    }),
+    route("POST", "/api/botcast/shows/:id/host-chat", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const userKey = decryptUserKey(userId);
+      const body = ctx.body as Record<string, unknown>;
+      const requestedProvider = readProvider(body.preferredProvider);
+      const preferredProvider =
+        user.preferred_provider === "local"
+          ? "local"
+          : (requestedProvider ?? user.preferred_provider);
+      const message = await runWithUsageSession(
+        {
+          db,
+          userId,
+          privacyScope: "private",
+          mode: "signal",
+          surface: "signal",
+        },
+        () =>
+          chatWithBotcastShowHost(db, userId, ctx.params.id, body, {
+            preferredProvider,
+            openAiApiKey:
+              getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey,
+            anthropicApiKey:
+              getAnthropicApiKeyForUser(userId, userKey) ??
+              config.anthropicApiKey,
+            secondaryOllamaHost: user.secondary_ollama_host,
+            preferredLocalModel:
+              user.preferred_local_model &&
+              !isDisabledModelChoice(user.preferred_local_model)
+                ? user.preferred_local_model
+                : null,
+            preferredOnlineModel:
+              user.preferred_online_model &&
+              !isDisabledModelChoice(user.preferred_online_model)
+                ? user.preferred_online_model
+                : null,
+            providerFactory: providerFactoryOverride,
+          }),
+      );
+      json(ctx.res, 200, { ok: true, message });
     }),
     route("GET", "/api/botcast/artwork-jobs/active", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -7757,6 +7907,20 @@ function buildRoutes(): RouteDefinition[] {
           providerFactory: providerFactoryOverride,
         },
       );
+      if (!result.generated) {
+        const fieldLabel =
+          field === "booking"
+            ? "booking"
+            : field === "topic"
+              ? "episode title"
+              : "private producer comments";
+        throw new HttpError(
+          502,
+          result.failureReason === "provider_request_failed"
+            ? "Signal could not get a response from the selected model. Check that it is available, then try again."
+            : `Signal’s selected model did not return a usable ${fieldLabel}. Try again or choose another model.`,
+        );
+      }
       json(ctx.res, 200, { ok: true, ...result });
     }),
     route("POST", "/api/botcast/shows/:id/assets/:slot/upload", async (ctx) => {
@@ -7884,9 +8048,17 @@ function buildRoutes(): RouteDefinition[] {
           )
         .get(show.hostBotId, userId) as { system_prompt: string } | undefined;
       if (!host) throw new HttpError(404, "Signal host bot not found.");
-      const compositionPlan = buildSignalElevenLabsMusicCompositionPlan({
+      const musicSeed = `${show.id}:${show.logo.seed}`;
+      const musicProfile = buildSignalMusicProfile({
         temperament: signalPersonaTemperamentFor(host.system_prompt),
-        seed: `${show.id}:${show.logo.seed}`,
+        seed: musicSeed,
+        premise: show.premise,
+        hostingStyle: show.hostingStyle,
+        studioIdentity: show.studioIdentity,
+      });
+      const compositionPlan = buildSignalElevenLabsMusicCompositionPlan({
+        profile: musicProfile,
+        seed: musicSeed,
       });
       const controller = new AbortController();
       const onClose = () => controller.abort();
@@ -7962,6 +8134,75 @@ function buildRoutes(): RouteDefinition[] {
       }
       },
     ),
+    route("POST", "/api/botcast/shows/:id/atmosphere-audio/generate", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      if (user.preferred_provider === "local") {
+        throw new HttpError(
+          409,
+          "Switch to Online before creating an ElevenLabs Signal atmosphere.",
+        );
+      }
+      const show = getBotcastShow(db, userId, ctx.params.id);
+      const userKey = decryptUserKey(userId);
+      const apiKey =
+        getElevenLabsApiKeyForUser(userId, userKey) ?? config.elevenLabsApiKey;
+      if (!apiKey) {
+        throw new HttpError(
+          409,
+          "Add an ElevenLabs API key in Settings first.",
+        );
+      }
+      const atmospherePrompt = buildSignalAtmospherePrompt({
+        showName: show.name,
+        studioIdentity: show.studioIdentity,
+      });
+      const controller = new AbortController();
+      const onClose = () => controller.abort();
+      ctx.req.once("close", onClose);
+      try {
+        const atmosphere = await requestSignalElevenLabsAtmosphere({
+          apiKey,
+          prompt: atmospherePrompt,
+          signal: controller.signal,
+        });
+        if (controller.signal.aborted) return;
+        const savedShow = storeBotcastShowAtmosphereAudio(
+          db,
+          userId,
+          show.id,
+          {
+            model: SIGNAL_ELEVENLABS_ATMOSPHERE_MODEL,
+            prompt: atmospherePrompt,
+            contentType: atmosphere.contentType,
+            audioBytes: atmosphere.audioBytes,
+            durationMs: SIGNAL_ELEVENLABS_ATMOSPHERE_DURATION_MS,
+          },
+        );
+        if (atmosphere.requestId) {
+          ctx.res.setHeader(
+            "x-prism-provider-request-id",
+            atmosphere.requestId,
+          );
+        }
+        json(ctx.res, 201, { ok: true, show: savedShow });
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        if (error instanceof ElevenLabsSoundError) {
+          throw new HttpError(
+            error.status === 401 || error.status === 403
+              ? 401
+              : error.status === 429
+                ? 429
+                : 502,
+            error.message,
+          );
+        }
+        throw error;
+      } finally {
+        ctx.req.off("close", onClose);
+      }
+    }),
     route("GET", "/api/botcast/shows/:id/intro-audio", async (ctx) => {
       const userId = requireAuth(ctx);
       const intro = readBotcastShowIntroAudio(db, userId, ctx.params.id);
@@ -8027,6 +8268,13 @@ function buildRoutes(): RouteDefinition[] {
           : {}),
         ...(body.hostingStyle !== undefined
           ? { hostingStyle: body.hostingStyle as string }
+          : {}),
+        ...(body.hostInterruptionLines !== undefined
+          ? {
+              hostInterruptionLines:
+                body.hostInterruptionLines as
+                  BotcastShowPatchRequest["hostInterruptionLines"],
+            }
           : {}),
         ...(body.atmosphereImageUrl !== undefined
           ? { atmosphereImageUrl: body.atmosphereImageUrl as string | null }
@@ -8116,6 +8364,7 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/botcast/shows/:id/episodes", async (ctx) => {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
+      const userKey = decryptUserKey(userId);
       const body = ctx.body as Record<string, unknown>;
       const requestedProvider = readProvider(body.preferredProvider);
       const autoFallbackChain = parseStoredAutoFallbackChain(
@@ -8147,12 +8396,70 @@ function buildRoutes(): RouteDefinition[] {
         preferredProvider === "local"
           ? user.preferred_local_model
           : user.preferred_online_model;
+      const producerGuest = body.guestKind === "producer";
+      const guestContext =
+        typeof body.guestContext === "string" ? body.guestContext : "";
+      const producerGuestBooking = producerGuest
+        ? await generateBotcastProducerGuestBooking(
+            db,
+            userId,
+            ctx.params.id,
+            {
+              guestName: BOTCAST_PRODUCER_GUEST_NAME,
+              guestContext,
+              modelOverride:
+                modelOverride ??
+                (accountModel && !isDisabledModelChoice(accountModel)
+                  ? accountModel
+                  : null),
+            },
+            {
+              preferredProvider,
+              openAiApiKey:
+                getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey,
+              anthropicApiKey:
+                getAnthropicApiKeyForUser(userId, userKey) ??
+                config.anthropicApiKey,
+              secondaryOllamaHost: user.secondary_ollama_host,
+              preferredLocalModel: user.preferred_local_model,
+              preferredOnlineModel: user.preferred_online_model,
+              autoFallbackChain,
+              providerFactory: providerFactoryOverride,
+            },
+          )
+        : null;
+      if (
+        producerGuest &&
+        (!producerGuestBooking?.generated ||
+          !producerGuestBooking.topic ||
+          !producerGuestBooking.producerBrief)
+      ) {
+        throw new HttpError(
+          503,
+          "Signal could not synthesize this interview from your context. Try again.",
+        );
+      }
       const episode = createBotcastEpisode(db, userId, ctx.params.id, {
-        guestBotId: typeof body.guestBotId === "string" ? body.guestBotId : "",
-        topic: typeof body.topic === "string" ? body.topic : "",
-        ...(body.producerBrief !== undefined
-          ? { producerBrief: body.producerBrief as string }
-          : {}),
+        guestKind: producerGuest ? "producer" : "bot",
+        ...(producerGuest
+          ? {}
+          : {
+              guestBotId:
+                typeof body.guestBotId === "string" ? body.guestBotId : "",
+            }),
+        ...(producerGuest
+          ? {
+              guestName: BOTCAST_PRODUCER_GUEST_NAME,
+              guestContext,
+              topic: producerGuestBooking!.topic,
+              producerBrief: producerGuestBooking!.producerBrief,
+            }
+          : {
+              topic: typeof body.topic === "string" ? body.topic : "",
+              ...(body.producerBrief !== undefined
+                ? { producerBrief: body.producerBrief as string }
+                : {}),
+            }),
         preferredProvider,
         responseMode: autoEnabled
           ? "auto"
@@ -8169,13 +8476,18 @@ function buildRoutes(): RouteDefinition[] {
             ? null
             : Number(body.durationMinutes),
       });
-      json(ctx.res, 201, { ok: true, episode });
+      json(ctx.res, 201, {
+        ok: true,
+        episode: projectBotcastEpisodeForAudienceV1(episode),
+      });
     }),
     route("GET", "/api/botcast/episodes/:id", async (ctx) => {
       const userId = requireAuth(ctx);
       json(ctx.res, 200, {
         ok: true,
-        episode: getBotcastEpisode(db, userId, ctx.params.id),
+        episode: projectBotcastEpisodeForAudienceV1(
+          getBotcastEpisode(db, userId, ctx.params.id),
+        ),
       });
     }),
     route("DELETE", "/api/botcast/episodes/:id", async (ctx) => {
@@ -8189,9 +8501,9 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
-      const endedEpisode = forceEndBotcastEpisode(db, userId, ctx.params.id);
-      await ensureBotcastEpisodePersonaReview(db, userId, endedEpisode.id, {
-        preferredProvider: endedEpisode.provider,
+      const currentEpisode = getBotcastEpisode(db, userId, ctx.params.id);
+      const generation = {
+        preferredProvider: currentEpisode.provider,
         openAiApiKey:
           getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey,
         anthropicApiKey:
@@ -8203,10 +8515,20 @@ function buildRoutes(): RouteDefinition[] {
           user.auto_fallback_chain,
         ),
         providerFactory: providerFactoryOverride,
-      });
+      };
+      const result = await endBotcastEpisodeOnProducerCut(
+        db,
+        userId,
+        currentEpisode.id,
+        generation,
+      );
+      await ensureBotcastEpisodePersonaReview(db, userId, result.episode.id, generation);
       json(ctx.res, 200, {
         ok: true,
-        episode: getBotcastEpisode(db, userId, endedEpisode.id),
+        ...projectBotcastAdvanceResponseForAudienceV1({
+          episode: getBotcastEpisode(db, userId, result.episode.id),
+          message: result.message,
+        }),
       });
     }),
     route(
@@ -8224,7 +8546,10 @@ function buildRoutes(): RouteDefinition[] {
         ctx.params.id,
         body.active,
       );
-      json(ctx.res, 200, { ok: true, episode });
+      json(ctx.res, 200, {
+        ok: true,
+        episode: projectBotcastEpisodeForAudienceV1(episode),
+      });
       },
     ),
     route("POST", "/api/botcast/episodes/:id/camera", async (ctx) => {
@@ -8258,10 +8583,12 @@ function buildRoutes(): RouteDefinition[] {
       }
       json(ctx.res, 200, {
         ok: true,
-        episode: setBotcastEpisodeCameraMode(db, userId, ctx.params.id, {
-          mode,
-          atMs,
-        }),
+        episode: projectBotcastEpisodeForAudienceV1(
+          setBotcastEpisodeCameraMode(db, userId, ctx.params.id, {
+            mode,
+            atMs,
+          }),
+        ),
       });
     }),
     route("POST", "/api/botcast/episodes/:id/advance", async (ctx) => {
@@ -8278,15 +8605,49 @@ function buildRoutes(): RouteDefinition[] {
       if (
         cueDelivery !== undefined &&
         cueDelivery !== "next_host_turn" &&
-        cueDelivery !== "interrupt_guest"
+        cueDelivery !== "interrupt_guest" &&
+        cueDelivery !== "redirect_host"
       ) {
         throw new HttpError(
           400,
-          "Signal cue delivery must be next_host_turn or interrupt_guest.",
+          "Signal cue delivery must be next_host_turn, interrupt_guest, or redirect_host.",
         );
       }
+      const hostRedirectRecord =
+        body.hostRedirect &&
+        typeof body.hostRedirect === "object" &&
+        !Array.isArray(body.hostRedirect)
+          ? (body.hostRedirect as Record<string, unknown>)
+          : null;
+      const hostRedirect =
+        typeof hostRedirectRecord?.messageId === "string" &&
+        typeof hostRedirectRecord.spokenContent === "string"
+          ? {
+              messageId: hostRedirectRecord.messageId,
+              spokenContent: hostRedirectRecord.spokenContent,
+            }
+          : undefined;
+      const guestInterruptionRecord =
+        body.guestInterruption &&
+        typeof body.guestInterruption === "object" &&
+        !Array.isArray(body.guestInterruption)
+          ? (body.guestInterruption as Record<string, unknown>)
+          : null;
+      const guestInterruption =
+        typeof guestInterruptionRecord?.bridgeLine === "string"
+          ? {
+              bridgeLine: guestInterruptionRecord.bridgeLine,
+              ...(typeof guestInterruptionRecord.messageId === "string"
+                ? { messageId: guestInterruptionRecord.messageId }
+                : {}),
+              ...(typeof guestInterruptionRecord.spokenContent === "string"
+                ? { spokenContent: guestInterruptionRecord.spokenContent }
+                : {}),
+            }
+          : undefined;
       const cue: BotcastProducerCue | undefined =
         cueKind === "ask_about" ||
+        cueKind === "refocus" ||
         cueKind === "press_harder" ||
         cueKind === "move_on" ||
         cueKind === "lighten_up" ||
@@ -8304,6 +8665,53 @@ function buildRoutes(): RouteDefinition[] {
           "Signal cue delivery requires a producer cue.",
         );
       }
+      if (cueDelivery === "redirect_host" && !hostRedirect) {
+        throw new HttpError(
+          400,
+          "A live host redirect requires the current message and spoken prefix.",
+        );
+      }
+      if (hostRedirect && cueDelivery !== "redirect_host") {
+        throw new HttpError(
+          400,
+          "A spoken host prefix is only valid for a live host redirect.",
+        );
+      }
+      if (guestInterruption && cueDelivery !== "interrupt_guest") {
+        throw new HttpError(
+          400,
+          "A guest interruption context is only valid while interrupting the guest.",
+        );
+      }
+      if (
+        body.guestMessage !== undefined &&
+        typeof body.guestMessage !== "string"
+      ) {
+        throw new HttpError(400, "Signal guestMessage must be text.");
+      }
+      if (typeof body.guestMessage === "string" && cue) {
+        throw new HttpError(
+          400,
+          "A Producer guest answer cannot include a producer cue.",
+        );
+      }
+      if (
+        body.guestThinkingMs !== undefined &&
+        (typeof body.guestThinkingMs !== "number" ||
+          !Number.isFinite(body.guestThinkingMs) ||
+          body.guestThinkingMs < 0)
+      ) {
+        throw new HttpError(400, "Signal guestThinkingMs must be a positive duration.");
+      }
+      if (
+        body.guestThinkingMs !== undefined &&
+        typeof body.guestMessage !== "string"
+      ) {
+        throw new HttpError(
+          400,
+          "Signal guest thinking time requires a Producer guest answer.",
+        );
+      }
       const requestedProvider = body.preferredProvider;
       const preferredProvider: ProviderName =
         requestedProvider === "local" ||
@@ -8315,10 +8723,19 @@ function buildRoutes(): RouteDefinition[] {
         db,
         userId,
         ctx.params.id,
-        cue
+        typeof body.guestMessage === "string"
+          ? {
+              guestMessage: body.guestMessage,
+              ...(typeof body.guestThinkingMs === "number"
+                ? { guestThinkingMs: body.guestThinkingMs }
+                : {}),
+            }
+          : cue
           ? {
               cue,
               ...(cueDelivery ? { cueDelivery } : {}),
+              ...(hostRedirect ? { hostRedirect } : {}),
+              ...(guestInterruption ? { guestInterruption } : {}),
             }
           : {},
         {
@@ -8337,7 +8754,10 @@ function buildRoutes(): RouteDefinition[] {
           providerFactory: providerFactoryOverride,
         },
       );
-      json(ctx.res, 200, { ok: true, ...result });
+      json(ctx.res, 200, {
+        ok: true,
+        ...projectBotcastAdvanceResponseForAudienceV1(result),
+      });
     }),
     // Coffee mode (timed live sessions for 3-5 reactive bots). Lives on its own
     // endpoint rather than inside /api/chat so the lighter coffee
@@ -10573,30 +10993,51 @@ function buildRoutes(): RouteDefinition[] {
       let sourceBotMuted = false;
       let sourceText = raw.text;
       let sourceElevenLabsText = raw.elevenLabsText;
+      const requestedSpeakerBotId =
+        typeof raw.speakerBotId === "string" && raw.speakerBotId.trim()
+          ? raw.speakerBotId.trim().slice(0, 160)
+          : null;
+      let sourceBotId = requestedSpeakerBotId;
+      const listenerReactionTextRequested = Object.prototype.hasOwnProperty.call(
+        raw,
+        "listenerReactionText",
+      );
+      const listenerReactionFoleyRequested =
+        Object.prototype.hasOwnProperty.call(raw, "listenerReactionFoley");
+      const listenerReactionRequested =
+        listenerReactionTextRequested || listenerReactionFoleyRequested;
       const signalMessageId =
         typeof raw.signalMessageId === "string" && raw.signalMessageId.trim()
           ? raw.signalMessageId.trim().slice(0, 160)
           : null;
+      const signalEpisodeId =
+        typeof raw.signalEpisodeId === "string" && raw.signalEpisodeId.trim()
+          ? raw.signalEpisodeId.trim().slice(0, 160)
+          : null;
+      const ordinaryMessageId =
+        typeof raw.messageId === "string" && raw.messageId.trim()
+          ? raw.messageId.trim()
+          : null;
       if (
-        signalMessageId &&
-        typeof raw.messageId === "string" &&
-        raw.messageId.trim()
+        [signalMessageId, signalEpisodeId, ordinaryMessageId].filter(Boolean)
+          .length > 1
       ) {
         throw new HttpError(400, "Choose one voice message source.");
       }
-      if (typeof raw.messageId === "string" && raw.messageId.trim()) {
+      if (ordinaryMessageId) {
         const message = db
           .prepare(
-            `SELECT message.content, message.provider, message.role, bot.powers_json
+            `SELECT message.content, message.provider, message.role, message.bot_id, bot.powers_json
                FROM messages AS message
                LEFT JOIN bots AS bot ON bot.id = message.bot_id
               WHERE message.id = ? AND message.user_id = ?`,
           )
-          .get(raw.messageId.trim(), userId) as
+          .get(ordinaryMessageId, userId) as
           | {
           content?: string;
           provider?: string | null;
           role?: string;
+          bot_id?: string | null;
           powers_json?: string | null;
             }
           | undefined;
@@ -10619,6 +11060,9 @@ function buildRoutes(): RouteDefinition[] {
           : (message?.content ?? "");
         persistedMessageProvider = message?.provider ?? null;
         sourceBotMuted = botPowerIsMutedV1(message?.powers_json);
+        if (!listenerReactionRequested || !requestedSpeakerBotId) {
+          sourceBotId = message?.bot_id ?? requestedSpeakerBotId;
+        }
       }
       if (signalMessageId) {
         const signalMessage = db
@@ -10626,6 +11070,9 @@ function buildRoutes(): RouteDefinition[] {
             `SELECT message.content,
                   message.voice_performance_text,
                   bot.powers_json,
+                  listener_bot.powers_json AS listener_powers_json,
+                  message.speaker_role,
+                  episode.id AS episode_id,
                   episode.provider,
                   episode.response_mode
              FROM botcast_messages AS message
@@ -10633,6 +11080,11 @@ function buildRoutes(): RouteDefinition[] {
                ON episode.id = message.episode_id
               AND episode.user_id = message.user_id
              LEFT JOIN bots AS bot ON bot.id = message.bot_id
+             LEFT JOIN bots AS listener_bot
+               ON listener_bot.id = CASE message.speaker_role
+                 WHEN 'host' THEN episode.guest_bot_id
+                 ELSE episode.host_bot_id
+               END
             WHERE message.id = ?
               AND message.user_id = ?`,
           )
@@ -10643,6 +11095,9 @@ function buildRoutes(): RouteDefinition[] {
               provider: string;
               response_mode: string;
               powers_json: string | null;
+              listener_powers_json: string | null;
+              speaker_role: "host" | "guest";
+              episode_id: string;
             }
           | undefined;
         if (!signalMessage) {
@@ -10657,59 +11112,136 @@ function buildRoutes(): RouteDefinition[] {
           signalMessage.response_mode === "local"
             ? "local"
             : `signal-${signalMessage.response_mode}`;
-        sourceBotMuted = botPowerIsMutedV1(signalMessage.powers_json);
+        const signalEpisode = getBotcastEpisode(
+          db,
+          userId,
+          signalMessage.episode_id,
+        );
+        const voiceRole = listenerReactionRequested
+          ? signalMessage.speaker_role === "host"
+            ? "guest"
+            : "host"
+          : signalMessage.speaker_role;
+        sourceBotId = voiceRole === "host"
+          ? signalEpisode.hostBotId
+          : signalEpisode.guestBotId;
+        sourceBotMuted = botPowerIsMutedV1(
+          botcastEpisodePowerSnapshotForRole(signalEpisode, voiceRole) ??
+            (listenerReactionRequested
+              ? signalMessage.listener_powers_json
+              : signalMessage.powers_json),
+        );
       }
-      const listenerReactionRequested = Object.prototype.hasOwnProperty.call(
-        raw,
-        "listenerReactionText",
-      );
+      if (signalEpisodeId) {
+        if (raw.signalInterruptionBridge !== true) {
+          throw new HttpError(400, "Unsupported Signal episode voice request.");
+        }
+        const episode = getBotcastEpisode(db, userId, signalEpisodeId);
+        const host = db
+          .prepare(
+            "SELECT powers_json FROM bots WHERE id = ? AND user_id = ?",
+          )
+          .get(episode.hostBotId, userId) as
+          | { powers_json: string | null }
+          | undefined;
+        sourceBotId = episode.hostBotId;
+        persistedMessageProvider =
+          episode.responseMode === "local"
+            ? "local"
+            : `signal-${episode.responseMode}`;
+        sourceBotMuted = botPowerIsMutedV1(
+          botcastEpisodePowerSnapshotForRole(episode, "host") ??
+            host?.powers_json,
+        );
+        if (sourceBotMuted) {
+          throw new HttpError(409, "This bot is muted by an active Power.");
+        }
+        const show = getBotcastShow(db, userId, episode.showId);
+        const bridgeLine =
+          typeof raw.text === "string"
+            ? raw.text.replace(/\s+/gu, " ").trim()
+            : "";
+        if (!show.hostInterruptionLines.includes(bridgeLine)) {
+          throw new HttpError(
+            400,
+            "Signal interruption bridge is not stored for this host.",
+          );
+        }
+        sourceText = bridgeLine;
+        sourceElevenLabsText = bridgeLine;
+      }
       if (
-        !listenerReactionRequested &&
-        (sourceBotMuted || botPowerResponseIsSilentV1(sourceText))
+        (sourceBotMuted && (!listenerReactionRequested || signalMessageId !== null)) ||
+        (!listenerReactionRequested && botPowerResponseIsSilentV1(sourceText))
       ) {
         throw new HttpError(409, "This bot is muted by an active Power.");
       }
       if (listenerReactionRequested) {
         if (
           !signalMessageId &&
-          !(typeof raw.messageId === "string" && raw.messageId.trim())
+          !ordinaryMessageId
         ) {
           throw new HttpError(
             400,
             "Listener reactions require a saved speaker message.",
           );
         }
-        const listenerReactionText =
-          typeof raw.listenerReactionText === "string"
-            ? raw.listenerReactionText.replace(/\s+/gu, " ").trim()
-            : "";
-        if (
-          listenerReactionText !== "mm-hm" &&
-          listenerReactionText !== "I see" &&
-          listenerReactionText !== "hmm" &&
-          listenerReactionText !== "right" &&
-          listenerReactionText !== "oh" &&
-          listenerReactionText !== "go on"
-        ) {
-          throw new HttpError(400, "Unsupported listener reaction.");
+        if (listenerReactionTextRequested && listenerReactionFoleyRequested) {
+          throw new HttpError(
+            400,
+            "Choose one listener speech or vocal Foley reaction.",
+          );
         }
-        sourceText = listenerReactionText;
-        sourceElevenLabsText = listenerReactionText;
+        if (listenerReactionFoleyRequested) {
+          const vocalFoley = normalizeListenerReactionVocalFoley(
+            raw.listenerReactionFoley,
+          );
+          if (!vocalFoley) {
+            throw new HttpError(400, "Unsupported listener vocal Foley.");
+          }
+          // Keep the authenticated provider request speakable without adding a
+          // transcript utterance. Eleven v3 turns the saved tag into the sound.
+          sourceText = "...";
+          sourceElevenLabsText = `[${vocalFoley}] ...`;
+        } else {
+          const listenerReactionText =
+            typeof raw.listenerReactionText === "string"
+              ? raw.listenerReactionText.replace(/\s+/gu, " ").trim()
+              : "";
+          if (
+            listenerReactionText !== "mm-hm" &&
+            listenerReactionText !== "I see" &&
+            listenerReactionText !== "hmm" &&
+            listenerReactionText !== "right" &&
+            listenerReactionText !== "oh" &&
+            listenerReactionText !== "go on" &&
+            listenerReactionText !== "No, hold on." &&
+            listenerReactionText !== "Let me answer that." &&
+            listenerReactionText !== "That's not fair."
+          ) {
+            throw new HttpError(400, "Unsupported listener reaction.");
+          }
+          sourceText = listenerReactionText;
+          sourceElevenLabsText = listenerReactionText;
+        }
       }
       const botNamePronunciations = db
         .prepare(
-        `SELECT name, name_pronunciation
+        `SELECT id, name, name_pronunciation, self_referral
            FROM bots
           WHERE user_id = ? OR visibility = 'public'
           ORDER BY CASE WHEN user_id = ? THEN 0 ELSE 1 END, LENGTH(name) DESC`,
         )
         .all(userId, userId) as Array<{
+        id: string;
         name: string;
         name_pronunciation: string | null;
+        self_referral: string | null;
       }>;
       const spokenSourceText = applyBotNamePronunciations(
         sourceText,
         botNamePronunciations,
+        sourceBotId,
       );
       const spokenElevenLabsText =
         typeof sourceElevenLabsText === "string"
@@ -10718,7 +11250,11 @@ function buildRoutes(): RouteDefinition[] {
               .map((segment, index) =>
                 index % 2 === 1
                   ? segment
-                  : applyBotNamePronunciations(segment, botNamePronunciations),
+                  : applyBotNamePronunciations(
+                      segment,
+                      botNamePronunciations,
+                      sourceBotId,
+                    ),
               )
               .join("")
           : sourceElevenLabsText;
@@ -10758,6 +11294,15 @@ function buildRoutes(): RouteDefinition[] {
         raw.engine === "elevenlabs" && resolveElevenLabsVoiceId(profile)
           ? "elevenlabs"
           : "builtin";
+      if (
+        listenerReactionFoleyRequested &&
+        (requestedEngine !== "elevenlabs" || !explicitOnlineContext)
+      ) {
+        throw new HttpError(
+          409,
+          "Listener vocal Foley requires an eligible ONLINE ElevenLabs voice.",
+        );
+      }
       const request = validateVoiceSynthesisRequest({
         ...raw,
         text: spokenSourceText,
@@ -10863,6 +11408,12 @@ function buildRoutes(): RouteDefinition[] {
       // Studio preview is a truth check for the selected provider identity.
       // Never make that check sound successful by substituting another voice.
       if (!voiceId || !apiKey) {
+        if (listenerReactionFoleyRequested) {
+          throw new HttpError(
+            503,
+            "Listener vocal Foley is unavailable without ElevenLabs.",
+          );
+        }
         if (requiresSelectedProviderVoice) {
           throw new HttpError(
             503,
@@ -11009,6 +11560,22 @@ function buildRoutes(): RouteDefinition[] {
               "ElevenLabs could not generate this preview. The fallback voice was not used.",
             );
           }
+          if (listenerReactionFoleyRequested) {
+            if (error instanceof ElevenLabsVoiceError) {
+              throw new HttpError(
+                error.status === 401 || error.status === 403
+                  ? 401
+                  : error.status === 429
+                    ? 429
+                    : 502,
+                "ElevenLabs could not generate this listener vocal Foley.",
+              );
+            }
+            throw new HttpError(
+              502,
+              "ElevenLabs could not generate this listener vocal Foley.",
+            );
+          }
           try {
             const wave = await builtinVoiceWaveGeneratorOverride({
               text: boundary.text,
@@ -11055,7 +11622,12 @@ function buildRoutes(): RouteDefinition[] {
         settings: {
           displayName: user.display_name,
           theme: user.theme,
+          graphicsQuality: normalizeGraphicsQuality(user.graphics_quality),
           preferredProvider: user.preferred_provider,
+          ephemeralChatProviderPreferences:
+            normalizeEphemeralChatProviderPreferences(
+              user.ephemeral_chat_provider_preferences,
+            ),
           preferredImageProvider: user.preferred_image_provider,
           providerLocked: Boolean(user.provider_locked),
           autoMemory: Boolean(user.auto_memory),
@@ -11399,6 +11971,36 @@ function buildRoutes(): RouteDefinition[] {
         },
       });
     }),
+    route("GET", "/api/settings/elevenlabs-credits", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      if (user.preferred_provider === "local") {
+        throw new HttpError(
+          409,
+          "Switch Prism to ONLINE before checking ElevenLabs credits.",
+        );
+      }
+      const userKey = decryptUserKey(userId);
+      const apiKey = getElevenLabsApiKeyForUser(userId, userKey);
+      if (!apiKey) {
+        throw new HttpError(
+          409,
+          "Save an ElevenLabs API key to this account before checking credits.",
+        );
+      }
+      try {
+        const balance = await getElevenLabsCreditBalance(apiKey);
+        ctx.res.setHeader("cache-control", "no-store");
+        json(ctx.res, 200, { ok: true, balance });
+      } catch (error) {
+        if (error instanceof ElevenLabsSubscriptionError) {
+          const status =
+            error.status === 401 || error.status === 403 ? 424 : error.status;
+          throw new HttpError(status, error.message);
+        }
+        throw error;
+      }
+    }),
     route("PATCH", "/api/default-bot", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
@@ -11562,7 +12164,10 @@ function buildRoutes(): RouteDefinition[] {
       const next = resolveNextSettings(body, {
         displayName: user.display_name,
         theme: user.theme,
+        graphicsQuality: user.graphics_quality,
         preferredProvider: user.preferred_provider,
+        ephemeralChatProviderPreferences:
+          user.ephemeral_chat_provider_preferences,
         preferredImageProvider: user.preferred_image_provider,
         providerLocked: user.provider_locked,
         autoMemory: user.auto_memory,
@@ -11692,7 +12297,7 @@ function buildRoutes(): RouteDefinition[] {
       db.prepare(
         `
         UPDATE users
-        SET display_name = ?, theme = ?, preferred_provider = ?, preferred_image_provider = ?, provider_locked = ?, auto_memory = ?, composer_writing_assist = ?, hidden_bot_model_ids = ?, hidden_comfyui_workflow_ids = ?, model_visibility_defaults_version = ?,
+        SET display_name = ?, theme = ?, graphics_quality = ?, preferred_provider = ?, ephemeral_chat_provider_preferences = ?, preferred_image_provider = ?, provider_locked = ?, auto_memory = ?, composer_writing_assist = ?, hidden_bot_model_ids = ?, hidden_comfyui_workflow_ids = ?, model_visibility_defaults_version = ?,
             experimental_dual_ollama_enabled = ?, experimental_all_model_effort_enabled = ?, coffee_experimental_table_angle_enabled = ?, psychic_mode_enabled = ?, auto_switch_model = ?, auto_fallback_chain = ?, preferred_local_model = ?, preferred_online_model = ?, lenient_local_image_fallback_model = ?, secondary_ollama_host = ?, comfyui_host = ?,
             preferred_local_image_model = ?, preferred_openai_image_model = ?, preferred_zen_wallpaper_local_image_model = ?, preferred_zen_wallpaper_openai_image_model = ?, zen_wallpaper_opacity = ?, zen_wallpaper_text_mask_enabled = ?, zen_wallpaper_grayscale_enabled = ?, zen_wallpaper_blurred_edges_enabled = ?, zen_wallpaper_style_notes = ?,
             zen_session_idle_gap_ms = ?, zen_fresh_start_gap_ms = ?, zen_recent_context_messages = ?, zen_wallpaper_regen_message_interval = ?, zen_mood_sensitivity = ?, zen_canvas_typing_speed = ?, zen_message_font_min_px = ?, zen_message_font_max_px = ?, zen_ask_question_patience_enabled = ?, zen_ask_question_patience_ms = ?, zen_autonomy_enabled = ?, zen_persona_transition_choice = ?,
@@ -11708,7 +12313,9 @@ function buildRoutes(): RouteDefinition[] {
       ).run(
         next.displayName,
         next.theme,
+        next.graphicsQuality,
         next.preferredProvider,
+        JSON.stringify(next.ephemeralChatProviderPreferences),
         next.preferredImageProvider,
         next.providerLocked,
         next.autoMemory,
@@ -11781,7 +12388,10 @@ function buildRoutes(): RouteDefinition[] {
         ok: true,
         settings: {
           displayName: next.displayName,
+          graphicsQuality: next.graphicsQuality,
           preferredProvider: next.preferredProvider,
+          ephemeralChatProviderPreferences:
+            next.ephemeralChatProviderPreferences,
           preferredImageProvider: next.preferredImageProvider,
           experimentalAllModelEffortEnabled:
             next.experimentalAllModelEffortEnabled === 1,
@@ -12708,8 +13318,106 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("GET", "/api/images/cleanup-preview", async (ctx) => {
       const userId = requireAuth(ctx);
+      if (peekActiveImageJobForUser(userId)) {
+        throw new HttpError(
+          409,
+          "Image generation is still finishing. Wait, then run the asset audit again.",
+        );
+      }
+      reconcileAssetCleanupRecoveryForUser(db, userId);
       const preview = previewUnreferencedImageAssets(db, userId);
       json(ctx.res, 200, { ok: true, preview });
+    }),
+    route("POST", "/api/images/cleanup", async (ctx) => {
+      const userId = requireAuth(ctx);
+      if (peekActiveImageJobForUser(userId)) {
+        throw new HttpError(
+          409,
+          "Image generation is still finishing. Wait, then run the asset audit again.",
+        );
+      }
+      reconcileAssetCleanupRecoveryForUser(db, userId);
+      const body = ctx.body as Record<string, unknown>;
+      const snapshot = typeof body.snapshot === "string" ? body.snapshot : "";
+      if (
+        !Array.isArray(body.imageIds) ||
+        body.imageIds.some((value) => typeof value !== "string")
+      ) {
+        throw new HttpError(400, "imageIds must be an array of image ids.");
+      }
+      const imageIds = body.imageIds as string[];
+      try {
+        const result = cleanupUnreferencedImageAssets(db, userId, {
+          snapshot,
+          imageIds,
+        });
+        json(ctx.res, 200, { ok: true, result });
+      } catch (error) {
+        if (error instanceof ImageAssetCleanupError) {
+          throw new HttpError(
+            error.code === "invalid_request" ? 400 : 409,
+            error.message,
+          );
+        }
+        throw error;
+      }
+    }),
+    route("GET", "/api/images/cleanup-recovery", async (ctx) => {
+      const userId = requireAuth(ctx);
+      reconcileAssetCleanupRecoveryForUser(db, userId);
+      json(ctx.res, 200, {
+        ok: true,
+        recoveries: listImageAssetCleanupRecoveries(db, userId),
+      });
+    }),
+    route("POST", "/api/images/cleanup-recovery/:id/restore", async (ctx) => {
+      const userId = requireAuth(ctx);
+      if (peekActiveImageJobForUser(userId)) {
+        throw new HttpError(409, "Wait for image generation to finish first.");
+      }
+      reconcileAssetCleanupRecoveryForUser(db, userId);
+      try {
+        const result = restoreImageAssetCleanupRecovery(
+          db,
+          userId,
+          ctx.params.id,
+        );
+        if (!result) throw new HttpError(404, "Recovery batch not found.");
+        json(ctx.res, 200, { ok: true, result });
+      } catch (error) {
+        if (error instanceof ImageAssetCleanupError) {
+          throw new HttpError(409, error.message);
+        }
+        throw error;
+      }
+    }),
+    route("DELETE", "/api/images/cleanup-recovery/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      if (body.confirm !== "permanently-delete") {
+        throw new HttpError(
+          400,
+          "Permanent deletion requires explicit confirmation.",
+        );
+      }
+      reconcileAssetCleanupRecoveryForUser(db, userId);
+      try {
+        if (
+          !permanentlyDeleteImageAssetCleanupRecovery(
+            db,
+            userId,
+            ctx.params.id,
+          )
+        ) {
+          throw new HttpError(404, "Recovery batch not found.");
+        }
+        json(ctx.res, 200, { ok: true });
+      } catch (error) {
+        if (error instanceof ImageAssetCleanupError) {
+          throw new HttpError(409, error.message);
+        }
+        throw error;
+      }
     }),
     route("GET", "/api/images/:id/thumb", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -12905,7 +13613,7 @@ function buildRoutes(): RouteDefinition[] {
 
       const updatedBot = db
         .prepare(
-          "SELECT id, name, name_pronunciation, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?",
+          "SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?",
         )
         .get(botId, userId) as Record<string, unknown>;
       json(ctx.res, 200, {
@@ -13094,6 +13802,7 @@ function buildRoutes(): RouteDefinition[] {
       const namePronunciation = normalizeBotNamePronunciation(
         body.namePronunciation,
       );
+      const selfReferral = normalizeBotSelfReferral(body.selfReferral);
       const authoredAudioVoiceProfile = normalizeBotAudioVoiceProfileV1(
         body.authoredAudioVoiceProfile,
       );
@@ -13164,6 +13873,9 @@ function buildRoutes(): RouteDefinition[] {
       db.prepare(
         "UPDATE bots SET name_pronunciation = ? WHERE id = ? AND user_id = ?",
       ).run(namePronunciation, botId, userId);
+      db.prepare(
+        "UPDATE bots SET self_referral = ? WHERE id = ? AND user_id = ?",
+      ).run(selfReferral, botId, userId);
       if (powers.length > 0) {
         db.prepare(
           "UPDATE bots SET powers_json = ? WHERE id = ? AND user_id = ?",
@@ -13174,6 +13886,10 @@ function buildRoutes(): RouteDefinition[] {
         userId,
         botId,
         prismDefaultLlmModel: user.prism_default_llm_model,
+        provider: auxiliaryProviderFactoryOverride(
+          user.prism_default_llm_model ?? undefined,
+          dualOllamaWorkloadOptions(user),
+        ),
       });
       json(ctx.res, 201, {
         ok: true,
@@ -13181,6 +13897,7 @@ function buildRoutes(): RouteDefinition[] {
           id: botId,
           name,
           name_pronunciation: namePronunciation,
+          self_referral: selfReferral,
           systemPrompt,
           export_hash: exportHash,
           model,
@@ -13233,7 +13950,7 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       const rows = db
         .prepare(
-          "SELECT id, name, name_pronunciation, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC",
+          "SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC",
         )
         .all(userId) as Record<string, unknown>[];
       json(ctx.res, 200, { ok: true, bots: botRowsForResponse(rows) });
@@ -13290,7 +14007,7 @@ function buildRoutes(): RouteDefinition[] {
         result.ids.length > 0
           ? (db
             .prepare(
-                `SELECT id, name, name_pronunciation, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? AND id IN (${result.ids.map(() => "?").join(", ")})`,
+                `SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? AND id IN (${result.ids.map(() => "?").join(", ")})`,
             )
               .all(userId, ...result.ids) as Record<string, unknown>[])
         : [];
@@ -13700,6 +14417,10 @@ function buildRoutes(): RouteDefinition[] {
         fields.push("name_pronunciation = ?");
         values.push(normalizeBotNamePronunciation(body.namePronunciation));
       }
+      if (body.selfReferral !== undefined) {
+        fields.push("self_referral = ?");
+        values.push(normalizeBotSelfReferral(body.selfReferral));
+      }
       if (body.exportHash !== undefined) {
         const normalizedExportHash = normalizeBotExportHash(body.exportHash);
         if (!normalizedExportHash) {
@@ -13764,11 +14485,15 @@ function buildRoutes(): RouteDefinition[] {
           userId,
           botId,
           prismDefaultLlmModel: user.prism_default_llm_model,
+          provider: auxiliaryProviderFactoryOverride(
+            user.prism_default_llm_model ?? undefined,
+            dualOllamaWorkloadOptions(user),
+          ),
         });
       }
       const updatedBot = db
         .prepare(
-          "SELECT id, name, name_pronunciation, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?",
+          "SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?",
         )
         .get(botId, userId) as Record<string, unknown>;
       json(ctx.res, 200, { ok: true, bot: botRowForResponse(updatedBot) });
@@ -14576,6 +15301,18 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
 }
 
 if (process.env.PRISM_API_DISABLE_AUTOSTART !== "1") {
+  for (const user of db.prepare("SELECT id FROM users").all() as Array<{
+    id: string;
+  }>) {
+    try {
+      reconcileAssetCleanupRecoveryForUser(db, user.id);
+    } catch (error) {
+      console.error(
+        `Asset Cleanup recovery reconciliation failed for ${user.id}.`,
+        error,
+      );
+    }
+  }
   slateRecoveryCoordinator = new SlateRecoveryCoordinator({
     db,
     rootDirectory: slateRecoveryRootDirectory(),

@@ -8,6 +8,7 @@ import {
   Info,
   KeyRound,
   MessageCircle,
+  Monitor,
   Network,
   Radio,
   SlidersHorizontal,
@@ -24,6 +25,7 @@ export type SettingsScope =
   | "botcast"
   | "slate"
   | "connections"
+  | "appearance"
   | "network"
   | "experimental"
   | "models"
@@ -56,6 +58,7 @@ const SETTINGS_NAV_GROUPS: readonly {
     items: [
       { scope: "connections", title: "Connections", icon: <KeyRound size={16} strokeWidth={2} /> },
       { scope: "models", title: "Models", icon: <SlidersHorizontal size={16} strokeWidth={2} /> },
+      { scope: "appearance", title: "Appearance", icon: <Monitor size={16} strokeWidth={2} /> },
       { scope: "network", title: "Network", icon: <Network size={16} strokeWidth={2} /> },
       { scope: "experimental", title: "Experimental", icon: <FlaskConical size={16} strokeWidth={2} /> },
       { scope: "voice", title: "Voice", icon: <Volume2 size={16} strokeWidth={2} /> },

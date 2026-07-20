@@ -4,6 +4,7 @@ import {
   normalizeBotFaceGlyphAnimation,
   parseBotAvatarDetailsV1,
   normalizeBotNamePronunciation,
+  normalizeBotSelfReferral,
   normalizeBotPowersV1,
   type BotAvatarDetailsV1,
   type BotFaceBlinkBar,
@@ -33,6 +34,7 @@ export interface PrismBotArchiveJson {
   bot: {
     name: string;
     namePronunciation?: string;
+    selfReferral?: string;
     color?: string | null;
     glyph?: string | null;
     avatarDetails?: BotAvatarDetailsV1 | null;
@@ -205,6 +207,9 @@ function validateBotJson(parsed: unknown): PrismBotArchiveJson {
       ...botJson.bot,
       ...(bot.namePronunciation !== undefined
         ? { namePronunciation: normalizeBotNamePronunciation(bot.namePronunciation) }
+        : {}),
+      ...(bot.selfReferral !== undefined
+        ? { selfReferral: normalizeBotSelfReferral(bot.selfReferral) }
         : {}),
       ...(avatarDetails !== undefined ? { avatarDetails } : {}),
       ...(bot.powers !== undefined ? { powers: normalizeBotPowersV1(bot.powers) } : {}),

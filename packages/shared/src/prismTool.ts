@@ -12,7 +12,10 @@ import type {
   AutoFallbackProvider,
   AutoRecoveryTraceV1,
 } from "./autoFallback.js";
-import type { ListenerReactionPlanV1 } from "./listenerReaction.js";
+import type {
+  ListenerReactionPlanV1,
+  ListenerReactionVocalFoley,
+} from "./listenerReaction.js";
 
 function normalizeStoredAutoRecoveryTrace(
   value: unknown
@@ -727,6 +730,11 @@ function normalizeStoredListenerReactionPlan(
       row.spokenCue === "oh" || row.spokenCue === "go on"
     ? row.spokenCue
     : undefined;
+  const vocalFoley = row.vocalFoley === "clears throat" ||
+      row.vocalFoley === "coughs" || row.vocalFoley === "sighs" ||
+      row.vocalFoley === "exhales" || row.vocalFoley === "chuckles"
+    ? row.vocalFoley as ListenerReactionVocalFoley
+    : undefined;
   if (
     row.v !== 1 || row.name !== "listenerReaction" || !speakerBotId ||
     !listenerBotId || speakerBotId === listenerBotId || !messageId || !seed ||
@@ -743,6 +751,7 @@ function normalizeStoredListenerReactionPlan(
     targetSource,
     visualAction,
     ...(spokenCue ? { spokenCue } : {}),
+    ...(!spokenCue && vocalFoley ? { vocalFoley } : {}),
     targetProgress: row.targetProgress,
     seed,
     cameraCutEligible: row.cameraCutEligible,

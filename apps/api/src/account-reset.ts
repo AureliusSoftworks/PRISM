@@ -88,7 +88,9 @@ export function restoreFactoryDefaultsInDatabase(
         UPDATE users
         SET
           theme = 'system',
+          graphics_quality = 'high',
           preferred_provider = 'local',
+          ephemeral_chat_provider_preferences = '{}',
           preferred_image_provider = 'local',
           provider_locked = 0,
           auto_memory = 1,

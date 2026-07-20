@@ -34,7 +34,14 @@ describe("local model warmup intermission integration", () => {
     assert.match(signalSource, /model-warmup-hold/u);
     assert.match(signalSource, /detail\.modelWarmupHoldStartedAt/u);
     assert.match(signalSource, /await releaseSignalModelWarmup\(opening\.episode\.id\)/u);
-    assert.match(signalSource, /prepareGuestResponse\(opening\.episode, opening\.message\)/u);
+    assert.match(
+      signalSource,
+      /playPreparedEpisodeMessage\([\s\S]{0,120}opening\.message,[\s\S]{0,80}opening\.episode/u,
+    );
+    assert.match(
+      signalSource,
+      /prepareGuestResponseRef\.current\(currentEpisode, message\)/u,
+    );
     assert.match(signalSource, /modelWarmupHoldDurationMs/u);
   });
 

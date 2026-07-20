@@ -31,9 +31,10 @@ export type SlateSafetyRow = Record<string, SlateScalar>;
 
 /**
  * Authoritative, portable project data. Deliberately absent are user ids,
- * credentials, provider configuration, temporary jobs, compatibility caches,
- * vector indexes, and rebuildable Continuity processing state. Versioned
- * generation metadata is authoritative and travels with its project pointers.
+ * credentials, account-level provider configuration, temporary jobs,
+ * compatibility caches, vector indexes, and rebuildable Continuity processing
+ * state. Versioned generation metadata is authoritative and travels with its
+ * project pointers.
  */
 export interface SlateSafetyContentV1 {
   schemaVersion: 1;
@@ -162,6 +163,10 @@ const PROJECT_COLUMNS = [
   "locked_ranges_json",
   "last_provider",
   "last_model",
+  "prose_mode",
+  "prose_model",
+  "prose_provider",
+  "deliberation_config_json",
   "continuity_active_version",
   "continuity_target_version",
   "continuity_active_generation",

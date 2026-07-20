@@ -45,6 +45,7 @@ const episode: BotcastEpisode = {
       speakerRole: "host",
       botId: "host-1",
       content: "What did the help cost you?\nBe specific.",
+      stageActionText: null,
       voicePerformanceText:
         "[curious] What did the help cost you? Be specific.",
       moodKey: "neutral",
@@ -56,6 +57,7 @@ const episode: BotcastEpisode = {
       speakerRole: "guest",
       botId: "guest-1",
       content: "It cost me the final decision.",
+      stageActionText: "holds the host's gaze",
       voicePerformanceText: null,
       moodKey: "guarded",
       createdAt: "2026-07-17T17:00:12.000Z",
@@ -217,6 +219,10 @@ describe("Signal review transcript", () => {
     assert.match(
       transcript,
       /### Turn 02 [\s\S]*?- Voice performance text:\n    \[none\]/u,
+    );
+    assert.match(
+      transcript,
+      /### Turn 02 [\s\S]*?- Stage action \(avatar only\):\n    holds the host's gaze/u,
     );
     assert.match(
       transcript,

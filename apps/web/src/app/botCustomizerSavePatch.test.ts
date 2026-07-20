@@ -11,6 +11,7 @@ import { DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1, botPowerSourceHashV1 } from "@local
 const pristine: BotCustomizerSavePristine = {
   name: "Iris",
   namePronunciation: "",
+  selfReferral: "",
   prompt: "stored prompt",
   rawPrompt: "raw stored prompt",
   localModel: "llama3.2",
@@ -60,6 +61,7 @@ const currentFromPristine = (
 ): BotCustomizerSaveCurrent => ({
   name: pristine.name,
   namePronunciation: pristine.namePronunciation,
+  selfReferral: pristine.selfReferral,
   storedSystemPrompt: pristine.prompt,
   advancedMode: false,
   localModel: pristine.localModel,
@@ -124,6 +126,16 @@ describe("bot customizer save patch", () => {
         pristine,
       ),
       { namePronunciation: "Eye-riss" },
+    );
+  });
+
+  it("patches a normalized self-referral independently", () => {
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(
+        currentFromPristine({ selfReferral: "  I  " }),
+        pristine,
+      ),
+      { selfReferral: "I" },
     );
   });
 

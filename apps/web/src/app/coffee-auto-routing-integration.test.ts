@@ -11,12 +11,14 @@ describe("Coffee Auto request routing", () => {
       /const coffeeResponseModeForSend = autoFallbackResponseModeForSend\(/u,
     );
     assert.equal(
-      pageSource.match(/responseMode: coffeeResponseModeForSend/gu)?.length,
-      4,
+      pageSource.match(/responseMode: coffeeResponseModeForSend(?!Ref)/gu)
+        ?.length,
+      3,
     );
-    assert.match(
-      pageSource,
-      /responseMode: coffeeResponseModeForSendRef\.current/u,
+    assert.equal(
+      pageSource.match(/responseMode: coffeeResponseModeForSendRef\.current/gu)
+        ?.length,
+      2,
     );
     assert.doesNotMatch(
       pageSource,

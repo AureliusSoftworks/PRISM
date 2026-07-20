@@ -16,6 +16,7 @@ import {
   updateSlateProject,
 } from "../slate.ts";
 import {
+  advanceSlateDeliberation,
   chatWithSlateProject,
   generateSlateProjectTitle,
   listSlateProjectChatMessages,
@@ -23,6 +24,7 @@ import {
   resolveSlateProjectTitleSuggestion,
   suggestSlateProjectTitle,
 } from "../slate-project-companion.ts";
+import { resolveSlateDeliberationModelOverride } from "../slate-deliberation-routing.ts";
 import {
   closeTestDatabase,
   createDeterministicProvider,
@@ -380,6 +382,70 @@ describe("Slate persistence and writing operations", () => {
     );
   });
 
+  it("persists independent Lux and Umbra profiles with backward-compatible defaults", () => {
+    const project = createSlateProject(db, "user-1", {
+      title: "Glass City",
+      spark: "A buried future calls its architect.",
+    });
+    assert.deepEqual(project.deliberationConfig, {
+      lux: { provider: null, model: null, directive: "" },
+      umbra: { provider: null, model: null, directive: "" },
+    });
+
+    const configured = updateSlateProject(db, "user-1", project.id, {
+      deliberationConfig: {
+        lux: {
+          provider: "openai",
+          model: "gpt-5-mini",
+          directive: "Protect the quiet grief beneath the premise.",
+        },
+        umbra: {
+          provider: "local",
+          model: "qwen3:8b",
+          directive: "Distrust any mystery that exists only to delay an answer.",
+        },
+      },
+    });
+    assert.equal(configured.deliberationConfig.lux.model, "gpt-5-mini");
+    assert.match(configured.deliberationConfig.umbra.directive, /delay an answer/u);
+    assert.deepEqual(
+      getSlateProject(db, "user-1", project.id).deliberationConfig,
+      configured.deliberationConfig,
+    );
+    assert.throws(
+      () =>
+        updateSlateProject(db, "user-1", project.id, {
+          deliberationConfig: {
+            ...configured.deliberationConfig,
+            lux: {
+              provider: "openai",
+              model: null,
+              directive: "Invalid partial route.",
+            },
+          },
+        }),
+      /model and provider must be selected together/i,
+    );
+  });
+
+  it("keeps hemisphere model overrides inside the project privacy route", () => {
+    const config = JSON.stringify({
+      lux: { provider: "openai", model: "gpt-5-mini", directive: "" },
+      umbra: { provider: "local", model: "qwen3:8b", directive: "" },
+    });
+    assert.deepEqual(resolveSlateDeliberationModelOverride(config, "lux", "auto"), {
+      provider: "openai",
+      model: "gpt-5-mini",
+    });
+    assert.equal(resolveSlateDeliberationModelOverride(config, "lux", "offline"), null);
+    assert.equal(resolveSlateDeliberationModelOverride(config, "umbra", "online"), null);
+    assert.deepEqual(resolveSlateDeliberationModelOverride(config, "umbra", "offline"), {
+      provider: "local",
+      model: "qwen3:8b",
+    });
+    assert.equal(resolveSlateDeliberationModelOverride(config, "synthesis", "auto"), null);
+  });
+
   it("persists a living summary, advisory project chat, and explicit title acceptance", async () => {
     const project = createSlateProject(db, "user-1", {
       title: "Glass City",
@@ -483,6 +549,107 @@ describe("Slate persistence and writing operations", () => {
     assert.equal(accepted.title, "The City Beneath Her Name");
     assert.equal(accepted.titleOrigin, "writer");
     assert.equal(accepted.titleSuggestion, null);
+  });
+
+  it("runs a bounded Lux and Umbra round robin without mutating writer state", async () => {
+    const project = createSlateProject(db, "user-1", {
+      title: "Glass City",
+      spark: "A buried future calls its architect.",
+    });
+    updateSlateProject(db, "user-1", project.id, {
+      structure: [scene()],
+      deliberationConfig: {
+        lux: {
+          provider: null,
+          model: null,
+          directive: "Protect the possibility that the city is trying to be kind.",
+        },
+        umbra: {
+          provider: null,
+          model: null,
+          directive: "Make every apparent mercy create a later cost.",
+        },
+      },
+    });
+    const section = listSlateProjectSections(db, "user-1", project.id)[0]!;
+    const savedSection = saveSlateProjectSection(
+      db,
+      "user-1",
+      project.id,
+      section.id,
+      {
+        expectedRevision: section.revision,
+        mutationId: "deliberation-focus",
+        prose: "At midnight, the plaza answered Mara and called her home.",
+        lockedRanges: [],
+      },
+    );
+    const before = getSlateProject(db, "user-1", project.id);
+    const provider = createDeterministicProvider([
+      "Make the city offer Mara one merciful lie before it asks for anything.",
+      "Mercy without a cost is decoration. Make the lie save her now and isolate her later.",
+      "**Direction**\nThe city saves Mara with a useful lie.\n\n**Why it survives both sides**\nIt is humane now and costly later.\n\n**Next move**\nLet her act on it.\n\n**Guardrails**\nDo not reveal the city's motive yet.",
+    ]);
+    const ai = { provider, providerName: "local" as const, model: "qwen3:8b" };
+    const messages: Array<{
+      speaker: "lux" | "umbra" | "synthesis";
+      round: number;
+      content: string;
+    }> = [];
+
+    for (let turn = 0; turn < 3; turn += 1) {
+      const message = await advanceSlateDeliberation(
+        db,
+        "user-1",
+        project.id,
+        {
+          prompt: "What should the city want from Mara?",
+          rounds: 1,
+          messages,
+          focus: {
+            sectionId: savedSection.id,
+            selectionStart: 0,
+            selectionEnd: 11,
+          },
+        },
+        ai,
+      );
+      messages.push({
+        speaker: message.speaker,
+        round: message.round,
+        content: message.content,
+      });
+    }
+
+    assert.deepEqual(
+      messages.map((message) => message.speaker),
+      ["lux", "umbra", "synthesis"],
+    );
+    assert.match(provider.calls[0]?.[0]?.content ?? "", /LIGHT \/ Lux/u);
+    assert.match(provider.calls[1]?.[0]?.content ?? "", /DARK \/ Umbra/u);
+    assert.match(provider.calls[2]?.[0]?.content ?? "", /center seam/u);
+    assert.match(provider.calls[0]?.[1]?.content ?? "", /At midnight/u);
+    assert.match(provider.calls[1]?.[2]?.content ?? "", /merciful lie/u);
+    assert.match(provider.calls[0]?.[2]?.content ?? "", /trying to be kind/u);
+    assert.match(provider.calls[1]?.[2]?.content ?? "", /later cost/u);
+    assert.equal(
+      getSlateProject(db, "user-1", project.id).updatedAt,
+      before.updatedAt,
+    );
+    await assert.rejects(
+      advanceSlateDeliberation(
+        db,
+        "user-1",
+        project.id,
+        {
+          prompt: "Break the order.",
+          rounds: 1,
+          messages: [{ speaker: "umbra", round: 1, content: "No." }],
+        },
+        ai,
+      ),
+      /round-robin order/i,
+    );
   });
 
   it("refuses to Shape over locked author material before calling the model", async () => {

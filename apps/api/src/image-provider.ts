@@ -95,7 +95,18 @@ export async function generateImage(
   body.size = normalized.size;
   body.quality = normalized.quality;
   body.output_format = "png";
-  if (request.background) body.background = request.background;
+  // GPT Image 2 currently rejects explicit transparent backgrounds. Callers
+  // can still request transparent intent so their deterministic post-processing
+  // can remove a plain generated matte without failing the provider request.
+  if (
+    request.background &&
+    !(
+      normalized.model === "gpt-image-2" &&
+      request.background === "transparent"
+    )
+  ) {
+    body.background = request.background;
+  }
 
   const response = await fetch("https://api.openai.com/v1/images/generations", {
     method: "POST",

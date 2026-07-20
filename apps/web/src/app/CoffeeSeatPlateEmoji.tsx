@@ -12,6 +12,7 @@ import {
   BOT_FACE_BLINK_BAR_VALUES,
   DEFAULT_BOT_FACE_BLINK_BAR,
   DEFAULT_BOT_FACE_THINKING_FRAMES,
+  botFaceThinkingSpinnerDisabled,
   botFaceThinkingFramesEqual,
   normalizeBotFaceBlinkBar,
   normalizeBotFaceBlinkOffsetX,
@@ -327,7 +328,14 @@ export function CoffeeSeatPlateEmoji({
   onBlinkPhaseChange,
   className,
 }: CoffeeSeatPlateEmojiProps): JSX.Element {
-  const thinkingSpinnerActive = enabled && showThinkingSpinner && !isTalking;
+  const normalizedThinkingFrames =
+    normalizeBotFaceThinkingFrames(faceThinkingFrames) ??
+    DEFAULT_BOT_FACE_THINKING_FRAMES;
+  const thinkingSpinnerActive =
+    enabled &&
+    showThinkingSpinner &&
+    !isTalking &&
+    !botFaceThinkingSpinnerDisabled(normalizedThinkingFrames);
   const questionGlyphActive = !thinkingSpinnerActive && showQuestionMark;
   const faceMode = thinkingSpinnerActive
     ? "thinking"
@@ -359,9 +367,6 @@ export function CoffeeSeatPlateEmoji({
     forceBlinkPhase === "open" || forceBlinkPhase === "closed"
       ? forceBlinkPhase
       : null;
-  const normalizedThinkingFrames =
-    normalizeBotFaceThinkingFrames(faceThinkingFrames) ??
-    DEFAULT_BOT_FACE_THINKING_FRAMES;
   const faceText = coffeeSeatFaceTextWithEyeCharacter(
     baseText,
     normalizedFaceEyeCharacter,

@@ -12,15 +12,30 @@ export interface SignalVoicePerformancePresentation {
   transcriptText: string;
 }
 
+type SignalPerformanceMessage = Pick<
+  BotcastMessage,
+  "content" | "voicePerformanceText"
+> &
+  Partial<Pick<BotcastMessage, "stageActionText">>;
+
 /**
  * Turns saved Eleven v3 audio directions into viewer-facing stage actions
  * without changing the canonical spoken text.
  */
 export function signalVoicePerformancePresentation(
-  message: Pick<BotcastMessage, "content" | "voicePerformanceText">,
+  message: SignalPerformanceMessage,
 ): SignalVoicePerformancePresentation | null {
-  const taggedText = message.voicePerformanceText?.replace(/\s+/gu, " ").trim();
   const content = message.content.replace(/\s+/gu, " ").trim();
+  const stageAction = message.stageActionText?.replace(/\s+/gu, " ").trim();
+  if (stageAction) {
+    return {
+      actions: [stageAction],
+      leadingActions: [stageAction],
+      trailingActions: [],
+      transcriptText: content,
+    };
+  }
+  const taggedText = message.voicePerformanceText?.replace(/\s+/gu, " ").trim();
   if (!taggedText || !content) return null;
 
   const allowed = new Set<string>(BOTCAST_IMMERSIVE_VOICE_TAGS);
@@ -60,7 +75,7 @@ export function signalVoicePerformancePresentation(
 }
 
 export function signalVoicePerformanceActionAtProgress(
-  message: Pick<BotcastMessage, "content" | "voicePerformanceText">,
+  message: SignalPerformanceMessage,
   progress: number,
 ): string | null {
   const presentation = signalVoicePerformancePresentation(message);
@@ -74,8 +89,53 @@ export function signalVoicePerformanceActionAtProgress(
   return presentation.actions[index] ?? null;
 }
 
+export type SignalVoicePerformanceActionPresentation = {
+  action: string;
+  opacity: number;
+  phase: "entering" | "holding" | "exiting";
+};
+
+/**
+ * Keeps each saved action mounted for its whole share of the utterance while
+ * the real speech clock eases it in, holds it, and fades it fully away.
+ */
+export function signalVoicePerformanceActionPresentationAtProgress(
+  message: SignalPerformanceMessage,
+  progress: number,
+): SignalVoicePerformanceActionPresentation | null {
+  const presentation = signalVoicePerformancePresentation(message);
+  if (!presentation) return null;
+  const clampedProgress = Math.max(0, Math.min(1, progress));
+  const scaledProgress = clampedProgress * presentation.actions.length;
+  const index = Math.min(
+    presentation.actions.length - 1,
+    Math.floor(scaledProgress),
+  );
+  const localProgress =
+    clampedProgress === 1 ? 1 : Math.max(0, scaledProgress - index);
+  const enteringUntil = 0.14;
+  const exitingFrom = 0.72;
+  const phase =
+    localProgress < enteringUntil
+      ? "entering"
+      : localProgress > exitingFrom
+        ? "exiting"
+        : "holding";
+  const opacity =
+    phase === "entering"
+      ? localProgress / enteringUntil
+      : phase === "exiting"
+        ? (1 - localProgress) / (1 - exitingFrom)
+        : 1;
+  return {
+    action: presentation.actions[index]!,
+    opacity: Number(Math.max(0, Math.min(1, opacity)).toFixed(3)),
+    phase,
+  };
+}
+
 export function signalVoicePerformanceTranscriptText(
-  message: Pick<BotcastMessage, "content" | "voicePerformanceText">,
+  message: SignalPerformanceMessage,
 ): string {
   return signalVoicePerformancePresentation(message)?.transcriptText ?? message.content;
 }

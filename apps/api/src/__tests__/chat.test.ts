@@ -546,6 +546,33 @@ describe("bot-locked Chat lane", () => {
     assert.equal(result.conversation.messages.at(-1)?.askQuestion, undefined);
     assert.equal(result.conversation.messages.at(-1)?.zenDisplay, undefined);
   });
+
+  it("engine-bounds hard minimal Chat prose without cutting structured answers", async () => {
+    const db = createChatTestDb();
+    installChatFetchStub("Fine. I could explain the whole history. It would take hours.");
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "What happened?",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botId: "bot-1",
+        incognito: false,
+        mode: "chat",
+        botSystemPrompt: "You are Lazy Ivan.",
+        botPowerResponseBudget: {
+          type: "response_budget",
+          mode: "minimal",
+          enforcement: "hard",
+        },
+      },
+    );
+
+    assert.equal(result.conversation.messages.at(-1)?.content, "Fine.");
+  });
 });
 
 describe("processChatMessage Psychic planning", () => {

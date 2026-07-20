@@ -4,7 +4,7 @@ export interface BotAvatarFacePlacement {
   scale: number;
 }
 
-/** Canonical face geometry shared by the full avatar and screen editor. */
+/** Canonical face geometry used by live avatars without registered screen ink. */
 export const BOT_AVATAR_CANONICAL_FACE_PLACEMENT: BotAvatarFacePlacement = {
   xPct: 50,
   yPct: 43.8,
@@ -15,16 +15,23 @@ export const BOT_AVATAR_CANONICAL_FACE_PLACEMENT: BotAvatarFacePlacement = {
 export const BOT_AVATAR_FACE_GLYPH_FRAME_RATIO = 0.217;
 
 /**
- * The editor uses container-relative type instead of the preview's fixed body
- * frame. These calibrated values make the rendered feature centers coincide
- * after font metrics and the shared face scale are applied.
+ * Face registration shared by the Details editor and every live avatar that
+ * renders authored screen ink. Keeping this contract separate from the
+ * ink-free default prevents face-relative paint from drifting at runtime.
  */
-export const BOT_AVATAR_SCREEN_EDITOR_FACE_PLACEMENT: BotAvatarFacePlacement = {
+export const BOT_AVATAR_DETAILS_FACE_PLACEMENT: BotAvatarFacePlacement = {
   xPct: 50,
   yPct: 42.75,
   scale: BOT_AVATAR_CANONICAL_FACE_PLACEMENT.scale,
 };
-export const BOT_AVATAR_SCREEN_EDITOR_FACE_GLYPH_FRAME_RATIO = 0.2337;
+export const BOT_AVATAR_DETAILS_FACE_GLYPH_FRAME_RATIO = 0.2337;
+
+export const BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE = {
+  "--zen-live-bot-face-x": `${BOT_AVATAR_DETAILS_FACE_PLACEMENT.xPct}%`,
+  "--zen-live-bot-face-y": `${BOT_AVATAR_DETAILS_FACE_PLACEMENT.yPct}%`,
+  "--zen-live-bot-face-scale": BOT_AVATAR_DETAILS_FACE_PLACEMENT.scale,
+  "--zen-live-bot-avatar-face-glyph-size": `calc(var(--zen-live-bot-body-frame-size) * ${BOT_AVATAR_DETAILS_FACE_GLYPH_FRAME_RATIO})`,
+} as const;
 
 /** Authored punctuation faces read normally with this post-rotation flip. */
 export const BOT_AVATAR_CANONICAL_FACE_SCALE_Y = "-1";

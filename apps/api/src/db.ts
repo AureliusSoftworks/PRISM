@@ -169,7 +169,9 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       wrapped_user_key_iv TEXT NOT NULL,
       wrapped_user_key_tag TEXT NOT NULL,
       theme TEXT NOT NULL DEFAULT 'system',
+      graphics_quality TEXT NOT NULL DEFAULT 'high',
       preferred_provider TEXT NOT NULL DEFAULT 'local',
+      ephemeral_chat_provider_preferences TEXT NOT NULL DEFAULT '{}',
       preferred_image_provider TEXT NOT NULL DEFAULT 'local',
       provider_locked INTEGER NOT NULL DEFAULT 0,
       auto_memory INTEGER NOT NULL DEFAULT 1,
@@ -509,6 +511,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       prose_mode TEXT NOT NULL DEFAULT 'auto',
       prose_model TEXT,
       prose_provider TEXT,
+      deliberation_config_json TEXT NOT NULL DEFAULT '{}',
       continuity_active_version TEXT NOT NULL DEFAULT '0.0',
       continuity_target_version TEXT NOT NULL DEFAULT '0.0',
       continuity_active_generation INTEGER NOT NULL DEFAULT 0,
@@ -961,6 +964,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       user_id TEXT NOT NULL,
       name TEXT NOT NULL,
       name_pronunciation TEXT NOT NULL DEFAULT '',
+      self_referral TEXT NOT NULL DEFAULT '',
       system_prompt TEXT NOT NULL DEFAULT '',
       clone_family_id TEXT,
       voice_preview_line TEXT,
@@ -1259,6 +1263,10 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       show_id TEXT NOT NULL,
       host_bot_id TEXT NOT NULL,
       guest_bot_id TEXT NOT NULL,
+      guest_kind TEXT NOT NULL DEFAULT 'bot'
+        CHECK (guest_kind IN ('bot', 'producer')),
+      guest_name TEXT NOT NULL DEFAULT '',
+      guest_context TEXT NOT NULL DEFAULT '',
       title TEXT NOT NULL,
       topic TEXT NOT NULL,
       producer_brief TEXT NOT NULL DEFAULT '',
@@ -1307,6 +1315,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       speaker_role TEXT NOT NULL,
       bot_id TEXT NOT NULL,
       content TEXT NOT NULL,
+      stage_action_text TEXT,
       voice_performance_text TEXT,
       created_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -1397,6 +1406,10 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   addSlateProjectColumn("prose_model", "TEXT");
   addSlateProjectColumn("prose_provider", "TEXT");
   addSlateProjectColumn(
+    "deliberation_config_json",
+    "TEXT NOT NULL DEFAULT '{}'",
+  );
+  addSlateProjectColumn(
     "continuity_active_version",
     "TEXT NOT NULL DEFAULT '0.0'",
   );
@@ -1452,6 +1465,14 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   );
   if (!hasLastActiveAt) {
     db.exec("ALTER TABLE users ADD COLUMN last_active_at TEXT;");
+  }
+  const hasGraphicsQuality = userColumns.some(
+    (column) => column.name === "graphics_quality",
+  );
+  if (!hasGraphicsQuality) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN graphics_quality TEXT NOT NULL DEFAULT 'high';",
+    );
   }
   const hasVoiceMode = userColumns.some(
     (column) => column.name === "voice_mode",
@@ -1552,6 +1573,14 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   if (!hasBotcastVoicePerformanceText) {
     db.exec(
       "ALTER TABLE botcast_messages ADD COLUMN voice_performance_text TEXT;",
+    );
+  }
+  const hasBotcastStageActionText = botcastMessageColumns.some(
+    (column) => column.name === "stage_action_text",
+  );
+  if (!hasBotcastStageActionText) {
+    db.exec(
+      "ALTER TABLE botcast_messages ADD COLUMN stage_action_text TEXT;",
     );
   }
   const hasProviderLocked = userColumns.some(
@@ -1857,6 +1886,14 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   if (!hasZenPersonaTransitionChoice) {
     db.exec(
       "ALTER TABLE users ADD COLUMN zen_persona_transition_choice TEXT NOT NULL DEFAULT 'random';",
+    );
+  }
+  const hasEphemeralChatProviderPreferences = userColumns.some(
+    (column) => column.name === "ephemeral_chat_provider_preferences",
+  );
+  if (!hasEphemeralChatProviderPreferences) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN ephemeral_chat_provider_preferences TEXT NOT NULL DEFAULT '{}';",
     );
   }
   const defaultBotColumns: Array<[string, string]> = [
@@ -2724,6 +2761,14 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       "ALTER TABLE bots ADD COLUMN name_pronunciation TEXT NOT NULL DEFAULT '';",
     );
   }
+  const hasBotSelfReferralColumn = botColumns.some(
+    (column) => column.name === "self_referral",
+  );
+  if (!hasBotSelfReferralColumn) {
+    db.exec(
+      "ALTER TABLE bots ADD COLUMN self_referral TEXT NOT NULL DEFAULT '';",
+    );
+  }
   const hasAuthoredAudioVoiceProfileColumn = botColumns.some(
     (column) => column.name === "authored_audio_voice_profile",
   );
@@ -2804,6 +2849,23 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   ) {
     db.exec(
       "ALTER TABLE botcast_episodes ADD COLUMN duration_minutes INTEGER CHECK (duration_minutes IS NULL OR (duration_minutes >= 3 AND duration_minutes <= 30));",
+    );
+  }
+  if (!botcastEpisodeColumns.some((column) => column.name === "guest_kind")) {
+    db.exec(
+      "ALTER TABLE botcast_episodes ADD COLUMN guest_kind TEXT NOT NULL DEFAULT 'bot' CHECK (guest_kind IN ('bot', 'producer'));",
+    );
+  }
+  if (!botcastEpisodeColumns.some((column) => column.name === "guest_name")) {
+    db.exec(
+      "ALTER TABLE botcast_episodes ADD COLUMN guest_name TEXT NOT NULL DEFAULT '';",
+    );
+  }
+  if (
+    !botcastEpisodeColumns.some((column) => column.name === "guest_context")
+  ) {
+    db.exec(
+      "ALTER TABLE botcast_episodes ADD COLUMN guest_context TEXT NOT NULL DEFAULT '';",
     );
   }
   if (

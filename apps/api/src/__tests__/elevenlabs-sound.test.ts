@@ -57,16 +57,25 @@ test("Signal atmosphere prompt asks what the finished studio sounds like in sile
   assert.match(prompt, /underwater glass studio/iu);
   assert.match(prompt, /water channels/iu);
   assert.match(prompt, /occasional bubbles/iu);
-  assert.match(prompt, /warm low room resonance/iu);
-  assert.match(prompt, /soft bass weight/iu);
-  assert.match(prompt, /damped low-mid texture/iu);
-  assert.match(prompt, /upper-frequency detail faint and diffuse/iu);
-  assert.match(prompt, /occasional distinct set sounds/iu);
-  assert.match(prompt, /smooth loop boundary/iu);
+  assert.match(prompt, /room-and-Foley loop unique to this studio/iu);
+  assert.match(prompt, /distinctive backing bed/iu);
+  assert.match(prompt, /warm low resonance/iu);
+  assert.match(prompt, /damped low mids/iu);
+  assert.match(prompt, /materials, objects, mechanisms, and setting/iu);
+  assert.match(prompt, /highs faint/iu);
+  assert.match(prompt, /smooth the loop boundary/iu);
   assert.doesNotMatch(prompt, /\bstatic\b|\bhiss\b|\bcrackle\b/iu);
   assert.doesNotMatch(prompt, /ventilation|microphone-room/iu);
   assert.doesNotMatch(prompt, /\bquiet\b|\bhush\b|\brestrained\b/iu);
   assert.doesNotMatch(prompt, /\bno\b|\bavoid\b|\bwithout\b/iu);
+  assert.notEqual(
+    prompt,
+    buildSignalAtmospherePrompt({
+      showName: "The Timber Line",
+      studioIdentity:
+        "A timber observatory with brass shutters, pendulum clocks, and a rain-dark roof.",
+    }),
+  );
 });
 
 test("Signal atmosphere prompt stays within ElevenLabs' 450-character limit", () => {
@@ -80,8 +89,8 @@ test("Signal atmosphere prompt stays within ElevenLabs' 450-character limit", ()
     /What would it sound like in this room if one were completely silent\?/u,
   );
   assert.match(prompt, /Studio: A timber observatory/iu);
-  assert.match(prompt, /sounds implied by this exact studio/iu);
-  assert.match(prompt, /smooth loop boundary/iu);
+  assert.match(prompt, /room-and-Foley loop unique to this studio/iu);
+  assert.match(prompt, /smooth the loop boundary/iu);
 });
 
 test("Signal atmosphere request asks ElevenLabs for a 30-second loop", async () => {

@@ -76,20 +76,26 @@ export {
 
 export {
   BOT_POWER_INTENT_MAX_LENGTH,
+  BOT_POWER_CANONICAL_SILENCE_V1,
   BOT_POWER_MAX_COUNT,
   BOT_POWER_NAME_MAX_LENGTH,
   BOT_POWER_VERSION,
   COFFEE_POWER_PROMPT_MAX_CHARS,
   COFFEE_POWER_PROMPT_MAX_TOKENS,
+  activeBotPowerEffectsV1,
   activeBotPowersV1,
   applyBotPowerEchoResponseV1,
   applyBotPowerMuteResponseV1,
+  applyBotPowerResponseBudgetV1,
   botPowerCupRateMultiplierForBotV1,
   botPowerCandorResponseRuleV1,
   botPowerCandorTriggerV1,
+  botPowerDefinitionIsExplicitInterruptionV1,
+  botPowerDefinitionIsExplicitMuteV1,
   botPowerEchoesAddressedSpeechV1,
   botPowerHasSpeakingOnlyAvatarVisibilityV1,
   botPowerIsMutedV1,
+  botPowerMuteActionTextsV1,
   botPowerObserverCueLinesV1,
   botPowerResponseIsSilentV1,
   botPowerSelfCueLinesV1,
@@ -107,12 +113,19 @@ export {
   parseStoredBotPowersV1,
   serializeBotPowersV1,
   strongestBotPowerCandorEffectV1,
+  strongestBotPowerInterruptionEffectV1,
+  strongestBotPowerResponseBudgetEffectV1,
+  strongestHardBotPowerResponseBudgetEffectV1,
   type BotPowerBondDirection,
   type BotPowerCompileStatus,
   type BotPowerEffectV1,
   type BotPowerFrequency,
   type BotPowerGravityDirection,
+  type BotPowerInterruptionMatchV1,
   type BotPowerMemoryMode,
+  type BotPowerEnforcement,
+  type BotPowerResponseBudgetEffectV1,
+  type BotPowerResponseBudgetMode,
   type BotPowerStrength,
   type BotPowerTargetV1,
   type BotPowerTopicDirection,
@@ -226,7 +239,11 @@ export {
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
   DEFAULT_ENGLISH_VOICE_ENGINE,
+  DEFAULT_VOICE_EFFECT,
   DEFAULT_VOICE_MODE,
+  VOICE_EFFECTS,
+  VOICE_EFFECT_DESCRIPTIONS,
+  VOICE_EFFECT_LABELS,
   ELEVENLABS_VOICE_EFFECTS,
   ELEVENLABS_VOICE_EFFECT_DESCRIPTIONS,
   ELEVENLABS_VOICE_EFFECT_LABELS,
@@ -251,6 +268,7 @@ export {
   normalizeElevenLabsVoiceDirection,
   normalizeElevenLabsVoiceEffect,
   normalizeElevenLabsVoiceStability,
+  normalizeVoiceEffect,
   normalizeOptionalBotAudioVoiceProfileV1,
   resolveBotAudioVoiceProfileV1,
   normalizeVoiceMode,
@@ -268,9 +286,11 @@ export {
   BOT_AUDIO_VOICE_PACE_RATE_DEPTH,
   BOT_AUDIO_VOICE_PITCH_DEPTH_CENTS,
   BOT_NAME_PRONUNCIATION_MAX_LENGTH,
+  BOT_NAME_SELF_REFERRAL_MAX_LENGTH,
   applyBotNamePronunciations,
   applyPlayerNamePronunciation,
   normalizeBotNamePronunciation,
+  normalizeBotSelfReferral,
   parseStoredBotAudioVoiceProfileV1,
   serializeBotAudioVoiceProfileV1,
   type BotAudioVoiceId,
@@ -289,6 +309,7 @@ export {
   type BotNamePronunciationEntry,
   type EnglishVoiceEngine,
   type ElevenLabsVoiceEffect,
+  type VoiceEffect,
   type VoiceMode,
 } from "./audioVoice.js";
 
@@ -355,6 +376,8 @@ export {
   DEFAULT_BOT_FACE_MOUTH_ROTATION_DEG,
   DEFAULT_BOT_FACE_MOUTH_SCALE,
   DEFAULT_BOT_FACE_THINKING_FRAMES,
+  DISABLED_BOT_FACE_THINKING_FRAMES,
+  botFaceThinkingSpinnerDisabled,
   botFaceThinkingFramesEqual,
   botFaceFontFromVoicePreset,
   isBotFaceFontId,
@@ -679,6 +702,13 @@ export {
   type SlateContinuityThread,
   type SlateCreateSeriesRequest,
   type SlateCreateProjectRequest,
+  type SlateDeliberationConfig,
+  type SlateDeliberationFocus,
+  type SlateDeliberationHemisphereConfig,
+  type SlateDeliberationMessage,
+  type SlateDeliberationSpeaker,
+  type SlateDeliberationTurnRequest,
+  type SlateDeliberationTurnResponse,
   type SlateDraftRequest,
   type SlateGenerateTitleRequest,
   type SlateGenerateTitleResponse,
@@ -798,6 +828,7 @@ export type UsagePurpose =
   | "chat_web_search_followup"
   | "conversation_title"
   | "botcast_brand"
+  | "botcast_show_chat"
   | "botcast_review"
   | "botcast_turn"
   | "coffee_turn"
@@ -813,6 +844,7 @@ export type UsagePurpose =
   | "memory_summary"
   | "prompt_wildcard"
   | "psychic_planning"
+  | "slate_deliberation"
   | "slate_draft"
   | "slate_project_chat"
   | "slate_revision"
@@ -2625,6 +2657,11 @@ export interface CoffeePollPlayerVoteResponse {
   poll: CoffeePoll;
 }
 export * from "./botcast.js";
+export * from "./signalMusicProfile.js";
+export * from "./voiceSpokenText.js";
 export * from "./listenerReaction.js";
 export * from "./continuityVersion.js";
 export * from "./modelReadiness.js";
+export * from "./graphicsQuality.js";
+export * from "./review.js";
+export * from "./ephemeralChat.js";

@@ -103,7 +103,7 @@ export function composeBotSystemPrompt(
   name: string | null | undefined,
   systemPrompt: string | null | undefined,
   flirtEnabled?: boolean,
-  powers?: unknown
+  powers?: unknown,
 ): string | undefined {
   const trimmedName = typeof name === "string" ? name.trim() : "";
   const trimmedPrompt =

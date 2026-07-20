@@ -40,6 +40,8 @@ export type BotPowerGhostModePolicy =
   | "adapted"
   | "irrelevant"
   | "deferred";
+export type BotPowerResponseBudgetModePolicy = BotPowerGhostModePolicy;
+export type BotPowerInterruptionModePolicy = BotPowerGhostModePolicy;
 
 export interface PrismAppletVersion {
   id: PrismAppletId;
@@ -52,13 +54,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   chat: {
     id: "chat",
     name: "Chat",
-    version: "1.8",
+    version: "1.9",
     status: "active",
   },
   zen: {
     id: "zen",
     name: "Zen",
-    version: "1.7",
+    version: "1.8",
     status: "active",
   },
   arena: {
@@ -76,13 +78,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   coffee: {
     id: "coffee",
     name: "Coffee",
-    version: "2.1",
+    version: "2.2",
     status: "active",
   },
   botcast: {
     id: "botcast",
     name: "Signal",
-    version: "1.1",
+    version: "1.7",
     status: "active",
   },
   feed: {
@@ -100,7 +102,7 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   story: {
     id: "story",
     name: "Story",
-    version: "0.5",
+    version: "0.6",
     status: "preview",
   },
   gym: {
@@ -208,6 +210,46 @@ export const BOT_POWER_GHOST_MODE_POLICY: Record<PrismAppletId, BotPowerGhostMod
   polling: "deferred",
   coffee: "direct",
   botcast: "direct",
+  feed: "deferred",
+  games: "deferred",
+  story: "adapted",
+  gym: "deferred",
+  slate: "irrelevant",
+  pseudo: "deferred",
+  surf: "deferred",
+};
+
+/** Exhaustive response-budget policy: prose constraints adapt to each mode's required beats. */
+export const BOT_POWER_RESPONSE_BUDGET_MODE_POLICY: Record<
+  PrismAppletId,
+  BotPowerResponseBudgetModePolicy
+> = {
+  chat: "direct",
+  zen: "direct",
+  arena: "deferred",
+  polling: "deferred",
+  coffee: "adapted",
+  botcast: "adapted",
+  feed: "deferred",
+  games: "deferred",
+  story: "adapted",
+  gym: "deferred",
+  slate: "irrelevant",
+  pseudo: "deferred",
+  surf: "deferred",
+};
+
+/** Exhaustive interruption policy: each mode owns how live conversational openings work. */
+export const BOT_POWER_INTERRUPTION_MODE_POLICY: Record<
+  PrismAppletId,
+  BotPowerInterruptionModePolicy
+> = {
+  chat: "cue",
+  zen: "cue",
+  arena: "deferred",
+  polling: "deferred",
+  coffee: "direct",
+  botcast: "adapted",
   feed: "deferred",
   games: "deferred",
   story: "adapted",

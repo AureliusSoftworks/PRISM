@@ -66,13 +66,16 @@ describe("bot voice randomizer", () => {
     assert.equal(operatingSystem.systemVoiceName, "Samantha");
   });
 
-  it("keeps fresh bot drafts deterministic until the explicit randomizer is used", () => {
+  it("keeps fresh bot drafts deterministic after whole-bot randomization is removed", () => {
     const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8").replace(
       /\s+/gu,
       " "
     );
-    assert.match(pageSource, /const randomBotVoiceProfileForCreation = useCallback/);
-    assert.match(pageSource, /setNewBotAudioVoiceProfile\(randomBotVoiceProfileForCreation\(\)\)/);
+    assert.doesNotMatch(pageSource, /const randomBotVoiceProfileForCreation = useCallback/);
+    assert.doesNotMatch(
+      pageSource,
+      /setNewBotAudioVoiceProfile\(randomBotVoiceProfileForCreation\(\)\)/,
+    );
     assert.match(
       pageSource,
       /useState<BotAudioVoiceProfileV1>\(DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1\)/,

@@ -13,9 +13,7 @@ import {
   SESSION_ATMOSPHERE_LOOP_PRE_GAIN,
   SESSION_FOLEY_URLS,
   coffeeCupFoleyCueForTransition,
-  SIGNAL_AMBIENT_FOLEY_PROFILE,
   SIGNAL_ATMOSPHERE_RELATIVE_MIX_MAX,
-  SIGNAL_STUDIO_GRAIN_URL,
   createSeamlessSessionAtmosphereLoopBuffer,
   sessionAmbientFoleyDelayMs,
   sessionAmbientFoleyUrl,
@@ -60,24 +58,22 @@ test("Signal keeps its atmosphere alive through a completed episode's outro", ()
   );
 });
 
-test("Signal mix keeps the studio bed subtle while favoring room presence over static", () => {
+test("Signal mix removes static while keeping atmosphere and tactile Foley separate", () => {
   assert.deepEqual(DEFAULT_SIGNAL_ATMOSPHERE_MIX, {
     background: 0.16,
-    grain: 0.005,
+    grain: 0,
     foley: 1,
   });
   assert.ok(
     DEFAULT_SIGNAL_ATMOSPHERE_MIX.background >
       DEFAULT_SESSION_ATMOSPHERE_MIX.background,
   );
-  assert.ok(
-    DEFAULT_SIGNAL_ATMOSPHERE_MIX.grain < DEFAULT_SESSION_ATMOSPHERE_MIX.grain,
-  );
+  assert.equal(DEFAULT_SIGNAL_ATMOSPHERE_MIX.grain, 0);
   assert.equal(DEFAULT_SIGNAL_ATMOSPHERE_MIX.foley, 1);
 });
 
 test("Signal presents its approved mix as centered 100% unity", () => {
-  for (const bus of ["background", "grain", "foley"] as const) {
+  for (const bus of ["background", "foley"] as const) {
     assert.equal(
       signalAtmosphereRelativeMixLevel(bus, {
         ...DEFAULT_SIGNAL_ATMOSPHERE_MIX,
@@ -92,6 +88,13 @@ test("Signal presents its approved mix as centered 100% unity", () => {
       DEFAULT_SIGNAL_ATMOSPHERE_MIX[bus] * 2,
     );
   }
+  assert.equal(
+    signalAtmosphereMixLevelFromRelative(
+      "grain",
+      SIGNAL_ATMOSPHERE_RELATIVE_MIX_MAX,
+    ),
+    0,
+  );
 });
 
 test("session atmosphere foley is deterministic and tactfully spaced", () => {
@@ -106,22 +109,13 @@ test("session atmosphere foley is deterministic and tactfully spaced", () => {
     maxDelayMs: 42_000,
     trim: 1,
   });
-  assert.ok(
-    sessionAmbientFoleyDelayMs("signal-a", 2, SIGNAL_AMBIENT_FOLEY_PROFILE) >=
-      SIGNAL_AMBIENT_FOLEY_PROFILE.minDelayMs,
-  );
-  assert.ok(
-    sessionAmbientFoleyDelayMs("signal-a", 2, SIGNAL_AMBIENT_FOLEY_PROFILE) <=
-      SIGNAL_AMBIENT_FOLEY_PROFILE.maxDelayMs,
-  );
-  assert.ok(SIGNAL_AMBIENT_FOLEY_PROFILE.trim > 1);
   assert.match(
     sessionAmbientFoleyUrl("session-a", 2),
     /^\/audio\/session-atmosphere\//u,
   );
 });
 
-test("Signal's Foley profile schedules a sooner, moderately boosted studio cue", () => {
+test("Signal can disable generic ambient Foley while preserving synchronized cues", () => {
   const originalAudio = Object.getOwnPropertyDescriptor(globalThis, "Audio");
   const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
   const scheduled: Array<{ callback: () => void; delayMs: number }> = [];
@@ -163,19 +157,13 @@ test("Signal's Foley profile schedules a sooner, moderately boosted studio cue",
       seed: "signal-foley",
       volume: 1,
       mix: { background: 0, grain: 0, foley: 0.5 },
-      ambientFoleyProfile: SIGNAL_AMBIENT_FOLEY_PROFILE,
+      ambientFoley: false,
     });
-    assert.ok(
-      (scheduled[0]?.delayMs ?? 0) >= SIGNAL_AMBIENT_FOLEY_PROFILE.minDelayMs,
-    );
-    assert.ok(
-      (scheduled[0]?.delayMs ?? Number.POSITIVE_INFINITY) <=
-        SIGNAL_AMBIENT_FOLEY_PROFILE.maxDelayMs,
-    );
-    scheduled[0]?.callback();
+    assert.equal(scheduled.length, 0);
+    controller.playCue("coffeeSip");
     assert.equal(instances.length, 1);
-    assert.match(instances[0]?.src ?? "", /^\/audio\/session-atmosphere\//u);
-    assert.equal(instances[0]?.volume, 0.8);
+    assert.match(instances[0]?.src ?? "", /coffee-sip\.mp3$/u);
+    assert.equal(instances[0]?.volume, 0.625);
     controller.stop();
   } finally {
     if (originalAudio) {
@@ -198,10 +186,8 @@ test("session atmosphere exposes bundled studio and cup-synced foley assets", ()
   );
   assert.match(SESSION_FOLEY_URLS.coffeeSip, /coffee-sip\.mp3$/u);
   assert.match(SESSION_FOLEY_URLS.coffeeCupPlace, /coffee-cup-place\.mp3$/u);
-  assert.match(SIGNAL_STUDIO_GRAIN_URL, /studio-mix-grain-loop\.mp3$/u);
   for (const url of [
     DEFAULT_STUDIO_ATMOSPHERE_URL,
-    SIGNAL_STUDIO_GRAIN_URL,
     SESSION_FOLEY_URLS.coffeeSip,
     SESSION_FOLEY_URLS.coffeeCupPlace,
   ]) {

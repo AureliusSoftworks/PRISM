@@ -5,6 +5,20 @@ export type SlateProjectPhase = "shape" | "draft" | "refine";
 export type SlateProseMode = "auto" | "online" | "offline";
 export type SlateAiProvider = "local" | "openai" | "anthropic";
 
+export interface SlateDeliberationHemisphereConfig {
+  /** Null means inherit the project prose route. */
+  provider: SlateAiProvider | null;
+  /** Null means inherit the project prose route. */
+  model: string | null;
+  /** Writer-authored creative emphasis layered beneath the hemisphere's core role. */
+  directive: string;
+}
+
+export interface SlateDeliberationConfig {
+  lux: SlateDeliberationHemisphereConfig;
+  umbra: SlateDeliberationHemisphereConfig;
+}
+
 export type SlateStructureKind = "act" | "chapter" | "scene";
 export type SlateStructureStatus = "planned" | "drafted";
 
@@ -218,6 +232,7 @@ export interface SlateProjectDetail extends SlateProjectSummary {
   proseMode: SlateProseMode;
   proseModel: string | null;
   proseProvider: SlateAiProvider | null;
+  deliberationConfig: SlateDeliberationConfig;
   titleSuggestion: SlateTitleSuggestion | null;
   revisions: SlateRevision[];
   versions: SlateVersionSummary[];
@@ -283,6 +298,7 @@ export type SlateProjectPatchRequest = Partial<
     | "proseMode"
     | "proseModel"
     | "proseProvider"
+    | "deliberationConfig"
   >
 >;
 
@@ -313,6 +329,39 @@ export interface SlateProjectChatResponse {
   ok: true;
   /** Chronological crash-recovery buffer; never more than three messages. */
   messages: SlateProjectChatMessage[];
+}
+
+export type SlateDeliberationSpeaker = "lux" | "umbra" | "synthesis";
+
+export interface SlateDeliberationMessage {
+  id: string;
+  speaker: SlateDeliberationSpeaker;
+  /** One-based exchange number; synthesis resolves the completed round count. */
+  round: number;
+  content: string;
+  provider: SlateAiProvider;
+  model: string;
+  createdAt: string;
+}
+
+export interface SlateDeliberationFocus {
+  sectionId: string | null;
+  selectionStart: number | null;
+  selectionEnd: number | null;
+}
+
+export interface SlateDeliberationTurnRequest {
+  prompt: string;
+  rounds: number;
+  messages: Array<
+    Pick<SlateDeliberationMessage, "speaker" | "round" | "content">
+  >;
+  focus?: SlateDeliberationFocus;
+}
+
+export interface SlateDeliberationTurnResponse {
+  ok: true;
+  message: SlateDeliberationMessage;
 }
 
 export interface SlateTitleSuggestionResponse {

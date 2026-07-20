@@ -1,5 +1,7 @@
 import {
   BOT_POWER_VERSION,
+  botPowerDefinitionIsExplicitInterruptionV1,
+  botPowerDefinitionIsExplicitMuteV1,
   botPowerSourceHashV1,
   normalizeBotPowerEffectV1,
   normalizeBotPowersV1,
@@ -140,19 +142,9 @@ function deterministicMutePower(
   source: BotPowerV1,
   botName: string,
 ): CompiledBotPowerV1 | null {
-  const name = compact(source.name, 80).toLowerCase();
-  const intent = compact(source.intent, 500)
-    .toLowerCase()
-    .replace(/[’]/gu, "'");
-  const explicitlyMuted = /^(?:mute|muted|silence)$/u.test(name) || [
-    /\b(?:is|becomes?|remains?|render(?:ed)?|make|makes)\s+(?:completely\s+|fully\s+)?muted\b/u,
-    /\bmuted?\s+(?:bot|voice|speech)\b/u,
-    /\bmutes?\s+(?:this|the)\s+bot\b/u,
-    /\b(?:can(?:not|'t)|never|does\s+not|doesn't)\s+(?:speak|talk|say\s+anything|make\s+a\s+sound)\b/u,
-    /\bvoice\s+(?:can(?:not|'t)|will\s+never|is\s+never)\s+be\s+heard\b/u,
-    /\bonly\s+(?:responds?|replies?)\s+(?:with|in)\s+(?:an?\s+)?(?:ellipsis|\.\.\.)(?:\s|$)/u,
-  ].some((pattern) => pattern.test(intent));
-  if (!explicitlyMuted) return null;
+  if (!botPowerDefinitionIsExplicitMuteV1(source.name, source.intent)) {
+    return null;
+  }
   const subject = compact(botName, 100) || "This bot";
   return {
     version: BOT_POWER_VERSION,
@@ -188,6 +180,49 @@ function deterministicEchoAddressedPower(
     observerCue: `${subject} can only echo the latest speech addressed to them; the sender may react with confusion.`,
     effects: [{ type: "echo_addressed" }],
     ruleLabels: ["Echoes addressed speech"],
+  };
+}
+
+function deterministicInterruptionPower(
+  source: BotPowerV1,
+  botName: string,
+): CompiledBotPowerV1 | null {
+  if (!botPowerDefinitionIsExplicitInterruptionV1(source.name, source.intent)) {
+    return null;
+  }
+  const text = compact(`${source.name} ${source.intent}`, 560).toLowerCase();
+  const frequent = /\b(?:aggressively|always|constantly|frequently|often|whenever\s+possible)\b/u.test(text);
+  const strength = /\b(?:aggressively|forcefully|always|constantly)\b/u.test(text)
+    ? "large" as const
+    : "medium" as const;
+  const frequency = frequent ? "frequent" as const : "occasional" as const;
+  const subject = compact(botName, 100) || "This bot";
+  return {
+    version: BOT_POWER_VERSION,
+    sourceHash: botPowerSourceHashV1(source.name, source.intent),
+    selfCue: "Seize real conversational openings quickly, but do not interrupt protected closings, boundaries, or human-controlled speech.",
+    observerCue: `${subject} may cut into an eligible bot speaker's live turn when a real opening appears.`,
+    effects: [
+      {
+        type: "interruption",
+        frequency,
+        strength,
+        targets: [{ kind: "all" }],
+      },
+      {
+        type: "action_bias",
+        cue: "Cut in quickly when a real interruption opportunity appears.",
+        frequency,
+      },
+      { type: "turn_gravity", direction: "more", strength },
+      {
+        type: "response_bond",
+        direction: "toward",
+        strength,
+        targets: [{ kind: "all" }],
+      },
+    ],
+    ruleLabels: [frequency === "frequent" ? "Frequently interrupts" : "May interrupt"],
   };
 }
 
@@ -408,20 +443,109 @@ function deterministicCoffeeDislikePower(
   };
 }
 
+function deterministicResponseBudgetPower(
+  source: BotPowerV1,
+  botName: string,
+): CompiledBotPowerV1 | null {
+  const text = compact(`${source.name} ${source.intent}`, 560)
+    .toLowerCase()
+    .replace(/[’]/gu, "'");
+  const minimal = [
+    /\bbare\s+minimum\b/u,
+    /\bfewest\s+(?:possible\s+)?words\b/u,
+    /\b(?:one|single)[- ](?:word|sentence)\s+(?:answers?|replies?|responses?)\b/u,
+    /\b(?:never|does\s+not|doesn't|won't)\s+elaborate\b/u,
+    /\b(?:says?|speaks?|answers?|replies?)\s+(?:with\s+)?(?:as\s+)?little\s+as\s+possible\b/u,
+    /\bonly\s+(?:says?|speaks?|answers?|replies?)\s+(?:with\s+)?what(?:'s|\s+is)\s+necessary\b/u,
+  ].some((pattern) => pattern.test(text));
+  const expansive = !minimal && [
+    /\b(?:verbose|long[- ]winded|expansive|very\s+detailed)\b/u,
+    /\b(?:always|usually|often|tends?\s+to)\s+elaborate\b/u,
+    /\b(?:gives?|offers?)\s+(?:long|detailed|thorough)\s+(?:answers?|replies?|responses?)\b/u,
+  ].some((pattern) => pattern.test(text));
+  const brief = !minimal && !expansive && [
+    /\b(?:terse|laconic|succinct|concise)\b/u,
+    /\b(?:brief|short)\s+(?:answers?|replies?|responses?)\b/u,
+    /\bkeeps?\s+(?:answers?|replies?|responses?)\s+(?:brief|short)\b/u,
+  ].some((pattern) => pattern.test(text));
+  if (!minimal && !brief && !expansive) return null;
+  const mode = minimal ? "minimal" as const : expansive ? "expansive" as const : "brief" as const;
+  const hardLanguage = [
+    /\b(?:always|never|must|cannot|can't|won't|does\s+not|doesn't|only)\b/u,
+    /\bbare\s+minimum\b/u,
+    /\bfewest\s+(?:possible\s+)?words\b/u,
+    /\b(?:one|single)[- ](?:word|sentence)\b/u,
+  ].some((pattern) => pattern.test(text));
+  const enforcement = mode !== "expansive" && hardLanguage ? "hard" as const : "soft" as const;
+  const subject = compact(botName, 100) || "This bot";
+  const selfCue = mode === "minimal"
+    ? enforcement === "hard"
+      ? "Answer with the bare minimum. Use one short sentence and never elaborate unless the requested format requires structure."
+      : "Prefer the fewest useful words and avoid elaborating unless it is necessary."
+    : mode === "brief"
+      ? enforcement === "hard"
+        ? "Keep every prose response brief: no more than two concise sentences unless the requested format requires structure."
+        : "Keep responses concise and resist unnecessary elaboration."
+      : "Offer fuller, more detailed answers when substance supports them; never add filler merely to sound expansive.";
+  return {
+    version: BOT_POWER_VERSION,
+    sourceHash: botPowerSourceHashV1(source.name, source.intent),
+    selfCue,
+    observerCue: mode === "minimal"
+      ? `${subject} gives conspicuously minimal answers and does not elaborate.`
+      : mode === "brief"
+        ? `${subject} consistently keeps responses concise.`
+        : `${subject} tends to answer expansively when there is real substance to add.`,
+    effects: [{ type: "response_budget", mode, enforcement }],
+    ruleLabels: [
+      mode === "minimal"
+        ? enforcement === "hard" ? "One-sentence maximum" : "Prefers minimal answers"
+        : mode === "brief"
+          ? enforcement === "hard" ? "Two-sentence maximum" : "Prefers brief answers"
+          : "Prefers expansive answers",
+    ],
+  };
+}
+
+function mergeDeterministicPowerParts(
+  primary: CompiledBotPowerV1 | null,
+  responseBudget: CompiledBotPowerV1 | null,
+): CompiledBotPowerV1 | null {
+  if (!primary) return responseBudget;
+  if (!responseBudget) return primary;
+  const effects = [...primary.effects, ...responseBudget.effects].filter(
+    (effect, index, all) =>
+      all.findIndex((candidate) => JSON.stringify(candidate) === JSON.stringify(effect)) === index,
+  ).slice(0, 8);
+  return {
+    ...primary,
+    selfCue: compact(`${primary.selfCue} ${responseBudget.selfCue}`, 280),
+    observerCue: compact(`${primary.observerCue} ${responseBudget.observerCue}`, 280),
+    effects,
+    ruleLabels: Array.from(
+      new Set([...primary.ruleLabels, ...responseBudget.ruleLabels]),
+    ).slice(0, 8),
+  };
+}
+
 function deterministicPower(
   source: BotPowerV1,
   botName: string,
 ): CompiledBotPowerV1 | null {
-  return (
+  const primary =
     deterministicHearingRepeatPower(source, botName) ??
     deterministicEchoAddressedPower(source, botName) ??
     deterministicMutePower(source, botName) ??
+    deterministicInterruptionPower(source, botName) ??
     deterministicGhostPower(source, botName) ??
     deterministicHardAudiencePower(source, botName) ??
     deterministicCandorPower(source, botName) ??
     deterministicIntimidationPower(source, botName) ??
     deterministicGradualMoodPower(source, botName) ??
-    deterministicCoffeeDislikePower(source, botName)
+    deterministicCoffeeDislikePower(source, botName);
+  return mergeDeterministicPowerParts(
+    primary,
+    deterministicResponseBudgetPower(source, botName),
   );
 }
 
@@ -476,11 +600,27 @@ function compiledEntrySatisfiesIntent(
   if (deterministicMutePower(source, "")) {
     return compiled.effects.some((effect) => effect.type === "mute");
   }
+  if (deterministicInterruptionPower(source, "")) {
+    return compiled.effects.some((effect) => effect.type === "interruption");
+  }
   if (deterministicGhostPower(source, "")) {
     return compiled.effects.some(
       (effect) =>
         effect.type === "avatar_visibility" && effect.mode === "speaking_only",
     );
+  }
+  const requiredResponseBudget = deterministicResponseBudgetPower(source, "")
+    ?.effects.find((effect) => effect.type === "response_budget");
+  if (
+    requiredResponseBudget?.type === "response_budget" &&
+    !compiled.effects.some(
+      (effect) =>
+        effect.type === "response_budget" &&
+        effect.mode === requiredResponseBudget.mode &&
+        effect.enforcement === requiredResponseBudget.enforcement,
+    )
+  ) {
+    return false;
   }
   const required = requiredHardAudienceEffect(source.intent);
   return !required || compiled.effects.some((effect) => effect.type === required);
@@ -691,6 +831,8 @@ export async function compileBotPowers(args: {
         '- {"type":"mood_resistance","polarity":"positive|negative|both","strength":"small|medium|large"},',
         '- {"type":"cup_rate","rate":"none|slow|fast|very_fast"},',
         '- {"type":"action_bias","cue":string,"frequency":"occasional|frequent"},',
+        '- {"type":"interruption","frequency":"occasional|frequent","strength":"small|medium|large","targets":[target...]},',
+        '- {"type":"response_budget","mode":"minimal|brief|expansive","enforcement":"soft|hard"},',
         '- {"type":"turn_gravity","direction":"more|less","strength":"small|medium|large"},',
         '- {"type":"response_bond","direction":"toward|away","strength":"small|medium|large","targets":[target...]},',
         '- {"type":"topic_gravity","direction":"toward|away","strength":"small|medium|large","topics":[string...]},',
@@ -733,7 +875,7 @@ export async function compileBotPowers(args: {
         content: [
           "Repair malformed PRISM Power compiler output.",
           "Reply with JSON only and preserve the supplied power IDs exactly.",
-          "Every hard echo, hearing-repeat, exclusive visibility, hearing-audience, or ghostly speaking-only avatar intent must include its matching echo_addressed, hearing_repeat, awareness, speech_audience, or avatar_visibility effect, not only prose cues.",
+          "Every hard echo, hearing-repeat, active live-interruption, exclusive visibility, hearing-audience, ghostly speaking-only avatar, or strict response-length intent must include its matching echo_addressed, hearing_repeat, interruption, awareness, speech_audience, avatar_visibility, or response_budget effect, not only prose cues.",
         ].join(" "),
       },
       {
@@ -742,7 +884,7 @@ export async function compileBotPowers(args: {
           `Expected powers: ${JSON.stringify(unresolved.map(({ id, name, intent, enabled }) => ({ id, name, intent, enabled })))}`,
           `Prior output: ${compact(raw, 6000) || "(empty)"}`,
           "Return {\"powers\":[{\"id\":string,\"name\":string,\"selfCue\":string,\"observerCue\":string,\"effects\":[],\"ruleLabels\":string[]}]}",
-          "Allowed effect types: mute, echo_addressed, hearing_repeat, awareness, speech_audience, avatar_visibility, social_influence, candor, mood_resistance, cup_rate, action_bias, turn_gravity, response_bond, topic_gravity, selective_memory, insight.",
+          "Allowed effect types: mute, echo_addressed, hearing_repeat, awareness, speech_audience, avatar_visibility, social_influence, candor, mood_resistance, cup_rate, action_bias, interruption, response_budget, turn_gravity, response_bond, topic_gravity, selective_memory, insight.",
         ].join("\n"),
       },
     ];

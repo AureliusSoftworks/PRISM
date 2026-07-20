@@ -6,6 +6,8 @@ import {
   type PromptWildcardRunMetadata,
   type SlateAiProvider,
   type SlateCharacter,
+  type SlateDeliberationConfig,
+  type SlateDeliberationHemisphereConfig,
   type SlateLockedRange,
   type SlateProjectDetail,
   type SlateProjectCover,
@@ -54,6 +56,7 @@ const SLATE_DIRECTION_MAX = 8_000;
 const SLATE_STRUCTURE_MAX = 240;
 const SLATE_CHARACTER_MAX = 120;
 const SLATE_THREAD_MAX = 160;
+const SLATE_DELIBERATION_DIRECTIVE_MAX = 4_000;
 
 interface SlateProjectRow {
   id: string;
@@ -80,8 +83,71 @@ interface SlateProjectRow {
   prose_mode: string;
   prose_model: string | null;
   prose_provider: string | null;
+  deliberation_config_json: string;
   created_at: string;
   updated_at: string;
+}
+
+function defaultSlateDeliberationHemisphereConfig(): SlateDeliberationHemisphereConfig {
+  return { provider: null, model: null, directive: "" };
+}
+
+function defaultSlateDeliberationConfig(): SlateDeliberationConfig {
+  return {
+    lux: defaultSlateDeliberationHemisphereConfig(),
+    umbra: defaultSlateDeliberationHemisphereConfig(),
+  };
+}
+
+function normalizeSlateDeliberationHemisphereConfig(
+  value: unknown,
+  label: string,
+): SlateDeliberationHemisphereConfig {
+  if (!isRecord(value)) throw new Error(`${label} settings are invalid.`);
+  const provider = optionalProviderValue(value.provider);
+  const model = boundedString(value.model, `${label} model`, 240) || null;
+  if (Boolean(provider) !== Boolean(model)) {
+    throw new Error(`${label} model and provider must be selected together.`);
+  }
+  return {
+    provider,
+    model,
+    directive: boundedString(
+      value.directive,
+      `${label} creative lens`,
+      SLATE_DELIBERATION_DIRECTIVE_MAX,
+    ),
+  };
+}
+
+function normalizeSlateDeliberationConfig(
+  value: unknown,
+): SlateDeliberationConfig {
+  if (!isRecord(value)) throw new Error("Slate hemisphere settings are invalid.");
+  return {
+    lux: normalizeSlateDeliberationHemisphereConfig(value.lux, "Lux"),
+    umbra: normalizeSlateDeliberationHemisphereConfig(value.umbra, "Umbra"),
+  };
+}
+
+function storedSlateDeliberationConfig(
+  row: SlateProjectRow,
+): SlateDeliberationConfig {
+  const fallback = defaultSlateDeliberationConfig();
+  const parsed = parseJson(row.deliberation_config_json, null);
+  if (!isRecord(parsed)) return fallback;
+  try {
+    return {
+      lux: isRecord(parsed.lux)
+        ? normalizeSlateDeliberationHemisphereConfig(parsed.lux, "Lux")
+        : fallback.lux,
+      umbra: isRecord(parsed.umbra)
+        ? normalizeSlateDeliberationHemisphereConfig(parsed.umbra, "Umbra")
+        : fallback.umbra,
+    };
+  } catch {
+    return fallback;
+  }
 }
 
 interface SlateRevisionRow {
@@ -438,6 +504,10 @@ function slateShapeProjectStateToken(row: SlateProjectRow): string {
     row.locked_ranges_json,
     row.last_provider,
     row.last_model,
+    row.prose_mode,
+    row.prose_model,
+    row.prose_provider,
+    row.deliberation_config_json,
     row.updated_at,
   ]);
 }
@@ -687,6 +757,7 @@ function detailFromRow(db: DatabaseSync, row: SlateProjectRow): SlateProjectDeta
     proseMode: proseModeValue(row.prose_mode),
     proseModel: row.prose_model,
     proseProvider: providerValue(row.prose_provider),
+    deliberationConfig: storedSlateDeliberationConfig(row),
     titleSuggestion: pendingTitleSuggestionForProject(db, row.user_id, row.id),
     revisions: revisionsForProject(db, row.user_id, row.id),
     versions: versionsForProject(db, row.user_id, row.id),
@@ -828,6 +899,12 @@ export function updateSlateProject(
   }
   if (Object.hasOwn(patch, "proseProvider")) {
     assign("prose_provider", optionalProviderValue(patch.proseProvider));
+  }
+  if (Object.hasOwn(patch, "deliberationConfig")) {
+    assign(
+      "deliberation_config_json",
+      JSON.stringify(normalizeSlateDeliberationConfig(patch.deliberationConfig)),
+    );
   }
   if (Object.hasOwn(patch, "nonNegotiables")) assign("non_negotiables_json", JSON.stringify(stringArray(patch.nonNegotiables, "Non-negotiables", 60)));
   if (Object.hasOwn(patch, "structure")) {

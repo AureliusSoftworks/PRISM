@@ -72,6 +72,7 @@ import type {
   WebSearchRequestPayload,
   AutoFallbackChainV1,
   AutoRecoveryTraceV1,
+  BotPowerResponseBudgetEffectV1,
   ImageProviderName,
   ResponseMode,
   ZenAskQuestionPatienceInput,
@@ -95,6 +96,7 @@ import {
   applyPrismMoodPositiveTurn,
   applyBotPowerEchoResponseV1,
   applyBotPowerMuteResponseV1,
+  applyBotPowerResponseBudgetV1,
   botPowerObserverCueLinesV1,
   createDefaultPrismMoodState,
   decayPrismMood,
@@ -2394,6 +2396,8 @@ export interface UserChatSettings {
   botPowerMuted?: boolean;
   /** Hard runtime enforcement for an active compiled addressed-speech echo Power. */
   botPowerEchoAddressed?: boolean;
+  /** Per-response prose envelope from a Ready response-budget Power. */
+  botPowerResponseBudget?: BotPowerResponseBudgetEffectV1 | null;
   /** Optional per-bot generation overrides, forwarded to the provider. */
   botOverrides?: GenerateOptions;
   /** Global developer rule layer applied across all bots when enabled. */
@@ -3387,6 +3391,7 @@ const MENTIONED_BOT_SHORT_TERM_MEMORY_LIMIT = 2;
 interface MentionedBotContextRow {
   id: string;
   name: string | null;
+  name_pronunciation?: string | null;
   system_prompt?: string | null;
   powers_json?: string | null;
 }
@@ -3483,6 +3488,9 @@ export async function buildMentionedBotPromptContexts(args: {
   const powersSelect = botColumns.has("powers_json")
     ? "powers_json"
     : "'[]' AS powers_json";
+  const pronunciationSelect = botColumns.has("name_pronunciation")
+    ? "name_pronunciation"
+    : "NULL AS name_pronunciation";
   const visibilityPredicate = botColumns.has("visibility")
     ? "(user_id = ? OR visibility = 'public')"
     : "user_id = ?";
@@ -3493,7 +3501,7 @@ export async function buildMentionedBotPromptContexts(args: {
   try {
     rows = args.db
       .prepare(
-        `SELECT id, name, ${systemPromptSelect}, ${powersSelect}
+        `SELECT id, name, ${pronunciationSelect}, ${systemPromptSelect}, ${powersSelect}
          FROM bots
          WHERE id IN (${placeholders})
            AND ${visibilityPredicate}${chatEnabledPredicate}`
@@ -3520,6 +3528,10 @@ export async function buildMentionedBotPromptContexts(args: {
       MENTIONED_BOT_PROFILE_MAX_CHARS
     );
     const lines = [`- ${displayName} (id: ${row.id})`];
+    const pronunciation = row.name_pronunciation?.replace(/\s+/gu, " ").trim();
+    if (pronunciation && pronunciation !== displayName) {
+      lines.push(`  Other bots refer to this bot aloud as: ${pronunciation}`);
+    }
     if (profileExcerpt) {
       lines.push(`  Profile excerpt: ${profileExcerpt}`);
     }
@@ -6287,6 +6299,7 @@ export async function processChatMessage(
   const isStarterPrompt = settings.starterPrompt === true;
   const botPowerMutedTurn = settings.botPowerMuted === true;
   const botPowerEchoTurn = settings.botPowerEchoAddressed === true;
+  const botPowerResponseBudgetTurn = settings.botPowerResponseBudget ?? null;
   const botPowerHardResponseTurn = botPowerMutedTurn || botPowerEchoTurn;
   const commandCenterPromptTurn =
     settings.commandCenterPrompt === true || Boolean(settings.promptShortcut);
@@ -6581,6 +6594,13 @@ export async function processChatMessage(
       : isStarterPrompt && !starterSendGeneratedImageRequested
       ? enforceStarterOpeningQuestion(assistantDisplayRaw, [])
       : assistantDisplayRaw;
+    if (!botPowerHardResponseTurn && webSearchStatus !== "blocked") {
+      assistantDisplay = applyBotPowerResponseBudgetV1(
+        assistantDisplay,
+        botPowerResponseBudgetTurn,
+        botPowerResponseBudgetTurn?.mode === "minimal" ? 1 : 2,
+      );
+    }
     const turnEvaluation = isStarterPrompt
       ? undefined
       : evaluateUserTurnOpinion(message);
@@ -7773,6 +7793,13 @@ export async function processChatMessage(
         settings.starterPromptWarrantsIntro === true
       )
     : assistantDisplayRaw;
+  if (!botPowerHardResponseTurn && webSearchStatus !== "blocked") {
+    assistantDisplay = applyBotPowerResponseBudgetV1(
+      assistantDisplay,
+      botPowerResponseBudgetTurn,
+      botPowerResponseBudgetTurn?.mode === "minimal" ? 1 : 2,
+    );
+  }
 	  const assistantMood = prismMoodPauseTurn
 	    ? {
 	        key: prismMood.moodKey,

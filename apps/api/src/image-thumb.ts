@@ -1,5 +1,12 @@
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname } from "node:path";
 import sharp from "sharp";
 import {
@@ -49,8 +56,10 @@ export function writeThumbWebpAtomically(absoluteThumbPath: string, webpBytes: B
  */
 export async function tryGenerateThumbAfterPngWrite(localPngRelPath: string): Promise<void> {
   try {
+    const absolutePngPath = resolveAbsoluteUnderDataRoot(localPngRelPath);
     const pngBytes = readGeneratedImageBytes(localPngRelPath);
     const webp = await encodeWebpThumbFromRasterBytes(pngBytes);
+    if (!existsSync(absolutePngPath)) return;
     const thumbRel = thumbWebpRelativePathFromPngRelativePath(localPngRelPath);
     writeThumbWebpAtomically(resolveAbsoluteUnderDataRoot(thumbRel), webp);
   } catch (error) {
@@ -64,14 +73,24 @@ export async function tryGenerateThumbAfterPngWrite(localPngRelPath: string): Pr
 /**
  * Returns existing thumb bytes or creates the sidecar from the PNG and returns those bytes.
  */
-export async function readOrCreateThumbBytes(localPngRelPath: string): Promise<Buffer> {
+export async function readOrCreateThumbBytes(
+  localPngRelPath: string,
+  encode: (inputBytes: Buffer) => Promise<Buffer> = encodeWebpThumbFromRasterBytes,
+): Promise<Buffer> {
   const thumbRel = thumbWebpRelativePathFromPngRelativePath(localPngRelPath);
   const absThumb = resolveAbsoluteUnderDataRoot(thumbRel);
   if (existsSync(absThumb)) {
     return readFileSync(absThumb);
   }
+  const absPng = resolveAbsoluteUnderDataRoot(localPngRelPath);
   const pngBytes = readGeneratedImageBytes(localPngRelPath);
-  const webp = await encodeWebpThumbFromRasterBytes(pngBytes);
+  const webp = await encode(pngBytes);
+  // No JavaScript cleanup can interleave between this synchronous existence
+  // check and the atomic write. If Asset Cleanup moved the PNG while encoding,
+  // do not recreate an orphan thumbnail in generated-images.
+  if (!existsSync(absPng)) {
+    throw new Error("Generated image was removed while creating its thumbnail.");
+  }
   writeThumbWebpAtomically(absThumb, webp);
   return webp;
 }

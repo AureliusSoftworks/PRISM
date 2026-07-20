@@ -63,7 +63,7 @@ export function buildSignalAtmospherePrompt(args: {
   const silentRoomQuestion =
     "What would it sound like in this room if one were completely silent?";
   const directions =
-    "Seamless non-musical loop from sounds implied by this exact studio. Favor warm low room resonance, soft bass weight, and damped low-mid texture. Keep upper-frequency detail faint and diffuse, with occasional distinct set sounds and a smooth loop boundary.";
+    "Seamless non-musical room-and-Foley loop unique to this studio. Build a distinctive backing bed from warm low resonance, damped low mids, and several sparse sounds implied by its materials, objects, mechanisms, and setting. Keep highs faint, leave speech space, and smooth the loop boundary.";
   const studioPrefix = "Studio: ";
   const promptEnvelopeLength =
     silentRoomQuestion.length + 1 + studioPrefix.length + 2 + directions.length;

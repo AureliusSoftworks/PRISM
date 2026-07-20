@@ -41,12 +41,20 @@ export interface BottishPlan {
 
 export interface BottishPlaybackTiming {
   targetDurationMs?: number;
-  /** Ephemeral mood delivery rate; authored Bottish pace remains ignored. */
+  /** Ephemeral delivery multiplier composed with the authored profile pace. */
   deliveryRate?: number;
+  /** Opt-in ceiling for fitting a long robot line into a shorter speech window. */
+  maximumCompressionRate?: number;
 }
 
 const MEDIA_PLAY_START_TIMEOUT_MS = 1500;
 const BOTTISH_SAMPLE_RATE = 24_000;
+const MAX_ROBOT_VOICE_COMPRESSION_RATE = 1.24;
+const SIGNAL_ENGLISH_WORD_DURATION_MS = 350;
+const SIGNAL_ENGLISH_STRONG_PAUSE_MS = 160;
+const SIGNAL_ENGLISH_SOFT_PAUSE_MS = 70;
+const SIGNAL_ENGLISH_MIN_UTTERANCE_MS = 720;
+const SIGNAL_ENGLISH_MAX_UTTERANCE_MS = 24_000;
 
 /** Keep the persisted field for profile/back-up compatibility, but do not let
  * legacy or randomized tone values change Bottish gain or processing. */
@@ -59,6 +67,35 @@ export function normalizeBottishPlaybackProfile(
     ...normalizeBotAudioVoiceProfileV1(rawProfile),
     warmth: 0,
     bottishTone: FIXED_BOTTISH_TONE,
+  };
+}
+
+/** Estimate the neutral-tempo English window for a Signal line. Signal uses
+ * this only to rein in robot modes that run materially longer than the same
+ * spoken line; the hard compression ceiling keeps either mode intelligible. */
+export function signalRobotVoiceCadenceTiming(
+  text: string,
+): BottishPlaybackTiming {
+  const wordCount = Math.max(
+    1,
+    text.match(/[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu)?.length ?? 0,
+  );
+  const strongPauseCount = text.match(/[.!?]+/gu)?.length ?? 0;
+  const softPauseCount = text.match(/[,;:]+/gu)?.length ?? 0;
+  const targetDurationMs = Math.min(
+    SIGNAL_ENGLISH_MAX_UTTERANCE_MS,
+    Math.max(
+      SIGNAL_ENGLISH_MIN_UTTERANCE_MS,
+      Math.round(
+        wordCount * SIGNAL_ENGLISH_WORD_DURATION_MS +
+          strongPauseCount * SIGNAL_ENGLISH_STRONG_PAUSE_MS +
+          softPauseCount * SIGNAL_ENGLISH_SOFT_PAUSE_MS,
+      ),
+    ),
+  );
+  return {
+    targetDurationMs,
+    maximumCompressionRate: MAX_ROBOT_VOICE_COMPRESSION_RATE,
   };
 }
 
@@ -190,23 +227,36 @@ export function buildBottishPlan(
   };
 }
 
-/** Fits procedural Bottish to a longer visible delivery window. Speech must
- * never be compressed to catch up with the UI: doing that turns a normal
- * Bottish cadence into an unintelligible burst. The reveal follows audio via
- * lifecycle timing, so a short UI window is simply ignored here. */
+/** Fits procedural Bottish to a visible delivery window. Compression remains
+ * opt-in and hard-bounded; ordinary chat/preview callers retain the historical
+ * no-speed-up behavior while Signal can approach an English-like live cadence. */
 export function fitBottishPlanToDuration(
   plan: BottishPlan,
-  targetDurationMs: number | undefined
+  targetDurationMs: number | undefined,
+  maximumCompressionRate = 1,
 ): BottishPlan {
   if (
     plan.durationMs <= 0 ||
     typeof targetDurationMs !== "number" ||
     !Number.isFinite(targetDurationMs) ||
-    targetDurationMs <= plan.durationMs
+    targetDurationMs <= 0
   ) {
     return plan;
   }
-  const durationMs = Math.max(plan.durationMs, 80, Math.round(targetDurationMs));
+  const compressionRate = Math.max(
+    1,
+    Math.min(
+      MAX_ROBOT_VOICE_COMPRESSION_RATE,
+      Number.isFinite(maximumCompressionRate) ? maximumCompressionRate : 1,
+    ),
+  );
+  const minimumDurationMs = Math.ceil(plan.durationMs / compressionRate);
+  const durationMs = Math.max(
+    80,
+    minimumDurationMs,
+    Math.round(targetDurationMs),
+  );
+  if (durationMs === plan.durationMs) return plan;
   const scale = durationMs / plan.durationMs;
   const notes = plan.notes.flatMap((note) => {
     const startMs = Math.max(0, Math.round(note.startMs * scale));
@@ -262,6 +312,49 @@ export function scaleBottishPlanForDeliveryRate(
       ),
     },
   };
+}
+
+export function buildBottishPlaybackPlan(
+  text: string,
+  rawProfile: BotAudioVoiceProfileV1,
+  seed: string,
+  timing?: BottishPlaybackTiming,
+): BottishPlan {
+  const normalizedProfile = normalizeBottishPlaybackProfile(rawProfile);
+  const rawDeliveryRate =
+    (1 + normalizedProfile.pace * BOT_AUDIO_VOICE_PACE_RATE_DEPTH) *
+    (timing?.deliveryRate ?? 1);
+  const boundedDeliveryRate = Number.isFinite(rawDeliveryRate)
+    ? Math.max(
+        1 - BOT_AUDIO_VOICE_PACE_RATE_DEPTH,
+        Math.min(1 + BOT_AUDIO_VOICE_PACE_RATE_DEPTH, rawDeliveryRate),
+      )
+    : 1;
+  const planProfile = {
+    ...normalizedProfile,
+    // Bottish owns its duration in the generated plan, so browser playback
+    // cannot apply Pace twice.
+    pace: 0,
+  };
+  const naturalPlan = buildBottishPlan(text, planProfile, seed);
+  if ((timing?.maximumCompressionRate ?? 1) > 1) {
+    const fittingCompressionRate = Math.min(
+      timing?.maximumCompressionRate ?? 1,
+      Math.max(1, MAX_ROBOT_VOICE_COMPRESSION_RATE / boundedDeliveryRate),
+    );
+    return scaleBottishPlanForDeliveryRate(
+      fitBottishPlanToDuration(
+        naturalPlan,
+        timing?.targetDurationMs,
+        fittingCompressionRate,
+      ),
+      boundedDeliveryRate,
+    );
+  }
+  return fitBottishPlanToDuration(
+    scaleBottishPlanForDeliveryRate(naturalPlan, boundedDeliveryRate),
+    timing?.targetDurationMs,
+  );
 }
 
 function writeWaveText(view: DataView, offset: number, value: string): void {
@@ -523,12 +616,14 @@ async function playPlan(
   lifecycle?: VoicePlaybackLifecycle,
   roomAcoustics?: RoomAcousticsSend,
   preSpeechBreath?: PreSpeechBreathPlan | null,
+  stereoPan?: number,
 ): Promise<void> {
   if (plan.durationMs <= 0 || expectedGeneration !== generation) return;
   await playPreSpeechBreath({
     plan: preSpeechBreath,
     profile,
     roomAcoustics,
+    stereoPan,
     isCurrent: () => expectedGeneration === generation,
   });
   if (expectedGeneration !== generation) return;
@@ -539,6 +634,7 @@ async function playPlan(
     seed,
     effectsEnabled,
     roomAcoustics,
+    stereoPan,
     lifecycle,
     alignment: plan.alignment,
     isCurrent: () => expectedGeneration === generation,
@@ -614,6 +710,77 @@ function waveChunkId(view: DataView, offset: number): string {
     view.getUint8(offset + 2),
     view.getUint8(offset + 3),
   );
+}
+
+export function pcmWaveDurationMs(bytes: ArrayBuffer): number | null {
+  if (bytes.byteLength < 44) return null;
+  const view = new DataView(bytes);
+  if (waveChunkId(view, 0) !== "RIFF" || waveChunkId(view, 8) !== "WAVE") {
+    return null;
+  }
+  let byteRate = 0;
+  let dataSize = 0;
+  for (let offset = 12; offset + 8 <= bytes.byteLength;) {
+    const chunkSize = view.getUint32(offset + 4, true);
+    const payloadOffset = offset + 8;
+    if (payloadOffset + chunkSize > bytes.byteLength) break;
+    const chunkId = waveChunkId(view, offset);
+    if (chunkId === "fmt " && chunkSize >= 16) {
+      byteRate = view.getUint32(payloadOffset + 8, true);
+    } else if (chunkId === "data") {
+      dataSize = Math.min(chunkSize, bytes.byteLength - payloadOffset);
+      break;
+    }
+    offset = payloadOffset + chunkSize + (chunkSize % 2);
+  }
+  if (byteRate <= 0 || dataSize <= 0) return null;
+  return Math.max(1, Math.round(dataSize / byteRate * 1_000));
+}
+
+export function resolveBabblePlaybackProfile(
+  rawProfile: BotAudioVoiceProfileV1,
+  bytes: ArrayBuffer,
+  timing?: BottishPlaybackTiming,
+): ReturnType<typeof normalizeBotAudioVoiceProfileV1> {
+  const profile = normalizeBottishPlaybackProfile(rawProfile);
+  const authoredRate = 1 + profile.pace * BOT_AUDIO_VOICE_PACE_RATE_DEPTH;
+  const deliveryRate = typeof timing?.deliveryRate === "number" &&
+      Number.isFinite(timing.deliveryRate)
+    ? timing.deliveryRate
+    : 1;
+  const sourceDurationMs = pcmWaveDurationMs(bytes);
+  const targetDurationMs = timing?.targetDurationMs;
+  const maximumCompressionRate = Math.max(
+    1,
+    Math.min(
+      MAX_ROBOT_VOICE_COMPRESSION_RATE,
+      typeof timing?.maximumCompressionRate === "number" &&
+          Number.isFinite(timing.maximumCompressionRate)
+        ? timing.maximumCompressionRate
+        : 1,
+    ),
+  );
+  const targetCompressionRate =
+    sourceDurationMs &&
+      typeof targetDurationMs === "number" &&
+      Number.isFinite(targetDurationMs) &&
+      targetDurationMs > 0
+      ? Math.max(
+          1,
+          Math.min(maximumCompressionRate, sourceDurationMs / targetDurationMs),
+        )
+      : 1;
+  const playbackRate = Math.max(
+    1 - BOT_AUDIO_VOICE_PACE_RATE_DEPTH,
+    Math.min(
+      1 + BOT_AUDIO_VOICE_PACE_RATE_DEPTH,
+      authoredRate * deliveryRate * targetCompressionRate,
+    ),
+  );
+  return {
+    ...profile,
+    pace: (playbackRate - 1) / BOT_AUDIO_VOICE_PACE_RATE_DEPTH,
+  };
 }
 
 /** Bakes clean additive Babble accents into a PCM WAV for browsers that cannot
@@ -773,7 +940,11 @@ async function playHybridBytesWithMedia(
           ? Math.round(audio.duration * 1000 / playbackTempo)
           : null;
         if (durationMs) {
-          progress = beginVoicePlaybackProgress(lifecycle, durationMs, () => audio.currentTime * 1000);
+          progress = beginVoicePlaybackProgress(
+            lifecycle,
+            durationMs,
+            () => audio.currentTime * 1000 / playbackTempo,
+          );
         } else {
           lifecycle?.onStart?.(null);
         }
@@ -799,6 +970,7 @@ async function playBabble(
   lifecycle?: VoicePlaybackLifecycle,
   roomAcoustics?: RoomAcousticsSend,
   preSpeechBreath?: PreSpeechBreathPlan | null,
+  stereoPan?: number,
 ): Promise<void> {
   if (expectedGeneration !== generation) return;
   const normalized = normalizeBottishPlaybackProfile(profile);
@@ -806,6 +978,7 @@ async function playBabble(
     plan: preSpeechBreath,
     profile: normalized,
     roomAcoustics,
+    stereoPan,
     isCurrent: () => expectedGeneration === generation,
   });
   if (expectedGeneration !== generation) return;
@@ -817,6 +990,7 @@ async function playBabble(
     effectsEnabled,
     baseLowpassHz: 20_000,
     roomAcoustics,
+    stereoPan,
     lifecycle,
     roboticPlan,
     cleanRoboticCarrier: true,
@@ -842,10 +1016,12 @@ export function enqueueBabbleVoice(
   lifecycle?: VoicePlaybackLifecycle,
   roomAcoustics?: RoomAcousticsSend,
   preSpeechBreath?: PreSpeechBreathPlan | null,
+  timing?: BottishPlaybackTiming,
+  stereoPan = 0,
 ): Promise<void> {
   const expectedGeneration = generation;
   const playbackProfile = {
-    ...normalizeBottishPlaybackProfile(profile),
+    ...resolveBabblePlaybackProfile(profile, bytes, timing),
     volume: normalizeBotVoiceVolume(globalVolume),
   };
   queue = queue
@@ -861,6 +1037,7 @@ export function enqueueBabbleVoice(
         lifecycle,
         roomAcoustics,
         preSpeechBreath,
+        stereoPan,
       ),
     );
   return queue;
@@ -876,12 +1053,10 @@ export function enqueueBottishVoice(
   timing?: BottishPlaybackTiming,
   roomAcoustics?: RoomAcousticsSend,
   preSpeechBreath?: PreSpeechBreathPlan | null,
+  stereoPan = 0,
 ): Promise<void> {
   const expectedGeneration = generation;
   const normalizedProfile = normalizeBottishPlaybackProfile(profile);
-  const deliveryRate =
-    (1 + normalizedProfile.pace * BOT_AUDIO_VOICE_PACE_RATE_DEPTH) *
-    (timing?.deliveryRate ?? 1);
   const planProfile = {
     ...normalizedProfile,
     // Bottish owns its duration in the generated plan, so browser playback
@@ -889,13 +1064,7 @@ export function enqueueBottishVoice(
     pace: 0,
     volume: normalizeBotVoiceVolume(globalVolume),
   };
-  const plan = fitBottishPlanToDuration(
-    scaleBottishPlanForDeliveryRate(
-      buildBottishPlan(text, planProfile, seed),
-      deliveryRate,
-    ),
-    timing?.targetDurationMs
-  );
+  const plan = buildBottishPlaybackPlan(text, normalizedProfile, seed, timing);
   // Pitch and lilt are baked into the procedural plan. Keeping the playback
   // transform neutral prevents a second shift after synthesis.
   const playbackProfile = { ...planProfile, pitch: 0, lilt: 0 };
@@ -911,6 +1080,7 @@ export function enqueueBottishVoice(
         lifecycle,
         roomAcoustics,
         preSpeechBreath,
+        stereoPan,
       ),
     );
   return queue;

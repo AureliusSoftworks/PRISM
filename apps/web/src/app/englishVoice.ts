@@ -1,11 +1,11 @@
 import {
   applyVoiceDeliveryMoodToProfile,
-  normalizeElevenLabsVoiceEffect,
   normalizeBotAudioVoiceProfileV1,
   normalizeBotVoiceVolume,
+  normalizeVoiceEffect,
   resolveVoicePlaybackTransform,
   type BotAudioVoiceProfileV1,
-  type ElevenLabsVoiceEffect,
+  type VoiceEffect,
   type VoiceDeliveryMood,
 } from "@localai/shared";
 import {
@@ -104,15 +104,21 @@ export async function readEnglishVoiceSynthesisClip(
   };
 }
 
+export function voiceEffectForPlayback(
+  rawProfile: BotAudioVoiceProfileV1,
+): VoiceEffect {
+  return normalizeVoiceEffect(
+    normalizeBotAudioVoiceProfileV1(rawProfile).elevenLabsEffect,
+  );
+}
+
+/** Backwards-compatible helper; playback effects no longer depend on engine. */
 export function elevenLabsEffectForEngine(
   rawProfile: BotAudioVoiceProfileV1,
-  engineUsed: string | null
-): ElevenLabsVoiceEffect {
-  return engineUsed === "elevenlabs"
-    ? normalizeElevenLabsVoiceEffect(
-        normalizeBotAudioVoiceProfileV1(rawProfile).elevenLabsEffect
-      )
-    : "clean";
+  engineUsed: string | null,
+): VoiceEffect {
+  void engineUsed;
+  return voiceEffectForPlayback(rawProfile);
 }
 
 export function resolveEnglishVoicePostProcessing(
@@ -360,12 +366,14 @@ async function playAudio(
   lifecycle?: VoicePlaybackLifecycle,
   roomAcoustics?: RoomAcousticsSend,
   preSpeechBreath?: PreSpeechBreathPlan | null,
+  stereoPan?: number,
 ): Promise<void> {
   if (expectedGeneration !== generation) return;
   await playPreSpeechBreath({
     plan: preSpeechBreath,
     profile,
     roomAcoustics,
+    stereoPan,
     isCurrent: () => expectedGeneration === generation,
   });
   if (expectedGeneration !== generation) return;
@@ -383,9 +391,11 @@ async function playAudio(
       effectsEnabled,
       detuneCents,
       baseLowpassHz: processing.lowpassHz,
-      elevenLabsEffect: elevenLabsEffectForEngine(profile, engineUsed),
+      voiceEffect: voiceEffectForPlayback(profile),
       roomAcoustics,
+      stereoPan,
       lifecycle,
+      compensateLifecycleForOutputLatency: true,
       isCurrent: () => expectedGeneration === generation,
     });
   } catch {
@@ -418,6 +428,7 @@ export function enqueueEnglishVoice(
   deliveryMood?: VoiceDeliveryMood | null,
   roomAcoustics?: RoomAcousticsSend,
   preSpeechBreath?: PreSpeechBreathPlan | null,
+  stereoPan = 0,
 ): Promise<void> {
   const expectedGeneration = generation;
   const playbackProfile = {
@@ -437,6 +448,7 @@ export function enqueueEnglishVoice(
         lifecycle,
         roomAcoustics,
         preSpeechBreath,
+        stereoPan,
       ),
     );
   return queue;

@@ -205,10 +205,12 @@ export function coffeeCupSippingActive(args: {
   nowMs: number;
   progress: number;
   durationMinutes?: number | null;
+  ambientSipAllowed?: boolean;
   speaking?: boolean;
   thinking?: boolean;
 }): boolean {
   if (args.progress >= 0.96) return false;
+  if (args.ambientSipAllowed === false) return false;
   if (args.speaking === true) return false;
   if (args.thinking === true) return false;
   if (!Number.isFinite(args.nowMs)) return false;
@@ -589,6 +591,7 @@ export function buildCoffeeCupVisualState(args: {
   sipCount?: number | null;
   sippingOverride?: boolean | null;
   sipLockedUntilMs?: number | null;
+  ambientSipAllowed?: boolean;
   speaking?: boolean;
   thinking?: boolean;
   forceEmpty?: boolean;
@@ -831,6 +834,7 @@ export function buildCoffeeCupVisualState(args: {
             ? Math.min(sipTriggerProgress, 0.959)
             : sipTriggerProgress,
           durationMinutes: args.durationMinutes,
+          ambientSipAllowed: args.ambientSipAllowed,
           speaking: args.speaking === true,
           thinking: args.thinking === true,
         });

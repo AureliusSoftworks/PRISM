@@ -176,6 +176,8 @@ export function buildSignalReviewTranscript(
         `- Turn routing: ${responseMode} -> ${provider} -> ${model}`,
         `- AUTO recovery: ${autoRecovery === undefined ? "None recorded" : stableJson(autoRecovery)}`,
         `- Immersive voice effect: ${event?.payload.immersiveVoiceEffect === true ? "yes" : "no"}`,
+        "- Stage action (avatar only):",
+        indentBlock(message.stageActionText),
         "- Visible transcript:",
         indentBlock(message.content),
         "- Voice performance text:",

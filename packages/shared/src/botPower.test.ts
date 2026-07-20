@@ -2,12 +2,17 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   COFFEE_POWER_PROMPT_MAX_TOKENS,
+  BOT_POWER_CANONICAL_SILENCE_V1,
   BOT_POWER_MAX_COUNT,
+  activeBotPowerEffectsV1,
   applyBotPowerEchoResponseV1,
   applyBotPowerMuteResponseV1,
+  applyBotPowerResponseBudgetV1,
   botPowerCupRateMultiplierForBotV1,
   botPowerCandorTriggerV1,
   botPowerCandorResponseRuleV1,
+  botPowerDefinitionIsExplicitInterruptionV1,
+  botPowerDefinitionIsExplicitMuteV1,
   botPowerEchoesAddressedSpeechV1,
   botPowerHasSpeakingOnlyAvatarVisibilityV1,
   botPowerIsMutedV1,
@@ -23,6 +28,9 @@ import {
   parseStoredBotPowersV1,
   serializeBotPowersV1,
   strongestBotPowerCandorEffectV1,
+  strongestBotPowerInterruptionEffectV1,
+  strongestBotPowerResponseBudgetEffectV1,
+  strongestHardBotPowerResponseBudgetEffectV1,
   type CoffeePowerPlanV1,
 } from "./botPower.ts";
 
@@ -142,13 +150,55 @@ test("mute Powers normalize and enforce silent action-aware responses", () => {
     type: "mute",
   });
   assert.equal(botPowerIsMutedV1(powers), true);
+  assert.equal(BOT_POWER_CANONICAL_SILENCE_V1, "...");
   assert.equal(
     applyBotPowerMuteResponseV1("*nods once* I can still explain this. *sips coffee*"),
     "*nods once* *sips coffee* ...",
   );
+  assert.equal(
+    applyBotPowerMuteResponseV1("*why* ..."),
+    "...",
+  );
+  assert.equal(
+    applyBotPowerMuteResponseV1("*meets his gaze, then looks away* ..."),
+    "*meets his gaze, then looks away* ...",
+  );
   assert.equal(applyBotPowerMuteResponseV1("**emphasis** Spoken words."), "...");
   assert.equal(botPowerResponseIsSilentV1("*nods once* ..."), true);
   assert.equal(botPowerResponseIsSilentV1("*nods once* I agree."), false);
+});
+
+test("legacy Ready mute Powers stay absolute when compiled effects are missing", () => {
+  const name = "Mute";
+  const intent = "Never talks. Ever.";
+  const legacyPowers = [{
+    version: 1,
+    id: "legacy-mute",
+    name,
+    intent,
+    enabled: true,
+    compileStatus: "ready",
+    compiled: {
+      version: 1,
+      sourceHash: botPowerSourceHashV1(name, intent),
+      selfCue: "Silence is golden.",
+      observerCue: "He rarely speaks.",
+      effects: [],
+      ruleLabels: ["Absolute Silence"],
+    },
+  }];
+
+  assert.equal(botPowerDefinitionIsExplicitMuteV1(name, intent), true);
+  assert.deepEqual(activeBotPowerEffectsV1(legacyPowers), [{ type: "mute" }]);
+  assert.equal(botPowerIsMutedV1(legacyPowers), true);
+  assert.equal(botPowerIsMutedV1([{ ...legacyPowers[0], enabled: false }]), false);
+  assert.equal(
+    botPowerDefinitionIsExplicitMuteV1(
+      "Muted Palette",
+      "Creates muted colors around the room.",
+    ),
+    false,
+  );
 });
 
 test("echo Powers normalize and preserve addressed speech exactly", () => {
@@ -177,6 +227,76 @@ test("echo Powers normalize and preserve addressed speech exactly", () => {
   assert.equal(botPowerEchoesAddressedSpeechV1(powers), true);
   assert.equal(applyBotPowerEchoResponseV1("  Keep  every\ncharacter?!  "), "  Keep  every\ncharacter?!  ");
   assert.equal(applyBotPowerEchoResponseV1(""), "...");
+});
+
+test("interruption Powers normalize and recover legacy turn-pressure contracts", () => {
+  assert.deepEqual(
+    normalizeBotPowerEffectV1({
+      type: "interruption",
+      frequency: "frequent",
+      strength: "large",
+      targets: [{ kind: "all" }, { kind: "all" }],
+    }),
+    {
+      type: "interruption",
+      frequency: "frequent",
+      strength: "large",
+      targets: [{ kind: "all" }],
+    },
+  );
+  assert.equal(
+    botPowerDefinitionIsExplicitInterruptionV1(
+      "Interrupting Tom",
+      "Aggressively jumps in after whoever just spoke and cuts into real live openings whenever possible.",
+    ),
+    true,
+  );
+  assert.equal(
+    botPowerDefinitionIsExplicitInterruptionV1(
+      "Steady",
+      "Hates being interrupted and resists anyone who tries.",
+    ),
+    false,
+  );
+  assert.deepEqual(
+    normalizeBotPowerEffectV1({ type: "interruption" }),
+    {
+      type: "interruption",
+      frequency: "occasional",
+      strength: "medium",
+      targets: [{ kind: "all" }],
+    },
+  );
+
+  const name = "Interrupting Tom";
+  const intent = "Aggressively jumps in after whoever just spoke and cuts into real live openings whenever possible.";
+  const match = strongestBotPowerInterruptionEffectV1([{
+    version: 1,
+    id: "interrupting-tom",
+    name,
+    intent,
+    enabled: true,
+    compileStatus: "ready",
+    compiled: {
+      version: 1,
+      sourceHash: botPowerSourceHashV1(name, intent),
+      selfCue: "Cut in quickly.",
+      observerCue: "Tom interrupts.",
+      effects: [
+        { type: "turn_gravity", direction: "more", strength: "large" },
+        { type: "response_bond", direction: "toward", strength: "large", targets: [{ kind: "all" }] },
+        { type: "action_bias", cue: "Cut in quickly.", frequency: "frequent" },
+      ],
+      ruleLabels: ["Interrupts"],
+    },
+  }], (target) => target.kind === "all");
+  assert.deepEqual(match, {
+    powerId: "interrupting-tom",
+    powerName: "Interrupting Tom",
+    frequency: "frequent",
+    strength: "large",
+    targets: [{ kind: "all" }],
+  });
 });
 
 test("hard-of-hearing repeat effects normalize bounded frequency and mood cost", () => {
@@ -243,6 +363,24 @@ test("relationship-agnostic Coffee effects normalize to bounded schemas", () => 
     rate: "none",
   });
   assert.deepEqual(normalizeBotPowerEffectV1({
+    type: "response_budget",
+    mode: "minimal",
+    enforcement: "hard",
+  }), {
+    type: "response_budget",
+    mode: "minimal",
+    enforcement: "hard",
+  });
+  assert.deepEqual(normalizeBotPowerEffectV1({
+    type: "response_budget",
+    mode: "unknown",
+    enforcement: "unknown",
+  }), {
+    type: "response_budget",
+    mode: "brief",
+    enforcement: "soft",
+  });
+  assert.deepEqual(normalizeBotPowerEffectV1({
     type: "turn_gravity",
     direction: "more",
     strength: "large",
@@ -297,6 +435,65 @@ test("relationship-agnostic Coffee effects normalize to bounded schemas", () => 
     type: "topic_gravity",
     topics: [],
   }), null);
+});
+
+test("response-budget Powers stack by strongest brevity and bound only hard prose", () => {
+  const power = (
+    id: string,
+    mode: "minimal" | "brief" | "expansive",
+    enforcement: "soft" | "hard",
+  ) => {
+    const name = `Budget ${id}`;
+    const intent = `${mode} ${enforcement}`;
+    return {
+      version: 1 as const,
+      id,
+      name,
+      intent,
+      enabled: true,
+      compileStatus: "ready" as const,
+      compiled: {
+        version: 1 as const,
+        sourceHash: botPowerSourceHashV1(name, intent),
+        selfCue: "Keep the response bounded.",
+        observerCue: "",
+        effects: [{ type: "response_budget" as const, mode, enforcement }],
+        ruleLabels: [],
+      },
+    };
+  };
+  const powers = [power("soft-minimal", "minimal", "soft"), power("hard-brief", "brief", "hard")];
+  const restored = parseStoredBotPowersV1(serializeBotPowersV1(powers));
+
+  assert.deepEqual(strongestBotPowerResponseBudgetEffectV1(restored), {
+    type: "response_budget",
+    mode: "minimal",
+    enforcement: "soft",
+  });
+  const hard = strongestHardBotPowerResponseBudgetEffectV1(restored);
+  assert.deepEqual(hard, {
+    type: "response_budget",
+    mode: "brief",
+    enforcement: "hard",
+  });
+  assert.equal(
+    applyBotPowerResponseBudgetV1(
+      "*shrugs.* Fine. I could explain the whole history. It would take a while.",
+      hard,
+      2,
+    ),
+    "*shrugs.* Fine. I could explain the whole history.",
+  );
+  assert.equal(
+    applyBotPowerResponseBudgetV1(
+      "Fine. I could explain more.",
+      strongestBotPowerResponseBudgetEffectV1(powers),
+      1,
+    ),
+    "Fine. I could explain more.",
+  );
+  const structured = "- First required step\n- Second required step\n- Third required step";
+  assert.equal(applyBotPowerResponseBudgetV1(structured, hard, 1), structured);
 });
 
 test("Coffee power prompt is deduplicated and bounded", () => {

@@ -504,6 +504,7 @@ export function queueBotSemanticFacetsRefresh(args: {
   userId: string;
   botId: string;
   prismDefaultLlmModel?: string | null;
+  provider?: LlmProvider;
 }): void {
   const key = `${args.userId}:${args.botId}`;
   if (queuedFacetRefreshes.has(key)) return;

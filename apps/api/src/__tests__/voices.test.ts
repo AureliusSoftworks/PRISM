@@ -62,6 +62,16 @@ describe("voice Phase 1 boundary", () => {
   });
   it("cleans markdown, tools, URLs, code, and stage directions", () => {
     assert.equal(cleanSpeakableAssistantProse("# Hi\n*waves*\n```js\nsecret()\n```\n[link](https://example.com) https://raw.example"), "Hi link");
+    assert.equal(
+      cleanSpeakableAssistantProse(
+        "*leans back, antennae twitching* Alright, Potter—you've got me there.",
+      ),
+      "Alright, Potter—you've got me there.",
+    );
+    assert.equal(
+      cleanSpeakableAssistantProse("The *important* part is trust."),
+      "The important part is trust.",
+    );
   });
   it("uses a phonetic player name only in synthesized text", () => {
     assert.equal(
@@ -85,7 +95,7 @@ describe("voice Phase 1 boundary", () => {
         v: 2,
         enabled: true,
         baseVoiceId: "voice-1",
-        elevenLabsEffect: "clean",
+        elevenLabsEffect: "chorus",
         pitch: 0,
         warmth: 0,
         pace: 0.333,
@@ -189,6 +199,16 @@ describe("voice Phase 1 boundary", () => {
         elevenLabsText: "[explosion] Welcome back.",
       }).elevenLabsText,
       null,
+    );
+    const withLeakedStageDirection = validateVoiceSynthesisRequest({
+      ...request,
+      text: "*leans back* Welcome back.",
+      elevenLabsText: "[sighs] *leans back* Welcome back.",
+    });
+    assert.equal(withLeakedStageDirection.text, "Welcome back.");
+    assert.equal(
+      withLeakedStageDirection.elevenLabsText,
+      "[sighs] Welcome back.",
     );
   });
 

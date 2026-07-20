@@ -48,4 +48,31 @@ describe("Signal room acoustics integration", () => {
       /audio\.addEventListener\("ended", \(\) => releaseAudio\(audio, true\)/u,
     );
   });
+
+  it("stages direct voices from saved seats while keeping one shared room", () => {
+    assert.match(
+      signalSource,
+      /signalStudioVoicePan\(\s*selectedShow\?\.studioLayout,\s*message\.speakerRole/u,
+    );
+    assert.match(
+      signalSource,
+      /signalStudioVoicePan\(show\.studioLayout, message\.speakerRole\)/u,
+    );
+    assert.match(
+      pageSource,
+      /playListenerReactionVoice\(\{[\s\S]{0,600}roomAcoustics: SIGNAL_STUDIO_VOICE_ROOM_SEND,[\s\S]{0,80}stereoPan/u,
+    );
+    assert.match(
+      pageSource,
+      /enqueueRobotVoiceMode\(\{[\s\S]{0,900}roomAcoustics: SIGNAL_STUDIO_VOICE_ROOM_SEND,[\s\S]{0,120}stereoPan/u,
+    );
+    assert.match(
+      pageSource,
+      /enqueueEnglishVoice\([\s\S]{0,1200}SIGNAL_STUDIO_VOICE_ROOM_SEND,[\s\S]{0,120}stereoPan/u,
+    );
+    assert.match(
+      voiceSource,
+      /connectRoomAcoustics\(\{[\s\S]{0,180}send: args\.roomAcoustics,[\s\S]{0,80}stereoPan: args\.stereoPan/u,
+    );
+  });
 });

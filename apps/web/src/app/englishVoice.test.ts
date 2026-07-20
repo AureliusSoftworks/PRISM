@@ -10,6 +10,7 @@ import {
   resolveEnglishVoicePostProcessing,
   scaleEnglishVoiceAlignmentForPlayback,
   stopEnglishVoice,
+  voiceEffectForPlayback,
 } from "./englishVoice.ts";
 
 describe("English voice post processing", () => {
@@ -210,17 +211,18 @@ describe("English voice synthesis responses", () => {
     assert.equal(clip.engineUsed, "elevenlabs");
   });
 
-  it("applies profile effects only when ElevenLabs actually supplied the clip", () => {
+  it("applies the saved profile effect regardless of the English engine", () => {
     const profile = {
       ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
       elevenLabsEffect: "robot" as const,
     };
+    assert.equal(voiceEffectForPlayback(profile), "robot");
     assert.equal(elevenLabsEffectForEngine(profile, "elevenlabs"), "robot");
-    assert.equal(elevenLabsEffectForEngine(profile, "builtin"), "clean");
+    assert.equal(elevenLabsEffectForEngine(profile, "builtin"), "robot");
     assert.equal(
       elevenLabsEffectForEngine(profile, "builtin-provider-fallback"),
-      "clean"
+      "robot"
     );
-    assert.equal(elevenLabsEffectForEngine(profile, null), "clean");
+    assert.equal(elevenLabsEffectForEngine(profile, null), "robot");
   });
 });

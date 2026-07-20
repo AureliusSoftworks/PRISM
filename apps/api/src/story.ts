@@ -10,6 +10,7 @@ import {
   STORY_LOCATION_COUNT_MIN,
   applyBotPowerEchoResponseV1,
   applyBotPowerMuteResponseV1,
+  applyBotPowerResponseBudgetV1,
   botPowerCandorResponseRuleV1,
   botPowerEchoesAddressedSpeechV1,
   botPowerIsMutedV1,
@@ -17,6 +18,7 @@ import {
   botPowerSelfCueLinesV1,
   buildBotPowersPromptBlock,
   strongestBotPowerCandorEffectV1,
+  strongestHardBotPowerResponseBudgetEffectV1,
   STORY_SCENE_COUNT_MIN,
   applyStoryChoice,
   applyStoryItemPickup,
@@ -1186,7 +1188,19 @@ function applyStoryHardResponsePowers(
       .filter((bot) => botPowerEchoesAddressedSpeechV1(bot.powers))
       .map((bot) => bot.id),
   );
-  if (mutedBotIds.size === 0 && echoBotIds.size === 0) return episode;
+  const responseBudgetByBotId = new Map(
+    bots.flatMap((bot) => {
+      const effect = strongestHardBotPowerResponseBudgetEffectV1(bot.powers);
+      return effect ? [[bot.id, effect] as const] : [];
+    }),
+  );
+  if (
+    mutedBotIds.size === 0 &&
+    echoBotIds.size === 0 &&
+    responseBudgetByBotId.size === 0
+  ) {
+    return episode;
+  }
   const scenes: StoryEpisodeManifest["scenes"] = [];
   let priorVisibleNarration: string | null = null;
   for (const scene of episode.scenes) {
@@ -1210,6 +1224,18 @@ function applyStoryHardResponsePowers(
             narration: applyBotPowerEchoResponseV1(priorVisibleNarration),
             spritePose: "speaking",
           };
+    } else if (scene.speakerBotId) {
+      const responseBudget = responseBudgetByBotId.get(scene.speakerBotId);
+      if (responseBudget) {
+        nextScene = {
+          ...scene,
+          narration: applyBotPowerResponseBudgetV1(
+            scene.narration,
+            responseBudget,
+            responseBudget.mode === "minimal" ? 1 : 2,
+          ),
+        };
+      }
     }
     scenes.push(nextScene);
     priorVisibleNarration = nextScene.narration;

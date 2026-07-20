@@ -141,6 +141,56 @@ describe("Signal asset uploads", () => {
     assert.ok(raw.data[center + 2]! < 40);
   });
 
+  it("recovers a uniform off-key background when the image provider ignores magenta", async () => {
+    const source = await sharp({
+      create: {
+        width: 640,
+        height: 640,
+        channels: 4,
+        background: { r: 245, g: 244, b: 239, alpha: 1 },
+      },
+    })
+      .composite([
+        {
+          input: Buffer.from(
+            '<svg width="260" height="260" xmlns="http://www.w3.org/2000/svg"><circle cx="130" cy="130" r="118" fill="#35c9c2"/><circle cx="130" cy="130" r="72" fill="#151515"/></svg>',
+          ),
+          gravity: "center",
+        },
+      ])
+      .png()
+      .toBuffer();
+    const normalized = await normalizeSignalLogoImage(source, {
+      generated: true,
+    });
+    const raw = await sharp(normalized.pngBytes)
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    const center =
+      (Math.floor(raw.info.height / 2) * raw.info.width +
+        Math.floor(raw.info.width / 2)) *
+      4;
+    assert.equal(raw.data[3], 0);
+    assert.ok(raw.data[center + 3]! > 240);
+    assert.ok(raw.data[center]! < 40);
+    assert.ok(raw.data[center + 1]! < 40);
+    assert.ok(raw.data[center + 2]! < 40);
+  });
+
+  it("still rejects generated artwork with a non-uniform scenic boundary", async () => {
+    const source = await sharp(
+      Buffer.from(
+        '<svg width="640" height="640" xmlns="http://www.w3.org/2000/svg"><rect width="640" height="640" fill="#f1eee4"/><rect x="64" width="512" height="48" fill="#e2b696"/><rect x="64" y="592" width="512" height="48" fill="#a9d2eb"/><rect y="64" width="48" height="512" fill="#d1a9e6"/><rect x="592" y="64" width="48" height="512" fill="#a6d8b1"/><circle cx="320" cy="320" r="118" fill="#35c9c2"/></svg>',
+      ),
+    )
+      .png()
+      .toBuffer();
+    await assert.rejects(
+      normalizeSignalLogoImage(source, { generated: true }),
+      /exact magenta color-key background/iu,
+    );
+  });
+
   it("converts only boundary-connected legacy black to the magenta key", async () => {
     const source = await sharp({
       create: {
