@@ -18,7 +18,7 @@ const BASE_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
     steps: [
       {
         heading: "Choose a relationship",
-        body: "Choose PRISM or a persona to enter that relationship’s Home. Ready Powers stay active with that persona here and across PRISM; a muted persona can still act, but only answers with ... and never speaks aloud, while an echo-bound persona repeats the latest message addressed to them exactly. A hard bare-minimum or brief Power is engine-bounded even if the model tries to elaborate. Back or Escape returns you to the wider Library or saved group grid exactly where you left it. Inviting a guest keeps you in the current Home.",
+        body: "Choose PRISM or a persona to enter that relationship’s Home. Ready Powers stay active with that persona here and across PRISM; a muted persona can still act, but only answers with ... and never speaks aloud, while an echo-bound persona repeats the latest message addressed to them exactly. Physical-size Powers render a persona slightly larger or smaller without changing the room layout, and Microscopic combines the smaller form with an unseen idle presence. Loud and Quiet Powers apply a small fixed voice-volume and text-size shift; Quiet can go unheard on half its turns and lose a little mood, while Loud overrides small, Microscopic, and invisible presentation. A hard bare-minimum or brief Power is engine-bounded even if the model tries to elaborate. Back or Escape returns you to the wider Library or saved group grid exactly where you left it. Inviting a guest keeps you in the current Home.",
         clickLabel: "a PRISM or persona tile",
         targetSelector: '[data-tutorial-target="chat-bot-picker"]',
       },
@@ -59,7 +59,7 @@ const BASE_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
     steps: [
       {
         heading: "Start with a bot",
-        body: "Pick a bot, then send your first message. Any ready Powers stay active with that bot across PRISM; a muted bot can still act, but only answers with ... and never speaks aloud, while an echo-bound bot repeats your addressed message exactly and adds nothing. Hard bare-minimum and brief Powers are engine-bounded; expansive Powers guide the bot without forcing filler. A ghostly bot stays unseen while idle and fades into view only for its own spoken line; you can always understand the haunting through the conversation itself.",
+        body: "Pick a bot, then send your first message. Any ready Powers stay active with that bot across PRISM; a muted bot can still act, but only answers with ... and never speaks aloud, while an echo-bound bot repeats your addressed message exactly and adds nothing. Hard bare-minimum and brief Powers are engine-bounded; expansive Powers guide the bot without forcing filler. Physical-size Powers render the bot slightly larger or smaller; Microscopic also keeps it unseen while idle. Loud and Quiet Powers apply a small fixed voice-volume and text-size shift; Quiet can go unheard on half its turns and lose a little mood, while Loud overrides small, Microscopic, and invisible presentation. A ghostly bot stays unseen while idle and fades into view only for its own spoken line; you can always understand the haunting through the conversation itself.",
         clickLabel: "a bot tile in the center picker",
         targetSelector: '[data-tutorial-target="chat-bot-picker"]',
       },
@@ -88,7 +88,7 @@ const BASE_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
     steps: [
       {
         heading: "Pick or stage your table",
-        body: "Choose a Coffee Group here to stage its table. In a larger saved group, write a Listen up prompt to open a locally ranked table already staged around your topic; review the seats, swap the cast, or cancel and keep editing. Each bot brings its ready Powers to the table; Powers can change who they notice, answer, remember, privately read, how strongly they pull the room's attention, whether a trustworthy direct question draws a more candid next answer, whether they touch their coffee at all, mute them so only actions and ... remain, or make them repeat the exact user or bot line directly addressed to them. Hard bare-minimum and brief Powers bound each table reply while preserving required interruptions, departures, and wraps. A ghostly bot is invisible at rest, fades in for its own line, then vanishes again; each appearance can leave the other bots rattled without taking their agency. If a hard-of-hearing bot asks what the prior speaker said, that bot repeats its saved line and loses a little mood each time.",
+        body: "Choose a Coffee Group here to stage its table. In a larger saved group, write a Listen up prompt to open a locally ranked table already staged around your topic; review the seats, swap the cast, or cancel and keep editing. Each bot brings its ready Powers to the table; Powers can change who they notice, answer, remember, privately read, how strongly they pull the room's attention, whether a trustworthy direct question draws a more candid next answer, whether they touch their coffee at all, mute them so only actions and ... remain, or make them repeat the exact user or bot line directly addressed to them. Hard bare-minimum and brief Powers bound each table reply while preserving required interruptions, departures, and wraps. Physical-size Powers keep a bot subtly larger or smaller than its tablemates, and Microscopic combines the smaller form with idle invisibility. Loud and Quiet adjust spoken volume and text by a small fixed amount; Loud annoys present bots and cancels small, Microscopic, and invisible presentation, while half of Quiet turns go unheard and cost the speaker a little mood. A ghostly bot is invisible at rest, fades in for its own line, then vanishes again; each appearance can leave the other bots rattled without taking their agency. If a hard-of-hearing bot asks what the prior speaker said, that bot repeats its saved line and loses a little mood each time.",
         clickLabel: "a Coffee Group in the left sidebar",
         targetSelector: '[data-tutorial-target="coffee-groups"]',
       },
@@ -246,6 +246,8 @@ const BASE_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
 
 const SIGNAL_PRODUCER_GUEST_TUTORIAL_SUFFIX =
   "The host introduces and addresses you on air as the Producer. Once the host yields with a question, the episode clock runs at half speed while you compose; replay preserves that pause as a visible thinking beat. Begin an answer with one leading *action* to save it above your on-stage presence while keeping it out of the spoken transcript.";
+const SIGNAL_AVATAR_SCALE_POWER_TUTORIAL_SUFFIX =
+  "Physical-size Powers keep a host or guest subtly larger or smaller on the saved stage and replay; Microscopic combines the smaller form with idle invisibility. Loud and Quiet add a small fixed voice-volume and transcript-size shift; Loud annoys the other cast member and cancels small, Microscopic, and invisible presentation, while half of Quiet turns are ignored and lower the speaker's saved mood.";
 
 export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
   ...BASE_MODE_TUTORIALS,
@@ -255,7 +257,7 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       index === 5
         ? {
             ...step,
-            body: `${step.body} ${SIGNAL_PRODUCER_GUEST_TUTORIAL_SUFFIX}`,
+            body: `${step.body} ${SIGNAL_AVATAR_SCALE_POWER_TUTORIAL_SUFFIX} ${SIGNAL_PRODUCER_GUEST_TUTORIAL_SUFFIX}`,
           }
         : step,
     ),

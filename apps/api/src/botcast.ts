@@ -67,6 +67,7 @@ import {
   botPowerCandorResponseRuleV1,
   botPowerCandorTriggerV1,
   botPowerEchoesAddressedSpeechV1,
+  botPowerIntermittentMuteTurnIsIgnoredV1,
   botPowerIsMutedV1,
   botPowerMuteActionTextsV1,
   botPowerObserverCueLinesV1,
@@ -5997,6 +5998,11 @@ export async function advanceBotcastEpisode(
   const speaker = speakerRole === "host" ? host : guest;
   const peer = speakerRole === "host" ? guest : host;
   const speakerIsMuted = botPowerIsMutedV1(speaker.powers);
+  const speakerQuietIgnored = botPowerIntermittentMuteTurnIsIgnoredV1(
+    speaker.powers,
+    `${episode.id}:${speaker.id}:${episode.messages.length}`,
+  );
+  const speakerIsMutedForTurn = speakerIsMuted || speakerQuietIgnored;
   const silentPeerTurnCount = botPowerIsMutedV1(peer.powers)
     ? botcastTrailingSilentPeerTurnCount({
         messages: episode.messages,
@@ -6034,7 +6040,7 @@ export async function advanceBotcastEpisode(
     segmentClosing: episode.segment === "closing",
   });
   const speakerRepeatsForHearingPower = Boolean(
-    hearingRepeatDirective && !speakerIsMuted,
+    hearingRepeatDirective && !speakerIsMutedForTurn,
   );
   const immersiveVoiceEffectRequired =
     botcastImmersiveVoiceEffectRequired(episode);
@@ -6251,7 +6257,7 @@ export async function advanceBotcastEpisode(
     speaker.name,
     speakerRole === "host" ? guest.name : host.name,
     speakerRole,
-    speakerIsMuted,
+    speakerIsMutedForTurn,
   );
   const performance = extractBotcastVoicePerformance(
     generatedContent,
@@ -6282,10 +6288,10 @@ export async function advanceBotcastEpisode(
         ? (silentGuestHostFallback ?? fallback)
         : silentHostSpeechSafeContent
       : silentHostSpeechSafeContent;
-  const stageActionText = speakerIsMuted
+  const stageActionText = speakerIsMutedForTurn
     ? (botPowerMuteActionTextsV1(generatedContent)[0] ?? null)
     : null;
-  const unbudgetedContent = speakerIsMuted
+  const unbudgetedContent = speakerIsMutedForTurn
     ? BOT_POWER_CANONICAL_SILENCE_V1
     : speakerRepeatsForHearingPower
       ? hearingRepeatDirective!.repeatedContent
@@ -6312,7 +6318,7 @@ export async function advanceBotcastEpisode(
     Boolean(wrapUpCue) ||
     departureRequired;
   const baseContent =
-    speakerIsMuted ||
+    speakerIsMutedForTurn ||
     speakerRepeatsForHearingPower ||
     speakerEchoesAddressedSpeech
       ? unbudgetedContent
@@ -6346,7 +6352,7 @@ export async function advanceBotcastEpisode(
     !baseVoluntaryDeparture &&
     !guestAlreadyDeparted &&
     tension.level < 2 &&
-    !speakerIsMuted &&
+    !speakerIsMutedForTurn &&
     !speakerRepeatsForHearingPower &&
     !speakerEchoesAddressedSpeech &&
     !botPowerIsMutedV1(host.powers) &&
@@ -6380,7 +6386,7 @@ export async function advanceBotcastEpisode(
   const voluntaryDeparture = baseVoluntaryDeparture;
   const guestDepartsThisTurn = departureRequired || voluntaryDeparture;
   const voicePerformanceText =
-    !speakerIsMuted &&
+    !speakerIsMutedForTurn &&
     !speakerRepeatsForHearingPower &&
     !speakerEchoesAddressedSpeech &&
     !powerInterruptedContent &&
@@ -6400,7 +6406,9 @@ export async function advanceBotcastEpisode(
     : null;
   const messageId = randomId(12);
   const tensionMoodKey = botcastVoiceMoodForTension(tension);
-  const messageMoodKey = speakerRepeatsForHearingPower
+  const messageMoodKey = speakerQuietIgnored
+    ? lowerVoiceMoodForHearingRepeat(tensionMoodKey)
+    : speakerRepeatsForHearingPower
     ? lowerVoiceMoodForHearingRepeat(hearingRepeatDirective!.sourceMood)
     : turnNegativeInfluence &&
         turnNegativeInfluence.strength !== "small" &&
@@ -6452,6 +6460,15 @@ export async function advanceBotcastEpisode(
             moodPenalty: hearingRepeatDirective!.moodPenalty,
           },
         }
+      : speakerQuietIgnored
+        ? {
+            powerOutcome: {
+              effect: "intermittent_mute",
+              outcome: "ignored",
+              botId: speaker.id,
+              moodPenalty: "small",
+            },
+          }
       : powerInterruptedContent && powerInterruptionPlan
         ? {
             powerOutcome: {
@@ -6476,6 +6493,7 @@ export async function advanceBotcastEpisode(
   const listener = listenerRole === "host" ? host : guest;
   const listenerReactionCandidate = !(
     episode.guestKind === "producer" ||
+    speakerQuietIgnored ||
     powerInterruptedContent ||
     (listenerRole === "guest" && guestAlreadyDeparted) ||
     (episode.guestPresenceMode === "audience_only" && listenerRole === "host")
@@ -6559,7 +6577,7 @@ export async function advanceBotcastEpisode(
     ) ?? 0;
   const afterSpeechPowerEffects =
     episode.guestKind === "producer" ||
-    speakerIsMuted ||
+    speakerIsMutedForTurn ||
     (listenerRole === "guest" && guestAlreadyDeparted)
       ? []
       : botcastSocialInfluenceEventsForPair({

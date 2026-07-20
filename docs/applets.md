@@ -24,11 +24,11 @@ ship as `0.5.2` while Coffee is `v0.7` and Story is `v0.1`.
 
 | Applet | Version | Status | Notes |
 | --- | --- | --- | --- |
-| Chat | v1.9 | Active | Full playground for bots, providers, models, images, exports, memory-aware conversations, per-bot online voice identity, sparse shared mic presence, and ready Powers including engine-bounded response budgets. |
-| Zen | v1.8 | Active | Calm one-to-one continuity surface with shared bot voice identity, mic presence, and ready Powers including engine-bounded response budgets; the standalone Zen lane is deprecating as this becomes Prism's default state. |
-| Coffee | v2.2 | Active | Multi-bot group table with Coffee Groups, model-aware session holds, pacing, cups, transcripts, replay, synchronized online speech, living atmosphere, and table-adapted response budgets. |
-| Signal | v1.7 | Active | Bot-owned anthology interviews with audience-projected transcript, voice, replay, and reviews; studio-specific atmosphere; frozen episode Powers; guest-led structure for echo-bound hosts; and bounded, replay-safe interruption Powers. |
-| Story | v0.6 | Preview | Generated visual-novel episodes with bots, choices, maps, inventory, transcripts, shared PRISM menu behavior, and engine-bounded speaker narration. |
+| Chat | v1.11 | Active | Full playground for bots, providers, models, images, exports, memory-aware conversations, per-bot online voice identity, sparse shared mic presence, and ready Powers including engine-bounded response budgets, relative avatar size, and loud/quiet presence. |
+| Zen | v1.10 | Active | Calm one-to-one continuity surface with shared bot voice identity, mic presence, and ready Powers including engine-bounded response budgets, relative avatar size, and loud/quiet presence; the standalone Zen lane is deprecating as this becomes Prism's default state. |
+| Coffee | v2.4 | Active | Multi-bot group table with Coffee Groups, model-aware session holds, pacing, cups, transcripts, replay, synchronized online speech, living atmosphere, table-adapted response budgets, and frozen size/voice Powers. |
+| Signal | v1.10 | Active | Bot-owned anthology interviews with audience-projected transcript, voice, replay, and reviews; studio-specific atmosphere; frozen episode Powers for avatar and voice presence; guest-led structure for echo-bound hosts; and bounded, replay-safe interruption Powers. |
+| Story | v0.8 | Preview | Generated visual-novel episodes with bots, choices, maps, inventory, transcripts, shared PRISM menu behavior, engine-bounded speaker narration, and Power-shaped relative sprite and voice presence. |
 | Arena | v0.0 | Planned | Moderated bot debate surface. |
 | Polling | v0.0 | Planned | AI-powered polling across bot groups. |
 | Feed | v0.0 | Planned | BotBook-style social feed. |
@@ -70,6 +70,23 @@ usable end to end. It entered preview at `v0.1` and is now `v0.7`; later snapsho
 stages do not block the standalone preview.
 
 ## Changelog
+
+- Bumped `Chat` to `v1.11`, `Zen` to `v1.10`, `Coffee` to `v2.4`, `Signal`
+  to `v1.10`, and `Story` to `v0.8` for reusable loud/quiet voice presence.
+  Loud lines receive a fixed 1.18x playback trim and 1.12x text scale, annoy
+  present bots after audible speech, and override small, Microscopic, and
+  speaking-only invisibility. Quiet lines receive a fixed 0.72x playback trim
+  and 0.88x text scale; a stable half of eligible turns are treated exactly like
+  mute, with one small holder-mood loss each time the bot goes unheard. Coffee
+  and Signal freeze these outcomes and presentation rules for replay. Story
+  adapts an ignored turn into a silent, visibly deflated beat.
+
+- Bumped `Chat` to `v1.10`, `Zen` to `v1.9`, `Coffee` to `v2.3`, `Signal`
+  to `v1.9`, and `Story` to `v0.7` for bounded physical-size Powers. Ready
+  larger or giant holders render 12% larger; small, tiny, or microscopic holders
+  render 14% smaller without changing layout. `Microscopic` also carries the
+  speaking-only invisibility contract. Coffee freezes the size in its session
+  plan, Signal freezes it in the episode snapshot, and replay preserves both.
 
 - Bumped `Signal` to `v1.7` so a Producer cut stops the current turn, catches the
   host briefly off guard, and still gives them one short, tactful on-air sign-off

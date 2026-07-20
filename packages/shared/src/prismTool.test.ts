@@ -827,4 +827,19 @@ describe("parseStoredToolPayload / serializeAskQuestionTool", () => {
     });
     assert.equal(parseStoredAssistantToolPayload(stored).webSearch, undefined);
   });
+
+  it("round-trips the saved Quiet intermittent-mute outcome", () => {
+    const stored = serializeAssistantToolPayload({
+      botPowerExactResponse: "intermittent_mute",
+    });
+    assert.equal(
+      parseStoredAssistantToolPayload(stored).botPowerExactResponse,
+      "intermittent_mute",
+    );
+    assert.equal(
+      hydrateAssistantMessageParts({ content: "...", toolPayload: stored })
+        .botPowerExactResponse,
+      "intermittent_mute",
+    );
+  });
 });

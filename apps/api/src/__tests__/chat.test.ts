@@ -521,6 +521,37 @@ describe("bot-locked Chat lane", () => {
     assert.equal(result.conversation.messages.at(-1)?.content, "*nods once* *sips coffee* ...");
   });
 
+  it("applies one holder mood hit when a Quiet Power turn takes the mute branch", async () => {
+    const db = createChatTestDb();
+    installChatFetchStub("*leans closer* Can anybody hear me?");
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Please speak.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botId: "bot-1",
+        incognito: false,
+        mode: "chat",
+        botSystemPrompt: "You are Quiet Karen.",
+        botPowerMuted: true,
+        botPowerQuietIgnored: true,
+      },
+    );
+
+    assert.equal(result.conversation.messages.at(-1)?.content, "*leans closer* ...");
+    assert.equal(
+      result.conversation.messages.at(-1)?.botPowerExactResponse,
+      "intermittent_mute",
+    );
+    assert.equal(result.prismMood.recentDeltas[0]?.kind, "power_ignored");
+    assert.ok(result.prismMood.warmth < 0.62);
+    assert.ok(result.prismMood.engagement < 0.62);
+  });
+
   it("hard-echoes the user's addressed Chat message verbatim and nothing else", async () => {
     const db = createChatTestDb();
     installChatFetchStub("A completely different model answer.");

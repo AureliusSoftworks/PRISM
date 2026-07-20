@@ -7,6 +7,7 @@ import {
   applyPrismMoodIgnoredTurn,
   applyPrismMoodNegativeTurn,
   applyPrismMoodPositiveTurn,
+  applyPrismMoodPowerIgnoredTurn,
   COFFEE_NEAR_DESATURATED_SATURATION,
   coffeeDepartureChanceFromSocial,
   coffeeMoodSaturationFromSocial,
@@ -90,6 +91,18 @@ test("ignored AskQuestion nudges mood without counting as an interruption", () =
   assert.ok(ignored.engagement < base.engagement);
   assert.equal(prismMoodInterruptionStreak(ignored), 0);
   assert.equal(shouldPrismMoodDeclineResponse(ignored), false);
+});
+
+test("an ignored Quiet Power turn applies one small holder mood loss", () => {
+  const base = createDefaultPrismMoodState("zen", "2026-07-20T12:00:00.000Z");
+  const next = applyPrismMoodPowerIgnoredTurn(
+    base,
+    "2026-07-20T12:00:01.000Z",
+  );
+  assert.equal(next.recentDeltas[0]?.kind, "power_ignored");
+  assert.ok(next.annoyance > base.annoyance);
+  assert.ok(next.warmth < base.warmth);
+  assert.ok(next.engagement < base.engagement);
 });
 
 test("ignored AskQuestion respects mood sensitivity", () => {

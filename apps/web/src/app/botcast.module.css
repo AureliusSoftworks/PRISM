@@ -294,6 +294,8 @@
 .showHostChatConversation { position: relative; z-index: 3; width: min(430px, 100%); min-width: 0; display: flex; flex-direction: column; align-items: stretch; gap: 9px; pointer-events: none; }
 .showHostChatCloud { max-height: min(42dvh, 330px); display: flex; flex-direction: column; align-items: flex-end; justify-content: flex-end; gap: 7px; overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; }
 .showHostChatBubble { --signal-host-chat-surface: color-mix(in srgb, var(--botcast-host-accent) 17%, rgba(8,10,18,.93)); width: fit-content; max-width: min(390px, 94%); margin: 0; border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 44%, rgba(255,255,255,.24)); border-radius: 18px 18px 6px 18px; padding: 11px 14px; color: rgba(255,255,255,.96); background: radial-gradient(circle at 8% 0%, color-mix(in srgb, var(--prism-p) 15%, transparent), transparent 44%), var(--signal-host-chat-surface); box-shadow: 0 16px 38px rgba(0,0,0,.36), 0 0 24px color-mix(in srgb, var(--botcast-host-accent) 15%, transparent), inset 0 1px rgba(255,255,255,.13); backdrop-filter: blur(18px) saturate(1.2); font: 640 .73rem/1.48 system-ui; overflow-wrap: anywhere; animation: signalHostChatBubbleIn 240ms cubic-bezier(.2,.72,.18,1) both, signalHostChatBubbleOut 380ms ease max(0ms, calc(var(--signal-host-bubble-life) - 380ms)) forwards; }
+.showHostChatBubble[data-power-voice-presence="loud"] { font-size: calc(.73rem * 1.12); }
+.showHostChatBubble[data-power-voice-presence="quiet"] { font-size: calc(.73rem * .88); }
 .showHostChatBubble[data-streaming="true"] { animation: signalHostChatBubbleIn 240ms cubic-bezier(.2,.72,.18,1) both; }
 .showHostChatBubble[data-streaming="true"]::after { display: inline-block; width: .42em; height: 1em; margin-left: .16em; border-radius: 999px; content: ""; background: color-mix(in srgb, var(--botcast-host-accent) 72%, #fff); box-shadow: 0 0 9px color-mix(in srgb, var(--botcast-host-accent) 44%, transparent); vertical-align: -.14em; animation: signalHostChatStreamCaret 720ms steps(1, end) infinite; }
 .showHostChatBubble[data-role="user"] { --signal-host-chat-surface: color-mix(in srgb, var(--prism-s) 26%, rgba(8,10,18,.94)); align-self: flex-start; border-radius: 18px 18px 18px 6px; border-color: color-mix(in srgb, var(--prism-s) 45%, rgba(255,255,255,.22)); }
@@ -507,6 +509,8 @@
 .avatarRig { --signal-avatar-lean: 0deg; position: relative; width: 100%; height: 100%; display: grid; place-items: center; filter: drop-shadow(0 13px 18px rgba(0,0,0,.48)); animation: signalBotIdle 4.8s ease-in-out infinite; transform-origin: 50% 82%; will-change: transform; }
 .avatarRig[data-signal-presence="host"] { --signal-avatar-lean: 2.4deg; }
 .avatarRig[data-signal-presence="guest"] { --signal-avatar-lean: -2.4deg; animation-delay: -2.1s; }
+.avatarRig[data-power-avatar-scale="larger"] { scale: 1.12; }
+.avatarRig[data-power-avatar-scale="smaller"] { scale: .86; }
 .avatarRig[data-ghostly-presence="true"] { opacity: 0; transition: opacity 420ms ease; }
 .avatarRig[data-ghostly-presence="true"][data-talking="true"] { opacity: 1; }
 .avatarRig[data-talking="true"] { animation: none; transform: rotate(var(--signal-avatar-lean)); }
@@ -557,7 +561,11 @@
 .transcript { min-height: 260px; max-height: 370px; overflow: auto; padding: 18px; }
 .transcript article { display: grid; grid-template-columns: 110px 1fr; gap: 16px; padding: 10px 0; border-bottom: 1px solid var(--botcast-line); }
 .transcript article[data-role="host"] strong { color: var(--prism-s); }
-.transcript strong { font-size: .75rem; }.transcript p { margin: 0; color: var(--botcast-ink); line-height: 1.55; font-size: .9rem; }
+.transcript strong { font-size: .75rem; }.transcript p { margin: 0; color: var(--botcast-ink); line-height: 1.55; font-size: calc(.9rem * var(--power-message-font-scale, 1)); }
+.transcript article[data-power-voice-presence="loud"],
+.replayTranscript button[data-power-voice-presence="loud"] { --power-message-font-scale: 1.12; }
+.transcript article[data-power-voice-presence="quiet"],
+.replayTranscript button[data-power-voice-presence="quiet"] { --power-message-font-scale: .88; }
 .thinking { color: var(--botcast-muted); font-size: .8rem; }
 
 @keyframes signalBotIdle {
@@ -609,7 +617,7 @@
 .replayTranscript button { width: 100%; display: grid; grid-template-columns: 110px 1fr; gap: 14px; text-align: left; border: 0; border-radius: 7px; padding: 9px 10px; color: var(--botcast-ink); background: transparent; cursor: pointer; }
 .replayTranscript button[data-active="true"] { background: color-mix(in srgb, var(--prism-m) 12%, transparent); }
 .replayTranscript strong { color: var(--prism-m); font-size: .72rem; }
-.replayTranscript span { font-size: .82rem; line-height: 1.4; }
+.replayTranscript span { font-size: calc(.82rem * var(--power-message-font-scale, 1)); line-height: 1.4; }
 .emptyStudio { min-height: calc(100dvh - 130px); display: grid; place-content: center; justify-items: center; text-align: center; color: var(--botcast-muted); }
 .emptyStudio .logoMark { width: 70px; height: 60px; }
 .emptyStudio h1 { color: var(--botcast-ink); margin-bottom: 6px; }

@@ -4,6 +4,9 @@ import {
   activeBotPowersV1,
   botPowerCandorResponseRuleV1,
   botPowerCandorTriggerV1,
+  botPowerIntermittentMuteEffectFromEffectsV1,
+  botPowerIntermittentMuteTurnIsIgnoredFromEffectsV1,
+  botPowerVoicePresenceModeFromEffectsV1,
   buildCoffeePowersPromptBlock,
   COFFEE_HISTORY_WINDOW_HARD_CAP,
   coffeePowerCupRateMultiplierV1,
@@ -493,6 +496,26 @@ export function coffeePowerBotIsMuted(plan: CoffeePowerPlanV1 | null, botId: str
   return plan?.bots[botId]?.effects.some((effect) => effect.type === "mute") === true;
 }
 
+export function coffeePowerVoicePresenceMode(
+  plan: CoffeePowerPlanV1 | null,
+  botId: string,
+): "loud" | "quiet" | null {
+  return botPowerVoicePresenceModeFromEffectsV1(plan?.bots[botId]?.effects ?? []);
+}
+
+export function coffeePowerQuietTurnIsIgnored(args: {
+  plan: CoffeePowerPlanV1 | null;
+  botId: string;
+  stableTurnKey: string;
+}): boolean {
+  const effects = args.plan?.bots[args.botId]?.effects ?? [];
+  return Boolean(botPowerIntermittentMuteEffectFromEffectsV1(effects)) &&
+    botPowerIntermittentMuteTurnIsIgnoredFromEffectsV1(
+      effects,
+      args.stableTurnKey,
+    );
+}
+
 /** Uses the frozen Coffee plan, so replay keeps the session's ghostly reveal. */
 export function coffeePowerBotHasSpeakingOnlyAvatarVisibility(
   plan: CoffeePowerPlanV1 | null,
@@ -605,6 +628,18 @@ export function applyCoffeeHearingRepeatMoodPenalty(args: {
   strength: BotPowerStrength;
 }): Record<string, CoffeeBotSocialSnapshot> {
   return applyCoffeeHearingRepeatMoodPenaltyV1(args);
+}
+
+/** Applies one small holder mood loss when Quiet goes completely unheard. */
+export function applyCoffeeQuietIgnoredMoodPenalty(args: {
+  socialByBotId: Record<string, CoffeeBotSocialSnapshot>;
+  botId: string;
+}): Record<string, CoffeeBotSocialSnapshot> {
+  return applyCoffeeHearingRepeatMoodPenaltyV1({
+    socialByBotId: args.socialByBotId,
+    repeatingBotId: args.botId,
+    strength: "small",
+  });
 }
 
 export function coffeePowerBotVisibleTo(

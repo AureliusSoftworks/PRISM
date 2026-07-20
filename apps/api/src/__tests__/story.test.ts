@@ -568,6 +568,52 @@ describe("Story API helpers", () => {
     assert.equal(mutedScene?.spritePose, "idle");
   });
 
+  it("adapts a deterministic Quiet turn into a silent mood-loss beat", async () => {
+    const db = createTestDb();
+    seedBot(db, "bot-a", "Ada");
+    seedBot(db, "bot-b", "Bert");
+    const name = "Quiet";
+    const intent = "Bert is very quiet and half of his turns go unheard.";
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'bot-b'").run(JSON.stringify([{
+      version: 1,
+      id: "quiet",
+      name,
+      intent,
+      enabled: true,
+      compileStatus: "ready",
+      compiled: {
+        version: 1,
+        sourceHash: botPowerSourceHashV1(name, intent),
+        selfCue: "Speak very quietly.",
+        observerCue: "Bert is sometimes ignored.",
+        effects: [
+          { type: "voice_presence", mode: "quiet" },
+          { type: "intermittent_mute", chance: "half", moodPenalty: "small" },
+        ],
+        ruleLabels: ["Quiet voice", "Half of turns unheard"],
+      },
+    }]));
+    const bots = loadStoryBotProfiles(db, "user-1", ["bot-a", "bot-b"]);
+    const created = createStorySession(db, "user-1", {
+      botIds: ["bot-a", "bot-b"],
+      provider: "local",
+      model: "test-model",
+    });
+
+    const generated = await generateStorySessionEpisode(db, "user-1", created.id, {
+      provider: new SequenceProvider([episodeJson()]),
+      providerName: "local",
+      model: "test-model",
+      bots,
+    });
+    const quietScene = generated.episode?.scenes.find(
+      (scene) => scene.speakerBotId === "bot-b",
+    );
+
+    assert.match(quietScene?.narration ?? "", /expression falls.*unheard.*\.\.\./u);
+    assert.equal(quietScene?.spritePose, "idle");
+  });
+
   it("bounds hard minimal Story speakers without cutting a sentence", async () => {
     const db = createTestDb();
     seedBot(db, "bot-a", "Ada");

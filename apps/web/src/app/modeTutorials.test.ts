@@ -49,6 +49,24 @@ describe("mode tutorials", () => {
     );
   });
 
+  it("explains relative avatar-size Powers across live bot modes", () => {
+    assert.match(MODE_TUTORIALS.zen.steps[0]?.body ?? "", /larger or smaller/u);
+    assert.match(MODE_TUTORIALS.chat.steps[0]?.body ?? "", /larger or smaller/u);
+    assert.match(MODE_TUTORIALS.coffee.steps[0]?.body ?? "", /larger or smaller/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /larger or smaller/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /Microscopic/u);
+  });
+
+  it("explains fixed Loud/Quiet presentation and Quiet's mood cost", () => {
+    for (const mode of ["zen", "chat", "coffee", "botcast"] as const) {
+      const copy = MODE_TUTORIALS[mode].steps.map((step) => step.body).join(" ");
+      assert.match(copy, /Loud and Quiet/u);
+      assert.match(copy, /voice-volume|spoken volume/u);
+      assert.match(copy, /half/u);
+      assert.match(copy, /mood/u);
+    }
+  });
+
   it("presents the production applet as Signal", () => {
     assert.equal(MODE_TUTORIALS.botcast.title, "Signal producer walkthrough");
     const signalCopy = MODE_TUTORIALS.botcast.steps
@@ -582,7 +600,7 @@ describe("mode tutorials", () => {
 
     assert.deepEqual(chooseRelationship, {
       heading: "Choose a relationship",
-      body: "Choose PRISM or a persona to enter that relationship’s Home. Ready Powers stay active with that persona here and across PRISM; a muted persona can still act, but only answers with ... and never speaks aloud, while an echo-bound persona repeats the latest message addressed to them exactly. A hard bare-minimum or brief Power is engine-bounded even if the model tries to elaborate. Back or Escape returns you to the wider Library or saved group grid exactly where you left it. Inviting a guest keeps you in the current Home.",
+      body: "Choose PRISM or a persona to enter that relationship’s Home. Ready Powers stay active with that persona here and across PRISM; a muted persona can still act, but only answers with ... and never speaks aloud, while an echo-bound persona repeats the latest message addressed to them exactly. Physical-size Powers render a persona slightly larger or smaller without changing the room layout, and Microscopic combines the smaller form with an unseen idle presence. Loud and Quiet Powers apply a small fixed voice-volume and text-size shift; Quiet can go unheard on half its turns and lose a little mood, while Loud overrides small, Microscopic, and invisible presentation. A hard bare-minimum or brief Power is engine-bounded even if the model tries to elaborate. Back or Escape returns you to the wider Library or saved group grid exactly where you left it. Inviting a guest keeps you in the current Home.",
       clickLabel: "a PRISM or persona tile",
       targetSelector: '[data-tutorial-target="chat-bot-picker"]',
     });
