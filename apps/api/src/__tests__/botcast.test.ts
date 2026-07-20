@@ -445,6 +445,71 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
+  it("lets the host choose a safe surprise booking when the Producer supplies no direction", async () => {
+    const db = fixture();
+    try {
+      const show = createBotcastShow(db, "user-1", {
+        hostBotId: "host-1",
+        name: "The Unfinished Machine",
+        premise: "Interviews about the human cost hidden inside invention.",
+      });
+      const captures: ProviderMessage[][] = [];
+      const provider = recordingProvider(
+        [
+          JSON.stringify({
+            topic: "Questions Worth Asking",
+            producerBrief:
+              "Open with a broad invitation about how people decide which questions deserve their attention, then follow only the experiences and views the guest actually shares.",
+          }),
+          "Welcome to The Unfinished Machine. I'm Mara Vale, and today I'm joined by the Producer for Questions Worth Asking. Producer, what question has been on your mind lately?",
+        ],
+        captures,
+      );
+
+      const booking = await generateBotcastProducerGuestBooking(
+        db,
+        "user-1",
+        show.id,
+        {
+          guestName: "Producer",
+          guestContext: "",
+        },
+        generation(provider),
+      );
+
+      assert.equal(booking.generated, true);
+      assert.equal(booking.topic, "Questions Worth Asking");
+      const prompt = captures[0]?.map((message) => message.content).join("\n") ?? "";
+      assert.match(prompt, /asked the host to surprise them/u);
+      assert.match(prompt, /without presumed expertise, biography, identity/u);
+      assert.doesNotMatch(prompt, /Guest-provided source context/u);
+
+      const created = createBotcastEpisode(db, "user-1", show.id, {
+        guestKind: "producer",
+        guestName: BOTCAST_PRODUCER_GUEST_NAME,
+        topic: booking.topic,
+        producerBrief: booking.producerBrief,
+      });
+      assert.equal(created.guestContext, "");
+
+      const opening = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {},
+        generation(provider),
+      );
+      assert.equal(opening.message?.speakerRole, "host");
+      const openingPrompt =
+        captures[1]?.map((message) => message.content).join("\n") ?? "";
+      assert.match(openingPrompt, /supplied no topic or source context/u);
+      assert.match(openingPrompt, /Never assume biography, expertise, identity/u);
+      assert.doesNotMatch(openingPrompt, /Private guest-provided source context/u);
+    } finally {
+      db.close();
+    }
+  });
+
   it("books the signed-in guest under one cohesive on-air Producer title", () => {
     const serverSource = readFileSync(
       new URL("../server.ts", import.meta.url),
