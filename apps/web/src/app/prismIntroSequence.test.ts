@@ -65,9 +65,45 @@ describe("PRISM intro sequence", () => {
       "You are the light. Prism reveals the spectrum. One light. Many colors.",
     );
     assert.match(PRISM_INTRO_SCENES[2]!.title, /multitude waited/u);
-    assert.match(PRISM_INTRO_SCENES[2]!.imageAlt, /powered-off PRISM bot frames/u);
-    assert.match(PRISM_INTRO_SCENES[5]!.imageAlt, /circular PRISM bot frames/u);
-    assert.match(PRISM_INTRO_SCENES[5]!.imageAlt, /primary frame remains powered off/u);
+    assert.match(
+      PRISM_INTRO_SCENES[2]!.imageAlt,
+      /powered-off PRISM bot frames/u,
+    );
+    assert.match(
+      PRISM_INTRO_SCENES[5]!.imageAlt,
+      /Pia, Rowan, Iris, Sol, and Mira/u,
+    );
+    assert.match(
+      PRISM_INTRO_SCENES[5]!.imageAlt,
+      /rose heart, amber winding-path, lime diamond, cyan sunburst, and violet four-point-sparkle phosphor eyes/u,
+    );
+    assert.match(
+      PRISM_INTRO_SCENES[5]!.imageAlt,
+      /black-glass CRTs/u,
+    );
+    assert.match(
+      PRISM_INTRO_SCENES[5]!.imageAlt,
+      /primary frame remains powered off/u,
+    );
+    assert.match(PRISM_INTRO_SCENES[5]!.imageAlt, /same-sized/u);
+    assert.match(
+      PRISM_INTRO_SCENES[6]!.imageAlt,
+      /Pia, Rowan, Iris, Sol, and Mira/u,
+    );
+    assert.match(PRISM_INTRO_SCENES[6]!.imageAlt, /black CRT glass/u);
+    assert.match(PRISM_INTRO_SCENES[6]!.imageAlt, /same-sized/u);
+    assert.match(
+      PRISM_INTRO_SCENES[7]!.imageAlt,
+      /Pia, Rowan, Iris, Sol, and Mira/u,
+    );
+    assert.match(
+      PRISM_INTRO_SCENES[7]!.imageAlt,
+      /same-sized, factory-clean main PRISM bot frame/u,
+    );
+    assert.match(
+      PRISM_INTRO_SCENES[7]!.imageAlt,
+      /colored phosphor faces on black glass/u,
+    );
     assert.equal(PRISM_INTRO_SCENES[6]!.body, "You decided what belonged.");
   });
 

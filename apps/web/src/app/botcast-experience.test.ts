@@ -178,7 +178,7 @@ describe("Signal experience shell", () => {
     assert.match(source, /const thinkingRole = botcastNextSpeakerRole/u);
     assert.match(source, /const roleIsThinking = \(role: "host" \| "guest"\)/u);
     assert.match(source, /speechReveal\?\.phase === "preparing"/u);
-    assert.match(source, /Warming the mic…/u);
+    assert.doesNotMatch(source, /Warming the mic…/u);
     assert.match(
       pageSource,
       /className=\{`\$\{styles\.zenLiveBotPresencePlate\} \$\{styles\.signalBotPresencePlate\}`\}/u,
@@ -500,8 +500,10 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       css,
-      /\.shell\[data-live-episode="true"\] \.controlRoom\s*\{[^}]*height:\s*clamp\(210px, 24dvh, 260px\)/iu,
+      /\.shell\[data-live-episode="true"\] \.liveLayout \.stageViewport\s*\{[^}]*calc\(\(100dvh - 320px\) \* 1\.7778\)/iu,
     );
+    assert.doesNotMatch(source, /className=\{styles\.transcript\}/u);
+    assert.match(source, /className=\{styles\.replayTranscript\}/u);
   });
 
   it("floats Signal errors and updates in dismissible toast notifications", () => {
@@ -562,6 +564,7 @@ describe("Signal experience shell", () => {
     assert.match(source, /playSignalIntroAudio\(\{/u);
     assert.match(source, /startDelayMs: SIGNAL_EPISODE_INTRO_LEAD_IN_MS/u);
     assert.match(source, /data-phase=\{episodePreRoll\.phase\}/u);
+    assert.match(source, /data-kind="intro"/u);
     assert.match(source, /Signal Synth · generated locally/u);
     assert.match(source, />\s*Skip intro\s*</u);
     assert.match(source, /<p>With \{episodePreRoll\.guestName\}<\/p>/u);
@@ -688,6 +691,8 @@ describe("Signal experience shell", () => {
     assert.match(css, /\.shell\[data-theme="light"\] \.preRollLockup h1/u);
     assert.match(css, /\.shell\[data-theme="light"\] \.preRollMeters i/u);
     assert.match(css, /@keyframes signalPreRollRing/u);
+    assert.match(css, /@keyframes signalIntroCurtainOut/u);
+    assert.match(css, /\.episodePreRoll\[data-kind="intro"\]::after/u);
     assert.match(css, /\.showIntroPreviewButton\[data-active="true"\]/u);
     assert.match(css, /@media \(prefers-reduced-motion: reduce\)/u);
     assert.match(pageSource, /introAudioEnabled=/u);
@@ -715,19 +720,20 @@ describe("Signal experience shell", () => {
       source.indexOf("const playEpisodeOutro = useCallback"),
       source.indexOf("useEffect(() => {\n    if (!introAudioEnabled)"),
     );
+    assert.match(outroSource, /phase: "curtain"/u);
+    assert.match(outroSource, /phase: "holding"/u);
     assert.match(outroSource, /phase: "complete"/u);
     assert.doesNotMatch(outroSource, /setEpisodeOutro\(null\)/u);
     assert.match(css, /\.episodeOutro\[data-phase="complete"\] > button/u);
     assert.match(css, /\.episodeOutro > \.episodeReviewCopyButton/u);
     assert.match(source, /data-episode-outro=\{episodeOutro \? "true" : undefined\}/u);
+    assert.doesNotMatch(css, /\.shell\[data-episode-outro="true"\]/u);
     assert.match(
       css,
-      /\.shell\[data-episode-outro="true"\] \.main\s*\{[^}]*overflow:\s*hidden/iu,
+      /\.episodeOutro\s*\{[^}]*position:\s*fixed;[^}]*inset:\s*66px 0 0 286px;[^}]*contain:\s*layout paint;[^}]*background:\s*var\(--botcast-curtain\)/iu,
     );
-    assert.match(
-      css,
-      /\.episodeOutro\s*\{[^}]*position:\s*fixed;[^}]*inset:\s*66px 0 0 286px;[^}]*contain:\s*layout paint/iu,
-    );
+    assert.match(css, /@keyframes signalOutroCurtainIn/u);
+    assert.match(css, /\.episodeOutro\[data-phase="curtain"\] \.preRollLockup/u);
     assert.match(
       css,
       /@media \(max-width: 900px\)[\s\S]*?\.episodeOutro\s*\{[^}]*inset:\s*66px 0 0;[^}]*min-height:\s*0/iu,
@@ -891,7 +897,9 @@ describe("Signal experience shell", () => {
     assert.match(source, /cueDelivery/u);
     assert.doesNotMatch(source, /disabled=\{busy \|\| !producerCueReady/u);
     assert.match(css, /\.producerControls button\[data-queued="true"\]/u);
-    assert.match(css, /\.cueGrid \.refocusCue\s*\{\s*grid-column: 1 \/ -1/u);
+    assert.match(css, /\.cueGrid\s*\{[^}]*repeat\(5, minmax\(0, 1fr\)\)/u);
+    assert.match(css, /\.cueGrid button\s*\{[^}]*min-height:\s*68px/u);
+    assert.match(source, /className=\{styles\.producerCueComposer\}/u);
   });
 
   it("puts the Producer guest on the shared bottom composer without cue cards", () => {
@@ -928,16 +936,12 @@ describe("Signal experience shell", () => {
     );
   });
 
-  it("stops two echo-bound bots before Signal begins recording", () => {
-    assert.match(
-      source,
-      /hostBot\?\.echoesAddressedSpeech &&[\s\S]{0,100}guest\?\.echoesAddressedSpeech/u,
-    );
-    assert.match(
+  it("lets two echo-bound bots reach Signal's server-owned opening fallback", () => {
+    assert.doesNotMatch(
       source,
       /both have hard echo Powers, so neither can originate the opening/u,
     );
-    assert.match(source, /"cast Power compatibility"/u);
+    assert.doesNotMatch(source, /"cast Power compatibility"/u);
   });
 
   it("preserves the producer cue input focus and caret across speaker changes", () => {
@@ -968,7 +972,7 @@ describe("Signal experience shell", () => {
     assert.match(css, /\.listenerReactionText\[data-interjection-attempt="true"\]/u);
   });
 
-  it("keeps live turns, transcript reveal, and stage presence on the real voice clock", () => {
+  it("keeps live turns and stage presence on the real voice clock", () => {
     assert.doesNotMatch(
       source,
       /speakingTimerRef|9_000|split\(\/\\s\+\/u\)\.length \* 280/u,
@@ -979,10 +983,8 @@ describe("Signal experience shell", () => {
     );
     assert.match(source, /onStart: \(durationMs, alignment\)/u);
     assert.match(source, /onProgress: \(elapsedMs, durationMs\)/u);
-    assert.match(
-      source,
-      /botcastSpeechRevealVisibleText\(liveSpeech\.reveal\)/u,
-    );
+    assert.match(source, /const speechElapsedMs = args\.replay/u);
+    assert.match(source, /speechReveal\?\.phase === "playing"/u);
     assert.match(source, /const SIGNAL_NATURAL_HANDOFF_MS = 120/u);
     assert.match(source, /const SIGNAL_VOICE_COMPLETION_GRACE_MS = 4_000/u);
     assert.match(
@@ -1097,17 +1099,13 @@ describe("Signal experience shell", () => {
     );
   });
 
-  it("follows incremental transcript growth until the producer scrolls away", () => {
-    assert.match(source, /signalTranscriptEpisodeIdRef/u);
-    assert.match(
-      source,
-      /signalTranscriptEpisodeIdRef\.current !== episodeId[\s\S]{0,180}signalTranscriptFollowingRef\.current = true/u,
-    );
-    assert.match(source, /followSignalTranscriptToBottom\(transcript\)/u);
-    assert.match(
-      source,
-      /onScroll=\{\(event\) => \{[\s\S]{0,180}signalTranscriptIsNearBottom\(event\.currentTarget\)/u,
-    );
+  it("reserves the full transcript and playback controls for replay", () => {
+    assert.doesNotMatch(source, /className=\{styles\.transcript\}/u);
+    assert.doesNotMatch(source, /signalTranscriptFollowingRef/u);
+    assert.match(source, /className=\{styles\.replayControls\}/u);
+    assert.match(source, /className=\{styles\.replayTranscript\}/u);
+    assert.match(css, /\.replayControls\s*\{[^}]*background:\s*var\(--botcast-panel\)/u);
+    assert.match(css, /\.replayTranscript\s*\{[^}]*max-height:\s*320px/u);
   });
 
   it("keeps hard-muted Signal lines visible but silent with a closed speaking mouth", () => {
@@ -1168,10 +1166,7 @@ describe("Signal experience shell", () => {
       source,
       /guestPresentOnStage && args\.guest && renderMug && guestCupVisual/u,
     );
-    assert.match(
-      source,
-      /episode\.messages\s*\.filter\(botcastMessageIsAudibleToAudienceV1\)/u,
-    );
+    assert.match(source, /botcastMessageIsAudibleToAudienceV1\(message\) \? \(/u);
     assert.match(source, /!botcastMessageIsAudibleToAudienceV1\(replayActiveMessage\)/u);
     assert.doesNotMatch(css, /data-audience-only/iu);
   });

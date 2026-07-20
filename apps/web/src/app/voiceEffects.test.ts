@@ -62,8 +62,9 @@ describe("engine-agnostic voice effects", () => {
     const robot = resolveVoiceEffectPlan("robot");
     const echo = resolveVoiceEffectPlan("echo");
     const chorus = resolveVoiceEffectPlan("chorus");
+    const resonance = resolveVoiceEffectPlan("resonance");
     const deepSpace = resolveVoiceEffectPlan("deep-space");
-    const processed = [radio, robot, echo, chorus, deepSpace];
+    const processed = [radio, robot, echo, chorus, resonance, deepSpace];
 
     assert.equal(clean.drive, 0);
     assert.equal(clean.parallelVoices.length, 0);
@@ -75,14 +76,23 @@ describe("engine-agnostic voice effects", () => {
     assert.ok(robot.parallelVoices.some((voice) => voice.detuneCents < 0));
     assert.equal(echo.parallelVoices.length, 2);
     assert.equal(chorus.parallelVoices.length, 2);
+    assert.ok(resonance.parallelVoices.some((voice) => voice.detuneCents <= -300));
+    assert.ok(
+      resonance.parallelVoices.some(
+        (voice) => (voice.delayModulationFrequencyHz ?? 0) > 0,
+      ),
+    );
+    assert.ok(resonance.dryGain > chorus.dryGain);
+    assert.ok(resonance.lowpassHz < chorus.lowpassHz);
     assert.ok(deepSpace.parallelVoices.some((voice) => voice.detuneCents <= -500));
     assert.ok(processed.every((plan) => plan.outputTrim < 0.8));
     assert.ok(processed.every((plan) => plan.drive === 0 && plan.bitDepth === 16));
     assert.equal(new Set(processed.map((plan) => JSON.stringify(plan))).size, processed.length);
     assert.deepEqual(resolveElevenLabsVoiceEffectPlan("chorus"), chorus);
+    assert.deepEqual(resolveElevenLabsVoiceEffectPlan("resonance"), resonance);
   });
 
-  it("keeps Chorus doubling bounded throughout long replies", () => {
+  it("keeps the Prism doubling bounded throughout long replies", () => {
     const chorus = resolveVoiceEffectPlan("chorus");
     for (const voice of chorus.parallelVoices) {
       const modulationDepthSeconds = Math.abs(

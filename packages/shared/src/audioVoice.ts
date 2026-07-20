@@ -9,6 +9,7 @@ export const VOICE_EFFECTS = [
   "robot",
   "echo",
   "chorus",
+  "resonance",
   "deep-space",
 ] as const;
 export type VoiceEffect = (typeof VOICE_EFFECTS)[number];
@@ -18,7 +19,8 @@ export const VOICE_EFFECT_LABELS: Record<VoiceEffect, string> = {
   radio: "Radio",
   robot: "Robot",
   echo: "Echo",
-  chorus: "Chorus",
+  chorus: "Prism",
+  resonance: "Resonance",
   "deep-space": "Deep Space",
 };
 
@@ -30,12 +32,13 @@ export const VOICE_EFFECT_DESCRIPTIONS: Record<
   radio: "Narrow-band broadcast tone with a trace of radio noise.",
   robot: "Mechanical pulse and a subtly doubled synthetic carrier.",
   echo: "Two level-controlled repeats behind the original voice.",
-  chorus: "A wide, gently detuned double without extra loudness.",
+  chorus: "PRISM's subtle, gently refracted double.",
+  resonance: "A dark, weighty mechanical double with a restrained low reflection.",
   "deep-space": "A lower spectral double with a distant trailing reflection.",
 };
 
-/** Chorus gives PRISM's robot cast a subtle shared synthetic character while
- * remaining restrained enough for ordinary conversation. */
+/** The stored chorus ID preserves existing profiles and exports while its
+ * player-facing Prism label gives the cast a restrained shared house sound. */
 export const DEFAULT_VOICE_EFFECT: VoiceEffect = "chorus";
 
 /** Backwards-compatible names for portable profiles and older call sites. */

@@ -596,6 +596,44 @@ describe("coffee replay helpers", () => {
     assert.doesNotMatch(text, /\*leans in\*/u);
   });
 
+  it("distinguishes attended departures from true Coffee no-shows", () => {
+    const text = formatCoffeeReviewClipboardText({
+      context: {
+        bots: [
+          { id: "bot-patrick", name: "Patrick" },
+          { id: "bot-squid", name: "Squidward" },
+        ],
+        absentBotIds: ["bot-sponge", "bot-squid"],
+      },
+      messages: [
+        {
+          id: "arrival-sponge",
+          role: "system",
+          content: "",
+          coffeeReplayEvents: [{
+            v: 1 as const,
+            name: "coffeeReplayEvent" as const,
+            kind: "arrival" as const,
+            botId: "bot-sponge",
+            occurredAt: "2026-07-20T21:39:29.990Z",
+          }],
+        },
+        {
+          id: "sponge-line",
+          role: "assistant",
+          botId: "bot-sponge",
+          botName: "SpongeBob",
+          content: "I was here, and now I should get going.",
+        },
+      ],
+    });
+
+    assert.match(text, /Roster: Patrick \(bot-patrick\), SpongeBob \(bot-sponge\)/u);
+    assert.match(text, /Absent bots: Squidward \(bot-squid\)/u);
+    assert.match(text, /Departed bots: SpongeBob \(bot-sponge\)/u);
+    assert.doesNotMatch(text, /Absent bots: [^\n]*SpongeBob/u);
+  });
+
   it("collects bot actions only up to the provided visible transcript", () => {
     const messages = [
       { id: "m1", role: "assistant", botName: "Nova", content: "*sips coffee* Hello." },

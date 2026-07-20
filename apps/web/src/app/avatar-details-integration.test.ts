@@ -448,6 +448,14 @@ describe("Avatar Details shared mannequin rendering", () => {
       maskCss,
       /scaleX\(var\(--avatar-details-scale-x, 1\)\)[\s\S]*scaleX\(var\(--avatar-details-facing-scale-x, 1\)\)/,
     );
+    assert.match(
+      pageCss,
+      /\.zenLiveBotPresenceFaceRig[\s\S]*scaleX\(var\(--zen-live-bot-face-layer-scale-x, 1\)\)/,
+    );
+    assert.match(
+      pageSource,
+      /\["--coffee-plate-emoji-face-scale-y" as string\]:\s*BOT_AVATAR_CANONICAL_FACE_SCALE_Y[\s\S]*\["--zen-live-bot-face-layer-scale-x" as string\]:\s*showQuestionMark\s*\? "1"\s*:\s*"var\(--avatar-details-facing-scale-x, 1\)"/,
+    );
     assert.doesNotMatch(maskCss, /--coffee-plate-emoji-face-scale-y/);
     assert.match(
       pageSource,

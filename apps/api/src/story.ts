@@ -20,6 +20,7 @@ import {
   botPowerSelfCueLinesV1,
   buildBotPowersPromptBlock,
   strongestBotPowerCandorEffectV1,
+  strongestBotPowerInterruptionEffectV1,
   strongestHardBotPowerResponseBudgetEffectV1,
   STORY_SCENE_COUNT_MIN,
   applyStoryChoice,
@@ -1199,16 +1200,29 @@ function applyStoryHardResponsePowers(
       return effect ? [[bot.id, effect] as const] : [];
     }),
   );
+  const hasInterruptionPower = bots.some((holder) =>
+    bots.some(
+      (target) =>
+        holder.id !== target.id &&
+        strongestBotPowerInterruptionEffectV1(
+          holder.powers,
+          (candidate) => storyPowerTargetMatches(candidate, target),
+        ) !== null,
+    ),
+  );
   if (
     mutedBotIds.size === 0 &&
     echoBotIds.size === 0 &&
     !bots.some((bot) => botPowerIntermittentMuteEffectV1(bot.powers)) &&
-    responseBudgetByBotId.size === 0
+    responseBudgetByBotId.size === 0 &&
+    !hasInterruptionPower
   ) {
     return episode;
   }
   const scenes: StoryEpisodeManifest["scenes"] = [];
-  let priorVisibleNarration: string | null = null;
+  const botsById = new Map(bots.map((bot) => [bot.id, bot] as const));
+  const lastInterruptionSceneByBotId = new Map<string, number>();
+  let priorBotSpeech: { botId: string; narration: string } | null = null;
   for (const [sceneIndex, scene] of episode.scenes.entries()) {
     let nextScene = scene;
     const quietIgnored = Boolean(
@@ -1218,6 +1232,53 @@ function applyStoryHardResponsePowers(
         `${episode.id}:${scene.id}:${sceneIndex}`,
       ),
     );
+    const priorScene = scenes.at(-1);
+    const priorSpeaker = priorScene?.speakerBotId
+      ? botsById.get(priorScene.speakerBotId)
+      : null;
+    const currentSpeaker = scene.speakerBotId
+      ? botsById.get(scene.speakerBotId)
+      : null;
+    const interruption =
+      currentSpeaker &&
+      priorSpeaker &&
+      currentSpeaker.id !== priorSpeaker.id &&
+      !mutedBotIds.has(currentSpeaker.id) &&
+      !quietIgnored &&
+      sceneIndex - (lastInterruptionSceneByBotId.get(currentSpeaker.id) ?? -3) >= 3
+        ? strongestBotPowerInterruptionEffectV1(
+            currentSpeaker.powers,
+            (candidate) => storyPowerTargetMatches(candidate, priorSpeaker),
+          )
+        : null;
+    if (
+      currentSpeaker &&
+      interruption &&
+      priorScene &&
+      storyPowerInterruptionShouldApply({
+        episodeId: episode.id,
+        sceneId: scene.id,
+        powerId: interruption.powerId,
+        frequency: interruption.frequency,
+        strength: interruption.strength,
+      })
+    ) {
+      const interruptedNarration = storyPowerInterruptedNarration(
+        priorScene.narration,
+        `${episode.id}:${scene.id}:${interruption.powerId}`,
+      );
+      if (interruptedNarration !== priorScene.narration) {
+        scenes[scenes.length - 1] = {
+          ...priorScene,
+          narration: interruptedNarration,
+        };
+        priorBotSpeech = {
+          botId: priorScene.speakerBotId!,
+          narration: interruptedNarration,
+        };
+        lastInterruptionSceneByBotId.set(currentSpeaker.id, sceneIndex);
+      }
+    }
     if (scene.speakerBotId && (mutedBotIds.has(scene.speakerBotId) || quietIgnored)) {
       const mutedNarration = applyBotPowerMuteResponseV1(scene.narration);
       nextScene = {
@@ -1229,16 +1290,15 @@ function applyStoryHardResponsePowers(
         spritePose: scene.spritePose === "action" ? "action" : "idle",
       };
     } else if (scene.speakerBotId && echoBotIds.has(scene.speakerBotId)) {
-      nextScene = priorVisibleNarration === null
-        ? {
-            ...scene,
-            speakerBotId: null,
-            speakerName: "",
-            spritePose: "idle",
-          }
+      const addressedSpeech =
+        priorBotSpeech && priorBotSpeech.botId !== scene.speakerBotId
+          ? priorBotSpeech.narration
+          : null;
+      nextScene = addressedSpeech === null
+        ? scene
         : {
             ...scene,
-            narration: applyBotPowerEchoResponseV1(priorVisibleNarration),
+            narration: applyBotPowerEchoResponseV1(addressedSpeech),
             spritePose: "speaking",
           };
     } else if (scene.speakerBotId) {
@@ -1255,12 +1315,59 @@ function applyStoryHardResponsePowers(
       }
     }
     scenes.push(nextScene);
-    priorVisibleNarration = nextScene.narration;
+    if (nextScene.speakerBotId) {
+      priorBotSpeech = {
+        botId: nextScene.speakerBotId,
+        narration: nextScene.narration,
+      };
+    }
   }
   return {
     ...episode,
     scenes,
   };
+}
+
+function storyPowerStableRoll(seed: string): number {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash ^= seed.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash / 0xffffffff;
+}
+
+function storyPowerInterruptionShouldApply(args: {
+  episodeId: string;
+  sceneId: string;
+  powerId: string;
+  frequency: "occasional" | "frequent";
+  strength: "small" | "medium" | "large";
+}): boolean {
+  if (args.frequency === "frequent" && args.strength === "large") return true;
+  const chance =
+    (args.frequency === "frequent" ? 0.62 : 0.28) +
+    (args.strength === "large" ? 0.14 : args.strength === "small" ? -0.08 : 0);
+  return storyPowerStableRoll(
+    `${args.episodeId}:${args.sceneId}:${args.powerId}`,
+  ) < chance;
+}
+
+function storyPowerInterruptedNarration(narration: string, seed: string): string {
+  const words = narration.trim().split(/\s+/u).filter(Boolean);
+  if (words.length < 12) return narration;
+  const progress = [0.38, 0.5, 0.62][
+    Math.floor(storyPowerStableRoll(seed) * 3) % 3
+  ]!;
+  let heardWordCount = Math.max(6, Math.floor(words.length * progress));
+  while (
+    heardWordCount < words.length - 2 &&
+    words.slice(0, heardWordCount).join(" ").length < 48
+  ) {
+    heardWordCount += 1;
+  }
+  if (heardWordCount >= words.length - 1) return narration;
+  return `${words.slice(0, heardWordCount).join(" ").replace(/[,.!?;:]+$/u, "")}—`;
 }
 
 function truncateStoryRepairRaw(raw: string): string {

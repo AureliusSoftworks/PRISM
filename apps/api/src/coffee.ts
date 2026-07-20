@@ -2373,7 +2373,7 @@ const COFFEE_STAGE_ACTION_THIRD_PERSON_VERBS = new Set([
   ...COFFEE_STAGE_ACTION_IRREGULAR_THIRD_PERSON_VERBS,
 ]);
 const COFFEE_STAGE_ACTION_BODY_PART_RE =
-  /^(?:(?:his|her|their|my)\s+)?(?:brows?|claws?|eyes?|expression|fingers?|fists?|hands?|head|jaw|mouth|shoulders?|tentacles?|voice)\s+(?:clench(?:es)?|drum(?:s)?|fold(?:s)?|glance(?:s)?|grip(?:s)?|hover(?:s)?|lift(?:s)?|pause(?:s)?|raise(?:s)?|rest(?:s)?|sharpen(?:s)?|shift(?:s)?|slam(?:s)?|slap(?:s)?|snap(?:s)?|stead(?:y|ies)|tap(?:s)?|tighten(?:s)?|twitch(?:es)?|wave(?:s)?)\b/i;
+  /^(?:(?:his|her|their|my)\s+)?(?:antennae?|brows?|claws?|eyes?|expression|fingers?|fists?|hands?|head|jaw|mouth|shoulders?|tentacles?|voice)\s+(?:clench(?:es)?|droop(?:s)?|drum(?:s)?|fold(?:s)?|glance(?:s)?|go(?:es)?\s+still|grip(?:s)?|hover(?:s)?|lift(?:s)?|pause(?:s)?|raise(?:s)?|rest(?:s)?|sharpen(?:s)?|shift(?:s)?|slam(?:s)?|slap(?:s)?|snap(?:s)?|stead(?:y|ies)|tap(?:s)?|tighten(?:s)?|twitch(?:es)?|wave(?:s)?)\b/i;
 const COFFEE_THUMB_TWIDDLE_ACTION_RE =
   /^(?:(?:dryly|slowly|quietly|thoughtfully|carefully|softly|theatrically|excitedly|gently|nervously)\s+)?twiddles?\b/i;
 const COFFEE_STAGE_ACTION_BLOCK_RE = /\*+([^*\n]+?)\*+/g;
@@ -2992,6 +2992,7 @@ export function coffeeReplyLooksUnfinished(raw: string): boolean {
   const words = normalized.toLowerCase().match(/[\p{L}\p{N}'’]+/gu) ?? [];
   if (words.length === 0) return false;
   const last = words[words.length - 1]?.replace(/[’']/g, "") ?? "";
+  if (/(?:^|[.!?…]\s+)\p{L}$/u.test(normalized)) return true;
   if (COFFEE_UNFINISHED_REPLY_TRAILING_WORDS.has(last)) return true;
   const tail = words.slice(-2).join(" ").replace(/[’']/g, "");
   if (tail === "but mostly" || tail === "and then" || tail === "so that") return true;
@@ -4568,7 +4569,18 @@ export function normalizeCoffeeSessionSynopsis(raw: string): string | null {
   if (withoutHeading.length < 40) return null;
   const prefixed = `${COFFEE_SESSION_SYNOPSIS_PREFIX} ${withoutHeading}`;
   if (prefixed.length <= COFFEE_SESSION_SYNOPSIS_MAX_CHARS) return prefixed;
-  return `${prefixed.slice(0, COFFEE_SESSION_SYNOPSIS_MAX_CHARS - 3).trimEnd()}...`;
+  const bounded = prefixed.slice(0, COFFEE_SESSION_SYNOPSIS_MAX_CHARS).trimEnd();
+  const sentenceEnds = [...bounded.matchAll(/[.!?](?=\s|$)/gu)];
+  const lastSentenceEnd = sentenceEnds.at(-1);
+  const sentenceEndIndex = lastSentenceEnd?.index == null
+    ? 0
+    : lastSentenceEnd.index + lastSentenceEnd[0].length;
+  if (sentenceEndIndex >= Math.floor(COFFEE_SESSION_SYNOPSIS_MAX_CHARS * 0.65)) {
+    return bounded.slice(0, sentenceEndIndex).trimEnd();
+  }
+  const wordBudget = prefixed.slice(0, COFFEE_SESSION_SYNOPSIS_MAX_CHARS - 3).trimEnd();
+  const wordBoundary = wordBudget.replace(/\s+\S*$/u, "").trimEnd();
+  return `${wordBoundary || wordBudget}...`;
 }
 
 function coffeeSessionAlreadyHasSynopsis(history: readonly ChatMessage[]): boolean {
@@ -4769,6 +4781,7 @@ function buildCoffeeSessionSynopsisMessages(args: {
         ...memorySection,
         "",
         "Write 2-4 short sentences. Cover how the conversation went, highlights or lows, and mention attendance only if the transcript made it socially meaningful. If the table drifted away from the topic, say so plainly instead of praising or disguising the sidestep. If poll results, team dynamics, or memory changes are provided above, include them naturally; do not mention categories that were not provided.",
+        "Keep the complete synopsis under 750 characters so it ends naturally instead of being cut off.",
         "Keep attribution literal: if Franklin introduces an object and Washington later handles it, do not credit Washington with introducing it. Never claim everyone stayed engaged unless every participant's visible lines support that exact conclusion.",
       ].join("\n"),
     },
@@ -5222,6 +5235,11 @@ export function interruptedSnippetFromTokenCount(fullText: string, visibleTokenC
   const lastWordMatch = visible.match(/(\S+)$/);
   if (!lastWordMatch) return `${visible}—`;
   const fullWord = lastWordMatch[1];
+  const internalDashIndex = fullWord.search(/[—–]/u);
+  if (internalDashIndex > 0) {
+    const prefix = visible.slice(0, visible.length - fullWord.length);
+    return `${prefix}${fullWord.slice(0, internalDashIndex)}—`;
+  }
   if (fullWord.length < 4) return `${visible}—`;
   const cutoffLength = Math.max(2, Math.floor(fullWord.length * 0.6));
   const prefix = visible.slice(0, visible.length - fullWord.length);
@@ -14122,8 +14140,16 @@ async function generateCoffeeBotReply(args: {
         latestAssistantContent: latestAssistantBeforeTurn?.content ?? null,
       })
     : null;
+  const speakerHasSpokenInSession = history.some(
+    (message) =>
+      message.role === "assistant" &&
+      resolveAssistantSpeakerBotId(message, group) === speaker.id
+  );
+  const speakerEchoesForTurn =
+    speakerEchoesAddressedSpeech &&
+    (speakerEchoSource !== null || speakerHasSpokenInSession);
   const speakerUsesHardResponse =
-    speakerIsMutedForTurn || speakerRepeatsForHearingPower || speakerEchoesAddressedSpeech;
+    speakerIsMutedForTurn || speakerRepeatsForHearingPower || speakerEchoesForTurn;
   settings.onPhase?.("thinking", speaker.id);
   throwIfCoffeeTurnCancelled(settings.signal);
   const coffeeCupSeed = coffeeCupSeedForBot({
@@ -14199,11 +14225,6 @@ async function generateCoffeeBotReply(args: {
       });
     }
   }
-  const speakerHasSpokenInSession = history.some(
-    (message) =>
-      message.role === "assistant" &&
-      resolveAssistantSpeakerBotId(message, group) === speaker.id
-  );
   const cannedInterruptionReactionRaw =
     playerInterruptionEvent && playerInterruptionEvent.interruptedBotId === speaker.id
       ? coffeeCannedInterruptionReaction({
@@ -14496,7 +14517,7 @@ async function generateCoffeeBotReply(args: {
           if (speakerIsMutedForTurn) {
             return { ok: true, value: applyBotPowerMuteResponseV1(raw) };
           }
-          if (speakerEchoesAddressedSpeech) {
+          if (speakerEchoesForTurn) {
             return { ok: true, value: applyBotPowerEchoResponseV1(speakerEchoSource) };
           }
           const base = validateAutoFallbackText(raw);
@@ -14612,7 +14633,7 @@ async function generateCoffeeBotReply(args: {
     replyText = applyBotPowerMuteResponseV1(speakerReplyRepaired);
   } else if (speakerRepeatsForHearingPower) {
     replyText = hearingRepeatDirective?.repeatedContent ?? "";
-  } else if (speakerEchoesAddressedSpeech) {
+  } else if (speakerEchoesForTurn) {
     replyText = applyBotPowerEchoResponseV1(speakerEchoSource);
   }
   if (
@@ -14791,7 +14812,7 @@ async function generateCoffeeBotReply(args: {
     ? applyBotPowerMuteResponseV1(replyText)
     : speakerRepeatsForHearingPower
       ? hearingRepeatDirective?.repeatedContent ?? replyText
-      : speakerEchoesAddressedSpeech
+      : speakerEchoesForTurn
       ? applyBotPowerEchoResponseV1(speakerEchoSource)
       : autoTagPeerMentionsInCoffeeReply(
         replyText,
@@ -14993,7 +15014,7 @@ async function generateCoffeeBotReply(args: {
       ? "hearing_repeat"
       : speakerQuietIgnored
         ? "intermittent_mute"
-      : speakerEchoesAddressedSpeech
+      : speakerEchoesForTurn
         ? "echo_addressed"
         : undefined,
   });

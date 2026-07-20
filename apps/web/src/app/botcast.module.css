@@ -15,6 +15,7 @@
   --botcast-field: rgba(15, 16, 24, .86);
   --botcast-shadow: rgba(0, 0, 0, .34);
   --botcast-bg: var(--botcast-canvas);
+  --botcast-curtain: #000;
   --botcast-logo-surface: color-mix(in srgb, var(--botcast-accent) 10%, #0d0f17);
   --botcast-logo-art-shadow: drop-shadow(0 1px 1px rgba(255,255,255,.28)) drop-shadow(0 5px 12px rgba(0,0,0,.44));
   --botcast-accent: var(--prism-m);
@@ -73,6 +74,7 @@
   --botcast-line: rgba(25, 26, 42, .1);
   --botcast-field: rgba(255, 255, 255, .84);
   --botcast-shadow: rgba(74, 66, 125, .13);
+  --botcast-curtain: #fff;
   --botcast-logo-surface: color-mix(in srgb, var(--botcast-accent) 6%, #f7f8fc);
   --botcast-logo-art-shadow: drop-shadow(0 1px 1px rgba(16,18,31,.24)) drop-shadow(0 5px 12px rgba(66,69,103,.16));
 }
@@ -120,6 +122,7 @@
 .episodePreRoll { grid-column: 2; grid-row: 2; position: relative; z-index: 120; min-width: 0; min-height: 0; display: grid; place-items: center; overflow: hidden; isolation: isolate; color: #fff; background: radial-gradient(circle at 50% 44%, color-mix(in srgb, var(--botcast-accent) 22%, transparent), transparent 31%), radial-gradient(circle at 50% 50%, #171724 0%, #080910 58%, #020307 100%); opacity: 1; transition: opacity 460ms ease, filter 460ms ease; }
 .episodePreRoll[data-phase="landing"] { opacity: 0; filter: brightness(1.22); pointer-events: none; }
 .episodePreRoll::before { position: absolute; inset: 0; z-index: -1; content: ""; opacity: .32; background: repeating-linear-gradient(0deg, rgba(255,255,255,.025) 0 1px, transparent 1px 4px); mask-image: radial-gradient(circle at center, #000, transparent 78%); }
+.episodePreRoll[data-kind="intro"]::after { position: absolute; inset: 0; z-index: 10; content: ""; background: var(--botcast-curtain); pointer-events: none; animation: signalIntroCurtainOut 720ms cubic-bezier(.4,0,.2,1) both; }
 .episodePreRoll > button { position: absolute; top: 24px; right: 28px; border: 1px solid rgba(255,255,255,.19); border-radius: 999px; padding: 8px 12px; color: rgba(255,255,255,.72); background: rgba(255,255,255,.055); font: 700 .68rem/1 system-ui; cursor: pointer; backdrop-filter: blur(12px); }
 .episodePreRoll > button:hover { color: #fff; border-color: rgba(255,255,255,.38); background: rgba(255,255,255,.1); }
 .preRollSignalField { position: absolute; width: min(72vw, 780px); aspect-ratio: 1; z-index: -1; opacity: .54; }
@@ -140,9 +143,10 @@
 .preRollMeters i { width: 3px; height: 8px; border-radius: 999px; background: color-mix(in srgb, var(--botcast-accent) 74%, #fff); box-shadow: 0 0 10px color-mix(in srgb, var(--botcast-accent) 45%, transparent); animation: signalPreRollMeter 820ms ease-in-out infinite alternate; }
 .preRollMeters i:nth-child(2n) { animation-delay: -180ms; }.preRollMeters i:nth-child(3n) { animation-delay: -390ms; }.preRollMeters i:nth-child(5n) { animation-delay: -610ms; }
 .episodeOutro .preRollSignalField { opacity: .32; }
-.shell[data-episode-outro="true"] { height: 100dvh; min-height: 100dvh; overflow: hidden; }
-.shell[data-episode-outro="true"] .main { overflow: hidden; }
-.episodeOutro { position: fixed; inset: 66px 0 0 286px; width: auto; height: auto; min-height: 0; contain: layout paint; }
+.episodeOutro { position: fixed; inset: 66px 0 0 286px; width: auto; height: auto; min-height: 0; contain: layout paint; background: var(--botcast-curtain); opacity: 0; animation: signalOutroCurtainIn 760ms cubic-bezier(.4,0,.2,1) both; }
+.episodeOutro .preRollLockup, .episodeOutro .preRollSignalField, .episodeOutro > button { transition: opacity 520ms ease, transform 520ms cubic-bezier(.2,.72,.18,1); }
+.episodeOutro[data-phase="curtain"] .preRollLockup, .episodeOutro[data-phase="curtain"] .preRollSignalField, .episodeOutro[data-phase="curtain"] > button { opacity: 0; pointer-events: none; }
+.episodeOutro[data-phase="curtain"] .preRollLockup { transform: translateY(8px) scale(.985); }
 .episodeOutro .preRollLogo { width: 118px; height: 118px; }
 .episodeOutro .preRollLogo .showLogo { width: 94px; border-radius: 24px; }
 .episodeOutro .preRollLockup h1 { margin-top: 14px; font-size: clamp(1.8rem, 4vw, 3.6rem); }
@@ -150,6 +154,8 @@
 .episodeOutro > .episodeReviewCopyButton { right: 166px; }
 .episodeOutro[data-phase="complete"] > button { border-color: color-mix(in srgb, var(--botcast-accent) 62%, rgba(255,255,255,.28)); color: #fff; background: color-mix(in srgb, var(--botcast-accent) 18%, rgba(255,255,255,.07)); }
 @keyframes signalPreRollRing { 0% { opacity: 0; transform: translate(-50%, -50%) scale(.18); } 22% { opacity: .8; } 100% { opacity: 0; transform: translate(-50%, -50%) scale(1); } }
+@keyframes signalIntroCurtainOut { from { opacity: 1; } to { opacity: 0; } }
+@keyframes signalOutroCurtainIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes signalPreRollLogoIn { from { opacity: 0; transform: scale(.72); filter: blur(8px); } to { opacity: 1; transform: scale(1); filter: blur(0); } }
 @keyframes signalPreRollReveal { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes signalPreRollOrbit { to { transform: rotate(360deg); } }
@@ -161,6 +167,7 @@
     radial-gradient(circle at 50% 42%, color-mix(in srgb, var(--botcast-accent) 18%, #fff), transparent 34%),
     radial-gradient(circle at 50% 50%, #fff 0%, #f4f6fb 58%, #e5eaf3 100%);
 }
+.shell[data-theme="light"] .episodeOutro { background: var(--botcast-curtain); }
 .shell[data-theme="light"] .episodePreRoll[data-phase="landing"] { filter: brightness(1.06) saturate(.88); }
 .shell[data-theme="light"] .episodePreRoll::before { opacity: .42; background: repeating-linear-gradient(0deg, rgba(31,35,55,.026) 0 1px, transparent 1px 4px); }
 .shell[data-theme="light"] .episodePreRoll > button { border-color: rgba(30,34,56,.15); color: rgba(23,23,36,.66); background: rgba(255,255,255,.6); box-shadow: 0 9px 26px rgba(65,69,103,.1), inset 0 1px rgba(255,255,255,.92); }
@@ -554,19 +561,11 @@
 .mugFallback { display: grid; place-items: center; width: 100%; height: 100%; font-size: clamp(1.5rem, 3vw, 2.5rem); filter: drop-shadow(0 7px 8px rgba(0,0,0,.5)); }
 .emptyChairLabel { position: absolute; z-index: 4; top: 47%; max-width: 150px; border: 1px solid rgba(255,255,255,.1); border-radius: 999px; padding: 7px 11px; color: rgba(255,255,255,.58); background: rgba(7,8,12,.52); backdrop-filter: blur(8px); text-align: center; font-size: .64rem; animation: signalEmptyChairReveal 260ms ease-out 640ms both; }
 
-.controlRoom { max-width: 1180px; margin: 14px auto 0; display: grid; grid-template-columns: minmax(0,1.5fr) minmax(270px,.7fr); gap: 14px; }
-.controlRoom[data-producer-guest="true"] { grid-template-columns: minmax(0, 1fr); }
+.controlRoom { max-width: 1180px; margin: 12px auto 0; }
 .liveLayout .controlRoom { max-width: 1320px; }
-.transcript, .producerControls, .replayTranscript { border: 1px solid var(--botcast-line); border-radius: 15px; background: var(--botcast-panel); box-shadow: 0 18px 44px var(--botcast-shadow); }
-.transcript { min-height: 260px; max-height: 370px; overflow: auto; padding: 18px; }
-.transcript article { display: grid; grid-template-columns: 110px 1fr; gap: 16px; padding: 10px 0; border-bottom: 1px solid var(--botcast-line); }
-.transcript article[data-role="host"] strong { color: var(--prism-s); }
-.transcript strong { font-size: .75rem; }.transcript p { margin: 0; color: var(--botcast-ink); line-height: 1.55; font-size: calc(.9rem * var(--power-message-font-scale, 1)); }
-.transcript article[data-power-voice-presence="loud"],
+.producerControls, .replayTranscript { border: 1px solid var(--botcast-line); border-radius: 15px; background: var(--botcast-panel); box-shadow: 0 18px 44px var(--botcast-shadow); }
 .replayTranscript button[data-power-voice-presence="loud"] { --power-message-font-scale: 1.12; }
-.transcript article[data-power-voice-presence="quiet"],
 .replayTranscript button[data-power-voice-presence="quiet"] { --power-message-font-scale: .88; }
-.thinking { color: var(--botcast-muted); font-size: .8rem; }
 
 @keyframes signalBotIdle {
   0%, 100% { transform: translate3d(0, 0, 0) rotate(var(--signal-avatar-lean)); }
@@ -588,17 +587,23 @@
   from { left: var(--signal-cup-return-x, var(--signal-cup-rest-x)); top: var(--signal-cup-return-y, var(--signal-cup-rest-y)); }
   to { left: var(--signal-cup-rest-x); top: var(--signal-cup-rest-y); }
 }
-.producerControls { padding: 18px; }
-.producerControls label { display: grid; gap: 8px; margin: 14px 0; color: var(--botcast-muted); font-size: .72rem; }
-.producerControls label > div { display: grid; grid-template-columns: 1fr auto; gap: 6px; }
-.producerControls button { border: 1px solid rgba(255,255,255,.13); border-radius: 8px; color: inherit; background: rgba(255,255,255,.055); padding: 9px 10px; cursor: pointer; }
-.producerControls button[data-queued="true"] { border-color: color-mix(in srgb, var(--botcast-accent) 72%, white); background: color-mix(in srgb, var(--botcast-accent) 18%, rgba(255,255,255,.055)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--botcast-accent) 24%, transparent); }
-.cueGrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
-.cueGrid .refocusCue { grid-column: 1 / -1; }
-.queuedCueStatus { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; margin: 10px 0 0; color: color-mix(in srgb, var(--botcast-accent) 72%, white); font-size: .7rem; line-height: 1.4; }
+.producerControls { display: grid; grid-template-columns: minmax(250px, .9fr) minmax(520px, 2fr); grid-template-areas: "composer cues" "status status"; gap: 12px 16px; align-items: stretch; padding: 14px; }
+.producerCueComposer { grid-area: composer; display: grid; align-content: center; gap: 7px; min-width: 0; }
+.producerControls label { display: grid; gap: 7px; margin: 0; color: var(--botcast-muted); font-size: .7rem; }
+.producerControls label > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.producerControls input { min-height: 46px; font: 650 .78rem/1.2 system-ui; }
+.producerControls button { border: 1px solid rgba(255,255,255,.13); border-radius: 13px; color: inherit; background: rgba(255,255,255,.055); padding: 11px 13px; font: 780 .74rem/1.1 system-ui; cursor: pointer; box-shadow: inset 0 1px rgba(255,255,255,.045); transition: transform 150ms ease, border-color 150ms ease, background 150ms ease, box-shadow 150ms ease; }
+.producerControls button:hover:not(:disabled) { transform: translateY(-2px); border-color: color-mix(in srgb, var(--botcast-accent) 42%, rgba(255,255,255,.18)); background: color-mix(in srgb, var(--botcast-accent) 10%, rgba(255,255,255,.07)); box-shadow: 0 9px 22px color-mix(in srgb, var(--botcast-accent) 12%, transparent), inset 0 1px rgba(255,255,255,.08); }
+.producerControls button:active:not(:disabled) { transform: translateY(1px) scale(.985); }
+.producerCueComposer button { min-width: 84px; }
+.producerControls button[data-queued="true"] { border-color: color-mix(in srgb, var(--botcast-accent) 72%, white); background: color-mix(in srgb, var(--botcast-accent) 20%, rgba(255,255,255,.06)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--botcast-accent) 24%, transparent), 0 10px 26px color-mix(in srgb, var(--botcast-accent) 18%, transparent), inset 0 1px rgba(255,255,255,.1); animation: signalCueQueued 720ms cubic-bezier(.2,.72,.18,1) both; }
+.cueGrid { grid-area: cues; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 9px; }
+.cueGrid button { min-height: 68px; }
+.queuedCueStatus { grid-area: status; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; margin: 0; border-top: 1px solid color-mix(in srgb, var(--botcast-accent) 20%, var(--botcast-line)); padding: 10px 2px 0; color: color-mix(in srgb, var(--botcast-accent) 72%, white); font-size: .7rem; line-height: 1.4; }
 .queuedCueStatus p { margin: 0; }
 .queuedCueStatus button { white-space: nowrap; font-size: .66rem; }
-.producerControls small { display: block; margin-top: 14px; color: #797b81; line-height: 1.45; }
+.producerCueComposer small { display: block; margin: 0; color: #797b81; font-size: .64rem; line-height: 1.35; }
+@keyframes signalCueQueued { from { transform: scale(.94); } 58% { transform: scale(1.025); } to { transform: scale(1); } }
 .returnButton { display: block; margin: 16px auto; }
 .producerGuestComposerDock { position: sticky; bottom: 0; z-index: 18; max-width: 1320px; margin: 0 auto; padding-top: 10px; background: linear-gradient(180deg, transparent, var(--botcast-canvas) 18%); }
 .producerGuestThinkingStatus { display: block; width: fit-content; margin: 0 0 7px auto; padding: 4px 9px; border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 24%, var(--botcast-line)); border-radius: 999px; color: var(--botcast-muted); background: color-mix(in srgb, var(--botcast-canvas) 92%, transparent); font: 700 .67rem/1.2 system-ui; letter-spacing: .04em; }
@@ -610,10 +615,10 @@
 .replayHeader { max-width: 1180px; margin: 0 auto 12px; display: flex; justify-content: space-between; align-items: end; gap: 20px; }
 .replayHeader h2 { margin: 6px 0; }.replayHeader p { margin: 0; color: var(--botcast-muted); font-size: .78rem; }
 .replayHeaderActions { display: flex; gap: 8px; }
-.replayControls { max-width: 1180px; margin: 12px auto; display: flex; gap: 10px; align-items: center; }
-.replayControls > button { border: 1px solid rgba(255,255,255,.12); border-radius: 7px; color: inherit; background: rgba(255,255,255,.04); padding: 8px 11px; cursor: pointer; }
+.replayControls { max-width: 1180px; margin: 12px auto; display: flex; gap: 12px; align-items: center; border: 1px solid var(--botcast-line); border-radius: 14px; padding: 10px 12px; background: var(--botcast-panel); box-shadow: 0 14px 36px var(--botcast-shadow); }
+.replayControls > button { min-width: 86px; min-height: 42px; border: 1px solid rgba(255,255,255,.12); border-radius: 10px; color: inherit; background: rgba(255,255,255,.04); padding: 9px 13px; font-weight: 780; cursor: pointer; }
 .replayControls > input { flex: 1; accent-color: var(--prism-m); }
-.replayTranscript { max-width: 1180px; max-height: 270px; margin: 0 auto; overflow: auto; padding: 8px; }
+.replayTranscript { max-width: 1180px; max-height: 320px; margin: 0 auto; overflow: auto; padding: 8px; }
 .replayTranscript button { width: 100%; display: grid; grid-template-columns: 110px 1fr; gap: 14px; text-align: left; border: 0; border-radius: 7px; padding: 9px 10px; color: var(--botcast-ink); background: transparent; cursor: pointer; }
 .replayTranscript button[data-active="true"] { background: color-mix(in srgb, var(--prism-m) 12%, transparent); }
 .replayTranscript strong { color: var(--prism-m); font-size: .72rem; }
@@ -760,7 +765,6 @@
 
 .shell[data-theme="light"] .productionDesk,
 .shell[data-theme="light"] .episodeOpenButton,
-.shell[data-theme="light"] .transcript,
 .shell[data-theme="light"] .producerControls,
 .shell[data-theme="light"] .replayTranscript {
   box-shadow: 0 22px 64px var(--botcast-shadow), inset 0 1px rgba(255,255,255,.78);
@@ -774,20 +778,21 @@
 .shell[data-theme="light"] .liveCameraControls button,
 .shell[data-theme="light"] .producerControls button,
 .shell[data-theme="light"] .liveTopline button { border-color: var(--botcast-line); background: rgba(255,255,255,.7); color: var(--botcast-ink); }
+.shell[data-theme="light"] .producerControls button[data-queued="true"] { border-color: color-mix(in srgb, var(--botcast-accent) 58%, var(--botcast-line)); background: color-mix(in srgb, var(--botcast-accent) 14%, rgba(255,255,255,.82)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--botcast-accent) 16%, transparent), 0 10px 26px color-mix(in srgb, var(--botcast-accent) 13%, transparent), inset 0 1px rgba(255,255,255,.9); }
 .shell[data-theme="light"] .liveCameraControls button[data-selected="true"] { border-color: transparent; color: #fff; background: linear-gradient(120deg, color-mix(in srgb, var(--botcast-host-accent) 76%, var(--prism-p)), var(--prism-m)); }
 .shell[data-theme="light"] .liveTopline .cutShowButton { border-color: rgba(164,42,37,.5); color: #fff; background: linear-gradient(135deg, #a82d29, #e24b3f); box-shadow: 0 7px 18px rgba(166,42,36,.2), inset 0 1px rgba(255,255,255,.16); }
 
 @media (min-width: 901px) and (min-height: 760px) {
   .shell[data-live-episode="true"] .main { overflow-y: hidden; }
   .shell[data-live-episode="true"] .liveLayout { height: 100%; box-sizing: border-box; overflow: hidden; }
-  .shell[data-live-episode="true"] .liveLayout .stageViewport { width: min(1320px, 100%, calc(177.78dvh - 764.45px)); }
-  .shell[data-live-episode="true"] .controlRoom { width: 100%; height: clamp(210px, 24dvh, 260px); align-items: stretch; }
-  .shell[data-live-episode="true"] .transcript,
-  .shell[data-live-episode="true"] .producerControls { box-sizing: border-box; min-height: 0; height: 100%; max-height: none; }
-  .shell[data-live-episode="true"] .producerControls { overflow: auto; }
+  .shell[data-live-episode="true"] .liveLayout .stageViewport { width: min(1320px, 100%, calc((100dvh - 320px) * 1.7778)); }
+  .shell[data-live-episode="true"] .controlRoom { width: 100%; }
   .shell[data-producer-guest="true"] .main { overflow-y: auto; }
   .shell[data-producer-guest="true"] .liveLayout { height: auto; min-height: 100%; overflow: visible; padding-bottom: 0; }
-  .shell[data-producer-guest="true"] .controlRoom { height: clamp(190px, 21dvh, 238px); }
+}
+
+@media (min-width: 901px) and (max-width: 1220px) {
+  .producerControls { grid-template-columns: minmax(0, 1fr); grid-template-areas: "composer" "cues" "status"; }
 }
 
 @media (max-width: 900px) {
@@ -857,7 +862,9 @@
   .stageLayoutModal .atmosphereMixer { grid-column: 1; grid-row: auto; width: 100%; max-width: none; }
   .stageLayoutEditorHeader { align-items: flex-start; flex-direction: column; }
   .stageLayoutEditorHeader > div { width: 100%; flex-wrap: wrap; }
-  .controlRoom { grid-template-columns: 1fr; }
+  .producerControls { grid-template-columns: minmax(0, 1fr); grid-template-areas: "composer" "cues" "status"; }
+  .cueGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cueGrid .refocusCue { grid-column: 1 / -1; }
   .setupGrid { grid-template-columns: 1fr; }.producerBrief { grid-column: auto; }
   .episodeLaunchRow { align-items: stretch; flex-direction: column; }
   .episodeModelControl { min-width: 0; }
@@ -876,6 +883,10 @@
 @media (prefers-reduced-motion: reduce) {
   .stageScene { transition-duration: 120ms; }
   .stageScene, .episodeOpenButton, .episodeDeleteButton, .episodePreRoll, .preRollLockup, .showAudiencePulse, .showIdentityGearButton, .showIdentityGearButton span { transition: none !important; }
+  .episodePreRoll[data-kind="intro"]::after { opacity: 0; animation: none !important; }
+  .episodeOutro { opacity: 1; animation: none !important; }
+  .producerControls button { transition: none !important; }
+  .producerControls button[data-queued="true"] { animation: none !important; }
   .avatarRig { animation: none !important; transform: rotate(var(--signal-avatar-lean)); }
   .avatarRig[data-departed="true"] { opacity: 0; transform: translate3d(42%, 5%, 0) rotate(calc(var(--signal-avatar-lean) + 9deg)) scale(.92); }
   .avatarRig[data-listener-reaction] { filter: drop-shadow(0 0 10px color-mix(in srgb, var(--botcast-studio-accent) 24%, transparent)); }

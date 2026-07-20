@@ -367,24 +367,24 @@ describe("Botcast persistence and isolation", () => {
     const eligible = Array.from({ length: 100 }, (_, index) =>
       botcastPowerInterruptionPlanV1({
         episodeId: `episode-${index}`,
-        guestTurnOrdinal: 0,
+        targetTurnOrdinal: 0,
         powerId: "interrupting-tom",
         powerName: "Interrupting Tom",
         frequency: "frequent",
         strength: "large",
-        guestTurnsSinceLastInterruption: null,
+        targetTurnsSinceLastInterruption: null,
       }),
     ).find(Boolean);
     assert.ok(eligible);
     assert.equal(
       botcastPowerInterruptionPlanV1({
         episodeId: "episode-cooldown",
-        guestTurnOrdinal: 3,
+        targetTurnOrdinal: 3,
         powerId: "interrupting-tom",
         powerName: "Interrupting Tom",
         frequency: "frequent",
         strength: "large",
-        guestTurnsSinceLastInterruption: 0,
+        targetTurnsSinceLastInterruption: 0,
       }),
       null,
     );
@@ -625,8 +625,15 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
-  it("rejects two echo-bound cast members before creating an episode", () => {
+  it("lets an echo-bound host originate one opening before both cast members echo", async () => {
     const db = fixture();
+    const originalOpening =
+      "This is Mara Vale in the Margins. I'm Mara Vale, and my guest is Ivo Stone. Ivo, let us begin with the impossible echo loop.";
+    const provider = recordingProvider([
+      originalOpening,
+      "This generated guest line is replaced by the exact echo.",
+      "This generated host closing is replaced by the exact echo.",
+    ], []);
     const name = "Echo";
     const intent = "Echo whatever is addressed to this bot and say nothing else.";
     const powersJson = JSON.stringify([{
@@ -650,17 +657,41 @@ describe("Botcast persistence and isolation", () => {
     );
     try {
       const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
-      assert.throws(
-        () => createBotcastEpisode(db, "user-1", show.id, {
-          guestBotId: "guest-1",
-          topic: "An impossible echo loop",
-        }),
-        /both have hard echo Powers, so neither can originate the opening/u,
+      const created = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "An impossible echo loop",
+        producerBrief: "PRIVATE: never put this sentence on air.",
+      });
+      const opening = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {},
+        generation(provider),
       );
-      const episodeCount = db
-        .prepare("SELECT COUNT(*) AS count FROM botcast_episodes")
-        .get() as { count: number };
-      assert.equal(episodeCount.count, 0);
+      const mirrored = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {},
+        generation(provider),
+      );
+      const closed = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        { cue: { kind: "wrap_up" } },
+        generation(provider),
+      );
+
+      assert.equal(opening.message?.speakerRole, "host");
+      assert.equal(opening.message?.content, originalOpening);
+      assert.doesNotMatch(opening.message?.content ?? "", /PRIVATE/u);
+      assert.equal(mirrored.message?.speakerRole, "guest");
+      assert.equal(mirrored.message?.content, opening.message?.content);
+      assert.equal(closed.message?.speakerRole, "host");
+      assert.equal(closed.message?.content, opening.message?.content);
+      assert.equal(closed.episode.status, "completed");
     } finally {
       db.close();
     }
@@ -6160,13 +6191,13 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
-  it("lets a bot guest open and close when the host can only echo addressed speech", async () => {
+  it("lets an echo-bound host originate one opening before the guest carries the close", async () => {
     const db = fixture();
     const captures: ProviderMessage[][] = [];
     const provider = recordingProvider(
       [
-        "A generic opening that omits the required cast names.",
-        "This generated host line must be replaced by the exact echo.",
+        "Welcome to the show. I am Mara Vale, and Ivo Stone joins me to examine the cost of copied invention.",
+        "A copied invention still has to survive materials, tolerances, judgment, and consequence.",
         "The useful closing is to test every copied idea against consequence. Mara, thank you, and thank you for listening.",
       ],
       captures,
@@ -6200,7 +6231,7 @@ describe("Botcast persistence and isolation", () => {
       const opening = await advanceBotcastEpisode(
         db, "user-1", created.id, {}, generation(provider),
       );
-      const echoed = await advanceBotcastEpisode(
+      const guestTurn = await advanceBotcastEpisode(
         db, "user-1", created.id, {}, generation(provider),
       );
       const closing = await advanceBotcastEpisode(
@@ -6211,18 +6242,18 @@ describe("Botcast persistence and isolation", () => {
         generation(provider),
       );
 
-      assert.equal(opening.message?.speakerRole, "guest");
+      assert.equal(opening.message?.speakerRole, "host");
       assert.match(opening.message?.content ?? "", new RegExp(show.name, "u"));
       assert.match(opening.message?.content ?? "", /Mara Vale/u);
       assert.match(opening.message?.content ?? "", /Ivo Stone/u);
-      assert.equal(echoed.message?.speakerRole, "host");
-      assert.equal(echoed.message?.content, opening.message?.content);
+      assert.equal(guestTurn.message?.speakerRole, "guest");
+      assert.notEqual(guestTurn.message?.content, opening.message?.content);
       assert.equal(closing.message?.speakerRole, "guest");
       assert.equal(closing.episode.status, "completed");
       assert.equal(closing.episode.messages.at(-1)?.speakerRole, "guest");
       const openingPrompt = captures[0]!.map((message) => message.content).join("\n");
       const closingPrompt = captures[2]!.map((message) => message.content).join("\n");
-      assert.match(openingPrompt, /guest-led opening/u);
+      assert.match(openingPrompt, /Echo opening exception/u);
       assert.match(closingPrompt, /host cannot originate a closing/u);
     } finally {
       db.close();
@@ -6256,7 +6287,7 @@ describe("Botcast persistence and isolation", () => {
         {},
         generation(provider),
       );
-      const echoed = await advanceBotcastEpisode(
+      const guestTurn = await advanceBotcastEpisode(
         db,
         "user-1",
         episode.id,
@@ -6270,8 +6301,8 @@ describe("Botcast persistence and isolation", () => {
         generation(provider),
       );
 
-      assert.equal(opening.message?.speakerRole, "guest");
-      assert.equal(echoed.message?.speakerRole, "host");
+      assert.equal(opening.message?.speakerRole, "host");
+      assert.equal(guestTurn.message?.speakerRole, "guest");
       assert.equal(cut.message?.speakerRole, "guest");
       assert.notEqual(cut.message?.content, "...");
       assert.match(cut.message?.content ?? "", /thank you for listening/iu);
@@ -6335,12 +6366,12 @@ describe("Botcast persistence and isolation", () => {
       for (let attempt = 0; attempt < 100; attempt += 1) {
         const plan = botcastPowerInterruptionPlanV1({
           episodeId: created.id,
-          guestTurnOrdinal: 1,
+          targetTurnOrdinal: 1,
           powerId: "interrupting-tom",
           powerName: name,
           frequency: "frequent",
           strength: "large",
-          guestTurnsSinceLastInterruption: null,
+          targetTurnsSinceLastInterruption: null,
         });
         if (plan) break;
         created = createBotcastEpisode(db, "user-1", show.id, {
@@ -6350,12 +6381,12 @@ describe("Botcast persistence and isolation", () => {
       }
       assert.ok(botcastPowerInterruptionPlanV1({
         episodeId: created.id,
-        guestTurnOrdinal: 1,
+        targetTurnOrdinal: 1,
         powerId: "interrupting-tom",
         powerName: name,
         frequency: "frequent",
         strength: "large",
-        guestTurnsSinceLastInterruption: null,
+        targetTurnsSinceLastInterruption: null,
       }));
 
       await advanceBotcastEpisode(
@@ -6405,6 +6436,251 @@ describe("Botcast persistence and isolation", () => {
       const followUpPrompt = captures[4]!.map((message) => message.content).join("\n");
       assert.match(followUpPrompt, /exact audience-heard prefix/u);
       assert.match(followUpPrompt, /Do not invent, complete, paraphrase/u);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("lets an interruptive host cut off an echo-bound guest mid-repeat", async () => {
+    const db = fixture();
+    const captures: ProviderMessage[][] = [];
+    const hostLine =
+      "Before the copied design reaches the workshop, which part of the original maker's judgment has already disappeared from view?";
+    const provider = recordingProvider(
+      [
+        "A generic opening that will use the safe introduction fallback.",
+        "This generated guest line is replaced by the exact echo.",
+        hostLine,
+        "This generated guest line is also replaced by the exact echo.",
+        "The missing judgment is exactly where I wanted to interrupt you.",
+      ],
+      captures,
+    );
+    const hostPowerName = "Interrupting Tom";
+    const hostPowerIntent =
+      "Aggressively jumps in after whoever just spoke and cuts into real live openings whenever possible.";
+    const guestPowerName = "Echoes";
+    const guestPowerIntent =
+      "Can only repeat the latest words spoken directly to her, verbatim.";
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'host-1'").run(
+      JSON.stringify([{
+        version: 1,
+        id: "power-interrupting",
+        name: hostPowerName,
+        intent: hostPowerIntent,
+        enabled: true,
+        compileStatus: "ready",
+        compiled: {
+          version: 1,
+          sourceHash: botPowerSourceHashV1(hostPowerName, hostPowerIntent),
+          selfCue: "Cut in quickly when an opening appears.",
+          observerCue: "Tom frequently interrupts.",
+          effects: [
+            { type: "turn_gravity", direction: "more", strength: "large" },
+            { type: "response_bond", direction: "toward", strength: "large", targets: [{ kind: "all" }] },
+            { type: "action_bias", cue: "Cut in quickly.", frequency: "frequent" },
+          ],
+          ruleLabels: ["Frequently interrupts"],
+        },
+      }]),
+    );
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'guest-1'").run(
+      JSON.stringify([{
+        version: 1,
+        id: "power-copycat",
+        name: guestPowerName,
+        intent: guestPowerIntent,
+        enabled: true,
+        compileStatus: "ready",
+        compiled: {
+          version: 1,
+          sourceHash: botPowerSourceHashV1(guestPowerName, guestPowerIntent),
+          selfCue: "Repeat the latest speech addressed to you verbatim. Say nothing else.",
+          observerCue: "The guest can only echo the latest speech addressed to them.",
+          effects: [{ type: "echo_addressed" }],
+          ruleLabels: ["Echoes addressed speech"],
+        },
+      }]),
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      let created = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "The cost of copied invention",
+      });
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const plan = botcastPowerInterruptionPlanV1({
+          episodeId: created.id,
+          targetTurnOrdinal: 1,
+          powerId: "power-interrupting",
+          powerName: hostPowerName,
+          frequency: "frequent",
+          strength: "large",
+          targetTurnsSinceLastInterruption: null,
+        });
+        if (plan) break;
+        created = createBotcastEpisode(db, "user-1", show.id, {
+          guestBotId: "guest-1",
+          topic: `The cost of copied invention ${attempt + 1}`,
+        });
+      }
+      assert.ok(botcastPowerInterruptionPlanV1({
+        episodeId: created.id,
+        targetTurnOrdinal: 1,
+        powerId: "power-interrupting",
+        powerName: hostPowerName,
+        frequency: "frequent",
+        strength: "large",
+        targetTurnsSinceLastInterruption: null,
+      }));
+
+      await advanceBotcastEpisode(
+        db, "user-1", created.id, {}, generation(provider),
+      );
+      await advanceBotcastEpisode(
+        db, "user-1", created.id, {}, generation(provider),
+      );
+      const host = await advanceBotcastEpisode(
+        db, "user-1", created.id, {}, generation(provider),
+      );
+      const guest = await advanceBotcastEpisode(
+        db, "user-1", created.id, {}, generation(provider),
+      );
+
+      assert.equal(host.message?.content, hostLine);
+      assert.equal(guest.message?.speakerRole, "guest");
+      assert.match(guest.message?.content ?? "", /—$/u);
+      assert.equal(
+        hostLine.startsWith((guest.message?.content ?? "").slice(0, -1)),
+        true,
+      );
+      assert.notEqual(guest.message?.content, hostLine);
+      assert.equal(guest.message?.voicePerformanceText, null);
+      const outcome = guest.episode.events.find(
+        (event) =>
+          event.kind === "utterance" &&
+          event.payload.messageId === guest.message?.id,
+      )?.payload.powerOutcome as Record<string, unknown>;
+      assert.equal(outcome.effect, "interruption");
+      assert.equal(outcome.powerId, "power-interrupting");
+      assert.equal("unheardContent" in outcome, false);
+      assert.equal(
+        guest.episode.events.some(
+          (event) =>
+            event.kind === "listener_reaction" &&
+            (event.payload.plan as Record<string, unknown> | undefined)?.messageId ===
+              guest.message?.id,
+        ),
+        false,
+      );
+      assert.doesNotMatch(
+        guest.message?.content ?? "",
+        /judgment has already disappeared from view/iu,
+      );
+
+      await advanceBotcastEpisode(
+        db, "user-1", created.id, {}, generation(provider),
+      );
+      const followUpPrompt = captures[4]!.map((message) => message.content).join("\n");
+      assert.match(followUpPrompt, /exact audience-heard prefix/u);
+      assert.match(followUpPrompt, /Do not invent, complete, paraphrase/u);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("lets an interruptive guest cut off the host mid-thought", async () => {
+    const db = fixture();
+    const captures: ProviderMessage[][] = [];
+    const longHostLine =
+      "The hidden cost appears when the copied design enters a working shop, because materials, tolerances, repairs, operator judgment, and accumulated practice all reshape what the artifact can safely become.";
+    const provider = recordingProvider(
+      [
+        "Welcome to the show. I am Mara Vale, and Ivo Stone joins me to examine the cost of copied invention.",
+        "The copy always arrives without the original maker's lived context.",
+        longHostLine,
+        "Exactly, and that missing context is where I needed to cut in.",
+      ],
+      captures,
+    );
+    const name = "Interrupting Tom";
+    const intent =
+      "Aggressively jumps in after whoever just spoke and cuts into real live openings whenever possible.";
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'guest-1'").run(
+      JSON.stringify([{
+        version: 1,
+        id: "interrupting-tom-guest",
+        name,
+        intent,
+        enabled: true,
+        compileStatus: "ready",
+        compiled: {
+          version: 1,
+          sourceHash: botPowerSourceHashV1(name, intent),
+          selfCue: "Cut in quickly when an opening appears.",
+          observerCue: "Tom frequently interrupts.",
+          effects: [
+            { type: "turn_gravity", direction: "more", strength: "large" },
+            { type: "response_bond", direction: "toward", strength: "large", targets: [{ kind: "all" }] },
+            { type: "action_bias", cue: "Cut in quickly.", frequency: "frequent" },
+          ],
+          ruleLabels: ["Interrupts"],
+        },
+      }]),
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      let created = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "The cost of copied invention",
+      });
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const plan = botcastPowerInterruptionPlanV1({
+          episodeId: created.id,
+          targetTurnOrdinal: 1,
+          powerId: "interrupting-tom-guest",
+          powerName: name,
+          frequency: "frequent",
+          strength: "large",
+          targetTurnsSinceLastInterruption: null,
+        });
+        if (plan) break;
+        created = createBotcastEpisode(db, "user-1", show.id, {
+          guestBotId: "guest-1",
+          topic: `The cost of copied invention ${attempt + 1}`,
+        });
+      }
+
+      await advanceBotcastEpisode(
+        db, "user-1", created.id, {}, generation(provider),
+      );
+      await advanceBotcastEpisode(
+        db, "user-1", created.id, {}, generation(provider),
+      );
+      const host = await advanceBotcastEpisode(
+        db, "user-1", created.id, {}, generation(provider),
+      );
+
+      assert.equal(host.message?.speakerRole, "host");
+      assert.match(host.message?.content ?? "", /—$/u);
+      assert.equal(
+        longHostLine.startsWith((host.message?.content ?? "").slice(0, -1)),
+        true,
+      );
+      const outcome = host.episode.events.find(
+        (event) =>
+          event.kind === "utterance" &&
+          event.payload.messageId === host.message?.id,
+      )?.payload.powerOutcome as Record<string, unknown>;
+      assert.equal(outcome.effect, "interruption");
+      assert.equal(outcome.interruptingBotId, "guest-1");
+      assert.equal(outcome.interruptedBotId, "host-1");
+
+      await advanceBotcastEpisode(
+        db, "user-1", created.id, {}, generation(provider),
+      );
+      const followUpPrompt = captures[3]!.map((message) => message.content).join("\n");
+      assert.match(followUpPrompt, /exact audience-heard prefix/u);
     } finally {
       db.close();
     }

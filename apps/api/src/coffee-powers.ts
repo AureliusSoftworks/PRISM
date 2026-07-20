@@ -682,7 +682,7 @@ export function coffeePowersPromptForSpeaker(
     if (names.length > 0) lines.push(`Hard rule: address only ${names.join(", ")}.`);
   }
   if (own?.effects.some((effect) => effect.type === "echo_addressed")) {
-    lines.push("Hard echo rule: repeat only the latest speech addressed directly to you, verbatim, with no added words or actions. If nothing was addressed to you, remain silent.");
+    lines.push("Hard echo rule: on your first turn, if nobody has addressed speech to you yet, originate one short in-character opening. After that, repeat only the latest speech addressed directly to you, verbatim, with no added words or actions; if there is no addressed speech, remain silent.");
   }
   const responseBudget = coffeePowerResponseBudgetForBot(plan, speakerBotId);
   if (responseBudget) {

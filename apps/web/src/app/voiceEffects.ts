@@ -117,6 +117,33 @@ export function resolveVoiceEffectPlan(
           },
         ],
       };
+    case "resonance":
+      return {
+        highpassHz: 45,
+        lowpassHz: 14_000,
+        drive: 0,
+        bitDepth: 16,
+        dryGain: 0.82,
+        outputTrim: 0.66,
+        noiseGain: 0,
+        modulationFrequencyHz: 0,
+        modulationDepth: 0,
+        modulationBaseGain: 1,
+        parallelVoices: [
+          {
+            delaySeconds: 0.01,
+            detuneCents: -320,
+            gain: 0.28,
+          },
+          {
+            delaySeconds: 0.018,
+            detuneCents: 0,
+            gain: 0.22,
+            delayModulationFrequencyHz: 0.19,
+            delayModulationDepthSeconds: 0.003,
+          },
+        ],
+      };
     case "deep-space":
       return {
         highpassHz: 35,
