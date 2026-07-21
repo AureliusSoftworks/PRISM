@@ -51,7 +51,7 @@ describe("shared bot ambient presence rig", () => {
 
   it("wires only the intended immersive avatar surfaces", () => {
     const rigUses = pageSource.match(/<BotAmbientPresenceRig\b/g) ?? [];
-    assert.equal(rigUses.length, 6);
+    assert.equal(rigUses.length, 7);
     assert.match(pageSource, /scheduleKey=\{`zen-live-/);
     assert.match(pageSource, /scheduleKey=\{`waiting-room-/);
     assert.match(pageSource, /scheduleKey=\{`coffee-replay-player-/);

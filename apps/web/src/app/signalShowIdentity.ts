@@ -1,4 +1,5 @@
 import {
+  BOTCAST_ECHO_DASHBOARD_BLURB_FALLBACK,
   BOT_POWER_CANONICAL_SILENCE_V1,
   type BotcastShow,
 } from "@localai/shared";
@@ -40,11 +41,15 @@ export function signalShowMagicManifest(
   const hasOnlyCanonicalSilence =
     show.dashboardBlurbs.length === 1 &&
     show.dashboardBlurbs[0] === BOT_POWER_CANONICAL_SILENCE_V1;
+  const hasOnlyCanonicalEchoBlurb =
+    show.dashboardBlurbs.length === 1 &&
+    show.dashboardBlurbs[0] === BOTCAST_ECHO_DASHBOARD_BLURB_FALLBACK;
   const usesFallbackStudioIdentity =
     /^Canonical persona-first set bible for\b/u.test(show.studioIdentity);
   const needsTextIdentity =
     show.dashboardBlurbs.length === 0 ||
-    (hasOnlyCanonicalSilence && usesFallbackStudioIdentity);
+    ((hasOnlyCanonicalSilence || hasOnlyCanonicalEchoBlurb) &&
+      usesFallbackStudioIdentity);
   const needsAudioPackage =
     show.introAudio.source !== "elevenlabs" ||
     show.atmosphereAudio.source !== "elevenlabs";

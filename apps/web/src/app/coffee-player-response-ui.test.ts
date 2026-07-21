@@ -68,7 +68,7 @@ describe("Coffee player response UI wiring", () => {
   it("starts the speaking reveal only from real voice playback start", () => {
     assert.match(
       pageSource,
-      /onStart:[\s\S]*?settle\(coffeeVoiceStartedDurationMs\(durationMs, fallbackDuration\)\)/,
+      /onStart:[\s\S]*?const resolvedDurationMs = coffeeVoiceStartedDurationMs\([\s\S]{0,120}durationMs,[\s\S]{0,80}fallbackDuration,[\s\S]{0,120}\)[\s\S]{0,900}settle\(resolvedDurationMs\)/,
     );
     assert.match(
       pageSource,
