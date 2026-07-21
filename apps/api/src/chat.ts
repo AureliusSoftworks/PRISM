@@ -95,10 +95,13 @@ import {
   applyPrismMoodNegativeTurn,
   applyPrismMoodPositiveTurn,
   applyPrismMoodPowerIgnoredTurn,
+  applyBotPowerEternalIntroductionResponseV1,
   applyBotPowerEchoResponseV1,
+  applyBotPowerMumbledResponseV1,
   applyBotPowerMuteResponseV1,
   applyBotPowerResponseBudgetV1,
   botPowerObserverCueLinesV1,
+  botPowerForgetfulPriorMessagesV1,
   createDefaultPrismMoodState,
   decayPrismMood,
   hydrateAssistantMessageParts,
@@ -2395,10 +2398,14 @@ export interface UserChatSettings {
   botSystemPrompt?: string;
   /** Hard runtime enforcement for an active compiled mute Power. */
   botPowerMuted?: boolean;
+  /** Hard rolling public-tail context and no-older-relationship contract. */
+  botPowerEternalIntroduction?: boolean;
   /** This turn hit the replay-stable half-mute branch of a Quiet Power. */
   botPowerQuietIgnored?: boolean;
-  /** Hard runtime enforcement for an active compiled addressed-speech echo Power. */
+  /** Hard runtime enforcement for an active compiled addressed-speech Copycat Power. */
   botPowerEchoAddressed?: boolean;
+  /** Hard public-speech replacement after the bot authors a coherent private intent. */
+  botPowerMumbling?: boolean;
   /** Per-response prose envelope from a Ready response-budget Power. */
   botPowerResponseBudget?: BotPowerResponseBudgetEffectV1 | null;
   /** Optional per-bot generation overrides, forwarded to the provider. */
@@ -6304,13 +6311,20 @@ export async function processChatMessage(
     : settings.botSystemPrompt;
   const isStarterPrompt = settings.starterPrompt === true;
   const botPowerMutedTurn = settings.botPowerMuted === true;
+  const botPowerEternalIntroductionTurn =
+    settings.botPowerEternalIntroduction === true && !botPowerMutedTurn;
   const botPowerQuietIgnoredTurn = settings.botPowerQuietIgnored === true;
   const botPowerEchoTurn = settings.botPowerEchoAddressed === true;
   const botPowerEchoOpeningTurn =
     botPowerEchoTurn && (isStarterPrompt || personaTransitionTurn);
   const botPowerEchoEnforcedTurn = botPowerEchoTurn && !botPowerEchoOpeningTurn;
+  const botPowerMumblingTurn = settings.botPowerMumbling === true;
   const botPowerResponseBudgetTurn = settings.botPowerResponseBudget ?? null;
-  const botPowerHardResponseTurn = botPowerMutedTurn || botPowerEchoEnforcedTurn;
+  const botPowerHardResponseTurn =
+    botPowerMutedTurn ||
+    botPowerEternalIntroductionTurn ||
+    botPowerEchoEnforcedTurn ||
+    botPowerMumblingTurn;
   const commandCenterPromptTurn =
     settings.commandCenterPrompt === true || Boolean(settings.promptShortcut);
   const promptInputOverride =
@@ -6371,7 +6385,13 @@ export async function processChatMessage(
       ? "WebSearch is unavailable in LOCAL mode. Switch to ONLINE mode to search the web."
       : "WebSearch is unavailable because a Brave Search API key is not configured. Add one in Settings → Connections or set BRAVE_SEARCH_API_KEY on the server.";
   const modeRuntimePlan = buildModeRuntimePlan(mode, incognitoForTurn);
-  const { skipPersonalFacts, skipSummarization, retrievalMode } = modeRuntimePlan;
+  const skipPersonalFacts =
+    modeRuntimePlan.skipPersonalFacts || botPowerEternalIntroductionTurn;
+  const skipSummarization =
+    modeRuntimePlan.skipSummarization || botPowerEternalIntroductionTurn;
+  const retrievalMode = botPowerEternalIntroductionTurn
+    ? "none" as const
+    : modeRuntimePlan.retrievalMode;
   pushBackendEvent(
     "route",
     "POST /api/chat accepted",
@@ -6409,6 +6429,12 @@ export async function processChatMessage(
   if (incognitoForTurn) {
     throwIfChatRequestCancelled(settings.signal);
     const history = sanitizeEphemeralMessages(settings.ephemeralMessages);
+    const holderPromptHistory = botPowerEternalIntroductionTurn
+      ? botPowerForgetfulPriorMessagesV1(
+          history,
+          `forgetful:${mode}:${conversationId ?? "incognito"}:${activeMemoryBotId ?? "default"}:${history.length}:${promptUserMessage}`,
+        )
+      : history;
     const manualWebSearchPayload = manualWebSearchRequested && !webSearchUnavailableReason
       ? await executeWebSearch(
           manualWebSearchQuery!,
@@ -6431,12 +6457,14 @@ export async function processChatMessage(
       coffeeContinuityContexts: [],
       memoryLines: [],
       memoryClarification: null,
-      sessionResumeContext: settings.sessionResumeContext,
+      sessionResumeContext: botPowerEternalIntroductionTurn
+        ? null
+        : settings.sessionResumeContext,
       topicReset: settings.topicReset === true,
-      chatHistory: history,
+      chatHistory: holderPromptHistory,
       userMessage: promptUserMessage,
       mode,
-      askQuestionMode,
+      askQuestionMode: botPowerEternalIntroductionTurn ? "off" : askQuestionMode,
       interruptedContent: settings.prismInterruption?.interruptedContent,
       imageSlotSystemHint: buildImageSlotSystemHint(userId, conversationId ?? null),
     });
@@ -6466,7 +6494,7 @@ export async function processChatMessage(
         botOverrides: settings.botOverrides,
         secondaryOllamaHost: settings.secondaryOllamaHost,
         prismImageToolLlmModel: settings.prismImageToolLlmModel,
-        recentMessages: history,
+        recentMessages: holderPromptHistory,
       });
     pushBackendEvent(
       "model",
@@ -6599,17 +6627,34 @@ export async function processChatMessage(
       !botPowerHardResponseTurn && isStarterPrompt && Boolean(parsedAssistant.sendGeneratedImage?.prompt?.trim());
     let assistantDisplay = botPowerMutedTurn
       ? applyBotPowerMuteResponseV1(assistantDisplayRaw)
+      : botPowerEternalIntroductionTurn
+        ? applyBotPowerEternalIntroductionResponseV1(
+            assistantDisplayRaw,
+            settings.starterPromptLabel,
+            promptUserMessage,
+          )
       : botPowerEchoEnforcedTurn
         ? applyBotPowerEchoResponseV1(isStarterPrompt ? "" : message)
       : isStarterPrompt && !starterSendGeneratedImageRequested
       ? enforceStarterOpeningQuestion(assistantDisplayRaw, [])
       : assistantDisplayRaw;
-    if (!botPowerHardResponseTurn && webSearchStatus !== "blocked") {
+    if (
+      (!botPowerHardResponseTurn || botPowerMumblingTurn) &&
+      webSearchStatus !== "blocked"
+    ) {
       assistantDisplay = applyBotPowerResponseBudgetV1(
         assistantDisplay,
         botPowerResponseBudgetTurn,
         botPowerResponseBudgetTurn?.mode === "minimal" ? 1 : 2,
       );
+    }
+    if (
+      botPowerMumblingTurn &&
+      !botPowerMutedTurn &&
+      !botPowerEternalIntroductionTurn &&
+      !botPowerEchoEnforcedTurn
+    ) {
+      assistantDisplay = applyBotPowerMumbledResponseV1(assistantDisplay);
     }
     const turnEvaluation = isStarterPrompt
       ? undefined
@@ -6618,7 +6663,7 @@ export async function processChatMessage(
       ? false
       : hasRepairSignal(normalizeOpinionText(message));
     const assistantMood = evaluateAssistantMood({
-      assistantContent: assistantDisplay,
+      assistantContent: botPowerMumblingTurn ? assistantDisplayRaw : assistantDisplay,
       toneDelta: turnEvaluation?.delta,
       repairSignal,
     });
@@ -6771,6 +6816,11 @@ export async function processChatMessage(
         ? { zenDisplay: parsedAssistant.zenDisplay }
         : {}),
       ...(webSearchForTurn ? { webSearch: webSearchForTurn } : {}),
+      ...(botPowerEchoEnforcedTurn
+        ? { botPowerExactResponse: "speech_copy" as const }
+        : botPowerMumblingTurn
+          ? { botPowerExactResponse: "speech_obfuscation" as const }
+        : {}),
     };
     const assistantTail: ChatMessage[] = [assistantMessageProse];
     const promptShortcutWithResolvedPrompt = withPromptShortcutResolvedPrompt(
@@ -7546,27 +7596,52 @@ export async function processChatMessage(
 	  const promptMessages = buildPromptMessages({
     botSystemPrompt: effectiveBotSystemPrompt,
     userDisplayName: settings.userDisplayName,
-    suppressDisplayNameHint: isStarterPrompt,
+    suppressDisplayNameHint: isStarterPrompt || botPowerEternalIntroductionTurn,
     devMemoriesEnabled: settings.devMemoriesEnabled,
     devMemoriesText: settings.devMemoriesText,
-    botOpinion: existingBotOpinion,
-    prismMood,
-    moodBoundaryHint: prismMoodForgivenessSystemHint,
-    threadSummary,
-    zenSessionMemoryContext,
-    zenPersonaContinuityContext,
+    botOpinion: botPowerEternalIntroductionTurn ? null : existingBotOpinion,
+    prismMood: botPowerEternalIntroductionTurn ? null : prismMood,
+    moodBoundaryHint: botPowerEternalIntroductionTurn
+      ? null
+      : prismMoodForgivenessSystemHint,
+    threadSummary: botPowerEternalIntroductionTurn ? null : threadSummary,
+    zenSessionMemoryContext: botPowerEternalIntroductionTurn
+      ? null
+      : zenSessionMemoryContext,
+    zenPersonaContinuityContext: botPowerEternalIntroductionTurn
+      ? null
+      : zenPersonaContinuityContext,
     zenPersonaContinuityLabel: settings.starterPromptLabel,
-    coffeeContinuityContexts,
-    memoryLines,
-    mentionedBotContexts,
-    mentionedBotOverflowNames,
-    memoryClarification,
-    sessionResumeContext: settings.sessionResumeContext,
+    coffeeContinuityContexts: botPowerEternalIntroductionTurn
+      ? []
+      : coffeeContinuityContexts,
+    memoryLines: botPowerEternalIntroductionTurn ? [] : memoryLines,
+    mentionedBotContexts: botPowerEternalIntroductionTurn
+      ? []
+      : mentionedBotContexts,
+    mentionedBotOverflowNames: botPowerEternalIntroductionTurn
+      ? []
+      : mentionedBotOverflowNames,
+    memoryClarification: botPowerEternalIntroductionTurn
+      ? null
+      : memoryClarification,
+    sessionResumeContext: botPowerEternalIntroductionTurn
+      ? null
+      : settings.sessionResumeContext,
     topicReset: settings.topicReset === true,
-    chatHistory: history,
+    chatHistory: botPowerEternalIntroductionTurn
+      ? botPowerForgetfulPriorMessagesV1(
+          history,
+          `forgetful:${mode}:${activeConversationId}:${activeMemoryBotId ?? "default"}:${history.length}:${promptUserMessage}`,
+        )
+      : history,
     userMessage: promptUserMessage,
     mode,
-    askQuestionMode: memoryClarification ? "explicit" : askQuestionMode,
+    askQuestionMode: botPowerEternalIntroductionTurn
+      ? "off"
+      : memoryClarification
+        ? "explicit"
+        : askQuestionMode,
 	    interruptedContent: settings.prismInterruption?.interruptedContent,
 	    imageSlotSystemHint: buildImageSlotSystemHint(userId, activeConversationId),
 	  });
@@ -7793,6 +7868,12 @@ export async function processChatMessage(
     !botPowerHardResponseTurn && isStarterPrompt && Boolean(parsedAssistant.sendGeneratedImage?.prompt?.trim());
   let assistantDisplay = botPowerMutedTurn
     ? applyBotPowerMuteResponseV1(assistantDisplayRaw)
+    : botPowerEternalIntroductionTurn
+      ? applyBotPowerEternalIntroductionResponseV1(
+          assistantDisplayRaw,
+          settings.starterPromptLabel,
+          promptUserMessage,
+        )
     : botPowerEchoEnforcedTurn
       ? applyBotPowerEchoResponseV1(
           personaTransitionTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn || isStarterPrompt
@@ -7806,12 +7887,23 @@ export async function processChatMessage(
         settings.starterPromptWarrantsIntro === true
       )
     : assistantDisplayRaw;
-  if (!botPowerHardResponseTurn && webSearchStatus !== "blocked") {
+  if (
+    (!botPowerHardResponseTurn || botPowerMumblingTurn) &&
+    webSearchStatus !== "blocked"
+  ) {
     assistantDisplay = applyBotPowerResponseBudgetV1(
       assistantDisplay,
       botPowerResponseBudgetTurn,
       botPowerResponseBudgetTurn?.mode === "minimal" ? 1 : 2,
     );
+  }
+  if (
+    botPowerMumblingTurn &&
+    !botPowerMutedTurn &&
+    !botPowerEternalIntroductionTurn &&
+    !botPowerEchoEnforcedTurn
+  ) {
+    assistantDisplay = applyBotPowerMumbledResponseV1(assistantDisplay);
   }
 	  const assistantMood = botPowerQuietIgnoredTurn || prismMoodPauseTurn
 	    ? {
@@ -7821,7 +7913,7 @@ export async function processChatMessage(
     : commandCenterPromptTurn || personaTransitionTurn || zenAutonomyTurn || zenLiveActionInterruptTurn
     ? NEUTRAL_MOOD_EVALUATION
     : evaluateAssistantMood({
-        assistantContent: assistantDisplay,
+        assistantContent: botPowerMumblingTurn ? assistantDisplayRaw : assistantDisplay,
         toneDelta: turnEvaluation?.delta,
         sessionOpinion: existingSessionOpinion,
         botOpinion: existingBotOpinion,
@@ -7998,6 +8090,10 @@ export async function processChatMessage(
 	    autoRecovery,
 	    botPowerExactResponse: botPowerQuietIgnoredTurn
 	      ? "intermittent_mute"
+        : botPowerEchoEnforcedTurn
+          ? "speech_copy"
+        : botPowerMumblingTurn
+          ? "speech_obfuscation"
 	      : undefined,
 	  });
   const toolPayloadImageOnly = sentGeneratedImagePersisted

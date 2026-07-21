@@ -4,6 +4,10 @@ export const SIGNAL_ELEVENLABS_SOUND_PROMPT_MAX_CHARACTERS = 450;
 const SIGNAL_ATMOSPHERE_AUDIO_MAX_BYTES = 4 * 1024 * 1024;
 export const COFFEE_ELEVENLABS_ACTION_SFX_MODEL = "eleven_text_to_sound_v2";
 const COFFEE_ACTION_SFX_AUDIO_MAX_BYTES = 512 * 1024;
+export const AVATAR_ELEVENLABS_SFX_MODEL = "eleven_text_to_sound_v2";
+export const AVATAR_ELEVENLABS_SFX_DURATION_SECONDS = 4;
+export const AVATAR_ELEVENLABS_SFX_PROMPT_MAX_CHARACTERS = 400;
+const AVATAR_ELEVENLABS_SFX_AUDIO_MAX_BYTES = 1024 * 1024;
 
 export const COFFEE_ELEVENLABS_ACTION_SFX = {
   cup_set_down: {
@@ -118,8 +122,11 @@ function boundSignalAtmospherePrompt(value: string): string {
   );
 }
 
-async function soundError(response: Response): Promise<ElevenLabsSoundError> {
-  let detail = "ElevenLabs could not create the Signal atmosphere audio.";
+async function soundError(
+  response: Response,
+  fallbackMessage = "ElevenLabs could not create the Signal atmosphere audio.",
+): Promise<ElevenLabsSoundError> {
+  let detail = fallbackMessage;
   try {
     const payload = (await response.json()) as Record<string, unknown>;
     const nested =
@@ -139,6 +146,89 @@ async function soundError(response: Response): Promise<ElevenLabsSoundError> {
     // Keep the player-facing fallback above when the provider body is not JSON.
   }
   return new ElevenLabsSoundError(response.status, detail);
+}
+
+export function buildAvatarElevenLabsSfxPrompt(value: string): string {
+  const request = boundSignalAtmosphereText(
+    value,
+    AVATAR_ELEVENLABS_SFX_PROMPT_MAX_CHARACTERS,
+  );
+  return `A seamless looping character sound effect: ${request}. Smooth loop boundary, stable level, and enough space for clear speech.`;
+}
+
+export async function requestAvatarElevenLabsSfx(args: {
+  apiKey: string;
+  prompt: string;
+  signal?: AbortSignal;
+  fetchImpl?: typeof fetch;
+}): Promise<{
+  audioBytes: Buffer;
+  contentType: string;
+  requestId: string | null;
+}> {
+  const fetchImpl = args.fetchImpl ?? fetch;
+  const response = await fetchImpl(
+    "https://api.elevenlabs.io/v1/sound-generation?output_format=mp3_44100_128",
+    {
+      method: "POST",
+      signal: args.signal,
+      headers: {
+        "content-type": "application/json",
+        "xi-api-key": args.apiKey,
+      },
+      body: JSON.stringify({
+        text: buildAvatarElevenLabsSfxPrompt(args.prompt),
+        duration_seconds: AVATAR_ELEVENLABS_SFX_DURATION_SECONDS,
+        prompt_influence: 0.35,
+        loop: true,
+        model_id: AVATAR_ELEVENLABS_SFX_MODEL,
+      }),
+    },
+  );
+  if (!response.ok) {
+    throw await soundError(
+      response,
+      "ElevenLabs could not create the avatar sound loop.",
+    );
+  }
+  const announcedLength = Number(response.headers.get("content-length") ?? 0);
+  if (
+    Number.isFinite(announcedLength) &&
+    announcedLength > AVATAR_ELEVENLABS_SFX_AUDIO_MAX_BYTES
+  ) {
+    throw new ElevenLabsSoundError(
+      502,
+      "ElevenLabs returned oversized avatar sound audio.",
+    );
+  }
+  const audioBytes = Buffer.from(await response.arrayBuffer());
+  if (audioBytes.length === 0) {
+    throw new ElevenLabsSoundError(
+      502,
+      "ElevenLabs returned empty avatar sound audio.",
+    );
+  }
+  if (audioBytes.length > AVATAR_ELEVENLABS_SFX_AUDIO_MAX_BYTES) {
+    throw new ElevenLabsSoundError(
+      502,
+      "ElevenLabs returned oversized avatar sound audio.",
+    );
+  }
+  const contentType = response.headers
+    .get("content-type")
+    ?.split(";")[0]
+    ?.trim();
+  if (!contentType?.startsWith("audio/")) {
+    throw new ElevenLabsSoundError(
+      502,
+      "ElevenLabs returned an invalid avatar sound audio format.",
+    );
+  }
+  return {
+    audioBytes,
+    contentType,
+    requestId: response.headers.get("request-id"),
+  };
 }
 
 export async function requestCoffeeElevenLabsActionSfx(args: {

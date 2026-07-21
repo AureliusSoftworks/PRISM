@@ -90,6 +90,35 @@ describe("Signal experience shell", () => {
     assert.match(css, /\.liveCameraControls button\[data-selected="true"\]/u);
   });
 
+  it("cuts on live speech, lingers after it, then uses Wide while a bot thinks", () => {
+    assert.match(source, /const liveBotThinking = Boolean/u);
+    assert.match(
+      source,
+      /liveSpeech\?\.reveal\.phase === "preparing"[\s\S]{0,120}livePreparedMessageIsBot/u,
+    );
+    assert.match(
+      source,
+      /producerGuestThinkingEndedAtRef\.current !== null[\s\S]{0,120}liveNextSpeakerIsBot/u,
+    );
+    assert.match(source, /signalLiveAutoCameraShot\(\{/u);
+    assert.match(
+      source,
+      /const liveSpeakingShot =[\s\S]{0,120}liveCameraMode === "auto"/u,
+    );
+    assert.match(source, /speakingShot: liveSpeakingShot/u);
+    assert.match(
+      source,
+      /postSpeechHoldShot:[\s\S]{0,100}liveCameraMode === "auto"[\s\S]{0,100}liveCameraPostSpeechHoldShot/u,
+    );
+    assert.match(source, /SIGNAL_LIVE_CAMERA_POST_SPEECH_HOLD_MS = 900/u);
+    assert.match(source, /holdLiveCameraAfterSpeech\(message\.speakerRole\)/u);
+    assert.match(source, /botThinking: liveBotThinking/u);
+    assert.match(
+      source,
+      /producerGuestThinking:[\s\S]{0,120}liveProducerGuestThinking[\s\S]{0,120}liveCameraMode === "auto"/u,
+    );
+  });
+
   it("plays saved listener reactions without taking the primary mic or fixed camera", () => {
     assert.match(source, /botcastListenerReactionForMessage/u);
     assert.match(source, /resolveListenerReactionAtMs/u);
@@ -130,21 +159,52 @@ describe("Signal experience shell", () => {
     assert.match(pageSource, /data-cup-sipping=/u);
   });
 
+  it("lets a Producer guest sip coffee without submitting a transcript turn", () => {
+    assert.match(source, /const \[producerGuestSipActive, setProducerGuestSipActive\]/u);
+    assert.match(
+      source,
+      /episode\?\.guestKind === "producer"[\s\S]{0,180}episode\.status === "live"[\s\S]{0,180}botHasCoffeeCup\(liveGuestBot\)/u,
+    );
+    assert.match(
+      source,
+      /const sipCoffeeAsProducerGuest = \(\): void => \{[\s\S]{0,700}setProducerGuestSipActive\(true\)[\s\S]{0,700}setProducerGuestSipActive\(false\)/u,
+    );
+    assert.match(
+      source,
+      /role === "guest" && manualProducerGuestSip[\s\S]{0,120}sippingOverride: true/u,
+    );
+    assert.match(source, /aria-label="Sip coffee on air"/u);
+    assert.match(source, /producerGuestIsSpeaking \|\|[\s\S]{0,120}signalGuestCupTravelMode !== "idle"/u);
+    assert.match(css, /\.producerGuestSipButton/u);
+  });
+
   it("renders the authored two-seat stage and empty-chair aftermath", () => {
     assert.match(source, /data-role="host"/u);
     assert.match(source, /data-role="guest"/u);
     assert.match(source, /data-signal-presence="host"/u);
     assert.match(source, /data-signal-presence="guest"/u);
     assert.match(source, /Guest has left the studio/u);
+    assert.match(source, /Host has left the studio/u);
     assert.match(
       source,
-      /const departureMonologueOnMic =[\s\S]*?args\.activeMessage\?\.speakerRole === "guest"[\s\S]*?speakingMessageId === args\.activeMessage\.id/u,
+      /const guestDepartureMonologueOnMic =[\s\S]*?args\.activeMessage\?\.speakerRole === "guest"[\s\S]*?speakingMessageId === args\.activeMessage\.id/u,
     );
     assert.match(
       source,
-      /const departed = recordedGuestDeparture && !departureMonologueOnMic/u,
+      /const hostDepartureMonologueOnMic =[\s\S]*?args\.activeMessage\?\.speakerRole === "host"[\s\S]*?speakingMessageId === args\.activeMessage\.id/u,
     );
-    assert.match(source, /data-departed=\{departed \? "true" : undefined\}/u);
+    assert.match(
+      source,
+      /const guestDeparted =[\s\S]*?recordedGuestDeparture && !guestDepartureMonologueOnMic/u,
+    );
+    assert.match(
+      source,
+      /const hostDeparted =[\s\S]*?recordedHostDeparture && !hostDepartureMonologueOnMic/u,
+    );
+    assert.match(
+      source,
+      /case "host_departed":[\s\S]*?return "Host ended the show"/u,
+    );
     assert.match(
       css,
       /\.avatarRig\[data-departed="true"\][^}]*signalGuestWalkout 900ms/iu,
@@ -184,6 +244,14 @@ describe("Signal experience shell", () => {
       /className=\{`\$\{styles\.zenLiveBotPresencePlate\} \$\{styles\.signalBotPresencePlate\}`\}/u,
     );
     assert.match(pageSource, /data-zen-live-bot-presence-plate="true"/u);
+    assert.match(
+      source,
+      /const renderedAvatar = renderAvatar\?\.\(bot,[\s\S]{0,420}if \(bot\.producerGuest\)/u,
+    );
+    assert.match(
+      pageSource,
+      /if \(botSummary\.producerGuest\)[\s\S]{0,2400}data-prism-persona="true"[\s\S]{0,2400}glyph=\{zenDefaultPrismGlyph\}[\s\S]{0,800}frameMaterialSeed=\{PRISM_FACTORY_CLEAN_FRAME_SEED\}/u,
+    );
     assert.match(pageSource, /renderMug=\{\(botSummary, mugState\) =>/u);
     assert.match(pageSource, /buildCoffeeCupVisualState\(\{/u);
     assert.match(
@@ -577,6 +645,7 @@ describe("Signal experience shell", () => {
       source,
       /`\/api\/botcast\/episodes\/\$\{encodeURIComponent\(response\.episode\.id\)\}\/advance`/u,
     );
+    assert.match(source, /body: JSON\.stringify\(\{ theme \}\)/u);
     assert.match(
       source,
       /playPreparedEpisodeMessage\(\s*opening\.message,\s*opening\.episode,/u,
@@ -723,6 +792,11 @@ describe("Signal experience shell", () => {
     assert.match(outroSource, /phase: "curtain"/u);
     assert.match(outroSource, /phase: "holding"/u);
     assert.match(outroSource, /phase: "complete"/u);
+    assert.match(source, /SIGNAL_EPISODE_OUTRO_DEAD_AIR_MS = 2_000/u);
+    assert.match(
+      outroSource,
+      /setTimeout\(resolve, SIGNAL_EPISODE_OUTRO_DEAD_AIR_MS\)[\s\S]{0,100}outroRunIdRef\.current !== runId[\s\S]{0,100}setEpisodeOutro\(/u,
+    );
     assert.doesNotMatch(outroSource, /setEpisodeOutro\(null\)/u);
     assert.match(css, /\.episodeOutro\[data-phase="complete"\] > button/u);
     assert.match(css, /\.episodeOutro > \.episodeReviewCopyButton/u);
@@ -744,6 +818,11 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
+      /onAirElapsedMs:\s*signalEpisodeRuntimeMs\([\s\S]{0,180}Date\.now\(\)/u,
+    );
+    assert.match(source, /discarded:\s*response\.discarded === true/u);
+    assert.match(
+      source,
       /invalidateEpisodeOperation\(\);[\s\S]{0,180}setCuttingShow\(true\)/u,
     );
     assert.match(
@@ -755,7 +834,10 @@ describe("Signal experience shell", () => {
       /disabled=\{episode\.status === "completed" \|\| cuttingShow\}/u,
     );
     assert.match(source, /■ Cut show/u);
-    assert.match(source, /quick host sign-off/u);
+    assert.match(source, /aria-label="Cut the live show"/u);
+    assert.match(source, /Signal transmission discarded/u);
+    assert.match(source, /Early cut · not saved/u);
+    assert.match(source, /!episodeOutro\.discarded/u);
     assert.match(css, /\.episodeOutro \.preRollLogo\s*\{[^}]*width:\s*118px/u);
     assert.match(css, /\.liveTopline \.cutShowButton/u);
     assert.match(
@@ -893,7 +975,13 @@ describe("Signal experience shell", () => {
     );
     assert.match(source, /const activeGuestMessage =[\s\S]{0,180}speakerRole === "guest"/u);
     assert.match(source, /setEpisode\(optimisticEpisode\)/u);
-    assert.match(source, /spokenContent,[\s\S]{0,160}nextHostInterruptionBridge/u);
+    assert.match(source, /spokenContent,[\s\S]{0,320}nextHostInterruptionBridge/u);
+    assert.match(source, /nextHostInterruptionCrosstalkPlan/u);
+    assert.match(source, /interruptedSpeakerCuePlayback: "crosstalk"/u);
+    assert.match(
+      source,
+      /interruptionCrosstalkPlan && interrupter[\s\S]{0,220}onListenerReaction\?\./u,
+    );
     assert.match(source, /cueDelivery/u);
     assert.doesNotMatch(source, /disabled=\{busy \|\| !producerCueReady/u);
     assert.match(css, /\.producerControls button\[data-queued="true"\]/u);
@@ -945,8 +1033,11 @@ describe("Signal experience shell", () => {
     );
     assert.match(source, /data-signal-producer-guest-composer="true"/u);
     assert.match(pageSource, /variant: "signal"/u);
+    assert.match(
+      pageSource,
+      /variant: "signal"[\s\S]{0,1400}mentionBots: EMPTY_COMPOSER_MENTION_PICKS[\s\S]{0,300}commandPicks: EMPTY_COMPOSER_COMMAND_PICKS[\s\S]{0,300}toolPicks: EMPTY_COMPOSER_COMMAND_PICKS[\s\S]{0,300}promptPicks: EMPTY_COMPOSER_COMMAND_PICKS[\s\S]{0,300}wildcardPicks: EMPTY_COMPOSER_COMMAND_PICKS/u,
+    );
     assert.match(pageSource, /showQueuedPromptRail: false/u);
-    assert.match(pageSource, /mentionBots: \[\]/u);
     assert.match(
       pageSource,
       /variant: "signal"[\s\S]{0,900}shouldSubmitComposerOnEnter/u,
@@ -955,6 +1046,30 @@ describe("Signal experience shell", () => {
       source,
       /producerGuestFallbackComposer[\s\S]{0,900}shouldSubmitComposerOnEnter/u,
     );
+  });
+
+  it("keeps Producer speech editable and cuts an audible host truthfully", () => {
+    assert.match(source, /signalProducerGuestHostInterruptionContext/u);
+    assert.match(
+      source,
+      /botcastSpeechRevealVisibleText\([\s\S]{0,120}trimEnd\(\)/u,
+    );
+    assert.match(
+      source,
+      /spokenContent === activeHostMessage\.content[\s\S]{0,120}!activeHostMessage\.content\.startsWith\(spokenContent\)/u,
+    );
+    assert.match(source, /interruptProducerGuestHostLocally/u);
+    assert.match(source, /invalidateEpisodeOperation\(\)/u);
+    assert.match(
+      source,
+      /\.\.\.\(producerGuestHostInterruption[\s\S]{0,100}\? \{ producerGuestHostInterruption \}[\s\S]{0,40}: \{\}\)/u,
+    );
+    assert.match(source, /inputDisabled: false/u);
+    assert.match(source, /shhActive: producerGuestHostInterruption !== null/u);
+    assert.match(source, /onShh: \(\) => void shushProducerGuestHost\(\)/u);
+    assert.match(pageSource, /inputDisabled: composer\.inputDisabled/u);
+    assert.match(pageSource, /interruptActive: composer\.shhActive/u);
+    assert.match(pageSource, /onInterrupt: composer\.onShh/u);
   });
 
   it("lets two echo-bound bots reach Signal's server-owned opening fallback", () => {
@@ -1170,7 +1285,7 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /!departed && audienceParticipants\?\.guest\.visible !== false/u,
+      /!guestDeparted && audienceParticipants\?\.guest\.visible !== false/u,
     );
     assert.match(
       source,

@@ -56,6 +56,20 @@ When adding or changing an effect:
 
 Do not build a giant universal Power engine when a shared contract and small adapters are sufficient. Do not solve a mode-specific visual with a global prompt, and do not make one applet's table/studio/document fiction leak into another lane.
 
+## Maintain the Power Collection
+
+When the user assigns a Power to a named showcase bot, publish or refresh that bot in the Marketplace's growing `power-collection` group as part of the same change. The collection is append-only by default and has no five-bot limit. Keep every bot independently installable while preserving collection install as one Library group. Skip publication only when the user explicitly asks for a private experiment or publishing would introduce a meaningful unresolved risk; record that decision in the verification notes.
+
+Use `scripts/update-power-bot-marketplace.mjs` as the canonical collection recipe and preserve every unrelated Marketplace entry or bundle. For each named Power bot:
+
+1. Keep a stable Marketplace ID and hash, add or update its recipe, and append its ID to the `power-collection` roster without pruning earlier showcase bots.
+2. Give it a concise card subtitle and description plus a complete structured profile. Describe the character and lived condition, not the implementation.
+3. Export the ready portable Power, authored prompt/profile, curated face and unique thinking spinner, authored voice profile, and a short preview line. Recompile deterministic hard rules so old Library snapshots cannot publish stale semantics; preserve ready prompt-only Powers when no structured effect honestly matches.
+4. Run the updater in `--dry-run` mode against the source Library first, then `--apply` with a new workspace backup directory. Never modify the source Library database and never overwrite an existing backup.
+5. Extend `botMarketplaceCatalog.test.ts` with collection membership, descriptions, profile/prompt presence, ready source hashes, effect contracts, curated face inventory, and the full unbounded roster. Verify a second dry run reports no changes.
+
+Installing the collection must recreate it as a Library group through the existing Marketplace theme flow. Do not add a bespoke installer or UI cap when the shared theme/group path already supports the growing roster.
+
 ## Cover every mode
 
 Before implementation, make a mode impact matrix from the live applet registry. For each current or planned applet, choose and justify one policy:
@@ -80,6 +94,14 @@ Add focused tests at the lowest useful layers:
 - persistence, replay/reload, backup/export/import, and UI/tutorial coverage when touched;
 - an inventory or policy test that exposes unreviewed future modes when appropriate.
 
+### Require a live LLM behavior check
+
+Do not complete a newly created or materially changed Power from deterministic tests alone. Make at least one real LLM call through an available PRISM provider using the production-composed system prompt for a relevant active mode and a short synthetic trigger message. For a Chat or Zen baseline, prefer `scripts/validate-prism-power-live.mjs`; it reads the exported bot archive, composes the production persona, and prints a credential-free JSON result. It defaults to LOCAL `llama3.2`; run ONLINE calls through `/Users/jared/.codex/bin/with-secrets`. Add another sample for each mode adapter whose prompt or target semantics materially differ. Keep LOCAL checks local; use ONLINE only through the user's configured credentials and existing privacy gates. Never include private conversation history, secrets, or personal data in a validation prompt.
+
+Before calling the model, write explicit pass criteria from the outcome contract: required observable behavior, prohibited failure modes, target identity, and any hard rule that runtime code—not the model—must enforce. Record the provider, model, mode, synthetic input, response, and pass/fail judgment in the Bead or verification artifact without recording credentials. For soft Powers, the reply must visibly express the intended pressure while preserving agency and safety. For hard Powers, the live call supplements rather than replaces deterministic engine enforcement.
+
+Treat a failed or ambiguous sample as an incomplete Power. Fix the compiled cue, prompt composition, or mode adapter and rerun the same scenario until it passes, or report a genuine provider blocker. Do not leave live-model validation as an optional manual gap when a provider is available.
+
 Run the narrow suites first, then targeted typecheck/lint and `git diff --check` in proportion to risk. Review `apps/web/src/app/firstRunOnboarding.ts` and `apps/web/src/app/modeTutorials.ts` for every player-visible change. Update affected applet versions and `docs/applets.md` only for meaningful felt behavior, following repository conventions.
 
 Close only the Beads issue used for this work. Do not commit or push unless the user separately asks.
@@ -89,5 +111,6 @@ Report the result in this order:
 - **Outcome**: already integrated, completed, or blocked;
 - **Power contract**: the exact lived rule and assumptions;
 - **Mode coverage**: concise current/planned-mode decisions;
-- **Verification**: exact checks and results;
+- **Marketplace**: showcase bot, description, and `power-collection` membership or an explicit reason publication was skipped;
+- **Verification**: exact deterministic checks plus live provider/model, sampled mode(s), scenario, and result;
 - **Gaps**: only real remaining limitations or live-model/manual validation.

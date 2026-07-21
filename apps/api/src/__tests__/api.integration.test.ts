@@ -2043,6 +2043,47 @@ describe("API request integration", () => {
     }
   });
 
+  it("keeps avatar SFX generation offline in LOCAL and requests a loop in ONLINE", async () => {
+    const client = createClient();
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({ username: "avatar-sfx@example.com", password: "avatar-sfx-password" })
+    );
+    assert.equal(register.status, 201);
+    const userId = String((await json(register)).user.id);
+    db.prepare("UPDATE users SET preferred_provider = 'local' WHERE id = ?").run(userId);
+    const beforeCalls = fetchRecorder.calls.length;
+    const localResponse = await client.request(
+      "/api/avatar/sfx/generate",
+      jsonInit({ prompt: "A quiet clockwork breathing loop" })
+    );
+    assert.equal(localResponse.status, 409);
+    assert.equal(fetchRecorder.calls.length, beforeCalls);
+
+    db.prepare("UPDATE users SET preferred_provider = 'openai' WHERE id = ?").run(userId);
+    const previousKey = config.elevenLabsApiKey;
+    config.elevenLabsApiKey = "avatar-sfx-test-key";
+    try {
+      const onlineResponse = await client.request(
+        "/api/avatar/sfx/generate",
+        jsonInit({ prompt: "A quiet clockwork breathing loop" })
+      );
+      // The shared recorder returns JSON; reaching 502 proves the authorized
+      // route attempted the provider call without accepting non-audio output.
+      assert.equal(onlineResponse.status, 502);
+      assert.equal(fetchRecorder.calls.length, beforeCalls + 1);
+      const providerCall = fetchRecorder.calls.at(-1);
+      assert.match(providerCall?.input ?? "", /elevenlabs\.io\/v1\/sound-generation/u);
+      const providerBody = JSON.parse(String(providerCall?.init?.body)) as Record<string, unknown>;
+      assert.equal(providerBody.loop, true);
+      assert.equal(providerBody.duration_seconds, 4);
+      assert.equal(providerBody.model_id, "eleven_text_to_sound_v2");
+      assert.match(String(providerBody.text), /clockwork breathing loop/iu);
+    } finally {
+      config.elevenLabsApiKey = previousKey;
+    }
+  });
+
   it("synthesizes persisted LOCAL replies offline even when ElevenLabs is requested", async () => {
     const client = createClient();
     const register = await client.request(
@@ -2423,6 +2464,29 @@ describe("API request integration", () => {
       assert.equal(
         JSON.parse(String(reactionCalls[0]?.init?.body)).text,
         "mm-hm",
+      );
+      const beforeInterruptedSpeakerCalls = fetchRecorder.calls.length;
+      const interruptedSpeakerVoice = await client.request(
+        "/api/voices/synthesize",
+        jsonInit({
+          signalMessageId: "signal-online-voice-message",
+          interruptedSpeakerReactionText: "... okay, never mind, I guess.",
+          mode: "english",
+          engine: "elevenlabs",
+          profile: {
+            ...normalizeBotAudioVoiceProfileV1(undefined),
+            elevenLabsVoiceId: "signal-provider-voice",
+          },
+        }),
+      );
+      assert.equal(interruptedSpeakerVoice.status, 200);
+      const interruptedSpeakerCalls = fetchRecorder.calls.slice(
+        beforeInterruptedSpeakerCalls,
+      );
+      assert.equal(interruptedSpeakerCalls.length, 1);
+      assert.equal(
+        JSON.parse(String(interruptedSpeakerCalls[0]?.init?.body)).text,
+        "... okay, never mind, I guess.",
       );
       const conversationalReaction = await client.request(
         "/api/voices/synthesize",

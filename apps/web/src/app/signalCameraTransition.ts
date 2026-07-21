@@ -1,4 +1,5 @@
 export type SignalCameraTransitionMode = "animated" | "instant";
+export type SignalDirectedCameraShot = "left" | "right" | "wide";
 
 export const SIGNAL_CAMERA_TRANSITION_STORAGE_KEY =
   "prism.signal.camera-transition-mode.v1";
@@ -45,4 +46,21 @@ export function signalCameraTransitionsShouldAnimate(
   prefersReducedMotion: boolean,
 ): boolean {
   return mode === "animated" && !prefersReducedMotion;
+}
+
+/** Auto keeps the room visible while a bot prepares, then follows the speaker. */
+export function signalLiveAutoCameraShot(args: {
+  baseShot: SignalDirectedCameraShot;
+  listenerReactionShot?: SignalDirectedCameraShot | null;
+  speakingShot?: SignalDirectedCameraShot | null;
+  postSpeechHoldShot?: SignalDirectedCameraShot | null;
+  botThinking: boolean;
+  producerGuestThinking: boolean;
+}): SignalDirectedCameraShot {
+  if (args.listenerReactionShot) return args.listenerReactionShot;
+  if (args.speakingShot) return args.speakingShot;
+  if (args.postSpeechHoldShot) return args.postSpeechHoldShot;
+  if (args.botThinking) return "wide";
+  if (args.producerGuestThinking) return "right";
+  return args.baseShot;
 }

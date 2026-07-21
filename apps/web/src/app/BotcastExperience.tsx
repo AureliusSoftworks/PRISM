@@ -25,6 +25,7 @@ import {
   BOTCAST_SESSION_DURATION_MINUTES_MIN,
   BOTCAST_VOICE_LEVEL_MAX,
   BOTCAST_VOICE_LEVEL_STEP,
+  BOT_IDENTITY_MIRROR_TRANSITION_MS,
   botPowerAvatarScaleModeV1,
   botPowerIsMutedV1,
   botPowerResponseIsSilentV1,
@@ -35,8 +36,14 @@ import {
   botcastCameraOffsetYPercent,
   botcastCameraModeAt,
   botcastCameraShotAt,
+  botcastDepartureSpeakerRole,
   botcastGuestHasDepartedAt,
+  botcastHostHasDepartedAt,
   botcastHostInterruptionLineAt,
+  appendBotCrosstalkInterruptedSpeakerCue,
+  botCrosstalkInterruptedSpeakerCueForSeed,
+  botcastIdentityMirrorStateBeforeMessageV1,
+  botcastIdentityMirrorStatesAtV1,
   botcastInterruptionBridgeMessageId,
   botcastInterruptedGuestContent,
   botcastListenerReactionForMessage,
@@ -49,6 +56,7 @@ import {
   botcastSnapshotHasSpeakingOnlyAvatarVisibility,
   botcastSnapshotPowersForRoleV1,
   botcastVoiceLevelForBot,
+  botIdentityMirrorTransitionActiveV1,
   buildSignalMusicProfile,
   normalizeAccentForTheme,
   normalizeBotcastStudioAtmosphereMix,
@@ -77,6 +85,7 @@ import {
   type BotcastStudioLayout,
   type BotcastStudioLayoutItem,
   type BotcastVoiceLevelsByBotId,
+  type BotIdentityMirrorStateV1,
   type BotPowerAvatarScaleMode,
   type BotPowerVoicePresenceMode,
   type ListenerReactionPlanV1,
@@ -90,6 +99,7 @@ import {
 import { Dices, LoaderCircle } from "lucide-react";
 import {
   buildCoffeeCupVisualState,
+  coffeeCupSipAnimationTiming,
   type CoffeeCupVisualState,
 } from "./coffee-cup-sprites";
 import { nextBotcastShowIdAfterDeletion } from "./botcastDeletion";
@@ -134,8 +144,10 @@ import {
 } from "./signalHostCueTiming";
 import {
   readSignalCameraTransitionMode,
+  signalLiveAutoCameraShot,
   writeSignalCameraTransitionMode,
   type SignalCameraTransitionMode,
+  type SignalDirectedCameraShot,
 } from "./signalCameraTransition";
 import { signalEpisodeRetryDraft } from "./signalEpisodeRetry";
 import {
@@ -187,20 +199,73 @@ export interface BotcastBotSummary {
   glyph: string | null;
   online_enabled?: number | null;
   muted?: boolean;
+  echoesAddressedSpeech?: boolean;
   voiceGainMultiplier?: number;
   voicePresence?: BotPowerVoicePresenceMode | null;
-  echoesAddressedSpeech?: boolean;
   personaTemperament: SignalPersonaTemperament;
   producerGuest?: boolean;
+  /** Persisted public face/voice source only; mechanical role and bot identity stay unchanged. */
+  identityMirrorState?: BotIdentityMirrorStateV1 | null;
+  identityMirrorTransitionActive?: boolean;
+  identityMirrorTargetFaceActive?: boolean;
+}
+
+function botWithIdentityBeforeMessage(
+  bot: BotcastBotSummary,
+  currentEpisode: BotcastEpisode,
+  message: BotcastMessage,
+): BotcastBotSummary {
+  return {
+    ...bot,
+    identityMirrorState: botcastIdentityMirrorStateBeforeMessageV1(
+      currentEpisode,
+      bot.id,
+      message.id,
+    ),
+    identityMirrorTransitionActive: false,
+    identityMirrorTargetFaceActive: true,
+  };
 }
 
 export interface BotcastProducerGuestComposerState {
   value: string;
   awaitingAnswer: boolean;
+  inputDisabled: boolean;
   disabled: boolean;
+  shhActive: boolean;
   placeholder: string;
   onChange: (value: string) => void;
   onSubmit: () => void;
+  onShh: () => void;
+}
+
+export function signalProducerGuestHostInterruptionContext(args: {
+  episode: BotcastEpisode | null;
+  speakingMessageId: string | null;
+  liveSpeech: BotcastLiveSpeech | null;
+}): BotcastHostRedirectContext | null {
+  const activeHostMessage = args.episode?.messages.find(
+    (message) =>
+      message.id === args.speakingMessageId && message.speakerRole === "host",
+  );
+  if (
+    !activeHostMessage ||
+    args.liveSpeech?.messageId !== activeHostMessage.id ||
+    args.liveSpeech.reveal.phase !== "playing"
+  ) {
+    return null;
+  }
+  const spokenContent = botcastSpeechRevealVisibleText(
+    args.liveSpeech.reveal,
+  ).trimEnd();
+  if (
+    !spokenContent.trim() ||
+    spokenContent === activeHostMessage.content ||
+    !activeHostMessage.content.startsWith(spokenContent)
+  ) {
+    return null;
+  }
+  return { messageId: activeHostMessage.id, spokenContent };
 }
 
 export interface BotcastModelOption {
@@ -385,7 +450,11 @@ type SignalEpisodeOutro = {
   showName: string;
   phase: "curtain" | "holding" | "complete";
   forced: boolean;
+  discarded: boolean;
 };
+
+const SIGNAL_EPISODE_OUTRO_DEAD_AIR_MS = 2_000;
+const SIGNAL_LIVE_CAMERA_POST_SPEECH_HOLD_MS = 900;
 
 type SignalReviewCopyState = {
   episodeId: string;
@@ -733,9 +802,14 @@ function signalIntroIdentityForShow(
 function episodeOutcomeLabel(
   episode: Pick<BotcastEpisodeSummary, "outcome">,
 ): string {
-  return episode.outcome === "guest_departed"
-    ? "Guest walked out"
-    : "Completed";
+  switch (episode.outcome) {
+    case "guest_departed":
+      return "Guest walked out";
+    case "host_departed":
+      return "Host ended the show";
+    default:
+      return "Completed";
+  }
 }
 
 function signalProducerCueLabel(cue: BotcastProducerCue): string {
@@ -756,7 +830,15 @@ function signalProducerCueLabel(cue: BotcastProducerCue): string {
 }
 
 function guestHasDeparted(episode: BotcastEpisode): boolean {
-  return episode.events.some((event) => event.kind === "departure");
+  return episode.events.some(
+    (event) => botcastDepartureSpeakerRole(event) === "guest",
+  );
+}
+
+function hostHasDeparted(episode: BotcastEpisode): boolean {
+  return episode.events.some(
+    (event) => botcastDepartureSpeakerRole(event) === "host",
+  );
 }
 
 function avatarFallback(bot: BotcastBotSummary): ReactNode {
@@ -1022,6 +1104,8 @@ export function BotcastExperience({
   const [cameraSaving, setCameraSaving] = useState(false);
   const [cameraTransitionMode, setCameraTransitionMode] =
     useState<SignalCameraTransitionMode>("animated");
+  const [liveCameraPostSpeechHoldShot, setLiveCameraPostSpeechHoldShot] =
+    useState<SignalDirectedCameraShot | null>(null);
   const [replayElapsedMs, setReplayElapsedMs] = useState(0);
   const [replayPlaying, setReplayPlaying] = useState(false);
   const [replayVoicePending, setReplayVoicePending] = useState(false);
@@ -1063,6 +1147,7 @@ export function BotcastExperience({
   } | null>(null);
   const [signalCupTravelByRole, setSignalCupTravelByRole] =
     useState<SignalCupTravelByRole>(initialSignalCupTravelByRole);
+  const [producerGuestSipActive, setProducerGuestSipActive] = useState(false);
   const blockingAbortRef = useRef<AbortController | null>(null);
   const handledArtworkJobIdsRef = useRef(new Set<string>());
   const artworkJobCompletedCountRef = useRef(new Map<string, number>());
@@ -1070,6 +1155,7 @@ export function BotcastExperience({
   const queuedProducerCueRef = useRef<BotcastProducerCue | null>(null);
   const producerGuestThinkingStartedAtRef = useRef<number | null>(null);
   const producerGuestThinkingEndedAtRef = useRef<number | null>(null);
+  const producerGuestSipTimeoutRef = useRef<number | null>(null);
   const producerCueInputRef = useRef<HTMLInputElement | null>(null);
   const producerCueInputFocusedRef = useRef(false);
   const producerCueInputSelectionRef = useRef({ start: 0, end: 0 });
@@ -1102,6 +1188,7 @@ export function BotcastExperience({
   const liveListenerReactionFiredRef = useRef(new Set<string>());
   const signalDeadAirAsideTimerRef = useRef<number | null>(null);
   const signalDeadAirAsideTurnIdsRef = useRef(new Set<string>());
+  const liveCameraPostSpeechHoldTimerRef = useRef<number | null>(null);
   const replayListenerReactionFiredRef = useRef(new Set<string>());
   const deleteCancelButtonRef = useRef<HTMLButtonElement | null>(null);
   const deleteReturnFocusRef = useRef<HTMLElement | null>(null);
@@ -1145,6 +1232,7 @@ export function BotcastExperience({
       controller: AbortController,
       runId: number,
       prepareFollowingTurn?: boolean,
+      onPlaybackStart?: () => void,
     ) => Promise<void>
   >(async () => undefined);
 
@@ -1200,6 +1288,26 @@ export function BotcastExperience({
   useEffect(() => () => blockingAbortRef.current?.abort(), []);
 
   const activeEpisodeId = episode?.id ?? null;
+  const clearLiveCameraPostSpeechHold = useCallback((): void => {
+    if (liveCameraPostSpeechHoldTimerRef.current !== null) {
+      window.clearTimeout(liveCameraPostSpeechHoldTimerRef.current);
+      liveCameraPostSpeechHoldTimerRef.current = null;
+    }
+    setLiveCameraPostSpeechHoldShot(null);
+  }, []);
+  const holdLiveCameraAfterSpeech = useCallback(
+    (speakerRole: "host" | "guest"): void => {
+      clearLiveCameraPostSpeechHold();
+      setLiveCameraPostSpeechHoldShot(
+        speakerRole === "host" ? "left" : "right",
+      );
+      liveCameraPostSpeechHoldTimerRef.current = window.setTimeout(() => {
+        liveCameraPostSpeechHoldTimerRef.current = null;
+        setLiveCameraPostSpeechHoldShot(null);
+      }, SIGNAL_LIVE_CAMERA_POST_SPEECH_HOLD_MS);
+    },
+    [clearLiveCameraPostSpeechHold],
+  );
   useEffect(() => {
     if (!activeEpisodeId) return;
     if (signalModelWarmup) return;
@@ -1406,16 +1514,44 @@ export function BotcastExperience({
   }, [activeEpisodeId, replayEpisode?.id, syncSignalSipMouthTargets]);
 
   useEffect(() => {
+    clearLiveCameraPostSpeechHold();
+    if (producerGuestSipTimeoutRef.current !== null) {
+      window.clearTimeout(producerGuestSipTimeoutRef.current);
+      producerGuestSipTimeoutRef.current = null;
+    }
+    setProducerGuestSipActive(false);
     setSignalCupTravelByRole(initialSignalCupTravelByRole());
     setHostInterruptionOrdinal(0);
     liveListenerReactionFiredRef.current.clear();
     replayListenerReactionFiredRef.current.clear();
     assignQueuedProducerCue(null);
-  }, [activeEpisodeId, assignQueuedProducerCue, replayEpisode?.id]);
+  }, [
+    activeEpisodeId,
+    assignQueuedProducerCue,
+    clearLiveCameraPostSpeechHold,
+    replayEpisode?.id,
+  ]);
+
+  useEffect(
+    () => () => {
+      if (producerGuestSipTimeoutRef.current !== null) {
+        window.clearTimeout(producerGuestSipTimeoutRef.current);
+      }
+      if (liveCameraPostSpeechHoldTimerRef.current !== null) {
+        window.clearTimeout(liveCameraPostSpeechHoldTimerRef.current);
+      }
+    },
+    [],
+  );
 
   // Signal cleanup depends on this callback, so voice-setting changes must not
   // make React tear down the active episode as though the studio unmounted.
   const stopUtterance = useCallback((): void => {
+    if (liveCameraPostSpeechHoldTimerRef.current !== null) {
+      window.clearTimeout(liveCameraPostSpeechHoldTimerRef.current);
+      liveCameraPostSpeechHoldTimerRef.current = null;
+    }
+    setLiveCameraPostSpeechHoldShot(null);
     activeSpeechMessageIdRef.current = null;
     setSpeakingMessageId(null);
     setLiveSpeech(null);
@@ -1461,16 +1597,24 @@ export function BotcastExperience({
       episode: BotcastEpisode;
       show: BotcastShow;
       forced: boolean;
+      discarded?: boolean;
     }): Promise<void> => {
       if (presentedEpisodeOutroIdsRef.current.has(args.episode.id)) return;
       presentedEpisodeOutroIdsRef.current.add(args.episode.id);
       const runId = outroRunIdRef.current + 1;
       outroRunIdRef.current = runId;
+      // Let the host's final words settle in the live studio before the
+      // transmission curtain or outro audio begins.
+      await new Promise<void>((resolve) =>
+        window.setTimeout(resolve, SIGNAL_EPISODE_OUTRO_DEAD_AIR_MS),
+      );
+      if (outroRunIdRef.current !== runId) return;
       setEpisodeOutro({
         episodeId: args.episode.id,
         showName: args.show.name,
         phase: "curtain",
         forced: args.forced,
+        discarded: args.discarded === true,
       });
       const playback = playSignalOutroAudio({
         seed: `${args.show.id}:${args.episode.id}:${args.show.logo.seed}`,
@@ -1977,6 +2121,51 @@ export function BotcastExperience({
     if (!nextHostInterruptionBridge || !hostBot || hostBot.muted) return;
     onPrefetchUtterance?.(nextHostInterruptionBridge, hostBot);
   }, [hostBot, nextHostInterruptionBridge, onPrefetchUtterance]);
+  const nextHostInterruptionCrosstalkPlan = useMemo<
+    ListenerReactionPlanV1 | null
+  >(() => {
+    if (!episode || !hostBot || !nextHostInterruptionBridge) return null;
+    const activeGuestMessage = episode.messages.find(
+      (message) =>
+        message.id === speakingMessageId && message.speakerRole === "guest",
+    );
+    if (!activeGuestMessage || activeGuestMessage.botId === BOTCAST_PRODUCER_GUEST_ID) {
+      return null;
+    }
+    const seed = `signal-host-crosstalk-v1:${episode.id}:${activeGuestMessage.id}:${nextHostInterruptionBridge.content}`;
+    return {
+      v: 1,
+      name: "listenerReaction",
+      speakerBotId: activeGuestMessage.botId,
+      listenerBotId: hostBot.id,
+      messageId: activeGuestMessage.id,
+      targetSource: "role",
+      visualAction: "lean_in",
+      interjectionAttempt: true,
+      interruptedSpeakerCue:
+        botCrosstalkInterruptedSpeakerCueForSeed(seed),
+      interruptedSpeakerCuePlayback: "crosstalk",
+      targetProgress: 0.6,
+      seed,
+      cameraCutEligible: true,
+    };
+  }, [
+    episode,
+    hostBot,
+    nextHostInterruptionBridge,
+    speakingMessageId,
+  ]);
+  useEffect(() => {
+    if (!nextHostInterruptionCrosstalkPlan || !hostBot) return;
+    onPrefetchListenerReaction?.(
+      nextHostInterruptionCrosstalkPlan,
+      hostBot,
+    );
+  }, [
+    hostBot,
+    nextHostInterruptionCrosstalkPlan,
+    onPrefetchListenerReaction,
+  ]);
   const studioLayoutGuest = hostBot
     ? (botsById.get(studioLayoutPreviewGuestId) ??
       eligibleBots.find((bot) => bot.id !== hostBot.id) ??
@@ -2316,7 +2505,14 @@ export function BotcastExperience({
           {
             method: "POST",
             signal: controller.signal,
-            body: JSON.stringify({}),
+            body: JSON.stringify({
+              onAirElapsedMs: signalEpisodeRuntimeMs(
+                episode,
+                Date.now(),
+                producerGuestThinkingStartedAtRef.current,
+                producerGuestThinkingEndedAtRef.current,
+              ),
+            }),
           },
         );
         if (!episodeOperationIsCurrent(controller, runId)) return false;
@@ -2337,6 +2533,7 @@ export function BotcastExperience({
           episode: response.episode,
           show: selectedShow,
           forced: true,
+          discarded: response.discarded === true,
         });
         if (selectedShowId) {
           void loadEpisodes(selectedShowId).catch(() => undefined);
@@ -3026,15 +3223,9 @@ export function BotcastExperience({
     setBusy(true);
     setError(null);
     setBlockingOperation({
-      title: hostBot?.echoesAddressedSpeech
-        ? "Rephrasing the host’s one original thought"
-        : "Refreshing the host’s dashboard voice",
-      detail: hostBot?.echoesAddressedSpeech
-        ? `Signal is rewriting the one line ${selectedShow.name} will repeat forever.`
-        : `Signal is writing a new batch of short, show-specific lines for ${selectedShow.name}.`,
-      stepLabel: hostBot?.echoesAddressedSpeech
-        ? "Finding the most original way to say it again"
-        : "Writing and rejecting the generic lines",
+      title: "Refreshing the host’s dashboard voice",
+      detail: `Signal is writing a new batch of short, show-specific lines for ${selectedShow.name}.`,
+      stepLabel: "Writing and rejecting the generic lines",
       progress: null,
       cancellable: false,
     });
@@ -3055,21 +3246,19 @@ export function BotcastExperience({
       if (!response.generated) {
         setNotice(
           response.failureReason === "provider_error"
-            ? `Signal couldn’t reach the selected model for a new ${hostBot?.echoesAddressedSpeech ? "blurb" : "set of blurbs"}. The current ${hostBot?.echoesAddressedSpeech ? "line is" : "lines are"} unchanged; try again when the model is ready.`
-            : hostBot?.echoesAddressedSpeech
-              ? "The model answered without one usable persona-shaped originality claim. The current line is unchanged; try again for a fresh pass."
-              : "The model answered, but not with enough distinct usable blurbs. The current lines are unchanged; try again for a fresh recovery pass.",
+            ? "Signal couldn’t reach the selected model for a new set of blurbs. The current lines are unchanged; try again when the model is ready."
+            : "The model answered, but not with enough distinct usable blurbs. The current lines are unchanged; try again for a fresh recovery pass.",
         );
         return;
       }
       replaceShow(response.show);
       setNotice(
-        hostBot?.echoesAddressedSpeech
-          ? response.recovered
-            ? `Signal found the one repeating host blurb after ${response.attempts} passes.`
-            : "The host’s one repeating dashboard blurb has been refreshed."
-          : response.recovered
-            ? `Signal recovered ${response.show.dashboardBlurbs.length} fresh host blurbs across ${response.attempts} passes.`
+        response.recovered
+          ? hostBot?.echoesAddressedSpeech
+            ? `Signal recovered one repeating dashboard blurb across ${response.attempts} passes.`
+            : `Signal recovered ${response.show.dashboardBlurbs.length} fresh host blurbs across ${response.attempts} passes.`
+          : hostBot?.echoesAddressedSpeech
+            ? "One repeating dashboard blurb is now in rotation."
             : `${response.show.dashboardBlurbs.length} fresh host blurbs are now in rotation.`,
       );
     } catch (blurbError) {
@@ -3478,10 +3667,7 @@ export function BotcastExperience({
     const producerGuest = guestDraftId === BOTCAST_PRODUCER_GUEST_ID;
     const producerGuestWantsSurprise =
       producerGuest && !producerGuestContextDraft.trim();
-    if (
-      producerGuest &&
-      (hostBot?.muted || hostBot?.echoesAddressedSpeech)
-    ) {
+    if (producerGuest && hostBot?.muted) {
       setError(
         signalErrorToast(
           "Start Signal episode",
@@ -3557,7 +3743,7 @@ export function BotcastExperience({
     const preRoll: SignalEpisodePreRoll = {
       showId: selectedShow.id,
       showName: selectedShow.name,
-      guestName: producerGuest ? BOTCAST_PRODUCER_GUEST_NAME : guest!.name,
+      guestName: producerGuest ? producerName : guest!.name,
       topic: producerGuest
         ? producerGuestWantsSurprise
           ? "Host’s choice"
@@ -3690,7 +3876,7 @@ export function BotcastExperience({
           {
             method: "POST",
             signal: controller.signal,
-            body: JSON.stringify({}),
+            body: JSON.stringify({ theme }),
           },
         );
         if (opening.message || opening.episode.status === "completed") break;
@@ -3921,7 +4107,10 @@ export function BotcastExperience({
       setSignalDeadAirAside(null);
       activeSpeechMessageIdRef.current = message.id;
       cacheListenerReactionPlan(currentEpisode, message);
-      const bot = botsById.get(message.botId);
+      let bot = botsById.get(message.botId);
+      if (bot) {
+        bot = botWithIdentityBeforeMessage(bot, currentEpisode, message);
+      }
       if (
         bot &&
         !bot.muted &&
@@ -3946,6 +4135,7 @@ export function BotcastExperience({
       controller: AbortController,
       runId: number,
       prepareFollowingTurn = true,
+      onPlaybackStart?: () => void,
     ): Promise<void> => {
       const bot =
         currentEpisode.guestKind === "producer" &&
@@ -3957,10 +4147,16 @@ export function BotcastExperience({
             )
           : botsById.get(message.botId);
       let playbackStarted = false;
+      let playbackStartNotified = false;
       let voicePreparationTimer: number | null = null;
       let voiceCompletionTimer: number | null = null;
       let settleVoicePlayback: ((value: boolean) => void) | null = null;
       let guestResponsePrepared = false;
+      const notifyPlaybackStart = (): void => {
+        if (playbackStartNotified) return;
+        playbackStartNotified = true;
+        onPlaybackStart?.();
+      };
       const prepareFollowingGuest = (): void => {
         if (
           !prepareFollowingTurn ||
@@ -3983,6 +4179,8 @@ export function BotcastExperience({
             voicePreparationTimer = null;
           }
           playbackStarted = true;
+          notifyPlaybackStart();
+          clearLiveCameraPostSpeechHold();
           const resolvedDurationMs =
             durationMs ?? Math.max(720, message.content.length * 34);
           if (voiceCompletionTimer !== null) {
@@ -4078,7 +4276,7 @@ export function BotcastExperience({
             void Promise.resolve(
               onUtterance(
                 message,
-                bot,
+                botWithIdentityBeforeMessage(bot, currentEpisode, message),
                 lifecycle,
                 botcastVoiceLevelForBot(
                   selectedShow?.voiceLevelsByBotId,
@@ -4098,6 +4296,7 @@ export function BotcastExperience({
       )
         return;
       if (!played && !playbackStarted) {
+        notifyPlaybackStart();
         await revealUtteranceWithoutAudio(message, (elapsedMs, durationMs) => {
           if (
             elapsedMs / Math.max(1, durationMs) >=
@@ -4115,6 +4314,7 @@ export function BotcastExperience({
       }
       if (activeSpeechMessageIdRef.current === message.id) {
         prepareFollowingGuest();
+        holdLiveCameraAfterSpeech(message.speakerRole);
         activeSpeechMessageIdRef.current = null;
         setSpeakingMessageId(null);
         setLiveSpeech(null);
@@ -4123,8 +4323,10 @@ export function BotcastExperience({
     [
       botsById,
       armListenerReactionTiming,
+      clearLiveCameraPostSpeechHold,
       episodeOperationIsCurrent,
       fireLiveListenerReaction,
+      holdLiveCameraAfterSpeech,
       onStopUtterance,
       onUtterance,
       revealUtteranceWithoutAudio,
@@ -4181,14 +4383,21 @@ export function BotcastExperience({
           {
             method: "POST",
             signal: controller.signal,
-            body: JSON.stringify({}),
+            body: JSON.stringify({ theme }),
           },
         );
         })
         .then(
           (response) => {
             if (response.message) {
-              const bot = botsById.get(response.message.botId);
+              let bot = botsById.get(response.message.botId);
+              if (bot) {
+                bot = botWithIdentityBeforeMessage(
+                  bot,
+                  response.episode,
+                  response.message,
+                );
+              }
               if (
                 bot &&
                 !bot.muted &&
@@ -4207,7 +4416,7 @@ export function BotcastExperience({
         });
       preparedAdvanceRef.current = prepared;
     },
-    [botsById, onPrefetchUtterance, request],
+    [botsById, onPrefetchUtterance, request, theme],
   );
   prepareGuestResponseRef.current = prepareGuestResponse;
 
@@ -4220,6 +4429,8 @@ export function BotcastExperience({
       interruptionBridgeMessage?: BotcastMessage,
       producerGuestMessage?: string,
       producerGuestThinkingMs?: number,
+      producerGuestHostInterruption?: BotcastHostRedirectContext,
+      interruptionCrosstalkPlan?: ListenerReactionPlanV1,
     ): Promise<boolean> => {
       if (
         !episode ||
@@ -4246,12 +4457,29 @@ export function BotcastExperience({
       const interruptionBridgePlayback = interruptionBridgeMessage
         ? (() => {
             prepareEpisodeMessage(interruptionBridgeMessage, episode);
+            const interrupter = interruptionCrosstalkPlan
+              ? botsById.get(interruptionCrosstalkPlan.listenerBotId)
+              : null;
             return playPreparedEpisodeMessage(
               interruptionBridgeMessage,
               episode,
               controller,
               runId,
               false,
+              interruptionCrosstalkPlan && interrupter
+                ? () => {
+                    void Promise.resolve(
+                      onListenerReaction?.(
+                        interruptionCrosstalkPlan,
+                        interrupter,
+                        signalStudioVoicePan(
+                          selectedShow?.studioLayout,
+                          "host",
+                        ),
+                      ),
+                    );
+                  }
+                : undefined,
             );
           })()
         : null;
@@ -4260,6 +4488,7 @@ export function BotcastExperience({
         const prepared =
           !requestedCue &&
           !producerGuestMessage &&
+          !producerGuestHostInterruption &&
           preparedAdvanceRef.current?.episodeId === episode.id &&
             preparedAdvanceRef.current.afterMessageId === lastVisibleMessageId
           ? preparedAdvanceRef.current
@@ -4297,7 +4526,10 @@ export function BotcastExperience({
         }
         if (preparedResult && !preparedResult.ok) throw preparedResult.error;
         let directHoldStart: Promise<BotcastEpisode> | null = null;
-        if (!preparedResult) {
+        if (
+          !preparedResult &&
+          !(producerGuestHostInterruption && !producerGuestMessage)
+        ) {
           const preparationStatus = await waitForModelPreparation({
             request,
             provider: episode.provider,
@@ -4347,6 +4579,7 @@ export function BotcastExperience({
               method: "POST",
               signal: controller.signal,
               body: JSON.stringify({
+                theme,
                 ...(requestedCue ? { cue: requestedCue } : {}),
                 ...(requestedCue ? { cueDelivery } : {}),
                 ...(hostRedirect ? { hostRedirect } : {}),
@@ -4356,6 +4589,9 @@ export function BotcastExperience({
                   : {}),
                 ...(producerGuestThinkingMs !== undefined
                   ? { guestThinkingMs: producerGuestThinkingMs }
+                  : {}),
+                ...(producerGuestHostInterruption
+                  ? { producerGuestHostInterruption }
                   : {}),
               }),
             },
@@ -4448,11 +4684,13 @@ export function BotcastExperience({
     },
     [
       beginEpisodeOperation,
+      botsById,
       episode,
       assignQueuedProducerCue,
       assignSignalModelWarmup,
       episodeOperationIsCurrent,
       loadEpisodes,
+      onListenerReaction,
       playEpisodeOutro,
       playPreparedEpisodeMessage,
       prepareEpisodeMessage,
@@ -4462,16 +4700,58 @@ export function BotcastExperience({
       selectedShowId,
       stopUtterance,
       setPersistedSignalModelWarmupHold,
+      theme,
     ],
   );
+
+  const producerGuestHostInterruption =
+    signalProducerGuestHostInterruptionContext({
+      episode,
+      speakingMessageId,
+      liveSpeech,
+    });
+
+  const interruptProducerGuestHostLocally = (
+    interruption: BotcastHostRedirectContext,
+  ): void => {
+    if (!episode) return;
+    invalidateEpisodeOperation();
+    setEpisode({
+      ...episode,
+      messages: episode.messages.map((message) =>
+        message.id === interruption.messageId
+          ? {
+              ...message,
+              content: interruption.spokenContent,
+              voicePerformanceText: null,
+            }
+          : message,
+      ),
+    });
+  };
+
+  const shushProducerGuestHost = async (): Promise<void> => {
+    if (!producerGuestHostInterruption) return;
+    interruptProducerGuestHostLocally(producerGuestHostInterruption);
+    setAutoRun(false);
+    await advanceEpisode(
+      undefined,
+      "next_host_turn",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      producerGuestHostInterruption,
+    );
+  };
 
   const submitProducerGuestAnswer = async (): Promise<void> => {
     if (
       !episode ||
       episode.guestKind !== "producer" ||
       episode.status !== "live" ||
-      busy ||
-      speakingMessageId !== null
+      (speakingMessageId !== null && !producerGuestHostInterruption)
     )
       return;
     const answer = producerGuestAnswerDraft.trim();
@@ -4481,7 +4761,7 @@ export function BotcastExperience({
       segment: episode.segment,
       guestDeparted: false,
     });
-    if (nextRole !== "guest") return;
+    if (nextRole !== "guest" || (busy && !producerGuestHostInterruption)) return;
     const thinkingEndedAtMs = Date.now();
     const thinkingStartedAtMs =
       producerGuestThinkingStartedAtRef.current ?? thinkingEndedAtMs;
@@ -4490,6 +4770,9 @@ export function BotcastExperience({
       thinkingEndedAtMs - thinkingStartedAtMs,
     );
     producerGuestThinkingEndedAtRef.current = thinkingEndedAtMs;
+    if (producerGuestHostInterruption) {
+      interruptProducerGuestHostLocally(producerGuestHostInterruption);
+    }
     setAutoRun(true);
     const sent = await advanceEpisode(
       undefined,
@@ -4499,6 +4782,7 @@ export function BotcastExperience({
       undefined,
       answer,
       guestThinkingMs,
+      producerGuestHostInterruption ?? undefined,
     );
     if (sent) {
       setProducerGuestAnswerDraft("");
@@ -4827,7 +5111,12 @@ export function BotcastExperience({
             message.id === activeGuestMessage.id && interruptedContent
               ? {
                   ...message,
-                  content: interruptedContent,
+                  content: nextHostInterruptionCrosstalkPlan?.interruptedSpeakerCue
+                    ? appendBotCrosstalkInterruptedSpeakerCue(
+                        interruptedContent,
+                        nextHostInterruptionCrosstalkPlan.interruptedSpeakerCue,
+                      )
+                    : interruptedContent,
                   voicePerformanceText: null,
                 }
               : message,
@@ -4850,10 +5139,20 @@ export function BotcastExperience({
           ? {
               messageId: activeGuestMessage.id,
               spokenContent,
+              ...(nextHostInterruptionCrosstalkPlan?.interruptedSpeakerCue
+                ? {
+                    interruptedSpeakerCue:
+                      nextHostInterruptionCrosstalkPlan.interruptedSpeakerCue,
+                  }
+                : {}),
             }
           : {}),
       },
       nextHostInterruptionBridge,
+      undefined,
+      undefined,
+      undefined,
+      nextHostInterruptionCrosstalkPlan ?? undefined,
     );
   };
 
@@ -4957,6 +5256,9 @@ export function BotcastExperience({
   const replayGuestDeparted = replayEpisode
     ? botcastGuestHasDepartedAt(replayEpisode.events, replayElapsedMs)
     : false;
+  const replayHostDeparted = replayEpisode
+    ? botcastHostHasDepartedAt(replayEpisode.events, replayElapsedMs)
+    : false;
   const replayMessageIndex = botcastReplayMessageIndexAt(
     replayTimeline.messageStartMs,
     replayElapsedMs,
@@ -5046,7 +5348,7 @@ export function BotcastExperience({
     if (!replayPlaying || !replayActiveMessage) return;
     if (replayVoiceMessageIdRef.current === replayActiveMessage.id) return;
     replayVoiceMessageIdRef.current = replayActiveMessage.id;
-    const bot =
+    let bot =
       replayEpisode?.guestKind === "producer" &&
       replayActiveMessage.speakerRole === "guest" &&
       replayActiveMessage.botId === BOTCAST_PRODUCER_GUEST_ID
@@ -5055,6 +5357,13 @@ export function BotcastExperience({
             selectedShow?.accentColor,
           )
         : botsById.get(replayActiveMessage.botId);
+    if (bot) {
+      bot = botWithIdentityBeforeMessage(
+        bot,
+        replayEpisode!,
+        replayActiveMessage,
+      );
+    }
     if (
       !bot ||
       bot.muted ||
@@ -5337,15 +5646,26 @@ export function BotcastExperience({
     activeMessage: BotcastMessage | null;
     replay: boolean;
     guestDeparted?: boolean;
+    hostDeparted?: boolean;
   }): React.JSX.Element => {
     const recordedGuestDeparture =
       args.guestDeparted ?? guestHasDeparted(args.currentEpisode);
-    const departureMonologueOnMic =
+    const recordedHostDeparture =
+      args.hostDeparted ?? hostHasDeparted(args.currentEpisode);
+    const guestDepartureMonologueOnMic =
       !args.replay &&
       recordedGuestDeparture &&
       args.activeMessage?.speakerRole === "guest" &&
       speakingMessageId === args.activeMessage.id;
-    const departed = recordedGuestDeparture && !departureMonologueOnMic;
+    const hostDepartureMonologueOnMic =
+      !args.replay &&
+      recordedHostDeparture &&
+      args.activeMessage?.speakerRole === "host" &&
+      speakingMessageId === args.activeMessage.id;
+    const guestDeparted =
+      recordedGuestDeparture && !guestDepartureMonologueOnMic;
+    const hostDeparted =
+      recordedHostDeparture && !hostDepartureMonologueOnMic;
     const audienceParticipants =
       args.currentEpisode.audienceExperience?.participants;
     const socialPressure = botcastStrongestNegativeSocialInfluenceAt({
@@ -5357,15 +5677,17 @@ export function BotcastExperience({
         ? args.host
         : args.guest
       : null;
-    const hostVisibleToAudience = audienceParticipants?.host.visible !== false;
+    const hostVisibleToAudience =
+      !hostDeparted && audienceParticipants?.host.visible !== false;
     const guestVisibleToAudience =
-      !departed && audienceParticipants?.guest.visible !== false;
-    const guestHiddenFromAudience = !departed && !guestVisibleToAudience;
+      !guestDeparted && audienceParticipants?.guest.visible !== false;
+    const guestHiddenFromAudience =
+      !guestDeparted && !guestVisibleToAudience;
     const guestPresentOnStage = guestVisibleToAudience;
     const thinkingRole = botcastNextSpeakerRole({
       messages: args.currentEpisode.messages,
       segment: args.currentEpisode.segment,
-      guestDeparted: departed,
+      guestDeparted,
     });
     const replayProducerGuestThinking = Boolean(
       args.replay &&
@@ -5489,13 +5811,19 @@ export function BotcastExperience({
         ? botPowerAvatarScaleModeV1(snapshot)
         : (resolveAvatarScaleMode?.(bot) ?? null);
     };
+    const manualProducerGuestSip = Boolean(
+      !args.replay &&
+        args.currentEpisode.guestKind === "producer" &&
+        producerGuestSipActive,
+    );
     const roleIsThinking = (role: "host" | "guest"): boolean =>
-      (role === "guest" &&
+      !(role === "guest" && manualProducerGuestSip) &&
+      ((role === "guest" &&
         (replayProducerGuestThinking || liveProducerGuestThinking)) ||
-      (!args.replay &&
-        ((speechReveal?.phase === "preparing" &&
-          args.activeMessage?.speakerRole === role) ||
-          (busy && speakingMessageId === null && thinkingRole === role)));
+        (!args.replay &&
+          ((speechReveal?.phase === "preparing" &&
+            args.activeMessage?.speakerRole === role) ||
+            (busy && speakingMessageId === null && thinkingRole === role))));
     const episodeStartedAtCandidate = Date.parse(args.currentEpisode.startedAt);
     const episodeStartedAtMs = Number.isFinite(episodeStartedAtCandidate)
       ? episodeStartedAtCandidate
@@ -5516,6 +5844,36 @@ export function BotcastExperience({
       args.replay && episodeStartedAtMs !== null
       ? episodeStartedAtMs + replayElapsedMs
       : liveEffectiveNowMs;
+    const identityMirrorNowMs =
+      args.replay && episodeStartedAtMs !== null
+        ? episodeStartedAtMs +
+          replayElapsedMs +
+          (args.currentEpisode.modelWarmupHoldDurationMs ?? 0)
+        : signalStageNowMs;
+    const identityMirrorStates = botcastIdentityMirrorStatesAtV1(
+      args.currentEpisode.events,
+      identityMirrorNowMs,
+    );
+    const botWithIdentityAtStageTime = (
+      bot: BotcastBotSummary,
+    ): BotcastBotSummary => {
+      const identityMirrorState = identityMirrorStates.get(bot.id) ?? null;
+      return {
+        ...bot,
+        identityMirrorState,
+        identityMirrorTransitionActive: identityMirrorState
+          ? botIdentityMirrorTransitionActiveV1(
+              identityMirrorState,
+              identityMirrorNowMs,
+            )
+          : false,
+        identityMirrorTargetFaceActive: identityMirrorState
+          ? identityMirrorNowMs >=
+            Date.parse(identityMirrorState.occurredAt) +
+              BOT_IDENTITY_MIRROR_TRANSITION_MS / 2
+          : false,
+      };
+    };
     const cupVisual = (
       bot: BotcastBotSummary,
       role: "host" | "guest",
@@ -5537,6 +5895,9 @@ export function BotcastExperience({
         ),
         speaking: roleIsSpeaking(role),
         thinking: roleIsThinking(role),
+        ...(role === "guest" && manualProducerGuestSip
+          ? { sippingOverride: true }
+          : {}),
       });
     };
     const hostCupVisual = args.host ? cupVisual(args.host, "host") : null;
@@ -5585,12 +5946,31 @@ export function BotcastExperience({
     ): ReactNode => {
       const mouthShape =
         talking && (args.activeMessage || signalDeadAirAside)
-        ? crtSpeechMouthShapeAtElapsedMs({
-            text: args.activeMessage?.content ?? signalDeadAirAside?.text ?? "",
-            elapsedMs: args.activeMessage ? speechElapsedMs : signalStageNowMs,
-            ...(speechDurationMs > 0 ? { durationMs: speechDurationMs } : {}),
-          })
+        ? args.activeMessage && speechDurationMs > 0
+          ? crtSpeechMouthShapeAtAlignedElapsedMs({
+              text: args.activeMessage.content,
+              elapsedMs: speechElapsedMs,
+              durationMs: speechDurationMs,
+              alignment: speechReveal?.alignment,
+            })
+          : crtSpeechMouthShapeAtElapsedMs({
+              text: signalDeadAirAside?.text ?? "",
+              elapsedMs: signalStageNowMs,
+            })
         : "closed";
+      bot = botWithIdentityAtStageTime(bot);
+      const renderedAvatar = renderAvatar?.(bot, {
+        talking,
+        thinking,
+        sipping,
+        role,
+        facing: signalStudioFacingForRole(studioLayout, role),
+        theme,
+        mouthShape,
+      });
+      if (renderedAvatar !== null && renderedAvatar !== undefined) {
+        return renderedAvatar;
+      }
       if (bot.producerGuest) {
         return (
           <div
@@ -5604,17 +5984,7 @@ export function BotcastExperience({
           </div>
         );
       }
-      return (
-        renderAvatar?.(bot, {
-        talking,
-        thinking,
-        sipping,
-        role,
-        facing: signalStudioFacingForRole(studioLayout, role),
-        theme,
-        mouthShape,
-        }) ?? avatarFallback(bot)
-      );
+      return avatarFallback(bot);
     };
     return (
       <section
@@ -5664,10 +6034,12 @@ export function BotcastExperience({
               className={styles.stagePlacement}
               style={signalStudioPlacementStyle(studioLayout, "hostBot")}
               aria-label={`Host ${args.host.name}`}
+              aria-hidden={hostDeparted ? "true" : undefined}
             >
               <div
                 className={styles.avatarRig}
                 data-signal-presence="host"
+                data-departed={hostDeparted ? "true" : undefined}
                 data-talking={
                   roleIsSpeaking("host")
                     ? "true"
@@ -5785,12 +6157,12 @@ export function BotcastExperience({
               className={styles.stagePlacement}
               style={signalStudioPlacementStyle(studioLayout, "guestBot")}
               aria-label={`Guest ${args.guest.name}`}
-              aria-hidden={departed ? "true" : undefined}
+              aria-hidden={guestDeparted ? "true" : undefined}
             >
               <div
                 className={styles.avatarRig}
                 data-signal-presence="guest"
-                data-departed={departed ? "true" : undefined}
+                data-departed={guestDeparted ? "true" : undefined}
                 data-talking={
                   roleIsSpeaking("guest")
                     ? "true"
@@ -5909,7 +6281,13 @@ export function BotcastExperience({
               ["--signal-seat-x" as string]: `${studioLayout.hostBot.x}%`,
             }}
             data-role="host"
+            data-departed={hostDeparted ? "true" : undefined}
           >
+            {hostDeparted ? (
+              <span className={styles.emptyChairLabel}>
+                Host has left the studio
+              </span>
+            ) : null}
             <strong className={styles.nameplate}>
               <span>Host</span>
               {args.host?.name ?? "Host"}
@@ -5921,10 +6299,10 @@ export function BotcastExperience({
               ["--signal-seat-x" as string]: `${studioLayout.guestBot.x}%`,
             }}
             data-role="guest"
-            data-departed={departed ? "true" : undefined}
+            data-departed={guestDeparted ? "true" : undefined}
             data-audience-hidden={guestHiddenFromAudience ? "true" : undefined}
           >
-            {departed ? (
+            {guestDeparted ? (
               <span className={styles.emptyChairLabel}>
                 Guest has left the studio
               </span>
@@ -6373,7 +6751,7 @@ export function BotcastExperience({
     const producerGuestSelected =
       guestDraftId === BOTCAST_PRODUCER_GUEST_ID;
     const producerGuestUnavailable = Boolean(
-      hostBot.muted || hostBot.echoesAddressedSpeech,
+      hostBot?.muted || hostBot?.echoesAddressedSpeech,
     );
     const selectedEpisodeModelOption = episodeModelDraft
       ? (modelOptions.find((option) => option.id === episodeModelDraft) ?? null)
@@ -7008,14 +7386,61 @@ export function BotcastExperience({
         guestDeparted: false,
       }) === "guest",
   );
-  const liveShot =
+  const liveNextSpeakerRole = episode
+    ? botcastNextSpeakerRole({
+        messages: episode.messages,
+        segment: episode.segment,
+        guestDeparted: guestHasDeparted(episode),
+      })
+    : null;
+  const liveNextSpeakerIsBot = Boolean(
+    episode &&
+      liveNextSpeakerRole &&
+      !(
+        episode.guestKind === "producer" && liveNextSpeakerRole === "guest"
+      ),
+  );
+  const livePreparedMessageIsBot = Boolean(
+    liveActiveMessage && liveActiveMessage.botId !== BOTCAST_PRODUCER_GUEST_ID,
+  );
+  const liveBotThinking = Boolean(
+    episode &&
+      episode.status === "live" &&
+      liveCameraMode === "auto" &&
+      ((liveSpeech?.reveal.phase === "preparing" &&
+        livePreparedMessageIsBot) ||
+        (busy &&
+          speakingMessageId === null &&
+          (producerGuestThinkingEndedAtRef.current !== null ||
+            liveNextSpeakerIsBot))),
+  );
+  const liveReactionShot =
     liveReactionCameraActive && episode
       ? liveListenerReactionPlan?.listenerBotId === episode.hostBotId
         ? "left"
         : "right"
-      : liveProducerGuestThinking && liveCameraMode === "auto"
-        ? "right"
-      : liveBaseShot;
+      : null;
+  const liveSpeakingShot =
+    liveCameraMode === "auto" &&
+    liveActiveMessage &&
+    liveSpeech?.messageId === liveActiveMessage.id &&
+    liveSpeech.reveal.phase === "playing" &&
+    botcastMessageIsAudibleToAudienceV1(liveActiveMessage) &&
+    !botPowerResponseIsSilentV1(liveActiveMessage.content)
+      ? liveActiveMessage.speakerRole === "host"
+        ? "left"
+        : "right"
+      : null;
+  const liveShot = signalLiveAutoCameraShot({
+    baseShot: liveBaseShot,
+    listenerReactionShot: liveReactionShot,
+    speakingShot: liveSpeakingShot,
+    postSpeechHoldShot:
+      liveCameraMode === "auto" ? liveCameraPostSpeechHoldShot : null,
+    botThinking: liveBotThinking,
+    producerGuestThinking:
+      liveProducerGuestThinking && liveCameraMode === "auto",
+  });
   const selectLiveCameraMode = async (
     mode: BotcastCameraShot,
   ): Promise<void> => {
@@ -7044,6 +7469,38 @@ export function BotcastExperience({
     } finally {
       setCameraSaving(false);
     }
+  };
+  const producerGuestSipAvailable = Boolean(
+    episode?.guestKind === "producer" &&
+      episode.status === "live" &&
+      liveGuestBot &&
+      botHasCoffeeCup(liveGuestBot),
+  );
+  const producerGuestIsSpeaking = Boolean(
+    speakingMessageId !== null &&
+      liveActiveMessage?.id === speakingMessageId &&
+      liveActiveMessage.speakerRole === "guest",
+  );
+  const producerGuestSipDisabled =
+    !producerGuestSipAvailable ||
+    producerGuestIsSpeaking ||
+    producerGuestSipActive ||
+    signalGuestCupTravelMode !== "idle";
+  const sipCoffeeAsProducerGuest = (): void => {
+    if (
+      !episode ||
+      !producerGuestSipAvailable ||
+      producerGuestSipDisabled
+    ) {
+      return;
+    }
+    const seed = `signal:${episode.id}:${BOTCAST_PRODUCER_GUEST_ID}:guest`;
+    const durationMs = coffeeCupSipAnimationTiming({ seed }).durationMs;
+    setProducerGuestSipActive(true);
+    producerGuestSipTimeoutRef.current = window.setTimeout(() => {
+      producerGuestSipTimeoutRef.current = null;
+      setProducerGuestSipActive(false);
+    }, durationMs);
   };
   const producerCueAvailable =
     episode?.status === "live" && episode.segment !== "closing";
@@ -7411,7 +7868,9 @@ export function BotcastExperience({
           </div>
           <div className={styles.preRollLockup}>
             <span className={styles.preRollEyebrow}>
-              {episodeOutro.forced
+              {episodeOutro.discarded
+                ? "Signal transmission discarded"
+                : episodeOutro.forced
                 ? "Signal transmission cut"
                 : "Signal transmission complete"}
             </span>
@@ -7420,11 +7879,16 @@ export function BotcastExperience({
             </div>
             <h1>{episodeOutro.showName}</h1>
               <p>
-                {episodeOutro.forced ? "Cut by producer" : "End of episode"}
+                {episodeOutro.discarded
+                  ? "Early cut · not saved"
+                  : episodeOutro.forced
+                    ? "Cut by producer"
+                    : "End of episode"}
               </p>
             <small>Signal</small>
           </div>
-            {episode?.id === episodeOutro.episodeId &&
+            {!episodeOutro.discarded &&
+            episode?.id === episodeOutro.episodeId &&
             episode.status === "completed" ? (
               <button
                 type="button"
@@ -7576,7 +8040,7 @@ export function BotcastExperience({
                 className={styles.cutShowButton}
                 onClick={() => void cutShow()}
                 disabled={episode.status === "completed" || cuttingShow}
-                aria-label="Cut the live show after a quick host sign-off"
+                aria-label="Cut the live show"
               >
                 {cuttingShow ? "Cutting…" : "■ Cut show"}
               </button>
@@ -7791,6 +8255,19 @@ export function BotcastExperience({
                 data-tutorial-target="botcast-cues"
                 data-signal-producer-guest-composer="true"
               >
+                <div className={styles.producerGuestActionRail}>
+                  <button
+                    type="button"
+                    className={styles.producerGuestSipButton}
+                    onClick={sipCoffeeAsProducerGuest}
+                    disabled={producerGuestSipDisabled}
+                    data-sipping={producerGuestSipActive ? "true" : undefined}
+                    aria-label="Sip coffee on air"
+                  >
+                    <span aria-hidden="true">☕</span>
+                    {producerGuestSipActive ? "Sipping…" : "Sip coffee"}
+                  </button>
+                </div>
                 {!busy &&
                 speakingMessageId === null &&
                 botcastNextSpeakerRole({
@@ -7805,28 +8282,32 @@ export function BotcastExperience({
                 {renderProducerGuestComposer?.({
                   value: producerGuestAnswerDraft,
                   awaitingAnswer:
-                    !busy &&
-                    speakingMessageId === null &&
                     botcastNextSpeakerRole({
                       messages: episode.messages,
                       segment: episode.segment,
                       guestDeparted: false,
                     }) === "guest",
+                  inputDisabled: false,
                   disabled:
-                    busy ||
-                    speakingMessageId !== null ||
                     !producerGuestAnswerDraft.trim() ||
-                    botcastNextSpeakerRole({
-                      messages: episode.messages,
-                      segment: episode.segment,
-                      guestDeparted: false,
-                    }) !== "guest",
+                    (!producerGuestHostInterruption &&
+                      (busy ||
+                        speakingMessageId !== null ||
+                        botcastNextSpeakerRole({
+                          messages: episode.messages,
+                          segment: episode.segment,
+                          guestDeparted: false,
+                        }) !== "guest")),
+                  shhActive: producerGuestHostInterruption !== null,
                   placeholder:
-                    busy || speakingMessageId !== null
-                      ? "Listen — the host has the mic…"
-                      : "Answer as the Producer… Start with *action* for stage direction.",
+                    producerGuestHostInterruption
+                      ? "Type your answer — Send cuts in now…"
+                      : busy || speakingMessageId !== null
+                        ? "Type your answer while the host has the mic…"
+                        : "Answer as the Producer…",
                   onChange: setProducerGuestAnswerDraft,
                   onSubmit: () => void submitProducerGuestAnswer(),
+                  onShh: () => void shushProducerGuestHost(),
                 }) ?? (
                   <form
                     className={styles.producerGuestFallbackComposer}
@@ -7837,6 +8318,7 @@ export function BotcastExperience({
                   >
                     <textarea
                       value={producerGuestAnswerDraft}
+                      disabled={false}
                       onChange={(event) =>
                         setProducerGuestAnswerDraft(event.currentTarget.value)
                       }
@@ -7852,27 +8334,36 @@ export function BotcastExperience({
                         }
                         event.preventDefault();
                         if (
-                          busy ||
-                          speakingMessageId !== null ||
-                          !producerGuestAnswerDraft.trim()
+                          !producerGuestAnswerDraft.trim() ||
+                          (!producerGuestHostInterruption &&
+                            (busy || speakingMessageId !== null))
                         ) {
                           return;
                         }
                         event.currentTarget.form?.requestSubmit();
                       }}
-                      placeholder="Answer as the Producer… Start with *action* for stage direction."
+                      placeholder="Answer as the Producer…"
                       enterKeyHint="send"
                     />
                     <button
                       type="submit"
                       disabled={
-                        busy ||
-                        speakingMessageId !== null ||
-                        !producerGuestAnswerDraft.trim()
+                        !producerGuestAnswerDraft.trim() ||
+                        (!producerGuestHostInterruption &&
+                          (busy || speakingMessageId !== null))
                       }
                     >
                       Send
                     </button>
+                    {producerGuestHostInterruption ? (
+                      <button
+                        type="button"
+                        onClick={() => void shushProducerGuestHost()}
+                        aria-label="Shh. Interrupt the Signal host"
+                      >
+                        Shh
+                      </button>
+                    ) : null}
                   </form>
                 )}
               </div>
@@ -7948,6 +8439,7 @@ export function BotcastExperience({
               activeMessage: replayActiveMessage,
               replay: true,
               guestDeparted: replayGuestDeparted,
+              hostDeparted: replayHostDeparted,
             })}
               <div
                 className={styles.replayControls}
@@ -8329,10 +8821,7 @@ export function BotcastExperience({
                         </button>
                       </div>
                         <div className={styles.showLookControlGroup}>
-                          <span>
-                            Dashboard{" "}
-                            {hostBot?.echoesAddressedSpeech ? "blurb" : "blurbs"}
-                          </span>
+                          <span>Dashboard blurbs</span>
                           <button
                             type="button"
                             data-signal-identity-action="blurbs"

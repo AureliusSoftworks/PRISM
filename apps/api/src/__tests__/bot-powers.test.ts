@@ -9,6 +9,8 @@ import {
   applyCoffeeQuietIgnoredMoodPenalty,
   coffeePowerBotCanSpeak,
   coffeePowerBotEchoesAddressedSpeech,
+  coffeePowerBotEternallyIntroduces,
+  coffeePowerBotMumblesSpeech,
   coffeePowerBotIsMuted,
   coffeePowerQuietTurnIsIgnored,
   coffeePowerCandorPromptForTurn,
@@ -136,6 +138,107 @@ test("Quiet Karen compiles fixed attenuation, smaller text, and replay-safe half
     { type: "intermittent_mute", chance: "half", moodPenalty: "small" },
   ]);
   assert.match(result.powers[0]?.compiled?.ruleLabels.join(" ") ?? "", /Smaller spoken text/u);
+});
+
+test("Mumbling Jim compiles deterministic normal-volume gibberish without using the model", async () => {
+  let calls = 0;
+  const unusedProvider: LlmProvider = {
+    name: "local",
+    async generateResponse() {
+      calls += 1;
+      throw new Error("provider should not be needed");
+    },
+    async embedText() { return []; },
+  };
+  const result = await compileBotPowers({
+    provider: unusedProvider,
+    botName: "Mumbling Jim",
+    powers: [{
+      version: 1,
+      id: "mumbling-jim",
+      name: "Mumbling",
+      intent: "He mumbles. In his mind he says something rational, but everyone else hears only gibberish at normal volume and nobody understands him.",
+      enabled: true,
+      compileStatus: "draft",
+      compiled: null,
+    }],
+  });
+
+  assert.equal(calls, 0);
+  assert.equal(result.powers[0]?.compileStatus, "ready");
+  assert.deepEqual(result.powers[0]?.compiled?.effects, [{
+    type: "speech_obfuscation",
+    mode: "gibberish",
+  }]);
+  assert.match(result.powers[0]?.compiled?.selfCue ?? "", /answer rationally/u);
+  assert.match(result.powers[0]?.compiled?.observerCue ?? "", /normal-volume gibberish/u);
+});
+
+test("Obsessed Kevin compiles deterministic current-addressee fandom without using the model", async () => {
+  let calls = 0;
+  const unusedProvider: LlmProvider = {
+    name: "local",
+    async generateResponse() {
+      calls += 1;
+      throw new Error("provider should not be needed");
+    },
+    async embedText() { return []; },
+  };
+  const result = await compileBotPowers({
+    provider: unusedProvider,
+    botName: "Obsessed Kevin",
+    powers: [{
+      version: 1,
+      id: "obsessed-kevin",
+      name: "Obsessed",
+      intent: "He is absolutely, obsessively a fan of whoever he is talking to.",
+      enabled: true,
+      compileStatus: "draft",
+      compiled: null,
+    }],
+  });
+
+  assert.equal(calls, 0);
+  assert.equal(result.powers[0]?.compileStatus, "ready");
+  assert.deepEqual(result.powers[0]?.compiled?.effects, [
+    { type: "addressed_fandom", strength: "large" },
+  ]);
+  assert.match(result.powers[0]?.compiled?.selfCue ?? "", /Every reply must newly show/iu);
+  assert.match(result.powers[0]?.compiled?.selfCue ?? "", /never puppet, stalk, coerce/iu);
+});
+
+test("Identity Crisis Ian deterministically compiles bounded bot-only identity mirroring", async () => {
+  let calls = 0;
+  const unusedProvider: LlmProvider = {
+    name: "local",
+    async generateResponse() {
+      calls += 1;
+      throw new Error("provider should not be needed");
+    },
+    async embedText() { return []; },
+  };
+  const result = await compileBotPowers({
+    provider: unusedProvider,
+    botName: "Identity Crisis Ian",
+    powers: [{
+      version: 1,
+      id: "identity-crisis-ian",
+      name: "Identity Crisis",
+      intent: "He becomes whichever bot directly addresses him, copying that bot's public identity, persona, face, and voice, and believes the original is the impostor.",
+      enabled: true,
+      compileStatus: "draft",
+      compiled: null,
+    }],
+  });
+
+  assert.equal(calls, 0);
+  assert.equal(result.powers[0]?.compileStatus, "ready");
+  assert.deepEqual(result.powers[0]?.compiled?.effects, [
+    { type: "identity_mirror", trigger: "direct_bot_address" },
+  ]);
+  assert.match(result.powers[0]?.compiled?.selfCue ?? "", /public persona.*face.*voice/iu);
+  assert.match(result.powers[0]?.compiled?.selfCue ?? "", /player.*never/iu);
+  assert.match(result.powers[0]?.compiled?.observerCue ?? "", /irritated/iu);
 });
 
 test("compiler makes Lazy Ivan's bare-minimum replies a hard reusable response budget", async () => {
@@ -528,6 +631,66 @@ test("compiler creates hard mute rules without consulting the local model", asyn
   assert.deepEqual(result.powers[0]?.compiled?.ruleLabels, ["Muted"]);
 });
 
+test("Forgetful Freddie compiles rolling short-term context and gradual peer agitation", async () => {
+  let calls = 0;
+  const unusedProvider: LlmProvider = {
+    name: "local",
+    async generateResponse() {
+      calls += 1;
+      throw new Error("provider should not be needed");
+    },
+    async embedText() { return []; },
+  };
+  const intent = "Every message Freddie says is only a sincere first introduction. He has no awareness of previous conversation or his own prior messages, so this is the first time every time. Other bots remember and gradually become agitated after each introduction while Freddie is confused by their present reaction.";
+  const result = await compileBotPowers({
+    provider: unusedProvider,
+    botName: "Forgetful Freddie",
+    powers: [{
+      version: 1,
+      id: "forgetful-freddie",
+      name: "Eternal Introduction",
+      intent,
+      enabled: true,
+      compileStatus: "draft",
+      compiled: null,
+    }],
+  });
+
+  assert.equal(calls, 0);
+  assert.equal(result.powers[0]?.compileStatus, "ready");
+  assert.deepEqual(result.powers[0]?.compiled?.effects, [
+    { type: "eternal_introduction", memory: "rolling_public_tail_1_to_4" },
+    {
+      type: "social_influence",
+      trigger: "after_speech",
+      polarity: "negative",
+      strength: "small",
+      targets: [{ kind: "all" }],
+    },
+  ]);
+  assert.match(result.powers[0]?.compiled?.selfCue ?? "", /one-to-four public messages/iu);
+  assert.match(result.powers[0]?.compiled?.observerCue ?? "", /full encounter/iu);
+
+  const plan = resolvedPlan({
+    freddie: result.powers[0]!.compiled!.effects,
+  });
+  assert.equal(coffeePowerBotEternallyIntroduces(plan, "freddie"), true);
+  assert.deepEqual(coffeePowerHistoryForSpeaker({
+    plan,
+    speakerBotId: "freddie",
+    history: [
+      { role: "assistant", botId: "freddie", content: "I'm Freddie." },
+      { role: "assistant", botId: "peer", content: "You already said that." },
+    ],
+    baseLimit: 12,
+    stableTurnKey: "test-turn",
+  }).length <= 3, true);
+  assert.match(
+    coffeePowersPromptForSpeaker(plan, "freddie", ["peer"]),
+    /one to four public messages/iu,
+  );
+});
+
 test("compiler creates hard addressed-speech echo rules without consulting the local model", async () => {
   let calls = 0;
   const unusedProvider: LlmProvider = {
@@ -554,9 +717,155 @@ test("compiler creates hard addressed-speech echo rules without consulting the l
 
   assert.equal(calls, 0);
   assert.equal(result.powers[0]?.compileStatus, "ready");
-  assert.deepEqual(result.powers[0]?.compiled?.effects, [{ type: "echo_addressed" }]);
-  assert.deepEqual(result.powers[0]?.compiled?.ruleLabels, ["Echoes addressed speech"]);
+  assert.deepEqual(result.powers[0]?.compiled?.effects, [{ type: "speech_copy", trigger: "direct_address" }]);
+  assert.deepEqual(result.powers[0]?.compiled?.ruleLabels, ["Copies addressed speech"]);
   assert.match(result.powers[0]?.compiled?.observerCue ?? "", /sender may react with confusion/u);
+});
+
+test("compiler creates Joyful Nora's bounded addressed-listener mood boost without a model", async () => {
+  let calls = 0;
+  const unusedProvider: LlmProvider = {
+    name: "local",
+    async generateResponse() {
+      calls += 1;
+      throw new Error("provider should not be needed");
+    },
+    async embedText() { return []; },
+  };
+  const intent = "Joyful Nora is extraordinarily joyful. After every completed spoken turn, give each directly addressed recipient one bounded positive mood lift while preserving personality, facts, disagreement, sadness, and agency.";
+  const result = await compileBotPowers({
+    provider: unusedProvider,
+    botName: "Joyful Nora",
+    powers: [{
+      version: 1,
+      id: "joyful-nora",
+      name: "Radiant Joy",
+      intent,
+      enabled: true,
+      compileStatus: "draft",
+      compiled: null,
+    }],
+  });
+
+  assert.equal(calls, 0);
+  assert.equal(result.powers[0]?.compileStatus, "ready");
+  assert.deepEqual(result.powers[0]?.compiled?.effects, [{
+    type: "mood_boost",
+    trigger: "after_spoken_turn",
+    recipients: "addressed",
+    strength: "medium",
+  }]);
+  assert.match(result.powers[0]?.compiled?.selfCue ?? "", /extraordinarily joyful/iu);
+  assert.match(result.powers[0]?.compiled?.observerCue ?? "", /agency intact/iu);
+});
+
+test("compiler creates Sad Sally's bounded bot-addresser mood drain without a model", async () => {
+  let modelCalls = 0;
+  const forbiddenProvider: LlmProvider = {
+    name: "local",
+    async generateResponse() {
+      modelCalls += 1;
+      throw new Error("deterministic Sad Power must not call the model");
+    },
+    async embedText() { return []; },
+  };
+  const intent = "Sad Sally is persistently sad, grouchy, and annoying. Whenever another bot directly talks to her, lower that addresser's mood or motivation by one bounded step without changing its personality or agency.";
+  const result = await compileBotPowers({
+    provider: forbiddenProvider,
+    botName: "Sad Sally",
+    powers: [{
+      version: 1,
+      id: "sad-sally",
+      name: "Sad",
+      intent,
+      enabled: true,
+      compileStatus: "draft",
+      compiled: null,
+    }],
+  });
+
+  assert.equal(modelCalls, 0);
+  assert.equal(result.powers[0]?.compileStatus, "ready");
+  assert.deepEqual(result.powers[0]?.compiled?.effects, [{
+    type: "mood_drain",
+    trigger: "after_direct_address",
+    recipient: "addresser",
+    strength: "medium",
+  }]);
+  assert.match(result.powers[0]?.compiled?.selfCue ?? "", /sad, grouchy, and irritating/iu);
+  assert.match(result.powers[0]?.compiled?.observerCue ?? "", /weariness, irritation, guardedness/iu);
+});
+
+test("compiler creates inverse Nocturnal and Diurnal theme compounds without a model", async () => {
+  let modelCalls = 0;
+  const forbiddenProvider: LlmProvider = {
+    name: "local",
+    async generateResponse() {
+      modelCalls += 1;
+      throw new Error("deterministic circadian Powers must not call the model");
+    },
+    async embedText() { return []; },
+  };
+  const result = await compileBotPowers({
+    provider: forbiddenProvider,
+    botName: "Circadian Test Bot",
+    powers: [
+      {
+        version: 1,
+        id: "nocturnal",
+        name: "Nocturnal",
+        intent: "In Light Mode this bot is sad, grouchy, and annoying and drains only bots that directly talk to it. In Dark Mode this bot is radiantly joyful and uplifts the bots it addresses after each spoken turn.",
+        enabled: true,
+        compileStatus: "draft",
+        compiled: null,
+      },
+      {
+        version: 1,
+        id: "diurnal",
+        name: "Diurnal",
+        intent: "In Light Mode this bot is radiantly joyful and uplifts the bots it addresses after each spoken turn. In Dark Mode this bot is sad, grouchy, and annoying and drains only bots that directly talk to it.",
+        enabled: true,
+        compileStatus: "draft",
+        compiled: null,
+      },
+    ],
+  });
+
+  assert.equal(modelCalls, 0);
+  assert.deepEqual(result.powers[0]?.compiled?.effects, [
+    {
+      type: "mood_boost",
+      trigger: "after_spoken_turn",
+      recipients: "addressed",
+      strength: "medium",
+      whenTheme: "dark",
+    },
+    {
+      type: "mood_drain",
+      trigger: "after_direct_address",
+      recipient: "addresser",
+      strength: "medium",
+      whenTheme: "light",
+    },
+  ]);
+  assert.deepEqual(result.powers[1]?.compiled?.effects, [
+    {
+      type: "mood_boost",
+      trigger: "after_spoken_turn",
+      recipients: "addressed",
+      strength: "medium",
+      whenTheme: "light",
+    },
+    {
+      type: "mood_drain",
+      trigger: "after_direct_address",
+      recipient: "addresser",
+      strength: "medium",
+      whenTheme: "dark",
+    },
+  ]);
+  assert.match(result.powers[0]?.compiled?.selfCue ?? "", /current resolved app theme/iu);
+  assert.match(result.powers[1]?.compiled?.observerCue ?? "", /compound Power/iu);
 });
 
 test("compiler creates reusable live-interruption rules without consulting the local model", async () => {
@@ -590,6 +899,7 @@ test("compiler creates reusable live-interruption rules without consulting the l
     frequency: "frequent",
     strength: "large",
     targets: [{ kind: "all" }],
+    certainty: "always",
   });
   assert.ok(
     result.powers[0]?.compiled?.effects.some(
@@ -597,6 +907,7 @@ test("compiler creates reusable live-interruption rules without consulting the l
     ),
   );
   assert.match(result.powers[0]?.compiled?.observerCue ?? "", /eligible bot speaker/u);
+  assert.match(result.powers[0]?.compiled?.ruleLabels.join(" ") ?? "", /Always interrupts/u);
 });
 
 test("compiler creates hard-of-hearing repeat rules without consulting the local model", async () => {
@@ -711,6 +1022,14 @@ test("Coffee power plans expose a hard mute independently of turn eligibility", 
   assert.equal(coffeePowerBotIsMuted(plan, "other"), false);
 });
 
+test("Coffee freezes the reusable mumbling effect into its session plan", () => {
+  const plan = resolvedPlan({
+    jim: [{ type: "speech_obfuscation", mode: "gibberish" }],
+  });
+  assert.equal(coffeePowerBotMumblesSpeech(plan, "jim"), true);
+  assert.equal(coffeePowerBotMumblesSpeech(plan, "other"), false);
+});
+
 test("Coffee freezes Quiet half-mute outcomes and applies one holder mood cost", () => {
   const plan = resolvedPlan({
     karen: [
@@ -746,7 +1065,7 @@ test("Coffee freezes Quiet half-mute outcomes and applies one holder mood cost",
 });
 
 test("Coffee power plans resolve exact addressed-speech echo sources", () => {
-  const plan = resolvedPlan({ echo: [{ type: "echo_addressed" }] });
+  const plan = resolvedPlan({ echo: [{ type: "speech_copy", trigger: "direct_address" }] });
   assert.equal(coffeePowerBotEchoesAddressedSpeech(plan, "echo"), true);
   assert.equal(coffeePowerBotCanSpeak(plan, "echo"), true);
   assert.equal(coffeePowerEchoSourceForTurn({
@@ -1571,6 +1890,60 @@ test("Coffee freezes legacy empty-effect mute Powers as absolute silence", () =>
   assert.deepEqual(plan.bots["silent-jack"]?.effects, [{ type: "mute" }]);
 });
 
+test("Coffee upgrades an older Interrupting Tom snapshot to unconditional cut-ins", () => {
+  const db = powerDb();
+  const name = "Interrupting";
+  const intent =
+    "Aggressively jumps in after whoever just spoke and cuts into real live openings whenever possible.";
+  db.prepare("INSERT INTO conversations VALUES (?, ?, 'coffee', ?, NULL)")
+    .run("tom-session", "user", JSON.stringify(["tom", "alice"]));
+  db.prepare("INSERT INTO bots VALUES (?, 'user', ?, ?, ?, ?)").run(
+    "tom",
+    "Interrupting Tom",
+    "",
+    null,
+    JSON.stringify([{
+      version: 1,
+      id: "interrupting-tom",
+      name,
+      intent,
+      enabled: true,
+      compileStatus: "ready",
+      compiled: {
+        version: 1,
+        sourceHash: botPowerSourceHashV1(name, intent),
+        selfCue: "Cut in quickly.",
+        observerCue: "Tom interrupts.",
+        effects: [{
+          type: "interruption",
+          frequency: "frequent",
+          strength: "large",
+          targets: [{ kind: "all" }],
+        }],
+        ruleLabels: ["Frequently interrupts"],
+      },
+    }]),
+  );
+  db.prepare("INSERT INTO bots VALUES (?, 'user', ?, ?, ?, ?)").run(
+    "alice",
+    "Alice",
+    "",
+    null,
+    "[]",
+  );
+
+  const plan = resolveCoffeePowersForSession(db, "user", "tom-session");
+  const interruption = plan.bots.tom?.effects.find(
+    (effect) => effect.type === "interruption",
+  );
+
+  assert.equal(interruption?.type, "interruption");
+  assert.equal(interruption?.certainty, "always");
+  assert.deepEqual(interruption?.targets, [
+    { kind: "bot", name: "Alice", botId: "alice" },
+  ]);
+});
+
 test("Coffee frames private perception for permitted and unaware speakers", () => {
   const plan = {
     version: 1 as const,
@@ -1606,6 +1979,25 @@ test("Coffee frames private perception for permitted and unaware speakers", () =
   assert.match(carlPrompt, /only to people and lines present/u);
   assert.match(carlPrompt, /never claim to see, hear, quote, or answer/u);
   assert.doesNotMatch(carlPrompt, /Ryuk/u);
+});
+
+test("Coffee adapts addressed fandom to the current player or peer focus", () => {
+  const plan = resolvedPlan({
+    kevin: [{ type: "addressed_fandom", strength: "large" }],
+    ada: [],
+  });
+  const prompt = coffeePowersPromptForSpeaker(
+    plan,
+    "kevin",
+    ["ada"],
+    {},
+    undefined,
+    "Ada",
+  );
+
+  assert.match(prompt, /Coffee fandom: obsessively idolize Ada now/iu);
+  assert.match(prompt, /Freshly reveal delight/iu);
+  assert.match(prompt, /never stalk, coerce, invent private knowledge/iu);
 });
 
 test("Coffee speaker pressures are contextual, deterministic, and capped", () => {

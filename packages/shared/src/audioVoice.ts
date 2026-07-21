@@ -32,7 +32,7 @@ export const VOICE_EFFECT_DESCRIPTIONS: Record<
   radio: "Narrow-band broadcast tone with a trace of radio noise.",
   robot: "Mechanical pulse and a subtly doubled synthetic carrier.",
   echo: "Two level-controlled repeats behind the original voice.",
-  chorus: "PRISM's subtle, gently refracted double.",
+  chorus: "PRISM's subtle tuned voice with a gently refracted double.",
   resonance: "A dark, weighty mechanical double with a restrained low reflection.",
   "deep-space": "A lower spectral double with a distant trailing reflection.",
 };
@@ -174,6 +174,24 @@ export interface BotAudioVoiceProfileV2 {
   gainDb: number;
   volume: number;
   texture: BotVoiceTextureV1;
+  /** Optional looping avatar sound that follows the bot's visible state. */
+  avatarSfx?: BotAvatarSfxV1;
+}
+
+export const BOT_AVATAR_SFX_MAX_BYTES = 4 * 1024 * 1024;
+export const BOT_AVATAR_SFX_PROMPT_MAX_LENGTH = 400;
+export const BOT_AVATAR_SFX_FILE_NAME_MAX_LENGTH = 160;
+
+export interface BotAvatarSfxV1 {
+  v: 1;
+  source: "upload" | "elevenlabs";
+  audioDataUrl: string;
+  fileName?: string;
+  prompt?: string;
+  playWhileTalking: boolean;
+  playWhileIdle: boolean;
+  playWhileThinking: boolean;
+  volume: number;
 }
 
 export type BotAudioVoiceProfile = LegacyBotAudioVoiceProfileV1 | BotAudioVoiceProfileV2;
@@ -685,6 +703,10 @@ export function normalizeBotAudioVoiceProfileV1(
     record.elevenLabsStability,
     fallbackProfile.elevenLabsStability ?? ELEVENLABS_VOICE_STABILITY_DEFAULT,
   );
+  const avatarSfx = normalizeBotAvatarSfxV1(
+    record.avatarSfx,
+    fallbackProfile.avatarSfx ?? null,
+  );
   return {
     v: 2,
     enabled: legacy ? true : record.enabled !== false,
@@ -713,18 +735,21 @@ export function normalizeBotAudioVoiceProfileV1(
     // Voice texture presets are retired. Keep the field canonical for export
     // compatibility, but always resolve old and new profiles to clean audio.
     texture: botVoiceTextureForPreset("clean"),
+    ...(avatarSfx ? { avatarSfx } : {}),
   };
 }
 
 function normalizeBotAudioVoiceProfileFallback(value: BotAudioVoiceProfile): BotAudioVoiceProfileV2 {
   if (value.v === 2) {
+    const { avatarSfx: rawAvatarSfx, ...voiceProfile } = value;
     const elevenLabsDirection = normalizeElevenLabsVoiceDirection(value.elevenLabsDirection);
     const elevenLabsStability = value.elevenLabsStability === undefined
       ? undefined
       : normalizeElevenLabsVoiceStability(value.elevenLabsStability);
+    const avatarSfx = normalizeBotAvatarSfxV1(rawAvatarSfx);
     return {
       ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
-      ...value,
+      ...voiceProfile,
       elevenLabsEffect: normalizeVoiceEffect(value.elevenLabsEffect),
       ...(elevenLabsDirection
         ? { elevenLabsDirection }
@@ -733,6 +758,7 @@ function normalizeBotAudioVoiceProfileFallback(value: BotAudioVoiceProfile): Bot
       eqTilt: normalizeBotAudioVoiceControl(value.eqTilt),
       gainDb: normalizeBotVoiceGainDb(value.gainDb),
       texture: botVoiceTextureForPreset("clean"),
+      ...(avatarSfx ? { avatarSfx } : {}),
     };
   }
   return {
@@ -755,6 +781,71 @@ export function normalizeBotVoiceVolume(value: unknown, fallback = 1): number {
   const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
   const safe = Number.isFinite(parsed) ? parsed : fallback;
   return Number(Math.min(1.25, Math.max(0, safe)).toFixed(3));
+}
+
+function normalizeBotAvatarSfxText(
+  value: unknown,
+  maxLength: number,
+): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.replace(/\s+/gu, " ").trim();
+  return normalized ? normalized.slice(0, maxLength) : null;
+}
+
+function botAvatarSfxDataUrlIsValid(value: string): boolean {
+  if (value.length > Math.ceil((BOT_AVATAR_SFX_MAX_BYTES * 4) / 3) + 256) {
+    return false;
+  }
+  return /^data:audio\/[a-z0-9.+-]+;base64,[a-z0-9+/=\s]+$/iu.test(value);
+}
+
+export function normalizeBotAvatarSfxVolume(
+  value: unknown,
+  fallback = 0.45,
+): number {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value)
+        : NaN;
+  const safe = Number.isFinite(parsed) ? parsed : fallback;
+  return Number(Math.min(1, Math.max(0, safe)).toFixed(3));
+}
+
+export function normalizeBotAvatarSfxV1(
+  value: unknown,
+  fallback: BotAvatarSfxV1 | null = null,
+): BotAvatarSfxV1 | null {
+  if (value === null) return null;
+  if (value === undefined) return fallback;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return fallback;
+  }
+  const record = value as Record<string, unknown>;
+  const rawDataUrl = typeof record.audioDataUrl === "string"
+    ? record.audioDataUrl.trim()
+    : "";
+  if (!botAvatarSfxDataUrlIsValid(rawDataUrl)) return fallback;
+  const fileName = normalizeBotAvatarSfxText(
+    record.fileName,
+    BOT_AVATAR_SFX_FILE_NAME_MAX_LENGTH,
+  );
+  const prompt = normalizeBotAvatarSfxText(
+    record.prompt,
+    BOT_AVATAR_SFX_PROMPT_MAX_LENGTH,
+  );
+  return {
+    v: 1,
+    source: record.source === "elevenlabs" ? "elevenlabs" : "upload",
+    audioDataUrl: rawDataUrl,
+    ...(fileName ? { fileName } : {}),
+    ...(prompt ? { prompt } : {}),
+    playWhileTalking: record.playWhileTalking === true,
+    playWhileIdle: record.playWhileIdle === true,
+    playWhileThinking: record.playWhileThinking === true,
+    volume: normalizeBotAvatarSfxVolume(record.volume),
+  };
 }
 
 function normalizeOptionalVoiceSelection(

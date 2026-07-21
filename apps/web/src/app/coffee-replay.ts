@@ -4,6 +4,7 @@ import {
   coffeeCupSipMessageGapForDuration,
   normalizeListenerReactionPlanV1,
   type CoffeeAmbientActionPayload,
+  type CoffeeUserActionPayload,
   type CoffeeCupTopOffSnapshot,
   type CoffeeReplayBotDepartureEventPayload,
   type CoffeeReplayEventPayload,
@@ -11,6 +12,7 @@ import {
   type CoffeeReplaySocialSnapshotPayload,
   type CoffeeReplayTopOffEventPayload,
   type CoffeeSessionSettings,
+  type BotIdentityMirrorStateV1,
   type ListenerReactionPlanV1,
 } from "@localai/shared";
 
@@ -40,6 +42,7 @@ export interface CoffeeReplayMessageLike {
   provider?: string | null;
   model?: string | null;
   coffeeAmbientAction?: CoffeeAmbientActionPayload;
+  coffeeUserAction?: CoffeeUserActionPayload;
   coffeeReplayEvents?: CoffeeReplayEventPayload[];
 }
 
@@ -187,6 +190,28 @@ export interface CoffeeReplayState {
   playerPresent: boolean;
   playerDeparting: boolean;
   playerDepartureEvent: CoffeeReplayPlayerDepartureEventPayload | null;
+  identityMirrorByHolderBotId: Record<string, BotIdentityMirrorStateV1>;
+}
+
+/** State used by voice playback for one message; the triggering message changes later turns. */
+export function coffeeIdentityMirrorStateBeforeMessage(
+  messages: readonly CoffeeReplayMessageLike[],
+  messageIndex: number,
+  holderBotId: string,
+): BotIdentityMirrorStateV1 | null {
+  let state: BotIdentityMirrorStateV1 | null = null;
+  const end = Math.max(0, Math.min(messages.length, Math.floor(messageIndex)));
+  for (let index = 0; index < end; index += 1) {
+    for (const event of coffeeReplayEventsForMessage(messages[index])) {
+      if (
+        event.kind === "identityMirror" &&
+        event.state.holderBotId === holderBotId
+      ) {
+        state = event.state;
+      }
+    }
+  }
+  return state;
 }
 
 export const COFFEE_REPLAY_PLAYER_THINKING_MIN_MS = 800;
@@ -210,7 +235,10 @@ export function coffeePlayerMessageSignalsSessionEnd(text: string): boolean {
 }
 
 export function coffeeReplayCompletionHoldMs(
-  message: Pick<CoffeeReplayMessageLike, "coffeeReplayEvents">,
+  message: Pick<
+    CoffeeReplayMessageLike,
+    "coffeeReplayEvents" | "coffeeUserAction"
+  >,
   reducedMotion: boolean,
 ): number {
   const events = message.coffeeReplayEvents ?? [];
@@ -219,6 +247,9 @@ export function coffeeReplayCompletionHoldMs(
   }
   if (events.some((event) => event.kind === "playerDeparture")) {
     return reducedMotion ? 120 : 1_280;
+  }
+  if (message.coffeeUserAction) {
+    return reducedMotion ? 120 : 1_100;
   }
   return 420;
 }
@@ -454,6 +485,7 @@ export function coffeeReplayStateAt(
   let playerPresent = true;
   let playerDeparting = false;
   let playerDepartureEvent: CoffeeReplayPlayerDepartureEventPayload | null = null;
+  const identityMirrorByHolderBotId: Record<string, BotIdentityMirrorStateV1> = {};
 
   for (let index = 0; index < messages.length && index <= clampedIndex; index += 1) {
     const isCurrentMessage = index === clampedIndex;
@@ -491,6 +523,8 @@ export function coffeeReplayStateAt(
         } else {
           playerPresent = false;
         }
+      } else if (event.kind === "identityMirror") {
+        identityMirrorByHolderBotId[event.state.holderBotId] = event.state;
       }
     }
   }
@@ -510,6 +544,7 @@ export function coffeeReplayStateAt(
     playerPresent,
     playerDeparting,
     playerDepartureEvent,
+    identityMirrorByHolderBotId,
   };
 }
 
@@ -651,6 +686,17 @@ function coffeeReviewReplayEventLine(
     return `- ${event.occurredAt} listenerReaction: ${bot} ${event.plan.visualAction}${audible} while ${speaker} spoke (${event.plan.targetSource}, ${Math.round(
       event.plan.targetProgress * 100,
     )}%)`;
+  }
+  if (event.kind === "identityMirror") {
+    return `- ${event.occurredAt} identityMirror: ${bot} copied ${event.state.targetBotName} (${event.state.targetBotId})`;
+  }
+  if (event.kind === "powerMoodBoost") {
+    const source = coffeeReviewBotLabel(event.sourceBotId, botNameById);
+    return `- ${event.occurredAt} powerMoodBoost: ${source} lifted ${bot} via ${event.powerName} (${event.strength}, disposition ${coffeeReviewUnitValue(event.dispositionBefore)} -> ${coffeeReviewUnitValue(event.dispositionAfter)}, sourceMessage=${event.sourceMessageId})`;
+  }
+  if (event.kind === "powerMoodDrain") {
+    const source = botNameById.get(event.sourceBotId) ?? event.sourceBotId;
+    return `- ${event.occurredAt} powerMoodDrain: ${bot} directly addressed ${source} and was drained by ${event.powerName} (${event.strength}, disposition ${coffeeReviewUnitValue(event.dispositionBefore)} -> ${coffeeReviewUnitValue(event.dispositionAfter)}, sourceMessage=${event.sourceMessageId})`;
   }
   return `- ${event.occurredAt} mood: ${bot} disposition=${coffeeReviewUnitValue(
     event.social.disposition

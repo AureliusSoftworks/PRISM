@@ -352,12 +352,14 @@ export function PrismMenuSurface({
       onClose({ restoreFocus: false });
     };
     const dismissForViewport = () => onClose({ restoreFocus: false });
-    document.addEventListener("pointerdown", dismissForPointer, true);
+    // Listen at the first capture boundary so canvas gestures that stop
+    // propagation cannot strand an open menu.
+    window.addEventListener("pointerdown", dismissForPointer, true);
     window.addEventListener("blur", dismissForViewport);
     window.addEventListener("resize", measure);
     window.addEventListener("scroll", measure, true);
     return () => {
-      document.removeEventListener("pointerdown", dismissForPointer, true);
+      window.removeEventListener("pointerdown", dismissForPointer, true);
       window.removeEventListener("blur", dismissForViewport);
       window.removeEventListener("resize", measure);
       window.removeEventListener("scroll", measure, true);

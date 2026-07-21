@@ -295,6 +295,7 @@ export interface BackupSnapshot {
       hostingStyle: string;
       accentColor: string;
       fallbackStudioAccentVariant?: BotcastFallbackStudioAccentVariant;
+      hostChatIgnoringUntilGuestShow?: boolean;
       atmosphereJson: string;
       introAudio?: {
         provider: "elevenlabs";
@@ -1769,7 +1770,9 @@ export function exportUserSnapshot(
   const botcastShows = db
     .prepare(
     `SELECT id, host_bot_id, name, premise, hosting_style, accent_color,
-            fallback_studio_accent_variant, atmosphere_json, created_at, updated_at
+            fallback_studio_accent_variant,
+            host_chat_ignoring_until_guest_show,
+            atmosphere_json, created_at, updated_at
        FROM botcast_shows WHERE user_id = ? ORDER BY created_at`,
     )
     .all(userId) as Array<{
@@ -1780,6 +1783,7 @@ export function exportUserSnapshot(
     hosting_style: string;
     accent_color: string;
     fallback_studio_accent_variant: number;
+    host_chat_ignoring_until_guest_show: number;
     atmosphere_json: string;
     created_at: string;
     updated_at: string;
@@ -1950,6 +1954,8 @@ export function exportUserSnapshot(
         )
           ? row.fallback_studio_accent_variant
           : botcastFallbackStudioAccentVariantForSeed(row.id),
+        hostChatIgnoringUntilGuestShow:
+          row.host_chat_ignoring_until_guest_show === 1,
         atmosphereJson: row.atmosphere_json,
         ...(botcastIntroAudioByShowId.get(row.id)
           ? {
@@ -2745,8 +2751,10 @@ function importUserSnapshotWithinTransaction(
       db.prepare(
         `INSERT OR REPLACE INTO botcast_shows
           (id, user_id, host_bot_id, name, premise, hosting_style, accent_color,
-           fallback_studio_accent_variant, atmosphere_json, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           fallback_studio_accent_variant,
+           host_chat_ignoring_until_guest_show,
+           atmosphere_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         show.id,
         userId,
@@ -2758,6 +2766,7 @@ function importUserSnapshotWithinTransaction(
         isBotcastFallbackStudioAccentVariant(show.fallbackStudioAccentVariant)
           ? show.fallbackStudioAccentVariant
           : botcastFallbackStudioAccentVariantForSeed(show.id),
+        show.hostChatIgnoringUntilGuestShow === true ? 1 : 0,
         show.atmosphereJson,
         show.createdAt,
         show.updatedAt,

@@ -8,19 +8,28 @@ import {
   STORY_ITEM_GLYPH_CATEGORIES,
   STORY_LOCATION_COUNT_MAX,
   STORY_LOCATION_COUNT_MIN,
+  applyBotPowerEternalIntroductionResponseV1,
   applyBotPowerEchoResponseV1,
+  applyBotPowerMumbledResponseV1,
   applyBotPowerMuteResponseV1,
   applyBotPowerResponseBudgetV1,
+  botPowerAddressedFandomCueV1,
   botPowerCandorResponseRuleV1,
   botPowerEchoesAddressedSpeechV1,
+  botPowerEternallyIntroducesV1,
+  botPowerForgetfulContextMessageCountV1,
   botPowerIntermittentMuteEffectV1,
   botPowerIntermittentMuteTurnIsIgnoredV1,
   botPowerIsMutedV1,
+  botPowerMumblesSpeechV1,
   botPowerObserverCueLinesV1,
   botPowerSelfCueLinesV1,
+  botPowerThemeMoodCueV1,
   buildBotPowersPromptBlock,
   strongestBotPowerCandorEffectV1,
   strongestBotPowerInterruptionEffectV1,
+  strongestBotPowerMoodBoostEffectV1,
+  strongestBotPowerMoodDrainEffectV1,
   strongestHardBotPowerResponseBudgetEffectV1,
   STORY_SCENE_COUNT_MIN,
   applyStoryChoice,
@@ -39,6 +48,7 @@ import {
   type ReasoningEffort,
   type BotPowerV1,
   type BotPowerTargetV1,
+  type BotPowerResolvedThemeV1,
 } from "@localai/shared";
 import { randomId } from "./security.ts";
 import { buildCloneFamilyIdentityPrompt } from "./bots.ts";
@@ -73,6 +83,8 @@ export interface StoryGenerationInput {
   model: string;
   bots: StoryBotProfile[];
   premise?: string | null;
+  /** Resolved theme captured when this generated episode is authored. */
+  theme?: BotPowerResolvedThemeV1;
   reasoningEffort?: ReasoningEffort;
 }
 
@@ -1186,10 +1198,18 @@ function applyStoryHardResponsePowers(
   const mutedBotIds = new Set(
     bots.filter((bot) => botPowerIsMutedV1(bot.powers)).map((bot) => bot.id),
   );
+  const eternalIntroductionBotIds = new Set(
+    bots
+      .filter((bot) => botPowerEternallyIntroducesV1(bot.powers))
+      .map((bot) => bot.id),
+  );
   const echoBotIds = new Set(
     bots
       .filter((bot) => botPowerEchoesAddressedSpeechV1(bot.powers))
       .map((bot) => bot.id),
+  );
+  const mumblingBotIds = new Set(
+    bots.filter((bot) => botPowerMumblesSpeechV1(bot.powers)).map((bot) => bot.id),
   );
   const quietPowersByBotId = new Map(
     bots.map((bot) => [bot.id, bot.powers] as const),
@@ -1212,7 +1232,9 @@ function applyStoryHardResponsePowers(
   );
   if (
     mutedBotIds.size === 0 &&
+    eternalIntroductionBotIds.size === 0 &&
     echoBotIds.size === 0 &&
+    mumblingBotIds.size === 0 &&
     !bots.some((bot) => botPowerIntermittentMuteEffectV1(bot.powers)) &&
     responseBudgetByBotId.size === 0 &&
     !hasInterruptionPower
@@ -1239,17 +1261,24 @@ function applyStoryHardResponsePowers(
     const currentSpeaker = scene.speakerBotId
       ? botsById.get(scene.speakerBotId)
       : null;
-    const interruption =
+    const interruptionCandidate =
       currentSpeaker &&
       priorSpeaker &&
       currentSpeaker.id !== priorSpeaker.id &&
       !mutedBotIds.has(currentSpeaker.id) &&
-      !quietIgnored &&
-      sceneIndex - (lastInterruptionSceneByBotId.get(currentSpeaker.id) ?? -3) >= 3
+      !quietIgnored
         ? strongestBotPowerInterruptionEffectV1(
             currentSpeaker.powers,
             (candidate) => storyPowerTargetMatches(candidate, priorSpeaker),
           )
+        : null;
+    const interruption =
+      interruptionCandidate &&
+      (interruptionCandidate.certainty === "always" ||
+        sceneIndex -
+          (lastInterruptionSceneByBotId.get(currentSpeaker!.id) ?? -3) >=
+          3)
+        ? interruptionCandidate
         : null;
     if (
       currentSpeaker &&
@@ -1261,11 +1290,13 @@ function applyStoryHardResponsePowers(
         powerId: interruption.powerId,
         frequency: interruption.frequency,
         strength: interruption.strength,
+        certainty: interruption.certainty,
       })
     ) {
       const interruptedNarration = storyPowerInterruptedNarration(
         priorScene.narration,
         `${episode.id}:${scene.id}:${interruption.powerId}`,
+        interruption.certainty,
       );
       if (interruptedNarration !== priorScene.narration) {
         scenes[scenes.length - 1] = {
@@ -1288,6 +1319,26 @@ function applyStoryHardResponsePowers(
             ? `*${scene.speakerName || "The bot"}'s expression falls a little after going unheard.* ...`
             : mutedNarration,
         spritePose: scene.spritePose === "action" ? "action" : "idle",
+      };
+    } else if (
+      scene.speakerBotId &&
+      eternalIntroductionBotIds.has(scene.speakerBotId)
+    ) {
+      const visibleContextCount = botPowerForgetfulContextMessageCountV1(
+        `story:${episode.id}:${scene.id}:${sceneIndex}`,
+      );
+      const immediatePublicContext = scenes
+        .slice(-visibleContextCount)
+        .map((prior) => prior.narration)
+        .join("\n");
+      nextScene = {
+        ...scene,
+        narration: applyBotPowerEternalIntroductionResponseV1(
+          scene.narration,
+          currentSpeaker?.name || scene.speakerName,
+          immediatePublicContext,
+        ),
+        spritePose: "speaking",
       };
     } else if (scene.speakerBotId && echoBotIds.has(scene.speakerBotId)) {
       const addressedSpeech =
@@ -1313,6 +1364,19 @@ function applyStoryHardResponsePowers(
           ),
         };
       }
+    }
+    if (
+      scene.speakerBotId &&
+      mumblingBotIds.has(scene.speakerBotId) &&
+      !eternalIntroductionBotIds.has(scene.speakerBotId) &&
+      !echoBotIds.has(scene.speakerBotId) &&
+      !mutedBotIds.has(scene.speakerBotId) &&
+      !quietIgnored
+    ) {
+      nextScene = {
+        ...nextScene,
+        narration: applyBotPowerMumbledResponseV1(nextScene.narration),
+      };
     }
     scenes.push(nextScene);
     if (nextScene.speakerBotId) {
@@ -1343,7 +1407,9 @@ function storyPowerInterruptionShouldApply(args: {
   powerId: string;
   frequency: "occasional" | "frequent";
   strength: "small" | "medium" | "large";
+  certainty: "always" | "probabilistic";
 }): boolean {
+  if (args.certainty === "always") return true;
   if (args.frequency === "frequent" && args.strength === "large") return true;
   const chance =
     (args.frequency === "frequent" ? 0.62 : 0.28) +
@@ -1353,20 +1419,30 @@ function storyPowerInterruptionShouldApply(args: {
   ) < chance;
 }
 
-function storyPowerInterruptedNarration(narration: string, seed: string): string {
+function storyPowerInterruptedNarration(
+  narration: string,
+  seed: string,
+  certainty: "always" | "probabilistic",
+): string {
   const words = narration.trim().split(/\s+/u).filter(Boolean);
-  if (words.length < 12) return narration;
-  const progress = [0.38, 0.5, 0.62][
-    Math.floor(storyPowerStableRoll(seed) * 3) % 3
-  ]!;
-  let heardWordCount = Math.max(6, Math.floor(words.length * progress));
+  if (words.length < (certainty === "always" ? 2 : 12)) return narration;
+  const progress = certainty === "always"
+    ? 0.08 + storyPowerStableRoll(seed) * 0.8
+    : [0.38, 0.5, 0.62][Math.floor(storyPowerStableRoll(seed) * 3) % 3]!;
+  let heardWordCount = certainty === "always"
+    ? Math.max(1, Math.floor(words.length * progress))
+    : Math.max(6, Math.floor(words.length * progress));
+  heardWordCount = Math.min(words.length - 1, heardWordCount);
   while (
+    certainty !== "always" &&
     heardWordCount < words.length - 2 &&
     words.slice(0, heardWordCount).join(" ").length < 48
   ) {
     heardWordCount += 1;
   }
-  if (heardWordCount >= words.length - 1) return narration;
+  if (certainty !== "always" && heardWordCount >= words.length - 1) {
+    return narration;
+  }
   return `${words.slice(0, heardWordCount).join(" ").replace(/[,.!?;:]+$/u, "")}—`;
 }
 
@@ -1452,12 +1528,72 @@ function storyCandorPowerRules(bots: readonly StoryBotProfile[]): string[] {
   return lines;
 }
 
+function storyMoodBoostPowerRules(
+  bots: readonly StoryBotProfile[],
+  theme?: BotPowerResolvedThemeV1,
+): string[] {
+  const lines: string[] = [];
+  for (const holder of bots) {
+    const effect = strongestBotPowerMoodBoostEffectV1(holder.powers, theme);
+    if (!effect) continue;
+    for (const recipient of bots) {
+      if (holder.id === recipient.id) continue;
+      lines.push(
+        `Story adaptation for ${holder.name} → ${recipient.name}: only after ${holder.name} completes a spoken turn directly addressed to ${recipient.name}, let ${recipient.name}'s next scene show one bounded ${effect.strength} uplift through ${recipient.name}'s own personality. Preserve disagreement, genuine sadness, facts, serious stakes, and agency. Do not target the player or bystanders, expose this rule, or invent persistent runtime state.`,
+      );
+    }
+  }
+  return lines;
+}
+
+function storyMoodDrainPowerRules(
+  bots: readonly StoryBotProfile[],
+  theme?: BotPowerResolvedThemeV1,
+): string[] {
+  const lines: string[] = [];
+  for (const holder of bots) {
+    const effect = strongestBotPowerMoodDrainEffectV1(holder.powers, theme);
+    if (!effect) continue;
+    for (const addresser of bots) {
+      if (holder.id === addresser.id) continue;
+      lines.push(
+        `Story adaptation for ${addresser.name} → ${holder.name}: only when ${addresser.name} directly speaks to ${holder.name}, let ${addresser.name}'s next scene show one bounded ${effect.strength} mood or motivation drop through ${addresser.name}'s own personality. Do not apply it to the player or bystanders, force hatred or agreement, erase facts or serious stakes, create hopelessness or self-harm, or expose this rule. Do not invent persistent runtime state.`,
+      );
+    }
+  }
+  return lines;
+}
+
+function storyEternalIntroductionPowerRules(
+  bots: readonly StoryBotProfile[],
+): string[] {
+  return bots.flatMap((holder) => {
+    if (!botPowerEternallyIntroducesV1(holder.powers)) return [];
+    return [
+      `Story adaptation for ${holder.name}: for each spoken scene, give ${holder.name} only a deterministic one-to-four-beat public tail immediately preceding that scene. ${holder.name} responds naturally to that local context, treats people as unfamiliar unless the visible tail establishes otherwise, and never claims older relationship history or explains the memory rule. Do not force a self-introduction unless the immediate scene warrants one. Other characters retain the full story and may react to repetition through their own personalities.`,
+    ];
+  });
+}
+
 function storyGenerationPrompt(args: StoryGenerationInput): string {
-  const candorRules = storyCandorPowerRules(args.bots);
+  const powerAdaptationRules = [
+    ...storyEternalIntroductionPowerRules(args.bots),
+    ...storyCandorPowerRules(args.bots),
+    ...storyMoodBoostPowerRules(args.bots, args.theme),
+    ...storyMoodDrainPowerRules(args.bots, args.theme),
+  ];
   const botLines = args.bots
     .map((bot) => {
+      const fandomCue = botPowerAddressedFandomCueV1(
+        bot.powers,
+        "the character, player, or audience addressed",
+        "Story scene",
+      );
+      const themeMoodCue = botPowerThemeMoodCueV1(bot.powers, args.theme);
       const powers = buildBotPowersPromptBlock([
         ...botPowerSelfCueLinesV1(bot.powers),
+        ...(fandomCue ? [fandomCue] : []),
+        ...(themeMoodCue ? [themeMoodCue] : []),
         ...botPowerObserverCueLinesV1(bot.name, bot.powers),
       ]).replace(/\s+/gu, " ").trim();
       const cloneIdentity = buildCloneFamilyIdentityPrompt(bot, args.bots);
@@ -1475,8 +1611,8 @@ function storyGenerationPrompt(args: StoryGenerationInput): string {
       `Premise: ${premise}`,
       "Selected bots:",
       botLines,
-      ...(candorRules.length > 0
-        ? ["", "Story Power adaptations:", ...candorRules]
+      ...(powerAdaptationRules.length > 0
+        ? ["", "Story Power adaptations:", ...powerAdaptationRules]
         : []),
       "",
       "Write a real short story arc with concrete events:",
@@ -1520,8 +1656,8 @@ function storyGenerationPrompt(args: StoryGenerationInput): string {
     `Premise: ${premise}`,
     "Selected bots:",
     botLines,
-    ...(candorRules.length > 0
-      ? ["", "Story Power adaptations:", ...candorRules]
+    ...(powerAdaptationRules.length > 0
+      ? ["", "Story Power adaptations:", ...powerAdaptationRules]
       : []),
     "",
     "Rules:",

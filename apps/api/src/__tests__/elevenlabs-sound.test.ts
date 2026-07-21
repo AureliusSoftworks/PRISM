@@ -1,15 +1,47 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  AVATAR_ELEVENLABS_SFX_DURATION_SECONDS,
+  AVATAR_ELEVENLABS_SFX_MODEL,
+  buildAvatarElevenLabsSfxPrompt,
   buildCoffeeElevenLabsActionSfxPrompt,
   buildSignalAtmospherePrompt,
   COFFEE_ELEVENLABS_ACTION_SFX_MODEL,
   isCoffeeElevenLabsActionSfxKind,
   requestCoffeeElevenLabsActionSfx,
+  requestAvatarElevenLabsSfx,
   requestSignalElevenLabsAtmosphere,
   SIGNAL_ELEVENLABS_ATMOSPHERE_MODEL,
   SIGNAL_ELEVENLABS_SOUND_PROMPT_MAX_CHARACTERS,
 } from "../elevenlabs-sound.ts";
+
+test("Avatar SFX generation requests a short seamless ElevenLabs loop", async () => {
+  let body: Record<string, unknown> | null = null;
+  const result = await requestAvatarElevenLabsSfx({
+    apiKey: "test-key",
+    prompt: "Soft clockwork breathing with tiny brass ticks",
+    fetchImpl: async (_input, init) => {
+      body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return new Response(Uint8Array.from([0x49, 0x44, 0x33]), {
+        status: 200,
+        headers: { "content-type": "audio/mpeg", "request-id": "avatar-sfx-1" },
+      });
+    },
+  });
+  const requestBody = body as Record<string, unknown>;
+  assert.equal(
+    requestBody.text,
+    buildAvatarElevenLabsSfxPrompt(
+      "Soft clockwork breathing with tiny brass ticks",
+    ),
+  );
+  assert.equal(requestBody.duration_seconds, AVATAR_ELEVENLABS_SFX_DURATION_SECONDS);
+  assert.equal(requestBody.prompt_influence, 0.35);
+  assert.equal(requestBody.loop, true);
+  assert.equal(requestBody.model_id, AVATAR_ELEVENLABS_SFX_MODEL);
+  assert.equal(result.requestId, "avatar-sfx-1");
+  assert.equal(result.audioBytes.length, 3);
+});
 
 test("Coffee action foley uses a small trusted physical-action allowlist", () => {
   assert.equal(isCoffeeElevenLabsActionSfxKind("coffee_pour"), true);

@@ -5,9 +5,12 @@ import {
   BOT_POWER_CANONICAL_SILENCE_V1,
   BOT_POWER_MAX_COUNT,
   activeBotPowerEffectsV1,
+  applyBotPowerEternalIntroductionResponseV1,
   applyBotPowerEchoResponseV1,
+  applyBotPowerMumbledResponseV1,
   applyBotPowerMuteResponseV1,
   applyBotPowerResponseBudgetV1,
+  botPowerAddressedFandomCueV1,
   botPowerAvatarScaleModeFromEffectsV1,
   botPowerAvatarScaleModeV1,
   botPowerDeterministicHalfChanceV1,
@@ -15,16 +18,23 @@ import {
   botPowerCandorTriggerV1,
   botPowerCandorResponseRuleV1,
   botPowerDefinitionIsExplicitInterruptionV1,
+  botPowerDefinitionIsUnconditionalInterruptionV1,
   botPowerDefinitionIsExplicitMuteV1,
   botPowerEchoesAddressedSpeechV1,
+  botPowerEternallyIntroducesV1,
+  botPowerForgetfulContextMessageCountV1,
+  botPowerForgetfulPriorMessagesV1,
   botPowerHasSpeakingOnlyAvatarVisibilityV1,
   botPowerIntermittentMuteEffectV1,
   botPowerIntermittentMuteTurnIsIgnoredV1,
   botPowerIsMutedV1,
+  botPowerMumblesSpeechV1,
   botPowerObserverCueLinesV1,
   botPowerResponseIsSilentV1,
+  botPowerResponseIsFirstIntroductionV1,
   botPowerSourceHashV1,
   botPowerTextScaleV1,
+  botPowerThemeMoodCueV1,
   botPowerVoiceGainMultiplierV1,
   botPowerVoicePresenceModeV1,
   buildBotPowersSelfPromptV1,
@@ -36,7 +46,10 @@ import {
   parseStoredBotPowersV1,
   serializeBotPowersV1,
   strongestBotPowerCandorEffectV1,
+  strongestBotPowerAddressedFandomEffectV1,
   strongestBotPowerInterruptionEffectV1,
+  strongestBotPowerMoodBoostEffectV1,
+  strongestBotPowerMoodDrainEffectV1,
   strongestBotPowerResponseBudgetEffectV1,
   strongestHardBotPowerResponseBudgetEffectV1,
   type CoffeePowerPlanV1,
@@ -107,6 +120,140 @@ test("voice-presence and intermittent-mute effects normalize to bounded contract
     chance: "half",
     moodPenalty: "medium",
   });
+});
+
+test("forgetful context normalizes legacy Powers into a stable one-to-four-message tail", () => {
+  assert.deepEqual(normalizeBotPowerEffectV1({
+    type: "eternal_introduction",
+    memory: "all_history",
+    ignored: true,
+  }), {
+    type: "eternal_introduction",
+    memory: "rolling_public_tail_1_to_4",
+  });
+  const name = "Forgetful Freddie";
+  const intent = "Every message is a first introduction and prior messages are unavailable.";
+  const powers = [{
+    version: 1,
+    id: "forgetful-freddie",
+    name: "Eternal Introduction",
+    intent,
+    enabled: true,
+    compileStatus: "ready",
+    compiled: {
+      version: 1,
+      sourceHash: botPowerSourceHashV1("Eternal Introduction", intent),
+      selfCue: "Introduce yourself for the first time.",
+      observerCue: "Remember each repetition.",
+      effects: [{
+        type: "eternal_introduction",
+        memory: "current_turn_only",
+      }],
+      ruleLabels: [],
+    },
+  }];
+
+  assert.equal(botPowerEternallyIntroducesV1(powers), true);
+  assert.deepEqual(
+    parseStoredBotPowersV1(serializeBotPowersV1(powers))[0]?.compiled?.effects,
+    [{ type: "eternal_introduction", memory: "rolling_public_tail_1_to_4" }],
+  );
+  const stableCount = botPowerForgetfulContextMessageCountV1("conversation:7");
+  assert.ok(stableCount >= 1 && stableCount <= 4);
+  assert.equal(
+    botPowerForgetfulContextMessageCountV1("conversation:7"),
+    stableCount,
+  );
+  assert.deepEqual(
+    botPowerForgetfulPriorMessagesV1(["one", "two", "three", "four"], "conversation:7"),
+    stableCount === 1
+      ? []
+      : ["one", "two", "three", "four"].slice(-(stableCount - 1)),
+  );
+  assert.equal(
+    botPowerResponseIsFirstIntroductionV1(
+      "Hello. I'm Forgetful Freddie. Everyone seems oddly tense.",
+      name,
+    ),
+    true,
+  );
+  assert.equal(
+    applyBotPowerEternalIntroductionResponseV1(
+      "I'm Forgetful Freddie again, as I said earlier.",
+      name,
+      "Why do you keep repeating yourself?",
+    ),
+    "What do you mean? I don't think we've met yet.",
+  );
+  assert.equal(
+    applyBotPowerEternalIntroductionResponseV1(
+      "Hello—I'm Forgetful Freddie. It's nice to meet you.",
+      name,
+      "Goddammit",
+    ),
+    "What's the matter? Sorry, I'm not sure what's wrong.",
+  );
+  assert.equal(
+    applyBotPowerEternalIntroductionResponseV1(
+      "I seem to have introduced myself a few times already.",
+      name,
+      "Why do you keep introducing yourself?",
+    ),
+    "What do you mean? I don't think we've met yet.",
+  );
+  assert.equal(
+    applyBotPowerEternalIntroductionResponseV1(
+      "The archive key is under the blue case.",
+      name,
+      "Where is the archive key?",
+    ),
+    "The archive key is under the blue case.",
+  );
+  assert.equal(
+    applyBotPowerEternalIntroductionResponseV1(
+      "We've known each other for years.",
+      name,
+      "Do you remember me?",
+    ),
+    "I'm sorry, but I don't think we've met before.",
+  );
+});
+
+test("mumbling is a normal-volume hard speech transform that preserves only physical actions", () => {
+  assert.deepEqual(normalizeBotPowerEffectV1({
+    type: "speech_obfuscation",
+    mode: "plain_english",
+    gain: 0.01,
+  }), { type: "speech_obfuscation", mode: "gibberish" });
+
+  const name = "Mumbling";
+  const intent = "He intends rational speech, but everyone else hears only gibberish.";
+  const powers = [{
+    version: 1,
+    id: "mumbling",
+    name,
+    intent,
+    enabled: true,
+    compileStatus: "ready",
+    compiled: {
+      version: 1,
+      sourceHash: botPowerSourceHashV1(name, intent),
+      selfCue: "Form a coherent answer before the runtime obscures it.",
+      observerCue: "Only literal gibberish is audible.",
+      effects: [{ type: "speech_obfuscation", mode: "gibberish" }],
+      ruleLabels: [],
+    },
+  }];
+  const intended = "*frowns slightly* [Mira](prism-bot://bot-mira), I explained the rational plan clearly.";
+  const first = applyBotPowerMumbledResponseV1(intended);
+  const second = applyBotPowerMumbledResponseV1(intended);
+
+  assert.equal(botPowerMumblesSpeechV1(powers), true);
+  assert.equal(first, second);
+  assert.match(first, /^\*frowns slightly\* /u);
+  assert.doesNotMatch(first, /Mira|explained|rational|plan|clearly|prism-bot/iu);
+  assert.equal(botPowerVoiceGainMultiplierV1(powers), 1);
+  assert.equal(botPowerTextScaleV1(powers), 1);
 });
 
 test("loud voice presence overrides smaller and speaking-only invisible presentation", () => {
@@ -221,6 +368,57 @@ test("candor Powers normalize, trigger narrowly, choose the strongest pressure, 
   );
 });
 
+test("addressed fandom is bounded, target-scoped, and active only for ready enabled Powers", () => {
+  assert.deepEqual(
+    normalizeBotPowerEffectV1({ type: "addressed_fandom", strength: "absolute" }),
+    { type: "addressed_fandom", strength: "medium" },
+  );
+  const name = "Obsessed";
+  const intent = "He is obsessively a fan of whoever he is talking to.";
+  const readyPower = {
+    version: 1 as const,
+    id: "obsessed-kevin",
+    name,
+    intent,
+    enabled: true,
+    compileStatus: "ready" as const,
+    compiled: {
+      version: 1 as const,
+      sourceHash: botPowerSourceHashV1(name, intent),
+      selfCue: "Treat the current addressee as your favorite.",
+      observerCue: "Kevin becomes a fan of his current addressee.",
+      effects: [{ type: "addressed_fandom" as const, strength: "large" as const }],
+      ruleLabels: ["Obsesses over current addressee"],
+    },
+  };
+
+  assert.deepEqual(strongestBotPowerAddressedFandomEffectV1([readyPower]), {
+    type: "addressed_fandom",
+    strength: "large",
+  });
+  const cue = botPowerAddressedFandomCueV1([readyPower], "Ada", "Signal");
+  assert.match(cue ?? "", /obsessively idolize Ada now/iu);
+  assert.match(cue ?? "", /Freshly reveal delight/iu);
+  assert.match(cue ?? "", /never stalk, coerce, invent private knowledge/iu);
+  assert.ok((cue?.length ?? 0) <= 280);
+  assert.equal(botPowerAddressedFandomCueV1([{ ...readyPower, enabled: false }], "Ada"), null);
+  assert.equal(
+    botPowerAddressedFandomCueV1([
+      { ...readyPower, compileStatus: "draft" as const, compiled: null },
+    ], "Ada"),
+    null,
+  );
+  assert.equal(
+    botPowerAddressedFandomCueV1([
+      {
+        ...readyPower,
+        compiled: { ...readyPower.compiled, sourceHash: "v1-stale" },
+      },
+    ], "Ada"),
+    null,
+  );
+});
+
 test("mute Powers normalize and enforce silent action-aware responses", () => {
   const name = "Mute";
   const intent = "This bot can never speak.";
@@ -311,17 +509,187 @@ test("echo Powers normalize and preserve addressed speech exactly", () => {
       sourceHash: botPowerSourceHashV1(name, intent),
       selfCue: "Repeat addressed speech exactly.",
       observerCue: "This bot only echoes addressed speech.",
-      effects: [{ type: "echo_addressed", ignored: true }],
+      effects: [{ type: "speech_copy", trigger: "direct_address", ignored: true }],
       ruleLabels: ["Echoes addressed speech"],
     },
   }];
 
-  assert.deepEqual(normalizeBotPowerEffectV1({ type: "echo_addressed", ignored: true }), {
-    type: "echo_addressed",
+  assert.deepEqual(normalizeBotPowerEffectV1({ type: "speech_copy", ignored: true }), {
+    type: "speech_copy",
+    trigger: "direct_address",
   });
   assert.equal(botPowerEchoesAddressedSpeechV1(powers), true);
   assert.equal(applyBotPowerEchoResponseV1("  Keep  every\ncharacter?!  "), "  Keep  every\ncharacter?!  ");
   assert.equal(applyBotPowerEchoResponseV1(""), "...");
+});
+
+test("mood boosts normalize to one bounded addressed-recipient contract", () => {
+  const name = "Radiant Joy";
+  const intent = "After every completed spoken turn, lift each addressed listener's mood once.";
+  const powers = [{
+    version: 1,
+    id: "joyful-nora",
+    name,
+    intent,
+    enabled: true,
+    compileStatus: "ready",
+    compiled: {
+      version: 1,
+      sourceHash: botPowerSourceHashV1(name, intent),
+      selfCue: "Radiate unmistakable joy.",
+      observerCue: "Addressed listeners feel a bounded lift without losing agency.",
+      effects: [{
+        type: "mood_boost",
+        trigger: "not-valid",
+        recipients: "everyone",
+        strength: "large",
+      }],
+      ruleLabels: ["Radiant joy"],
+    },
+  }];
+
+  assert.deepEqual(normalizeBotPowerEffectV1(powers[0]!.compiled.effects[0]), {
+    type: "mood_boost",
+    trigger: "after_spoken_turn",
+    recipients: "addressed",
+    strength: "large",
+  });
+  assert.deepEqual(strongestBotPowerMoodBoostEffectV1(powers), {
+    type: "mood_boost",
+    trigger: "after_spoken_turn",
+    recipients: "addressed",
+    strength: "large",
+  });
+  assert.deepEqual(
+    normalizeBotPowerEffectV1({ type: "mood_boost", strength: "unbounded" }),
+    {
+      type: "mood_boost",
+      trigger: "after_spoken_turn",
+      recipients: "addressed",
+      strength: "medium",
+    },
+  );
+});
+
+test("mood drains normalize to one bounded bot-addresser contract", () => {
+  const name = "Sad";
+  const intent = "A bot that directly talks to the holder loses mood once after that spoken turn.";
+  const powers = [{
+    version: 1,
+    id: "sad-sally",
+    name,
+    intent,
+    enabled: true,
+    compileStatus: "ready",
+    compiled: {
+      version: 1,
+      sourceHash: botPowerSourceHashV1(name, intent),
+      selfCue: "Carry a stubbornly gloomy and irritating presence.",
+      observerCue: "Talking directly to Sally leaves bots less motivated.",
+      effects: [{
+        type: "mood_drain",
+        trigger: "not-valid",
+        recipient: "everyone",
+        strength: "large",
+      }],
+      ruleLabels: ["Drains direct addresser mood"],
+    },
+  }];
+
+  assert.deepEqual(normalizeBotPowerEffectV1(powers[0]!.compiled.effects[0]), {
+    type: "mood_drain",
+    trigger: "after_direct_address",
+    recipient: "addresser",
+    strength: "large",
+  });
+  assert.deepEqual(strongestBotPowerMoodDrainEffectV1(powers), {
+    type: "mood_drain",
+    trigger: "after_direct_address",
+    recipient: "addresser",
+    strength: "large",
+  });
+  assert.deepEqual(
+    normalizeBotPowerEffectV1({ type: "mood_drain", strength: "unbounded" }),
+    {
+      type: "mood_drain",
+      trigger: "after_direct_address",
+      recipient: "addresser",
+      strength: "medium",
+    },
+  );
+});
+
+test("theme-conditioned Joy and Sad branches activate exclusively", () => {
+  const name = "Nocturnal";
+  const intent = "In Light Mode this bot is sad; in Dark Mode it radiates joy.";
+  const powers = [{
+    version: 1,
+    id: "nocturnal",
+    name,
+    intent,
+    enabled: true,
+    compileStatus: "ready",
+    compiled: {
+      version: 1,
+      sourceHash: botPowerSourceHashV1(name, intent),
+      selfCue: "Follow the current theme.",
+      observerCue: "The current theme selects one branch.",
+      effects: [
+        {
+          type: "mood_boost",
+          trigger: "after_spoken_turn",
+          recipients: "addressed",
+          strength: "medium",
+          whenTheme: "dark",
+        },
+        {
+          type: "mood_drain",
+          trigger: "after_direct_address",
+          recipient: "addresser",
+          strength: "medium",
+          whenTheme: "light",
+        },
+      ],
+      ruleLabels: ["Circadian"],
+    },
+  }];
+
+  assert.equal(strongestBotPowerMoodBoostEffectV1(powers, "light"), null);
+  assert.equal(strongestBotPowerMoodDrainEffectV1(powers, "dark"), null);
+  assert.equal(strongestBotPowerMoodBoostEffectV1(powers), null);
+  assert.deepEqual(strongestBotPowerMoodBoostEffectV1(powers, "dark"), {
+    type: "mood_boost",
+    trigger: "after_spoken_turn",
+    recipients: "addressed",
+    strength: "medium",
+    whenTheme: "dark",
+  });
+  assert.deepEqual(strongestBotPowerMoodDrainEffectV1(powers, "light"), {
+    type: "mood_drain",
+    trigger: "after_direct_address",
+    recipient: "addresser",
+    strength: "medium",
+    whenTheme: "light",
+  });
+  assert.match(botPowerThemeMoodCueV1(powers, "dark") ?? "", /radiant-joy branch/iu);
+  assert.match(botPowerThemeMoodCueV1(powers, "light") ?? "", /sad branch/iu);
+  assert.deepEqual(
+    parseStoredBotPowersV1(serializeBotPowersV1(powers))[0]?.compiled?.effects,
+    powers[0]?.compiled.effects,
+  );
+  assert.deepEqual(
+    normalizeBotPowerEffectV1({
+      type: "mood_boost",
+      strength: "small",
+      whenTheme: "sepia",
+    }),
+    {
+      type: "mood_boost",
+      trigger: "after_spoken_turn",
+      recipients: "addressed",
+      strength: "small",
+    },
+  );
 });
 
 test("interruption Powers normalize and recover legacy turn-pressure contracts", () => {
@@ -331,12 +699,14 @@ test("interruption Powers normalize and recover legacy turn-pressure contracts",
       frequency: "frequent",
       strength: "large",
       targets: [{ kind: "all" }, { kind: "all" }],
+      certainty: "always",
     }),
     {
       type: "interruption",
       frequency: "frequent",
       strength: "large",
       targets: [{ kind: "all" }],
+      certainty: "always",
     },
   );
   assert.equal(
@@ -345,6 +715,20 @@ test("interruption Powers normalize and recover legacy turn-pressure contracts",
       "Aggressively jumps in after whoever just spoke and cuts into real live openings whenever possible.",
     ),
     true,
+  );
+  assert.equal(
+    botPowerDefinitionIsUnconditionalInterruptionV1(
+      "Interrupting Tom",
+      "Aggressively jumps in after whoever just spoke and cuts into real live openings whenever possible.",
+    ),
+    true,
+  );
+  assert.equal(
+    botPowerDefinitionIsUnconditionalInterruptionV1(
+      "Interjector",
+      "Often interrupts other bots when a good opening appears.",
+    ),
+    false,
   );
   assert.equal(
     botPowerDefinitionIsExplicitInterruptionV1(
@@ -391,6 +775,7 @@ test("interruption Powers normalize and recover legacy turn-pressure contracts",
     frequency: "frequent",
     strength: "large",
     targets: [{ kind: "all" }],
+    certainty: "always",
   });
 });
 

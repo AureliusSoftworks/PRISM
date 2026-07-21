@@ -10,6 +10,7 @@ import {
   coffeeActionPassesSipCadence,
   coffeeActionSipMessageGapForDuration,
   coffeeConversationHasMeaningfulTableDialogue,
+  coffeeIdentityMirrorStateBeforeMessage,
   coffeeListenerReactionForMessage,
   coffeeReplayMessageHasStateEvent,
   coffeeReplayMessageRevealInProgress,
@@ -28,8 +29,44 @@ import {
   formatCoffeeReviewClipboardText,
   sanitizeCoffeeActionForBot,
 } from "./coffee-replay.ts";
+import { createBotIdentityMirrorStateV1 } from "@localai/shared";
 
 describe("coffee replay helpers", () => {
+  it("reports persisted Sad Sally drain events without reconstructing them from prose", () => {
+    const review = formatCoffeeReviewClipboardText({
+      messages: [{
+        id: "bert-addresses-sally",
+        role: "assistant",
+        botId: "bert",
+        botName: "Bert",
+        content: "Sally, can we try one hopeful idea?",
+        coffeeReplayEvents: [{
+          v: 1 as const,
+          name: "coffeeReplayEvent" as const,
+          kind: "powerMoodDrain" as const,
+          botId: "bert",
+          sourceBotId: "sad-sally",
+          sourceMessageId: "bert-addresses-sally",
+          powerId: "sad-sally",
+          powerName: "Sad",
+          strength: "medium" as const,
+          dispositionBefore: 0.7,
+          dispositionAfter: 0.5,
+          occurredAt: "2026-07-21T07:00:00.000Z",
+        }],
+      }],
+      context: { bots: [
+        { id: "bert", name: "Bert" },
+        { id: "sad-sally", name: "Sad Sally" },
+      ] },
+    });
+
+    assert.match(
+      review,
+      /powerMoodDrain: Bert \(bert\) directly addressed Sad Sally and was drained by Sad \(medium, disposition 0\.70 -> 0\.50, sourceMessage=bert-addresses-sally\)/u,
+    );
+  });
+
   it("keeps saved listener reactions out of transcript rows while exposing replay diagnostics", () => {
     const message = {
       id: "message-1",
@@ -147,6 +184,20 @@ describe("coffee replay helpers", () => {
     assert.equal(coffeeReplayCompletionHoldMs(eventMessage("botDeparture"), false), 2_700);
     assert.equal(coffeeReplayCompletionHoldMs(eventMessage("botDeparture"), true), 120);
     assert.equal(coffeeReplayCompletionHoldMs({ coffeeReplayEvents: [] }, false), 420);
+  });
+
+  it("holds player actions long enough for the Prism replay motion", () => {
+    const playerAction = {
+      coffeeUserAction: {
+        v: 1 as const,
+        name: "coffeeUserAction" as const,
+        source: "user" as const,
+        action: "nods twice",
+        occurredAt: "2026-07-20T12:00:00.000Z",
+      },
+    };
+    assert.equal(coffeeReplayCompletionHoldMs(playerAction, false), 1_100);
+    assert.equal(coffeeReplayCompletionHoldMs(playerAction, true), 120);
   });
 
   it("returns the transcript visible at the current replay index", () => {
@@ -381,6 +432,85 @@ describe("coffee replay helpers", () => {
       progressAfter: 0.18,
       toppedOffAt: "2026-07-02T15:01:00.000Z",
     });
+  });
+
+  it("replays persisted mirror targets and hands voice over only after the trigger", () => {
+    const first = createBotIdentityMirrorStateV1({
+      surface: "coffee",
+      holderBotId: "ian",
+      holderBotName: "Identity Crisis Ian",
+      targetBotId: "mara",
+      targetBotName: "Mara Vale",
+      targetPersonaPrompt: "A terse lunar cartographer.",
+      targetFace: { faceEyeCharacter: "◉" },
+      targetVoice: { v: 2, enabled: true, baseVoiceId: "voice-4", pitch: 0.18 },
+      sourceMessageId: "mara-trigger",
+      occurredAt: "2026-07-20T20:00:00.000Z",
+    });
+    const replacement = createBotIdentityMirrorStateV1({
+      surface: "coffee",
+      holderBotId: "ian",
+      holderBotName: "Identity Crisis Ian",
+      targetBotId: "jo",
+      targetBotName: "Jo Reed",
+      targetPersonaPrompt: "A dry public-radio host.",
+      targetFace: { faceEyeCharacter: "•" },
+      targetVoice: { v: 2, enabled: true, baseVoiceId: "voice-2", pitch: -0.18 },
+      sourceMessageId: "jo-trigger",
+      occurredAt: "2026-07-20T20:01:00.000Z",
+    });
+    const eventFor = (state: typeof first) => ({
+      v: 1 as const,
+      name: "coffeeReplayEvent" as const,
+      kind: "identityMirror" as const,
+      botId: state.holderBotId,
+      occurredAt: state.occurredAt,
+      state,
+    });
+    const messages = [
+      {
+        id: "mara-trigger",
+        role: "assistant",
+        botId: "mara",
+        content: "Identity Crisis Ian, look north.",
+        coffeeReplayEvents: [eventFor(first)],
+      },
+      { id: "ian-first", role: "assistant", botId: "ian", content: "I am Mara." },
+      {
+        id: "jo-trigger",
+        role: "assistant",
+        botId: "jo",
+        content: "Identity Crisis Ian, listen closely.",
+        coffeeReplayEvents: [eventFor(replacement)],
+      },
+      { id: "ian-second", role: "assistant", botId: "ian", content: "I am Jo." },
+    ];
+
+    assert.equal(coffeeIdentityMirrorStateBeforeMessage(messages, 0, "ian"), null);
+    assert.equal(
+      coffeeIdentityMirrorStateBeforeMessage(messages, 1, "ian")?.targetBotId,
+      "mara",
+    );
+    assert.equal(
+      coffeeIdentityMirrorStateBeforeMessage(messages, 2, "ian")?.targetBotId,
+      "mara",
+    );
+    assert.equal(
+      coffeeIdentityMirrorStateBeforeMessage(messages, 3, "ian")?.targetBotId,
+      "jo",
+    );
+    assert.equal(
+      coffeeIdentityMirrorStateBeforeMessage(messages, 1, "ian")?.targetVoice.baseVoiceId,
+      "voice-4",
+    );
+    assert.equal(
+      coffeeIdentityMirrorStateBeforeMessage(messages, 3, "ian")?.targetVoice.baseVoiceId,
+      "voice-2",
+    );
+    assert.equal(
+      coffeeReplayStateAt(messages, 2).identityMirrorByHolderBotId.ian?.targetBotId,
+      "jo",
+    );
   });
 
   it("reconstructs the player's departure without requiring a bot id", () => {

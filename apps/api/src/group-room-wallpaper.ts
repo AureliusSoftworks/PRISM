@@ -15,7 +15,8 @@ export const GROUP_ROOM_WALLPAPER_BACKUP_UPLOAD_MAX_BYTES = 16 * 1024 * 1024;
 export const GROUP_ROOM_WALLPAPER_BACKUP_PROMPT_MAX_LENGTH = 4_096;
 const GROUP_ROOM_WALLPAPER_BACKUP_MAX_PIXELS = 40_000_000;
 const GROUP_ROOM_WALLPAPER_BACKUP_MAX_DIMENSION = 8_192;
-const PNG_DATA_URL_PATTERN = /^data:image\/png;base64,([a-zA-Z0-9+/]+={0,2})$/u;
+const IMAGE_DATA_URL_PATTERN =
+  /^data:image\/(png|jpeg|webp);base64,([a-zA-Z0-9+/]+={0,2})$/u;
 
 export interface GroupRoomWallpaperMember {
   id: string;
@@ -60,18 +61,20 @@ export async function normalizeGroupRoomWallpaperBackupUpload(
   value: unknown
 ): Promise<NormalizedGroupRoomWallpaperBackupUpload> {
   if (typeof value !== "string") {
-    throw new Error("Room atmosphere backup image is required.");
+    throw new Error("Room atmosphere image is required.");
   }
-  const match = PNG_DATA_URL_PATTERN.exec(value);
+  const match = IMAGE_DATA_URL_PATTERN.exec(value);
   if (!match) {
-    throw new Error("Room atmosphere backup image must be a PNG data URL.");
+    throw new Error(
+      "Room atmosphere image must be a PNG, JPEG, or WebP data URL.",
+    );
   }
-  const sourceBytes = Buffer.from(match[1]!, "base64");
+  const sourceBytes = Buffer.from(match[2]!, "base64");
   if (
     sourceBytes.length === 0 ||
     sourceBytes.length > GROUP_ROOM_WALLPAPER_BACKUP_UPLOAD_MAX_BYTES
   ) {
-    throw new Error("Room atmosphere backup image is too large.");
+    throw new Error("Room atmosphere image is too large.");
   }
   let metadata: sharp.Metadata;
   try {
@@ -80,7 +83,7 @@ export async function normalizeGroupRoomWallpaperBackupUpload(
       limitInputPixels: GROUP_ROOM_WALLPAPER_BACKUP_MAX_PIXELS,
     }).metadata();
   } catch {
-    throw new Error("Room atmosphere backup image could not be read.");
+    throw new Error("Room atmosphere image could not be read.");
   }
   const width = metadata.width ?? 0;
   const height = metadata.height ?? 0;
@@ -91,7 +94,7 @@ export async function normalizeGroupRoomWallpaperBackupUpload(
     height > GROUP_ROOM_WALLPAPER_BACKUP_MAX_DIMENSION ||
     width * height > GROUP_ROOM_WALLPAPER_BACKUP_MAX_PIXELS
   ) {
-    throw new Error("Room atmosphere backup image dimensions are unsupported.");
+    throw new Error("Room atmosphere image dimensions are unsupported.");
   }
   let normalized: { data: Buffer; info: sharp.OutputInfo };
   try {
@@ -103,10 +106,10 @@ export async function normalizeGroupRoomWallpaperBackupUpload(
       .png()
       .toBuffer({ resolveWithObject: true });
   } catch {
-    throw new Error("Room atmosphere backup image could not be normalized.");
+    throw new Error("Room atmosphere image could not be normalized.");
   }
   if (normalized.data.length > GROUP_ROOM_WALLPAPER_BACKUP_UPLOAD_MAX_BYTES) {
-    throw new Error("Room atmosphere backup image is too large.");
+    throw new Error("Room atmosphere image is too large.");
   }
   return {
     pngBytes: normalized.data,

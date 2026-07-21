@@ -189,6 +189,7 @@ import {
   projectBotcastEpisodeForAudienceV1,
   readBotcastShowAtmosphereAudio,
   readBotcastShowIntroAudio,
+  resolveBotcastProducerGuestName,
   setBotcastEpisodeCameraMode,
   setBotcastModelWarmupHold,
   signalOnlineTurnHttpStatus,
@@ -203,12 +204,15 @@ import {
   requestSignalElevenLabsIntroMusic,
 } from "./elevenlabs-music.ts";
 import {
+  AVATAR_ELEVENLABS_SFX_MODEL,
+  AVATAR_ELEVENLABS_SFX_PROMPT_MAX_CHARACTERS,
   COFFEE_ELEVENLABS_ACTION_SFX_MODEL,
   ElevenLabsSoundError,
   SIGNAL_ELEVENLABS_ATMOSPHERE_DURATION_MS,
   SIGNAL_ELEVENLABS_ATMOSPHERE_MODEL,
   buildSignalAtmospherePrompt,
   isCoffeeElevenLabsActionSfxKind,
+  requestAvatarElevenLabsSfx,
   requestCoffeeElevenLabsActionSfx,
   requestSignalElevenLabsAtmosphere,
 } from "./elevenlabs-sound.ts";
@@ -526,13 +530,17 @@ import {
   normalizeEphemeralChatProviderPreferences,
   normalizeGraphicsQuality,
   normalizeListenerReactionVocalFoley,
+  normalizeBotCrosstalkInterruptedSpeakerCue,
   normalizeOptionalBotAudioVoiceProfileV1,
   parseStoredBotAudioVoiceProfileV1,
   parseStoredBotPowersV1,
   botPowerIntermittentMuteEffectV1,
   botPowerIntermittentMuteTurnIsIgnoredV1,
   botPowerEchoesAddressedSpeechV1,
+  botPowerEternallyIntroducesV1,
   botPowerIsMutedV1,
+  botPowerMumblesSpeechV1,
+  botPowerThemeMoodCueV1,
   botPowerResponseIsSilentV1,
   strongestHardBotPowerResponseBudgetEffectV1,
   serializeBotAudioVoiceProfileV1,
@@ -575,7 +583,6 @@ import {
   type BotFaceThinkingFrames,
   type BotAudioVoiceProfileV1,
   BOTCAST_ELEVENLABS_INTRO_DURATION_MS,
-  BOTCAST_PRODUCER_GUEST_NAME,
   buildSignalMusicProfile,
   signalPersonaTemperamentFor,
   type BotcastProducerCue,
@@ -1771,6 +1778,10 @@ function readProvider(value: unknown): ProviderName | undefined {
   return value === "local" || value === "openai" || value === "anthropic"
     ? value
     : undefined;
+}
+
+function readResolvedPowerTheme(value: unknown): "light" | "dark" | undefined {
+  return value === "light" || value === "dark" ? value : undefined;
 }
 
 function readApiKeyValidationProvider(
@@ -3780,6 +3791,7 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/story/sessions", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
+      const powerTheme = readResolvedPowerTheme(body.theme);
       const botIds = normalizeStoryCreateBotIds(body.botIds);
       const storyBots = loadStoryBotProfiles(db, userId, botIds);
       const user = getUserRow(userId);
@@ -3847,6 +3859,7 @@ function buildRoutes(): RouteDefinition[] {
               model: resolvedAuto.model,
               bots: storyBots,
               premise: readOptionalString(body.premise),
+              ...(powerTheme ? { theme: powerTheme } : {}),
               ...(requestedReasoningEffort
                 ? { reasoningEffort: requestedReasoningEffort }
                 : {}),
@@ -6977,6 +6990,7 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/chat", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
+      const powerTheme = readResolvedPowerTheme(body.theme);
       const starterPrompt = body.starterPrompt === true;
       const starterPromptWarrantsIntro =
         starterPrompt && body.starterPromptWarrantsIntro === true;
@@ -7194,8 +7208,10 @@ function buildRoutes(): RouteDefinition[] {
       let botSystemPrompt: string | undefined;
       let starterPromptLabel: string | undefined;
       let runtimeBotMuted = false;
+      let runtimeBotEternalIntroduction = false;
       let runtimeBotQuietIgnored = false;
       let runtimeBotEchoAddressed = false;
+      let runtimeBotMumbling = false;
       let runtimeBotResponseBudget: ReturnType<
         typeof strongestHardBotPowerResponseBudgetEffectV1
       > = null;
@@ -7222,6 +7238,9 @@ function buildRoutes(): RouteDefinition[] {
           | undefined;
         if (bot) {
           runtimeBotMuted = botPowerIsMutedV1(bot.powers_json);
+          runtimeBotEternalIntroduction = botPowerEternallyIntroducesV1(
+            bot.powers_json,
+          );
           if (botPowerIntermittentMuteEffectV1(bot.powers_json)) {
             const stableTurnOrdinal = incognito
               ? (ephemeralMessages?.length ?? 0)
@@ -7237,7 +7256,10 @@ function buildRoutes(): RouteDefinition[] {
               `${mode}:${conversationId ?? "new"}:${runtimeBotId}:${stableTurnOrdinal}:${message}`,
             );
           }
-          runtimeBotEchoAddressed = botPowerEchoesAddressedSpeechV1(bot.powers_json);
+          runtimeBotEchoAddressed = botPowerEchoesAddressedSpeechV1(
+            bot.powers_json,
+          );
+          runtimeBotMumbling = botPowerMumblesSpeechV1(bot.powers_json);
           runtimeBotResponseBudget = strongestHardBotPowerResponseBudgetEffectV1(
             bot.powers_json,
           );
@@ -7252,6 +7274,13 @@ function buildRoutes(): RouteDefinition[] {
             bot.flirt_enabled === 1,
             bot.powers_json,
           );
+          const themeMoodCue = botPowerThemeMoodCueV1(
+            bot.powers_json,
+            powerTheme,
+          );
+          if (themeMoodCue) {
+            botSystemPrompt = `${botSystemPrompt}\n\n${themeMoodCue}`;
+          }
           if (bot.online_enabled === 0 && effectiveProvider !== "local") {
             effectiveProvider = "local";
             botForcesLocalProvider = true;
@@ -7503,8 +7532,10 @@ function buildRoutes(): RouteDefinition[] {
             ephemeralMessages,
             botSystemPrompt,
             botPowerMuted: runtimeBotMuted || runtimeBotQuietIgnored,
+            botPowerEternalIntroduction: runtimeBotEternalIntroduction,
             botPowerQuietIgnored: runtimeBotQuietIgnored,
             botPowerEchoAddressed: runtimeBotEchoAddressed,
+            botPowerMumbling: runtimeBotMumbling,
             botPowerResponseBudget: runtimeBotResponseBudget,
             botOverrides,
             mode,
@@ -8495,6 +8526,15 @@ function buildRoutes(): RouteDefinition[] {
           ? user.preferred_local_model
           : user.preferred_online_model;
       const producerGuest = body.guestKind === "producer";
+      const producerGuestName = producerGuest
+        ? resolveBotcastProducerGuestName(
+            db,
+            userId,
+            ctx.params.id,
+            user.display_name,
+            userKey,
+          )
+        : null;
       const guestContext =
         typeof body.guestContext === "string" ? body.guestContext : "";
       const producerGuestBooking = producerGuest
@@ -8503,7 +8543,7 @@ function buildRoutes(): RouteDefinition[] {
             userId,
             ctx.params.id,
             {
-              guestName: BOTCAST_PRODUCER_GUEST_NAME,
+              guestName: producerGuestName!,
               guestContext,
               modelOverride:
                 modelOverride ??
@@ -8513,6 +8553,11 @@ function buildRoutes(): RouteDefinition[] {
             },
             {
               preferredProvider,
+              responseMode: autoEnabled
+                ? "auto"
+                : preferredProvider === "local"
+                  ? "local"
+                  : "online",
               openAiApiKey:
                 getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey,
               anthropicApiKey:
@@ -8534,7 +8579,9 @@ function buildRoutes(): RouteDefinition[] {
       ) {
         throw new HttpError(
           503,
-          "Signal could not prepare this interview. Try again.",
+          producerGuestBooking?.failureReason === "provider_request_failed"
+            ? "Signal could not reach an available interview model. Check your Signal model settings and try again."
+            : "Signal could not shape a valid interview plan from the configured models. Try again.",
         );
       }
       const episode = createBotcastEpisode(db, userId, ctx.params.id, {
@@ -8547,7 +8594,7 @@ function buildRoutes(): RouteDefinition[] {
             }),
         ...(producerGuest
           ? {
-              guestName: BOTCAST_PRODUCER_GUEST_NAME,
+              guestName: producerGuestName!,
               guestContext,
               topic: producerGuestBooking!.topic,
               producerBrief: producerGuestBooking!.producerBrief,
@@ -8597,6 +8644,7 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("POST", "/api/botcast/episodes/:id/end", async (ctx) => {
       const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
       const currentEpisode = getBotcastEpisode(db, userId, ctx.params.id);
@@ -8619,14 +8667,33 @@ function buildRoutes(): RouteDefinition[] {
         userId,
         currentEpisode.id,
         generation,
+        {
+          onAirElapsedMs:
+            typeof body.onAirElapsedMs === "number" &&
+            Number.isFinite(body.onAirElapsedMs) &&
+            body.onAirElapsedMs >= 0
+              ? body.onAirElapsedMs
+              : undefined,
+        },
       );
-      await ensureBotcastEpisodePersonaReview(db, userId, result.episode.id, generation);
+      if (!result.discarded) {
+        await ensureBotcastEpisodePersonaReview(
+          db,
+          userId,
+          result.episode.id,
+          generation,
+        );
+      }
       json(ctx.res, 200, {
         ok: true,
-        ...projectBotcastAdvanceResponseForAudienceV1({
-          episode: getBotcastEpisode(db, userId, result.episode.id),
-          message: result.message,
-        }),
+        ...projectBotcastAdvanceResponseForAudienceV1(
+          result.discarded
+            ? result
+            : {
+                episode: getBotcastEpisode(db, userId, result.episode.id),
+                message: result.message,
+              },
+        ),
       });
     }),
     route(
@@ -8694,6 +8761,7 @@ function buildRoutes(): RouteDefinition[] {
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
       const body = ctx.body as Record<string, unknown>;
+      const powerTheme = readResolvedPowerTheme(body.theme);
       const cueRecord =
         body.cue && typeof body.cue === "object" && !Array.isArray(body.cue)
           ? (body.cue as Record<string, unknown>)
@@ -8851,6 +8919,7 @@ function buildRoutes(): RouteDefinition[] {
             autoFallbackChain: parseStoredAutoFallbackChain(
               user.auto_fallback_chain,
             ),
+            ...(powerTheme ? { theme: powerTheme } : {}),
             providerFactory: providerFactoryOverride,
           },
         );
@@ -9778,6 +9847,7 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/coffee/turn", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
+      const powerTheme = readResolvedPowerTheme(body.theme);
       const message = readString(body.message, "message");
       const conversationId =
         typeof body.conversationId === "string"
@@ -9860,6 +9930,7 @@ function buildRoutes(): RouteDefinition[] {
             },
             {
               preferredProvider: effectiveProvider,
+              ...(powerTheme ? { theme: powerTheme } : {}),
               preferredLocalModel: user.preferred_local_model,
               preferredOnlineModel: user.preferred_online_model,
               responseMode: normalizeResponseMode(
@@ -9906,6 +9977,7 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/coffee/turn-jobs", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
+      const powerTheme = readResolvedPowerTheme(body.theme);
       const kind = body.kind === "autonomous" ? "autonomous" : "user";
       const conversationId =
         typeof body.conversationId === "string"
@@ -10003,6 +10075,7 @@ function buildRoutes(): RouteDefinition[] {
             () => {
               const settings = {
                 preferredProvider: effectiveProvider,
+                ...(powerTheme ? { theme: powerTheme } : {}),
                 preferredLocalModel: user.preferred_local_model,
                 preferredOnlineModel: user.preferred_online_model,
                 responseMode: normalizeResponseMode(
@@ -11029,6 +11102,72 @@ function buildRoutes(): RouteDefinition[] {
       }
       json(ctx.res, 200, { ok: true, line });
     }),
+    route("POST", "/api/avatar/sfx/generate", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      if (user.preferred_provider === "local") {
+        throw new HttpError(
+          409,
+          "Switch to Online before creating an ElevenLabs avatar sound.",
+        );
+      }
+      const raw = ctx.body as Record<string, unknown>;
+      const prompt = typeof raw.prompt === "string"
+        ? raw.prompt.replace(/\s+/gu, " ").trim()
+        : "";
+      if (!prompt) {
+        throw new HttpError(400, "Describe the avatar sound to generate.");
+      }
+      if (prompt.length > AVATAR_ELEVENLABS_SFX_PROMPT_MAX_CHARACTERS) {
+        throw new HttpError(
+          400,
+          `Avatar sound descriptions are limited to ${AVATAR_ELEVENLABS_SFX_PROMPT_MAX_CHARACTERS} characters.`,
+        );
+      }
+      const userKey = decryptUserKey(userId);
+      const apiKey =
+        getElevenLabsApiKeyForUser(userId, userKey) ?? config.elevenLabsApiKey;
+      if (!apiKey) {
+        throw new HttpError(
+          409,
+          "Add an ElevenLabs API key in Settings first.",
+        );
+      }
+      const controller = new AbortController();
+      const onClose = () => controller.abort();
+      ctx.req.once("close", onClose);
+      try {
+        const sound = await requestAvatarElevenLabsSfx({
+          apiKey,
+          prompt,
+          signal: controller.signal,
+        });
+        if (controller.signal.aborted) return;
+        ctx.res.statusCode = 200;
+        ctx.res.setHeader("content-type", sound.contentType);
+        ctx.res.setHeader("cache-control", "no-store");
+        ctx.res.setHeader("x-prism-avatar-sfx-model", AVATAR_ELEVENLABS_SFX_MODEL);
+        if (sound.requestId) {
+          ctx.res.setHeader("x-prism-provider-request-id", sound.requestId);
+        }
+        ctx.res.end(sound.audioBytes);
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        if (error instanceof ElevenLabsSoundError) {
+          throw new HttpError(
+            error.status === 401 || error.status === 403
+              ? 401
+              : error.status === 429
+                ? 429
+                : 502,
+            error.message,
+          );
+        }
+        throw error;
+      } finally {
+        ctx.req.off("close", onClose);
+      }
+    }),
     route("POST", "/api/coffee/action-sfx", async (ctx) => {
       const userId = requireAuth(ctx);
       const raw = ctx.body as Record<string, unknown>;
@@ -11152,6 +11291,11 @@ function buildRoutes(): RouteDefinition[] {
         Object.prototype.hasOwnProperty.call(raw, "listenerReactionFoley");
       const listenerReactionRequested =
         listenerReactionTextRequested || listenerReactionFoleyRequested;
+      const interruptedSpeakerReactionRequested =
+        Object.prototype.hasOwnProperty.call(
+          raw,
+          "interruptedSpeakerReactionText",
+        );
       const signalMessageId =
         typeof raw.signalMessageId === "string" && raw.signalMessageId.trim()
           ? raw.signalMessageId.trim().slice(0, 160)
@@ -11363,13 +11507,43 @@ function buildRoutes(): RouteDefinition[] {
             listenerReactionText !== "go on" &&
             listenerReactionText !== "No, hold on." &&
             listenerReactionText !== "Let me answer that." &&
-            listenerReactionText !== "That's not fair."
+            listenerReactionText !== "That's not fair." &&
+            listenerReactionText !== "Wait a second." &&
+            listenerReactionText !== "Hold on." &&
+            listenerReactionText !== "Hang on." &&
+            listenerReactionText !== "One second."
           ) {
             throw new HttpError(400, "Unsupported listener reaction.");
           }
           sourceText = listenerReactionText;
           sourceElevenLabsText = listenerReactionText;
         }
+      }
+      if (interruptedSpeakerReactionRequested) {
+        if (listenerReactionRequested) {
+          throw new HttpError(
+            400,
+            "Choose one listener or interrupted-speaker reaction.",
+          );
+        }
+        if (!signalMessageId && !ordinaryMessageId) {
+          throw new HttpError(
+            400,
+            "Interrupted-speaker reactions require a saved speaker message.",
+          );
+        }
+        const interruptedSpeakerReaction =
+          normalizeBotCrosstalkInterruptedSpeakerCue(
+            raw.interruptedSpeakerReactionText,
+          );
+        if (!interruptedSpeakerReaction) {
+          throw new HttpError(
+            400,
+            "Unsupported interrupted-speaker reaction.",
+          );
+        }
+        sourceText = interruptedSpeakerReaction;
+        sourceElevenLabsText = interruptedSpeakerReaction;
       }
       const botNamePronunciations = db
         .prepare(

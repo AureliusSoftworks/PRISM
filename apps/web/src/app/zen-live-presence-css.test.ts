@@ -439,6 +439,11 @@ describe("Zen live presence CSS", () => {
     assert.match(emissionMaskRule, /--crt-phosphor-scale:\s*clamp\(1\.85px,\s*1\.16%,\s*3\.8px\)\s*;/);
     assert.match(emissionMaskRule, /--crt-scanline-opacity:\s*0\.045\s*;/);
     assert.match(emissionMaskRule, /--crt-scanline-pitch:\s*clamp\(3px,\s*1\.82%,\s*5px\)\s*;/);
+    assert.match(emissionMaskRule, /--crt-pixel-grid-opacity:\s*0\.14\s*;/);
+    assert.match(
+      emissionMaskRule,
+      /--crt-pixel-grid-line-width:\s*clamp\(0\.32px,\s*0\.18%,\s*0\.48px\)\s*;/,
+    );
     assert.match(emissionMaskRule, /--crt-static-opacity:\s*0\.03\s*;/);
     assert.match(emissionMaskRule, /--crt-static-speed:\s*860ms\s*;/);
     assert.match(emissionMaskRule, /--crt-convergence-offset:\s*0\.26px\s*;/);
@@ -514,6 +519,10 @@ describe("Zen live presence CSS", () => {
       pageSource,
       /botFaceCrtBreathingLayer[\s\S]*botFaceCrtGrimeLayer[\s\S]*data-crt-material-layer="grime"[\s\S]*style=\{screenMaterialStyle\}[\s\S]*CoffeeSeatPlateEmoji/
     );
+    assert.match(
+      pageSource,
+      /CoffeeSeatPlateEmoji[\s\S]*botFaceCrtPixelGridLayer[\s\S]*data-crt-material-layer="pixel-grid"[\s\S]*depth="above-face"/,
+    );
     assert.match(pageSource, /function botScreenMaterialSeedForBot/);
     assert.match(pageSource, /return "bot-screen-material:shared-curved-glass";/);
     assert.match(pageSource, /function botScreenMaterialStyle/);
@@ -576,6 +585,19 @@ describe("Zen live presence CSS", () => {
     assert.match(scanlineRule, /var\(--crt-scanline-opacity\)/);
     assert.match(scanlineRule, /var\(--crt-scanline-pitch\)/);
     assert.match(scanlineRule, /mix-blend-mode:\s*multiply\s*;/);
+
+    const pixelGridRule = ruleForExactSelector(".botFaceCrtPixelGridLayer");
+    assert.match(pixelGridRule, /position:\s*absolute\s*;/);
+    assert.match(pixelGridRule, /inset:\s*0\s*;/);
+    assert.match(pixelGridRule, /z-index:\s*6\s*;/);
+    assert.match(pixelGridRule, /repeating-linear-gradient\(\s*90deg/);
+    assert.match(pixelGridRule, /repeating-linear-gradient\(\s*0deg/);
+    assert.match(pixelGridRule, /var\(--bot-face-crt-cell-width\)/);
+    assert.match(pixelGridRule, /var\(--bot-face-crt-cell-height\)/);
+    assert.match(pixelGridRule, /opacity:\s*var\(--crt-pixel-grid-opacity\)\s*;/);
+    assert.match(pixelGridRule, /mix-blend-mode:\s*multiply\s*;/);
+    assert.doesNotMatch(pixelGridRule, /filter:/);
+    assert.doesNotMatch(pixelGridRule, /data-crt-glyph-layer/);
 
     const glyphEmissionRule = ruleForSelectorNeedlesWithBody(
       ['[data-crt-glyph-layer="true"]'],
@@ -1790,6 +1812,41 @@ describe("Zen live presence CSS", () => {
       '.zenLiveBotPresencePlate[data-prism-persona="true"][data-private-mode="true"][data-talking="true"] .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part]'
     );
     assert.match(privateTalkingFacePartRule, /animation:\s*none\s*;/);
+  });
+
+  it("scrambles only the mirrored face while holder color, glyph, and body stay anchored", () => {
+    const mirrorFaceRule = ruleForSelectorNeedles(
+      'data-identity-mirror-transition="true"',
+      ".zenLiveBotPresenceFaceEmissionMask",
+    );
+    assert.match(
+      mirrorFaceRule,
+      /animation:\s*identityMirrorFaceScramble 760ms steps\(8, end\) both\s*;/,
+    );
+    assert.match(css, /@keyframes identityMirrorFaceScramble/);
+    assert.match(
+      pageSource,
+      /Date\.parse\(identityMirrorState\.occurredAt\) \+ BOT_IDENTITY_MIRROR_TRANSITION_MS \/ 2/,
+    );
+    assert.match(
+      pageSource,
+      /const seatFaceStyle = identityMirrorTargetFaceVisible \? identityMirrorState!\.targetFace : resolveBotFaceStyleForBot\(bot\)/,
+    );
+    assert.match(pageSource, /const seatGlyphName:[^;]+bot\.glyph[^;]+;/);
+    assert.match(
+      pageSource,
+      /avatarDetails=\{resolveBotAvatarDetails\(bot\)\} avatarDetailsColor=\{normalizeAccentForTheme\( bot\.color/,
+    );
+    assert.match(
+      pageSource,
+      /const faceStyle = botSummary\.identityMirrorState && botSummary\.identityMirrorTargetFaceActive \? botSummary\.identityMirrorState\.targetFace : resolveBotFaceStyleForBot\(bot\)/,
+    );
+    assert.match(pageSource, /const glyph:[^;]+bot\.glyph[^;]+;/);
+    assert.match(pageSource, /const color = normalizeAccentForTheme\( bot\.color/);
+    assert.doesNotMatch(
+      pageSource,
+      /identityMirrorState\.target(?:Color|Glyph|Avatar|Body|Accessories)/,
+    );
   });
 
   it("removes temporary calibration handles and drag affordances", () => {

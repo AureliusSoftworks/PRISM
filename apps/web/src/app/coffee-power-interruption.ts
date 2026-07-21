@@ -13,7 +13,17 @@ export interface CoffeeAutomaticCutInCandidate {
   botId: string;
   social: CoffeeBotSocialSnapshot | undefined;
   powerEffect: CoffeeInterruptionEffect | null;
+  directlyAddressed: boolean;
   chance: number;
+}
+
+export function coffeeInterruptionTriggerProgressV1(
+  certainty: CoffeeInterruptionEffect["certainty"],
+  stableUnit: number,
+): number {
+  if (certainty !== "always") return 0.35;
+  const bounded = Math.max(0, Math.min(1, stableUnit));
+  return 0.08 + bounded * 0.8;
 }
 
 function socialScore(social: CoffeeBotSocialSnapshot | undefined): number {
@@ -55,6 +65,8 @@ function strongestInterruptionEffectForTarget(
   const strengthRank = { small: 1, medium: 2, large: 3 } as const;
   return effects.sort(
     (left, right) =>
+      Number(right.certainty === "always") -
+        Number(left.certainty === "always") ||
       Number(right.frequency === "frequent") -
         Number(left.frequency === "frequent") ||
       strengthRank[right.strength] - strengthRank[left.strength],
@@ -64,6 +76,7 @@ function strongestInterruptionEffectForTarget(
 export function coffeeAutomaticCutInCandidateV1(args: {
   candidateBotIds: readonly string[];
   interruptedBotId: string;
+  directlyAddressedBotId?: string | null;
   socialByBotId: Record<string, CoffeeBotSocialSnapshot> | undefined;
   powerPlan: CoffeePowerPlanV1 | null;
   crossTalk: "rare" | "normal" | "chatty" | "pileup";
@@ -80,6 +93,7 @@ export function coffeeAutomaticCutInCandidateV1(args: {
     .map((botId) => ({
       botId,
       social: args.socialByBotId?.[botId],
+      directlyAddressed: botId === args.directlyAddressedBotId,
       powerEffect: strongestInterruptionEffectForTarget(
         args.powerPlan,
         botId,
@@ -87,10 +101,17 @@ export function coffeeAutomaticCutInCandidateV1(args: {
       ),
     }))
     .sort((left, right) => {
+      if (left.directlyAddressed !== right.directlyAddressed) {
+        return right.directlyAddressed ? 1 : -1;
+      }
       if (Boolean(left.powerEffect) !== Boolean(right.powerEffect)) {
         return right.powerEffect ? 1 : -1;
       }
       if (left.powerEffect && right.powerEffect) {
+        const certaintyDelta =
+          Number(right.powerEffect.certainty === "always") -
+          Number(left.powerEffect.certainty === "always");
+        if (certaintyDelta !== 0) return certaintyDelta;
         const frequencyDelta =
           Number(right.powerEffect.frequency === "frequent") -
           Number(left.powerEffect.frequency === "frequent");
@@ -112,6 +133,12 @@ export function coffeeAutomaticCutInCandidateV1(args: {
       ...candidate,
       chance: Math.max(0, Math.min(0.42, baseChance + socialAdjustment)),
     };
+  }
+  if (
+    candidate.powerEffect.certainty === "always" &&
+    candidate.directlyAddressed
+  ) {
+    return { ...candidate, chance: 1 };
   }
   const powerBase = candidate.powerEffect.frequency === "frequent" ? 0.68 : 0.3;
   const powerStrengthAdjustment =

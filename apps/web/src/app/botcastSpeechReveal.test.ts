@@ -32,6 +32,7 @@ describe("Signal transcript speech reveal", () => {
 
     assert.equal(state.tokens[0]?.completionAtMs, 200);
     assert.equal(state.tokens[1]?.completionAtMs, 900);
+    assert.deepEqual(state.alignment?.characters, characters);
     assert.equal(botcastSpeechRevealVisibleText(state), "");
     assert.equal(botcastSpeechRevealVisibleText(updateBotcastSpeechReveal(state, 199)), "");
     assert.equal(botcastSpeechRevealVisibleText(updateBotcastSpeechReveal(state, 200)), "Hi ");
@@ -68,6 +69,7 @@ describe("Signal transcript speech reveal", () => {
     });
 
     assert.equal(state.tokens.length, 3);
+    assert.equal(state.alignment, null);
     assert.equal((state.tokens[0]?.completionAtMs ?? 0) > 0, true);
     assert.equal(
       (state.tokens[1]?.completionAtMs ?? 0) > (state.tokens[0]?.completionAtMs ?? 0),
@@ -75,6 +77,21 @@ describe("Signal transcript speech reveal", () => {
     );
     assert.equal(state.tokens[2]?.completionAtMs, 1_200);
     assert.equal(botcastSpeechRevealVisibleText(state), "");
+  });
+
+  it("retains valid spoken alignment when the visible transcript has formatting", () => {
+    const state = startBotcastSpeechReveal({
+      text: "*Hi*",
+      durationMs: 400,
+      alignment: {
+        characters: ["H", "i"],
+        characterStartTimesSeconds: [0, 0.2],
+        characterEndTimesSeconds: [0.2, 0.4],
+      },
+    });
+
+    assert.equal(state.alignment?.characters.join(""), "Hi");
+    assert.equal(state.tokens.at(-1)?.completionAtMs, 400);
   });
 
   it("updates progress from the audio clock and finishes to the exact text", () => {

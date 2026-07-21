@@ -89,7 +89,18 @@ describe("bot marketplace static catalog", () => {
       ["thomas-hobbes", "="],
       ["claude-monet", "≍"],
       ["joseph-campbell", "≈"],
-      ["sigmund-freud", "≎"]
+      ["sigmund-freud", "≎"],
+      ["lazy-cameron", "_"],
+      ["tiny-bill", "·"],
+      ["interrupting-tom", "!"],
+      ["copycat-calvin", "o"],
+      ["joyful-nora", "+"],
+      ["crazy-brenda", "⊙"],
+      ["mumbling-jim", "~"],
+      ["obsessed-kevin", "★"],
+      ["identity-crisis-ian", "?"],
+      ["sad-sally", "-"],
+      ["forgetful-freddie", "?"]
     ]);
     let customEyeCount = 0;
     let defaultEyeCount = 0;
@@ -124,9 +135,9 @@ describe("bot marketplace static catalog", () => {
       }
     }
 
-    assert.equal(expectedCustomEyes.size, 30);
-    assert.equal(customEyeCount, 30);
-    assert.equal(defaultEyeCount, 20);
+    assert.equal(expectedCustomEyes.size, 41);
+    assert.equal(customEyeCount, 41);
+    assert.equal(defaultEyeCount, 21);
   });
 
   it("ships the approved Carl Jung and Alan Watts avatar customizations", () => {
@@ -236,6 +247,129 @@ describe("bot marketplace static catalog", () => {
     assert.equal(expected.size, 14);
   });
 
+  it("ships a growing Power Collection with described, portable personas", () => {
+    const manifest = normalizeBotMarketplaceManifest(
+      readJsonFile(path.join(publicRoot, "bot-marketplace/manifest.json"))
+    );
+    const theme = manifest.themes.find((entry) => entry.id === "power-collection");
+    const expected = new Map<string, { name: string; effects: string[] }>([
+      ["silent-jack", { name: "Mute", effects: ["mute"] }],
+      ["lazy-cameron", { name: "Lazy", effects: [] }],
+      ["tiny-bill", { name: "Microscopic", effects: ["avatar_scale", "avatar_visibility"] }],
+      [
+        "interrupting-tom",
+        {
+          name: "Interrupting",
+          effects: ["interruption", "action_bias", "turn_gravity", "response_bond"]
+        }
+      ],
+      ["copycat-calvin", { name: "Copycat", effects: ["speech_copy"] }],
+      ["joyful-nora", { name: "Radiant Joy", effects: ["mood_boost"] }],
+      ["crazy-brenda", { name: "Existential Crisis", effects: [] }],
+      ["mumbling-jim", { name: "Mumbling", effects: ["speech_obfuscation"] }],
+      ["obsessed-kevin", { name: "Obsessed", effects: ["addressed_fandom"] }],
+      ["identity-crisis-ian", { name: "Identity Crisis", effects: ["identity_mirror"] }],
+      ["sad-sally", { name: "Sad", effects: ["mood_drain"] }],
+      [
+        "forgetful-freddie",
+        {
+          name: "Short-Term Amnesia",
+          effects: ["eternal_introduction", "social_influence"],
+        },
+      ]
+    ]);
+
+    assert.ok(theme);
+    assert.equal(theme.botIds.length > 5, true);
+    assert.deepEqual(theme.botIds, Array.from(expected.keys()));
+    assert.match(theme.description, /growing cast/iu);
+    assert.equal(theme.botIds.includes("silent-tim"), false);
+    assert.equal(manifest.bots.some((entry) => entry.id === "silent-tim"), false);
+
+    for (const botId of theme.botIds) {
+      const entry = manifest.bots.find((candidate) => candidate.id === botId);
+      const expectation = expected.get(botId);
+      assert.ok(entry, botId);
+      assert.ok(expectation, botId);
+      assert.equal((entry.subtitle?.trim().length ?? 0) > 0, true, `${botId} subtitle`);
+      assert.equal((entry.description?.trim().length ?? 0) > 0, true, `${botId} description`);
+      assert.deepEqual(entry.themeIds, ["power-collection"], `${botId} collection`);
+
+      const bundle = readBotBundle(path.join(publicRoot, entry.bundlePath));
+      const powers = normalizeBotPowersV1(bundle.botJson.bot.powers);
+      assert.equal(
+        (bundle.botJson.profile?.purpose.statement.trim().length ?? 0) > 0,
+        true,
+        `${botId} purpose`
+      );
+      assert.equal(
+        (bundle.botJson.systemPrompt?.trim().length ?? 0) > 0,
+        true,
+        `${botId} prompt`
+      );
+      assert.equal(powers.length, 1, botId);
+      assert.equal(powers[0]?.name, expectation.name, botId);
+      assert.equal(powers[0]?.compileStatus, "ready", botId);
+      assert.equal(
+        powers[0]?.compiled?.sourceHash,
+        botPowerSourceHashV1(powers[0]?.name ?? "", powers[0]?.intent ?? ""),
+        botId
+      );
+      assert.deepEqual(
+        powers[0]?.compiled?.effects.map((effect) => effect.type),
+        expectation.effects,
+        botId
+      );
+      if (botId === "interrupting-tom") {
+        const interruption = powers[0]?.compiled?.effects.find(
+          (effect) => effect.type === "interruption",
+        );
+        assert.equal(interruption?.type, "interruption");
+        assert.equal(interruption?.certainty, "always");
+        assert.match(powers[0]?.intent ?? "", /whenever possible/iu);
+      }
+      if (botId === "joyful-nora") {
+        const voice = normalizeOptionalBotAudioVoiceProfileV1(
+          bundle.botJson.bot.authoredAudioVoiceProfile,
+        );
+        assert.equal(bundle.botJson.bot.color, "#ff24bf");
+        assert.equal(bundle.botJson.bot.glyph, "lucideRadio");
+        assert.equal(bundle.botJson.bot.faceEyeCharacter, "+");
+        assert.deepEqual(bundle.botJson.bot.faceThinkingFrames, ["e", "E", "e", "E"]);
+        assert.equal(
+          voice?.elevenLabsVoiceIdOverride,
+          "Xb7hH8MSUJpSbSDYk0k2",
+        );
+        assert.match(bundle.botJson.bot.voicePreviewLine ?? "", /glad|brighter/iu);
+        assert.match(bundle.botJson.systemPrompt ?? "", /joy|hope|lighter/iu);
+      }
+      if (botId === "sad-sally") {
+        const voice = normalizeOptionalBotAudioVoiceProfileV1(
+          bundle.botJson.bot.authoredAudioVoiceProfile,
+        );
+        assert.equal(bundle.botJson.bot.color, "#665a7a");
+        assert.equal(bundle.botJson.bot.glyph, "lucideCloudRain");
+        assert.equal(bundle.botJson.bot.faceEyeCharacter, "-");
+        assert.deepEqual(bundle.botJson.bot.faceThinkingFrames, ["s", "i", "g", "h"]);
+        assert.equal(voice?.elevenLabsVoiceIdOverride, "EXAVITQu4vr4xnSDxMaL");
+        assert.match(bundle.botJson.bot.voicePreviewLine ?? "", /another conversation/iu);
+        assert.match(bundle.botJson.systemPrompt ?? "", /grouchy|pessimist|rain cloud/iu);
+      }
+      if (botId === "forgetful-freddie") {
+        const voice = normalizeOptionalBotAudioVoiceProfileV1(
+          bundle.botJson.bot.authoredAudioVoiceProfile,
+        );
+        assert.equal(bundle.botJson.bot.color, "#f2b84b");
+        assert.equal(bundle.botJson.bot.glyph, "lucideRefreshCcw");
+        assert.equal(bundle.botJson.bot.faceEyeCharacter, "?");
+        assert.deepEqual(bundle.botJson.bot.faceThinkingFrames, ["h", "e", "l", "o"]);
+        assert.equal(voice?.elevenLabsVoiceIdOverride, "nPczCjzI2devNBz1zQrb");
+        assert.match(bundle.botJson.bot.voicePreviewLine ?? "", /Forgetful Freddie/iu);
+        assert.match(bundle.botJson.systemPrompt ?? "", /short-term-amnesia|one to four/iu);
+      }
+    }
+  });
+
   it("ships a portable, persona-crafted ElevenLabs voice for every bot", () => {
     const manifest = normalizeBotMarketplaceManifest(
       readJsonFile(path.join(publicRoot, "bot-marketplace/manifest.json"))
@@ -247,6 +381,12 @@ describe("bot marketplace static catalog", () => {
       assert.equal(profile?.enabled, true, entry.name);
       assert.equal(typeof profile?.elevenLabsVoiceIdOverride, "string", entry.name);
       assert.equal((profile?.elevenLabsVoiceIdOverride?.length ?? 0) > 0, true, entry.name);
+      assert.equal(
+        profile?.elevenLabsEffect,
+        /^(?:darth\s+)?vader$/iu.test(entry.name) ? "resonance" : "chorus",
+        `${entry.name} voice effect`,
+      );
+      assert.equal(profile?.voiceEffectExplicit, true, `${entry.name} explicit voice effect`);
       const directions = profile?.elevenLabsDirection?.split(",").map((value) => value.trim()) ?? [];
       assert.equal(directions.length >= 2 && directions.length <= 3, true, entry.name);
       assert.equal(
@@ -389,7 +529,24 @@ describe("bot marketplace static catalog", () => {
         "justice-reform",
         ["martin-luther-king-jr", "mahatma-gandhi", "nelson-mandela", "frederick-douglass", "harriet-tubman"]
       ],
-      ["story-literature", ["william-shakespeare", "mary-shelley", "edgar-allan-poe", "jane-austen", "homer"]]
+      ["story-literature", ["william-shakespeare", "mary-shelley", "edgar-allan-poe", "jane-austen", "homer"]],
+      [
+        "power-collection",
+        [
+          "silent-jack",
+          "lazy-cameron",
+          "tiny-bill",
+          "interrupting-tom",
+          "copycat-calvin",
+          "joyful-nora",
+          "crazy-brenda",
+          "mumbling-jim",
+          "obsessed-kevin",
+          "identity-crisis-ian",
+          "sad-sally",
+          "forgetful-freddie"
+        ]
+      ]
     ]);
 
     assert.deepEqual(

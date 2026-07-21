@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  appendBotCrosstalkInterruptedSpeakerCue,
+  buildBotCrosstalkListenerReactionPlanV1,
   buildCoffeeListenerReactionPlanV1,
   buildSignalListenerReactionPlanV1,
   normalizeListenerReactionPlanV1,
@@ -78,7 +80,34 @@ describe("listener reaction planning", () => {
     assert.equal(calmAttempts.length, 0);
     assert.ok(warningAttempts.length > 1_250 && warningAttempts.length < 1_450);
     assert.ok(warningAttempts.every((plan) => plan?.spokenCue));
+    assert.ok(warningAttempts.every((plan) => plan?.interruptedSpeakerCue));
+    assert.ok(warningAttempts.every(
+      (plan) => plan?.interruptedSpeakerCuePlayback === "primary",
+    ));
     assert.ok(warningAttempts.every((plan) => plan?.visualAction === "lean_in"));
+  });
+
+  it("builds deterministic bot crosstalk with a transcript-safe annoyed cutoff", () => {
+    const input = {
+      seed: "coffee-bot-crosstalk-v1:session:turn:a:b",
+      messageId: "message-1",
+      speakerBotId: "a",
+      interrupterBotId: "b",
+      targetProgress: 0.48,
+    };
+    const plan = buildBotCrosstalkListenerReactionPlanV1(input);
+    assert.deepEqual(plan, buildBotCrosstalkListenerReactionPlanV1(input));
+    assert.equal(plan.interjectionAttempt, true);
+    assert.equal(plan.interruptedSpeakerCuePlayback, "crosstalk");
+    assert.ok(plan.spokenCue);
+    assert.ok(plan.interruptedSpeakerCue);
+    assert.equal(
+      appendBotCrosstalkInterruptedSpeakerCue(
+        "That's why the lemons are never ripe enou—",
+        plan.interruptedSpeakerCue!,
+      ),
+      `That's why the lemons are never ripe enou—${plan.interruptedSpeakerCue}`,
+    );
   });
 
   it("makes inferred Coffee targets visual-only and enforces audible cooldowns", () => {

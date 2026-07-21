@@ -143,12 +143,31 @@ describe("group-room wallpaper backup uploads", () => {
     );
   });
 
-  it("rejects non-PNG and unreadable backup data", async () => {
+  it("accepts JPEG uploads and normalizes them to PNG", async () => {
+    const source = await sharp({
+      create: {
+        width: 9,
+        height: 6,
+        channels: 3,
+        background: { r: 54, g: 68, b: 82 },
+      },
+    })
+      .jpeg()
+      .toBuffer();
+    const normalized = await normalizeGroupRoomWallpaperBackupUpload(
+      `data:image/jpeg;base64,${source.toString("base64")}`,
+    );
+    assert.equal(normalized.width, 9);
+    assert.equal(normalized.height, 6);
+    assert.equal((await sharp(normalized.pngBytes).metadata()).format, "png");
+  });
+
+  it("rejects unsupported and unreadable upload data", async () => {
     await assert.rejects(
       normalizeGroupRoomWallpaperBackupUpload(
-        "data:image/jpeg;base64,aGVsbG8=",
+        "data:image/gif;base64,aGVsbG8=",
       ),
-      /must be a PNG data URL/u,
+      /must be a PNG, JPEG, or WebP data URL/u,
     );
     await assert.rejects(
       normalizeGroupRoomWallpaperBackupUpload(

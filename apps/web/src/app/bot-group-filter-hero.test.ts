@@ -34,6 +34,24 @@ describe("bot group canvas filtering", () => {
     assert.equal(pageSource.match(/openCanvasBotContextMenu\(/g)?.length, 2);
   });
 
+  it("clears a selected Chat persona when switching groups so the group hero can render", () => {
+    const resetSource = pageSource.slice(
+      pageSource.indexOf("const resetEmptyStateBotSelection"),
+      pageSource.indexOf("function applyBotLibraryGroupFilter"),
+    );
+    const groupFilterSource = pageSource.slice(
+      pageSource.indexOf("function applyBotLibraryGroupFilter"),
+      pageSource.indexOf("function applyBotLibraryHeaderFilter"),
+    );
+
+    assert.match(resetSource, /setSelectedBotId\(null\)/);
+    assert.match(
+      resetSource,
+      /if \(view === "chat"\) \{[\s\S]*?setZenPersonaBotId\(null\)/,
+    );
+    assert.match(groupFilterSource, /resetEmptyStateBotSelection\(\)/);
+  });
+
   it("keeps the group description, controls, and combined member gradient in the hero", () => {
     const heroSource = pageSource.slice(
       pageSource.indexOf("const renderFocusedBotLibraryGroupHero"),
