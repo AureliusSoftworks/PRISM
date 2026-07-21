@@ -4823,7 +4823,9 @@ function activeBotcastWrapUpCue(
     cue: { kind: "wrap_up" },
     utterancesSinceCue: episode.events.filter(
       (event) =>
-        event.sequence > cueEvent.sequence && event.kind === "utterance",
+        event.sequence > cueEvent.sequence &&
+        event.kind === "utterance" &&
+        event.payload.interruptionBridge !== true,
     ).length,
   };
 }

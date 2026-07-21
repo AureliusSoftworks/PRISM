@@ -4638,8 +4638,10 @@ test.describe("PRISM desktop smoke", () => {
     const catalogVoice = studio.getByLabel("ElevenLabs voice identity");
     await expect(onlineVoice).toBeVisible();
     await expect(fallbackVoice).toBeVisible();
-    await expect(onlineVoice).toContainText("PRIMARY");
-    await expect(fallbackVoice).toContainText("FALLBACK");
+    await expect(onlineVoice).toContainText("PREMIUM VOICE · ELEVENLABS");
+    await expect(fallbackVoice).toContainText("ENGLISH VOICE · LOCAL");
+    await expect(onlineVoice).toHaveAttribute("data-active", "true");
+    await expect(fallbackVoice).not.toHaveAttribute("data-active", "true");
     await expect(catalogVoice).toHaveValue("catalog-voice-id");
     await page.addStyleTag({
       content: `[class*="botAvatarCustomizerBackdrop"] {
