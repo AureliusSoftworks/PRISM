@@ -1036,6 +1036,12 @@ export async function playRealtimeVoiceBytes(args: {
       }
       if (active.nodes === scheduled) active.nodes = [];
       if (completed) {
+        // Completed speech is no longer interruptible. Detach its released
+        // room return from the active channel so the next natural turn can
+        // begin over the short studio tail instead of hard-disconnecting it.
+        if (active.roomConnection === roomConnection) {
+          active.roomConnection = null;
+        }
         roomConnection.release();
         args.lifecycle?.onEnd?.();
       }

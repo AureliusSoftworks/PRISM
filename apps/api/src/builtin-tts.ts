@@ -180,7 +180,7 @@ export function systemEnglishGenerationSettings(args: {
       // keeps native synthesis neutral and stops pitch from altering duration.
       ? 175
       : 0,
-    slotIndex: Number(profile.baseVoiceId.slice(-1)) - 1,
+    slotIndex: BOT_AUDIO_VOICE_IDS.indexOf(profile.baseVoiceId),
   };
 }
 
@@ -298,6 +298,8 @@ export async function getSystemVoiceCapabilities(signal?: AbortSignal): Promise<
   installedVoices: string[];
   voices: SystemVoiceOption[];
   slots: Array<{ voiceId: BotAudioVoiceId; name: string | null }>;
+  hasDistinctPackVoices: boolean;
+  /** Compatibility flag retained for older clients. */
   hasFiveDistinctVoices: boolean;
   pack: typeof PRISM_BUILTIN_ENGLISH_VOICES;
 }> {
@@ -312,13 +314,18 @@ export async function getSystemVoiceCapabilities(signal?: AbortSignal): Promise<
     voiceId,
     name: prismBuiltinEnglishVoice(voiceId).name,
   }));
+  const distinctVoiceCount = new Set(
+    slots.map((slot) => slot.name).filter(Boolean),
+  ).size;
+  const packAvailable = builtinEnglishAvailable();
   return {
     platform,
     installedVoices,
     voices,
     slots,
-    hasFiveDistinctVoices: builtinEnglishAvailable() &&
-      new Set(slots.map((slot) => slot.name).filter(Boolean)).size >= 5,
+    hasDistinctPackVoices: packAvailable &&
+      distinctVoiceCount === PRISM_BUILTIN_ENGLISH_VOICES.length,
+    hasFiveDistinctVoices: packAvailable && distinctVoiceCount >= 5,
     pack: PRISM_BUILTIN_ENGLISH_VOICES,
   };
 }

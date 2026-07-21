@@ -122,6 +122,13 @@ const VOICE_BASES = {
   "voice-3": { frequency: 390, waveform: "sine" as OscillatorType },
   "voice-4": { frequency: 180, waveform: "square" as OscillatorType },
   "voice-5": { frequency: 475, waveform: "triangle" as OscillatorType },
+  "voice-6": { frequency: 345, waveform: "triangle" as OscillatorType },
+  "voice-7": { frequency: 270, waveform: "sine" as OscillatorType },
+  "voice-8": { frequency: 205, waveform: "sine" as OscillatorType },
+  "voice-9": { frequency: 430, waveform: "triangle" as OscillatorType },
+  "voice-10": { frequency: 155, waveform: "square" as OscillatorType },
+  "voice-11": { frequency: 515, waveform: "sine" as OscillatorType },
+  "voice-12": { frequency: 215, waveform: "triangle" as OscillatorType },
 } as const;
 
 function stableUnit(seed: string): number {

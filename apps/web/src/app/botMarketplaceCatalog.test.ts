@@ -254,7 +254,7 @@ describe("bot marketplace static catalog", () => {
     const theme = manifest.themes.find((entry) => entry.id === "power-collection");
     const expected = new Map<string, { name: string; effects: string[] }>([
       ["silent-jack", { name: "Mute", effects: ["mute"] }],
-      ["lazy-cameron", { name: "Lazy", effects: [] }],
+      ["lazy-cameron", { name: "Lazy", effects: ["response_budget"] }],
       ["tiny-bill", { name: "Microscopic", effects: ["avatar_scale", "avatar_visibility"] }],
       [
         "interrupting-tom",
@@ -320,13 +320,37 @@ describe("bot marketplace static catalog", () => {
         expectation.effects,
         botId
       );
+      if (botId === "tiny-bill") {
+        const visibility = powers[0]?.compiled?.effects.find(
+          (effect) => effect.type === "avatar_visibility",
+        );
+        assert.equal(visibility?.type, "avatar_visibility");
+        assert.equal(visibility?.mode, "hidden");
+        assert.match(entry.description ?? "", /too small to see at all/u);
+        assert.match(
+          bundle.botJson.profile?.appearance.presence ?? "",
+          /Never visually perceptible/u,
+        );
+      }
+      if (botId === "lazy-cameron") {
+        const responseBudget = powers[0]?.compiled?.effects.find(
+          (effect) => effect.type === "response_budget",
+        );
+        assert.equal(responseBudget?.type, "response_budget");
+        assert.equal(responseBudget?.mode, "minimal");
+        assert.equal(responseBudget?.enforcement, "hard");
+        assert.match(entry.description ?? "", /bare minimum/u);
+      }
       if (botId === "interrupting-tom") {
         const interruption = powers[0]?.compiled?.effects.find(
           (effect) => effect.type === "interruption",
         );
         assert.equal(interruption?.type, "interruption");
         assert.equal(interruption?.certainty, "always");
-        assert.match(powers[0]?.intent ?? "", /whenever possible/iu);
+        assert.match(
+          powers[0]?.intent ?? "",
+          /Always interrupts the Signal bot host[\s\S]*every opening and interview turn/iu,
+        );
       }
       if (botId === "joyful-nora") {
         const voice = normalizeOptionalBotAudioVoiceProfileV1(

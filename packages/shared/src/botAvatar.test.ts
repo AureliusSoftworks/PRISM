@@ -87,6 +87,7 @@ describe("bot avatar face style", () => {
   });
 
   it("accepts broad single eye glyphs while rejecting emoji presentation", () => {
+    assert.equal(normalizeBotFaceEyeCharacter(" "), " ");
     assert.equal(normalizeBotFaceEyeCharacter("  =  "), "=");
     assert.equal(normalizeBotFaceEyeCharacter("8)"), "8");
     assert.equal(normalizeBotFaceEyeCharacter("♥"), "♥");
@@ -118,6 +119,7 @@ describe("bot avatar face style", () => {
   });
 
   it("accepts broad single mouth glyphs while rejecting emoji presentation", () => {
+    assert.equal(normalizeBotFaceMouthCharacter(" "), " ");
     assert.equal(normalizeBotFaceMouthCharacter("  △  "), "△");
     assert.equal(normalizeBotFaceMouthCharacter("Vv"), "V");
     assert.equal(normalizeBotFaceMouthCharacter("※"), "※");

@@ -9967,6 +9967,43 @@ describe("pickDirectedSpeaker", () => {
 
 describe("Coffee direct mention routing helpers", () => {
   it("separates direct bot address from broad name tagging and excludes the player", () => {
+    const identityCrisisIan = {
+      ...BORIS,
+      id: "identity-crisis-ian",
+      name: "Identity Crisis Ian",
+    };
+    assert.equal(
+      resolveCoffeeIdentityMirrorDirectAddresseeV1({
+        line: "Ian, if you strip away the recipe, what actually makes it work?",
+        speakerBotId: ALICE.id,
+        seatedBots: [ALICE, identityCrisisIan],
+      }),
+      identityCrisisIan.id,
+    );
+    assert.equal(
+      resolveCoffeeIdentityMirrorDirectAddresseeV1({
+        line: "Ian, take the first point.",
+        speakerBotId: ALICE.id,
+        seatedBots: [
+          ALICE,
+          identityCrisisIan,
+          { ...CARA, id: "ian", name: "Ian" },
+        ],
+      }),
+      "ian",
+    );
+    assert.equal(
+      resolveCoffeeIdentityMirrorDirectAddresseeV1({
+        line: "Ian, take the first point.",
+        speakerBotId: ALICE.id,
+        seatedBots: [
+          ALICE,
+          identityCrisisIan,
+          { ...CARA, id: "ian-malcolm", name: "Ian Malcolm" },
+        ],
+      }),
+      null,
+    );
     assert.equal(
       resolveCoffeeIdentityMirrorDirectAddresseeV1({
         line: "Boris is right about that.",

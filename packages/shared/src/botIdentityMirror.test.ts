@@ -6,6 +6,7 @@ import {
   applyBotIdentityMirrorResponseV1,
   botDirectAddressIndexV1,
   botDirectlyAddressesBotV1,
+  botNaturalAddressAliasesV1,
   botIdentityMirrorHolderPromptV1,
   botIdentityMirrorTargetChangesV1,
   botIdentityMirrorTransitionActiveV1,
@@ -37,6 +38,18 @@ function identityState() {
 }
 
 test("identity mirror accepts only explicit direct bot address syntax", () => {
+  assert.deepEqual(botNaturalAddressAliasesV1("Identity Crisis Ian"), [
+    "Identity",
+    "Ian",
+  ]);
+  assert.equal(
+    botDirectlyAddressesBotV1({
+      text: "Ian, if you strip away the recipe, what actually makes it work?",
+      targetBotId: "ian",
+      targetBotName: "Ian",
+    }),
+    true,
+  );
   assert.equal(
     botDirectlyAddressesBotV1({
       text: "Mara says: Ian, what bearing do you make of that?",
@@ -163,6 +176,19 @@ test("identity mirror snapshot is bounded to public persona, normalized face, an
       null,
     ).baseVoiceId,
     "voice-2",
+  );
+  assert.equal(
+    resolveBotIdentityMirrorVoiceV1(
+      null,
+      JSON.stringify({
+        v: 2,
+        enabled: true,
+        baseVoiceId: "voice-4",
+        pitch: 0.2,
+      }),
+      null,
+    ).baseVoiceId,
+    "voice-4",
   );
   assert.equal(
     applyBotIdentityMirrorResponseV1(

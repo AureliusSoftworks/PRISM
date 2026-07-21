@@ -238,6 +238,24 @@ export function botDirectlyAddressesBotV1(args: {
   return botDirectAddressIndexV1(args) >= 0;
 }
 
+/**
+ * Human-scale names that may be used as vocatives for a longer bot name.
+ * Callers must discard aliases shared by another present participant before
+ * treating one as a hard identity-mirror trigger.
+ */
+export function botNaturalAddressAliasesV1(name: string): string[] {
+  const normalized = name.normalize("NFKC").replace(/\s+/gu, " ").trim();
+  const words = normalized.match(/[\p{L}\p{N}][\p{L}\p{N}'’_-]*/gu) ?? [];
+  if (words.length < 2) return [];
+  const aliases = [words[0], words.at(-1)].filter(
+    (value): value is string => Boolean(value && value.length >= 2),
+  );
+  return [...new Set(aliases)].filter(
+    (alias) =>
+      alias.localeCompare(normalized, undefined, { sensitivity: "accent" }) !== 0,
+  );
+}
+
 /** Repeating the current target is a no-op; a new bot replaces it. */
 export function botIdentityMirrorTargetChangesV1(
   current: BotIdentityMirrorStateV1 | null | undefined,

@@ -15,7 +15,7 @@ redistributing the source materials.
 
 ## PRISM Voice Pack
 
-Prism bundles a quantized Kokoro 82M model and five voice embeddings for local
+Prism bundles a quantized Kokoro 82M model and twelve voice embeddings for local
 English speech.
 
 - Kokoro and `kokoro-js`: https://github.com/hexgrad/kokoro — Apache-2.0

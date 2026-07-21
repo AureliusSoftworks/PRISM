@@ -3,11 +3,16 @@ import {
   normalizeBotIdentityMirrorStateV1,
   type BotIdentityMirrorStateV1,
 } from "./botIdentityMirror.ts";
-import type {
-  BotCrosstalkInterruptedSpeakerCue,
-  ListenerReactionPlanV1,
-  ListenerReactionVocalFoley,
-} from "./listenerReaction.js";
+import {
+  normalizeListenerReactionPlanV1,
+  type BotCrosstalkInterruptedSpeakerCue,
+  type ListenerReactionPlanV1,
+} from "./listenerReaction.ts";
+import {
+  botPowerAvatarVisibilityModeV1,
+  botPowerResponseIsSilentV1,
+  type BotPowerAvatarVisibilityModeV1,
+} from "./botPower.ts";
 
 export type BotcastEpisodeSegment = "opening" | "interview" | "closing";
 export type BotcastEpisodeStatus = "live" | "completed";
@@ -30,6 +35,7 @@ export const BOTCAST_SESSION_DURATION_MINUTES_MAX = 30;
 export const BOTCAST_SESSION_DURATION_MINUTES_STEP = 1;
 export const BOTCAST_AUTO_MIN_EXCHANGES = 3;
 export const BOTCAST_AUTO_MAX_EXCHANGES = 60;
+export const BOTCAST_AUTO_MIN_SUBSTANTIVE_GUEST_ANSWERS = 3;
 export const BOTCAST_TIMED_MAX_UTTERANCES = 120;
 export const BOTCAST_LOCAL_INTRO_DURATION_MS = 5_600;
 export const BOTCAST_ELEVENLABS_INTRO_DURATION_MS = 6_000;
@@ -789,33 +795,21 @@ export function botcastSnapshotPowersForRoleV1(
   return Array.isArray(powers) ? powers : null;
 }
 
-/** Reads the episode-start Power snapshot so a Signal replay keeps its reveal. */
+/** Reads the episode-start Power snapshot so a Signal replay keeps its visibility. */
+export function botcastSnapshotAvatarVisibilityModeV1(
+  episode: Pick<BotcastEpisode, "events" | "hostBotId" | "guestBotId">,
+  role: BotcastSpeakerRole,
+): BotPowerAvatarVisibilityModeV1 | null {
+  const powers = botcastSnapshotPowersForRoleV1(episode, role);
+  return powers ? botPowerAvatarVisibilityModeV1(powers) : null;
+}
+
+/** Compatibility helper for the ghost speaking-only treatment. */
 export function botcastSnapshotHasSpeakingOnlyAvatarVisibility(
   episode: Pick<BotcastEpisode, "events" | "hostBotId" | "guestBotId">,
   role: BotcastSpeakerRole,
 ): boolean {
-  const powers = botcastSnapshotPowersForRoleV1(episode, role);
-  if (!powers) return false;
-  let speakingOnly = false;
-  let loud = false;
-  for (const power of powers) {
-    if (!power || typeof power !== "object" || Array.isArray(power)) continue;
-    const record = power as Record<string, unknown>;
-    if (record.enabled === false || record.compileStatus !== "ready") continue;
-    const compiled = record.compiled;
-    if (!compiled || typeof compiled !== "object" || Array.isArray(compiled)) continue;
-    const effects = (compiled as Record<string, unknown>).effects;
-    if (!Array.isArray(effects)) continue;
-    for (const effect of effects) {
-      if (!effect || typeof effect !== "object" || Array.isArray(effect)) continue;
-      const row = effect as Record<string, unknown>;
-      if (row.type === "voice_presence" && row.mode === "loud") loud = true;
-      if (row.type === "avatar_visibility" && row.mode === "speaking_only") {
-        speakingOnly = true;
-      }
-    }
-  }
-  return speakingOnly && !loud;
+  return botcastSnapshotAvatarVisibilityModeV1(episode, role) === "speaking_only";
 }
 
 export interface BotcastSocialInfluenceEventV1 {
@@ -896,84 +890,7 @@ export interface BotcastCameraSuggestion {
 function normalizeSavedBotcastListenerReactionPlan(
   value: unknown,
 ): ListenerReactionPlanV1 | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const row = value as Record<string, unknown>;
-  const id = (candidate: unknown): string | null =>
-    typeof candidate === "string" &&
-    candidate.trim() &&
-    candidate.trim().length <= 160
-      ? candidate.trim()
-      : null;
-  const speakerBotId = id(row.speakerBotId);
-  const listenerBotId = id(row.listenerBotId);
-  const messageId = id(row.messageId);
-  const seed = id(row.seed);
-  const targetSource =
-    row.targetSource === "role" ||
-      row.targetSource === "direct" ||
-      row.targetSource === "inferred"
-      ? row.targetSource
-      : null;
-  const visualAction =
-    row.visualAction === "nod" ||
-      row.visualAction === "lean_in" ||
-      row.visualAction === "head_tilt" ||
-      row.visualAction === "soft_smile" ||
-      row.visualAction === "thoughtful_hmm"
-      ? row.visualAction
-      : null;
-  const spokenCue =
-    row.spokenCue === "mm-hm" ||
-      row.spokenCue === "I see" ||
-      row.spokenCue === "hmm" ||
-      row.spokenCue === "right" ||
-      row.spokenCue === "oh" ||
-      row.spokenCue === "go on" ||
-      row.spokenCue === "No, hold on." ||
-      row.spokenCue === "Let me answer that." ||
-      row.spokenCue === "That's not fair."
-      ? row.spokenCue
-      : undefined;
-  const vocalFoley =
-    row.vocalFoley === "clears throat" ||
-      row.vocalFoley === "coughs" ||
-      row.vocalFoley === "sighs" ||
-      row.vocalFoley === "exhales" ||
-      row.vocalFoley === "chuckles"
-      ? row.vocalFoley as ListenerReactionVocalFoley
-      : undefined;
-  const interjectionAttempt = row.interjectionAttempt === true;
-  if (
-    row.v !== 1 ||
-    row.name !== "listenerReaction" ||
-    !speakerBotId ||
-    !listenerBotId ||
-    speakerBotId === listenerBotId ||
-    !messageId ||
-    !seed ||
-    !targetSource ||
-    !visualAction ||
-    typeof row.targetProgress !== "number" ||
-    !Number.isFinite(row.targetProgress) ||
-    row.targetProgress < 0.3 ||
-    row.targetProgress > 0.75 ||
-    typeof row.cameraCutEligible !== "boolean"
-  ) return null;
-  return {
-    v: 1,
-    name: "listenerReaction",
-    speakerBotId,
-    listenerBotId,
-    messageId,
-    targetSource,
-    visualAction,
-    ...(spokenCue ? { spokenCue } : {}),
-    ...(!spokenCue && vocalFoley ? { vocalFoley } : {}),
-    ...(interjectionAttempt ? { interjectionAttempt: true as const } : {}),
-    targetProgress: row.targetProgress,
-    seed,
-    cameraCutEligible: row.cameraCutEligible,
-  };
+  return normalizeListenerReactionPlanV1(value);
 }
 
 export function botcastListenerReactionForMessage(
@@ -1554,6 +1471,16 @@ const BOTCAST_NATURAL_REST_PATTERN =
 const BOTCAST_MATURE_FAREWELL_PATTERN =
   /\b(?:good luck(?:\s+with\b[^.!?]*)?|take care(?:\s+of\s+(?:yourself|each other))?|I(?:'m| am) not sure there(?:'s| is) much more I can add|you(?:'ve| have) got (?:everything|all) you need|that(?:'s| is) all that matters now)\b/iu;
 
+const BOTCAST_GUEST_REASK_PATTERN =
+  /\b(?:what (?:was|is) that(?: you said)?|what did you (?:just )?(?:say|ask)|say (?:that|it) again|repeat (?:that|it|the question)|once more|come again|pardon(?: me)?|I (?:did not|didn't|could not|couldn't) (?:hear|catch) (?:that|it)|could you (?:repeat|restate|say|ask)\b)/iu;
+
+/** A narrow progress signal used only to keep Auto from mistaking stalls for tapering. */
+export function botcastGuestAnswerAdvancesInterview(content: string): boolean {
+  if (botPowerResponseIsSilentV1(content)) return false;
+  if (botcastSpokenWordCount(content) < 3) return false;
+  return !BOTCAST_GUEST_REASK_PATTERN.test(content);
+}
+
 const BOTCAST_VOLUNTARY_DEPARTURE_BASE_ACTION = String.raw`(?:leave(?=\s*(?:$|now\b|soon\b|here\b|the\s+(?:show|studio|interview)\b|you\s+(?:to|two)\b))|go(?=\s*(?:$|now\b|home\b|outside\b))|get\s+going\b|head\s+(?:back\s+)?out\b|step\s+outside\b|take\s+off(?=\s*(?:$|now\b|soon\b)))`;
 const BOTCAST_VOLUNTARY_DEPARTURE_CONTINUOUS_ACTION = String.raw`(?:leaving(?=\s*(?:$|now\b|soon\b|here\b|the\s+(?:show|studio|interview)\b|you\s+(?:to|two)\b))|heading\s+(?:back\s+)?out\b|stepping\s+outside\b|going\s+(?:home|outside|back\s+(?:home|outside|out))\b)`;
 const BOTCAST_VOLUNTARY_DEPARTURE_PATTERNS = [
@@ -1708,6 +1635,22 @@ export function botcastSessionShouldClose(args: {
     BOTCAST_MATURE_FAREWELL_PATTERN.test(latestGuestLine)
   ) {
     return true;
+  }
+
+  const substantiveGuestAnswerCount = args.messages.reduce(
+    (count, message) =>
+      count +
+      (message.speakerRole === "guest" &&
+      botcastGuestAnswerAdvancesInterview(message.content)
+        ? 1
+        : 0),
+    0,
+  );
+  if (
+    substantiveGuestAnswerCount <
+    BOTCAST_AUTO_MIN_SUBSTANTIVE_GUEST_ANSWERS
+  ) {
+    return false;
   }
 
   const recent = args.messages.slice(-4);
@@ -1884,16 +1827,32 @@ export interface BotcastReplayThinkingRange {
   endMs: number;
 }
 
-function botcastProducerGuestThinkingTimelineDurationMs(
+export function botcastProducerGuestThinkingTimelineDurationMs(
+  wallDurationMs: number,
+): number {
+  if (!Number.isFinite(wallDurationMs) || wallDurationMs <= 0) return 0;
+  return Math.max(
+    0,
+    Math.round(
+      wallDurationMs * BOTCAST_PRODUCER_GUEST_THINKING_TIME_SCALE,
+    ),
+  );
+}
+
+function botcastProducerGuestThinkingTimelineDurationForEventMs(
   event: BotcastReplayEvent,
 ): number {
   if (event.kind !== "guest_thinking") return 0;
   const wallDurationMs = Number(event.payload.wallDurationMs);
   if (!Number.isFinite(wallDurationMs) || wallDurationMs <= 0) return 0;
+  const scaledTimelineDurationMs =
+    botcastProducerGuestThinkingTimelineDurationMs(wallDurationMs);
   const recordedTimelineDurationMs = Number(event.payload.timelineDurationMs);
-  const timelineDurationMs = Number.isFinite(recordedTimelineDurationMs)
-    ? recordedTimelineDurationMs
-    : wallDurationMs;
+  const timelineDurationMs =
+    Number.isFinite(recordedTimelineDurationMs) &&
+    recordedTimelineDurationMs !== wallDurationMs
+      ? recordedTimelineDurationMs
+      : scaledTimelineDurationMs;
   return Math.max(0, Math.min(wallDurationMs, Math.round(timelineDurationMs)));
 }
 
@@ -1934,7 +1893,7 @@ export function botcastReplayTimeline(
     if (typeof messageId !== "string" || !messageId) continue;
     thinkingDurationByMessageId.set(
       messageId,
-      botcastProducerGuestThinkingTimelineDurationMs(event),
+      botcastProducerGuestThinkingTimelineDurationForEventMs(event),
     );
   }
   let cursorMs = 0;

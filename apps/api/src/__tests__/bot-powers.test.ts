@@ -276,6 +276,40 @@ test("compiler makes Lazy Ivan's bare-minimum replies a hard reusable response b
   assert.match(result.powers[0]?.compiled?.observerCue ?? "", /Lazy Ivan/u);
 });
 
+test("compiler makes Lazy Cameron's legacy wording a hard bare-minimum budget", async () => {
+  let calls = 0;
+  const unusedProvider: LlmProvider = {
+    name: "local",
+    async generateResponse() {
+      calls += 1;
+      throw new Error("provider should not be needed");
+    },
+    async embedText() { return []; },
+  };
+  const result = await compileBotPowers({
+    provider: unusedProvider,
+    botName: "Lazy Cameron",
+    powers: [{
+      version: 1,
+      id: "lazy-cameron",
+      name: "Lazy",
+      intent: "Barely wants to do anything, including explain things.",
+      enabled: true,
+      compileStatus: "draft",
+      compiled: null,
+    }],
+  });
+
+  assert.equal(calls, 0);
+  assert.deepEqual(result.powers[0]?.compiled?.effects, [{
+    type: "response_budget",
+    mode: "minimal",
+    enforcement: "hard",
+  }]);
+  assert.match(result.powers[0]?.compiled?.selfCue ?? "", /fewest possible words/u);
+  assert.match(result.powers[0]?.compiled?.selfCue ?? "", /Never explain/u);
+});
+
 test("response budgets compose with an existing deterministic social effect", async () => {
   const unusedProvider: LlmProvider = {
     name: "local",
@@ -451,7 +485,7 @@ test("compiler keeps terror separate when a speaking-only ghost does not request
   );
 });
 
-test("compiler makes Microscopic a smaller speaking-only avatar without consulting the model", async () => {
+test("compiler makes Microscopic a smaller permanently hidden avatar without consulting the model", async () => {
   let calls = 0;
   const unusedProvider: LlmProvider = {
     name: "local",
@@ -478,12 +512,43 @@ test("compiler makes Microscopic a smaller speaking-only avatar without consulti
   assert.equal(result.powers[0]?.compileStatus, "ready");
   assert.deepEqual(result.powers[0]?.compiled?.effects, [
     { type: "avatar_scale", mode: "smaller" },
-    { type: "avatar_visibility", mode: "speaking_only" },
+    { type: "avatar_visibility", mode: "hidden" },
   ]);
   assert.deepEqual(result.powers[0]?.compiled?.ruleLabels, [
     "Smaller avatar",
-    "Appears only while speaking",
+    "Hidden while microscopic",
   ]);
+  assert.match(result.powers[0]?.compiled?.selfCue ?? "", /at any time/u);
+});
+
+test("compiler makes Invisible continuously half-translucent without consulting the model", async () => {
+  let calls = 0;
+  const unusedProvider: LlmProvider = {
+    name: "local",
+    async generateResponse() {
+      calls += 1;
+      throw new Error("provider should not be needed");
+    },
+    async embedText() { return []; },
+  };
+  const result = await compileBotPowers({
+    provider: unusedProvider,
+    botName: "Mote",
+    powers: [{
+      version: 1,
+      id: "invisible",
+      name: "Invisible",
+      intent: "Mote is invisible; older lore says he appears while speaking.",
+      enabled: true,
+      compileStatus: "draft",
+      compiled: null,
+    }],
+  });
+  assert.equal(calls, 0);
+  assert.deepEqual(result.powers[0]?.compiled?.effects, [
+    { type: "avatar_visibility", mode: "translucent" },
+  ]);
+  assert.match(result.powers[0]?.compiled?.selfCue ?? "", /half-translucent/u);
 });
 
 test("compiler deterministically distinguishes larger and smaller physical forms", async () => {

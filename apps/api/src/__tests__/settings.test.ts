@@ -169,7 +169,7 @@ describe("resolveNextSettings — ephemeral chat providers", () => {
 });
 
 describe("resolveNextSettings — voice foundation", () => {
-  it("persists the selected English engine while preserving legacy voice identities", () => {
+  it("persists the selected English engine while preserving the legacy five-slot provider bank", () => {
     const next = resolveNextSettings(
       {
         voiceMode: "babble",
@@ -179,7 +179,12 @@ describe("resolveNextSettings — voice foundation", () => {
         englishVoiceEngine: "builtin",
         defaultSystemVoiceName: "  Alex  ",
         defaultElevenLabsVoiceId: " eleven-default ",
-        elevenLabsVoiceBank: { "voice-1": "  voice_alpha  ", "voice-3": 17, extra: "ignore" },
+        elevenLabsVoiceBank: {
+          "voice-1": "  voice_alpha  ",
+          "voice-3": 17,
+          "voice-6": "retired-slot-must-not-expand",
+          extra: "ignore",
+        },
         elevenLabsVoiceModel: " eleven_multilingual_v2 ",
         elevenLabsVoiceCollectionId: " collection-main ",
       },

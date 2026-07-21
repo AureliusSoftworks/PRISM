@@ -185,6 +185,7 @@ function botFaceGraphemeHasEmoji(value: string): boolean {
 
 export function normalizeBotFaceEyeCharacter(value: unknown): string | null {
   if (typeof value !== "string") return null;
+  if (value === " ") return value;
   const [glyph] = splitBotFaceVisibleGraphemes(value);
   if (!glyph || botFaceGraphemeHasEmoji(glyph)) return null;
   return glyph;

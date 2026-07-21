@@ -10,7 +10,11 @@ Active development happens on the `dev` branch; every release is a merge into
 
 ## [Unreleased]
 
-_Staging area - nothing queued for release yet._
+### Fixed
+
+- **Lazy Cameron now does the absolute minimum.** His legacy and Marketplace
+  `Lazy` Powers deterministically enforce bare-minimum replies across PRISM
+  instead of relying on a vague reluctance prompt.
 
 ## [0.13.0] - 2026-07-21
 

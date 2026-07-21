@@ -22,7 +22,14 @@ const includedPrismVoiceFiles = new Set([
   "af_bella.bin",
   "am_michael.bin",
   "bf_emma.bin",
-  "bm_george.bin"
+  "bm_george.bin",
+  "af_aoede.bin",
+  "af_kore.bin",
+  "af_nicole.bin",
+  "af_sarah.bin",
+  "am_fenrir.bin",
+  "am_puck.bin",
+  "bm_fable.bin"
 ]);
 
 function parseArgs(argv) {

@@ -311,7 +311,7 @@ describe("Coffee seat arrival CSS", () => {
     );
     assert.match(
       pageSource,
-      /isTalking=\{faceTalking\} blinkWhileTalking mouthShape=\{faceMouthShape\}/
+      /isTalking=\{faceTalking\}[\s\S]{0,800}blinkWhileTalking[\s\S]{0,120}mouthShape=\{faceMouthShape\}/
     );
     assert.match(
       pageSource,

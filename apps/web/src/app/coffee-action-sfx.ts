@@ -21,6 +21,11 @@ export interface CoffeeActionSfxPlan {
   revealAtDisplayLength: number;
 }
 
+export interface BundledActionSfxPlan {
+  kind: BundledCoffeeActionSfxKind;
+  revealAtDisplayLength: number;
+}
+
 export interface CoffeeActionSfxGateState {
   lastPlayedAtMs: number | null;
   lastPlayedAtMsByKind: Partial<Record<CoffeeActionSfxKind, number>>;
@@ -197,6 +202,31 @@ export function buildCoffeeActionSfxPlan(
   return null;
 }
 
+/** Shared bodily-action foley that is safe to play outside Coffee. */
+export function buildBundledActionSfxPlan(
+  messageText: string,
+): BundledActionSfxPlan | null {
+  const plan = buildCoffeeActionSfxPlan(messageText);
+  if (!plan || !isBundledCoffeeActionSfxKind(plan.kind)) return null;
+  return {
+    kind: plan.kind,
+    revealAtDisplayLength: plan.revealAtDisplayLength,
+  };
+}
+
+export function bundledActionSfxIsEligible(args: {
+  voiceMode: string;
+  voiceEffectsEnabled: boolean;
+  voiceVolume: number;
+}): boolean {
+  return (
+    args.voiceMode !== "mute" &&
+    args.voiceEffectsEnabled &&
+    Number.isFinite(args.voiceVolume) &&
+    args.voiceVolume > 0
+  );
+}
+
 export function coffeeActionSfxIsEligible(args: {
   kind: CoffeeActionSfxKind;
   coffeeProvider: string;
@@ -207,12 +237,7 @@ export function coffeeActionSfxIsEligible(args: {
   voiceVolume: number;
   elevenLabsKeyAvailable: boolean;
 }): boolean {
-  const audible =
-    args.voiceMode !== "mute" &&
-    args.voiceEffectsEnabled &&
-    Number.isFinite(args.voiceVolume) &&
-    args.voiceVolume > 0;
-  if (!audible) return false;
+  if (!bundledActionSfxIsEligible(args)) return false;
   if (isBundledCoffeeActionSfxKind(args.kind)) return true;
   return (
     args.coffeeProvider !== "local" &&

@@ -53,12 +53,19 @@ export const BOT_AUDIO_VOICE_IDS = [
   "voice-3",
   "voice-4",
   "voice-5",
+  "voice-6",
+  "voice-7",
+  "voice-8",
+  "voice-9",
+  "voice-10",
+  "voice-11",
+  "voice-12",
 ] as const;
 export type BotAudioVoiceId = (typeof BOT_AUDIO_VOICE_IDS)[number];
 
 /** PRISM's portable, always-local English voice pack. The engine voice IDs are
  * implementation details; profiles continue to persist only the stable
- * `voice-1` through `voice-5` identities. */
+ * `voice-1` through `voice-12` identities. */
 export const PRISM_BUILTIN_ENGLISH_VOICES = [
   {
     voiceId: "voice-1",
@@ -94,6 +101,55 @@ export const PRISM_BUILTIN_ENGLISH_VOICES = [
     name: "George",
     locale: "en-GB",
     character: "Measured British",
+  },
+  {
+    voiceId: "voice-6",
+    engineVoiceId: "af_aoede",
+    name: "Aoede",
+    locale: "en-US",
+    character: "Bright American",
+  },
+  {
+    voiceId: "voice-7",
+    engineVoiceId: "af_kore",
+    name: "Kore",
+    locale: "en-US",
+    character: "Composed American",
+  },
+  {
+    voiceId: "voice-8",
+    engineVoiceId: "af_nicole",
+    name: "Nicole",
+    locale: "en-US",
+    character: "Smooth American",
+  },
+  {
+    voiceId: "voice-9",
+    engineVoiceId: "af_sarah",
+    name: "Sarah",
+    locale: "en-US",
+    character: "Natural American",
+  },
+  {
+    voiceId: "voice-10",
+    engineVoiceId: "am_fenrir",
+    name: "Fenrir",
+    locale: "en-US",
+    character: "Deep American",
+  },
+  {
+    voiceId: "voice-11",
+    engineVoiceId: "am_puck",
+    name: "Puck",
+    locale: "en-US",
+    character: "Lively American",
+  },
+  {
+    voiceId: "voice-12",
+    engineVoiceId: "bm_fable",
+    name: "Fable",
+    locale: "en-GB",
+    character: "Expressive British",
   },
 ] as const satisfies ReadonlyArray<{
   voiceId: BotAudioVoiceId;
@@ -887,7 +943,9 @@ export function resolveBotAudioVoiceProfileV1(
   authoredValue: unknown,
   overrideValue: unknown,
 ): BotAudioVoiceProfileV2 {
-  const authored = normalizeBotAudioVoiceProfileV1(authoredValue);
+  const authored =
+    normalizeOptionalBotAudioVoiceProfileV1(authoredValue) ??
+    normalizeBotAudioVoiceProfileV1(undefined);
   const override = normalizeOptionalBotAudioVoiceProfileV1(overrideValue);
   if (!override) return authored;
 

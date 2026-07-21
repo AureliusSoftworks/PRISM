@@ -791,6 +791,23 @@
   scale: 0.86;
 }
 
+.storySpriteWrap[data-power-avatar-visibility="hidden"] {
+  opacity: 0;
+}
+
+.storySpriteWrap[data-power-avatar-visibility="translucent"] {
+  opacity: 0.5;
+}
+
+.storySpriteWrap[data-power-avatar-visibility="speaking_only"] {
+  opacity: 0;
+  transition: opacity 420ms ease;
+}
+
+.storySpriteWrap[data-power-avatar-visibility="speaking_only"][data-speaking="true"] {
+  opacity: 1;
+}
+
 .storySpriteWrap[data-pose="idle"] {
   transform: translateY(2px) scale(0.985);
 }
@@ -977,6 +994,25 @@
 .coffeeSeat[data-power-avatar-scale="smaller"] .coffeeSeatPlate {
   scale: 0.86;
   transform-origin: 50% 70%;
+}
+
+/* Visibility Powers affect only the embodied avatar, not its seat or transcript. */
+.zenLiveBotPresencePlate[data-power-avatar-visibility="hidden"] {
+  opacity: 0;
+}
+
+.zenLiveBotPresencePlate[data-power-avatar-visibility="translucent"] {
+  opacity: 0.5;
+}
+
+.coffeeSeat[data-power-avatar-visibility="hidden"]:not([data-roster-preview="true"])
+  .coffeeSeatPlate[data-live-body-style="zen"] {
+  opacity: 0;
+}
+
+.coffeeSeat[data-power-avatar-visibility="translucent"]:not([data-roster-preview="true"])
+  .coffeeSeatPlate[data-live-body-style="zen"] {
+  opacity: 0.5;
 }
 
 /* Identity Mirror keeps the holder's metal/color/glyph anchored while only the CRT face scrambles. */
@@ -44805,17 +44841,6 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     inset 0 -1px 0 rgba(0, 0, 0, 0.24);
 }
 
-.botAvatarControlTabs[data-tab-count="10"] {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-}
-
-.botAvatarControlTabs[data-tab-count="10"] button,
-.form .botAvatarControlTabs[data-tab-count="10"] button {
-  gap: 4px;
-  padding-inline: 5px;
-  font-size: 10.5px;
-}
-
 .botAvatarControlTabs button,
 .form .botAvatarControlTabs button {
   -webkit-appearance: none;
@@ -45289,14 +45314,6 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     in srgb,
     var(--editor-bot-color, var(--accent)) 68%,
     #ff9db8
-  );
-}
-
-.botAvatarControlGroup[data-avatar-control-tab="motion"] {
-  --bot-avatar-section-accent: color-mix(
-    in srgb,
-    var(--editor-bot-color, var(--accent)) 62%,
-    #ffd38a
   );
 }
 
@@ -46194,8 +46211,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     color-mix(in srgb, var(--editor-bot-color, var(--accent)) 20%, transparent);
 }
 
-.botAvatarCustomControls,
-.botAvatarMotionControls {
+.botAvatarCustomControls {
   min-width: 0;
   display: grid;
   gap: 12px;
