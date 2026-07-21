@@ -5911,6 +5911,53 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
+  it("gives OpenAI reasoning models enough low-effort budget to complete a show identity", async () => {
+    const db = fixture();
+    const optionCaptures: GenerateOptions[] = [];
+    const provider: LlmProvider = {
+      name: "openai",
+      async generateResponse(_messages, options) {
+        optionCaptures.push(options);
+        return JSON.stringify({
+          name: "The Vale Index",
+          premise: "Precise conversations that inventory the stories culture tells itself.",
+          studioIdentity:
+            "A forensic archive organized around annotated cultural ephemera, pinned redactions, specimen drawers, a magnifying lens, index cards, balance weights, and one severe sculptural clock.",
+          logoThesis:
+            "An evidence notch interrupts a carrier interval, and the same cut becomes the signal's moment of transmission.",
+          dashboardBlurbs: Array.from(
+            { length: 24 },
+            (_, index) => `Cultural alibi ${index + 1}: noted, indexed, and still unconvincing.`,
+          ),
+        });
+      },
+      async embedText() {
+        return [];
+      },
+    };
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const result = await generateBotcastShowIdentity(
+        db,
+        "user-1",
+        show.id,
+        {
+          preferredProvider: "openai",
+          preferredOnlineModel: "gpt-5.6-sol",
+          providerFactory: (() => provider) as typeof selectProvider,
+        },
+      );
+
+      assert.equal(result.generated, true);
+      assert.equal(optionCaptures.length, 1);
+      assert.equal(optionCaptures[0]?.model, "gpt-5.6-sol");
+      assert.equal(optionCaptures[0]?.reasoningEffort, "low");
+      assert.equal(optionCaptures[0]?.maxTokens, 1_200);
+    } finally {
+      db.close();
+    }
+  });
+
   it("generates a muted host's show identity without inventing anything they say", async () => {
     const db = fixture();
     const captures: ProviderMessage[][] = [];

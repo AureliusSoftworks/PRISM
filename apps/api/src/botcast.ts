@@ -3815,7 +3815,11 @@ export async function generateBotcastShowIdentity(
       {
         ...(selected.model ? { model: selected.model } : {}),
         temperature: 0.82,
-        maxTokens: 1_200,
+        ...botcastBookingGenerationOptions(
+          selected.providerName,
+          selected.model ?? defaultModelIdForProvider(selected.providerName),
+          1_200,
+        ),
         jsonMode: true,
         usagePurpose: "botcast_brand",
       },

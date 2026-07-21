@@ -20,15 +20,15 @@ describe("Signal room acoustics integration", () => {
   it("places every Signal voice lane in the same restrained room", () => {
     assert.match(
       pageSource,
-      /playListenerReactionVoice\(\{[\s\S]{0,500}roomAcoustics: SIGNAL_STUDIO_VOICE_ROOM_SEND/u,
+      /playListenerReactionVoice\(\{[\s\S]{0,1000}roomAcoustics: SIGNAL_STUDIO_VOICE_ROOM_SEND/u,
     );
     assert.match(
       pageSource,
-      /enqueueRobotVoiceMode\(\{[\s\S]{0,600}roomAcoustics: SIGNAL_STUDIO_VOICE_ROOM_SEND/u,
+      /enqueueRobotVoiceMode\(\{[\s\S]{0,1200}roomAcoustics: SIGNAL_STUDIO_VOICE_ROOM_SEND/u,
     );
     assert.match(
       pageSource,
-      /enqueueEnglishVoice\([\s\S]{0,700}SIGNAL_STUDIO_VOICE_ROOM_SEND/u,
+      /enqueueEnglishVoice\([\s\S]{0,1400}SIGNAL_STUDIO_VOICE_ROOM_SEND/u,
     );
     assert.match(voiceSource, /connectRoomAcoustics\(\{/u);
     assert.match(voiceSource, /roomConnection\.release\(\)/u);

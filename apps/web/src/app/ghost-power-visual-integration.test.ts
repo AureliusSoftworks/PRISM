@@ -35,7 +35,7 @@ describe("ghost Power live-avatar contract", () => {
   it("uses the frozen Coffee plan and the active table speaker for the reveal", () => {
     assert.match(
       pageSource,
-      /const seatGhostlyPresence\s*=\s*coffeePowerPlan\?\.bots\[bot\.id\]\?\.effects\.some\([\s\S]{0,180}effect\.type === "avatar_visibility"[\s\S]{0,100}effect\.mode === "speaking_only"/u,
+      /const seatGhostlyPresence\s*=\s*coffeePowerPlan[\s\S]{0,160}botPowerHasSpeakingOnlyAvatarVisibilityFromEffectsV1\([\s\S]{0,100}coffeePowerPlan\.bots\[bot\.id\]\?\.effects/u,
     );
     assert.match(
       pageSource,

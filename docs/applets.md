@@ -71,6 +71,8 @@ stages do not block the standalone preview.
 
 ## Changelog
 
+### 2026-07-21
+
 - Bumped `Coffee` to `v2.15`, `Signal` to `v1.23`, and `Story` to `v0.17`
   for unconditional interruption Powers. A Power explicitly authored to
   interrupt every eligible bot turn now does so without a random roll or the
