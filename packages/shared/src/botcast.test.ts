@@ -45,6 +45,7 @@ import {
   botcastMoodDrainEventsAt,
   normalizeBotcastMoodDrainEventV1,
   botcastStrongestNegativeSocialInfluenceAt,
+  botcastSnapshotAvatarVisibilityModeV1,
   botcastSnapshotHasSpeakingOnlyAvatarVisibility,
   botcastSnapshotPowersForRoleV1,
   botcastVoiceMoodForTension,
@@ -118,6 +119,8 @@ describe("Signal fallback studio accents", () => {
             visualAction: "nod",
             spokenCue: "No, hold on.",
             interjectionAttempt: true,
+            interruptedSpeakerCue: "... okay, never mind, I guess.",
+            interruptedSpeakerCuePlayback: "crosstalk",
             targetProgress: 0.48,
             seed: "signal-listener-v1:test",
             cameraCutEligible: true,
@@ -155,6 +158,11 @@ describe("Signal fallback studio accents", () => {
       botcastListenerReactionForMessage(events, "message-1")
         ?.interjectionAttempt,
       true,
+    );
+    assert.equal(
+      botcastListenerReactionForMessage(events, "message-1")
+        ?.interruptedSpeakerCuePlayback,
+      "crosstalk",
     );
     assert.equal(botcastListenerReactionForMessage(events, "other"), null);
     assert.equal(
@@ -348,6 +356,13 @@ describe("Signal replayed ghost avatar presence", () => {
         "guest",
       ),
       true,
+    );
+    assert.equal(
+      botcastSnapshotAvatarVisibilityModeV1(
+        { events, hostBotId: "host", guestBotId: "guest" },
+        "guest",
+      ),
+      "speaking_only",
     );
     assert.equal(
       botPowerAvatarScaleModeV1(
@@ -610,6 +625,43 @@ describe("Botcast episode state", () => {
       durationMinutes: null,
       startedAtMs: 0,
       nowMs: 1,
+    }), true);
+  });
+
+  it("does not mistake repeated questions and fragments for a settled interview", () => {
+    const reviewedEpisode = [
+      { speakerRole: "host" as const, content: "What makes a plan perfect?" },
+      { speakerRole: "guest" as const, content: "Sorry, what was that you said?" },
+      { speakerRole: "host" as const, content: "Does its design matter, or must it survive reality?" },
+      { speakerRole: "guest" as const, content: "For real, once more. What did you just ask?" },
+      { speakerRole: "host" as const, content: "When a plan fails, should it bend or blame reality?" },
+      { speakerRole: "guest" as const, content: "Sorry, I got distracted. What was that?" },
+      { speakerRole: "host" as const, content: "What makes a plan perfect?" },
+      { speakerRole: "guest" as const, content: "coffee..." },
+      { speakerRole: "host" as const, content: "Does a perfect plan adapt?" },
+      { speakerRole: "guest" as const, content: "No, a perfect plan involves coffee. Lots of coffee." },
+    ];
+    assert.equal(botcastSessionShouldClose({
+      messages: reviewedEpisode,
+      durationMinutes: null,
+      startedAtMs: 0,
+      nowMs: 5 * 60_000,
+    }), false);
+
+    const substantiveEpisode = reviewedEpisode.map((message, index) =>
+      message.speakerRole === "guest" && index < 7
+        ? {
+            ...message,
+            content:
+              "A perfect plan changes when reality exposes a cost its designer missed.",
+          }
+        : message,
+    );
+    assert.equal(botcastSessionShouldClose({
+      messages: substantiveEpisode,
+      durationMinutes: null,
+      startedAtMs: 0,
+      nowMs: 5 * 60_000,
     }), true);
   });
 
@@ -999,7 +1051,7 @@ describe("Botcast replay director", () => {
     assert.equal(botcastEpisodeDepartureOutcome(events), "host_departed");
   });
 
-  it("replays Producer typing pauses as guest thinking", () => {
+  it("replays Producer typing pauses at the half-speed episode duration", () => {
     const events: BotcastReplayEvent[] = [
       {
         id: "thinking",
@@ -1026,7 +1078,7 @@ describe("Botcast replay director", () => {
     assert.equal(timeline.thinkingRanges[0]?.startMs, timeline.messageEndMs[0]);
     assert.equal(
       timeline.thinkingRanges[0]?.endMs,
-      timeline.messageEndMs[0]! + 12_000,
+      timeline.messageEndMs[0]! + 6_000,
     );
     assert.equal(
       timeline.messageStartMs[1],

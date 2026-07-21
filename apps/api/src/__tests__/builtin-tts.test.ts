@@ -13,14 +13,27 @@ import {
 } from "../builtin-tts.ts";
 
 describe("built-in English audio", () => {
-  it("ships five stable, distinct PRISM voice identities", () => {
+  it("ships twelve stable, distinct PRISM voice identities", () => {
     assert.deepEqual(
       PRISM_BUILTIN_ENGLISH_VOICES.map((voice) => voice.voiceId),
-      ["voice-1", "voice-2", "voice-3", "voice-4", "voice-5"],
+      [
+        "voice-1",
+        "voice-2",
+        "voice-3",
+        "voice-4",
+        "voice-5",
+        "voice-6",
+        "voice-7",
+        "voice-8",
+        "voice-9",
+        "voice-10",
+        "voice-11",
+        "voice-12",
+      ],
     );
     assert.equal(
       new Set(PRISM_BUILTIN_ENGLISH_VOICES.map((voice) => voice.engineVoiceId)).size,
-      5,
+      PRISM_BUILTIN_ENGLISH_VOICES.length,
     );
   });
 
@@ -85,14 +98,32 @@ describe("built-in English audio", () => {
     );
   });
 
-  it("renders a real local PCM wave through the packaged model", {
+  it("keeps double-digit voice identities aligned with their pack slot", () => {
+    assert.deepEqual(
+      systemEnglishGenerationSettings({
+        profile: {
+          v: 1,
+          baseVoiceId: "voice-12",
+          pitch: 0,
+          warmth: 0,
+          pace: 0,
+          lilt: 0,
+        },
+        platform: "win32",
+        installedVoices: [],
+      }),
+      { voiceName: null, rate: 0, slotIndex: 11 },
+    );
+  });
+
+  it("renders an added PRISM identity through the packaged local model", {
     skip: !builtinEnglishAvailable(),
   }, async () => {
     const wave = await generateBuiltinEnglishWave({
       text: "Prism built-in voice test.",
       profile: {
         v: 1,
-        baseVoiceId: "voice-1",
+        baseVoiceId: "voice-12",
         pitch: 0,
         warmth: 0,
         pace: 0,

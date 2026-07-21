@@ -8,7 +8,10 @@ import {
   parseStoredBotPowersV1,
 } from "@localai/shared";
 import { parsePrismBotArchive } from "../apps/web/src/app/botArchive.ts";
-import { buildBotcastSpeakerPrompt } from "../apps/api/src/botcast.ts";
+import {
+  botcastIdentityMirrorCanTriggerV1,
+  buildBotcastSpeakerPrompt,
+} from "../apps/api/src/botcast.ts";
 import {
   buildSpeakerPrompt,
   coffeeIdentityMirrorPromptForSpeaker,
@@ -81,7 +84,22 @@ const social = {
   leavePressure: 0.18,
 };
 const directAddress =
-  "Identity Crisis Ian, give me the bearing from Shackleton crater to the south-pole relay.";
+  "Ian, give me the bearing from Shackleton crater to the south-pole relay.";
+const shortNameTriggerDetected = botcastIdentityMirrorCanTriggerV1({
+  guestKind: "bot",
+  guestPresenceMode: "present",
+  speakerRole: "host",
+  holderRole: "guest",
+  speakerIsMuted: false,
+  speakerMumbles: false,
+  speaker: mara,
+  holder: ian,
+  currentState: null,
+  content: directAddress,
+});
+if (!shortNameTriggerDetected) {
+  throw new Error("Natural short-name Signal address did not trigger identity mirroring.");
+}
 const signalGuestReply =
   "The south-pole relay lies north-northeast from Shackleton crater; hold that bearing and correct at the ridge.";
 const coffeeHistory = [
@@ -227,11 +245,12 @@ const result = {
   passCriteria: PASS_CRITERIA,
   syntheticTrigger: {
     speaker: "Mara Vale",
-    speakerRole: "guest",
+    speakerRole: "host",
     target: "Identity Crisis Ian",
-    targetRole: "host",
-    text: signalGuestReply,
-    containsTargetName: false,
+    targetRole: "guest",
+    text: directAddress,
+    containsFullTargetName: false,
+    shortNameTriggerDetected,
   },
   coffee: {
     productionPrompt: coffeePrompt,

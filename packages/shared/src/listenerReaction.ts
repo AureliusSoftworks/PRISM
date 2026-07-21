@@ -269,6 +269,25 @@ export function appendBotCrosstalkInterruptedSpeakerCue(
   return `${cutoff}${cue}`;
 }
 
+/** Keeps the saved transcript retort while excluding it from primary speech.
+ * The retort is played later on the crosstalk channel after a processing beat. */
+export function botCrosstalkPrimarySpeakerContent(
+  content: string,
+  plan: Pick<
+    ListenerReactionPlanV1,
+    "interruptedSpeakerCue" | "interruptedSpeakerCuePlayback"
+  > | null | undefined,
+): string {
+  const cue = plan?.interruptedSpeakerCue;
+  if (!cue || plan?.interruptedSpeakerCuePlayback !== "crosstalk") {
+    return content;
+  }
+  const trimmed = content.trimEnd();
+  return trimmed.endsWith(cue)
+    ? trimmed.slice(0, -cue.length).trimEnd()
+    : content;
+}
+
 export function buildBotCrosstalkListenerReactionPlanV1(args: {
   seed: string;
   messageId: string;
@@ -420,7 +439,7 @@ export function buildSignalListenerReactionPlanV1(args: {
     ...(interruptedSpeakerCue
       ? {
           interruptedSpeakerCue,
-          interruptedSpeakerCuePlayback: "primary" as const,
+          interruptedSpeakerCuePlayback: "crosstalk" as const,
         }
       : {}),
     targetProgress: interjectionAttempt

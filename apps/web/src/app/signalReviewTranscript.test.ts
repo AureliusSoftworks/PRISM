@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import type { BotcastEpisode, BotcastShow } from "@localai/shared";
+import {
+  BOTCAST_PRODUCER_GUEST_ID,
+  type BotcastEpisode,
+  type BotcastShow,
+} from "@localai/shared";
 import { buildSignalReviewTranscript } from "./signalReviewTranscript.ts";
 
 const show: Pick<BotcastShow, "id" | "name" | "premise" | "hostingStyle"> = {
@@ -263,6 +267,47 @@ describe("Signal review transcript", () => {
       /- Turn routing: auto -> unknown -> provider default or unrecorded/u,
     );
     assert.match(transcript, /No production events were recorded\./u);
+  });
+
+  it("identifies Producer guest composer turns as human-authored", () => {
+    const transcript = buildSignalReviewTranscript({
+      episode: {
+        ...episode,
+        guestBotId: BOTCAST_PRODUCER_GUEST_ID,
+        messages: [{
+          ...episode.messages[1]!,
+          botId: BOTCAST_PRODUCER_GUEST_ID,
+          content: "A perfect plan needs enough coffee to survive revision.",
+        }],
+        events: [{
+          ...episode.events[4]!,
+          payload: {
+            messageId: "message-2",
+            speakerRole: "guest",
+            botId: BOTCAST_PRODUCER_GUEST_ID,
+            segment: "interview",
+            source: "producer_guest_composer",
+          },
+        }],
+        segments: [],
+      },
+      show,
+      host: { id: "host-1", name: "Ada" },
+      guest: { id: BOTCAST_PRODUCER_GUEST_ID, name: "Jared" },
+    });
+
+    assert.match(
+      transcript,
+      /- Turn routing: human-authored -> no provider -> no model/u,
+    );
+    assert.match(
+      transcript,
+      /- AUTO recovery: Not applicable \(human-authored\)/u,
+    );
+    assert.match(
+      transcript,
+      /- ONLINE retry: Not applicable \(human-authored\)/u,
+    );
   });
 
   it("does not label hard-muted silence-only entries as spoken turns", () => {

@@ -39,7 +39,7 @@ describe("mode tutorials", () => {
     assert.match(joinCopy, /inferred listeners remain visual only/u);
     assert.match(
       joinCopy,
-      /one bot cuts off another.*interrupter speaks a short hold-on.*interrupted bot overlaps/u,
+      /one bot cuts off another.*interrupter speaks a short hold-on.*interrupted bot takes a brief processing beat.*annoyed, abandoned ending/u,
     );
     assert.match(joinCopy, /sparse mic-ready breath/u);
   });
@@ -69,6 +69,15 @@ describe("mode tutorials", () => {
     assert.match(MODE_TUTORIALS.coffee.steps[0]?.body ?? "", /larger or smaller/u);
     assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /larger or smaller/u);
     assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /Microscopic/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /fully unseen even while speaking/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /half-translucent/u);
+  });
+
+  it("explains that Auto requires substantive interview progress", () => {
+    const setupCopy = MODE_TUTORIALS.botcast.steps[5]?.body ?? "";
+    assert.match(setupCopy, /substantive guest answers/u);
+    assert.match(setupCopy, /repeat a question/u);
+    assert.match(setupCopy, /do not count as interview progress/u);
   });
 
   it("explains addressed fandom without weakening player or bot agency", () => {
@@ -88,9 +97,14 @@ describe("mode tutorials", () => {
   });
 
   it("teaches the nonverbal coffee action for a Producer guest", () => {
+    const producerGuestCopy = MODE_TUTORIALS.botcast.steps[5]?.body ?? "";
     assert.match(
-      MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
+      producerGuestCopy,
       /Sip coffee animates your stage mug and face with room Foley without sending a transcript turn/u,
+    );
+    assert.match(
+      producerGuestCopy,
+      /With Voice Effects on, fart, burp, and cough actions play matching room Foley live and in replay/u,
     );
   });
 
@@ -342,7 +356,11 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
-      /visible thinking beat/u,
+      /replay compresses that pause to the same half-speed duration/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
+      /returns to normal time for your answer/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
@@ -502,7 +520,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
-      /genuinely cuts across[\s\S]*short hold-on[\s\S]*annoyed, abandoned ending/u,
+      /genuinely cuts across[\s\S]*short hold-on[\s\S]*brief processing beat[\s\S]*annoyed, abandoned ending/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
@@ -522,7 +540,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
-      /Interrupt guest now plays one of that host’s saved short interjections immediately[\s\S]*guest’s annoyed cutoff overlaps[\s\S]*unheard remainder of the guest’s line is discarded/u,
+      /Interrupt guest now plays one of that host’s saved short interjections immediately[\s\S]*guest takes a brief processing beat before the annoyed cutoff retort[\s\S]*unheard remainder of the guest’s line is discarded/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
@@ -567,6 +585,10 @@ describe("mode tutorials", () => {
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
       /full transcript stays out of the initial play and returns with playback/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      /active line appears as a live caption after a brief half-second delay and clears as soon as that line ends/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
@@ -712,7 +734,7 @@ describe("mode tutorials", () => {
 
     assert.deepEqual(chooseRelationship, {
       heading: "Choose a relationship",
-      body: "Choose PRISM or a persona to enter that relationship’s Home. Ready Powers stay active with that persona here and across PRISM; a muted persona can still act, but only answers with ... and never speaks aloud, while a Copycat persona may originate one opening if nobody has addressed them yet, then repeats the latest addressed message exactly. A short-term-amnesia persona responds naturally from a replay-stable one-to-four-message public tail, never older relationship history, and introduces themself only when that immediate exchange warrants it. An Obsessed persona treats you as the star of each reply with fresh, intense admiration, while your agency, privacy, and safety boundaries still win. A radiant-joy persona makes that emotional warmth palpable without tracking or rewriting your mood. A sad-grouchy persona makes her draining presence equally palpable without changing your state; only bots that directly talk to her lose mood or motivation. Physical-size Powers render a persona slightly larger or smaller without changing the room layout, and Microscopic combines the smaller form with an unseen idle presence. Loud and Quiet Powers apply a small fixed voice-volume and text-size shift; Quiet can go unheard on half its turns and lose a little mood, while Loud overrides small, Microscopic, and invisible presentation. A hard bare-minimum or brief Power is engine-bounded even if the model tries to elaborate. Back or Escape returns you to the wider Library or saved group grid exactly where you left it. Inviting a guest keeps you in the current Home.",
+      body: "Choose PRISM or a persona to enter that relationship’s Home. Ready Powers stay active with that persona here and across PRISM; a muted persona can still act, but only answers with ... and never speaks aloud, while a Copycat persona may originate one opening if nobody has addressed them yet, then repeats the latest addressed message exactly. A short-term-amnesia persona responds naturally from a replay-stable one-to-four-message public tail, never older relationship history, and introduces themself only when that immediate exchange warrants it. An Obsessed persona treats you as the star of each reply with fresh, intense admiration, while your agency, privacy, and safety boundaries still win. A radiant-joy persona makes that emotional warmth palpable without tracking or rewriting your mood. A sad-grouchy persona makes her draining presence equally palpable without changing your state; only bots that directly talk to her lose mood or motivation. Physical-size Powers render a persona slightly larger or smaller without changing the room layout. Microscopic stays fully unseen even while speaking, while Invisible stays half-translucent. Loud and Quiet Powers apply a small fixed voice-volume and text-size shift without changing physical size or visibility; Quiet can go unheard on half its turns and lose a little mood. A hard bare-minimum or brief Power is engine-bounded even if the model tries to elaborate. Back or Escape returns you to the wider Library or saved group grid exactly where you left it. Inviting a guest keeps you in the current Home.",
       clickLabel: "a PRISM or persona tile",
       targetSelector: '[data-tutorial-target="chat-bot-picker"]',
     });
@@ -911,7 +933,8 @@ describe("mode tutorials", () => {
     assert.match(coffee?.body ?? "", /cup-return sounds stay synchronized/);
     assert.match(signal?.body ?? "", /awkward dead air/);
     assert.match(signal?.body ?? "", /original answer keeps generating/);
-    assert.match(signal?.body ?? "", /Ambient sips land only while the other bot is talking/);
+    assert.match(signal?.body ?? "", /Bot ambient sips land only while the other bot is talking/);
+    assert.match(signal?.body ?? "", /your cup moves only after you click Sip coffee/);
     assert.match(signal?.body ?? "", /cup-return sounds stay synchronized/);
   });
 
@@ -1002,6 +1025,10 @@ describe("mode tutorials", () => {
     assert.match(controlRoom, /interruptive cast member’s Power/u);
     assert.match(controlRoom, /without a random roll or cooldown/u);
     assert.match(controlRoom, /early, in the middle, or late/u);
+    assert.match(
+      controlRoom,
+      /Interrupting Tom cuts every ordinary bot-host opening and interview turn, including producer-directed host turns/u,
+    );
     assert.match(controlRoom, /other interruption Powers retain their frequency, strength, target, and cooldown/u);
     assert.match(
       controlRoom,

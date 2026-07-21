@@ -24,10 +24,9 @@ describe("Loud and Quiet Power presentation", () => {
     assert.match(pageCss, /\.messageAssistant\[data-power-voice-presence="quiet"\][^{]*\{[^}]*--power-message-font-scale:\s*0\.88/u);
   });
 
-  it("uses Coffee's frozen plan for voice gain, text, and visibility precedence", () => {
+  it("uses Coffee's frozen plan for voice gain and text", () => {
     assert.match(pageSource, /botPowerVoiceGainMultiplierFromEffectsV1\([\s\S]{0,100}coffeePowerPlan\.bots\[bot\.id\]\?\.effects/u);
     assert.match(pageSource, /data-power-voice-presence=\{line\.voicePresence\}/u);
-    assert.match(pageSource, /const seatGhostlyPresence = coffeePowerPlan[\s\S]{0,180}botPowerHasSpeakingOnlyAvatarVisibilityFromEffectsV1/u);
     assert.match(pageCss, /\.coffeeCenterFeedLine\[data-power-voice-presence="loud"\][\s\S]{0,140}--power-message-font-scale:\s*1\.12/u);
     assert.match(pageCss, /\.coffeeCenterFeedLine\[data-power-voice-presence="quiet"\][\s\S]{0,140}--power-message-font-scale:\s*0\.88/u);
   });

@@ -28,6 +28,33 @@ import type { RoomAcousticsSend } from "./roomAcoustics.ts";
 
 export type ListenerReactionVoiceMode = "english" | "bottish" | "babble";
 
+/** A perceptible beat after a cut-in before the interrupted bot answers back. */
+export const INTERRUPTED_SPEAKER_RETORT_PAUSE_MS = 850;
+
+async function waitForReactionVoiceStart(
+  delayMs: number,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  if (signal?.aborted) return false;
+  const boundedDelayMs = Math.max(0, Math.round(delayMs));
+  if (boundedDelayMs === 0) return true;
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const finish = (ready: boolean): void => {
+      if (settled) return;
+      settled = true;
+      if (timer !== null) clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      resolve(ready);
+    };
+    const onAbort = (): void => finish(false);
+    timer = setTimeout(() => finish(true), boundedDelayMs);
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) onAbort();
+  });
+}
+
 export function listenerReactionVoiceCacheKey(args: {
   plan: ListenerReactionPlanV1;
   mode: ListenerReactionVoiceMode;
@@ -104,11 +131,16 @@ export async function playEphemeralReactionVoice(args: {
   stereoPan?: number;
   maxDurationMs?: number;
   channel?: VoicePlaybackChannel;
+  startDelayMs?: number;
+  signal?: AbortSignal;
 }): Promise<boolean> {
   const cue = args.text.replace(/\s+/gu, " ").trim();
   const normalizedInputProfile = normalizeBotAudioVoiceProfileV1(args.profile);
   if (!cue || args.globalVolume <= 0 || !normalizedInputProfile.enabled)
     return false;
+  if (!(await waitForReactionVoiceStart(args.startDelayMs ?? 0, args.signal))) {
+    return false;
+  }
   const profile = normalizeBotAudioVoiceProfileV1({
     ...applyVoiceDeliveryMoodToProfile(normalizedInputProfile, args.mood),
     volume: normalizeBotVoiceVolume(args.globalVolume),

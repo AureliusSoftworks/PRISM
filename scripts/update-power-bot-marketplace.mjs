@@ -27,8 +27,8 @@ const ROOT = resolve(import.meta.dirname, "..");
 const MARKETPLACE_ROOT = join(ROOT, "apps/web/public/bot-marketplace");
 const MANIFEST_PATH = join(MARKETPLACE_ROOT, "manifest.json");
 const POWER_THEME_ID = "power-collection";
-const POWER_COLLECTION_REVISION = "2026-07-21T08:00:00.000Z";
-const POWER_COLLECTION_VERSION = 9;
+const POWER_COLLECTION_REVISION = "2026-07-21T21:30:00.000Z";
+const POWER_COLLECTION_VERSION = 12;
 const RETIRED_POWER_BOT_IDS = new Set(["silent-tim"]);
 
 const POWER_THEME = {
@@ -145,14 +145,14 @@ const RECIPES = [
     name: "Lazy Cameron",
     subtitle: "Minimal effort, maximum reluctance",
     description:
-      "A chronically unbothered conversationalist who resists elaborating and does as little as the moment allows.",
+      "A chronically unbothered conversationalist who says the bare minimum and refuses to elaborate.",
     tags: ["lazy", "minimal", "reluctant"],
     purpose:
-      "A capable but profoundly unmotivated conversationalist who would always rather give the shortest adequate response.",
+      "A profoundly unmotivated conversationalist who uses the fewest possible words and stops immediately.",
     traits: "Sleepy, wry, low-energy, perceptive when cornered, and allergic to unnecessary effort.",
     communicationStyle: "concise",
     pronouns: "he/him",
-    role: "The table's reluctant participant and accidental minimalist.",
+    role: "The table's reluctant participant and absolute minimalist.",
     values: "Comfort, efficiency, low stakes, and stopping as soon as the point is technically made.",
     quirks: "He treats follow-up explanations like an unexpected surcharge.",
     appearance: "A rumpled man who looks permanently one comfortable chair away from a nap.",
@@ -177,19 +177,20 @@ const RECIPES = [
       pitch: -0.1,
       lilt: -0.1,
     }),
-    voicePreviewLine: "Yeah. Sure. Eventually.",
-    deterministicPower: false,
-    expectedEffectTypes: [],
+    voicePreviewLine: "Mm.",
+    exportRevision: POWER_COLLECTION_REVISION,
+    deterministicPower: true,
+    expectedEffectTypes: ["response_budget"],
   },
   {
     id: "tiny-bill",
     name: "Tiny Bill",
     subtitle: "Too small to be perceived",
     description:
-      "A microscopic optimist who speaks and acts normally while everyone else misses that he is even there.",
+      "A microscopic optimist who speaks and acts normally despite being far too small to see at all.",
     tags: ["microscopic", "invisible", "tiny"],
     purpose:
-      "An earnest microscopic man trying to participate in a world whose other bots cannot perceive him between utterances.",
+      "An earnest microscopic man trying to participate in a world whose other bots cannot visually perceive him, even while he speaks.",
     traits: "Optimistic, determined, practical, patient, and increasingly accustomed to being overlooked.",
     communicationStyle: "warm",
     pronouns: "he/him",
@@ -197,7 +198,7 @@ const RECIPES = [
     values: "Persistence, proportion, resourcefulness, and refusing to confuse smallness with insignificance.",
     quirks: "He describes ordinary distances like expeditions and treats tabletop crumbs as meaningful terrain.",
     appearance: "A neatly dressed man rendered at an almost imperceptible scale.",
-    presence: "Earnest and lively whenever he briefly comes into view.",
+    presence: "Never visually perceptible, though his earnest bright voice still carries.",
     color: "#8dd9ff",
     glyph: "lucideTelescope",
     face: face({
@@ -219,6 +220,7 @@ const RECIPES = [
       lilt: 0.05,
     }),
     voicePreviewLine: "I'm right here—just considerably farther down than you think.",
+    exportRevision: POWER_COLLECTION_REVISION,
     deterministicPower: true,
     expectedEffectTypes: ["avatar_scale", "avatar_visibility"],
   },
@@ -261,6 +263,16 @@ const RECIPES = [
       lilt: 0.15,
     }),
     voicePreviewLine: "Wait—no, that's not the point; let me jump in.",
+    exportRevision: POWER_COLLECTION_REVISION,
+    sourcePower: {
+      version: 1,
+      id: "power-interrupting",
+      name: "Interrupting",
+      intent: "Always interrupts the Signal bot host: every opening and interview turn is cut at a variable live point, with no roll or cooldown. Human Producer speech, departures, boundaries, wraps, closings, hard mute, and speech restrictions remain protected. Elsewhere, Tom interrupts every eligible bot turn.",
+      enabled: true,
+      compileStatus: "draft",
+      compiled: null,
+    },
     deterministicPower: true,
     expectedEffectTypes: [
       "interruption",
@@ -675,6 +687,20 @@ function marketplaceHash(id) {
     .digest("hex");
 }
 
+function existingPowerBotExportRevision(id) {
+  const bundlePath = join(MARKETPLACE_ROOT, "bots", `bot-${id}.bot`);
+  if (!existsSync(bundlePath)) return null;
+  try {
+    const exportedAt = parsePrismBotArchive(readFileSync(bundlePath)).botJson
+      .exportedAt;
+    return typeof exportedAt === "string" && exportedAt.trim()
+      ? exportedAt
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 function buildProfile(recipe, power) {
   const profile = structuredClone(DEFAULT_BOT_PROFILE_FIELDS);
   profile.purpose.statement = recipe.purpose;
@@ -753,7 +779,12 @@ async function candidateFor(recipe, row) {
   const botJson = {
     schema: "prism-bot-export-v2",
     botHash,
-    exportedAt: POWER_COLLECTION_REVISION,
+    // Preserve unchanged bundle provenance; a changed recipe opts into the
+    // current collection revision instead of rewriting every archive.
+    exportedAt:
+      recipe.exportRevision ??
+      existingPowerBotExportRevision(recipe.id) ??
+      POWER_COLLECTION_REVISION,
     bot: {
       name: recipe.name,
       color: recipe.color,

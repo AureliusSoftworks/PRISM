@@ -2342,6 +2342,53 @@ describe("API request integration", () => {
       "The room needs a little more care.",
       now,
     );
+    const interruptedPrimaryText =
+      "I was explaining—... okay, never mind, I guess.";
+    db.prepare(
+      `INSERT INTO botcast_messages
+         (id, user_id, episode_id, speaker_role, bot_id, content, voice_performance_text, created_at)
+       VALUES (?, ?, ?, 'host', ?, ?, NULL, ?)`,
+    ).run(
+      "signal-interrupted-voice-message",
+      userId,
+      onlineEpisodeId,
+      "signal-voice-host",
+      interruptedPrimaryText,
+      now,
+    );
+    db.prepare(
+      `INSERT INTO botcast_events
+         (id, user_id, episode_id, sequence, kind, payload_json, occurred_at)
+       VALUES (?, ?, ?,
+         (SELECT COALESCE(MAX(sequence), 0) + 1 FROM botcast_events
+           WHERE user_id = ? AND episode_id = ?),
+         'listener_reaction', ?, ?)`,
+    ).run(
+      "signal-interrupted-voice-event",
+      userId,
+      onlineEpisodeId,
+      userId,
+      onlineEpisodeId,
+      JSON.stringify({
+        plan: {
+          v: 1,
+          name: "listenerReaction",
+          speakerBotId: "signal-voice-host",
+          listenerBotId: "signal-voice-guest",
+          messageId: "signal-interrupted-voice-message",
+          targetSource: "role",
+          visualAction: "lean_in",
+          spokenCue: "Hold on.",
+          interjectionAttempt: true,
+          interruptedSpeakerCue: "... okay, never mind, I guess.",
+          interruptedSpeakerCuePlayback: "crosstalk",
+          targetProgress: 0.6,
+          seed: "signal-interrupted-voice",
+          cameraCutEligible: true,
+        },
+      }),
+      now,
+    );
 
     // Replaying an ONLINE episode must stay authorized by the saved episode,
     // even after the account's current provider has returned to LOCAL.
@@ -2414,6 +2461,28 @@ describe("API request integration", () => {
       assert.equal(
         providerBody.text,
         "[sighs] Welcome to the difficult part.",
+      );
+      const beforeInterruptedPrimaryCalls = fetchRecorder.calls.length;
+      const interruptedPrimaryVoice = await client.request(
+        "/api/voices/synthesize",
+        jsonInit({
+          signalMessageId: "signal-interrupted-voice-message",
+          mode: "english",
+          engine: "elevenlabs",
+          profile: {
+            ...normalizeBotAudioVoiceProfileV1(undefined),
+            elevenLabsVoiceId: "signal-provider-voice",
+          },
+        }),
+      );
+      assert.equal(interruptedPrimaryVoice.status, 200);
+      const interruptedPrimaryCalls = fetchRecorder.calls.slice(
+        beforeInterruptedPrimaryCalls,
+      );
+      assert.equal(interruptedPrimaryCalls.length, 1);
+      assert.equal(
+        JSON.parse(String(interruptedPrimaryCalls[0]?.init?.body)).text,
+        "I was explaining—",
       );
       const beforeMoodCalls = fetchRecorder.calls.length;
       const onlineMoodVoice = await client.request(
@@ -2732,7 +2801,20 @@ describe("API request integration", () => {
     assert.equal(builtinEnglish.model, "kokoro-82m-q8");
     assert.deepEqual(
       builtinEnglish.pack.map((voice: { name: string }) => voice.name),
-      ["Heart", "Bella", "Michael", "Emma", "George"],
+      [
+        "Heart",
+        "Bella",
+        "Michael",
+        "Emma",
+        "George",
+        "Aoede",
+        "Kore",
+        "Nicole",
+        "Sarah",
+        "Fenrir",
+        "Puck",
+        "Fable",
+      ],
     );
     const enableSystemVoices = await client.request(
       "/api/settings",

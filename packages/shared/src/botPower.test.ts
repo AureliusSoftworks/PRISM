@@ -13,6 +13,8 @@ import {
   botPowerAddressedFandomCueV1,
   botPowerAvatarScaleModeFromEffectsV1,
   botPowerAvatarScaleModeV1,
+  botPowerAvatarVisibilityModeFromEffectsV1,
+  botPowerAvatarVisibilityModeV1,
   botPowerDeterministicHalfChanceV1,
   botPowerCupRateMultiplierForBotV1,
   botPowerCandorTriggerV1,
@@ -256,7 +258,7 @@ test("mumbling is a normal-volume hard speech transform that preserves only phys
   assert.equal(botPowerTextScaleV1(powers), 1);
 });
 
-test("loud voice presence overrides smaller and speaking-only invisible presentation", () => {
+test("voice presence does not override physical size or visibility presentation", () => {
   const name = "Loud";
   const intent = "A loud voice that cannot be overlooked.";
   const powers = [{
@@ -282,8 +284,9 @@ test("loud voice presence overrides smaller and speaking-only invisible presenta
   assert.equal(botPowerVoicePresenceModeV1(powers), "loud");
   assert.equal(botPowerVoiceGainMultiplierV1(powers), 1.18);
   assert.equal(botPowerTextScaleV1(powers), 1.12);
-  assert.equal(botPowerAvatarScaleModeV1(powers), null);
-  assert.equal(botPowerHasSpeakingOnlyAvatarVisibilityV1(powers), false);
+  assert.equal(botPowerAvatarScaleModeV1(powers), "smaller");
+  assert.equal(botPowerAvatarVisibilityModeV1(powers), "speaking_only");
+  assert.equal(botPowerHasSpeakingOnlyAvatarVisibilityV1(powers), true);
 });
 
 test("quiet turns use one replay-stable half chance and retain their mood penalty", () => {
@@ -832,6 +835,93 @@ test("ghost avatar visibility is bounded and activates only from a Ready Power",
   }];
   assert.equal(botPowerHasSpeakingOnlyAvatarVisibilityV1(powers), true);
   assert.equal(botPowerHasSpeakingOnlyAvatarVisibilityV1([{ ...powers[0], enabled: false }]), false);
+});
+
+test("avatar visibility distinguishes hidden, speaking-only, and translucent states", () => {
+  assert.deepEqual(
+    normalizeBotPowerEffectV1({ type: "avatar_visibility", mode: "hidden" }),
+    { type: "avatar_visibility", mode: "hidden" },
+  );
+  assert.deepEqual(
+    normalizeBotPowerEffectV1({ type: "avatar_visibility", mode: "translucent" }),
+    { type: "avatar_visibility", mode: "translucent" },
+  );
+  assert.equal(
+    botPowerAvatarVisibilityModeFromEffectsV1([
+      { type: "avatar_visibility", mode: "translucent" },
+      { type: "avatar_visibility", mode: "speaking_only" },
+      { type: "avatar_visibility", mode: "hidden" },
+    ]),
+    "hidden",
+  );
+});
+
+test("legacy Microscopic and Invisible presentations upgrade without a recompile", () => {
+  const legacyPower = (name: "Microscopic" | "Invisible") => {
+    const intent = `${name} presentation.`;
+    return normalizeBotPowersV1([{
+      version: 1,
+      id: name.toLowerCase(),
+      name,
+      intent,
+      enabled: true,
+      compileStatus: "ready",
+      compiled: {
+        version: 1,
+        sourceHash: botPowerSourceHashV1(name, intent),
+        selfCue: "Fade in to speak.",
+        observerCue: "Appears while speaking.",
+        effects: [
+          { type: "avatar_scale", mode: "smaller" },
+          { type: "avatar_visibility", mode: "speaking_only" },
+        ],
+        ruleLabels: ["Smaller avatar", "Appears only while speaking"],
+      },
+    }]);
+  };
+
+  assert.equal(botPowerAvatarVisibilityModeV1(legacyPower("Microscopic")), "hidden");
+  assert.equal(botPowerAvatarVisibilityModeV1(legacyPower("Invisible")), "translucent");
+  assert.match(
+    legacyPower("Microscopic")[0]?.compiled?.selfCue ?? "",
+    /at any time/u,
+  );
+});
+
+test("legacy Lazy Cameron Powers gain a hard minimal response budget without a recompile", () => {
+  const name = "Lazy";
+  const intent = "Barely wants to do anything, including explain things.";
+  const powers = normalizeBotPowersV1([{
+    version: 1,
+    id: "lazy-cameron",
+    name,
+    intent,
+    enabled: true,
+    compileStatus: "ready",
+    compiled: {
+      version: 1,
+      sourceHash: botPowerSourceHashV1(name, intent),
+      selfCue: "Doesn't want to explain much.",
+      observerCue: "Reluctant to elaborate, often.",
+      effects: [],
+      ruleLabels: ["Minimal Response", "Avoids Detail"],
+    },
+  }]);
+
+  assert.deepEqual(strongestHardBotPowerResponseBudgetEffectV1(powers), {
+    type: "response_budget",
+    mode: "minimal",
+    enforcement: "hard",
+  });
+  assert.match(powers[0]?.compiled?.selfCue ?? "", /fewest possible words/u);
+  assert.equal(
+    applyBotPowerResponseBudgetV1(
+      "Mm. It's strategy when you cut effort but still hit the target.",
+      strongestHardBotPowerResponseBudgetEffectV1(powers),
+      1,
+    ),
+    "Mm.",
+  );
 });
 
 test("avatar scale effects normalize safely and smaller wins without stacking", () => {

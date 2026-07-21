@@ -156,6 +156,14 @@ describe("engine-agnostic voice effects", () => {
     assert.match(reactionSource, /channel: args\.channel \?\? "reaction"/u);
     assert.match(reactionSource, /maxDurationMs: args\.plan\.interjectionAttempt \? 1_300 : 900/u);
     assert.match(reactionSource, /args\.plan\.vocalFoley && args\.mode !== "english"/u);
+    assert.match(
+      reactionSource,
+      /INTERRUPTED_SPEAKER_RETORT_PAUSE_MS = 850/u,
+    );
+    assert.match(
+      reactionSource,
+      /waitForReactionVoiceStart\(args\.startDelayMs \?\? 0, args\.signal\)/u,
+    );
     assert.match(pageSource, /listenerReactionHasAudio\(plan\)/u);
     assert.match(pageSource, /listenerReactionFoley: args\.plan\.vocalFoley/u);
     assert.match(

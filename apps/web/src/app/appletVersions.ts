@@ -40,6 +40,7 @@ export type BotPowerGhostModePolicy =
   | "irrelevant"
   | "deferred";
 export type BotPowerAvatarScaleModePolicy = BotPowerGhostModePolicy;
+export type BotPowerAvatarVisibilityModePolicy = BotPowerGhostModePolicy;
 export type BotPowerVoicePresenceModePolicy = BotPowerGhostModePolicy;
 export type BotPowerSpeechObfuscationModePolicy = BotPowerGhostModePolicy;
 export type BotPowerAddressedFandomModePolicy = BotPowerGhostModePolicy;
@@ -64,13 +65,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   chat: {
     id: "chat",
     name: "Chat",
-    version: "1.19",
+    version: "1.21",
     status: "active",
   },
   zen: {
     id: "zen",
     name: "Zen",
-    version: "1.18",
+    version: "1.20",
     status: "active",
   },
   arena: {
@@ -88,13 +89,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   coffee: {
     id: "coffee",
     name: "Coffee",
-    version: "2.15",
+    version: "2.18",
     status: "active",
   },
   botcast: {
     id: "botcast",
     name: "Signal",
-    version: "1.23",
+    version: "1.29",
     status: "active",
   },
   feed: {
@@ -112,7 +113,7 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   story: {
     id: "story",
     name: "Story",
-    version: "0.17",
+    version: "0.19",
     status: "preview",
   },
   gym: {
@@ -317,6 +318,26 @@ export const BOT_POWER_HEARING_REPEAT_MODE_POLICY: Record<
 
 /** Exhaustive ghost-Power policy: live avatars reveal only for speech. */
 export const BOT_POWER_GHOST_MODE_POLICY: Record<PrismAppletId, BotPowerGhostModePolicy> = {
+  chat: "direct",
+  zen: "direct",
+  arena: "deferred",
+  polling: "deferred",
+  coffee: "direct",
+  botcast: "direct",
+  feed: "deferred",
+  games: "deferred",
+  story: "adapted",
+  gym: "deferred",
+  slate: "irrelevant",
+  pseudo: "deferred",
+  surf: "deferred",
+};
+
+/** Exhaustive visibility-Power policy: hidden and translucent are stable embodied states. */
+export const BOT_POWER_AVATAR_VISIBILITY_MODE_POLICY: Record<
+  PrismAppletId,
+  BotPowerAvatarVisibilityModePolicy
+> = {
   chat: "direct",
   zen: "direct",
   arena: "deferred",

@@ -24,11 +24,11 @@ ship as `0.5.2` while Coffee is `v0.7` and Story is `v0.1`.
 
 | Applet | Version | Status | Notes |
 | --- | --- | --- | --- |
-| Chat | v1.19 | Active | Full playground for bots, providers, models, images, exports, memory-aware conversations, five-choice English/Premium voice switching, sparse shared mic presence, and ready Powers including rolling one-to-four-message short-term amnesia, one-opening copy behavior, engine-bounded response budgets, relative avatar size, loud/quiet presence, speech obfuscation, current-addressee fandom, and cue-only radiant joy or reactive gloom. |
-| Zen | v1.18 | Active | Calm one-to-one continuity surface with five-choice English/Premium voice switching, mic presence, and ready Powers including rolling one-to-four-message short-term amnesia, one-opening copy behavior, engine-bounded response budgets, relative avatar size, loud/quiet presence, speech obfuscation, current-addressee fandom, and cue-only radiant joy or reactive gloom; the standalone Zen lane is deprecating as this becomes Prism's default state. |
-| Coffee | v2.15 | Active | Multi-bot group table with Coffee Groups, live and replay-safe English/Premium switching, model-aware session holds, pacing, cups, transcripts, living atmosphere, rolling one-to-four-message short-term amnesia with accumulating peer agitation, one-opening copy behavior, Power-driven bot-to-bot cut-ins including guaranteed early-to-late interruptions, public-only gibberish context, player/peer-focused fandom, replay-safe bot-only identity mirroring, persisted recipient mood boosts, and direct-addresser mood drains. |
-| Signal | v1.23 | Active | Bot-owned anthology interviews with next-utterance English/Premium switching, audience-projected transcript, voice, replay, and reviews; rolling one-to-four-message short-term amnesia with persisted peer pressure; one-opening copy behavior; replay-safe probabilistic or guaranteed early-to-late interruption, speech obfuscation, bot-only identity mirroring, recipient mood boosts, and direct-addresser mood drains; and peer/audience-focused fandom. |
-| Story | v0.17 | Preview | Generated visual-novel episodes with bots, choices, maps, inventory, transcripts, shared PRISM menu behavior, scene-local rolling short-term amnesia, one-opening copy behavior, replay-stable probabilistic or guaranteed interruption, scene-safe speech obfuscation, scene-focus fandom, and cue-only personality-shaped uplift or drag. |
+| Chat | v1.21 | Active | Full playground for bots, providers, models, images, exports, memory-aware conversations, five-choice English/Premium voice switching, sparse shared mic presence, and ready Powers including rolling one-to-four-message short-term amnesia, one-opening copy behavior, engine-bounded response budgets, distinct relative size and visibility states, loud/quiet presence, speech obfuscation, current-addressee fandom, and cue-only radiant joy or reactive gloom. |
+| Zen | v1.20 | Active | Calm one-to-one continuity surface with five-choice English/Premium voice switching, mic presence, and ready Powers including rolling one-to-four-message short-term amnesia, one-opening copy behavior, engine-bounded response budgets, distinct relative size and visibility states, loud/quiet presence, speech obfuscation, current-addressee fandom, and cue-only radiant joy or reactive gloom; the standalone Zen lane is deprecating as this becomes Prism's default state. |
+| Coffee | v2.18 | Active | Multi-bot group table with Coffee Groups, live and replay-safe English/Premium switching, model-aware session holds, pacing, cups, transcripts, living atmosphere, distinct replay-safe physical presentation states, rolling one-to-four-message short-term amnesia with accumulating peer agitation, one-opening copy behavior, Power-driven bot-to-bot cut-ins including guaranteed early-to-late interruptions, public-only gibberish context, player/peer-focused fandom, replay-safe bot-only identity mirroring, persisted recipient mood boosts, and direct-addresser mood drains. |
+| Signal | v1.29 | Active | Bot-owned anthology interviews with progress-aware Auto completion, progressively streamed live captions, distinct replay-safe physical presentation states, next-utterance English/Premium switching, audience-projected transcript, voice, replay, and reviews; rolling one-to-four-message short-term amnesia with persisted peer pressure; one-opening copy behavior; replay-safe probabilistic or guaranteed early-to-late interruption, speech obfuscation, bot-only identity mirroring, recipient mood boosts, and direct-addresser mood drains; and peer/audience-focused fandom. |
+| Story | v0.19 | Preview | Generated visual-novel episodes with bots, choices, maps, inventory, transcripts, shared PRISM menu behavior, adapted physical presentation states, scene-local rolling short-term amnesia, one-opening copy behavior, replay-stable probabilistic or guaranteed interruption, scene-safe speech obfuscation, scene-focus fandom, and cue-only personality-shaped uplift or drag. |
 | Arena | v0.0 | Planned | Moderated bot debate surface. |
 | Polling | v0.0 | Planned | AI-powered polling across bot groups. |
 | Feed | v0.0 | Planned | BotBook-style social feed. |
@@ -72,6 +72,48 @@ stages do not block the standalone preview.
 ## Changelog
 
 ### 2026-07-21
+
+- Bumped `Chat` to `v1.21`, `Zen` to `v1.20`, `Coffee` to `v2.18`, `Signal`
+  to `v1.29`, and `Story` to `v0.19` so Lazy Cameron's legacy `Lazy` Power
+  means the fewest possible words everywhere. Existing Library copies migrate
+  to a hard minimal response budget, and the refreshed Marketplace bot carries
+  that deterministic rule.
+
+- Bumped `Coffee` to `v2.17` and `Signal` to `v1.28` so Identity Crisis Ian
+  treats a natural, unambiguous short-name vocative such as “Ian” as a real
+  bot address. The resulting replay event now activates the copied CRT face,
+  and saved JSON voice profiles resolve to the target bot's actual voice
+  instead of silently falling back to Voice 1. Ambiguous aliases, player
+  speech, muted speech, and inaudible speech remain excluded.
+
+- Bumped `Signal` to `v1.27` so Auto requires real interview progress before a
+  natural close. Repeat requests and tiny fragments no longer let a low-word
+  transcript masquerade as a settled conversation, so the host follows the
+  first substantive answer instead of immediately wrapping. Signal Review now
+  identifies Producer-guest turns as human-authored rather than unknown model
+  traffic. Producer typing pauses persist and replay at half wall duration.
+
+- Bumped `Chat` to `v1.20`, `Zen` to `v1.19`, `Coffee` to `v2.16`, `Signal`
+  to `v1.26`, and `Story` to `v0.18` to separate physical presentation
+  Powers. Small changes only avatar scale, Microscopic remains fully unseen
+  even while speaking, Invisible remains continuously half-translucent, and
+  Ghost alone uses the speaking-only reveal. Loud no longer cancels size or
+  visibility; Coffee and Signal freeze these states for replay.
+
+- Bumped `Signal` to `v1.25` to restore captions to live sessions without
+  bringing the full transcript back on screen. Only the active line appears in
+  a compact lower-third after a half-second presentation delay, and it clears
+  when that line ends. Audience-hidden or hard-silent turns stay absent. Audio,
+  episode pacing, interruption behavior, persistence, and replay remain
+  unchanged; replay keeps the complete authoritative transcript.
+
+- Bumped `Signal` to `v1.24` so an always-on interruptive bot guest cuts
+  every ordinary bot-host opening and interview turn, including
+  producer-directed turns and turns under elevated tension. The cutoff still
+  lands at a replay-stable variable point, while human Producer speech,
+  departures, boundaries, wraps, closings, hard mute, and speech restrictions
+  remain protected. Interrupting Tom's Marketplace Power now carries this
+  exact contract instead of relying on a legacy Library snapshot.
 
 - Bumped `Coffee` to `v2.15`, `Signal` to `v1.23`, and `Story` to `v0.17`
   for unconditional interruption Powers. A Power explicitly authored to

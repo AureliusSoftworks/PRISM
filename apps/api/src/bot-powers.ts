@@ -741,6 +741,43 @@ function deterministicGhostPower(
   };
 }
 
+function deterministicInvisiblePower(
+  source: BotPowerV1,
+  botName: string,
+): CompiledBotPowerV1 | null {
+  const name = compact(source.name, 120).toLowerCase();
+  const intent = compact(source.intent, 500).toLowerCase();
+  const text = `${name} ${intent}`;
+  if (/\bmicroscopic\b/u.test(text)) return null;
+  if (requiredHardAudienceEffect(source.intent)) return null;
+  if (
+    /\bonly\b[\s\S]{0,80}\b(?:see|sees|visible)\b/u.test(intent) ||
+    /\b(?:visible|invisible|unseen)\s+to\b/u.test(intent) ||
+    /\bexcept\b/u.test(intent)
+  ) {
+    return null;
+  }
+  const namedInvisible = /^(?:invisible|unseen)$/u.test(name);
+  const invisible =
+    namedInvisible ||
+    /\b(?:half[- ]visible|half[- ]translucent|50\s*%\s*(?:opacity|transparent|translucent|visible))\b/u.test(intent) ||
+    /\b(?:avatar|body|physical form)\b[\s\S]{0,50}\b(?:continuously|always)\s+(?:invisible|translucent|transparent)\b/u.test(intent);
+  const speakingReveal =
+    /\b(?:while|when|only)\s+(?:talking|speaking)\b/u.test(intent) ||
+    /\b(?:fade|appear|reveal)[\s\S]{0,50}\b(?:talk|speak|utter)/u.test(intent);
+  if (!invisible || (!namedInvisible && speakingReveal)) return null;
+  const subject = compact(botName, 100) || "This bot";
+  return {
+    version: BOT_POWER_VERSION,
+    sourceHash: botPowerSourceHashV1(source.name, source.intent),
+    selfCue:
+      "You remain continuously half-translucent. Speaking does not make you more visible.",
+    observerCue: `${subject} remains continuously half-translucent, including while speaking.`,
+    effects: [{ type: "avatar_visibility", mode: "translucent" }],
+    ruleLabels: ["Half-translucent avatar"],
+  };
+}
+
 function deterministicAvatarScalePower(
   source: BotPowerV1,
   botName: string,
@@ -782,29 +819,28 @@ function deterministicAvatarScalePower(
 
   const mode = smaller ? "smaller" as const : "larger" as const;
   const subject = compact(botName, 100) || "This bot";
-  const speakingOnlyVisibility = microscopic;
   return {
     version: BOT_POWER_VERSION,
     sourceHash: botPowerSourceHashV1(source.name, source.intent),
     selfCue: microscopic
-      ? "You are microscopic and unseen while idle. Fade into view only while delivering an utterance, then vanish again."
+      ? "You are microscopic: too small to be visually perceived at any time, though your voice can still be heard."
       : mode === "smaller"
         ? "Your physical form is noticeably smaller than the other bots."
         : "Your physical form is noticeably larger than the other bots.",
     observerCue: microscopic
-      ? `${subject} is microscopic and unseen between utterances, appearing briefly only while speaking.`
+      ? `${subject} is microscopic and cannot be visually perceived, even while speaking; their voice can still be heard.`
       : mode === "smaller"
         ? `${subject} is noticeably smaller than the other bots.`
         : `${subject} is noticeably larger than the other bots.`,
     effects: [
       { type: "avatar_scale", mode },
-      ...(speakingOnlyVisibility
-        ? [{ type: "avatar_visibility" as const, mode: "speaking_only" as const }]
+      ...(microscopic
+        ? [{ type: "avatar_visibility" as const, mode: "hidden" as const }]
         : []),
     ],
     ruleLabels: [
       mode === "smaller" ? "Smaller avatar" : "Larger avatar",
-      ...(speakingOnlyVisibility ? ["Appears only while speaking"] : []),
+      ...(microscopic ? ["Hidden while microscopic"] : []),
     ],
   };
 }
@@ -881,10 +917,11 @@ function deterministicResponseBudgetPower(
   source: BotPowerV1,
   botName: string,
 ): CompiledBotPowerV1 | null {
+  const powerName = compact(source.name, 120).toLowerCase();
   const text = compact(`${source.name} ${source.intent}`, 560)
     .toLowerCase()
     .replace(/[’]/gu, "'");
-  const minimal = [
+  const minimal = powerName === "lazy" || [
     /\bbare\s+minimum\b/u,
     /\bfewest\s+(?:possible\s+)?words\b/u,
     /\b(?:one|single)[- ](?:word|sentence)\s+(?:answers?|replies?|responses?)\b/u,
@@ -904,7 +941,7 @@ function deterministicResponseBudgetPower(
   ].some((pattern) => pattern.test(text));
   if (!minimal && !brief && !expansive) return null;
   const mode = minimal ? "minimal" as const : expansive ? "expansive" as const : "brief" as const;
-  const hardLanguage = [
+  const hardLanguage = powerName === "lazy" || [
     /\b(?:always|never|must|cannot|can't|won't|does\s+not|doesn't|only)\b/u,
     /\bbare\s+minimum\b/u,
     /\bfewest\s+(?:possible\s+)?words\b/u,
@@ -914,7 +951,7 @@ function deterministicResponseBudgetPower(
   const subject = compact(botName, 100) || "This bot";
   const selfCue = mode === "minimal"
     ? enforcement === "hard"
-      ? "Answer with the bare minimum. Use one short sentence and never elaborate unless the requested format requires structure."
+      ? "Use the fewest possible words. Prefer a fragment; at most, use one short sentence. Never explain, elaborate, add examples, ask a follow-up, or pad the answer."
       : "Prefer the fewest useful words and avoid elaborating unless it is necessary."
     : mode === "brief"
       ? enforcement === "hard"
@@ -933,7 +970,7 @@ function deterministicResponseBudgetPower(
     effects: [{ type: "response_budget", mode, enforcement }],
     ruleLabels: [
       mode === "minimal"
-        ? enforcement === "hard" ? "One-sentence maximum" : "Prefers minimal answers"
+        ? enforcement === "hard" ? "Bare-minimum replies" : "Prefers minimal answers"
         : mode === "brief"
           ? enforcement === "hard" ? "Two-sentence maximum" : "Prefers brief answers"
           : "Prefers expansive answers",
@@ -980,6 +1017,7 @@ function deterministicPower(
     deterministicInterruptionPower(source, botName) ??
     deterministicAddressedFandomPower(source, botName) ??
     deterministicGhostPower(source, botName) ??
+    deterministicInvisiblePower(source, botName) ??
     deterministicHardAudiencePower(source, botName) ??
     deterministicCandorPower(source, botName) ??
     deterministicIntimidationPower(source, botName) ??
@@ -1036,11 +1074,13 @@ function compiledEntrySatisfiesIntent(
   compiled: CompiledBotPowerV1,
   source: BotPowerV1
 ): boolean {
-  const requiredAvatarEffects = deterministicAvatarScalePower(source, "")
-    ?.effects.filter(
-      (effect) =>
-        effect.type === "avatar_scale" || effect.type === "avatar_visibility",
-    ) ?? [];
+  const requiredAvatarEffects = [
+    ...(deterministicAvatarScalePower(source, "")?.effects ?? []),
+    ...(deterministicInvisiblePower(source, "")?.effects ?? []),
+  ].filter(
+    (effect) =>
+      effect.type === "avatar_scale" || effect.type === "avatar_visibility",
+  );
   if (
     requiredAvatarEffects.some(
       (required) =>
@@ -1097,6 +1137,12 @@ function compiledEntrySatisfiesIntent(
     return compiled.effects.some(
       (effect) =>
         effect.type === "avatar_visibility" && effect.mode === "speaking_only",
+    );
+  }
+  if (deterministicInvisiblePower(source, "")) {
+    return compiled.effects.some(
+      (effect) =>
+        effect.type === "avatar_visibility" && effect.mode === "translucent",
     );
   }
   const requiredResponseBudget = deterministicResponseBudgetPower(source, "")
@@ -1258,6 +1304,9 @@ function compileFailureMessage(power: BotPowerV1, provider: LlmProvider): string
   if (deterministicGhostPower(power, "")) {
     return `Local power compilation failed: invalid compiler output; required speaking-only avatar rule missing. ${compilerDiagnosticContext(provider)}; describe the ghost's idle invisibility and speaking reveal, then retry.`;
   }
+  if (deterministicInvisiblePower(power, "")) {
+    return `Local power compilation failed: invalid compiler output; required translucent-avatar rule missing. ${compilerDiagnosticContext(provider)}; describe the continuous invisibility clearly, then retry.`;
+  }
   const required = requiredHardAudienceEffect(power.intent);
   const context = compilerDiagnosticContext(provider);
   if (required === "awareness") {
@@ -1320,7 +1369,7 @@ export async function compileBotPowers(args: {
         '- {"type":"hearing_repeat","frequency":"occasional|frequent","moodPenalty":"small|medium|large"},',
         '- {"type":"awareness","allowed":[target...]},',
         '- {"type":"speech_audience","allowed":[target...]},',
-        '- {"type":"avatar_visibility","mode":"speaking_only"},',
+        '- {"type":"avatar_visibility","mode":"speaking_only|hidden|translucent"},',
         '- {"type":"avatar_scale","mode":"larger|smaller"},',
         '- {"type":"voice_presence","mode":"loud|quiet"},',
         '- {"type":"speech_obfuscation","mode":"gibberish"},',

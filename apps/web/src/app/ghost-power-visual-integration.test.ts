@@ -20,7 +20,7 @@ describe("ghost Power live-avatar contract", () => {
   it("hides Chat and Zen avatars until their own talking state is active", () => {
     assert.match(
       pageSource,
-      /data-ghostly-presence=\{[\s\S]{0,160}botPowerHasSpeakingOnlyAvatarVisibilityV1\(bot\.powers\)/u,
+      /data-ghostly-presence=\{[\s\S]{0,180}botPowerAvatarVisibilityModeV1\(bot\.powers\) === "speaking_only"/u,
     );
     assert.match(
       pageCss,
@@ -35,7 +35,7 @@ describe("ghost Power live-avatar contract", () => {
   it("uses the frozen Coffee plan and the active table speaker for the reveal", () => {
     assert.match(
       pageSource,
-      /const seatGhostlyPresence\s*=\s*coffeePowerPlan[\s\S]{0,160}botPowerHasSpeakingOnlyAvatarVisibilityFromEffectsV1\([\s\S]{0,100}coffeePowerPlan\.bots\[bot\.id\]\?\.effects/u,
+      /const seatAvatarVisibilityMode\s*=\s*coffeePowerPlan[\s\S]{0,180}botPowerAvatarVisibilityModeFromEffectsV1\([\s\S]{0,100}coffeePowerPlan\.bots\[bot\.id\]\?\.effects/u,
     );
     assert.match(
       pageSource,
@@ -54,7 +54,7 @@ describe("ghost Power live-avatar contract", () => {
   it("uses the recorded Signal snapshot during replay and fades only the speaker in", () => {
     assert.match(
       signalSource,
-      /botcastSnapshotHasSpeakingOnlyAvatarVisibility\([\s\S]{0,100}args\.currentEpisode/u,
+      /const roleAvatarVisibilityMode[\s\S]{0,300}botcastSnapshotPowersForRoleV1\([\s\S]{0,180}snapshot !== null[\s\S]{0,120}botPowerAvatarVisibilityModeV1\(snapshot\)/u,
     );
     assert.match(signalSource, /data-talking=\{[\s\S]{0,80}roleIsSpeaking/u);
     assert.match(
