@@ -4520,7 +4520,9 @@ test.describe("PRISM desktop smoke", () => {
       page.getByRole("button", { name: /^Avatar Studio/ }),
     );
 
-    const studio = page.getByRole("dialog", { name: "Test Bot 1" });
+    const studio = page.locator(
+      'section[role="dialog"][aria-labelledby="bot-avatar-customizer-title"]',
+    );
     await expect(studio).toBeVisible();
     await expect(
       studio.locator('[data-avatar-details-mask="true"]'),
@@ -4627,7 +4629,9 @@ test.describe("PRISM desktop smoke", () => {
       page.getByRole("button", { name: /^Avatar Studio/ }),
     );
 
-    const studio = page.getByRole("dialog", { name: "Test Bot 1" });
+    const studio = page.locator(
+      'section[role="dialog"][aria-labelledby="bot-avatar-customizer-title"]',
+    );
     await expect(studio).toBeVisible();
     await studio.getByRole("tab", { name: "Voice" }).click({ force: true });
 
