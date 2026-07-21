@@ -18,6 +18,16 @@ rm -rf runtime/apps/web/.next/standalone/node_modules/@img/sharp-linuxmusl-x64
 rm -rf runtime/node_modules/@img/sharp-libvips-linuxmusl-x64
 rm -rf runtime/node_modules/@img/sharp-linuxmusl-x64
 
+# onnxruntime-node ships optional GPU execution providers alongside the CPU
+# runtime. linuxdeploy treats those optional libraries as required ELF inputs
+# and fails on clean CI runners that do not have CUDA/ROCm installed.
+echo "Pruning optional GPU providers from staged ONNX runtime..."
+find runtime -type f \(
+  -name "libonnxruntime_providers_cuda.so" -o
+  -name "libonnxruntime_providers_tensorrt.so" -o
+  -name "libonnxruntime_providers_rocm.so"
+\) -print -delete
+
 echo "Building Tauri Linux bundle..."
 # Keep AppImage packaging resilient in CI and emit detailed linuxdeploy diagnostics.
 export APPIMAGE_EXTRACT_AND_RUN="${APPIMAGE_EXTRACT_AND_RUN:-1}"
