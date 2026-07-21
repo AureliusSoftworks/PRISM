@@ -144,15 +144,17 @@
 .preRollMeters i:nth-child(2n) { animation-delay: -180ms; }.preRollMeters i:nth-child(3n) { animation-delay: -390ms; }.preRollMeters i:nth-child(5n) { animation-delay: -610ms; }
 .episodeOutro .preRollSignalField { opacity: .32; }
 .episodeOutro { position: fixed; inset: 66px 0 0 286px; width: auto; height: auto; min-height: 0; contain: layout paint; background: var(--botcast-curtain); opacity: 0; animation: signalOutroCurtainIn 760ms cubic-bezier(.4,0,.2,1) both; }
-.episodeOutro .preRollLockup, .episodeOutro .preRollSignalField, .episodeOutro > button { transition: opacity 520ms ease, transform 520ms cubic-bezier(.2,.72,.18,1); }
-.episodeOutro[data-phase="curtain"] .preRollLockup, .episodeOutro[data-phase="curtain"] .preRollSignalField, .episodeOutro[data-phase="curtain"] > button { opacity: 0; pointer-events: none; }
+.episodeOutro .preRollLockup, .episodeOutro .preRollSignalField, .episodeOutroActions { transition: opacity 520ms ease, transform 520ms cubic-bezier(.2,.72,.18,1); }
+.episodeOutro[data-phase="curtain"] .preRollLockup, .episodeOutro[data-phase="curtain"] .preRollSignalField, .episodeOutro[data-phase="curtain"] .episodeOutroActions { opacity: 0; pointer-events: none; }
 .episodeOutro[data-phase="curtain"] .preRollLockup { transform: translateY(8px) scale(.985); }
 .episodeOutro .preRollLogo { width: 118px; height: 118px; }
 .episodeOutro .preRollLogo .showLogo { width: 94px; border-radius: 24px; }
 .episodeOutro .preRollLockup h1 { margin-top: 14px; font-size: clamp(1.8rem, 4vw, 3.6rem); }
 .episodeOutro .preRollLockup small { margin-top: 18px; letter-spacing: .24em; text-transform: uppercase; }
-.episodeOutro > .episodeReviewCopyButton { right: 166px; }
-.episodeOutro[data-phase="complete"] > button { border-color: color-mix(in srgb, var(--botcast-accent) 62%, rgba(255,255,255,.28)); color: #fff; background: color-mix(in srgb, var(--botcast-accent) 18%, rgba(255,255,255,.07)); }
+.episodeOutroActions { position: absolute; top: 24px; right: 28px; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.episodeOutroActions button { border: 1px solid rgba(255,255,255,.19); border-radius: 999px; padding: 8px 12px; color: rgba(255,255,255,.72); background: rgba(255,255,255,.055); font: 700 .68rem/1 system-ui; cursor: pointer; backdrop-filter: blur(12px); }
+.episodeOutroActions button:hover { color: #fff; border-color: rgba(255,255,255,.38); background: rgba(255,255,255,.1); }
+.episodeOutro[data-phase="complete"] .episodeOutroActions button { border-color: color-mix(in srgb, var(--botcast-accent) 62%, rgba(255,255,255,.28)); color: #fff; background: color-mix(in srgb, var(--botcast-accent) 18%, rgba(255,255,255,.07)); }
 @keyframes signalPreRollRing { 0% { opacity: 0; transform: translate(-50%, -50%) scale(.18); } 22% { opacity: .8; } 100% { opacity: 0; transform: translate(-50%, -50%) scale(1); } }
 @keyframes signalIntroCurtainOut { from { opacity: 1; } to { opacity: 0; } }
 @keyframes signalOutroCurtainIn { from { opacity: 0; } to { opacity: 1; } }
@@ -436,10 +438,8 @@
 .archiveHeading::before { position: absolute; top: 1px; bottom: 0; left: 0; width: 3px; border-radius: 999px; content: ""; background: linear-gradient(180deg, var(--botcast-host-accent), color-mix(in srgb, var(--botcast-host-accent) 18%, transparent)); box-shadow: 0 0 14px color-mix(in srgb, var(--botcast-host-accent) 24%, transparent); }
 .episodeGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-top: 16px; }
 .episodeCard { position: relative; min-width: 0; }
-.episodeOpenButton { width: 100%; display: grid; gap: 8px; min-height: 150px; text-align: left; border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 13%, var(--botcast-line)); border-radius: 15px; padding: 17px 72px 17px 17px; color: inherit; background: linear-gradient(145deg, color-mix(in srgb, var(--botcast-host-accent) 4%, var(--botcast-soft-panel)), var(--botcast-soft-panel)); cursor: pointer; box-shadow: 0 16px 40px transparent; transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease; }
+.episodeOpenButton { width: 100%; display: grid; gap: 8px; min-height: 150px; text-align: left; border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 13%, var(--botcast-line)); border-radius: 15px; padding: 17px; color: inherit; background: linear-gradient(145deg, color-mix(in srgb, var(--botcast-host-accent) 4%, var(--botcast-soft-panel)), var(--botcast-soft-panel)); cursor: pointer; box-shadow: 0 16px 40px transparent; transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease; }
 .episodeOpenButton:hover { border-color: color-mix(in srgb, var(--botcast-host-accent) 46%, var(--botcast-line)); transform: translateY(-2px); box-shadow: 0 18px 38px var(--botcast-shadow), 0 0 26px color-mix(in srgb, var(--botcast-host-accent) 9%, transparent); }
-.episodeDeleteButton { position: absolute; top: 11px; right: 11px; z-index: 2; border: 1px solid color-mix(in srgb, var(--prism-p) 22%, var(--botcast-line)); border-radius: 999px; padding: 6px 8px; color: color-mix(in srgb, var(--prism-p) 70%, var(--botcast-ink)); background: color-mix(in srgb, var(--botcast-panel) 88%, transparent); font: 700 .62rem/1 system-ui; cursor: pointer; opacity: .72; transition: opacity 160ms ease, border-color 160ms ease, background 160ms ease; }
-.episodeCard:hover .episodeDeleteButton, .episodeDeleteButton:focus-visible { opacity: 1; border-color: color-mix(in srgb, var(--prism-p) 46%, var(--botcast-line)); background: color-mix(in srgb, var(--prism-p) 10%, var(--botcast-panel)); }
 .episodeGrid span, .episodeGrid small { color: var(--botcast-muted); }
 .episodeNumber { color: var(--botcast-host-accent) !important; font: 750 .66rem/1 system-ui; letter-spacing: .12em; }
 
@@ -501,8 +501,12 @@
 .studioSpotlightPool { position: absolute; left: 50%; bottom: -1%; width: 98%; height: 12%; transform: translateX(-50%); border-radius: 50%; background: radial-gradient(ellipse, rgba(255,241,198,.22), color-mix(in srgb, var(--botcast-studio-accent) 8%, transparent) 48%, transparent 73%); filter: blur(11px); mix-blend-mode: screen; opacity: .58; }
 .wordmark { position: absolute; top: 8%; left: 50%; z-index: 2; isolation: isolate; display: grid; justify-items: center; gap: 7px; transform: translateX(-50%); color: #f8fbff; text-align: center; text-shadow: 0 3px 18px rgba(0,0,0,.96); }
 .wordmark::before { position: absolute; inset: -18px -36px -16px; z-index: -1; border-radius: 50%; content: ""; background: radial-gradient(ellipse at center, rgba(2,4,10,.76) 0%, rgba(2,4,10,.52) 46%, rgba(2,4,10,0) 76%); filter: blur(10px); pointer-events: none; }
-.wordmark strong { max-width: 400px; color: #f8fbff; font: 800 clamp(.8rem, 2vw, 1.45rem)/1.05 system-ui; letter-spacing: .04em; text-shadow: 0 2px 3px rgba(0,0,0,.98), 0 0 18px rgba(0,0,0,.9), 0 0 42px rgba(0,0,0,.76); -webkit-text-stroke: .35px rgba(255,255,255,.26); }
+.wordmark > strong { max-width: 400px; color: #f8fbff; font: 800 clamp(.8rem, 2vw, 1.45rem)/1.05 system-ui; letter-spacing: .04em; text-shadow: 0 2px 3px rgba(0,0,0,.98), 0 0 18px rgba(0,0,0,.9), 0 0 42px rgba(0,0,0,.76); -webkit-text-stroke: .35px rgba(255,255,255,.26); }
 .wordmark .showLogo { width: 68px; border-radius: 20px; box-shadow: 0 10px 28px rgba(0,0,0,.76), 0 0 28px rgba(0,0,0,.78), inset 0 1px rgba(255,255,255,.2); }
+.stageCastCredit { width: min(66vw, 390px); display: grid; gap: 5px; padding-top: 2px; color: #f8fbff; text-shadow: 0 2px 3px rgba(0,0,0,.98), 0 0 15px rgba(0,0,0,.96), 0 0 34px rgba(0,0,0,.84); pointer-events: none; user-select: none; }
+.stageCastCredit span { width: 100%; min-width: 0; display: grid; grid-template-columns: minmax(0, .36fr) minmax(0, .64fr); align-items: baseline; column-gap: clamp(7px, 1vw, 11px); }
+.stageCastCredit small { justify-self: end; color: rgba(255,255,255,.56); font: 780 clamp(.38rem, .68vw, .5rem)/1 system-ui; letter-spacing: .18em; text-transform: uppercase; }
+.stageCastCredit strong { min-width: 0; max-width: 100%; justify-self: start; overflow: hidden; color: #f8fbff; font: 740 clamp(.62rem, 1.2vw, .86rem)/1.05 system-ui; letter-spacing: .025em; text-overflow: ellipsis; white-space: nowrap; }
 .logoMark { width: 42px; height: 31px; display: flex; align-items: flex-end; justify-content: center; gap: 3px; }
 .logoMark i { width: 5px; border-radius: 9px; box-shadow: 0 0 12px currentColor; }
 .logoMark i:nth-child(1) { height: 45%; color: var(--prism-p); background: currentColor; }.logoMark i:nth-child(2) { height: 100%; color: var(--prism-s); background: currentColor; }.logoMark i:nth-child(3) { height: 68%; color: var(--prism-m); background: currentColor; }
@@ -540,14 +544,11 @@
 .avatarRig > .voiceActionText[data-phase="exiting"] { transform: translateX(-50%) translateY(-4px); }
 .avatarRig > .listenerReactionText { position: absolute; left: 50%; top: -3%; z-index: 13; width: max-content; max-width: 132%; max-height: none; transform: translateX(-50%); border: 1px solid rgba(255,255,255,.14); border-radius: 999px; padding: 4px 8px; color: rgba(255,255,255,.88); background: rgba(7,9,14,.66); backdrop-filter: blur(7px); font: 720 clamp(.52rem, .95vw, .7rem)/1 system-ui; letter-spacing: .03em; text-shadow: 0 2px 7px rgba(0,0,0,.9); animation: signalVoiceActionIn 160ms ease-out both; pointer-events: none; }
 .avatarRig > .listenerReactionText[data-interjection-attempt="true"] { top: -5%; border-color: color-mix(in srgb, #ff604f 58%, rgba(255,255,255,.2)); padding: 5px 10px; color: #fff4f1; background: rgba(92,21,21,.82); box-shadow: 0 0 18px rgba(255,96,79,.2); font-weight: 820; }
-.avatarRig > .deadAirAsideText { width: min(190px, 158%); max-width: 158%; border-radius: 10px; line-height: 1.22; text-align: center; }
 .avatarFallback { width: 132px; aspect-ratio: 1; display: grid; place-items: center; border: 8px solid #454a53; border-radius: 40% 40% 46% 46%; background: #101216; box-shadow: inset 0 0 30px color-mix(in srgb, var(--botcast-accent) 30%, transparent), 0 0 24px color-mix(in srgb, var(--botcast-accent) 22%, transparent); font-size: 2rem; }
 .producerGuestPresence { width: min(76%, 168px); aspect-ratio: 1; display: grid; place-content: center; justify-items: center; gap: 8px; border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 56%, rgba(255,255,255,.22)); border-radius: 50%; color: #fff; background: radial-gradient(circle at 35% 24%, rgba(255,255,255,.18), transparent 28%), linear-gradient(145deg, color-mix(in srgb, var(--botcast-host-accent) 72%, #1a1826), #10121a); box-shadow: inset 0 0 34px rgba(255,255,255,.06), 0 14px 36px rgba(0,0,0,.34), 0 0 26px color-mix(in srgb, var(--botcast-host-accent) 22%, transparent); text-align: center; }
 .producerGuestPresence > span { font: 850 clamp(.9rem, 2.4vw, 1.6rem)/1 system-ui; letter-spacing: .16em; }
 .producerGuestPresence > strong { max-width: 84%; overflow: hidden; font: 720 clamp(.55rem, 1vw, .72rem)/1.2 system-ui; text-overflow: ellipsis; white-space: nowrap; opacity: .74; }
 .producerGuestPresence[data-talking="true"] { box-shadow: inset 0 0 34px rgba(255,255,255,.1), 0 14px 36px rgba(0,0,0,.34), 0 0 42px color-mix(in srgb, var(--botcast-host-accent) 38%, transparent); }
-.nameplate { position: absolute; z-index: 8; bottom: 1.5%; min-width: 112px; display: grid; gap: 3px; border: 1px solid rgba(255,255,255,.13); border-radius: 999px; padding: 6px 14px 7px; text-align: center; color: rgba(255,255,255,.94); background: rgba(7,8,12,.72); backdrop-filter: blur(10px) saturate(1.08); font-size: clamp(.62rem, 1.1vw, .82rem); line-height: 1.05; box-shadow: 0 7px 20px rgba(0,0,0,.38); }
-.nameplate span { color: rgba(255,255,255,.48); font: 760 .48rem/1 system-ui; letter-spacing: .14em; text-transform: uppercase; }
 .stageMug { position: absolute; z-index: 9; width: max(6.2%, 58px); aspect-ratio: 8 / 9; display: grid; place-items: end center; transform: translate(-50%, -50%); pointer-events: none; will-change: left, top; }
 .stageMug[data-sipping="true"] { animation: signalStageMugSip var(--signal-cup-sip-duration-ms, 1400ms) ease-in-out 1 both; }
 .stageMug[data-returning="true"] { animation: signalStageMugInterruptedReturn 320ms cubic-bezier(.22,.72,.2,1) 1 both; }
@@ -690,7 +691,7 @@
 .deleteDialogActions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 22px; }
 .deleteDialogActions button { min-width: 104px; border: 1px solid var(--botcast-line); border-radius: 10px; padding: 10px 13px; color: var(--botcast-ink); background: var(--botcast-soft-panel); font-weight: 780; cursor: pointer; }
 .deleteDialogActions .deleteConfirmButton { border-color: transparent; color: white; background: linear-gradient(115deg, var(--prism-p), var(--prism-m)); box-shadow: 0 10px 28px color-mix(in srgb, var(--prism-p) 22%, transparent); }
-.showDeleteButton:focus-visible, .episodeDeleteButton:focus-visible, .dangerButton:focus-visible, .deleteDialogActions button:focus-visible { outline: 2px solid var(--prism-s); outline-offset: 3px; }
+.showDeleteButton:focus-visible, .dangerButton:focus-visible, .deleteDialogActions button:focus-visible { outline: 2px solid var(--prism-s); outline-offset: 3px; }
 
 .shell[data-theme="light"] .showBrandPreview {
   border-color: color-mix(in srgb, var(--botcast-accent) 18%, var(--botcast-line));
@@ -908,7 +909,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .stageScene { transition-duration: 120ms; }
-  .stageScene, .episodeOpenButton, .episodeDeleteButton, .episodePreRoll, .preRollLockup, .showAudiencePulse, .showIdentityGearButton, .showIdentityGearButton span { transition: none !important; }
+  .stageScene, .episodeOpenButton, .episodePreRoll, .preRollLockup, .showAudiencePulse, .showIdentityGearButton, .showIdentityGearButton span { transition: none !important; }
   .liveCaption { animation: none !important; }
   .episodePreRoll[data-kind="intro"]::after { opacity: 0; animation: none !important; }
   .episodeOutro { opacity: 1; animation: none !important; }

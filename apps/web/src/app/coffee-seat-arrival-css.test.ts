@@ -792,6 +792,9 @@ describe("Coffee seat arrival CSS", () => {
     assert.match(facePartRule, /--crt-bloom-opacity:\s*0\.16\s*;/);
     assert.match(facePartRule, /--crt-bloom-radius:\s*2px\s*;/);
     assert.match(facePartRule, /--crt-bloom-wide-radius:\s*12px\s*;/);
+    assert.match(facePartRule, /--crt-face-screen-wash-near-opacity:\s*24%\s*;/);
+    assert.match(facePartRule, /--crt-face-screen-wash-mid-opacity:\s*11%\s*;/);
+    assert.match(facePartRule, /--crt-face-screen-wash-far-opacity:\s*5%\s*;/);
     assert.match(facePartRule, /drop-shadow\(0 0 calc\(0\.72px \* var\(--crt-face-glow-radius-scale,\s*1\)\) var\(--crt-face-edge-color\)\)/);
     assert.match(facePartRule, /drop-shadow\(0 0 calc\(1\.5px \* var\(--crt-face-glow-radius-scale,\s*1\)\) var\(--crt-face-edge-color\)\)/);
     assert.match(

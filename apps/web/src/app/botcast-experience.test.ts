@@ -166,18 +166,10 @@ describe("Signal experience shell", () => {
     );
   });
 
-  it("fills awkward Signal dead air except around a hard-muted participant", () => {
-    assert.match(source, /SIGNAL_DEAD_AIR_ASIDE_DELAY_MS = 3_800/u);
-    assert.match(source, /buildDeadAirAsidePlanV1\(\{[\s\S]{0,240}mode: "signal"/u);
-    assert.match(source, /onDeadAirAside\([\s\S]{0,220}episode\.responseMode !== "local"/u);
-    assert.match(source, /setSignalDeadAirAside\(plan\)/u);
-    assert.match(
-      source,
-      /thinkingBot\.muted \|\| commentator\.muted/u,
-    );
-    assert.match(source, /styles\.deadAirAsideText/u);
-    assert.match(css, /\.deadAirAsideText/u);
-    assert.match(pageSource, /onDeadAirAside=\{playDeadAirAside\}/u);
+  it("keeps Signal quiet while the next bot prepares its turn", () => {
+    assert.doesNotMatch(source, /DeadAirAside|deadAirAside/u);
+    assert.doesNotMatch(css, /deadAirAside/u);
+    assert.doesNotMatch(pageSource, /onDeadAirAside=/u);
   });
 
   it("attaches Signal cups to the shared sip and return foley lifecycle", () => {
@@ -276,7 +268,8 @@ describe("Signal experience shell", () => {
       css,
       /\.stagePlacement\s*\{[^}]*transform:\s*translate\(-50%, -50%\)/u,
     );
-    assert.match(css, /\.nameplate\s*\{[^}]*position:\s*absolute/u);
+    assert.doesNotMatch(source, /styles\.nameplate/u);
+    assert.doesNotMatch(css, /\.nameplate\s*\{/u);
     assert.match(css, /\.stageMug\s*\{[^}]*position:\s*absolute/u);
     assert.match(css, /\.stageMug\[data-returning="true"\][^}]*320ms/u);
     assert.match(
@@ -836,7 +829,7 @@ describe("Signal experience shell", () => {
     );
   });
 
-  it("lands natural endings and producer cuts on a compact local outro", () => {
+  it("lets the active line finish before a compact producer close and outro", () => {
     assert.match(source, /playSignalOutroAudio\(\{/u);
     assert.match(source, /data-kind="outro"/u);
     assert.match(source, /Signal transmission cut/u);
@@ -867,8 +860,11 @@ describe("Signal experience shell", () => {
       /setTimeout\(resolve, SIGNAL_EPISODE_OUTRO_DEAD_AIR_MS\)[\s\S]{0,100}outroRunIdRef\.current !== runId[\s\S]{0,100}setEpisodeOutro\(/u,
     );
     assert.doesNotMatch(outroSource, /setEpisodeOutro\(null\)/u);
-    assert.match(css, /\.episodeOutro\[data-phase="complete"\] > button/u);
-    assert.match(css, /\.episodeOutro > \.episodeReviewCopyButton/u);
+    assert.match(
+      css,
+      /\.episodeOutro\[data-phase="complete"\] \.episodeOutroActions button/u,
+    );
+    assert.match(css, /\.episodeOutroActions\s*\{/u);
     assert.match(source, /data-episode-outro=\{episodeOutro \? "true" : undefined\}/u);
     assert.doesNotMatch(css, /\.shell\[data-episode-outro="true"\]/u);
     assert.match(
@@ -883,17 +879,31 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /`\/api\/botcast\/episodes\/\$\{encodeURIComponent\(episodeId\)\}\/end`/u,
+      /`\/api\/botcast\/episodes\/\$\{encodeURIComponent\(episode\.id\)\}\/end`/u,
+    );
+    assert.doesNotMatch(source, /onAirElapsedMs|episodeOutro\.discarded/u);
+    assert.match(
+      source,
+      /lastAudienceMessageId:\s*episode\.messages\.at\(-1\)\?\.id \?\? null/u,
     );
     assert.match(
       source,
-      /onAirElapsedMs:\s*signalEpisodeRuntimeMs\([\s\S]{0,180}Date\.now\(\)/u,
+      /lastAudienceEventSequence:\s*episode\.events\.at\(-1\)\?\.sequence \?\? 0/u,
     );
-    assert.match(source, /discarded:\s*response\.discarded === true/u);
+    assert.match(source, /audienceSegmentCount:\s*episode\.segments\.length/u);
     assert.match(
       source,
-      /invalidateEpisodeOperation\(\);[\s\S]{0,180}setCuttingShow\(true\)/u,
+      /activeSpeechMessageIdRef\.current === null &&[\s\S]{0,80}speakingMessageId === null[\s\S]{0,80}invalidateEpisodeOperation\(\)/u,
     );
+    assert.match(
+      source,
+      /speakingMessageId !== null \|\|[\s\S]{0,100}activeSpeechMessageIdRef\.current !== null \|\|[\s\S]{0,60}busy/u,
+    );
+    assert.match(
+      source,
+      /pendingCutRef\.current !== null \|\|[\s\S]{0,80}message\.speakerRole !== "host"/u,
+    );
+    assert.match(source, /if \(pendingCutRef\.current\) return true;/u);
     assert.match(
       source,
       /response\.message[\s\S]{0,260}playPreparedEpisodeMessageRef\.current[\s\S]{0,360}playEpisodeOutro\(\{/u,
@@ -903,10 +913,9 @@ describe("Signal experience shell", () => {
       /disabled=\{episode\.status === "completed" \|\| cuttingShow\}/u,
     );
     assert.match(source, /■ Cut show/u);
-    assert.match(source, /aria-label="Cut the live show"/u);
-    assert.match(source, /Signal transmission discarded/u);
-    assert.match(source, /Early cut · not saved/u);
-    assert.match(source, /!episodeOutro\.discarded/u);
+    assert.match(source, /aria-label="Finish the current line and close the live show"/u);
+    assert.match(source, /Finishing…/u);
+    assert.doesNotMatch(source, /Signal transmission discarded|Early cut · not saved/u);
     assert.match(css, /\.episodeOutro \.preRollLogo\s*\{[^}]*width:\s*118px/u);
     assert.match(css, /\.liveTopline \.cutShowButton/u);
     assert.match(
@@ -1198,6 +1207,11 @@ describe("Signal experience shell", () => {
     assert.match(source, /const SIGNAL_VOICE_COMPLETION_GRACE_MS = 4_000/u);
     assert.match(
       source,
+      /botcastSignalStandardCadenceDurationMs\(pacingText\)/u,
+    );
+    assert.doesNotMatch(source, /tokenCount \* 175|6_500/u);
+    assert.match(
+      source,
       /resolvedDurationMs \+ SIGNAL_VOICE_COMPLETION_GRACE_MS/u,
     );
     assert.match(source, /settleVoicePlayback\?\.\(true\)/u);
@@ -1292,15 +1306,40 @@ describe("Signal experience shell", () => {
     assert.match(css, /@keyframes signalBotIdle/u);
     assert.match(css, /@keyframes signalBotThinking/u);
     assert.match(css, /\.wordmark \.showLogo\s*\{[^}]*width:\s*68px/iu);
+    assert.match(source, /data-signal-cast-credit="true"/u);
+    assert.match(
+      source,
+      /<small>with<\/small>[\s\S]{0,80}<strong>\{args\.host\?\.name \?\? "Host"\}<\/strong>/u,
+    );
+    assert.match(
+      source,
+      /<small>featuring<\/small>[\s\S]{0,80}<strong>\{args\.guest\?\.name \?\? "Guest"\}<\/strong>/u,
+    );
+    assert.match(
+      css,
+      /\.stageCastCredit\s*\{[^}]*width:\s*min\(66vw, 390px\)[^}]*user-select:\s*none/iu,
+    );
+    assert.match(
+      css,
+      /\.stageCastCredit span\s*\{[^}]*grid-template-columns:\s*minmax\(0, \.36fr\) minmax\(0, \.64fr\)/iu,
+    );
+    assert.match(
+      css,
+      /\.stageCastCredit small\s*\{[^}]*letter-spacing:\s*\.18em[^}]*text-transform:\s*uppercase/iu,
+    );
+    assert.match(
+      css,
+      /\.stageCastCredit strong\s*\{[^}]*text-overflow:\s*ellipsis/iu,
+    );
     assert.match(
       css,
       /\.stageViewport\[data-shot="right"\] \.stageScene\s*\{[^}]*scale\(1\.42\)/u,
     );
     assert.match(css, /\.wordmark::before\s*\{[^}]*radial-gradient/iu);
-    assert.match(css, /\.wordmark strong\s*\{[^}]*color:\s*#f8fbff/iu);
+    assert.match(css, /\.wordmark > strong\s*\{[^}]*color:\s*#f8fbff/iu);
     assert.match(
       css,
-      /\.wordmark strong\s*\{[^}]*text-shadow:[^;}]*rgba\(0,0,0,\.98\)/iu,
+      /\.wordmark > strong\s*\{[^}]*text-shadow:[^;}]*rgba\(0,0,0,\.98\)/iu,
     );
     assert.match(
       css,
@@ -1353,10 +1392,6 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /!thinkingBot \|\| !commentator \|\| thinkingBot\.muted \|\| commentator\.muted/u,
-    );
-    assert.match(
-      source,
       /signalShowCardBlurbs\([\s\S]{0,120}Boolean\(hostBot\?\.muted\),[\s\S]{0,100}Boolean\(hostBot\?\.echoesAddressedSpeech\)/u,
     );
     assert.match(
@@ -1388,7 +1423,7 @@ describe("Signal experience shell", () => {
       /data-audience-guest-visible=\{guestVisibleToAudience \? "true" : "false"\}/u,
     );
     assert.doesNotMatch(source, /Guest chair is empty/u);
-    assert.match(source, /guestHiddenFromAudience \? "Booked guest" : "Guest"/u);
+    assert.doesNotMatch(source, /Booked guest/u);
     assert.match(source, /data-audience-hidden=\{guestHiddenFromAudience/u);
     assert.match(
       source,
@@ -2076,7 +2111,7 @@ describe("Signal experience shell", () => {
     assert.match(source, /startSignalArtworkJob\(reset\.show, \["logo"\]\)/u);
   });
 
-  it("offers confirmed show deletion and episode delete or discard without nesting actions", () => {
+  it("offers episode deletion only beside completed review-copy controls", () => {
     assert.match(
       source,
       /`\/api\/botcast\/shows\/\$\{encodeURIComponent\(target\.id\)\}`,[\s\S]{0,100}method: "DELETE"/u,
@@ -2087,19 +2122,28 @@ describe("Signal experience shell", () => {
     );
     assert.match(source, /role="alertdialog"/u);
     assert.match(source, /aria-modal="true"/u);
-    assert.match(source, /Discard episode/u);
+    assert.match(source, /if \(item\.status !== "completed"\) return/u);
+    assert.doesNotMatch(source, /Discard episode/u);
     assert.match(source, /Delete show/u);
     assert.match(source, /Saved studio and logo artwork stays in Images/u);
     assert.match(source, /deleteCancelButtonRef\.current\?\.focus\(\)/u);
     assert.match(source, /event\.key === "Escape"/u);
     assert.match(
       source,
-      /<article key=\{item\.id\} className=\{styles\.episodeCard\}>[\s\S]*?<\/article>/u,
+      /className=\{styles\.episodeOutroActions\}[\s\S]{0,1200}copyEpisodeForReview\(episode\)[\s\S]{0,1200}openEpisodeDeletion\(episode/u,
     );
+    const episodeCardStart = source.indexOf(
+      "<article key={item.id} className={styles.episodeCard}>",
+    );
+    const episodeCardSource = source.slice(
+      episodeCardStart,
+      source.indexOf("</article>", episodeCardStart),
+    );
+    assert.doesNotMatch(episodeCardSource, /openEpisodeDeletion|Delete/u);
     assert.match(css, /\.deleteDialog\s*\{/u);
     assert.match(css, /\.deleteConfirmButton/u);
     assert.match(css, /\.episodeOpenButton/u);
-    assert.match(css, /prefers-reduced-motion[\s\S]*?\.episodeDeleteButton/u);
+    assert.doesNotMatch(css, /\.episodeDeleteButton/u);
   });
 
   it("opens a bounded ephemeral host chat from the dashboard avatar", () => {

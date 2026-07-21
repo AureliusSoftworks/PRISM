@@ -379,6 +379,10 @@ describe("Bottish speech plan", () => {
       targetDurationMs: 2_260,
       maximumCompressionRate: 1.24,
     });
+    assert.equal(
+      signalRobotVoiceCadenceTiming("...").targetDurationMs,
+      3_200,
+    );
     const natural = buildBottishPlan(text, neutral, "signal-cadence");
     const fitted = buildBottishPlaybackPlan(
       text,

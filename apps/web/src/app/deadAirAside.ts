@@ -5,7 +5,7 @@ import type {
 
 export const DEAD_AIR_ASIDE_PLAN_VERSION = 1 as const;
 
-export type DeadAirAsideMode = "signal" | "coffee";
+export type DeadAirAsideMode = "coffee";
 
 export interface DeadAirAsidePlanV1 {
   v: typeof DEAD_AIR_ASIDE_PLAN_VERSION;

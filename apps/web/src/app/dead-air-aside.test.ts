@@ -6,7 +6,7 @@ import { buildDeadAirAsidePlanV1 } from "./deadAirAside.ts";
 describe("dead-air aside planning", () => {
   it("is deterministic and keeps the thinking bot out of the commentator seat", () => {
     const args = {
-      mode: "signal" as const,
+      mode: "coffee" as const,
       turnId: "episode-1:message-4:guest",
       thinkingBotId: "guest-1",
       thinkingBotName: "Ivo Stone",

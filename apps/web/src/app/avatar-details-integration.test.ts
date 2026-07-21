@@ -432,6 +432,30 @@ describe("Avatar Details shared mannequin rendering", () => {
     );
     assert.match(maskSource, /avatarDetailsPhosphorCoreRgba\(pixels\)/);
     assert.match(maskCss, /\.core[\s\S]*opacity:\s*1[\s\S]*drop-shadow/);
+    assert.match(
+      maskCss,
+      /\.halo[\s\S]*--zen-live-bot-crt-flicker-base-filter:[\s\S]*filter:\s*var\(--zen-live-bot-crt-flicker-base-filter\)/,
+    );
+    assert.match(
+      maskCss,
+      /\.bloom[\s\S]*--zen-live-bot-crt-flicker-base-filter:[\s\S]*filter:\s*var\(--zen-live-bot-crt-flicker-base-filter\)/,
+    );
+    assert.match(
+      maskCss,
+      /\.core[\s\S]*--zen-live-bot-crt-flicker-base-filter:[\s\S]*filter:\s*brightness\(1\.07\) contrast\(1\.02\)[\s\S]*var\(--zen-live-bot-crt-flicker-base-filter\)/,
+    );
+    assert.match(
+      pageCss,
+      /\.zenLiveBotPresenceFaceEmissionMask \[data-avatar-details-emission\][\s\S]*animation:\s*zenLiveBotCrtFaceFlicker 11\.7s linear infinite/,
+    );
+    assert.match(
+      pageCss,
+      /@keyframes zenLiveBotCrtFaceFlicker[\s\S]*var\(--zen-live-bot-crt-flicker-base-filter,\s*brightness\(1\)\)/,
+    );
+    assert.match(
+      pageCss,
+      /@media \(prefers-reduced-motion:\s*reduce\)[\s\S]*\.zenLiveBotPresenceFaceEmissionMask \[data-avatar-details-emission\][\s\S]*animation:\s*none/,
+    );
   });
 
   it("mirrors authored screen ink and yields to full-screen face effects", () => {

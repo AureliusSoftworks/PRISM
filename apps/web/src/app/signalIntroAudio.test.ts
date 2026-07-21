@@ -2,12 +2,16 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { buildSignalMusicProfile } from "@localai/shared";
 import {
+  SIGNAL_AUDIO_STOP_FADE_MS,
   SIGNAL_EPISODE_INTRO_LEAD_IN_MS,
   SIGNAL_SYNTH_IDENT_DURATION_MS,
   SIGNAL_SYNTH_OUTRO_DURATION_MS,
   buildSignalSynthIdentPlan,
   buildSignalSynthOutroPlan,
   encodeSignalSynthIdentWave,
+  playSignalIntroAudio,
+  signalAudioFadeVolumeAt,
+  stopSignalIntroAudio,
 } from "./signalIntroAudio.ts";
 
 describe("Signal Synth ident", () => {
@@ -24,6 +28,105 @@ describe("Signal Synth ident", () => {
 
   it("gives episode playback a short preload lead-in", () => {
     assert.equal(SIGNAL_EPISODE_INTRO_LEAD_IN_MS, 180);
+  });
+
+  it("uses a bounded equal-power release instead of a hard ident stop", async () => {
+    assert.equal(SIGNAL_AUDIO_STOP_FADE_MS, 320);
+    assert.equal(signalAudioFadeVolumeAt(0.8, 0), 0.8);
+    assert.ok(signalAudioFadeVolumeAt(0.8, 0.5) < 0.8);
+    assert.ok(signalAudioFadeVolumeAt(0.8, 0.5) > 0);
+    assert.ok(signalAudioFadeVolumeAt(0.8, 1) < 0.000_001);
+
+    class FakeAudio {
+      private currentVolume = 1;
+      readonly volumeWrites: number[] = [];
+      paused = true;
+      preload = "";
+      src = "";
+      pauseCalls = 0;
+
+      get volume(): number {
+        return this.currentVolume;
+      }
+
+      set volume(value: number) {
+        this.currentVolume = value;
+        this.volumeWrites.push(value);
+      }
+
+      addEventListener(): void {}
+      load(): void {}
+      removeAttribute(): void {
+        this.src = "";
+      }
+      pause(): void {
+        this.paused = true;
+        this.pauseCalls += 1;
+      }
+      async play(): Promise<void> {
+        this.paused = false;
+      }
+    }
+
+    const audioDescriptor = Object.getOwnPropertyDescriptor(globalThis, "Audio");
+    const windowDescriptor = Object.getOwnPropertyDescriptor(globalThis, "window");
+    const createdAudio: FakeAudio[] = [];
+    Object.defineProperty(globalThis, "Audio", {
+      configurable: true,
+      value: class {
+        constructor() {
+          const audio = new FakeAudio();
+          createdAudio.push(audio);
+          return audio;
+        }
+      },
+    });
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: {
+        clearTimeout,
+        setTimeout,
+      },
+    });
+    try {
+      const playback = playSignalIntroAudio({
+        profile: profile("neutral", "fade-test"),
+        seed: "fade-test",
+        introAudio: {
+          source: "elevenlabs",
+          audioUrl: "/ident.mp3",
+          durationMs: 6_000,
+          revision: 1,
+          model: "music_v2",
+        },
+        enabled: true,
+        volume: 0.8,
+      });
+      const audio = createdAudio.at(-1);
+      assert.ok(audio);
+      stopSignalIntroAudio();
+      assert.equal(audio.pauseCalls, 0);
+      await playback.finished;
+      assert.ok(audio.pauseCalls > 0);
+      assert.ok(
+        audio.volumeWrites.some(
+          (value) => value > 0 && value < 0.8,
+        ),
+      );
+      assert.ok(audio.volume < 0.000_001);
+    } finally {
+      stopSignalIntroAudio();
+      if (audioDescriptor) {
+        Object.defineProperty(globalThis, "Audio", audioDescriptor);
+      } else {
+        Reflect.deleteProperty(globalThis, "Audio");
+      }
+      if (windowDescriptor) {
+        Object.defineProperty(globalThis, "window", windowDescriptor);
+      } else {
+        Reflect.deleteProperty(globalThis, "window");
+      }
+    }
   });
 
   it("pins commanding and playful recipes to different emotional directions", () => {

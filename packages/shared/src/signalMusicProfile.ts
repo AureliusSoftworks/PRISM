@@ -75,7 +75,8 @@ const SIGNAL_MUSIC_TEMPERAMENT_RECIPES: Record<
     ending: "hard",
     pulse: "deliberate severe low pulse with disciplined restraint",
     motifDirection: "descending minor-tonal melodic contour",
-    endingDirection: "abrupt dry hard-button ending",
+    endingDirection:
+      "decisive resolved hard-button cadence with a brief natural release",
   },
   contemplative: {
     tempoBpm: 94,
@@ -161,7 +162,8 @@ const SIGNAL_MUSIC_PALETTE_TONE_OVERRIDES: Partial<
     ending: "hard",
     pulse: "deliberate severe low orchestral pulse with disciplined restraint",
     motifDirection: "descending minor-tonal melodic contour",
-    endingDirection: "abrupt dry hard-button ending",
+    endingDirection:
+      "decisive resolved hard-button cadence with a brief natural release",
   },
   magical: {
     tempoBpm: 106,

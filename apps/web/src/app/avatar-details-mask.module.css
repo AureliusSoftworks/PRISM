@@ -31,7 +31,7 @@
 .halo {
   opacity: 1;
   mix-blend-mode: screen;
-  filter: blur(1.35px) saturate(1.28)
+  --zen-live-bot-crt-flicker-base-filter: blur(1.35px) saturate(1.28)
     drop-shadow(
       0 0 6px
         color-mix(
@@ -56,12 +56,13 @@
           transparent
         )
     );
+  filter: var(--zen-live-bot-crt-flicker-base-filter);
 }
 
 .bloom {
   opacity: 1;
   mix-blend-mode: screen;
-  filter: blur(0.32px) saturate(1.18)
+  --zen-live-bot-crt-flicker-base-filter: blur(0.32px) saturate(1.18)
     drop-shadow(0 0 0.72px var(--avatar-details-phosphor-glow-color))
     drop-shadow(0 0 1.5px var(--avatar-details-phosphor-glow-color))
     drop-shadow(
@@ -96,11 +97,15 @@
           transparent
         )
     );
+  filter: var(--zen-live-bot-crt-flicker-base-filter);
 }
 
 .core {
   opacity: 1;
   mix-blend-mode: screen;
+  --zen-live-bot-crt-flicker-base-filter: drop-shadow(
+    0 0 0.45px rgba(255, 255, 255, 0.82)
+  );
   filter: brightness(1.07) contrast(1.02)
-    drop-shadow(0 0 0.45px rgba(255, 255, 255, 0.82));
+    var(--zen-live-bot-crt-flicker-base-filter);
 }

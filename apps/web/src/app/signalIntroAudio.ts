@@ -9,6 +9,7 @@ import {
 export const SIGNAL_SYNTH_IDENT_DURATION_MS = BOTCAST_LOCAL_INTRO_DURATION_MS;
 export const SIGNAL_SYNTH_OUTRO_DURATION_MS = 1_800;
 export const SIGNAL_EPISODE_INTRO_LEAD_IN_MS = 180;
+export const SIGNAL_AUDIO_STOP_FADE_MS = 320;
 
 export type SignalSynthNote = {
   startMs: number;
@@ -601,18 +602,135 @@ export function encodeSignalSynthIdentWave(
   return output;
 }
 
-let activeAudio: HTMLAudioElement | null = null;
-let activeObjectUrl: string | null = null;
-let activeResolve: (() => void) | null = null;
+type ActiveSignalAudio = {
+  audio: HTMLAudioElement;
+  objectUrl: string | null;
+  resolve: () => void;
+  startTimer: number | null;
+  watchdogTimer: number | null;
+  fadeTimer: number | null;
+  stopping: boolean;
+  settled: boolean;
+};
+
+let activeSignalAudio: ActiveSignalAudio | null = null;
+
+export function signalAudioFadeVolumeAt(
+  startVolume: number,
+  progress: number,
+): number {
+  const normalizedVolume = Math.max(0, Math.min(1, startVolume));
+  const normalizedProgress = Math.max(0, Math.min(1, progress));
+  return normalizedVolume * Math.cos((normalizedProgress * Math.PI) / 2);
+}
+
+function releaseSignalAudio(state: ActiveSignalAudio): void {
+  if (state.settled) return;
+  state.settled = true;
+  state.stopping = false;
+  if (state.startTimer !== null) window.clearTimeout(state.startTimer);
+  if (state.watchdogTimer !== null) window.clearTimeout(state.watchdogTimer);
+  if (state.fadeTimer !== null) window.clearTimeout(state.fadeTimer);
+  state.startTimer = null;
+  state.watchdogTimer = null;
+  state.fadeTimer = null;
+  if (activeSignalAudio === state) activeSignalAudio = null;
+  try {
+    state.audio.pause();
+    state.audio.removeAttribute("src");
+    state.audio.load();
+  } catch {
+    // The promise still settles if a browser has already released the element.
+  }
+  if (state.objectUrl) URL.revokeObjectURL(state.objectUrl);
+  state.resolve();
+}
+
+function fadeAndReleaseSignalAudio(
+  state: ActiveSignalAudio,
+  fadeOutMs: number,
+): void {
+  if (state.settled || state.stopping) return;
+  state.stopping = true;
+  if (activeSignalAudio === state) activeSignalAudio = null;
+  if (state.startTimer !== null) {
+    window.clearTimeout(state.startTimer);
+    state.startTimer = null;
+  }
+  if (state.watchdogTimer !== null) {
+    window.clearTimeout(state.watchdogTimer);
+    state.watchdogTimer = null;
+  }
+  const durationMs = Math.max(0, Math.round(fadeOutMs));
+  const startVolume = state.audio.volume;
+  if (durationMs === 0 || state.audio.paused || startVolume <= 0) {
+    releaseSignalAudio(state);
+    return;
+  }
+  const startedAt = Date.now();
+  const step = (): void => {
+    if (state.settled) return;
+    const progress = (Date.now() - startedAt) / durationMs;
+    state.audio.volume = signalAudioFadeVolumeAt(startVolume, progress);
+    if (progress >= 1) {
+      releaseSignalAudio(state);
+      return;
+    }
+    state.fadeTimer = window.setTimeout(step, 16);
+  };
+  step();
+}
 
 export function stopSignalIntroAudio(): void {
-  activeAudio?.pause();
-  activeAudio = null;
-  if (activeObjectUrl) URL.revokeObjectURL(activeObjectUrl);
-  activeObjectUrl = null;
-  const resolve = activeResolve;
-  activeResolve = null;
-  resolve?.();
+  const state = activeSignalAudio;
+  if (!state) return;
+  fadeAndReleaseSignalAudio(state, SIGNAL_AUDIO_STOP_FADE_MS);
+}
+
+function playSignalAudio(args: {
+  audio: HTMLAudioElement;
+  objectUrl: string | null;
+  durationMs: number;
+  startDelayMs?: number;
+}): Promise<void> {
+  let settle!: () => void;
+  const finished = new Promise<void>((resolve) => {
+    settle = resolve;
+  });
+  const state: ActiveSignalAudio = {
+    audio: args.audio,
+    objectUrl: args.objectUrl,
+    resolve: settle,
+    startTimer: null,
+    watchdogTimer: null,
+    fadeTimer: null,
+    stopping: false,
+    settled: false,
+  };
+  activeSignalAudio = state;
+  const finish = (): void => {
+    if (state.stopping) return;
+    releaseSignalAudio(state);
+  };
+  args.audio.addEventListener("ended", finish, { once: true });
+  args.audio.addEventListener("error", finish, { once: true });
+  args.audio.load();
+  const startDelayMs = Math.max(0, Math.min(1_000, args.startDelayMs ?? 0));
+  const beginPlayback = (): void => {
+    state.startTimer = null;
+    if (state.settled || state.stopping || activeSignalAudio !== state) return;
+    void args.audio.play().catch(finish);
+  };
+  if (startDelayMs > 0) {
+    state.startTimer = window.setTimeout(beginPlayback, startDelayMs);
+  } else {
+    beginPlayback();
+  }
+  state.watchdogTimer = window.setTimeout(
+    () => fadeAndReleaseSignalAudio(state, SIGNAL_AUDIO_STOP_FADE_MS),
+    startDelayMs + args.durationMs + 1_500,
+  );
+  return finished;
 }
 
 export function playSignalIntroAudio(args: {
@@ -638,6 +756,7 @@ export function playSignalIntroAudio(args: {
   const audio = new Audio();
   audio.preload = "auto";
   audio.volume = Math.max(0, Math.min(1, args.volume));
+  let objectUrl: string | null = null;
   if (args.introAudio.source === "elevenlabs" && args.introAudio.audioUrl) {
     audio.src = args.introAudio.audioUrl;
   } else {
@@ -645,35 +764,14 @@ export function playSignalIntroAudio(args: {
       profile: args.profile,
       seed: args.seed,
     }));
-    activeObjectUrl = URL.createObjectURL(new Blob([wave], { type: "audio/wav" }));
-    audio.src = activeObjectUrl;
+    objectUrl = URL.createObjectURL(new Blob([wave], { type: "audio/wav" }));
+    audio.src = objectUrl;
   }
-  activeAudio = audio;
-
-  const finished = new Promise<void>((resolve) => {
-    activeResolve = resolve;
-    const finish = () => {
-      if (activeAudio !== audio) return;
-      activeAudio = null;
-      if (activeObjectUrl) URL.revokeObjectURL(activeObjectUrl);
-      activeObjectUrl = null;
-      if (activeResolve === resolve) activeResolve = null;
-      resolve();
-    };
-    audio.addEventListener("ended", finish, { once: true });
-    audio.addEventListener("error", finish, { once: true });
-    audio.load();
-    const startDelayMs = Math.max(0, Math.min(1_000, args.startDelayMs ?? 0));
-    const beginPlayback = () => {
-      if (activeAudio !== audio) return;
-      void audio.play().catch(finish);
-    };
-    if (startDelayMs > 0) {
-      window.setTimeout(beginPlayback, startDelayMs);
-    } else {
-      beginPlayback();
-    }
-    window.setTimeout(finish, startDelayMs + durationMs + 1_500);
+  const finished = playSignalAudio({
+    audio,
+    objectUrl,
+    durationMs,
+    startDelayMs: args.startDelayMs,
   });
   return { durationMs, finished };
 }
@@ -694,27 +792,17 @@ export function playSignalOutroAudio(args: {
   }
 
   const wave = encodeSignalSynthIdentWave(buildSignalSynthOutroPlan(args.seed));
-  activeObjectUrl = URL.createObjectURL(new Blob([wave], { type: "audio/wav" }));
+  const objectUrl = URL.createObjectURL(
+    new Blob([wave], { type: "audio/wav" }),
+  );
   const audio = new Audio();
   audio.preload = "auto";
   audio.volume = Math.max(0, Math.min(1, args.volume * 0.82));
-  audio.src = activeObjectUrl;
-  activeAudio = audio;
-
-  const finished = new Promise<void>((resolve) => {
-    activeResolve = resolve;
-    const finish = () => {
-      if (activeAudio !== audio) return;
-      activeAudio = null;
-      if (activeObjectUrl) URL.revokeObjectURL(activeObjectUrl);
-      activeObjectUrl = null;
-      if (activeResolve === resolve) activeResolve = null;
-      resolve();
-    };
-    audio.addEventListener("ended", finish, { once: true });
-    audio.addEventListener("error", finish, { once: true });
-    void audio.play().catch(finish);
-    window.setTimeout(finish, durationMs + 1_000);
+  audio.src = objectUrl;
+  const finished = playSignalAudio({
+    audio,
+    objectUrl,
+    durationMs,
   });
   return { durationMs, finished };
 }

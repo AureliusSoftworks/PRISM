@@ -26452,32 +26452,38 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   92%,
   100% {
     opacity: 1;
-    filter: brightness(1.07) contrast(1.02);
+    filter: brightness(1.07) contrast(1.02)
+      var(--zen-live-bot-crt-flicker-base-filter, brightness(1));
   }
 
   48.2% {
     opacity: 0.86;
-    filter: brightness(0.92) contrast(1.06);
+    filter: brightness(0.92) contrast(1.06)
+      var(--zen-live-bot-crt-flicker-base-filter, brightness(1));
   }
 
   48.55% {
     opacity: 0.96;
-    filter: brightness(1.02) contrast(1.03);
+    filter: brightness(1.02) contrast(1.03)
+      var(--zen-live-bot-crt-flicker-base-filter, brightness(1));
   }
 
   74.9% {
     opacity: 0.78;
-    filter: brightness(0.84) contrast(1.08);
+    filter: brightness(0.84) contrast(1.08)
+      var(--zen-live-bot-crt-flicker-base-filter, brightness(1));
   }
 
   75.22% {
     opacity: 0.93;
-    filter: brightness(0.98) contrast(1.04);
+    filter: brightness(0.98) contrast(1.04)
+      var(--zen-live-bot-crt-flicker-base-filter, brightness(1));
   }
 
   91.55% {
     opacity: 0.9;
-    filter: brightness(0.95) contrast(1.05);
+    filter: brightness(0.95) contrast(1.05)
+      var(--zen-live-bot-crt-flicker-base-filter, brightness(1));
   }
 }
 
@@ -26951,9 +26957,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --crt-glyph-bloom-wide-outer-opacity: 18%;
   /* Keep the CRT glass black; color belongs to the phosphor glyph, not a
      full-aperture wash. */
-  --crt-face-screen-wash-near-opacity: 18%;
-  --crt-face-screen-wash-mid-opacity: 8%;
-  --crt-face-screen-wash-far-opacity: 3%;
+  --crt-face-screen-wash-near-opacity: 24%;
+  --crt-face-screen-wash-mid-opacity: 11%;
+  --crt-face-screen-wash-far-opacity: 5%;
   --zen-live-bot-idle-face-glow-filter-high: drop-shadow(
       0 0 calc(0.72px * var(--crt-face-glow-radius-scale, 1))
         var(--crt-face-edge-color)
@@ -27023,7 +27029,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .coffeeSeatPlate[data-live-body-style="zen"]
   .coffeeSeatPlateEmoji
   [data-coffee-plate-emoji-part]
-  [data-crt-glyph-layer="true"] {
+  [data-crt-glyph-layer="true"],
+.zenLiveBotPresenceFaceEmissionMask [data-avatar-details-emission] {
   animation: zenLiveBotCrtFaceFlicker 11.7s linear infinite;
 }
 
@@ -28177,7 +28184,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   .coffeeSeatPlate[data-live-body-style="zen"]
     .coffeeSeatPlateEmoji
     [data-coffee-plate-emoji-part]
-    [data-crt-glyph-layer="true"]::before {
+    [data-crt-glyph-layer="true"]::before,
+  .zenLiveBotPresenceFaceEmissionMask [data-avatar-details-emission] {
     animation: none;
   }
 

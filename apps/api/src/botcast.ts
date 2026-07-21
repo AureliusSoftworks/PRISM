@@ -158,6 +158,7 @@ import {
 import {
   AutoFallbackExhaustedError,
   runAutoFallbackChain,
+  validateAutoFallbackText,
 } from "./auto-fallback.ts";
 import {
   botPowerTextRequestsRepeat,
@@ -2166,7 +2167,6 @@ export function projectBotcastAdvanceResponseForAudienceV1(
       ? (episode.messages.find((message) => message.id === response.message?.id) ??
         null)
       : null,
-    ...(response.discarded ? { discarded: true } : {}),
   };
 }
 
@@ -4145,7 +4145,9 @@ export function deleteBotcastEpisode(
   episodeId: string,
 ): boolean {
   const result = db
-    .prepare("DELETE FROM botcast_episodes WHERE id = ? AND user_id = ?")
+    .prepare(
+      "DELETE FROM botcast_episodes WHERE id = ? AND user_id = ? AND status = 'completed'",
+    )
     .run(episodeId, userId);
   return Number(result.changes ?? 0) > 0;
 }
@@ -5134,7 +5136,7 @@ export interface BotcastPromptBuildArgs {
   cueDelivery?: BotcastProducerCueDelivery;
   interruptionBridgeLine?: string;
   departureRequired?: boolean;
-  /** The Producer stopped the rundown and the host gets one emergency sign-off. */
+  /** The Producer requested an expedited close after the current line finishes. */
   producerCut?: boolean;
 }
 
@@ -5694,7 +5696,7 @@ export function buildBotcastSpeakerPrompt(
     ? "Your interruption Power just cut the other speaker at the exact audience-heard prefix saved in the transcript. Take the mic immediately and continue from only those heard words. Do not invent, complete, paraphrase, or react to an unheard ending; do not name the Power or explain the cutoff."
     : null;
   const producerCutRule = producerCut
-    ? "The episode has been stopped unexpectedly and you have only one brief on-air beat to end it. Let a small, genuine flash of surprise register, recover immediately, and close with tact and warmth in your own voice. Use one or two very short sentences. Do not ask a question, recap the interview, invite another response, explain why the show is ending, or mention a producer, cue, control room, cut, technical problem, or instruction."
+    ? "The current speaker has finished and the episode now needs one prompt, natural closing beat. Close with tact and warmth in your own voice, without sounding interrupted or surprised. Use one or two very short sentences. Do not ask a question, recap the interview, invite another response, explain why the show is ending, or mention a producer, cue, control room, cut, technical problem, or instruction."
     : null;
   const echoingPeerTurnRule =
     args.speakerRole === "host" && priorPeerEchoTurnCount > 0
@@ -5769,7 +5771,7 @@ export function buildBotcastSpeakerPrompt(
             ? "There are no live producer cues or queue cards in this episode. Build the interview autonomously from the AI-synthesized plan and on-air answers."
             : "Private producer direction is silent control-room guidance. Incorporate it naturally; never quote it, mention a producer, or address the user.",
           producerCut
-            ? "End the broadcast right now. Sound briefly caught off guard, then thank the guest and/or listeners without extending the conversation."
+            ? "Close the broadcast promptly and naturally. Thank the guest and/or listeners without extending the conversation."
             : wrappingUp
             ? peerEchoesAddressedSpeech
               ? `Close the broadcast yourself now with one concise, topic-grounded takeaway and thank ${args.guest.name}. Do not invite another response; the guest can only repeat your words.`
@@ -5865,7 +5867,7 @@ export function buildBotcastSpeakerPrompt(
         "Speak only the on-air line. Never narrate the room, silence, pauses, body movement, facial expression, or your own delivery in third person; Signal schedules supported performance separately.",
         "Return only the next spoken line. No speaker label, no analysis, no camera directions, and no markdown.",
         producerCut
-            ? "Keep this emergency sign-off extremely brief: one or two short sentences, usually 8 to 28 spoken words."
+            ? "Keep this expedited sign-off extremely brief: one or two short sentences, usually 8 to 24 spoken words."
             : firstHostOpening
               ? "Keep this opening conversational and brisk: two to four concise sentences, usually 35 to 90 spoken words."
               : "Keep this turn conversational and brisk: one to three concise sentences, usually 12 to 45 spoken words.",
@@ -6093,6 +6095,40 @@ function sanitizeUtterance(
   return cleaned && !botcastUtteranceAppearsIncomplete(cleaned)
     ? cleaned
     : fallback;
+}
+
+const BOTCAST_NON_ANSWERING_DEFERRAL_PATTERNS = [
+  /^I (?:do not|don't) accept the premise(?: as stated)?(?:,\s*but)?\s+I(?:'ll| will) answer (?:the part|what)\b[^.!?…]*[.!?…]?$/iu,
+  /^(?:I\s+)?(?:reject|dispute|question) the premise(?: as stated)?[.;]?\s*(?:(?:but|however),?\s*)?I(?:'ll| will)\s+(?:answer|address|respond to|focus on)\b[^.!?…]*[.!?…]?$/iu,
+] as const;
+
+function validateBotcastAutoSpeakerUtterance(input: {
+  raw: string;
+  speakerName: string;
+  peerName: string;
+  speakerRole: BotcastSpeakerRole;
+}):
+  | { ok: true; value: string }
+  | { ok: false; reason: "empty" | "refusal" | "invalid_output" } {
+  const textValidation = validateAutoFallbackText(input.raw);
+  if (!textValidation.ok) return textValidation;
+  const sanitized = sanitizeUtterance(
+    textValidation.value,
+    "",
+    input.speakerName,
+    input.peerName,
+    input.speakerRole,
+  );
+  const spokenContent = extractBotcastVoicePerformance(sanitized, false).content;
+  if (
+    !spokenContent ||
+    BOTCAST_NON_ANSWERING_DEFERRAL_PATTERNS.some((pattern) =>
+      pattern.test(spokenContent),
+    )
+  ) {
+    return { ok: false, reason: "invalid_output" };
+  }
+  return { ok: true, value: textValidation.value };
 }
 
 const BOTCAST_AUDIENCE_ONLY_ABSENCE_PATTERN =
@@ -6604,8 +6640,6 @@ function beginBotcastProducerCut(
   };
 }
 
-export const BOTCAST_PRODUCER_FORCE_CUT_WINDOW_MS = 10_000;
-
 export function forceEndBotcastEpisode(
   db: DatabaseSync,
   userId: string,
@@ -6625,19 +6659,110 @@ export function forceEndBotcastEpisode(
   return getBotcastEpisode(db, userId, episode.id);
 }
 
+export type BotcastProducerCutAudienceCheckpoint = {
+  lastAudienceMessageId: string | null;
+  lastAudienceEventSequence: number;
+  audienceSegmentCount: number;
+};
+
+function restoreBotcastEpisodeToAudienceCheckpoint(
+  db: DatabaseSync,
+  userId: string,
+  episodeId: string,
+  checkpoint: BotcastProducerCutAudienceCheckpoint,
+): BotcastEpisode {
+  const episode = getBotcastEpisode(db, userId, episodeId);
+  const messageIndex = checkpoint.lastAudienceMessageId === null
+    ? -1
+    : episode.messages.findIndex(
+        (message) => message.id === checkpoint.lastAudienceMessageId,
+      );
+  if (checkpoint.lastAudienceMessageId !== null && messageIndex < 0) {
+    throw new Error("Signal cut checkpoint message is not in this episode.");
+  }
+  const latestEventSequence = episode.events.at(-1)?.sequence ?? 0;
+  if (
+    !Number.isInteger(checkpoint.lastAudienceEventSequence) ||
+    checkpoint.lastAudienceEventSequence < 0 ||
+    checkpoint.lastAudienceEventSequence > latestEventSequence
+  ) {
+    throw new Error("Signal cut checkpoint event sequence is invalid.");
+  }
+  if (
+    !Number.isInteger(checkpoint.audienceSegmentCount) ||
+    checkpoint.audienceSegmentCount < 1 ||
+    checkpoint.audienceSegmentCount > episode.segments.length
+  ) {
+    throw new Error("Signal cut checkpoint segment count is invalid.");
+  }
+  const retainedSegment = episode.segments[checkpoint.audienceSegmentCount - 1];
+  if (!retainedSegment) {
+    throw new Error("Signal cut checkpoint segment is missing.");
+  }
+  const unspokenMessageIds = episode.messages
+    .slice(messageIndex + 1)
+    .map((message) => message.id);
+  const now = new Date().toISOString();
+  db.exec("BEGIN");
+  try {
+    db.prepare(
+      `DELETE FROM botcast_events
+        WHERE user_id = ? AND episode_id = ? AND sequence > ?`,
+    ).run(userId, episodeId, checkpoint.lastAudienceEventSequence);
+    const deleteMessage = db.prepare(
+      "DELETE FROM botcast_messages WHERE id = ? AND user_id = ? AND episode_id = ?",
+    );
+    for (const messageId of unspokenMessageIds) {
+      deleteMessage.run(messageId, userId, episodeId);
+    }
+    db.prepare(
+      `DELETE FROM botcast_episode_segments
+        WHERE user_id = ? AND episode_id = ? AND ordinal >= ?`,
+    ).run(userId, episodeId, checkpoint.audienceSegmentCount);
+    db.prepare(
+      `UPDATE botcast_episode_segments
+          SET ended_at = NULL
+        WHERE user_id = ? AND episode_id = ? AND ordinal = ?`,
+    ).run(userId, episodeId, checkpoint.audienceSegmentCount - 1);
+    db.prepare(
+      `UPDATE botcast_episodes
+          SET segment = ?, updated_at = ?
+        WHERE id = ? AND user_id = ? AND status = 'live'`,
+    ).run(retainedSegment.segment, now, episodeId, userId);
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+  return getBotcastEpisode(db, userId, episodeId);
+}
+
 /**
- * Force-cuts and discards the archive during the first ten on-air seconds.
- * After that, gives an eligible cast member one emergency closing beat.
+ * Gives an eligible cast member one expedited closing beat after the current
+ * on-air line has finished. The recording is always retained.
  * Hard speech restrictions remain authoritative. Provider failures fall back
- * to the prior hard cut so the studio cannot hang.
+ * to a completed archive so the studio cannot hang.
  */
 export async function endBotcastEpisodeOnProducerCut(
   db: DatabaseSync,
   userId: string,
   episodeId: string,
   generation: BotcastGenerationOptions,
-  options: { onAirElapsedMs?: number } = {},
+  options: {
+    audienceCheckpoint?: BotcastProducerCutAudienceCheckpoint;
+  } = {},
 ): Promise<BotcastEpisodeAdvanceResponse> {
+  if (options.audienceCheckpoint) {
+    const current = getBotcastEpisode(db, userId, episodeId);
+    if (current.status !== "completed") {
+      restoreBotcastEpisodeToAudienceCheckpoint(
+        db,
+        userId,
+        episodeId,
+        options.audienceCheckpoint,
+      );
+    }
+  }
   const cut = beginBotcastProducerCut(db, userId, episodeId);
   if (!cut.started) {
     return {
@@ -6646,22 +6771,6 @@ export async function endBotcastEpisodeOnProducerCut(
           ? cut.episode
           : forceEndBotcastEpisode(db, userId, episodeId),
       message: null,
-    };
-  }
-  if (
-    typeof options.onAirElapsedMs === "number" &&
-    Number.isFinite(options.onAirElapsedMs) &&
-    Math.max(0, options.onAirElapsedMs) <
-      BOTCAST_PRODUCER_FORCE_CUT_WINDOW_MS
-  ) {
-    const episode = forceEndBotcastEpisode(db, userId, episodeId);
-    if (!deleteBotcastEpisode(db, userId, episodeId)) {
-      throw new Error("Signal could not discard the early-cut episode.");
-    }
-    return {
-      episode,
-      message: null,
-      discarded: true,
     };
   }
   try {
@@ -7381,6 +7490,17 @@ export async function advanceBotcastEpisode(
       })),
       perAttemptTimeoutMs: 60_000,
       totalTimeoutMs: resolvedChain.length * 60_000,
+      ...(speakerIsMutedForTurn
+        ? {}
+        : {
+            validate: (candidate: string) =>
+              validateBotcastAutoSpeakerUtterance({
+                raw: candidate,
+                speakerName: speaker.name,
+                peerName: peer.name,
+                speakerRole,
+              }),
+          }),
     });
     raw = result.value;
     providerUsed = result.provider;
@@ -7541,7 +7661,7 @@ export async function advanceBotcastEpisode(
           : "I can see your reaction, but I will not put words to it."
       : null;
   const producerCutFallback = producerCut
-    ? "Oh—we're ending here. Thank you for joining us, and thank you for listening."
+    ? "We'll leave it there. Thank you for joining us, and thank you for listening."
     : null;
   const echoHostGuestCutFallback =
     producerCut &&

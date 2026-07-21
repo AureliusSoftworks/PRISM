@@ -1,6 +1,7 @@
 import {
   BOT_AUDIO_VOICE_PACE_RATE_DEPTH,
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+  botcastSignalStandardCadenceDurationMs,
   normalizeBotAudioVoiceProfileV1,
   normalizeBotVoiceVolume,
   type BotAudioVoiceProfileV1,
@@ -50,11 +51,6 @@ export interface BottishPlaybackTiming {
 const MEDIA_PLAY_START_TIMEOUT_MS = 1500;
 const BOTTISH_SAMPLE_RATE = 24_000;
 const MAX_ROBOT_VOICE_COMPRESSION_RATE = 1.24;
-const SIGNAL_ENGLISH_WORD_DURATION_MS = 350;
-const SIGNAL_ENGLISH_STRONG_PAUSE_MS = 160;
-const SIGNAL_ENGLISH_SOFT_PAUSE_MS = 70;
-const SIGNAL_ENGLISH_MIN_UTTERANCE_MS = 720;
-const SIGNAL_ENGLISH_MAX_UTTERANCE_MS = 24_000;
 
 /** Keep the persisted field for profile/back-up compatibility, but do not let
  * legacy or randomized tone values change Bottish gain or processing. */
@@ -70,31 +66,13 @@ export function normalizeBottishPlaybackProfile(
   };
 }
 
-/** Estimate the neutral-tempo English window for a Signal line. Signal uses
- * this only to rein in robot modes that run materially longer than the same
- * spoken line; the hard compression ceiling keeps either mode intelligible. */
+/** Fit robot speech to Signal's shared Premium-calibrated cadence without
+ * exceeding the hard compression ceiling required for intelligibility. */
 export function signalRobotVoiceCadenceTiming(
   text: string,
 ): BottishPlaybackTiming {
-  const wordCount = Math.max(
-    1,
-    text.match(/[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu)?.length ?? 0,
-  );
-  const strongPauseCount = text.match(/[.!?]+/gu)?.length ?? 0;
-  const softPauseCount = text.match(/[,;:]+/gu)?.length ?? 0;
-  const targetDurationMs = Math.min(
-    SIGNAL_ENGLISH_MAX_UTTERANCE_MS,
-    Math.max(
-      SIGNAL_ENGLISH_MIN_UTTERANCE_MS,
-      Math.round(
-        wordCount * SIGNAL_ENGLISH_WORD_DURATION_MS +
-          strongPauseCount * SIGNAL_ENGLISH_STRONG_PAUSE_MS +
-          softPauseCount * SIGNAL_ENGLISH_SOFT_PAUSE_MS,
-      ),
-    ),
-  );
   return {
-    targetDurationMs,
+    targetDurationMs: botcastSignalStandardCadenceDurationMs(text),
     maximumCompressionRate: MAX_ROBOT_VOICE_COMPRESSION_RATE,
   };
 }

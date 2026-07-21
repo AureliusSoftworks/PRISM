@@ -20,7 +20,6 @@ import {
   BOTCAST_PRODUCER_GUEST_ID,
   BOTCAST_PRODUCER_GUEST_NAME,
   BOTCAST_PRODUCER_GUEST_THINKING_TIME_SCALE,
-  BOTCAST_DIRECTOR_MIN_SHOT_MS,
   BOTCAST_SESSION_DURATION_MINUTES_MAX,
   BOTCAST_SESSION_DURATION_MINUTES_MIN,
   BOTCAST_VOICE_LEVEL_MAX,
@@ -54,6 +53,7 @@ import {
   botcastProducerGuestThinkingDiscountMs,
   botcastReplayMessageIndexAt,
   botcastReplayTimeline,
+  botcastSignalStandardCadenceDurationMs,
   botcastStrongestNegativeSocialInfluenceAt,
   botcastSnapshotPowersForRoleV1,
   botcastVoiceLevelForBot,
@@ -95,10 +95,6 @@ import {
 } from "@localai/shared";
 import { PRISM_APP_VERSION } from "../prismAppVersion";
 import { INTERRUPTED_SPEAKER_RETORT_PAUSE_MS } from "./listenerReactionVoice";
-import {
-  buildDeadAirAsidePlanV1,
-  type DeadAirAsidePlanV1,
-} from "./deadAirAside";
 import { Dices, LoaderCircle } from "lucide-react";
 import {
   buildCoffeeCupVisualState,
@@ -286,8 +282,6 @@ export interface BotcastApiRequest {
 
 const SIGNAL_NATURAL_HANDOFF_MS = 40;
 const SIGNAL_NOTICE_TOAST_MS = 7_000;
-const SIGNAL_DEAD_AIR_ASIDE_DELAY_MS = 3_800;
-const SIGNAL_DEAD_AIR_ASIDE_MIN_VISIBLE_MS = 2_600;
 const SIGNAL_EPISODE_PRE_ROLL_MIN_MS = 4_200;
 const SIGNAL_ATMOSPHERE_BUSES = [
   {
@@ -441,12 +435,6 @@ export interface BotcastExperienceProps {
     stereoPan: number,
     retortDelayMs?: number,
   ) => boolean | Promise<boolean>;
-  onDeadAirAside?: (
-    plan: DeadAirAsidePlanV1,
-    bot: BotcastBotSummary,
-    onlineVoiceEnabled: boolean,
-    stereoPan: number,
-  ) => boolean | Promise<boolean>;
   onPrepareUtterance?: () => void;
   onStopUtterance?: () => void;
   onProducerGuestActionSfx?: (message: BotcastMessage) => void;
@@ -480,7 +468,13 @@ type SignalEpisodeOutro = {
   showName: string;
   phase: "curtain" | "holding" | "complete";
   forced: boolean;
-  discarded: boolean;
+};
+
+type SignalPendingCutRequest = {
+  episodeId: string;
+  waitForOutro: boolean;
+  promise: Promise<boolean>;
+  resolve: (completed: boolean) => void;
 };
 
 const SIGNAL_EPISODE_OUTRO_DEAD_AIR_MS = 2_000;
@@ -646,13 +640,6 @@ function deleteConfirmationCopy(target: SignalDeleteTarget): {
       title: `Delete “${target.name}”?`,
       body: `This permanently removes the show${archiveCopy}. Saved studio and logo artwork stays in Images.`,
       action: "Delete show",
-    };
-  }
-  if (target.status === "live") {
-    return {
-      title: `Discard “${target.title}”?`,
-      body: "This stops the rundown and permanently removes the live episode, its transcript, and producer cues. The show stays.",
-      action: "Discard episode",
     };
   }
   return {
@@ -1022,7 +1009,6 @@ export function BotcastExperience({
   onPrefetchUtterance,
   onPrefetchListenerReaction,
   onListenerReaction,
-  onDeadAirAside,
   onPrepareUtterance,
   onStopUtterance,
   onProducerGuestActionSfx,
@@ -1118,8 +1104,6 @@ export function BotcastExperience({
   );
   const [liveSpeech, setLiveSpeech] = useState<BotcastLiveSpeech | null>(null);
   const [hostInterruptionOrdinal, setHostInterruptionOrdinal] = useState(0);
-  const [signalDeadAirAside, setSignalDeadAirAside] =
-    useState<DeadAirAsidePlanV1 | null>(null);
   const [signalStageNowMs, setSignalStageNowMs] = useState(() => Date.now());
   const [episodePreRoll, setEpisodePreRoll] =
     useState<SignalEpisodePreRoll | null>(null);
@@ -1212,7 +1196,8 @@ export function BotcastExperience({
   const hostChatCloudRef = useRef<HTMLDivElement | null>(null);
   const hostChatComposerRef = useRef<HTMLTextAreaElement | null>(null);
   const hostChatRequestSequenceRef = useRef(0);
-  const cuttingShowRef = useRef(false);
+  const pendingCutRef = useRef<SignalPendingCutRequest | null>(null);
+  const cutExecutionRef = useRef(false);
   const replayVoiceMessageIdRef = useRef<string | null>(null);
   const replayVoiceRunIdRef = useRef(0);
   const listenerReactionPlanByMessageIdRef = useRef(
@@ -1220,8 +1205,6 @@ export function BotcastExperience({
   );
   const listenerReactionAtMsByMessageIdRef = useRef(new Map<string, number>());
   const liveListenerReactionFiredRef = useRef(new Set<string>());
-  const signalDeadAirAsideTimerRef = useRef<number | null>(null);
-  const signalDeadAirAsideTurnIdsRef = useRef(new Set<string>());
   const liveCameraPostSpeechHoldTimerRef = useRef<number | null>(null);
   const replayListenerReactionFiredRef = useRef(new Set<string>());
   const deleteCancelButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -1689,7 +1672,6 @@ export function BotcastExperience({
       episode: BotcastEpisode;
       show: BotcastShow;
       forced: boolean;
-      discarded?: boolean;
     }): Promise<void> => {
       if (presentedEpisodeOutroIdsRef.current.has(args.episode.id)) return;
       presentedEpisodeOutroIdsRef.current.add(args.episode.id);
@@ -1707,7 +1689,6 @@ export function BotcastExperience({
         showName: args.show.name,
         phase: "curtain",
         forced: args.forced,
-        discarded: args.discarded === true,
       });
       const playback = playSignalOutroAudio({
         seed: `${args.show.id}:${args.episode.id}:${args.show.logo.seed}`,
@@ -1763,11 +1744,6 @@ export function BotcastExperience({
     setAutoRun(false);
     setBusy(false);
     setEpisodePreRoll(null);
-    if (signalDeadAirAsideTimerRef.current !== null) {
-      window.clearTimeout(signalDeadAirAsideTimerRef.current);
-      signalDeadAirAsideTimerRef.current = null;
-    }
-    setSignalDeadAirAside(null);
     assignSignalModelWarmup(null);
     signalModelWarmupVisibleRef.current = false;
     stopEpisodeOutro();
@@ -2576,85 +2552,177 @@ export function BotcastExperience({
     [request],
   );
 
-  const cutShow = useCallback(
-    async (options: { waitForOutro?: boolean } = {}): Promise<boolean> => {
-      if (
-        !episode ||
-        episode.status === "completed" ||
-        !selectedShow ||
-        cuttingShowRef.current
-      )
-        return false;
-      const episodeId = episode.id;
-      cuttingShowRef.current = true;
-      invalidateEpisodeOperation();
-      const { controller, runId } = beginEpisodeOperation();
-      setCuttingShow(true);
-      setBusy(true);
-      setError(null);
-      try {
-        const response = await request<BotcastEpisodeAdvanceResponse>(
-          `/api/botcast/episodes/${encodeURIComponent(episodeId)}/end`,
-          {
-            method: "POST",
-            signal: controller.signal,
-            body: JSON.stringify({
-              onAirElapsedMs: signalEpisodeRuntimeMs(
-                episode,
-                Date.now(),
-                producerGuestThinkingStartedAtRef.current,
-                producerGuestThinkingEndedAtRef.current,
-              ),
-            }),
-          },
-        );
-        if (!episodeOperationIsCurrent(controller, runId)) return false;
-        setEpisode(response.episode);
-        setAutoRun(false);
-        if (response.message) {
-          prepareEpisodeMessageRef.current(response.message, response.episode);
-          await playPreparedEpisodeMessageRef.current(
-            response.message,
-            response.episode,
-            controller,
-            runId,
-            false,
-          );
-          if (!episodeOperationIsCurrent(controller, runId)) return false;
-        }
-        const outro = playEpisodeOutro({
-          episode: response.episode,
-          show: selectedShow,
-          forced: true,
-          discarded: response.discarded === true,
-        });
-        if (selectedShowId) {
-          void loadEpisodes(selectedShowId).catch(() => undefined);
-        }
-        if (options.waitForOutro) await outro;
-        else void outro;
-        return true;
-      } catch (cutError) {
-        setError(signalErrorToast("Cut live show", cutError));
-        return false;
-      } finally {
-        cuttingShowRef.current = false;
-        setCuttingShow(false);
-        setBusy(false);
+  const settlePendingCut = useCallback(
+    (pending: SignalPendingCutRequest, completed: boolean): void => {
+      if (pendingCutRef.current !== pending) return;
+      pendingCutRef.current = null;
+      cutExecutionRef.current = false;
+      setCuttingShow(false);
+      pending.resolve(completed);
+    },
+    [],
+  );
+
+  const performCutShow = useCallback(async (): Promise<void> => {
+    const pending = pendingCutRef.current;
+    if (
+      !pending ||
+      cutExecutionRef.current ||
+      !episode ||
+      episode.id !== pending.episodeId ||
+      episode.status === "completed" ||
+      !selectedShow
+    )
+      return;
+    cutExecutionRef.current = true;
+    invalidateEpisodeOperation();
+    const { controller, runId } = beginEpisodeOperation();
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await request<BotcastEpisodeAdvanceResponse>(
+        `/api/botcast/episodes/${encodeURIComponent(episode.id)}/end`,
+        {
+          method: "POST",
+          signal: controller.signal,
+          body: JSON.stringify({
+            lastAudienceMessageId: episode.messages.at(-1)?.id ?? null,
+            lastAudienceEventSequence: episode.events.at(-1)?.sequence ?? 0,
+            audienceSegmentCount: episode.segments.length,
+          }),
+        },
+      );
+      if (!episodeOperationIsCurrent(controller, runId)) {
+        settlePendingCut(pending, false);
+        return;
       }
+      setEpisode(response.episode);
+      setAutoRun(false);
+      if (response.message) {
+        prepareEpisodeMessageRef.current(response.message, response.episode);
+        await playPreparedEpisodeMessageRef.current(
+          response.message,
+          response.episode,
+          controller,
+          runId,
+          false,
+        );
+        if (!episodeOperationIsCurrent(controller, runId)) {
+          settlePendingCut(pending, false);
+          return;
+        }
+      }
+      const outro = playEpisodeOutro({
+        episode: response.episode,
+        show: selectedShow,
+        forced: true,
+      });
+      if (selectedShowId) {
+        void loadEpisodes(selectedShowId).catch(() => undefined);
+      }
+      if (pending.waitForOutro) await outro;
+      else void outro;
+      settlePendingCut(pending, true);
+    } catch (cutError) {
+      if (episodeOperationIsCurrent(controller, runId)) {
+        setError(signalErrorToast("Close live show", cutError));
+      }
+      settlePendingCut(pending, false);
+    } finally {
+      if (episodeOperationIsCurrent(controller, runId)) {
+        episodeOperationAbortRef.current = null;
+      }
+      setBusy(false);
+    }
+  }, [
+    beginEpisodeOperation,
+    episode,
+    episodeOperationIsCurrent,
+    invalidateEpisodeOperation,
+    loadEpisodes,
+    playEpisodeOutro,
+    request,
+    selectedShow,
+    selectedShowId,
+    settlePendingCut,
+  ]);
+
+  const cutShow = useCallback(
+    (options: { waitForOutro?: boolean } = {}): Promise<boolean> => {
+      if (!episode || episode.status === "completed" || !selectedShow) {
+        return Promise.resolve(false);
+      }
+      const existing = pendingCutRef.current;
+      if (existing) {
+        if (options.waitForOutro) existing.waitForOutro = true;
+        return existing.promise;
+      }
+      let resolve!: (completed: boolean) => void;
+      const promise = new Promise<boolean>((complete) => {
+        resolve = complete;
+      });
+      const pending: SignalPendingCutRequest = {
+        episodeId: episode.id,
+        waitForOutro: options.waitForOutro === true,
+        promise,
+        resolve,
+      };
+      pendingCutRef.current = pending;
+      setCuttingShow(true);
+      setAutoRun(false);
+      assignQueuedProducerCue(null);
+      preparedAdvanceRef.current?.controller.abort();
+      preparedAdvanceRef.current = null;
+      if (
+        activeSpeechMessageIdRef.current === null &&
+        speakingMessageId === null
+      ) {
+        invalidateEpisodeOperation();
+      }
+      return promise;
     },
     [
-      beginEpisodeOperation,
+      assignQueuedProducerCue,
       episode,
-      episodeOperationIsCurrent,
       invalidateEpisodeOperation,
-      loadEpisodes,
-      playEpisodeOutro,
-      request,
       selectedShow,
-      selectedShowId,
+      speakingMessageId,
     ],
   );
+
+  useEffect(() => {
+    const pending = pendingCutRef.current;
+    if (!pending || cutExecutionRef.current) return;
+    if (!episode || episode.id !== pending.episodeId || !selectedShow) {
+      settlePendingCut(pending, false);
+      return;
+    }
+    if (
+      speakingMessageId !== null ||
+      activeSpeechMessageIdRef.current !== null ||
+      busy
+    )
+      return;
+    if (episode.status === "completed") {
+      if (
+        !pending.waitForOutro ||
+        (episodeOutro?.episodeId === episode.id &&
+          episodeOutro.phase === "complete")
+      ) {
+        settlePendingCut(pending, true);
+      }
+      return;
+    }
+    void performCutShow();
+  }, [
+    busy,
+    episode,
+    episodeOutro,
+    performCutShow,
+    selectedShow,
+    settlePendingCut,
+    speakingMessageId,
+  ]);
 
   useEffect(() => {
     let active = true;
@@ -3072,6 +3140,7 @@ export function BotcastExperience({
     item: Pick<BotcastEpisodeSummary, "id" | "showId" | "title" | "status">,
     opener: HTMLElement,
   ): void => {
+    if (item.status !== "completed") return;
     resetEpisodePlayback();
     deleteReturnFocusRef.current = opener;
     setDeleteError(null);
@@ -3174,16 +3243,13 @@ export function BotcastExperience({
           },
         );
         resetEpisodePlayback();
+        if (episodeOutro?.episodeId === target.id) stopEpisodeOutro();
         setEpisode((current) => (current?.id === target.id ? null : current));
         setReplayEpisode((current) =>
           current?.id === target.id ? null : current,
         );
         await Promise.all([loadShows(), loadEpisodes(target.showId)]);
-        setNotice(
-          target.status === "live"
-            ? `“${target.title}” discarded.`
-            : `“${target.title}” deleted from the archive.`,
-        );
+        setNotice(`“${target.title}” deleted from the archive.`);
       }
       setDeleteTarget(null);
     } catch (deleteRequestError) {
@@ -4054,16 +4120,9 @@ export function BotcastExperience({
           await releaseSignalModelWarmup(unstartedEpisodeId);
         }
         if (unstartedEpisodeId && !openingMessageReceived) {
-          try {
-            await request(
-              `/api/botcast/episodes/${encodeURIComponent(unstartedEpisodeId)}`,
-              { method: "DELETE" },
-            );
-            setEpisode(null);
-            void loadEpisodes(selectedShow.id).catch(() => undefined);
-          } catch {
-            // Keep the original startup error; the archive can still be discarded manually.
-          }
+          // Keep the failed start available in Signal so the Producer can
+          // retry it or finish it through the same graceful Cut show path.
+          void loadEpisodes(selectedShow.id).catch(() => undefined);
         }
         setError(signalErrorToast("Start Signal episode", startError));
       }
@@ -4195,13 +4254,12 @@ export function BotcastExperience({
       onProgress?: (elapsedMs: number, durationMs: number) => void,
     ): Promise<void> => {
       const messageId = message.id;
-      const tokenCount = Math.max(
-        1,
-        (message.stageActionText ?? message.content).trim().split(/\s+/u).length,
-      );
-      const durationMs = Math.min(
-        6_500,
-        Math.max(message.stageActionText ? 1_800 : 720, tokenCount * 175),
+      const pacingText = botPowerResponseIsSilentV1(message.content)
+        ? message.content
+        : (message.stageActionText ?? message.content);
+      const durationMs = Math.max(
+        message.stageActionText ? 1_800 : 0,
+        botcastSignalStandardCadenceDurationMs(pacingText),
       );
       armListenerReactionTiming(message, durationMs);
       setLiveSpeech({
@@ -4239,7 +4297,6 @@ export function BotcastExperience({
 
   const prepareEpisodeMessage = useCallback(
     (message: BotcastMessage, currentEpisode: BotcastEpisode): void => {
-      setSignalDeadAirAside(null);
       activeSpeechMessageIdRef.current = message.id;
       cacheListenerReactionPlan(currentEpisode, message);
       let bot = botsById.get(message.botId);
@@ -4310,6 +4367,7 @@ export function BotcastExperience({
         if (
           !prepareFollowingTurn ||
           guestResponsePrepared ||
+          pendingCutRef.current !== null ||
           message.speakerRole !== "host"
         )
           return;
@@ -4748,6 +4806,7 @@ export function BotcastExperience({
           ));
         if (interruptionBridgePlayback) {
           await interruptionBridgePlayback;
+          if (pendingCutRef.current) return true;
         }
         if (!episodeOperationIsCurrent(controller, runId)) return false;
         if (requestedCue && queuedProducerCueRef.current === requestedCue) {
@@ -4788,6 +4847,7 @@ export function BotcastExperience({
             false,
           );
           if (!episodeOperationIsCurrent(controller, runId)) return false;
+          if (pendingCutRef.current) return true;
         }
         setEpisode(response.episode);
         if (response.message) {
@@ -4966,97 +5026,6 @@ export function BotcastExperience({
       producerGuestThinkingEndedAtRef.current = null;
     }
   }, [busy, episode, speakingMessageId]);
-
-  useEffect(() => {
-    if (signalDeadAirAsideTimerRef.current !== null) {
-      window.clearTimeout(signalDeadAirAsideTimerRef.current);
-      signalDeadAirAsideTimerRef.current = null;
-    }
-    if (
-      !busy ||
-      speakingMessageId !== null ||
-      !episode ||
-      episode.status !== "live" ||
-      episode.guestKind === "producer" ||
-      episode.segment !== "interview" ||
-      episode.guestPresenceMode !== "present" ||
-      signalModelWarmup !== null
-    ) {
-      if (!busy) setSignalDeadAirAside(null);
-      return;
-    }
-    const guestDeparted = guestHasDeparted(episode);
-    const thinkingRole = botcastNextSpeakerRole({
-      messages: episode.messages,
-      segment: episode.segment,
-      guestDeparted,
-    });
-    if (!thinkingRole) return;
-    const commentatorRole = thinkingRole === "host" ? "guest" : "host";
-    if (commentatorRole === "guest" && guestDeparted) return;
-    const thinkingBot = thinkingRole === "host" ? hostBot : liveGuestBot;
-    const commentator = commentatorRole === "host" ? hostBot : liveGuestBot;
-    if (!thinkingBot || !commentator || thinkingBot.muted || commentator.muted)
-      return;
-    const lastMessageId = episode.messages.at(-1)?.id ?? "opening";
-    const turnId = `${episode.id}:${lastMessageId}:${thinkingRole}`;
-    if (signalDeadAirAsideTurnIdsRef.current.has(turnId)) return;
-    signalDeadAirAsideTimerRef.current = window.setTimeout(() => {
-      signalDeadAirAsideTimerRef.current = null;
-      const commentatorMessage = [...episode.messages]
-        .reverse()
-        .find((message) => message.botId === commentator.id);
-      const plan = buildDeadAirAsidePlanV1({
-        mode: "signal",
-        turnId,
-        thinkingBotId: thinkingBot.id,
-        thinkingBotName: thinkingBot.name,
-        commentatorBotId: commentator.id,
-        mood: commentatorMessage?.moodKey ?? "neutral",
-        temperament: commentator.personaTemperament,
-      });
-      if (!plan) return;
-      signalDeadAirAsideTurnIdsRef.current.add(turnId);
-      setSignalDeadAirAside(plan);
-      const visibleMinimum = new Promise<void>((resolve) => {
-        window.setTimeout(resolve, SIGNAL_DEAD_AIR_ASIDE_MIN_VISIBLE_MS);
-      });
-      const voice = onDeadAirAside
-        ? Promise.resolve(
-            onDeadAirAside(
-              plan,
-              commentator,
-              episode.responseMode !== "local" &&
-                commentator.online_enabled !== 0,
-              signalStudioVoicePan(
-                selectedShow?.studioLayout,
-                commentatorRole,
-              ),
-            ),
-          ).catch(() => false)
-        : Promise.resolve(false);
-      void Promise.all([voice, visibleMinimum]).then(() => {
-        setSignalDeadAirAside((current) =>
-          current?.seed === plan.seed ? null : current,
-        );
-      });
-    }, SIGNAL_DEAD_AIR_ASIDE_DELAY_MS);
-    return () => {
-      if (signalDeadAirAsideTimerRef.current !== null) {
-        window.clearTimeout(signalDeadAirAsideTimerRef.current);
-        signalDeadAirAsideTimerRef.current = null;
-      }
-    };
-  }, [
-    busy,
-    episode,
-    hostBot,
-    liveGuestBot,
-    onDeadAirAside,
-    selectedShow,
-    signalModelWarmup,
-    speakingMessageId,
-  ]);
 
   const leaveInitialSignalWarmup = async (): Promise<void> => {
     const episodeId =
@@ -5969,29 +5938,13 @@ export function BotcastExperience({
         listenerReactionPlan?.listenerBotId ===
           (role === "host" ? args.host?.id : args.guest?.id),
       );
-    const deadAirAsideRole =
-      !args.replay && signalDeadAirAside
-        ? signalDeadAirAside.commentatorBotId === args.host?.id && !args.host?.muted
-          ? "host"
-          : signalDeadAirAside.commentatorBotId === args.guest?.id && !args.guest?.muted
-            ? "guest"
-            : null
-        : null;
-    const roleIsDeadAirAsideSpeaking = (role: "host" | "guest"): boolean =>
-      Boolean(
-        deadAirAsideRole === role &&
-        !(role === "host" ? args.host?.muted : args.guest?.muted) &&
-        busy &&
-        args.activeMessage === null,
-      );
     const roleIsSpeaking = (role: "host" | "guest"): boolean =>
       Boolean(
-        (speechIsPlaying &&
+        speechIsPlaying &&
           botcastMessageIsAudibleToAudienceV1(args.activeMessage ?? {}) &&
           !botPowerResponseIsSilentV1(args.activeMessage?.content) &&
           (args.replay || botcastSpeechRevealIsVoicing(speechReveal) !== false) &&
-          args.activeMessage?.speakerRole === role) ||
-          roleIsDeadAirAsideSpeaking(role),
+          args.activeMessage?.speakerRole === role,
       );
     const roleAvatarScaleMode = (
       role: "host" | "guest",
@@ -6153,8 +6106,8 @@ export function BotcastExperience({
       sipping: boolean,
     ): ReactNode => {
       const mouthShape =
-        talking && (args.activeMessage || signalDeadAirAside)
-        ? args.activeMessage && speechDurationMs > 0
+        talking && args.activeMessage
+        ? speechDurationMs > 0
           ? crtSpeechMouthShapeAtAlignedElapsedMs({
               text: args.activeMessage.content,
               elapsedMs: speechElapsedMs,
@@ -6162,7 +6115,7 @@ export function BotcastExperience({
               alignment: speechReveal?.alignment,
             })
           : crtSpeechMouthShapeAtElapsedMs({
-              text: signalDeadAirAside?.text ?? "",
+              text: args.activeMessage.content,
               elapsedMs: signalStageNowMs,
             })
         : "closed";
@@ -6232,9 +6185,24 @@ export function BotcastExperience({
               />
             ) : null}
           </div>
-          <div className={styles.wordmark}>
+          <div
+            className={styles.wordmark}
+            data-signal-cast-credit="true"
+          >
             <SignalShowLogo show={args.show} />
-            <strong>{args.show.name}</strong>
+            <div
+              className={styles.stageCastCredit}
+              aria-label={`With ${args.host?.name ?? "Host"}, featuring ${args.guest?.name ?? "Guest"}`}
+            >
+              <span>
+                <small>with</small>
+                <strong>{args.host?.name ?? "Host"}</strong>
+              </span>
+              <span>
+                <small>featuring</small>
+                <strong>{args.guest?.name ?? "Guest"}</strong>
+              </span>
+            </div>
           </div>
           <div className={styles.studioGlow} aria-hidden="true" />
           {socialPressure ? (
@@ -6318,15 +6286,6 @@ export function BotcastExperience({
                       listenerReactionActionLabel(
                         listenerReactionPlan.visualAction,
                       )}
-                  </span>
-                ) : null}
-                {deadAirAsideRole === "host" && signalDeadAirAside ? (
-                  <span
-                    className={`${styles.listenerReactionText} ${styles.deadAirAsideText}`}
-                    role="status"
-                    aria-label={`${args.host.name}: ${signalDeadAirAside.text}`}
-                  >
-                    {signalDeadAirAside.text}
                   </span>
                 ) : null}
               </div>
@@ -6462,15 +6421,6 @@ export function BotcastExperience({
                       )}
                   </span>
                 ) : null}
-                {deadAirAsideRole === "guest" && signalDeadAirAside ? (
-                  <span
-                    className={`${styles.listenerReactionText} ${styles.deadAirAsideText}`}
-                    role="status"
-                    aria-label={`${args.guest.name}: ${signalDeadAirAside.text}`}
-                  >
-                    {signalDeadAirAside.text}
-                  </span>
-                ) : null}
               </div>
             </div>
           ) : null}
@@ -6543,10 +6493,6 @@ export function BotcastExperience({
                 Host has left the studio
               </span>
             ) : null}
-            <strong className={styles.nameplate}>
-              <span>Host</span>
-              {args.host?.name ?? "Host"}
-            </strong>
           </div>
           <div
             className={`${styles.seat} ${styles.guestSeat}`}
@@ -6562,10 +6508,6 @@ export function BotcastExperience({
                 Guest has left the studio
               </span>
             ) : null}
-            <strong className={styles.nameplate}>
-              <span>{guestHiddenFromAudience ? "Booked guest" : "Guest"}</span>
-              {args.guest?.name ?? "Guest"}
-            </strong>
           </div>
         </div>
         {delayedLiveCaption && delayedLiveCaptionSpeaker && args.activeMessage ? (
@@ -7549,17 +7491,6 @@ export function BotcastExperience({
                   : episodeOutcomeLabel(item)}
               </small>
             </button>
-            <button
-              type="button"
-              className={styles.episodeDeleteButton}
-              onClick={(event) =>
-                openEpisodeDeletion(item, event.currentTarget)
-              }
-              disabled={busy}
-              aria-label={`${item.status === "live" ? "Discard" : "Delete"} episode ${item.title}`}
-            >
-              {item.status === "live" ? "Discard" : "Delete"}
-            </button>
           </article>
         ))}
       </div>
@@ -7595,14 +7526,9 @@ export function BotcastExperience({
       );
     }
     const lastIndex = episode.messages.length - 1;
-    const lastMessage = episode.messages[lastIndex]!;
-    const wordCount = lastMessage.content.split(/\s+/u).filter(Boolean).length;
     return Math.max(
       0,
-      Math.round(
-        (timeline.messageStartMs[lastIndex] ?? 0) +
-          Math.max(BOTCAST_DIRECTOR_MIN_SHOT_MS, wordCount * 310),
-      ),
+      Math.round(timeline.messageEndMs[lastIndex] ?? 0),
     );
   })();
   const liveCameraMode = episode
@@ -8139,9 +8065,7 @@ export function BotcastExperience({
           </div>
           <div className={styles.preRollLockup}>
             <span className={styles.preRollEyebrow}>
-              {episodeOutro.discarded
-                ? "Signal transmission discarded"
-                : episodeOutro.forced
+              {episodeOutro.forced
                 ? "Signal transmission cut"
                 : "Signal transmission complete"}
             </span>
@@ -8150,30 +8074,40 @@ export function BotcastExperience({
             </div>
             <h1>{episodeOutro.showName}</h1>
               <p>
-                {episodeOutro.discarded
-                  ? "Early cut · not saved"
-                  : episodeOutro.forced
+                {episodeOutro.forced
                     ? "Cut by producer"
                     : "End of episode"}
               </p>
             <small>Signal</small>
           </div>
-            {!episodeOutro.discarded &&
-            episode?.id === episodeOutro.episodeId &&
-            episode.status === "completed" ? (
-              <button
-                type="button"
-                className={styles.episodeReviewCopyButton}
-                onClick={() => void copyEpisodeForReview(episode)}
-                disabled={
-                  reviewCopyState?.episodeId === episode.id &&
-                  reviewCopyState.phase === "copying"
-                }
-                aria-live="polite"
-              >
-                {signalReviewCopyLabel(reviewCopyState, episode.id)}
-              </button>
-            ) : null}
+            <div className={styles.episodeOutroActions}>
+              {episode?.id === episodeOutro.episodeId &&
+              episode.status === "completed" ? (
+                <>
+                  <button
+                    type="button"
+                    className={styles.episodeReviewCopyButton}
+                    onClick={() => void copyEpisodeForReview(episode)}
+                    disabled={
+                      reviewCopyState?.episodeId === episode.id &&
+                      reviewCopyState.phase === "copying"
+                    }
+                    aria-live="polite"
+                  >
+                    {signalReviewCopyLabel(reviewCopyState, episode.id)}
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.dangerButton}
+                    onClick={(event) =>
+                      openEpisodeDeletion(episode, event.currentTarget)
+                    }
+                    disabled={busy}
+                  >
+                    Delete episode
+                  </button>
+                </>
+              ) : null}
             <button
               type="button"
               onClick={() => {
@@ -8187,6 +8121,7 @@ export function BotcastExperience({
                 ? "Skip outro"
                 : "Return to show"}
             </button>
+            </div>
         </section>
       ) : null}
       {renderLibrary()}
@@ -8302,7 +8237,7 @@ export function BotcastExperience({
                   if (!autoRun) onPrepareUtterance?.();
                   setAutoRun((value) => !value);
                 }}
-                disabled={episode.status === "completed"}
+                disabled={episode.status === "completed" || cuttingShow}
               >
                 {autoRun ? "Pause rundown" : "Resume rundown"}
               </button>
@@ -8311,21 +8246,9 @@ export function BotcastExperience({
                 className={styles.cutShowButton}
                 onClick={() => void cutShow()}
                 disabled={episode.status === "completed" || cuttingShow}
-                aria-label="Cut the live show"
+                aria-label="Finish the current line and close the live show"
               >
-                {cuttingShow ? "Cutting…" : "■ Cut show"}
-              </button>
-              <button
-                type="button"
-                className={styles.dangerButton}
-                  onClick={(event) =>
-                    openEpisodeDeletion(episode, event.currentTarget)
-                  }
-                disabled={busy}
-              >
-                  {episode.status === "live"
-                    ? "Discard episode"
-                    : "Delete episode"}
+                {cuttingShow ? "Finishing…" : "■ Cut show"}
               </button>
             </div>
             {renderStage({
@@ -8682,15 +8605,6 @@ export function BotcastExperience({
                   </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    stopReplayPlayback();
-                    setReplayEpisode(null);
-                  }}
-                >
-                  Close replay
-                </button>
-                <button
-                  type="button"
                   className={styles.dangerButton}
                     onClick={(event) =>
                       openEpisodeDeletion(replayEpisode, event.currentTarget)
@@ -8698,6 +8612,15 @@ export function BotcastExperience({
                   disabled={busy}
                 >
                   Delete episode
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    stopReplayPlayback();
+                    setReplayEpisode(null);
+                  }}
+                >
+                  Close replay
                 </button>
               </div>
             </div>

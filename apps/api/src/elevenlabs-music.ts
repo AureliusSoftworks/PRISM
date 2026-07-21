@@ -17,9 +17,9 @@ export class ElevenLabsMusicError extends Error {
 }
 
 const SIGNAL_IDENT_ARTICULATION_VARIANTS = [
-  "close dry articulation with strong negative space",
-  "unequal note lengths and one pronounced dynamic contrast",
-  "one sharp rhythmic interruption inside an otherwise restrained phrase",
+  "a clear memorable melodic contour with purposeful negative space",
+  "unequal note lengths, one expressive dynamic swell, and a singable contour",
+  "one rhythmic surprise inside a coherent two-phrase melody",
 ] as const;
 
 export type SignalElevenLabsMusicCompositionPlan = {
@@ -90,7 +90,8 @@ export function buildSignalElevenLabsMusicCompositionPlan(args: {
           `${recipe.register} register`,
           recipe.motifDirection,
           recipe.openingForm,
-          "foreground phrase begins immediately and dominates the clip",
+          "compact genuinely melodic theme with a memorable original motif",
+          "foreground melody begins immediately and dominates the clip",
         ],
         negative_styles: [
           ...sharedNegativeStyles,
@@ -109,14 +110,15 @@ export function buildSignalElevenLabsMusicCompositionPlan(args: {
           recipe.developmentForm,
           recipe.motifDirection,
           recipe.endingDirection,
+          "answering phrase clearly develops the opening motif",
           "foreground melody remains unmistakable through the final note",
+          "complete cadence lands before the clip ends, followed by a brief natural release",
         ],
         negative_styles: [
           ...sharedNegativeStyles,
           ...temperamentNegativeStyles,
           ...recipe.avoidStyles,
-          "sustained ending",
-          "fade out",
+          "unresolved hanging ending",
           "long reverb tail",
         ],
         context_adherence: "high",

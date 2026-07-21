@@ -1366,8 +1366,6 @@ export interface BotcastEpisodeAdvanceRequest {
 export interface BotcastEpisodeAdvanceResponse {
   episode: BotcastEpisode;
   message: BotcastMessage | null;
-  /** The completed response is transient and no episode archive was retained. */
-  discarded?: boolean;
 }
 
 export interface BotcastModelWarmupHoldRequest {
@@ -1390,6 +1388,40 @@ export function botcastVoiceMoodForTension(
 
 export const BOTCAST_DIRECTOR_MIN_SHOT_MS = 3_200;
 export const BOTCAST_DIRECTOR_HYSTERESIS_MS = 1_100;
+const BOTCAST_SIGNAL_STANDARD_WORD_DURATION_MS = 350;
+const BOTCAST_SIGNAL_STANDARD_STRONG_PAUSE_MS = 160;
+const BOTCAST_SIGNAL_STANDARD_SOFT_PAUSE_MS = 70;
+const BOTCAST_SIGNAL_STANDARD_MIN_UTTERANCE_MS = 720;
+const BOTCAST_SIGNAL_STANDARD_MAX_UTTERANCE_MS = 24_000;
+
+/**
+ * Premium-calibrated Signal cadence shared by procedural speech, silent live
+ * reveal, and replay. A Power-silenced turn deliberately holds one complete
+ * studio shot so removing its audio never accelerates the episode.
+ */
+export function botcastSignalStandardCadenceDurationMs(text: unknown): number {
+  const spokenText = typeof text === "string" ? text.trim() : "";
+  if (botPowerResponseIsSilentV1(spokenText)) {
+    return BOTCAST_DIRECTOR_MIN_SHOT_MS;
+  }
+  const wordCount = Math.max(
+    1,
+    spokenText.match(/[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu)?.length ?? 0,
+  );
+  const strongPauseCount = spokenText.match(/[.!?]+/gu)?.length ?? 0;
+  const softPauseCount = spokenText.match(/[,;:]+/gu)?.length ?? 0;
+  return Math.min(
+    BOTCAST_SIGNAL_STANDARD_MAX_UTTERANCE_MS,
+    Math.max(
+      BOTCAST_SIGNAL_STANDARD_MIN_UTTERANCE_MS,
+      Math.round(
+        wordCount * BOTCAST_SIGNAL_STANDARD_WORD_DURATION_MS +
+          strongPauseCount * BOTCAST_SIGNAL_STANDARD_STRONG_PAUSE_MS +
+          softPauseCount * BOTCAST_SIGNAL_STANDARD_SOFT_PAUSE_MS,
+      ),
+    ),
+  );
+}
 
 export function botcastTensionStageForLevel(
   level: number,
@@ -1912,8 +1944,10 @@ export function botcastReplayTimeline(
       cursorMs += thinkingDurationMs;
     }
     const startMs = cursorMs;
-    const wordCount = message.content.split(/\s+/u).filter(Boolean).length;
-    cursorMs += Math.max(BOTCAST_DIRECTOR_MIN_SHOT_MS, wordCount * 310);
+    cursorMs += Math.max(
+      BOTCAST_DIRECTOR_MIN_SHOT_MS,
+      botcastSignalStandardCadenceDurationMs(message.content),
+    );
     messageEndMs.push(cursorMs);
     return startMs;
   });

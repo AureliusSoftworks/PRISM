@@ -59,7 +59,7 @@ describe("applet version helpers", () => {
     assert.equal(PRISM_APPLETS.chat.version, "1.22");
     assert.equal(PRISM_APPLETS.zen.version, "1.21");
     assert.equal(PRISM_APPLETS.coffee.version, "2.19");
-    assert.equal(PRISM_APPLETS.botcast.version, "1.30");
+    assert.equal(PRISM_APPLETS.botcast.version, "1.34");
     assert.equal(PRISM_APPLETS.botcast.name, "Signal");
     assert.equal(PRISM_APPLETS.story.version, "0.20");
     assert.equal(PRISM_APPLETS.slate.version, "0.7");
@@ -67,7 +67,7 @@ describe("applet version helpers", () => {
     assert.equal(prismAppletVersionLabel("chat"), "v1.22");
     assert.equal(prismAppletVersionLabel("zen"), "v1.21");
     assert.equal(prismAppletVersionLabel("coffee"), "v2.19");
-    assert.equal(prismAppletVersionLabel("botcast"), "v1.30");
+    assert.equal(prismAppletVersionLabel("botcast"), "v1.34");
     assert.equal(prismAppletVersionLabel("story"), "v0.20");
     assert.equal(prismAppletVersionLabel("slate"), "v0.7");
   });

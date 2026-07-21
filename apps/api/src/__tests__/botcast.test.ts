@@ -54,7 +54,6 @@ import {
   listBotcastEpisodes,
   nextBotcastFallbackStudioAccentVariant,
   parseBotcastPersonaReviewResponse,
-  projectBotcastAdvanceResponseForAudienceV1,
   projectBotcastEpisodeForAudienceV1,
   readBotcastShowAtmosphereAudio,
   readBotcastShowIntroAudio,
@@ -2611,6 +2610,7 @@ describe("Botcast persistence and isolation", () => {
           powers,
           `${episode.id}:host-1:0`,
         )) break;
+        forceEndBotcastEpisode(db, "user-1", episode.id);
         deleteBotcastEpisode(db, "user-1", episode.id);
         episode = createBotcastEpisode(db, "user-1", show.id, {
           guestBotId: "guest-1",
@@ -5238,8 +5238,11 @@ describe("Botcast persistence and isolation", () => {
       serverSource,
       /route\("POST", "\/api\/botcast\/episodes\/:id\/end"/u,
     );
-    assert.match(serverSource, /if \(!result\.discarded\)/u);
-    assert.match(serverSource, /result\.discarded\s*\? result/u);
+    assert.match(
+      serverSource,
+      /targetEpisode\.status !== "completed"[\s\S]{0,180}Finish the Signal broadcast before deleting its episode/u,
+    );
+    assert.doesNotMatch(serverSource, /result\.discarded/u);
     assert.match(
       serverSource,
       /route\("POST", "\/api\/botcast\/episodes\/:id\/camera"/u,
@@ -7649,6 +7652,120 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
+  it("keeps advancing AUTO when a fallback answer would be rejected from the Signal transcript", async () => {
+    const db = fixture();
+    const attempts: Array<{ provider: string; model: string | undefined }> = [];
+    let callCount = 0;
+    const providerFactory: typeof selectProvider = (providerName) => ({
+      name: providerName,
+      async generateResponse(_messages, options) {
+        callCount += 1;
+        attempts.push({ provider: providerName, model: options.model });
+        if (callCount === 1) {
+          return "Welcome to Signal Test. I'm Mara Vale, joined by Ivo Stone to examine whether spectacle can preserve agency. Ivo, where should we begin?";
+        }
+        if (providerName === "openai") {
+          return "I cannot help with that request.";
+        }
+        if (providerName === "local") {
+          return options.model === "local-signal-recovery"
+            ? "Begin with one physical choice the overlooked person controls, then make the audience answer that choice directly."
+            : "It is the medium's convention, not an affectation.";
+        }
+        return "I do not accept the premise as stated, but I will answer the part that matters.";
+      },
+      async embedText() {
+        return [];
+      },
+    });
+    try {
+      const show = createBotcastShow(db, "user-1", {
+        hostBotId: "host-1",
+        name: "Signal Test",
+      });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Whether spectacle can preserve agency",
+        preferredProvider: "openai",
+        modelOverride: "gpt-signal-primary",
+        responseMode: "auto",
+      });
+      const generationOptions = {
+        preferredProvider: "openai" as const,
+        providerFactory,
+        autoFallbackChain: {
+          v: 1 as const,
+          fallbacks: [
+            { provider: "local" as const, model: "local-signal-fallback" },
+            {
+              provider: "anthropic" as const,
+              model: "claude-signal-fallback",
+            },
+            {
+              provider: "local" as const,
+              model: "local-signal-recovery",
+            },
+          ],
+        },
+      };
+
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generationOptions,
+      );
+      const result = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generationOptions,
+      );
+
+      assert.equal(
+        result.message?.content,
+        "Begin with one physical choice the overlooked person controls, then make the audience answer that choice directly.",
+      );
+      assert.deepEqual(attempts.slice(1), [
+        { provider: "openai", model: "gpt-signal-primary" },
+        { provider: "local", model: "local-signal-fallback" },
+        { provider: "anthropic", model: "claude-signal-fallback" },
+        { provider: "local", model: "local-signal-recovery" },
+      ]);
+      const utterance = result.episode.events
+        .filter((event) => event.kind === "utterance")
+        .at(-1);
+      const recovery = utterance?.payload.autoRecovery as
+        | {
+            attempts?: Array<Record<string, unknown>>;
+            finalProvider?: unknown;
+          }
+        | undefined;
+      assert.deepEqual(
+        recovery?.attempts?.map((attempt) => ({
+          provider: attempt.provider,
+          outcome: attempt.outcome,
+          reason: attempt.reason,
+        })),
+        [
+          { provider: "openai", outcome: "failed", reason: "refusal" },
+          { provider: "local", outcome: "failed", reason: "invalid_output" },
+          {
+            provider: "anthropic",
+            outcome: "failed",
+            reason: "invalid_output",
+          },
+          { provider: "local", outcome: "succeeded", reason: undefined },
+        ],
+      );
+      assert.equal(recovery?.finalProvider, "local");
+    } finally {
+      db.close();
+    }
+  });
+
   it("records live camera overrides and locks direction when the episode ends", () => {
     const db = fixture();
     try {
@@ -7699,12 +7816,13 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
-  it("force-cuts without a host sign-off during the first ten on-air seconds", async () => {
+  it("keeps even an immediate producer-cut episode and gives it a brief close", async () => {
     const db = fixture();
     let providerCalls = 0;
     const provider = recordingProvider(
       [
         "Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone.",
+        "Ivo, thank you for joining me, and thank you all for listening.",
       ],
       [],
     );
@@ -7734,24 +7852,19 @@ describe("Botcast persistence and isolation", () => {
         "user-1",
         episode.id,
         generation(countedProvider),
-        { onAirElapsedMs: 9_999 },
       );
 
-      assert.equal(cut.message, null);
-      assert.equal(cut.discarded, true);
+      assert.equal(cut.message?.speakerRole, "host");
       assert.equal(
-        projectBotcastAdvanceResponseForAudienceV1(cut).discarded,
-        true,
+        cut.message?.content,
+        "Ivo, thank you for joining me, and thank you all for listening.",
       );
       assert.equal(cut.episode.status, "completed");
       assert.equal(cut.episode.outcome, "completed");
-      assert.equal(cut.episode.messages.length, 1);
-      assert.equal(providerCalls, 1);
-      assert.deepEqual(listBotcastEpisodes(db, "user-1", show.id), []);
-      assert.throws(
-        () => getBotcastEpisode(db, "user-1", episode.id),
-        /Signal episode not found/u,
-      );
+      assert.equal(cut.episode.messages.length, 2);
+      assert.equal(providerCalls, 2);
+      assert.equal(listBotcastEpisodes(db, "user-1", show.id).length, 1);
+      assert.equal(getBotcastEpisode(db, "user-1", episode.id).status, "completed");
       assert.ok(
         cut.episode.events.some(
           (event) =>
@@ -7764,13 +7877,85 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
-  it("lets a startled host tactfully sign off from ten seconds onward", async () => {
+  it("removes a prefetched but unheard turn before the producer close", async () => {
+    const db = fixture();
+    const provider = recordingProvider(
+      [
+        "Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone.",
+        "This guest answer was prepared but never reached the audience.",
+        "Ivo, thank you for joining me, and thank you all for listening.",
+      ],
+      [],
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "A queued answer that stays off air",
+      });
+      const opening = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+      const hidden = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+      assert.equal(hidden.episode.messages.length, 2);
+
+      const cut = await endBotcastEpisodeOnProducerCut(
+        db,
+        "user-1",
+        episode.id,
+        generation(provider),
+        {
+          audienceCheckpoint: {
+            lastAudienceMessageId: opening.message?.id ?? null,
+            lastAudienceEventSequence:
+              opening.episode.events.at(-1)?.sequence ?? 0,
+            audienceSegmentCount: opening.episode.segments.length,
+          },
+        },
+      );
+
+      assert.deepEqual(
+        cut.episode.messages.map((message) => message.content),
+        [
+          opening.message?.content,
+          "Ivo, thank you for joining me, and thank you all for listening.",
+        ],
+      );
+      assert.doesNotMatch(
+        cut.episode.messages.map((message) => message.content).join("\n"),
+        /prepared but never reached/u,
+      );
+      assert.ok(
+        cut.episode.events.every(
+          (event) => event.payload.messageId !== hidden.message?.id,
+        ),
+      );
+      assert.deepEqual(
+        cut.episode.segments.map((segment) => segment.segment),
+        ["opening", "closing"],
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("lets the host close promptly without acting interrupted or surprised", async () => {
     const db = fixture();
     const captures: ProviderMessage[][] = [];
     const provider = recordingProvider(
       [
         "Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore A show that ends on the producer's cut.",
-        "Oh—we're stopping there. Ivo, thank you for joining me, and thank you all for listening.",
+        "Ivo, thank you for joining me, and thank you all for listening.",
       ],
       captures,
     );
@@ -7793,13 +7978,12 @@ describe("Botcast persistence and isolation", () => {
         "user-1",
         episode.id,
         generation(provider),
-        { onAirElapsedMs: 10_000 },
       );
       const ended = cut.episode;
       assert.equal(cut.message?.speakerRole, "host");
       assert.equal(
         cut.message?.content,
-        "Oh—we're stopping there. Ivo, thank you for joining me, and thank you all for listening.",
+        "Ivo, thank you for joining me, and thank you all for listening.",
       );
       assert.equal(ended.status, "completed");
       assert.equal(ended.outcome, "completed");
@@ -7812,8 +7996,9 @@ describe("Botcast persistence and isolation", () => {
       const closingPrompt = captures[1]!
         .map((message) => message.content)
         .join("\n");
-      assert.match(closingPrompt, /stopped unexpectedly/u);
-      assert.match(closingPrompt, /flash of surprise/u);
+      assert.match(closingPrompt, /current speaker has finished/u);
+      assert.match(closingPrompt, /without sounding interrupted or surprised/u);
+      assert.doesNotMatch(closingPrompt, /stopped unexpectedly|flash of surprise/u);
       assert.match(closingPrompt, /one or two very short sentences/u);
       assert.match(closingPrompt, /Do not ask a question/u);
       assert.match(closingPrompt, /mention a producer, cue, control room, cut/u);
@@ -7900,7 +8085,6 @@ describe("Botcast persistence and isolation", () => {
         "user-1",
         episode.id,
         generation(provider),
-        { onAirElapsedMs: 10_000 },
       );
       await hostSignOffStarted;
       releaseInterruptedTurn("This line arrived too late.");
@@ -7954,6 +8138,8 @@ describe("Botcast persistence and isolation", () => {
         getBotcastEpisode(db, "user-1", episode.id).messages.length,
         1,
       );
+      assert.equal(deleteBotcastEpisode(db, "user-1", episode.id), false);
+      forceEndBotcastEpisode(db, "user-1", episode.id);
       assert.equal(deleteBotcastEpisode(db, "user-1", episode.id), true);
       assert.throws(
         () => getBotcastEpisode(db, "user-1", episode.id),
@@ -8537,7 +8723,6 @@ describe("Botcast persistence and isolation", () => {
         "user-1",
         episode.id,
         generation(provider),
-        { onAirElapsedMs: 10_000 },
       );
 
       assert.equal(opening.message?.speakerRole, "host");

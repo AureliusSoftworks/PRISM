@@ -139,9 +139,10 @@ describe("mode tutorials", () => {
       .join(" ");
     assert.match(
       signalCopy,
-      /Cut show stops the current line[^.]*discards the episode[^.]*under ten seconds[^.]*no host sign-off or saved archive/u,
+      /Cut show is quicker[^.]*currently on mic finishes the line[^.]*unspoken next turn is cancelled/u,
     );
-    assert.match(signalCopy, /After that[^.]*quick, tactful sign-off/u);
+    assert.match(signalCopy, /one brief natural sign-off/u);
+    assert.match(signalCopy, /Even an immediate cut is saved/u);
     assert.match(
       signalCopy,
       /After several substantive exchanges[^.]*host who genuinely refuses to continue[^.]*Host ended the show/u,
@@ -552,7 +553,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
-      /Wrap it up privately asks the host/u,
+      /Wrap it up privately asks the host to steer the exchange to a full ending/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
@@ -564,15 +565,15 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
-      /session-changing navbar tools stay locked/u,
+      /session-changing navbar tools, and episode deletion stay locked/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
-      /restores the full chrome/u,
+      /completed end card places Delete episode beside Copy for Signal Review/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
-      /left rail while on air makes the same producer cut/u,
+      /left rail while on air makes the same graceful producer close/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
@@ -649,6 +650,10 @@ describe("mode tutorials", () => {
     assert.match(
       MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
       /per-turn model routing/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
+      /Delete episode sits beside it only after the broadcast is complete/u,
     );
   });
 
@@ -922,7 +927,7 @@ describe("mode tutorials", () => {
     assert.match(signalVoice?.body ?? "", /saved vocal reaction takes precedence/);
   });
 
-  it("teaches dead-air asides and each mode's ambient sip contract", () => {
+  it("teaches Coffee dead-air asides, Signal quiet, and each ambient sip contract", () => {
     const coffee = MODE_TUTORIALS.coffee.steps.find(
       (step) => step.heading === "Join the conversation",
     );
@@ -935,9 +940,11 @@ describe("mode tutorials", () => {
     assert.match(coffee?.body ?? "", /Ambient sips continue through quiet beats and listening moments/);
     assert.match(coffee?.body ?? "", /active speaker keeps their cup down/);
     assert.match(coffee?.body ?? "", /cup-return sounds stay synchronized/);
-    assert.match(signal?.body ?? "", /awkward dead air/);
-    assert.match(signal?.body ?? "", /original answer keeps generating/);
-    assert.match(signal?.body ?? "", /except while a hard-muted participant/u);
+    assert.match(signal?.body ?? "", /Between turns, Signal stays quiet/u);
+    assert.doesNotMatch(
+      signal?.body ?? "",
+      /awkward dead air|brief mood-aware aside/u,
+    );
     assert.match(signal?.body ?? "", /Bot ambient sips land only while the other bot is talking/);
     assert.match(signal?.body ?? "", /your cup moves only after you click Sip coffee/);
     assert.match(signal?.body ?? "", /cup-return sounds stay synchronized/);

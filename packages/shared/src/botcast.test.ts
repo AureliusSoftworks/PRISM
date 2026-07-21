@@ -38,6 +38,7 @@ import {
   botcastProducerGuestThinkingDiscountMs,
   botcastReplayMessageIndexAt,
   botcastReplayTimeline,
+  botcastSignalStandardCadenceDurationMs,
   botcastNextSpeakerRole,
   botcastSegmentForTurn,
   botcastSessionShouldClose,
@@ -60,6 +61,28 @@ import {
 } from "./botcast.ts";
 
 describe("Signal fallback studio accents", () => {
+  it("uses Premium-calibrated cadence for speech and a full shot for silence", () => {
+    assert.equal(
+      botcastSignalStandardCadenceDurationMs(
+        "A streamed reply with several words.",
+      ),
+      2_260,
+    );
+    assert.equal(
+      botcastSignalStandardCadenceDurationMs("..."),
+      BOTCAST_DIRECTOR_MIN_SHOT_MS,
+    );
+    const replayLine = "One two three four five six seven eight nine ten eleven twelve.";
+    const replayTimeline = botcastReplayTimeline(
+      [{ content: replayLine }],
+      [],
+    );
+    assert.equal(
+      replayTimeline.messageEndMs[0]! - replayTimeline.messageStartMs[0]!,
+      botcastSignalStandardCadenceDurationMs(replayLine),
+    );
+  });
+
   it("recognizes the one Echo dashboard joke across persona wording", () => {
     assert.equal(
       BOTCAST_ECHO_DASHBOARD_BLURB_FALLBACK,

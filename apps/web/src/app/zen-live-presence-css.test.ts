@@ -887,6 +887,9 @@ describe("Zen live presence CSS", () => {
       "--zen-live-bot-idle-face-glow-filter-high"
     );
     assert.match(glyphPartRule, /--zen-live-bot-idle-face-glow-filter-high:/);
+    assert.match(glyphPartRule, /--crt-face-screen-wash-near-opacity:\s*24%\s*;/);
+    assert.match(glyphPartRule, /--crt-face-screen-wash-mid-opacity:\s*11%\s*;/);
+    assert.match(glyphPartRule, /--crt-face-screen-wash-far-opacity:\s*5%\s*;/);
     assert.match(glyphPartRule, /--crt-face-glow-filter:\s*var\(--zen-live-bot-idle-face-glow-filter-high\)\s*;/);
     assert.doesNotMatch(glyphPartRule, /zenLiveBotIdleLightBreath/);
 

@@ -8698,6 +8698,19 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("DELETE", "/api/botcast/episodes/:id", async (ctx) => {
       const userId = requireAuth(ctx);
+      const targetEpisode = (() => {
+        try {
+          return getBotcastEpisode(db, userId, ctx.params.id);
+        } catch {
+          throw new HttpError(404, "Signal episode not found.");
+        }
+      })();
+      if (targetEpisode.status !== "completed") {
+        throw new HttpError(
+          409,
+          "Finish the Signal broadcast before deleting its episode.",
+        );
+      }
       if (!deleteBotcastEpisode(db, userId, ctx.params.id)) {
         throw new HttpError(404, "Signal episode not found.");
       }
@@ -8705,7 +8718,28 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("POST", "/api/botcast/episodes/:id/end", async (ctx) => {
       const userId = requireAuth(ctx);
-      const body = ctx.body as Record<string, unknown>;
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      const checkpointRequested =
+        "lastAudienceMessageId" in body ||
+        "lastAudienceEventSequence" in body ||
+        "audienceSegmentCount" in body;
+      const audienceCheckpoint = checkpointRequested
+        ? (typeof body.lastAudienceMessageId === "string" ||
+            body.lastAudienceMessageId === null) &&
+          typeof body.lastAudienceEventSequence === "number" &&
+          Number.isInteger(body.lastAudienceEventSequence) &&
+          typeof body.audienceSegmentCount === "number" &&
+          Number.isInteger(body.audienceSegmentCount)
+          ? {
+              lastAudienceMessageId: body.lastAudienceMessageId,
+              lastAudienceEventSequence: body.lastAudienceEventSequence,
+              audienceSegmentCount: body.audienceSegmentCount,
+            }
+          : null
+        : undefined;
+      if (audienceCheckpoint === null) {
+        throw new HttpError(400, "Signal cut checkpoint is invalid.");
+      }
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
       const currentEpisode = getBotcastEpisode(db, userId, ctx.params.id);
@@ -8728,32 +8762,21 @@ function buildRoutes(): RouteDefinition[] {
         userId,
         currentEpisode.id,
         generation,
-        {
-          onAirElapsedMs:
-            typeof body.onAirElapsedMs === "number" &&
-            Number.isFinite(body.onAirElapsedMs) &&
-            body.onAirElapsedMs >= 0
-              ? body.onAirElapsedMs
-              : undefined,
-        },
+        audienceCheckpoint ? { audienceCheckpoint } : {},
       );
-      if (!result.discarded) {
-        await ensureBotcastEpisodePersonaReview(
-          db,
-          userId,
-          result.episode.id,
-          generation,
-        );
-      }
+      await ensureBotcastEpisodePersonaReview(
+        db,
+        userId,
+        result.episode.id,
+        generation,
+      );
       json(ctx.res, 200, {
         ok: true,
         ...projectBotcastAdvanceResponseForAudienceV1(
-          result.discarded
-            ? result
-            : {
-                episode: getBotcastEpisode(db, userId, result.episode.id),
-                message: result.message,
-              },
+          {
+            episode: getBotcastEpisode(db, userId, result.episode.id),
+            message: result.message,
+          },
         ),
       });
     }),

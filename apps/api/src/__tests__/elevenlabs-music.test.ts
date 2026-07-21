@@ -34,10 +34,12 @@ describe("Signal ElevenLabs intro music", () => {
     assert.doesNotMatch(serialized, /Mara|Vale|urgent public evidence|system_prompt|show-private-name/iu);
     assert.equal(plan.chunks.length, 2);
     assert.deepEqual(plan.chunks.map((chunk) => chunk.duration_ms), [3_000, 3_000]);
-    assert.match(positive, /foreground phrase begins immediately/u);
+    assert.match(positive, /foreground melody begins immediately/u);
+    assert.match(positive, /genuinely melodic theme/u);
     assert.match(positive, /two-note low-brass call/u);
     assert.match(positive, /descending minor-tonal melodic contour/u);
-    assert.match(positive, /abrupt dry hard-button ending/u);
+    assert.match(positive, /decisive resolved hard-button cadence/u);
+    assert.match(positive, /brief natural release/u);
     assert.match(negative, /ambient pad/u);
     assert.match(negative, /pad-only/u);
     assert.match(negative, /drone/u);
@@ -47,6 +49,7 @@ describe("Signal ElevenLabs intro music", () => {
     assert.doesNotMatch(positive, /cheerful|whimsical|corporate|ambient|soundscape/iu);
     assert.doesNotMatch(serialized, /rising variation|warm and modern/iu);
     assert.doesNotMatch(positive, /resolving chime/iu);
+    assert.doesNotMatch(negative, /fade out/u);
   });
 
   it("keeps playful and warm provider directions distinct from commanding", () => {
