@@ -8960,6 +8960,133 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
+  it("does not count an interruption bridge as a wrap-up exchange turn", async () => {
+    const db = fixture();
+    const captures: ProviderMessage[][] = [];
+    const provider = recordingProvider(
+      [
+        "Welcome to the show. Ivo, what makes a safety threshold trustworthy?",
+        "Independent verification makes a threshold trustworthy.",
+        "Who should hold final authority over that verification?",
+        "This prepared guest answer should be discarded before it airs.",
+        "Before we close, who should hold that final authority?",
+        "An independent safety lead should hold final authority.",
+        "That independent authority is where we will leave it. Ivo, thank you for joining me.",
+      ],
+      captures,
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const created = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Authority over safety thresholds",
+      });
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {},
+        generation(provider),
+      );
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {},
+        generation(provider),
+      );
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {},
+        generation(provider),
+      );
+      const preparedGuest = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {},
+        generation(provider),
+      );
+
+      const hostWrap = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {
+          cue: { kind: "wrap_up" },
+          cueDelivery: "interrupt_guest",
+          guestInterruption: {
+            messageId: preparedGuest.message!.id,
+            spokenContent: "",
+            bridgeLine: show.hostInterruptionLines[0]!,
+          },
+        },
+        generation(provider),
+      );
+
+      assert.equal(
+        hostWrap.episode.messages.some(
+          (message) => message.id === preparedGuest.message!.id,
+        ),
+        false,
+      );
+      assert.equal(hostWrap.message?.speakerRole, "host");
+      assert.equal(hostWrap.episode.segment, "interview");
+      assert.equal(hostWrap.episode.status, "live");
+      assert.equal(
+        hostWrap.episode.events.filter(
+          (event) =>
+            event.kind === "utterance" &&
+            event.payload.interruptionBridge === true,
+        ).length,
+        1,
+      );
+
+      const guestFinal = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {},
+        generation(provider),
+      );
+      assert.equal(guestFinal.message?.speakerRole, "guest");
+      assert.equal(guestFinal.episode.segment, "closing");
+      assert.equal(guestFinal.episode.status, "live");
+
+      const hostClose = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {},
+        generation(provider),
+      );
+      assert.equal(hostClose.message?.speakerRole, "host");
+      assert.equal(hostClose.episode.segment, "closing");
+      assert.equal(hostClose.episode.status, "completed");
+      assert.equal(hostClose.episode.outcome, "completed");
+      assert.equal(
+        hostClose.episode.messages.at(-2)?.content,
+        "An independent safety lead should hold final authority.",
+      );
+      assert.equal(
+        hostClose.episode.messages.at(-1)?.content,
+        "That independent authority is where we will leave it. Ivo, thank you for joining me.",
+      );
+      assert.match(
+        captures[4]!.map((message) => message.content).join("\n"),
+        /invite exactly one final response/u,
+      );
+      assert.doesNotMatch(
+        captures[5]!.map((message) => message.content).join("\n"),
+        /producer cue|wrap_up/iu,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   it("lets an early live cue truncate and redirect the host's current line", async () => {
     const db = fixture();
     const captures: ProviderMessage[][] = [];
