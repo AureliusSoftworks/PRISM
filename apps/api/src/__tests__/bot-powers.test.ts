@@ -696,7 +696,7 @@ test("compiler creates hard mute rules without consulting the local model", asyn
   assert.deepEqual(result.powers[0]?.compiled?.ruleLabels, ["Muted"]);
 });
 
-test("Forgetful Freddie compiles rolling short-term context and gradual peer agitation", async () => {
+test("Forgetful Freddie compiles current-other-speaker context and gradual peer agitation", async () => {
   let calls = 0;
   const unusedProvider: LlmProvider = {
     name: "local",
@@ -724,7 +724,7 @@ test("Forgetful Freddie compiles rolling short-term context and gradual peer agi
   assert.equal(calls, 0);
   assert.equal(result.powers[0]?.compileStatus, "ready");
   assert.deepEqual(result.powers[0]?.compiled?.effects, [
-    { type: "eternal_introduction", memory: "rolling_public_tail_1_to_4" },
+    { type: "eternal_introduction", memory: "current_other_speaker_message" },
     {
       type: "social_influence",
       trigger: "after_speech",
@@ -733,7 +733,7 @@ test("Forgetful Freddie compiles rolling short-term context and gradual peer agi
       targets: [{ kind: "all" }],
     },
   ]);
-  assert.match(result.powers[0]?.compiled?.selfCue ?? "", /one-to-four public messages/iu);
+  assert.match(result.powers[0]?.compiled?.selfCue ?? "", /current other-speaker message/iu);
   assert.match(result.powers[0]?.compiled?.observerCue ?? "", /full encounter/iu);
 
   const plan = resolvedPlan({
@@ -749,10 +749,10 @@ test("Forgetful Freddie compiles rolling short-term context and gradual peer agi
     ],
     baseLimit: 12,
     stableTurnKey: "test-turn",
-  }).length <= 3, true);
+  }).length, 0);
   assert.match(
     coffeePowersPromptForSpeaker(plan, "freddie", ["peer"]),
-    /one to four public messages/iu,
+    /current other-speaker message/iu,
   );
 });
 

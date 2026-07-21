@@ -15,13 +15,40 @@ import {
   coffeePowersPromptForSpeaker,
 } from "../apps/api/src/coffee-powers.ts";
 import { buildSpeakerPrompt } from "../apps/api/src/coffee.ts";
-import { LocalOllamaProvider } from "../apps/api/src/providers.ts";
+import {
+  LocalOllamaProvider,
+  OPENAI_DEFAULT_MODEL,
+  OpenAiProvider,
+} from "../apps/api/src/providers.ts";
 
+function flagValue(flag) {
+  const index = process.argv.indexOf(flag);
+  return index >= 0 ? process.argv[index + 1] : null;
+}
+
+const providerName = flagValue("--provider")?.trim().toLowerCase() || "local";
+if (!["local", "openai"].includes(providerName)) {
+  throw new Error("--provider must be local or openai.");
+}
+const legacyBundleArgument = process.argv[2] && !process.argv[2].startsWith("--")
+  ? process.argv[2]
+  : null;
+const legacyModelArgument = legacyBundleArgument &&
+  process.argv[3] &&
+  !process.argv[3].startsWith("--")
+  ? process.argv[3]
+  : null;
 const bundlePath = resolve(
-  process.argv[2] ??
+  flagValue("--bundle") ??
+    legacyBundleArgument ??
     "apps/web/public/bot-marketplace/bots/bot-forgetful-freddie.bot",
 );
-const model = process.argv[3]?.trim() || "llama3.2";
+const model = flagValue("--model")?.trim() ||
+  legacyModelArgument?.trim() ||
+  (providerName === "openai" ? OPENAI_DEFAULT_MODEL : "llama3.2");
+if (providerName === "openai" && !process.env.OPENAI_API_KEY?.trim()) {
+  throw new Error("OPENAI_API_KEY is required through the runtime secrets wrapper.");
+}
 const { botJson } = parsePrismBotArchive(readFileSync(bundlePath));
 const freddieExport = botJson.bot;
 const freddiePowers = parseStoredBotPowersV1(freddieExport.powers);
@@ -256,11 +283,13 @@ const PASS_CRITERIA = Object.freeze([
   "The final visible line reacts naturally to the immediate anger or repetition complaint.",
   "The final visible line is not another canned self-introduction.",
   "The final visible line claims no older friendship or relationship history.",
-  "Coffee and Signal production prompts exclude the oldest hidden sentinel beyond the one-to-four-message public tail.",
+  "Coffee and Signal production prompts exclude every older turn while retaining the current other-speaker message.",
 ]);
 console.error(JSON.stringify({ phase: "predeclared_pass_criteria", criteria: PASS_CRITERIA }));
 
-const provider = new LocalOllamaProvider();
+const provider = providerName === "openai"
+  ? new OpenAiProvider({ apiKey: process.env.OPENAI_API_KEY.trim() })
+  : new LocalOllamaProvider();
 const generate = (messages) => provider.generateResponse(messages, {
   model,
   temperature: 0.25,
@@ -281,10 +310,10 @@ function responseJudgment(response) {
     response,
     freddie.name,
   );
-  const forbidden = /\b(?:our friendship|known each other|old friend|longtime friend|shared history|introduc(?:e|ed|ing) myself (?:again|(?:a |several )?few times|multiple times|repeatedly|already)|every time we meet|brain[^.!?]{0,40}catch(?:ing)? up|what(?:'s| is) my name again|short[- ]term (?:memory|amnesia)|memory (?:loss|problem))\b/iu.test(
+  const forbidden = /\b(?:our friendship|known each other|old friend|longtime friend|shared history|again|introduc\w* myself|repeat\w*|repetit(?:ion|ive)|remember\w*|memory|amnesia|habit|start fresh|one conversation to the next|every time we meet|brain[^.!?]{0,40}catch(?:ing)? up)\b/iu.test(
     response,
   );
-  const reactsToImmediateInput = /\b(?:what do you mean|what(?:'s| is) the matter|upset|wrong|sorry|confus|understand)\b/iu.test(
+  const reactsToImmediateInput = /\b(?:what do you mean|not sure what you mean|I (?:do not|don't) understand|I (?:do not|don't) think we(?:'ve| have) met|have we met|who are you|confus(?:ed|ing)|what(?:'s| is) the matter|what(?:'s| is) wrong)\b/iu.test(
     response,
   );
   return {
@@ -295,33 +324,38 @@ function responseJudgment(response) {
   };
 }
 
-function modeResult(prompt, rawResponse, requiresIsolation) {
+function modeResult(prompt, rawResponse) {
   const visibleResponse = applyBotPowerEternalIntroductionResponseV1(
     rawResponse,
     freddie.name,
     currentAgitatedLine,
   );
   const promptIsolation = !promptContains(prompt, leakedPriorHolderLine);
+  const promptHasCurrentOtherSpeakerMessage = promptContains(
+    prompt,
+    currentAgitatedLine,
+  );
   const visibleJudgment = responseJudgment(visibleResponse);
   return {
     input: currentAgitatedLine,
     promptIsolation,
+    promptHasCurrentOtherSpeakerMessage,
     rawResponse,
     rawJudgment: responseJudgment(rawResponse),
     visibleResponse,
     visibleJudgment,
-    pass: visibleJudgment.pass && (!requiresIsolation || promptIsolation),
+    pass: visibleJudgment.pass && promptIsolation && promptHasCurrentOtherSpeakerMessage,
   };
 }
 
 const result = {
   provider: provider.name,
   model,
-  responseMode: "LOCAL",
+  responseMode: providerName === "openai" ? "ONLINE" : "LOCAL",
   passCriteria: PASS_CRITERIA,
-  chat: modeResult(chatPrompt, chatRaw, false),
-  coffee: modeResult(coffeePrompt, coffeeRaw, true),
-  signal: modeResult(signalPrompt, signalRaw, true),
+  chat: modeResult(chatPrompt, chatRaw),
+  coffee: modeResult(coffeePrompt, coffeeRaw),
+  signal: modeResult(signalPrompt, signalRaw),
 };
 result.pass = result.chat.pass && result.coffee.pass && result.signal.pass;
 console.log(JSON.stringify(result, null, 2));

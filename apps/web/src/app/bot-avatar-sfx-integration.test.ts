@@ -24,7 +24,7 @@ test("Avatar Studio drives SFX from its idle, blink, talking, and thinking previ
   assert.match(previewSource, /avatarSfxState=\{previewMode\}/);
 });
 
-test("Zen, Coffee, and Signal resolve each visible bot's SFX and live state", () => {
+test("Zen, Coffee, and live Signal resolve each visible bot's SFX and live state", () => {
   const zenSource = sourceBefore(
     "scheduleKey={`zen-live-${bot?.id ?? \"prism\"}-${moodHint}`}",
   );
@@ -37,8 +37,41 @@ test("Zen, Coffee, and Signal resolve each visible bot's SFX and live state", ()
 
   const signalSource = sourceBefore(
     "scheduleKey={`botcast-${avatarState.role}-${bot.id}`}",
+    3_000,
   );
-  assert.match(signalSource, /avatarSfx=\{botAvatarSfxForBot\(bot\)\}/);
+  assert.match(
+    signalSource,
+    /avatarSfx=\{[\s\S]{0,80}avatarState\.sfxEnabled[\s\S]{0,120}botAvatarSfxForBot\(bot\)[\s\S]{0,40}: null/u,
+  );
   assert.match(signalSource, /avatarState\.talking/);
   assert.match(signalSource, /avatarState\.thinking/);
+});
+
+test("Signal keeps dashboard avatars quiet while preserving live-stage Persona SFX", () => {
+  const botcastSource = readFileSync(
+    new URL("./BotcastExperience.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    botcastSource,
+    /surface: "dashboard" \| "stage";/u,
+  );
+  assert.match(
+    botcastSource,
+    /const renderedAvatar = renderAvatar\?\.\(bot, \{[\s\S]{0,180}surface: "stage"[\s\S]{0,220}sfxEnabled: signalAvatarSfxShouldPlay\(\{[\s\S]{0,180}introActive: episodePreRoll !== null,[\s\S]{0,180}episodeOutroSfxMutedId === args\.currentEpisode\.id[\s\S]{0,100}episodeOutro !== null/u,
+  );
+  assert.equal(
+    botcastSource.match(/surface: "dashboard",/gu)?.length,
+    3,
+    "Every non-live Signal avatar surface should be marked as dashboard UI",
+  );
+
+  const producerSource = sourceBefore(
+    'scheduleKey="botcast-producer-prism"',
+    3_000,
+  );
+  assert.match(
+    producerSource,
+    /avatarSfx=\{[\s\S]{0,80}avatarState\.sfxEnabled[\s\S]{0,180}botAvatarSfxForProfile\([\s\S]{0,220}: null/u,
+  );
 });

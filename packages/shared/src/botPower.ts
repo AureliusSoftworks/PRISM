@@ -7,8 +7,6 @@ export const BOT_POWER_PROMPT_MAX_CHARS = 640;
 export const BOT_POWER_PROMPT_MAX_TOKENS = 160;
 export const COFFEE_POWER_PROMPT_MAX_CHARS = 640;
 export const COFFEE_POWER_PROMPT_MAX_TOKENS = 160;
-export const BOT_POWER_FORGETFUL_CONTEXT_MIN_MESSAGES_V1 = 1;
-export const BOT_POWER_FORGETFUL_CONTEXT_MAX_MESSAGES_V1 = 4;
 
 export type BotPowerCompileStatus = "draft" | "compiling" | "ready" | "error";
 export type BotPowerStrength = "small" | "medium" | "large";
@@ -41,8 +39,8 @@ export type BotPowerTargetV1 =
 
 export type BotPowerEffectV1 =
   | { type: "mute" }
-  /** Give the holder a stable one-to-four-message public tail and no older continuity. */
-  | { type: "eternal_introduction"; memory: "rolling_public_tail_1_to_4" }
+  /** Give the holder only the current other-speaker message and no older continuity. */
+  | { type: "eternal_introduction"; memory: "current_other_speaker_message" }
   /** Repeat the latest speech addressed to the holder verbatim. */
   | { type: "speech_copy"; trigger: "direct_address" }
   /** Copy the latest bot that directly addresses the holder; humans are never targets. */
@@ -261,8 +259,9 @@ export function normalizeBotPowerEffectV1(value: unknown): BotPowerEffectV1 | nu
   const effect = value as Record<string, unknown>;
   if (effect.type === "mute") return { type: "mute" };
   if (effect.type === "eternal_introduction") {
-    // Upgrade legacy `current_turn_only` archives at the shared boundary.
-    return { type: "eternal_introduction", memory: "rolling_public_tail_1_to_4" };
+    // Upgrade legacy archives at the shared boundary. Older ready cues sometimes
+    // forced a canned introduction, so never preserve their broader history model.
+    return { type: "eternal_introduction", memory: "current_other_speaker_message" };
   }
   if (effect.type === "speech_copy") {
     return { type: "speech_copy", trigger: "direct_address" };
@@ -951,33 +950,23 @@ export function botPowerDeterministicHalfChanceV1(seedValue: unknown): boolean {
   return (hash & 1) === 0;
 }
 
-/** Replay-stable one-to-four-message perception window for short-term amnesia. */
+/**
+ * Compatibility helpers for callers that supplied the current message separately.
+ * Eternal Introduction now exposes no prior messages: the current other-speaker
+ * message is the whole holder-visible context.
+ */
 export function botPowerForgetfulContextMessageCountV1(
-  seedValue: unknown,
+  _seedValue: unknown,
 ): number {
-  const seed = typeof seedValue === "string" ? seedValue : String(seedValue ?? "");
-  let hash = 0x811c9dc5;
-  for (let index = 0; index < seed.length; index += 1) {
-    hash ^= seed.charCodeAt(index);
-    hash = Math.imul(hash, 0x01000193) >>> 0;
-  }
-  const span =
-    BOT_POWER_FORGETFUL_CONTEXT_MAX_MESSAGES_V1 -
-    BOT_POWER_FORGETFUL_CONTEXT_MIN_MESSAGES_V1 +
-    1;
-  return BOT_POWER_FORGETFUL_CONTEXT_MIN_MESSAGES_V1 + (hash % span);
+  return 1;
 }
 
 /** Prior portion of the window when the current message is supplied separately. */
 export function botPowerForgetfulPriorMessagesV1<T>(
-  history: readonly T[],
-  stableTurnKey: unknown,
+  _history: readonly T[],
+  _stableTurnKey: unknown,
 ): T[] {
-  const priorCount = Math.max(
-    0,
-    botPowerForgetfulContextMessageCountV1(stableTurnKey) - 1,
-  );
-  return priorCount === 0 ? [] : history.slice(-priorCount);
+  return [];
 }
 
 export function botPowerIntermittentMuteTurnIsIgnoredFromEffectsV1(
@@ -1309,7 +1298,11 @@ export function applyBotPowerEternalIntroductionResponseV1(
     botPowerResponseIsFirstIntroductionV1(source, name) &&
     (repetitionComplaint || immediateUpset);
   const explainsUnseenAmnesiaOrRepetition =
-    /\b(?:introduc(?:e|ed|ing) myself (?:again|(?:a |several )?few times|multiple times|repeatedly|already)|every time we meet|habit of mine|brain[^.!?]{0,40}catch(?:ing)? up|what(?:'s| is) my name again|I (?:keep|always) introduc|I did it again|short[- ]term (?:memory|amnesia)|memory (?:loss|problem))\b/iu.test(
+    /\b(?:again|introduc\w* myself|repeat\w*|repetit(?:ion|ive)|remember\w*|memory|amnesia|habit|start fresh|one conversation to the next|every time we meet|brain[^.!?]{0,40}catch(?:ing)? up)\b/iu.test(
+      source,
+    );
+  const respondsWithFirstContactConfusion =
+    /\b(?:what do you mean|not sure what you mean|I (?:do not|don't) understand|I (?:do not|don't) think we(?:'ve| have) met|have we met|who are you|confus(?:ed|ing)|what(?:'s| is) the matter|what(?:'s| is) wrong)\b/iu.test(
       source,
     );
 
@@ -1317,7 +1310,10 @@ export function applyBotPowerEternalIntroductionResponseV1(
     source &&
     !claimsEstablishedRelationship &&
     !cannedIntroductionAgainstComplaint &&
-    !(repetitionComplaint && explainsUnseenAmnesiaOrRepetition)
+    !(
+      repetitionComplaint &&
+      (explainsUnseenAmnesiaOrRepetition || !respondsWithFirstContactConfusion)
+    )
   ) {
     return source;
   }
@@ -1437,7 +1433,7 @@ export function botPowerSelfCueLinesV1(value: unknown): string[] {
       )
     ) {
       return [
-        `${power.name || "Short-term amnesia"}: HARD MEMORY CONTRACT: respond naturally to only the one-to-four public messages provided for this turn. Treat people as unfamiliar unless those visible messages establish otherwise. Never claim an older relationship, recall hidden history, or mention the memory rule. A self-introduction is optional and should happen only when the immediate conversation warrants one.`,
+        `${power.name || "Short-term amnesia"}: HARD MEMORY CONTRACT: you receive and understand only the current other-speaker message. Respond directly to its concrete content as fresh first contact. You do not know prior turns or your own earlier messages. Never claim an older relationship, recall hidden history, or mention the memory rule. If accused of repetition, react with sincere confusion; never agree that you repeated yourself or explain why. A self-introduction is optional only when this exchange genuinely calls for one; never default to identical introductory copy.`,
       ];
     }
     const cue = power.compiled?.selfCue.trim();
@@ -1461,7 +1457,7 @@ export function botPowerObserverCueLinesV1(
       )
     ) {
       return [
-        `${subject} — ${power.name || "Short-term amnesia"}: ${subject} remembers only a shifting one-to-four-message public tail and has no older relationship context. Respond to that limited perception naturally; other characters retain the full encounter and may react through their own personalities.`,
+        `${subject} — ${power.name || "Short-term amnesia"}: ${subject} receives only the current other-speaker message and has no memory of prior turns or their own earlier messages. Respond to that limited fresh-contact perception naturally; other characters retain the full encounter and may react through their own personalities.`,
       ];
     }
     const cue = power.compiled?.observerCue.trim();

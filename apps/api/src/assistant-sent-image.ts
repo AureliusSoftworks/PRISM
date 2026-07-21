@@ -10,6 +10,11 @@ import { randomId } from "./security.ts";
 import { generateImage } from "./image-provider.ts";
 import { generateLocalImageBytesByModelId } from "./image-local-by-model.ts";
 import { shouldAttemptLenientLocalImageFallback } from "./image-lenient-fallback.ts";
+import {
+  buildOriginalAlternativeImagePrompt,
+  runImagePromptAttempts,
+  type ImagePromptAttempt,
+} from "./image-prompt-retry.ts";
 import type { LlmProvider, ProviderMessage } from "./providers.ts";
 import { resolveImageGeneratePersistence } from "./image-generate-resolve.ts";
 import { serializeImageRelatedBotIds } from "./image-provenance.ts";
@@ -583,6 +588,49 @@ export async function runAssistantSentImageGeneration(args: {
       captionPrompt: prompt,
     }),
   });
+  const buildRecoveryAttempts = async (): Promise<ImagePromptAttempt[]> => {
+    const repairedPrompt = await buildRepairPrompt();
+    return [
+      {
+        prompt: repairedPrompt,
+        strategy: "general-audience",
+        useSourceImage: false,
+      },
+      {
+        prompt: buildOriginalAlternativeImagePrompt(repairedPrompt),
+        strategy: "original-alternative",
+        useSourceImage: false,
+      },
+    ];
+  };
+  const persistOpenAiSuccess = async (
+    openAiResult: Awaited<ReturnType<typeof generateImage>>,
+  ): Promise<AssistantSentImageGenerationResult> => {
+    let imageBytes: Buffer;
+    try {
+      imageBytes = await readOpenAiGeneratedImageBytes(openAiResult, signal);
+    } catch {
+      return { status: "failed" };
+    }
+    try {
+      writeGeneratedImageBytes(localRelPath, imageBytes);
+    } catch {
+      tryUnlinkGeneratedImageFile(localRelPath);
+      return { status: "failed" };
+    }
+    await tryGenerateThumbAfterPngWrite(localRelPath);
+    const storedUrl = openAiResult.url || displayUrl;
+    insertRow({
+      revisedPrompt: openAiResult.revisedPrompt ?? null,
+      urlForDb: storedUrl,
+      providerTag: "openai",
+      modelUsed: openAiResult.model,
+    });
+    return successPayload(
+      openAiResult.revisedPrompt ?? undefined,
+      openAiResult.model,
+    );
+  };
 
   try {
     const shouldRunLocal =
@@ -611,27 +659,47 @@ export async function runAssistantSentImageGeneration(args: {
         });
 
       let localOut: Awaited<ReturnType<typeof generateLocalImageBytesByModelId>> | undefined;
+      let localRevisedPrompt = promptForModel;
       try {
         localOut = await runLocal(resolvedLocalImageModel);
       } catch (primaryError) {
         const primaryWasDenied = shouldAttemptLenientLocalImageFallback(primaryError);
         if (primaryWasDenied) {
-          const repairedPrompt = await buildRepairPrompt();
-          const retryModel =
-            lenientFb && lenientFb !== resolvedLocalImageModel.trim()
-              ? lenientFb
-              : resolvedLocalImageModel;
+          const recoveryAttempts = await buildRecoveryAttempts();
           try {
-            localOut = await runLocal(retryModel, repairedPrompt);
+            const attempted = await runImagePromptAttempts({
+              attempts: recoveryAttempts,
+              generate: (attempt) =>
+                runLocal(resolvedLocalImageModel, attempt.prompt),
+            });
+            localOut = attempted.value;
+            localRevisedPrompt = attempted.prompt;
           } catch (retryError) {
             if (shouldAttemptLenientLocalImageFallback(retryError)) {
-              return deniedResult();
+              if (
+                lenientFb &&
+                lenientFb !== resolvedLocalImageModel.trim()
+              ) {
+                localRevisedPrompt =
+                  recoveryAttempts.at(-1)?.prompt ?? promptForModel;
+                try {
+                  localOut = await runLocal(lenientFb, localRevisedPrompt);
+                } catch (fallbackError) {
+                  if (shouldAttemptLenientLocalImageFallback(fallbackError)) {
+                    return deniedResult();
+                  }
+                  return { status: "failed" };
+                }
+              } else {
+                return deniedResult();
+              }
+            } else {
+              console.warn(
+                "[assistant-sent-image] local repaired retry failed:",
+                retryError instanceof Error ? retryError.message : retryError
+              );
+              return { status: "failed" };
             }
-            console.warn(
-              "[assistant-sent-image] local repaired retry failed:",
-              retryError instanceof Error ? retryError.message : retryError
-            );
-            return { status: "failed" };
           }
         } else {
           const fallbackCandidates: string[] = [];
@@ -669,12 +737,12 @@ export async function runAssistantSentImageGeneration(args: {
       writeGeneratedImageBytes(localRelPath, localOut.imageBytes);
       await tryGenerateThumbAfterPngWrite(localRelPath);
       insertRow({
-        revisedPrompt: prompt,
+        revisedPrompt: localRevisedPrompt,
         urlForDb: displayUrl,
         providerTag: localOut.provider,
         modelUsed: localOut.modelUsed,
       });
-      return successPayload(prompt, localOut.modelUsed);
+      return successPayload(localRevisedPrompt, localOut.modelUsed);
     }
 
     if (onlineImageDisabled) {
@@ -694,73 +762,37 @@ export async function runAssistantSentImageGeneration(args: {
         quality: ASSISTANT_SENT_IMAGE_QUALITY,
         signal,
       });
-      let imageBytes: Buffer;
-      try {
-        imageBytes = await readOpenAiGeneratedImageBytes(openAiResult, signal);
-      } catch {
-        return { status: "failed" };
-      }
-      try {
-        writeGeneratedImageBytes(localRelPath, imageBytes);
-      } catch {
-        tryUnlinkGeneratedImageFile(localRelPath);
-        return { status: "failed" };
-      }
-      await tryGenerateThumbAfterPngWrite(localRelPath);
-      const storedUrl = openAiResult.url || displayUrl;
-      insertRow({
-        revisedPrompt: openAiResult.revisedPrompt ?? null,
-        urlForDb: storedUrl,
-        providerTag: "openai",
-        modelUsed: openAiResult.model,
-      });
-      return successPayload(openAiResult.revisedPrompt ?? undefined, openAiResult.model);
+      return persistOpenAiSuccess(openAiResult);
     } catch (primaryError) {
       if (!shouldAttemptLenientLocalImageFallback(primaryError)) {
         return { status: "failed" };
       }
-      const repairedPrompt = await buildRepairPrompt();
-      if (!lenientFb) {
-        try {
-          const openAiRetry = await generateImage(repairedPrompt, apiKey, {
+      const recoveryAttempts = await buildRecoveryAttempts();
+      try {
+        const attempted = await runImagePromptAttempts({
+          attempts: recoveryAttempts,
+          generate: (attempt) =>
+            generateImage(attempt.prompt, apiKey, {
             model: resolvedOpenAiImageModel || undefined,
             size: requestedSize,
             quality: ASSISTANT_SENT_IMAGE_QUALITY,
             signal,
-          });
-          let imageBytes: Buffer;
-          try {
-            imageBytes = await readOpenAiGeneratedImageBytes(openAiRetry, signal);
-          } catch {
-            return { status: "failed" };
-          }
-          try {
-            writeGeneratedImageBytes(localRelPath, imageBytes);
-          } catch {
-            tryUnlinkGeneratedImageFile(localRelPath);
-            return { status: "failed" };
-          }
-          await tryGenerateThumbAfterPngWrite(localRelPath);
-          const storedUrl = openAiRetry.url || displayUrl;
-          insertRow({
-            revisedPrompt: openAiRetry.revisedPrompt ?? null,
-            urlForDb: storedUrl,
-            providerTag: "openai",
-            modelUsed: openAiRetry.model,
-          });
-          return successPayload(openAiRetry.revisedPrompt ?? undefined, openAiRetry.model);
-        } catch (retryError) {
-          if (shouldAttemptLenientLocalImageFallback(retryError)) {
-            return deniedResult();
-          }
+            }),
+        });
+        return persistOpenAiSuccess(attempted.value);
+      } catch (retryError) {
+        if (!shouldAttemptLenientLocalImageFallback(retryError)) {
           return { status: "failed" };
         }
       }
+      if (!lenientFb) return deniedResult();
+      const localFallbackPrompt =
+        recoveryAttempts.at(-1)?.prompt ?? promptForModel;
       let localOut: Awaited<ReturnType<typeof generateLocalImageBytesByModelId>>;
       try {
         localOut = await generateLocalImageBytesByModelId({
           modelId: lenientFb,
-          promptForModel: repairedPrompt,
+          promptForModel: localFallbackPrompt,
           negativePrompt: sceneOnlyNegativePrompt,
           size: requestedSize,
           signal,
@@ -778,12 +810,12 @@ export async function runAssistantSentImageGeneration(args: {
       writeGeneratedImageBytes(localRelPath, localOut.imageBytes);
       await tryGenerateThumbAfterPngWrite(localRelPath);
       insertRow({
-        revisedPrompt: prompt,
+        revisedPrompt: localFallbackPrompt,
         urlForDb: displayUrl,
         providerTag: localOut.provider,
         modelUsed: localOut.modelUsed,
       });
-      return successPayload(prompt, localOut.modelUsed);
+      return successPayload(localFallbackPrompt, localOut.modelUsed);
     }
   } catch (err) {
     tryUnlinkGeneratedImageFile(localRelPath);

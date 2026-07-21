@@ -389,7 +389,15 @@ describe("bot marketplace static catalog", () => {
         assert.deepEqual(bundle.botJson.bot.faceThinkingFrames, ["h", "e", "l", "o"]);
         assert.equal(voice?.elevenLabsVoiceIdOverride, "nPczCjzI2devNBz1zQrb");
         assert.match(bundle.botJson.bot.voicePreviewLine ?? "", /Forgetful Freddie/iu);
-        assert.match(bundle.botJson.systemPrompt ?? "", /short-term-amnesia|one to four/iu);
+        const eternalIntroduction = powers[0]?.compiled?.effects.find(
+          (effect) => effect.type === "eternal_introduction",
+        );
+        assert.equal(eternalIntroduction?.type, "eternal_introduction");
+        assert.equal(
+          eternalIntroduction?.memory,
+          "current_other_speaker_message",
+        );
+        assert.match(bundle.botJson.systemPrompt ?? "", /short-term-amnesia|current other-speaker/iu);
       }
     }
   });

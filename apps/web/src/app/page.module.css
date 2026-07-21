@@ -35809,6 +35809,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   place-items: center;
   padding: 28px 22px;
   box-sizing: border-box;
+  overflow-y: auto;
   background:
     radial-gradient(
       circle at 16% 18%,
@@ -35962,8 +35963,141 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   color: var(--fg-subtle);
 }
 
+.panelImagesGenQueueComposer {
+  width: 100%;
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  text-align: left;
+}
+
+.panelImagesGenQueueComposer label {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 680;
+}
+
+.panelImagesGenQueueComposer label span {
+  color: var(--fg-subtle);
+  font-size: 11px;
+  font-weight: 560;
+  font-variant-numeric: tabular-nums;
+}
+
+.panelImagesGenQueueComposer textarea {
+  min-width: 0;
+  min-height: 62px;
+  resize: vertical;
+  border: 1px solid
+    color-mix(in srgb, var(--accent-ink) 30%, var(--line-strong));
+  border-radius: 10px;
+  padding: 9px 10px;
+  background: color-mix(in srgb, var(--bg-surface) 88%, var(--accent) 8%);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.panelImagesGenQueueComposer textarea:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 64%, transparent);
+  outline-offset: 1px;
+}
+
+.panelImagesGenQueueComposer > button {
+  align-self: stretch;
+  min-width: 88px;
+  border: 1px solid
+    color-mix(in srgb, var(--accent-ink) 42%, var(--line-strong));
+  border-radius: 10px;
+  padding: 8px 11px;
+  background: color-mix(in srgb, var(--bg-surface) 78%, var(--accent) 18%);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 680;
+  cursor: pointer;
+}
+
+.panelImagesGenQueueComposer > button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.panelImagesGenQueueComposer > p,
+.panelImagesGenQueueElsewhere {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--fg-subtle);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.panelImagesGenQueueList {
+  width: 100%;
+  max-height: 132px;
+  margin-top: 2px;
+  display: grid;
+  gap: 5px;
+  overflow-y: auto;
+}
+
+.panelImagesGenQueueList > button {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line));
+  border-radius: 8px;
+  padding: 6px 7px;
+  background: color-mix(in srgb, var(--bg) 90%, var(--accent) 8%);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.panelImagesGenQueueList > button:hover,
+.panelImagesGenQueueList > button:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 46%, var(--line-strong));
+  color: var(--fg);
+}
+
+.panelImagesGenQueueList > button > span:first-child {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+
+.panelImagesGenQueueList > button > span:nth-child(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.panelImagesGenQueueList > button > span:last-child {
+  color: var(--fg-subtle);
+  font-size: 16px;
+  line-height: 1;
+  text-align: center;
+}
+
 .panelImagesGenOverlayCancel {
-  margin-top: 14px;
+  margin-top: 8px;
   padding: 8px 18px;
   border-radius: 999px;
   border: 1px solid

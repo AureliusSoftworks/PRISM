@@ -605,6 +605,10 @@ import {
 import { editImage, generateImage } from "./image-provider.ts";
 import { generateLocalImageBytesByModelId } from "./image-local-by-model.ts";
 import { shouldAttemptLenientLocalImageFallback } from "./image-lenient-fallback.ts";
+import {
+  buildImagePromptAttempts,
+  runImagePromptAttempts,
+} from "./image-prompt-retry.ts";
 import { AutoFallbackExhaustedError } from "./auto-fallback.ts";
 import {
   checkComfyUiHostStatus,
@@ -2822,6 +2826,7 @@ async function finalizeComfyOrOllamaGeneratedImageResponse(
     userId: string;
     persistence: ImageInsertPersistence;
     prompt: string;
+    revisedPrompt?: string;
     localRelPath: string;
     size: string;
     quality: string;
@@ -2860,7 +2865,7 @@ async function finalizeComfyOrOllamaGeneratedImageResponse(
       ),
       args.persistence.origin,
       args.prompt,
-      args.prompt,
+      args.revisedPrompt ?? args.prompt,
       storedUrl,
       args.size,
       args.quality,
@@ -2915,7 +2920,7 @@ async function finalizeComfyOrOllamaGeneratedImageResponse(
       ),
       origin: args.persistence.origin,
       url: storedUrl,
-      revisedPrompt: args.prompt,
+      revisedPrompt: args.revisedPrompt ?? args.prompt,
       displayUrl,
       hasLocalFile: true,
       model: args.modelUsed,
@@ -3082,10 +3087,10 @@ async function generateAndPersistSignalArtworkAsset(args: {
   if (shouldRunLocal) {
     const lenientFallbackModel =
       user.lenient_local_image_fallback_model?.trim() ?? "";
-    const runLocal = (modelId: string) =>
+    const runLocal = (modelId: string, promptForModel: string) =>
       generateLocalImageBytesByModelId({
         modelId,
-        promptForModel: localPrompt,
+        promptForModel,
         size: args.size,
         signal: args.signal,
         comfyUiHost: user.comfyui_host,
@@ -3094,22 +3099,30 @@ async function generateAndPersistSignalArtworkAsset(args: {
         primaryOllamaHost: config.ollamaHost,
       });
     let output: Awaited<ReturnType<typeof generateLocalImageBytesByModelId>>;
+    const attempts = buildImagePromptAttempts({ prompt: localPrompt });
     try {
-      output = await runLocal(resolvedLocalImageModel);
+      const attempted = await runImagePromptAttempts({
+        attempts,
+        generate: (attempt) =>
+          runLocal(resolvedLocalImageModel, attempt.prompt),
+      });
+      output = attempted.value;
+      revisedPrompt = attempted.prompt;
     } catch (error) {
       if (
         lenientFallbackModel &&
         lenientFallbackModel !== resolvedLocalImageModel &&
         shouldAttemptLenientLocalImageFallback(error)
       ) {
-        output = await runLocal(lenientFallbackModel);
+        const fallbackPrompt = attempts.at(-1)?.prompt ?? localPrompt;
+        output = await runLocal(lenientFallbackModel, fallbackPrompt);
+        revisedPrompt = fallbackPrompt;
       } else {
         throw error;
       }
     }
     provider = output.provider;
     model = output.modelUsed;
-    revisedPrompt = localPrompt;
     imageBytes = output.imageBytes;
   } else {
     const userKey = decryptUserKey(args.userId);
@@ -3117,23 +3130,33 @@ async function generateAndPersistSignalArtworkAsset(args: {
       getOpenAiApiKeyForUser(args.userId, userKey) ?? config.openAiApiKey;
     const lenientFallbackModel =
       user.lenient_local_image_fallback_model?.trim() ?? "";
+    const onlineAttempts = buildImagePromptAttempts({
+      prompt: onlinePrompt,
+      useSourceImage: Boolean(sourceImageBytes),
+      promptOnlyFallback: localPrompt,
+    });
     try {
-      const result = sourceImageBytes
-        ? await editImage(onlinePrompt, sourceImageBytes, apiKey, {
-            model: resolvedOpenAiImageModel,
-            size: args.size,
-            quality,
-            signal: args.signal,
-          })
-        : await generateImage(onlinePrompt, apiKey, {
-            model: resolvedOpenAiImageModel,
-            size: args.size,
-            quality,
-            ...(args.kind === "logo"
-              ? { background: "opaque" as const }
-              : {}),
-            signal: args.signal,
-          });
+      const attempted = await runImagePromptAttempts({
+        attempts: onlineAttempts,
+        generate: (attempt) =>
+          attempt.useSourceImage && sourceImageBytes
+            ? editImage(attempt.prompt, sourceImageBytes, apiKey, {
+                model: resolvedOpenAiImageModel,
+                size: args.size,
+                quality,
+                signal: args.signal,
+              })
+            : generateImage(attempt.prompt, apiKey, {
+                model: resolvedOpenAiImageModel,
+                size: args.size,
+                quality,
+                ...(args.kind === "logo"
+                  ? { background: "opaque" as const }
+                  : {}),
+                signal: args.signal,
+              }),
+      });
+      const result = attempted.value;
       const downloadStartedAt = Date.now();
       try {
         imageBytes = await readOpenAiGeneratedImageBytes(result, args.signal);
@@ -3156,9 +3179,12 @@ async function generateAndPersistSignalArtworkAsset(args: {
       ) {
         throw error;
       }
+      const localFallbackPrompt =
+        buildImagePromptAttempts({ prompt: localPrompt }).at(-1)?.prompt ??
+        localPrompt;
       const output = await generateLocalImageBytesByModelId({
         modelId: lenientFallbackModel,
-        promptForModel: localPrompt,
+        promptForModel: localFallbackPrompt,
         size: args.size,
         signal: args.signal,
         comfyUiHost: user.comfyui_host,
@@ -3168,7 +3194,7 @@ async function generateAndPersistSignalArtworkAsset(args: {
       });
       provider = output.provider;
       model = output.modelUsed;
-      revisedPrompt = localPrompt;
+      revisedPrompt = localFallbackPrompt;
       imageBytes = output.imageBytes;
     }
   }
@@ -3318,10 +3344,10 @@ async function generateAndPersistSlateCoverAsset(args: {
   if (shouldRunLocal) {
     const lenientFallbackModel =
       user.lenient_local_image_fallback_model?.trim() ?? "";
-    const runLocal = (modelId: string) =>
+    const runLocal = (modelId: string, promptForModel: string) =>
       generateLocalImageBytesByModelId({
         modelId,
-        promptForModel: args.prompt,
+        promptForModel,
         size,
         signal: args.signal,
         comfyUiHost: user.comfyui_host,
@@ -3330,22 +3356,30 @@ async function generateAndPersistSlateCoverAsset(args: {
         primaryOllamaHost: config.ollamaHost,
       });
     let output: Awaited<ReturnType<typeof generateLocalImageBytesByModelId>>;
+    const attempts = buildImagePromptAttempts({ prompt: args.prompt });
     try {
-      output = await runLocal(resolvedLocalImageModel);
+      const attempted = await runImagePromptAttempts({
+        attempts,
+        generate: (attempt) =>
+          runLocal(resolvedLocalImageModel, attempt.prompt),
+      });
+      output = attempted.value;
+      revisedPrompt = attempted.prompt;
     } catch (error) {
       if (
         lenientFallbackModel &&
         lenientFallbackModel !== resolvedLocalImageModel &&
         shouldAttemptLenientLocalImageFallback(error)
       ) {
-        output = await runLocal(lenientFallbackModel);
+        const fallbackPrompt = attempts.at(-1)?.prompt ?? args.prompt;
+        output = await runLocal(lenientFallbackModel, fallbackPrompt);
+        revisedPrompt = fallbackPrompt;
       } else {
         throw error;
       }
     }
     provider = output.provider;
     model = output.modelUsed;
-    revisedPrompt = args.prompt;
     imageBytes = output.imageBytes;
   } else {
     const userKey = decryptUserKey(args.userId);
@@ -3353,13 +3387,19 @@ async function generateAndPersistSlateCoverAsset(args: {
       getOpenAiApiKeyForUser(args.userId, userKey) ?? config.openAiApiKey;
     const lenientFallbackModel =
       user.lenient_local_image_fallback_model?.trim() ?? "";
+    const onlineAttempts = buildImagePromptAttempts({ prompt: args.prompt });
     try {
-      const result = await generateImage(args.prompt, apiKey, {
-        model: resolvedOpenAiImageModel,
-        size,
-        quality,
-        signal: args.signal,
+      const attempted = await runImagePromptAttempts({
+        attempts: onlineAttempts,
+        generate: (attempt) =>
+          generateImage(attempt.prompt, apiKey, {
+            model: resolvedOpenAiImageModel,
+            size,
+            quality,
+            signal: args.signal,
+          }),
       });
+      const result = attempted.value;
       const downloadStartedAt = Date.now();
       imageBytes = await readOpenAiGeneratedImageBytes(result, args.signal);
       downloadMs = Date.now() - downloadStartedAt;
@@ -3374,9 +3414,10 @@ async function generateAndPersistSlateCoverAsset(args: {
       ) {
         throw error;
       }
+      const localFallbackPrompt = onlineAttempts.at(-1)?.prompt ?? args.prompt;
       const output = await generateLocalImageBytesByModelId({
         modelId: lenientFallbackModel,
-        promptForModel: args.prompt,
+        promptForModel: localFallbackPrompt,
         size,
         signal: args.signal,
         comfyUiHost: user.comfyui_host,
@@ -3386,7 +3427,7 @@ async function generateAndPersistSlateCoverAsset(args: {
       });
       provider = output.provider;
       model = output.modelUsed;
-      revisedPrompt = args.prompt;
+      revisedPrompt = localFallbackPrompt;
       imageBytes = output.imageBytes;
     }
   }
@@ -5814,14 +5855,17 @@ function buildRoutes(): RouteDefinition[] {
         const imageId = randomId(12);
         const localRelPath = buildGeneratedImageRelativePath(userId, imageId);
         const promptForModel = prompt;
+        const wallpaperPromptAttempts = buildImagePromptAttempts({
+          prompt: promptForModel,
+        });
 
         if (shouldRunLocalWallpaper) {
           const lenientImageFb =
             user.lenient_local_image_fallback_model?.trim() ?? "";
-          const runLocalBytes = (modelId: string) =>
+          const runLocalBytes = (modelId: string, attemptPrompt: string) =>
             generateLocalImageBytesByModelId({
               modelId,
-              promptForModel,
+              promptForModel: attemptPrompt,
               size: ZEN_WALLPAPER_SIZE,
               signal: imageGenAbort.signal,
               comfyUiHost: user.comfyui_host,
@@ -5834,15 +5878,24 @@ function buildRoutes(): RouteDefinition[] {
           let localOut: Awaited<
             ReturnType<typeof generateLocalImageBytesByModelId>
           >;
+          let revisedPrompt: string;
           try {
-            localOut = await runLocalBytes(resolvedLocalImageModel);
+            const attempted = await runImagePromptAttempts({
+              attempts: wallpaperPromptAttempts,
+              generate: (attempt) =>
+                runLocalBytes(resolvedLocalImageModel, attempt.prompt),
+            });
+            localOut = attempted.value;
+            revisedPrompt = attempted.prompt;
           } catch (primaryError) {
             if (
               lenientImageFb &&
               lenientImageFb !== resolvedLocalImageModel.trim() &&
               shouldAttemptLenientLocalImageFallback(primaryError)
             ) {
-              localOut = await runLocalBytes(lenientImageFb);
+              revisedPrompt =
+                wallpaperPromptAttempts.at(-1)?.prompt ?? promptForModel;
+              localOut = await runLocalBytes(lenientImageFb, revisedPrompt);
             } else {
               throw primaryError;
             }
@@ -5870,7 +5923,7 @@ function buildRoutes(): RouteDefinition[] {
                 wallpaperPersonaBotId,
               ),
               prompt,
-              prompt,
+              revisedPrompt,
               storedUrl,
               ZEN_WALLPAPER_SIZE,
               ZEN_WALLPAPER_QUALITY,
@@ -5895,12 +5948,17 @@ function buildRoutes(): RouteDefinition[] {
         let openAiResult: Awaited<ReturnType<typeof generateImage>> | null =
           null;
         try {
-          openAiResult = await generateImage(promptForModel, apiKey, {
-            model: resolvedOpenAiImageModel || undefined,
-            size: ZEN_WALLPAPER_SIZE,
-            quality: ZEN_WALLPAPER_QUALITY,
-            signal: imageGenAbort.signal,
+          const attempted = await runImagePromptAttempts({
+            attempts: wallpaperPromptAttempts,
+            generate: (attempt) =>
+              generateImage(attempt.prompt, apiKey, {
+                model: resolvedOpenAiImageModel || undefined,
+                size: ZEN_WALLPAPER_SIZE,
+                quality: ZEN_WALLPAPER_QUALITY,
+                signal: imageGenAbort.signal,
+              }),
           });
+          openAiResult = attempted.value;
         } catch (primaryError) {
           if (
             lenientImageFbOnline &&
@@ -5908,7 +5966,8 @@ function buildRoutes(): RouteDefinition[] {
           ) {
             const localOut = await generateLocalImageBytesByModelId({
               modelId: lenientImageFbOnline,
-              promptForModel,
+              promptForModel:
+                wallpaperPromptAttempts.at(-1)?.prompt ?? promptForModel,
               size: ZEN_WALLPAPER_SIZE,
               signal: imageGenAbort.signal,
               comfyUiHost: user.comfyui_host,
@@ -5941,7 +6000,7 @@ function buildRoutes(): RouteDefinition[] {
                   wallpaperPersonaBotId,
                 ),
                 prompt,
-                prompt,
+                wallpaperPromptAttempts.at(-1)?.prompt ?? promptForModel,
                 storedUrl,
                 ZEN_WALLPAPER_SIZE,
                 ZEN_WALLPAPER_QUALITY,
@@ -13235,10 +13294,13 @@ function buildRoutes(): RouteDefinition[] {
       if (shouldRunLocal) {
           const lenientImageFb =
             user.lenient_local_image_fallback_model?.trim() ?? "";
-        const runLocalBytes = (modelId: string) =>
+        const localPromptAttempts = buildImagePromptAttempts({
+          prompt: localPromptForModel,
+        });
+        const runLocalBytes = (modelId: string, attemptPrompt: string) =>
           generateLocalImageBytesByModelId({
             modelId,
-            promptForModel,
+            promptForModel: attemptPrompt,
             size,
             signal: imageGenAbort.signal,
             comfyUiHost: user.comfyui_host,
@@ -13252,15 +13314,24 @@ function buildRoutes(): RouteDefinition[] {
           let localOut: Awaited<
             ReturnType<typeof generateLocalImageBytesByModelId>
           >;
+        let revisedPrompt: string;
         try {
-          localOut = await runLocalBytes(resolvedLocalImageModel);
+          const attempted = await runImagePromptAttempts({
+            attempts: localPromptAttempts,
+            generate: (attempt) =>
+              runLocalBytes(resolvedLocalImageModel, attempt.prompt),
+          });
+          localOut = attempted.value;
+          revisedPrompt = attempted.prompt;
         } catch (primaryError) {
           if (
             lenientImageFb &&
             lenientImageFb !== resolvedLocalImageModel.trim() &&
             shouldAttemptLenientLocalImageFallback(primaryError)
           ) {
-            localOut = await runLocalBytes(lenientImageFb);
+            revisedPrompt =
+              localPromptAttempts.at(-1)?.prompt ?? localPromptForModel;
+            localOut = await runLocalBytes(lenientImageFb, revisedPrompt);
           } else {
             throw primaryError;
           }
@@ -13276,6 +13347,7 @@ function buildRoutes(): RouteDefinition[] {
             origin: imageOrigin,
           },
           prompt: promptForPersistence,
+          revisedPrompt,
           localRelPath,
           size,
           quality,
@@ -13298,31 +13370,44 @@ function buildRoutes(): RouteDefinition[] {
           getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
         const lenientImageFbOnline =
           user.lenient_local_image_fallback_model?.trim() ?? "";
+        const onlinePromptAttempts = buildImagePromptAttempts({
+          prompt: onlinePromptForModel,
+          useSourceImage: Boolean(sourceImageBytes),
+          promptOnlyFallback: localPromptForModel,
+        });
 
         let openAiResult: Awaited<ReturnType<typeof generateImage>> | null =
           null;
       try {
-        openAiResult = sourceImageBytes
-          ? await editImage(promptForModel, sourceImageBytes, apiKey, {
-              model: resolvedOpenAiImageModel || undefined,
-              size,
-              quality,
-              signal: imageGenAbort.signal,
-            })
-          : await generateImage(promptForModel, apiKey, {
-              model: resolvedOpenAiImageModel || undefined,
-              size,
-              quality,
-              signal: imageGenAbort.signal,
-            });
+        const attempted = await runImagePromptAttempts({
+          attempts: onlinePromptAttempts,
+          generate: (attempt) =>
+            attempt.useSourceImage && sourceImageBytes
+              ? editImage(attempt.prompt, sourceImageBytes, apiKey, {
+                  model: resolvedOpenAiImageModel || undefined,
+                  size,
+                  quality,
+                  signal: imageGenAbort.signal,
+                })
+              : generateImage(attempt.prompt, apiKey, {
+                  model: resolvedOpenAiImageModel || undefined,
+                  size,
+                  quality,
+                  signal: imageGenAbort.signal,
+                }),
+        });
+        openAiResult = attempted.value;
       } catch (primaryError) {
         if (
           lenientImageFbOnline &&
           shouldAttemptLenientLocalImageFallback(primaryError)
         ) {
+          const localFallbackPrompt =
+            buildImagePromptAttempts({ prompt: localPromptForModel }).at(-1)
+              ?.prompt ?? localPromptForModel;
           const localOut = await generateLocalImageBytesByModelId({
             modelId: lenientImageFbOnline,
-            promptForModel: localPromptForModel,
+            promptForModel: localFallbackPrompt,
             size,
             signal: imageGenAbort.signal,
             comfyUiHost: user.comfyui_host,
@@ -13345,6 +13430,7 @@ function buildRoutes(): RouteDefinition[] {
                 imageOrigin === "botcast"
               ? localPromptForModel
               : promptForPersistence,
+            revisedPrompt: localFallbackPrompt,
             localRelPath,
             size,
             quality,

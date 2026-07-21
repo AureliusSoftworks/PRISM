@@ -140,6 +140,7 @@ import {
   playSignalOutroAudio,
   stopSignalIntroAudio,
 } from "./signalIntroAudio";
+import { signalAvatarSfxShouldPlay } from "./signalAvatarSfx";
 import { randomSignalEpisodeGuestId } from "./signalBookingRandomizer";
 import {
   SIGNAL_HOST_CUE_REDIRECT_LATEST_PROGRESS,
@@ -165,6 +166,7 @@ import {
   signalAudienceSnapshot,
 } from "./signalAudiencePulse";
 import {
+  signalCupShadowProfileForTravel,
   signalCupSipFaceReleaseMs,
   signalCupSipTargetFromMouth,
   signalStageLocalPointFromViewport,
@@ -395,6 +397,8 @@ export interface BotcastExperienceProps {
       thinking: boolean;
       sipping: boolean;
       role: "host" | "guest";
+      surface: "dashboard" | "stage";
+      sfxEnabled: boolean;
       facing?: "left" | "right";
       theme?: "light" | "dark";
       mouthShape: ZenLiveBotMouthShape;
@@ -1124,6 +1128,9 @@ export function BotcastExperience({
   const [episodeOutro, setEpisodeOutro] = useState<SignalEpisodeOutro | null>(
     null,
   );
+  const [episodeOutroSfxMutedId, setEpisodeOutroSfxMutedId] = useState<
+    string | null
+  >(null);
   const [introPreviewShowId, setIntroPreviewShowId] = useState<string | null>(
     null,
   );
@@ -1366,6 +1373,9 @@ export function BotcastExperience({
       const mug = scene.querySelector<HTMLElement>(
         `[data-signal-mug-role="${role}"]`,
       );
+      const shadow = scene.querySelector<HTMLElement>(
+        `[data-signal-mug-shadow-role="${role}"]`,
+      );
       if (!mouth || !mug) continue;
 
       const target = signalCupSipTargetFromMouth({
@@ -1380,6 +1390,31 @@ export function BotcastExperience({
       if (!target) continue;
       mug.style.setProperty("--signal-cup-mouth-x", `${target.x}px`);
       mug.style.setProperty("--signal-cup-mouth-y", `${target.y}px`);
+      if (!shadow) continue;
+      const shadowProfile = signalCupShadowProfileForTravel({
+        spawnX: shadow.offsetLeft,
+        spawnY: shadow.offsetTop,
+        cupX: target.x,
+        cupY: target.y,
+        sceneWidth: scene.offsetWidth,
+        sceneHeight: scene.offsetHeight,
+      });
+      shadow.style.setProperty(
+        "--signal-cup-shadow-active-scale-x",
+        `${shadowProfile.scaleX}`,
+      );
+      shadow.style.setProperty(
+        "--signal-cup-shadow-active-scale-y",
+        `${shadowProfile.scaleY}`,
+      );
+      shadow.style.setProperty(
+        "--signal-cup-shadow-active-blur",
+        `${shadowProfile.blurPx}px`,
+      );
+      shadow.style.setProperty(
+        "--signal-cup-shadow-active-opacity",
+        `${shadowProfile.opacity}`,
+      );
     }
   }, []);
 
@@ -1418,6 +1453,35 @@ export function BotcastExperience({
             viewportX: mugBounds.left + mugBounds.width / 2,
             viewportY: mugBounds.top + mugBounds.height / 2,
           });
+          const shadow = scene.querySelector<HTMLElement>(
+            `[data-signal-mug-shadow-role="${role}"]`,
+          );
+          if (returnPoint && shadow) {
+            const shadowProfile = signalCupShadowProfileForTravel({
+              spawnX: shadow.offsetLeft,
+              spawnY: shadow.offsetTop,
+              cupX: returnPoint.x,
+              cupY: returnPoint.y,
+              sceneWidth: scene.offsetWidth,
+              sceneHeight: scene.offsetHeight,
+            });
+            shadow.style.setProperty(
+              "--signal-cup-shadow-return-scale-x",
+              `${shadowProfile.scaleX}`,
+            );
+            shadow.style.setProperty(
+              "--signal-cup-shadow-return-scale-y",
+              `${shadowProfile.scaleY}`,
+            );
+            shadow.style.setProperty(
+              "--signal-cup-shadow-return-blur",
+              `${shadowProfile.blurPx}px`,
+            );
+            shadow.style.setProperty(
+              "--signal-cup-shadow-return-opacity",
+              `${shadowProfile.opacity}`,
+            );
+          }
           nextTravel = returnPoint
             ? {
                 mode: "returning",
@@ -1616,6 +1680,7 @@ export function BotcastExperience({
   const stopEpisodeOutro = useCallback((): void => {
     outroRunIdRef.current += 1;
     setEpisodeOutro(null);
+    setEpisodeOutroSfxMutedId(null);
     stopSignalIntroAudio();
   }, []);
 
@@ -1628,6 +1693,7 @@ export function BotcastExperience({
     }): Promise<void> => {
       if (presentedEpisodeOutroIdsRef.current.has(args.episode.id)) return;
       presentedEpisodeOutroIdsRef.current.add(args.episode.id);
+      setEpisodeOutroSfxMutedId(args.episode.id);
       const runId = outroRunIdRef.current + 1;
       outroRunIdRef.current = runId;
       // Let the host's final words settle in the live studio before the
@@ -3516,6 +3582,33 @@ export function BotcastExperience({
     }
   };
 
+  const regenerateLightStudio = async (): Promise<void> => {
+    if (!selectedShow) return;
+    if (!selectedShow.nightAtmosphere.imageId) {
+      setError(
+        signalErrorToast(
+          "Refresh Light studio",
+          "Create or upload the Dark studio before refreshing the Light studio.",
+        ),
+      );
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setNotice("Refreshing the Light studio from the current Dark studio…");
+    try {
+      await startSignalArtworkJob(selectedShow, ["day-studio"]);
+      setNotice(
+        "The new Light studio is rendering from the current Dark studio in the background. The Dark studio stays unchanged, and you can keep using PRISM.",
+      );
+    } catch (studioError) {
+      setError(signalErrorToast("Refresh Light studio", studioError));
+      setNotice("The current Light and Dark studios remain in place.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const regenerateLogo = async (): Promise<void> => {
     if (!selectedShow) return;
     setBusy(true);
@@ -4030,6 +4123,7 @@ export function BotcastExperience({
     (message: BotcastMessage, elapsedMs: number, durationMs: number): void => {
       const plan = listenerReactionPlanByMessageIdRef.current.get(message.id);
       if (!plan) return;
+      if (botPowerResponseIsSilentV1(message.content)) return;
       const atMs =
         listenerReactionAtMsByMessageIdRef.current.get(message.id) ??
         armListenerReactionTiming(message, durationMs);
@@ -4062,6 +4156,7 @@ export function BotcastExperience({
     (message: BotcastMessage, elapsedMs: number, durationMs: number): void => {
       const plan = listenerReactionPlanByMessageIdRef.current.get(message.id);
       if (!plan) return;
+      if (botPowerResponseIsSilentV1(message.content)) return;
       const atMs =
         listenerReactionAtMsByMessageIdRef.current.get(message.id) ??
         armListenerReactionTiming(message, durationMs);
@@ -4901,7 +4996,8 @@ export function BotcastExperience({
     if (commentatorRole === "guest" && guestDeparted) return;
     const thinkingBot = thinkingRole === "host" ? hostBot : liveGuestBot;
     const commentator = commentatorRole === "host" ? hostBot : liveGuestBot;
-    if (!thinkingBot || !commentator || commentator.muted) return;
+    if (!thinkingBot || !commentator || thinkingBot.muted || commentator.muted)
+      return;
     const lastMessageId = episode.messages.at(-1)?.id ?? "opening";
     const turnId = `${episode.id}:${lastMessageId}:${thinkingRole}`;
     if (signalDeadAirAsideTurnIdsRef.current.has(turnId)) return;
@@ -5839,6 +5935,11 @@ export function BotcastExperience({
           args.activeMessage.id,
         ))
       : null;
+    const listenerReactionSpokenCue = botPowerResponseIsSilentV1(
+      args.activeMessage?.content,
+    )
+      ? null
+      : listenerReactionPlan?.spokenCue;
     const listenerReactionAtMs =
       args.activeMessage && listenerReactionPlan
         ? (listenerReactionAtMsByMessageIdRef.current.get(
@@ -6071,6 +6172,15 @@ export function BotcastExperience({
         thinking,
         sipping,
         role,
+        surface: "stage",
+        sfxEnabled: signalAvatarSfxShouldPlay({
+          surface: "stage",
+          introActive: episodePreRoll !== null,
+          outroActive:
+            !args.replay &&
+            (episodeOutroSfxMutedId === args.currentEpisode.id ||
+              episodeOutro !== null),
+        }),
         facing: signalStudioFacingForRole(studioLayout, role),
         theme,
         mouthShape,
@@ -6204,7 +6314,7 @@ export function BotcastExperience({
                     role="status"
                     aria-label={`${args.host.name} ${listenerReactionActionLabel(listenerReactionPlan.visualAction)}`}
                   >
-                    {(args.host.muted ? null : listenerReactionPlan.spokenCue) ??
+                    {(args.host.muted ? null : listenerReactionSpokenCue) ??
                       listenerReactionActionLabel(
                         listenerReactionPlan.visualAction,
                       )}
@@ -6223,41 +6333,60 @@ export function BotcastExperience({
             </div>
           ) : null}
           {hostVisibleToAudience && args.host && renderMug && hostCupVisual ? (
-            <div
-              className={styles.stageMug}
-              style={{
-                ...signalStudioPlacementStyle(studioLayout, "hostCup"),
-                ["--signal-cup-rest-x" as string]: `${studioLayout.hostCup.x}%`,
-                ["--signal-cup-rest-y" as string]: `${studioLayout.hostCup.y}%`,
-                ["--signal-cup-sip-duration-ms" as string]: `${hostCupVisual.sipAnimationMs}ms`,
-                ...(hostCupTravel.returnX !== null &&
-                hostCupTravel.returnY !== null
-                  ? {
-                      ["--signal-cup-return-x" as string]: `${hostCupTravel.returnX}px`,
-                      ["--signal-cup-return-y" as string]: `${hostCupTravel.returnY}px`,
-                    }
-                  : {}),
-              }}
-              data-signal-mug-role="host"
-              data-sip-face-release-ms={signalCupSipFaceReleaseMs(
-                hostCupVisual.sipAnimationMs,
-              )}
-              data-sip-requested={hostSipping ? "true" : undefined}
-              data-sipping={
-                hostCupTravel.mode === "sipping" ? "true" : undefined
-              }
-              data-returning={
-                hostCupTravel.mode === "returning" ? "true" : undefined
-              }
-              onAnimationEnd={(event) => finishSignalCupReturn("host", event)}
-              aria-label="Host coffee mug"
-            >
-              {renderMug(args.host, {
-                role: "host",
-                facing: signalStudioFacingForRole(studioLayout, "host"),
-                visual: hostCupVisual,
-              })}
-            </div>
+            <>
+              <span
+                className={styles.stageMugShadow}
+                style={{
+                  ...signalStudioPlacementStyle(studioLayout, "hostCup"),
+                  ["--signal-cup-shadow-duration-ms" as string]: `${hostCupVisual.sipAnimationMs}ms`,
+                }}
+                data-signal-mug-shadow-role="host"
+                data-sipping={
+                  hostCupTravel.mode === "sipping" ? "true" : undefined
+                }
+                data-returning={
+                  hostCupTravel.mode === "returning" ? "true" : undefined
+                }
+                aria-hidden="true"
+              />
+              <div
+                className={styles.stageMug}
+                style={{
+                  ...signalStudioPlacementStyle(studioLayout, "hostCup"),
+                  ["--signal-cup-rest-x" as string]: `${studioLayout.hostCup.x}%`,
+                  ["--signal-cup-rest-y" as string]: `${studioLayout.hostCup.y}%`,
+                  ["--signal-cup-sip-duration-ms" as string]: `${hostCupVisual.sipAnimationMs}ms`,
+                  ...(hostCupTravel.returnX !== null &&
+                  hostCupTravel.returnY !== null
+                    ? {
+                        ["--signal-cup-return-x" as string]: `${hostCupTravel.returnX}px`,
+                        ["--signal-cup-return-y" as string]: `${hostCupTravel.returnY}px`,
+                      }
+                    : {}),
+                }}
+                data-signal-mug-role="host"
+                data-sip-face-release-ms={signalCupSipFaceReleaseMs(
+                  hostCupVisual.sipAnimationMs,
+                )}
+                data-sip-requested={hostSipping ? "true" : undefined}
+                data-sipping={
+                  hostCupTravel.mode === "sipping" ? "true" : undefined
+                }
+                data-returning={
+                  hostCupTravel.mode === "returning" ? "true" : undefined
+                }
+                onAnimationEnd={(event) =>
+                  finishSignalCupReturn("host", event)
+                }
+                aria-label="Host coffee mug"
+              >
+                {renderMug(args.host, {
+                  role: "host",
+                  facing: signalStudioFacingForRole(studioLayout, "host"),
+                  visual: hostCupVisual,
+                })}
+              </div>
+            </>
           ) : null}
           {guestVisibleToAudience && args.guest ? (
             <div
@@ -6327,7 +6456,7 @@ export function BotcastExperience({
                     role="status"
                     aria-label={`${args.guest.name} ${listenerReactionActionLabel(listenerReactionPlan.visualAction)}`}
                   >
-                    {(args.guest.muted ? null : listenerReactionPlan.spokenCue) ??
+                    {(args.guest.muted ? null : listenerReactionSpokenCue) ??
                       listenerReactionActionLabel(
                         listenerReactionPlan.visualAction,
                       )}
@@ -6346,41 +6475,60 @@ export function BotcastExperience({
             </div>
           ) : null}
           {guestPresentOnStage && args.guest && renderMug && guestCupVisual ? (
-            <div
-              className={styles.stageMug}
-              style={{
-                ...signalStudioPlacementStyle(studioLayout, "guestCup"),
-                ["--signal-cup-rest-x" as string]: `${studioLayout.guestCup.x}%`,
-                ["--signal-cup-rest-y" as string]: `${studioLayout.guestCup.y}%`,
-                ["--signal-cup-sip-duration-ms" as string]: `${guestCupVisual.sipAnimationMs}ms`,
-                ...(guestCupTravel.returnX !== null &&
-                guestCupTravel.returnY !== null
-                  ? {
-                      ["--signal-cup-return-x" as string]: `${guestCupTravel.returnX}px`,
-                      ["--signal-cup-return-y" as string]: `${guestCupTravel.returnY}px`,
-                    }
-                  : {}),
-              }}
-              data-signal-mug-role="guest"
-              data-sip-face-release-ms={signalCupSipFaceReleaseMs(
-                guestCupVisual.sipAnimationMs,
-              )}
-              data-sip-requested={guestSipping ? "true" : undefined}
-              data-sipping={
-                guestCupTravel.mode === "sipping" ? "true" : undefined
-              }
-              data-returning={
-                guestCupTravel.mode === "returning" ? "true" : undefined
-              }
-              onAnimationEnd={(event) => finishSignalCupReturn("guest", event)}
-              aria-label="Guest coffee mug"
-            >
-              {renderMug(args.guest, {
-                role: "guest",
-                facing: signalStudioFacingForRole(studioLayout, "guest"),
-                visual: guestCupVisual,
-              })}
-            </div>
+            <>
+              <span
+                className={styles.stageMugShadow}
+                style={{
+                  ...signalStudioPlacementStyle(studioLayout, "guestCup"),
+                  ["--signal-cup-shadow-duration-ms" as string]: `${guestCupVisual.sipAnimationMs}ms`,
+                }}
+                data-signal-mug-shadow-role="guest"
+                data-sipping={
+                  guestCupTravel.mode === "sipping" ? "true" : undefined
+                }
+                data-returning={
+                  guestCupTravel.mode === "returning" ? "true" : undefined
+                }
+                aria-hidden="true"
+              />
+              <div
+                className={styles.stageMug}
+                style={{
+                  ...signalStudioPlacementStyle(studioLayout, "guestCup"),
+                  ["--signal-cup-rest-x" as string]: `${studioLayout.guestCup.x}%`,
+                  ["--signal-cup-rest-y" as string]: `${studioLayout.guestCup.y}%`,
+                  ["--signal-cup-sip-duration-ms" as string]: `${guestCupVisual.sipAnimationMs}ms`,
+                  ...(guestCupTravel.returnX !== null &&
+                  guestCupTravel.returnY !== null
+                    ? {
+                        ["--signal-cup-return-x" as string]: `${guestCupTravel.returnX}px`,
+                        ["--signal-cup-return-y" as string]: `${guestCupTravel.returnY}px`,
+                      }
+                    : {}),
+                }}
+                data-signal-mug-role="guest"
+                data-sip-face-release-ms={signalCupSipFaceReleaseMs(
+                  guestCupVisual.sipAnimationMs,
+                )}
+                data-sip-requested={guestSipping ? "true" : undefined}
+                data-sipping={
+                  guestCupTravel.mode === "sipping" ? "true" : undefined
+                }
+                data-returning={
+                  guestCupTravel.mode === "returning" ? "true" : undefined
+                }
+                onAnimationEnd={(event) =>
+                  finishSignalCupReturn("guest", event)
+                }
+                aria-label="Guest coffee mug"
+              >
+                {renderMug(args.guest, {
+                  role: "guest",
+                  facing: signalStudioFacingForRole(studioLayout, "guest"),
+                  visual: guestCupVisual,
+                })}
+              </div>
+            </>
           ) : null}
           <div
             className={`${styles.seat} ${styles.hostSeat}`}
@@ -6654,6 +6802,8 @@ export function BotcastExperience({
             thinking: false,
             sipping: false,
             role,
+            surface: "dashboard",
+            sfxEnabled: false,
             facing: signalStudioFacingForRole(layout, role),
             theme: previewTheme,
             mouthShape,
@@ -7913,6 +8063,8 @@ export function BotcastExperience({
                   thinking: hostChatBusy && !hostChatStreamingMessage,
                   sipping: false,
                   role: "host",
+                  surface: "dashboard",
+                  sfxEnabled: false,
                   facing: signalStudioFacingForRole(
                     normalizeBotcastStudioLayout(selectedShow.studioLayout),
                     "host",
@@ -8969,6 +9121,23 @@ export function BotcastExperience({
                         </button>
                         <button
                           type="button"
+                          data-signal-artwork-action="day-studio"
+                          title={
+                            selectedShow.nightAtmosphere.imageId
+                              ? "Generate a new Light studio from the current Dark studio"
+                              : "Create or replace the Dark studio first"
+                          }
+                          onClick={() => void regenerateLightStudio()}
+                          disabled={
+                            busy ||
+                            selectedShowArtworkBusy ||
+                            !selectedShow.nightAtmosphere.imageId
+                          }
+                        >
+                          Refresh Light
+                        </button>
+                        <button
+                          type="button"
                           className={styles.assetUploadButton}
                           title="Upload a replacement for the Light Mode studio"
                             onClick={() =>
@@ -9075,6 +9244,8 @@ export function BotcastExperience({
                       thinking: hostChatBusy,
                       sipping: false,
                       role: "host",
+                      surface: "dashboard",
+                      sfxEnabled: false,
                       facing: signalStudioFacingForRole(
                         normalizeBotcastStudioLayout(selectedShow.studioLayout),
                         "host",

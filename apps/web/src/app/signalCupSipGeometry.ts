@@ -7,6 +7,13 @@ export interface SignalCupSipRect {
   height: number;
 }
 
+export interface SignalCupShadowProfile {
+  scaleX: number;
+  scaleY: number;
+  blurPx: number;
+  opacity: number;
+}
+
 const SIGNAL_CUP_SIP_X_MIN_PX = 28;
 const SIGNAL_CUP_SIP_X_MAX_PX = 40;
 const SIGNAL_CUP_SIP_X_VIEWPORT_RATIO = 0.031;
@@ -22,6 +29,44 @@ const SIGNAL_CUP_SIP_RIM_OFFSET_HEIGHT_RATIO = 0.24;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+function round(value: number): number {
+  return Math.round(value * 1_000) / 1_000;
+}
+
+export function signalCupShadowProfileForTravel(args: {
+  spawnX: number;
+  spawnY: number;
+  cupX: number;
+  cupY: number;
+  sceneWidth: number;
+  sceneHeight: number;
+}): SignalCupShadowProfile {
+  const values = [
+    args.spawnX,
+    args.spawnY,
+    args.cupX,
+    args.cupY,
+    args.sceneWidth,
+    args.sceneHeight,
+  ];
+  const sceneSize = Math.min(args.sceneWidth, args.sceneHeight);
+  const distance = Math.hypot(
+    args.cupX - args.spawnX,
+    args.cupY - args.spawnY,
+  );
+  const travel =
+    values.every(Number.isFinite) && sceneSize > 0
+      ? clamp(distance / (sceneSize * 0.45), 0, 1)
+      : 0;
+
+  return {
+    scaleX: round(0.76 + travel * 0.66),
+    scaleY: round(0.38 + travel * 0.44),
+    blurPx: round(2 + travel * 5),
+    opacity: round(0.7 - travel * 0.44),
+  };
 }
 
 export function signalCupSipFaceReleaseMs(durationMs: number): number {

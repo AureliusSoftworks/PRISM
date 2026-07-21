@@ -521,7 +521,7 @@ describe("bot-locked Chat lane", () => {
     assert.equal(result.conversation.messages.at(-1)?.content, "*nods once* *sips coffee* ...");
   });
 
-  it("gives Forgetful Freddie a bounded public tail and responds to the current complaint", async () => {
+  it("gives Forgetful Freddie only the current message and responds to the complaint", async () => {
     const db = createChatTestDb();
     const chatCalls = installChatFetchStub(
       "I'm Forgetful Freddie. Everyone seems surprisingly tense, but it's nice to meet you.",
@@ -559,8 +559,8 @@ describe("bot-locked Chat lane", () => {
       (entry) => entry.role !== "system",
     );
     assert.match(joinedPrompt, /Why are you introducing yourself yet again/iu);
-    assert.ok(visiblePromptMessages.length >= 1);
-    assert.ok(visiblePromptMessages.length <= 4);
+    assert.equal(visiblePromptMessages.length, 1);
+    assert.doesNotMatch(joinedPrompt, /Hello for the very first time/iu);
     assert.equal(
       second.conversation.messages.at(-1)?.content,
       "What do you mean? I don't think we've met yet.",

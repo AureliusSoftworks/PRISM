@@ -65,13 +65,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   chat: {
     id: "chat",
     name: "Chat",
-    version: "1.21",
+    version: "1.22",
     status: "active",
   },
   zen: {
     id: "zen",
     name: "Zen",
-    version: "1.20",
+    version: "1.21",
     status: "active",
   },
   arena: {
@@ -89,13 +89,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   coffee: {
     id: "coffee",
     name: "Coffee",
-    version: "2.18",
+    version: "2.19",
     status: "active",
   },
   botcast: {
     id: "botcast",
     name: "Signal",
-    version: "1.29",
+    version: "1.30",
     status: "active",
   },
   feed: {
@@ -113,7 +113,7 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   story: {
     id: "story",
     name: "Story",
-    version: "0.19",
+    version: "0.20",
     status: "preview",
   },
   gym: {
@@ -162,7 +162,7 @@ export const BOT_POWER_IDENTITY_MIRROR_MODE_POLICY: Record<
   surf: "deferred",
 };
 
-/** Every holder turn gets a stable one-to-four-message public tail and no older continuity. */
+/** Every holder turn gets only the current other-speaker message and no older continuity. */
 export const BOT_POWER_ETERNAL_INTRODUCTION_MODE_POLICY: Record<
   PrismAppletId,
   BotPowerEternalIntroductionModePolicy

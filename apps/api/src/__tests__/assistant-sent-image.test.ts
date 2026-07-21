@@ -143,7 +143,7 @@ describe("buildContextAwareImageUserPrompt", () => {
     assert.doesNotMatch(out, /cleavage/i);
   });
 
-  it("tries one repaired image prompt, then returns an organic bot boundary on denial", async () => {
+  it("tries progressively safer image prompts, then returns an organic bot boundary on denial", async () => {
     const db = createImageTestDb();
     db.prepare(
       "INSERT INTO bots (id, user_id, name, system_prompt, openai_image_model) VALUES (?, ?, ?, ?, ?)"
@@ -185,8 +185,9 @@ describe("buildContextAwareImageUserPrompt", () => {
     });
 
     assert.equal(result.status, "denied");
-    assert.equal(prompts.length, 2);
+    assert.equal(prompts.length, 3);
     assert.match(prompts[1] ?? "", /fully clothed adult portrait/i);
+    assert.match(prompts[2] ?? "", /fresh, non-branded, general-audience/iu);
     if (result.status === "denied") {
       assert.equal(
         result.message,

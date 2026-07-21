@@ -187,11 +187,11 @@ function deterministicEternalIntroductionPower(
     version: BOT_POWER_VERSION,
     sourceHash: botPowerSourceHashV1(source.name, source.intent),
     selfCue:
-      "HARD MEMORY CONTRACT: respond naturally to only the one-to-four public messages provided for this turn. Treat people as unfamiliar unless those visible messages establish otherwise. Never claim older relationship context or mention this rule. Introduce yourself only when the immediate exchange warrants it.",
+      "HARD MEMORY CONTRACT: receive and understand only the current other-speaker message. Respond directly to its concrete content as fresh first contact. You do not know prior turns or your own earlier messages. Never claim older relationship context or mention this rule. If accused of repetition, react with sincere confusion; never agree that you repeated yourself or explain why. Introduce yourself only when this exchange genuinely warrants it; never default to identical introductory copy.",
     observerCue:
-      `${subject} remembers only a shifting one-to-four-message public tail and has no older relationship context. Retain the full encounter yourself; react to repetition through your own personality without explaining hidden mechanics or forcing an emotion.`,
+      `${subject} receives only the current other-speaker message and has no memory of prior turns or their own earlier messages. Retain the full encounter yourself; react to repetition through your own personality without explaining hidden mechanics or forcing an emotion.`,
     effects: [
-      { type: "eternal_introduction", memory: "rolling_public_tail_1_to_4" },
+      { type: "eternal_introduction", memory: "current_other_speaker_message" },
       {
         type: "social_influence",
         trigger: "after_speech",
@@ -1363,7 +1363,7 @@ export async function compileBotPowers(args: {
         "Return {\"powers\":[{\"id\":string,\"selfCue\":string,\"observerCue\":string,\"effects\":[],\"ruleLabels\":string[]}]}",
         "Allowed effects only:",
         '- {"type":"mute"},',
-        '- {"type":"eternal_introduction","memory":"rolling_public_tail_1_to_4"},',
+        '- {"type":"eternal_introduction","memory":"current_other_speaker_message"},',
         '- {"type":"speech_copy","trigger":"direct_address"},',
         '- {"type":"identity_mirror","trigger":"direct_bot_address"},',
         '- {"type":"hearing_repeat","frequency":"occasional|frequent","moodPenalty":"small|medium|large"},',
@@ -1426,7 +1426,7 @@ export async function compileBotPowers(args: {
         content: [
           "Repair malformed PRISM Power compiler output.",
           "Reply with JSON only and preserve the supplied power IDs exactly.",
-          "Every rolling one-to-four-message short-term-amnesia rule, addressed-speech copy, direct-addresser identity mirror, hearing-repeat, active live-interruption, exclusive visibility, hearing-audience, ghostly speaking-only avatar, physical avatar-size, loud/quiet voice presence, normal-volume gibberish, intermittent mute, strict response-length, current-addressee obsessive-fandom, after-spoken-turn recipient mood-boost, direct-addresser mood-drain, or light/dark conditional compound intent must include its matching typed effects, including exact whenTheme conditions for compound branches, not only prose cues.",
+          "Every current-other-speaker short-term-amnesia rule, addressed-speech copy, direct-addresser identity mirror, hearing-repeat, active live-interruption, exclusive visibility, hearing-audience, ghostly speaking-only avatar, physical avatar-size, loud/quiet voice presence, normal-volume gibberish, intermittent mute, strict response-length, current-addressee obsessive-fandom, after-spoken-turn recipient mood-boost, direct-addresser mood-drain, or light/dark conditional compound intent must include its matching typed effects, including exact whenTheme conditions for compound branches, not only prose cues.",
         ].join(" "),
       },
       {

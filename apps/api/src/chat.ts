@@ -2398,7 +2398,7 @@ export interface UserChatSettings {
   botSystemPrompt?: string;
   /** Hard runtime enforcement for an active compiled mute Power. */
   botPowerMuted?: boolean;
-  /** Hard rolling public-tail context and no-older-relationship contract. */
+  /** Hard current-other-speaker context and no-older-relationship contract. */
   botPowerEternalIntroduction?: boolean;
   /** This turn hit the replay-stable half-mute branch of a Quiet Power. */
   botPowerQuietIgnored?: boolean;

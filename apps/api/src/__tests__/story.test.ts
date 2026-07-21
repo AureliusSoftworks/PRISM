@@ -964,8 +964,8 @@ describe("Story API helpers", () => {
     ));
     assert.ok(freddieScenes.every((scene) => scene.spritePose === "speaking"));
     assert.match(prompt, /Story adaptation for Forgetful Freddie/iu);
-    assert.match(prompt, /one-to-four-beat public tail/iu);
-    assert.match(prompt, /responds naturally/iu);
+    assert.match(prompt, /current other-speaker beat/iu);
+    assert.match(prompt, /responds directly to its concrete content/iu);
   });
 
   it("hard-echoes the prior bot-authored Story scene for powered speakers", async () => {

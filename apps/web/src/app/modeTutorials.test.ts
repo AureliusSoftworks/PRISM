@@ -311,7 +311,11 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
-      /physical actions float above their avatar and stay out of captions/u,
+      /no narrated action text is shown/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
+      /guest carries the first audible opening and the spoken closing/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
@@ -734,7 +738,7 @@ describe("mode tutorials", () => {
 
     assert.deepEqual(chooseRelationship, {
       heading: "Choose a relationship",
-      body: "Choose PRISM or a persona to enter that relationship’s Home. Ready Powers stay active with that persona here and across PRISM; a muted persona can still act, but only answers with ... and never speaks aloud, while a Copycat persona may originate one opening if nobody has addressed them yet, then repeats the latest addressed message exactly. A short-term-amnesia persona responds naturally from a replay-stable one-to-four-message public tail, never older relationship history, and introduces themself only when that immediate exchange warrants it. An Obsessed persona treats you as the star of each reply with fresh, intense admiration, while your agency, privacy, and safety boundaries still win. A radiant-joy persona makes that emotional warmth palpable without tracking or rewriting your mood. A sad-grouchy persona makes her draining presence equally palpable without changing your state; only bots that directly talk to her lose mood or motivation. Physical-size Powers render a persona slightly larger or smaller without changing the room layout. Microscopic stays fully unseen even while speaking, while Invisible stays half-translucent. Loud and Quiet Powers apply a small fixed voice-volume and text-size shift without changing physical size or visibility; Quiet can go unheard on half its turns and lose a little mood. A hard bare-minimum or brief Power is engine-bounded even if the model tries to elaborate. Back or Escape returns you to the wider Library or saved group grid exactly where you left it. Inviting a guest keeps you in the current Home.",
+      body: "Choose PRISM or a persona to enter that relationship’s Home. Ready Powers stay active with that persona here and across PRISM; a muted persona can still act, but only answers with ... and never speaks aloud, while a Copycat persona may originate one opening if nobody has addressed them yet, then repeats the latest addressed message exactly. A short-term-amnesia persona understands only your current message, treats it as fresh first contact, never knows prior turns or their own earlier replies, and responds directly instead of defaulting to the same introduction. An Obsessed persona treats you as the star of each reply with fresh, intense admiration, while your agency, privacy, and safety boundaries still win. A radiant-joy persona makes that emotional warmth palpable without tracking or rewriting your mood. A sad-grouchy persona makes her draining presence equally palpable without changing your state; only bots that directly talk to her lose mood or motivation. Physical-size Powers render a persona slightly larger or smaller without changing the room layout. Microscopic stays fully unseen even while speaking, while Invisible stays half-translucent. Loud and Quiet Powers apply a small fixed voice-volume and text-size shift without changing physical size or visibility; Quiet can go unheard on half its turns and lose a little mood. A hard bare-minimum or brief Power is engine-bounded even if the model tries to elaborate. Back or Escape returns you to the wider Library or saved group grid exactly where you left it. Inviting a guest keeps you in the current Home.",
       clickLabel: "a PRISM or persona tile",
       targetSelector: '[data-tutorial-target="chat-bot-picker"]',
     });
@@ -933,6 +937,7 @@ describe("mode tutorials", () => {
     assert.match(coffee?.body ?? "", /cup-return sounds stay synchronized/);
     assert.match(signal?.body ?? "", /awkward dead air/);
     assert.match(signal?.body ?? "", /original answer keeps generating/);
+    assert.match(signal?.body ?? "", /except while a hard-muted participant/u);
     assert.match(signal?.body ?? "", /Bot ambient sips land only while the other bot is talking/);
     assert.match(signal?.body ?? "", /your cup moves only after you click Sip coffee/);
     assert.match(signal?.body ?? "", /cup-return sounds stay synchronized/);
@@ -997,7 +1002,7 @@ describe("mode tutorials", () => {
     assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /without overriding the other bot’s agency or boundaries/u);
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
-      /both frozen cast members are muted[\s\S]*short visual exchange and closing/u,
+      /both frozen cast members are muted[\s\S]*short silent exchange and closing/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",

@@ -755,7 +755,7 @@ export function coffeePowersPromptForSpeaker(
   }
   if (own?.effects.some((effect) => effect.type === "eternal_introduction")) {
     lines.push(
-      "Hard short-term-amnesia rule: respond naturally using only the one to four public messages included in this prompt. Treat people as unfamiliar unless those visible messages establish otherwise. Never claim an older relationship, use hidden table history, or mention this rule. A self-introduction is optional and belongs only when the immediate exchange warrants it.",
+      "Hard short-term-amnesia rule: receive and understand only the current other-speaker message. Respond directly to its concrete content as fresh first contact. You do not know prior turns or your own earlier messages. Never claim an older relationship, use hidden table history, mention this rule, or default to identical introductory copy. If accused of repetition, react with sincere confusion; never agree that you repeated yourself or explain why. A self-introduction is optional only when this exchange genuinely warrants it.",
     );
   }
   const responseBudget = coffeePowerResponseBudgetForBot(plan, speakerBotId);

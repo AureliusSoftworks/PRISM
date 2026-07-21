@@ -124,6 +124,18 @@ describe("Signal experience shell", () => {
     assert.match(source, /resolveListenerReactionAtMs/u);
     assert.match(source, /onListenerReaction\?\./u);
     assert.match(source, /listenerReactionHasCrosstalkAudio\(plan\)/u);
+    assert.equal(
+      [
+        ...source.matchAll(
+          /if \(botPowerResponseIsSilentV1\(message\.content\)\) return;/gu,
+        ),
+      ].length,
+      2,
+    );
+    assert.match(
+      source,
+      /const listenerReactionSpokenCue = botPowerResponseIsSilentV1\(/u,
+    );
     assert.match(source, /signalInterruptedSpeakerRetortDelayMs\(/u);
     assert.match(
       source,
@@ -154,11 +166,15 @@ describe("Signal experience shell", () => {
     );
   });
 
-  it("fills awkward Signal dead air without replacing the pending turn", () => {
+  it("fills awkward Signal dead air except around a hard-muted participant", () => {
     assert.match(source, /SIGNAL_DEAD_AIR_ASIDE_DELAY_MS = 3_800/u);
     assert.match(source, /buildDeadAirAsidePlanV1\(\{[\s\S]{0,240}mode: "signal"/u);
     assert.match(source, /onDeadAirAside\([\s\S]{0,220}episode\.responseMode !== "local"/u);
     assert.match(source, /setSignalDeadAirAside\(plan\)/u);
+    assert.match(
+      source,
+      /thinkingBot\.muted \|\| commentator\.muted/u,
+    );
     assert.match(source, /styles\.deadAirAsideText/u);
     assert.match(css, /\.deadAirAsideText/u);
     assert.match(pageSource, /onDeadAirAside=\{playDeadAirAside\}/u);
@@ -283,7 +299,7 @@ describe("Signal experience shell", () => {
     assert.match(pageSource, /data-zen-live-bot-presence-plate="true"/u);
     assert.match(
       source,
-      /const renderedAvatar = renderAvatar\?\.\(bot,[\s\S]{0,420}if \(bot\.producerGuest\)/u,
+      /const renderedAvatar = renderAvatar\?\.\(bot,[\s\S]{0,720}if \(bot\.producerGuest\)/u,
     );
     assert.match(
       pageSource,
@@ -357,6 +373,17 @@ describe("Signal experience shell", () => {
     assert.match(source, /signalCupSipTargetFromMouth\(\{/u);
     assert.match(source, /mouthBounds: mouth\.getBoundingClientRect\(\)/u);
     assert.match(source, /setProperty\("--signal-cup-mouth-x"/u);
+    assert.match(source, /signalCupShadowProfileForTravel\(\{/u);
+    assert.match(source, /data-signal-mug-shadow-role="host"/u);
+    assert.match(source, /data-signal-mug-shadow-role="guest"/u);
+    assert.match(
+      css,
+      /\.stageMugShadow\s*\{[^}]*position:\s*absolute[^}]*z-index:\s*8/iu,
+    );
+    assert.match(
+      css,
+      /@keyframes signalStageMugShadowSip\s*\{[\s\S]*?--signal-cup-shadow-active-scale-x[\s\S]*?scale\(\.76, \.38\)/u,
+    );
     assert.doesNotMatch(
       source,
       /--signal-cup-mouth-[xy][^\n]*studioLayout\.(?:host|guest)Bot/u,
@@ -831,6 +858,10 @@ describe("Signal experience shell", () => {
     assert.match(outroSource, /phase: "holding"/u);
     assert.match(outroSource, /phase: "complete"/u);
     assert.match(source, /SIGNAL_EPISODE_OUTRO_DEAD_AIR_MS = 2_000/u);
+    assert.match(
+      outroSource,
+      /setEpisodeOutroSfxMutedId\(args\.episode\.id\)[\s\S]{0,320}SIGNAL_EPISODE_OUTRO_DEAD_AIR_MS/u,
+    );
     assert.match(
       outroSource,
       /setTimeout\(resolve, SIGNAL_EPISODE_OUTRO_DEAD_AIR_MS\)[\s\S]{0,100}outroRunIdRef\.current !== runId[\s\S]{0,100}setEpisodeOutro\(/u,
@@ -1322,7 +1353,7 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /!thinkingBot \|\| !commentator \|\| commentator\.muted/u,
+      /!thinkingBot \|\| !commentator \|\| thinkingBot\.muted \|\| commentator\.muted/u,
     );
     assert.match(
       source,
@@ -1477,6 +1508,7 @@ describe("Signal experience shell", () => {
       /Regenerate\{" "\}[\s\S]{0,100}hostBot\?\.echoesAddressedSpeech \? "blurb" : "blurbs"/u,
     );
     assert.match(source, />\s*Refresh studio\s*</u);
+    assert.match(source, />\s*Refresh Light\s*</u);
     assert.match(source, />\s*Refresh logo\s*</u);
     assert.match(
       source,
@@ -1492,9 +1524,13 @@ describe("Signal experience shell", () => {
     );
     assert.match(source, /studio-specific room-and-Foley atmosphere is ready/u);
     assert.match(source, /regenerateStudio\(\)/u);
+    assert.match(source, /regenerateLightStudio\(\)/u);
+    assert.match(
+      source,
+      /startSignalArtworkJob\(selectedShow, \["day-studio"\]\)/u,
+    );
     assert.match(source, /startSignalArtworkJob\(reset\.show, \["logo"\]\)/u);
     assert.doesNotMatch(source, /const generateShowArtwork/u);
-    assert.doesNotMatch(source, />\s*Refresh Light\s*</u);
     assert.doesNotMatch(source, />\s*Refresh Dark\s*</u);
     assert.match(source, /function SignalShowLogo/u);
     assert.match(source, /show\.logo\.fallbackGlyph/u);
@@ -1514,6 +1550,10 @@ describe("Signal experience shell", () => {
   it("blocks only for identity handoff, then exposes honest persistent background progress", () => {
     const studioRefreshSource = source.slice(
       source.indexOf("const regenerateStudio"),
+      source.indexOf("const regenerateLightStudio"),
+    );
+    const lightStudioRefreshSource = source.slice(
+      source.indexOf("const regenerateLightStudio"),
       source.indexOf("const regenerateLogo"),
     );
     const logoRefreshSource = source.slice(
@@ -1553,11 +1593,21 @@ describe("Signal experience shell", () => {
     assert.match(artworkActivitySource, /\/cancel/u);
     assert.match(artworkActivityCss, /signal-artwork-scan/u);
     assert.doesNotMatch(studioRefreshSource, /setBlockingOperation/u);
+    assert.doesNotMatch(lightStudioRefreshSource, /setBlockingOperation/u);
     assert.doesNotMatch(logoRefreshSource, /setBlockingOperation/u);
     assert.match(
       studioRefreshSource,
       /rendering in the background[\s\S]{0,180}You can keep using PRISM/u,
     );
+    assert.match(
+      lightStudioRefreshSource,
+      /startSignalArtworkJob\(selectedShow, \["day-studio"\]\)/u,
+    );
+    assert.doesNotMatch(
+      lightStudioRefreshSource,
+      /regenerateAtmosphere|atmosphere-audio\/generate|\["night-studio"/u,
+    );
+    assert.match(lightStudioRefreshSource, /Dark studio stays unchanged/u);
     assert.match(
       logoRefreshSource,
       /rendering in the background\. You can keep using PRISM/u,
@@ -1625,6 +1675,15 @@ describe("Signal experience shell", () => {
   });
 
   it("replaces each Signal show asset through a simple image upload", () => {
+    assert.match(source, /data-signal-artwork-action="day-studio"/u);
+    assert.match(
+      source,
+      /Generate a new Light studio from the current Dark studio/u,
+    );
+    assert.match(
+      source,
+      /disabled=\{\s*busy \|\|\s*selectedShowArtworkBusy \|\|\s*!selectedShow\.nightAtmosphere\.imageId\s*\}/u,
+    );
     assert.match(source, />\s*Replace Light\s*</u);
     assert.match(source, />\s*Replace Dark\s*</u);
     assert.match(source, />\s*Replace logo\s*</u);

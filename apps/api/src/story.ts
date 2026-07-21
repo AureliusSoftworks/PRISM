@@ -17,7 +17,6 @@ import {
   botPowerCandorResponseRuleV1,
   botPowerEchoesAddressedSpeechV1,
   botPowerEternallyIntroducesV1,
-  botPowerForgetfulContextMessageCountV1,
   botPowerIntermittentMuteEffectV1,
   botPowerIntermittentMuteTurnIsIgnoredV1,
   botPowerIsMutedV1,
@@ -1324,13 +1323,11 @@ function applyStoryHardResponsePowers(
       scene.speakerBotId &&
       eternalIntroductionBotIds.has(scene.speakerBotId)
     ) {
-      const visibleContextCount = botPowerForgetfulContextMessageCountV1(
-        `story:${episode.id}:${scene.id}:${sceneIndex}`,
-      );
       const immediatePublicContext = scenes
-        .slice(-visibleContextCount)
-        .map((prior) => prior.narration)
-        .join("\n");
+        .slice(0, sceneIndex)
+        .reverse()
+        .find((prior) => prior.speakerBotId !== scene.speakerBotId)
+        ?.narration ?? "";
       nextScene = {
         ...scene,
         narration: applyBotPowerEternalIntroductionResponseV1(
@@ -1570,7 +1567,7 @@ function storyEternalIntroductionPowerRules(
   return bots.flatMap((holder) => {
     if (!botPowerEternallyIntroducesV1(holder.powers)) return [];
     return [
-      `Story adaptation for ${holder.name}: for each spoken scene, give ${holder.name} only a deterministic one-to-four-beat public tail immediately preceding that scene. ${holder.name} responds naturally to that local context, treats people as unfamiliar unless the visible tail establishes otherwise, and never claims older relationship history or explains the memory rule. Do not force a self-introduction unless the immediate scene warrants one. Other characters retain the full story and may react to repetition through their own personalities.`,
+      `Story adaptation for ${holder.name}: for each spoken scene, give ${holder.name} only the current other-speaker beat immediately preceding that scene. ${holder.name} responds directly to its concrete content as fresh first contact, has no memory of prior turns or their own earlier scenes, and never claims older relationship history or explains the memory rule. If accused of repetition, ${holder.name} reacts with sincere confusion instead of agreeing or explaining. Do not force a self-introduction or identical copy unless the immediate scene genuinely warrants one. Other characters retain the full story and may react to repetition through their own personalities.`,
     ];
   });
 }

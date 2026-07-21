@@ -24,11 +24,11 @@ ship as `0.5.2` while Coffee is `v0.7` and Story is `v0.1`.
 
 | Applet | Version | Status | Notes |
 | --- | --- | --- | --- |
-| Chat | v1.21 | Active | Full playground for bots, providers, models, images, exports, memory-aware conversations, five-choice English/Premium voice switching, sparse shared mic presence, and ready Powers including rolling one-to-four-message short-term amnesia, one-opening copy behavior, engine-bounded response budgets, distinct relative size and visibility states, loud/quiet presence, speech obfuscation, current-addressee fandom, and cue-only radiant joy or reactive gloom. |
-| Zen | v1.20 | Active | Calm one-to-one continuity surface with five-choice English/Premium voice switching, mic presence, and ready Powers including rolling one-to-four-message short-term amnesia, one-opening copy behavior, engine-bounded response budgets, distinct relative size and visibility states, loud/quiet presence, speech obfuscation, current-addressee fandom, and cue-only radiant joy or reactive gloom; the standalone Zen lane is deprecating as this becomes Prism's default state. |
-| Coffee | v2.18 | Active | Multi-bot group table with Coffee Groups, live and replay-safe English/Premium switching, model-aware session holds, pacing, cups, transcripts, living atmosphere, distinct replay-safe physical presentation states, rolling one-to-four-message short-term amnesia with accumulating peer agitation, one-opening copy behavior, Power-driven bot-to-bot cut-ins including guaranteed early-to-late interruptions, public-only gibberish context, player/peer-focused fandom, replay-safe bot-only identity mirroring, persisted recipient mood boosts, and direct-addresser mood drains. |
-| Signal | v1.29 | Active | Bot-owned anthology interviews with progress-aware Auto completion, progressively streamed live captions, distinct replay-safe physical presentation states, next-utterance English/Premium switching, audience-projected transcript, voice, replay, and reviews; rolling one-to-four-message short-term amnesia with persisted peer pressure; one-opening copy behavior; replay-safe probabilistic or guaranteed early-to-late interruption, speech obfuscation, bot-only identity mirroring, recipient mood boosts, and direct-addresser mood drains; and peer/audience-focused fandom. |
-| Story | v0.19 | Preview | Generated visual-novel episodes with bots, choices, maps, inventory, transcripts, shared PRISM menu behavior, adapted physical presentation states, scene-local rolling short-term amnesia, one-opening copy behavior, replay-stable probabilistic or guaranteed interruption, scene-safe speech obfuscation, scene-focus fandom, and cue-only personality-shaped uplift or drag. |
+| Chat | v1.22 | Active | Full playground for bots, providers, models, images, exports, memory-aware conversations, five-choice English/Premium voice switching, sparse shared mic presence, and ready Powers including current-other-speaker short-term amnesia, one-opening copy behavior, engine-bounded response budgets, distinct relative size and visibility states, loud/quiet presence, speech obfuscation, current-addressee fandom, and cue-only radiant joy or reactive gloom. |
+| Zen | v1.21 | Active | Calm one-to-one continuity surface with five-choice English/Premium voice switching, mic presence, and ready Powers including current-other-speaker short-term amnesia, one-opening copy behavior, engine-bounded response budgets, distinct relative size and visibility states, loud/quiet presence, speech obfuscation, current-addressee fandom, and cue-only radiant joy or reactive gloom; the standalone Zen lane is deprecating as this becomes Prism's default state. |
+| Coffee | v2.19 | Active | Multi-bot group table with Coffee Groups, live and replay-safe English/Premium switching, model-aware session holds, pacing, cups, transcripts, living atmosphere, distinct replay-safe physical presentation states, current-other-speaker short-term amnesia with accumulating peer agitation, one-opening copy behavior, Power-driven bot-to-bot cut-ins including guaranteed early-to-late interruptions, public-only gibberish context, player/peer-focused fandom, replay-safe bot-only identity mirroring, persisted recipient mood boosts, and direct-addresser mood drains. |
+| Signal | v1.30 | Active | Bot-owned anthology interviews with progress-aware Auto completion, progressively streamed live captions, distinct replay-safe physical presentation states, next-utterance English/Premium switching, audience-projected transcript, voice, replay, and reviews; current-other-speaker short-term amnesia with persisted peer pressure; one-opening copy behavior; replay-safe probabilistic or guaranteed early-to-late interruption, speech obfuscation, bot-only identity mirroring, recipient mood boosts, and direct-addresser mood drains; and peer/audience-focused fandom. |
+| Story | v0.20 | Preview | Generated visual-novel episodes with bots, choices, maps, inventory, transcripts, shared PRISM menu behavior, adapted physical presentation states, current-other-speaker short-term amnesia, one-opening copy behavior, replay-stable probabilistic or guaranteed interruption, scene-safe speech obfuscation, scene-focus fandom, and cue-only personality-shaped uplift or drag. |
 | Arena | v0.0 | Planned | Moderated bot debate surface. |
 | Polling | v0.0 | Planned | AI-powered polling across bot groups. |
 | Feed | v0.0 | Planned | BotBook-style social feed. |
@@ -139,13 +139,15 @@ stages do not block the standalone preview.
   now reported as unusable model output instead of a false availability
   failure.
 
-- Bumped `Chat` to `v1.19`, `Zen` to `v1.18`, `Coffee` to `v2.14`, `Signal`
-  to `v1.20`, and `Story` to `v0.16` for Forgetful Freddie's short-term
-  amnesia. Each holder turn now receives a replay-stable one-to-four-message
-  public tail, responds naturally to that immediate context, and cannot claim
-  an older relationship. Self-introductions are no longer forced. Long-term
-  memories, summaries, private producer cues, and other hidden continuity stay
-  excluded; Coffee and Signal preserve their replay-safe peer consequences.
+- Bumped `Chat` to `v1.22`, `Zen` to `v1.21`, `Coffee` to `v2.19`, `Signal`
+  to `v1.30`, and `Story` to `v0.20` for the refined short-term-amnesia
+  contract. Each holder receives and understands only the current other-speaker
+  message, has no memory of prior turns or their own earlier messages, and
+  responds directly to that concrete content as fresh contact. A self-
+  introduction is optional only when warranted and cannot become identical
+  default copy; long-term memories, summaries, private producer cues, and other
+  hidden continuity remain excluded while Coffee and Signal preserve replay-safe
+  peer consequences.
 
 - Bumped `Coffee` to `v2.13` and `Signal` to `v1.19` so Identity Crisis Ian
   reliably changes when a bot addresses him naturally, including a name at the

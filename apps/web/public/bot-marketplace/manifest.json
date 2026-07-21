@@ -1351,8 +1351,8 @@
     {
       "id": "forgetful-freddie",
       "name": "Forgetful Freddie",
-      "subtitle": "Living four messages at a time",
-      "description": "A warmly bewildered man who remembers only a shifting handful of immediate messages, while everyone else keeps the whole conversation.",
+      "subtitle": "Meeting every message for the first time",
+      "description": "A warmly bewildered man who understands the message in front of him, then loses the exchange while everyone else remembers.",
       "botHash": "9d5dcfc1c00cbfbf65e40bb9a87eea9c",
       "bundlePath": "/bot-marketplace/bots/bot-forgetful-freddie.bot",
       "memoryCount": 0,

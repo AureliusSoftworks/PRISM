@@ -124,14 +124,14 @@ test("voice-presence and intermittent-mute effects normalize to bounded contract
   });
 });
 
-test("forgetful context normalizes legacy Powers into a stable one-to-four-message tail", () => {
+test("forgetful context normalizes legacy Powers into the current-other-speaker contract", () => {
   assert.deepEqual(normalizeBotPowerEffectV1({
     type: "eternal_introduction",
     memory: "all_history",
     ignored: true,
   }), {
     type: "eternal_introduction",
-    memory: "rolling_public_tail_1_to_4",
+    memory: "current_other_speaker_message",
   });
   const name = "Forgetful Freddie";
   const intent = "Every message is a first introduction and prior messages are unavailable.";
@@ -158,19 +158,17 @@ test("forgetful context normalizes legacy Powers into a stable one-to-four-messa
   assert.equal(botPowerEternallyIntroducesV1(powers), true);
   assert.deepEqual(
     parseStoredBotPowersV1(serializeBotPowersV1(powers))[0]?.compiled?.effects,
-    [{ type: "eternal_introduction", memory: "rolling_public_tail_1_to_4" }],
+    [{ type: "eternal_introduction", memory: "current_other_speaker_message" }],
   );
   const stableCount = botPowerForgetfulContextMessageCountV1("conversation:7");
-  assert.ok(stableCount >= 1 && stableCount <= 4);
+  assert.equal(stableCount, 1);
   assert.equal(
     botPowerForgetfulContextMessageCountV1("conversation:7"),
     stableCount,
   );
   assert.deepEqual(
     botPowerForgetfulPriorMessagesV1(["one", "two", "three", "four"], "conversation:7"),
-    stableCount === 1
-      ? []
-      : ["one", "two", "three", "four"].slice(-(stableCount - 1)),
+    [],
   );
   assert.equal(
     botPowerResponseIsFirstIntroductionV1(
@@ -198,6 +196,38 @@ test("forgetful context normalizes legacy Powers into a stable one-to-four-messa
   assert.equal(
     applyBotPowerEternalIntroductionResponseV1(
       "I seem to have introduced myself a few times already.",
+      name,
+      "Why do you keep introducing yourself?",
+    ),
+    "What do you mean? I don't think we've met yet.",
+  );
+  assert.equal(
+    applyBotPowerEternalIntroductionResponseV1(
+      "I seem to have done that again.",
+      name,
+      "Why do you keep introducing yourself?",
+    ),
+    "What do you mean? I don't think we've met yet.",
+  );
+  assert.equal(
+    applyBotPowerEternalIntroductionResponseV1(
+      "I'm sorry, I didn't mean to repeat myself.",
+      name,
+      "Why do you keep introducing yourself?",
+    ),
+    "What do you mean? I don't think we've met yet.",
+  );
+  assert.equal(
+    applyBotPowerEternalIntroductionResponseV1(
+      "I didn't realize it was getting repetitive. I don't seem to remember who everyone is from one conversation to the next.",
+      name,
+      "Why do you keep introducing yourself?",
+    ),
+    "What do you mean? I don't think we've met yet.",
+  );
+  assert.equal(
+    applyBotPowerEternalIntroductionResponseV1(
+      "I just seem to be doing that a lot lately, and I don't know why.",
       name,
       "Why do you keep introducing yourself?",
     ),

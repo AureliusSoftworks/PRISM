@@ -4276,7 +4276,7 @@ describe("Coffee group foundation", () => {
     assert.equal(assistant?.content, addressed);
   });
 
-  it("gives Forgetful Freddie a bounded Coffee tail and answers current reactions naturally", async () => {
+  it("gives Forgetful Freddie only the current Coffee message and answers it naturally", async () => {
     const db = createCoffeeTestDb();
     const userId = "user-1";
     const conversationId = "conv-power-eternal-introduction";
@@ -4374,9 +4374,9 @@ describe("Coffee group foundation", () => {
       secondAssistant?.content,
       "What do you mean? I don't think we've met yet.",
     );
-    assert.ok(secondVisiblePromptMessages.length >= 1);
-    assert.ok(secondVisiblePromptMessages.length <= 4);
+    assert.equal(secondVisiblePromptMessages.length, 1);
     assert.match(secondProviderPrompt, /copper vault/iu);
+    assert.doesNotMatch(secondProviderPrompt, /violet lighthouse/iu);
   });
 
   it("persists bot-only Coffee identity targets, ignores repeats, and replaces with the latest bot", async () => {
