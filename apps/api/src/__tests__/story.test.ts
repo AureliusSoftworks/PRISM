@@ -479,6 +479,68 @@ describe("Story API helpers", () => {
     assert.match(prompt, /Ada — Echo Step: Ada's arrivals echo twice/u);
   });
 
+  it("keeps the reader omniscient while unaware characters overlap spectral speech", async () => {
+    const db = createTestDb();
+    seedBot(db, "bot-a", "Ryuk");
+    seedBot(db, "bot-b", "Abraham Lincoln");
+    const name = "Invisible";
+    const intent = "Can only be seen and heard by Light Yagami.";
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'bot-a'").run(JSON.stringify([{
+      version: 1,
+      id: "invisible",
+      name,
+      intent,
+      enabled: true,
+      compileStatus: "ready",
+      compiled: {
+        version: 1,
+        sourceHash: botPowerSourceHashV1(name, intent),
+        selfCue: "",
+        observerCue: "",
+        effects: [
+          { type: "awareness", allowed: [{ kind: "bot", name: "Light Yagami" }] },
+          { type: "speech_audience", allowed: [{ kind: "bot", name: "Light Yagami" }] },
+          { type: "avatar_visibility", mode: "translucent" },
+        ],
+        ruleLabels: [],
+      },
+    }]));
+    const generatedEpisode = JSON.parse(episodeJson()) as {
+      scenes: Array<Record<string, unknown>>;
+    };
+    generatedEpisode.scenes[0] = {
+      ...generatedEpisode.scenes[0],
+      speakerBotId: "bot-a",
+      speakerName: "Ryuk",
+      spritePose: "speaking",
+      narration: "Ryuk gives his entire supernatural warning without stopping.",
+    };
+    generatedEpisode.scenes[1] = {
+      ...generatedEpisode.scenes[1],
+      speakerBotId: "bot-b",
+      speakerName: "Abraham Lincoln",
+      spritePose: "speaking",
+      narration: "Lincoln begins a complete answer about the archive.",
+    };
+    const bots = loadStoryBotProfiles(db, "user-1", ["bot-a", "bot-b"]);
+    const created = createStorySession(db, "user-1", {
+      botIds: ["bot-a", "bot-b"], provider: "local", model: "test-model",
+    });
+    const provider = new SequenceProvider([JSON.stringify(generatedEpisode)]);
+
+    const generated = await generateStorySessionEpisode(db, "user-1", created.id, {
+      provider, providerName: "local", model: "test-model", bots,
+    });
+
+    const prompt = provider.calls[0]?.messages.map((message) => message.content).join("\n") ?? "";
+    assert.match(prompt, /narrator and player always see Ryuk half-translucently/u);
+    assert.match(prompt, /Abraham Lincoln cannot see or hear Ryuk/u);
+    assert.match(prompt, /never pause time/u);
+    assert.match(generated.episode?.scenes[1]?.narration ?? "", /begins before Ryuk has finished/u);
+    assert.match(generated.episode?.scenes[1]?.narration ?? "", /Lincoln begins a complete answer/u);
+    assert.equal(generated.episode?.scenes[0]?.narration, generatedEpisode.scenes[0]?.narration);
+  });
+
   it("adapts the strongest targeted candor Power into one response scene", async () => {
     const db = createTestDb();
     seedBot(db, "bot-a", "Ada");
@@ -965,6 +1027,7 @@ describe("Story API helpers", () => {
     assert.ok(freddieScenes.every((scene) => scene.spritePose === "speaking"));
     assert.match(prompt, /Story adaptation for Forgetful Freddie/iu);
     assert.match(prompt, /current other-speaker beat/iu);
+    assert.match(prompt, /does not retain the episode premise or topic/iu);
     assert.match(prompt, /responds directly to its concrete content/iu);
   });
 
@@ -1231,6 +1294,37 @@ describe("Story API helpers", () => {
     assert.equal(generated.status, "playing");
     assert.equal(generated.title, "Glass Archive");
     assert.equal(provider.calls.length, 1);
+  });
+
+  it("normalizes a common neutral sprite pose from local Story models", async () => {
+    const db = createTestDb();
+    seedBot(db, "bot-a", "Ada");
+    seedBot(db, "bot-b", "Bert");
+    const bots = loadStoryBotProfiles(db, "user-1", ["bot-a", "bot-b"]);
+    const created = createStorySession(db, "user-1", {
+      botIds: ["bot-a", "bot-b"],
+      provider: "local",
+      model: "gemma3:latest",
+    });
+    const source = JSON.parse(episodeJson()) as {
+      scenes: Array<Record<string, unknown>>;
+    };
+    source.scenes[1] = {
+      ...source.scenes[1],
+      speakerBotId: "bot-a",
+      speakerName: "Ada",
+      spritePose: "neutral",
+    };
+
+    const generated = await generateStorySessionEpisode(db, "user-1", created.id, {
+      provider: new SequenceProvider([JSON.stringify(source)]),
+      providerName: "local",
+      model: "gemma3:latest",
+      bots,
+    });
+
+    assert.equal(generated.status, "playing");
+    assert.equal(generated.episode?.scenes[1]?.spritePose, "speaking");
   });
 
   it("accepts a valid Story manifest after extra JSON scratch output", async () => {

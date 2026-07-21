@@ -34,9 +34,11 @@ describe("Signal music profile", () => {
     assert.equal(cinematic.tempoBpm, 92);
     assert.equal(cinematic.register, "low");
     assert.equal(cinematic.ending, "hard");
+    assert.deepEqual(cinematic.motifIntervals, [7, 5, 3, 0]);
     assert.equal(magical.tempoBpm, 106);
     assert.equal(magical.register, "middle-high");
     assert.equal(magical.ending, "resolve");
+    assert.deepEqual(magical.motifIntervals, [0, 5, 7, 12]);
     assert.equal(nautical.tempoBpm, 122);
     assert.notDeepEqual(cinematic, nautical);
     assert.notDeepEqual(cinematic, magical);

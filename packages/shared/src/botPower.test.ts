@@ -31,7 +31,11 @@ import {
   botPowerIntermittentMuteTurnIsIgnoredV1,
   botPowerIsMutedV1,
   botPowerMumblesSpeechV1,
+  botPowerObserverProjectionV1,
   botPowerObserverCueLinesV1,
+  botPowerPairwisePerceptionV1,
+  botPowerPerceptionOverlapStartRatioV1,
+  botPowerSelfCueLinesV1,
   botPowerResponseIsSilentV1,
   botPowerResponseIsFirstIntroductionV1,
   botPowerSourceHashV1,
@@ -156,6 +160,14 @@ test("forgetful context normalizes legacy Powers into the current-other-speaker 
   }];
 
   assert.equal(botPowerEternallyIntroducesV1(powers), true);
+  assert.match(
+    botPowerSelfCueLinesV1(powers).join("\n"),
+    /do not know the standing conversation topic unless that message states it/iu,
+  );
+  assert.match(
+    botPowerObserverCueLinesV1(name, powers).join("\n"),
+    /does not retain the standing conversation topic unless that message restates it/iu,
+  );
   assert.deepEqual(
     parseStoredBotPowersV1(serializeBotPowersV1(powers))[0]?.compiled?.effects,
     [{ type: "eternal_introduction", memory: "current_other_speaker_message" }],
@@ -916,6 +928,147 @@ test("legacy Microscopic and Invisible presentations upgrade without a recompile
     legacyPower("Microscopic")[0]?.compiled?.selfCue ?? "",
     /at any time/u,
   );
+});
+
+test("targeted legacy Invisible snapshots gain spectral presentation idempotently", () => {
+  const name = "Invisible";
+  const intent = "Only visible to Light Yagami.";
+  const sourceHash = botPowerSourceHashV1(name, intent);
+  const stored = [{
+    version: 1,
+    id: "invisible-light",
+    name,
+    intent,
+    enabled: true,
+    compileStatus: "ready",
+    compiled: {
+      version: 1,
+      sourceHash,
+      selfCue: "Remain unseen except to Light.",
+      observerCue: "Only Light can perceive the holder.",
+      effects: [{
+        type: "awareness",
+        allowed: [{ kind: "bot", name: "Light Yagami" }],
+      }],
+      ruleLabels: ["Visible only to Light Yagami"],
+    },
+  }];
+  const upgraded = parseStoredBotPowersV1(stored);
+  const restored = parseStoredBotPowersV1(serializeBotPowersV1(upgraded));
+
+  assert.equal(upgraded[0]?.compiled?.sourceHash, sourceHash);
+  assert.deepEqual(upgraded, restored);
+  assert.equal(
+    upgraded[0]?.compiled?.effects.filter(
+      (effect) => effect.type === "avatar_visibility",
+    ).length,
+    1,
+  );
+  assert.equal(botPowerAvatarVisibilityModeV1(upgraded), "translucent");
+});
+
+test("pairwise and observer perception separate participant, live, and replay truth", () => {
+  const power = (name: string, effects: unknown[]) => ({
+    version: 1 as const,
+    id: name.toLowerCase(),
+    name,
+    intent: name,
+    enabled: true,
+    compileStatus: "ready" as const,
+    compiled: {
+      version: 1 as const,
+      sourceHash: botPowerSourceHashV1(name, name),
+      selfCue: "",
+      observerCue: "",
+      effects,
+      ruleLabels: [],
+    },
+  });
+  const spectral = [
+    power("Invisible", [
+      { type: "awareness", allowed: [{ kind: "bot", name: "Light Yagami" }] },
+      { type: "avatar_visibility", mode: "translucent" },
+    ]),
+    power("Introvert", [
+      { type: "speech_audience", allowed: [{ kind: "trait", trait: "kira" }] },
+    ]),
+  ];
+  const lightMatches = (target: { kind: string; name?: string; trait?: string }) =>
+    target.kind === "bot" && target.name === "Light Yagami" ||
+    target.kind === "trait" && target.trait === "kira";
+  const lincolnMatches = () => false;
+
+  assert.deepEqual(botPowerPairwisePerceptionV1(spectral, lightMatches), {
+    version: 1,
+    visible: true,
+    audible: true,
+  });
+  assert.deepEqual(botPowerPairwisePerceptionV1(spectral, lincolnMatches), {
+    version: 1,
+    visible: false,
+    audible: false,
+  });
+  assert.deepEqual(
+    botPowerObserverProjectionV1(spectral, "live", lincolnMatches),
+    {
+      version: 1,
+      perspective: "live",
+      visibility: "hidden",
+      audible: false,
+      spectral: true,
+    },
+  );
+  assert.deepEqual(
+    botPowerObserverProjectionV1(spectral, "replay", lincolnMatches),
+    {
+      version: 1,
+      perspective: "replay",
+      visibility: "translucent",
+      audible: true,
+      spectral: true,
+    },
+  );
+
+  const ordinaryPrivate = [power("Private", [{
+    type: "speech_audience",
+    allowed: [{ kind: "bot", botId: "light", name: "Light Yagami" }],
+  }])];
+  assert.equal(
+    botPowerObserverProjectionV1(ordinaryPrivate, "replay", lincolnMatches).audible,
+    false,
+  );
+});
+
+test("hidden and mute precedence survive spectral replay", () => {
+  const effects = [{
+    version: 1 as const,
+    id: "stack",
+    name: "Invisible",
+    intent: "Invisible",
+    enabled: true,
+    compileStatus: "ready" as const,
+    compiled: {
+      version: 1 as const,
+      sourceHash: botPowerSourceHashV1("Invisible", "Invisible"),
+      selfCue: "",
+      observerCue: "",
+      effects: [
+        { type: "avatar_visibility" as const, mode: "translucent" as const },
+        { type: "avatar_visibility" as const, mode: "hidden" as const },
+        { type: "mute" as const },
+      ],
+      ruleLabels: [],
+    },
+  }];
+  const replay = botPowerObserverProjectionV1(effects, "replay", () => false);
+  assert.equal(replay.visibility, "hidden");
+  assert.equal(replay.audible, false);
+});
+
+test("perception overlap starts at a stable seeded 58-72 percent", () => {
+  const first = botPowerPerceptionOverlapStartRatioV1("episode:turn-2");
+  assert.equal(first, botPowerPerceptionOverlapStartRatioV1("episode:turn-2"));
+  assert.ok(first >= 0.58 && first <= 0.72);
 });
 
 test("legacy Lazy Cameron Powers gain a hard minimal response budget without a recompile", () => {

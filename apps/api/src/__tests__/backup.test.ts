@@ -14,6 +14,10 @@ import {
   DEFAULT_ZEN_MESSAGE_FONT_MIN_PX,
   MAX_ZEN_WALLPAPER_STYLE_NOTES_LENGTH,
 } from "../settings.ts";
+import {
+  botPowerSourceHashV1,
+  parseStoredBotPowersV1,
+} from "@localai/shared";
 
 describe("backup Auto model settings", () => {
   it("exports and restores Auto mode without exporting retired text fallback settings", () => {
@@ -558,6 +562,30 @@ describe("backup bot avatar face style", () => {
       assert.equal(restored.face_blink_offset_y, 0.06);
       assert.equal(restored.face_thinking_frames, '["·","*","✦","*"]');
       assert.equal(restored.profile_picture_image_id, null);
+
+      const explicitOptOut = snapshot.bots?.[0];
+      assert.ok(explicitOptOut);
+      explicitOptOut.faceMouthCoffeePucker = false;
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      assert.equal(
+        (
+          db.prepare(
+            "SELECT face_mouth_coffee_pucker AS value FROM bots WHERE id = ?",
+          ).get("bot-1") as { value: number }
+        ).value,
+        0,
+      );
+
+      delete explicitOptOut.faceMouthCoffeePucker;
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      assert.equal(
+        (
+          db.prepare(
+            "SELECT face_mouth_coffee_pucker AS value FROM bots WHERE id = ?",
+          ).get("bot-1") as { value: number }
+        ).value,
+        1,
+      );
     });
   });
 
@@ -1408,6 +1436,66 @@ describe("backup clone lineage", () => {
         ).clone_family_id,
         "root-bot",
       );
+    });
+  });
+});
+
+describe("backup spectral Power compatibility", () => {
+  it("upgrades and round-trips a frozen targeted-Invisible bot without changing its source hash", () => {
+    withBackupDatabase((db, userKey) => {
+      const name = "Invisible";
+      const intent = "Can only be seen by Light Yagami.";
+      const sourceHash = botPowerSourceHashV1(name, intent);
+      const legacyPowers = [{
+        version: 1,
+        id: "invisible",
+        name,
+        intent,
+        enabled: true,
+        compileStatus: "ready",
+        compiled: {
+          version: 1,
+          sourceHash,
+          selfCue: "Remain unseen except to Light.",
+          observerCue: "Only Light can perceive the holder.",
+          effects: [{
+            type: "awareness",
+            allowed: [{ kind: "bot", name: "Light Yagami" }],
+          }],
+          ruleLabels: ["Visible only to Light Yagami"],
+        },
+      }];
+      db.prepare(
+        `INSERT INTO bots
+          (id, user_id, name, system_prompt, powers_json, created_at, updated_at)
+         VALUES (?, 'user-1', ?, '', ?, ?, ?)`,
+      ).run(
+        "spectral-bot",
+        "Ryuk",
+        JSON.stringify(legacyPowers),
+        "2026-07-21T00:00:00.000Z",
+        "2026-07-21T00:00:00.000Z",
+      );
+
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      const exportedPower = snapshot.bots
+        ?.find((bot) => bot.id === "spectral-bot")
+        ?.powers?.[0];
+      assert.equal(exportedPower?.compiled?.sourceHash, sourceHash);
+      assert.deepEqual(exportedPower?.compiled?.effects, [
+        legacyPowers[0]!.compiled.effects[0],
+        { type: "avatar_visibility", mode: "translucent" },
+      ]);
+
+      db.prepare("UPDATE bots SET powers_json = '[]' WHERE id = ?").run(
+        "spectral-bot",
+      );
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      const restored = db.prepare(
+        "SELECT powers_json FROM bots WHERE id = ?",
+      ).get("spectral-bot") as { powers_json: string | null };
+      const restoredPower = parseStoredBotPowersV1(restored.powers_json)[0];
+      assert.deepEqual(restoredPower, exportedPower);
     });
   });
 });

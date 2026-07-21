@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { strToU8, unzipSync, zipSync } from "fflate";
 import {
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+  botPowerAvatarVisibilityModeV1,
   botPowerSourceHashV1,
 } from "@localai/shared";
 
@@ -192,6 +193,44 @@ describe("botArchive", () => {
     assert.equal(stalePower?.compileStatus, "draft");
     assert.equal(stalePower?.compiled, null);
     assert.equal(stalePower?.intent, "A revised intent that invalidates compiled rules.");
+  });
+
+  it("upgrades targeted-Invisible archives without invalidating their source", () => {
+    const name = "Invisible";
+    const intent = "Can only be seen by Light Yagami.";
+    const sourceHash = botPowerSourceHashV1(name, intent);
+    const archive = createPrismBotArchive({
+      botJson: baseBotJson({
+        bot: {
+          ...baseBotJson().bot,
+          powers: [{
+            version: 1,
+            id: "invisible",
+            name,
+            intent,
+            enabled: true,
+            compileStatus: "ready",
+            compiled: {
+              version: 1,
+              sourceHash,
+              selfCue: "Remain unseen except to Light.",
+              observerCue: "Only Light can perceive the holder.",
+              effects: [{
+                type: "awareness",
+                allowed: [{ kind: "bot", name: "Light Yagami" }],
+              }],
+              ruleLabels: ["Visible only to Light Yagami"],
+            },
+          }],
+        },
+      }),
+      memories: [],
+    });
+
+    const power = parsePrismBotArchive(archive).botJson.bot.powers?.[0];
+    assert.equal(power?.compileStatus, "ready");
+    assert.equal(power?.compiled?.sourceHash, sourceHash);
+    assert.equal(botPowerAvatarVisibilityModeV1(power ? [power] : []), "translucent");
   });
 
   it("can be embedded as zipped .bot entries inside a .bots collection", () => {

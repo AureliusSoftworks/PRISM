@@ -43,6 +43,8 @@ export interface SignalMusicProfile {
   register: SignalMusicRegister;
   contour: SignalMusicContour;
   ending: SignalMusicEnding;
+  /** Relative pitch fingerprint shared by the opening ident and closing outdent. */
+  motifIntervals: readonly [number, number, number, number];
   lead: string;
   support: string;
   pulse: string;
@@ -59,6 +61,7 @@ type SignalMusicTemperamentRecipe = Pick<
   | "register"
   | "contour"
   | "ending"
+  | "motifIntervals"
   | "pulse"
   | "motifDirection"
   | "endingDirection"
@@ -73,6 +76,7 @@ const SIGNAL_MUSIC_TEMPERAMENT_RECIPES: Record<
     register: "low",
     contour: "descending",
     ending: "hard",
+    motifIntervals: [7, 5, 3, 0],
     pulse: "deliberate severe low pulse with disciplined restraint",
     motifDirection: "descending minor-tonal melodic contour",
     endingDirection:
@@ -83,6 +87,7 @@ const SIGNAL_MUSIC_TEMPERAMENT_RECIPES: Record<
     register: "low-middle",
     contour: "turning",
     ending: "resolve",
+    motifIntervals: [0, 3, 7, 5],
     pulse: "sparse measured movement with deliberate silence",
     motifDirection: "gently turning melodic contour with a downward final step",
     endingDirection: "quiet dry resolve",
@@ -92,6 +97,7 @@ const SIGNAL_MUSIC_TEMPERAMENT_RECIPES: Record<
     register: "middle-high",
     contour: "bouncing",
     ending: "lift",
+    motifIntervals: [0, 7, 4, 12],
     pulse: "buoyant compact rhythmic pulse",
     motifDirection: "bouncing melodic contour with one light upward turn",
     endingDirection: "brief lifted button ending",
@@ -101,6 +107,7 @@ const SIGNAL_MUSIC_TEMPERAMENT_RECIPES: Record<
     register: "middle",
     contour: "stepwise",
     ending: "button",
+    motifIntervals: [0, 2, 5, 7],
     pulse: "measured geometric pulse with clean spacing",
     motifDirection: "stepwise melodic contour with one revealing interval",
     endingDirection: "exact dry broadcast button ending",
@@ -110,6 +117,7 @@ const SIGNAL_MUSIC_TEMPERAMENT_RECIPES: Record<
     register: "middle",
     contour: "asymmetric",
     ending: "button",
+    motifIntervals: [0, 3, 7, 9],
     pulse: "compact syncopated machine pulse",
     motifDirection: "asymmetric rising melodic contour",
     endingDirection: "crisp engineered button ending",
@@ -119,6 +127,7 @@ const SIGNAL_MUSIC_TEMPERAMENT_RECIPES: Record<
     register: "middle",
     contour: "arch",
     ending: "resolve",
+    motifIntervals: [0, 5, 7, 3],
     pulse: "gentle human-scale pulse with clean articulation",
     motifDirection: "rounded arch-shaped melodic contour",
     endingDirection: "soft compact resolved button ending",
@@ -128,6 +137,7 @@ const SIGNAL_MUSIC_TEMPERAMENT_RECIPES: Record<
     register: "middle-high",
     contour: "asymmetric",
     ending: "resolve",
+    motifIntervals: [0, 5, 3, 10],
     pulse: "confident asymmetric rhythmic support",
     motifDirection: "expressive asymmetric melodic contour",
     endingDirection: "confident dry resolve",
@@ -137,6 +147,7 @@ const SIGNAL_MUSIC_TEMPERAMENT_RECIPES: Record<
     register: "middle",
     contour: "ascending",
     ending: "button",
+    motifIntervals: [0, 5, 7, 12],
     pulse: "driving forward pulse",
     motifDirection: "ascending melodic contour with decisive momentum",
     endingDirection: "decisive compact button ending",
@@ -146,6 +157,7 @@ const SIGNAL_MUSIC_TEMPERAMENT_RECIPES: Record<
     register: "middle",
     contour: "balanced",
     ending: "button",
+    motifIntervals: [0, 2, 7, 5],
     pulse: "restrained broadcast pulse",
     motifDirection: "balanced arch-shaped melodic contour",
     endingDirection: "dry neutral broadcast button ending",

@@ -698,6 +698,13 @@ function coffeeReviewReplayEventLine(
     const source = botNameById.get(event.sourceBotId) ?? event.sourceBotId;
     return `- ${event.occurredAt} powerMoodDrain: ${bot} directly addressed ${source} and was drained by ${event.powerName} (${event.strength}, disposition ${coffeeReviewUnitValue(event.dispositionBefore)} -> ${coffeeReviewUnitValue(event.dispositionAfter)}, sourceMessage=${event.sourceMessageId})`;
   }
+  if (event.kind === "perceptionOverlap") {
+    const preceding = coffeeReviewBotLabel(
+      event.precedingBotId,
+      botNameById,
+    );
+    return `- ${event.occurredAt} perceptionOverlap: ${bot} began over ${preceding} at ${Math.round(event.startRatio * 100)}% (${event.precedingMessageId} -> ${event.overlappingMessageId})`;
+  }
   return `- ${event.occurredAt} mood: ${bot} disposition=${coffeeReviewUnitValue(
     event.social.disposition
   )}; valuesFriction=${coffeeReviewUnitValue(

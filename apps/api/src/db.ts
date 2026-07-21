@@ -221,7 +221,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       prism_default_bot_face_mouth_font TEXT,
       prism_default_bot_face_mouth_character TEXT,
       prism_default_bot_face_mouth_animation TEXT,
-      prism_default_bot_face_mouth_coffee_pucker INTEGER NOT NULL DEFAULT 0,
+      prism_default_bot_face_mouth_coffee_pucker INTEGER NOT NULL DEFAULT 1,
       prism_default_bot_face_font_weight INTEGER,
       prism_default_bot_face_eye_scale REAL,
       prism_default_bot_face_eye_offset_x REAL,
@@ -992,7 +992,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       face_mouth_font TEXT,
       face_mouth_character TEXT,
       face_mouth_animation TEXT,
-      face_mouth_coffee_pucker INTEGER NOT NULL DEFAULT 0,
+      face_mouth_coffee_pucker INTEGER NOT NULL DEFAULT 1,
       face_font_weight INTEGER,
       face_eye_scale REAL,
       face_eye_offset_x REAL,
@@ -1238,6 +1238,10 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       content_type TEXT NOT NULL,
       audio_bytes BLOB NOT NULL,
       duration_ms INTEGER NOT NULL,
+      outdent_prompt TEXT,
+      outdent_content_type TEXT,
+      outdent_audio_bytes BLOB,
+      outdent_duration_ms INTEGER,
       revision INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
@@ -1368,6 +1372,26 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
     );
   `);
+  const botcastIntroAudioColumns = new Set(
+    (db.prepare("PRAGMA table_info(botcast_show_intro_audio)").all() as Array<{
+      name: string;
+    }>).map((column) => column.name),
+  );
+  const addBotcastIntroAudioColumn = (
+    name: string,
+    definition: string,
+  ): void => {
+    if (botcastIntroAudioColumns.has(name)) return;
+    db.exec(
+      `ALTER TABLE botcast_show_intro_audio ADD COLUMN ${name} ${definition};`,
+    );
+    botcastIntroAudioColumns.add(name);
+  };
+  addBotcastIntroAudioColumn("outdent_prompt", "TEXT");
+  addBotcastIntroAudioColumn("outdent_content_type", "TEXT");
+  addBotcastIntroAudioColumn("outdent_audio_bytes", "BLOB");
+  addBotcastIntroAudioColumn("outdent_duration_ms", "INTEGER");
+
   const legalAcceptanceColumns = db
     .prepare("PRAGMA table_info(legal_acceptances)")
     .all() as Array<{ name: string }>;
@@ -1908,7 +1932,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     ["prism_default_bot_face_mouth_animation", "TEXT"],
     [
       "prism_default_bot_face_mouth_coffee_pucker",
-      "INTEGER NOT NULL DEFAULT 0",
+      "INTEGER NOT NULL DEFAULT 1",
     ],
     ["prism_default_bot_face_font_weight", "INTEGER"],
     ["prism_default_bot_face_eye_scale", "REAL"],
@@ -2473,6 +2497,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
                   json_extract(shows.atmosphere_json, '$.imageId') = images.id
                   OR json_extract(shows.atmosphere_json, '$.dayAtmosphere.imageId') = images.id
                   OR json_extract(shows.atmosphere_json, '$.nightAtmosphere.imageId') = images.id
+                  OR json_extract(shows.atmosphere_json, '$.studioLighting.imageId') = images.id
                   OR json_extract(shows.atmosphere_json, '$.logo.imageId') = images.id
                 )
               LIMIT 1
@@ -2487,6 +2512,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
                   json_extract(shows.atmosphere_json, '$.imageId') = images.id
                   OR json_extract(shows.atmosphere_json, '$.dayAtmosphere.imageId') = images.id
                   OR json_extract(shows.atmosphere_json, '$.nightAtmosphere.imageId') = images.id
+                  OR json_extract(shows.atmosphere_json, '$.studioLighting.imageId') = images.id
                   OR json_extract(shows.atmosphere_json, '$.logo.imageId') = images.id
                 )
            );
@@ -2612,7 +2638,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   );
   if (!hasBotFaceMouthCoffeePuckerColumn) {
     db.exec(
-      "ALTER TABLE bots ADD COLUMN face_mouth_coffee_pucker INTEGER NOT NULL DEFAULT 0;",
+      "ALTER TABLE bots ADD COLUMN face_mouth_coffee_pucker INTEGER NOT NULL DEFAULT 1;",
     );
   }
   const hasBotFaceFontWeightColumn = botColumns.some(

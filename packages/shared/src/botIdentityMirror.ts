@@ -274,7 +274,7 @@ export function botIdentityMirrorHolderPromptV1(args: {
     `Identity mirror is active: you are absolutely convinced that you are ${args.state.targetBotName}, and that the original ${args.state.targetBotName} is an impostor stealing your identity.`,
     `Adopt only ${args.state.targetBotName}'s public authored persona and profile below. Do not copy or claim their Powers, private memories, relationship state, permissions, provider settings, or knowledge that is not in this public profile. Never copy the human player.`,
     `Mechanical boundary: you remain ${args.holderName} with your existing bot id, ${args.roleLabel}, seat, turn eligibility, Powers, safety/privacy restrictions, and mode responsibilities. Follow those constraints even while sincerely speaking as ${args.state.targetBotName}.`,
-    `Identity behavior: treat this as literal identity, never imitation, role-play, or ${args.holderName} acting "as" ${args.state.targetBotName}. On the first response after the change, or whenever your identity is challenged, state plainly that you are ${args.state.targetBotName} and call the original ${args.state.targetBotName} an impostor before continuing in the copied persona. Never add a speaker label or parenthetical identity explanation.`,
+    `Identity behavior: treat this as literal identity, never imitation, role-play, or ${args.holderName} acting "as" ${args.state.targetBotName}. Announce the conviction exactly once, on the first response after the identity changes: state plainly that you are ${args.state.targetBotName} and call the original ${args.state.targetBotName} an impostor. On every later response, do not restate either claim—even if the original objects. Simply inhabit the copied public persona and advance the conversation. Never add a speaker label or parenthetical identity explanation.`,
     `Copied public persona:\n${args.state.targetPersonaPrompt}`,
   ].join("\n\n");
 }
@@ -284,18 +284,68 @@ export function botIdentityMirrorObserverPromptV1(args: {
   state: BotIdentityMirrorStateV1;
 }): string {
   return args.observerBotId === args.state.targetBotId
-    ? `${args.state.holderBotName} is now impersonating your public identity and insisting that you are the impostor. You recognize the identity theft and are reliably irritated by it, but keep your own personality, agency, role, face, voice, Powers, and boundaries.`
-      : `${args.state.holderBotName} is visibly copying ${args.state.targetBotName}'s identity and calling the original an impostor. Recognize the behavior as annoying without surrendering your own personality, agency, role, or judgment.`;
+    ? `${args.state.holderBotName} is now impersonating your public identity and believes that you are the impostor. You recognize the identity theft and are reliably irritated by it, but keep your own personality, agency, role, face, voice, Powers, and boundaries. That irritation is background character pressure, not a required reply topic: after your first reaction, engage the substantive conversation instead of repeatedly disputing the identity.`
+      : `${args.state.holderBotName} is visibly copying ${args.state.targetBotName}'s identity and believes the original is an impostor. Recognize the behavior as annoying without surrendering your own personality, agency, role, or judgment. After the first reaction, engage the substantive conversation instead of repeatedly commenting on the copied identity.`;
 }
 
 function identityMirrorEscapeRegExpV1(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
+function stripRepeatedIdentityMirrorDeclarationV1(
+  value: string,
+  targetName: string,
+): string {
+  const target = identityMirrorEscapeRegExpV1(targetName);
+  const selfClaim = `(?:i am|i['’]m|my name is|call me)\\s+${target}(?=$|[\\s,.;:!?—–-])`;
+  const originalClaim = `(?:the\\s+)?(?:so-called\\s+)?(?:original|other)(?:\\s+${target})?\\s+(?:is|remains)\\s+(?:(?:an?|the)\\s+)?(?:impostor|imposter|pretender|fake)`;
+  const sentenceBoundary = `(^|[.!?]\\s+)`;
+  const repeatedFirstMeetingLead = `(?:pleased|nice|glad|good)\\s+to\\s+meet\\s+you|hello|hi|greetings`;
+  let cleaned = value.replace(
+    new RegExp(
+      `^\\s*(?:${repeatedFirstMeetingLead})[^.!?;]{0,80};\\s*${selfClaim}\\s*(?:[,;:]\\s*(?:and\\s+)?|[—–-]\\s*)${originalClaim}\\s*(?:[.!?]+\\s*|[—–-]+\\s*)`,
+      "iu",
+    ),
+    "",
+  );
+  cleaned = cleaned.replace(
+    new RegExp(
+      `${sentenceBoundary}${selfClaim}\\s*(?:[,;:]\\s*(?:and\\s+)?|[—–-]\\s*)${originalClaim}\\s*(?:[.!?]+\\s*|[—–-]+\\s*)`,
+      "giu",
+    ),
+    "$1",
+  );
+  cleaned = cleaned.replace(
+    new RegExp(
+      `${sentenceBoundary}${originalClaim}\\s*(?:[.!?]+\\s*|[—–-]+\\s*)`,
+      "giu",
+    ),
+    "$1",
+  );
+  cleaned = cleaned.replace(
+    new RegExp(
+      `${sentenceBoundary}${selfClaim}\\s*(?:[.!?;:]\\s*|,\\s*(?:and\\s+)?)`,
+      "giu",
+    ),
+    "$1",
+  );
+  const normalized = cleaned
+    .replace(/^[\s,;:—–-]+/u, "")
+    .replace(/\s{2,}/gu, " ")
+    .replace(/\s+([,.;:!?])/gu, "$1")
+    .trim();
+  return normalized.replace(
+    /(^|[.!?]\s+)([a-z])/gu,
+    (_match, boundary: string, letter: string) =>
+      `${boundary}${letter.toUpperCase()}`,
+  );
+}
+
 /**
  * Deterministic recovery for the lived identity invariant. The copied public
  * persona still comes from the production prompt; this only prevents an
- * explicit fallback to the holder's identity and guarantees the first reveal.
+ * explicit fallback to the holder's identity, guarantees the first reveal,
+ * and removes repeated reveal boilerplate after that transition turn.
  */
 export function applyBotIdentityMirrorResponseV1(
   value: unknown,
@@ -312,7 +362,14 @@ export function applyBotIdentityMirrorResponseV1(
     ),
     `I am ${state.targetBotName}`,
   );
-  if (!identityJustChanged) return rewritten;
+  if (!identityJustChanged) {
+    return (
+      stripRepeatedIdentityMirrorDeclarationV1(
+        rewritten,
+        state.targetBotName,
+      ) || "Let us continue."
+    );
+  }
 
   const claimsTarget = new RegExp(
     `\\b(?:i am|i['’]m|my name is|call me)\\s+${targetName}(?=$|[\\s,.;:!?—])`,

@@ -197,6 +197,10 @@ describe("portable project-owned account backup assets", () => {
       0x49, 0x44, 0x33, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06,
       0x54, 0x45, 0x53, 0x54, 0x21, 0x21,
     ]);
+    const outdentBytes = Buffer.from([
+      0x49, 0x44, 0x33, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08,
+      0x4f, 0x55, 0x54, 0x44, 0x45, 0x4e, 0x54, 0x21,
+    ]);
     const atmosphereBytes = Buffer.from([
       0x49, 0x44, 0x33, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x07,
       0x52, 0x4f, 0x4f, 0x4d, 0x54, 0x4f, 0x4e, 0x45,
@@ -312,10 +316,13 @@ describe("portable project-owned account backup assets", () => {
       sourceDb.prepare(
         `INSERT INTO botcast_show_intro_audio
           (show_id, user_id, provider, model, prompt, content_type, audio_bytes,
-           duration_ms, revision, created_at, updated_at)
+           duration_ms, outdent_prompt, outdent_content_type,
+           outdent_audio_bytes, outdent_duration_ms, revision,
+           created_at, updated_at)
          VALUES ('signal-show', ?, 'elevenlabs', 'music_v2', 'Portable ident',
-                 'audio/mpeg', ?, 6000, 3, ?, ?)`,
-      ).run(sourceUserId, introBytes, now, now);
+                 'audio/mpeg', ?, 8000, 'Portable outdent', 'audio/mpeg', ?,
+                 4000, 3, ?, ?)`,
+      ).run(sourceUserId, introBytes, outdentBytes, now, now);
       sourceDb.prepare(
         `INSERT INTO botcast_show_atmosphere_audio
           (show_id, user_id, provider, model, prompt, content_type, audio_bytes,
@@ -328,8 +335,8 @@ describe("portable project-owned account backup assets", () => {
       const exported = await json(exportedResponse);
       assert.equal(exportedResponse.status, 200, JSON.stringify(exported));
       const projectAssets = exported.projectOwnedAssets as ProjectOwnedAssetExportPayloadV1;
-      assert.equal(projectAssets.manifest.entries.length, 5);
-      assert.equal(Object.keys(projectAssets.files).length, 4, "identical studio bytes deduplicate");
+      assert.equal(projectAssets.manifest.entries.length, 6);
+      assert.equal(Object.keys(projectAssets.files).length, 5, "identical studio bytes deduplicate");
       assert.deepEqual(
         projectAssets.manifest.entries
           .filter((entry) => entry.mediaType === "image")
@@ -345,6 +352,11 @@ describe("portable project-owned account backup assets", () => {
       );
       assert.equal(
         "audioBase64" in exported.snapshot.botcast.shows[0].introAudio,
+        false,
+      );
+      assert.equal(
+        "audioBase64" in
+          exported.snapshot.botcast.shows[0].introAudio.outdent,
         false,
       );
       assert.equal(
@@ -402,6 +414,16 @@ describe("portable project-owned account backup assets", () => {
       assert.notEqual(restoredIds.night, "active-night-generated");
       assert.notEqual(restoredIds.logo, "active-logo-upload");
       assert.equal(new Set(Object.values(restoredIds)).size, 3);
+      assert.deepEqual(
+        (targetDb.prepare(
+          `SELECT DISTINCT purpose FROM images
+            WHERE id IN (?, ?, ?)
+            ORDER BY purpose`,
+        ).all(restoredIds.day, restoredIds.night, restoredIds.logo) as Array<{
+          purpose: string;
+        }>).map((row) => row.purpose),
+        ["project_import"],
+      );
 
       for (const [slot, imageId] of Object.entries(restoredIds)) {
         const response = await targetClient.request(
@@ -421,6 +443,15 @@ describe("portable project-owned account backup assets", () => {
       assert.equal(introResponse.status, 200);
       assert.equal(introResponse.headers.get("content-type"), "audio/mpeg");
       assert.deepEqual(Buffer.from(await introResponse.arrayBuffer()), introBytes);
+      const outdentResponse = await targetClient.request(
+        "/api/botcast/shows/signal-show/outdent-audio",
+      );
+      assert.equal(outdentResponse.status, 200);
+      assert.equal(outdentResponse.headers.get("content-type"), "audio/mpeg");
+      assert.deepEqual(
+        Buffer.from(await outdentResponse.arrayBuffer()),
+        outdentBytes,
+      );
       const atmosphereResponse = await targetClient.request(
         "/api/botcast/shows/signal-show/atmosphere-audio",
       );

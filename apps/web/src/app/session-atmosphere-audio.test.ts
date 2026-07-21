@@ -3,6 +3,7 @@ import { statSync } from "node:fs";
 import test from "node:test";
 import {
   DEFAULT_SESSION_ATMOSPHERE_MIX,
+  DEFAULT_SESSION_AMBIENT_BOT_VOCALIZATION_PROFILE,
   DEFAULT_SESSION_AMBIENT_FOLEY_PROFILE,
   DEFAULT_SIGNAL_ATMOSPHERE_MIX,
   DEFAULT_STUDIO_ATMOSPHERE_URL,
@@ -15,6 +16,9 @@ import {
   coffeeCupFoleyCueForTransition,
   SIGNAL_ATMOSPHERE_RELATIVE_MIX_MAX,
   createSeamlessSessionAtmosphereLoopBuffer,
+  sessionAmbientBotVocalizationCue,
+  sessionAmbientBotVocalizationDelayMs,
+  sessionAmbientBotVocalizationTargetId,
   sessionAmbientFoleyDelayMs,
   sessionAmbientFoleyUrl,
   sessionAtmosphereBusVolume,
@@ -63,6 +67,7 @@ test("Signal mix removes static while keeping atmosphere and tactile Foley separ
     background: 0.16,
     grain: 0,
     foley: 1,
+    filmGrain: 0.3,
   });
   assert.ok(
     DEFAULT_SIGNAL_ATMOSPHERE_MIX.background >
@@ -113,6 +118,135 @@ test("session atmosphere foley is deterministic and tactfully spaced", () => {
     sessionAmbientFoleyUrl("session-a", 2),
     /^\/audio\/session-atmosphere\//u,
   );
+});
+
+test("ambient bot vocalizations are sparse bundled recordings with deterministic targets", () => {
+  assert.deepEqual(DEFAULT_SESSION_AMBIENT_BOT_VOCALIZATION_PROFILE, {
+    minDelayMs: 34_000,
+    maxDelayMs: 76_000,
+    trim: 1,
+  });
+  assert.equal(
+    sessionAmbientBotVocalizationDelayMs("session-a", 2),
+    sessionAmbientBotVocalizationDelayMs("session-a", 2),
+  );
+  assert.ok(
+    sessionAmbientBotVocalizationDelayMs("session-a", 2) >= 34_000,
+  );
+  assert.ok(
+    sessionAmbientBotVocalizationDelayMs("session-a", 2) <= 76_000,
+  );
+  assert.equal(
+    sessionAmbientBotVocalizationTargetId("session-a", 2, ["", "a", "b"]),
+    sessionAmbientBotVocalizationTargetId("session-a", 2, ["", "a", "b"]),
+  );
+  assert.equal(
+    sessionAmbientBotVocalizationTargetId("session-a", 2, []),
+    null,
+  );
+
+  const kinds = new Set<string>();
+  for (let index = 0; index < 200; index += 1) {
+    const cue = sessionAmbientBotVocalizationCue("session-a", index);
+    kinds.add(cue.kind);
+    assert.match(cue.url, /^\/audio\/(?:session-atmosphere|voice-presence)\//u);
+    assert.ok(cue.durationMs >= 700 && cue.durationMs <= 1_300);
+    assert.ok(
+      statSync(new URL(`../../public${cue.url}`, import.meta.url)).size > 1_000,
+      `${cue.url} should be bundled`,
+    );
+  }
+  assert.deepEqual(
+    kinds,
+    new Set([
+      "throat-clear",
+      "mouth-sound",
+      "lip-smack",
+      "soft-sigh",
+      "soft-inhale",
+    ]),
+  );
+});
+
+test("ambient bot vocalizations use the local Foley lane without a voice profile", () => {
+  const originalAudio = Object.getOwnPropertyDescriptor(globalThis, "Audio");
+  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  const scheduled: Array<{ callback: () => void; delayMs: number }> = [];
+  const instances: Array<{ src: string; volume: number }> = [];
+  class FakeAudio {
+    readonly src: string;
+    preload = "";
+    loop = false;
+    volume = 1;
+    constructor(src: string) {
+      this.src = src;
+      instances.push(this);
+    }
+    addEventListener(): void {}
+    removeEventListener(): void {}
+    play(): Promise<void> {
+      return Promise.resolve();
+    }
+    pause(): void {}
+    removeAttribute(): void {}
+    load(): void {}
+  }
+  Object.defineProperty(globalThis, "Audio", {
+    configurable: true,
+    value: FakeAudio,
+  });
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      setTimeout(callback: () => void, delayMs: number): number {
+        scheduled.push({ callback, delayMs });
+        return scheduled.length;
+      },
+      clearTimeout(): void {},
+    },
+  });
+  try {
+    const seenKinds: string[] = [];
+    const controller = startSessionAtmosphere({
+      seed: "local-vocalization",
+      volume: 1,
+      mix: { background: 0, grain: 0, foley: 0.5 },
+      ambientFoley: false,
+      ambientBotVocalizations: true,
+      ambientBotVocalizationProfile: {
+        minDelayMs: 1_000,
+        maxDelayMs: 1_000,
+        trim: 0.4,
+      },
+      shouldDeferFoley: () => true,
+      shouldDeferBotVocalization: () => false,
+      onAmbientBotVocalization(cue) {
+        seenKinds.push(cue.kind);
+        return true;
+      },
+    });
+    assert.equal(scheduled.length, 1);
+    scheduled[0]!.callback();
+    assert.equal(seenKinds.length, 1);
+    assert.equal(instances.length, 1);
+    assert.match(
+      instances[0]?.src ?? "",
+      /^\/audio\/(?:session-atmosphere|voice-presence)\//u,
+    );
+    assert.equal(instances[0]?.volume, 0.2);
+    controller.stop();
+  } finally {
+    if (originalAudio) {
+      Object.defineProperty(globalThis, "Audio", originalAudio);
+    } else {
+      Reflect.deleteProperty(globalThis, "Audio");
+    }
+    if (originalWindow) {
+      Object.defineProperty(globalThis, "window", originalWindow);
+    } else {
+      Reflect.deleteProperty(globalThis, "window");
+    }
+  }
 });
 
 test("Signal can disable generic ambient Foley while preserving synchronized cues", () => {

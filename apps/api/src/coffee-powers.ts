@@ -15,6 +15,7 @@ import {
   strongestBotPowerMoodBoostEffectFromEffectsV1,
   strongestBotPowerMoodDrainEffectFromEffectsV1,
   botPowerVoicePresenceModeFromEffectsV1,
+  botPowerPairwisePerceptionFromEffectsV1,
   buildCoffeePowersPromptBlock,
   COFFEE_HISTORY_WINDOW_HARD_CAP,
   coffeePowerCupRateMultiplierV1,
@@ -59,9 +60,27 @@ export function parseCoffeePowerPlan(raw: string | null | undefined): CoffeePowe
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as CoffeePowerPlanV1;
-    return parsed?.version === 1 && parsed.bots && typeof parsed.bots === "object"
-      ? parsed
-      : null;
+    if (parsed?.version !== 1 || !parsed.bots || typeof parsed.bots !== "object") {
+      return null;
+    }
+    return {
+      ...parsed,
+      bots: Object.fromEntries(
+        Object.entries(parsed.bots).map(([botId, bot]) => {
+          const effects = Array.isArray(bot.effects) ? [...bot.effects] : [];
+          const targetedInvisible = bot.powerNames?.some(
+            (name) => name.trim().toLowerCase() === "invisible",
+          ) && effects.some((effect) => effect.type === "awareness");
+          if (
+            targetedInvisible &&
+            !effects.some((effect) => effect.type === "avatar_visibility")
+          ) {
+            effects.push({ type: "avatar_visibility", mode: "translucent" });
+          }
+          return [botId, { ...bot, effects }];
+        }),
+      ),
+    };
   } catch {
     return null;
   }
@@ -532,8 +551,12 @@ export function resolveCoffeePowersForSession(
 }
 
 export function coffeePowerBotCanSpeak(plan: CoffeePowerPlanV1 | null, botId: string): boolean {
-  const audience = plan?.bots[botId]?.speechAudienceBotIds;
-  return audience === null || audience === undefined || audience.length > 0;
+  // A restricted audience controls who receives the turn, not whether the
+  // holder is allowed to complete it. Hidden spectral turns are persisted for
+  // replay even when nobody at the live table can perceive them.
+  void plan;
+  void botId;
+  return true;
 }
 
 export function coffeePowerBotIsMuted(plan: CoffeePowerPlanV1 | null, botId: string): boolean {
@@ -711,15 +734,47 @@ export function coffeePowerBotVisibleTo(
   viewerBotId: string
 ): boolean {
   if (subjectBotId === viewerBotId) return true;
-  const audience = plan?.bots[subjectBotId]?.visibleToBotIds;
-  return audience === null || audience === undefined || audience.includes(viewerBotId);
+  const frozen = plan?.bots[subjectBotId];
+  const effects = frozen?.effects ?? [];
+  const perceived = botPowerPairwisePerceptionFromEffectsV1(
+    effects,
+    (target) => target.kind === "bot" && target.botId === viewerBotId,
+    { holderSpeaking: true },
+  ).visible;
+  const legacyAudience = frozen?.visibleToBotIds;
+  return perceived &&
+    (effects.some((effect) => effect.type === "awareness") ||
+      legacyAudience === null ||
+      legacyAudience === undefined ||
+      legacyAudience.includes(viewerBotId));
+}
+
+export function coffeePowerBotAudibleTo(
+  plan: CoffeePowerPlanV1 | null,
+  subjectBotId: string,
+  listenerBotId: string,
+): boolean {
+  if (subjectBotId === listenerBotId) return true;
+  const frozen = plan?.bots[subjectBotId];
+  const effects = frozen?.effects ?? [];
+  const perceived = botPowerPairwisePerceptionFromEffectsV1(
+    effects,
+    (target) => target.kind === "bot" && target.botId === listenerBotId,
+    { holderSpeaking: true },
+  ).audible;
+  const legacyAudience = frozen?.speechAudienceBotIds;
+  return perceived &&
+    (effects.some((effect) => effect.type === "speech_audience") ||
+      legacyAudience === null ||
+      legacyAudience === undefined ||
+      legacyAudience.includes(listenerBotId));
 }
 
 export function coffeePowerMessageAudience(
   plan: CoffeePowerPlanV1 | null,
   speakerBotId: string
 ): string[] | null {
-  return plan?.bots[speakerBotId]?.visibleToBotIds ?? null;
+  return plan?.bots[speakerBotId]?.speechAudienceBotIds ?? null;
 }
 
 export function coffeePowersPromptForSpeaker(
@@ -755,7 +810,7 @@ export function coffeePowersPromptForSpeaker(
   }
   if (own?.effects.some((effect) => effect.type === "eternal_introduction")) {
     lines.push(
-      "Hard short-term-amnesia rule: receive and understand only the current other-speaker message. Respond directly to its concrete content as fresh first contact. You do not know prior turns or your own earlier messages. Never claim an older relationship, use hidden table history, mention this rule, or default to identical introductory copy. If accused of repetition, react with sincere confusion; never agree that you repeated yourself or explain why. A self-introduction is optional only when this exchange genuinely warrants it.",
+      "Hard short-term-amnesia rule: receive and understand only the current other-speaker message. Respond directly to its concrete content as fresh first contact. You do not know the standing table topic unless that message states it, and you do not know prior turns or your own earlier messages. Never claim an older relationship, use hidden table history, mention this rule, or default to identical introductory copy. If accused of repetition, react with sincere confusion; never agree that you repeated yourself or explain why. A self-introduction is optional only when this exchange genuinely warrants it.",
     );
   }
   const responseBudget = coffeePowerResponseBudgetForBot(plan, speakerBotId);

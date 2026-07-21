@@ -25082,6 +25082,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   right: 0;
 }
 
+/* Signal's authored Studio set supplies the receiving surfaces for its light.
+   Keep the shared avatar hover, but remove the portable tabletop underglow. */
+.signalBotPresencePlate .botAmbientUnderglow {
+  display: none;
+}
+
 .botAmbientPresenceRig {
   --bot-ambient-color: var(
     --zen-live-bot-frame-tint-color,
@@ -43810,6 +43816,288 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   --avatar-editor-warning: #92400e;
 }
 
+.botGeneratorBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 4200;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: color-mix(in srgb, #03050a 70%, transparent);
+  backdrop-filter: blur(14px) saturate(108%);
+  -webkit-backdrop-filter: blur(14px) saturate(108%);
+}
+
+.botGeneratorDialog {
+  width: min(680px, 100%);
+  max-height: min(760px, calc(100dvh - 48px));
+  overflow: auto;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  color: var(--fg);
+  background:
+    radial-gradient(
+      circle at 12% 0%,
+      color-mix(in srgb, var(--accent) 14%, transparent),
+      transparent 38%
+    ),
+    var(--bg-elevated);
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line-strong));
+  border-radius: 20px;
+  box-shadow:
+    0 30px 90px rgba(0, 0, 0, 0.58),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 9%, transparent);
+}
+
+.botGeneratorHeader {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.botGeneratorGlyph {
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--line));
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-elevated));
+}
+
+.botGeneratorTitle {
+  min-width: 0;
+}
+
+.botGeneratorTitle > span {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--fg-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.botGeneratorHeader h3 {
+  margin: 0;
+  font-size: clamp(1.28rem, 3vw, 1.62rem);
+  letter-spacing: -0.025em;
+}
+
+.botGeneratorHeaderActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.botGeneratorHeaderActions > button {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  padding: 0 0 2px;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 1.25rem;
+  line-height: 1;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--bg-hover);
+  cursor: pointer;
+}
+
+.botGeneratorHeaderActions > button:hover:not(:disabled) {
+  color: var(--fg);
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--line-strong));
+}
+
+.botGeneratorHeaderActions > button:disabled {
+  opacity: 0.45;
+  cursor: wait;
+}
+
+.botGeneratorModeBadge {
+  padding: 5px 9px;
+  color: var(--fg-muted);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--bg-hover);
+}
+
+.botGeneratorModeBadge[data-mode="local"] {
+  color: #70d9bf;
+  border-color: color-mix(in srgb, #70d9bf 42%, var(--line));
+}
+
+.botGeneratorModeBadge[data-mode="online"] {
+  color: #83b7ff;
+  border-color: color-mix(in srgb, #83b7ff 42%, var(--line));
+}
+
+.botGeneratorModeBadge[data-mode="auto"] {
+  color: #c2a6ff;
+  border-color: color-mix(in srgb, #c2a6ff 42%, var(--line));
+}
+
+.botGeneratorBody {
+  padding: 22px 24px;
+}
+
+.botGeneratorBody > p:first-child {
+  margin: 0 0 18px;
+  color: var(--fg-muted);
+  line-height: 1.55;
+}
+
+.botGeneratorBody label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 0.78rem;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.botGeneratorBody textarea {
+  width: 100%;
+  min-height: 184px;
+  resize: vertical;
+  padding: 14px 15px;
+  color: var(--fg);
+  font: inherit;
+  line-height: 1.55;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  outline: none;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  box-shadow: inset 0 1px 8px color-mix(in srgb, #000000 14%, transparent);
+}
+
+.botGeneratorBody textarea::placeholder {
+  color: var(--fg-subtle);
+}
+
+.botGeneratorBody textarea:focus {
+  border-color: color-mix(in srgb, var(--accent) 70%, var(--line-strong));
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent),
+    inset 0 1px 8px color-mix(in srgb, #000000 14%, transparent);
+}
+
+.botGeneratorPromptMeta {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 8px;
+  color: var(--fg-subtle);
+  font-size: 0.75rem;
+}
+
+.botGeneratorPromptMeta span:last-child {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.botGeneratorError {
+  margin: 14px 0 0 !important;
+  padding: 10px 12px;
+  color: var(--danger);
+  font-size: 0.82rem;
+  line-height: 1.4;
+  border: 1px solid color-mix(in srgb, var(--danger) 36%, var(--line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+}
+
+.botGeneratorActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 16px 24px 22px;
+  border-top: 1px solid var(--line);
+}
+
+.botGeneratorActions button,
+.botGeneratedBriefCard button {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 15px;
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 720;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--bg-hover);
+  cursor: pointer;
+}
+
+.botGeneratorActions button:hover:not(:disabled),
+.botGeneratedBriefCard button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 46%, var(--line-strong));
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg-hover));
+}
+
+.botGeneratorActions button:disabled {
+  opacity: 0.52;
+  cursor: wait;
+}
+
+.botGeneratorActions .botGeneratorPrimaryAction {
+  color: var(--accent-contrast, #ffffff);
+  border-color: color-mix(in srgb, var(--accent) 82%, #ffffff 8%);
+  background: var(--accent);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.botGeneratedBriefCard p {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 0.84rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.botGeneratedBriefCard button {
+  margin-top: 12px;
+}
+
+@media (max-width: 640px) {
+  .botGeneratorBackdrop {
+    padding: 12px;
+  }
+
+  .botGeneratorDialog {
+    max-height: calc(100dvh - 24px);
+    border-radius: 16px;
+  }
+
+  .botGeneratorHeader,
+  .botGeneratorBody {
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+
+  .botGeneratorActions {
+    padding: 14px 18px 18px;
+  }
+
+  .botGeneratorActions button {
+    flex: 1;
+  }
+}
+
 .botAvatarCustomizerBackdrop {
   position: fixed;
   inset: 0;
@@ -62479,6 +62767,12 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .coffeeCenterFeedLineTyping {
   color: var(--coffee-center-line-color, rgba(255, 255, 255, 0.96));
+}
+
+.coffeePerceptionOverlapLane {
+  margin-top: 2px;
+  padding-top: 6px;
+  border-top: 1px solid color-mix(in srgb, currentColor 24%, transparent);
 }
 
 .coffeeCenterFeedLineFallback {

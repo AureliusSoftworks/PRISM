@@ -608,20 +608,21 @@ const RECIPES = [
   {
     id: "forgetful-freddie",
     name: "Forgetful Freddie",
+    exportRevision: POWER_COLLECTION_REVISION,
     subtitle: "Meeting every message for the first time",
     description:
       "A warmly bewildered man who understands the message in front of him, then loses the exchange while everyone else remembers.",
     tags: ["memory", "introduction", "confusion", "agitation"],
     purpose:
-      "A short-term-amnesia character who answers the current speaker directly as fresh contact, never knows prior turns or his own earlier messages, and leaves baffled peers carrying the whole encounter.",
+      "A short-term-amnesia character who answers only the current speaker as fresh contact, never retains the standing topic or prior turns unless the current message restates them, and leaves baffled peers carrying the whole encounter.",
     traits: "Earnest, courteous, tentative, friendly, easily bewildered, and genuinely pleased to meet absolutely everyone.",
     communicationStyle: "formal",
     pronouns: "he/him",
-    role: "The table's perpetual newcomer: attentive to the person speaking now, then socially reset while everyone around him carries the accumulating history.",
+    role: "The table's perpetual newcomer: attentive to the person speaking now, then reset without even the standing topic while everyone around him carries the accumulating history.",
     values: "Courtesy, fresh starts, friendly first impressions, simple sincerity, and treating unexplained hostility with patient bewilderment.",
     quirks: "He follows the current speaker with care, loses the exchange before the next turn, occasionally reintroduces himself when it feels locally natural, and reads unexplained exasperation as baffling.",
     appearance: "A tidy, approachable man with questioning eyes, a hopeful half-smile, and amber accents that feel perpetually ready for a new beginning.",
-    presence: "Freshly cordial and faintly lost; he can answer the moment in front of him even as the larger relationship keeps vanishing behind him.",
+    presence: "Freshly cordial and faintly lost; he can answer the message in front of him even as the topic and larger relationship keep vanishing behind him.",
     color: "#f2b84b",
     glyph: "lucideRefreshCcw",
     face: face({
@@ -648,7 +649,7 @@ const RECIPES = [
       version: 1,
       id: "forgetful-freddie",
       name: "Short-Term Amnesia",
-      intent: "For each Freddie turn, expose only the current other-speaker message. He understands and responds directly to its concrete content as fresh first contact, has no awareness of prior turns or his own earlier messages, never claims older relationship history, and introduces himself only when this exchange genuinely warrants it rather than repeating identical copy. If accused of repetition, he reacts with sincere confusion instead of agreeing or explaining. Other bots remember the full encounter and receive one small negative social step after each Freddie speech.",
+      intent: "Each Freddie turn sees only the current other-speaker message. He knows no standing topic unless that message states it, no prior turns, and none of his own messages. He answers as fresh contact; repetition complaints confuse him. Other bots remember and become slightly agitated after each speech.",
       enabled: true,
       compileStatus: "draft",
       compiled: null,
@@ -668,17 +669,30 @@ const shouldDryRun = process.argv.includes("--dry-run");
 const databaseArgument = flagValue("--db");
 const userId = flagValue("--user-id");
 const backupArgument = flagValue("--backup-dir");
+const onlyArgument = flagValue("--only");
 
 if (shouldApply === shouldDryRun) {
   throw new Error("Choose exactly one of --dry-run or --apply.");
 }
 if (!databaseArgument || !userId) {
   throw new Error(
-    "Usage: update-power-bot-marketplace.mjs --db PATH --user-id ID (--dry-run | --apply --backup-dir PATH)",
+    "Usage: update-power-bot-marketplace.mjs --db PATH --user-id ID [--only recipe-id[,recipe-id...]] (--dry-run | --apply --backup-dir PATH)",
   );
 }
 if (shouldApply && !backupArgument) {
   throw new Error("Applying requires --backup-dir PATH.");
+}
+
+const selectedRecipeIds = onlyArgument
+  ? new Set(onlyArgument.split(",").map((value) => value.trim()).filter(Boolean))
+  : null;
+const selectedRecipes = selectedRecipeIds
+  ? RECIPES.filter((recipe) => selectedRecipeIds.has(recipe.id))
+  : RECIPES;
+if (selectedRecipeIds && selectedRecipes.length !== selectedRecipeIds.size) {
+  const knownIds = new Set(RECIPES.map((recipe) => recipe.id));
+  const unknownIds = [...selectedRecipeIds].filter((id) => !knownIds.has(id));
+  throw new Error(`Unknown Power Collection recipe ids: ${unknownIds.join(", ")}.`);
 }
 
 function marketplaceHash(id) {
@@ -857,11 +871,11 @@ try {
   const rows = database
     .prepare(
       `SELECT * FROM bots
-        WHERE user_id = ? AND name IN (${RECIPES.map(() => "?").join(", ")})`,
+        WHERE user_id = ? AND name IN (${selectedRecipes.map(() => "?").join(", ")})`,
     )
-    .all(userId, ...RECIPES.map((recipe) => recipe.name));
+    .all(userId, ...selectedRecipes.map((recipe) => recipe.name));
   const rowsByName = new Map(rows.map((row) => [row.name, row]));
-  const missing = RECIPES.filter(
+  const missing = selectedRecipes.filter(
     (recipe) => !recipe.sourcePower && !rowsByName.has(recipe.name),
   );
   if (missing.length > 0) {
@@ -870,7 +884,7 @@ try {
     );
   }
   candidates = await Promise.all(
-    RECIPES.map((recipe) => candidateFor(recipe, rowsByName.get(recipe.name))),
+    selectedRecipes.map((recipe) => candidateFor(recipe, rowsByName.get(recipe.name))),
   );
 } finally {
   database.close();
@@ -880,8 +894,8 @@ const manifest = JSON.parse(readFileSync(MANIFEST_PATH, "utf8"));
 if (manifest.schema !== "prism-bot-marketplace-v1") {
   throw new Error("Unsupported Marketplace manifest.");
 }
-const recipeIds = new Set(RECIPES.map((recipe) => recipe.id));
-const retiredBundlePaths = [...RETIRED_POWER_BOT_IDS]
+const recipeIds = new Set(selectedRecipes.map((recipe) => recipe.id));
+const retiredBundlePaths = (selectedRecipeIds ? [] : [...RETIRED_POWER_BOT_IDS])
   .map((id) => join(MARKETPLACE_ROOT, "bots", `bot-${id}.bot`))
   .filter((bundlePath) => existsSync(bundlePath));
 const candidateHashes = new Set(candidates.map((candidate) => candidate.botHash));

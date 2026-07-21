@@ -165,7 +165,7 @@ describe("restoreFactoryDefaultsInDatabase", () => {
       assert.equal(user.prism_default_bot_face_mouth_font, null);
       assert.equal(user.prism_default_bot_face_mouth_character, null);
       assert.equal(user.prism_default_bot_face_mouth_animation, null);
-      assert.equal(user.prism_default_bot_face_mouth_coffee_pucker, 0);
+      assert.equal(user.prism_default_bot_face_mouth_coffee_pucker, 1);
       assert.equal(user.prism_default_bot_face_font_weight, null);
       assert.equal(user.prism_default_bot_face_eye_scale, null);
       assert.equal(user.prism_default_bot_face_eye_offset_x, null);

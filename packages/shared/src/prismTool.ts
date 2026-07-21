@@ -276,6 +276,20 @@ export interface CoffeeReplayListenerReactionEventPayload {
   plan: ListenerReactionPlanV1;
 }
 
+export interface CoffeeReplayPerceptionOverlapEventPayload {
+  v: 1;
+  name: "coffeeReplayEvent";
+  kind: "perceptionOverlap";
+  /** The line that begins while the preceding speaker is still talking. */
+  botId: string;
+  precedingBotId: string;
+  precedingMessageId: string;
+  overlappingMessageId: string;
+  startRatio: number;
+  maxSimultaneousVoices: 2;
+  occurredAt: string;
+}
+
 export interface CoffeeReplayIdentityMirrorEventPayload {
   v: 1;
   name: "coffeeReplayEvent";
@@ -296,6 +310,7 @@ export type CoffeeReplayEventPayload =
   | CoffeeReplayPlayerDepartureEventPayload
   | CoffeeReplayBotDepartureEventPayload
   | CoffeeReplayListenerReactionEventPayload
+  | CoffeeReplayPerceptionOverlapEventPayload
   | CoffeeReplayIdentityMirrorEventPayload;
 
 export type ZenDisplayAlign = "start" | "center" | "end";
@@ -859,6 +874,36 @@ export function normalizeCoffeeReplayEventPayload(
       botId,
       occurredAt,
       plan,
+    };
+  }
+  if (row.kind === "perceptionOverlap") {
+    const precedingBotId = normalizeCoffeeReplayBotId(row.precedingBotId);
+    const precedingMessageId = normalizeCoffeeReplayBotId(row.precedingMessageId);
+    const overlappingMessageId = normalizeCoffeeReplayBotId(row.overlappingMessageId);
+    const startRatio = typeof row.startRatio === "number" && Number.isFinite(row.startRatio)
+      ? Math.min(0.72, Math.max(0.58, row.startRatio))
+      : undefined;
+    if (
+      !precedingBotId ||
+      precedingBotId === botId ||
+      !precedingMessageId ||
+      !overlappingMessageId ||
+      startRatio === undefined ||
+      row.maxSimultaneousVoices !== 2
+    ) {
+      return undefined;
+    }
+    return {
+      v: 1,
+      name: "coffeeReplayEvent",
+      kind: "perceptionOverlap",
+      botId,
+      precedingBotId,
+      precedingMessageId,
+      overlappingMessageId,
+      startRatio,
+      maxSimultaneousVoices: 2,
+      occurredAt,
     };
   }
   if (row.kind === "botDeparture") {

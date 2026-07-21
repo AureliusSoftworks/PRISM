@@ -4,7 +4,8 @@ import { buildSignalMusicProfile } from "@localai/shared";
 import {
   SIGNAL_ELEVENLABS_MUSIC_MODEL,
   buildSignalElevenLabsMusicCompositionPlan,
-  requestSignalElevenLabsIntroMusic,
+  buildSignalElevenLabsOutdentCompositionPlan,
+  requestSignalElevenLabsMusic,
 } from "../elevenlabs-music.ts";
 
 describe("Signal ElevenLabs intro music", () => {
@@ -33,7 +34,7 @@ describe("Signal ElevenLabs intro music", () => {
     const negative = plan.chunks.flatMap((chunk) => chunk.negative_styles).join(" ");
     assert.doesNotMatch(serialized, /Mara|Vale|urgent public evidence|system_prompt|show-private-name/iu);
     assert.equal(plan.chunks.length, 2);
-    assert.deepEqual(plan.chunks.map((chunk) => chunk.duration_ms), [3_000, 3_000]);
+    assert.deepEqual(plan.chunks.map((chunk) => chunk.duration_ms), [4_000, 4_000]);
     assert.match(positive, /foreground melody begins immediately/u);
     assert.match(positive, /genuinely melodic theme/u);
     assert.match(positive, /two-note low-brass call/u);
@@ -50,6 +51,37 @@ describe("Signal ElevenLabs intro music", () => {
     assert.doesNotMatch(serialized, /rising variation|warm and modern/iu);
     assert.doesNotMatch(positive, /resolving chime/iu);
     assert.doesNotMatch(negative, /fade out/u);
+  });
+
+  it("pairs a host-specific four-second outdent with the opening fingerprint", () => {
+    const profile = buildSignalMusicProfile({
+      temperament: "inventive",
+      seed: "host-a:show-a",
+      hostingStyle: "Precise, curious, and delighted by mechanisms.",
+      studioIdentity: "A workshop of gears, circuits, and metal instruments.",
+    });
+    const ident = buildSignalElevenLabsMusicCompositionPlan({
+      profile,
+      seed: "host-a:show-a",
+    });
+    const outdent = buildSignalElevenLabsOutdentCompositionPlan({
+      profile,
+      seed: "host-a:show-a",
+    });
+    assert.deepEqual(
+      outdent.chunks.map((chunk) => chunk.duration_ms),
+      [4_000],
+    );
+    assert.ok(outdent.chunks.every((chunk) => chunk.duration_ms >= 3_000));
+    const identText = JSON.stringify(ident);
+    const outdentText = JSON.stringify(outdent);
+    const fingerprint = profile.motifIntervals.join(", ");
+    assert.match(identText, new RegExp(fingerprint, "u"));
+    assert.match(outdentText, new RegExp(fingerprint, "u"));
+    assert.match(outdentText, /paired opening ident|opening host signature/u);
+    assert.match(outdentText, /same instrumental identity/u);
+    assert.match(outdentText, /closing outdent/u);
+    assert.doesNotMatch(outdentText, /host-a|show-a|mechanisms|circuits/iu);
   });
 
   it("keeps playful and warm provider directions distinct from commanding", () => {
@@ -146,7 +178,7 @@ describe("Signal ElevenLabs intro music", () => {
       }),
       seed: "show-1",
     });
-    const result = await requestSignalElevenLabsIntroMusic({
+    const result = await requestSignalElevenLabsMusic({
       apiKey: "secret-test-key",
       compositionPlan,
       fetchImpl: async (input, init) => {

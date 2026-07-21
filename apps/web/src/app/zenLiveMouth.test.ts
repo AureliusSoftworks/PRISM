@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  BOTTISH_MOUTH_PHASE_MS,
+  bottishMouthShapeAtAlignedElapsedMs,
   crtSpeechMouthShapeAtAlignedElapsedMs,
   crtSpeechMouthShapeAtElapsedMs,
   crtSpeechMouthShapeAtTextCursor,
@@ -156,6 +158,27 @@ test("aligned preview visemes fall back when provider timing is malformed", () =
       durationMs: 1_000,
     }),
   );
+});
+
+test("Bottish holds readable poses across rapid synthesized notes", () => {
+  const alignment = {
+    characters: ["b", "o", "t", "t", "i"],
+    characterStartTimesSeconds: [0, 0.08, 0.16, 0.24, 0.32],
+    characterEndTimesSeconds: [0.07, 0.15, 0.23, 0.31, 0.39],
+  };
+  const at = (elapsedMs: number) =>
+    bottishMouthShapeAtAlignedElapsedMs({
+      text: "botti",
+      elapsedMs,
+      durationMs: 390,
+      alignment,
+    });
+
+  assert.equal(BOTTISH_MOUTH_PHASE_MS, 240);
+  assert.equal(at(20), at(140));
+  assert.notEqual(at(140), at(260));
+  assert.equal(at(75), "closed");
+  assert.equal(at(390), "closed");
 });
 
 test("English viseme timelines give vowels more time than closures", () => {

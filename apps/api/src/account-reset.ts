@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER } from "@localai/shared";
 import {
   DEFAULT_ZEN_ASK_QUESTION_PATIENCE_ENABLED,
   DEFAULT_ZEN_ASK_QUESTION_PATIENCE_MS,
@@ -138,7 +139,7 @@ export function restoreFactoryDefaultsInDatabase(
           prism_default_bot_face_mouth_font = NULL,
           prism_default_bot_face_mouth_character = NULL,
           prism_default_bot_face_mouth_animation = NULL,
-          prism_default_bot_face_mouth_coffee_pucker = 0,
+          prism_default_bot_face_mouth_coffee_pucker = ?,
           prism_default_bot_face_font_weight = NULL,
           prism_default_bot_face_eye_scale = NULL,
           prism_default_bot_face_eye_offset_x = NULL,
@@ -203,6 +204,7 @@ export function restoreFactoryDefaultsInDatabase(
         DEFAULT_ZEN_ASK_QUESTION_PATIENCE_ENABLED ? 1 : 0,
         DEFAULT_ZEN_ASK_QUESTION_PATIENCE_MS,
         DEFAULT_ZEN_PERSONA_TRANSITION_CHOICE,
+        DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER ? 1 : 0,
         nowIso,
         userId
       ) as {

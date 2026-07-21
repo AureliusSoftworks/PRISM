@@ -244,7 +244,7 @@ describe("bot avatar face style", () => {
     );
   });
 
-  it("normalizes Coffee pucker choices while keeping legacy custom mouths unchanged", () => {
+  it("defaults Coffee pucker on while preserving an explicit opt-out", () => {
     assert.equal(normalizeBotFaceMouthCoffeePucker(true), true);
     assert.equal(normalizeBotFaceMouthCoffeePucker(1), true);
     assert.equal(normalizeBotFaceMouthCoffeePucker(false), false);
@@ -252,6 +252,13 @@ describe("bot avatar face style", () => {
     assert.equal(normalizeBotFaceMouthCoffeePucker("true"), null);
     assert.equal(
       resolveBotFaceStyle({ faceMouthCharacter: "△" }).mouthCoffeePucker,
+      true,
+    );
+    assert.equal(
+      resolveBotFaceStyle({
+        faceMouthCharacter: "△",
+        faceMouthCoffeePucker: false,
+      }).mouthCoffeePucker,
       false,
     );
   });

@@ -11,7 +11,10 @@ import {
 export const DEFAULT_STUDIO_ATMOSPHERE_URL =
   "/audio/session-atmosphere/default-studio-room-loop.mp3";
 
-export type SessionAtmosphereMix = BotcastStudioAtmosphereMix;
+export type SessionAtmosphereMix = Pick<
+  BotcastStudioAtmosphereMix,
+  "background" | "grain" | "foley"
+>;
 
 export type SessionAtmosphereBackgroundTone = "neutral" | "warm-low";
 
@@ -38,6 +41,32 @@ export const DEFAULT_SESSION_AMBIENT_FOLEY_PROFILE = {
   minDelayMs: 18_000,
   maxDelayMs: 42_000,
   trim: 1,
+} as const satisfies SessionAmbientFoleyProfile;
+
+export type SessionAmbientBotVocalizationKind =
+  | "throat-clear"
+  | "mouth-sound"
+  | "lip-smack"
+  | "soft-sigh"
+  | "soft-inhale";
+
+export interface SessionAmbientBotVocalizationCue {
+  kind: SessionAmbientBotVocalizationKind;
+  url: string;
+  durationMs: number;
+  index: number;
+  sequenceKey: string;
+}
+
+export const DEFAULT_SESSION_AMBIENT_BOT_VOCALIZATION_PROFILE = {
+  minDelayMs: 34_000,
+  maxDelayMs: 76_000,
+  trim: 1,
+} as const satisfies SessionAmbientFoleyProfile;
+
+export const SIGNAL_SESSION_AMBIENT_BOT_VOCALIZATION_PROFILE = {
+  ...DEFAULT_SESSION_AMBIENT_BOT_VOCALIZATION_PROFILE,
+  trim: 0.32,
 } as const satisfies SessionAmbientFoleyProfile;
 
 export function signalSessionAtmosphereActive(args: {
@@ -84,10 +113,39 @@ type SessionAtmosphereBus = keyof SessionAtmosphereMix;
 
 const GENERAL_FOLEY_URLS = [
   "/audio/session-atmosphere/clothing-shuffle.mp3",
-  "/audio/session-atmosphere/throat-clear.mp3",
-  "/audio/session-atmosphere/faint-swallow.mp3",
   "/audio/session-atmosphere/soft-foot-tap.mp3",
 ] as const;
+
+const AMBIENT_BOT_VOCALIZATIONS = [
+  {
+    kind: "throat-clear",
+    url: "/audio/session-atmosphere/throat-clear.mp3",
+    durationMs: 1_228,
+  },
+  {
+    kind: "mouth-sound",
+    url: "/audio/session-atmosphere/faint-swallow.mp3",
+    durationMs: 914,
+  },
+  {
+    kind: "lip-smack",
+    url: "/audio/session-atmosphere/lip-smack-01.mp3",
+    durationMs: 731,
+  },
+  {
+    kind: "soft-sigh",
+    url: "/audio/session-atmosphere/soft-sigh-01.mp3",
+    durationMs: 1_228,
+  },
+  {
+    kind: "soft-inhale",
+    url: "/audio/voice-presence/breath-deliberate-02.mp3",
+    durationMs: 914,
+  },
+] as const satisfies readonly Omit<
+  SessionAmbientBotVocalizationCue,
+  "index" | "sequenceKey"
+>[];
 
 export const SESSION_FOLEY_URLS = {
   coffeeSip: "/audio/session-atmosphere/coffee-sip.mp3",
@@ -125,6 +183,46 @@ export function sessionAmbientFoleyDelayMs(
 export function sessionAmbientFoleyUrl(seed: string, index: number): string {
   return GENERAL_FOLEY_URLS[
     stableHash(`${seed}:foley:${index}`) % GENERAL_FOLEY_URLS.length
+  ]!;
+}
+
+export function sessionAmbientBotVocalizationDelayMs(
+  seed: string,
+  index: number,
+  profile: SessionAmbientFoleyProfile =
+    DEFAULT_SESSION_AMBIENT_BOT_VOCALIZATION_PROFILE,
+): number {
+  return sessionAmbientFoleyDelayMs(
+    `${seed}:bot-vocalization`,
+    index,
+    profile,
+  );
+}
+
+export function sessionAmbientBotVocalizationCue(
+  seed: string,
+  index: number,
+): SessionAmbientBotVocalizationCue {
+  const cue = AMBIENT_BOT_VOCALIZATIONS[
+    stableHash(`${seed}:bot-vocalization:cue:${index}`) %
+      AMBIENT_BOT_VOCALIZATIONS.length
+  ]!;
+  return {
+    ...cue,
+    index,
+    sequenceKey: `${seed}:bot-vocalization:${index}:${cue.kind}`,
+  };
+}
+
+export function sessionAmbientBotVocalizationTargetId(
+  seed: string,
+  index: number,
+  candidateIds: readonly string[],
+): string | null {
+  const eligible = candidateIds.filter((id) => id.trim().length > 0);
+  if (eligible.length === 0) return null;
+  return eligible[
+    stableHash(`${seed}:bot-vocalization:target:${index}`) % eligible.length
   ]!;
 }
 
@@ -423,8 +521,14 @@ export function startSessionAtmosphere(args: {
   foleyRoomAcoustics?: RoomAcousticsSend;
   allowMixBoost?: boolean;
   shouldDeferFoley?: () => boolean;
+  shouldDeferBotVocalization?: () => boolean;
   ambientFoley?: boolean;
   ambientFoleyProfile?: SessionAmbientFoleyProfile;
+  ambientBotVocalizations?: boolean;
+  ambientBotVocalizationProfile?: SessionAmbientFoleyProfile;
+  onAmbientBotVocalization?: (
+    cue: SessionAmbientBotVocalizationCue,
+  ) => boolean;
   onPlaybackError?: (error: unknown) => void;
 }): SessionAtmosphereController {
   let volume = clampAudioLevel(args.volume);
@@ -437,9 +541,14 @@ export function startSessionAtmosphere(args: {
   const pendingLoopLoads = new Set<AbortController>();
   let stopped = false;
   let timer: number | null = null;
+  let botVocalizationTimer: number | null = null;
   let foleyIndex = 0;
+  let botVocalizationIndex = 0;
   const ambientFoleyProfile =
     args.ambientFoleyProfile ?? DEFAULT_SESSION_AMBIENT_FOLEY_PROFILE;
+  const ambientBotVocalizationProfile =
+    args.ambientBotVocalizationProfile ??
+    DEFAULT_SESSION_AMBIENT_BOT_VOCALIZATION_PROFILE;
 
   const releaseAudio = (
     audio: HTMLAudioElement,
@@ -607,6 +716,48 @@ export function startSessionAtmosphere(args: {
   };
   if (args.ambientFoley !== false) scheduleFoley();
 
+  const scheduleBotVocalization = (): void => {
+    if (stopped || typeof window === "undefined") return;
+    const index = botVocalizationIndex;
+    botVocalizationTimer = window.setTimeout(
+      () => {
+        botVocalizationTimer = null;
+        if (stopped) return;
+        if (
+          (args.shouldDeferBotVocalization ?? args.shouldDeferFoley)?.()
+        ) {
+          botVocalizationTimer = window.setTimeout(
+            scheduleBotVocalization,
+            4_000,
+          );
+          return;
+        }
+        const cue = sessionAmbientBotVocalizationCue(args.seed, index);
+        let accepted = false;
+        try {
+          accepted = args.onAmbientBotVocalization?.(cue) === true;
+        } catch {
+          accepted = false;
+        }
+        if (accepted) {
+          play(
+            cue.url,
+            "foley",
+            Math.max(0, ambientBotVocalizationProfile.trim),
+          );
+        }
+        botVocalizationIndex += 1;
+        scheduleBotVocalization();
+      },
+      sessionAmbientBotVocalizationDelayMs(
+        args.seed,
+        index,
+        ambientBotVocalizationProfile,
+      ),
+    );
+  };
+  if (args.ambientBotVocalizations === true) scheduleBotVocalization();
+
   return {
     playCue(cue) {
       play(
@@ -638,7 +789,11 @@ export function startSessionAtmosphere(args: {
       if (timer !== null && typeof window !== "undefined") {
         window.clearTimeout(timer);
       }
+      if (botVocalizationTimer !== null && typeof window !== "undefined") {
+        window.clearTimeout(botVocalizationTimer);
+      }
       timer = null;
+      botVocalizationTimer = null;
       for (const loadController of pendingLoopLoads) {
         loadController.abort();
       }

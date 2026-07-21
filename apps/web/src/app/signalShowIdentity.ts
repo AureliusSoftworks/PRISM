@@ -52,6 +52,7 @@ export function signalShowMagicManifest(
       usesFallbackStudioIdentity);
   const needsAudioPackage =
     show.introAudio.source !== "elevenlabs" ||
+    !show.introAudio.outdentAudioUrl ||
     show.atmosphereAudio.source !== "elevenlabs";
 
   return {

@@ -14,6 +14,14 @@ describe("mode tutorials", () => {
     }
   });
 
+  it("teaches the local refreshable Studio lighting map", () => {
+    const identityCopy = MODE_TUTORIALS.botcast.steps[1]?.body ?? "";
+    assert.match(identityCopy, /Refresh Studio Lighting/u);
+    assert.match(identityCopy, /one shared ambient receiver map/u);
+    assert.match(identityCopy, /without changing either image/u);
+    assert.match(identityCopy, /instead of applying stale light/u);
+  });
+
   it("clamps restored progress to a valid step", () => {
     assert.equal(modeTutorialStep("zen", -1).heading, "Choose a relationship");
     assert.equal(
@@ -35,7 +43,9 @@ describe("mode tutorials", () => {
     assert.match(joinCopy, /brief spoken acknowledgement/u);
     assert.match(joinCopy, /Cross-talk setting/u);
     assert.match(joinCopy, /audible overlaps/u);
-    assert.match(joinCopy, /ElevenLabs throat-clear, light cough/u);
+    assert.match(joinCopy, /prerecorded throat-clear, swallow, lip smack, sigh, or inhale/u);
+    assert.match(joinCopy, /independent of its speaking style or voice engine/u);
+    assert.match(joinCopy, /restrained ElevenLabs vocal reaction/u);
     assert.match(joinCopy, /inferred listeners remain visual only/u);
     assert.match(
       joinCopy,
@@ -132,6 +142,22 @@ describe("mode tutorials", () => {
     }
   });
 
+  it("explains that short-term amnesia also forgets the standing topic", () => {
+    const expectedCopy = {
+      chat: /does not retain the broader topic unless your current message states it/u,
+      zen: /does not retain the broader topic unless your current message states it/u,
+      coffee: /does not retain the table topic unless that message states it/u,
+      botcast: /does not retain the episode topic unless that message states it/u,
+    } as const;
+
+    for (const [mode, pattern] of Object.entries(expectedCopy)) {
+      const copy = MODE_TUTORIALS[mode as keyof typeof expectedCopy].steps
+        .map((step) => step.body)
+        .join(" ");
+      assert.match(copy, pattern);
+    }
+  });
+
   it("presents the production applet as Signal", () => {
     assert.equal(MODE_TUTORIALS.botcast.title, "Signal producer walkthrough");
     const signalCopy = MODE_TUTORIALS.botcast.steps
@@ -148,6 +174,7 @@ describe("mode tutorials", () => {
       /After several substantive exchanges[^.]*host who genuinely refuses to continue[^.]*Host ended the show/u,
     );
     assert.match(signalCopy, /short, locally synthesized closing card/u);
+    assert.match(signalCopy, /Reviews appear at least four hours after the broadcast/u);
     assert.equal(
       MODE_TUTORIALS.botcast.steps[1]?.heading,
       "Shape the show’s identity",
@@ -241,12 +268,12 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[3]?.body ?? "",
-      /host-persona-led Signal Synth ident/u,
+      /host-persona-led Signal Synth identity/u,
     );
     assert.match(MODE_TUTORIALS.botcast.steps[3]?.body ?? "", /Play ident/u);
     assert.match(
       MODE_TUTORIALS.botcast.steps[3]?.body ?? "",
-      /six-second ident plus a studio-specific, non-musical room-and-Foley backing loop/u,
+      /eight-second host-specific ident, its four-second outdent/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[3]?.body ?? "",
@@ -312,11 +339,19 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
+      /choose only the guest and press Begin episode/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
       /no narrated action text is shown/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
-      /guest carries the first audible opening and the spoken closing/u,
+      /one opening ellipsis, then the bot guest carries a self-directed solo broadcast/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
+      /calls the original an impostor once, then inhabits that persona without repeating the claim/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
@@ -425,6 +460,10 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
+      /Film grain controls the full composited screen[\s\S]*preserved in live playback and replay[\s\S]*zero for a clean digital image/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
       /Host and Guest voice sliders to balance the cast/u,
     );
     assert.match(
@@ -446,6 +485,10 @@ describe("mode tutorials", () => {
     assert.match(
       MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
       /sharpen your editable premise inspiration/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
+      /Refresh premise treats the prose in that box as inspiration/u,
     );
     assert.doesNotMatch(
       MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
@@ -573,7 +616,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
-      /left rail while on air makes the same graceful producer close/u,
+      /show library and Create show controls hide while Signal is on air[\s\S]*return automatically after the broadcast/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
@@ -597,7 +640,11 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
-      /large bottom cue dock/u,
+      /on-air soundboard for applause, laughter, a gasp, or a rimshot/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      /saved at its live timing, and returns in replay/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[8]?.body ?? "",
@@ -743,7 +790,7 @@ describe("mode tutorials", () => {
 
     assert.deepEqual(chooseRelationship, {
       heading: "Choose a relationship",
-      body: "Choose PRISM or a persona to enter that relationship’s Home. Ready Powers stay active with that persona here and across PRISM; a muted persona can still act, but only answers with ... and never speaks aloud, while a Copycat persona may originate one opening if nobody has addressed them yet, then repeats the latest addressed message exactly. A short-term-amnesia persona understands only your current message, treats it as fresh first contact, never knows prior turns or their own earlier replies, and responds directly instead of defaulting to the same introduction. An Obsessed persona treats you as the star of each reply with fresh, intense admiration, while your agency, privacy, and safety boundaries still win. A radiant-joy persona makes that emotional warmth palpable without tracking or rewriting your mood. A sad-grouchy persona makes her draining presence equally palpable without changing your state; only bots that directly talk to her lose mood or motivation. Physical-size Powers render a persona slightly larger or smaller without changing the room layout. Microscopic stays fully unseen even while speaking, while Invisible stays half-translucent. Loud and Quiet Powers apply a small fixed voice-volume and text-size shift without changing physical size or visibility; Quiet can go unheard on half its turns and lose a little mood. A hard bare-minimum or brief Power is engine-bounded even if the model tries to elaborate. Back or Escape returns you to the wider Library or saved group grid exactly where you left it. Inviting a guest keeps you in the current Home.",
+      body: "Choose PRISM or a persona to enter that relationship’s Home. Ready Powers stay active with that persona here and across PRISM; a muted persona can still act, but only answers with ... and never speaks aloud, while a Copycat persona may originate one opening if nobody has addressed them yet, then repeats the latest addressed message exactly. A short-term-amnesia persona understands only your current message, treats it as fresh first contact, never knows prior turns or their own earlier replies, does not retain the broader topic unless your current message states it, and responds directly instead of defaulting to the same introduction. An Obsessed persona treats you as the star of each reply with fresh, intense admiration, while your agency, privacy, and safety boundaries still win. A radiant-joy persona makes that emotional warmth palpable without tracking or rewriting your mood. A sad-grouchy persona makes her draining presence equally palpable without changing your state; only bots that directly talk to her lose mood or motivation. Physical-size Powers render a persona slightly larger or smaller without changing the room layout. Microscopic stays fully unseen even while speaking, while Invisible stays half-translucent. Loud and Quiet Powers apply a small fixed voice-volume and text-size shift without changing physical size or visibility; Quiet can go unheard on half its turns and lose a little mood. A hard bare-minimum or brief Power is engine-bounded even if the model tries to elaborate. Back or Escape returns you to the wider Library or saved group grid exactly where you left it. Inviting a guest keeps you in the current Home.",
       clickLabel: "a PRISM or persona tile",
       targetSelector: '[data-tutorial-target="chat-bot-picker"]',
     });
@@ -950,14 +997,22 @@ describe("mode tutorials", () => {
     assert.match(signal?.body ?? "", /cup-return sounds stay synchronized/);
   });
 
-  it("teaches sparse provider vocal Foley in Coffee and Signal", () => {
+  it("separates local ambient vocalizations from provider reactions", () => {
     assert.match(
       MODE_TUTORIALS.coffee.steps.map((step) => step.body).join(" "),
-      /throat-clear, light cough, sigh, exhale, or chuckle/u,
+      /prerecorded throat-clear, swallow, lip smack, sigh, or inhale/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps.map((step) => step.body).join(" "),
-      /stays out of the transcript and is saved for replay/u,
+      /speaking style or voice engine/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps.map((step) => step.body).join(" "),
+      /local cues animate the listener’s mouth and use no synthesis/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps.map((step) => step.body).join(" "),
+      /saved context-aware vocal reactions/u,
     );
   });
 

@@ -116,6 +116,23 @@ export function readGeneratedImageBytes(localRelPath: string): Buffer {
   return readFileSync(absolute);
 }
 
+/** Existing bytes owned by one generated PNG, including its thumbnail sidecar. */
+export function generatedImageStorageSizeBytes(localRelPath: string): number {
+  let total = 0;
+  for (const relatedPath of [
+    localRelPath.trim(),
+    thumbWebpRelativePathFromPngRelativePath(localRelPath),
+  ]) {
+    try {
+      const absolute = resolveAbsoluteUnderDataRoot(relatedPath);
+      if (existsSync(absolute)) total += statSync(absolute).size;
+    } catch {
+      // Invalid, missing, or unreadable paths contribute no reclaimable bytes.
+    }
+  }
+  return total;
+}
+
 function writeJsonAtomically(
   absolutePath: string,
   value: unknown,
@@ -408,9 +425,20 @@ export function listGeneratedImageRecoveryBatchesForUser(
 export function purgeGeneratedImageRecoveryBatch(
   batch: GeneratedImageRecoveryBatch,
 ): void {
+  purgeGeneratedImageQuarantine(batch.journal.userId, batch.quarantine);
+}
+
+/** Permanently removes one validated owner-scoped quarantine directory. */
+export function purgeGeneratedImageQuarantine(
+  userId: string,
+  quarantine: GeneratedImageQuarantineResult,
+): void {
+  if (!/^[a-zA-Z0-9_-]+$/.test(userId)) {
+    throw new Error("Invalid asset cleanup recovery owner.");
+  }
   const expected =
-    `${ASSET_CLEANUP_TRASH_SUBDIR}/${batch.journal.userId}/${batch.journal.recoveryId}`;
-  if (batch.quarantine.recoveryRelativePath !== expected) {
+    `${ASSET_CLEANUP_TRASH_SUBDIR}/${userId}/${quarantine.recoveryId}`;
+  if (quarantine.recoveryRelativePath !== expected) {
     throw new Error("Invalid asset cleanup recovery batch path.");
   }
   const absolute = resolveAbsoluteUnderDataRoot(expected);

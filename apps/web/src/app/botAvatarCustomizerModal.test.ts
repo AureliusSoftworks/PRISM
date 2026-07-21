@@ -98,6 +98,10 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.match(pageSource, /faceMouthCharacter: string \| null/);
   assert.match(pageSource, /faceMouthAnimation: BotFaceGlyphAnimation/);
   assert.match(pageSource, /faceMouthCoffeePucker: boolean/);
+  assert.match(
+    pageSource,
+    /useState<boolean>\(DEFAULT_BOT_FACE_STYLE\.mouthCoffeePucker\)/,
+  );
   assert.match(pageSource, /faceEyeScale: number/);
   assert.match(pageSource, /faceEyeOffsetX: number/);
   assert.match(pageSource, /faceEyeOffsetY: number/);
@@ -308,7 +312,11 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   );
   assert.match(pageSource, /normalizeBotFaceMouthRotationDeg/);
   assert.match(pageSource, /normalizeBotFaceEyeRotationDeg/);
-  assert.match(pageSource, /label="Stroke weight"/);
+  assert.equal(
+    pageSource.match(/label="Stroke weight"/gu)?.length,
+    2,
+    "Eyes and Mouth should each expose the shared stroke-weight slider",
+  );
   assert.match(cssRuleBody(".botAvatarCoordinatePad"), /cursor:\s*grab;/);
   assert.match(cssSource, /\.botAvatarCoordinatePad::before/);
   assert.match(cssRuleBody(".botAvatarCoordinateThumb"), /width:\s*20px;/);
@@ -356,12 +364,11 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.match(faceTabSource, /<legend>Thinking animation<\/legend>/);
   assert.match(faceTabSource, /aria-label="Custom thinking animation frames"/);
   assert.match(faceTabSource, /\sinline\s/);
-  assert.ok(
-    faceTabSource.indexOf('label="Stroke weight"') <
-      faceTabSource.indexOf("<ColorGlyphPicker"),
-    "Inline color and glyph controls should sit below the stroke-weight slider",
-  );
+  assert.doesNotMatch(faceTabSource, /label="Stroke weight"/);
   assert.match(eyesTabSource, /ariaLabel="Custom eye glyph"/);
+  assert.match(eyesTabSource, /label="Stroke weight"/);
+  assert.match(eyesTabSource, /value=\{faceFontWeight\}/);
+  assert.match(eyesTabSource, /onChange=\{onWeightChange\}/);
   assert.match(eyesTabSource, /<BotAvatarCustomGlyphCapture/);
   assert.match(eyesTabSource, /handleEyeCharacterChange/);
   assert.match(eyesTabSource, /selected=\{faceEyesFont === fontId\}/);
@@ -401,6 +408,9 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
     "Custom glyph capture should sit left of the eye rotation wheel",
   );
   assert.match(mouthTabSource, /ariaLabel="Custom mouth glyph"/);
+  assert.match(mouthTabSource, /label="Stroke weight"/);
+  assert.match(mouthTabSource, /value=\{faceFontWeight\}/);
+  assert.match(mouthTabSource, /onChange=\{onWeightChange\}/);
   assert.match(mouthTabSource, /<BotAvatarCustomGlyphCapture/);
   assert.match(mouthTabSource, /handleMouthCharacterChange/);
   assert.match(mouthTabSource, /selected=\{faceMouthFont === fontId\}/);
@@ -1189,10 +1199,10 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
     pageSource,
     /\? "Face"\s*: activeTab === "eyes"\s*\? "Eyes"\s*: "Mouth"/,
   );
-  assert.match(pageSource, /Presets and stroke weight/);
-  assert.match(pageSource, /Name, badge, presets, and stroke/);
-  assert.match(pageSource, /Built-in style/);
-  assert.match(pageSource, /Custom glyph/);
+  assert.match(pageSource, /Presets and thinking/);
+  assert.match(pageSource, /Name, badge, presets, and thinking/);
+  assert.match(pageSource, /Built-in style and stroke weight/);
+  assert.match(pageSource, /Custom glyph and stroke weight/);
   assert.doesNotMatch(pageSource, /Blink, mouth, and thinking animation/);
   assert.match(pageSource, /type BotAvatarCustomizerTab =/);
   assert.match(pageSource, /\| "profile"/);

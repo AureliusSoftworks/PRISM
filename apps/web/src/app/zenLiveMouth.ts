@@ -1,4 +1,6 @@
 export const ZEN_LIVE_MOUTH_PHASE_MS = 120;
+/** Bottish notes can arrive much faster than a readable CRT mouth pose. */
+export const BOTTISH_MOUTH_PHASE_MS = 240;
 
 export type ZenLiveBotMouthShape =
   | "open-wide"
@@ -699,6 +701,43 @@ export function crtSpeechMouthShapeAtAlignedElapsedMs({
   return crtSpeechMouthShapeAtTextCursor({
     text: alignment.characters.join(""),
     cursorIndex,
+  });
+}
+
+/**
+ * Keeps Bottish on the audio clock without changing pose on every synthesized
+ * note. Provider alignment still closes the mouth for real phrase gaps.
+ */
+export function bottishMouthShapeAtAlignedElapsedMs({
+  text,
+  elapsedMs,
+  durationMs,
+  alignment,
+  phaseMs = BOTTISH_MOUTH_PHASE_MS,
+}: {
+  text: string;
+  elapsedMs: number;
+  durationMs: number;
+  alignment?: {
+    characters: readonly string[];
+    characterStartTimesSeconds: readonly number[];
+    characterEndTimesSeconds: readonly number[];
+  } | null;
+  phaseMs?: number;
+}): ZenLiveBotMouthShape {
+  const activityShape = crtSpeechMouthShapeAtAlignedElapsedMs({
+    text,
+    elapsedMs,
+    durationMs,
+    alignment,
+  });
+  if (activityShape === "closed") return "closed";
+  return zenLiveBotMouthShapeFromSpeechPhase({
+    speechSeedText: text,
+    phaseIndex: Math.floor(
+      Math.max(0, Number.isFinite(elapsedMs) ? elapsedMs : 0) /
+        Math.max(1, phaseMs),
+    ),
   });
 }
 

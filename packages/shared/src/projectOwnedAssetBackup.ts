@@ -12,6 +12,7 @@ export type SignalProjectOwnedAssetSlotV1 =
   | "dark-studio"
   | "logo"
   | "intro-audio"
+  | "outdent-audio"
   | "atmosphere-audio";
 
 export interface SignalProjectImageRestoreMetadataV1 {

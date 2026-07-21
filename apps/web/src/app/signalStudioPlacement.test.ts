@@ -34,11 +34,11 @@ describe("Signal studio placement parity", () => {
   it("stages voices subtly from their saved seats", () => {
     assert.equal(
       signalStudioVoicePan(BOTCAST_DEFAULT_STUDIO_LAYOUT, "host"),
-      -0.124,
+      -0.142,
     );
     assert.equal(
       signalStudioVoicePan(BOTCAST_DEFAULT_STUDIO_LAYOUT, "guest"),
-      0.124,
+      0.142,
     );
     assert.equal(
       signalStudioVoicePan(

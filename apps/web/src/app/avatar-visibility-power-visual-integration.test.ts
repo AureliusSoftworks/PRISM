@@ -35,7 +35,7 @@ describe("avatar visibility Power visual contract", () => {
   it("uses Coffee's frozen visibility state without hiding roster previews", () => {
     assert.match(
       pageSource,
-      /const seatAvatarVisibilityMode\s*=\s*coffeePowerPlan[\s\S]{0,220}botPowerAvatarVisibilityModeFromEffectsV1\([\s\S]{0,140}coffeePowerPlan\.bots\[bot\.id\]\?\.effects/u,
+      /const seatObserverProjection[\s\S]{0,700}const seatAvatarVisibilityMode[\s\S]{0,220}seatObserverProjection\?\.visibility[\s\S]{0,260}botPowerAvatarVisibilityModeFromEffectsV1/u,
     );
     assert.match(
       pageCss,
@@ -47,10 +47,10 @@ describe("avatar visibility Power visual contract", () => {
     );
   });
 
-  it("freezes Signal visibility in the episode snapshot and never reveals hidden avatars", () => {
+  it("freezes Signal visibility and applies its live or replay observer projection", () => {
     assert.match(
       signalSource,
-      /const roleAvatarVisibilityMode[\s\S]{0,320}botcastSnapshotPowersForRoleV1\([\s\S]{0,180}snapshot !== null[\s\S]{0,120}botPowerAvatarVisibilityModeV1\(snapshot\)/u,
+      /const roleAvatarVisibilityMode[\s\S]{0,220}observerParticipants\?\.\[role\]\.visibility[\s\S]{0,260}botcastSnapshotPowersForRoleV1\([\s\S]{0,180}snapshot !== null[\s\S]{0,120}botPowerAvatarVisibilityModeV1\(snapshot\)/u,
     );
     assert.match(
       signalSource,
@@ -64,6 +64,12 @@ describe("avatar visibility Power visual contract", () => {
       signalCss,
       /\.avatarRig\[data-power-avatar-visibility="translucent"\] \{ opacity: \.5; \}/u,
     );
+  });
+
+  it("labels speaking-only, hidden, and translucent states distinctly in Avatar Studio", () => {
+    assert.match(pageSource, /Fully hidden, including while speaking/u);
+    assert.match(pageSource, /Half-translucent spectral presence/u);
+    assert.match(pageSource, /Hidden while idle; appears while speaking/u);
   });
 
   it("adapts hidden, translucent, and speaking-only states to Story", () => {

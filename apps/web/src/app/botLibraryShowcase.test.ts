@@ -203,6 +203,17 @@ describe("selected bot library showcase", () => {
     );
   });
 
+  it("paces Bottish from audio progress instead of the rapid Babble timer", () => {
+    assert.match(
+      pageSource,
+      /botHubVoicePreview\.mode === "bottish"[\s\S]{0,180}return;/,
+    );
+    assert.match(
+      pageSource,
+      /mode === "bottish"[\s\S]{0,500}bottishMouthShapeAtAlignedElapsedMs\(\{/,
+    );
+  });
+
   it("rests the English preview mouth in provider-timed phrase gaps", () => {
     const previewHandlerSource = pageSource.slice(
       pageSource.indexOf("async function playBotHubVoicePreview"),

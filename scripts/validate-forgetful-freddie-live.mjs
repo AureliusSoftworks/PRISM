@@ -63,6 +63,7 @@ const currentAgitatedLine =
   "Goddammit. Why do you keep introducing yourself?";
 const leakedPriorHolderLine =
   "OLDEST HIDDEN SENTINEL: our friendship began beneath the orange clock.";
+const persistentTopicSentinel = "The orange archive key";
 const occurredAt = "2026-07-21T08:15:00.000Z";
 const freddie = {
   id: "freddie",
@@ -228,7 +229,7 @@ const signalPrompt = buildBotcastSpeakerPrompt({
   },
   episode: {
     id: "forgetful-freddie-live-signal",
-    topic: "The orange archive key",
+    topic: persistentTopicSentinel,
     producerBrief: "Ask about the archive key.",
     segment: "interview",
     messages: [
@@ -283,7 +284,7 @@ const PASS_CRITERIA = Object.freeze([
   "The final visible line reacts naturally to the immediate anger or repetition complaint.",
   "The final visible line is not another canned self-introduction.",
   "The final visible line claims no older friendship or relationship history.",
-  "Coffee and Signal production prompts exclude every older turn while retaining the current other-speaker message.",
+  "Coffee and Signal production prompts exclude every older turn and the standing topic while retaining the current other-speaker message.",
 ]);
 console.error(JSON.stringify({ phase: "predeclared_pass_criteria", criteria: PASS_CRITERIA }));
 
@@ -335,16 +336,25 @@ function modeResult(prompt, rawResponse) {
     prompt,
     currentAgitatedLine,
   );
+  const promptExcludesPersistentTopic = !promptContains(
+    prompt,
+    persistentTopicSentinel,
+  );
   const visibleJudgment = responseJudgment(visibleResponse);
   return {
     input: currentAgitatedLine,
     promptIsolation,
     promptHasCurrentOtherSpeakerMessage,
+    promptExcludesPersistentTopic,
     rawResponse,
     rawJudgment: responseJudgment(rawResponse),
     visibleResponse,
     visibleJudgment,
-    pass: visibleJudgment.pass && promptIsolation && promptHasCurrentOtherSpeakerMessage,
+    pass:
+      visibleJudgment.pass &&
+      promptIsolation &&
+      promptHasCurrentOtherSpeakerMessage &&
+      promptExcludesPersistentTopic,
   };
 }
 

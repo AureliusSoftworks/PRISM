@@ -4,6 +4,7 @@ import { useEffect, useRef, type RefObject } from "react";
 import {
   attachCoffeeCupFoley,
   startSessionAtmosphere,
+  type SessionAmbientBotVocalizationCue,
   type SessionAmbientFoleyProfile,
   type SessionAtmosphereBackgroundTone,
   type SessionAtmosphereController,
@@ -23,7 +24,13 @@ export interface SessionAtmosphereLayerProps {
   allowMixBoost?: boolean;
   ambientFoley?: boolean;
   deferFoley?: boolean;
+  deferBotVocalization?: boolean;
   ambientFoleyProfile?: SessionAmbientFoleyProfile;
+  ambientBotVocalizations?: boolean;
+  ambientBotVocalizationProfile?: SessionAmbientFoleyProfile;
+  onAmbientBotVocalization?: (
+    cue: SessionAmbientBotVocalizationCue,
+  ) => boolean;
   coffeeCupRootRef?: RefObject<HTMLElement | null>;
 }
 
@@ -39,16 +46,28 @@ export function SessionAtmosphereLayer({
   allowMixBoost = false,
   ambientFoley = true,
   deferFoley = false,
+  deferBotVocalization = deferFoley,
   ambientFoleyProfile,
+  ambientBotVocalizations = false,
+  ambientBotVocalizationProfile,
+  onAmbientBotVocalization,
   coffeeCupRootRef,
 }: SessionAtmosphereLayerProps): null {
   const deferFoleyRef = useRef(deferFoley);
+  const deferBotVocalizationRef = useRef(deferBotVocalization);
   const controllerRef = useRef<SessionAtmosphereController | null>(null);
   const volumeRef = useRef(volume);
   const mixRef = useRef(mix);
+  const ambientBotVocalizationRef = useRef(onAmbientBotVocalization);
   useEffect(() => {
     deferFoleyRef.current = deferFoley;
   }, [deferFoley]);
+  useEffect(() => {
+    deferBotVocalizationRef.current = deferBotVocalization;
+  }, [deferBotVocalization]);
+  useEffect(() => {
+    ambientBotVocalizationRef.current = onAmbientBotVocalization;
+  }, [onAmbientBotVocalization]);
   useEffect(() => {
     volumeRef.current = volume;
     mixRef.current = mix;
@@ -68,7 +87,13 @@ export function SessionAtmosphereLayer({
       allowMixBoost,
       ambientFoley,
       shouldDeferFoley: () => deferFoleyRef.current,
+      shouldDeferBotVocalization: () =>
+        deferBotVocalizationRef.current,
       ambientFoleyProfile,
+      ambientBotVocalizations,
+      ambientBotVocalizationProfile,
+      onAmbientBotVocalization: (cue) =>
+        ambientBotVocalizationRef.current?.(cue) === true,
     });
     controllerRef.current = controller;
     const detachCupFoley = coffeeCupRootRef?.current
@@ -84,6 +109,8 @@ export function SessionAtmosphereLayer({
     allowMixBoost,
     ambientFoley,
     ambientFoleyProfile,
+    ambientBotVocalizations,
+    ambientBotVocalizationProfile,
     backgroundTone,
     backgroundUrl,
     coffeeCupRootRef,

@@ -17,6 +17,8 @@ export const COFFEE_SEAT_SIP_PLATE_GLYPH = {
 export const COFFEE_SEAT_SIP_FACE_ACTIVE_PROGRESS = 0.68;
 /** Hold each Coffee speaking mouth pose across a few revealed characters. */
 export const COFFEE_SEAT_MOUTH_CHARACTERS_PER_PHASE = 3;
+/** Bottish typewriter fallback holds poses closer to its audible syllables. */
+export const COFFEE_SEAT_BOTTISH_MOUTH_CHARACTERS_PER_PHASE = 6;
 const COFFEE_SEAT_SIP_MOUTH_OFFSET_EM = 0.48;
 const COFFEE_SEAT_CENTER_SIP_MOUTH_OFFSET_EM = 0.36;
 const COFFEE_SEAT_SIP_MOUTH_DROP_EM = 0.17;
@@ -52,6 +54,7 @@ export function coffeeSeatMouthShapeFromVisibleLength(
   visibleLength: number,
   speechSeedText: string,
   phonemeAware = false,
+  charactersPerPhase = COFFEE_SEAT_MOUTH_CHARACTERS_PER_PHASE,
 ): ZenLiveBotMouthShape {
   if (phonemeAware) {
     return crtSpeechMouthShapeFromVisibleTextProgress({
@@ -63,7 +66,7 @@ export function coffeeSeatMouthShapeFromVisibleLength(
   return zenLiveBotMouthShapeFromVisibleTextProgress({
     text: speechSeedText,
     visibleLength,
-    charactersPerPhase: COFFEE_SEAT_MOUTH_CHARACTERS_PER_PHASE,
+    charactersPerPhase,
   });
 }
 

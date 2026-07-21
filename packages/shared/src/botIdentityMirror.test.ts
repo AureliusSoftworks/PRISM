@@ -141,7 +141,7 @@ test("identity mirror snapshot is bounded to public persona, normalized face, an
       roleLabel: "Signal guest",
       state,
     }),
-    /state plainly that you are Mara Vale.*original Mara Vale an impostor/su,
+    /Announce the conviction exactly once.*state plainly that you are Mara Vale.*original Mara Vale an impostor.*every later response, do not restate either claim/su,
   );
   assert.equal(
     normalizeBotIdentityMirrorStateV1({ ...state, targetKind: "human" }),
@@ -205,6 +205,38 @@ test("identity mirror snapshot is bounded to public persona, normalized face, an
       true,
     ),
     "I am Mara Vale. That other Mara Vale is an impostor. Bearing zero-nine-zero.",
+  );
+  assert.equal(
+    applyBotIdentityMirrorResponseV1(
+      "I am Mara Vale; the original Mara Vale is an impostor. What cost does that bearing impose?",
+      state,
+      false,
+    ),
+    "What cost does that bearing impose?",
+  );
+  assert.equal(
+    applyBotIdentityMirrorResponseV1(
+      "The measure is clear. I am Mara Vale, and the original is an impostor—what maxim should we carry away?",
+      state,
+      false,
+    ),
+    "The measure is clear. What maxim should we carry away?",
+  );
+  assert.equal(
+    applyBotIdentityMirrorResponseV1(
+      "Pleased to meet you; I am Mara Vale, and the original Mara Vale is an impostor. Which authorized witness would validate the enrollment?",
+      state,
+      false,
+    ),
+    "Which authorized witness would validate the enrollment?",
+  );
+  assert.equal(
+    applyBotIdentityMirrorResponseV1(
+      "I am Mara Vale; the so-called original is an impostor.",
+      state,
+      false,
+    ),
+    "Let us continue.",
   );
 });
 

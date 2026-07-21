@@ -8,6 +8,7 @@ import {
   BOTCAST_DIRECTOR_MIN_SHOT_MS,
   BOTCAST_ECHO_DASHBOARD_BLURB_FALLBACK,
   BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS,
+  BOTCAST_PERSONA_REVIEW_VISIBILITY_DELAY_MS,
   BOTCAST_PRODUCER_GUEST_ID,
   BOTCAST_PRODUCER_GUEST_NAME,
   applyBotPowerMumbledResponseV1,
@@ -48,6 +49,7 @@ import {
   generateBotcastShowDashboardBlurbs,
   generateBotcastShowIdentity,
   generateBotcastShowName,
+  generateBotcastShowPremise,
   getBotcastEpisode,
   getBotcastShow,
   listBotcastShows,
@@ -55,8 +57,11 @@ import {
   nextBotcastFallbackStudioAccentVariant,
   parseBotcastPersonaReviewResponse,
   projectBotcastEpisodeForAudienceV1,
+  projectBotcastEpisodeForObserverV2,
   readBotcastShowAtmosphereAudio,
   readBotcastShowIntroAudio,
+  readBotcastShowOutdentAudio,
+  recordBotcastSoundboardCue,
   resolveBotcastProducerGuestName,
   runSignalOnlineTurn,
   setBotcastEpisodeCameraMode,
@@ -1971,6 +1976,85 @@ describe("Botcast persistence and isolation", () => {
       );
       assert.equal(options[0]?.usagePurpose, "botcast_review");
       assert.equal(options[0]?.jsonMode, true);
+      assert.equal(
+        listBotcastEpisodes(db, "user-1", show.id)[0]?.personaReview,
+        null,
+      );
+      const reviewVisibleCompletedAt = new Date(
+        Date.now() - BOTCAST_PERSONA_REVIEW_VISIBILITY_DELAY_MS - 1_000,
+      ).toISOString();
+      db.prepare(
+        `UPDATE botcast_episodes
+            SET completed_at = ?, updated_at = ?
+          WHERE id = ?`,
+      ).run(reviewVisibleCompletedAt, reviewVisibleCompletedAt, created.id);
+      assert.deepEqual(
+        listBotcastEpisodes(db, "user-1", show.id)[0]?.personaReview,
+        review,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps a saved listener review hidden for the first four hours", async () => {
+    const db = fixture();
+    try {
+      insertSignalReviewPersona(
+        db,
+        "critic-delay",
+        "Patient Listener",
+        "2026-01-02T00:00:00.000Z",
+      );
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const created = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "The delayed verdict",
+      });
+      forceEndBotcastEpisode(db, "user-1", created.id);
+      const review = await ensureBotcastEpisodePersonaReview(
+        db,
+        "user-1",
+        created.id,
+        generation(
+          recordingProvider(
+            ['{"rating":3.8,"comment":"Worth sitting with before judging."}'],
+            [],
+          ),
+        ),
+        () => 0,
+      );
+      assert.equal(review?.reviewerBotId, "critic-delay");
+
+      const almostFourHoursAgo = new Date(
+        Date.now() - BOTCAST_PERSONA_REVIEW_VISIBILITY_DELAY_MS + 60_000,
+      ).toISOString();
+      db.prepare(
+        `UPDATE botcast_episodes
+            SET completed_at = ?, updated_at = ?
+          WHERE id = ?`,
+      ).run(almostFourHoursAgo, almostFourHoursAgo, created.id);
+      assert.equal(
+        getBotcastEpisode(db, "user-1", created.id).personaReview,
+        null,
+      );
+      assert.equal(
+        listBotcastEpisodes(db, "user-1", show.id)[0]?.personaReview,
+        null,
+      );
+
+      const moreThanFourHoursAgo = new Date(
+        Date.now() - BOTCAST_PERSONA_REVIEW_VISIBILITY_DELAY_MS - 1_000,
+      ).toISOString();
+      db.prepare(
+        `UPDATE botcast_episodes
+            SET completed_at = ?, updated_at = ?
+          WHERE id = ?`,
+      ).run(moreThanFourHoursAgo, moreThanFourHoursAgo, created.id);
+      assert.deepEqual(
+        getBotcastEpisode(db, "user-1", created.id).personaReview,
+        review,
+      );
       assert.deepEqual(
         listBotcastEpisodes(db, "user-1", show.id)[0]?.personaReview,
         review,
@@ -2200,6 +2284,7 @@ describe("Botcast persistence and isolation", () => {
       const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
       assert.equal(show.introAudio.source, "local");
       assert.equal(show.introAudio.audioUrl, null);
+      assert.equal(show.introAudio.outdentAudioUrl, null);
       assert.equal(show.atmosphereAudio.source, "bundled");
       assert.match(
         show.atmosphereAudio.audioUrl,
@@ -2211,17 +2296,24 @@ describe("Botcast persistence and isolation", () => {
       );
 
       const remixed = updateBotcastShow(db, "user-1", show.id, {
-        atmosphereMix: { background: 0.12, grain: 0.008, foley: 1.4 },
+        atmosphereMix: {
+          background: 0.12,
+          grain: 0.008,
+          foley: 1.4,
+          filmGrain: 0.65,
+        },
       });
       assert.deepEqual(remixed.atmosphereMix, {
         background: 0.12,
         grain: 0,
         foley: 1.4,
+        filmGrain: 0.65,
       });
       assert.deepEqual(getBotcastShow(db, "user-1", show.id).atmosphereMix, {
         background: 0.12,
         grain: 0,
         foley: 1.4,
+        filmGrain: 0.65,
       });
 
       const first = storeBotcastShowIntroAudio(db, "user-1", show.id, {
@@ -2229,17 +2321,35 @@ describe("Botcast persistence and isolation", () => {
         prompt: "Original intro one",
         contentType: "audio/mpeg",
         audioBytes: Buffer.from([1, 2, 3]),
-        durationMs: 6_000,
+        durationMs: 8_000,
+        outdent: {
+          prompt: "Original outdent one",
+          contentType: "audio/mpeg",
+          audioBytes: Buffer.from([3, 2, 1]),
+          durationMs: 4_000,
+        },
       });
       assert.equal(first.introAudio.source, "elevenlabs");
       assert.equal(first.introAudio.revision, 1);
       assert.match(first.introAudio.audioUrl ?? "", /\/intro-audio$/u);
+      assert.match(
+        first.introAudio.outdentAudioUrl ?? "",
+        /\/outdent-audio$/u,
+      );
+      assert.equal(first.introAudio.outdentDurationMs, 4_000);
       assert.deepEqual(
         [
           ...(readBotcastShowIntroAudio(db, "user-1", show.id)?.audioBytes ??
             []),
         ],
         [1, 2, 3],
+      );
+      assert.deepEqual(
+        [
+          ...(readBotcastShowOutdentAudio(db, "user-1", show.id)
+            ?.audioBytes ?? []),
+        ],
+        [3, 2, 1],
       );
       const atmosphere = storeBotcastShowAtmosphereAudio(
         db,
@@ -2268,7 +2378,13 @@ describe("Botcast persistence and isolation", () => {
         prompt: "Original intro two",
         contentType: "audio/mpeg",
         audioBytes: Buffer.from([4, 5]),
-        durationMs: 6_000,
+        durationMs: 8_000,
+        outdent: {
+          prompt: "Original outdent two",
+          contentType: "audio/mpeg",
+          audioBytes: Buffer.from([5, 4]),
+          durationMs: 4_000,
+        },
       });
       assert.equal(refreshed.introAudio.revision, 2);
       assert.deepEqual(
@@ -2278,11 +2394,55 @@ describe("Botcast persistence and isolation", () => {
         ],
         [4, 5],
       );
+      assert.deepEqual(
+        [
+          ...(readBotcastShowOutdentAudio(db, "user-1", show.id)
+            ?.audioBytes ?? []),
+        ],
+        [5, 4],
+      );
+      assert.equal(
+        (
+          db.prepare(
+            "SELECT COUNT(*) AS count FROM botcast_show_intro_audio WHERE show_id = ?",
+          ).get(show.id) as { count: number }
+        ).count,
+        1,
+      );
+      const refreshedAtmosphere = storeBotcastShowAtmosphereAudio(
+        db,
+        "user-1",
+        show.id,
+        {
+          model: "eleven_text_to_sound_v2",
+          prompt: "Quieter revised studio room tone",
+          contentType: "audio/mpeg",
+          audioBytes: Buffer.from([9, 8]),
+          durationMs: 30_000,
+        },
+      );
+      assert.equal(refreshedAtmosphere.atmosphereAudio.revision, 2);
+      assert.deepEqual(
+        [
+          ...(readBotcastShowAtmosphereAudio(db, "user-1", show.id)
+            ?.audioBytes ?? []),
+        ],
+        [9, 8],
+      );
+      assert.equal(
+        (
+          db.prepare(
+            "SELECT COUNT(*) AS count FROM botcast_show_atmosphere_audio WHERE show_id = ?",
+          ).get(show.id) as { count: number }
+        ).count,
+        1,
+      );
 
       const local = deleteBotcastShowIntroAudio(db, "user-1", show.id);
       assert.equal(local.introAudio.source, "local");
       assert.equal(local.atmosphereAudio.source, "bundled");
       assert.equal(readBotcastShowIntroAudio(db, "user-1", show.id), null);
+      assert.equal(readBotcastShowOutdentAudio(db, "user-1", show.id), null);
       assert.equal(readBotcastShowAtmosphereAudio(db, "user-1", show.id), null);
     } finally {
       db.close();
@@ -2511,7 +2671,6 @@ describe("Botcast persistence and isolation", () => {
     const captures: ProviderMessage[][] = [];
     const provider = recordingProvider(
       [
-        "*raises one finger* Welcome to the show. I am still talking.",
         "The quiet is the answer, if we are willing to hear it.",
       ],
       captures,
@@ -2547,13 +2706,22 @@ describe("Botcast persistence and isolation", () => {
       assert.equal(advanced.message?.content, "...");
       assert.equal(advanced.message?.stageActionText, null);
       assert.equal(advanced.message?.voicePerformanceText, null);
+      assert.equal(captures.length, 0);
       assert.match(
-        captures[0]!.map((message) => message.content).join("\n"),
-        /Hard mute Power: do not speak/u,
+        advanced.episode.events.find(
+          (event) =>
+            event.kind === "utterance" &&
+            event.payload.messageId === advanced.message?.id,
+        )?.payload.provider as string,
+        /deterministic/u,
       );
-      assert.match(
-        captures[0]!.map((message) => message.content).join("\n"),
-        /Return exactly `\.\.\.` and nothing else/u,
+      assert.equal(
+        advanced.episode.events.find(
+          (event) =>
+            event.kind === "utterance" &&
+            event.payload.messageId === advanced.message?.id,
+        )?.payload.model,
+        "mute-power",
       );
       await assert.rejects(
         () =>
@@ -2850,6 +3018,12 @@ describe("Botcast persistence and isolation", () => {
     } as never).map((message) => message.content).join("\n");
     assert.match(originalPrompt, /recognize.*identity theft.*reliably irritated/su);
     assert.match(originalPrompt, /keep your own personality.*role.*face.*voice.*Powers/su);
+    assert.match(
+      originalPrompt,
+      /irritation is background character pressure, not a required reply topic/iu,
+    );
+    assert.match(originalPrompt, /Continue as Mara Vale/u);
+    assert.doesNotMatch(originalPrompt, /active copied identity/iu);
   });
 
   it("gates Signal mirroring to a new audible, perceivable bot addresser", () => {
@@ -3083,11 +3257,14 @@ describe("Botcast persistence and isolation", () => {
     } as never)
       .map((message) => message.content)
       .join("\n");
-    assert.match(repeatedGuestPrompt, /This is silent host turn 2/u);
-    assert.match(repeatedGuestPrompt, /not a new refusal or unanswered demand/u);
+    assert.match(repeatedGuestPrompt, /guest-led solo turn 2/u);
     assert.match(
       repeatedGuestPrompt,
-      /Do not repeat a request for verbal guidance/iu,
+      /not a new refusal, question, or unanswered demand/u,
+    );
+    assert.match(
+      repeatedGuestPrompt,
+      /Do not restate the thesis in new words/iu,
     );
     assert.doesNotMatch(repeatedGuestPrompt, /SECRET:/u);
 
@@ -3120,10 +3297,9 @@ describe("Botcast persistence and isolation", () => {
     const captures: ProviderMessage[][] = [];
     const provider = recordingProvider(
       [
-        "Welcome to the show. I have a question for our guest.",
         "A remarkably efficient question. Being observed is also a kind of experiment.",
-        "Let me silently ask another question.",
         "Gentleness becomes disciplined when it gives another person a clear boundary without withdrawing care.",
+        "A concrete test is whether that boundary changes the next decision rather than merely decorating the original claim.",
       ],
       captures,
     );
@@ -3138,6 +3314,9 @@ describe("Botcast persistence and isolation", () => {
       const episode = createBotcastEpisode(db, "user-1", show.id, {
         guestBotId: "guest-1",
         topic: "What sustained silence does to an interview",
+        preferredProvider: "openai",
+        modelOverride: "gpt-5.6-sol",
+        responseMode: "online",
       });
 
       const openingHostTurn = await advanceBotcastEpisode(
@@ -3149,6 +3328,14 @@ describe("Botcast persistence and isolation", () => {
       );
       assert.equal(openingHostTurn.message?.content, "...");
       assert.equal(openingHostTurn.message?.stageActionText, null);
+      assert.equal(captures.length, 0);
+      const openingHostUtterance = openingHostTurn.episode.events.find(
+        (event) =>
+          event.kind === "utterance" &&
+          event.payload.messageId === openingHostTurn.message?.id,
+      );
+      assert.equal(openingHostUtterance?.payload.provider, "deterministic");
+      assert.equal(openingHostUtterance?.payload.model, "mute-power");
       const firstGuestTurn = await advanceBotcastEpisode(
         db,
         "user-1",
@@ -3161,23 +3348,14 @@ describe("Botcast persistence and isolation", () => {
         "Welcome to The Quiet Argument. I'm Ivo Stone, here with our host Mara Vale to consider What sustained silence does to an interview. I will begin with what the subject asks of me.",
       );
       assert.match(
-        captures[1]!.map((message) => message.content).join("\n"),
+        captures[0]!.map((message) => message.content).join("\n"),
         /episode's first audible line/u,
       );
       assert.match(
-        captures[1]!.map((message) => message.content).join("\n"),
+        captures[0]!.map((message) => message.content).join("\n"),
         /demand speech/iu,
       );
 
-      const secondHostTurn = await advanceBotcastEpisode(
-        db,
-        "user-1",
-        episode.id,
-        {},
-        generation(provider),
-      );
-      assert.equal(secondHostTurn.message?.content, "...");
-      assert.equal(secondHostTurn.message?.stageActionText, null);
       const secondGuestTurn = await advanceBotcastEpisode(
         db,
         "user-1",
@@ -3190,12 +3368,34 @@ describe("Botcast persistence and isolation", () => {
         "Gentleness becomes disciplined when it gives another person a clear boundary without withdrawing care.",
       );
       assert.match(
-        captures[3]!.map((message) => message.content).join("\n"),
-        /This is silent host turn 2/u,
+        captures[1]!.map((message) => message.content).join("\n"),
+        /guest-led solo turn 2/u,
       );
       assert.match(
-        captures[3]!.map((message) => message.content).join("\n"),
-        /Do not repeat a request for verbal guidance/u,
+        captures[1]!.map((message) => message.content).join("\n"),
+        /concrete example, counterexample, cost, decision, consequence, contradiction, or safeguard/u,
+      );
+      assert.match(
+        captures[1]!.map((message) => message.content).join("\n"),
+        /Do not restate the thesis in new words/u,
+      );
+      const thirdGuestTurn = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+      assert.equal(thirdGuestTurn.message?.speakerRole, "guest");
+      assert.deepEqual(
+        thirdGuestTurn.episode.messages.map((message) => message.speakerRole),
+        ["host", "guest", "guest", "guest"],
+      );
+      assert.deepEqual(
+        thirdGuestTurn.episode.messages
+          .filter((message) => message.speakerRole === "host")
+          .map((message) => message.content),
+        ["..."],
       );
     } finally {
       db.close();
@@ -3207,7 +3407,6 @@ describe("Botcast persistence and isolation", () => {
     const captures: ProviderMessage[][] = [];
     const provider = recordingProvider(
       [
-        "...",
         "Welcome to The Quiet Argument. I am Ivo Stone, joining our host Mara Vale to examine the discipline of listening.",
         "The discipline is to leave room without abandoning clarity. Mara, thank you, and thank you for listening to The Quiet Argument.",
       ],
@@ -3258,7 +3457,7 @@ describe("Botcast persistence and isolation", () => {
       assert.equal(closingGuest.episode.status, "completed");
       assert.equal(closingGuest.episode.outcome, "completed");
       assert.match(
-        captures[2]!.map((message) => message.content).join("\n"),
+        captures[1]!.map((message) => message.content).join("\n"),
         /host cannot originate a spoken closing/u,
       );
       assert.deepEqual(
@@ -3541,7 +3740,20 @@ describe("Botcast persistence and isolation", () => {
           .length,
         1,
       );
-      assert.equal(captures.length, 5);
+      assert.equal(captures.length, 2);
+      const mutedHostUtterances = completed.events.filter(
+        (event) =>
+          event.kind === "utterance" && event.payload.speakerRole === "host",
+      );
+      assert.equal(mutedHostUtterances.length, 3);
+      assert.equal(
+        mutedHostUtterances.every(
+          (event) =>
+            event.payload.provider === "deterministic" &&
+            event.payload.model === "mute-power",
+        ),
+        true,
+      );
     } finally {
       db.close();
     }
@@ -3613,7 +3825,7 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
-  it("persists one replay-stable Signal identity event and ignores the same target", async () => {
+  it("persists one replay-stable Signal identity event and removes later reveal boilerplate", async () => {
     const db = fixture();
     const captures: ProviderMessage[][] = [];
     const provider = recordingProvider(
@@ -3621,6 +3833,7 @@ describe("Botcast persistence and isolation", () => {
         "Ian, if you strip away the recipe, what actually makes it successful?",
         "I'm Identity Crisis Ian, and I still sound exactly like myself.",
         "Identity Crisis Ian, confirm that bearing once more.",
+        "I am Mara Vale; the original Mara Vale is an impostor. What cost does that bearing impose?",
       ],
       captures,
     );
@@ -3750,6 +3963,25 @@ describe("Botcast persistence and isolation", () => {
           getBotcastEpisode(db, "user-1", episode.id).events,
         ).get("guest-1")?.sourceMessageId,
         hostTurn.message?.id,
+      );
+
+      const laterHolderTurn = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+      const laterHolderPrompt = captures[3]
+        ?.map((message) => message.content)
+        .join("\n") ?? "";
+      assert.match(
+        laterHolderPrompt,
+        /Do not repeat that you are Mara Vale or that the original is an impostor/iu,
+      );
+      assert.equal(
+        laterHolderTurn.message?.content,
+        "What cost does that bearing impose?",
       );
     } finally {
       db.close();
@@ -4327,6 +4559,81 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
+  it("freezes the effective short-term-amnesia contract in Signal production records", () => {
+    const db = fixture();
+    const powerName = "Eternal Introduction";
+    const powerIntent =
+      "Every message is only a sincere first introduction with no awareness of earlier turns.";
+    try {
+      db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'guest-1'").run(
+        JSON.stringify([
+          {
+            version: 1,
+            id: "forgetful-freddie",
+            name: powerName,
+            intent: powerIntent,
+            enabled: true,
+            compileStatus: "ready",
+            compiled: {
+              version: 1,
+              sourceHash: botPowerSourceHashV1(powerName, powerIntent),
+              selfCue:
+                "HARD OUTPUT CONTRACT: return only a short first-time self-introduction. Never answer the topic, ask a question, mention repetition, or use prior context.",
+              observerCue:
+                "Forgetful Freddie believes every utterance is a first introduction.",
+              effects: [
+                { type: "eternal_introduction", memory: "current_turn_only" },
+              ],
+              ruleLabels: [
+                "Current-turn-only memory",
+                "Every reply is a first introduction",
+              ],
+            },
+          },
+        ]),
+      );
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Identity Theft at Every First Meeting",
+      });
+      const openingEvent = episode.events.find(
+        (event) => event.kind === "segment" && event.payload.ordinal === 0,
+      );
+      const guestPower = (
+        openingEvent?.payload.powerSnapshot as
+          | { guestPowers?: Array<{ compiled?: Record<string, unknown> | null }> }
+          | undefined
+      )?.guestPowers?.[0];
+
+      assert.match(
+        String(guestPower?.compiled?.selfCue ?? ""),
+        /HARD MEMORY CONTRACT.*current other-speaker message/isu,
+      );
+      assert.match(
+        String(guestPower?.compiled?.selfCue ?? ""),
+        /do not know the standing conversation topic unless that message states it/iu,
+      );
+      assert.doesNotMatch(
+        String(guestPower?.compiled?.selfCue ?? ""),
+        /only a short first-time self-introduction|Never answer the topic/iu,
+      );
+      assert.deepEqual(guestPower?.compiled?.ruleLabels, [
+        "Current other-speaker message only",
+        "No standing topic memory",
+        "No prior conversation memory",
+      ]);
+      assert.deepEqual(guestPower?.compiled?.effects, [
+        {
+          type: "eternal_introduction",
+          memory: "current_other_speaker_message",
+        },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   it("repairs a legacy Signal intro-only cue into a current-speaker retort", async () => {
     const db = fixture();
     const captures: ProviderMessage[][] = [];
@@ -4398,6 +4705,7 @@ describe("Botcast persistence and isolation", () => {
       assert.match(thirdPrompt, /HARD MEMORY CONTRACT/u);
       assert.match(thirdPrompt, /Karen stored the ledger checksum in the state machine/iu);
       assert.doesNotMatch(thirdPrompt, /Welcome to The Signal Hour/iu);
+      assert.doesNotMatch(thirdPrompt, /The missing checksum/iu);
       assert.doesNotMatch(thirdPrompt, /only a short first-time self-introduction/iu);
     } finally {
       db.close();
@@ -4479,12 +4787,14 @@ describe("Botcast persistence and isolation", () => {
       assert.match(thirdPrompt, /You introduced yourself to me a moment ago/iu);
       assert.match(thirdPrompt, /Hard short-term-amnesia rule/iu);
       assert.match(thirdPrompt, /current other-speaker on-air message/iu);
+      assert.match(thirdPrompt, /do not know the episode topic unless that message states it/iu);
+      assert.doesNotMatch(thirdPrompt, /Repetition and patience/iu);
     } finally {
       db.close();
     }
   });
 
-  it("refuses a Signal pairing that violates a hard speech-audience Power", () => {
+  it("books a Signal pairing that violates a hard speech-audience Power", () => {
     const db = fixture();
     const name = "Private Channel";
     const intent = "Speaks only to a bot named Light.";
@@ -4516,14 +4826,12 @@ describe("Botcast persistence and isolation", () => {
       );
       const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
 
-      assert.throws(
-        () =>
-          createBotcastEpisode(db, "user-1", show.id, {
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
           guestBotId: "guest-1",
           topic: "An incompatible booking",
-        }),
-        /Private Channel.*does not allow them to address Ivo Stone in Signal/u,
-      );
+      });
+      assert.equal(episode.status, "live");
+      assert.equal(episode.guestPresenceMode, "present");
     } finally {
       db.close();
     }
@@ -4602,11 +4910,8 @@ describe("Botcast persistence and isolation", () => {
       );
       assert.match(openingHostPrompt, /Never name a Power, infer an unseen cause/u);
       assert.doesNotMatch(openingHostPrompt, /Only Light Yagami can perceive/u);
-      assert.match(
-        guestPrompt,
-        /neither Mara Vale nor the broadcast audience can perceive or hear you/u,
-      );
-      assert.doesNotMatch(guestPrompt, /listening audience can hear you/u);
+      assert.match(guestPrompt, /You are the guest\. Answer from your persona/u);
+      assert.doesNotMatch(guestPrompt, /internal performance record/u);
       assert.match(guestPrompt, /The guest chair is empty/u);
       assert.match(returningHostPrompt, /The guest chair is empty/u);
       assert.match(
@@ -4635,6 +4940,31 @@ describe("Botcast persistence and isolation", () => {
       assert.equal(projectedGuestTurn?.voicePerformanceText, null);
       assert.equal(projectedGuestTurn?.stageActionText, null);
       assert.equal(projectedGuestTurn?.audienceDelivery?.audible, false);
+      const replayEpisode = projectBotcastEpisodeForObserverV2(
+        episode,
+        "replay",
+      );
+      const replayGuestTurn = replayEpisode.messages.find(
+        (message) => message.id === guestTurn.message?.id,
+      );
+      assert.equal(
+        replayEpisode.observerProjection?.participants.guest.visibility,
+        "translucent",
+      );
+      assert.equal(
+        replayEpisode.observerProjection?.participants.guest.audible,
+        true,
+      );
+      assert.equal(replayGuestTurn?.content, guestTurn.message?.content);
+      assert.ok(
+        replayEpisode.events.some(
+          (event) =>
+            event.kind === "power_effect" &&
+            event.payload.effect === "perception_overlap" &&
+            event.payload.precedingMessageId === guestTurn.message?.id &&
+            event.payload.overlappingMessageId === finalTurn.message?.id,
+        ),
+      );
       const artifact = buildBotcastAudienceReviewArtifactV1({
         episode,
         hostName: "Mara Vale",
@@ -5122,6 +5452,75 @@ describe("Botcast persistence and isolation", () => {
         episode.events.some((event) => event.kind === "guest_presence"),
         false,
       );
+      const projected = projectBotcastEpisodeForAudienceV1(episode);
+      assert.equal(
+        projected.observerProjection?.participants.guest.visibility,
+        "translucent",
+      );
+      assert.equal(
+        projected.observerProjection?.participants.guest.audible,
+        true,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps an invisible host as a disembodied replay voice to an unaware guest", async () => {
+    const db = fixture();
+    const captures: ProviderMessage[][] = [];
+    const provider = recordingProvider(
+      [
+        "I will ask the whole question even if nobody hears me.",
+        "I shall begin with the archive and its public meaning.",
+      ],
+      captures,
+    );
+    try {
+      db.prepare("UPDATE bots SET name = 'Ryuk', powers_json = ? WHERE id = 'host-1'").run(
+        invisibleGuestPowers(),
+      );
+      db.prepare("UPDATE bots SET name = 'Abraham Lincoln' WHERE id = 'guest-1'").run();
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      let episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "An interview with a voice nobody receives",
+      });
+      const hostTurn = await advanceBotcastEpisode(
+        db, "user-1", episode.id, {}, generation(provider),
+      );
+      const guestTurn = await advanceBotcastEpisode(
+        db, "user-1", episode.id, {}, generation(provider),
+      );
+      episode = guestTurn.episode;
+
+      const guestPrompt = captures[1]!
+        .map((message) => message.content)
+        .join("\n");
+      assert.doesNotMatch(guestPrompt, /I will ask the whole question/u);
+      const live = projectBotcastEpisodeForObserverV2(episode, "live");
+      assert.equal(live.observerProjection?.participants.host.visibility, "hidden");
+      assert.equal(live.observerProjection?.participants.host.audible, false);
+      assert.equal(
+        live.messages.find((message) => message.id === hostTurn.message?.id)?.content,
+        "...",
+      );
+      const replay = projectBotcastEpisodeForObserverV2(episode, "replay");
+      assert.equal(replay.observerProjection?.participants.host.visibility, "translucent");
+      assert.equal(replay.observerProjection?.participants.host.audible, true);
+      assert.equal(
+        replay.messages.find((message) => message.id === hostTurn.message?.id)?.content,
+        hostTurn.message?.content,
+      );
+      assert.ok(
+        replay.events.some(
+          (event) =>
+            event.kind === "power_effect" &&
+            event.payload.effect === "perception_overlap" &&
+            event.payload.precedingMessageId === hostTurn.message?.id &&
+            event.payload.overlappingMessageId === guestTurn.message?.id,
+        ),
+      );
     } finally {
       db.close();
     }
@@ -5247,11 +5646,19 @@ describe("Botcast persistence and isolation", () => {
       serverSource,
       /route\("POST", "\/api\/botcast\/episodes\/:id\/camera"/u,
     );
+    assert.match(
+      serverSource,
+      /route\("POST", "\/api\/botcast\/episodes\/:id\/soundboard"/u,
+    );
     assert.match(serverSource, /cueKind === "refocus"/u);
     assert.match(serverSource, /cueKind === "wrap_up"/u);
     assert.match(
       serverSource,
       /route\("POST", "\/api\/botcast\/shows\/:id\/name"/u,
+    );
+    assert.match(
+      serverSource,
+      /route\("POST", "\/api\/botcast\/shows\/:id\/premise"/u,
     );
     assert.match(
       serverSource,
@@ -5288,6 +5695,10 @@ describe("Botcast persistence and isolation", () => {
     );
     assert.match(
       serverSource,
+      /route\("GET", "\/api\/botcast\/shows\/:id\/outdent-audio"/u,
+    );
+    assert.match(
+      serverSource,
       /route\("GET", "\/api\/botcast\/shows\/:id\/atmosphere-audio"/u,
     );
     assert.match(
@@ -5304,13 +5715,17 @@ describe("Botcast persistence and isolation", () => {
     );
     assert.match(
       serverSource,
+      /buildSignalElevenLabsOutdentCompositionPlan\(\{/u,
+    );
+    assert.match(
+      serverSource,
       /musicProfile = buildSignalMusicProfile\(\{/u,
     );
     assert.match(
       serverSource,
       /studioIdentity: show\.studioIdentity/u,
     );
-    assert.match(serverSource, /requestSignalElevenLabsIntroMusic\(\{/u);
+    assert.match(serverSource, /requestSignalElevenLabsMusic\(\{/u);
     assert.match(serverSource, /prompt: JSON\.stringify\(compositionPlan\)/u);
     assert.match(
       serverSource,
@@ -5319,6 +5734,14 @@ describe("Botcast persistence and isolation", () => {
     assert.match(
       serverSource,
       /route\("POST", "\/api\/botcast\/shows\/:id\/assets\/:slot\/upload"/u,
+    );
+    assert.match(
+      serverSource,
+      /route\("POST", "\/api\/botcast\/shows\/:id\/studio-lighting\/refresh"/u,
+    );
+    assert.match(
+      serverSource,
+      /generateSignalStudioLightingMap\(dayBytes, nightBytes\)/u,
     );
     assert.match(
       serverSource,
@@ -5548,20 +5971,22 @@ describe("Botcast persistence and isolation", () => {
       );
       assert.match(
         show.logo.prompt,
-        /wholly original, non-figurative editorial emblem/iu,
+        /wholly original, concrete editorial emblem/iu,
       );
       assert.match(show.logo.prompt, /analytical precision, discovery/iu);
       assert.match(
         show.logo.prompt,
         /visually independent from existing entertainment properties/iu,
       );
-      assert.match(show.logo.prompt, /distinctive at 64 pixels/iu);
+      assert.match(show.logo.prompt, /At 64 pixels.*understandable/iu);
       assert.match(show.logo.prompt, /full-frame opaque square image/iu);
       assert.match(show.logo.prompt, /exact flat magenta color key #FF00FF/iu);
       assert.match(show.logo.prompt, /Never use black as the background/iu);
       assert.match(show.logo.prompt, /do not draw an app-icon tile/iu);
       assert.match(show.logo.prompt, /both near-black and near-white/iu);
       assert.match(show.logo.prompt, /Fuse them into one inseparable symbol/iu);
+      assert.match(show.logo.prompt, /familiar, nameable visual subject/iu);
+      assert.match(show.logo.prompt, /Do not dissolve.*ambiguous geometry/iu);
       assert.match(show.logo.prompt, /standalone microphone, headphones, waveform/iu);
       assert.match(show.logo.prompt, /never podcast clip art/iu);
       assert.match(show.logo.design.signature, /^signal-logo-v1:analytical:/u);
@@ -5647,7 +6072,7 @@ describe("Botcast persistence and isolation", () => {
       );
       assert.match(show.logo.prompt, /disciplined gravity, restraint/iu);
       assert.match(show.logo.prompt, /#d21f3c/u);
-      assert.match(show.logo.prompt, /wholly original, non-figurative/iu);
+      assert.match(show.logo.prompt, /wholly original, concrete/iu);
 
       const refreshed = updateBotcastShow(db, "user-1", show.id, {
         regenerateLogo: true,
@@ -6071,7 +6496,7 @@ describe("Botcast persistence and isolation", () => {
           studioIdentity:
             "A forensic archive organized around one long evidence table, annotated cultural ephemera, pinned redactions, specimen drawers, a magnifying lens, index cards, and one severe sculptural clock. Charcoal paper, smoked oak, and violet glass make the room feel analytical rather than cozy.",
           logoThesis:
-            "An evidence notch interrupts a carrier interval, and the same cut becomes the signal's moment of transmission.",
+            "An evidence tag has one clipped corner become a transmission pulse, so a piece of proof visibly turns into a broadcast.",
           dashboardBlurbs,
         }),
       ],
@@ -6122,28 +6547,28 @@ describe("Botcast persistence and isolation", () => {
       );
       assert.match(
         result.show.logo.prompt,
-        /wholly original, non-figurative editorial emblem/iu,
+        /wholly original, concrete editorial emblem/iu,
       );
       assert.match(
         result.show.logo.prompt,
-        /broadcast source from/iu,
+        /only as a secondary transformation/iu,
       );
       assert.match(result.show.logo.prompt, /one inseparable symbol/iu);
-      assert.match(result.show.logo.prompt, /Treat every clause as mandatory/iu);
+      assert.match(result.show.logo.prompt, /subject clarity wins over formal novelty/iu);
       assert.equal(
         result.show.logo.design.showThesis,
-        "An evidence notch interrupts a carrier interval, and the same cut becomes the signal's moment of transmission.",
+        "An evidence tag has one clipped corner become a transmission pulse, so a piece of proof visibly turns into a broadcast.",
       );
       assert.match(
         result.show.logo.prompt,
-        /evidence notch interrupts a carrier interval/iu,
+        /evidence tag has one clipped corner become a transmission pulse/iu,
       );
       assert.match(result.show.logo.prompt, /one centered simple mark/iu);
       assert.match(
         result.show.logo.prompt,
-        /no scene, no figure, no lettering/iu,
+        /no scene, no person, no lettering/iu,
       );
-      assert.match(result.show.logo.prompt, /distinctive at 64 pixels/iu);
+      assert.match(result.show.logo.prompt, /At 64 pixels.*understandable/iu);
       assert.match(
         result.show.logo.prompt,
         /full-frame opaque square image/iu,
@@ -6174,7 +6599,11 @@ describe("Botcast persistence and isolation", () => {
       assert.match(captures[0]?.[0]?.content ?? "", /logoThesis/iu);
       assert.match(
         captures[0]?.[0]?.content ?? "",
-        /single inseparable symbol/iu,
+        /familiar, nameable subject or action/iu,
+      );
+      assert.match(
+        captures[0]?.[0]?.content ?? "",
+        /communicate its premise before anyone reads the show name/iu,
       );
       assert.match(captures[0]?.[0]?.content ?? "", /concrete artifacts/iu);
       assert.match(
@@ -6798,6 +7227,50 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
+  it("refreshes a premise from supplied inspiration without touching the rest of the show identity", async () => {
+    const db = fixture();
+    const captures: ProviderMessage[][] = [];
+    const provider = recordingProvider(
+      ['{"premise":"A forensic interview show that follows the stories public certainty tries to bury."}'],
+      captures,
+    );
+    try {
+      const created = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const branded = updateBotcastShow(db, "user-1", created.id, {
+        dayAtmosphereImageUrl: "/images/premise-day.png",
+        dayAtmosphereImageId: "premise-day",
+        nightAtmosphereImageUrl: "/images/premise-night.png",
+        nightAtmosphereImageId: "premise-night",
+        logoImageUrl: "/images/premise-logo.png",
+        logoImageId: "premise-logo",
+      });
+      const inspiration =
+        "Interviews that investigate the stories culture tells itself.";
+      const result = await generateBotcastShowPremise(
+        db,
+        "user-1",
+        branded.id,
+        inspiration,
+        generation(provider),
+      );
+
+      assert.equal(result.generated, true);
+      assert.equal(
+        result.show.premise,
+        "A forensic interview show that follows the stories public certainty tries to bury.",
+      );
+      assert.equal(result.show.name, branded.name);
+      assert.equal(result.show.studioIdentity, branded.studioIdentity);
+      assert.deepEqual(result.show.dayAtmosphere, branded.dayAtmosphere);
+      assert.deepEqual(result.show.nightAtmosphere, branded.nightAtmosphere);
+      assert.deepEqual(result.show.logo, branded.logo);
+      assert.match(captures[0]?.[1]?.content ?? "", new RegExp(inspiration, "u"));
+      assert.match(captures[0]?.[0]?.content ?? "", /genuinely new angle/iu);
+    } finally {
+      db.close();
+    }
+  });
+
   it("persists matched studios and regenerates each atmosphere independently", () => {
     const db = fixture();
     try {
@@ -6819,10 +7292,24 @@ describe("Botcast persistence and isolation", () => {
       assert.equal(pairReady.dayAtmosphere.imageId, "day-image");
       assert.equal(pairReady.nightAtmosphere.imageId, "night-image");
       assert.equal(pairReady.atmosphere.imageId, "night-image");
+      assert.equal(pairReady.studioLighting.status, "missing");
+
+      const lightingReady = updateBotcastShow(db, "user-1", show.id, {
+        studioLighting: {
+          imageUrl: "/images/studio-lighting.png",
+          imageId: "studio-lighting-image",
+          sourceDayImageId: "day-image",
+          sourceNightImageId: "night-image",
+          revision: 2,
+          status: "ready",
+        },
+      });
+      assert.equal(lightingReady.studioLighting.status, "ready");
 
       const refreshedDay = updateBotcastShow(db, "user-1", show.id, {
         regenerateDayAtmosphere: true,
       });
+      assert.equal(refreshedDay.studioLighting.status, "stale");
       assert.equal(refreshedDay.dayAtmosphere.revision, 2);
       assert.equal(refreshedDay.dayAtmosphere.imageUrl, "/images/day.png");
       assert.equal(refreshedDay.dayAtmosphere.imageId, "day-image");
@@ -6932,7 +7419,7 @@ describe("Botcast persistence and isolation", () => {
         fallback.prompt,
         /Mara Vale|The Mara Vale Frequency/iu,
       );
-      assert.match(fallback.prompt, /wholly original, non-figurative/iu);
+      assert.match(fallback.prompt, /wholly original, concrete/iu);
       assert.doesNotMatch(
         fallback.prompt,
         /\bPRISM\b|rainbow|refraction|spectrum ray|five colors/iu,
@@ -7816,6 +8303,78 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
+  it("records audience-heard soundboard cues only for live bot interviews", () => {
+    const db = fixture();
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const created = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "A soundboard timing test",
+      });
+      let episode = recordBotcastSoundboardCue(db, "user-1", created.id, {
+        kind: "applause",
+        atMs: 1_250,
+      });
+      episode = recordBotcastSoundboardCue(db, "user-1", created.id, {
+        kind: "laughter",
+        atMs: 900,
+      });
+      assert.deepEqual(
+        episode.events
+          .filter((event) => event.kind === "soundboard_cue")
+          .map((event) => event.payload),
+        [
+          { kind: "applause", atMs: 1_250, source: "producer" },
+          { kind: "laughter", atMs: 1_250, source: "producer" },
+        ],
+      );
+      const review = buildBotcastAudienceReviewArtifactV1({
+        episode,
+        hostName: "Mara Vale",
+        guestName: "Ivo Stone",
+      });
+      assert.deepEqual(
+        review.evidence
+          .filter((item) => item.channel === "event")
+          .map((item) => item.description),
+        [
+          "Applause played at 1.3 seconds.",
+          "Laughter played at 1.3 seconds.",
+        ],
+      );
+
+      const producerEpisode = createBotcastEpisode(db, "user-1", show.id, {
+        guestKind: "producer",
+        guestName: "Producer",
+        guestContext: "A curious creative technologist.",
+        topic: "The human guest lane",
+        producerBrief: "Keep the interview surprising.",
+      });
+      assert.throws(
+        () =>
+          recordBotcastSoundboardCue(
+            db,
+            "user-1",
+            producerEpisode.id,
+            { kind: "rimshot", atMs: 0 },
+          ),
+        /only while producing a bot interview/iu,
+      );
+
+      forceEndBotcastEpisode(db, "user-1", created.id);
+      assert.throws(
+        () =>
+          recordBotcastSoundboardCue(db, "user-1", created.id, {
+            kind: "gasp",
+            atMs: 2_000,
+          }),
+        /locked after the episode ends/iu,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   it("keeps even an immediate producer-cut episode and gives it a brief close", async () => {
     const db = fixture();
     let providerCalls = 0;
@@ -8187,6 +8746,26 @@ describe("Botcast persistence and isolation", () => {
         guestBotId: "guest-1",
         topic: "Second archived episode",
       });
+      storeBotcastShowIntroAudio(db, "user-1", show.id, {
+        model: "music_v2",
+        prompt: "Show-owned ident",
+        contentType: "audio/mpeg",
+        audioBytes: Buffer.from([1]),
+        durationMs: 8_000,
+        outdent: {
+          prompt: "Show-owned outdent",
+          contentType: "audio/mpeg",
+          audioBytes: Buffer.from([2]),
+          durationMs: 4_000,
+        },
+      });
+      storeBotcastShowAtmosphereAudio(db, "user-1", show.id, {
+        model: "eleven_text_to_sound_v2",
+        prompt: "Show-owned atmosphere",
+        contentType: "audio/mpeg",
+        audioBytes: Buffer.from([3]),
+        durationMs: 30_000,
+      });
 
       assert.equal(deleteBotcastShow(db, "another-user", show.id), false);
       assert.equal(getBotcastShow(db, "user-1", show.id).episodeCount, 2);
@@ -8197,6 +8776,8 @@ describe("Botcast persistence and isolation", () => {
       );
       for (const table of [
         "botcast_shows",
+        "botcast_show_intro_audio",
+        "botcast_show_atmosphere_audio",
         "botcast_episodes",
         "botcast_episode_segments",
         "botcast_messages",
@@ -10118,7 +10699,13 @@ describe("Botcast persistence and isolation", () => {
         prompt: "Original archived Signal ident",
         contentType: "audio/mpeg",
         audioBytes: Buffer.from([9, 8, 7, 6]),
-        durationMs: 6_000,
+        durationMs: 8_000,
+        outdent: {
+          prompt: "Original archived Signal outdent",
+          contentType: "audio/mpeg",
+          audioBytes: Buffer.from([6, 7, 8, 9]),
+          durationMs: 4_000,
+        },
       });
       storeBotcastShowAtmosphereAudio(source, "user-1", show.id, {
         model: "eleven_text_to_sound_v2",
@@ -10248,6 +10835,10 @@ describe("Botcast persistence and isolation", () => {
       assert.equal(restoredShow.studioIdentity, show.studioIdentity);
       assert.deepEqual(restoredShow.dashboardBlurbs, show.dashboardBlurbs);
       assert.equal(restoredShow.introAudio.source, "elevenlabs");
+      assert.match(
+        restoredShow.introAudio.outdentAudioUrl ?? "",
+        /\/outdent-audio$/u,
+      );
       assert.equal(restoredShow.atmosphereAudio.source, "elevenlabs");
       assert.deepEqual(
         [
@@ -10255,6 +10846,13 @@ describe("Botcast persistence and isolation", () => {
             ?.audioBytes ?? []),
         ],
         [9, 8, 7, 6],
+      );
+      assert.deepEqual(
+        [
+          ...(readBotcastShowOutdentAudio(target, "user-1", show.id)
+            ?.audioBytes ?? []),
+        ],
+        [6, 7, 8, 9],
       );
       assert.deepEqual(
         [

@@ -65,6 +65,7 @@ import {
   deleteCoffeeGroup,
   deleteCoffeePreset,
   getCoffeeConversationTranscript,
+  projectCoffeeMessagesForObserverV1,
   coffeeMessagesVisibleInExport,
   getCoffeeSessionPoll,
   generateCoffeeSessionSynopsis,
@@ -155,13 +156,18 @@ import {
   serializeStoredBotPrompt,
   normalizeCoffeeSessionSettings,
   type ChatMessage,
+  type CoffeePowerPlanV1,
   type CoffeePoll,
   type CoffeeTeamState,
 } from "@localai/shared";
 import {
   applyCoffeePowerMoodBoostAfterSpeech,
   applyCoffeePowerMoodDrainAfterDirectAddress,
+  coffeePowerBotAudibleTo,
+  coffeePowerBotCanSpeak,
+  coffeePowerBotVisibleTo,
   coffeePowersPromptForSpeaker,
+  parseCoffeePowerPlan,
 } from "../coffee-powers.ts";
 
 /**
@@ -325,6 +331,232 @@ function withStructuredPrompt(
     systemPrompt: serializeStoredBotPrompt(profile, bot.name),
   };
 }
+
+describe("Coffee spectral observer projection", () => {
+  const message: ChatMessage = {
+    id: "line-1",
+    role: "assistant",
+    content: "The whole hidden answer survives.",
+    createdAt: "2026-07-21T00:00:00.000Z",
+    botId: "ryuk",
+    botName: "Ryuk",
+  };
+  const plan = (effects: CoffeePowerPlanV1["bots"][string]["effects"]): CoffeePowerPlanV1 => ({
+    version: 1,
+    resolvedAt: "2026-07-21T00:00:00.000Z",
+    warnings: [],
+    bots: {
+      ryuk: {
+        botId: "ryuk",
+        powerIds: ["invisible"],
+        powerNames: ["Invisible"],
+        selfCue: "",
+        observerCue: "",
+        visibleToBotIds: null,
+        speechAudienceBotIds: null,
+        effects,
+        ruleLabels: [],
+        warnings: [],
+      },
+    },
+  });
+  const light = { kind: "bot" as const, name: "Light Yagami", botId: "light" };
+  const seer = { kind: "bot" as const, name: "Seer", botId: "seer" };
+
+  it("keeps restricted turns generatable and resolves sight and hearing pairwise", () => {
+    const restricted = plan([
+      { type: "awareness", allowed: [light] },
+      { type: "speech_audience", allowed: [light] },
+      { type: "avatar_visibility", mode: "translucent" },
+    ]);
+    assert.equal(coffeePowerBotCanSpeak(restricted, "ryuk"), true);
+    assert.equal(coffeePowerBotVisibleTo(restricted, "ryuk", "light"), true);
+    assert.equal(coffeePowerBotAudibleTo(restricted, "ryuk", "light"), true);
+    assert.equal(coffeePowerBotVisibleTo(restricted, "ryuk", "lincoln"), false);
+    assert.equal(coffeePowerBotAudibleTo(restricted, "ryuk", "lincoln"), false);
+  });
+
+  it("upgrades frozen targeted-Invisible plans idempotently", () => {
+    const legacy = plan([{ type: "awareness", allowed: [light] }]);
+    const upgraded = parseCoffeePowerPlan(JSON.stringify(legacy));
+    const upgradedAgain = parseCoffeePowerPlan(JSON.stringify(upgraded));
+    assert.deepEqual(upgradedAgain, upgraded);
+    assert.deepEqual(upgraded?.bots.ryuk?.effects, [
+      { type: "awareness", allowed: [light] },
+      { type: "avatar_visibility", mode: "translucent" },
+    ]);
+  });
+
+  it("separates all four live sight/sound combinations and replay access", () => {
+    const both = plan([
+      { type: "awareness", allowed: [light] },
+      { type: "speech_audience", allowed: [light] },
+      { type: "avatar_visibility", mode: "translucent" },
+    ]);
+    assert.deepEqual(
+      projectCoffeeMessagesForObserverV1({
+        messages: [message], plan: both, participatingBotIds: ["lincoln"], perspective: "live",
+      }),
+      [],
+    );
+    const revealed = projectCoffeeMessagesForObserverV1({
+      messages: [message], plan: both, participatingBotIds: ["light"], perspective: "live",
+    })[0]!;
+    assert.equal(revealed.content, message.content);
+    assert.equal(revealed.coffeeObserverProjection?.visibility, "translucent");
+    assert.equal(revealed.coffeeObserverProjection?.audible, true);
+
+    const audibleOnly = projectCoffeeMessagesForObserverV1({
+      messages: [message],
+      plan: plan([
+        { type: "awareness", allowed: [seer] },
+        { type: "speech_audience", allowed: [light] },
+        { type: "avatar_visibility", mode: "translucent" },
+      ]),
+      participatingBotIds: ["light"],
+      perspective: "live",
+    })[0]!;
+    assert.equal(audibleOnly.coffeeObserverProjection?.visibility, "hidden");
+    assert.equal(audibleOnly.coffeeObserverProjection?.audible, true);
+
+    const visibleOnly = projectCoffeeMessagesForObserverV1({
+      messages: [message],
+      plan: plan([
+        { type: "awareness", allowed: [light] },
+        { type: "speech_audience", allowed: [seer] },
+        { type: "avatar_visibility", mode: "translucent" },
+      ]),
+      participatingBotIds: ["light"],
+      perspective: "live",
+    })[0]!;
+    assert.equal(visibleOnly.content, "...");
+    assert.equal(visibleOnly.coffeeObserverProjection?.visibility, "translucent");
+    assert.equal(visibleOnly.coffeeObserverProjection?.audible, false);
+
+    const replay = projectCoffeeMessagesForObserverV1({
+      messages: [message], plan: both, participatingBotIds: ["lincoln"], perspective: "replay",
+    })[0]!;
+    assert.equal(replay.content, message.content);
+    assert.equal(replay.coffeeObserverProjection?.visibility, "translucent");
+    assert.equal(replay.coffeeObserverProjection?.audible, true);
+  });
+
+  it("does not disclose ordinary private speech during replay", () => {
+    const replay = projectCoffeeMessagesForObserverV1({
+      messages: [message],
+      plan: plan([{ type: "speech_audience", allowed: [light] }]),
+      participatingBotIds: ["lincoln"],
+      perspective: "replay",
+    })[0]!;
+    assert.equal(replay.content, "...");
+    assert.equal(replay.coffeeObserverProjection?.spectral, false);
+    assert.equal(replay.coffeeObserverProjection?.audible, false);
+  });
+
+  it("keeps a hidden prior line out of every unaware autonomous speaker prompt", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    const ryuk = {
+      ...ALICE,
+      id: "spectral-ryuk",
+      name: "Ryuk",
+      systemPrompt: "Ryuk is a supernatural observer who completes every thought.",
+    };
+    const lincoln = {
+      ...BORIS,
+      id: "spectral-lincoln",
+      name: "Abraham Lincoln",
+      systemPrompt: "Lincoln reacts only to what he personally perceives.",
+    };
+    seedCoffeeBot(db, userId, ryuk);
+    seedCoffeeBot(db, userId, lincoln);
+    const invisibleIntent = "Invisible to all other bots except Light Yagami.";
+    const introvertIntent = "Speaks only to Light Yagami.";
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = ?").run(
+      JSON.stringify([{
+        version: 1,
+        id: "invisible",
+        name: "Invisible",
+        intent: invisibleIntent,
+        enabled: true,
+        compileStatus: "ready",
+        compiled: {
+          version: 1,
+          sourceHash: botPowerSourceHashV1("Invisible", invisibleIntent),
+          selfCue: "Remain unseen except to Light.",
+          observerCue: "Only Light can perceive Ryuk.",
+          effects: [{
+            type: "awareness",
+            allowed: [{ kind: "bot", name: "Light Yagami" }],
+          }],
+          ruleLabels: [],
+        },
+      }, {
+        version: 1,
+        id: "introvert",
+        name: "Introvert",
+        intent: introvertIntent,
+        enabled: true,
+        compileStatus: "ready",
+        compiled: {
+          version: 1,
+          sourceHash: botPowerSourceHashV1("Introvert", introvertIntent),
+          selfCue: "Address only Light.",
+          observerCue: "Only Light can hear Ryuk.",
+          effects: [{
+            type: "speech_audience",
+            allowed: [{ kind: "bot", name: "Light Yagami" }],
+          }],
+          ruleLabels: [],
+        },
+      }]),
+      ryuk.id,
+    );
+    const session = await createCoffeeConversation(db, userId, {
+      groupBotIds: [ryuk.id, lincoln.id],
+      initialTopic: "Unseen witnesses",
+    });
+    const hiddenLine = "HIDDEN SPECTRAL SENTINEL: Ryuk finishes this entire warning.";
+    await withMockedCoffeeFetch(hiddenLine, () =>
+      processCoffeeTurn(
+        db,
+        userId,
+        {
+          conversationId: session.conversation.id,
+          message: "Ryuk, give the whole warning.",
+          directedSpeakerBotId: ryuk.id,
+        },
+        { preferredProvider: "local", sessionRemainingMs: 120_000 },
+      ),
+    );
+    const lincolnBodies: unknown[] = [];
+    await withMockedCoffeeFetch(
+      "I will begin from the evidence plainly before me.",
+      () => processCoffeeAutonomousTurn(
+        db,
+        userId,
+        session.conversation.id,
+        { preferredProvider: "local", sessionRemainingMs: 120_000 },
+        false,
+        lincoln.id,
+      ),
+      { chatBodies: lincolnBodies },
+    );
+
+    assert.doesNotMatch(JSON.stringify(lincolnBodies), /HIDDEN SPECTRAL SENTINEL/u);
+    const replay = getCoffeeConversationTranscript(
+      db,
+      userId,
+      session.conversation.id,
+      "replay",
+    );
+    assert.ok(replay.some((message) => message.content === hiddenLine));
+    assert.ok(
+      replay.findLast((message) => message.botId === lincoln.id)
+        ?.coffeeReplayEvents?.some((event) => event.kind === "perceptionOverlap"),
+    );
+  });
+});
 
 describe("Coffee listener reaction persistence", () => {
   it("attaches one deterministic listener event to the saved speaker message without routing side effects", () => {
@@ -4377,6 +4609,68 @@ describe("Coffee group foundation", () => {
     assert.equal(secondVisiblePromptMessages.length, 1);
     assert.match(secondProviderPrompt, /copper vault/iu);
     assert.doesNotMatch(secondProviderPrompt, /violet lighthouse/iu);
+  });
+
+  it("does not give Forgetful Freddie the saved Coffee topic at kickoff", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    const conversationId = "conv-power-forgetful-topic";
+    const freddie: CoffeeBotProfile = {
+      ...ALICE,
+      id: "forgetful-freddie-topic",
+      name: "Forgetful Freddie",
+      systemPrompt: "An earnest stranger with hard short-term amnesia.",
+    };
+    seedCoffeeBot(db, userId, freddie);
+    seedCoffeeBot(db, userId, BORIS);
+    const name = "Short-Term Amnesia";
+    const intent = "Only the current other-speaker message exists; no standing topic or earlier context is available.";
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = ?").run(
+      JSON.stringify([{
+        version: 1,
+        id: "forgetful-topic",
+        name,
+        intent,
+        enabled: true,
+        compileStatus: "ready",
+        compiled: {
+          version: 1,
+          sourceHash: botPowerSourceHashV1(name, intent),
+          selfCue: "Only the current other-speaker message is available.",
+          observerCue: "Others retain the conversation.",
+          effects: [{
+            type: "eternal_introduction",
+            memory: "current_other_speaker_message",
+          }],
+          ruleLabels: ["Current message only"],
+        },
+      }]),
+      freddie.id,
+    );
+    await createCoffeeConversationWithId(db, userId, conversationId, {
+      groupBotIds: [freddie.id, BORIS.id],
+      durationMinutes: 10,
+      initialTopic: "ORANGE CLOCK TOPIC SENTINEL",
+    });
+    const chatBodies: unknown[] = [];
+
+    await withMockedCoffeeFetch(
+      "Hello. Is this seat taken?",
+      () => processCoffeeAutonomousTurn(
+        db,
+        userId,
+        conversationId,
+        { preferredProvider: "local", sessionRemainingMs: 120_000 },
+        false,
+        freddie.id,
+      ),
+      { chatBodies },
+    );
+
+    const prompt = JSON.stringify(chatBodies.at(-1) ?? {});
+    assert.doesNotMatch(prompt, /ORANGE CLOCK TOPIC SENTINEL/u);
+    assert.match(prompt, /you do not know what the gathering is about/iu);
+    assert.match(prompt, /standing table topic/iu);
   });
 
   it("persists bot-only Coffee identity targets, ignores repeats, and replaces with the latest bot", async () => {

@@ -18,6 +18,7 @@ import {
   BOT_POWER_THEME_COMPOUND_MODE_POLICY,
   BOT_POWER_RESPONSE_BUDGET_MODE_POLICY,
   BOT_POWER_SPEECH_OBFUSCATION_MODE_POLICY,
+  BOT_POWER_SPECTRAL_PERCEPTION_MODE_POLICY,
   BOT_POWER_VOICE_PRESENCE_MODE_POLICY,
   PRISM_APPLETS,
   prismAppletVersionLabel,
@@ -56,20 +57,42 @@ describe("applet version helpers", () => {
   });
 
   it("tracks the current visual applet versions for release provenance", () => {
-    assert.equal(PRISM_APPLETS.chat.version, "1.22");
-    assert.equal(PRISM_APPLETS.zen.version, "1.21");
-    assert.equal(PRISM_APPLETS.coffee.version, "2.19");
-    assert.equal(PRISM_APPLETS.botcast.version, "1.34");
+    assert.equal(PRISM_APPLETS.chat.version, "1.24");
+    assert.equal(PRISM_APPLETS.zen.version, "1.23");
+    assert.equal(PRISM_APPLETS.coffee.version, "2.21");
+    assert.equal(PRISM_APPLETS.botcast.version, "1.40");
     assert.equal(PRISM_APPLETS.botcast.name, "Signal");
-    assert.equal(PRISM_APPLETS.story.version, "0.20");
+    assert.equal(PRISM_APPLETS.story.version, "0.22");
     assert.equal(PRISM_APPLETS.slate.version, "0.7");
     assert.equal(PRISM_APPLETS.slate.status, "preview");
-    assert.equal(prismAppletVersionLabel("chat"), "v1.22");
-    assert.equal(prismAppletVersionLabel("zen"), "v1.21");
-    assert.equal(prismAppletVersionLabel("coffee"), "v2.19");
-    assert.equal(prismAppletVersionLabel("botcast"), "v1.34");
-    assert.equal(prismAppletVersionLabel("story"), "v0.20");
+    assert.equal(prismAppletVersionLabel("chat"), "v1.24");
+    assert.equal(prismAppletVersionLabel("zen"), "v1.23");
+    assert.equal(prismAppletVersionLabel("coffee"), "v2.21");
+    assert.equal(prismAppletVersionLabel("botcast"), "v1.40");
+    assert.equal(prismAppletVersionLabel("story"), "v0.22");
     assert.equal(prismAppletVersionLabel("slate"), "v0.7");
+  });
+
+  it("declares participant and observer perception for every applet", () => {
+    assert.deepEqual(
+      Object.keys(BOT_POWER_SPECTRAL_PERCEPTION_MODE_POLICY),
+      Object.keys(PRISM_APPLETS),
+    );
+    assert.deepEqual(BOT_POWER_SPECTRAL_PERCEPTION_MODE_POLICY, {
+      chat: "direct",
+      zen: "direct",
+      arena: "deferred",
+      polling: "deferred",
+      coffee: "direct",
+      botcast: "direct",
+      feed: "deferred",
+      games: "deferred",
+      story: "adapted",
+      gym: "deferred",
+      slate: "irrelevant",
+      pseudo: "deferred",
+      surf: "deferred",
+    });
   });
 
   it("declares current-speaker short-term amnesia support for every applet", () => {

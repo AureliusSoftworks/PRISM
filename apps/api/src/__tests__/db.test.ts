@@ -305,7 +305,7 @@ describe("createDatabase bot export hash migration", () => {
         userColumns.find(
           (column) => column.name === "prism_default_bot_face_mouth_coffee_pucker"
         )?.dflt_value,
-        "0"
+        "1"
       );
       assert.ok(
         userColumns.some((column) => column.name === "prism_default_bot_face_eye_rotation_deg")
@@ -399,7 +399,7 @@ describe("createDatabase bot export hash migration", () => {
       assert.equal(
         columns.find((column) => column.name === "face_mouth_coffee_pucker")
           ?.dflt_value,
-        "0"
+        "1"
       );
       assert.ok(columns.some((column) => column.name === "face_font_weight"));
       assert.ok(columns.some((column) => column.name === "face_eye_scale"));

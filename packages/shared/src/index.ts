@@ -8,6 +8,7 @@ import type {
   BotCrosstalkInterruptedSpeakerCue,
   ListenerReactionSpokenCue,
 } from "./listenerReaction.js";
+import type { BotPowerObserverProjectionV1 } from "./botPower.js";
 
 export {
   PRISM_EULA_ACCEPTANCE_ACTION,
@@ -128,7 +129,12 @@ export {
   botPowerMumblesSpeechV1,
   botPowerMirrorsIdentityV1,
   botPowerMuteActionTextsV1,
+  botPowerObserverProjectionFromEffectsV1,
+  botPowerObserverProjectionV1,
   botPowerObserverCueLinesV1,
+  botPowerPairwisePerceptionFromEffectsV1,
+  botPowerPairwisePerceptionV1,
+  botPowerPerceptionOverlapStartRatioV1,
   botPowerResponseIsSilentV1,
   botPowerResponseIsFirstIntroductionV1,
   botPowerSelfCueLinesV1,
@@ -172,6 +178,10 @@ export {
   type BotPowerGravityDirection,
   type BotPowerInterruptionMatchV1,
   type BotPowerMemoryMode,
+  type BotPowerObserverPerspectiveV1,
+  type BotPowerObserverProjectionV1,
+  type BotPowerObserverVisibilityV1,
+  type BotPowerPairwisePerceptionV1,
   type BotPowerEnforcement,
   type BotPowerResponseBudgetEffectV1,
   type BotPowerResponseBudgetMode,
@@ -528,6 +538,23 @@ export {
   type BotAvatarDetailStampV1,
   type BotAvatarDetailsV1,
 } from "./botAvatarDetails.js";
+
+export {
+  BOT_GENERATION_DRAFT_VERSION,
+  BOT_GENERATION_GLYPH_IDS,
+  BOT_GENERATION_PROMPT_MAX_LENGTH,
+  BOT_GENERATION_VOICE_PREVIEW_MAX_LENGTH,
+  normalizeBotGeneratedDraftV1,
+  normalizeBotGenerationPrompt,
+  type BotGeneratedAvatarDetailsInputV1,
+  type BotGeneratedDraftV1,
+  type BotGeneratedInkRole,
+  type BotGeneratedInkShape,
+  type BotGeneratedInkStrokeV1,
+  type BotGeneratedSettingsV1,
+  type BotGenerationGlyphId,
+  type NormalizeBotGeneratedDraftOptions,
+} from "./botGeneration.js";
 
 export {
   PRISM_TOOL_END,
@@ -1049,6 +1076,10 @@ export interface ChatMessage {
   coffeeUserAction?: CoffeeUserActionPayload;
   /** Coffee-only hidden replay state beats; not shown in normal transcripts. */
   coffeeReplayEvents?: CoffeeReplayEventPayload[];
+  /** Frozen participant ids allowed to hear this Coffee line, or null for all. */
+  coffeeAudienceBotIds?: string[] | null;
+  /** Human-observer projection applied when this Coffee row was read. */
+  coffeeObserverProjection?: BotPowerObserverProjectionV1;
   /** Privacy-safe provider/model attempt history when Auto recovered this reply. */
   autoRecovery?: AutoRecoveryTraceV1;
   /** Saved deterministic hard-response branch from a Ready Power. */
@@ -2061,6 +2092,8 @@ export interface Conversation {
    * marked away for this specific session.
    */
   coffeeAbsentBotIds?: string[];
+  /** Live observer projection for each frozen Coffee participant. */
+  coffeeObserverProjectionByBotId?: Record<string, BotPowerObserverProjectionV1>;
   /**
    * Coffee-only hidden social values keyed by bot id for this conversation.
    * This is primarily consumed by dev diagnostics and prompt shaping.

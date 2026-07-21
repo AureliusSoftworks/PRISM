@@ -181,14 +181,18 @@ import {
   generateBotcastShowDashboardBlurbs,
   generateBotcastShowIdentity,
   generateBotcastShowName,
+  generateBotcastShowPremise,
   getBotcastEpisode,
   getBotcastShow,
   listBotcastEpisodes,
   listBotcastShows,
   projectBotcastAdvanceResponseForAudienceV1,
   projectBotcastEpisodeForAudienceV1,
+  projectBotcastEpisodeForObserverV2,
   readBotcastShowAtmosphereAudio,
   readBotcastShowIntroAudio,
+  readBotcastShowOutdentAudio,
+  recordBotcastSoundboardCue,
   resolveBotcastProducerGuestName,
   setBotcastEpisodeCameraMode,
   setBotcastModelWarmupHold,
@@ -201,7 +205,8 @@ import {
   ElevenLabsMusicError,
   SIGNAL_ELEVENLABS_MUSIC_MODEL,
   buildSignalElevenLabsMusicCompositionPlan,
-  requestSignalElevenLabsIntroMusic,
+  buildSignalElevenLabsOutdentCompositionPlan,
+  requestSignalElevenLabsMusic,
 } from "./elevenlabs-music.ts";
 import {
   AVATAR_ELEVENLABS_SFX_MODEL,
@@ -221,6 +226,7 @@ import {
   normalizeSignalLogoImage,
   readSignalAssetSlot,
 } from "./signal-asset-upload.ts";
+import { generateSignalStudioLightingMap } from "./signal-studio-lighting.ts";
 import {
   createDevSeedMemories,
   demoteMemoryToShortTerm,
@@ -376,6 +382,10 @@ import {
 } from "./bots.ts";
 import { queueBotSemanticFacetsRefresh } from "./bot-facets.ts";
 import { compileBotPowers } from "./bot-powers.ts";
+import {
+  BotGenerationError,
+  generateBotDraft,
+} from "./bot-generator.ts";
 import { resolveCoffeePowersForSession } from "./coffee-powers.ts";
 import {
   BOT_PROFILE_PICTURE_IMAGE_PURPOSE,
@@ -513,6 +523,7 @@ import {
   normalizeBotFaceFontWeight,
   normalizeBotFaceGlyphAnimation,
   normalizeBotFaceMouthCharacter,
+  normalizeBotFaceMouthCoffeePucker,
   normalizeBotFaceMouthOffsetX,
   normalizeBotFaceMouthOffsetY,
   normalizeBotFaceMouthRotationDeg,
@@ -522,6 +533,7 @@ import {
   serializeBotAvatarDetailsV1,
   serializeBotFaceThinkingFrames,
   normalizeBotAudioVoiceProfileV1,
+  normalizeBotGenerationPrompt,
   normalizeEnglishVoiceEngine,
   applyBotNamePronunciations,
   normalizeBotNamePronunciation,
@@ -585,6 +597,7 @@ import {
   type BotFaceThinkingFrames,
   type BotAudioVoiceProfileV1,
   BOTCAST_ELEVENLABS_INTRO_DURATION_MS,
+  BOTCAST_ELEVENLABS_OUTDENT_DURATION_MS,
   buildSignalMusicProfile,
   signalPersonaTemperamentFor,
   type BotcastProducerCue,
@@ -705,6 +718,7 @@ import { deleteVector, deleteVectorsForUser } from "./qdrant.ts";
 let config: AppConfig = getAppConfig();
 let db: DatabaseSync = createDatabase();
 const signalArtworkJobs = new SignalArtworkJobManager();
+const activeSignalStudioLightingRefreshes = new Set<string>();
 let masterKey = deriveMasterKey(config.encryptionMasterKey);
 let providerFactoryOverride: typeof selectProvider = selectProvider;
 let auxiliaryProviderFactoryOverride: typeof getAuxiliaryProvider =
@@ -1392,8 +1406,9 @@ function getOrCreateLocalOwnerUser(): string {
       id, email, display_name, password_hash, password_salt,
       wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag,
       theme, preferred_provider, auto_memory, auto_switch_model,
+      prism_default_bot_face_mouth_coffee_pucker,
       english_voice_engine, created_at, last_active_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'system', 'local', 1, 0, 'builtin', ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'system', 'local', 1, 0, ?, 'builtin', ?, ?)
   `,
   ).run(
     userId,
@@ -1404,6 +1419,7 @@ function getOrCreateLocalOwnerUser(): string {
     wrappedUserKey.ciphertext,
     wrappedUserKey.iv,
     wrappedUserKey.tag,
+    DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER ? 1 : 0,
     createdAt,
     createdAt,
   );
@@ -2496,6 +2512,15 @@ function readBotFaceGlyphAnimationForStorage(
   return normalizeBotFaceGlyphAnimation(value);
 }
 
+function readBotFaceMouthCoffeePuckerForStorage(value: unknown): number {
+  return (
+    normalizeBotFaceMouthCoffeePucker(value) ??
+    DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER
+  )
+    ? 1
+    : 0;
+}
+
 function readBotFaceWeightForStorage(value: unknown): number | null {
   return normalizeBotFaceFontWeight(value);
 }
@@ -2648,8 +2673,8 @@ function normalizeDefaultBotSettingsForResponse(user: UserDbRow) {
         user.prism_default_bot_face_mouth_animation,
       ) ?? DEFAULT_BOT_FACE_GLYPH_ANIMATION,
     prismDefaultBotFaceMouthCoffeePucker:
-      user.prism_default_bot_face_mouth_coffee_pucker === 1
-        ? true
+      user.prism_default_bot_face_mouth_coffee_pucker === 0
+        ? false
         : DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER,
     prismDefaultBotFaceFontWeight:
       normalizeBotFaceFontWeight(user.prism_default_bot_face_font_weight) ??
@@ -3627,8 +3652,9 @@ function buildRoutes(): RouteDefinition[] {
             id, email, display_name, password_hash, password_salt,
             wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag,
             theme, preferred_provider, auto_memory, auto_switch_model,
+            prism_default_bot_face_mouth_coffee_pucker,
             english_voice_engine, created_at, last_active_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'local', 1, 0, 'builtin', ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'local', 1, 0, ?, 'builtin', ?, ?)
         `,
         ).run(
           userId,
@@ -3640,6 +3666,7 @@ function buildRoutes(): RouteDefinition[] {
           wrappedUserKey.iv,
           wrappedUserKey.tag,
           requestedTheme,
+          DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER ? 1 : 0,
           createdAt,
           createdAt,
         );
@@ -8029,6 +8056,42 @@ function buildRoutes(): RouteDefinition[] {
       });
       json(ctx.res, 200, { ok: true, ...result });
     }),
+    route("POST", "/api/botcast/shows/:id/premise", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const userKey = decryptUserKey(userId);
+      const body = ctx.body as Record<string, unknown>;
+      const inspiration = readOptionalString(body.inspiration)?.slice(0, 360);
+      if (!inspiration) {
+        throw new HttpError(400, "Add premise inspiration before refreshing it.");
+      }
+      const requestedProvider = body.preferredProvider;
+      const preferredProvider: ProviderName =
+        requestedProvider === "local" ||
+        requestedProvider === "openai" ||
+        requestedProvider === "anthropic"
+          ? requestedProvider
+          : user.preferred_provider;
+      const result = await generateBotcastShowPremise(
+        db,
+        userId,
+        ctx.params.id,
+        inspiration,
+        {
+          preferredProvider,
+          openAiApiKey:
+            getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey,
+          anthropicApiKey:
+            getAnthropicApiKeyForUser(userId, userKey) ??
+            config.anthropicApiKey,
+          secondaryOllamaHost: user.secondary_ollama_host,
+          preferredLocalModel: user.preferred_local_model,
+          preferredOnlineModel: user.preferred_online_model,
+          providerFactory: providerFactoryOverride,
+        },
+      );
+      json(ctx.res, 200, { ok: true, ...result });
+    }),
     route("POST", "/api/botcast/shows/:id/booking-suggestion", async (ctx) => {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
@@ -8212,33 +8275,165 @@ function buildRoutes(): RouteDefinition[] {
         }),
       });
     }),
+    route("POST", "/api/botcast/shows/:id/studio-lighting/refresh", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const show = getBotcastShow(db, userId, ctx.params.id);
+      const refreshKey = `${userId}\u0000${show.id}`;
+      if (activeSignalStudioLightingRefreshes.has(refreshKey)) {
+        throw new HttpError(409, "This Studio lighting map is already refreshing.");
+      }
+      activeSignalStudioLightingRefreshes.add(refreshKey);
+      try {
+      if (signalArtworkJobs.hasActiveJobForShow(userId, show.id)) {
+        throw new HttpError(
+          409,
+          "Wait for the current Studio artwork to finish before refreshing its lighting.",
+        );
+      }
+      if (!show.dayAtmosphere.imageId || !show.nightAtmosphere.imageId) {
+        throw new HttpError(
+          409,
+          "Install both the Light and Dark studios before refreshing Studio lighting.",
+        );
+      }
+      type StudioSourceRow = {
+        id: string;
+        bot_id: string | null;
+        origin: string | null;
+        local_rel_path: string | null;
+      };
+      const loadSource = (imageId: string, label: string): Buffer => {
+        const source = db
+          .prepare(
+            `SELECT id, bot_id, origin, local_rel_path
+               FROM images
+              WHERE id = ? AND user_id = ?`,
+          )
+          .get(imageId, userId) as StudioSourceRow | undefined;
+        if (
+          !source ||
+          source.origin !== "botcast" ||
+          source.bot_id !== show.hostBotId ||
+          !source.local_rel_path?.trim()
+        ) {
+          throw new HttpError(404, `${label} studio source is not available locally.`);
+        }
+        try {
+          return readGeneratedImageBytes(source.local_rel_path);
+        } catch {
+          throw new HttpError(404, `${label} studio source file was not found.`);
+        }
+      };
+      const dayBytes = loadSource(show.dayAtmosphere.imageId, "Light");
+      const nightBytes = loadSource(show.nightAtmosphere.imageId, "Dark");
+      const generated = await generateSignalStudioLightingMap(dayBytes, nightBytes);
+      const imageId = randomId(12);
+      const localRelPath = buildGeneratedImageRelativePath(userId, imageId);
+      const displayUrl = `/api/images/${encodeURIComponent(imageId)}/file`;
+      const createdAt = new Date().toISOString();
+      const prompt = `Derived Studio lighting receiver map for ${show.name}`;
+      const relatedBotIds = serializeImageRelatedBotIds(
+        [show.hostBotId],
+        show.hostBotId,
+      );
+      let savedShow = show;
+      try {
+        writeGeneratedImageBytes(localRelPath, generated.pngBytes);
+        db.prepare(
+          `INSERT INTO images
+             (id, user_id, conversation_id, bot_id, related_bot_ids, origin,
+              prompt, revised_prompt, url, size, quality, provider, model,
+              local_rel_path, purpose, created_at)
+           VALUES (?, ?, NULL, ?, ?, 'botcast', ?, ?, ?, ?, 'derived',
+                   'local', 'prism-studio-lighting-v1', ?, 'signal_studio_lighting', ?)`,
+        ).run(
+          imageId,
+          userId,
+          show.hostBotId,
+          relatedBotIds,
+          prompt,
+          prompt,
+          displayUrl,
+          `${generated.width}x${generated.height}`,
+          localRelPath,
+          createdAt,
+        );
+        try {
+          savedShow = updateBotcastShow(db, userId, show.id, {
+            studioLighting: {
+              imageUrl: displayUrl,
+              imageId,
+              sourceDayImageId: show.dayAtmosphere.imageId,
+              sourceNightImageId: show.nightAtmosphere.imageId,
+              revision: show.studioLighting.revision + 1,
+              status: "ready",
+            },
+          });
+        } catch (error) {
+          db.prepare("DELETE FROM images WHERE id = ? AND user_id = ?").run(
+            imageId,
+            userId,
+          );
+          throw error;
+        }
+      } catch (error) {
+        tryUnlinkGeneratedImageFile(localRelPath);
+        throw error;
+      }
+      const previousImageId = show.studioLighting.imageId;
+      if (previousImageId && previousImageId !== imageId) {
+        const previous = db
+          .prepare(
+            `SELECT local_rel_path
+               FROM images
+              WHERE id = ? AND user_id = ? AND bot_id = ?
+                AND origin = 'botcast' AND purpose = 'signal_studio_lighting'`,
+          )
+          .get(previousImageId, userId, show.hostBotId) as
+          | { local_rel_path: string | null }
+          | undefined;
+        if (previous) {
+          db.prepare("DELETE FROM images WHERE id = ? AND user_id = ?").run(
+            previousImageId,
+            userId,
+          );
+          if (previous.local_rel_path?.trim()) {
+            tryUnlinkGeneratedImageFile(previous.local_rel_path);
+          }
+        }
+      }
+      json(ctx.res, 200, { ok: true, show: savedShow });
+      } finally {
+        activeSignalStudioLightingRefreshes.delete(refreshKey);
+      }
+    }),
     route("POST", "/api/botcast/shows/:id/intro-audio/generate", async (ctx) => {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
       if (user.preferred_provider === "local") {
         throw new HttpError(
           409,
-            "Switch to Online before creating an ElevenLabs Signal atmosphere.",
+          "Switch to Online before creating an ElevenLabs Signal audio package.",
         );
       }
       const show = getBotcastShow(db, userId, ctx.params.id);
       const userKey = decryptUserKey(userId);
-        const apiKey =
-          getElevenLabsApiKeyForUser(userId, userKey) ??
-          config.elevenLabsApiKey;
+      const apiKey =
+        getElevenLabsApiKeyForUser(userId, userKey) ??
+        config.elevenLabsApiKey;
       if (!apiKey) {
-          throw new HttpError(
-            409,
-            "Add an ElevenLabs API key in Settings first.",
-          );
+        throw new HttpError(
+          409,
+          "Add an ElevenLabs API key in Settings first.",
+        );
       }
       const host = db
-          .prepare(
-            "SELECT system_prompt FROM bots WHERE id = ? AND user_id = ?",
-          )
+        .prepare(
+          "SELECT system_prompt FROM bots WHERE id = ? AND user_id = ?",
+        )
         .get(show.hostBotId, userId) as { system_prompt: string } | undefined;
       if (!host) throw new HttpError(404, "Signal host bot not found.");
-      const musicSeed = `${show.id}:${show.logo.seed}`;
+      const musicSeed = `${show.hostBotId}:${show.id}:${show.logo.seed}`;
       const musicProfile = buildSignalMusicProfile({
         temperament: signalPersonaTemperamentFor(host.system_prompt),
         seed: musicSeed,
@@ -8250,65 +8445,83 @@ function buildRoutes(): RouteDefinition[] {
         profile: musicProfile,
         seed: musicSeed,
       });
+      const outdentCompositionPlan =
+        buildSignalElevenLabsOutdentCompositionPlan({
+          profile: musicProfile,
+          seed: musicSeed,
+        });
       const controller = new AbortController();
       const onClose = () => controller.abort();
       ctx.req.once("close", onClose);
       try {
-          const atmospherePrompt = buildSignalAtmospherePrompt({
-            showName: show.name,
-            studioIdentity: show.studioIdentity,
-          });
-          const [music, atmosphere] = await Promise.all([
-            requestSignalElevenLabsIntroMusic({
-          apiKey,
-          compositionPlan,
-          signal: controller.signal,
-            }),
-            requestSignalElevenLabsAtmosphere({
-              apiKey,
-              prompt: atmospherePrompt,
-              signal: controller.signal,
-            }),
-          ]);
-        if (controller.signal.aborted) return;
-          db.exec("BEGIN IMMEDIATE");
-          let savedShow;
-          try {
-            storeBotcastShowIntroAudio(db, userId, show.id, {
-          model: SIGNAL_ELEVENLABS_MUSIC_MODEL,
-          prompt: JSON.stringify(compositionPlan),
-          contentType: music.contentType,
-          audioBytes: music.audioBytes,
-          durationMs: BOTCAST_ELEVENLABS_INTRO_DURATION_MS,
+        const atmospherePrompt = buildSignalAtmospherePrompt({
+          showName: show.name,
+          studioIdentity: show.studioIdentity,
         });
-            savedShow = storeBotcastShowAtmosphereAudio(db, userId, show.id, {
-              model: SIGNAL_ELEVENLABS_ATMOSPHERE_MODEL,
-              prompt: atmospherePrompt,
-              contentType: atmosphere.contentType,
-              audioBytes: atmosphere.audioBytes,
-              durationMs: SIGNAL_ELEVENLABS_ATMOSPHERE_DURATION_MS,
-            });
-            db.exec("COMMIT");
-          } catch (storeError) {
-            db.exec("ROLLBACK");
-            throw storeError;
-          }
-          const requestIds = [music.requestId, atmosphere.requestId].filter(
-            Boolean,
+        const [music, outdent, atmosphere] = await Promise.all([
+          requestSignalElevenLabsMusic({
+            apiKey,
+            compositionPlan,
+            signal: controller.signal,
+          }),
+          requestSignalElevenLabsMusic({
+            apiKey,
+            compositionPlan: outdentCompositionPlan,
+            signal: controller.signal,
+          }),
+          requestSignalElevenLabsAtmosphere({
+            apiKey,
+            prompt: atmospherePrompt,
+            signal: controller.signal,
+          }),
+        ]);
+        if (controller.signal.aborted) return;
+        db.exec("BEGIN IMMEDIATE");
+        let savedShow;
+        try {
+          storeBotcastShowIntroAudio(db, userId, show.id, {
+            model: SIGNAL_ELEVENLABS_MUSIC_MODEL,
+            prompt: JSON.stringify(compositionPlan),
+            contentType: music.contentType,
+            audioBytes: music.audioBytes,
+            durationMs: BOTCAST_ELEVENLABS_INTRO_DURATION_MS,
+            outdent: {
+              prompt: JSON.stringify(outdentCompositionPlan),
+              contentType: outdent.contentType,
+              audioBytes: outdent.audioBytes,
+              durationMs: BOTCAST_ELEVENLABS_OUTDENT_DURATION_MS,
+            },
+          });
+          savedShow = storeBotcastShowAtmosphereAudio(db, userId, show.id, {
+            model: SIGNAL_ELEVENLABS_ATMOSPHERE_MODEL,
+            prompt: atmospherePrompt,
+            contentType: atmosphere.contentType,
+            audioBytes: atmosphere.audioBytes,
+            durationMs: SIGNAL_ELEVENLABS_ATMOSPHERE_DURATION_MS,
+          });
+          db.exec("COMMIT");
+        } catch (storeError) {
+          db.exec("ROLLBACK");
+          throw storeError;
+        }
+        const requestIds = [
+          music.requestId,
+          outdent.requestId,
+          atmosphere.requestId,
+        ].filter(Boolean);
+        if (requestIds.length > 0) {
+          ctx.res.setHeader(
+            "x-prism-provider-request-id",
+            requestIds.join(","),
           );
-          if (requestIds.length > 0) {
-            ctx.res.setHeader(
-              "x-prism-provider-request-id",
-              requestIds.join(","),
-            );
         }
         json(ctx.res, 201, { ok: true, show: savedShow });
       } catch (error) {
         if (controller.signal.aborted) return;
-          if (
-            error instanceof ElevenLabsMusicError ||
-            error instanceof ElevenLabsSoundError
-          ) {
+        if (
+          error instanceof ElevenLabsMusicError ||
+          error instanceof ElevenLabsSoundError
+        ) {
           throw new HttpError(
             error.status === 401 || error.status === 403
               ? 401
@@ -8322,8 +8535,7 @@ function buildRoutes(): RouteDefinition[] {
       } finally {
         ctx.req.off("close", onClose);
       }
-      },
-    ),
+    }),
     route("POST", "/api/botcast/shows/:id/atmosphere-audio/generate", async (ctx) => {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
@@ -8402,6 +8614,23 @@ function buildRoutes(): RouteDefinition[] {
       ctx.res.setHeader("content-length", String(intro.audioBytes.byteLength));
       ctx.res.setHeader("cache-control", "private, no-store");
       ctx.res.end(intro.audioBytes);
+    }),
+    route("GET", "/api/botcast/shows/:id/outdent-audio", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const outdent = readBotcastShowOutdentAudio(
+        db,
+        userId,
+        ctx.params.id,
+      );
+      if (!outdent) throw new HttpError(404, "Signal outdent not found.");
+      ctx.res.statusCode = 200;
+      ctx.res.setHeader("content-type", outdent.contentType);
+      ctx.res.setHeader(
+        "content-length",
+        String(outdent.audioBytes.byteLength),
+      );
+      ctx.res.setHeader("cache-control", "private, no-store");
+      ctx.res.end(outdent.audioBytes);
     }),
     route("GET", "/api/botcast/shows/:id/atmosphere-audio", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -8689,10 +8918,14 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("GET", "/api/botcast/episodes/:id", async (ctx) => {
       const userId = requireAuth(ctx);
+      const perspective = ctx.query.get("perspective") === "replay"
+        ? "replay"
+        : "live";
       json(ctx.res, 200, {
         ok: true,
-        episode: projectBotcastEpisodeForAudienceV1(
+        episode: projectBotcastEpisodeForObserverV2(
           getBotcastEpisode(db, userId, ctx.params.id),
+          perspective,
         ),
       });
     }),
@@ -8835,6 +9068,54 @@ function buildRoutes(): RouteDefinition[] {
         episode: projectBotcastEpisodeForAudienceV1(
           setBotcastEpisodeCameraMode(db, userId, ctx.params.id, {
             mode,
+            atMs,
+          }),
+        ),
+      });
+    }),
+    route("POST", "/api/botcast/episodes/:id/soundboard", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const kind = body.kind;
+      if (
+        kind !== "applause" &&
+        kind !== "laughter" &&
+        kind !== "gasp" &&
+        kind !== "rimshot"
+      ) {
+        throw new HttpError(400, "Choose a valid Signal soundboard cue.");
+      }
+      const atMs = Number(body.atMs);
+      if (!Number.isFinite(atMs) || atMs < 0) {
+        throw new HttpError(
+          400,
+          "Signal soundboard time must be a non-negative number.",
+        );
+      }
+      const current = getBotcastEpisode(db, userId, ctx.params.id);
+      if (current.status !== "live") {
+        throw new HttpError(
+          409,
+          "Signal soundboard cues are locked after the episode ends.",
+        );
+      }
+      if (current.guestKind === "producer") {
+        throw new HttpError(
+          409,
+          "The Signal soundboard is available only while producing a bot interview.",
+        );
+      }
+      if (current.segment === "closing") {
+        throw new HttpError(
+          409,
+          "The Signal soundboard is closed during the sign-off.",
+        );
+      }
+      json(ctx.res, 200, {
+        ok: true,
+        episode: projectBotcastEpisodeForAudienceV1(
+          recordBotcastSoundboardCue(db, userId, ctx.params.id, {
+            kind,
             atMs,
           }),
         ),
@@ -9300,6 +9581,7 @@ function buildRoutes(): RouteDefinition[] {
         db,
         userId,
         ctx.params.id,
+        ctx.query.get("perspective") === "replay" ? "replay" : "live",
       );
       json(ctx.res, 200, {
         ok: true,
@@ -12440,7 +12722,8 @@ function buildRoutes(): RouteDefinition[] {
       const faceMouthAnimation =
         readBotFaceGlyphAnimationForStorage(body.faceMouthAnimation) ??
         DEFAULT_BOT_FACE_GLYPH_ANIMATION;
-      const faceMouthCoffeePucker = body.faceMouthCoffeePucker === true ? 1 : 0;
+      const faceMouthCoffeePucker =
+        readBotFaceMouthCoffeePuckerForStorage(body.faceMouthCoffeePucker);
       const faceFontWeight =
         readBotFaceWeightForStorage(body.faceFontWeight) ??
         DEFAULT_BOT_FACE_FONT_WEIGHT;
@@ -13795,6 +14078,7 @@ function buildRoutes(): RouteDefinition[] {
         const result = cleanupUnreferencedImageAssets(db, userId, {
           snapshot,
           imageIds,
+          permanent: body.permanent === true,
         });
         json(ctx.res, 200, { ok: true, result });
       } catch (error) {
@@ -14100,6 +14384,154 @@ function buildRoutes(): RouteDefinition[] {
       );
       json(ctx.res, 200, { ok: true, ...result });
     }),
+    route("POST", "/api/bots/generate-draft", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const body = ctx.body as Record<string, unknown>;
+      const prompt = normalizeBotGenerationPrompt(body.prompt);
+      if (!prompt) {
+        throw new HttpError(400, "Describe the bot you want first.");
+      }
+
+      const storedAutoFallbackChain = parseStoredAutoFallbackChain(
+        user.auto_fallback_chain,
+      );
+      const requestedResponseMode = normalizeResponseMode(
+        body.responseMode,
+        user.preferred_provider === "local" ? "local" : "online",
+      );
+      const responseMode =
+        requestedResponseMode === "auto" &&
+        user.auto_switch_model === 1 &&
+        storedAutoFallbackChain
+          ? "auto"
+          : requestedResponseMode === "auto"
+            ? user.preferred_provider === "local"
+              ? "local"
+              : "online"
+            : requestedResponseMode;
+      const requestedProvider = readProvider(body.preferredProvider);
+      const primaryProvider: ProviderName =
+        responseMode === "local"
+          ? "local"
+          : responseMode === "auto"
+            ? (requestedProvider ?? user.preferred_provider)
+            : requestedProvider && requestedProvider !== "local"
+              ? requestedProvider
+              : user.preferred_provider === "anthropic"
+                ? "anthropic"
+                : "openai";
+
+      const userKey = decryptUserKey(userId);
+      // LOCAL draft generation must not even probe online model or voice
+      // catalogs. AUTO and ONLINE explicitly permit an online boundary.
+      const onlineAllowed = responseMode !== "local";
+      const openAiApiKey = onlineAllowed
+        ? getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey
+        : undefined;
+      const anthropicApiKey = onlineAllowed
+        ? getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey
+        : undefined;
+      const catalog = await buildModelCatalog(
+        openAiApiKey,
+        user.secondary_ollama_host,
+        anthropicApiKey,
+      );
+      const preferredModel =
+        primaryProvider === "local"
+          ? readOptionalString(user.preferred_local_model)
+          : readOptionalString(user.preferred_online_model);
+      if (isDisabledModelChoice(preferredModel)) {
+        throw new HttpError(
+          400,
+          `${primaryProvider === "local" ? "Local" : "Online"} replies are disabled. Choose a model before generating a bot.`,
+        );
+      }
+      const resolved = resolveAutoModel({
+        provider: primaryProvider,
+        explicitModelOverride: null,
+        preferredModel,
+        hiddenModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
+        catalog,
+      });
+      const provider = providerFactoryOverride(
+        resolved.provider,
+        openAiApiKey,
+        user.secondary_ollama_host,
+        anthropicApiKey,
+      );
+
+      const controller = new AbortController();
+      const onClose = () => controller.abort();
+      ctx.req.once("close", onClose);
+      let voiceCatalog: Awaited<
+        ReturnType<typeof requestElevenLabsVoiceCatalog>
+      > = [];
+      try {
+        if (onlineAllowed) {
+          const elevenLabsApiKey =
+            getElevenLabsApiKeyForUser(userId, userKey) ??
+            config.elevenLabsApiKey;
+          if (elevenLabsApiKey) {
+            try {
+              voiceCatalog = await requestElevenLabsVoiceCatalog({
+                apiKey: elevenLabsApiKey,
+                collectionId: user.elevenlabs_voice_collection_id,
+                signal: controller.signal,
+              });
+            } catch (error) {
+              if (controller.signal.aborted) throw error;
+              // Voice matching is additive. A stale or limited ElevenLabs key
+              // should not prevent a strong local-voice bot draft.
+              console.warn(
+                "[bot-generator] premium voice catalog unavailable:",
+                error instanceof Error ? error.message : error,
+              );
+            }
+          }
+        }
+        const result = await runWithUsageSession(
+          {
+            db,
+            userId,
+            privacyScope: "normal",
+            mode: "system",
+            surface: "bots",
+          },
+          () =>
+            generateBotDraft({
+              prompt,
+              provider,
+              providerName: resolved.provider,
+              model: resolved.model,
+              responseMode,
+              voiceCatalog,
+              autoFallbackChain:
+                responseMode === "auto" ? storedAutoFallbackChain : null,
+              providerFactory: providerFactoryOverride,
+              openAiApiKey,
+              anthropicApiKey,
+              secondaryOllamaHost: user.secondary_ollama_host,
+              signal: controller.signal,
+            }),
+        );
+        json(ctx.res, 200, { ok: true, ...result });
+      } catch (error) {
+        if (error instanceof BotGenerationError) {
+          throw new HttpError(
+            error.kind === "invalid_prompt" ? 400 : 502,
+            error.message,
+          );
+        }
+        if (controller.signal.aborted) throw error;
+        throw new HttpError(
+          502,
+          "PRISM could not reach the selected bot-generation model. Your brief is still here—try again.",
+        );
+      } finally {
+        ctx.req.off("close", onClose);
+      }
+    }),
     route("POST", "/api/bots", async (ctx) => {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
@@ -14160,7 +14592,8 @@ function buildRoutes(): RouteDefinition[] {
       const faceMouthAnimation =
         readBotFaceGlyphAnimationForStorage(body.faceMouthAnimation) ??
         DEFAULT_BOT_FACE_GLYPH_ANIMATION;
-      const faceMouthCoffeePucker = body.faceMouthCoffeePucker === true ? 1 : 0;
+      const faceMouthCoffeePucker =
+        readBotFaceMouthCoffeePuckerForStorage(body.faceMouthCoffeePucker);
       const faceFontWeight = readBotFaceWeightForStorage(body.faceFontWeight);
       const faceEyeScale = readBotFaceEyeScaleForStorage(body.faceEyeScale);
       const faceEyeOffsetX = readBotFaceEyeOffsetXForStorage(

@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   COFFEE_SEAT_ANGRY_BRACKET_GLYPH,
+  COFFEE_SEAT_BOTTISH_MOUTH_CHARACTERS_PER_PHASE,
   COFFEE_SEAT_MOUTH_CHARACTERS_PER_PHASE,
   COFFEE_SEAT_SIP_FACE_ACTIVE_PROGRESS,
   COFFEE_SEAT_SIP_PLATE_GLYPH,
@@ -42,6 +43,21 @@ describe("coffeeSeatPlateGlyph", () => {
     assert.equal(
       coffeeSeatMouthShapeFromVisibleLength(1, "lamp", false),
       "speech-closed",
+    );
+  });
+
+  it("holds Bottish fallback poses across a slower character span", () => {
+    const speech = "Bottish should not chatter.";
+    const firstShape = coffeeSeatMouthShapeFromVisibleLength(
+      1,
+      speech,
+      false,
+      COFFEE_SEAT_BOTTISH_MOUTH_CHARACTERS_PER_PHASE,
+    );
+    assert.equal(COFFEE_SEAT_BOTTISH_MOUTH_CHARACTERS_PER_PHASE, 6);
+    assert.equal(
+      coffeeSeatMouthShapeFromVisibleLength(6, speech, false, 6),
+      firstShape,
     );
   });
 
@@ -114,7 +130,7 @@ describe("coffeeSeatPlateGlyph", () => {
     });
   });
 
-  it("lets custom mouths opt into the Coffee sip pucker", () => {
+  it("lets custom mouths explicitly opt out of the Coffee sip pucker", () => {
     assert.equal(
       coffeeSeatCustomMouthCharacterForSip({
         mouthCharacter: "△",

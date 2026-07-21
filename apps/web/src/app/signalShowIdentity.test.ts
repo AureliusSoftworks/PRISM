@@ -20,11 +20,15 @@ function show(overrides: Partial<BotcastShow> = {}): BotcastShow {
     nightAtmosphere: {
       imageUrl: "/night.png",
     } as BotcastShow["nightAtmosphere"],
+    studioLighting: {} as BotcastShow["studioLighting"],
     studioLayout: {} as BotcastShow["studioLayout"],
     voiceLevelsByBotId: {},
     atmosphereMix: {} as BotcastShow["atmosphereMix"],
     logo: { imageUrl: "/logo.png" } as BotcastShow["logo"],
-    introAudio: { source: "elevenlabs" } as BotcastShow["introAudio"],
+    introAudio: {
+      source: "elevenlabs",
+      outdentAudioUrl: "/outdent.mp3",
+    } as BotcastShow["introAudio"],
     atmosphereAudio: {
       source: "elevenlabs",
     } as BotcastShow["atmosphereAudio"],

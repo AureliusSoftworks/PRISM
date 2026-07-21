@@ -715,6 +715,18 @@ describe("hydrateAssistantMessageParts", () => {
       {
         v: 1,
         name: "coffeeReplayEvent",
+        kind: "perceptionOverlap",
+        botId: "bot-2",
+        precedingBotId: "bot-1",
+        precedingMessageId: "message-1",
+        overlappingMessageId: "message-2",
+        startRatio: 0.64,
+        maxSimultaneousVoices: 2,
+        occurredAt: "2026-07-02T15:03:15.000Z",
+      },
+      {
+        v: 1,
+        name: "coffeeReplayEvent",
         kind: "identityMirror",
         botId: "ian",
         occurredAt: "2026-07-02T15:03:20.000Z",

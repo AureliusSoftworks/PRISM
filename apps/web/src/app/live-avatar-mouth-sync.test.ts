@@ -31,6 +31,8 @@ describe("live avatar mouth synchronization", () => {
     );
     assert.match(avatar, /crtSpeechMouthShapeAtAlignedElapsedMs\(\{/u);
     assert.match(avatar, /alignment: speechReveal\?\.alignment/u);
+    assert.match(avatar, /voiceMode === "bottish"/u);
+    assert.match(avatar, /bottishMouthShapeAtAlignedElapsedMs\(\{/u);
   });
 
   it("drives Zen visemes from its audio timeline instead of canvas reveal", () => {
@@ -41,6 +43,18 @@ describe("live avatar mouth synchronization", () => {
     assert.match(zenMouth, /speechTimeline\?\.phase === "playing"/u);
     assert.match(zenMouth, /elapsedMs: speechTimeline\.elapsedMs/u);
     assert.match(zenMouth, /alignment: speechTimeline\.alignment/u);
+    assert.match(zenMouth, /settings\?\.voiceMode === "bottish"/u);
+    assert.match(zenMouth, /bottishMouthShapeAtAlignedElapsedMs\(\{/u);
+  });
+
+  it("throttles Bottish in Avatar Studio while retaining its phrase gaps", () => {
+    const avatarPreview = pageSource.slice(
+      pageSource.indexOf("const playAvatarVoicePreview = async"),
+      pageSource.indexOf("const previewAvatarGlobalVoice = async"),
+    );
+    assert.match(avatarPreview, /forcedMode === "bottish"/u);
+    assert.match(avatarPreview, /bottishMouthShapeAtAlignedElapsedMs\(\{/u);
+    assert.match(avatarPreview, /mouthShape === "closed"/u);
   });
 
   it("tracks Coffee audio progress separately from table typewriter pacing", () => {
@@ -58,5 +72,29 @@ describe("live avatar mouth synchronization", () => {
     assert.match(seatMouth, /crtSpeechMouthShapeAtAlignedElapsedMs\(\{/u);
     assert.match(seatMouth, /elapsedMs: liveSeatSpeech\.elapsedMs/u);
     assert.match(seatMouth, /alignment: liveSeatSpeech\.alignment/u);
+    assert.match(seatMouth, /settings\?\.voiceMode === "bottish"/u);
+    assert.match(seatMouth, /bottishMouthShapeAtAlignedElapsedMs\(\{/u);
+  });
+
+  it("animates prerecorded ambient vocalizations without consulting bot voice style", () => {
+    assert.match(pageSource, /useAmbientBotVocalization\(\)/u);
+    assert.match(
+      pageSource,
+      /seatAmbientVocalizationActive[\s\S]{0,180}seatMouthActive/u,
+    );
+    assert.match(
+      pageSource,
+      /coffeeAmbientBotVocalizationMouthShape\(bot\.id\)/u,
+    );
+    assert.match(signalSource, /roleIsAmbientVocalizing/u);
+    assert.match(signalSource, /roleMouthIsActive/u);
+    assert.match(
+      signalSource,
+      /signalAmbientBotVocalizationMouthShape\(role\)/u,
+    );
+    assert.doesNotMatch(
+      signalSource,
+      /handleSignalAmbientBotVocalization[\s\S]{0,1600}(?:voicePreset|voiceProfile|speakingStyle)/u,
+    );
   });
 });

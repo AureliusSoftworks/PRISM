@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type {
   BotcastAtmosphereState,
   BotcastAudienceExperienceV1,
+  BotcastObserverProjectionV2,
   BotcastCameraShot,
   BotcastCameraSuggestion,
   BotcastEpisode,
@@ -26,6 +27,7 @@ import type {
   BotcastProducerCueDelivery,
   BotcastReplayEvent,
   BotcastReplayEventKind,
+  BotcastSoundboardCueKind,
   BotcastSocialInfluenceEventV1,
   BotcastSegmentRecord,
   BotcastShow,
@@ -34,6 +36,7 @@ import type {
   BotcastShowHostChatRequest,
   BotcastShowPatchRequest,
   BotcastStudioLayout,
+  BotcastStudioLightingState,
   BotcastStudioAtmosphereMix,
   BotcastVoiceLevelsByBotId,
   BotcastLogoGlyph,
@@ -47,6 +50,7 @@ import type {
   BotPowerResolvedThemeV1,
   BotPowerV1,
   BotPowerTargetV1,
+  BotPowerObserverPerspectiveV1,
   PrismReviewArtifactV1,
   ListenerReactionPlanV1,
   SignalPersonaTemperament,
@@ -58,6 +62,8 @@ import {
   BOTCAST_ECHO_DASHBOARD_BLURB_FALLBACK,
   BOTCAST_DIRECTOR_MIN_SHOT_MS,
   BOTCAST_LOCAL_INTRO_DURATION_MS,
+  BOTCAST_LOCAL_OUTDENT_DURATION_MS,
+  BOTCAST_PERSONA_REVIEW_VISIBILITY_DELAY_MS,
   BOTCAST_PRODUCER_GUEST_ID,
   BOTCAST_PRODUCER_GUEST_NAME,
   BOTCAST_IMMERSIVE_VOICE_TAGS,
@@ -93,6 +99,9 @@ import {
   botPowerIsMutedV1,
   botPowerMumblesSpeechV1,
   botPowerObserverCueLinesV1,
+  botPowerObserverProjectionV1,
+  botPowerPairwisePerceptionV1,
+  botPowerPerceptionOverlapStartRatioV1,
   botPowerResponseIsSilentV1,
   botPowerSelfCueLinesV1,
   botPowerThemeMoodCueV1,
@@ -121,6 +130,8 @@ import {
   botcastProducerGuestThinkingTimelineDurationMs,
   buildSignalListenerReactionPlanV1,
   botcastReplayTimeline,
+  botcastSoundboardCueFromEvent,
+  botcastSoundboardCueLabel,
   botcastMoodBoostEventsAt,
   botcastMoodDrainEventsAt,
   botcastSocialInfluenceEventsAt,
@@ -130,6 +141,7 @@ import {
   botcastVoiceMoodForTension,
   buildBotPowersPromptBlock,
   isBotcastFallbackStudioAccentVariant,
+  isBotcastSoundboardCueKind,
   isBotcastEchoDashboardBlurb,
   normalizeVoiceDeliveryMood,
   normalizeBotcastStudioLayout,
@@ -433,6 +445,7 @@ type BotcastShowRow = {
   intro_audio_model?: string | null;
   intro_audio_duration_ms?: number | null;
   intro_audio_revision?: number | null;
+  outdent_audio_duration_ms?: number | null;
   atmosphere_audio_provider?: string | null;
   atmosphere_audio_model?: string | null;
   atmosphere_audio_duration_ms?: number | null;
@@ -453,6 +466,7 @@ export type StoredBotcastShowIntroAudio = {
 };
 
 export type StoredBotcastShowAtmosphereAudio = StoredBotcastShowIntroAudio;
+export type StoredBotcastShowOutdentAudio = StoredBotcastShowIntroAudio;
 
 type BotcastEpisodeRow = {
   id: string;
@@ -1206,18 +1220,19 @@ function logoPromptForDesign(
   temperamentDirection?: string,
 ): string {
   return [
-    "Create a wholly original, non-figurative editorial emblem for one singular interview podcast.",
+    "Create a wholly original, concrete editorial emblem for one singular interview podcast.",
     ...(temperamentDirection
       ? [`Its emotional logic is ${temperamentDirection}.`]
       : []),
     `Show-specific conceptual thesis: ${design.showThesis}`,
-    `Build its persona source from ${design.personaMotif}, and its broadcast source from ${design.broadcastArchetype}.`,
-    `Fuse them into one inseparable symbol: ${design.fusionMechanic}. Never place two icons beside each other, and never let either source remain recognizable as standalone clip art.`,
-    `Structural genome: ${design.composition}; ${design.silhouette}; ${design.negativeSpace}; ${design.lineLanguage}. Treat every clause as mandatory rather than optional inspiration.`,
+    "Primary-read rule: show exactly one familiar, nameable visual subject or action from that thesis. An unfamiliar viewer must be able to describe the central idea in a short noun phrase before knowing the show name. If the thesis is written in abstract design language, translate it into the clearest concrete subject that preserves its meaning.",
+    `Let the subject feel ${design.personaMotif}, but do not turn that phrase into an additional shape. Use ${design.broadcastArchetype} only as a secondary transformation within the concrete subject.`,
+    `Fuse them into one inseparable symbol: ${design.fusionMechanic}. Never place two icons beside each other. Keep the show-specific subject plainly recognizable; the broadcast cue may simplify into one edge, cut, pulse, or interval and does not need to read as standalone audio clip art. Do not dissolve the idea into ambiguous geometry.`,
+    `Render that visual sentence with ${design.lineLanguage}. Do not add extra formal motifs from the style phrase. Subject clarity wins over formal novelty.`,
     `Anchor the restrained palette in ${normalizeAccentColor(accentColor)} with only one or two complementary tones.`,
     "Do not use a standalone microphone, headphones, waveform, play button, RSS arcs, radio tower, speech bubble, vinyl record, or generic frequency ring. Do not draw an app-icon tile, circular badge, shield, crest, monogram, or podcast seal. A viewer must see a singular editorial symbol, never podcast clip art.",
     "Keep the identity visually independent from existing entertainment properties, character designs, signature objects, insignia, and existing logos.",
-    "One centered simple mark, bold silhouette, generous negative space, no scene, no figure, no lettering, and no readable text. It must remain distinctive at 64 pixels.",
+    "One centered simple mark with one subject, a bold silhouette, generous negative space, no scene, no person, no lettering, and no readable text. At 64 pixels, the subject and what is happening to it must still be understandable, not merely distinctive.",
     "Output one full-frame opaque square image with no alpha or transparency. Fill every background pixel with the exact flat magenta color key #FF00FF; keep #FF00FF out of the emblem itself. Never use black as the background or color key. Do not draw a container, card, badge field, border, floor, shadow plate, or glow panel.",
     "The exact same mark and colors must remain legible on both near-black and near-white interface surfaces without inversion or hue rotation; use clean dual-surface edge contrast where needed.",
   ].join(" ");
@@ -1329,6 +1344,7 @@ function parseAtmospheres(raw: string): {
   hostInterruptionLines: string[];
   dayAtmosphere: BotcastAtmosphereState;
   nightAtmosphere: BotcastAtmosphereState;
+  studioLighting: BotcastStudioLightingState;
   studioLayout: BotcastStudioLayout;
   voiceLevelsByBotId: BotcastVoiceLevelsByBotId;
   atmosphereMix: BotcastStudioAtmosphereMix;
@@ -1340,11 +1356,39 @@ function parseAtmospheres(raw: string): {
       hostInterruptionLines?: unknown;
       dayAtmosphere?: Partial<BotcastAtmosphereState>;
       nightAtmosphere?: Partial<BotcastAtmosphereState>;
+      studioLighting?: Partial<BotcastStudioLightingState>;
       studioLayout?: unknown;
       voiceLevelsByBotId?: unknown;
       atmosphereMix?: unknown;
     };
     const legacy = normalizeAtmosphere(container, fallbackAtmosphere("night"));
+    const storedLighting = container.studioLighting;
+    const studioLighting: BotcastStudioLightingState = {
+      imageUrl:
+        typeof storedLighting?.imageUrl === "string"
+          ? storedLighting.imageUrl
+          : null,
+      imageId:
+        typeof storedLighting?.imageId === "string" ? storedLighting.imageId : null,
+      sourceDayImageId:
+        typeof storedLighting?.sourceDayImageId === "string"
+          ? storedLighting.sourceDayImageId
+          : null,
+      sourceNightImageId:
+        typeof storedLighting?.sourceNightImageId === "string"
+          ? storedLighting.sourceNightImageId
+          : null,
+      revision:
+        typeof storedLighting?.revision === "number"
+          ? Math.max(1, Math.round(storedLighting.revision))
+          : 1,
+      status:
+        storedLighting?.status === "ready" ||
+        storedLighting?.status === "stale" ||
+        storedLighting?.status === "failed"
+          ? storedLighting.status
+          : "missing",
+    };
     return {
       studioIdentity:
         typeof container.studioIdentity === "string"
@@ -1358,6 +1402,7 @@ function parseAtmospheres(raw: string): {
       // owner refreshes them into a purpose-built matched pair.
       dayAtmosphere: normalizeAtmosphere(container.dayAtmosphere, legacy),
       nightAtmosphere: normalizeAtmosphere(container.nightAtmosphere, legacy),
+      studioLighting,
       studioLayout: normalizeBotcastStudioLayout(container.studioLayout),
       voiceLevelsByBotId: normalizeBotcastVoiceLevelsByBotId(
         container.voiceLevelsByBotId,
@@ -1373,6 +1418,14 @@ function parseAtmospheres(raw: string): {
       hostInterruptionLines: [],
       dayAtmosphere: fallbackAtmosphere("day"),
       nightAtmosphere: fallbackAtmosphere("night"),
+      studioLighting: {
+        imageUrl: null,
+        imageId: null,
+        sourceDayImageId: null,
+        sourceNightImageId: null,
+        revision: 1,
+        status: "missing",
+      },
       studioLayout: normalizeBotcastStudioLayout(undefined),
       voiceLevelsByBotId: {},
       atmosphereMix: normalizeBotcastStudioAtmosphereMix(undefined),
@@ -1523,6 +1576,7 @@ function logoDesignsForUser(
 function serializeShowVisuals(
   dayAtmosphere: BotcastAtmosphereState,
   nightAtmosphere: BotcastAtmosphereState,
+  studioLighting: BotcastStudioLightingState,
   logo: BotcastLogoState,
   studioIdentity: string,
   dashboardBlurbs: readonly string[],
@@ -1542,6 +1596,7 @@ function serializeShowVisuals(
     ),
     dayAtmosphere,
     nightAtmosphere,
+    studioLighting,
     studioLayout,
     voiceLevelsByBotId: normalizeBotcastVoiceLevelsByBotId(
       voiceLevelsByBotId,
@@ -1585,23 +1640,36 @@ function mapShow(row: BotcastShowRow): BotcastShow {
     logo: parseLogo(row.atmosphere_json, row),
     introAudio:
       row.intro_audio_provider === "elevenlabs"
-      ? {
-          source: "elevenlabs",
-          audioUrl: `/api/botcast/shows/${encodeURIComponent(row.id)}/intro-audio`,
+        ? {
+            source: "elevenlabs",
+            audioUrl: `/api/botcast/shows/${encodeURIComponent(row.id)}/intro-audio`,
             durationMs: Math.max(
               3_000,
               Number(row.intro_audio_duration_ms ?? 6_000),
             ),
-          revision: Math.max(1, Number(row.intro_audio_revision ?? 1)),
-          model: row.intro_audio_model ?? "music_v2",
-        }
-      : {
-          source: "local",
-          audioUrl: null,
-          durationMs: BOTCAST_LOCAL_INTRO_DURATION_MS,
-          revision: 1,
-          model: null,
-        },
+            outdentAudioUrl:
+              Number(row.outdent_audio_duration_ms ?? 0) > 0
+                ? `/api/botcast/shows/${encodeURIComponent(row.id)}/outdent-audio`
+                : null,
+            outdentDurationMs: Math.max(
+              BOTCAST_LOCAL_OUTDENT_DURATION_MS,
+              Number(
+                row.outdent_audio_duration_ms ??
+                  BOTCAST_LOCAL_OUTDENT_DURATION_MS,
+              ),
+            ),
+            revision: Math.max(1, Number(row.intro_audio_revision ?? 1)),
+            model: row.intro_audio_model ?? "music_v2",
+          }
+        : {
+            source: "local",
+            audioUrl: null,
+            durationMs: BOTCAST_LOCAL_INTRO_DURATION_MS,
+            outdentAudioUrl: null,
+            outdentDurationMs: BOTCAST_LOCAL_OUTDENT_DURATION_MS,
+            revision: 1,
+            model: null,
+          },
     atmosphereAudio:
       row.atmosphere_audio_provider === "elevenlabs"
         ? {
@@ -1658,6 +1726,7 @@ function repairBotcastShowHostAuthoredLines(
     serializeShowVisuals(
       show.dayAtmosphere,
       show.nightAtmosphere,
+      show.studioLighting,
       show.logo,
       show.studioIdentity,
       show.dashboardBlurbs,
@@ -1874,6 +1943,45 @@ function loadBotProfile(
   };
 }
 
+function botcastEffectivePowerSnapshot(
+  powers: unknown,
+  holderName: string,
+): BotPowerV1[] {
+  const subject = holderName.trim() || "This character";
+  return activeBotPowersV1(powers).map((power) => {
+    if (
+      !power.compiled?.effects.some(
+        (effect) => effect.type === "eternal_introduction",
+      )
+    ) {
+      return power;
+    }
+    const powerLabel = power.name || "Short-term amnesia";
+    const selfPrefix = `${powerLabel}: `;
+    const observerPrefix = `${subject} — ${powerLabel}: `;
+    const effectiveSelfCue = botPowerSelfCueLinesV1([power])[0] ?? "";
+    const effectiveObserverCue =
+      botPowerObserverCueLinesV1(subject, [power])[0] ?? "";
+    return {
+      ...power,
+      compiled: {
+        ...power.compiled,
+        selfCue: effectiveSelfCue.startsWith(selfPrefix)
+          ? effectiveSelfCue.slice(selfPrefix.length)
+          : effectiveSelfCue,
+        observerCue: effectiveObserverCue.startsWith(observerPrefix)
+          ? effectiveObserverCue.slice(observerPrefix.length)
+          : effectiveObserverCue,
+        ruleLabels: [
+          "Current other-speaker message only",
+          "No standing topic memory",
+          "No prior conversation memory",
+        ],
+      },
+    };
+  });
+}
+
 function botcastProducerGuestProfile(
   guestName: string,
   guestContext: string,
@@ -2003,6 +2111,24 @@ interface BotcastEpisodePowerSnapshotV1 {
   guestBotId: string;
   hostPowers: BotPowerV1[];
   guestPowers: BotPowerV1[];
+  hostIdentity?: Pick<BotcastBotProfile, "id" | "name" | "systemPrompt">;
+  guestIdentity?: Pick<BotcastBotProfile, "id" | "name" | "systemPrompt">;
+}
+
+function normalizeBotcastSnapshotIdentity(
+  value: unknown,
+  expectedId: string,
+): Pick<BotcastBotProfile, "id" | "name" | "systemPrompt"> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const identity = value as Record<string, unknown>;
+  if (identity.id !== expectedId || typeof identity.name !== "string") {
+    return undefined;
+  }
+  return {
+    id: expectedId,
+    name: cleanText(identity.name, "", 200),
+    systemPrompt: cleanText(identity.systemPrompt, "", BOTCAST_TEXT_MAX),
+  };
 }
 
 function botcastEpisodePowerSnapshot(
@@ -2029,6 +2155,14 @@ function botcastEpisodePowerSnapshot(
     guestBotId: episode.guestBotId,
     hostPowers: parseStoredBotPowersV1(snapshot.hostPowers),
     guestPowers: parseStoredBotPowersV1(snapshot.guestPowers),
+    hostIdentity: normalizeBotcastSnapshotIdentity(
+      snapshot.hostIdentity,
+      episode.hostBotId,
+    ),
+    guestIdentity: normalizeBotcastSnapshotIdentity(
+      snapshot.guestIdentity,
+      episode.guestBotId,
+    ),
   };
 }
 
@@ -2042,44 +2176,157 @@ export function botcastEpisodePowerSnapshotForRole(
   return role === "host" ? snapshot.hostPowers : snapshot.guestPowers;
 }
 
-function botcastPowersAllowSignalAudience(
-  powers: readonly BotPowerV1[] | null | undefined,
-  effectType: "awareness" | "speech_audience",
-): boolean {
-  // The Signal audience is not a named bot or a safely inferable trait. Only
-  // an explicit `all` target includes the public broadcast perspective.
-  for (const power of activeBotPowersV1(powers)) {
-    for (const effect of power.compiled?.effects ?? []) {
-      if (effect.type !== effectType) continue;
-      if (!effect.allowed.some((target) => target.kind === "all")) return false;
+function botcastObserverProjectionForRoleV2(args: {
+  episode: Pick<BotcastEpisode, "events" | "hostBotId" | "guestBotId" | "guestName">;
+  role: BotcastSpeakerRole;
+  perspective: BotPowerObserverPerspectiveV1;
+}): BotcastObserverProjectionV2["participants"][BotcastSpeakerRole] {
+  const snapshot = botcastEpisodePowerSnapshot(args.episode);
+  const powers = args.role === "host"
+    ? snapshot?.hostPowers ?? []
+    : snapshot?.guestPowers ?? [];
+  const fallbackHost = {
+    id: args.episode.hostBotId,
+    name: "",
+    systemPrompt: "",
+  };
+  const fallbackGuest = {
+    id: args.episode.guestBotId,
+    name: args.episode.guestName ?? "",
+    systemPrompt: "",
+  };
+  const participants = [
+    snapshot?.hostIdentity ?? fallbackHost,
+    snapshot?.guestIdentity ?? fallbackGuest,
+  ];
+  const projected = botPowerObserverProjectionV1(
+    powers,
+    args.perspective,
+    (target) => participants.some((bot) => botcastPowerTargetMatches(target, bot)),
+    { holderSpeaking: true },
+  );
+  return {
+    visibility: projected.visibility,
+    visible: projected.visibility !== "hidden",
+    audible: projected.audible,
+    spectral: projected.spectral,
+  };
+}
+
+export function botcastObserverProjectionV2(
+  episode: Pick<
+    BotcastEpisode,
+    "events" | "hostBotId" | "guestBotId" | "guestName" | "messages"
+  >,
+  perspective: BotPowerObserverPerspectiveV1 = "live",
+): BotcastObserverProjectionV2 {
+  const participants = {
+    host: botcastObserverProjectionForRoleV2({ episode, role: "host", perspective }),
+    guest: botcastObserverProjectionForRoleV2({ episode, role: "guest", perspective }),
+  };
+  return {
+    v: 2,
+    perspective,
+    participants,
+    redactedMessageCount: episode.messages.filter(
+      (message) => !participants[message.speakerRole].audible,
+    ).length,
+  };
+}
+
+function botcastEventsWithPerceptionOverlapFallbackV1(
+  episode: BotcastEpisode,
+): BotcastReplayEvent[] {
+  const existingOverlappingMessageIds = new Set(
+    episode.events.flatMap((event) =>
+      event.kind === "power_effect" &&
+      event.payload.effect === "perception_overlap" &&
+      typeof event.payload.overlappingMessageId === "string"
+        ? [event.payload.overlappingMessageId]
+        : [],
+    ),
+  );
+  const snapshot = botcastEpisodePowerSnapshot(episode);
+  if (!snapshot) return episode.events;
+  const identityForRole = (
+    role: BotcastSpeakerRole,
+  ): Pick<BotcastBotProfile, "id" | "name" | "systemPrompt"> =>
+    role === "host"
+      ? snapshot.hostIdentity ?? {
+          id: episode.hostBotId,
+          name: "",
+          systemPrompt: "",
+        }
+      : snapshot.guestIdentity ?? {
+          id: episode.guestBotId,
+          name: episode.guestName ?? "",
+          systemPrompt: "",
+        };
+  const powersForRole = (role: BotcastSpeakerRole): BotPowerV1[] =>
+    role === "host" ? snapshot.hostPowers : snapshot.guestPowers;
+  const maxSequence = episode.events.reduce(
+    (maximum, event) => Math.max(maximum, event.sequence),
+    0,
+  );
+  const derived: BotcastReplayEvent[] = [];
+  for (let index = 1; index < episode.messages.length; index += 1) {
+    const preceding = episode.messages[index - 1]!;
+    const overlapping = episode.messages[index]!;
+    if (
+      preceding.speakerRole === overlapping.speakerRole ||
+      existingOverlappingMessageIds.has(overlapping.id) ||
+      botPowerResponseIsSilentV1(preceding.content) ||
+      botPowerResponseIsSilentV1(overlapping.content)
+    ) {
+      continue;
     }
+    const perceiver = identityForRole(overlapping.speakerRole);
+    const perception = botPowerPairwisePerceptionV1(
+      powersForRole(preceding.speakerRole),
+      (target) => botcastPowerTargetMatches(target, perceiver),
+      { holderSpeaking: true },
+    );
+    if (perception.audible) continue;
+    derived.push({
+      id: `signal-perception-overlap:${preceding.id}:${overlapping.id}`,
+      episodeId: episode.id,
+      sequence: maxSequence + derived.length + 1,
+      kind: "power_effect",
+      payload: {
+        v: 1,
+        effect: "perception_overlap",
+        precedingMessageId: preceding.id,
+        overlappingMessageId: overlapping.id,
+        precedingBotId: preceding.botId,
+        overlappingBotId: overlapping.botId,
+        startRatio: botPowerPerceptionOverlapStartRatioV1(
+          `${episode.id}:${preceding.id}:${overlapping.id}`,
+        ),
+        maxSimultaneousVoices: 2,
+        derived: true,
+      },
+      occurredAt: overlapping.createdAt,
+    });
   }
-  return true;
+  return derived.length > 0 ? [...episode.events, ...derived] : episode.events;
 }
 
 /** Audience truth derived only from the immutable episode-start Power snapshot. */
 export function botcastAudienceExperienceV1(
   episode: Pick<
     BotcastEpisode,
-    "events" | "hostBotId" | "guestBotId" | "messages"
+    "events" | "hostBotId" | "guestBotId" | "guestName" | "messages"
   >,
 ): BotcastAudienceExperienceV1 {
-  const hostPowers = botcastEpisodePowerSnapshotForRole(episode, "host");
-  const guestPowers = botcastEpisodePowerSnapshotForRole(episode, "guest");
+  const observerProjection = botcastObserverProjectionV2(episode, "live");
   const participants = {
     host: {
-      visible: botcastPowersAllowSignalAudience(hostPowers, "awareness"),
-      audible: botcastPowersAllowSignalAudience(
-        hostPowers,
-        "speech_audience",
-      ),
+      visible: observerProjection.participants.host.visible,
+      audible: observerProjection.participants.host.audible,
     },
     guest: {
-      visible: botcastPowersAllowSignalAudience(guestPowers, "awareness"),
-      audible: botcastPowersAllowSignalAudience(
-        guestPowers,
-        "speech_audience",
-      ),
+      visible: observerProjection.participants.guest.visible,
+      audible: observerProjection.participants.guest.audible,
     },
   };
   return {
@@ -2100,19 +2347,43 @@ export function botcastAudienceExperienceV1(
 export function projectBotcastEpisodeForAudienceV1(
   episode: BotcastEpisode,
 ): BotcastEpisode {
-  const audienceExperience = botcastAudienceExperienceV1(episode);
+  return projectBotcastEpisodeForObserverV2(episode, "live");
+}
+
+export function projectBotcastEpisodeForObserverV2(
+  episode: BotcastEpisode,
+  perspective: BotPowerObserverPerspectiveV1 = "live",
+): BotcastEpisode {
+  const observerProjection = botcastObserverProjectionV2(episode, perspective);
+  const audienceExperience: BotcastAudienceExperienceV1 = {
+    v: 1,
+    perspective: "audience",
+    participants: {
+      host: {
+        visible: observerProjection.participants.host.visible,
+        audible: observerProjection.participants.host.audible,
+      },
+      guest: {
+        visible: observerProjection.participants.guest.visible,
+        audible: observerProjection.participants.guest.audible,
+      },
+    },
+    redactedMessageCount: observerProjection.redactedMessageCount,
+  };
   const audienceDeliveryByMessageId = new Map(
     episode.messages.map((message) => [
       message.id,
-      audienceExperience.participants[message.speakerRole],
+      observerProjection.participants[message.speakerRole],
     ] as const),
   );
+  const observerEvents = botcastEventsWithPerceptionOverlapFallbackV1(episode);
   return {
     ...episode,
     audienceExperience,
+    observerProjection,
     messages: episode.messages.map((message) => {
       const delivery =
-        audienceExperience.participants[message.speakerRole];
+        observerProjection.participants[message.speakerRole];
       return {
         ...message,
         content: delivery.audible
@@ -2126,17 +2397,19 @@ export function projectBotcastEpisodeForAudienceV1(
           v: 1,
           audible: delivery.audible,
           speakerVisible: delivery.visible,
+          visibility: delivery.visibility,
+          spectral: delivery.spectral,
         },
       };
     }),
-    events: episode.events.map((event) => {
+    events: observerEvents.map((event) => {
       if (event.kind !== "utterance") return event;
       const messageId =
         typeof event.payload.messageId === "string"
           ? event.payload.messageId
           : "";
       const delivery = audienceDeliveryByMessageId.get(messageId);
-      if (!delivery || delivery.visible) return event;
+      if (!delivery) return event;
       const {
         stageActionText: _hiddenStageAction,
         powerOutcome: _hiddenPowerOutcome,
@@ -2145,11 +2418,13 @@ export function projectBotcastEpisodeForAudienceV1(
       return {
         ...event,
         payload: {
-          ...publicPayload,
+          ...(delivery.visible ? event.payload : publicPayload),
           audienceDelivery: {
             v: 1,
             audible: delivery.audible,
             speakerVisible: delivery.visible,
+            visibility: delivery.visibility,
+            spectral: delivery.spectral,
           },
         },
       };
@@ -2179,7 +2454,7 @@ export function buildBotcastAudienceReviewArtifactV1(args: {
   const projected = projectBotcastEpisodeForAudienceV1(args.episode);
   const speakerName = (role: BotcastSpeakerRole): string =>
     role === "host" ? args.hostName : args.guestName;
-  const evidence = projected.messages.flatMap((message) => {
+  const messageEvidence = projected.messages.flatMap((message) => {
     const items: PrismReviewArtifactV1["evidence"][number][] = [];
     if (message.audienceDelivery?.audible !== false) {
       items.push({
@@ -2199,6 +2474,19 @@ export function buildBotcastAudienceReviewArtifactV1(args: {
     }
     return items;
   });
+  const soundboardEvidence = projected.events.flatMap((event) => {
+    const cue = botcastSoundboardCueFromEvent(event);
+    return cue
+      ? [
+          {
+            id: event.id,
+            channel: "event" as const,
+            label: "On-air soundboard",
+            description: `${botcastSoundboardCueLabel(cue.kind)} played at ${(cue.atMs / 1_000).toFixed(1)} seconds.`,
+          },
+        ]
+      : [];
+  });
   return {
     version: 1,
     appletId: "signal",
@@ -2216,23 +2504,12 @@ export function buildBotcastAudienceReviewArtifactV1(args: {
           ? "broadcast completed"
           : (args.episode.outcome ?? "completed"),
     },
-    evidence,
+    evidence: [...messageEvidence, ...soundboardEvidence],
     createdAt:
       args.episode.completedAt ??
       args.episode.updatedAt ??
       args.episode.startedAt,
   };
-}
-
-function assertBotcastPowerSpeechCompatibility(
-  speaker: BotcastBotProfile,
-  peer: BotcastBotProfile,
-): void {
-  const restriction = botcastPowerRestriction(speaker, peer, "speech_audience");
-  if (!restriction) return;
-  throw new Error(
-    `${speaker.name}'s Power “${restriction.name || "Unnamed Power"}” does not allow them to address ${peer.name} in Signal.`,
-  );
 }
 
 function botcastPowerRestriction(
@@ -2540,6 +2817,8 @@ export function listBotcastShows(
               WHERE i.user_id = s.user_id AND i.show_id = s.id) AS intro_audio_duration_ms,
             (SELECT i.revision FROM botcast_show_intro_audio i
               WHERE i.user_id = s.user_id AND i.show_id = s.id) AS intro_audio_revision,
+            (SELECT i.outdent_duration_ms FROM botcast_show_intro_audio i
+              WHERE i.user_id = s.user_id AND i.show_id = s.id) AS outdent_audio_duration_ms,
             (SELECT a.provider FROM botcast_show_atmosphere_audio a
               WHERE a.user_id = s.user_id AND a.show_id = s.id) AS atmosphere_audio_provider,
             (SELECT a.model FROM botcast_show_atmosphere_audio a
@@ -2630,6 +2909,14 @@ export function createBotcastShow(
     serializeShowVisuals(
       dayAtmosphere,
       nightAtmosphere,
+      {
+        imageUrl: null,
+        imageId: null,
+        sourceDayImageId: null,
+        sourceNightImageId: null,
+        revision: 1,
+        status: "missing",
+      },
       logo,
       studioIdentity,
       hostIsMuted
@@ -2670,6 +2957,8 @@ export function getBotcastShow(
               WHERE i.user_id = s.user_id AND i.show_id = s.id) AS intro_audio_duration_ms,
             (SELECT i.revision FROM botcast_show_intro_audio i
               WHERE i.user_id = s.user_id AND i.show_id = s.id) AS intro_audio_revision,
+            (SELECT i.outdent_duration_ms FROM botcast_show_intro_audio i
+              WHERE i.user_id = s.user_id AND i.show_id = s.id) AS outdent_audio_duration_ms,
             (SELECT a.provider FROM botcast_show_atmosphere_audio a
               WHERE a.user_id = s.user_id AND a.show_id = s.id) AS atmosphere_audio_provider,
             (SELECT a.model FROM botcast_show_atmosphere_audio a
@@ -2697,6 +2986,12 @@ export function storeBotcastShowIntroAudio(
     contentType: string;
     audioBytes: Buffer;
     durationMs: number;
+    outdent?: {
+      prompt: string;
+      contentType: string;
+      audioBytes: Buffer;
+      durationMs: number;
+    };
   },
 ): BotcastShow {
   getBotcastShow(db, userId, showId);
@@ -2710,8 +3005,9 @@ export function storeBotcastShowIntroAudio(
   db.prepare(
     `INSERT INTO botcast_show_intro_audio
       (show_id, user_id, provider, model, prompt, content_type, audio_bytes,
-       duration_ms, revision, created_at, updated_at)
-     VALUES (?, ?, 'elevenlabs', ?, ?, ?, ?, ?, ?, ?, ?)
+       duration_ms, outdent_prompt, outdent_content_type, outdent_audio_bytes,
+       outdent_duration_ms, revision, created_at, updated_at)
+     VALUES (?, ?, 'elevenlabs', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(show_id) DO UPDATE SET
        provider = excluded.provider,
        model = excluded.model,
@@ -2719,6 +3015,10 @@ export function storeBotcastShowIntroAudio(
        content_type = excluded.content_type,
        audio_bytes = excluded.audio_bytes,
        duration_ms = excluded.duration_ms,
+       outdent_prompt = excluded.outdent_prompt,
+       outdent_content_type = excluded.outdent_content_type,
+       outdent_audio_bytes = excluded.outdent_audio_bytes,
+       outdent_duration_ms = excluded.outdent_duration_ms,
        revision = excluded.revision,
        updated_at = excluded.updated_at`,
   ).run(
@@ -2729,6 +3029,16 @@ export function storeBotcastShowIntroAudio(
     cleanText(input.contentType, "audio/mpeg", 120),
     input.audioBytes,
     Math.max(3_000, Math.round(input.durationMs)),
+    input.outdent
+      ? cleanText(input.outdent.prompt, "Signal show outdent", 4_100)
+      : null,
+    input.outdent
+      ? cleanText(input.outdent.contentType, "audio/mpeg", 120)
+      : null,
+    input.outdent?.audioBytes ?? null,
+    input.outdent
+      ? Math.max(3_000, Math.round(input.outdent.durationMs))
+      : null,
     revision,
     now,
     now,
@@ -2772,6 +3082,47 @@ export function readBotcastShowIntroAudio(
     contentType: row.content_type,
     audioBytes: Buffer.from(row.audio_bytes),
     durationMs: row.duration_ms,
+    revision: row.revision,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function readBotcastShowOutdentAudio(
+  db: DatabaseSync,
+  userId: string,
+  showId: string,
+): StoredBotcastShowOutdentAudio | null {
+  const row = db
+    .prepare(
+      `SELECT provider, model, outdent_prompt, outdent_content_type,
+              outdent_audio_bytes, outdent_duration_ms, revision,
+              created_at, updated_at
+         FROM botcast_show_intro_audio
+        WHERE show_id = ? AND user_id = ?
+          AND outdent_audio_bytes IS NOT NULL`,
+    )
+    .get(showId, userId) as
+    | {
+        provider: "elevenlabs";
+        model: string;
+        outdent_prompt: string;
+        outdent_content_type: string;
+        outdent_audio_bytes: Uint8Array;
+        outdent_duration_ms: number;
+        revision: number;
+        created_at: string;
+        updated_at: string;
+      }
+    | undefined;
+  if (!row) return null;
+  return {
+    provider: "elevenlabs",
+    model: row.model,
+    prompt: row.outdent_prompt,
+    contentType: row.outdent_content_type,
+    audioBytes: Buffer.from(row.outdent_audio_bytes),
+    durationMs: row.outdent_duration_ms,
     revision: row.revision,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -2904,6 +3255,7 @@ export function updateBotcastShow(
   const hostingStyle = cleanText(patch.hostingStyle, current.hostingStyle);
   let dayAtmosphere = current.dayAtmosphere;
   let nightAtmosphere = current.nightAtmosphere;
+  let studioLighting = patch.studioLighting ?? current.studioLighting;
   let logo = current.logo;
   const studioLayout = normalizeBotcastStudioLayout(
     patch.studioLayout,
@@ -3019,6 +3371,21 @@ export function updateBotcastShow(
             : "fallback",
     };
   }
+  const studioArtworkChanged =
+    regenerateDayAtmosphere ||
+    regenerateNightAtmosphere ||
+    patch.dayAtmosphereImageUrl !== undefined ||
+    patch.dayAtmosphereImageId !== undefined ||
+    patch.nightAtmosphereImageUrl !== undefined ||
+    patch.nightAtmosphereImageId !== undefined ||
+    patch.atmosphereImageUrl !== undefined ||
+    patch.atmosphereImageId !== undefined;
+  if (studioArtworkChanged && patch.studioLighting === undefined) {
+    studioLighting = {
+      ...studioLighting,
+      status: studioLighting.imageId ? "stale" : "missing",
+    };
+  }
   if (patch.regenerateLogo) {
     const retiredDesigns = normalizeStoredLogoDesigns([
       current.logo.design,
@@ -3069,6 +3436,7 @@ export function updateBotcastShow(
     serializeShowVisuals(
       dayAtmosphere,
       nightAtmosphere,
+      studioLighting,
       logo,
       studioIdentity,
       dashboardBlurbs,
@@ -3215,6 +3583,16 @@ function parseGeneratedShowName(raw: string): string | null {
   try {
     const parsed = JSON.parse(candidate) as Record<string, unknown>;
     return cleanText(parsed.name, "", BOTCAST_SHOW_NAME_MAX) || null;
+  } catch {
+    return null;
+  }
+}
+
+function parseGeneratedShowPremise(raw: string): string | null {
+  const candidate = raw.match(/\{[\s\S]*\}/u)?.[0] ?? raw;
+  try {
+    const parsed = JSON.parse(candidate) as Record<string, unknown>;
+    return cleanText(parsed.premise, "", 360) || null;
   } catch {
     return null;
   }
@@ -3799,7 +4177,8 @@ export async function generateBotcastShowIdentity(
             "studioIdentity is a compact persona-first set bible, not a mood board: define distinctive architecture or landscape, materials, spatial motifs, and at least six concrete artifacts whose subjects and arrangement reveal this host.",
             "The room should be recognizable as the host's world without their name, portrait, logo, or readable text. Generic books, plants, luxury chairs, acoustic panels, and podcast gear do not count as identity details unless made meaningfully specific.",
             "Do not specify lighting or time of day in studioIdentity; the same physical set will be rendered in both daylight and nighttime variants.",
-            "logoThesis is one compact, original abstract metaphor for this show's emblem. Derive it from the host's worldview, imagery, craft, setting, or era, then fuse it with one broadcast behavior into a single inseparable symbol. Describe the double meaning and structural transformation, not a mood or style.",
+            "logoThesis is one compact, original, concrete visual metaphor for this show's emblem. Start with one familiar, nameable subject or action rooted in the host's worldview, imagery, craft, setting, or era, then transform one part of it with a broadcast behavior. State what a viewer sees first and what is happening to it. The show-specific subject must remain recognizable at thumbnail size; avoid theses made only from abstract cuts, intervals, planes, contours, voids, or geometry.",
+            "The logo should communicate its premise before anyone reads the show name. Favor a simple visual sentence such as an evidence tag whose clipped corner becomes a transmission pulse, not an abstract design-system recipe.",
             "logoThesis must use no host or show name, portrait, character likeness, signature prop, lettering, initials, existing insignia, or recognizable entertainment-property imagery. Reject standalone microphones, headphones, waveforms, play buttons, RSS arcs, radio towers, vinyl records, speech bubbles, circular podcast badges, and generic audio clip art.",
             ...(hostIsMuted
               ? BOTCAST_MUTED_DASHBOARD_BLURB_DIRECTIONS
@@ -4100,6 +4479,84 @@ export async function generateBotcastShowName(
       }
       return {
         show: updateBotcastShow(db, userId, showId, { name }),
+        generated: true,
+      };
+    }
+    return { show: current, generated: false };
+  } catch {
+    return { show: current, generated: false };
+  }
+}
+
+export async function generateBotcastShowPremise(
+  db: DatabaseSync,
+  userId: string,
+  showId: string,
+  inspiration: string,
+  generation: BotcastGenerationOptions,
+): Promise<{ show: BotcastShow; generated: boolean }> {
+  const current = getBotcastShow(db, userId, showId);
+  const host = loadBotProfile(db, userId, current.hostBotId);
+  const sourceInspiration = cleanText(inspiration, current.premise, 360);
+  const rejectedPremises = Array.from(
+    new Set(
+      [current.premise, sourceInspiration]
+        .map((premise) => premise.trim())
+        .filter(Boolean),
+    ),
+  );
+  try {
+    const selected = generationProvider(generation);
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const raw = await selected.provider.generateResponse(
+        [
+          {
+            role: "system",
+            content: [
+              "You refresh the premise of a premium podcast show around its host's singular voice and the producer's supplied inspiration.",
+              "Return one JSON object with exactly one string field: premise.",
+              "Write one crisp sentence describing the show's conversational promise. Do not use markdown.",
+              "Preserve the inspiration's core idea while finding a genuinely new angle, tension, or formulation rather than lightly editing or repeating it.",
+              "Every regeneration must differ meaningfully from every rejected premise while still feeling like the same show.",
+            ].join(" "),
+          },
+          {
+            role: "user",
+            content: [
+              `Show: ${current.name}`,
+              `Host: ${host.name}`,
+              `Inspiration: ${sourceInspiration}`,
+              `Rejected premises:\n${rejectedPremises
+                .map((premise) => `- ${premise}`)
+                .join("\n")}`,
+              `Host persona:\n${host.systemPrompt.slice(0, 2_400)}`,
+            ].join("\n"),
+          },
+        ],
+        {
+          ...(selected.model ? { model: selected.model } : {}),
+          temperature: Math.min(1, 0.88 + attempt * 0.04),
+          ...botcastBookingGenerationOptions(
+            selected.providerName,
+            selected.model ?? defaultModelIdForProvider(selected.providerName),
+            240,
+          ),
+          jsonMode: true,
+          usagePurpose: "botcast_brand",
+        },
+      );
+      const premise = parseGeneratedShowPremise(raw);
+      if (!premise) continue;
+      if (
+        rejectedPremises.some(
+          (rejected) =>
+            rejected.toLocaleLowerCase() === premise.toLocaleLowerCase(),
+        )
+      ) {
+        continue;
+      }
+      return {
+        show: updateBotcastShow(db, userId, showId, { premise }),
         generated: true,
       };
     }
@@ -4512,6 +4969,50 @@ export function setBotcastEpisodeCameraMode(
   return getBotcastEpisode(db, userId, episode.id);
 }
 
+export function recordBotcastSoundboardCue(
+  db: DatabaseSync,
+  userId: string,
+  episodeId: string,
+  input: { kind: BotcastSoundboardCueKind; atMs: number },
+): BotcastEpisode {
+  const episode = getBotcastEpisode(db, userId, episodeId);
+  if (episode.status !== "live") {
+    throw new Error("Signal soundboard cues are locked after the episode ends.");
+  }
+  if (episode.guestKind === "producer") {
+    throw new Error(
+      "The Signal soundboard is available only while producing a bot interview.",
+    );
+  }
+  if (episode.segment === "closing") {
+    throw new Error("The Signal soundboard is closed during the sign-off.");
+  }
+  if (!isBotcastSoundboardCueKind(input.kind)) {
+    throw new Error("Choose a valid Signal soundboard cue.");
+  }
+  if (!Number.isFinite(input.atMs) || input.atMs < 0) {
+    throw new Error("Signal soundboard time must be a non-negative number.");
+  }
+  const previousCue = [...episode.events]
+    .reverse()
+    .map(botcastSoundboardCueFromEvent)
+    .find((cue) => cue !== null);
+  const atMs = Math.max(previousCue?.atMs ?? 0, Math.round(input.atMs));
+  const now = new Date().toISOString();
+  recordEvent(
+    db,
+    userId,
+    episode.id,
+    "soundboard_cue",
+    { kind: input.kind, atMs, source: "producer" },
+    now,
+  );
+  db.prepare(
+    "UPDATE botcast_episodes SET updated_at = ? WHERE id = ? AND user_id = ?",
+  ).run(now, episode.id, userId);
+  return getBotcastEpisode(db, userId, episode.id);
+}
+
 function recordEvent(
   db: DatabaseSync,
   userId: string,
@@ -4581,10 +5082,6 @@ export function createBotcastEpisode(
   }
   const guestPresenceMode =
     guestKind === "producer" ? "present" : botcastGuestPresenceMode(host, guest);
-  if (guestKind === "bot") assertBotcastPowerSpeechCompatibility(host, guest);
-  if (guestKind === "bot" && guestPresenceMode === "present") {
-    assertBotcastPowerSpeechCompatibility(guest, host);
-  }
   const sessionStartPowerEffects =
     guestKind === "producer"
       ? []
@@ -4676,8 +5173,18 @@ export function createBotcastEpisode(
           v: 1,
           hostBotId: host.id,
           guestBotId: guest.id,
-          hostPowers: host.powers ?? [],
-          guestPowers: guest.powers ?? [],
+          hostPowers: botcastEffectivePowerSnapshot(host.powers, host.name),
+          guestPowers: botcastEffectivePowerSnapshot(guest.powers, guest.name),
+          hostIdentity: {
+            id: host.id,
+            name: host.name,
+            systemPrompt: host.systemPrompt,
+          },
+          guestIdentity: {
+            id: guest.id,
+            name: guest.name,
+            systemPrompt: guest.systemPrompt,
+          },
         },
       },
       now,
@@ -5528,14 +6035,38 @@ export function buildBotcastSpeakerPrompt(
         speakerRole: args.speakerRole,
       })
     : 0;
+  const mutedHostGuestSoloTurnOrdinal =
+    !speakerEternallyIntroduces &&
+    args.speakerRole === "guest" &&
+    botPowerIsMutedV1(args.host.powers)
+      ? args.episode.messages.filter(
+          (message) => message.speakerRole === "guest",
+        ).length + 1
+      : 0;
   const cloneIdentityPrompt = buildCloneFamilyIdentityPrompt(speaker, [
     args.host,
     args.guest,
   ]);
-  const audienceOnlyGuest = args.episode.guestPresenceMode === "audience_only";
+  const peerPerception = botPowerPairwisePerceptionV1(
+    peer.powers,
+    (target) => botcastPowerTargetMatches(target, speaker),
+    { holderSpeaking: true },
+  );
+  const peerTotallyAbsent = !peerPerception.visible && !peerPerception.audible;
+  // Keep the old isolated-guest prompt shape only for the unaware host. The
+  // hidden guest still receives and answers the host normally.
+  const audienceOnlyGuest =
+    peerTotallyAbsent && args.speakerRole === "host";
+  const peerPerceptionRule = peerTotallyAbsent
+    ? `Participant perception: you cannot see or hear ${peer.name}. No words, actions, timing, or reactions from ${peer.name} are available to you. Never quote, answer, wait for, or correctly infer their hidden turns. Use each scheduled opening as your own uninterrupted floor and continue naturally without naming a Power or hidden cause.`
+    : !peerPerception.visible
+      ? `Participant perception: you hear ${peer.name}'s complete voice but cannot see or otherwise visually locate them. Treat the speech as a disembodied voice. React to the words, never to hidden movement, expression, posture, or location, and never name or explain a Power.`
+      : !peerPerception.audible
+        ? `Participant perception: you can see ${peer.name}, including visible physical actions, but cannot hear any of their words. Treat every spoken turn as silence. React only to visible behavior; never quote, answer, lip-read, or correctly infer hidden speech, and never name or explain a Power.`
+        : null;
   const fandomCue = botPowerAddressedFandomCueV1(
     speaker.powers,
-    audienceOnlyGuest && args.speakerRole === "host"
+    peerTotallyAbsent
       ? "the listening audience"
       : peer.name,
     "Signal",
@@ -5557,7 +6088,7 @@ export function buildBotcastSpeakerPrompt(
     ...botPowerSelfCueLinesV1(genericSpeakerCuePowers),
     ...(fandomCue ? [fandomCue] : []),
     ...(themeMoodCue ? [themeMoodCue] : []),
-    ...(audienceOnlyGuest && args.speakerRole === "host"
+    ...(peerTotallyAbsent
       ? []
       : botPowerObserverCueLinesV1(peer.name, genericPeerCuePowers)),
   ]);
@@ -5704,8 +6235,8 @@ export function buildBotcastSpeakerPrompt(
       : null;
   const silentPeerTurnRule = latestPeerTurnIsSilent
     ? args.speakerRole === "guest"
-      ? silentPeerTurnCount > 1
-        ? `The host still cannot speak. This is silent host turn ${silentPeerTurnCount}, not a new refusal or unanswered demand. Do not repeat a request for verbal guidance or escalate solely because the established mute continues. Use the open floor to develop the stated topic in a fresh direction, while retaining any ordinary personal boundaries this persona would honestly hold.`
+      ? mutedHostGuestSoloTurnOrdinal > 1
+        ? `The host still cannot speak. This is guest-led solo turn ${mutedHostGuestSoloTurnOrdinal}, not a new refusal, question, or unanswered demand. Continue one self-directed broadcast instead of pretending an interview is happening. Advance through exactly one fresh move—a concrete example, counterexample, cost, decision, consequence, contradiction, or safeguard not already present in the transcript. Do not restate the thesis in new words, repeat a request for verbal guidance, or invent anything the host asked or meant.`
         : "The host cannot speak and remains silently present. That established mute is part of this show's format, not an unannounced refusal to participate. Use the open floor to begin developing the stated topic in your own voice. Do not invent a question or hidden intent, demand speech, or retreat into an abstract account of being watched."
       : unansweredSilentPeerTurnCount > 1
         ? `The guest has now given ${unansweredSilentPeerTurnCount} consecutive actionless silent turns. Stop pressing for an answer and close the episode now. State clearly that the question remains unanswered. Never assign the guest a yes, no, choice, belief, motive, or position.`
@@ -5715,20 +6246,30 @@ export function buildBotcastSpeakerPrompt(
     : null;
   const currentOtherSpeakerMessage = speakerEternallyIntroduces
     ? args.episode.messages.slice().reverse().find(
-        (message) => message.botId !== speaker.id,
+        (message) =>
+          message.botId !== speaker.id &&
+          (peerPerception.visible || peerPerception.audible),
       )
     : null;
   const transcriptMessages = speakerEternallyIntroduces
     ? currentOtherSpeakerMessage ? [currentOtherSpeakerMessage] : []
-    : audienceOnlyGuest && args.speakerRole === "host"
-      ? args.episode.messages.filter(
-          (message) => message.speakerRole === "host",
-        )
-      : args.episode.messages;
+    : args.episode.messages.filter(
+        (message) =>
+          message.botId === speaker.id ||
+          peerPerception.visible ||
+          peerPerception.audible,
+      );
   const transcript = transcriptMessages
     .map((message) => {
-      const silentResponse = botPowerResponseIsSilentV1(message.content);
-      const stageActionText = silentResponse ? null : message.stageActionText;
+      const peerMessage = message.botId !== speaker.id;
+      const audible = !peerMessage || peerPerception.audible;
+      const visible = !peerMessage || peerPerception.visible;
+      const canonicalSilentResponse = botPowerResponseIsSilentV1(message.content);
+      const silentResponse = !audible || canonicalSilentResponse;
+      const stageActionText =
+        !visible || (audible && canonicalSilentResponse)
+          ? null
+          : message.stageActionText;
       const content = silentResponse
         ? BOT_POWER_CANONICAL_SILENCE_V1
         : message.content;
@@ -5830,7 +6371,7 @@ export function buildBotcastSpeakerPrompt(
       : "Hard echo Power: repeat only the immediately preceding on-air line from the other cast member, verbatim. Add no words, actions, reactions, labels, or vocal tags. If there is no preceding cast line after your opening, return only `...`. This overrides every later question, answer, closing, and vocal-reaction instruction."
     : null;
   const eternalIntroductionRule = !muteRule && speakerEternallyIntroduces
-    ? "Hard short-term-amnesia rule: receive and understand only the current other-speaker on-air message below. Respond directly to its concrete content as fresh first contact. You do not know prior turns or your own earlier messages. Keep your assigned host or guest role; never claim older familiarity, use private episode history, mention this rule, or default to identical introductory copy. If accused of repetition, react with sincere confusion; never agree that you repeated yourself or explain why. A self-introduction is optional only when this exchange genuinely warrants it."
+    ? "Hard short-term-amnesia rule: receive and understand only the current other-speaker on-air message below. Respond directly to its concrete content as fresh first contact. You do not know the episode topic unless that message states it, and you do not know prior turns or your own earlier messages. Keep your assigned host or guest role; never claim older familiarity, use private episode history, mention this rule, or default to identical introductory copy. If accused of repetition, react with sincere confusion; never agree that you repeated yourself or explain why. A self-introduction is optional only when this exchange genuinely warrants it."
     : null;
   const responseBudget = strongestBotPowerResponseBudgetEffectV1(speaker.powers);
   const responseBudgetRule = responseBudget
@@ -5876,6 +6417,7 @@ export function buildBotcastSpeakerPrompt(
         ...(identityMirrorPrompt ? [identityMirrorPrompt] : []),
         ...(cloneIdentityPrompt ? [cloneIdentityPrompt] : []),
         ...(powersPrompt ? [powersPrompt] : []),
+        ...(peerPerceptionRule ? [peerPerceptionRule] : []),
         ...(powerEncounterRule ? [powerEncounterRule] : []),
         ...(candorRule ? [candorRule] : []),
         ...(powerPressureRule ? [powerPressureRule] : []),
@@ -5905,7 +6447,6 @@ export function buildBotcastSpeakerPrompt(
       content: (speakerEternallyIntroduces
         ? [
             `Show: ${args.show.name}`,
-            `Topic: ${args.episode.topic}`,
             `Your assigned on-air role: ${args.speakerRole}.`,
             `${peer.name} is the person in front of you now.`,
             transcript
@@ -5953,9 +6494,9 @@ export function buildBotcastSpeakerPrompt(
           : []),
         identityMirrorJustChanged && activeIdentityMirrorState
           ? `The identity change just occurred. First state plainly that you are ${activeIdentityMirrorState.targetBotName}, call the original ${activeIdentityMirrorState.targetBotName} an impostor, then continue in that public persona while remaining the mechanical ${args.speakerRole}.`
-          : identityMirrorPrompt
-            ? `Continue in your active copied identity while remaining the mechanical ${args.speakerRole}.`
-          : `Continue as ${speaker.name}.`,
+          : activeIdentityMirrorState
+            ? `Continue in your active copied identity while remaining the mechanical ${args.speakerRole}. Do not repeat that you are ${activeIdentityMirrorState.targetBotName} or that the original is an impostor; demonstrate the copied persona by advancing the substantive conversation.`
+            : `Continue as ${speaker.name}.`,
           ]).join("\n\n"),
     },
   ];
@@ -6315,7 +6856,7 @@ function recentBotcastGuestReviewerExclusionIds(
   return rows.map((row) => row.guest_bot_id);
 }
 
-function hideIneligibleBotcastPersonaReview(
+function hideBotcastReviewFromIneligibleReviewer(
   db: DatabaseSync,
   userId: string,
   episode: BotcastEpisodeSummary,
@@ -6331,6 +6872,30 @@ function hideIneligibleBotcastPersonaReview(
     : episode;
 }
 
+function hidePrematureBotcastPersonaReview(
+  episode: BotcastEpisodeSummary,
+  nowMs: number = Date.now(),
+): BotcastEpisodeSummary {
+  if (!episode.personaReview) return episode;
+  const completedAtMs = episode.completedAt
+    ? Date.parse(episode.completedAt)
+    : Number.NaN;
+  return Number.isFinite(completedAtMs) &&
+    nowMs - completedAtMs >= BOTCAST_PERSONA_REVIEW_VISIBILITY_DELAY_MS
+    ? episode
+    : { ...episode, personaReview: null };
+}
+
+function hideIneligibleBotcastPersonaReview(
+  db: DatabaseSync,
+  userId: string,
+  episode: BotcastEpisodeSummary,
+): BotcastEpisodeSummary {
+  return hidePrematureBotcastPersonaReview(
+    hideBotcastReviewFromIneligibleReviewer(db, userId, episode),
+  );
+}
+
 export async function ensureBotcastEpisodePersonaReview(
   db: DatabaseSync,
   userId: string,
@@ -6340,10 +6905,16 @@ export async function ensureBotcastEpisodePersonaReview(
 ): Promise<BotcastPersonaReview | null> {
   let episode = getBotcastEpisode(db, userId, episodeId);
   if (episode.status !== "completed") return null;
-  const persistedReview = mapEpisodeSummary(
+  const persistedSummary = mapEpisodeSummary(
     loadEpisodeRow(db, userId, episodeId),
-  ).personaReview;
-  if (persistedReview) return episode.personaReview;
+  );
+  if (persistedSummary.personaReview) {
+    return hideBotcastReviewFromIneligibleReviewer(
+      db,
+      userId,
+      persistedSummary,
+    ).personaReview;
+  }
 
   const personaRows = db
     .prepare(
@@ -6433,8 +7004,11 @@ export async function ensureBotcastEpisodePersonaReview(
       episode.id,
       userId,
     );
-    episode = getBotcastEpisode(db, userId, episode.id);
-    return episode.personaReview;
+    return hideBotcastReviewFromIneligibleReviewer(
+      db,
+      userId,
+      mapEpisodeSummary(loadEpisodeRow(db, userId, episode.id)),
+    ).personaReview;
   } catch {
     // A listener reaction should never turn a successfully completed episode
     // into an error. The next idempotent completion read may try again.
@@ -7253,6 +7827,20 @@ export async function advanceBotcastEpisode(
     segment: episode.segment,
     guestDeparted: guestAlreadyDeparted,
   });
+  const mutedHostNeedsGuestLedSoloContinuation = Boolean(
+    !producerCut &&
+      episode.segment === "interview" &&
+      episode.guestKind === "bot" &&
+      episode.guestPresenceMode === "present" &&
+      hostPowerSnapshot &&
+      guestPowerSnapshot &&
+      botPowerIsMutedV1(hostPowerSnapshot) &&
+      !botPowerIsMutedV1(guestPowerSnapshot) &&
+      botcastHasUtteranceInSegment(episode, "guest", "opening"),
+  );
+  if (mutedHostNeedsGuestLedSoloContinuation) {
+    scheduledSpeakerRole = "guest";
+  }
   const constrainedHostNeedsGuestLedClosing = Boolean(
     !producerCut &&
     episode.guestKind === "bot" &&
@@ -7433,7 +8021,7 @@ export async function advanceBotcastEpisode(
     producerCut
       ? BOTCAST_SPEAKER_MAX_TOKENS
       : BOTCAST_CONVERSATIONAL_MAX_TOKENS;
-  let providerUsed = selected.providerName;
+  let providerUsed: string = selected.providerName;
   let modelUsed =
     selected.model ?? defaultModelIdForProvider(selected.providerName);
   let autoRecovery: Awaited<
@@ -7441,7 +8029,11 @@ export async function advanceBotcastEpisode(
   >["recovery"];
   let onlineTurn: SignalOnlineTurnResult | undefined;
   let raw: string;
-  if (hearingRepeatDirective) {
+  if (speakerRole === "host" && speakerIsMuted) {
+    raw = BOT_POWER_CANONICAL_SILENCE_V1;
+    providerUsed = "deterministic";
+    modelUsed = "mute-power";
+  } else if (hearingRepeatDirective) {
     raw = hearingRepeatDirective.repeatedContent;
   } else if (episode.responseMode === "auto") {
     const resolvedChain = autoFallbackResolvedChain(
@@ -7830,7 +8422,8 @@ export async function advanceBotcastEpisode(
     !speakerIsMutedForTurn &&
     !speakerEternallyIntroduces &&
     !speakerRepeatsForHearingPower &&
-    !botPowerIsMutedV1(peer.powers)
+    !botPowerIsMutedV1(peer.powers) &&
+    !botcastPowerRestriction(speaker, peer, "speech_audience")
       ? strongestBotPowerInterruptionEffectV1(
           peer.powers,
           (target) => botcastPowerTargetMatches(target, speaker),
@@ -8022,6 +8615,41 @@ export async function advanceBotcastEpisode(
     },
     now,
   );
+  const precedingPerception = latestOnAirMessage?.botId === peer.id
+    ? botPowerPairwisePerceptionV1(
+        peer.powers,
+        (target) => botcastPowerTargetMatches(target, speaker),
+        { holderSpeaking: true },
+      )
+    : null;
+  if (
+    episode.guestKind === "bot" &&
+    latestOnAirMessage &&
+    precedingPerception &&
+    !precedingPerception.audible &&
+    !botPowerResponseIsSilentV1(latestOnAirMessage.content) &&
+    !botPowerResponseIsSilentV1(content)
+  ) {
+    recordEvent(
+      db,
+      userId,
+      episode.id,
+      "power_effect",
+      {
+        v: 1,
+        effect: "perception_overlap",
+        precedingMessageId: latestOnAirMessage.id,
+        overlappingMessageId: messageId,
+        precedingBotId: latestOnAirMessage.botId,
+        overlappingBotId: speaker.id,
+        startRatio: botPowerPerceptionOverlapStartRatioV1(
+          `${episode.id}:${latestOnAirMessage.id}:${messageId}`,
+        ),
+        maxSimultaneousVoices: 2,
+      },
+      now,
+    );
+  }
   const listenerRole = speakerRole === "host" ? "guest" : "host";
   const currentIdentityMirrorState =
     botcastIdentityMirrorStatesV1(episode.events).get(peer.id) ?? null;
@@ -8076,6 +8704,11 @@ export async function advanceBotcastEpisode(
   let deliveredContent = content;
   let deliveredVoicePerformanceText = voicePerformanceText;
   const listener = listenerRole === "host" ? host : guest;
+  const listenerPerception = botPowerPairwisePerceptionV1(
+    speaker.powers,
+    (target) => botcastPowerTargetMatches(target, listener),
+    { holderSpeaking: true },
+  );
   let listenerReactionCandidate = powerInterruptedContent && powerInterruptionPlan
     ? buildBotCrosstalkListenerReactionPlanV1({
         seed: `signal-power-crosstalk-v1:${episode.id}:${messageId}:${listener.id}`,
@@ -8089,7 +8722,7 @@ export async function advanceBotcastEpisode(
         episode.guestKind === "producer" ||
         speakerQuietIgnored ||
         (listenerRole === "guest" && guestAlreadyDeparted) ||
-        (episode.guestPresenceMode === "audience_only" && listenerRole === "host")
+        !listenerPerception.audible
       )
       ? buildSignalListenerReactionPlanV1({
           episodeId: episode.id,

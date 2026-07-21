@@ -93,7 +93,7 @@ function seedImage(
     options.userId ?? "user-1",
     options.botId ?? null,
     JSON.stringify(options.botIds ?? []),
-    options.origin ?? "images_panel",
+    options.origin ?? "botcast",
     `Prompt for ${id}`,
     `https://example.invalid/${id}.png`,
     options.provider ?? "openai",
@@ -123,14 +123,20 @@ describe("image asset cleanup preview", () => {
         "story-image",
       ]) {
         seedImage(db, id, {
-          origin: id.startsWith("signal") || id === "unused-signal"
-            ? "botcast"
-            : "images_panel",
+          origin:
+            id.startsWith("zen")
+              ? "zen_wallpaper"
+              : id === "profile-image"
+                ? "bot_profile_picture"
+                : id === "slate-cover"
+                  ? "slate_cover"
+                  : "botcast",
           botId: id === "unused-signal" ? "bot-a" : null,
           botIds: id === "unused-signal" ? ["bot-a", "bot-b"] : [],
         });
       }
       seedImage(db, "uploaded-image", { provider: "upload" });
+      seedImage(db, "intentional-library-image", { origin: "images_panel" });
       seedImage(db, "group-room-image", {
         origin: "bot_group_room",
         purpose: "group-room-wallpaper",
@@ -186,20 +192,66 @@ describe("image asset cleanup preview", () => {
       assert.equal(preview.readOnly, true);
       assert.equal(preview.cleanupAvailable, true);
       assert.equal(before, after);
-      assert.equal(preview.scanned, 13);
+      assert.equal(preview.version, 3);
+      assert.equal(preview.scanned, 14);
       assert.equal(preview.candidateCount, 1);
       assert.deepEqual(preview.candidates.map((candidate) => candidate.id), [
         "unused-signal",
       ]);
       assert.deepEqual(preview.candidates[0]?.botIds, ["bot-a", "bot-b"]);
       assert.equal(preview.candidates[0]?.modeLabel, "Signal");
-      assert.match(preview.candidates[0]?.reason ?? "", /saved only in the Image Library/iu);
+      assert.match(preview.candidates[0]?.reason ?? "", /PRISM-managed asset/iu);
+      assert.equal(preview.candidates[0]?.storageBytes, 0);
+      assert.equal(preview.candidateStorageBytes, 0);
       assert.equal(preview.protectedByReferenceCount, 9);
+      assert.equal(preview.protectedIntentionalAssetCount, 1);
       assert.equal(preview.protectedPlayerAssetCount, 1);
       assert.equal(preview.protectedUnverifiableCount, 1);
       assert.equal(preview.protectedSharedFileCount, 0);
       assert.equal(preview.remoteOnlyCount, 1);
       assert.doesNotMatch(JSON.stringify(preview), /other-user-unused/u);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("allows only orphaned PRISM-managed applet origins", () => {
+    const db = fixture();
+    try {
+      for (const origin of [
+        "botcast",
+        "slate_cover",
+        "zen_wallpaper",
+        "bot_profile_picture",
+      ]) {
+        seedImage(db, `eligible-${origin}`, { origin });
+      }
+      for (const origin of [
+        "images_panel",
+        "zen_chat",
+        "sandbox_chat",
+        "legacy_accessory",
+      ]) {
+        seedImage(db, `intentional-${origin}`, { origin });
+      }
+      seedImage(db, "imported-image", { origin: "asset_import" });
+      seedImage(db, "imported-project-image", {
+        origin: "botcast",
+        purpose: "project_import",
+      });
+
+      const preview = previewUnreferencedImageAssets(db, "user-1");
+      assert.deepEqual(
+        preview.candidates.map((candidate) => candidate.origin).sort(),
+        [
+          "bot_profile_picture",
+          "botcast",
+          "slate_cover",
+          "zen_wallpaper",
+        ],
+      );
+      assert.equal(preview.protectedIntentionalAssetCount, 4);
+      assert.equal(preview.protectedPlayerAssetCount, 2);
     } finally {
       db.close();
     }
@@ -262,13 +314,19 @@ describe("image asset cleanup preview", () => {
       const result = cleanupUnreferencedImageAssets(
         db,
         "user-1",
-        { snapshot: preview.snapshot, imageIds: ["candidate-a"] },
+        {
+          snapshot: preview.snapshot,
+          imageIds: ["candidate-a"],
+          permanent: true,
+        },
         fileOperations,
       );
 
       assert.equal(result.deletedCount, 1);
       assert.equal(result.quarantinedAssetCount, 1);
-      assert.equal(result.recoveryId, "cleanup-test");
+      assert.equal(result.permanentDeleteCompleted, true);
+      assert.equal(result.recoveryRetained, false);
+      assert.equal(result.recoveryId, null);
       assert.deepEqual(quarantined, [["generated-images/user-1/candidate-a.png"]]);
       assert.equal(
         (db.prepare("SELECT COUNT(*) AS count FROM images WHERE id = 'candidate-a'").get() as { count: number }).count,
@@ -286,6 +344,38 @@ describe("image asset cleanup preview", () => {
     }
   });
 
+  it("requires explicit permanent-delete confirmation before mutation", () => {
+    const db = fixture();
+    try {
+      seedImage(db, "candidate-a");
+      const preview = previewUnreferencedImageAssets(db, "user-1");
+      let quarantineCalled = false;
+      assert.throws(
+        () => cleanupUnreferencedImageAssets(
+          db,
+          "user-1",
+          {
+            snapshot: preview.snapshot,
+            imageIds: ["candidate-a"],
+            permanent: false,
+          },
+          {
+            quarantine: () => {
+              quarantineCalled = true;
+              throw new Error("should not move");
+            },
+          },
+        ),
+        (error) =>
+          error instanceof ImageAssetCleanupError &&
+          error.code === "invalid_request",
+      );
+      assert.equal(quarantineCalled, false);
+    } finally {
+      db.close();
+    }
+  });
+
   it("rejects stale previews before any file move", () => {
     const db = fixture();
     try {
@@ -298,7 +388,11 @@ describe("image asset cleanup preview", () => {
         () => cleanupUnreferencedImageAssets(
           db,
           "user-1",
-          { snapshot: preview.snapshot, imageIds: ["candidate-a"] },
+          {
+            snapshot: preview.snapshot,
+            imageIds: ["candidate-a"],
+            permanent: true,
+          },
           { quarantine: () => {
             quarantineCalled = true;
             throw new Error("should not move");
@@ -333,7 +427,11 @@ describe("image asset cleanup preview", () => {
           cleanupUnreferencedImageAssets(
             db,
             "user-1",
-            { snapshot: preview.snapshot, imageIds: ["candidate-a"] },
+            {
+              snapshot: preview.snapshot,
+              imageIds: ["candidate-a"],
+              permanent: true,
+            },
             {
               quarantine: () => {
                 quarantineCalled = true;
@@ -363,7 +461,11 @@ describe("image asset cleanup preview", () => {
           cleanupUnreferencedImageAssets(
             db,
             "user-1",
-            { snapshot: preview.snapshot, imageIds: ["candidate-a"] },
+            {
+              snapshot: preview.snapshot,
+              imageIds: ["candidate-a"],
+              permanent: true,
+            },
             {
               quarantine: () => {
                 quarantineCalled = true;
@@ -403,7 +505,11 @@ describe("image asset cleanup preview", () => {
         () => cleanupUnreferencedImageAssets(
           db,
           "user-1",
-          { snapshot: preview.snapshot, imageIds: ["profile-image"] },
+          {
+            snapshot: preview.snapshot,
+            imageIds: ["profile-image"],
+            permanent: true,
+          },
           {
             quarantine: () => {
               quarantineCalled = true;
@@ -444,7 +550,11 @@ describe("image asset cleanup preview", () => {
       assert.throws(() => cleanupUnreferencedImageAssets(
         db,
         "user-1",
-        { snapshot: preview.snapshot, imageIds: ["candidate-a"] },
+        {
+          snapshot: preview.snapshot,
+          imageIds: ["candidate-a"],
+          permanent: true,
+        },
         {
           recoveryId: () => "rollback-test",
           quarantine: (userId, paths, recoveryId) => ({
@@ -483,6 +593,8 @@ describe("image asset cleanup preview", () => {
       writeGeneratedImageBytes(primary, Buffer.from("png"));
       writeGeneratedImageBytes(thumbnail, Buffer.from("webp"));
       const preview = previewUnreferencedImageAssets(db, "user-1");
+      assert.equal(preview.candidates[0]?.storageBytes, 7);
+      assert.equal(preview.candidateStorageBytes, 7);
       db.exec(`
         CREATE TRIGGER reject_real_candidate_cleanup
         BEFORE DELETE ON images
@@ -496,7 +608,11 @@ describe("image asset cleanup preview", () => {
         cleanupUnreferencedImageAssets(
           db,
           "user-1",
-          { snapshot: preview.snapshot, imageIds: ["candidate-a"] },
+          {
+            snapshot: preview.snapshot,
+            imageIds: ["candidate-a"],
+            permanent: true,
+          },
           { recoveryId: () => "real-rollback" },
         ),
       );
@@ -569,7 +685,11 @@ describe("image asset cleanup preview", () => {
           cleanupUnreferencedImageAssets(
             db,
             "user-1",
-            { snapshot: preview.snapshot, imageIds: [hiddenId] },
+            {
+              snapshot: preview.snapshot,
+              imageIds: [hiddenId],
+              permanent: true,
+            },
             {
               quarantine: () => {
                 quarantineCalled = true;
@@ -587,7 +707,60 @@ describe("image asset cleanup preview", () => {
     }
   });
 
-  it("round-trips rows and files through owner-only recovery and permanent purge", () => {
+  it("permanently purges quarantined PNG and thumbnail bytes after commit", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "prism-cleanup-permanent-purge-"));
+    const previousDbPath = process.env.DB_PATH;
+    const previousDataDir = process.env.LOCALAI_DATA_DIR;
+    process.env.DB_PATH = join(tempDir, "localai.db");
+    delete process.env.LOCALAI_DATA_DIR;
+    const db = fixture();
+    try {
+      seedImage(db, "candidate-a");
+      const primary = "generated-images/user-1/candidate-a.png";
+      const thumbnail = thumbWebpRelativePathFromPngRelativePath(primary);
+      writeGeneratedImageBytes(primary, Buffer.from("png"));
+      writeGeneratedImageBytes(thumbnail, Buffer.from("webp"));
+      const preview = previewUnreferencedImageAssets(db, "user-1");
+      assert.equal(preview.candidates[0]?.storageBytes, 7);
+      assert.equal(preview.candidateStorageBytes, 7);
+      const cleaned = cleanupUnreferencedImageAssets(
+        db,
+        "user-1",
+        {
+          snapshot: preview.snapshot,
+          imageIds: ["candidate-a"],
+          permanent: true,
+        },
+        { recoveryId: () => "permanent-success" },
+      );
+
+      assert.equal(cleaned.selectedStorageBytes, 7);
+      assert.equal(cleaned.reclaimedBytes, 7);
+      assert.equal(cleaned.permanentDeleteCompleted, true);
+      assert.equal(cleaned.recoveryRetained, false);
+      assert.equal(cleaned.recoveryId, null);
+      assert.equal(existsSync(resolveAbsoluteUnderDataRoot(primary)), false);
+      assert.equal(existsSync(resolveAbsoluteUnderDataRoot(thumbnail)), false);
+      assert.equal(
+        existsSync(
+          resolveAbsoluteUnderDataRoot(
+            "asset-cleanup-trash/user-1/permanent-success",
+          ),
+        ),
+        false,
+      );
+      assert.equal(listImageAssetCleanupRecoveries(db, "user-1").length, 0);
+    } finally {
+      db.close();
+      if (previousDbPath === undefined) delete process.env.DB_PATH;
+      else process.env.DB_PATH = previousDbPath;
+      if (previousDataDir === undefined) delete process.env.LOCALAI_DATA_DIR;
+      else process.env.LOCALAI_DATA_DIR = previousDataDir;
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("retains a recoverable owner-only batch when final purge fails", () => {
     const tempDir = mkdtempSync(join(tmpdir(), "prism-cleanup-recovery-roundtrip-"));
     const previousDbPath = process.env.DB_PATH;
     const previousDataDir = process.env.LOCALAI_DATA_DIR;
@@ -604,10 +777,23 @@ describe("image asset cleanup preview", () => {
       const cleaned = cleanupUnreferencedImageAssets(
         db,
         "user-1",
-        { snapshot: preview.snapshot, imageIds: ["candidate-a"] },
-        { recoveryId: () => "roundtrip" },
+        {
+          snapshot: preview.snapshot,
+          imageIds: ["candidate-a"],
+          permanent: true,
+        },
+        {
+          recoveryId: () => "roundtrip",
+          purge: () => {
+            throw new Error("simulated final purge failure");
+          },
+        },
       );
       assert.equal(cleaned.deletedCount, 1);
+      assert.equal(cleaned.permanentDeleteCompleted, false);
+      assert.equal(cleaned.recoveryRetained, true);
+      assert.equal(cleaned.reclaimedBytes, 0);
+      assert.equal(cleaned.recoveryId, "roundtrip");
       assert.equal(listImageAssetCleanupRecoveries(db, "user-2").length, 0);
       assert.equal(
         restoreImageAssetCleanupRecovery(db, "user-2", "roundtrip"),
@@ -632,8 +818,17 @@ describe("image asset cleanup preview", () => {
       cleanupUnreferencedImageAssets(
         db,
         "user-1",
-        { snapshot: secondPreview.snapshot, imageIds: ["candidate-a"] },
-        { recoveryId: () => "permanent" },
+        {
+          snapshot: secondPreview.snapshot,
+          imageIds: ["candidate-a"],
+          permanent: true,
+        },
+        {
+          recoveryId: () => "permanent",
+          purge: () => {
+            throw new Error("retain for explicit purge test");
+          },
+        },
       );
       assert.equal(
         permanentlyDeleteImageAssetCleanupRecovery(
@@ -681,7 +876,11 @@ describe("image asset cleanup preview", () => {
         cleanupUnreferencedImageAssets(
           db,
           "user-1",
-          { snapshot: preview.snapshot, imageIds: ["candidate-a"] },
+          {
+            snapshot: preview.snapshot,
+            imageIds: ["candidate-a"],
+            permanent: true,
+          },
           {
             recoveryId: () => "interrupted",
             restore: () => undefined,

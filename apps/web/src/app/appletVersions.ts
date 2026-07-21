@@ -53,6 +53,7 @@ export type BotPowerEternalIntroductionModePolicy = BotPowerGhostModePolicy;
 export type BotPowerMoodBoostModePolicy = BotPowerGhostModePolicy;
 export type BotPowerMoodDrainModePolicy = BotPowerGhostModePolicy;
 export type BotPowerThemeCompoundModePolicy = BotPowerGhostModePolicy;
+export type BotPowerSpectralPerceptionModePolicy = BotPowerGhostModePolicy;
 
 export interface PrismAppletVersion {
   id: PrismAppletId;
@@ -65,13 +66,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   chat: {
     id: "chat",
     name: "Chat",
-    version: "1.22",
+    version: "1.24",
     status: "active",
   },
   zen: {
     id: "zen",
     name: "Zen",
-    version: "1.21",
+    version: "1.23",
     status: "active",
   },
   arena: {
@@ -89,13 +90,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   coffee: {
     id: "coffee",
     name: "Coffee",
-    version: "2.19",
+    version: "2.21",
     status: "active",
   },
   botcast: {
     id: "botcast",
     name: "Signal",
-    version: "1.34",
+    version: "1.40",
     status: "active",
   },
   feed: {
@@ -113,7 +114,7 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   story: {
     id: "story",
     name: "Story",
-    version: "0.20",
+    version: "0.22",
     status: "preview",
   },
   gym: {
@@ -140,6 +141,26 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
     version: "0.0",
     status: "planned",
   },
+};
+
+/** Participant perception stays separate from the human live/replay projection. */
+export const BOT_POWER_SPECTRAL_PERCEPTION_MODE_POLICY: Record<
+  PrismAppletId,
+  BotPowerSpectralPerceptionModePolicy
+> = {
+  chat: "direct",
+  zen: "direct",
+  arena: "deferred",
+  polling: "deferred",
+  coffee: "direct",
+  botcast: "direct",
+  feed: "deferred",
+  games: "deferred",
+  story: "adapted",
+  gym: "deferred",
+  slate: "irrelevant",
+  pseudo: "deferred",
+  surf: "deferred",
 };
 
 /** Direct-address identity theft exists only where bots can address bots at runtime. */

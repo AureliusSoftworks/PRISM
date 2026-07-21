@@ -34,8 +34,8 @@ export type BotFaceEyeCount = (typeof BOT_FACE_EYE_COUNTS)[number];
 /** A custom glyph is one authored eye unit unless the user opts into a pair. */
 export const DEFAULT_BOT_FACE_EYE_COUNT: BotFaceEyeCount = 1;
 export const DEFAULT_BOT_FACE_MOUTH_CHARACTER: string | null = null;
-/** Existing custom mouths stay visible during Coffee sips until explicitly opted in. */
-export const DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER = false;
+/** Custom mouths use the Coffee sip pucker unless the player explicitly opts out. */
+export const DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER = true;
 export const DEFAULT_BOT_FACE_FONT_WEIGHT = 600;
 export const BOT_FACE_FONT_WEIGHT_MIN = 300;
 export const BOT_FACE_FONT_WEIGHT_MAX = 800;

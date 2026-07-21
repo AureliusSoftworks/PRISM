@@ -1,5 +1,6 @@
 import {
   BOTCAST_LOCAL_INTRO_DURATION_MS,
+  BOTCAST_LOCAL_OUTDENT_DURATION_MS,
   type BotcastIntroAudioState,
   type SignalMusicPalette,
   type SignalMusicProfile,
@@ -7,7 +8,8 @@ import {
 } from "@localai/shared";
 
 export const SIGNAL_SYNTH_IDENT_DURATION_MS = BOTCAST_LOCAL_INTRO_DURATION_MS;
-export const SIGNAL_SYNTH_OUTRO_DURATION_MS = 1_800;
+export const SIGNAL_SYNTH_OUTDENT_DURATION_MS =
+  BOTCAST_LOCAL_OUTDENT_DURATION_MS;
 export const SIGNAL_EPISODE_INTRO_LEAD_IN_MS = 180;
 export const SIGNAL_AUDIO_STOP_FADE_MS = 320;
 
@@ -38,7 +40,6 @@ type SignalSynthTemperamentRecipe = Omit<
   "durationMs" | "temperament" | "palette" | "notes"
 > & {
   rootMidi: number;
-  motif: readonly [number, number, number, number];
   supportIntervals: readonly number[];
   pulseBeats: readonly number[];
   melodyWaveform: SignalSynthNote["waveform"];
@@ -61,7 +62,6 @@ const SIGNAL_SYNTH_TEMPERAMENT_RECIPES: Record<
     contour: "descending",
     ending: "hard",
     rootMidi: 43,
-    motif: [7, 5, 3, 0],
     supportIntervals: [0, 7, 10],
     pulseBeats: [0, 2, 4, 6],
     melodyWaveform: "soft-square",
@@ -79,7 +79,6 @@ const SIGNAL_SYNTH_TEMPERAMENT_RECIPES: Record<
     contour: "turning",
     ending: "resolve",
     rootMidi: 46,
-    motif: [0, 3, 7, 5],
     supportIntervals: [0, 7],
     pulseBeats: [0, 3, 6],
     melodyWaveform: "triangle",
@@ -97,7 +96,6 @@ const SIGNAL_SYNTH_TEMPERAMENT_RECIPES: Record<
     contour: "bouncing",
     ending: "lift",
     rootMidi: 51,
-    motif: [0, 7, 4, 12],
     supportIntervals: [0, 4, 7],
     pulseBeats: [0, 1.5, 3, 4.5, 6],
     melodyWaveform: "triangle",
@@ -115,7 +113,6 @@ const SIGNAL_SYNTH_TEMPERAMENT_RECIPES: Record<
     contour: "stepwise",
     ending: "button",
     rootMidi: 48,
-    motif: [0, 2, 5, 7],
     supportIntervals: [0, 7],
     pulseBeats: [0, 2, 4, 6],
     melodyWaveform: "soft-square",
@@ -133,7 +130,6 @@ const SIGNAL_SYNTH_TEMPERAMENT_RECIPES: Record<
     contour: "asymmetric",
     ending: "button",
     rootMidi: 48,
-    motif: [0, 3, 7, 9],
     supportIntervals: [0, 4, 7],
     pulseBeats: [0, 1.5, 3, 4.5, 6],
     melodyWaveform: "soft-square",
@@ -151,7 +147,6 @@ const SIGNAL_SYNTH_TEMPERAMENT_RECIPES: Record<
     contour: "arch",
     ending: "resolve",
     rootMidi: 48,
-    motif: [0, 5, 7, 3],
     supportIntervals: [0, 3, 7],
     pulseBeats: [0, 2, 4, 6],
     melodyWaveform: "triangle",
@@ -169,7 +164,6 @@ const SIGNAL_SYNTH_TEMPERAMENT_RECIPES: Record<
     contour: "asymmetric",
     ending: "resolve",
     rootMidi: 50,
-    motif: [0, 5, 3, 10],
     supportIntervals: [0, 5, 10],
     pulseBeats: [0, 2, 3.5, 5, 6],
     melodyWaveform: "triangle",
@@ -187,7 +181,6 @@ const SIGNAL_SYNTH_TEMPERAMENT_RECIPES: Record<
     contour: "ascending",
     ending: "button",
     rootMidi: 49,
-    motif: [0, 5, 7, 12],
     supportIntervals: [0, 5, 7],
     pulseBeats: [0, 1.5, 3, 4.5, 6],
     melodyWaveform: "soft-square",
@@ -205,7 +198,6 @@ const SIGNAL_SYNTH_TEMPERAMENT_RECIPES: Record<
     contour: "balanced",
     ending: "button",
     rootMidi: 48,
-    motif: [0, 2, 7, 5],
     supportIntervals: [0, 7, 10],
     pulseBeats: [0, 2, 4, 6],
     melodyWaveform: "triangle",
@@ -397,43 +389,50 @@ export function buildSignalSynthIdentPlan(args: {
   const hash = stableHash(args.seed);
   const tempoBpm = args.profile.tempoBpm;
   const beatMs = 60_000 / tempoBpm;
-  const root = recipe.rootMidi + palette.rootShift + (hash % 3);
+  const root = recipe.rootMidi + palette.rootShift + (hash % 5) - 2;
   const notes: SignalSynthNote[] = [];
+  const answerStartMs = Math.max(3_900, beatMs * 6.2);
 
-  for (const interval of recipe.supportIntervals) {
-    notes.push({
-      startMs: 0,
-      durationMs: beatMs * (
-        args.profile.temperament === "commanding" ? 0.9 : 1.45
-      ),
-      midi: root + interval,
-      gain: interval === 0 ? 0.036 : 0.021,
-      waveform: palette.supportWaveform ?? recipe.supportWaveform,
-      attackMs: recipe.supportAttackMs * palette.supportAttackScale,
-      releaseMs: recipe.supportReleaseMs * palette.supportReleaseScale,
-      lowpassHz: Math.max(
-        950,
-        recipe.melodyLowpassHz * palette.lowpassScale - 1_450,
-      ),
-    });
+  for (const phraseStartMs of [0, answerStartMs]) {
+    for (const interval of recipe.supportIntervals) {
+      notes.push({
+        startMs: phraseStartMs,
+        durationMs:
+          beatMs * (phraseStartMs === 0 ? 1.45 : 2.7),
+        midi: root + interval,
+        gain: interval === 0 ? 0.036 : 0.021,
+        waveform: palette.supportWaveform ?? recipe.supportWaveform,
+        attackMs: recipe.supportAttackMs * palette.supportAttackScale,
+        releaseMs: recipe.supportReleaseMs * palette.supportReleaseScale,
+        lowpassHz: Math.max(
+          950,
+          recipe.melodyLowpassHz * palette.lowpassScale - 1_450,
+        ),
+      });
+    }
   }
 
-  for (const beat of recipe.pulseBeats) {
-    notes.push({
-      startMs: 180 + beat * beatMs,
-      durationMs: beatMs * 0.82,
-      midi: root - 12 + (
-        beat === recipe.pulseBeats[recipe.pulseBeats.length - 1] &&
-        args.profile.ending !== "hard"
-          ? 7
-          : 0
-      ),
-      gain: recipe.pulseGain * palette.pulseGainScale,
-      waveform: "soft-square",
-      attackMs: args.profile.ending === "hard" ? 5 : 12,
-      releaseMs: 190,
-      lowpassHz: args.profile.ending === "hard" ? 620 : 470,
-    });
+  for (const [phraseStartMs, pulseBeats] of [
+    [0, recipe.pulseBeats],
+    [answerStartMs, [0, 1.5, 3]],
+  ] as const) {
+    for (const beat of pulseBeats) {
+      notes.push({
+        startMs: phraseStartMs + 180 + beat * beatMs,
+        durationMs: beatMs * 0.82,
+        midi: root - 12 + (
+          beat === pulseBeats[pulseBeats.length - 1] &&
+          args.profile.ending !== "hard"
+            ? 7
+            : 0
+        ),
+        gain: recipe.pulseGain * palette.pulseGainScale,
+        waveform: "soft-square",
+        attackMs: args.profile.ending === "hard" ? 5 : 12,
+        releaseMs: 190,
+        lowpassHz: args.profile.ending === "hard" ? 620 : 470,
+      });
+    }
   }
 
   const motifBeats = SIGNAL_SYNTH_PALETTE_MOTIF_BEATS[args.profile.palette];
@@ -442,8 +441,8 @@ export function buildSignalSynthIdentPlan(args: {
     : args.profile.temperament === "contemplative"
       ? 7
       : 12;
-  recipe.motif.forEach((interval, index) => {
-    const finalNote = index === recipe.motif.length - 1;
+  args.profile.motifIntervals.forEach((interval, index) => {
+    const finalNote = index === args.profile.motifIntervals.length - 1;
     notes.push({
       startMs: 60 + motifBeats[index]! * beatMs,
       durationMs: finalNote
@@ -460,6 +459,38 @@ export function buildSignalSynthIdentPlan(args: {
             ? 220
             : 620) * palette.melodyReleaseScale
         : 210 * palette.melodyReleaseScale,
+      lowpassHz: recipe.melodyLowpassHz * palette.lowpassScale,
+    });
+  });
+
+  const answerIntervals = [
+    args.profile.motifIntervals[1],
+    args.profile.motifIntervals[2],
+    args.profile.motifIntervals[3],
+    args.profile.ending === "lift"
+      ? args.profile.motifIntervals[3] + 7
+      : 0,
+  ] as const;
+  const answerBeats = [0, 0.85, 2.05, 3.25] as const;
+  answerIntervals.forEach((interval, index) => {
+    const finalNote = index === answerIntervals.length - 1;
+    notes.push({
+      startMs:
+        answerStartMs +
+        (answerBeats[index]! + args.profile.variant * 0.08) * beatMs,
+      durationMs: finalNote
+        ? beatMs * (args.profile.ending === "hard" ? 0.8 : 1.75)
+        : beatMs * 0.74,
+      midi: root + melodyOffset + interval,
+      gain: finalNote ? recipe.melodyGain + 0.018 : recipe.melodyGain * 0.96,
+      waveform: palette.melodyWaveform ?? recipe.melodyWaveform,
+      attackMs:
+        palette.melodyAttackMs ?? (args.profile.ending === "hard" ? 4 : 10),
+      releaseMs: finalNote
+        ? (args.profile.ending === "hard" || args.profile.ending === "button"
+            ? 260
+            : 680) * palette.melodyReleaseScale
+        : 220 * palette.melodyReleaseScale,
       lowpassHz: recipe.melodyLowpassHz * palette.lowpassScale,
     });
   });
@@ -490,52 +521,69 @@ export function buildSignalSynthIdentPlan(args: {
   };
 }
 
-/** Builds a shorter resolving cadence for the end of a Signal episode. */
-export function buildSignalSynthOutroPlan(seed: string): SignalSynthIdentPlan {
-  const hash = stableHash(`${seed}:outro`);
-  const root = 45 + ((hash >>> 4) % 9);
-  const notes: SignalSynthNote[] = [
-    {
+/** Builds the shorter closing half of one host's stable audio signature. */
+export function buildSignalSynthOutdentPlan(args: {
+  profile: SignalMusicProfile;
+  seed: string;
+}): SignalSynthIdentPlan {
+  const recipe = SIGNAL_SYNTH_TEMPERAMENT_RECIPES[args.profile.temperament];
+  const palette = SIGNAL_SYNTH_PALETTE_RECIPES[args.profile.palette];
+  const hash = stableHash(args.seed);
+  const beatMs = 60_000 / args.profile.tempoBpm;
+  const root = recipe.rootMidi + palette.rootShift + (hash % 5) - 2;
+  const melodyOffset = args.profile.temperament === "commanding"
+    ? 0
+    : args.profile.temperament === "contemplative"
+      ? 7
+      : 12;
+  const notes: SignalSynthNote[] = recipe.supportIntervals.map(
+    (interval) => ({
       startMs: 0,
-      durationMs: 1_650,
-      midi: root,
-      gain: 0.042,
-      waveform: "sine",
-      attackMs: 80,
-      releaseMs: 620,
-      lowpassHz: 1_050,
-    },
-    {
-      startMs: 0,
-      durationMs: 1_650,
-      midi: root + 7,
-      gain: 0.026,
-      waveform: "sine",
-      attackMs: 100,
-      releaseMs: 660,
-      lowpassHz: 1_350,
-    },
-  ];
-  [12, 7, hash % 2 === 0 ? 3 : 4, 0].forEach((interval, index) => {
+      durationMs: SIGNAL_SYNTH_OUTDENT_DURATION_MS - 180,
+      midi: root + interval,
+      gain: interval === 0 ? 0.034 : 0.019,
+      waveform: palette.supportWaveform ?? recipe.supportWaveform,
+      attackMs: recipe.supportAttackMs * palette.supportAttackScale,
+      releaseMs: Math.max(
+        540,
+        recipe.supportReleaseMs * palette.supportReleaseScale,
+      ),
+      lowpassHz: Math.max(
+        900,
+        recipe.melodyLowpassHz * palette.lowpassScale - 1_500,
+      ),
+    }),
+  );
+  const recallIntervals = [
+    args.profile.motifIntervals[2],
+    args.profile.motifIntervals[1],
+    args.profile.motifIntervals[3],
+    0,
+  ] as const;
+  const recallBeats = [0, 0.72, 1.55, 2.65] as const;
+  recallIntervals.forEach((interval, index) => {
+    const finalNote = index === recallIntervals.length - 1;
     notes.push({
-      startMs: 90 + index * 360,
-      durationMs: index === 3 ? 760 : 420,
-      midi: root + 12 + interval,
-      gain: index === 3 ? 0.105 : 0.082,
-      waveform: "triangle",
-      attackMs: 10,
-      releaseMs: index === 3 ? 520 : 180,
-      lowpassHz: 2_450,
+      startMs: 50 + recallBeats[index]! * beatMs,
+      durationMs: finalNote ? beatMs * 1.2 : beatMs * 0.58,
+      midi: root + melodyOffset + interval,
+      gain: finalNote ? recipe.melodyGain + 0.014 : recipe.melodyGain * 0.9,
+      waveform: palette.melodyWaveform ?? recipe.melodyWaveform,
+      attackMs: palette.melodyAttackMs ?? 8,
+      releaseMs: finalNote
+        ? Math.max(460, 620 * palette.melodyReleaseScale)
+        : 170 * palette.melodyReleaseScale,
+      lowpassHz: recipe.melodyLowpassHz * palette.lowpassScale,
     });
   });
   return {
-    durationMs: SIGNAL_SYNTH_OUTRO_DURATION_MS,
-    tempoBpm: 100,
-    temperament: "neutral",
-    palette: "broadcast",
-    register: "middle",
-    contour: "descending",
-    ending: "resolve",
+    durationMs: SIGNAL_SYNTH_OUTDENT_DURATION_MS,
+    tempoBpm: args.profile.tempoBpm,
+    temperament: args.profile.temperament,
+    palette: args.profile.palette,
+    register: args.profile.register,
+    contour: args.profile.contour,
+    ending: args.profile.ending,
     notes,
   };
 }
@@ -776,13 +824,20 @@ export function playSignalIntroAudio(args: {
   return { durationMs, finished };
 }
 
-export function playSignalOutroAudio(args: {
+export function playSignalOutdentAudio(args: {
+  profile: SignalMusicProfile;
   seed: string;
+  introAudio: BotcastIntroAudioState;
   enabled: boolean;
   volume: number;
 }): { durationMs: number; finished: Promise<void> } {
   stopSignalIntroAudio();
-  const durationMs = SIGNAL_SYNTH_OUTRO_DURATION_MS;
+  const useCachedOutdent =
+    args.introAudio.source === "elevenlabs" &&
+    Boolean(args.introAudio.outdentAudioUrl);
+  const durationMs = useCachedOutdent
+    ? Math.max(3_000, args.introAudio.outdentDurationMs)
+    : SIGNAL_SYNTH_OUTDENT_DURATION_MS;
   if (
     !args.enabled ||
     typeof Audio === "undefined" ||
@@ -791,14 +846,24 @@ export function playSignalOutroAudio(args: {
     return { durationMs, finished: Promise.resolve() };
   }
 
-  const wave = encodeSignalSynthIdentWave(buildSignalSynthOutroPlan(args.seed));
-  const objectUrl = URL.createObjectURL(
-    new Blob([wave], { type: "audio/wav" }),
-  );
   const audio = new Audio();
   audio.preload = "auto";
-  audio.volume = Math.max(0, Math.min(1, args.volume * 0.82));
-  audio.src = objectUrl;
+  audio.volume = Math.max(0, Math.min(1, args.volume * 0.9));
+  let objectUrl: string | null = null;
+  if (useCachedOutdent) {
+    audio.src = args.introAudio.outdentAudioUrl!;
+  } else {
+    const wave = encodeSignalSynthIdentWave(
+      buildSignalSynthOutdentPlan({
+        profile: args.profile,
+        seed: args.seed,
+      }),
+    );
+    objectUrl = URL.createObjectURL(
+      new Blob([wave], { type: "audio/wav" }),
+    );
+    audio.src = objectUrl;
+  }
   const finished = playSignalAudio({
     audio,
     objectUrl,

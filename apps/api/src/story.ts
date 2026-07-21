@@ -21,7 +21,10 @@ import {
   botPowerIntermittentMuteTurnIsIgnoredV1,
   botPowerIsMutedV1,
   botPowerMumblesSpeechV1,
+  botPowerResponseIsSilentV1,
   botPowerObserverCueLinesV1,
+  botPowerPairwisePerceptionV1,
+  botPowerAvatarVisibilityModeV1,
   botPowerSelfCueLinesV1,
   botPowerThemeMoodCueV1,
   buildBotPowersPromptBlock,
@@ -927,6 +930,16 @@ function coerceGeneratedStoryEpisodeShape(value: unknown): unknown {
     const id = stringValue(scene.id) ?? generatedId("scene", index);
     const title = stringValue(scene.title) ?? `Scene ${index + 1}`;
     const narration = normalizeGeneratedNarration(title, stringValue(scene.narration) ?? title);
+    const rawSpritePose = stringValue(scene.spritePose);
+    const spritePose =
+      rawSpritePose === "idle" ||
+      rawSpritePose === "speaking" ||
+      rawSpritePose === "thinking" ||
+      rawSpritePose === "action"
+        ? rawSpritePose
+        : stringValue(scene.speakerBotId)
+          ? "speaking"
+          : "idle";
     const choicesRaw = Array.isArray(scene.choices) ? scene.choices : [];
     const choices = choicesRaw.map((choiceEntry, choiceIndex) => {
       const choice = asMutableObject(choiceEntry) ?? {};
@@ -954,7 +967,7 @@ function coerceGeneratedStoryEpisodeShape(value: unknown): unknown {
       narration,
       speakerBotId: stringValue(scene.speakerBotId),
       speakerName: stringValue(scene.speakerName) ?? "",
-      spritePose: stringValue(scene.spritePose) ?? "idle",
+      spritePose,
       backgroundAssetId: stringValue(scene.backgroundAssetId) ?? null,
       cutsceneAssetId: stringValue(scene.cutsceneAssetId) ?? null,
       itemIds: Array.isArray(scene.itemIds) ? scene.itemIds : [],
@@ -1229,6 +1242,17 @@ function applyStoryHardResponsePowers(
         ) !== null,
     ),
   );
+  const hasPerceptionBoundary = bots.some((holder) =>
+    bots.some(
+      (observer) =>
+        holder.id !== observer.id &&
+        !botPowerPairwisePerceptionV1(
+          holder.powers,
+          (target) => storyPowerTargetMatches(target, observer),
+          { holderSpeaking: true },
+        ).audible,
+    ),
+  );
   if (
     mutedBotIds.size === 0 &&
     eternalIntroductionBotIds.size === 0 &&
@@ -1236,7 +1260,8 @@ function applyStoryHardResponsePowers(
     mumblingBotIds.size === 0 &&
     !bots.some((bot) => botPowerIntermittentMuteEffectV1(bot.powers)) &&
     responseBudgetByBotId.size === 0 &&
-    !hasInterruptionPower
+    !hasInterruptionPower &&
+    !hasPerceptionBoundary
   ) {
     return episode;
   }
@@ -1373,6 +1398,27 @@ function applyStoryHardResponsePowers(
       nextScene = {
         ...nextScene,
         narration: applyBotPowerMumbledResponseV1(nextScene.narration),
+      };
+    }
+    const priorPerception =
+      currentSpeaker && priorSpeaker && currentSpeaker.id !== priorSpeaker.id
+        ? botPowerPairwisePerceptionV1(
+            priorSpeaker.powers,
+            (target) => storyPowerTargetMatches(target, currentSpeaker),
+            { holderSpeaking: true },
+          )
+        : null;
+    if (
+      currentSpeaker &&
+      priorSpeaker &&
+      priorScene &&
+      priorPerception?.audible === false &&
+      !botPowerResponseIsSilentV1(priorScene.narration) &&
+      !botPowerResponseIsSilentV1(nextScene.narration)
+    ) {
+      nextScene = {
+        ...nextScene,
+        narration: `*Unable to hear ${priorSpeaker.name}, ${currentSpeaker.name} begins before ${priorSpeaker.name} has finished; both voices continue over one another, neither line cut short.* ${nextScene.narration}`,
       };
     }
     scenes.push(nextScene);
@@ -1567,14 +1613,51 @@ function storyEternalIntroductionPowerRules(
   return bots.flatMap((holder) => {
     if (!botPowerEternallyIntroducesV1(holder.powers)) return [];
     return [
-      `Story adaptation for ${holder.name}: for each spoken scene, give ${holder.name} only the current other-speaker beat immediately preceding that scene. ${holder.name} responds directly to its concrete content as fresh first contact, has no memory of prior turns or their own earlier scenes, and never claims older relationship history or explains the memory rule. If accused of repetition, ${holder.name} reacts with sincere confusion instead of agreeing or explaining. Do not force a self-introduction or identical copy unless the immediate scene genuinely warrants one. Other characters retain the full story and may react to repetition through their own personalities.`,
+      `Story adaptation for ${holder.name}: for each spoken scene, give ${holder.name} only the current other-speaker beat immediately preceding that scene. ${holder.name} does not retain the episode premise or topic unless that immediate beat states it, responds directly to its concrete content as fresh first contact, has no memory of prior turns or their own earlier scenes, and never claims older relationship history or explains the memory rule. If accused of repetition, ${holder.name} reacts with sincere confusion instead of agreeing or explaining. Do not force a self-introduction or identical copy unless the immediate scene genuinely warrants one. Other characters retain the full story and may react to repetition through their own personalities.`,
     ];
   });
+}
+
+function storyPerceptionPowerRules(
+  bots: readonly StoryBotProfile[],
+): string[] {
+  const lines: string[] = [];
+  for (const holder of bots) {
+    if (botPowerAvatarVisibilityModeV1(holder.powers) === "translucent") {
+      lines.push(
+        `Omniscient Story presentation for ${holder.name}: the narrator and player always see ${holder.name} half-translucently and receive every non-muted word. This observer access never grants knowledge to another character.`,
+      );
+    }
+    for (const observer of bots) {
+      if (observer.id === holder.id) continue;
+      const perception = botPowerPairwisePerceptionV1(
+        holder.powers,
+        (target) => storyPowerTargetMatches(target, observer),
+        { holderSpeaking: true },
+      );
+      if (perception.visible && perception.audible) continue;
+      if (perception.audible) {
+        lines.push(
+          `Pairwise perception for ${observer.name} → ${holder.name}: ${observer.name} hears ${holder.name} as a disembodied voice but cannot see a body, pose, expression, or gesture.`,
+        );
+      } else if (perception.visible) {
+        lines.push(
+          `Pairwise perception for ${observer.name} → ${holder.name}: ${observer.name} can see ${holder.name} but hears none of ${holder.name}'s speech; reactions may use visible action only.`,
+        );
+      } else {
+        lines.push(
+          `Pairwise perception for ${observer.name} → ${holder.name}: ${observer.name} cannot see or hear ${holder.name}, must never react to or reveal that hidden presence or speech, and may begin speaking before ${holder.name} finishes. Preserve both characters' complete words as accidental overlapping prose; never pause time.`,
+        );
+      }
+    }
+  }
+  return lines;
 }
 
 function storyGenerationPrompt(args: StoryGenerationInput): string {
   const powerAdaptationRules = [
     ...storyEternalIntroductionPowerRules(args.bots),
+    ...storyPerceptionPowerRules(args.bots),
     ...storyCandorPowerRules(args.bots),
     ...storyMoodBoostPowerRules(args.bots, args.theme),
     ...storyMoodDrainPowerRules(args.bots, args.theme),

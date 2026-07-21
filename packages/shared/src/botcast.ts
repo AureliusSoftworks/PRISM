@@ -12,6 +12,8 @@ import {
   botPowerAvatarVisibilityModeV1,
   botPowerResponseIsSilentV1,
   type BotPowerAvatarVisibilityModeV1,
+  type BotPowerObserverPerspectiveV1,
+  type BotPowerObserverVisibilityV1,
 } from "./botPower.ts";
 
 export type BotcastEpisodeSegment = "opening" | "interview" | "closing";
@@ -27,6 +29,7 @@ export type BotcastGuestKind = "bot" | "producer";
 export const BOTCAST_PRODUCER_GUEST_ID = "__signal_producer_guest__";
 export const BOTCAST_PRODUCER_GUEST_NAME = "the Producer";
 export const BOTCAST_PRODUCER_GUEST_THINKING_TIME_SCALE = 0.5;
+export const BOTCAST_PERSONA_REVIEW_VISIBILITY_DELAY_MS = 4 * 60 * 60 * 1_000;
 /** `audience_only` is the legacy internal name for a guest isolated from the host. */
 export type BotcastGuestPresenceMode = "present" | "audience_only";
 export type BotcastSessionDurationMinutes = number;
@@ -37,8 +40,10 @@ export const BOTCAST_AUTO_MIN_EXCHANGES = 3;
 export const BOTCAST_AUTO_MAX_EXCHANGES = 60;
 export const BOTCAST_AUTO_MIN_SUBSTANTIVE_GUEST_ANSWERS = 3;
 export const BOTCAST_TIMED_MAX_UTTERANCES = 120;
-export const BOTCAST_LOCAL_INTRO_DURATION_MS = 5_600;
-export const BOTCAST_ELEVENLABS_INTRO_DURATION_MS = 6_000;
+export const BOTCAST_LOCAL_INTRO_DURATION_MS = 7_800;
+export const BOTCAST_ELEVENLABS_INTRO_DURATION_MS = 8_000;
+export const BOTCAST_LOCAL_OUTDENT_DURATION_MS = 3_200;
+export const BOTCAST_ELEVENLABS_OUTDENT_DURATION_MS = 4_000;
 export const BOTCAST_DASHBOARD_BLURB_FALLBACKS = [
   "Episode 4: Now with 12% more dramatic pause.",
   "Guest chair's open. Bring me someone interesting",
@@ -219,6 +224,16 @@ export interface BotcastAtmosphereState {
   status: "fallback" | "ready" | "failed";
 }
 
+/** Neutral receiver response derived from the installed Light/Dark studio pair. */
+export interface BotcastStudioLightingState {
+  imageUrl: string | null;
+  imageId: string | null;
+  sourceDayImageId: string | null;
+  sourceNightImageId: string | null;
+  revision: number;
+  status: "missing" | "ready" | "stale" | "failed";
+}
+
 export interface BotcastStudioPoint {
   x: number;
   y: number;
@@ -241,14 +256,19 @@ export interface BotcastStudioAtmosphereMix {
   background: number;
   grain: number;
   foley: number;
+  /** Visual film grain over the composited studio screen; never an audio bus. */
+  filmGrain: number;
 }
 
+export const BOTCAST_DEFAULT_STUDIO_FILM_GRAIN = 0.3;
+export const BOTCAST_STUDIO_FILM_GRAIN_MAX = 1;
 export const BOTCAST_DEFAULT_STUDIO_ATMOSPHERE_MIX: Readonly<BotcastStudioAtmosphereMix> = {
   background: 0.16,
   // Retained in the persisted shape for compatibility, but Signal no longer
   // layers a separate static/grain bed over its studio atmosphere.
   grain: 0,
   foley: 1,
+  filmGrain: BOTCAST_DEFAULT_STUDIO_FILM_GRAIN,
 };
 export const BOTCAST_STUDIO_ATMOSPHERE_MIX_RELATIVE_MAX = 2;
 
@@ -299,6 +319,11 @@ export function normalizeBotcastStudioAtmosphereMix(
       fallback.foley,
       BOTCAST_DEFAULT_STUDIO_ATMOSPHERE_MIX.foley *
         BOTCAST_STUDIO_ATMOSPHERE_MIX_RELATIVE_MAX,
+    ),
+    filmGrain: normalizeBotcastStudioAtmosphereMixLevel(
+      container.filmGrain,
+      fallback.filmGrain,
+      BOTCAST_STUDIO_FILM_GRAIN_MAX,
     ),
   };
 }
@@ -357,18 +382,26 @@ export function botcastVoiceLevelForBot(
 }
 
 export const BOTCAST_DEFAULT_STUDIO_LAYOUT: BotcastStudioLayout = {
-  hostBot: { x: 22.5, y: 71.25 },
-  guestBot: { x: 77.5, y: 71.25 },
-  hostCup: { x: 36.25, y: 90 },
-  guestCup: { x: 63.75, y: 90 },
+  hostBot: { x: 18.5, y: 66 },
+  guestBot: { x: 81.5, y: 66 },
+  hostCup: { x: 36.25, y: 86 },
+  guestCup: { x: 63.75, y: 86 },
 };
 
-const BOTCAST_LEGACY_DEFAULT_STUDIO_LAYOUT = {
-  hostBot: { x: 22.5, y: 64 },
-  guestBot: { x: 77.5, y: 64 },
-  hostCup: { x: 36.25, y: 80 },
-  guestCup: { x: 63.75, y: 80 },
-} as const;
+const BOTCAST_PREVIOUS_DEFAULT_STUDIO_LAYOUTS = [
+  {
+    hostBot: { x: 22.5, y: 71.25 },
+    guestBot: { x: 77.5, y: 71.25 },
+    hostCup: { x: 36.25, y: 90 },
+    guestCup: { x: 63.75, y: 90 },
+  },
+  {
+    hostBot: { x: 22.5, y: 64 },
+    guestBot: { x: 77.5, y: 64 },
+    hostCup: { x: 36.25, y: 80 },
+    guestCup: { x: 63.75, y: 80 },
+  },
+] as const satisfies readonly BotcastStudioLayout[];
 
 export const BOTCAST_CLOSEUP_CAMERA_SCALE = 1.42;
 
@@ -446,23 +479,23 @@ export function normalizeBotcastStudioLayout(
     value && typeof value === "object" && !Array.isArray(value)
       ? (value as Partial<Record<BotcastStudioLayoutItem, unknown>>)
     : {};
-  const isLegacyDefault = (
-    Object.keys(BOTCAST_LEGACY_DEFAULT_STUDIO_LAYOUT) as Array<
-      keyof typeof BOTCAST_LEGACY_DEFAULT_STUDIO_LAYOUT
-    >
-  ).every((item) => {
+  const isPreviousDefault = BOTCAST_PREVIOUS_DEFAULT_STUDIO_LAYOUTS.some(
+    (previousDefault) =>
+      (
+        Object.keys(previousDefault) as Array<keyof typeof previousDefault>
+      ).every((item) => {
         const point = rawContainer[item];
         return Boolean(
           point &&
           typeof point === "object" &&
           !Array.isArray(point) &&
           (point as Partial<BotcastStudioPoint>).x ===
-            BOTCAST_LEGACY_DEFAULT_STUDIO_LAYOUT[item].x &&
-          (point as Partial<BotcastStudioPoint>).y ===
-            BOTCAST_LEGACY_DEFAULT_STUDIO_LAYOUT[item].y,
+            previousDefault[item].x &&
+          (point as Partial<BotcastStudioPoint>).y === previousDefault[item].y,
         );
-      });
-  const container = isLegacyDefault ? {} : rawContainer;
+      }),
+  );
+  const container = isPreviousDefault ? {} : rawContainer;
   return (
     Object.keys(BOTCAST_DEFAULT_STUDIO_LAYOUT) as BotcastStudioLayoutItem[]
   ).reduce<BotcastStudioLayout>((layout, item) => {
@@ -530,7 +563,7 @@ export type BotcastLogoGlyph =
 export interface BotcastLogoDesignV1 {
   version: 1;
   signature: string;
-  /** Original abstract metaphor that makes the mark belong to this show. */
+  /** Original concrete visual metaphor that makes the mark legible and show-specific. */
   showThesis: string;
   personaMotif: string;
   broadcastArchetype: string;
@@ -558,6 +591,9 @@ export interface BotcastIntroAudioState {
   source: "local" | "elevenlabs";
   audioUrl: string | null;
   durationMs: number;
+  /** Paired closing signature created with the ident; null for local synthesis. */
+  outdentAudioUrl: string | null;
+  outdentDurationMs: number;
   revision: number;
   model: string | null;
 }
@@ -586,6 +622,7 @@ export interface BotcastShow {
   hostInterruptionLines: string[];
   dayAtmosphere: BotcastAtmosphereState;
   nightAtmosphere: BotcastAtmosphereState;
+  studioLighting: BotcastStudioLightingState;
   studioLayout: BotcastStudioLayout;
   voiceLevelsByBotId: BotcastVoiceLevelsByBotId;
   atmosphereMix: BotcastStudioAtmosphereMix;
@@ -645,6 +682,9 @@ export interface BotcastMessageAudienceDeliveryV1 {
   v: 1;
   audible: boolean;
   speakerVisible: boolean;
+  /** New observer projections distinguish a spectral body from ordinary presence. */
+  visibility?: BotPowerObserverVisibilityV1;
+  spectral?: boolean;
 }
 
 export interface BotcastAudienceExperienceV1 {
@@ -653,6 +693,26 @@ export interface BotcastAudienceExperienceV1 {
   participants: {
     host: { visible: boolean; audible: boolean };
     guest: { visible: boolean; audible: boolean };
+  };
+  redactedMessageCount: number;
+}
+
+export interface BotcastObserverProjectionV2 {
+  v: 2;
+  perspective: BotPowerObserverPerspectiveV1;
+  participants: {
+    host: {
+      visibility: BotPowerObserverVisibilityV1;
+      visible: boolean;
+      audible: boolean;
+      spectral: boolean;
+    };
+    guest: {
+      visibility: BotPowerObserverVisibilityV1;
+      visible: boolean;
+      audible: boolean;
+      spectral: boolean;
+    };
   };
   redactedMessageCount: number;
 }
@@ -677,6 +737,48 @@ export interface BotcastProducerCue {
   detail?: string;
 }
 
+export const BOTCAST_SOUNDBOARD_CUE_KINDS = [
+  "applause",
+  "laughter",
+  "gasp",
+  "rimshot",
+] as const;
+
+export type BotcastSoundboardCueKind =
+  (typeof BOTCAST_SOUNDBOARD_CUE_KINDS)[number];
+
+export interface BotcastSoundboardCue {
+  kind: BotcastSoundboardCueKind;
+  atMs: number;
+}
+
+export function isBotcastSoundboardCueKind(
+  value: unknown,
+): value is BotcastSoundboardCueKind {
+  return BOTCAST_SOUNDBOARD_CUE_KINDS.some((kind) => kind === value);
+}
+
+export function botcastSoundboardCueLabel(
+  kind: BotcastSoundboardCueKind,
+): string {
+  if (kind === "applause") return "Applause";
+  if (kind === "laughter") return "Laughter";
+  if (kind === "gasp") return "Gasp";
+  return "Rimshot";
+}
+
+export function botcastSoundboardCueFromEvent(
+  event: Pick<BotcastReplayEvent, "kind" | "payload">,
+): BotcastSoundboardCue | null {
+  if (event.kind !== "soundboard_cue") return null;
+  const kind = event.payload.kind;
+  const atMs = Number(event.payload.atMs);
+  if (!isBotcastSoundboardCueKind(kind) || !Number.isFinite(atMs) || atMs < 0) {
+    return null;
+  }
+  return { kind, atMs: Math.round(atMs) };
+}
+
 export type BotcastReplayEventKind =
   | "segment"
   | "guest_presence"
@@ -691,6 +793,7 @@ export type BotcastReplayEventKind =
   | "camera_mode"
   | "camera_suggestion"
   | "listener_reaction"
+  | "soundboard_cue"
   | "guest_thinking"
   | "episode_completed";
 
@@ -701,6 +804,69 @@ export interface BotcastReplayEvent {
   kind: BotcastReplayEventKind;
   payload: Record<string, unknown>;
   occurredAt: string;
+}
+
+export interface BotcastPerceptionOverlapV1 {
+  v: 1;
+  effect: "perception_overlap";
+  precedingMessageId: string;
+  overlappingMessageId: string;
+  precedingBotId: string;
+  overlappingBotId: string;
+  startRatio: number;
+  maxSimultaneousVoices: 2;
+}
+
+export function normalizeBotcastPerceptionOverlapV1(
+  value: unknown,
+): BotcastPerceptionOverlapV1 | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  const boundedId = (candidate: unknown): string | null =>
+    typeof candidate === "string" && candidate.trim()
+      ? candidate.trim().slice(0, 160)
+      : null;
+  const precedingMessageId = boundedId(row.precedingMessageId);
+  const overlappingMessageId = boundedId(row.overlappingMessageId);
+  const precedingBotId = boundedId(row.precedingBotId);
+  const overlappingBotId = boundedId(row.overlappingBotId);
+  const startRatio = Number(row.startRatio);
+  if (
+    row.v !== 1 ||
+    row.effect !== "perception_overlap" ||
+    !precedingMessageId ||
+    !overlappingMessageId ||
+    precedingMessageId === overlappingMessageId ||
+    !precedingBotId ||
+    !overlappingBotId ||
+    precedingBotId === overlappingBotId ||
+    !Number.isFinite(startRatio) ||
+    startRatio < 0.58 ||
+    startRatio > 0.72 ||
+    row.maxSimultaneousVoices !== 2
+  ) {
+    return null;
+  }
+  return {
+    v: 1,
+    effect: "perception_overlap",
+    precedingMessageId,
+    overlappingMessageId,
+    precedingBotId,
+    overlappingBotId,
+    startRatio: Number(startRatio.toFixed(4)),
+    maxSimultaneousVoices: 2,
+  };
+}
+
+export function botcastPerceptionOverlapEventsV1(
+  events: readonly Pick<BotcastReplayEvent, "kind" | "payload">[],
+): BotcastPerceptionOverlapV1[] {
+  return events.flatMap((event) => {
+    if (event.kind !== "power_effect") return [];
+    const overlap = normalizeBotcastPerceptionOverlapV1(event.payload);
+    return overlap ? [overlap] : [];
+  });
 }
 
 /** Rehydrates the last persisted identity theft for each holder at a live/replay cutoff. */
@@ -1264,6 +1430,8 @@ export interface BotcastEpisode extends BotcastEpisodeSummary {
   guestPresenceMode: BotcastGuestPresenceMode;
   /** Present on audience-facing API copies; absent from internal/legacy records. */
   audienceExperience?: BotcastAudienceExperienceV1;
+  /** Participant-neutral human projection; live is default, replay is explicit. */
+  observerProjection?: BotcastObserverProjectionV2;
   messages: BotcastMessage[];
   segments: BotcastSegmentRecord[];
   events: BotcastReplayEvent[];
@@ -1289,6 +1457,8 @@ export interface BotcastShowPatchRequest {
   dayAtmosphereImageId?: string | null;
   nightAtmosphereImageUrl?: string | null;
   nightAtmosphereImageId?: string | null;
+  /** Server-owned derived state; omitted by the public show PATCH route. */
+  studioLighting?: BotcastStudioLightingState;
   studioLayout?: BotcastStudioLayout;
   voiceLevelsByBotId?: BotcastVoiceLevelsByBotId;
   atmosphereMix?: BotcastStudioAtmosphereMix;
@@ -1919,6 +2089,12 @@ export function botcastReplayTimeline(
   thinkingRanges: BotcastReplayThinkingRange[];
 } {
   const thinkingDurationByMessageId = new Map<string, number>();
+  const perceptionOverlapByMessageId = new Map(
+    botcastPerceptionOverlapEventsV1(events).map((overlap) => [
+      overlap.overlappingMessageId,
+      overlap,
+    ] as const),
+  );
   for (const event of events) {
     if (event.kind !== "guest_thinking") continue;
     const messageId = event.payload.messageId;
@@ -1930,8 +2106,10 @@ export function botcastReplayTimeline(
   }
   let cursorMs = 0;
   const messageEndMs: number[] = [];
+  const messageStartMs: number[] = [];
+  const messageIndexById = new Map<string, number>();
   const thinkingRanges: BotcastReplayThinkingRange[] = [];
-  const messageStartMs = messages.map((message) => {
+  messages.forEach((message, index) => {
     const messageId = message.id ?? "";
     const thinkingDurationMs =
       thinkingDurationByMessageId.get(messageId) ?? 0;
@@ -1943,13 +2121,28 @@ export function botcastReplayTimeline(
       });
       cursorMs += thinkingDurationMs;
     }
-    const startMs = cursorMs;
-    cursorMs += Math.max(
+    const durationMs = Math.max(
       BOTCAST_DIRECTOR_MIN_SHOT_MS,
       botcastSignalStandardCadenceDurationMs(message.content),
     );
-    messageEndMs.push(cursorMs);
-    return startMs;
+    const overlap = perceptionOverlapByMessageId.get(messageId);
+    const precedingIndex = overlap
+      ? messageIndexById.get(overlap.precedingMessageId)
+      : undefined;
+    const overlapStartMs = overlap && precedingIndex !== undefined
+      ? (messageStartMs[precedingIndex] ?? 0) +
+        ((messageEndMs[precedingIndex] ?? 0) -
+          (messageStartMs[precedingIndex] ?? 0)) * overlap.startRatio
+      : cursorMs;
+    const twoVoiceFloorMs = index >= 2 ? messageEndMs[index - 2] ?? 0 : 0;
+    const startMs = overlap && precedingIndex === index - 1
+      ? Math.max(overlapStartMs, twoVoiceFloorMs)
+      : cursorMs;
+    const endMs = startMs + durationMs;
+    messageStartMs.push(Math.round(startMs));
+    messageEndMs.push(Math.round(endMs));
+    cursorMs = Math.max(cursorMs, endMs);
+    if (messageId) messageIndexById.set(messageId, index);
   });
   const directorEndMs = events.reduce((latest, event) => {
     if (event.kind !== "camera_suggestion") return latest;

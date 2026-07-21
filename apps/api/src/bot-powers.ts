@@ -122,6 +122,11 @@ function deterministicHardAudiencePower(
   const audience = names.join(", ");
   const subject = compact(botName, 100) || "This bot";
   const visibility = required === "awareness";
+  const spectralInvisible = visibility &&
+    /\b(?:invisible|unseen)\b/u.test(
+      `${source.name} ${source.intent}`.toLowerCase(),
+    ) &&
+    !/\bmicroscopic\b/u.test(`${source.name} ${source.intent}`.toLowerCase());
   return {
     version: BOT_POWER_VERSION,
     sourceHash: botPowerSourceHashV1(source.name, source.intent),
@@ -131,11 +136,19 @@ function deterministicHardAudiencePower(
     observerCue: visibility
       ? `Only ${audience} can perceive ${subject}.`
       : `Only ${audience} can hear ${subject}.`,
-    effects: [{
-      type: required,
-      allowed: names.map((name) => ({ kind: "bot" as const, name })),
-    }],
-    ruleLabels: [visibility ? `Visible only to ${audience}` : `Heard only by ${audience}`],
+    effects: [
+      {
+        type: required,
+        allowed: names.map((name) => ({ kind: "bot" as const, name })),
+      },
+      ...(spectralInvisible
+        ? [{ type: "avatar_visibility" as const, mode: "translucent" as const }]
+        : []),
+    ],
+    ruleLabels: [
+      visibility ? `Visible only to ${audience}` : `Heard only by ${audience}`,
+      ...(spectralInvisible ? ["Half-translucent observer presence"] : []),
+    ],
   };
 }
 
@@ -187,9 +200,9 @@ function deterministicEternalIntroductionPower(
     version: BOT_POWER_VERSION,
     sourceHash: botPowerSourceHashV1(source.name, source.intent),
     selfCue:
-      "HARD MEMORY CONTRACT: receive and understand only the current other-speaker message. Respond directly to its concrete content as fresh first contact. You do not know prior turns or your own earlier messages. Never claim older relationship context or mention this rule. If accused of repetition, react with sincere confusion; never agree that you repeated yourself or explain why. Introduce yourself only when this exchange genuinely warrants it; never default to identical introductory copy.",
+      "HARD MEMORY CONTRACT: receive and understand only the current other-speaker message. Respond directly to its concrete content as fresh first contact. You do not know the standing conversation topic unless that message states it, and you do not know prior turns or your own earlier messages. Never claim older relationship context or mention this rule. If accused of repetition, react with sincere confusion; never agree that you repeated yourself or explain why. Introduce yourself only when this exchange genuinely warrants it; never default to identical introductory copy.",
     observerCue:
-      `${subject} receives only the current other-speaker message and has no memory of prior turns or their own earlier messages. Retain the full encounter yourself; react to repetition through your own personality without explaining hidden mechanics or forcing an emotion.`,
+      `${subject} receives only the current other-speaker message, does not retain the standing conversation topic unless that message restates it, and has no memory of prior turns or their own earlier messages. Retain the full encounter yourself; react to repetition through your own personality without explaining hidden mechanics or forcing an emotion.`,
     effects: [
       { type: "eternal_introduction", memory: "current_other_speaker_message" },
       {
@@ -1060,13 +1073,29 @@ function normalizeCompiledEntry(
     ? rawRuleLabels.map((label) => compact(label, 100)).filter(Boolean).slice(0, 8)
     : [];
   if (!selfCue && !observerCue && effects.length === 0) return null;
+  const targetedInvisible =
+    compact(source.name, 120).toLowerCase() === "invisible" &&
+    effects.some((effect) => effect.type === "awareness") &&
+    !effects.some((effect) => effect.type === "avatar_visibility");
   return {
     version: BOT_POWER_VERSION,
     sourceHash: botPowerSourceHashV1(source.name, source.intent),
     selfCue,
     observerCue,
-    effects,
-    ruleLabels,
+    effects: targetedInvisible
+      ? [
+          ...effects,
+          {
+            type: "avatar_visibility",
+            mode: "translucent",
+          } satisfies BotPowerEffectV1,
+        ].slice(0, 8)
+      : effects,
+    ruleLabels: targetedInvisible
+      ? Array.from(
+          new Set([...ruleLabels, "Half-translucent observer presence"]),
+        ).slice(0, 8)
+      : ruleLabels,
   };
 }
 
@@ -1077,6 +1106,7 @@ function compiledEntrySatisfiesIntent(
   const requiredAvatarEffects = [
     ...(deterministicAvatarScalePower(source, "")?.effects ?? []),
     ...(deterministicInvisiblePower(source, "")?.effects ?? []),
+    ...(deterministicHardAudiencePower(source, "")?.effects ?? []),
   ].filter(
     (effect) =>
       effect.type === "avatar_scale" || effect.type === "avatar_visibility",

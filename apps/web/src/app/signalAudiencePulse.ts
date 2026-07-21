@@ -1,4 +1,7 @@
-import type { BotcastEpisodeSummary } from "@localai/shared";
+import {
+  BOTCAST_PERSONA_REVIEW_VISIBILITY_DELAY_MS,
+  type BotcastEpisodeSummary,
+} from "@localai/shared";
 
 export type SignalAudienceEpisode = Pick<
   BotcastEpisodeSummary,
@@ -92,6 +95,28 @@ export function signalAudienceReviews(
   episodes: readonly SignalAudienceEpisode[],
 ): SignalAudienceReview[] {
   return reviewsFromCompletedEpisodes(completedSignalAudienceEpisodes(episodes));
+}
+
+export function signalNextAudienceReviewRefreshDelayMs(
+  episodes: readonly SignalAudienceEpisode[],
+  nowMs: number = Date.now(),
+): number | null {
+  const nextRevealAtMs = episodes.reduce<number | null>((earliest, episode) => {
+    if (
+      episode.status !== "completed" ||
+      episode.personaReview ||
+      !episode.completedAt
+    ) {
+      return earliest;
+    }
+    const completedAtMs = Date.parse(episode.completedAt);
+    if (!Number.isFinite(completedAtMs)) return earliest;
+    const revealAtMs =
+      completedAtMs + BOTCAST_PERSONA_REVIEW_VISIBILITY_DELAY_MS;
+    if (revealAtMs <= nowMs) return earliest;
+    return earliest === null ? revealAtMs : Math.min(earliest, revealAtMs);
+  }, null);
+  return nextRevealAtMs === null ? null : nextRevealAtMs - nowMs;
 }
 
 export function formatSignalAudienceViews(totalViews: number): string {

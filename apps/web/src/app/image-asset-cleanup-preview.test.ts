@@ -35,6 +35,9 @@ describe("unused image asset cleanup", () => {
       /route\("POST", "\/api\/images\/cleanup"[\s\S]{0,240}requireAuth\(ctx\)/u,
     );
     assert.match(auditSource, /readOnly:\s*true/u);
+    assert.match(auditSource, /IMAGE_ASSET_CLEANUP_PREVIEW_VERSION = 3/u);
+    assert.match(auditSource, /SYSTEM_MANAGED_IMAGE_ORIGINS/u);
+    assert.match(auditSource, /candidateStorageBytes/u);
     assert.match(auditSource, /BEGIN IMMEDIATE/u);
     assert.match(auditSource, /graph\.preview\.snapshot !== validated\.snapshot/u);
     assert.match(auditSource, /DELETE FROM images WHERE id = \? AND user_id = \? AND local_rel_path = \?/u);
@@ -42,6 +45,8 @@ describe("unused image asset cleanup", () => {
     assert.match(storageSource, /manifest\.json/u);
     assert.match(storageSource, /state: "prepared"/u);
     assert.match(storageSource, /restoreQuarantinedGeneratedImageFiles/u);
+    assert.match(storageSource, /generatedImageStorageSizeBytes/u);
+    assert.match(storageSource, /purgeGeneratedImageQuarantine/u);
     assert.match(serverSource, /"\/api\/images\/cleanup-recovery"/u);
     assert.match(serverSource, /cleanup-recovery\/:id\/restore/u);
   });
@@ -57,7 +62,14 @@ describe("unused image asset cleanup", () => {
     );
     assert.match(requestSlice, /"\/api\/images\/cleanup-preview"/u);
     assert.match(requestSlice, /"\/api\/images\/cleanup"[\s\S]*method:\s*"POST"/u);
-    assert.match(requestSlice, /JSON\.stringify\(\{ snapshot: preview\.snapshot, imageIds \}\)/u);
+    assert.match(
+      requestSlice,
+      /JSON\.stringify\(\{[\s\S]*snapshot: preview\.snapshot,[\s\S]*imageIds,[\s\S]*permanent: true/u,
+    );
+    assert.match(
+      requestSlice,
+      /new Set\(result\.preview\.candidates\.map\(\(candidate\) => candidate\.id\)\)/u,
+    );
     assert.match(modalSlice, /Unused asset preview/u);
     assert.match(modalSlice, /role="alertdialog"/u);
     assert.match(modalSlice, /ref=\{imageCleanupConfirmCancelRef\}/u);
@@ -73,7 +85,12 @@ describe("unused image asset cleanup", () => {
       pageSource,
       /\[role="dialog"\]\[aria-modal="true"\], \[role="alertdialog"\]\[aria-modal="true"\]/u,
     );
-    assert.match(modalSlice, /Move to recovery trash/u);
+    assert.match(modalSlice, /Permanently delete selected/u);
+    assert.match(modalSlice, /This cannot be undone/u);
+    assert.match(modalSlice, /candidateStorageBytes/u);
+    assert.match(modalSlice, /candidate\.storageBytes/u);
+    assert.match(modalSlice, /Source: \{candidate\.modeLabel\}/u);
+    assert.match(modalSlice, /formatAssetAge\(candidate\.createdAt\)/u);
     assert.match(modalSlice, /Recovery trash/u);
     assert.match(modalSlice, /Account backups do not include/u);
     assert.match(modalSlice, /resetting or deleting the account clears/u);
@@ -85,7 +102,25 @@ describe("unused image asset cleanup", () => {
     assert.match(modalSlice, /Run audit again/u);
     assert.match(
       pageSource,
-      /imagePanelScope === "all" && view !== "chat"[\s\S]{0,280}aria-label="Preview unused generated assets"/u,
+      /activeSettingsScope === "account"[\s\S]{0,10000}data-settings-action="clean-unused-assets"/u,
+    );
+    assert.equal(
+      [...pageSource.matchAll(/data-settings-action="clean-unused-assets"/gu)]
+        .length,
+      1,
+    );
+    assert.match(pageSource, /<strong>Clean unused assets<\/strong>/u);
+    assert.match(
+      pageSource,
+      /Intentional Image[\s\S]{0,120}chat images, uploads, and[\s\S]{0,50}imports are never included/u,
+    );
+    assert.doesNotMatch(
+      pageSource,
+      /aria-label="Preview unused generated assets"/u,
+    );
+    assert.match(
+      modalSlice,
+      /if \(checked\) next\.add\(candidate\.id\);[\s\S]{0,80}else next\.delete\(candidate\.id\);/u,
     );
   });
 
@@ -100,9 +135,6 @@ describe("unused image asset cleanup", () => {
     );
     assert.match(cssSource, /\.imageCleanupRecoveryBadge/u);
     assert.match(cssSource, /\.imageCleanupCandidateSelect/u);
-    assert.match(
-      tutorialSource,
-      /sparkle audit finds generated files[\s\S]*selection-only[\s\S]*recovery trash/u,
-    );
+    assert.doesNotMatch(tutorialSource, /sparkle audit finds generated files/u);
   });
 });

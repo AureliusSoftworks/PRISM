@@ -86,6 +86,10 @@ test("local compiler produces ready structured powers", async () => {
   });
   assert.equal(result.powers[0]?.compileStatus, "ready");
   assert.equal(result.powers[0]?.compiled?.effects[0]?.type, "awareness");
+  assert.deepEqual(result.powers[0]?.compiled?.effects[1], {
+    type: "avatar_visibility",
+    mode: "translucent",
+  });
   assert.equal(
     result.powers[0]?.compiled?.sourceHash,
     botPowerSourceHashV1("Invisible", "Only visible to the bot named Light Yagami")
@@ -411,10 +415,13 @@ test("compiler creates exclusive visibility rules without consulting the local m
   });
   assert.equal(calls, 0);
   assert.equal(result.powers[0]?.compileStatus, "ready");
-  assert.deepEqual(result.powers[0]?.compiled?.effects, [{
-    type: "awareness",
-    allowed: [{ kind: "bot", name: "Light Yagami" }],
-  }]);
+  assert.deepEqual(result.powers[0]?.compiled?.effects, [
+    {
+      type: "awareness",
+      allowed: [{ kind: "bot", name: "Light Yagami" }],
+    },
+    { type: "avatar_visibility", mode: "translucent" },
+  ]);
 });
 
 test("compiler deterministically recovers the ghostly speaking-only presence contract", async () => {
@@ -734,6 +741,7 @@ test("Forgetful Freddie compiles current-other-speaker context and gradual peer 
     },
   ]);
   assert.match(result.powers[0]?.compiled?.selfCue ?? "", /current other-speaker message/iu);
+  assert.match(result.powers[0]?.compiled?.selfCue ?? "", /standing conversation topic/iu);
   assert.match(result.powers[0]?.compiled?.observerCue ?? "", /full encounter/iu);
 
   const plan = resolvedPlan({
@@ -1916,7 +1924,7 @@ test("Coffee resolution freezes named visibility and session-start trait mood", 
     db.prepare("INSERT INTO coffee_bot_social_state VALUES ('user', 'session-no-light', ?, 0.5, '')").run(id);
   }
   const noLightPlan = resolveCoffeePowersForSession(db, "user", "session-no-light");
-  assert.equal(coffeePowerBotCanSpeak(noLightPlan, "ryuk"), false);
+  assert.equal(coffeePowerBotCanSpeak(noLightPlan, "ryuk"), true);
   assert.match(noLightPlan.warnings.join(" "), /No matching Coffee participant.*Light Yagami/u);
 });
 

@@ -24,11 +24,11 @@ ship as `0.5.2` while Coffee is `v0.7` and Story is `v0.1`.
 
 | Applet | Version | Status | Notes |
 | --- | --- | --- | --- |
-| Chat | v1.22 | Active | Full playground for bots, providers, models, images, exports, memory-aware conversations, five-choice English/Premium voice switching, sparse shared mic presence, and ready Powers including current-other-speaker short-term amnesia, one-opening copy behavior, engine-bounded response budgets, distinct relative size and visibility states, loud/quiet presence, speech obfuscation, current-addressee fandom, and cue-only radiant joy or reactive gloom. |
-| Zen | v1.21 | Active | Calm one-to-one continuity surface with five-choice English/Premium voice switching, mic presence, and ready Powers including current-other-speaker short-term amnesia, one-opening copy behavior, engine-bounded response budgets, distinct relative size and visibility states, loud/quiet presence, speech obfuscation, current-addressee fandom, and cue-only radiant joy or reactive gloom; the standalone Zen lane is deprecating as this becomes Prism's default state. |
-| Coffee | v2.19 | Active | Multi-bot group table with Coffee Groups, live and replay-safe English/Premium switching, model-aware session holds, pacing, cups, transcripts, living atmosphere, distinct replay-safe physical presentation states, current-other-speaker short-term amnesia with accumulating peer agitation, one-opening copy behavior, Power-driven bot-to-bot cut-ins including guaranteed early-to-late interruptions, public-only gibberish context, player/peer-focused fandom, replay-safe bot-only identity mirroring, persisted recipient mood boosts, and direct-addresser mood drains. |
-| Signal | v1.34 | Active | Bot-owned anthology interviews with progress-aware Auto completion, progressively streamed live captions, centered host-and-featured-guest stage credits, quiet between-turn preparation, graceful producer cuts that retain the archive, post-broadcast-only deletion, distinct replay-safe physical presentation states, next-utterance voice switching with shared Premium-calibrated pacing, audience-projected transcript, voice, replay, and reviews; current-other-speaker short-term amnesia with persisted peer pressure; one-opening copy behavior; replay-safe probabilistic or guaranteed early-to-late interruption, speech obfuscation, bot-only identity mirroring, recipient mood boosts, and direct-addresser mood drains; and peer/audience-focused fandom. |
-| Story | v0.20 | Preview | Generated visual-novel episodes with bots, choices, maps, inventory, transcripts, shared PRISM menu behavior, adapted physical presentation states, current-other-speaker short-term amnesia, one-opening copy behavior, replay-stable probabilistic or guaranteed interruption, scene-safe speech obfuscation, scene-focus fandom, and cue-only personality-shaped uplift or drag. |
+| Chat | v1.24 | Active | Full playground with direct human access to a companion and half-translucent targeted-Invisible presentation. |
+| Zen | v1.23 | Active | Calm one-to-one continuity with direct human access to a companion and half-translucent targeted-Invisible presentation. |
+| Coffee | v2.21 | Active | Multi-bot tables with frozen pairwise sight and hearing, hidden spectral turns, cast-dependent live reveal, full spectral replay, and deterministic Power-driven overlap. |
+| Signal | v1.40 | Active | Bot-owned interviews with pairwise cast perception, unrestricted spectral booking, cast-dependent live reveal, full spectral replay, dual captions, spatial overlap audio, and audience-projected reviews. |
+| Story | v0.22 | Preview | Generated visual-novel episodes with an omniscient reader, half-translucent spectral actors, pairwise character knowledge, accidental prose overlap, choices, maps, inventory, and transcripts. |
 | Arena | v0.0 | Planned | Moderated bot debate surface. |
 | Polling | v0.0 | Planned | AI-powered polling across bot groups. |
 | Feed | v0.0 | Planned | BotBook-style social feed. |
@@ -69,9 +69,54 @@ Slate stayed planned `v0.0` until its first functional vertical slice became
 usable end to end. It entered preview at `v0.1` and is now `v0.7`; later snapshot
 stages do not block the standalone preview.
 
+## Spectral perception policy
+
+- Participant truth is pairwise: each bot receives only the bodies, actions,
+  and speech its frozen Power matrix allows.
+- Live observer truth is cast-dependent. A matching bot such as Light can
+  reveal a targeted-Invisible participant half-translucently and audibly; the
+  player never counts as that matching bot.
+- Replay truth restores a spectral participant half-translucently and audibly
+  without retroactively informing unaware participants. Mute, fully hidden or
+  Microscopic presentation, canonical silence, and speech obfuscation retain
+  precedence. Ordinary private channels remain private in replay.
+- Signal and Coffee enforce this directly. Story keeps the reader omniscient
+  while constraining character reactions and representing accidental overlap
+  in prose. Chat and Zen preserve direct human access to the selected
+  companion. Slate has no participant-observer contract, so the policy is
+  irrelevant there. Arena, Polling, Feed, Games, Gym, Pseudo, Surf, and other
+  unimplemented applets remain deferred until they define both perspectives.
+
 ## Changelog
 
 ### 2026-07-21
+
+- Bumped `Chat` to `v1.24`, `Zen` to `v1.23`, `Coffee` to `v2.21`, `Signal`
+  to `v1.40`, and `Story` to `v0.22` for shared spectral perception. Targeted
+  Invisible Powers now separate bot knowledge from live observer projection
+  and replay truth. Signal and Coffee persist complete hidden turns and stable
+  overlapping handoffs; replay restores half-translucent bodies, captions, and
+  independently stoppable voice channels. Story keeps its reader omniscient
+  while unaware characters cannot react to what they neither see nor hear.
+
+- Bumped `Signal` to `v1.39` for show-scoped film grain across the composited
+  studio screen. Align stage now previews and saves its strength from zero to
+  full texture; live and replay share the setting, while audio static stays off.
+
+- Bumped `Signal` to `v1.38` so a live broadcast hides the show library and
+  Create show controls, letting the studio use the full window. The management
+  sidebar returns automatically when the broadcast ends.
+
+- Bumped `Signal` to `v1.37` for longer, more robust host-specific opening
+  idents and paired closing outdents. Local and cached ElevenLabs audio now share
+  one stable musical fingerprint, and the outdent replaces the generic episode
+  exit sound without generating anything at show time.
+
+- Bumped `Signal` to `v1.36` for a producer-operated live soundboard in bot
+  interviews. Applause, laughter, gasp, and rimshot reactions are bundled for
+  local playback, recorded at their audience-heard timing, included in the
+  audience review artifact, and restored during replay. The Producer-guest lane
+  keeps its answer composer and does not expose the board.
 
 - Bumped `Signal` to `v1.34` so Cut show lets the current speaker finish,
   cancels any unspoken next turn, and moves directly into one concise natural
@@ -158,6 +203,14 @@ stages do not block the standalone preview.
   the requested title and private producer angle. Empty provider replies are
   now reported as unusable model output instead of a false availability
   failure.
+
+- Bumped `Chat` to `v1.23`, `Zen` to `v1.22`, `Coffee` to `v2.20`, `Signal`
+  to `v1.35`, and `Story` to `v0.21` so short-term-amnesia holders no
+  longer receive a standing conversation, table, episode, or story topic.
+  Their hard context remains the current other-speaker message plus immutable
+  persona, safety, and mode-role instructions; a topic becomes available only
+  when that current message states it. Coffee kickoff no longer leaks its saved
+  topic, and Signal no longer supplies episode-topic metadata to the holder.
 
 - Bumped `Chat` to `v1.22`, `Zen` to `v1.21`, `Coffee` to `v2.19`, `Signal`
   to `v1.30`, and `Story` to `v0.20` for the refined short-term-amnesia

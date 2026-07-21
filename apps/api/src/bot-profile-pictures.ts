@@ -6,7 +6,7 @@ export const BOT_PROFILE_PICTURE_IMAGE_PURPOSE = "bot_profile_picture";
 export const BOT_PROFILE_PICTURE_UPLOAD_MAX_BYTES = 8 * 1024 * 1024;
 export const BOT_PROFILE_PICTURE_SIZE = "1024x1024";
 export const GALLERY_EXCLUDED_PURPOSE_SQL =
-  "COALESCE(purpose, 'gallery') NOT IN ('wallpaper', 'bot_profile_picture')";
+  "COALESCE(purpose, 'gallery') NOT IN ('wallpaper', 'bot_profile_picture', 'signal_studio_lighting')";
 
 export function botProfilePictureImageBelongsToBot(
   db: DatabaseSync,

@@ -63,6 +63,10 @@ interface ExportAudioRow {
   revision: number;
   created_at: string;
   updated_at: string;
+  outdent_prompt?: string | null;
+  outdent_content_type?: string | null;
+  outdent_audio_bytes?: Uint8Array | null;
+  outdent_duration_ms?: number | null;
 }
 
 export interface ProjectOwnedAssetArchiveBundleV1 {
@@ -88,7 +92,7 @@ interface PreparedProjectImageReference {
 
 interface PreparedProjectAudio {
   showId: string;
-  slot: "intro-audio" | "atmosphere-audio";
+  slot: "intro-audio" | "outdent-audio" | "atmosphere-audio";
   bytes: Buffer;
   contentType: "audio/mpeg";
   restore: SignalProjectAudioRestoreMetadataV1;
@@ -321,7 +325,7 @@ function exportSignalImageEntry(args: {
 function exportSignalAudioEntry(args: {
   showId: string;
   showName: string;
-  slot: "intro-audio" | "atmosphere-audio";
+  slot: "intro-audio" | "outdent-audio" | "atmosphere-audio";
   row: ExportAudioRow;
   files: Record<string, Uint8Array>;
 }): ProjectOwnedAssetManifestEntryV1 {
@@ -375,12 +379,33 @@ export function exportProjectOwnedAssets(
   const audioRows = db
     .prepare(
       `SELECT show_id, provider, model, prompt, content_type, audio_bytes,
-              duration_ms, revision, created_at, updated_at
+              duration_ms, outdent_prompt, outdent_content_type,
+              outdent_audio_bytes, outdent_duration_ms, revision,
+              created_at, updated_at
          FROM botcast_show_intro_audio
         WHERE user_id = ?`,
     )
     .all(userId) as unknown as ExportAudioRow[];
   const audioByShowId = new Map(audioRows.map((row) => [row.show_id, row] as const));
+  const outdentAudioByShowId = new Map(
+    audioRows.flatMap((row): Array<readonly [string, ExportAudioRow]> =>
+      row.outdent_audio_bytes &&
+      row.outdent_prompt &&
+      row.outdent_content_type &&
+      row.outdent_duration_ms
+        ? [[
+            row.show_id,
+            {
+              ...row,
+              prompt: row.outdent_prompt,
+              content_type: row.outdent_content_type,
+              audio_bytes: row.outdent_audio_bytes,
+              duration_ms: row.outdent_duration_ms,
+            },
+          ]]
+        : [],
+    ),
+  );
   const atmosphereAudioRows = db
     .prepare(
       `SELECT show_id, provider, model, prompt, content_type, audio_bytes,
@@ -421,6 +446,18 @@ export function exportProjectOwnedAssets(
           showName: show.name,
           slot: "intro-audio",
           row: audio,
+          files,
+        }),
+      );
+    }
+    const outdentAudio = outdentAudioByShowId.get(show.id);
+    if (outdentAudio) {
+      entries.push(
+        exportSignalAudioEntry({
+          showId: show.id,
+          showName: show.name,
+          slot: "outdent-audio",
+          row: outdentAudio,
           files,
         }),
       );
@@ -493,9 +530,20 @@ export function omitInlineProjectOwnedAssetBinaries(
       .filter((entry) => entry.logicalSlot === "atmosphere-audio")
       .map((entry) => entry.ownerId),
   );
+  const outdentAudioShowIds = new Set(
+    manifest.entries
+      .filter((entry) => entry.logicalSlot === "outdent-audio")
+      .map((entry) => entry.ownerId),
+  );
   for (const show of snapshot.botcast?.shows ?? []) {
     if (show.introAudio && introAudioShowIds.has(show.id)) {
       delete show.introAudio.audioBase64;
+    }
+    if (
+      show.introAudio?.outdent &&
+      outdentAudioShowIds.has(show.id)
+    ) {
+      delete show.introAudio.outdent.audioBase64;
     }
     if (show.atmosphereAudio && atmosphereAudioShowIds.has(show.id)) {
       delete show.atmosphereAudio.audioBase64;
@@ -596,6 +644,7 @@ export function normalizeProjectOwnedAssetManifest(
       logicalSlot !== "dark-studio" &&
       logicalSlot !== "logo" &&
       logicalSlot !== "intro-audio" &&
+      logicalSlot !== "outdent-audio" &&
       logicalSlot !== "atmosphere-audio"
     ) {
       throw new Error("Project asset manifest contains an invalid logical slot.");
@@ -617,7 +666,9 @@ export function normalizeProjectOwnedAssetManifest(
       throw new Error("Project asset manifest contains an unsafe archive path.");
     }
     const imageSlot =
-      logicalSlot !== "intro-audio" && logicalSlot !== "atmosphere-audio";
+      logicalSlot !== "intro-audio" &&
+      logicalSlot !== "outdent-audio" &&
+      logicalSlot !== "atmosphere-audio";
     if (
       (imageSlot && (raw.mediaType !== "image" || raw.contentType !== "image/png")) ||
       (!imageSlot && (raw.mediaType !== "audio" || raw.contentType !== "audio/mpeg"))
@@ -690,6 +741,15 @@ function assertBundleMatchesSnapshot(
       expected.add(key);
       if (!entriesBySlot.has(key)) {
         throw new Error(`Project asset backup is missing Signal intro audio for “${show.name}”.`);
+      }
+    }
+    if (show.introAudio?.outdent) {
+      const key = entryKey(show.id, "outdent-audio");
+      expected.add(key);
+      if (!entriesBySlot.has(key)) {
+        throw new Error(
+          `Project asset backup is missing Signal outdent audio for “${show.name}”.`,
+        );
       }
     }
     if (show.atmosphereAudio) {
@@ -897,6 +957,15 @@ function remapSignalAtmosphereJson(
       );
     }
   }
+  // The receiver map is deterministic derived data, so project restores omit
+  // its blob and ask the owner to rebuild it from the restored Studio pair.
+  if (isRecord(parsed.studioLighting)) {
+    parsed.studioLighting.imageId = null;
+    parsed.studioLighting.imageUrl = null;
+    parsed.studioLighting.sourceDayImageId = null;
+    parsed.studioLighting.sourceNightImageId = null;
+    parsed.studioLighting.status = "missing";
+  }
   const restored = readSignalProjectAssetReferences(JSON.stringify(parsed));
   for (const reference of references) {
     if (restored[reference.slot].imageId !== reference.restoredImageId) {
@@ -917,7 +986,7 @@ export function applyPreparedProjectOwnedAssetsWithinTransaction(
        (id, user_id, conversation_id, bot_id, related_bot_ids, origin,
         prompt, revised_prompt, url, size, quality, provider, model,
         local_rel_path, purpose, created_at)
-     VALUES (?, ?, NULL, ?, ?, 'botcast', ?, ?, ?, ?, ?, ?, ?, ?, 'gallery', ?)`,
+     VALUES (?, ?, NULL, ?, ?, 'botcast', ?, ?, ?, ?, ?, ?, ?, ?, 'project_import', ?)`,
   );
   for (const image of prepared.images) {
     insertImage.run(
@@ -966,7 +1035,9 @@ export function applyPreparedProjectOwnedAssetsWithinTransaction(
         duration_ms, revision, created_at, updated_at)
      VALUES (?, ?, 'elevenlabs', ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
-  for (const item of prepared.audio) {
+  for (const item of prepared.audio.filter(
+    (candidate) => candidate.slot !== "outdent-audio",
+  )) {
     const insertAudio = item.slot === "intro-audio"
       ? insertIntroAudio
       : insertAtmosphereAudio;
@@ -982,5 +1053,26 @@ export function applyPreparedProjectOwnedAssetsWithinTransaction(
       item.restore.createdAt,
       item.restore.updatedAt,
     );
+  }
+  const updateOutdentAudio = db.prepare(
+    `UPDATE botcast_show_intro_audio
+        SET outdent_prompt = ?, outdent_content_type = ?,
+            outdent_audio_bytes = ?, outdent_duration_ms = ?
+      WHERE show_id = ? AND user_id = ?`,
+  );
+  for (const item of prepared.audio.filter(
+    (candidate) => candidate.slot === "outdent-audio",
+  )) {
+    const result = updateOutdentAudio.run(
+      item.restore.prompt,
+      item.contentType,
+      item.bytes,
+      item.restore.durationMs,
+      item.showId,
+      userId,
+    );
+    if (Number(result.changes ?? 0) !== 1) {
+      throw new Error("Restored Signal outdent is missing its paired ident.");
+    }
   }
 }

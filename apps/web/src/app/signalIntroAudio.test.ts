@@ -5,11 +5,12 @@ import {
   SIGNAL_AUDIO_STOP_FADE_MS,
   SIGNAL_EPISODE_INTRO_LEAD_IN_MS,
   SIGNAL_SYNTH_IDENT_DURATION_MS,
-  SIGNAL_SYNTH_OUTRO_DURATION_MS,
+  SIGNAL_SYNTH_OUTDENT_DURATION_MS,
   buildSignalSynthIdentPlan,
-  buildSignalSynthOutroPlan,
+  buildSignalSynthOutdentPlan,
   encodeSignalSynthIdentWave,
   playSignalIntroAudio,
+  playSignalOutdentAudio,
   signalAudioFadeVolumeAt,
   stopSignalIntroAudio,
 } from "./signalIntroAudio.ts";
@@ -96,6 +97,8 @@ describe("Signal Synth ident", () => {
           source: "elevenlabs",
           audioUrl: "/ident.mp3",
           durationMs: 6_000,
+          outdentAudioUrl: "/outdent.mp3",
+          outdentDurationMs: 4_000,
           revision: 1,
           model: "music_v2",
         },
@@ -145,6 +148,7 @@ describe("Signal Synth ident", () => {
     assert.deepEqual(commanding, commandingAgain);
     assert.notDeepEqual(commanding, playful);
     assert.equal(commanding.durationMs, SIGNAL_SYNTH_IDENT_DURATION_MS);
+    assert.equal(SIGNAL_SYNTH_IDENT_DURATION_MS, 7_800);
     assert.equal(commanding.tempoBpm, 92);
     assert.equal(commanding.register, "low");
     assert.equal(commanding.contour, "descending");
@@ -159,6 +163,8 @@ describe("Signal Synth ident", () => {
     );
     assert.ok(commanding.notes.some((note) => note.waveform === "soft-square"));
     assert.ok(playful.notes.some((note) => note.lowpassHz > 3_650));
+    assert.ok(commanding.notes.some((note) => note.startMs >= 3_900));
+    assert.ok(playful.notes.some((note) => note.startMs >= 3_900));
   });
 
   it("turns cinematic, magical, and nautical profiles into different local phrases", () => {
@@ -220,15 +226,79 @@ describe("Signal Synth ident", () => {
     assert.ok(bytes.byteLength > 44);
   });
 
-  it("builds a shorter deterministic resolving outro", () => {
-    const first = buildSignalSynthOutroPlan("show-a:episode-a");
-    const again = buildSignalSynthOutroPlan("show-a:episode-a");
-    const other = buildSignalSynthOutroPlan("show-a:episode-b");
+  it("builds a shorter deterministic outdent from the host's ident fingerprint", () => {
+    const hostProfile = profile("inventive", "host-a:show-a", {
+      studioIdentity: "A precise mechanical workshop of gears and circuits.",
+    });
+    const ident = buildSignalSynthIdentPlan({
+      profile: hostProfile,
+      seed: "host-a:show-a",
+    });
+    const first = buildSignalSynthOutdentPlan({
+      profile: hostProfile,
+      seed: "host-a:show-a",
+    });
+    const again = buildSignalSynthOutdentPlan({
+      profile: hostProfile,
+      seed: "host-a:show-a",
+    });
+    const other = buildSignalSynthOutdentPlan({
+      profile: profile("warm", "host-b:show-b"),
+      seed: "host-b:show-b",
+    });
     assert.deepEqual(first, again);
     assert.notDeepEqual(first, other);
-    assert.equal(first.durationMs, SIGNAL_SYNTH_OUTRO_DURATION_MS);
+    assert.equal(first.durationMs, SIGNAL_SYNTH_OUTDENT_DURATION_MS);
     assert.ok(first.durationMs < SIGNAL_SYNTH_IDENT_DURATION_MS);
     assert.ok(first.notes.length >= 6);
     assert.ok(first.notes.some((note) => note.releaseMs >= 500));
+    assert.equal(first.temperament, ident.temperament);
+    assert.equal(first.palette, ident.palette);
+    assert.equal(first.tempoBpm, ident.tempoBpm);
+    assert.ok(
+      first.notes.some((note) =>
+        ident.notes.some(
+          (identNote) =>
+            identNote.midi === note.midi &&
+            identNote.waveform === note.waveform,
+        ),
+      ),
+    );
+  });
+
+  it("uses the cached paired outdent and falls back locally for legacy idents", () => {
+    const hostProfile = profile("analytical", "host-a:show-a");
+    const cached = playSignalOutdentAudio({
+      profile: hostProfile,
+      seed: "host-a:show-a",
+      introAudio: {
+        source: "elevenlabs",
+        audioUrl: "/ident.mp3",
+        durationMs: 8_000,
+        outdentAudioUrl: "/outdent.mp3",
+        outdentDurationMs: 4_000,
+        revision: 1,
+        model: "music_v2",
+      },
+      enabled: false,
+      volume: 1,
+    });
+    const legacy = playSignalOutdentAudio({
+      profile: hostProfile,
+      seed: "host-a:show-a",
+      introAudio: {
+        source: "elevenlabs",
+        audioUrl: "/legacy-ident.mp3",
+        durationMs: 6_000,
+        outdentAudioUrl: null,
+        outdentDurationMs: SIGNAL_SYNTH_OUTDENT_DURATION_MS,
+        revision: 1,
+        model: "music_v2",
+      },
+      enabled: false,
+      volume: 1,
+    });
+    assert.equal(cached.durationMs, 4_000);
+    assert.equal(legacy.durationMs, SIGNAL_SYNTH_OUTDENT_DURATION_MS);
   });
 });

@@ -22,6 +22,11 @@ export type BotPowerAvatarVisibilityModeV1 =
   | "speaking_only"
   | "hidden"
   | "translucent";
+export type BotPowerObserverPerspectiveV1 = "live" | "replay";
+export type BotPowerObserverVisibilityV1 =
+  | "hidden"
+  | "translucent"
+  | "visible";
 export type BotPowerVoicePresenceMode = "loud" | "quiet";
 /** Resolved rendered app theme used by conditional Power branches. */
 export type BotPowerResolvedThemeV1 = "light" | "dark";
@@ -39,7 +44,7 @@ export type BotPowerTargetV1 =
 
 export type BotPowerEffectV1 =
   | { type: "mute" }
-  /** Give the holder only the current other-speaker message and no older continuity. */
+  /** Give the holder only the current other-speaker message, never a standing topic or older continuity. */
   | { type: "eternal_introduction"; memory: "current_other_speaker_message" }
   /** Repeat the latest speech addressed to the holder verbatim. */
   | { type: "speech_copy"; trigger: "direct_address" }
@@ -191,6 +196,20 @@ export interface CoffeePowerPlanV1 {
   resolvedAt: string;
   bots: Record<string, ResolvedCoffeePowerBotV1>;
   warnings: string[];
+}
+
+export interface BotPowerPairwisePerceptionV1 {
+  version: 1;
+  visible: boolean;
+  audible: boolean;
+}
+
+export interface BotPowerObserverProjectionV1 {
+  version: 1;
+  perspective: BotPowerObserverPerspectiveV1;
+  visibility: BotPowerObserverVisibilityV1;
+  audible: boolean;
+  spectral: boolean;
 }
 
 function compactText(value: unknown, limit: number): string {
@@ -500,7 +519,11 @@ function upgradeLegacyAvatarPresentationV1(
       ),
     };
   }
-  if (normalizedName === "invisible" && visibilityEffect) {
+  if (
+    normalizedName === "invisible" &&
+    visibilityEffect?.type === "avatar_visibility" &&
+    visibilityEffect.mode === "speaking_only"
+  ) {
     return {
       ...compiled,
       selfCue:
@@ -515,6 +538,22 @@ function upgradeLegacyAvatarPresentationV1(
       ruleLabels: compiled.ruleLabels.map((label) =>
         label === "Appears only while speaking" ? "Half-translucent avatar" : label,
       ),
+    };
+  }
+  if (
+    normalizedName === "invisible" &&
+    !visibilityEffect &&
+    compiled.effects.some((effect) => effect.type === "awareness")
+  ) {
+    return {
+      ...compiled,
+      effects: [
+        ...compiled.effects,
+        { type: "avatar_visibility" as const, mode: "translucent" as const },
+      ].slice(0, 8),
+      ruleLabels: Array.from(
+        new Set([...compiled.ruleLabels, "Half-translucent observer presence"]),
+      ).slice(0, 8),
     };
   }
   return compiled;
@@ -1036,6 +1075,141 @@ export function botPowerAvatarVisibilityModeV1(
   return botPowerAvatarVisibilityModeFromEffectsV1(activeBotPowerEffectsV1(value));
 }
 
+function botPowerRestrictionAllowsV1(
+  effects: readonly BotPowerEffectV1[],
+  type: "awareness" | "speech_audience",
+  matchesTarget: (target: BotPowerTargetV1) => boolean,
+): boolean {
+  const restrictions = effects.filter(
+    (
+      effect,
+    ): effect is Extract<
+      BotPowerEffectV1,
+      { type: "awareness" | "speech_audience" }
+    > => effect.type === type,
+  );
+  return restrictions.every((restriction) =>
+    restriction.allowed.some(
+      (target) => target.kind === "all" || matchesTarget(target),
+    ),
+  );
+}
+
+/** What one participant can truthfully perceive about a Power holder. */
+export function botPowerPairwisePerceptionFromEffectsV1(
+  value: unknown,
+  matchesTarget: (target: BotPowerTargetV1) => boolean,
+  options: { holderSpeaking?: boolean } = {},
+): BotPowerPairwisePerceptionV1 {
+  const effects = Array.isArray(value)
+    ? value
+        .map(normalizeBotPowerEffectV1)
+        .filter((effect): effect is BotPowerEffectV1 => effect !== null)
+    : [];
+  const avatarMode = botPowerAvatarVisibilityModeFromEffectsV1(effects);
+  const presentationVisible = avatarMode !== "hidden" &&
+    (avatarMode !== "speaking_only" || options.holderSpeaking === true);
+  return {
+    version: 1,
+    visible:
+      presentationVisible &&
+      botPowerRestrictionAllowsV1(effects, "awareness", matchesTarget),
+    audible:
+      !effects.some((effect) => effect.type === "mute") &&
+      botPowerRestrictionAllowsV1(effects, "speech_audience", matchesTarget),
+  };
+}
+
+export function botPowerPairwisePerceptionV1(
+  value: unknown,
+  matchesTarget: (target: BotPowerTargetV1) => boolean,
+  options: { holderSpeaking?: boolean } = {},
+): BotPowerPairwisePerceptionV1 {
+  return botPowerPairwisePerceptionFromEffectsV1(
+    activeBotPowerEffectsV1(value),
+    matchesTarget,
+    options,
+  );
+}
+
+/**
+ * Projects a Power holder to the human observer without changing participant
+ * knowledge. Replay grants spectral access only to translucent holders; normal
+ * private channels retain their live disclosure boundary.
+ */
+export function botPowerObserverProjectionFromEffectsV1(
+  value: unknown,
+  perspective: BotPowerObserverPerspectiveV1,
+  participatingBotMatchesTarget: (target: BotPowerTargetV1) => boolean,
+  options: { holderSpeaking?: boolean } = {},
+): BotPowerObserverProjectionV1 {
+  const effects = Array.isArray(value)
+    ? value
+        .map(normalizeBotPowerEffectV1)
+        .filter((effect): effect is BotPowerEffectV1 => effect !== null)
+    : [];
+  const avatarMode = botPowerAvatarVisibilityModeFromEffectsV1(effects);
+  const spectral = effects.some(
+    (effect) =>
+      effect.type === "avatar_visibility" && effect.mode === "translucent",
+  );
+  const replaySpectralAccess = perspective === "replay" && spectral;
+  const visibilityAllowed = replaySpectralAccess || botPowerRestrictionAllowsV1(
+    effects,
+    "awareness",
+    participatingBotMatchesTarget,
+  );
+  const presentationVisible = avatarMode !== "hidden" &&
+    (avatarMode !== "speaking_only" || options.holderSpeaking === true);
+  const visibility: BotPowerObserverVisibilityV1 =
+    !visibilityAllowed || !presentationVisible
+      ? "hidden"
+      : spectral
+        ? "translucent"
+        : "visible";
+  const audible =
+    !effects.some((effect) => effect.type === "mute") &&
+    (replaySpectralAccess || botPowerRestrictionAllowsV1(
+      effects,
+      "speech_audience",
+      participatingBotMatchesTarget,
+    ));
+  return {
+    version: 1,
+    perspective,
+    visibility,
+    audible,
+    spectral,
+  };
+}
+
+export function botPowerObserverProjectionV1(
+  value: unknown,
+  perspective: BotPowerObserverPerspectiveV1,
+  participatingBotMatchesTarget: (target: BotPowerTargetV1) => boolean,
+  options: { holderSpeaking?: boolean } = {},
+): BotPowerObserverProjectionV1 {
+  return botPowerObserverProjectionFromEffectsV1(
+    activeBotPowerEffectsV1(value),
+    perspective,
+    participatingBotMatchesTarget,
+    options,
+  );
+}
+
+/** Stable point where an unaware next speaker begins over the preceding line. */
+export function botPowerPerceptionOverlapStartRatioV1(
+  seedValue: unknown,
+): number {
+  const seed = typeof seedValue === "string" ? seedValue : String(seedValue ?? "");
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash ^= seed.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return Number((0.58 + (hash % 1401) / 10_000).toFixed(4));
+}
+
 /** A Ready Power that makes a live avatar appear only during an utterance. */
 export function botPowerHasSpeakingOnlyAvatarVisibilityV1(value: unknown): boolean {
   return botPowerAvatarVisibilityModeV1(value) === "speaking_only";
@@ -1433,7 +1607,7 @@ export function botPowerSelfCueLinesV1(value: unknown): string[] {
       )
     ) {
       return [
-        `${power.name || "Short-term amnesia"}: HARD MEMORY CONTRACT: you receive and understand only the current other-speaker message. Respond directly to its concrete content as fresh first contact. You do not know prior turns or your own earlier messages. Never claim an older relationship, recall hidden history, or mention the memory rule. If accused of repetition, react with sincere confusion; never agree that you repeated yourself or explain why. A self-introduction is optional only when this exchange genuinely calls for one; never default to identical introductory copy.`,
+        `${power.name || "Short-term amnesia"}: HARD MEMORY CONTRACT: you receive and understand only the current other-speaker message. Respond directly to its concrete content as fresh first contact. You do not know the standing conversation topic unless that message states it, and you do not know prior turns or your own earlier messages. Never claim an older relationship, recall hidden history, or mention the memory rule. If accused of repetition, react with sincere confusion; never agree that you repeated yourself or explain why. A self-introduction is optional only when this exchange genuinely calls for one; never default to identical introductory copy.`,
       ];
     }
     const cue = power.compiled?.selfCue.trim();
@@ -1457,7 +1631,7 @@ export function botPowerObserverCueLinesV1(
       )
     ) {
       return [
-        `${subject} — ${power.name || "Short-term amnesia"}: ${subject} receives only the current other-speaker message and has no memory of prior turns or their own earlier messages. Respond to that limited fresh-contact perception naturally; other characters retain the full encounter and may react through their own personalities.`,
+        `${subject} — ${power.name || "Short-term amnesia"}: ${subject} receives only the current other-speaker message, does not retain the standing conversation topic unless that message restates it, and has no memory of prior turns or their own earlier messages. Respond to that limited fresh-contact perception naturally; other characters retain the full encounter and may react through their own personalities.`,
       ];
     }
     const cue = power.compiled?.observerCue.trim();

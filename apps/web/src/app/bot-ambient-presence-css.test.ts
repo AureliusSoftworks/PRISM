@@ -49,6 +49,17 @@ describe("shared bot ambient presence rig", () => {
     assert.match(css, /@media \(prefers-reduced-motion:\s*reduce\)[\s\S]*\.botAmbientPresenceBody[\s\S]*animation:\s*none\s*;[\s\S]*\.botAmbientPresenceRig\[data-talking="true"\] \.botAmbientSpeakingPulse[\s\S]*opacity:\s*var\(--bot-ambient-speaking-mid-opacity\)\s*;/);
   });
 
+  it("disables the portable underglow inside Signal's authored Studio set", () => {
+    assert.match(
+      css,
+      /\.signalBotPresencePlate \.botAmbientUnderglow\s*\{[\s\S]*?display:\s*none\s*;[\s\S]*?\}/,
+    );
+    assert.doesNotMatch(
+      css,
+      /(?:^|\n)\.botAmbientUnderglow\s*\{[^}]*display:\s*none\s*;/,
+    );
+  });
+
   it("wires only the intended immersive avatar surfaces", () => {
     const rigUses = pageSource.match(/<BotAmbientPresenceRig\b/g) ?? [];
     assert.equal(rigUses.length, 7);

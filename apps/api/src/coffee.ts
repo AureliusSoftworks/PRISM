@@ -117,6 +117,9 @@ import {
   applyBotPowerResponseBudgetV1,
   botDirectAddressIndexV1,
   botDirectlyAddressesBotV1,
+  botPowerObserverProjectionFromEffectsV1,
+  botPowerPerceptionOverlapStartRatioV1,
+  botPowerResponseIsSilentV1,
   botNaturalAddressAliasesV1,
   botIdentityMirrorFaceV1,
   botIdentityMirrorHolderPromptV1,
@@ -200,6 +203,7 @@ import {
   applyCoffeePowerMoodDrainAfterDirectAddress,
   coffeePowerActionBias,
   coffeePowerBotCanSpeak,
+  coffeePowerBotAudibleTo,
   coffeePowerBotEchoesAddressedSpeech,
   coffeePowerBotEternallyIntroduces,
   coffeePowerBotMumblesSpeech,
@@ -216,6 +220,7 @@ import {
   coffeePowerResponseBudgetForBot,
   coffeePowerSpeakerOverride,
   coffeePowersPromptForSpeaker,
+  parseCoffeePowerPlan,
   resolveCoffeePowersForSession,
 } from "./coffee-powers.ts";
 
@@ -10927,6 +10932,7 @@ interface ConversationRow {
   coffee_meeting_summary: string | null;
   coffee_meeting_summary_message_count: number | null;
   coffee_meeting_summary_updated_at: string | null;
+  coffee_power_plan_json?: string | null;
   incognito: number;
   created_at: string;
   updated_at: string;
@@ -11064,6 +11070,7 @@ interface MessageRow {
   model: string | null;
   bot_id: string | null;
   tool_payload: string | null;
+  coffee_audience_bot_ids: string | null;
   created_at: string;
   bot_name: string | null;
   bot_color: string | null;
@@ -11080,7 +11087,8 @@ function loadConversationRow(
       `SELECT id, user_id, title, conversation_mode, bot_id, bot_group_ids,
               coffee_settings, coffee_group_id, coffee_duration_minutes, coffee_preset_id,
               coffee_topic, coffee_absent_bot_ids, coffee_team_mode_json, coffee_meeting_summary, coffee_meeting_summary_message_count,
-              coffee_meeting_summary_updated_at, incognito, created_at, updated_at
+              coffee_meeting_summary_updated_at, coffee_power_plan_json,
+              incognito, created_at, updated_at
          FROM conversations
         WHERE id = ? AND user_id = ?`
     )
@@ -11096,7 +11104,7 @@ function loadMessages(
   const rowsDesc = db
     .prepare(
       `SELECT m.id, m.role, m.content, m.provider, m.model, m.bot_id, m.created_at,
-              m.tool_payload,
+              m.tool_payload, m.coffee_audience_bot_ids,
               b.name AS bot_name, b.color AS bot_color, b.glyph AS bot_glyph
          FROM messages m
          LEFT JOIN bots b ON b.id = m.bot_id
@@ -11138,6 +11146,9 @@ function loadMessages(
         ...(coffeeAmbientAction ? { coffeeAmbientAction } : {}),
         ...(coffeeUserAction ? { coffeeUserAction } : {}),
         ...(coffeeReplayEvents && coffeeReplayEvents.length > 0 ? { coffeeReplayEvents } : {}),
+        ...(row.coffee_audience_bot_ids === null
+          ? { coffeeAudienceBotIds: null }
+          : { coffeeAudienceBotIds: parseStoredBotGroupIds(row.coffee_audience_bot_ids) }),
         ...(autoRecovery ? { autoRecovery } : {}),
         ...(botPowerExactResponse ? { botPowerExactResponse } : {}),
       };
@@ -11152,7 +11163,7 @@ function loadAllMessages(
   const rows = db
     .prepare(
       `SELECT m.id, m.role, m.content, m.provider, m.model, m.bot_id, m.created_at,
-              m.tool_payload,
+              m.tool_payload, m.coffee_audience_bot_ids,
               b.name AS bot_name, b.color AS bot_color, b.glyph AS bot_glyph
          FROM messages m
          LEFT JOIN bots b ON b.id = m.bot_id
@@ -11190,22 +11201,59 @@ function loadAllMessages(
         ...(coffeeAmbientAction ? { coffeeAmbientAction } : {}),
         ...(coffeeUserAction ? { coffeeUserAction } : {}),
         ...(coffeeReplayEvents && coffeeReplayEvents.length > 0 ? { coffeeReplayEvents } : {}),
+        ...(row.coffee_audience_bot_ids === null
+          ? { coffeeAudienceBotIds: null }
+          : { coffeeAudienceBotIds: parseStoredBotGroupIds(row.coffee_audience_bot_ids) }),
         ...(autoRecovery ? { autoRecovery } : {}),
         ...(botPowerExactResponse ? { botPowerExactResponse } : {}),
       };
     });
 }
 
+export function projectCoffeeMessagesForObserverV1(args: {
+  messages: readonly ChatMessage[];
+  plan: CoffeePowerPlanV1 | null;
+  participatingBotIds: readonly string[];
+  perspective?: "live" | "replay";
+}): ChatMessage[] {
+  const perspective = args.perspective ?? "live";
+  const participatingBotIds = new Set(args.participatingBotIds);
+  return args.messages.flatMap((message) => {
+    if (message.role !== "assistant" || !message.botId) return [message];
+    const projection = botPowerObserverProjectionFromEffectsV1(
+      args.plan?.bots[message.botId]?.effects ?? [],
+      perspective,
+      (target) =>
+        target.kind === "bot" &&
+        typeof target.botId === "string" &&
+        participatingBotIds.has(target.botId),
+      { holderSpeaking: true },
+    );
+    if (projection.visibility === "hidden" && !projection.audible) return [];
+    return [{
+      ...message,
+      content: projection.audible ? message.content : "...",
+      coffeeObserverProjection: projection,
+    }];
+  });
+}
+
 export function getCoffeeConversationTranscript(
   db: DatabaseSync,
   userId: string,
-  conversationId: string
+  conversationId: string,
+  perspective: "live" | "replay" = "live",
 ): ChatMessage[] {
   const row = loadConversationRow(db, userId, conversationId);
   if (!row || row.conversation_mode !== "coffee") {
     throw new Error("Coffee session not found.");
   }
-  return loadAllMessages(db, userId, conversationId);
+  return projectCoffeeMessagesForObserverV1({
+    messages: loadAllMessages(db, userId, conversationId),
+    plan: parseCoffeePowerPlan(row.coffee_power_plan_json),
+    participatingBotIds: parseStoredBotGroupIds(row.bot_group_ids),
+    perspective,
+  });
 }
 
 export function coffeeMessagesVisibleInExport<T extends { role: string; content: string }>(
@@ -11356,6 +11404,27 @@ function buildConversationResponse(args: {
   const groupIds = parseStoredBotGroupIds(row.bot_group_ids);
   const absentBotIds = parseStoredBotGroupIds(row.coffee_absent_bot_ids);
   const coffeeTeams = parseCoffeeTeamState(row.coffee_team_mode_json);
+  const coffeePowerPlan = parseCoffeePowerPlan(row.coffee_power_plan_json);
+  const observerProjectionByBotId = Object.fromEntries(
+    groupIds.map((botId) => [
+      botId,
+      botPowerObserverProjectionFromEffectsV1(
+        coffeePowerPlan?.bots[botId]?.effects ?? [],
+        "live",
+        (target) =>
+          target.kind === "bot" &&
+          typeof target.botId === "string" &&
+          groupIds.includes(target.botId),
+        { holderSpeaking: true },
+      ),
+    ]),
+  );
+  const projectedMessages = projectCoffeeMessagesForObserverV1({
+    messages,
+    plan: coffeePowerPlan,
+    participatingBotIds: groupIds,
+    perspective: "live",
+  });
   return {
     id: row.id,
     userId: row.user_id,
@@ -11366,6 +11435,9 @@ function buildConversationResponse(args: {
     coffeeGroupId: row.coffee_group_id ?? null,
     ...(seatBotIds.some((id) => id !== null) ? { coffeeSeatBotIds: seatBotIds } : {}),
     ...(absentBotIds.length > 0 ? { coffeeAbsentBotIds: absentBotIds } : {}),
+    ...(Object.keys(observerProjectionByBotId).length > 0
+      ? { coffeeObserverProjectionByBotId: observerProjectionByBotId }
+      : {}),
     ...(socialByBotId && Object.keys(socialByBotId).length > 0
       ? { coffeeBotSocialById: socialByBotId }
       : {}),
@@ -11389,7 +11461,7 @@ function buildConversationResponse(args: {
     hasAssistantReply: messages.some((message) => message.role === "assistant"),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    messages,
+    messages: projectedMessages,
   };
 }
 
@@ -14526,8 +14598,11 @@ async function generateCoffeeBotReply(args: {
     coffeeCupRateMultiplier: coffeePowerCupRateMultiplier(coffeePowerPlan, speaker.id),
     nowMs: Date.now(),
   });
-  const speakerPromptGroup = turnGroup.filter((bot) =>
-    coffeePowerBotVisibleTo(coffeePowerPlan, bot.id, speaker.id)
+  const speakerPromptGroup = turnGroup.filter(
+    (bot) =>
+      bot.id === speaker.id ||
+      coffeePowerBotVisibleTo(coffeePowerPlan, bot.id, speaker.id) ||
+      coffeePowerBotAudibleTo(coffeePowerPlan, bot.id, speaker.id),
   );
   const speakerHasHiddenPeers = speakerPromptGroup.length !== turnGroup.length;
   const peerAddressByBotId = await loadCoffeePeerAddressPreferences({
@@ -14677,20 +14752,52 @@ async function generateCoffeeBotReply(args: {
     speakerMemoryHistory,
     speaker.id,
   );
-  const speakerVisibleHistory = arrivalVisibleHistory.filter((message) =>
-    message.role !== "assistant" ||
-    !message.botId ||
-    coffeePowerBotVisibleTo(coffeePowerPlan, message.botId, speaker.id)
-  );
-  const latestVisibleTableMessage = coffeeBotPromptHistory(speakerVisibleHistory).at(-1) ?? null;
+  const speakerVisibleHistory = arrivalVisibleHistory.flatMap((message) => {
+    if (
+      message.role !== "assistant" ||
+      !message.botId ||
+      message.botId === speaker.id
+    ) {
+      return [message];
+    }
+    const visible = coffeePowerBotVisibleTo(
+      coffeePowerPlan,
+      message.botId,
+      speaker.id,
+    );
+    const audible = coffeePowerBotAudibleTo(
+      coffeePowerPlan,
+      message.botId,
+      speaker.id,
+    );
+    if (!visible && !audible) return [];
+    return [audible ? message : { ...message, content: "..." }];
+  });
+  const latestTableMessageBeforePerception =
+    coffeeBotPromptHistory(arrivalVisibleHistory).at(-1) ?? null;
+  const latestVisibleTableMessage =
+    coffeeBotPromptHistory(speakerVisibleHistory).at(-1) ?? null;
   const speakerVisibleMessageIds = new Set(speakerVisibleHistory.map((message) => message.id));
   const speakerHistoryWasArrivalScoped =
     speakerVisibleHistory.length !== speakerHistorySource.length;
   const speakerMissedLatestTableMoment =
-    latestVisibleTableMessage !== null && !speakerVisibleMessageIds.has(latestVisibleTableMessage.id);
-  const speakerTableFocus = speakerMissedLatestTableMoment
-    ? `You have just settled at the table. Offer a fresh, in-character opening line from what you can see now; do not refer to earlier dialogue you did not hear.`
-    : tableFocus;
+    latestTableMessageBeforePerception !== null &&
+    !speakerVisibleMessageIds.has(latestTableMessageBeforePerception.id);
+  const speakerSawLatestTableMomentWithoutHearingIt = Boolean(
+    latestTableMessageBeforePerception?.role === "assistant" &&
+      latestVisibleTableMessage?.id === latestTableMessageBeforePerception.id &&
+      latestVisibleTableMessage.content === "..." &&
+      latestTableMessageBeforePerception.content !== "...",
+  );
+  const speakerTableFocus = speakerEternallyIntroduces && sessionKickoff
+    ? "You have just sat down at a Coffee table. No one has spoken to you yet, and you do not know what the gathering is about. Offer one brief first-contact opening without naming or inventing a topic."
+    : speakerMissedLatestTableMoment
+      ? `You have just settled at the table. Offer a fresh, in-character opening line from what you can see now; do not refer to earlier dialogue you did not hear.`
+      : speakerSawLatestTableMomentWithoutHearingIt &&
+          turnKind === "autonomous" &&
+          !tableFocus.startsWith("The user directly addressed")
+        ? "The latest participant visibly spoke, but you heard no words. Continue from visible action only; do not infer or answer their hidden speech."
+      : tableFocus;
   const activeIdentityMirrorState = speakerEternallyIntroduces
     ? null
     : coffeeIdentityMirrorStatesFromHistory(speakerVisibleHistory).get(speaker.id) ??
@@ -14699,6 +14806,19 @@ async function generateCoffeeBotReply(args: {
     activeIdentityMirrorState &&
       activeIdentityMirrorState.sourceMessageId === latestAssistantBeforeTurn?.id,
   );
+  const speakerPerceptionPrompt = turnGroup.flatMap((peer) => {
+    if (peer.id === speaker.id) return [];
+    const visible = coffeePowerBotVisibleTo(coffeePowerPlan, peer.id, speaker.id);
+    const audible = coffeePowerBotAudibleTo(coffeePowerPlan, peer.id, speaker.id);
+    if (visible && audible) return [];
+    if (audible) {
+      return [`Hard perception rule: you can hear ${peer.name} as a disembodied voice, but you cannot see them. Do not invent visible gestures or a body for them.`];
+    }
+    if (visible) {
+      return [`Hard perception rule: you can see ${peer.name}, but you cannot hear their speech. Treat their saved lines as silence and react only to visible action.`];
+    }
+    return [];
+  }).join("\n");
   let speakerMessages = buildSpeakerPrompt({
     speaker,
     group: speakerPromptGroup,
@@ -14769,6 +14889,7 @@ async function generateCoffeeBotReply(args: {
             : "the table audience",
         settings.theme,
       ),
+      speakerPerceptionPrompt,
       !speakerEternallyIntroduces ? coffeeMoodBoostPromptForSpeakerV1({
         history: speakerVisibleHistory,
         speakerBotId: speaker.id,
@@ -14934,7 +15055,7 @@ async function generateCoffeeBotReply(args: {
             !sanitized ||
             coffeeReplyLooksLikePromptLeak(sanitized) ||
             coffeeReplyIsLowValueTableLine(sanitized) ||
-            coffeeReplyNeedsRepeatRepair(sanitized, history)
+            coffeeReplyNeedsRepeatRepair(sanitized, speakerVisibleHistory)
           ) {
             return { ok: false, reason: "invalid_output" as const };
           }
@@ -15062,24 +15183,24 @@ async function generateCoffeeBotReply(args: {
   }
   if (!speakerUsesHardResponse && !autoAttemptAccepted && !replyText) {
     replyText = buildCoffeeEmergencyFallbackReply({
-      tableFocus,
+      tableFocus: speakerTableFocus,
       topic: row.coffee_topic,
       speaker,
       conversationId: row.id,
       historyLength: history.length,
-      avoidTexts: recentCoffeeAssistantTexts(history),
+      avoidTexts: recentCoffeeAssistantTexts(speakerVisibleHistory),
       maxChars: replyCaps.tableReplyMaxChars,
       activePoll,
     });
   }
   if (!speakerUsesHardResponse && !autoAttemptAccepted && (coffeeReplyLooksLikePromptLeak(replyText) || coffeeReplyIsLowValueTableLine(replyText))) {
     replyText = buildCoffeeEmergencyFallbackReply({
-      tableFocus,
+      tableFocus: speakerTableFocus,
       topic: row.coffee_topic,
       speaker,
       conversationId: row.id,
       historyLength: history.length,
-      avoidTexts: recentCoffeeAssistantTexts(history),
+      avoidTexts: recentCoffeeAssistantTexts(speakerVisibleHistory),
       maxChars: replyCaps.tableReplyMaxChars,
       activePoll,
     });
@@ -15088,7 +15209,7 @@ async function generateCoffeeBotReply(args: {
     !speakerUsesHardResponse &&
     !autoAttemptAccepted &&
     replyText &&
-    (coffeeReplyNeedsRepeatRepair(replyText, history) ||
+    (coffeeReplyNeedsRepeatRepair(replyText, speakerVisibleHistory) ||
       coffeeReplyIsLowValueTableLine(replyText))
   ) {
     try {
@@ -15097,8 +15218,8 @@ async function generateCoffeeBotReply(args: {
         speaker,
         speakerOptions,
         repeatedReply: replyText,
-        history,
-        tableFocus,
+        history: speakerVisibleHistory,
+        tableFocus: speakerTableFocus,
         maxChars: replyCaps.tableReplyMaxChars,
       });
     } catch {
@@ -15109,17 +15230,17 @@ async function generateCoffeeBotReply(args: {
     !speakerUsesHardResponse &&
     !autoAttemptAccepted &&
     (!replyText ||
-    coffeeReplyNeedsRepeatRepair(replyText, history) ||
+    coffeeReplyNeedsRepeatRepair(replyText, speakerVisibleHistory) ||
     coffeeReplyIsLowValueTableLine(replyText))
   ) {
     replyText = buildCoffeeFreshFallbackBeat({
       speaker,
       conversationId: row.id,
       historyLength: history.length,
-      tableFocus,
+      tableFocus: speakerTableFocus,
       topic: row.coffee_topic,
       seedExtra: activePoll ? "poll-repeat" : "repeat",
-      avoidTexts: recentCoffeeAssistantTexts(history),
+      avoidTexts: recentCoffeeAssistantTexts(speakerVisibleHistory),
       maxChars: replyCaps.tableReplyMaxChars,
     });
   }
@@ -15148,7 +15269,7 @@ async function generateCoffeeBotReply(args: {
       speaker,
       conversationId: row.id,
       historyLength: history.length,
-      avoidTexts: recentCoffeeAssistantTexts(history),
+      avoidTexts: recentCoffeeAssistantTexts(speakerVisibleHistory),
       maxChars: replyCaps.tableReplyMaxChars,
     });
   }
@@ -15350,6 +15471,7 @@ async function generateCoffeeBotReply(args: {
     if (
       bot.id !== speaker.id &&
       !coffeePowerBotVisibleTo(coffeePowerPlan, speaker.id, bot.id) &&
+      !coffeePowerBotAudibleTo(coffeePowerPlan, speaker.id, bot.id) &&
       preTurnSocialByBotId[bot.id]
     ) {
       nextSocialByBotId[bot.id] = preTurnSocialByBotId[bot.id]!;
@@ -15384,9 +15506,11 @@ async function generateCoffeeBotReply(args: {
     ? coffeeIdentityMirrorStatesFromHistory(history).get(identityMirrorHolder.id) ?? null
     : null;
   const identityMirrorCanHearSpeaker = identityMirrorHolder
-    ? (coffeeAudienceBotIds === null ||
-        coffeeAudienceBotIds.includes(identityMirrorHolder.id)) &&
-      coffeePowerBotVisibleTo(coffeePowerPlan, speaker.id, identityMirrorHolder.id)
+    ? coffeePowerBotAudibleTo(
+        coffeePowerPlan,
+        speaker.id,
+        identityMirrorHolder.id,
+      )
     : false;
   const identityMirrorState =
     identityMirrorHolder &&
@@ -15476,6 +15600,36 @@ async function generateCoffeeBotReply(args: {
     occurredAt: assistantNow,
     social,
   }));
+  const perceptionOverlapEvent: CoffeeReplayEventPayload | null =
+    turnKind === "autonomous" &&
+    latestAssistantBeforeTurn?.role === "assistant" &&
+    priorAssistantSpeakerBotId &&
+    priorAssistantSpeakerBotId !== speaker.id &&
+    !botPowerResponseIsSilentV1(latestAssistantBeforeTurn.content) &&
+    !botPowerResponseIsSilentV1(replyText) &&
+    !coffeePowerBotAudibleTo(
+      coffeePowerPlan,
+      priorAssistantSpeakerBotId,
+      speaker.id,
+    ) &&
+    !(latestAssistantBeforeTurn.coffeeReplayEvents ?? []).some(
+      (event) => event.kind === "perceptionOverlap",
+    )
+      ? {
+          v: 1,
+          name: "coffeeReplayEvent",
+          kind: "perceptionOverlap",
+          botId: speaker.id,
+          precedingBotId: priorAssistantSpeakerBotId,
+          precedingMessageId: latestAssistantBeforeTurn.id,
+          overlappingMessageId: assistantMessageId,
+          startRatio: botPowerPerceptionOverlapStartRatioV1(
+            `${row.id}:${latestAssistantBeforeTurn.id}:${assistantMessageId}`,
+          ),
+          maxSimultaneousVoices: 2,
+          occurredAt: assistantNow,
+        }
+      : null;
   const listenerTarget =
     replyAddressedBotId && replyAddressedBotId !== speaker.id
       ? { botId: replyAddressedBotId, source: "direct" as const }
@@ -15506,8 +15660,7 @@ async function generateCoffeeBotReply(args: {
           activePoll === null &&
           interruptionEvent === undefined &&
           departurePersistence === null &&
-          listenerIsInAudience &&
-          coffeePowerBotVisibleTo(coffeePowerPlan, speaker.id, listenerBot.id),
+          listenerIsInAudience,
         allowAudio:
           listenerTarget.source === "direct" &&
           !coffeePowerBotIsMuted(coffeePowerPlan, listenerBot.id),
@@ -15531,6 +15684,7 @@ async function generateCoffeeBotReply(args: {
       ? [
           ...emptyCupAttemptUpdate.replayEvents,
           ...identityMirrorReplayEvents,
+          ...(perceptionOverlapEvent ? [perceptionOverlapEvent] : []),
           ...moodBoostOutcome.events,
           ...moodDrainOutcome.events,
           ...coffeeReplayMoodEvents,
@@ -15546,6 +15700,7 @@ async function generateCoffeeBotReply(args: {
       : [
           ...emptyCupAttemptUpdate.replayEvents,
           ...identityMirrorReplayEvents,
+          ...(perceptionOverlapEvent ? [perceptionOverlapEvent] : []),
           ...moodBoostOutcome.events,
           ...moodDrainOutcome.events,
           ...coffeeReplayMoodEvents,

@@ -174,8 +174,8 @@ describe("Asset Cleanup account lifecycle", () => {
       `INSERT INTO images
          (id, user_id, related_bot_ids, origin, prompt, url, size, quality,
           provider, model, local_rel_path, purpose, created_at)
-       VALUES (?, ?, '[]', 'images_panel', 'unused', '', '1024x1024',
-               'standard', 'openai', 'image-model', ?, 'gallery', ?)`,
+       VALUES (?, ?, '[]', 'botcast', 'unused', '', '1024x1024',
+               'standard', 'openai', 'image-model', ?, 'studio', ?)`,
     ).run(imageId, userId, localRelPath, "2020-01-01T00:00:00.000Z");
     const acquired = await tryAcquireImageSlot({
       userId,
@@ -198,7 +198,11 @@ describe("Asset Cleanup account lifecycle", () => {
         (
           await client.request(
             "/api/images/cleanup",
-            jsonInit({ snapshot: "00000000000000000000", imageIds: [imageId] }),
+            jsonInit({
+              snapshot: "00000000000000000000",
+              imageIds: [imageId],
+              permanent: true,
+            }),
           )
         ).status,
         409,
@@ -226,6 +230,7 @@ describe("Asset Cleanup account lifecycle", () => {
       jsonInit({
         snapshot: previewPayload.preview.snapshot,
         imageIds: [imageId],
+        permanent: true,
       }),
     );
     assert.equal(cleanup.status, 200);

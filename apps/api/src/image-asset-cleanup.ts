@@ -1,10 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import {
+  generatedImageStorageSizeBytes,
   listGeneratedImageRecoveryBatchesForUser,
   markGeneratedImageQuarantineCommitted,
   markGeneratedImageRecoveryBatchRestoring,
   purgeGeneratedImageRecoveryBatch,
+  purgeGeneratedImageQuarantine,
   quarantineGeneratedImageFiles,
   requarantineGeneratedImageRecoveryBatch,
   restoreQuarantinedGeneratedImageFiles,
@@ -12,7 +14,7 @@ import {
   type GeneratedImageQuarantineResult,
 } from "./image-storage.ts";
 
-export const IMAGE_ASSET_CLEANUP_PREVIEW_VERSION = 2;
+export const IMAGE_ASSET_CLEANUP_PREVIEW_VERSION = 3;
 export const IMAGE_ASSET_CLEANUP_PREVIEW_LIMIT = 200;
 export const IMAGE_ASSET_CLEANUP_SELECTION_LIMIT = 200;
 export const IMAGE_ASSET_CLEANUP_MINIMUM_AGE_MS = 15 * 60 * 1_000;
@@ -28,6 +30,7 @@ export interface ImageAssetCleanupCandidate {
   promptExcerpt: string;
   modeLabel: string;
   reason: string;
+  storageBytes: number;
 }
 
 export interface ImageAssetCleanupPreview {
@@ -37,7 +40,9 @@ export interface ImageAssetCleanupPreview {
   scanned: number;
   generatedLocalAssets: number;
   candidateCount: number;
+  candidateStorageBytes: number;
   protectedByReferenceCount: number;
+  protectedIntentionalAssetCount: number;
   protectedPlayerAssetCount: number;
   protectedUnverifiableCount: number;
   protectedSharedFileCount: number;
@@ -52,6 +57,7 @@ export interface ImageAssetCleanupPreview {
 export interface ImageAssetCleanupRequest {
   snapshot: string;
   imageIds: string[];
+  permanent: boolean;
 }
 
 export interface ImageAssetCleanupResult {
@@ -59,8 +65,12 @@ export interface ImageAssetCleanupResult {
   quarantinedAssetCount: number;
   quarantinedFileCount: number;
   missingAssetFileCount: number;
-  recoveryId: string;
-  recoveryRelativePath: string;
+  selectedStorageBytes: number;
+  reclaimedBytes: number;
+  permanentDeleteCompleted: boolean;
+  recoveryRetained: boolean;
+  recoveryId: string | null;
+  recoveryRelativePath: string | null;
   imageIds: string[];
   preview: ImageAssetCleanupPreview;
 }
@@ -129,9 +139,19 @@ export interface ImageAssetCleanupFileOperations {
     recoveryManifest?: string,
   ) => GeneratedImageQuarantineResult;
   restore?: (quarantine: GeneratedImageQuarantineResult) => void;
+  purge?: (
+    userId: string,
+    quarantine: GeneratedImageQuarantineResult,
+  ) => void;
 }
 
 const IMAGE_FILE_URL_PATTERN = /\/api\/images\/([^/\s?#]+)\/(?:file|thumb)\b/giu;
+const SYSTEM_MANAGED_IMAGE_ORIGINS = new Set([
+  "botcast",
+  "slate_cover",
+  "zen_wallpaper",
+  "bot_profile_picture",
+]);
 
 function readRows<T>(db: DatabaseSync, sql: string, userId: string): T[] {
   return db.prepare(sql).all(userId) as T[];
@@ -242,7 +262,7 @@ function modeLabelForImage(row: ImageAssetRow): string {
   if (origin === "botcast") return "Signal";
   if (origin === "zen_wallpaper" || purpose === "wallpaper") return "Zen";
   if (origin === "bot_profile_picture" || purpose === "bot_profile_picture") {
-    return "bot profile";
+    return "Bot profile";
   }
   if (origin.startsWith("bot_group_room") || purpose === "group-room-wallpaper") {
     return "Group room";
@@ -255,15 +275,24 @@ function modeLabelForImage(row: ImageAssetRow): string {
 function playerAuthoredAsset(row: ImageAssetRow): boolean {
   const provider = row.provider?.trim().toLowerCase() ?? "";
   const origin = row.origin?.trim().toLowerCase() ?? "";
+  const purpose = row.purpose?.trim().toLowerCase() ?? "";
   return (
     provider === "upload" ||
     origin.includes("upload") ||
-    origin.includes("import")
+    origin.includes("import") ||
+    purpose.includes("upload") ||
+    purpose.includes("import")
   );
 }
 
 function unverifiableClientAsset(row: ImageAssetRow): boolean {
   return row.purpose?.trim().toLowerCase() === "group-room-wallpaper";
+}
+
+function systemManagedAppletAsset(row: ImageAssetRow): boolean {
+  return SYSTEM_MANAGED_IMAGE_ORIGINS.has(
+    row.origin?.trim().toLowerCase() ?? "",
+  );
 }
 
 function verifiedGeneratedLocalPath(
@@ -414,6 +443,7 @@ function buildImageAssetCleanupGraph(
 
   let generatedLocalAssets = 0;
   let protectedByReferenceCount = 0;
+  let protectedIntentionalAssetCount = 0;
   let protectedPlayerAssetCount = 0;
   let protectedUnverifiableCount = 0;
   let protectedSharedFileCount = 0;
@@ -439,6 +469,10 @@ function buildImageAssetCleanupGraph(
       protectedUnverifiableCount += 1;
       continue;
     }
+    if (!systemManagedAppletAsset(row)) {
+      protectedIntentionalAssetCount += 1;
+      continue;
+    }
     if ((localPathReferenceCounts.get(verifiedLocalPath) ?? 0) !== 1) {
       protectedSharedFileCount += 1;
       continue;
@@ -456,6 +490,7 @@ function buildImageAssetCleanupGraph(
       continue;
     }
     const modeLabel = modeLabelForImage(row);
+    const storageBytes = generatedImageStorageSizeBytes(verifiedLocalPath);
     const candidate: ImageAssetCleanupCandidate = {
       id: row.id,
       createdAt: row.created_at,
@@ -469,10 +504,8 @@ function buildImageAssetCleanupGraph(
       ]),
       promptExcerpt: row.prompt.trim().replace(/\s+/gu, " ").slice(0, 180),
       modeLabel,
-      reason:
-        modeLabel === "Image Library"
-          ? "No current or historical applet reference was found. This generated file is saved only in the Image Library."
-          : `No current or historical ${modeLabel} reference was found. This generated file is saved only in the Image Library.`,
+      reason: `No current or historical ${modeLabel} reference was found. This PRISM-managed asset has been replaced or its owning experience was removed.`,
+      storageBytes,
     };
     allCandidates.push(candidate);
     candidateRows.set(row.id, {
@@ -502,6 +535,7 @@ function buildImageAssetCleanupGraph(
             row?.local_rel_path ?? "",
             row?.purpose ?? null,
             row?.created_at ?? candidate.createdAt,
+            candidate.storageBytes,
           ]);
         })
         .sort()
@@ -516,7 +550,12 @@ function buildImageAssetCleanupGraph(
     scanned: rows.length,
     generatedLocalAssets,
     candidateCount: allCandidates.length,
+    candidateStorageBytes: allCandidates.reduce(
+      (total, candidate) => total + candidate.storageBytes,
+      0,
+    ),
     protectedByReferenceCount,
+    protectedIntentionalAssetCount,
     protectedPlayerAssetCount,
     protectedUnverifiableCount,
     protectedSharedFileCount,
@@ -532,6 +571,7 @@ function buildImageAssetCleanupGraph(
       "Signal show artwork",
       "Slate covers",
       "Story sessions",
+      "Intentional Image Library and chat generations",
       "Player uploads and imports",
       "Group-room assets with browser-local references",
       "Generated files shared by more than one database row or account",
@@ -801,7 +841,7 @@ export function permanentlyDeleteImageAssetCleanupRecovery(
 
 function validateCleanupRequest(
   request: ImageAssetCleanupRequest,
-): { snapshot: string; imageIds: string[] } {
+): { snapshot: string; imageIds: string[]; permanent: true } {
   const snapshot = request.snapshot?.trim() ?? "";
   if (!/^[a-f0-9]{20}$/u.test(snapshot)) {
     throw new ImageAssetCleanupError(
@@ -813,6 +853,12 @@ function validateCleanupRequest(
     throw new ImageAssetCleanupError(
       "invalid_request",
       "Select one or more cleanup candidates.",
+    );
+  }
+  if (request.permanent !== true) {
+    throw new ImageAssetCleanupError(
+      "invalid_request",
+      "Permanent asset cleanup requires explicit confirmation.",
     );
   }
   const imageIds = request.imageIds.map((value) =>
@@ -829,13 +875,14 @@ function validateCleanupRequest(
       `Select between 1 and ${IMAGE_ASSET_CLEANUP_SELECTION_LIMIT} unique cleanup candidates.`,
     );
   }
-  return { snapshot, imageIds };
+  return { snapshot, imageIds, permanent: true };
 }
 
 /**
  * Revalidates a selected preview under an immediate SQLite transaction, moves
- * only verified generated files into recovery trash, and then removes their
- * owning rows. Any database failure restores the moved files before returning.
+ * only verified generated files into a quarantine, and removes their owning
+ * rows. Database failures restore the files; committed batches are permanently
+ * purged, with failed purges retained for recovery.
  */
 export function cleanupUnreferencedImageAssets(
   db: DatabaseSync,
@@ -851,10 +898,12 @@ export function cleanupUnreferencedImageAssets(
     fileOperations.quarantine ?? quarantineGeneratedImageFiles;
   const restore =
     fileOperations.restore ?? restoreQuarantinedGeneratedImageFiles;
+  const purge = fileOperations.purge ?? purgeGeneratedImageQuarantine;
   const recoveryId = makeRecoveryId();
   let quarantineResult: GeneratedImageQuarantineResult | null = null;
   let nextPreview: ImageAssetCleanupPreview | null = null;
   let transactionStarted = false;
+  let selectedStorageBytes = 0;
 
   try {
     db.exec("BEGIN IMMEDIATE;");
@@ -882,6 +931,13 @@ export function cleanupUnreferencedImageAssets(
       }
       return row;
     });
+    selectedStorageBytes = validated.imageIds.reduce(
+      (total, imageId) =>
+        total +
+        (graph.preview.candidates.find((candidate) => candidate.id === imageId)
+          ?.storageBytes ?? 0),
+      0,
+    );
 
     quarantineResult = quarantine(
       userId,
@@ -935,6 +991,13 @@ export function cleanupUnreferencedImageAssets(
     // DB truth remains authoritative; startup reconciliation can classify a
     // prepared journal whose rows are already absent as committed recovery.
   }
+  let permanentDeleteCompleted = false;
+  try {
+    purge(userId, quarantineResult);
+    permanentDeleteCompleted = true;
+  } catch {
+    // The committed recovery journal remains available for retry or restore.
+  }
   return {
     deletedCount: validated.imageIds.length,
     quarantinedAssetCount:
@@ -943,8 +1006,14 @@ export function cleanupUnreferencedImageAssets(
     quarantinedFileCount: quarantineResult.movedFiles.length,
     missingAssetFileCount:
       quarantineResult.missingPrimaryRelativePaths.length,
-    recoveryId: quarantineResult.recoveryId,
-    recoveryRelativePath: quarantineResult.recoveryRelativePath,
+    selectedStorageBytes,
+    reclaimedBytes: permanentDeleteCompleted ? selectedStorageBytes : 0,
+    permanentDeleteCompleted,
+    recoveryRetained: !permanentDeleteCompleted,
+    recoveryId: permanentDeleteCompleted ? null : quarantineResult.recoveryId,
+    recoveryRelativePath: permanentDeleteCompleted
+      ? null
+      : quarantineResult.recoveryRelativePath,
     imageIds: validated.imageIds,
     preview: nextPreview,
   };

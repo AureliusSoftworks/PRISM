@@ -63,6 +63,25 @@
   box-sizing: border-box;
 }
 
+.shell[data-live-episode="true"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.shell[data-live-episode="true"] .sidebarNavigation,
+.shell[data-live-episode="true"] .library {
+  display: none;
+}
+
+.shell[data-live-episode="true"] .mainNavigation,
+.shell[data-live-episode="true"] .main,
+.shell[data-live-episode="true"] .episodePreRoll {
+  grid-column: 1;
+}
+
+.shell[data-live-episode="true"] .episodeOutro {
+  inset: 66px 0 0;
+}
+
 .shell[data-theme="light"] {
   --botcast-ink: #171724;
   --botcast-muted: #696b7a;
@@ -372,11 +391,12 @@
 .stageLayoutModalHeader p { margin: 0; color: var(--botcast-muted); font-size: .72rem; }
 .stageLayoutModalHeader > button { flex: 0 0 auto; border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 44%, var(--botcast-line)); border-radius: 10px; padding: 10px 18px; color: var(--botcast-ink); background: color-mix(in srgb, var(--botcast-host-accent) 14%, var(--botcast-soft-panel)); font: 760 .7rem/1 system-ui; cursor: pointer; }
 .stageLayoutModalBody { width: min(1600px, 100%); height: 100%; min-height: 0; margin: 0 auto; box-sizing: border-box; overflow: hidden; padding: clamp(12px, 2vw, 28px); }
-.stageLayoutEditor { height: 100%; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(290px, 350px); grid-template-rows: auto auto auto minmax(0, 1fr); gap: 12px 18px; }
-.stageLayoutModal .stageViewport { grid-column: 1; grid-row: 2 / 5; align-self: center; width: min(100%, calc((100dvh - 180px) * 1.7778)); max-width: 1320px; max-height: 100%; }
+.stageLayoutEditor { height: 100%; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(290px, 350px); grid-template-rows: auto auto auto auto minmax(0, 1fr); gap: 12px 18px; }
+.stageLayoutModal .stageViewport { grid-column: 1; grid-row: 2 / 6; align-self: center; width: min(100%, calc((100dvh - 180px) * 1.7778)); max-width: 1320px; max-height: 100%; }
 .stageLayoutModal .stageSoundcheckStatus { grid-column: 2; grid-row: 2; }
 .stageLayoutModal .stageVoiceMixer { grid-column: 2; grid-row: 3; grid-template-columns: 1fr; gap: 9px; }
-.stageLayoutModal .atmosphereMixer { grid-column: 2; grid-row: 4; align-self: start; width: 100%; max-width: 350px; grid-template-columns: 1fr; gap: 9px; margin: 0; }
+.stageLayoutModal .stageScreenTreatment { grid-column: 2; grid-row: 4; }
+.stageLayoutModal .atmosphereMixer { grid-column: 2; grid-row: 5; align-self: start; width: 100%; max-width: 350px; grid-template-columns: 1fr; gap: 9px; margin: 0; }
 .stageLayoutModal .atmosphereMixerSliders { grid-template-columns: 1fr; gap: 8px; }
 .stageLayoutEditorHeader { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
 .stageLayoutEditorHeader { grid-column: 1 / -1; grid-row: 1; }
@@ -407,6 +427,17 @@
 .stageVoiceMixerSliders small { overflow: hidden; color: var(--botcast-muted); font: 650 .58rem/1 system-ui; text-overflow: ellipsis; white-space: nowrap; }
 .stageVoiceMixerSliders output { flex: 0 0 auto; color: var(--botcast-ink); font: 760 .6rem/1 system-ui; font-variant-numeric: tabular-nums; }
 .stageVoiceMixerSliders input { width: 100%; margin: 0; accent-color: var(--botcast-host-accent); }
+.stageScreenTreatment { display: grid; gap: 8px; border: 1px solid color-mix(in srgb, var(--prism-r) 22%, var(--botcast-line)); border-radius: 12px; padding: 10px 12px; background: color-mix(in srgb, var(--prism-r) 5%, var(--botcast-soft-panel)); box-shadow: inset 3px 0 color-mix(in srgb, var(--prism-r) 40%, transparent); }
+.stageScreenTreatment > header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.stageScreenTreatment > header > div { min-width: 0; display: grid; gap: 3px; }
+.stageScreenTreatment > header strong { font-size: .74rem; }
+.stageScreenTreatment button { border: 1px solid var(--botcast-line); border-radius: 7px; padding: 6px 8px; color: var(--botcast-muted); background: var(--botcast-soft-panel); font: 700 .58rem/1 system-ui; cursor: pointer; }
+.stageScreenTreatment button:disabled { opacity: .42; cursor: default; }
+.stageScreenTreatment label { display: grid; gap: 5px; }
+.stageScreenTreatment label > span { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--botcast-muted); font: 700 .58rem/1 system-ui; }
+.stageScreenTreatment output { color: var(--botcast-ink); font-variant-numeric: tabular-nums; }
+.stageScreenTreatment input { width: 100%; margin: 0; accent-color: var(--prism-r); }
+.stageScreenTreatment > small { color: var(--botcast-muted); font-size: .56rem; line-height: 1.35; }
 .setupGrid { display: grid; grid-template-columns: .8fr 1.2fr; gap: 16px; margin-top: 22px; }
 .setupGrid label, .setupField { display: grid; gap: 8px; color: var(--botcast-muted); font-size: .75rem; }
 .producerBrief { grid-column: 1 / -1; }
@@ -460,7 +491,8 @@
 .liveCameraControls button[data-selected="true"] { border-color: transparent; color: #fff; background: linear-gradient(120deg, color-mix(in srgb, var(--botcast-host-accent) 76%, var(--prism-p)), var(--prism-m)); box-shadow: 0 6px 18px color-mix(in srgb, var(--botcast-host-accent) 18%, transparent); }
 .dangerButton { border-color: color-mix(in srgb, var(--prism-p) 28%, var(--botcast-line)) !important; color: color-mix(in srgb, var(--prism-p) 70%, var(--botcast-ink)) !important; background: color-mix(in srgb, var(--prism-p) 7%, transparent) !important; }
 .dangerButton:hover { border-color: color-mix(in srgb, var(--prism-p) 52%, var(--botcast-line)) !important; background: color-mix(in srgb, var(--prism-p) 12%, transparent) !important; }
-.stageViewport { --botcast-accent: var(--prism-m); --botcast-studio-accent: var(--botcast-accent); --signal-power-accent: var(--botcast-studio-accent); --botcast-atmosphere: none; position: relative; max-width: 1180px; aspect-ratio: 16 / 9; margin: 0 auto; overflow: hidden; border: 1px solid rgba(255,255,255,.14); border-radius: 20px; background: #11121a; box-shadow: 0 28px 90px rgba(21,15,48,.35), inset 0 0 80px rgba(0,0,0,.5); }
+.stageViewport { --botcast-accent: var(--prism-m); --botcast-studio-accent: var(--botcast-accent); --signal-power-accent: var(--botcast-studio-accent); --signal-film-grain-level: .3; --botcast-atmosphere: none; position: relative; isolation: isolate; max-width: 1180px; aspect-ratio: 16 / 9; margin: 0 auto; overflow: hidden; border: 1px solid rgba(255,255,255,.14); border-radius: 20px; background: #11121a; box-shadow: 0 28px 90px rgba(21,15,48,.35), inset 0 0 80px rgba(0,0,0,.5); }
+.stageViewport::after { position: absolute; inset: -18%; z-index: 40; content: ""; background: url("/signal-film-grain.svg") repeat; background-size: 180px 180px; mix-blend-mode: soft-light; opacity: calc(var(--signal-film-grain-level) * .65); pointer-events: none; animation: signalFilmGrainJitter 240ms steps(2, end) infinite; will-change: transform; }
 .liveLayout .stageViewport { max-width: 1320px; }
 .atmosphereMixer { max-width: 1180px; margin: 10px auto 14px; display: grid; grid-template-columns: minmax(220px, .55fr) minmax(0, 1fr); align-items: center; gap: 14px; box-sizing: border-box; border: 1px solid color-mix(in srgb, var(--prism-s) 34%, var(--botcast-line)); border-radius: 12px; padding: 10px 12px; background: color-mix(in srgb, var(--prism-s) 4%, var(--botcast-panel)); box-shadow: inset 3px 0 color-mix(in srgb, var(--prism-s) 42%, transparent); }
 .atmosphereMixerHeader { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 3px 9px; }
@@ -479,6 +511,10 @@
 .liveCaption { position: absolute; left: 50%; bottom: 6.5%; z-index: 18; width: min(76%, 780px); display: grid; justify-items: center; gap: 5px; transform: translateX(-50%); color: #fff; text-align: center; pointer-events: none; animation: signalVoiceActionIn 160ms ease-out both; }
 .liveCaption strong { border: 1px solid rgba(255,255,255,.16); border-radius: 999px; padding: 4px 8px; color: color-mix(in srgb, var(--botcast-studio-accent) 42%, white); background: rgba(4,6,11,.72); backdrop-filter: blur(9px) saturate(1.1); font: 820 clamp(.52rem, .9vw, .68rem)/1 system-ui; letter-spacing: .11em; text-transform: uppercase; box-shadow: 0 5px 18px rgba(0,0,0,.28); }
 .liveCaption span { max-width: 100%; border-radius: 10px; padding: 7px 12px 8px; background: rgba(4,6,11,.76); backdrop-filter: blur(9px) saturate(1.08); font: 720 clamp(.72rem, 1.45vw, 1.05rem)/1.28 system-ui; letter-spacing: .004em; text-wrap: balance; text-shadow: 0 2px 7px rgba(0,0,0,.98); box-shadow: 0 6px 22px rgba(0,0,0,.28); }
+.replayCaptionLanes { position: absolute; left: 50%; bottom: 5.5%; z-index: 18; width: min(88%, 940px); display: grid; gap: 6px; transform: translateX(-50%); pointer-events: none; }
+.replayCaptionLane { display: grid; grid-template-columns: minmax(90px, 150px) minmax(0, 1fr); align-items: start; gap: 10px; border: 1px solid rgba(255,255,255,.15); border-radius: 10px; padding: 7px 11px; color: #fff; background: rgba(4,6,11,.78); backdrop-filter: blur(9px) saturate(1.08); box-shadow: 0 6px 22px rgba(0,0,0,.3); }
+.replayCaptionLane strong { overflow: hidden; color: color-mix(in srgb, var(--botcast-studio-accent) 42%, white); font: 820 clamp(.55rem, .9vw, .7rem)/1.25 system-ui; letter-spacing: .08em; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
+.replayCaptionLane span { font: 700 clamp(.68rem, 1.2vw, .92rem)/1.28 system-ui; text-shadow: 0 2px 7px rgba(0,0,0,.98); }
 .stageViewport[data-camera-transitions="instant"] .stageScene { transition: none; }
 .stageViewport[data-model-warmup="entering"] .stageScene,
 .stageViewport[data-model-warmup="held"] .stageScene,
@@ -490,7 +526,7 @@
 .stageViewport[data-shot="right"] .stageScene { transform: translate(var(--botcast-camera-offset-x, 0%), var(--botcast-camera-offset-y, 0%)) scale(1.42); }
 .atmosphere { position: absolute; inset: -5%; overflow: hidden; background-color: #11121a; background-size: cover; background-position: center; filter: saturate(1.08) contrast(1.04); }
 .stageViewport[data-studio-source="image"] .atmosphere { background-image: var(--botcast-atmosphere); }
-.studioGlow { position: absolute; inset: 0; background: linear-gradient(90deg, transparent 14%, color-mix(in srgb, var(--botcast-studio-accent) 8%, transparent) 28%, transparent 46%, transparent 54%, color-mix(in srgb, var(--botcast-studio-accent) 6%, transparent) 72%, transparent 86%); mix-blend-mode: screen; }
+.studioGlow { position: absolute; inset: 0; z-index: 1; pointer-events: none; background: radial-gradient(ellipse 38% 46% at var(--signal-studio-host-x) var(--signal-studio-host-y), color-mix(in srgb, var(--signal-studio-host-light) 72%, transparent) 0%, color-mix(in srgb, var(--signal-studio-host-light) 30%, transparent) 42%, transparent 76%), radial-gradient(ellipse 38% 46% at var(--signal-studio-guest-x) var(--signal-studio-guest-y), color-mix(in srgb, var(--signal-studio-guest-light) 72%, transparent) 0%, color-mix(in srgb, var(--signal-studio-guest-light) 30%, transparent) 42%, transparent 76%); opacity: .46; mix-blend-mode: screen; -webkit-mask-image: var(--signal-studio-lighting-map); mask-image: var(--signal-studio-lighting-map); -webkit-mask-position: center; mask-position: center; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-size: cover; mask-size: cover; }
 .powerPressure { --signal-power-origin-x: 50%; position: absolute; inset: 0; z-index: 6; pointer-events: none; background: radial-gradient(circle at var(--signal-power-origin-x) 48%, color-mix(in srgb, var(--signal-power-accent) 15%, transparent) 0%, transparent 31%), radial-gradient(ellipse at center, transparent 34%, rgba(1,2,7,.72) 100%); box-shadow: inset 0 0 82px color-mix(in srgb, var(--signal-power-accent) 18%, rgba(0,0,0,.58)); opacity: .24; mix-blend-mode: multiply; }
 .powerPressure[data-source="host"] { --signal-power-origin-x: 27%; }
 .powerPressure[data-source="guest"] { --signal-power-origin-x: 73%; }
@@ -518,7 +554,7 @@
 .spectrumP { color: var(--prism-p); stroke: currentColor; }.spectrumRFill { color: var(--prism-r); fill: currentColor !important; stroke: none !important; }.spectrumPFill { color: var(--prism-p); fill: currentColor !important; stroke: none !important; }.spectrumIFill { color: var(--prism-i); fill: currentColor !important; stroke: none !important; }.spectrumS { color: var(--prism-s); stroke: currentColor; }.spectrumSFill { color: var(--prism-s); fill: currentColor !important; stroke: none !important; }.spectrumM { color: var(--prism-m); stroke: currentColor; }.spectrumMFill { color: var(--prism-m); fill: currentColor !important; stroke: none !important; }
 .spectrumMonogram { fill: #fff; font: 800 34px/1 system-ui; text-anchor: middle; filter: drop-shadow(0 2px 5px rgba(0,0,0,.45)); }
 .seat { position: absolute; top: 27%; left: var(--signal-seat-x); width: 38%; height: 63%; z-index: 4; display: grid; justify-items: center; transform: translateX(-50%); }
-.hostSeat { --signal-seat-x: 22.5%; }.guestSeat { --signal-seat-x: 77.5%; }
+.hostSeat { --signal-seat-x: 18.5%; }.guestSeat { --signal-seat-x: 81.5%; }
 .stagePlacement { position: absolute; z-index: 3; width: 25%; aspect-ratio: 1; transform: translate(-50%, -50%); pointer-events: none; }
 .avatarRig { --signal-avatar-lean: 0deg; position: relative; width: 100%; height: 100%; display: grid; place-items: center; filter: drop-shadow(0 13px 18px rgba(0,0,0,.48)); animation: signalBotIdle 4.8s ease-in-out infinite; transform-origin: 50% 82%; will-change: transform; }
 .avatarRig[data-signal-presence="host"] { --signal-avatar-lean: 2.4deg; }
@@ -608,7 +644,7 @@
   from { opacity: var(--signal-cup-shadow-return-opacity, var(--signal-cup-shadow-active-opacity)); filter: blur(var(--signal-cup-shadow-return-blur, var(--signal-cup-shadow-active-blur))); transform: translate(-50%, -50%) scale(var(--signal-cup-shadow-return-scale-x, var(--signal-cup-shadow-active-scale-x)), var(--signal-cup-shadow-return-scale-y, var(--signal-cup-shadow-active-scale-y))); }
   to { opacity: .7; filter: blur(2px); transform: translate(-50%, -50%) scale(.76, .38); }
 }
-.producerControls { display: grid; grid-template-columns: minmax(250px, .9fr) minmax(520px, 2fr); grid-template-areas: "composer cues" "status status"; gap: 12px 16px; align-items: stretch; padding: 14px; }
+.producerControls { display: grid; grid-template-columns: minmax(230px, .82fr) minmax(270px, 1fr) minmax(520px, 2fr); grid-template-areas: "composer soundboard cues" "status status status"; gap: 12px 16px; align-items: stretch; padding: 14px; }
 .producerCueComposer { grid-area: composer; display: grid; align-content: center; gap: 7px; min-width: 0; }
 .producerControls label { display: grid; gap: 7px; margin: 0; color: var(--botcast-muted); font-size: .7rem; }
 .producerControls label > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
@@ -618,6 +654,13 @@
 .producerControls button:active:not(:disabled) { transform: translateY(1px) scale(.985); }
 .producerCueComposer button { min-width: 84px; }
 .producerControls button[data-queued="true"] { border-color: color-mix(in srgb, var(--botcast-accent) 72%, white); background: color-mix(in srgb, var(--botcast-accent) 20%, rgba(255,255,255,.06)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--botcast-accent) 24%, transparent), 0 10px 26px color-mix(in srgb, var(--botcast-accent) 18%, transparent), inset 0 1px rgba(255,255,255,.1); animation: signalCueQueued 720ms cubic-bezier(.2,.72,.18,1) both; }
+.signalSoundboard { grid-area: soundboard; min-width: 0; display: grid; grid-template-rows: auto 1fr; gap: 8px; border-inline: 1px solid color-mix(in srgb, var(--botcast-accent) 15%, var(--botcast-line)); padding-inline: 16px; }
+.signalSoundboardHeading { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.signalSoundboardHeading small { overflow: hidden; color: var(--botcast-muted); font: 680 .58rem/1.2 system-ui; text-overflow: ellipsis; white-space: nowrap; }
+.signalSoundboardGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.signalSoundboardGrid button { min-height: 31px; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 9px; font-size: .66rem; }
+.signalSoundboardGrid button > span { min-width: 1.1em; color: color-mix(in srgb, var(--botcast-accent) 72%, var(--botcast-ink)); font-size: .88rem; line-height: 1; }
+.signalSoundboardGrid button[data-hit="true"] { border-color: color-mix(in srgb, var(--botcast-accent) 78%, white); background: color-mix(in srgb, var(--botcast-accent) 24%, rgba(255,255,255,.08)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--botcast-accent) 28%, transparent), 0 0 24px color-mix(in srgb, var(--botcast-accent) 24%, transparent); animation: signalSoundboardHit 620ms cubic-bezier(.2,.75,.2,1) both; }
 .cueGrid { grid-area: cues; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 9px; }
 .cueGrid button { min-height: 68px; }
 .queuedCueStatus { grid-area: status; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; margin: 0; border-top: 1px solid color-mix(in srgb, var(--botcast-accent) 20%, var(--botcast-line)); padding: 10px 2px 0; color: color-mix(in srgb, var(--botcast-accent) 72%, white); font-size: .7rem; line-height: 1.4; }
@@ -625,6 +668,7 @@
 .queuedCueStatus button { white-space: nowrap; font-size: .66rem; }
 .producerCueComposer small { display: block; margin: 0; color: #797b81; font-size: .64rem; line-height: 1.35; }
 @keyframes signalCueQueued { from { transform: scale(.94); } 58% { transform: scale(1.025); } to { transform: scale(1); } }
+@keyframes signalSoundboardHit { 0% { transform: scale(.9); } 28% { transform: scale(1.045); } 100% { transform: scale(1); } }
 .returnButton { display: block; margin: 16px auto; }
 .producerGuestComposerDock { position: sticky; bottom: 0; z-index: 18; max-width: 1320px; margin: 0 auto; padding-top: 10px; background: linear-gradient(180deg, transparent, var(--botcast-canvas) 18%); }
 .producerGuestActionRail { display: flex; justify-content: flex-end; margin: 0 0 7px; }
@@ -777,17 +821,17 @@
   filter: saturate(.9) contrast(.94) brightness(1.04);
 }
 .shell[data-theme="light"] .stageViewport[data-studio-source="image"] .atmosphere { background-image: var(--botcast-atmosphere); }
-.shell[data-theme="light"] .stageViewport .studioGlow { opacity: .24; mix-blend-mode: normal; }
+.shell[data-theme="light"] .studioGlow { opacity: .34; mix-blend-mode: multiply; }
 .shell[data-theme="light"] .studioSpotlightBeam { background: radial-gradient(ellipse at 50% 8%, rgba(255,252,235,.48) 0%, rgba(255,229,169,.11) 32%, transparent 73%); mix-blend-mode: soft-light; opacity: .4; }
 .shell[data-theme="light"] .studioSpotlightPool { background: radial-gradient(ellipse, rgba(255,244,207,.28), color-mix(in srgb, var(--botcast-studio-accent) 6%, transparent) 48%, transparent 73%); mix-blend-mode: soft-light; opacity: .36; }
 .stageLayoutModalBackdrop[data-preview-theme="light"] .stageViewport { border-color: color-mix(in srgb, var(--botcast-accent) 16%, var(--botcast-line)); background: #e8edf4; box-shadow: 0 24px 72px rgba(55,61,90,.16), inset 0 0 70px rgba(255,255,255,.34); }
 .stageLayoutModalBackdrop[data-preview-theme="light"] .stageViewport .atmosphere { background-color: #e8edf4; filter: saturate(.9) contrast(.94) brightness(1.04); }
-.stageLayoutModalBackdrop[data-preview-theme="light"] .stageViewport .studioGlow { opacity: .24; mix-blend-mode: normal; }
+.stageLayoutModalBackdrop[data-preview-theme="light"] .stageViewport .studioGlow { opacity: .34; mix-blend-mode: multiply; }
 .stageLayoutModalBackdrop[data-preview-theme="light"] .studioSpotlightBeam { background: radial-gradient(ellipse at 50% 8%, rgba(255,252,235,.48) 0%, rgba(255,229,169,.11) 32%, transparent 73%); mix-blend-mode: soft-light; opacity: .4; }
 .stageLayoutModalBackdrop[data-preview-theme="light"] .studioSpotlightPool { background: radial-gradient(ellipse, rgba(255,244,207,.28), color-mix(in srgb, var(--botcast-studio-accent) 6%, transparent) 48%, transparent 73%); mix-blend-mode: soft-light; opacity: .36; }
 .shell[data-theme="light"] .stageLayoutModalBackdrop[data-preview-theme="dark"] .stageViewport { border-color: rgba(255,255,255,.14); background: #11121a; box-shadow: 0 24px 72px rgba(21,15,48,.35), inset 0 0 80px rgba(0,0,0,.5); }
 .shell[data-theme="light"] .stageLayoutModalBackdrop[data-preview-theme="dark"] .stageViewport .atmosphere { background-color: #11121a; filter: saturate(1.08) contrast(1.04); }
-.shell[data-theme="light"] .stageLayoutModalBackdrop[data-preview-theme="dark"] .stageViewport .studioGlow { opacity: 1; mix-blend-mode: screen; }
+.shell[data-theme="light"] .stageLayoutModalBackdrop[data-preview-theme="dark"] .stageViewport .studioGlow { opacity: .46; mix-blend-mode: screen; }
 
 .shell[data-theme="light"] .productionDesk,
 .shell[data-theme="light"] .episodeOpenButton,
@@ -819,7 +863,8 @@
 }
 
 @media (min-width: 901px) and (max-width: 1220px) {
-  .producerControls { grid-template-columns: minmax(0, 1fr); grid-template-areas: "composer" "cues" "status"; }
+  .producerControls { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-areas: "composer soundboard" "cues cues" "status status"; }
+  .signalSoundboard { border-inline-end: 0; }
 }
 
 @media (max-width: 900px) {
@@ -889,7 +934,8 @@
   .stageLayoutModal .atmosphereMixer { grid-column: 1; grid-row: auto; width: 100%; max-width: none; }
   .stageLayoutEditorHeader { align-items: flex-start; flex-direction: column; }
   .stageLayoutEditorHeader > div { width: 100%; flex-wrap: wrap; }
-  .producerControls { grid-template-columns: minmax(0, 1fr); grid-template-areas: "composer" "cues" "status"; }
+  .producerControls { grid-template-columns: minmax(0, 1fr); grid-template-areas: "composer" "soundboard" "cues" "status"; }
+  .signalSoundboard { border-inline: 0; border-block: 1px solid color-mix(in srgb, var(--botcast-accent) 15%, var(--botcast-line)); padding: 12px 0; }
   .cueGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .cueGrid .refocusCue { grid-column: 1 / -1; }
   .setupGrid { grid-template-columns: 1fr; }.producerBrief { grid-column: auto; }
@@ -909,12 +955,14 @@
 
 @media (prefers-reduced-motion: reduce) {
   .stageScene { transition-duration: 120ms; }
+  .stageViewport::after { animation: none !important; }
   .stageScene, .episodeOpenButton, .episodePreRoll, .preRollLockup, .showAudiencePulse, .showIdentityGearButton, .showIdentityGearButton span { transition: none !important; }
   .liveCaption { animation: none !important; }
   .episodePreRoll[data-kind="intro"]::after { opacity: 0; animation: none !important; }
   .episodeOutro { opacity: 1; animation: none !important; }
   .producerControls button, .producerGuestSipButton { transition: none !important; }
   .producerControls button[data-queued="true"] { animation: none !important; }
+  .signalSoundboardGrid button[data-hit="true"] { animation: none !important; }
   .avatarRig { animation: none !important; transform: rotate(var(--signal-avatar-lean)); }
   .avatarRig[data-departed="true"] { opacity: 0; transform: translate3d(42%, 5%, 0) rotate(calc(var(--signal-avatar-lean) + 9deg)) scale(.92); }
   .avatarRig[data-listener-reaction] { filter: drop-shadow(0 0 10px color-mix(in srgb, var(--botcast-studio-accent) 24%, transparent)); }
@@ -931,6 +979,14 @@
 @keyframes signalStudioSpotlightSweep {
   0% { transform: translateX(-50%) rotate(-1.5deg); }
   100% { transform: translateX(-50%) rotate(1.5deg); }
+}
+
+@keyframes signalFilmGrainJitter {
+  0% { transform: translate3d(-2%, -1%, 0); }
+  25% { transform: translate3d(1%, 2%, 0); }
+  50% { transform: translate3d(2%, -2%, 0); }
+  75% { transform: translate3d(-1%, 1%, 0); }
+  100% { transform: translate3d(0, -1%, 0); }
 }
 
 @keyframes signalHostChatBubbleIn {

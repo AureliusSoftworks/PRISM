@@ -38,6 +38,8 @@ import {
   botcastProducerGuestThinkingDiscountMs,
   botcastReplayMessageIndexAt,
   botcastReplayTimeline,
+  botcastSoundboardCueFromEvent,
+  botcastSoundboardCueLabel,
   botcastSignalStandardCadenceDurationMs,
   botcastNextSpeakerRole,
   botcastSegmentForTurn,
@@ -61,6 +63,29 @@ import {
 } from "./botcast.ts";
 
 describe("Signal fallback studio accents", () => {
+  it("normalizes the four replay-safe Signal soundboard cues", () => {
+    const event: BotcastReplayEvent = {
+      id: "soundboard-1",
+      episodeId: "episode-1",
+      sequence: 1,
+      kind: "soundboard_cue",
+      payload: { kind: "applause", atMs: 1_250, source: "producer" },
+      occurredAt: "2026-07-21T00:00:00.000Z",
+    };
+    assert.deepEqual(botcastSoundboardCueFromEvent(event), {
+      kind: "applause",
+      atMs: 1_250,
+    });
+    assert.equal(botcastSoundboardCueLabel("rimshot"), "Rimshot");
+    assert.equal(
+      botcastSoundboardCueFromEvent({
+        ...event,
+        payload: { kind: "airhorn", atMs: 1_250 },
+      }),
+      null,
+    );
+  });
+
   it("uses Premium-calibrated cadence for speech and a full shot for silence", () => {
     assert.equal(
       botcastSignalStandardCadenceDurationMs(
@@ -467,10 +492,21 @@ describe("Signal studio relighting", () => {
 describe("Signal studio layout", () => {
   it("defaults missing positions and clamps saved props inside the stage", () => {
     assert.deepEqual(normalizeBotcastStudioLayout(undefined), BOTCAST_DEFAULT_STUDIO_LAYOUT);
-    assert.equal(BOTCAST_DEFAULT_STUDIO_LAYOUT.hostBot.y, 71.25);
-    assert.equal(BOTCAST_DEFAULT_STUDIO_LAYOUT.guestBot.y, 71.25);
-    assert.equal(BOTCAST_DEFAULT_STUDIO_LAYOUT.hostCup.y, 90);
-    assert.equal(BOTCAST_DEFAULT_STUDIO_LAYOUT.guestCup.y, 90);
+    assert.deepEqual(BOTCAST_DEFAULT_STUDIO_LAYOUT, {
+      hostBot: { x: 18.5, y: 66 },
+      guestBot: { x: 81.5, y: 66 },
+      hostCup: { x: 36.25, y: 86 },
+      guestCup: { x: 63.75, y: 86 },
+    });
+    assert.deepEqual(
+      normalizeBotcastStudioLayout({
+        hostBot: { x: 22.5, y: 71.25 },
+        guestBot: { x: 77.5, y: 71.25 },
+        hostCup: { x: 36.25, y: 90 },
+        guestCup: { x: 63.75, y: 90 },
+      }),
+      BOTCAST_DEFAULT_STUDIO_LAYOUT,
+    );
     assert.deepEqual(
       normalizeBotcastStudioLayout({
         hostBot: { x: 22.5, y: 64 },
@@ -479,6 +515,16 @@ describe("Signal studio layout", () => {
         guestCup: { x: 63.75, y: 80 },
       }),
       BOTCAST_DEFAULT_STUDIO_LAYOUT,
+    );
+    const customizedPreviousLayout = {
+      hostBot: { x: 20, y: 71.25 },
+      guestBot: { x: 77.5, y: 71.25 },
+      hostCup: { x: 36.25, y: 90 },
+      guestCup: { x: 63.75, y: 90 },
+    };
+    assert.deepEqual(
+      normalizeBotcastStudioLayout(customizedPreviousLayout),
+      customizedPreviousLayout,
     );
     assert.deepEqual(
       normalizeBotcastStudioLayout({
@@ -551,15 +597,16 @@ describe("Signal studio atmosphere mix", () => {
         background: 99,
         grain: -1,
         foley: "1.4",
+        filmGrain: 99,
       }),
-      { background: 0.32, grain: 0, foley: 1.4 },
+      { background: 0.32, grain: 0, foley: 1.4, filmGrain: 1 },
     );
     assert.deepEqual(
       normalizeBotcastStudioAtmosphereMix(
-        { background: 0.2, grain: 0.006, foley: 1.1 },
-        { background: 0, grain: 0, foley: 0 },
+        { background: 0.2, grain: 0.006, foley: 1.1, filmGrain: 0 },
+        { background: 0, grain: 0, foley: 0, filmGrain: 0.75 },
       ),
-      { background: 0.2, grain: 0, foley: 1.1 },
+      { background: 0.2, grain: 0, foley: 1.1, filmGrain: 0 },
     );
   });
 });
@@ -1115,5 +1162,46 @@ describe("Botcast replay director", () => {
       ),
       -1,
     );
+  });
+
+  it("keeps complete perception-overlap lines with at most two voices", () => {
+    const overlap = (
+      sequence: number,
+      precedingMessageId: string,
+      overlappingMessageId: string,
+      precedingBotId: string,
+      overlappingBotId: string,
+    ): BotcastReplayEvent => ({
+      id: `overlap-${sequence}`,
+      episodeId: "episode",
+      sequence,
+      kind: "power_effect",
+      payload: {
+        v: 1,
+        effect: "perception_overlap",
+        precedingMessageId,
+        overlappingMessageId,
+        precedingBotId,
+        overlappingBotId,
+        startRatio: 0.64,
+        maxSimultaneousVoices: 2,
+      },
+      occurredAt: "2026-07-21T00:00:00.000Z",
+    });
+    const timeline = botcastReplayTimeline(
+      [
+        { id: "one", content: "First speaker gives a complete and deliberately long answer." },
+        { id: "two", content: "Second speaker begins without hearing that answer and keeps talking." },
+        { id: "three", content: "Third speaker also attempts to begin before the handoff settles." },
+      ],
+      [
+        overlap(1, "one", "two", "ryuk", "lincoln"),
+        overlap(2, "two", "three", "lincoln", "ryuk"),
+      ],
+    );
+    assert.ok(timeline.messageStartMs[1]! < timeline.messageEndMs[0]!);
+    assert.ok(timeline.messageEndMs[1]! > timeline.messageStartMs[1]!);
+    assert.ok(timeline.messageStartMs[2]! >= timeline.messageEndMs[0]!);
+    assert.ok(timeline.messageEndMs[2]! > timeline.messageStartMs[2]!);
   });
 });

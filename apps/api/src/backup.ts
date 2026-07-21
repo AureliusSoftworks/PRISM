@@ -15,6 +15,7 @@ import {
   DEFAULT_BOT_FACE_BLINK_SCALE,
   DEFAULT_BOT_FACE_EYE_COUNT,
   DEFAULT_BOT_FACE_GLYPH_ANIMATION,
+  DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER,
   DEFAULT_BOT_FACE_THINKING_FRAMES,
   parseStoredBotAvatarDetailsV1,
   normalizeBotFaceBlinkBar,
@@ -308,6 +309,13 @@ export interface BackupSnapshot {
         revision: number;
         createdAt: string;
         updatedAt: string;
+        outdent?: {
+          prompt: string;
+          contentType: string;
+          /** Legacy v1 snapshots store audio inline; new `.prism` archives use project blobs. */
+          audioBase64?: string;
+          durationMs: number;
+        };
       };
       atmosphereAudio?: {
         provider: "elevenlabs";
@@ -1811,7 +1819,9 @@ export function exportUserSnapshot(
   const botcastIntroAudio = db
     .prepare(
     `SELECT show_id, provider, model, prompt, content_type, audio_bytes,
-            duration_ms, revision, created_at, updated_at
+            duration_ms, outdent_prompt, outdent_content_type,
+            outdent_audio_bytes, outdent_duration_ms, revision,
+            created_at, updated_at
        FROM botcast_show_intro_audio WHERE user_id = ?`,
     )
     .all(userId) as Array<{
@@ -1822,6 +1832,10 @@ export function exportUserSnapshot(
     content_type: string;
     audio_bytes: Uint8Array;
     duration_ms: number;
+    outdent_prompt: string | null;
+    outdent_content_type: string | null;
+    outdent_audio_bytes: Uint8Array | null;
+    outdent_duration_ms: number | null;
     revision: number;
     created_at: string;
     updated_at: string;
@@ -1972,6 +1986,26 @@ export function exportUserSnapshot(
                 revision: botcastIntroAudioByShowId.get(row.id)!.revision,
                 createdAt: botcastIntroAudioByShowId.get(row.id)!.created_at,
                 updatedAt: botcastIntroAudioByShowId.get(row.id)!.updated_at,
+                ...(botcastIntroAudioByShowId.get(row.id)!
+                  .outdent_audio_bytes
+                  ? {
+                      outdent: {
+                        prompt:
+                          botcastIntroAudioByShowId.get(row.id)!
+                            .outdent_prompt ?? "Signal show outdent",
+                        contentType:
+                          botcastIntroAudioByShowId.get(row.id)!
+                            .outdent_content_type ?? "audio/mpeg",
+                        audioBase64: Buffer.from(
+                          botcastIntroAudioByShowId.get(row.id)!
+                            .outdent_audio_bytes!,
+                        ).toString("base64"),
+                        durationMs:
+                          botcastIntroAudioByShowId.get(row.id)!
+                            .outdent_duration_ms ?? 4_000,
+                      },
+                    }
+                  : {}),
               },
             }
           : {}),
@@ -2739,7 +2773,15 @@ function importUserSnapshotWithinTransaction(
       ).run(serializeBotPowersV1(bot.powers ?? []), bot.id.trim(), userId);
       db.prepare(
         "UPDATE bots SET face_mouth_coffee_pucker = ? WHERE id = ? AND user_id = ?",
-      ).run(bot.faceMouthCoffeePucker === true ? 1 : 0, bot.id.trim(), userId);
+      ).run(
+        bot.faceMouthCoffeePucker === false
+          ? 0
+          : DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER
+            ? 1
+            : 0,
+        bot.id.trim(),
+        userId,
+      );
     }
   }
 
@@ -2776,6 +2818,18 @@ function importUserSnapshotWithinTransaction(
         typeof show.introAudio.audioBase64 === "string"
       ) {
         const audioBytes = Buffer.from(show.introAudio.audioBase64, "base64");
+        const outdentBytes =
+          typeof show.introAudio.outdent?.audioBase64 === "string"
+            ? Buffer.from(show.introAudio.outdent.audioBase64, "base64")
+            : null;
+        const validOutdent = Boolean(
+          outdentBytes &&
+            outdentBytes.length > 0 &&
+            outdentBytes.length <= 4 * 1024 * 1024 &&
+            /^audio\/(?:mpeg|mp3)$/iu.test(
+              show.introAudio.outdent?.contentType ?? "",
+            ),
+        );
         if (
           audioBytes.length > 0 &&
           audioBytes.length <= 4 * 1024 * 1024 &&
@@ -2784,8 +2838,10 @@ function importUserSnapshotWithinTransaction(
           db.prepare(
             `INSERT OR REPLACE INTO botcast_show_intro_audio
               (show_id, user_id, provider, model, prompt, content_type,
-               audio_bytes, duration_ms, revision, created_at, updated_at)
-             VALUES (?, ?, 'elevenlabs', ?, ?, ?, ?, ?, ?, ?, ?)`,
+               audio_bytes, duration_ms, outdent_prompt,
+               outdent_content_type, outdent_audio_bytes,
+               outdent_duration_ms, revision, created_at, updated_at)
+             VALUES (?, ?, 'elevenlabs', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           ).run(
             show.id,
             userId,
@@ -2794,6 +2850,15 @@ function importUserSnapshotWithinTransaction(
             show.introAudio.contentType,
             audioBytes,
             Math.max(3_000, Math.round(show.introAudio.durationMs)),
+            validOutdent ? show.introAudio.outdent!.prompt : null,
+            validOutdent ? show.introAudio.outdent!.contentType : null,
+            validOutdent ? outdentBytes : null,
+            validOutdent
+              ? Math.max(
+                  3_000,
+                  Math.round(show.introAudio.outdent!.durationMs),
+                )
+              : null,
             Math.max(1, Math.round(show.introAudio.revision)),
             show.introAudio.createdAt || show.createdAt,
             show.introAudio.updatedAt || show.updatedAt,

@@ -23,6 +23,7 @@ import {
   playRealtimeVoiceBytes,
   stopReactionVoiceAudio,
   type VoicePlaybackChannel,
+  type VoicePlaybackLifecycle,
 } from "./voiceEffects.ts";
 import type { RoomAcousticsSend } from "./roomAcoustics.ts";
 
@@ -133,6 +134,7 @@ export async function playEphemeralReactionVoice(args: {
   channel?: VoicePlaybackChannel;
   startDelayMs?: number;
   signal?: AbortSignal;
+  lifecycle?: VoicePlaybackLifecycle;
 }): Promise<boolean> {
   const cue = args.text.replace(/\s+/gu, " ").trim();
   const normalizedInputProfile = normalizeBotAudioVoiceProfileV1(args.profile);
@@ -164,6 +166,7 @@ export async function playEphemeralReactionVoice(args: {
       maxDurationMs: args.maxDurationMs ?? 900,
       roomAcoustics: args.roomAcoustics,
       stereoPan: args.stereoPan,
+      lifecycle: args.lifecycle,
     });
   }
 
@@ -187,6 +190,7 @@ export async function playEphemeralReactionVoice(args: {
     maxDurationMs: args.maxDurationMs ?? 900,
     roomAcoustics: args.roomAcoustics,
     stereoPan: args.stereoPan,
+    lifecycle: args.lifecycle,
   });
 }
 
