@@ -1,4 +1,5 @@
 import {
+  BOTCAST_PRODUCER_GUEST_ID,
   botPowerResponseIsSilentV1,
   botcastReplayTimeline,
   type BotcastEpisode,
@@ -164,11 +165,20 @@ export function buildSignalReviewTranscript(
       const event = utteranceEvents.get(message.id);
       const participant = message.speakerRole === "host" ? host : guest;
       const segment = payloadString(event, "segment") ?? "unknown";
-      const provider = payloadString(event, "provider") ?? "unknown";
-      const model =
-        payloadString(event, "model") ?? "provider default or unrecorded";
+      const humanProducerGuest =
+        message.speakerRole === "guest" &&
+        (message.botId === BOTCAST_PRODUCER_GUEST_ID ||
+          payloadString(event, "source") === "producer_guest_composer");
+      const provider = humanProducerGuest
+        ? "no provider"
+        : (payloadString(event, "provider") ?? "unknown");
+      const model = humanProducerGuest
+        ? "no model"
+        : (payloadString(event, "model") ?? "provider default or unrecorded");
       const responseMode =
-        payloadString(event, "responseMode") ?? episode.responseMode;
+        humanProducerGuest
+          ? "human-authored"
+          : (payloadString(event, "responseMode") ?? episode.responseMode);
       const recordedAt = event?.occurredAt ?? message.createdAt;
       const autoRecovery = event?.payload.autoRecovery;
       const providerRecovery = event?.payload.providerRecovery;
@@ -181,8 +191,8 @@ export function buildSignalReviewTranscript(
         `- Segment: ${segment}`,
         `- Delivery mood: ${message.moodKey}`,
         `- Turn routing: ${responseMode} -> ${provider} -> ${model}`,
-        `- AUTO recovery: ${autoRecovery === undefined ? "None recorded" : stableJson(autoRecovery)}`,
-        `- ONLINE retry: ${providerRecovery === undefined ? "None recorded" : stableJson(providerRecovery)}`,
+        `- AUTO recovery: ${humanProducerGuest ? "Not applicable (human-authored)" : autoRecovery === undefined ? "None recorded" : stableJson(autoRecovery)}`,
+        `- ONLINE retry: ${humanProducerGuest ? "Not applicable (human-authored)" : providerRecovery === undefined ? "None recorded" : stableJson(providerRecovery)}`,
         `- Immersive voice effect: ${event?.payload.immersiveVoiceEffect === true ? "yes" : "no"}`,
         "- Stage action (avatar only):",
         indentBlock(message.stageActionText),

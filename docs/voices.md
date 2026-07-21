@@ -15,7 +15,7 @@ choices move into the tools menu instead of becoming an ambiguous cycle button.
 
 Voice settings list the engines available in each privacy lane:
 
-- **Offline engine** is the **PRISM Voice Pack**: five portable neural voices
+- **Offline engine** is the **PRISM Voice Pack**: twelve portable neural voices
   bundled with installed builds and generated entirely on the device. The
   Kokoro 82M q8 model is loaded only from the packaged model directory; a
   missing model never triggers a network download.
@@ -28,8 +28,9 @@ Voice settings list the engines available in each privacy lane:
   ElevenLabs voice in Prism or bot customization.
 
 Every profile defaults to one stable PRISM voice slot (`voice-1` through
-`voice-5`). Those slots currently map to Heart, Bella, Michael, Emma, and
-George, spanning American and British voices with distinct vocal character.
+`voice-12`). Those slots map to Heart, Bella, Michael, Emma, George, Aoede,
+Kore, Nicole, Sarah, Fenrir, Puck, and Fable, spanning American and British
+voices with distinct vocal character.
 Profiles persist only the stable slot, not the engine's internal voice name.
 An explicit ElevenLabs voice overrides the local identity for eligible ONLINE
 English replies. If the API key, selected provider voice, or ElevenLabs itself

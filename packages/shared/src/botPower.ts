@@ -20,6 +20,10 @@ export type BotPowerMemoryMode = "remember" | "forget";
 export type BotPowerResponseBudgetMode = "minimal" | "brief" | "expansive";
 export type BotPowerEnforcement = "soft" | "hard";
 export type BotPowerAvatarScaleMode = "larger" | "smaller";
+export type BotPowerAvatarVisibilityModeV1 =
+  | "speaking_only"
+  | "hidden"
+  | "translucent";
 export type BotPowerVoicePresenceMode = "loud" | "quiet";
 /** Resolved rendered app theme used by conditional Power branches. */
 export type BotPowerResolvedThemeV1 = "light" | "dark";
@@ -50,8 +54,8 @@ export type BotPowerEffectV1 =
     }
   | { type: "awareness"; allowed: BotPowerTargetV1[] }
   | { type: "speech_audience"; allowed: BotPowerTargetV1[] }
-  /** Hide a live avatar while idle; reveal it only for an audible utterance. */
-  | { type: "avatar_visibility"; mode: "speaking_only" }
+  /** Apply one bounded live-avatar visibility treatment. */
+  | { type: "avatar_visibility"; mode: BotPowerAvatarVisibilityModeV1 }
   /** Render the holder at a restrained relative size without changing layout. */
   | { type: "avatar_scale"; mode: BotPowerAvatarScaleMode }
   /** Apply a fixed audible and typographic presence without changing saved voice settings. */
@@ -277,7 +281,13 @@ export function normalizeBotPowerEffectV1(value: unknown): BotPowerEffectV1 | nu
     return { type: effect.type, allowed: normalizeTargets(effect.allowed) };
   }
   if (effect.type === "avatar_visibility") {
-    return { type: "avatar_visibility", mode: "speaking_only" };
+    return {
+      type: "avatar_visibility",
+      mode:
+        effect.mode === "hidden" || effect.mode === "translucent"
+          ? effect.mode
+          : "speaking_only",
+    };
   }
   if (
     effect.type === "avatar_scale" &&
@@ -466,6 +476,89 @@ export function normalizeCompiledBotPowerV1(value: unknown): CompiledBotPowerV1 
   };
 }
 
+function upgradeLegacyAvatarPresentationV1(
+  compiled: CompiledBotPowerV1,
+  name: string,
+): CompiledBotPowerV1 {
+  const normalizedName = name.trim().toLowerCase();
+  const visibilityEffect = compiled.effects.find(
+    (effect) => effect.type === "avatar_visibility",
+  );
+  if (normalizedName === "microscopic" && visibilityEffect) {
+    return {
+      ...compiled,
+      selfCue:
+        "You are microscopic: too small to be visually perceived at any time, though your voice can still be heard.",
+      observerCue:
+        "The Power holder is microscopic and cannot be visually perceived, even while speaking; their voice can still be heard.",
+      effects: compiled.effects.map((effect) =>
+        effect.type === "avatar_visibility"
+          ? { type: "avatar_visibility", mode: "hidden" }
+          : effect,
+      ),
+      ruleLabels: compiled.ruleLabels.map((label) =>
+        label === "Appears only while speaking" ? "Hidden while microscopic" : label,
+      ),
+    };
+  }
+  if (normalizedName === "invisible" && visibilityEffect) {
+    return {
+      ...compiled,
+      selfCue:
+        "You remain continuously half-translucent. Speaking does not make you more visible.",
+      observerCue:
+        "The Power holder remains continuously half-translucent, including while speaking.",
+      effects: compiled.effects.map((effect) =>
+        effect.type === "avatar_visibility"
+          ? { type: "avatar_visibility", mode: "translucent" }
+          : effect,
+      ),
+      ruleLabels: compiled.ruleLabels.map((label) =>
+        label === "Appears only while speaking" ? "Half-translucent avatar" : label,
+      ),
+    };
+  }
+  return compiled;
+}
+
+function upgradeLegacyLazyResponseBudgetV1(
+  compiled: CompiledBotPowerV1,
+  name: string,
+  intent: string,
+): CompiledBotPowerV1 {
+  if (
+    name.trim().toLowerCase() !== "lazy" ||
+    compiled.effects.some((effect) => effect.type === "response_budget")
+  ) {
+    return compiled;
+  }
+  const legacySpeechContract = compactText(
+    `${intent} ${compiled.selfCue} ${compiled.observerCue} ${compiled.ruleLabels.join(" ")}`,
+    900,
+  ).toLowerCase().replace(/[’]/gu, "'");
+  if (
+    !/\b(?:explain|elaborat|minimal response|avoids? detail|fewest words|bare minimum)\b/u.test(
+      legacySpeechContract,
+    )
+  ) {
+    return compiled;
+  }
+  return {
+    ...compiled,
+    selfCue:
+      "Use the fewest possible words. Prefer a fragment; at most, use one short sentence. Never explain, elaborate, add examples, ask a follow-up, or pad the answer.",
+    observerCue:
+      "The Power holder says the bare minimum and refuses to elaborate.",
+    effects: [
+      ...compiled.effects,
+      { type: "response_budget", mode: "minimal", enforcement: "hard" },
+    ],
+    ruleLabels: Array.from(
+      new Set([...compiled.ruleLabels, "Bare-minimum replies"]),
+    ).slice(0, 8),
+  };
+}
+
 export function normalizeBotPowerV1(value: unknown): BotPowerV1 | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const power = value as Record<string, unknown>;
@@ -475,7 +568,11 @@ export function normalizeBotPowerV1(value: unknown): BotPowerV1 | null {
   const parsedCompiled = normalizeCompiledBotPowerV1(power.compiled);
   const compiled =
     parsedCompiled?.sourceHash === botPowerSourceHashV1(name, intent)
-      ? parsedCompiled
+      ? upgradeLegacyLazyResponseBudgetV1(
+          upgradeLegacyAvatarPresentationV1(parsedCompiled, name),
+          name,
+          intent,
+        )
       : null;
   const compileStatus: BotPowerCompileStatus =
     power.compileStatus === "ready" && compiled
@@ -924,28 +1021,41 @@ export function botPowerMumblesSpeechV1(value: unknown): boolean {
   return botPowerMumblesSpeechFromEffectsV1(activeBotPowerEffectsV1(value));
 }
 
+/** Resolves hard visibility first so contradictory Powers never reveal a hidden avatar. */
+export function botPowerAvatarVisibilityModeFromEffectsV1(
+  value: unknown,
+): BotPowerAvatarVisibilityModeV1 | null {
+  if (!Array.isArray(value)) return null;
+  const modes = value
+    .map(normalizeBotPowerEffectV1)
+    .filter(
+      (
+        effect,
+      ): effect is Extract<BotPowerEffectV1, { type: "avatar_visibility" }> =>
+        effect?.type === "avatar_visibility",
+    )
+    .map((effect) => effect.mode);
+  if (modes.includes("hidden")) return "hidden";
+  if (modes.includes("speaking_only")) return "speaking_only";
+  return modes.includes("translucent") ? "translucent" : null;
+}
+
+/** Returns the effective visibility treatment from enabled Ready Powers. */
+export function botPowerAvatarVisibilityModeV1(
+  value: unknown,
+): BotPowerAvatarVisibilityModeV1 | null {
+  return botPowerAvatarVisibilityModeFromEffectsV1(activeBotPowerEffectsV1(value));
+}
+
 /** A Ready Power that makes a live avatar appear only during an utterance. */
 export function botPowerHasSpeakingOnlyAvatarVisibilityV1(value: unknown): boolean {
-  const effects = activeBotPowerEffectsV1(value);
-  if (botPowerVoicePresenceModeFromEffectsV1(effects) === "loud") return false;
-  return effects.some(
-    (effect) =>
-      effect.type === "avatar_visibility" && effect.mode === "speaking_only",
-  );
+  return botPowerAvatarVisibilityModeV1(value) === "speaking_only";
 }
 
 export function botPowerHasSpeakingOnlyAvatarVisibilityFromEffectsV1(
   value: unknown,
 ): boolean {
-  if (!Array.isArray(value)) return false;
-  const effects = value
-    .map(normalizeBotPowerEffectV1)
-    .filter((effect): effect is BotPowerEffectV1 => effect !== null);
-  if (botPowerVoicePresenceModeFromEffectsV1(effects) === "loud") return false;
-  return effects.some(
-    (effect) =>
-      effect.type === "avatar_visibility" && effect.mode === "speaking_only",
-  );
+  return botPowerAvatarVisibilityModeFromEffectsV1(value) === "speaking_only";
 }
 
 /**
@@ -963,8 +1073,7 @@ export function botPowerAvatarScaleModeFromEffectsV1(
         effect?.type === "avatar_scale",
     )
     .map((effect) => effect.mode);
-  const loudOverride = botPowerVoicePresenceModeFromEffectsV1(value) === "loud";
-  if (modes.includes("smaller") && !loudOverride) return "smaller";
+  if (modes.includes("smaller")) return "smaller";
   return modes.includes("larger") ? "larger" : null;
 }
 

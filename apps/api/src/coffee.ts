@@ -117,6 +117,7 @@ import {
   applyBotPowerResponseBudgetV1,
   botDirectAddressIndexV1,
   botDirectlyAddressesBotV1,
+  botNaturalAddressAliasesV1,
   botIdentityMirrorFaceV1,
   botIdentityMirrorHolderPromptV1,
   botIdentityMirrorObserverPromptV1,
@@ -9548,6 +9549,20 @@ export function resolveCoffeeIdentityMirrorDirectAddresseeV1(args: {
   speakerMumbles?: boolean;
 }): string | null {
   if (args.speakerMuted || args.speakerMumbles) return null;
+  const naturalAliasOwners = new Map<string, Set<string>>();
+  for (const bot of args.seatedBots) {
+    const addressNames = [
+      bot.name,
+      args.peerAddressByBotId?.get(bot.id)?.trim() ?? "",
+      ...botNaturalAddressAliasesV1(bot.name),
+    ];
+    for (const alias of new Set(addressNames.filter(Boolean))) {
+      const key = alias.normalize("NFKC").toLocaleLowerCase();
+      const owners = naturalAliasOwners.get(key) ?? new Set<string>();
+      owners.add(bot.id);
+      naturalAliasOwners.set(key, owners);
+    }
+  }
   let addressedBotId: string | null = null;
   let addressedAt = -1;
   for (const bot of args.seatedBots) {
@@ -9555,6 +9570,10 @@ export function resolveCoffeeIdentityMirrorDirectAddresseeV1(args: {
     const names = [
       bot.name,
       args.peerAddressByBotId?.get(bot.id)?.trim() ?? "",
+      ...botNaturalAddressAliasesV1(bot.name).filter((alias) => {
+        const key = alias.normalize("NFKC").toLocaleLowerCase();
+        return naturalAliasOwners.get(key)?.size === 1;
+      }),
     ];
     for (const name of new Set(names.filter(Boolean))) {
       const directAt = botDirectAddressIndexV1({

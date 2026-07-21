@@ -224,7 +224,14 @@ describe("selected bot library showcase", () => {
   });
 
   it("persists across bot-owned panels and replaces the matching canvas presence", () => {
-    assert.match(pageSource, /panel === "bots"[\s\S]*?botPanelView === "botHub"[\s\S]*?botPanelView === "customize"[\s\S]*?botPanelView === "settings"/);
+    assert.match(
+      pageSource,
+      /panel === "bots"[\s\S]*?botPanelView === "library"[\s\S]*?botPanelView === "botHub"[\s\S]*?return null/,
+    );
+    assert.match(
+      pageSource,
+      /setBotPanelView\("botHub"\)[\s\S]*?setBotAvatarCustomizerOpen\(true\)/,
+    );
     assert.match(pageSource, /panel === "memories" && memoryPanelScope === "bot"/);
     assert.match(pageSource, /panel === "images" && imagePanelScope === "bot"/);
     assert.match(pageSource, /zenLivePresenceBot\?\.id === botPanelShowcaseBotId/);

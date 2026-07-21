@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
   BOT_VOICE_TEXTURE_RECIPES,
@@ -10,6 +11,7 @@ import {
   applyBotNamePronunciations,
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
   DEFAULT_VOICE_EFFECT,
+  PRISM_BUILTIN_ENGLISH_VOICES,
   VOICE_EFFECT_DESCRIPTIONS,
   VOICE_EFFECT_LABELS,
   botVoiceTextureIsModified,
@@ -33,6 +35,29 @@ import {
 } from "./audioVoice.ts";
 
 describe("audio voice normalization", () => {
+  it("keeps every PRISM voice embedding in the packaged desktop runtime", () => {
+    const stagingSource = readFileSync(
+      new URL("../../../scripts/stage-desktop-runtime.mjs", import.meta.url),
+      "utf8",
+    );
+    const whitelist = stagingSource.match(
+      /const includedPrismVoiceFiles = new Set\(\[([\s\S]*?)\]\);/,
+    );
+    assert.ok(whitelist, "desktop voice embedding whitelist is missing");
+    const stagedVoiceFiles = [...whitelist[1].matchAll(/"([^"]+\.bin)"/g)].map(
+      (match) => match[1],
+    );
+
+    assert.deepEqual(
+      new Set(stagedVoiceFiles),
+      new Set(
+        PRISM_BUILTIN_ENGLISH_VOICES.map(
+          (voice) => `${voice.engineVoiceId}.bin`,
+        ),
+      ),
+    );
+  });
+
   it("normalizes and applies bot name pronunciations without changing visible-name boundaries", () => {
     assert.equal(normalizeBotNamePronunciation("  Light   Yah-gah-mee  "), "Light Yah-gah-mee");
     assert.equal(
@@ -177,6 +202,16 @@ describe("audio voice normalization", () => {
       volume: 1,
       texture: BOT_VOICE_TEXTURE_RECIPES.clean,
     });
+    assert.equal(
+      normalizeBotAudioVoiceProfileV1({ v: 2, baseVoiceId: "voice-12" })
+        .baseVoiceId,
+      "voice-12",
+    );
+    assert.equal(
+      normalizeBotAudioVoiceProfileV1({ v: 2, baseVoiceId: "voice-13" })
+        .baseVoiceId,
+      DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1.baseVoiceId,
+    );
   });
   it("normalizes and round-trips a bounded looping avatar SFX profile", () => {
     const audioDataUrl = `data:audio/mpeg;base64,${Buffer.from("loop").toString("base64")}`;
@@ -343,6 +378,29 @@ describe("audio voice normalization", () => {
     assert.equal(resolved.elevenLabsVoiceId, undefined);
     assert.equal(resolved.elevenLabsVoiceIdOverride, undefined);
     assert.equal(resolved.elevenLabsVoiceInitialized, true);
+  });
+
+  it("resolves serialized saved profiles before applying authored and override precedence", () => {
+    const authored = serializeBotAudioVoiceProfileV1({
+      v: 2,
+      enabled: true,
+      baseVoiceId: "voice-4",
+      elevenLabsVoiceIdOverride: "marketplace-voice",
+      elevenLabsDirection: "measured, exact",
+    });
+    const override = serializeBotAudioVoiceProfileV1({
+      v: 2,
+      enabled: true,
+      baseVoiceId: "voice-9",
+      systemVoiceName: "Alex",
+    });
+
+    const resolved = resolveBotAudioVoiceProfileV1(authored, override);
+
+    assert.equal(resolved.baseVoiceId, "voice-9");
+    assert.equal(resolved.systemVoiceName, "Alex");
+    assert.equal(resolved.elevenLabsVoiceIdOverride, "marketplace-voice");
+    assert.equal(resolved.elevenLabsDirection, "measured, exact");
   });
 
   it("normalizes v2 volume and retires legacy texture controls to clean audio", () => {

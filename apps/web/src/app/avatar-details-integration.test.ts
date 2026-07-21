@@ -140,7 +140,7 @@ describe("Avatar Details Studio integration", () => {
     );
     assert.match(
       editorCss,
-      /\.editor\[data-editor-theme="light"\] \.canvasFrame/,
+      /\.editor\[data-editor-theme="light"\] \.canvasFrame\s*\{[\s\S]*?background-color:\s*#ffffff/,
     );
     assert.match(editorSource, /BOT_AVATAR_DETAILS_FACE_PLACEMENT\.yPct/);
     assert.match(

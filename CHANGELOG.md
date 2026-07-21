@@ -12,6 +12,46 @@ Active development happens on the `dev` branch; every release is a merge into
 
 _Staging area - nothing queued for release yet._
 
+## [0.14.0] - 2026-07-21
+
+### Added
+
+- **Signal restores live captions without turning the studio back into a chat
+  log.** The active spoken line appears progressively after a brief delay,
+  clears at the end of the turn, and keeps audience-hidden or silent speech out
+  while replay retains the complete authoritative transcript.
+- **The offline PRISM Voice Pack now carries twelve stable identities.** Seven
+  additional American and British voices ship inside desktop builds and retain
+  their saved slots across local playback, imports, and provider fallback.
+- **Authored avatar SFX now follow bots into live spaces.** Idle, talking, and
+  thinking loops share one lifecycle across Avatar Studio, Zen, Coffee, and
+  Signal, while Producer-guest bodily actions gain matching live and replay
+  Foley.
+
+### Changed
+
+- **Physical presentation Powers now remain distinct and composable.** Small
+  changes scale, Microscopic stays fully unseen, Invisible stays translucent,
+  and Ghost alone reveals itself while speaking; Loud and Quiet no longer
+  override those states, and Coffee and Signal preserve them in replay.
+- **Signal Auto waits for a real interview before closing naturally.** Repeated
+  questions and fragments no longer count as substantive progress, Producer
+  guest turns are identified as human-authored, and saved typing pauses replay
+  at the same half-speed episode timing.
+- **Interrupting Tom cuts every eligible Signal bot turn.** Ordinary openings,
+  interview answers, Producer-directed turns, and high-tension exchanges are
+  guaranteed to be interrupted at a replay-stable early, middle, or late point,
+  while human speech and protected show beats remain untouched.
+- **Identity-mirroring bots recognize natural short-name address.** An
+  unambiguous vocative can now trigger the copied CRT face and resolved voice
+  without confusing shared aliases, player speech, or unheard turns.
+
+### Fixed
+
+- **Lazy Cameron now does the absolute minimum.** His legacy and Marketplace
+  `Lazy` Powers deterministically enforce bare-minimum replies across PRISM
+  instead of relying on a vague reluctance prompt.
+
 ## [0.13.0] - 2026-07-21
 
 ### Added

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync, statSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
+  buildBundledActionSfxPlan,
   buildCoffeeActionReactionPlan,
   buildCoffeeActionSfxPlan,
   coffeeActionCueTextForMessage,
@@ -47,6 +48,14 @@ describe("Coffee action sound effects", () => {
       revealAtDisplayLength: 5,
     });
     assert.equal(buildCoffeeActionSfxPlan("*nods twice* Yes."), null);
+    assert.deepEqual(buildBundledActionSfxPlan("*farts*"), {
+      kind: "fart",
+      revealAtDisplayLength: 0,
+    });
+    assert.equal(
+      buildBundledActionSfxPlan("*sets the mug down on the table*"),
+      null,
+    );
   });
 
   it("uses the saved player-action payload as the canonical replay cue", () => {

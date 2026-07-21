@@ -34,6 +34,17 @@ describe("Signal room acoustics integration", () => {
     assert.match(voiceSource, /roomConnection\.release\(\)/u);
   });
 
+  it("lets completed voice tails overlap natural handoffs without weakening interruption stops", () => {
+    assert.match(
+      voiceSource,
+      /if \(active\.roomConnection === roomConnection\) \{\s*active\.roomConnection = null;\s*\}\s*roomConnection\.release\(\)/u,
+    );
+    assert.match(
+      voiceSource,
+      /export function stopRealtimeVoiceAudio\([\s\S]{0,700}active\.roomConnection\?\.disconnect\(\);\s*active\.roomConnection = null;/u,
+    );
+  });
+
   it("reverbs studio Foley while leaving the ambience bed dry", () => {
     assert.match(
       signalSource,

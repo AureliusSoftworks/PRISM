@@ -14,11 +14,9 @@ import {
   normalizeBotVoiceVolume,
   normalizeEnglishVoiceEngine,
   normalizeVoiceMode,
-  BOT_AUDIO_VOICE_IDS,
   parseStoredAutoFallbackChain,
   normalizeAutoFallbackChain,
   serializeAutoFallbackChain,
-  type BotAudioVoiceId,
   type GraphicsQuality,
   type ImageProviderName,
   type EphemeralChatProviderPreferences,
@@ -52,15 +50,25 @@ export interface ElevenLabsVoiceBank {
   [voiceId: string]: string | null;
 }
 
+/** Retired provider-bank data was defined only for the original five local
+ * identities. Keep its backup shape stable as the offline pack grows. */
+const LEGACY_ELEVENLABS_VOICE_BANK_IDS = [
+  "voice-1",
+  "voice-2",
+  "voice-3",
+  "voice-4",
+  "voice-5",
+] as const;
+
 export function normalizeElevenLabsVoiceBank(value: unknown): ElevenLabsVoiceBank {
   const record = value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
-  return Object.fromEntries(BOT_AUDIO_VOICE_IDS.map((slot) => {
+  return Object.fromEntries(LEGACY_ELEVENLABS_VOICE_BANK_IDS.map((slot) => {
     const raw = record[slot];
     const voiceId = typeof raw === "string" ? raw.trim().slice(0, 160) : "";
     return [slot, voiceId || null];
-  })) as Record<BotAudioVoiceId, string | null>;
+  }));
 }
 
 export function parseStoredElevenLabsVoiceBank(value: string | null | undefined): ElevenLabsVoiceBank {

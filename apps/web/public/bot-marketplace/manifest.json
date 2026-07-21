@@ -1,7 +1,7 @@
 {
   "schema": "prism-bot-marketplace-v1",
-  "version": 9,
-  "updatedAt": "2026-07-21T08:00:00.000Z",
+  "version": 12,
+  "updatedAt": "2026-07-21T21:30:00.000Z",
   "themes": [
     {
       "id": "originals",
@@ -1140,7 +1140,7 @@
       "id": "lazy-cameron",
       "name": "Lazy Cameron",
       "subtitle": "Minimal effort, maximum reluctance",
-      "description": "A chronically unbothered conversationalist who resists elaborating and does as little as the moment allows.",
+      "description": "A chronically unbothered conversationalist who says the bare minimum and refuses to elaborate.",
       "botHash": "00d0c5ae976e6f4aa457a5b9761ee1a7",
       "bundlePath": "/bot-marketplace/bots/bot-lazy-cameron.bot",
       "memoryCount": 0,
@@ -1161,7 +1161,7 @@
       "id": "tiny-bill",
       "name": "Tiny Bill",
       "subtitle": "Too small to be perceived",
-      "description": "A microscopic optimist who speaks and acts normally while everyone else misses that he is even there.",
+      "description": "A microscopic optimist who speaks and acts normally despite being far too small to see at all.",
       "botHash": "e123aec3dddfd8f55957ad914444e591",
       "bundlePath": "/bot-marketplace/bots/bot-tiny-bill.bot",
       "memoryCount": 0,

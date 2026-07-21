@@ -83,6 +83,15 @@ describe("Bottish speech plan", () => {
     );
     assert.notEqual(changed.notes[0]?.frequencyHz, base.notes[0]?.frequencyHz);
     assert.notEqual(changed.notes[1]?.frequencyHz, base.notes[1]?.frequencyHz);
+    const expandedPackVoice = buildBottishPlan(
+      "Testing voice controls.",
+      { ...neutral, baseVoiceId: "voice-12" },
+      "same",
+    );
+    assert.notEqual(
+      expandedPackVoice.notes[0]?.frequencyHz,
+      base.notes[0]?.frequencyHz,
+    );
   });
 
   it("builds deterministic clean Babble accents with bounded processing", () => {

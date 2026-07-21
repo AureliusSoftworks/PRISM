@@ -531,6 +531,8 @@ import {
   normalizeGraphicsQuality,
   normalizeListenerReactionVocalFoley,
   normalizeBotCrosstalkInterruptedSpeakerCue,
+  botCrosstalkPrimarySpeakerContent,
+  botcastListenerReactionForMessage,
   normalizeOptionalBotAudioVoiceProfileV1,
   parseStoredBotAudioVoiceProfileV1,
   parseStoredBotPowersV1,
@@ -11406,6 +11408,13 @@ function buildRoutes(): RouteDefinition[] {
           db,
           userId,
           signalMessage.episode_id,
+        );
+        sourceText = botCrosstalkPrimarySpeakerContent(
+          signalMessage.content,
+          botcastListenerReactionForMessage(
+            signalEpisode.events,
+            signalMessageId,
+          ),
         );
         const voiceRole = listenerReactionRequested
           ? signalMessage.speaker_role === "host"

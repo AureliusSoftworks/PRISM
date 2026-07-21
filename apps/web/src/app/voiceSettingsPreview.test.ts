@@ -143,7 +143,7 @@ describe("voice settings preview", () => {
 
   it("presents offline English as the bundled local neural voice pack", () => {
     assert.match(pageSource, /aria-label="Offline English voice engine"/);
-    assert.match(pageSource, /PRISM Voice Pack · 5 included/);
+    assert.match(pageSource, /PRISM Voice Pack · 12 included/);
     assert.match(
       pageSource,
       /Default for every bot and every LOCAL reply/,

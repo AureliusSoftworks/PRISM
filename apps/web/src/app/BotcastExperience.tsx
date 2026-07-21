@@ -27,6 +27,7 @@ import {
   BOTCAST_VOICE_LEVEL_STEP,
   BOT_IDENTITY_MIRROR_TRANSITION_MS,
   botPowerAvatarScaleModeV1,
+  botPowerAvatarVisibilityModeV1,
   botPowerIsMutedV1,
   botPowerResponseIsSilentV1,
   botPowerVoiceGainMultiplierV1,
@@ -42,6 +43,7 @@ import {
   botcastHostInterruptionLineAt,
   appendBotCrosstalkInterruptedSpeakerCue,
   botCrosstalkInterruptedSpeakerCueForSeed,
+  botCrosstalkPrimarySpeakerContent,
   botcastIdentityMirrorStateBeforeMessageV1,
   botcastIdentityMirrorStatesAtV1,
   botcastInterruptionBridgeMessageId,
@@ -53,7 +55,6 @@ import {
   botcastReplayMessageIndexAt,
   botcastReplayTimeline,
   botcastStrongestNegativeSocialInfluenceAt,
-  botcastSnapshotHasSpeakingOnlyAvatarVisibility,
   botcastSnapshotPowersForRoleV1,
   botcastVoiceLevelForBot,
   botIdentityMirrorTransitionActiveV1,
@@ -65,7 +66,7 @@ import {
   normalizeBotcastVoiceLevelsByBotId,
   swapBotcastStudioLayoutSeats,
   listenerReactionActionLabel,
-  listenerReactionHasAudio,
+  listenerReactionHasCrosstalkAudio,
   resolveListenerReactionAtMs,
   type BotcastCameraShot,
   type BotcastEpisode,
@@ -87,11 +88,13 @@ import {
   type BotcastVoiceLevelsByBotId,
   type BotIdentityMirrorStateV1,
   type BotPowerAvatarScaleMode,
+  type BotPowerAvatarVisibilityModeV1,
   type BotPowerVoicePresenceMode,
   type ListenerReactionPlanV1,
   type SignalPersonaTemperament,
 } from "@localai/shared";
 import { PRISM_APP_VERSION } from "../prismAppVersion";
+import { INTERRUPTED_SPEAKER_RETORT_PAUSE_MS } from "./listenerReactionVoice";
 import {
   buildDeadAirAsidePlanV1,
   type DeadAirAsidePlanV1,
@@ -142,6 +145,7 @@ import {
   SIGNAL_HOST_CUE_REDIRECT_LATEST_PROGRESS,
   signalHostCueShouldRedirect,
 } from "./signalHostCueTiming";
+import { signalLiveCaptionText } from "./signalLiveCaptions";
 import {
   readSignalCameraTransitionMode,
   signalLiveAutoCameraShot,
@@ -278,10 +282,11 @@ export interface BotcastApiRequest {
   <T>(path: string, options?: RequestInit): Promise<T>;
 }
 
-const SIGNAL_NATURAL_HANDOFF_MS = 120;
+const SIGNAL_NATURAL_HANDOFF_MS = 40;
 const SIGNAL_NOTICE_TOAST_MS = 7_000;
-const SIGNAL_DEAD_AIR_ASIDE_DELAY_MS = 6_500;
+const SIGNAL_DEAD_AIR_ASIDE_DELAY_MS = 3_800;
 const SIGNAL_DEAD_AIR_ASIDE_MIN_VISIBLE_MS = 2_600;
+const SIGNAL_EPISODE_PRE_ROLL_MIN_MS = 4_200;
 const SIGNAL_ATMOSPHERE_BUSES = [
   {
     key: "background",
@@ -300,6 +305,23 @@ const SIGNAL_VOICE_START_TIMEOUT_MS = 30_000;
 // Once playback starts, a missing provider completion signal must not strand
 // the episode in a busy state and block the next on-air turn indefinitely.
 const SIGNAL_VOICE_COMPLETION_GRACE_MS = 4_000;
+
+function signalInterruptedSpeakerRetortDelayMs(
+  plan: ListenerReactionPlanV1,
+  elapsedMs: number,
+  durationMs: number,
+): number {
+  if (
+    !plan.interruptedSpeakerCue ||
+    plan.interruptedSpeakerCuePlayback !== "crosstalk"
+  ) {
+    return INTERRUPTED_SPEAKER_RETORT_PAUSE_MS;
+  }
+  return (
+    Math.max(0, durationMs - elapsedMs) +
+    INTERRUPTED_SPEAKER_RETORT_PAUSE_MS
+  );
+}
 const SIGNAL_OPENING_ADVANCE_ATTEMPTS = 2;
 const SIGNAL_SHOW_CARD_QUIP_INITIAL_DELAY_MS = 4_800;
 const SIGNAL_SHOW_CARD_QUIP_VISIBLE_MS = 5_600;
@@ -388,7 +410,9 @@ export interface BotcastExperienceProps {
     },
   ) => ReactNode;
   resolveCupRateMultiplier?: (bot: BotcastBotSummary) => number;
-  hasSpeakingOnlyAvatarVisibility?: (bot: BotcastBotSummary) => boolean;
+  resolveAvatarVisibilityMode?: (
+    bot: BotcastBotSummary,
+  ) => BotPowerAvatarVisibilityModeV1 | null;
   resolveAvatarScaleMode?: (
     bot: BotcastBotSummary,
   ) => BotPowerAvatarScaleMode | null;
@@ -411,6 +435,7 @@ export interface BotcastExperienceProps {
     plan: ListenerReactionPlanV1,
     bot: BotcastBotSummary,
     stereoPan: number,
+    retortDelayMs?: number,
   ) => boolean | Promise<boolean>;
   onDeadAirAside?: (
     plan: DeadAirAsidePlanV1,
@@ -420,6 +445,7 @@ export interface BotcastExperienceProps {
   ) => boolean | Promise<boolean>;
   onPrepareUtterance?: () => void;
   onStopUtterance?: () => void;
+  onProducerGuestActionSfx?: (message: BotcastMessage) => void;
   introAudioEnabled?: boolean;
   introAudioVolume?: number;
   sidebarHeader: ReactNode;
@@ -986,7 +1012,7 @@ export function BotcastExperience({
   renderAvatar,
   renderMug,
   resolveCupRateMultiplier,
-  hasSpeakingOnlyAvatarVisibility,
+  resolveAvatarVisibilityMode,
   resolveAvatarScaleMode,
   onUtterance,
   onPrefetchUtterance,
@@ -995,6 +1021,7 @@ export function BotcastExperience({
   onDeadAirAside,
   onPrepareUtterance,
   onStopUtterance,
+  onProducerGuestActionSfx,
   introAudioEnabled = true,
   introAudioVolume = 1,
   sidebarHeader,
@@ -3765,7 +3792,10 @@ export function BotcastExperience({
       window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
     const visualMinimum = new Promise<void>((resolve) => {
       let settled = false;
-      const timer = window.setTimeout(finish, reducedMotion ? 900 : 2_800);
+      const timer = window.setTimeout(
+        finish,
+        reducedMotion ? 1_100 : SIGNAL_EPISODE_PRE_ROLL_MIN_MS,
+      );
       function finish(): void {
         if (settled) return;
         settled = true;
@@ -4006,7 +4036,7 @@ export function BotcastExperience({
       if (atMs === null || elapsedMs < atMs) return;
       if (liveListenerReactionFiredRef.current.has(message.id)) return;
       liveListenerReactionFiredRef.current.add(message.id);
-      if (!listenerReactionHasAudio(plan)) return;
+      if (!listenerReactionHasCrosstalkAudio(plan)) return;
       const listener = botsById.get(plan.listenerBotId);
       if (listener) {
         const listenerRole =
@@ -4016,6 +4046,11 @@ export function BotcastExperience({
             plan,
             listener,
             signalStudioVoicePan(selectedShow?.studioLayout, listenerRole),
+            signalInterruptedSpeakerRetortDelayMs(
+              plan,
+              elapsedMs,
+              durationMs,
+            ),
           ),
         );
       }
@@ -4037,7 +4072,7 @@ export function BotcastExperience({
       }
       if (replayListenerReactionFiredRef.current.has(message.id)) return;
       replayListenerReactionFiredRef.current.add(message.id);
-      if (!listenerReactionHasAudio(plan)) return;
+      if (!listenerReactionHasCrosstalkAudio(plan)) return;
       const listener = botsById.get(plan.listenerBotId);
       if (listener) {
         const listenerRole =
@@ -4047,6 +4082,11 @@ export function BotcastExperience({
             plan,
             listener,
             signalStudioVoicePan(selectedShow?.studioLayout, listenerRole),
+            signalInterruptedSpeakerRetortDelayMs(
+              plan,
+              elapsedMs,
+              durationMs,
+            ),
           ),
         );
       }
@@ -4146,6 +4186,13 @@ export function BotcastExperience({
               selectedShow?.accentColor,
             )
           : botsById.get(message.botId);
+      const primarySpokenContent = botCrosstalkPrimarySpeakerContent(
+        message.content,
+        listenerReactionPlanByMessageIdRef.current.get(message.id),
+      );
+      const playbackMessage = primarySpokenContent === message.content
+        ? message
+        : { ...message, content: primarySpokenContent };
       let playbackStarted = false;
       let playbackStartNotified = false;
       let voicePreparationTimer: number | null = null;
@@ -4155,6 +4202,13 @@ export function BotcastExperience({
       const notifyPlaybackStart = (): void => {
         if (playbackStartNotified) return;
         playbackStartNotified = true;
+        if (
+          currentEpisode.guestKind === "producer" &&
+          message.speakerRole === "guest" &&
+          message.botId === BOTCAST_PRODUCER_GUEST_ID
+        ) {
+          onProducerGuestActionSfx?.(message);
+        }
         onPlaybackStart?.();
       };
       const prepareFollowingGuest = (): void => {
@@ -4275,7 +4329,7 @@ export function BotcastExperience({
             }, SIGNAL_VOICE_START_TIMEOUT_MS);
             void Promise.resolve(
               onUtterance(
-                message,
+                playbackMessage,
                 botWithIdentityBeforeMessage(bot, currentEpisode, message),
                 lifecycle,
                 botcastVoiceLevelForBot(
@@ -4328,6 +4382,7 @@ export function BotcastExperience({
       fireLiveListenerReaction,
       holdLiveCameraAfterSpeech,
       onStopUtterance,
+      onProducerGuestActionSfx,
       onUtterance,
       revealUtteranceWithoutAudio,
       selectedShow,
@@ -5127,6 +5182,10 @@ export function BotcastExperience({
       messages: [...optimisticMessages, nextHostInterruptionBridge],
     };
     setEpisode(optimisticEpisode);
+    // Cancelling an active guest deliberately disables auto-run. The queued
+    // interruption is still a live handoff, so resume the normal turn loop
+    // after the host bridge and cue response finish.
+    setAutoRun(true);
     setHostInterruptionOrdinal((current) => current + 1);
     onPrepareUtterance?.();
     void advanceEpisode(
@@ -5348,6 +5407,13 @@ export function BotcastExperience({
     if (!replayPlaying || !replayActiveMessage) return;
     if (replayVoiceMessageIdRef.current === replayActiveMessage.id) return;
     replayVoiceMessageIdRef.current = replayActiveMessage.id;
+    if (
+      replayEpisode?.guestKind === "producer" &&
+      replayActiveMessage.speakerRole === "guest" &&
+      replayActiveMessage.botId === BOTCAST_PRODUCER_GUEST_ID
+    ) {
+      onProducerGuestActionSfx?.(replayActiveMessage);
+    }
     let bot =
       replayEpisode?.guestKind === "producer" &&
       replayActiveMessage.speakerRole === "guest" &&
@@ -5377,19 +5443,31 @@ export function BotcastExperience({
       replayTimeline.messageStartMs[replayMessageIndex] ?? 0;
     const messageEndMs =
       replayTimeline.messageEndMs[replayMessageIndex] ?? replayDurationMs;
+    const replayListenerReactionPlan =
+      listenerReactionPlanByMessageIdRef.current.get(replayActiveMessage.id) ??
+      botcastListenerReactionForMessage(
+        replayEpisode?.events ?? [],
+        replayActiveMessage.id,
+      );
+    const replayPrimarySpokenContent = botCrosstalkPrimarySpeakerContent(
+      replayActiveMessage.content,
+      replayListenerReactionPlan,
+    );
+    const replayPlaybackMessage =
+      replayPrimarySpokenContent === replayActiveMessage.content
+        ? replayActiveMessage
+        : { ...replayActiveMessage, content: replayPrimarySpokenContent };
     setReplayVoicePending(true);
     setReplaySpeechActive(false);
     void (async () => {
       try {
         const played = await onUtterance(
-          replayActiveMessage,
+          replayPlaybackMessage,
           bot,
           {
             onStart: (durationMs, alignment) => {
               if (replayVoiceRunIdRef.current !== runId) return;
-              const plan = listenerReactionPlanByMessageIdRef.current.get(
-                replayActiveMessage.id,
-              );
+              const plan = replayListenerReactionPlan;
               if (plan) {
                 const timelineDurationMs = Math.max(
                   1,
@@ -5453,6 +5531,7 @@ export function BotcastExperience({
   }, [
     botsById,
     armListenerReactionTiming,
+    onProducerGuestActionSfx,
     onUtterance,
     replayActiveMessage,
     replayDurationMs,
@@ -5717,6 +5796,20 @@ export function BotcastExperience({
       liveSpeech?.messageId === args.activeMessage.id
         ? liveSpeech.reveal
         : null;
+    const delayedLiveCaption =
+      !args.replay &&
+      args.activeMessage &&
+      speechReveal?.phase === "playing" &&
+      botcastMessageIsAudibleToAudienceV1(args.activeMessage) &&
+      !botPowerResponseIsSilentV1(args.activeMessage.content)
+        ? signalLiveCaptionText(speechReveal)
+        : "";
+    const delayedLiveCaptionSpeaker =
+      args.activeMessage?.speakerRole === "host"
+        ? (args.host?.name ?? "Host")
+        : args.activeMessage?.speakerRole === "guest"
+          ? (args.guest?.name ?? "Guest")
+          : null;
     const speechElapsedMs = args.replay
       ? Math.max(0, replayElapsedMs - replayMessageStartMs)
       : (speechReveal?.elapsedMs ?? 0);
@@ -5811,6 +5904,18 @@ export function BotcastExperience({
         ? botPowerAvatarScaleModeV1(snapshot)
         : (resolveAvatarScaleMode?.(bot) ?? null);
     };
+    const roleAvatarVisibilityMode = (
+      role: "host" | "guest",
+      bot: BotcastBotSummary,
+    ): BotPowerAvatarVisibilityModeV1 | null => {
+      const snapshot = botcastSnapshotPowersForRoleV1(
+        args.currentEpisode,
+        role,
+      );
+      return snapshot !== null
+        ? botPowerAvatarVisibilityModeV1(snapshot)
+        : (resolveAvatarVisibilityMode?.(bot) ?? null);
+    };
     const manualProducerGuestSip = Boolean(
       !args.replay &&
         args.currentEpisode.guestKind === "producer" &&
@@ -5880,6 +5985,8 @@ export function BotcastExperience({
     ): CoffeeCupVisualState | null => {
       const powerRateMultiplier = cupRateMultiplierForBot(bot);
       if (powerRateMultiplier <= 0) return null;
+      const producerGuestRole =
+        role === "guest" && args.currentEpisode.guestKind === "producer";
       return buildCoffeeCupVisualState({
         seed: `signal:${args.currentEpisode.id}:${bot.id}:${role}`,
         botColor: bot.color,
@@ -5890,9 +5997,9 @@ export function BotcastExperience({
           args.currentEpisode.durationMinutes ??
           DEFAULT_COFFEE_SESSION_DURATION_MINUTES,
         powerRateMultiplier,
-        ambientSipAllowed: roleIsSpeaking(
-          role === "host" ? "guest" : "host",
-        ),
+        ambientSipAllowed:
+          !producerGuestRole &&
+          roleIsSpeaking(role === "host" ? "guest" : "host"),
         speaking: roleIsSpeaking(role),
         thinking: roleIsThinking(role),
         ...(role === "guest" && manualProducerGuestSip
@@ -6048,12 +6155,12 @@ export function BotcastExperience({
                 data-thinking={roleIsThinking("host") ? "true" : undefined}
                 data-sipping={hostSipping ? "true" : undefined}
                 data-ghostly-presence={
-                  (botcastSnapshotHasSpeakingOnlyAvatarVisibility(
-                    args.currentEpisode,
-                    "host",
-                  ) || hasSpeakingOnlyAvatarVisibility?.(args.host))
+                  roleAvatarVisibilityMode("host", args.host) === "speaking_only"
                     ? "true"
                     : undefined
+                }
+                data-power-avatar-visibility={
+                  roleAvatarVisibilityMode("host", args.host) ?? undefined
                 }
                 data-power-avatar-scale={
                   roleAvatarScaleMode("host", args.host) ?? undefined
@@ -6171,12 +6278,12 @@ export function BotcastExperience({
                 data-thinking={roleIsThinking("guest") ? "true" : undefined}
                 data-sipping={guestSipping ? "true" : undefined}
                 data-ghostly-presence={
-                  (botcastSnapshotHasSpeakingOnlyAvatarVisibility(
-                    args.currentEpisode,
-                    "guest",
-                  ) || hasSpeakingOnlyAvatarVisibility?.(args.guest))
+                  roleAvatarVisibilityMode("guest", args.guest) === "speaking_only"
                     ? "true"
                     : undefined
+                }
+                data-power-avatar-visibility={
+                  roleAvatarVisibilityMode("guest", args.guest) ?? undefined
                 }
                 data-power-avatar-scale={
                   roleAvatarScaleMode("guest", args.guest) ?? undefined
@@ -6313,6 +6420,18 @@ export function BotcastExperience({
             </strong>
           </div>
         </div>
+        {delayedLiveCaption && delayedLiveCaptionSpeaker && args.activeMessage ? (
+          <div
+            className={styles.liveCaption}
+            data-signal-live-caption="true"
+            data-message-id={args.activeMessage.id}
+            data-speaker-role={args.activeMessage.speakerRole}
+            aria-live="off"
+          >
+            <strong>{delayedLiveCaptionSpeaker}</strong>
+            <span>{delayedLiveCaption}</span>
+          </div>
+        ) : null}
         {!args.replay && signalModelWarmup ? (
           <ModelWarmupIntermission
             phase={signalModelWarmup.phase}

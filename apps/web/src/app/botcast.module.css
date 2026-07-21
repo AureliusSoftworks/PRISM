@@ -476,6 +476,9 @@
 .atmosphereMixerSliders input { width: 100%; margin: 0; accent-color: var(--prism-s); }
 .atmosphereMixer > small { grid-column: 1 / -1; margin-top: -6px; color: var(--botcast-muted); font-size: .58rem; }
 .stageScene { position: absolute; inset: 0; transform-origin: center 55%; transition: transform 900ms cubic-bezier(.22,.72,.2,1), filter 900ms ease; }
+.liveCaption { position: absolute; left: 50%; bottom: 6.5%; z-index: 18; width: min(76%, 780px); display: grid; justify-items: center; gap: 5px; transform: translateX(-50%); color: #fff; text-align: center; pointer-events: none; animation: signalVoiceActionIn 160ms ease-out both; }
+.liveCaption strong { border: 1px solid rgba(255,255,255,.16); border-radius: 999px; padding: 4px 8px; color: color-mix(in srgb, var(--botcast-studio-accent) 42%, white); background: rgba(4,6,11,.72); backdrop-filter: blur(9px) saturate(1.1); font: 820 clamp(.52rem, .9vw, .68rem)/1 system-ui; letter-spacing: .11em; text-transform: uppercase; box-shadow: 0 5px 18px rgba(0,0,0,.28); }
+.liveCaption span { max-width: 100%; border-radius: 10px; padding: 7px 12px 8px; background: rgba(4,6,11,.76); backdrop-filter: blur(9px) saturate(1.08); font: 720 clamp(.72rem, 1.45vw, 1.05rem)/1.28 system-ui; letter-spacing: .004em; text-wrap: balance; text-shadow: 0 2px 7px rgba(0,0,0,.98); box-shadow: 0 6px 22px rgba(0,0,0,.28); }
 .stageViewport[data-camera-transitions="instant"] .stageScene { transition: none; }
 .stageViewport[data-model-warmup="entering"] .stageScene,
 .stageViewport[data-model-warmup="held"] .stageScene,
@@ -520,6 +523,8 @@
 .avatarRig[data-power-avatar-scale="smaller"] { scale: .86; }
 .avatarRig[data-ghostly-presence="true"] { opacity: 0; transition: opacity 420ms ease; }
 .avatarRig[data-ghostly-presence="true"][data-talking="true"] { opacity: 1; }
+.avatarRig[data-power-avatar-visibility="hidden"] { opacity: 0; }
+.avatarRig[data-power-avatar-visibility="translucent"] { opacity: .5; }
 .avatarRig[data-talking="true"] { animation: none; transform: rotate(var(--signal-avatar-lean)); }
 .avatarRig[data-thinking="true"] { animation: signalBotThinking 1.9s ease-in-out infinite; }
 .avatarRig[data-sipping="true"] { animation: none; transform: rotate(var(--signal-avatar-lean)); }
@@ -889,6 +894,7 @@
 @media (prefers-reduced-motion: reduce) {
   .stageScene { transition-duration: 120ms; }
   .stageScene, .episodeOpenButton, .episodeDeleteButton, .episodePreRoll, .preRollLockup, .showAudiencePulse, .showIdentityGearButton, .showIdentityGearButton span { transition: none !important; }
+  .liveCaption { animation: none !important; }
   .episodePreRoll[data-kind="intro"]::after { opacity: 0; animation: none !important; }
   .episodeOutro { opacity: 1; animation: none !important; }
   .producerControls button, .producerGuestSipButton { transition: none !important; }

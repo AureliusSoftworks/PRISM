@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
   BOT_POWER_ADDRESSED_FANDOM_MODE_POLICY,
   BOT_POWER_AVATAR_SCALE_MODE_POLICY,
+  BOT_POWER_AVATAR_VISIBILITY_MODE_POLICY,
   BOT_POWER_CANDOR_MODE_POLICY,
   BOT_POWER_ETERNAL_INTRODUCTION_MODE_POLICY,
   BOT_POWER_HEARING_REPEAT_MODE_POLICY,
@@ -55,19 +56,19 @@ describe("applet version helpers", () => {
   });
 
   it("tracks the current visual applet versions for release provenance", () => {
-    assert.equal(PRISM_APPLETS.chat.version, "1.19");
-    assert.equal(PRISM_APPLETS.zen.version, "1.18");
-    assert.equal(PRISM_APPLETS.coffee.version, "2.15");
-    assert.equal(PRISM_APPLETS.botcast.version, "1.23");
+    assert.equal(PRISM_APPLETS.chat.version, "1.21");
+    assert.equal(PRISM_APPLETS.zen.version, "1.20");
+    assert.equal(PRISM_APPLETS.coffee.version, "2.18");
+    assert.equal(PRISM_APPLETS.botcast.version, "1.29");
     assert.equal(PRISM_APPLETS.botcast.name, "Signal");
-    assert.equal(PRISM_APPLETS.story.version, "0.17");
+    assert.equal(PRISM_APPLETS.story.version, "0.19");
     assert.equal(PRISM_APPLETS.slate.version, "0.7");
     assert.equal(PRISM_APPLETS.slate.status, "preview");
-    assert.equal(prismAppletVersionLabel("chat"), "v1.19");
-    assert.equal(prismAppletVersionLabel("zen"), "v1.18");
-    assert.equal(prismAppletVersionLabel("coffee"), "v2.15");
-    assert.equal(prismAppletVersionLabel("botcast"), "v1.23");
-    assert.equal(prismAppletVersionLabel("story"), "v0.17");
+    assert.equal(prismAppletVersionLabel("chat"), "v1.21");
+    assert.equal(prismAppletVersionLabel("zen"), "v1.20");
+    assert.equal(prismAppletVersionLabel("coffee"), "v2.18");
+    assert.equal(prismAppletVersionLabel("botcast"), "v1.29");
+    assert.equal(prismAppletVersionLabel("story"), "v0.19");
     assert.equal(prismAppletVersionLabel("slate"), "v0.7");
   });
 
@@ -206,6 +207,28 @@ describe("applet version helpers", () => {
   it("declares an exhaustive ghost-Power policy for every current and planned applet", () => {
     assert.deepEqual(Object.keys(BOT_POWER_GHOST_MODE_POLICY), Object.keys(PRISM_APPLETS));
     assert.deepEqual(BOT_POWER_GHOST_MODE_POLICY, {
+      chat: "direct",
+      zen: "direct",
+      arena: "deferred",
+      polling: "deferred",
+      coffee: "direct",
+      botcast: "direct",
+      feed: "deferred",
+      games: "deferred",
+      story: "adapted",
+      gym: "deferred",
+      slate: "irrelevant",
+      pseudo: "deferred",
+      surf: "deferred",
+    });
+  });
+
+  it("declares an exhaustive avatar-visibility Power policy for every applet", () => {
+    assert.deepEqual(
+      Object.keys(BOT_POWER_AVATAR_VISIBILITY_MODE_POLICY),
+      Object.keys(PRISM_APPLETS),
+    );
+    assert.deepEqual(BOT_POWER_AVATAR_VISIBILITY_MODE_POLICY, {
       chat: "direct",
       zen: "direct",
       arena: "deferred",

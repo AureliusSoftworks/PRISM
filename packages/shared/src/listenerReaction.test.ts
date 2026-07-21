@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   appendBotCrosstalkInterruptedSpeakerCue,
+  botCrosstalkPrimarySpeakerContent,
   buildBotCrosstalkListenerReactionPlanV1,
   buildCoffeeListenerReactionPlanV1,
   buildSignalListenerReactionPlanV1,
@@ -82,7 +83,7 @@ describe("listener reaction planning", () => {
     assert.ok(warningAttempts.every((plan) => plan?.spokenCue));
     assert.ok(warningAttempts.every((plan) => plan?.interruptedSpeakerCue));
     assert.ok(warningAttempts.every(
-      (plan) => plan?.interruptedSpeakerCuePlayback === "primary",
+      (plan) => plan?.interruptedSpeakerCuePlayback === "crosstalk",
     ));
     assert.ok(warningAttempts.every((plan) => plan?.visualAction === "lean_in"));
   });
@@ -107,6 +108,13 @@ describe("listener reaction planning", () => {
         plan.interruptedSpeakerCue!,
       ),
       `That's why the lemons are never ripe enou—${plan.interruptedSpeakerCue}`,
+    );
+    assert.equal(
+      botCrosstalkPrimarySpeakerContent(
+        `That's why the lemons are never ripe enou—${plan.interruptedSpeakerCue}`,
+        plan,
+      ),
+      "That's why the lemons are never ripe enou—",
     );
   });
 
