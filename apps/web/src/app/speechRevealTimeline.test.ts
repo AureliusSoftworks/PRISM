@@ -62,6 +62,7 @@ describe("speech reveal timeline", () => {
     );
     assert.equal(timeline.revealAtMs[0], 0);
     assert.equal(timeline.revealAtMs[1], 600);
+    assert.equal(timeline.alignment?.characters.join(""), "Hello there");
     assert.equal(speechRevealVisibleTokenCount(updateSpeechRevealTimeline(timeline, 590)), 1);
     assert.equal(speechRevealVisibleTokenCount(updateSpeechRevealTimeline(timeline, 610)), 2);
     assert.equal(

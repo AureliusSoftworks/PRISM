@@ -93,18 +93,33 @@ describe("PRISM intro sequence", () => {
     assert.match(PRISM_INTRO_SCENES[6]!.imageAlt, /black CRT glass/u);
     assert.match(PRISM_INTRO_SCENES[6]!.imageAlt, /same-sized/u);
     assert.match(
+      PRISM_INTRO_SCENES[6]!.imageAlt,
+      /five narrow rose, amber, lime, cyan, and violet rays converge/u,
+    );
+    assert.match(
+      PRISM_INTRO_SCENES[6]!.imageAlt,
+      /remains dark for one final moment/u,
+    );
+    assert.match(
       PRISM_INTRO_SCENES[7]!.imageAlt,
       /Pia, Rowan, Iris, Sol, and Mira/u,
     );
     assert.match(
       PRISM_INTRO_SCENES[7]!.imageAlt,
-      /same-sized, factory-clean main PRISM bot frame/u,
+      /Five narrow colored rays/u,
     );
     assert.match(
       PRISM_INTRO_SCENES[7]!.imageAlt,
-      /colored phosphor faces on black glass/u,
+      /converge on the triangle medallion/u,
     );
-    assert.equal(PRISM_INTRO_SCENES[6]!.body, "You decided what belonged.");
+    assert.match(
+      PRISM_INTRO_SCENES[7]!.imageAlt,
+      /comes online with a white face on black CRT glass/u,
+    );
+    assert.equal(
+      PRISM_INTRO_SCENES[6]!.body,
+      "You decided what belonged. Their five colors carried your light toward the one still dark.",
+    );
   });
 
   it("clamps navigation without ever producing an empty scene", () => {

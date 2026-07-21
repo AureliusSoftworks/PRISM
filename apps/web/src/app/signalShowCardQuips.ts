@@ -22,12 +22,8 @@ export function signalShowCardBlurbs(
 ): readonly string[] {
   if (hostMuted) return [BOT_POWER_CANONICAL_SILENCE_V1];
   if (hostEchoesAddressedSpeech) {
-    const blurb =
-      show.dashboardBlurbs.length === 1 &&
-      isBotcastEchoDashboardBlurb(show.dashboardBlurbs[0])
-        ? show.dashboardBlurbs[0]!
-        : BOTCAST_ECHO_DASHBOARD_BLURB_FALLBACK;
-    return [blurb];
+    const echoBlurb = show.dashboardBlurbs.find(isBotcastEchoDashboardBlurb);
+    return [echoBlurb ?? BOTCAST_ECHO_DASHBOARD_BLURB_FALLBACK];
   }
   return show.dashboardBlurbs.length > 0
     ? show.dashboardBlurbs

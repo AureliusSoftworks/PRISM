@@ -521,6 +521,52 @@ describe("bot-locked Chat lane", () => {
     assert.equal(result.conversation.messages.at(-1)?.content, "*nods once* *sips coffee* ...");
   });
 
+  it("gives Forgetful Freddie a bounded public tail and responds to the current complaint", async () => {
+    const db = createChatTestDb();
+    const chatCalls = installChatFetchStub(
+      "I'm Forgetful Freddie. Everyone seems surprisingly tense, but it's nice to meet you.",
+    );
+    const settings = {
+      preferredProvider: "local" as const,
+      autoMemory: false,
+      botId: "bot-1",
+      incognito: false,
+      mode: "chat" as const,
+      botSystemPrompt: "You are Forgetful Freddie.",
+      starterPromptLabel: "Forgetful Freddie",
+      botPowerEternalIntroduction: true,
+    };
+
+    const first = await processChatMessage(
+      db,
+      "user-1",
+      "Hello for the very first time.",
+      CHAT_TEST_USER_KEY,
+      settings,
+    );
+    const second = await processChatMessage(
+      db,
+      "user-1",
+      "Why are you introducing yourself yet again?",
+      CHAT_TEST_USER_KEY,
+      settings,
+      first.conversation.id,
+    );
+
+    const secondPrompt = chatCalls.at(-1) ?? [];
+    const joinedPrompt = secondPrompt.map((entry) => entry.content).join("\n");
+    const visiblePromptMessages = secondPrompt.filter(
+      (entry) => entry.role !== "system",
+    );
+    assert.match(joinedPrompt, /Why are you introducing yourself yet again/iu);
+    assert.ok(visiblePromptMessages.length >= 1);
+    assert.ok(visiblePromptMessages.length <= 4);
+    assert.equal(
+      second.conversation.messages.at(-1)?.content,
+      "What do you mean? I don't think we've met yet.",
+    );
+  });
+
   it("applies one holder mood hit when a Quiet Power turn takes the mute branch", async () => {
     const db = createChatTestDb();
     installChatFetchStub("*leans closer* Can anybody hear me?");
@@ -550,6 +596,36 @@ describe("bot-locked Chat lane", () => {
     assert.equal(result.prismMood.recentDeltas[0]?.kind, "power_ignored");
     assert.ok(result.prismMood.warmth < 0.62);
     assert.ok(result.prismMood.engagement < 0.62);
+  });
+
+  it("persists and replays only Mumbling Jim's normal-volume gibberish", async () => {
+    const db = createChatTestDb();
+    installChatFetchStub("*frowns slightly* I explained the rational plan clearly, and I expect it to work.");
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "What is your plan?",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botId: "bot-1",
+        incognito: false,
+        mode: "chat",
+        botSystemPrompt: "You are Mumbling Jim.",
+        botPowerMumbling: true,
+      },
+    );
+
+    const saved = result.conversation.messages.at(-1);
+    assert.match(saved?.content ?? "", /^\*frowns slightly\* /u);
+    assert.doesNotMatch(saved?.content ?? "", /explained|rational|plan|expect|work/iu);
+    assert.equal(saved?.botPowerExactResponse, "speech_obfuscation");
+    const row = db.prepare(
+      "SELECT content FROM messages WHERE role = 'assistant' ORDER BY rowid DESC LIMIT 1",
+    ).get() as { content: string };
+    assert.equal(row.content, saved?.content);
   });
 
   it("hard-echoes the user's addressed Chat message verbatim and nothing else", async () => {

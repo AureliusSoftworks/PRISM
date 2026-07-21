@@ -57,8 +57,9 @@ Each profile can also choose a local playback effect: **Clean**, **Radio**,
 **Robot**, **Echo**, **Prism**, **Resonance**, or **Deep Space**. **Prism is the
 default** so PRISM's robot cast keeps a restrained synthetic house sound across
 voice engines. Radio adds a narrow broadcast band and light static; Robot uses
-level-controlled mechanical modulation; Echo supplies two repeats; Prism adds
-a gently refracted double; Resonance adds a darker, weightier mechanical double
+level-controlled mechanical modulation; Echo supplies two repeats; Prism gently
+tunes voiced speech toward nearby chromatic notes before adding its refracted
+double; Resonance adds a darker, weightier mechanical double
 for imposing character voices; and Deep Space adds a lower spectral double and
 trailing reflection. Prism stores
 the choice with the profile and applies it locally to PRISM Voice Pack,
@@ -68,8 +69,10 @@ effects use Web Audio; the browser's basic media fallback plays the clip clean.
 Older local-only profiles that carried the former implicit Clean default adopt
 Prism; choosing Clean in the current editor records an explicit opt-out. The
 stored `chorus` identifier remains the compatible representation of Prism, so
-existing profiles keep the same sound. The old Distortion value also migrates
-to Prism when an earlier profile is loaded.
+existing profiles keep the same selection. Pitch analysis and correction happen
+locally after synthesis, never leave the browser, and relax to neutral through
+silence and unvoiced speech. The old Distortion value also migrates to Prism
+when an earlier profile is loaded.
 
 Profiles with an ElevenLabs voice can also save up to three performance
 directions as removable word chips, such as `warmly`, `hushed`, or

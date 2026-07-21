@@ -82,10 +82,11 @@ export const PRISM_INTRO_SCENES: readonly PrismIntroScene[] = [
     id: "interplay",
     eyebrow: "THE INTERPLAY",
     title: "From their interplay came words, images, worlds, and paths.",
-    body: "You decided what belonged.",
+    body:
+      "You decided what belonged. Their five colors carried your light toward the one still dark.",
     imageSrc: "/prism-intro/07-interplay.webp",
     imageAlt:
-      "Pia, Rowan, Iris, Sol, and Mira glow from black CRT glass as they weave colored threads through unfinished words, sound, images, and worlds while a same-sized, clean triangle-marked primary PRISM frame waits dark beside them.",
+      "Pia, Rowan, Iris, Sol, and Mira glow on black CRT glass as five narrow rose, amber, lime, cyan, and violet rays converge across the creative table on the triangle medallion of a same-sized main PRISM bot, which remains dark for one final moment; a vast pile of dormant frames fills the chamber behind them.",
     imagePosition: "center center",
   },
   {
@@ -95,7 +96,7 @@ export const PRISM_INTRO_SCENES: readonly PrismIntroScene[] = [
     body: `${PRISM_BRAND_COPY.coreBelief} ${PRISM_BRAND_COPY.slogan}`,
     imageSrc: "/prism-intro/08-enter.webp",
     imageAlt:
-      "The same-sized, factory-clean main PRISM bot frame comes online among Pia, Rowan, Iris, Sol, and Mira with a white face on black CRT glass, a glowing triangle medallion, and tiny spectrum lights while the five Originals retain colored phosphor faces on black glass before a vast heap of dormant frames.",
+      "Five narrow colored rays from Pia, Rowan, Iris, Sol, and Mira converge on the triangle medallion of the same-sized main PRISM bot as it comes online with a white face on black CRT glass and small colored side lights; a vast pile of dormant frames fills the chamber behind them.",
     imagePosition: "center center",
     showBrandMark: true,
   },

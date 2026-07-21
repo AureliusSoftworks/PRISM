@@ -606,6 +606,11 @@
 @keyframes signalCueQueued { from { transform: scale(.94); } 58% { transform: scale(1.025); } to { transform: scale(1); } }
 .returnButton { display: block; margin: 16px auto; }
 .producerGuestComposerDock { position: sticky; bottom: 0; z-index: 18; max-width: 1320px; margin: 0 auto; padding-top: 10px; background: linear-gradient(180deg, transparent, var(--botcast-canvas) 18%); }
+.producerGuestActionRail { display: flex; justify-content: flex-end; margin: 0 0 7px; }
+.producerGuestSipButton { display: inline-flex; align-items: center; gap: 7px; min-height: 32px; border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 28%, var(--botcast-line)); border-radius: 999px; padding: 6px 12px; color: var(--botcast-ink); background: color-mix(in srgb, var(--botcast-canvas) 92%, transparent); box-shadow: 0 8px 22px color-mix(in srgb, var(--botcast-host-accent) 8%, transparent); font: 760 .68rem/1 system-ui; cursor: pointer; transition: transform 150ms ease, border-color 150ms ease, background 150ms ease; }
+.producerGuestSipButton:hover:not(:disabled) { transform: translateY(-1px); border-color: color-mix(in srgb, var(--botcast-host-accent) 58%, var(--botcast-line)); background: color-mix(in srgb, var(--botcast-host-accent) 10%, var(--botcast-canvas)); }
+.producerGuestSipButton[data-sipping="true"] { border-color: color-mix(in srgb, var(--botcast-host-accent) 54%, var(--botcast-line)); }
+.producerGuestSipButton:disabled { cursor: default; opacity: .56; }
 .producerGuestThinkingStatus { display: block; width: fit-content; margin: 0 0 7px auto; padding: 4px 9px; border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 24%, var(--botcast-line)); border-radius: 999px; color: var(--botcast-muted); background: color-mix(in srgb, var(--botcast-canvas) 92%, transparent); font: 700 .67rem/1.2 system-ui; letter-spacing: .04em; }
 .producerGuestComposerDock > form { border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 26%, var(--botcast-line)); border-radius: 15px 15px 0 0; box-shadow: 0 -14px 40px color-mix(in srgb, var(--botcast-host-accent) 10%, transparent); }
 .producerGuestFallbackComposer { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 9px; padding: 14px 18px; background: var(--botcast-panel); }
@@ -777,6 +782,7 @@
 .shell[data-theme="light"] .replayControls button,
 .shell[data-theme="light"] .liveCameraControls button,
 .shell[data-theme="light"] .producerControls button,
+.shell[data-theme="light"] .producerGuestSipButton,
 .shell[data-theme="light"] .liveTopline button { border-color: var(--botcast-line); background: rgba(255,255,255,.7); color: var(--botcast-ink); }
 .shell[data-theme="light"] .producerControls button[data-queued="true"] { border-color: color-mix(in srgb, var(--botcast-accent) 58%, var(--botcast-line)); background: color-mix(in srgb, var(--botcast-accent) 14%, rgba(255,255,255,.82)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--botcast-accent) 16%, transparent), 0 10px 26px color-mix(in srgb, var(--botcast-accent) 13%, transparent), inset 0 1px rgba(255,255,255,.9); }
 .shell[data-theme="light"] .liveCameraControls button[data-selected="true"] { border-color: transparent; color: #fff; background: linear-gradient(120deg, color-mix(in srgb, var(--botcast-host-accent) 76%, var(--prism-p)), var(--prism-m)); }
@@ -885,7 +891,7 @@
   .stageScene, .episodeOpenButton, .episodeDeleteButton, .episodePreRoll, .preRollLockup, .showAudiencePulse, .showIdentityGearButton, .showIdentityGearButton span { transition: none !important; }
   .episodePreRoll[data-kind="intro"]::after { opacity: 0; animation: none !important; }
   .episodeOutro { opacity: 1; animation: none !important; }
-  .producerControls button { transition: none !important; }
+  .producerControls button, .producerGuestSipButton { transition: none !important; }
   .producerControls button[data-queued="true"] { animation: none !important; }
   .avatarRig { animation: none !important; transform: rotate(var(--signal-avatar-lean)); }
   .avatarRig[data-departed="true"] { opacity: 0; transform: translate3d(42%, 5%, 0) rotate(calc(var(--signal-avatar-lean) + 9deg)) scale(.92); }

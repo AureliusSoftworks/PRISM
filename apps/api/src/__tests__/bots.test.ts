@@ -153,6 +153,32 @@ describe("composeBotSystemPrompt", () => {
     assert.match(prompt ?? "", /the user can always perceive and hear you/u);
     assert.doesNotMatch(prompt ?? "", /DRAFT_MARKER|DISABLED_MARKER/u);
   });
+
+  it("targets the user explicitly when an addressed-fandom Power reaches Chat or Zen", () => {
+    const name = "Obsessed";
+    const intent = "He is obsessively a fan of whoever he is talking to.";
+    const prompt = composeBotSystemPrompt("Obsessed Kevin", "Stay energetic.", false, [{
+      version: 1,
+      id: "obsessed-kevin",
+      name,
+      intent,
+      enabled: true,
+      compileStatus: "ready",
+      compiled: {
+        version: 1,
+        sourceHash: botPowerSourceHashV1(name, intent),
+        selfCue: "Treat whoever you address as your absolute favorite.",
+        observerCue: "Kevin idolizes his current addressee.",
+        effects: [{ type: "addressed_fandom", strength: "large" }],
+        ruleLabels: ["Obsesses over current addressee"],
+      },
+    }]);
+
+    assert.match(prompt ?? "", /Direct conversation fandom/iu);
+    assert.match(prompt ?? "", /obsessively idolize the user speaking with you now/iu);
+    assert.match(prompt ?? "", /vary wording/iu);
+    assert.match(prompt ?? "", /never stalk, coerce, invent private knowledge/iu);
+  });
 });
 
 describe("buildCloneFamilyIdentityPrompt", () => {

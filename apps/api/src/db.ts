@@ -1221,6 +1221,8 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       accent_color TEXT NOT NULL,
       fallback_studio_accent_variant INTEGER NOT NULL DEFAULT 0
         CHECK (fallback_studio_accent_variant IN (0, 1, 2)),
+      host_chat_ignoring_until_guest_show INTEGER NOT NULL DEFAULT 0
+        CHECK (host_chat_ignoring_until_guest_show IN (0, 1)),
       atmosphere_json TEXT NOT NULL DEFAULT '{}',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
@@ -2816,6 +2818,15 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       "UPDATE botcast_shows SET fallback_studio_accent_variant = (rowid - 1) % 3;",
     );
   }
+  const hasBotcastHostChatIgnoringUntilGuestShowColumn =
+    botcastShowColumns.some(
+      (column) => column.name === "host_chat_ignoring_until_guest_show",
+    );
+  if (!hasBotcastHostChatIgnoringUntilGuestShowColumn) {
+    db.exec(
+      "ALTER TABLE botcast_shows ADD COLUMN host_chat_ignoring_until_guest_show INTEGER NOT NULL DEFAULT 0 CHECK (host_chat_ignoring_until_guest_show IN (0, 1));",
+    );
+  }
   const botcastEpisodeColumns = db
     .prepare("PRAGMA table_info(botcast_episodes)")
     .all() as Array<{ name: string }>;
@@ -2851,6 +2862,26 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   if (!botcastEpisodeColumns.some((column) => column.name === "guest_kind")) {
     db.exec(
       "ALTER TABLE botcast_episodes ADD COLUMN guest_kind TEXT NOT NULL DEFAULT 'bot' CHECK (guest_kind IN ('bot', 'producer'));",
+    );
+  }
+  if (!hasBotcastHostChatIgnoringUntilGuestShowColumn) {
+    db.exec(
+      `UPDATE botcast_shows AS show
+          SET host_chat_ignoring_until_guest_show = CASE
+            WHEN (
+              SELECT episode.outcome
+                FROM botcast_episodes AS episode
+               WHERE episode.user_id = show.user_id
+                 AND episode.show_id = show.id
+                 AND (
+                   episode.outcome = 'host_departed'
+                   OR episode.guest_kind = 'bot'
+                 )
+               ORDER BY episode.created_at DESC, episode.rowid DESC
+               LIMIT 1
+            ) = 'host_departed' THEN 1
+            ELSE 0
+          END;`,
     );
   }
   if (!botcastEpisodeColumns.some((column) => column.name === "guest_name")) {

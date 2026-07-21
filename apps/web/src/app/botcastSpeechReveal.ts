@@ -21,6 +21,8 @@ export interface BotcastSpeechRevealState {
   elapsedMs: number;
   progress: number;
   phase: BotcastSpeechRevealPhase;
+  /** Provider timing retained for the live avatar's aligned visemes. */
+  alignment: SpeechCharacterAlignment | null;
   speechActivityWindows: SpeechActivityWindow[] | null;
 }
 
@@ -62,17 +64,15 @@ function tokenWeight(token: string): number {
   return weight;
 }
 
-function alignmentIsUsable(
-  text: string,
-  alignment: SpeechCharacterAlignment | null | undefined
+function alignmentTimingIsUsable(
+  alignment: SpeechCharacterAlignment | null | undefined,
 ): alignment is SpeechCharacterAlignment {
   if (!alignment) return false;
   const count = alignment.characters.length;
   if (
     count === 0 ||
     count !== alignment.characterStartTimesSeconds.length ||
-    count !== alignment.characterEndTimesSeconds.length ||
-    alignment.characters.join("") !== text
+    count !== alignment.characterEndTimesSeconds.length
   ) return false;
 
   let previousStart = 0;
@@ -94,6 +94,16 @@ function alignmentIsUsable(
     previousEnd = end;
   }
   return previousEnd > 0;
+}
+
+function alignmentIsUsable(
+  text: string,
+  alignment: SpeechCharacterAlignment | null | undefined,
+): alignment is SpeechCharacterAlignment {
+  return (
+    alignmentTimingIsUsable(alignment) &&
+    alignment.characters.join("") === text
+  );
 }
 
 function alignedCompletionTimes(
@@ -137,6 +147,7 @@ export function prepareBotcastSpeechReveal(text: string): BotcastSpeechRevealSta
     elapsedMs: 0,
     progress: 0,
     phase: "preparing",
+    alignment: null,
     speechActivityWindows: null,
   };
 }
@@ -155,11 +166,12 @@ export function startBotcastSpeechReveal({
     Number.isFinite(durationMs) ? durationMs : 0
   ));
   const sourceTokens = tokenizePreservingWhitespace(text);
+  const mouthAlignment = alignmentTimingIsUsable(alignment) ? alignment : null;
   const completionTimes = alignedCompletionTimes(
     text,
     sourceTokens,
     normalizedDurationMs,
-    alignment
+    alignment,
   ) ?? fallbackCompletionTimes(sourceTokens, normalizedDurationMs);
 
   return {
@@ -172,8 +184,9 @@ export function startBotcastSpeechReveal({
     elapsedMs: 0,
     progress: 0,
     phase: "playing",
+    alignment: mouthAlignment,
     speechActivityWindows: buildSpeechActivityWindows(
-      alignment,
+      mouthAlignment,
       normalizedDurationMs,
     ),
   };

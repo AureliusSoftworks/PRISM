@@ -201,6 +201,9 @@ describe("createDatabase bot export hash migration", () => {
       db.exec(
         "ALTER TABLE botcast_shows DROP COLUMN fallback_studio_accent_variant;"
       );
+      db.exec(
+        "ALTER TABLE botcast_shows DROP COLUMN host_chat_ignoring_until_guest_show;"
+      );
       db.close();
 
       const reopened = createDatabase();
@@ -224,6 +227,11 @@ describe("createDatabase bot export hash migration", () => {
       assert.ok(
         botcastShowColumns.some(
           (column) => column.name === "fallback_studio_accent_variant"
+        )
+      );
+      assert.ok(
+        botcastShowColumns.some(
+          (column) => column.name === "host_chat_ignoring_until_guest_show"
         )
       );
       assert.ok(

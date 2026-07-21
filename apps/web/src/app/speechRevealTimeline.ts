@@ -20,6 +20,8 @@ export interface SpeechRevealTimeline {
   finalSegment?: boolean;
   /** Provider-timed regions where the face should actively articulate. */
   speechActivityWindows: SpeechActivityWindow[] | null;
+  /** Provider timing retained for the live avatar's aligned visemes. */
+  alignment: SpeechCharacterAlignment | null;
 }
 
 export interface SpeechCharacterAlignment {
@@ -54,6 +56,7 @@ export function prepareSpeechRevealTimeline(tokenSignature: string): SpeechRevea
     totalTokenCount: 0,
     finalSegment: true,
     speechActivityWindows: null,
+    alignment: null,
   };
 }
 
@@ -139,6 +142,7 @@ function buildSpeechRevealTimeline(args: {
         args.alignment,
         normalizedDurationMs,
       ),
+      alignment: args.alignment ?? null,
     };
   }
   const alignedRevealAtMs = args.alignment
@@ -172,6 +176,7 @@ function buildSpeechRevealTimeline(args: {
       args.alignment,
       normalizedDurationMs,
     ),
+    alignment: args.alignment ?? null,
   };
 }
 
