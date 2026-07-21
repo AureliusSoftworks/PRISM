@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1 } from "@localai/shared";
 import {
+  englishVoiceMediaElapsedMs,
   enqueueEnglishVoice,
   elevenLabsEffectForEngine,
   readEnglishVoiceSynthesisClip,
@@ -14,6 +15,12 @@ import {
 } from "./englishVoice.ts";
 
 describe("English voice post processing", () => {
+  it("derives visible playback progress from the media clock at the active tempo", () => {
+    assert.equal(englishVoiceMediaElapsedMs(0.62, 1.24), 500);
+    assert.equal(englishVoiceMediaElapsedMs(Number.NaN, 1), 0);
+    assert.equal(englishVoiceMediaElapsedMs(0.5, 0), 500);
+  });
+
   it("preserves gesture-authorized fallback media across passive preparation", () => {
     const source = readFileSync(new URL("./englishVoice.ts", import.meta.url), "utf8");
     assert.match(

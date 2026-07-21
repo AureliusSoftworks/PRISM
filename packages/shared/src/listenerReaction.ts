@@ -22,7 +22,28 @@ export type ListenerReactionSpokenCue =
   | "go on"
   | "No, hold on."
   | "Let me answer that."
-  | "That's not fair.";
+  | "That's not fair."
+  | "Wait a second."
+  | "Hold on."
+  | "Hang on."
+  | "One second.";
+export const BOT_CROSSTALK_INTERRUPTER_CUES = [
+  "Wait a second.",
+  "Hold on.",
+  "Hang on.",
+  "One second.",
+  "No, hold on.",
+] as const satisfies readonly ListenerReactionSpokenCue[];
+export const BOT_CROSSTALK_INTERRUPTED_SPEAKER_CUES = [
+  "... okay, never mind, I guess.",
+  "... right. Apparently we're moving on.",
+  "... sure. Go ahead.",
+  "... fine. I'll stop there.",
+  "... okay. I'll leave it.",
+] as const;
+export type BotCrosstalkInterruptedSpeakerCue =
+  (typeof BOT_CROSSTALK_INTERRUPTED_SPEAKER_CUES)[number];
+export type BotCrosstalkInterruptedSpeakerPlayback = "primary" | "crosstalk";
 export const LISTENER_REACTION_VOCAL_FOLEYS = [
   "clears throat",
   "coughs",
@@ -46,6 +67,10 @@ export interface ListenerReactionPlanV1 {
   vocalFoley?: ListenerReactionVocalFoley;
   /** A tense guest trying to cut across the host without taking transcript ownership. */
   interjectionAttempt?: true;
+  /** Short annoyed follow-up spoken by the bot whose live line was cut off. */
+  interruptedSpeakerCue?: BotCrosstalkInterruptedSpeakerCue;
+  /** Whether the follow-up is already part of primary audio or needs its own overlap channel. */
+  interruptedSpeakerCuePlayback?: BotCrosstalkInterruptedSpeakerPlayback;
   /** Relative position inside the speaker's delivery. Always 0.3..0.75. */
   targetProgress: number;
   seed: string;
@@ -76,7 +101,14 @@ const SPOKEN_CUES = new Set<ListenerReactionSpokenCue>([
   "No, hold on.",
   "Let me answer that.",
   "That's not fair.",
+  "Wait a second.",
+  "Hold on.",
+  "Hang on.",
+  "One second.",
 ]);
+const INTERRUPTED_SPEAKER_CUES = new Set<BotCrosstalkInterruptedSpeakerCue>(
+  BOT_CROSSTALK_INTERRUPTED_SPEAKER_CUES,
+);
 const VOCAL_FOLEYS = new Set<ListenerReactionVocalFoley>(
   LISTENER_REACTION_VOCAL_FOLEYS,
 );
@@ -89,10 +121,31 @@ export function normalizeListenerReactionVocalFoley(
     : null;
 }
 
+export function normalizeBotCrosstalkInterruptedSpeakerCue(
+  value: unknown,
+): BotCrosstalkInterruptedSpeakerCue | null {
+  return INTERRUPTED_SPEAKER_CUES.has(
+      value as BotCrosstalkInterruptedSpeakerCue,
+    )
+    ? value as BotCrosstalkInterruptedSpeakerCue
+    : null;
+}
+
 export function listenerReactionHasAudio(
   plan: Pick<ListenerReactionPlanV1, "spokenCue" | "vocalFoley">,
 ): boolean {
   return Boolean(plan.spokenCue || plan.vocalFoley);
+}
+
+export function listenerReactionHasCrosstalkAudio(
+  plan: Pick<
+    ListenerReactionPlanV1,
+    "spokenCue" | "vocalFoley" | "interruptedSpeakerCue"
+  >,
+): boolean {
+  return Boolean(
+    plan.spokenCue || plan.vocalFoley || plan.interruptedSpeakerCue,
+  );
 }
 
 // Attentive presence should be the norm in Signal; the remaining gaps keep
@@ -141,6 +194,14 @@ export function normalizeListenerReactionPlanV1(
   const vocalFoley = normalizeListenerReactionVocalFoley(row.vocalFoley) ??
     undefined;
   const interjectionAttempt = row.interjectionAttempt === true;
+  const interruptedSpeakerCue =
+    normalizeBotCrosstalkInterruptedSpeakerCue(row.interruptedSpeakerCue) ??
+    undefined;
+  const interruptedSpeakerCuePlayback =
+    row.interruptedSpeakerCuePlayback === "primary" ||
+      row.interruptedSpeakerCuePlayback === "crosstalk"
+      ? row.interruptedSpeakerCuePlayback
+      : undefined;
   const targetProgress = typeof row.targetProgress === "number" &&
       Number.isFinite(row.targetProgress)
     ? Math.max(0.3, Math.min(0.75, row.targetProgress))
@@ -169,6 +230,13 @@ export function normalizeListenerReactionPlanV1(
     ...(spokenCue ? { spokenCue } : {}),
     ...(!spokenCue && vocalFoley ? { vocalFoley } : {}),
     ...(interjectionAttempt ? { interjectionAttempt: true as const } : {}),
+    ...(interjectionAttempt && interruptedSpeakerCue
+      ? {
+          interruptedSpeakerCue,
+          interruptedSpeakerCuePlayback:
+            interruptedSpeakerCuePlayback ?? "crosstalk",
+        }
+      : {}),
     targetProgress: Number(targetProgress.toFixed(3)),
     seed,
     cameraCutEligible: row.cameraCutEligible,
@@ -177,6 +245,62 @@ export function normalizeListenerReactionPlanV1(
 
 function choose<T>(seed: string, values: readonly T[]): T {
   return values[Math.floor(stableUnit(seed) * values.length) % values.length]!;
+}
+
+export function botCrosstalkInterrupterCueForSeed(
+  seed: string,
+): ListenerReactionSpokenCue {
+  return choose(`${seed}:interrupter`, BOT_CROSSTALK_INTERRUPTER_CUES);
+}
+
+export function botCrosstalkInterruptedSpeakerCueForSeed(
+  seed: string,
+): BotCrosstalkInterruptedSpeakerCue {
+  return choose(`${seed}:interrupted`, BOT_CROSSTALK_INTERRUPTED_SPEAKER_CUES);
+}
+
+export function appendBotCrosstalkInterruptedSpeakerCue(
+  interruptedContent: string,
+  cue: BotCrosstalkInterruptedSpeakerCue,
+): string {
+  const prefix = interruptedContent.replace(/\s+/gu, " ").trimEnd();
+  if (!prefix) return cue;
+  const cutoff = /[—–-]$/u.test(prefix) ? prefix : `${prefix}—`;
+  return `${cutoff}${cue}`;
+}
+
+export function buildBotCrosstalkListenerReactionPlanV1(args: {
+  seed: string;
+  messageId: string;
+  speakerBotId: string;
+  interrupterBotId: string;
+  targetProgress: number;
+  interrupterCue?: ListenerReactionSpokenCue;
+  interruptedSpeakerCue?: BotCrosstalkInterruptedSpeakerCue;
+  interruptedSpeakerCuePlayback?: BotCrosstalkInterruptedSpeakerPlayback;
+}): ListenerReactionPlanV1 {
+  return {
+    v: LISTENER_REACTION_PLAN_VERSION,
+    name: "listenerReaction",
+    speakerBotId: args.speakerBotId,
+    listenerBotId: args.interrupterBotId,
+    messageId: args.messageId,
+    targetSource: "role",
+    visualAction: "lean_in",
+    spokenCue:
+      args.interrupterCue ?? botCrosstalkInterrupterCueForSeed(args.seed),
+    interjectionAttempt: true,
+    interruptedSpeakerCue:
+      args.interruptedSpeakerCue ??
+      botCrosstalkInterruptedSpeakerCueForSeed(args.seed),
+    interruptedSpeakerCuePlayback:
+      args.interruptedSpeakerCuePlayback ?? "crosstalk",
+    targetProgress: Number(
+      Math.max(0.3, Math.min(0.75, args.targetProgress)).toFixed(3),
+    ),
+    seed: args.seed,
+    cameraCutEligible: true,
+  };
 }
 
 function targetProgress(seed: string): number {
@@ -277,6 +401,9 @@ export function buildSignalListenerReactionPlanV1(args: {
             ["mm-hm", "I see", "hmm", "right", "oh", "go on"] as const,
           )
     : undefined;
+  const interruptedSpeakerCue = interjectionAttempt
+    ? botCrosstalkInterruptedSpeakerCueForSeed(seed)
+    : undefined;
   return {
     v: LISTENER_REACTION_PLAN_VERSION,
     name: "listenerReaction",
@@ -290,6 +417,12 @@ export function buildSignalListenerReactionPlanV1(args: {
     ...(spokenCue ? { spokenCue } : {}),
     ...(vocalFoley ? { vocalFoley } : {}),
     ...(interjectionAttempt ? { interjectionAttempt: true as const } : {}),
+    ...(interruptedSpeakerCue
+      ? {
+          interruptedSpeakerCue,
+          interruptedSpeakerCuePlayback: "primary" as const,
+        }
+      : {}),
     targetProgress: interjectionAttempt
       ? Number((0.3 + stableUnit(`${seed}:interjection-progress`) * 0.25).toFixed(3))
       : targetProgress(seed),

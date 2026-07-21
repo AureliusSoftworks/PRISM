@@ -43,6 +43,10 @@ const BOT_MARKETPLACE_GROUP_ATMOSPHERES: Readonly<
     label: "Ocean haze",
     src: "/zen-fallback-wallpapers/ocean-haze.png",
   },
+  "power-collection": {
+    label: "Mineral aurora",
+    src: "/zen-fallback-wallpapers/mineral-aurora.png",
+  },
 };
 
 export function resolveBotMarketplaceGroupAtmosphere(

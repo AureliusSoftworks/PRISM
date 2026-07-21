@@ -45,6 +45,21 @@ test("menu interaction contract includes keyboard, submenu, and focus restoratio
   assert.match(menuSource, /claimSurface/u);
 });
 
+test("outside pointer presses dismiss menus before canvas handlers can trap them", () => {
+  assert.match(
+    menuSource,
+    /window\.addEventListener\("pointerdown", dismissForPointer, true\)/u,
+  );
+  assert.match(
+    menuSource,
+    /window\.removeEventListener\("pointerdown", dismissForPointer, true\)/u,
+  );
+  assert.doesNotMatch(
+    menuSource,
+    /document\.addEventListener\("pointerdown", dismissForPointer/u,
+  );
+});
+
 test("visual shell follows the PRISM instrument-glass contract", () => {
   assert.match(menuCss, /border-radius: 12px/u);
   assert.match(menuCss, /\.filament/u);

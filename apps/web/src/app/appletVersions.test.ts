@@ -2,13 +2,22 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
-  BOT_POWER_ECHO_MODE_POLICY,
+  BOT_POWER_ADDRESSED_FANDOM_MODE_POLICY,
+  BOT_POWER_AVATAR_SCALE_MODE_POLICY,
   BOT_POWER_CANDOR_MODE_POLICY,
+  BOT_POWER_ETERNAL_INTRODUCTION_MODE_POLICY,
   BOT_POWER_HEARING_REPEAT_MODE_POLICY,
+  BOT_POWER_IDENTITY_MIRROR_MODE_POLICY,
+  BOT_POWER_INTERMITTENT_MUTE_MODE_POLICY,
   BOT_POWER_INTERRUPTION_MODE_POLICY,
   BOT_POWER_GHOST_MODE_POLICY,
   BOT_POWER_MUTE_MODE_POLICY,
+  BOT_POWER_MOOD_BOOST_MODE_POLICY,
+  BOT_POWER_MOOD_DRAIN_MODE_POLICY,
+  BOT_POWER_THEME_COMPOUND_MODE_POLICY,
   BOT_POWER_RESPONSE_BUDGET_MODE_POLICY,
+  BOT_POWER_SPEECH_OBFUSCATION_MODE_POLICY,
+  BOT_POWER_VOICE_PRESENCE_MODE_POLICY,
   PRISM_APPLETS,
   prismAppletVersionLabel,
   prismPlannedRoadmapApplets,
@@ -46,20 +55,42 @@ describe("applet version helpers", () => {
   });
 
   it("tracks the current visual applet versions for release provenance", () => {
-    assert.equal(PRISM_APPLETS.chat.version, "1.9");
-    assert.equal(PRISM_APPLETS.zen.version, "1.8");
-    assert.equal(PRISM_APPLETS.coffee.version, "2.2");
-    assert.equal(PRISM_APPLETS.botcast.version, "1.7");
+    assert.equal(PRISM_APPLETS.chat.version, "1.19");
+    assert.equal(PRISM_APPLETS.zen.version, "1.18");
+    assert.equal(PRISM_APPLETS.coffee.version, "2.15");
+    assert.equal(PRISM_APPLETS.botcast.version, "1.23");
     assert.equal(PRISM_APPLETS.botcast.name, "Signal");
-    assert.equal(PRISM_APPLETS.story.version, "0.6");
+    assert.equal(PRISM_APPLETS.story.version, "0.17");
     assert.equal(PRISM_APPLETS.slate.version, "0.7");
     assert.equal(PRISM_APPLETS.slate.status, "preview");
-    assert.equal(prismAppletVersionLabel("chat"), "v1.9");
-    assert.equal(prismAppletVersionLabel("zen"), "v1.8");
-    assert.equal(prismAppletVersionLabel("coffee"), "v2.2");
-    assert.equal(prismAppletVersionLabel("botcast"), "v1.7");
-    assert.equal(prismAppletVersionLabel("story"), "v0.6");
+    assert.equal(prismAppletVersionLabel("chat"), "v1.19");
+    assert.equal(prismAppletVersionLabel("zen"), "v1.18");
+    assert.equal(prismAppletVersionLabel("coffee"), "v2.15");
+    assert.equal(prismAppletVersionLabel("botcast"), "v1.23");
+    assert.equal(prismAppletVersionLabel("story"), "v0.17");
     assert.equal(prismAppletVersionLabel("slate"), "v0.7");
+  });
+
+  it("declares rolling short-term amnesia support for every applet", () => {
+    assert.deepEqual(
+      Object.keys(BOT_POWER_ETERNAL_INTRODUCTION_MODE_POLICY),
+      Object.keys(PRISM_APPLETS),
+    );
+    assert.deepEqual(BOT_POWER_ETERNAL_INTRODUCTION_MODE_POLICY, {
+      chat: "direct",
+      zen: "direct",
+      arena: "deferred",
+      polling: "deferred",
+      coffee: "adapted",
+      botcast: "adapted",
+      feed: "deferred",
+      games: "deferred",
+      story: "adapted",
+      gym: "deferred",
+      slate: "irrelevant",
+      pseudo: "deferred",
+      surf: "deferred",
+    });
   });
 
   it("requires every bot-embodying future applet to enforce hard mute before activation", () => {
@@ -74,16 +105,61 @@ describe("applet version helpers", () => {
     }
   });
 
-  it("requires every bot-embodying future applet to enforce addressed-speech echo before activation", () => {
-    assert.deepEqual(Object.keys(BOT_POWER_ECHO_MODE_POLICY), Object.keys(PRISM_APPLETS));
-    for (const applet of Object.values(PRISM_APPLETS)) {
-      const policy = BOT_POWER_ECHO_MODE_POLICY[applet.id];
-      if (applet.status === "planned") {
-        assert.equal(policy, "required_before_activation");
-      } else if (applet.id !== "slate") {
-        assert.equal(policy, "enforced");
-      }
-    }
+  it("declares addressed mood-boost behavior for every current and planned applet", () => {
+    assert.deepEqual(Object.keys(BOT_POWER_MOOD_BOOST_MODE_POLICY), Object.keys(PRISM_APPLETS));
+    assert.deepEqual(BOT_POWER_MOOD_BOOST_MODE_POLICY, {
+      chat: "cue",
+      zen: "cue",
+      arena: "deferred",
+      polling: "deferred",
+      coffee: "adapted",
+      botcast: "adapted",
+      feed: "deferred",
+      games: "deferred",
+      story: "adapted",
+      gym: "deferred",
+      slate: "irrelevant",
+      pseudo: "deferred",
+      surf: "deferred",
+    });
+  });
+
+  it("declares direct-addresser mood-drain behavior for every applet", () => {
+    assert.deepEqual(Object.keys(BOT_POWER_MOOD_DRAIN_MODE_POLICY), Object.keys(PRISM_APPLETS));
+    assert.deepEqual(BOT_POWER_MOOD_DRAIN_MODE_POLICY, {
+      chat: "cue",
+      zen: "cue",
+      arena: "deferred",
+      polling: "deferred",
+      coffee: "adapted",
+      botcast: "adapted",
+      feed: "deferred",
+      games: "deferred",
+      story: "adapted",
+      gym: "deferred",
+      slate: "irrelevant",
+      pseudo: "deferred",
+      surf: "deferred",
+    });
+  });
+
+  it("declares resolved-theme compound behavior for every applet", () => {
+    assert.deepEqual(Object.keys(BOT_POWER_THEME_COMPOUND_MODE_POLICY), Object.keys(PRISM_APPLETS));
+    assert.deepEqual(BOT_POWER_THEME_COMPOUND_MODE_POLICY, {
+      chat: "cue",
+      zen: "cue",
+      arena: "deferred",
+      polling: "deferred",
+      coffee: "adapted",
+      botcast: "adapted",
+      feed: "deferred",
+      games: "deferred",
+      story: "adapted",
+      gym: "deferred",
+      slate: "irrelevant",
+      pseudo: "deferred",
+      surf: "deferred",
+    });
   });
 
   it("declares an exhaustive candor policy for every current and planned applet", () => {
@@ -95,6 +171,28 @@ describe("applet version helpers", () => {
       polling: "deferred",
       coffee: "direct",
       botcast: "direct",
+      feed: "deferred",
+      games: "deferred",
+      story: "adapted",
+      gym: "deferred",
+      slate: "irrelevant",
+      pseudo: "deferred",
+      surf: "deferred",
+    });
+  });
+
+  it("declares an exhaustive current-addressee fandom policy for every applet", () => {
+    assert.deepEqual(
+      Object.keys(BOT_POWER_ADDRESSED_FANDOM_MODE_POLICY),
+      Object.keys(PRISM_APPLETS),
+    );
+    assert.deepEqual(BOT_POWER_ADDRESSED_FANDOM_MODE_POLICY, {
+      chat: "direct",
+      zen: "direct",
+      arena: "deferred",
+      polling: "deferred",
+      coffee: "adapted",
+      botcast: "adapted",
       feed: "deferred",
       games: "deferred",
       story: "adapted",
@@ -121,6 +219,94 @@ describe("applet version helpers", () => {
       slate: "irrelevant",
       pseudo: "deferred",
       surf: "deferred",
+    });
+  });
+
+  it("declares an exhaustive avatar-size Power policy for every applet", () => {
+    assert.deepEqual(
+      Object.keys(BOT_POWER_AVATAR_SCALE_MODE_POLICY),
+      Object.keys(PRISM_APPLETS),
+    );
+    assert.deepEqual(BOT_POWER_AVATAR_SCALE_MODE_POLICY, {
+      chat: "direct",
+      zen: "direct",
+      arena: "deferred",
+      polling: "deferred",
+      coffee: "direct",
+      botcast: "direct",
+      feed: "deferred",
+      games: "deferred",
+      story: "adapted",
+      gym: "deferred",
+      slate: "irrelevant",
+      pseudo: "deferred",
+      surf: "deferred",
+    });
+  });
+
+  it("declares an exhaustive loud/quiet presentation policy for every applet", () => {
+    assert.deepEqual(
+      Object.keys(BOT_POWER_VOICE_PRESENCE_MODE_POLICY),
+      Object.keys(PRISM_APPLETS),
+    );
+    assert.deepEqual(BOT_POWER_VOICE_PRESENCE_MODE_POLICY, {
+      chat: "direct",
+      zen: "direct",
+      arena: "deferred",
+      polling: "deferred",
+      coffee: "direct",
+      botcast: "direct",
+      feed: "deferred",
+      games: "deferred",
+      story: "adapted",
+      gym: "deferred",
+      slate: "irrelevant",
+      pseudo: "deferred",
+      surf: "deferred",
+    });
+  });
+
+  it("declares an exhaustive speech-obfuscation policy for every applet", () => {
+    assert.deepEqual(
+      Object.keys(BOT_POWER_SPEECH_OBFUSCATION_MODE_POLICY),
+      Object.keys(PRISM_APPLETS),
+    );
+    assert.deepEqual(BOT_POWER_SPEECH_OBFUSCATION_MODE_POLICY, {
+      chat: "direct",
+      zen: "direct",
+      arena: "deferred",
+      polling: "deferred",
+      coffee: "direct",
+      botcast: "adapted",
+      feed: "deferred",
+      games: "deferred",
+      story: "adapted",
+      gym: "deferred",
+      slate: "irrelevant",
+      pseudo: "deferred",
+      surf: "deferred",
+    });
+  });
+
+  it("declares an exhaustive intermittent-mute mood policy for every applet", () => {
+    assert.deepEqual(
+      Object.keys(BOT_POWER_INTERMITTENT_MUTE_MODE_POLICY),
+      Object.keys(PRISM_APPLETS),
+    );
+    assert.deepEqual(BOT_POWER_INTERMITTENT_MUTE_MODE_POLICY, {
+      chat: "enforced",
+      zen: "enforced",
+      arena: "required_before_activation",
+      polling: "required_before_activation",
+      coffee: "enforced",
+      botcast: "enforced",
+      feed: "required_before_activation",
+      games: "required_before_activation",
+      story: "adapted",
+      gym: "required_before_activation",
+      slate: "not_applicable",
+      pseudo: "required_before_activation",
+      surf: "required_before_activation",
     });
   });
 
@@ -183,6 +369,28 @@ describe("applet version helpers", () => {
       feed: "deferred",
       games: "deferred",
       story: "adapted",
+      gym: "deferred",
+      slate: "irrelevant",
+      pseudo: "deferred",
+      surf: "deferred",
+    });
+  });
+
+  it("exhaustively limits identity mirroring to bot-to-bot participant routing", () => {
+    assert.deepEqual(
+      Object.keys(BOT_POWER_IDENTITY_MIRROR_MODE_POLICY),
+      Object.keys(PRISM_APPLETS),
+    );
+    assert.deepEqual(BOT_POWER_IDENTITY_MIRROR_MODE_POLICY, {
+      chat: "irrelevant",
+      zen: "irrelevant",
+      arena: "deferred",
+      polling: "deferred",
+      coffee: "direct",
+      botcast: "direct",
+      feed: "deferred",
+      games: "deferred",
+      story: "cue",
       gym: "deferred",
       slate: "irrelevant",
       pseudo: "deferred",

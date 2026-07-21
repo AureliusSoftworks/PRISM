@@ -4,6 +4,10 @@ import type {
 } from "./prismTool.js";
 import type { PrismMoodIgnoredQuestionPenaltyLevel } from "./mood.js";
 import type { AutoRecoveryTraceV1 } from "./autoFallback.js";
+import type {
+  BotCrosstalkInterruptedSpeakerCue,
+  ListenerReactionSpokenCue,
+} from "./listenerReaction.js";
 
 export {
   PRISM_EULA_ACCEPTANCE_ACTION,
@@ -77,29 +81,66 @@ export {
 export {
   BOT_POWER_INTENT_MAX_LENGTH,
   BOT_POWER_CANONICAL_SILENCE_V1,
+  BOT_POWER_FORGETFUL_CONTEXT_MAX_MESSAGES_V1,
+  BOT_POWER_FORGETFUL_CONTEXT_MIN_MESSAGES_V1,
   BOT_POWER_MAX_COUNT,
   BOT_POWER_NAME_MAX_LENGTH,
+  BOT_POWER_LOUD_TEXT_SCALE_V1,
+  BOT_POWER_LOUD_VOICE_GAIN_MULTIPLIER_V1,
+  BOT_POWER_QUIET_TEXT_SCALE_V1,
+  BOT_POWER_QUIET_VOICE_GAIN_MULTIPLIER_V1,
   BOT_POWER_VERSION,
   COFFEE_POWER_PROMPT_MAX_CHARS,
   COFFEE_POWER_PROMPT_MAX_TOKENS,
   activeBotPowerEffectsV1,
   activeBotPowersV1,
+  applyBotPowerAddressedCopyResponseV1,
+  applyBotPowerEternalIntroductionResponseV1,
   applyBotPowerEchoResponseV1,
+  applyBotPowerMumbledResponseV1,
   applyBotPowerMuteResponseV1,
   applyBotPowerResponseBudgetV1,
+  botPowerAddressedFandomCueFromEffectsV1,
+  botPowerAddressedFandomCueV1,
+  botPowerDeterministicHalfChanceV1,
+  botPowerAvatarScaleModeFromEffectsV1,
+  botPowerAvatarScaleModeV1,
   botPowerCupRateMultiplierForBotV1,
   botPowerCandorResponseRuleV1,
   botPowerCandorTriggerV1,
   botPowerDefinitionIsExplicitInterruptionV1,
+  botPowerDefinitionIsUnconditionalInterruptionV1,
   botPowerDefinitionIsExplicitMuteV1,
+  botPowerCopiesAddressedSpeechV1,
   botPowerEchoesAddressedSpeechV1,
+  botPowerEternallyIntroducesFromEffectsV1,
+  botPowerEternallyIntroducesV1,
+  botPowerForgetfulContextMessageCountV1,
+  botPowerForgetfulPriorMessagesV1,
   botPowerHasSpeakingOnlyAvatarVisibilityV1,
+  botPowerHasSpeakingOnlyAvatarVisibilityFromEffectsV1,
+  botPowerIntermittentMuteEffectFromEffectsV1,
+  botPowerIntermittentMuteEffectV1,
+  botPowerIntermittentMuteTurnIsIgnoredFromEffectsV1,
+  botPowerIntermittentMuteTurnIsIgnoredV1,
   botPowerIsMutedV1,
+  botPowerMumblesSpeechFromEffectsV1,
+  botPowerMumblesSpeechV1,
+  botPowerMirrorsIdentityV1,
   botPowerMuteActionTextsV1,
   botPowerObserverCueLinesV1,
   botPowerResponseIsSilentV1,
+  botPowerResponseIsFirstIntroductionV1,
   botPowerSelfCueLinesV1,
+  botPowerThemeMoodCueFromEffectsV1,
+  botPowerThemeMoodCueV1,
   botPowerSourceHashV1,
+  botPowerTextScaleFromEffectsV1,
+  botPowerTextScaleV1,
+  botPowerVoiceGainMultiplierFromEffectsV1,
+  botPowerVoiceGainMultiplierV1,
+  botPowerVoicePresenceModeFromEffectsV1,
+  botPowerVoicePresenceModeV1,
   buildBotPowersPromptBlock,
   buildBotPowersSelfPromptV1,
   buildCoffeePowersPromptBlock,
@@ -113,10 +154,17 @@ export {
   parseStoredBotPowersV1,
   serializeBotPowersV1,
   strongestBotPowerCandorEffectV1,
+  strongestBotPowerAddressedFandomEffectFromEffectsV1,
+  strongestBotPowerAddressedFandomEffectV1,
+  strongestBotPowerMoodBoostEffectFromEffectsV1,
+  strongestBotPowerMoodBoostEffectV1,
+  strongestBotPowerMoodDrainEffectFromEffectsV1,
+  strongestBotPowerMoodDrainEffectV1,
   strongestBotPowerInterruptionEffectV1,
   strongestBotPowerResponseBudgetEffectV1,
   strongestHardBotPowerResponseBudgetEffectV1,
   type BotPowerBondDirection,
+  type BotPowerAvatarScaleMode,
   type BotPowerCompileStatus,
   type BotPowerEffectV1,
   type BotPowerFrequency,
@@ -126,6 +174,8 @@ export {
   type BotPowerEnforcement,
   type BotPowerResponseBudgetEffectV1,
   type BotPowerResponseBudgetMode,
+  type BotPowerResolvedThemeV1,
+  type BotPowerVoicePresenceMode,
   type BotPowerStrength,
   type BotPowerTargetV1,
   type BotPowerTopicDirection,
@@ -144,6 +194,7 @@ export {
   applyPrismMoodIgnoredTurn,
   applyPrismMoodNegativeTurn,
   applyPrismMoodPositiveTurn,
+  applyPrismMoodPowerIgnoredTurn,
   clampPrismMoodValue,
   COFFEE_NEAR_DESATURATED_SATURATION,
   coffeeDepartureChanceFromSocial,
@@ -230,6 +281,25 @@ export {
 } from "./botProfile.js";
 
 export {
+  BOT_IDENTITY_MIRROR_TRANSITION_MS,
+  BOT_IDENTITY_MIRROR_VERSION,
+  applyBotIdentityMirrorResponseV1,
+  botDirectAddressIndexV1,
+  botDirectlyAddressesBotV1,
+  botIdentityMirrorFaceV1,
+  botIdentityMirrorVoiceV1,
+  botIdentityMirrorHolderPromptV1,
+  botIdentityMirrorObserverPromptV1,
+  botIdentityMirrorTransitionActiveV1,
+  botIdentityMirrorTargetChangesV1,
+  createBotIdentityMirrorStateV1,
+  normalizeBotIdentityMirrorStateV1,
+  resolveBotIdentityMirrorVoiceV1,
+  type BotIdentityMirrorStateV1,
+  type BotIdentityMirrorSurfaceV1,
+} from "./botIdentityMirror.js";
+
+export {
   BOT_AUDIO_VOICE_IDS,
   PRISM_BUILTIN_ENGLISH_VOICES,
   prismBuiltinEnglishVoice,
@@ -264,6 +334,8 @@ export {
   normalizeBotVoiceTexture,
   normalizeBotVoiceTextureUnit,
   normalizeBotVoiceVolume,
+  normalizeBotAvatarSfxV1,
+  normalizeBotAvatarSfxVolume,
   normalizeEnglishVoiceEngine,
   normalizeElevenLabsVoiceDirection,
   normalizeElevenLabsVoiceEffect,
@@ -287,6 +359,9 @@ export {
   BOT_AUDIO_VOICE_PITCH_DEPTH_CENTS,
   BOT_NAME_PRONUNCIATION_MAX_LENGTH,
   BOT_NAME_SELF_REFERRAL_MAX_LENGTH,
+  BOT_AVATAR_SFX_MAX_BYTES,
+  BOT_AVATAR_SFX_PROMPT_MAX_LENGTH,
+  BOT_AVATAR_SFX_FILE_NAME_MAX_LENGTH,
   applyBotNamePronunciations,
   applyPlayerNamePronunciation,
   normalizeBotNamePronunciation,
@@ -298,6 +373,7 @@ export {
   type BotAudioVoiceProfile,
   type BotAudioVoiceProfileV1,
   type BotAudioVoiceProfileV2,
+  type BotAvatarSfxV1,
   type BotVoiceTexturePreset,
   type BotVoiceTextureV1,
   type CoffeeVoiceDeliveryEnvelope,
@@ -470,7 +546,10 @@ export {
   type CoffeeReplayArrivalEventPayload,
   type CoffeeReplayBotDepartureEventPayload,
   type CoffeeReplayEventPayload,
+  type CoffeeReplayIdentityMirrorEventPayload,
   type CoffeeReplayMoodEventPayload,
+  type CoffeeReplayPowerMoodBoostEventPayload,
+  type CoffeeReplayPowerMoodDrainEventPayload,
   type CoffeeReplayPlayerDepartureEventPayload,
   type CoffeeReplaySocialSnapshotPayload,
   type CoffeeReplayTopOffEventPayload,
@@ -970,6 +1049,8 @@ export interface ChatMessage {
   coffeeReplayEvents?: CoffeeReplayEventPayload[];
   /** Privacy-safe provider/model attempt history when Auto recovered this reply. */
   autoRecovery?: AutoRecoveryTraceV1;
+  /** Saved deterministic hard-response branch from a Ready Power. */
+  botPowerExactResponse?: "speech_copy" | "hearing_repeat" | "intermittent_mute" | "speech_obfuscation";
   /** User-entered Prompt Center shortcut that resolved into this message content. */
   promptShortcut?: PromptShortcutMetadata;
   /** User-entered wildcard decks/options that resolved into this message content. */
@@ -1018,6 +1099,10 @@ export interface CoffeeInterruptionEvent {
   reactionOutcome?: "silence" | "react" | "yield" | "resume";
   resumeOutcome?: "none" | "yielded" | "continued" | "invited";
   reactionText?: string;
+  /** Immediate canned cut-in spoken by the interrupting bot. */
+  interrupterCue?: ListenerReactionSpokenCue;
+  /** Annoyed canned tail spoken by the interrupted bot over the cut-in. */
+  interruptedSpeakerCue?: BotCrosstalkInterruptedSpeakerCue;
   socialConsequences: CoffeeInterruptionSocialDelta[];
 }
 
@@ -2215,6 +2300,8 @@ export interface ChatRequestPayload {
   /** When true, bypass "reuse latest chat" and start a fresh conversation row. */
   forceNewConversation?: boolean;
   message: string;
+  /** Resolved rendered app theme for theme-conditional Powers this turn. */
+  theme?: "light" | "dark";
   starterPrompt?: boolean;
   mode?: ChatMode;
   /** Companion-only optional preferences (used only when mode === "zen"). */
@@ -2513,6 +2600,8 @@ export interface CoffeeUserActionResponse {
 
 /** Request body for `POST /api/coffee/sessions/:id/continue`. */
 export interface CoffeeContinueRequest {
+  /** Resolved rendered app theme for theme-conditional Powers this turn. */
+  theme?: "light" | "dark";
   /**
    * Per-request provider override for the next bot reply. Per-bot online
    * gating still wins — a bot with `online_enabled=0` falls back to local.
@@ -2545,6 +2634,8 @@ export interface CoffeeSessionSettingsPatchRequest {
 
 /** Request body for `POST /api/coffee/turn`. */
 export interface CoffeeTurnRequest {
+  /** Resolved rendered app theme for theme-conditional Powers this turn. */
+  theme?: "light" | "dark";
   /** Existing Coffee conversation id, or omitted for legacy first-turn creation. */
   conversationId?: string;
   /**

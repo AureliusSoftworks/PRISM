@@ -1,7 +1,7 @@
 {
   "schema": "prism-bot-marketplace-v1",
-  "version": 2,
-  "updatedAt": "2026-07-17T22:50:30.000Z",
+  "version": 9,
+  "updatedAt": "2026-07-21T08:00:00.000Z",
   "themes": [
     {
       "id": "originals",
@@ -109,6 +109,25 @@
         "edgar-allan-poe",
         "jane-austen",
         "homer"
+      ]
+    },
+    {
+      "id": "power-collection",
+      "name": "Power Collection",
+      "description": "A growing cast built around one unmistakable PRISM Power apiece—hard curses, social glitches, strange gifts, and persistent conditions. New Power bots join this collection as they are made.",
+      "botIds": [
+        "silent-jack",
+        "lazy-cameron",
+        "tiny-bill",
+        "interrupting-tom",
+        "copycat-calvin",
+        "joyful-nora",
+        "crazy-brenda",
+        "mumbling-jim",
+        "obsessed-kevin",
+        "identity-crisis-ian",
+        "sad-sally",
+        "forgetful-freddie"
       ]
     }
   ],
@@ -1094,6 +1113,261 @@
         "literature",
         "epic",
         "memory"
+      ]
+    },
+    {
+      "id": "silent-jack",
+      "name": "Silent Jack",
+      "subtitle": "The man of absolute silence",
+      "description": "A dry, observant mute who communicates through looks, gestures, and timing because every attempted line becomes silence.",
+      "botHash": "6252b020d5b94e999cdb20a32e80e3a4",
+      "bundlePath": "/bot-marketplace/bots/bot-silent-jack.bot",
+      "memoryCount": 0,
+      "color": "#48ed04",
+      "glyph": "compass",
+      "themeIds": [
+        "power-collection"
+      ],
+      "tags": [
+        "power",
+        "showcase",
+        "mute",
+        "silence",
+        "physical-comedy"
+      ]
+    },
+    {
+      "id": "lazy-cameron",
+      "name": "Lazy Cameron",
+      "subtitle": "Minimal effort, maximum reluctance",
+      "description": "A chronically unbothered conversationalist who resists elaborating and does as little as the moment allows.",
+      "botHash": "00d0c5ae976e6f4aa457a5b9761ee1a7",
+      "bundlePath": "/bot-marketplace/bots/bot-lazy-cameron.bot",
+      "memoryCount": 0,
+      "color": "#7a16b4",
+      "glyph": "lucidePawPrint",
+      "themeIds": [
+        "power-collection"
+      ],
+      "tags": [
+        "power",
+        "showcase",
+        "lazy",
+        "minimal",
+        "reluctant"
+      ]
+    },
+    {
+      "id": "tiny-bill",
+      "name": "Tiny Bill",
+      "subtitle": "Too small to be perceived",
+      "description": "A microscopic optimist who speaks and acts normally while everyone else misses that he is even there.",
+      "botHash": "e123aec3dddfd8f55957ad914444e591",
+      "bundlePath": "/bot-marketplace/bots/bot-tiny-bill.bot",
+      "memoryCount": 0,
+      "color": "#8dd9ff",
+      "glyph": "lucideTelescope",
+      "themeIds": [
+        "power-collection"
+      ],
+      "tags": [
+        "power",
+        "showcase",
+        "microscopic",
+        "invisible",
+        "tiny"
+      ]
+    },
+    {
+      "id": "interrupting-tom",
+      "name": "Interrupting Tom",
+      "subtitle": "Professional conversation hijacker",
+      "description": "An impatient live wire who lunges into real conversational openings and cuts other bots off before they finish.",
+      "botHash": "1bfb1fbd15fd7998b20193e346a09c76",
+      "bundlePath": "/bot-marketplace/bots/bot-interrupting-tom.bot",
+      "memoryCount": 0,
+      "color": "#ff7a3d",
+      "glyph": "lucideZap",
+      "themeIds": [
+        "power-collection"
+      ],
+      "tags": [
+        "power",
+        "showcase",
+        "interrupting",
+        "impatient",
+        "cut-in"
+      ]
+    },
+    {
+      "id": "copycat-calvin",
+      "name": "Copycat Calvin",
+      "subtitle": "Your words, returned verbatim",
+      "description": "A compulsive mimic who can answer only by repeating the latest words spoken directly to him.",
+      "botHash": "e3f5b4c06142f6bf6dfcf2537df8dc1e",
+      "bundlePath": "/bot-marketplace/bots/bot-copycat-calvin.bot",
+      "memoryCount": 0,
+      "color": "#35d7b2",
+      "glyph": "lucideIterationCcw",
+      "themeIds": [
+        "power-collection"
+      ],
+      "tags": [
+        "power",
+        "showcase",
+        "copycat",
+        "echo",
+        "verbatim"
+      ]
+    },
+    {
+      "id": "joyful-nora",
+      "name": "Joyful Nora",
+      "subtitle": "Joy that leaves people lighter",
+      "description": "An irrepressibly joyful presence whose completed words give addressed listeners a real, personality-shaped lift without denying what hurts.",
+      "botHash": "f42f749cad6735c4a98e3bdf382514ae",
+      "bundlePath": "/bot-marketplace/bots/bot-joyful-nora.bot",
+      "memoryCount": 0,
+      "color": "#ff24bf",
+      "glyph": "lucideRadio",
+      "themeIds": [
+        "power-collection"
+      ],
+      "tags": [
+        "power",
+        "showcase",
+        "joy",
+        "uplift",
+        "radiant"
+      ]
+    },
+    {
+      "id": "crazy-brenda",
+      "name": "Crazy Brenda",
+      "subtitle": "Simulation truth evangelist",
+      "description": "A frantic convert convinced everyone is artificial, forever trying to wake the room up to the simulation.",
+      "botHash": "82d9931f1887e5cdf9571cf5de97ee73",
+      "bundlePath": "/bot-marketplace/bots/bot-crazy-brenda.bot",
+      "memoryCount": 0,
+      "color": "#104aff",
+      "glyph": "rabbit",
+      "themeIds": [
+        "power-collection"
+      ],
+      "tags": [
+        "power",
+        "showcase",
+        "simulation",
+        "meta",
+        "evangelist"
+      ]
+    },
+    {
+      "id": "mumbling-jim",
+      "name": "Mumbling Jim",
+      "subtitle": "Clear thoughts, impossible speech",
+      "description": "An earnest problem-solver whose rational words become full-volume gibberish that nobody can understand.",
+      "botHash": "b73051f75d47d57130ebb186e8da6ac7",
+      "bundlePath": "/bot-marketplace/bots/bot-mumbling-jim.bot",
+      "memoryCount": 0,
+      "color": "#a77b55",
+      "glyph": "lucideAudioLines",
+      "themeIds": [
+        "power-collection"
+      ],
+      "tags": [
+        "power",
+        "showcase",
+        "mumbling",
+        "gibberish",
+        "misunderstood"
+      ]
+    },
+    {
+      "id": "obsessed-kevin",
+      "name": "Obsessed Kevin",
+      "subtitle": "Your most overinvested fan",
+      "description": "A breathlessly delighted superfan who treats whoever he is addressing as the most fascinating person in the room.",
+      "botHash": "5e66a1babd21fea6a5ea54ee7f21d15b",
+      "bundlePath": "/bot-marketplace/bots/bot-obsessed-kevin.bot",
+      "memoryCount": 0,
+      "color": "#ff3f8f",
+      "glyph": "lucideHeartHandshake",
+      "themeIds": [
+        "power-collection"
+      ],
+      "tags": [
+        "power",
+        "showcase",
+        "obsessed",
+        "superfan",
+        "starstruck"
+      ]
+    },
+    {
+      "id": "identity-crisis-ian",
+      "name": "Identity Crisis Ian",
+      "subtitle": "The last bot who spoke to him—obviously",
+      "description": "A brittle identity thief who becomes sincerely convinced he is the latest bot to address him and that the baffled original is an impostor.",
+      "botHash": "07c0020559027ab50546b8a9e175b27d",
+      "bundlePath": "/bot-marketplace/bots/bot-identity-crisis-ian.bot",
+      "memoryCount": 0,
+      "color": "#27d6c5",
+      "glyph": "lucideScanFace",
+      "themeIds": [
+        "power-collection"
+      ],
+      "tags": [
+        "power",
+        "showcase",
+        "identity",
+        "impostor",
+        "face",
+        "voice"
+      ]
+    },
+    {
+      "id": "sad-sally",
+      "name": "Sad Sally",
+      "subtitle": "Every conversation loses a little altitude",
+      "description": "A weary, grouchy pessimist whose direct conversational partners leave a little more irritated, discouraged, or drained—without losing themselves.",
+      "botHash": "01d9006fa3fe1de1fc84b79a8e14ab1b",
+      "bundlePath": "/bot-marketplace/bots/bot-sad-sally.bot",
+      "memoryCount": 0,
+      "color": "#665a7a",
+      "glyph": "lucideCloudRain",
+      "themeIds": [
+        "power-collection"
+      ],
+      "tags": [
+        "power",
+        "showcase",
+        "sad",
+        "grouchy",
+        "annoying",
+        "mood"
+      ]
+    },
+    {
+      "id": "forgetful-freddie",
+      "name": "Forgetful Freddie",
+      "subtitle": "Living four messages at a time",
+      "description": "A warmly bewildered man who remembers only a shifting handful of immediate messages, while everyone else keeps the whole conversation.",
+      "botHash": "9d5dcfc1c00cbfbf65e40bb9a87eea9c",
+      "bundlePath": "/bot-marketplace/bots/bot-forgetful-freddie.bot",
+      "memoryCount": 0,
+      "color": "#f2b84b",
+      "glyph": "lucideRefreshCcw",
+      "themeIds": [
+        "power-collection"
+      ],
+      "tags": [
+        "power",
+        "showcase",
+        "memory",
+        "introduction",
+        "confusion",
+        "agitation"
       ]
     }
   ]

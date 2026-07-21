@@ -24,11 +24,11 @@ ship as `0.5.2` while Coffee is `v0.7` and Story is `v0.1`.
 
 | Applet | Version | Status | Notes |
 | --- | --- | --- | --- |
-| Chat | v1.9 | Active | Full playground for bots, providers, models, images, exports, memory-aware conversations, per-bot online voice identity, sparse shared mic presence, and ready Powers including engine-bounded response budgets. |
-| Zen | v1.8 | Active | Calm one-to-one continuity surface with shared bot voice identity, mic presence, and ready Powers including engine-bounded response budgets; the standalone Zen lane is deprecating as this becomes Prism's default state. |
-| Coffee | v2.2 | Active | Multi-bot group table with Coffee Groups, model-aware session holds, pacing, cups, transcripts, replay, synchronized online speech, living atmosphere, and table-adapted response budgets. |
-| Signal | v1.7 | Active | Bot-owned anthology interviews with audience-projected transcript, voice, replay, and reviews; studio-specific atmosphere; frozen episode Powers; guest-led structure for echo-bound hosts; and bounded, replay-safe interruption Powers. |
-| Story | v0.6 | Preview | Generated visual-novel episodes with bots, choices, maps, inventory, transcripts, shared PRISM menu behavior, and engine-bounded speaker narration. |
+| Chat | v1.19 | Active | Full playground for bots, providers, models, images, exports, memory-aware conversations, five-choice English/Premium voice switching, sparse shared mic presence, and ready Powers including rolling one-to-four-message short-term amnesia, one-opening copy behavior, engine-bounded response budgets, relative avatar size, loud/quiet presence, speech obfuscation, current-addressee fandom, and cue-only radiant joy or reactive gloom. |
+| Zen | v1.18 | Active | Calm one-to-one continuity surface with five-choice English/Premium voice switching, mic presence, and ready Powers including rolling one-to-four-message short-term amnesia, one-opening copy behavior, engine-bounded response budgets, relative avatar size, loud/quiet presence, speech obfuscation, current-addressee fandom, and cue-only radiant joy or reactive gloom; the standalone Zen lane is deprecating as this becomes Prism's default state. |
+| Coffee | v2.15 | Active | Multi-bot group table with Coffee Groups, live and replay-safe English/Premium switching, model-aware session holds, pacing, cups, transcripts, living atmosphere, rolling one-to-four-message short-term amnesia with accumulating peer agitation, one-opening copy behavior, Power-driven bot-to-bot cut-ins including guaranteed early-to-late interruptions, public-only gibberish context, player/peer-focused fandom, replay-safe bot-only identity mirroring, persisted recipient mood boosts, and direct-addresser mood drains. |
+| Signal | v1.23 | Active | Bot-owned anthology interviews with next-utterance English/Premium switching, audience-projected transcript, voice, replay, and reviews; rolling one-to-four-message short-term amnesia with persisted peer pressure; one-opening copy behavior; replay-safe probabilistic or guaranteed early-to-late interruption, speech obfuscation, bot-only identity mirroring, recipient mood boosts, and direct-addresser mood drains; and peer/audience-focused fandom. |
+| Story | v0.17 | Preview | Generated visual-novel episodes with bots, choices, maps, inventory, transcripts, shared PRISM menu behavior, scene-local rolling short-term amnesia, one-opening copy behavior, replay-stable probabilistic or guaranteed interruption, scene-safe speech obfuscation, scene-focus fandom, and cue-only personality-shaped uplift or drag. |
 | Arena | v0.0 | Planned | Moderated bot debate surface. |
 | Polling | v0.0 | Planned | AI-powered polling across bot groups. |
 | Feed | v0.0 | Planned | BotBook-style social feed. |
@@ -70,6 +70,148 @@ usable end to end. It entered preview at `v0.1` and is now `v0.7`; later snapsho
 stages do not block the standalone preview.
 
 ## Changelog
+
+### 2026-07-21
+
+- Bumped `Coffee` to `v2.15`, `Signal` to `v1.23`, and `Story` to `v0.17`
+  for unconditional interruption Powers. A Power explicitly authored to
+  interrupt every eligible bot turn now does so without a random roll or the
+  ordinary interruption cooldown, with a replay-stable cutoff distributed
+  from early through late in the active utterance. Older Ready copies of
+  Interrupting Tom recover the hard rule from “whenever possible.” Direct
+  Coffee engagement always creates that opening; otherwise Coffee first makes
+  its normal organic cut-in choice, then guarantees the cutoff during the
+  active turn. Signal and
+  Story adapt the same contract while human Producer speech, departures,
+  wraps, closings, and hard speech rules remain protected.
+
+- Bumped `Signal` to `v1.22` so Identity Crisis Ian works as the host. A
+  present bot guest's scheduled reply now counts as direct guest-to-host
+  address even when the guest naturally omits Ian's name. Producer guests,
+  audience-only speech, and unnamed host-to-guest turns remain excluded; the
+  replay-safe persona, CRT face, and resolved-voice handoff is unchanged.
+
+- Bumped `Signal` to `v1.21` so random booking and field synthesis give
+  reasoning-style OpenAI models enough low-effort completion budget to return
+  the requested title and private producer angle. Empty provider replies are
+  now reported as unusable model output instead of a false availability
+  failure.
+
+- Bumped `Chat` to `v1.19`, `Zen` to `v1.18`, `Coffee` to `v2.14`, `Signal`
+  to `v1.20`, and `Story` to `v0.16` for Forgetful Freddie's short-term
+  amnesia. Each holder turn now receives a replay-stable one-to-four-message
+  public tail, responds naturally to that immediate context, and cannot claim
+  an older relationship. Self-introductions are no longer forced. Long-term
+  memories, summaries, private producer cues, and other hidden continuity stay
+  excluded; Coffee and Signal preserve their replay-safe peer consequences.
+
+- Bumped `Coffee` to `v2.13` and `Signal` to `v1.19` so Identity Crisis Ian
+  reliably changes when a bot addresses him naturally, including a name at the
+  end or inside a sentence. The copied bot's public persona now becomes Ian's
+  primary production identity, the first changed reply is engine-bounded to
+  claim that identity and reject the original as an impostor, and the persisted
+  event continues to drive the copied face and resolved voice. Generic Power
+  cues no longer tell observers that identity theft happened before a real
+  event exists.
+
+- Bumped `Chat` to `v1.18`, `Zen` to `v1.17`, `Coffee` to `v2.12`, `Signal`
+  to `v1.18`, and `Story` to `v0.15` for the eternal-introduction Power. The
+  holder receives no earlier conversational context and every persisted spoken
+  turn is engine-bounded to a sincere first introduction. Coffee and Signal
+  preserve everyone else's transcript and apply one small replay-safe negative
+  social step after each introduction, so peers can become increasingly
+  agitated while the holder experiences only the present reaction as confusing
+  first contact. Story rewrites each holder scene as an isolated introduction;
+  Slate is irrelevant, and planned participant applets remain deferred.
+
+- Bumped `Chat` to `v1.17`, `Zen` to `v1.16`, `Coffee` to `v2.11`, `Signal`
+  to `v1.17`, and `Story` to `v0.14` for resolved-theme compound Powers.
+  Nocturnal activates the existing Sad contract in Light Mode and Radiant Joy
+  in Dark Mode; Diurnal is the exact inverse. Theme changes affect later turns,
+  while Coffee and Signal persist the effect branch that actually fired. Chat
+  and Zen keep player mood experiential only, Story captures the active branch
+  when generating an episode, Slate is irrelevant, and planned applets defer
+  runtime support.
+
+- Bumped `Chat` to `v1.16`, `Zen` to `v1.15`, `Coffee` to `v2.10`, `Signal`
+  to `v1.16`, and `Story` to `v0.13` for the direct-addresser mood-drain
+  contract. Only a bot that completes a turn directly to the ready holder loses
+  one bounded mood or motivation step; the player and bystanders are never
+  mutable recipients. Coffee and Signal persist explicit events and carry the
+  drag into the addresser's subsequent behavior without replacing personality,
+  agency, facts, disagreement, or serious stakes. Chat and Zen keep the effect
+  experiential, Story adapts through supported scene prompting, and planned
+  applets remain deferred.
+
+- Added the addressed-recipient mood-boost contract across every applet policy.
+  Chat and Zen express radiant joy through the holder's production persona
+  without creating player mood state. Coffee and Signal apply one clamped,
+  recipient-scoped lift per completed source turn, persist explicit replay
+  events, and feed the saved result into subsequent bot behavior. Story adapts
+  the cue through its existing generated-scene contract; Slate is irrelevant,
+  and planned applets remain deferred until they own compatible participant
+  state. Hard mute always wins because no spoken turn occurred.
+
+- Bumped `Coffee` to `v2.9` and `Signal` to `v1.15` for bounded identity
+  mirroring. The latest bot to directly address a ready holder supplies only its
+  public persona, normalized face, and resolved voice; the holder keeps its own
+  glyph, color, role, Powers, private state, routing, and hard restrictions.
+  Coffee and Signal persist and replay the CRT face/voice handoff. The player is
+  never a target. Story remains cue-only because its current scene contract has
+  speakers but no authoritative bot-to-bot addressee; Chat, Zen, and Slate are
+  irrelevant, and planned participant applets must implement the contract
+  explicitly before activation.
+
+- Bumped `Chat` to `v1.15`, `Zen` to `v1.14`, `Coffee` to `v2.8`, `Signal`
+  to `v1.14`, and `Story` to `v0.12` for bounded current-addressee fandom.
+  The ready holder treats the player, live peer, or scene audience they address
+  as a personal star and reveals fresh fanlike delight in every reply. The
+  pressure remains soft: personality, agency, safety, privacy, and mode rules
+  win, and draft, stale, failed, disabled, or absent Powers contribute no cue.
+
+- Bumped `Chat` to `v1.14`, `Zen` to `v1.13`, `Coffee` to `v2.7`, `Signal`
+  to `v1.13`, and `Story` to `v0.11` for hard normal-volume speech
+  obfuscation. A holder still reasons and responds coherently in private, but
+  only deterministic gibberish reaches transcripts, replay, voice, memory, or
+  another bot's context. Physical stage actions remain visible; no listener can
+  recover the holder's intended words.
+
+- Bumped `Chat` to `v1.13`, `Zen` to `v1.12`, `Coffee` to `v2.6`, `Signal`
+  to `v1.12`, and `Story` to `v0.10` so Copycat/Echo bots can originate one
+  opening before exact-copy enforcement begins. Interrupting bots now carry
+  their target-aware cutoff behavior into every bot-to-bot lane: real live
+  cut-ins in Coffee and either Signal cast role, plus replay-stable Story cuts.
+  Typed human Chat/Zen speech and the Signal Producer-guest lane remain
+  protected from synthetic truncation.
+
+- Bumped `Chat` to `v1.12`, `Zen` to `v1.11`, `Coffee` to `v2.5`, `Signal`
+  to `v1.11`, and `Story` to `v0.9` for the global five-choice voice control.
+  English always uses the bot's local identity; Premium uses its stable
+  ElevenLabs identity and falls back locally. Live and replay switches begin
+  with the next utterance without cutting off speech already playing.
+
+- Bumped `Chat` to `v1.11`, `Zen` to `v1.10`, `Coffee` to `v2.4`, `Signal`
+  to `v1.10`, and `Story` to `v0.8` for reusable loud/quiet voice presence.
+  Loud lines receive a fixed 1.18x playback trim and 1.12x text scale, annoy
+  present bots after audible speech, and override small, Microscopic, and
+  speaking-only invisibility. Quiet lines receive a fixed 0.72x playback trim
+  and 0.88x text scale; a stable half of eligible turns are treated exactly like
+  mute, with one small holder-mood loss each time the bot goes unheard. Coffee
+  and Signal freeze these outcomes and presentation rules for replay. Story
+  adapts an ignored turn into a silent, visibly deflated beat.
+
+- Bumped `Chat` to `v1.10`, `Zen` to `v1.9`, `Coffee` to `v2.3`, `Signal`
+  to `v1.9`, and `Story` to `v0.7` for bounded physical-size Powers. Ready
+  larger or giant holders render 12% larger; small, tiny, or microscopic holders
+  render 14% smaller without changing layout. `Microscopic` also carries the
+  speaking-only invisibility contract. Coffee freezes the size in its session
+  plan, Signal freezes it in the episode snapshot, and replay preserves both.
+
+- Bumped `Signal` to `v1.8` so a Copycat/Echo host owns exactly one
+  persona-shaped dashboard variation of “I always have an original thing to
+  say.” Signal repeats that same line forever instead of rotating a batch, and
+  safely repairs older multi-blurb shows to the canonical joke until the player
+  refreshes the host's wording.
 
 - Bumped `Signal` to `v1.7` so a Producer cut stops the current turn, catches the
   host briefly off guard, and still gives them one short, tactful on-air sign-off

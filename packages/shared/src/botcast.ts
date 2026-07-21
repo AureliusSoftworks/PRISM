@@ -1,12 +1,20 @@
 import type { VoiceDeliveryMood } from "./audioVoice.js";
+import {
+  normalizeBotIdentityMirrorStateV1,
+  type BotIdentityMirrorStateV1,
+} from "./botIdentityMirror.ts";
 import type {
+  BotCrosstalkInterruptedSpeakerCue,
   ListenerReactionPlanV1,
   ListenerReactionVocalFoley,
 } from "./listenerReaction.js";
 
 export type BotcastEpisodeSegment = "opening" | "interview" | "closing";
 export type BotcastEpisodeStatus = "live" | "completed";
-export type BotcastEpisodeOutcome = "completed" | "guest_departed";
+export type BotcastEpisodeOutcome =
+  | "completed"
+  | "guest_departed"
+  | "host_departed";
 export type BotcastEpisodeProvider = "local" | "openai" | "anthropic";
 export type BotcastEpisodeResponseMode = "local" | "auto" | "online";
 export type BotcastSpeakerRole = "host" | "guest";
@@ -29,6 +37,17 @@ export const BOTCAST_DASHBOARD_BLURB_FALLBACKS = [
   "Episode 4: Now with 12% more dramatic pause.",
   "Guest chair's open. Bring me someone interesting",
 ] as const;
+export const BOTCAST_ECHO_DASHBOARD_BLURB_FALLBACK =
+  "I always have an original thing to say.";
+
+/** Keeps the unrelated Copycat dashboard joke recognizable across persona rewrites. */
+export function isBotcastEchoDashboardBlurb(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.trim().length > 0 &&
+    /\boriginal(?:ity|ly)?\b/iu.test(value)
+  );
+}
 export const BOTCAST_HOST_INTERRUPTION_LINE_TARGET = 6;
 export const BOTCAST_HOST_INTERRUPTION_LINE_MAX_LENGTH = 64;
 export const BOTCAST_HOST_INTERRUPTION_LINE_FALLBACKS = [
@@ -657,6 +676,7 @@ export type BotcastReplayEventKind =
   | "guest_presence"
   | "power_effect"
   | "producer_cue"
+  | "provider_generation"
   | "utterance"
   | "tension"
   | "warning"
@@ -675,6 +695,72 @@ export interface BotcastReplayEvent {
   kind: BotcastReplayEventKind;
   payload: Record<string, unknown>;
   occurredAt: string;
+}
+
+/** Rehydrates the last persisted identity theft for each holder at a live/replay cutoff. */
+export function botcastIdentityMirrorStatesAtV1(
+  events: readonly Pick<BotcastReplayEvent, "kind" | "payload" | "occurredAt">[],
+  cutoffOccurredAtMs = Number.POSITIVE_INFINITY,
+): ReadonlyMap<string, BotIdentityMirrorStateV1> {
+  const states = new Map<string, BotIdentityMirrorStateV1>();
+  for (const event of events) {
+    if (event.kind !== "power_effect") continue;
+    const eventAtMs = Date.parse(event.occurredAt);
+    if (Number.isFinite(eventAtMs) && eventAtMs > cutoffOccurredAtMs) continue;
+    const state = normalizeBotIdentityMirrorStateV1(event.payload.state);
+    if (!state || state.surface !== "signal") continue;
+    states.set(state.holderBotId, state);
+  }
+  return states;
+}
+
+/** Uses event sequence/message order so equal timestamps still replay deterministically. */
+export function botcastIdentityMirrorStateBeforeMessageV1(
+  episode: Pick<BotcastEpisode, "events" | "messages">,
+  holderBotId: string,
+  messageId: string,
+): BotIdentityMirrorStateV1 | null {
+  const messageIndex = episode.messages.findIndex((message) => message.id === messageId);
+  if (messageIndex < 0) return null;
+  let state: BotIdentityMirrorStateV1 | null = null;
+  for (const event of episode.events) {
+    if (event.kind !== "power_effect") continue;
+    const candidate = normalizeBotIdentityMirrorStateV1(event.payload.state);
+    if (
+      !candidate ||
+      candidate.surface !== "signal" ||
+      candidate.holderBotId !== holderBotId
+    ) {
+      continue;
+    }
+    const sourceIndex = episode.messages.findIndex(
+      (message) => message.id === candidate.sourceMessageId,
+    );
+    if (sourceIndex >= 0 && sourceIndex < messageIndex) state = candidate;
+  }
+  return state;
+}
+
+/** Legacy departure events predate speakerRole and always represented guests. */
+export function botcastDepartureSpeakerRole(
+  event: Pick<BotcastReplayEvent, "kind" | "payload">,
+): BotcastSpeakerRole | null {
+  if (event.kind !== "departure") return null;
+  return event.payload.speakerRole === "host" ? "host" : "guest";
+}
+
+export function botcastEpisodeDepartureOutcome(
+  events: readonly Pick<BotcastReplayEvent, "kind" | "payload">[],
+): Extract<BotcastEpisodeOutcome, "guest_departed" | "host_departed"> | null {
+  const departure = [...events]
+    .reverse()
+    .find((event) => event.kind === "departure");
+  const role = departure ? botcastDepartureSpeakerRole(departure) : null;
+  return role === "host"
+    ? "host_departed"
+    : role === "guest"
+      ? "guest_departed"
+      : null;
 }
 
 /** Reads one role's immutable episode-start Powers for live use and replay. */
@@ -710,25 +796,26 @@ export function botcastSnapshotHasSpeakingOnlyAvatarVisibility(
 ): boolean {
   const powers = botcastSnapshotPowersForRoleV1(episode, role);
   if (!powers) return false;
-  // The API snapshots only normalized Ready Powers at episode creation. Keep
-  // this structural reader local to the replay contract so the shared Signal
-  // model does not need to import the broader bot-Power runtime.
-  return powers.some((power) => {
-    if (!power || typeof power !== "object" || Array.isArray(power)) return false;
+  let speakingOnly = false;
+  let loud = false;
+  for (const power of powers) {
+    if (!power || typeof power !== "object" || Array.isArray(power)) continue;
     const record = power as Record<string, unknown>;
-    if (record.enabled === false || record.compileStatus !== "ready") return false;
+    if (record.enabled === false || record.compileStatus !== "ready") continue;
     const compiled = record.compiled;
-    if (!compiled || typeof compiled !== "object" || Array.isArray(compiled)) return false;
+    if (!compiled || typeof compiled !== "object" || Array.isArray(compiled)) continue;
     const effects = (compiled as Record<string, unknown>).effects;
-    return Array.isArray(effects) && effects.some(
-      (effect) =>
-        effect !== null &&
-        typeof effect === "object" &&
-        !Array.isArray(effect) &&
-        (effect as Record<string, unknown>).type === "avatar_visibility" &&
-        (effect as Record<string, unknown>).mode === "speaking_only",
-    );
-  });
+    if (!Array.isArray(effects)) continue;
+    for (const effect of effects) {
+      if (!effect || typeof effect !== "object" || Array.isArray(effect)) continue;
+      const row = effect as Record<string, unknown>;
+      if (row.type === "voice_presence" && row.mode === "loud") loud = true;
+      if (row.type === "avatar_visibility" && row.mode === "speaking_only") {
+        speakingOnly = true;
+      }
+    }
+  }
+  return speakingOnly && !loud;
 }
 
 export interface BotcastSocialInfluenceEventV1 {
@@ -745,6 +832,49 @@ export interface BotcastSocialInfluenceEventV1 {
   strength: "small" | "medium" | "large";
   atMs: number;
   sourceMessageId?: string;
+}
+
+export interface BotcastMoodBoostEventV1 {
+  v: 1;
+  effect: "mood_boost";
+  powerId: string;
+  powerName: string;
+  sourceBotId: string;
+  targetBotId: string;
+  sourceRole: BotcastSpeakerRole;
+  targetRole: BotcastSpeakerRole;
+  trigger: "after_spoken_turn";
+  recipients: "addressed";
+  strength: "small" | "medium" | "large";
+  /** Resolved theme that selected a conditional branch, when applicable. */
+  theme?: "light" | "dark";
+  moodBefore: VoiceDeliveryMood;
+  moodAfter: VoiceDeliveryMood;
+  atMs: number;
+  sourceMessageId: string;
+}
+
+export interface BotcastMoodDrainEventV1 {
+  v: 1;
+  effect: "mood_drain";
+  powerId: string;
+  powerName: string;
+  /** Power holder that was directly addressed. */
+  sourceBotId: string;
+  /** Bot addresser whose mood was reduced. */
+  targetBotId: string;
+  sourceRole: BotcastSpeakerRole;
+  targetRole: BotcastSpeakerRole;
+  trigger: "after_direct_address";
+  recipient: "addresser";
+  strength: "small" | "medium" | "large";
+  /** Resolved theme that selected a conditional branch, when applicable. */
+  theme?: "light" | "dark";
+  moodBefore: VoiceDeliveryMood;
+  moodAfter: VoiceDeliveryMood;
+  atMs: number;
+  /** Completed spoken turn authored by targetBotId. */
+  sourceMessageId: string;
 }
 
 export interface BotcastCameraSuggestion {
@@ -912,6 +1042,190 @@ function normalizeBotcastSocialInfluenceEvent(
   };
 }
 
+export function normalizeBotcastMoodBoostEventV1(
+  value: unknown,
+): BotcastMoodBoostEventV1 | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  const boundedId = (candidate: unknown, limit = 160): string | null =>
+    typeof candidate === "string" && candidate.trim()
+      ? candidate.trim().slice(0, limit)
+      : null;
+  const powerId = boundedId(row.powerId);
+  const powerName = boundedId(row.powerName, 80);
+  const sourceBotId = boundedId(row.sourceBotId);
+  const targetBotId = boundedId(row.targetBotId);
+  const sourceMessageId = boundedId(row.sourceMessageId);
+  const atMs = Number(row.atMs);
+  const theme = row.theme === "light" || row.theme === "dark"
+    ? row.theme
+    : undefined;
+  const moodBefore =
+    row.moodBefore === "joyful" ||
+    row.moodBefore === "warm" ||
+    row.moodBefore === "guarded" ||
+    row.moodBefore === "strained"
+      ? row.moodBefore
+      : row.moodBefore === "neutral"
+        ? "neutral"
+        : null;
+  const moodAfter =
+    row.moodAfter === "joyful" ||
+    row.moodAfter === "warm" ||
+    row.moodAfter === "guarded" ||
+    row.moodAfter === "strained"
+      ? row.moodAfter
+      : row.moodAfter === "neutral"
+        ? "neutral"
+        : null;
+  if (
+    row.v !== 1 ||
+    row.effect !== "mood_boost" ||
+    !powerId ||
+    !powerName ||
+    !sourceBotId ||
+    !targetBotId ||
+    sourceBotId === targetBotId ||
+    !sourceMessageId ||
+    (row.sourceRole !== "host" && row.sourceRole !== "guest") ||
+    (row.targetRole !== "host" && row.targetRole !== "guest") ||
+    row.sourceRole === row.targetRole ||
+    row.trigger !== "after_spoken_turn" ||
+    row.recipients !== "addressed" ||
+    (row.strength !== "small" && row.strength !== "medium" && row.strength !== "large") ||
+    !moodBefore ||
+    !moodAfter ||
+    !Number.isFinite(atMs) ||
+    atMs < 0
+  ) {
+    return null;
+  }
+  return {
+    v: 1,
+    effect: "mood_boost",
+    powerId,
+    powerName,
+    sourceBotId,
+    targetBotId,
+    sourceRole: row.sourceRole,
+    targetRole: row.targetRole,
+    trigger: "after_spoken_turn",
+    recipients: "addressed",
+    strength: row.strength,
+    ...(theme ? { theme } : {}),
+    moodBefore,
+    moodAfter,
+    atMs: Math.round(atMs),
+    sourceMessageId,
+  };
+}
+
+export function botcastMoodBoostEventsAt(args: {
+  events: readonly BotcastReplayEvent[];
+  elapsedMs: number;
+  targetBotId?: string;
+}): BotcastMoodBoostEventV1[] {
+  const seen = new Set<string>();
+  return args.events.flatMap((event) => {
+    if (event.kind !== "power_effect") return [];
+    const boost = normalizeBotcastMoodBoostEventV1(event.payload);
+    if (!boost || boost.atMs > args.elapsedMs) return [];
+    if (args.targetBotId && boost.targetBotId !== args.targetBotId) return [];
+    const key = `${boost.sourceMessageId}\n${boost.targetBotId}`;
+    if (seen.has(key)) return [];
+    seen.add(key);
+    return [boost];
+  });
+}
+
+export function normalizeBotcastMoodDrainEventV1(
+  value: unknown,
+): BotcastMoodDrainEventV1 | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  const boundedId = (candidate: unknown, limit = 160): string | null =>
+    typeof candidate === "string" && candidate.trim()
+      ? candidate.trim().slice(0, limit)
+      : null;
+  const powerId = boundedId(row.powerId);
+  const powerName = boundedId(row.powerName, 80);
+  const sourceBotId = boundedId(row.sourceBotId);
+  const targetBotId = boundedId(row.targetBotId);
+  const sourceMessageId = boundedId(row.sourceMessageId);
+  const atMs = Number(row.atMs);
+  const theme = row.theme === "light" || row.theme === "dark"
+    ? row.theme
+    : undefined;
+  const mood = (candidate: unknown): VoiceDeliveryMood | null =>
+    candidate === "joyful" ||
+    candidate === "warm" ||
+    candidate === "neutral" ||
+    candidate === "guarded" ||
+    candidate === "strained"
+      ? candidate
+      : null;
+  const moodBefore = mood(row.moodBefore);
+  const moodAfter = mood(row.moodAfter);
+  if (
+    row.v !== 1 ||
+    row.effect !== "mood_drain" ||
+    !powerId ||
+    !powerName ||
+    !sourceBotId ||
+    !targetBotId ||
+    sourceBotId === targetBotId ||
+    !sourceMessageId ||
+    (row.sourceRole !== "host" && row.sourceRole !== "guest") ||
+    (row.targetRole !== "host" && row.targetRole !== "guest") ||
+    row.sourceRole === row.targetRole ||
+    row.trigger !== "after_direct_address" ||
+    row.recipient !== "addresser" ||
+    (row.strength !== "small" && row.strength !== "medium" && row.strength !== "large") ||
+    !moodBefore ||
+    !moodAfter ||
+    !Number.isFinite(atMs) ||
+    atMs < 0
+  ) {
+    return null;
+  }
+  return {
+    v: 1,
+    effect: "mood_drain",
+    powerId,
+    powerName,
+    sourceBotId,
+    targetBotId,
+    sourceRole: row.sourceRole,
+    targetRole: row.targetRole,
+    trigger: "after_direct_address",
+    recipient: "addresser",
+    strength: row.strength,
+    ...(theme ? { theme } : {}),
+    moodBefore,
+    moodAfter,
+    atMs: Math.round(atMs),
+    sourceMessageId,
+  };
+}
+
+export function botcastMoodDrainEventsAt(args: {
+  events: readonly BotcastReplayEvent[];
+  elapsedMs: number;
+  targetBotId?: string;
+}): BotcastMoodDrainEventV1[] {
+  const seen = new Set<string>();
+  return args.events.flatMap((event) => {
+    if (event.kind !== "power_effect") return [];
+    const drain = normalizeBotcastMoodDrainEventV1(event.payload);
+    if (!drain || drain.atMs > args.elapsedMs) return [];
+    if (args.targetBotId && drain.targetBotId !== args.targetBotId) return [];
+    const key = `${drain.sourceMessageId}\n${drain.sourceBotId}\n${drain.targetBotId}`;
+    if (seen.has(key)) return [];
+    seen.add(key);
+    return [drain];
+  });
+}
+
 export function botcastSocialInfluenceEventsAt(args: {
   events: readonly BotcastReplayEvent[];
   elapsedMs: number;
@@ -1027,7 +1341,7 @@ export interface BotcastPersonaReview {
 
 export interface BotcastEpisode extends BotcastEpisodeSummary {
   producerBrief: string;
-  /** User-authored source material used by AI to synthesize this interview. */
+  /** Optional user-authored direction used by AI to synthesize this interview. */
   guestContext?: string;
   /** Legacy internal interaction mode; audience truth lives in audienceExperience. */
   guestPresenceMode: BotcastGuestPresenceMode;
@@ -1105,13 +1419,22 @@ export interface BotcastGuestInterruptionContext {
   spokenContent?: string;
   /** Prewritten host bridge played immediately while the redirect generates. */
   bridgeLine: string;
+  /** Canned annoyed tail spoken by the interrupted guest over the host bridge. */
+  interruptedSpeakerCue?: BotCrosstalkInterruptedSpeakerCue;
 }
 
 export interface BotcastEpisodeAdvanceRequest {
+  /** Resolved rendered app theme for theme-conditional Powers this turn. */
+  theme?: "light" | "dark";
   /** On-air human answer. Valid only when the Producer is the episode guest. */
   guestMessage?: string;
   /** Wall-clock pause after the host yielded; replay preserves it as thinking. */
   guestThinkingMs?: number;
+  /**
+   * Producer-guest only: truncate the active host line to the exact prefix
+   * heard by the audience before yielding the mic to the human guest.
+   */
+  producerGuestHostInterruption?: BotcastHostRedirectContext;
   cue?: BotcastProducerCue;
   /**
    * Omit for the normal, non-disruptive queue: the host receives the cue on
@@ -1126,6 +1449,8 @@ export interface BotcastEpisodeAdvanceRequest {
 export interface BotcastEpisodeAdvanceResponse {
   episode: BotcastEpisode;
   message: BotcastMessage | null;
+  /** The completed response is transient and no episode archive was retained. */
+  discarded?: boolean;
 }
 
 export interface BotcastModelWarmupHoldRequest {
@@ -1277,6 +1602,43 @@ export function botcastGuestVoluntaryDepartureIntent(args: {
   const clauses = args.content.split(/[.!?;—]+/u);
   return clauses.some((clause) =>
     BOTCAST_VOLUNTARY_DEPARTURE_PATTERNS.some((pattern) => {
+      const match = pattern.exec(clause);
+      if (!match) return false;
+      const prefix = clause.slice(0, match.index);
+      return !/\b(?:if|unless)\b/iu.test(prefix);
+    }),
+  );
+}
+
+const BOTCAST_HOST_RAGE_QUIT_PATTERNS = [
+  /\bI(?:'m| am)\s+(?:done|finished)\s+(?:here|with\s+(?:this|the)\s+(?:show|interview|episode))\b/iu,
+  /\b(?:we(?:'re| are)|(?:this|the)\s+(?:show|interview|episode)\s+is)\s+(?:done|over|finished)(?:\s+(?:here|now))?\b/iu,
+  /\bI(?:'m| am)\s+(?:ending|stopping)\s+(?:this|the)\s+(?:show|interview|episode)(?:\s+(?:here|now))?\b/iu,
+  /\bI\s+(?:quit|refuse\s+to\s+continue)\b/iu,
+  /\b(?:end|stop|cut)\s+(?:this|the)\s+(?:show|interview|episode)\s+(?:here|now)\b/iu,
+] as const;
+
+/**
+ * Recognizes a host's unmistakable, present-tense decision to terminate an
+ * interview after enough real exchange to make the rupture earned.
+ */
+export function botcastHostRageQuitIntent(args: {
+  content: string;
+  segment: BotcastEpisodeSegment;
+  priorUtteranceCount: number;
+}): boolean {
+  if (
+    args.segment !== "interview" ||
+    args.priorUtteranceCount < BOTCAST_AUTO_MIN_EXCHANGES * 2 - 1
+  ) {
+    return false;
+  }
+  const clauses = args.content.split(/[.!?;—]+/u);
+  return clauses.some((clause) =>
+    [
+      ...BOTCAST_HOST_RAGE_QUIT_PATTERNS,
+      ...BOTCAST_VOLUNTARY_DEPARTURE_PATTERNS,
+    ].some((pattern) => {
       const match = pattern.exec(clause);
       if (!match) return false;
       const prefix = clause.slice(0, match.index);
@@ -1481,18 +1843,39 @@ export function botcastCameraShotAt(args: {
   return shot;
 }
 
+function botcastParticipantHasDepartedAt(
+  events: readonly BotcastReplayEvent[],
+  elapsedMs: number,
+  role: BotcastSpeakerRole,
+): boolean {
+  const departure = events.find(
+    (event) => botcastDepartureSpeakerRole(event) === role,
+  );
+  if (!departure) return false;
+  const departureShot = events.find(
+    (event) =>
+      event.sequence > departure.sequence &&
+      event.kind === "camera_suggestion" &&
+      event.payload.reason === "departure" &&
+      (event.payload.speakerRole === role ||
+        (role === "guest" && event.payload.speakerRole === undefined)),
+  );
+  const departureAtMs = Number(departureShot?.payload.atMs);
+  return Number.isFinite(departureAtMs) && elapsedMs >= departureAtMs;
+}
+
 export function botcastGuestHasDepartedAt(
   events: readonly BotcastReplayEvent[],
   elapsedMs: number,
 ): boolean {
-  if (!events.some((event) => event.kind === "departure")) return false;
-  const departureShot = events.find(
-    (event) =>
-      event.kind === "camera_suggestion" &&
-      event.payload.reason === "departure",
-  );
-  const departureAtMs = Number(departureShot?.payload.atMs);
-  return Number.isFinite(departureAtMs) && elapsedMs >= departureAtMs;
+  return botcastParticipantHasDepartedAt(events, elapsedMs, "guest");
+}
+
+export function botcastHostHasDepartedAt(
+  events: readonly BotcastReplayEvent[],
+  elapsedMs: number,
+): boolean {
+  return botcastParticipantHasDepartedAt(events, elapsedMs, "host");
 }
 
 export interface BotcastReplayThinkingRange {

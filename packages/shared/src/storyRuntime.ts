@@ -133,6 +133,8 @@ export interface StorySessionDetail extends StorySessionSummary {
 
 export interface StorySessionCreateRequest {
   botIds: string[];
+  /** Resolved rendered app theme used for supported Power adaptation. */
+  theme?: "light" | "dark";
   premise?: string | null;
   preferredProvider?: LlmProviderName;
   modelOverride?: string | null;

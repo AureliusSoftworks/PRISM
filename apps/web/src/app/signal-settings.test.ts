@@ -59,8 +59,9 @@ test("Signal sends saved performance text only through the ElevenLabs request la
   );
   assert.match(
     pageSource,
-    /signalOnlineVoiceEnabled[\s\S]{0,180}settings\.englishVoiceEngine/u,
+    /signalOnlineVoiceEnabled[\s\S]{0,260}selectedEngine/u,
   );
+  assert.match(pageSource, /voiceSelection\.englishVoiceEngine/u);
   assert.doesNotMatch(
     pageSource,
     /effectiveProvider === "local"[\s\S]{0,100}settings\.englishVoiceEngine/u,

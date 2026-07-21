@@ -119,6 +119,9 @@ describe("Asset Cleanup account lifecycle", () => {
     const stranger = createClient();
     const ownerId = await register(owner, "cleanup-owner@example.com");
     const strangerId = await register(stranger, "cleanup-stranger@example.com");
+    db.prepare(
+      "UPDATE users SET english_voice_engine = 'elevenlabs' WHERE id = ?",
+    ).run(ownerId);
     const ownerResetBatch = createRecoveryBatch(ownerId, "owner-reset");
     const strangerBatch = createRecoveryBatch(strangerId, "stranger");
 
@@ -134,6 +137,10 @@ describe("Asset Cleanup account lifecycle", () => {
       existsSync(resolveAbsoluteUnderDataRoot(strangerBatch)),
       true,
     );
+    const resetVoiceEngine = db
+      .prepare("SELECT english_voice_engine FROM users WHERE id = ?")
+      .get(ownerId) as { english_voice_engine: string };
+    assert.equal(resetVoiceEngine.english_voice_engine, "builtin");
 
     const ownerDeleteBatch = createRecoveryBatch(ownerId, "owner-delete");
     const deleted = await owner.request("/api/account", { method: "DELETE" });

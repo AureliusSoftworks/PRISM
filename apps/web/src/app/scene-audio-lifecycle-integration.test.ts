@@ -62,7 +62,7 @@ describe("scene audio lifecycle wiring", () => {
   it("stops Coffee speech before returning to the group overview", () => {
     const coffeeVoice = sourceSlice(
       pageSource,
-      "useEffect(() => {\n    if (!coffeeConversation)",
+      "useEffect(() => {\n    const voiceSelection = voicePlaybackSelectionRef.current;\n    if (!coffeeConversation)",
       "/** Scenario for arrival animation",
     );
     const coffeeExit = sourceSlice(

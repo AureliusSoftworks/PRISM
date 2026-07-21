@@ -3,16 +3,20 @@ import { describe, it } from "node:test";
 import {
   BOT_VOICE_TEXTURE_RECIPES,
   BOT_VOICE_EQ_TILT_DB_MAX,
+  BOT_AVATAR_SFX_MAX_BYTES,
   ELEVENLABS_VOICE_DIRECTION_BY_MOOD,
   VOICE_DELIVERY_RATE_BY_MOOD,
   applyVoiceDeliveryMoodToProfile,
   applyBotNamePronunciations,
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
   DEFAULT_VOICE_EFFECT,
+  VOICE_EFFECT_DESCRIPTIONS,
+  VOICE_EFFECT_LABELS,
   botVoiceTextureIsModified,
   elevenLabsVoiceDirectionForMood,
   expectedVoicePlaybackDurationMs,
   normalizeBotAudioVoiceProfileV1,
+  normalizeBotAvatarSfxV1,
   normalizeBotNamePronunciation,
   normalizeBotVoiceTexture,
   normalizeEnglishVoiceEngine,
@@ -174,6 +178,57 @@ describe("audio voice normalization", () => {
       texture: BOT_VOICE_TEXTURE_RECIPES.clean,
     });
   });
+  it("normalizes and round-trips a bounded looping avatar SFX profile", () => {
+    const audioDataUrl = `data:audio/mpeg;base64,${Buffer.from("loop").toString("base64")}`;
+    const avatarSfx = normalizeBotAvatarSfxV1({
+      v: 99,
+      source: "elevenlabs",
+      audioDataUrl: `  ${audioDataUrl}  `,
+      fileName: "  Soft servo loop.mp3  ",
+      prompt: " soft   servo breathing ",
+      playWhileTalking: true,
+      playWhileIdle: false,
+      playWhileThinking: true,
+      volume: 4,
+    });
+    assert.deepEqual(avatarSfx, {
+      v: 1,
+      source: "elevenlabs",
+      audioDataUrl,
+      fileName: "Soft servo loop.mp3",
+      prompt: "soft servo breathing",
+      playWhileTalking: true,
+      playWhileIdle: false,
+      playWhileThinking: true,
+      volume: 1,
+    });
+    const profile = normalizeBotAudioVoiceProfileV1({
+      ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+      avatarSfx,
+    });
+    assert.deepEqual(
+      parseStoredBotAudioVoiceProfileV1(serializeBotAudioVoiceProfileV1(profile)),
+      profile,
+    );
+    assert.equal(BOT_AVATAR_SFX_MAX_BYTES, 4 * 1024 * 1024);
+  });
+
+  it("rejects non-audio and oversized avatar SFX data URLs", () => {
+    assert.equal(
+      normalizeBotAvatarSfxV1({
+        audioDataUrl: "data:text/html;base64,PGgxPk5vPC9oMT4=",
+      }),
+      null,
+    );
+    assert.equal(
+      normalizeBotAvatarSfxV1({
+        audioDataUrl: `data:audio/mpeg;base64,${"A".repeat(
+          Math.ceil((BOT_AVATAR_SFX_MAX_BYTES * 4) / 3) + 300,
+        )}`,
+      }),
+      null,
+    );
+  });
   it("maps the Voice Character pad to coupled shelves and bounded per-bot gain", () => {
     const character = resolveBotVoiceCharacter({
       ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
@@ -270,6 +325,26 @@ describe("audio voice normalization", () => {
     assert.equal(resolved.elevenLabsDirection, "patient, warm");
   });
 
+  it("lets an initialized local-only override suppress an authored Premium identity", () => {
+    const authored = normalizeBotAudioVoiceProfileV1({
+      ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+      elevenLabsVoiceIdOverride: "marketplace-voice",
+      elevenLabsDirection: "bright, quick",
+    });
+    const localOnly = normalizeBotAudioVoiceProfileV1({
+      ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+      systemVoiceName: "Alex",
+      elevenLabsVoiceInitialized: true,
+    });
+
+    const resolved = resolveBotAudioVoiceProfileV1(authored, localOnly);
+
+    assert.equal(resolved.systemVoiceName, "Alex");
+    assert.equal(resolved.elevenLabsVoiceId, undefined);
+    assert.equal(resolved.elevenLabsVoiceIdOverride, undefined);
+    assert.equal(resolved.elevenLabsVoiceInitialized, true);
+  });
+
   it("normalizes v2 volume and retires legacy texture controls to clean audio", () => {
     const profile = normalizeBotAudioVoiceProfileV1({
       ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
@@ -294,11 +369,13 @@ describe("audio voice normalization", () => {
       systemVoiceName: "  Alex  ",
       elevenLabsVoiceId: " eleven-voice-id ",
       elevenLabsVoiceIdOverride: " portable-voice-id ",
+      elevenLabsVoiceInitialized: true,
       elevenLabsEffect: "radio",
     });
     assert.equal(profile.systemVoiceName, "Alex");
     assert.equal(profile.elevenLabsVoiceId, "eleven-voice-id");
     assert.equal(profile.elevenLabsVoiceIdOverride, "portable-voice-id");
+    assert.equal(profile.elevenLabsVoiceInitialized, true);
     assert.equal(profile.elevenLabsEffect, "radio");
     assert.deepEqual(
       parseStoredBotAudioVoiceProfileV1(serializeBotAudioVoiceProfileV1(profile)),
@@ -306,10 +383,13 @@ describe("audio voice normalization", () => {
     );
   });
 
-  it("normalizes engine-agnostic effects to a Chorus default", () => {
+  it("presents the compatible Chorus ID as the Prism default", () => {
     assert.equal(DEFAULT_VOICE_EFFECT, "chorus");
+    assert.equal(VOICE_EFFECT_LABELS.chorus, "Prism");
+    assert.match(VOICE_EFFECT_DESCRIPTIONS.chorus, /PRISM/u);
     assert.equal(normalizeVoiceEffect(undefined), "chorus");
     assert.equal(normalizeVoiceEffect("clean"), "clean");
+    assert.equal(normalizeVoiceEffect("resonance"), "resonance");
     assert.equal(normalizeElevenLabsVoiceEffect("robot"), "robot");
     assert.equal(normalizeElevenLabsVoiceEffect(undefined), "chorus");
     assert.equal(normalizeElevenLabsVoiceEffect("distortion"), "chorus");
@@ -339,6 +419,18 @@ describe("audio voice normalization", () => {
         elevenLabsEffect: "deep-space",
       }).elevenLabsEffect,
       "deep-space"
+    );
+    assert.deepEqual(
+      parseStoredBotAudioVoiceProfileV1(serializeBotAudioVoiceProfileV1({
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+        elevenLabsEffect: "resonance",
+        voiceEffectExplicit: true,
+      })),
+      {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+        elevenLabsEffect: "resonance",
+        voiceEffectExplicit: true,
+      },
     );
   });
 

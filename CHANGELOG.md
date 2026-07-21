@@ -12,6 +12,67 @@ Active development happens on the `dev` branch; every release is a merge into
 
 _Staging area - nothing queued for release yet._
 
+## [0.13.0] - 2026-07-21
+
+### Added
+
+- **PRISM now opens with a cinematic origin story.** An eight-scene,
+  skippable and replayable introduction carries the refraction ethos from the
+  border of Mind and Ego into the living workspace.
+- **The Marketplace has a dedicated Power Collection.** Twelve portable
+  showcase personas demonstrate exact copying, silence, interruption,
+  identity mirroring, short-term amnesia, voice transformation, mood pressure,
+  physical scale, and other creative rules as ready-to-run bot identities.
+- **Coffee gives the player a fuller physical voice at the table.** Player
+  speech follows the global voice choice, stage action has its own composer
+  field, and saved actions can land with synchronized gestures and restrained
+  bundled or generated Foley.
+- **Voice identities gain new house-character options.** The Prism effect adds
+  subtle local pitch correction to its refracted double, Resonance supplies a
+  darker mechanical weight, and eligible accounts receive stable Premium voice
+  defaults without overwriting authored or manually chosen identities.
+
+### Changed
+
+- **Bot Powers now behave like portable runtime rules across applets.** Coffee,
+  Signal, Story, Chat, and Zen share explicit contracts for forgetfulness,
+  first-contact loops, identity mirroring, mood shifts, theme compounds,
+  loud/quiet presence, gibberish, response length, echo, and interruption while
+  preserving each applet's own privacy and production boundaries.
+- **Coffee and Signal conversations can overlap without losing transcript
+  truth.** Backchannels, direct cut-ins, abandoned speaker endings, voice,
+  camera reactions, replay, and saved audience-visible text now follow one
+  deterministic crosstalk record.
+- **Interrupting Tom fulfills the Marketplace promise.** Direct engagement
+  guarantees a replay-stable cutoff that may land early, midway, or late;
+  Coffee can also choose an organic cut-in, while human Producer speech and
+  protected show beats remain untouchable.
+- **Bot-led spaces carry more of each persona's authored presence.** Chat
+  gradients, live mouth motion, volume and text-scale Powers, refined voice
+  previews, and updated onboarding/tutorial language keep visual and audible
+  identity aligned.
+
+### Fixed
+
+- **Signal handles unusual powered casts without stalling or inventing
+  speech.** Identity-mirroring hosts, echo openings and closings, muted turns,
+  hearing repeats, interruptions, producer cuts, departures, and empty model
+  responses remain bounded and replay-safe.
+- **Signal Magic completes show identity generation on reasoning models.**
+  Low-effort online identity jobs receive enough output budget to finish the
+  full studio package without changing the selected model or effort.
+- **Coffee keeps direct address, cut-ins, actions, voice, and replay in the same
+  session truth.** Interrupted text retains only what reached the table, forced
+  responders stay correctly seated, and action audio respects privacy, mute,
+  and cooldown boundaries.
+- **Voice playback keeps identity and timing stable across engines.** Premium
+  selection, local fallback, pitch/lilt processing, crosstalk channels, and
+  avatar mouth timing now share the same resolved playback profile.
+- **Generated and imported bot packages preserve current runtime contracts.**
+  Marketplace refreshes, account backup, legacy Power recovery, and static
+  catalog validation keep older bots compatible without mutating frozen
+  Coffee or Signal sessions.
+
 ## [0.12.0] - 2026-07-20
 
 ### Added

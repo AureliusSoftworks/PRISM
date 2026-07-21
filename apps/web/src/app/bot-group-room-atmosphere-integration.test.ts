@@ -69,13 +69,22 @@ describe("saved group room atmosphere integration", () => {
     assert.doesNotMatch(manifestInterface, /roomAtmosphere|imageId/u);
   });
 
-  it("offers local selection, clear, and purpose-scoped generation from the group hero", () => {
+  it("offers Signal-style generate, refresh, upload, and clear controls from the group hero", () => {
     assert.match(pageSource, /data-tutorial-target="chat-group-atmosphere"/u);
     assert.match(pageSource, /data-room-atmosphere-dialog="true"/u);
     assert.match(
       pageSource,
-      /eligibleBotGroupRoomAtmosphereImages\([\s\S]*?imageBotDirectorySnapshot,[\s\S]*?imagePrivateGeneratedIds/u,
+      /accept=\{BOT_GROUP_ROOM_ATMOSPHERE_UPLOAD_ACCEPT\}[\s\S]*?uploadBotGroupRoomAtmosphere\(group\.id, file\)/u,
     );
+    assert.match(
+      pageSource,
+      /readImageBlobAsDataUrl\(file\)[\s\S]*?\/api\/images\/group-room-wallpaper\/upload/u,
+    );
+    assert.match(
+      pageSource,
+      /selectedAtmosphere[\s\S]{0,220}?"Refresh"[\s\S]{0,80}?"Generate"/u,
+    );
+    assert.doesNotMatch(pageSource, /Saved local images/u);
     assert.match(pageSource, /clearBotGroupRoomAtmosphere\(current/u);
     assert.match(
       pageSource,
@@ -85,7 +94,7 @@ describe("saved group room atmosphere integration", () => {
     assert.match(pageSource, /resolveZenWallpaperImageModels\(\)/u);
     assert.match(
       pageSource,
-      /ONLINE[\s\S]*?sends those cues to the selected image provider; LOCAL keeps[\s\S]*?on your network/u,
+      /LOCAL stays on[\s\S]*?your network; ONLINE sends member cues/u,
     );
   });
 
@@ -218,5 +227,6 @@ describe("saved group room atmosphere integration", () => {
     );
     assert.match(tutorialSource, /Shape a saved group's room/u);
     assert.match(tutorialSource, /chat-group-atmosphere/u);
+    assert.match(tutorialSource, /Generate or Refresh it, or Upload your own/u);
   });
 });

@@ -4,7 +4,9 @@
     "outDir": "dist",
     "declaration": true,
     "module": "NodeNext",
-    "moduleResolution": "NodeNext"
+    "moduleResolution": "NodeNext",
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true
   },
   "include": [
     "src/**/*"

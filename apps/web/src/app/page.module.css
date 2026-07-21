@@ -778,7 +778,17 @@
   aspect-ratio: 2 / 3;
   color: var(--bot-color, #ffffff);
   transform-origin: 50% 86%;
-  transition: transform 180ms ease;
+  transition:
+    transform 180ms ease,
+    scale 180ms ease;
+}
+
+.storySpriteWrap[data-power-avatar-scale="larger"] {
+  scale: 1.12;
+}
+
+.storySpriteWrap[data-power-avatar-scale="smaller"] {
+  scale: 0.86;
 }
 
 .storySpriteWrap[data-pose="idle"] {
@@ -946,6 +956,66 @@
   }
 }
 
+/* Size Powers adjust the rendered bot, not seat or page layout geometry. */
+.zenLiveBotPresencePlate[data-power-avatar-scale="larger"]
+  > .botAmbientPresenceRig {
+  scale: 1.12;
+  transform-origin: 50% 86%;
+}
+
+.zenLiveBotPresencePlate[data-power-avatar-scale="smaller"]
+  > .botAmbientPresenceRig {
+  scale: 0.86;
+  transform-origin: 50% 86%;
+}
+
+.coffeeSeat[data-power-avatar-scale="larger"] .coffeeSeatPlate {
+  scale: 1.12;
+  transform-origin: 50% 70%;
+}
+
+.coffeeSeat[data-power-avatar-scale="smaller"] .coffeeSeatPlate {
+  scale: 0.86;
+  transform-origin: 50% 70%;
+}
+
+/* Identity Mirror keeps the holder's metal/color/glyph anchored while only the CRT face scrambles. */
+.coffeeSeat[data-identity-mirror-transition="true"]
+  .zenLiveBotPresenceFaceEmissionMask,
+.signalBotPresencePlate[data-identity-mirror-transition="true"]
+  .zenLiveBotPresenceFaceEmissionMask {
+  --crt-static-opacity: 0.82;
+  --crt-static-speed: 72ms;
+  animation: identityMirrorFaceScramble 760ms steps(8, end) both;
+}
+
+@keyframes identityMirrorFaceScramble {
+  0% {
+    filter: none;
+    opacity: 1;
+  }
+  18% {
+    filter: contrast(1.9) brightness(1.5) saturate(0);
+    opacity: 0.42;
+  }
+  38% {
+    filter: contrast(2.4) brightness(1.8) hue-rotate(90deg);
+    opacity: 0.12;
+  }
+  58% {
+    filter: contrast(2.1) brightness(1.55) hue-rotate(-70deg);
+    opacity: 0.2;
+  }
+  78% {
+    filter: contrast(1.65) brightness(1.28) saturate(0.35);
+    opacity: 0.62;
+  }
+  100% {
+    filter: none;
+    opacity: 1;
+  }
+}
+
 /* A ghost Power is a hard live-avatar rule: the holder appears only to speak. */
 .zenLiveBotPresencePlate[data-ghostly-presence="true"] {
   opacity: 0;
@@ -972,6 +1042,13 @@
   .coffeeSeat[data-ghostly-presence="true"]
     .coffeeSeatPlate[data-live-body-style="zen"] {
     transition: none;
+  }
+
+  .coffeeSeat[data-identity-mirror-transition="true"]
+    .zenLiveBotPresenceFaceEmissionMask,
+  .signalBotPresencePlate[data-identity-mirror-transition="true"]
+    .zenLiveBotPresenceFaceEmissionMask {
+    animation-duration: 120ms;
   }
 }
 
@@ -1058,6 +1135,21 @@
   min-height: 64px;
   border-radius: 8px;
   outline: 0;
+}
+
+.storyDialogueTextPanel[data-power-voice-presence="loud"],
+.storyTranscriptList li[data-power-voice-presence="loud"] {
+  --power-message-font-scale: 1.12;
+}
+
+.storyDialogueTextPanel[data-power-voice-presence="quiet"],
+.storyTranscriptList li[data-power-voice-presence="quiet"] {
+  --power-message-font-scale: 0.88;
+}
+
+.storyDialogueTextPanel[data-power-voice-presence] p,
+.storyTranscriptList li[data-power-voice-presence] p {
+  font-size: calc(1em * var(--power-message-font-scale, 1));
 }
 
 .storyDialogueTextPanel[data-advanceable="true"] {
@@ -6685,6 +6777,21 @@
       color-mix(in srgb, var(--accent) 7%, var(--bg-surface) 93%) 66%,
       color-mix(in srgb, var(--accent) 16%, #ffffff 84%) 100%
     );
+}
+
+/* A selected bot owns deterministic ambient light over an opaque neutral theme
+   base. Keeping that base inside the generated background prevents the root's
+   accent glow from turning the entire canvas into a solid bot-color field;
+   only the broad edge pools carry bot hue. Private mode remains mono. */
+.appLayout[data-zen-surface="true"][data-bot-gradient-active="true"]:not(
+    [data-private-active="true"]
+  )
+  .messagesFrame,
+.themeLight.appLayout[data-zen-surface="true"][data-bot-gradient-active="true"]:not(
+    [data-private-active="true"]
+  )
+  .messagesFrame {
+  background: var(--bot-chat-gradient);
 }
 
 .appLayout[data-chat-sidebar-hidden="true"][data-accent-active="true"]:not(
@@ -19200,8 +19307,19 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .chatEphemeralLine {
   display: block;
   white-space: pre-wrap;
-  font-size: var(--chat-line-dynamic-font-size, inherit);
+  font-size: calc(
+    var(--chat-line-dynamic-font-size, 1em) *
+      var(--power-message-font-scale, 1)
+  );
   transition: font-size 0.32s cubic-bezier(0.2, 0.72, 0.18, 1);
+}
+
+.messageAssistant[data-power-voice-presence="loud"] {
+  --power-message-font-scale: 1.12;
+}
+
+.messageAssistant[data-power-voice-presence="quiet"] {
+  --power-message-font-scale: 0.88;
 }
 
 .chatEphemeralMarkdownBody[data-zen-placement-active="true"] {
@@ -20208,7 +20326,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   overflow-x: auto;
   word-break: break-word;
   word-spacing: 0.06em;
-  font-size: var(--message-dynamic-font-size, var(--font-size-message));
+  font-size: calc(
+    var(--message-dynamic-font-size, var(--font-size-message)) *
+      var(--power-message-font-scale, 1)
+  );
   line-height: 1.55;
 }
 
@@ -25213,6 +25334,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --crt-phosphor-scale: clamp(1.85px, 1.16%, 3.8px);
   --crt-scanline-opacity: 0.045;
   --crt-scanline-pitch: clamp(3px, 1.82%, 5px);
+  --crt-pixel-grid-opacity: 0.14;
+  --crt-pixel-grid-line-width: clamp(0.32px, 0.18%, 0.48px);
   --crt-static-opacity: 0.03;
   --crt-static-speed: 860ms;
   --crt-convergence-offset: 0.26px;
@@ -25721,6 +25844,47 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   animation: crtStaticSnowJitter var(--crt-static-speed) steps(9, end) infinite;
 }
 
+.botFaceCrtPixelGridLayer {
+  /* A single screen-space cell grid sits above the live face but below the
+     foreground Ink. It textures the display without resampling glyph geometry. */
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: block;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      transparent 0
+        calc(
+          var(--bot-face-crt-cell-width) - var(--crt-pixel-grid-line-width)
+        ),
+      rgb(0 0 0 / 0.78)
+        calc(
+          var(--bot-face-crt-cell-width) - var(--crt-pixel-grid-line-width)
+        )
+        var(--bot-face-crt-cell-width)
+    ),
+    repeating-linear-gradient(
+      0deg,
+      transparent 0
+        calc(
+          var(--bot-face-crt-cell-height) - var(--crt-pixel-grid-line-width)
+        ),
+      rgb(0 0 0 / 0.66)
+        calc(
+          var(--bot-face-crt-cell-height) - var(--crt-pixel-grid-line-width)
+        )
+        var(--bot-face-crt-cell-height)
+    );
+  background-size:
+    var(--bot-face-crt-cell-width) 100%,
+    100% var(--bot-face-crt-cell-height);
+  background-repeat: repeat;
+  opacity: var(--crt-pixel-grid-opacity);
+  mix-blend-mode: multiply;
+}
+
 /* Curvature and Fresnel: broad fields make the tube feel convex, not patterned. */
 .botFaceCrtGrimeLayer {
   position: absolute;
@@ -25904,7 +26068,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   left: var(--zen-live-bot-face-x, 50%);
   top: var(--zen-live-bot-face-y, 50%);
   z-index: 6;
-  transform: translate(-50%, -50%) scale(var(--zen-live-bot-face-scale, 1));
+  transform: translate(-50%, -50%) scale(var(--zen-live-bot-face-scale, 1))
+    scaleX(var(--zen-live-bot-face-layer-scale-x, 1));
   transform-origin: 50% 50%;
   display: grid;
   place-items: center;
@@ -26748,9 +26913,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --crt-bloom-wide-radius: 12px;
   --crt-glyph-bloom-wide-inner-opacity: 30%;
   --crt-glyph-bloom-wide-outer-opacity: 18%;
-  --crt-face-screen-wash-near-opacity: 58%;
-  --crt-face-screen-wash-mid-opacity: 36%;
-  --crt-face-screen-wash-far-opacity: 22%;
+  /* Keep the CRT glass black; color belongs to the phosphor glyph, not a
+     full-aperture wash. */
+  --crt-face-screen-wash-near-opacity: 18%;
+  --crt-face-screen-wash-mid-opacity: 8%;
+  --crt-face-screen-wash-far-opacity: 3%;
   --zen-live-bot-idle-face-glow-filter-high: drop-shadow(
       0 0 calc(0.72px * var(--crt-face-glow-radius-scale, 1))
         var(--crt-face-edge-color)
@@ -29686,6 +29853,87 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   margin: 0 auto;
   display: grid;
   gap: 8px;
+}
+
+.composerActionRail {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.composerActionField {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+  padding: 5px 9px;
+  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--bg) 86%, transparent);
+}
+
+.composerActionField > span {
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.composerActionField > input {
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  outline: 0;
+  padding: 3px 0;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+}
+
+.composerActionField > input::placeholder {
+  color: var(--fg-subtle);
+  font-style: italic;
+}
+
+.composerActionField:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 68%, var(--line));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 13%, transparent);
+}
+
+.composerShhButton {
+  flex: none;
+  min-height: 34px;
+  padding: 0 13px;
+  border: 1px solid color-mix(in srgb, var(--accent) 56%, var(--line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg) 82%, var(--accent) 18%);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.composerShhButton:hover,
+.composerShhButton:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+  background: color-mix(in srgb, var(--bg) 68%, var(--accent) 32%);
+}
+
+@media (max-width: 720px) {
+  .composerActionField {
+    grid-template-columns: auto minmax(5rem, 1fr);
+  }
+
+  .composerActionField > span {
+    font-size: 10px;
+  }
 }
 
 .markdownToolbarButton {
@@ -37704,9 +37952,11 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .botPanelHubVoiceChoices {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: center;
   gap: 8px;
+  max-width: min(440px, calc(100vw - 48px));
 }
 
 .botPanelHubVoiceChoices button {
@@ -37793,6 +38043,16 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .botPanelHubVoiceChoices button:active {
   transform: scale(0.97);
+}
+
+.botPanelHubVoiceChoices button:disabled {
+  color: color-mix(in srgb, var(--fg-muted) 64%, transparent);
+  border-color: color-mix(in srgb, var(--fg) 12%, transparent);
+  background: color-mix(in srgb, var(--bg-surface) 54%, transparent);
+  box-shadow: none;
+  cursor: not-allowed;
+  opacity: 0.72;
+  transform: none;
 }
 
 @keyframes botPanelHubVoiceFeedbackSpin {
@@ -46950,6 +47210,405 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   background: color-mix(in srgb, var(--avatar-studio-recessed) 72%, #ffffff);
 }
 
+.botAvatarSfxEditor {
+  min-width: 0;
+  display: grid;
+  gap: 12px;
+  padding: 2px;
+}
+
+.botAvatarSfxHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid
+    color-mix(in srgb, var(--editor-bot-color, var(--accent)) 34%, var(--line));
+  border-radius: 11px;
+  background: linear-gradient(
+    118deg,
+    color-mix(in srgb, var(--editor-bot-color, var(--accent)) 12%, var(--panel)),
+    color-mix(in srgb, var(--panel) 94%, var(--bg))
+  );
+  box-shadow: inset 3px 0 0
+    color-mix(in srgb, var(--editor-bot-color, var(--accent)) 72%, transparent);
+}
+
+.botAvatarSfxHeader > span,
+.botAvatarSfxUploadButton > span,
+.botAvatarSfxSampleCard > span:not(.botAvatarSfxWave) {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.botAvatarSfxHeader strong,
+.botAvatarSfxUploadButton strong,
+.botAvatarSfxSampleCard strong {
+  color: var(--fg);
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.botAvatarSfxHeader small,
+.botAvatarSfxUploadButton small,
+.botAvatarSfxSampleCard small {
+  color: var(--muted);
+  font-size: 9.5px;
+  line-height: 1.35;
+}
+
+.botAvatarSfxHeader em {
+  flex: 0 0 auto;
+  padding: 4px 7px;
+  border: 1px solid
+    color-mix(in srgb, var(--editor-bot-color, var(--accent)) 42%, var(--line));
+  border-radius: 999px;
+  background: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 10%,
+    var(--panel)
+  );
+  color: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 78%,
+    var(--fg)
+  );
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 820;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.botAvatarSfxGenerateCard {
+  display: grid;
+  gap: 7px;
+  padding: 11px;
+  border: 1px solid color-mix(in srgb, var(--line) 90%, transparent);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--panel) 91%, var(--bg));
+}
+
+.botAvatarSfxGenerateCard > label,
+.botAvatarSfxTriggers legend,
+.botAvatarSfxVolume strong {
+  color: var(--fg);
+  font-size: 10px;
+  font-weight: 790;
+}
+
+.botAvatarSfxGenerateCard textarea {
+  width: 100%;
+  min-height: 78px;
+  resize: vertical;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  outline: none;
+  background: color-mix(in srgb, var(--bg) 90%, var(--panel));
+  color: var(--fg);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.botAvatarSfxGenerateCard textarea:focus-visible {
+  border-color: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 72%,
+    var(--border)
+  );
+  box-shadow: 0 0 0 3px
+    color-mix(
+      in srgb,
+      var(--editor-bot-color, var(--accent)) 14%,
+      transparent
+    );
+}
+
+.botAvatarSfxGenerateActions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.botAvatarSfxGenerateActions small {
+  color: var(--muted);
+  font-size: 8.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.botAvatarSfxGenerateActions button,
+.botAvatarSfxSampleCard button,
+.botAvatarSfxUploadButton {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 740;
+  cursor: pointer;
+}
+
+.botAvatarSfxGenerateActions button {
+  border-color: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 68%,
+    var(--border)
+  );
+  background: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 82%,
+    var(--bg)
+  );
+  color: var(--editor-bot-contrast, #fff);
+}
+
+.botAvatarSfxGenerateActions button:hover:not(:disabled),
+.botAvatarSfxGenerateActions button:focus-visible,
+.botAvatarSfxSampleCard button:hover,
+.botAvatarSfxSampleCard button:focus-visible,
+.botAvatarSfxUploadButton:hover:not(:disabled),
+.botAvatarSfxUploadButton:focus-visible {
+  outline: none;
+  border-color: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 64%,
+    var(--border)
+  );
+  filter: brightness(1.06);
+}
+
+.botAvatarSfxGenerateActions button:disabled,
+.botAvatarSfxUploadButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
+.botAvatarSfxDivider {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 8.5px;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.botAvatarSfxDivider::before,
+.botAvatarSfxDivider::after {
+  height: 1px;
+  background: var(--line);
+  content: "";
+}
+
+.botAvatarSfxFileInput {
+  display: none;
+}
+
+.botAvatarSfxUploadButton {
+  width: 100%;
+  justify-content: flex-start;
+  padding: 10px 11px;
+  text-align: left;
+}
+
+.botAvatarSfxUploadButton > svg {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  padding: 6px;
+  border-radius: 8px;
+  background: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 11%,
+    var(--panel)
+  );
+  color: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 78%,
+    var(--fg)
+  );
+}
+
+.botAvatarSfxSampleCard {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid
+    color-mix(in srgb, var(--editor-bot-color, var(--accent)) 30%, var(--line));
+  border-radius: 11px;
+  background: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 7%,
+    var(--panel)
+  );
+}
+
+.botAvatarSfxWave {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 9px;
+  background: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 13%,
+    var(--bg)
+  );
+  color: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 78%,
+    var(--fg)
+  );
+}
+
+.botAvatarSfxSampleCard strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.botAvatarSfxSampleCard .botAvatarSfxRemoveButton {
+  width: 34px;
+  padding: 0;
+  color: var(--muted);
+}
+
+.botAvatarSfxTriggers {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 11px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+}
+
+.botAvatarSfxTriggers legend {
+  padding: 0 4px;
+}
+
+.botAvatarSfxTriggers > small {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.botAvatarSfxTriggers label {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 44px;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--line) 90%, transparent);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--bg) 62%, transparent);
+  color: var(--fg);
+  font-size: 9.5px;
+  font-weight: 690;
+  line-height: 1.25;
+  cursor: pointer;
+}
+
+.botAvatarSfxTriggers input {
+  flex: 0 0 auto;
+  accent-color: var(--editor-bot-color, var(--accent));
+}
+
+.botAvatarSfxTriggers label:has(input:checked) {
+  border-color: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 54%,
+    var(--line)
+  );
+  background: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 11%,
+    var(--panel)
+  );
+}
+
+.botAvatarSfxVolume {
+  display: grid;
+  gap: 7px;
+  padding: 10px 11px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg) 56%, transparent);
+}
+
+.botAvatarSfxVolume > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.botAvatarSfxVolume output {
+  color: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 70%,
+    var(--fg)
+  );
+  font-size: 9.5px;
+  font-weight: 780;
+  font-variant-numeric: tabular-nums;
+}
+
+.botAvatarSfxVolume input {
+  width: 100%;
+  accent-color: var(--editor-bot-color, var(--accent));
+}
+
+.botAvatarSfxEmpty,
+.botAvatarSfxStatus {
+  margin: 0;
+  padding: 9px 10px;
+  border: 1px dashed var(--line);
+  border-radius: 9px;
+  color: var(--muted);
+  font-size: 9.5px;
+  line-height: 1.4;
+}
+
+.botAvatarSfxStatus {
+  border-style: solid;
+  border-color: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 30%,
+    var(--line)
+  );
+  background: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 7%,
+    transparent
+  );
+  color: var(--fg-muted);
+}
+
+@media (max-width: 720px) {
+  .botAvatarSfxTriggers {
+    grid-template-columns: 1fr;
+  }
+}
+
 .botAvatarMouthRotationControl {
   min-width: 0;
   display: grid;
@@ -47918,39 +48577,30 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .botGroupRoomAtmosphereDialog {
-  width: min(760px, 100%);
+  width: min(520px, 100%);
 }
 
-.botGroupRoomAtmosphereCurrent,
-.botGroupRoomAtmosphereGenerateRow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 11px 12px;
+.botGroupRoomAtmosphereCurrent {
+  display: grid;
+  overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--fg-muted) 24%, var(--line));
   border-radius: 12px;
   background: color-mix(in srgb, var(--bg-deep) 72%, transparent);
 }
 
-.botGroupRoomAtmosphereCurrent > div,
-.botGroupRoomAtmosphereGenerateRow > div,
-.botGroupRoomAtmosphereSavedHeader {
+.botGroupRoomAtmosphereCurrent > div {
   min-width: 0;
   display: grid;
   gap: 3px;
+  padding: 10px 12px;
 }
 
-.botGroupRoomAtmosphereCurrent strong,
-.botGroupRoomAtmosphereGenerateRow strong,
-.botGroupRoomAtmosphereSavedHeader strong {
+.botGroupRoomAtmosphereCurrent strong {
   color: var(--fg);
   font-size: 13px;
 }
 
-.botGroupRoomAtmosphereCurrent span,
-.botGroupRoomAtmosphereGenerateRow span,
-.botGroupRoomAtmosphereSavedHeader span {
+.botGroupRoomAtmosphereCurrent span {
   color: var(--fg-muted);
   font-size: 11.5px;
   line-height: 1.35;
@@ -47959,11 +48609,11 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .botGroupRoomAtmosphereCurrent > img,
 .botGroupRoomAtmosphereFallbackSwatch {
   display: block;
-  flex: 0 0 144px;
-  width: 144px;
-  height: 80px;
-  border: 1px solid color-mix(in srgb, var(--fg-muted) 28%, var(--line));
-  border-radius: 9px;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 0;
+  border-bottom: 1px solid
+    color-mix(in srgb, var(--fg-muted) 24%, var(--line));
   object-fit: cover;
   background: var(
     --bot-library-group-gradient,
@@ -47971,122 +48621,35 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   );
 }
 
-.botGroupRoomAtmosphereGenerateRow .deleteAllModalConfirm {
-  flex: 0 0 auto;
+.botGroupRoomAtmosphereActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  width: 100%;
+}
+
+.botGroupRoomAtmosphereActions button {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
 }
 
-.botGroupRoomAtmosphereSavedHeader {
-  padding: 2px 2px 0;
+.botGroupRoomAtmosphereClear {
+  margin-right: auto;
 }
 
-.botGroupRoomAtmosphereGrid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 9px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.botGroupRoomAtmosphereGrid li {
-  min-width: 0;
-}
-
-.botGroupRoomAtmosphereGrid button {
-  position: relative;
-  width: 100%;
-  min-width: 0;
-  display: grid;
-  grid-template-rows: 92px auto;
-  gap: 6px;
-  padding: 5px;
-  border: 1px solid color-mix(in srgb, var(--fg-muted) 24%, var(--line));
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--bg) 84%, transparent);
-  color: var(--fg);
-  cursor: pointer;
-  text-align: left;
-}
-
-.botGroupRoomAtmosphereGrid button:hover:not(:disabled),
-.botGroupRoomAtmosphereGrid button:focus-visible,
-.botGroupRoomAtmosphereGrid button[data-selected="true"] {
-  border-color: color-mix(
-    in srgb,
-    var(--bot-library-group-accent, var(--accent)) 62%,
-    var(--line)
-  );
-  background: color-mix(
-    in srgb,
-    var(--bot-library-group-accent, var(--accent)) 12%,
-    var(--bg)
-  );
-  outline: none;
-}
-
-.botGroupRoomAtmosphereGrid button:focus-visible {
-  box-shadow: 0 0 0 2px
-    color-mix(
-      in srgb,
-      var(--bot-library-group-accent, var(--accent)) 32%,
-      transparent
-    );
-}
-
-.botGroupRoomAtmosphereGrid img {
-  width: 100%;
-  height: 92px;
-  border-radius: 7px;
-  object-fit: cover;
-  background: var(--bg-deep);
-}
-
-.botGroupRoomAtmosphereGrid button > span {
-  min-width: 0;
-  overflow: hidden;
+.botGroupRoomAtmosphereHint {
+  margin: -2px 2px 0;
   color: var(--fg-muted);
   font-size: 11px;
-  line-height: 1.25;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.4;
 }
 
-.botGroupRoomAtmosphereGrid button > svg {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  width: 24px;
-  height: 24px;
-  padding: 4px;
-  border-radius: 999px;
-  background: color-mix(
-    in srgb,
-    var(--bot-library-group-accent, var(--accent)) 76%,
-    var(--bg-deep)
-  );
-  color: #fff;
-  box-shadow: 0 3px 12px color-mix(in srgb, #000 36%, transparent);
-}
-
-@media (max-width: 720px) {
-  .botGroupRoomAtmosphereCurrent,
-  .botGroupRoomAtmosphereGenerateRow {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .botGroupRoomAtmosphereCurrent > img,
-  .botGroupRoomAtmosphereFallbackSwatch {
-    width: 100%;
-    height: 112px;
-    flex-basis: 112px;
-  }
-
-  .botGroupRoomAtmosphereGrid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+@media (max-width: 520px) {
+  .botGroupRoomAtmosphereActions {
+    flex-wrap: wrap;
   }
 }
 
@@ -59848,7 +60411,9 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeStage[data-compact="true"] .coffeeCenterFeedLine {
-  font-size: clamp(0.78rem, 3.2vw, 0.94rem);
+  font-size: calc(
+    clamp(0.78rem, 3.2vw, 0.94rem) * var(--power-message-font-scale, 1)
+  );
 }
 
 .coffeeStage[data-compact="true"] .coffeeCenterIcon {
@@ -61732,7 +62297,9 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .coffeeCenterFeedLine {
   margin: 0;
   color: rgba(255, 255, 255, 0.88);
-  font-size: clamp(0.94rem, 1.65vw, 1.22rem);
+  font-size: calc(
+    clamp(0.94rem, 1.65vw, 1.22rem) * var(--power-message-font-scale, 1)
+  );
   line-height: 1.26;
   white-space: pre-wrap;
   word-break: break-word;
@@ -61740,6 +62307,16 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .coffeeCenterFeedLine[data-role="assistant"] {
   color: var(--coffee-center-line-color, rgba(255, 255, 255, 0.88));
+}
+
+.coffeeCenterFeedLine[data-power-voice-presence="loud"],
+.coffeeMessage[data-power-voice-presence="loud"] {
+  --power-message-font-scale: 1.12;
+}
+
+.coffeeCenterFeedLine[data-power-voice-presence="quiet"],
+.coffeeMessage[data-power-voice-presence="quiet"] {
+  --power-message-font-scale: 0.88;
 }
 
 .coffeeCenterFeedLineTyping {
@@ -63026,19 +63603,19 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   --bot-face-screen-default-bg:
     radial-gradient(
       circle at 34% 24%,
-      rgba(255, 255, 255, 0.38),
-      rgba(255, 255, 255, 0.16) 18%,
+      rgba(255, 255, 255, 0.12),
+      rgba(255, 255, 255, 0.04) 18%,
       transparent 38%
     ),
     radial-gradient(
       circle at 50% 58%,
-      color-mix(in srgb, var(--bot-preview-face-color) 24%, transparent),
+      color-mix(in srgb, var(--bot-preview-face-color) 7%, transparent),
       transparent 62%
     ),
     linear-gradient(
       180deg,
-      color-mix(in srgb, #101014 82%, var(--bot-preview-face-color) 18%),
-      color-mix(in srgb, #030304 88%, var(--bot-preview-face-color) 12%)
+      color-mix(in srgb, #08090b 96%, var(--bot-preview-face-color) 4%),
+      color-mix(in srgb, #010203 97%, var(--bot-preview-face-color) 3%)
     );
   --bot-face-screen-default-border: color-mix(
     in srgb,
@@ -65652,6 +66229,107 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   animation: coffeeListenerWarmth 980ms ease-in-out both;
 }
 
+.coffeeSeat[data-coffee-authored-action-reaction] .coffeeSeatCluster,
+.coffeeReplayPlayerSeat[data-coffee-authored-action-reaction]
+  .coffeeReplayPlayerAvatar {
+  transform-origin: 50% 68%;
+}
+
+.coffeeSeat[data-coffee-authored-action-reaction="nod"] .coffeeSeatCluster,
+.coffeeReplayPlayerSeat[data-coffee-authored-action-reaction="nod"]
+  .coffeeReplayPlayerAvatar {
+  animation: coffeeAuthoredActionNod 860ms ease-in-out both;
+}
+
+.coffeeSeat[data-coffee-authored-action-reaction="fart"] .coffeeSeatCluster,
+.coffeeReplayPlayerSeat[data-coffee-authored-action-reaction="fart"]
+  .coffeeReplayPlayerAvatar {
+  animation: coffeeAuthoredActionFart 720ms cubic-bezier(0.22, 1, 0.36, 1)
+    both;
+}
+
+.coffeeSeat[data-coffee-authored-action-reaction="burp"] .coffeeSeatCluster,
+.coffeeReplayPlayerSeat[data-coffee-authored-action-reaction="burp"]
+  .coffeeReplayPlayerAvatar {
+  animation: coffeeAuthoredActionBurp 760ms ease-out both;
+}
+
+.coffeeSeat[data-coffee-authored-action-reaction="cough"] .coffeeSeatCluster,
+.coffeeReplayPlayerSeat[data-coffee-authored-action-reaction="cough"]
+  .coffeeReplayPlayerAvatar {
+  animation: coffeeAuthoredActionCough 820ms ease-in-out both;
+}
+
+@keyframes coffeeAuthoredActionNod {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg) scaleY(1);
+  }
+  18% {
+    transform: translateY(5px) rotate(0.45deg) scaleY(0.985);
+  }
+  31% {
+    transform: translateY(-1px) rotate(0deg) scaleY(1);
+  }
+  48% {
+    transform: translateY(4px) rotate(0.35deg) scaleY(0.988);
+  }
+  67% {
+    transform: translateY(-1px) rotate(0deg) scaleY(1);
+  }
+}
+
+@keyframes coffeeAuthoredActionFart {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+  22% {
+    transform: translate3d(-2px, -1px, 0) rotate(-0.7deg);
+  }
+  38% {
+    transform: translate3d(2px, 0, 0) rotate(0.6deg);
+  }
+  57% {
+    transform: translate3d(-1px, 1px, 0) rotate(-0.3deg);
+  }
+}
+
+@keyframes coffeeAuthoredActionBurp {
+  0%,
+  100% {
+    transform: translateY(0) scaleY(1);
+  }
+  28% {
+    transform: translateY(-3px) scaleY(1.018);
+  }
+  48% {
+    transform: translateY(2px) scaleY(0.992);
+  }
+  68% {
+    transform: translateY(-1px) scaleY(1.006);
+  }
+}
+
+@keyframes coffeeAuthoredActionCough {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+  18% {
+    transform: translate3d(-1px, 4px, 0) rotate(-0.75deg);
+  }
+  31% {
+    transform: translate3d(1px, 0, 0) rotate(0.45deg);
+  }
+  46% {
+    transform: translate3d(-1px, 3px, 0) rotate(-0.55deg);
+  }
+  64% {
+    transform: translate3d(0, -1px, 0) rotate(0deg);
+  }
+}
+
 @keyframes coffeeListenerNod {
   0%, 100% { transform: translateY(0); }
   42% { transform: translateY(4px) scaleY(0.985); }
@@ -65675,12 +66353,16 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 @media (prefers-reduced-motion: reduce) {
   .coffeeSeat[data-coffee-listener-reaction="true"] .coffeeSeatCluster,
-  .coffeeSeat[data-coffee-listener-reaction="true"] .coffeeSeatPlateEmoji {
+  .coffeeSeat[data-coffee-listener-reaction="true"] .coffeeSeatPlateEmoji,
+  .coffeeSeat[data-coffee-authored-action-reaction] .coffeeSeatCluster,
+  .coffeeReplayPlayerSeat[data-coffee-authored-action-reaction]
+    .coffeeReplayPlayerAvatar {
     animation: none;
     transform: none;
   }
 
-  .coffeeSeat[data-coffee-listener-reaction="true"] .coffeeSeatPlateEmoji {
+  .coffeeSeat[data-coffee-listener-reaction="true"] .coffeeSeatPlateEmoji,
+  .coffeeSeat[data-coffee-authored-action-reaction] .coffeeSeatPlateEmoji {
     filter: brightness(1.08);
   }
 }
@@ -70140,7 +70822,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   white-space: pre-wrap;
   word-wrap: break-word;
   color: rgba(255, 255, 255, 0.9);
-  font-size: 0.95rem;
+  font-size: calc(0.95rem * var(--power-message-font-scale, 1));
   line-height: 1.45;
 }
 

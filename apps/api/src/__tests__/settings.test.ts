@@ -99,7 +99,7 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     voiceEffectsEnabled: 1,
     voiceVolume: 1,
     operatingSystemVoicesEnabled: 0,
-    englishVoiceEngine: "elevenlabs",
+    englishVoiceEngine: "builtin",
     defaultSystemVoiceName: null,
     defaultElevenLabsVoiceId: null,
     elevenLabsVoiceBank: "{}",
@@ -169,7 +169,7 @@ describe("resolveNextSettings — ephemeral chat providers", () => {
 });
 
 describe("resolveNextSettings — voice foundation", () => {
-  it("keeps ElevenLabs available online while preserving legacy voice identities", () => {
+  it("persists the selected English engine while preserving legacy voice identities", () => {
     const next = resolveNextSettings(
       {
         voiceMode: "babble",
@@ -189,7 +189,7 @@ describe("resolveNextSettings — voice foundation", () => {
     assert.equal(next.voiceEffectsEnabled, false);
     assert.equal(next.voiceVolume, 0.65);
     assert.equal(next.operatingSystemVoicesEnabled, true);
-    assert.equal(next.englishVoiceEngine, "elevenlabs");
+    assert.equal(next.englishVoiceEngine, "builtin");
     assert.equal(next.defaultSystemVoiceName, "Alex");
     assert.equal(next.defaultElevenLabsVoiceId, "eleven-default");
     assert.deepEqual(next.elevenLabsVoiceBank, {
@@ -201,6 +201,13 @@ describe("resolveNextSettings — voice foundation", () => {
       resolveNextSettings({}, baseline({ operatingSystemVoicesEnabled: 1 }))
         .operatingSystemVoicesEnabled,
       true,
+    );
+    assert.equal(
+      resolveNextSettings(
+        { theme: "light" },
+        baseline({ englishVoiceEngine: "elevenlabs" }),
+      ).englishVoiceEngine,
+      "elevenlabs",
     );
     assert.equal(
       resolveNextSettings(

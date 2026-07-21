@@ -1123,7 +1123,7 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   );
   assert.match(
     pageSource,
-    /const BOT_AVATAR_CUSTOMIZER_TABS = \[\s*\{ value: "face", label: "Identity" \},\s*\{ value: "profile", label: "Profile" \},\s*\{ value: "powers", label: "Powers" \},\s*\{ value: "eyes", label: "Eyes" \},\s*\{ value: "mouth", label: "Mouth" \},\s*\{ value: "voice", label: "Voice" \},\s*\{ value: "tone", label: "Tone" \},\s*\{ value: "settings", label: "Settings" \},\s*\{ value: "details", label: "Details" \},\s*\{ value: "motion", label: "Motion" \}/,
+    /const BOT_AVATAR_CUSTOMIZER_TABS = \[\s*\{ value: "face", label: "Identity" \},\s*\{ value: "profile", label: "Profile" \},\s*\{ value: "powers", label: "Powers" \},\s*\{ value: "eyes", label: "Eyes" \},\s*\{ value: "mouth", label: "Mouth" \},\s*\{ value: "voice", label: "Voice" \},\s*\{ value: "sfx", label: "SFX" \},\s*\{ value: "settings", label: "Settings" \},\s*\{ value: "details", label: "Details" \},\s*\{ value: "motion", label: "Motion" \}/,
   );
   assert.match(
     pageSource,
@@ -1145,8 +1145,14 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
     /\.botProfileBuilderBackdrop\[data-avatar-studio-layer="true"\]/,
   );
   assert.match(pageSource, /activeControlTab === "voice"/);
-  assert.match(pageSource, /activeControlTab === "tone"/);
+  assert.match(pageSource, /activeControlTab === "sfx"/);
   assert.match(pageSource, /<BotVoiceCharacterEditor/);
+  assert.match(pageSource, /<BotAvatarSfxEditor/);
+  assert.match(pageSource, /Play while talking/);
+  assert.match(pageSource, /Play while not talking/);
+  assert.match(pageSource, /Play while thinking/);
+  assert.match(pageSource, /data-bot-avatar-sfx-preview="true"/);
+  assert.match(pageSource, /\/api\/avatar\/sfx\/generate/);
   assert.match(pageSource, /data-tab-count=\{visibleAvatarTabs\.length\}/);
   assert.match(cssSource, /\.botAvatarControlTabs\[data-tab-count="10"\]/);
   assert.match(
@@ -1618,11 +1624,11 @@ test("avatar customizer preview has explicit expression states", () => {
   assert.match(pageSource, /const BOT_AVATAR_PREVIEW_MOODS = \[/);
   assert.match(
     pageSource,
-    /mode\.value === "talking"[\s\S]*?voiceModeDisplayName\(voiceMode\)[\s\S]*?: mode\.label/,
+    /mode\.value === "talking"[\s\S]*?voiceModeDisplayName\(voiceChoice\)[\s\S]*?: mode\.label/,
   );
   assert.match(
     pageSource,
-    /<BotAvatarPreviewPanel[\s\S]*?voiceMode=\{voiceMode\}/,
+    /<BotAvatarPreviewPanel[\s\S]*?voiceChoice=\{voicePlaybackChoice\([\s\S]*?voiceMode[\s\S]*?englishVoiceEngine/,
   );
   assert.match(
     pageSource,
@@ -1820,7 +1826,7 @@ test("Powers read as an app-wide bot trait across active surfaces", () => {
   assert.match(pageSource, /effect\.type === "mute"\) return "Never speaks"/u);
   assert.match(
     pageSource,
-    /effect\.type === "echo_addressed"\) return "Repeats addressed speech exactly"/u,
+    /effect\.type === "speech_copy"\) return "Repeats addressed speech exactly"/u,
   );
   assert.match(
     pageSource,

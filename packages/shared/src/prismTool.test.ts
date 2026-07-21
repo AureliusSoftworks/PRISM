@@ -1,6 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  createBotIdentityMirrorStateV1,
+} from "./botIdentityMirror.ts";
+import {
   hydrateAssistantMessageParts,
   parseAssistantPrismTools,
   parseStoredAssistantToolPayload,
@@ -709,6 +712,25 @@ describe("hydrateAssistantMessageParts", () => {
           cameraCutEligible: false,
         },
       },
+      {
+        v: 1,
+        name: "coffeeReplayEvent",
+        kind: "identityMirror",
+        botId: "ian",
+        occurredAt: "2026-07-02T15:03:20.000Z",
+        state: createBotIdentityMirrorStateV1({
+          surface: "coffee",
+          holderBotId: "ian",
+          holderBotName: "Identity Crisis Ian",
+          targetBotId: "bot-2",
+          targetBotName: "Mara Vale",
+          targetPersonaPrompt: "A terse lunar cartographer.",
+          targetFace: { faceEyeCharacter: "◉" },
+          targetVoice: { version: 1, enabled: true, preset: "warm" },
+          sourceMessageId: "message-2",
+          occurredAt: "2026-07-02T15:03:20.000Z",
+        }),
+      },
     ];
     const stored = serializeAssistantToolPayload({ coffeeReplayEvents });
 
@@ -826,5 +848,35 @@ describe("parseStoredToolPayload / serializeAskQuestionTool", () => {
       },
     });
     assert.equal(parseStoredAssistantToolPayload(stored).webSearch, undefined);
+  });
+
+  it("round-trips the saved Quiet intermittent-mute outcome", () => {
+    const stored = serializeAssistantToolPayload({
+      botPowerExactResponse: "intermittent_mute",
+    });
+    assert.equal(
+      parseStoredAssistantToolPayload(stored).botPowerExactResponse,
+      "intermittent_mute",
+    );
+    assert.equal(
+      hydrateAssistantMessageParts({ content: "...", toolPayload: stored })
+        .botPowerExactResponse,
+      "intermittent_mute",
+    );
+  });
+
+  it("round-trips a saved public speech-obfuscation outcome", () => {
+    const stored = serializeAssistantToolPayload({
+      botPowerExactResponse: "speech_obfuscation",
+    });
+    assert.equal(
+      parseStoredAssistantToolPayload(stored).botPowerExactResponse,
+      "speech_obfuscation",
+    );
+    assert.equal(
+      hydrateAssistantMessageParts({ content: "Mrruh.", toolPayload: stored })
+        .botPowerExactResponse,
+      "speech_obfuscation",
+    );
   });
 });

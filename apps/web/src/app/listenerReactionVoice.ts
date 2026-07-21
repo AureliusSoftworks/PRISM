@@ -22,6 +22,7 @@ import {
 import {
   playRealtimeVoiceBytes,
   stopReactionVoiceAudio,
+  type VoicePlaybackChannel,
 } from "./voiceEffects.ts";
 import type { RoomAcousticsSend } from "./roomAcoustics.ts";
 
@@ -43,6 +44,22 @@ export function listenerReactionVoiceCacheKey(args: {
   ]);
 }
 
+export function interruptedSpeakerReactionVoiceCacheKey(args: {
+  plan: Pick<ListenerReactionPlanV1, "seed" | "interruptedSpeakerCue">;
+  mode: ListenerReactionVoiceMode;
+  engine: string;
+  profile: BotAudioVoiceProfileV1;
+}): string {
+  return JSON.stringify([
+    args.plan.seed,
+    args.plan.interruptedSpeakerCue ?? "silent",
+    "interrupted-speaker",
+    args.mode,
+    args.engine,
+    args.profile,
+  ]);
+}
+
 export async function playListenerReactionVoice(args: {
   plan: ListenerReactionPlanV1;
   mode: ListenerReactionVoiceMode;
@@ -53,6 +70,7 @@ export async function playListenerReactionVoice(args: {
   englishClip?: EnglishVoiceSynthesisClip | null;
   roomAcoustics?: RoomAcousticsSend;
   stereoPan?: number;
+  channel?: VoicePlaybackChannel;
 }): Promise<boolean> {
   if (!listenerReactionHasAudio(args.plan)) return false;
   if (args.plan.vocalFoley && args.mode !== "english") return false;
@@ -68,6 +86,7 @@ export async function playListenerReactionVoice(args: {
     englishClip: args.englishClip,
     roomAcoustics: args.roomAcoustics,
     stereoPan: args.stereoPan,
+    channel: args.channel,
     maxDurationMs: args.plan.interjectionAttempt ? 1_300 : 900,
   });
 }
@@ -84,6 +103,7 @@ export async function playEphemeralReactionVoice(args: {
   roomAcoustics?: RoomAcousticsSend;
   stereoPan?: number;
   maxDurationMs?: number;
+  channel?: VoicePlaybackChannel;
 }): Promise<boolean> {
   const cue = args.text.replace(/\s+/gu, " ").trim();
   const normalizedInputProfile = normalizeBotAudioVoiceProfileV1(args.profile);
@@ -108,7 +128,7 @@ export async function playEphemeralReactionVoice(args: {
       baseLowpassHz: processing.lowpassHz,
       voiceEffect: voiceEffectForPlayback(profile),
       alignment: args.englishClip.alignment,
-      channel: "reaction",
+      channel: args.channel ?? "reaction",
       maxDurationMs: args.maxDurationMs ?? 900,
       roomAcoustics: args.roomAcoustics,
       stereoPan: args.stereoPan,
@@ -131,7 +151,7 @@ export async function playEphemeralReactionVoice(args: {
           cleanRoboticCarrier: true,
         }
       : {}),
-    channel: "reaction",
+    channel: args.channel ?? "reaction",
     maxDurationMs: args.maxDurationMs ?? 900,
     roomAcoustics: args.roomAcoustics,
     stereoPan: args.stereoPan,

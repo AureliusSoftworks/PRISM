@@ -1,6 +1,7 @@
 import {
   BOT_POWER_VERSION,
   botPowerDefinitionIsExplicitInterruptionV1,
+  botPowerDefinitionIsUnconditionalInterruptionV1,
   botPowerDefinitionIsExplicitMuteV1,
   botPowerSourceHashV1,
   normalizeBotPowerEffectV1,
@@ -156,7 +157,151 @@ function deterministicMutePower(
   };
 }
 
-function deterministicEchoAddressedPower(
+function deterministicEternalIntroductionPower(
+  source: BotPowerV1,
+  botName: string,
+): CompiledBotPowerV1 | null {
+  const name = compact(source.name, 100).toLowerCase();
+  const intent = compact(source.intent, 600)
+    .toLowerCase()
+    .replace(/[’]/gu, "'");
+  const explicitName =
+    /^(?:eternal introduction|short[- ]term (?:memory loss|amnesia)|forgetful|forgetful freddie)$/u.test(
+      name,
+    );
+  const everyTurnIntroduction = [
+    /\b(?:every|each)\s+(?:message|reply|response|turn|utterance)\b[\s\S]*\b(?:introduc(?:e|es|ing)|introduction)\b/u,
+    /\b(?:introduc(?:e|es|ing)|introduction)\b[\s\S]*\b(?:every|each)\s+(?:message|reply|response|turn|utterance)\b/u,
+    /\bonly\s+(?:ever\s+)?(?:introduc(?:e|es)|an?\s+introduction)\b/u,
+  ].some((pattern) => pattern.test(intent));
+  const forgetsPriorContext = [
+    /\b(?:forgets?|cannot\s+remember|can't\s+remember|has\s+no\s+(?:memory|awareness)|does\s+not\s+know|doesn't\s+know)\b[\s\S]*\b(?:previous|prior|earlier|past|own)\s+(?:messages?|replies?|responses?|turns?|conversation|history)\b/u,
+    /\b(?:previous|prior|earlier|past|own)\s+(?:messages?|replies?|responses?|turns?|conversation|history)\b[\s\S]*\b(?:hidden|removed|forgotten|unavailable|unknown)\b/u,
+    /\b(?:current[- ]turn[- ]only|first\s+time\s+every\s+time|always\s+first\s+contact)\b/u,
+  ].some((pattern) => pattern.test(intent));
+  if (!explicitName && !(everyTurnIntroduction && forgetsPriorContext)) {
+    return null;
+  }
+  const subject = compact(botName, 100) || "This bot";
+  return {
+    version: BOT_POWER_VERSION,
+    sourceHash: botPowerSourceHashV1(source.name, source.intent),
+    selfCue:
+      "HARD MEMORY CONTRACT: respond naturally to only the one-to-four public messages provided for this turn. Treat people as unfamiliar unless those visible messages establish otherwise. Never claim older relationship context or mention this rule. Introduce yourself only when the immediate exchange warrants it.",
+    observerCue:
+      `${subject} remembers only a shifting one-to-four-message public tail and has no older relationship context. Retain the full encounter yourself; react to repetition through your own personality without explaining hidden mechanics or forcing an emotion.`,
+    effects: [
+      { type: "eternal_introduction", memory: "rolling_public_tail_1_to_4" },
+      {
+        type: "social_influence",
+        trigger: "after_speech",
+        polarity: "negative",
+        strength: "small",
+        targets: [{ kind: "all" }],
+      },
+    ],
+    ruleLabels: [
+      "One-to-four-message memory",
+      "No older relationship context",
+      "Repeated introductions grate on bots",
+    ],
+  };
+}
+
+function deterministicVoicePresencePower(
+  source: BotPowerV1,
+  botName: string,
+): CompiledBotPowerV1 | null {
+  const powerName = compact(source.name, 100)
+    .toLowerCase()
+    .replace(/[’]/gu, "'");
+  const intent = compact(source.intent, 500)
+    .toLowerCase()
+    .replace(/[’]/gu, "'");
+  const explicitlyLoud =
+    /^(?:loud|loud simon|booming|deafening)$/u.test(powerName) ||
+    [
+      /\b(?:voice|speech)\s+(?:is|becomes?|sounds?)\s+(?:very\s+|extremely\s+|incredibly\s+)?(?:loud|booming|deafening)\b/u,
+      /\b(?:speaks?|talks?|shouts?|yells?)\s+(?:very\s+|extremely\s+|incredibly\s+)?(?:loudly|at\s+full\s+volume)\b/u,
+    ].some((pattern) => pattern.test(intent));
+  const explicitlyQuiet =
+    !explicitlyLoud &&
+    (
+      /^(?:quiet|quiet karen|soft[- ]spoken|whisper)$/u.test(powerName) ||
+      [
+        /\b(?:voice|speech)\s+(?:is|becomes?|sounds?)\s+(?:very\s+|extremely\s+|incredibly\s+)?(?:quiet|soft|faint)\b/u,
+        /\b(?:speaks?|talks?)\s+(?:very\s+|extremely\s+|incredibly\s+)?(?:quietly|softly|faintly)\b/u,
+        /\b(?:whispers?|murmurs?)\s+(?:everything|constantly|whenever\s+(?:speaking|talking))\b/u,
+      ].some((pattern) => pattern.test(intent))
+    );
+  if (!explicitlyLoud && !explicitlyQuiet) return null;
+  const subject = compact(botName, 100) || "This bot";
+  if (explicitlyLoud) {
+    return {
+      version: BOT_POWER_VERSION,
+      sourceHash: botPowerSourceHashV1(source.name, source.intent),
+      selfCue:
+        "Your voice is inescapably loud. It overrides any small, microscopic, or speaking-only invisible presentation and mildly annoys other bots whenever you speak.",
+      observerCue: `${subject}'s amplified voice is impossible to overlook and mildly grates on other bots after each utterance.`,
+      effects: [
+        { type: "voice_presence", mode: "loud" },
+        {
+          type: "social_influence",
+          trigger: "after_speech",
+          polarity: "negative",
+          strength: "small",
+          targets: [{ kind: "all" }],
+        },
+      ],
+      ruleLabels: ["Amplified voice", "Larger spoken text", "Annoys other bots"],
+    };
+  }
+  return {
+    version: BOT_POWER_VERSION,
+    sourceHash: botPowerSourceHashV1(source.name, source.intent),
+    selfCue:
+      "Your voice is unusually quiet. Half of your attempted turns are ignored as completely as mute, and each ignored turn slightly lowers your mood.",
+    observerCue: `${subject} speaks very quietly and may go completely unheard; being ignored visibly lowers their mood.`,
+    effects: [
+      { type: "voice_presence", mode: "quiet" },
+      { type: "intermittent_mute", chance: "half", moodPenalty: "small" },
+    ],
+    ruleLabels: ["Attenuated voice", "Smaller spoken text", "Half of turns unheard"],
+  };
+}
+
+function deterministicMumblingPower(
+  source: BotPowerV1,
+  botName: string,
+): CompiledBotPowerV1 | null {
+  const powerName = compact(source.name, 100)
+    .toLowerCase()
+    .replace(/[’]/gu, "'");
+  const intent = compact(source.intent, 500)
+    .toLowerCase()
+    .replace(/[’]/gu, "'");
+  const explicitlyMumbling =
+    /^(?:mumble|mumbling|mumbling jim|unintelligible speech)$/u.test(powerName) ||
+    [
+      /\bmumbl(?:e|es|ed|ing)\b[\s\S]*\b(?:gibberish|unintelligible|hard\s+to\s+(?:hear|understand)|no\s+one\s+(?:can\s+)?understands?)\b/u,
+      /\b(?:says?|speaks?|talks?|utters?)\b[\s\S]*\b(?:only\s+)?(?:gibberish|unintelligibly)\b/u,
+      /\b(?:other\s+bots?|everyone|listeners?|people)\b[\s\S]*\b(?:hear|receive|understand)\b[\s\S]*\bgibberish\b/u,
+    ].some((pattern) => pattern.test(intent));
+  if (!explicitlyMumbling) return null;
+  const subject = compact(botName, 100) || "This bot";
+  return {
+    version: BOT_POWER_VERSION,
+    sourceHash: botPowerSourceHashV1(source.name, source.intent),
+    selfCue:
+      "Think and answer rationally in ordinary clear language. Runtime turns every spoken word into gibberish for everyone else, while you believe you expressed the intended meaning; repeated misunderstanding may frustrate you naturally, but never force an emotion.",
+    observerCue:
+      `${subject}'s speech reaches you only as literal normal-volume gibberish. Never reconstruct, infer, or respond to hidden intended meaning; react only to what is publicly observable, and nobody understands the words.`,
+    effects: [{ type: "speech_obfuscation", mode: "gibberish" }],
+    ruleLabels: ["Normal-volume gibberish", "Intended meaning stays private"],
+  };
+}
+
+function deterministicAddressedSpeechCopyPower(
   source: BotPowerV1,
   botName: string,
 ): CompiledBotPowerV1 | null {
@@ -164,22 +309,192 @@ function deterministicEchoAddressedPower(
   const intent = compact(source.intent, 500)
     .toLowerCase()
     .replace(/[’]/gu, "'");
-  const explicitlyEchoesAddressedSpeech =
-    /^(?:echo|echoes|parrot|parroting)$/u.test(name) ||
+  const explicitlyCopiesAddressedSpeech =
+    /^(?:copycat|copycat calvin|echo|echoes|parrot|parroting)$/u.test(name) ||
     [
-      /\b(?:echo(?:es|ing)?|repeat(?:s|ing)?|parrot(?:s|ing)?)\s+(?:back\s+)?(?:exactly\s+|verbatim\s+)?(?:whatever|everything|anything|what|the\s+words?)\b[\s\S]*\b(?:addressed|said|spoken|asked|told)\b/u,
-      /\b(?:echo(?:es|ing)?|repeat(?:s|ing)?|parrot(?:s|ing)?)\b[\s\S]*\b(?:word[ -]for[ -]word|verbatim|exactly)\b[\s\S]*\b(?:addressed|said|spoken|asked|told)\b/u,
-      /\b(?:can|may)\s+only\s+(?:echo|repeat|parrot)\b[\s\S]*\b(?:addressed|said|spoken|asked|told)\b/u,
+      /\b(?:copy|copies|copying|echo(?:es|ing)?|repeat(?:s|ing)?|parrot(?:s|ing)?)\s+(?:back\s+)?(?:exactly\s+|verbatim\s+)?(?:whatever|everything|anything|what|the\s+words?)\b[\s\S]*\b(?:addressed|said|spoken|asked|told)\b/u,
+      /\b(?:copy|copies|copying|echo(?:es|ing)?|repeat(?:s|ing)?|parrot(?:s|ing)?)\b[\s\S]*\b(?:word[ -]for[ -]word|verbatim|exactly)\b[\s\S]*\b(?:addressed|said|spoken|asked|told)\b/u,
+      /\b(?:can|may)\s+only\s+(?:copy|echo|repeat|parrot)\b[\s\S]*\b(?:addressed|said|spoken|asked|told)\b/u,
     ].some((pattern) => pattern.test(intent));
-  if (!explicitlyEchoesAddressedSpeech) return null;
+  if (!explicitlyCopiesAddressedSpeech) return null;
   const subject = compact(botName, 100) || "This bot";
   return {
     version: BOT_POWER_VERSION,
     sourceHash: botPowerSourceHashV1(source.name, source.intent),
     selfCue: "Repeat the latest speech addressed to you verbatim. Say nothing else.",
-    observerCue: `${subject} can only echo the latest speech addressed to them; the sender may react with confusion.`,
-    effects: [{ type: "echo_addressed" }],
-    ruleLabels: ["Echoes addressed speech"],
+    observerCue: `${subject} can only copy the latest speech addressed to them; the sender may react with confusion.`,
+    effects: [{ type: "speech_copy", trigger: "direct_address" }],
+    ruleLabels: ["Copies addressed speech"],
+  };
+}
+
+function deterministicJoyfulPower(
+  source: BotPowerV1,
+  botName: string,
+): CompiledBotPowerV1 | null {
+  const name = compact(source.name, 80).toLowerCase();
+  const intent = compact(source.intent, 500)
+    .toLowerCase()
+    .replace(/[’]/gu, "'");
+  const namesJoy = /^(?:joyful|joyful nora|radiant joy|radiant)$/u.test(name);
+  const extraordinaryJoy =
+    /\b(?:extraordinarily|exceptionally|radiantly|infectiously|overwhelmingly)\s+(?:joyful|joyous|happy)\b/u.test(intent);
+  const spokenRecipientBoost =
+    /\b(?:after|whenever)\b[\s\S]*\b(?:spoken|speaks?|talks?|utterance|turn)\b[\s\S]*\b(?:mood|disposition|spirits?)\b[\s\S]*\b(?:boost|lift|uplift|brighten|improve|raise)\w*\b/u.test(intent) ||
+    /\b(?:boost|lift|uplift|brighten|improve|raise)\w*\b[\s\S]*\b(?:mood|disposition|spirits?)\b[\s\S]*\b(?:after|whenever)\b[\s\S]*\b(?:spoken|speaks?|talks?|utterance|turn)\b/u.test(intent);
+  if (!((namesJoy || extraordinaryJoy) && spokenRecipientBoost)) return null;
+  const subject = compact(botName, 100) || "This bot";
+  return {
+    version: BOT_POWER_VERSION,
+    sourceHash: botPowerSourceHashV1(source.name, source.intent),
+    selfCue:
+      "You are extraordinarily joyful: let radiant delight be unmistakable in every spoken turn, including serious moments, without denying stakes, forcing agreement, or flattening your own voice.",
+    observerCue:
+      `${subject}'s completed spoken turns can visibly lift addressed listeners one bounded step. Filter that uplift through your own personality and circumstances; keep facts, serious stakes, sadness, disagreement, and agency intact.`,
+    effects: [{
+      type: "mood_boost",
+      trigger: "after_spoken_turn",
+      recipients: "addressed",
+      strength: "medium",
+    }],
+    ruleLabels: ["Radiant joy", "Uplifts addressed listeners"],
+  };
+}
+
+function deterministicSadPower(
+  source: BotPowerV1,
+  botName: string,
+): CompiledBotPowerV1 | null {
+  const name = compact(source.name, 80).toLowerCase();
+  const intent = compact(source.intent, 500)
+    .toLowerCase()
+    .replace(/[’]/gu, "'");
+  const namesReactiveGloom =
+    /^(?:sad|sad sally|depressed|angry|annoying|grouchy|hateful|miserable|toxic)$/u.test(name);
+  const directAddresser = [
+    /\b(?:bots?|characters?|people)\s+(?:who|that)\s+(?:directly\s+)?(?:talk|speak|address|converse|interact)(?:s|ed|ing)?\s+(?:to|with)\s+(?:him|her|them|the\s+holder|this\s+bot)\b/u,
+    /\bwhen(?:ever)?\s+(?:another\s+)?bot\s+(?:directly\s+)?(?:talks?|speaks?|addresses|converses|interacts)\s+(?:to|with)\s+(?:him|her|them|the\s+holder|this\s+bot)\b/u,
+    /\bonly\s+(?:the\s+)?bots?\s+(?:that|who)\s+(?:talk|speak|address|converse|interact)\s+(?:to|with)\s+(?:him|her|them|the\s+holder|this\s+bot)\b/u,
+  ].some((pattern) => pattern.test(intent));
+  const negativeMood = [
+    /\b(?:lower|lowers|lowering|reduce|reduces|reducing|drain|drains|draining|worsen|worsens|worsening|sour|sours|souring)\b[\s\S]*\b(?:mood|motivation|morale|spirits?|disposition)\b/u,
+    /\b(?:mood|motivation|morale|spirits?|disposition)\b[\s\S]*\b(?:drop|drops|fall|falls|sink|sinks|lower|lowers|worsen|worsens)\b/u,
+    /\b(?:makes?|leaves?)\b[\s\S]*\b(?:sad|depressed|angry|annoyed|grouchy|miserable|demotivated|discouraged)\b/u,
+  ].some((pattern) => pattern.test(intent));
+  if (!(namesReactiveGloom && directAddresser && negativeMood)) return null;
+  const subject = compact(botName, 100) || "This bot";
+  return {
+    version: BOT_POWER_VERSION,
+    sourceHash: botPowerSourceHashV1(source.name, source.intent),
+    selfCue:
+      "You are persistently sad, grouchy, and irritating. Let that heavy, grating presence stay unmistakable without inventing facts, demanding agreement, manipulating vulnerability, or turning sadness into abuse or self-harm.",
+    observerCue:
+      `After a bot directly speaks to ${subject}, that addresser can lose one bounded step of mood or motivation. Express the drag through your own personality—weariness, irritation, guardedness, or reduced enthusiasm are valid—without forced hatred, hopelessness, agreement, factual denial, or lost agency.`,
+    effects: [{
+      type: "mood_drain",
+      trigger: "after_direct_address",
+      recipient: "addresser",
+      strength: "medium",
+    }],
+    ruleLabels: ["Drains direct addresser mood", "Preserves agency and stakes"],
+  };
+}
+
+function deterministicCircadianPower(
+  source: BotPowerV1,
+  botName: string,
+): CompiledBotPowerV1 | null {
+  const name = compact(source.name, 80).toLowerCase();
+  const intent = compact(source.intent, 600)
+    .toLowerCase()
+    .replace(/[’]/gu, "'");
+  const nocturnal = /^(?:nocturnal|night owl|night-owl)$/u.test(name);
+  const diurnal = /^(?:diurnal|daytime|day-active|day active)$/u.test(name);
+  if (!nocturnal && !diurnal) return null;
+  const lightNegative =
+    /\b(?:light|day)(?:\s+mode)?\b[\s\S]*\b(?:sad|depressed|angry|annoying|grouchy|hateful|miserable|negative)\b/u.test(intent);
+  const darkPositive =
+    /\b(?:dark|night)(?:\s+mode)?\b[\s\S]*\b(?:joy|joyful|joyous|happy|radiant|positive)\b/u.test(intent);
+  const lightPositive =
+    /\b(?:light|day)(?:\s+mode)?\b[\s\S]*\b(?:joy|joyful|joyous|happy|radiant|positive)\b/u.test(intent);
+  const darkNegative =
+    /\b(?:dark|night)(?:\s+mode)?\b[\s\S]*\b(?:sad|depressed|angry|annoying|grouchy|hateful|miserable|negative)\b/u.test(intent);
+  if (
+    (nocturnal && (!lightNegative || !darkPositive)) ||
+    (diurnal && (!lightPositive || !darkNegative))
+  ) {
+    return null;
+  }
+  const subject = compact(botName, 100) || "This bot";
+  const positiveTheme = nocturnal ? "dark" : "light";
+  const negativeTheme = nocturnal ? "light" : "dark";
+  const trait = nocturnal ? "nocturnal" : "diurnal";
+  return {
+    version: BOT_POWER_VERSION,
+    sourceHash: botPowerSourceHashV1(source.name, source.intent),
+    selfCue:
+      `You are ${trait}. In ${positiveTheme === "dark" ? "Dark" : "Light"} Mode, become extraordinarily and unmistakably joyful without denying real problems. In ${negativeTheme === "dark" ? "Dark" : "Light"} Mode, become noticeably sad, grouchy, and irritating without becoming abusive, hopeless, or unsafe. Apply only the branch matching the current resolved app theme.`,
+    observerCue:
+      `${subject}'s ${trait} compound Power follows the resolved app theme. In ${positiveTheme === "dark" ? "Dark" : "Light"} Mode, completed spoken turns can give addressed bot recipients one bounded uplift. In ${negativeTheme === "dark" ? "Dark" : "Light"} Mode, only bots that directly speak to ${subject} can receive one bounded mood or motivation drop. Preserve agency, personality, facts, disagreement, genuine sadness, and serious stakes.`,
+    effects: [
+      {
+        type: "mood_boost",
+        trigger: "after_spoken_turn",
+        recipients: "addressed",
+        strength: "medium",
+        whenTheme: positiveTheme,
+      },
+      {
+        type: "mood_drain",
+        trigger: "after_direct_address",
+        recipient: "addresser",
+        strength: "medium",
+        whenTheme: negativeTheme,
+      },
+    ],
+    ruleLabels: [
+      `${positiveTheme === "dark" ? "Dark" : "Light"} Mode radiant joy`,
+      `${negativeTheme === "dark" ? "Dark" : "Light"} Mode reactive sadness`,
+      "Preserves agency and stakes",
+    ],
+  };
+}
+
+function deterministicIdentityMirrorPower(
+  source: BotPowerV1,
+  botName: string,
+): CompiledBotPowerV1 | null {
+  const name = compact(source.name, 80).toLowerCase();
+  const intent = compact(source.intent, 600)
+    .toLowerCase()
+    .replace(/[’]/gu, "'");
+  const identityLanguage =
+    /\b(?:identit(?:y|ies)|persona|personality|face|voice|becomes?|copy|copies|mirror|mirrors|whoever)\b/u.test(
+      intent,
+    );
+  const addressedTrigger = [
+    /\bwhoever\s+(?:directly\s+)?addresses\s+(?:him|her|them|the\s+bot)\b/u,
+    /\b(?:bot|person|character)\s+(?:who|that)\s+(?:directly\s+)?addresses\s+(?:him|her|them|the\s+bot)\b/u,
+    /\bwhen(?:ever)?\s+(?:another\s+)?bot\s+(?:directly\s+)?addresses\s+(?:him|her|them|the\s+bot)\b/u,
+  ].some((pattern) => pattern.test(intent));
+  const copyLanguage = [
+    /\b(?:copy|copies|mirror|mirrors|become|becomes)\b[\s\S]*\b(?:identity|persona|personality|face|voice)\b/u,
+    /\b(?:identity|persona|personality|face|voice)\b[\s\S]*\b(?:copy|copies|mirror|mirrors|become|becomes)\b/u,
+  ].some((pattern) => pattern.test(intent));
+  const explicitName = /^(?:identity crisis|identity mirror|identity crisis ian)$/u.test(name);
+  if (!(addressedTrigger && identityLanguage && copyLanguage) && !explicitName) {
+    return null;
+  }
+  const subject = compact(botName, 100) || "This bot";
+  return {
+    version: BOT_POWER_VERSION,
+    sourceHash: botPowerSourceHashV1(source.name, source.intent),
+    selfCue:
+      "When a bot directly addresses you, become absolutely convinced you are that bot and the original is an impostor; copy only their public persona, face, and spoken voice until another bot addresses you or the session resets. The player is never a target.",
+    observerCue:
+      `${subject} steals the latest direct bot addresser's public identity, face, and voice while retaining every mechanical boundary; the original recognizes the theft and is reliably irritated.`,
+    effects: [{ type: "identity_mirror", trigger: "direct_bot_address" }],
+    ruleLabels: ["Mirrors direct bot addresser", "Original becomes irritated"],
   };
 }
 
@@ -196,18 +511,27 @@ function deterministicInterruptionPower(
     ? "large" as const
     : "medium" as const;
   const frequency = frequent ? "frequent" as const : "occasional" as const;
+  const unconditional = botPowerDefinitionIsUnconditionalInterruptionV1(
+    source.name,
+    source.intent,
+  );
   const subject = compact(botName, 100) || "This bot";
   return {
     version: BOT_POWER_VERSION,
     sourceHash: botPowerSourceHashV1(source.name, source.intent),
-    selfCue: "Seize real conversational openings quickly, but do not interrupt protected closings, boundaries, or human-controlled speech.",
-    observerCue: `${subject} may cut into an eligible bot speaker's live turn when a real opening appears.`,
+    selfCue: unconditional
+      ? "Cut into every eligible bot speaker's live turn. Take the opening at a naturally variable point, but never interrupt protected closings, boundaries, or human-controlled speech."
+      : "Seize real conversational openings quickly, but do not interrupt protected closings, boundaries, or human-controlled speech.",
+    observerCue: unconditional
+      ? `${subject} cuts into every eligible bot speaker's live turn at an unpredictable point before the speaker finishes.`
+      : `${subject} may cut into an eligible bot speaker's live turn when a real opening appears.`,
     effects: [
       {
         type: "interruption",
         frequency,
         strength,
         targets: [{ kind: "all" }],
+        ...(unconditional ? { certainty: "always" as const } : {}),
       },
       {
         type: "action_bias",
@@ -222,7 +546,13 @@ function deterministicInterruptionPower(
         targets: [{ kind: "all" }],
       },
     ],
-    ruleLabels: [frequency === "frequent" ? "Frequently interrupts" : "May interrupt"],
+    ruleLabels: [
+      unconditional
+        ? "Always interrupts eligible bot turns"
+        : frequency === "frequent"
+          ? "Frequently interrupts"
+          : "May interrupt",
+    ],
   };
 }
 
@@ -251,6 +581,42 @@ function deterministicCandorPower(
     observerCue: `${subject}'s direct questions can feel unusually safe to answer candidly, without overriding anyone's agency or boundaries.`,
     effects: [{ type: "candor", strength, targets: [{ kind: "all" }] }],
     ruleLabels: ["Draws out candid answers"],
+  };
+}
+
+function deterministicAddressedFandomPower(
+  source: BotPowerV1,
+  botName: string,
+): CompiledBotPowerV1 | null {
+  const name = compact(source.name, 100)
+    .toLowerCase()
+    .replace(/[’]/gu, "'");
+  const intent = compact(source.intent, 500)
+    .toLowerCase()
+    .replace(/[’]/gu, "'");
+  const namesFandom = /\b(?:fan|superfan|fandom|starstruck|admiration)\b/u.test(
+    `${name} ${intent}`,
+  );
+  const namesObsession = /\bobsess(?:ed|ive|ively|ion)?\b/u.test(
+    `${name} ${intent}`,
+  );
+  const followsAddressee = [
+    /\bwho(?:m|ever)\s+(?:he|she|they|the\s+bot)\s+(?:is\s+)?(?:talking|speaking)\s+to\b/u,
+    /\b(?:current|active)\s+addressee\b/u,
+    /\bwhoever\s+(?:is\s+)?(?:being\s+)?addressed\b/u,
+    /\beveryone\s+(?:he|she|they|the\s+bot)\s+(?:talks?|speaks?)\s+to\b/u,
+  ].some((pattern) => pattern.test(intent));
+  if (!namesFandom || !namesObsession || !followsAddressee) return null;
+  const subject = compact(botName, 100) || "This bot";
+  return {
+    version: BOT_POWER_VERSION,
+    sourceHash: botPowerSourceHashV1(source.name, source.intent),
+    selfCue:
+      "Treat whoever you address as your absolute favorite. Every reply must newly show obsessive fanlike delight, admiration, overinvestment, or starstruck attention, without a stock phrase. Soft pressure only: never puppet, stalk, coerce, invent private knowledge, or override safety or mode rules.",
+    observerCue:
+      `${subject} treats the current addressee like a personal star with intense but non-coercive admiration; never infer stalking, private knowledge, or loss of anyone's agency.`,
+    effects: [{ type: "addressed_fandom", strength: "large" }],
+    ruleLabels: ["Obsesses over current addressee"],
   };
 }
 
@@ -371,6 +737,74 @@ function deterministicGhostPower(
     ruleLabels: [
       "Appears only while speaking",
       ...(terrifiesOnlookers ? ["Terrifies present bots"] : []),
+    ],
+  };
+}
+
+function deterministicAvatarScalePower(
+  source: BotPowerV1,
+  botName: string,
+): CompiledBotPowerV1 | null {
+  const name = compact(source.name, 120).toLowerCase();
+  const intent = compact(source.intent, 500).toLowerCase();
+  const microscopic =
+    name === "microscopic" ||
+    [
+      /\b(?:is|becomes?|turns?|remains?|looks?|appears?)\s+(?:physically\s+)?microscopic\b/u,
+      /\b(?:physically|visibly|literally)\s+microscopic\b/u,
+      /\bmicroscopic\s+(?:body|form|size|stature|bot|character|person)\b/u,
+    ].some((pattern) => pattern.test(intent));
+  const smaller =
+    microscopic ||
+    /^(?:tiny|small|miniature|minuscule|diminutive|shrunken|undersized)$/u.test(name) ||
+    [
+      /\b(?:is|becomes?|turns?|remains?|looks?|appears?)\s+(?:physically\s+)?(?:small(?:er)?|tiny|miniature|minuscule|diminutive|shrunken|undersized)\b/u,
+      /\b(?:makes?|renders?|keeps?)\s+(?:(?:the\s+)?bot|them|it|him|her)?\s*(?:physically\s+)?(?:small(?:er)?|tiny|miniature|minuscule|diminutive|shrunken|undersized)\b/u,
+      /\b(?:physically|visibly|literally)\s+(?:small(?:er)?|tiny|miniature|minuscule|diminutive|shrunken|undersized)\b/u,
+      /\b(?:small(?:er)?|tiny|miniature|minuscule|diminutive|shrunken|undersized)\s+(?:body|form|size|stature|bot|character|person)\b/u,
+      /\bsmall(?:er)?\s+than\s+(?:the\s+)?(?:other|average|normal)\b/u,
+      /\b(?:shrinks?|shrinking|shrank|shrunk|shrunken|miniaturiz(?:e|es|ed|ing))\b/u,
+    ].some((pattern) => pattern.test(intent));
+  const larger =
+    !smaller &&
+    (
+      /^(?:large|larger|big|bigger|giant|gigantic|huge|massive|colossal|oversized|towering)$/u.test(name) ||
+      [
+        /\b(?:is|becomes?|turns?|remains?|looks?|appears?)\s+(?:physically\s+)?(?:a\s+)?(?:large|larger|big|bigger|huge|massive|giant|gigantic|colossal|oversized|towering)\b/u,
+        /\b(?:makes?|renders?|keeps?)\s+(?:(?:the\s+)?bot|them|it|him|her)?\s*(?:physically\s+)?(?:large|larger|big|bigger|huge|massive|giant|gigantic|colossal|oversized|towering)\b/u,
+        /\b(?:physically|visibly|literally)\s+(?:large|larger|big|bigger|huge|massive|giant|gigantic|colossal|oversized|towering)\b/u,
+        /\b(?:large|larger|big|bigger|huge|massive|giant|gigantic|colossal|oversized|towering)\s+(?:body|form|size|stature|bot|character|person)\b/u,
+        /\b(?:larger|bigger)\s+than\s+(?:the\s+)?(?:other|average|normal)\b/u,
+        /\b(?:grow(?:s|ing)?|enlarge(?:s|d|ment|ing)?)\s+(?:physically|in\s+size|their\s+(?:body|form))\b/u,
+      ].some((pattern) => pattern.test(intent))
+    );
+  if (!smaller && !larger) return null;
+
+  const mode = smaller ? "smaller" as const : "larger" as const;
+  const subject = compact(botName, 100) || "This bot";
+  const speakingOnlyVisibility = microscopic;
+  return {
+    version: BOT_POWER_VERSION,
+    sourceHash: botPowerSourceHashV1(source.name, source.intent),
+    selfCue: microscopic
+      ? "You are microscopic and unseen while idle. Fade into view only while delivering an utterance, then vanish again."
+      : mode === "smaller"
+        ? "Your physical form is noticeably smaller than the other bots."
+        : "Your physical form is noticeably larger than the other bots.",
+    observerCue: microscopic
+      ? `${subject} is microscopic and unseen between utterances, appearing briefly only while speaking.`
+      : mode === "smaller"
+        ? `${subject} is noticeably smaller than the other bots.`
+        : `${subject} is noticeably larger than the other bots.`,
+    effects: [
+      { type: "avatar_scale", mode },
+      ...(speakingOnlyVisibility
+        ? [{ type: "avatar_visibility" as const, mode: "speaking_only" as const }]
+        : []),
+    ],
+    ruleLabels: [
+      mode === "smaller" ? "Smaller avatar" : "Larger avatar",
+      ...(speakingOnlyVisibility ? ["Appears only while speaking"] : []),
     ],
   };
 }
@@ -533,10 +967,18 @@ function deterministicPower(
   botName: string,
 ): CompiledBotPowerV1 | null {
   const primary =
+    deterministicEternalIntroductionPower(source, botName) ??
+    deterministicIdentityMirrorPower(source, botName) ??
+    deterministicMumblingPower(source, botName) ??
+    deterministicVoicePresencePower(source, botName) ??
     deterministicHearingRepeatPower(source, botName) ??
-    deterministicEchoAddressedPower(source, botName) ??
+    deterministicAddressedSpeechCopyPower(source, botName) ??
+    deterministicCircadianPower(source, botName) ??
+    deterministicJoyfulPower(source, botName) ??
+    deterministicSadPower(source, botName) ??
     deterministicMutePower(source, botName) ??
     deterministicInterruptionPower(source, botName) ??
+    deterministicAddressedFandomPower(source, botName) ??
     deterministicGhostPower(source, botName) ??
     deterministicHardAudiencePower(source, botName) ??
     deterministicCandorPower(source, botName) ??
@@ -544,7 +986,10 @@ function deterministicPower(
     deterministicGradualMoodPower(source, botName) ??
     deterministicCoffeeDislikePower(source, botName);
   return mergeDeterministicPowerParts(
-    primary,
+    mergeDeterministicPowerParts(
+      primary,
+      deterministicAvatarScalePower(source, botName),
+    ),
     deterministicResponseBudgetPower(source, botName),
   );
 }
@@ -591,17 +1036,62 @@ function compiledEntrySatisfiesIntent(
   compiled: CompiledBotPowerV1,
   source: BotPowerV1
 ): boolean {
+  const requiredAvatarEffects = deterministicAvatarScalePower(source, "")
+    ?.effects.filter(
+      (effect) =>
+        effect.type === "avatar_scale" || effect.type === "avatar_visibility",
+    ) ?? [];
+  if (
+    requiredAvatarEffects.some(
+      (required) =>
+        !compiled.effects.some(
+          (effect) => JSON.stringify(effect) === JSON.stringify(required),
+        ),
+    )
+  ) {
+    return false;
+  }
   if (deterministicHearingRepeatPower(source, "")) {
     return compiled.effects.some((effect) => effect.type === "hearing_repeat");
   }
-  if (deterministicEchoAddressedPower(source, "")) {
-    return compiled.effects.some((effect) => effect.type === "echo_addressed");
+  if (deterministicEternalIntroductionPower(source, "")) {
+    return compiled.effects.some(
+      (effect) => effect.type === "eternal_introduction",
+    );
+  }
+  if (deterministicMumblingPower(source, "")) {
+    return compiled.effects.some(
+      (effect) => effect.type === "speech_obfuscation",
+    );
+  }
+  if (deterministicAddressedSpeechCopyPower(source, "")) {
+    return compiled.effects.some((effect) => effect.type === "speech_copy");
+  }
+  const circadian = deterministicCircadianPower(source, "");
+  if (circadian) {
+    return circadian.effects.every((required) =>
+      compiled.effects.some(
+        (effect) => JSON.stringify(effect) === JSON.stringify(required),
+      ),
+    );
+  }
+  if (deterministicJoyfulPower(source, "")) {
+    return compiled.effects.some((effect) => effect.type === "mood_boost");
+  }
+  if (deterministicSadPower(source, "")) {
+    return compiled.effects.some((effect) => effect.type === "mood_drain");
+  }
+  if (deterministicIdentityMirrorPower(source, "")) {
+    return compiled.effects.some((effect) => effect.type === "identity_mirror");
   }
   if (deterministicMutePower(source, "")) {
     return compiled.effects.some((effect) => effect.type === "mute");
   }
   if (deterministicInterruptionPower(source, "")) {
     return compiled.effects.some((effect) => effect.type === "interruption");
+  }
+  if (deterministicAddressedFandomPower(source, "")) {
+    return compiled.effects.some((effect) => effect.type === "addressed_fandom");
   }
   if (deterministicGhostPower(source, "")) {
     return compiled.effects.some(
@@ -762,6 +1252,9 @@ function providerFailureMessage(provider: LlmProvider, error: unknown): string {
 }
 
 function compileFailureMessage(power: BotPowerV1, provider: LlmProvider): string {
+  if (deterministicAvatarScalePower(power, "")) {
+    return `Local power compilation failed: invalid compiler output; required avatar-size rule missing. ${compilerDiagnosticContext(provider)}; describe the physical size clearly, then retry.`;
+  }
   if (deterministicGhostPower(power, "")) {
     return `Local power compilation failed: invalid compiler output; required speaking-only avatar rule missing. ${compilerDiagnosticContext(provider)}; describe the ghost's idle invisibility and speaking reveal, then retry.`;
   }
@@ -821,13 +1314,22 @@ export async function compileBotPowers(args: {
         "Return {\"powers\":[{\"id\":string,\"selfCue\":string,\"observerCue\":string,\"effects\":[],\"ruleLabels\":string[]}]}",
         "Allowed effects only:",
         '- {"type":"mute"},',
-        '- {"type":"echo_addressed"},',
+        '- {"type":"eternal_introduction","memory":"rolling_public_tail_1_to_4"},',
+        '- {"type":"speech_copy","trigger":"direct_address"},',
+        '- {"type":"identity_mirror","trigger":"direct_bot_address"},',
         '- {"type":"hearing_repeat","frequency":"occasional|frequent","moodPenalty":"small|medium|large"},',
         '- {"type":"awareness","allowed":[target...]},',
         '- {"type":"speech_audience","allowed":[target...]},',
         '- {"type":"avatar_visibility","mode":"speaking_only"},',
+        '- {"type":"avatar_scale","mode":"larger|smaller"},',
+        '- {"type":"voice_presence","mode":"loud|quiet"},',
+        '- {"type":"speech_obfuscation","mode":"gibberish"},',
+        '- {"type":"intermittent_mute","chance":"half","moodPenalty":"small|medium|large"},',
         '- {"type":"social_influence","trigger":"session_start|after_speech","polarity":"positive|negative","strength":"small|medium|large","targets":[target...]},',
+        '- {"type":"mood_boost","trigger":"after_spoken_turn","recipients":"addressed","strength":"small|medium|large","whenTheme":"light|dark" (optional)},',
+        '- {"type":"mood_drain","trigger":"after_direct_address","recipient":"addresser","strength":"small|medium|large","whenTheme":"light|dark" (optional)},',
         '- {"type":"candor","strength":"small|medium|large","targets":[target...]},',
+        '- {"type":"addressed_fandom","strength":"small|medium|large"},',
         '- {"type":"mood_resistance","polarity":"positive|negative|both","strength":"small|medium|large"},',
         '- {"type":"cup_rate","rate":"none|slow|fast|very_fast"},',
         '- {"type":"action_bias","cue":string,"frequency":"occasional|frequent"},',
@@ -875,7 +1377,7 @@ export async function compileBotPowers(args: {
         content: [
           "Repair malformed PRISM Power compiler output.",
           "Reply with JSON only and preserve the supplied power IDs exactly.",
-          "Every hard echo, hearing-repeat, active live-interruption, exclusive visibility, hearing-audience, ghostly speaking-only avatar, or strict response-length intent must include its matching echo_addressed, hearing_repeat, interruption, awareness, speech_audience, avatar_visibility, or response_budget effect, not only prose cues.",
+          "Every rolling one-to-four-message short-term-amnesia rule, addressed-speech copy, direct-addresser identity mirror, hearing-repeat, active live-interruption, exclusive visibility, hearing-audience, ghostly speaking-only avatar, physical avatar-size, loud/quiet voice presence, normal-volume gibberish, intermittent mute, strict response-length, current-addressee obsessive-fandom, after-spoken-turn recipient mood-boost, direct-addresser mood-drain, or light/dark conditional compound intent must include its matching typed effects, including exact whenTheme conditions for compound branches, not only prose cues.",
         ].join(" "),
       },
       {
@@ -884,7 +1386,7 @@ export async function compileBotPowers(args: {
           `Expected powers: ${JSON.stringify(unresolved.map(({ id, name, intent, enabled }) => ({ id, name, intent, enabled })))}`,
           `Prior output: ${compact(raw, 6000) || "(empty)"}`,
           "Return {\"powers\":[{\"id\":string,\"name\":string,\"selfCue\":string,\"observerCue\":string,\"effects\":[],\"ruleLabels\":string[]}]}",
-          "Allowed effect types: mute, echo_addressed, hearing_repeat, awareness, speech_audience, avatar_visibility, social_influence, candor, mood_resistance, cup_rate, action_bias, interruption, response_budget, turn_gravity, response_bond, topic_gravity, selective_memory, insight.",
+          "Allowed effect types: mute, eternal_introduction, speech_copy, identity_mirror, hearing_repeat, awareness, speech_audience, avatar_visibility, avatar_scale, voice_presence, speech_obfuscation, intermittent_mute, social_influence, mood_boost, mood_drain, candor, addressed_fandom, mood_resistance, cup_rate, action_bias, interruption, response_budget, turn_gravity, response_bond, topic_gravity, selective_memory, insight.",
         ].join("\n"),
       },
     ];

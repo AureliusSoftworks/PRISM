@@ -179,7 +179,7 @@ export function restoreFactoryDefaultsInDatabase(
           voice_mode = 'mute',
           voice_effects_enabled = 1,
           voice_volume = 1,
-          english_voice_engine = 'elevenlabs',
+          english_voice_engine = 'builtin',
           default_system_voice_name = NULL,
           default_elevenlabs_voice_id = NULL,
           elevenlabs_voice_bank = '{}',

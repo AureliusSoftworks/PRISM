@@ -554,6 +554,14 @@ describe("extractStageDirections", () => {
     assert.deepEqual(out.actions, ["glances at Plankton"]);
   });
 
+  it("keeps bodily-function synonyms as inline stage directions", () => {
+    const out = extractStageDirections(
+      "Well— *flatulates discreetly* excuse me. *clears her throat* Moving on.",
+    );
+    assert.equal(out.mainText, "Well— excuse me. Moving on.");
+    assert.deepEqual(out.actions, ["flatulates discreetly", "clears her throat"]);
+  });
+
   it("unwraps double-asterisk inline emphasis inside prose", () => {
     const out = extractStageDirections("The **idea** is still terrible.");
     assert.equal(out.mainText, "The idea is still terrible.");

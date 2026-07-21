@@ -201,6 +201,11 @@ describe("Signal review transcript", () => {
     );
     assert.match(transcript, /- Recorded runtime: 00:38\.300/u);
     assert.match(transcript, /- Completed model warmup holds: 00:01\.250/u);
+    assert.match(
+      transcript,
+      /- Counts: 2 transcript turns \(2 with spoken content, 0 silence-only\), 2 segments, 7 production events/u,
+    );
+    assert.match(transcript, /## Transcript/u);
     assert.match(transcript, /### Turn 01 \| 00:00\.000 \| Ada \(host\)/u);
     assert.match(
       transcript,
@@ -210,6 +215,7 @@ describe("Signal review transcript", () => {
       transcript,
       /- AUTO recovery: \{"attempts":2,"recoveredFrom":"primary-model"\}/u,
     );
+    assert.match(transcript, /- ONLINE retry: None recorded/u);
     assert.match(transcript, /- Immersive voice effect: yes/u);
     assert.match(
       transcript,
@@ -257,5 +263,82 @@ describe("Signal review transcript", () => {
       /- Turn routing: auto -> unknown -> provider default or unrecorded/u,
     );
     assert.match(transcript, /No production events were recorded\./u);
+  });
+
+  it("does not label hard-muted silence-only entries as spoken turns", () => {
+    const transcript = buildSignalReviewTranscript({
+      episode: {
+        ...episode,
+        messages: [
+          {
+            ...episode.messages[0]!,
+            content: "...",
+            voicePerformanceText: null,
+          },
+          episode.messages[1]!,
+        ],
+      },
+      show,
+      host: { id: "host-1", name: "Silent Jack" },
+      guest: { id: "guest-1", name: "Grace" },
+    });
+
+    assert.match(
+      transcript,
+      /- Counts: 2 transcript turns \(1 with spoken content, 1 silence-only\), 2 segments, 7 production events/u,
+    );
+    assert.doesNotMatch(transcript, /spoken turns/u);
+    assert.doesNotMatch(transcript, /Spoken Transcript/u);
+    assert.match(transcript, /Use the visible transcript for user-visible quality/u);
+  });
+
+  it("prints same-route ONLINE retry metadata beside the recovered utterance", () => {
+    const providerRecovery = {
+      v: 1,
+      strategy: "same_route_retry",
+      attempts: [
+        {
+          provider: "openai",
+          model: "gpt-signal",
+          durationMs: 410,
+          outcome: "failed",
+          reason: "provider_error",
+          httpStatus: 500,
+        },
+        {
+          provider: "openai",
+          model: "gpt-signal",
+          durationMs: 220,
+          outcome: "succeeded",
+        },
+      ],
+      finalProvider: "openai",
+      finalModel: "gpt-signal",
+    };
+    const transcript = buildSignalReviewTranscript({
+      episode: {
+        ...episode,
+        events: episode.events.map((event) =>
+          event.id === "event-2"
+            ? {
+                ...event,
+                payload: {
+                  ...event.payload,
+                  responseMode: "online",
+                  providerRecovery,
+                },
+              }
+            : event,
+        ),
+      },
+      show,
+      host: { id: "host-1", name: "Ada" },
+      guest: { id: "guest-1", name: "Grace" },
+    });
+
+    assert.match(
+      transcript,
+      /- ONLINE retry: \{"attempts":\[\{"durationMs":410,"httpStatus":500,"model":"gpt-signal","outcome":"failed","provider":"openai","reason":"provider_error"\},\{"durationMs":220,"model":"gpt-signal","outcome":"succeeded","provider":"openai"\}\],"finalModel":"gpt-signal","finalProvider":"openai","strategy":"same_route_retry","v":1\}/u,
+    );
   });
 });

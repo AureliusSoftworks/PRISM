@@ -62,8 +62,9 @@ describe("engine-agnostic voice effects", () => {
     const robot = resolveVoiceEffectPlan("robot");
     const echo = resolveVoiceEffectPlan("echo");
     const chorus = resolveVoiceEffectPlan("chorus");
+    const resonance = resolveVoiceEffectPlan("resonance");
     const deepSpace = resolveVoiceEffectPlan("deep-space");
-    const processed = [radio, robot, echo, chorus, deepSpace];
+    const processed = [radio, robot, echo, chorus, resonance, deepSpace];
 
     assert.equal(clean.drive, 0);
     assert.equal(clean.parallelVoices.length, 0);
@@ -75,14 +76,33 @@ describe("engine-agnostic voice effects", () => {
     assert.ok(robot.parallelVoices.some((voice) => voice.detuneCents < 0));
     assert.equal(echo.parallelVoices.length, 2);
     assert.equal(chorus.parallelVoices.length, 2);
+    assert.deepEqual(chorus.pitchCorrection, {
+      strength: 0.25,
+      maxCorrectionCents: 40,
+      glideSeconds: 0.1,
+    });
+    assert.ok(
+      [clean, radio, robot, echo, resonance, deepSpace].every(
+        (plan) => plan.pitchCorrection === undefined,
+      ),
+    );
+    assert.ok(resonance.parallelVoices.some((voice) => voice.detuneCents <= -300));
+    assert.ok(
+      resonance.parallelVoices.some(
+        (voice) => (voice.delayModulationFrequencyHz ?? 0) > 0,
+      ),
+    );
+    assert.ok(resonance.dryGain > chorus.dryGain);
+    assert.ok(resonance.lowpassHz < chorus.lowpassHz);
     assert.ok(deepSpace.parallelVoices.some((voice) => voice.detuneCents <= -500));
     assert.ok(processed.every((plan) => plan.outputTrim < 0.8));
     assert.ok(processed.every((plan) => plan.drive === 0 && plan.bitDepth === 16));
     assert.equal(new Set(processed.map((plan) => JSON.stringify(plan))).size, processed.length);
     assert.deepEqual(resolveElevenLabsVoiceEffectPlan("chorus"), chorus);
+    assert.deepEqual(resolveElevenLabsVoiceEffectPlan("resonance"), resonance);
   });
 
-  it("keeps Chorus doubling bounded throughout long replies", () => {
+  it("keeps the Prism doubling bounded throughout long replies", () => {
     const chorus = resolveVoiceEffectPlan("chorus");
     for (const voice of chorus.parallelVoices) {
       const modulationDepthSeconds = Math.abs(
@@ -94,6 +114,13 @@ describe("engine-agnostic voice effects", () => {
       assert.ok(voice.delaySeconds - modulationDepthSeconds >= 0);
       assert.ok(voice.delaySeconds + modulationDepthSeconds <= 0.03);
     }
+  });
+
+  it("analyzes the decoded carrier locally only for effects with pitch correction", () => {
+    const source = readFileSync(new URL("./voiceEffects.ts", import.meta.url), "utf8");
+    assert.match(source, /voiceEffect\.pitchCorrection\s*\?\s*analyzePrismPitchCorrection/u);
+    assert.match(source, /samples: decoded\.getChannelData\(0\)/u);
+    assert.match(source, /voicePitchCorrectionCentsAt\(pitchCorrectionPoints/u);
   });
 
   it("does not let a stale asynchronous decode stop newer playback", () => {
@@ -116,19 +143,26 @@ describe("engine-agnostic voice effects", () => {
       "utf8",
     );
     const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
-    assert.match(source, /VoicePlaybackChannel = "primary" \| "reaction"/);
+    assert.match(
+      source,
+      /VoicePlaybackChannel = "primary" \| "reaction" \| "crosstalk"/,
+    );
     assert.match(source, /stopRealtimeVoiceAudio\(channel\)/);
-    assert.match(source, /channel === "reaction" \? 0\.62 : 1/);
+    assert.match(source, /channel === "primary" \? 1 : 0\.62/);
     assert.match(source, /maxDurationMs/);
     assert.match(reactionSource, /args\.mode === "english"/u);
     assert.match(reactionSource, /buildBottishPlan/u);
     assert.match(reactionSource, /args\.mode === "babble"/u);
-    assert.match(reactionSource, /channel: "reaction"/u);
+    assert.match(reactionSource, /channel: args\.channel \?\? "reaction"/u);
     assert.match(reactionSource, /maxDurationMs: args\.plan\.interjectionAttempt \? 1_300 : 900/u);
     assert.match(reactionSource, /args\.plan\.vocalFoley && args\.mode !== "english"/u);
     assert.match(pageSource, /listenerReactionHasAudio\(plan\)/u);
     assert.match(pageSource, /listenerReactionFoley: args\.plan\.vocalFoley/u);
-    assert.match(pageSource, /if \(!preparedInTime\) return false/u);
+    assert.match(
+      pageSource,
+      /interruptedSpeakerCuePlayback !== "primary"/u,
+    );
+    assert.match(pageSource, /channel: "crosstalk"/u);
   });
 });
 

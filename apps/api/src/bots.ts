@@ -1,6 +1,8 @@
 import type { DatabaseSync } from "node:sqlite";
 import {
-  buildBotPowersSelfPromptV1,
+  botPowerAddressedFandomCueV1,
+  botPowerSelfCueLinesV1,
+  buildBotPowersPromptBlock,
   stripBotProfileMetaSuffix,
 } from "@localai/shared";
 import { randomId } from "./security.ts";
@@ -111,7 +113,15 @@ export function composeBotSystemPrompt(
       ? stripBotProfileMetaSuffix(systemPrompt).trim()
       : "";
 
-  const powersPrompt = buildBotPowersSelfPromptV1(powers);
+  const directFandomCue = botPowerAddressedFandomCueV1(
+    powers,
+    "the user speaking with you",
+    "Direct conversation",
+  );
+  const powersPrompt = buildBotPowersPromptBlock([
+    ...botPowerSelfCueLinesV1(powers),
+    ...(directFandomCue ? [directFandomCue] : []),
+  ]);
   if (!trimmedName && !trimmedPrompt && !powersPrompt) return undefined;
   const preamble = trimmedName.length > 0
     ? `You are ${trimmedName}. When the user addresses you as ${trimmedName}, respond as ${trimmedName}.`

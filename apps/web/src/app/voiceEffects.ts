@@ -16,6 +16,12 @@ import {
   type RoomAcousticsSend,
 } from "./roomAcoustics.ts";
 import type { PreSpeechBreathPlan } from "./preSpeechBreath.ts";
+import {
+  PRISM_VOICE_PITCH_CORRECTION,
+  analyzePrismPitchCorrection,
+  voicePitchCorrectionCentsAt,
+  type VoicePitchCorrectionPlan,
+} from "./voicePitchCorrection.ts";
 
 export interface VoiceEffectPlan {
   highpassHz: number;
@@ -28,6 +34,7 @@ export interface VoiceEffectPlan {
   modulationFrequencyHz: number;
   modulationDepth: number;
   modulationBaseGain: number;
+  pitchCorrection?: VoicePitchCorrectionPlan;
   parallelVoices: Array<{
     delaySeconds: number;
     detuneCents: number;
@@ -100,6 +107,7 @@ export function resolveVoiceEffectPlan(
         modulationFrequencyHz: 0,
         modulationDepth: 0,
         modulationBaseGain: 1,
+        pitchCorrection: PRISM_VOICE_PITCH_CORRECTION,
         parallelVoices: [
           {
             delaySeconds: 0.012,
@@ -114,6 +122,33 @@ export function resolveVoiceEffectPlan(
             gain: 0.34,
             delayModulationFrequencyHz: 0.27,
             delayModulationDepthSeconds: -0.005,
+          },
+        ],
+      };
+    case "resonance":
+      return {
+        highpassHz: 45,
+        lowpassHz: 14_000,
+        drive: 0,
+        bitDepth: 16,
+        dryGain: 0.82,
+        outputTrim: 0.66,
+        noiseGain: 0,
+        modulationFrequencyHz: 0,
+        modulationDepth: 0,
+        modulationBaseGain: 1,
+        parallelVoices: [
+          {
+            delaySeconds: 0.01,
+            detuneCents: -320,
+            gain: 0.28,
+          },
+          {
+            delaySeconds: 0.018,
+            detuneCents: 0,
+            gain: 0.22,
+            delayModulationFrequencyHz: 0.19,
+            delayModulationDepthSeconds: 0.003,
           },
         ],
       };
@@ -407,7 +442,7 @@ function createNoiseBuffer(context: AudioContext, durationSeconds: number, seed:
 }
 
 let audioContext: AudioContext | null = null;
-export type VoicePlaybackChannel = "primary" | "reaction";
+export type VoicePlaybackChannel = "primary" | "reaction" | "crosstalk";
 
 type FormantCorrectionNodeLike = AudioNode & {
   pitch: AudioParam;
@@ -461,6 +496,7 @@ const activeVoiceChannels: Record<
 > = {
   primary: { nodes: [], resolve: null, progress: null, roomConnection: null },
   reaction: { nodes: [], resolve: null, progress: null, roomConnection: null },
+  crosstalk: { nodes: [], resolve: null, progress: null, roomConnection: null },
 };
 
 const preSpeechBreathBufferCache = new Map<string, Promise<AudioBuffer | null>>();
@@ -604,6 +640,7 @@ export function stopRealtimeVoiceAudio(
 
 export function stopReactionVoiceAudio(): void {
   stopRealtimeVoiceAudio("reaction");
+  stopRealtimeVoiceAudio("crosstalk");
 }
 
 export async function playRealtimeVoiceBytes(args: {
@@ -650,7 +687,6 @@ export async function playRealtimeVoiceBytes(args: {
         )
       : "clean",
   );
-  const now = context.currentTime;
   const lifecycleOutputLatencyMs =
     args.compensateLifecycleForOutputLatency && args.lifecycle
     ? estimateVoiceOutputLatencyMs(context)
@@ -669,6 +705,19 @@ export async function playRealtimeVoiceBytes(args: {
       ? args.maxDurationMs
       : Number.POSITIVE_INFINITY,
   );
+  const pitchCorrectionPoints = voiceEffect.pitchCorrection
+    ? analyzePrismPitchCorrection({
+        samples: decoded.getChannelData(0),
+        sampleRate: decoded.sampleRate,
+        playbackRate: playbackRateRatio,
+        maxPlaybackDurationSeconds: playbackDurationSeconds,
+        plan: voiceEffect.pitchCorrection,
+        pitchOffsetCentsAt: (elapsedSeconds) =>
+          (args.detuneCents ?? transform.pitchCents) +
+          voiceLiltDetuneCents(profile.lilt, elapsedSeconds),
+      })
+    : [];
+  const now = context.currentTime;
   const FormantCorrectionNode = await formantCorrectionNodeConstructor(context);
   const createPitchTransform = (
     startAt: number,
@@ -682,12 +731,35 @@ export async function playRealtimeVoiceBytes(args: {
     node.playbackRate.setValueAtTime(playbackRateRatio, startAt);
     node.formantStrength.setValueAtTime(1, startAt);
     const basePitchCents = (args.detuneCents ?? transform.pitchCents) + effectDetuneCents;
-    node.pitch.setValueAtTime(2 ** (basePitchCents / 1200), startAt);
+    const pitchAutomationTimes = new Set<number>([0]);
     if (profile.lilt !== 0) {
       const contourStep = 0.32;
       for (let at = contourStep; at < playbackDurationSeconds; at += contourStep) {
-        const cents = basePitchCents + voiceLiltDetuneCents(profile.lilt, at);
-        node.pitch.linearRampToValueAtTime(2 ** (cents / 1200), startAt + at);
+        pitchAutomationTimes.add(at);
+      }
+    }
+    for (const point of pitchCorrectionPoints) {
+      if (point.atSeconds > 0 && point.atSeconds < playbackDurationSeconds) {
+        pitchAutomationTimes.add(point.atSeconds);
+      }
+    }
+    const orderedPitchAutomationTimes = [...pitchAutomationTimes].sort(
+      (left, right) => left - right,
+    );
+    for (let index = 0; index < orderedPitchAutomationTimes.length; index += 1) {
+      const elapsedSeconds = orderedPitchAutomationTimes[index] ?? 0;
+      const cents =
+        basePitchCents +
+        voiceLiltDetuneCents(profile.lilt, elapsedSeconds) +
+        voicePitchCorrectionCentsAt(pitchCorrectionPoints, elapsedSeconds);
+      const pitchRatio = 2 ** (cents / 1_200);
+      if (index === 0) {
+        node.pitch.setValueAtTime(pitchRatio, startAt);
+      } else {
+        node.pitch.linearRampToValueAtTime(
+          pitchRatio,
+          startAt + elapsedSeconds,
+        );
       }
     }
     return node;
@@ -743,7 +815,7 @@ export async function playRealtimeVoiceBytes(args: {
     0.88 *
     voiceEffect.outputTrim *
     voiceCharacter.gainMultiplier *
-    (channel === "reaction" ? 0.62 : 1);
+    (channel === "primary" ? 1 : 0.62);
   lowShelf.type = "lowshelf";
   lowShelf.frequency.value = BOT_VOICE_LOW_SHELF_HZ;
   lowShelf.gain.value = voiceCharacter.lowShelfDb;

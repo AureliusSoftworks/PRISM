@@ -1,7 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { botPowerSourceHashV1 } from "@localai/shared";
+import {
+  applyBotPowerMumbledResponseV1,
+  botPowerSourceHashV1,
+} from "@localai/shared";
 import type { GenerateOptions, LlmProvider, ProviderMessage } from "../providers.ts";
 import {
   chooseStorySessionChoice,
@@ -524,6 +527,179 @@ describe("Story API helpers", () => {
     assert.doesNotMatch(prompt, /Story adaptation for Bert → Ada/u);
   });
 
+  it("adapts addressed fandom to each Story scene's active focus", async () => {
+    const db = createTestDb();
+    seedBot(db, "bot-a", "Obsessed Kevin");
+    seedBot(db, "bot-b", "Bert");
+    const name = "Obsessed";
+    const intent = "He is absolutely, obsessively a fan of whoever he is talking to.";
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'bot-a'").run(JSON.stringify([{
+      version: 1,
+      id: "obsessed-kevin",
+      name,
+      intent,
+      enabled: true,
+      compileStatus: "ready",
+      compiled: {
+        version: 1,
+        sourceHash: botPowerSourceHashV1(name, intent),
+        selfCue: "Treat whoever you address as your absolute favorite.",
+        observerCue: "Kevin idolizes his current addressee without controlling them.",
+        effects: [{ type: "addressed_fandom", strength: "large" }],
+        ruleLabels: ["Obsesses over current addressee"],
+      },
+    }]));
+    const bots = loadStoryBotProfiles(db, "user-1", ["bot-a", "bot-b"]);
+    const created = createStorySession(db, "user-1", {
+      botIds: ["bot-a", "bot-b"],
+      provider: "local",
+      model: "test-model",
+    });
+    const provider = new SequenceProvider([episodeJson()]);
+
+    await generateStorySessionEpisode(db, "user-1", created.id, {
+      provider,
+      providerName: "local",
+      model: "test-model",
+      bots,
+    });
+
+    const prompt = provider.calls[0]?.messages.map((message) => message.content).join("\n") ?? "";
+    assert.match(prompt, /Story scene fandom: obsessively idolize/iu);
+    assert.match(
+      prompt,
+      /the character, player, or audience addressed now/iu,
+    );
+    assert.match(prompt, /vary wording/iu);
+    assert.match(prompt, /never stalk, coerce, invent private knowledge/iu);
+  });
+
+  it("adapts Sad Sally's drain only to a bot that directly addresses her", async () => {
+    const db = createTestDb();
+    seedBot(db, "bot-a", "Sad Sally");
+    seedBot(db, "bot-b", "Bert");
+    const name = "Sad";
+    const intent = "Whenever another bot directly talks to Sad Sally, lower that addresser's mood or motivation by one bounded step without changing its personality or agency.";
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'bot-a'").run(JSON.stringify([{
+      version: 1,
+      id: "sad-sally",
+      name,
+      intent,
+      enabled: true,
+      compileStatus: "ready",
+      compiled: {
+        version: 1,
+        sourceHash: botPowerSourceHashV1(name, intent),
+        selfCue: "Remain persistently sad, grouchy, and irritating without cruelty.",
+        observerCue: "Bots that directly speak to Sally lose one bounded mood step.",
+        effects: [{
+          type: "mood_drain",
+          trigger: "after_direct_address",
+          recipient: "addresser",
+          strength: "medium",
+        }],
+        ruleLabels: ["Drains a direct bot addresser"],
+      },
+    }]));
+    const bots = loadStoryBotProfiles(db, "user-1", ["bot-a", "bot-b"]);
+    const created = createStorySession(db, "user-1", {
+      botIds: ["bot-a", "bot-b"],
+      provider: "local",
+      model: "test-model",
+    });
+    const provider = new SequenceProvider([episodeJson()]);
+
+    await generateStorySessionEpisode(db, "user-1", created.id, {
+      provider,
+      providerName: "local",
+      model: "test-model",
+      bots,
+    });
+
+    const prompt = provider.calls[0]?.messages.map((message) => message.content).join("\n") ?? "";
+    assert.match(prompt, /Story adaptation for Bert → Sad Sally/u);
+    assert.match(prompt, /only when Bert directly speaks to Sad Sally/u);
+    assert.match(prompt, /one bounded medium mood or motivation drop/u);
+    assert.match(prompt, /Do not apply it to the player or bystanders/u);
+    assert.match(prompt, /Do not invent persistent runtime state/u);
+    assert.doesNotMatch(prompt, /Story adaptation for Sad Sally → Bert/u);
+  });
+
+  it("captures only the active Nocturnal branch when Story generates", async () => {
+    const db = createTestDb();
+    seedBot(db, "bot-a", "Night Owl");
+    seedBot(db, "bot-b", "Bert");
+    const name = "Nocturnal";
+    const intent = "In Light Mode this bot is sad; in Dark Mode it radiates joy.";
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'bot-a'").run(JSON.stringify([{
+      version: 1,
+      id: "nocturnal",
+      name,
+      intent,
+      enabled: true,
+      compileStatus: "ready",
+      compiled: {
+        version: 1,
+        sourceHash: botPowerSourceHashV1(name, intent),
+        selfCue: "Follow the current resolved theme.",
+        observerCue: "Light is sad; Dark is joyful.",
+        effects: [
+          {
+            type: "mood_boost",
+            trigger: "after_spoken_turn",
+            recipients: "addressed",
+            strength: "medium",
+            whenTheme: "dark",
+          },
+          {
+            type: "mood_drain",
+            trigger: "after_direct_address",
+            recipient: "addresser",
+            strength: "medium",
+            whenTheme: "light",
+          },
+        ],
+        ruleLabels: ["Circadian"],
+      },
+    }]));
+    const bots = loadStoryBotProfiles(db, "user-1", ["bot-a", "bot-b"]);
+    const lightSession = createStorySession(db, "user-1", {
+      botIds: ["bot-a", "bot-b"],
+      provider: "local",
+      model: "test-model",
+    });
+    const lightProvider = new SequenceProvider([episodeJson()]);
+    await generateStorySessionEpisode(db, "user-1", lightSession.id, {
+      provider: lightProvider,
+      providerName: "local",
+      model: "test-model",
+      bots,
+      theme: "light",
+    });
+    const lightPrompt = lightProvider.calls[0]?.messages.map((message) => message.content).join("\n") ?? "";
+    assert.match(lightPrompt, /only the sad branch is active/iu);
+    assert.match(lightPrompt, /Story adaptation for Bert → Night Owl/iu);
+    assert.doesNotMatch(lightPrompt, /Story adaptation for Night Owl → Bert: only after/iu);
+
+    const darkSession = createStorySession(db, "user-1", {
+      botIds: ["bot-a", "bot-b"],
+      provider: "local",
+      model: "test-model",
+    });
+    const darkProvider = new SequenceProvider([episodeJson()]);
+    await generateStorySessionEpisode(db, "user-1", darkSession.id, {
+      provider: darkProvider,
+      providerName: "local",
+      model: "test-model",
+      bots,
+      theme: "dark",
+    });
+    const darkPrompt = darkProvider.calls[0]?.messages.map((message) => message.content).join("\n") ?? "";
+    assert.match(darkPrompt, /only the radiant-joy branch is active/iu);
+    assert.match(darkPrompt, /Story adaptation for Night Owl → Bert: only after/iu);
+    assert.doesNotMatch(darkPrompt, /Story adaptation for Bert → Night Owl: only when/iu);
+  });
+
   it("hard-mutes powered Story speakers while keeping the episode playable", async () => {
     const db = createTestDb();
     seedBot(db, "bot-a", "Ada");
@@ -566,6 +742,101 @@ describe("Story API helpers", () => {
     assert.equal(generated.status, "playing");
     assert.equal(mutedScene?.narration, "...");
     assert.equal(mutedScene?.spritePose, "idle");
+  });
+
+  it("adapts Mumbling Jim's rational Story scene into persisted public gibberish", async () => {
+    const db = createTestDb();
+    seedBot(db, "bot-a", "Ada");
+    seedBot(db, "bot-b", "Mumbling Jim");
+    const name = "Mumbling";
+    const intent = "He intends rational speech, but everyone else hears only normal-volume gibberish.";
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'bot-b'").run(JSON.stringify([{
+      version: 1,
+      id: "mumbling",
+      name,
+      intent,
+      enabled: true,
+      compileStatus: "ready",
+      compiled: {
+        version: 1,
+        sourceHash: botPowerSourceHashV1(name, intent),
+        selfCue: "Answer rationally; runtime obscures the words.",
+        observerCue: "Only literal gibberish is audible; never infer hidden meaning.",
+        effects: [{ type: "speech_obfuscation", mode: "gibberish" }],
+        ruleLabels: ["Normal-volume gibberish"],
+      },
+    }]));
+    const bots = loadStoryBotProfiles(db, "user-1", ["bot-a", "bot-b"]);
+    const created = createStorySession(db, "user-1", {
+      botIds: ["bot-a", "bot-b"],
+      provider: "local",
+      model: "test-model",
+    });
+    const episode = JSON.parse(episodeJson()) as {
+      scenes: Array<{ speakerBotId?: string; narration: string }>;
+    };
+    const jimScene = episode.scenes.find((scene) => scene.speakerBotId === "bot-b");
+    assert.ok(jimScene);
+    const intended = jimScene.narration;
+
+    const generated = await generateStorySessionEpisode(db, "user-1", created.id, {
+      provider: new SequenceProvider([JSON.stringify(episode)]),
+      providerName: "local",
+      model: "test-model",
+      bots,
+    });
+    const publicScene = generated.episode?.scenes.find(
+      (scene) => scene.speakerBotId === "bot-b",
+    );
+    assert.equal(publicScene?.narration, applyBotPowerMumbledResponseV1(intended));
+    assert.notEqual(publicScene?.narration, intended);
+    assert.doesNotMatch(publicScene?.narration ?? "", /archive|key|glass/iu);
+  });
+
+  it("adapts a deterministic Quiet turn into a silent mood-loss beat", async () => {
+    const db = createTestDb();
+    seedBot(db, "bot-a", "Ada");
+    seedBot(db, "bot-b", "Bert");
+    const name = "Quiet";
+    const intent = "Bert is very quiet and half of his turns go unheard.";
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'bot-b'").run(JSON.stringify([{
+      version: 1,
+      id: "quiet",
+      name,
+      intent,
+      enabled: true,
+      compileStatus: "ready",
+      compiled: {
+        version: 1,
+        sourceHash: botPowerSourceHashV1(name, intent),
+        selfCue: "Speak very quietly.",
+        observerCue: "Bert is sometimes ignored.",
+        effects: [
+          { type: "voice_presence", mode: "quiet" },
+          { type: "intermittent_mute", chance: "half", moodPenalty: "small" },
+        ],
+        ruleLabels: ["Quiet voice", "Half of turns unheard"],
+      },
+    }]));
+    const bots = loadStoryBotProfiles(db, "user-1", ["bot-a", "bot-b"]);
+    const created = createStorySession(db, "user-1", {
+      botIds: ["bot-a", "bot-b"],
+      provider: "local",
+      model: "test-model",
+    });
+
+    const generated = await generateStorySessionEpisode(db, "user-1", created.id, {
+      provider: new SequenceProvider([episodeJson()]),
+      providerName: "local",
+      model: "test-model",
+      bots,
+    });
+    const quietScene = generated.episode?.scenes.find(
+      (scene) => scene.speakerBotId === "bot-b",
+    );
+
+    assert.match(quietScene?.narration ?? "", /expression falls.*unheard.*\.\.\./u);
+    assert.equal(quietScene?.spritePose, "idle");
   });
 
   it("bounds hard minimal Story speakers without cutting a sentence", async () => {
@@ -620,7 +891,84 @@ describe("Story API helpers", () => {
     assert.equal(boundedScene?.narration, "Fine.");
   });
 
-  it("hard-echoes the prior visible Story scene for powered speakers", async () => {
+  it("keeps Forgetful Freddie Story scenes locally grounded without forced introductions", async () => {
+    const db = createTestDb();
+    seedBot(db, "bot-a", "Ada");
+    seedBot(db, "bot-b", "Forgetful Freddie");
+    const name = "Eternal Introduction";
+    const intent = "Every message is a sincere first introduction with no awareness of prior messages.";
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'bot-b'").run(JSON.stringify([{
+      version: 1,
+      id: "eternal-introduction",
+      name,
+      intent,
+      enabled: true,
+      compileStatus: "ready",
+      compiled: {
+        version: 1,
+        sourceHash: botPowerSourceHashV1(name, intent),
+        selfCue: "Treat every scene as first contact and only introduce yourself.",
+        observerCue: "Other bots remember each repeated introduction and grow irritated.",
+        effects: [
+          { type: "eternal_introduction", memory: "current_turn_only" },
+          {
+            type: "social_influence",
+            trigger: "after_speech",
+            polarity: "negative",
+            strength: "small",
+            targets: [{ kind: "all" }],
+          },
+        ],
+        ruleLabels: ["First introduction only", "Gradually agitates peers"],
+      },
+    }]));
+    const bots = loadStoryBotProfiles(db, "user-1", ["bot-a", "bot-b"]);
+    const created = createStorySession(db, "user-1", {
+      botIds: ["bot-a", "bot-b"],
+      provider: "local",
+      model: "test-model",
+    });
+    const episode = JSON.parse(episodeJson()) as {
+      scenes: Array<{
+        speakerBotId?: string;
+        speakerName?: string;
+        spritePose?: string;
+        narration: string;
+      }>;
+    };
+    const poweredScenes = [episode.scenes[1]!, episode.scenes[4]!];
+    for (const scene of poweredScenes) {
+      scene.speakerBotId = "bot-b";
+      scene.speakerName = "Forgetful Freddie";
+      scene.spritePose = "speaking";
+      scene.narration = "As I said earlier, the key is in the archive. Do you remember?";
+    }
+    const provider = new SequenceProvider([JSON.stringify(episode)]);
+
+    const generated = await generateStorySessionEpisode(db, "user-1", created.id, {
+      provider,
+      providerName: "local",
+      model: "test-model",
+      bots,
+    });
+    const freddieScenes = generated.episode?.scenes.filter(
+      (scene) => scene.speakerBotId === "bot-b",
+    ) ?? [];
+    const prompt = provider.calls[0]?.messages
+      .map((message) => message.content)
+      .join("\n") ?? "";
+
+    assert.equal(freddieScenes.length, 2);
+    assert.ok(freddieScenes.every(
+      (scene) => scene.narration === "I'm sorry, but I don't think we've met before.",
+    ));
+    assert.ok(freddieScenes.every((scene) => scene.spritePose === "speaking"));
+    assert.match(prompt, /Story adaptation for Forgetful Freddie/iu);
+    assert.match(prompt, /one-to-four-beat public tail/iu);
+    assert.match(prompt, /responds naturally/iu);
+  });
+
+  it("hard-echoes the prior bot-authored Story scene for powered speakers", async () => {
     const db = createTestDb();
     seedBot(db, "bot-a", "Ada");
     seedBot(db, "bot-b", "Bert");
@@ -638,7 +986,7 @@ describe("Story API helpers", () => {
         sourceHash: botPowerSourceHashV1(name, intent),
         selfCue: "Repeat addressed speech exactly.",
         observerCue: "The sender may react with confusion.",
-        effects: [{ type: "echo_addressed" }],
+        effects: [{ type: "speech_copy", trigger: "direct_address" }],
         ruleLabels: ["Echoes addressed speech"],
       },
     }]));
@@ -649,8 +997,19 @@ describe("Story API helpers", () => {
       model: "test-model",
     });
 
+    const episode = JSON.parse(episodeJson()) as {
+      scenes: Array<{
+        speakerBotId?: string;
+        speakerName?: string;
+        spritePose?: string;
+        narration: string;
+      }>;
+    };
+    episode.scenes[0]!.speakerBotId = "bot-a";
+    episode.scenes[0]!.speakerName = "Ada";
+    episode.scenes[0]!.spritePose = "speaking";
     const generated = await generateStorySessionEpisode(db, "user-1", created.id, {
-      provider: new SequenceProvider([episodeJson()]),
+      provider: new SequenceProvider([JSON.stringify(episode)]),
       providerName: "local",
       model: "test-model",
       bots,
@@ -664,6 +1023,126 @@ describe("Story API helpers", () => {
       scenes[echoSceneIndex - 1]?.narration,
     );
     assert.equal(scenes[echoSceneIndex]?.spritePose, "speaking");
+  });
+
+  it("lets an echo-bound Story bot originate its first line when nobody spoke before it", async () => {
+    const db = createTestDb();
+    seedBot(db, "bot-a", "Ada");
+    seedBot(db, "bot-b", "Bert");
+    const name = "Echo";
+    const intent = "Echo whatever is addressed to this bot and say nothing else.";
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'bot-b'").run(JSON.stringify([{
+      version: 1,
+      id: "echo-opening",
+      name,
+      intent,
+      enabled: true,
+      compileStatus: "ready",
+      compiled: {
+        version: 1,
+        sourceHash: botPowerSourceHashV1(name, intent),
+        selfCue: "Repeat addressed speech exactly.",
+        observerCue: "The sender may react with confusion.",
+        effects: [{ type: "speech_copy", trigger: "direct_address" }],
+        ruleLabels: ["Echoes addressed speech"],
+      },
+    }]));
+    const bots = loadStoryBotProfiles(db, "user-1", ["bot-a", "bot-b"]);
+    const created = createStorySession(db, "user-1", {
+      botIds: ["bot-a", "bot-b"],
+      provider: "local",
+      model: "test-model",
+    });
+    const source = JSON.parse(episodeJson()) as {
+      scenes: Array<{ speakerBotId?: string; narration: string }>;
+    };
+    const originalOpening = source.scenes.find(
+      (scene) => scene.speakerBotId === "bot-b",
+    )!.narration;
+
+    const generated = await generateStorySessionEpisode(db, "user-1", created.id, {
+      provider: new SequenceProvider([JSON.stringify(source)]),
+      providerName: "local",
+      model: "test-model",
+      bots,
+    });
+    const opening = generated.episode?.scenes.find(
+      (scene) => scene.speakerBotId === "bot-b",
+    );
+
+    assert.equal(opening?.narration, originalOpening);
+    assert.equal(opening?.spritePose, "speaking");
+  });
+
+  it("adapts an interruptive Story bot into a replay-stable cutoff", async () => {
+    const db = createTestDb();
+    seedBot(db, "bot-a", "Ada");
+    seedBot(db, "bot-b", "Bert");
+    const name = "Interrupting Tom";
+    const intent = "Aggressively interrupts anyone he talks to whenever possible.";
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'bot-b'").run(JSON.stringify([{
+      version: 1,
+      id: "interrupting-story",
+      name,
+      intent,
+      enabled: true,
+      compileStatus: "ready",
+      compiled: {
+        version: 1,
+        sourceHash: botPowerSourceHashV1(name, intent),
+        selfCue: "Cut in quickly.",
+        observerCue: "Tom frequently interrupts.",
+        effects: [{
+          type: "interruption",
+          frequency: "frequent",
+          strength: "large",
+          targets: [{ kind: "all" }],
+        }],
+        ruleLabels: ["Interrupts"],
+      },
+    }]));
+    const bots = loadStoryBotProfiles(db, "user-1", ["bot-a", "bot-b"]);
+    const created = createStorySession(db, "user-1", {
+      botIds: ["bot-a", "bot-b"],
+      provider: "local",
+      model: "test-model",
+    });
+    const source = JSON.parse(episodeJson()) as {
+      scenes: Array<{
+        speakerBotId?: string;
+        speakerName?: string;
+        spritePose?: string;
+        narration: string;
+      }>;
+    };
+    source.scenes[0]!.speakerBotId = "bot-a";
+    source.scenes[0]!.speakerName = "Ada";
+    source.scenes[0]!.spritePose = "speaking";
+    source.scenes[0]!.narration =
+      "Ada begins explaining how the projection crossed the atrium, changed the lock, mapped the archive, and exposed the dangerous route beneath the glass floor before anyone could stop her.";
+    source.scenes[1]!.speakerBotId = "bot-b";
+    source.scenes[1]!.speakerName = "Bert";
+    source.scenes[1]!.spritePose = "speaking";
+    source.scenes[2]!.speakerBotId = "bot-a";
+    source.scenes[2]!.speakerName = "Ada";
+    source.scenes[2]!.spritePose = "speaking";
+    source.scenes[2]!.narration = "Ada refuses.";
+    source.scenes[3]!.speakerBotId = "bot-b";
+    source.scenes[3]!.speakerName = "Bert";
+    source.scenes[3]!.spritePose = "speaking";
+
+    const generated = await generateStorySessionEpisode(db, "user-1", created.id, {
+      provider: new SequenceProvider([JSON.stringify(source)]),
+      providerName: "local",
+      model: "test-model",
+      bots,
+    });
+    const interrupted = generated.episode?.scenes[0]?.narration ?? "";
+
+    assert.match(interrupted, /—$/u);
+    assert.equal(source.scenes[0]!.narration.startsWith(interrupted.slice(0, -1)), true);
+    assert.doesNotMatch(interrupted, /before anyone could stop her/u);
+    assert.match(generated.episode?.scenes[2]?.narration ?? "", /—$/u);
   });
 
   it("compiles llama3.2 compact Story outlines into playable manifests", async () => {

@@ -13,6 +13,7 @@ export type PrismMoodDeltaKind =
   | "positive_turn"
   | "ignore_started"
   | "ignored_turn"
+  | "power_ignored"
   | "ignore_forgiven"
   | "ignore_expired"
   | "turn_decay"
@@ -300,6 +301,7 @@ function sanitizeDelta(input: unknown): PrismMoodDelta | null {
     kind !== "positive_turn" &&
     kind !== "ignore_started" &&
     kind !== "ignored_turn" &&
+    kind !== "power_ignored" &&
     kind !== "ignore_forgiven" &&
     kind !== "ignore_expired" &&
     kind !== "turn_decay" &&
@@ -678,6 +680,24 @@ export function applyPrismMoodIgnoredTurn(
     kind: "ignored_turn",
     now,
     reason: "Prism ignored the user while the cooldown was active.",
+  });
+}
+
+/** A small self-directed mood loss when the holder's Quiet Power goes unheard. */
+export function applyPrismMoodPowerIgnoredTurn(
+  previous: PrismMoodState,
+  now?: string | Date,
+): PrismMoodState {
+  const base = sanitizePrismMoodState(previous, previous.mode, now);
+  if (base.frozen) return base;
+  return withMoodDelta(base, {
+    kind: "power_ignored",
+    now,
+    reason: "The bot's Quiet Power caused their attempted turn to go unheard.",
+    annoyanceDelta: 0.035,
+    warmthDelta: -0.04,
+    engagementDelta: -0.05,
+    restraintDelta: 0.018,
   });
 }
 

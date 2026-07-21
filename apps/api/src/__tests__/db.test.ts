@@ -60,6 +60,52 @@ describe("createDatabase runtime pragmas", () => {
   });
 });
 
+describe("createDatabase English voice engine compatibility", () => {
+  it("defaults new accounts to builtin without rewriting saved Premium accounts", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "prism-voice-engine-"));
+    const previousDbPath = process.env.DB_PATH;
+    const previousDataDir = process.env.LOCALAI_DATA_DIR;
+    process.env.DB_PATH = join(tempDir, "voice-engine.db");
+    delete process.env.LOCALAI_DATA_DIR;
+    try {
+      const db = createDatabase();
+      db.prepare(
+        "INSERT INTO users (id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, created_at, last_active_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      ).run(
+        "voice-user",
+        "voice-user@example.com",
+        "Voice User",
+        "hash",
+        "salt",
+        "cipher",
+        "iv",
+        "tag",
+        "2026-07-20T00:00:00.000Z",
+        "2026-07-20T00:00:00.000Z",
+      );
+
+      const readEngine = (): string =>
+        (
+          db
+            .prepare("SELECT english_voice_engine FROM users WHERE id = ?")
+            .get("voice-user") as { english_voice_engine: string }
+        ).english_voice_engine;
+      assert.equal(readEngine(), "builtin");
+
+      db.prepare(
+        "UPDATE users SET english_voice_engine = 'elevenlabs' WHERE id = ?",
+      ).run("voice-user");
+      initializeDatabase(db);
+      assert.equal(readEngine(), "elevenlabs");
+      db.close();
+    } finally {
+      restoreEnv("DB_PATH", previousDbPath);
+      restoreEnv("LOCALAI_DATA_DIR", previousDataDir);
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("createDatabase legal acceptance schema", () => {
   it("creates versioned, account-scoped clickwrap records", () => {
     const tempDir = mkdtempSync(join(tmpdir(), "prism-legal-schema-"));
@@ -155,6 +201,9 @@ describe("createDatabase bot export hash migration", () => {
       db.exec(
         "ALTER TABLE botcast_shows DROP COLUMN fallback_studio_accent_variant;"
       );
+      db.exec(
+        "ALTER TABLE botcast_shows DROP COLUMN host_chat_ignoring_until_guest_show;"
+      );
       db.close();
 
       const reopened = createDatabase();
@@ -178,6 +227,11 @@ describe("createDatabase bot export hash migration", () => {
       assert.ok(
         botcastShowColumns.some(
           (column) => column.name === "fallback_studio_accent_variant"
+        )
+      );
+      assert.ok(
+        botcastShowColumns.some(
+          (column) => column.name === "host_chat_ignoring_until_guest_show"
         )
       );
       assert.ok(

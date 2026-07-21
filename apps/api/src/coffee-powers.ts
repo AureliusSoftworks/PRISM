@@ -2,17 +2,31 @@ import type { DatabaseSync } from "node:sqlite";
 import {
   activeBotPowerEffectsV1,
   activeBotPowersV1,
+  botPowerDefinitionIsUnconditionalInterruptionV1,
+  botPowerAddressedFandomCueFromEffectsV1,
   botPowerCandorResponseRuleV1,
   botPowerCandorTriggerV1,
+  botPowerEternallyIntroducesFromEffectsV1,
+  botPowerForgetfulPriorMessagesV1,
+  botPowerThemeMoodCueFromEffectsV1,
+  botPowerResponseIsSilentV1,
+  botPowerIntermittentMuteEffectFromEffectsV1,
+  botPowerIntermittentMuteTurnIsIgnoredFromEffectsV1,
+  strongestBotPowerMoodBoostEffectFromEffectsV1,
+  strongestBotPowerMoodDrainEffectFromEffectsV1,
+  botPowerVoicePresenceModeFromEffectsV1,
   buildCoffeePowersPromptBlock,
   COFFEE_HISTORY_WINDOW_HARD_CAP,
   coffeePowerCupRateMultiplierV1,
   type BotPowerEffectV1,
   type BotPowerResponseBudgetEffectV1,
+  type BotPowerResolvedThemeV1,
   type BotPowerStrength,
   type BotPowerTargetV1,
   type CoffeeBotSocialSnapshot,
   type CoffeePowerPlanV1,
+  type CoffeeReplayPowerMoodBoostEventPayload,
+  type CoffeeReplayPowerMoodDrainEventPayload,
   type ResolvedCoffeePowerBotV1,
 } from "@localai/shared";
 import {
@@ -272,8 +286,15 @@ export function coffeePowerHistoryForSpeaker<
   speakerBotId: string;
   history: readonly T[];
   baseLimit: number;
+  stableTurnKey?: unknown;
 }): T[] {
   const effects = args.plan?.bots[args.speakerBotId]?.effects ?? [];
+  if (botPowerEternallyIntroducesFromEffectsV1(effects)) {
+    return botPowerForgetfulPriorMessagesV1(
+      args.history,
+      args.stableTurnKey ?? `${args.speakerBotId}:${args.history.length}`,
+    );
+  }
   const baseStart = Math.max(0, args.history.length - Math.max(0, Math.floor(args.baseLimit)));
   const retainedIndexes = new Set<number>();
   for (let index = baseStart; index < args.history.length; index += 1) retainedIndexes.add(index);
@@ -448,16 +469,42 @@ export function resolveCoffeePowersForSession(
     const powers = activeBotPowersV1(bot.powers_json);
     if (powers.length === 0) continue;
     const warnings: string[] = [];
-    const effects = activeBotPowerEffectsV1(powers).map((effect) =>
-      resolvedEffect(effect, bot.id, orderedBots, warnings)
+    const effects = powers.flatMap((power) =>
+      activeBotPowerEffectsV1([power]).map((effect) =>
+        resolvedEffect(
+          effect.type === "interruption" &&
+            botPowerDefinitionIsUnconditionalInterruptionV1(
+              power.name,
+              power.intent,
+            )
+            ? { ...effect, certainty: "always" as const }
+            : effect,
+          bot.id,
+          orderedBots,
+          warnings,
+        ),
+      ),
     );
     const awareness = effects.find((effect) => effect.type === "awareness");
     const speechAudience = effects.find((effect) => effect.type === "speech_audience");
+    const genericCuePowers = powers.filter(
+      (power) =>
+        !power.compiled?.effects.some(
+          (effect) => effect.type === "identity_mirror",
+        ),
+    );
     const resolved: ResolvedCoffeePowerBotV1 = {
       botId: bot.id,
       powerIds: powers.map((power) => power.id),
-      selfCue: powers.map((power) => power.compiled?.selfCue ?? "").filter(Boolean).join(" "),
-      observerCue: powers.map((power) => power.compiled?.observerCue ?? "").filter(Boolean).join(" "),
+      powerNames: powers.map((power) => power.name || "Power"),
+      selfCue: genericCuePowers
+        .map((power) => power.compiled?.selfCue ?? "")
+        .filter(Boolean)
+        .join(" "),
+      observerCue: genericCuePowers
+        .map((power) => power.compiled?.observerCue ?? "")
+        .filter(Boolean)
+        .join(" "),
       visibleToBotIds:
         awareness?.type === "awareness" ? idsFromResolvedTargets(awareness.allowed) : null,
       speechAudienceBotIds:
@@ -493,6 +540,35 @@ export function coffeePowerBotIsMuted(plan: CoffeePowerPlanV1 | null, botId: str
   return plan?.bots[botId]?.effects.some((effect) => effect.type === "mute") === true;
 }
 
+export function coffeePowerBotEternallyIntroduces(
+  plan: CoffeePowerPlanV1 | null,
+  botId: string,
+): boolean {
+  return botPowerEternallyIntroducesFromEffectsV1(
+    plan?.bots[botId]?.effects ?? [],
+  );
+}
+
+export function coffeePowerVoicePresenceMode(
+  plan: CoffeePowerPlanV1 | null,
+  botId: string,
+): "loud" | "quiet" | null {
+  return botPowerVoicePresenceModeFromEffectsV1(plan?.bots[botId]?.effects ?? []);
+}
+
+export function coffeePowerQuietTurnIsIgnored(args: {
+  plan: CoffeePowerPlanV1 | null;
+  botId: string;
+  stableTurnKey: string;
+}): boolean {
+  const effects = args.plan?.bots[args.botId]?.effects ?? [];
+  return Boolean(botPowerIntermittentMuteEffectFromEffectsV1(effects)) &&
+    botPowerIntermittentMuteTurnIsIgnoredFromEffectsV1(
+      effects,
+      args.stableTurnKey,
+    );
+}
+
 /** Uses the frozen Coffee plan, so replay keeps the session's ghostly reveal. */
 export function coffeePowerBotHasSpeakingOnlyAvatarVisibility(
   plan: CoffeePowerPlanV1 | null,
@@ -509,7 +585,8 @@ export function coffeePowerBotEchoesAddressedSpeech(
   botId: string,
 ): boolean {
   return plan?.bots[botId]?.effects.some(
-    (effect) => effect.type === "echo_addressed",
+    (effect) =>
+      effect.type === "speech_copy" && effect.trigger === "direct_address",
   ) === true;
 }
 
@@ -540,6 +617,15 @@ export function coffeePowerEchoSourceForTurn(args: {
     return args.latestAssistantContent;
   }
   return null;
+}
+
+export function coffeePowerBotMumblesSpeech(
+  plan: CoffeePowerPlanV1 | null,
+  botId: string,
+): boolean {
+  return plan?.bots[botId]?.effects.some(
+    (effect) => effect.type === "speech_obfuscation",
+  ) === true;
 }
 
 export interface CoffeePowerHearingRepeatDirective {
@@ -607,6 +693,18 @@ export function applyCoffeeHearingRepeatMoodPenalty(args: {
   return applyCoffeeHearingRepeatMoodPenaltyV1(args);
 }
 
+/** Applies one small holder mood loss when Quiet goes completely unheard. */
+export function applyCoffeeQuietIgnoredMoodPenalty(args: {
+  socialByBotId: Record<string, CoffeeBotSocialSnapshot>;
+  botId: string;
+}): Record<string, CoffeeBotSocialSnapshot> {
+  return applyCoffeeHearingRepeatMoodPenaltyV1({
+    socialByBotId: args.socialByBotId,
+    repeatingBotId: args.botId,
+    strength: "small",
+  });
+}
+
 export function coffeePowerBotVisibleTo(
   plan: CoffeePowerPlanV1 | null,
   subjectBotId: string,
@@ -635,10 +733,16 @@ export function coffeePowersPromptForSpeaker(
     sourceText: string | null;
     directlyAddressed: boolean;
   },
+  addressedFandomTargetLabel?: string | null,
+  theme?: BotPowerResolvedThemeV1,
 ): string {
   if (!plan) return "";
   const lines: string[] = [];
   const own = plan.bots[speakerBotId];
+  const ownHasLegacyIdentityOnlyCue = Boolean(
+    own?.powerIds.length === 1 &&
+      own.effects.some((effect) => effect.type === "identity_mirror"),
+  );
   const speechAudience = own?.effects.find((effect) => effect.type === "speech_audience");
   if (speechAudience?.type === "speech_audience") {
     const names = speechAudience.allowed.flatMap((target) =>
@@ -646,8 +750,13 @@ export function coffeePowersPromptForSpeaker(
     );
     if (names.length > 0) lines.push(`Hard rule: address only ${names.join(", ")}.`);
   }
-  if (own?.effects.some((effect) => effect.type === "echo_addressed")) {
-    lines.push("Hard echo rule: repeat only the latest speech addressed directly to you, verbatim, with no added words or actions. If nothing was addressed to you, remain silent.");
+  if (own?.effects.some((effect) => effect.type === "speech_copy")) {
+    lines.push("Hard Copycat rule: on your first turn, if nobody has addressed speech to you yet, originate one short in-character opening. After that, repeat only the latest speech addressed directly to you, verbatim, with no added words or actions; if there is no addressed speech, remain silent.");
+  }
+  if (own?.effects.some((effect) => effect.type === "eternal_introduction")) {
+    lines.push(
+      "Hard short-term-amnesia rule: respond naturally using only the one to four public messages included in this prompt. Treat people as unfamiliar unless those visible messages establish otherwise. Never claim an older relationship, use hidden table history, or mention this rule. A self-introduction is optional and belongs only when the immediate exchange warrants it.",
+    );
   }
   const responseBudget = coffeePowerResponseBudgetForBot(plan, speakerBotId);
   if (responseBudget) {
@@ -669,13 +778,24 @@ export function coffeePowersPromptForSpeaker(
     }),
   });
   if (candorRule) lines.push(candorRule);
+  const fandomCue = botPowerAddressedFandomCueFromEffectsV1(
+    own?.effects ?? [],
+    addressedFandomTargetLabel,
+    "Coffee",
+  );
+  if (fandomCue) lines.push(fandomCue);
+  const themeMoodCue = botPowerThemeMoodCueFromEffectsV1(
+    own?.effects ?? [],
+    theme,
+  );
+  if (themeMoodCue) lines.push(themeMoodCue);
   lines.push(...coffeePowerInsightPromptLines({
     plan,
     speakerBotId,
     visiblePeerBotIds,
     socialByBotId,
   }));
-  if (own?.selfCue) lines.push(own.selfCue);
+  if (own?.selfCue && !ownHasLegacyIdentityOnlyCue) lines.push(own.selfCue);
   for (const effect of own?.effects ?? []) {
     const targetNames = effect.type === "response_bond" || effect.type === "selective_memory"
       ? effect.targets.flatMap((target) => target.kind === "bot" ? [target.name] : [])
@@ -734,7 +854,13 @@ export function coffeePowersPromptForSpeaker(
   }
   for (const botId of visiblePeerBotIds) {
     const peer = plan.bots[botId];
-    if (peer?.observerCue) lines.push(peer.observerCue);
+    const peerHasLegacyIdentityOnlyCue = Boolean(
+      peer?.powerIds.length === 1 &&
+        peer.effects.some((effect) => effect.type === "identity_mirror"),
+    );
+    if (peer?.observerCue && !peerHasLegacyIdentityOnlyCue) {
+      lines.push(peer.observerCue);
+    }
   }
   return buildCoffeePowersPromptBlock(lines);
 }
@@ -880,4 +1006,155 @@ export function applyCoffeePowerAfterSpeech<T extends { disposition: number }>(a
     }
   }
   return next;
+}
+
+export function applyCoffeePowerMoodBoostAfterSpeech<T extends { disposition: number }>(args: {
+  plan: CoffeePowerPlanV1 | null;
+  speakerBotId: string;
+  sourceMessageId: string;
+  sourceContent: string;
+  recipientBotIds: readonly string[];
+  socialByBotId: Record<string, T>;
+  existingEvents?: readonly CoffeeReplayPowerMoodBoostEventPayload[];
+  occurredAt: string;
+  theme?: BotPowerResolvedThemeV1;
+}): {
+  socialByBotId: Record<string, T>;
+  events: CoffeeReplayPowerMoodBoostEventPayload[];
+} {
+  const holder = args.plan?.bots[args.speakerBotId];
+  const effect = strongestBotPowerMoodBoostEffectFromEffectsV1(
+    holder?.effects ?? [],
+    args.theme,
+  );
+  if (!effect || botPowerResponseIsSilentV1(args.sourceContent)) {
+    return { socialByBotId: args.socialByBotId, events: [] };
+  }
+  const alreadyApplied = new Set(
+    (args.existingEvents ?? []).map(
+      (event) => `${event.sourceMessageId}\n${event.botId}`,
+    ),
+  );
+  const next = { ...args.socialByBotId };
+  const events: CoffeeReplayPowerMoodBoostEventPayload[] = [];
+  const rawDelta = strengthDelta(effect.strength);
+  const powerId = holder?.powerIds[0] ?? "mood-boost";
+  const powerName = holder?.powerNames?.[0] ?? "Power";
+  for (const targetId of new Set(args.recipientBotIds)) {
+    if (targetId === args.speakerBotId) continue;
+    const key = `${args.sourceMessageId}\n${targetId}`;
+    if (alreadyApplied.has(key)) continue;
+    if (!coffeePowerBotVisibleTo(args.plan, args.speakerBotId, targetId)) continue;
+    const speechAudience = holder?.speechAudienceBotIds;
+    if (speechAudience !== null && speechAudience !== undefined && !speechAudience.includes(targetId)) {
+      continue;
+    }
+    const previous = next[targetId];
+    if (!previous) continue;
+    const dispositionBefore = clamp01(previous.disposition);
+    const dispositionAfter = clamp01(
+      dispositionBefore + rawDelta * resistanceMultiplier(args.plan!, targetId, "positive"),
+    );
+    next[targetId] = { ...previous, disposition: dispositionAfter };
+    events.push({
+      v: 1,
+      name: "coffeeReplayEvent",
+      kind: "powerMoodBoost",
+      botId: targetId,
+      sourceBotId: args.speakerBotId,
+      sourceMessageId: args.sourceMessageId,
+      powerId,
+      powerName,
+      strength: effect.strength,
+      ...(args.theme ? { theme: args.theme } : {}),
+      dispositionBefore,
+      dispositionAfter,
+      occurredAt: args.occurredAt,
+    });
+    alreadyApplied.add(key);
+  }
+  return { socialByBotId: next, events };
+}
+
+export function applyCoffeePowerMoodDrainAfterDirectAddress<T extends { disposition: number }>(args: {
+  plan: CoffeePowerPlanV1 | null;
+  addresserBotId: string;
+  addressedHolderBotIds: readonly string[];
+  sourceMessageId: string;
+  sourceContent: string;
+  socialByBotId: Record<string, T>;
+  existingEvents?: readonly CoffeeReplayPowerMoodDrainEventPayload[];
+  occurredAt: string;
+  theme?: BotPowerResolvedThemeV1;
+}): {
+  socialByBotId: Record<string, T>;
+  events: CoffeeReplayPowerMoodDrainEventPayload[];
+} {
+  if (!args.plan || botPowerResponseIsSilentV1(args.sourceContent)) {
+    return { socialByBotId: args.socialByBotId, events: [] };
+  }
+  const addresser = args.plan.bots[args.addresserBotId];
+  const previous = args.socialByBotId[args.addresserBotId];
+  if (!addresser || !previous) {
+    return { socialByBotId: args.socialByBotId, events: [] };
+  }
+  const alreadyApplied = new Set(
+    (args.existingEvents ?? []).map(
+      (event) => `${event.sourceMessageId}\n${event.sourceBotId}\n${event.botId}`,
+    ),
+  );
+  let current = previous;
+  const events: CoffeeReplayPowerMoodDrainEventPayload[] = [];
+  for (const holderBotId of new Set(args.addressedHolderBotIds)) {
+    if (holderBotId === args.addresserBotId) continue;
+    const holder = args.plan.bots[holderBotId];
+    const effect = strongestBotPowerMoodDrainEffectFromEffectsV1(
+      holder?.effects ?? [],
+      args.theme,
+    );
+    if (!holder || !effect) continue;
+    if (!coffeePowerBotVisibleTo(args.plan, args.addresserBotId, holderBotId)) continue;
+    if (
+      addresser.speechAudienceBotIds !== null &&
+      addresser.speechAudienceBotIds !== undefined &&
+      !addresser.speechAudienceBotIds.includes(holderBotId)
+    ) {
+      continue;
+    }
+    const key = `${args.sourceMessageId}\n${holderBotId}\n${args.addresserBotId}`;
+    if (alreadyApplied.has(key)) continue;
+    const dispositionBefore = clamp01(current.disposition);
+    const dispositionAfter = clamp01(
+      dispositionBefore -
+        strengthDelta(effect.strength) *
+          resistanceMultiplier(args.plan, args.addresserBotId, "negative"),
+    );
+    current = { ...current, disposition: dispositionAfter };
+    events.push({
+      v: 1,
+      name: "coffeeReplayEvent",
+      kind: "powerMoodDrain",
+      botId: args.addresserBotId,
+      sourceBotId: holderBotId,
+      sourceMessageId: args.sourceMessageId,
+      powerId: holder.powerIds[0] ?? "mood-drain",
+      powerName: holder.powerNames?.[0] ?? "Power",
+      strength: effect.strength,
+      ...(args.theme ? { theme: args.theme } : {}),
+      dispositionBefore,
+      dispositionAfter,
+      occurredAt: args.occurredAt,
+    });
+    alreadyApplied.add(key);
+  }
+  if (events.length === 0) {
+    return { socialByBotId: args.socialByBotId, events: [] };
+  }
+  return {
+    socialByBotId: {
+      ...args.socialByBotId,
+      [args.addresserBotId]: current,
+    },
+    events,
+  };
 }

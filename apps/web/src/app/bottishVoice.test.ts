@@ -328,7 +328,7 @@ describe("Bottish speech plan", () => {
     );
     assert.match(
       conversationChange,
-      /stopBottishVoice\(\{[\s\S]*?preservePreparedMedia:[\s\S]*?settings\?\.voiceMode === "bottish"[\s\S]*?settings\?\.voiceMode === "babble"/
+      /stopBottishVoice\(\{[\s\S]*?preservePreparedMedia:[\s\S]*?voiceSelection\.voiceMode === "bottish"[\s\S]*?voiceSelection\.voiceMode === "babble"/
     );
   });
 

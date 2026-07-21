@@ -48,7 +48,7 @@ test("Signal avatars identify their bot and inherit the standard menu", () => {
   );
   assert.match(
     pageSource,
-    /data-signal-bot-presence="true"[\s\S]{0,800}onContextMenu=\{\(event\) => \{[\s\S]*?openAppWideBotContextMenu\(event\)/u,
+    /data-bot-id=\{bot\.id\}[\s\S]{0,240}data-signal-bot-presence="true"[\s\S]{0,1400}onContextMenu=\{\(event\) => \{[\s\S]*?openAppWideBotContextMenu\(event\)/u,
   );
   assert.match(pageSource, /label: "Avatar Studio"/u);
   assert.match(

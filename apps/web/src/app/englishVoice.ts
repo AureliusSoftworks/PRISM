@@ -145,6 +145,17 @@ export function resolveEnglishVoicePlaybackDetuneCents(
   return resolveVoicePlaybackTransform(rawProfile).pitchCents;
 }
 
+/** Convert the media element's source-time clock to audible playback time. */
+export function englishVoiceMediaElapsedMs(
+  currentTimeSeconds: number,
+  playbackTempo: number,
+): number {
+  if (!Number.isFinite(currentTimeSeconds) || currentTimeSeconds <= 0) return 0;
+  const safeTempo =
+    Number.isFinite(playbackTempo) && playbackTempo > 0 ? playbackTempo : 1;
+  return (currentTimeSeconds * 1_000) / safeTempo;
+}
+
 /** Provider/native character timings describe the neutral-tempo source clip.
  * Scale them to the local playback clock before Signal uses them directly. */
 export function scaleEnglishVoiceAlignmentForPlayback(
@@ -329,7 +340,6 @@ async function playBytesWithMedia(
     void audio.play().then(
       () => {
         started = true;
-        const startedAtMs = performance.now();
         const playbackTempo = resolveVoicePlaybackTransform(profile).tempo;
         audio.playbackRate = playbackTempo;
         const durationMs = Number.isFinite(audio.duration) && audio.duration > 0
@@ -339,7 +349,7 @@ async function playBytesWithMedia(
           progress = beginVoicePlaybackProgress(
             lifecycle,
             durationMs,
-            () => performance.now() - startedAtMs
+            () => englishVoiceMediaElapsedMs(audio.currentTime, playbackTempo),
           );
         } else {
           lifecycle?.onStart?.(null);
